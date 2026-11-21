@@ -75,5 +75,5 @@ test("a bot moving into a team carries its own things only: no apps, keys, login
   assert.equal(sent.owner, OWNER, "the team learns whose lines become the mover's");
   const report = await send.check();
   assert.deepEqual(report.secrets, { equal: [], differs: [], missing: [] });
-  assert.ok(calls.some(([method, route]) => method === "GET" && route === "/api/cloud-send/manifest?bot=scout"));
+  assert.ok(calls.some(([method, route]) => method === "GET" && /^\/api\/cloud-send\/manifest\?(?:[\w=&]+&)?bot=scout$/u.test(route)));
 });

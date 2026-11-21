@@ -24,7 +24,7 @@ describe("modelMenu", () => {
     expect(JSON.stringify(menu).length).toBeLessThan(400);
   });
 
-  it("lists a small catalog whole, without what the organization turned off, with efforts and only the labels that add something", () => {
+  it("lists a small catalog whole, with efforts and only the labels that add something, and says what the organization turned off", () => {
     const claude = engine("claude", [], {
       models: { default: "claude-sonnet-5", options: [
         { id: "claude-sonnet-5", label: "Claude Sonnet 5" },
@@ -36,7 +36,35 @@ describe("modelMenu", () => {
     });
     expect(modelMenu({ engines: [claude], current, pinned: [], refusal: opens })).toEqual({ current, engines: [{
       instanceId: "claude", name: "Claude", models: ["claude-sonnet-5", "claude-opus-5", { id: "default", label: "Default (recommended)" }], efforts: ["low", "high", "max"],
+      blocked: [{ id: "claude-haiku-5", why: "turned off by this account's organization" }],
     }] });
+  });
+
+  it("names a model the installed CLI is too old for, with the version it needs, instead of dropping it (Fable 5.2 'gone' after an update)", () => {
+    const claude = engine("claude", [], {
+      models: { default: "claude-sonnet-5", options: [
+        { id: "claude-sonnet-5", label: "Claude Sonnet 5" },
+        { id: "claude-fable-5-2", label: "Claude Fable 5.2", needsCliUpdate: "2.1.321" },
+      ] },
+    });
+    const why = "needs Claude CLI 2.1.321 or newer: update it";
+    expect(modelMenu({ engines: [claude], current, pinned: [], refusal: opens }).engines).toEqual([{
+      instanceId: "claude", name: "Claude", models: ["claude-sonnet-5"], blocked: [{ id: "claude-fable-5-2", why }],
+    }]);
+    expect(modelMenu({ engines: [claude], current, pinned: [], refusal: opens, search: "fable 5.2" }).engines).toEqual([{
+      instanceId: "claude", name: "Claude", blocked: [{ id: "claude-fable-5-2", why }],
+    }]);
+  });
+
+  it("keeps the reason on an engine whose only matching model is a gated current one that start_thread refuses", () => {
+    const claude = engine("claude", [], {
+      models: { default: "claude-sonnet-5", options: [{ id: "claude-fable-5-2", label: "Claude Fable 5.2", needsCliUpdate: "2.1.321" }] },
+    });
+    const fable: ModelSelection = { instanceId: "claude", model: "claude-fable-5-2" };
+    const refused = "Claude · claude-fable-5-2 can't run now: update Claude Code.";
+    expect(modelMenu({ engines: [claude], current: fable, pinned: [], refusal: () => refused, search: "claude-fable-5-2" }).engines).toEqual([{
+      instanceId: "claude", name: "Claude", unusable: refused, blocked: [{ id: "claude-fable-5-2", why: "needs Claude CLI 2.1.321 or newer: update it" }],
+    }]);
   });
 
   it("marks an engine unusable with start_thread's own reason after a few refusals, without checking the rest of a big catalog", () => {

@@ -97,8 +97,8 @@ test("connecting uses the pairing page with the code in the hash, or the machine
   assert.equal(cloudHomeConnectUrl({ origin, grant: { origin, code, expiresAt: NOW } }, NOW), origin);
   assert.equal(cloudHomeConnectUrl({ origin, grant: { origin: "https://other.fly.dev", code, expiresAt: NOW + 1 } }, NOW), origin);
   assert.equal(cloudHomeConnectUrl({ origin, grant: null }, NOW), origin);
-  assert.equal(cloudHomeConnectUrl({ origin, grant: { origin, code, expiresAt: NOW + 1 } }, NOW, "phone"), `${origin}/pair?desktop-settings=phone#code=${code}`);
-  assert.equal(cloudHomeConnectUrl({ origin, grant: null }, NOW, "phone"), `${origin}/?desktop-settings=phone`);
+  assert.equal(cloudHomeConnectUrl({ origin, grant: { origin, code, expiresAt: NOW + 1 } }, NOW, "phone"), `${origin}/pair?desktop-settings=phone&pair=open#code=${code}`);
+  assert.equal(cloudHomeConnectUrl({ origin, grant: null }, NOW, "phone"), `${origin}/?desktop-settings=phone&pair=open`);
   assert.equal(cloudHomeConnectUrl({ origin, grant: null }, NOW, "evil"), origin);
   const parsed = parseServerInput(`${origin}/pair#code=${code}`);
   assert.deepEqual([parsed.candidates, parsed.code, pairingPageUrl(origin, parsed.code)], [[origin], code, `${origin}/pair#code=${code}`]);
@@ -445,7 +445,7 @@ test("the Server menu opens My Cloud through the Cloud's own connection, never a
     navigateMainWindow: url => calls.push(`navigate:${url}`), activeOrigin: () => context.environmentsState.environments.find(e => e.id === context.environmentsState.activeId)?.origin,
     homeWindow: { cloudOrigin: () => null, asking: () => false, cancel: () => {} }, cleanWorkspace: { profile: () => null }, showHome: async (options) => { calls.push(options ? `home:${JSON.stringify(options)}` : "home"); },
     homePlaces: { remember: (place) => calls.push(`remember:${JSON.stringify(place)}`) },
-    runningDataDir: "/data", desktopDataDir: () => "/data",
+    runningDataDir: "/data", desktopDataDir: () => "/data", placeSwitch: { replacing: () => false, before: () => null },
     handSaved, serverOpens: async (place) => { calls.push(`look:${place.id}`); return answers; }, session: { defaultSession: { fetch: async () => null } }, dialog: {},
   });
   let answers = true;

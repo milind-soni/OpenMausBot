@@ -215,6 +215,13 @@ export function createPersonInbox(deps: PersonInboxDeps) {
 
   const line = (item: Item) => store.messagesFor(item.threadId).find((message) => message.id === item.id);
 
+  /** The message a line points at in the conversation it came from: the newest one there, so a client can put the person
+   * at it when they open the line. */
+  const focusOf = (threadId: string): { messageId?: string } => {
+    const newest = store.messagesFor(threadId).at(-1)?.id;
+    return newest ? { messageId: newest } : {};
+  };
+
   /** The card that asked, in the conversation it was asked in; undefined once that conversation is gone. An ask that
    * came from no conversation (someone asking for access to a bot) is its own card. */
   const asking = (item: Item) => !item.requestId ? undefined : item.origin
@@ -243,10 +250,11 @@ export function createPersonInbox(deps: PersonInboxDeps) {
   const mark = (threadId: string) => { changedAt.set(threadId, Math.max(now(), (changedAt.get(threadId) ?? 0) + 1)); };
   const touch = (threadId: string) => { mark(threadId); deps.changed?.(threadId); };
 
-  /** The tab a line is listed in: an ask by its card where it was asked, anything else by its answer or the person's done. */
+  /** The tab a line is listed in: an ask by its card where it was asked, anything else by its answer or the person's done.
+   * Finished work the person has read needs nothing more from them, so it leaves the inbox. */
   function tabOf(item: Item, copy?: Message): InboxTab {
     if (item.kind === "ask" && item.requestId) return askWaits(item, copy) ? "needs-you" : "done";
-    return item.done || settled(item) ? "done" : "info";
+    return item.done || settled(item) || (item.kind === "result" && item.seen === true) ? "done" : "info";
   }
 
   /** How many asks in this inbox wait on its person: questions, approvals and work handed on, open here and where they
@@ -287,7 +295,10 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     }
     const wire: InboxItem = {
       kind: delivery.kind, from: delivery.from, ...(delivery.via ? { via: delivery.via } : {}),
-      ...(origin && deps.sees(to, origin.threadId) ? { origin: { ...origin, title: titleOf(origin) } } : {}),
+      ...(origin && deps.sees(to, origin.threadId)
+        // The message it points at: the newest one in the conversation it came from, so a client can put the person there.
+        ? { origin: { ...origin, title: titleOf(origin), ...(origin.messageId ? {} : focusOf(origin.threadId)) } }
+        : {}),
       ...(delivery.to ? { replies: true as const } : {}),
       ...(delivery.assistant ? { assistant: true as const } : {}),
     };
@@ -442,6 +453,23 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     route,
     answeredIn,
     answer: answerItem,
+    /** One line per conversation that waits on this person: while their line about it is not answered or done, a newer
+     * one takes its words and its place at the top instead of adding another. `created` when it is a new line. */
+    keepOne(to: string, delivery: Delivery & { origin: Origin }): { item: Item; created: boolean } | null {
+      const open = items.findLast((item) => item.person === to && item.kind === delivery.kind && item.origin?.threadId === delivery.origin.threadId && !item.done && !settled(item));
+      const posted = open && line(open);
+      if (!open || !posted) {
+        const item = deliver(to, { ...delivery, quiet: true });
+        return item ? { item, created: true } : null;
+      }
+      store.patchMessage(open.threadId, open.id, { text: delivery.text, ...(posted.inbox ? { inbox: { ...posted.inbox, from: delivery.from, ...(posted.inbox.origin ? { origin: { ...posted.inbox.origin, ...delivery.origin } } : {}) } } : {}) });
+      Object.assign(open, { text: oneLine(delivery.text, 400), from: delivery.from.name.slice(0, 200), origin: delivery.origin, at: now(), seen: false });
+      if (delivery.from.email) open.fromEmail = delivery.from.email; else delete open.fromEmail;
+      save();
+      touch(open.threadId);
+      store.patchTask(open.botId, open.threadId, { unread: true });
+      return { item: open, created: false };
+    },
     /** The line in this inbox that `messageId` is, when it waits on an answer. */
     replyable(threadId: string, messageId: string): Item | undefined {
       return items.find((item) => item.threadId === threadId && item.id === messageId && item.to !== undefined);
@@ -503,6 +531,15 @@ export function createPersonInbox(deps: PersonInboxDeps) {
       if (!item) return false;
       if (!item.seen) { item.seen = true; save(); touch(item.threadId); }
       return true;
+    },
+    /** The person read every line of their inbox that still waits on them; an ask stays open, only unmarked as new. */
+    markAllRead(person: string): number {
+      const unread = items.filter((item) => item.person === person && !item.seen && !settled(item));
+      if (!unread.length) return 0;
+      for (const item of unread) item.seen = true;
+      save();
+      for (const inbox of new Set(unread.map((item) => item.threadId))) touch(inbox);
+      return unread.length;
     },
     /** The person wrote in a conversation: their inbox's list changes when a message from there waited on them. */
     wrote(person: string, threadId: string): void {

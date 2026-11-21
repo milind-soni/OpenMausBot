@@ -8,6 +8,7 @@ import { appEventCatalog, appLabel } from "./app-event-catalog.ts";
 import { brokerClient, type AppTriggerBroker, type BrokerAccess } from "./app-trigger-broker.ts";
 import { AppTriggerRequestService, type AppTriggerRequestStore } from "./app-trigger-requests.ts";
 import { AppTriggerError, AppTriggerManager, type AppTriggerPatch } from "./app-triggers.ts";
+import { managedComposioBrokerOff } from "./composio-broker-access.ts";
 import type { RosterMember } from "./peer-roster.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { Routine, RoutineManager } from "./routines.ts";
@@ -65,6 +66,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
   const service = () => {
     const mode = deps.connectionMode();
     if (mode === "self-hosted") return { available: false as const, reason: "self-hosted" as const };
+    if (managedComposioBrokerOff()) return { available: false as const, reason: "off" as const };
     return mode === "managed" && deps.access() ? { available: true as const } : { available: false as const, reason: "unavailable" as const };
   };
   const manager = new AppTriggerManager({
@@ -75,7 +77,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
     botState: deps.botState,
     runs: {
       enqueue: (input) => deps.routines().enqueueWebhook(input),
-      merge: (triggerId, eventId, merge) => deps.routines().mergeIntoQueuedRun(triggerId, eventId, merge),
+      merge: (triggerId, eventId, sameConversation, merge) => deps.routines().mergeIntoQueuedRun(triggerId, eventId, sameConversation, merge),
       receipt: (triggerId, eventId) => deps.routines().webhookRunReceipt(triggerId, eventId),
       pending: (triggerId) => deps.routines().activeWebhookRunCount(triggerId),
       cancelQueued: (triggerId, message) => deps.routines().cancelQueuedWebhook(triggerId, message),
@@ -84,7 +86,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
   });
   const requests = new AppTriggerRequestService({ store: deps.store, triggers: manager, botName: (botId) => deps.store.bot(botId)?.name ?? "the bot" });
 
-  const unavailableText = (reason: "self-hosted" | "unavailable") => reason === "self-hosted"
+  const unavailableText = (reason: "self-hosted" | "unavailable" | "off") => reason === "self-hosted"
     ? "App events need OpenMausBot's connected apps. This server uses its own Composio key, so a bot cannot watch apps here yet: use a schedule that checks the app, or a webhook."
     : "Connected apps are not set up here, so a bot cannot watch apps yet.";
 
@@ -131,6 +133,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
           ...(body.filter && typeof body.filter === "object" ? { filter: body.filter as never } : {}),
           ...(body.config && typeof body.config === "object" ? { config: body.config as Record<string, unknown> } : {}),
           ...(body.runOn === "cloud" ? { runOn: "cloud" as const } : {}),
+          ...(body.sameConversation === true ? { sameConversation: true } : {}),
         });
         return json(res, 201, { trigger });
       }
@@ -150,6 +153,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
           ...(body.filter === null || (body.filter && typeof body.filter === "object") ? { filter: body.filter as never } : {}),
           ...(body.config && typeof body.config === "object" ? { config: body.config as Record<string, unknown> } : {}),
           ...(typeof body.enabled === "boolean" ? { enabled: body.enabled } : {}),
+          ...(typeof body.sameConversation === "boolean" ? { sameConversation: body.sameConversation } : {}),
         };
         const trigger = await manager.update(id, patch);
         return trigger ? json(res, 200, { trigger }) : json(res, 404, { error: "no such automation" });

@@ -76,4 +76,33 @@ describe("createTeamRoutines", () => {
     const plain = { botId: "scout", resultsThreadId: "main" };
     expect(host.justMe(session(BOB), plain)).toBe(plain);
   });
+
+  it("makes a new routine that names no audience its writer's alone, and widens nothing the person did not choose", () => {
+    const { host, opened } = fixture();
+    expect(host.justMe(session(BOB), { botId: "scout", name: "Kumquat" }), "nothing said: his own chat").toMatchObject({ resultsThreadId: "bob-chat" });
+    expect(host.justMe(session(OLIVE), { botId: "scout", name: "Kumquat", target: "bot" })).toMatchObject({ resultsThreadId: "new-chat" });
+    expect(opened).toEqual([["scout", "Kumquat", olive]]);
+    // The person's own choice still stands: the shared chat by id, and an older app's null.
+    const shared = { botId: "scout", name: "Standup", resultsThreadId: "main" }, older = { botId: "scout", name: "Standup", resultsThreadId: null };
+    expect(host.justMe(session(BOB), shared)).toBe(shared);
+    expect(host.justMe(session(BOB), older)).toBe(older);
+    // A change to an existing routine that names no audience moves nothing.
+    const change = { name: "Renamed" };
+    expect(host.justMe(session(BOB), change, "r1")).toBe(change);
+    // Their own MausBot's are theirs already; a group chat's goal has the group chat's audience.
+    const own = { botId: "bobs-mausbot", name: "Morning note" }, goal = { botId: "scout", groupId: "room", target: "room-goal", name: "Goal" };
+    expect(host.justMe(session(BOB), own)).toBe(own);
+    expect(host.justMe(session(BOB), goal)).toBe(goal);
+    // No session (the server's own work) and anywhere off a team: as it was.
+    const unsaid = { botId: "scout", name: "Kumquat" };
+    expect(host.justMe({ kind: "loopback", scopes: ["admin"] } as unknown as RequestAuth, unsaid)).toBe(unsaid);
+    expect(fixture(false).host.justMe(session(BOB), unsaid)).toBe(unsaid);
+  });
+
+  it("never falls back to the shared place when no private chat can be opened", () => {
+    const starters = new Map<string, string>();
+    const host = createTeamRoutines({ team: true, privateTo: (threadId) => starters.get(threadId) ?? null, task: () => undefined, routines: () => null, authors: null,
+      withWriter: (_writer, work) => work(), tasks: () => [], openChat: () => undefined, threadRefusal: () => null });
+    expect(host.justMe(session(BOB), { botId: "scout", name: "Kumquat" })).toMatchObject({ resultsThreadId: RESULTS_JUST_ME });
+  });
 });

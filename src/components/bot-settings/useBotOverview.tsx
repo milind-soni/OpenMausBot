@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
-import { api, useStore, type Bot } from "@/state/store";
+import { api, type Bot } from "@/state/store";
 import type { BotOverview } from "@/lib/bot-overview-types";
 import { ConfirmDialog } from "../ConfirmDialog";
 import type { HistoryRow } from "./HistorySection";
 import type { PromptPreviewData } from "./PromptPreview";
 import { t } from "@/lib/i18n";
+import { sameFields, useStoreActions, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 /**
  * Reads the bot's overview and prompt preview while `want` asks for them. By default every change to the bot's facts
@@ -14,7 +15,7 @@ import { t } from "@/lib/i18n";
  * there would save, record a history row and read once per keystroke.
  */
 export function useBotOverview(bot: Bot, want: { overview: boolean; prompt: boolean; followEdits?: boolean }) {
-  const { state, flushBotPatches } = useStore();
+  const state = useStoreSelector((s) => ({ routines: s.routines, webhooks: s.webhooks }), sameFields), { flushBotPatches } = useStoreActions();
   const [overview, setOverview] = useState<BotOverview | null>(null);
   const [overviewError, setOverviewError] = useState(false);
   const [prompt, setPrompt] = useState<PromptPreviewData | null>(null);
@@ -104,7 +105,7 @@ export function useBotOverview(bot: Bot, want: { overview: boolean; prompt: bool
 }
 
 export function useBotHistory(bot: Bot, active: boolean) {
-  const { dispatch, flushBotPatches } = useStore();
+  const dispatch = useStoreDispatch(), { flushBotPatches } = useStoreActions();
   const [rows, setRows] = useState<HistoryRow[] | null>(null);
   const [error, setError] = useState(false);
   const [revision, setRevision] = useState<string | null>(null);

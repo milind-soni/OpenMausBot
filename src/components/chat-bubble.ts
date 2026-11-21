@@ -13,8 +13,11 @@ export const SIMPLE_BUBBLE_TEXT = "text-[15px] leading-[22px]";
 
 const SIMPLE_BUBBLE_SHAPE = `min-w-9 rounded-[18px] px-3 py-[7px] ${SIMPLE_BUBBLE_TEXT}`;
 
-/** Simple mode's bot bubble: the one surface tone. */
-export const SIMPLE_BOT_BUBBLE = `${SIMPLE_BUBBLE_SHAPE} bg-card text-ink`;
+/** A bot's bubble finish on a light ground: a top-lit sheen and a 0.5px inset line of ink (styles.css, DESIGN §8). */
+export const BOT_BUBBLE_FINISH = "bubble-finish";
+
+/** Simple mode's bot bubble: the one surface tone, finished. */
+export const SIMPLE_BOT_BUBBLE = `${SIMPLE_BUBBLE_SHAPE} bg-card ${BOT_BUBBLE_FINISH} text-ink`;
 
 /** Simple mode's own bubble; the bot's colour, when on, comes from its inline style. */
 export const SIMPLE_USER_BUBBLE = `${SIMPLE_BUBBLE_SHAPE} bg-bubble-user font-normal`;
@@ -26,28 +29,27 @@ export const SIMPLE_BUBBLE_MAX = "max-w-[min(var(--chat-bubble-max),var(--chat-b
 export function plainBotBubble(simple: boolean): string {
   return simple
     ? cn("chat-text w-fit whitespace-pre-wrap", SIMPLE_BUBBLE_MAX, SIMPLE_BOT_BUBBLE)
-    : "chat-text w-fit max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-2xl bg-card px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap text-ink";
+    : `chat-text w-fit max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-2xl bg-card ${BOT_BUBBLE_FINISH} px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap text-ink`;
 }
 
 /** Simple mode's transcript spaces rows 16px apart (ChatView's data-simple-rows); a row in the same group pulls up 12px, to 4px. */
 export const SIMPLE_STACKED = "-mt-3";
 
-/** Where a Simple bubble meets its group's neighbours: those corners tighten to 6px on the bubble's own side. */
+/** Where a Simple bubble meets its group's neighbours. */
 export interface BubbleJoin {
   above: boolean;
   below: boolean;
 }
 
+/** A bubble in a run of its sender's bubbles keeps a tail: its bottom corner on its own side tightens to 6px
+ * (18 18 18 6 for a bot, mirrored for the person), and its top corners stay round. A lone bubble stays round. */
 export function joinedCorners(side: "start" | "end", join: BubbleJoin): string {
-  return cn(
-    join.above && (side === "start" ? "rounded-ss-[6px]" : "rounded-se-[6px]"),
-    join.below && (side === "start" ? "rounded-es-[6px]" : "rounded-ee-[6px]"),
-  );
+  return cn((join.above || join.below) && (side === "start" ? "rounded-es-[6px]" : "rounded-ee-[6px]"));
 }
 
 /** Which bubble group a transcript row belongs to in Simple mode: this bot's words, the person's own words, or none. */
 export function bubbleGroup(message: Message, botId: string): "bot" | "user" | null {
-  if (message.kind !== "text" || message.publishedPage || message.automation || message.helperFollowup) return null;
+  if (message.kind !== "text" || message.publishedPage || message.template || message.automation || message.helperFollowup) return null;
   if (message.role === "user") return peerLine(message) ? null : "user";
   if (message.role !== "bot" || peerRequest(message, botId)) return null;
   return isPureLeakedSystemHarnessMessage(message.text) && !message.attachments?.length ? null : "bot";
@@ -63,7 +65,7 @@ export function quietRow(message: Message, showToolCalls: boolean): boolean {
   if (message.reaction || message.helperFollowup) return true;
   if (message.kind === "digest") return !showToolCalls;
   if (message.kind !== "activity" || showToolCalls) return false;
-  if (message.dataResult || message.comm || message.threadRef || message.relay || isStatusActivity(message)) return false;
+  if (message.dataResult || message.comm || message.threadRef || message.relay || message.checkBack || isStatusActivity(message)) return false;
   return !(message.tool && failedTurnCause(message.tool.name) !== null);
 }
 
@@ -129,7 +131,7 @@ export function simpleRowLayout(items: readonly TranscriptItem[], { botId, showT
     if (item.kind !== "message") return { group: null, hidden: !showToolCalls, breakBefore: stamped || i === 0, breakAfter: false, stamped };
     const m = item.message;
     const group = isCancelledTranscriptRow(m) ? null : bubbleGroup(m, botId);
-    const hidden = !group && (quietRow(m, showToolCalls) || (m.role === "bot" && m.kind === "text" && !m.publishedPage && !peerRequest(m, botId) && isPureLeakedSystemHarnessMessage(m.text) && !m.attachments?.length));
+    const hidden = !group && (quietRow(m, showToolCalls) || (m.role === "bot" && m.kind === "text" && !m.publishedPage && !m.template && !peerRequest(m, botId) && isPureLeakedSystemHarnessMessage(m.text) && !m.attachments?.length));
     const sender = m.role === "bot" && !peerLine(m) && !peerRequest(m, botId) ? botId : null;
     return { group, hidden, breakBefore: stamped || i === 0 || Boolean(m.automation), breakAfter: Boolean(m.setupOffer), stamped, sender };
   });

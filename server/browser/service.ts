@@ -23,6 +23,7 @@ import type { CdpPage } from "./cdp/page.ts";
 import { browserRoot, profileDir, profileHash, profileKind, removeProfile, workspaceId } from "./chrome/profile.ts";
 import { BROWSER_CONTROL_REFUSAL, ProfileControl, type TakeResult } from "./control.ts";
 import { executeTool, personUrl, toolFailure, type ToolContext } from "./dispatch.ts";
+import { installedExtensions } from "./extensions.ts";
 import { HealthShown, pageHealthLine } from "./health.ts";
 import type { HoldLimits } from "./hold.ts";
 import { errorResult, shapeResult, textResult, withParts, type ToolResult } from "./shape.ts";
@@ -56,7 +57,7 @@ export interface BrowserServiceOptions {
   /** What the egress gate of this profile's browser refused since it was last asked, as one line. */
   egressNotice?: (key: string) => string | null;
   onTiming?: (timing: BrowserTiming) => void;
-  callBudgetMs?: number | (() => number);
+  callBudgetMs?: number;
   laneWaitMs?: number;
   takeoverMs?: number;
   capacityWaitMs?: number;
@@ -418,8 +419,7 @@ export class BrowserService {
     for (let stopping = profile.stopping; stopping; stopping = profile.stopping) await stopping;
     profile.calls++;
     const name = toolNameOf(params) ?? "browser";
-    const budget = this.#options.callBudgetMs;
-    const deadline = Date.now() + (typeof budget === "function" ? budget() : budget);
+    const deadline = Date.now() + this.#options.callBudgetMs;
     const started = performance.now();
     let result: ToolResult | null;
     try {
@@ -729,6 +729,7 @@ export class BrowserService {
         profile.hub.tabsChanged();
       },
       download: (id: string): Download | undefined => profile.run?.browser.downloads?.list().find((download) => download.id === id),
+      extensions: () => (["mychrome", "cdp"].includes(profileKind(profile.key)) ? [] : installedExtensions(profileDir(this.#options.dataDir, profile.key))),
     };
   }
 }

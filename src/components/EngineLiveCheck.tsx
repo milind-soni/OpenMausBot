@@ -6,8 +6,9 @@ import { api, type InstanceInfo } from "@/state/store";
 import { serverErrorText } from "@/lib/server-error";
 import type { ServerErrorBody } from "../../shared/server-text";
 
-export type EngineLiveCheck = { state: "checking" } | { state: "working" } | ({ state: "failed" } & ServerErrorBody);
-type Answer = { ok: true } | ({ ok: false } & ServerErrorBody) | { ok: null };
+/** `reason`: why it failed as a word from a fixed list, for usage analytics. */
+export type EngineLiveCheck = { state: "checking" } | { state: "working" } | ({ state: "failed"; reason?: string } & ServerErrorBody);
+type Answer = { ok: true } | ({ ok: false; reason?: string } & ServerErrorBody) | { ok: null };
 
 /** Right after one of these engines is connected here, one tiny real message checks that it answers. An engine already
  * connected when this first renders is left alone. */
@@ -19,7 +20,7 @@ export function useEngineLiveCheck(engines: readonly InstanceInfo[]) {
     let next: EngineLiveCheck | null;
     try {
       const answer = await api<Answer>(`/api/instances/${encodeURIComponent(instanceId)}/check`, { method: "POST", body: "{}", timeoutMs: 120_000 });
-      next = answer.ok === true ? { state: "working" } : answer.ok === false ? { state: "failed", error: answer.error, errorKey: answer.errorKey, errorParams: answer.errorParams } : null;
+      next = answer.ok === true ? { state: "working" } : answer.ok === false ? { state: "failed", error: answer.error, errorKey: answer.errorKey, errorParams: answer.errorParams, reason: answer.reason ?? "other" } : null;
     } catch (error) {
       next = { state: "failed", error: error instanceof Error ? error.message : String(error) };
     }

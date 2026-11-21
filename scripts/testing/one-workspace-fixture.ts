@@ -37,6 +37,7 @@ import { createHomeWindow, installHomeWindowIpc, HOME_SCREEN_PATH } from "../../
 import { createStartupScreen } from "../../electron/startup-screen.mjs";
 import { packageUrlFromDeepLink } from "../../electron/package-link.mjs";
 import { WELCOME_VERSION } from "../../electron/onboarding-record.mjs";
+import { freePortBlock } from "../../server/testing/ports.ts";
 import { SPOTLIGHTS } from "../../src/lib/first-conversation.ts";
 import { TOUR_STEPS } from "../../src/lib/guided-tour.ts";
 import { NOTICES } from "../../src/lib/notices.ts";
@@ -293,9 +294,9 @@ export async function welcomed(fx: CloudSendFixture): Promise<void> {
   await fx.onCloud("PATCH", "/api/config", { onboarding: { ...onboarding, hintsSeen: [...onboarding.hintsSeen, "cloud-welcome-done", "cloud-setup-hidden"] }, language: "en" });
 }
 
-async function vite(port: number, host: string, plugin: (server: ViteDevServer) => void, proxy: Record<string, unknown>): Promise<ViteDevServer> {
+async function vite(cacheDir: string, port: number, host: string, plugin: (server: ViteDevServer) => void, proxy: Record<string, unknown>): Promise<ViteDevServer> {
   const server = await createViteServer({
-    root: REPO_ROOT, logLevel: "warn", clearScreen: false,
+    root: REPO_ROOT, cacheDir, logLevel: "warn", clearScreen: false,
     server: { host, port, strictPort: true, proxy: proxy as never, hmr: { port: port + 1 } },
     plugins: [{ name: "one-workspace-edge", configureServer: plugin }],
   });
@@ -303,11 +304,15 @@ async function vite(port: number, host: string, plugin: (server: ViteDevServer) 
   return server;
 }
 
-/** `chrome`: the pinned Chrome for Testing; `ports`: two free pairs (each Vite server takes its port and the next). */
-export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, versionEveryMs = 1_000, quietMs = 1_500, profiles = false }: {
-  chrome: string; ports: [number, number, number, number]; versionEveryMs?: number; quietMs?: number; profiles?: boolean;
+export async function launchHomeWorld(fx: CloudSendFixture, { chrome, versionEveryMs = 1_000, quietMs = 1_500, profiles = false }: {
+  chrome: string; versionEveryMs?: number; quietMs?: number; profiles?: boolean;
 }): Promise<HomeWorld> {
-  const [cloudPort, localPort, ipcPort, teamPort] = ports;
+  const [cloudPort, localPort, ipcPort, teamPort] = await Promise.all([
+    freePortBlock([0, 1], 19_616, 768),
+    freePortBlock([0, 1], 20_384, 768),
+    freePortBlock([0], 21_152, 768),
+    freePortBlock([0, 1], 21_920, 768),
+  ]);
   const cloudOrigin = `http://localhost:${cloudPort}`;
   const localOrigin = `http://127.0.0.1:${localPort}`;
   const ipcBase = `http://127.0.0.1:${ipcPort}`;
@@ -332,7 +337,7 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
   const size = { width: 1280, height: 800 };
 
   // My Cloud's edge: the renderer from source, and its API on the real Cloud-mode server with the edge's own headers.
-  const cloudEdge = await vite(cloudPort, "localhost", (server) => {
+  const cloudEdge = await vite(join(fx.root, "node_modules", ".vite-cloud"), cloudPort, "localhost", (server) => {
     server.middlewares.use((req, res, next) => {
       if (network.down || network.nameMissing) { req.socket.destroy(); return; }
       if ((req.url ?? "").startsWith("/api/") || (req.url ?? "").startsWith("/.well-known/")) cloudRequests.push({ path: (req.url ?? "").split("?")[0]!, at: Date.now() });
@@ -349,7 +354,7 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
   }])));
   cleanup.push(() => cloudEdge.close());
   // The team's Cloud: the same server, its own origin (so its own cookie, its own page).
-  const teamEdge = await vite(teamPort, "::1", (server) => {
+  const teamEdge = await vite(join(fx.root, "node_modules", ".vite-team"), teamPort, "::1", (server) => {
     server.middlewares.use((req, _res, next) => { if (network.teamDown) { req.socket.destroy(); return; } next(); });
   }, Object.fromEntries(PROXIED.map((path) => [path, {
     target: fx.cloudBase, ws: true, headers: fx.edge,
@@ -363,7 +368,7 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
   cleanup.push(() => teamEdge.close());
 
   // This computer's page: the same renderer, and its real server, as the desktop's owner, decides which page it serves.
-  const localEdge = await vite(localPort, "127.0.0.1", (server) => {
+  const localEdge = await vite(join(fx.root, "node_modules", ".vite-local"), localPort, "127.0.0.1", (server) => {
     server.middlewares.use(async (req, res, next) => {
       const path = (req.url ?? "/").split("?")[0]!;
       const page = req.method === "GET" && !path.startsWith("/api/") && !path.startsWith("/@") && !path.startsWith("/src/") && !path.startsWith("/node_modules/")
@@ -387,6 +392,7 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
   const started = new Map<string, number>();
   const syncHandlers = new Map<string, (event: any) => void>();
   const ipcMain = { handle: (channel: string, handler: (...args: any[]) => unknown) => { handlers.set(channel, handler); }, on: (channel: string, listener: (event: any) => void) => { syncHandlers.set(channel, listener); } };
+  ipcMain.on("desktop-language:read", (event) => { event.returnValue = "en"; });
   const ipc: Server = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
     res.setHeader("access-control-allow-origin", "*");
     const [path = "", query = ""] = (req.url ?? "").split("?");

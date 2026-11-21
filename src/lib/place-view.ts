@@ -13,11 +13,19 @@ import { openKeySettings } from "@/components/keys/key-focus";
 import type { Action, Bot, ConfigStatus, InstanceInfo } from "@/state/store";
 import type { LocaleKey } from "@/locales";
 import {
-  placeRowView, placeView, type Place, type PlaceActionId, type PlaceFacts, type PlaceRow, type PlaceTranslate, type PlaceView, type ServerKind,
+  cloudLimitFromBody, cloudRefusal, placeRowView, placeView, type Place, type PlaceActionId, type PlaceFacts, type PlaceRow, type PlaceTranslate, type PlaceView,
+  type ServerKind,
 } from "../../shared/place-view";
 import { canUseMcpServer } from "../../shared/tool-scope";
 
 export const placeTranslate: PlaceTranslate = (key, params) => t(key as LocaleKey, params);
+
+/** A cloud desktop's failed start, read from the server's error: its words, its status and the Admin's limit. */
+export function panelCloudRefusal(error: unknown, message: string, included: boolean): NonNullable<PlaceFacts["refusal"]> {
+  const { status, body } = Object(error) as { status?: unknown; body?: { cloudLimit?: unknown } };
+  const limit = cloudLimitFromBody(body?.cloudLimit);
+  return cloudRefusal({ message, status: Number(status ?? 0) || undefined, ...(limit ? { limit } : {}) }, included);
+}
 
 export interface PlaceSeat {
   server: ServerKind;

@@ -1,15 +1,17 @@
 // The volatile half of a bot's instructions rides in a new session's first
 // user message (prompt-split.ts withVolatileNote, launch form) so the system
-// prompt file stays the same for every session of the bot. Fakes fold it back
-// into "the system prompt" they record and drop it from "the prompt", so a
-// test reads both as the model receives them.
+// prompt file stays the same for every session of the bot, and in a warm
+// session's next message when it changed. Fakes fold it back into "the system
+// prompt" they record and drop it from "the prompt", so a test reads both as
+// the model receives them.
 const LAUNCH_NOTE = /^<system-reminder>\nThis part of your instructions changes from turn to turn, so it arrives here instead of in the system prompt\. It replaces any earlier copy:\n\n([\s\S]*?)\n<\/system-reminder>(?:\n\n)?/;
+const CHANGED_NOTE = /^<system-reminder>\nThis part of your instructions changed since this session started\. It replaces the earlier copy:\n\n([\s\S]*?)\n<\/system-reminder>(?:\n\n)?/;
 
-export function splitLaunchNote<T>(prompt: T): { note: string | null; prompt: T } {
+function splitNote<T>(pattern: RegExp, prompt: T): { note: string | null; prompt: T } {
   const message = (prompt as { message?: { content?: unknown } } | null)?.message;
   const content = message?.content;
   const strip = (text: string) => {
-    const match = LAUNCH_NOTE.exec(text);
+    const match = pattern.exec(text);
     return match ? { note: match[1]!, text: text.slice(match[0].length) } : null;
   };
   if (typeof content === "string") {
@@ -24,4 +26,12 @@ export function splitLaunchNote<T>(prompt: T): { note: string | null; prompt: T 
     }
   }
   return { note: null, prompt };
+}
+
+export function splitLaunchNote<T>(prompt: T): { note: string | null; prompt: T } {
+  return splitNote(LAUNCH_NOTE, prompt);
+}
+
+export function splitChangedNote<T>(prompt: T): { note: string | null; prompt: T } {
+  return splitNote(CHANGED_NOTE, prompt);
 }

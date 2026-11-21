@@ -13,6 +13,12 @@ function say(marker) {
   process.stdout.write(`${marker}\n`);
 }
 
+// The hand-off returns once the terminal has spawned; the stand-in writes its receipt some time after that.
+async function appears(file, ms = 15_000) {
+  for (const end = Date.now() + ms; !existsSync(file) && Date.now() < end;) await new Promise((resolve) => setTimeout(resolve, 25));
+  return existsSync(file);
+}
+
 async function main() {
   const { handOffDownloadedPackage } = await import("../updater.mjs");
   const { packageInstallCommand } = await import("../package-install-command.mjs");
@@ -40,7 +46,7 @@ async function main() {
     if (clipboard.readText() === expected) say("clipboard-holds-the-install-command");
     else say(`clipboard-mismatch:${JSON.stringify(clipboard.readText())}`);
 
-    if (existsSync(receipt)) say("terminal-really-launched");
+    if (await appears(receipt)) say("terminal-really-launched");
     if (result.terminalOpened === true) say("hand-off-reported-the-terminal");
     if (result.command === expected) say("hand-off-returned-the-command");
 

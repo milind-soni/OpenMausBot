@@ -7,7 +7,7 @@ export interface DecodedGeneratedImage {
 
 const MAX_BASE64_CHARS = Math.ceil(IMAGE_MAX_BYTES / 3) * 4 + 8;
 
-function sniffRaster(bytes: Buffer): DecodedGeneratedImage["mime"] | null {
+export function sniffRaster(bytes: Buffer): DecodedGeneratedImage["mime"] | null {
   if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
     return "image/png";
   }

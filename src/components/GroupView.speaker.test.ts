@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, Group, Message } from "@/state/store";
 
+const viewer = vi.hoisted(() => ({ reactor: "user" }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({ state: original.initialState, dispatch: vi.fn() }) };
@@ -12,6 +13,7 @@ vi.mock("./DesktopCapabilities", () => ({
   useCaptionChrome: () => ({}),
 }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
+vi.mock("@/lib/cloud-guest", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/cloud-guest")>(), useReactor: () => viewer.reactor }));
 
 const { Transcript } = await import("./GroupView");
 
@@ -43,6 +45,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  viewer.reactor = "user";
   vi.unstubAllGlobals();
 });
 
@@ -57,7 +60,7 @@ describe("room speaker names", () => {
     ]);
     expect(html.match(/data-bot-color="blue"/g)).toHaveLength(1);
     expect(html.match(/data-bot-color="orange"/g)).toHaveLength(1);
-    expect(html).toContain('class="text-[11px] font-medium bot-identity" data-bot-color="blue"');
+    expect(html).toContain('class="text-[13px] font-semibold bot-identity" data-bot-color="blue"');
     expect(html).toContain(">Ada<");
     expect(html).toContain(">Kai<");
     expect(html).toContain("var(--identity-blue)");
@@ -79,5 +82,30 @@ describe("room speaker names", () => {
     ]);
     expect(html).toContain('data-bot-color="blue"');
     expect(html).toContain("the notes are in");
+  });
+
+  it("shows who a bot speaks to, in that bot's colour", () => {
+    const html = markup([
+      line("u", "user", "@Ada check it"),
+      line("a", "bot", "Sure. @Kai, can you draw it?", { botId: "ada", name: "Ada", color: "blue" }),
+      line("k", "bot", "here", { botId: "kai", name: "Kai", color: "orange" }),
+    ]);
+    expect(html).toMatch(/>Ada<\/span><span[^>]*>→<\/span><span class="text-\[13px\] font-semibold bot-identity" data-bot-color="orange">Kai</);
+    expect(html.match(/→/g)).toHaveLength(1);
+  });
+
+  it("names another person's line on a shared server without a team, and never the viewer's own", () => {
+    const said = (sender: { name: string; id: string }, text: string): Message => ({ ...line(text, "user", text), sender });
+    const messages = [said({ name: "Olive", id: "p_olive" }, "can you check the draft"), said({ name: "Ada", id: "p_ada" }, "on my side too")];
+    viewer.reactor = "p_ada";
+    const shared = markup(messages);
+    expect(shared).toContain(">Olive<");
+    expect(shared).not.toContain(">Ada<");
+    const nameClasses = shared.match(/class="([^"]*)">Olive</)![1].split(" ");
+    expect(nameClasses).toEqual(expect.arrayContaining(["text-[13px]", "font-semibold", "text-ink-secondary"]));
+    viewer.reactor = "user";
+    const solo = markup(messages);
+    expect(solo).not.toContain(">Olive<");
+    expect(solo).not.toContain(">Ada<");
   });
 });

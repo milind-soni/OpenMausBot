@@ -3,8 +3,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { lookForGrokBot, removeOldCursorSignIn } from "./grok-local.ts";
+import { lookForGrokBot, readGrokChat, removeOldCursorSignIn } from "./grok-local.ts";
 import { thisMachine, type SetupFs, type SetupMachine } from "./setup-import.ts";
+import { base32, GROK_CACHE as CACHE, grokSlice as slice } from "./testing/grok-cache.ts";
 
 const homes: string[] = [];
 afterEach(() => {
@@ -33,22 +34,6 @@ function machineAt(home: string, platform: NodeJS.Platform = "darwin"): SetupMac
   return { ...real, home, platform, env: {}, fs, opened };
 }
 
-const base32 = (text: string) => {
-  const alphabet = "abcdefghijklmnopqrstuvwxyz234567";
-  let bits = 0, value = 0, out = "";
-  for (const byte of Buffer.from(text)) {
-    value = (value << 8) | byte;
-    bits += 8;
-    while (bits >= 5) {
-      out += alphabet[(value >>> (bits - 5)) & 31];
-      bits -= 5;
-    }
-    value &= (1 << bits) - 1;
-  }
-  return bits ? out + alphabet[(value << (5 - bits)) & 31] : out;
-};
-const CACHE = "Library/Application Support/Grok Bot/sand-client-persistence";
-const slice = (kind: string) => `${CACHE}/${base32(`sand.client.slice.account.user%2E1.${kind}`)}.blob`;
 const SECRET = "the-secret-chat-text-and-login";
 
 function appCache(put: (path: string, text: string) => string) {
@@ -117,5 +102,58 @@ describe("what the desktop app finds about Grok Bot", () => {
     expect(existsSync(token)).toBe(false);
     expect(existsSync(kept)).toBe(true);
     expect(() => removeOldCursorSignIn(join(home, "data"))).not.toThrow();
+  });
+});
+
+describe("one moved Bot's chat", () => {
+  const NEW_A = "1731b8e0-0000-4000-8000-000000000001", NEW_B = "28ae2014-0000-4000-8000-000000000002";
+  const DREW = "d0bdfa13-0000-4000-8000-000000000003", QUIET = "e1e1e1e1-0000-4000-8000-000000000004";
+  const chat = (text: string) => JSON.stringify({ schemaVersion: 1, value: { entries: [{ kind: "message", seq: 1, role: "user", content: text, timestampMs: 1 }], persistedAt: 2 } });
+  function cache() {
+    const { home, put } = fixtureHome();
+    // appCache writes a roster that the one below replaces; everything else it writes must stay unopened.
+    const never = [...appCache(put), put(`${CACHE}/${base32("sand.client.slice.account.user%2E1.transcript.replicas")}.blob`, SECRET)];
+    put(slice("roster.last-roster"), JSON.stringify({ schemaVersion: 1, value: { rows: [
+      { id: NEW_A, name: "New Bot" }, { id: NEW_B, name: "New Bot" }, { id: DREW, name: "Drew" }, { id: QUIET, name: "Quiet" },
+      { id: "g1", name: "Team room", isGroup: true },
+    ] } }));
+    const chats = Object.fromEntries([NEW_A, NEW_B, DREW, "g1"].map((id) => [id, put(slice(`transcript.replicas.${id}`), chat(`chat of ${id}`))]));
+    return { home, put, chats, never, roster: join(home, slice("roster.last-roster")) };
+  }
+
+  it("matches the Bot by its name, whatever the case or spaces, and opens only the roster and that Bot's chat", () => {
+    const { home, chats, never, roster } = cache();
+    const machine = machineAt(home);
+    expect(readGrokChat(machine, "  drew ")).toEqual({ entries: [{ kind: "message", seq: 1, role: "user", content: `chat of ${DREW}`, timestampMs: 1 }] });
+    expect(machine.opened).toEqual([roster, chats[DREW]]);
+    for (const path of [...never, chats[NEW_A], chats[NEW_B], chats.g1]) expect(machine.opened).not.toContain(path);
+  });
+
+  it("tells Bots that share a name apart by the start of the id in the name, and otherwise picks none", () => {
+    const { home, chats, roster } = cache();
+    const machine = machineAt(home);
+    expect(readGrokChat(machine, "New Bot 28ae2014")).toMatchObject({ entries: [{ content: `chat of ${NEW_B}` }] });
+    expect(readGrokChat(machine, "New Bot (1731B8E0)")).toMatchObject({ entries: [{ content: `chat of ${NEW_A}` }] });
+    expect(machine.opened).toEqual([roster, chats[NEW_B], roster, chats[NEW_A]]);
+    machine.opened.length = 0;
+    expect(readGrokChat(machine, "New Bot")).toEqual({ reason: "ambiguous" });
+    expect(readGrokChat(machine, "New Bot ffffffff")).toEqual({ reason: "noMatch" });
+    expect(readGrokChat(machine, "Drew 28ae2014")).toEqual({ reason: "noMatch" });
+    expect(readGrokChat(machine, "Team room")).toEqual({ reason: "noMatch" });
+    expect(machine.opened).toEqual([roster, roster, roster, roster]);
+  });
+
+  it("says when the app isn't here, or has no chat saved for the Bot", () => {
+    const empty = machineAt(fixtureHome().home);
+    expect(readGrokChat(empty, "Drew")).toEqual({ reason: "noApp" });
+    expect(empty.opened).toEqual([]);
+    const { home, put } = cache();
+    expect(readGrokChat(machineAt(home), "Quiet")).toEqual({ reason: "empty" });
+    put(slice(`transcript.replicas.${DREW}`), JSON.stringify({ schemaVersion: 1, value: { entries: [] } }));
+    expect(readGrokChat(machineAt(home), "Drew")).toEqual({ reason: "empty" });
+    put(slice(`transcript.replicas.${DREW}`), "not json");
+    expect(readGrokChat(machineAt(home), "Drew")).toEqual({ reason: "empty" });
+    put(slice("roster.last-roster"), "not json");
+    expect(readGrokChat(machineAt(home), "Drew")).toEqual({ reason: "noMatch" });
   });
 });

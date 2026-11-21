@@ -175,6 +175,27 @@ describe("PhoneSecretBridge", () => {
     })).rejects.toEqual(expect.objectContaining<Partial<PhoneSecretError>>({ status: 503 }));
   });
 
+  it("tells a self-hosted server's phone to use the web, and is ready only once a desktop key arrives", async () => {
+    const context = { ...baseContext("AAAAAAAAAAAAAAAAAAAAAA"), encapsulatedKey: "A".repeat(87), ciphertext: "A".repeat(24) };
+    const selfHosted = new PhoneSecretBridge(() => true, 50, 8, false);
+    expect(selfHosted.ready).toBe(false);
+    await expect(selfHosted.provide(context)).rejects.toMatchObject({
+      status: 503,
+      message: "This server cannot take secrets from a phone. Enter it on the web or on your computer instead.",
+    });
+
+    const desktop = new PhoneSecretBridge(() => true, 50);
+    await expect(desktop.provide(context)).rejects.toMatchObject({ message: expect.stringContaining("Reopen OpenMausBot") });
+    const material = await keyMaterial();
+    desktop.receive(material.message);
+    await vi.waitFor(() => expect(desktop.ready).toBe(true));
+
+    desktop.receive({ ...material.message, version: 2 });
+    expect(desktop.ready).toBe(false);
+    await expect(desktop.provide(context)).rejects.toMatchObject({ status: 503 });
+    expect(desktop.ready).toBe(false);
+  });
+
   it("rejects a private scalar that does not match the advertised public point", async () => {
     const material = await keyMaterial();
     const other = await keyMaterial();

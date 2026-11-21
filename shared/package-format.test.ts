@@ -8,11 +8,16 @@ import {
   downgradeToV1,
   NEWER_PACKAGE_MESSAGE,
   PACKAGE_MAX_BYTES,
+  PACKAGE_MAX_SKILLS,
+  PACKAGE_V2_MAX_SKILLS,
+  PACKAGE_V2_VERSION,
+  PACKAGE_VERSION,
   packageBytes,
   packageKeys,
   packageScanFindings,
   packageSecretFindings,
   packageSummary,
+  packageVersionFor,
   PackageFormatError,
   parsePackageDocument,
   parsePackageV1,
@@ -85,10 +90,45 @@ describe("package fixtures", () => {
   });
 
   it("refuses a newer file with a pointer to update, and unknown formats plainly", () => {
-    expect(refusal(fixture("newer.v3.json"))).toMatchObject({ code: "newer_version", message: NEWER_PACKAGE_MESSAGE });
+    expect(refusal(fixture("newer.v4.json"))).toMatchObject({ code: "newer_version", message: NEWER_PACKAGE_MESSAGE });
     expect(refusal({ ...fixture("full-team.v2.json"), version: 0 })).toMatchObject({ code: "unsupported_version" });
     expect(refusal({ format: "openmaus.team", version: 2 })).toMatchObject({ code: "not_a_package" });
     expect(refusal("# not a playbook")).toMatchObject({ code: "not_a_package" });
+  });
+});
+
+describe("package skill cap", () => {
+  const skill = (name: string) => ({ name, description: `${name} steps.`, instructions: `---\nname: ${name}\ndescription: ${name} steps.\n---\n\n# ${name}\n` });
+  /** library-only.v2.json grown to `count` skills, stamped the way a writer would. */
+  function withSkills(count: number) {
+    const document = fixture("library-only.v2.json");
+    const entries = document.package.skills.entries;
+    for (let index = entries.length; index < count; index += 1) entries.push(skill(`extra-${index + 1}`));
+    document.version = packageVersionFor(document.package);
+    return document;
+  }
+
+  it("opens a package with 120 skills and refuses a 121st", () => {
+    expect(PACKAGE_MAX_SKILLS).toBe(120);
+    const full = parsePackageDocument(withSkills(120));
+    expect(full.version).toBe(PACKAGE_VERSION);
+    expect(full.package.skills?.entries).toHaveLength(120);
+    expect(refusal(withSkills(121))).toMatchObject({ code: "invalid" });
+  });
+
+  it("stays v2 up to 60 skills, so apps that read only v2 still open it", () => {
+    const fits = withSkills(PACKAGE_V2_MAX_SKILLS);
+    expect(fits.version).toBe(PACKAGE_V2_VERSION);
+    expect(parsePackageDocument(fits).version).toBe(PACKAGE_V2_VERSION);
+  });
+
+  it("stamps v3 past 60 skills, which a v2-only app refuses with \"update the app\"", () => {
+    const big = withSkills(PACKAGE_V2_MAX_SKILLS + 1);
+    expect(big.version).toBe(3);
+    // A v2-only app's reader: any integer version above 2 is "newer".
+    const v2OnlyRefuses = (version: number) => Number.isInteger(version) && version > PACKAGE_V2_VERSION;
+    expect(v2OnlyRefuses(big.version)).toBe(true);
+    expect(refusal({ ...big, version: PACKAGE_VERSION + 1 })).toMatchObject({ code: "newer_version", message: NEWER_PACKAGE_MESSAGE });
   });
 });
 
@@ -267,139 +307,18 @@ describe("files for older apps", () => {
   });
 });
 
-describe("portable skill companions", () => {
-  const bundle = () => {
-    const doc = fixture("full-team.v2.json");
-    doc.package.skills.version = 2;
-    doc.package.skills.entries[0].files = [
-      { path: "references/deep/rules.md", content: "password=fixture-secret-123456\n" },
-      { path: "README.md", content: "Open the rules.\n" },
-    ];
-    return doc;
-  };
-  it("retains, sorts, redacts and scans companions, and refuses a lossy downgrade", () => {
-    const doc = parsePackageDocument(bundle());
-    expect(doc.package.skills!.entries[0]!.files!.map((file) => file.path)).toEqual(["README.md", "references/deep/rules.md"]);
-    expect(packageSecretFindings(doc)).toContain("skills[pricing-policy].files[1].content");
-    const redacted = redactPackageSecrets(doc);
-    expect(JSON.stringify(redacted.document)).not.toContain("fixture-secret-123456");
-    expect(parsePackageDocument(redacted.document).package.skills!.entries[0]!.files).toHaveLength(2);
-    expect(downgradeToV1(doc)).toEqual({ error: expect.stringContaining("skill files") });
-    const legacy = fixture("legacy-team.v1.json");
-    legacy.package.skills.version = 2;
-    legacy.package.skills.entries[0].files = [{ path: "x.md", content: "x" }];
-    expect(() => parsePackageV1(legacy)).toThrow();
-    legacy.package.skills.version = 1;
-    expect(() => parsePackageV1(legacy)).toThrow("Skill files require skills version 2");
-  });
-  it("refuses files disguised as the legacy skills section", () => {
-    const doc = bundle();
-    doc.package.skills.version = 1;
-    expect(() => parsePackageDocument(doc)).toThrow("Skill files require skills version 2");
-  });
-  it("does not allow an older skills section to discard Markdown file mode", () => {
-    const doc = bundle();
-    doc.package.skills.entries[0].files = [{ path: "run.md", content: "instructions", executable: true }];
-    expect(() => parsePackageDocument(doc)).toThrow("These skill files require skills version 3");
-    doc.package.skills.version = 3;
-    expect(parsePackageDocument(doc).package.skills!.entries[0]!.files).toEqual(doc.package.skills.entries[0].files);
-  });
-  it("uses a new section version for scripts and opaque bytes, redacting only text", () => {
-    const doc = bundle();
-    doc.package.skills.version = 3;
-    const binary = Buffer.from("password=unscannable-fixture\0", "utf8").toString("base64");
-    doc.package.skills.entries[0].files = [
-      { path: "scripts/render.sh", content: "password=fixture-secret-123456\n", executable: true },
-      { path: "assets/data.bin", binary: { base64: binary } },
-      { path: "template.html", content: "<p>Template</p>" },
-    ];
-    const parsed = parsePackageDocument(doc);
-    const redacted = redactPackageSecrets(parsed);
-    const files = redacted.document.package.skills!.entries[0]!.files!;
-    expect(files.find((file) => file.path === "assets/data.bin")).toEqual({ path: "assets/data.bin", binary: { base64: binary } });
-    expect(redacted.redacted).toContain("skills[pricing-policy].files[1].content");
-    expect(JSON.stringify(files)).not.toContain("fixture-secret-123456");
-    expect(parsePackageDocument(redacted.document)).toEqual(redacted.document);
-    doc.package.skills.version = 2;
-    expect(() => parsePackageDocument(doc)).toThrow("These skill files require skills version 3");
-  });
-  it("rejects malformed, unsafe or oversized folder files", () => {
-    const invalid = [
-      { path: "../outside.sh", content: "echo no" },
-      { path: "a\\b", content: "x" },
-      { path: "AUX", content: "x" },
-      { path: "auth.json", content: "fixture" },
-      { path: "secrets/reference.md", content: "fixture" },
-      { path: "assets/private.key", binary: { base64: "AA==" } },
-      { path: "assets/image.bin", binary: { base64: "AB==" } },
-      { path: "assets/image.bin", binary: { base64: "SGVsbG8=" } },
-      { path: "assets/image.bin", binary: { base64: "AA==" }, executable: true },
-      { path: "assets/image.bin", binary: { base64: "AA==" }, content: "x" },
-      { path: "large.txt", content: "x".repeat(512 * 1024 + 1) },
-    ];
-    for (const file of invalid) {
-      const doc = bundle(); doc.package.skills.version = 3; doc.package.skills.entries[0].files = [file];
-      expect(() => parsePackageDocument(doc), JSON.stringify(file).slice(0, 120)).toThrow();
-    }
-    for (const files of [
-      [{ path: "É.txt", content: "a" }, { path: "e\u0301.txt", content: "b" }],
-      Array.from({ length: 5 }, (_, index) => ({ path: `${index}.txt`, content: "x".repeat(500 * 1024) })),
-      Array.from({ length: 129 }, (_, index) => ({ path: `${index}.txt`, content: "x" })),
-    ]) {
-      const doc = bundle(); doc.package.skills.version = 3; doc.package.skills.entries[0].files = files;
-      expect(() => parsePackageDocument(doc)).toThrow();
-    }
-  });
-  it.each([2, 3])("rejects path collisions that the folder installer cannot represent in skills version %i", (version) => {
-    for (const files of [
-      [{ path: "SKILL.md/guide.md", content: "x" }],
-      [{ path: "a.md", content: "a" }, { path: "a.md-other.md", content: "b" }, { path: "a.md/child.md", content: "c" }],
-      [{ path: "Docs/a.md", content: "a" }, { path: "docs/b.md", content: "b" }],
-      [{ path: "É/a.md", content: "a" }, { path: "e\u0301/b.md", content: "b" }],
-    ]) {
-      const doc = bundle(); doc.package.skills.version = version; doc.package.skills.entries[0].files = files;
-      expect(() => parsePackageDocument(doc)).toThrow();
-    }
-  });
-  it.each(["../escape.md", "/absolute.md", "x/../../escape.md", "x\\escape.md", ".hidden.md", "folder/.hidden/x.md", "CON.md", "skill.md", "x/a.txt", "x/", "x/one./two.md", "secrets/guide.md"]) (
-    "refuses unsafe path %s", (path) => {
-      const doc = bundle();
-      doc.package.skills.entries[0].files = [{ path, content: "x" }];
-      expect(() => parsePackageDocument(doc)).toThrow();
-    },
-  );
-  it("refuses colliding paths, oversized content, too many files and NUL text", () => {
-    for (const files of [
-      [{ path: "Guide.md", content: "a" }, { path: "guide.md", content: "b" }],
-      [{ path: "a.md", content: "a" }, { path: "A.md/b.md", content: "b" }],
-      [{ path: "large.md", content: "a".repeat(65537) }],
-      Array.from({ length: 9 }, (_, i) => ({ path: `${i}.md`, content: "a".repeat(65536) })),
-      Array.from({ length: 33 }, (_, i) => ({ path: `${i}.md`, content: "x" })),
-      [{ path: "binary.md", content: "a\0b" }],
-    ]) {
-      const doc = bundle(); doc.package.skills.entries[0].files = files;
-      expect(() => parsePackageDocument(doc)).toThrow();
-    }
-  });
-  it("refuses text that cannot round-trip through UTF-8 while keeping valid Unicode", () => {
-    for (const file of [
-      { path: "references/\ud800.md", content: "guide" },
-      { path: "references/\udc00.md", content: "guide" },
-      { path: "references/guide.md", content: "before \ud800 after" },
-      { path: "references/guide.md", content: "before \udc00 after" },
-    ]) {
-      const doc = bundle(); doc.package.skills.entries[0].files = [file];
-      expect(() => parsePackageDocument(doc)).toThrow();
-    }
-    const doc = bundle();
-    doc.package.skills.entries[0].files = [{ path: "references/手冊-😀.md", content: "Guide 😀\n" }];
-    expect(parsePackageDocument(doc).package.skills!.entries[0]!.files).toEqual(doc.package.skills.entries[0].files);
-    doc.package.skills.entries[0].instructions += "\n\ud800";
-    expect(() => parsePackageDocument(doc)).toThrow("Bundled skill instructions must be UTF-8 text");
-    doc.package.skills.entries[0].instructions = doc.package.skills.entries[0].instructions.replace("\ud800", "\0");
-    expect(() => parsePackageDocument(doc)).toThrow("Bundled skill instructions must be UTF-8 text");
-    delete doc.package.skills.entries[0].files;
-    doc.package.skills.version = 1;
-    expect(() => parsePackageDocument(doc)).not.toThrow();
-  });
+it.each(["legacy-team.v1.json", "full-team.v2.json"])("accepts underscore app requirements without widening package keys in %s", (name) => {
+  for (const slug of ["_1password", "_" + "a".repeat(63)]) {
+    const value = fixture(name);
+    value.package.requirements.apps = [{ slug, label: "1Password", reason: "Read vault items." }];
+    expect(parsePackageDocument(value).package.requirements.apps[0]?.slug).toBe(slug);
+  }
+  for (const slug of ["", "-x", "Bad Slug", "a/b", "__proto__", "Uppercase", "a".repeat(65)]) {
+    const value = fixture(name);
+    value.package.requirements.apps = [{ slug, label: "Invalid", reason: "Test validation." }];
+    expect(() => parsePackageDocument(value)).toThrow();
+  }
+  const value = fixture(name);
+  value.package.agents[0].key = "_agent";
+  expect(() => parsePackageDocument(value)).toThrow();
 });

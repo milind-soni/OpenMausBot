@@ -72,6 +72,11 @@ export interface BotDatabase {
 
 export interface DataEngine {
   unavailable(): string | null;
+  /** What a status read shows: the loaded binding's state, or, before anything has loaded it, whether its files are in
+   * place. Asking never loads the binding; it is loaded a little later to confirm, and `onInstalledChange` hears of an
+   * answer that turned out wrong either way. */
+  installed(): boolean;
+  onInstalledChange(listener: () => void): void;
   forBot(botId: string): Promise<BotDatabase>;
   deleteBot(botId: string): Promise<void>;
   closeAll(): Promise<void>;

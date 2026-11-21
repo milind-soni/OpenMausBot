@@ -1,4 +1,6 @@
+import type { SkillFile } from "../shared/skill-files.ts";
 import { parseBotPackage, type BotPackageDefinition, type BotPackagePlaybook, type BotPackageSkill, type ParsedBotPackage } from "./bot-package.ts";
+import { productName } from "./brand.ts";
 import type { DefaultsPreset, PublishedLibrary } from "./presets.ts";
 import type { PublishedTeam } from "./published-teams.ts";
 import { nextPatchRelease } from "./published-teams.ts";
@@ -7,17 +9,15 @@ import type { BotRecord, GroupRecord, InstalledPlaybook } from "./store.ts";
 import {
   AGENT_MAX_SKILLS,
   AVATAR_MAX_BYTES,
-  canonicalJson,
   decodeBase64,
   PACKAGE_FORMAT,
   PACKAGE_MAX_SKILLS,
-  PACKAGE_VERSION,
+  packageVersionFor,
   PackageFormatError,
   parsePackageDocument,
   pictureMatchesMime,
   RELEASE_NOTES_MAX,
   redactPackageSecrets,
-  skillCompanionsSchema,
   SEED_FILE_MAX_BYTES,
   SEED_MAX_BYTES,
   SEED_MAX_FILES,
@@ -27,7 +27,6 @@ import {
   type PackageDefinition,
   type PackageDocument,
   type PackagePreset,
-  type PackageSkill,
   type PackageRoom,
   type PackageRoutine,
   type PackageRoutineSchedule,
@@ -73,19 +72,14 @@ export interface ExportablePackageSkill extends Omit<BotPackageSkill, "name" | "
   name: string;
   description: string;
   enabled?: boolean;
-  files?: PackageSkill["files"];
+  /** The text files beside SKILL.md that travel with it. */
+  files?: SkillFile[];
 }
 
 function sameSkill(a: ExportablePackageSkill, b: ExportablePackageSkill): boolean {
-  const ordered = (files: PackageSkill["files"]) => [...files ?? []].sort((x, y) => x.path < y.path ? -1 : x.path > y.path ? 1 : 0);
   return a.instructions === b.instructions && a.description === b.description &&
     a.source === b.source && a.license === b.license && a.compatibility === b.compatibility &&
-    canonicalJson(ordered(a.files)) === canonicalJson(ordered(b.files));
-}
-
-export function skillSectionVersion(skills: Iterable<Pick<ExportablePackageSkill, "files">>): 1 | 2 | 3 {
-  const files = [...skills].flatMap((skill) => skill.files?.length ? [skill.files] : []);
-  return !files.length ? 1 : files.every((entries) => skillCompanionsSchema.safeParse(entries).success) ? 2 : 3;
+    JSON.stringify(a.files ?? []) === JSON.stringify(b.files ?? []);
 }
 
 function assignPlaybooks(bots: readonly BotRecord[], idToKey: ReadonlyMap<string, string>) {
@@ -242,10 +236,10 @@ export function createBotPackageExport(input: {
     id,
     release: "1.0.0",
     name: input.name,
-    tagline: `A portable OpenMausBot setup with ${bots.length} ${bots.length === 1 ? "bot" : "bots"}.`,
-    summary: "Exported from OpenMausBot. Review the roles, rooms, playbooks, connector requirements, and paused routines before sharing or publishing.",
+    tagline: `A portable ${productName()} setup with ${bots.length} ${bots.length === 1 ? "bot" : "bots"}.`,
+    summary: `Exported from ${productName()}. Review the roles, rooms, playbooks, connector requirements, and paused routines before sharing or publishing.`,
     category: "Community",
-    author: { name: input.authorName?.trim() || "OpenMausBot user" },
+    author: { name: input.authorName?.trim() || `${productName()} user` },
     license: "Unspecified",
     outcomes: ["Recreate this bot setup without copying private runtime state."],
     setupMinutes: Math.min(240, Math.max(2, bots.length + requirements.size * 2)),
@@ -279,11 +273,6 @@ export type TeamExportSkipReason =
   | "lead_not_in_group_chat"
   | "notes_too_large"
   | "skill_changed"
-  | "skill_file_type"
-  | "skill_file_unsafe"
-  | "skill_file_limit"
-  | "skill_file_binary"
-  | "skill_file_unreviewed"
   | "skill_conflict"
   | "bot_skill_limit"
   | "team_skill_limit"
@@ -679,12 +668,12 @@ export function createTeamPackageExport(input: TeamExportInput): TeamExportResul
     id: packageId,
     release,
     name: displayName,
-    tagline: input.tagline?.trim() || `A portable OpenMausBot team with ${bots.length} ${bots.length === 1 ? "bot" : "bots"}.`,
+    tagline: input.tagline?.trim() || `A portable ${productName()} team with ${bots.length} ${bots.length === 1 ? "bot" : "bots"}.`,
     summary: input.summary?.trim() ||
-      "Shared from OpenMausBot. Bots, skills, group chats and routines arrive as new copies; routines start paused and chat history never travels.",
+      `Shared from ${productName()}. Bots, skills, group chats and routines arrive as new copies; routines start paused and chat history never travels.`,
     ...(notes ? { notes } : {}),
     category: "Community",
-    author: { name: input.authorName?.trim() || "OpenMausBot user" },
+    author: { name: input.authorName?.trim() || `${productName()} user` },
     license: "Unspecified",
     outcomes: ["Recreate this team without copying chat history or private settings."],
     setupMinutes: Math.min(240, Math.max(2, bots.length + requirements.size * 2 + connections.length * 2)),
@@ -700,11 +689,11 @@ export function createTeamPackageExport(input: TeamExportInput): TeamExportResul
   if (routines.length) definition.routines = routines;
   if (playbooks.length) definition.playbooks = playbooks;
   if (input.preset) definition.presets = [withPresetSkills(input.preset, packageSkills, skipped)];
-  if (packageSkills.size) definition.skills = { version: skillSectionVersion(packageSkills.values()), entries: [...packageSkills.values()].map((skill) => ({ ...skill })) };
+  if (packageSkills.size) definition.skills = { version: 1, entries: [...packageSkills.values()].map((skill) => ({ ...skill })) };
   if (connections.length) definition.connections = connections;
 
   const { document: redactedDocument, redacted } = redactPackageSecrets({
-    format: PACKAGE_FORMAT, version: PACKAGE_VERSION, package: definition,
+    format: PACKAGE_FORMAT, version: packageVersionFor(definition), package: definition,
   } as PackageDocument);
   let document: PackageDocument;
   try {
@@ -798,12 +787,12 @@ export function createLibraryPackageExport(input: LibraryExportInput): LibraryEx
     id: packageId,
     release,
     name: displayName,
-    tagline: input.tagline?.trim() || "A preset bot for OpenMausBot's New bot dialog.",
+    tagline: input.tagline?.trim() || `A preset bot for ${productName()}'s New bot dialog.`,
     summary: input.summary?.trim() ||
-      "Shared from OpenMausBot. Adds a preset bot to New bot. Its skills arrive switched off; model choices, computers, approval levels and connected apps never travel.",
+      `Shared from ${productName()}. Adds a preset bot to New bot. Its skills arrive switched off; model choices, computers, approval levels and connected apps never travel.`,
     ...(notes ? { notes } : {}),
     category: "Community",
-    author: { name: input.authorName?.trim() || "OpenMausBot user" },
+    author: { name: input.authorName?.trim() || `${productName()} user` },
     license: "Unspecified",
     outcomes: ["Start new bots from a shared preset."],
     setupMinutes: 2,
@@ -811,9 +800,9 @@ export function createLibraryPackageExport(input: LibraryExportInput): LibraryEx
     agents: [],
     presets: [preset],
   };
-  if (packageSkills.size) definition.skills = { version: skillSectionVersion(packageSkills.values()), entries: [...packageSkills.values()].map((skill) => ({ ...skill })) };
+  if (packageSkills.size) definition.skills = { version: 1, entries: [...packageSkills.values()].map((skill) => ({ ...skill })) };
   const { document: redactedDocument, redacted } = redactPackageSecrets({
-    format: PACKAGE_FORMAT, version: PACKAGE_VERSION, package: definition,
+    format: PACKAGE_FORMAT, version: packageVersionFor(definition), package: definition,
   } as PackageDocument);
   let document: PackageDocument;
   try {

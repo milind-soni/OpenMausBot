@@ -24,6 +24,9 @@ export interface VaultProvider {
   /** A login's password and 2FA key, or a secret's main value (or its `field`), read from the manager now. */
   read(itemId: string, field?: string): Promise<LinkedValue>;
   markUsed(itemId: string): void;
+  /** The secret a reference in the manager's own form names (1Password's `op://…`, Bitwarden's `bw://…`) and the field it
+   * reads; the secret may be one the list does not show by name. */
+  resolve?(reference: string): { secret: LinkedSecret; field?: string } | null;
 }
 
 function logins(provider: VaultProvider, bots: string | readonly string[]): LoginSummary[] {
@@ -67,6 +70,11 @@ export function findLinkedSecret(providers: readonly VaultProvider[], name: stri
       const found = linkedSecretNames(secret).find((one) => vaultNameKey(one.name) === key);
       if (found) return { provider, secret, ...(found.field ? { field: found.field } : {}) };
     }
+  }
+  // Security: a reference reaches only a secret this bot may use, by the same bots a name does.
+  for (const provider of providers) {
+    const named = provider.resolve?.(name);
+    if (named && loginUsableBy(named.secret, botId)) return { provider, secret: named.secret, ...(named.field ? { field: named.field } : {}) };
   }
   return null;
 }

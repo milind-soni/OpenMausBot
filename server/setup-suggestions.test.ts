@@ -183,6 +183,22 @@ describe("the card's answers", () => {
     expect(late.patches).toHaveLength(2);
   });
 
+  it("count the 6 s from when the writing starts, not while it waits for a free slot behind other bots' background calls", async () => {
+    // The writer as side-jobs queues it: told it waits, started 8 s later, answering 2 s after that.
+    const started = vi.fn();
+    const s = setup({ reply: () => new Promise<string>((resolve) => {
+      const options = s.calls.at(-1)!.options as { waiting?(): void; started?(): void } | undefined;
+      options?.waiting?.();
+      setTimeout(() => { options?.started?.(); started(); setTimeout(() => resolve(REPLY), 2000); }, 8000);
+    }) });
+    s.suggestions.personalise(s.bot.id);
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(started).toHaveBeenCalledOnce();
+    expect(s.calls[0]!.options?.signal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(s.greeting().setupChoices).toEqual(JSON.parse(REPLY));
+  });
+
   it("drop the answers when the person writes, closes the card or picks first", async () => {
     const acts: Array<(s: ReturnType<typeof setup>) => void> = [
       (s) => s.store.appendMessage(s.bot.threadId, { role: "user", kind: "text", text: "hello" }),

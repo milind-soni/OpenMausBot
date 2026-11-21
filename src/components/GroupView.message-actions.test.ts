@@ -2,15 +2,14 @@
 import { createElement, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
-import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, Group, Message } from "@/state/store";
 
-const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), canWrite: true as boolean | null }));
+const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), canWrite: true as boolean | null, config: null as { tts: { configured: boolean; ready: boolean; voice: string } } | null }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({
-    state: { ...original.initialState, bots: [] as Bot[] },
+    state: { ...original.initialState, bots: [] as Bot[], config: fixture.config as typeof original.initialState.config },
     dispatch: fixture.dispatch,
   }) };
 });
@@ -23,6 +22,7 @@ vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => fixture.canWrite, useReactor: () => "user" }));
 
 const { Transcript } = await import("./GroupView");
+const { MESSAGE_ROW } = await import("./MessageActions");
 const { MessageBoundary } = await import("./ChatView");
 
 const lead = { id: "lead", name: "Lead", color: "blue", voice: "verse" } as Bot;
@@ -37,11 +37,17 @@ const text = (id: string, role: "user" | "bot", body: string): Message => ({
   ...(role === "bot" ? { from: { botId: "lead", name: "Lead", color: "blue" as const } } : {}),
 });
 
+/** The room as drawn with the pointer over each message, which is when a message's own buttons mount. */
 const markup = (messages: Message[]) => {
-  const group = { ...room, messages };
-  return renderToStaticMarkup(createElement(Transcript, {
-    group, members: [lead], locale: "en", messages, transcript: messages, onReply: () => {},
-  }));
+  vi.unstubAllGlobals();
+  flushSync(() => root.render(createElement(Transcript, {
+    group: { ...room, messages }, members: [lead], locale: "en", messages, transcript: messages, onReply: () => {},
+  })));
+  hover();
+  return host.innerHTML;
+};
+const hover = () => {
+  for (const row of host.querySelectorAll(`[${MESSAGE_ROW}]`)) flushSync(() => row.dispatchEvent(new PointerEvent("pointerenter", { pointerType: "mouse" })));
 };
 
 function Boom(): ReactNode {
@@ -55,6 +61,7 @@ beforeEach(() => {
   vi.stubGlobal("window", {});
   fixture.dispatch.mockClear();
   fixture.canWrite = true;
+  fixture.config = null;
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -88,18 +95,37 @@ describe("room message actions", () => {
     expect(closed).toMatch(/<span role="img" aria-label="Thumbs up: yes, go ahead: Ada"/);
   });
 
-  it("puts read aloud, raw markdown and pin in a room reply's more menu", () => {
+  it("puts read aloud (with its setup hint while no voice is set up), raw markdown and pin in a room reply's more menu", () => {
     vi.unstubAllGlobals();
     const messages = [text("a", "bot", "The build is green")];
     flushSync(() => root.render(createElement(Transcript, {
       group: { ...room, messages }, members: [lead], locale: "en", messages, transcript: messages, onReply: () => {},
     })));
+    hover();
     flushSync(() => host.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!.click());
     const items = [...host.querySelectorAll<HTMLButtonElement>("[role=menuitem]")];
     expect(items.map((item) => item.textContent)).toEqual(expect.arrayContaining(["Read this aloud", "Show raw markdown", "Pin message", "Copy message ID"]));
     const speak = items.find((item) => item.textContent === "Read this aloud");
     expect(speak?.title).toBe("Add an ElevenLabs key in an agent profile to read messages aloud");
     expect(speak?.disabled).toBe(true);
+    expect(host.querySelector('[data-testid="message-actions"] > button[aria-label="Read this aloud"]')).toBeNull();
+  });
+
+  it("gives a room reply its own Read this aloud button once a voice is set up, out of the more menu", () => {
+    vi.unstubAllGlobals();
+    fixture.config = { tts: { configured: true, ready: true, voice: "Ada" } };
+    const messages = [text("a", "bot", "The build is green")];
+    flushSync(() => root.render(createElement(Transcript, {
+      group: { ...room, messages }, members: [lead], locale: "en", messages, transcript: messages, onReply: () => {},
+    })));
+    hover();
+    const bar = host.querySelector('[data-testid="message-actions"]')!;
+    const button = bar.querySelector<HTMLButtonElement>('button[aria-label="Read this aloud"]');
+    expect(button?.disabled).toBe(false);
+    flushSync(() => host.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!.click());
+    const items = [...host.querySelectorAll<HTMLButtonElement>("[role=menuitem]")].map((item) => item.textContent);
+    expect(items).toEqual(expect.arrayContaining(["Show raw markdown", "Pin message"]));
+    expect(items).not.toContain("Read this aloud");
   });
 
   it("copies a person's message and folds a long one", () => {

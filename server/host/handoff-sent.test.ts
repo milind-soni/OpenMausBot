@@ -7,6 +7,13 @@ const recipient = { id: "buyer", name: "Buyer Research", color: "green" };
 const sales = { id: "sales", name: "Sales", here: true };
 
 describe("sentRow", () => {
+  it("carries the files passed with the hand-off, for the line's chips", () => {
+    const report = { kind: "file" as const, path: "/data/attachments/1f0c.pdf", mime: "application/pdf", name: "report.pdf" };
+    expect(sentRow({ sender, recipient, threadId: "buyer-work", via: "direct", attachments: [report] }).attachments).toEqual([report]);
+    expect(sentRow({ sender, recipient, threadId: "buyer-work", via: "direct", attachments: [] })).not.toHaveProperty("attachments");
+    expect(sentRow({ sender, recipient, threadId: "buyer-work", via: "direct" })).not.toHaveProperty("attachments");
+  });
+
   it("says a bot outside the addressed room got the work directly, and links to its thread", () => {
     const row = sentRow({ sender, recipient, threadId: "buyer-work", title: "@Chief · work", room: sales, via: "direct" });
     expect(row).toMatchObject({

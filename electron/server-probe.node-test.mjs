@@ -51,6 +51,36 @@ test("on a Mac, a local address that never answers names the Local Network permi
   assert.equal((await probeServer({ address: "maus.example.com", fetch: fakeFetch({ "https://maus.example.com": blocked() }).fetch, platform: "darwin" })).problem, "unreachable");
 });
 
+test("a tailnet address that doesn't answer says whose Tailscale to fix", async () => {
+  const blocked = () => new Error("net::ERR_ADDRESS_UNREACHABLE");
+  const silent = () => Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+  const unknownName = () => new Error("net::ERR_NAME_NOT_RESOLVED");
+  const link = "http://macmini.tail1234.ts.net:8799/pair#code=ABCD-EFGH-JKLM";
+  const at = (error) => fakeFetch({ "http://macmini.tail1234.ts.net:8799": error }).fetch;
+  const probe = (fetch, tailnet = true, platform = "darwin") => probeServer({ address: link, fetch, platform, tailnet: () => tailnet });
+  const host = "macmini.tail1234.ts.net:8799";
+  assert.deepEqual(await probe(at(blocked()), false), { outcome: "problem", problem: "tailscaleOff", host });
+  assert.deepEqual(await probe(at(unknownName())), { outcome: "problem", problem: "otherTailnet", host });
+  assert.deepEqual(await probe(at(blocked())), { outcome: "problem", problem: "tailnetBlocked", host });
+  assert.equal((await probe(at(blocked()), true, "linux")).problem, "tailnetSilent");
+  assert.equal((await probe(at(silent()))).problem, "tailnetSilent");
+  assert.equal((await probe(fakeFetch({}).fetch)).problem, "tailnetSilent");
+  // A bare tailnet address and an https name are tailnet addresses too.
+  assert.equal((await probeServer({ address: "http://100.101.102.103:8799", fetch: fakeFetch({ "http://100.101.102.103:8799": blocked() }).fetch, platform: "darwin", tailnet: () => true })).problem, "tailnetBlocked");
+  // The phone port of a desktop app on the tailnet: that app can share itself, so say how.
+  const phonePort = () => new Response(JSON.stringify({ error: "pair this device from Remote access settings" }), { status: 401, headers: { "content-type": "application/json" } });
+  assert.equal((await probeServer({ address: "http://macmini.tail1234.ts.net:8810", fetch: fakeFetch({ "http://macmini.tail1234.ts.net:8810": phonePort }).fetch, tailnet: () => true })).problem, "desktopAppTailnet");
+  // Off a tailnet a bare 100.64/10 address is just a private one: carrier NAT or another VPN keeps the Local Network hint.
+  const bare = await probeServer({ address: "http://100.101.102.103:8799", fetch: fakeFetch({ "http://100.101.102.103:8799": blocked() }).fetch, platform: "darwin", tailnet: () => false });
+  assert.deepEqual(bare, { outcome: "problem", problem: "localNetwork", host: "100.101.102.103:8799" });
+  // Typed alone, the name is tried three ways; the one that named a cause is the one shown.
+  const typed = fakeFetch({ "https://macmini.tail1234.ts.net": new Error("net::ERR_CERT_COMMON_NAME_INVALID"), "http://macmini.tail1234.ts.net": refused(), "http://macmini.tail1234.ts.net:8799": refused() });
+  assert.equal((await probeServer({ address: "macmini.tail1234.ts.net", fetch: typed.fetch, tailnet: () => true })).problem, "certificate");
+  const shared = fakeFetch({ "http://macmini.tail1234.ts.net:8799": () => descriptor("env-mini", "Mac mini") });
+  const found = await probeServer({ address: "macmini.tail1234.ts.net", code: "abcd-efgh-jklm", fetch: shared.fetch, tailnet: () => true });
+  assert.deepEqual([found.outcome, found.origin, found.transport], ["found", "http://macmini.tail1234.ts.net:8799", "tailscale"]);
+});
+
 test("a link to this computer is caught: nothing there, or this app's own workspace", async () => {
   assert.deepEqual(await probeServer({ address: "http://127.0.0.1:8799/pair#code=ABCD-EFGH-JKLM", fetch: fakeFetch({}).fetch }), { outcome: "problem", problem: "loopback", host: "127.0.0.1:8799" });
   const own = fakeFetch({ "http://127.0.0.1:18799": () => descriptor("mine") });

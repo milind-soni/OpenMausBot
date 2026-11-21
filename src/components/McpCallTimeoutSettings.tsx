@@ -1,3 +1,5 @@
+import { SETTINGS_INLINE_INPUT, SettingRow } from "./SettingsPrimitives";
+import { cn } from "@/lib/cn";
 import { useEffect, useRef, useState } from "react";
 
 import {
@@ -6,11 +8,12 @@ import {
   mcpCallTimeoutMinutes,
   parseMcpCallTimeoutMinutes,
 } from "@/lib/mcp-call-timeout";
-import { api, useStore, type ConfigStatus } from "@/state/store";
+import { api, type ConfigStatus } from "@/state/store";
 import { t } from "@/lib/i18n";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 export function McpCallTimeoutSettings() {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const confirmedMinutes = mcpCallTimeoutMinutes(state.config);
   const [value, setValue] = useState(String(confirmedMinutes));
   const [dirty, setDirty] = useState(false);
@@ -49,15 +52,10 @@ export function McpCallTimeoutSettings() {
   };
 
   return (
-    <div className="flex flex-col gap-2">
-      <label htmlFor="mcp-call-timeout" className="text-[13px] font-medium text-ink">
-        {t("settings.mcpCalls.label")}
-      </label>
-      <div
-        className={`flex max-w-[220px] items-center rounded-lg border bg-inset ${
-          error ? "border-danger/60" : "border-hairline/40 focus-within:border-focus"
-        }`}
-      >
+    <SettingRow title={t("settings.limits.toolTime")} subtitle={t("settings.limits.toolTimeLine")}
+      message={error ? <span id="mcp-call-timeout-error" role="alert" className="text-danger">{error}</span> : undefined}>
+      {/* The field and its unit fill the card's 160 px control column, so the field starts where the selects do. */}
+      <span className="flex w-[160px] items-center gap-2 text-[13px] leading-5 text-ink-secondary">
         <input
           id="mcp-call-timeout"
           type="number"
@@ -67,8 +65,10 @@ export function McpCallTimeoutSettings() {
           inputMode="numeric"
           value={value}
           disabled={saving}
+          aria-label={t("settings.limits.toolTime")}
           aria-invalid={Boolean(error)}
-          aria-describedby={error ? "mcp-call-timeout-error mcp-call-timeout-help" : "mcp-call-timeout-help"}
+          aria-describedby={error ? "mcp-call-timeout-error" : undefined}
+          title={t("settings.mcpCalls.help")}
           onChange={(event) => {
             setValue(event.target.value);
             setDirty(true);
@@ -78,18 +78,10 @@ export function McpCallTimeoutSettings() {
           onKeyDown={(event) => {
             if (event.key === "Enter") event.currentTarget.blur();
           }}
-          className="min-w-0 flex-1 bg-transparent px-3 py-2 text-[14px] tabular-nums text-ink focus:outline-none"
+          className={cn(SETTINGS_INLINE_INPUT, "w-auto min-w-0 flex-1", error && "border-danger/60")}
         />
-        <span className="pr-3 text-[13px] text-ink-secondary">{t("settings.mcpCalls.minutes")}</span>
-      </div>
-      <p id="mcp-call-timeout-help" className="text-[12px] leading-relaxed text-ink-secondary">
-        {t("settings.mcpCalls.help")}
-      </p>
-      {error ? (
-        <p id="mcp-call-timeout-error" role="alert" className="text-[12px] text-danger">
-          {error}
-        </p>
-      ) : null}
-    </div>
+        {t("settings.mcpCalls.minutes")}
+      </span>
+    </SettingRow>
   );
 }

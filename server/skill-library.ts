@@ -9,8 +9,6 @@ import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR, type AppConfig } from "./config.ts";
 import { githubSkillOriginSchema, skillFolderDigest, skillFolderRecordSchema, writeSkillFolder } from "./skill-folder.ts";
 import { entryExistsWithoutFollowing } from "./skill-storage.ts";
-import { portableFilesForDisk, snapshotPortableSkill } from "./portable-skill-files.ts";
-import { readBoundedSkillFile } from "./bounded-skill-read.ts";
 import type { GitHubSkillOrigin } from "../shared/skill-import.ts";
 import { isSkillName, parseSkillMd, SKILL_FILE_MAX_BYTES } from "../shared/skill-md.ts";
 import type { SkillPackageStamp } from "./skills.ts";
@@ -159,7 +157,6 @@ export interface SkillLibraryEntry {
   /** The files beside SKILL.md and skillFolderDigest over them; absent for a skill that is SKILL.md alone. */
   files?: string[];
   filesSha256?: string;
-  executableFiles?: string[];
   github?: GitHubSkillOrigin;
   /** Replaced descriptions, oldest first, with when each was replaced, so a running conversation keeps its prompt. */
   descriptionHistory?: Array<{ description: string; until: number }>;
@@ -276,9 +273,8 @@ function sha256Hex(text: string): string {
 function libraryContentMatches(root: string, entry: SkillLibraryEntry): boolean {
   try {
     const file = join(librarySkillDirectory(root, entry.name), "SKILL.md");
-    const bytes = readBoundedSkillFile(file, SKILL_FILE_MAX_BYTES);
-    if (!bytes || sha256Hex(bytes.toString("utf8")) !== entry.sha256) return false;
-    return !entry.filesSha256 || skillFolderDigest(librarySkillDirectory(root, entry.name), entry.files ?? [], { executablePaths: entry.executableFiles }) === entry.filesSha256;
+    if (!existsSync(file) || sha256Hex(readFileSync(file, "utf8")) !== entry.sha256) return false;
+    return !entry.filesSha256 || skillFolderDigest(librarySkillDirectory(root, entry.name), entry.files ?? []) === entry.filesSha256;
   } catch {
     return false;
   }
@@ -305,6 +301,85 @@ function librarySkillListing(root: string, entry: SkillLibraryEntry): LibrarySki
     ...(entry.files ? { files: entry.files } : {}),
     ...(entry.github ? { github: entry.github } : {}),
   };
+}
+
+const libraryOptOutSchema = z.array(z.string());
+
+function libraryOptOutPath(botId: string): string | null {
+  if (!/^[\w-]+$/.test(botId)) return null;
+  return join(DATA_DIR, "skill-state", botId, "library-opt-out.json");
+}
+
+const unreadableOptOutsWarned = new Set<string>();
+
+function noLibraryOptOuts(path: string, why: string): ReadonlySet<string> {
+  if (!unreadableOptOutsWarned.has(path)) {
+    unreadableOptOutsWarned.add(path);
+    console.warn(`Library opt-outs at ${path} can't be read (${why}); every every-bot skill stays on for that bot until one is switched off again.`);
+  }
+  return new Set();
+}
+
+/** Names this bot has taken off its own list. An explicit assignment still wins; the shared copy stays. A list that is
+ * there but cannot be read counts as none, so the bot keeps working with every every-bot skill; the server logs it once. */
+export function librarySkillOptOuts(botId: string): ReadonlySet<string> {
+  const path = libraryOptOutPath(botId);
+  if (!path) return new Set();
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return new Set();
+    return noLibraryOptOuts(path, code ?? "read failed");
+  }
+  try {
+    const parsed = libraryOptOutSchema.safeParse(JSON.parse(text));
+    if (parsed.success) return new Set(parsed.data.filter(isSkillName));
+  } catch {}
+  return noLibraryOptOuts(path, "not a list of skill names");
+}
+
+export function setLibrarySkillOptOut(botId: string, name: string, optedOut: boolean): void {
+  if (!isSkillName(name)) return;
+  const path = libraryOptOutPath(botId);
+  if (!path) return;
+  const names = new Set(librarySkillOptOuts(botId));
+  if (names.has(name) === optedOut) return;
+  if (optedOut) names.add(name);
+  else names.delete(name);
+  mkdirSync(join(DATA_DIR, "skill-state", botId), { recursive: true, mode: 0o700 });
+  writeFileAtomic(path, `${JSON.stringify([...names].sort(), null, 2)}\n`, { mode: 0o600 });
+}
+
+/** Library skills this bot has: an explicit assignment, or every bot unless this bot opted out. */
+export function librarySkillsForBot(botId: string, assigned: ReadonlySet<string>, owned: ReadonlySet<string>): LibrarySkillListing[] {
+  const optedOut = librarySkillOptOuts(botId);
+  return listLibrarySkills().filter((skill) => !owned.has(skill.name) && (assigned.has(skill.name) || (skill.everyBot && !optedOut.has(skill.name))));
+}
+
+/** Library skills this bot can still add: not owned, not assigned, and not already on for every bot. */
+export function librarySkillsToOffer(botId: string, assigned: ReadonlySet<string>, owned: ReadonlySet<string>): LibrarySkillListing[] {
+  const optedOut = librarySkillOptOuts(botId);
+  return listLibrarySkills().filter((entry) => !owned.has(entry.name) && !assigned.has(entry.name) && (!entry.everyBot || optedOut.has(entry.name)));
+}
+
+/** Drops one bot's assignment. A skill on for every bot is opted out here so the others keep it. */
+export function unassignLibrarySkill(
+  botId: string,
+  name: string,
+  assigned: readonly string[] | undefined,
+): { unassigned: true; assignedSkills?: string[] } | { absent: true } {
+  if (!isSkillName(name)) return { absent: true };
+  const listing = listLibrarySkills().find((skill) => skill.name === name);
+  if (!listing) return { absent: true };
+  const explicit = assigned?.includes(name) === true;
+  const viaEvery = listing.everyBot && !librarySkillOptOuts(botId).has(name);
+  if (!explicit && !viaEvery) return { absent: true };
+  setLibrarySkillOptOut(botId, name, true);
+  return explicit
+    ? { unassigned: true, assignedSkills: assigned!.filter((skill) => skill !== name) }
+    : { unassigned: true };
 }
 
 export function setLibrarySkillEveryBot(
@@ -386,7 +461,6 @@ export function installLibrarySkill(input: {
     if ("error" in stored) return stored;
     entry.files = input.files.map((file) => file.path);
     entry.filesSha256 = stored.filesSha256;
-    entry.executableFiles = input.files.filter((file) => file.executable).map((file) => file.path);
   } else {
     mkdirSync(librarySkillDirectory(root, input.name), { recursive: true, mode: 0o700 });
     writeFileAtomic(join(librarySkillDirectory(root, input.name), "SKILL.md"), input.instructions, { mode: 0o600 });
@@ -408,9 +482,8 @@ function storeLibraryFolder(
   const staged = join(root, "skills", `.install-${name}-${randomUUID()}`);
   try {
     mkdirSync(join(root, "skills"), { recursive: true, mode: 0o700 });
-    const executablePaths = files.filter((file) => file.executable).map((file) => file.path);
-    writeSkillFolder(staged, skillMd, files, { recordExecutableIntent: true });
-    const filesSha256 = skillFolderDigest(staged, files.map((file) => file.path), { remember: false, executablePaths });
+    writeSkillFolder(staged, skillMd, files);
+    const filesSha256 = skillFolderDigest(staged, files.map((file) => file.path), { remember: false });
     if (!filesSha256) throw new Error("the stored skill folder could not be read back");
     if (entryExistsWithoutFollowing(directory)) {
       mkdirSync(join(root, "archive", "unreferenced"), { recursive: true, mode: 0o700 });
@@ -429,23 +502,11 @@ export function readLibrarySkillFile(name: string, root: string = skillsLibraryR
   const entry = readSkillLibraryIndex(root)[name];
   if (!entry) return null;
   try {
-    const bytes = readBoundedSkillFile(join(librarySkillDirectory(root, name), "SKILL.md"), SKILL_FILE_MAX_BYTES);
-    if (!bytes) return null;
-    const text = bytes.toString("utf8");
+    const text = readFileSync(join(librarySkillDirectory(root, name), "SKILL.md"), "utf8");
     return sha256Hex(text) === entry.sha256 ? text : null;
   } catch {
     return null;
   }
-}
-
-export function exportLibrarySkill(name: string, root: string = skillsLibraryRoot()) {
-  if (!isSkillName(name)) return null;
-  const entry = readSkillLibraryIndex(root)[name];
-  if (!entry) return null;
-  const directory = librarySkillDirectory(root, name), paths = entry.files ?? [];
-  return snapshotPortableSkill(directory, () => libraryContentMatches(root, entry) ? readLibrarySkillFile(name, root) : null, paths,
-    (files) => entry.filesSha256 ? skillFolderDigest(directory, paths, { captured: portableFilesForDisk(files), remember: false, executablePaths: entry.executableFiles }) === entry.filesSha256 : paths.length === 0,
-    entry.filesSha256 ? entry.executableFiles ?? null : []);
 }
 
 export function setLibrarySkillReviewState(

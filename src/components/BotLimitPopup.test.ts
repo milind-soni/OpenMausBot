@@ -10,9 +10,10 @@ const posted = vi.hoisted(() => [] as Array<{ path: string; body: unknown }>);
 vi.mock("@/state/api", () => ({ api: vi.fn(async (path: string, init?: { body?: string }) => { posted.push({ path, body: init?.body ? JSON.parse(init.body) : undefined }); return {}; }) }));
 vi.mock("@/lib/app-links", async (original) => ({ ...await original<typeof import("@/lib/app-links")>(), openExternalLink: vi.fn(async () => {}) }));
 
-import { botLimitShown, closeBotLimit, showBotLimit } from "@/lib/bot-limit";
+import { botLimitShown, closeBotLimit, showBotLimit, showCreatedPaused } from "@/lib/bot-limit";
 import { openExternalLink } from "@/lib/app-links";
 import { setLocale } from "@/lib/i18n";
+import { initialAwake } from "./AwakeBotsPicker";
 import { BotLimitPopup } from "./BotLimitPopup";
 
 const STARTER = { tier: "starter", resetsAt: 1, meters: [], upgrades: [{ tier: "pro", amount: 4900 }, { tier: "max", amount: 9900 }] };
@@ -185,5 +186,36 @@ describe("the popup for Starter's other limits", () => {
     await press("Keep these awake", picker);
     expect(posted).toEqual([{ path: "/api/starter/awake", body: { awake: ["b1", "b2", "b3", "b4", "b5"] } }]);
     expect(botLimitShown()).toBe(false);
+  });
+
+  it("says a bot just made is paused, and swaps it in for the least recently used idle bot with one tap", async () => {
+    posted.length = 0;
+    const bots = made(6).map((bot, n) => ({ ...bot, name: n === 5 ? "Scout" : bot.id, tasks: [{ updatedAt: n === 1 ? 1 : 100 + n }], ...(n === 0 ? { busy: true } : {}) }));
+    // A server that makes any number of bots sends no botLimit.
+    fixture.state = { config: { cloudHome: true, awakeLimit: 5, pausedBots: ["b5"] }, bots };
+    (window as unknown as { ogb?: unknown }).ogb = { cloudPlan: bridge({ status: "paid", tier: "starter", usage: STARTER }) };
+    await act(async () => { root.render(createElement(BotLimitPopup)); });
+    await act(async () => { showCreatedPaused("b5"); });
+    await act(async () => {});
+    expect(dialog()!.querySelector("h2")?.textContent).toBe("Created Scout, paused for now");
+    expect(dialog()!.textContent).toContain("Starter keeps 5 bots awake, so this one is paused. Choose which 5 stay awake, or upgrade to wake them all.");
+    expect(dialog()!.textContent).not.toContain("You've reached");
+    const picker = dialog()!.querySelector("[data-awake-bots]")!;
+    await press("Keep these awake", picker);
+    expect(posted).toEqual([{ path: "/api/starter/awake", body: { awake: ["b0", "b2", "b3", "b4", "b5"] } }]);
+    expect(botLimitShown()).toBe(false);
+  });
+});
+
+describe("the bots first offered awake", () => {
+  const bot = (id: string, at: number, busy = false) => ({ id, busy, tasks: [{ updatedAt: at }] as never });
+  it("keeps the awake ones as they are when nothing new is swapped in", () => {
+    expect(initialAwake([bot("a", 1), bot("b", 2), bot("c", 3)], new Set(["c"]), 2)).toEqual(new Set(["a", "b"]));
+  });
+
+  it("swaps a new bot in for the least recently active one that isn't working, even before the paused list arrives", () => {
+    const bots = [bot("new", 9), bot("a", 1, true), bot("b", 2), bot("c", 3), bot("d", 4), bot("e", 5)];
+    expect(initialAwake(bots, new Set(["new"]), 5, "new")).toEqual(new Set(["new", "a", "c", "d", "e"]));
+    expect(initialAwake(bots, new Set(), 5, "new")).toEqual(new Set(["new", "a", "c", "d", "e"]));
   });
 });

@@ -1,27 +1,31 @@
-// The OpenMausBot package file ("openmaus.package"), v1 or v2; every reader
-// returns v2. The single validation gate for the server, the renderer and the
-// Admin upload, so it imports only zod, yaml, croner and pure shared modules
-// (no Buffer, no node:*). The schema has no credential, chat history, model
-// choice, computer, visibility or personal setting fields. Text and binary
-// contents may still contain secrets. Unknown fields are stripped.
+// The OpenMausBot package file ("openmaus.package"), v1, v2 or v3 (v2 with
+// more skills); every reader returns v2 or v3. The single validation gate for
+// the server, the renderer and the Admin upload, so it imports only zod, yaml,
+// croner and pure shared modules (no Buffer, no node:*). The schema has no
+// field for chat history, secrets, model choices, computers, visibility or
+// personal settings, and unknown fields are stripped.
 import { parse as parseYaml } from "yaml";
-import { isUtf8Text, portableFolderFilesSchema, skillCompanionsSchema } from "./portable-skill-bundle.ts";
-export { isPortableSkillPath, skillCompanionsSchema, SKILL_BUNDLE_MAX_FILES, SKILL_BUNDLE_FILE_MAX_BYTES, SKILL_BUNDLE_MAX_BYTES } from "./portable-skill-bundle.ts";
-export { portableFolderFilesSchema } from "./portable-skill-bundle.ts";
 import { z } from "zod";
 
 import { BOT_PROFILE_LIMITS, fitsOnOneLine } from "./bot-profile.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { normalizeCronSchedule } from "./routine-schedule.ts";
+import { isToolGroup } from "./tool-groups.ts";
 import { MAUS_COLOR_NAMES } from "./wire.ts";
 import { isSkillName, parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES } from "./skill-md.ts";
+import { skillFilesSchema } from "./skill-files.ts";
 
 export const PACKAGE_FORMAT = "openmaus.package";
 /** The newest version this module reads and writes. */
-export const PACKAGE_VERSION = 2;
+export const PACKAGE_VERSION = 3;
+/** Every writer stamps v2 unless the package needs v3's larger skill cap, so
+ * apps that read only v2 still open everything they can represent and say
+ * "update the app" for the rest. */
+export const PACKAGE_V2_VERSION = 2;
+export const PACKAGE_V2_MAX_SKILLS = 60;
 /** Canonical UTF-8 bytes of the whole document. */
 export const PACKAGE_MAX_BYTES = 4 * 1024 * 1024;
-export const PACKAGE_MAX_SKILLS = 60, AGENT_MAX_SKILLS = 30, PACKAGE_MAX_PRESETS = 20, PACKAGE_MAX_CONNECTIONS = 20;
+export const PACKAGE_MAX_SKILLS = 120, AGENT_MAX_SKILLS = 30, PACKAGE_MAX_PRESETS = 20, PACKAGE_MAX_CONNECTIONS = 20;
 /** Decoded picture bytes. */
 export const AVATAR_MAX_BYTES = 64 * 1024;
 export const SEED_FILE_MAX_BYTES = 256 * 1024, SEED_MAX_FILES = 100, SEED_MAX_BYTES = 1024 * 1024;
@@ -31,6 +35,8 @@ export const TEAM_BRIEF_MAX_BYTES = 24_000, RELEASE_NOTES_MAX = 4_000;
 export const PACKAGE_V1_VERSION = 1;
 export const PACKAGE_V1_MAX_SKILLS = 20;
 export const BOTMRR_MARKDOWN_VERSION = 1;
+/** A template folder's bot.md or team.md (shared/share-folder.ts): v2 package fields, with skills and pictures in files. */
+export const BOTMRR_FOLDER_VERSION = 2;
 const BOTMRR_MARKDOWN_MAX_BYTES = 1_000_000;
 
 export const NEWER_PACKAGE_MESSAGE = "This file was made by a newer OpenMausBot. Update the app, then import it again.";
@@ -92,8 +98,8 @@ const portableSkillSchema = z.object({
   license: optionalText(200),
   compatibility: optionalText(200),
   instructions: skillInstructions,
+  files: skillFilesSchema,
 });
-const bundledSkillSchema = portableSkillSchema.extend({ files: portableFolderFilesSchema.optional() });
 const soulSchema = z.string().refine((value) => utf8Bytes(value) <= BOT_PROFILE_LIMITS.soul, {
   error: "standing instructions must be at most 24000 bytes",
 });
@@ -160,7 +166,7 @@ const playbookSchema = z.object({
 });
 const requirementsSchema = z.object({
   apps: z.array(z.object({
-    slug: key,
+    slug: requiredText(64).regex(/^(?!__proto__$)[a-z0-9_][a-z0-9_-]*$/, { message: "may only contain lowercase letters, numbers, - and _" }),
     label: requiredText(100),
     reason: requiredText(240),
     optional: z.boolean().optional(),
@@ -242,7 +248,7 @@ const packageDocumentV1Schema = z.object({
       runOn: z.enum(["maus", "cloud"]),
       schedule: packageRoutineScheduleSchema,
       durationMinutes: z.number().int().min(5).max(240),
-      timeoutMinutes: z.number().int().min(5).max(240).optional(),
+      timeoutMinutes: z.number().int().min(5).max(1_440).optional(),
       overlap: z.enum(["skip", "queue"]).optional(),
       enabledAfterInstall: z.literal(false),
     })).max(50).optional(),
@@ -354,6 +360,10 @@ const agentSchema = z.object({
   skills: z.array(skillName).max(AGENT_MAX_SKILLS).optional(),
   connections: z.array(connKey).max(PACKAGE_MAX_CONNECTIONS).optional(),
   seed: seedSchema.optional(),
+  /** Tool groups the bot has switched off. It only narrows what the bot is shown; a group this app doesn't know is dropped. */
+  tools: z.object({
+    off: z.array(z.string({ error: "must be text" }).max(40)).max(20).transform((groups) => [...new Set(groups.filter(isToolGroup))]),
+  }).optional(),
 });
 
 const routineSchema = z.object({
@@ -429,7 +439,7 @@ const connectionSchema = z.object({
 
 export const packageDocumentSchema = z.object({
   format: z.literal(PACKAGE_FORMAT, { error: "This is not an OpenMaus package" }),
-  version: z.literal(PACKAGE_VERSION, { error: "Package version is not supported" }),
+  version: z.union([z.literal(PACKAGE_V2_VERSION), z.literal(PACKAGE_VERSION)], { error: "Package version is not supported" }),
   package: z.object({
     /** The package slug: its identity across releases. */
     id: slug,
@@ -461,8 +471,8 @@ export const packageDocumentSchema = z.object({
     routines: z.array(routineSchema).max(50).optional(),
     playbooks: z.array(playbookSchema).max(80).optional(),
     skills: z.object({
-      version: z.union([z.literal(1), z.literal(2), z.literal(3)]),
-      entries: z.array(bundledSkillSchema).min(1).max(PACKAGE_MAX_SKILLS),
+      version: z.literal(1),
+      entries: z.array(portableSkillSchema).min(1).max(PACKAGE_MAX_SKILLS),
     }).optional(),
     presets: z.array(presetSchema).max(PACKAGE_MAX_PRESETS).optional(),
     connections: z.array(connectionSchema).max(PACKAGE_MAX_CONNECTIONS).optional(),
@@ -481,6 +491,7 @@ export type PackagePreset = NonNullable<PackageDefinition["presets"]>[number];
 export type PackageConnection = NonNullable<PackageDefinition["connections"]>[number];
 export type PackageAvatar = NonNullable<PackageAgent["appearance"]["avatar"]>;
 export type PackageRoutineSchedule = PackageRoutine["schedule"];
+
 
 /** Lists whose items are named by `key` in part paths: agents[scout].soul. */
 const KEYED_LISTS = new Set(["agents", "rooms", "routines", "playbooks", "presets", "connections"]);
@@ -537,6 +548,7 @@ function v1SchemaSentence(error: z.ZodError): string {
   return path ? `${path} ${issue.message}` : issue.message;
 }
 
+
 /** Sorted keys (default UTF-16 sort), undefined omitted, no whitespace,
  * leaves by JSON.stringify. The release sha256 is over exactly these bytes. */
 export function canonicalJson(value: unknown): string {
@@ -557,6 +569,7 @@ export function packageBytes(document: unknown): number {
 function tooLarge(): PackageFormatError {
   return new PackageFormatError("too_large", `This package is larger than ${PACKAGE_MAX_BYTES / (1024 * 1024)} MB.`);
 }
+
 
 function invalid(message: string): PackageFormatError {
   return new PackageFormatError("invalid", message);
@@ -681,6 +694,7 @@ function checkV2References(pkg: PackageDefinition): void {
   }
 }
 
+
 function markdownDocument(markdown: string): unknown {
   if (markdown.length > PACKAGE_MAX_BYTES) throw tooLarge();
   if (utf8Bytes(markdown) > BOTMRR_MARKDOWN_MAX_BYTES) throw new PackageFormatError("too_large", "The bot playbook is too large");
@@ -703,6 +717,7 @@ function markdownDocument(markdown: string): unknown {
   return { format: PACKAGE_FORMAT, version: PACKAGE_V1_VERSION, package: definition };
 }
 
+
 /** True for a BotMRR Markdown string or an object that says it is a package. */
 export function isPackageDocument(value: unknown): boolean {
   if (typeof value === "string") return /^---\r?\n[\s\S]*?\bbotmrr:\s*1\b/m.test(value);
@@ -713,10 +728,6 @@ export function isPackageDocument(value: unknown): boolean {
 /** Parse exactly one v1 document (JSON object or Markdown) with the v1 rules. */
 export function parsePackageV1(value: unknown): PackageDocumentV1 {
   const source = typeof value === "string" ? markdownDocument(value) : value;
-  const entries = (source as { package?: { skills?: { entries?: unknown } } } | null)?.package?.skills?.entries;
-  if (Array.isArray(entries) && entries.some((entry) => entry && typeof entry === "object" && "files" in entry)) {
-    throw invalid("Skill files require skills version 2");
-  }
   const parsed = packageDocumentV1Schema.safeParse(source);
   if (!parsed.success) throw new PackageFormatError("invalid", v1SchemaSentence(parsed.error));
   checkV1References(parsed.data.package);
@@ -726,18 +737,13 @@ export function parsePackageV1(value: unknown): PackageDocumentV1 {
 function validateV2(source: unknown): PackageDocument {
   const parsed = packageDocumentSchema.safeParse(source);
   if (!parsed.success) throw invalid(schemaSentence(parsed.error, source));
-  if (parsed.data.package.skills?.version === 1 && parsed.data.package.skills.entries.some((skill) => skill.files)) {
-    throw invalid("Skill files require skills version 2");
-  }
-  if (parsed.data.package.skills?.version === 2 && parsed.data.package.skills.entries.some((skill) => skill.files && !skillCompanionsSchema.safeParse(skill.files).success)) {
-    throw invalid("These skill files require skills version 3");
-  }
-  for (const skill of parsed.data.package.skills?.entries ?? []) {
-    if (skill.files && !isUtf8Text(skill.instructions)) throw invalid("Bundled skill instructions must be UTF-8 text");
-    if (skill.files) skill.files.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-  }
   checkV2References(parsed.data.package);
   return parsed.data;
+}
+
+/** The version a writer stamps: v3 only when the skills outgrow v2. */
+export function packageVersionFor(pkg: { skills?: { entries: readonly unknown[] } }): typeof PACKAGE_V2_VERSION | typeof PACKAGE_VERSION {
+  return (pkg.skills?.entries.length ?? 0) > PACKAGE_V2_MAX_SKILLS ? PACKAGE_VERSION : PACKAGE_V2_VERSION;
 }
 
 /** Normalize a v1 release ("01.2.03" → "1.2.3"): numeric parts, no leading zeros. */
@@ -751,7 +757,7 @@ export function upgradeV1(document: PackageDocumentV1): PackageDocument {
   const { chiefOfStaff, ...pkg } = document.package;
   return validateV2({
     format: PACKAGE_FORMAT,
-    version: PACKAGE_VERSION,
+    version: PACKAGE_V2_VERSION,
     package: {
       ...pkg,
       release: normalizedRelease(pkg.release),
@@ -777,7 +783,7 @@ export function parsePackageDocument(value: unknown, options: { trust?: PackageT
     if (typeof version === "number" && Number.isInteger(version) && version > PACKAGE_VERSION) {
       throw new PackageFormatError("newer_version", NEWER_PACKAGE_MESSAGE);
     }
-    if (version !== PACKAGE_V1_VERSION && version !== PACKAGE_VERSION) {
+    if (version !== PACKAGE_V1_VERSION && version !== PACKAGE_V2_VERSION && version !== PACKAGE_VERSION) {
       throw new PackageFormatError("unsupported_version", "Package version is not supported");
     }
     // A cheap guard before any schema work; the exact cap is re-checked on
@@ -790,14 +796,12 @@ export function parsePackageDocument(value: unknown, options: { trust?: PackageT
   return document;
 }
 
+
 /** A v1 document for apps older than v2 support. Refuses what v1 cannot
  * represent; lists what it had to leave out. */
 export function downgradeToV1(document: PackageDocument):
   { document: PackageDocumentV1; dropped: string[] } | { error: string } {
   const pkg = document.package;
-  if (pkg.skills?.entries.some((skill) => skill.files?.length)) {
-    return { error: "Packages with skill files cannot be opened by older versions of OpenMausBot." };
-  }
   if (!pkg.agents.length || !pkg.team) return { error: "Packages without bots cannot be opened by older versions of OpenMausBot." };
   const referenced = new Set(pkg.agents.flatMap((agent) => agent.skills ?? []));
   const skills = (pkg.skills?.entries ?? []).filter((skill) => referenced.has(skill.name));
@@ -818,7 +822,8 @@ export function downgradeToV1(document: PackageDocument):
   for (const preset of pkg.presets ?? []) dropped.push(`presets[${preset.key}]`);
   for (const connection of pkg.connections ?? []) dropped.push(`connections[${connection.key}]`);
   const agents = pkg.agents.map((agent) => {
-    const { approval, connections, seed, appearance, ...kept } = agent;
+    const { approval, connections, seed, appearance, tools, ...kept } = agent;
+    if (tools?.off.length) dropped.push(`agents[${agent.key}].tools`);
     const { avatar, ...look } = appearance;
     if (avatar) dropped.push(`agents[${agent.key}].appearance.avatar`);
     if (approval !== undefined) dropped.push(`agents[${agent.key}].approval`);
@@ -858,10 +863,11 @@ export function downgradeToV1(document: PackageDocument):
   }
 }
 
+
 type TextVisitor = (part: string, value: string) => string | void;
 
-/** Every string leaf except picture and skill binary bytes. A visitor that
- * returns a string replaces the leaf in place. */
+/** Every string leaf of the document, with its part path, except picture
+ * bytes. A visitor that returns a string replaces the leaf in place. */
 function visitText(document: PackageDocument, visit: TextVisitor): void {
   const walk = (holder: Record<string, unknown> | unknown[], slot: string | number, part: string) => {
     const value = (holder as Record<string | number, unknown>)[slot];
@@ -877,8 +883,7 @@ function visitText(document: PackageDocument, visit: TextVisitor): void {
     if (!value || typeof value !== "object") return;
     const record = value as Record<string, unknown>;
     for (const name of Object.keys(record)) {
-      if (part.endsWith(".appearance.avatar") && name === "data") continue;
-      if (/\.files\[\d+\]$/.test(part) && name === "binary") continue;
+      if ((part.endsWith(".appearance.avatar") && name === "data") || (name === "content" && /^skills\[[^\]]*\]\.files\[\d+\]$/.test(part))) continue;
       walk(record, name, part.endsWith(".seed.memory") ? `${part}[${JSON.stringify(name)}]` : `${part}.${name}`);
     }
   };
@@ -942,6 +947,7 @@ export function packageScanFindings(document: PackageDocument): Array<{ part: st
   });
   return findings;
 }
+
 
 /** Every item's stable identity: "agents:scout", "skills:x", … */
 export function packageKeys(document: PackageDocument): string[] {

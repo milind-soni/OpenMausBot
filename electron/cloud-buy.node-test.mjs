@@ -3,8 +3,9 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { inflateSync } from "node:zlib";
-import { CLOUD_COLORS, CLOUD_COLOR_HEX, cleanCloudColor, cleanCloudName, cloudLinkOpensSheet, colorDotIcons, colorDotPng, createCloudLook, createCloudReadyNotice,
+import { CLOUD_COLORS, CLOUD_COLOR_HEX, cleanCloudColor, cleanCloudName, cloudLinkOpensSheet, colorDotIcons, createCloudLook, createCloudReadyNotice,
   installCloudBuy, lookFile } from "./cloud-buy.mjs";
+import { colorDotPng } from "./color-dot.mjs";
 import environments from "./environments.cjs";
 
 const origin = "https://omb-u-1a2b3c4d5e6f.fly.dev";

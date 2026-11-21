@@ -1,24 +1,12 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { addHeldSecretScrubber } from "../shared/redact.ts";
 import { redactSecretsInText } from "./redact.ts";
-import { createBotPackageExport, createTeamPackageExport, shareableAddress, skillSectionVersion, TEAM_TOO_LARGE_MESSAGE, TeamExportError } from "./package-export.ts";
-import { HeldSecrets, VaultStore } from "./vault-store.ts";
+import { createBotPackageExport, createTeamPackageExport, shareableAddress, TEAM_TOO_LARGE_MESSAGE, TeamExportError } from "./package-export.ts";
 import { parseBotPackage, renderBotPackageMarkdown } from "./bot-package.ts";
 import type { Routine } from "./routines.ts";
 import type { BotRecord, GroupRecord } from "./store.ts";
-import { includedSkills, requestedSkills, startingTicks } from "../src/lib/team-share-skills.ts";
 
 describe("package export", () => {
-  it("requires the new skills section when a Markdown file carries executable metadata", () => {
-    expect(skillSectionVersion([{}])).toBe(1);
-    expect(skillSectionVersion([{ files: [{ path: "run.md", content: "instructions" }] }])).toBe(2);
-    expect(skillSectionVersion([{ files: [{ path: "run.md", content: "instructions", executable: true }] }])).toBe(3);
-  });
-
   it("preserves the exact cron and timezone through export and import", () => {
     const schedule = { type: "cron" as const, expression: "0 9 L * *", timeZone: "America/New_York" };
     const exported = createBotPackageExport({
@@ -356,24 +344,6 @@ describe("whole-team export (package v2)", () => {
     expect(JSON.stringify(result.document)).not.toContain("hunter2hunter2");
   });
 
-  it("redacts a value saved in the Vault from a skill companion", () => {
-    const directory = mkdtempSync(join(tmpdir(), "omb-vault-export-"));
-    try {
-      const secret = "violet-ocean-fixture-value";
-      const vault = new VaultStore({ dataDir: directory });
-      vault.saveSecret({ name: "Fixture", value: secret, source: "card", bots: "all" });
-      const held = new HeldSecrets(vault);
-      const unregister = addHeldSecretScrubber((text) => held.scrub(text));
-      try {
-        const skillsByBot = new Map([["lead", [{ ...skill("pricing"), files: [{ path: "references/guide.md", content: `Use ${secret} here.\n` }] }]]]);
-        const result = createTeamPackageExport({ ...fixture(), skillsByBot });
-        expect(result.document.package.skills!.entries[0]!.files).toEqual([{ path: "references/guide.md", content: "Use •••••• here.\n" }]);
-        expect(result.redacted).toContain("skills[pricing].files[0].content");
-        expect(JSON.stringify(result.document)).not.toContain(secret);
-      } finally { unregister(); }
-    } finally { rmSync(directory, { recursive: true, force: true }); }
-  });
-
   it("skips pictures that are too large or not what they claim", () => {
     const big = new Uint8Array(70 * 1024);
     big.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -466,49 +436,33 @@ describe("whole-team export (package v2)", () => {
       expect(result.skipped).toContainEqual({ part: "skills[pricing]", reason: "skill_conflict" });
     });
 
-    it("keeps 60 per team and lists the rest", () => {
+    it("keeps 120 per team and lists the rest", () => {
       const input = fixture();
-      input.bots.push(bot("third", "Third"));
+      input.bots.push(bot("third", "Third"), bot("fourth", "Fourth"), bot("fifth", "Fifth"));
       const result = createTeamPackageExport({ ...input, skillSelection: "all",
-        skillsByBot: new Map([["lead", many("a", 30)], ["scout", many("b", 30)], ["third", many("c", 2)]]) });
-      expect(result.document.package.skills?.entries).toHaveLength(60);
+        skillsByBot: new Map([["lead", many("a", 30)], ["scout", many("b", 30)], ["third", many("c", 30)],
+          ["fourth", many("d", 30)], ["fifth", many("e", 2)]]) });
+      expect(result.document.package.skills?.entries).toHaveLength(120);
       expect(result.skipped.filter((skip) => skip.reason === "team_skill_limit")).toEqual([
-        { part: "skills[c-01]", reason: "team_skill_limit" }, { part: "skills[c-02]", reason: "team_skill_limit" },
+        { part: "skills[e-01]", reason: "team_skill_limit" }, { part: "skills[e-02]", reason: "team_skill_limit" },
       ]);
-      expect(result.document.package.agents.find((agent) => agent.key === "third")?.skills).toBeUndefined();
+      expect(result.document.package.agents.find((agent) => agent.key === "fifth")?.skills).toBeUndefined();
     });
 
-    it("keeps switched-on skills first when the team has more than 60, even one that sorts later by name", () => {
+    it("keeps switched-on skills first when the team has more than 120, even one that sorts later by name", () => {
       const input = fixture();
-      input.bots.push(bot("third", "Third"));
-      // "a-off" sorts first but is off on its only bot; "b-01" is off on Third but on for Morgan, so it counts as on.
+      input.bots.push(bot("third", "Third"), bot("fourth", "Fourth"), bot("fifth", "Fifth"));
+      // "a-off" sorts first but is off on its only bot; "b-01" is off on Fifth but on for Morgan, so it counts as on.
       const result = createTeamPackageExport({ ...input, skillSelection: "all",
         skillsByBot: new Map([["lead", many("b", 30, { enabled: true })], ["scout", many("c", 30, { enabled: true })],
-          ["third", [{ ...skill("a-off"), enabled: false }, { ...skill("b-01"), enabled: false }]]]) });
+          ["third", many("d", 30, { enabled: true })], ["fourth", many("e", 30, { enabled: true })],
+          ["fifth", [{ ...skill("a-off"), enabled: false }, { ...skill("b-01"), enabled: false }]]]) });
       const kept = result.document.package.skills?.entries.map((entry) => entry.name);
-      expect(kept).toHaveLength(60);
+      expect(kept).toHaveLength(120);
       expect(kept).not.toContain("a-off");
-      expect(kept).toContain("c-30");
+      expect(kept).toContain("e-30");
       expect(result.skipped.filter((skip) => skip.reason === "team_skill_limit")).toEqual([{ part: "skills[a-off]", reason: "team_skill_limit" }]);
-      expect(result.document.package.agents.find((agent) => agent.key === "third")?.skills).toEqual(["b-01"]);
-    });
-
-    it("starts the dialog's boxes on a choice that fits, so unticking any one box still fits", () => {
-      // Morgan holds s-01..s-31; Scout holds the same s-31 plus z-only, so "all" puts 32 names in the file.
-      const shared = many("s", 31);
-      const skillsByBot = new Map([["lead", shared], ["scout", [shared[30]!, skill("z-only")]]]);
-      const all = createTeamPackageExport({ ...fixture(), skillSelection: "all", skillsByBot });
-      expect(includedSkills(all.document)).toHaveLength(32);
-      const exactly = (names: readonly string[]) => createTeamPackageExport({ ...fixture(),
-        skillsByBot: new Map([...skillsByBot].map(([id, list]) => [id, list.filter((entry) => names.includes(entry.name))])) });
-      expect(() => exactly(includedSkills(all.document).filter((name) => name !== "z-only"))).toThrow("Morgan has more than 30 skills");
-      const ticks = startingTicks(all);
-      expect(ticks).not.toContain("s-31");
-      expect(() => exactly(ticks)).not.toThrow();
-      for (const unticked of ticks) {
-        const choice = requestedSkills(new Set(ticks.filter((name) => name !== unticked)), [...shared.map((entry) => entry.name), "z-only"]);
-        expect(() => exactly(choice as string[])).not.toThrow();
-      }
+      expect(result.document.package.agents.find((agent) => agent.key === "fifth")?.skills).toEqual(["b-01"]);
     });
 
     it("refuses an exact choice that cannot fit, in a sentence the dialog shows", () => {

@@ -37,6 +37,7 @@ export function snapshotFrom(value: unknown): ProviderSnapshot | null {
   const raw = value as Record<string, unknown>;
   if (raw.state !== "available" && raw.state !== "unavailable") return null;
   const update = strings(raw.update, ["title", "message", "command"] as const);
+  const skipServerInstall = (raw.update as { serverInstall?: unknown } | null | undefined)?.serverInstall === false;
   const warning = strings(raw.warning, ["title", "message"] as const);
   const signedInAs = account(raw.account);
   return {
@@ -49,7 +50,7 @@ export function snapshotFrom(value: unknown): ProviderSnapshot | null {
     ...(text(raw.authenticationUnavailableReason) ? { authenticationUnavailableReason: raw.authenticationUnavailableReason } : {}),
     ...(signedInAs ? { account: signedInAs } : {}),
     ...(text(raw.version) || raw.version === null ? { version: raw.version } : {}),
-    ...(update ? { update } : {}),
+    ...(update ? { update: { ...update, ...(skipServerInstall ? { serverInstall: false as const } : {}) } } : {}),
     ...(raw.billing === "metered" || raw.billing === "subscription" ? { billing: raw.billing } : {}),
     ...(warning ? { warning } : {}),
   };

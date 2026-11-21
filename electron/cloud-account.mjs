@@ -2,7 +2,7 @@ import { createManagedDesktopStore, retryDelay, unreadableRecord } from "./manag
 import { CLOUD_MACHINE_CONNECTABLE, cloudUnreachableText, parseCloudCredit, parseCloudLanding, parseCloudOffer, parseCloudPurchase, parseCloudSummary, parseCloudTeams, parseCloudRoom, parseCloudTrial, parseCloudUsage, parsePairingGrant, parsePublicOffer, withoutTrial } from "./cloud-home.mjs";
 import { CLOUD_ID, CLOUD_SWATCHES, cleanCloudListName, ORGANIZATION_BLOCKS, otherOwnClouds, ownCloud, parseCloudList, parseCloudRenewal, parseOrganizations, releaseVersion } from "./cloud-list.mjs";
 import { planTeam, teamPlan } from "./cloud-team-plan.mjs";
-import { cleanCode, cleanEmail, parseSignInStart, SIGN_IN_START, SIGN_IN_TRIES, SIGN_IN_VERIFY, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
+import { cleanCode, cleanEmail, failureKind, parseSignInStart, READ_WAIT_MS, resetOffered, retryAfterSeconds, settledWithin, SIGN_IN_START, SIGN_IN_TRIES, SIGN_IN_VERIFY, signInBlock, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
 import nativeText from "./native-text.cjs";
 
 const { englishText } = nativeText;
@@ -98,10 +98,14 @@ function addOffer(result) {
 
 export function createCloudAccountClient({ store, openBrowser, platform, deviceName, appVersion,
   origin = CLOUD_ORIGIN, fixture = false, fetch: fetcher = globalThis.fetch, now = Date.now, onState = () => {},
-  setTimer = setTimeout, clearTimer = clearTimeout, warn = message => console.warn(message), awaitingWake = () => false, t = englishText.t }) {
+  setTimer = setTimeout, clearTimer = clearTimeout, warn = message => console.warn(message), awaitingWake = () => false, t = englishText.t, readWaitMs = READ_WAIT_MS }) {
   origin = cloudOrigin(origin, fixture);
   const staging = origin === STAGING_CLOUD_ORIGIN;
   let grant = null, issued = null, cleanup = null, pending = null, cleanupNeeded = false;
+  /** `resetUsed`: the person cleared a saved sign-in this computer couldn't use (resetSaved); from then on this run, a new sign-in
+   * that can't be saved is kept in memory only (`unsaved`). `stuckSince`: the first failed read of the saved one. */
+  let resetUsed = false, unsaved = false, stuckSince = null, reading = null;
+  const save = record => (unsaved ? Promise.resolve() : store.write(record));
   let value = { status: "signed-out", message: "restoring" }, generation = 0, timer = null, closed = false, clearing = null, refreshing = null;
   let verifiedUntil = 0, restoring = false, controller = new AbortController(), failures = 0;
   let plan = null, savedHint = null;
@@ -126,7 +130,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     ? { cloudId: adding.cloudId, name: adding.name, color: adding.color, tier: adding.tier, startedAt: adding.startedAt, ...(adding.url ? { link: true } : {}), ...(adding.done ? { done: true } : {}) } : null;
   const withCheckout = current => {
     const open = checkout(), add = buying(), shown = waking && current.status === "connected" ? { ...current, waking: true } : current;
-    const next = { ...shown, ...(open ? { checkout: open } : {}), ...(add ? { adding: add } : {}) };
+    const next = { ...shown, ...(open ? { checkout: open } : {}), ...(add ? { adding: add } : {}), ...(unsaved && grant ? { unsaved: true } : {}) };
     return staging ? { ...next, staging: true } : next;
   };
   const state = () => {
@@ -167,12 +171,12 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       }
     } catch (error) { await reader?.cancel().catch(() => {}); throw error; }
     finally { reader?.releaseLock(); }
-    let data;
+    let data; const wait = response.ok ? undefined : retryAfterSeconds(response.headers, now()), retryAfter = wait === undefined ? {} : { retryAfter: wait };
     try { data = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch {
-      if (!response.ok) throw Object.assign(new Error("Cloud request failed."), { status: response.status, opaque: true });
+      if (!response.ok) throw Object.assign(new Error("Cloud request failed."), { status: response.status, opaque: true, ...retryAfter });
       throw new Error("Invalid Cloud response.");
     }
-    if (!response.ok) throw Object.assign(new Error("Cloud request failed."), { status: response.status, code: data?.error, interval: data?.interval, blocked: data?.addBlocked,
+    if (!response.ok) throw Object.assign(new Error("Cloud request failed."), { status: response.status, code: data?.error, interval: data?.interval, blocked: data?.addBlocked, ...retryAfter,
       ...(typeof data?.checkoutUrl === "string" ? { checkoutUrl: data.checkoutUrl } : {}) });
     return data;
   }
@@ -238,12 +242,14 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     if (clearing) return clearing;
     const previous = grant ?? issued ?? cleanup, stamp = reset();
     grant = null; issued = null; cleanup = previous; cleanupNeeded = true; plan = null; savedHint = null; opened = null; adding = null; renewalCloud = null;
+    // A sign-in kept in memory only has nothing of its own on disk: one that can't be removed there doesn't block the next.
+    const memoryOnly = unsaved; unsaved = false;
     if (!quiet) publish({ status: "signed-out" });
     const operation = (async () => {
-      const [persisted, revoked] = await Promise.allSettled([Promise.resolve().then(() => store.write(null)), previous ? revoke(previous) : Promise.resolve()]);
+      const [persisted, revoked] = await Promise.allSettled([Promise.resolve().then(() => store.write(null)).catch(error => { if (!memoryOnly) throw error; }), previous ? revoke(previous) : Promise.resolve()]);
       if (persisted.status === "fulfilled") { cleanup = null; cleanupNeeded = false; }
       if (!current(stamp)) return state();
-      if (persisted.status === "rejected") return publish({ status: "unavailable", message: "signout-storage-failed" });
+      if (persisted.status === "rejected") return publish({ status: "unavailable", message: "signout-storage-failed", reset: true });
       if (quiet) return state();
       return publish({ status: "signed-out", ...(revoked.status === "rejected" ? { message: "signout-local-only" } : {}) });
     })().finally(() => { if (clearing === operation) clearing = null; });
@@ -271,11 +277,11 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       const hint = access.plan === "pro" ? { ...(access.tier ? { tier: access.tier } : {}), active: access.status === "active" } : null;
       if (next.expiresAt !== previous.expiresAt) {
         const replacement = { ...previous, expiresAt: next.expiresAt };
-        await store.write(record(replacement, hint));
+        await save(record(replacement, hint));
         if (!current(stamp) || grant !== previous) return state();
         grant = replacement; savedHint = hint;
       } else if (!sameHint(savedHint, hint)) {
-        try { await store.write(record(previous, hint)); savedHint = hint; } catch {}
+        try { await save(record(previous, hint)); savedHint = hint; } catch {}
         if (!current(stamp) || grant !== previous) return state();
       }
       plan = hint ? { accountId: grant.account.id, ...hint } : null;
@@ -327,7 +333,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     if (!current(stamp) || !wanted()) { await revoke(next).catch(() => {}); return false; }
     if (next.expiresAt <= now()) throw new Error("Expired Cloud credential.");
     issued = next;
-    await store.write(next);
+    try { await store.write(next); } catch (error) { if (!resetUsed) throw error; if (current(stamp)) unsaved = true; }
     if (!current(stamp)) return false;
     grant = next; issued = null; pending = null; emailed = null; savedHint = null;
     if (plan?.accountId !== next.account.id) plan = null;
@@ -358,7 +364,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     }
   }
   async function begin(intent = null) {
-    if (closed || restoring || clearing || grant || issued || cleanupNeeded) throw new Error("Sign out before starting another Cloud connection.");
+    if (closed || restoring || clearing || grant || issued || cleanupNeeded) return state();
     const stamp = reset();
     opened = intent ? { plan: intent.plan, source: intent.source, startedAt: now(), signIn: true } : null;
     publish({ status: "connecting" });
@@ -374,13 +380,19 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       publish({ status: "connecting", enrollment: { userCode: result.userCode, expiresAt: pending.expiresAt } });
       await openBrowser(pending.verificationUri);
       if (current(stamp)) schedule(poll, pending.interval);
-    } catch { if (current(stamp)) { pending = null; opened = null; publish({ status: "signed-out", message: "signin-failed" }); } }
+    } catch (error) { if (current(stamp)) { warn(`[cloud] browser sign-in could not start: ${failureKind(error)}`); pending = null; opened = null; publish({ status: "signed-out", message: "signin-failed" }); } }
     return state();
   }
-  const signInBlocked = () => closed || restoring || clearing || grant || issued || cleanupNeeded;
+  /** Why a sign-in can't start now (the sheet says so, with the one thing to do), after a sign-out or a read under way ends. */
+  async function blocked(connecting = false) {
+    if (clearing) await clearing.catch(() => {});
+    if (restoring && reading) await settledWithin(reading, readWaitMs);
+    const reason = signInBlock({ closed, restoring, issued, grant, cleanupNeeded, connecting: connecting && value.status === "connecting" });
+    return reason && { outcome: "blocked", reason, ...(reason === "saved" && value.reset ? { reset: true } : {}) };
+  }
   /** Sends the 8-digit code to `email`. Nothing is signed in yet; the answer says what the sheet shows next. */
   async function emailStart(email) {
-    if (signInBlocked() || value.status === "connecting") throw new Error("Sign out before starting another Cloud connection.");
+    const stop = await blocked(true); if (stop) return stop;
     const address = cleanEmail(email), app = signInIdentity({ deviceName, platform, appVersion });
     if (!address) return { outcome: "invalid-email" };
     if (!app) return { outcome: "browser" };
@@ -394,7 +406,9 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       emailed = { attempt: started.attempt, email: address, expiresAt: now() + started.expiresIn * 1000, wrong: 0 };
       return { outcome: "sent", email: address, expiresAt: emailed.expiresAt, resendAt: now() + started.resendAfter * 1000, signupOpen: started.signupOpen };
     } catch (error) {
-      return current(stamp) ? { outcome: startFailure(error) } : { outcome: "failed" };
+      if (!current(stamp)) return { outcome: "failed" };
+      const outcome = startFailure(error); if (outcome === "failed") warn(`[cloud] email sign-in could not start: ${failureKind(error)}`);
+      return { outcome };
     }
   }
   /** Checks the code; on success the token is stored like the browser sign-in's and the session is read at once. */
@@ -402,7 +416,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     const attempt = emailed, digits = cleanCode(code);
     if (!attempt || now() >= attempt.expiresAt) { emailed = null; return { outcome: "expired" }; }
     if (!digits) return { outcome: "wrong-code", triesLeft: SIGN_IN_TRIES - attempt.wrong };
-    if (signInBlocked()) throw new Error("Sign out before starting another Cloud connection.");
+    const stop = await blocked(); if (stop) return stop;
     const stamp = generation;
     try {
       const result = await request(null, { method: "POST", path: SIGN_IN_VERIFY, body: { attempt: attempt.attempt, code: digits } });
@@ -463,10 +477,10 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     if (unreadable) {
       const removed = await store.write(null).then(() => true, () => false);
       if (!current(stamp)) return state();
-      if (removed) { cleanupNeeded = false; failures = 0; return publish({ status: "signed-out", message: "restore-removed" }); }
+      if (removed) { cleanupNeeded = false; failures = 0; stuckSince = null; return publish({ status: "signed-out", message: "restore-removed" }); }
     }
-    failures++;
-    if (value.message !== "restore-failed") publish({ status: "unavailable", message: "restore-failed" });
+    failures++; stuckSince ??= now(); const offer = resetOffered({ failures, since: stuckSince, now: now() });
+    if (value.message !== "restore-failed" || (offer && !value.reset)) publish({ status: "unavailable", message: "restore-failed", ...(offer ? { reset: true } : {}) });
     schedule(start, retryDelay(failures));
     return state();
   }
@@ -474,12 +488,12 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     const stamp = generation;
     restoring = true; verifiedUntil = 0;
     let saved, restored = null, failed = false, unreadable = false;
-    try { saved = await store.read(); } catch (error) { failed = true; unreadable = unreadableRecord(error); }
+    try { saved = await (reading = store.read()); } catch (error) { failed = true; unreadable = unreadableRecord(error); }
     if (!failed) try { restored = saved ? validateGrant(saved) : null; } catch { failed = unreadable = true; }
     restoring = false;
     if (!current(stamp)) return state();
     if (failed) return restoreFailed(stamp, unreadable);
-    grant = restored; cleanupNeeded = false; failures = 0;
+    grant = restored; cleanupNeeded = false; failures = 0; stuckSince = null;
     savedHint = grant ? planHint(saved.planHint) : null;
     plan = grant && savedHint ? { accountId: grant.account.id, ...savedHint } : null;
     if (!grant) return ["restoring", "restore-failed"].includes(value.message) ? publish({ status: "signed-out" }) : state();
@@ -511,6 +525,18 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     },
     cancel: () => { if (!pending && value.status !== "connecting") return Promise.resolve(state()); opened = null; return signOut(); },
     refresh, signOut,
+    /** Clear and sign in again: a saved sign-in this computer can't read or remove goes (never a working one), and isn't read again
+     * this run. One that still can't be removed stays on disk; this run's next sign-in is kept in memory if it can't be saved. */
+    async resetSaved() {
+      if (closed || grant || issued || clearing || !cleanupNeeded || !value.reset) return state();
+      // A read under way may yet open it: then it is kept and signed in, never cleared under that read.
+      if (restoring && reading) { await settledWithin(reading, readWaitMs); if (grant) return refresh(); restoring = false; if (closed || issued || clearing || !cleanupNeeded) return state(); }
+      const stamp = reset(), ended = cleanup; resetUsed = true;
+      const [removed] = await Promise.all([store.write(null).then(() => true, () => false), ended ? revoke(ended).catch(() => {}) : null]);
+      if (!current(stamp)) return state();
+      cleanup = null; cleanupNeeded = false; stuckSince = null;
+      return publish({ status: "signed-out", ...(removed ? {} : { message: "reset-kept" }) });
+    },
     async openDashboard() { await openBrowser(`${origin}/cloud`); return state(); },
     async upgradePreview(plan, source) {
       if (!UPGRADE_TIERS.includes(plan) || !UPGRADE_SOURCES.includes(source)) throw new Error("Invalid Cloud upgrade.");
@@ -674,9 +700,8 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       if (!target || !current) throw new Error(t("native.cloud.notReady"));
       let result;
       try { result = await request("pairing", { method: "POST", body: {}, token: current.token }); } catch (error) {
-        const why = cloudUnreachableText(await refresh().catch(() => state()), target.origin);
-        throw why ? new Error(why) : error;
-      }
+        const why = error?.status === 429 ? null : cloudUnreachableText(await refresh().catch(() => state()), target.origin); // the Admin's limit: never asked again here
+        throw why ? Object.assign(new Error(why), { status: error?.status, opaque: error?.opaque, retryAfter: error?.retryAfter }) : error; }
       const pairing = parsePairingGrant(result, target.origin, now());
       if (!pairing) throw new Error("Invalid Cloud pairing response.");
       return pairing;
@@ -935,7 +960,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     /** Reads the sign-in saved in `store` afresh: nothing of the one before stays. Told once, when the Admin has answered. */
     reload() {
       quiet = false;
-      reset();
+      reset(); unsaved = false;
       grant = null; issued = null; cleanup = null; cleanupNeeded = false; plan = null; savedHint = null; opened = null; adding = null; renewalCloud = null; offerCache = null; waking = false;
       confirmations.clear();
       value = { status: "signed-out", message: "restoring" };
@@ -943,6 +968,8 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     },
     /** Ends a sign-in that waits on this device, at the Admin. */
     revokeSaved: revoke,
+    /** For cloud-accounts.mjs only, never a page: the active sign-in when it is kept in memory only, as its file would hold it. */
+    memorySignIn: () => (unsaved && grant ? structuredClone(grant) : null),
     close() { closed = true; reset(); },
   };
 }

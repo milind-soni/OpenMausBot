@@ -12,17 +12,26 @@ export function transcriptEndPad(composerHeightPx: number): string {
   return `calc(${height}px + ${TRANSCRIPT_GAP})`;
 }
 
+export function messageBoxHeight(dock: Pick<DOMRect, "bottom">, box: Pick<DOMRect, "top"> | undefined): number {
+  return box ? Math.max(0, dock.bottom - box.top) : 0;
+}
+
 export function useComposerDockPad(ref: RefObject<HTMLElement | null>) {
   const [height, setHeight] = useState(0);
+  const [box, setBox] = useState(0);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const apply = () => setHeight(el.getBoundingClientRect().height);
+    const apply = () => {
+      const dock = el.getBoundingClientRect();
+      setHeight(dock.height);
+      setBox(messageBoxHeight(dock, el.querySelector("[data-look=composer]")?.getBoundingClientRect()));
+    };
     apply();
     const observer = new ResizeObserver(apply);
     observer.observe(el);
     return () => observer.disconnect();
   }, [ref]);
   const measured = height > 0 ? height : FALLBACK_COMPOSER_PX;
-  return { pad: transcriptEndPad(measured), height: measured };
+  return { pad: transcriptEndPad(measured), height: measured, box: box > 0 ? box : measured };
 }

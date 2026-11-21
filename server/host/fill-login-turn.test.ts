@@ -45,10 +45,20 @@ describe("fill_login outside the bot's own browser", () => {
     expect(moveToBrowser).toHaveBeenCalledWith(turn);
     expect(target).not.toHaveBeenCalled();
     expect(answer.ok).toBe(false);
-    expect(answer.text).toContain("never types one on the screen of");
+    expect(answer.text).toContain("it never types one there");
     expect(answer.text).toContain("moving this conversation to your own browser");
     expect(answer.text).toContain("End this turn now");
     expect(answer.text).not.toContain("request_sign_in");
+  });
+
+  it.each([
+    ["can move", {}],
+    ["cannot move", { moveToBrowser: () => false }],
+    ["has no browser here", { browserSelectable: () => false }],
+  ] as const)("says plainly why a saved login is not filled on a screen when the run %s", async (_case, over) => {
+    const { fill } = harness(over);
+    const answer = await fill(bot, turn, undefined, undefined);
+    expect(answer.text).toMatch(/^Saved logins are filled only in your own browser, the one your browser tools drive, where MausBot checks the page's site before it types a password\. On the screen of this computer it cannot prove which site a box belongs to, so it never types one there[,.]/);
   });
 
   it("names the person's own Chrome when the bot's profile is My Chrome", async () => {
@@ -91,6 +101,17 @@ describe("fill_login outside the bot's own browser", () => {
 });
 
 describe("fill_login in the bot's own browser", () => {
+  it("passes turn cancellation through to the login action before browser input starts", async () => {
+    const engine = vi.fn(async () => ({ url: "https://bank.test/sign-in" }));
+    const { fill } = harness({
+      at: "browser", turnActive: () => false,
+      target: async () => ({ session: "bot-b1", spec: { command: "agent-browser", env: {} }, env: {} }),
+      loginInput: () => ({ engine, insertText: async () => {}, press: async () => {}, click: async () => {} }),
+    });
+    expect(await fill(bot, turn, undefined, undefined)).toEqual({ ok: false, text: "Stopped filling this login because the turn ended." });
+    expect(engine).not.toHaveBeenCalled();
+  });
+
   it("fills there and never asks to move", async () => {
     const { fill, moveToBrowser, target } = harness({ at: "browser" });
     const answer = await fill(bot, turn, undefined, undefined);
@@ -135,3 +156,40 @@ describe("fill_login and a login kept to some bots on a shared browser", () => {
   });
 });
 
+
+describe("fill_login and a missing mailbox", () => {
+  function browser(offer: { shown: boolean; line?: string }, outcome = { ok: false, text: "This page asks for a one-time code.", wantsMailbox: true }) {
+    const offerConnect = vi.fn(async () => offer);
+    const find = vi.fn(async () => ({ kind: "skip" as const }));
+    const { fill } = harness({
+      at: "browser", target: async () => ({ session: "s", spec: { command: "x", env: {} }, env: {} }),
+      withSecretInput: async () => outcome, mailCodes: { find, offerConnect },
+    });
+    return { fill, offerConnect };
+  }
+
+  it("shows the connect card and tells the bot to end the turn instead of handing the person a code to copy", async () => {
+    const { fill, offerConnect } = browser({ shown: true });
+    const answer = await fill(bot, turn, undefined, undefined);
+    expect(offerConnect).toHaveBeenCalledOnce();
+    expect(answer.text).toContain("Connect card for Gmail");
+    expect(answer.text).toContain("End this turn now");
+    expect(answer.text).not.toContain("request_sign_in");
+  });
+
+  it("falls back to today's words when no card is shown", async () => {
+    const { fill } = browser({ shown: false });
+    expect((await fill(bot, turn, undefined, undefined)).text).toContain("read it from their connected email or messages");
+  });
+
+  it("passes on the team's line for a person's own Gmail", async () => {
+    const { fill } = browser({ shown: false, line: "Connect your Gmail here: https://x" });
+    expect((await fill(bot, turn, undefined, undefined)).text).toContain("Connect your Gmail here: https://x");
+  });
+
+  it("moves an email-only sign-in to the browser even with no saved login", async () => {
+    const { fill, moveToBrowser } = harness({ logins: { sitesFor: () => [], candidates: async () => [], markUsed: () => {} } });
+    await fill(bot, turn, undefined, undefined, "ada@acme.test");
+    expect(moveToBrowser).toHaveBeenCalledOnce();
+  });
+});

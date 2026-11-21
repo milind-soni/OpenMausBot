@@ -95,7 +95,7 @@ describe("what a CI run proves", () => {
 
   it("is partial when only some platforms' shards ran, as on a push to main or in a merge group", () => {
     expect(judgeRun(mainLane())).toBe("partial");
-    expect(judgeRun(green().filter((job) => job.name !== "vitest (macos-latest, shard 4/4)"))).toBe("partial");
+    expect(judgeRun(green().filter((job) => job.name !== "vitest (macos-latest, shard 5/5)"))).toBe("partial");
     expect(judgeRun([...mainLane(), ...shards("windows-latest")])).toBe("partial");
   });
 

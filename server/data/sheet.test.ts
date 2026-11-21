@@ -68,6 +68,27 @@ describe("DataSheetStore", () => {
     expect(next.id).toBe("c_3");
   });
 
+  it("persists query-only allocations without changing or broadcasting the visible sheet", () => {
+    const dir = freshDir();
+    const { sheet, frames } = store(dir);
+    const before = sheet.sheet();
+    expect(sheet.nextResultName()).toBe("q_1");
+    expect(sheet.nextResultName()).toBe("q_2");
+    expect(sheet.sheet()).toEqual(before);
+    expect(frames).toEqual([]);
+    expect(store(dir).sheet.nextResultName()).toBe("q_3");
+  });
+
+  it("keeps result allocations made after the last visible card change", async () => {
+    const dir = freshDir();
+    const { sheet } = store(dir);
+    await sheet.addCard({ kind: "text", title: "Note", text: "hi", by: "person", status: "ready" });
+    expect(sheet.nextResultName()).toBe("q_2");
+    const reopened = store(dir).sheet;
+    expect(reopened.nextResultName()).toBe("q_3");
+    expect((await reopened.addCard({ kind: "text", title: "Next", by: "person" })).id).toBe("c_4");
+  });
+
   it("prunes the oldest unpinned card first and drops its result table", async () => {
     const dir = freshDir();
     const { sheet, dropped } = store(dir, { cardsMax: 3 });

@@ -14,6 +14,7 @@ import { startBrokerFake, type BrokerFake } from "./testing/broker-fake.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "./testing/fake-http-mcp-server.ts";
 import { startFakeOAuth, type FakeOAuth } from "./testing/fake-oauth-server.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
+import { readRegistry } from "./testing/registry.ts";
 
 const TOKEN = `ops_fake-team-${randomBytes(8).toString("hex")}`;
 const OWNER = { email: "olive@acme.test", role: "owner" as const };
@@ -44,7 +45,7 @@ beforeAll(async () => {
   admin = (await team.pair(ADMIN)).token!;
   ada = (await team.pair(ADA)).token!;
   cleo = (await team.pair(CLEO)).token!;
-  const created = await team.as(owner, "POST", "/api/bots", { name: "Scout" });
+  const created = await team.as(owner, "POST", "/api/bots", { name: "Scout", visibility: "everyone" });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   bot = created.body.bot;
   // The Team Cloud registered its own installation as it started: the team's Gmail is connected there.
@@ -223,11 +224,11 @@ it("never uses her own Gmail or mail where others read, even for her own line in
 }, hostTimeout(180_000));
 
 it("gives work her own message hands to another bot her own Gmail, and never work Cleo's message hands on", async () => {
-  const created = await team.as(owner, "POST", "/api/bots", { name: "Helper" });
+  const created = await team.as(owner, "POST", "/api/bots", { name: "Helper", visibility: "everyone" });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   const helper = created.body.bot as { id: string; mainThreadId: string };
   const handOn = (who: string) => ({ name: "coordinate_bots", server: "agents", input: { bot_ids: [helper.id], message: `Fetch ${who}'s latest email.` } });
-  const helperThreads = () => (JSON.parse(readFileSync(join(team.home, ".openmausbot", "bots.json"), "utf8")) as Array<{ id: string; tasks: Array<{ threadId: string }> }>)
+  const helperThreads = () => (readRegistry(join(team.home, ".openmausbot")).bots as Array<{ id: string; tasks: Array<{ threadId: string }> }>)
     .find((entry) => entry.id === helper.id)!.tasks.map((task) => task.threadId).filter((threadId) => threadId !== helper.mainThreadId);
   /** The Gmail step the helper ran in the work it was handed, once it has finished. */
   const helperGmail = async (token: string, known: readonly string[]) => {
@@ -283,10 +284,10 @@ it("runs work her group-chat line hands on in the receiving bot's chat with her,
   const SECRET = "Q3 salary review 7731";
   writeFileSync(join(team.home, "marker-replies.json"), JSON.stringify({ "Brief from @Scout:": `Ada's latest email: ${SECRET}.` }));
   try {
-    const created = await team.as(owner, "POST", "/api/bots", { name: "Clerk" });
+    const created = await team.as(owner, "POST", "/api/bots", { name: "Clerk", visibility: "everyone" });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     const clerk = created.body.bot as { id: string; mainThreadId: string };
-    const clerkWork = () => (JSON.parse(readFileSync(join(team.home, ".openmausbot", "bots.json"), "utf8")) as Array<{ id: string; tasks: Array<{ threadId: string }> }>)
+    const clerkWork = () => (readRegistry(join(team.home, ".openmausbot")).bots as Array<{ id: string; tasks: Array<{ threadId: string }> }>)
       .find((entry) => entry.id === clerk.id)!.tasks.map((task) => task.threadId).filter((threadId) => threadId !== clerk.mainThreadId);
     /** The room's row for Clerk's result: Scout is resumed with it in the room right after. */
     const clerkReplied = async () => ((await messages(ada, roomThread)).body.messages as Array<{ roomRequest?: { phase?: string }; tool?: { name?: string } }>)

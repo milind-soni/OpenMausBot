@@ -37,6 +37,8 @@ export const PATHS = {
   audit: process.env.MAUSBOT_AUDIT_DIR || "/var/log/mausbot",
   /** In the container's own /tmp: `mausbot-connector job` reaches the running connector here. */
   jobs: process.env.MAUSBOT_JOBS_SOCKET || "/tmp/mausbot-jobs.sock",
+  /** /var/lib/mausbot/update on the host, on a customer-run server only: where an update is handed to the server's own updater. */
+  update: process.env.MAUSBOT_UPDATE_DIR || "/var/lib/mausbot/update",
 } as const;
 
 export const AUDIT_FILE = "audit.jsonl";
@@ -76,7 +78,7 @@ export const HIDEPID_CAPABILITIES = ["SYS_ADMIN", "SETPCAP"] as const;
 /** The home's secrets: kept out of its container's environment (docker inspect shows that) once its launcher reads the file. */
 export const HOME_SECRET_ENV = [
   "OMB_CLOUD_BOOTSTRAP_SECRET", "OMB_CLOUD_BOAT_TOKEN", "OMB_CLOUD_VOICE_TOKEN", "OMB_CLOUD_DECIDER_TOKEN", "OMB_CLOUD_AI_TOKEN",
-  "OMB_CLOUD_CONNECTED_APPS_GRANT", "OMB_CLOUD_X_TOKEN", "OMB_CLOUD_TUNNEL_TOKEN",
+  "OMB_CLOUD_CONNECTED_APPS_GRANT", "OMB_CLOUD_X_TOKEN", "OMB_CLOUD_HOSTING_TOKEN", "OMB_CLOUD_TUNNEL_TOKEN",
 ] as const;
 /** In the home: a read-only folder holding only `secrets.json`, root's alone. The launcher reads it at start. */
 export const HOME_SECRETS_TARGET = "/run/mausbot";

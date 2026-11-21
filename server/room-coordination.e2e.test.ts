@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, openSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
@@ -58,6 +58,12 @@ async function addSupervisingChief(f: any, section = "") {
   return chief;
 }
 
+// These checks cover jobs taking turns in the room's own thread, so they turn
+// parallel room jobs off.
+async function jobsTakeTurns(f: any) {
+  expect((await f.api("/api/config", { features: { parallelRoomJobs: false } }, "PATCH")).features.parallelRoomJobs).toBe(false);
+}
+
 // A result is withheld when the server revalidates the running child, so keep the child held until that has failed it.
 async function releaseAfterWithhold(f: any, gateFile: string) {
   await expect.poll(() => f.nodes().find((n: any) => n.parentId)?.status, { timeout: 30_000 }).toBe("failed");
@@ -65,6 +71,7 @@ async function releaseAfterWithhold(f: any, gateFile: string) {
 }
 
 it.each(["", "Leadership"])("lists and coordinates with a supervising Chief and same-section peer in the same room (Chief section %j)", section => withRooms(async f => {
+  await jobsTakeTurns(f);
   const chief = await addSupervisingChief(f, section);
   f.plan[f.sender.id].steps = [{ arguments: { bot_ids: [chief.id, f.target.id], message: "Review the work here" } }];
   f.plan[f.target.id] = { reply: "Built CSV", expectContextIncludes: ["[LIVE TEAMMATES]", `[id: ${f.sender.id}]`] };
@@ -77,6 +84,7 @@ it.each(["", "Leadership"])("lists and coordinates with a supervising Chief and 
 }), 45_000);
 
 it("coordinates in a room that mixes departments, with a Chief that manages none of them", () => withRooms(async f => {
+  await jobsTakeTurns(f);
   const chief = await addSupervisingChief(f);
   await f.api(`/api/bots/${chief.id}`, { managedSections: [] }, "PATCH");
   const outsider = (await f.cli("new-bot", "--name", "Outsider", "--section", "Finance")).bot;
@@ -90,6 +98,19 @@ it("coordinates in a room that mixes departments, with a Chief that manages none
   expect(children.map((node: any) => node.botId).sort()).toEqual([chief.id, outsider.id].sort());
   expect(children.every((node: any) => node.status === "completed" && node.groupId === f.source.id)).toBe(true);
 }), 45_000);
+
+it("keeps each member's engine through hand-offs between rooms and the person's next messages", () => withRooms(async f => {
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  for (const round of [2, 3, 4]) {
+    await f.cli("send-channel", "--channel", f.source.id, "--text", `@Director Next assignment ${round}`);
+    expect((await f.wait()).status).toBe("settled");
+  }
+  const native = join(f.session.info.dataDir, "native");
+  const closes = readdirSync(native).flatMap((file) => readFileSync(join(native, file), "utf8").split("\n").filter(Boolean)
+    .map((line) => JSON.parse(line)).filter((row) => row.source === "claude.session" && row.msg?.close).map((row) => row.msg));
+  expect(closes).toEqual([]);
+  expect(f.handoffs().filter((node: any) => node.botId === f.target.id).map((node: any) => node.status)).toEqual(["completed", "completed", "completed", "completed"]);
+}), 90_000);
 
 it("runs room-destined work in the room's own conversation, opening no thread on the recipient", () => withRooms(async f => {
   const tasksOf = async (botId: string) => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === botId).tasks ?? [];
@@ -178,11 +199,11 @@ it("hands work to a bot in another department, into a room whose readers are in 
   expect((await f.messages(f.source.activeTaskId)).some((m: any) => m.text === "Reviewed downstream outcome")).toBe(true);
 }), 45_000);
 
-it.each([4000, 4001])("enforces the %i-character request boundary on the real server", length => withRooms(async f => {
+it.each([6_000, 12_000, 12_001])("enforces the %i-character request boundary on the real server", length => withRooms(async f => {
   f.plan[f.sender.id].steps[0].arguments.message = "x".repeat(length);
-  f.plan[f.sender.id].steps[0].expectError = length > 4000;
+  f.plan[f.sender.id].steps[0].expectError = length > 12_000;
   await f.start(); expect((await f.wait()).status).toBe("settled");
-  if (length > 4000) expect(f.handoffs()).toEqual([]);
+  if (length > 12_000) expect(f.handoffs()).toEqual([]);
   else expect(f.nodes().find((n: any) => n.parentId).status).toBe("completed");
 }), 45_000);
 
@@ -213,7 +234,12 @@ it("receipts a retried duplicate of a failed hand-off as failed, not queued behi
   f.plan[f.target.id].fail = true;
   f.plan[f.sender.id].resumeSteps = [{ arguments: f.plan[f.sender.id].steps[0].arguments, expectError: true }];
   await f.start(); expect((await f.wait()).status).toBe("settled");
-  expect(f.provider().map((turn: any) => turn.botId)).toEqual([f.sender.id, f.target.id, f.sender.id]);
+  // The main Chief got department A when it was made, so it also hears of the failed run, in a turn of its own.
+  const chief = (await f.api("/api/bots")).bots.find((bot: any) => bot.chiefOfStaff);
+  expect(chief.managedSections).toEqual(["A"]);
+  await expect.poll(() => f.provider().filter((turn: any) => turn.botId === chief.id)
+    .map((turn: any) => /incident report.*Engineer's run in the room \\"Engineering\\" failed/.test(JSON.stringify(turn.prompt))), { timeout: 15_000 }).toEqual([true]);
+  expect(f.provider().map((turn: any) => turn.botId).filter((id: string) => id !== chief.id)).toEqual([f.sender.id, f.target.id, f.sender.id]);
   const [assigned, retried] = f.provider().filter((turn: any) => turn.botId === f.sender.id);
   expect(assigned.resumed).toBe(false);
   const first = JSON.parse(assigned.evidence.find((entry: any) => entry.step).response.result.content[0].text);
@@ -274,6 +300,7 @@ it("pins a busy destination's task even when its active task changes", () => wit
   expect(created.success).toBe(true);
 }), 45_000);
 it("consults multiple existing members and returns once, with no discussion prerequisite or new room settings", () => withRooms(async f => {
+  await jobsTakeTurns(f);
   const reviewer = (await f.cli("new-bot", "--name", "Reviewer", "--section", "A")).bot;
   await f.tool("update_channel", { channel_id: f.source.id, member_ids: [f.sender.id, f.target.id, reviewer.id] });
   f.plan[f.sender.id].steps = [{ arguments: { bot_ids: [f.target.id, reviewer.id], message: "Give one risk from your role" } }];
@@ -377,13 +404,27 @@ it("does not repeat a shared brief or rerun recipients on an identical tool retr
   f.plan[f.sender.id].steps = [{ arguments: args }, { arguments: args }];
   f.plan[reviewer.id] = { reply: "Release checklist reviewed" };
   await f.start(); expect((await f.wait()).status).toBe("settled");
-  const requests = (await f.messages(f.source.activeTaskId)).filter((m: any) => m.roomRequest?.phase === "request");
-  expect(requests).toHaveLength(1);
-  expect(requests[0].text).toBe("@Engineer @Reviewer Review the release checklist");
-  expect(f.provider().map((turn: any) => turn.botId)).toEqual([f.sender.id, f.target.id, reviewer.id, f.sender.id]);
+  expect(f.handoffs().map((n: any) => n.botId).sort()).toEqual([f.target.id, reviewer.id].sort());
+  const turns = f.provider().map((turn: any) => turn.botId);
+  expect([turns[0], turns.at(-1)]).toEqual([f.sender.id, f.sender.id]);
+  expect(turns.slice(1, -1).sort()).toEqual([f.target.id, reviewer.id].sort());
+  const retry = JSON.parse(f.provider()[0].evidence.filter((e: any) => e.step)[1].response.result.content[0].text);
+  expect(retry.receipts.every((r: any) => r.detail.startsWith("already sent"))).toBe(true);
+}), 45_000);
+
+it("keeps work sent to several members of another room in that room's thread", () => withRooms(async f => {
+  const reviewer = (await f.cli("new-bot", "--name", "Reviewer", "--section", "A")).bot;
+  await f.tool("update_channel", { channel_id: f.destination.id, member_ids: [f.target.id, reviewer.id] });
+  f.plan[f.sender.id].steps = [{ arguments: { group_id: f.destination.id, bot_ids: [f.target.id, reviewer.id], message: "Review the export" } }];
+  f.plan[reviewer.id] = { reply: "Export reviewed" };
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  expect(f.handoffs().every((n: any) => n.status === "completed" && n.groupId === f.destination.id && n.threadId === f.destination.activeTaskId)).toBe(true);
+  const requests = (await f.messages(f.destination.activeTaskId)).filter((m: any) => m.roomRequest?.phase === "request");
+  expect(requests.map((m: any) => m.text)).toEqual(["@Engineer @Reviewer Review the export"]);
 }), 45_000);
 
 it("keeps genuinely different room briefs separate", () => withRooms(async f => {
+  await jobsTakeTurns(f);
   const reviewer = (await f.cli("new-bot", "--name", "Reviewer", "--section", "A")).bot;
   await f.tool("update_channel", { channel_id: f.source.id, member_ids: [f.sender.id, f.target.id, reviewer.id] });
   f.plan[f.sender.id].steps = [
@@ -401,6 +442,8 @@ it("runs a room member's turn a restart cut again once, told so, and resumes the
   f.plan[f.target.id] = { reply: "Built CSV", gateFile };
   await f.start();
   await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 15_000 }).toBe("running");
+  // The sender's turn records itself only as it ends, which can be just after the member's turn starts; only the member's turn is cut.
+  await expect.poll(() => { try { return f.provider().some((turn: any) => turn.botId === f.sender.id); } catch { return false; } }, { timeout: 15_000 }).toBe(true);
   await f.restart("SIGKILL");
   writeFileSync(gateFile, "open");
   await expect.poll(() => f.nodes().every((node: any) => node.status === "completed"), { timeout: 30_000 }).toBe(true);

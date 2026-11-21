@@ -8,10 +8,11 @@ import type { RoutineRun } from "@/lib/routines";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { loadWebhookCredentials, removeWebhookCredential, saveWebhookCredential, webhookCredentialStore } from "@/lib/webhook-credentials";
 import type { WebhookCredential } from "@/lib/webhooks";
-import { api, openBotThread, useStore } from "@/state/store";
+import { api, openBotThread } from "@/state/store";
+import { useStoreRef } from "@/state/store-ref";
 
 export function useAutomationActions() {
-  const { state, dispatch } = useStore();
+  const store = useStoreRef(), dispatch = store.dispatch;
   const showThreads = useShowThreads();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -79,7 +80,7 @@ export function useAutomationActions() {
   });
 
   const openRun = (automation: Automation, run: RoutineRun | undefined) => {
-    const bot = state.bots.find((candidate) => candidate.id === automation.botId);
+    const bot = store.state().bots.find((candidate) => candidate.id === automation.botId);
     if (bot && run?.threadId) openBotThread(dispatch, bot, run.threadId, showThreads);
   };
 

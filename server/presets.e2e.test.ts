@@ -1,48 +1,19 @@
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 
 import { launchVerificationServer } from "../scripts/control-omb.ts";
 import { canonicalJson, parsePackageDocument } from "../shared/package-format.ts";
+import { createLibraryPackageExport } from "./package-export.ts";
 import { NO_PRESETS_MESSAGE } from "./package-import.ts";
-import { ORG_PRESET_REMOVE_MESSAGE, PRESET_UNAVAILABLE_MESSAGE } from "./presets.ts";
+import { ORG_PRESET_REMOVE_MESSAGE, PRESET_UNAVAILABLE_MESSAGE, presetFromDefaults } from "./presets.ts";
 
 const FIXTURES = join(import.meta.dirname, "..", "shared", "package-fixtures");
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 const skill = (name: string) => `---\nname: ${name}\ndescription: ${name} steps.\n---\n\n# ${name}\n`;
 
-it("requires a fresh review when Markdown-only preset companions change", async () => {
-  const fixture = await launchVerificationServer();
-  const call = async (method: string, path: string, body?: unknown) => {
-    const response = await fetch(`${fixture.info.url}${path}`, { method, headers: { "content-type": "application/json" },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-    return { status: response.status, body: await response.json() as any };
-  };
-  const setGuide = (content: string) => call("PATCH", "/api/config", { newBotDefaults: { skills: [{ name: "follow-up",
-    description: "follow-up steps.", source: "fixture", text: skill("follow-up"), enabled: true, warnings: [],
-    files: [{ path: "references/guide.md", content }] }] } });
-  try {
-    expect((await call("POST", "/api/bots", { name: "Preset reviewer", section: "Review desk", useDefaults: false })).status).toBe(201);
-    for (const body of [
-      { format: "package", version: 2, kind: "library", presetName: "Review preset" },
-      { format: "package", version: 2, team: "Review desk", includeDefaultsPreset: true, presetName: "Review preset" },
-    ]) {
-      expect((await setGuide("reviewed")).status).toBe(200);
-      const preview = await call("POST", "/api/teams/export", { ...body, dryRun: true });
-      expect(preview.body.document.package.skills.version).toBe(2);
-      expect(preview.body.skillReviewHash).toEqual(expect.any(String));
-      expect((await setGuide("changed after preview")).status).toBe(200);
-      const stale = await call("POST", "/api/teams/export", { ...body, reviewedSkillHash: preview.body.skillReviewHash });
-      expect(stale).toMatchObject({ status: 409, body: { code: "skill_preview_stale" } });
-      const fresh = await call("POST", "/api/teams/export", { ...body, dryRun: true });
-      expect(fresh.body.skillReviewHash).not.toBe(preview.body.skillReviewHash);
-      expect((await call("POST", "/api/teams/export", { ...body, reviewedSkillHash: fresh.body.skillReviewHash })).status).toBe(200);
-    }
-  } finally { await fixture.close(); }
-}, 120_000);
-
-it("shares New bot defaults as a preset, imports it, and creates bots from file and organization presets", async () => {
+it("imports a library file of presets and creates bots from file and organization presets", async () => {
   const fixture = await launchVerificationServer();
   console.log(JSON.stringify({ fixture: fixture.info }));
   const url = fixture.info.url;
@@ -60,56 +31,16 @@ it("shares New bot defaults as a preset, imports it, and creates bots from file 
   const presetsFile = join(fixture.info.dataDir, "org-library", "presets.json");
   try {
     expect(await ok("GET", "/api/bot-presets")).toEqual({ presets: [] });
-    await ok("PATCH", "/api/config", { newBotDefaults: {
+    const defaults = {
       profile: { name: "Sky", title: "Support", soul: "Be kind. The portal password=Presets-Fixture-77 stays private.\n", color: "blue",
         approvalMode: "auto", composio: true, browser: true, mcpServers: [], alwaysAllow: ["Bash(*)"], parkDirectMessages: true },
       memory: { "MEMORY.md": "- Customers first.\n", "memory/tone.md": "Warm.\n" },
-      skills: [{ name: "follow-up", description: "follow-up steps.", source: "fixture", text: skill("follow-up"), enabled: true, warnings: [],
-        files: [{ path: "references/guide.md", content: "Follow up with care.\n" },
-          { path: "scripts/follow.sh", content: "#!/bin/sh\necho fixture\n", executable: true },
-          { path: "assets/example.bin", binary: { base64: "AP8=" } }] }],
+      skills: [{ name: "follow-up", description: "follow-up steps.", source: "fixture", text: skill("follow-up"), enabled: true, warnings: [] }],
       routines: [{ name: "Daily", prompt: "Check the inbox.", schedule: { type: "daily", time: "09:00", weekdays: [1] } }],
-    } });
-
-    const body = { format: "package", version: 2, kind: "library", presetName: "Support agent", includeMemory: true, presetAvatar: `data:image/png;base64,${PNG}` };
-    const published = join(fixture.info.dataDir, "published-library.json");
-    const preview = await ok("POST", "/api/teams/export", { ...body, dryRun: true });
-    expect(existsSync(published)).toBe(false);
-    expect(preview.summary).toMatchObject({ kind: "library", counts: { bots: 0, skills: 1, presets: 1 }, presetNames: ["Support agent"] });
-    expect(preview.skipped).toContainEqual({ part: "presets[new-bot-defaults].skills[follow-up].files[assets/example.bin]", reason: "skill_file_binary" });
-    const approved = await ok("POST", "/api/teams/export", { ...body, includeBinarySkillFiles: true, dryRun: true });
-    const saved = await ok("POST", "/api/teams/export", { ...body, includeBinarySkillFiles: true, reviewedSkillHash: approved.skillReviewHash });
-    expect(saved.filename).toBe("support-agent-1.0.0.openmaus.json");
-    expect(saved.redacted).toEqual(["presets[new-bot-defaults].bot.soul"]);
-    expect(existsSync(published)).toBe(true);
-    const preset = saved.document.package.presets[0];
-    expect(saved.document.package.skills.version).toBe(3);
-    expect(saved.document.package.skills.entries[0].files).toEqual([
-      { path: "assets/example.bin", binary: { base64: "AP8=" } },
-      { path: "references/guide.md", content: "Follow up with care.\n" },
-      { path: "scripts/follow.sh", content: "#!/bin/sh\necho fixture\n", executable: true },
-    ]);
-    expect(preset).toMatchObject({ key: "new-bot-defaults", name: "Support agent", skills: ["follow-up"],
-      bot: { name: "Sky", title: "Support", appearance: { color: "blue", avatar: { mime: "image/png", crop: "circle" } } },
-      seed: { memory: { "MEMORY.md": "- Customers first.\n", "memory/tone.md": "Warm.\n" } } });
+    };
+    const built = presetFromDefaults(defaults as never, { name: "Support agent", includeNotes: true, avatar: { mime: "image/png", data: PNG } });
+    const saved = createLibraryPackageExport({ name: "Support agent", published: null, preset: built.value, skipped: built.skipped });
     expect(JSON.stringify(saved.document)).not.toMatch(/Presets-Fixture-77|"approvalMode"|"composio"|"browser"|"alwaysAllow"|Bash\(|"modelSelection"|Check the inbox|"enabled"/);
-    expect(saved.document.package.agents).toEqual([]);
-    expect(() => parsePackageDocument(saved.document)).not.toThrow();
-    expect((await ok("POST", "/api/teams/export", { ...body, reviewedSkillHash: preview.skillReviewHash })).document.package.release).toBe("1.0.1");
-
-    const lead = (await ok("POST", "/api/bots", { name: "Morgan", section: "Sales desk", useDefaults: false })).bot;
-    const plain = await ok("POST", "/api/teams/export", { format: "package", version: 2, team: "Sales desk", dryRun: true });
-    expect(plain.document.package).not.toHaveProperty("presets");
-    const withPreset = await ok("POST", "/api/teams/export", { format: "package", version: 2, team: "Sales desk", includeDefaultsPreset: true, presetName: "Support agent", dryRun: true });
-    expect(withPreset.summary.counts).toMatchObject({ bots: 1, presets: 1, skills: 1 });
-    expect(withPreset.document.package.presets[0]).not.toHaveProperty("seed");
-    expect(withPreset.skipped).toContainEqual({ part: "presets[new-bot-defaults].skills[follow-up].files[assets/example.bin]", reason: "skill_file_binary" });
-    expect(withPreset.document.package.skills.entries[0].files).not.toContainEqual({ path: "assets/example.bin", binary: { base64: "AP8=" } });
-    const withBinary = await ok("POST", "/api/teams/export", { format: "package", version: 2, team: "Sales desk", includeDefaultsPreset: true,
-      presetName: "Support agent", includeBinarySkillFiles: true, dryRun: true });
-    expect(withBinary.document.package.skills.entries[0].files).toContainEqual({ path: "assets/example.bin", binary: { base64: "AP8=" } });
-    expect(withBinary.skillReviewHash).toEqual(expect.any(String));
-    expect(lead.name).toBe("Morgan");
 
     const imported = await call("POST", "/api/teams/import", { ...saved.document, trust: "org", org: { installId: "x" } });
     expect(imported.status).toBe(201);
@@ -124,8 +55,6 @@ it("shares New bot defaults as a preset, imports it, and creates bots from file 
     const fromFile = await ok("POST", "/api/bots", { name: "Sky", title: "Support", useDefaults: false, preset: fileId });
     const fromFileSkills = (await ok("GET", `/api/bots/${fromFile.bot.id}/skills`)).skills;
     expect(fromFileSkills).toEqual([expect.objectContaining({ name: "follow-up", enabled: false })]);
-    expect(readFileSync(join(fixture.info.dataDir, "workspaces", fromFile.bot.id, "skills", "follow-up", "references", "guide.md"), "utf8")).toBe("Follow up with care.\n");
-    expect(readFileSync(join(fixture.info.dataDir, "workspaces", fromFile.bot.id, "skills", "follow-up", "assets", "example.bin"))).toEqual(Buffer.from([0, 255]));
     expect((await ok("GET", `/api/bots/${fromFile.bot.id}/memory/file?path=${encodeURIComponent("memory/tone.md")}`)).text).toBe("Warm.\n");
     const bots = (await ok("GET", "/api/bots")).bots as Array<{ id: string; installedPackage?: Record<string, unknown>; approvalMode?: string }>;
     const created = bots.find((bot) => bot.id === fromFile.bot.id)!;
@@ -144,8 +73,6 @@ it("shares New bot defaults as a preset, imports it, and creates bots from file 
       .toEqual([["org", "Acme Partners"], ["file", undefined]]);
     const fromOrg = await ok("POST", "/api/bots", { name: "Sky 2", useDefaults: false, preset: "org-preset-1" });
     expect((await ok("GET", `/api/bots/${fromOrg.bot.id}/skills`)).skills).toEqual([expect.objectContaining({ name: "follow-up", enabled: true, source: "org:acme/support-agent@1.0.0" })]);
-    expect(readFileSync(join(fixture.info.dataDir, "workspaces", fromOrg.bot.id, "skills", "follow-up", "references", "guide.md"), "utf8")).toBe("Follow up with care.\n");
-    expect(readFileSync(join(fixture.info.dataDir, "workspaces", fromOrg.bot.id, "skills", "follow-up", "assets", "example.bin"))).toEqual(Buffer.from([0, 255]));
     writeFileSync(join(fixture.info.dataDir, "org-library", "state.json"), JSON.stringify({ version: 1, installs: { [orgRow.installId]: { status: "withdrawn" } } }));
     expect((await ok("GET", "/api/bot-presets")).presets.map((entry: { source: string }) => entry.source)).toEqual(["org", "file"]);
 

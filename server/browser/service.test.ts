@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 import { removeTempDir } from "../testing/cleanup.ts";
-import { hostTimeout } from "../testing/host-timeout.ts";
 import { forbiddenCommand } from "./cdp/testing/real-chrome.ts";
 import { BROWSER_CONTROL_REFUSAL } from "./control.ts";
 import { REDDIT_REFUSAL } from "./egress/reddit.ts";
@@ -332,11 +331,8 @@ describe("a person and the bot sharing one browser", () => {
 
 describe("a call the browser never answers", () => {
   it("counts as lost: the next call checks the browser first and says it recovered, without running", async () => {
-    let callBudgetMs = hostTimeout(10_000);
-    const { call, text, backend } = setup({ callBudgetMs: () => callBudgetMs });
-    const opened = await call("agent_browser_open", { url: "https://example.com/form" });
-    expect(text(opened)).toContain("Opened https://example.com/form");
-    callBudgetMs = 200;
+    const { call, text, backend } = setup({ callBudgetMs: 150 });
+    await call("agent_browser_open", { url: "https://example.com/form" });
     backend.chrome.hang = (method) => method === "Accessibility.getFullAXTree";
     const lost = await call("agent_browser_snapshot");
     expect(lost.isError).toBe(true);

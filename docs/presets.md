@@ -21,8 +21,7 @@ A preset is an allowlist. It can carry only:
 - the new bot's name, title, description and standing instructions;
 - its look: colour, mascot and picture;
 - playbooks;
-- skills (`SKILL.md`, bounded text companions and scripts; binary assets only
-  when explicitly selected, because their contents cannot be scanned for secrets);
+- skills (`SKILL.md` and validated Markdown companion files from imported file presets, never scripts);
 - starter notes (`MEMORY.md` and topic notes).
 
 It has no field for a model, a folder, a computer, an approval level,
@@ -40,7 +39,7 @@ still says only what a file may.
 - **From your organization:** the skills are added **switched on**, because
   your organization's Admin published them. Each also carries the install's
   skill stamp (contract §3.2: the install, the skill's name, the release, and
-  hashes of the released and written skill content), marked `via: "preset"`,
+  the `SKILL.md` hashes as released and as written), marked `via: "preset"`,
   so a later automatic update can tell your own edits from the publisher's
   changes. The bot is still yours, not part of the package: it never keeps
   the package added, so a team you deleted can be added again.
@@ -63,33 +62,11 @@ bot** under the Starting role list (no confirmation step).
 
 ## Sharing presets
 
-Two ways, both saving the same file format ([team-sharing.md](team-sharing.md)):
-
-- **With a department.** In **Share department…**, tick **Include my New bot defaults as
-  a preset**. It is off unless you tick it: your New bot defaults are yours
-  until you share them. The department's **Include starter notes** box also decides
-  whether the preset's notes go in.
-- **On their own.** **Settings → General → Defaults for new bots → Share as
-  preset…** saves a preset file: the preset and its skills, no team, no bots.
-  Choose the preset's name, a description, the version and whether to include
-  the picture and starter notes.
-
-Either way the preset is made from your saved New bot defaults through the
-allowlist above, and every text part passes through the same secret redaction
-as a team file. The dialog lists what was removed or left out. There is no
-confirmation step: **Save file** is the decision.
-
-Newly fetched skill folders in New bot defaults retain supported companion files.
-Defaults saved before folder support contained only `SKILL.md`; re-import their
-source to include companions. The preview names included and omitted files.
-File and folder limits, exclusions and the binary opt-in are described in
-[team sharing](team-sharing.md).
-
-A preset file is added in **Templates → Import** like a team file. The
-preview shows the preset bots and any skills the file only offers; **Add
-presets** puts the presets in the review's **Starting role** list and changes nothing else. A file with
-skills but no bots or presets has nothing to add here and is refused with a
-sentence. Adding the same file twice offers its presets once.
+Presets reach a desktop from an organization's library ([org-library.md](org-library.md)) or from an older preset
+file, which `/api/teams/import` still reads: the preview shows the preset bots and any skills the file only offers, and
+adding it puts the presets in the review's **Starting role** list and changes nothing else. A file with skills but no
+bots or presets has nothing to add and is refused with a sentence. Adding the same file twice offers its presets once.
+Bots and departments are shared as templates ([team-sharing.md](team-sharing.md)).
 
 ## Where presets are kept
 

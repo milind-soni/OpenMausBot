@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { BeginTurnRequest, Coordinator, CoordinatorHost, CoordinatorOptions, HandoffLimit, HandoffOptions, HandoffView, HostTurnResult, LiveHandoffEdge, RoomAddress } from "./coordinator.ts";
 import type { WorkOrigin } from "./peer-provenance.ts";
 import { composeEnvelope, composeQuestion, composeReport, composeResume, composeRootTurn, continuationLine, envelopeNote } from "./runtime/envelope.ts";
+import { handoffLimits } from "./runtime/handoff-limits.ts";
 import { Runtime } from "./runtime/runtime.ts";
 import { importLegacyDelegations, importLegacyHandoffs, type LegacyThreadResolver } from "./runtime/import-legacy.ts";
 import { openRuntimeStore, type RuntimeStore } from "./runtime/store.ts";
@@ -18,7 +19,9 @@ const ANCESTOR = "Cannot assign work back to an ancestor; results return automat
 const ALREADY_COMPLETED = "This agent already completed your assignment. Do not send acknowledgements or approvals as new work. Finish with your decision; results return automatically. Only use rework=true for concrete additional work.";
 const ROOM_ANCESTOR = "A room request cannot return to an ancestor room; results are returned automatically";
 const DEPTH = "Room handoff depth limit reached";
-const BUDGET = "Room handoff budget exhausted";
+const TOTAL_BUDGET = /^Request budget exhausted: \d+ turns in all/;
+const totalRefusal = (limit: number): string => `This request has started ${limit} turns in all, the most one request may take, so this one was not sent. Nobody can reset that, the person included, so don't ask them to, and don't send it another way. Finish with what you have and say what is left undone.`;
+const budgetRefusal = (limit: number): string => `This request reached its limit of ${limit} hand-offs since any work last came back, so this one was not sent. The limit belongs to the request: nobody can reset it, the person included, so don't ask them to, and don't send it another way. If work is still out, end your turn: each result that comes back renews the limit and resumes you. If nothing is out, finish with what you have and say what is left undone.`;
 const NO_TURN = "The requesting turn has no root (no turn)";
 /** A stop with no other cause is the person's own. */
 const STOPPED_BY_USER = "Stopped by user";
@@ -31,9 +34,16 @@ const requestKey = (root: Assignment): string => root.origin.kind === "person" ?
 const BRIEF_MAX = 12_000;
 const RUNTIME_DEPTH = /^Assignment depth limit reached/;
 const NEEDS_INPUT = /^needs input:/i;
+/** A NEEDS INPUT line whose whole value says there is nothing to ask ("none", "无", …) asks nothing. */
+const NOTHING_TO_ASK = new Set(["none", "nothing", "n/a", "nil", "-", "—", "无", "無", "没有", "沒有", "无需", "暂无", "なし", "없음", "нет",
+  "ninguna", "ninguno", "nada", "aucune", "aucun", "rien", "keine", "nichts", "nenhuma", "nenhum", "không", "ไม่มี"]);
 
 /** Per-turn stalls belong to the host's watchdog: this only keeps the runtime's window out of its way. */
 const TURN_STALL_MS = 24 * 60 * 60_000;
+
+/** Handed-off work parked on the person: a reminder after a day, closed after three. */
+const PARKED_REMIND_MS = 24 * 60 * 60_000;
+const PARKED_LIMIT_MS = 72 * 60 * 60_000;
 
 const REQUESTS_PER_ROOT = 64;
 const EXECUTIONS_PER_ROOT = 96;
@@ -78,7 +88,9 @@ export function needsInputQuestion(text: string): string | undefined {
   const at = /^default:/i.test(lines[last]!.trim()) ? filled(last - 1) : last;
   const line = at < 0 ? "" : lines[at]!.trim();
   if (!NEEDS_INPUT.test(line)) return undefined;
-  const question = [line.slice("NEEDS INPUT:".length), ...lines.slice(at + 1)].join("\n").trim();
+  const value = line.slice("NEEDS INPUT:".length).trim();
+  if (NOTHING_TO_ASK.has(value.replace(/[.!。！]+$/u, "").toLowerCase())) return undefined;
+  const question = [value, ...lines.slice(at + 1)].join("\n").trim();
   return question || undefined;
 }
 
@@ -104,6 +116,7 @@ export function view(a: Assignment, parent?: Assignment): HandoffView {
   if (a.parentId !== undefined) node.parentId = a.parentId;
   if (groupId !== undefined) node.groupId = groupId;
   if (a.batchKey !== undefined) node.requestBatchKey = a.batchKey;
+  if (a.statusOnly) node.statusOnly = true;
   if (a.startedAt !== undefined) node.startedAt = a.startedAt;
   const origin = legacyOrigin(a.origin);
   if (origin) node.origin = origin;
@@ -145,6 +158,8 @@ export class RuntimeCoordinator implements Coordinator {
   private readonly log: (line: string) => void;
   /** The person's stops, remembered: which bots' work on which request they stopped, and when. */
   private readonly stops: Array<{ at: number; request: string; bots: Set<string> }> = [];
+  /** The cause of the stop running now, if any (stopFor). */
+  private stopCause: string | undefined;
   private opened = false;
   private prunedAt: number | undefined;
 
@@ -160,7 +175,7 @@ export class RuntimeCoordinator implements Coordinator {
     this.store = options.wrote ? announcingWrites(store, options.wrote) : store;
     this.runtime = new Runtime(this.store, this.runner(), {
       clock: { now: () => this.now(), monotonic: () => performance.now() },
-      limits: { depth: 4, requests: REQUESTS_PER_ROOT, executions: EXECUTIONS_PER_ROOT, turnStallMs: TURN_STALL_MS, ...options.runtimeLimits },
+      limits: { depth: 4, requests: REQUESTS_PER_ROOT, executions: EXECUTIONS_PER_ROOT, turnStallMs: TURN_STALL_MS, inputWaitMs: PARKED_LIMIT_MS, inputRemindMs: PARKED_REMIND_MS, ...handoffLimits(), ...options.runtimeLimits },
       ...(options.log ? { log: options.log } : {}),
     });
   }
@@ -214,6 +229,22 @@ export class RuntimeCoordinator implements Coordinator {
     return rows.map(row => view(row, row.parentId ? byId.get(row.parentId) : undefined));
   }
 
+  newestRoot(threadId: string, ids: Iterable<string>): HandoffView | undefined {
+    this.ready();
+    let newest: Assignment | undefined;
+    for (const id of ids) {
+      const a = this.store.get(id);
+      if (a && !a.parentId && a.assignee.destination.threadId === threadId && (!newest || a.createdAt >= newest.createdAt)) newest = a;
+    }
+    return newest && view(newest);
+  }
+
+  inThread(threadId: string, filter: { open?: boolean; since?: number } = {}): HandoffView[] {
+    this.ready();
+    return this.store.all({ assigneeThreadId: threadId, ...(filter.open ? { nonTerminal: true } : {}), ...(filter.since !== undefined ? { openSince: filter.since } : {}) })
+      .map(a => this.project(a));
+  }
+
   active(): HandoffView[] {
     this.ready();
     return this.live().map(row => this.project(row));
@@ -228,7 +259,7 @@ export class RuntimeCoordinator implements Coordinator {
   enqueue(source: RoomAddress, generation: string, parentId: string | undefined, target: RoomAddress, text: string,
     options: HandoffOptions = {}): { node: HandoffView; duplicate: boolean } {
     this.ready();
-    const { rework = false, requestBatchKey, thread } = options;
+    const { rework = false, requestBatchKey, fanOut, thread } = options;
     const mode = options.mode ?? "work";
     const parent = parentId ? this.store.get(parentId) : this.store.get(generation);
     if (!parent) throw new Error(parentId ? NOT_RUNNING : NO_TURN);
@@ -247,7 +278,7 @@ export class RuntimeCoordinator implements Coordinator {
     const existing = siblings.findLast(c => c.assignee.botId === target.botId && c.assignee.destination.groupId === target.groupId && c.brief === brief && c.mode === mode
       && (!own || c.assignee.destination.threadId === target.threadId));
     if (existing && !(rework && isTerminal(existing))) return { node: view(existing, parent), duplicate: true };
-    const limited = this.handoffLimit?.refusal(target.botId, () => this.live().filter(a => a.parentId !== undefined).length);
+    const limited = this.handoffLimit?.refusal(target.botId, () => this.live().filter(a => a.parentId !== undefined).length, parent.origin.kind === "person" ? "user" : "outside");
     if (limited) throw new Error(limited);
     if (mode === "work" && !rework && !own && siblings.some(c => c.mode === "work" && kindOf(c.assignee.destination.groupId, parent) === kind &&
       c.assignee.destination.groupId === target.groupId && c.assignee.botId === target.botId && c.status === "completed")) throw new Error(ALREADY_COMPLETED);
@@ -270,9 +301,10 @@ export class RuntimeCoordinator implements Coordinator {
       levels: { own: level.level, ...(level.chief !== undefined ? { chief: level.chief } : {}) },
       ...(level.driverKind !== undefined ? { driverKind: level.driverKind } : {}),
       ...(target.groupId && requestBatchKey ? { batchKey: requestBatchKey } : {}),
+      ...(fanOut ? { fanOut } : {}),
     });
     if (!result.ok) {
-      if (result.outcome === "budget") throw new Error(BUDGET);
+      if (result.outcome === "budget") throw new Error(TOTAL_BUDGET.test(result.reason) ? totalRefusal(this.runtime.limits.totalExecutions) : budgetRefusal(this.runtime.limits.requests));
       throw new Error(RUNTIME_DEPTH.test(result.reason) ? DEPTH : result.reason);
     }
     return { node: view(result.assignment, parent), duplicate: result.duplicate };
@@ -375,7 +407,7 @@ export class RuntimeCoordinator implements Coordinator {
   /** Nothing can answer what this parked turn waits on any more. */
   releaseParked(id: string, reason: string): void {
     this.ready();
-    if (this.store.get(id)?.status === "needs_input") this.runtime.cancel(id, reason, "stopped");
+    if (this.store.get(id)?.status === "needs_input") this.stopFor(reason, () => this.runtime.cancel(id, reason, "stopped"));
   }
 
   parkedFor(botId: string): HandoffView[] {
@@ -408,25 +440,38 @@ export class RuntimeCoordinator implements Coordinator {
     return { id: batch[0]!.id, botIds: batch.map(c => c.assignee.botId) };
   }
 
-  cancelRoom(groupId: string, threadId?: string, reason = "Stopped by user", status: "failed" | "cancelled" = "cancelled"): void {
+  cancelRoom(groupId: string, threadId?: string, reason = STOPPED_BY_USER, status: "failed" | "cancelled" = "cancelled"): void {
     this.ready();
-    for (const n of this.live()) {
-      if (n.assignee.destination.groupId !== groupId || (threadId && n.assignee.destination.threadId !== threadId)) continue;
-      this.runtime.cancel(n.id, reason, status === "failed" ? "failed" : "stopped");
-    }
+    this.stopFor(reason, () => {
+      for (const n of this.live()) {
+        if (n.assignee.destination.groupId !== groupId || (threadId && n.assignee.destination.threadId !== threadId)) continue;
+        this.runtime.cancel(n.id, reason, status === "failed" ? "failed" : "stopped");
+      }
+    });
   }
 
-  cancelDirect(threadId: string, reason = "Stopped by user"): void {
+  cancelDirect(threadId: string, reason = STOPPED_BY_USER): void {
     this.ready();
-    for (const n of this.live()) if (this.direct(n, threadId)) this.runtime.cancel(n.id, reason, "stopped");
+    this.stopFor(reason, () => { for (const n of this.live()) if (this.direct(n, threadId)) this.runtime.cancel(n.id, reason, "stopped"); });
   }
 
-  stopAwaitingDirect(threadId: string, reason = STOPPED_BY_USER): void {
+  /** With no reason given, the stop is the person's, unless it is part of a stop already under way: see stopFor. */
+  stopAwaitingDirect(threadId: string, reason?: string): void {
     this.ready();
-    const stopping = reason === STOPPED_BY_USER ? this.live().filter(n => n.assignee.destination.threadId === threadId) : [];
+    const cause = reason ?? this.stopCause ?? STOPPED_BY_USER;
+    const stopping = cause === STOPPED_BY_USER ? this.live().filter(n => n.assignee.destination.threadId === threadId) : [];
     const trees = stopping.map(n => ({ root: this.store.get(n.rootId), work: this.subtree(n).filter(a => !isTerminal(a)) }));
-    this.runtime.stopRequester({ threadId }, reason);
+    this.stopFor(cause, () => this.runtime.stopRequester({ threadId }, cause));
     for (const { root, work } of trees) if (root) this.rememberStop(root, work);
+  }
+
+  /** Runs a stop with its cause. A teammate's turn it ends stops that teammate's thread as well (the host's abort handler
+   * calls stopAwaitingDirect with no reason), and that is still this stop: a cut the system made (a waiting line going
+   * first, a restart, a deleted conversation) is never remembered as the person's stop. */
+  private stopFor(cause: string, stop: () => void): void {
+    const outer = this.stopCause;
+    this.stopCause = cause;
+    try { stop(); } finally { this.stopCause = outer; }
   }
 
   /** The person's stop, remembered (scoped to that request): the bots whose work on it the stop ended don't take the same
@@ -567,6 +612,7 @@ export class RuntimeCoordinator implements Coordinator {
       },
       run: (a, input, signal) => this.run(a, input, signal),
       park: (a, question, restored) => host.park(this.project(a), question, restored),
+      remind: (a, closesAt) => host.remind?.(this.project(a), closesAt),
       report: (a, parent) => host.report(view(a, parent), parent && this.project(parent)),
       changed: rows => {
         const groups = new Set<string>();
@@ -579,6 +625,7 @@ export class RuntimeCoordinator implements Coordinator {
       },
       names: (a, parent) => host.names(view(a, parent), parent && this.project(parent)),
       outward: a => host.outward ? host.outward(this.project(a)) : [],
+      away: a => host.away ? host.away(this.project(a)) : false,
     };
   }
 
@@ -606,7 +653,8 @@ export class RuntimeCoordinator implements Coordinator {
     const body = resumed
       ? composeResume(a, this.host.names(node, parent && this.project(parent)),
         settled.map(child => composeReport(this.readable(child, a, node), this.host.names(view(child, a), node))),
-        asked.map(child => composeQuestion(this.readable(child, a, node), this.host.names(view(child, a), node))))
+        asked.map(child => composeQuestion(this.readable(child, a, node), this.host.names(view(child, a), node))),
+        settled.flatMap(child => child.status === "failed" && child.fault ? [{ fault: child.fault, who: this.host.names(view(child, a), node).assignee }] : []))
       : root
         ? composeRootTurn(a, { turn: input.turn === "resume" ? "first" : input.turn, restartNote: "", ...(input.answer !== undefined ? { answer: input.answer } : {}),
           ...(input.continuation ? { continuation: input.continuation } : {}) })
@@ -618,8 +666,9 @@ export class RuntimeCoordinator implements Coordinator {
     if (signal.aborted) return { kind: "failed", outcome: "stopped", text: result.text };
     if (result.cap) return { kind: "continue", text: result.text, note: result.cap.note, ...(result.cap.handoffPath ? { handoffPath: result.cap.handoffPath } : {}), ...evidence(result) };
     if (result.cards) return { kind: "needs_input", question: result.cards.question, cards: result.cards.ids, ...evidence(result) };
-    if (!result.ok) return { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...evidence(result) };
     const question = root ? undefined : needsInputQuestion(result.text);
+    if (!root && a.origin.kind === "person" && result.approvalAsk && !result.stalled && question === undefined) return { kind: "needs_input", question: result.approvalAsk, ...evidence(result) };
+    if (!result.ok) return { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...(result.failure ? { failure: result.failure } : {}), ...evidence(result) };
     if (question === undefined) return { kind: "completed", text: result.text, ...(await this.statusOnly(a, parent, input.turn, result, signal) ? { statusOnly: true } : {}), ...evidence(result) };
     const named = withDefault(question);
     const decide = requesterDecides(a) && !result.privateQuestion && !personOnly(named.question) ? { decide: named.default ? { default: named.default } : {} } : {};

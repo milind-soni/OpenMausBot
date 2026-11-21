@@ -456,7 +456,7 @@ describe("steer-queue module", () => {
       expect(snapshots).toHaveLength(2);
       expect(cancelSteeredMessage(bot.id, second.id)).toBe(true);
       bot.busy = false;
-      expect(() => drainSteeredMessages(fakeStore([bot]), () => { throw new Error("failed dispatch"); })).toThrow("failed dispatch");
+      expect(() => drainSteeredMessages(fakeStore([bot]), () => { throw new Error("failed dispatch"); })).not.toThrow();
       expect(snapshots).toEqual([
         { [bot.threadId]: [{ queueId: first.id, text: "keep" }] },
         { [bot.threadId]: [{ queueId: first.id, text: "keep" }, { queueId: second.id, text: "cancel" }] },
@@ -543,6 +543,19 @@ describe("steer-queue module", () => {
       queueId: queued.id,
     });
     expect(queuedSteeredMessage(bot.id, bot.threadId, "send_1234567890123456")).toBeNull();
+  });
+
+  it("keeps a pictures hold on the queued receipt so a retried send can say why", () => {
+    const bot = fakeBot("bot-images-receipt", "thread-images-receipt", true);
+    const queued = queueSteeredMessage(bot.id, bot.threadId, "see this", {
+      sendId: "send_images_held_123456",
+      blockedBy: "images",
+    });
+    expect(queuedSteeredMessage(bot.id, bot.threadId, "send_images_held_123456")).toEqual({
+      id: queued.id,
+      text: "see this",
+      blockedBy: "images",
+    });
   });
 
   it("holds the queue while the bot is busy and drains it once when idle", () => {

@@ -1,31 +1,17 @@
 // Learned-skill files on disk: SKILL.md plus at most MAX_SKILL_REFERENCES references/<topic>.md files,
 // published as one immutable reviewed revision and never read through a symlink.
 import { createHash, randomUUID } from "node:crypto";
-import { lstatSync, mkdirSync, opendirSync, renameSync, rmSync } from "node:fs";
+import { lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
-import { readBoundedSkillFile } from "./bounded-skill-read.ts";
-import { SKILL_FILE_MAX_BYTES } from "../shared/skill-md.ts";
 
-export const STAGED_SKILL_FILE_MAX_BYTES = 32 * 1024;
+/** A learned skill's SKILL.md. */
+export const STAGED_SKILL_FILE_MAX_BYTES = 64 * 1024;
+/** Each of its references/<topic>.md files. */
+export const STAGED_SKILL_REFERENCE_MAX_BYTES = 32 * 1024;
 export const MAX_SKILL_REFERENCES = 8;
 const SKILL_REFERENCE_PATH = /^references\/[a-z0-9][a-z0-9-]{0,63}\.md$/;
-
-function boundedNames(directory: string, limit: number): string[] | null {
-  try {
-    const names: string[] = [], handle = opendirSync(directory);
-    try {
-      for (;;) {
-        const entry = handle.readSync();
-        if (!entry) break;
-        if (names.length >= limit) return null;
-        names.push(entry.name);
-      }
-    } finally { handle.closeSync(); }
-    return names.sort();
-  } catch { return null; }
-}
 
 export function isSkillReferencePath(path: string): boolean {
   return SKILL_REFERENCE_PATH.test(path);
@@ -82,8 +68,8 @@ export function referenceLimitError(files: Array<{ path: string; content: string
   for (const file of references) {
     if (!isSkillReferencePath(file.path)) return referencePathError(file.path);
     const bytes = Buffer.byteLength(file.content, "utf8");
-    if (bytes > STAGED_SKILL_FILE_MAX_BYTES) {
-      return `${file.path} must be at most ${STAGED_SKILL_FILE_MAX_BYTES / 1024}KB; it is ${formatKb(bytes)}. Split it into more references/<topic>.md files.`;
+    if (bytes > STAGED_SKILL_REFERENCE_MAX_BYTES) {
+      return `${file.path} must be at most ${STAGED_SKILL_REFERENCE_MAX_BYTES / 1024}KB; it is ${formatKb(bytes)}. Split it into more references/<topic>.md files.`;
     }
   }
   if (new Set(references.map((file) => file.path)).size !== references.length) {
@@ -99,17 +85,15 @@ export function referenceLimitError(files: Array<{ path: string; content: string
 export function readReferenceFiles(directory: string): Array<{ path: string; content: string }> | null {
   const references = join(directory, "references");
   if (directoryEntryState(references) !== "directory") return null;
-  const names = boundedNames(references, MAX_SKILL_REFERENCES);
-  if (!names?.length) return null;
+  const names = readdirSync(references).sort();
+  if (!names.length || names.length > MAX_SKILL_REFERENCES) return null;
   const files: Array<{ path: string; content: string }> = [];
   for (const name of names) {
     const path = `references/${name}`;
     if (!isSkillReferencePath(path)) return null;
     const stat = lstatSync(join(references, name));
-    if (!stat.isFile() || stat.size > STAGED_SKILL_FILE_MAX_BYTES) return null;
-    const bytes = readBoundedSkillFile(join(references, name), STAGED_SKILL_FILE_MAX_BYTES);
-    if (!bytes) return null;
-    files.push({ path, content: bytes.toString("utf8") });
+    if (!stat.isFile() || stat.size > STAGED_SKILL_REFERENCE_MAX_BYTES) return null;
+    files.push({ path, content: readFileSync(join(references, name), "utf8") });
   }
   return files;
 }
@@ -117,13 +101,12 @@ export function readReferenceFiles(directory: string): Array<{ path: string; con
 export function learnedSkillDirectoryMatches(directory: string, sha256: string, referencesSha256?: string): boolean {
   if (directoryEntryState(directory) !== "directory") return false;
   try {
+    const entries = readdirSync(directory).sort();
     const expected = referencesSha256 ? ["SKILL.md", "references"] : ["SKILL.md"];
-    const entries = boundedNames(directory, expected.length);
-    if (!entries || entries.length !== expected.length || entries.some((entry, index) => entry !== expected[index])) return false;
+    if (entries.length !== expected.length || entries.some((entry, index) => entry !== expected[index])) return false;
     const file = join(directory, "SKILL.md");
     if (!lstatSync(file).isFile()) return false;
-    const bytes = readBoundedSkillFile(file, SKILL_FILE_MAX_BYTES);
-    if (!bytes || createHash("sha256").update(bytes).digest("hex") !== sha256) return false;
+    if (createHash("sha256").update(readFileSync(file)).digest("hex") !== sha256) return false;
     if (!referencesSha256) return true;
     const references = readReferenceFiles(directory);
     return references !== null && skillReferencesSha256(references) === referencesSha256;

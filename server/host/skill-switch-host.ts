@@ -113,13 +113,13 @@ export function createSkillSwitchHost(deps: SkillSwitchHostDeps) {
     return { title: copy.title, done: copy.done };
   }
 
-  async function apply(botId: string, name: string, action: SkillSwitchAction, kind: SwitchableSkill["kind"] | undefined) {
+  function apply(botId: string, name: string, action: SkillSwitchAction, kind: SwitchableSkill["kind"] | undefined) {
     if (action === "delete") return removeSkill(botId, name);
     return (kind === "imported" ? setImportedSkillEnabled : setSkillEnabled)(botId, name, action === "enable");
   }
 
   /** Where the bot's own skill writes apply directly, so does this, with a receipt; otherwise the person decides on a card. */
-  async function stage(from: BotRecord, threadId: string, action: SkillSwitchAction, body: Record<string, unknown>, direct: DirectApply | null): Promise<{ status: number; body: Record<string, unknown> }> {
+  function stage(from: BotRecord, threadId: string, action: SkillSwitchAction, body: Record<string, unknown>, direct: DirectApply | null): { status: number; body: Record<string, unknown> } {
     const name = typeof body.skill_name === "string" ? body.skill_name.trim() : "";
     if (!name) return { status: 400, body: { error: `skill_name is required when action is ${action}` } };
     const persistence = deps.persistence(from.id, threadId, !direct);
@@ -130,7 +130,7 @@ export function createSkillSwitchHost(deps: SkillSwitchHostDeps) {
     const requestId = randomUUID();
     if (direct) {
       const previous = action === "delete" && current ? deletedSkillFiles(from.id, name, current) : undefined;
-      const applied = await apply(from.id, name, action, current?.kind);
+      const applied = apply(from.id, name, action, current?.kind);
       if ("error" in applied) return { status: 422, body: { state: "failed", error: applied.error } };
       const { done } = appendCard({ requestId, botId: from.id, threadId, action, name, target, applied: { previous } });
       appendDecision(deps.dataDir, { threadId, requestId, botId: from.id, botName: from.name,
@@ -152,12 +152,12 @@ export function createSkillSwitchHost(deps: SkillSwitchHostDeps) {
     return { status: 201, body: { state: "pending", name, action, gist: target.gist, warnings: [], summary } };
   }
 
-  async function resolve(
+  function resolve(
     args: SkillSwitchResolveArgs,
     messageId: string,
     card: OptionCardData,
     request: SkillRequestCardData & { action: SkillSwitchAction },
-  ): Promise<SkillSwitchResolution> {
+  ): SkillSwitchResolution {
     if (card.answered || card.dismissed) {
       return { claimed: true, outcome: card.answered === "allow" ? "allowed-once" : "rejected", alreadySettled: true };
     }
@@ -178,7 +178,7 @@ export function createSkillSwitchHost(deps: SkillSwitchHostDeps) {
     const bot = store.bot(args.botId);
     const current = bot ? switchableSkill(bot, request.name) : undefined;
     const still = skillSwitchStillMatches(request.name, request.action, current, readPin(request.requestId));
-    const applied = "error" in still ? still : await apply(args.botId, request.name, request.action, current?.kind);
+    const applied = "error" in still ? still : apply(args.botId, request.name, request.action, current?.kind);
     if ("error" in applied) {
       store.patchMessage(args.threadId, messageId, { card: { ...card, held: applied.error } });
       return { claimed: true, status: 422, error: applied.error };
@@ -214,7 +214,7 @@ export function createSkillSwitchHost(deps: SkillSwitchHostDeps) {
   }
 
   /** Undo from the receipt of a change that applied on its own; refuses, changing nothing, once the skill moved on since. */
-  async function undo(botId: string, threadId: string, message: Message, request: SkillRequestCardData & { action: SkillSwitchAction }): Promise<SkillSwitchUndo> {
+  function undo(botId: string, threadId: string, message: Message, request: SkillRequestCardData & { action: SkillSwitchAction }): SkillSwitchUndo {
     const card = message.card!;
     const bot = store.bot(botId);
     if (!bot) return { claimed: true, state: "invalid", error: "this change has no valid owner", status: 400 };
@@ -227,7 +227,7 @@ export function createSkillSwitchHost(deps: SkillSwitchHostDeps) {
       const back = UNDO_ACTION[request.action];
       if (!current || current.kind === "fixed" || current.enabled !== (request.action === "enable")) undone = { stale: true };
       else {
-        const flipped = await apply(botId, request.name, back, current.kind);
+        const flipped = apply(botId, request.name, back, current.kind);
         undone = "error" in flipped ? flipped : { ok: true };
       }
     }

@@ -9,7 +9,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import { defuse } from "./records-block.ts";
 import { redactSecretsInText } from "../shared/redact.ts";
-import { API_WHO, AUTHORITY, fromNote } from "./provenance-label.ts";
+import { API_OWNER_WHO, API_WHO, AUTHORITY, fromNote } from "./provenance-label.ts";
 import { parseJson } from "./schema.ts";
 
 export const BOT_API_RATE_LIMIT = 10;
@@ -32,6 +32,9 @@ const recordSchema = z.object({
   keyCreatedAt: z.number().finite().nonnegative(),
   callCount: z.number().int().nonnegative(),
   lastCalledAt: z.number().finite().nonnegative().optional(),
+  /** The owner marked this key as acting for them (bot-api-host.ts): a thread it opens runs at the bot's own level. A new
+   * key starts without it. */
+  actsAsOwner: z.literal(true).optional(),
 });
 const attemptSchema = z.object({
   id: z.string().min(1),
@@ -43,6 +46,8 @@ const attemptSchema = z.object({
   preview: z.string().optional(),
   reason: z.string().optional(),
   repeats: z.number().int().positive().optional(),
+  /** Taken in a thread that runs as the owner's own work. */
+  asOwner: z.literal(true).optional(),
 });
 const fileSchema = z.object({
   version: z.literal(1),
@@ -56,6 +61,8 @@ export type BotApiAttempt = z.output<typeof attemptSchema>;
 /** What the app may see: never the hash. */
 export interface BotApiStatus {
   enabled: boolean;
+  /** The key acts as the owner: what it starts runs at the bot's own level, as the owner's work. */
+  actsAsOwner: boolean;
   keyCreatedAt?: number;
   callCount: number;
   lastCalledAt?: number;
@@ -102,8 +109,8 @@ export class BotApiManager {
 
   status(botId: string): BotApiStatus {
     const record = this.bots.find((candidate) => candidate.botId === botId);
-    if (!record) return { enabled: false, callCount: 0 };
-    return { enabled: true, keyCreatedAt: record.keyCreatedAt, callCount: record.callCount, ...(record.lastCalledAt !== undefined ? { lastCalledAt: record.lastCalledAt } : {}) };
+    if (!record) return { enabled: false, actsAsOwner: false, callCount: 0 };
+    return { enabled: true, actsAsOwner: record.actsAsOwner === true, keyCreatedAt: record.keyCreatedAt, callCount: record.callCount, ...(record.lastCalledAt !== undefined ? { lastCalledAt: record.lastCalledAt } : {}) };
   }
 
   /** Turns the API on with a fresh key, or replaces the key of one already on. The key is returned once and never kept. */
@@ -115,6 +122,8 @@ export class BotApiManager {
     if (record) {
       record.keyHash = hashBotApiKey(key);
       record.keyCreatedAt = now;
+      // A new key is a new token: whoever is given it acts as the owner only once the owner says so again.
+      delete record.actsAsOwner;
       if (mintedBy) record.mintedBy = mintedBy; else delete record.mintedBy;
     } else {
       this.bots.unshift({ botId, keyHash: hashBotApiKey(key), ...(mintedBy ? { mintedBy } : {}), createdAt: now, keyCreatedAt: now, callCount: 0 });
@@ -155,6 +164,21 @@ export class BotApiManager {
     return this.bots.some((candidate) => candidate.botId === botId);
   }
 
+  /** Whether the key acts as the owner. The host also asks whether this server allows it at all. */
+  actsAsOwner(botId: string): boolean {
+    return this.bots.find((candidate) => candidate.botId === botId)?.actsAsOwner === true;
+  }
+
+  /** Marks the key as acting for the owner, or not; false when the API is off. */
+  setActsAsOwner(botId: string, on: boolean): boolean {
+    const record = this.bots.find((candidate) => candidate.botId === botId);
+    if (!record) return false;
+    this.assertWritable();
+    if (on) record.actsAsOwner = true; else delete record.actsAsOwner;
+    this.save();
+    return true;
+  }
+
   /** Constant-time: a wrong key costs the same as a right one, whatever it shares with it. */
   authorize(botId: string, key: string): boolean {
     const record = this.bots.find((candidate) => candidate.botId === botId);
@@ -189,6 +213,7 @@ export class BotApiManager {
     if (details.threadId) attempt.threadId = details.threadId;
     if (details.preview) attempt.preview = redactSecretsInText(details.preview).replace(/\s+/g, " ").trim().slice(0, 200);
     if (details.reason) attempt.reason = redactSecretsInText(details.reason).slice(0, 500);
+    if (details.asOwner) attempt.asOwner = true;
     this.keep(attempt);
     const record = this.bots.find((candidate) => candidate.botId === botId);
     if (record && details.outcome === "accepted") {
@@ -262,4 +287,10 @@ export function botApiPrompt(message: string, receivedAt: number): string {
     withoutAttachedImages(message),
     "[/UNTRUSTED BOT API MESSAGE]",
   ].join("\n");
+}
+
+/** A message through a key the owner marked as acting for them: their request, at the bot's own level. Its words are
+ * still defused, so they can't pass for a note or name a stored file. */
+export function botApiOwnerPrompt(message: string): string {
+  return [fromNote(API_OWNER_WHO, "message", AUTHORITY.behalf), withoutAttachedImages(message)].join("\n");
 }

@@ -6,6 +6,7 @@ import type { Message } from "./store.ts";
 import type { DigestFiles, DigestTool, HookCoverage, TurnDigest } from "../shared/digest.ts";
 import { redactSecretsInText } from "../shared/redact.ts";
 import { toolIdentity } from "../shared/tool-name.ts";
+import { toolResultPrefix } from "./tool-results.ts";
 export type { DigestFiles, DigestTool, HookCoverage, TurnDigest } from "../shared/digest.ts";
 
 /** Evidence is observed, never inferred from a provider's brand. */
@@ -16,6 +17,14 @@ export function coverageForDriver(_driverKind: string | undefined, fullResults =
 export function toolEvidence(activities: readonly Message[], turnId: string): boolean {
   const rows = activities.filter((m) => m.kind === "activity" && m.tool?.itemId && m.turnId === turnId);
   return rows.length > 0 && rows.every((m) => m.tool?.fullResult === true);
+}
+
+/** A turn's digest marked "preview" that full results arriving after it have since completed; null when none did. */
+export function digestCompletedLate(activities: readonly Message[], turnId: string): { id: string; digest: TurnDigest; text: string } | null {
+  const message = activities.findLast((m) => m.kind === "digest" && m.turnId === turnId && m.digest?.hookCoverage === "preview");
+  if (!message?.digest || !toolEvidence(activities, turnId)) return null;
+  const digest: TurnDigest = { ...message.digest, hookCoverage: "full" };
+  return { id: message.id, digest, text: renderDigest(digest) };
 }
 
 export const MAX_TOOLS = 8;
@@ -99,7 +108,7 @@ function firstSentence(reply: string): string {
   const flat = reply.replace(/\s+/g, " ").trim();
   const end = flat.search(/[.!?](\s|$)/);
   const sentence = end === -1 ? flat : flat.slice(0, end + 1);
-  return sentence.slice(0, REPLY_CHARS);
+  return toolResultPrefix(sentence, REPLY_CHARS);
 }
 
 export function renderDigest(d: TurnDigest): string {

@@ -2,18 +2,16 @@
 import { createHash, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createConnection, createServer, type AddressInfo } from "node:net";
-
+import { OWN_GROUP, stopGroup } from "./group-exec.ts";
 import {
   BASE_IMAGE,
   CUA_DRIVER_VERSION,
   CUA_SOCKET,
   IMAGE as CUA_IMAGE,
   cuaExecArgs,
-  dockerSecurityIsHardened,
   imageLabelsMatch,
   managedImageDockerfile,
   wholeScreenshot,
-  type DockerHardeningConfig,
   BASE_IMAGE_DIGEST,
   BASE_IMAGE_LABEL,
   DRIVER_LABEL,
@@ -21,11 +19,12 @@ import {
   IMAGE_LAYER_VERSION,
   MANAGED_LABEL,
 } from "./container-computer.ts";
+import { desktopCapArgs, dockerSecurityIsHardened, type DockerHardeningConfig } from "./container-isolation.ts";
 import { PIDS_LIMIT, raisePidsLimit } from "./container-limits.ts";
 import { DATA_DIR, isValidSshAlias, vpsSshAlias, type AppConfig } from "./config.ts";
 import { augmentedPath } from "./env-path.ts";
-import { COMMAND_TIMEOUT_KILL_GRACE_MS, defaultRunner, type VpsCommandRunner } from "./vps-command.ts";
-export { defaultRunner, type VpsCommandOptions, type VpsCommandRunner } from "./vps-command.ts";
+import { COMMAND_TIMEOUT_KILL_GRACE_MS, defaultRunner, VpsHostUnreachableError, type VpsCommandRunner } from "./vps-command.ts";
+export { defaultRunner, VpsHostUnreachableError, type VpsCommandOptions, type VpsCommandRunner } from "./vps-command.ts";
 import { prepareVpsSsh } from "./vps-ssh.ts";
 import { loadEnvironmentId } from "./environment.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
@@ -40,7 +39,7 @@ export const VPS_CONTAINER_PREFIX = "openmausbot-vps";
 export { dockerCliInstallCommand, vpsStartsForTurn, vpsUnavailableHint } from "./vps-hints.ts";
 // Lazy: index must finish data migration and take the writer lease before this may create the data directory.
 let vpsEnvironmentIdCache: string | null = null;
-function vpsEnvironmentId(): string {
+export function vpsEnvironmentId(): string {
   if (!vpsEnvironmentIdCache) vpsEnvironmentIdCache = loadEnvironmentId(DATA_DIR);
   return vpsEnvironmentIdCache;
 }
@@ -145,6 +144,8 @@ export interface ManagedVpsInventory {
   vpsAliases: string[];
   problem: string | null;
   instances: ManagedVpsInventoryInstance[];
+  /** Set when every host that failed could not be reached over SSH or timed out, rather than one that answered with a refusal or a list that can't be verified. */
+  unreachable?: true;
 }
 
 function containerNamePart(botId: string): string {
@@ -227,7 +228,7 @@ function stopDesktopTunnel(botId: string, expected?: DesktopTunnel): boolean {
     if (pending) {
       pending.start.cancelled = true;
       const child = pending.start.child;
-      if (child?.exitCode === null && !child.killed) child.kill("SIGTERM");
+      if (child) stopGroup(child);
       pendingDesktopTunnels.delete(botId);
     }
   }
@@ -235,7 +236,7 @@ function stopDesktopTunnel(botId: string, expected?: DesktopTunnel): boolean {
   if (!tunnel || desktopTunnels.get(botId) !== tunnel) return false;
   desktopTunnels.delete(botId);
   clearTimeout(tunnel.expiry);
-  if (tunnel.child.exitCode === null && !tunnel.child.killed) tunnel.child.kill("SIGTERM");
+  stopGroup(tunnel.child);
   return true;
 }
 
@@ -295,7 +296,7 @@ function emptyStatus(botId: string, alias: string | null): VpsComputerStatus {
     desktopReady: false,
     desktop_error: null,
     ready: false,
-    problem: alias ? "Docker over SSH is not reachable" : "Configure a VPS SSH alias in Settings → API keys",
+    problem: alias ? "Docker over SSH is not reachable" : "Configure a VPS SSH alias in AI › Other services",
     image_ref: VPS_IMAGE,
     base_image_ref: BASE_IMAGE,
     driver_version: CUA_DRIVER_VERSION,
@@ -363,7 +364,7 @@ function hasNoPublishedPorts(config: {
 }
 
 function statusProblem(status: VpsComputerStatus): string | null {
-  if (!status.configured) return "Configure a VPS SSH alias in Settings → API keys";
+  if (!status.configured) return "Configure a VPS SSH alias in AI › Other services";
   if (!status.daemonUp) return "Docker over SSH could not reach the VPS; check the SSH alias and Docker on the VPS";
   if (!status.image) return `Prepare the pinned OpenMausBot Cua image on the VPS (Driver ${CUA_DRIVER_VERSION})`;
   if (status.container === "missing") return "No OpenMausBot container exists for this bot on the VPS";
@@ -580,7 +581,7 @@ const VPS_INVENTORY_STATES = new Set<ManagedVpsInventoryInstance["state"]>([
   "dead",
 ]);
 
-type ManagedVpsAliasScan = Pick<ManagedVpsInventory, "available" | "problem" | "instances"> & { containerIds: Map<string, string> };
+type ManagedVpsAliasScan = Pick<ManagedVpsInventory, "available" | "problem" | "instances" | "unreachable"> & { containerIds: Map<string, string> };
 
 function inventoryFailure(alias: string, error: unknown): ManagedVpsAliasScan {
   if (dockerCliMissing(error)) return { available: false, problem: `${dockerCliMissingProblem()} (VPS host: ${alias})`, instances: [], containerIds: new Map() };
@@ -611,16 +612,13 @@ async function scanManagedVpsAlias(
   owners: ManagedVpsOwner[],
   runner: VpsCommandRunner,
 ): Promise<ManagedVpsAliasScan> {
+  let listed: { stdout: string };
   try {
-    const listed = await runner(vpsDockerArgs(alias, [
-      "container",
-      "ls",
-      "--all",
-      "--filter",
-      `label=${VPS_MANAGED_LABEL}=1`,
-      "--format",
-      "{{.ID}}",
-    ]), { timeoutMs: 20_000 });
+    listed = await runner(vpsDockerArgs(alias, ["container", "ls", "--all", "--filter", `label=${VPS_MANAGED_LABEL}=1`, "--format", "{{.ID}}"]), { timeoutMs: 20_000 });
+  } catch (error) {
+    return { ...inventoryFailure(alias, error), ...(error instanceof VpsHostUnreachableError ? { unreachable: true as const } : {}) };
+  }
+  try {
     const ids = [...new Set(listed.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))];
     if (ids.length > VPS_INVENTORY_LIMIT || ids.some((id) => !CONTAINER_ID.test(id))) {
       throw new Error("the VPS returned an invalid or unexpectedly large managed-container list");
@@ -716,7 +714,8 @@ export async function listManagedVpsComputers(
     (left.ownerName ?? left.name).localeCompare(right.ownerName ?? right.name) ||
     left.vpsAlias.localeCompare(right.vpsAlias),
   );
-  return { configured: true, available: scans.every((scan) => scan.available), vpsAliases: scanning, problem, instances };
+  const unreachable = scans.some((scan) => scan.unreachable) && scans.every((scan) => scan.available || scan.unreachable);
+  return { configured: true, available: scans.every((scan) => scan.available), vpsAliases: scanning, problem, instances, ...(unreachable ? { unreachable } : {}) };
 }
 
 export function vpsContainerRunArgs(
@@ -762,12 +761,8 @@ export function vpsContainerRunArgs(
     "private",
     "--cgroupns",
     "private",
-    "--cap-drop",
-    "ALL",
-    "--cap-add",
-    "SETUID",
-    "--cap-add",
-    "SETGID",
+    // No host mounts, so root in this desktop can install packages without reaching the host's files.
+    ...desktopCapArgs("docker"),
     "--shm-size",
     "512m",
     // Without a restart policy Docker leaves the container down after a VPS reboot; unless-stopped still honors Stop.
@@ -915,7 +910,7 @@ export async function removeManagedVpsComputer(
   cfg = snapshotVpsConfig(cfg);
   const alias = vpsSshAlias(cfg);
   if (!alias) {
-    throw Object.assign(new Error("VPS is not configured — add an SSH config alias in Settings → API keys"), { status: 409 });
+    throw Object.assign(new Error("VPS is not configured — add an SSH config alias in Settings → AI → Other services"), { status: 409 });
   }
   if (!MANAGED_VPS_CONTAINER_NAME.test(containerName)) {
     throw Object.assign(new Error("invalid managed VPS computer name"), { status: 400 });
@@ -969,7 +964,7 @@ export async function vpsComputerAction(
 ): Promise<VpsComputerStatus> {
   cfg = snapshotVpsConfig(cfg);
   const alias = vpsSshAlias(cfg);
-  if (!alias) throw Object.assign(new Error("VPS is not configured — add an SSH config alias in Settings → API keys"), { status: 409 });
+  if (!alias) throw Object.assign(new Error("VPS is not configured — add an SSH config alias in Settings → AI → Other services"), { status: 409 });
   const key = `${alias}:${vpsContainerName(botId)}`;
   const pending = action === "provision" ? pendingProvisions.get(key) : undefined;
   if (pending) return pending;
@@ -1117,7 +1112,7 @@ async function startDesktopTunnel(cfg: AppConfig, botId: string, alias: string, 
     shell: false,
     env: { ...process.env, PATH: ssh.path },
     stdio: ["ignore", "ignore", "pipe"],
-    windowsHide: true,
+    ...OWN_GROUP, // with ssh's ProxyCommand, if any, so a stop reaches it
   });
   start.child = child;
   let failure: string | null = null;
@@ -1145,7 +1140,7 @@ async function startDesktopTunnel(cfg: AppConfig, botId: string, alias: string, 
   }
   const ready = !failure && await loopbackAnswers(localPort);
   if (start.cancelled || failure || !ready) {
-    if (child.exitCode === null && !child.killed) child.kill("SIGTERM");
+    stopGroup(child);
     assertOpen();
     const detail = failure || stderr.trim() || "the SSH port forward did not become ready";
     throw Object.assign(new Error(`Could not open the VPS live desktop: ${detail}`), { status: 502 });

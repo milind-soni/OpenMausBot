@@ -1,4 +1,10 @@
 export const TRANSCRIPT_WINDOW_SIZE = 120;
+/** The most rows drawn at once while the reader is away from the end: one step past it unloads rows at the far edge. */
+export const TRANSCRIPT_WINDOW_MAX = 2 * TRANSCRIPT_WINDOW_SIZE;
+/** Rows one scroll step draws at a window edge: small enough to mount without a long frame. */
+export const TRANSCRIPT_WINDOW_STEP = 20;
+/** The most rows drawn while a text selection holds rows the reader has scrolled away from; past it the selection is set aside. */
+export const SELECTION_HOLD_MAX = 2 * TRANSCRIPT_WINDOW_MAX;
 
 export interface TranscriptWindow<T> {
   visible: T[];
@@ -17,6 +23,14 @@ export function tailWindowStart(total: number, size: number = TRANSCRIPT_WINDOW_
   return Math.max(0, total - size);
 }
 
+/** The newest rows a switch draws in its first frame; the rest of the window follows once that frame is on screen. */
+export const FIRST_FRAME_ROWS = 20;
+
+/** The first row a switch draws, when the window holds more than the first frame does. */
+export function firstFrameRow<T extends { id: string }>(visible: readonly T[]): string | undefined {
+  return visible.length > FIRST_FRAME_ROWS ? visible[visible.length - FIRST_FRAME_ROWS]!.id : undefined;
+}
+
 export function followWindowStart(messages: readonly { role?: string }[], start: number): number {
   const tail = tailWindowStart(messages.length);
   const oldest = Math.max(start, tail - TRANSCRIPT_WINDOW_SIZE);
@@ -28,6 +42,50 @@ export function followWindowStart(messages: readonly { role?: string }[], start:
 
 export function expandWindowStart(startIndex: number, size: number = TRANSCRIPT_WINDOW_SIZE): number {
   return Math.max(0, startIndex - size);
+}
+
+/** A window over a transcript; a null `end` reaches the newest row and grows with it. */
+export interface TranscriptWindowBounds {
+  start: number;
+  end: number | null;
+}
+
+/** Holds a window to `TRANSCRIPT_WINDOW_MAX` rows by dropping rows at its bottom; an end at the newest row is null. */
+export function capWindowEnd({ start, end }: TranscriptWindowBounds, total: number): TranscriptWindowBounds {
+  const last = Math.min(total, end ?? total);
+  if (last - start > TRANSCRIPT_WINDOW_MAX) return { start, end: start + TRANSCRIPT_WINDOW_MAX };
+  return { start, end: last >= total ? null : last };
+}
+
+export function windowEarlier(window: TranscriptWindowBounds, total: number): TranscriptWindowBounds {
+  return capWindowEnd({ start: expandWindowStart(window.start, TRANSCRIPT_WINDOW_STEP), end: window.end }, total);
+}
+
+/** One step down: rows below join and, past the cap, rows at the top leave. */
+export function windowLater({ start, end }: TranscriptWindowBounds, total: number): TranscriptWindowBounds {
+  if (end === null) return { start, end };
+  const nextEnd = Math.min(total, end + TRANSCRIPT_WINDOW_STEP);
+  return { start: Math.max(start, nextEnd - TRANSCRIPT_WINDOW_MAX), end: nextEnd >= total ? null : nextEnd };
+}
+
+/** The window after `added` older rows were put in front of the transcript: a window at the top shows one step of them. */
+export function windowAfterPrepend({ start, end }: TranscriptWindowBounds, added: number, total: number): TranscriptWindowBounds {
+  const moved = { start: start === 0 ? Math.max(0, added - TRANSCRIPT_WINDOW_STEP) : start + added, end: end === null ? null : end + added };
+  return capWindowEnd(moved, total);
+}
+
+/** `window` widened to draw rows `first` to `last`, or null when that would draw more than `SELECTION_HOLD_MAX` rows. */
+export function holdRows({ start, end }: TranscriptWindowBounds, total: number, { first, last }: { first: number; last: number }): TranscriptWindowBounds | null {
+  const from = Math.max(0, Math.min(start, first));
+  const to = Math.min(total, Math.max(end ?? total, last + 1));
+  if (to - from > SELECTION_HOLD_MAX) return null;
+  return { start: from, end: end === null || to >= total ? null : to };
+}
+
+/** The window that puts a remembered row back on screen, drawing at most `TRANSCRIPT_WINDOW_MAX` rows. */
+export function restoreWindow(total: number, rowIndex: number, rememberedStart: number | undefined): TranscriptWindowBounds {
+  const start = Math.max(0, rowIndex - TRANSCRIPT_WINDOW_SIZE, Math.min(rowIndex, rememberedStart ?? rowIndex, tailWindowStart(total)));
+  return capWindowEnd({ start, end: null }, total);
 }
 
 export function focusWindowRange(
@@ -62,4 +120,11 @@ export function resolveTranscriptWindow<T>(
     startIndex: start,
     endIndex: end,
   };
+}
+
+/** The window's rows, with the newest card that `rests` on put back on top when the window has left it behind: work rests
+ * on that card until the person answers it, so its answer and its Not now stay on screen however long the chat grows. */
+export function withRestingCard<T>(messages: readonly T[], visible: T[], startIndex: number, rests?: (row: T) => boolean): T[] {
+  const index = rests ? messages.findLastIndex(rests) : -1;
+  return index >= 0 && index < startIndex ? [messages[index]!, ...visible] : visible;
 }

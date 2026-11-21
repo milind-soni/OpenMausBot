@@ -1,13 +1,14 @@
 import type { ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { cpus } from "node:os";
+import { availableParallelism } from "node:os";
 import { splitCliString } from "../env-path.ts";
 
 /** Every Codex app-server starts its MCP servers with its thread; many starting at once on a small host
  * push those calls past their timeouts. Launches past this many wait until one has its turn running. */
 export function codexLaunchLimit(): number {
   const configured = Number(process.env.OMB_CODEX_LAUNCH_SLOTS);
-  return Number.isInteger(configured) && configured > 0 ? configured : Math.max(2, cpus().length);
+  // The CPUs this process may use (its container's or its affinity's), not every one the machine has.
+  return Number.isInteger(configured) && configured > 0 ? configured : Math.max(2, availableParallelism());
 }
 
 let starting = 0;

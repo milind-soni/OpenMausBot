@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SkillsLibrarySkillWire } from "../../shared/wire";
 
 const fixture = vi.hoisted(() => ({ values: [] as unknown[], index: 0, modal: vi.fn(), request: vi.fn() }));
+vi.mock("@/state/store-select", async (importOriginal) => (await import("@/testing/plain-store-select")).plainStoreSelect(await importOriginal()));
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
   useState: (initial: unknown) => {
@@ -134,30 +135,5 @@ describe("Skills library review and assignment controls", () => {
     named(tree, "Disable pdf").props.onClick!();
     await flush();
     expect(fixture.request).toHaveBeenCalledWith("/api/bots/bot/skills/pdf", expect.objectContaining({ method: "PATCH", body: '{"enabled":false}' }));
-  });
-
-  it("shows the recovery instructions alongside a skill that is waiting for space", () => {
-    const warning = "Skill recovery storage is full. Move retained recovery folders to a private backup, then retry.";
-    const waiting = { name: "pricing-policy", description: "Quote prices", enabled: false, source: "org:fixture", warnings: [warning], origin: "private" };
-    fixture.values = [[waiting], [], [], "", [], false, "", "", null, { current: false }, null, "", false, ""];
-    expect(render(true).some((node) => node.props.children === warning)).toBe(true);
-  });
-
-  it("refreshes the skill after a failed removal and keeps the recovery error visible", async () => {
-    const warning = "Recovery storage is full; move retained folders to a private backup.";
-    const active = { name: "pricing-policy", description: "Quote prices", enabled: true, source: "org:fixture", warnings: [], origin: "private" };
-    fixture.values = [[active], [], [], "", [], false, "", "", null, { current: false }, null, "", false, ""];
-    vi.stubGlobal("window", { confirm: () => true });
-    fixture.request.mockImplementation(async (_url, options) => {
-      if (options?.method === "DELETE") throw new Error("Recovery storage is full");
-      return { skills: [{ ...active, enabled: false, warnings: [warning] }] };
-    });
-    named(render(true), "Remove pricing-policy").props.onClick!();
-    await flush();
-    const tree = render(true);
-    expect(named(tree, "Enable pricing-policy")).toBeDefined();
-    expect(tree.some((node) => node.props.children === warning)).toBe(true);
-    expect(tree.some((node) => node.props.role === "alert" && node.props.children === "Recovery storage is full")).toBe(true);
-    expect(fixture.request).toHaveBeenCalledTimes(2);
   });
 });

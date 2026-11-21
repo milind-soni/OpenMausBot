@@ -1,5 +1,5 @@
 // The token is written to a file only you can read and never printed: pass the file to other verbs with --token-file.
-import { closeSync, existsSync, fchmodSync, fstatSync, openSync, writeSync } from "node:fs";
+import { closeSync, existsSync, fchmodSync, fstatSync, lstatSync, openSync, writeSync } from "node:fs";
 import { isatty } from "node:tty";
 
 import { parseServerInput } from "../../electron/server-address.mjs";
@@ -64,6 +64,7 @@ function target(ctx: VerbContext): { candidates: string[]; secret: string | null
 export async function connectVerb(ctx: VerbContext): Promise<VerbOutcome> {
   const out = flag(ctx.flags, "out")?.trim();
   if (!out) throw usageError("--out FILE is required: where to keep the script key");
+  if (ctx.flags.force !== true && lstatSync(out, { throwIfNoEntry: false })) throw usageError(`${out} already exists`, "pass --force to replace it");
   const { candidates, secret } = target(ctx);
   let origin = candidates[0]!;
   let described: { status: number; body: Rec } | null = null;
@@ -82,8 +83,11 @@ export async function connectVerb(ctx: VerbContext): Promise<VerbOutcome> {
   if (!code) {
     const minted = await call(origin, "/api/auth/pairing", { method: "POST", body: JSON.stringify({ label, ...(ctx.flags.client ? { scopes: ["client"] } : {}) }) });
     if (minted.status !== 200 || typeof minted.body.code !== "string") {
+      const desktop = typeof minted.body.error === "string" && minted.body.error.includes("must come from the desktop app");
       throw new HeadlessError(`this server will not mint a pairing code for a command on this computer${minted.body.error ? ` (${minted.body.error})` : ""}`,
-        EXIT.unreachable, `${cliCommand("pair")} in a terminal on this computer, then pass --code CODE`);
+        EXIT.notAllowed, desktop
+          ? `the MausBot app runs this server: run ${cliCommand("login")} instead and press Allow in the app, or make a code in Settings → Phone & devices and pass --code CODE`
+          : `${cliCommand("pair")} in a terminal on this computer, then pass --code CODE`);
     }
     code = minted.body.code as string;
   }

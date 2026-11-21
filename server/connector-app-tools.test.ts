@@ -63,6 +63,19 @@ describe("a call to one", () => {
     expect(appToolCall("COMPOSIO_SEARCH_TOOLS", {})).toBeNull();
   });
 
+  it("names the connected account the bot chose, so an account limit can be met through the shortcut too", () => {
+    for (const tool of APP_TOOLS) {
+      const [entry] = appToolEntries([tool.name], "plain");
+      expect((entry!.inputSchema as { properties: Record<string, unknown> }).properties.account).toMatchObject({ type: "string" });
+    }
+    expect(appToolCall("gmail.search_emails", { query: "is:unread", account: " ca_home " })?.frame(1)).toMatchObject({ params: { arguments: { tools: [{
+      tool_slug: "GMAIL_FETCH_EMAILS", account: "ca_home", arguments: { query: "is:unread" },
+    }] } } });
+    const item = (appToolCall("googlecalendar.list_events", { account: "" })!.frame(1) as { params: { arguments: { tools: Array<Record<string, unknown>> } } }).params.arguments.tools[0]!;
+    expect(item).not.toHaveProperty("account");
+    expect(item.arguments).not.toHaveProperty("account");
+  });
+
   it("answers with the tool's own data, and passes a refusal or failure through as it came", () => {
     const ok = { jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: JSON.stringify({ successful: true, data: { results: [{ tool_slug: "GMAIL_FETCH_EMAILS", response: { successful: true, data: { messages: [{ messageId: "m1" }] } } }] } }) }] } };
     expect(appToolAnswer("GMAIL_FETCH_EMAILS", ok)).toEqual({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: JSON.stringify({ messages: [{ messageId: "m1" }] }) }] } });

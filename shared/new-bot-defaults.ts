@@ -1,7 +1,6 @@
 import type { WireBot } from "./wire";
 import type { RoutineInput } from "./routines";
 import type { ToolScope } from "./tool-scope";
-import type { PortableFolderFile } from "./portable-skill-bundle";
 
 /** Data shared by the default template and an individual creation draft. */
 export type BotDefaultsProfile = Partial<Pick<WireBot,
@@ -30,8 +29,6 @@ export interface BotSkillTemplate {
   text: string;
   enabled: boolean;
   warnings: string[];
-  files?: PortableFolderFile[];
-  omittedFiles?: Array<{ path: string; reason: "skill_file_type" | "skill_file_unsafe" | "skill_file_limit" }>;
 }
 export interface NewBotDefaults {
   profile: BotDefaultsProfile;

@@ -6,10 +6,10 @@ import { dirname, join, relative, sep } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
-import { exportImportedSkill, IMPORTED_SKILLS_DIR, importedSkillListings, importedSkillsFor, readImportedSkills, setImportedSkillEnabled, storeImportedSkills } from "./imported-skills.ts";
+import { IMPORTED_SKILLS_DIR, importedSkillListings, importedSkillsFor, readImportedSkills, setImportedSkillEnabled } from "./imported-skills.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import {
-  applySetupImport, claudeCodeSkillInputs, detectSetup, secretName, setupPaths, SKILL_COPY_LIMITS, thisMachine, topLevelJsonMember, withoutJsonComments,
+  applySetupImport, detectSetup, secretName, setupPaths, SKILL_COPY_LIMITS, thisMachine, topLevelJsonMember, withoutJsonComments,
   type SetupFs, type SetupHost, type SetupMachine,
 } from "./setup-import.ts";
 import { installSkill, listSkills } from "./skills.ts";
@@ -131,6 +131,9 @@ function plantPrivateFiles(home: string): string[] {
     ".claude/projects/-Users-someone-app/0b1c.jsonl", ".codex/sessions/2026/10/16/rollout-1.jsonl",
     ".codex/archived_sessions/rollout-0.jsonl", ".claude/logs/claude.log", ".gemini/oauth_creds.json",
     ".gemini/google_accounts.json", ".claude/statsig/cache.json",
+    ".hermes/.env", ".hermes/auth.json", ".hermes/mcp-tokens/linear.json", ".hermes/state.db", ".hermes/sessions/s1.json",
+    ".hermes/memories/USER.md", ".hermes/SOUL.md", ".openclaw/.env", ".openclaw/secrets.json", ".openclaw/credentials/oauth.json",
+    ".openclaw/state/openclaw.sqlite", ".openclaw/agents/main/agent/auth-profiles.json", ".openclaw/workspace/MEMORY.md", ".openclaw/workspace/USER.md",
   ].map((path) => put(home, path, SENTINEL));
 }
 
@@ -316,11 +319,11 @@ describe("finding what another AI tool already set up on this computer", () => {
     // Opened or listed: the tools' config files and what is inside their skills folders, nothing else.
     expect(ops.filter(({ op, path }) => (op === "read" || op === "readdir") && !files.has(path) && !inRoot(path))).toEqual([]);
     // Only looked at, never opened: also the home folder and the tools' own folders on the way.
-    const passed = new Set([home, ...[".claude", ".codex", ".gemini", ".cursor"].map((folder) => join(home, folder))]);
+    const passed = new Set([home, ...[".claude", ".codex", ".gemini", ".cursor", ".hermes", ".openclaw", join(".openclaw", "workspace")].map((folder) => join(home, folder))]);
     expect(ops.filter(({ path }) => !files.has(path) && !inRoot(path) && !passed.has(path))).toEqual([]);
     for (const path of planted) expect(touched()).not.toContain(path);
     const inSkills = touched().filter((path) => roots.some((root) => path.startsWith(root + sep))).map((path) => relative(home, path));
-    expect(inSkills.filter((path) => path.split(sep).some((part) => part.startsWith(".") && part !== ".claude" && part !== ".codex"))).toEqual([]);
+    expect(inSkills.filter((path) => path.split(sep).some((part) => part.startsWith(".") && ![".claude", ".codex", ".hermes", ".openclaw"].includes(part)))).toEqual([]);
     expect(inSkills.filter((path) => path.split(sep).some(secretName))).toEqual([]);
 
     const said = JSON.stringify({ detection, result, saved: servers() });
@@ -452,49 +455,6 @@ describe("finding what another AI tool already set up on this computer", () => {
 });
 
 describe("bringing skills in", () => {
-  it.skipIf(process.platform === "win32")("marks POSIX source modes known and Windows source modes unknown", () => {
-    const home = fixtureHome();
-    put(home, ".claude/skills/mode-sample/SKILL.md", skillMd("mode-sample"));
-    put(home, ".claude/skills/mode-sample/references/guide.md", "guide\n", 0o600);
-    put(home, ".claude/skills/mode-sample/scripts/run.sh", "echo fixture\n", 0o700);
-    const posix = claudeCodeSkillInputs(machineFor(home, "linux").machine)[0]!;
-    expect(posix.executableIntentVersion).toBe(1);
-    expect(posix.files).toEqual(expect.arrayContaining([
-      expect.objectContaining({ path: "references/guide.md", executable: false }),
-      expect.objectContaining({ path: "scripts/run.sh", executable: true }),
-    ]));
-    const machine = machineFor(home, "win32").machine, windows = claudeCodeSkillInputs(machine)[0]!;
-    expect(windows.executableIntentVersion).toBeUndefined();
-    expect(windows.files.every((file) => file.executable === null)).toBe(true);
-    expect(applySetupImport(machine, hostFor().host, { skills: true }).skills?.added).toContain("mode-sample");
-    expect(readImportedSkills()["mode-sample"]!.modeUnknown).toBe(true);
-    expect(exportImportedSkill("mode-sample")).toBeNull();
-    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
-    try {
-      Object.defineProperty(process, "platform", { value: "win32", configurable: true });
-      expect(storeImportedSkills([posix])[0]!.stored).toBe(true);
-      expect(exportImportedSkill("mode-sample")!.files).toEqual(expect.arrayContaining([
-        { path: "references/guide.md", content: "guide\n" },
-        { path: "scripts/run.sh", content: "echo fixture\n", executable: true },
-      ]));
-    } finally { Object.defineProperty(process, "platform", platform); }
-  });
-
-  it.skipIf(process.platform === "win32")("does not record a mode that changes while the source file is read", () => {
-    const home = fixtureHome();
-    put(home, ".claude/skills/mode-race/SKILL.md", skillMd("mode-race"));
-    const file = put(home, ".claude/skills/mode-race/references/guide.md", "guide\n", 0o600);
-    const { machine } = machineFor(home, "linux"), read = machine.fs.read;
-    machine.fs.read = (path, ...options) => {
-      const bytes = read(path, ...options);
-      if (path === file) chmodSync(file, 0o700);
-      return bytes;
-    };
-    const result = applySetupImport(machine, hostFor().host, { skills: true });
-    expect(result.skills?.filesLeftOut).toBe(1);
-    expect(existsSync(join(IMPORTED_SKILLS_DIR, "mode-race", "references", "guide.md"))).toBe(false);
-  });
-
   it("copies each skill's text files once, read-only, for every bot, and leaves out binary, oversized, linked and private files", () => {
     const home = fixtureHome();
     plantSkills(home);
@@ -700,3 +660,102 @@ describe("bringing MCP servers in", () => {
     expect(saves).toEqual([]);
   });
 });
+
+describe("Hermes Agent and OpenClaw on this computer", () => {
+  function plantAgents(home: string) {
+    put(home, ".hermes/config.yaml", [
+      "model:",
+      "  default: anthropic/claude-sonnet-4",
+      "mcp_servers:",
+      "  github:",
+      "    command: npx",
+      '    args: ["-y", "@modelcontextprotocol/server-github"]',
+      "    env:",
+      "      GITHUB_PERSONAL_ACCESS_TOKEN: ghp_hermes_secret",
+      "  linear:",
+      "    url: https://mcp.linear.app/mcp",
+      "    auth: oauth",
+    ].join("\n"));
+    put(home, ".hermes/skills/.bundled_manifest", "arxiv:0f3a\nplan:9bc1\n");
+    put(home, ".hermes/skills/research/arxiv/SKILL.md", skillMd("arxiv"));
+    put(home, ".hermes/skills/devops/deploy-k8s/SKILL.md", skillMd("deploy-k8s", "Deploy to the team cluster."));
+    put(home, ".hermes/skills/standup/SKILL.md", skillMd("standup"));
+    put(home, ".hermes/skills/.hub/quarantine/bad/SKILL.md", skillMd("quarantined"));
+    put(home, ".openclaw/openclaw.json", `{
+      // OpenClaw's config is JSON5
+      agents: undefined,
+      "mcp": { "servers": {
+        "fetch": { "command": "uvx", "args": ["mcp-server-fetch"] },
+        "docs": { "url": "https://mcp.example.test/mcp", "transport": "streamable-http" },
+        "events": { "url": "https://events.example.test/stream", "transport": "sse" },
+      } },
+    }`.replace("agents: undefined,", ""));
+    put(home, ".openclaw/skills/image-lab/SKILL.md", skillMd("image-lab"));
+    put(home, ".openclaw/workspace/skills/triage/SKILL.md", skillMd("triage"));
+  }
+
+  it("finds their skills, nested or not, leaving out what Hermes ships and its Hub folder, and their MCP servers", () => {
+    const home = fixtureHome();
+    plantAgents(home);
+    const { machine } = machineFor(home);
+    const detection = detectSetup(machine, hostFor().host);
+    expect(detection.skills).toEqual([
+      { name: "deploy-k8s", source: "hermes" },
+      { name: "standup", source: "hermes" },
+      { name: "image-lab", source: "openclaw" },
+      { name: "triage", source: "openclaw" },
+    ]);
+    expect(detection.tools).toEqual([
+      { name: "github", source: "hermes" },
+      { name: "linear", source: "hermes" },
+      { name: "fetch", source: "openclaw" },
+      { name: "docs", source: "openclaw" },
+      { name: "events", source: "openclaw" },
+    ]);
+  });
+
+  it("brings them in switched off, with OpenClaw's transport kept, and never opens their secrets", () => {
+    const home = fixtureHome();
+    plantAgents(home);
+    const planted = plantPrivateFiles(home);
+    const { machine, touched } = machineFor(home);
+    const { host, servers } = hostFor();
+    const result = applySetupImport(machine, host, { skills: true, tools: true });
+    expect(result.skills?.added.sort()).toEqual(["deploy-k8s", "image-lab", "standup", "triage"]);
+    expect(result.tools?.added).toEqual(["github", "linear", "fetch", "docs", "events"]);
+    const saved = servers();
+    expect(Object.values(saved).every((server: any) => server.enabled === false)).toBe(true);
+    expect(saved.docs).toMatchObject({ type: "http", url: "https://mcp.example.test/mcp" });
+    expect(saved.events).toMatchObject({ type: "sse", url: "https://events.example.test/stream" });
+    expect(saved.github).toMatchObject({ command: "npx", args: ["-y", "@modelcontextprotocol/server-github"] });
+    for (const path of planted) expect(touched()).not.toContain(path);
+    expect(JSON.stringify(result)).not.toContain("ghp_hermes_secret");
+    expect(readImportedSkills()["deploy-k8s"]).toMatchObject({ source: "hermes" });
+    expect(readImportedSkills()["image-lab"]).toMatchObject({ source: "openclaw" });
+  });
+
+  it("follows HERMES_HOME, OPENCLAW_STATE_DIR and OPENCLAW_CONFIG_PATH, and Hermes' Windows home", () => {
+    const home = fixtureHome();
+    put(home, "agents/hermes/skills/standup/SKILL.md", skillMd("standup"));
+    put(home, "agents/claw/skills/triage/SKILL.md", skillMd("triage"));
+    put(home, "agents/claw.json", '{ "mcp": { "servers": { "fetch": { "command": "uvx", "args": ["mcp-server-fetch"] } } } }');
+    const { machine } = machineFor(home, "darwin", {
+      HERMES_HOME: join(home, "agents", "hermes"), OPENCLAW_STATE_DIR: join(home, "agents", "claw"), OPENCLAW_CONFIG_PATH: join(home, "agents", "claw.json"),
+    });
+    const detection = detectSetup(machine, hostFor().host);
+    expect(detection.skills.map((skill) => [skill.name, skill.source])).toEqual([["standup", "hermes"], ["triage", "openclaw"]]);
+    expect(detection.tools).toEqual([{ name: "fetch", source: "openclaw" }]);
+    // Windows keeps Hermes under %LOCALAPPDATA%, and falls back to the profile's AppData\\Local without it.
+    expect(setupPaths({ home: "/u/ada", platform: "win32", env: { LOCALAPPDATA: "/u/ada/Local" } }).hermesHome).toBe(join("/u/ada/Local", "hermes"));
+    expect(setupPaths({ home: "/u/ada", platform: "win32", env: {} }).hermesHome).toBe(join("/u/ada", "AppData", "Local", "hermes"));
+  });
+
+  it("reads no tools from an OpenClaw config it can't parse, and leaves Hermes' alone", () => {
+    const home = fixtureHome();
+    plantAgents(home);
+    put(home, ".openclaw/openclaw.json", "{ mcp: { servers: { fetch: { command: 'uvx' } } } }");
+    const { machine } = machineFor(home);
+    expect(detectSetup(machine, hostFor().host).tools.map((tool) => tool.source)).toEqual(["hermes", "hermes"]);
+  });
+});
+

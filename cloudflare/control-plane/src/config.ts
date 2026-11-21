@@ -74,16 +74,18 @@ export const DEFAULT_OFFLINE_RECLAIM_DAYS = 21;
 // tunnel. Below three days a weekend away does; it gets the same address back
 // when it returns, if its account still has room.
 export const MIN_OFFLINE_RECLAIM_DAYS = 1;
-// Each cleanup makes at most ten Cloudflare API calls: twenty rows plus the two
-// capacity reads stay near 200 calls per five-minute run, under the token's
-// 1,200-per-five-minutes limit and Workers Paid's 10,000 subrequests. Use 4 on
-// Workers Free, whose limit is 50 subrequests (4 x 10 + 2 + 2 Cache API
-// deletes = 44).
+// Each cleanup makes at most 14 Cloudflare API calls (an idle reclaim at most
+// 12; a forced removal whose tunnel is still connected adds two connection
+// cleanups and two deletes to the usual ten): twenty rows plus the two capacity
+// reads stay under 290 calls per run, under the token's
+// 1,200-per-five-minutes limit and Workers Paid's 10,000 subrequests. Use 3 on
+// Workers Free, whose limit is 50 subrequests (3 x 14 + 2 + 2 Cache API
+// deletes = 46).
 export const DEFAULT_CLEANUP_SWEEP_LIMIT = 20;
 export const MAX_CLEANUP_SWEEP_LIMIT = 50;
-/** Each account adds two Cloudflare reads per cron run: on Workers Free, 4
- * cleanup rows x 10 calls + 4 x 2 + two Cache API deletes is the whole
- * 50-subrequest budget. */
+/** Each account adds two Cloudflare reads per cron run: on Workers Free, 3
+ * cleanup rows x 14 calls + 3 x 2 + two Cache API deletes is the whole
+ * 50-subrequest budget, and four accounts need the sweep limit at 2. */
 export const MAX_ENDPOINT_ACCOUNTS = 4;
 
 function boundedIntegerVar(

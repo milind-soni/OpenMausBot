@@ -3,6 +3,7 @@ import { botAvatarUrlFromStoredPath } from "../../shared/bot-avatar.ts";
 import type { CommandAllowlistResponse } from "../../shared/command-allowlist.ts";
 import type { WireBot } from "../../shared/wire.ts";
 import { deleteAttachment, saveImage } from "../attachments.ts";
+import { MAX_ALWAYS_ALLOW, withAlwaysAllowKey } from "../always-allow.ts";
 import { avatarGenerationRequestSchema, avatarGenerationStateMatches, generateAvatarImage, snapshotAvatarGenerationState } from "../avatar-image.ts";
 import { parseBotProfilePatch } from "../bot-profile.ts";
 import { commandAllowlistCandidate, type CommandAllowlistStore } from "../command-allowlist.ts";
@@ -19,7 +20,7 @@ import type { ModelSelectionCheck } from "./bots-create.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
 import { sawThread } from "../thread-presence.ts";
-import { refusalBody } from "../user-errors.ts";
+import { refusalBody, refusalText, userError } from "../user-errors.ts";
 import { readThreadNotifications, type NotificationListed } from "./notifications.ts";
 
 export interface BotSettingsRouteDeps {
@@ -221,16 +222,17 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
       }
       // A standing grant is an approval: only those who may approve the card may remember it.
       const refusal = cardAnswerRefusal(auth, bot.threadId, pending.card!.requestId!, "allow");
-      if (refusal) return json(res, 403, { error: refusal });
-      const savedBot = store.bot(bot.id)!;
-      store.patchBot(bot.id, {
-        alwaysAllow: [...new Set([...(savedBot.alwaysAllow ?? []), allowKey])].slice(0, 200),
-      });
-      store.patchTask(bot.id, bot.threadId, {
-        alwaysAllow: [...new Set([...(bot.alwaysAllow ?? []), allowKey])].slice(0, 200),
-      });
+      if (refusal) return json(res, 403, refusalText(refusal));
       const live = directTurnBots.get(bot.threadId);
-      if (live) live.alwaysAllow = [...new Set([...(live.alwaysAllow ?? []), allowKey])].slice(0, 200);
+      const botAllow = withAlwaysAllowKey(store.bot(bot.id)!.alwaysAllow, allowKey);
+      const taskAllow = withAlwaysAllowKey(bot.alwaysAllow, allowKey);
+      const liveAllow = live ? withAlwaysAllowKey(live.alwaysAllow, allowKey) : null;
+      if (!botAllow || !taskAllow || (live && !liveAllow)) {
+        return json(res, 400, userError("serverError.bot.alwaysAllowFull", { max: MAX_ALWAYS_ALLOW }));
+      }
+      store.patchBot(bot.id, { alwaysAllow: botAllow });
+      store.patchTask(bot.id, bot.threadId, { alwaysAllow: taskAllow });
+      if (live && liveAllow) live.alwaysAllow = liveAllow;
       const updated = store.bot(bot.id)!;
       const visible = wireBot(updated);
       broadcast({ kind: "bot", bot: visible });

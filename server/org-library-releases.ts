@@ -8,7 +8,7 @@
 import type { PackageAgent, PackageDocument } from "../shared/package-format.ts";
 import type { OrgInstall, OrgLibraryDeps, OrgLibraryEntry } from "./org-library.ts";
 import {
-  agentReleaseValues, pair, partHash, playbookValues, roomReleaseValues, routineReleaseValues, scheduleValue, skillReleaseValue,
+  agentReleaseValues, pair, partHash, playbookValues, roomReleaseValues, routineReleaseValues, scheduleValue,
   type AgentPart, type PartPair, type RoomPart, type RoutinePart,
 } from "./package-parts.ts";
 import { profileSnapshot } from "./profile-revision.ts";
@@ -73,9 +73,8 @@ function switchOff(deps: OrgLibraryDeps, installId: string): void {
 }
 
 /** Brings each added team up to its catalog release; the ids of the installs it moved to a new release. */
-export async function applyUpdates(context: ReleaseContext): Promise<{ updated: string[]; retry: boolean }> {
+export function applyUpdates(context: ReleaseContext): string[] {
   const updated: string[] = [];
-  let retry = false;
   for (const [installId, install] of Object.entries(context.installs)) {
     if (context.currentInstallId(install.packageId) !== installId || install.status !== "installed" || install.kind !== "team") continue;
     const entry = context.entries.find((candidate) => candidate.packageId === install.packageId);
@@ -86,13 +85,12 @@ export async function applyUpdates(context: ReleaseContext): Promise<{ updated: 
     if (!next) continue;
     const update = new InstallUpdate(context.deps, installId, install, next, release.sha256, context.installedDocument(install));
     try {
-      await update.bots();
+      update.bots();
       update.rooms();
       update.routines();
       update.brief();
     } catch (error) {
       // The parts written so far carry their new stamps, so the next catalog picks up from here.
-      if ((error as { retryable?: boolean } | null)?.retryable) retry = true;
       console.warn(`[org-library] could not finish updating ${install.name || install.packageId}: ${error instanceof Error ? error.message : String(error)}`);
       continue;
     }
@@ -101,7 +99,7 @@ export async function applyUpdates(context: ReleaseContext): Promise<{ updated: 
     install.updatedAt = context.now();
     updated.push(installId);
   }
-  return { updated, retry };
+  return updated;
 }
 
 /** The parts the update writes; the others stay as they were added (see docs/org-library.md). */
@@ -133,19 +131,10 @@ class InstallUpdate {
     this.ref = install.ref;
   }
 
-  async bots(): Promise<void> {
+  bots(): void {
     const playbookByKey = new Map((this.pkg.playbooks ?? []).map((playbook) => [playbook.key, playbook]));
-    let deferred: (Error & { retryable?: boolean }) | undefined;
     for (const agent of this.pkg.agents) {
-      const initial = this.deps.store.bot(this.install.bots[agent.key] ?? "");
-      if (!initial?.packageBase) continue;
-      const skillUpdate = await this.skills(initial, agent);
-      if (skillUpdate.error) {
-        if (!deferred) deferred = skillUpdate.error;
-        else if (skillUpdate.error.retryable) deferred.retryable = true;
-        continue;
-      }
-      const bot = this.deps.store.bot(initial.id);
+      const bot = this.deps.store.bot(this.install.bots[agent.key] ?? "");
       if (!bot?.packageBase) continue;
       const released = agentReleaseValues(agent, playbookByKey);
       const now: Record<(typeof AGENT_UPDATED)[number], unknown> = {
@@ -161,7 +150,7 @@ class InstallUpdate {
         else profile[part] = String(released[part]);
         base[part] = pair(released[part], part === "playbooks" ? playbookValues(playbooks ?? []) : released[part]);
       }
-      if (skillUpdate.changed) base.skills = pair(released.skills, released.skills);
+      if (this.skills(bot, agent)) base.skills = pair(released.skills, released.skills);
       if (Object.keys(profile).length) {
         const before = profileSnapshot(bot);
         const updated = this.deps.store.patchBotProfile(bot.id, profile);
@@ -171,48 +160,43 @@ class InstallUpdate {
       // The stamps go last: a part written before a crash and not yet stamped is kept, never written twice.
       this.deps.store.patchBot(bot.id, { ...(playbooks ? { playbooks } : {}), packageBase: base, ...(installed ? { installedPackage: installed } : {}) });
     }
-    if (deferred) throw deferred;
   }
 
   /** Each skill the publisher changed and the person did not gets the new text; a skill new in this release is added, but
    * never one the person took off. Whether a skill is on is the person's and stays. */
-  private async skills(bot: BotRecord, agent: PackageAgent): Promise<{ changed: boolean; error?: Error & { retryable?: boolean } }> {
+  private skills(bot: BotRecord, agent: PackageAgent): boolean {
     const entries = new Map((this.pkg.skills?.entries ?? []).map((skill) => [skill.name, skill]));
     const stamped = new Map(this.deps.skills.stamps(bot.id).filter((skill) => skill.stamp.installId === this.installId).map((skill) => [skill.stamp.key, skill]));
     const before = this.previous?.package.agents.find((candidate) => candidate.key === agent.key)?.skills;
     const source = `org:${this.ref}@${this.pkg.release}`;
-    let changed = false, deferred: (Error & { retryable?: boolean }) | undefined;
-    const noteError = (error: Error & { retryable?: boolean }) => {
-      if (!deferred) deferred = error;
-      else if (error.retryable) deferred.retryable = true;
-    };
+    let changed = false;
     for (const name of agent.skills ?? []) {
       const skill = entries.get(name);
       if (!skill) continue;
-      const value = skillReleaseValue(skill);
-      const stamp = { installId: this.installId, key: name, release: this.pkg.release, ...pair(value, value) };
+      const stamp = { installId: this.installId, key: name, release: this.pkg.release, ...pair(skill.instructions, skill.instructions) };
       const have = stamped.get(name);
       if (have) {
-        const recovered = await this.deps.skills.recoverOrg?.(bot.id, name);
-        if (recovered && "error" in recovered) {
-          noteError(Object.assign(new Error(`skill ${name} could not be synchronized: ${recovered.error}`), { retryable: true }));
-          continue;
+        if (partHash(skill.instructions) === have.stamp.r || !this.deps.skills.read || !this.deps.skills.remove) continue;
+        const text = this.deps.skills.read(bot.id, name);
+        if (text === null || partHash(text) !== have.stamp.w) continue;
+        const was = this.deps.skills.list(bot.id).find((listed) => listed.name === name)?.source ?? source;
+        if ("error" in this.deps.skills.remove(bot.id, name)) continue;
+        const added = this.deps.skills.installOrg(bot.id, source, skill.instructions, stamp);
+        if ("error" in added) {
+          // Put the skill back as it was, so it is never mistaken later for one the person took off.
+          this.deps.skills.installOrg(bot.id, was, text, have.stamp);
+          if (!have.enabled) this.deps.skills.setEnabled(bot.id, name, false);
+          throw new Error(`skill ${name} could not be updated: ${added.error}`);
         }
-        if (partHash(value) === have.stamp.r || !this.deps.skills.replaceOrg) continue;
-        const result = await this.deps.skills.replaceOrg(bot.id, source, skill, stamp, have.stamp);
-        if ("stale" in result) continue;
-        if ("error" in result) {
-          noteError(Object.assign(new Error(`skill ${name} could not be updated: ${result.error}`), { retryable: result.retryable === true }));
-          continue;
-        }
+        if (!have.enabled) this.deps.skills.setEnabled(bot.id, name, false);
         changed = true;
       } else if (before && !before.includes(name) && !this.deps.skills.list(bot.id).some((listed) => listed.name === name)) {
-        const added = this.deps.skills.installOrg(bot.id, source, skill.instructions, stamp, skill.files);
-        if ("error" in added) { noteError(new Error(`skill ${name} could not be added: ${added.error}`)); continue; }
+        const added = this.deps.skills.installOrg(bot.id, source, skill.instructions, stamp);
+        if ("error" in added) throw new Error(`skill ${name} could not be added: ${added.error}`);
         changed = true;
       }
     }
-    return { changed, ...(deferred ? { error: deferred } : {}) };
+    return changed;
   }
 
   rooms(): void {

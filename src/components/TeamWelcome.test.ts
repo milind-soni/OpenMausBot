@@ -15,7 +15,7 @@ vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => true }));
 vi.mock("@/state/team-people", async (original) => ({ ...await original<typeof import("@/state/team-people")>(), useTeamPeople: () => fixture.people }));
 import { TeamWelcome } from "./TeamWelcome";
 import { teamPrivateChatsLineDue } from "./TeamPrivateChatsLine";
-import { finishTeamWelcome, markTeamWelcomeShown, parseTeamWelcome, resetTeamWelcome, teamWelcomeDue, teamWelcomeView, WELCOME_USE_MS } from "@/lib/team-welcome";
+import { finishTeamWelcome, markTeamWelcomeShown, parseTeamWelcome, resetTeamWelcome, invitedToTeam, teamWelcomeDue, teamWelcomeView, WELCOME_USE_MS } from "@/lib/team-welcome";
 import { teamQuiet } from "./MausBotWelcome";
 
 const ACME = { id: "team-acme", name: "Acme" };
@@ -83,14 +83,23 @@ describe("a new member's first screen in a team", () => {
 });
 
 describe("when it shows", () => {
-  it("only to a User of a team who hasn't seen it, once their record is read; an Admin has the Cloud's own welcome", () => {
+  it("only to someone invited to a team who hasn't seen it, once their record is read", () => {
     const fresh = { invitedBy: null, welcomedAt: null, hints: [] };
-    expect(teamWelcomeDue({ team: ACME, canSave: false, record: fresh })).toBe(true);
-    expect(teamWelcomeDue({ team: ACME, canSave: false, record: { ...fresh, welcomedAt: 1 } })).toBe(false);
-    expect(teamWelcomeDue({ team: ACME, canSave: false, record: undefined }), "not yet read").toBe(false);
-    expect(teamWelcomeDue({ team: ACME, canSave: false, record: null }), "a Team Cloud too old to keep one").toBe(false);
-    expect(teamWelcomeDue({ team: ACME, canSave: true, record: fresh })).toBe(false);
-    expect(teamWelcomeDue({ team: null, canSave: false, record: fresh })).toBe(false);
+    expect(teamWelcomeDue({ team: ACME, invited: true, record: fresh })).toBe(true);
+    expect(teamWelcomeDue({ team: ACME, invited: true, record: { ...fresh, welcomedAt: 1 } })).toBe(false);
+    expect(teamWelcomeDue({ team: ACME, invited: true, record: undefined }), "not yet read").toBe(false);
+    expect(teamWelcomeDue({ team: ACME, invited: true, record: null }), "a Team Cloud too old to keep one").toBe(false);
+    expect(teamWelcomeDue({ team: ACME, invited: false, record: fresh })).toBe(false);
+    expect(teamWelcomeDue({ team: null, invited: true, record: fresh })).toBe(false);
+  });
+
+  it("an invited Admin is welcomed as a User is; the Owner, who set the team up, has the Cloud's own welcome", () => {
+    expect(invitedToTeam({ canSave: false, teamRole: "member" })).toBe(true);
+    expect(invitedToTeam({ canSave: true, teamRole: "admin" })).toBe(true);
+    expect(invitedToTeam({ canSave: true, teamRole: "owner" })).toBe(false);
+    expect(invitedToTeam({ canSave: false }), "a Team Cloud too old to say the role").toBe(true);
+    expect(invitedToTeam({ canSave: true }), "a My Cloud's person").toBe(false);
+    expect(invitedToTeam(null)).toBe(false);
   });
 
   it("reads the record as the server keeps it, and nothing else", () => {
@@ -135,11 +144,17 @@ describe("its manners", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("MausBot's own card doesn't interrupt a team's first run: not after the team's welcome in this launch, never over a run", () => {
-    expect(teamQuiet({ config: { team: ACME }, bots: [{ busy: true }] })).toBe(true);
-    expect(teamQuiet({ config: { team: ACME }, bots: [{ busy: false }] })).toBe(false);
+  it("MausBot's own card never reaches a team's member, and its admins never over their welcome or a run", () => {
+    const owner = { hosted: false, canSave: true, cloudHome: true, teamRole: "owner" }, admin = { ...owner, teamRole: "admin" }, member = { ...owner, canSave: false, teamRole: "member" };
+    const idle = { config: { team: ACME }, bots: [{ busy: false }] }, seen = { invitedBy: null, welcomedAt: 1, hints: [] };
+    expect(teamQuiet(idle, member, seen), "a member, even after their welcome").toBe(true);
+    expect(teamQuiet(idle, admin, undefined), "an admin whose welcome is still being read").toBe(true);
+    expect(teamQuiet(idle, admin, { ...seen, welcomedAt: null }), "an admin who hasn't had their welcome").toBe(true);
+    expect(teamQuiet(idle, admin, seen)).toBe(false);
+    expect(teamQuiet(idle, owner, null)).toBe(false);
+    expect(teamQuiet({ config: { team: ACME }, bots: [{ busy: true }] }, owner, null)).toBe(true);
     markTeamWelcomeShown();
-    expect(teamQuiet({ config: { team: ACME }, bots: [] })).toBe(true);
-    expect(teamQuiet({ config: {}, bots: [{ busy: true }] }), "off a team as before").toBe(false);
+    expect(teamQuiet({ config: { team: ACME }, bots: [] }, owner, null)).toBe(true);
+    expect(teamQuiet({ config: {}, bots: [{ busy: true }] }, { hosted: false, canSave: false }, undefined), "off a team as before").toBe(false);
   });
 });

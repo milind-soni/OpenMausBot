@@ -24,17 +24,6 @@ beforeEach(() => {
 });
 
 describe("skills library store", () => {
-  it("exports a reviewed library folder only while its recorded files remain intact", () => {
-    const root = mkdtempSync(join(tmpdir(), "omb-library-bundle-"));
-    library.installLibrarySkill({ name: "bundle", instructions: SKILL("bundle"), source: "fixture", root, reviewState: "approved",
-      files: [{ path: "references/guide.md", content: "library guide" }] });
-    expect(library.exportLibrarySkill("bundle", root)?.files).toEqual([{ path: "references/guide.md", content: "library guide" }]);
-    writeFileSync(join(root, "skills", "bundle", "added.md"), "not reviewed");
-    expect(library.exportLibrarySkill("bundle", root)).toMatchObject({ files: [{ path: "references/guide.md", content: "library guide" }],
-      skipped: [{ path: "added.md", reason: "skill_file_unreviewed" }] });
-    writeFileSync(join(root, "skills", "bundle", "references", "guide.md"), "changed");
-    expect(library.exportLibrarySkill("bundle", root)).toBeNull();
-  });
   it("installs a skill: bytes on disk, entry in the index, listing, invalidation event", () => {
     const events: Array<{ kind: string; name: string }> = [];
     library.skillLibraryEvents.on("invalidate", (event) => events.push(event));
@@ -226,6 +215,28 @@ describe("assignment resolution", () => {
     const only = resolved.find((skill) => skill.name === "library-only")!;
     expect(only.source).toBe("lib");
     expect(only.editable).toBe(false);
+  });
+
+  it("takes a shared skill off one bot and leaves the library copy and every other bot", () => {
+    const name = `shared-${Math.random().toString(36).slice(2, 10)}`;
+    const other = `lib-bot-${Math.random().toString(36).slice(2, 10)}`;
+    const instructions = SKILL(name, "Shared steps.");
+    expect("error" in library.installLibrarySkill({ name, instructions, source: "lib", reviewState: "approved" })).toBe(false);
+    library.setLibrarySkillEveryBot(name, true);
+    try {
+      expect(skills.resolveBotSkills(bot, []).map((skill) => skill.name)).toContain(name);
+      expect(skills.resolveBotSkills(other, []).map((skill) => skill.name)).toContain(name);
+      expect(library.unassignLibrarySkill(bot, name, ["kept", name])).toEqual({ unassigned: true, assignedSkills: ["kept"] });
+      expect(skills.resolveBotSkills(bot, ["kept"]).map((skill) => skill.name)).not.toContain(name);
+      expect(skills.resolveBotSkills(other, []).map((skill) => skill.name)).toContain(name);
+      expect(library.readLibrarySkillFile(name)).toBe(instructions);
+      const page = skills.listBotSkillsWithOrigin(bot, ["kept"]);
+      expect(page.skills.map((skill) => skill.name)).not.toContain(name);
+      expect(page.library.map((skill) => skill.name)).toContain(name);
+      expect(skills.resolveBotSkills(bot, [name]).map((skill) => skill.name)).toContain(name);
+    } finally {
+      expect(library.setLibrarySkillEveryBot(name, false)).toMatchObject({ everyBot: false });
+    }
   });
 
   it("without assignments, resolution is exactly listSkills (the flag-off contract)", () => {

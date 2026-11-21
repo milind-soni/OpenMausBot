@@ -1,14 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { botSkillTemplateSchema, newBotDefaultsSchema, resolveBotCreationDefaults } from "./new-bot-defaults.ts";
+import { newBotApproval, newBotDefaultsSchema, resolveBotCreationDefaults } from "./new-bot-defaults.ts";
 import { parseConfigPatch } from "./config.ts";
 
 describe("new-bot templates", () => {
-  it("requires bundle instructions to round-trip through UTF-8 without changing old text-only templates", () => {
-    const skill = { name: "runbook", description: "A guide", source: "fixture", text: "Guide \ud800", enabled: false };
-    expect(botSkillTemplateSchema.safeParse({ ...skill, files: [{ path: "guide.md", content: "Guide" }] }).success).toBe(false);
-    expect(botSkillTemplateSchema.safeParse(skill).success).toBe(true);
-    expect(botSkillTemplateSchema.safeParse({ ...skill, text: "Guide 😀", files: [{ path: "guide.md", content: "Guide" }] }).success).toBe(true);
-  });
   it("preserves restricted and empty tool defaults while allowing an explicit owner reset", () => {
     const defaults = newBotDefaultsSchema.parse({ profile: { toolScope: { allow: ["native:read", "native:read"] } } });
     expect(defaults.profile).toEqual({ toolScope: { allow: ["native:read"] } });
@@ -83,5 +77,20 @@ describe("new-bot templates", () => {
   it("bounds the complete template, including multiple individually valid files", () => {
     const memory = Object.fromEntries(Array.from({ length: 10 }, (_, index) => [`memory/file${index}.md`, "x".repeat(262_144)]));
     expect(newBotDefaultsSchema.safeParse({ memory }).success).toBe(false);
+  });
+});
+
+describe("the saved level a bot made outside New bot starts at", () => {
+  const saved = (approvalMode?: "ask" | "auto" | "full" | "custom") => newBotDefaultsSchema.parse({ profile: approvalMode ? { approvalMode } : {} });
+  it("is the template's level, and none when the template sets none", () => {
+    expect(newBotApproval(saved("auto"), false)).toBe("auto");
+    expect(newBotApproval(saved("ask"), true)).toBe("ask");
+    expect(newBotApproval(saved("full"), false)).toBe("full");
+    expect(newBotApproval(saved(), false)).toBeUndefined();
+    expect(newBotApproval(undefined, false)).toBeUndefined();
+  });
+  it("leaves Custom and a hosted workspace's Full access to the workspace default", () => {
+    expect(newBotApproval(saved("custom"), false)).toBeUndefined();
+    expect(newBotApproval(saved("full"), true)).toBeUndefined();
   });
 });

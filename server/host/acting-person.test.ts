@@ -209,6 +209,9 @@ describe("what work in one person's private chat hands back", () => {
   it("to a chat others read: only where the result is, never the result or what was observed", () => {
     expect(privateHandBack(done, place(null))).toEqual({ ok: true, text: "Done. The result is in Helper's chat with Ada." });
     expect(privateHandBack({ ok: false, text: "Gmail said the board's thread is gone." }, place(null)).text).toBe("It stopped before it finished. The result is in Helper's chat with Ada.");
+    const approval: Parameters<typeof privateHandBack>[0] = privateHandBack({ ok: true, text: "Did not run.", approvalAsk: "Approve “Bash: cat salary.csv”?" }, place(null));
+    expect(approval.approvalAsk, "an unanswered approval names no private action").toBe("Helper has a question for Ada, in Helper's chat with Ada.");
+    expect(approval.privateQuestion).toBe(true);
     expect(privateHandBack(done, place(BEN)).text, "another person's private chat reads none of hers").toBe("Done. The result is in Helper's chat with Ada.");
   });
 
@@ -216,6 +219,8 @@ describe("what work in one person's private chat hands back", () => {
     const asked = privateHandBack({ ok: true, text: "Found two.\nNEEDS INPUT: Forward the salary review to Ben?", cards: { question: "Forward the salary review to Ben?", ids: ["c1"] } }, place(null));
     expect(asked).toEqual({ ok: true, text: "NEEDS INPUT: Helper has a question for Ada, in Helper's chat with Ada.", cards: { question: "Helper has a question for Ada, in Helper's chat with Ada.", ids: ["c1"] }, privateQuestion: true });
     expect(privateHandBack({ ok: true, text: "Found two.\nNEEDS INPUT: Forward it to Ben?" }, place(null)), "only she can answer it").toMatchObject({ privateQuestion: true });
+    expect(privateHandBack({ ok: true, text: "Found two.\nNEEDS INPUT: 无" }, place(null)), "a line that asks nothing").toEqual({ ok: true, text: "Done. The result is in Helper's chat with Ada." });
+    expect(privateHandBack({ ok: true, text: "Found two.\nNEEDS INPUT: Which account?\nDefault: staging" }, place(null)), "a question with a default").toMatchObject({ text: "NEEDS INPUT: Helper has a question for Ada, in Helper's chat with Ada.", privateQuestion: true });
   });
 
   it("hands everything back into her own private chat, and anything from a chat others read already", () => {

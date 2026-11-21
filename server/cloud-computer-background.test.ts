@@ -2,7 +2,6 @@
 import { createServer, type Server } from "node:http";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "./config.ts";
-import { hostTimeout } from "./testing/host-timeout.ts";
 
 const BOX = "bx_23456789", OTHER_BOX = "bx_3456789a";
 const OWN_KEY = "boat_own-synthetic-key", INCLUDED = "box_omb_included-synthetic-token";
@@ -17,6 +16,7 @@ const calls: Array<{ method: string; path: string; query: string; body: any; aut
 let nextProcessId = 41;
 let hold = false;
 let holdStatusAfterFirst = false;
+let statusHeld: (() => void) | undefined;
 let syncReply: Record<string, unknown> = { exitCode: 0, stdout: "done", stderr: "" };
 let startReply: { status: number; body: unknown } | undefined;
 let statusReply: { status: number; body: unknown } | undefined;
@@ -44,7 +44,7 @@ beforeAll(async () => {
       if (statusReply) return send(statusReply.status, statusReply.body);
       const process = processes.get(`${box}:${pid}`);
       if (!process) return send(404, { ok: false, code: "not_found", message: "No such process." });
-      if (holdStatusAfterFirst && process.polls > 0) return;
+      if (holdStatusAfterFirst && process.polls > 0) return statusHeld?.();
       const running = process.polls++ < process.runningFor;
       return send(200, {
         ok: true, type: "command.status", success: true, processId: Number(pid), status: running ? "running" : process.lost ? "lost" : "exited", running,
@@ -177,7 +177,7 @@ describe("background status deadlines", () => {
 });
 afterAll(async () => { vi.unstubAllEnvs(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
 beforeEach(() => {
-  calls.length = 0; processes.clear(); hold = false; holdStatusAfterFirst = false; startReply = undefined; statusReply = undefined;
+  calls.length = 0; processes.clear(); hold = false; holdStatusAfterFirst = false; statusHeld = undefined; startReply = undefined; statusReply = undefined;
   syncReply = { exitCode: 0, stdout: "done", stderr: "" };
 });
 
@@ -269,13 +269,14 @@ describe.each([
   it("propagates cancellation during a follow-up status read", async () => {
     const processId = await start();
     holdStatusAfterFirst = true;
+    const held = new Promise<void>(resolve => { statusHeld = resolve; });
+    const stoppedClock = { now: () => 0, sleep: async () => {}, timeout: () => new AbortController().signal };
     const controller = new AbortController();
-    // The next status read waits out one poll. A one-second wait is already over when that timer fires late on Windows, so the read never starts.
-    const pending = background.backgroundStatus(cfg, BOX, { process_id: processId, wait_seconds: 6 }, controller.signal);
-    await expect.poll(() => calls.filter(entry => entry.method === "GET").length, { timeout: hostTimeout(10_000), interval: 20 }).toBe(2);
+    const pending = background.backgroundStatus(cfg, BOX, { process_id: processId, wait_seconds: 1 }, controller.signal, stoppedClock);
+    await held;
+    expect(calls.filter(entry => entry.method === "GET")).toHaveLength(2);
     controller.abort();
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
-    server.closeAllConnections();
   });
 
   it("returns only the end of long output, and never half a character", async () => {
@@ -405,8 +406,11 @@ describe.each([
     expect(background.EXEC_LATE).toMatch(/may still be running.*do not run it again blindly.*background: true.*exec_status/s);
     server.closeAllConnections();
     hold = false;
-    syncReply = { exitCode: null, stdout: "", stderr: "", timedOut: true };
-    expect(await call("exec", { command: "sleep 600" }).done).toEqual({ isError: true, content: [{ type: "text", text: background.EXEC_LATE }] });
+    // A relay that does not forward the detached flag runs the command itself, and the provider stops it at its limit.
+    startReply = { status: 200, body: { exitCode: 143, signal: "SIGTERM", stdout: "", stderr: "", timedOut: true } };
+    const stopped = await call("exec", { command: "sleep 600" }).done;
+    expect(stopped).toEqual({ isError: true, content: [{ type: "text", text: (await import("./cloud-computer-tools.ts")).EXEC_STOPPED_AT_LIMIT }] });
+    expect((stopped as { content: Array<{ text: string }> }).content[0]!.text).toMatch(/stopped this command after 30 seconds.*no longer running.*background: true/s);
     expect(calls.filter(entry => entry.method === "POST")).toHaveLength(2);
   });
 

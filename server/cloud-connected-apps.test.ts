@@ -3,8 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { CLOUD_CONNECTED_APPS_FILE, startCloudConnectedApps, type CloudConnectedAppsOptions } from "./cloud-connected-apps.ts";
-import { connectionMode, connectorSetup, listToolkits, setManagedBrokerAccess } from "./composio.ts";
+import { cloudConnectedAppsBrokerUrl, CLOUD_CONNECTED_APPS_FILE, startCloudConnectedApps, startCloudHomeConnectedApps, stopCloudHomeConnectedApps, type CloudConnectedAppsOptions } from "./cloud-connected-apps.ts";
+import { brokerAccess, connectionMode, connectorSetup, listToolkits, setManagedBrokerAccess } from "./composio.ts";
+import { PeopleConnections } from "./team-connections.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
 const BROKER = "https://broker.example.test";
@@ -49,6 +50,9 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+  stopCloudHomeConnectedApps();
   setManagedBrokerAccess(null);
   await removeTempDir(dataDir);
 });
@@ -318,5 +322,95 @@ describe("a paid Cloud's grant", () => {
     expect(grantCalls(broker.calls)).toHaveLength(3);
     expect(lines.at(-1)).toBe("connected apps: the service did not take this Cloud's grant (HTTP 404)");
     expect(applied).toEqual([{ url: BROKER, token: OLD }]);
+  });
+});
+
+describe("a Cloud kept off the managed service", () => {
+  const GRANT = "signed-grant";
+
+  it("with the owner's own key, sends nothing at start, not even its token check or its plan, until the key is cleared", async () => {
+    store(OLD);
+    let ownKey = true;
+    const broker = fakeBroker({ "GET /v1/me": [json(200, {})], "PUT /v1/installation/cloud": [json(200, {})] });
+    await start(broker.fetchImpl, { ownKey: () => ownKey, cloudGrant: GRANT }).settled();
+    expect(broker.calls).toEqual([]);
+    expect(applied).toEqual([{ url: BROKER, token: OLD }]);
+    expect(existsSync(file())).toBe(true);
+
+    timers.shift()!.run();
+    expect(broker.calls).toEqual([]);
+
+    ownKey = false;
+    const apps = start(broker.fetchImpl, { ownKey: () => ownKey, cloudGrant: GRANT });
+    await apps.settled();
+    expect(broker.calls.map((call) => `${call.method} ${call.path}`)).toEqual(["GET /v1/me", "PUT /v1/installation/cloud"]);
+  });
+
+  it("a Cloud that started on its own key registers once the key is cleared, without a restart", async () => {
+    let ownKey = true;
+    const broker = fakeBroker({ "POST /v1/installations": [registered(NEW)] });
+    const apps = start(broker.fetchImpl, { ownKey: () => ownKey });
+    await apps.settled();
+    expect(broker.registrations()).toBe(0);
+    ownKey = false;
+    timers.shift()!.run();
+    await apps.settled();
+    expect(broker.registrations()).toBe(1);
+    expect(applied.at(-1)).toEqual({ url: BROKER, token: NEW });
+  });
+
+  it("with no key and no switch, registers as before", async () => {
+    const broker = fakeBroker({ "POST /v1/installations": [registered(NEW)] });
+    await start(broker.fetchImpl, { ownKey: () => false }).settled();
+    expect(broker.registrations()).toBe(1);
+  });
+
+  it("OMB_COMPOSIO_BROKER=off: a Cloud home registers nothing and shows the needs-a-key state, even with a token on the volume", async () => {
+    store(OLD);
+    const fetchSpy = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchSpy);
+    vi.stubEnv("OMB_COMPOSIO_BROKER_URL", BROKER);
+    vi.stubEnv("OMB_COMPOSIO_BROKER", "off");
+    const apply = vi.fn();
+    startCloudHomeConnectedApps({ cloudHome: true, dataDir, apply, cloudGrant: GRANT });
+    expect(apply).not.toHaveBeenCalled();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(existsSync(file())).toBe(true);
+
+    expect(cloudConnectedAppsBrokerUrl()).toBe("");
+    setManagedBrokerAccess({ url: BROKER, token: OLD });
+    expect(brokerAccess()).toBeNull();
+    expect(connectionMode({})).toBe("unavailable");
+    expect(connectorSetup({}, true)).toBe("needs-setup");
+    expect(connectionMode({ composio: { apiKey: "ak_owner_project" } })).toBe("self-hosted");
+    expect(connectorSetup({ composio: { apiKey: "ak_owner_project" } }, true)).toBe("ready");
+  });
+
+  it("the switch also wins over a token named in the server's environment", async () => {
+    vi.stubEnv("OMB_COMPOSIO_BROKER_URL", BROKER);
+    vi.stubEnv("OMB_COMPOSIO_BROKER_TOKEN", OLD);
+    vi.resetModules();
+    const fresh = await import("./composio-broker-access.ts");
+    expect(fresh.brokerAccess()).toEqual({ url: BROKER, token: OLD });
+    vi.stubEnv("OMB_COMPOSIO_BROKER", "off");
+    expect(fresh.brokerAccess()).toBeNull();
+  });
+
+  it("OMB_COMPOSIO_BROKER=off: a Team Cloud member's own apps report unavailable, and the member's installation is kept", async () => {
+    const person = `p_${"a".repeat(22)}`;
+    const fetchImpl = vi.fn(async () => json(201, { installationId: "install-p", token: NEW }));
+    const people = new PeopleConnections({ dataDir, brokerUrl: () => BROKER, clients: () => undefined, isOwnerLive: () => true, fetchImpl: fetchImpl as unknown as typeof fetch });
+    await expect(people.ensureAppsAccess(person, "m@example.test")).resolves.toEqual({ url: BROKER, token: NEW });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+
+    vi.stubEnv("OMB_COMPOSIO_BROKER", "off");
+    expect(people.appsAccess(person)).toBeNull();
+    expect(people.appsPeople()).toEqual([]);
+    await expect(people.ensureAppsAccess(`p_${"b".repeat(22)}`, "n@example.test")).resolves.toBeNull();
+    expect(fetchImpl).toHaveBeenCalledOnce();
+
+    vi.unstubAllEnvs();
+    expect(people.appsAccess(person)).toEqual({ url: BROKER, token: NEW });
   });
 });

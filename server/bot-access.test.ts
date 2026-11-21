@@ -79,11 +79,15 @@ describe("what a request needs", () => {
     expect(levelNeeded("POST", "/api/bots/b1/bot-api/new-key")).toBe("edit");
     expect(levelNeeded("GET", "/api/bots/b1/bot-api")).toBe("view");
     expect(levelNeeded("POST", "/api/groups/g1/read")).toBe("view");
+    expect(levelNeeded("POST", "/api/bots/b1/data/page")).toBe("view");
+    expect(levelNeeded("POST", "/api/bots/b1/data/run")).toBe("chat");
     expect(levelNeeded("POST", "/api/bots/b1/tasks/t1")).toBe("view");
     expect(levelNeeded("POST", "/api/bots/b1/tasks/delete")).toBe("chat");
     expect(levelNeeded("POST", "/api/bots/b1/tasks")).toBe("chat");
     expect(levelNeeded("PATCH", "/api/bots/b1/tasks/t1")).toBe("chat");
     expect(levelNeeded("POST", "/api/bots/b1/messages")).toBe("chat");
+    expect(levelNeeded("POST", "/api/bots/b1/compact")).toBe("chat");
+    expect(levelNeeded("POST", "/api/bots/b1/context")).toBe("chat");
     expect(levelNeeded("POST", "/api/threads/t1/respond")).toBe("chat");
     expect(levelNeeded("PATCH", "/api/bots/b1/profile")).toBe("chat");
     expect(levelNeeded("PUT", "/api/bots/b1/access")).toBe("edit");
@@ -100,7 +104,8 @@ describe("what a request needs", () => {
     expect(memberBotPatchViolation({ color: "teal", name: "Mine" }, "chat", true, true)).toBeNull();
     expect(memberBotPatchViolation({ color: "teal" }, "edit", false, true)).toBeNull();
     expect(memberBotPatchViolation({ soul: "x" }, "chat")).toBe("soul");
-    expect(memberBotPatchViolation({ soul: "x", modelSelection: {}, threadId: "t", composio: true, connectorTools: {}, mcpServers: [] }, "edit")).toBeNull();
+    expect(memberBotPatchViolation({ soul: "x", modelSelection: {}, threadId: "t", composio: true, connectorTools: {}, mcpServers: [], toolsOff: ["data"] }, "edit")).toBeNull();
+    expect(memberBotPatchViolation({ toolsOff: ["data"] }, "chat")).toBe("toolsOff");
     for (const field of ["approvalMode", "autoApprove", "alwaysAllow", "cwd", "computer", "section", "chiefOfStaff", "peers", "visibility", "access", "reportsTo", "browserProfile"]) {
       expect(memberBotPatchViolation({ [field]: null }, "edit"), field).toBe(field);
     }

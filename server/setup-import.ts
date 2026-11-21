@@ -13,9 +13,9 @@ import type { SetupDetection, SetupImportRequest, SetupImportResult, SetupSource
 import { holdsCredential } from "../shared/redact.ts";
 import { parseSkillMd, SKILL_FILE_MAX_BYTES, type ParsedSkill } from "../shared/skill-md.ts";
 import { importedSkillIntact, readImportedSkills, storeImportedSkills, type ImportedSkillEntry, type ImportedSkillInput } from "./imported-skills.ts";
-import { containsSkillPathControls, scanSkillFolder } from "./skill-folder.ts";
-import { secretName } from "./skill-secret-names.ts";
-import { importedMcpServerName, isRemoteMcpServer, MAX_MCP_SERVERS, parseMcpServersImport, parseStoredMcpServer, type StoredMcpServer } from "./mcp-registry.ts";
+import { scanSkillFolder } from "./skill-folder.ts";
+import { importedMcpServerName, isRemoteMcpServer, mcpSharedServerRoom, parseMcpServersImport, parseStoredMcpServer, type StoredMcpServer } from "./mcp-registry.ts";
+import { parse as parseYaml } from "yaml";
 import { parseToml } from "./toml-lite.ts";
 
 /** The file operations finding and copying use, so tests can see every path touched. Each answers null on failure. */
@@ -69,7 +69,7 @@ const nodeFs: SetupFs = {
       const nonBlock = process.platform !== "win32" ? constants.O_NONBLOCK : 0;
       fd = openSync(path, constants.O_RDONLY | noFollow | nonBlock);
       const opened = fstatSync(fd);
-      if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size > max || (oneLink && opened.nlink > 1)) return null;
+      if (!opened.isFile() || opened.size > max || (oneLink && opened.nlink > 1)) return null;
       const buffer = Buffer.alloc(opened.size);
       let offset = 0;
       while (offset < buffer.length) {
@@ -77,8 +77,7 @@ const nodeFs: SetupFs = {
         if (count <= 0) break;
         offset += count;
       }
-      const after = fstatSync(fd);
-      return offset === opened.size && after.size === opened.size && after.mtimeMs === opened.mtimeMs && after.ctimeMs === opened.ctimeMs ? buffer : null;
+      return buffer.subarray(0, offset);
     } catch {
       return null;
     } finally {
@@ -93,7 +92,7 @@ export function thisMachine(): SetupMachine {
   return { home: homedir(), platform: process.platform, env: process.env, fs: nodeFs };
 }
 
-type ToolFormat = "claudeJson" | "json" | "toml";
+type ToolFormat = "claudeJson" | "json" | "toml" | "yaml";
 
 const CONFIG_MAX_BYTES = 1024 * 1024;
 /** ~/.claude.json also keeps every project's history, so it can be large; only its mcpServers member is parsed. */
@@ -108,19 +107,36 @@ export function setupPaths(machine: Pick<SetupMachine, "home" | "platform" | "en
     : platform === "win32" ? join(absolute(env.APPDATA) ?? join(home, "AppData", "Roaming"), "Claude")
       : join(home, ".config", "Claude");
   const codexLabel = codexHome === join(home, ".codex") ? "~/.codex/skills" : "$CODEX_HOME/skills";
+  // Hermes Agent (hermes_constants.get_hermes_home) and OpenClaw (docs.openclaw.ai/help/environment) homes.
+  const hermesDefault = platform === "win32" ? join(absolute(env.LOCALAPPDATA) ?? join(home, "AppData", "Local"), "hermes") : join(home, ".hermes");
+  const hermesHome = absolute(env.HERMES_HOME) ?? hermesDefault;
+  // Named by where it is: a HERMES_HOME that points at ~/.hermes (as on any system but Windows by default) still reads ~/.hermes.
+  const hermesLabel = hermesHome === join(home, ".hermes") ? "~/.hermes/skills"
+    : hermesHome === hermesDefault ? "%LOCALAPPDATA%/hermes/skills" : "$HERMES_HOME/skills";
+  const openclawHome = absolute(env.OPENCLAW_STATE_DIR) ?? join(home, ".openclaw");
+  const openclawLabel = openclawHome === join(home, ".openclaw") ? "~/.openclaw" : "$OPENCLAW_STATE_DIR";
   return {
     codexHome,
+    hermesHome,
+    openclawHome,
     skills: [
       { source: "claudeCode", root: join(home, ".claude", "skills"), label: "~/.claude/skills" },
       { source: "codex", root: join(codexHome, "skills"), label: codexLabel },
-    ] satisfies Array<{ source: SkillSource; root: string; label: string }>,
+      // Hermes files skills under category folders, and lists the ones it ships (not the person's) in .bundled_manifest.
+      { source: "hermes", root: join(hermesHome, "skills"), label: hermesLabel, nested: true, bundled: join(hermesHome, "skills", ".bundled_manifest") },
+      { source: "openclaw", root: join(openclawHome, "skills"), label: `${openclawLabel}/skills`, nested: true },
+      { source: "openclaw", root: join(openclawHome, "workspace", "skills"), label: `${openclawLabel}/workspace/skills`, nested: true },
+    ] satisfies Array<{ source: SkillSource; root: string; label: string; nested?: boolean; bundled?: string }>,
     tools: [
       { source: "claudeCode", path: join(home, ".claude.json"), format: "claudeJson", max: CLAUDE_JSON_MAX_BYTES },
       { source: "claudeDesktop", path: join(desktop, "claude_desktop_config.json"), format: "json", max: CONFIG_MAX_BYTES },
       { source: "cursor", path: join(home, ".cursor", "mcp.json"), format: "json", max: CONFIG_MAX_BYTES },
       { source: "codex", path: join(codexHome, "config.toml"), format: "toml", max: CONFIG_MAX_BYTES },
       { source: "gemini", path: join(home, ".gemini", "settings.json"), format: "json", max: CONFIG_MAX_BYTES },
-    ] satisfies Array<{ source: SetupSource; path: string; format: ToolFormat; max: number }>,
+      { source: "hermes", path: join(hermesHome, "config.yaml"), format: "yaml", max: CONFIG_MAX_BYTES, key: "mcp_servers" },
+      // OpenClaw's config is JSON5; the comments and trailing commas the json format already strips are what it adds in practice.
+      { source: "openclaw", path: absolute(env.OPENCLAW_CONFIG_PATH) ?? join(openclawHome, "openclaw.json"), format: "json", max: CONFIG_MAX_BYTES, key: "mcp.servers" },
+    ] satisfies Array<{ source: SetupSource; path: string; format: ToolFormat; max: number; key?: string }>,
   };
 }
 
@@ -141,7 +157,20 @@ interface FoundSkill {
 
 const MAX_SKILL_FOLDERS = 500;
 
-export { secretName } from "./skill-secret-names.ts";
+const SECRET_WORDS = /(?:^|[^a-z])(?:o?auth|tokens?|sessions?|cookies?|passw\w*|secrets?|credentials?|api[-_]?keys?|keys?|bearer|storage[-_]?state|service[-_]?accounts?|private[-_]?keys?)(?:[^a-z]|$)/;
+const SECRET_FOLDERS = /^(?:secrets?|credentials?|sessions?|cookies?|tokens?|keys?|private[-_]?keys?|service[-_]?accounts?)$/;
+const KEY_STORES = /\.(?:pem|key|p12|pfx|jks|keystore|kdbx|ppk|keychain|keychain-db|sqlite3?|db|env)$|^id_(?:rsa|dsa|ecdsa|ed25519)/;
+/** Data formats a credential is kept in. Instructions and code may well be named after one (credentials.md, auth.py). */
+const DATA_EXTENSIONS = new Set(["json", "jsonc", "jsonl", "yaml", "yml", "toml", "ini", "cfg", "conf", "txt", "text", "csv", "tsv", "xml"]);
+
+/** A name inside a skill folder that holds a credential, a session or a key rather than instructions or code: it is left
+ * out, decided before anything is opened. */
+export function secretName(name: string): boolean {
+  const lower = name.toLowerCase();
+  if (SECRET_FOLDERS.test(lower) || KEY_STORES.test(lower)) return true;
+  const dot = lower.lastIndexOf(".");
+  return dot > 0 && DATA_EXTENSIONS.has(lower.slice(dot + 1)) && SECRET_WORDS.test(lower.slice(0, dot));
+}
 
 /** Folders macOS asks the person about before an app looks inside. */
 const GUARDED_HOME_FOLDERS = new Set(["desktop", "documents", "downloads", "library", "movies", "music", "pictures"]);
@@ -204,7 +233,7 @@ function placesFor(machine: SetupMachine): Places {
     return [...new Set([...spellings, ...(found ? [found.path] : [])])];
   };
   const paths = setupPaths(machine);
-  const toolHomes = [join(machine.home, ".claude"), paths.codexHome, join(machine.home, ".gemini"), join(machine.home, ".cursor")].flatMap(forms);
+  const toolHomes = [join(machine.home, ".claude"), paths.codexHome, join(machine.home, ".gemini"), join(machine.home, ".cursor"), paths.hermesHome, paths.openclawHome].flatMap(forms);
   const roots = new Map<string, string>();
   for (const { root } of paths.skills) {
     const found = locate(machine, { homes, darwin }, root);
@@ -224,28 +253,47 @@ function skillFolderAllowed(places: Places, real: string): boolean {
 
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 
+const MANIFEST_MAX_BYTES = 256 * 1024;
+
+/** The skills Hermes seeded from its own install: one `name:hash` line each (tools/skills_sync.py). */
+function bundledSkillNames(machine: SetupMachine, manifest: string): Set<string> {
+  const bytes = machine.fs.read(manifest, MANIFEST_MAX_BYTES, false);
+  const text = bytes ? utf8(bytes) : null;
+  if (!text) return new Set();
+  return new Set(text.split(/\r?\n/).map((line) => line.split(":")[0]!.trim()).filter(Boolean));
+}
+
 /** Skill folders with a valid SKILL.md, Claude Code's first; a name found twice keeps its first folder. */
 function findSkills(machine: SetupMachine): FoundSkill[] {
   const places = placesFor(machine);
   const found: FoundSkill[] = [];
   const names = new Set<string>();
-  for (const { source, root, label } of setupPaths(machine).skills) {
+  for (const skillRoot of setupPaths(machine).skills) {
+    const { source, root, label } = skillRoot;
     const real = places.roots.get(root);
     if (!real) continue;
-    // Dot folders hold the tools' own built-in skills (Codex's .system), not the person's.
-    const folders = (machine.fs.readdir(real) ?? []).filter((folder) => !folder.startsWith(".")).sort().slice(0, MAX_SKILL_FOLDERS);
-    for (const folder of folders) {
-      const dir = locate(machine, places, join(real, folder));
-      if (!dir?.info.isDirectory() || !skillFolderAllowed(places, dir.path)) continue;
+    const shipped = "bundled" in skillRoot && skillRoot.bundled ? bundledSkillNames(machine, skillRoot.bundled) : new Set<string>();
+    // Dot folders hold the tools' own built-in skills (Codex's .system, Hermes' .hub), not the person's.
+    const listed = (dir: string) => (machine.fs.readdir(dir) ?? []).filter((folder) => !folder.startsWith(".")).sort();
+    let budget = MAX_SKILL_FOLDERS;
+    const visit = (relativeFolder: string, deeper: boolean) => {
+      if (budget-- <= 0) return;
+      const dir = locate(machine, places, join(real, relativeFolder));
+      if (!dir?.info.isDirectory() || !skillFolderAllowed(places, dir.path)) return;
       const bytes = machine.fs.read(join(dir.path, "SKILL.md"), SKILL_FILE_MAX_BYTES, false);
-      const text = bytes ? utf8(bytes) : null;
+      if (!bytes) {
+        if (deeper) for (const inner of listed(dir.path)) visit(join(relativeFolder, inner), false);
+        return;
+      }
+      const text = utf8(bytes);
       const parsed = text === null ? null : parseSkillMd(text);
-      if (!parsed || "error" in parsed || names.has(parsed.name)) continue;
+      if (!parsed || "error" in parsed || names.has(parsed.name) || shipped.has(parsed.name)) return;
       names.add(parsed.name);
       found.push({
-        name: parsed.name, source, parsed, folder: dir.path, root, origin: join(root, folder), label: `${label}/${folder}`, text: text!, sha256: sha256(text!),
+        name: parsed.name, source, parsed, folder: dir.path, root, origin: join(root, relativeFolder), label: `${label}/${relativeFolder.split(/[\\/]/).join("/")}`, text: text!, sha256: sha256(text!),
       });
-    }
+    };
+    for (const folder of listed(real)) visit(folder, "nested" in skillRoot && skillRoot.nested === true);
   }
   return found;
 }
@@ -273,7 +321,7 @@ export const SKILL_COPY_LIMITS = {
 interface SkillFile {
   path: string;
   content: string;
-  executable: boolean | null;
+  executable: boolean;
 }
 
 function textFile(name: string): boolean {
@@ -294,14 +342,13 @@ function utf8(bytes: Buffer): string | null {
 
 /** The text files beside SKILL.md, within the limits. Links are never followed, a file with another hard link (which
  * may be a credential elsewhere) is not read, and one holding a credential is not copied; anything left out is counted. */
-function skillFiles(fs: SetupFs, dir: string, budget: { bytes: number }, modeKnown: boolean): { files: SkillFile[]; leftOut: number } {
+function skillFiles(fs: SetupFs, dir: string, budget: { bytes: number }): { files: SkillFile[]; leftOut: number } {
   const files: SkillFile[] = [];
   let leftOut = 0;
   let bytes = 0;
   const walk = (folder: string, relative: string, depth: number) => {
     for (const name of (fs.readdir(folder) ?? []).sort()) {
       if (name.startsWith(".")) continue;
-      if (containsSkillPathControls(name)) { leftOut += 1; continue; }
       // Decided by name before anything is opened.
       if (secretName(name)) {
         leftOut += 1;
@@ -324,13 +371,11 @@ function skillFiles(fs: SetupFs, dir: string, budget: { bytes: number }, modeKno
           bytes + info.size <= SKILL_COPY_LIMITS.skillBytes && budget.bytes + info.size <= SKILL_COPY_LIMITS.totalBytes;
         const raw = fits ? fs.read(full, SKILL_COPY_LIMITS.fileBytes, false, true) : null;
         const content = raw ? utf8(raw) : null;
-        const after = raw && fs.lstat(full);
-        if (content === null || !after?.isFile() || after.nlink > 1 || raw!.length !== info.size || after.dev !== info.dev || after.ino !== info.ino ||
-            after.size !== info.size || after.mode !== info.mode || after.mtimeMs !== info.mtimeMs || after.ctimeMs !== info.ctimeMs || holdsCredential(content)) {
+        if (content === null || holdsCredential(content)) {
           leftOut += 1;
           continue;
         }
-        files.push({ path, content, executable: modeKnown ? (info.mode & 0o100) !== 0 : null });
+        files.push({ path, content, executable: (info.mode & 0o111) !== 0 });
         bytes += raw!.length;
         budget.bytes += raw!.length;
       }
@@ -352,15 +397,13 @@ function freshSkill(skill: FoundSkill, held: ImportedSkillEntry | undefined): bo
 
 /** A found skill as an import stores it: SKILL.md and the text files beside it, with the scan's warnings. */
 function skillInput(machine: SetupMachine, skill: FoundSkill, budget: { bytes: number }): { input: ImportedSkillInput; leftOut: number } {
-  const modeKnown = machine.platform !== "win32";
-  const copy = skillFiles(machine.fs, skill.folder, budget, modeKnown);
+  const copy = skillFiles(machine.fs, skill.folder, budget);
   return {
     leftOut: copy.leftOut,
     input: {
       name: skill.name,
       skillMd: skill.text,
       files: copy.files,
-      ...(modeKnown ? { executableIntentVersion: 1 as const } : {}),
       entry: {
         description: skill.parsed.description,
         source: skill.source,
@@ -565,7 +608,9 @@ function pasteEntry(source: SetupSource, raw: Record<string, unknown>): Record<s
     if (typeof raw.httpUrl === "string") return remote("http", raw.httpUrl);
     if (typeof raw.url === "string") return remote(raw.type === "http" ? "http" : "sse", raw.url);
   } else if (typeof raw.url === "string") {
-    return remote(typeof raw.type === "string" && /sse/i.test(raw.type) ? "sse" : "http", raw.url);
+    // OpenClaw names it transport ("streamable-http" or "sse"); the others, type.
+    const kind = typeof raw.type === "string" ? raw.type : typeof raw.transport === "string" ? raw.transport : "";
+    return remote(/sse/i.test(kind) ? "sse" : "http", raw.url);
   }
   const env = textValues(raw.env);
   return {
@@ -594,8 +639,12 @@ function toolEntries(machine: SetupMachine, tool: ReturnType<typeof setupPaths>[
       const servers = topLevelJsonMember(text, "mcpServers");
       return isRecord(servers) ? servers : null;
     }
-    const parsed: unknown = tool.format === "toml" ? parseToml(text) : JSON.parse(withoutTrailingCommas(withoutJsonComments(text)));
-    const servers = isRecord(parsed) ? parsed[tool.format === "toml" ? "mcp_servers" : "mcpServers"] : undefined;
+    const parsed: unknown = tool.format === "toml" ? parseToml(text)
+      : tool.format === "yaml" ? parseYaml(text, { maxAliasCount: 100 })
+        : JSON.parse(withoutTrailingCommas(withoutJsonComments(text)));
+    const key = "key" in tool && tool.key ? tool.key : tool.format === "toml" ? "mcp_servers" : "mcpServers";
+    let servers: unknown = parsed;
+    for (const part of key.split(".")) servers = isRecord(servers) ? servers[part] : undefined;
     return isRecord(servers) ? servers : null;
   } catch {
     return null;
@@ -658,7 +707,7 @@ function importTools(machine: SetupMachine, host: SetupHost): NonNullable<SetupI
   try {
     const current = host.mcpServers();
     const { fresh, present, conflicts, refused } = findTools(machine, current, host);
-    const room = Math.max(0, MAX_MCP_SERVERS - Object.keys(current).length);
+    const room = mcpSharedServerRoom(current);
     const adding = fresh.slice(0, room);
     let saved = true;
     if (adding.length) {
@@ -686,7 +735,7 @@ export function detectSetup(machine: SetupMachine, host: SetupHost): SetupDetect
   const index = readImportedSkills();
   const skills = findSkills(machine).filter((skill) => freshSkill(skill, index[skill.name])).map(({ name, source }) => ({ name, source }));
   const current = host.mcpServers();
-  const tools = Object.keys(current).length < MAX_MCP_SERVERS
+  const tools = mcpSharedServerRoom(current) > 0
     ? findTools(machine, current, host).fresh.map(({ name, source }) => ({ name, source }))
     : [];
   return { skills, tools };

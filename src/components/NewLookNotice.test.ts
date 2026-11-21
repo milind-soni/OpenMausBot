@@ -50,7 +50,7 @@ describe("the new look notice", () => {
     expect(dialog()?.getAttribute("role")).toBe("dialog");
     expect(dialog()?.getAttribute("aria-modal")).toBe("true");
     expect(host.querySelector("h2")?.textContent).toBe("MausBot has a simpler look");
-    expect(host.textContent).toContain("Everything you need is still here; rarer settings are under Settings → More settings.");
+    expect(host.textContent).toContain("Everything you need is still here; search Settings to find the rarer ones.");
     expect(host.querySelector('[role="switch"]')).toBeNull();
     expect(host.textContent).not.toContain("Advanced");
     expect(document.activeElement).toBe(host.querySelector("h2"));
@@ -91,7 +91,7 @@ describe("the word that Advanced mode is back", () => {
     await show(true);
     expect(dialog()?.hasAttribute("data-advanced-back")).toBe(true);
     expect(host.querySelector("h2")?.textContent).toBe("Advanced mode is back");
-    expect(host.textContent).toContain("This device is on Advanced mode again. Turn it off any time in Settings → General.");
+    expect(host.textContent).toContain("This device is on Advanced mode again. Turn it off any time in Settings → Advanced mode.");
     expect(host.querySelector('[role="switch"]')).toBeNull();
     expect(document.activeElement).toBe(host.querySelector("h2"));
   });

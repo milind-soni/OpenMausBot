@@ -4,7 +4,8 @@
 // it under the same id, switched off, as its owner's, with this computer's folder named as its own; DELETE lets this
 // computer go of an app event My Cloud now collects. Admin scope; My Cloud takes an item only over its owner's session.
 import { createHash } from "node:crypto";
-import { lstatSync, opendirSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 
@@ -19,11 +20,9 @@ import type { AppTriggerManager } from "./app-triggers.ts";
 import type { CalendarCall, CalendarCallManager } from "./calendar-calls.ts";
 import type { CloudOwner } from "./cloud-owner-lines.ts";
 import type { CloudSendItem } from "./cloud-send.ts";
-import { retireUnusedStarter, takeArrivingDefaultBot } from "./default-bot.ts";
+import { keptDefaultBot, retireUnusedStarter, takeArrivingDefaultBot } from "./default-bot.ts";
 import { watchAsMade } from "./host/default-watch.ts";
-import { IMPORTED_SKILLS_DIR, importedSkillCaptureIntact, readFileNoFollow, readImportedSkills, storeImportedSkills, type ImportedSkillEntry, type ImportedSkillInput } from "./imported-skills.ts";
-import { containsSkillPathControls } from "./skill-folder.ts";
-import type { PortableSkillFile } from "./portable-skill-files.ts";
+import { IMPORTED_SKILLS_DIR, readImportedSkills, storeImportedSkills, type ImportedSkillInput } from "./imported-skills.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import { withCheckFields } from "./routine-load.ts";
 import type { Routine, RoutineManager, RoutineRun } from "./routines.ts";
@@ -37,11 +36,11 @@ import { restorePaths, validRelative } from "./workspace-backup-paths.ts";
 const SHARED_ROOT = "/omb-data";
 const FINISHED = new Set(["completed", "failed", "cancelled", "missed"]);
 const KIND_BODY_MAX = 8 * 1024 * 1024;
-const ROUTINE_FIELDS = ["name", "prompt", "target", "botId", "groupId", "runOn", "schedule", "durationMinutes", "timeoutMinutes", "attachments", "continuity", "modelSelection",
+const ROUTINE_FIELDS = ["name", "prompt", "target", "botId", "groupId", "runOn", "schedule", "durationMinutes", "timeoutMinutes", "attachments", "continuity", "sameConversation", "modelSelection",
   "overlap", "runOnStartup", "sourceThreadId", "resultsThreadId", "createdAt", "checks", "access", "deliver"] as const;
 const CALL_FIELDS = ["name", "description", "botIds", "schedule", "durationMinutes", "attachments", "roomId", "createdAt"] as const;
-const WEBHOOK_FIELDS = ["name", "prompt", "botId", "runOn", "delivery", "groupId", "eventTypes", "maxPendingRuns", "resultsThreadId", "createdAt"] as const;
-const APP_EVENT_FIELDS = ["name", "prompt", "botId", "runOn", "app", "event", "accountId", "config", "filter", "sourceThreadId"] as const;
+const WEBHOOK_FIELDS = ["name", "prompt", "botId", "runOn", "delivery", "groupId", "eventTypes", "payloadFilter", "maxPendingRuns", "sameConversation", "resultsThreadId", "createdAt"] as const;
+const APP_EVENT_FIELDS = ["name", "prompt", "botId", "runOn", "app", "event", "accountId", "config", "filter", "sourceThreadId", "sameConversation"] as const;
 /** Prose that may name this computer's data folder. */
 const TEXTS = ["prompt", "description", "output", "error"] as const;
 export const MOVE_BOT_FIELDS: readonly string[] = Object.values(MOVE_BOT_PARTS).flat();
@@ -86,47 +85,31 @@ function finishedRuns(routines: Pick<RoutineManager, "listRuns">, routineId: str
 }
 
 /** An imported skill's files as they are kept here, SKILL.md apart. */
-function importedSkillFiles(name: string, entry: ImportedSkillEntry): Pick<ImportedSkillInput, "skillMd" | "files" | "executableIntentVersion"> | null {
+function importedSkillFiles(name: string): { skillMd: string; files: Array<{ path: string; content: string; executable: boolean }> } | null {
   const root = join(IMPORTED_SKILLS_DIR, name);
-  const files: Array<{ path: string; content: string; executable: boolean | null }> = [], captured: PortableSkillFile[] = [];
-  const known = !entry.modeUnknown && (entry.executableFiles !== undefined || process.platform !== "win32"), executable = entry.executableFiles && new Set(entry.executableFiles);
-  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
-  let visited = 0, bytesRead = 0;
+  const files: Array<{ path: string; content: string; executable: boolean }> = [];
   let skillMd: string | null = null;
   const walk = (folder: string, prefix: string, depth: number): boolean => {
     if (depth > 8) return false;
-    const names: string[] = [], handle = opendirSync(folder);
-    try {
-      for (let item = handle.readSync(); item; item = handle.readSync()) {
-        if (++visited > 1 + 200 * 9 || containsSkillPathControls(item.name)) return false;
-        names.push(item.name);
-      }
-    } finally { handle.closeSync(); }
-    for (const name of names.sort()) {
-      const full = join(folder, name), path = prefix ? `${prefix}/${name}` : name;
+    for (const entry of readdirSync(folder).sort()) {
+      const full = join(folder, entry), path = prefix ? `${prefix}/${entry}` : entry;
       const info = lstatSync(full);
       if (info.isDirectory()) { if (!walk(full, path, depth + 1)) return false; continue; }
-      if (!info.isFile() || info.size > 2 * 1024 * 1024 || (bytesRead += info.size) > 16 * 1024 * 1024 || (path !== "SKILL.md" && files.length >= 200)) return false;
-      const bytes = readFileNoFollow(full);
-      if (!bytes) return false;
-      const content = decoder.decode(bytes);
+      if (!info.isFile()) return false;
+      const content = readFileSync(full, "utf8");
       if (path === "SKILL.md") skillMd = content;
-      else {
-        const intent = process.platform === "win32" && executable ? executable.has(path) : (info.mode & 0o100) !== 0;
-        files.push({ path, content, executable: known ? intent : null });
-        captured.push({ path, content, ...(intent ? { executable: true as const } : {}) });
-      }
+      else files.push({ path, content, executable: (info.mode & 0o100) !== 0 });
     }
     return true;
   };
   try { if (!walk(root, "", 0)) return null; } catch { return null; }
-  return skillMd === null || !importedSkillCaptureIntact(name, entry, skillMd, captured) ? null : { skillMd, files, ...(known ? { executableIntentVersion: 1 as const } : {}) };
+  return skillMd === null ? null : { skillMd, files };
 }
 
 /** An imported skill by its content: SKILL.md and each file with its executable bit. */
-export function importedSkillHash(skill: { skillMd: string; files: ReadonlyArray<{ path: string; content: string; executable: boolean | null }> }): string {
+export function importedSkillHash(skill: { skillMd: string; files: ReadonlyArray<{ path: string; content: string; executable: boolean }> }): string {
   const lines = [`SKILL.md ${sha256(skill.skillMd)}`, ...[...skill.files].sort((a, b) => a.path.localeCompare(b.path))
-    .map((file) => `${file.executable === null ? "?" : file.executable ? "x" : "-"} ${file.path} ${sha256(file.content)}`)];
+    .map((file) => `${file.executable ? "x" : "-"} ${file.path} ${sha256(file.content)}`)];
   return sha256(lines.join("\n")).slice(0, 24);
 }
 
@@ -135,9 +118,9 @@ export function importedSkillHash(skill: { skillMd: string; files: ReadonlyArray
 function importedSkills(deps: MoveKindsDeps): ImportedSkillInput[] {
   const out: ImportedSkillInput[] = [];
   for (const [name, entry] of Object.entries(readImportedSkills())) {
-    const files = importedSkillFiles(name, entry);
-    if (!files) throw new Error(`Imported skill "${name}" changed or could not be checked safely; bring it in again before moving it.`);
-    const { filesSha256: _files, importedAt: _at, executableFiles: _executable, modeUnknown: _unknown, ...kept } = entry;
+    const files = importedSkillFiles(name);
+    if (!files) continue;
+    const { filesSha256: _files, importedAt: _at, ...kept } = entry;
     out.push({ name, entry: kept, ...files });
   }
   const held = new Set(out.map((skill) => skill.name));
@@ -272,20 +255,18 @@ const botFieldsSchema = z.object({
   sidebarHidden: z.boolean().nullable().optional(),
   welcomed: z.boolean().nullable().optional(),
 }).strict();
-const skillFileSchema = z.object({ path: z.string().max(400).refine((path) => validRelative(path) && !containsSkillPathControls(path)), content: z.string().max(512 * 1024), executable: z.boolean().nullable() });
+const skillFileSchema = z.object({ path: z.string().max(400).refine(validRelative), content: z.string().max(512 * 1024), executable: z.boolean() });
 const importedSkillSchema = z.object({ name: z.string().refine(isSkillName), skillMd: z.string().max(512 * 1024), files: z.array(skillFileSchema).max(200),
-  executableIntentVersion: z.literal(1).optional(),
   entry: z.object({ description: z.string().max(4000), source: z.enum(["claudeCode", "codex"]), root: z.string().max(4096), origin: z.string().max(4096),
     label: z.string().max(400), sha256: z.string().regex(/^[a-f0-9]{64}$/u), warnings: z.array(z.string().max(2000)).max(100),
-    license: z.string().max(400).optional(), compatibility: z.string().max(400).optional() }) }).refine((skill) =>
-      skill.executableIntentVersion === 1 ? skill.files.every((file) => file.executable !== null) : skill.files.every((file) => file.executable === null));
+    license: z.string().max(400).optional(), compatibility: z.string().max(400).optional() }) });
 const librarySkillSchema = z.object({ text: z.string().max(512 * 1024), entry: z.object({ name: z.string().refine(isSkillName), description: z.string().max(4000),
   source: z.string().max(2000), reviewState: z.enum(["approved", "disabled"]), license: z.string().max(400).optional(), compatibility: z.string().max(400).optional(),
   tags: z.array(z.string().max(80)).max(40).optional(), warnings: z.array(z.string().max(2000)).max(100).optional() }).passthrough() });
 
 /** My Cloud sets a bot's move-only fields as they are on this computer: absent ones it clears, its own projects it keeps
  * beside the ones that arrive, and an engine, team or library skill it lacks it leaves out. */
-function applyBotFields(deps: MoveKindsDeps, id: string, raw: unknown): void {
+function applyBotFields(deps: MoveKindsDeps, id: string, raw: unknown, source: ArrivingSource = {}): void {
   const bot = deps.store.bot(id) ?? refuse(409, "This bot is not on My Cloud yet.");
   const parsed = botFieldsSchema.safeParse(raw);
   if (!parsed.success) refuse(400, "send the bot's fields as this computer holds them");
@@ -312,11 +293,15 @@ function applyBotFields(deps: MoveKindsDeps, id: string, raw: unknown): void {
   if (Object.hasOwn(fields, "chiefOfStaff") && fields.chiefOfStaff !== true) patch.chiefOfStaff = fields.chiefOfStaff ?? undefined;
   if (fields.chiefOfStaff === true) delete patch.hidden;
   deps.store.patchBot(id, patch);
-  if (fields.chiefOfStaff === true) {
+  // A MausBot arriving where the person's own MausBot stays (takeArrivingDefaultBot) doesn't take the crown from this
+  // place's Chief, whichever bot that is, also when a later pass sends its Chief fields without its MausBot mark.
+  const keepsCrown = (fields.defaultBot || source.defaultBot) && keptDefaultBot(deps.store, id)
+    && deps.store.bots.some((other) => other.id !== id && other.chiefOfStaff);
+  if (fields.chiefOfStaff === true && !keepsCrown) {
     deps.store.setChiefOfStaff(id);
     if (patch.managedSections) deps.store.patchBot(id, { managedSections: patch.managedSections });
   }
-  if (fields.defaultBot) takeArrivingDefaultBot(deps.store, id);
+  if (fields.defaultBot) takeArrivingDefaultBot(deps.store, id, source.computer);
   retireUnusedStarter(deps.store, deps.dataDir);
 }
 
@@ -346,10 +331,10 @@ function adoptRoutine(deps: MoveKindsDeps, raw: unknown, runs: unknown, from: st
   deps.arrived?.();
 }
 
-async function adopt(deps: MoveKindsDeps, kind: Kind, id: string, raw: unknown, runs: unknown, from: string, owner: CloudOwner): Promise<void> {
+async function adopt(deps: MoveKindsDeps, kind: Kind, id: string, raw: unknown, runs: unknown, from: string, owner: CloudOwner, source: ArrivingSource = {}): Promise<void> {
   if (!record(raw) && kind !== "bot") refuse(400, "send the item's record");
   const same = (value: unknown) => record(value) && (value.id === undefined || value.id === id);
-  if (kind === "bot") return applyBotFields(deps, id, raw);
+  if (kind === "bot") return applyBotFields(deps, id, raw, source);
   if (kind === "routine") return adoptRoutine(deps, raw, runs, from, owner);
   if (!same(raw) && kind !== "imported-skill" && kind !== "library-skill") refuse(400, "the record names another item");
   if (kind === "call") {
@@ -375,7 +360,6 @@ async function adopt(deps: MoveKindsDeps, kind: Kind, id: string, raw: unknown, 
   if (kind === "imported-skill") {
     const parsed = importedSkillSchema.safeParse(raw);
     if (!parsed.success || parsed.data.name !== id) refuse(400, "send the skill's files as this computer holds them");
-    if (parsed.data!.files.some((file) => file.executable === null)) refuse(409, "This skill's executable intent is unknown. Bring it in from a source that records file modes before moving it.");
     if (!storeImportedSkills([parsed.data!])[0]?.stored) refuse(500, "My Cloud could not keep this skill.");
     return;
   }
@@ -397,7 +381,15 @@ async function adopt(deps: MoveKindsDeps, kind: Kind, id: string, raw: unknown, 
   }
 }
 
-const putSchema = z.object({ v: z.literal(1), key: z.string().max(200), dataDir: z.string().min(1).max(4096), record: z.unknown(), runs: z.array(z.unknown()).max(2_000).optional() });
+const putSchema = z.object({ v: z.literal(1), key: z.string().max(200), dataDir: z.string().min(1).max(4096), record: z.unknown(), runs: z.array(z.unknown()).max(2_000).optional(),
+  computer: z.string().max(120).optional(), sourceDefault: z.boolean().optional() });
+
+type ArrivingSource = { computer?: string; defaultBot?: boolean };
+
+/** This computer's name as a person knows it, which a MausBot that moves away is named for when the place it goes keeps its own. */
+function thisComputerName(): string {
+  return (process.env.OMB_ENVIRONMENT_LABEL?.trim() || hostname()).replace(/\.local$/iu, "").slice(0, 120);
+}
 
 /** False when the path is not this route. */
 export async function moveKindsRoute(deps: MoveKindsDeps, { req, res, path, method, url, auth, json, readBody }: RouteContext): Promise<boolean> {
@@ -408,7 +400,7 @@ export async function moveKindsRoute(deps: MoveKindsDeps, { req, res, path, meth
       const key = parseKey(url.searchParams.get("key"));
       const found = key && kindRecord(deps, key.kind, key.id);
       if (!found) json(res, 404, { error: "not here" });
-      else json(res, 200, { v: 1, dataDir: deps.dataDir, ...found });
+      else json(res, 200, { v: 1, dataDir: deps.dataDir, ...(key.kind === "bot" ? { computer: thisComputerName() } : {}), ...found });
       return true;
     }
     if (method === "PUT") {
@@ -417,7 +409,7 @@ export async function moveKindsRoute(deps: MoveKindsDeps, { req, res, path, meth
       const body = putSchema.safeParse(await readBody(req, KIND_BODY_MAX));
       const key = body.success ? parseKey(body.data.key) : null;
       if (!body.success || !key) { json(res, 400, { error: "send { v: 1, key, dataDir, record }" }); return true; }
-      await adopt(deps, key.kind, key.id, body.data.record, body.data.runs, body.data.dataDir, owner);
+      await adopt(deps, key.kind, key.id, body.data.record, body.data.runs, body.data.dataDir, owner, { computer: body.data.computer, defaultBot: body.data.sourceDefault });
       json(res, 200, { v: 1, ok: true });
       return true;
     }

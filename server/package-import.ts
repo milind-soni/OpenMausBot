@@ -1,29 +1,25 @@
 // Packages are untrusted: import only adds new records, sets every privilege-bearing field itself, and rolls back on any failure.
 import { createHash, randomUUID } from "node:crypto";
 
-import { mcpServerNameError, MAX_MCP_SERVERS, parseStoredMcpServer } from "./mcp-registry.ts";
+import { mcpServerNameError, mcpSharedServerRoom, parseStoredMcpServer } from "./mcp-registry.ts";
 import {
   AGENT_PARTS, agentReleaseValues, connectionLocalValue, connectionReleaseValue, pair, pairs, playbookValues,
-  ROOM_PARTS, roomReleaseValues, ROUTINE_PARTS, routineReleaseValues, scheduleValue, sha256Hex, skillReleaseValue, TEAM_PARTS,
+  ROOM_PARTS, roomReleaseValues, ROUTINE_PARTS, routineReleaseValues, scheduleValue, sha256Hex, TEAM_PARTS,
   type AgentPart, type PartPair, type TeamPart,
 } from "./package-parts.ts";
-import type { BotLimit } from "./host/starter-bot-limit.ts";
 import type { PresetRegistry } from "./presets.ts";
-import { portableFilesForDisk } from "./portable-skill-files.ts";
-import type { SkillFolderFile } from "./skill-folder.ts";
 import type { Routine, RoutineInput, RoutineManager } from "./routines.ts";
 import type { SkillListing, SkillPackageStamp } from "./skills.ts";
 import type { BotRecord, GroupRecord, InstalledPackageMetadata, Store } from "./store.ts";
 import { importedMemberProfile, type ParsedTeamManifest, type TeamManifestMember } from "./team-manifest.ts";
-import { BOT_LIMIT_CODE } from "../shared/bot-limit.ts";
 import { takeImportName } from "../shared/import-name.ts";
-import { decodeBase64, type PackageAgent, type PackageDocument, type PackageSkill, type PackageTrust } from "../shared/package-format.ts";
+import { decodeBase64, type PackageAgent, type PackageDocument, type PackageTrust } from "../shared/package-format.ts";
 import type { BotVisibility, ModelSelection } from "../shared/wire.ts";
 
 export const NO_BOTS_MESSAGE = "This package has no bots. Add it from your organization's shelf, or update OpenMausBot.";
 export const NO_PRESETS_MESSAGE = "This file has no bots or preset bots to add. Its skills can be added from your organization's shelf.";
 
-export type PackageImportErrorCode = "no_bots" | "invalid_package" | typeof BOT_LIMIT_CODE;
+export type PackageImportErrorCode = "no_bots" | "invalid_package" | "too_many_bots";
 
 export class PackageImportError extends Error {
   readonly status: number;
@@ -50,9 +46,9 @@ export interface PackageImportDeps {
   store: Store;
   routines: Pick<RoutineManager, "create" | "remove"> & Partial<Pick<RoutineManager, "stampInstalledPackage">>;
   skills: {
-    install(botId: string, source: string, files: SkillFolderFile[]): SkillListing | { error: string };
+    install(botId: string, source: string, files: Array<{ path: string; content: string }>): SkillListing | { error: string };
     setEnabled(botId: string, name: string, enabled: boolean): SkillListing | { error: string };
-    installOrg?(botId: string, source: string, skillMd: string, stamp: SkillPackageStamp, files?: PackageSkill["files"]): SkillListing | { error: string };
+    installOrg?(botId: string, source: string, skillMd: string, stamp: SkillPackageStamp): SkillListing | { error: string };
   };
   memory: {
     writeIndex(botId: string, text: string): void;
@@ -67,8 +63,11 @@ export interface PackageImportDeps {
   images: { save(bytes: Uint8Array, mime: string): string };
   broadcast?: (event: { kind: "bot"; bot: BotRecord } | { kind: "group"; group: GroupRecord }) => void;
   defaultSelection: () => ModelSelection;
-  botLimit?: Pick<BotLimit, "refusal">;
+  /** The most bots this workspace holds, every plan alike. */
+  maxBots?: number;
   presets?: PresetRegistry;
+  /** A Team Cloud: the member adding the package, who looks after its bots. */
+  createdBy?: string;
 }
 
 export interface OrgImportContext {
@@ -89,6 +88,8 @@ export interface PackageImportOptions {
   room?: string;
   /** Who may see the new bots: the admin's choice, never the file's. */
   visibility?: BotVisibility;
+  /** A one-bot template: its bot joins no department, so no section, brief or Chief is made. */
+  noDepartment?: boolean;
   org?: OrgImportContext;
 }
 
@@ -229,8 +230,9 @@ function runImport(source: ImportSource, options: PackageImportOptions, deps: Pa
   const members = pkg
     ? pkg.agents.map((agent) => ({ member: memberFromAgent(agent), agent }))
     : (source as { manifest: ParsedTeamManifest }).manifest.team.members.map((member) => ({ member, agent: undefined }));
-  const overPlan = deps.botLimit?.refusal(members.length);
-  if (overPlan) throw new PackageImportError(overPlan.code, overPlan.error, 409);
+  if (deps.maxBots !== undefined && store.bots.length + members.length > deps.maxBots) {
+    throw new PackageImportError("too_many_bots", `This adds ${members.length} bots, and this workspace is limited to ${deps.maxBots} bots.`, 409);
+  }
 
   const importedBots: BotRecord[] = [];
   const createdGroups: GroupRecord[] = [];
@@ -252,7 +254,7 @@ function runImport(source: ImportSource, options: PackageImportOptions, deps: Pa
         .map((value) => value.trim().toLowerCase()),
     );
     // Always a new section: never merge into an existing one or replace its Chief.
-    section = takeImportName(teamName, existingSections, 60);
+    section = options.noDepartment ? undefined : takeImportName(teamName, existingSections, 60);
 
     const serverForKey = new Map<string, string>();
     const connections: PackageImportResult["connections"] = [];
@@ -260,7 +262,7 @@ function runImport(source: ImportSource, options: PackageImportOptions, deps: Pa
       const next: Record<string, unknown> = { ...deps.mcp.servers() };
       for (const connection of pkg.connections) {
         const part = `connections[${connection.key}]`;
-        if (Object.keys(next).length >= MAX_MCP_SERVERS) {
+        if (mcpSharedServerRoom(next) === 0) {
           skipped.push({ part, reason: "too_many_connections" });
           continue;
         }
@@ -300,6 +302,7 @@ function runImport(source: ImportSource, options: PackageImportOptions, deps: Pa
           modelSelection: selection,
           section,
           ...(options.visibility ? { visibility: options.visibility } : {}),
+          ...(deps.createdBy ? { createdBy: deps.createdBy } : {}),
         },
         { seedMessages: false },
       );
@@ -336,6 +339,8 @@ function runImport(source: ImportSource, options: PackageImportOptions, deps: Pa
         connectorTools: {},
         // The publisher's choice, with no card: recording only keeps evidence in this workspace.
         ...(agent?.recordBrowserSteps === true ? { recordBrowserSteps: true } : {}),
+        // Only ever narrows what the bot is shown.
+        ...(agent?.tools?.off.length ? { toolsOff: agent.tools.off } : {}),
         ...(playbooks.length ? { playbooks } : {}),
         ...(installed ? { installedPackage: installed } : {}),
         ...(agent?.connections ? { mcpServers: agent.connections.flatMap((key) => serverForKey.has(key) ? [serverForKey.get(key)!] : []) } : {}),
@@ -347,8 +352,8 @@ function runImport(source: ImportSource, options: PackageImportOptions, deps: Pa
         // The organization channel names its own source, so ownership can never be forged.
         const added = org
           ? deps.skills.installOrg!(created.id, `org:${org.ref}@${pkg!.release}`, skill.instructions,
-              { installId: org.installId, key: skill.name, release: pkg!.release, ...pair(skillReleaseValue(skill), skillReleaseValue(skill)) }, skill.files)
-          : deps.skills.install(created.id, skill.source ?? `package:${pkg!.id}`, [{ path: "SKILL.md", content: skill.instructions }, ...portableFilesForDisk(skill.files ?? [])]);
+              { installId: org.installId, key: skill.name, release: pkg!.release, ...pair(skill.instructions, skill.instructions) })
+          : deps.skills.install(created.id, skill.source ?? `package:${pkg!.id}`, [{ path: "SKILL.md", content: skill.instructions }, ...(skill.files ?? [])]);
         if ("error" in added) throw new Error(`Package skill "${skillName}" could not be imported: ${added.error}`);
       }
       for (const [path, text] of Object.entries(agent?.seed?.memory ?? {})) {
@@ -382,8 +387,8 @@ function runImport(source: ImportSource, options: PackageImportOptions, deps: Pa
     }
 
     // Brief first, leader last, so an interrupted organization add can tell a finished team from a partial one.
-    const brief = Boolean(pkg?.team?.brief?.trim());
-    if (brief) deps.sections.writeBrief(section, pkg!.team!.brief!);
+    const brief = Boolean(section && pkg?.team?.brief?.trim());
+    if (brief) deps.sections.writeBrief(section!, pkg!.team!.brief!);
 
     const groupIds = new Map<string, string>();
     for (const room of pkg?.rooms ?? []) {
@@ -451,13 +456,13 @@ function runImport(source: ImportSource, options: PackageImportOptions, deps: Pa
       }
     }
 
-    if (pkg?.team?.leader) store.setChiefOfStaff(botIds.get(pkg.team.leader)!);
+    if (section && pkg?.team?.leader) store.setChiefOfStaff(botIds.get(pkg.team.leader)!);
     if (org && pkg?.team) {
-      orgIndex.section = section;
+      orgIndex.section = section ?? "";
       orgIndex.team.parts = pairs(TEAM_PARTS, {
         name: pkg.team.name, brief: pkg.team.brief ?? "", leader: pkg.team.leader ?? null,
       }, {
-        name: section, brief: brief ? pkg.team.brief! : "", leader: pkg.team.leader ? botIds.get(pkg.team.leader)! : null,
+        name: section ?? "", brief: brief ? pkg.team.brief! : "", leader: pkg.team.leader ? botIds.get(pkg.team.leader)! : null,
       });
     }
     let presets: PackageImportResult["presets"];
@@ -486,7 +491,7 @@ function runImport(source: ImportSource, options: PackageImportOptions, deps: Pa
       ...(installId ? { installId } : {}),
       ...(org ? { org: orgIndex } : {}),
       name,
-      section,
+      section: section ?? "",
       bots,
       groups: createdGroups.map((created) => store.group(created.id) ?? created),
       ...(group ? { group } : {}),

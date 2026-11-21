@@ -61,7 +61,7 @@ describe("a click on a bot's row or tile", () => {
   });
 
   it("leaves a team's Cloud alone: there a bot's row is the person's own conversation", () => {
-    setTeamChats({ teamId: "acme", member: true });
+    setTeamChats({ teamId: "acme", member: true, opened: [] });
     const bot = { ...chief([work]), tasks: [{ threadId: "mine", private: true, createdAt: 3 }, work] };
     expect(opened(bot as ReturnType<typeof chief>, false)).toEqual([{ type: "switchTask", botId: "cos", threadId: "mine" }]);
   });

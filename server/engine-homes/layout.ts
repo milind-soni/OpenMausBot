@@ -62,7 +62,7 @@ export const ENGINE_FOLDERS: readonly EngineFolder[] = [
   { env: "XDG_CONFIG_HOME", home: ".config", shared: ["muse/auth.json"] },
   { env: "XDG_DATA_HOME", home: ".local/share", shared: ["opencode/auth.json"] },
   { home: ".gemini", shared: ["oauth_creds.json", "google_accounts.json", "settings.json"] },
-  { home: ".pi/agent", shared: ["auth.json"] },
+  { env: "PI_CODING_AGENT_DIR", home: ".pi/agent", shared: ["auth.json"] },
 ];
 
 /** Folder variables that move with HOME besides those above. */
