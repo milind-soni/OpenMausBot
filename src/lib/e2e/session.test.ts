@@ -8,7 +8,8 @@ import { WebSocket as NodeWebSocket, WebSocketServer, type RawData } from "ws";
 
 import { b64u, concat, fromB64u, utf8, type Bytes } from "./bytes.ts";
 import { admission, credentialHash, keyId, psk } from "./credentials.ts";
-import { dial, dialRelay, RELAY_PROTOCOL, SessionClosed, type E2EStream, type PhoneSession } from "./session.ts";
+import type { SessionKeys } from "./noise.ts";
+import { dial, dialRelay, PhoneSession, RELAY_PROTOCOL, SessionClosed, type E2EStream } from "./session.ts";
 
 const SERVER = fileURLToPath(new URL("../../../companion/src/e2e/interop-server.ts", import.meta.url));
 const BOUND_MS = 10_000;
@@ -38,6 +39,12 @@ interface RelayNode {
   admitted: Set<string>;
   /** Refuse every phone with this code, as a full (4503) or rate-limiting (4429) node would. */
   refuseWith: number | null;
+  /** The close reason sent with refuseWith. */
+  refuseReason: string;
+  /** The computer route it splices to; the real relay transport unless a test swaps in another responder. */
+  computer: string | null;
+  /** Close the phone with this code right after the computer's first message reaches it. */
+  closeAfterFirst: number | null;
   /** Answer ready but never splice, so the handshake deadline passes. */
   stall: boolean;
   /** Drop everything the computer sends from now on, as a dead path would. */
@@ -56,6 +63,9 @@ async function startNode(): Promise<RelayNode> {
     closes: [],
     admitted: new Set(),
     refuseWith: null,
+    refuseReason: "",
+    computer: null,
+    closeAfterFirst: null,
     stall: false,
     mute: false,
     close: () =>
@@ -65,12 +75,12 @@ async function startNode(): Promise<RelayNode> {
         server.close(() => resolve());
       }),
   };
-  const refuse = (socket: NodeWebSocket, code: number) => {
+  const refuse = (socket: NodeWebSocket, code: number, reason?: string) => {
     node.closes.push(code);
-    socket.close(code);
+    socket.close(code, reason);
   };
   wss.on("connection", (phone) => {
-    if (node.refuseWith !== null) return refuse(phone, node.refuseWith);
+    if (node.refuseWith !== null) return refuse(phone, node.refuseWith, node.refuseReason);
     phone.once("message", (raw: RawData, isBinary: boolean) => {
       if (isBinary) return refuse(phone, 4400);
       let first: { t?: unknown; v?: unknown; hid?: unknown; adm?: unknown };
@@ -83,12 +93,14 @@ async function startNode(): Promise<RelayNode> {
       if (first.t !== "phone" || first.v !== 1) return refuse(phone, 4400);
       if (first.hid !== b64u(HOST_ID) || !node.admitted.has(String(first.adm))) return refuse(phone, 4404);
       if (node.stall) return void phone.send(JSON.stringify({ t: "ready" }));
-      const data = new NodeWebSocket(ready.relayTransport, "omb-e2e.v1");
+      const data = new NodeWebSocket(node.computer ?? ready.relayTransport, "omb-e2e.v1");
       data.on("open", () => {
         phone.send(JSON.stringify({ t: "ready" }));
         phone.on("message", (bytes: RawData, binary: boolean) => (binary ? data.send(bytes as Buffer) : refuse(phone, 4400)));
         data.on("message", (bytes: RawData) => {
-          if (!node.mute && phone.readyState === NodeWebSocket.OPEN) phone.send(bytes as Buffer);
+          if (node.mute || phone.readyState !== NodeWebSocket.OPEN) return;
+          phone.send(bytes as Buffer);
+          if (node.closeAfterFirst !== null) refuse(phone, node.closeAfterFirst);
         });
       });
       // Close codes pass through, as the real relay's splice does.
@@ -168,11 +180,17 @@ const health = async (session: PhoneSession) => text(await request(session, "GET
 
 describe("dialRelay: the browser phone through a relay node", () => {
   it("sends the pre-auth message, waits for ready, handshakes with the relay prologue and carries requests", async () => {
+    const stranger = await startNode();
     const { node, options } = await admittingNode();
     const adm = b64u(options.adm);
-    const dialing = dialRelay({ ...options, urls: [node.url] });
+    const urls = [stranger.url, node.url];
+    const dialing = dialRelay({ ...options, urls });
+    // Every attempt, the fallback node's too, sends what the caller passed at the call.
     options.adm.fill(0);
+    options.psk.fill(0);
+    urls.length = 0;
     const session = await dialing;
+    expect(stranger.closes).toEqual([4404]);
     expect(node.firstMessages).toEqual([{ t: "phone", v: 1, hid: b64u(HOST_ID), adm }]);
     for (const reply of await Promise.all([health(session), health(session)])) {
       expect(reply.startsWith("HTTP/1.1 200")).toBe(true);
@@ -195,7 +213,11 @@ describe("dialRelay: the browser phone through a relay node", () => {
     ]);
     expect(text(upload)).toContain(JSON.stringify({ bytes: body.length, sha256 }));
     expect(text(download.subarray(0, 12))).toBe("HTTP/1.1 200");
-    expect(download.length).toBeGreaterThan(body.length);
+    const headEnd = download.findIndex((_, i) => download[i] === 13 && download[i + 1] === 10 && download[i + 2] === 13 && download[i + 3] === 10);
+    expect(headEnd).toBeGreaterThan(0);
+    const downloaded = download.subarray(headEnd + 4);
+    expect(downloaded.length).toBe(body.length);
+    expect(downloaded.every((byte, index) => byte === index % 251)).toBe(true);
     session.shutdown();
   });
 
@@ -213,6 +235,26 @@ describe("dialRelay: the browser phone through a relay node", () => {
     const failure = dialRelay({ ...options, urls: [full.url, stranger.url] });
     await expect(failure).rejects.toBeInstanceOf(SessionClosed);
     await expect(failure).rejects.toMatchObject({ code: 4404 });
+  });
+
+  it("waits the delay a 4503 asks for before the next node", async () => {
+    const full = await startNode();
+    full.refuseWith = 4503;
+    full.refuseReason = JSON.stringify({ retryInMs: 400 });
+    const { node, options } = await admittingNode();
+    const started = Date.now();
+    const session = await dialRelay({ ...options, urls: [full.url, node.url] });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(400);
+    session.shutdown();
+  });
+
+  it("stops hard on a message 2 that fails to verify, even when the node closes 4404 meanwhile", async () => {
+    const { node: closing, options } = await admittingNode();
+    closing.computer = ready.wrongKey;
+    closing.closeAfterFirst = 4404;
+    const { node: next } = await admittingNode();
+    await expect(dialRelay({ ...options, urls: [closing.url, next.url] })).rejects.toThrow("e2e: aead");
+    expect(next.firstMessages).toEqual([]);
   });
 
   it("does not try another node after any other code", async () => {
@@ -271,5 +313,83 @@ describe("dial: the direct route", () => {
     await expect(reader.read()).rejects.toThrow("stream reset");
     await expect(stream.write(utf8("more"))).rejects.toThrow("stream reset");
     expect(() => session.open()).toThrow(SessionClosed);
+  });
+
+  it("refuses writes once its FIN is sent, while the computer's half is still open", async () => {
+    const { psk: key } = await credentials(ready.deviceToken);
+    const session = await dial({ url: ready.direct, remoteStatic, psk: key, app: "web-test/1" });
+    const stream = session.open();
+    const reader = stream.readable.getReader();
+    await stream.write(utf8("GET /hang HTTP/1.1\r\nHost: companion\r\n\r\n"));
+    expect(text((await reader.read()).value!)).toContain("data: start");
+    stream.end();
+    await expect(stream.write(utf8("more"))).rejects.toThrow("stream ended");
+    session.close(1000);
+  });
+});
+
+/** A socket that records what the session sends, and records sealed and opened as themselves. */
+function fakeSession(seal: (plaintext: Bytes) => Promise<Bytes> = async (plaintext) => plaintext) {
+  const sent: Bytes[] = [];
+  const closes: Array<number | undefined> = [];
+  const socket = {
+    bufferedAmount: 0,
+    send: (record: Bytes) => sent.push(record.slice()),
+    close: (code?: number) => closes.push(code),
+    onmessage: null as ((event: MessageEvent) => void) | null,
+    onclose: null as ((event: CloseEvent) => void) | null,
+  };
+  const keys = { send: { seal }, receive: { open: async (record: Bytes) => record } } as unknown as SessionKeys;
+  const session = new PhoneSession(socket as unknown as WebSocket, keys);
+  const record = (...bytes: number[]) => session.receive({ data: Uint8Array.from(bytes).buffer } as MessageEvent);
+  const remoteClose = (code: number) => socket.onclose!({ code } as CloseEvent);
+  return { session, sent, closes, record, remoteClose };
+}
+
+const GO_AWAY_REMOVED = [0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3];
+const GO_AWAY_PROTOCOL = [0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+/** A WindowUpdate {SYN} on stream 2: the computer may not open streams. */
+const COMPUTER_OPEN = [0, 1, 0, 1, 0, 0, 0, 2, 0, 0, 0, 0];
+
+describe("PhoneSession records and closes", () => {
+  it("reads a GoAway(3) still being opened before the 4001 close behind it ends the session", async () => {
+    const { session, record, remoteClose } = fakeSession();
+    record(...GO_AWAY_REMOVED);
+    remoteClose(4001);
+    expect(await session.closed).toBe(4001);
+    expect(session.removed).toBe(true);
+  });
+
+  it("sends GoAway(1) on a yamux violation before closing 4000", async () => {
+    const { session, sent, closes, record } = fakeSession();
+    record(...COMPUTER_OPEN);
+    expect(await session.closed).toBe(4000);
+    expect(sent).toEqual([Uint8Array.from(GO_AWAY_PROTOCOL)]);
+    expect(closes).toEqual([4000]);
+  });
+
+  it("handles a seal that fails while an earlier one is pending, and keeps send order", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      let release!: () => void;
+      let calls = 0;
+      const { session, sent } = fakeSession((plaintext) => {
+        calls += 1;
+        if (calls === 1) return new Promise((resolve) => (release = () => resolve(plaintext)));
+        return Promise.reject(new Error("seal failed"));
+      });
+      const first = session.open();
+      session.open();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      release();
+      expect(await session.closed).toBe(4000);
+      expect(sent).toHaveLength(1);
+      expect(sent[0][7]).toBe(first.id);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
   });
 });

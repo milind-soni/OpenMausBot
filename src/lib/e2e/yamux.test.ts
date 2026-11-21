@@ -217,8 +217,17 @@ describe("the browser mux, after the peer's FIN and inside callbacks", () => {
     const { mux } = phoneWith();
     const id = mux.open();
     mux.receive({ type: 1, flags: 2 | 4, streamId: id, length: 0 });
+    const window = mux.sendWindow(id);
     mux.receive({ type: 1, flags: 0, streamId: id, length: 10 });
+    expect(mux.sendWindow(id)).toBe(window + 10);
     expect(() => mux.receive({ type: 0, flags: 0, streamId: id, length: 0, data: new Uint8Array(0) })).toThrow(YamuxError);
+  });
+
+  it("refuses Data on a phone-opened stream before the computer's ACK, and delivers none of it", () => {
+    const { mux, log } = phoneWith();
+    const id = mux.open();
+    expect(() => mux.receive({ type: 0, flags: 0, streamId: id, length: 1, data: new Uint8Array([7]) })).toThrow("data_before_ack");
+    expect(log.filter((entry) => entry.startsWith("data"))).toEqual([]);
   });
 
   it("stops handling a frame once the data callback resets the stream", () => {

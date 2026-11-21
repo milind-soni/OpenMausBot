@@ -97,11 +97,15 @@ async function handshake(url: string, token: string, transport: TransportByte) {
 async function get(ws: ReturnType<typeof open>, keys: SessionKeys, path: string): Promise<string> {
   const body: Uint8Array[] = [];
   let sending = Promise.resolve();
+  let failSend!: (error: unknown) => void;
+  // A failed seal or send ends the wait for the reply at once instead of a receive timeout.
+  const sendFailed = new Promise<never>((_resolve, reject) => (failSend = reject));
   let ended = false;
   const mux = new Mux("phone", {
     send: (frame) => {
       const plaintext = encodeFrame(frame);
       sending = sending.then(async () => ws.send(await keys.send.seal(plaintext)));
+      sending.catch(failSend);
     },
     data: (_id, data) => body.push(data.slice()),
     ended: () => (ended = true),
@@ -113,7 +117,7 @@ async function get(ws: ReturnType<typeof open>, keys: SessionKeys, path: string)
   const id = mux.open();
   const request = utf8(`GET ${path} HTTP/1.1\r\nHost: companion\r\nConnection: close\r\n\r\n`);
   expect(mux.write(id, request)).toBe(request.length);
-  while (!ended) mux.receive(decodeFrame(await keys.receive.open(await ws.next())));
+  while (!ended) mux.receive(decodeFrame(await keys.receive.open(await Promise.race([ws.next(), sendFailed]))));
   mux.finish(id);
   expect(mux.has(id)).toBe(false);
   await sending;

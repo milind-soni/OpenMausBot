@@ -1,6 +1,3 @@
-// The phone side of one encrypted session in the browser (companion/src/e2e/README.md sections 6-12): the WebSocket to
-// a relay node or a direct route, the handshake, then records carrying yamux frames. Each stream is a raw byte pipe to
-// the computer's origin; the HTTP on top comes later.
 import { b64u, type Bytes } from "./bytes.ts";
 import { encodePayload1, newConn, NoiseError, phoneHello, TRANSPORT_DIRECT, TRANSPORT_RELAY, type SessionKeys } from "./noise.ts";
 import { decodeFrame, encodeFrame, GO_AWAY, Mux, PING_INTERVAL_MS, PING_TIMEOUT_MS, YamuxError, type Frame } from "./yamux.ts";
@@ -28,12 +25,17 @@ export const SEND_BUFFER_HIGH = 1024 * 1024;
 const DRAIN_POLL_MS = 5;
 /** The readable side holds this much before the computer is told to wait. */
 const READ_HIGH_WATER = 256 * 1024;
+/** The longest wait a 4503 can ask for. */
+const MAX_RETRY_MS = 60_000;
 
 export class SessionClosed extends Error {
   readonly code: number;
-  constructor(code: number) {
+  /** A 4503's `{"retryInMs":N}`. */
+  readonly retryInMs?: number;
+  constructor(code: number, retryInMs?: number) {
     super(`e2e session closed (${code})`);
     this.code = code;
+    this.retryInMs = retryInMs;
   }
 }
 
@@ -47,7 +49,8 @@ interface Timers {
 }
 
 export interface DialOptions extends Timers {
-  /** `ws://host:port/v1/e2e` for Wi-Fi and Tailscale, `wss://relayN.openmausbot.com/v1/phone` for the relay. */
+  /** `ws://host:port/v1/e2e` for Wi-Fi and Tailscale, `wss://relayN.openmausbot.com/v1/phone` for the relay. The direct
+   * route refuses any Origin header (README section 4), so a web page always goes through the relay. */
   url: string;
   /** The pinned transport key `T.pub`. */
   remoteStatic: Bytes;
@@ -95,6 +98,8 @@ export function dial(options: DialOptions): Promise<PhoneSession> {
     let stage: "connecting" | "relay" | "message2" | "finishing" | "done" = "connecting";
     /** Records that arrive while message 2 is checked go to the session in order. */
     const early: MessageEvent[] = [];
+    /** A close while message 2 is checked: a failed check wins over it, since a node's 4404 must not hide a hard stop. */
+    let closedWhileFinishing: SessionClosed | null = null;
     const fail = (error: Error, code?: number) => {
       if (stage === "done") return;
       stage = "done";
@@ -134,6 +139,7 @@ export function dial(options: DialOptions): Promise<PhoneSession> {
         .then(
           (keys) => {
             if (stage !== "finishing") return;
+            if (closedWhileFinishing) return fail(closedWhileFinishing);
             stage = "done";
             clearTimeout(timer);
             const session = new PhoneSession(socket, keys, options);
@@ -143,9 +149,23 @@ export function dial(options: DialOptions): Promise<PhoneSession> {
           (error: Error) => fail(error, CLOSE.protocol),
         );
     };
-    socket.onclose = (event: CloseEvent) => fail(new SessionClosed(event.code));
+    socket.onclose = (event: CloseEvent) => {
+      const closed = new SessionClosed(event.code, event.code === CLOSE.relayBusy ? retryDelay(event.reason) : undefined);
+      if (stage === "finishing") closedWhileFinishing = closed;
+      else fail(closed);
+    };
     socket.onerror = () => {};
   });
+}
+
+/** `{"retryInMs":N}` with N a whole number of ms, at most a minute; anything else asks for no wait. */
+function retryDelay(reason: string): number | undefined {
+  try {
+    const value = (JSON.parse(reason) as { retryInMs?: unknown } | null)?.retryInMs;
+    return Number.isSafeInteger(value) && (value as number) >= 0 ? Math.min(value as number, MAX_RETRY_MS) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function isReady(text: string): boolean {
@@ -156,14 +176,20 @@ function isReady(text: string): boolean {
   }
 }
 
-/** Tries each node in order. 4404 (not connected or not admitted here) and 4503 (full or restarting) move on to the
- * next; any other failure, or the last node's, is the caller's to back off from. */
+/** Tries each node in order. 4404 (not connected or not admitted here) moves on at once; 4503 (full or restarting)
+ * waits the `retryInMs` it gives, plus jitter, first. Any other failure, or the last node's, is the caller's to back
+ * off from. */
 export async function dialRelay(options: RelayDialOptions): Promise<PhoneSession> {
-  const { urls, hostId, adm, ...rest } = options;
-  let last: unknown = new SessionClosed(CLOSE.relayNotHere);
-  for (const url of urls) {
+  // Copied at the call: the caller may reuse or wipe its arrays while the nodes are tried.
+  const { urls, hostId, adm, remoteStatic, psk, ...rest } = options;
+  const nodes = [...urls];
+  const relay = { hostId: hostId.slice(), adm: adm.slice() };
+  const keys = { remoteStatic: remoteStatic.slice(), psk: psk.slice() };
+  let last = new SessionClosed(CLOSE.relayNotHere);
+  for (const [index, url] of nodes.entries()) {
+    if (index > 0 && last.retryInMs) await sleep(last.retryInMs * (1 + Math.random() * 0.2));
     try {
-      return await dial({ ...rest, url, relay: { hostId, adm } });
+      return await dial({ ...rest, ...keys, url, relay });
     } catch (error) {
       if (!(error instanceof SessionClosed) || (error.code !== CLOSE.relayNotHere && error.code !== CLOSE.relayBusy)) throw error;
       last = error;
@@ -171,6 +197,8 @@ export async function dialRelay(options: RelayDialOptions): Promise<PhoneSession
   }
   throw last;
 }
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 interface PendingWrite {
   bytes: Uint8Array;
@@ -279,8 +307,7 @@ class Stream implements E2EStream {
       this.#writes.shift();
       head.resolve();
     }
-    if (!this.#done && this.#ending && this.#writes.length === 0 && mux?.has(this.id)) {
-      this.#ending = false;
+    if (!this.#done && this.#ending && !this.#finSent && this.#writes.length === 0 && mux?.has(this.id)) {
       this.#finSent = true;
       mux.finish(this.id);
       this.#forgetIfDone();
@@ -288,7 +315,8 @@ class Stream implements E2EStream {
   }
 }
 
-type State = "open" | "closed";
+/** "closing": the last records are being sent before the socket closes. */
+type State = "open" | "closing" | "closed";
 
 /** An open session. Built by dial() once message 2 checks out. */
 export class PhoneSession {
@@ -306,6 +334,9 @@ export class PhoneSession {
   #pingCounter = 0;
   #drainWaiters: Array<() => void> = [];
   #removed = false;
+  /** Records still being opened, and the socket's close code if it closed meanwhile. */
+  #opening = 0;
+  #closedMeanwhile: number | null = null;
   #settleClosed!: (code: number) => void;
   readonly closed: Promise<number>;
 
@@ -332,7 +363,11 @@ export class PhoneSession {
       },
     });
     socket.onmessage = (event: MessageEvent) => this.receive(event);
-    socket.onclose = (event: CloseEvent) => this.#end(event.code);
+    // A record already received, such as GoAway(3) just before a 4001, is read before the close ends the session.
+    socket.onclose = (event: CloseEvent) => {
+      if (this.#opening === 0) this.#end(event.code);
+      else this.#closedMeanwhile = event.code;
+    };
     const pingTimeoutMs = timers.pingTimeoutMs ?? PING_TIMEOUT_MS;
     this.#pingTimer = setInterval(() => this.#ping(pingTimeoutMs), timers.pingIntervalMs ?? PING_INTERVAL_MS);
   }
@@ -381,25 +416,39 @@ export class PhoneSession {
     if (this.#state !== "open") return;
     if (typeof event.data === "string") return this.close(CLOSE.protocol);
     // Opens settle one at a time in call order, so frames reach the mux in wire order.
-    this.#keys.receive.open(new Uint8Array(event.data as ArrayBuffer)).then(
-      (plaintext) => {
-        if (this.#state !== "open") return;
-        try {
-          this.#mux.receive(decodeFrame(plaintext));
-        } catch (error) {
-          if (!(error instanceof YamuxError)) throw error;
-          this.#mux.protocolError();
-          this.close(CLOSE.protocol);
-        }
-      },
-      () => this.close(CLOSE.protocol),
-    );
+    this.#opening += 1;
+    this.#keys.receive
+      .open(new Uint8Array(event.data as ArrayBuffer))
+      .then(
+        (plaintext) => {
+          if (this.#state !== "open") return;
+          try {
+            this.#mux.receive(decodeFrame(plaintext));
+          } catch (error) {
+            if (!(error instanceof YamuxError)) throw error;
+            this.#mux.protocolError();
+            this.#closeAfterSending(CLOSE.protocol);
+          }
+        },
+        () => this.close(CLOSE.protocol),
+      )
+      .finally(() => {
+        this.#opening -= 1;
+        if (this.#opening === 0 && this.#closedMeanwhile !== null) this.#end(this.#closedMeanwhile);
+      });
   }
 
   /** A planned close: GoAway first, so the computer knows it isn't an error. */
   shutdown(): void {
-    if (this.#state === "open") this.#mux.goAway(GO_AWAY.normal);
-    this.#sending.then(() => this.close(CLOSE.normal));
+    if (this.#state !== "open") return;
+    this.#mux.goAway(GO_AWAY.normal);
+    this.#closeAfterSending(CLOSE.normal);
+  }
+
+  /** Sends what is queued (a GoAway last), then closes; nothing new is sent or read meanwhile. */
+  #closeAfterSending(code: number): void {
+    this.#state = "closing";
+    this.#sending.then(() => this.close(code));
   }
 
   close(code: number): void {
@@ -428,24 +477,22 @@ export class PhoneSession {
     this.#pongTimer = setTimeout(() => this.close(CLOSE.goingAway), timeoutMs);
   }
 
-  /** Seals start now, in frame order, so each takes the next nonce; sends wait for every earlier record. */
+  /** Seals start now, in frame order, so each takes the next nonce; sends wait for every earlier record. A seal's
+   * failure is caught at once, so it is not unhandled while an earlier record is still being sealed. */
   #send(frame: Frame): void {
     if (this.#state !== "open") return;
     const plaintext = encodeFrame(frame);
     this.#unsealed += plaintext.length;
-    const sealed = this.#keys.send.seal(plaintext);
-    this.#sending = this.#sending.then(() =>
-      sealed.then(
-        (record) => {
-          this.#unsealed -= plaintext.length;
-          if (this.#state === "open") this.#socket.send(record);
-        },
-        (error: unknown) => {
-          this.#unsealed -= plaintext.length;
-          // The counter ran out: close before it could repeat; the phone reconnects.
-          this.close(error instanceof NoiseError ? CLOSE.normal : CLOSE.protocol);
-        },
-      ),
+    const sealed = this.#keys.send.seal(plaintext).then(
+      (record) => ({ record }),
+      (error: unknown) => ({ error }),
     );
+    this.#sending = this.#sending.then(async () => {
+      const result = await sealed;
+      this.#unsealed -= plaintext.length;
+      // The counter ran out: close before it could repeat; the phone reconnects.
+      if ("error" in result) return this.close(result.error instanceof NoiseError ? CLOSE.normal : CLOSE.protocol);
+      if (this.#state !== "closed") this.#socket.send(result.record);
+    });
   }
 }
