@@ -1,9 +1,9 @@
 ---
 title: Move from Grok Bot
-description: Bring your Grok Bot Bots to MausBot, on your computer or on My Cloud. What comes over (instructions, skills, routines, memories, apps, chats), what doesn't, and each step.
+description: Bring your Grok Bot Bots to MausBot, on your computer or on My Cloud. What comes over (instructions, skills, routines, memories, a handover note, apps, chats, pages, files), what doesn't, and each step.
 ---
 
-MausBot is an open-source alternative to Grok Bot, with no tie to xAI. You can bring each of your Grok Bot Bots over, with its instructions, skills, routines, memories, the list of apps it used and, on the desktop app, its whole chat. It takes a few minutes per Bot, and nothing changes in Grok Bot.
+MausBot is an open-source alternative to Grok Bot, with no tie to xAI. You can bring each of your Grok Bot Bots over, with its instructions, skills, routines, memories, a handover note saying where its work stands, the list of apps it used and, on the desktop app, its whole chat. It takes a few minutes per Bot, and nothing changes in Grok Bot.
 
 Grok Bot has no export button. So MausBot gives you a message to send to each Bot, the Bot writes down its own setup, and MausBot reads what it wrote.
 
@@ -17,13 +17,17 @@ Grok Bot has no export button. So MausBot gives you a message to send to each Bo
 | Routines on a schedule | Routines in the same time zone, **paused**, up to 50 per bot. |
 | Routines that start on an event (Slack, GitHub, email, a webhook) or whose schedule can't be read | Saved as a note in the bot's memory, `memory/grok-bot-event-routines.md`, with their trigger and full instruction, so you can set each one up again. |
 | What it remembers, and what it knows about you | The bot's memory (`MEMORY.md`), under *Notes from Grok Bot*. |
+| A handover note: each project or piece of work it has going, where it stands, the next steps, open questions, decisions made, and the files it uses | The first section of the bot's memory (`MEMORY.md`), *Where things stand*, which the bot reads in every conversation. A note over 100 lines keeps its start there and comes over whole in `memory/grok-bot-handover.md`. For a Bot you moved before, moving it again puts its new note in the bot you have, in place of the earlier one, and changes nothing else in its memory. |
 | Connected apps and MCP servers | Listed as apps to connect again. Where the Bot gave a remote MCP server's `https` address, MausBot keeps that address with any key taken out. |
 | Its chat, from the first message (desktop app, with the Grok Bot app on the same computer) | A thread on the new bot called *Chat from Grok Bot*, with every message in order and with its time. A card the Bot showed (a question with choices, a shared template, a request to connect an app, images) comes over as a line saying what it was, with your answer to a question. Keys and tokens in the text are redacted. The bot doesn't reply to it or act on it: carry on in that thread when you're ready. |
+| Its pages: canvases and documents (desktop app, through the Grok Bot connector) | Each page becomes a live page in a thread on the bot called *Pages from Grok Bot*, and shows in the bot's Library. The Bot in Grok Bot rewrites the page for MausBot with the same content and numbers. It is kept in the bot's folder as `from-grok/pages/<title>/page.js`, with the original Grok Bot source beside it. When the bot edits that file, the page updates. |
+| Its files (desktop app, through the Grok Bot connector) | In the bot's folder, under `from-grok/`, at the path the Bot sent. |
 
 ## What doesn't come over
 
 - **Chats, on My Cloud or in a browser.** Chats come from the Grok Bot app's own copy on your computer, so only the desktop app on that computer can bring them over.
-- **Files on Grok Bot's computer.** Add any files your bot needs to its folder in MausBot.
+- **Pages and files, without the connector.** They live in Grok Bot's cloud, so only a Bot there can send them: see [Pages and files](#pages-and-files). A file over 3 MB, a hidden file, a package or cache folder, and a file named like a key or password store (`.env`, `*.pem`, `id_rsa`, `credentials`) are never taken. Add those to the bot's folder yourself if it needs them.
+- **Data a page fetched by itself.** A Grok Bot page has its numbers written into it, and so does the page that comes over. To refresh it, ask the bot, or give it a routine that rewrites the page's file.
 - **Passwords, API keys, tokens and sign-ins.** The message tells the Bot to leave them out. If what it writes still has a password or key field in it, MausBot refuses the whole thing and says which fields; ask the Bot to write it again without them. Token-shaped text anywhere else is redacted before anything is saved.
 - **App sign-ins.** Connect each app again under **Connected apps**.
 - **Group chats.** Put the moved bots in a group again in MausBot.
@@ -47,7 +51,7 @@ A new install shows a *Move from Grok Bot* popup once, after your first chat. **
 
 Choose **Copy the message**, then paste it into your Bot's chat in Grok Bot and send it. Do this once per Bot.
 
-The message asks the Bot to write its whole setup as one file named `grok-bot-export-<its name>.json`: in your Downloads folder if it can write to your computer, otherwise attached to its reply, or as a JSON block in the reply. It also asks the Bot to change nothing, to leave out keys and passwords, and to say what it couldn't read instead of guessing.
+The message asks the Bot to write its whole setup as one file named `grok-bot-export-<its name>.json`: in your Downloads folder if it can write to your computer, otherwise attached to its reply, or as a JSON block in the reply. It also asks the Bot for a handover note, saying what it is working on and where each piece stands, and asks it to change nothing, to leave out keys and passwords, and to say what it couldn't read instead of guessing.
 
 If the setup is too long for one message, the Bot splits it into several parts. Bring back all of them: MausBot puts them together.
 
@@ -67,7 +71,8 @@ Then choose **Continue**.
 
 - that routines come over paused,
 - how many apps need connecting again,
-- which Bots are already here (moved before) and won't be added twice,
+- which Bots bring a handover note,
+- which Bots are already here (moved before) and won't be added twice, and whether their new handover note comes over into the bot you have,
 - on the desktop app, that each Bot's chat comes over too,
 - which skills a safety check keeps off,
 - anything that couldn't be read.
@@ -82,6 +87,19 @@ MausBot finds each Bot's chat by the name in what the Bot wrote. Grok Bot lets s
 
 Choose **Move another Bot** for the next one, or **Done**.
 
+## Pages and files
+
+Pages and files are not on your computer, so the Bot's written setup can't carry them. The Grok Bot connector can: it is a link you add to Grok Bot once, which the MausBot bot there sends things through. This works on the desktop app, with your bots on this computer.
+
+1. In **Move from Grok Bot**, under **Connect Grok Bot**, choose **Get the link**, and add it in Grok Bot as the dialog says. Then choose **Add the MausBot bot in Grok Bot**.
+2. Ask that bot to move your Bots with their pages and files. For each Bot it sends the setup first, then each page, then each file.
+3. MausBot shows *Arrived from Grok Bot* with the Bots' names. Choose **Use these**. *What would come over* names each Bot's pages and counts its files.
+4. Choose **Import**. The report counts the pages and files that came over, and names any that could not be brought.
+
+If you imported a Bot's setup before its pages arrived, choose **Use these** again when they do: the Bot is listed as already here, and **Import** brings its pages and files into the bot you have.
+
+Nothing a Bot sends is saved to disk or shown to a bot until you choose **Import**. Grok Bot can add to what is waiting and see how much there is, and can never read any of it back. A link holds up to 1,000 pages and files, 64 MB in all, until you import them. A page or file that holds a key is refused.
+
 ## After you import
 
 1. **Choose the bot's engine and model** in the bot's settings, if it should not use your default.
@@ -89,7 +107,8 @@ Choose **Move another Bot** for the next one, or **Done**.
 3. **Set up event routines again** from the note in the bot's memory (`memory/grok-bot-event-routines.md`). You can ask the bot to do it: for example, *"set up the routines in your Grok Bot notes"*.
 4. **Connect apps again** under **Connected apps**.
 5. **Check skills that stayed off.** A safety check keeps a skill off when its text has a long base64-looking blob, pipes a download straight into a shell (`curl | sh`), or has invisible Unicode characters. Read it, then switch it on in the bot's skills if you trust it.
-6. **Add files** the bot needs to its folder.
+6. **Add files** the bot needs to its folder, if they did not come through the connector.
+7. **Open each page** in the bot's *Pages from Grok Bot* thread and check it against the one in Grok Bot. Ask the bot to fix anything that looks different: the original source is beside each page.
 
 ## On My Cloud
 
@@ -119,11 +138,15 @@ It never opens Grok Bot's sign-in files or cookies, or the chat of a Bot you are
 | *This has passwords or keys in it, so nothing was read.* | Ask the Bot to write it again without them. |
 | *This was written for a newer OpenMausBot.* | Update MausBot, then try again. |
 | *This couldn't be turned into a bot.* | Ask the Bot to write it again. |
-| *Already here* | That Bot was moved before. Delete the moved bot first if you want to move it again. |
+| *Already here* | That Bot was moved before, so it isn't added twice. Its new handover note still comes over into the bot you have. Delete the moved bot first if you want to move everything again. |
+| *Its handover note couldn't be saved to its memory.* | Move the Bot again. |
 | *No chat came over: the Grok Bot app isn't on this computer.* | Move from the desktop app on the computer where you use Grok Bot. |
 | *No chat came over: the Grok Bot app on this computer has no Bot with this name.* | The Bot wrote a different name from the one Grok Bot shows for it, or it's in the Grok Bot app on another computer. Ask it to write its setup again under the name Grok Bot shows, or move it from that computer. Delete the moved bot first. |
 | *No chat came over: several Bots in the Grok Bot app have this name.* | Ask the Bot to write its setup again with the first 8 characters of its ID after its name, or give it a name of its own in Grok Bot. Delete the moved bot, then move it again. |
 | *No chat came over: the Grok Bot app has none saved for this Bot.* | The Grok Bot app keeps no copy of that chat here. Open the Bot's chat in the Grok Bot app, then delete the moved bot and move it again. |
+| *Pages or files arrived for …, but not the setup.* | Ask the MausBot bot in Grok Bot to send that Bot's setup too. Its pages and files wait until then. |
+| *Couldn't be brought over: …* | That page could not be shown, or that file's folder could not be written. Ask the MausBot bot in Grok Bot to send it again. |
+| *Its pages and files couldn't be brought over. They are still waiting.* | Choose **Import** again. |
 
 ## Not the same as Backups
 

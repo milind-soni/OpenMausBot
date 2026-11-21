@@ -1,7 +1,7 @@
 const TOKEN = /^[0-9a-f]{64}$/;
 
 /** OpenMausBot's connected-apps service (cloudflare/composio-broker): the packaged desktop app and a Cloud home use it. */
-export const DEFAULT_MANAGED_COMPOSIO_BROKER_URL = "https://openmausbot-composio.milindsoni201.workers.dev";
+export const DEFAULT_MANAGED_COMPOSIO_BROKER_URL = "https://mcp.mausbot.com";
 
 /** OMB_COMPOSIO_BROKER=off: nothing reaches the managed service, whatever else is set. */
 export function managedComposioBrokerOff(environment = process.env) {
@@ -46,11 +46,11 @@ export function managedComposioChildEnvironment(brokerUrl, credentials, environm
   const next = { ...environment };
   delete next.OMB_COMPOSIO_BROKER_URL;
   delete next.OMB_COMPOSIO_BROKER_TOKEN;
+  if (managedComposioBrokerOff()) return next;
+  const url = normalizeManagedComposioBrokerUrl(brokerUrl);
+  if (url) next.OMB_COMPOSIO_BROKER_URL = url;
   const access = managedComposioAccess(brokerUrl, credentials);
-  if (access) {
-    next.OMB_COMPOSIO_BROKER_URL = access.url;
-    next.OMB_COMPOSIO_BROKER_TOKEN = access.token;
-  }
+  if (access) next.OMB_COMPOSIO_BROKER_TOKEN = access.token;
   return next;
 }
 

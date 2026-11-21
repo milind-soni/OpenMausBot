@@ -2,6 +2,8 @@ import { createHmac } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 
+import type { LinkManifest } from "../../../shared/grok-link";
+import { LinkRelay, type RelaySocket } from "./grok-link-relay";
 import worker from "./index";
 
 /** D1 over node:sqlite with the real migrations: the same SQLite engine, so constraints, RETURNING and partial
@@ -67,6 +69,51 @@ export function fakeD1(migrations = Infinity) {
   const rows = <T = Record<string, unknown>>(sql: string, ...values: unknown[]) =>
     db.prepare(sql).all(...params(values)).map(plain) as T[];
   return { db, D1, rows, sqlLog };
+}
+
+/** The header a fake attach answers with, naming the object the socket belongs to: Node cannot build a 101 Response. */
+export const FAKE_GROK_LINK_ATTACHED = "x-fake-grok-link";
+
+/** The GROK_LINK namespace: each named object is a real LinkRelay over a store in memory. `attach` is what the object
+ *  does with an upgraded socket. */
+export function fakeGrokLinks() {
+  const objects = new Map<string, { relay: LinkRelay; sockets: RelaySocket[] }>();
+  const object = (name: string) => {
+    let made = objects.get(name);
+    if (!made) {
+      let manifest: LinkManifest | null = null;
+      const sockets: RelaySocket[] = [];
+      const relay = new LinkRelay({ read: async () => manifest, write: async (next) => { manifest = next; }, clear: async () => { manifest = null; } }, () => sockets);
+      objects.set(name, made = { relay, sockets });
+    }
+    return made;
+  };
+  return {
+    made: () => [...objects.keys()],
+    attach(name: string, socket: RelaySocket) {
+      const { relay, sockets } = object(name);
+      const gone = () => { if (sockets.includes(wired)) sockets.splice(sockets.indexOf(wired), 1); };
+      const wired: RelaySocket = { send: (text) => socket.send(text), close: (code, reason) => { gone(); socket.close(code, reason); } };
+      sockets.push(wired);
+      relay.attach(wired);
+      return { received: (text: string) => relay.received(wired, text), closed: () => { gone(); relay.closed(wired); } };
+    },
+    namespace: {
+      idFromName: (name: string) => name,
+      get: (name: string) => ({
+        async fetch(url: string, init: { body?: Uint8Array } = {}) {
+          const { relay } = object(name);
+          const { pathname } = new URL(url);
+          if (pathname === "/call") return relay.call(new TextDecoder().decode(init.body));
+          if (pathname === "/purge") {
+            await relay.purge();
+            return new Response(null, { status: 204 });
+          }
+          return new Response(null, { status: 200, headers: { [FAKE_GROK_LINK_ATTACHED]: name } });
+        },
+      }),
+    },
+  };
 }
 
 interface FakeAccount { id: string; user_id: string; toolkit: { slug: string }; status: string }
@@ -272,7 +319,8 @@ export interface Installation { id: string; token: string; userId: string }
 export function brokerHarness(options: { migrations?: number } = {}) {
   const d1 = fakeD1(options.migrations);
   const composio = fakeComposio();
-  const limits = { events: true };
+  const limits = { events: true, registration: true, link: true };
+  const grokLinks = fakeGrokLinks();
   const env = {
     DB: d1.D1,
     COMPOSIO_API_BASE: "https://backend.composio.dev/api/v3.1",
@@ -283,7 +331,9 @@ export function brokerHarness(options: { migrations?: number } = {}) {
     CLOUD_GRANT_SECRET: CLOUD_GRANT_SECRET as string | undefined,
     STATS_TOKEN: STATS_TOKEN as string | undefined,
     CLOUD_ADMIN_URL: undefined as string | undefined,
-    REGISTRATION_LIMITER: { limit: async () => ({ success: true }) },
+    REGISTRATION_LIMITER: { limit: async () => ({ success: limits.registration }) },
+    LINK_LIMITER: { limit: async () => ({ success: limits.link }) },
+    GROK_LINK: grokLinks.namespace,
     SESSION_LIMITER: { limit: async () => ({ success: true }) },
     EVENTS_LIMITER: { limit: async () => ({ success: limits.events }) },
   };
@@ -299,6 +349,7 @@ export function brokerHarness(options: { migrations?: number } = {}) {
     ctx,
     composio,
     limits,
+    grokLinks,
     background,
     fetch: fetchBroker,
     async install(): Promise<Installation> {

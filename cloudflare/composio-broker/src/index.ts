@@ -19,6 +19,8 @@ import {
 } from "./common";
 import { eraseInstallation } from "./erase";
 import { requestFileUpload } from "./files";
+import { GROK_LINK_ATTACH_PATH, GROK_LINK_MCP_PATH } from "../../../shared/grok-link";
+import { grokLinkCall, grokLinkRoute, redactPath, sweepGrokLinks } from "./grok-link";
 import { adoptSharedUser, me, shareUser } from "./sharing";
 import { createTrigger, deleteTrigger, getTriggerType, listTriggers, listTriggerTypes, updateTrigger } from "./triggers";
 
@@ -833,6 +835,9 @@ async function route(request: Request, env: Env, ctx: ExecutionContext) {
   if (request.method === "POST" && url.pathname === "/v1/installations") return register(request, env);
   if (request.method === "POST" && url.pathname === "/v1/composio/webhook") return composioWebhook(request, env, ctx);
   if (request.method === "GET" && url.pathname === "/v1/stats/app-events") return appEventStats(request, url, env);
+  const grokLink = url.pathname.match(GROK_LINK_MCP_PATH);
+  if (grokLink) return grokLinkCall(request, grokLink[1]!, env);
+  if (url.pathname === GROK_LINK_ATTACH_PATH) return grokLinkRoute(request, env);
   if (!url.pathname.startsWith("/v1/")) return json({ error: "not found" }, 404);
   const installation = await authenticate(request, env);
   if (!installation) return json({ error: "unauthorized" }, 401);
@@ -876,14 +881,17 @@ export default {
       return await route(request, env, ctx);
     } catch (error) {
       if (error instanceof Response) return error;
-      console.error(JSON.stringify({ message: "request failed", path: new URL(request.url).pathname, error: error instanceof Error ? error.message : String(error) }));
+      console.error(JSON.stringify({ message: "request failed", path: redactPath(new URL(request.url).pathname), error: error instanceof Error ? error.message : String(error) }));
       return json({ error: "service unavailable" }, 503);
     }
   },
   async scheduled(controller: ScheduledController, env: Env) {
     await runHourly(env, controller.scheduledTime);
+    await sweepGrokLinks(env, controller.scheduledTime);
   },
 } satisfies ExportedHandler<Env>;
+
+export { GrokLinkObject } from "./grok-link";
 
 export {
   authorize,

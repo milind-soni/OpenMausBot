@@ -1,15 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { GROK_EXPORT_FORMAT, GROK_EXPORT_PROMPT, GROK_NOTES_FILE, GrokImportError, grokExportDocument, grokMovePlan, mergeGrokBots, parseGrokExport, type GrokBot } from "./grok-import.ts";
+import { GROK_EXPORT_FORMAT, GROK_EXPORT_PROMPT, GROK_HANDOVER_FILE, GROK_NOTES_FILE, GrokImportError, grokExportDocument, grokMovePlan, mergeGrokBots, parseGrokExport, withGrokHandover, type GrokBot } from "./grok-import.ts";
 import { parsePackageDocument } from "./package-format.ts";
 
 const TOKEN = "sk-abcdefghijklmnopqrstuvwx";
+const HANDOVER = "Q3 renewals: drafted, waiting on legal.\nNext: send the deck to Dana.\nFiles: renewals.xlsx holds the account list.";
 /** The shape a real Bot wrote: role, memories, facts, skills, a live and a paused routine, event routines, apps. */
 const BOT = {
   name: "Account Health", title: "Customer success",
   instructions: "Own the weekly account-health review. Never contact a customer without approval.",
   memories: ["Churn signal: three weeks without a login", `Token ${TOKEN} is old`, "churn signal:  three WEEKS without a login"],
   user_facts: ["Works in America/New_York", "Churn signal: three weeks without a login"],
+  handover: HANDOVER,
   skills: [
     { name: "Weekly account health", description: "Score accounts each week", instructions: "1. Pull usage.\n2. Flag churn.\n3. Post a watch list." },
     { name: "Empty one", description: "", instructions: "" },
@@ -92,7 +94,22 @@ describe("reading what a Bot wrote", () => {
     expect(moved.apps).toBe(1);
   });
 
+  it("reads a Bot's handover note as text or a list of lines, and an export without one exactly as before", () => {
+    expect(parseGrokExport(FILE)[0]!.handover).toBe(HANDOVER);
+    expect(parseGrokExport(JSON.stringify({ format: GROK_EXPORT_FORMAT, bots: [{ name: "Desk", handover: HANDOVER.split("\n") }] }))[0]!.handover).toBe(HANDOVER);
+    expect(parseGrokExport(JSON.stringify({ name: "Bare", handover: "Halfway through the audit." }))[0]!.handover).toBe("Halfway through the audit.");
+    const { handover: _note, ...older } = BOT;
+    expect(parseGrokExport(JSON.stringify({ ...EXPORT, bots: [older] }))).toEqual([{ ...parseGrokExport(FILE)[0]!, handover: "" }]);
+  });
+
+  it("joins a split export to the later document's handover note, and keeps it when a later part has none", () => {
+    const part = (extra: object) => JSON.stringify({ format: GROK_EXPORT_FORMAT, version: 1, bots: [{ name: "Desk", ...extra }] });
+    expect(parseGrokExport(`${part({ handover: "Drafting the deck." })}\n${part({ handover: "Deck sent." })}`)[0]!.handover).toBe("Deck sent.");
+    expect(parseGrokExport(`${part({ handover: "Drafting the deck." })}\n${part({ memories: ["more"] })}`)[0]!.handover).toBe("Drafting the deck.");
+  });
+
   it("asks the Bot for no secrets and names the file per Bot", () => {
+    expect(GROK_EXPORT_PROMPT).toMatch(/"handover": "[^"\n]*for each project or ongoing piece of work, what it is, where it stands, the next steps, open questions, decisions made, and the files it uses[^"\n]*under 100 lines"/);
     expect(GROK_EXPORT_PROMPT).toContain(GROK_EXPORT_FORMAT);
     expect(GROK_EXPORT_PROMPT).toContain("grok-bot-export-<your name>.json");
     expect(GROK_EXPORT_PROMPT).toMatch(/Never include passwords, API keys, tokens/);
@@ -111,7 +128,7 @@ describe("what an export may never bring", () => {
   });
 
   it("redacts token-shaped text everywhere, including the notes", () => {
-    const moved = grokMovePlan(parseGrokExport(FILE)[0]!, { timeZone: "UTC" });
+    const moved = grokMovePlan(parseGrokExport(JSON.stringify({ ...EXPORT, bots: [{ ...BOT, handover: `${HANDOVER}\nKey ${TOKEN}` }] }))[0]!, { timeZone: "UTC" });
     expect(JSON.stringify(moved)).not.toContain(TOKEN);
     expect(moved.document.package.agents[0]!.seed!.memory[GROK_NOTES_FILE]).toContain("Reproduce the ticket");
     expect(moved.document.package.agents[0]!.seed!.memory["MEMORY.md"]).toContain("is old");
@@ -253,7 +270,62 @@ describe("what comes over", () => {
   });
 
   it("merges the same Bot across files by name, whatever the case", () => {
-    const bot = (name: string, memories: string[]): GrokBot => ({ name, title: "", description: "", instructions: "", memories, userFacts: [], skills: [], routines: [], apps: [] });
+    const bot = (name: string, memories: string[]): GrokBot => ({ name, title: "", description: "", instructions: "", memories, userFacts: [], skills: [], routines: [], apps: [], handover: "" });
     expect(mergeGrokBots([bot("Desk", ["a"]), bot("desk", ["a", "b"]), bot("Other", [])]).map((item) => [item.name, item.memories])).toEqual([["Desk", ["a", "b"]], ["Other", []]]);
+  });
+
+  it("opens the new bot's memory with its handover note, ahead of the notes from Grok Bot", () => {
+    const moved = plan();
+    const memory = moved.document.package.agents[0]!.seed!.memory;
+    const index = memory["MEMORY.md"]!;
+    expect(index.slice(0, index.indexOf(HANDOVER)).replace(/<!--.*?-->/g, "").trim()).toBe("## Where things stand");
+    expect(index.indexOf(HANDOVER)).toBeLessThan(index.indexOf("# Notes from Grok Bot"));
+    expect(memory[GROK_HANDOVER_FILE]).toBeUndefined();
+    expect(moved.handover).not.toBeNull();
+    const onlyNote = plan({ name: "Desk", handover: "Halfway through the audit." });
+    expect(onlyNote).toMatchObject({ memories: 0 });
+    expect(onlyNote.document.package.agents[0]!.seed!.memory["MEMORY.md"]).toContain("Halfway through the audit.");
+    const crowded = plan({ name: "Crowded", handover: "Halfway through the audit.", memories: Array.from({ length: 300 }, (_, i) => `Fact ${i}: ${"y".repeat(900)}`) });
+    expect(crowded).toMatchObject({ memories: 0 });
+    expect(crowded.handover).not.toBeNull();
+    expect(crowded.document.package.agents[0]!.seed!.memory["MEMORY.md"]).toContain("Halfway through the audit.");
+    const { handover: _note, ...older } = BOT;
+    expect(plan(older).handover).toBeNull();
+    expect(plan(older).document.package.agents[0]!.seed!.memory["MEMORY.md"]).not.toContain("Where things stand");
+  });
+
+  it("keeps a long handover note's start in MEMORY.md, inside what a conversation loads, and the whole note beside it", () => {
+    const lines = Array.from({ length: 150 }, (_, i) => `Line ${i + 1}: step ${i + 1} of the renewal.`);
+    const memory = plan({ name: "Long", handover: lines.join("\n"), memories: ["The door sticks"] }).document.package.agents[0]!.seed!.memory;
+    const index = memory["MEMORY.md"]!;
+    expect(index).toContain("Line 100: ");
+    expect(index).not.toContain("Line 101: ");
+    expect(index).toContain(`The rest of this note is in ${GROK_HANDOVER_FILE}.`);
+    expect(index.split("\n").slice(0, 200).join("\n")).toContain("- The door sticks");
+    expect(memory[GROK_HANDOVER_FILE]).toContain("Line 1: ");
+    expect(memory[GROK_HANDOVER_FILE]).toContain("Line 150: ");
+
+    const wide = plan({ name: "Wide", handover: Array.from({ length: 60 }, (_, i) => `${i}: ${"x".repeat(900)}`).join("\n") }).document.package.agents[0]!.seed!.memory;
+    expect(new TextEncoder().encode(wide["MEMORY.md"]!).length).toBeLessThan(24_000 / 2 + 500);
+    expect(wide[GROK_HANDOVER_FILE]).toContain(`59: ${"x".repeat(900)}`);
+  });
+
+  it("writes a note into memory a bot already has: first, once, in place of an earlier note, and nothing else changes", () => {
+    const mine = "# Notes from Grok Bot\n\n- The door sticks\n- 2026-11-01 · from chat · Likes tea\n";
+    const drafting = plan({ name: "Desk", handover: "Drafting the deck." }).handover!.section;
+    const once = withGrokHandover(mine, drafting);
+    expect(once.indexOf("Drafting the deck.")).toBeLessThan(once.indexOf("# Notes from Grok Bot"));
+    expect(once.endsWith(mine)).toBe(true);
+    expect(withGrokHandover(once, drafting)).toBe(once);
+
+    const sent = plan({ name: "Desk", handover: "Deck sent; waiting on legal." }).handover!.section;
+    const again = withGrokHandover(once, sent);
+    expect(again).not.toContain("Drafting the deck.");
+    expect(again.match(/## Where things stand/g)).toHaveLength(1);
+    expect(again.endsWith(mine)).toBe(true);
+    expect(withGrokHandover("", sent)).toBe(sent);
+
+    const copied = plan({ name: "Desk", handover: `${once}\nAlso: the deck.` }).handover!.section;
+    expect(withGrokHandover(withGrokHandover(mine, copied), sent)).toBe(withGrokHandover(mine, sent));
   });
 });
