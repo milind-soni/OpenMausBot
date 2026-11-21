@@ -10332,6 +10332,8 @@
   "chat.notice.botMemoryCap": "{bot} used more memory than this computer allows for one bot ({used} MB of {cap} MB) while memory was running short, so I stopped this task to keep the other bots running. Send the message again to start over; if it keeps happening, give this task less to do at once, or give this computer more memory.",
   "chat.notice.memoryReclaimedBrowserDetail": "Ran out of room, so I closed the browser to keep everything else running. ({detail})",
   "chat.notice.memoryReclaimedTaskDetail": "Ran out of room, so I stopped this task to keep everything else running. ({detail})",
+  "chat.notice.memoryReclaimedOnly": "Ran out of room, so I stopped this task to keep everything here from freezing.",
+  "chat.notice.memoryReclaimedOnlyDetail": "Ran out of room, so I stopped this task to keep everything here from freezing. ({detail})",
   "chat.notice.outOfProcesses": "There is no room to start another program ({code}), so this task could not run. Nothing was sent to the AI. It starts again by itself when there is room.",
   "server.personFirst.stoppedSeconds": "Stopped a step that had run for {seconds} s, to answer you first",
   "server.personFirst.stoppedMinutes": "Stopped a step that had run for {minutes} min, to answer you first",
