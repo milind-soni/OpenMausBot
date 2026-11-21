@@ -18,6 +18,7 @@ import { createLiveStreamClient, type LiveResume, type LiveStreamClient } from "
 import { BROWSER_HELD_ELSEWHERE } from "../../shared/browser-held";
 import { passkeyWallAt } from "../../shared/passkey-wall";
 import { browserScope, withBrowserScope } from "@/lib/team-browser";
+import { useNativeViewObscured } from "@/lib/native-view-obscured";
 
 const button = "rounded-md p-1.5 text-ink-secondary hover:bg-inset hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed";
 const NO_NAV: BrowserNav = { url: "", loading: false, canGoBack: false, canGoForward: false };
@@ -66,6 +67,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   const floating = useBrowserPictureInPicture();
   const pageVisible = usePageVisible();
   const panel = useRef<HTMLDivElement>(null);
+  const pageArea = useRef<HTMLDivElement>(null);
   const address = useRef<HTMLInputElement>(null);
   const surface = useRef<StreamSurfaceHandle>(null);
   const profilesDialog = useRef<HTMLDialogElement>(null);
@@ -288,6 +290,36 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     setError("");
   }, [shown]);
   const typingReady = connected && you;
+  // The desktop app shows this browser natively over the page area; the stream underneath shows through any overlay.
+  const paneMode = stream && state.config?.browserEngine?.pane === true && Boolean(window.ogb?.browserPane);
+  const obscured = useNativeViewObscured(showProfiles || showTyping, paneMode);
+  const paneVisible = paneMode && shown && connected && !asleep && !heldElsewhere && !gone && !starting && !obscured;
+  const paneShown = useRef(paneVisible);
+  const placePane = useRef<() => void>(() => {});
+  paneShown.current = paneVisible;
+  useEffect(() => {
+    const bridge = window.ogb?.browserPane;
+    if (!paneMode || !bridge) return;
+    const threadId = scopedThread ?? null;
+    const profile = bot.browserProfile ?? null;
+    const place = () => {
+      const rect = pageArea.current?.getBoundingClientRect();
+      const bounds = rect && rect.width >= 1 && rect.height >= 1
+        ? { x: Math.round(rect.left), y: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height) } : null;
+      void bridge.show({ botId: bot.id, threadId, profile, bounds, visible: paneShown.current && bounds !== null }).catch(() => undefined);
+    };
+    placePane.current = place;
+    const observer = new ResizeObserver(place);
+    if (pageArea.current) observer.observe(pageArea.current);
+    window.addEventListener("resize", place);
+    return () => {
+      placePane.current = () => {};
+      observer.disconnect();
+      window.removeEventListener("resize", place);
+      void bridge.show({ botId: bot.id, threadId, profile, bounds: null, visible: false }).catch(() => undefined);
+    };
+  }, [paneMode, bot.id, bot.browserProfile, scopedThread]);
+  useEffect(() => { placePane.current(); }, [paneVisible, paneMode, bot.id, bot.browserProfile, scopedThread]);
   const pipSupported = stream && supportsBrowserPictureInPicture();
   const passkeyWall = passkeyWallAt(nav.url);
   return <div ref={panel} className={maximized
@@ -341,7 +373,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     {(error || (notReaching && connected)) && <div role="alert" className="flex shrink-0 items-center justify-between gap-2 border-b border-hairline/30 px-3 py-2 text-[12px] text-danger"><span>{notReaching && connected ? t("browser.input.notReaching") : error}</span>{(!connected || notReaching) && <button className="shrink-0 underline" onClick={reconnect}>{t("browser.panel.reconnect")}</button>}</div>}
     {takeStatus === "stale" && <div role="status" className="shrink-0 border-b border-hairline/30 px-3 py-1.5 text-[12px] text-accent-text">{t("browser.control.stale", { name: bot.name })}</div>}
     {passkeyWall && passkeyDismissed !== nav.url && <PasskeyNotice wall={passkeyWall} botName={bot.name} onDismiss={() => setPasskeyDismissed(nav.url)} />}
-    <div className="relative flex min-h-0 flex-1 flex-col bg-inset/40">
+    <div ref={pageArea} {...(paneMode ? { "data-native-view-host": "" } : {})} className="relative flex min-h-0 flex-1 flex-col bg-inset/40">
       {shown ? (
         <StreamSurface
           key={`${attempt}:${stream ? "stream" : "live"}:${bot.browserProfile ?? ""}`}
