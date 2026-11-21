@@ -307,7 +307,9 @@ describe("input to a page on the default browser engine", () => {
     const before = evidence().length;
     seen.length = 0;
     const step = (tool: string, args: Record<string, unknown>, expectError = false) => ({ server: "browser", tool: `agent_browser_${tool}`, arguments: args, ...(expectError ? { expectError: true } : {}) });
-    writeFileSync(planPath, JSON.stringify({ [bot.id]: { turns: [{ timeoutMs: 180_000, steps: [
+    // The scripted bot takes the plan's turn at the index of the turns it already took.
+    const earlier = Array.from({ length: evidence().filter((turn: any) => turn.botId === bot.id).length }, () => ({ steps: [], reply: "Done." }));
+    writeFileSync(planPath, JSON.stringify({ [bot.id]: { turns: [...earlier, { timeoutMs: 180_000, steps: [
       step("open", { url: `${base}/?bot=${Date.now()}` }),
       step("click", { selector: "#off" }, true),
       step("click", { selector: "#name" }),
