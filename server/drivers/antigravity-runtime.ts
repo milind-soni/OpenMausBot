@@ -1,3 +1,4 @@
+import { GeminiCredentialsWatcher, type AccountSwitchedInfo, type GeminiCredentialsWatcherOptions } from "./antigravity-credentials-watcher.ts";
 import { createHash, randomUUID } from "node:crypto";
 import {
   access,
@@ -361,4 +362,30 @@ export async function antigravityOlderRuntime(baseDir = DATA_DIR, asset = resolv
 
 export function antigravityManagedInstallAvailable(): boolean {
   return resolveAntigravityReleaseAsset() !== null;
+}
+
+const instanceWatchers = new Map<string, GeminiCredentialsWatcher>();
+
+export function startAntigravityWatcher(
+  instanceId: string,
+  onAccountSwitched?: (info: AccountSwitchedInfo) => Promise<void> | void,
+  options?: GeminiCredentialsWatcherOptions,
+): GeminiCredentialsWatcher {
+  stopAntigravityWatcher(instanceId);
+  const watcher = new GeminiCredentialsWatcher(instanceId, onAccountSwitched, options);
+  watcher.start();
+  instanceWatchers.set(instanceId, watcher);
+  return watcher;
+}
+
+export function stopAntigravityWatcher(instanceId: string): void {
+  const existing = instanceWatchers.get(instanceId);
+  if (existing) {
+    existing.stop();
+    instanceWatchers.delete(instanceId);
+  }
+}
+
+export function getAntigravityWatcher(instanceId: string): GeminiCredentialsWatcher | undefined {
+  return instanceWatchers.get(instanceId);
 }
