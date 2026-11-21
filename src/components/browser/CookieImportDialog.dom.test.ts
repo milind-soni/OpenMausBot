@@ -52,6 +52,20 @@ describe("the sign-in import dialog", () => {
     expect(host.querySelector('[role="status"]')?.textContent).toBe("Imported 4 cookies for github.com.");
   });
 
+  it("picks the browser and profile in the app's own dropdowns, a new browser starting at its first profile", async () => {
+    bridge.import.mockResolvedValue({ ok: true, site: "github.com", imported: 1, sessionOnly: 0, skipped: {} });
+    await render();
+    const [from, profile] = [...host.querySelectorAll<HTMLSelectElement>('select[data-look="select"]')];
+    expect([from, profile].map((select) => select!.value)).toEqual(["chrome", "Default"]);
+    await act(async () => { profile!.value = "Profile 1"; profile!.dispatchEvent(new Event("change", { bubbles: true })); });
+    expect(text()).toContain("from Google Chrome (Work)");
+    await act(async () => { from!.value = "firefox"; from!.dispatchEvent(new Event("change", { bubbles: true })); });
+    await settle();
+    expect(host.querySelectorAll<HTMLSelectElement>('select[data-look="select"]')[1]!.value).toBe("abc.default");
+    await submit();
+    expect(bridge.import).toHaveBeenCalledWith({ botId: "scout", threadId: null, site: "github.com", source: "firefox", profile: "abc.default" });
+  });
+
   it("says plainly why nothing was imported", async () => {
     bridge.import.mockResolvedValue({ ok: false, reason: "full-disk-access" });
     await render("example.com");

@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 
 import { loginSite } from "../../../shared/logins";
 import { t } from "@/lib/i18n";
+import { Select } from "../Select";
 import type { LocaleKey } from "@/locales";
 
 const button = "rounded-md p-1.5 text-ink-secondary hover:bg-inset hover:text-ink";
@@ -126,18 +127,18 @@ export function CookieImportDialog({ open, botId, botName, threadId, site: initi
         <form className="flex flex-col gap-3" onSubmit={(event) => { event.preventDefault(); if (ready) void start(); }}>
           <div className="grid grid-cols-2 gap-2">
             <label className="flex flex-col gap-1 text-[12px] text-ink-secondary">{t("browser.cookieImport.from")}
-              <select className={field} value={sourceId} disabled={busy} onChange={(event) => {
+              <Select className="w-full" value={sourceId} disabled={busy} onChange={(event) => {
                 const next = sources.find((candidate) => candidate.id === event.target.value);
                 setSourceId(event.target.value);
                 setProfileId(next?.profiles[0]?.id ?? "");
               }}>
                 {sources.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
-              </select>
+              </Select>
             </label>
             <label className="flex flex-col gap-1 text-[12px] text-ink-secondary">{t("browser.cookieImport.profile")}
-              <select className={field} value={profileId} disabled={busy} onChange={(event) => setProfileId(event.target.value)}>
+              <Select className="w-full" value={profileId} disabled={busy} onChange={(event) => setProfileId(event.target.value)}>
                 {source?.profiles.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
-              </select>
+              </Select>
             </label>
           </div>
           <label className="flex flex-col gap-1 text-[12px] text-ink-secondary">{t("browser.cookieImport.site")}
