@@ -255,7 +255,7 @@ export async function streamFetch(open: () => E2EStream, request: StreamRequest)
                 const trailers = new Headers();
                 let room = MAX_HEAD;
                 for (;;) {
-                  const line = await reader.until([13, 10], room, "trailer section");
+                  const line = await reader.until([13, 10], room, "rest of the trailer section");
                   if (!line.length) break;
                   room = Math.max(0, room - line.length - 2);
                   appendField(trailers, byteString(line));
