@@ -67,9 +67,11 @@ To keep bots on different servers, add each server under **Named servers** in
 **App Settings → AI → Other services → Self-hosted VPS**: a name you choose and
 its SSH config alias. A saved VPS bot then shows a server picker under
 **Where … works**. Choose the default server, a named one, or **Other SSH
-alias…** to type one that is not on the list, then press **Save**. A bot
-cannot move while its computer still lives on the old server; remove that
-computer first.
+alias…** to type one that is not on the list, then press **Save**. While the
+old server can be reached, a bot cannot move while its computer still lives
+there; remove that computer first. If the old server cannot be reached, the move
+goes ahead, and the app warns that the computer may be left there and shows the
+command that removes it once the server is back.
 
 <Callout type="warn" title="Existing bots in 0.1.151 and 0.1.152">
   The Simple layout can hide this selector and show **Connect Boat first** even
