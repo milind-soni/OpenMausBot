@@ -216,6 +216,20 @@ GPU-process failure that could leave an invisible focused app window receiving i
 acceleration, because software rendering costs about a CPU core while the window animates. Set `OMB_LINUX_GPU=off`
 to force software rendering or `OMB_LINUX_GPU=on` to force the GPU.
 
+
+### Known issue: Qt apps crash during Xorg sessions on current Qt (X11)
+
+On Xorg, each local-control session creates and later removes uinput pointer and keyboard devices.
+On hosts running current Qt (reported with Qt 6.11.3, X11 platform plugin), this device churn crashes
+every Qt application on the desktop — Telegram Desktop, Kate, Krusader and flameshot all SIGSEGV in the
+same second a device is removed, without any injected input involved (a use-after-free in Qt's XCB plugin).
+Older Qt releases tolerate the same churn, so the supported Ubuntu 24.04 stack is unaffected; NixOS and
+other current-Qt hosts are not. The fix belongs in the driver, which creates the devices once per lifetime
+in a persistent-device mode we do not ship yet: see upstream trycua/cua
+[issue #8451](https://github.com/trycua/cua/issues/8451) and the Cinnamon variant
+[issue #8197](https://github.com/trycua/cua/issues/8197). Until the driver fix lands, treat local control
+on a current-Qt X11 desktop as crash-prone for Qt apps.
+
 Cua actions use a private logical cursor. With the decorative overlay disabled, `move_cursor` does not move the
 user's physical pointer; approved click and typing actions still target the requested window, while the user's own
 mouse remains under their control.
