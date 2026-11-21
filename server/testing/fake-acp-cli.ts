@@ -37,6 +37,7 @@
 //       FAKE_ACP_LATE_UPDATE=1: a tool_call_update of the finished prompt arrives 50 ms after its answer)
 //   FAKE_ACP_GROK_NATIVE_MCP  _x.ai/mcp/list reports these comma-separated native servers after the session's accepted ones
 //   FAKE_ACP_MCP_TRANSPORTS  remote MCP transports advertised in initialize, e.g. "http,sse"
+//   FAKE_ACP_MCP_HOLD=1  every session connects its MCP servers at once and keeps the stdio ones running, as Grok does
 //   FAKE_ACP_PERMISSION_OPTIONS  JSON options override in permission mode
 //   FAKE_ACP_DUMP  path for {argv, env}; with FAKE_ACP_MODES or FAKE_ACP_MODELS also <dump>.prompts.jsonl
 //     and <dump>.initialize.json for the initialize params
@@ -549,31 +550,46 @@ function offeredAgents(servers: AnyMcpEntry[]): McpEntry | null {
 /** grok 1.0.25's initialize (`grok mcp doctor`) */
 const GROK_MCP_HANDSHAKE = { protocolVersion: "2025-11-25", capabilities: { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: ["text/html;profile=mcp-app"] } } }, clientInfo: { name: "grok-shell", version: "1.0.25" } };
 
+/** An initialized client of a Streamable HTTP MCP server: one POST per frame, the answer read as JSON or as one event. */
+async function httpMcp(entry: AnyMcpEntry, handshake: unknown): Promise<(frame: object) => Promise<any>> {
+  const headers: Record<string, string> = { "content-type": "application/json", accept: "application/json, text/event-stream" };
+  for (const { name, value } of entry.headers ?? []) headers[name] = value;
+  const post = async (frame: object) => {
+    const response = await fetch(entry.url!, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", ...frame }), signal: AbortSignal.timeout(20_000) });
+    const session = response.headers.get("mcp-session-id");
+    if (session) headers["mcp-session-id"] = session;
+    const text = await response.text();
+    const body = text.split("\n").find((line) => line.startsWith("data:"))?.slice(5) ?? text;
+    const parsed = body.trim() ? JSON.parse(body) : {};
+    if (!response.ok || parsed.error) throw new Error(`HTTP ${response.status} ${parsed.error?.message ?? ""}`.trim());
+    return parsed.result;
+  };
+  await post({ id: 1, method: "initialize", params: handshake });
+  await post({ method: "notifications/initialized" });
+  return post;
+}
+/** FAKE_ACP_MCP_HOLD=1: like Grok, each session's stdio MCP servers stay running once connected, until this process ends. */
+const heldMcp = new Set<ReturnType<typeof spawn>>();
+process.once("exit", () => { for (const child of heldMcp) child.kill(); });
+function holdSessionMcp(): void {
+  if (process.env.FAKE_ACP_MCP_HOLD !== "1") return;
+  for (const entry of sessionMcp) void listMcpTools(entry, GROK_MCP_HANDSHAKE).catch(() => {});
+}
+
 async function listMcpTools(entry: AnyMcpEntry, handshake: unknown): Promise<string[]> {
   const names = (result: any) => (result?.tools ?? []).map((tool: { name: string; inputSchema?: unknown }) =>
     process.env.FAKE_ACP_MCP_SCHEMA_BYTES === "1" ? `${tool.name}=${JSON.stringify(tool.inputSchema ?? {}).length}` : tool.name);
   if (typeof entry.url === "string") {
-    const headers: Record<string, string> = { "content-type": "application/json", accept: "application/json, text/event-stream" };
-    for (const { name, value } of entry.headers ?? []) headers[name] = value;
-    const post = async (frame: object) => {
-      const response = await fetch(entry.url!, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", ...frame }), signal: AbortSignal.timeout(20_000) });
-      const session = response.headers.get("mcp-session-id");
-      if (session) headers["mcp-session-id"] = session;
-      const text = await response.text();
-      const body = text.split("\n").find((line) => line.startsWith("data:"))?.slice(5) ?? text;
-      const parsed = body.trim() ? JSON.parse(body) : {};
-      if (!response.ok || parsed.error) throw new Error(`HTTP ${response.status} ${parsed.error?.message ?? ""}`.trim());
-      return parsed.result;
-    };
-    await post({ id: 1, method: "initialize", params: handshake });
-    await post({ method: "notifications/initialized" });
+    const post = await httpMcp(entry, handshake);
     return names(await post({ id: 2, method: "tools/list", params: {} }));
   }
   return new Promise((resolve, reject) => {
     const env = { ...process.env };
     for (const { name, value } of entry.env ?? []) env[name] = value;
     const child = spawn(entry.command!, entry.args ?? [], { env, stdio: ["pipe", "pipe", "ignore"] });
-    const finish = (error: Error | null, tools?: string[]) => { clearTimeout(timer); child.kill(); if (error) reject(error); else resolve(tools!); };
+    const hold = process.env.FAKE_ACP_MCP_HOLD === "1";
+    if (hold) heldMcp.add(child);
+    const finish = (error: Error | null, tools?: string[]) => { clearTimeout(timer); if (!hold || error) child.kill(); if (error) reject(error); else resolve(tools!); };
     const timer = setTimeout(() => finish(new Error("mcp timeout")), 20_000);
     child.on("error", (error) => finish(error));
     const write = (frame: object) => child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", ...frame })}\n`);
@@ -655,6 +671,13 @@ function appendAntigravitySteps(sessionId: unknown): void {
   } finally {
     database.close();
   }
+}
+
+async function httpMcpCall(entry: AnyMcpEntry, name: string, args: Record<string, unknown>): Promise<string> {
+  const post = await httpMcp(entry, { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "fake-acp", version: "1" } });
+  const result = await post({ id: 2, method: "tools/call", params: { name, arguments: args } });
+  if (result?.isError) throw new Error(`Fixture MCP request failed: ${JSON.stringify(result)}`);
+  return String(result?.content?.[0]?.text ?? "");
 }
 
 function driveMcp(entry: McpEntry, calls: Array<{ name: string | (() => string); args: (prev: string) => object }>, strict = false): Promise<string> {
@@ -977,6 +1000,7 @@ function handle(msg: any) {
       const offered = offeredAgents(servers);
       agentsMcp = mode === "list-peers" ? agentsMcp ?? offered : offered;
       sessionMcp = acceptedMcp(servers);
+      holdSessionMcp();
       if (process.env.FAKE_ACP_DUMP) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.mcp.json`, JSON.stringify(servers, null, 2));
       }
@@ -1050,7 +1074,7 @@ function handle(msg: any) {
       if (process.env.FAKE_ACP_DUMP) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.mcp.json`, JSON.stringify(msg.params?.mcpServers ?? []));
       }
-      if (!cachedLiveLoad) sessionMcp = acceptedMcp(msg.params?.mcpServers ?? []);
+      if (!cachedLiveLoad) { sessionMcp = acceptedMcp(msg.params?.mcpServers ?? []); holdSessionMcp(); }
       const opts = configOptions();
       const mdls = sessionModels();
       liveSession = typeof msg.params?.sessionId === "string" ? msg.params.sessionId : liveSession;
@@ -1547,8 +1571,8 @@ function handle(msg: any) {
         void (async () => {
           for (const call of calls) {
             const server = sessionMcp.find((entry) => entry.name === call.server);
-            if (!server?.command) throw new Error(`Fixture MCP server unavailable: ${call.server}`);
-            const text = await driveMcp({ command: server.command, args: server.args, env: server.env },
+            if (!server?.command && !server?.url) throw new Error(`Fixture MCP server unavailable: ${call.server}`);
+            const text = server.url ? await httpMcpCall(server, call.name, call.arguments) : await driveMcp({ command: server.command!, args: server.args, env: server.env },
               [{ name: call.name, args: () => call.arguments }], true);
             out({ jsonrpc: "2.0", method: "session/update", params: { update: {
               sessionUpdate: "agent_message_chunk", content: { text: `${call.name}: ${text}\n` },

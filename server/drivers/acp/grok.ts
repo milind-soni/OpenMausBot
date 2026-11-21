@@ -441,6 +441,7 @@ const support: AcpSupport = {
   effortLevels: ["low", "medium", "high"],
   defaultCli: "grok",
   nativeSource: "grok.acp",
+  ownMcpOverHttp: "advertised",
   loginNote: "Grok is not signed in to your grok.com account — choose Sign in to Grok in engine setup",
 
   // No Windows one-liner: the installer is a POSIX shell script.
