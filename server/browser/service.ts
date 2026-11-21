@@ -24,6 +24,7 @@ import { browserRoot, profileDir, profileHash, profileKind, removeProfile, works
 import { BROWSER_CONTROL_REFUSAL, ProfileControl, type TakeResult } from "./control.ts";
 import { executeTool, personUrl, readsDuringHold, toolFailure, type ToolContext } from "./dispatch.ts";
 import type { DesktopTarget } from "./desktop/views.ts";
+import { PERSON_HOLDS_TAB } from "./pane/endpoint.ts";
 import { fillDisplay, resizeDisplay } from "./desktop/window.ts";
 import { installedExtensions } from "./extensions.ts";
 import { HealthShown, pageHealthLine } from "./health.ts";
@@ -490,6 +491,10 @@ export class BrowserService {
     }
     beforeDispatch?.();
     if (control.owner !== null && !readsDuringHold(parsed.call)) throw new Error(BROWSER_CONTROL_REFUSAL);
+    // A pane tab the person holds takes the same reads; the pane's endpoint refuses any other command to it as well.
+    const asked = (parsed.call.input as { tab?: string }).tab;
+    const paneTab = asked === "new" ? null : asked ? profile.tabs.get(asked) : profile.active();
+    if (paneTab && run.opened.personControl?.held(paneTab.page.targetId) && !readsDuringHold(parsed.call)) return errorResult(PERSON_HOLDS_TAB);
     control.call = parsed.call.name;
     try {
       const result = await executeTool(this.#context(profile, run, deadline), parsed.call);

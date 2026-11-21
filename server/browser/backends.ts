@@ -48,7 +48,7 @@ export interface OpenedBrowser {
   onPersonInput?(listener: () => void): () => void;
   /** Where the person uses the page directly: holds the bot's input to a tab while the person has it (refs drop on
    * release), and says who acted last in it. */
-  personControl?: { hold(targetId: string, held: boolean): void; owner(targetId: string): "person" | "bot" | null };
+  personControl?: { hold(targetId: string, held: boolean): void; owner(targetId: string): "person" | "bot" | null; held(targetId: string): boolean };
   /** The private display its window is on, which a person sees as a remote desktop; absent when it runs headless. */
   readonly display?: DesktopDisplay | null;
 }

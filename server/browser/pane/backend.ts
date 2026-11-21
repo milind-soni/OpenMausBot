@@ -93,6 +93,7 @@ export class PaneBackend implements Backend {
           if (!held) browser.page(targetId)?.refs.invalidateAll();
         },
         owner: (targetId) => opened.endpoint.owner(targetId),
+        held: (targetId) => opened.endpoint.held(targetId),
       },
       close: async () => {
         await browser.close();
