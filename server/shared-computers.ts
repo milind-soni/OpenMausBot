@@ -288,15 +288,23 @@ export class SharedComputers {
    * an online computer lent by that session is the one they type on: marked, and put first. */
   known(principal: string | null, sending?: string): KnownLentComputer[] {
     if (!principal) return [];
-    const typingOn = sending === undefined ? undefined
-      : [...this.computers.values()].find(entry => entry.owner.person === principal && entry.owner.session === sending && this.online(entry))?.registration.id;
-    const known = (this.lent?.list(principal) ?? []).map((record): KnownLentComputer => {
+    const typing = sending === undefined ? undefined
+      : [...this.computers.values()].find(entry => entry.owner.person === principal && entry.owner.session === sending && this.online(entry));
+    const records = this.lent?.list(principal) ?? [];
+    const known = records.map((record): KnownLentComputer => {
       const entry = this.chosen(principal, record.id);
-      return { ...(record.id === typingOn ? { typing: true as const } : {}), id: record.id, name: record.name, platform: record.platform, online: entry ? this.online(entry) : false, busy: (entry?.jobs.size ?? 0) > 0,
+      return { ...(record.id === typing?.registration.id ? { typing: true as const } : {}), id: record.id, name: record.name, platform: record.platform, online: entry ? this.online(entry) : false, busy: (entry?.jobs.size ?? 0) > 0,
         lent: record.stoppedAt === null, lastSeenAt: entry ? Math.max(entry.seen, record.lastSeenAt) : record.lastSeenAt, lastUsedAt: record.lastUsedAt,
         scopes: { folders: record.folders, terminal: record.terminal, screen: record.screen, internet: record.internet === true, chrome: record.chrome === true } };
     });
-    return [...known.filter(computer => computer.typing), ...known.filter(computer => !computer.typing)];
+    // Two computers with one name share one record, kept for the newer, so the one they type on can have none: listed live.
+    const unrecorded = typing && !records.some(record => record.id === typing.registration.id) ? [typing] : [];
+    return [
+      ...unrecorded.map(({ registration, jobs, seen }): KnownLentComputer => ({ typing: true, id: registration.id, name: registration.name, platform: registration.platform ?? null,
+        online: true, busy: jobs.size > 0, lent: true, lastSeenAt: seen, lastUsedAt: null,
+        scopes: { folders: registration.folders.length, terminal: registration.terminal, screen: registration.computer, internet: registration.internet === true, chrome: registration.chrome === true } })),
+      ...known.filter(computer => computer.typing), ...known.filter(computer => !computer.typing),
+    ];
   }
   /** For a bot: which known computer is offline and since when, and the sentence to say; nothing while one is online. */
   away(principal: string | null) {

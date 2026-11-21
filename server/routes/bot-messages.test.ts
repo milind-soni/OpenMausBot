@@ -352,6 +352,14 @@ describe("POST /api/bots/:id/messages and who typed it", () => {
     expect(sendingSession(threadId, OTHER_SEND)).toBeUndefined();
   });
 
+  it("keeps the first sender's session when a conflicting send reuses a queued line's sendId", async () => {
+    const { threadId, post } = await fixture();
+    expect((await post({ threadId, sendId: SEND, text: words }, "", { "x-test-session": "pc-session" })).status).toBe(202);
+    const conflict = await post({ threadId, sendId: SEND, text: "Something else" }, "", { "x-test-session": "laptop-session" });
+    expect(conflict.status, JSON.stringify(conflict.body)).toBe(409);
+    expect(sendingSession(threadId, SEND)).toBe("pc-session");
+  });
+
   it("does not take a bare loopback send as a person's on a headless server, where it may be a bot's shell", async () => {
     const { threadId, post } = await fixture({}, false);
     const plain = await post({ threadId, sendId: SEND, text: words });

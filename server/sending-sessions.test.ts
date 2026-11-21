@@ -10,6 +10,12 @@ describe("the session that sent a line", () => {
     expect(sendingSession("thread-a", undefined)).toBeUndefined();
   });
 
+  it("keeps the first session for a line: a later send reusing its sendId does not take it over", () => {
+    noteSendingSession("thread-first", "send-1", "pc-session");
+    noteSendingSession("thread-first", "send-1", "laptop-session");
+    expect(sendingSession("thread-first", "send-1")).toBe("pc-session");
+  });
+
   it("keeps the newest lines and forgets the oldest past its limit", () => {
     noteSendingSession("thread-old", "send-old", "old");
     for (let index = 0; index < 2_000; index++) noteSendingSession("thread-many", `send-${index}`, "pc");

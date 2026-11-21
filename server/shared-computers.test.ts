@@ -652,4 +652,21 @@ describe("the computer the person types on", () => {
     broker.close();
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it("is listed live when another computer with the same name holds the one record kept for that name", async () => {
+    vi.useFakeTimers({ now: Date.now() });
+    const dir = mkdtempSync(join(tmpdir(), "omb-typing-same-name-"));
+    const broker = new SharedComputers(() => true, new LentComputers(join(dir, "lent.json")));
+    const first = { ...registration(), name: "PC", platform: "win32" as const };
+    const second = { ...registration(), name: "PC", platform: "win32" as const };
+    broker.register(first, { session: "first", person: alice.person }, secret);
+    await vi.advanceTimersByTimeAsync(1_000);
+    broker.register(second, { session: "second", person: alice.person }, other);
+    expect(broker.known(alice.person).map(computer => computer.id)).toEqual([second.id]);
+    expect(broker.known(alice.person, "first").map(computer => [computer.id, computer.typing === true, computer.online]))
+      .toEqual([[first.id, true, true], [second.id, false, true]]);
+    expect(broker.known(alice.person, "second").map(computer => [computer.id, computer.typing === true])).toEqual([[second.id, true]]);
+    broker.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
 });
