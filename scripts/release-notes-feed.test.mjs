@@ -47,6 +47,12 @@ describe("adding a release", () => {
     expect(JSON.parse(text).releases[0].version).toBe("0.2.20");
   });
 
+  it("refuses one release larger than the file may be on its own", () => {
+    const huge = Array.from({ length: 40 }, (_, index) => `Line ${index} ${"word ".repeat(115).trim()}.`);
+    const sections = Array.from({ length: 6 }, (_, index) => ({ title: `Part ${index}`, items: huge }));
+    expect(() => withRelease(empty, { version: "0.1.1", date: "2026-11-20T00:00:00Z", sections }, { now: NOW })).toThrow(/alone are larger/);
+  });
+
   it("refuses an entry that is not valid", () => {
     expect(() => withRelease(empty, entry("0.1.1", ["<script>x</script>"]), { now: NOW })).toThrow(/valid entry/);
     expect(() => withRelease(empty, { ...entry("0.1.1"), sections: [] }, { now: NOW })).toThrow(/valid entry/);

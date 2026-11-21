@@ -37,6 +37,7 @@ export function withRelease(raw, entry, { now = Date.now() } = {}) {
     .slice(0, MAX_RELEASES);
   const feed = { $schema: "./releases.schema.json", version: 1, updatedAt, releases };
   while (Buffer.byteLength(releasesText(feed)) > MAX_RELEASES_FILE_BYTES && feed.releases.length > 1) feed.releases.pop();
+  if (Buffer.byteLength(releasesText(feed)) > MAX_RELEASES_FILE_BYTES) throw new Error(`the notes for ${entry.version} alone are larger than ${MAX_RELEASES_FILE_BYTES} bytes`);
   if (!feed.releases.some((release) => release.version === entry.version)) throw new Error(`${entry.version} is older than every release the file keeps`);
   return releasesText(feed);
 }
@@ -49,8 +50,12 @@ function main() {
     process.exitCode = 2;
     return;
   }
+  const iso = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+  if (values.date !== undefined && !iso.test(values.date)) throw new Error(`--date ${values.date} is not an ISO date and time, such as 2026-11-22T10:00:00Z`);
   const date = values.date ? new Date(values.date) : new Date();
-  if (Number.isNaN(date.getTime())) throw new Error(`--date ${values.date} is not a date`);
+  if (Number.isNaN(date.getTime()) || (values.date && !values.date.startsWith(date.toISOString().slice(0, 10)) && values.date.endsWith("Z"))) {
+    throw new Error(`--date ${values.date} is not a real date`);
+  }
   const file = values.file ?? join(root, RELEASES_FILE);
   const entry = releaseFromMarkdown(readFileSync(notesPath, "utf8"), { version, date: date.toISOString().replace(/\.\d{3}Z$/, "Z") });
   writeFileSync(file, withRelease(readFileSync(file, "utf8"), entry));

@@ -83,6 +83,10 @@ describe("release notes Markdown to an entry", () => {
     expect(cleanReleaseLine("a\u202eb\u202ec\u200bd")).toBe("a b c d");
   });
 
+  it("tidies spacing in the prose only, never inside code", () => {
+    expect(cleanReleaseLine("Run  `a  b .c`  now .")).toBe("Run `a  b .c` now.");
+  });
+
   it("each cleaned line is already clean", () => {
     for (const line of ["**A.** b `c` d", "Plain.", "x <b>y</b> [z](https://a.b)"]) expect(cleanReleaseLine(cleanReleaseLine(line))).toBe(cleanReleaseLine(line));
   });

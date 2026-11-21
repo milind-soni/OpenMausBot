@@ -225,9 +225,10 @@ export function cleanReleaseLine(raw: string): string {
     .replace(/(^|\W)_([^_\n]+?)_(?=\W|$)/g, "$1$2");
   if ((text.match(/\*\*/g)?.length ?? 0) % 2) text = text.replace(/\*\*/g, "");
   text = text.replace(/\*\*\s*\*\*/g, "").replace(/(?<!\*)\*(?!\*)/g, "");
+  // Spacing is tidied in the prose only; a code run keeps its text as written.
+  text = text.replace(/\s+/g, " ").replace(/\(\s*\)/g, "").replace(/\s+([.,;:!?])/g, "$1").trim();
   // eslint-disable-next-line no-control-regex
   text = text.replace(/\u0000(\d+)\u0000/g, (_, index: string) => `\`${codes[Number(index)]}\``);
-  text = text.replace(/\s+/g, " ").replace(/\(\s*\)/g, "").replace(/\s+([.,;:!?])/g, "$1").trim();
   if (text.length > RELEASE_LIMITS.item) {
     const cut = text.slice(0, RELEASE_LIMITS.item - 1);
     const end = cut.search(/[.!?](?=[^.!?]*$)/);
