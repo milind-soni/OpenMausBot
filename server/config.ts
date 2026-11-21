@@ -10,6 +10,7 @@ import type { ImageGenerationConfig } from "../shared/image-generation.ts";
 import { imageGenConfigSchema, imageGenPatchSchema, keepKeysOutOfImageModels, type ImageGenCredentialPatch } from "./image-generation-config.ts";
 import { botAvatarUrlSchema } from "../shared/bot-avatar.ts";
 import { writeFileAtomic } from "./atomic.ts";
+import { isValidSshAlias, normalizeVpsConfig, storedVpsServersSchema, vpsConfigSchema, vpsServersSchema, type VpsServer } from "./vps-config.ts";
 import { configBackupRefusal, configSaveRefusal, readConfigFile, writeConfigBackup } from "./config-backup.ts";
 import { defaultBotThreads, MAX_CONCURRENT_BOT_THREADS } from "./bot-thread-limits.ts";
 import { anthropicKeyEnv } from "./anthropic-key-env.ts";
@@ -34,9 +35,9 @@ import { browserEngineConfigSchema, isValidCdpTarget, type BrowserEngineConfig }
 import { roomContextSettings } from "./room-context-settings.ts"; import { usageCapsSchema, type UsageCapsConfig } from "./usage-caps-config.ts";
 import { localVmConfigSchema } from "./local-vm-settings.ts";
 export * from "./local-vm-settings.ts";
+export * from "./vps-config.ts";
 
 const optionalText = z.string().optional();
-const SSH_ALIAS = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 const LEGACY_BROWSER_PROFILE_ID = /^[A-Za-z0-9_-]{1,40}$/;
 const BROWSER_PROFILE_ID = /^[a-z0-9_-]{1,40}$/;
 
@@ -54,26 +55,6 @@ export const MAX_MCP_CALL_TIMEOUT_MINUTES = 60;
 export const MIN_THREAD_EVENT_LOG_BYTES = 256 * 1024;
 export const MAX_THREAD_EVENT_LOG_BYTES = 4 * 1024 * 1024 * 1024;
 
-export function isValidSshAlias(value: unknown): value is string {
-  return typeof value === "string" && SSH_ALIAS.test(value);
-}
-
-export function normalizeVpsConfig(raw: unknown): { sshAlias?: string } {
-  if (raw === undefined || raw === null) return {};
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error("vps must be an object containing an SSH config alias");
-  }
-  const alias = (raw as Record<string, unknown>).sshAlias;
-  if (alias === undefined || alias === "") return {};
-  if (!isValidSshAlias(alias)) {
-    throw new Error("vps.sshAlias must be a simple SSH config alias (letters, numbers, dot, dash, or underscore)");
-  }
-  return { sshAlias: alias };
-}
-
-const vpsConfigSchema = z.object({
-  sshAlias: z.string().refine((value) => value === "" || isValidSshAlias(value), { message: "must be a simple SSH config alias" }).optional(),
-});
 const roomConfigSchema = z.object({
   turnTimeoutMinutes: z
     .number()
@@ -364,6 +345,7 @@ const appConfigSchema = z.object({
   composio: z.object({ apiKey: optionalText, userId: optionalText, sessionId: optionalText }).optional(),
   box: z.object({ token: optionalText }).optional(),
   vps: vpsConfigSchema.optional(),
+  vpsServers: vpsServersSchema.optional(),
   /** OpenCode key, plus `providerKeys` for its other providers by the env name OpenCode reads; both write-only and only for its child. */
   opencodeGo: z.object({ apiKey: optionalText, providerKeys: z.record(z.string(), z.string()).optional() }).optional(),
   /** `provider`: "elevenlabs" (default, `key`), "fish" (`fishKey`, `fishModel`), "system", "xai" (`xai.key`), "gemini" (`geminiKey`, `model`), "openai" (`openai.key`), "deepseek" (`deepseek.key`; it also hears dictation) or "chatterbox" (local; `baseUrl`, `model`). */
@@ -418,6 +400,7 @@ const appConfigSchema = z.object({
   mcpServers: z.record(z.string(), z.unknown()).optional(),
 });
 const storedAppConfigSchema = appConfigSchema.extend(helperStoredShape).extend({
+  vpsServers: storedVpsServersSchema,
   browserProfiles: storedBrowserProfilesSchema.optional(),
   /** Loose like mcpServers: a bad provider key is dropped later, never the whole file. */
   opencodeGo: z.object({
@@ -472,6 +455,7 @@ export interface AppConfig extends HelperConfig {
   box?: { token?: string };
   /** A named host from the user's SSH config. Authentication stays with SSH. */
   vps?: { sshAlias?: string };
+  vpsServers?: VpsServer[];
   opencodeGo?: { apiKey?: string; providerKeys?: Record<string, string> };
   tts?: { key?: string; fishKey?: string; geminiKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini" | "openai" | "deepseek"; baseUrl?: string; model?: string; fishModel?: FishTtsModel; everyReply?: boolean; hearWith?: "device" | "elevenlabs"; hearLanguage?: string };
   decider?: DeciderConfig;
@@ -920,7 +904,8 @@ export function saveConfig(
   }
   keepImageModels();
   if (checkedPatch.vps !== undefined) disk.vps = normalizeVpsConfig(checkedPatch.vps);
-  for (const key of ["language", "computerName", "everyBotRules"] as const) if (checkedPatch[key] !== undefined) disk[key] = checkedPatch[key];
+  // vpsServers is kept even when empty: the running config is updated by Object.assign, which cannot drop a key.
+  for (const key of ["language", "computerName", "everyBotRules", "vpsServers"] as const) if (checkedPatch[key] !== undefined) disk[key] = checkedPatch[key];
   if (checkedPatch.customDomain !== undefined) disk.customDomain = checkedPatch.customDomain;
   if (checkedPatch.signIn !== undefined) disk.signIn = checkedPatch.signIn;
   // Replace the section so clearing a backup cannot revive the old selection.
