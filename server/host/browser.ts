@@ -51,7 +51,7 @@ import { passkeyAnnotation } from "../browser/passkey-notice.ts";
 import { LentChromeDoors, lentChromeGuidance, type ChromeLender } from "../browser/lent-chrome.ts";
 import type { ChromeRoute } from "../device-links.ts";
 import type { EngineBrowsers } from "../engine-memory.ts";
-import { createBrowserReclaim } from "./browser-reclaim.ts";
+import { createBrowserReclaim, reclaimable } from "./browser-reclaim.ts";
 import { BROWSER_TASKS, processBudget } from "../process-room.ts";
 import { idleAfter } from "../drivers/session-idle.ts";
 import { augmentedPath } from "../env-path.ts";
@@ -323,11 +323,15 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         typeof tab.tabId === "string" ? [{ tabId: tab.tabId, title: String(tab.title ?? ""), url: String(tab.url ?? ""), active: tab.active === true }] : []) : null;
     },
     closeTab: async (session, tabId) => (await inRunningSession(session, ["tab", "close", tabId])) !== null,
-    // The rules memory relief closes by: never one a turn holds, a call runs in or a person watches, nor one that would lose its sign-ins.
+    // Memory relief's rules under ordinary shortage; which bots have a turn running is not known here.
     close: async (session) => {
-      const spec = usedBrowserSessions.get(session), spare = agentBrowserRuntime.spare(session);
-      if (!spec || !spare?.savesSignIns || !turnResources.free(`browser:${session}`)) return false;
-      return browserRuntime.closeUnused(session, spec);
+      const spec = usedBrowserSessions.get(session);
+      if (!spec) return false;
+      const working = agentBrowserRuntime.working(session), spare = agentBrowserRuntime.spare(session);
+      const candidate = { session, held: !turnResources.free(`browser:${session}`), working, running: browserRunning(session, spec),
+        attached: Boolean(chromeTarget(session, spec)) || attachesToChrome(spec.env), watched: spare === null && !working, turnRunning: false,
+        savesSignIns: spare?.savesSignIns ?? spec.env.AGENT_BROWSER_RESTORE_SAVE === "auto" };
+      return reclaimable(candidate, false) && browserRuntime.closeUnused(session, spec);
     },
   }) : null;
   function inRunningSession(session: string, args: string[]): Promise<Record<string, unknown> | null> {
