@@ -755,9 +755,14 @@ jobs:
         # own private displays, and Chrome's lock-down policy for each display's
         # Chrome alone, which the suite proves from Chrome's own address bar.
         if: runner.os == 'Linux'
+        # Ubuntu 25.04+ also confines what bubblewrap starts (AppArmor's
+        # bwrap-userns-restrict: its children get no capabilities, so Chrome
+        # cannot build its own sandbox under bwrap and exits with SIGTRAP).
+        # A Cloud is Debian with no AppArmor, so the suite runs as there.
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           sudo apt-get update && sudo apt-get install -y xvfb tigervnc-standalone-server bubblewrap
+          if [ -f /etc/apparmor.d/bwrap-userns-restrict ]; then sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict; fi
       - name: Keep the runner's Google Chrome as it is for the whole run
         # The macOS image's Chrome is older than Google's release, and about
         # 30 s after Chrome first runs it starts its bundled GoogleUpdater,
