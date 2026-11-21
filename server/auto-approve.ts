@@ -26,8 +26,9 @@ export async function deliverFullAccessApproval(
   }
 }
 
-/** Full access is the person's grant to this receiving bot: never inherited from a sender (delegatedApprovalMode aside), and
- * peer-started Custom turns run as Auto. */
+/** Full access is the person's grant to this receiving bot: a turn never inherits it from a sender (delegatedApprovalMode
+ * aside; a thread a hand-off opens is saved at the sending conversation's own level, spawn-level.ts), and peer-started
+ * Custom turns run as Auto. */
 export function approvalModeForOrigin(mode: ApprovalMode, origin: { peerInitiated: boolean }): ApprovalMode {
   if (mode === "custom" && origin.peerInitiated) return "auto";
   return mode;
