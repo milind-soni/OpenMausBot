@@ -1,4 +1,4 @@
-import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, renameSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -72,6 +72,28 @@ describe("what has been used", () => {
     // The file was rewritten shorter (a restore): it is read from the start.
     writeFileSync(usageFileFor(dataDir, now), JSON.stringify(row("2026-09-15T09:00:00.000Z", "a", 0.25)) + "\n");
     expect(usageTotals(dataDir, at(64)).server).toEqual({ day: { usd: 0.25, tokens: 1_500 }, month: { usd: 0.25, tokens: 1_500 } });
+  });
+
+  it.each(["same-size rewrite", "larger replacement"])("refreshes cap totals after a %s", async (kind) => {
+    const original = row("2026-09-15T08:00:00.000Z", "a", 1);
+    await appendUsage(dataDir, original);
+    expect(usageTotals(dataDir, now).server.day.usd).toBe(1);
+    const file = usageFileFor(dataDir, now), before = statSync(file);
+    const rewritten = readFileSync(file, "utf8").replace('"costUsd":1', '"costUsd":9');
+    if (kind === "same-size rewrite") {
+      writeFileSync(file, rewritten);
+      utimesSync(file, before.atime, new Date(before.mtimeMs + 1_000));
+    } else {
+      const replacement = `${file}.next`;
+      writeFileSync(replacement, rewritten + JSON.stringify(row("2026-09-15T09:00:00.000Z", "b", 2)) + "\n");
+      utimesSync(replacement, before.atime, before.mtime);
+      renameSync(replacement, file);
+    }
+    const expected = kind === "same-size rewrite" ? 9 : 11;
+    const later = new Date(now.getTime() + 16_000);
+    expect(usageTotals(dataDir, later).server.day.usd).toBe(expected);
+    expect(usageTotals(dataDir, later).bots.get("a")!.day.usd).toBe(9);
+    expect(reachedCap({ server: { dailyUsd: 8 } }, dataDir, { botId: "a", personWaiting: false }, later, NO_ENV)).not.toBeNull();
   });
 
   it("sets no cap at all until one is asked for, and reads 0 as no cap", () => {
