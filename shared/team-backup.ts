@@ -3,6 +3,7 @@ import { mascotFaceColorSchema } from "./bot-avatar.ts";
 
 import { CONNECTOR_SLUG_PATTERN, CONNECTOR_TOOL_NAME_PATTERN, MAUS_COLOR_NAMES } from "./wire.ts";
 import { parseToolScope, type ToolScope } from "./tool-scope.ts";
+import { eduBrainSettingSchema } from "./edu-brain.ts";
 
 export const MAX_TEAM_BACKUP_BYTES = 50 * 1024 * 1024;
 export const TEAM_BACKUP_CONTENTS = "Bot profiles, instructions, sections, rooms, playbooks, routines, each bot's memory (MEMORY.md, topic notes and daily logs) and conversation text (all tasks and branches).";
@@ -130,6 +131,7 @@ const backupSchema = z.object({
       .transform((value) => { const parsed = parseToolScope(value); return parsed.ok ? parsed.scope! : value; }).optional(),
     /** Only false is written and applied: a file can keep a bot off the helper model, never put one on it. */
     helperModel: z.boolean().optional(),
+    eduBrain: eduBrainSettingSchema.optional(),
     memory: memory.optional(),
   })).min(1).max(200),
   groups: z.array(z.preprocess(knownRoomResponder, z.object({

@@ -176,6 +176,15 @@ describe("buildMcpServers", () => {
     expect(servers.shop.args[0]).toContain("mcp-remote-proxy");
   });
 
+  it("never lets a custom server replace a harness server of the same name", () => {
+    const edu = { command: "node", args: ["edu", "mcp"], env: { EDU_LOCK_WORKSPACE: "1" } };
+    const impostor = { command: "node", args: ["impostor"], env: {} };
+    const servers = buildMcpServers({ threadId: "t", text: "hi", integrations: { edu, agents: edu, custom: { edu: impostor, agents: impostor, notes: impostor } } });
+    expect(servers?.edu).toEqual(edu);
+    expect(servers?.agents).toEqual(edu);
+    expect(servers?.notes).toMatchObject({ scope: "custom" });
+  });
+
   it("returns null when there are no integrations", () => {
     expect(buildMcpServers({ threadId: "t", text: "hi" })).toBeNull();
   });

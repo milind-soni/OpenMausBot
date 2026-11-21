@@ -1,6 +1,8 @@
 // The relocation guard's scan is the only VPS call this route makes; the mocked scan stands in for SSH
 // and lets each test mutate the store mid-scan deterministically.
-import { rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -13,6 +15,7 @@ import type { RequestAuth } from "../request-auth.ts";
 import { Store, type BotRecord } from "../store.ts";
 import * as vps from "../vps-computer.ts";
 import type { ManagedVpsInventory } from "../vps-computer.ts";
+import { createEduBrains } from "../edu-brain.ts";
 import { createBotPatchRoutes, type BotPatchRouteDeps } from "./bot-patch.ts";
 import { PASS, type RouteContext } from "./table.ts";
 
@@ -434,6 +437,78 @@ describe("PATCH /api/bots/:id while the bot works", () => {
 
     expect(widened.status).toBe(409);
     expect(store.bot(bot.id)?.mcpServers).toEqual(["notes"]);
+  });
+});
+
+describe("PATCH /api/bots/:id eduBrain", () => {
+  const paired = { auth: { kind: "session", via: "bearer", scopes: ["admin", "client"], session: { id: "s", label: "Laptop", scopes: ["admin", "client"] } } as unknown as RequestAuth };
+  const limits = () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "edu-patch-")));
+    const dataDir = join(root, "data");
+    const globalHome = join(root, "home", ".edu");
+    mkdirSync(globalHome, { recursive: true });
+    mkdirSync(dataDir);
+    const eduBrains = createEduBrains({ dataDir, config: () => ({ home: globalHome }), locate: () => null });
+    return { root, dataDir, globalHome, eduBrains };
+  };
+
+  it("lets a paired session turn it off, point it at a folder and reset it, and refuses a relative folder", async () => {
+    const { root, eduBrains } = limits();
+    const { store, bot, patch } = fixture({ eduBrains });
+    expect((await patch(bot.id, { eduBrain: { mode: "off" } })).status).toBe(200);
+    expect(store.bot(bot.id)?.eduBrain).toEqual({ mode: "off" });
+    expect((await patch(bot.id, { eduBrain: { mode: "folder", path: "brains/bi" } }, paired)).status).toBe(400);
+    expect((await patch(bot.id, { eduBrain: null }, paired)).status).toBe(200);
+    expect(store.bot(bot.id)?.eduBrain).toBeUndefined();
+    const area = join(root, "area-bi");
+    expect((await patch(bot.id, { eduBrain: { mode: "folder", path: area } }, paired)).status).toBe(200);
+    expect(store.bot(bot.id)?.eduBrain).toEqual({ mode: "folder", path: area });
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("never lets a local caller widen it, idle or busy, with an Origin or without, and still lets it turn it off", async () => {
+    const { root, eduBrains } = limits();
+    const { store, bot, patch } = fixture({ eduBrains });
+    const area = { eduBrain: { mode: "folder", path: join(root, "area") } };
+    for (const headers of [{}, { origin: "http://127.0.0.1" }] as Array<Record<string, string>>) {
+      expect((await patch(bot.id, area, { headers })).status).toBe(403);
+      store.patchBot(bot.id, { busy: true });
+      expect((await patch(bot.id, area, { headers })).status).toBe(403);
+      store.patchBot(bot.id, { busy: false });
+    }
+    expect(store.bot(bot.id)?.eduBrain).toBeUndefined();
+    expect((await patch(bot.id, { eduBrain: { mode: "off" } })).status).toBe(200);
+    expect((await patch(bot.id, { eduBrain: { mode: "own" } }, { headers: { origin: "http://127.0.0.1" } })).status).toBe(403);
+    expect((await patch(bot.id, { eduBrain: null })).status).toBe(403);
+    expect(store.bot(bot.id)?.eduBrain).toEqual({ mode: "off" });
+    expect((await patch(bot.id, { eduBrain: { mode: "own" } }, paired)).status).toBe(200);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("lets the desktop app widen it", async () => {
+    const { root, eduBrains } = limits();
+    const { store, bot, patch } = fixture({ eduBrains, desktopManaged: true });
+    expect((await patch(bot.id, { eduBrain: { mode: "folder", path: join(root, "area") } })).status).toBe(200);
+    expect(store.bot(bot.id)?.eduBrain).toEqual({ mode: "folder", path: join(root, "area") });
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("refuses the global brain, a folder holding it, Edu Bot's data folder and a linked .edu", async () => {
+    const { root, dataDir, globalHome, eduBrains } = limits();
+    const { store, bot, patch } = fixture({ eduBrains });
+    const linked = join(root, "linked");
+    mkdirSync(linked);
+    symlinkSync(globalHome, join(linked, ".edu"));
+    symlinkSync(globalHome, join(root, "via-link"));
+    for (const path of [globalHome, join(globalHome, "brain"), join(root, "home"), join(root, "via-link"), dataDir,
+      join(dataDir, "brains", "other-bot"), join(dataDir, "edu-registry"), linked]) {
+      const refused = await patch(bot.id, { eduBrain: { mode: "folder", path } }, paired);
+      expect(refused.status, path).toBe(400);
+      expect(refused.body.error, path).toMatch(/global Edu brain|data folder|link/);
+    }
+    expect(store.bot(bot.id)?.eduBrain).toBeUndefined();
+    expect((await patch(bot.id, { eduBrain: { mode: "folder", path: join(dataDir, "brains", bot.id) } }, paired)).status).toBe(200);
+    rmSync(root, { recursive: true, force: true });
   });
 });
 

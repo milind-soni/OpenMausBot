@@ -30,6 +30,11 @@ exception: `OMB_OPENAI_LIVE_URL` crosses when it is a loopback
 and `OMB_OPENAI_LIVE_KEY` crosses only with it, so that key can only ever
 reach the fake.
 
+A fixture has no Edu. `EDU_FIXTURE_HOME`, an absolute temporary folder, gives it
+the installed Edu (or the `cli.js` that `OMB_EDU_CLI` names) with that folder as
+its global brain; the launcher refuses your own `~/.edu` (see
+[the Edu brain](../edu-brain.md)).
+
 Pass the printed URL explicitly from a second terminal:
 
 ```sh
@@ -50,6 +55,7 @@ Use only mapped, tested commands:
 - [Work summaries and engine hooks](digests.md)
 - [OpenAI-compatible structured tools](openai-tools.md)
 - [Per-bot tool selection and local-model checks](tool-selection.md)
+- [Edu brain for every bot](../edu-brain.md)
 - [OpenCode model variants through ACP](opencode-variants.md)
 - [Bot setup, model scope, and file continuity](bot-continuity.md)
 - [Reviewed Chief team setup and scoped deletion](team-setup.md)

@@ -11,6 +11,9 @@ services unless you configure them. This page lists every outbound host that rem
 | `models.dev` | The public model catalog (`/api.json`) | At most once a day | `OMB_DISABLE_MODEL_CATALOG_FETCH=1` |
 | `registry.npmjs.org` | The newest Codex version (`@openai/codex/latest`) | At start and at most hourly, to tell whether the Codex engine is current | — |
 
+When [Edu](../edu-brain.md) is installed, the server runs it on this computer (`edu --version`, `edu init` for a new
+bot's brain, and `edu mcp` in each turn). Checked with Edu 6.0.0: these made no network request.
+
 The server also probes local model servers on this computer (Ollama, LM Studio and similar, on `127.0.0.1`), and
 starts each engine CLI installed on this computer to read its version and sign-in. Those CLIs are third-party
 programs and may contact their own vendor when they start; for example, Cursor's CLI calls `api2.cursor.sh`.

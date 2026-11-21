@@ -122,6 +122,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
       ...(bot.toolScope !== undefined ? { toolScope: structuredClone(bot.toolScope) } : {}),
       // A bot kept off the helper model stays off it wherever its notes and chats land.
       ...(helperModelAllowed(bot) ? {} : { helperModel: false }),
+      ...(bot.eduBrain ? { eduBrain: structuredClone(bot.eduBrain) } : {}),
       memory: memoryFor(bot.id),
       // Someone else's private chat selected: the backup opens on the first conversation it carries instead.
       ...((tasks) => ({ activeTask: tasks.some((task) => task.key === bot.threadId) ? bot.threadId : tasks[0]?.key ?? bot.threadId, tasks }))(histories.get(bot.id)!),
@@ -140,8 +141,15 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
   return document;
 }
 
+export interface TeamBackupImportOptions {
+  visibility?: BotVisibility;
+  createdBy?: string;
+  /** Security: whether a bot's Edu brain may point at the folder the file names (a paired session or the desktop app); else it is off. */
+  eduFolders?: boolean;
+}
+
 /** Always additive: rollback owns only the fresh records and cannot touch an existing bot or chat. */
-export function importTeamBackup(store: Store, routines: RoutineManager, input: unknown, selection: ModelSelection, options: { visibility?: BotVisibility; createdBy?: string } = {}) {
+export function importTeamBackup(store: Store, routines: RoutineManager, input: unknown, selection: ModelSelection, options: TeamBackupImportOptions = {}) {
   const backup = parseTeamBackup(input);
   const bots: BotRecord[] = [];
   const groups: GroupRecord[] = [];
@@ -196,6 +204,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
       store.patchBot(bot.id, { composio: false, computer: "off", browser: false, autoApprove: false,
         connectorTools: {}, toolScope: source.toolScope, hidden: source.hidden, chiefOfStaff: source.chiefOfStaff, playbooks: source.playbooks,
         ...(source.helperModel === false ? { helperModel: false } : {}) });
+      if (source.eduBrain) store.patchBot(bot.id, { eduBrain: source.eduBrain.mode !== "folder" || options.eduFolders ? source.eduBrain : { mode: "off" } });
       if (source.memory) restoreMemory(bot.id, source.memory);
     }
     for (const source of backup.bots) {

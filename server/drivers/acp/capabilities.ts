@@ -9,7 +9,7 @@ export function acpCapabilities(support: AcpSupport): ProviderAdapter["capabilit
     computerMcp: true,
     composioMcp: true,
     browserMcp: true,
-    dataMcp: true, emailMcp: true, deviceMcp: true,
+    dataMcp: true, emailMcp: true, deviceMcp: true, eduMcp: true,
     images: support.images !== false,
     nativeImageInput: support.images === true,
     effortLevels: support.effortLevels,

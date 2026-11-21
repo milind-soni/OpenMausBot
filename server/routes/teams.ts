@@ -40,9 +40,12 @@ export interface TeamRouteDeps {
   botShown?(auth: RequestAuth): (botId: string) => boolean;
   /** On a Team Cloud: false for a routine that lives in someone else's private chat, which no export carries. */
   routineShown?(auth: RequestAuth): (routine: Routine) => boolean;
+  /** Every public local change must come from the desktop app. */
+  desktopManaged?: boolean;
 }
 
 export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
+  const desktopManaged = deps.desktopManaged === true;
   const routinesFor = (auth: RequestAuth): Routine[] => {
     const all = deps.routines()!.listRoutines();
     const shown = deps.routineShown?.(auth);
@@ -179,7 +182,9 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
       if (body?.format === "openmaus.backup") {
         if (importMode !== "add") return json(res, 400, { error: "Import backups alongside your existing bots; project mode is only for templates" });
         try {
-          const imported = importTeamBackup(store, routines!, body, await defaultSelection(), { visibility: importVisibility, ...teamCreator(auth) });
+          const imported = importTeamBackup(store, routines!, body, await defaultSelection(), {
+            visibility: importVisibility, ...teamCreator(auth), eduFolders: auth.kind === "session" || desktopManaged,
+          });
           // A restore writes transcripts without store events: these frames carry the restored pages to other clients.
           const bots = imported.bots.map((bot) => publicBot(bot));
           const groups = imported.groups.map((group) => groupWithThread(group));

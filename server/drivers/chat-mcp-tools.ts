@@ -557,6 +557,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   if (integrations?.data && eligible("data")) servers.push(["data", integrations.data]);
   if (integrations?.email && eligible("email")) servers.push(["email", integrations.email]);
   if (integrations?.device && eligible("device")) servers.push(["device", integrations.device]);
+  if (integrations?.edu && eligible("edu")) servers.push(["edu", integrations.edu]);
   // A failed mount of an optional built-in is skipped like a configured server's, which the model is told about, so one
   // dead helper can't fail every later turn. (CLI engines already drop them and go on.)
   // Safety: a turn never runs without the agents server, or without a Local VM it was given (any computer but this

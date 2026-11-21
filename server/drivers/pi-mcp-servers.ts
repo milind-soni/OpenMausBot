@@ -33,13 +33,15 @@ export function buildMcpServers(turn: SendTurnInput): Record<string, unknown> | 
     };
   }
   if (turn.integrations?.browser) servers.browser = { ...turn.integrations.browser };
-  for (const name of ["data", "email", "device"] as const) if (turn.integrations?.[name]) servers[name] = { ...turn.integrations[name] };
-  for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) servers[name] = { ...server, scope: "custom" };
+  for (const name of ["data", "email", "device", "edu"] as const) if (turn.integrations?.[name]) servers[name] = { ...turn.integrations[name] };
+  const custom = Object.entries(turn.integrations?.custom ?? {}).filter(([name]) => !Object.hasOwn(servers, name));
+  for (const [name, server] of custom) servers[name] = { ...server, scope: "custom" };
+  const customNames = new Set(custom.map(([name]) => name));
   for (const [name, server] of Object.entries(servers)) {
     if (parsed.scope !== undefined && !canUseMcpServer(parsed.scope, name)) { delete servers[name]; continue; }
     // pi registers every tool it is given and has no tool search of its own.
     const directory = remoteMcpSpec(server) !== undefined;
-    const gated = gateServer({ name, server, toolScope: parsed.scope, threadId: turn.threadId, nodeEnv: NODE_ENV_FLAG, directory, ...customServerGate(name, name in (turn.integrations?.custom ?? {}), turn.integrations?.customResultBudgets), apps: appMountFor(name, turn) });
+    const gated = gateServer({ name, server, toolScope: parsed.scope, threadId: turn.threadId, nodeEnv: NODE_ENV_FLAG, directory, ...customServerGate(name, customNames.has(name), turn.integrations?.customResultBudgets), apps: appMountFor(name, turn) });
     const stdio = gated ?? mcpStdioServer(server, { nodeEnv: NODE_ENV_FLAG, ...(directory ? { directory: { name } } : {}) });
     if (!stdio) throw new Error("Pi MCP server configuration is invalid");
     const original = server as { scope?: string };

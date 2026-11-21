@@ -6,6 +6,7 @@ import {
   MAX_MCP_SERVERS,
   mcpServerLimitError,
   mcpSharedServerRoom,
+  importedMcpServerName,
   mcpServerNameError,
   mcpServerProblemFor,
   parseMcpServerMutation,
@@ -48,6 +49,8 @@ describe("custom MCP registry", () => {
     expect(mcpServerNameError("Bad.Name")).toMatch(/lowercase/);
     expect(mcpServerNameError("computer")).toMatch(/reserved/);
     expect(mcpServerNameError("data")).toMatch(/reserved/);
+    expect(mcpServerNameError("edu")).toMatch(/reserved/);
+    expect(importedMcpServerName("Edu")).toBe("mcp-edu");
     expect(parseStoredMcpServer("data", { command: "custom-data" })).toMatchObject({ ok: false, error: expect.stringMatching(/reserved/) });
     expect(mcpServerNameError("safe-notes")).toBeNull();
   });

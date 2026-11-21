@@ -1,11 +1,12 @@
 // What crosses from the launching shell into a fixture server: only what a
 // test scripted on purpose. A real OpenAI key must never reach a fixture that
 // could send it to OpenAI.
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 
-import { verificationServerEnvironment } from "./control-omb.ts";
+import { eduFixtureEnvironment, verificationServerEnvironment } from "./control-omb.ts";
 
 const childEnv = (parentEnv: NodeJS.ProcessEnv) => verificationServerEnvironment(parentEnv, join(tmpdir(), "omb-fixture-env"), 9100);
 
@@ -105,5 +106,34 @@ describe("the fixture's @devs reports", () => {
       expect(childEnv({ OMB_BUG_REPORT_URL: url }).OMB_BUG_REPORT_URL, url).toBe(closed);
     }
     expect(childEnv({}).OMB_BUG_REPORT_URL).toBe(closed);
+  });
+});
+
+describe("the fixture's Edu brain", () => {
+  it("has no Edu unless asked, and never the person's own brain, through a link or not", () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "omb-edu-fixture-")));
+    try {
+      const home = join(root, "home");
+      const cli = join(root, "cli.js");
+      mkdirSync(join(home, ".edu", "inner"), { recursive: true });
+      writeFileSync(cli, "");
+      const parent = { HOME: home, USERPROFILE: home, OMB_EDU_CLI: cli };
+      expect(eduFixtureEnvironment(parent, root)).toEqual({ OMB_EDU_CLI: join(root, "no-edu") });
+      symlinkSync(join(home, ".edu"), join(root, "brain-link"));
+      symlinkSync(home, join(root, "home-link"));
+      for (const fixture of [join(home, ".edu"), join(home, ".edu", "inner"), join(root, "brain-link"), join(root, "brain-link", "inner"), join(root, "home-link", ".edu"), "relative/edu"]) {
+        expect(() => eduFixtureEnvironment({ ...parent, EDU_FIXTURE_HOME: fixture }, root), fixture).toThrow(/EDU_FIXTURE_HOME/);
+      }
+      const other = join(root, "other-brain");
+      mkdirSync(other);
+      symlinkSync(other, join(root, "other-link"));
+      expect(() => eduFixtureEnvironment({ ...parent, EDU_HOME: join(root, "other-link"), EDU_FIXTURE_HOME: other }, root)).toThrow(/EDU_FIXTURE_HOME/);
+      const fixture = join(root, "fixture-edu");
+      mkdirSync(fixture);
+      symlinkSync(fixture, join(root, "fixture-link"));
+      expect(eduFixtureEnvironment({ ...parent, EDU_FIXTURE_HOME: join(root, "fixture-link") }, root)).toEqual({ EDU_HOME: fixture, OMB_EDU_CLI: cli });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

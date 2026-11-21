@@ -490,7 +490,7 @@ const support: AcpSupport = {
       const available = new Set([
         ...(turn.integrations?.agents ? ["agents"] : []), ...(turn.integrations?.composio ? ["composio"] : []), ...(turn.integrations?.composioOwn ? [OWN_APPS_SERVER] : []),
         ...(turn.integrations?.browser ? ["browser"] : []), ...(turn.integrations?.localComputer ? ["computer"] : []),
-        ...(turn.integrations?.data ? ["data"] : []), ...(turn.integrations?.email ? ["email"] : []), ...(turn.integrations?.device ? ["device"] : []),
+        ...(turn.integrations?.data ? ["data"] : []), ...(turn.integrations?.email ? ["email"] : []), ...(turn.integrations?.device ? ["device"] : []), ...(turn.integrations?.edu ? ["edu"] : []),
         ...Object.keys(turn.integrations?.custom ?? {}),
       ].filter((name) => canUseMcpServer(turn.toolScope, name)));
       const deadline = Date.now() + 10_000;

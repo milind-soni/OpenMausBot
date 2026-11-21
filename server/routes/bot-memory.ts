@@ -22,9 +22,13 @@ import { upkeepEnabled, type MemoryUpkeep } from "../memory-upkeep.ts";
 import { listLearnedFacts, removeLearned } from "../profile-learned.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
+import type { EduBrainSetting } from "../../shared/edu-brain.ts";
+import type { EduBrainStatus } from "../edu-brain.ts";
 
 export interface BotMemoryRouteDeps {
-  bot(id: string): { id: string; memoryUpkeep?: boolean } | null | undefined;
+  bot(id: string): { id: string; name?: string; memoryUpkeep?: boolean; eduBrain?: EduBrainSetting } | null | undefined;
+  /** Whether this bot has an Edu brain now, and why not. */
+  eduStatus?(bot: { id: string; name?: string; eduBrain?: EduBrainSetting }): Promise<EduBrainStatus>;
   taskByThread(botId: string, threadId: string): { title?: string } | undefined;
   upkeep: Pick<MemoryUpkeep, "status" | "tidy">;
   /** The caller's About me: the server's profile's, or on a Team Cloud the signed-in person's own. */
@@ -95,13 +99,15 @@ export function createBotMemoryRoutes(deps: BotMemoryRouteDeps): RouteHandler {
     };
     m = path.match(/^\/api\/bots\/([\w-]+)\/memory$/);
     if (m && method === "GET") {
-      if (!deps.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      const bot = deps.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      const edu = deps.eduStatus ? await deps.eduStatus(bot) : undefined;
       try {
         const overview = memoryOverview(m[1]);
         // `text` and `truncated` stay one release for clients of the old whole-file shape.
         const review = deps.lendingReview?.needed(m[1]);
         return json(res, 200, { ...overview, text: readMemoryDoc(m[1], MEMORY_INDEX).text, truncated: overview.index.truncated,
-          ...(review ? { lendingReview: review } : {}) });
+          ...(review ? { lendingReview: review } : {}), ...(edu ? { edu } : {}) });
       } catch (error) {
         return replyMemoryError(res, error);
       }

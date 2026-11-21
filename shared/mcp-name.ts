@@ -10,6 +10,7 @@ export const RESERVED_MCP_NAMES: ReadonlySet<string> = new Set([
   "device",
   "phone",
   "dweb",
+  "edu",
   "openmausbot_connectors",
   "openmausbot_phone",
 ]);

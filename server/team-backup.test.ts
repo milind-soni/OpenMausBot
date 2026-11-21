@@ -105,6 +105,32 @@ describe("additive portable team backups", () => {
     expect(restored.bots.find((bot) => bot.name === "MausBot 2")?.color).toBe("silver");
   });
 
+  it("carries each bot's Edu brain setting, and points a restored bot at a named folder only when the importer may", () => {
+    const { store, routines, chief, scout, otherChief } = fixture();
+    const area = process.platform === "win32" ? "C:\\brains\\area" : "/srv/brains/area";
+    store.patchBot(chief.id, { eduBrain: { mode: "folder", path: area } });
+    store.patchBot(scout.id, { eduBrain: { mode: "off" } });
+    const backup = parseTeamBackup(JSON.parse(JSON.stringify(createTeamBackup(store, routines.listRoutines(), "Edu"))));
+    const saved = (id: string) => backup.bots.find((bot) => bot.key === id);
+    expect(saved(chief.id)?.eduBrain).toEqual({ mode: "folder", path: area });
+    expect(saved(scout.id)?.eduBrain).toEqual({ mode: "off" });
+    expect(saved(otherChief.id)).not.toHaveProperty("eduBrain");
+
+    const restored = (options: { eduFolders?: boolean }) => {
+      const bots = importTeamBackup(store, routines, backup, selection(), options).bots;
+      return (name: string) => store.bot(bots.find((bot) => bot.name.startsWith(`${name} `))!.id)?.eduBrain;
+    };
+    const trusted = restored({ eduFolders: true });
+    expect(trusted("Mira")).toEqual({ mode: "folder", path: area });
+    expect(trusted("Scout")).toEqual({ mode: "off" });
+    expect(trusted("Ava")).toBeUndefined();
+    expect(restored({})("Mira")).toEqual({ mode: "off" });
+
+    const relative = structuredClone(backup) as unknown as { bots: Array<{ eduBrain?: unknown }> };
+    relative.bots[0]!.eduBrain = { mode: "folder", path: "brains/area" };
+    expect(() => parseTeamBackup(relative)).toThrow();
+  });
+
   it("carries a bot's never-use-the-helper switch through backup and import, so its restored notes and chats stay off the helper", () => {
     const { store, routines, chief, scout } = fixture();
     store.patchBot(chief.id, { helperModel: false });

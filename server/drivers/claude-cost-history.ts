@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DATA_DIR } from "../config.ts";
 import { writeFileAtomic } from "../atomic.ts";
-import type { ClaudeCostSnapshot } from "./claude.ts";
+import type { ClaudeCostSnapshot } from "./claude-cost.ts";
 
 const COST_HISTORY_FILE = join(DATA_DIR, "claude-cost-history.json");
 const COST_HISTORY_SESSIONS = 100;

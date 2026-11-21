@@ -3,8 +3,8 @@
 // changes something never runs on a server it merely found.
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { delimiter, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 
@@ -14,6 +14,9 @@ import type { handleToolCall, request } from "./mcp-server.ts";
 import { launchUi, runControlOmbUi } from "./testing/control-omb-ui.ts";
 import { removeTempDir, waitForExit } from "../server/testing/cleanup.ts";
 import { hostTimeout } from "../server/testing/host-timeout.ts";
+import { locateEduCli } from "../server/edu-brain.ts";
+import { userHome } from "../server/env-path.ts";
+import { isInside, resolveThroughLinks } from "../server/sentinel/paths.ts";
 import { freePortBlock } from "../server/testing/ports.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -128,6 +131,22 @@ export interface VerificationServer {
   close(): Promise<void>;
 }
 
+/** No Edu unless the caller asks for one with EDU_FIXTURE_HOME: the global Edu brain the fixture's bots read, a folder the
+ * caller made. Security: it may never be the person's own brain, symlinks resolved. */
+export function eduFixtureEnvironment(parentEnv: NodeJS.ProcessEnv, dataDir: string): Record<string, string> {
+  const home = parentEnv.EDU_FIXTURE_HOME?.trim();
+  if (!home) return { OMB_EDU_CLI: join(dataDir, "no-edu") };
+  if (!isAbsolute(home)) throw new ControlOmbError("EDU_FIXTURE_HOME must be an absolute temporary folder");
+  const real = resolveThroughLinks(home);
+  const own = [join(userHome(parentEnv), ".edu"), join(homedir(), ".edu"), ...(parentEnv.EDU_HOME ? [parentEnv.EDU_HOME] : [])];
+  if (own.some((root) => isInside(real, resolveThroughLinks(root)))) {
+    throw new ControlOmbError("EDU_FIXTURE_HOME must be an absolute temporary folder, never your own Edu brain");
+  }
+  const cli = locateEduCli(parentEnv, parentEnv.PATH ?? "");
+  if (!cli) throw new ControlOmbError("EDU_FIXTURE_HOME needs Edu installed on PATH, or OMB_EDU_CLI naming its cli.js");
+  return { EDU_HOME: real, OMB_EDU_CLI: cli };
+}
+
 /** A temporary home in `dataDir`, the fake engine's knobs from `parentEnv`, node
  * on PATH, and nothing else from the parent shell or this machine's CLIs. */
 export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, dataDir: string, port: number): NodeJS.ProcessEnv {
@@ -175,6 +194,7 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
     // FAKE_CLAUDE_DUMP stays the launcher's: assertions read fixtureDumpPath.
     if ((key.startsWith("FAKE_CLAUDE_") || key.startsWith("FAKE_CODEX_TEXT_") || key.startsWith("FAKE_CODEX_COMMAND") || key.startsWith("FAKE_STREAM_") || key === "FAKE_ACP_HANG_ON") && key !== "FAKE_CLAUDE_DUMP" && value) childEnv[key] = value;
   }
+  Object.assign(childEnv, eduFixtureEnvironment(parentEnv, dataDir));
   // Enables POST /api/testing/org-library; the route does not exist without it.
   if (parentEnv.OMB_TEST_ORG_LIBRARY_KEY) childEnv.OMB_TEST_ORG_LIBRARY_KEY = parentEnv.OMB_TEST_ORG_LIBRARY_KEY;
   // Enables POST /api/testing/internal-capability (a bot's own tool routes, such as publish_page); the route refuses without it.

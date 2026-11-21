@@ -23,13 +23,11 @@ import {
   parseClaudeCliVersion,
   permissionSocketPath,
   readClaudeAuthSettings,
-  claudeCostSnapshot,
-  restoredCostBase,
   STEERED_CONTINUATION_GRACE_MS,
   sumNativeTurnResults,
-  turnCostFromRunningTotal,
   type ClaudeConfig,
 } from "./claude.ts";
+import { claudeCostSnapshot, restoredCostBase, turnCostFromRunningTotal } from "./claude-cost.ts";
 import { spawnContractDiff } from "./claude-spawn-contract.ts";
 import { TEAM_TOOLS_FAILED } from "./team-tools.ts";
 import { claudeLimitMessage } from "./claude-limits.ts";
@@ -2119,6 +2117,33 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const other = await mounted("t-tool-search-no-browse", false);
     expect(other.alwaysLoaded).toEqual(["agents", "ogb"]);
     expect(other.onDemand).toContain("browser");
+  });
+
+  it("mounts the Edu brain with its memory tools pre-allowed and the crew-worker guard on the engine alone", async () => {
+    await create();
+    const dump = join(scratch, "edu.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    const edu = { command: process.execPath, args: ["/fake/edu/cli.js", "--cwd", "/fake/brain", "mcp", "--profile", "memory"], env: { EDU_LOCK_WORKSPACE: "1" } };
+    const turn = async (threadId: string) => {
+      const { turnId } = await instance.adapter.sendTurn({ threadId, botId: "b-edu", text: "hi", cwd: scratch, integrations: { edu } });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+      return JSON.parse(readFileSync(dump, "utf8")) as { argv: string[]; env: Record<string, string>; mcpConfig: { mcpServers: Record<string, { env?: Record<string, string> }> } };
+    };
+    const seen = await turn("t-edu");
+    const allowed = seen.argv[seen.argv.indexOf("--allowedTools") + 1]!.split(",");
+    expect(allowed).toEqual(expect.arrayContaining(["mcp__edu__edu_recall", "mcp__edu__edu_remember", "mcp__edu__edu_propose_canonical", "mcp__edu__edu_session_close"]));
+    expect(allowed.filter((name) => name === "mcp__edu" || name === "mcp__edu__edu_project_use" || name.startsWith("mcp__edu__edu_crew"))).toEqual([]);
+    expect(seen.mcpConfig.mcpServers.edu?.env).toMatchObject({ EDU_LOCK_WORKSPACE: "1", EDU_CREW_JOB: "" });
+    expect(seen.env.EDU_CREW_JOB).toBe("edu-bot:b-edu");
+
+    process.env.EDU_CREW_JOB = "outer-job";
+    try {
+      const inherited = await turn("t-edu-inherited");
+      expect(inherited.mcpConfig.mcpServers.edu?.env).not.toHaveProperty("EDU_CREW_JOB");
+      expect(inherited.env.EDU_CREW_JOB).toBe("outer-job");
+    } finally {
+      delete process.env.EDU_CREW_JOB;
+    }
   });
 
   it("honours a person who turned Claude Code's tool search off, and restarts when they change it", async () => {

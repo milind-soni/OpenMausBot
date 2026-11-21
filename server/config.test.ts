@@ -761,6 +761,23 @@ describe("a config.json saved with a byte order mark", () => {
     }
   });
 
+  it("reads config.json's edu block, keeps it on save and never takes it from the settings API", () => {
+    const edu = { enabled: false, home: "~/brains/global" };
+    expect(parseStoredConfig({ edu, language: "en" })).toEqual({ edu, language: "en" });
+    expect(() => parseStoredConfig({ edu: { enabled: "no" } })).toThrow("edu");
+    expect(parseConfigPatch({ edu } as JsonValue)).not.toHaveProperty("edu");
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({ edu: { home: "/srv/edu" } }));
+    try {
+      saveConfig({ edu: { enabled: false } });
+      expect(JSON.parse(readFileSync(path, "utf8")).edu).toEqual({ home: "/srv/edu", enabled: false });
+      expect(loadConfig().edu).toEqual({ home: "/srv/edu", enabled: false });
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
   it("keeps the browser's allow-list when the owner flips its local-sites switch", () => {
     const path = join(DATA_DIR, "config.json");
     mkdirSync(DATA_DIR, { recursive: true });

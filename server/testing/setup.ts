@@ -14,6 +14,10 @@ process.env.USERPROFILE = home;
 process.env.FAKE_OPENAI_COMPAT_RETRY_SCALE ??= "0.001";
 // OMB_DATA_DIR must never escape the throwaway home the suite deletes.
 delete process.env.OMB_DATA_DIR;
+// No test finds the developer's own Edu or its brain: one that wants Edu points OMB_EDU_CLI at it.
+process.env.OMB_EDU_CLI = join(home, "no-edu");
+delete process.env.EDU_HOME;
+delete process.env.EDU_CREW_JOB;
 // The model manifest comes from the bundled copy in tests; refreshing it would be a network call in every server boot.
 process.env.OMB_DISABLE_MODEL_MANIFEST_FETCH = "1";
 // Do not let a developer's Hermes global config path leak into per-test homes.
