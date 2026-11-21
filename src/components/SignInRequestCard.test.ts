@@ -29,7 +29,7 @@ vi.mock("@/lib/logins", () => ({
 }));
 
 import { LoginForm } from "./LoginForm";
-import { SignInBanner, SignInRequestCard } from "./SignInRequestCard";
+import { SignInBanner, SignInRequestCard, SiteSignInCard } from "./SignInRequestCard";
 import { VaultChoices } from "./VaultChoices";
 
 const card = (signIn: Record<string, unknown> = {}): Message => ({
@@ -51,7 +51,7 @@ const elements = (node: ReactNode): Node[] => {
 };
 const tree = (signIn?: Record<string, unknown>) => {
   let root!: ReactNode;
-  function Capture() { root = SignInRequestCard(props(signIn)); return root; }
+  function Capture() { root = SiteSignInCard(props(signIn)); return root; }
   renderToStaticMarkup(createElement(Capture));
   const top = elements(root);
   return [...top, ...top.flatMap((node) => elements((node.props as { footer?: ReactNode }).footer))];

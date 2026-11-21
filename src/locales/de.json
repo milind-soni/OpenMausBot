@@ -4102,5 +4102,7 @@
   "settings.vault.bitwardenSecrets.guide": "Öffne in Bitwarden Secrets Manager die Maschinenkonten, wähle eines, das nur die Projekte lesen kann, die Bots brauchen, dann Zugriffstoken → Zugriffstoken erstellen, und füge das Token hier ein. Ein Geheimnis, dessen Notiz eine url:-Zeile hat (und optional username:- und totp:-Zeilen), ist das Login für diese Website, mit seinem Wert als Passwort.",
   "settings.vault.bitwardenSecrets.token": "Zugriffstoken",
   "settings.vault.bitwardenSecrets.note": "Wird verschlüsselt auf dem Computer gespeichert, auf dem dies läuft, und nie wieder angezeigt. Jeder Wert wird aus Bitwarden gelesen, wenn ein Bot ihn nutzt, und in Bitwarden geändert.",
-  "settings.vault.bitwardenSecrets.error": "Bitwarden Secrets Manager konnte nicht verbunden werden. Versuche es erneut."
+  "settings.vault.bitwardenSecrets.error": "Bitwarden Secrets Manager konnte nicht verbunden werden. Versuche es erneut.",
+  "server.notify.handoff": "{who} wartet auf dich",
+  "serverError.signIn.expired": "Diese Anfrage ist bereits abgelaufen"
 }

@@ -258,7 +258,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   if (DEVS_TOOL_NAMES.has(name)) return callDevsTool(name, args, context);
   if (TRIGGER_TOOL_NAMES.has(name)) return callTriggerTool(name, args, context);
   if (WAIT_TOOL_NAMES.has(name)) return callWaitTool(name, args, context); if (CHECK_BACK_TOOL_NAMES.has(name)) return callCheckBackTool(args, context);
-  if (name === USAGE_LIMITS_TOOL) return callUsageLimitsTool(context);
+  if (name === USAGE_LIMITS_TOOL) return callUsageLimitsTool(context, args);
   if (COMPUTER_ASK_TOOL_NAMES.has(name)) return callComputerAskTool(args, context);
   // Second lock: with sharing off the catalog already omits these tools.
   if (SHARED_COMPUTER_TOOL_NAMES.has(name) && !context.sharedComputers) {
@@ -623,15 +623,25 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     };
   }
   if (name === "request_sign_in") {
+    const instruction = typeof args.instruction === "string" ? args.instruction.trim() : "";
     const site = typeof args.site === "string" ? args.site.trim() : "";
-    if (!site) return { text: "request_sign_in needs site: the page's address or its domain, such as example.com.", isError: true };
+    if (!instruction && !site) return { text: "request_sign_in needs instruction: one sentence on the step the person does.", isError: true };
     const reason = typeof args.reason === "string" ? args.reason.trim().slice(0, 240) : "";
     const r = await api("/api/internal/request-sign-in", {
       method: "POST",
-      body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, site, ...(reason ? { reason } : {}) }),
+      body: JSON.stringify({
+        fromBotId: BOT_ID, fromThreadId: THREAD_ID, ...(instruction ? { instruction } : {}), ...(site ? { site } : {}), ...(reason ? { reason } : {}),
+        ...(typeof args.kind === "string" ? { kind: args.kind } : {}), ...(typeof args.target === "string" ? { target: args.target } : {}),
+      }),
     });
+    const where = SIGN_IN_PLACES[String(r.place)] ?? "the place you work";
+    if (!instruction) {
+      return {
+        text: `The person was asked to sign in to ${r.site ?? site} on ${where}. Your turn ends now: say in one short line that you are waiting for them, then stop. OpenMausBot resumes you when they finish or decline. Never ask for the password or a code in chat.`,
+      };
+    }
     return {
-      text: `The person was asked to sign in to ${r.site ?? site} on ${SIGN_IN_PLACES[String(r.place)] ?? "the place you work"}. Your turn ends now: say in one short line that you are waiting for them, then stop. OpenMausBot resumes you when they finish or decline. Never ask for the password or a code in chat.`,
+      text: `Waiting for the person. Asked them on ${where}: ${JSON.stringify(instruction)} The request expires in 30 minutes. Say in one short line that you are waiting for them, then stop, or do other work that does not need ${where}. OpenMausBot resumes you with the outcome: done, skipped or expired. Never ask for a password, a code or payment details in chat.`,
     };
   }
   if (name === "fill_login") {

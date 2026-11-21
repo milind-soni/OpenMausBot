@@ -164,6 +164,7 @@ export function adoptLearned(facts: readonly LearnedFact[], removed: readonly st
   const next = appendAboutMe(aboutMe, lines);
   if (next === null) return null;
   const removals = [...new Set([...file.removed, ...removed])].slice(-MAX_REMOVED);
-  if (kept.length || removals.length !== file.removed.length) save({ ...file, learned: [...file.learned, ...kept].slice(-MAX_KEPT), removed: removals });
+  const removalsChanged = removals.length !== file.removed.length || removals.some((identity, i) => identity !== file.removed[i]);
+  if (kept.length || removalsChanged) save({ ...file, learned: [...file.learned, ...kept].slice(-MAX_KEPT), removed: removals });
   return { aboutMe: next, added: lines.length };
 }
