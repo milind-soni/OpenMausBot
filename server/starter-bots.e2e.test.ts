@@ -224,19 +224,26 @@ describe("a Starter Cloud's bots, on a real server", () => {
     expect(five).toContain(out[0]);
     expect(await notices()).toEqual([expect.stringMatching(/^notice: Woke @Sixth for its routine “Every three hours”: this Cloud's Starter plan keeps 5 bots awake, so @.+ is paused to make room\./)]);
 
-    // The person swaps it back: their choice stands, and Run now still runs, in its own conversation, told once.
+    // The person swaps it back: their choice stands, and its scheduled run still runs, in its own conversation, told once.
     expect((await cloud.api("POST", "/api/starter/awake", { awake: five })).body).toEqual({ paused: [sixth.id] });
+    const soon = await cloud.api("POST", "/api/routines", { name: "In a moment", prompt: "Check the inbox.", botId: sixth.id, enabled: true, schedule: { type: "once", at: Date.now() + 2_000 } });
+    expect(soon.status, JSON.stringify(soon.body)).toBe(201);
+    await expect.poll(async () => (await runs()).find((run) => run.routineId === soon.body.routine.id)?.status, { timeout: 30_000 }).toBe("running");
+    expect(await paused()).toEqual([sixth.id]);
+    expect((await notices()).slice(1)).toEqual([expect.stringMatching(/^notice: Ran the routine “In a moment” for @Sixth, which stays paused/)]);
+    cloud.finishTurn();
+    await expect.poll(async () => (await runs()).find((run) => run.routineId === soon.body.routine.id)?.status, { timeout: 30_000 }).toBe("completed");
+    // And Run now, with nothing more said.
     const started = await cloud.api("POST", `/api/routines/${created.body.routine.id}/run`);
     expect(started.status, JSON.stringify(started.body)).toBe(201);
-    await expect.poll(async () => (await runs()).find((run) => run.id === started.body.run.id)?.status, { timeout: 30_000 }).toBe("running");
+    await expect.poll(async () => (await runs()).find((run) => run.id === started.body.run.id)?.status, { timeout: 30_000 }).toBe("completed");
     expect(await paused()).toEqual([sixth.id]);
-    expect((await notices()).slice(1)).toEqual([expect.stringMatching(/^notice: Ran the routine “Every three hours” for @Sixth, which stays paused/)]);
+    expect(await notices()).toHaveLength(2);
     // A message to it in its own chat is still refused for the plan.
     expect(await cloud.api("POST", `/api/bots/${sixth.id}/messages`, { text: "Hello", threadId: sixth.threadId })).toMatchObject({ status: 409, body: { code: "bot_paused" } });
 
     // A bot the person paused is not woken by its routine, and a run they start by hand fails in the pause's words.
     expect((await cloud.api("POST", "/api/paused", { kind: "bot", id: sixth.id, paused: true })).status).toBe(200);
-    await expect.poll(async () => (await runs()).find((run) => run.id === started.body.run.id)?.status, { timeout: 30_000 }).not.toBe("running");
     const held = await cloud.api("POST", `/api/routines/${created.body.routine.id}/run`);
     await expect.poll(async () => (await runs()).find((run) => run.id === held.body.run.id)?.status, { timeout: 30_000 }).toBe("failed");
     expect((await runs()).find((run) => run.id === held.body.run.id)?.error).toMatch(/^Sixth is paused, so it takes no new work/);
