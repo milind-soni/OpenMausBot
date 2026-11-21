@@ -120,6 +120,44 @@ describe("killCliTree", () => {
     }
   });
 
+  it.runIf(process.platform === "linux").each([true, false])("leaves a gateway the CLI started to outlive it, and that gateway's own children, running (gateway command: %s)", async (isGateway) => {
+    const gateway = `
+      const s = require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(`console.log(process.pid); ${IDLE}`)}], { stdio: ['ignore', 'pipe', 'ignore'] });
+      s.stdout.once('data', (pid) => console.log(process.pid + ' ' + String(pid).trim()));
+      ${IDLE};
+    `;
+    // Hermes starts it as `python -m hermes_cli.main gateway run --quiet --idle-exit`; any other command with the same
+    // inherited variable is still stopped.
+    const gatewayArgs = ['-e', gateway, ...(isGateway ? ['gateway', 'run', '--quiet'] : [])];
+    const parent = spawnCli(process.execPath, ["-e", `
+      const c = require('node:child_process').spawn(process.execPath, ${JSON.stringify(gatewayArgs)}, {
+        detached: true, stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, HERMES_GATEWAY_DETACHED: '1' },
+      });
+      c.stdout.once('data', (pids) => process.stdout.write(pids));
+      ${IDLE};
+    `], { stdio: ["pipe", "pipe", "pipe"] });
+    let kept: number[] = [];
+    try {
+      kept = await new Promise<number[]>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("the gateway did not report its pids")), 5_000);
+        let line = "";
+        parent.stdout.on("data", (chunk) => {
+          line += String(chunk);
+          if (!line.includes("\n")) return;
+          clearTimeout(timer);
+          resolve(line.trim().split(" ").map(Number));
+        });
+      });
+      expect(kept).toHaveLength(2);
+      captureCliTree(parent);
+      await expect(killCliTree(parent, 80)).resolves.toBe(true);
+      expect(kept.map(alive)).toEqual([isGateway, isGateway]);
+    } finally {
+      await killCliTree(parent, 0);
+      for (const pid of kept) if (alive(pid)) try { process.kill(pid, "SIGKILL"); } catch {}
+    }
+  }, 20_000);
+
   it.skipIf(process.platform === "win32")("escalates ignored TERM and shares concurrent stop attempts", async () => {
     const child = spawnCli(process.execPath, ["-e", STUBBORN], { stdio: ["pipe", "pipe", "pipe"] });
     try {
