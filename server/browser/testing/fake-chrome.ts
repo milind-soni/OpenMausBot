@@ -37,6 +37,8 @@ export interface FakePage {
   focused: number | null;
   /** Emulation.setDeviceMetricsOverride's size, which the page then reports instead of its window's. */
   emulated?: { width: number; height: number } | null;
+  /** A window resize landed after the emulation: the page is drawn at its window's size, and still reports the emulated one. */
+  viewLost?: boolean;
   /** The size of an emulation that ended, and how many more measures answer with it. */
   lagging?: { width: number; height: number; measures: number } | null;
   /** A bar of this height over the page, as Chrome's first tab has. */
@@ -282,6 +284,7 @@ export class FakeChrome implements CdpTransport {
         return { frameTree: { frame: { id: page.targetId, url: page.url, loaderId: page.loaderId } } };
       case "Emulation.setDeviceMetricsOverride":
         page.emulated = { width: Number(params.width), height: Number(params.height) };
+        page.viewLost = false;
         return {};
       case "Emulation.clearDeviceMetricsOverride":
         page.lagging = page.emulated && this.lateClears > 0 ? { ...page.emulated, measures: this.lateClears } : null;
@@ -403,8 +406,17 @@ export class FakeChrome implements CdpTransport {
     const cast = page.screencasts.get(sessionId);
     if (!cast) return;
     cast.sent++;
-    const viewport = this.viewport;
+    const viewport = page.emulated && !page.viewLost ? page.emulated : this.viewport;
     this.event("Page.screencastFrame", { data: JPEG, sessionId: cast.sent, metadata: { deviceWidth: viewport.width, deviceHeight: viewport.height, offsetTop: 0, pageScaleFactor: 1, scrollOffsetX: 0, scrollOffsetY: 0, timestamp: Date.now() / 1000 } }, sessionId);
+  }
+
+  /** A window resize lands after its pages were emulated, as a slow one does: they are drawn at the window's size again. */
+  landResize(): void {
+    for (const page of this.pages.values()) {
+      if (!page.emulated) continue;
+      page.viewLost = true;
+      this.paint(page);
+    }
   }
 
   /** The page repaints: every screencast on it gets a frame. */
