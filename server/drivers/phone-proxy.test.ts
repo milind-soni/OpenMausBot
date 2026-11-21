@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, realpathSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -25,6 +25,46 @@ emulator-5554 device product:sdk model:Emulator transport_id:6
       { serial: "emulator-5554", state: "device", connection: "emulator", model: "Emulator" },
       { serial: "192.0.2.4:5555", state: "device", connection: "network", model: "Remote" },
     ]);
+  });
+
+  it("installs on the selected wireless phone and preserves the workspace and transport boundaries", async () => {
+    const wireless = "adb-EXAMPLE-a1b2c3._adb-tls-connect._tcp";
+    const other = "adb-OTHER-123._adb-tls-connect._tcp";
+    const plain = "192.0.2.4:5555";
+    const dir = mkdtempSync(join(tmpdir(), "phone-apk-"));
+    const apk = join(dir, "release game.apk");
+    const calls: string[][] = [];
+    const adb = async (args: string[]) => {
+      calls.push(args);
+      return Buffer.from(args[0] === "devices"
+        ? [wireless, other, plain, "emulator-5554"].map(s => s + " device model:Pixel").join("\n")
+        : "Performing Streamed Install\nSuccess\n");
+    };
+    const call = (name: string, args = {}) => callPhoneTool(name, args, async () => ({ ok: true }), adb);
+    async function statusDevices() {
+      const [content] = (await call("status")).content;
+      if (content?.type !== "text") throw new Error("Expected phone status");
+      return JSON.parse(content.text).devices;
+    }
+    try {
+      writeFileSync(apk, "fixture");
+      vi.stubEnv("OMB_ADB_PATH", process.execPath);
+      vi.stubEnv("OMB_PHONE_APK_DIR", dir);
+      vi.stubEnv("PH_ANDROID_SERIAL", "");
+      expect(await statusDevices()).toEqual([]);
+      vi.stubEnv("PH_ANDROID_SERIAL", wireless);
+      expect(await statusDevices()).toEqual([
+        { serial: wireless, state: "device", connection: "network", model: "Pixel" },
+      ]);
+      expect((await call("install_apk", { path: "release game.apk" })).isError).toBeFalsy();
+      for (const args of [{ serial: other }, { serial: plain }, { serial: "emulator-5554" }, { path: "../outside.apk" }, { path: apk }]) {
+        expect((await call("install_apk", { path: "release game.apk", ...args })).isError).toBe(true);
+      }
+      expect(calls.filter(args => args[0] !== "devices")).toEqual([["-s", wireless, "install", "-r", realpathSync(apk)]]);
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("extracts unique launchable packages", () => {
@@ -785,7 +825,7 @@ esac
   it("runs a batch on the device its serial names", async () => {
     rmSync(join(home, "adb.log"), { force: true });
     const response = await call("batch", { serial: "MISSING", steps: [{ action: "tap", x: 540, y: 1200 }] });
-    expect(response.result).toEqual({ content: [{ type: "text", text: "No physical USB Android device is connected" }], isError: true });
+    expect(response.result).toEqual({ content: [{ type: "text", text: "The selected Android phone is not connected or allowed" }], isError: true });
     expect(adbLog()).toEqual(["devices -l"]);
   });
 

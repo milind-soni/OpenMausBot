@@ -1,12 +1,12 @@
 ---
-title: USB Android control
-description: Let a bot inspect and operate a physically connected Android phone.
+title: Android phone control
+description: Let a bot inspect and operate a connected Android phone.
 icon: Cable
 ---
 
-MausBot can expose a USB-connected Android device through its Phone Harness skill. A supported agent can inspect the screen, open apps, tap, long-press, type, swipe, scroll, and capture screenshots.
+MausBot can expose a USB or paired wireless Android device through its Phone Harness skill. A supported agent can inspect the screen, open apps, tap, long-press, type, swipe, scroll, and capture screenshots.
 
-## Requirements
+## USB setup
 
 - A physical Android device connected over USB
 - USB debugging enabled on the device
@@ -14,6 +14,20 @@ MausBot can expose a USB-connected Android device through its Phone Harness skil
 - The packaged Android platform tools or a compatible local ADB installation
 
 Phone access is a separate capability from desktop computer use. Keep the device unlocked and visible while testing, and review actions that may send messages, change accounts, or expose private content.
+
+## Wireless setup
+
+On Android 11 or later, enable **Wireless debugging** in Developer options and choose **Pair device with pairing code**. On this computer, use Android platform tools to run `adb pair HOST:PAIRING_PORT` and enter the code at its prompt. Keep the phone and computer on the same Wi-Fi.
+
+Run `adb devices -l` and copy the connected service name ending in `._adb-tls-connect._tcp`. Set the environment variable `PH_ANDROID_SERIAL` to that exact name before starting OpenMausBot. For example, in PowerShell:
+
+```powershell
+$env:PH_ANDROID_SERIAL = 'adb-EXAMPLE-random._adb-tls-connect._tcp'
+```
+
+Fully quit OpenMausBot, start it from that shell, and ask it to check the phone. If the service name is missing, check that wireless debugging and mDNS discovery are available. Clearing the variable and restarting restores USB-only operation. Pairing codes are entered directly into Android platform tools.
+
+To install an app, put its APK in the conversation working folder and ask the bot to install it. Android checks the signature on updates and keeps the existing app data.
 
 ## Screen and lock
 

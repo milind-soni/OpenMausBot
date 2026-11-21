@@ -1,8 +1,8 @@
-// First-party Android phone MCP server: physical USB devices only (no emulators, wireless or network ADB).
+import { isPhoneTransport } from "../../electron/android-transport.mjs";
 import { spawn } from "node:child_process";
-import { accessSync, constants, existsSync } from "node:fs";
+import { accessSync, constants, existsSync, realpathSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
-import { delimiter, join } from "node:path";
+import { delimiter, extname, isAbsolute, join, relative, sep } from "node:path";
 import { homedir } from "node:os";
 
 import { PHONE_STEP_TOOLS, type PhoneStepTool } from "../../shared/phone-steps.ts";
@@ -137,17 +137,17 @@ export function parseDevices(output: string): Device[] {
   return devices;
 }
 
-async function usbDevices(adb: Adb) {
+async function connectedPhones(adb: Adb) {
   if (!resolveAdbPath()) return [];
-  return parseDevices((await adb(["devices", "-l"])).toString("utf8")).filter((device) => device.connection === "usb");
+  return parseDevices((await adb(["devices", "-l"])).toString("utf8")).filter((device) => isPhoneTransport(device, process.env.PH_ANDROID_SERIAL));
 }
 
 async function readySerial(adb: Adb, requested?: unknown): Promise<string> {
-  const devices = await usbDevices(adb);
+  const devices = await connectedPhones(adb);
   const serial = typeof requested === "string" && requested ? requested : process.env.PH_ANDROID_SERIAL;
   const candidates = serial ? devices.filter((device) => device.serial === serial) : devices;
-  if (!candidates.length) throw new Error("No physical USB Android device is connected");
-  if (candidates.length > 1 && !serial) throw new Error("Multiple USB Android devices are connected; pass serial");
+  if (!candidates.length) throw new Error(serial ? "The selected Android phone is not connected or allowed" : "No physical USB Android device is connected");
+  if (candidates.length > 1 && !serial) throw new Error("Multiple Android devices are connected; pass serial");
   const device = candidates[0];
   if (device.state === "unauthorized") throw new Error("Unlock the phone and accept Allow USB debugging");
   if (device.state !== "device") throw new Error(`The Android device is ${device.state}`);
@@ -158,7 +158,7 @@ async function readySerial(adb: Adb, requested?: unknown): Promise<string> {
 const claimedDevice = (ensureClaim: EnsureClaim, adb: Adb): OnDevice => async (serial, args, binary = false) => {
   const claim = await ensureClaim(true);
   if (!claim.ok) throw new Error(claim.message);
-  return adb(["-s", serial, ...args], { binary });
+  return adb(["-s", serial, ...args], args[0] === "install" ? { binary, timeoutMs: 180_000 } : { binary });
 };
 
 type Shell = (...command: string[]) => Promise<string>;
@@ -325,7 +325,7 @@ function nodeLines(nodes: UiNode[]) {
 }
 
 const SINGLE_TOOLS = [
-  { name: "status", description: "Check physical USB Android devices and USB-debugging authorization before any Android phone task.", inputSchema: { type: "object", properties: {} } },
+  { name: "status", description: "Check USB and configured paired wireless Android phones and their authorization before any Android phone task.", inputSchema: { type: "object", properties: {} } },
   { name: "read_screen", description: "Read visible text, accessibility labels, resource ids, and pixel bounds from the connected Android screen. Use it before choosing what to act on. To act and see the result in one call, put the action and read_screen in one batch.", inputSchema: { type: "object", properties: { serial: { type: "string" } } } },
   { name: "screenshot", description: "Capture the connected Android screen when accessibility text is insufficient. Returns a PNG image.", inputSchema: { type: "object", properties: { serial: { type: "string" } } } },
   { name: "list_apps", description: "List installed launchable Android package names, optionally filtered by a human app name. Prefer open_app first.", inputSchema: { type: "object", properties: { query: { type: "string" }, serial: { type: "string" } } } },
@@ -445,6 +445,11 @@ const BATCH_HINT = "To do several steps, or to act and then read the screen, in 
 const takesBatchHint = (name: string) => name !== "read_screen" && (PHONE_STEP_TOOLS as readonly string[]).includes(name);
 
 export const TOOLS = [
+  {
+    name: "install_apk",
+    description: "Install the requested APK from the current working folder, preserving existing app data on update.",
+    inputSchema: { type: "object", properties: { path: { type: "string" }, serial: { type: "string" } }, required: ["path"] },
+  },
   ...SINGLE_TOOLS.map((tool) => (takesBatchHint(tool.name) ? { ...tool, description: `${tool.description} ${BATCH_HINT}` } : tool)),
   {
     name: "batch",
@@ -600,7 +605,7 @@ export async function runSteps(
 async function callTool(name: string, args: Json, adb: Adb, onDevice: OnDevice, ensureClaim: EnsureClaim): Promise<ToolResult> {
   if (name === "status") {
     const available = Boolean(resolveAdbPath());
-    const devices = available ? await usbDevices(adb) : [];
+    const devices = available ? await connectedPhones(adb) : [];
     return textResult(JSON.stringify({ available, devices }, null, 2));
   }
   // Security: this sends a command without asking for the phone claim, so a person's hold does not stop it.
@@ -611,6 +616,21 @@ async function callTool(name: string, args: Json, adb: Adb, onDevice: OnDevice, 
     return runSteps(await readySerial(adb, args.serial), steps, ensureClaim, actOn(onDevice, unclaimed));
   }
   const serial = await readySerial(adb, args.serial);
+  if (name === "install_apk") {
+    const root = process.env.OMB_PHONE_APK_DIR;
+    if (!root || typeof args.path !== "string" || isAbsolute(args.path) || args.path.includes(":") || args.path.split(/[\\/]/).includes("..") || extname(args.path).toLowerCase() !== ".apk") {
+      throw new Error("Choose an APK by its relative path in this conversation’s working folder");
+    }
+    const folder = realpathSync(root);
+    const apk = realpathSync(join(folder, args.path));
+    const rel = relative(folder, apk);
+    if (rel === ".." || rel.startsWith(".." + sep) || isAbsolute(rel) || extname(apk).toLowerCase() !== ".apk" || !statSync(apk).isFile()) {
+      throw new Error("Choose an APK file inside this conversation’s working folder");
+    }
+    const result = (await onDevice(serial, ["install", "-r", apk])).toString("utf8").trim();
+    if (!result.split(/\r?\n/).includes("Success")) throw new Error(result || "Android did not confirm installation");
+    return textResult("Android confirmed the APK was installed");
+  }
   return callToolOn(onDevice, unclaimed, serial, name, args);
 }
 
