@@ -39,7 +39,7 @@ const MAX_PAGES = 10;
 const PROTOCOL = "2025-03-26";
 /** Security: a port under 1024 is a system service's, and this computer's own OpenMausBot server and Chrome's DevTools
  * take commands from any local caller, so a lent address on one of them would hand a Cloud's bot this computer. */
-const OWN_PORT = "Only an MCP server on its own port (1024 or higher) at this computer's address can be reached, never this computer's own OpenMausBot or Chrome ports";
+const OWN_PORT = "Only an MCP server on its own port (1024 or higher) at this computer's address can be reached, never this computer's own Edu Bot or Chrome ports";
 
 /** What a lent server inherits from this app: where things live, never a key. */
 const INHERITED = ["HOME", "USERPROFILE", "USER", "LOGNAME", "SHELL", "LANG", "TMPDIR", "TEMP", "TMP", "PATHEXT", "SystemRoot", "SystemDrive", "windir", "ComSpec", "APPDATA", "LOCALAPPDATA", "ProgramData"];
@@ -153,7 +153,7 @@ function stdioClient(server, { environment, home }) {
     let message; try { message = JSON.parse(line); } catch { return; }
     if (!record(message)) return;
     // A server's own request (roots, sampling) is one this client does not offer.
-    if (typeof message.method === "string" && Object.hasOwn(message, "id")) return void write({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "Not offered by OpenMausBot" } });
+    if (typeof message.method === "string" && Object.hasOwn(message, "id")) return void write({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "Not offered by Edu Bot" } });
     const waiting = pending.get(message.id);
     if (!waiting) return;
     pending.delete(message.id); bytes = 0;

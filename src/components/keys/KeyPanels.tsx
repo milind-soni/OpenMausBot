@@ -176,7 +176,7 @@ export function VpsConnection() {
     <div className="flex flex-col gap-2">
       <p className="text-[12px] leading-4 text-ink-secondary">
         {t("keys.vps.descBefore")}
-        <a href="https://github.com/milind-soni/OpenMausBot/blob/main/docs/byo-vps.md" target="_blank" rel="noopener noreferrer" className="text-accent-text hover:underline">
+        <a href="https://github.com/EduardoMoraga/edu-bot/blob/main/docs/byo-vps.md" target="_blank" rel="noopener noreferrer" className="text-accent-text hover:underline">
           {t("keys.vps.descLink")}
         </a>
         {t("keys.vps.descAfter")}

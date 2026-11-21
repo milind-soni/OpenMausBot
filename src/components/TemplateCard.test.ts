@@ -78,7 +78,7 @@ describe("a template's chat card", () => {
     const signIn = shown({ ...draft, fallback: "sign_in" });
     expect(signIn).toContain("Save folder…");
     expect(signIn).toContain("Upload on GitHub");
-    expect(signIn).toContain("Sign in to MausBot to publish");
+    expect(signIn).toContain("Sign in to Edu Bot to publish");
     expect(signIn).not.toMatch(/\bPublish\b/);
     expect(shown({ ...draft, fallback: "unavailable" })).toContain("Publishing isn't available here");
   });

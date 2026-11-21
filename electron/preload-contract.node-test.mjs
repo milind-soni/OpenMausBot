@@ -6,7 +6,7 @@ import test from "node:test";
 // Node tests run without Electron: satisfy preload's require("electron") from the require cache; the real preload still runs.
 const require = createRequire(import.meta.url);
 // The company desktop's keys are part of the bridge too: the test looks at the whole of it.
-process.argv.push("--omb-company-desktop=1");
+process.argv.push("--omb-company-desktop=1", "--omb-managed-cloud=1");
 const exposed = { api: null };
 const fakeElectron = {
   ipcRenderer: {

@@ -4,7 +4,7 @@ import { cloudColor } from "@/lib/cloud-look";
 import { placeInitials } from "@/lib/places";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { productName } from "@/lib/brand";
+import { brand, productName } from "@/lib/brand";
 import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { SIMPLE_ONLY } from "@/lib/simple-only";
 import { useStoreSelector } from "@/state/store-select";
@@ -43,7 +43,7 @@ export function AppIcon({ size }: { size: number }) {
   // A 0.5 px edge keeps the tile's shape on a dark sheet, where its own black would melt into Midnight's.
   return (
     <span className="relative shrink-0" style={{ width: size, height: size }}>
-      <img src="/app-icon.svg" alt="" width={size} height={size} className="rounded-[6px]" style={{ width: size, height: size }} />
+      <img src={brand().logo ?? "/app-icon.svg"} alt="" width={size} height={size} className="rounded-[6px]" style={{ width: size, height: size }} />
       <span aria-hidden="true" className="absolute inset-0 rounded-[6px] shadow-[inset_0_0_0_0.5px_var(--settings-edge)]" />
     </span>
   );

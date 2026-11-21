@@ -121,7 +121,7 @@ describe("harness MCP capability proxy", () => {
     const resetting = await listening((req) => req.socket.destroy());
     try {
       expect(textOf(await harnessMcpRequest(click, { url: resetting.url, token: "t", kind: "computer" })))
-        .toMatch(/^OpenMausBot restarted while this cloud computer call was running, so it may or may not have taken effect\./);
+        .toMatch(/^Edu Bot restarted while this cloud computer call was running, so it may or may not have taken effect\./);
     } finally { await new Promise<void>((resolve) => resetting.peer.close(() => resolve())); }
     vi.stubGlobal("fetch", vi.fn(async () => { throw new DOMException("The operation was aborted due to timeout", "TimeoutError"); }));
     try {

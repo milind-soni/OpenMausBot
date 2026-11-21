@@ -94,7 +94,7 @@ export function ToolSelectionCard({ bot, engineKind }: { bot: Bot; engineKind?: 
         className="rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
         {t(saving ? "botAccess.tools.saving" : "botAccess.tools.save")}
       </button>
-      <a href="https://github.com/milind-soni/OpenMausBot/blob/main/docs/tool-selection.md" target="_blank" rel="noreferrer" className="text-[12px] text-ink-secondary underline">{t("botAccess.tools.examples")}</a>
+      <a href="https://github.com/EduardoMoraga/edu-bot/blob/main/docs/tool-selection.md" target="_blank" rel="noreferrer" className="text-[12px] text-ink-secondary underline">{t("botAccess.tools.examples")}</a>
     </div>
   </div>;
 }

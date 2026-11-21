@@ -70,7 +70,7 @@ describe("call capability guidance", () => {
     }, "other"), false, null);
     expect(help).toEqual({
       label: "Calls where you take turns need the desktop app",
-      reason: "They listen from this computer, so they need MausBot on a Mac, Windows or Linux computer.",
+      reason: "They listen from this computer, so they need Edu Bot on a Mac, Windows or Linux computer.",
     });
   });
 
@@ -101,7 +101,7 @@ describe("call capability guidance", () => {
       onDevice: true,
     }), false, null)).toEqual({
       label: "Calls aren't available right now",
-      reason: "The speech service is unavailable in this app build. Restart or update MausBot.",
+      reason: "The speech service is unavailable in this app build. Restart or update Edu Bot.",
     });
   });
 });

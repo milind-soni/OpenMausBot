@@ -4,7 +4,7 @@ description: Find the failing layer first, then apply the smallest safe fix.
 icon: Wrench
 ---
 
-Most MausBot failures come from one of four layers: the desktop app, a local agent CLI, a connected service, or a computer backend.
+Most Edu Bot failures come from one of four layers: the desktop app, a local agent CLI, a connected service, or a computer backend.
 
 <Cards>
   <Card title="Where are my logs?" href="/docs/troubleshooting/logs" description="Where the logs are on Windows, macOS and Linux, and how to share them with secrets removed." />
@@ -22,15 +22,15 @@ the last entry in the @ list) and a few words about what went wrong, then send.
 Typing it is the decision to send: there is nothing else to press.
 
 The bot answering the message adds a short summary: what you said went wrong,
-what it saw itself in the conversation, and steps to reproduce. MausBot adds
+what it saw itself in the conversation, and steps to reproduce. Edu Bot adds
 its own facts: the app version, the computer's system, whether it runs on the
 desktop or the Cloud, the bot's engine and model, recent errors in that
 conversation, the server's latest warnings and errors, and the conversation's
 ids. Keys, passwords, tokens, cookies and the parameters of web addresses are
 masked first. The rest of the conversation is never sent, and neither is any file.
 
-A line in the chat says where it went, for example *Sent to the MausBot team
-(report …). Milind and Omkar get it by email and will reply to you@example.com.*
+A line in the chat says where it went, for example *Sent to the Edu Bot team
+(report …). The maintainers get it by email and will reply to you@example.com.*
 The reply address is the email you signed in with, or the one in your profile.
 If the report cannot go yet (no connection, or too many reports in the last
 hour), the line says so: the report is saved and sent on its own later, so there
@@ -40,14 +40,14 @@ Under your message you can follow what becomes of it: *Got it, we're looking*,
 then *Fixed in 0.1.135, coming in your next update* once the team has fixed it.
 When the app (or the Cloud) runs that version, you get one message in the same
 chat, *Fixed in 0.1.135. Want to try again?*, and one notification. The app asks
-the MausBot team about your reports about once an hour and each time it starts;
+the Edu Bot team about your reports about once an hour and each time it starts;
 it sends only the reports' ids.
 
 ## Collect useful evidence
 
 Before opening an issue, record:
 
-- MausBot version and operating system;
+- Edu Bot version and operating system;
 - selected engine and model;
 - the exact visible error, not only “it failed”;
 - whether the same agent CLI works directly in a terminal;

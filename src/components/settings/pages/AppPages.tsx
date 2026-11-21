@@ -45,8 +45,6 @@ export function AppPage() {
       <SettingsGroup label={t("settings.updates.title")} block="updates">
         <SettingsRows>
           {window.ogb?.updater ? <UpdatesRow title={appVersionLine} />
-            // On the app's own page with no updater (a package or store build), the version is live and says why
-            // there is no button; only another place's page names This computer.
             : ctx.home || ctx.client ? <SettingRow title={appVersionLine} subtitle={t("settings.updates.fromPackage")}>{null}</SettingRow>
               : <InertRow title={appVersionLine} reason={t("settings.inert.checkFromHere", { place: computer.name })}
                 control={<button type="button" className="ui-button" tabIndex={-1}>{t("settings.updates.check")}</button>} />}

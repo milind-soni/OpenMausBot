@@ -37,7 +37,7 @@ describe("t", () => {
   });
 
   it("fills {app} with the product's name, a white-label brand's own name, or the name a caller passes", () => {
-    expect(t("routines.runsOn.localHint")).toBe("Starts while MausBot is open here.");
+    expect(t("routines.runsOn.localHint")).toBe("Starts while Edu Bot is open here.");
     expect(t("routines.runsOn.localHint", { app: "Acme" })).toBe("Starts while Acme is open here.");
     applyBrand({ brand: { name: "Acme Bots" }, source: "file", file: "/brand.json" });
     try {

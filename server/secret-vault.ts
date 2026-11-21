@@ -69,7 +69,7 @@ function refText(ref: string, reason: "unknown" | "used" | "expired" | "owner"):
     case "owner":
       return `${ref} was given to another bot or conversation. Ask the person here with request_credential.`;
     default:
-      return `${ref} is not a secretRef OpenMausBot holds: it is mistyped, or OpenMausBot restarted before it was used. Ask again with request_credential.`;
+      return `${ref} is not a secretRef OpenMausBot holds: it is mistyped, or Edu Bot restarted before it was used. Ask again with request_credential.`;
   }
 }
 

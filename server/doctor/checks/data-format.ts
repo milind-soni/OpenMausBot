@@ -20,8 +20,8 @@ export function dataFormatCheck(format: { reads: number; writes: number } = DATA
       if (!marker) return { status: "ok", summary: "No marker: the data is in format 1." };
       if (marker.format > format.reads) {
         return { status: "problem", blocking: true,
-          summary: `The data was written by a newer OpenMausBot (${marker.writtenBy}) in format ${marker.format}; this version (${ctx.version}) reads up to format ${format.reads}.`,
-          instruction: `Install OpenMausBot ${marker.writtenBy} or newer, or put back the copy of the data taken before that update (./update.sh --rollback). Nothing was changed.` };
+          summary: `The data was written by a newer Edu Bot (${marker.writtenBy}) in format ${marker.format}; this version (${ctx.version}) reads up to format ${format.reads}.`,
+          instruction: `Install Edu Bot ${marker.writtenBy} or newer, or put back the copy of the data taken before that update (./update.sh --rollback). Nothing was changed.` };
       }
       return { status: "ok", summary: `Format ${marker.format}, which this version reads.` };
     },

@@ -36,9 +36,10 @@ describe("body builders", () => {
     }
   });
 
-  it("keeps the cursor outline byte-identical to the shipped artwork", () => {
-    const cursor = BODY_DEFS.find(s => s.id === "cursor");
-    expect(cursor.d.startsWith("M0 0 C1.12815992 0.94880479")).toBe(true);
-    expect(cursor.d.trimEnd().endsWith("-21.34867451 -18.24899383 0 0 Z")).toBe(true);
+  it("keeps the legacy cursor id as the squircle outline", () => {
+    const legacy = BODY_DEFS.find(body => body.id === "cursor");
+    const squircle = BODY_DEFS.find(body => body.id === "squircle");
+    expect(legacy.d).toBe(squircle.d);
+    expect(legacy.viewBox).toEqual(squircle.viewBox);
   });
 });

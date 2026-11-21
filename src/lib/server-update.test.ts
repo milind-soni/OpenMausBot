@@ -55,7 +55,7 @@ describe("self-hosted update row", () => {
 
   it("explains servers that are updated elsewhere", () => {
     expect(serverUpdateRow("up-to-date", check({ install: "desktop" })).label).toBe(
-      "Updates come from the MausBot app on the computer these bots run on",
+      "Updates come from the Edu Bot app on the computer these bots run on",
     );
     expect(serverUpdateRow("up-to-date", check({ install: "managed" })).label).toBe("Kept up to date for you");
   });
@@ -85,7 +85,7 @@ describe("the update row for another server the app shows", () => {
 
   it("keeps the rows of servers updated for their owner, and the row of this computer", () => {
     expect(serverUpdateRow("up-to-date", check({ install: "desktop" }), "0.1.116", "Office Mac").label).toBe(
-      "Updates come from the MausBot app on the computer these bots run on",
+      "Updates come from the Edu Bot app on the computer these bots run on",
     );
     expect(serverUpdateRow("up-to-date", check({ install: "managed" }), "0.1.116", "Office Mac").label).toBe("Kept up to date for you");
     expect(serverUpdateRow("available", npm, "0.1.116", null).label).toBe("Version 0.1.127 available (release notes)");

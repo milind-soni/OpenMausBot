@@ -489,7 +489,7 @@ test("a Cloud's bot needing apps and screen on a Mac that lacks only macOS's per
   homes[HOME].push({ action: "computer_tools" });
   await until(() => homes[HOME].results.length === 1, "the answer");
   assert.deepEqual(asked, [missing]);
-  assert.match(homes[HOME].results[0].content[0].text, /allow Accessibility and Screen Recording for OpenMausBot in System Settings/);
+  assert.match(homes[HOME].results[0].content[0].text, /allow Accessibility and Screen Recording for Edu Bot in System Settings/);
 });
 
 test("the move's project folders are lent to My Cloud with editing on top; while paused the move is told to try later", async t => {
@@ -561,7 +561,7 @@ test("the menu names each bot using this Mac with its colour dot; See activity i
   bot.click();
   assert.deepEqual(clicked, ["activity"]);
   assert.equal(trays[0].title, "IT Support and Client A are using this Mac");
-  assert.equal(trays[0].tip, "OpenMausBot: IT Support on My Cloud is using this Mac. Client A is using this Mac");
+  assert.equal(trays[0].tip, "Edu Bot: IT Support on My Cloud is using this Mac. Client A is using this Mac");
   indicator.update({ clouds: ["My Cloud"], using: ["My Cloud"], bots: [{ name: "Helper", color: null, cloud: "My Cloud" }] });
   assert.deepEqual([labels()[0], trays[0].menu[0].icon], ["Helper on My Cloud is using this Mac", undefined], "no dot for a colour this app doesn't know");
   indicator.update({ clouds: ["My Cloud"], using: ["My Cloud"], bots: [{ name: "Helper", color: "red", cloud: "My Cloud" }], paused: true });
@@ -589,7 +589,7 @@ test("the menu-bar item: which Clouds are using this Mac, Pause or Resume, the t
   assert.equal(trays.length, 1);
   assert.deepEqual(labels(), ["Client A is using this Mac", "-", "Pause", "Let Clouds run commands on this Mac", "See activity"]);
   assert.equal(trays[0].title, "Client A is using this Mac");
-  assert.equal(trays[0].tip, "OpenMausBot: Client A is using this Mac");
+  assert.equal(trays[0].tip, "Edu Bot: Client A is using this Mac");
   trays[0].menu.find(item => item.label === "Pause").click();
   trays[0].menu.find(item => item.label === "See activity").click();
   indicator.update({ clouds: ["My Cloud"], using: [], paused: true });

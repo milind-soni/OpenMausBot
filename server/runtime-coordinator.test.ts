@@ -1172,13 +1172,13 @@ describe("RuntimeCoordinator: restarts", () => {
       after.coordinator.tick();
       expect(after.host.runs).toHaveLength(1);
       expect(after.host.runs[0]!.resumed).toBe(false);
-      expect(after.host.runs[0]!.text).toMatch(/^OpenMausBot restarted while your previous turn here was running and cut it off;.*\n\[From /);
+      expect(after.host.runs[0]!.text).toMatch(/^Edu Bot restarted while your previous turn here was running and cut it off;.*\n\[From /);
       await flush();
       expect(after.coordinator.node(node.id)).toMatchObject({ status: "completed", restarts: 1 });
       after.coordinator.tick();
       const resume = after.host.runs[1]!;
       expect(resume.node.id).toBe("gen-1");
-      expect(resume.text).toMatch(/^OpenMausBot restarted before your previous turn here finished, after it sent work to teammates\..*A restart cut these teammates' turns: builder \(resumed once in place and told to check what it had already done\)\. Check their results as usual\.\nYour downstream room requests have settled\./);
+      expect(resume.text).toMatch(/^Edu Bot restarted before your previous turn here finished, after it sent work to teammates\..*A restart cut these teammates' turns: builder \(resumed once in place and told to check what it had already done\)\. Check their results as usual\.\nYour downstream room requests have settled\./);
       await flush();
       expect(after.coordinator.node("gen-1")?.status).toBe("completed");
       after.coordinator.close();
@@ -1532,7 +1532,7 @@ describe("RuntimeCoordinator: every turn a root (beginTurn, endTurn, answerRoot,
       expect(run.node).toMatchObject({ id: "gen-1", status: "running", executions: 2, restarts: 1, restart: "rerun" });
       expect(run.resumed).toBe(false);
       expect(run.composed.turn).toBe("rerun");
-      expect(run.composed.restartNote).toMatch(/^OpenMausBot restarted while your previous turn here was running and cut it off; this turn continues it\./);
+      expect(run.composed.restartNote).toMatch(/^Edu Bot restarted while your previous turn here was running and cut it off; this turn continues it\./);
       expect(run.text.startsWith(run.composed.restartNote)).toBe(true);
       expect(run.text.endsWith('Continue the request you were working on: "Ship the CSV export".')).toBe(true);
       expect(run.text).not.toContain("· assignment ");

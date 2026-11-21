@@ -1097,8 +1097,8 @@ describe("a card answered after OpenMausBot restarts", () => {
     await respond("allow");
     expect(stored("notes")).toMatchObject({ args: ["-y", "notes-mcp"], env: { NOTES_TOKEN: "saved-token" } });
     expect(probe).not.toHaveBeenCalled();
-    expect(card()).toMatchObject({ expired: true, held: "OpenMausBot restarted, so this request expired.", mcpRequest: { result: { state: "expired" } } });
-    expect(answers[0]).toContain("OpenMausBot restarted, so this request expired. Ask again if you still need it.");
+    expect(card()).toMatchObject({ expired: true, held: "Edu Bot restarted, so this request expired.", mcpRequest: { result: { state: "expired" } } });
+    expect(answers[0]).toContain("Edu Bot restarted, so this request expired. Ask again if you still need it.");
     for (const sent of [fresh, "sk-live-9", "fresh-token", "saved-token"]) expect(JSON.stringify(chat), sent).not.toContain(sent);
   });
 

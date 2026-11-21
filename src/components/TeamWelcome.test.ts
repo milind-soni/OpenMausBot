@@ -77,7 +77,7 @@ describe("a new member's first screen in a team", () => {
     render(null);
     expect(container.querySelector("[data-team-welcome-invited]")?.textContent).toBe("You’re in Acme now.");
     expect(container.querySelector("[data-team-welcome-person]")).toBeNull();
-    expect(container.textContent).toContain("No bots are shared with you in Acme yet. Your own MausBot is in the sidebar.");
+    expect(container.textContent).toContain("No bots are shared with you in Acme yet. Your own Edu is in the sidebar.");
     expect([...container.querySelectorAll("button")].map((button) => button.textContent)).toEqual(["Look around"]);
   });
 });

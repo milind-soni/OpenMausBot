@@ -266,7 +266,7 @@ export async function signInCloudSession({ origin, mine, pair, fetch: fetchImpl 
     if (grant?.origin !== origin || typeof grant.code !== "string") return false;
     const response = await fetchImpl(`${origin}/api/auth/pair`, {
       method: "POST", credentials: "include", redirect: "error", cache: "no-store", signal: AbortSignal.timeout(15_000),
-      headers: { "content-type": "application/json", origin }, body: JSON.stringify({ code: grant.code, cookie: true, label: "OpenMausBot app (lending)" }),
+      headers: { "content-type": "application/json", origin }, body: JSON.stringify({ code: grant.code, cookie: true, label: "Edu Bot app (lending)" }),
     });
     return response.ok;
   } catch { return false; }

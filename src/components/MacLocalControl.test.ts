@@ -18,9 +18,9 @@ afterAll(() => vi.unstubAllGlobals());
 describe("Mac local computer status", () => {
   it("shows the recorded Accessibility failure and its matching recovery actions", () => {
     const markup = renderToStaticMarkup(createElement(MacLocalControl));
-    expect(markup).toContain("Accessibility is required for MausBot");
+    expect(markup).toContain("Accessibility is required for Edu Bot");
     expect(markup).toContain("Open Accessibility Settings");
-    expect(markup).toContain("Relaunch MausBot");
+    expect(markup).toContain("Relaunch Edu Bot");
     expect(markup).not.toContain("Open Screen Recording Settings");
     expect(markup).toContain("Driver detail");
     expect(markup).toContain(">Not now</button>");
@@ -31,7 +31,7 @@ describe("Mac local computer status", () => {
     const markup = renderToStaticMarkup(createElement(MacLocalControl));
     expect(markup).toContain("Local computer control is not ready");
     expect(markup).not.toContain("Accessibility is required");
-    expect(markup).not.toContain("Relaunch MausBot</button>");
+    expect(markup).not.toContain("Relaunch Edu Bot</button>");
   });
 
   it("offers no permission repair on a Mac too old for the driver", () => {

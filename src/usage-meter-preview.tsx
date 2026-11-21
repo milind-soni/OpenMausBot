@@ -57,12 +57,12 @@ function SettingsMock({ usage }: { usage: CloudUsage }) {
   return <div className="flex h-full justify-center bg-black/40 p-8">
     <div className="flex w-full max-w-[920px] overflow-hidden rounded-2xl border border-hairline/40 bg-panel text-ink shadow-2xl">
       <nav className="w-[220px] shrink-0 border-e border-hairline/40 p-3 text-[14px]">
-        {["General", "Appearance", "MausBot Cloud", "AI & keys", "Usage", "Apps"].map((label, index) => <div key={label} className={`rounded-lg px-3 py-2 ${index === 0 ? "bg-raised font-medium" : "text-ink-secondary"}`}>{label}</div>)}
+        {["General", "Appearance", "Edu Bot Cloud", "AI & keys", "Usage", "Apps"].map((label, index) => <div key={label} className={`rounded-lg px-3 py-2 ${index === 0 ? "bg-raised font-medium" : "text-ink-secondary"}`}>{label}</div>)}
       </nav>
       <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-6">
         <h1 className="text-[20px] font-semibold">General</h1>
         <section className="flex items-center justify-between gap-3 rounded-xl border border-hairline/50 p-3">
-          <div className="flex items-center gap-3"><Gauge size={18} className="text-ink-secondary" /><div><h3 className="text-[14px] font-semibold">MausBot Cloud</h3>
+          <div className="flex items-center gap-3"><Gauge size={18} className="text-ink-secondary" /><div><h3 className="text-[14px] font-semibold">Edu Bot Cloud</h3>
             <p className="mt-1 text-[12px] text-ink-secondary">{t("cloudAccount.pro", { plan: cloudPlanLabel(usage.tier) })}</p></div></div>
           <span className="ui-button">{t("pro.openCloudSettings")}</span>
         </section>

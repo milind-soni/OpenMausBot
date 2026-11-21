@@ -256,7 +256,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
   async function localJson(route, options) {
     if (!allowed(route)) throw new CloudSendError("invalid", "Unsupported local request.");
     const response = await local(chosenOnly(route), options);
-    if (!response.ok) throw new CloudSendError("local", "OpenMausBot on this computer did not answer. Try again in a moment.");
+    if (!response.ok) throw new CloudSendError("local", "Edu Bot on this computer did not answer. Try again in a moment.");
     return response.json();
   }
   async function localBytes(route) {
@@ -364,7 +364,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
   async function sendTo(origin, job, { keys, force, reason }) {
     const result = { ...emptyResult(), ...(reason === "move" ? movedResult() : {}) };
     const mine = parseSendSummary(await localJson(reason === "move" ? scoped("/api/cloud-send?move=1") : "/api/cloud-send"));
-    if (!mine) throw new CloudSendError("local", "OpenMausBot on this computer did not answer. Try again in a moment.");
+    if (!mine) throw new CloudSendError("local", "Edu Bot on this computer did not answer. Try again in a moment.");
     const withChats = !keys && CHAT_REASONS.has(reason);
     const latest = await sendItems(origin, mine, result, { keys, force, job, withChats });
     const outcome = { at: now(), reason, result };

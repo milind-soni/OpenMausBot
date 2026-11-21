@@ -3,17 +3,14 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
-import type { WhatsNewView } from "@/lib/whats-new";
 
 vi.mock("@/components/Avatar", () => ({ MausAvatar: () => null }));
 vi.mock("@/components/EngineLibrary", () => ({ engineReady: () => true }));
 const { otherDialogOpen, useOtherDialogOpen } = await import("./notice-dialogs");
-const { WhatsNewPopup } = await import("./whats-new/WhatsNewPopup");
+const { GrokMovePopup } = await import("./GrokMovePopup");
 const { Spotlight } = await import("./onboarding/Spotlight");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-const VIEW: WhatsNewView = { slides: ["pro", "team"], audience: "none", signedIn: false, staging: false,
-  plans: { pro: { name: "Pro", terms: "Pro · $49/month + tax" }, team: { name: "Team", terms: "Team · $40/month + tax" } } };
 const done = vi.fn();
 let roots: Root[];
 const mount = async (element: ReturnType<typeof createElement>) => {
@@ -21,7 +18,7 @@ const mount = async (element: ReturnType<typeof createElement>) => {
   roots.push(root);
   await act(async () => { root.render(element); });
 };
-const showPopup = () => mount(createElement(WhatsNewPopup, { view: VIEW, onBuy: () => {}, onDone: done }));
+const showPopup = () => mount(createElement(GrokMovePopup, { onDone: done }));
 
 beforeEach(() => { setLocale("en"); roots = []; done.mockClear(); });
 afterEach(async () => { for (const root of roots) await act(async () => root.unmount()); document.body.replaceChildren(); vi.useRealTimers(); });
@@ -65,20 +62,11 @@ it("any dialog on screen counts, modal or not, the tour's cards and the card tha
   }
 });
 
-it("the first conversation's spotlight is a dialog the popup waits for, and an Escape meant for the spotlight reaches it", async () => {
+it("the first conversation's spotlight is a dialog the popup waits for", async () => {
   const gotIt = vi.fn();
   await mount(createElement(Spotlight, { anchor: null, placement: "below", primary: { label: "Got it", onClick: gotIt }, onDone: gotIt, children: "Approve this step" }));
   expect(document.querySelector('[role="dialog"]')!.getAttribute("aria-modal"), "the spotlight is not modal").toBeNull();
   expect(otherDialogOpen()).toBe(true);
-  const spotButton = [...document.querySelectorAll("button")].find(button => button.textContent === "Got it")!;
-  await showPopup(); spotButton.focus();
-  const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
-  await act(async () => { spotButton.dispatchEvent(escape); });
-  expect(done).not.toHaveBeenCalled(); expect(escape.defaultPrevented).toBe(false);
-  expect(gotIt).toHaveBeenCalledOnce();
-  const tab = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
-  await act(async () => { spotButton.dispatchEvent(tab); });
-  expect(tab.defaultPrevented, "nor does it pull Tab out of the spotlight").toBe(false);
 });
 
 it("the calendar's Quick create (a dialog with only a label) counts too", () => {

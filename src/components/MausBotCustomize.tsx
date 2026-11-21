@@ -1,3 +1,4 @@
+import { botBodyId } from "../../shared/bot-body";
 import { useState, type RefObject } from "react";
 import { ImagePlus, Loader2, Sparkles, Trash2 } from "lucide-react";
 
@@ -7,7 +8,7 @@ import { colorSwatch, MAUS_COLOR_LABEL, MAUS_COLOR_NAMES } from "@/lib/mascot";
 import { bodyName } from "@/lib/mascot-names";
 import type { Bot } from "@/state/store";
 import { BOT_PROFILE_LIMITS } from "../../shared/bot-profile";
-import { MASCOT_BODY_IDS } from "../../shared/mascot-bodies";
+import { PICKABLE_MASCOT_BODY_IDS } from "../../shared/mascot-bodies";
 import { MausAvatar } from "./Avatar";
 import { AvatarImageGenerator } from "./AvatarImageGenerator";
 import type { AvatarPatch, useAvatarImage } from "./avatar-editing";
@@ -35,7 +36,7 @@ export function MausBotCustomize({ preview, name, nameRef, image, onName, onPatc
           ref={nameRef}
           value={name}
           maxLength={BOT_PROFILE_LIMITS.name}
-          placeholder="MausBot"
+          placeholder="Edu"
           data-mausbot-welcome-name=""
           onChange={(event) => onName(event.target.value)}
           className="mt-1 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink focus:outline-none"
@@ -63,16 +64,16 @@ export function MausBotCustomize({ preview, name, nameRef, image, onName, onPatc
       <div>
         <span className={LABEL}>{t("mausbotWelcome.look")}</span>
         <div className="mt-1.5 grid grid-cols-5 gap-1">
-          {MASCOT_BODY_IDS.map((id) => (
+          {PICKABLE_MASCOT_BODY_IDS.map((id) => (
             <button
               key={id}
               type="button"
-              aria-pressed={!picture && (preview.mascotBody ?? "cursor") === id}
+              aria-pressed={!picture && (botBodyId(preview.mascotBody)) === id}
               aria-label={bodyName(id)}
               title={bodyName(id)}
               data-mausbot-welcome-body={id}
               onClick={() => shape({ mascotBody: id })}
-              className={cn("flex h-11 items-center justify-center rounded-xl", !picture && (preview.mascotBody ?? "cursor") === id ? "bg-ink/[0.08] ring-[1.5px] ring-inset ring-ink/25" : "hover:bg-ink/[0.05]")}
+              className={cn("flex h-11 items-center justify-center rounded-xl", !picture && (botBodyId(preview.mascotBody)) === id ? "bg-ink/[0.08] ring-[1.5px] ring-inset ring-ink/25" : "hover:bg-ink/[0.05]")}
             >
               <MausAvatar color={preview.color} bodyId={id} size={30} animated={false} trackPointer={false} />
             </button>
@@ -103,7 +104,7 @@ export function MausBotCustomize({ preview, name, nameRef, image, onName, onPatc
         {image.error && <p role="alert" data-mausbot-welcome-error="" className="mt-1 px-2 text-[13px] text-danger">{image.error}</p>}
         {generating && (
           <div className="mt-2">
-            <AvatarImageGenerator botLabel={name || "MausBot"} disabled={image.uploading} generating={image.generating} onGenerate={image.generate} />
+            <AvatarImageGenerator botLabel={name || "Edu"} disabled={image.uploading} generating={image.generating} onGenerate={image.generate} />
           </div>
         )}
       </div>

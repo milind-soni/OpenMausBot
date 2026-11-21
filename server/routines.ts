@@ -306,7 +306,7 @@ export interface RoutineManagerOptions {
 
 const WAKE_HORIZON_MS = 60 * 60_000;
 
-export const ROUTINE_RESTARTED = "OpenMausBot restarted while this routine was running";
+export const ROUTINE_RESTARTED = "Edu Bot restarted while this routine was running";
 const MAX_RUNS = 2_000;
 const earliest = (...times: Array<number | null>): number | null => times.reduce<number | null>((first, at) => at === null ? first : first === null ? at : Math.min(first, at), null);
 function cloneRoutine(routine: Routine): Routine {

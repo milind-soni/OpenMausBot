@@ -1,16 +1,16 @@
 ---
-title: Self-hosting MausBot
+title: Self-hosting Edu Bot
 description: Run the harness and desktop app on infrastructure you control.
 icon: Server
 ---
 
-MausBot is local-first by default: the harness listens on loopback, agent CLIs run on your machine, and application state lives under `~/.openmausbot`.
+Edu Bot is local-first by default: the harness listens on loopback, agent CLIs run on your machine, and application state lives under `~/.openmausbot`.
 
-If you only want to use a remote Docker desktop while MausBot and its agents stay on your current computer, follow [Your own VPS (BYO)](/docs/computers/byo-vps) instead.
+If you only want to use a remote Docker desktop while Edu Bot and its agents stay on your current computer, follow [Your own VPS (BYO)](/docs/computers/byo-vps) instead.
 
 ## On a server, with one command
 
-On a fresh Ubuntu 22.04 or 24.04 server (x86-64) with a domain name pointing at it, the installer checks the server, installs MausBot with Docker under `/opt/openmausbot` and ends with HTTPS on your domain:
+On a fresh Ubuntu 22.04 or 24.04 server (x86-64) with a domain name pointing at it, the installer checks the server, installs Edu Bot with Docker under `/opt/openmausbot` and ends with HTTPS on your domain:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/install.sh | sudo sh -s -- --domain maus.example.com
@@ -20,8 +20,8 @@ Add `--check` to only check the server; it changes nothing. Run the command agai
 
 ## On your own computer, or by hand
 
-1. Run MausBot on your personal macOS, Windows, or Ubuntu computer.
-2. Install and authenticate the agent CLIs you want to use separately; the npm OpenMausBot package does not include them. Use the same operating-system account for setup and the running server.
+1. Run Edu Bot on your personal macOS, Windows, or Ubuntu computer.
+2. Install and authenticate the agent CLIs you want to use separately; the npm Edu Bot package does not include them. Use the same operating-system account for setup and the running server.
 3. Add optional third-party keys only for the services you need.
 4. Keep the harness on loopback.
 5. Use it from other devices by pairing them. `openmausbot serve` prints one pairing link for the way in you choose; paste it into the desktop app under **＋ → Connect to a server**, open it in a browser, or scan its QR with a phone.
@@ -42,7 +42,7 @@ Stop the server before a filesystem backup. Application state under `.openmausbo
 
 ## What is still third party
 
-Self-hosting MausBot does not self-host every service it talks to. A standalone server, or its web UI, contacts these:
+Self-hosting Edu Bot does not self-host every service it talks to. A standalone server, or its web UI, contacts these:
 
 - Agent providers authenticate and bill through their own CLI or API.
 - Composio owns connected-app OAuth grants. Connected apps need your own Composio project key, in **Settings → AI → Other services**, or a broker you run (`OMB_COMPOSIO_BROKER_URL`).
@@ -50,7 +50,7 @@ Self-hosting MausBot does not self-host every service it talks to. A standalone 
 - Cloudflare carries path A's traffic: `serve --tunnel` is a Cloudflare tunnel.
 - GitHub answers update checks (the release list and the stable channel's file), and by default serves the model list, refreshed about hourly (`OMB_DISABLE_MODEL_MANIFEST_FETCH=1` turns it off), and, only when `OMB_ANNOUNCEMENTS=1` is set, the announcements feed.
 - The npm registry serves engine installs and a Codex version check; on an npm install, Google's `storage.googleapis.com` serves the bots' Chrome for Testing.
-- MausBot's own page publishing and sharing to the community go through MausBot from a Cloud or the desktop app only; a standalone server does not offer them.
+- Edu Bot's own page publishing and sharing to the community go through Edu Bot from a Cloud or the desktop app only; a standalone server does not offer them.
 - Boat owns managed cloud computers.
 - ElevenLabs or Fish Audio synthesizes speech when its hosted voice engine is enabled. On Windows and Linux, Fish Audio also turns what you say into text for Take turns calls and dictation.
 

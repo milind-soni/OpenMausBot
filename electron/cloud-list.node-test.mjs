@@ -144,7 +144,7 @@ test("the switcher lists another own Cloud like a team's: no Forget, the window 
   assert.deepEqual(menu.map(item => item.id), ["workspace-home", "workspace-a"]);
   const before = environments.workspaceMenuTemplate(state, { onSwitch() {}, onConnect() {}, onForget() {} });
   assert.equal(before.some(item => item.id === "workspace-forget"), false);
-  assert.equal(environments.workspaceWindowTitle(state, null, HOME), "OpenMausBot — Client A");
+  assert.equal(environments.workspaceWindowTitle(state, null, HOME), "Edu Bot — Client A");
 });
 
 test("home places: the session's other Clouds become saved places, one remembered is opened next time, and one the session drops is forgotten", () => {

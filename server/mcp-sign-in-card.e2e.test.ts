@@ -60,7 +60,7 @@ it("a bot adds an OAuth server and asks the person to sign in; they sign in on t
   await endTurn();
   const shown = await card();
   expect(shown.connector).toMatchObject({ slug: "postiz", label: "Postiz", status: "required" });
-  expect(shown.text).toBe("Postiz's MCP server needs a sign-in. Open this conversation in OpenMausBot to sign in.");
+  expect(shown.text).toBe("Postiz's MCP server needs a sign-in. Open this conversation in Edu Bot to sign in.");
 
   const window = await api("POST", "/api/auth/pairing", { scopes: ["client"] });
   const paired = await (await fetch(`${url}/api/auth/pair`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: window.code }) })).json() as { token: string };

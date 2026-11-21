@@ -8,8 +8,8 @@ import type { LocaleKey } from "@/locales";
 import { colorSwatch, MAUS_COLOR_LABEL, MAUS_COLOR_NAMES, PICKABLE_STATES, type MausState } from "@/lib/mascot";
 import { type Bot } from "@/state/store";
 import { mayRename, useTeamPeople } from "@/state/team-people";
-import { MASCOT_BODY_IDS } from "../../../shared/mascot-bodies";
-import { FESTIVAL_IDS, FESTIVALS, isCarvedBody, type BotBodyId } from "../../../shared/bot-body";
+import { PICKABLE_MASCOT_BODY_IDS } from "../../../shared/mascot-bodies";
+import { botBodyId, FESTIVAL_IDS, FESTIVALS, isCarvedBody, type BotBodyId } from "../../../shared/bot-body";
 import { useFestivalDress, wornBody } from "@/lib/festival-dress";
 import { MausAvatar } from "../Avatar";
 import { AvatarImageGenerator } from "../AvatarImageGenerator";
@@ -68,10 +68,10 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
     tabsRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus();
   }, []);
   const pickMascot = (patch: AvatarPatch) => onPatch(crop === "mascot" ? patch : { ...patch, avatarCrop: "mascot" });
-  const body = bot.mascotBody ?? "cursor";
+  const body = botBodyId(bot.mascotBody);
   const state = useStoreSelector((s) => ({ config: s.config }), sameFields), bots = useBotsApartFromTurns(), dispatch = useStoreDispatch();
   const team = useTeamPeople();
-  const othersToMatch = bots.filter((other) => other.id !== bot.id && (other.mascotBody ?? "cursor") !== body
+  const othersToMatch = bots.filter((other) => other.id !== bot.id && (botBodyId(other.mascotBody)) !== body
     && (team ? mayRename(other, team) : !state.config?.team));
   const festival = useFestivalDress();
   const costume = wornBody(bot.mascotBody, bot.color, festival);
@@ -142,7 +142,7 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
         {tab === "bot" && (
           <>
             <div className="grid grid-cols-5 gap-1.5">
-              {MASCOT_BODY_IDS.map((id) => bodyButton(id, bodyName(id)))}
+              {PICKABLE_MASCOT_BODY_IDS.map((id) => bodyButton(id, bodyName(id)))}
             </div>
             {!showsImage && othersToMatch.length > 0 && (
               <button

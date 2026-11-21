@@ -158,7 +158,7 @@ describe("bundled phone-connection skill", () => {
 
   it("mounts when the phone can't reach the computer, with no capability, and stays out of other turns", () => {
     for (const text of ["My phone stopped connecting when I'm away from Wi-Fi", "the app says No route to your computer at 192.168.1.20",
-      "Anywhere, through MausBot doesn't work", "why won't my phone connect on mobile data? my phone won't connect", "how do I pair my phone again?"]) {
+      "Anywhere, through Edu Bot doesn't work", "why won't my phone connect on mobile data? my phone won't connect", "how do I pair my phone again?"]) {
       expect(ids(text), text).toContain("phone-connection");
     }
     for (const text of ["call my phone at 5pm", "Write a paragraph about photography", "book a call for Friday", "summarize this email", "check the wifi password in my notes"]) {
@@ -167,7 +167,7 @@ describe("bundled phone-connection skill", () => {
   });
 
   it("tells the cause only from the live Phone link line, gives the fix, and rules out what can't help", () => {
-    expect(guide).toContain("Same Wi-Fi"); expect(guide).toContain("Anywhere, through MausBot");
+    expect(guide).toContain("Same Wi-Fi"); expect(guide).toContain("Anywhere, through Edu Bot");
     expect(guide).toContain('starts "Phone link:"');
     expect(guide).toContain("update the MausBot app on that phone");
     expect(guide).toMatch(/open it once\s+on the same Wi-Fi as this computer/);

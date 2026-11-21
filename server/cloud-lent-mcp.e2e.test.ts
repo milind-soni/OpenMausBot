@@ -234,7 +234,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   macServerPorts = [Number(new URL(macUrl).port)];
   const reached = macRequests.length;
   const own = await call("tools/call", { name: "search_notes", arguments: { q: "plan" } });
-  expect(own.result).toEqual({ content: [{ type: "text", text: "Only an MCP server on its own port (1024 or higher) at this computer's address can be reached, never this computer's own OpenMausBot or Chrome ports" }], isError: true });
+  expect(own.result).toEqual({ content: [{ type: "text", text: "Only an MCP server on its own port (1024 or higher) at this computer's address can be reached, never this computer's own Edu Bot or Chrome ports" }], isError: true });
   expect(macRequests.length).toBe(reached);
   macServerPorts = [];
 

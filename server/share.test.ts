@@ -77,13 +77,13 @@ describe("making a template", () => {
     const department = share.export({ scope: "department", section: "Ops", bots: [bot()] }, [routine]);
     expect(department.card.tagline).toBe("");
     const departmentDetails = share.get(department.card.id).details;
-    expect(departmentDetails.summary).toMatch(/^Shared from MausBot\. Its bots, skills, group chats and routines arrive/);
+    expect(departmentDetails.summary).toMatch(/^Shared from Edu Bot\. Its bots, skills, group chats and routines arrive/);
     expect(departmentDetails.brief).toContain("49 per seat");
     const quiet = host({ bots: [bot({ title: undefined, description: undefined })] });
     const lone = quiet.share.export({ scope: "bot", bot: bot({ title: undefined, description: undefined }) }, []);
     expect(lone.card.tagline).toBe("");
     const loneSummary = quiet.share.get(lone.card.id).details.summary ?? "";
-    expect(loneSummary).toMatch(/^Shared from MausBot\. The bot arrives as a new copy/);
+    expect(loneSummary).toMatch(/^Shared from Edu Bot\. The bot arrives as a new copy/);
     expect(loneSummary).not.toMatch(/group chats|OpenMausBot/);
     const titled = share.export({ scope: "bot", bot: bot() }, []);
     expect(titled.card.tagline).toBe("Inbox helper");

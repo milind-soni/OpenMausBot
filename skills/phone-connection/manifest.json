@@ -6,6 +6,8 @@
   "defaultEnabled": true,
   "triggerTerms": [
     "no route to your computer",
+    "anywhere, through edu bot",
+    "anywhere through edu bot",
     "anywhere, through mausbot",
     "anywhere through mausbot",
     "same wi-fi",

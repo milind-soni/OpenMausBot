@@ -9,7 +9,7 @@ function load({ remote, active = true }) {
   const invoked = [];
   let bridge;
   const context = vm.createContext({
-    process: { platform: "fixture", argv: [`--omb-local-origin=${origin}`, "--omb-company-desktop=1"] },
+    process: { platform: "fixture", argv: [`--omb-local-origin=${origin}`, "--omb-company-desktop=1", "--omb-managed-cloud=1"] },
     location: { origin: remote ? "https://omb-u-aaaaaaaaaaaa.fly.dev" : origin }, TextEncoder,
     navigator: { userActivation: { isActive: active } },
     localStorage: { getItem: () => null },

@@ -1,7 +1,7 @@
 noVNC 1.7.0
 Copyright (C) 2022 The noVNC authors
 
-OpenMausBot bundles the unmodified noVNC core library under the Mozilla
+Edu Bot bundles the unmodified noVNC core library under the Mozilla
 Public License 2.0 (MPL-2.0). The corresponding source, including its
 original copyright and license notices, is available at:
 https://github.com/novnc/noVNC/tree/v1.7.0

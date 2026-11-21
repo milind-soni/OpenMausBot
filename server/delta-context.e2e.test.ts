@@ -740,7 +740,7 @@ it.each(["SIGTERM", "SIGKILL"] as const)("resumes a Chief whose own turn a resta
   await expect.poll(async () => (await f.messages()).some((m: any) => m.text === "CUT_REVIEWED"), { timeout: 30_000 }).toBe(true);
   expect(f.turns()).toHaveLength(chiefTurns + 1);
   expect(f.turns().at(-1).resumed).toBe(true);
-  expect(f.prompt(f.turns().at(-1))).toContain("OpenMausBot restarted before your previous turn here finished, after it sent work to teammates.");
+  expect(f.prompt(f.turns().at(-1))).toContain("Edu Bot restarted before your previous turn here finished, after it sent work to teammates.");
   expect(f.prompt(f.turns().at(-1))).toContain("LEAD_DONE_BEFORE_RESTART");
   expect(f.turns(f.lead.id)).toHaveLength(1);
   // The final reply is saved before the Chief's graph settlement is persisted.

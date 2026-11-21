@@ -62,8 +62,8 @@ describe("a headless server's startup routines", () => {
     expect(startups).toHaveLength(2);
     const skipped = last!.listRuns().filter((run) => run.status === "missed");
     expect(skipped.map((run) => [run.routineId, run.triggerSource, run.skipped?.count, run.error])).toEqual([
-      [routine.id, "startup", 29, "Not run at 29 starts because OpenMausBot started again soon after the start that last ran it"],
-      [routine.id, "startup", 29, "Not run at 29 starts because OpenMausBot started again soon after the start that last ran it"],
+      [routine.id, "startup", 29, "Not run at 29 starts because Edu Bot started again soon after the start that last ran it"],
+      [routine.id, "startup", 29, "Not run at 29 starts because Edu Bot started again soon after the start that last ran it"],
     ]);
   });
 

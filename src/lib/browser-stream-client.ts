@@ -19,7 +19,7 @@ export const PREVIEW_STREAM_LIBRARIES_COMMAND = "sudo openmausbot browser instal
 /** What a container's operator sets to run its browser without Chrome's own sandbox. */
 export const PREVIEW_STREAM_SANDBOX_OFF = "OMB_BROWSER_SANDBOX=0";
 export const PREVIEW_STREAM_SANDBOX_STEPS_URL =
-  "https://github.com/milind-soni/OpenMausBot/blob/main/docs/deploy-vps.md#ubuntu-2404-browser-sandbox";
+  "https://github.com/EduardoMoraga/edu-bot/blob/main/docs/deploy-vps.md#ubuntu-2404-browser-sandbox";
 
 export type PreviewViewportSetting =
   | { readonly mode: "fill" }
@@ -560,5 +560,5 @@ export const previewStreamHostSetupMessage = (setup: PreviewStreamHostSetup) =>
   setup.need === "sandbox"
     ? "This server's host blocks the sandbox its browser runs in. An administrator can allow it for one copy of Chrome with these steps, then try again:"
     : setup.need === "container"
-    ? "Chrome's sandbox can't start in this server's container. Its operator can set this to run the browser without it and rely on the container's isolation, then restart OpenMausBot:"
+    ? "Chrome's sandbox can't start in this server's container. Its operator can set this to run the browser without it and rely on the container's isolation, then restart Edu Bot:"
     : "This server's host is missing libraries its browser needs. Run this once on the host, then try again:";

@@ -178,7 +178,7 @@ test("the page's bridge sends the sheet's words as text only, and exists only on
   const load = ({ remote = false } = {}) => {
     let bridge; const invoked = [];
     vm.runInNewContext(readFileSync(new URL("./preload.cjs", import.meta.url), "utf8"), {
-      process: { platform: "fixture", argv: [`--omb-local-origin=${local}`, "--omb-company-desktop=1"] },
+      process: { platform: "fixture", argv: [`--omb-local-origin=${local}`, "--omb-company-desktop=1", "--omb-managed-cloud=1"] },
       location: { origin: remote ? "https://remote.example.test" : local }, TextEncoder, localStorage: { getItem: () => null },
       require: () => ({ webUtils: {}, contextBridge: { exposeInMainWorld: (_name, value) => { bridge = value; } },
         ipcRenderer: { on() {}, removeListener() {}, send() {}, invoke: (...args) => { invoked.push(args); return Promise.resolve(null); } } }),

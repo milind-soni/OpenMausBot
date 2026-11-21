@@ -74,7 +74,7 @@ export function checkoutDestination(value, { fixture = false, staging = false } 
 export function cloudOrigin(value = CLOUD_ORIGIN, fixture = false) {
   const url = new URL(value);
   if (value !== url.origin || (![CLOUD_ORIGIN, STAGING_CLOUD_ORIGIN].includes(value) && !(fixture && url.protocol === "http:" && ["127.0.0.1", "[::1]"].includes(url.hostname)))) {
-    throw new Error("Invalid MausBot Cloud address.");
+    throw new Error("Invalid Edu Bot Cloud address.");
   }
   return value;
 }
@@ -197,7 +197,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       !(input.expiresAt === null || timestamp(input.expiresAt)) || !Number.isSafeInteger(input.version) || input.version < 0) throw new Error("Invalid Cloud entitlement.");
     const plan = input.plan === "free" ? "free" : "pro";
     if (input.status === "active" && (plan !== "pro" || input.expiresAt === null || input.expiresAt <= now())) throw new Error("Invalid active Cloud entitlement.");
-    if (newer && !newerPlans.has(input.plan)) { newerPlans.add(input.plan); warn(`[cloud] MausBot Cloud sent plan "${input.plan}", newer than this app; treating it as paid.`); }
+    if (newer && !newerPlans.has(input.plan)) { newerPlans.add(input.plan); warn(`[cloud] Edu Bot Cloud sent plan "${input.plan}", newer than this app; treating it as paid.`); }
     const tier = typeof input.tier === "string" && TIER.test(input.tier) ? input.tier : newer ? input.plan : undefined;
     return { plan, ...(tier ? { tier } : {}), status: input.status,
       expiresAt: input.expiresAt, version: input.version };
@@ -439,7 +439,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     if (typeof plan !== "string" || !TIER.test(plan) || !CHECKOUT_SOURCES.includes(source)) throw new Error("Invalid Cloud checkout.");
     const current = state();
     if (current.status === "signed-out" && !grant) return { outcome: "signing-in", state: await begin({ plan, source }) };
-    if (current.status !== "connected" || !grant) throw new Error("Sign in to MausBot Cloud before choosing a plan.");
+    if (current.status !== "connected" || !grant) throw new Error("Sign in to Edu Bot Cloud before choosing a plan.");
     const signedIn = grant;
     let destination;
     try {
@@ -514,7 +514,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     /** The Cloud this checkout bought was opened, announced or shown ready: the purchase is over (Add a Cloud… says one Cloud for now). */
     checkoutDone() { if (opened && !opened.done) { opened = { ...opened, done: true }; publish(value); } },
     async signInAgain() {
-      if (state().status !== "reauth-required") throw new Error("This computer is still signed in to MausBot Cloud.");
+      if (state().status !== "reauth-required") throw new Error("This computer is still signed in to Edu Bot Cloud.");
       publish({ status: "connecting" });
       const forgotten = await forget({ quiet: true });
       if (forgotten.status === "unavailable") return forgotten;
@@ -632,7 +632,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     async interest(kind) {
       if (kind !== "another_cloud") throw new Error("Invalid Cloud interest.");
       const signedIn = grant;
-      if (!signedIn || state().status !== "connected") throw new Error("Sign in to MausBot Cloud first.");
+      if (!signedIn || state().status !== "connected") throw new Error("Sign in to Edu Bot Cloud first.");
       const result = await request("interest", { method: "POST", body: { kind }, token: signedIn.token });
       if (result?.ok !== true) throw new Error("Invalid Cloud response.");
     },
@@ -852,7 +852,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
      * `installation`: this computer, which the Admin lets take it only if it is the one the Cloud's things come home to. */
     async exportHome({ installation } = {}) {
       const current = grant;
-      if (!current) throw new Error("Sign in to MausBot Cloud first.");
+      if (!current) throw new Error("Sign in to Edu Bot Cloud first.");
       let result;
       try { result = await request("export", { method: "POST", body: installation ? { installation } : {}, token: current.token }); } catch (error) {
         if (error?.status === 409) return { notHeld: true };
@@ -937,12 +937,12 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     /** The account's answer to the product-updates question (GET /api/cloud/desktop/updates-consent), as the Admin sends it. */
     async updatesConsent() {
       const current = grant;
-      if (!current || state().status !== "connected") throw new Error("Sign in to MausBot Cloud first.");
+      if (!current || state().status !== "connected") throw new Error("Sign in to Edu Bot Cloud first.");
       return request("updates-consent", { token: current.token, signal: AbortSignal.timeout(10_000) });
     },
     async recordUpdatesConsent(status, textVersion) {
       const current = grant;
-      if (!current || state().status !== "connected") throw new Error("Sign in to MausBot Cloud first.");
+      if (!current || state().status !== "connected") throw new Error("Sign in to Edu Bot Cloud first.");
       const result = await request("updates-consent", { method: "POST", body: { status, textVersion }, token: current.token, signal: AbortSignal.timeout(10_000) });
       if (result?.cloudContractVersion !== 1 || result.consent?.status !== status) throw new Error("Invalid Cloud consent response.");
     },

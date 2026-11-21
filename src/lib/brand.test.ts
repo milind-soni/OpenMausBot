@@ -39,10 +39,10 @@ describe("brand", () => {
     expect(brand()).toEqual(DEFAULT_BRAND);
   });
 
-  it("names the product MausBot, or a white-label brand file by its own name", () => {
+  it("names the product Edu Bot, or a white-label brand file by its own name", () => {
     applyBrand({ brand: DEFAULT_BRAND, source: "default", file: "" });
-    expect(productName()).toBe("MausBot");
-    expect(brand().name).toBe("OpenMausBot");
+    expect(productName()).toBe("Edu Bot");
+    expect(brand().name).toBe("Edu Bot");
     applyBrand({ brand: { name: "Acme Bots" }, source: "file", file: "/data/brand.json" });
     expect(productName()).toBe("Acme Bots");
     applyBrand({ brand: DEFAULT_BRAND, source: "default", file: "" });

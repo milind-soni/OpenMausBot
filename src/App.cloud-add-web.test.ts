@@ -7,12 +7,13 @@ import { initialState, type Action, type AppState } from "./state/store";
 
 let state: AppState = { ...initialState, connected: true, hydrated: true };
 let dispatched: Action[] = [];
-vi.mock("./lib/email-gate", () => ({ emailGateDone: () => true }));
+const track = vi.fn();
 vi.mock("./state/store", async (original) => ({
   ...await original<typeof import("./state/store")>(),
   StoreProvider: ({ children }: { children: unknown }) => children,
   useStore: () => ({ state, dispatch: (action: Action) => { dispatched.push(action); }, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} }),
 }));
+vi.mock("./lib/analytics", () => ({ initAnalytics: () => {}, track: (...args: unknown[]) => track(...args), emailGateDone: () => true }));
 const { default: App } = await import("./App");
 
 function render(cloudAdd: AppState["cloudAdd"], ogb?: unknown): { opened: ReturnType<typeof vi.fn>; done: () => void } {
@@ -21,7 +22,7 @@ function render(cloudAdd: AppState["cloudAdd"], ogb?: unknown): { opened: Return
   vi.stubGlobal("open", opened);
   if (ogb) (window as { ogb?: unknown }).ogb = ogb;
   state = { ...initialState, connected: true, hydrated: true, cloudAdd };
-  dispatched = [];
+  dispatched = []; track.mockClear();
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
@@ -31,19 +32,19 @@ function render(cloudAdd: AppState["cloudAdd"], ogb?: unknown): { opened: Return
 
 afterEach(() => { delete (window as { ogb?: unknown }).ogb; vi.unstubAllGlobals(); });
 
-it("in a browser, Try Cloud opens the Cloud website's checkout in the same tap and leaves nothing waiting", () => {
+it("in a browser, an old Add a Cloud action clears without opening an upstream checkout", () => {
   const { opened, done } = render({ source: "app_onboarding" });
   try {
-    expect(opened).toHaveBeenCalledExactlyOnceWith("https://cloud.openmausbot.com/pro/buy?src=app_onboarding", "_blank", "noopener,noreferrer");
+    expect(opened).not.toHaveBeenCalled();
     expect(dispatched).toContainEqual({ type: "closeCloudAdd" });
   } finally { done(); }
 });
 
-it("on a desktop showing another computer, it goes through main to the browser", () => {
+it("on a desktop showing another computer, an old checkout action also clears", () => {
   const openExternal = vi.fn(async () => {});
   const { opened, done } = render({ source: "app_card" }, { remoteClient: { active: true }, cloudAccount: {}, openExternal });
   try {
-    expect(openExternal).toHaveBeenCalledExactlyOnceWith("https://cloud.openmausbot.com/pro/buy?src=app_card");
+    expect(openExternal).not.toHaveBeenCalled();
     expect(opened).not.toHaveBeenCalled();
     expect(dispatched).toContainEqual({ type: "closeCloudAdd" });
   } finally { done(); }

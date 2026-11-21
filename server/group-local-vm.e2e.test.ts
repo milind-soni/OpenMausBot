@@ -833,7 +833,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
       await send(group.id);
       const state = await until(() => api("GET", "/api/bots?messages=30"),
         value => JSON.stringify(value).includes(reason));
-      if (process.platform === "darwin") expect(JSON.stringify(state)).toContain("Relaunch OpenMausBot after granting the missing macOS permission");
+      if (process.platform === "darwin") expect(JSON.stringify(state)).toContain("Relaunch Edu Bot after granting the missing macOS permission");
       await idle(bots[0].id);
       expect(existsSync(dumpFile)).toBe(false);
     } finally {

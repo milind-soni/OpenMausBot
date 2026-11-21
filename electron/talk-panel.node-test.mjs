@@ -66,7 +66,7 @@ test("talkPanelBounds sits the box bottom-centre of the work area, clamped", () 
 test("the constants are frozen and carry the spec's values", () => {
   assert.deepEqual(TALK_PANEL, { width: 400, margin: 24, minHeight: 56, maxHeight: 240, fadeMs: 180 });
   assert.ok(Object.isFrozen(TALK_PANEL) && Object.isFrozen(TALK_LABELS));
-  assert.equal(TALK_LABELS["needs-you"], "MausBot needs you · Open chat");
+  assert.equal(TALK_LABELS["needs-you"], "Edu needs you · Open chat");
   assert.equal(TALK_LABELS["still-working"], "Still working · Open chat");
   assert.equal(TALK_LABELS.error, "");
 });
@@ -313,7 +313,7 @@ test("an open box follows the current language without translating a reply or ca
   await flush();
   assert.equal(painted(made[0]).text, text.t("native.talk.dictationOff"));
   assert.equal(painted(made[0]).labels.listening, "Ouvindo…");
-  assert.equal(painted(made[0]).labels.reply, "MausBot");
+  assert.equal(painted(made[0]).labels.reply, "Edu");
   assert.equal(painted(made[0]).dismiss, "Fechar");
   assert.equal(painted(made[0]).release, text.t("native.talk.releaseToSend"));
   panel.render({ state: "reply", text: "Turn on Dictation in System Settings → Keyboard, then try again." });

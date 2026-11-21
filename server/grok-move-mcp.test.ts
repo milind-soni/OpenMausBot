@@ -24,7 +24,7 @@ describe("the move MCP a Bot in Grok Bot talks to", () => {
     for (const [asked, given] of [["2025-06-18", "2025-06-18"], ["2025-03-26", "2025-03-26"], ["2024-11-05", "2024-11-05"], ["1999-01-01", "2025-06-18"], [undefined, "2025-06-18"]]) {
       expect(moveMcp(rpc("initialize", { protocolVersion: asked, capabilities: {} }), to)).toMatchObject({
         status: 200,
-        body: { jsonrpc: "2.0", id: 1, result: { protocolVersion: given, capabilities: { tools: {} }, serverInfo: { name: "MausBot" } } },
+        body: { jsonrpc: "2.0", id: 1, result: { protocolVersion: given, capabilities: { tools: {} }, serverInfo: { name: "Edu Bot" } } },
       });
     }
     expect(moveMcp(rpc("notifications/initialized", undefined, null), to)).toEqual({ status: 202 });
@@ -39,12 +39,12 @@ describe("the move MCP a Bot in Grok Bot talks to", () => {
 
   it("keeps a sent Bot as the importer reads it, whether it came as an object or as JSON text, and counts it in the status", () => {
     const to = link();
-    expect(call(to, "move_status").text).toBe("Connected to MausBot. 0 Bots received so far. This link works until 2030-01-01T00:00:00.000Z, while MausBot stays open. Send each Bot with send_export, one Bot per call.");
+    expect(call(to, "move_status").text).toBe("Connected to Edu Bot. 0 Bots received so far. This link works until 2030-01-01T00:00:00.000Z, while Edu Bot stays open. Send each Bot with send_export, one Bot per call.");
     const sent = call(to, "send_export", { document: {
       ...document("Tango", { memories: ["likes cheese", `the key is ${TOKEN}`], skills: [{ name: "Greet", instructions: "Say hello." }, { name: "Empty" }], extra: { anything: 1 } }),
       stray: "x",
     } });
-    expect(sent).toEqual({ refused: false, text: "Arrived in MausBot. Tango: 1 skill, 0 routines, 2 memories. Left out: 1 skill without instructions. Send those again with their full text if the Bot has it. The person can now import it in MausBot, under Settings → Import & export." });
+    expect(sent).toEqual({ refused: false, text: "Arrived in Edu Bot. Tango: 1 skill, 0 routines, 2 memories. Left out: 1 skill without instructions. Send those again with their full text if the Bot has it. The person can now import it in Edu Bot, under Settings → Import & export." });
     expect(call(to, "send_export", { document: JSON.stringify(document("Maus")) }).refused).toBe(false);
     expect(call(to, "send_export", { document: document("tango", { memories: ["more"] }) }).refused).toBe(false);
 

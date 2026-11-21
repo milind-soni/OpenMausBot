@@ -125,8 +125,8 @@ it("sends one report with the bot's report_bug summary and the facts, redacted, 
   expect(whole).not.toContain("convert in.png out.webp");
 
   const dump = JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")) as { prompt: unknown };
-  expect(JSON.stringify(dump.prompt)).toContain("this message tags @devs, so it is a bug report for the MausBot team");
-  const line = "Sent to the MausBot team (report report-1). Milind and Omkar get it by email and will reply to ada@example.com.";
+  expect(JSON.stringify(dump.prompt)).toContain("this message tags @devs, so it is a bug report for the Edu Bot team");
+  const line = "Sent to the Edu Bot team (report report-1). The maintainers get it by email and will reply to ada@example.com.";
   await until(async () => (await rows()).some((row) => row.kind === "activity" && row.tool?.name === `notice: ${line}`), 20_000);
   const tool = (await rows()).find((row) => row.kind === "activity" && row.tool?.name === "report_bug");
   expect(tool?.tool?.output).toContain(line);
@@ -140,8 +140,8 @@ it("still sends the report, with the server's facts, when the bot never calls re
   expect(report.description.split("\n")[0]).toBe("the send button froze again");
   expect(report.description).toContain("No summary from a bot: the bot did not call report_bug.");
   expect(report.diagnostics).toContain("tool Bash failed: convert: command not found");
-  expect(report.diagnostics).toContain("notice: Sent to the MausBot team (report report-1)");
-  const line = "Sent to the MausBot team (report report-2). Milind and Omkar get it by email and will reply to ada@example.com.";
+  expect(report.diagnostics).toContain("notice: Sent to the Edu Bot team (report report-1)");
+  const line = "Sent to the Edu Bot team (report report-2). The maintainers get it by email and will reply to ada@example.com.";
   await until(async () => (await rows()).some((row) => row.kind === "activity" && row.tool?.name === `notice: ${line}`), 20_000);
 
   plan([], "Noted.");

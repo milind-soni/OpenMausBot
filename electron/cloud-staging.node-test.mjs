@@ -23,7 +23,7 @@ test("OMB_CLOUD_STAGING=1, and only that, points the app at the fixed staging Ad
 test("the staging address is the one exact https origin; staging checkouts are only Dodo's test page", () => {
   assert.equal(cloudOrigin(STAGING_CLOUD_ORIGIN), STAGING_CLOUD_ORIGIN);
   for (const value of ["http://omb-cloud-staging.fly.dev", `${STAGING_CLOUD_ORIGIN}/`, `${STAGING_CLOUD_ORIGIN}:8443`, "https://omb-cloud-staging.fly.dev.evil.test", "https://evil.fly.dev"]) {
-    assert.throws(() => cloudOrigin(value), /Invalid MausBot Cloud address/, value);
+    assert.throws(() => cloudOrigin(value), /Invalid Edu Bot Cloud address/, value);
   }
   const test = "https://test.checkout.dodopayments.com/session/cks_1", live = "https://checkout.dodopayments.com/session/cks_1";
   assert.equal(checkoutDestination(test, { staging: true }), test);

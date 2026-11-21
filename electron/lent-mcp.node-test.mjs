@@ -77,7 +77,7 @@ test("security: only the person's own Cloud, a command only with the terminal le
   assert.match(lentMcpRefusal(cloud, { ...http("http://127.0.0.1:1/sse"), type: "sse" }), /older SSE transport/);
 });
 
-const OWN_PORT = /^Only an MCP server on its own port \(1024 or higher\) at this computer's address can be reached, never this computer's own OpenMausBot or Chrome ports$/;
+const OWN_PORT = /^Only an MCP server on its own port \(1024 or higher\) at this computer's address can be reached, never this computer's own Edu Bot or Chrome ports$/;
 
 test("security: an address only on its own port, 1024 or higher, never one left to its default", () => {
   const cloud = { cloud: { accountId: "a", origin: "https://x" }, terminal: false };

@@ -2,15 +2,13 @@ import { useEffect, useState } from "react";
 import type { CloudAccountState } from "../../../electron/cloud-account.mjs";
 import { announcementHistory, announcementsUnread, markAnnouncementsRead, useAnnouncementRecord, type HistoryFacts, type HistoryItem, type PersonRecord,
   type RecordWriter } from "@/lib/announcement-history";
-import { announcementConditions, announcementFeedUpdatedAt, announcementPlan, announcementPlatform, announcementSurface, cardsForPerson, providersRestricted,
-  SPONSOR_CARDS_FOR_TEAM_MEMBERS, useAnnouncementCards } from "@/lib/announcements";
+import { announcementConditions, announcementFeedUpdatedAt, announcementPlan, announcementPlatform, announcementSurface, cardsForPerson,
+  useAnnouncementCards } from "@/lib/announcements";
 import { appVersion } from "@/lib/app-links";
 import { brandStatus } from "@/lib/brand";
 import { cloudPlanView } from "@/lib/cloud-plan";
 import { activeLocale } from "@/lib/i18n";
-import { modelgoOfferable } from "@/lib/modelgo-offer";
 import { usedBefore } from "@/lib/notices";
-import type { WelcomeViewer } from "@/lib/onboarding";
 import { useStore } from "@/state/store";
 import { useDesktopNotices } from "../desktop-notices";
 import { localDesktopPage, useWelcomeViewer } from "../onboarding/WelcomeGate";
@@ -49,11 +47,6 @@ export interface Announcements {
   markRead: () => void;
   person: PersonRecord;
   writer: RecordWriter;
-  viewer: WelcomeViewer | null;
-  /** This desktop's MausBot Cloud sign-in, on its own page. */
-  account: CloudAccountState | null;
-  /** The app's Add a Cloud and Cloud sign-in are here: This computer's page. */
-  cloudBridge: boolean;
 }
 
 /** Every announcement this person could have had here, and whether one is new to them. */
@@ -72,18 +65,15 @@ export function useAnnouncements(now: () => number = Date.now): Announcements {
   const team = Boolean(state.config?.team);
   const canSave = viewer?.canSave !== false;
   const cloudHome = Boolean(state.config?.cloudHome || viewer?.cloudHome);
-  const sponsors = SPONSOR_CARDS_FOR_TEAM_MEMBERS || !team || viewer?.canSave === true;
   const facts: HistoryFacts = {
-    branded, organization, remote, team, canSave, sponsors,
-    cloudSale: Boolean(bridge && desktop), cloudCards: Boolean(bridge || (!remote && cloudHome && window.ogb?.cloudPlan)),
-    modelgo: modelgoOfferable(state.config?.managedPolicy),
+    branded, organization, remote, team, canSave, cloudSale: Boolean(bridge && desktop),
   };
   const surface = announcementSurface(local, cloudHome);
   const cards = cardsForPerson(useAnnouncementCards(!branded), {
     facts: { nowMs: now(), version: appVersion(), platform: announcementPlatform(globalThis.navigator?.userAgent), surface,
       plan: announcementPlan(surface, bridge ? cloudPlanView(account) : null, team), people: usedBefore(state.bots) ? "existing" : "new", locale: activeLocale(),
       conditions: announcementConditions(state) },
-    branded, admin: canSave, sponsors: !providersRestricted(state.config?.managedPolicy) && sponsors,
+    branded, admin: canSave, sponsors: false,
   });
   const items = announcementHistory({ facts, cards, feedUpdatedAt: announcementFeedUpdatedAt(), now: now() });
   const record = state.config?.onboarding;
@@ -91,7 +81,7 @@ export function useAnnouncements(now: () => number = Date.now): Announcements {
   const ready = viewer !== null && organization !== null && (!desktop || desktopState !== null) && state.config !== null;
   const writer: RecordWriter = { team, desktop, saved: config => dispatch({ type: "configStatus", config }) };
   return {
-    items, unread: ready && announcementsUnread(items, person), person, writer, viewer, account, cloudBridge: Boolean(bridge),
+    items, unread: ready && announcementsUnread(items, person), person, writer,
     markRead: () => markAnnouncementsRead(now(), record, writer),
   };
 }

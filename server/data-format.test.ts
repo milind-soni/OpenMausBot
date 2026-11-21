@@ -74,7 +74,7 @@ describe("the data folder's format marker", () => {
     const dir = dataDir();
     const marker = `${JSON.stringify({ format: 3, writtenBy: "0.2.0", writtenAt: "2027-01-01T00:00:00.000Z" })}\n`;
     writeFileSync(join(dir, DATA_FORMAT_FILE), marker);
-    const refusal = `OpenMausBot startup failed: the data in ${dir} was written by a newer OpenMausBot (0.2.0), in a format this version (0.1.152) cannot read. Nothing was changed. Install OpenMausBot 0.2.0 or newer, or put back the copy of the data taken before that update.`;
+    const refusal = `Edu Bot startup failed: the data in ${dir} was written by a newer Edu Bot (0.2.0), in a format this version (0.1.152) cannot read. Nothing was changed. Install Edu Bot 0.2.0 or newer, or put back the copy of the data taken before that update.`;
     expect(() => checkDataFormat(dir, "0.1.152", 2)).toThrow(new DataFormatError(refusal));
     expect(() => stampDataFormat(dir, "0.1.152", { writes: 2, reads: 2 })).toThrow(DataFormatError);
     expect(readFileSync(join(dir, DATA_FORMAT_FILE), "utf8")).toBe(marker);
@@ -115,7 +115,7 @@ describe("the data folder's format marker", () => {
     writeFileSync(join(dir, DATA_FORMAT_FILE), `\uFEFF${JSON.stringify({ format: 1, writtenBy: "0.1.151", writtenAt: "" })}`);
     expect(readDataFormat(dir)).toMatchObject({ format: 1, writtenBy: "0.1.151" });
     writeFileSync(join(dir, DATA_FORMAT_FILE), `\uFEFF${JSON.stringify({ format: 3, writtenBy: "0.2.0", writtenAt: "" })}`);
-    expect(() => checkDataFormat(dir, "0.1.152", 1, 1)).toThrow("written by a newer OpenMausBot (0.2.0)");
+    expect(() => checkDataFormat(dir, "0.1.152", 1, 1)).toThrow("written by a newer Edu Bot (0.2.0)");
   });
 
   it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("starts on a marker this user cannot read, and on a folder it cannot write", () => {
@@ -201,7 +201,7 @@ describe("a server starting on a data folder", () => {
     const { code, stderr } = await start(dir, () => false);
     expect(code).toBe(1);
     expect(stderr.trim().split("\n").at(-1)).toBe(
-      `OpenMausBot startup failed: the data in ${data} was written by a newer OpenMausBot (99.0.0), in a format this version (${VERSION}) cannot read. Nothing was changed. Install OpenMausBot 99.0.0 or newer, or put back the copy of the data taken before that update.`,
+      `Edu Bot startup failed: the data in ${data} was written by a newer Edu Bot (99.0.0), in a format this version (${VERSION}) cannot read. Nothing was changed. Install Edu Bot 99.0.0 or newer, or put back the copy of the data taken before that update.`,
     );
     expect(readdirSync(data)).toEqual([DATA_FORMAT_FILE]);
   }, 60_000);

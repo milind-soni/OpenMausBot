@@ -64,8 +64,8 @@ export function xResearchAction(view: CloudPlanView | null): "connecting" | "sig
 export function cloudPlanLine(view: CloudPlanView): string | null {
   switch (view.kind) {
     case "paid": return t(view.trial ? "cloudAccount.trialPlan" : "cloudAccount.pro", { plan: view.label });
-    case "attention": return t("cloudAccount.inactive", { plan: view.label ?? "MausBot Cloud" });
-    case "purchase": return t("cloudAccount.purchaseReceived", { plan: view.label ?? "MausBot Cloud" });
+    case "attention": return t("cloudAccount.inactive", { plan: view.label ?? "Edu Bot Cloud" });
+    case "purchase": return t("cloudAccount.purchaseReceived", { plan: view.label ?? "Edu Bot Cloud" });
     case "unverified": return view.label ? t("cloudAccount.lastPlan", { plan: view.label }) : null;
     case "reauth": return view.label ? t("cloudAccount.planName", { plan: view.label }) : null;
     case "free": return t("cloudAccount.free");

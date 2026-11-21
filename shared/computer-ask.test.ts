@@ -16,10 +16,10 @@ describe("a bot's ask to turn on what it needs from the person's computer", () =
     expect(line("not-running", "PC")).toBe("Screen control isn't running on your PC.");
     expect(line("blocked", "PC")).toBe("Screen control is blocked on your PC: Windows Security may have stopped it.");
     expect(line("blocked", "Mac")).toBe("Screen control is blocked on your Mac.");
-    expect(line("permissions", "Mac")).toBe("macOS hasn't allowed MausBot to see and use the screen yet.");
-    expect(line("closed", "PC")).toBe("MausBot isn't open on your PC. Open it there and Scout carries on.");
-    expect(line("never", "computer")).toBe("MausBot isn't on your computer yet. Install it, sign in to MausBot Cloud there, and Scout carries on.");
-    expect(line("update", "PC")).toBe("MausBot on your PC needs an update first. Update it, and Scout carries on.");
+    expect(line("permissions", "Mac")).toBe("macOS hasn't allowed Edu Bot to see and use the screen yet.");
+    expect(line("closed", "PC")).toBe("Edu Bot isn't open on your PC. Open it there and Scout carries on.");
+    expect(line("never", "computer")).toBe("Edu Bot isn't on your computer yet. Install it, sign in to Edu Bot Cloud there, and Scout carries on.");
+    expect(line("update", "PC")).toBe("Edu Bot on your PC needs an update first. Update it, and Scout carries on.");
   });
 
   it("offers Turn on only where the app on that computer can do it, and the app itself where it's the fix", () => {

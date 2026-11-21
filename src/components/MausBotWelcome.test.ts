@@ -38,7 +38,7 @@ describe("MausBot's first-launch welcome", () => {
 
   it("saves an empty name as MausBot and caps a long one at the bot-name limit", () => {
     const jarvis = { ...maus, name: "Jarvis" };
-    expect(welcomePatch(jarvis, { ...draftOf(jarvis), name: "   " }, true).name).toBe("MausBot");
+    expect(welcomePatch(jarvis, { ...draftOf(jarvis), name: "   " }, true).name).toBe("Edu");
     expect(welcomeName("x".repeat(300))).toHaveLength(100);
     expect(welcomeName("  Ada ")).toBe("Ada");
   });

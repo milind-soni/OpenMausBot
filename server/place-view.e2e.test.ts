@@ -221,7 +221,7 @@ describe("a cloud computer that can't start, against the real server", () => {
     createAnswer = refusal(402, "subscription_inactive", "Cloud computers are included with an active Cloud subscription.");
     await send(bot.id, bot.threadId, "Open the desktop.");
     const row = await failedRow(bot.threadId);
-    expect(row.tool.name).toBe("error: Your MausBot Cloud plan has ended, so cloud desktops are off. See your plan on the Plan page.");
+    expect(row.tool.name).toBe("error: Your Edu Bot Cloud plan has ended, so cloud desktops are off. See your plan on the Plan page.");
     expect(row.tool.place).toEqual({ state: "cc-ended", params: { bot: "Ended Bot" }, source: "works-on" });
   }, 90_000);
 

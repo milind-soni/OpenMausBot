@@ -49,7 +49,7 @@ describe("what a due routine does", () => {
     const late = plan(interval(60), START + HOUR, START + 4 * HOUR + 10 * MINUTE);
     expect(late).toMatchObject({ scheduledFor: START + 4 * HOUR, first: START + HOUR, through: START + 4 * HOUR, count: 4, fields: {}, late: true });
     expect(late.older).toMatchObject({ scheduledFor: START + HOUR, count: 3, fields: { status: "missed", seenAt: START + 4 * HOUR + 10 * MINUTE,
-      error: "Missed 3 scheduled runs because this computer was asleep or OpenMausBot was not running", skipped: { count: 3, firstAt: START + HOUR, lastAt: START + 3 * HOUR } } });
+      error: "Missed 3 scheduled runs because this computer was asleep or Edu Bot was not running", skipped: { count: 3, firstAt: START + HOUR, lastAt: START + 3 * HOUR } } });
     expect(late.older!.fields.skipped).not.toHaveProperty("told");
     expect(plan(interval(60), START + HOUR, START + HOUR + 10 * MINUTE)).toEqual({ scheduledFor: START + HOUR, first: START + HOUR, through: START + HOUR, count: 1, fields: {}, late: true });
     expect(plan(cron("0 9 * * *"), Date.parse("2026-11-16T09:00:00Z"), Date.parse("2026-11-18T10:00:00Z")).older?.fields.skipped)

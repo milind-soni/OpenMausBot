@@ -318,7 +318,7 @@ describe("the Agentcard tile", () => {
     expect(tile.querySelector("img")).toBeNull();
     expect(tile.querySelector("svg")).not.toBeNull();
     expect(tile.textContent).toContain("Shop and pay from your own Agentcard account.");
-    expect(tile.textContent).toContain("OpenMausBot stores no card details");
+    expect(tile.textContent).toContain("Edu Bot stores no card details");
   });
 });
 

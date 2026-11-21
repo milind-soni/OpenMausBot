@@ -4,7 +4,7 @@ description: Understand the harness, webhook, and companion network boundaries.
 icon: Network
 ---
 
-MausBot separates its network surfaces by trust level.
+Edu Bot separates its network surfaces by trust level.
 
 | Surface | Default bind | Purpose |
 |---|---|---|
@@ -21,7 +21,7 @@ Never forward the harness port yourself. A self-hosted server is reached through
 - `--domain HOST`: a managed Caddy that gets the certificate;
 - `--tailscale`: your tailnet, with Tailscale's HTTPS when the tailnet has certificates turned on, otherwise plain http on this machine's own tailnet address;
 - `--lan`: this network only, plain http. It listens on every address, but answers only connections whose two ends are both private;
-- `--tunnel`: a free MausBot web address.
+- `--tunnel`: a free Edu Bot web address.
 
 Each prints one pairing link; paste it into the desktop app under **＋ → Connect to a server**. The app accepts plain http only on private networks: LAN addresses, Tailscale's 100.64/10 and `*.ts.net`, and `*.local`.
 

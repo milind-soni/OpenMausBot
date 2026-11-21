@@ -28,11 +28,11 @@ export type YourComputerKey = keyof typeof YOUR_COMPUTER_WORDS;
 export const YOUR_COMPUTER_TOOL = "use_your_computer";
 
 /** A failed turn's line starts with this when the desktop app's own driver is not ready; the app adds the permission fix. */
-export const THIS_COMPUTER_NOT_READY = "OpenMausBot can't use this computer yet — ";
+export const THIS_COMPUTER_NOT_READY = "Edu Bot can't use this computer yet — ";
 
 /** What a bot is told when the computer-control helper dies under it: the app restarts the helper by itself. */
 export const COMPUTER_HELPER_STOPPED =
-  "Computer control on this computer stopped because its helper crashed and OpenMausBot is restarting it by itself, so try the same action once more in a few seconds, and if it fails the same way, tell the person computer control is not working and to quit and reopen OpenMausBot.";
+  "Computer control on this computer stopped because its helper crashed and Edu Bot is restarting it by itself, so try the same action once more in a few seconds, and if it fails the same way, tell the person computer control is not working and to quit and reopen Edu Bot.";
 
 const BROWSERS: Record<string, string> = {
   chrome: "Chrome", "google chrome": "Chrome", chromium: "Chromium", safari: "Safari", firefox: "Firefox",

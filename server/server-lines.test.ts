@@ -5,8 +5,8 @@ import { serverLine } from "./server-lines.ts";
 
 describe("serverLine", () => {
   it("writes the line in the language given, with its values filled in", () => {
-    expect(serverLine("de", "server.reports.sent", { report: "r-1" })).toBe("An das MausBot-Team gesendet (Bericht r-1). Milind und Omkar bekommen ihn per E-Mail.");
-    expect(serverLine(undefined, "server.reports.sent", { report: "r-1" })).toBe("Sent to the MausBot team (report r-1). Milind and Omkar get it by email.");
+    expect(serverLine("de", "server.reports.sent", { report: "r-1" })).toBe("An das Edu Bot-Team gesendet (Bericht r-1). Die Maintainer bekommen ihn per E-Mail.");
+    expect(serverLine(undefined, "server.reports.sent", { report: "r-1" })).toBe("Sent to the Edu Bot team (report r-1). The maintainers get it by email.");
     expect(serverLine("en", "server.reports.when.minutes", { count: 5 })).toBe("in about 5 minutes");
   });
 
@@ -18,6 +18,6 @@ describe("serverLine", () => {
   });
 
   it("leaves a {name} it was given no value for as it is", () => {
-    expect(serverLine("en", "server.reports.refused", {})).toBe("The MausBot team's server refused this bug report, so nothing was sent: {detail}.");
+    expect(serverLine("en", "server.reports.refused", {})).toBe("The Edu Bot team's server refused this bug report, so nothing was sent: {detail}.");
   });
 });

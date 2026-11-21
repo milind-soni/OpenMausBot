@@ -63,7 +63,7 @@ export function parseConnections(value) {
 /** This computer's connections, by name only, and the computer they are on. */
 export async function collectConnections(local) {
   const listed = parseConnections(await local.json("/api/cloud-connections").catch(() => null));
-  if (!listed) throw new ConnectionMoveError("local", "OpenMausBot on this computer did not list its apps and keys. Try again in a moment.");
+  if (!listed) throw new ConnectionMoveError("local", "Edu Bot on this computer did not list its apps and keys. Try again in a moment.");
   return { computer: listed.computer, connections: listed.connections };
 }
 

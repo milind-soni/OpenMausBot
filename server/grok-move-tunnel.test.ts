@@ -55,7 +55,7 @@ describe("the Grok Bot link", () => {
     const sent = await post(made.connectorUrl!, send("Tango"));
     expect(sent.status).toBe(200);
     expect(sent.headers.get("content-type")).toBe("application/json");
-    expect(await sent.json()).toMatchObject({ result: { content: [{ text: expect.stringContaining("Arrived in MausBot. Tango") }] } });
+    expect(await sent.json()).toMatchObject({ result: { content: [{ text: expect.stringContaining("Arrived in Edu Bot. Tango") }] } });
     expect((await post(made.connectorUrl!, { jsonrpc: "2.0", method: "notifications/initialized" })).status).toBe(202);
     const looked = move.look(0);
     expect(looked).toMatchObject({ connectorUrl: made.connectorUrl, arrived: [{ seq: 1 }] });

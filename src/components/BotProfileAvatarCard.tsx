@@ -11,8 +11,8 @@ import {
   type MausState,
 } from "@/lib/mascot";
 import { BOT_AVATAR_CROPS } from "../../shared/bot-avatar";
-import { MASCOT_BODY_IDS } from "../../shared/mascot-bodies";
-import { FESTIVAL_IDS, FESTIVALS, type BotBodyId } from "../../shared/bot-body";
+import { PICKABLE_MASCOT_BODY_IDS } from "../../shared/mascot-bodies";
+import { botBodyId, FESTIVAL_IDS, FESTIVALS, type BotBodyId } from "../../shared/bot-body";
 import { BotAvatar, MausAvatar } from "./Avatar";
 import { AvatarImageGenerator } from "./AvatarImageGenerator";
 import { AvatarFraming, OrganizationAvatarIcons, RESET_MASCOT_PATCH, useAvatarImage, type AvatarPatch } from "./avatar-editing";
@@ -172,7 +172,7 @@ export function BotProfileAvatarCard({
               {t("botIdentity.body")}
             </div>
             <div className="grid grid-cols-5 gap-1.5">
-              {MASCOT_BODY_IDS.map((id) => (
+              {PICKABLE_MASCOT_BODY_IDS.map((id) => (
                 <BodyButton key={id} id={id} name={bodyName(id)} bot={bot} busy={busy} onPatch={onPatch} />
               ))}
             </div>
@@ -211,7 +211,7 @@ function BodyButton({ id, name, bot, busy, onPatch }: {
   busy: boolean;
   onPatch: (patch: AvatarPatch) => void;
 }) {
-  const selected = (bot.mascotBody ?? "cursor") === id;
+  const selected = (botBodyId(bot.mascotBody)) === id;
   return (
     <button
       type="button"

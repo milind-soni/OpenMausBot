@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { AppWindow, Bot as BotIcon, Cloud, Download, Mail, Smartphone, Sparkles, type LucideIcon } from "lucide-react";
 
+import { cloudAccountBridge } from "@/lib/cloud-add-web";
 import { INTRO_CHIPS, setupSteps, type IntroChip, type SetupStep } from "@/lib/default-bot";
 import { t } from "@/lib/i18n";
 import { phonePairingSettingsAction } from "@/lib/phone-pairing";
@@ -9,6 +10,8 @@ import { useStore, type Action } from "@/state/store";
 import { engineReady } from "./EngineLibrary";
 import { ConnectAiDialog } from "./onboarding/ConnectAi";
 import { useWelcomeAi } from "./onboarding/welcome-ai";
+
+const cloudSetupAvailable = () => typeof window !== "undefined" && Boolean(cloudAccountBridge());
 
 const STEPS: Record<SetupStep, { label: LocaleKey; icon: LucideIcon }> = {
   ai: { label: "helperIntro.step.ai", icon: Sparkles },
@@ -38,7 +41,7 @@ export function HelperSetup() {
     onCloud: state.config?.cloudHome === true,
     team: Boolean(state.config?.team),
     remote: typeof window !== "undefined" && window.ogb?.remoteClient?.active === true,
-  });
+  }).filter(step => step !== "cloud" || cloudSetupAvailable());
   if (!steps.length) return null;
   return (
     <div role="group" aria-label={t("helperIntro.setup")} data-helper-setup="" className="flex max-w-full flex-col items-start gap-1.5">
@@ -88,7 +91,7 @@ export function IntroChips({ chips }: { chips: readonly IntroChip[] }) {
   const { dispatch } = useStore();
   const [tapped, setTapped] = useState<ReadonlySet<IntroChip>>(new Set());
   const [connecting, setConnecting] = useState(false);
-  const shown = chips.filter((chip) => !tapped.has(chip)).slice(0, INTRO_CHIPS);
+  const shown = chips.filter((chip) => !tapped.has(chip) && (chip !== "cloud" || cloudSetupAvailable())).slice(0, INTRO_CHIPS);
   const tap = (chip: IntroChip) => {
     setTapped((now) => new Set([...now, chip]));
     if (chip === "ai") return setConnecting(true);

@@ -23,7 +23,7 @@ describe("this computer, only for the desktop app's own server", () => {
   it("finds nothing on a server the app did not launch, though the app's record, its folder and the desktop flag are all there", () => {
     const home = mkdtempSync(join(tmpdir(), "omb-desktop-computer-"));
     folders.push(home);
-    for (const folder of [join(home, "user-data"), join(home, "Library", "Application Support", "OpenMausBot")]) {
+    for (const folder of [join(home, "user-data"), join(home, "Library", "Application Support", "Edu Bot")]) {
       mkdirSync(folder, { recursive: true, mode: 0o700 });
       writeFileSync(join(folder, "cua-connection.json"), JSON.stringify(READY), { mode: 0o600 });
     }
@@ -35,7 +35,7 @@ describe("this computer, only for the desktop app's own server", () => {
       expect(desktop.unavailableReason(), platform).toBeNull();
     }
     expect(thisComputerNotReady(createDesktopComputer())).toBe(
-      "Only the OpenMausBot app on this computer can let a bot use it. Open the app here, or let the bot work in its own browser or on a cloud desktop instead.",
+      "Only the Edu Bot app on this computer can let a bot use it. Open the app here, or let the bot work in its own browser or on a cloud desktop instead.",
     );
   });
 
@@ -43,17 +43,17 @@ describe("this computer, only for the desktop app's own server", () => {
     const desktop = createDesktopComputer({ platform: "darwin" });
     expect(desktop.receive({ type: DESKTOP_COMPUTER_GRANT, connection: READY })).toBe(true);
     expect(desktop.connection()).toEqual({ command: "/fixture/cua-driver", args: ["mcp"], env: {}, platform: "darwin", scope: "local-computer" });
-    const reason = "embedded host failed: Screen Recording required; grant access in System Settings and restart OpenMausBot";
+    const reason = "embedded host failed: Screen Recording required; grant access in System Settings and restart Edu Bot";
     expect(desktop.receive({ type: DESKTOP_COMPUTER_GRANT, connection: { mode: "unavailable", reason } })).toBe(true);
     expect(desktop.connection()).toBeNull();
     expect(desktop.unavailableReason()).toBe(reason);
     expect(thisComputerNotReady(desktop, "darwin")).toBe(
-      `OpenMausBot can't use this computer yet — ${reason}. Relaunch OpenMausBot after granting the missing macOS permission.`,
+      `Edu Bot can't use this computer yet — ${reason}. Relaunch Edu Bot after granting the missing macOS permission.`,
     );
     expect(desktop.receive({ type: DESKTOP_COMPUTER_GRANT, connection: null })).toBe(true);
     expect(desktop.connection()).toBeNull();
     expect(desktop.granted()).toBe(true);
-    expect(thisComputerNotReady(desktop)).toBe("OpenMausBot can't use this computer yet — make sure OpenMausBot has the permissions it asks for, then restart it");
+    expect(thisComputerNotReady(desktop)).toBe("Edu Bot can't use this computer yet — make sure Edu Bot has the permissions it asks for, then restart it");
   });
 
   it("decodes again on every use, so a Linux driver that stopped is no longer used", () => {

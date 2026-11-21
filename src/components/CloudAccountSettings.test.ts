@@ -66,11 +66,11 @@ it("names the verified tier; no tier is today's Pro, and a tier newer than the a
 const confirmDialog = () => render().nodes.find(node => node.type === SignOutConfirm) as ReactElement<{ onConfirm: () => Promise<unknown>; onClose: () => void }> | undefined;
 it("sign-out asks first, says what keeps running, and Cancel keeps you signed in", async () => {
   await ready(free); click("Sign out"); expect(bridge.signOut).not.toHaveBeenCalled();
-  expect(render().html).toContain("Sign out of MausBot?");
+  expect(render().html).toContain("Sign out of Edu Bot?");
   expect(render().html).toContain("Your bots keep running on this computer.");
   confirmDialog()!.props.onClose(); expect(confirmDialog()).toBeUndefined(); expect(bridge.signOut).not.toHaveBeenCalled();
   click("Sign out"); void confirmDialog()!.props.onConfirm(); await flush(); expect(bridge.signOut).toHaveBeenCalledExactlyOnceWith();
-  expect(render().html).toContain("Sign in to MausBot"); expect(fetch).not.toHaveBeenCalled();
+  expect(render().html).toContain("Sign in to Edu Bot"); expect(fetch).not.toHaveBeenCalled();
 });
 it("never accesses account bridge from remote companion pages", async () => {
   vi.stubGlobal("window", { ogb: { cloudAccount: bridge, remoteClient: { active: true } } }); render(); f.effects[0](); await flush();
@@ -78,7 +78,7 @@ it("never accesses account bridge from remote companion pages", async () => {
 });
 it("a late initial snapshot cannot replace a newer revoked state", async () => {
   let resolve!: (state: CloudAccountState) => void; vi.mocked(bridge.state).mockReturnValueOnce(new Promise(done => { resolve = done; }));
-  render(); f.effects[0](); push({ status: "reauth-required" }); resolve(free); await flush(); expect(render().html).toContain("no longer signed in to MausBot Cloud");
+  render(); f.effects[0](); push({ status: "reauth-required" }); resolve(free); await flush(); expect(render().html).toContain("no longer signed in to Edu Bot Cloud");
 });
 
 const all = (html: string, texts: string[]) => texts.forEach(text => expect(html).toContain(text));
@@ -91,13 +91,13 @@ it("a failed re-check keeps the plan, Cloud and Connect, and only says it is che
   const machine = { status: "ready" as const, origin: "https://home-7f3k2.fly.dev" };
   await ready({ ...free, entitlement: { plan: "pro", tier: "max", status: "active", expiresAt: 1_900_000_000_000, version: 3 }, machine, checking: true });
   const { html } = render();
-  all(html, [">Max<", "Checking with MausBot Cloud…", "Open My Cloud", "Manage subscription"]);
+  all(html, [">Max<", "Checking with Edu Bot Cloud…", "Open My Cloud", "Manage subscription"]);
   none(html, [...BUY, ...ALARM]);
 });
 it("OMB Cloud out of reach: the plan last verified stays named, calmly, with no offer to buy", async () => {
   await ready({ status: "unavailable", message: "unreachable", account: { id: "fixture", email: "person@example.test" }, lastPlan: { tier: "personal", active: true } });
   let html = render().html;
-  all(html, ["Personal · checking with MausBot Cloud…", "be reached right now, so this app", "Nothing has changed with your plan", "Manage subscription"]);
+  all(html, ["Personal · checking with Edu Bot Cloud…", "be reached right now, so this app", "Nothing has changed with your plan", "Manage subscription"]);
   none(html, [...BUY, ...ALARM]);
   push({ status: "unavailable", message: "unreachable", account: { id: "fixture", email: "person@example.test" } });
   html = render().html; expect(html).toContain("Open your Plan page"); none(html, [...BUY, ...ALARM]);
@@ -133,13 +133,13 @@ it("a sign-in that ended asks to sign in again, keeps the plan, and offers nothi
   button("Sign in again")!.props.onClick!(); await flush();
   expect(bridge.signInAgain).toHaveBeenCalledExactlyOnceWith(); expect(bridge.signOut).not.toHaveBeenCalled(); expect(bridge.begin).not.toHaveBeenCalled();
   push({ status: "reauth-required", message: "access-ended", account: { id: "fixture", email: "person@example.test" } });
-  all(render().html, ["no longer signed in to MausBot Cloud", "Sign in again"]); none(render().html, BUY);
+  all(render().html, ["no longer signed in to Edu Bot Cloud", "Sign in again"]); none(render().html, BUY);
 });
 it("a payment problem or a stopped Cloud is never 'Free account' with a plan to choose", async () => {
   const origin = "https://home-7f3k2.fly.dev";
   await ready({ ...free, machine: { status: "payment-problem", origin } });
   let html = render().html;
-  all(html, ["MausBot Cloud · not active right now", "problem with your payment", "Update payment in your browser"]); none(html, BUY);
+  all(html, ["Edu Bot Cloud · not active right now", "problem with your payment", "Update payment in your browser"]); none(html, BUY);
   push({ ...free, machine: { status: "stopped", origin } });
   html = render().html; all(html, ["Subscribe again on your Plan page", "Open your Plan page"]); none(html, BUY);
   expect(html).not.toContain("shows why and how to fix it");
@@ -151,7 +151,7 @@ it("a payment being linked says so, with its date, and asks nobody to pay again"
   const html = render().html;
   all(html, ["Personal · payment received", "Received Oct 2, 2026", "no need to pay again", "Open your Plan page"]); none(html, BUY);
   push({ ...free, purchase: { state: "held" } });
-  all(render().html, ["MausBot Cloud · payment received", "linking your payment"]); none(render().html, BUY);
+  all(render().html, ["Edu Bot Cloud · payment received", "linking your payment"]); none(render().html, BUY);
 });
 it("where this app can keep another account beside this one, the other email is added, with nothing signed out", async () => {
   vi.stubGlobal("window", { ogb: { cloudAccount: bridge, accounts: { addCancel: vi.fn(), list: vi.fn(), onChanged: vi.fn() } } });
@@ -167,7 +167,7 @@ it("a free account may add a Cloud, and is told what to do if it bought with ano
   all(render({ onAddCloud: vi.fn() }).html, ["No plan yet", ">Add a Cloud<", "Bought a plan with a different email?"]);
   none(render({ onAddCloud: vi.fn() }).html, ["Choose a Cloud plan", "Free account", "a checkout return alone"]);
   button("Sign out and use that email")!.props.onClick!();
-  expect(render().html).toContain("Sign out of MausBot?"); expect(bridge.signOut).not.toHaveBeenCalled();
+  expect(render().html).toContain("Sign out of Edu Bot?"); expect(bridge.signOut).not.toHaveBeenCalled();
 });
 it("shows the sign-in code plainly, with how long it works", async () => {
   await ready({ status: "connecting", enrollment: { userCode: "ABCDE-FGHJK", expiresAt: Date.UTC(2026, 9, 2, 12, 15) } });
@@ -196,7 +196,7 @@ it("a saved sign-in that can't be read right now says the app tries again by its
   await ready({ status: "unavailable", message: "restore-failed" });
   const html = render().html;
   expect(html).toContain("This computer couldn&#x27;t open its saved Cloud sign-in. Unlock your keychain, and the app tries again by itself.");
-  none(html, ["could not be read or cleared", "sign out again", "Sign out of MausBot Cloud, then"]);
+  none(html, ["could not be read or cleared", "sign out again", "Sign out of Edu Bot Cloud, then"]);
 });
 it("a saved sign-in this computer still can't read: what may open it first, then a secondary button that clears it and starts the sign-in", async () => {
   for (const [platform, onSignIn, step] of [["win32", undefined, "Restarting the app may fix it."], ["darwin", vi.fn(), "Unlock your keychain or restart the app"],
@@ -255,15 +255,15 @@ it("on the person's own Cloud, Settings shows the plan read only, with Manage, a
   view().nodes.find(node => node.type === "button" && node.props.children === "Manage subscription")!.props.onClick!();
   await flush(); expect(plan.manage).toHaveBeenCalledExactlyOnceWith();
   plan.state.mockResolvedValueOnce({ status: "checking", tier: "pro" }); f.values = []; view(); f.effects[0](); await flush();
-  expect(view().html).toContain("Pro · checking with MausBot Cloud…");
+  expect(view().html).toContain("Pro · checking with Edu Bot Cloud…");
   plan.state.mockResolvedValueOnce({ status: "signin", tier: "max" }); f.values = []; view(); f.effects[0](); await flush();
-  all(view().html, ["Max plan", "This computer needs to sign in to MausBot Cloud again"]); none(view().html, [...BUY, "Could not complete", "Switch to this computer"]);
+  all(view().html, ["Max plan", "This computer needs to sign in to Edu Bot Cloud again"]); none(view().html, [...BUY, "Could not complete", "Switch to this computer"]);
   expect(view().nodes.filter(node => node.type === "button" && node.props.children === "Sign in again")).toHaveLength(1);
   view().nodes.find(node => node.type === "button" && node.props.children === "Sign in again")!.props.onClick!();
   await flush(); expect(plan.signIn).toHaveBeenCalledExactlyOnceWith();
   plan.state.mockRejectedValueOnce(new Error("cloud-plan:state is only available in this app's window")); f.values = []; view(); f.effects[0](); await flush();
   const refused = view();
-  expect(refused.html).toContain("Your plan is managed in the MausBot app on your computer.");
+  expect(refused.html).toContain("Your plan is managed in the Edu Bot app on your computer.");
   expect(refused.nodes.some(node => node.type === "button")).toBe(false);
   none(refused.html, ["Could not complete", 'role="alert"', "Loading"]);
 });
@@ -274,11 +274,11 @@ it("on My Cloud once it is home, Settings is that app's own: the plan is managed
     return { html: renderToStaticMarkup(createElement(Capture)), nodes: nodes(tree) }; };
   view(); f.effects[0](); await flush();
   all(view().html, ["Your plan is managed on your Plan page.", "Your plan is managed on your Plan page.", "Manage subscription"]);
-  none(view().html, ["MausBot app", "on your computer"]);
+  none(view().html, ["Edu Bot app", "on your computer"]);
   plan.state.mockResolvedValueOnce({ status: "paid", tier: "pro", home: true }); f.values = []; view(); f.effects[0](); await flush();
   all(view().html, [">Pro<", "Manage subscription"]); none(view().html, ["on your computer"]);
   plan.state.mockResolvedValueOnce({ status: "none" }); f.values = []; view(); f.effects[0](); await flush();
-  all(view().html, ["Your plan is managed in the MausBot app on your computer."]);
+  all(view().html, ["Your plan is managed in the Edu Bot app on your computer."]);
 });
 
 const pro: CloudAccountState = { ...free, entitlement: { plan: "pro", status: "active", expiresAt: 1_900_000_000_000, version: 2 } };
@@ -413,7 +413,7 @@ it("only shows the status of a Cloud that is not Ready, and a later sign-out sta
     expect(render().html).toContain(`data-cloud-home="${machine.status}"`);
   }
   push({ status: "signed-out" }); linked(); await flush();
-  expect(render().html).toContain("Sign in to MausBot");
+  expect(render().html).toContain("Sign in to Edu Bot");
   expect(bridge.connectHome).not.toHaveBeenCalled();
   expect(bridge.begin).not.toHaveBeenCalled();
 });
@@ -487,9 +487,9 @@ it("on a Team Cloud, sends its admins to the invite box on the team's People pag
   const onTeam = render({ cloudHome: true, teamHome: team }).nodes;
   expect(onTeam.some(node => node.type === CloudPlanOnCloud), "a team's people and plan are on its Overview, not Plan & billing").toBe(false);
   const html = renderToStaticMarkup(createElement(TeamPeopleCard, { team, admin: true }));
-  all(html, ["People and plan", "Invite or remove people in Acme and change their roles on its People page on MausBot Cloud.",
+  all(html, ["People and plan", "Invite or remove people in Acme and change their roles on its People page on Edu Bot Cloud.",
     'href="https://cloud.example.com/cloud/team/team-acme/people?do=invite"', "Invite people"]);
-  none(html, ["managed in the MausBot app on your computer", "Plan page", "seats"]);
+  none(html, ["managed in the Edu Bot app on your computer", "Plan page", "seats"]);
   const owner = renderToStaticMarkup(createElement(TeamPeopleCard, { team, admin: true, owner: true }));
   all(owner, ["Invite or remove people in Acme, add seats and change roles", 'href="https://cloud.example.com/cloud/team/team-acme/people?do=invite"',
     'href="https://cloud.example.com/cloud/team/team-acme/people?do=seats"', "Add seats"]);

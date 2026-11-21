@@ -67,10 +67,10 @@ describe("routine list", () => {
     setLocale("en");
   });
   it("says a coded run result in the app language, and the run's own words otherwise", () => {
-    const waiting = { ...run, output: undefined, attention: "Starting again shortly after OpenMausBot restarted while it ran", attentionCode: "routines.server.retryAfterRestart" } as RoutineRun;
-    expect(list({ runs: [waiting] })).toContain("Starting again shortly after OpenMausBot restarted while it ran");
+    const waiting = { ...run, output: undefined, attention: "Starting again shortly after Edu Bot restarted while it ran", attentionCode: "routines.server.retryAfterRestart" } as RoutineRun;
+    expect(list({ runs: [waiting] })).toContain("Starting again shortly after Edu Bot restarted while it ran");
     setLocale("pt-br");
-    expect(list({ runs: [waiting] })).toContain("Vai começar novamente em instantes: o OpenMausBot reiniciou durante a execução");
+    expect(list({ runs: [waiting] })).toContain("Vai começar novamente em instantes: o Edu Bot reiniciou durante a execução");
     expect(list()).toContain("Brief prepared.");
     setLocale("en");
   });

@@ -20,11 +20,11 @@ const IDENTITY_PAGE: Partial<Record<SettingsPage["id"], string>> = { overview: "
  * place's page there, or in a browser; else the one kind of place that has it. */
 const SEEN = { here: {}, elsewhere: { here: false }, browser: { desktop: false, here: false, home: false, cloud: true } } satisfies Record<string, Partial<SettingsContext>>;
 const SEEN_ON: Record<string, string> = {
-  here: "the desktop app, on this computer's own page", "here,elsewhere": "the desktop app", "elsewhere,browser": "a Cloud's or server's own page", browser: "MausBot in a browser",
+  here: "the desktop app, on this computer's own page", "here,elsewhere": "the desktop app", "elsewhere,browser": "a Cloud's or server's own page", browser: "Edu Bot in a browser",
 };
 const KINDS: ReadonlyArray<{ only: string; ctx: Partial<SettingsContext> }> = [
   { only: "a team's or a self-hosted server's Settings, for admins", ctx: { team: true } },
-  { only: "a company's managed MausBot", ctx: { organization: true } },
+  { only: "a company's managed Edu Bot", ctx: { organization: true } },
   { only: "a place with the skills library on", ctx: { skills: true } },
   { only: "a server that manages installations", ctx: { installations: true } },
 ];
@@ -37,7 +37,7 @@ function onlyOn(shows: (ctx: SettingsContext) => boolean): string | undefined {
 }
 
 function fill(text: string): string {
-  return text.replaceAll("{app}", "MausBot").replaceAll("{place}", "My Cloud");
+  return text.replaceAll("{app}", "Edu Bot").replaceAll("{place}", "My Cloud");
 }
 
 /** The places, in Settings' own order, with their labels read from `labels` (the English catalog). */

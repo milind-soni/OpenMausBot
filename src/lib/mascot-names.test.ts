@@ -12,7 +12,7 @@ afterEach(() => {
 
 describe("mascot names", () => {
   const keys = [
-    ...BOT_BODY_IDS.map((id) => `mascot.body.${id}`),
+    ...BOT_BODY_IDS.filter(id => id !== "cursor").map((id) => `mascot.body.${id}`),
     ...MAUS_COLOR_NAMES.map((color) => `mascot.color.${color}`),
     ...PICKABLE_STATES.map((state) => `mascot.expression.${state}`),
   ];

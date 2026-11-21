@@ -28,7 +28,7 @@ import { LearnMore, SettingRow, SettingsFoldRow, SettingsGroup, SettingsLinkRow,
 import { Layer } from "./Layer";
 import { DialogTitle } from "./settings/SettingsDialog";
 export { DialogTitle };
-import { productName } from "../lib/brand";
+import { COMPANION_APP_NAME, productName } from "../lib/brand";
 import { useStore } from "@/state/store";
 
 export {
@@ -466,7 +466,7 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
       ) : (
         <SettingsGroup label={t("devices.paired")} block="paired" actions={pairButton}>
           {showTunnelRetiredNotice(c.account, state) && (
-            <p role="status" data-devices-notice="tunnel-retired" className="px-4 text-[12px] leading-4 text-warning">{t("remote.devices.retiredShort")}</p>
+            <p role="status" data-devices-notice="tunnel-retired" className="px-4 text-[12px] leading-4 text-warning">{t("remote.devices.retiredShort", { app: COMPANION_APP_NAME })}</p>
           )}
           {remoteBlocked && <p role="status" className="px-4 text-[12px] leading-4 text-ink-secondary">{remoteBlocked}</p>}
           {state.pairing && <SettingsRows><OpenCodeRow c={c} state={state} /></SettingsRows>}
@@ -535,7 +535,7 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
  * desktop app never opens a store or a download. The code itself, and "scan this code", appear only in the dialog. */
 export function PairRow({ reason, children }: { reason?: string | null; children: React.ReactNode }) {
   return (
-    <SettingRow title={t("phone.pair.rowTitle")} subtitle={t("phone.pair.rowLine", { app: productName() })} message={reason ?? undefined}>
+    <SettingRow title={t("phone.pair.rowTitle")} subtitle={t("phone.pair.rowLine", { app: COMPANION_APP_NAME })} message={reason ?? undefined}>
       {children}
     </SettingRow>
   );

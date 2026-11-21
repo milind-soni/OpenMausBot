@@ -29,7 +29,7 @@ describe("data-format check", () => {
     const report = runDoctor({ dataDir: data, version: "0.1.170", mode: "command", fix: true, now: () => NOW, pidAlive: () => false,
       checks: [dataFormatCheck(), tempFilesCheck()], acquireLease: () => ({ release() {} }) });
     expect(report.fix).toMatchObject({ asked: true, ran: false });
-    expect(report.fix.why).toContain("newer OpenMausBot");
+    expect(report.fix.why).toContain("newer Edu Bot");
     expect(report.checks.map((result) => result.status)).toEqual(["problem", "problem"]);
     expect(existsSync(stray)).toBe(true);
     expect(existsSync(join(data, DOCTOR_BACKUPS_DIR))).toBe(false);

@@ -166,7 +166,7 @@ describe("Pair a device", () => {
     const input = (route: string) => html.match(new RegExp(`<input[^>]*value="${route}"[^>]*>`))![0];
     expect(input("wifi")).toContain('checked=""');
     expect(input("relay"), "signed out: Anywhere can't be chosen yet, and says why").toContain('disabled=""');
-    expect(html).toContain("Needs a free MausBot sign-in.");
+    expect(html).toContain("Needs a free Edu Bot sign-in.");
     expect(html).toContain('aria-label="Close"');
     expect(html).not.toContain('type="checkbox"');
     expect(html).toContain(">Turn on and show code<");
@@ -187,7 +187,7 @@ describe("route words", () => {
     expect(routeStateText(off, 0)).toBe("Off");
     expect(routeStateText({ on: true, since: NOV_7 }, 0)).toBe("On · waiting for a paired device");
     expect(reachLine({ routes: routes() })).toBe("No way in is on yet.");
-    expect(reachLine({ routes: routes({ tailscale: true, relay: true }) })).toBe("Reaches this computer on your tailnet and anywhere through MausBot.");
+    expect(reachLine({ routes: routes({ tailscale: true, relay: true }) })).toBe("Reaches this computer on your tailnet and anywhere through Edu Bot.");
   });
 });
 

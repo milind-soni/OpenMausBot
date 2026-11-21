@@ -215,7 +215,7 @@ function preloadStandIn(ipcBase: string, localOrigin: string, tab = "window"): s
     removeListener: (channel, listener) => { listeners.get(channel)?.delete(listener); },
   };
   const electron = { contextBridge: { exposeInMainWorld: (key, value) => { window[key] = value; } }, ipcRenderer, webUtils: { getPathForFile: () => "" } };
-  const process = { platform: "darwin", argv: ["--omb-local-origin=${localOrigin}", "--omb-company-desktop=1"] };
+  const process = { platform: "darwin", argv: ["--omb-local-origin=${localOrigin}", "--omb-company-desktop=1", "--omb-managed-cloud=1"] };
   (function (require, process) {
 ${PRELOAD}
   })(() => electron, process);

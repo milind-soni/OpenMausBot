@@ -124,7 +124,7 @@ describe("a bot on the person's own Cloud asks to turn on what it needs from the
     const call = f.asks.ask({ threadId: "t1", bot, need: "screen", why: "Open Excel" }, 30_000);
     await vi.advanceTimersByTimeAsync(20_000);
     expect(f.card()).toMatchObject({ options: ["Not now"], computerAsk: { reason: "closed", device: "PC" } });
-    expect(f.card().subtitle).toContain("MausBot isn't open on your PC. Open it there and Scout carries on.");
+    expect(f.card().subtitle).toContain("Edu Bot isn't open on your PC. Open it there and Scout carries on.");
     await f.present(desktop({ paused: true }));
     expect(f.card()).toMatchObject({ options: ["Turn on", "Not now"], computerAsk: { reason: "paused" } });
     f.state.online = [lends()];

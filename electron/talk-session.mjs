@@ -4,15 +4,15 @@ import { TalkServerError } from "./talk-server.mjs";
 export const TALK_TIMING = Object.freeze({ replyHideMs: 12_000, noticeHideMs: 4_000, stillWorkingMs: 120_000, hoverRecheckMs: 500, maxListenMs: 60_000 });
 
 export const TALK_TEXT = Object.freeze({
-  busy: "Voice is in use in MausBot",
-  serverDown: "Open MausBot to talk",
-  starting: "MausBot is still starting. Try again in a moment.",
-  noMausbot: "Set up MausBot first, then try again.",
-  moved: "MausBot lives on My Cloud now — talk to it there",
+  busy: "Voice is in use in Edu Bot",
+  serverDown: "Open Edu Bot to talk",
+  starting: "Edu Bot is still starting. Try again in a moment.",
+  noMausbot: "Set up Edu first, then try again.",
+  moved: "Edu lives on My Cloud now — talk to it there",
   permission: "Talking needs Microphone + Speech Recognition access — System Settings → Privacy & Security.",
   dictationOff: "Turn on Dictation in System Settings → Keyboard, then try again.",
   unavailable: "Talking couldn't start. Try again.",
-  failed: "MausBot couldn't take that · Open chat",
+  failed: "Edu couldn't take that · Open chat",
 });
 
 const SPEECH_PROBLEMS = new Map([

@@ -224,8 +224,8 @@ describe("Move from Grok Bot", () => {
     await act(async () => button("Get the link")!.click());
     await tick();
     expect(host.querySelector<HTMLInputElement>('input[aria-label="Link for Grok Bot"]')!.value).toBe(link);
-    expect(shown()).toContain("open Connect apps, choose Add a custom connector at the bottom, name it MausBot, paste this as the Server URL, then choose Add plugin");
-    await act(async () => button("Add the MausBot bot in Grok Bot")!.click());
+    expect(shown()).toContain("open Connect apps, choose Add a custom connector at the bottom, name it Edu Bot, paste this as the Server URL, then choose Add plugin");
+    await act(async () => button("Add the Edu Bot bot in Grok Bot")!.click());
     expect(openExternal).toHaveBeenCalledWith("https://x.ai/bot/3i4Tvjckmdk05UwntFeNo");
     expect(host.querySelector("[data-grok-move-arrived]")).toBeNull();
 
@@ -233,7 +233,7 @@ describe("Move from Grok Bot", () => {
     await act(async () => { vi.advanceTimersByTime(3_000); });
     await tick();
     expect(shown()).toContain("Arrived from Grok Bot: Job Search");
-    expect(shown()).toContain("The link works for an hour, while MausBot stays open.");
+    expect(shown()).toContain("The link works for an hour, while Edu Bot stays open.");
     await act(async () => { vi.advanceTimersByTime(3_000); });
     await tick();
     expect(calls.at(-1)).toBe("GET /api/setup-import/grok/connector?after=1");

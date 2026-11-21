@@ -9,7 +9,7 @@ import { createManagedDesktopStore } from "./managed-desktop.mjs";
 const DAY = 24 * 60 * 60_000, HOUR = DAY / 24;
 const ENABLE = { enabled: true, confirmation: "BACK UP THIS WORKSPACE DAILY" };
 const REMOVED = "The saved daily backup schedule couldn't be read, so it was turned off. Turn daily backups on again.";
-const WAITING = "The saved daily backup schedule can't be read right now. OpenMausBot tries again every minute.";
+const WAITING = "The saved daily backup schedule can't be read right now. Edu Bot tries again every minute.";
 const RESUME_DELAY = 15 * 60_000;
 const deferred = () => { let resolve; const promise = new Promise(yes => { resolve = yes; }); return { promise, resolve }; };
 const turn = () => new Promise(resolve => setImmediate(resolve));

@@ -712,7 +712,7 @@ export function createOneHome(deps) {
     const waiting = () => journal.retryAt > now() && !(cameBack && !journal.hourly);
     if (journal && cloud && cloud.account !== journal.cloud.account) {
       // Another account's Cloud never moves this computer's copy, nor lifts its freeze once the move is done.
-      if (FROZEN.has(journal.phase)) await failed(journal, tagged("Another MausBot Cloud account signed in.", "other_account"), true);
+      if (FROZEN.has(journal.phase)) await failed(journal, tagged("Another Edu Bot Cloud account signed in.", "other_account"), true);
       await deps.release?.();
       return;
     }

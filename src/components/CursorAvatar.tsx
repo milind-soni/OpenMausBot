@@ -45,7 +45,7 @@ export interface CursorSilhouette {
   anchor: { x: number; y: number; scale: number }
 }
 
-const { id: _cursorBodyId, ...cursorSilhouette } = MASCOT_BODIES.cursor;
+const { id: _cursorBodyId, ...cursorSilhouette } = MASCOT_BODIES.squircle;
 export const DEFAULT_SILHOUETTE: CursorSilhouette = cursorSilhouette;
 
 export const DEFAULT_GRADIENT: [string, string, string] = ["#9FE6B5","#3FAE6E","#1C7A4C"]

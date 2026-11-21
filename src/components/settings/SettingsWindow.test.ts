@@ -71,9 +71,15 @@ describe("the Settings window", () => {
   it("says which place a place page changes, and that account and app pages stay the same, without “place” for a person with one place", () => {
     expect(render("phone")).toContain("This computer");
     const account = render("account");
-    expect(account).toContain("Your MausBot account");
+    expect(account).toContain("Your Edu Bot account");
     expect(account).not.toContain("Same on every place");
-    expect(render("appearance")).toContain("MausBot on this device");
+    expect(render("appearance")).toContain("Edu Bot on this device");
+  });
+
+  it("offers local account settings and manual update information without Cloud or an updater", () => {
+    expect(render("account")).not.toContain("Sign in to Edu Bot");
+    expect(navPages(render("overview"))).not.toContain("plan");
+    expect(render("app")).toContain("Automatic updates are off. Find releases on GitHub.");
   });
 
   const SIMPLE_NAV = ["overview", "phone", "ai", "vault", "usage", "transfer", "account", "plan", "app", "appearance"];
@@ -83,10 +89,10 @@ describe("the Settings window", () => {
     ["My Cloud's rail in the desktop window", () => { vi.stubGlobal("window", { ogb: { platform: "darwin", cloudPlan: { state: () => new Promise(() => {}) }, workspaces: { state: () => new Promise(() => {}), places: () => new Promise(() => {}) } } }); fixture.config = { cloudHome: true }; }],
     ["My Cloud in a browser", () => { vi.stubGlobal("window", {}); fixture.config = { cloudHome: true }; }],
   ];
-  it.each(SIMPLE_PEOPLE)("shows Simple's ten entries for %s", (_who, set) => {
+  it.each(SIMPLE_PEOPLE)("shows the applicable Simple entries for %s", (who, set) => {
     set();
     fixture.advanced = false;
-    expect(navPages(render("overview"))).toEqual(SIMPLE_NAV);
+    expect(navPages(render("overview"))).toEqual(who === "My Cloud in a browser" ? SIMPLE_NAV.filter(page => page !== "plan") : SIMPLE_NAV);
     fixture.advanced = true;
     const advanced = navPages(render("overview"));
     for (const page of ["bots", "desktops", "data", "general"]) expect(advanced).toContain(page);

@@ -50,7 +50,7 @@ const button = (label: string) => [...host.querySelectorAll("button")].find((nod
 describe("the connection check", () => {
   it("in Settings, shows the headline closed, and the steps and Copy diagnostics open", async () => {
     flushSync(() => root.render(createElement(RemoteAccessCheckRow, { account, state })));
-    expect(host.querySelector("[data-remote-access-headline]")?.textContent).toBe("MausBot Relay didn't answer.");
+    expect(host.querySelector("[data-remote-access-headline]")?.textContent).toBe("Edu Bot Relay didn't answer.");
     expect(host.querySelector("[data-remote-access-check]")).toBeNull();
     flushSync(() => button("Connection check")!.click());
     const steps = [...host.querySelectorAll("[data-step]")].map((node) => `${node.getAttribute("data-step")}=${node.getAttribute("data-result")}`);
@@ -68,7 +68,7 @@ describe("the connection check", () => {
     flushSync(() => root.render(createElement(PairingFailureCheck, { account: { available: false, status: "signed-out" }, state, setupTimedOut: false })));
     expect(host.querySelector("[data-remote-access-headline]")).toBeNull();
     expect(host.querySelector('[data-step="account"]')?.getAttribute("data-result")).toBe("failed");
-    expect(host.textContent).toContain("This computer can't reach MausBot right now.");
+    expect(host.textContent).toContain("This computer can't reach Edu Bot right now.");
     expect(button("Copy diagnostics")).not.toBeNull();
   });
 });

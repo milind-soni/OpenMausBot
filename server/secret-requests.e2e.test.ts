@@ -163,7 +163,7 @@ it("keeps a file secret and a ref secret out of every record, and the bot uses e
   expect(askedFile).toEqual({ isError: false, text: expect.stringMatching(/^A secure card for Stripe secret key is now in this conversation/u) });
   const fileCard = (await cards()).at(-1);
   expect(fileCard.secret).toMatchObject({ target: "customSecret", label: "Stripe secret key", placeholder: "sk_test_…", helpUrl: "", delivery: "file", reason: "To create test charges." });
-  expect(fileCard.secret.description).toBe("To create test charges. Ledger's commands can read it from a private file for 24 hours; it is never added to chat. OpenMausBot keeps it safely, so Ledger can use it again without asking you.");
+  expect(fileCard.secret.description).toBe("To create test charges. Ledger's commands can read it from a private file for 24 hours; it is never added to chat. Edu Bot keeps it safely, so Ledger can use it again without asking you.");
   expect(await save(fileCard.id, "")).toMatchObject({ status: 400 });
   expect(await save(fileCard.id, FILE_CANARY)).toMatchObject({ status: 200, body: { provided: true } });
   expect(await save(fileCard.id, FILE_CANARY)).toMatchObject({ status: 409, body: { error: "this secret was already saved" } });
@@ -180,7 +180,7 @@ it("keeps a file secret and a ref secret out of every record, and the bot uses e
   // A one-use secretRef for mcp_server.
   await tools.call("request_credential", { label: "Notion key", reason: "For Notion's MCP server.", delivery: "ref" });
   const refCard = (await cards()).at(-1);
-  expect(refCard.secret.description).toBe("For Notion's MCP server. Ledger gets a one-use reference for OpenMausBot's own tools and never sees it. OpenMausBot keeps it safely, so Ledger can use it again without asking you.");
+  expect(refCard.secret.description).toBe("For Notion's MCP server. Ledger gets a one-use reference for Edu Bot's own tools and never sees it. Edu Bot keeps it safely, so Ledger can use it again without asking you.");
   expect(await save(refCard.id, REF_CANARY)).toMatchObject({ status: 200, body: { provided: true } });
   const refText = (await tools.call("request_credential", { label: "Notion key", reason: "For Notion's MCP server.", delivery: "ref" })).text;
   const ref = /secret-ref:[0-9a-f]{32}/u.exec(refText)?.[0];

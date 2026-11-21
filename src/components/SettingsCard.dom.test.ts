@@ -91,7 +91,7 @@ describe("a settings card in chat", () => {
   it("on a Cloud's page, a browser or another computer's window, says where it is set and draws no switch", async () => {
     f.here = false;
     const chat = await show();
-    expect(chat.querySelector("[data-settings-card-elsewhere]")!.textContent).toBe("This is set on the computer itself: open MausBot there, then Settings → Phone & devices → Your other computers.");
+    expect(chat.querySelector("[data-settings-card-elsewhere]")!.textContent).toBe("This is set on the computer itself: open Edu Bot there, then Settings → Phone & devices → Your other computers.");
     expect(chat.querySelector('[role="switch"]')).toBeNull();
     expect(chat.querySelector("button")).toBeNull();
     expect(rowOf(chat)).toBeNull();

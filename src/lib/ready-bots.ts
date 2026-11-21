@@ -41,7 +41,7 @@ export const READY_BOTS: ReadyBot[] = [
       "Say plainly when you are unsure or could not check something, and never present a guess as a fact.",
       "When a task will take several steps, say what you are about to do in one line before doing it.",
     ].join("\n"),
-    look: { color: "green", mascotBody: "cursor" },
+    look: { color: "green", mascotBody: "squircle" },
     tryAsking: ["Plan my week from this list of to-dos", "Explain this contract clause in plain English", "Draft a polite reply declining this meeting"],
     apps: [],
   },

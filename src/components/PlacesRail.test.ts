@@ -271,20 +271,20 @@ it("Connect to a server says how another computer's desktop app is opened from h
   await click(host.querySelector("[data-rail-add]"));
   await click(document.querySelector('[data-place-add-choice="server"]'));
   const form = document.querySelector('[data-place-add="own-server"]')!;
-  expect(form.querySelector("[data-connect-other-computer]")?.textContent).toBe("For another computer running the MausBot app: on that computer, open Settings → Phone & devices → Your other computers.");
+  expect(form.querySelector("[data-connect-other-computer]")?.textContent).toBe("For another computer running the Edu Bot app: on that computer, open Settings → Phone & devices → Your other computers.");
   await type(form.querySelector("[data-own-server-link]"), "192.168.1.30:8799");
   await settle();
   const line = form.querySelector("[data-connect-problem]")?.textContent ?? "";
-  expect(line).toContain("192.168.1.30:8799 is a MausBot desktop app. To open it from here, turn on Tailscale and Your other computers in its Settings → Phone & devices, then use the link shown there.");
+  expect(line).toContain("192.168.1.30:8799 is an Edu Bot desktop app. To open it from here, turn on Tailscale and Your other computers in its Settings → Phone & devices, then use the link shown there.");
   expect(line).toContain("My Cloud");
-  expect(line).not.toMatch(/can't connect to another|isn't a MausBot server/);
+  expect(line).not.toMatch(/can't connect to another|isn't an Edu Bot server/);
   expect((form.querySelector("[data-own-server-connect]") as HTMLButtonElement).disabled).toBe(true);
   await type(form.querySelector("[data-own-server-link]"), "123456");
   await settle();
   const code = form.querySelector("[data-connect-problem]")?.textContent ?? "";
   expect(code).toContain("That code is for the phone app. To open that computer from here, turn on Tailscale and Your other computers in its Settings → Phone & devices, then use the link shown there.");
   expect(code).toContain("My Cloud");
-  expect(code).not.toMatch(/can't connect to another|older MausBot/);
+  expect(code).not.toMatch(/can't connect to another|older Edu Bot/);
 });
 
 it("an address typed key by key stays in its box; a pasted one moves on to the code", async () => {
@@ -330,7 +330,7 @@ it("Connect to a server takes an address and a code typed apart: a code pasted a
   await type(form.querySelector("[data-own-server-link]"), "192.168.1.20:8799");
   await settle();
   expect(probe).toHaveBeenLastCalledWith("192.168.1.20:8799", "ABCD-EFGH-JKLM");
-  expect(form.querySelector("[data-connect-found]")?.textContent).toBe("✓ kitchen-box · MausBot 0.1.147 · Private network, not encrypted. Fine on your own network or Tailscale.");
+  expect(form.querySelector("[data-connect-found]")?.textContent).toBe("✓ kitchen-box · Edu Bot 0.1.147 · Private network, not encrypted. Fine on your own network or Tailscale.");
   expect(form.querySelector("[data-connect-problem]")).toBeNull();
   const button = form.querySelector("[data-own-server-connect]") as HTMLButtonElement;
   expect([button.disabled, button.textContent]).toEqual([false, "Connect to kitchen-box"]);

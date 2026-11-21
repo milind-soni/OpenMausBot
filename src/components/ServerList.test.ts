@@ -50,7 +50,7 @@ async function mount() {
 
 it("each saved server says how it is reached and how it is doing, with one thing to do when it needs the person", async () => {
   await mount();
-  expect(row("cloud").querySelector("[data-server-where]")?.textContent).toBe("Managed by MausBot");
+  expect(row("cloud").querySelector("[data-server-where]")?.textContent).toBe("Managed by Edu Bot");
   expect(buttonIn(row("cloud"), "Remove My Cloud"), "My Cloud has no Remove").toBeUndefined();
   expect(row("vps").querySelector("[data-server-where]")?.textContent).toBe("maus.example.com · HTTPS");
   expect(row("mini").querySelector("[data-server-where]")?.textContent).toBe("192.168.1.50:8799 · Private network, not encrypted");
@@ -67,7 +67,7 @@ it("the update note shows only for a server behind this app, with the command th
   await mount();
   const notes = [...host.querySelectorAll("[data-server-behind]")];
   expect(notes).toHaveLength(1);
-  expect(notes[0]!.textContent).toContain("hetzner-1 runs MausBot 0.1.140. This app is 0.1.147.");
+  expect(notes[0]!.textContent).toContain("hetzner-1 runs Edu Bot 0.1.140. This app is 0.1.147.");
   expect(notes[0]!.textContent).toContain("Copy update command");
   await click(buttonIn(notes[0]!, "Hide this note"));
   expect(host.querySelector("[data-server-behind]")).toBeNull();

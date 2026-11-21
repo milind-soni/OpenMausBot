@@ -3326,7 +3326,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     await instance.adapter.sendTurn({ threadId: "t-generic-elicitation", text: "go" });
     await recorder.until((event) => event.type === "turn.completed");
     expect(recorder.events.find((event) => event.type === "runtime.notice")).toMatchObject({
-      message: "An MCP server asked for input OpenMausBot can't show yet, so the request was declined.",
+      message: "An MCP server asked for input Edu Bot can't show yet, so the request was declined.",
       text: { key: "chat.notice.codexElicitationDeclinedGeneric" },
     });
   });
@@ -3365,7 +3365,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(recorder.events.some((event) => event.type === "request.opened")).toBe(false);
     expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ action: "decline" });
     expect(recorder.events.find((event) => event.type === "runtime.notice")).toMatchObject({
-      message: "example asked for input OpenMausBot can't show yet, so the request was declined.",
+      message: "example asked for input Edu Bot can't show yet, so the request was declined.",
       text: { key: "chat.notice.codexElicitationDeclined", params: { server: "example" } },
     });
   });

@@ -9,7 +9,7 @@ import { setLocale } from "@/lib/i18n";
 
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: { host: { platform: "darwin" } }, ready: true }) }));
 vi.mock("@/state/store", async original => ({ ...await original<typeof import("@/state/store")>(), useStore: () => ({ state: { bots: [], config: {} }, dispatch: vi.fn() }) }));
-import { CLOUD_CALL_URL, CloudCancelPlan, type CloudRenewalActions } from "./CloudCancelPlan";
+import { CloudCancelPlan, type CloudRenewalActions } from "./CloudCancelPlan";
 import { CloudAccountSettings, CloudPlanOnCloud } from "./CloudAccountSettings";
 
 const NOW = Date.UTC(2026, 9, 28, 12), DAY = 86_400_000, END = NOW + 5 * DAY;
@@ -57,9 +57,8 @@ describe("the cancel sheet", () => {
     expect(chips()).toEqual([["Missing a feature", "false"], ["Too expensive", "false"], ["Hard to set up", "false"], ["Didn't work as I expected", "false"],
       ["Not using it right now", "false"], ["Something else", "false"]]);
     expect(document.activeElement?.textContent).toBe("Missing a feature");
-    expect([...sheet()!.querySelectorAll("label")].map(label => label.textContent)).toEqual(["What did you expect MausBot to do? (optional)", "What could we have done better? (optional)"]);
-    const call = sheet()!.querySelector<HTMLAnchorElement>(`a[href="${CLOUD_CALL_URL}"]`)!;
-    expect([call.textContent, call.getAttribute("target"), call.parentElement!.textContent]).toEqual(["Book 30 minutes with Milind", "_blank", "Rather talk it through? Book 30 minutes with Milind"]);
+    expect([...sheet()!.querySelectorAll("label")].map(label => label.textContent)).toEqual(["What did you expect Edu Bot to do? (optional)", "What could we have done better? (optional)"]);
+    expect(sheet()!.querySelector("a[href]")).toBeNull();
     // One tap picks a reason; the same tap again lets it go.
     await click(button("Too expensive"));
     await click(button("Too expensive"));
@@ -70,7 +69,7 @@ describe("the cancel sheet", () => {
     expect(actions.cancel).toHaveBeenCalledExactlyOnceWith({ answer: "setup", expected: "To answer my email by itself." });
     expect(sheet()!.querySelector("[role='status']")?.textContent).toBe(`Cancelled. Your trial ends on ${day(END)}, and nothing is charged.`);
     expect(text()).toContain("The Cloud stops then. Its files are kept 3 days, then deleted.");
-    expect(text()).toContain("Thanks. Milind and Omkar read every answer, and we'll write back if it's something we can build.");
+    expect(text()).toContain("Thanks. The Edu Bot maintainers read every answer, and we'll write back if it's something we can build.");
     expect(changed).not.toHaveBeenCalled();
     // Changed your mind? Keep my plan: renewal back on, the sheet closes and the plan is read again.
     expect(text()).toContain("Changed your mind?");

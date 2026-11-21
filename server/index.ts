@@ -4038,7 +4038,7 @@ const botLink = createBotLinkHost({ roomLine: (threadId, key, params) => serverL
     outward: node => {
       const followup = node.parentId || node.groupId ? undefined : followupAtBoot(node.threadId);
       if (followup) {
-        followupEndedRoots.set(node.id, followup === "pending" ? "turn interrupted — OpenMausBot restarted" : undefined);
+        followupEndedRoots.set(node.id, followup === "pending" ? "turn interrupted — Edu Bot restarted" : undefined);
         return [followup === "pending" ? "queued follow-up waiting" : "queued follow-up dispatched"];
       }
       return outwardActions(turnRows(node));
@@ -8831,10 +8831,10 @@ store.reconcileInterruptedGroupGoals((runId, threadId) => {
   );
   const detail = run.output ?? run.error ?? (
     status === "completed"
-      ? "The scheduled team goal completed before OpenMausBot restarted."
+      ? "The scheduled team goal completed before Edu Bot restarted."
       : status === "stopped"
         ? "The scheduled team goal was stopped."
-        : "OpenMausBot restarted before this scheduled team goal finished."
+        : "Edu Bot restarted before this scheduled team goal finished."
   );
   return { status, detail, finishedAt: run.finishedAt ?? groupGoalRecoveryAt };
 });

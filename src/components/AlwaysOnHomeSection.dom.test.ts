@@ -152,7 +152,7 @@ describe("on the spare computer", () => {
     await vi.waitFor(() => expect($("[data-always-on-details]")).not.toBeNull());
     expect(text()).toContain("Use this computer as an always-on home");
     expect(text()).toContain("Updates come through your package manager");
-    expect(text()).toMatch(/Keeps running when its window is closed\. Open \S+ again to bring the window back; to quit, press Alt and choose File → Quit\./);
+    expect(text()).toMatch(/Keeps running when its window is closed\. Open Edu Bot again to bring the window back; to quit, press Alt and choose File → Quit\./);
     expect($("[data-always-on-system]")).toBeNull();
   });
 });

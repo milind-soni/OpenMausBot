@@ -226,7 +226,7 @@ describe("desktop companion pairing", () => {
         requestId: "request-https-03",
         fetchImpl,
       }),
-    ).rejects.toThrow("OpenMausBot HTTPS companion address");
+    ).rejects.toThrow("Enter the Edu Bot HTTPS companion address");
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 

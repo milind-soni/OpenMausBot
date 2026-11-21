@@ -297,7 +297,7 @@ describe("running a request again where several people write", () => {
     for (const [by, text] of [[PRIYA, "Draft the launch post"], [PRIYA, "Draft the launch note"]] as const) {
       const { store, threadId, state, edit } = await fixture({ ...team({ person: by, admin: false }), ...startedByOther });
       const request = asked(store, threadId);
-      store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: "turn interrupted — OpenMausBot restarted", ok: false } });
+      store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: "turn interrupted — Edu Bot restarted", ok: false } });
       expect((await edit(request.id, { threadId, text })).status).toBe(202);
       expect(state.started).toMatchObject([{ text, opts: { editedMessageId: request.id } }]);
     }

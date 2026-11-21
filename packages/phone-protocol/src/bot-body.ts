@@ -14,7 +14,8 @@ export const botBodySchema = z.enum(BOT_BODY_IDS);
 
 /** Runtime-safe read of an untrusted persisted or streamed body id. */
 export function botBodyId(value: unknown): BotBodyId {
-  return botBodySchema.safeParse(value).data ?? DEFAULT_MASCOT_BODY;
+  const id = botBodySchema.safeParse(value).data;
+  return id === "cursor" ? DEFAULT_MASCOT_BODY : id ?? DEFAULT_MASCOT_BODY;
 }
 
 export function isCarvedBody(value: unknown): value is CarvedBodyId {

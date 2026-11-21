@@ -73,7 +73,7 @@ describe("Settings → General", () => {
   };
   it("lists every allowance with its meter and the plan, and offers each bigger plan", () => {
     const { html, tree, onUpgrade } = section(usage({ tier: "starter", upgrades: [{ tier: "max", amount: 9900 }, { tier: "pro", amount: 4900 }] }));
-    for (const text of ["MausBot Cloud usage", "What your Starter plan includes this month", "285 of 300 hours", "12,000 of 60,000 characters", "41.2 of 100 GB",
+    for (const text of ["Edu Bot Cloud usage", "What your Starter plan includes this month", "285 of 300 hours", "12,000 of 60,000 characters", "41.2 of 100 GB",
       "Resets on Nov 1.", "Upgrade to Pro · $49/month", "Upgrade to Max · $99/month"]) expect(html).toContain(text);
     expect(html.match(/role="progressbar"/g)).toHaveLength(3);
     button(tree, "Upgrade to Max")!.props.onClick();

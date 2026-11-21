@@ -10,14 +10,14 @@ There is nothing to turn on. The bot follows its built-in **Publish to Netlify**
 
 ## A page, or a site
 
-- **A page, report or dashboard** to look at or share: the bot shows it in the chat and can share it at a MausBot link, with no account needed. A shared page holds static files, up to 5 MB and 200 files.
+- **A page, report or dashboard** to look at or share: the bot shows it in the chat and can share it at an Edu Bot link, with no account needed. A shared page holds static files, up to 5 MB and 200 files.
 - **A site or app for people outside**, something bigger, or anything that needs forms that save, an API, a database or a backend: the bot uses Netlify.
 
 ## The token
 
 The first time, the bot shows a secure card asking for a **Netlify personal access token**. Create one in Netlify under **User settings → Applications → Personal access tokens → New access token** ([open that page](https://app.netlify.com/user/applications#personal-access-tokens)) and paste it into the card, never into the chat.
 
-MausBot keeps the token in its [Vault](/docs/security/permissions-and-secrets#the-vault) for that bot, so later publishes need no new card. The bot never sees the token: it gets a private file that only its publish command reads. The token is not printed, not written into the site and not kept with the project. If you reset your Netlify password, Netlify cancels the token and the bot asks for a new one.
+Edu Bot keeps the token in its [Vault](/docs/security/permissions-and-secrets#the-vault) for that bot, so later publishes need no new card. The bot never sees the token: it gets a private file that only its publish command reads. The token is not printed, not written into the site and not kept with the project. If you reset your Netlify password, Netlify cancels the token and the bot asks for a new one.
 
 ## What gets published
 
@@ -34,7 +34,7 @@ The sites live in your Netlify account: rename, remove or give them a domain the
 
 ## Bigger builds
 
-A plain site builds in seconds. A framework app with a large install may be too much for a small MausBot Cloud. When your plan has a [cloud computer](/docs/computers/cloud-and-vps), the bot can build there and bring back only the finished files; it tells you first, because a cloud computer uses your plan's hours while it is on. The publish itself always runs where the token was delivered, never on the cloud computer.
+A plain site builds in seconds. A framework app with a large install may be too much for a small Edu Bot Cloud. When your plan has a [cloud computer](/docs/computers/cloud-and-vps), the bot can build there and bring back only the finished files; it tells you first, because a cloud computer uses your plan's hours while it is on. The publish itself always runs where the token was delivered, never on the cloud computer.
 
 ## Functions, a database, a backend
 

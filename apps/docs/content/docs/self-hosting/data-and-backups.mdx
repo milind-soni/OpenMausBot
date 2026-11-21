@@ -1,10 +1,10 @@
 ---
 title: Data and backups
-description: Know what MausBot stores locally and what to preserve.
+description: Know what Edu Bot stores locally and what to preserve.
 icon: DatabaseBackup
 ---
 
-MausBot keeps its application state in its data folder, including configuration, transcripts, message attachments, device pairing state, and the SQLite message store. Where that folder is:
+Edu Bot keeps its application state in its data folder, including configuration, transcripts, message attachments, device pairing state, and the SQLite message store. Where that folder is:
 
 - The desktop app and an npm install: `~/.openmausbot` (`OMB_DATA_DIR` names another). In the desktop app, workspaces you add are in `~/.openmausbot-profiles/` (`<that folder>-profiles` with `OMB_DATA_DIR`); once this computer's bots have moved to My Cloud, This Mac's (or This PC's) is there too, as `default`, and `~/.openmausbot` keeps the copy from before the move.
 - The Docker image: `/data/.openmausbot` inside the container, on its `data` volume (named `deploy_data` with path B's `deploy/docker-compose.yml`, `openmausbot_data` with the repository's root `compose.yaml`).
@@ -111,7 +111,7 @@ paths are not copied or rewritten; check them when moving between computers.
 
 ## Filesystem-level backups
 
-Close MausBot before taking a filesystem-level backup so SQLite and configuration files are captured consistently. Preserve the entire `.openmausbot` directory rather than selecting individual database files.
+Close Edu Bot before taking a filesystem-level backup so SQLite and configuration files are captured consistently. Preserve the entire `.openmausbot` directory rather than selecting individual database files.
 
 Raw filesystem snapshots differ from Settings exports: they may include saved
 credentials, CLI homes and browser sessions. A Docker snapshot of the whole

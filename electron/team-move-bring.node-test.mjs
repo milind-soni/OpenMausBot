@@ -82,7 +82,7 @@ test("moves nothing until the person agrees in main's own confirm, which says th
     assert.equal(journal.value, null);
     assert.equal(asked[0].message, "Move Atlas to Acme?");
     assert.match(asked[0].detail, /no way back/);
-    assert.match(asked[0].detail, /what Atlas remembers, your connections, and MausBot/);
+    assert.match(asked[0].detail, /what Atlas remembers, your connections, and Edu/);
     assert.deepEqual(asked[0].buttons, ["Move to Acme", "Cancel"]);
   } finally { done(); }
 });
@@ -143,7 +143,7 @@ test("the native confirm and IPC refusals follow the app's current language", as
         "Só você e os administradores de Acme podem usar Atlas até você compartilhar.",
         "Vão com Atlas: instruções, habilidades, arquivos, rotinas e suas conversas com Atlas",
         "Suas conversas continuam privadas lá: só você pode vê-las.",
-        "Ficam no My Cloud: o que Atlas lembra, suas conexões e o MausBot",
+        "Ficam no My Cloud: o que Atlas lembra, suas conexões e o Edu",
         "Não é possível desfazer: você não pode mover o bot de volta para o My Cloud.",
       ].join("\n\n"),
       buttons: ["Mover para Acme", "Cancelar"],

@@ -50,9 +50,11 @@ export function activityText(tool: NoticeTool, english: string): string {
 
 const LINE_PREFIXES = ["routines.server.", "chat.notice."];
 
-function englishParams(params: ServerTextParams | undefined): ServerTextParams {
+const legacyBrand = (text: string): string => text.replaceAll("Edu Bot", "OpenMausBot");
+
+function englishParams(params: ServerTextParams | undefined, legacy = false): ServerTextParams {
   return Object.fromEntries(Object.entries(params ?? {}).map(([name, value]) =>
-    [name, isReferenceParam(name, value) && Object.hasOwn(en, value) ? en[value as LocaleKey] : value]));
+    [name, isReferenceParam(name, value) && Object.hasOwn(en, value) ? (legacy ? legacyBrand(en[value as LocaleKey]) : en[value as LocaleKey]) : value]));
 }
 
 /** A routine's stored line (`checkTroubleCode`, a run's `outputCode`, `errorCode`, `attentionCode`) in the reader's
@@ -60,7 +62,9 @@ function englishParams(params: ServerTextParams | undefined): ServerTextParams {
  * line's English: a later line the server wrote without a code is shown as written. */
 export function routineLineText(code: string | undefined, english: string, params?: ServerTextParams): string {
   if (!code || !LINE_PREFIXES.some((prefix) => code.startsWith(prefix)) || !Object.hasOwn(en, code) || activeLocale() === "en") return english;
-  if (formatServerText(en[code as LocaleKey], englishParams(params)) !== english) return english;
+  const template = en[code as LocaleKey];
+  if (formatServerText(template, englishParams(params)) !== english
+    && formatServerText(legacyBrand(template), englishParams(params, true)) !== english) return english;
   try {
     return tFromServer(code, english, wordedParams(params));
   } catch {

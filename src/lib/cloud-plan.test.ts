@@ -78,9 +78,9 @@ describe("the plan line and the credit", () => {
     entitlement: { plan: "pro", tier: "pro", status: "active", expiresAt: ENDS + 3 * DAY, version: 1 }, ...extra });
   it("a running trial is a free trial, not an active paid plan; once paid, or ended, it is not", () => {
     for (const state of ["active", "ending", "processing"] as const) {
-      expect(cloudPlanLine(cloudPlanView(connected({ trial: trial(state) })))).toBe("Pro free trial · verified by MausBot Cloud");
+      expect(cloudPlanLine(cloudPlanView(connected({ trial: trial(state) })))).toBe("Pro free trial · verified by Edu Bot Cloud");
     }
-    expect(cloudPlanLine(cloudPlanView(connected({})))).toBe("Pro active · verified by MausBot Cloud");
+    expect(cloudPlanLine(cloudPlanView(connected({})))).toBe("Pro active · verified by Edu Bot Cloud");
     expect(cloudPlanView(connected({ entitlement: { plan: "free", status: "inactive", expiresAt: null, version: 2 }, machine: { status: "stopped" }, trial: trial("ended") })).kind).toBe("attention");
   });
 
@@ -107,9 +107,9 @@ describe("the plan line and the credit", () => {
 
   it("a Personal subscriber's plan is Personal wherever the app names it", () => {
     const personal = { plan: "pro" as const, tier: "personal", expiresAt: ENDS + 3 * DAY, version: 1 };
-    expect(cloudPlanLine(cloudPlanView(connected({ entitlement: { ...personal, status: "active" } })))).toBe("Personal active · verified by MausBot Cloud");
+    expect(cloudPlanLine(cloudPlanView(connected({ entitlement: { ...personal, status: "active" } })))).toBe("Personal active · verified by Edu Bot Cloud");
     expect(cloudPlanLine(cloudPlanView(connected({ entitlement: { ...personal, status: "inactive" } })))).toBe("Personal · not active right now");
-    expect(cloudPlanLine(cloudPlanView({ status: "unavailable", lastPlan: { tier: "personal", active: true } }))).toBe("Personal · checking with MausBot Cloud…");
+    expect(cloudPlanLine(cloudPlanView({ status: "unavailable", lastPlan: { tier: "personal", active: true } }))).toBe("Personal · checking with Edu Bot Cloud…");
     expect(cloudPlanLine(cloudPlanView({ status: "reauth-required", message: "expired", lastPlan: { tier: "personal", active: true } }))).toBe("Personal plan");
     expect(cloudTrialView(trial("active", { tier: "personal", amount: 2900 })).body).toContain("Then Personal is $29/month plus tax");
   });

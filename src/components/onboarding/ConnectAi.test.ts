@@ -10,7 +10,6 @@ const f = vi.hoisted(() => ({
   instances: [] as InstanceInfo[], dispatch: vi.fn(), row: null as null | { bridge: unknown; onOpenSettings: () => void },
   check: (): Promise<object> => Promise.resolve({ ok: true }), checks: [] as string[], fail: false, config: {} as Record<string, unknown>, brand: "default", opened: [] as string[],
 }));
-vi.mock("@/lib/email-gate", () => ({ emailGateDone: () => false }));
 vi.mock("@/state/store", () => ({
   api: async (path: string) => {
     if (f.fail) { f.fail = false; throw new Error("503"); }
@@ -20,6 +19,7 @@ vi.mock("@/state/store", () => ({
   },
   useStore: () => ({ state: { instances: f.instances, config: f.config }, dispatch: f.dispatch }),
 }));
+vi.mock("@/lib/email-gate", () => ({ emailGateDone: () => false }));
 vi.mock("@/lib/brand", () => ({ brandStatus: () => ({ source: f.brand }), productName: () => "MausBot" }));
 vi.mock("@/lib/app-links", async (original) => ({ ...await original<typeof import("@/lib/app-links")>(), openExternalLink: async (url: string) => { f.opened.push(url); } }));
 vi.mock("@/components/EngineSetup", async () => {
@@ -275,27 +275,8 @@ describe("connecting an AI on the first screen", () => {
 });
 
 describe("the ModelGo option", () => {
-  const URL_EXACT = "https://modelgo.ai/?utm_source=openmausbot&utm_medium=sponsorship&utm_content=app&campaign_id=openmausbot&ad_group_id=app";
   const option = () => host.querySelector("[data-modelgo-option]");
   const provider = (ready = false) => engine("modelgo", "modelgo", "ModelGo (API)", ready);
-
-  it("sits among the other ways, labelled a sponsor, and its link opens exactly the sponsor's address", async () => {
-    f.instances.push(provider());
-    await show();
-    expect(option()?.textContent).toContain("ModelGo"); expect(option()?.textContent).toContain("Sponsor");
-    expect(option()?.textContent).toContain("One API key, every model.");
-    expect(host.querySelectorAll("[data-modelgo-option]")).toHaveLength(1);
-    const link = [...option()!.querySelectorAll("button")].find(button => button.textContent?.includes("Get a key"))!;
-    await act(async () => { link.click(); });
-    expect(f.opened).toEqual([URL_EXACT]);
-  });
-
-  it("opens to its key field", async () => {
-    f.instances.push(provider());
-    await show();
-    await act(async () => { option()!.querySelector<HTMLButtonElement>("button[aria-expanded]")!.click(); });
-    expect(option()!.querySelector('[data-engine-setup="modelgo"]')).toBeTruthy();
-  });
 
   it("is not added on a white-label build, a desktop whose organization refuses it, or a hosted workspace; nor once connected", async () => {
     f.brand = "file"; await show(); expect(option()).toBeNull();

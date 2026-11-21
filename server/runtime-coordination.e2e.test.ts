@@ -14,7 +14,7 @@ import { ownTurnText } from "./testing/room-handoff-agent.ts";
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SETTLED = "Your downstream room requests have settled.";
 const REPORT_FROM_MIRA = "[From @Mira (bot) · report on assignment";
-const RERUN_NOTE = "OpenMausBot restarted while your previous turn here was running";
+const RERUN_NOTE = "Edu Bot restarted while your previous turn here was running";
 const TEAMMATES_CUT = "A restart cut these teammates' turns";
 
 const jsonl = (path: string): any[] => existsSync(path)

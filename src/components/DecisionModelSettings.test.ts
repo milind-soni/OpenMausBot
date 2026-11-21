@@ -271,7 +271,7 @@ describe("DecisionModelSettings", () => {
     for (const [result, text] of [
       [{ ok: false, reason: "http_error", status: 402 }, "Decisions are included with an active Cloud subscription."],
       [{ ok: false, reason: "rate_limited", status: 429 }, "Your Cloud plan&#x27;s decisions are busy or used up for this month. Try again later."],
-      [{ ok: false, reason: "rejected", status: 401 }, "MausBot Cloud did not accept this machine&#x27;s decisions. Try again later."],
+      [{ ok: false, reason: "rejected", status: 401 }, "Edu Bot Cloud did not accept this machine&#x27;s decisions. Try again later."],
     ] as const) {
       fixture.api.mockResolvedValueOnce(result);
       click(render().test);
@@ -518,7 +518,7 @@ describe("DecisionModelSettings", () => {
       expect(text({ reason: "http_error", status: 500 })).toBe("OpenRouter sent back an error (500). Try again in a moment.");
       expect(text({ reason: "rate_limited" })).toBe("OpenRouter is limiting requests right now. Try again in a moment.");
       expect(text({ reason: "overloaded" })).toBe("The model is overloaded right now. Try again shortly.");
-      expect(text({ reason: "malformed" })).toBe("The model sent an answer MausBot could not read. Try another model.");
+      expect(text({ reason: "malformed" })).toBe("The model sent an answer Edu Bot could not read. Try another model.");
       expect(text({ reason: "unreachable" })).toBe("Could not reach OpenRouter. Check your connection.");
       expect(text({ reason: "timeout" })).toBe("OpenRouter did not answer in time. Try again.");
       expect(text({ reason: "no_key" })).toBe("Paste a key or save one first.");

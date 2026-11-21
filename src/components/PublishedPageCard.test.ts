@@ -111,7 +111,7 @@ describe("a published page's card", () => {
     desktop({ cloudAccount: {} });
     const { container, root } = render(page({ state: "limit", title: "Bake sale", plan: "free", upgrade: true, usage: { pages: 5, limit: 5 }, message: "server words" }));
     try {
-      expect(container.textContent).toContain("You’ve used your 5 free pages. MausBot Cloud gives you more, and pages without the badge.");
+      expect(container.textContent).toContain("You’ve used your 5 free pages. Edu Bot Cloud gives you more, and pages without the badge.");
       expect(container.textContent).toContain("5 of 5 pages");
       container.querySelector("button")!.click();
       expect(dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "app_pages" });

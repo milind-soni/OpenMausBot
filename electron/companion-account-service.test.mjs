@@ -1512,7 +1512,7 @@ describe("Companion account on demand", () => {
 
   it("tells a desktop below the minimum version to update", async () => {
     const message = friendlyCompanionAccountError(new ControlPlaneError("update_required", 426));
-    expect(message).toBe("This version of MausBot can no longer make secure links. Update MausBot, then try again. Local Wi-Fi and Tailscale pairing still work.");
+    expect(message).toBe("This version of Edu Bot can no longer make secure links. Update Edu Bot, then try again. Local Wi-Fi and Tailscale pairing still work.");
   });
 
   it("signs a relay-capable computer in without a tunnel when no phone needs one", async () => {

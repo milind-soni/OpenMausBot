@@ -147,7 +147,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     const rows = await messages();
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ role: "bot", kind: "text" });
-    expect(rows[0].text).toBe("Hi Sam! I'm MausBot, your Chief of Staff. I live on the Cloud, so I keep working while your computer is off. What do you want off your plate?");
+    expect(rows[0].text).toBe("Hi Sam! I'm Edu, your Chief of Staff. I live on the Cloud, so I keep working while your computer is off. What do you want off your plate?");
     expect(rows[0].helperIntro).toBeUndefined();
     expect((await api("GET", "/api/config")).onboarding.hintsSeen).toContain("cloud-welcome-done");
     expect((await api("GET", "/api/bots")).bots.find((bot: any) => bot.id === chief.id).welcomed).toBe(true);

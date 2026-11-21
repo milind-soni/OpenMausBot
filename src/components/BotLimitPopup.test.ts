@@ -109,12 +109,11 @@ describe("the bot limit popup", () => {
     expect(dialog()!.querySelector("h2")?.textContent).toBe("That's more bots than Starter has room for");
   });
 
-  it("in a browser tab, with no bridge, opens the Plan page", async () => {
+  it("in a browser tab, with no bridge, has no upstream Plan page link", async () => {
     await open();
     expect(dialog()!.querySelector("p")?.textContent).toBe("To create more, upgrade this Cloud on its Plan page. Every bot you have stays as it is.");
-    expect(buttons()).toEqual(["Open the Plan page", "Not now", "Close"]);
-    await press("Open the Plan page");
-    expect(openExternalLink).toHaveBeenCalledExactlyOnceWith("https://cloud.openmausbot.com/cloud");
+    expect(buttons()).toEqual(["Not now", "Close"]);
+    expect(openExternalLink).not.toHaveBeenCalled();
   });
 
   it("on a person's other Cloud, which only reads its plan, opens its Plan page and closes", async () => {

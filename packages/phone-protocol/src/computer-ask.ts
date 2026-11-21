@@ -6,7 +6,7 @@
 export const COMPUTER_ASK_TOOL = "turn_on_your_computer";
 /** The bots' tool that raises the card. */
 export const ASK_FOR_COMPUTER_TOOL = "ask_for_computer";
-export const DESKTOP_DOWNLOAD_URL = "https://www.openmausbot.com/download";
+export const DESKTOP_DOWNLOAD_URL = "https://github.com/EduardoMoraga/edu-bot/releases/latest";
 
 export const COMPUTER_NEEDS = ["screen", "folders", "terminal"] as const;
 export type ComputerNeed = (typeof COMPUTER_NEEDS)[number];
@@ -68,7 +68,7 @@ export const COMPUTER_ASK_WORDS = {
   "computerAsk.reason.unsupported": "Screen control can't work on your {device} right now.",
   "computerAsk.reason.terminalOff": "Running commands isn't turned on for your {device}.",
   "computerAsk.reason.closed": "{app} isn't open on your {device}. Open it there and {name} carries on.",
-  "computerAsk.reason.never": "{app} isn't on your computer yet. Install it, sign in to MausBot Cloud there, and {name} carries on.",
+  "computerAsk.reason.never": "{app} isn't on your computer yet. Install it, sign in to Edu Bot Cloud there, and {name} carries on.",
   "computerAsk.reason.update": "{app} on your {device} needs an update first. Update it, and {name} carries on.",
   "computerAsk.action.turnOn": "Turn on",
   "computerAsk.action.tryAgain": "Try again",
@@ -84,7 +84,7 @@ export const COMPUTER_ASK_WORDS = {
 export type ComputerAskKey = keyof typeof COMPUTER_ASK_WORDS;
 
 /** The product's name as the person reads it, as the app fills `{app}`. */
-export const COMPUTER_ASK_APP = "MausBot";
+export const COMPUTER_ASK_APP = "Edu Bot";
 
 export function computerAskText(key: ComputerAskKey, params: Record<string, string>): string {
   return COMPUTER_ASK_WORDS[key].replace(/\{(\w+)\}/g, (whole, name: string) => (name === "app" ? params.app ?? COMPUTER_ASK_APP : params[name] ?? whole));

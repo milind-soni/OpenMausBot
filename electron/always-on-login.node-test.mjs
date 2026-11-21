@@ -11,7 +11,7 @@ import { createAlwaysOnHome } from "./always-on-home.mjs";
 import { createOpenAtLogin, HIDDEN_ARG } from "./open-at-login.mjs";
 
 const blocker = { start: () => 1, stop() {}, isStarted: () => true };
-const CHOSEN = "OpenMausBot at login";
+const CHOSEN = "Edu Bot at login";
 
 function world(t, platform) {
   const dir = mkdtempSync(path.join(tmpdir(), "omb-always-on-login-"));

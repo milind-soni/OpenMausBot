@@ -7,12 +7,12 @@ import './global.css';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  metadataBase: new URL(siteUrl),
+  metadataBase: siteUrl ? new URL(siteUrl) : undefined,
   title: {
     default: appName,
     template: `%s · ${appName}`,
   },
-  description: 'MausBot docs: install, configure and extend your local-first team of AI agents. MausBot is free and open source (Apache 2.0).',
+  description: 'Edu Bot docs: install, configure and extend your local-first team of AI agents. Edu Bot is free and open source (Apache 2.0).',
   openGraph: {
     title: appName,
     siteName: appName,

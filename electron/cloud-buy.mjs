@@ -111,7 +111,7 @@ export function installCloudBuy({ ipcMain, guard, client, offersReady, clipboard
   handle("signInVerify", (_event, code) => client().emailVerify(plain(code)));
   handle("signInCancel", () => { client().emailCancel(); });
   handle("reopenCheckout", async (_event, plan, source) => {
-    if (!(await offersReady())) throw new Error("MausBot Cloud isn't offered in this app.");
+    if (!(await offersReady())) throw new Error("Edu Bot Cloud isn't offered in this app.");
     const account = client();
     if (account.checkoutLink()) return account.reopenCheckout();
     if (typeof plan !== "string" || !CHECKOUT_SOURCES.includes(source)) throw new Error("Choose a plan to continue.");

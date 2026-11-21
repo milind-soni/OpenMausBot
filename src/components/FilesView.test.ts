@@ -164,7 +164,7 @@ describe("Add a folder", () => {
 
   it.each([
     ["too-broad", "That folder is too big to share. Choose a folder inside it, like one in Documents."],
-    ["app-data", "That's MausBot's own folder. Choose another one."],
+    ["app-data", "That's Edu Bot's own folder. Choose another one."],
     ["already-shared", "This folder is already shared."],
     ["not-a-folder", "Choose a folder."],
     ["private", "That folder holds private keys or settings, so it isn't shared. Choose another one."],
@@ -248,22 +248,22 @@ describe("My Cloud's state", () => {
     expect(off).toHaveBeenCalledOnce();
   });
 
-  it("asks to sign in again, through Settings → MausBot Cloud", async () => {
+  it("asks to sign in again, through Settings → Edu Bot Cloud", async () => {
     await mount({ ...base, phase: "signed-out", shared: [folder("synced")] });
     expect(page()).toContain("Sign in to the Cloud again to keep sharing files.");
     expect(row("synced")).toBeTruthy();
-    await click("Open MausBot Cloud settings");
+    await click("Open Edu Bot Cloud settings");
     expect(dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "cloudAccount" });
   });
 
   it("without a Ready My Cloud, explains Files works with it and opens its settings", async () => {
     await mount({ ...base, phase: "unavailable" });
-    expect(page()).toContain("Files works with MausBot Cloud.");
+    expect(page()).toContain("Files works with Edu Bot Cloud.");
     expect(button("Add a folder")).toBeUndefined();
-    await click("Open MausBot Cloud settings");
+    await click("Open Edu Bot Cloud settings");
     expect(dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "cloudAccount" });
     delete window.ogb;
     await mount();
-    expect(page()).toContain("Files works with MausBot Cloud.");
+    expect(page()).toContain("Files works with Edu Bot Cloud.");
   });
 });

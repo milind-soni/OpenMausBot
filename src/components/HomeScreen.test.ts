@@ -75,7 +75,7 @@ it("an Admin that asked the app to wait says when it tries again by itself, and 
   const now = new Date(2026, 10, 20, 15, 0).getTime(), at = new Date(2026, 10, 20, 15, 5).getTime();
   const time = new Intl.DateTimeFormat("en", { timeStyle: "short" }).format(new Date(at));
   expect(homeScreenText({ screen: "offline", retryAt: at }, now)).toMatchObject({
-    action: "retry", reason: `MausBot Cloud asked this app to wait before it signs in to My Cloud again. The app tries again by itself at ${time}.`,
+    action: "retry", reason: `Edu Bot Cloud asked this app to wait before it signs in to My Cloud again. The app tries again by itself at ${time}.`,
   });
   expect(homeScreenText({ screen: "offline", retryAt: at }, at + 1).reason).toBeNull();
 });

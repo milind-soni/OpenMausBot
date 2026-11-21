@@ -57,7 +57,7 @@ test("Windows: the person's item has a name of its own, apart from lending's hid
   login.follow(true);
   login.choose(true);
   assert.equal(login.chosen(), true);
-  assert.deepEqual(app.items.get("OpenMausBot at login"), { args: [] }, "no hidden flag");
+  assert.deepEqual(app.items.get("Edu Bot at login"), { args: [] }, "no hidden flag");
   login.follow(false);
   assert.equal(login.chosen(), true, "lending stopping leaves it");
   login.choose(false);
@@ -95,7 +95,7 @@ test("Windows: Settings shows on while Windows already starts the app, even from
 
 test("Windows: turning it off removes every entry that starts the app, and lending adds none until it is on again", async t => {
   const dir = await temp(t);
-  const app = windowsApp([{ name: "electron.app.OpenMausBot", args: ["--omb-hidden"] }, { name: "OpenMausBot at login" }]);
+  const app = windowsApp([{ name: "electron.app.OpenMausBot", args: ["--omb-hidden"] }, { name: "Edu Bot at login" }]);
   const login = createOpenAtLogin({ app, file: path.join(dir, "win.json"), platform: "win32", home: dir, argv: ["OpenMausBot.exe"] });
   login.choose(false);
   assert.deepEqual([...app.items.keys()], []);
@@ -103,7 +103,7 @@ test("Windows: turning it off removes every entry that starts the app, and lendi
   assert.equal(login.chosen(), false, "lending keeps to the person's choice");
   login.choose(true);
   login.follow(true);
-  assert.deepEqual([...app.items].sort(), [["OpenMausBot at login", { args: [], enabled: true }], ["electron.app.OpenMausBot", { args: ["--omb-hidden"], enabled: true }]]);
+  assert.deepEqual([...app.items].sort(), [["Edu Bot at login", { args: [], enabled: true }], ["electron.app.OpenMausBot", { args: ["--omb-hidden"], enabled: true }]]);
 });
 
 test("Linux: the person's autostart entry has no hidden flag and no lending mark, and lending never removes it", async t => {

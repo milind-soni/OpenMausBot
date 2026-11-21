@@ -18,7 +18,6 @@ const FILES = [
   "src/components/AppearanceSelectRows.tsx",
   "src/components/AttachmentStorageSettings.tsx",
   "src/components/AutomaticRecoverySettings.tsx",
-  "src/components/BoatOffer.tsx",
   "src/components/BrowserProfilesManager.tsx",
   "src/components/BrowserSettingsRows.tsx",
   "src/components/CacheKeepWarmSettings.tsx",

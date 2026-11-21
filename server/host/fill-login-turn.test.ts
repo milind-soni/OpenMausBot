@@ -58,7 +58,7 @@ describe("fill_login outside the bot's own browser", () => {
   ] as const)("says plainly why a saved login is not filled on a screen when the run %s", async (_case, over) => {
     const { fill } = harness(over);
     const answer = await fill(bot, turn, undefined, undefined);
-    expect(answer.text).toMatch(/^Saved logins are filled only in your own browser, the one your browser tools drive, where MausBot checks the page's site before it types a password\. On the screen of this computer it cannot prove which site a box belongs to, so it never types one there[,.]/);
+    expect(answer.text).toMatch(/^Saved logins are filled only in your own browser, the one your browser tools drive, where Edu Bot checks the page's site before it types a password\. On the screen of this computer it cannot prove which site a box belongs to, so it never types one there[,.]/);
   });
 
   it("names the person's own Chrome when the bot's profile is My Chrome", async () => {

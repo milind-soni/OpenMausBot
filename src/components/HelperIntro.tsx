@@ -31,7 +31,7 @@ export function HelperIntro(props: IntroProps) {
 function AdvancedHelperIntro({ botId, threadId, message, answered }: IntroProps) {
   const { state, dispatch } = useStore();
   const bot = state.bots.find((candidate) => candidate.id === botId);
-  const name = bot?.name ?? "MausBot";
+  const name = bot?.name ?? "Edu";
   const team = bot?.defaultBot?.person ? state.config?.team?.name : undefined;
   const ask = (key: LocaleKey) => dispatch({ type: "answerCard", botId, threadId, messageId: message.id, answer: t(key) });
   return (

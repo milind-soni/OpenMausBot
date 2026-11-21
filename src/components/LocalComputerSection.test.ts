@@ -231,7 +231,7 @@ describe("Local VM inventory UI", () => {
     }));
 
     expect(markup).toContain("Not managed");
-    expect(markup).toContain("not managed by MausBot");
+    expect(markup).toContain("not managed by Edu Bot");
     expect(markup).toContain("remove it directly in Docker or Podman");
     expect(markup).not.toContain(">Delete</button>");
     expect(markup).not.toContain("Container labels do not match");
@@ -515,7 +515,7 @@ describe("VPS computer inventory UI", () => {
     expect(disconnected.match(/No VPS is set up yet/g)).toHaveLength(1);
     expect(disconnected).not.toContain("aria-busy");
     expect(renderCard({ unavailableReason: "SSH host cannot be reached" })).toContain("SSH host cannot be reached");
-    expect(renderCard()).toContain("No MausBot desktops found on your VPS");
+    expect(renderCard()).toContain("No Edu Bot desktops found on your VPS");
   });
 
   it("tags computers on more than one server and keeps reachable rows beside the warning", () => {

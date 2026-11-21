@@ -149,7 +149,7 @@ export const PLACE_EN = {
   "place.view.ccUnavailable.short": "Not available now",
   "place.view.ccUnavailable.line": "Cloud desktops can't start right now. It isn't anything you did.",
   "place.view.ccEnded.short": "Plan ended",
-  "place.view.ccEnded.line": "Your MausBot Cloud plan has ended, so cloud desktops are off.",
+  "place.view.ccEnded.line": "Your Edu Bot Cloud plan has ended, so cloud desktops are off.",
   "place.view.ccNoStart.short": "Didn't start",
   "place.view.ccNoStart.line": "{bot}'s cloud desktop didn't start.",
   "place.view.ccClearing.short": "Clearing up",

@@ -3,10 +3,15 @@ export function managedCloudConfigured(env = process.env) {
   return env?.OMB_CLOUD_ACCOUNT === "1" || env?.OMB_CLOUD_STAGING === "1";
 }
 
+export function companyRendererArgs(packaged, remote, env = process.env) {
+  if (!packaged || remote) return [];
+  return managedCloudConfigured(env) ? ["--omb-company-desktop=1", "--omb-managed-cloud=1"] : ["--omb-company-desktop=1"];
+}
+
 /** The sign-in message and email sign-in outcome for a Cloud this app has not set up. */
 export const CLOUD_NOT_SET_UP = "not-set-up";
 
-export const cloudNotSetUpError = () => Object.assign(new Error("MausBot Cloud is not set up in this app."), { opaque: true, code: CLOUD_NOT_SET_UP });
+export const cloudNotSetUpError = () => Object.assign(new Error("Edu Bot Cloud is not set up in this app."), { opaque: true, code: CLOUD_NOT_SET_UP });
 
 const unconfiguredFetch = async () => { throw cloudNotSetUpError(); };
 

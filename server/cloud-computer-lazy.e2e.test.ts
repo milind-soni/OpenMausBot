@@ -443,7 +443,7 @@ describe("a cloud computer starts only when the bot uses it", () => {
     await finish(bot.id);
 
     const waiting = "Stranded's cloud computer stopped responding. Replace computer in the computer panel gives it a new one; files only on the old computer are lost.";
-    const line = `Stranded's cloud computer stopped responding, so MausBot gave it a new one. The old one is kept with its files until ${until} in Settings → Desktops & browser → Desktops, then deleted.`;
+    const line = `Stranded's cloud computer stopped responding, so Edu Bot gave it a new one. The old one is kept with its files until ${until} in Settings → Desktops & browser → Desktops, then deleted.`;
     expect(await recoveryLines(bot.id)).toEqual([`recovery: ${waiting}`, `recovery: ${line}`]);
     expect(inboxNotices(bot.id)).toEqual([waiting, line]);
     stops.on = false;

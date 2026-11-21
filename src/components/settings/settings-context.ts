@@ -25,7 +25,7 @@ export function useSettingsContext(): SettingsContext {
   const here = pageIsThisComputer();
   const home = here || Boolean(ogb?.home);
   const placesShown = known > 1 || (!ogb?.environments && railShown(places));
-  const plan = desktop ? Boolean(ogb?.cloudAccount || (ogb?.cloudPlan && cloud)) : cloud && !team && admin;
+  const plan = Boolean(ogb?.cloudAccount || (ogb?.cloudPlan && cloud));
   const organization = Boolean(ogb?.organization) && !client;
   const environments = Boolean(ogb?.environments);
   const installations = workspacesAvailable(config);

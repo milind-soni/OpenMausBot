@@ -185,7 +185,7 @@ export function ErrorRow({
   const currentPermissions = missingMacCuaPermissions(capabilities.localComputer.message);
   const macCuaReason = ready && capabilities.host.platform === "darwin" &&
     capabilities.localComputer.available === false && capabilities.localComputer.reasonCode !== "remote-server" &&
-    message.startsWith(THIS_COMPUTER_NOT_READY) &&
+    (message.startsWith(THIS_COMPUTER_NOT_READY) || message.startsWith("OpenMausBot can't use this computer yet — ")) &&
     failedPermissions.length > 0 && failedPermissions.join(",") === currentPermissions.join(",")
     ? macCuaPermissionMessage(currentPermissions)
     : null;

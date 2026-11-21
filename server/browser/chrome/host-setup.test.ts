@@ -47,7 +47,7 @@ describe("host setup", () => {
     for (const output of outputs) {
       const diagnosis = await diagnoseLaunchFailure({ executable: "/opt/chrome", output, platform: "darwin", exists: inContainer });
       expect(diagnosis?.kind).toBe("container");
-      expect(diagnosis?.message).toBe("Chrome's sandbox can't start in this container. The operator can set OMB_BROWSER_SANDBOX=0 to run the browser without it and rely on the container's isolation, then restart OpenMausBot.");
+      expect(diagnosis?.message).toBe("Chrome's sandbox can't start in this container. The operator can set OMB_BROWSER_SANDBOX=0 to run the browser without it and rely on the container's isolation, then restart Edu Bot.");
     }
     // Root needs no container marker; a sandbox the host blocks elsewhere keeps the AppArmor steps.
     expect((await diagnoseLaunchFailure({ executable: "/opt/chrome", output: outputs[0]!, platform: "darwin", exists: () => false }))?.kind).toBe("container");

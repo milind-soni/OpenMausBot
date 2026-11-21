@@ -1,5 +1,5 @@
 // Electron has no role for the macOS Preferences… item, so it is built explicitly.
-import { Menu, app } from "electron";
+import { Menu } from "electron";
 import nativeText from "./native-text.cjs";
 
 const role = (t, name, key, params) => ({ role: name, label: t(key, params) });
@@ -82,7 +82,7 @@ const whereItLives = (environment) => (environment.kind === "local" ? environmen
  * @param {{ checked: boolean, onToggle: (on: boolean) => void } | null} [input.openAtLogin] Open at Login, in the app
  *   menu on macOS and the File menu elsewhere; absent when this build cannot add a login item.
  */
-export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFromClipboard, onConnect, onForget, onOpenSettings, onOrganizationSignIn, onAddCloud, sublabels = {}, home = null, openAtLogin = null, t = nativeText.englishText.t }) {
+export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFromClipboard, onConnect, onForget, onOpenSettings, onOrganizationSignIn, onAddCloud, sublabels = {}, home = null, openAtLogin = null, t = nativeText.englishText.t, appName = "Edu Bot" }) {
   const isMac = process.platform === "darwin";
   const active = environments.find((e) => e.id === activeId) ?? null;
   const others = home ? environments.filter((e) => e.origin !== home.origin && e.kind !== "local") : [];
@@ -123,17 +123,17 @@ export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFr
   const atLogin = openAtLogin ? [{ id: "open-at-login", label: t("native.menu.openAtLogin"), type: "checkbox", checked: openAtLogin.checked, click: () => openAtLogin.onToggle(!openAtLogin.checked) }] : [];
   const roles = roleMenus(t, isMac);
   const appMenu = {
-    label: app.name,
+    label: appName,
     submenu: [
-      role(t, "about", "native.role.about", { app: app.name }),
+      role(t, "about", "native.role.about", { app: appName }),
       { label: t("native.menu.settings"), accelerator: "CmdOrCtrl+,", click: () => onOpenSettings() },
       ...atLogin,
       { type: "separator" },
-      role(t, "hide", "native.role.hide", { app: app.name }),
+      role(t, "hide", "native.role.hide", { app: appName }),
       role(t, "hideOthers", "native.role.hideOthers"),
       role(t, "unhide", "native.role.unhide"),
       { type: "separator" },
-      role(t, "quit", "native.role.quitApp", { app: app.name }),
+      role(t, "quit", "native.role.quitApp", { app: appName }),
     ],
   };
   const template = [

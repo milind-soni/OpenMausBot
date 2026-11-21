@@ -377,7 +377,7 @@ function warn(release: StandaloneRelease, detail: unknown): void {
 }
 
 function httpRefusal(name: string, status: number): StandaloneInstallError {
-  if (status === 404 || status === 410) return Object.assign(new StandaloneInstallError(`This version of ${name} is no longer available to download. Update OpenMausBot, then try again.`), userErrorFields(userError("serverError.install.versionGone", { name: name })));
+  if (status === 404 || status === 410) return Object.assign(new StandaloneInstallError(`This version of ${name} is no longer available to download. Update Edu Bot, then try again.`), userErrorFields(userError("serverError.install.versionGone", { name: name })));
   if (status === 403 || status === 429) return Object.assign(new StandaloneInstallError(`The download site is limiting downloads right now. Try again in a few minutes.`), userErrorFields(userError("serverError.install.downloadLimited")));
   if (status >= 500) return Object.assign(new StandaloneInstallError(`${name}'s download site isn't answering right now. Try again later.`), userErrorFields(userError("serverError.install.siteNotAnswering", { name: name })));
   return Object.assign(new StandaloneInstallError(`${name} couldn't be downloaded. Check the internet connection and try again.`), userErrorFields(userError("serverError.install.downloadFailed", { name: name })));
@@ -693,7 +693,7 @@ async function realFolder(path: string, release: StandaloneRelease): Promise<voi
     return;
   }
   if (!info.isDirectory()) {
-    throw Object.assign(new StandaloneInstallError(`OpenMausBot's folder for ${release.name} is not a plain folder (${path}), so nothing was changed. Move it away, then try again.`), userErrorFields(userError("serverError.install.notPlainFolder", { name: release.name, path: path })));
+    throw Object.assign(new StandaloneInstallError(`Edu Bot's folder for ${release.name} is not a plain folder (${path}), so nothing was changed. Move it away, then try again.`), userErrorFields(userError("serverError.install.notPlainFolder", { name: release.name, path: path })));
   }
 }
 
@@ -703,7 +703,7 @@ async function checkBinFolder(binDir: string, release: StandaloneRelease): Promi
   await realFolder(binDir, release);
   const folder = (await readdir(binDir, { withFileTypes: true })).find((entry) => entry.isDirectory());
   if (folder) {
-    throw Object.assign(new StandaloneInstallError(`OpenMausBot's folder for ${release.name} holds something it did not put there (${join(binDir, folder.name)}), so nothing was changed. Move it away, then try again.`), userErrorFields(userError("serverError.install.unexpectedFolder", { name: release.name, path: join(binDir, folder.name) })));
+    throw Object.assign(new StandaloneInstallError(`Edu Bot's folder for ${release.name} holds something it did not put there (${join(binDir, folder.name)}), so nothing was changed. Move it away, then try again.`), userErrorFields(userError("serverError.install.unexpectedFolder", { name: release.name, path: join(binDir, folder.name) })));
   }
 }
 
@@ -789,7 +789,7 @@ export function plainInstallError(release: StandaloneRelease, asset: StandaloneA
     return Object.assign(new StandaloneInstallError(`${release.name} is open in another window. Close it, then try again.`), userErrorFields(userError("serverError.install.openElsewhere", { name: release.name })));
   }
   if (code === "EACCES" || code === "EPERM" || code === "EROFS") {
-    return Object.assign(new StandaloneInstallError(`OpenMausBot can't write to its folder for ${release.name}. Check the folder's permissions, then try again.`), userErrorFields(userError("serverError.install.cannotWrite", { name: release.name })));
+    return Object.assign(new StandaloneInstallError(`Edu Bot can't write to its folder for ${release.name}. Check the folder's permissions, then try again.`), userErrorFields(userError("serverError.install.cannotWrite", { name: release.name })));
   }
   return Object.assign(new StandaloneInstallError(`${release.name} couldn't be installed. Try again.`), userErrorFields(userError("serverError.install.failed", { name: release.name })));
 }

@@ -21,7 +21,7 @@ const MERGE_BUDGET = 150_000;
 export const BURST_PART_MAX_RESTARTS = 2;
 /** OMB_BURST_PART_MAX_RESTARTS, a whole number from 0; anything else leaves the default. */
 export const burstPartMaxRestarts = (env: NodeJS.ProcessEnv = process.env): number => envWhole(env.OMB_BURST_PART_MAX_RESTARTS, BURST_PART_MAX_RESTARTS, 0);
-export const cutOffTooOften = (restarts: number): string => `Not started again: OpenMausBot restarted while this part ran ${restarts + 1} times.`;
+export const cutOffTooOften = (restarts: number): string => `Not started again: Edu Bot restarted while this part ran ${restarts + 1} times.`;
 export const ITEM_MAX = 2_000;
 export const INSTRUCTIONS_MAX = 12_000;
 

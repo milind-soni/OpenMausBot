@@ -89,7 +89,7 @@ export function createUpdaterCoordinator(
       setState({
         status: "error",
         retryable: false,
-        message: `${updateErrorMessage(error)} Quit and reopen OpenMausBot before trying the update again.`,
+        message: `${updateErrorMessage(error)} Quit and reopen Edu Bot before trying the update again.`,
         ...said(error),
       });
       return;

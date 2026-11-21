@@ -1,3 +1,4 @@
+import { companyRendererArgs } from "./managed-cloud.mjs";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
@@ -38,7 +39,7 @@ function world({ wanted = true, hidden = false, frame = true, openComputer = nul
   const { made, createView } = viewMaker();
   const state = { wanted, hidden, changes: 0 };
   const prefs = { railHidden: () => state.hidden, setRailHidden: (value) => { state.hidden = value; }, windowFrame: () => frame };
-  const rail = createChromeRail({ createView, preload: "/app/preload.cjs", args: () => ["--omb-local-origin=http://127.0.0.1:8799", "--omb-company-desktop=1"], url: () => RAIL,
+  const rail = createChromeRail({ createView, preload: "/app/preload.cjs", args: () => ["--omb-local-origin=http://127.0.0.1:8799", "--omb-company-desktop=1", "--omb-managed-cloud=1"], url: () => RAIL,
     wanted: () => state.wanted, prefs: () => prefs, changed: () => { state.changes++; }, openComputer });
   const handlers = new Map();
   rail.install({ handle: (channel, handler) => handlers.set(channel, handler) });
@@ -58,7 +59,7 @@ test("two places or more: the rail's own page in a view at the window's left edg
   assert.equal(view.background, "#00000000", "transparent where the rail draws nothing");
   assert.deepEqual(view.webContents.loaded, [RAIL]);
   assert.deepEqual(view.options.webPreferences, { contextIsolation: true, sandbox: true, nodeIntegration: false, preload: "/app/preload.cjs",
-    additionalArguments: ["--omb-local-origin=http://127.0.0.1:8799", "--omb-company-desktop=1"] });
+    additionalArguments: ["--omb-local-origin=http://127.0.0.1:8799", "--omb-company-desktop=1", "--omb-managed-cloud=1"] });
   assert.deepEqual(w.page.told, [CHROME_RAIL_WIDTH], "the page beside it is told how wide the rail is");
   w.win.size = [1000, 700];
   w.win.emit("resize");
@@ -265,6 +266,7 @@ test("main's own wiring: the choice is this desktop's, and the pages hear the ra
   const kept = { hidden: false }, signals = [], handlers = new Map();
   const context = vm.createContext({ createChromeRail, CHROME_RAIL_PATH, WebContentsView: function WebContentsView(options) { return createView(options); },
     path: { join: (...parts) => parts.join("/") }, __dirname: "/app", slog: () => {}, desktopCompanionRendererArguments: () => [],
+    companyRendererArgs: (packaged, remote) => companyRendererArgs(packaged, remote, {}),
     app: { isPackaged: true, getVersion: () => "0.1.133" }, desktopRemoteAccess: null, rendererOrigin: () => "http://127.0.0.1:8799", serverReady: true,
     railList: () => [{ id: "local" }, { id: "home" }], desktopPrefs: { railHidden: () => kept.hidden, setRailHidden: (hidden) => { kept.hidden = hidden; } },
     rail: { changed: () => signals.push("changed") }, ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) } });
@@ -272,6 +274,7 @@ test("main's own wiring: the choice is this desktop's, and the pages hear the ra
   const { win, page } = appWindow();
   chromeRail.attach(win);
   assert.deepEqual(made.map((view) => view.webContents.loaded), [["http://127.0.0.1:8799/rail"]]);
+  assert.deepEqual([...made[0].options.webPreferences.additionalArguments], ["--omb-company-desktop=1", "--omb-app-version=0.1.133"]);
   handlers.get("rail:hide")({ sender: page, senderFrame: page.mainFrame }, true);
   assert.deepEqual([kept.hidden, chromeRail.shown(), signals], [true, false, ["changed", "changed"]]);
 });
@@ -284,7 +287,7 @@ function pageWithPreload(origin = "https://bots.example.test", pathname = "/", a
   const frame = { zoom: 1 }, navigator = { userActivation: { isActive: false } };
   let bridge = null;
   vm.runInNewContext(readFileSync(new URL("./preload.cjs", import.meta.url), "utf8"), {
-    process: { platform: "darwin", argv: ["--omb-local-origin=http://127.0.0.1:8799", "--omb-company-desktop=1"] },
+    process: { platform: "darwin", argv: ["--omb-local-origin=http://127.0.0.1:8799", "--omb-company-desktop=1", "--omb-managed-cloud=1"] },
     location: { origin, pathname }, navigator, TextEncoder, localStorage: { getItem: () => null }, queueMicrotask, document,
     window: { addEventListener: (type, listener) => listeners.set(type, listener) },
     require: () => ({ webUtils: {}, webFrame: { getZoomFactor: () => frame.zoom }, contextBridge: { exposeInMainWorld: (_name, value) => { bridge = value; } },

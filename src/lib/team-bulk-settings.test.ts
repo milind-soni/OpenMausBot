@@ -202,12 +202,12 @@ describe("who can use a department's bots", () => {
     expect(planAccess(payroll, { kind: "access", person: { email: BOB, level: "chat" } })).toMatchObject({ access: { everyone: "none", people: { [CARA]: "edit", [BOB]: "chat" }, groups: { finance: "chat" } } });
   });
 
-  it("skips someone's own MausBot and a bot this person can't share, and never lists a bot's owner", () => {
+  it("skips someone's own Edu and a bot this person can't share, and never lists a bot's owner", () => {
     const own = shared("mine", { everyone: "none", people: {} }, { defaultBot: { person: BOB } } as Partial<Bot>);
     const viewOnly = shared("atlas", { everyone: "none", people: {} }, { yourAccess: "chat" });
     const owned = shared("owned", { everyone: "none", people: {} });
     const plan = planTeamChange([own, viewOnly, owned], instances, { kind: "access", person: { email: ADA, level: "chat" } });
-    expect(plan.map((row) => row.status === "skip" ? row.reason : row.status)).toEqual(["it's someone's own MausBot", "you can't change who can use it", "unchanged"]);
+    expect(plan.map((row) => row.status === "skip" ? row.reason : row.status)).toEqual(["it's someone's own Edu", "you can't change who can use it", "unchanged"]);
   });
 
   it("plans again from the bot's latest sharing, so a grant another admin removed after the preview stays removed", () => {

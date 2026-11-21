@@ -367,7 +367,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
     const verdict = cloudLendingVerdict(grant.cloud, cloud(env), env);
     if (verdict.allow) return;
     if (verdict.stop) { endCloud(env, verdict.stop); throw new Error("Lending to this Cloud stopped."); }
-    throw new Paused("Waiting for your MausBot Cloud sign-in.");
+    throw new Paused("Waiting for your Edu Bot Cloud sign-in.");
   };
   const store = next => {
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -406,7 +406,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
       bytes += chunk.length; if (bytes > 4_000_000) throw new Error("Server response exceeded limit");
       chunks.push(Buffer.from(chunk));
     }
-    let json; try { json = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw new Error("This server does not support computer sharing. Update its OpenMausBot installation."); }
+    let json; try { json = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw new Error("This server does not support computer sharing. Update its Edu Bot installation."); }
     if (!response.ok) throw Object.assign(new Error(response.status === 401 || response.status === 403 ? "Pair this desktop again before sharing computer access." : `Server request failed (${response.status}). Update the server if needed.`), { status: response.status });
     return json;
   };

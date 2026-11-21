@@ -30,6 +30,6 @@ describe("the first setup step's promise", () => {
   });
 
   it("on My Cloud, says it as before", () => {
-    expect(bring(false)).toContain("Bots on your computer come here by themselves from the MausBot app.");
+    expect(bring(false)).toContain("Bots on your computer come here by themselves from the Edu Bot app.");
   });
 });

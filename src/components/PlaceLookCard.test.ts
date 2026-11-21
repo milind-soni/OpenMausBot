@@ -140,9 +140,9 @@ it("the Admin's refusal, an Admin without the route, and a failure: said plainly
   }
 });
 
-it("another Cloud of the person's own while the MausBot Cloud sign-in is away: locked, and says why", async () => {
+it("another Cloud of the person's own while the Edu Bot Cloud sign-in is away: locked, and says why", async () => {
   await page(look({ change: null, reason: "signed-out" }));
-  expect(host.querySelector('[data-place-look="locked"]')?.textContent).toContain("Sign in to MausBot Cloud to change its color.");
+  expect(host.querySelector('[data-place-look="locked"]')?.textContent).toContain("Sign in to Edu Bot Cloud to change its color.");
   expect(swatch("rose").disabled).toBe(true);
 });
 

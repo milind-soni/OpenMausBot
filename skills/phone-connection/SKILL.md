@@ -5,12 +5,12 @@ description: "Why the MausBot phone app can't reach the person's computer, and w
 
 # When the phone can't reach their computer
 
-The MausBot phone app reaches the person's computer, where the OpenMausBot
+The MausBot phone app reaches the person's computer, where the Edu Bot
 desktop app runs, in the ways turned on in Settings → Phone & devices:
 
 - **Same Wi-Fi**: the phone and the computer are on the same network. Every
   version of the phone app can use it.
-- **Anywhere, through MausBot**: from anywhere, through MausBot Relay, end-to-end
+- **Anywhere, through Edu Bot**: from anywhere, through MausBot Relay, end-to-end
   encrypted. Only a phone app with the encrypted connection can use it.
 - **Tailscale**, under More ways in, for people who use it.
 
@@ -31,13 +31,13 @@ can't tell why.
    (the phone's row there has Pair again), then remove its old entry.
 2. With no such line, never say the link ended or that their app is too old.
    Check the usual things, one at a time: the computer is on and awake with
-   OpenMausBot open; on the same Wi-Fi the phone connects; Anywhere, through
-   MausBot is on in Settings → Phone & devices; the phone is in the paired list
+   Edu Bot open; on the same Wi-Fi the phone connects; Anywhere, through
+   Edu Bot is on in Settings → Phone & devices; the phone is in the paired list
    and its Connect from is Anywhere, not Wi-Fi and Tailscale only.
 3. If you run on My Cloud, phones reach the Cloud through its own web address,
    not these ways: this guide is about the desktop app on their computer.
 
 For an older app after the link ended, none of these help, so don't suggest
-them: turning Anywhere, through MausBot off and on, Try reconnecting,
+them: turning Anywhere, through Edu Bot off and on, Try reconnecting,
 force-quitting the app away from that Wi-Fi, reinstalling the same app version,
 restarting the computer, or checking for a VPN.

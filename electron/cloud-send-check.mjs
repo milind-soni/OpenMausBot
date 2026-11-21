@@ -214,7 +214,7 @@ export const noGaps = (gaps) => Boolean(gaps) && Object.values(gaps).every((entr
 export async function* rowIdChunks(localJson, threadId) {
   for (let from = 0, more = true; more; from += IDS) {
     const page = await localJson(`/api/cloud-send/chats/ids?thread=${threadId}&from=${from}`);
-    if (!record(page)) throw new Error("OpenMausBot on this computer did not list a conversation's rows.");
+    if (!record(page)) throw new Error("Edu Bot on this computer did not list a conversation's rows.");
     more = page.more === true;
     yield { ids: list(page.ids), path: list(page.path), leaf: page.leaf ?? null, more };
   }
@@ -278,7 +278,7 @@ export async function checkChats({ localJson, session, threads, skip = () => fal
   for (const threadId of todo) {
     if (skip(threadId)) { onProgress(++done, total); continue; }
     const first = await localJson(`/api/cloud-send/chats/ids?thread=${threadId}&from=0`);
-    if (!record(first)) throw new Error("OpenMausBot on this computer did not list a conversation's rows.");
+    if (!record(first)) throw new Error("Edu Bot on this computer did not list a conversation's rows.");
     if (first.more === true) { finish(await checkLong(threadId)); continue; }
     const asked = { threadId, ids: list(first.ids), path: { after: null, ids: list(first.path), last: true } };
     const size = asked.ids.length + asked.path.ids.length;

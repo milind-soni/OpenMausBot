@@ -15,8 +15,8 @@ describe("the server's bundle of the language packs", () => {
   it("carries every language's server lines and none of the app's screens", async () => {
     const bundled = await build({ entryPoints: [SERVER_LINES], bundle: true, write: false, platform: "node", format: "esm", plugins: [serverLocalePlugin], logLevel: "silent" });
     const code = bundled.outputFiles[0]!.text;
-    expect(code).toContain("An das MausBot-Team gesendet");
-    expect(code).toContain("Sent to the MausBot team");
+    expect(code).toContain("An das Edu Bot-Team gesendet");
+    expect(code).toContain("Sent to the Edu Bot team");
     expect(code).not.toContain("notice.openFailed");
     expect(code.length).toBeLessThan(1_000_000);
   });

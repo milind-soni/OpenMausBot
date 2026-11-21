@@ -3,7 +3,6 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { EMPTY_ONBOARDING } from "@/lib/onboarding";
-import { TEAMS_NOTICE } from "@/lib/notices";
 
 const f = vi.hoisted(() => ({ state: {} as Record<string, unknown>, dispatch: vi.fn(), session: {} as Record<string, unknown>, cards: [] as unknown[] }));
 vi.mock("@/state/store", () => ({
@@ -31,11 +30,14 @@ const mount = async () => {
 };
 const config = (hintsSeen: string[], extra: Record<string, unknown> = {}) => ({ onboarding: { ...EMPTY_ONBOARDING, completedAt: "2026-09-01", version: 1, hintsSeen }, ...extra });
 
+const note = { id: "fixture-note", kind: "product", label: "New", title: "A new feature", body: "Feature details",
+  primary: { label: "Read more", action: { open_url: "https://example.test/news" } },
+  starts: "2026-11-17T00:00:00Z", ends: "2026-12-01T00:00:00Z" };
 let storage: Map<string, string>;
 beforeEach(() => {
   storage = new Map();
   vi.stubGlobal("localStorage", { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), clear: () => storage.clear() });
-  forgetAnnouncementCards(); vi.clearAllMocks(); f.cards = [];
+  forgetAnnouncementCards(); vi.clearAllMocks(); f.cards = [note];
   f.session = { hosted: true, scopes: ["admin"] };
   f.state = { connected: true, bots: [{ tasks: [{ threadId: "t", createdAt: 1, usage: { turns: 2 } }] }], groups: [], routines: [], routinesLoadState: "ready", config: config([]) };
   f.dispatch.mockImplementation((action: { type: string; config?: unknown }) => { if (action.type === "configStatus") f.state = { ...f.state, config: action.config }; });
@@ -43,9 +45,9 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root?.unmount()); root = null; host?.remove(); vi.unstubAllGlobals(); });
 
-it("someone who used the app before has the dot for Teams alone, and opening Announcements clears it here and in their record", async () => {
+it("a new feed announcement raises the dot, and opening Announcements clears it here and in the place record", async () => {
   await mount();
-  expect(found.items[0]?.id).toBe(TEAMS_NOTICE);
+  expect(found.items[0]?.id).toBe(note.id);
   expect(found.unread).toBe(true);
   await act(async () => { found.markRead(); await Promise.resolve(); });
   expect(found.unread).toBe(false);
@@ -56,8 +58,8 @@ it("someone who used the app before has the dot for Teams alone, and opening Ann
   expect(found.unread, "the place's record keeps it for their other devices").toBe(false);
 });
 
-it("no dot once the Teams popup was seen, nor before the session is known", async () => {
-  f.state = { ...f.state, config: config([TEAMS_NOTICE]) };
+it("no dot once the feed card was seen, nor before the session is known", async () => {
+  f.state = { ...f.state, config: config([`announcement:${note.id}`]) };
   await mount();
   expect(found.unread).toBe(false);
   await act(async () => root?.unmount());
@@ -67,11 +69,11 @@ it("no dot once the Teams popup was seen, nor before the session is known", asyn
   expect(found.unread, "waits for who is looking").toBe(false);
 });
 
-it("a Team Cloud's member: Teams is theirs, the dot too, and clearing it writes their own record", async () => {
+it("clearing the dot on a Team Cloud writes the member's own record", async () => {
   f.session = { hosted: true, scopes: ["client"], team: { role: "member" } };
   f.state = { ...f.state, config: config([], { team: { id: "t", name: "Acme" }, cloudHome: true }) };
   await mount();
-  expect(found.items.map(item => item.id)).toEqual([TEAMS_NOTICE]);
+  expect(found.items.map(item => item.id)).toEqual([note.id]);
   expect(found.unread).toBe(true);
   await act(async () => { found.markRead(); await Promise.resolve(); });
   expect(vi.mocked(api).mock.calls.some(([path]) => path === "/api/me/welcome")).toBe(true);

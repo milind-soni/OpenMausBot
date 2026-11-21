@@ -23,7 +23,7 @@ it("shows the terminal's code and what it would get, and Allow answers that one 
   await act(async () => { root.render(createElement(CliLoginPrompt)); });
   await act(async () => { await Promise.resolve(); });
   const card = document.querySelector<HTMLElement>("[data-notice='cli-login']")!;
-  expect(card.textContent).toContain("A terminal wants to control MausBot");
+  expect(card.textContent).toContain("A terminal wants to control Edu Bot");
   expect(card.querySelector("[data-cli-login-code]")!.textContent).toBe("KQ7M-X2PD");
   expect(card.textContent).toContain("Full control · openmausbot CLI on studio");
   const allow = [...card.querySelectorAll("button")].find((button) => button.textContent === "Allow")!;

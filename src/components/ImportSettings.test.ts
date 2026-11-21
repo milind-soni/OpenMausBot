@@ -44,7 +44,7 @@ describe("Settings → Import", () => {
   it("says what happened: looking, nothing new, not this computer, or the result", () => {
     expect(apps({ detection: undefined })).toContain("Looking on this computer…");
     expect(apps({ detection: { skills: [], tools: [] } })).toContain("Nothing new to bring in from your AI apps.");
-    expect(apps({ local: false })).toContain("Only the desktop app on the computer running MausBot");
+    expect(apps({ local: false })).toContain("Only the desktop app on the computer running Edu Bot");
     expect(apps({ result: { skills: { added: ["pdf"], present: [], skipped: [], filesLeftOut: 0, review: [] } } })).toContain("Added 1 skill.");
   });
 });

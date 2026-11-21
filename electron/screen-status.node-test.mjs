@@ -76,7 +76,7 @@ test("the icon's menu says plainly what the Clouds can't use, why, and offers th
   indicator.update({ clouds: ["My Cloud"], screen: notRunning });
   const [line, why, fix] = trays[0].menu;
   assert.deepEqual([line.label, line.enabled, why.label, why.enabled, fix.label], ["My Cloud can use this PC, but not its apps and screen", false, "Screen control isn't running on this PC", false, "Start screen control"]);
-  assert.equal(trays[0].tip, "OpenMausBot: My Cloud can use this PC, but not its apps and screen. Screen control isn't running on this PC");
+  assert.equal(trays[0].tip, "Edu Bot: My Cloud can use this PC, but not its apps and screen. Screen control isn't running on this PC");
   fix.click();
   assert.equal(started, 1, "one click starts screen control");
   indicator.update({ clouds: ["My Cloud"], screen: { ready: true, lent: true, reason: null, fix: null } });
@@ -134,7 +134,7 @@ test("the menu never says a Cloud can use this computer before that Cloud accept
   indicator.update({ clouds: ["My Cloud", "Debian Server"], waiting: ["Debian Server"], screen: ready });
   assert.deepEqual(trays[0].menu.filter(item => item.label).map(item => item.label),
     ["My Cloud can use this Mac", "Waiting for Debian Server to accept this Mac", "Pause", "Let Clouds run commands on this Mac", "See activity"]);
-  assert.equal(trays[0].tip, "OpenMausBot: My Cloud can use this Mac. Waiting for Debian Server to accept this Mac");
+  assert.equal(trays[0].tip, "Edu Bot: My Cloud can use this Mac. Waiting for Debian Server to accept this Mac");
   indicator.update({ clouds: ["My Cloud", "Debian Server"], waiting: [], screen: ready });
   assert.equal(trays[0].menu[0].label, "My Cloud and Debian Server can use this Mac", "accepted: the waiting line goes away");
 });

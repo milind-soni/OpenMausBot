@@ -161,14 +161,14 @@ describe("Built-in browser without Google Chrome", () => {
     fixture.config = { features: { browser: true }, browserEngine: { kind: "engine", noChrome: true, myChrome: true } };
     show();
     expect(row()).toContain("Ready. Bots use a basic browser because Google Chrome isn't installed.");
-    expect(row()).toContain("Many sites block it. Install Google Chrome and restart MausBot.");
+    expect(row()).toContain("Many sites block it. Install Google Chrome and restart Edu Bot.");
     expect(row()).toContain("If a site still blocks bots, give the bot a My Chrome profile in Browser profiles.");
   });
 
   it("leaves out My Chrome where there is none to use", () => {
     fixture.config = { features: { browser: true }, browserEngine: { kind: "engine", noChrome: true, myChrome: false } };
     show();
-    expect(row()).toContain("Install Google Chrome and restart MausBot.");
+    expect(row()).toContain("Install Google Chrome and restart Edu Bot.");
     expect(row()).not.toContain("My Chrome");
   });
 

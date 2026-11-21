@@ -68,7 +68,7 @@ import {
 import { ConnectionDetail } from "./ConnectionDetail";
 import { PhonePairingQr } from "./PhonePairingQr";
 import { PhoneSetupSignInRoutes } from "./PhoneSetupSignInRoutes";
-import { productName } from "../lib/brand";
+import { COMPANION_APP_NAME, productName } from "../lib/brand";
 
 import type { CompanionBridge, CompanionState } from "../lib/companion-types";
 export type { CompanionBridge, CompanionRoute, CompanionState, PhoneDevice } from "../lib/companion-types";
@@ -1041,13 +1041,13 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
       {!c.pairingExpired && c.pairingLink && (
         <>
           <div className="mt-4 rounded-2xl bg-white p-3.5" aria-label={t("phone.code.qrAria")}><QRCodeSVG value={c.pairingLink} size={180} level="M" bgColor="#ffffff" fgColor="#111111" /></div>
-          <p className="mt-3 text-[13px] text-ink-secondary">{t("phone.code.installAndScan", { app: productName() })}</p>
-          <p className="mt-1 text-[12px] text-ink-tertiary">{t("phone.code.notCamera", { app: productName() })}</p>
+          <p className="mt-3 text-[13px] text-ink-secondary">{t("phone.code.installAndScan", { app: COMPANION_APP_NAME })}</p>
+          <p className="mt-1 text-[12px] text-ink-tertiary">{t("phone.code.notCamera", { app: COMPANION_APP_NAME })}</p>
         </>
       )}
       {!c.pairingExpired && manualCodeMode === "direct" && c.state?.pairing && (
         <div className="mt-4 w-full max-w-[320px] rounded-xl bg-inset px-4 py-3 text-[13px] text-ink-secondary">
-          <div>{t("phone.code.typeIntro", { app: productName() })}</div>
+          <div>{t("phone.code.typeIntro", { app: COMPANION_APP_NAME })}</div>
           <div className="mt-2 font-mono text-[22px] tracking-[0.25em] text-ink">
             {c.state.pairing.code}
           </div>

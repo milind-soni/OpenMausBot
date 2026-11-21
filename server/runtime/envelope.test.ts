@@ -583,7 +583,7 @@ describe("composeRootTurn", () => {
   const root = assignment({ id: "gen-1", rootId: "gen-1", parentId: undefined, depth: 0, requester: { kind: "person", threadId: "th_1", chief: true },
     assignee: { botId: "chief", destination: { kind: "standing_thread", threadId: "th_1" } }, brief: "Ship the CSV export and push it", status: "queued", executions: 1 });
   const paragraphs = (text: string): string[] => text.split("\n\n").filter(Boolean);
-  const NOTE = "OpenMausBot restarted while your previous turn here was running and cut it off; this turn continues it.\n";
+  const NOTE = "Edu Bot restarted while your previous turn here was running and cut it off; this turn continues it.\n";
 
   it("after the person acted on the cards: the harness text alone, no envelope, no brief", () => {
     const text = composeRootTurn(root, { turn: "answered", restartNote: "", answer: "OpenMausBot connection update: the user securely connected GitHub. Continue the task." });

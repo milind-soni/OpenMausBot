@@ -7,10 +7,10 @@ import environments from "./environments.cjs";
 
 const origin = "http://127.0.0.1:48993", methods = ["state", "begin", "signInAgain", "reopen", "cancel", "refresh", "signOut", "openDashboard", "offer"];
 const bridgeMethods = [...methods, "connectHome", "connectHomeForPhone"];
-function preload({ enabled = true, remote = false } = {}) {
+function preload({ enabled = true, remote = false, configured = enabled } = {}) {
   let bridge; const invoked = [];
   vm.runInNewContext(readFileSync(new URL("./preload.cjs", import.meta.url), "utf8"), {
-    process: { platform: "fixture", argv: [`--omb-local-origin=${origin}`, ...(enabled ? ["--omb-company-desktop=1"] : [])] },
+    process: { platform: "fixture", argv: [`--omb-local-origin=${origin}`, ...(enabled ? ["--omb-company-desktop=1"] : []), ...(configured ? ["--omb-managed-cloud=1"] : [])] },
     location: { origin: remote ? "https://remote.example.test" : origin }, TextEncoder, localStorage: { getItem: () => null },
     require: () => ({ webUtils: {}, contextBridge: { exposeInMainWorld: (_name, value) => { bridge = value; } },
       ipcRenderer: { on() {}, removeListener() {}, send() {}, invoke: (...args) => { invoked.push(args); return Promise.resolve({ status: "signed-out" }); } } }),
@@ -24,6 +24,10 @@ test("personal Cloud bridge is desktop-local, contains no capability access, and
   assert.equal(f.bridge.cloudAccount.connection, undefined);
   assert.equal(preload({ enabled: false }).bridge.cloudAccount, undefined);
   assert.equal(preload({ remote: true }).bridge.cloudAccount, undefined);
+  const { bridge } = preload({ configured: false });
+  for (const key of ["cloudAccount", "cloudPlan", "accounts", "accountSheet"]) assert.equal(bridge[key], undefined, key);
+  assert.ok(bridge.organization);
+  assert.ok(bridge.environments);
 });
 test("production personal Cloud IPC guards exact local main frame and forwards no arguments", async () => {
   const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8"), start = source.indexOf("const workspaceOnly ="), end = source.indexOf('ipcMain.handle("organization:settings-opened"', start);

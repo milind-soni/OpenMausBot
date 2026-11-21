@@ -12,7 +12,7 @@ import { freePortBlock } from "./testing/ports.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const NOT_THE_APP = "Only the OpenMausBot app on this computer can let a bot use it.";
+const NOT_THE_APP = "Only the Edu Bot app on this computer can let a bot use it.";
 
 describe("this computer belongs to the desktop app's own server", () => {
   let home = "";

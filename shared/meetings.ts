@@ -67,7 +67,7 @@ export function findMeetingLink(text: string | undefined): string | null {
 }
 
 /** The name the bot shows in the meeting. */
-export const meetingDisplayName = (botName: string): string => `${botName.trim().slice(0, 40) || "MausBot"} (notes)`;
+export const meetingDisplayName = (botName: string): string => `${botName.trim().slice(0, 40) || "Edu"} (notes)`;
 
 /** Posted in the meeting chat the moment the bot is let in, before anything is captured. Not configurable. */
 export function consentLine(botName: string, personName: string | undefined): string {

@@ -86,7 +86,7 @@ const RETRY_WHY: Record<Exclude<RoutineRetryCause, "usage_limit" | "restarted">,
   failed: "routines.server.part.failed",
 };
 const FIRST_START: Record<RoutineRetryCause, string> = {
-  stalled: "stopped when its AI stalled", restarted: "was cut off when OpenMausBot restarted", rate_limited: "was stopped by a rate limit",
+  stalled: "stopped when its AI stalled", restarted: "was cut off when Edu Bot restarted", rate_limited: "was stopped by a rate limit",
   provider: "failed on a temporary AI error", usage_limit: "was refused by the AI's usage limit", failed: "failed",
 };
 

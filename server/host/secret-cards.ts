@@ -98,7 +98,7 @@ const credentialUpdateText = (label: string, outcome: "provided" | "dismissed"):
 
 /** What the bot is told a saved custom secret is, and how to use it without ever seeing or showing the value. */
 export function savedSecretText(label: string, saved: SavedSecret | null): string {
-  if (!saved) return `The person saved ${label}, but it expired or OpenMausBot restarted before you used it. Ask again with request_credential if you still need it.`;
+  if (!saved) return `The person saved ${label}, but it expired or Edu Bot restarted before you used it. Ask again with request_credential if you still need it.`;
   if ("ref" in saved) {
     return `The person saved ${label} as ${saved.ref}. Put it in an mcp_server env, header or oauth.clientSecret value, alone or inside text such as "Bearer ${saved.ref}": OpenMausBot swaps in the value. It works once, only for you in this conversation, for an hour, and you never see the value.`;
   }

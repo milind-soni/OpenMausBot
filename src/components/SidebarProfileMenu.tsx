@@ -61,7 +61,7 @@ import { cloudPlanLabel } from "@/lib/cloud-plan";
 import { shortcutLabel } from "./ShortcutHint";
 import { useAnnouncements } from "./announcements/use-announcements";
 import { useOtherServerName } from "@/lib/other-server";
-import { isOwnerOrAdmin, profileForSession, readSessionState, type SessionState } from "@/lib/session";
+import { profileForSession, readSessionState, type SessionState } from "@/lib/session";
 import {
   cloudPhoneDestination,
   phonePairingSettingsAction,
@@ -575,8 +575,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
   const besideRail = railShown(usePlaces());
   const filesReady = useCloudFilesReady();
   const desktop = Boolean(window.ogb);
-  const planHere = !remote && (desktop ? Boolean(window.ogb?.cloudAccount || (window.ogb?.cloudPlan && state.config?.cloudHome === true))
-    : state.config?.cloudHome === true && !state.config?.team && isOwnerOrAdmin(session));
+  const planHere = !remote && Boolean(window.ogb?.cloudAccount || (window.ogb?.cloudPlan && state.config?.cloudHome === true));
   const openSettings = (section: AppSettingsSection) => dispatch({ type: "toggleAppSettings", open: true, section });
   const move = useAccountMove(state.config?.cloudHome === true, { onOpen: () => openSettings("plan"), onPairPhone: () => dispatch(phonePairingSettingsAction()) });
   const accounts = useAccounts();

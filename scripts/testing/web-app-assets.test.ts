@@ -13,7 +13,7 @@ describe("phone web app installation assets", () => {
     const href = head.querySelector('link[rel="manifest"]')?.getAttribute("href");
     expect(href).toBeDefined();
     const manifest = JSON.parse(readFileSync(fileURLToPath(new URL(`public${href}`, root)), "utf8"));
-    expect(manifest.name).toBe("OpenMausBot");
+    expect(manifest.name).toBe("Edu Bot");
     expect(manifest.display).toBe("standalone");
     const origin = "https://workspace.example.test";
     const start = new URL(manifest.start_url, origin);

@@ -132,7 +132,7 @@ export function installTeamMove({ ipcMain, cloudPage, pageOrigin = () => null, c
       const team = teamOf(move.team.id);
       if (!team) throw new Error(`You're no longer in ${move.team.name}.`);
       const client = account();
-      if (!client) throw new Error("Sign in to MausBot Cloud first.");
+      if (!client) throw new Error("Sign in to Edu Bot Cloud first.");
       const member = await openOwnerSession({ origin: team.origin, grant: () => client.pairTeam(team.id) }, fetchImpl, { label, background: false });
       try {
         const asked = await member.call("POST", "/api/team-move-in", { v: 1, bot: { id: move.bot.id, name: move.bot.name, ...(facts.threadId ? { threadId: facts.threadId } : {}) },

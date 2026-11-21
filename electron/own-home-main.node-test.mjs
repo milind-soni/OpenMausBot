@@ -87,7 +87,7 @@ test("starting asks the server once more, and keeps this computer's bots here wh
   const cases = [
     [{ own: false }, "Garage server has other people on it, so your bots stay here."],
     [{ signedIn: false }, "This app isn't signed in to Garage server."],
-    [{ own: true, move: false }, "Update OpenMausBot on Garage server first"],
+    [{ own: true, move: false }, "Update Edu Bot on Garage server first"],
   ];
   for (const [answer, words] of cases) {
     const { own } = install({ answers: { [garage.origin]: answer } });

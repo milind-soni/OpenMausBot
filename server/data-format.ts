@@ -67,8 +67,8 @@ export function checkDataFormat(dataDir: string, version: string, reads: number 
 
 function newerData(dataDir: string, version: string, marker: DataFormatMarker): DataFormatError {
   return new DataFormatError(
-    `OpenMausBot startup failed: the data in ${dataDir} was written by a newer OpenMausBot (${marker.writtenBy}), in a format this version (${version}) cannot read. Nothing was changed. `
-    + `Install OpenMausBot ${marker.writtenBy} or newer, or put back the copy of the data taken before that update.`,
+    `Edu Bot startup failed: the data in ${dataDir} was written by a newer Edu Bot (${marker.writtenBy}), in a format this version (${version}) cannot read. Nothing was changed. `
+    + `Install Edu Bot ${marker.writtenBy} or newer, or put back the copy of the data taken before that update.`,
   );
 }
 

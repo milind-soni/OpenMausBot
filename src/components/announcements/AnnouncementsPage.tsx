@@ -1,12 +1,9 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
-import { Cloud, Gift, Megaphone, Rocket, UsersRound } from "lucide-react";
-import type { CloudOffer } from "../../../electron/cloud-home.mjs";
+import { Cloud, Megaphone } from "lucide-react";
 import { itemSeen, rememberNoticeSeen, type HistoryAction, type HistoryItem, type HistoryMark, type HistoryModal } from "@/lib/announcement-history";
 import { openEmailDraft, openExternalLink } from "@/lib/app-links";
 import { cn } from "@/lib/cn";
 import { activeLocale, t } from "@/lib/i18n";
-import { teamsAction } from "@/lib/teams-whats-new";
-import { WHATS_NEW_SOURCES, whatsNewView, type WhatsNewView } from "@/lib/whats-new";
 import { useStore } from "@/state/store";
 import { localized, type AnnouncementAction, type AnnouncementPlace } from "../../../shared/announcements";
 import { announcementPlaceAction, KIND_ICON, MARK } from "../AnnouncementCard";
@@ -14,14 +11,12 @@ import { GrokBotMark } from "../GrokBotMark";
 import { GrokMovePopup } from "../GrokMovePopup";
 import { GrokMoveDialog } from "../lazy-screens";
 import { PRIMARY_BUTTON } from "../NoticeCard";
-import { ModelgoMark, type IconProps } from "../ProviderIcons";
+import { type IconProps } from "../ProviderIcons";
 import { TOOL_PAGE_TITLE, ToolPage, ToolPageHeader } from "../ToolPageShell";
-import { TeamsPopup } from "../whats-new/TeamsPopup";
-import { WhatsNewPopup } from "../whats-new/WhatsNewPopup";
 import { useAnnouncements, type Announcements } from "./use-announcements";
 
 const BUILT_IN_MARK: Record<HistoryMark, ComponentType<IconProps>> = {
-  teams: UsersRound, cloud: Cloud, boat: Gift, modelgo: ModelgoMark, grok: GrokBotMark, "product-hunt": Rocket,
+  cloud: Cloud, grok: GrokBotMark,
 };
 const QUIET_BUTTON = "ui-button min-h-9 gap-1.5 px-3 py-1.5";
 
@@ -105,40 +100,14 @@ export function AnnouncementList({ items, locale = activeLocale(), onModal, canR
   </ul>;
 }
 
-/** The earlier What's new needs this desktop's Cloud account and the Admin's offer to say anything; null when it has nothing
- * for this account. */
-function useWhatsNewView(found: Announcements, listed: boolean): WhatsNewView | null {
-  const bridge = found.cloudBridge ? window.ogb?.cloudAccount : undefined;
-  const [offer, setOffer] = useState<CloudOffer | null | undefined>(undefined);
-  useEffect(() => {
-    if (!listed || !bridge?.offer) return;
-    let active = true;
-    void bridge.offer().then(next => { if (active) setOffer(next); }, () => { if (active) setOffer(null); });
-    return () => { active = false; };
-  }, [listed, bridge]);
-  const view = listed && bridge?.offer ? whatsNewView(found.account, offer) : "none";
-  return typeof view === "object" ? view : null;
-}
-
 /** A popup from the list, opened again outside the notice queue: nothing about the queue's launch changes. */
-function Replay({ modal, found, whatsNew, onClose }: { modal: HistoryModal; found: Announcements; whatsNew: WhatsNewView | null; onClose: () => void }) {
-  const { state, dispatch } = useStore();
+function Replay({ modal, found, onClose }: { modal: HistoryModal; found: Announcements; onClose: () => void }) {
   const [moving, setMoving] = useState(false);
   const item = found.items.find(entry => entry.source === "built-in" && "modal" in entry.entry.open && entry.entry.open.modal === modal);
   const done = () => {
     if (item && !itemSeen(item, found.person)) rememberNoticeSeen(item.id, found.person.record, found.writer);
     onClose();
   };
-  if (modal === "teams") {
-    const action = teamsAction({ team: state.config?.team, viewer: found.viewer, account: found.account, canAddCloud: found.cloudBridge });
-    return <TeamsPopup action={action} onDone={done}
-      onStart={() => dispatch({ type: "openCloudAdd", source: WHATS_NEW_SOURCES.team })} />;
-  }
-  if (modal === "whats-new") {
-    if (!whatsNew) return null;
-    return <WhatsNewPopup view={whatsNew} onDone={done}
-      onBuy={slide => dispatch({ type: "openCloudAdd", source: WHATS_NEW_SOURCES[slide] })} />;
-  }
   if (moving) return <GrokMoveDialog onClose={onClose} />;
   return <GrokMovePopup onDone={action => { if (action === "start") setMoving(true); else done(); }} />;
 }
@@ -149,7 +118,6 @@ export function AnnouncementsPage() {
   const found = useAnnouncements();
   const [open, setOpen] = useState<HistoryModal | null>(null);
   const back = useRef<HTMLButtonElement>(null);
-  const whatsNew = useWhatsNewView(found, found.items.some(item => item.source === "built-in" && "modal" in item.entry.open && item.entry.open.modal === "whats-new"));
   useEffect(() => { back.current?.focus({ preventScroll: true }); }, []);
   useEffect(() => { if (found.unread) found.markRead(); }, [found.unread]);
   const to: AnnouncementRun = {
@@ -166,10 +134,10 @@ export function AnnouncementsPage() {
       </ToolPageHeader>
       <div className="min-h-0 flex-1 overflow-y-auto" data-announcements={found.items.length}>
         <div className={cn("mx-auto w-full max-w-2xl p-4 sm:p-6")}>
-          <AnnouncementList items={found.items} onModal={setOpen} canReopen={modal => modal !== "whats-new" || whatsNew !== null} to={to} />
+          <AnnouncementList items={found.items} onModal={setOpen} to={to} />
         </div>
       </div>
-      {open && <Replay modal={open} found={found} whatsNew={whatsNew} onClose={() => setOpen(null)} />}
+      {open && <Replay modal={open} found={found} onClose={() => setOpen(null)} />}
     </ToolPage>
   );
 }

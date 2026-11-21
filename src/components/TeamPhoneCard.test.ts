@@ -48,6 +48,7 @@ describe("Open on your phone, on a Team Cloud: the phones it opened", () => {
     expect(rows()[0]).toContain("Ada's iPhone · ada@acme.test");
     expect(rows()[0]).toContain("seen 3 min ago");
     expect(host.textContent).toContain("Paired devices");
+    expect(host.textContent, "the phone app keeps its published name").toContain("Scan this code with the MausBot phone app. Your phone opens Acme as you, with the chats you see here.");
     expect(removeButtons().map((button) => button.textContent)).toEqual(["Remove"]);
   });
 
