@@ -48,6 +48,7 @@ RUN node /stage/prepare-cloudflared.mjs --current --root /stage \
 # The JavaScript build is the same for every CPU, so it runs once on the build
 # host's own; only the Data engine's native tree below follows the image's CPU.
 FROM --platform=$BUILDPLATFORM node:24-bookworm-slim AS build
+ENV NODE_OPTIONS=--max-old-space-size=3072
 WORKDIR /src
 # pinned to package.json#packageManager; corepack is being removed from Node
 RUN npm install -g pnpm@10.33.0
@@ -93,28 +94,19 @@ RUN apt-get update \
     libxshmfence1 libgbm1 fonts-noto-color-emoji fonts-noto-cjk fonts-freefont-ttf \
   && rm -rf /var/lib/apt/lists/* \
   && useradd --create-home --home-dir /data --shell /bin/bash maus
-# The bots' browser (docs/plans/browser-engine.md): the pinned agent-browser
-# and a Chrome for Testing with its libraries, so a server bot can browse.
-# Pin here and in server/browser-engine-release.ts together.
+# The bots' browser (docs/plans/browser-engine.md): use Debian's Chromium
+# on both amd64 and arm64. This avoids downloading the ~194 MB Chrome for
+# Testing archive during every uncached build, which is unreliable on slow VPS
+# build networks. Keep the executable path stable for agent-browser.
 ARG AGENT_BROWSER_VERSION=0.37.0
-# `agent-browser install` fetches Chrome for Testing's last-known-good Stable;
-# the publish job passes that version so a Chrome release rebuilds this layer.
-ARG CHROME_CACHE_TAG=""
-# Chrome for Testing has no Linux ARM64 build, so an arm64 image takes
-# Debian's Chromium instead, linked at the same path; the publish job passes
-# its newest bookworm version so a Debian security update rebuilds it too.
-ARG CHROMIUM_CACHE_TAG=""
-ARG TARGETARCH
-# The global link must be the native binary for this platform (agent-browser's
-# postinstall points it there); the other platforms' binaries are never run.
-RUN echo "agent-browser ${AGENT_BROWSER_VERSION}, Chrome for Testing ${CHROME_CACHE_TAG:-Stable}, Debian Chromium ${CHROMIUM_CACHE_TAG:-latest}" \
+RUN echo "agent-browser ${AGENT_BROWSER_VERSION}, Debian Chromium" \
   && npm install -g --cache /tmp/npm-cache agent-browser@${AGENT_BROWSER_VERSION} \
-  && if [ "$TARGETARCH" = arm64 ]; then \
-       apt-get update && apt-get install -y --no-install-recommends chromium && rm -rf /var/lib/apt/lists/* \
-       && mkdir -p /opt/openmausbot-browser && ln -s /usr/lib/chromium/chromium /opt/openmausbot-browser/chrome; \
-     else HOME=/opt/openmausbot-browser agent-browser install \
-       && ln -s /opt/openmausbot-browser/.agent-browser/browsers/chrome-*/chrome /opt/openmausbot-browser/chrome; \
-     fi \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends chromium \
+  && rm -rf /var/lib/apt/lists/* \
+  && test -x /usr/lib/chromium/chromium \
+  && mkdir -p /opt/openmausbot-browser \
+  && ln -sf /usr/lib/chromium/chromium /opt/openmausbot-browser/chrome \
   && native="$(readlink -f "$(command -v agent-browser)")" \
   && case "$native" in */agent-browser/bin/agent-browser-linux-*) ;; *) echo "agent-browser is not a native binary: $native" >&2; exit 1;; esac \
   && [ "$(head -c 4 "$native")" = "$(printf '\177ELF')" ] \
@@ -247,27 +239,57 @@ USER root
 ENTRYPOINT ["/usr/bin/tini", "-s", "--"]
 CMD ["node", "/app/dist-server/cloud-home-start.js"]
 
-# The self-hosted server, last so a plain `docker build .` builds it.
+# # The self-hosted server, last so a plain `docker build .` builds it.
+# FROM runtime AS server
+# # Optional engine CLIs baked into the image (space-separated npm packages).
+# ARG ENGINES=""
+# RUN if [ -n "$ENGINES" ]; then HOME=/tmp/omb-build-home npm install -g $ENGINES && rm -rf /tmp/omb-build-home /tmp/node-compile-cache; fi
+# COPY --from=build --chown=maus:maus /src/dist-native/duckdb/target ./duckdb
+# COPY --from=build --chown=maus:maus /src/dist-server ./dist-server
+# COPY --from=build --chown=maus:maus /src/dist ./dist
+# COPY --from=build --chown=maus:maus /src/skills ./skills
+# ENV HOME=/data
+# VOLUME ["/data"]
+# USER maus
+# HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+#   CMD curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot || exit 1
+# # The launcher runs dist-server/index.js and starts it again when it asks to
+# # (a copied workspace committing, server/restart.ts), so the container, and a
+# # Caddy sharing its network, stays up through that restart.
+# CMD ["node", "dist-server/server-launcher.js"]
+
+# The self-hosted server
 FROM runtime AS server
-# Optional engine CLIs baked into the image (space-separated npm packages).
+
 ARG ENGINES=""
-RUN if [ -n "$ENGINES" ]; then HOME=/tmp/omb-build-home npm install -g $ENGINES && rm -rf /tmp/omb-build-home /tmp/node-compile-cache; fi
+RUN if [ -n "$ENGINES" ]; then \
+      HOME=/tmp/omb-build-home npm install -g $ENGINES \
+      && rm -rf /tmp/omb-build-home /tmp/node-compile-cache; \
+    fi
+
+# Copy application files
 COPY --from=build --chown=maus:maus /src/dist-native/duckdb/target ./duckdb
 COPY --from=build --chown=maus:maus /src/dist-server ./dist-server
 COPY --from=build --chown=maus:maus /src/dist ./dist
 COPY --from=build --chown=maus:maus /src/skills ./skills
+
 # `docker compose exec omb openmausbot pair`: the commands the CLI prints start the same way.
-RUN printf '#!/bin/sh\nexec node /app/dist-server/openmausbot.js "$@"\n' > /usr/local/bin/openmausbot && chmod 0755 /usr/local/bin/openmausbot
+RUN printf '#!/bin/sh\nexec node /app/dist-server/openmausbot.js "$@"\n' > /usr/local/bin/openmausbot \
+  && chmod 0755 /usr/local/bin/openmausbot
+
 ENV HOME=/data \
     OMB_CLI_PREFIX="docker compose exec omb openmausbot"
+
 VOLUME ["/data"]
+
+EXPOSE 8799
+
 USER maus
+
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot || exit 1
-# The launcher runs dist-server/index.js and starts it again when it asks to
-# (a copied workspace committing, server/restart.ts), so the container, and a
-# Caddy sharing its network, stays up through that restart.
-# -s: under `docker run --init` or compose's `init: true` tini is not PID 1,
-# and collects the server's orphans as a subreaper instead of warning.
+
+# The launcher restarts the server when a copied workspace commits.
+# tini reaps orphaned browser/engine processes and forwards container signals.
 ENTRYPOINT ["/usr/bin/tini", "-s", "--"]
 CMD ["node", "dist-server/server-launcher.js"]
