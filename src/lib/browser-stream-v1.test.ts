@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PreviewStreamEvents } from "./browser-stream-client";
+import { createBrowserControl } from "./browser-control";
 import { browserFrameSize, createLiveInputQueue, createLiveStreamClient, jpegSize, liveAction, liveControl } from "./browser-stream-v1";
 
 const deferred = () => {
@@ -45,9 +46,9 @@ describe("the v1 view of one conversation's browser", () => {
     createLiveStreamClient("scout", events(), vi.fn(), { viewer: "v-1" }, { threadId: "ada-chat" });
     createLiveStreamClient("scout", events(), vi.fn());
     expect(FixtureEventSource.instances.map((source) => source.url)).toEqual([
-      "/api/bots/scout/browser/live?threadId=ada-chat",
-      "/api/bots/scout/browser/live?resume=v-1&threadId=ada-chat",
-      "/api/bots/scout/browser/live",
+      "/api/bots/scout/browser/live?selects=1&threadId=ada-chat",
+      "/api/bots/scout/browser/live?resume=v-1&selects=1&threadId=ada-chat",
+      "/api/bots/scout/browser/live?selects=1",
     ]);
   });
 });
@@ -105,7 +106,7 @@ describe("the v1 live client", () => {
 
   it("connects to the bot's live view, shows its frames and acknowledges each one", () => {
     const { post, handlers, source } = open();
-    expect(source.url).toBe("/api/bots/pepper/browser/live");
+    expect(source.url).toBe("/api/bots/pepper/browser/live?selects=1");
     source.emit("ready", { viewerId: "v1" });
     expect(handlers.onConnectedChange).toHaveBeenCalledWith(true);
     source.emit("frame", { seq: 7, data: base64(JPEG_2X1), metadata: { deviceWidth: 2, deviceHeight: 1 } });
@@ -122,7 +123,7 @@ describe("the v1 live client", () => {
     const post = vi.fn<(body: Record<string, unknown>, viewerId: string) => Promise<unknown>>().mockResolvedValue({ ok: true });
     const client = createLiveStreamClient("pepper", events(), post, { viewer: "" }, {}, { width: 365.4, height: 686 });
     const source = FixtureEventSource.instances.at(-1)!;
-    expect(source.url).toBe("/api/bots/pepper/browser/live?width=365&height=686");
+    expect(source.url).toBe("/api/bots/pepper/browser/live?selects=1&width=365&height=686");
     expect(client.send({ type: "resize", width: 400, height: 700 })).toBe(true);
     expect(post).not.toHaveBeenCalled();
     source.emit("ready", { viewerId: "v1" });
@@ -163,6 +164,33 @@ describe("the v1 live client", () => {
     expect(handlers.onMessage).not.toHaveBeenCalled();
     source.emit("waiting", { reason: "busy" });
     expect(handlers.onMessage).toHaveBeenCalledExactlyOnceWith({ type: "starting" });
+  });
+
+  it("after control changed under a press, the person's next press takes the browser again and reaches the page", async () => {
+    const { client, post, handlers, source } = open();
+    let controller = "you";
+    vi.mocked(handlers.onControl!).mockImplementation((next) => { controller = next?.controller ?? ""; browser.observe(); });
+    const browser = createBrowserControl({ transport: client.transport, owned: () => controller === "you", onTakeStatus: vi.fn(), onError: vi.fn() });
+    source.emit("ready", { viewerId: "v1" });
+    source.emit("control", { held: true, owned: true, controlling: true });
+    const down = { type: "mouse", action: "down", x: 4, y: 5, button: "left", buttons: 1, clickCount: 1, modifiers: 0 } as const;
+    const up = { ...down, action: "up", buttons: 0 } as const;
+    let refuse = true;
+    post.mockImplementation(async (body) => {
+      if (body.type === "input_mouse" && refuse) { refuse = false; throw Object.assign(new Error("Browser control changed. Try again."), { status: 409 }); }
+      return { ok: true };
+    });
+    browser.interact(down); browser.interact(up);
+    await vi.waitFor(() => expect(refuse).toBe(false));
+    await client.transport.settle();
+    source.emit("control", { held: false, owned: false, controlling: false });
+    post.mockImplementation(async (body) => { if (body.type === "take") source.emit("control", { held: true, owned: true, controlling: true }); return { ok: true }; });
+    browser.interact({ ...down, x: 40 }); browser.interact({ ...up, x: 40 });
+    await vi.waitFor(() => expect(post.mock.calls.map(([body]) => `${body.type}:${body.eventType ?? ""}:${body.x ?? ""}`)).toContain("input_mouse:mouseReleased:40"));
+    const sent = post.mock.calls.map(([body]) => `${body.type}:${body.eventType ?? ""}:${body.x ?? ""}`);
+    expect(sent).toEqual(["take::", "input_mouse:mousePressed:4", "input_mouse:mouseReleased:4", "take::", "input_mouse:mousePressed:40", "input_mouse:mouseReleased:40"]);
+    expect(client.transport.stopped()).toBe(false);
+    browser.close();
   });
 
   it("passes on the server's dropdown list for a press, and sends the option chosen", async () => {
@@ -344,19 +372,19 @@ describe("a v1 live view whose stream dropped", () => {
 
   it("asks to carry on with the view it had until a new one is ready", () => {
     const { client } = open();
-    expect(latest().url).toBe("/api/bots/pepper/browser/live");
+    expect(latest().url).toBe("/api/bots/pepper/browser/live?selects=1");
     latest().emit("ready", { viewerId: "old-viewer" });
     interrupted(latest());
     vi.advanceTimersByTime(1_000);
-    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer");
+    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer&selects=1");
     interrupted(latest());
     vi.advanceTimersByTime(2_000);
-    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer");
+    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer&selects=1");
     latest().emit("ready", { viewerId: "new-viewer" });
     latest().emit("heartbeat", {});
     interrupted(latest());
     vi.advanceTimersByTime(1_000);
-    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=new-viewer");
+    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=new-viewer&selects=1");
     latest().emit("ready", { viewerId: "newest-viewer" });
     client.stop();
   });
@@ -367,7 +395,7 @@ describe("a v1 live view whose stream dropped", () => {
     latest().emit("ready", { viewerId: "old-viewer" });
     first.client.stop();
     const second = open(resume);
-    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer");
+    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer&selects=1");
     latest().emit("ready", { viewerId: "new-viewer" });
     expect(resume.viewer).toBe("");
     second.client.stop();
@@ -388,7 +416,7 @@ describe("a v1 live view whose stream dropped", () => {
     expect(FixtureEventSource.instances).toHaveLength(6);
     shown.visibilityState = "visible"; page.dispatchEvent(new Event("focus"));
     expect(FixtureEventSource.instances).toHaveLength(7);
-    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer");
+    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer&selects=1");
     latest().emit("ready", { viewerId: "back-viewer" });
     expect(handlers.onConnectedChange).toHaveBeenLastCalledWith(true);
     client.stop();
@@ -438,7 +466,7 @@ describe("a v1 live view whose stream dropped", () => {
     expect(source.close).toHaveBeenCalledOnce();
     expect(handlers.onConnectedChange).toHaveBeenLastCalledWith(false);
     vi.advanceTimersByTime(1_000);
-    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=quiet-viewer");
+    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=quiet-viewer&selects=1");
     client.stop();
   });
 
@@ -465,7 +493,7 @@ describe("a v1 live view whose stream dropped", () => {
     expect(source.close).toHaveBeenCalledOnce();
     expect(handlers.onMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "notice" }));
     vi.advanceTimersByTime(1_000);
-    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=gone-viewer");
+    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=gone-viewer&selects=1");
     client.stop();
   });
 

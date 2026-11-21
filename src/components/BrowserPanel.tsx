@@ -149,7 +149,6 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
       mine: () => controlRef.current?.owned === true,
       onTakeStatus: setTakeStatus,
       onError: setError,
-      onHalted: () => setError(t("browser.input.tooSlow")),
     });
     created.keep(keepNow.current);
     browserControl.current = created;

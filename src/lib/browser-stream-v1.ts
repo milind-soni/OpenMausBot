@@ -259,6 +259,7 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
     retry = null;
     if (stopped) return;
     const params = new URLSearchParams(resume.viewer ? { resume: resume.viewer } : {});
+    params.set("selects", "1");
     const opening = size;
     if (size) {
       params.set("width", String(Math.round(size.width)));

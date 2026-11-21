@@ -172,6 +172,8 @@ interface OpenOptions {
   resume?: string | null;
   /** The panel's size in CSS pixels, which the page fills from the start. */
   size?: PageSize | null;
+  /** The view draws a page's dropdown lists itself (selectPopup, select_choose); an older one leaves the press to the page. */
+  drawsSelects?: boolean;
 }
 interface Viewer extends OpenOptions {
   id: string;
@@ -642,7 +644,8 @@ export class BrowserLive {
 
   /** A left press on a dropdown list shows the view's own list of its options: neither it nor its release reaches the page. */
   private async selectPress(viewer: Viewer, eventType: string, fields: ObjectValue): Promise<boolean> {
-    if (fields.button !== "left") return false;
+    // A page's own question holds every probe until it is answered.
+    if (fields.button !== "left" || !viewer.drawsSelects || this.dialogs.get(viewer.session)?.watch.dialog) return false;
     if (eventType === "mouseReleased" && viewer.select?.releasing) { viewer.select.releasing = false; return true; }
     if (eventType !== "mousePressed" || fields.clickCount !== 1) return false;
     const found = await viewer.page.selectAt(Number(fields.x), Number(fields.y), randomUUID()).catch(() => null);

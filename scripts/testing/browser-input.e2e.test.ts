@@ -132,7 +132,8 @@ describe("input to a page on the default browser engine", () => {
   async function connectView() {
     const abort = new AbortController();
     closers.push(() => abort.abort());
-    const stream = await fetch(`${url}/api/bots/${bot.id}/browser/live`, { headers: { origin: url, accept: "text/event-stream" }, signal: abort.signal });
+    // As the panel opens it: a view that draws the page's dropdown lists.
+    const stream = await fetch(`${url}/api/bots/${bot.id}/browser/live?selects=1`, { headers: { origin: url, accept: "text/event-stream" }, signal: abort.signal });
     expect(stream.status).toBe(200);
     const view = { viewerId: "", inputBatch: 1, frames: 0, ended: false, error: "", retryable: false, selectPopups: [] as Array<{ id: string; options: Array<{ label: string }>; selectedIndex: number }> };
     const post = (body: Body) => api("POST", `/api/bots/${bot.id}/browser/action`, { ...body, viewerId: view.viewerId });

@@ -94,9 +94,9 @@ beforeEach(() => {
 });
 afterEach(() => { live.closeAll(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.useRealTimers(); });
 
-async function open({ botId = "bot-a", session = "profile-a", owner = "admin-a", current = () => true, resume, size }: { botId?: string; session?: string; owner?: string; current?: () => boolean; resume?: string; size?: { width: number; height: number } } = {}) {
+async function open({ botId = "bot-a", session = "profile-a", owner = "admin-a", current = () => true, resume, size, drawsSelects }: { botId?: string; session?: string; owner?: string; current?: () => boolean; resume?: string; size?: { width: number; height: number }; drawsSelects?: boolean } = {}) {
   const res = new ResponseFixture();
-  await live.open({ botId, session, owner, isCurrent: current, res: res as unknown as ServerResponse, ...(resume ? { resume } : {}), ...(size ? { size } : {}),
+  await live.open({ botId, session, owner, isCurrent: current, res: res as unknown as ServerResponse, ...(resume ? { resume } : {}), ...(size ? { size } : {}), ...(drawsSelects ? { drawsSelects } : {}),
     spec: { command: "/trusted/agent-browser", args: ["mcp", "--tools", "core"], env: { AGENT_BROWSER_SESSION: session, AGENT_BROWSER_SOCKET_DIR: "/isolated/socket" } } });
   return { res, socket: SocketFixture.instances.at(-1)!, action: (body: unknown) => live.action({ viewerId: res.id, botId, owner, body }) };
 }
@@ -835,9 +835,9 @@ describe("authenticated browser viewer relay", () => {
     });
 
     /** A view of a page its DevTools client is attached to, shown as the active tab. */
-    async function attachedView(tools: ReturnType<typeof devTools>) {
+    async function attachedView(tools: ReturnType<typeof devTools>, drawsSelects = true) {
       live = new BrowserLive({ runtime, devTools: { url: tools.url, connect: tools.connect } });
-      const a = await open();
+      const a = await open({ drawsSelects });
       tools.emit("Target.attachedToTarget", { sessionId: "page-1", targetInfo: { type: "page", targetId: "TARGET-1" } });
       a.socket.receive({ type: "tabs", tabs: [{ tabId: "t1", targetId: "TARGET-1", title: "Page", url: "https://example.com/", active: true }] });
       await a.action({ type: "take" });
@@ -926,6 +926,16 @@ describe("authenticated browser viewer relay", () => {
       expect(selected).toBe(1);
       // The list is chosen from once.
       await expect(a.action({ type: "select_choose", id: again.id, index: 0 })).resolves.toMatchObject({ notice: expect.any(String) });
+    });
+
+    it("leaves a press on a dropdown list to the page for a view that does not draw lists, as an older phone app's", async () => {
+      const tools = devTools((method) => method === "Page.getFrameTree" ? { frameTree: { frame: { id: "FRAME-1" } } } : method === "Page.createIsolatedWorld" ? { executionContextId: 7 } : method === "Runtime.evaluate" ? { result: { value: { options: [{ label: "Alpha", disabled: false }], selectedIndex: 0, rect: { x: 0, y: 0, width: 9, height: 9 } } } } : {});
+      const a = await attachedView(tools, false);
+      nativeInput.mockClear();
+      await a.action({ type: "input_mouse", eventType: "mousePressed", x: 5, y: 5, button: "left", clickCount: 1 });
+      expect(nativeInput.mock.calls.map(([, options]) => JSON.parse(options.body).type)).toEqual(["mousePressed"]);
+      expect(a.res.events("selectPopup")).toEqual([]);
+      expect(tools.sent.some((call) => call.method === "Runtime.evaluate")).toBe(false);
     });
 
     it("lets a press that is not on a dropdown list through to the page", async () => {
