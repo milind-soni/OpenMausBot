@@ -83,7 +83,7 @@ export function describeDevinAccountError(code: AccountErrorCode): string {
  * `_meta["cognition.ai/userMessageId"]`. */
 export const DEVIN_STEER: AcpPromptSteer = {
   kind: "prompt",
-  capability: "cognition.ai/midTurnPrompts",
+  supported: (init) => (init as { agentCapabilities?: { _meta?: Record<string, unknown> } } | null)?.agentCapabilities?._meta?.["cognition.ai/midTurnPrompts"] === true,
   run: (response) => {
     const run = (response as { _meta?: Record<string, unknown> } | null)?._meta?.["cognition.ai/userMessageId"];
     return typeof run === "string" ? run : undefined;

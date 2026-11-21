@@ -158,4 +158,27 @@ describe("acpPromptSteering", () => {
     expect(await failing.steer("late")).toBe("refused");
     expect(await acpPromptSteering(() => false, async () => ({})).steer("x")).toBe("refused");
   });
+
+  it("does not wait for a steer the agent never answers, and swallows its late failure", async () => {
+    const sent: string[] = [];
+    let fail: (error: unknown) => void = () => {};
+    const steering = acpPromptSteering(() => true, (text) => {
+      sent.push(text);
+      return new Promise((_, reject) => { fail = reject; });
+    }, false);
+    expect(await steering.steer(" more ")).toBe("steered");
+    expect(sent).toEqual(["more"]);
+    expect(steering.promptAnswered()).toBeNull();
+    fail(new Error("process gone"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(steering.failure).toBeUndefined();
+    expect(steering.replies).toEqual([]);
+    expect(await steering.steer("late")).toBe("refused");
+  });
+
+  it("reports an immediate send failure on a steer the agent does not answer", async () => {
+    const steering = acpPromptSteering(() => true, () => Promise.reject(new Error("process gone")), false);
+    expect(await steering.steer("change of plan")).toBe("indeterminate");
+    expect(steering.promptAnswered()).toBeNull();
+  });
 });

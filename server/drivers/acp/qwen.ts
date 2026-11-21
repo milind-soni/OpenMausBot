@@ -1,4 +1,4 @@
-// Qwen Code (`qwen --acp`), custom-only: live local hosts are written into ~/.qwen/settings.json modelProviders.
+// Qwen Code reads custom routes from modelProviders in settings.json.
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -8,7 +8,11 @@ import { qualifiedModelLabel } from "../../contracts.ts";
 import { harnessHome } from "../../env-path.ts";
 import { parseQwenLogLine } from "./quiet-status.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
-import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { acpBackgroundWork } from "./background.ts";
+import { createAcpDriver, type AcpConfig, type AcpSupport } from "./core.ts";
+import { discoverAcpModels } from "./custom-model-catalog.ts";
+import { execCli } from "../../procs.ts";
+import type { AcpPromptSteer } from "./steer.ts";
 
 const EMPTY: ModelCatalog = { default: "", options: [] };
 
@@ -150,8 +154,47 @@ export function ensureQwenInjectModel(
   return inject.model;
 }
 
-async function resolveModels(env: Record<string, string | undefined>): Promise<ModelCatalog> {
-  const catalog = await mergeLocalInject(readQwenModelCatalog(env), env);
+/** `qwen --list-models` (1.0.0-preview.2) prints `MODEL` then one `<label> (<id>)` line per model the signed-in
+ * account can use; `--output-format json` does not change it. */
+export function parseQwenModelList(stdout: string): ModelCatalog["options"] {
+  const [header, ...lines] = stdout.trim().split(/\r?\n/);
+  if (header?.trim() !== "MODEL") return [];
+  return lines.flatMap((line) => {
+    const match = /^(.+?) \(([^()\s]+)\)$/.exec(line.trim());
+    return match ? [{ id: match[2], label: match[1] }] : [];
+  });
+}
+
+function listQwenModels(env: Record<string, string | undefined>, cli: string): Promise<ModelCatalog["options"] | null> {
+  return new Promise((resolve) => {
+    execCli(cli, ["--list-models"], { timeout: 30_000, env: env as NodeJS.ProcessEnv }, (err, stdout) => {
+      resolve(err ? null : parseQwenModelList(String(stdout ?? "")));
+    });
+  });
+}
+
+/** ACP session/new offers only the session's own model (`qfmodel` under qoder-oauth, `auto` with no settings), so
+ * the account's list comes from `--list-models`, and the session from a CLI without it. Routes come from settings. */
+async function readQwenNativeModels(env: Record<string, string | undefined>, cli: string): Promise<ModelCatalog["options"]> {
+  const listed = await listQwenModels(env, cli || "qwen");
+  if (listed) return listed;
+  try {
+    const catalog = await discoverAcpModels(env, cli || "qwen", ["--acp"], { variants: false });
+    return catalog.options.filter((option) => !isQwenRouteId(option.id));
+  } catch {
+    return [];
+  }
+}
+
+function isQwenRouteId(model: string): boolean {
+  const protocol = /\(([^()]+)\)$/.exec(model)?.[1];
+  return model.startsWith("qwen-route:") || (protocol !== undefined && PROTOCOLS.has(protocol));
+}
+
+async function resolveModels(env: Record<string, string | undefined>, config: Pick<AcpConfig, "cli">): Promise<ModelCatalog> {
+  const routed = await mergeLocalInject(readQwenModelCatalog(env), env);
+  const native = await readQwenNativeModels(env, config.cli);
+  const catalog = { default: routed.default || native[0]?.id || "", options: [...routed.options, ...native] };
   const routes = readQwenRoutes(env);
   const replacements = new Map<string, string>();
   for (const option of catalog.options) {
@@ -169,7 +212,7 @@ async function resolveModels(env: Record<string, string | undefined>): Promise<M
   return { default: options.some((option) => option.id === preferred) ? preferred : options[0]?.id ?? "", options };
 }
 
-export function resolveQwenTurnModel(model: string | undefined, env: Record<string, string | undefined>): string | undefined {
+export function resolveQwenTurnModel(model: string | undefined, env: Record<string, string | undefined>, catalog?: ModelCatalog): string | undefined {
   if (!model) return model;
   const injected = decodeInjectId(model);
   if (injected) ensureQwenInjectModel(model, env);
@@ -181,8 +224,10 @@ export function resolveQwenTurnModel(model: string | undefined, env: Record<stri
     return route.id;
   }
   if (routes.some((route) => route.id === model)) return model;
+  if (catalog?.options.some((option) => option.id === model && !option.custom)) return model;
   const matches = routes.filter((route) => route.model === model);
   if (matches.length > 1) throw new Error("This Qwen model has multiple providers. Refresh models and select the intended provider again.");
+  if (!matches.length && !isQwenRouteId(model)) return model;
   if (!matches.length) throw new Error("This Qwen model is no longer configured. Refresh models and select it again.");
   return matches[0].id;
 }
@@ -205,10 +250,26 @@ export function qwenApprovalArgs(fullAuto: boolean, approvalMode: string | undef
   return [];
 }
 
+/** Qwen Code 1.0.0-preview.2 takes a second `session/prompt` into the running turn but advertises nothing, so its
+ * `agentInfo.version` is the only signal; older builds are untested. */
+export function qwenSteers(initializeResult: unknown): boolean {
+  const version = (initializeResult as { agentInfo?: { version?: unknown } } | null)?.agentInfo?.version;
+  const match = typeof version === "string" ? /^(\d+)\.(\d+)\.(\d+)(?:-(.+))?$/.exec(version.trim()) : null;
+  if (!match) return false;
+  const [major, minor, patch] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  if (major !== 1 || minor !== 0 || patch !== 0) return major >= 1;
+  const pre = match[4];
+  if (pre === undefined) return true;
+  const preview = /^preview\.(\d+)$/.exec(pre);
+  return preview !== null && Number(preview[1]) >= 2;
+}
+
+/** Qwen Code 1.0.0-preview.2 never answers the steer prompt; the first prompt ends with the steer taken in. */
+const QWEN_STEER: AcpPromptSteer = { kind: "prompt", answers: false, supported: qwenSteers };
+
 const support: AcpSupport = {
   driverKind: "qwenAgent",
   displayName: "Qwen",
-  access: "custom",
   models: EMPTY,
   resolveModels,
   resolveTurnModel: resolveQwenTurnModel,
@@ -228,6 +289,9 @@ const support: AcpSupport = {
   // Qwen's live session/load returns its cached MCP clients, ignoring fresh credentials.
   restartOnMcpChange: true,
   selectModel: { configId: "model" },
+  // 1.0.0-preview.2 ignores `-m` and refuses session/set_config_option for any account model but the session's own.
+  sessionModelEnv: "QWEN_MODEL",
+  sessionModelOnly: true,
   pickAuthMethod: () => null,
   authFailure: "continue",
   isAuthenticated: () => true,
@@ -235,8 +299,13 @@ const support: AcpSupport = {
   // Qwen says nothing over ACP while it retries or compresses, but its debug log does.
   transformEnv: (env) => {
     if (env.QWEN_DEBUG_LOG_FILE === undefined) env.QWEN_DEBUG_LOG_FILE = "1";
+    // Qwen Code 1.0: with agent sessions on, an Agent call may run in the background and wake a turn after ours ends;
+    // off, the subagent finishes inside the turn and its result reaches the chat.
+    env.QWEN_ENABLE_AGENT_SESSIONS ??= "0";
   },
+  backgroundWork: (instanceId) => acpBackgroundWork(["qwenAgent", instanceId], 30_000),
   statusLog: { path: qwenDebugLogPath, parse: parseQwenLogLine },
+  steer: QWEN_STEER,
 };
 
 export const QwenAgentDriver = createAcpDriver(support);

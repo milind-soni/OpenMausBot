@@ -22,6 +22,7 @@ export interface AcpTurn {
   controlsHost: boolean;
   state: {
     settled: boolean; promptSent: boolean; text: string; textMessageId: string | null; producedItem: boolean; repliedText: boolean; startupActivity: boolean; stopped: boolean;
+    backgroundWoke?: boolean;
     /** A tool call ended, and no reply reached the chat since (text or image). The turn still runs, but its end is wordless. */
     toolsSinceShown: boolean;
     /** Reasoning streamed in that wordless window, and no reply followed it: the model was answering and never landed it. */
@@ -57,6 +58,7 @@ export interface AcpSession {
    *  and bearer tokens rotate every turn, so a change re-establishes the session on the same child. */
   sessionKey: string | null;
   sessionId: string | null;
+  loadingSessionId?: string;
   sessionConfigResult: any;
   initResult: any;
   authenticated: boolean;

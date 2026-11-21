@@ -1,6 +1,6 @@
 // ACP has no steer method, so each agent takes a message into its running turn its own way: a slash command it
 // advertises (`available_commands_update`, Hermes), an extension request (`_session/steering`, OpenCode 2.3.0), or a
-// second session/prompt (Devin, 3000.13.4).
+// second session/prompt (Devin, 3000.13.4; Qwen Code, 1.0.0-preview.2).
 import type { SteerOutcome } from "../../contracts.ts";
 
 /** How an agent takes a person's message into its running turn. */
@@ -20,13 +20,16 @@ export interface AcpRequestSteer {
   supported(initializeResult: unknown): boolean;
 }
 
-/** A second `session/prompt` joins the running turn: Devin, for a CLI whose `initialize` sets `agentCapabilities._meta[capability]`
- * (both prompts end together; their replies carry the same usage and the same `run`), and Grok, whose config opts in (`enabled`). */
+/** A second `session/prompt` joins the running turn. */
 export interface AcpPromptSteer {
   kind: "prompt";
+  /** Whether this process's `initialize` result says a second prompt joins the running turn. */
+  supported?(initializeResult: unknown): boolean;
   capability?: string;
   /** For an agent that does not announce the capability: whether this process's environment opts in. */
   enabled?(env: Record<string, string | undefined>): boolean;
+  /** False when the agent never answers the steer prompt (Qwen Code 1.0.0-preview.2): the turn ends with its own prompt. */
+  answers?: false;
   /** The run a prompt reply ends; replies of one run report their usage once. */
   run?(response: unknown): string | undefined;
   /** A steer reply that only reports its message was taken into the running turn; the turn's own reply is the outcome. */
@@ -137,8 +140,9 @@ export function acpRequestSteering(running: () => boolean, send: (text: string) 
 }
 
 /** `send` carries one `session/prompt` and settles when the agent answers it, at the end of the run. A steer is reported as
- * steered once it is sent: the agent gives no earlier answer. */
-export function acpPromptSteering(running: () => boolean, send: (text: string) => Promise<unknown>): AcpTurnSteering {
+ * steered once it is sent: the agent gives no earlier answer. `answers` false: the agent never answers it, so the turn
+ * does not wait for it. */
+export function acpPromptSteering(running: () => boolean, send: (text: string) => Promise<unknown>, answers = true): AcpTurnSteering {
   let answered = false;
   const pending = new Set<Promise<unknown>>();
   const steering: AcpTurnSteering = {
@@ -147,6 +151,12 @@ export function acpPromptSteering(running: () => boolean, send: (text: string) =
     async steer(text) {
       const guidance = text.trim();
       if (!guidance || answered || !running()) return "refused";
+      if (!answers) {
+        return new Promise<SteerOutcome>((resolve) => {
+          send(guidance).then(() => resolve("steered"), () => resolve("indeterminate"));
+          queueMicrotask(() => resolve("steered"));
+        });
+      }
       const sent = send(guidance).then(
         (reply) => { steering.replies!.push(reply); },
         (error) => { steering.failure ??= error; },
@@ -184,7 +194,9 @@ export function turnSteering(support: AcpSteerSupport, io: AcpSteerIo): AcpTurnS
       (text) => io.extension(support.method, text));
   }
   if ("kind" in support && support.kind === "prompt") {
-    return acpPromptSteering(() => io.open() && (support.enabled ? support.enabled(io.env) : io.initializeResult()?.agentCapabilities?._meta?.[support.capability ?? ""] === true), io.prompt);
+    const enabled = () => support.enabled?.(io.env) ?? support.supported?.(io.initializeResult())
+      ?? (io.initializeResult()?.agentCapabilities?._meta?.[support.capability ?? ""] === true);
+    return acpPromptSteering(() => io.open() && enabled(), io.prompt, support.answers !== false);
   }
   return acpTurnSteering(support, () => io.open() && io.commands()?.has(support.command) === true, io.prompt);
 }
