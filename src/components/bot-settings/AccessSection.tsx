@@ -14,7 +14,7 @@ import { shortPath } from "@/lib/short-path";
 import { isOwnThreadFolder } from "../../../shared/thread-folder";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { CloudBackendPicker } from "../CloudBackendPicker";
-import { placeManagedBy, worksOnChoices, WorksOnGrid, worksOnSelected, type WorksOnMode } from "../WorksOnGrid";
+import { placeManagedBy, worksOnChoices, WorksOnGrid, worksOnHintKey, worksOnSelected, type WorksOnMode } from "../WorksOnGrid";
 import { Switch } from "../SettingsPrimitives";
 import { PhoneAppsCard } from "./PhoneAppsCard";
 import { ProposalStatus } from "./ProposalStatus";
@@ -685,7 +685,7 @@ function DraftWorksOn({ bot, patch, seat }: { bot: Bot; patch: ReturnType<typeof
   const choose = (mode: WorksOnMode) => patch(mode === "browser" ? { computer: mode, browser: true } : { computer: mode });
   return <>
     <div className="text-[15px] font-medium text-ink">{t("computer.worksOn")}</div>
-    <p className="mt-1 text-[12px] leading-5 text-ink-secondary">{t(state.config?.cloudHome ? "computer.worksOnHintCloudHome" : "computer.worksOnHint")}</p>
+    <p className="mt-1 text-[12px] leading-5 text-ink-secondary">{t(worksOnHintKey(state.config, capabilities))}</p>
     <WorksOnGrid options={options} onSelect={choose} />
   </>;
 }
