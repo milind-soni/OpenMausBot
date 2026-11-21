@@ -284,6 +284,23 @@ async function keepPicture(desk: RfbClient, name: string): Promise<string> {
   }
 }
 
+/**
+ * How long until the display shows the page's own colour at a point, or null if it never did. A window just started can
+ * stay unpainted after the bot's call returned (seen on the runner's Google Chrome: one flat grey rectangle), and a
+ * click sent into it is lost.
+ */
+async function untilPainted(desk: RfbClient, at: { x: number; y: number }, colour: string, timeoutMs: number): Promise<number | null> {
+  const began = Date.now();
+  for (;;) {
+    if (await desk.pixel(at.x, at.y).catch(() => null) === colour) return Date.now() - began;
+    if (Date.now() - began > timeoutMs) return null;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
+/** "r,g,b" from a computed CSS colour such as "rgb(239, 239, 239)". */
+const rgbOf = (css: string) => (/rgba?\((\d+), (\d+), (\d+)/.exec(css) ?? []).slice(1, 4).join(",");
+
 /** What a display's browser shows besides the page, for a failure message: its targets, and the page's focus and size. */
 type Shown = { run: { browser: { connection: { root: { send<T>(method: string, params?: Record<string, unknown>): Promise<T> }; session(id: string): { send<T>(method: string, params?: Record<string, unknown>): Promise<T> } | undefined } } } | null; active(): { page: { evaluate(expression: string, options: { world: "page" }): Promise<unknown> } } | null };
 
@@ -433,6 +450,20 @@ suite("a bot's browser on a private display", () => {
     await keepPicture(desk, "first-case-start");
 
     const button = await onScreen(200, 140);
+    // Up and left of the click point is still the button, and clear of the pointer Xvnc draws into the picture.
+    const beside = { x: button.x - 20, y: button.y - 20 };
+    const face = rgbOf(await read<string>("getComputedStyle(document.getElementById('b')).backgroundColor"));
+    const firstPaintMs = await untilPainted(desk, beside, face, 30_000);
+    console.log(JSON.stringify({ firstPaintMs, after: "the bot's open returned and a view connected" }));
+    if (firstPaintMs === null) {
+      // Whether input is what it waits for: one pointer move from the person holding it, and five seconds more.
+      await keepPicture(desk, "first-case-unpainted");
+      await profile.control.take(person);
+      desk.send(Buffer.from([5, 0, 0, 10, 0, 10]));
+      const afterInput = await untilPainted(desk, beside, face, 5_000);
+      await keepPicture(desk, "first-case-after-input");
+      throw new Error(`the display never showed the page within 30 s of the bot's open without input; ${afterInput === null ? "nor within 5 s of a pointer move" : `it did ${afterInput} ms after a pointer move`}; what the display's browser showed: ${await shownState(profile)}`);
+    }
     desk.click(button.x, button.y);
     await desk.picture();
     expect(await read<string | undefined>("document.body.dataset.clicks")).toBeUndefined();
