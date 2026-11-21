@@ -213,7 +213,7 @@ async function readText(tab: Tab, input: ToolInput<"agent_browser_read">): Promi
   let text: string;
   if (input.ref !== undefined || input.selector !== undefined) {
     const handle = await resolveElement(tab.page.frames, tab.page.refs, input.ref !== undefined ? { ref: input.ref } : { selector: input.selector! });
-    text = await callOnNode<string>(tab.page.frames, handle, ELEMENT_TEXT);
+    text = await callOnNode<string>(tab.page.frames, handle, ELEMENT_TEXT, [], { readOnly: true });
   } else {
     text = await tab.page.visibleText(offset + limit);
   }

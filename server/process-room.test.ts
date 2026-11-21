@@ -6,7 +6,7 @@ import { engineFailureKind } from "./drivers/engine-errors.ts";
 import { classifyError } from "./drivers/retry.ts";
 import { EngineMemory, FIRST_FRAME_MS, readHostMemory, withEngineMemory, type HostMemory } from "./engine-memory.ts";
 import { containerLimited, readCgroupMemory, readPids, readProcessLimits } from "./process-limits.ts";
-import { BROWSER_NO_ROOM, BROWSER_TASKS, ENGINE_TASKS, gateHost, linuxTreeUse, margin, ProcessBudget, turnsSetting, turnsUnder, type TreeUse } from "./process-room.ts";
+import { BROWSER_NO_ROOM, BROWSER_TASKS, ENGINE_TASKS, engineTasks, gateHost, linuxTreeUse, margin, ProcessBudget, turnsSetting, turnsUnder, type TreeUse } from "./process-room.ts";
 import { outOfProcesses, shortageCode } from "./process-shortage.ts";
 import { describeSpawnFailure, linuxGroupOnlyExited } from "./procs.ts";
 import { classifyRoutineFailure, recoverRun, ROUTINE_BUSY_WAIT_MS } from "./routine-recovery.ts";
@@ -167,6 +167,30 @@ describe("the pids budget", () => {
     made.noteForceKilled(); made.noteLateReaped(); made.noteLateReaped();
     expect(made.short(ENGINE_TASKS, 0)).toBe(true);
     expect(made.counts()).toEqual({ limit: 4096, spawnFailed: { EAGAIN: 0, EMFILE: 1, ENFILE: 0, ENOMEM: 1, ENOENT: 1, other: 2 }, forceKilled: 1, lateReaped: 2 });
+  });
+});
+
+describe("an engine's own size against the pids limit", () => {
+  it("counts Grok's runtime threads, a pre-warmed pool of 16 and a worker per CPU, beside every other engine's usual size", () => {
+    expect(engineTasks("grokAgent", 4)).toBe(ENGINE_TASKS + 16 + 4);
+    expect(engineTasks("grokAgent", 16)).toBe(ENGINE_TASKS + 32);
+    expect(engineTasks("codex", 16)).toBe(ENGINE_TASKS);
+  });
+
+  it("holds a Grok engine still starting at its own size, so fewer others start beside it", async () => {
+    // pids.max 256 keeps 32 back: 26 running, a Grok engine of 80 and one of 60 promised, and a third of 60 would pass 224.
+    const grok = server({ pids: 256, turns: 100 });
+    expect(await grok.memory.admit("grok", new AbortController().signal, () => {}, "process", undefined, engineTasks("grokAgent", 4))).toBe(true);
+    expect(await grok.memory.admit("a", new AbortController().signal, () => {})).toBe(true);
+    const stop = new AbortController(), notices: string[] = [];
+    const third = grok.memory.admit("b", stop.signal, (text) => notices.push(text));
+    await settle();
+    expect(notices).toHaveLength(1);
+    stop.abort();
+    expect(await third).toBe(false);
+
+    const generic = server({ pids: 256, turns: 100 });
+    for (const thread of ["first", "a", "b"]) expect(await generic.memory.admit(thread, new AbortController().signal, () => {})).toBe(true);
   });
 });
 
@@ -669,6 +693,29 @@ describe("a new engine that never comes up", () => {
     s.memory.turnStarted("t1");
     expect(s.memory.stoppedForRoom("t1", 1000)).toBe(false);
     expect(s.memory.stoppedForRoom("t1")).toBe(false);
+  });
+  it("admits each engine at its own size: a Grok start waits where an engine of the usual size fits", async () => {
+    // Under pids.max 256, 120 and a busy engine's 44 running: one more of the usual 60 reaches the 224 below the margin,
+    // Grok's runtime threads pass it.
+    const send = async (driverKind: string) => {
+      const s = server({ pids: 256, turns: 100 });
+      s.state.base = 120;
+      expect(await s.start("busy")).toBe(true);
+      // Its processes are all there by now, so nothing more is held for it.
+      s.advance(6_000);
+      const decorated = withEngineMemory(fakeInstance(driverKind).instance, s.memory), notices: string[] = [];
+      decorated.adapter.onEvent((event) => { if (event.type === "runtime.notice") notices.push(event.message); });
+      return { decorated, notices, turn: decorated.adapter.sendTurn({ threadId: "t1", text: "hi" } as SendTurnInput) };
+    };
+    const usual = await send("claudeAgent");
+    expect(await usual.turn).toEqual({ turnId: "turn-t1" });
+    expect(usual.notices).toEqual([]);
+    const grok = await send("grokAgent");
+    const caught = grok.turn.catch((error: unknown) => error);
+    await settle();
+    expect(grok.notices).toHaveLength(1);
+    await grok.decorated.adapter.interruptTurn("t1", "turn-t1");
+    expect(await caught).toBeInstanceOf(TurnNotStartedError);
   });
 });
 

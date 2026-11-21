@@ -116,7 +116,7 @@ async function receivesClick(context: ActionContext, handle: NodeHandle, local: 
         functionDeclaration: RECEIVES,
         arguments: [hitId ? { objectId: hitId } : { value: null }, { value: wantEnabled }],
         returnByValue: true,
-      });
+      }, { readOnly: true });
       if (exceptionDetails || !result.value) return { disabled: false, covering: null };
       // A hit in a frame this element hosts lands inside it.
       if (!sameFrame && hit.backendNodeId !== handle.backendNodeId) {
@@ -260,14 +260,14 @@ const notEditable = () => new DriverError("not-editable", "The target is not an 
 async function focusEditable(context: ActionContext, handle: NodeHandle & { ref?: string }): Promise<"text" | "value" | "contenteditable"> {
   let editable: { kind: "text" | "value" | "contenteditable" } | null;
   try {
-    editable = await callOnNode<{ kind: "text" | "value" | "contenteditable" } | null>(context.frames, handle, EDITABLE);
+    editable = await callOnNode<{ kind: "text" | "value" | "contenteditable" } | null>(context.frames, handle, EDITABLE, [], { readOnly: true });
   } catch (error) {
     if (isGone(error) || (error instanceof DriverError && error.code === "not-found")) throw gone(handle);
     throw error;
   }
   if (!editable) throw notEditable();
   await handle.session.send("DOM.focus", { backendNodeId: handle.backendNodeId });
-  if (!(await callOnNode<boolean>(context.frames, handle, FOCUSED))) throw notEditable();
+  if (!(await callOnNode<boolean>(context.frames, handle, FOCUSED, [], { readOnly: true }))) throw notEditable();
   return editable.kind;
 }
 
@@ -336,7 +336,7 @@ export async function select(context: ActionContext, target: Exclude<Target, Poi
   await context.bringToFront();
   refuseErrorPage(context);
   const handle = await element(context, target);
-  const info = await callOnNode<SelectInfo | null>(context.frames, handle, SELECT_INFO).catch((error: unknown) => {
+  const info = await callOnNode<SelectInfo | null>(context.frames, handle, SELECT_INFO, [], { readOnly: true }).catch((error: unknown) => {
     if (isGone(error) || (error instanceof DriverError && error.code === "not-found")) throw gone(handle);
     throw error;
   });
@@ -357,7 +357,7 @@ export async function select(context: ActionContext, target: Exclude<Target, Poi
     if (typeable) {
       await handle.session.send("DOM.focus", { backendNodeId: handle.backendNodeId });
       await context.keyboard.type(option.label);
-      const after = await callOnNode<SelectInfo | null>(context.frames, handle, SELECT_INFO);
+      const after = await callOnNode<SelectInfo | null>(context.frames, handle, SELECT_INFO, [], { readOnly: true });
       if (after?.value === option.value) return { selected: [option.value] };
     }
   }
@@ -380,13 +380,13 @@ type CheckState = { kind: "checkbox" | "radio"; checked: boolean | "mixed" } | n
 /** Clicks only when the state differs, then confirms the page took it. */
 export async function check(context: ActionContext, target: Exclude<Target, Point>, checked = true, options: { timeoutMs?: number } = {}): Promise<{ checked: boolean; changed: boolean }> {
   const handle = await element(context, target);
-  const state = await callOnNode<CheckState>(context.frames, handle, CHECK_STATE);
+  const state = await callOnNode<CheckState>(context.frames, handle, CHECK_STATE, [], { readOnly: true });
   if (!state) throw new DriverError("not-editable", "This element is not a checkbox, radio button or switch.");
   if (state.checked === checked) return { checked, changed: false };
   if (!checked && state.kind === "radio") throw new DriverError("refused", "A radio button cannot be unchecked; choose another option instead.");
   const ref = handle.ref ?? context.refs.refFor(handle);
   await click(context, { ref }, options);
-  const after = await callOnNode<CheckState>(context.frames, handle, CHECK_STATE);
+  const after = await callOnNode<CheckState>(context.frames, handle, CHECK_STATE, [], { readOnly: true });
   if (after?.checked !== checked) throw new DriverError("execution", `Clicking did not ${checked ? "check" : "uncheck"} the element.`);
   return { checked, changed: true };
 }
@@ -413,7 +413,7 @@ export async function drag(context: ActionContext, from: Target, to: Target, { t
   });
   await session.send("Input.setInterceptDrags", { enabled: true });
   try {
-    await valueInWorld(context.frames, sourceFrame, DRAG_PROBE);
+    await valueInWorld(context.frames, sourceFrame, DRAG_PROBE, { readOnly: false });
     await context.mouse.move(start.x, start.y);
     await context.mouse.down();
     // Past Chrome's drag threshold, toward the target.

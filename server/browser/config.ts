@@ -26,6 +26,8 @@ export const browserEngineConfigSchema = z.object({
   egress: browserEgressConfigSchema.optional(),
   /** "chrome" runs the bots' browsers on OpenMausBot's own Chrome driver, an early test; agent-browser is the default. */
   engine: z.enum(["agent-browser", "chrome"]).optional(),
+  /** "pane" shows the Chrome engine's browser on the desktop app as a real page the person uses directly, an early test; streamed when unset. */
+  surface: z.enum(["stream", "pane"]).optional(),
 });
 
 export interface BrowserEngineConfig {
@@ -33,8 +35,14 @@ export interface BrowserEngineConfig {
   idleTimeoutMinutes?: number;
   egress?: BrowserEgressConfig;
   engine?: BrowserEngineKind;
+  surface?: "stream" | "pane";
 }
 
 export function browserEngineKind(cfg: { browserEngine?: BrowserEngineConfig }): BrowserEngineKind {
   return cfg.browserEngine?.engine === "chrome" ? "chrome" : "agent-browser";
+}
+
+/** The desktop pane needs the Chrome engine too: it is that engine's browser, shown natively. */
+export function browserPaneWanted(cfg: { browserEngine?: BrowserEngineConfig }): boolean {
+  return browserEngineKind(cfg) === "chrome" && cfg.browserEngine?.surface === "pane";
 }

@@ -322,3 +322,87 @@ describe("a host that cannot run the browser yet", () => {
     expect(host.querySelector("a")).toBeNull();
   });
 });
+
+describe("a press before the view can place it", () => {
+  /** The view's first frame, page size and control, in the order a slow start delivers them. */
+  const ready = (events: PreviewStreamEvents, controller: PreviewStreamControl["controller"] = "agent") => act(async () => {
+    events.onConnectedChange(true);
+    events.onControl?.(control(controller));
+    events.onViewport({ width: 1600, height: 1000 });
+    events.onFrame(new ArrayBuffer(8));
+  });
+
+  it("sends a click made before the first frame once the frame shows, where the picture puts it", async () => {
+    const { input, canvas, events } = await mount();
+    await pointer(canvas, "pointerdown", 400, 250);
+    await pointer(canvas, "pointerup", 400, 250);
+    expect(input).not.toHaveBeenCalled();
+    await ready(events());
+    await flush();
+    expect(input.mock.calls.map(([message]) => message)).toEqual([
+      expect.objectContaining({ type: "mouse", action: "move", x: 400, y: 250 }),
+      expect.objectContaining({ type: "mouse", action: "down", x: 400, y: 250, button: "left", clickCount: 1 }),
+      expect.objectContaining({ type: "mouse", action: "up", x: 400, y: 250, button: "left", clickCount: 1 }),
+    ]);
+  });
+
+  it("keeps a button still held down, so its release later is sent where it is let go", async () => {
+    const { input, canvas, events } = await mount();
+    await pointer(canvas, "pointerdown", 400, 250);
+    await ready(events());
+    await flush();
+    await pointer(canvas, "pointerup", 420, 260);
+    expect(input.mock.calls.map(([message]) => (message as { action?: string }).action)).toEqual(["move", "down", "up"]);
+    expect(input.mock.calls.at(-1)![0]).toMatchObject({ action: "up", x: 420, y: 260 });
+  });
+
+  it("sends nothing for a press on the bands beside the picture once it shows, so such a press takes no control", async () => {
+    frame = { width: 1600, height: 500 };
+    const { input, canvas, events } = await mount();
+    await act(async () => {
+      events().onConnectedChange(true);
+      events().onControl?.(control("agent"));
+      events().onViewport({ width: 1600, height: 500 });
+      events().onFrame(new ArrayBuffer(8));
+    });
+    await flush();
+    await pointer(canvas, "pointerdown", 400, 100);
+    await pointer(canvas, "pointerup", 400, 100);
+    expect(input).not.toHaveBeenCalled();
+    await pointer(canvas, "pointerdown", 400, 500);
+    expect(input).toHaveBeenCalledWith(expect.objectContaining({ action: "down", y: 250 }));
+  });
+
+  it("drops it when it landed on the bands beside the picture, when it is too old, or when another viewer holds the browser", async () => {
+    frame = { width: 1600, height: 500 };
+    let mounted = await mount();
+    await pointer(mounted.canvas, "pointerdown", 400, 100);
+    await pointer(mounted.canvas, "pointerup", 400, 100);
+    await act(async () => {
+      mounted.events().onConnectedChange(true);
+      mounted.events().onControl?.(control("agent"));
+      mounted.events().onViewport({ width: 1600, height: 500 });
+      mounted.events().onFrame(new ArrayBuffer(8));
+    });
+    await flush();
+    expect(mounted.input).not.toHaveBeenCalled();
+    act(() => root.unmount());
+    root = createRoot(host);
+    frame = { width: 3200, height: 2000 };
+    mounted = await mount();
+    vi.spyOn(performance, "now").mockReturnValue(performance.now() + 5_000);
+    await pointer(mounted.canvas, "pointerdown", 400, 250);
+    vi.mocked(performance.now).mockReturnValue(performance.now() + 60_000);
+    await ready(mounted.events());
+    await flush();
+    expect(mounted.input).not.toHaveBeenCalled();
+    vi.mocked(performance.now).mockRestore();
+    act(() => root.unmount());
+    root = createRoot(host);
+    mounted = await mount();
+    await pointer(mounted.canvas, "pointerdown", 400, 250);
+    await ready(mounted.events(), "another-viewer");
+    await flush();
+    expect(mounted.input).not.toHaveBeenCalled();
+  });
+});
