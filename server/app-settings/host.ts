@@ -134,7 +134,7 @@ export function createAppSettings(deps: AppSettingsDeps) {
     if (!bot) return refuse(404, "This bot no longer exists.");
     if (entry.tier === "owner-only") return refuse(403, personOnly(entry.label, entry.where));
     const notOwner = notOwners(turn);
-    if (notOwner) return refuse(403, `Settings change only in the owner's own conversation, so nothing changed; you may still read settings. ${whyNotOwners(notOwner, placePath(entry.where))}`);
+    if (notOwner) return refuse(403, `Settings change only in the owner's own conversation. Nothing changed; you may still read settings. ${whyNotOwners(notOwner, placePath(entry.where))}`);
     if (entry.tier === "secret") {
       if (body.value !== undefined) return refuse(400, `Never send a key or token as a value. Call set on ${entry.id} with no value: a secure card asks the user for it, and you never see it.`);
       const budget = spendWrite(turn);
@@ -194,7 +194,7 @@ export function createAppSettings(deps: AppSettingsDeps) {
     const bot = store.bot(turn.botId);
     if (!bot) return refuse(404, "This bot no longer exists.");
     const notOwner = notOwners(turn);
-    if (notOwner) return refuse(403, `A settings card shows only in the owner's own conversation, when they asked, so nothing was shown. ${whyNotOwners(notOwner, "Settings")}`);
+    if (notOwner) return refuse(403, `A settings card shows only in the owner's own conversation, when they asked. Nothing was shown. ${whyNotOwners(notOwner, "Settings")}`);
     if (!deps.cards?.here(body.card)) return reply(200, { text: cardElsewhere(card) });
     if (deps.connectorThread(bot.id, turn.threadId)?.group) return reply(200, { text: cardNotInRoom(card) });
     const budget = spendWrite(turn);

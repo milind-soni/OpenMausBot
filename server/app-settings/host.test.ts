@@ -158,7 +158,7 @@ describe("reads", () => {
       expect(refused.status).toBe(403);
       expect(saved).toEqual([]);
       const error = String(refused.body.error);
-      expect(error).toMatch(/^Settings change only in the owner's own conversation, so nothing changed; you may still read settings\. /);
+      expect(error).toMatch(/^Settings change only in the owner's own conversation\. Nothing changed; you may still read settings\. /);
       expect(error).toContain(`The person can change it themselves in ${where}.`);
       return error;
     };
