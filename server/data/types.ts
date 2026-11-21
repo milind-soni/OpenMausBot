@@ -70,6 +70,9 @@ export interface BotDatabase {
   close(): Promise<void>;
 }
 
+/** A bot's database a release could not close, kept open (never a second instance on its file) until it can be. */
+export interface DataHeld { botId: string; why: "running" | "failed"; detail?: string }
+
 export interface DataEngine {
   unavailable(): string | null;
   /** What a status read shows: the loaded binding's state, or, before anything has loaded it, whether its files are in
@@ -80,8 +83,8 @@ export interface DataEngine {
   forBot(botId: string): Promise<BotDatabase>;
   deleteBot(botId: string): Promise<void>;
   /** Closes every bot's database, its WAL written into the file, so its files are at rest until its next statement (a
-   * full backup copies them then). Returns the bots whose database a statement that did not stop still holds. */
-  release(): Promise<string[]>;
+   * full backup copies them then). Returns the databases still open: a statement that did not stop, or a failed close. */
+  release(): Promise<DataHeld[]>;
   closeAll(): Promise<void>;
 }
 

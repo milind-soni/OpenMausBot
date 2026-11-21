@@ -144,7 +144,7 @@ test("the native confirm and IPC refusals follow the app's current language", as
         "Vão com Atlas: instruções, habilidades, arquivos, rotinas e suas conversas com Atlas",
         "Suas conversas continuam privadas lá: só você pode vê-las.",
         "Ficam no My Cloud: o que Atlas lembra, suas conexões e o MausBot",
-        "As tabelas que Atlas carregou em Dados ficam no My Cloud: a transferência ainda não as leva.",
+        "As tabelas que Atlas carregou em Dados não são transferidas: ficam no My Cloud, onde Atlas não consegue abri-las depois que entra em Acme.",
         "Não é possível desfazer: você não pode mover o bot de volta para o My Cloud.",
       ].join("\n\n"),
       buttons: ["Mover para Acme", "Cancelar"],

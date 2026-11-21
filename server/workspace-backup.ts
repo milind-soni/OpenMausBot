@@ -18,7 +18,7 @@ import { cjkSearchText } from "./cjk-search.ts";
 import { dataEngineSpillPath, ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, managedTaskSkillLink, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
 import { omittedAsTeamPrivate, routinesWithoutTeamPrivate, stripTeamPrivate, TEAM_PRIVATE_NOTE, teamPrivateAttachments, teamPrivateThreads, withoutTeamPrivate } from "./workspace-backup-team-private.ts";
 import { flushLaterSaves } from "./save-batch.ts";
-import { foldLegacySidecars, LEGACY_SIDECARS, LIVE_DATABASE_SIDECARS, SNAPSHOT_DATABASES, snapshotDatabases } from "./workspace-backup-databases.ts";
+import { DATA_TABLES, foldLegacySidecars, LEGACY_SIDECARS, LIVE_DATABASE_SIDECARS, SNAPSHOT_DATABASES, snapshotDatabases, tooLargeError } from "./workspace-backup-databases.ts";
 import type { WorkspaceBackupClientState, WorkspaceBackupPrivateMetadata, WorkspaceBackupSummary, WorkspaceLeftBehind } from "../shared/workspace-backup.ts";
 
 export type { WorkspaceBackupSummary, WorkspaceBackupPrivateMetadata } from "../shared/workspace-backup.ts";
@@ -321,6 +321,7 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
   const foldedPaths = new Map<string, string>();
   const warnings = ["Stop external editors and managed desktops before exporting; files written outside this server cannot be frozen by the backup gate.", "Conversation text and user files are not redacted and may contain secrets you pasted. Keep the encrypted backup private.", RESTORE_WARNING];
   let bytes = 0;
+  let dataBytes = 0;
   let skippedLinks = 0;
   let skippedDependencies = 0;
   let skippedWorkLinks = 0;
@@ -394,6 +395,8 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
           entries.push({ path, type: "directory", size: 0, mode: 0o700 });
           walk(source, path, [...chain, source]);
         } else if (stat.isFile()) {
+          // Said before a copy that could take minutes: Data tables are the files a workspace grows past the limit with.
+          if (DATA_TABLES.test(path) && bytes + stat.size > MAX_WORKSPACE_BACKUP_BYTES) throw tooLargeError(bytes + stat.size, dataBytes + stat.size);
           let copied: { size: number; mode: number; sha256: string };
           if (path === "config.json" || path === "webhooks.json" || (privacy && (path === "bots.json" || path === "routines.json"))) {
             const value = privateJson(source);
@@ -409,7 +412,8 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
             copied = { size: lstatSync(destination).size, mode: 0o600, sha256: hashFile(destination) };
           } else copied = copyRegular(SNAPSHOT_DATABASES[path] ? join(snapshot, SNAPSHOT_DATABASES[path]) : source, destination);
           bytes += copied.size;
-          if (bytes > MAX_WORKSPACE_BACKUP_BYTES) throw new Error("The workspace exceeds the 10 GB backup limit.");
+          if (DATA_TABLES.test(path)) dataBytes += copied.size;
+          if (bytes > MAX_WORKSPACE_BACKUP_BYTES) throw tooLargeError(bytes, dataBytes);
           entries.push({ path, type: "file", ...copied });
         } else throw new Error(`Cannot back up special or live runtime file: ${path}`);
       }

@@ -13,7 +13,7 @@ import { DATA_RESULTS_SCHEMA } from "../shared/data-surface.ts";
 import { createDataEngine } from "./data/engine.ts";
 import { openRuntimeStore } from "./runtime/store.ts";
 import { applyPendingWorkspaceRestore, commitPendingWorkspaceRestore, createWorkspaceBackup, stageWorkspaceBackup } from "./workspace-backup.ts";
-import { releaseDataForBackup } from "./workspace-backup-databases.ts";
+import { ONE_STEP, releaseDataForBackup, snapshotDatabases, tooLargeError } from "./workspace-backup-databases.ts";
 
 const PASSWORD = "correct horse battery staple";
 // Real encrypted backups: a few seconds here, much longer on the Windows runners.
@@ -59,6 +59,14 @@ function rowsOf(path: string, sql: string): number {
 }
 
 describe("SQLite databases in a full backup", () => {
+  it("snapshots in one step at a rate every Node takes: a positive Int32", async () => {
+    expect(Number.isInteger(ONE_STEP) && ONE_STEP >= 1 && ONE_STEP <= 2 ** 31 - 1).toBe(true);
+    const root = directory(), snapshot = directory();
+    liveDatabase(join(root, "bursts.db"), "CREATE TABLE probe(i INTEGER PRIMARY KEY, pad TEXT)", "INSERT INTO probe VALUES (?, ?)", 20).db.close();
+    await snapshotDatabases(root, snapshot);
+    expect(rowsOf(join(snapshot, "bursts-snapshot.db"), "SELECT i FROM probe ORDER BY i")).toBe(20);
+  });
+
   it("restores each database whole and complete while a writer goes on inserting into it", async () => {
     const source = directory();
     // A big file before the databases keeps the copy going while the writers write.
@@ -174,35 +182,58 @@ describe("a bot's Data tables in a full backup", () => {
     expect(tables.result).toHaveLength(2);
   }, TIMEOUT_MS);
 
-  it("waits for a Data statement that did not stop rather than copy the database it holds, every time until it closes", async () => {
-    await expect(releaseDataForBackup({ release: async () => ["b1"] })).rejects.toMatchObject({ status: 409 });
+  it("says which bot's Data query holds its database, and that a restart ends it", async () => {
+    const running = await releaseDataForBackup({ release: async () => [{ botId: "b1", why: "running" }] }, () => "Ledger").catch((error: unknown) => error);
+    expect(running).toMatchObject({ status: 409, errorKey: "serverError.backup.dataQueryRunning", errorParams: { bot: "Ledger" } });
+    expect((running as Error).message).toBe("Ledger's Data query is still running and did not stop when asked. Fully quit and reopen OpenMausBot (or restart the hosted server) to stop it, then try again.");
+    const failed = await releaseDataForBackup({ release: async () => [{ botId: "b1", why: "failed", detail: "IO Error: disk full" }] }).catch((error: unknown) => error);
+    expect(failed).toMatchObject({ status: 409, errorKey: "serverError.backup.dataCloseFailed" });
+    expect((failed as Error).message).toContain("b1's Data tables could not be closed for the backup (IO Error: disk full).");
     await expect(releaseDataForBackup({ release: async () => [] })).resolves.toBeUndefined();
-    // A statement DuckDB does not stop (seen on Windows): the engine leaves its instance open, and says so again on the
-    // next try rather than report a database it no longer tracks as closed.
+  });
+
+  it("never opens a second instance on a file a statement that did not stop still holds, and reports it until it closes", async () => {
+    // A statement DuckDB does not stop (seen on Windows): the engine keeps its instance, and every statement meanwhile,
+    // even one that asked while the release was draining, goes to that same instance.
     let finish = () => {};
-    let closed = 0;
+    let created = 0, closed = 0, closeFails = 0;
     const result = { statementType: 1, chunkCount: 0, columnCount: 0, rowCount: 0 };
     const connection = () => ({
       run: async (sql: string) => sql === "SELECT stuck" ? new Promise((resolve) => { finish = () => resolve(result); }) : result,
       runAndReadAll: async () => ({ getRowsJson: () => [] }),
       interrupt() {},
-      closeSync() {},
+      closeSync() { if (closeFails > 0) { closeFails--; throw new Error("IO Error: could not write the checkpoint"); } },
     });
     const binding = {
       version: () => "fake",
-      DuckDBInstance: { create: async () => ({ connect: async () => connection(), closeSync() { closed++; } }) },
+      DuckDBInstance: { create: async () => { created++; return { connect: async () => connection(), closeSync() { closed++; } }; } },
       StatementType: { SELECT: 1, EXPLAIN: 2 },
     } as unknown as NonNullable<Parameters<typeof createDataEngine>[0]>["binding"];
     const engine = createDataEngine({ botFolder: (id) => join(directory(), id), dataDir: directory(), binding });
-    const running = (await engine.forBot("b1")).run("SELECT stuck", { connection: "bot", timeoutMs: 60_000 });
+    const database = await engine.forBot("b1");
+    const running = database.run("SELECT stuck", { connection: "bot", timeoutMs: 120_000 });
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(await engine.release()).toEqual(["b1"]);
-    expect(await engine.release()).toEqual(["b1"]);
+    const releasing = engine.release();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const during = database.run("SELECT 1", { connection: "panel" });
+    expect(await releasing).toEqual([{ botId: "b1", why: "running" }]);
+    await during;
+    await database.run("SELECT 2", { connection: "panel" });
+    expect(created).toBe(1);
+    expect(await engine.release()).toEqual([{ botId: "b1", why: "running" }]);
     expect(closed).toBe(0);
     finish();
     await running;
+    // A close that throws leaves the instance tracked, said with DuckDB's words, and tried again next time.
+    closeFails = 1;
+    expect(await engine.release()).toEqual([{ botId: "b1", why: "failed", detail: "IO Error: could not write the checkpoint" }]);
+    await database.run("SELECT 3", { connection: "panel" });
+    expect(created).toBe(1);
     expect(await engine.release()).toEqual([]);
     expect(closed).toBe(1);
+    await database.run("SELECT 4", { connection: "panel" });
+    expect(created).toBe(2);
+    await engine.closeAll();
   }, TIMEOUT_MS);
 });
 
@@ -247,6 +278,15 @@ function legacyBackup(source: string, out: string): string {
   return path;
 }
 
+describe("the 10 GB limit", () => {
+  it("says how much of it is Data tables when they are most of it", () => {
+    expect(tooLargeError(11 * 1024 ** 3, 3 * 1024 ** 3).message).toBe("The workspace exceeds the 10 GB backup limit.");
+    const data = tooLargeError(11 * 1024 ** 3, 7.4 * 1024 ** 3);
+    expect(data).toMatchObject({ errorKey: "serverError.backup.tooLargeData", errorParams: { size: "7.4 GB" } });
+    expect(data.message).toBe("The workspace exceeds the 10 GB backup limit; 7.4 GB of it is bots' Data tables.");
+  });
+});
+
 describe("backups older releases made", () => {
   it("still restore: a raw bursts database and its WAL arrive as one database, and a backup without Data tables restores without them", async () => {
     const live = directory();
@@ -274,5 +314,20 @@ describe("backups older releases made", () => {
     expect(readFileSync(join(target, "notes.md"), "utf8")).toBe("kept");
     expect(readdirSync(join(target, "bots", "b1"))).toEqual(["SOUL.md"]);
     expect(readFileSync(join(result.safetyCopyPath!, "data", "bots", "b1", "data.duckdb"), "utf8")).toBe("destination tables");
+  }, TIMEOUT_MS);
+
+  it("refuses one whose bursts database is damaged with words a person can act on, changing nothing", async () => {
+    const source = directory();
+    writeFileSync(join(source, "bursts.db"), "not a database at all, but long enough to be read as a header by SQLite........");
+    writeFileSync(join(source, "bursts.db-wal"), "nor a log");
+    writeFileSync(join(source, "notes.md"), "kept");
+    const backup = legacyBackup(source, directory());
+    const target = directory();
+    writeFileSync(join(target, "notes.md"), "here");
+    const staged = await stageWorkspaceBackup(target, backup, { password: PASSWORD });
+    expect(() => commitPendingWorkspaceRestore(target, staged.id)).toThrow(expect.objectContaining({ errorKey: "serverError.backup.legacyBursts",
+      message: "This backup's burst records (bursts.db) are damaged, so nothing was restored and nothing here changed. Make a new backup where it came from." }));
+    expect(applyPendingWorkspaceRestore(target)).toEqual({ restored: false });
+    expect(readFileSync(join(target, "notes.md"), "utf8")).toBe("here");
   }, TIMEOUT_MS);
 });
