@@ -172,7 +172,10 @@ export async function dial(options: DialOptions): Promise<PhoneSession> {
             // from a bare 4001 the relay may have sent on its own.
             const event = closedWhileFinishing;
             socket.onclose?.call(socket, event);
-            void session.closed.then(() => reject(closedBy(event, session.removed)));
+            // The session's own code wins: a record that fails to open is a 4000, never the relay's retryable close.
+            void session.closed.then((code) =>
+              reject(code === event.code ? closedBy(event, session.removed) : new SessionClosed(code, undefined, session.removed)),
+            );
           },
           (error: Error) => fail(error, CLOSE.protocol),
         );

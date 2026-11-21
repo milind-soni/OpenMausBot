@@ -132,13 +132,16 @@ export interface Head {
   headers: Headers;
 }
 
+/** Strips the optional whitespace HTTP allows around a field value: spaces and tabs only, never other bytes. */
+const ows = (value: string) => value.replace(/^[ \t]+|[ \t]+$/g, "");
+
 /** One `name: value` line of a head or the trailers. */
 function appendField(headers: Headers, line: string): void {
   const colon = line.indexOf(":");
   const name = line.slice(0, colon);
   if (colon < 1 || !TOKEN.test(name)) throw new HttpError("bad header line");
   try {
-    headers.append(name, line.slice(colon + 1).replace(/^[ \t]+|[ \t]+$/g, ""));
+    headers.append(name, ows(line.slice(colon + 1)));
   } catch {
     throw new HttpError(`bad value for ${name}`);
   }
@@ -160,12 +163,12 @@ function framing(method: string, head: Head): Framing {
   if (method === "HEAD" || NULL_BODY.has(head.status)) return { kind: "none" };
   // Checked even beside chunked: lengths that disagree mean the reply's framing can't be trusted.
   const length = head.headers.get("content-length");
-  const values = new Set(length?.split(",").map((value) => value.trim()));
+  const values = new Set(length?.split(",").map(ows));
   const [only] = values;
   if (length !== null && (values.size !== 1 || !/^\d{1,15}$/.test(only))) throw new HttpError("bad content-length");
   const coding = head.headers.get("transfer-encoding");
   if (coding !== null) {
-    if (coding.trim().toLowerCase() !== "chunked") throw new HttpError(`unsupported transfer-encoding ${coding}`);
+    if (ows(coding).toLowerCase() !== "chunked") throw new HttpError(`unsupported transfer-encoding ${coding}`);
     return { kind: "chunked" };
   }
   return length === null ? { kind: "close" } : { kind: "length", left: Number(only) };
@@ -189,13 +192,16 @@ export async function streamFetch(open: () => E2EStream, request: StreamRequest)
   const stream = open();
   const reader = new ByteReader(stream.readable);
   let finished = false;
+  /** Set once the whole request is written; a reply that ends before that resets the stream, as fetch drops an upload. */
+  let uploaded = false;
   /** The reply body's controller, once the head is in. */
   let output: ReadableStreamDefaultController<Uint8Array> | null = null;
   const done = () => {
     finished = true;
     signal?.removeEventListener("abort", abort);
     reader.release();
-    stream.end();
+    if (uploaded) stream.end();
+    else stream.reset();
   };
   const failed = (error: unknown): unknown => {
     finished = true;
@@ -214,6 +220,10 @@ export async function streamFetch(open: () => E2EStream, request: StreamRequest)
 
   // No FIN after the request: Node's HTTP server cuts a reply short when the client half-closes first.
   const sent = Promise.all([stream.write(latin1(head)), body?.length ? stream.write(Uint8Array.from(body)) : undefined]);
+  void sent.then(
+    () => (uploaded = true),
+    () => {},
+  );
   try {
     const received = (async () => {
       for (;;) {
@@ -255,11 +265,13 @@ export async function streamFetch(open: () => E2EStream, request: StreamRequest)
             if (chunkLeft === 0) {
               chunkLeft = await chunkSize(reader);
               if (chunkLeft === 0) {
-                // Trailers are checked and dropped, up to the blank line that ends the reply.
+                // Trailers are checked and dropped, up to the blank line that ends the reply; all of them fit in MAX_HEAD.
                 const trailers = new Headers();
+                let room = MAX_HEAD;
                 for (;;) {
-                  const line = await reader.until([13, 10], MAX_HEAD, "trailer");
+                  const line = await reader.until([13, 10], room, "trailer section");
                   if (!line.length) break;
+                  room = Math.max(0, room - line.length - 2);
                   appendField(trailers, byteString(line));
                 }
                 break;
