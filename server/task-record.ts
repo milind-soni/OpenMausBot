@@ -1,4 +1,4 @@
-import { approvalModeFor } from "../shared/approval-mode.ts";
+import { approvalModeFor, type ApprovalMode } from "../shared/approval-mode.ts";
 import { sameModelSelection } from "../shared/thread-model.ts";
 import type { TaskOpenedBy } from "../shared/wire.ts";
 import { newId, type ModelSelection } from "./contracts.ts";
@@ -19,8 +19,15 @@ function botLevel(bot: BotRecord): Pick<TaskRecord, "approvalMode" | "autoApprov
   return { approvalMode: approvalModeFor({ ...bot, approvalGrant: undefined }), autoApprove: Boolean(bot.autoApprove), alwaysAllow: [...(bot.alwaysAllow ?? [])] };
 }
 
+/** The level a new thread opens at, when not its bot's: exactly "ask" or "full" with no saved grants (a Bot API thread, an
+ * engine its bot's level does not carry to, a level picked for it), or `from` the conversation that opened it, with the bot's
+ * own saved grants (spawn-level.ts). */
+export type NewThreadLevel = "ask" | "full" | { from: ApprovalMode };
+
+const levelFrom = (bot: BotRecord, mode: ApprovalMode) => ({ approvalMode: mode, autoApprove: mode === "auto", alwaysAllow: [...(bot.alwaysAllow ?? [])] });
+
 export function buildTask(bot: BotRecord, title?: string, projectId?: string, openedBy?: TaskOpenedBy,
-  approvalMode?: "ask" | "full", modelSelection?: ModelSelection, cwd?: string | null): TaskRecord {
+  approvalMode?: NewThreadLevel, modelSelection?: ModelSelection, cwd?: string | null): TaskRecord {
   const createdAt = Date.now();
   return {
     threadId: newId(),
@@ -32,7 +39,7 @@ export function buildTask(bot: BotRecord, title?: string, projectId?: string, op
     ...(openedBy ? { openedBy: structuredClone(openedBy) } : {}),
     resumeCursors: {},
     ...(modelSelection && !sameModelSelection(modelSelection, bot.modelSelection) ? { modelSelection: structuredClone(modelSelection) } : {}),
-    ...(approvalMode ? { approvalMode, autoApprove: false, alwaysAllow: [] } : botLevel(bot)),
+    ...(typeof approvalMode === "string" ? { approvalMode, autoApprove: false, alwaysAllow: [] } : approvalMode ? levelFrom(bot, approvalMode.from) : botLevel(bot)),
     unread: false,
     activity: "idle",
     busy: false,

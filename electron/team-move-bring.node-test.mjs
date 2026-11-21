@@ -124,7 +124,7 @@ test("its confirm says what the page's confirm says, word for word", () => {
   const words = teamMoveConfirmWords({ bot: "Atlas", team: "Acme" });
   assert.equal(words.message, fill("teamMove.title"));
   assert.equal(words.buttons[0], fill("teamMove.confirm"));
-  for (const key of ["teamMove.yours", "teamMove.goes", "teamMove.private", "teamMove.staysOnMyCloud", "teamMove.noWayBack"]) assert.ok(words.detail.includes(fill(key)), key);
+  for (const key of ["teamMove.yours", "teamMove.goes", "teamMove.private", "teamMove.staysOnMyCloud", "teamMove.dataStays", "teamMove.noWayBack"]) assert.ok(words.detail.includes(fill(key)), key);
 });
 
 test("the native confirm and IPC refusals follow the app's current language", async () => {
@@ -144,6 +144,7 @@ test("the native confirm and IPC refusals follow the app's current language", as
         "Vão com Atlas: instruções, habilidades, arquivos, rotinas e suas conversas com Atlas",
         "Suas conversas continuam privadas lá: só você pode vê-las.",
         "Ficam no My Cloud: o que Atlas lembra, suas conexões e o MausBot",
+        "As tabelas que Atlas carregou em Dados não são transferidas: ficam no My Cloud, onde Atlas não consegue abri-las depois que entra em Acme.",
         "Não é possível desfazer: você não pode mover o bot de volta para o My Cloud.",
       ].join("\n\n"),
       buttons: ["Mover para Acme", "Cancelar"],
