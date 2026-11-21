@@ -284,6 +284,7 @@ export class AppTriggerManager {
       received: 0, filtered: 0, createdAt: now, updatedAt: now,
     };
     await this.exclusive(async () => {
+      if (this.triggers.some((candidate) => candidate.id === trigger.id)) throw new AppTriggerError("An automation with this id already exists.", 409);
       const duplicate = this.triggers.find((trigger) => trigger.enabled && trigger.botId === input.botId && trigger.event === type.slug &&
         trigger.accountId === account.id && trigger.prompt === prompt && JSON.stringify(trigger.config) === JSON.stringify(config));
       if (duplicate) throw new AppTriggerError(`The same automation already exists (${duplicate.id}). Use trigger_info to review it, then change that one instead.`, 409);
@@ -311,9 +312,18 @@ export class AppTriggerManager {
       return (await this.update(record.id, { name: record.name, prompt: record.prompt, runOn: record.runOn, filter: record.filter ?? null, config,
         sameConversation: record.sameConversation === true }))!;
     }
-    return this.create({ id: record.id, botId: record.botId, name: record.name, prompt: record.prompt, app: record.app, event: record.event, account: record.accountId,
-      ...(record.filter ? { filter: record.filter } : {}), config, runOn: record.runOn, enabled: false, ...(record.sourceThreadId ? { sourceThreadId: record.sourceThreadId } : {}),
-      ...(record.sameConversation ? { sameConversation: true } : {}) });
+    try {
+      return await this.create({ id: record.id, botId: record.botId, name: record.name, prompt: record.prompt, app: record.app, event: record.event, account: record.accountId,
+        ...(record.filter ? { filter: record.filter } : {}), config, runOn: record.runOn, enabled: false, ...(record.sourceThreadId ? { sourceThreadId: record.sourceThreadId } : {}),
+        ...(record.sameConversation ? { sameConversation: true } : {}) });
+    } catch (error) {
+      // Another copy of the same move may have completed while this one validated its account and event.
+      if (error instanceof AppTriggerError && error.status === 409 && this.triggers.some((candidate) => candidate.id === record.id)) {
+        return (await this.update(record.id, { name: record.name, prompt: record.prompt, runOn: record.runOn, filter: record.filter ?? null, config,
+          sameConversation: record.sameConversation === true }))!;
+      }
+      throw error;
+    }
   }
 
   async update(id: string, patch: AppTriggerPatch, options: { protectInstructions?: boolean } = {}): Promise<AppTrigger | null> {
@@ -395,20 +405,20 @@ export class AppTriggerManager {
   /** Brings back one deleted in the last week, with its settings; the service copy is made again. */
   async restore(id: string): Promise<AppTrigger | null> {
     this.assertWritable();
-    const entry = this.deleted.find((candidate) => candidate.trigger.id === id && candidate.at >= this.now() - RESTORE_WINDOW_MS);
-    if (!entry || this.triggers.some((trigger) => trigger.id === id)) return null;
-    if (this.options.botState(entry.trigger.botId) === "missing") throw new AppTriggerError("The assigned bot no longer exists.", 410);
-    const trigger: StoredTrigger = { ...structuredClone(entry.trigger), remote: { state: "pending" }, updatedAt: this.now() };
-    await this.exclusive(async () => {
+    return this.exclusive(async () => {
+      const entry = this.deleted.find((candidate) => candidate.trigger.id === id && candidate.at >= this.now() - RESTORE_WINDOW_MS);
+      if (!entry || this.triggers.some((trigger) => trigger.id === id)) return null;
+      if (this.options.botState(entry.trigger.botId) === "missing") throw new AppTriggerError("The assigned bot no longer exists.", 410);
+      const trigger: StoredTrigger = { ...structuredClone(entry.trigger), remote: { state: "pending" }, updatedAt: this.now() };
       try { await this.bind(trigger); await this.applyEnabled(trigger.remote.triggerId); }
       catch (error) { this.markRemoteFailure(trigger, error); }
       this.deleted = this.deleted.filter((candidate) => candidate !== entry);
       this.triggers.unshift(trigger);
       this.save();
+      this.emitTrigger(trigger);
+      this.wake();
+      return publicTrigger(trigger);
     });
-    this.emitTrigger(trigger);
-    this.wake();
-    return publicTrigger(trigger);
   }
 
   /** A test event marked as one, sent through the service's real queue when the automation has its copy there. */
