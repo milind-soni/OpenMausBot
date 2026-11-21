@@ -15,7 +15,7 @@ export interface StarterRoutineWake {
   /** A routine or trigger was saved: an enabled one for a bot the limit paused wakes it now. */
   saved(item: RoutineLike | null | undefined): void;
   /** What the routine, webhook and app-trigger managers emit: a saved one is `saved`. */
-  emitted(payload: { kind?: unknown; routine?: unknown; webhook?: unknown; trigger?: unknown }): void;
+  emitted(payload: { kind?: unknown; routine?: unknown; webhook?: unknown; trigger?: unknown; [other: string]: unknown }): void;
 }
 
 /** Bots whose routines and triggers would run: enabled, aimed at the bot itself (a room goal runs through the room). */

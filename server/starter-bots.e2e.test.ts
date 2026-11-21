@@ -231,8 +231,8 @@ describe("a Starter Cloud's bots, on a real server", () => {
     await expect.poll(async () => (await runs()).find((run) => run.id === started.body.run.id)?.status, { timeout: 30_000 }).toBe("running");
     expect(await paused()).toEqual([sixth.id]);
     expect((await notices()).slice(1)).toEqual([expect.stringMatching(/^notice: Ran the routine “Every three hours” for @Sixth, which stays paused/)]);
-    // A message to it elsewhere is still refused for the plan.
-    expect(await send(sixth.id)).toMatchObject({ status: 409, body: { code: "bot_paused" } });
+    // A message to it in its own chat is still refused for the plan.
+    expect(await cloud.api("POST", `/api/bots/${sixth.id}/messages`, { text: "Hello", threadId: sixth.threadId })).toMatchObject({ status: 409, body: { code: "bot_paused" } });
 
     // A bot the person paused is not woken by its routine, and a run they start by hand fails in the pause's words.
     expect((await cloud.api("POST", "/api/paused", { kind: "bot", id: sixth.id, paused: true })).status).toBe(200);

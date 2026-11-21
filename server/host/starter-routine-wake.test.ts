@@ -15,7 +15,8 @@ function cloud(options: { starter?: boolean; held?: number } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "starter-routine-wake-")); dirs.push(dir);
   const store = new Store(() => ({ instanceId: "claude", model: "claude-sonnet-5" }));
   const made = Array.from({ length: 7 }, (_, n) => store.createBot({ name: `Bot ${n}` }));
-  const bots = () => store.bots.map((bot) => ({ ...bot, createdAt: made.findIndex((each) => each.id === bot.id) * 60_000, tasks: [] }));
+  // Only this test's bots: a Store reads whatever an earlier one in this data folder saved.
+  const bots = () => made.map((bot, n) => ({ ...store.bot(bot.id)!, createdAt: n * 60_000, tasks: [] }));
   const awake = createStarterAwake({ dataDir: dir, starter: () => options.starter ?? true, bots });
   awake.paused();
   const items: RoutineLike[] = [];
