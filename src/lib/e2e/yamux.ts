@@ -232,6 +232,7 @@ export class Mux {
   }
 
   goAway(code: number = GO_AWAY.normal): void {
+    if (this.role === "phone" && code === GO_AWAY.removed) throw new YamuxError("phone_removed");
     this.#localGoneAway = true;
     this.#events.send(goAwayFrame(code));
   }
