@@ -2,6 +2,8 @@
 // changes behaviour.
 import type { ChildProcess } from "node:child_process";
 
+import type { SendTurnInput } from "../../contracts.ts";
+import type { AcpConfig } from "./core.ts";
 import type { AcpHost } from "./host.ts";
 
 export interface AcpDriverHooks {
@@ -36,6 +38,12 @@ export interface AcpDriverHooks {
   /** An agent that also ends each prompt with a notification of its own, which may come before the prompt's reply or
    * without it. */
   promptCompletion?: AcpPromptCompletion;
+  /** For an agent that can leave session/load unanswered after replaying the history: how long the replay must go quiet
+   * before the load counts as done. Undefined waits for the answer. */
+  loadReplayQuietMs?(turn: SendTurnInput): number | undefined;
+  /** The part of spawnArgs a running process must match for a turn to reuse it. What it leaves out, configureSession
+   * changes inside the live session, throwing LiveSwitchRefused when the agent refuses; a reused session then restarts. */
+  spawnContractArgs?(config: AcpConfig, turn: SendTurnInput): string[];
 }
 
 /** How an agent names the end of a prompt outside its session/prompt reply. */
@@ -46,6 +54,9 @@ export interface AcpPromptCompletion {
    * reply's shape; null for any other notification. */
   read(msg: { method?: unknown; params?: unknown }): { sessionId: string; promptId: string | null; result: { stopReason: string; error?: string } } | null;
 }
+
+/** configureSession could not change a running session's model or effort in place. */
+export class LiveSwitchRefused extends Error {}
 
 const MAX_LINE_CHARS = 64 * 1024;
 
