@@ -5848,6 +5848,8 @@
   "backup.exportPassword": "備份密碼",
   "backup.confirmPassword": "確認備份密碼",
   "backup.exporting": "正在建立加密備份…",
+  "backup.exportReconnecting": "正在重新連線以檢查備份…",
+  "backup.exportUnavailable": "此備份已無法使用。請重新匯出並輸入備份密碼。",
   "backup.downloadAgain": "下載 {filename}",
   "backup.import": "匯入備份",
   "backup.importHint": "選取加密的 .ombbackup 檔案，並在變更任何內容前先驗證。備份最多支援 10 GB 安裝實例資料。較舊的團隊備份與可分享範本仍可從「範本」匯入。",
