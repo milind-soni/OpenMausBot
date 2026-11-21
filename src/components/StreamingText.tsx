@@ -27,7 +27,7 @@ export function useStreamingFade<T extends HTMLElement>(active: boolean) {
     const interval = Math.min(16, Math.max(0, now + 96 - start) / Math.max(1, fresh.length - 1));
     fresh.forEach((word, index) => word.animate?.(
       [{ opacity: 0 }, { opacity: 1 }],
-      { duration: 180, delay: start - now + index * interval, easing: "ease-out", fill: "backwards" },
+      { duration: 300, delay: start - now + index * interval, easing: "ease-in-out", fill: "backwards" },
     ));
     lastStart.current = start + (fresh.length - 1) * interval;
   });

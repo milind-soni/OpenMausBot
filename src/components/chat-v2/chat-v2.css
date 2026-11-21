@@ -58,7 +58,7 @@
 .v2-turn-status[data-visible] { grid-template-rows:1fr; opacity:1; visibility:visible; }
 .v2-turn-status-clip { min-height:0; overflow:clip; }
 .v2-turn-status-content { display:flex; align-items:center; gap:8px; padding:0 1.25rem 8px; }
-.v2-turn-status .thinking-shimmer { font-size:15px; }
+.v2-status-label { color:var(--color-ink-secondary); font-size:15px; }
 .v2-working-symbol { display:grid; place-items:center; width:34px; height:34px; flex:none; }
 .v2-working-symbol > span { grid-area:1 / 1; }
 .v2-working-avatar { opacity:0; }
@@ -199,6 +199,15 @@
   }
 }
 @media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
+  @supports (background-clip: text) {
+    :root:not([data-reduced-motion="true"]) .v2-status-label {
+      background-image: linear-gradient(90deg, var(--color-ink-secondary) 35%, color-mix(in srgb, var(--color-ink-secondary) 65%, var(--color-ink)) 50%, var(--color-ink-secondary) 65%);
+      background-size: 300% 100%;
+      background-clip: text;
+      color: transparent;
+      animation: v2-work-wave 4s linear infinite;
+    }
+  }
   :root:not([data-reduced-motion="true"]) .v2-work[data-active] > .v2-work-content > button > .v2-wave-label,
   :root:not([data-reduced-motion="true"]) .v2-step [data-live] > button > .tool-activity-label {
     background-image: linear-gradient(90deg, var(--color-ink-secondary) 38%, var(--color-ink) 50%, var(--color-ink-secondary) 62%);
@@ -213,9 +222,7 @@
   to { background-position: 0 0; }
 }
 
-:root[data-reduced-motion="true"] .v2-turn-status .thinking-sheen { display:none; }
-.v2-turn-status:not([data-visible]) :is(.v2-working-dots, .v2-working-dots > i, .v2-working-avatar, .thinking-sheen > span),
-.v2-turn-status:not([data-visible]) .thinking-sheen > span::before {
+.v2-turn-status:not([data-visible]) :is(.v2-working-dots, .v2-working-dots > i, .v2-working-avatar, .v2-status-label) {
   animation-play-state: paused;
 }
 :root[data-reduced-motion="true"] .v2-turn-status :is(.v2-working-dots, .v2-working-dots > i, .v2-working-avatar) {

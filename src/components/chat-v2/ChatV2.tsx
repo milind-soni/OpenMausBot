@@ -63,7 +63,7 @@ import { FailedTurnRow } from "../ChatView";
 import { useSharedRun } from "../shared-run";
 import { SetupOffer } from "../SetupOffer";
 import { ReplyQuote } from "../ReplyQuote";
-import { ShimmerPhrase, useRotatingPhrase } from "../TurnPresence";
+import { useRotatingPhrase } from "../TurnPresence";
 
 const EMPTY_TRANSCRIPT: Message[] = [];
 
@@ -97,7 +97,7 @@ function ChatV2Presence({ bot, stopping }: { bot: Bot; stopping: boolean }) {
           <span className="v2-working-dots"><i /><i /><i /></span>
           <span className="v2-working-avatar"><BotAvatar bot={bot} size={34} state={stateForBot(bot)} /></span>
         </span>
-        <ShimmerPhrase text={current} periodMs={4000} />
+        <span className="v2-status-label">{current}</span>
       </div>
     </div>
   </div>;
