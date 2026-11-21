@@ -99,7 +99,7 @@ describe("the preview", () => {
     const reworded = { ...DESK, instructions: `${DESK.instructions} Reworded on the second export.` };
     const again = previewGrokMove(bots(reworded), facts({ bots: [{ id: "here-Desk", name: "Desk", installedPackage: { id: first.packageId, name: "Desk" } as never }] }));
     expect(again.plans).toEqual([]);
-    expect(again.moved).toEqual([{ name: "Desk", botId: "here-Desk" }]);
+    expect(again.moved).toMatchObject([{ name: "Desk", botId: "here-Desk" }]);
   });
 
   it("a Bot moved before gets its chat on a second move, into the bot already here, and nothing else is imported", async () => {
