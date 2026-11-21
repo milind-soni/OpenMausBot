@@ -224,6 +224,8 @@
   "server.room.turnsStill": "Wartet noch: Dieser Server führt {limit} Aufgaben gleichzeitig aus. Davor in der Reihe: {ahead}.",
   "chat.notice.outOfProcesses": "Es ist kein Platz, um ein weiteres Programm zu starten ({code}), deshalb konnte diese Aufgabe nicht laufen. An die KI wurde nichts gesendet. Sie startet von selbst neu, sobald Platz ist.",
   "server.botPaused": "Pausiert: Starter hält {limit} Bots wach. Führe ein Upgrade durch, um ihn zu wecken, oder tausche, welche Bots wach sind.",
+  "server.starter.routineRanPaused": "@{bot} kümmert sich um „{routine}“ und bleibt sonst pausiert: Starter hält {limit} Bots wach. Seine Routinen und Auslöser laufen trotzdem; um mit ihm zu chatten, schreib ihm eine Nachricht und wähle, welche Bots wach bleiben.",
+  "server.starter.routineWoke": "@{bot} wurde für „{routine}“ geweckt: Starter hält {limit} Bots wach, deshalb ist @{out}, der eine Weile nichts zu tun hatte, jetzt pausiert. Um das rückgängig zu machen, schreib @{out} eine Nachricht und wähle, welche Bots wach bleiben.",
   "server.botHeld": "{bot} ist pausiert und nimmt keine neue Arbeit an. Setze ihn über sein Menü in der Seitenleiste fort.",
   "server.botHeldDepartment": "{bot} ist mit der Abteilung {department} pausiert und nimmt keine neue Arbeit an. Setze die Abteilung über ihr Menü in der Seitenleiste fort.",
   "server.botHeldAll": "Alle Bots sind pausiert, daher nimmt {bot} keine neue Arbeit an. Setze alle Bots über das Menü eines beliebigen Bots in der Seitenleiste fort.",
