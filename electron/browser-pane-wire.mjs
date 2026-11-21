@@ -18,13 +18,35 @@ const DOWNLOAD_STATES = new Set(["begin", "inProgress", "completed", "canceled"]
 /** An absolute folder or file path, POSIX or Windows, with no parent steps. */
 const ABSOLUTE = /^(?:\/|[A-Za-z]:[\\/])(?!.*(?:^|[\\/])\.\.(?:[\\/]|$))[^\0]{0,4095}$/;
 
-const TO_MAIN = new Set(["hello", "open", "create", "cdp", "front", "close-tab", "close", "erase", "resolved", "cancel-download"]);
-const TO_SERVER = new Set(["hello", "opened", "failed", "created", "answer", "event", "tab", "tab-gone", "closed", "input", "which", "download"]);
+const SOURCE = /^[a-z][a-z0-9-]{0,31}$/;
+const SAME_SITE = new Set(["unspecified", "no_restriction", "lax", "strict"]);
+/** Chromium's own limit on a cookie's name and value together. */
+const COOKIE_BYTES = 4096;
+const MAX_COOKIES = 2000;
+
+const TO_MAIN = new Set(["hello", "open", "create", "cdp", "front", "close-tab", "close", "erase", "resolved", "cancel-download", "set-cookies", "cookie-sources-result", "cookie-import-result", "cookie-offer-result"]);
+const TO_SERVER = new Set(["hello", "opened", "failed", "created", "answer", "event", "tab", "tab-gone", "closed", "input", "which", "download", "cookies-set", "cookie-sources", "cookie-import", "cookie-offer"]);
 
 const isObject = (value) => Object.prototype.toString.call(value) === "[object Object]";
 const text = (value, pattern) => typeof value === "string" && pattern.test(value);
 const optional = (value, pattern) => value === undefined || text(value, pattern);
 const count = (value) => Number.isSafeInteger(value) && value > 0;
+const tally = (value) => Number.isSafeInteger(value) && value >= 0;
+const short = (value, limit) => typeof value === "string" && value.length <= limit && !value.includes("\0");
+
+/** Electron's cookies.set details, as an import writes them into a pane's partition. */
+function cookieValid(cookie) {
+  return isObject(cookie) && short(cookie.url, 4096) && /^https?:\/\//.test(cookie.url) && short(cookie.name, COOKIE_BYTES) && short(cookie.value, COOKIE_BYTES)
+    && cookie.name.length + cookie.value.length <= COOKIE_BYTES && (cookie.domain === undefined || short(cookie.domain, 253)) && short(cookie.path, 1024)
+    && typeof cookie.secure === "boolean" && typeof cookie.httpOnly === "boolean" && SAME_SITE.has(cookie.sameSite)
+    && (cookie.expirationDate === undefined || Number.isFinite(cookie.expirationDate));
+}
+
+function sourcesValid(sources) {
+  return Array.isArray(sources) && sources.length <= 64 && sources.every((source) => isObject(source) && text(source.id, SOURCE) && short(source.name, 80)
+    && ["chromium", "firefox", "safari"].includes(source.engine) && Array.isArray(source.profiles) && source.profiles.length <= 64
+    && source.profiles.every((profile) => isObject(profile) && short(profile.id, 512) && short(profile.name, 80)));
+}
 
 function fieldsValid(message) {
   const { op } = message;
@@ -52,6 +74,15 @@ function fieldsValid(message) {
     case "event": return text(message.tab, TAB) && text(message.method, METHOD) && isObject(message.params);
     case "which": return count(message.req) && text(message.botId, BOT) && (message.threadId === null || text(message.threadId, BOT));
     case "resolved": return count(message.req);
+    case "set-cookies": return count(message.req) && Array.isArray(message.cookies) && message.cookies.length <= MAX_COOKIES && message.cookies.every(cookieValid);
+    case "cookies-set": return count(message.req) && tally(message.written) && tally(message.refused);
+    case "cookie-sources": return count(message.req);
+    case "cookie-sources-result": return count(message.req) && sourcesValid(message.sources);
+    case "cookie-import": case "cookie-offer":
+      return count(message.req) && text(message.botId, BOT) && (message.threadId === null || text(message.threadId, BOT)) && short(message.site, 2048)
+        && (message.op === "cookie-offer" || (text(message.source, SOURCE) && short(message.profile, 512) && message.profile.length > 0));
+    case "cookie-import-result": return count(message.req) && isObject(message.result) && typeof message.result.ok === "boolean";
+    case "cookie-offer-result": return count(message.req) && typeof message.offered === "boolean" && (message.reason === undefined || short(message.reason, 32));
     default: return true;
   }
 }

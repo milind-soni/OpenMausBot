@@ -73,6 +73,9 @@ extraResources:
     to: licenses/models-dev-LICENSE.txt
   - from: third_party/opencode/LICENSE
     to: licenses/opencode-LICENSE.txt
+  # Orca (MIT): the Google cookies a sign-in import never copies.
+  - from: third_party/orca/LICENSE
+    to: licenses/orca-LICENSE.txt
   # Code adapted from T3 Code (MIT): the bots' browser egress gate, the Antigravity runtime, citations.
   - from: third_party/t3-code/LICENSE
     to: licenses/t3-code-LICENSE.txt

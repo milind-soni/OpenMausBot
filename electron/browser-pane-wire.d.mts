@@ -15,7 +15,37 @@ export type PaneToMain = Base & (
   | { op: "close"; browser: string }
   | { op: "erase"; partition: string }
   | { op: "resolved"; req: number; browser: string | null }
+  /** A sign-in import's cookies, written into a pane's partition by the main process. */
+  | { op: "set-cookies"; req: number; partition: string; cookies: PaneCookie[] }
+  | { op: "cookie-sources-result"; req: number; sources: CookieSource[] }
+  | { op: "cookie-import-result"; req: number; result: CookieImportResult }
+  | { op: "cookie-offer-result"; req: number; offered: boolean; reason?: string }
 );
+
+/** Electron's cookies.set details. */
+export interface PaneCookie {
+  url: string;
+  name: string;
+  value: string;
+  domain?: string;
+  path: string;
+  secure: boolean;
+  httpOnly: boolean;
+  sameSite: "unspecified" | "no_restriction" | "lax" | "strict";
+  expirationDate?: number;
+}
+
+export interface CookieSource {
+  id: string;
+  name: string;
+  engine: "chromium" | "firefox" | "safari";
+  profiles: Array<{ id: string; name: string }>;
+}
+
+/** Counts and a reason code only: never a cookie. */
+export type CookieImportResult =
+  | { ok: true; site: string; imported: number; sessionOnly: number; skipped: Partial<Record<string, number>> }
+  | { ok: false; reason: string };
 
 /** `target`: the page's main frame id, which a CDP client takes as its target id. */
 export type PaneToServer = Base & (
@@ -31,6 +61,11 @@ export type PaneToServer = Base & (
   | { op: "closed"; browser: string; reason: string }
   | { op: "input"; browser: string; tab?: string }
   | { op: "which"; req: number; botId: string; threadId: string | null }
+  | { op: "cookies-set"; req: number; written: number; refused: number }
+  /** The person, at the app's own window, asks: which browsers can be imported from, whether a site can, and to do it. */
+  | { op: "cookie-sources"; req: number }
+  | { op: "cookie-offer"; req: number; botId: string; threadId: string | null; site: string }
+  | { op: "cookie-import"; req: number; botId: string; threadId: string | null; site: string; source: string; profile: string }
   | { op: "download"; browser: string; tab: string; guid: string; state: "begin" | "inProgress" | "completed" | "canceled"; url?: string; name?: string; received?: number; total?: number; path?: string }
 );
 
