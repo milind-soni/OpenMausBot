@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import path from "node:path";
 import test from "node:test";
 
 import { createBrowserPanes } from "./browser-pane-main.mjs";
@@ -341,7 +342,7 @@ test("saves every download into the profile's folder without a dialog, reports i
     getURL: () => "https://example.com/a.csv", getFilename: () => "a.csv", getReceivedBytes: () => 3, getTotalBytes: () => 3,
   });
   electron.sessions.get(PARTITION).emit("will-download", {}, item, contents);
-  assert.ok(item.savePath.startsWith(`${DOWNLOADS}/`));
+  assert.equal(path.dirname(item.savePath), path.join(DOWNLOADS));
   item.emit("updated", {}, "progressing");
   item.emit("done", {}, "completed");
   const downloads = posted.filter((message) => message.op === "download");
