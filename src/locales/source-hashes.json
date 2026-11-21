@@ -4061,7 +4061,19 @@
       "decider.provider.line": "b74959fffc682f78c90fde2eb8e8d2c0a40eebac0d11000c8def7ae4db389462",
       "computer.worksOnHintServer": "2c3302d501a67067774aedcacfff8d16a80ea8238e2f14d8af97e3fd593f690b",
       "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9",
-      "server.teammates.noLongerWaiting": "49259fb62a6e8687efa6a6e69da294c81bd67a19c57687d0724ee4bdd5cc4645"
+      "server.teammates.noLongerWaiting": "49259fb62a6e8687efa6a6e69da294c81bd67a19c57687d0724ee4bdd5cc4645",
+      "keys.vps.servers.title": "974f60ef932fe181d2037ef79ebddb5c438444e612824616483e43d0db892faa",
+      "keys.vps.servers.hint": "cd11a6b1a8e4dea8ce1454b85de2b1bb00787fbac9dcd7753f095a634c3567f9",
+      "keys.vps.servers.name": "21babfed6c3829985b43ce0de25b2d582154b45a779a71da5ea204c9d8a3cd20",
+      "keys.vps.servers.namePlaceholder": "e09a6ae22f0ceaeb4334fa7a74f17aef7865033ef862e87bed8fa69430d67723",
+      "keys.vps.servers.alias": "f7d2bebcb1c01f94add52556a874d6555afa3edcd7fa844e4fdfae361445c99d",
+      "keys.vps.servers.add": "9fd728c66c9a256b121472dabf32a34317aed01d8427d70ec830289cf23a7cc8",
+      "keys.vps.servers.removeAria": "e6a3c4a1250a6ad3f10faa22333e5e50a6ba78e5b28a3b26f5743d9f8c7ede93",
+      "botAccess.cloud.serverPick": "edec371af907e8c466525839736f03bc0f971164e6dc98ca8286440fe5dc30b9",
+      "botAccess.cloud.serverPickHint": "98e8f8043da8f8c8fcc0887435867473afcc491d4fddac669c462e8ef67e8ce0",
+      "botAccess.cloud.serverPickDefault": "04f8c8609c5369828f915006cf06a5d95398472014945bcab2d7a2ff000c0e7d",
+      "botAccess.cloud.serverPickNone": "fbc0134f1d438a0781af95743d45cede059746ae89decf3e106d458f4257717f",
+      "botAccess.cloud.serverPickOther": "15524e6a8d1c4bd7ec0549a8f3c866770872e76caa5428ff38925306276dca7b"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -37269,7 +37281,19 @@
       "chat.notice.waitingPasswordElsewhere": "97cacd0a74d5204ef08cc8bc8e98a7510c0b4cc40e43a828e09c6ec945f868f2",
       "chat.notice.waitingSignInElsewhere": "23128dfa673a206b5bdbebc2d7c667b294214c38b5c4d848f2efc7abfa40927b",
       "chat.notice.waitingConnectElsewhere": "ea42fbcab6227c96875c990433e140b7dcec434b3431efe9edd4788925b596fb",
-      "chat.notice.waitingReviewElsewhere": "bacacf6c5c87a709dce2c839ac18a57a7f87bc7f52b4afa2ab161ffb8bca66c7"
+      "chat.notice.waitingReviewElsewhere": "bacacf6c5c87a709dce2c839ac18a57a7f87bc7f52b4afa2ab161ffb8bca66c7",
+      "keys.vps.servers.title": "974f60ef932fe181d2037ef79ebddb5c438444e612824616483e43d0db892faa",
+      "keys.vps.servers.hint": "cd11a6b1a8e4dea8ce1454b85de2b1bb00787fbac9dcd7753f095a634c3567f9",
+      "keys.vps.servers.name": "21babfed6c3829985b43ce0de25b2d582154b45a779a71da5ea204c9d8a3cd20",
+      "keys.vps.servers.namePlaceholder": "e09a6ae22f0ceaeb4334fa7a74f17aef7865033ef862e87bed8fa69430d67723",
+      "keys.vps.servers.alias": "f7d2bebcb1c01f94add52556a874d6555afa3edcd7fa844e4fdfae361445c99d",
+      "keys.vps.servers.add": "9fd728c66c9a256b121472dabf32a34317aed01d8427d70ec830289cf23a7cc8",
+      "keys.vps.servers.removeAria": "e6a3c4a1250a6ad3f10faa22333e5e50a6ba78e5b28a3b26f5743d9f8c7ede93",
+      "botAccess.cloud.serverPick": "edec371af907e8c466525839736f03bc0f971164e6dc98ca8286440fe5dc30b9",
+      "botAccess.cloud.serverPickHint": "98e8f8043da8f8c8fcc0887435867473afcc491d4fddac669c462e8ef67e8ce0",
+      "botAccess.cloud.serverPickDefault": "04f8c8609c5369828f915006cf06a5d95398472014945bcab2d7a2ff000c0e7d",
+      "botAccess.cloud.serverPickNone": "fbc0134f1d438a0781af95743d45cede059746ae89decf3e106d458f4257717f",
+      "botAccess.cloud.serverPickOther": "15524e6a8d1c4bd7ec0549a8f3c866770872e76caa5428ff38925306276dca7b"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

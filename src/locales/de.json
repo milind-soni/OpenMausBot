@@ -1470,6 +1470,13 @@
   "keys.vps.anyMachine": "Jeder Linux-Rechner mit Docker, den du per SSH erreichst, funktioniert, auch ein Computer in deinem Tailscale-Netzwerk: Trag seinen Tailscale-Namen als HostName des Alias ein.",
   "keys.vps.aria": "SSH-Config-Alias des selbst gehosteten VPS",
   "keys.vps.removeAlias": "Gespeicherten Alias entfernen",
+  "keys.vps.servers.title": "Benannte Server",
+  "keys.vps.servers.hint": "Füge weitere Server mit Namen hinzu. Jeder Bot kann dann in seinen eigenen Computer-Einstellungen einen davon wählen; der Alias oben bleibt der Standard.",
+  "keys.vps.servers.name": "Servername",
+  "keys.vps.servers.namePlaceholder": "Heimlabor",
+  "keys.vps.servers.alias": "SSH-Config-Alias des Servers",
+  "keys.vps.servers.add": "Hinzufügen",
+  "keys.vps.servers.removeAria": "{name} entfernen",
   "usage.title": "Nutzung",
   "usage.bot.empty": "Für diesen Bot wurde noch keine Nutzung erfasst.",
   "usage.bot.unpriced": "Dieser Anbieter meldet keinen Preis; Tokens werden gezählt.",
@@ -4091,5 +4098,10 @@
   "geminiServer.key": "Gemini-API-Schlüssel",
   "geminiServer.add": "Google AI Studio hinzufügen",
   "inbox.settled.title": "Erledigt",
-  "inbox.settled.read": "Gelesen"
+  "inbox.settled.read": "Gelesen",
+  "botAccess.cloud.serverPick": "Server für diesen Bot wählen",
+  "botAccess.cloud.serverPickHint": "Wähle einen benannten Server oder gib einen anderen SSH-Alias ein.",
+  "botAccess.cloud.serverPickDefault": "Standardserver ({alias})",
+  "botAccess.cloud.serverPickNone": "Kein Server gewählt",
+  "botAccess.cloud.serverPickOther": "Anderer SSH-Alias …"
 }
