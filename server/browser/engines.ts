@@ -95,7 +95,7 @@ export class ChromeEngine {
     const locale = () => browserLanguage(env, options.language?.()) ?? null;
     this.displays = new DisplaySupervisor({
       root: join(browserRoot(options.dataDir), "displays"),
-      xvnc: options.host === "desktop" ? null : findXvnc(env, platform),
+      xvnc: options.host === "desktop" ? null : () => findXvnc(env, platform),
       bwrap: options.host === "desktop" ? null : () => (options.probeBwrap ?? findBwrap)(env, platform),
       ...(options.log ? { log: options.log } : {}),
     });

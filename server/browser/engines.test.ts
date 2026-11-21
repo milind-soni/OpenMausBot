@@ -386,13 +386,28 @@ describe("the new engine's desktop view", () => {
     const probeBwrap = vi.fn(() => "/usr/bin/bwrap");
     const value = new ChromeEngine({ dataDir, host: "container", env: { PATH: bin }, platform: "linux", egressPort: async () => 0, idleMs: () => 180_000, egressNotice: () => null, cloudDisplay: () => on, probeBwrap });
     try {
-      value.summary();
+      expect(value.summary()).not.toHaveProperty("desktopView");
       expect(value.desktopView()).toBe(false);
       expect(probeBwrap).not.toHaveBeenCalled();
       on = true;
       value.desktopView();
       value.desktopView();
       expect(probeBwrap).toHaveBeenCalledTimes(1);
+    } finally {
+      await value.close();
+      await removeTempDir(dataDir);
+    }
+  });
+
+  it("stays inert on a server without Xvnc, the setting on: no lookup at start, no bubblewrap probe, no desktop view", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "omb-chrome-engine-"));
+    const probeBwrap = vi.fn(() => "/usr/bin/bwrap");
+    const value = new ChromeEngine({ dataDir, host: "container", env: { PATH: join(dataDir, "no-such-bin") }, platform: "linux", egressPort: async () => 0, idleMs: () => 180_000, egressNotice: () => null, cloudDisplay: () => true, probeBwrap });
+    try {
+      expect(value.desktopView()).toBe(false);
+      expect(value.summary()).not.toHaveProperty("desktopView");
+      expect(probeBwrap).not.toHaveBeenCalled();
+      expect(value.displays.numbers()).toEqual([]);
     } finally {
       await value.close();
       await removeTempDir(dataDir);

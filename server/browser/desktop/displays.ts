@@ -48,8 +48,8 @@ type Spawn = (file: string, args: string[], options: { env: NodeJS.ProcessEnv })
 export interface DisplaySupervisorOptions {
   /** Where each display keeps its socket and cookie; a short path, as a unix socket's may not pass about 100 bytes. */
   root: string;
-  /** The Xvnc binary, or null where there is none. */
-  xvnc: string | null;
+  /** The Xvnc binary, or null where there is none; a function is asked once, the first time a display is wanted. */
+  xvnc: string | null | (() => string | null);
   /** bubblewrap, which puts the lock-down policy in force for a display's Chrome alone; null where it cannot run. A
    * function is asked once, the first time a display is wanted, so a server that never wants one never probes. */
   bwrap: string | null | (() => string | null);
@@ -202,6 +202,7 @@ export class DisplaySupervisor {
   readonly #claimed = new Set<number>();
   #swept = false;
   #probed: { bwrap: string | null } | null = null;
+  #found: { xvnc: string | null } | null = null;
 
   constructor(options: DisplaySupervisorOptions) {
     this.#options = options;
@@ -209,7 +210,14 @@ export class DisplaySupervisor {
 
   /** Security: with no way to put the policy in force for its Chrome alone, no browser gets a display. */
   get available(): boolean {
-    return this.#options.xvnc !== null && this.#bwrap() !== null;
+    return this.#xvnc() !== null && this.#bwrap() !== null;
+  }
+
+  #xvnc(): string | null {
+    const xvnc = this.#options.xvnc;
+    if (typeof xvnc !== "function") return xvnc;
+    this.#found ??= { xvnc: xvnc() };
+    return this.#found.xvnc;
   }
 
   #bwrap(): string | null {
@@ -288,7 +296,7 @@ export class DisplaySupervisor {
   }
 
   async #start(key: string, size: DisplaySize, fileRoots: readonly string[]): Promise<Running> {
-    const xvnc = this.#options.xvnc;
+    const xvnc = this.#xvnc();
     if (!xvnc) throw new Error("This server has no display for a browser window: Xvnc is not installed.");
     const bwrap = this.#bwrap();
     if (!bwrap) throw new Error("This server cannot keep a browser window's Chrome locked down: bubblewrap cannot run here.");
