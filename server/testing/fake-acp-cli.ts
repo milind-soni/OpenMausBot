@@ -101,11 +101,24 @@
 //     during a running one is injected into it and answers {stopReason:"cancelled", _meta:{completionKind:"removedFromQueue"}}
 //     at once; the running prompt then ends with end_turn and every steer it took.
 //   FAKE_ACP_STEERING=off  the two steer modes above report no steering capability.
+//   FAKE_ACP_MODE=grok-complete  grok 1.0.41's `_x.ai/session/prompt_complete`: a prompt says "answered", then sends the
+//     notification {sessionId, promptId: the prompt's _meta.promptId, stopReason: FAKE_ACP_COMPLETE_STOP (end_turn),
+//     agentResult: FAKE_ACP_COMPLETE_RESULT (null)}, then answers per FAKE_ACP_COMPLETE_REPLY: "after" (default) at once
+//     with that stopReason and usage, "never", "late" after FAKE_ACP_COMPLETE_REPLY_MS (3500) with "late words" and usage,
+//     "late-bare" the same reply with no words, or "rate-limit-error" (JSON-RPC -32003). FAKE_ACP_COMPLETE_NAMES (own) lists the prompts the notifications name:
+//     own, none (no promptId), task (a background task's task-completed-… id), other-session.
+//   FAKE_ACP_START_FAILURE  this line on stderr at startup, then exit 1 before reading anything, as grok 1.0.x does when it
+//     cannot start its threads
 import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 
 const mode = process.env.FAKE_ACP_MODE ?? "happy";
+
+if (process.env.FAKE_ACP_START_FAILURE) {
+  writeSync(2, `${process.env.FAKE_ACP_START_FAILURE}\n`);
+  process.exit(1);
+}
 
 // The scripted replies every fake plays (FAKE_STREAM_SCRIPT, FAKE_STREAM_CADENCE); inlined, since tests copy this fake
 // out of the repo.
@@ -495,12 +508,12 @@ const resultAndConfigUpdates = (id: unknown, res: unknown, after: string, sessio
   process.stdout.write([{ jsonrpc: "2.0", id, result: res }, ...updates].map((message) => JSON.stringify(message)).join("\n") + "\n");
 };
 const rpcMethods: string[] = [];
-const recordMethod = (method: string, sessionId?: unknown) => {
+const recordMethod = (method: string, sessionId?: unknown, meta?: unknown) => {
   rpcMethods.push(method);
   if (process.env.FAKE_ACP_RPC_DUMP) writeFileSync(process.env.FAKE_ACP_RPC_DUMP, JSON.stringify(rpcMethods));
   if (process.env.FAKE_ACP_RPC_APPEND_FILE) {
     try {
-      appendFileSync(process.env.FAKE_ACP_RPC_APPEND_FILE, JSON.stringify({ pid: process.pid, method, cwd: process.cwd(), sessionId }) + "\n");
+      appendFileSync(process.env.FAKE_ACP_RPC_APPEND_FILE, JSON.stringify({ pid: process.pid, method, cwd: process.cwd(), sessionId, ...(meta === undefined ? {} : { meta }) }) + "\n");
     } catch {}
   }
 };
@@ -773,6 +786,29 @@ let gatedTurn: { run: string; steers: string[]; pending: unknown[] } | null = nu
 let gatedRuns = 0;
 /** A prompt that says "working. " and waits for FAKE_ACP_GATE_FILE. devin-steer: a prompt during it joins the run and is
  * answered with the first one, with the same usage and run id, as Devin does. opencode-steer: only `_session/steering` joins it. */
+function grokCompletePrompt(msg: any) {
+  const sessionId = msg.params?.sessionId, own = msg.params?._meta?.promptId, stopReason = process.env.FAKE_ACP_COMPLETE_STOP ?? "end_turn";
+  const say = (text: string) => out({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } } } });
+  say("answered");
+  const named: Record<string, { sessionId: unknown; promptId?: unknown }> = {
+    own: { sessionId, promptId: own }, none: { sessionId }, task: { sessionId, promptId: "task-completed-00000000-0000-4000-8000-000000000002" },
+    "other-session": { sessionId: "another-session", promptId: own },
+  };
+  for (const name of (process.env.FAKE_ACP_COMPLETE_NAMES ?? "own").split(",")) {
+    out({ jsonrpc: "2.0", method: "_x.ai/session/prompt_complete", params: { ...named[name], stopReason, agentResult: process.env.FAKE_ACP_COMPLETE_RESULT ?? null } });
+  }
+  const usage = { sessionId, requestId: own, promptId: own, inputTokens: 20, outputTokens: 7 };
+  switch (process.env.FAKE_ACP_COMPLETE_REPLY ?? "after") {
+    case "after": result(msg.id, { stopReason, _meta: usage }); break;
+    case "never": hangKeepAlive = setInterval(() => {}, 1_000); break;
+    case "late": case "late-bare": setTimeout(() => {
+      if (process.env.FAKE_ACP_COMPLETE_REPLY === "late") say(" late words");
+      result(msg.id, { stopReason, _meta: usage });
+    }, Number(process.env.FAKE_ACP_COMPLETE_REPLY_MS ?? 3_500)); break;
+    case "rate-limit-error": out({ jsonrpc: "2.0", id: msg.id, error: { code: -32003, message: "Rate limited", data: { message: process.env.FAKE_ACP_COMPLETE_RESULT ?? "Rate limited" } } }); break;
+  }
+}
+
 function gatedPrompt(msg: any) {
   const text = (Array.isArray(msg.params?.prompt) ? msg.params.prompt : []).map((block: any) => block?.text ?? "").join("");
   if (gatedTurn && mode === "grok-steer") {
@@ -896,7 +932,7 @@ function handle(msg: any) {
   }
   if (!msg.method) return;
   if (msg.method === "session/prompt" && heldByHoldFile(msg)) return;
-  recordMethod(msg.method, msg.params?.sessionId);
+  recordMethod(msg.method, msg.params?.sessionId, msg.params?._meta);
 
   switch (msg.method) {
     case "initialize": {
@@ -1197,6 +1233,10 @@ function handle(msg: any) {
       }
       if (mode === "opencode-steer" || mode === "devin-steer" || mode === "grok-steer") {
         gatedPrompt(msg);
+        return;
+      }
+      if (mode === "grok-complete") {
+        grokCompletePrompt(msg);
         return;
       }
       if (process.env.FAKE_ACP_TOOL_LIMIT) {

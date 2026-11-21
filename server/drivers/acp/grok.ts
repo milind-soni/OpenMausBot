@@ -12,6 +12,7 @@ import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../loca
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 import { closeEndsBackgroundWork } from "./background-work.ts";
 import { readGrokFollowUp } from "./grok-follow-up.ts";
+import { GROK_CANCEL_META, GROK_INITIALIZE_META, GROK_PROMPT_COMPLETION, grokPromptOutcome, grokReportedFailure } from "./grok-signals.ts";
 import type { AcpPromptSteer } from "./steer.ts";
 import { bundledEngineCatalog } from "../../model-manifest/bundled.ts";
 import { currentEngineCatalog } from "../../model-manifest/manifest.ts";
@@ -455,6 +456,11 @@ const support: AcpSupport = {
   deviceSignIn: GROK_DEVICE_SIGN_IN,
   steer: GROK_STEER,
   backgroundWork: GROK_BACKGROUND,
+  initializeMeta: GROK_INITIALIZE_META,
+  cancelMeta: GROK_CANCEL_META,
+  promptCompletion: GROK_PROMPT_COMPLETION,
+  promptOutcome: grokPromptOutcome,
+  reportedFailure: grokReportedFailure,
 
   // With the instance HOME/GROK_HOME: ensureGrokInjectSlug defaults to process.env.
   resolveTurnModel: (model, env) => (model ? ensureGrokInjectSlug(model, env) : model),

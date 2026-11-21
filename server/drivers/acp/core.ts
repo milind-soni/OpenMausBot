@@ -597,7 +597,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const running = sharedHost(hostKey, threadId, cwd);
         if (running) return running;
         const child = spawnCli(launch.command, argv, { cwd, env, stdio: ["pipe", "pipe", "pipe"], box: { allowEnv: instanceEnvNames(input.environment, env), botThreads: hostKey !== null, ro: launch.ro } }, "bot");
-        const host = new AcpHost(child, hostKey, { source: SOURCE, logMessage: nativeLogMessage, unrouted: refuse });
+        const host = new AcpHost(child, hostKey, { source: SOURCE, logMessage: nativeLogMessage, unrouted: refuse, promptCompletion: support.promptCompletion });
         hosts.add(host); signIn.watch(host);
         child.once("close", () => hosts.delete(host));
         child.once("error", () => hosts.delete(host));
@@ -938,7 +938,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             if (current?.state.cancelling) return;
             if (current) {
               if (!current.state.stopped) emit({ ...base(threadId, current.turnId), type: "runtime.error",
-                ...exitBeforeResult(support.displayName, code, signal, session.stderr, support.minNodeVersion, found) });
+                ...exitBeforeResult(support.displayName, code, signal, session.stderr, support.minNodeVersion, found, session.host.startRefused) });
               settle(threadId, session, current.state.stopped, current.state.stopped ? "cancelled" : "exit_before_result");
             } else if (sessions.get(threadId) === session) {
               // The identity check keeps an old child's exit from unlinking its replacement.
@@ -1132,7 +1132,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const interrupt = () => {
           state.stopped = true;
           if (session.sessionId) {
-            session.acp.send({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId: session.sessionId } });
+            session.acp.send({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId: session.sessionId, ...(support.cancelMeta ? { _meta: support.cancelMeta } : {}) } });
             if (current.interruptTimer) clearTimeout(current.interruptTimer);
             current.interruptTimer = setTimeout(() => {
               state.cancelling = true;
@@ -1164,7 +1164,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 session.initResult = await session.host.once("initialize", () => request(
                   "initialize",
                   {
-                    protocolVersion: 1,
+                    protocolVersion: 1, ...(support.initializeMeta ? { _meta: support.initializeMeta } : {}),
                     clientInfo: support.clientInfo?.(instanceId) ?? { name: "openmausbot", version: "0.0.0" },
                     clientCapabilities: {
                       fs: {
