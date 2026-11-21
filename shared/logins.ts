@@ -10,8 +10,8 @@ import { browserMatesOf } from "./browser-mates.ts";
 export { browserMatesOf };
 
 /** Where a login came from: the sign-in card's Save, Settings, or the person's
- * 1Password or Bitwarden vault (read-only here). */
-export type LoginSource = "card" | "settings" | "1password" | "bitwarden";
+ * 1Password, Bitwarden or Bitwarden Secrets Manager (read-only here). */
+export type LoginSource = "card" | "settings" | "1password" | "bitwarden" | "bitwarden-secrets";
 
 /** Which bots may use a login: every bot, or the ones named. */
 export type LoginBots = "all" | string[];
@@ -88,6 +88,23 @@ export interface BitwardenCredentials {
   clientId: string;
   clientSecret: string;
   password: string;
+}
+
+/** Bitwarden Secrets Manager, connected with a machine account's access token, which never leaves the server.
+ * `server`: the Bitwarden server's host. */
+export interface BitwardenSecretsStatus {
+  connected: boolean;
+  server?: string;
+  /** How many logins and secrets it lists. */
+  items?: number;
+  error?: string;
+}
+
+/** What an admin connects Bitwarden Secrets Manager with: the server's https address and a machine account's access
+ * token. Sent once, kept sealed on the server, never sent back. */
+export interface BitwardenSecretsCredentials {
+  serverUrl: string;
+  accessToken: string;
 }
 
 /** The Bitwarden servers an admin picks from; anything else is a self-hosted (or Vaultwarden) address. */

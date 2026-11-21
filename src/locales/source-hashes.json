@@ -4061,7 +4061,18 @@
       "decider.provider.line": "b74959fffc682f78c90fde2eb8e8d2c0a40eebac0d11000c8def7ae4db389462",
       "computer.worksOnHintServer": "2c3302d501a67067774aedcacfff8d16a80ea8238e2f14d8af97e3fd593f690b",
       "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9",
-      "server.teammates.noLongerWaiting": "49259fb62a6e8687efa6a6e69da294c81bd67a19c57687d0724ee4bdd5cc4645"
+      "server.teammates.noLongerWaiting": "49259fb62a6e8687efa6a6e69da294c81bd67a19c57687d0724ee4bdd5cc4645",
+      "settings.logins.source.bitwardenSecrets": "211e61f416c7a271a8b3cca06dd292d5c1150ae828ad4e9d1ce8aa62d603919b",
+      "settings.vault.bitwardenSecrets.title": "65f58012467adf1656b5154076917cf2c0a195687f98c4b81e9c796b599471f1",
+      "settings.vault.bitwardenSecrets.line": "0da1e7063eadfc97c25ed12c8ee14b8015521436ba82c52078d26685839ba7d9",
+      "settings.vault.bitwardenSecrets.connected": "8ac07a95e993f71c702cef899d97f32e096d8214cbd1e04cca3017e9a51af9be",
+      "settings.vault.bitwardenSecrets.connect": "c171b125276ffcf283f70289389453db1e9b5c31cabbf060d7392d99b764a103",
+      "settings.vault.bitwardenSecrets.disconnect": "178e5f11b96808b4dfcf7732c4bf5ca42867f71d26b6492067ef02b0c62388d9",
+      "settings.vault.bitwardenSecrets.team": "0142fb70f0144e670aaf97f91ef171c42fefc9924532b6af30fdcea48e0f6801",
+      "settings.vault.bitwardenSecrets.guide": "a9cde30c280181181cdcc7f07ecf5bac7e8c50399b4ad010555cc091e55a69fb",
+      "settings.vault.bitwardenSecrets.token": "9a911b08feb9d2928240dda42c6efa8794ab3457f8b59a7cfb5187e817f948e3",
+      "settings.vault.bitwardenSecrets.note": "cb98c043ae54f73b55e675c6791759f93421cc65d2a3080b12d8af988997ef13",
+      "settings.vault.bitwardenSecrets.error": "393d6d3cb4d0776647976c6288ff1dac2198db77e9eb2613b6c389bca082694f"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -37269,7 +37280,18 @@
       "chat.notice.waitingPasswordElsewhere": "97cacd0a74d5204ef08cc8bc8e98a7510c0b4cc40e43a828e09c6ec945f868f2",
       "chat.notice.waitingSignInElsewhere": "23128dfa673a206b5bdbebc2d7c667b294214c38b5c4d848f2efc7abfa40927b",
       "chat.notice.waitingConnectElsewhere": "ea42fbcab6227c96875c990433e140b7dcec434b3431efe9edd4788925b596fb",
-      "chat.notice.waitingReviewElsewhere": "bacacf6c5c87a709dce2c839ac18a57a7f87bc7f52b4afa2ab161ffb8bca66c7"
+      "chat.notice.waitingReviewElsewhere": "bacacf6c5c87a709dce2c839ac18a57a7f87bc7f52b4afa2ab161ffb8bca66c7",
+      "settings.logins.source.bitwardenSecrets": "211e61f416c7a271a8b3cca06dd292d5c1150ae828ad4e9d1ce8aa62d603919b",
+      "settings.vault.bitwardenSecrets.title": "65f58012467adf1656b5154076917cf2c0a195687f98c4b81e9c796b599471f1",
+      "settings.vault.bitwardenSecrets.line": "0da1e7063eadfc97c25ed12c8ee14b8015521436ba82c52078d26685839ba7d9",
+      "settings.vault.bitwardenSecrets.connected": "8ac07a95e993f71c702cef899d97f32e096d8214cbd1e04cca3017e9a51af9be",
+      "settings.vault.bitwardenSecrets.connect": "c171b125276ffcf283f70289389453db1e9b5c31cabbf060d7392d99b764a103",
+      "settings.vault.bitwardenSecrets.disconnect": "178e5f11b96808b4dfcf7732c4bf5ca42867f71d26b6492067ef02b0c62388d9",
+      "settings.vault.bitwardenSecrets.team": "0142fb70f0144e670aaf97f91ef171c42fefc9924532b6af30fdcea48e0f6801",
+      "settings.vault.bitwardenSecrets.guide": "a9cde30c280181181cdcc7f07ecf5bac7e8c50399b4ad010555cc091e55a69fb",
+      "settings.vault.bitwardenSecrets.token": "9a911b08feb9d2928240dda42c6efa8794ab3457f8b59a7cfb5187e817f948e3",
+      "settings.vault.bitwardenSecrets.note": "cb98c043ae54f73b55e675c6791759f93421cc65d2a3080b12d8af988997ef13",
+      "settings.vault.bitwardenSecrets.error": "393d6d3cb4d0776647976c6288ff1dac2198db77e9eb2613b6c389bca082694f"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
