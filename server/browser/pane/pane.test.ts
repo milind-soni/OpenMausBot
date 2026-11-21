@@ -204,6 +204,22 @@ describe("what a held pane lets the bot do", () => {
     expect(main.toMain.filter((message) => message.op === "front").map((message) => (message as { tab: string }).tab)).toEqual(["p1"]);
   });
 
+  it("takes the same reads as a held browser does, and refuses every other tool on the held tab before it reaches the pane", async () => {
+    const { main, service, call, text } = setup({ quietMs: 0 });
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    const run = service.profiles()[0]!.run!;
+    run.opened.personControl!.hold(run.browser.activePage!.targetId, true);
+    for (const [name, args] of [["agent_browser_status", {}], ["agent_browser_snapshot", {}], ["agent_browser_screenshot", {}], ["agent_browser_read", {}], ["agent_browser_tabs", { action: "list" }]] as const) {
+      const answer = await call(name, args);
+      expect(answer.isError, `${name}: ${text(answer)}`).toBeUndefined();
+    }
+    main.commands.length = 0;
+    for (const [name, args] of [["agent_browser_wait", { text: "Sign up" }], ["agent_browser_eval", { expression: "1" }], ["agent_browser_screenshot", { fullPage: true }], ["agent_browser_click", { selector: "#go" }]] as const) {
+      expect(text(await call(name, args)), name).toContain(PERSON_HOLDS_TAB);
+    }
+    expect(main.commands).toEqual([]);
+  });
+
   it("opens a bot's new tab behind the one the person holds", async () => {
     const { main, service, call } = setup({ quietMs: 0 });
     await call("agent_browser_open", { url: "https://example.com/a" });

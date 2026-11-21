@@ -214,6 +214,12 @@ export class PaneEndpoint implements CdpTransport {
     for (const tab of this.#tabs.values()) if (tab.target === targetId) tab.held = held;
   }
 
+  /** The person holds this tab now. */
+  held(targetId: string): boolean {
+    for (const tab of this.#tabs.values()) if (tab.target === targetId) return tab.held;
+    return false;
+  }
+
   owner(targetId: string): PaneOwner {
     for (const tab of this.#tabs.values()) {
       if (tab.target !== targetId) continue;

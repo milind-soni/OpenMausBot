@@ -28,6 +28,9 @@ export const browserEngineConfigSchema = z.object({
   engine: z.enum(["agent-browser", "chrome"]).optional(),
   /** "pane" shows the Chrome engine's browser on the desktop app as a real page the person uses directly, an early test; streamed when unset. */
   surface: z.enum(["stream", "pane"]).optional(),
+  /** On a Linux server with Xvnc, the new engine's Chrome runs with its window on a private display that the browser panel
+   * shows and a person drives as a remote desktop. Off by default. */
+  cloudDisplay: z.boolean().optional(),
 });
 
 export interface BrowserEngineConfig {
@@ -36,6 +39,7 @@ export interface BrowserEngineConfig {
   egress?: BrowserEgressConfig;
   engine?: BrowserEngineKind;
   surface?: "stream" | "pane";
+  cloudDisplay?: boolean;
 }
 
 export function browserEngineKind(cfg: { browserEngine?: BrowserEngineConfig }): BrowserEngineKind {
@@ -45,4 +49,9 @@ export function browserEngineKind(cfg: { browserEngine?: BrowserEngineConfig }):
 /** The desktop pane needs the Chrome engine too: it is that engine's browser, shown natively. */
 export function browserPaneWanted(cfg: { browserEngine?: BrowserEngineConfig }): boolean {
   return browserEngineKind(cfg) === "chrome" && cfg.browserEngine?.surface === "pane";
+}
+
+/** The bots' browsers should run on a display a person sees: asked for in config, on the new engine, on a server. */
+export function cloudDisplayWanted(cfg: { browserEngine?: BrowserEngineConfig }, host: "desktop" | "server" | "container", platform: NodeJS.Platform = process.platform): boolean {
+  return cfg.browserEngine?.cloudDisplay === true && browserEngineKind(cfg) === "chrome" && host !== "desktop" && platform === "linux";
 }

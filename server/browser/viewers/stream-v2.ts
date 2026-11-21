@@ -301,6 +301,8 @@ export class StreamV2 {
       pace: "hi",
       authPrompts: true,
       pagePopups: true,
+      // The panel shows this browser's window on a remote desktop instead: the stream still carries its hold and tabs.
+      ...(params.get("frames") === "0" ? { frames: false } : {}),
       ...(size && request.canOperate ? { size } : {}),
     };
     try {

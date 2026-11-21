@@ -1,8 +1,9 @@
 // People's views of a bot's browser. v1 (GET …/browser/live as server-sent events, POST …/browser/action) is what the
 // phone apps speak, and its contract is frozen. v2 (GET …/browser/stream, a WebSocket) is the desktop panel's and the
 // web UI's, on the new engine only: a page's file picker is answered by POST …/browser/upload and a finished download
-// is fetched from GET …/browser/download/:id. Never mix login frames into the general events feed, which every device
-// reads.
+// is fetched from GET …/browser/download/:id. GET …/browser/desktop (a WebSocket) is the remote-desktop view of a browser
+// whose window is on a private display, beside the v2 stream. Never mix login frames into the general events feed, which
+// every device reads.
 import { createReadStream, rmSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { dirname, join } from "node:path";
@@ -21,7 +22,7 @@ import { PASS, type RouteHandler } from "./table.ts";
 import type { Upgrades } from "./upgrades.ts";
 
 const LIVE = /^\/api\/bots\/([\w-]+)\/browser\/(live|action)$/;
-const STREAM = /^\/api\/bots\/([\w-]+)\/browser\/stream$/;
+const STREAM = /^\/api\/bots\/([\w-]+)\/browser\/(stream|desktop)$/;
 const UPLOAD = /^\/api\/bots\/([\w-]+)\/browser\/upload$/;
 const DOWNLOAD = /^\/api\/bots\/([\w-]+)\/browser\/download\/([\w-]{1,64})$/;
 const CHOOSER = /^[\w-]{1,64}$/;
@@ -33,7 +34,7 @@ type Failure = { status: number; error: string };
 
 export interface BrowserViewerRouteDeps {
   upgrades: Upgrades;
-  viewers: Pick<LiveRouter, "open" | "action" | "stream" | "fileChooserOffered" | "answerFileChooser" | "download">;
+  viewers: Pick<LiveRouter, "open" | "action" | "stream" | "desktop" | "fileChooserOffered" | "answerFileChooser" | "download">;
   /** Who is watching, as a hold of the browser knows them: every view and device of one person shares their hold. */
   person(auth: RequestAuth): string;
   /** Whose browser of the bot this person's view shows (`threadId` names the conversation they look at); null when
@@ -176,6 +177,16 @@ export function createBrowserViewerRoutes(deps: BrowserViewerRouteDeps): RouteHa
       if (pending.socket.destroyed) return;
       if (!isCurrent()) return json(res, 409, { error: "This browser session changed. Reopen the browser panel." });
       pending.release();
+      if (stream[2] === "desktop") {
+        const opened = deps.viewers.desktop({
+          session: browser.session, spec: browser.spec, botId: browser.botId, owner, person,
+          canOperate: url.searchParams.get("interactive") !== "false",
+          req, socket: pending.socket, head: pending.head, isCurrent,
+        });
+        if (!opened) return json(res, 409, { error: "This browser has no desktop view." });
+        res.detachSocket(pending.socket);
+        return;
+      }
       const opened = deps.viewers.stream({
         session: browser.session, spec: browser.spec, botId: browser.botId, owner, person,
         canOperate: url.searchParams.get("interactive") !== "false",

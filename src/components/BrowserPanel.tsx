@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Globe, Hand, Loader2, LockKeyhole, Moon, X } from "lucide-react";
 import { browserUnavailableReason } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
@@ -19,6 +19,8 @@ import { BROWSER_HELD_ELSEWHERE } from "../../shared/browser-held";
 import { passkeyWallAt } from "../../shared/passkey-wall";
 import { browserScope, withBrowserScope } from "@/lib/team-browser";
 import { useNativeViewObscured } from "@/lib/native-view-obscured";
+
+const BrowserDesktop = lazy(() => import("./browser/BrowserDesktop").then((module) => ({ default: module.BrowserDesktop })));
 
 const button = "rounded-md p-1.5 text-ink-secondary hover:bg-inset hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed";
 const NO_NAV: BrowserNav = { url: "", loading: false, canGoBack: false, canGoForward: false };
@@ -43,6 +45,14 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   const { state } = useStore();
   const [fallback, setFallback] = useState(false);
   const stream = state.config?.browserEngine?.engine === "chrome" && !fallback;
+  const [noDesktop, setNoDesktop] = useState(false);
+  const desktopView = stream && state.config?.browserEngine?.desktopView === true && !noDesktop;
+  // The desktop app shows this browser natively over the page area; the stream underneath shows through any overlay.
+  const paneMode = stream && state.config?.browserEngine?.pane === true && Boolean(window.ogb?.browserPane);
+  // The page shows as a remote desktop or a native pane, not from the stream's pictures: the stream's tab list, which comes
+  // once the browser runs, ends the starting state rather than a first picture.
+  const pageNotFromFrames = useRef(false);
+  pageNotFromFrames.current = desktopView || paneMode;
   const [attempt, setAttempt] = useState(0);
   const [connected, setConnected] = useState(false);
   const [control, setControl] = useState<PreviewStreamControl | null>(null);
@@ -102,7 +112,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     setAttempt((value) => value + 1);
   }, []);
   // Another profile may run on the other engine: it gets the stream again if it has one.
-  useEffect(() => { setFallback(false); }, [bot.id, bot.browserProfile, scopedThread]);
+  useEffect(() => { setFallback(false); setNoDesktop(false); }, [bot.id, bot.browserProfile, scopedThread]);
   useEffect(() => {
     setTabs([]);
     setExtensions(null);
@@ -116,14 +126,15 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
 
   const connect = useCallback<SurfaceConnect>((target, events) => {
     const scope: Record<string, string> = scopedThread ? { threadId: scopedThread } : {};
-    if (stream) return createPreviewStreamClient({ access: browserStreamAccess(bot.id, window.location, scope), ...target }, events);
+    // The desktop view shows the page, so the stream beside it carries no pictures.
+    if (stream) return createPreviewStreamClient({ access: browserStreamAccess(bot.id, window.location, desktopView ? { ...scope, frames: "0" } : scope), ...target }, events);
     const key = `${bot.id}\n${bot.browserProfile ?? ""}${scopedThread ? `\n${scopedThread}` : ""}`;
     if (resume.current.key !== key) resume.current = { key, viewer: "" };
     return createLiveStreamClient(bot.id, events, (body, viewerId) => api(withBrowserScope(`/api/bots/${encodeURIComponent(bot.id)}/browser/action`, scope), {
       // 120 s matches the server's browser requestTimeoutMs.
       method: "POST", body: JSON.stringify({ ...body, viewerId }), timeoutMs: 120_000,
     }), resume.current, scope, { width: target.width, height: target.height });
-  }, [bot.id, bot.browserProfile, scopedThread, stream]);
+  }, [bot.id, bot.browserProfile, scopedThread, stream, desktopView]);
 
   const interact = useCallback((input: PreviewStreamInput) => {
     if (controlRef.current?.controller === "another-viewer") {
@@ -170,6 +181,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     if (message.type === "tabs") {
       const next = tabsOf(message.tabs);
       setTabs(next);
+      if (pageNotFromFrames.current) setStarting(false);
       const active = next.find((tab) => tab.active);
       if (active) {
         setNav((current) => ({ ...current, url: active.url }));
@@ -290,8 +302,6 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     setError("");
   }, [shown]);
   const typingReady = connected && you;
-  // The desktop app shows this browser natively over the page area; the stream underneath shows through any overlay.
-  const paneMode = stream && state.config?.browserEngine?.pane === true && Boolean(window.ogb?.browserPane);
   const obscured = useNativeViewObscured(showProfiles || showTyping, paneMode);
   const paneVisible = paneMode && shown && connected && !asleep && !heldElsewhere && !gone && !starting && !obscured;
   const paneShown = useRef(paneVisible);
@@ -376,7 +386,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     <div ref={pageArea} {...(paneMode ? { "data-native-view-host": "" } : {})} className="relative flex min-h-0 flex-1 flex-col bg-inset/40">
       {shown ? (
         <StreamSurface
-          key={`${attempt}:${stream ? "stream" : "live"}:${bot.browserProfile ?? ""}`}
+          key={`${attempt}:${stream ? "stream" : "live"}:${bot.browserProfile ?? ""}${desktopView ? ":desktop" : ""}`}
           ref={surface}
           connect={connect}
           input={interact}
@@ -391,6 +401,18 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
           onClose={(code, reason) => { if (code === 1013 && reason) setError(reason); }}
           onLeave={() => address.current?.focus()}
         />
+      ) : null}
+      {shown && desktopView && connected && !starting && !asleep && !gone && !heldElsewhere ? (
+        <Suspense fallback={null}>
+          <BrowserDesktop
+            key={`${attempt}:${bot.browserProfile ?? ""}`}
+            botId={bot.id}
+            scope={scopedThread ? { threadId: scopedThread } : {}}
+            controlling={you}
+            label={t("browser.panel.pageLabel", { name: bot.name })}
+            onUnavailable={() => setNoDesktop(true)}
+          />
+        </Suspense>
       ) : null}
       {asleep || heldElsewhere || gone || !connected || starting ? (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-card/95 p-6 text-center text-[13px] text-ink-secondary">

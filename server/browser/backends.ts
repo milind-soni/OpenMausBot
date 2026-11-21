@@ -5,9 +5,10 @@ import { loopbackPage, openOwnPage } from "./chrome/calibrate.ts";
 import type { Identity } from "./cdp/identity.ts";
 import { webSocketTransport } from "./cdp/transport.ts";
 import { fitPage, pageLimit, type BrowserMode, type HostKind, type ScreenSpec } from "./chrome/flags.ts";
-import { launchChrome, type ChromeProcess, type LaunchOptions } from "./chrome/launch.ts";
+import { ChromeLaunchError, launchChrome, type ChromeProcess, type LaunchOptions } from "./chrome/launch.ts";
 import { clearSingleton, staleSingletonLock, type ProcessRegistry } from "./chrome/processes.ts";
 import { languageList } from "./chrome/wrapper.ts";
+import type { DesktopDisplay } from "./desktop/displays.ts";
 import { downgradeRefusal, ensureProfile, forgetOpenTabs, markCleanExit, profileDir, profileHash, recordOpenedBy, versionOf, workspaceId } from "./chrome/profile.ts";
 
 export type BackendKind = "local" | "my-chrome" | "cdp-url" | "pane";
@@ -47,7 +48,9 @@ export interface OpenedBrowser {
   onPersonInput?(listener: () => void): () => void;
   /** Where the person uses the page directly: holds the bot's input to a tab while the person has it (refs drop on
    * release), and says who acted last in it. */
-  personControl?: { hold(targetId: string, held: boolean): void; owner(targetId: string): "person" | "bot" | null };
+  personControl?: { hold(targetId: string, held: boolean): void; owner(targetId: string): "person" | "bot" | null; held(targetId: string): boolean };
+  /** The private display its window is on, which a person sees as a remote desktop; absent when it runs headless. */
+  readonly display?: DesktopDisplay | null;
 }
 
 export interface Backend {
@@ -81,6 +84,21 @@ export interface LocalBackendOptions {
   log?: (line: string) => void;
   /** Starts Chrome; tests pass a fake. */
   launch?: (options: LaunchOptions) => Promise<ChromeProcess>;
+  /** A private display for this profile's window, or null to run it headless. */
+  display?: (key: string) => Promise<DesktopDisplay | null>;
+  /** Chrome could not start on its display, so it was started headless instead; `reason` is what Chrome said. */
+  displayFailed?: (reason: string) => void;
+}
+
+/** Chrome did not start on its private display. */
+class DisplayLaunchError extends Error {
+  readonly reason: string;
+  constructor(error: unknown) {
+    const output = error instanceof ChromeLaunchError ? error.output.trim().split("\n").slice(-20).join("\n") : "";
+    const reason = `${error instanceof Error ? error.message : String(error)}${output ? `\n${output}` : ""}`;
+    super(reason);
+    this.reason = reason;
+  }
 }
 
 const LOCAL_CAPS: BackendCaps = { persistentProfile: true, window: true, egressGate: true, identityOverride: true, ownsAllTabs: true, downloads: "local", uploads: "path", botPasskeys: true };
@@ -100,13 +118,21 @@ export class LocalBackend implements Backend {
     const platform = options.platform ?? process.platform;
     const release = options.registry?.reserve(profileDir(options.dataDir, request.key));
     try {
-      return await this.#open(request, platform);
+      try {
+        return await this.#open(request, platform, true);
+      } catch (error) {
+        if (!(error instanceof DisplayLaunchError)) throw error;
+        // A host whose Chrome cannot keep its sandbox in the display's mount namespace (an AppArmor-confined bubblewrap)
+        // still gets the bot's browser: headless, shown as pictures.
+        options.displayFailed?.(error.reason);
+        return await this.#open(request, platform, false);
+      }
     } finally {
       release?.();
     }
   }
 
-  async #open(request: OpenRequest, platform: NodeJS.Platform): Promise<OpenedBrowser> {
+  async #open(request: OpenRequest, platform: NodeJS.Platform, onDisplay: boolean): Promise<OpenedBrowser> {
     const options = this.#options;
     const binary = await options.binary();
     const { dir, record, created } = ensureProfile(options.dataDir, request.key, { acceptLanguages: options.acceptLanguages?.() ?? "en-US,en" });
@@ -116,7 +142,9 @@ export class LocalBackend implements Backend {
     if (staleSingletonLock(dir)) clearSingleton(dir);
     markCleanExit(dir);
     if (request.fresh) forgetOpenTabs(dir);
-    const headless = request.mode === "headless";
+    const display = onDisplay ? (await options.display?.(request.key)) ?? null : null;
+    const mode = display ? "window" : request.mode;
+    const headless = mode === "headless";
     const locale = options.locale?.() ?? null;
     const egressPort = await options.egressPort(request.key);
     const screen = headless ? await options.screen() : null;
@@ -125,7 +153,7 @@ export class LocalBackend implements Backend {
     const chrome: ChromeProcess = await (options.launch ?? launchChrome)({
       executablePath: binary.path,
       userDataDir: dir,
-      mode: request.mode,
+      mode,
       host: options.host,
       platform,
       userAgent: headless ? binary.identity.userAgent : null,
@@ -140,6 +168,11 @@ export class LocalBackend implements Backend {
       profileMarker: profileHash(workspaceId(options.dataDir), request.key),
       registry: options.registry ?? null,
       ...(options.handshakeTimeoutMs === undefined ? {} : { handshakeTimeoutMs: options.handshakeTimeoutMs }),
+      ...(display ? { env: { ...process.env, ...display.env }, fillScreen: display.size, wrap: display.wrap } : {}),
+    }).catch(async (error: unknown) => {
+      if (!display) throw error;
+      await display.release();
+      throw new DisplayLaunchError(error);
     });
     const version = versionOf(chrome.version.product);
     try {
@@ -147,7 +180,8 @@ export class LocalBackend implements Backend {
       const browserOptions: BrowserOptions = {
         identity: headless ? binary.identity : null,
         acceptLanguage: locale ? languageList(locale) : undefined,
-        headless,
+        // A window on a private display is still one nobody sits at: file pickers and passkeys go to the panel.
+        headless: headless || display !== null,
         downloadDir: request.downloadDir,
         platform,
         maxPages: 8,
@@ -162,14 +196,17 @@ export class LocalBackend implements Backend {
         pageLimit: limit,
         pid: chrome.pid,
         version,
-        exited: chrome.exited.then(() => undefined),
+        exited: chrome.exited.then(() => display?.release()),
         async close() {
           await browser.close();
           await chrome.close(5_000);
+          await display?.release();
         },
+        display,
       };
     } catch (error) {
       await chrome.kill();
+      await display?.release();
       throw error;
     }
   }
