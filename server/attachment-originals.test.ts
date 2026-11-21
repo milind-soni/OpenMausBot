@@ -39,11 +39,13 @@ describe("kept originals", () => {
     expect(readFileSync(join(kept, NAME), "utf8")).toBe("as sent");
   });
 
-  it("keeps nothing when the box is on, which shows uploads read-only", () => {
+  it("keeps nothing when the box shows the upload read-only, and keeps it when the box leaves the store's path", () => {
     const upload = join(store, NAME);
     writeFileSync(upload, "as sent");
     attachmentsForBox(tag(upload), join(dataDir, "task-workspaces", "bot", "thread"), true, dataDir, store);
     expect(existsSync(join(kept, NAME))).toBe(false);
+    expect(attachmentsForBox(tag(upload), join(root, "own-project"), true, dataDir, store)).toBe(tag(upload));
+    expect(readFileSync(join(kept, NAME), "utf8")).toBe("as sent");
   });
 
   it("keeps only documents from the store, within the size limit", () => {

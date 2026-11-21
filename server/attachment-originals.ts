@@ -4,8 +4,8 @@ import { decodeAttachmentAttribute } from "../src/lib/composer-attachments.ts";
 import { DATA_DIR } from "./config.ts";
 
 /**
- * Without the bot box a turn names the person's upload by its place in the attachment store, and an engine with file tools
- * can save its edit over it (the store is writable, and some engines replace a file by renaming over it). Before such a
+ * Without the bot box (or outside a conversation's own folder) a turn names the person's upload by its place in the
+ * attachment store, and an engine with file tools can save its edit over it (the store is writable, and some engines replace a file by renaming over it). Before such a
  * turn, each document it names is copied once into this private folder, which no turn is told about: the person's own
  * message and the comparison of an edit read the copy, so what they sent is never lost. Copies are made only of
  * documents a bot might edit, up to KEEP_MAX_BYTES each and KEPT_TOTAL_MAX_BYTES together, and go when the upload does.
@@ -74,12 +74,12 @@ export function keptOriginal(path: string, attachmentsDir: string, keptDir = KEP
 
 export function dropKeptOriginals(names: readonly string[], keptDir = KEPT_ORIGINALS_DIR): void {
   for (const name of names) {
-    if (!isKeptDocumentName(name)) continue;
+    if (!isKeptDocumentName(name) || !existsSync(join(keptDir, name))) continue;
     try {
       rmSync(join(keptDir, name), { force: true });
     } catch { /* a busy file on Windows stays until the next removal */ }
+    kept = null;
   }
-  if (names.length) kept = null;
 }
 
 export function __resetKeptOriginalsForTests(): void {

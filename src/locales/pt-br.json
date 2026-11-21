@@ -9851,6 +9851,7 @@
   "chat.notice.exportedGoal.failed": "{before}[Objetivo: falhou]{content}",
   "activity.tool.team.decide": "Decidir",
   "activity.tool.team.extract": "Extrair",
+  "activity.tool.team.whatChanged": "O que mudou",
   "serverError.voice.utteranceTooLong": "Cada trecho de fala pode ter no máximo 500 caracteres",
   "browser.panel.restore": "Restaurar tamanho",
   "browser.panel.maximize": "Maximizar",

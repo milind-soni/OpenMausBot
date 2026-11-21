@@ -9937,6 +9937,7 @@
   "chat.notice.exportedGoal.failed": "{before}[Goal: failed]{content}",
   "activity.tool.team.decide": "Decide",
   "activity.tool.team.extract": "Extract",
+  "activity.tool.team.whatChanged": "What changed",
   "serverError.voice.utteranceTooLong": "voice utterances are limited to 500 characters",
   "browser.panel.restore": "Restore size",
   "browser.panel.maximize": "Maximize",
