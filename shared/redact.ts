@@ -36,7 +36,9 @@ const KEY_PREFIXES: RegExp[] = [
   /\bwhsec_[A-Za-z0-9_-]{20,}/g, // webhook secrets, alone or in an automation's address
   /\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g, // sendgrid api keys
   /\bbak_[A-Za-z0-9_-]{20,}/g, // Bot API keys
-  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, // jwt
+  // jwt; each part bounded (at most 8 KB) for the reason KEY_VALUE's name is: unbounded, every `eyJ` in a long run of
+  // base64url scanned to its end
+  /\beyJ[A-Za-z0-9_-]{8,8192}\.[A-Za-z0-9_-]{8,8192}\.[A-Za-z0-9_-]{8,8192}\b/g,
 ];
 const KEY_PREFIX_TESTS = KEY_PREFIXES.map((re) => new RegExp(re.source));
 const PRIVATE_KEY_BLOCK = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
@@ -53,18 +55,22 @@ const BASIC_AUTH = /(\bAuthorization["']?\s*[:=]\s*["']?Basic\s+)([A-Za-z0-9+/]{
 const PEM_BLOCK = /(-----BEGIN [A-Z ]*PRIVATE KEY-----)([\s\S]*?)(-----END [A-Z ]*PRIVATE KEY-----)/g;
 /** key=value / key: value / key="value" where the key is secret-shaped.
  * The value must be a single token of some length; prose after a colon
- * ("password: leave blank…") has spaces and does not match. */
+ * ("password: leave blank…") has spaces and does not match.
+ *
+ * The name before the secret word (here and before `key` below) is at most 128 characters. Unbounded, each word boundary
+ * in a long run of name characters (a base64url blob, `a-b-c-…`) scanned to the end of the run and back: one 400 KB tool
+ * output held the server's only thread about ten seconds, and a few MB for minutes. Bounded, the work grows with the text. */
 const KEY_VALUE =
-  /\b((?:[A-Za-z0-9_-]*_)?(?:api[_-]?key|apikey|secret|token|password|passwd|authorization|auth[_-]?token|access[_-]?key|private[_-]?key)s?)(["']?\s*[=:]\s*)(["']?)([A-Za-z0-9._~+/=-]{8,})\3/gi;
+  /\b((?:[A-Za-z0-9_-]{0,128}_)?(?:api[_-]?key|apikey|secret|token|password|passwd|authorization|auth[_-]?token|access[_-]?key|private[_-]?key)s?)(["']?\s*[=:]\s*)(["']?)([A-Za-z0-9._~+/=-]{8,})\3/gi;
 /** `X_KEY=value`, `xai-key=value`: an assignment to a name that ENDS in key
  * is a credential whatever the value looks like, so no length floor. The
  * separator before `key` is what keeps `hotkey=` and `keyboard=` out. */
-const KEY_SUFFIX_ASSIGNMENT = /\b([A-Za-z][A-Za-z0-9_-]*[_-]key)s?(=)(["']?)([A-Za-z0-9._~+/=-]+)\3/gi;
+const KEY_SUFFIX_ASSIGNMENT = /\b([A-Za-z][A-Za-z0-9_-]{0,128}[_-]key)s?(=)(["']?)([A-Za-z0-9._~+/=-]+)\3/gi;
 /** `--token abc`, `--password=abc`: the flag names a secret; the value is
  * whatever single token follows, never another flag. */
 const SECRET_FLAG = /(--(?:token|password|passwd|api-key|apikey|secret|access-key|auth-token)(?:=|\s+))(["']?)(?!-)([A-Za-z0-9._~+/=-]+)\2/gi;
-/** `scheme://user:secret@host` — the password in a URL's userinfo. */
-const URL_USERINFO = /(\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@'"]+:)([^\s/@'"«»]+)(@)/gi;
+/** `scheme://user:secret@host` — the password in a URL's userinfo. The scheme is bounded for the reason KEY_VALUE's name is. */
+const URL_USERINFO = /(\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s/:@'"]+:)([^\s/@'"«»]+)(@)/gi;
 
 // A saved website password has no shape: it is known by value. The server
 // registers a scrubber for the values it holds, and every redaction below
