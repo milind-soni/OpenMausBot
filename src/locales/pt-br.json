@@ -10067,6 +10067,7 @@
   "chat.notice.backupCardWaiting": "Mudou para {name}. Seu pedido aguarda sua ação em um cartão acima. Depois disso, continua em {name}.",
   "chat.notice.backupRequestUnderWay": "Mudou para {name}. Seu pedido ainda está em andamento aqui e continua em {name}.",
   "chat.notice.backupConversationBusy": "Mudou para {name}. O bot está trabalhando nesta conversa, então sua mensagem não foi enviada novamente.",
+  "chat.notice.backupAlreadyRan": "Mudou para {name}. Parte do seu pedido já foi executada, então ele não foi enviado novamente. Envie o que ainda falta fazer.",
   "chat.notice.backupQuestionWaiting": "Mudou para {name}. Um colega aguarda sua resposta a uma pergunta nesta conversa, por isso sua mensagem não foi reenviada. Responda à pergunta e depois envie sua mensagem novamente.",
   "chat.notice.backupMessageMissing": "Mudou para {name}, mas não foi possível encontrar sua mensagem para reenviar. Envie novamente.",
   "chat.notice.backupContinuingLimit": "Continuando em {name} depois de atingir o limite de uso",
