@@ -20,7 +20,7 @@ import { CALL_ENDPOINT_MS, speechBridge } from "@/lib/speech";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
 import { titledCard } from "./ApprovalCard";
-import { spokenConsent } from "../../shared/call-consent";
+import { chineseConsent, NO, YES } from "../../shared/call-consent";
 
 type Phase = "listening" | "sending" | "working" | "speaking";
 
@@ -235,7 +235,8 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
           hush();
           return;
         }
-        const decision = spokenConsent(said, "turns");
+        // English is read exactly as before; chineseConsent only adds the Chinese answers.
+        const decision = YES.test(said) ? "allow" : NO.test(said) ? "deny" : chineseConsent(said);
         if (decision) {
           const allow = decision === "allow";
           if (allow && openApproval.skill) {

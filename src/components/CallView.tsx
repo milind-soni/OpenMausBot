@@ -10,7 +10,7 @@ import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
 import { currentCall, deferCallCleanup, endCall, startCall, useOnCall } from "@/lib/call";
 import { CALL_MODES, callModeHint, effectiveCallMode, setCallMode, useCallMode, type CallMode } from "@/lib/call-mode";
-import { spokenConsent } from "../../shared/call-consent";
+import { chineseConsent, NO, YES } from "../../shared/call-consent";
 import { dismissStartPrompt, hangUpLiveCall, isLiveCallRunning, startLiveCall, useLiveMedia } from "@/lib/live-call-media";
 import { t } from "@/lib/i18n";
 import { speaker } from "@/lib/tts";
@@ -588,7 +588,8 @@ function Call({ bot }: { bot: Bot }) {
           hush();
           return;
         }
-        const decision = spokenConsent(said, "turns");
+        // English is read exactly as before; chineseConsent only adds the Chinese answers.
+        const decision = YES.test(said) ? "allow" : NO.test(said) ? "deny" : chineseConsent(said);
         if (decision) {
           const allow = decision === "allow";
           if (allow && open.skill) {

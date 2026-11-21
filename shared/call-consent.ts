@@ -26,6 +26,14 @@ const ZH_YES = /^(?:我?(?:同意|允[许許]|批准)|是的|(?:[确確][认認]
 // 不 no, 不行 no way, 不可以 you may not, 不要 don't, 不用 no need.
 const ZH_NO = /^(?:我?拒[绝絕]|不同意|不允[许許]|不批准|(?:不要|不|取消|停止)[执執]行|取消|不(?:行|可以|要|用)?)[\s。.!！]*$/;
 
+/** A Chinese answer on its own: "allow", "deny", or null. Never decides an English answer. */
+export function chineseConsent(text: string): "allow" | "deny" | null {
+  const said = text.trim().replace(ZH_HEDGES, "");
+  if (ZH_YES.test(said)) return "allow";
+  if (ZH_NO.test(said)) return "deny";
+  return null;
+}
+
 /** "allow", "deny", or null when the words are not a clear decision. The
  * answer must open the utterance; filler before it ("uh, yes") is dropped.
  * `live`: a Live call, whose microphone stays open while the voice speaks
@@ -33,9 +41,8 @@ const ZH_NO = /^(?:我?拒[绝絕]|不同意|不允[许許]|不批准|(?:不要|
  * `turns` (take turns) keeps its own rule: its microphone is closed while
  * the bot talks. */
 export function spokenConsent(text: string, mode: "turns" | "live" = "turns"): "allow" | "deny" | null {
-  const chinese = text.trim().replace(ZH_HEDGES, "");
-  if (ZH_YES.test(chinese)) return "allow";
-  if (ZH_NO.test(chinese)) return "deny";
+  const chinese = chineseConsent(text);
+  if (chinese) return chinese;
   const said = text.trim().replace(mode === "live" ? LIVE_HEDGES : FILLER, "");
   if ((mode === "live" ? LIVE_YES : YES).test(said)) return "allow";
   if (NO.test(said)) return "deny";

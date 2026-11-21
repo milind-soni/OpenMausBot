@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { spokenConsent } from "./call-consent.ts";
+import { chineseConsent, spokenConsent } from "./call-consent.ts";
 
 describe("spokenConsent", () => {
   it("reads a clear yes or no at the start of the answer", () => {
@@ -85,4 +85,27 @@ describe("spokenConsent", () => {
       }
     });
   }
+});
+
+describe("chineseConsent", () => {
+  it("accepts a whole Chinese approval or refusal", () => {
+    for (const said of ["同意", "好的，同意。", "可以执行", "允許"]) {
+      expect.soft(chineseConsent(said), said).toBe("allow");
+    }
+    for (const said of ["拒绝", "不行", "嗯，取消", "拒絕"]) {
+      expect.soft(chineseConsent(said), said).toBe("deny");
+    }
+  });
+
+  it("ignores Chinese filler, questions and conditions", () => {
+    for (const said of ["好的", "可以", "同意吗？", "同意，但是先备份"]) {
+      expect(chineseConsent(said), said).toBeNull();
+    }
+  });
+
+  it("ignores English answers and empty input", () => {
+    for (const said of ["yes", "no", "okay", "uh, yes", "uh, yes, but only after a backup", ""]) {
+      expect(chineseConsent(said), said).toBeNull();
+    }
+  });
 });
