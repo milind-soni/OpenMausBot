@@ -87,3 +87,19 @@ it("refuses a report-back thread brief longer than a hand-off carries instead of
   expect(refused).toContain("nothing was done");
   expect(f.turns(f.worker.id)).toHaveLength(1);
 }), 90_000);
+
+it("says which other provider's AI a checker would start on only when asked: null with one provider, the other with two", async () => {
+  for (const extra of [[], ["codex"]] as const) {
+    const session = await launchVerificationServer({ ...process.env }, undefined, undefined, undefined, undefined, { scripted: true }, [...extra]);
+    const api = (path: string) => request(path, {}, session.info.url) as Promise<any>;
+    try {
+      const plain = await api("/api/bot-defaults");
+      expect(plain.modelSelection.instanceId).toBe("claude");
+      expect(Object.hasOwn(plain, "checkerModelSelection")).toBe(false);
+      const checker = await api("/api/bot-defaults?checker=1");
+      expect(checker.modelSelection).toEqual(plain.modelSelection);
+      if (extra.length) expect(checker.checkerModelSelection).toMatchObject({ instanceId: "codex" });
+      else expect(checker.checkerModelSelection).toBeNull();
+    } finally { await session.close(); }
+  }
+}, 120_000);

@@ -1,3 +1,5 @@
+import { basename } from "node:path";
+
 import { splitTranscriptAttachments } from "../src/lib/composer-attachments.ts";
 import type { Message } from "./store.ts";
 
@@ -12,7 +14,7 @@ type Line = Pick<Message, "role" | "text" | "attachments" | "from" | "roomReques
 export function conversationAttachments(messages: readonly Line[]): ConversationAttachment[] {
   const found = new Map<string, string>();
   for (const message of messages) {
-    for (const file of message.attachments ?? []) if (file.kind !== "audio" && !found.has(file.path)) found.set(file.path, file.name);
+    for (const file of message.attachments ?? []) if (file.kind !== "audio" && !found.has(file.path)) found.set(file.path, file.name ?? basename(file.path));
     if (message.role !== "user" || message.from || message.roomRequest || message.threadPost || message.via || !message.text) continue;
     const { images, files } = splitTranscriptAttachments(message.text, false, false);
     for (const file of [...images, ...files]) if (!found.has(file.path)) found.set(file.path, file.name);

@@ -299,7 +299,7 @@ import { createDelegatedLevel } from "./host/delegated-level.ts";
 import { createLiveApprovalMode } from "./host/live-approval.ts";
 import { CONSENT_RULE, continuedOrigin, escapeNotes, labelledLine, OUTSIDE, peerLineText, peerProvenanceNote, quoteInNote, reportNote, requestWorkOrigin, type WorkOrigin } from "./peer-provenance.ts"; import { lineNote, PROVENANCE_PROMPT } from "./provenance-label.ts"; import { openRoomThread } from "./host/room-new-thread.ts"; import { createLineLabels } from "./host/line-labels.ts";
 import { decideRoomPost, emptyRoomPostBudget, type RoomPostAttempt, type RoomPostBudget } from "./room-post-budget.ts";
-import { messagePages, pageMessage, pageSize, slimMessage } from "./host/message-pages.ts"; import { suggestedSelection } from "./host/suggested-selection.ts";
+import { messagePages, pageMessage, pageSize, slimMessage } from "./host/message-pages.ts"; import { SUGGESTION_MAX_AGE_MS, suggestedSelection } from "./host/suggested-selection.ts"; import { otherProviderSelection } from "./checker-model.ts";
 import { coordinateResultMessage, createAsksActingPerson, createTeammatePrompts } from "./host/teammate-prompts.ts"; import { createPersonalReach } from "./host/personal-reach.ts"; import { createMausBotOwnChat } from "./host/mausbot-own-chat.ts"; import { moveMemoryLayer } from "./memory-move.ts";
 import { createQueuedReason } from "./host/queued-reason.ts";
 import { ReplayBuffer } from "./host/sse-replay.ts";
@@ -14583,11 +14583,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
 
     if (method === "GET" && path === "/api/bot-defaults") {
-      return json(res, 200, {
-        defaults: structuredClone(cfg.newBotDefaults ?? newBotDefaultsSchema.parse({})),
-        modelSelection: await suggestedSelection({ reused: (age) => registry.describe({ reuse: { ...age, changed: () => broadcast({ kind: "config", ...configStatus() }) } }), fresh: () => registry.describe(), select: (instances) => defaultSelection(undefined, instances) }),
-        suggestedName: pickBotName(store.bots.map(bot => bot.name)),
-      });
+      const defaults = structuredClone(cfg.newBotDefaults ?? newBotDefaultsSchema.parse({})), reused = (ms: number) => registry.describe({ reuse: { ms, maxAgeMs: SUGGESTION_MAX_AGE_MS, changed: () => broadcast({ kind: "config", ...configStatus() }) } }), modelSelection = await suggestedSelection({ reused: (age) => reused(age.ms), fresh: () => registry.describe(), select: (instances) => defaultSelection(undefined, instances) });
+      const checker = url.searchParams.get("checker") === "1" && !hostedModels ? otherProviderSelection(selectableInstances<SelectableInstance>(await reused(ENGINE_LIST_REUSE_MS)), defaults.profile.modelSelection?.instanceId ? defaults.profile.modelSelection : modelSelection, selectionContext) : undefined;
+      return json(res, 200, { defaults, modelSelection, suggestedName: pickBotName(store.bots.map(bot => bot.name)), ...(checker === undefined ? {} : { checkerModelSelection: checker }) });
     }
     if (method === "POST" && path === "/api/bot-defaults/skills/preview") {
       const checked = z.object({ source: z.string().min(1).max(2000) }).strict().safeParse(await readBody(req));
