@@ -234,7 +234,7 @@ describe("a card lifts a lock only for the owner's own line (server/host/cloud-l
 
 describe("a routine someone else changed (email 1a1bca40)", () => {
   const routinePrompt = { id: "m1", role: "user", automation: { routineId: "r1" } };
-  function routineRun({ trigger = "schedule" as "schedule" | "manual" | "webhook" | "startup", ownerStarted = false, ownerAuthored = false, flagged = false } = {}) {
+  function routineRun({ trigger = "schedule" as "schedule" | "manual" | "webhook" | "startup", ownerStarted = false, ownerAuthored = false, flagged = false, refused = [] as unknown[][] } = {}) {
     const run = { id: "run1", routineId: "r1", threadId: "t1", triggerSource: trigger };
     return createCloudLendingTurns({
       store: {
@@ -255,6 +255,7 @@ describe("a routine someone else changed (email 1a1bca40)", () => {
       routines: () => ({ listRoutines: () => [{ id: "r1", name: "Morning inbox" }] }) as never,
       routineAuthors: { authored: () => ownerAuthored },
       lentPlatform: () => "darwin",
+      routineRefused: (...args) => { refused.push(args); },
     });
   }
   const changed = "\"Morning inbox\" can't use your Mac because it isn't confirmed as yours: it was last changed or made outside your own chats. Open it and save it to make it yours again.";
@@ -266,6 +267,20 @@ describe("a routine someone else changed (email 1a1bca40)", () => {
     expect(host.cloudLendingRefusalForBot(turn)).toBe(`${changed} ${ONLY_THE_PERSON}`);
     expect(routineRun({ trigger: "startup" }).cloudLendingRefusalNotice(turn)).toBe(changed);
     expect(routineRun({ trigger: "manual", ownerStarted: true }).cloudLendingRefusalNotice(turn)).toBe(changed);
+  });
+  it("a refused call records the run and its routine for the run's own ending, and nothing else does", () => {
+    const refused: unknown[][] = [];
+    const host = routineRun({ refused });
+    host.cloudLendingRefusalNotice(turn);
+    expect(refused, "only a call the bot was refused").toEqual([]);
+    host.cloudLendingRefusalForBot(turn);
+    host.cloudLendingRefusalForBot(turn, false);
+    expect(refused, "a use, then a listing").toEqual([["t1", "run1", "Morning inbox", true], ["t1", "run1", "Morning inbox", false]]);
+    const others: unknown[][] = [];
+    for (const options of [{ ownerAuthored: true }, { trigger: "webhook" as const }, { trigger: "manual" as const }, { flagged: true }]) {
+      routineRun({ ...options, refused: others }).cloudLendingRefusalForBot(turn);
+    }
+    expect(others).toEqual([]);
   });
   it("the owner's own routine still runs, and every other refusal keeps its words", () => {
     expect(routineRun({ ownerAuthored: true }).cloudLendingRefusalNotice(turn)).toBeNull();
