@@ -261,6 +261,43 @@ describe("Bitwarden Secrets Manager in the Vault", () => {
     await expect(candidate!.secrets()).rejects.toThrow("no longer in");
   });
 
+  it("refuses a login picked before its username changed, even after the list is read again", async () => {
+    const { vault, fake } = setup();
+    await vault.refresh();
+    const [candidate] = linkedCandidates(vault, "github.com", "pepper");
+    fake.secrets[0]!.note = "url: https://github.com/login\nusername: replacement-bot";
+    fake.secrets[0]!.value = "fake-replacement-Passw0rd";
+    await vault.refresh();
+    await expect(candidate!.secrets()).rejects.toThrow("no longer in");
+    const [replacement] = linkedCandidates(vault, "github.com", "pepper");
+    expect((await replacement!.secrets()).password, "the login as it is listed now").toBe("fake-replacement-Passw0rd");
+  });
+
+  it("reads the new connection on a refresh asked for after connecting, not an old read started while connecting", async () => {
+    const old = fakeBws({ secrets: SECRETS });
+    const next = fakeBws({ secrets: [{ key: "NEXT_KEY", value: "fake-next" }], serverUrl: "https://bw.example.test" });
+    const fetch: SecretsFetch = (url, init) => (url.startsWith("https://bw.example.test") ? next.fetch(url, init) : old.fetch(url, init));
+    const nextCredentials = { serverUrl: "https://bw.example.test", accessToken: next.accessToken };
+    let saved: { serverUrl: string; accessToken: string } | null = { serverUrl: SERVER, accessToken: old.accessToken };
+    const vault = new BitwardenSecrets({ credentials: () => saved, fetch });
+    let openNext!: () => void;
+    let openOld!: () => void;
+    next.state.gate = new Promise((done) => { openNext = done; });
+    old.state.gate = new Promise((done) => { openOld = done; });
+    try {
+      const connecting = vault.connect(nextCredentials, () => { saved = nextCredentials; });
+      const oldList = vault.refresh();
+      openNext();
+      await connecting;
+      next.secrets.push({ id: "0f3c1a2b-1111-4222-8333-444455556666", key: "LATER_KEY", value: "fake-later" });
+      const after = vault.refresh();
+      openOld();
+      expect((await after).items, "the refresh read the new connection").toBe(2);
+      await oldList.catch(() => undefined);
+      expect(linkedSecrets(vault).map((secret) => secret.name).sort()).toEqual(["LATER_KEY", "NEXT_KEY"]);
+    } finally { openNext(); openOld(); }
+  });
+
   it("reads the new connection on a refresh asked for after a reconnect, not the old one still being read", async () => {
     const old = fakeBws({ secrets: SECRETS });
     const next = fakeBws({ secrets: [{ key: "NEXT_KEY", value: "fake-next" }], serverUrl: "https://bw.example.test" });

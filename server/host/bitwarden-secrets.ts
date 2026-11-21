@@ -127,6 +127,8 @@ export class BitwardenSecrets implements VaultProvider {
     // A connection made or cleared meanwhile wins; a connect it overtook keeps nothing.
     if (generation !== this.generation) throw new BitwardenSecretsProblem("unavailable");
     save();
+    // A refresh started while this connection was checked read the old one; the next refresh reads this one.
+    this.refreshing = null;
     this.publish(catalog);
     return this.status();
   }
@@ -171,7 +173,8 @@ export class BitwardenSecrets implements VaultProvider {
       const sites = new Map<string, string[]>();
       for (const host of login.hosts) sites.set(loginSite(host), [...(sites.get(loginSite(host)) ?? []), host]);
       for (const [site, hosts] of sites) {
-        logins.push({ id: `${ID_PREFIX}${secret.id}:${site}`, secretId: secret.id, site, hosts, exactHost: false, username: login.username, hasTotp: Boolean(parseTotpKey(login.totp)) });
+        // The username is part of the id, so a login picked before its note named another account is never read as the new one.
+        logins.push({ id: `${ID_PREFIX}${secret.id}:${site}:${encodeURIComponent(login.username)}`, secretId: secret.id, site, hosts, exactHost: false, username: login.username, hasTotp: Boolean(parseTotpKey(login.totp)) });
       }
     }
     return { logins: logins.sort((a, b) => a.site.localeCompare(b.site) || a.username.localeCompare(b.username)), entries };
