@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { connectorAvailability, connectorSetup } from "./composio.ts";
 import type { AppConfig } from "./config.ts";
+
+afterEach(() => vi.unstubAllEnvs());
 
 const cfg = (over: Partial<AppConfig> = {}): AppConfig => ({ ...over }) as AppConfig;
 
@@ -37,7 +39,21 @@ describe("connectorSetup", () => {
     expect(connectorSetup(cfg({ composio: { apiKey: "" } }), false)).toBe("needs-setup");
   });
 
-  it("reports the managed service as unavailable only on a host it comes with (the installed desktop app, a Cloud home)", () => {
-    expect(connectorSetup(cfg(), true)).toBe("service-unavailable");
+  it("reports the managed service as unavailable only on a managed host with a broker URL configured", () => {
+    expect(connectorSetup(cfg(), true, "https://broker.example.test")).toBe("service-unavailable");
+    expect(connectorSetup(cfg(), false, "https://broker.example.test")).toBe("needs-setup");
+  });
+
+  it("needs setup on the desktop app when no broker URL is configured, since none ships by default", () => {
+    vi.stubEnv("OMB_DESKTOP_PARENT", "1");
+    vi.stubEnv("OMB_COMPOSIO_BROKER_URL", "");
+    expect(connectorSetup(cfg())).toBe("needs-setup");
+    expect(connectorSetup(cfg(), true, undefined)).toBe("needs-setup");
+    expect(connectorSetup(cfg(), true, "not a url")).toBe("needs-setup");
+  });
+
+  it("needs setup when OMB_COMPOSIO_BROKER=off, even with a broker URL", () => {
+    vi.stubEnv("OMB_COMPOSIO_BROKER", "off");
+    expect(connectorSetup(cfg(), true, "https://broker.example.test")).toBe("needs-setup");
   });
 });

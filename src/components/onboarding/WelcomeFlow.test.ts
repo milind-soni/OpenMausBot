@@ -14,7 +14,6 @@ import type { InstanceInfo } from "@/state/store";
 const f = vi.hoisted(() => ({ state: {} as Record<string, unknown>, dispatch: vi.fn(), api: vi.fn(), landed: vi.fn(), onDone: vi.fn(),
   checks: [] as string[] }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f.dispatch }), api: f.api }));
-vi.mock("@/lib/analytics", () => ({ track: vi.fn(), setEmailGateDone: vi.fn() }));
 vi.mock("@/components/Avatar", () => ({ BotAvatar: () => null, MausAvatar: () => null }));
 vi.mock("@/components/mascot-clock", () => ({ usePrefersReducedMotion: () => true }));
 vi.mock("@/components/EngineSetup", async (original) => {

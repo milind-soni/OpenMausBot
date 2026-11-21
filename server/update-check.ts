@@ -2,9 +2,11 @@
 import { existsSync } from "node:fs";
 import { join, sep } from "node:path";
 
-export const LATEST_RELEASE_URL = "https://api.github.com/repos/milind-soni/OpenMausBot/releases/latest";
+import { PROJECT_REPOSITORY } from "../shared/project-repository.ts";
+
+export const LATEST_RELEASE_URL = `https://api.github.com/repos/${PROJECT_REPOSITORY}/releases/latest`;
 /** Written by .github/workflows/promote-stable.yml: the released version our own Clouds have run for 48 hours. */
-export const STABLE_CHANNEL_URL = "https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json";
+export const STABLE_CHANNEL_URL = `https://raw.githubusercontent.com/${PROJECT_REPOSITORY}/channels/stable.json`;
 const CACHE_MS = 60 * 60_000;
 /** How long the last answer stands in when the channel cannot be read: an outage of GitHub is no reason to say nothing. */
 const STALE_MS = 24 * 60 * 60_000;
@@ -127,7 +129,7 @@ export function createUpdateChecker(options: {
     ...updateCommand(options.install),
   });
   const ask = (url: string) => fetchJson(url, {
-    headers: { accept: "application/vnd.github+json", "user-agent": "openmausbot-update-check" },
+    headers: { accept: "application/vnd.github+json", "user-agent": "edu-bot-update-check" },
     signal: AbortSignal.timeout(8_000),
   });
 
@@ -141,8 +143,10 @@ export function createUpdateChecker(options: {
     return { version: record.version, ...(typeof record.releaseUrl === "string" ? { releaseUrl: record.releaseUrl } : {}) };
   }
 
-  async function newest(): Promise<Found> {
+  /** Null while the repository has published no release: GitHub answers 404. */
+  async function newest(): Promise<Found | null> {
     const response = await ask(LATEST_RELEASE_URL);
+    if (response.status === 404) return null;
     if (!response.ok) throw new Error(`GitHub answered ${response.status}`);
     const release = await response.json() as { tag_name?: unknown; html_url?: unknown };
     if (typeof release.tag_name !== "string") throw new Error("GitHub sent no release tag");
@@ -156,7 +160,7 @@ export function createUpdateChecker(options: {
       try {
         const promoted = channel === "stable" ? await stable() : null;
         const found = promoted ?? await newest();
-        const result: UpdateCheck = {
+        const result: UpdateCheck = !found ? base() : {
           ...base(),
           channel: promoted ? "stable" : "newest",
           latest: found.version,

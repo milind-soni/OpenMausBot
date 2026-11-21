@@ -4,8 +4,6 @@ import { useStore } from "@/state/store";
 import { installCommandFor } from "@/state/engine-install";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import type { KeyResult, KeyVia } from "@/lib/analytics-allowlist";
-import { keyRemoved, keySaved, keySaveFailure, savedKeyResult } from "@/lib/product-events";
 import { InstanceProviderMark } from "../ProviderIcons";
 import { FIELD_EDGE, SettingsLook, SettingsMark } from "../SettingsPrimitives";
 import { keyEntry, keyForInstance, looksLikeOtherKey, savedState, shownKeyEntry, type KeyEntry, type KeyId, type SavedState } from "./key-catalog";
@@ -85,7 +83,6 @@ function errorText(cause: unknown): string {
 export function KeyRow({
   id,
   row: rowId,
-  via = "settings",
   onSaved,
   bare = false,
   rejected: rejectedHere,
@@ -94,7 +91,6 @@ export function KeyRow({
 }: {
   id: KeyId;
   row?: KeyId;
-  via?: KeyVia;
   onSaved?: (configured: boolean) => void;
   bare?: boolean;
   rejected?: boolean;
@@ -177,8 +173,8 @@ export function KeyRow({
   const testAt = state.config && target.testAt ? target.testAt(state.config) ?? "" : null;
   const checkedAt = useRef(testAt);
 
-  const runCheck = async (): Promise<KeyResult> => {
-    if (!target.test) return "unverified";
+  const runCheck = async (): Promise<void> => {
+    if (!target.test) return;
     const mine = ++generation.current;
     const at = checkedAt.current;
     setBusy("checking");
@@ -190,11 +186,9 @@ export function KeyRow({
         setVerdict(check.ok ? check.text : null);
         setProblem(check.ok ? null : check.text);
       }
-      return check.result;
     } catch (cause) {
       if (mine === generation.current && checkedAt.current !== at) return await runCheck();
       if (mine === generation.current) setProblem(errorText(cause));
-      return "unverified";
     }
   };
 
@@ -227,11 +221,9 @@ export function KeyRow({
         if (!now.configured) setProblem(t("keys.row.notKept"));
       }
       onSaved?.(now.configured);
-      if (now.configured && via === "settings") target.settingsEvent?.("add_key");
-      keySaved(target.analytics, via, current && now.configured && target.test ? await runCheck() : savedKeyResult(target.analytics));
+      if (current && now.configured && target.test) await runCheck();
     } catch (cause) {
       if (mine === generation.current) setProblem(errorText(cause));
-      keySaved(target.analytics, via, keySaveFailure(cause));
     } finally {
       busyRef.current = false;
       setBusy(null);
@@ -283,7 +275,6 @@ export function KeyRow({
       setReplacing(false);
       setDraft("");
       onSaved?.(target.saved(status).configured);
-      keyRemoved(target.analytics, via);
     } catch (cause) {
       setProblem(errorText(cause));
     } finally {
@@ -346,7 +337,7 @@ export function KeyRow({
       {input}
       {target.href && (
         <p className="text-[13px] leading-[18px] text-ink-secondary">
-          <a href={target.href} target="_blank" rel="noopener noreferrer" onClick={() => { if (via === "settings") target.settingsEvent?.("get_key"); }} className="text-accent-text hover:underline focus-visible:underline">
+          <a href={target.href} target="_blank" rel="noopener noreferrer" className="text-accent-text hover:underline focus-visible:underline">
             {t("keys.row.getKey")}
           </a>
         </p>
@@ -482,7 +473,7 @@ export function KeyRow({
             {(fieldShown && target.href && !settings) || (!fieldShown && saved.configured && target.test) ? (
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                 {fieldShown && target.href && !settings && (
-                  <a href={target.href} target="_blank" rel="noopener noreferrer" onClick={() => { if (via === "settings") target.settingsEvent?.("get_key"); }} className="inline-flex items-center gap-1 font-medium text-accent-text hover:underline">
+                  <a href={target.href} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-medium text-accent-text hover:underline">
                     {t("keys.row.getKey")}
                     <ExternalLink size={11} aria-hidden="true" />
                   </a>

@@ -5,7 +5,6 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
 import { suggestedLocalName } from "@/lib/places";
 
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("./cloud-buy/CloudMascotScene", () => ({ CloudMascotScene: () => null }));
 const { NewLocalFromMenu, RailSheet } = await import("./PlaceAddSheet");
 

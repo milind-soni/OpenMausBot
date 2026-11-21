@@ -202,9 +202,9 @@ export function startCloudConnectedApps(options: CloudConnectedAppsOptions): Clo
 }
 
 let cloudHome: CloudConnectedApps | null = null;
-/** The connected-apps service a Cloud home and a Team Cloud's members register with: the built server uses OpenMausBot's;
- * from source (development, tests) only an explicit OMB_COMPOSIO_BROKER_URL. "" for none. */
-export const cloudConnectedAppsBrokerUrl = (): string => managedComposioBrokerUrl(process.env.OMB_COMPOSIO_BROKER_URL, !import.meta.url.endsWith(".ts"));
+/** The connected-apps service a Cloud home and a Team Cloud's members register with: only an explicit
+ * OMB_COMPOSIO_BROKER_URL, none by default. "" for none. */
+export const cloudConnectedAppsBrokerUrl = (): string => managedComposioBrokerUrl(process.env.OMB_COMPOSIO_BROKER_URL);
 
 /** A Cloud home's plan includes the connected-apps service, so it registers itself. */
 export function startCloudHomeConnectedApps(input: { cloudHome: boolean; dataDir: string; apply: CloudConnectedAppsOptions["apply"]; cloudGrant?: string; ownKey?: () => boolean }): void {

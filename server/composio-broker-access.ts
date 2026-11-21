@@ -3,9 +3,9 @@
 // them from the environment). `composio.ts` re-exports these.
 import { z } from "zod";
 
-import { managedComposioBrokerOff } from "../electron/managed-composio.mjs";
+import { managedComposioBrokerOff, managedComposioBrokerUrl } from "../electron/managed-composio.mjs";
 
-export { managedComposioBrokerOff };
+export { managedComposioBrokerOff, managedComposioBrokerUrl };
 
 let managedBrokerAccess: { url: string; token: string } | null | undefined;
 

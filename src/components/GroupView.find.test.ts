@@ -16,7 +16,6 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false }, host: { packaged: true, platform: "other" }, localComputer: { available: false, reasonCode: "x", message: "" } }, ready: true }),
   useCaptionChrome: () => ({}),
 }));
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
 const { GroupView } = await import("./GroupView");
 const { requestChatFind } = await import("@/lib/chat-find");

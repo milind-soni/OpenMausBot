@@ -129,7 +129,7 @@ function parent(cells: string[]) {
     const data = mkdtempSync(join(tmpdir(), "omb-registry-bench-data-"));
     try {
       const run = spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", "--expose-gc", fileURLToPath(import.meta.url), "--cell", cell], {
-        env: { ...process.env, HOME: home, USERPROFILE: home, OMB_DATA_DIR: data, OMB_DISABLE_ANNOUNCEMENTS: "1", OMB_DISABLE_MODEL_MANIFEST_FETCH: "1" },
+        env: { ...process.env, HOME: home, USERPROFILE: home, OMB_DATA_DIR: data, OMB_ANNOUNCEMENTS: "0", OMB_DISABLE_MODEL_MANIFEST_FETCH: "1" },
         encoding: "utf8", maxBuffer: 64 * 1024 * 1024,
       });
       const line = run.stdout.split("\n").find((text) => text.startsWith("{\"bots\""));

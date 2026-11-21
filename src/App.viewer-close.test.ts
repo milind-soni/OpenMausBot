@@ -5,12 +5,12 @@ import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { initialState } from "./state/store";
 
+vi.mock("./lib/email-gate", () => ({ emailGateDone: () => true }));
 vi.mock("./state/store", async (original) => ({
   ...await original<typeof import("./state/store")>(),
   StoreProvider: ({ children }: { children: ReactNode }) => children,
   useStore: () => ({ state: { ...initialState, connected: true, hydrated: true }, dispatch: () => {}, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} }),
 }));
-vi.mock("./lib/analytics", () => ({ initAnalytics: () => {}, track: () => {}, emailGateDone: () => true }));
 const { default: App } = await import("./App");
 
 afterEach(() => { vi.unstubAllGlobals(); });

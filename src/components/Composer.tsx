@@ -1,4 +1,3 @@
-import { directMessageSent, roomMessageSent } from "@/lib/product-events";
 import { TeamAudienceLabel } from "./TeamSideSwitch";
 import { useComposerDictation } from "@/lib/use-composer-dictation";
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
@@ -330,6 +329,7 @@ export function Composer({
   const commandPickerOpen = commandCandidates.length > 0;
 
   const mention = mentionQueryAt(text, caret); const teammates = useTeammates(); const viewer = useViewerEmail();
+  const bugReports = state.config?.bugReports === true;
   const candidates = useMemo(() => {
     if (!mention || mention.start === dismissedAt) return [];
     const pool: MentionChoice[] = group
@@ -340,8 +340,8 @@ export function Composer({
       : bots
           .filter((member) => member.id !== bot?.id && !member.hidden && !hiddenFromSidebar(member, viewer))
           .map((member) => ({ id: member.id, name: member.name, bot: member }));
-    return mentionChoicesForQuery([...pool, ...teammateChoices(teammates.people), DEVS_CHOICE], mention.query);
-  }, [mention, dismissedAt, bots, bot?.id, group, members, teammates, viewer]);
+    return mentionChoicesForQuery([...pool, ...teammateChoices(teammates.people), ...(bugReports ? [DEVS_CHOICE] : [])], mention.query);
+  }, [mention, dismissedAt, bots, bot?.id, group, members, teammates, viewer, bugReports]);
   const mentionEveryoneCount = (members ?? []).filter((member) => !member.hidden).length;
   const mentionPickerOpen = candidates.length > 0;
   const commandMotion = useMenuMotion(commandPickerOpen);
@@ -586,7 +586,6 @@ export function Composer({
         ...(points ? { pointed: points.pointed } : {}),
         onError: () => { points?.restore(); restoreDraft(sentDraft); },
       });
-      roomMessageSent(effectiveChannelMode, busy);
     } else if (bot) {
       const points = effectiveChannelMode === "goal" ? null : takePointedChips(threadId);
       const page = effectiveChannelMode === "goal" ? undefined : openPageFor(threadId);
@@ -595,7 +594,6 @@ export function Composer({
         ...(points ? { pointed: points.pointed } : {}), ...(page ? { openPage: page } : {}), ...(followUp ? { followUp } : {}),
         onError: () => { points?.restore(); restoreDraft(sentDraft); },
       });
-      directMessageSent(state.instances, bot.modelSelection?.instanceId, busy && followUp !== "steer");
     }
     setText("");
     setAttachments([]); picks.clear();

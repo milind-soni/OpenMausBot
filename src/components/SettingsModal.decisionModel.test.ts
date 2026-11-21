@@ -8,10 +8,6 @@ beforeAll(() => {
 
 // Pinned to Advanced: these cover the Advanced rail; Simple has its own suite.
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true, setAdvancedMode: () => {} }));
-vi.mock("@/lib/analytics", () => ({
-  analyticsEnabled: () => false,
-  setAnalyticsEnabled: () => {},
-}));
 
 describe("Settings › AI › Routing and extraction", () => {
   it("is a section of AI now, Routing and extraction, and old links land there", async () => {

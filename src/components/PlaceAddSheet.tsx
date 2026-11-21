@@ -7,7 +7,6 @@ import type { CloudSwatch } from "../../electron/cloud-list.mjs";
 import type { RailAddChoices, RailPlace } from "../../electron/cloud-rail.mjs";
 import { EXAMPLE_ADDRESS, parseServerInput } from "../../electron/server-address.mjs";
 import { CONNECT_PROBLEM_KEYS, type ServerProbe, type ServerProbeProblem } from "../../electron/server-probe.mjs";
-import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
 import { CLOUD_LIST_NAME_LIMIT, CLOUD_SWATCH_ORDER, SWATCH_COLOR, swatchFill } from "@/lib/cloud-extra";
 import { useCopyFeedback } from "@/lib/copy-text";
@@ -91,7 +90,6 @@ export function OwnServerLink({ onBack, onConnected, connect = null, start = nul
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!address.trim() || busy || (canProbe && !found)) return;
-    track("rail_add", { step: "link" });
     setBusy(true);
     setFailure(null);
     try {
@@ -206,7 +204,7 @@ export function NewLocalWorkspace({ places, onBack, onDone }: { places: readonly
     setBusy(true); setProblem(null);
     const outcome = await createLocal(shown, color === "slate" ? null : color);
     setBusy(false);
-    if (outcome === "made") { track("rail_add", { step: "local" }); onDone(); return; }
+    if (outcome === "made") { onDone(); return; }
     setProblem(outcome === "taken" ? "taken" : "failed");
   };
   return <form data-place-add="local" className="flex flex-col gap-4 px-[30px] pb-[26px] pt-7" onSubmit={(event) => { event.preventDefault(); void create(); }}>
@@ -255,7 +253,6 @@ export function PlaceAddSheet({ choices, places = [], connect = null, onClose, o
   const [wide, setWide] = useState(false);
   const workspaces = window.ogb?.workspaces;
   const firstCloud = () => {
-    track("rail_add", { step: "cloud" });
     onClose();
     void workspaces?.add?.("cloud").catch(() => {});
   };

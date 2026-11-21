@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot } from "@/state/store";
 import { restoreComposerDraft } from "@/lib/drafts";
 
-const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), track: vi.fn() }));
+const fixture = vi.hoisted(() => ({ dispatch: vi.fn() }));
 const ADDED_CLAUDE = "claude-3f0c2b1e-9d1a-4c55-8a51-0a3a6f1e2b7c";
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
@@ -18,7 +18,6 @@ vi.mock("@/state/store", async (importOriginal) => {
     dispatch: fixture.dispatch,
   }) };
 });
-vi.mock("@/lib/analytics", () => ({ track: fixture.track }));
 // The model picker in Advanced mode's footer reads a store this file does not build.
 vi.mock("./ModelPicker", () => ({ ModelPicker: () => null }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => false }));
@@ -108,7 +107,6 @@ describe("Japanese IME in the real composer", () => {
     expect(fixture.dispatch).toHaveBeenCalledWith(expect.objectContaining({
       type: "send", botId: bot.id, text: "@調査担当",
     }));
-    expect(fixture.track.mock.calls).toEqual([["message_sent", { driver: "claude", queued: false }]]);
   });
 
   it("keeps ordinary slash selection and Shift+Enter working", () => {

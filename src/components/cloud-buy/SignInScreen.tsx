@@ -21,6 +21,7 @@ export function problemLine(problem: CloudSignInProblem, triesLeft: number | nul
     case "two-factor": return t("cloudBuy.signIn.twoFactor");
     case "browser": return t("cloudBuy.signIn.browser");
     case "failed": return t("cloudBuy.signIn.failed");
+    case "not-set-up": return t("cloudAccount.notSetUp");
     case "saved": return t("cloudBuy.signIn.saved");
     case "saved-wait": return t("cloudBuy.signIn.savedWait");
     case "connecting": return t("cloudBuy.signIn.connecting");

@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { Loader2, LogIn } from "lucide-react";
 import { api, useStore } from "@/state/store";
 import { intlLocale, t } from "@/lib/i18n";
-import { engineSignedIn } from "@/lib/product-events";
 import { deviceFlowUnavailable, type DeviceSignInStatus } from "./DeviceSignIn";
 
 function ended(phase: "failed" | "expired"): DeviceSignInStatus {
@@ -32,7 +31,6 @@ export function EngineBrowserSignIn({ instanceId, autoStart = false, onDone, onS
 
   // The sign-in already succeeded: a failed catalog refresh must not read as a failed sign-in.
   const refresh = async () => {
-    engineSignedIn("mistral_vibe", "browser");
     try { await refreshInstances(); } catch {}
     try { await refreshModels(instanceId); } catch {}
     onDone?.(true);

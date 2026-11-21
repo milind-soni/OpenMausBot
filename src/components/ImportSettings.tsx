@@ -4,7 +4,6 @@ import { BookOpen, Check, ChevronDown, Info, Loader2, Plug } from "lucide-react"
 import { useContext, useEffect, useState, type ReactNode } from "react";
 import { SettingRow, SettingsLook, SettingsMark, SettingsRows, Switch } from "./SettingsPrimitives";
 
-import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { importOutcome, localSetupImport, setupImportApi, skillsSummary, toolsSummary, type SetupImportClient } from "@/lib/setup-import";
@@ -206,7 +205,6 @@ function AiAppsImport({ client, local }: { client: SetupImportClient; local: boo
     setStatus("working");
     try {
       const brought = await client.apply(request);
-      track("setup_import_applied", { skills: brought.skills?.added.length ?? 0, tools: brought.tools?.added.length ?? 0 });
       setResult(brought);
       setStatus("idle");
     } catch {

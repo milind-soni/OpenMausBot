@@ -17,7 +17,6 @@ vi.mock("@/state/store", async (importOriginal) => {
     dispatch: fixture.dispatch,
   }) };
 });
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 // The model picker in Advanced mode's footer reads a store this file does not build.
 vi.mock("./ModelPicker", () => ({ ModelPicker: () => null }));
 vi.mock("@/lib/use-slash-skills", () => ({ useSlashSkills: () => [] }));

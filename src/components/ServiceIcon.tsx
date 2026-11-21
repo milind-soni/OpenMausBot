@@ -12,28 +12,17 @@ export interface ToolkitCard {
   categories?: string[];
 }
 
-/** An app's logo, then its site's favicon, then its initial. */
+/** An app's logo from the connection service's catalog, then its initial. */
 export function ServiceIcon({ card, className = "size-11" }: { card: Pick<ToolkitCard, "logo" | "domain" | "label">; className?: string }) {
-  const [stage, setStage] = useState(card.logo ? 0 : card.domain ? 1 : 2);
-  if (stage === 0 && card.logo) {
+  const [failed, setFailed] = useState(false);
+  if (card.logo && !failed) {
     return (
       <img
         src={card.logo}
         alt=""
         loading="lazy"
         className={cn("rounded-xl object-contain", className)}
-        onError={() => setStage(1)}
-      />
-    );
-  }
-  if (stage === 1 && card.domain) {
-    return (
-      <img
-        src={`https://www.google.com/s2/favicons?domain=${card.domain}&sz=64`}
-        alt=""
-        loading="lazy"
-        className={cn("rounded-xl object-contain", className)}
-        onError={() => setStage(2)}
+        onError={() => setFailed(true)}
       />
     );
   }

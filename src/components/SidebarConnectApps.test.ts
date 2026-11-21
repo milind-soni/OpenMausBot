@@ -41,6 +41,13 @@ describe("the Connect apps faces", () => {
     expect(html).not.toContain("data-app-face");
   });
 
+  it("draws the popular apps from bundled glyphs, with no request to a favicon service", () => {
+    const html = renderToStaticMarkup(createElement(SidebarConnectApps));
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("google.com");
+    for (const glyph of ["lucide-mail", "lucide-messages-square", "lucide-notebook-text"]) expect(html).toContain(glyph);
+  });
+
   it("keeps a connected app it cannot draw yet out, and the popular ones in", () => {
     expect(appFaces(["linear"], new Map()).map((face) => face.slug)).toEqual(["gmail", "slack", "notion"]);
   });

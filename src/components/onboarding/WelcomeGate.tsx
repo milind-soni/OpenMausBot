@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { emailGateDone } from "@/lib/analytics";
+import { emailGateDone } from "@/lib/email-gate";
 import { clearWelcomeDraft } from "@/lib/welcome-draft";
 import { hostedMember, LOCAL_VIEWER, welcomeDue, welcomeViewer, type WelcomeViewer } from "@/lib/onboarding";
 import { api, useStore } from "@/state/store";

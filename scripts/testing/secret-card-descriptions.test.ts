@@ -14,7 +14,6 @@ import { setLocale } from "../../src/lib/i18n";
 import type { Message } from "../../src/state/store";
 
 vi.mock("@/state/store", () => ({ api: vi.fn(), useStore: () => ({ dispatch: vi.fn() }) }));
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
 beforeEach(() => vi.stubGlobal("window", {}));
 afterEach(() => {

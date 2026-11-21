@@ -8,8 +8,6 @@ import { setLocale } from "@/lib/i18n";
 import { ADVANCED_MODE_KEY, readAdvancedMode, setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { SIMPLE_MODE_PROMPT_KEY, simpleModePromptSeen } from "@/lib/simple-mode-prompt";
 
-const analytics = vi.hoisted(() => ({ track: vi.fn() }));
-vi.mock("@/lib/analytics", () => analytics);
 const { SimpleModePrompt } = await import("./SimpleModePrompt");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -22,7 +20,6 @@ const show = async () => { await act(async () => { root.render(createElement(Sim
 const key = async (name: string, shiftKey = false) => {
   await act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: name, shiftKey, bubbles: true, cancelable: true })); });
 };
-const events = () => analytics.track.mock.calls.filter(([event]) => event === "simple_mode_prompt").map(([, props]) => props);
 
 const memoryStorage = () => {
   const values = new Map<string, string>();
@@ -32,7 +29,6 @@ const memoryStorage = () => {
 beforeEach(() => {
   setLocale("en");
   vi.stubGlobal("localStorage", memoryStorage());
-  analytics.track.mockReset();
   onClose.mockReset();
   opener = document.createElement("button");
   document.body.append(opener);
@@ -84,7 +80,6 @@ describe("the Simple mode popup", () => {
     expect(readAdvancedMode()).toBe(true);
     expect(app()).toBe("advanced");
     expect(toggle().getAttribute("aria-checked")).toBe("false");
-    expect(events()).toEqual([{ action: "toggled", mode: "simple" }, { action: "toggled", mode: "advanced" }]);
     expect(onClose, "flipping never closes it").not.toHaveBeenCalled();
   });
 
@@ -105,7 +100,6 @@ describe("the Simple mode popup", () => {
     expect(onClose).toHaveBeenCalledOnce();
     expect(simpleModePromptSeen()).toBe(true);
     expect(localStorage.getItem(SIMPLE_MODE_PROMPT_KEY)).toBe("1");
-    expect(events()).toEqual([{ action: "closed", mode: "simple" }]);
   });
 
   it("keeps the keyboard inside while it is open, and gives focus back when it closes", async () => {

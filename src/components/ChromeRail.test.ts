@@ -3,7 +3,6 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root | null = null;
 afterEach(async () => { await act(async () => root?.unmount()); root = null; document.body.innerHTML = ""; vi.unstubAllGlobals(); });

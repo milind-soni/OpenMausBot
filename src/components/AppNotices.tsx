@@ -4,11 +4,10 @@ import type { CloudAccountState } from "../../electron/cloud-account.mjs";
 import type { CloudOffer } from "../../electron/cloud-home.mjs";
 import { api, useStore } from "@/state/store";
 import { APP_REPOSITORY, appVersion } from "@/lib/app-links";
-import { track } from "@/lib/analytics";
 import { announcementConditions, announcementPlan, announcementPlatform, announcementSurface, markLaunchAnnouncement, pickAnnouncement, providersRestricted, rememberCardSeen, rememberSponsorDay,
-  reportAnnouncement, SPONSOR_CARDS_FOR_TEAM_MEMBERS, useAnnouncementCards, type SeenRecord } from "@/lib/announcements";
+  SPONSOR_CARDS_FOR_TEAM_MEMBERS, useAnnouncementCards, type SeenRecord } from "@/lib/announcements";
 import { boatOfferRuns } from "@/lib/boat-offer";
-import { modelgoOfferable, reportModelgoOffer } from "@/lib/modelgo-offer";
+import { modelgoOfferable } from "@/lib/modelgo-offer";
 import { brandStatus } from "@/lib/brand";
 import { buyOfferAllowed, cloudNoticeKind, cloudPlanView, cloudTrialNotice, cloudTrialView, offerTrialDays } from "@/lib/cloud-plan";
 import { jobRoutine, useCloudIntent } from "@/lib/cloud-intent";
@@ -16,36 +15,36 @@ import { CLOUD_INTENT_GIVEN, cloudSetupStage } from "@/lib/cloud-setup";
 import { cornerPopupWaits, firstChatQuiet, firstReplyPending } from "@/lib/corner-popup";
 import { ANNOUNCEMENT_NOTICE, BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, dismissNotices, GROK_MOVE_NOTICE, introShown, introStage, launchNotice, markLaunchNotice, MODELGO_OFFER_NOTICE, nextNotice, noticeSeen, PHONE_UPDATE_NOTICE, phoneUpdateHint, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, SIMPLE_MODE_NOTICE, STAR_NOTICE, TEAMS_NOTICE, TWO_PLACES_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, WHATS_NEW_NOTICE } from "@/lib/notices";
 import { rememberNoticeSeen } from "@/lib/announcement-history";
-import { reportTeams, teamsAction } from "@/lib/teams-whats-new";
+import { teamsAction } from "@/lib/teams-whats-new";
 import { useTwoPlaces } from "@/lib/two-places";
 import { SIMPLE_ONLY } from "@/lib/simple-only";
 import { useAdvancedBackDue, useNewLookDue } from "@/lib/new-look";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useSimpleModePromptSeen } from "@/lib/simple-mode-prompt";
-import { reportWhatsNew, WHATS_NEW_SOURCES, whatsNewAudience, whatsNewView, type WhatsNewAction, type WhatsNewSlide } from "@/lib/whats-new";
+import { WHATS_NEW_SOURCES, whatsNewAudience, whatsNewView } from "@/lib/whats-new";
 import { cloudSignInDue, onboardingCloudOffered, welcomeFinishedThisLaunch, type WelcomeViewer } from "@/lib/onboarding";
 import { launchDialogShown, markLaunchDialog } from "@/lib/launch-dialogs";
 import { useUpdaterState } from "@/lib/updater";
 import { phonePairingSettingsAction } from "@/lib/phone-pairing";
 import { activeLocale, t } from "@/lib/i18n";
 import { AnnouncementCard, announcementPlaceAction } from "./AnnouncementCard";
-import { BoatOfferCard, reportBoatOffer, type BoatOfferAction } from "./BoatOffer";
+import { BoatOfferCard } from "./BoatOffer";
 import { engineReady } from "./EngineLibrary";
-import { ModelgoOfferCard, type ModelgoCardAction } from "./ModelgoOffer";
+import { ModelgoOfferCard } from "./ModelgoOffer";
 import { CLOUD_NOTICE_CARD, cloudNoticeStep, CloudNoticeCard } from "./CloudNotice";
 import { CloudTrialIntroCard } from "./CloudTrialIntro";
 import { useMoveQuiet } from "./CloudSendStrip";
 import { CloudTrialNoticeCard, useCloudPlanSnapshot } from "./CloudTrialNotice";
-import { GrokMovePopup, reportGrokMovePopup, type GrokMovePopupAction } from "./GrokMovePopup";
+import { GrokMovePopup, type GrokMovePopupAction } from "./GrokMovePopup";
 import { GrokMoveDialog } from "./lazy-screens";
 import { LinkButton, NoticeCard, NoticeToast, NotNowButton } from "./NoticeCard";
 import { useDesktopNotices, useOtherDialogOpen } from "./notice-dialogs";
 import { localDesktopPage } from "./onboarding/WelcomeGate";
 import { UpdatesConsentDialog, updatesConsentBridge, useUpdatesConsent } from "./UpdatesConsent";
 import { useMausBotWelcomeDue } from "./MausBotWelcome";
-import { NewLookNotice, reportNewLook } from "./NewLookNotice";
+import { NewLookNotice } from "./NewLookNotice";
 import { PhoneUpdateCard, phonesToTell, useRetiredLinkPhones } from "./PhoneUpdateNotice";
-import { reportSimpleModePrompt, SimpleModePrompt } from "./SimpleModePrompt";
+import { SimpleModePrompt } from "./SimpleModePrompt";
 import { TwoPlacesCard } from "./TwoPlacesCard";
 import { TeamsPopup } from "./whats-new/TeamsPopup";
 import { WhatsNewPopup } from "./whats-new/WhatsNewPopup";
@@ -281,7 +280,6 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     if (shownKey === TEAMS_NOTICE || shownKey === GROK_MOVE_NOTICE || shownKey === SIMPLE_MODE_NOTICE || shownKey === WHATS_NEW_NOTICE || shownKey === UPDATES_CONSENT_NOTICE) markLaunchDialog("notices");
     if (shownKey === CLOUD_INTRO) {
       setIntroOpen(true);
-      track("cloud_card_shown", { variant: view?.kind === "signed-out" ? "signed_out" : "free" });
       const patch = introShown(record, now());
       if (patch) void api("/api/config", { method: "PUT", body: JSON.stringify(patch) }).then(config => dispatch({ type: "configStatus", config })).catch(() => {});
     } else if (notice === CLOUD_TRIAL_NOTICE && trialOpen !== shownKey) {
@@ -289,22 +287,16 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
       void planBridge?.noticeSeen?.().catch(() => {});
     } else if (shownKey === SIMPLE_MODE_NOTICE && !simpleShown) {
       setSimpleShown(true);
-      if (SIMPLE_ONLY || advancedBack) reportNewLook("shown", advancedBack);
-      else reportSimpleModePrompt("shown");
     } else if (shownKey === BOAT_OFFER_NOTICE && !boatShown) {
       setBoatShown(true);
-      reportBoatOffer("shown", "card");
     } else if (shownKey === MODELGO_OFFER_NOTICE && !modelgoShown) {
       setModelgoShown(true);
-      reportModelgoOffer("shown", "popup");
     } else if (notice === ANNOUNCEMENT_NOTICE && announcement && announcementShown !== announcement.id) {
       setAnnouncementShown(announcement.id);
       markLaunchAnnouncement(announcement.id);
-      reportAnnouncement(announcement, "shown");
       if (announcement.kind === "sponsor") rememberSponsorDay(seenRecord, now(), remembering);
     } else if (shownKey === GROK_MOVE_NOTICE && !grokShown) {
       setGrokShown(true);
-      reportGrokMovePopup("shown");
     }
   }, [shownKey]);
 
@@ -320,7 +312,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
 
   if (notice === GROK_MOVE_NOTICE) {
     const done = (action: GrokMovePopupAction) => {
-      reportGrokMovePopup(action); close(); save(GROK_MOVE_NOTICE);
+      close(); save(GROK_MOVE_NOTICE);
       void desktop?.seen(GROK_MOVE_NOTICE).catch(() => {});
       if (action === "start") setGrokOpen(true);
     };
@@ -330,7 +322,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   if (notice === TEAMS_NOTICE) {
     const action = teamsAction({ team: state.config?.team, viewer, account, canAddCloud: Boolean(bridge) });
     const done = () => { close(); rememberNoticeSeen(TEAMS_NOTICE, record, { team, desktop, saved: config => dispatch({ type: "configStatus", config }) }); };
-    return <TeamsPopup action={action} onStep={step => reportTeams(step, action)} onDone={done} onStart={() => dispatch({ type: "openCloudAdd", source: WHATS_NEW_SOURCES.team })} />;
+    return <TeamsPopup action={action} onDone={done} onStart={() => dispatch({ type: "openCloudAdd", source: WHATS_NEW_SOURCES.team })} />;
   }
 
   if (notice === PHONE_UPDATE_NOTICE && retiredPhones?.length) {
@@ -344,9 +336,8 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   }
 
   if (notice === WHATS_NEW_NOTICE && whatsNew && desktop) {
-    const report = (action: WhatsNewAction, slide: WhatsNewSlide) => reportWhatsNew(action, slide, whatsNew);
     const done = () => { close(); save(WHATS_NEW_NOTICE); void desktop.seen(WHATS_NEW_NOTICE).catch(() => {}); };
-    return <WhatsNewPopup view={whatsNew} report={report} onDone={done} onBuy={slide => dispatch({ type: "openCloudAdd", source: WHATS_NEW_SOURCES[slide] })} />;
+    return <WhatsNewPopup view={whatsNew} onDone={done} onBuy={slide => dispatch({ type: "openCloudAdd", source: WHATS_NEW_SOURCES[slide] })} />;
   }
 
   if (notice === UPDATES_CONSENT_NOTICE && consent.state) {
@@ -356,13 +347,13 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
       onNo={() => { done(); void consent.choose("declined").catch(() => {}); }} />;
   }
   if (notice === CLOUD_INTRO && offer) {
-    const done = (action: string) => { track("cloud_card_action", { action }); close(); save(CLOUD_INTRO); };
+    const done = () => { close(); save(CLOUD_INTRO); };
     return <CloudTrialIntroCard offer={offer}
-      onStart={() => { done("start"); dispatch({ type: "openCloudAdd", source: "app_card" }); }}
-      onHowTo={() => { done("howto"); dispatch({ type: "cloudHowTo", open: true }); }}
-      onSignIn={view?.kind === "signed-out" ? () => { track("cloud_card_action", { action: "signin" }); close(); dispatch({ type: "openCloudAdd", source: "app_card", signIn: true }); } : undefined}
-      onNotNow={() => { done("not_now"); setToast(t("cloudIntro.later")); }}
-      onDismiss={() => { done("close"); setToast(t("cloudIntro.later")); }} />;
+      onStart={() => { done(); dispatch({ type: "openCloudAdd", source: "app_card" }); }}
+      onHowTo={() => { done(); dispatch({ type: "cloudHowTo", open: true }); }}
+      onSignIn={view?.kind === "signed-out" ? () => { close(); dispatch({ type: "openCloudAdd", source: "app_card", signIn: true }); } : undefined}
+      onNotNow={() => { done(); setToast(t("cloudIntro.later")); }}
+      onDismiss={() => { done(); setToast(t("cloudIntro.later")); }} />;
   }
   if (notice === CLOUD_TRIAL_NOTICE && trial) {
     const shown = cloudTrialView(trial, plan?.credit);
@@ -378,31 +369,31 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     return <CloudNoticeCard kind={kind} busy={busy} failed={failed} onAction={act} onNotNow={() => { close(); save(CLOUD_NOTICE_CARD[kind].dismissed); }} />;
   }
   if (notice === TWO_PLACES_NOTICE && two.suggest) {
-    const { key, kind } = two.suggest;
+    const { key } = two.suggest;
     return <TwoPlacesCard key={key} suggest={two.suggest}
-      onBring={() => { track("two_places_card", { action: "bring", kind }); return two.accept(key).then(close); }}
-      onDismiss={() => { track("two_places_card", { action: "not_now", kind }); two.dismiss(key); close(); }} />;
+      onBring={() => two.accept(key).then(close)}
+      onDismiss={() => { two.dismiss(key); close(); }} />;
   }
   if (notice === PRODUCT_HUNT_NOTICE) {
-    return <ProductHuntCard onDone={action => { track("product_hunt_card", { action }); close(); save(PRODUCT_HUNT_NOTICE); }} />;
+    return <ProductHuntCard onDone={() => { close(); save(PRODUCT_HUNT_NOTICE); }} />;
   }
   if (notice === BOAT_OFFER_NOTICE) {
-    const done = (action: BoatOfferAction) => {
-      reportBoatOffer(action, "card"); close(); save(BOAT_OFFER_NOTICE);
+    const done = () => {
+      close(); save(BOAT_OFFER_NOTICE);
       void desktop?.seen(BOAT_OFFER_NOTICE).catch(() => {});
     };
     return <BoatOfferCard onDone={done} />;
   }
   if (notice === MODELGO_OFFER_NOTICE) {
-    const done = (action: ModelgoCardAction) => {
-      reportModelgoOffer(action, "popup"); close(); save(MODELGO_OFFER_NOTICE);
+    const done = () => {
+      close(); save(MODELGO_OFFER_NOTICE);
       void desktop?.seen(MODELGO_OFFER_NOTICE).catch(() => {});
     };
     return <ModelgoOfferCard onDone={done} />;
   }
   if (notice === ANNOUNCEMENT_NOTICE && announcement) {
-    const done = (action: "primary" | "secondary" | "close") => {
-      reportAnnouncement(announcement, action); close(); rememberCardSeen(seenRecord, announcement.id, remembering);
+    const done = () => {
+      close(); rememberCardSeen(seenRecord, announcement.id, remembering);
     };
     return <AnnouncementCard key={announcement.id} card={announcement} onDone={done} open={place => dispatch(announcementPlaceAction(place))} />;
   }

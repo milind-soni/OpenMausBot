@@ -21,7 +21,7 @@ const mount = async (element: ReturnType<typeof createElement>) => {
   roots.push(root);
   await act(async () => { root.render(element); });
 };
-const showPopup = () => mount(createElement(WhatsNewPopup, { view: VIEW, report: () => {}, onBuy: () => {}, onDone: done }));
+const showPopup = () => mount(createElement(WhatsNewPopup, { view: VIEW, onBuy: () => {}, onDone: done }));
 
 beforeEach(() => { setLocale("en"); roots = []; done.mockClear(); });
 afterEach(async () => { for (const root of roots) await act(async () => root.unmount()); document.body.replaceChildren(); vi.useRealTimers(); });

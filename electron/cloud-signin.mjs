@@ -1,5 +1,7 @@
 // The email-code sign-in the phone apps use (openmaus-cloud server/cloud-app-signin.ts), typed into the app: it ends in
 // the same omc_ device token as the browser approval. The attempt and the token stay in main; the page sees outcomes only.
+import { CLOUD_NOT_SET_UP } from "./managed-cloud.mjs";
+
 export const SIGN_IN_START = "/api/cloud/app/sign-in/start";
 export const SIGN_IN_VERIFY = "/api/cloud/app/sign-in/verify";
 /** The Admin's code tries per email (Better Auth emailOTP `allowedAttempts`, server/auth.ts); the sixth answer is "expired". */
@@ -46,6 +48,7 @@ const said = (error, status, code) => !error?.opaque && error?.status === status
 const noEmailRoute = error => [404, 405, 501].includes(error?.status) && (error.opaque || error.code === "unsupported" || error.code === "not_found" || error.code === undefined);
 
 export function startFailure(error) {
+  if (error?.code === CLOUD_NOT_SET_UP) return CLOUD_NOT_SET_UP;
   if (said(error, 403, "sso")) return "sso";
   if (said(error, 429)) return "rate-limited";
   if (noEmailRoute(error)) return "browser";

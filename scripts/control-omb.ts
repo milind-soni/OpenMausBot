@@ -163,7 +163,7 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
     // login shell's PATH, finding a developer's own engine CLIs that CI lacks.
     OMB_TEST_SEALED_PATH: "1",
     // The project's live announcement cards would sit over the corner the UI tests click in.
-    OMB_DISABLE_ANNOUNCEMENTS: "1",
+    OMB_ANNOUNCEMENTS: "0",
     // The bundled model list, as in-process tests use: a downloaded one that differs makes the engines read their status
     // again mid-boot, so what a fixture probes would depend on what is published on main.
     OMB_DISABLE_MODEL_MANIFEST_FETCH: "1",

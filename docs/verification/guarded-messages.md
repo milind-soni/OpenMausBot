@@ -150,7 +150,7 @@ shared task.
 Run the operator-policy and Full/Ask workflow checks:
 
 ```sh
-pnpm exec vitest run server/enterprise.test.ts server/hosted-access.test.ts server/full-access-workflows.e2e.test.ts server/store.test.ts
+pnpm exec vitest run server/enterprise.test.ts server/full-access-workflows.e2e.test.ts server/store.test.ts
 ```
 
 The hosted-access tests exercise the real hosted authorization route with an

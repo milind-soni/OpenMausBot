@@ -9,7 +9,7 @@ import en from "./en.json";
  * render must exist in every language, so a translated window never falls back to English (a German "Sign out"). */
 const SETTINGS_DIR = "src/components/settings";
 const SHARED = [
-  "SettingsPrimitives.tsx", "NotificationSettingsRows.tsx", "AppSettingsRows.tsx", "AnalyticsRow.tsx", "OpenAtLoginRow.tsx",
+  "SettingsPrimitives.tsx", "NotificationSettingsRows.tsx", "AppSettingsRows.tsx", "OpenAtLoginRow.tsx",
   "TalkShortcutRow.tsx", "SidebarProfileMenu.tsx", "PlaceLookCard.tsx", "DefaultBotControls.tsx", "PhoneDevicesSection.tsx",
 ].map((file) => `src/components/${file}`);
 

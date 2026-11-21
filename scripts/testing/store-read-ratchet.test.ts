@@ -197,9 +197,6 @@ const READS: Record<string, number> = {
   "src/components/usage/UsageInsights.tsx": 1,
   "src/components/widget/WidgetMessage.tsx": 1,
   "src/hooks/use-read-shown-chat.ts": 1,
-  "src/hooks/use-usage-snapshot.ts": 1,
-  "src/lib/app-load.ts": 1,
-  "src/lib/connect-ai-events.ts": 1,
   "src/state/store-ref.ts": 1,
   "src/state/store-select.ts": 1,
 };

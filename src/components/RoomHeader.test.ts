@@ -20,7 +20,6 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => {
     useCaptionChrome: () => fixture.chrome ?? original.captionChrome("native"),
   };
 });
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
 const { GroupView } = await import("./GroupView");
 const { RoomHeader } = await import("./RoomHeader");

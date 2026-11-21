@@ -9,7 +9,7 @@ export type ConfigStatusFrame = Pick<
 /** What the server says about the place itself. Its frames carry them as GET /api/config does, one left out meaning
  * unset (planTurns off Starter, routinesUnreadable once the routines read again); a frame with none of them (an older
  * server's) says nothing about them. */
-const PLACE_FIELDS = ["computerName", "newBots", "signIn", "membership", "cloudStarter", "waitingForRoom", "planTurns", "decisions", "safetyFloor", "routinesUnreadable", "botLimit"];
+const PLACE_FIELDS = ["computerName", "newBots", "signIn", "membership", "cloudStarter", "waitingForRoom", "planTurns", "decisions", "safetyFloor", "routinesUnreadable", "botLimit", "bugReports"];
 
 function placeFields(frame: object, held: ConfigStatus | null | undefined): Partial<ConfigStatus> {
   const carried = PLACE_FIELDS.some((field) => field in frame);

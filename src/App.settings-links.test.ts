@@ -7,12 +7,12 @@ import { initialState, type Action, type AppState } from "./state/store";
 
 const state: AppState = { ...initialState, connected: true, hydrated: true };
 let dispatched: Action[] = [];
+vi.mock("./lib/email-gate", () => ({ emailGateDone: () => true }));
 vi.mock("./state/store", async (original) => ({
   ...await original<typeof import("./state/store")>(),
   StoreProvider: ({ children }: { children: unknown }) => children,
   useStore: () => ({ state, dispatch: (action: Action) => { dispatched.push(action); }, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} }),
 }));
-vi.mock("./lib/analytics", () => ({ initAnalytics: () => {}, track: () => {}, emailGateDone: () => true }));
 const { default: App } = await import("./App");
 
 let fromMain: ((section?: string) => void) | null = null;

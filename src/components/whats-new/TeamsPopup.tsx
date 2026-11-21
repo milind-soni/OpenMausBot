@@ -5,7 +5,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { MausColor } from "@/lib/mascot";
 import { reducedMotion } from "@/lib/onboarding";
-import type { TeamsAction, TeamsStep } from "@/lib/teams-whats-new";
+import type { TeamsAction } from "@/lib/teams-whats-new";
 import type { LocaleKey } from "@/locales";
 import { TEAM_PLANS_URL } from "@/lib/app-links";
 import { CLOSE, PRIMARY, QUIET, SHEET } from "../cloud-buy/parts";
@@ -49,16 +49,13 @@ function TeamsPicture() {
  * "MausBot is better with your team": once per person after this release (AppNotices), and again from Announcements.
  * Focus starts at its main button and stays inside; Escape, ×, a click outside and every button end it.
  */
-export function TeamsPopup({ action, onStep, onStart, onDone }: {
+export function TeamsPopup({ action, onStart, onDone }: {
   action: TeamsAction;
-  onStep: (step: TeamsStep) => void;
   /** Start a team in the app's own Add a Cloud (action.inApp). */
   onStart: () => void;
   onDone: () => void;
 }) {
-  const end = (step: TeamsStep) => { onStep(step); onDone(); };
   useEffect(() => {
-    onStep("seen");
     const opener = document.activeElement as HTMLElement | null, mine = document.querySelector(TEAMS_POPUP);
     mine?.querySelector<HTMLElement>("[data-primary] button, button[data-primary]")?.focus();
     return () => {
@@ -70,7 +67,7 @@ export function TeamsPopup({ action, onStep, onStart, onDone }: {
     const onKey = (event: KeyboardEvent) => {
       const popup = document.querySelector(TEAMS_POPUP), focus = document.activeElement;
       if (!popup || (!popup.contains(focus) && !focusLost(focus))) return;
-      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); end("close"); return; }
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onDone(); return; }
       if (event.key !== "Tab") return;
       const list = [...popup.querySelectorAll<HTMLElement>("button:not([disabled])")];
       if (!list.length) return;
@@ -83,14 +80,14 @@ export function TeamsPopup({ action, onStep, onStart, onDone }: {
   });
 
   const main = action.kind === "invite"
-    ? <LinkButton url={action.url} label={t("teamsNew.invite")} className={cn(PRIMARY, "ui-button-lg gap-1.5")} onOpened={() => end("invite")} />
+    ? <LinkButton url={action.url} label={t("teamsNew.invite")} className={cn(PRIMARY, "ui-button-lg gap-1.5")} onOpened={onDone} />
     : action.kind === "got-it"
-      ? <button type="button" className={cn(PRIMARY, "ui-button-lg")} onClick={() => end("got_it")}>{t("teamsNew.gotIt")}</button>
+      ? <button type="button" className={cn(PRIMARY, "ui-button-lg")} onClick={onDone}>{t("teamsNew.gotIt")}</button>
       : action.inApp
-        ? <button type="button" className={cn(PRIMARY, "ui-button-lg")} onClick={() => { onStart(); end("start_team"); }}>{t("teamsNew.start")}</button>
-        : <LinkButton url={action.url} label={t("teamsNew.start")} className={cn(PRIMARY, "ui-button-lg gap-1.5")} onOpened={() => end("start_team")} />;
+        ? <button type="button" className={cn(PRIMARY, "ui-button-lg")} onClick={() => { onStart(); onDone(); }}>{t("teamsNew.start")}</button>
+        : <LinkButton url={action.url} label={t("teamsNew.start")} className={cn(PRIMARY, "ui-button-lg gap-1.5")} onOpened={onDone} />;
 
-  return <div className="ui-scrim fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6" onMouseDown={event => { if (event.target === event.currentTarget) end("close"); }}>
+  return <div className="ui-scrim fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6" onMouseDown={event => { if (event.target === event.currentTarget) onDone(); }}>
     <div role="dialog" aria-modal="true" aria-labelledby={TITLE} data-teams-popup={action.kind} tabIndex={-1}
       className={cn(SHEET, "teams-card-in relative flex max-h-full w-full max-w-[460px] flex-col overflow-hidden outline-none")}>
       <div className="flex min-h-0 flex-col overflow-y-auto">
@@ -107,12 +104,12 @@ export function TeamsPopup({ action, onStep, onStart, onDone }: {
           <p data-teams-price className="mt-3 text-[13px] leading-[18px] text-ink-secondary">{t("teamsNew.price")}</p>
           <div className="mt-5 flex flex-wrap items-center gap-3">
             <div data-primary="">{main}</div>
-            <LinkButton url={TEAM_PLANS_URL} label={t("teamsNew.seePlans")} className={cn(QUIET, "ui-button-lg gap-1.5")} onOpened={() => end("see_team_plans")} />
-            {action.kind !== "got-it" && <NotNowButton onClick={() => end("not_now")} />}
+            <LinkButton url={TEAM_PLANS_URL} label={t("teamsNew.seePlans")} className={cn(QUIET, "ui-button-lg gap-1.5")} onOpened={onDone} />
+            {action.kind !== "got-it" && <NotNowButton onClick={onDone} />}
           </div>
         </div>
       </div>
-      <button type="button" onClick={() => end("close")} aria-label={t("cloudAdd.close")}
+      <button type="button" onClick={onDone} aria-label={t("cloudAdd.close")}
         className={cn(CLOSE, "absolute end-3 top-3 z-10 bg-app/80 backdrop-blur-sm")}><X size={16} /></button>
     </div>
   </div>;

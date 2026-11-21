@@ -18,6 +18,7 @@ const OWN = "https://omb-c-a.fly.dev";
 
 const fixture = vi.hoisted(() => ({ autoUpdater: null, handlers: new Map(), home: "" }));
 
+vi.mock("./desktop-updates.mjs", () => ({ DESKTOP_AUTO_UPDATE: true }));
 vi.mock("electron", () => ({
   app: { isPackaged: true, getPath: () => fixture.home, getVersion: () => "1.0.0", hide: vi.fn() },
   clipboard: { writeText: vi.fn() },
@@ -53,7 +54,7 @@ function mainRule() {
     mainWindow: window,
     environmentsState: { environments: [], activeId: environments.LOCAL_ID },
     cloudAccount: { homeTarget: () => ({ origin: CLOUD }), state: () => ({ status: "connected", account: { id: "a1" } }), isOwnCloud: () => false },
-    rememberedHome: null, savedCloudHomeOrigin, cloudSignInRestored: true,
+    rememberedHome: null, savedCloudHomeOrigin, cloudSignInRestored: true, DESKTOP_AUTO_UPDATE: true,
     // ensureCloudAccount's world: a packaged app, and a sign-in client whose state the test sets.
     app: { isPackaged: true, getPath: () => "/unused", getVersion: () => "1.0.0" }, process: { platform: "darwin", env: {} }, cloudTarget,
     path: { join: (...parts) => parts.join("/") }, os: { hostname: () => "mac" }, shell: {}, safeStorage: {},
@@ -132,7 +133,7 @@ afterEach(() => {
   rmSync(fixture.home, { recursive: true, force: true });
 });
 
-function bridgeFor(origin, { clicked = false, rule = null } = {}) {
+function bridgeFor(origin, { clicked = false, rule = null, updates = true } = {}) {
   let bridge;
   const invoked = [];
   const asked = [];
@@ -147,7 +148,11 @@ function bridgeFor(origin, { clicked = false, rule = null } = {}) {
       contextBridge: { exposeInMainWorld: (_name, value) => { bridge = value; } },
       ipcRenderer: {
         on() {}, removeListener() {}, send() {},
-        sendSync: (channel) => { asked.push(channel); return rule ? rule.offered(loading.event) : undefined; },
+        sendSync: (channel) => {
+          asked.push(channel);
+          if (channel === "update:enabled") return updates;
+          return rule ? rule.offered(loading.event) : undefined;
+        },
         invoke: (...args) => { invoked.push(args); return Promise.resolve({ status: "idle" }); },
       },
     }),
@@ -158,7 +163,7 @@ function bridgeFor(origin, { clicked = false, rule = null } = {}) {
 it("My Cloud's page gets the update bridge, and it restarts the app only on the person's click", async () => {
   const local = bridgeFor(LOCAL);
   expect(Object.keys(local.bridge.updater).sort()).toEqual(["check", "install", "onState", "seen"]);
-  expect(local.asked, "this computer's page has the whole bridge without asking").toEqual([]);
+  expect(local.asked, "this computer's page asks only whether desktop updates are on").toEqual(["update:enabled"]);
   await local.bridge.updater.install();
   expect(local.invoked).toEqual([["update:install"]]);
 
@@ -202,6 +207,15 @@ it("another server's page never gets the update bridge; My Cloud's does, even wh
   expect(has(CLOUD, "cloud")).toBe(false);
 
   expect("updater" in bridgeFor(CLOUD).bridge).toBe(false);
+});
+
+it("with desktop auto-update off, no page gets the update bridge, so Settings shows the plain version row", () => {
+  expect("updater" in bridgeFor(LOCAL, { updates: false }).bridge).toBe(false);
+  const rule = mainRule();
+  rule.context.DESKTOP_AUTO_UPDATE = false;
+  rule.show(page(CLOUD), "cloud");
+  expect(rule.offered({ sender: rule.window.webContents, senderFrame: { url: `${CLOUD}/` } })).toBe(false);
+  expect("updater" in bridgeFor(CLOUD, { rule }).bridge).toBe(false);
 });
 
 it("another Cloud of the person's own gets the update bridge as My Cloud's page does; a server only signed in with their account does not", () => {

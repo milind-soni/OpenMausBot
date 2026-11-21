@@ -2,7 +2,6 @@
 // (server/tunnel.ts). Keep in step with the implementation.
 import type { ControlPlaneClient } from "./control-plane-client.mjs";
 
-export declare const DEFAULT_COMPANION_CONTROL_PLANE_URL: string;
 export declare const COMPANION_CLIENT_INSTANCE_FIELD: string;
 export declare const COMPANION_ACCOUNT_TOKEN_FIELD: string;
 export declare const COMPANION_ACCOUNT_USER_ID_FIELD: string;
@@ -19,7 +18,6 @@ export declare const PHONE_UNUSED_RELEASE_MS: number;
 export type CredentialDocument = Record<string, unknown>;
 
 export declare function resolveCompanionControlPlaneURL(options?: {
-  isPackaged?: boolean;
   environment?: NodeJS.ProcessEnv;
 }): string;
 export declare function companionAccountCleanupPending(credentials: CredentialDocument): boolean;

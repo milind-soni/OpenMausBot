@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ANNOUNCEMENTS_URL, type AnnouncementFeed } from "../../shared/announcements.ts";
 import {
-  ANNOUNCEMENTS_DISABLE_ENV, ANNOUNCEMENTS_RETRY_MS, ANNOUNCEMENTS_TTL_MS, AnnouncementStore, announcementsCachePath, BUNDLED_ANNOUNCEMENTS,
+  ANNOUNCEMENTS_ENABLE_ENV, ANNOUNCEMENTS_RETRY_MS, ANNOUNCEMENTS_TTL_MS, AnnouncementStore, announcementsCachePath, BUNDLED_ANNOUNCEMENTS,
 } from "./feed.ts";
 
 const NOW = Date.parse("2026-12-01T10:00:00Z");
@@ -23,22 +23,24 @@ const answer = (body: unknown, init: ResponseInit = { status: 200 }) => new Resp
 function subject(options: { fetch?: typeof fetch; dir?: string; env?: NodeJS.ProcessEnv; bundled?: AnnouncementFeed } = {}) {
   let time = NOW;
   const log = vi.fn();
-  const store = new AnnouncementStore({ dataDir: options.dir ?? dataDir(), bundled: options.bundled ?? bundled, now: () => time, log, env: options.env ?? {}, fetch: options.fetch });
+  const store = new AnnouncementStore({ dataDir: options.dir ?? dataDir(), bundled: options.bundled ?? bundled, now: () => time, log, env: options.env ?? { [ANNOUNCEMENTS_ENABLE_ENV]: "1" }, fetch: options.fetch });
   return { store, log, advance: (ms: number) => { time += ms; } };
 }
 
-it("bundles the repository's file, and never fetches while switched off", async () => {
+it("bundles the repository's file, and is off unless the server opts in", async () => {
   expect(BUNDLED_ANNOUNCEMENTS.version).toBe(1);
   const fetchMock = vi.fn();
-  const { store } = subject({ fetch: fetchMock, env: { [ANNOUNCEMENTS_DISABLE_ENV]: "1" }, bundled: feed("2026-11-01T00:00:00Z", [card("bundled-card")]) });
-  expect(await store.cardsForPage()).toEqual([]);
-  await store.refresh({ force: true });
+  for (const env of [{}, { [ANNOUNCEMENTS_ENABLE_ENV]: "0" }, { [ANNOUNCEMENTS_ENABLE_ENV]: "true" }]) {
+    const { store } = subject({ fetch: fetchMock, env, bundled: feed("2026-11-01T00:00:00Z", [card("bundled-card")]) });
+    expect(await store.cardsForPage()).toEqual([]);
+    await store.refresh({ force: true });
+    expect(store.disabled).toBe(true);
+  }
   expect(fetchMock).not.toHaveBeenCalled();
-  expect(store.disabled).toBe(true);
 });
 
-it("tests never reach the network: the suite switches it off for every server it starts", () => {
-  expect(process.env[ANNOUNCEMENTS_DISABLE_ENV]).toBe("1");
+it("tests never reach the network: no server the suite starts opts in", () => {
+  expect(process.env[ANNOUNCEMENTS_ENABLE_ENV]).toBeUndefined();
 });
 
 describe("downloading the file", () => {

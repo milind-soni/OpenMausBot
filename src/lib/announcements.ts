@@ -3,14 +3,13 @@
 // here, from what the page already knows, and nothing about the person leaves it. AppNotices shows the card through the
 // notice queue, after every notice someone must act on.
 import { useEffect, useSyncExternalStore } from "react";
-import { track } from "@/lib/analytics";
 import { hintSeen, type OnboardingStatus } from "@/lib/onboarding";
 import { localDay } from "@/lib/notices";
 import type { CloudPlanView } from "@/lib/cloud-plan";
 import type { ManagedPolicySummary } from "@/state/config-status";
 import { api, type AppState } from "@/state/store";
 import {
-  ADMIN_PLACES, audienceMatches, cardPlaces, parseAnnouncementCard, type AnnouncementCard, type AnnouncementFacts, type AnnouncementKind,
+  ADMIN_PLACES, audienceMatches, cardPlaces, parseAnnouncementCard, type AnnouncementCard, type AnnouncementFacts,
   type AnnouncementPlan, type AnnouncementPlatform, type AnnouncementSurface,
 } from "../../shared/announcements";
 
@@ -253,12 +252,4 @@ export function cardsForPerson(list: readonly AnnouncementCard[], context: Omit<
   return list.filter((card) => !(card.starts && Date.parse(card.starts) > now) && Date.parse(card.ends) > now
     && (card.kind !== "sponsor" || context.sponsors) && (context.admin || !cardPlaces(card).some((place) => ADMIN_PLACES.has(place)))
     && audienceMatches(card.audience, context.facts) === true);
-}
-
-export type AnnouncementAction = "shown" | "primary" | "secondary" | "close";
-
-/** One event per card and step, under the same analytics switch as every other event. The id is the card's own, from
- * the public file, the same for everyone. */
-export function reportAnnouncement(card: { id: string; kind: AnnouncementKind }, action: AnnouncementAction): void {
-  track("announcement", { id: card.id, kind: card.kind, action });
 }

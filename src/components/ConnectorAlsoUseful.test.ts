@@ -7,7 +7,6 @@ import { setLocale } from "@/lib/i18n";
 
 const api = vi.hoisted(() => vi.fn());
 vi.mock("@/state/store", () => ({ api }));
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 const { ConnectorAlsoUseful } = await import("./ConnectorAlsoUseful");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

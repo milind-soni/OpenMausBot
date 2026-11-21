@@ -28,7 +28,6 @@ vi.mock("@/state/store", async (importOriginal) => {
 vi.mock("./DesktopCapabilities", () => ({
   useDesktopCapabilities: () => ({ capabilities: { dictation: { available: true, engine: "apple-speech", onDevice: true } }, ready: true }),
 }));
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
 const { CallTargetButton } = await import("./CallView");
 const { requestCallStart } = await import("@/lib/call-start-request");
@@ -38,10 +37,9 @@ const { configureLiveMedia, liveMedia, resetLiveMedia } = await import("@/lib/li
 
 let root: Root;
 let container: HTMLDivElement;
-const onStart = vi.fn();
 const render = () => flushSync(() => root.render(createElement(CallTargetButton, {
   targetId: "atlas", targetName: "Atlas", threadId: "thread-atlas", voices: ["v"],
-  requireExplicitVoices: false, liveCapable: true, placement: "composer", fill: "#8057C8", onStart,
+  requireExplicitVoices: false, liveCapable: true, placement: "composer", fill: "#8057C8",
 })));
 
 beforeEach(() => {
@@ -59,7 +57,6 @@ afterEach(() => {
   setCallMode("turns");
   resetLiveMedia();
   endCall();
-  onStart.mockClear();
   delete window.ogb;
 });
 
@@ -69,14 +66,12 @@ describe("a call started from the composer's + menu", () => {
     flushSync(() => requestCallStart("atlas", "turns"));
     expect(currentCall()).toBe("atlas");
     expect(liveMedia().phase).toBe("idle");
-    expect(onStart).toHaveBeenCalledWith("turns");
     expect(callMode()).toBe("turns");
   });
 
   it("goes Live through the Live media", () => {
     flushSync(() => requestCallStart("atlas", "live"));
     expect(liveMedia()).toMatchObject({ phase: "starting", botId: "atlas", threadId: "thread-atlas" });
-    expect(onStart).toHaveBeenCalledWith("live");
     expect(callMode()).toBe("live");
   });
 
@@ -86,7 +81,6 @@ describe("a call started from the composer's + menu", () => {
     flushSync(() => startCall("atlas"));
     flushSync(() => requestCallStart("atlas", "live"));
     expect(liveMedia().phase).toBe("idle");
-    expect(onStart).not.toHaveBeenCalled();
   });
 
   it("starts nothing while Live is the mode and its line is held on another device, where the button hides", () => {
@@ -97,7 +91,6 @@ describe("a call started from the composer's + menu", () => {
     for (const mode of ["turns", "live"] as const) flushSync(() => requestCallStart("atlas", mode));
     expect(currentCall()).toBeNull();
     expect(liveMedia().phase).toBe("idle");
-    expect(onStart).not.toHaveBeenCalled();
     expect(callMode()).toBe("live");
   });
 });

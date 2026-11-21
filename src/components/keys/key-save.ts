@@ -1,8 +1,6 @@
 // Security: secrets are write-only; GET /api/config returns configured flags and, for admins, the last four characters.
 import { api, type ConfigStatus } from "@/state/store";
 import { t } from "@/lib/i18n";
-import { keyTestResult } from "@/lib/product-events";
-import type { KeyResult } from "@/lib/analytics-allowlist";
 import { PROVIDER_CREDENTIAL_TARGETS } from "../../../shared/credential-request";
 import { keyEntry, type DesktopSlot, type DesktopSlotOptions, type KeyId, type KeyTarget, type TestableProvider } from "./key-catalog";
 
@@ -49,20 +47,19 @@ export function tregVerdict(result: { ok?: unknown; balanceUsd?: unknown; messag
   return `${t("keys.treg.working")}${balance}`;
 }
 
-export interface KeyCheck { result: KeyResult; ok: boolean; text: string }
+export interface KeyCheck { ok: boolean; text: string }
 
 export async function checkKey(provider: TestableProvider): Promise<KeyCheck> {
   const answer = await api("/api/keys/test", { method: "POST", body: JSON.stringify({ provider }) });
-  const result = keyTestResult(answer);
-  if (answer.check === "treg") return { result, ok: answer.ok === true, text: tregVerdict(answer) };
+  if (answer.check === "treg") return { ok: answer.ok === true, text: tregVerdict(answer) };
   if (!answer.ok) {
     const text = answer.reason === "rejected" ? t("keys.testRejected")
       : answer.reason === "unreachable" ? t("keys.testUnreachable")
         : t("keys.testUnexpected", { status: String(answer.status ?? "?") });
-    return { result, ok: false, text };
+    return { ok: false, text };
   }
   const outcome = answer.check === "authentication"
     ? answer.freeTier === true ? `${t("keys.testAuthenticated")}\n${t("keys.testFreeTier")}` : t("keys.testAuthenticated")
     : answer.models?.length ? t("keys.testCatalog", { models: answer.models.join(", ") }) : t("keys.testCatalogNoModels");
-  return { result, ok: true, text: `${t("keys.testSaved")} ${outcome}` };
+  return { ok: true, text: `${t("keys.testSaved")} ${outcome}` };
 }

@@ -1,8 +1,5 @@
 const TOKEN = /^[0-9a-f]{64}$/;
 
-/** OpenMausBot's connected-apps service (cloudflare/composio-broker): the packaged desktop app and a Cloud home use it. */
-export const DEFAULT_MANAGED_COMPOSIO_BROKER_URL = "https://openmausbot-composio.milindsoni201.workers.dev";
-
 /** OMB_COMPOSIO_BROKER=off: nothing reaches the managed service, whatever else is set. */
 export function managedComposioBrokerOff(environment = process.env) {
   return /^(off|0|false|no)$/i.test(environment.OMB_COMPOSIO_BROKER?.trim() ?? "");
@@ -13,11 +10,10 @@ export function ownComposioKey(credentials, environment = process.env) {
   return Boolean((typeof saved === "string" && saved.trim()) || environment.COMPOSIO_API_KEY?.trim());
 }
 
-/** An explicit URL wins; otherwise the default, only for a shipped build, so development and tests never register. */
-export function managedComposioBrokerUrl(configured, shipped) {
+/** Only a broker the person configured with OMB_COMPOSIO_BROKER_URL: none by default. */
+export function managedComposioBrokerUrl(configured) {
   if (managedComposioBrokerOff()) return "";
-  const explicit = typeof configured === "string" ? configured.trim() : "";
-  return normalizeManagedComposioBrokerUrl(explicit || (shipped ? DEFAULT_MANAGED_COMPOSIO_BROKER_URL : ""));
+  return normalizeManagedComposioBrokerUrl(typeof configured === "string" ? configured.trim() : "");
 }
 
 export function normalizeManagedComposioBrokerUrl(value) {
@@ -46,11 +42,10 @@ export function managedComposioChildEnvironment(brokerUrl, credentials, environm
   const next = { ...environment };
   delete next.OMB_COMPOSIO_BROKER_URL;
   delete next.OMB_COMPOSIO_BROKER_TOKEN;
+  const url = managedComposioBrokerOff() ? "" : normalizeManagedComposioBrokerUrl(brokerUrl);
+  if (url) next.OMB_COMPOSIO_BROKER_URL = url;
   const access = managedComposioAccess(brokerUrl, credentials);
-  if (access) {
-    next.OMB_COMPOSIO_BROKER_URL = access.url;
-    next.OMB_COMPOSIO_BROKER_TOKEN = access.token;
-  }
+  if (access) next.OMB_COMPOSIO_BROKER_TOKEN = access.token;
   return next;
 }
 

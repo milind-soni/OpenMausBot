@@ -1,17 +1,12 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
-import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { readAdvancedMode, setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
+import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { markSimpleModePromptSeen } from "@/lib/simple-mode-prompt";
 
 export const SIMPLE_MODE_PROMPT = "[data-simple-mode-prompt]";
 const TITLE = "simple-mode-prompt-title";
-
-export function reportSimpleModePrompt(action: "shown" | "toggled" | "closed", advanced = readAdvancedMode()): void {
-  track("simple_mode_prompt", { action, mode: advanced ? "advanced" : "simple" });
-}
 
 /** Once per browser (AppNotices): a switch for Simple mode that changes the app behind it as it is flipped. Done, ×,
  * Escape and a click outside close it for good. The mode stays in Settings → General. */
@@ -21,13 +16,11 @@ export function SimpleModePrompt({ onClose }: { onClose: () => void }) {
   // Its words stay those it opened with; the switch follows the mode, here or from another tab.
   const [openedSimple] = useState(simple);
   const close = () => {
-    reportSimpleModePrompt("closed", advanced);
     markSimpleModePromptSeen();
     onClose();
   };
   const flip = () => {
     setAdvancedMode(simple);
-    reportSimpleModePrompt("toggled", simple);
   };
 
   useEffect(() => {

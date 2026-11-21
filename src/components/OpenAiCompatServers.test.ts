@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as store from "@/state/store";
 import { BuiltInReplyWait, modelIds, originChanged, OtherOpenAiCompatServers, LmStudioServer, lmStudioBaseUrl } from "./OpenAiCompatServers";
 
-const fixture = vi.hoisted(() => ({ counting: false, values: [] as unknown[], index: 0, api: vi.fn(), track: vi.fn() }));
+const fixture = vi.hoisted(() => ({ counting: false, values: [] as unknown[], index: 0, api: vi.fn() }));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
   return {
@@ -18,7 +18,6 @@ vi.mock("react", async (original) => {
   };
 });
 vi.mock("@/state/store", async (original) => ({ ...await original<typeof import("@/state/store")>(), api: fixture.api }));
-vi.mock("@/lib/analytics", () => ({ track: fixture.track }));
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
@@ -95,15 +94,12 @@ describe("adding another OpenAI-compatible server", () => {
   it.each([
     ["unverified", () => fixture.api.mockResolvedValueOnce({ instances: [] })],
     ["error", () => fixture.api.mockRejectedValueOnce(new store.ApiError(`unreachable https://ada.example.com/v1 ${KEY}`, 502, {}))],
-  ])("reports one custom endpoint key save (%s), with no name, address or key", async (result, answer) => {
+  ])("saves a custom endpoint key once (%s)", async (_result, answer) => {
     fixture.values = [];
-    fixture.track.mockReset();
     fixture.api.mockReset();
     answer();
     await add();
     expect(fixture.api).toHaveBeenCalledExactlyOnceWith("/api/instances/openai-compat", expect.objectContaining({ method: "POST" }));
-    expect(fixture.track.mock.calls).toEqual([["api_key_saved", { provider: "custom_endpoint", via: "settings", result }]]);
-    expect(JSON.stringify(fixture.track.mock.calls)).not.toMatch(/ada|example|ZZtest|SECRET/);
   });
 
   it("fills in Google Gemini, so only the AI Studio key is left to paste", async () => {
@@ -229,7 +225,6 @@ describe("LM Studio and Bionic setup", () => {
   it("adds LM Studio with the placeholder key when the token is empty", async () => {
     fixture.values = [];
     fixture.api.mockReset();
-    fixture.track.mockReset();
     fixture.api.mockResolvedValueOnce({ instances: [] });
     vi.stubGlobal("window", {});
     vi.spyOn(store, "useStore").mockReturnValue({
@@ -250,7 +245,6 @@ describe("LM Studio and Bionic setup", () => {
       method: "POST",
       body: JSON.stringify({ displayName: "LM Studio", url: "http://127.0.0.1:1234/v1", key: "lm-studio", catalog: "lmstudio" }),
     });
-    expect(JSON.stringify(fixture.track.mock.calls)).not.toContain("lm-studio");
   });
 
   it("sends a token the person typed", async () => {

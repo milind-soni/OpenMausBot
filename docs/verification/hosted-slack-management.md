@@ -26,7 +26,7 @@ its own visitors.
 Run these disposable fixtures:
 
 ```sh
-pnpm exec vitest run server/hosted-slack.test.ts server/routes/hosted-slack.test.ts server/request-auth.test.ts server/hosted-access.test.ts
+pnpm exec vitest run server/hosted-slack.test.ts server/routes/hosted-slack.test.ts server/request-auth.test.ts
 pnpm exec vitest run src/components/bot-settings/SlackSection.test.ts
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/slack-management-ui.e2e.test.ts
 pnpm typecheck

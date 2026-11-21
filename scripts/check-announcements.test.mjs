@@ -66,7 +66,7 @@ describe("what the check refuses", () => {
   });
 
   it("a picture that is not in the repository, or too large", () => {
-    const pictured = tip({ image: { url: "https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/announcements/images/tip.png", alt: "A tip" } });
+    const pictured = tip({ image: { url: "https://raw.githubusercontent.com/EduardoMoraga/edu-bot/main/announcements/images/tip.png", alt: "A tip" } });
     expect(problems(withCards(pictured))).toEqual(["tip-first-api-key: the picture announcements/images/tip.png is not in the repository"]);
     expect(problems(withCards(pictured), { fileSize: () => MAX_IMAGE_BYTES + 1 })[0]).toMatch(/larger than/);
     expect(problems(withCards(pictured), { fileSize: () => 40_000 })).toEqual([]);

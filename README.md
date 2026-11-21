@@ -445,7 +445,7 @@ receipts.
 **App events** start a bot when something happens in a connected app ("whenever I get an email from Acme, draft
 a reply"). The bot finds the app's events with `trigger_info` (`action: "events"`) and calls `trigger` with
 `action: "create"` and `when: "app_event"`; the person can also choose **New → Set it up yourself → When something happens in an app**.
-Composio sends each event to OpenMausBot's connected-apps service, which queues it; the app collects the queue
+Composio sends each event to a connected-apps broker you run (`OMB_COMPOSIO_BROKER_URL`), which queues it; the app collects the queue
 with a long poll, so a desktop needs no public address and events wait while it is closed. Gmail is checked every
 15 minutes; Slack, GitHub and other push apps arrive at once. A desktop keeps up to 500 events a day and a paid
 Cloud 2,000; what is skipped shows on the automation. App events need the included connected apps: a server
@@ -478,9 +478,8 @@ see [Other model providers](apps/docs/content/docs/providers/model-providers.mdx
 
 ## Privacy
 
-Usage analytics are optional and anonymous: product events and a once-a-day count of what is set up, never keys,
-names, addresses or conversations. Turn them off in Settings → General → Usage analytics;
-[`docs/analytics.md`](docs/analytics.md) lists every event and property.
+Edu Bot sends no usage analytics. [`docs/edu-bot/network.md`](docs/edu-bot/network.md) lists every outbound host
+and when it is contacted.
 
 ## Support the project
 
@@ -541,11 +540,13 @@ scratch is [docs/deploy-vps.md](docs/deploy-vps.md).
 
 ## License
 
-[Apache License 2.0](LICENSE) © 2026 Milind Soni and OpenMausBot contributors,
-except `enterprise/`, which is source-available under its
-[own license](enterprise/LICENSE); delete that folder and what remains is the
-open-source edition. Details, including how contributions are signed off, are
-in [LICENSING.md](LICENSING.md).
+Edu Bot is licensed under the [Apache License 2.0](LICENSE) © 2026 Eduardo Moraga and Edu Bot
+contributors. It is an independent fork of [OpenMausBot](https://github.com/milind-soni/OpenMausBot)
+(© 2026 Milind Soni and OpenMausBot contributors, Apache-2.0), without upstream's source-available
+`enterprise/` directory. Full upstream and third-party attributions are in [NOTICE](NOTICE); details
+are in [LICENSING.md](LICENSING.md). Edu Bot is not affiliated with or endorsed by Supamaus Software
+Private Limited or OpenMausBot; "OpenMausBot", "MausBot" and the SupaMaus mascot are trademarks of
+Supamaus Software Private Limited.
 
 Packaged Cua Driver components retain their upstream MIT, SIL OFL 1.1, MPL-2.0, and other dependency terms;
 the corresponding notices, license texts, source locations, and SBOM are in

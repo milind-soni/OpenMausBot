@@ -1,6 +1,6 @@
 import { createRoot } from "react-dom/client";
 import App from "../../src/App";
-import { setAnalyticsEnabled, setEmailGateDone } from "../../src/lib/analytics";
+import { setEmailGateDone } from "../../src/lib/email-gate";
 import { CLOUD_SETUP_HIDDEN, CLOUD_WELCOME_DONE } from "../../src/lib/cloud-setup";
 import { withTourFinished } from "../../src/lib/guided-tour";
 import { setAdvancedMode } from "../../src/lib/interface-mode";
@@ -15,7 +15,6 @@ import "../../src/styles.css";
 // config read as a Cloud home's. ?skin= picks the skin.
 const params = new URLSearchParams(location.search);
 const page = params.get("page") === "local" ? "local" : "cloud";
-setAnalyticsEnabled(false);
 setEmailGateDone("skipped");
 markSimpleModePromptSeen();
 localStorage.setItem(GROK_MOVE_NOTICE, "1");

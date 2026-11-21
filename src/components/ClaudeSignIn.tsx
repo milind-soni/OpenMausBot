@@ -3,7 +3,6 @@ import { ExternalLink, Loader2, LogIn } from "lucide-react";
 import { api, ApiError, useStore } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { openExternalLink } from "@/lib/app-links";
-import { engineSignedIn } from "@/lib/product-events";
 import { type DeviceSignInStatus } from "./DeviceSignIn";
 
 const SIGN_IN_HOSTS = ["claude.com", "claude.ai", "console.anthropic.com", "platform.claude.com"];
@@ -48,7 +47,6 @@ export function ClaudeSignIn({ instanceId, autoStart = false, onDone, onStart }:
   const succeeded = async () => {
     setAuth({ phase: "succeeded", flowId: null, authorizationUrl: null, expiresAt: null });
     setCode("");
-    engineSignedIn("claude", "code");
     // The sign-in already succeeded: a failed catalog refresh must not read as a failed sign-in.
     try { await refreshInstances(); } catch {}
     try { await refreshModels(instanceId); } catch {}

@@ -6,12 +6,12 @@ import { afterEach, expect, it, vi } from "vitest";
 import { initialState, type AppState, type Bot } from "./state/store";
 
 let state: AppState;
+vi.mock("./lib/email-gate", () => ({ emailGateDone: () => true }));
 vi.mock("./state/store", async (original) => ({
   ...await original<typeof import("./state/store")>(),
   StoreProvider: ({ children }: { children: ReactNode }) => children,
   useStore: () => ({ state, dispatch: () => {}, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} }),
 }));
-vi.mock("./lib/analytics", () => ({ initAnalytics: () => {}, track: () => {}, emailGateDone: () => true }));
 const { default: App } = await import("./App");
 
 afterEach(() => { vi.unstubAllGlobals(); });

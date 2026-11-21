@@ -1,8 +1,7 @@
-import { useEffect, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { reportModelgoOffer } from "@/lib/modelgo-offer";
 import { MODELGO_URL } from "../../shared/modelgo";
 import { LinkButton, NoticeCard, NotNowButton, PRIMARY_BUTTON } from "./NoticeCard";
 import { ModelgoMark, type IconProps } from "./ProviderIcons";
@@ -26,7 +25,6 @@ const GET_KEY_LINK = "inline-flex shrink-0 items-center gap-1 text-[12px] font-m
 
 /** The first run's row for ModelGo, among the other ways to connect an AI; `children` is its key field, when the server has the provider. */
 export function ModelgoOption({ open, onToggle, children }: { open: boolean; onToggle: () => void; children?: ReactNode }) {
-  useEffect(() => { reportModelgoOffer("shown", "onboarding"); }, []);
   const name = <>
     <span className="flex size-[18px] shrink-0 items-center justify-center"><ModelgoMark size={18} /></span>
     <span className="min-w-0 flex-1">
@@ -39,12 +37,12 @@ export function ModelgoOption({ open, onToggle, children }: { open: boolean; onT
   </>;
   return <div data-modelgo-option="">
     <div className="flex items-center gap-2 pr-4 transition-colors hover:bg-ink/[0.04]">
-      {children ? <button type="button" aria-expanded={open} onClick={() => { if (!open) reportModelgoOffer("add_key", "onboarding"); onToggle(); }}
+      {children ? <button type="button" aria-expanded={open} onClick={onToggle}
         className="flex min-w-0 flex-1 items-center gap-3 py-2.5 pl-4 text-left focus-visible:outline-offset-[-2px]">
         {name}
         <ChevronDown size={14} className={cn("shrink-0 text-ink-secondary transition-transform duration-200", open && "rotate-180")} />
       </button> : <div className="flex min-w-0 flex-1 items-center gap-3 py-2.5 pl-4">{name}</div>}
-      <LinkButton url={MODELGO_URL} label={t("modelgoOffer.link")} className={GET_KEY_LINK} onOpened={() => reportModelgoOffer("get_key", "onboarding")} />
+      <LinkButton url={MODELGO_URL} label={t("modelgoOffer.link")} className={GET_KEY_LINK} />
     </div>
     {open && children}
   </div>;

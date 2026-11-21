@@ -1,3 +1,33 @@
+Edu Bot
+Copyright 2026 Eduardo Moraga and Edu Bot contributors
+
+Edu Bot is a fork and derivative work of OpenMausBot
+(https://github.com/milind-soni/OpenMausBot), licensed under the Apache
+License, Version 2.0. The original OpenMausBot copyright and attribution
+notices are reproduced below.
+
+Edu Bot is an independent project and is not affiliated with, endorsed by,
+or sponsored by Supamaus Software Private Limited or the OpenMausBot project.
+"OpenMausBot", "MausBot", and the SupaMaus mascot are trademarks of Supamaus
+Software Private Limited and are being removed from Edu Bot's branding.
+
+Summary of Edu Bot modifications:
+- Rebranding from OpenMausBot/MausBot to Edu Bot.
+- Removed the source-available `enterprise/` directory of upstream
+  OpenMausBot; it is not included in Edu Bot.
+- Removed usage analytics (PostHog) and turned off contact with upstream
+  OpenMausBot services by default.
+
+Additional third-party components bundled in Edu Bot:
+- @resvg/resvg-js (https://github.com/yisibl/resvg-js), licensed under the
+  Mozilla Public License 2.0 (MPL-2.0); source code is available at
+  https://github.com/yisibl/resvg-js.
+- Microsoft Playwright injected snapshot sources (third_party/playwright-injected/),
+  Copyright Microsoft Corporation, licensed under the Apache License, Version 2.0.
+
+---
+Original upstream NOTICE follows:
+
 OpenMausBot
 Copyright 2026 Milind Soni and OpenMausBot contributors
 

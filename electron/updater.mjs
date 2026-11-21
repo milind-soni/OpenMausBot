@@ -15,6 +15,7 @@ import { releaseSingleInstanceLock } from "./single-instance.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
 import { UPDATE_TEXT } from "./update-errors.mjs";
 import { createUpdaterCoordinator } from "./updater-coordinator.mjs";
+import { DESKTOP_AUTO_UPDATE } from "./desktop-updates.mjs";
 import { createQuietInstall, installFailed, launchAfter, LOOK_EVERY_MS, updateSeen } from "./update-when-quiet.mjs";
 
 export { quietSignals } from "./update-when-quiet-main.mjs";
@@ -190,7 +191,7 @@ export function attachUpdaterWindow(mainWindow) {
 
 /** `signals` (quietSignals): what tells a quiet moment; without them a downloaded update installs only on Restart or quit. */
 export function startUpdater(signals = null) {
-  if (!app.isPackaged) {
+  if (!app.isPackaged || !DESKTOP_AUTO_UPDATE) {
     updaterCoordinator = null;
     setState({ status: "idle" });
     return;

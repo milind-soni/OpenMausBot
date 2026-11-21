@@ -19,7 +19,6 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
   useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false }, host: { packaged: true, platform: "other" }, localComputer: { available: false, reasonCode: "cua-driver-unavailable", message: "" } }, ready: true }),
 }));
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("./ModelPicker", () => ({ ModelPicker: () => createElement("span") }));
 vi.mock("./ApprovalModeSelector", () => ({ ApprovalModeSelector: () => createElement("span") }));
 

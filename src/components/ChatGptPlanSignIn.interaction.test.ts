@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const fixture = vi.hoisted(() => ({
   values: [] as unknown[], index: 0, effects: [] as (() => (() => void) | undefined)[],
-  api: vi.fn(), dispatch: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(), openExternal: vi.fn(), track: vi.fn(),
+  api: vi.fn(), dispatch: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(), openExternal: vi.fn(),
 }));
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
@@ -19,7 +19,6 @@ vi.mock("@/state/store", async (original) => ({
   ...await original<typeof import("@/state/store")>(), api: fixture.api,
   useStore: () => ({ dispatch: fixture.dispatch, refreshInstances: fixture.refreshInstances, refreshModels: fixture.refreshModels }),
 }));
-vi.mock("@/lib/analytics", () => ({ track: fixture.track }));
 const { DeviceSignIn } = await import("./DeviceSignIn");
 const { AddAccount } = await import("./EngineAccounts");
 
@@ -63,7 +62,6 @@ it("starts only on request, opens the official page, and refreshes models after 
   expect(fixture.api).toHaveBeenCalledWith("/api/instances/chatgpt/auth/status?flowId=flow-one", expect.objectContaining({ signal: expect.any(AbortSignal) }));
   expect(fixture.refreshInstances).toHaveBeenCalledOnce();
   expect(fixture.refreshModels).toHaveBeenCalledWith("chatgpt");
-  expect(fixture.track.mock.calls).toEqual([["engine_signed_in", { engine: "codex", method: "browser" }]]);
   cleanup?.();
 });
 
@@ -77,7 +75,6 @@ it("cancels the same flow and never opens an untrusted authorization URL", async
   expect(fixture.api).toHaveBeenLastCalledWith("/api/instances/chatgpt/auth/cancel", { method: "POST", body: JSON.stringify({ flowId: "flow-one" }) });
   expect(fixture.values[0]).toMatchObject({ phase: "cancelled", flowId: null });
   expect(fixture.refreshModels).not.toHaveBeenCalled();
-  expect(fixture.track).not.toHaveBeenCalled();
 });
 
 it.each([undefined, "google-original"])("adds a named account, then hands its id back so its sign-in can start (%s)", async (antigravityInstanceId) => {

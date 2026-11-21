@@ -118,6 +118,7 @@ function accountMessage(account: CloudAccountState | null, view: CloudPlanView, 
   if (account.status === "signed-out" && account.message === "enrollment-expired") return t("cloudAccount.codeExpired");
   if (account.status === "signed-out" && account.message === "restore-removed") return t("cloudAccount.restoreRemoved");
   if (account.status === "signed-out" && account.message === "reset-kept") return t("cloudAccount.resetKept");
+  if (account.status === "signed-out" && account.message === "not-set-up") return t("cloudAccount.notSetUp");
   if (account.status === "signed-out" && account.message && account.message !== "restoring") return t("cloudAccount.signinFailed");
   return account.unsaved ? t("cloudAccount.unsaved") : null;
 }

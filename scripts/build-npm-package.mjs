@@ -4,7 +4,7 @@
 //
 //   pnpm build:server && pnpm exec vite build && node scripts/build-npm-package.mjs
 //   cd release/npm && npm pack        # or npm publish --access public
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -24,17 +24,8 @@ mkdirSync(out, { recursive: true });
 cpSync(join(root, "dist-server"), join(out, "dist-server"), { recursive: true });
 cpSync(join(root, "dist"), join(out, "dist"), { recursive: true });
 if (existsSync(join(root, "skills"))) cpSync(join(root, "skills"), join(out, "skills"), { recursive: true });
-// The enterprise layer, under the path the server loads it from.
-// Source-available under its own license; inert without OMB_LICENSE_KEY.
-const enterpriseBundle = join(root, "dist-server", "enterprise", "server", "index.js");
-if (existsSync(enterpriseBundle)) {
-  mkdirSync(join(out, "enterprise", "server"), { recursive: true });
-  copyFileSync(enterpriseBundle, join(out, "enterprise", "server", "index.js"));
-  for (const file of ["LICENSE", "README.md"]) {
-    if (existsSync(join(root, "enterprise", file))) copyFileSync(join(root, "enterprise", file), join(out, "enterprise", file));
-  }
-}
 cpSync(join(root, "LICENSE"), join(out, "LICENSE"));
+cpSync(join(root, "NOTICE"), join(out, "NOTICE"));
 
 // The bin lives next to the bundle so serverEntry() finds index.js by path.
 writeFileSync(join(out, "cli.js"), `#!/usr/bin/env node\nimport "./dist-server/openmausbot.js";\n`);
@@ -58,7 +49,7 @@ writeFileSync(
         "@duckdb/node-api": app.dependencies["@duckdb/node-api"],
         "@resvg/resvg-js": app.dependencies["@resvg/resvg-js"],
       },
-      files: ["cli.js", "dist-server", "dist", "skills", "enterprise", "LICENSE", "README.md"],
+      files: ["cli.js", "dist-server", "dist", "skills", "LICENSE", "NOTICE", "README.md"],
       engines: { node: ">=24" },
       repository: { type: "git", url: "https://github.com/milind-soni/OpenMausBot.git" },
       homepage: "https://github.com/milind-soni/OpenMausBot#readme",

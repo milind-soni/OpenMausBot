@@ -220,7 +220,7 @@ export function startPhoneRelay(options: PhoneRelayOptions): PhoneRelay | null {
     // A server's other devices reach it some other way: they are the devices the relay does not carry.
     return { e2e: Math.min(e2eCount, 100), legacy: Math.min(Math.max(sessions.list().length - e2eCount, 0), 100) };
   };
-  const controlPlane = resolveCompanionControlPlaneURL({ isPackaged: true, environment: options.env });
+  const controlPlane = resolveCompanionControlPlaneURL({ environment: options.env });
   const client = controlPlane ? createControlPlaneClient({ baseURL: controlPlane }) : null;
   const fetchGrant = options.fetchGrant ?? (async (devicesNow: { e2e: number; legacy: number }) => {
     const document = openTunnelCredentials(dataDir).read();

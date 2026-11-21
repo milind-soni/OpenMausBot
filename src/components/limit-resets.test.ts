@@ -27,7 +27,6 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   useCaptionChrome: () => ({}),
 }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => null }));
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
 const { setLocale } = await import("@/lib/i18n");
 const limits = await import("@/lib/limit-resets");

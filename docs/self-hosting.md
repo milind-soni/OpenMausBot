@@ -1155,9 +1155,9 @@ is bootstrapped; while it does, Settings refuses to change that list and says
 which variable to change instead. One that is empty, as `.env.example` and the
 Compose files leave them, leaves the list to Settings.
 
-The code itself comes from `accounts.openmausbot.com`, the OpenMausBot
-account service, so your server needs no email credentials. Your server asks
-it to send the code, checks the answer, and then issues its own session
+The code is sent by your own mail server (`OMB_SIGNIN_SMTP_URL`), or by a
+control plane you name with `OMB_CONTROL_PLANE_URL`; Edu Bot uses neither by
+default. Your server sends the code, checks the answer, and then issues its own session
 cookie: the browser only ever talks to your server, and who is welcome is
 decided only by your allow-list. Wrong codes count against a lockout of
 their own: ten in a minute from one address pause sign-in there for a minute. Sessions from a sign-in show the email in
@@ -1296,11 +1296,10 @@ and one link.
 
 ## Announcements from the project
 
-When someone opens the app, the server downloads the project's public announcements file from GitHub
-(`raw.githubusercontent.com`, at most once an hour, a plain GET with nothing of yours in it) and its pages may show one of
-its cards in the corner: product news, a tip, or a sponsor's offer, each once per person
-([docs/announcements.md](announcements.md)). Set `OMB_DISABLE_ANNOUNCEMENTS=1` in the server's environment to never
-download it and never show those cards.
+Off by default. With `OMB_ANNOUNCEMENTS=1` in the server's environment, the server downloads the project's public
+announcements file from GitHub when someone opens the app (`raw.githubusercontent.com`, at most once an hour, a plain GET
+with nothing of yours in it) and its pages may show one of its cards in the corner: product news or a tip, each once per
+person ([docs/announcements.md](announcements.md)).
 
 ## Attachment storage
 

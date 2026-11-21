@@ -3,7 +3,6 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("./Avatar", () => ({ MausAvatar: () => createElement("i", { "data-our-mark": "" }) }));
 
 import { setLocale } from "@/lib/i18n";

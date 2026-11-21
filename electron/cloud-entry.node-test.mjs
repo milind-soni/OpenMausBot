@@ -168,6 +168,6 @@ test("Add a Cloud… is always the sheet on this computer's page, never a native
   assert.match(add, /const action = source === "app_howto" \? "cloud-add-howto" : "cloud-add";/);
   assert.deepEqual([...add.matchAll(/webContents\.send\(([^)]*)\)/g)].map(match => match[1]), ['"app:open-settings", action']);
   assert.deepEqual([...add.matchAll(/loadURL\((.*)\);/g)].map(match => match[1]), ["`${rendererOrigin()}/?desktop-settings=${action}`"]);
-  assert.match(between("function cloudOffersAllowed()", "\n}\n"), /return app\.isPackaged && !desktopRemoteAccess && brandedBuild === false;/);
+  assert.match(between("function cloudOffersAllowed()", "\n}\n"), /return managedCloudConfigured\(\) && app\.isPackaged && !desktopRemoteAccess && brandedBuild === false;/);
   assert.match(between("async function readCloudOfferBrand()", "\n}\n"), /fetch\(`http:\/\/127\.0\.0\.1:\$\{SERVER_PORT\}\/api\/brand`/);
 });

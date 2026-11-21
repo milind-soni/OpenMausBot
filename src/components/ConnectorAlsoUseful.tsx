@@ -8,7 +8,6 @@ import { pollConnector } from "@/lib/connector-poll";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { mcpSignInLink } from "@/lib/mcp-sign-in";
-import { connectorConnect } from "@/lib/product-events";
 import { api } from "@/state/store";
 import { ServiceIcon, type ToolkitCard } from "./ServiceIcon";
 
@@ -49,7 +48,6 @@ export function ConnectorAlsoUseful({ botId, slug }: { botId: string; slug: stri
       if (!await launch.open(url)) setError({ key: "connectors.card.popupBlocked" });
       const stop = pollConnector(undefined, () => api(`/api/connectors?services=${encodeURIComponent(card.slug)}`).then((answer) => answer.services?.[card.slug]), (end) => {
         stops.current.delete(stop);
-        connectorConnect(card.slug, end);
         settle(end === "connected");
         if (end === "connected") void preloadConnectedApps(true).catch(() => {});
       });

@@ -95,12 +95,12 @@ function seed() {
   return seeded;
 }
 
-const STORAGE = { "omb-analytics-opt-out": "1", "omb-email-gate": "skipped", "omb-simple-mode-prompt": "1", "grok-move-2026-11": "1", "teams-2026-11b": "1", "modelgo-offer-2026-11": "1", "omb-advanced-mode": "0" };
+const STORAGE = { "omb-email-gate": "skipped", "omb-simple-mode-prompt": "1", "grok-move-2026-11": "1", "teams-2026-11b": "1", "modelgo-offer-2026-11": "1", "omb-advanced-mode": "0" };
 const electron = require("electron");
 const DEV_PAGE_PORT = BENCH_PORTS[0] - 3600;
 const fixtureEnv = () => ({
   PATH: dirname(process.execPath), HOME: paths.home, CFFIXED_USER_HOME: paths.home, TMPDIR: paths.tmp, LANG: process.env.LANG ?? "en_US.UTF-8",
-  OMB_DATA_DIR: paths.data, OMB_WEBHOOK_PORT: String(BENCH_PORTS[0] + 1), OMB_TEST_SEALED_PATH: "1", OMB_DISABLE_ANNOUNCEMENTS: "1", FAKE_CLAUDE_MODE: "happy",
+  OMB_DATA_DIR: paths.data, OMB_WEBHOOK_PORT: String(BENCH_PORTS[0] + 1), OMB_TEST_SEALED_PATH: "1", OMB_ANNOUNCEMENTS: "0", FAKE_CLAUDE_MODE: "happy",
   OMB_BENCH_EGRESS_LOG: paths.egress, ...(values["server-prof"] ? { OMB_BENCH_SERVER_PROF: resolve(values["server-prof"]), OMB_BENCH_SERVER_PROF_TAIL_MS: values["server-prof-tail"] } : {}),
 });
 const answers = (url) => new Promise((done) => { const request = httpGet(url, (response) => { response.resume(); done(response.statusCode < 500); }); request.on("error", () => done(false)); request.setTimeout(2000, () => request.destroy()); });
@@ -116,7 +116,7 @@ async function startDevServers() {
 }
 const stopDevServers = () => { for (const child of devChildren) child.kill("SIGTERM"); };
 const staged = stage();
-if (!existsSync(join(paths.userData, "desktop-prefs.json"))) writeFileSync(join(paths.userData, "desktop-prefs.json"), JSON.stringify({ seen: [], analytics: false }));
+if (!existsSync(join(paths.userData, "desktop-prefs.json"))) writeFileSync(join(paths.userData, "desktop-prefs.json"), JSON.stringify({ seen: [] }));
 const seeded = seed();
 
 let logRead = 0;

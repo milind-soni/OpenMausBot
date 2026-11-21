@@ -15,10 +15,10 @@ const { TeamsPopup, TEAMS_POPUP } = await import("./TeamsPopup");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement, root: Root | null = null;
-const onStep = vi.fn(), onStart = vi.fn(), onDone = vi.fn();
+const onStart = vi.fn(), onDone = vi.fn();
 async function show(action: TeamsAction) {
   root = createRoot(host);
-  await act(async () => { root!.render(createElement(TeamsPopup, { action, onStep, onStart, onDone })); });
+  await act(async () => { root!.render(createElement(TeamsPopup, { action, onStart, onDone })); });
   return document.querySelector<HTMLElement>(TEAMS_POPUP)!;
 }
 const key = async (name: string, shiftKey = false) => {
@@ -43,7 +43,6 @@ describe("the Teams popup", () => {
     expect(document.activeElement?.textContent, "focus starts at its main button").toBe("Start a team");
     await act(async () => { (popup.querySelector("[data-primary] button") as HTMLElement).click(); });
     expect(onStart).toHaveBeenCalled();
-    expect(onStep.mock.calls.map(([step]) => step)).toEqual(["seen", "start_team"]);
     expect(onDone).toHaveBeenCalledTimes(1);
     await act(async () => root?.unmount()); root = null;
 
@@ -60,7 +59,6 @@ describe("the Teams popup", () => {
       const link = [...popup.querySelectorAll("button")].find(button => button.textContent === "See Team plans");
       await act(async () => { link!.click(); });
       expect(opened.at(-1), action.kind).toBe("https://www.openmausbot.com/pricing#teams");
-      expect(onStep, action.kind).toHaveBeenLastCalledWith("see_team_plans");
       await act(async () => root?.unmount()); root = null;
     }
   });
@@ -74,7 +72,6 @@ describe("the Teams popup", () => {
     await key("Tab", true);
     expect(document.activeElement).toBe(list.at(-1));
     await key("Escape");
-    expect(onStep).toHaveBeenLastCalledWith("close");
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 

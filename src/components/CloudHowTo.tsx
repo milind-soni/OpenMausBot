@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { track } from "@/lib/analytics";
 import { t } from "@/lib/i18n";
 import { useStore } from "@/state/store";
 import { NoticeToast } from "./NoticeCard";
@@ -23,13 +22,12 @@ export function CloudHowTo() {
     if (!open) return;
     const found = switcherPlacement();
     if (found) { setPlacement(found); return; }
-    track("cloud_howto", { result: "no_button" });
     dispatch({ type: "openCloudAdd", source: "app_howto" });
     setToast(t("cloudHowTo.nextTime"));
   }, [open, dispatch]);
   if (toast) return <NoticeToast text={toast} onDone={() => setToast(null)} />;
   if (!open || !placement) return null;
-  const skip = () => { track("cloud_howto", { result: "skipped" }); dispatch({ type: "cloudHowTo", open: false }); };
+  const skip = () => { dispatch({ type: "cloudHowTo", open: false }); };
   return <Spotlight anchor={SWITCHER_ANCHOR} placement={placement} mascot="curious" secondary={{ label: t("cloudHowTo.skip"), onClick: skip }} onDone={skip}>
     <p className="font-semibold">{t("cloudHowTo.title")}</p>
     <p className="mt-1 text-[13px] text-ink-secondary">{t("cloudHowTo.body")}</p>

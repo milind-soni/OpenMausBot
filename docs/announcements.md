@@ -6,8 +6,9 @@ change to it on `main` and every install that runs this version or later picks i
 
 ## How it works
 
-- **One file on `main`.** The app's server downloads
-  `https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/announcements/announcements.json` when a page of the app
+- **Off by default.** Nothing is downloaded or shown unless the server's environment sets `OMB_ANNOUNCEMENTS=1`.
+- **One file on `main`.** Once switched on, the app's server downloads
+  `https://raw.githubusercontent.com/EduardoMoraga/edu-bot/main/announcements/announcements.json` when a page of the app
   asks for the cards: at launch, then about hourly while the app is in use. Whoever can merge to `main` can publish a card;
   there is no other sign-in and no backend.
 - **The server fetches, the page decides.** The desktop app's own server, a MausBot Cloud and a self-hosted server all
@@ -201,25 +202,22 @@ with the cards). Give a card `starts` when its date matters.
   (`{ buttons }`: open a page, write an email, open Add a Cloud). Give an offer its `until` to show Ended after it. Its
   date newer than the person's last look is what raises the dot.
 
-## Turning it off
+## Turning it on
 
-- **`OMB_DISABLE_ANNOUNCEMENTS=1`** in the server's environment stops the download and every remote card on that server's
-  pages, the bundled ones included. For a self-hosted server or an open-source build that should never show them. The
-  desktop app's own server inherits the app's environment, so it holds there when the app is started with it set.
-- **No in-app switch governs these cards.** The app has no setting for promotional popups: the product-updates question is
-  about email, and the usage-analytics switch only stops the counting. A person closes a card with Not now or the X, and
+- **`OMB_ANNOUNCEMENTS=1`** in the server's environment turns on the download and the cards on that server's pages. Any
+  other value, or none, keeps it off, the bundled cards included. The desktop app's own server inherits the app's
+  environment, so it holds there when the app is started with it set.
+- **No in-app switch governs these cards.** The app has no setting for promotional popups. A person closes a card with Not now or the X, and
   never sees that card again.
 
 ## Counting
 
-With usage analytics on, and only then (the same switch as every other event), each card sends one `announcement` event
-per step: `{ id, kind, action }`, `action` being `shown`, `primary`, `secondary` or `close` (the X, Escape or Not now).
-The `id` is the card's own id from this public file, the same for everyone. See [Usage analytics](analytics.md).
+Cards send nothing back: the app has no usage analytics.
 
 ## Tests and previews
 
 Tests never download the live file: `server/testing/setup.ts` and the verification server
-(`scripts/control-omb.ts`, which the renderer previews and UI tests run on) set `OMB_DISABLE_ANNOUNCEMENTS=1`, so their
+(`scripts/control-omb.ts`, which the renderer previews and UI tests run on) never set `OMB_ANNOUNCEMENTS=1`, so their
 pages get no cards whatever `main` holds. The server's tests hand the store a fake fetch.
 
 ## Moving the built-in sponsor card into the feed later

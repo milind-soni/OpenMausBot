@@ -14,7 +14,6 @@ const fixture = vi.hoisted(() => ({
   dispatch: vi.fn(),
   startCall: vi.fn(),
   endCall: vi.fn(),
-  track: vi.fn(),
 }));
 
 vi.mock("@/state/store", async (importOriginal) => {
@@ -43,7 +42,6 @@ vi.mock("@/lib/local-voice", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/local-voice")>(),
   localSystemVoiceActive: () => false,
 }));
-vi.mock("@/lib/analytics", () => ({ track: fixture.track }));
 // Stands in for the open state a click would set; SSR cannot click.
 vi.mock("./MenuMotion", async (importOriginal) => ({
   ...await importOriginal<typeof import("./MenuMotion")>(),
@@ -90,7 +88,6 @@ beforeEach(() => {
   fixture.helpShown = false;
   fixture.startCall.mockClear();
   fixture.endCall.mockClear();
-  fixture.track.mockClear();
   fixture.dispatch.mockClear();
   vi.stubGlobal("window", { ogb: { speechStart: () => {} } });
 });
@@ -108,9 +105,8 @@ describe("composer call button", () => {
     expect(html).not.toContain("lucide-phone");
   });
 
-  it("starts the call with the same telemetry as the header button did", () => {
+  it("starts the call as the header button does", () => {
     render().button.props.onClick!();
-    expect(fixture.track).toHaveBeenCalledWith("call_started", { driver: "codex", mode: "turns" });
     expect(fixture.startCall).toHaveBeenCalledWith("pepper");
     expect(fixture.endCall).not.toHaveBeenCalled();
   });
@@ -125,7 +121,6 @@ describe("composer call button", () => {
     }
     renderToStaticMarkup(createElement(Capture));
     findButton(tree)!.props.onClick!();
-    expect(fixture.track.mock.calls).toEqual([["call_started", { driver: "claude", mode: "turns" }]]);
   });
 
   it("shows a hang-up state during the call and hangs up", () => {
@@ -163,7 +158,6 @@ describe("composer call button", () => {
     button.props.onClick!();
     expect(getUserMedia).toHaveBeenCalledTimes(1);
     expect(liveMedia()).toMatchObject({ phase: "starting", botId: "pepper" });
-    expect(fixture.track).toHaveBeenCalledWith("call_started", { driver: "codex", mode: "live" });
   });
 
   it("is a Live call on a server's page in the Windows app and the Mac app alike", () => {

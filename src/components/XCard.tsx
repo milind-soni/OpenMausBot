@@ -4,7 +4,6 @@ import { Check, ExternalLink, Loader2 } from "lucide-react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { activeLocale, t } from "@/lib/i18n";
 import { xResearchAction } from "@/lib/cloud-plan";
-import { keyRemoved, keySaved, keySaveFailure, keyTestResult } from "@/lib/product-events";
 import { isXConnectorStatus, type XConnectorStatus, type XIncludedUsage } from "../../shared/x-connector";
 import { looksLikeKey, saveCredential, tregVerdict } from "./keys/key-save";
 import { useCloudPlan } from "./ProIntroduction";
@@ -93,10 +92,8 @@ export function XCard({ refreshKey = 0, onConnection }: {
     try {
       const result = await api("/api/keys/test", { method: "POST", body: JSON.stringify({ provider: "treg" }) });
       if (mounted.current) setVerdict(tregVerdict(result));
-      return keyTestResult(result);
     } catch (cause) {
       if (mounted.current) setVerdict(cause instanceof Error ? cause.message : String(cause));
-      return keyTestResult(null);
     } finally {
       if (mounted.current) setBusy(null);
     }
@@ -114,10 +111,9 @@ export function XCard({ refreshKey = 0, onConnection }: {
       if (!mounted.current) return;
       setKey("");
       setAddingOwn(false);
-      keySaved("treg", "apps", await test());
+      await test();
     } catch (cause) {
       if (mounted.current) setError(cause instanceof Error ? cause.message : String(cause));
-      keySaved("treg", "apps", keySaveFailure(cause));
     } finally {
       if (mounted.current) setBusy((current) => (current === "save" ? null : current));
     }
@@ -130,7 +126,6 @@ export function XCard({ refreshKey = 0, onConnection }: {
     setVerdict(null);
     try {
       await applied(await saveCredential("treg", "", false));
-      keyRemoved("treg", "apps");
     } catch (cause) {
       if (mounted.current) setError(cause instanceof Error ? cause.message : String(cause));
     } finally {

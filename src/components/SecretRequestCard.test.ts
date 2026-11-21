@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message } from "@/state/store";
 
 const dispatch = vi.fn();
-const fixture = vi.hoisted(() => ({ counting: false, values: [] as unknown[], index: 0, api: vi.fn(), track: vi.fn() }));
+const fixture = vi.hoisted(() => ({ counting: false, values: [] as unknown[], index: 0, api: vi.fn() }));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
   return {
@@ -22,7 +22,6 @@ vi.mock("@/state/store", async (original) => ({
   api: fixture.api,
   useStore: () => ({ dispatch }),
 }));
-vi.mock("@/lib/analytics", () => ({ track: fixture.track }));
 
 import { SecretRequestCard } from "./SecretRequestCard";
 import { VaultChoices } from "./VaultChoices";
@@ -261,7 +260,7 @@ describe("SecretRequestCard mailbox", () => {
   });
 });
 
-describe("SecretRequestCard key analytics", () => {
+describe("SecretRequestCard key saving", () => {
   const KEY = "boat_ZZtestSECRET0123456789abcdef";
   type Props = { children?: ReactNode; type?: string; onChange?: (event: { target: { value: string } }) => void; onSubmit?: (event: { preventDefault(): void }) => void };
   const nodes = (tree: ReactNode): Array<ReactElement<Props>> =>
@@ -285,11 +284,10 @@ describe("SecretRequestCard key analytics", () => {
   beforeEach(() => {
     fixture.values = [];
     fixture.api.mockReset();
-    fixture.track.mockReset();
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it("reports a Boat key saved over the desktop bridge once, even when only the resume is retried", async () => {
+  it("saves a Boat key over the desktop bridge once, even when only the resume is retried", async () => {
     const setCredential = vi.fn().mockResolvedValue({ box: { configured: true } });
     vi.stubGlobal("window", { ogb: { setCredential } });
     fixture.api.mockRejectedValueOnce(new Error("resume failed")).mockResolvedValueOnce({ ok: true });
@@ -298,14 +296,12 @@ describe("SecretRequestCard key analytics", () => {
     await flush();
     expect(setCredential).toHaveBeenCalledExactlyOnceWith("boxToken", KEY);
     expect(fixture.api).toHaveBeenCalledTimes(2);
-    expect(fixture.track.mock.calls).toEqual([["api_key_saved", { provider: "boat", via: "chat_request", result: "ok" }]]);
-    for (const fragment of [KEY, KEY.slice(0, 6), KEY.slice(-6), String(KEY.length)]) expect(JSON.stringify(fixture.track.mock.calls)).not.toContain(fragment);
   });
 
-  it("reports a Boat key boat.dev refused as rejected", async () => {
+  it("does not resume the bot with a Boat key boat.dev refused", async () => {
     vi.stubGlobal("window", { ogb: { setCredential: vi.fn().mockRejectedValue(new Error("Error invoking remote method 'credential:set': KeyRejected: That doesn't look like a Boat API key")) } });
     await submit("boxToken");
-    expect(fixture.track.mock.calls).toEqual([["api_key_saved", { provider: "boat", via: "chat_request", result: "rejected" }]]);
+    expect(fixture.api).not.toHaveBeenCalled();
   });
 
   // Even with the desktop bridge, the 1Password token goes to this server's Logins (which checks it with 1Password),
@@ -319,14 +315,12 @@ describe("SecretRequestCard key analytics", () => {
     expect(fixture.api.mock.calls[0]).toEqual(["/api/logins/1password", { method: "POST", body: JSON.stringify({ token: "ops_ZZtestSECRET0123456789" }) }]);
     expect(fixture.api.mock.calls[1]![0]).toBe("/api/bots/bot-1/secret-cards/secret-card/provided");
     expect(dispatch).not.toHaveBeenCalled();
-    expect(JSON.stringify(fixture.track.mock.calls)).not.toContain("ZZtestSECRET");
   });
 
-  it("reports an xAI key saved from chat as unverified: nothing checks it before it is used", async () => {
+  it("saves an xAI key from chat through this server's config", async () => {
     fixture.api.mockResolvedValueOnce({ xai: { configured: true } }).mockResolvedValueOnce({ ok: true });
     await submit("xaiApiKey", "xai-ZZtestSECRET0123456789");
     expect(fixture.api.mock.calls[0]).toEqual(["/api/config", { method: "PUT", body: JSON.stringify({ xai: { key: "xai-ZZtestSECRET0123456789" } }) }]);
-    expect(fixture.track.mock.calls).toEqual([["api_key_saved", { provider: "xai", via: "chat_request", result: "unverified" }]]);
   });
 
   it("saves an Anthropic key in the desktop store as Settings does, keeping Claude sign-ins", async () => {
@@ -336,7 +330,6 @@ describe("SecretRequestCard key analytics", () => {
     await submit("anthropicApiKey", "sk-ant-ZZtestSECRET0123456789");
     expect(setCredential).toHaveBeenCalledExactlyOnceWith("anthropicApiKey", "sk-ant-ZZtestSECRET0123456789", { everyClaudeBot: false });
     expect(fixture.api.mock.calls.map(([path]) => path)).toEqual(["/api/bots/bot-1/secret-cards/secret-card/provided"]);
-    expect(fixture.track.mock.calls).toEqual([["api_key_saved", { provider: "anthropic", via: "chat_request", result: "unverified" }]]);
   });
 
   it("sends a provider key typed on a desktop paired to another computer to that computer's server", async () => {
@@ -356,8 +349,8 @@ describe("SecretRequestCard key analytics", () => {
     expect(setCredential).toHaveBeenCalledExactlyOnceWith("composioApiKey", "ak_ZZtestSECRET0123456789");
   });
 
-  // A custom secret goes only to its own card's save, which resumes the bot: never Settings, the desktop store or an event.
-  it("keeps a custom secret behind its card, with no product event naming it", async () => {
+  // A custom secret goes only to its own card's save, which resumes the bot: never Settings or the desktop store.
+  it("keeps a custom secret behind its card", async () => {
     const setCredential = vi.fn();
     vi.stubGlobal("window", { ogb: { setCredential } });
     fixture.api.mockResolvedValueOnce({ provided: true, resumed: true });
@@ -366,7 +359,6 @@ describe("SecretRequestCard key analytics", () => {
     expect(fixture.api.mock.calls).toEqual([["/api/bots/bot-1/secret-cards/secret-card/save", {
       method: "POST", body: JSON.stringify({ threadId: "thread-1", value: "sk_live_ZZtestSECRET0123456789" }),
     }]]);
-    expect(fixture.track).not.toHaveBeenCalled();
   });
 });
 

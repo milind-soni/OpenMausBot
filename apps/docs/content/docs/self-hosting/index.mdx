@@ -45,11 +45,10 @@ Stop the server before a filesystem backup. Application state under `.openmausbo
 Self-hosting MausBot does not self-host every service it talks to. A standalone server, or its web UI, contacts these:
 
 - Agent providers authenticate and bill through their own CLI or API.
-- Composio owns connected-app OAuth grants. MausBot's connected-apps service serves only the desktop app and MausBot's Clouds; a server you run yourself needs your own Composio project key, in **Settings → AI → Other services**.
-- The MausBot account service (`accounts.openmausbot.com`) sends emailed sign-in codes unless you set your own mail server (`OMB_SIGNIN_SMTP_URL`), reserves the `serve --tunnel` address, and signs a server in to MausBot Relay for phones (`OMB_PHONE_RELAY`).
+- Composio owns connected-app OAuth grants. Connected apps need your own Composio project key, in **Settings → AI → Other services**, or a broker you run (`OMB_COMPOSIO_BROKER_URL`).
+- Emailed sign-in codes need your own mail server (`OMB_SIGNIN_SMTP_URL`). Reserving a `serve --tunnel` address and the phone relay (`OMB_PHONE_RELAY`) need a control plane you name with `OMB_CONTROL_PLANE_URL`; there is none by default.
 - Cloudflare carries path A's traffic: `serve --tunnel` is a Cloudflare tunnel.
-- GitHub answers update checks (the release list and the stable channel's file), and by default serves the model list, refreshed about hourly (`OMB_DISABLE_MODEL_MANIFEST_FETCH=1` turns it off), and the announcements feed (`OMB_DISABLE_ANNOUNCEMENTS=1`).
-- PostHog receives usage analytics from the web UI, on unless each person turns it off under **Settings → General → Privacy** (shown in Advanced mode). [Analytics](/docs/security/analytics) lists what is sent.
+- GitHub answers update checks (the release list and the stable channel's file), and by default serves the model list, refreshed about hourly (`OMB_DISABLE_MODEL_MANIFEST_FETCH=1` turns it off), and, only when `OMB_ANNOUNCEMENTS=1` is set, the announcements feed.
 - The npm registry serves engine installs and a Codex version check; on an npm install, Google's `storage.googleapis.com` serves the bots' Chrome for Testing.
 - MausBot's own page publishing and sharing to the community go through MausBot from a Cloud or the desktop app only; a standalone server does not offer them.
 - Boat owns managed cloud computers.

@@ -38,8 +38,6 @@ vi.mock("./onboarding/ConnectAi", async () => {
   return { ConnectAiDialog: ({ onClose }: { onClose: () => void }) => h("div", { "data-connect-ai": "", onClick: onClose }) };
 });
 vi.mock("./onboarding/welcome-ai", () => ({ useWelcomeAi: () => null }));
-const analytics = vi.hoisted(() => ({ track: vi.fn() }));
-vi.mock("@/lib/analytics", () => analytics);
 vi.mock("@/lib/setup-import", () => ({
   localSetupImport: () => f.local,
   setupImportApi: {},
@@ -77,7 +75,6 @@ beforeEach(() => {
   setLocale("en");
   f.dispatch.mockReset();
   f.detect.mockReset();
-  analytics.track.mockReset();
   f.advanced = false;
   f.local = false;
   f.reduced = false;
@@ -208,10 +205,9 @@ describe("in the chat (Simple mode)", () => {
     expect(f.detect).not.toHaveBeenCalled();
   });
 
-  it("counts Try Cloud as the first run's Cloud moment, then opens Add a Cloud", async () => {
+  it("Try Cloud opens Add a Cloud", async () => {
     await show();
     await act(async () => { host.querySelector<HTMLElement>('[data-helper-step="cloud"]')!.click(); });
-    expect(analytics.track).toHaveBeenCalledWith("onboarding_cloud", { action: "start_trial" });
     expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "app_onboarding" });
   });
 

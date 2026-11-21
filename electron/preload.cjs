@@ -90,11 +90,14 @@ function railKeepsItsSize() {
 if (typeof window !== "undefined") {
   for (const type of ["resize", "DOMContentLoaded"]) window.addEventListener(type, () => { leaveRailRoom(); railKeepsItsSize(); });
 }
-const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "placesTogether", "accountSheet", "desktopNotices", "desktopNotifications", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame", "softwareRendering", "appUpdate"]);
+const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "placesTogether", "accountSheet", "desktopNotices", "desktopNotifications", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame", "softwareRendering", "appUpdate"]);
 /** My Cloud's own page once it is the person's home (main checks the sender again): it is this app's page then. */
 const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "exportDiagnostics", "openLogsFolder", "openAtLogin", "callActive"];
 function updaterOffered() {
   try { return ipcRenderer.sendSync("update:offered") === true; } catch { return false; }
+}
+function updatesEnabled() {
+  try { return ipcRenderer.sendSync("update:enabled") === true; } catch { return false; }
 }
 function homePage() {
   try { return ipcRenderer.sendSync("home:page") === true; } catch { return false; }
@@ -102,10 +105,6 @@ function homePage() {
 function reloadedForUpdate() {
   try { return ipcRenderer.sendSync("home:updating") === true; } catch { return false; }
 }
-function savedAnalyticsChoice() {
-  try { const saved = ipcRenderer.sendSync("desktop-analytics:read"); return typeof saved === "boolean" ? saved : null; } catch { return null; }
-}
-let analyticsChoice;
 function savedLanguageChoice() {
   try { const saved = ipcRenderer.sendSync("desktop-language:read"); return typeof saved === "string" ? saved : null; } catch { return null; }
 }
@@ -125,7 +124,7 @@ const COMPANY_BACKUP_CLIENT_KEYS = [
   "omb-skin", "omb-show-threads", "omb-show-run-card", "omb-send-key", "omb-color-user-bubbles", "omb-chat-width", "openmausbot.sidebarDensity",
   "openmausbot.sidebarToolsLayout",
   "openmausbot.sidebarCollapsedSections.v1", "openmausbot.sidebarSectionOrder.v1",
-  "omb-analytics-opt-out", "openmausbot.remote-voice.v1",
+  "openmausbot.remote-voice.v1",
 ];
 if (isLocalPage && !desktopRemoteClient && process.argv.includes("--omb-company-desktop=1")) {
   ipcRenderer.on("company-backups:collect-client-state", (_event, request) => {
@@ -763,13 +762,6 @@ const bridge = {
       return () => notificationOpenListeners.delete(cb);
     },
   },
-  desktopAnalytics: {
-    enabled: () => {
-      if (analyticsChoice === undefined) analyticsChoice = savedAnalyticsChoice();
-      return analyticsChoice;
-    },
-    ...(isLocalPage ? { set: enabled => { analyticsChoice = enabled === true; return ipcRenderer.invoke("desktop-analytics:set", analyticsChoice); } } : {}),
-  },
   desktopLanguage: {
     choice: () => {
       if (languageChoice === undefined) languageChoice = savedLanguageChoice();
@@ -789,5 +781,5 @@ const bridge = {
 
 contextBridge.exposeInMainWorld(
   "ogb",
-  isLocalPage ? bridge : Object.fromEntries(Object.entries(bridge).filter(([key]) => remoteKeys.has(key))),
+  Object.fromEntries(Object.entries(bridge).filter(([key]) => (isLocalPage ? key !== "updater" || updatesEnabled() : remoteKeys.has(key)))),
 );

@@ -7,7 +7,6 @@ import type { AddCloudView } from "../../../electron/cloud-rail.mjs";
 import { addCloudScreen, addCloudStop, SWATCH_COLOR, swatchFill } from "@/lib/cloud-extra";
 import { setLocale } from "@/lib/i18n";
 
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("./CloudMascotScene", () => ({ CloudMascotScene: () => null }));
 const { AddCloudFlow } = await import("./AddCloudFlow");
 

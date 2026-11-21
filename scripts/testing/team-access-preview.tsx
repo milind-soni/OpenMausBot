@@ -2,7 +2,7 @@
 // ?mode=simple|advanced and ?skin= pick the mode and the skin.
 import { createRoot } from "react-dom/client";
 import App from "../../src/App";
-import { setAnalyticsEnabled, setEmailGateDone } from "../../src/lib/analytics";
+import { setEmailGateDone } from "../../src/lib/email-gate";
 import { setAdvancedMode } from "../../src/lib/interface-mode";
 import { GROK_MOVE_NOTICE, MODELGO_OFFER_NOTICE, TEAMS_NOTICE } from "../../src/lib/notices";
 import { markSimpleModePromptSeen } from "../../src/lib/simple-mode-prompt";
@@ -11,7 +11,6 @@ import "../../src/styles.css";
 
 const params = new URLSearchParams(location.search);
 const skin = params.get("skin") ?? "daylight";
-setAnalyticsEnabled(false);
 setEmailGateDone("skipped");
 markSimpleModePromptSeen();
 localStorage.setItem(GROK_MOVE_NOTICE, "1");

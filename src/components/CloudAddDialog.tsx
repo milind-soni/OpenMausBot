@@ -5,7 +5,6 @@ import { X } from "lucide-react";
 import type { CloudColor } from "../../electron/cloud-buy.mjs";
 import type { CloudAccountState, CloudCheckoutOutcome } from "../../electron/cloud-account.mjs";
 import type { CloudOffer } from "../../electron/cloud-home.mjs";
-import { track } from "@/lib/analytics";
 import { cloudAccountBridge } from "@/lib/cloud-add-web";
 import { cn } from "@/lib/cn";
 import { cloudColor, cloudNameShown, DEFAULT_CLOUD_COLOR } from "@/lib/cloud-look";
@@ -127,7 +126,6 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
   const [busy, setBusy] = useState(false);
   const [openFailed, setOpenFailed] = useState(false);
   const [asked, setAsked] = useState(0);
-  const [reported, setReported] = useState<string[]>([]);
   const [signIn, setSignIn] = useState<CloudSignInPhase | null>(null);
   const [form, setForm] = useState({ email: "", code: "" });
   const [look, setLook] = useState<{ typed: string; color: CloudColor; dirty: boolean } | null>(null);
@@ -161,7 +159,7 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
   const close = () => {
     if (signIn) void bridge?.signInCancel?.().catch(() => {});
     dispatch({ type: "closeCloudAdd" });
-    setError(null); setConflict(false); setChoosing(false); setOpenFailed(false); setReported([]); setChosen(null);
+    setError(null); setConflict(false); setChoosing(false); setOpenFailed(false); setChosen(null);
     setSignIn(null); setForm({ email: "", code: "" }); setLook(null); setAuto(null); setNote(null); setArrived(false); setTerms(false);
   };
   // Capture phase, key marked handled: Escape and Tab reach this before anything underneath (Settings). Focus goes back to the opener.
@@ -204,11 +202,6 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
   useEffect(() => {
     if (!kind || !request) return;
     if (kind === "settings") { close(); dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" }); return; }
-    if (kind === "checking") return;
-    const first = reported.length === 0;
-    if (first) track("cloud_dialog_shown", { source: request.source, view: kind });
-    if (["starting", "ready"].includes(kind) && !reported.includes(kind)) track("cloud_dialog_view", { view: kind });
-    if (first || !reported.includes(kind)) setReported([...reported, kind]);
   }, [kind]);
   // The setup screen saves what its preview shows, even untouched, so the switcher matches it; One Cloud for now changes nothing.
   useEffect(() => {
@@ -281,12 +274,11 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
   const planNow = () => view.kind === "waiting" && !chosen ? view.plan : offerShown ? offerPlan(offerShown, chosen).tier : null;
   const openCheckout = async (plan: string | null) => {
     if (!plan || !bridge.checkout) { setError("failed"); return; }
-    const trial = Boolean(offerShown?.plans.find(entry => entry.tier === plan)?.trialDays);
     const result = await bridge.checkout(plan, request.source);
     const outcome: CloudCheckoutOutcome = result.outcome;
     setAccount(result.state);
     if (outcome === "opened" || outcome === "signing-in") {
-      setChoosing(false); setError(null); setConflict(false); setNote(null); setTerms(false); track("cloud_checkout_opened", { plan, trial, source: request.source });
+      setChoosing(false); setError(null); setConflict(false); setNote(null); setTerms(false);
     }
     else if (outcome === "rate-limited") setError("rate-limited");
     else if (outcome === "failed") setError("failed");
@@ -306,7 +298,6 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
         setSignIn({ step: "code", intent: phase.intent, email: result.email, resendAt: result.resendAt, problem: null, triesLeft: null,
           ...(result.signupOpen === false ? { signupOpen: false } : {}) });
         setForm({ email: result.email, code: "" });
-        track("cloud_signin", { step: "code_sent", source: request.source });
       } else setSignIn({ ...phase, problem: result.outcome === "blocked" ? blockedProblem(result) : result.outcome });
     }, () => setSignIn({ ...phase, problem: "failed" })).finally(() => setBusy(false));
   };
@@ -324,7 +315,6 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
           return;
         }
         setAccount(result.state); setArrived(true);
-        track("cloud_signin", { step: "signed_in", source: request.source });
         if (plan && free(result.state)) {
           // The account's own offer may differ from the one shown signed out (a trial already used, another price).
           if (sameTerms(offerShown, result.state.offer, plan)) { setSignIn({ step: "done", intent: true }); await openCheckout(plan); }
@@ -358,7 +348,6 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
       const plan = signIn?.intent ? planNow() : null;
       setSignIn(null);
       await bridge.signInCancel?.().catch(() => {});
-      track("cloud_signin", { step: "browser", source: request.source });
       if (plan) await openCheckout(plan);
       else setAccount(await bridge.begin());
     }),

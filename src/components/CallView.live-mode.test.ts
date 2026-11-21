@@ -51,7 +51,7 @@ describe("call modes", () => {
   it("keeps group calls on the take-turns path", () => {
     setCallMode("live");
     const group = render(createElement(CallTargetButton, {
-      targetId: "room", targetName: "Room", voices: [undefined], requireExplicitVoices: true, onStart: vi.fn(),
+      targetId: "room", targetName: "Room", voices: [undefined], requireExplicitVoices: true,
     }));
     expect(group).toContain('aria-label="Checking call availability"');
   });
@@ -61,7 +61,7 @@ describe("call modes", () => {
     expect(one).toContain('aria-label="Call mode"');
     expect(one).toContain('aria-haspopup="menu"');
     const group = render(createElement(CallTargetButton, {
-      targetId: "room", targetName: "Room", voices: [undefined], requireExplicitVoices: true, onStart: vi.fn(),
+      targetId: "room", targetName: "Room", voices: [undefined], requireExplicitVoices: true,
     }));
     expect(group).not.toContain('aria-label="Call mode"');
   });
@@ -86,7 +86,7 @@ describe("call modes", () => {
       expect(other).toMatch(/<button[^>]*disabled=""[^>]*aria-label="On a Live call"/);
     }
     const room = render(createElement(CallTargetButton, {
-      targetId: "room", targetName: "Room", voices: [undefined], requireExplicitVoices: true, onStart: vi.fn(),
+      targetId: "room", targetName: "Room", voices: [undefined], requireExplicitVoices: true,
     }));
     expect(room).toMatch(/<button[^>]*disabled=""[^>]*aria-label="On a Live call"/);
   });

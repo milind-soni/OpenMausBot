@@ -1,13 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
-import { track } from "@/lib/analytics";
 import { CLOUD_SOURCES } from "@/lib/cloud-plan";
 import { cloudAccountBridge, cloudWebHop, openCloudOnWeb } from "./cloud-add-web";
 
 const away = { cloudHome: false };
 
-afterEach(() => { vi.unstubAllGlobals(); vi.mocked(track).mockClear(); });
+afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("Add a Cloud without the desktop's own sign-in", () => {
   it("opens the plan's checkout on the Cloud website, tagged with the button that asked", () => {
@@ -27,18 +25,16 @@ describe("Add a Cloud without the desktop's own sign-in", () => {
       .toBe("https://cloud.openmausbot.com/cloud?src=app_settings");
   });
 
-  it("opens a new tab in a browser, through main on a desktop, and counts the hop", () => {
+  it("opens a new tab in a browser, through main on a desktop", () => {
     const open = vi.fn();
     vi.stubGlobal("window", { open });
     openCloudOnWeb({ source: "app_onboarding" }, away);
     expect(open).toHaveBeenCalledExactlyOnceWith("https://cloud.openmausbot.com/pro/buy?src=app_onboarding", "_blank", "noopener,noreferrer");
-    expect(track).toHaveBeenCalledExactlyOnceWith("cloud_checkout_opened", { plan: "pro", source: "app_onboarding", via: "web" });
     const openExternal = vi.fn(async () => {});
     vi.stubGlobal("window", { open, ogb: { openExternal, remoteClient: { active: true } } });
     openCloudOnWeb({ source: "app_card" }, { cloudHome: true });
     expect(openExternal).toHaveBeenCalledExactlyOnceWith("https://cloud.openmausbot.com/cloud?src=app_card");
     expect(open).toHaveBeenCalledTimes(1);
-    expect(track).toHaveBeenLastCalledWith("cloud_checkout_opened", { source: "app_card", via: "cloud_page" });
   });
 
   it("only the desktop's own page has the sign-in Add a Cloud runs on", () => {

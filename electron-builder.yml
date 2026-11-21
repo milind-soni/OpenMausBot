@@ -81,6 +81,12 @@ extraResources:
   # carries its license text, so the upstream file travels here.
   - from: third_party/onepassword-sdk/LICENSE
     to: licenses/1password-sdk-LICENSE.txt
+  # Playwright's accessibility snapshot, bundled into electron/resources/browser-snapshot.js (Apache-2.0).
+  - from: third_party/playwright-injected/LICENSE
+    to: licenses/playwright-injected-LICENSE.txt
+  # resvg-js (MPL-2.0), staged in the duckdb resource tree.
+  - from: node_modules/@resvg/resvg-js/LICENSE
+    to: licenses/resvg-js-LICENSE.txt
   - from: dist
     to: ui
   - from: dist-server

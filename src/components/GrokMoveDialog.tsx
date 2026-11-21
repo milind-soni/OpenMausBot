@@ -1,7 +1,6 @@
 import { Check, Copy, ExternalLink, FileUp, Loader2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { track } from "@/lib/analytics";
 import { openExternalLink } from "@/lib/app-links";
 import { cn } from "@/lib/cn";
 import { useCopyFeedback } from "@/lib/copy-text";
@@ -267,7 +266,6 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
     if (!preview) return;
     setImporting(true);
     const done = await runGrokMove(preview, dispatch, local);
-    track("team_imported", { members: preview.plans.length, source: "grok", mode: "add", format: "package" });
     if (viaLink.current && done.bots.length > 0 && done.failed.length === 0) {
       // Best effort: a link left behind stops working on its own within the hour.
       void grokConnector("DELETE").then(takeConnector, () => {});

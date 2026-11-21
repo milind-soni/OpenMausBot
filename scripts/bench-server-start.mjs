@@ -73,7 +73,7 @@ function once({ appRoot, entry, cache }) {
     ];
     const env = {
       PATH: dirname(process.execPath), HOME: data, TMPDIR: join(data, "tmp"), LANG: "en_US.UTF-8", OMB_DATA_DIR: data, OMB_PORT: String(port),
-      OMB_WEBHOOK_PORT: String(port + 1), OMB_TEST_SEALED_PATH: "1", OMB_DISABLE_ANNOUNCEMENTS: "1", OMB_STATIC_DIR: join(appRoot, "dist"),
+      OMB_WEBHOOK_PORT: String(port + 1), OMB_TEST_SEALED_PATH: "1", OMB_ANNOUNCEMENTS: "0", OMB_STATIC_DIR: join(appRoot, "dist"),
       OMB_BENCH_EGRESS_LOG: join(dirname(data), "egress-server-start.log"), OMB_BENCH_CPU_OUT: cpuFile,
       ...(values.node ? {} : { ELECTRON_RUN_AS_NODE: "1" }),
       ...(values["stall-ms"] ? { OMB_BENCH_EGRESS_STALL_MS: values["stall-ms"] } : {}),

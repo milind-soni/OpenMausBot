@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { hintSeenPatch, welcomeDue } from "@/lib/onboarding";
 import { useAdvancedMode } from "@/lib/interface-mode";
-import { emailGateDone } from "@/lib/analytics";
+import { emailGateDone } from "@/lib/email-gate";
 import { anchorFor, cardAnswered, nextSpotlight, placementFor, tourComplete, type ChatObservation, type SpotlightId } from "@/lib/first-conversation";
 import { t } from "@/lib/i18n";
 import type { MausState } from "@/lib/mascot";

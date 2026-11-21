@@ -27,7 +27,6 @@ vi.mock("@/state/store", async (importOriginal) => {
   };
 });
 vi.mock("@/lib/app-links", () => ({ openExternalLink: vi.fn(async () => {}) }));
-vi.mock("@/lib/product-events", () => ({ engineSignedIn: vi.fn() }));
 vi.mock("@/components/ClaudeSignIn", () => ({ claudeSignInLink: () => null }));
 
 import { api } from "@/state/store";

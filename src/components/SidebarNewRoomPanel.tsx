@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { track } from "@/lib/analytics";
 import { useStore } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { imeComposing } from "@/lib/send-key";
@@ -27,7 +26,6 @@ export function NewRoomPanel({ onClose }: { onClose: () => void }) {
       name: name.trim() || undefined,
       section: section.trim() || undefined,
     });
-    track("room_created", { members: picked.size, context: Boolean(section.trim()) });
     onClose();
   };
   return (

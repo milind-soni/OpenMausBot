@@ -1,49 +1,42 @@
 # Licensing
 
-OpenMausBot is open source under the [Apache License 2.0](LICENSE), with one
-carve-out and a few notes.
+Edu Bot is open source under the [Apache License 2.0](LICENSE). Everything in
+this repository is Apache 2.0, except third-party components, which keep their
+own licenses (below).
 
-## The carve-out: `enterprise/`
+## Fork attribution
 
-Everything under `enterprise/` is source-available under the
-[OpenMausBot Enterprise License](enterprise/LICENSE), not Apache 2.0. You may
-read, build, and evaluate it, and run it freely in development and test.
-Running its features in production needs a license key issued for your
-organisation. Hosting it for third parties or white-labelling the product needs
-a partner agreement.
+Edu Bot is a fork and derivative work of
+[OpenMausBot](https://github.com/milind-soni/OpenMausBot), Copyright 2026
+Milind Soni and OpenMausBot contributors, also licensed under Apache 2.0. The
+upstream copyright and attribution notices are kept in [NOTICE](NOTICE), below
+Edu Bot's own header, which summarises what Edu Bot changed.
 
-Delete the folder and what remains is the open-source edition: the server
-reports `{"edition":"oss"}` and ordinary standalone operation is unchanged.
-A workspace explicitly configured for hosted sign-in refuses remote access
-without that optional adapter; removing the enterprise layer must not bypass
-its configured sign-in authority. The `open-source edition builds without
-enterprise/` CI job proves the OSS build, boot response and absent adapter
-factory; it does not exercise every hosted HTTP route. The isolated hosted
-workspace tests verify those sign-in and revocation paths separately. The list
-of entitlement ids the server understands is in [`enterprise/FEATURES`](enterprise/FEATURES).
-
-The routing rule for new work: could any open-source user want it? Then it goes
-in core, as a public pull request. Organisation-, admin- or tier-flavoured?
-Then it lives in `enterprise/` behind an entitlement. Customer-specific brand,
-skills, packages or connectors belong in that customer's own repository as
-data and configuration, never as a fork.
+Upstream OpenMausBot carries a source-available `enterprise/` directory under a
+separate license that forbids redistribution. Edu Bot does not include it: the
+server always reports `{"edition":"oss"}`, and the `open-source edition, no
+enterprise layer` CI job proves the build and the boot without it. A workspace
+explicitly configured for hosted sign-in (`OMB_ADMIN_*`) still refuses remote
+access, because the adapter it needs is not part of Edu Bot.
 
 ## Contributions
 
-- Outside `enterprise/`: contribute under Apache 2.0. No DCO sign-off or CLA is
-  required. Submit only code you wrote or have the right to contribute.
-- Inside `enterprise/`: sign the [Contributor License Agreement](CLA.md) once, by
-  commenting on your pull request. It lets the project keep that folder under
-  its own license while still accepting your work.
-- The open-core boundary, the cloud seam and this file are covered by
-  [`CODEOWNERS`](.github/CODEOWNERS): a maintainer reviews changes there.
+Contribute under Apache 2.0. No DCO sign-off or CLA is required. Submit only
+code you wrote or have the right to contribute.
 
-## Third-party components and trademarks
+## Third-party components
 
 Bundled third-party software keeps its own licenses; notices, license texts,
 source locations and the SBOM are listed in [NOTICE](NOTICE) and
-[`third_party/`](third_party/). The OpenMausBot and MausBot names and the
-mascot are trademarks of Supamaus Software Private Limited; the Apache License
-does not grant trademark rights (section 6),
-so a product built on OpenMausBot needs its own name unless a partner agreement
-says otherwise.
+[`third_party/`](third_party/). Every desktop package, the npm package and the
+Docker image ship `LICENSE` and `NOTICE`.
+
+## Trademarks
+
+Edu Bot is an independent project and is not affiliated with, endorsed by, or
+sponsored by Supamaus Software Private Limited or the OpenMausBot project.
+"OpenMausBot", "MausBot" and the SupaMaus mascot are trademarks of Supamaus
+Software Private Limited. The Apache License does not grant trademark rights
+(section 6); Edu Bot uses those names only to state where the code comes from.
+Other product names and provider marks shown in the app belong to their owners
+and identify those providers only.

@@ -31,7 +31,7 @@ A standalone server becomes connected by enrolling the connector. No reinstall, 
   - `operated`, for a server we run a Team Cloud on: those jobs plus `export-disk` and `import-disk`, a `start` that
     carries the image and the settings, and the Admin's signed requests to the home, pairing among them.
 - **Installer**: one script with a preflight. This repository.
-- **Paid-only features** (SSO, seat checks): `enterprise/` in this repository, under its source-available licence.
+- **Paid-only features** (SSO, seat checks): upstream's `enterprise/` layer, not included in Edu Bot.
 - **Control plane**: our Admin, in a private repository: enrolment, entitlements, update scheduling, health, billing,
   operations.
 - The licence signing key is in neither repository.
@@ -183,7 +183,7 @@ Read at the commit that adds the customer-run mode. "Built" means the code is in
   version does not report healthy (`home.ts`).
 - The connector's own installer with a preflight, `connector/install.sh`, which the Admin is to serve with its address
   and the connector's image digest filled in.
-- The offline licence check for paid features (`enterprise/server/license.ts`).
+- The offline licence check for paid features (upstream's enterprise layer, not included in Edu Bot).
 
 ### Different from this document
 

@@ -5,7 +5,6 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ServerStatus } from "../../electron/server-status.mjs";
 import { setLocale } from "@/lib/i18n";
 
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 const { ServerList, updateCommand } = await import("./ServerList");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

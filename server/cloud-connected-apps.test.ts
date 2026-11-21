@@ -153,7 +153,7 @@ describe("a Cloud home's connected-apps installation", () => {
     await apps.settled();
     expect(applied).toEqual([null]);
     expect(connectionMode({})).toBe("unavailable");
-    expect(connectorSetup({}, true)).toBe("service-unavailable");
+    expect(connectorSetup({}, true, BROKER)).toBe("service-unavailable");
     expect(existsSync(file())).toBe(false);
 
     // 30 s, 1 min, 2 min, each with the jitter random() = 0.5 adds (a tenth).

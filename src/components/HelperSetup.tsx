@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { AppWindow, Bot as BotIcon, Cloud, Download, Mail, Smartphone, Sparkles, type LucideIcon } from "lucide-react";
 
-import { track } from "@/lib/analytics";
 import { INTRO_CHIPS, setupSteps, type IntroChip, type SetupStep } from "@/lib/default-bot";
 import { t } from "@/lib/i18n";
 import { phonePairingSettingsAction } from "@/lib/phone-pairing";
@@ -9,7 +8,6 @@ import type { LocaleKey } from "@/locales";
 import { useStore, type Action } from "@/state/store";
 import { engineReady } from "./EngineLibrary";
 import { ConnectAiDialog } from "./onboarding/ConnectAi";
-import { ConnectAiPlaceContext } from "@/lib/connect-ai-events";
 import { useWelcomeAi } from "./onboarding/welcome-ai";
 
 const STEPS: Record<SetupStep, { label: LocaleKey; icon: LucideIcon }> = {
@@ -49,10 +47,7 @@ export function HelperSetup() {
         {steps.map((step) => {
           const { label, icon: Icon } = STEPS[step];
           return (
-            <button key={step} type="button" data-helper-step={step} onClick={() => {
-              if (step === "cloud") track("onboarding_cloud", { action: "start_trial" });
-              dispatch(setupAction(step));
-            }}
+            <button key={step} type="button" data-helper-step={step} onClick={() => dispatch(setupAction(step))}
               className="inline-flex items-center gap-1.5 rounded-full bg-accent/10 px-3 py-1.5 text-[13px] font-medium text-ink hover:bg-accent/20">
               <Icon size={14} aria-hidden="true" className="text-accent" />{t(label)}
             </button>
@@ -84,9 +79,7 @@ export function chipAction(chip: Exclude<IntroChip, "ai">): Action {
 function IntroConnectAi({ onClose }: { onClose: () => void }) {
   const { state } = useStore();
   const [chosen, setChosen] = useState<string | null>(null);
-  return <ConnectAiPlaceContext.Provider value="chat">
-    <ConnectAiDialog tested={useWelcomeAi(state.instances, true, chosen, "chat")} onChoose={setChosen} onClose={onClose} />
-  </ConnectAiPlaceContext.Provider>;
+  return <ConnectAiDialog tested={useWelcomeAi(state.instances, true, chosen)} onChoose={setChosen} onClose={onClose} />;
 }
 
 /** What is still missing, as chips under MausBot's follow-up (Simple mode): at most INTRO_CHIPS, and one that was tapped
@@ -99,7 +92,6 @@ export function IntroChips({ chips }: { chips: readonly IntroChip[] }) {
   const tap = (chip: IntroChip) => {
     setTapped((now) => new Set([...now, chip]));
     if (chip === "ai") return setConnecting(true);
-    if (chip === "cloud") track("onboarding_cloud", { action: "start_trial" });
     dispatch(chipAction(chip));
   };
   return (

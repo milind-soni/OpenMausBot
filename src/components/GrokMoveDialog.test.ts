@@ -3,9 +3,8 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const f = vi.hoisted(() => ({ state: {} as Record<string, unknown>, dispatch: vi.fn(), api: vi.fn(), track: vi.fn() }));
+const f = vi.hoisted(() => ({ state: {} as Record<string, unknown>, dispatch: vi.fn(), api: vi.fn() }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f.dispatch }), api: f.api }));
-vi.mock("@/lib/analytics", () => ({ track: f.track }));
 
 import { setLocale } from "@/lib/i18n";
 import { GROK_EXPORT_FORMAT, GROK_EXPORT_PROMPT } from "../../shared/grok-import";
@@ -64,7 +63,6 @@ beforeEach(() => {
   setLocale("en");
   vi.stubGlobal("ogb", undefined);
   f.api.mockReset();
-  f.track.mockReset();
   f.dispatch.mockReset();
   f.state = { config: {}, bots: [] };
   f.api.mockImplementation(async (path: string) => (path.startsWith("/api/teams/import")
@@ -111,7 +109,6 @@ describe("Move from Grok Bot", () => {
     expect(lines.indexOf(FILES_STAY)).toBe(lines.indexOf("Routines are paused. Turn each one off in Grok Bot, then on here.") + 1);
     plain();
     expect(f.api.mock.calls.map(([path]) => path)).toContain("/api/bots/b1/skills/greet");
-    expect(f.track).toHaveBeenCalledOnce();
     expect(button("Move another Bot")).toBeDefined();
     expect(button("Done")).toBeDefined();
   });

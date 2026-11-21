@@ -1,6 +1,5 @@
 import { useId, useState } from "react";
 import { Gift, Mail } from "lucide-react";
-import { track } from "@/lib/analytics";
 import { openEmailDraft } from "@/lib/app-links";
 import { BOAT_OFFER, boatClaimMailto, boatOfferRuns } from "@/lib/boat-offer";
 import { brandStatus } from "@/lib/brand";
@@ -9,11 +8,6 @@ import { t } from "@/lib/i18n";
 import { LinkButton, NoticeCard, NotNowButton, PRIMARY_BUTTON } from "./NoticeCard";
 
 export type BoatOfferAction = "get_boat" | "claim" | "not_now" | "close";
-type BoatOfferPlace = "card" | "settings";
-
-export function reportBoatOffer(action: BoatOfferAction | "shown", place: BoatOfferPlace) {
-  track("boat_offer", { action, place });
-}
 
 function BoatOfferWords() {
   return <>
@@ -59,10 +53,10 @@ export function BoatOfferPanel() {
         <p className="text-[13px] leading-[18px] text-ink-secondary">{t("boatOffer.body")}</p>
         <p data-boat-offer-yourself className="mt-1 text-[12px] leading-4 text-ink-secondary">{t("boatOffer.yourself")}</p>
       </div>
-      <LinkButton url={BOAT_OFFER.url} label={t("boatOffer.get")} className="ui-button ui-button-md shrink-0 rounded-full" onOpened={() => reportBoatOffer("get_boat", "settings")} />
+      <LinkButton url={BOAT_OFFER.url} label={t("boatOffer.get")} className="ui-button ui-button-md shrink-0 rounded-full" />
     </div>
     <div className="flex items-center justify-end">
-      <ClaimButton onOpened={() => reportBoatOffer("claim", "settings")} />
+      <ClaimButton />
     </div>
   </section>;
 }

@@ -87,8 +87,7 @@ What each first-run surface depends on, and how it was checked:
 | Browser, client-scope session on a server that is not hosted | Nothing new: the flow does not open itself (it could not be saved); Settings replay and spotlights as before | `src/components/onboarding/WelcomeGate.test.ts`, `src/lib/onboarding.test.ts` |
 
 `GET /api/auth/session` adds `hosted: true` for a session on a hosted
-workspace and is otherwise unchanged (`server/hosted-access.test.ts`,
-`server/email-signin.test.ts`).
+workspace and is otherwise unchanged (`server/email-signin.test.ts`).
 
 On a fresh `ui launch` fixture, the recipe above still passed end to end
 through the new session check. In the same fixture browser, a client-scope

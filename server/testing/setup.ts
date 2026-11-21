@@ -23,7 +23,7 @@ delete process.env.CODEX_HOME;
 // Pi turns copy from the person's Pi agent folder ($PI_CODING_AGENT_DIR or ~/.pi/agent): keep it in the throwaway home.
 delete process.env.PI_CODING_AGENT_DIR;
 // No server in a test downloads the project's announcement cards; its tests hand the store a fake fetch.
-process.env.OMB_DISABLE_ANNOUNCEMENTS = "1";
+delete process.env.OMB_ANNOUNCEMENTS;
 // Named explicitly although homedir() already covers it: the device tests delete this directory wholesale.
 process.env.OMB_COMPANION_DIR = join(home, ".openmausbot-companion");
 

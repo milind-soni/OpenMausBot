@@ -70,7 +70,7 @@ describe("container images", () => {
       // (and the Cloud home's Caddyfile)
       expect(heavy, target).toHaveLength(target === "cloud-home" ? 3 : 2);
       const fromBuild = steps.flatMap((step, i) => (step.op === "COPY" && step.args.includes("--from=build") ? [i] : []));
-      expect(fromBuild, target).toHaveLength(4);
+      expect(fromBuild, target).toHaveLength(5);
       expect(Math.max(...heavy), target).toBeLessThan(Math.min(...app));
       // The Data engine's native tree (DuckDB, resvg) changes on a version bump,
       // not per commit, so it is copied before the per-commit app files.
@@ -114,6 +114,7 @@ describe("container images", () => {
     expect(home.findIndex(step => step.args.startsWith("--from=tunnel "))).toBeLessThan(home.findLastIndex(npmInstall));
     expect(home.filter(step => step.args.includes("--from=build")).map(step => step.args)).toEqual([
       "/src/dist-native/duckdb/target ./duckdb", "/src/dist-server ./dist-server", "/src/dist ./dist", "/src/skills ./skills",
+      "/src/LICENSE /src/NOTICE ./",
     ].map(path => `--from=build ${path}`));
     expect(chain("server").filter(step => step.args.includes("--from=build")).every(step => step.args.startsWith("--from=build --chown=maus:maus "))).toBe(true);
   });

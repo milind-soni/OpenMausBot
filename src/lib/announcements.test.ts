@@ -3,12 +3,11 @@ import { EMPTY_ONBOARDING, type OnboardingStatus } from "@/lib/onboarding";
 import { localeChoices } from "@/locales";
 import { ANNOUNCEMENT_LOCALES, parseAnnouncementCard, type AnnouncementCard, type AnnouncementFacts } from "../../shared/announcements";
 
-vi.mock("@/lib/analytics", () => ({ track: vi.fn(), emailGateDone: () => true }));
+vi.mock("@/lib/email-gate", () => ({ emailGateDone: () => true }));
 vi.mock("@/state/store", () => ({ api: vi.fn() }));
-import { track } from "@/lib/analytics";
 import {
   announcementConditions, announcementPlan, announcementPlatform, announcementSurface, cardSeen, hintsWith, lastSponsorDay, launchAnnouncement, markLaunchAnnouncement,
-  pickAnnouncement, providersRestricted, rememberCardSeen, rememberSponsorDay, reportAnnouncement, seenKey, SPONSOR_CARDS_FOR_TEAM_MEMBERS, SPONSOR_REST_DAYS,
+  pickAnnouncement, providersRestricted, rememberCardSeen, rememberSponsorDay, seenKey, SPONSOR_CARDS_FOR_TEAM_MEMBERS, SPONSOR_REST_DAYS,
   sponsorDayKey, type PickContext, type SeenRecord,
 } from "./announcements";
 
@@ -19,7 +18,7 @@ beforeEach(() => {
   vi.stubGlobal("localStorage", { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value) });
   vi.stubGlobal("sessionStorage", { getItem: (key: string) => session.get(key) ?? null, setItem: (key: string, value: string) => session.set(key, value) });
 });
-afterEach(() => { vi.unstubAllGlobals(); vi.mocked(track).mockClear(); });
+afterEach(() => { vi.unstubAllGlobals(); });
 
 const make = (id: string, extra: Record<string, unknown> = {}): AnnouncementCard => {
   const parsed = parseAnnouncementCard({ id, kind: "product", title: "T", body: "B", primary: { label: "Go", action: { open_url: "https://example.com/" } }, ends: "2027-01-01T00:00:00Z", ...extra });
@@ -174,11 +173,6 @@ describe("what the page knows", () => {
     expect(providersRestricted(policy({ allowedEngines: ["claudeAgent"] }))).toBe(true);
     expect(providersRestricted(policy({ allowedEngines: ["claudeAgent"], team: true }))).toBe(false);
   });
-});
-
-it("counts one event per card and step, with the card's public id and nothing else", () => {
-  reportAnnouncement(make("card-a", { kind: "tip" }), "primary");
-  expect(track).toHaveBeenCalledWith("announcement", { id: "card-a", kind: "tip", action: "primary" });
 });
 
 it("a card's texts may be in any of the app's languages, and only those", () => {

@@ -448,9 +448,9 @@ export function phonePushAccess(controlPlane: unknown, credential: unknown): Pho
 export class PhonePushAccessSource {
   private desktop: PhonePushAccess | null | undefined;
   private readonly env: NodeJS.ProcessEnv;
-  private readonly options: { tunnelFile: string; defaultControlPlane: string };
+  private readonly options: { tunnelFile: string; defaultControlPlane?: string };
 
-  constructor(options: { env?: NodeJS.ProcessEnv; tunnelFile: string; defaultControlPlane: string }) {
+  constructor(options: { env?: NodeJS.ProcessEnv; tunnelFile: string; defaultControlPlane?: string }) {
     this.env = options.env ?? process.env;
     this.options = options;
   }
@@ -467,7 +467,7 @@ export class PhonePushAccessSource {
 
   private controlPlane(): string {
     if (Object.hasOwn(this.env, "OMB_CONTROL_PLANE_URL")) return normalizeControlPlaneURL(this.env.OMB_CONTROL_PLANE_URL ?? "");
-    return this.options.defaultControlPlane;
+    return this.options.defaultControlPlane ?? "";
   }
 
   current(): PhonePushAccess | null {

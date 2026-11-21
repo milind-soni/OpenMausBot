@@ -15,13 +15,11 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
   useEffect: (effect: EffectCallback, deps?: readonly unknown[]) => { f.effects.push({ effect, deps }); },
 }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f.dispatch }) }));
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("./cloud-buy/NightCard", () => ({ NightCard: ({ children }: { children: ReactNode }) => createElement("div", { "data-night-card": "" }, children) }));
 vi.mock("./cloud-buy/AddCloudFlow", () => ({ AddCloudFlow: ({ source }: { source?: string }) => createElement("div", { "data-add-cloud-flow": source ?? "" }) }));
 import { CloudAddDialog, CloudAddPanel, CloudAddSheet, type CloudAddActions, type CloudAddUi } from "./CloudAddDialog";
 import { ChooseScreen } from "./cloud-buy/ChooseScreen";
 import { cloudAddView, type CloudAddView } from "@/lib/cloud-plan";
-import { track } from "@/lib/analytics";
 import { showWelcome } from "@/lib/onboarding";
 
 const DAY = 86_400_000, NOW = new Date(2026, 9, 8, 12).getTime();
@@ -395,7 +393,6 @@ describe("the sheet", () => {
 
   it("signed out, Start free trial signs in inside the sheet: the code, then straight to checkout, with no browser until payment", async () => {
     expect(await settle()).toContain("Your bots, always on.");
-    expect(track).toHaveBeenCalledWith("cloud_dialog_shown", { source: "app_menu", view: "offer" });
     expect(bridge.sheet).toHaveBeenCalledWith(true);
     expect(await buy("max")).toContain("Create your MausBot account");
     expect(bridge.checkout).not.toHaveBeenCalled(); expect(bridge.begin).not.toHaveBeenCalled();
@@ -410,8 +407,6 @@ describe("the sheet", () => {
     expect(bridge.checkout).toHaveBeenCalledExactlyOnceWith("max", "app_menu");
     account = { ...free, checkout: { plan: "max", startedAt: NOW, link: true } };
     expect(await settle()).toContain("Waiting for your payment");
-    expect(track).toHaveBeenCalledWith("cloud_signin", { step: "signed_in", source: "app_menu" });
-    expect(track).toHaveBeenCalledWith("cloud_checkout_opened", { plan: "max", trial: true, source: "app_menu" });
   });
 
   it("Compare plans shows every card's details and hides them again; a button names the cards it opens", async () => {

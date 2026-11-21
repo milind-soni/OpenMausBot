@@ -34,7 +34,7 @@ import {
 } from "./connector-advertisement.ts";
 import { connectedAppGrantSlugs, serviceSlugFor, serviceSlugForCandidates } from "./connector-verdict.ts";
 import { parseMcpResponse, withToolsListFallback } from "./connector-tools-list.ts";
-import { brokerAccess, managedComposioBrokerOff, type BrokerAccess } from "./composio-broker-access.ts";
+import { brokerAccess, managedComposioBrokerUrl, type BrokerAccess } from "./composio-broker-access.ts";
 export { applyManagedBrokerMessage, brokerAccess, setManagedBrokerAccess, type BrokerAccess } from "./composio-broker-access.ts";
 export { prepareProjectSession, trustedSessionMcpUrl } from "./composio-session.ts";
 import { catalogFor, type CatalogPagination, type ToolkitCard } from "./composio-catalog.ts";
@@ -161,15 +161,16 @@ export function connectorAvailability(
   return storeState === "unavailable" ? "unreadable" : "unconfigured";
 }
 
-/** Only a host the managed service comes with (the desktop app, OMB_DESKTOP_PARENT=1, or a Cloud home) calls a missing one an outage. */
+/** Only a managed host (the desktop app, OMB_DESKTOP_PARENT=1, or a Cloud home) with a broker URL configured calls a missing service an outage. */
 export type ConnectorSetup = "ready" | "needs-setup" | "service-unavailable";
 
 export function connectorSetup(
   cfg: AppConfig,
   managedHost: boolean = process.env.OMB_DESKTOP_PARENT === "1",
+  brokerUrl: string | undefined = process.env.OMB_COMPOSIO_BROKER_URL,
 ): ConnectorSetup {
   if (configured(cfg)) return "ready";
-  return managedHost && !managedComposioBrokerOff() ? "service-unavailable" : "needs-setup";
+  return managedHost && managedComposioBrokerUrl(brokerUrl) ? "service-unavailable" : "needs-setup";
 }
 
 async function brokerRequest(path: string, init?: RequestInit, broker = brokerAccess()): Promise<Response> {

@@ -144,6 +144,17 @@ describe("server update check", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("says up to date, without an error, while the repository has published no release yet", async () => {
+    const fetch = vi.fn(async () => missing);
+    for (const channel of ["stable", "newest"] as const) {
+      const check = createUpdateChecker({ current: "0.1.92", install: "npm", channel, fetch });
+      const result = await check();
+      expect(result).toMatchObject({ current: "0.1.92", install: "npm", available: false });
+      expect(result.latest).toBeUndefined();
+    }
+    expect(fetch).toHaveBeenCalledWith(LATEST_RELEASE_URL, expect.anything());
+  });
+
   it("fails clearly when GitHub cannot be reached, and tries again next time", async () => {
     const fetch = vi.fn(async () => ({ ok: false, status: 403, json: async () => ({}) }) as Response);
     const check = createUpdateChecker({ current: "0.1.92", install: "git", channel: "newest", fetch });

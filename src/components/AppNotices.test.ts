@@ -15,6 +15,7 @@ import { createUpdatesConsent, registerUpdatesConsent } from "../../electron/upd
 
 const f = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[], state: {} as any, updater: null as any, dispatch: null as any, brand: "default",
   viewerEmail: undefined as string | null | undefined }));
+vi.mock("@/lib/email-gate", () => ({ emailGateDone: () => false }));
 vi.mock("./Layer", () => ({ Layer: ({ children }: { children: ReactNode }) => children, useIsTopLayer: () => () => true }));
 vi.mock("react", async original => ({ ...await original<typeof import("react")>(),
   useId: () => "test-id",
@@ -25,7 +26,6 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
 }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f.dispatch }), api: vi.fn().mockResolvedValue({}),
   CLOUD_LINK_SETTINGS: { type: "toggleAppSettings", open: true, section: "cloudAccount", cloudLink: true } }));
-vi.mock("@/lib/analytics", () => ({ emailGateDone: () => false, track: vi.fn() }));
 vi.mock("@/lib/updater", () => ({ useUpdaterState: () => f.updater }));
 vi.mock("./cloud-buy/NightCard", () => ({ NightCard: ({ children }: { children: unknown }) => children }));
 vi.mock("./whats-new/TeamPicture", () => ({ TeamPicture: () => null }));
@@ -40,7 +40,6 @@ import { AppNotices } from "./AppNotices";
 import { TwoPlacesCard } from "./TwoPlacesCard";
 import { BOAT_OFFER_NOTICE, CLOUD_INTRO, GROK_MOVE_NOTICE, launchNotice, localDay, MODELGO_OFFER_NOTICE, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, STAR_NOTICE, TEAMS_NOTICE, WHATS_NEW_NOTICE } from "@/lib/notices";
 import { BOAT_OFFER, boatClaimMailto } from "@/lib/boat-offer";
-import { track } from "@/lib/analytics";
 import { ADVANCED_MODE_KEY, setAdvancedMode } from "@/lib/interface-mode";
 import { SIMPLE_MODE_PROMPT_KEY } from "@/lib/simple-mode-prompt";
 import { ADVANCED_BACK_KEY } from "@/lib/new-look";
@@ -183,7 +182,6 @@ describe("the card after the update", () => {
     for (const gone of ["launch price", "first 100", "$89", "New features first", "Get Pro", STAR]) expect(html).not.toContain(gone);
     expect(html).not.toContain('aria-modal="true"');
     expect(bridges.cloud.offer).toHaveBeenCalled();
-    expect(track).toHaveBeenCalledWith("cloud_card_shown", { variant: "signed_out" });
     expect(JSON.parse(storage.get(`${CLOUD_INTRO}:days`)!)).toEqual([localDay(NOW)]);
     expect(hints()).toContain(`${CLOUD_INTRO}:day-1`);
     expect(await settle()).toContain(INTRO);
@@ -192,7 +190,6 @@ describe("the card after the update", () => {
     now = NOW + DAY; account = free;
     const again = await launch();
     expect(again).toContain(INTRO); expect(again).not.toContain("Sign in to your Cloud plan");
-    expect(track).toHaveBeenCalledWith("cloud_card_shown", { variant: "free" });
   });
 
   it("needs a trial: without one it waits (the star may show), and without money-back from the Admin it says none", async () => {
@@ -226,7 +223,6 @@ describe("the card after the update", () => {
     returning(); await launch();
     press("Start free trial"); await flush();
     expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "app_card" });
-    expect(track).toHaveBeenCalledWith("cloud_card_action", { action: "start" });
     expect(storage.get(CLOUD_INTRO)).toBe("1"); expect(hints()).toContain(CLOUD_INTRO);
     expect(render()).toBe("");
     now = NOW + 5 * DAY; storage.clear(); launchCardsSeen(); expect(await launch()).not.toContain(INTRO);
@@ -236,7 +232,6 @@ describe("the card after the update", () => {
     returning(); await launch();
     press("Show me how");
     expect(f.dispatch).toHaveBeenCalledWith({ type: "cloudHowTo", open: true });
-    expect(track).toHaveBeenCalledWith("cloud_card_action", { action: "howto" });
     expect(storage.get(CLOUD_INTRO)).toBe("1");
     for (const close of ["Not now", "Dismiss for good", "Escape"]) {
       storage.clear(); launchCardsSeen(); f.state.config.onboarding.hintsSeen = withTourFinished(undefined); now += DAY;
@@ -249,8 +244,6 @@ describe("the card after the update", () => {
       expect(storage.get(CLOUD_INTRO), close).toBe("1"); expect(hints()).toContain(CLOUD_INTRO);
       expect(render()).toContain("You can add a Cloud any time from the menu on the left of the app.");
     }
-    expect(track).toHaveBeenCalledWith("cloud_card_action", { action: "not_now" });
-    expect(track).toHaveBeenCalledWith("cloud_card_action", { action: "close" });
   });
 
   it("Sign in to your Cloud plan opens the sheet at its own sign-in and only hides the card for now", async () => {
@@ -283,7 +276,6 @@ describe("the card after the update", () => {
       }
     }
     expect(storage.get(`${CLOUD_INTRO}:days`)).toBeUndefined();
-    expect(track).not.toHaveBeenCalledWith("cloud_card_shown", expect.anything());
     expect(bridges.cloud.offer, "nothing to load the offer for").not.toHaveBeenCalled();
   });
 
@@ -391,7 +383,6 @@ describe("the Product Hunt launch card", () => {
     expect(html).not.toContain(STAR); expect(html).not.toContain("Your always-on bots are in the Cloud");
     press("Upvote on Product Hunt"); await flush();
     expect(window.ogb?.openExternal).toHaveBeenCalledWith(PRODUCT_HUNT_URL);
-    expect(vi.mocked(track)).toHaveBeenCalledWith("product_hunt_card", { action: "upvote" });
     expect(storage.get(PRODUCT_HUNT_NOTICE)).toBe("1"); expect(hints()).toContain(PRODUCT_HUNT_NOTICE);
     expect(await launch()).not.toContain(PH);
   });
@@ -400,7 +391,6 @@ describe("the Product Hunt launch card", () => {
     fresh();
     expect(await launch()).toContain(PH);
     press("Not now");
-    expect(vi.mocked(track)).toHaveBeenCalledWith("product_hunt_card", { action: "not_now" });
     expect(storage.get(PRODUCT_HUNT_NOTICE)).toBe("1");
     expect(await launch()).not.toContain(PH);
   });
@@ -445,7 +435,6 @@ describe("Boat's credit offer", () => {
   const html = (text: string) => text.replace(/'/g, "&#x27;");
   // No Cloud trial to offer, as for every plan but Team: the Cloud's own card after the update steps aside.
   const fresh = () => { storage.delete(BOAT_OFFER_NOTICE); returning(); offer = { ...PLAIN_OFFER }; };
-  const boatEvents = () => vi.mocked(track).mock.calls.filter(([name]) => name === "boat_offer").map(([, props]) => props);
   const escape = () => tree().find(node => node.type === "aside")!.props.onKeyDown({ key: "Escape", preventDefault() {}, stopPropagation() {} });
   const endedForGood = async () => {
     expect(render()).toBe("");
@@ -471,7 +460,6 @@ describe("Boat's credit offer", () => {
     for (let i = 1; i < words.length; i++) expect(shown.indexOf(words[i - 1]!), words[i]).toBeLessThan(shown.indexOf(words[i]!));
     expect(shown).not.toContain(STAR); expect(shown).not.toContain('aria-modal="true"');
     expect(await settle()).toContain(html(TITLE));
-    expect(boatEvents()).toEqual([{ action: "shown", place: "card" }]);
   });
 
   it("never on a first launch: not before the bots load, on a new install's first chat, in the launch its welcome or MausBot's card took", async () => {
@@ -502,21 +490,18 @@ describe("Boat's credit offer", () => {
       expect(await launch(), wait.toString()).not.toContain(html(TITLE));
       f.state = saved;
     }
-    expect(boatEvents()).toEqual([]);
     expect(await launch()).toContain(html(TITLE));
     f.state.bots[0].busy = true;
     expect(await settle(), "a turn starts while it is up").toBe("");
     f.state.bots[0].busy = false;
     expect(await settle(), "back once the turn ends, still not dismissed").toContain(html(TITLE));
     expect(storage.get(BOAT_OFFER_NOTICE)).toBeUndefined();
-    expect(boatEvents()).toEqual([{ action: "shown", place: "card" }]);
   });
 
   it("Get Boat opens boat.dev in the browser and ends it for good", async () => {
     fresh(); await launch();
     press("Get Boat"); await flush();
     expect(window.ogb?.openExternal).toHaveBeenCalledWith("https://boat.dev");
-    expect(boatEvents()).toContainEqual({ action: "get_boat", place: "card" });
     await endedForGood();
   });
 
@@ -530,7 +515,6 @@ describe("Boat's credit offer", () => {
     expect(draft.searchParams.get("subject")).toBe("MausBot introduced me: $50 Boat credit");
     expect(draft.searchParams.get("body")!.replace(/\r\n/g, "\n")).toBe("Hi Boat team,\n\nMausBot introduced me to Boat. I'm on the $___ plan.\nMy Boat account email: ___\n\nThanks!");
     expect(vi.mocked(api).mock.calls.map(([path]) => path), "only the dismissal is saved").toEqual(["/api/config"]);
-    expect(boatEvents()).toContainEqual({ action: "claim", place: "card" });
     await endedForGood();
   });
 
@@ -550,7 +534,6 @@ describe("Boat's credit offer", () => {
       end(); await flush();
       await endedForGood();
     }
-    expect(boatEvents().map((props) => props?.action)).toEqual(["shown", "not_now", "shown", "close", "shown", "close"]);
   });
 
   it("closed on This computer's page, it stays closed on My Cloud's page in the same desktop; a desktop that never showed it shows it there", async () => {
@@ -608,8 +591,6 @@ describe("What's new after the update", () => {
   const ID = WHATS_NEW_NOTICE;
   const BOAT = "$50 of Boat credit for you";
   let modal: boolean;
-  const steps = () => vi.mocked(track).mock.calls.filter(([event]) => event === "whats_new").map(([, props]) => props as Record<string, unknown>);
-  const step = (action: string, slide: string, audience = "no_plan", signedIn = false) => ({ action, slide, audience, signed_in: signedIn, campaign: ID });
   const seenOnDesktop = () => desk.saved?.seen ?? [];
   const on = (html: string) => /data-whats-new="(pro|team)"/.exec(html)?.[1] ?? null;
   const fresh = () => { desk = desktopMachine(); storage.delete(ID); f.state.config.onboarding.hintsSeen = withTourFinished(undefined); };
@@ -644,19 +625,16 @@ describe("What's new after the update", () => {
       expect(html).toContain(text);
     for (const part of ['role="dialog"', 'aria-modal="true"', 'aria-labelledby="whats-new-pro-title"']) expect(html).toContain(part);
     for (const other of [STAR, INTRO]) expect(html).not.toContain(other);
-    expect(steps()).toEqual([step("seen", "pro")]);
     expect(await settle()).toContain(PRO);
-    expect(steps(), "seen once while it is up").toHaveLength(1);
     expect(seenOnDesktop()).toEqual([]);
     expect(launchNotice(), "it takes the launch").toBe(ID);
 
     press("Get Pro"); await flush();
     expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "app_whats_new_pro" });
-    expect(steps().at(-1)).toEqual(step("get_pro", "pro"));
     await keptForGood();
   });
 
-  it("Next shows the Team slide, Back the new Cloud again, each step counted", async () => {
+  it("Next shows the Team slide, Back the new Cloud again", async () => {
     account = free;
     await launch();
     press("Next");
@@ -664,7 +642,6 @@ describe("What's new after the update", () => {
     f.effects.forEach(effect => effect()); await flush();
     press("Back");
     expect(on(render())).toBe("pro");
-    expect(steps()).toEqual([step("seen", "pro", "no_plan", true), step("next", "pro", "no_plan", true), step("seen", "team", "no_plan", true), step("back", "team", "no_plan", true)]);
     expect(f.dispatch).not.toHaveBeenCalled(); expect(seenOnDesktop()).toEqual([]);
   });
 
@@ -672,13 +649,11 @@ describe("What's new after the update", () => {
     await launch();
     press("See the new Cloud"); await flush();
     expect(window.ogb?.openExternal).toHaveBeenCalledWith("https://cloud.openmausbot.com/cloud?src=app_whats_new_pro");
-    expect(steps().at(-1)).toEqual(step("see_cloud", "pro"));
     await keptForGood();
     fresh(); vi.mocked(window.ogb!.openExternal!).mockClear();
     await relaunch(); press("Next");
     press("Start a Team"); await flush();
     expect(window.ogb?.openExternal).toHaveBeenCalledWith("https://cloud.openmausbot.com/pro/buy?plan=team&src=app_whats_new_team");
-    expect(steps().at(-1)).toEqual(step("start_team", "team"));
     await keptForGood();
   });
 
@@ -688,7 +663,6 @@ describe("What's new after the update", () => {
       const html = await relaunch();
       expect(on(html), JSON.stringify(state.entitlement)).toBe("team");
       expect(html).not.toContain(PRO); expect(html).not.toContain("Next"); expect(html).not.toContain("Get Pro");
-      expect(steps()).toEqual([step("seen", "team", "own_plan", true)]);
     }
     press("Start a Team"); await flush();
     expect(f.dispatch, "the app's own Add a Cloud, which lists the Team plan").toHaveBeenCalledWith({ type: "openCloudAdd", source: "app_whats_new_team" });
@@ -707,7 +681,7 @@ describe("What's new after the update", () => {
       const html = await relaunch();
       expect(on(html), JSON.stringify(state)).toBeNull();
     }
-    expect(steps()).toEqual([]); expect(seenOnDesktop()).toEqual([]);
+    expect(seenOnDesktop()).toEqual([]);
   });
 
   it("a slide the Admin doesn't sell is left out; neither sold, or the Cloud unreachable, waits for a later launch and lets the other cards show", async () => {
@@ -738,7 +712,6 @@ describe("What's new after the update", () => {
     const next = await relaunch();
     expect(on(next)).toBeNull(); expect(next).toContain(BOAT);
     expect(launchNotice()).toBe(BOAT_OFFER_NOTICE);
-    expect(steps().map(props => props.action)).toEqual(["seen", "not_now"]);
   });
 
   it("a new install sees it once onboarding is done and a bot has answered, in a later launch than the welcome's, after MausBot's card", async () => {
@@ -778,7 +751,7 @@ describe("What's new after the update", () => {
       expect(await relaunch(), wait.toString()).toBe("");
       f.state = saved; f.updater = null; account = signedOut; modal = false; bridges.cloud.offer.mockImplementation(async () => offer); desk = desktopMachine();
     }
-    expect(steps()).toEqual([]); expect(seenOnDesktop()).toEqual([]);
+    expect(seenOnDesktop()).toEqual([]);
     expect(on(await relaunch())).toBe("pro");
     f.state.bots[0].busy = true;
     expect(await settle(), "a turn starts while it is up").toBe("");
@@ -800,7 +773,6 @@ describe("What's new after the update", () => {
       await flush();
       await keptForGood();
     }
-    expect(steps().filter(props => props.action !== "seen").map(props => props.action)).toEqual(["not_now", "close", "close", "close"]);
   });
 
   it("closed on another port or in another browser on this workspace, it stays closed; the desktop learns an earlier close", async () => {
@@ -809,7 +781,6 @@ describe("What's new after the update", () => {
       expect(on(await relaunch())).toBeNull();
       await flush(); expect(seenOnDesktop()).toEqual([ID]);
     }
-    expect(steps()).toEqual([]);
   });
 
   it("a first run on this computer leaves it for a later launch: everyone who installs sees it once", async () => {
@@ -839,7 +810,7 @@ describe("What's new after the update", () => {
     expect(on(await relaunch())).toBeNull();
     viewer = { hosted: true, canSave: true }; showWindow(VPS);
     expect(on(await relaunch())).toBeNull();
-    expect(steps()).toEqual([]); expect(seenOnDesktop()).toEqual([]);
+    expect(seenOnDesktop()).toEqual([]);
   });
 });
 
@@ -973,7 +944,6 @@ describe("no Use my Mac popup", () => {
 describe("the Move from Grok Bot popup", () => {
   const TITLE = "Move from Grok Bot", WHATS_NEW = "Meet the new MausBot Cloud", DIALOG = "THE MOVE DIALOG";
   let modal: boolean;
-  const events = () => vi.mocked(track).mock.calls.filter(([name]) => name === "grok_move_popup").map(([, props]) => (props as { action: string }).action);
   const reads = () => vi.mocked(api).mock.calls.map(([path]) => path).filter(path => path === "/api/setup-import/grok");
   const keydown = (key: string) => {
     const handler = vi.mocked(window.addEventListener).mock.calls.filter(([type]) => type === "keydown").at(-1)![1] as (event: unknown) => void;
@@ -999,11 +969,9 @@ describe("the Move from Grok Bot popup", () => {
     const html = await launch();
     for (const text of [TITLE, "Bring your Bots here, with their skills, routines and memories.", "Let&#x27;s start", "Not now"]) expect(html).toContain(text);
     for (const part of ['role="dialog"', 'aria-modal="true"', "data-grok-move-popup"]) expect(html).toContain(part);
-    expect(events()).toEqual(["shown"]);
     expect(launchNotice()).toBe(GROK_MOVE_NOTICE);
     expect(launchDialogShown(), "MausBot's card waits for a later launch").toBe("notices");
     expect(await settle()).toContain(TITLE);
-    expect(events(), "shown is counted once").toHaveLength(1);
     expect(reads(), "showing it looks at neither Downloads nor the Grok Bot app").toEqual([]);
   });
 
@@ -1031,13 +999,11 @@ describe("the Move from Grok Bot popup", () => {
     expect(await launch(), "the welcome is open").toBe("");
     f.state.welcomeOpen = false; markWelcomeFinished();
     expect(await settle(), "its first messages are still arriving").toBe("");
-    expect(events()).toEqual([]);
     vi.advanceTimersByTime(6_000);
     const html = await settle();
     expect(html).toContain(TITLE); expect(html).not.toContain(STAR);
     press("Let&#x27;s start"); await flush();
     expect(render()).toContain(DIALOG);
-    expect(events()).toEqual(["shown", "start"]);
     expect(storage.get(GROK_MOVE_NOTICE)).toBe("1");
   });
 
@@ -1050,7 +1016,6 @@ describe("the Move from Grok Bot popup", () => {
       await flush();
       await endedForGood();
     }
-    expect(events().filter(action => action !== "shown")).toEqual(["not_now", "close", "close"]);
   });
 
   it("Let's start opens the same dialog, ends the popup for good, and only the dialog looks on this computer", async () => {
@@ -1058,7 +1023,6 @@ describe("the Move from Grok Bot popup", () => {
     await launch();
     press("Let&#x27;s start"); await flush();
     expect(render()).toContain(DIALOG);
-    expect(events()).toEqual(["shown", "start"]);
     expect(storage.get(GROK_MOVE_NOTICE)).toBe("1"); expect(hints()).toContain(GROK_MOVE_NOTICE); expect(desk.saved?.seen).toContain(GROK_MOVE_NOTICE);
     expect(reads()).toEqual([]);
     expect(await relaunch()).not.toContain(TITLE);
@@ -1111,7 +1075,6 @@ describe("the Move from Grok Bot popup", () => {
 describe("the Simple mode popup after the update", () => {
   const TITLE = "Try the new Simple mode", ON = "You&#x27;re on Simple mode", POPUP = "Meet the new MausBot Cloud";
   let modal: boolean;
-  const prompts = () => vi.mocked(track).mock.calls.filter(([event]) => event === "simple_mode_prompt").map(([, props]) => props);
 
   beforeEach(() => {
     modal = false;
@@ -1125,17 +1088,13 @@ describe("the Simple mode popup after the update", () => {
     const html = await launch();
     expect(html).toContain(TITLE);
     for (const part of ['role="dialog"', 'aria-modal="true"', 'role="switch"', 'aria-checked="false"', "Switch any time in Settings → Advanced mode."]) expect(html).toContain(part);
-    expect(prompts()).toEqual([{ action: "shown", mode: "advanced" }]);
     expect(launchDialogShown()).toBe("notices");
-    expect(await settle(), "shown is counted once").toContain(TITLE);
-    expect(prompts()).toHaveLength(1);
+    expect(await settle()).toContain(TITLE);
     press("Done"); await flush();
     expect(render(), "nothing else in this launch after it").toBe("");
     expect(storage.get(SIMPLE_MODE_PROMPT_KEY)).toBe("1");
-    expect(prompts()).toEqual([{ action: "shown", mode: "advanced" }, { action: "closed", mode: "advanced" }]);
     session.clear();
     expect(await launch()).not.toContain(TITLE);
-    expect(prompts()).toHaveLength(2);
   });
 
   it("changes the mode live from the popup, both ways, while its words stay", async () => {
@@ -1147,7 +1106,6 @@ describe("the Simple mode popup after the update", () => {
     press("Simple mode"); await flush();
     expect(storage.get(ADVANCED_MODE_KEY)).toBe("1");
     expect(render()).toContain('aria-checked="false"');
-    expect(prompts().slice(1)).toEqual([{ action: "toggled", mode: "simple" }, { action: "toggled", mode: "advanced" }]);
     expect(storage.has(SIMPLE_MODE_PROMPT_KEY), "flipping never closes it").toBe(false);
   });
 
@@ -1155,7 +1113,6 @@ describe("the Simple mode popup after the update", () => {
     setAdvancedMode(false);
     const html = await launch();
     expect(html).toContain(ON); expect(html).toContain('aria-checked="true"');
-    expect(prompts()).toEqual([{ action: "shown", mode: "simple" }]);
   });
 
   it("asks on the Cloud's own page and in a plain browser too, not only on this computer's", async () => {
@@ -1178,7 +1135,6 @@ describe("the Simple mode popup after the update", () => {
       expect(await launch(), wait.toString()).not.toContain(TITLE);
       f.state = saved; modal = false;
     }
-    expect(prompts()).toEqual([]);
     markWelcomeFinished();
     expect(await launch(), "the launch the welcome finished in").not.toContain(TITLE);
     session.clear();
@@ -1200,7 +1156,6 @@ describe("the Simple mode popup after the update", () => {
 
 describe("the word that Advanced mode is back, in the Simple mode popup's place", () => {
   const TITLE = "Advanced mode is back", BODY = "Turn it off any time in Settings → Advanced mode.";
-  const events = () => vi.mocked(track).mock.calls.filter(([event]) => event === "advanced_back_notice").map(([, props]) => props);
 
   beforeEach(() => {
     vi.stubGlobal("document", { activeElement: null, body: null, documentElement: { dataset: {} }, getElementById: () => null, querySelector: () => null,
@@ -1215,12 +1170,10 @@ describe("the word that Advanced mode is back, in the Simple mode popup's place"
     const html = await launch();
     expect(html).toContain(TITLE); expect(html).toContain(BODY);
     for (const gone of ['role="switch"', "data-simple-mode-prompt", "Try the new Simple mode"]) expect(html).not.toContain(gone);
-    expect(events()).toEqual([{ action: "shown" }]);
     press("Done"); await flush();
     expect(render(), "nothing else in this launch after it").toBe("");
     expect(storage.get(ADVANCED_BACK_KEY)).toBe("seen");
     expect(storage.get(SIMPLE_MODE_PROMPT_KEY)).toBe("1");
-    expect(events()).toEqual([{ action: "shown" }, { action: "closed" }]);
     session.clear();
     const later = await launch();
     expect(later).not.toContain(TITLE); expect(later).not.toContain("data-simple-mode-prompt");
@@ -1230,7 +1183,6 @@ describe("the word that Advanced mode is back, in the Simple mode popup's place"
     storage.set(SIMPLE_MODE_PROMPT_KEY, "1");
     setAdvancedMode(false);
     expect(await launch()).not.toContain(TITLE);
-    expect(events()).toEqual([]);
     expect(storage.get(ADVANCED_BACK_KEY)).toBe("due");
   });
 
@@ -1241,7 +1193,6 @@ describe("the word that Advanced mode is back, in the Simple mode popup's place"
       session.clear();
       expect(await launch(), String(back)).not.toContain(TITLE);
     }
-    expect(events()).toEqual([]);
   });
 });
 
@@ -1273,7 +1224,6 @@ describe("bots in two places", () => {
     press("Move bots");
     await flush();
     expect(accepted).toEqual([GARAGE.key]);
-    expect(track).toHaveBeenCalledWith("two_places_card", { action: "bring", kind: "server" });
     expect(await settle()).not.toContain('data-notice="two-places"');
   });
 
@@ -1365,7 +1315,6 @@ describe("ModelGo's sponsor card", () => {
   const TITLE = "ModelGo is now in MausBot", LINE = "One API key, every model.";
   const URL_EXACT = "https://modelgo.ai/?utm_source=openmausbot&utm_medium=sponsorship&utm_content=app&campaign_id=openmausbot&ad_group_id=app";
   const due = () => { storage.delete(MODELGO_OFFER_NOTICE); };
-  const events = () => vi.mocked(track).mock.calls.filter(([name]) => name === "modelgo_offer").map(([, props]) => props);
   const escape = () => tree().find(node => node.type === "aside")!.props.onKeyDown({ key: "Escape", preventDefault() {}, stopPropagation() {} });
   const gone = async () => {
     expect(render()).toBe("");
@@ -1381,27 +1330,22 @@ describe("ModelGo's sponsor card", () => {
     const buttons = tree().filter(node => node.type === "button");
     expect(buttons).toHaveLength(3);
     expect(render()).not.toMatch(/add my key|Settings/i);
-    expect(events()).toEqual([{ action: "shown", place: "popup" }]);
     expect(await settle()).toContain(TITLE);
-    expect(events()).toHaveLength(1);
   });
 
   it("opens exactly the sponsor's address, and is gone for good", async () => {
     await launch(); press("Get a ModelGo key"); await flush();
     expect(window.ogb!.openExternal).toHaveBeenCalledWith(URL_EXACT);
-    expect(events().at(-1)).toEqual({ action: "get_key", place: "popup" });
     await gone();
   });
 
-  it("Not now records its action and ends it for good, on the desktop too", async () => {
+  it("Not now ends it for good, on the desktop too", async () => {
     await launch(); press("Not now"); await flush();
-    expect(events().at(-1)).toEqual({ action: "not_now", place: "popup" });
     await gone();
   });
 
-  it("close (the X or Escape) records its action and ends it for good", async () => {
+  it("close (the X or Escape) ends it for good", async () => {
     await launch(); escape(); await flush();
-    expect(events().at(-1)).toEqual({ action: "close", place: "popup" });
     await gone();
   });
 
@@ -1481,11 +1425,9 @@ describe("ModelGo's sponsor card", () => {
     returning(); desk.saved = null; storage.delete(WHATS_NEW_NOTICE);
     const first = await launch();
     expect(first).toContain("Meet the new MausBot Cloud"); expect(first, "never two at once").not.toContain(TITLE);
-    expect(events()).toEqual([]);
     press("Not now"); await flush();
     const after = await settle();
     expect(after, "right after What's new closes").toContain(TITLE); expect(after).not.toContain("Meet the new MausBot Cloud");
-    expect(events()).toEqual([{ action: "shown", place: "popup" }]);
     expect(launchNotice(), "What's new keeps the launch").toBe(WHATS_NEW_NOTICE);
     expect(await launch(), "a reload in the same launch").toContain(TITLE);
     press("Not now"); await flush();
@@ -1557,7 +1499,6 @@ describe("cards from the announcements file", () => {
   const card = (id: string, extra: Record<string, unknown> = {}) => ({ id, kind: "product", label: "New", title: `Title of ${id}`, body: `Body of ${id}.`,
     primary: { label: `Open ${id}`, action: { open_url: `https://example.com/${id}` } }, ends: new Date(NOW + 30 * DAY).toISOString(), ...extra });
   let feed: unknown[];
-  const events = () => vi.mocked(track).mock.calls.filter(([name]) => name === "announcement").map(([, props]) => props);
   beforeEach(() => {
     forgetAnnouncementCards(); feed = [card("phone-app")];
     const config = vi.mocked(api).getMockImplementation()!;
@@ -1568,15 +1509,12 @@ describe("cards from the announcements file", () => {
     const shown = await launch();
     for (const text of ["New", "Title of phone-app", "Body of phone-app.", "Open phone-app", "Not now"]) expect(shown).toContain(text);
     expect(shown).toContain('data-notice="announcement"'); expect(shown).not.toContain('aria-modal="true"');
-    expect(events()).toEqual([{ id: "phone-app", kind: "product", action: "shown" }]);
     expect(await settle()).toContain("Title of phone-app");
-    expect(events(), "one shown event, however often it draws").toHaveLength(1);
   });
 
   it("its button opens the file's address outside the app, as it is, and the card is gone for good on every record", async () => {
     await launch(); press("Open phone-app"); await flush();
     expect(window.ogb!.openExternal).toHaveBeenCalledWith("https://example.com/phone-app");
-    expect(events().at(-1)).toEqual({ id: "phone-app", kind: "product", action: "primary" });
     expect(render()).toBe("");
     expect(storage.get(seenKey("phone-app"))).toBe("1"); expect(hints()).toContain(seenKey("phone-app")); expect(desk.saved?.seen).toContain(seenKey("phone-app"));
     expect(await relaunch()).not.toContain("Title of phone-app");
@@ -1587,14 +1525,12 @@ describe("cards from the announcements file", () => {
     expect(await launch()).not.toContain("Not now");
     press("Connect apps");
     expect(f.dispatch).toHaveBeenCalledWith({ type: "togglePlugins", open: true, surface: "apps" });
-    expect(events().at(-1)).toEqual({ id: "keys-tip", kind: "tip", action: "secondary" });
     expect(window.ogb!.openExternal).not.toHaveBeenCalled();
   });
 
   it("one card a launch: the next waits for the next launch", async () => {
     feed = [card("first-card"), card("second-card")];
     await launch(); press("Not now"); await flush();
-    expect(events().at(-1)).toEqual({ id: "first-card", kind: "product", action: "close" });
     expect(await settle(), "the same page").toBe("");
     expect(await launch(), "the same launch").toBe("");
     expect(await relaunch()).toContain("Title of second-card");
@@ -1615,7 +1551,6 @@ describe("cards from the announcements file", () => {
     returning(); desk.saved = null; storage.delete(WHATS_NEW_NOTICE); storage.set(CLOUD_INTRO, "1");
     const popup = await launch();
     expect(popup).toContain("Meet the new MausBot Cloud"); expect(popup, "never two at once").not.toContain("Title of first-card");
-    expect(events()).toEqual([]);
     press("Not now"); await flush();
     const after = await settle();
     expect(after, "right after What's new closes").toContain("Title of first-card"); expect(after).not.toContain("Meet the new MausBot Cloud");
@@ -1816,8 +1751,6 @@ describe("the Teams What's new", () => {
   const POINTS = ["One shared bot for everyone: set it up once, everyone uses it.", "Team files and templates everyone&#x27;s bots can use.",
     "Private chats stay private, even from admins.", "$40 a month for 2 people, $20 for each extra person."];
   const TEAM = { id: "team-acme", name: "Acme", cloudPage: "https://admin.openmausbot.com/cloud" };
-  const steps = () => vi.mocked(track).mock.calls.filter(([event, props]) => event === "whats_new" && (props as { slide: string }).slide === "teams")
-    .map(([, props]) => (props as { action: string }).action);
   let firstScreen: boolean;
   const desktopMarks = () => (desk.saved as { seen?: string[] } | null)?.seen ?? [];
   const keptForGood = async () => {
@@ -1854,11 +1787,8 @@ describe("the Teams What's new", () => {
     for (const other of [GROK, "Meet the new MausBot Cloud", STAR]) expect(html).not.toContain(other);
     expect(launchNotice(), "it takes the launch").toBe(TEAMS_NOTICE);
     expect(launchDialogShown(), "MausBot's card waits for a later launch").toBe("notices");
-    expect(steps()).toContain("seen");
-    expect(vi.mocked(track)).toHaveBeenCalledWith("whats_new", { action: "seen", slide: "teams", audience: "no_team", campaign: TEAMS_NOTICE });
     press("Start a team"); await flush();
     expect(window.ogb?.openExternal).toHaveBeenCalledWith("https://cloud.openmausbot.com/pro/buy?plan=team&src=app_whats_new_teams");
-    expect(steps().at(-1)).toBe("start_team");
     expect(hints()).toContain(TEAMS_NOTICE); expect(desktopMarks()).toContain(TEAMS_NOTICE);
     expect(render(), "nothing else that launch").toBe("");
     const next = await relaunch();
@@ -1885,7 +1815,6 @@ describe("the Teams What's new", () => {
     expect(html).not.toContain("Start a team");
     press("Invite your team"); await flush();
     expect(window.open, "a Cloud's page opens links as a browser does").toHaveBeenCalledWith("https://admin.openmausbot.com/cloud/team/team-acme/people?do=invite", "_blank", "noopener,noreferrer");
-    expect(vi.mocked(track)).toHaveBeenCalledWith("whats_new", { action: "invite", slide: "teams", audience: "team_admin", campaign: TEAMS_NOTICE });
     expect(wrote("/api/me/welcome")).toEqual([{ hints: [TEAMS_NOTICE] }]);
     expect(wrote("/api/config"), "never the team's record").toEqual([]);
     expect(desk.saved?.seen).toContain(TEAMS_NOTICE);
@@ -1898,7 +1827,6 @@ describe("the Teams What's new", () => {
     expect(html).toContain(TITLE); expect(html).toContain("Got it");
     for (const gone of ["Invite your team", "Start a team", "Not now"]) expect(html).not.toContain(gone);
     press("Got it"); await flush();
-    expect(steps()).toContain("seen"); expect(steps().filter(step => step !== "seen")).toEqual(["got_it"]);
     expect(wrote("/api/me/welcome")).toEqual([{ hints: [TEAMS_NOTICE] }]);
     await keptForGood();
   });
@@ -1910,7 +1838,6 @@ describe("the Teams What's new", () => {
     const html = await launch();
     expect(html).toContain("Start a team"); expect(html).toContain("Not now");
     press("Close"); await flush();
-    expect(steps().at(-1)).toBe("close");
     await keptForGood();
   });
 
@@ -1920,7 +1847,6 @@ describe("the Teams What's new", () => {
     f.brand = "default";
     (window.ogb as Record<string, unknown>).organization = { state: async () => ({ status: "signed-in", organization: { name: "Acme" } }), onState: () => () => {} };
     expect(await relaunch()).not.toContain(TITLE);
-    expect(steps()).toEqual([]);
   });
 
   it("never during onboarding: not with the welcome or the tour open, before a first reply, over a first run's own screens or in the launch the welcome finished; then once", async () => {
@@ -1934,7 +1860,6 @@ describe("the Teams What's new", () => {
     expect(await launch(), "a team's welcome to a new member").not.toContain(TITLE);
     firstScreen = false; markWelcomeFinished();
     expect(await launch(), "the launch the welcome finished in").not.toContain(TITLE);
-    expect(steps()).toEqual([]);
     expect(await relaunch(), "the next launch").toContain(TITLE);
   });
 });

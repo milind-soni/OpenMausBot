@@ -154,7 +154,6 @@ const __APP_VERSION__: string;
       desktopNotifications?: import("../../electron/desktop-notifications.mjs").DesktopNotificationsBridge;
       /** This computer's own page only: the account's full name, for a first run's profile (system-name.mjs). */
       desktopProfile?: { systemName(): Promise<string | null> };
-      desktopAnalytics?: import("../../electron/desktop-prefs.mjs").DesktopAnalyticsBridge;
       desktopLanguage?: import("../../electron/desktop-prefs.mjs").DesktopLanguageBridge;
       /** This computer's page and My Cloud's own page: the one-time "Get MausBot updates?" answer. */
       updatesConsent?: import("../../electron/updates-consent.mjs").UpdatesConsentBridge;

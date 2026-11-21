@@ -1,13 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { CloudAccountState } from "../../electron/cloud-account.mjs";
 import type { CloudOffer } from "../../electron/cloud-home.mjs";
 import type { CloudListEntry } from "../../electron/cloud-list.mjs";
 
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
-import { track } from "@/lib/analytics";
 import { setLocale } from "@/lib/i18n";
-import { WHATS_NEW_NOTICE } from "@/lib/notices";
-import { newCloudUrl, reportWhatsNew, startTeamUrl, WHATS_NEW_SOURCES, whatsNewAudience, whatsNewSlides, whatsNewView, type WhatsNewView } from "./whats-new";
+import { newCloudUrl, startTeamUrl, WHATS_NEW_SOURCES, whatsNewAudience, whatsNewSlides, whatsNewView, type WhatsNewView } from "./whats-new";
 
 const DAY = 86_400_000, NOW = Date.UTC(2026, 10, 12);
 const OFFER: CloudOffer = { recommended: "pro", refundDays: 14, plans: [
@@ -22,7 +19,7 @@ const listed = (patch: Partial<CloudListEntry>): CloudListEntry => ({ id: "c1", 
 const team = { id: "t1", name: "Design Studio", role: "member" as const, machine: null };
 const running = { state: "active" as const, tier: "pro", endsAt: NOW + DAY, amount: 4900, chargeAt: NOW + DAY, holdUntil: null, deleteAt: null, keep: "none" as const };
 
-beforeEach(() => { setLocale("en"); vi.mocked(track).mockClear(); });
+beforeEach(() => { setLocale("en"); });
 
 describe("who sees which slides", () => {
   it("no Cloud plan: the new Cloud, then Team; signed out or signed in with none, an ended Cloud of their own included", () => {
@@ -105,14 +102,5 @@ describe("the funnel", () => {
     expect(newCloudUrl(true)).toBe("https://omb-cloud-staging.fly.dev/cloud?src=app_whats_new_pro");
     expect(startTeamUrl(true)).toBe("https://omb-cloud-staging.fly.dev/pro/buy?plan=team&src=app_whats_new_team");
     for (const tag of Object.values(WHATS_NEW_SOURCES)) expect(tag, "the Admin's tag form").toMatch(/^[a-z0-9_]{1,32}$/);
-  });
-
-  it("counts each step with its slide, who it was for and the campaign; never an email, a name or an address", () => {
-    reportWhatsNew("seen", "pro", { audience: "none", signedIn: false });
-    reportWhatsNew("start_team", "team", { audience: "own", signedIn: true });
-    expect(vi.mocked(track).mock.calls).toEqual([
-      ["whats_new", { action: "seen", slide: "pro", audience: "no_plan", signed_in: false, campaign: WHATS_NEW_NOTICE }],
-      ["whats_new", { action: "start_team", slide: "team", audience: "own_plan", signed_in: true, campaign: WHATS_NEW_NOTICE }],
-    ]);
   });
 });

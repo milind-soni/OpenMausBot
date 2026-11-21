@@ -1,4 +1,4 @@
-import { emailGateDone } from "@/lib/analytics";
+import { emailGateDone } from "@/lib/email-gate";
 import { hintSeen, MET_CHIEF_HINT, welcomeDue, type WelcomeViewer } from "@/lib/onboarding";
 import type { UpdaterState } from "@/lib/updater";
 import type { AppState } from "@/state/store";

@@ -10,8 +10,8 @@ import { EMPTY_ONBOARDING, LOCAL_VIEWER, markWelcomeFinished, WELCOME_VERSION, t
 import { setLocale } from "@/lib/i18n";
 
 const f = vi.hoisted(() => ({ state: {} as Record<string, unknown>, welcoming: vi.fn(), dispatch: vi.fn() }));
+vi.mock("@/lib/email-gate", () => ({ emailGateDone: () => false }));
 vi.mock("@/state/store", async (original) => ({ ...(await original<typeof import("@/state/store")>()), useStore: () => ({ state: f.state, dispatch: f.dispatch }) }));
-vi.mock("@/lib/analytics", () => ({ emailGateDone: () => false, track: vi.fn() }));
 vi.mock("@/lib/default-bot", async (original) => ({
   ...(await original<typeof import("@/lib/default-bot")>()),
   useViewerEmail: () => null,

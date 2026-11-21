@@ -10,11 +10,13 @@
 // audience key does.
 import { z } from "zod";
 
+import { PROJECT_RAW_MAIN } from "./project-repository.ts";
+
 export const ANNOUNCEMENTS_FILE = "announcements/announcements.json";
 export const ANNOUNCEMENTS_SCHEMA_FILE = "announcements/announcements.schema.json";
-export const ANNOUNCEMENTS_URL = `https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/${ANNOUNCEMENTS_FILE}`;
+export const ANNOUNCEMENTS_URL = `${PROJECT_RAW_MAIN}${ANNOUNCEMENTS_FILE}`;
 /** Pictures: files in the repository's announcements/ folder on main, as raw.githubusercontent.com serves them. */
-export const ANNOUNCEMENT_IMAGE_PREFIX = "https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/announcements/";
+export const ANNOUNCEMENT_IMAGE_PREFIX = `${PROJECT_RAW_MAIN}announcements/`;
 
 /** An install reads at most this many cards, in file order; CI refuses a longer list. */
 export const MAX_CARDS = 20;

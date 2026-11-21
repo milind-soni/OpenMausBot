@@ -4,7 +4,6 @@ import { MausAvatar } from "@/components/Avatar";
 import { engineReady } from "@/components/EngineLibrary";
 import { staggerIndex } from "@/components/onboarding/beats/shared";
 import { withViewTransition } from "@/components/onboarding/view-transition";
-import { track } from "@/lib/analytics";
 import { productName } from "@/lib/brand";
 import { CLOUD_INTENT_ASKED, CLOUD_INTENT_GIVEN } from "@/lib/cloud-setup";
 import { dismissCloudIntent, markIntentSent, reopenCloudIntent, setPendingIntent, setupMessage, useCloudIntent } from "@/lib/cloud-intent";
@@ -52,7 +51,6 @@ export function startCloudSetup(job: string, state: Pick<AppState, "bots" | "sel
   const tidy = () => { delete root.dataset.cloudIntentMorph; };
   if (transition) void transition.finished.finally(tidy);
   else tidy();
-  track("cloud_setup_started");
   return true;
 }
 
@@ -88,13 +86,11 @@ export function CloudIntent() {
   const submit = () => {
     const text = job.trim();
     if (!text) return;
-    track("cloud_intent_submitted", { idea, edited: idea ? text !== t(IDEAS.find((candidate) => candidate.id === idea)!.text) : true });
     rememberIntent(record, [CLOUD_INTENT_ASKED, CLOUD_INTENT_GIVEN], dispatch);
     if (ready && startCloudSetup(text, state, dispatch)) return;
     withViewTransition(() => { setPendingIntent(text); reopenCloudIntent(false); });
   };
   const skip = () => {
-    track("cloud_intent_skipped");
     rememberIntent(record, [CLOUD_INTENT_ASKED], dispatch);
     withViewTransition(dismissCloudIntent);
   };

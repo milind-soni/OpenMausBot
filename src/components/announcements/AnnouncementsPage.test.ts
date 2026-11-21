@@ -11,12 +11,10 @@ import type { Announcements } from "./use-announcements";
 const f = vi.hoisted(() => ({ found: null as unknown as Announcements, dispatch: vi.fn(), state: { config: {} as Record<string, unknown> }, remembered: vi.fn() }));
 vi.mock("./use-announcements", () => ({ useAnnouncements: () => f.found }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f.dispatch }), api: vi.fn() }));
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("@/components/Avatar", () => ({ MausAvatar: () => null }));
 vi.mock("../lazy-screens", () => ({ GrokMoveDialog: () => createElement("div", { "data-grok-move-dialog": "" }) }));
 vi.mock("@/lib/announcement-history", async original => ({ ...await original<typeof import("@/lib/announcement-history")>(), rememberNoticeSeen: f.remembered }));
 const { AnnouncementsPage } = await import("./AnnouncementsPage");
-const { track } = await import("@/lib/analytics");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const NOW = Date.parse("2026-11-18T10:00:00Z");
@@ -95,7 +93,6 @@ describe("Announcements", () => {
     await click(rows().find(row => row.dataset.announcementItem === TEAMS_NOTICE)?.querySelector("button"));
     const popup = document.querySelector("[data-teams-popup]");
     expect(popup?.getAttribute("data-teams-popup")).toBe("start");
-    expect(track).toHaveBeenCalledWith("whats_new", { action: "seen", slide: "teams", audience: "no_team", campaign: TEAMS_NOTICE });
     await click([...popup!.querySelectorAll("button")].find(button => button.textContent === "Not now"));
     expect(document.querySelector("[data-teams-popup]")).toBeNull();
     expect(f.remembered).toHaveBeenCalledWith(TEAMS_NOTICE, undefined, expect.objectContaining({ team: false }));

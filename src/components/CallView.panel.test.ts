@@ -20,8 +20,6 @@ vi.mock("@/state/store", async (importOriginal) => {
 vi.mock("./DesktopCapabilities", () => ({
   useDesktopCapabilities: () => ({ capabilities: { dictation: { available: true, engine: "apple-speech", onDevice: true } }, ready: true }),
 }));
-const track = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/analytics", () => ({ track }));
 
 const { CallButton, CallTargetButton } = await import("./CallView");
 const { requestCallStart } = await import("@/lib/call-start-request");
@@ -34,7 +32,6 @@ const atlas: Bot = {
 };
 let root: Root;
 let host: HTMLDivElement;
-const composerStarts = vi.fn();
 
 beforeEach(() => {
   setCallMode("turns");
@@ -47,8 +44,6 @@ afterEach(() => {
   flushSync(() => root.unmount());
   host.remove();
   endCall();
-  composerStarts.mockReset();
-  track.mockReset();
   delete window.ogb;
 });
 
@@ -69,7 +64,6 @@ describe("the bot panel's Call button", () => {
     flushSync(() => root.render(createElement(CallButton, { bot: atlas, placement: "panel" })));
     flushSync(() => panelButton().click());
     expect(currentCall()).toBe("atlas");
-    expect(track).toHaveBeenCalledWith("call_started", expect.objectContaining({ mode: "turns" }));
     expect(panelButton().getAttribute("aria-label")).toBe("Hang up on Atlas");
     flushSync(() => panelButton().click());
     expect(currentCall()).toBeNull();
@@ -80,12 +74,10 @@ describe("the bot panel's Call button", () => {
       createElement(CallButton, { bot: atlas, placement: "panel" }),
       createElement(CallTargetButton, {
         targetId: "atlas", targetName: "Atlas", threadId: "thread-atlas", voices: ["v"], requireExplicitVoices: false,
-        liveCapable: true, placement: "composer", fill: "#8057C8", onStart: composerStarts,
+        liveCapable: true, placement: "composer", fill: "#8057C8",
       }),
     )));
     flushSync(() => requestCallStart("atlas", "turns"));
-    expect(composerStarts).toHaveBeenCalledExactlyOnceWith("turns");
-    expect(track.mock.calls.filter(([event]) => event === "call_started")).toEqual([]);
     expect(currentCall()).toBe("atlas");
   });
 });

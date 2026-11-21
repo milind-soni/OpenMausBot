@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, Cloud, Laptop } from "lucide-react";
-import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
 import type { Action } from "@/state/store";
 import type { CloudPlanSnapshot } from "../../electron/cloud-account.mjs";
@@ -15,7 +14,6 @@ export function openServerMenu(bridge: { menu: (options?: { from?: "howto" }) =>
 }
 
 export function endCloudHowTo(dispatch: (action: Action) => void): void {
-  track("cloud_howto", { result: "closed" });
   dispatch({ type: "cloudHowTo", open: false });
 }
 

@@ -37,7 +37,6 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
   useDesktopCapabilities: () => ({ capabilities: { host: {}, dictation: { available: false } }, ready: true }),
 }));
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
 const { initialState } = await import("@/state/store");
 const { EventDetails, EventEditor, RoutineEditor } = await import("./RoutineCalendarPage");

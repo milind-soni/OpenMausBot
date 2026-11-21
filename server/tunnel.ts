@@ -144,7 +144,7 @@ export function createTunnelAccount(options: {
 }): TunnelAccount {
   const env = options.env ?? process.env;
   const credentials = openTunnelCredentials(options.dataDir);
-  const controlPlane = resolveCompanionControlPlaneURL({ isPackaged: true, environment: env });
+  const controlPlane = resolveCompanionControlPlaneURL({ environment: env });
   const client = controlPlane ? createControlPlaneClient({ baseURL: controlPlane, fetchImpl: options.fetchImpl }) : null;
   const recovery = options.recovery;
   const service = createCompanionAccountService({
@@ -183,8 +183,8 @@ export function fleetCredential(env: NodeJS.ProcessEnv = process.env): string | 
 
 export async function fleetAccess(options: { credential: string; version?: string; env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch }): Promise<ManagedTunnelAccess> {
   const env = options.env ?? process.env;
-  const controlPlane = resolveCompanionControlPlaneURL({ isPackaged: true, environment: env });
-  if (!controlPlane) throw new Error("OMB_CONTROL_PLANE_URL is set but is not an https address");
+  const controlPlane = resolveCompanionControlPlaneURL({ environment: env });
+  if (!controlPlane) throw new Error("No control plane: set OMB_CONTROL_PLANE_URL to an https address");
   const client = createControlPlaneClient({ baseURL: controlPlane, fetchImpl: options.fetchImpl });
   try {
     const { endpoint, connectorToken } = await client.ensureEndpoint(options.credential, { appVersion: options.version, kind: "server" });

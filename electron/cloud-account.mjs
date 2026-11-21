@@ -3,6 +3,7 @@ import { CLOUD_MACHINE_CONNECTABLE, cloudUnreachableText, parseCloudCredit, pars
 import { CLOUD_ID, CLOUD_SWATCHES, cleanCloudListName, ORGANIZATION_BLOCKS, otherOwnClouds, ownCloud, parseCloudList, parseCloudRenewal, parseOrganizations, releaseVersion } from "./cloud-list.mjs";
 import { planTeam, teamPlan } from "./cloud-team-plan.mjs";
 import { cleanCode, cleanEmail, failureKind, parseSignInStart, READ_WAIT_MS, resetOffered, retryAfterSeconds, settledWithin, SIGN_IN_START, SIGN_IN_TRIES, SIGN_IN_VERIFY, signInBlock, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
+import { CLOUD_NOT_SET_UP, cloudFetchConfigured, cloudNotSetUpError, managedCloudFetch } from "./managed-cloud.mjs";
 import nativeText from "./native-text.cjs";
 
 const { englishText } = nativeText;
@@ -97,7 +98,7 @@ function addOffer(result) {
 }
 
 export function createCloudAccountClient({ store, openBrowser, platform, deviceName, appVersion,
-  origin = CLOUD_ORIGIN, fixture = false, fetch: fetcher = globalThis.fetch, now = Date.now, onState = () => {},
+  origin = CLOUD_ORIGIN, fixture = false, fetch: fetcher = fixture ? globalThis.fetch : managedCloudFetch(), now = Date.now, onState = () => {},
   setTimer = setTimeout, clearTimer = clearTimeout, warn = message => console.warn(message), awaitingWake = () => false, t = englishText.t, readWaitMs = READ_WAIT_MS }) {
   origin = cloudOrigin(origin, fixture);
   const staging = origin === STAGING_CLOUD_ORIGIN;
@@ -380,7 +381,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       publish({ status: "connecting", enrollment: { userCode: result.userCode, expiresAt: pending.expiresAt } });
       await openBrowser(pending.verificationUri);
       if (current(stamp)) schedule(poll, pending.interval);
-    } catch (error) { if (current(stamp)) { warn(`[cloud] browser sign-in could not start: ${failureKind(error)}`); pending = null; opened = null; publish({ status: "signed-out", message: "signin-failed" }); } }
+    } catch (error) { if (current(stamp)) { warn(`[cloud] browser sign-in could not start: ${failureKind(error)}`); pending = null; opened = null; publish({ status: "signed-out", message: error?.code === CLOUD_NOT_SET_UP ? CLOUD_NOT_SET_UP : "signin-failed" }); } }
     return state();
   }
   /** Why a sign-in can't start now (the sheet says so, with the one thing to do), after a sign-out or a read under way ends. */
@@ -537,7 +538,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       cleanup = null; cleanupNeeded = false; stuckSince = null;
       return publish({ status: "signed-out", ...(removed ? {} : { message: "reset-kept" }) });
     },
-    async openDashboard() { await openBrowser(`${origin}/cloud`); return state(); },
+    async openDashboard() { if (!cloudFetchConfigured(fetcher)) throw cloudNotSetUpError(); await openBrowser(`${origin}/cloud`); return state(); },
     async upgradePreview(plan, source) {
       if (!UPGRADE_TIERS.includes(plan) || !UPGRADE_SOURCES.includes(source)) throw new Error("Invalid Cloud upgrade.");
       const signedIn = grant;

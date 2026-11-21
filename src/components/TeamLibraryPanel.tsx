@@ -1,4 +1,3 @@
-import { track } from "@/lib/analytics";
 import { t } from "@/lib/i18n";
 import { addTemplate } from "@/lib/template-add";
 import { templateDetailsOf } from "@/lib/template-details";
@@ -147,7 +146,6 @@ export function TeamLibraryPanel({
     setError("");
     try {
       const response = await addTemplate(manifest, dispatch);
-      track("team_imported", { members: response.bots.length, source: "library", mode: "add", format: "package" });
       onImported({
         name,
         members: response.bots.length,
@@ -192,7 +190,6 @@ export function TeamLibraryPanel({
       for (const group of response.groups ?? []) dispatch({ type: "groupPatched", group });
       for (const routine of response.routines ?? []) dispatch({ type: "routinePatched", routine });
       const first = response.bots?.find((bot) => !bot.hidden);
-      track("team_imported", { members: response.bots?.length ?? 0, source: "organization", mode: "add", format: "package" });
       if (first) {
         dispatch({ type: "select", id: first.id });
         onImported({

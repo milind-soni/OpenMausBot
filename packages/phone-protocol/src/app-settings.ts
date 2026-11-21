@@ -73,7 +73,6 @@ export const WINDOW_PREFS = {
   "general.followUp": z.enum(["steer", "queue"]),
   "general.finishedNotifications": z.boolean(),
   "general.notificationFeed": z.boolean(),
-  "general.analytics": z.boolean(),
   "general.openAtLogin": z.boolean(),
   "general.talkShortcut": z.object({ enabled: z.boolean(), key: z.enum(TALK_KEYS) }).strict(),
   "account.productEmails": z.boolean(),

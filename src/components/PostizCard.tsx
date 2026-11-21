@@ -6,7 +6,6 @@ import { t } from "@/lib/i18n";
 import { openExternalLink } from "@/lib/app-links";
 import { reserveConnectionPage } from "@/lib/connector-oauth";
 import { completeMcpSignIn, mcpSignInLink, runMcpSignIn, type McpSignInStatus } from "@/lib/mcp-sign-in";
-import { keySaved, keySaveFailure } from "@/lib/product-events";
 import { POSTIZ_API, postizErrorText, postizHost, postizSaveErrorText } from "@/lib/postiz";
 import { isPostizStatus, POSTIZ_CLOUD, POSTIZ_KEY_PAGE, POSTIZ_SERVER, type PostizStatus } from "../../shared/postiz";
 import { cleanKey, looksLikeKey, saveCredential } from "./keys/key-save";
@@ -200,12 +199,10 @@ export function PostizCard({ refreshKey = 0, onConnection }: {
         if (wanted !== saved) applied(await api("/api/config", { method: "PUT", body: JSON.stringify({ postiz: { url: wanted } }) }));
         applied(await saveCredential("postiz", value, state.config?.postiz?.configured !== true));
       }
-      keySaved("postiz", "apps", "ok");
       if (!mounted.current) return;
       setKey("");
       setKeyMode(false);
     } catch (cause) {
-      keySaved("postiz", "apps", keySaveFailure(cause));
       if (mounted.current) setError(postizSaveErrorText(cause, target || POSTIZ_CLOUD));
     } finally {
       if (mounted.current) {

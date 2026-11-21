@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import type { CloudSwatch, OrganizationBlock } from "../../../electron/cloud-list.mjs";
 import type { AddCloudView } from "../../../electron/cloud-rail.mjs";
-import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
 import { CLOUD_LIST_NAME_LIMIT, DEFAULT_SWATCH, swatchFill } from "@/lib/cloud-extra";
 import { t } from "@/lib/i18n";
@@ -38,7 +37,6 @@ export function NewOrganization({ onBack, onClose }: { onBack: (() => void) | nu
     setBusy(false);
     const why = organizationProblem(answer);
     if (why) { setProblem(why); return; }
-    track("rail_add", { step: "organization" });
     void refreshPlaces();
     onClose();
   };

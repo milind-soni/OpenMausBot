@@ -1,5 +1,6 @@
-import type { ConnectorResult } from "@/lib/analytics-allowlist";
 import type { ConnectorStatus } from "@/lib/connector-status";
+
+export type ConnectorResult = "connected" | "failed" | "expired" | "timed_out";
 
 export const CONNECTOR_POLL_MS = 5_000;
 export const CONNECTOR_POLL_TRIES = 24;

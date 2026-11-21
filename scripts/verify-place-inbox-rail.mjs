@@ -21,7 +21,6 @@ const POLL_MS = 150_000;
 const DEBUG_PORT = 9333;
 
 const ADMIN_HOST = "cloud.openmausbot.com", AWAKE_HOST = "omb-u-aaaaaaaaaaaa.fly.dev", ASLEEP_HOST = "omb-u-bbbbbbbbbbbb.fly.dev";
-const BLOCKED = ["us.i.posthog.com", "us-assets.i.posthog.com", "app.posthog.com"];
 const TOKEN = `omc_${"T".repeat(43)}`, COOKIE = "omb_session_fixture";
 const results = [];
 const log = (line) => { console.log(line); appendFileSync(join(OUT, "progress.log"), `${line}\n`); };
@@ -32,7 +31,7 @@ function trustThrowawayCertificate() {
   writeFileSync(conf, `[req]\ndistinguished_name=dn\nx509_extensions=v3\nprompt=no\n[dn]\nCN=rail check\n[v3]\nsubjectAltName=${[ADMIN_HOST, AWAKE_HOST, ASLEEP_HOST].map((host) => `DNS:${host}`).join(",")}\nbasicConstraints=critical,CA:TRUE\nkeyUsage=critical,digitalSignature,keyCertSign\nextendedKeyUsage=serverAuth\n`);
   execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2", "-keyout", key, "-out", cert, "-config", conf]);
   execFileSync("sudo", ["security", "add-trusted-cert", "-d", "-r", "trustRoot", "-k", "/Library/Keychains/System.keychain", cert]);
-  const lines = [ADMIN_HOST, AWAKE_HOST, ASLEEP_HOST, ...BLOCKED].map((host) => `127.0.0.1 ${host}`).join("\n");
+  const lines = [ADMIN_HOST, AWAKE_HOST, ASLEEP_HOST].map((host) => `127.0.0.1 ${host}`).join("\n");
   execFileSync("sudo", ["sh", "-c", `printf '%s\\n' '${lines}' >> /etc/hosts && dscacheutil -flushcache`]);
   return { key: readFileSync(key), cert: readFileSync(cert), certFile: cert };
 }

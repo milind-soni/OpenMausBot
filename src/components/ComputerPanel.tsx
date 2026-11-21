@@ -1515,7 +1515,7 @@ export function ComputerPanel({
         )}
         {(boatKeyShown || (phase === "unconfigured" && cloudView.action?.id === "add-boat-key")) && (
           <div data-boat-key className="mt-3 rounded-xl bg-card py-1.5">
-            <KeyRow id="box" via="computer_panel"
+            <KeyRow id="box"
               onSaved={(configured) => { setBoatKeyShown(true); if (configured) setRetry((n) => n + 1); }}
             />
           </div>

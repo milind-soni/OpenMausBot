@@ -105,8 +105,6 @@ above passed. Before that rebase (main `0bb37982` plus #1708),
 `server/runtime-coordinator.test.ts`, `server/chief-of-staff.test.ts`,
 `server/thread-capacity-api.test.ts`, `server/cli-service-trust.e2e.test.ts`
 and the Settings/People/session UI tests passed on macOS.
-`server/hosted-access.test.ts` passed except once for its 8-second licence
-expiry case, which failed under load and passed when rerun alone.
 
 Mutation checks, each restored afterwards, turned a named test red: the
 per-path gate off; the bot list unfiltered; the live stream unfiltered;

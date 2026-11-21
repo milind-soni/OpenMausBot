@@ -190,7 +190,7 @@ function readBody(req: IncomingMessage): Promise<string> {
 function preloadStandIn(ipcBase: string, localOrigin: string, tab = "window"): string {
   return `(() => {
   if (!/^https?:/.test(location.protocol)) return;
-  try { localStorage.setItem("omb-analytics-opt-out", "1"); localStorage.setItem("omb-email-gate", "skipped"); localStorage.setItem("omb-advanced-mode", "0");
+  try { localStorage.setItem("omb-email-gate", "skipped"); localStorage.setItem("omb-advanced-mode", "0");
     for (const notice of ${JSON.stringify(NOTICES)}) localStorage.setItem(notice, "1"); } catch {}
   const listeners = new Map();
   window.__ogbEmit = (channel, ...args) => { for (const listener of [...(listeners.get(channel) ?? [])]) listener({}, ...args); };

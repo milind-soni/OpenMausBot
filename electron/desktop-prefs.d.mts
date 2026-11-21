@@ -12,13 +12,6 @@ export interface DesktopNoticesBridge {
   state(): Promise<DesktopNoticesState>;
   seen(id: string): Promise<void>;
 }
-/** The desktop's own switch, the same on every port its page is served from. */
-export interface DesktopAnalyticsBridge {
-  /** null until a choice is saved; a server's page is told only false, when this desktop turned analytics off. */
-  enabled(): boolean | null;
-  /** This computer's page only. */
-  set?(enabled: boolean): Promise<void>;
-}
 /** The app's language on this computer, one pick for every page its window shows; main draws its menus, tray, dialogs and
  * notifications in it too. */
 export interface DesktopLanguageBridge {
@@ -35,8 +28,6 @@ export interface DesktopPrefs {
   /** One of DESKTOP_NOTICES, an announcement card's mark (`announcement:<id>`, `announcement-sponsor:<day>`), or when
    * Announcements was last opened (`announcements-read-<ms>`, the newest kept); anything else is not kept. */
   markSeen(id: string): void;
-  analytics(): boolean | null;
-  setAnalytics(enabled: boolean): void;
   language(): string | null;
   /** False for anything that is not a locale code or "". */
   setLanguage(language: unknown): boolean;

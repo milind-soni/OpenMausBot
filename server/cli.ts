@@ -507,7 +507,7 @@ export async function runLogin(options: CliOptions, io: CliIo = defaultIo()): Pr
     return 1;
   }
   if (!account.controlPlane) {
-    io.error("OMB_CONTROL_PLANE_URL is set but is not an https address");
+    io.error("No control plane: set OMB_CONTROL_PLANE_URL to an https address");
     return 1;
   }
   const existing = describeTunnelAccount(account.credentials.read());

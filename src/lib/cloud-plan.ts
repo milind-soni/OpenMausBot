@@ -273,7 +273,7 @@ export function cloudIntroView(offer: CloudOffer | null | undefined): { badge: s
 export const CHECKOUT_WAIT_MS = 30 * 60_000;
 
 /** The in-app sign-in's step, kept by the sheet: where it is and what the Admin last said, never a code or token. */
-export type CloudSignInProblem = "invalid-email" | "rate-limited" | "failed" | "wrong-code" | "expired" | "signup-closed" | "device-limit" | "sso" | "two-factor" | "browser"
+export type CloudSignInProblem = "invalid-email" | "rate-limited" | "failed" | "not-set-up" | "wrong-code" | "expired" | "signup-closed" | "device-limit" | "sso" | "two-factor" | "browser"
   | "saved" | "saved-wait" | "connecting" | "busy" | "signed-in";
 /** A sign-in that couldn't start, as the sheet says it: a saved sign-in this computer can't read (`saved` once clearing it is
  * offered, `saved-wait` while the app still tries to read it), one in the browser (`connecting`), or a moment's wait. */

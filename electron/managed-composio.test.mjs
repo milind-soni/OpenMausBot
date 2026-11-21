@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  DEFAULT_MANAGED_COMPOSIO_BROKER_URL,
   ensureManagedComposioCredentials,
   managedComposioAccess,
   managedComposioBrokerUrl,
@@ -22,13 +21,12 @@ describe("managed Composio desktop registration", () => {
     expect(managedComposioAccess("", { composioBrokerToken: TOKEN })).toBeNull();
   });
 
-  it("uses the default service only in a shipped build (the packaged app, a Cloud home's image); an explicit URL wins", () => {
-    expect(DEFAULT_MANAGED_COMPOSIO_BROKER_URL).toMatch(/^https:\/\//);
-    expect(managedComposioBrokerUrl(undefined, true)).toBe(DEFAULT_MANAGED_COMPOSIO_BROKER_URL);
-    expect(managedComposioBrokerUrl("  ", true)).toBe(DEFAULT_MANAGED_COMPOSIO_BROKER_URL);
-    expect(managedComposioBrokerUrl(undefined, false)).toBe("");
-    expect(managedComposioBrokerUrl(" http://127.0.0.1:8787/ ", false)).toBe("http://127.0.0.1:8787");
-    expect(managedComposioBrokerUrl("http://broker.example", true)).toBe("");
+  it("has no service by default; only a configured https or loopback broker is used", () => {
+    expect(managedComposioBrokerUrl(undefined)).toBe("");
+    expect(managedComposioBrokerUrl("  ")).toBe("");
+    expect(managedComposioBrokerUrl(" http://127.0.0.1:8787/ ")).toBe("http://127.0.0.1:8787");
+    expect(managedComposioBrokerUrl("https://broker.example/")).toBe("https://broker.example");
+    expect(managedComposioBrokerUrl("http://broker.example")).toBe("");
   });
 
   it("accepts HTTPS and loopback development brokers but rejects insecure remote URLs", async () => {
@@ -65,6 +63,9 @@ describe("managed Composio desktop registration", () => {
         OMB_COMPOSIO_BROKER_TOKEN: "attacker-controlled",
       }),
     ).toEqual({ PATH: "/usr/bin" });
+    expect(
+      managedComposioChildEnvironment("https://broker.example", {}, { PATH: "/usr/bin", OMB_COMPOSIO_BROKER_TOKEN: "attacker-controlled" }),
+    ).toEqual({ PATH: "/usr/bin", OMB_COMPOSIO_BROKER_URL: "https://broker.example" });
     expect(
       managedComposioChildEnvironment("http://[::1]:8787", credentials, { PATH: "/usr/bin" }),
     ).toEqual({
@@ -191,8 +192,7 @@ describe("keeping the desktop app off the managed service", () => {
   it("OMB_COMPOSIO_BROKER=off stops registration, check-in and the token handed to the server, with or without a key", async () => {
     vi.stubEnv("OMB_COMPOSIO_BROKER", " Off ");
     vi.stubEnv("COMPOSIO_API_KEY", "");
-    expect(managedComposioBrokerUrl(undefined, true)).toBe("");
-    expect(managedComposioBrokerUrl("https://broker.example", true)).toBe("");
+    expect(managedComposioBrokerUrl("https://broker.example")).toBe("");
     expect(managedComposioAccess("https://broker.example", { composioBrokerToken: TOKEN })).toBeNull();
     expect(managedComposioChildEnvironment("https://broker.example", { composioBrokerToken: TOKEN }, {
       PATH: "/usr/bin", OMB_COMPOSIO_BROKER: "off", OMB_COMPOSIO_BROKER_URL: "https://broker.example", OMB_COMPOSIO_BROKER_TOKEN: TOKEN,
@@ -201,11 +201,11 @@ describe("keeping the desktop app off the managed service", () => {
     expect(await launch({ composioBrokerToken: TOKEN })).not.toHaveBeenCalled();
     expect(await launch({})).not.toHaveBeenCalled();
     expect(await launch({ composioApiKey: "ak_owner" })).not.toHaveBeenCalled();
-    await expect(registerManagedComposio({ brokerUrl: managedComposioBrokerUrl(undefined, true), updateCredentials: vi.fn() })).resolves.toBeUndefined();
+    await expect(registerManagedComposio({ brokerUrl: managedComposioBrokerUrl("https://broker.example"), updateCredentials: vi.fn() })).resolves.toBeUndefined();
   });
 
   it("any other value of the switch leaves the service on", () => {
     vi.stubEnv("OMB_COMPOSIO_BROKER", "on");
-    expect(managedComposioBrokerUrl(undefined, true)).toBe(DEFAULT_MANAGED_COMPOSIO_BROKER_URL);
+    expect(managedComposioBrokerUrl("https://broker.example")).toBe("https://broker.example");
   });
 });

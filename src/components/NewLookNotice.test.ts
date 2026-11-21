@@ -7,8 +7,6 @@ import { setLocale } from "@/lib/i18n";
 import { ADVANCED_BACK_KEY, advancedBackDue, NEW_LOOK_KEY, newLookDue } from "@/lib/new-look";
 import { SIMPLE_MODE_PROMPT_KEY } from "@/lib/simple-mode-prompt";
 
-const analytics = vi.hoisted(() => ({ track: vi.fn() }));
-vi.mock("@/lib/analytics", () => analytics);
 vi.mock("@/lib/brand", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/brand")>(), productName: () => "MausBot" }));
 const { NewLookNotice } = await import("./NewLookNotice");
 
@@ -21,14 +19,12 @@ const show = async (back = false) => { await act(async () => { root.render(creat
 const key = async (name: string, shiftKey = false) => {
   await act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: name, shiftKey, bubbles: true, cancelable: true })); });
 };
-const events = () => analytics.track.mock.calls.filter(([event]) => event === "new_look_notice").map(([, props]) => props);
 
 beforeEach(() => {
   setLocale("en");
   const values = new Map<string, string>([[NEW_LOOK_KEY, "due"]]);
   vi.stubGlobal("localStorage", { getItem: (k: string) => values.get(k) ?? null, setItem: (k: string, v: string) => void values.set(k, String(v)),
     removeItem: (k: string) => void values.delete(k) });
-  analytics.track.mockReset();
   onClose.mockReset();
   opener = document.createElement("button");
   document.body.append(opener);
@@ -64,7 +60,6 @@ describe("the new look notice", () => {
     expect(onClose).toHaveBeenCalledOnce();
     expect(newLookDue()).toBe(false);
     expect(localStorage.getItem(NEW_LOOK_KEY)).toBe("seen");
-    expect(events()).toEqual([{ action: "closed" }]);
   });
 
   it("keeps the keyboard inside while it is open, and gives focus back when it closes", async () => {
@@ -84,7 +79,6 @@ describe("the new look notice", () => {
 });
 
 describe("the word that Advanced mode is back", () => {
-  const backEvents = () => analytics.track.mock.calls.filter(([event]) => event === "advanced_back_notice").map(([, props]) => props);
 
   it("says Advanced mode is back and where its switch is, with no switch of its own", async () => {
     localStorage.setItem(ADVANCED_BACK_KEY, "due");
@@ -106,7 +100,5 @@ describe("the word that Advanced mode is back", () => {
     expect(localStorage.getItem(ADVANCED_BACK_KEY)).toBe("seen");
     expect(localStorage.getItem(SIMPLE_MODE_PROMPT_KEY)).toBe("1");
     expect(localStorage.getItem(NEW_LOOK_KEY), "the record of the move stays").toBe("due");
-    expect(backEvents()).toEqual([{ action: "closed" }]);
-    expect(events()).toEqual([]);
   });
 });

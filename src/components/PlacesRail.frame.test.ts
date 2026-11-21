@@ -5,7 +5,6 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { RailState } from "../../electron/cloud-rail.mjs";
 
 const fixture = vi.hoisted(() => ({ windowChrome: "mac-inset" as "mac-inset" | "win-caption", windowFrame: undefined as boolean | undefined }));
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
   useDesktopCapabilities: () => ({ capabilities: { windowChrome: fixture.windowChrome, windowFrame: fixture.windowFrame }, ready: true }),

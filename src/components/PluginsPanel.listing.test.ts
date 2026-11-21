@@ -48,7 +48,6 @@ vi.mock("@/lib/connected-apps", () => ({
   rememberConnectorStatus: () => {},
 }));
 vi.mock("@/lib/connected-apps-cache", () => ({ readCachedInventory: () => null, writeCachedInventory: () => {} }));
-vi.mock("@/lib/product-events", () => ({ connectorConnect: vi.fn() }));
 vi.mock("./McpServersPanel", () => ({ McpServersPanel: () => null }));
 vi.mock("./XCard", () => ({ X_CARD_SEARCH: "x", XCard: () => null }));
 vi.mock("./PostizCard", () => ({ PostizCard: () => null }));

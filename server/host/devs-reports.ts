@@ -542,3 +542,16 @@ export function createDevsReports(deps: DevsReportsDeps) {
 }
 
 export type DevsReports = ReturnType<typeof createDevsReports>;
+
+/** @devs on a server without OMB_BUG_REPORT_URL: nothing is kept, sent or asked about. */
+export const DEVS_REPORTS_OFF: DevsReports = {
+  note: () => "",
+  forget() {},
+  async internal(ctx) {
+    if (ctx.path !== DEVS_REPORT_PATH) return PASS;
+    return ctx.json(ctx.res, 404, { error: "Bug reports are off on this server. Tell the person, and do not call report_bug again." });
+  },
+  tick() {},
+  idle: async () => {},
+  stop() {},
+};

@@ -27,7 +27,6 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
 vi.mock("@/lib/interface-mode", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/interface-mode")>(), useAdvancedMode: () => fixture.advanced }));
 vi.mock("@/lib/use-media-query", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/use-media-query")>(), useMediaQuery: () => fixture.phone }));
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
 const { FailedTurnRow } = await import("./ChatView");
 

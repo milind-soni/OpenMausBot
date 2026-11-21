@@ -22,7 +22,6 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => {
     },
   };
 });
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
 const stored = new Map<string, string>();
 const storage = {

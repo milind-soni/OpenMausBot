@@ -1,10 +1,8 @@
 import type { CloudAccountState } from "../../electron/cloud-account.mjs";
 import type { CloudOffer } from "../../electron/cloud-home.mjs";
 import { CLOUD_TEAM_TIERS } from "../../electron/cloud-team-plan.mjs";
-import { track } from "@/lib/analytics";
 import { cloudPlanView, moneyBackShort, offerPlanLabel, trialRunning, trialTerms, usd } from "@/lib/cloud-plan";
 import { t } from "@/lib/i18n";
-import { WHATS_NEW_NOTICE } from "@/lib/notices";
 
 export type WhatsNewSlide = "pro" | "team";
 /** Who the account is to MausBot Cloud: no plan, a plan of its own, in a team, or something else (being bought, needing
@@ -67,10 +65,4 @@ export function whatsNewView(account: CloudAccountState | null, offer: CloudOffe
   const slides = wanted.filter(slide => plans[slide]);
   if (!slides.length) return "none";
   return { slides, audience, signedIn: account?.status === "connected", staging: account?.staging === true, plans };
-}
-
-export type WhatsNewAction = "seen" | "next" | "back" | "get_pro" | "see_cloud" | "start_team" | "not_now" | "close";
-
-export function reportWhatsNew(action: WhatsNewAction, slide: WhatsNewSlide, view: Pick<WhatsNewView, "audience" | "signedIn">) {
-  track("whats_new", { action, slide, audience: view.audience === "own" ? "own_plan" : "no_plan", signed_in: view.signedIn, campaign: WHATS_NEW_NOTICE });
 }

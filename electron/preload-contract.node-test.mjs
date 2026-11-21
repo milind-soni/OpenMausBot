@@ -9,7 +9,10 @@ const require = createRequire(import.meta.url);
 process.argv.push("--omb-company-desktop=1");
 const exposed = { api: null };
 const fakeElectron = {
-  ipcRenderer: { on: () => undefined, removeListener: () => undefined, invoke: async () => undefined, send: () => undefined },
+  ipcRenderer: {
+    on: () => undefined, removeListener: () => undefined, invoke: async () => undefined, send: () => undefined,
+    sendSync: (channel) => channel === "update:enabled",
+  },
   contextBridge: { exposeInMainWorld: (_name, api) => { exposed.api = api; } },
   webUtils: { getPathForFile: () => "" },
 };

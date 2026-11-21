@@ -1,7 +1,5 @@
 import type { CloudAccountState } from "../../electron/cloud-account.mjs";
-import { track } from "@/lib/analytics";
 import { teamPeoplePage } from "@/lib/app-links";
-import { TEAMS_NOTICE } from "@/lib/notices";
 import { startTeamUrl, whatsNewAudience } from "@/lib/whats-new";
 import type { WelcomeViewer } from "@/lib/onboarding";
 
@@ -43,7 +41,3 @@ export function teamsAudience(action: TeamsAction): TeamsAudience {
   return action.kind === "invite" ? "team_admin" : action.kind === "got-it" ? "team_member" : "no_team";
 }
 
-/** The `whats_new` event, as the earlier popup counts its steps, under this popup's campaign. */
-export function reportTeams(action: TeamsStep, shown: TeamsAction) {
-  track("whats_new", { action, slide: "teams", audience: teamsAudience(shown), campaign: TEAMS_NOTICE });
-}

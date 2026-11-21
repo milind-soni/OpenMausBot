@@ -9,11 +9,9 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
   useEffect: (effect: EffectCallback) => { f.effects.push(effect); },
 }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f.dispatch }) }));
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("./onboarding/Spotlight", () => ({ Spotlight: (props: { anchor: string; placement: string; secondary: { label: string; onClick: () => void }; children: unknown }) =>
   createElement("div", { "data-spotlight": props.anchor, "data-placement": props.placement }, props.children as never, createElement("button", { onClick: props.secondary.onClick }, props.secondary.label)) }));
 import { CloudHowTo, switcherPlacement } from "./CloudHowTo";
-import { track } from "@/lib/analytics";
 
 const rect = (left: number, width: number) => ({ left, right: left + width, top: 8, bottom: 36, width, height: 28 });
 const doc = (...rects: ReturnType<typeof rect>[]) => ({ querySelectorAll: () => rects.map(value => ({ getBoundingClientRect: () => value })) }) as unknown as Document;
@@ -44,7 +42,6 @@ it("with the menu off screen, the dialog opens instead and says where the menu i
   vi.stubGlobal("document", doc()); vi.stubGlobal("window", { innerWidth: 1200, innerHeight: 800 });
   render(); f.effects.forEach(effect => effect());
   expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "app_howto" });
-  expect(track).toHaveBeenCalledWith("cloud_howto", { result: "no_button" });
   f.state = { cloudHowTo: false };
   expect(render()).toContain("Next time, Add a Cloud is in the menu on the left of the app.");
 });

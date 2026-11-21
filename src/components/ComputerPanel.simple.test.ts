@@ -456,11 +456,11 @@ describe("Where the bot works", () => {
     expect(user.nodes.some((node) => node.props["data-testid"] === "place-action")).toBe(false);
   });
 
-  it("saves a Boat key pasted into the panel as one from the Computer panel", () => {
+  it("offers the Boat key row in the panel", () => {
     fixture.config = { ...fixture.config, box: { configured: false } };
     fixture.seed = { phase: "unconfigured", resolved: { botId: "scout", threadId: "thread-scout", computer: "cloud", cloudBackend: "box" } };
     const rows = render(makeBot({ computer: "cloud" })).nodes.filter((node) => node.type === KeyRow);
-    expect(rows.map((node) => ({ id: node.props.id, via: node.props.via }))).toEqual([{ id: "box", via: "computer_panel" }]);
+    expect(rows.map((node) => node.props.id)).toEqual(["box"]);
   });
 
   it("keeps a Boat key saved in the panel in view, masked and connected, after the panel moves on", () => {

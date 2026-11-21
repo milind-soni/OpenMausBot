@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Pencil, RotateCw, Trash2 } from "lucide-react";
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { t } from "@/lib/i18n";
-import { keySaved } from "@/lib/product-events";
 import { addedServers } from "@/lib/openai-compat-endpoints";
 import { cn } from "@/lib/cn";
 import { KEY_FIELD } from "./keys/KeyRow";
@@ -126,8 +125,8 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
       method: "POST",
       body: JSON.stringify({ displayName: name.trim(), url: url.trim(), key: key.trim(), ...(modelIds(models).length ? { models: modelIds(models) } : {}) }),
     }).then(
-      (added) => { keySaved("custom_endpoint", "settings", "unverified"); return added; },
-      (cause: unknown) => { keySaved("custom_endpoint", "settings", "error"); throw cause; },
+      (added) => { return added; },
+      (cause: unknown) => { throw cause; },
     ),
     () => { setName(""); setUrl(""); setKey(""); setModels(""); },
   );
@@ -282,13 +281,11 @@ function useAddServer() {
     setError(null);
     return api("/api/instances/openai-compat", { method: "POST", body: JSON.stringify(body) }).then(
       async (created) => {
-        keySaved("custom_endpoint", "settings", "unverified");
         if (Array.isArray(created.instances)) dispatch({ type: "instances", instances: created.instances as InstanceInfo[] });
         else await refreshInstances({ reportErrors: true });
         return true;
       },
       (cause: unknown) => {
-        keySaved("custom_endpoint", "settings", "error");
         setError(cause instanceof Error && cause.message ? cause.message : t("apiInstances.failed"));
         return false;
       },

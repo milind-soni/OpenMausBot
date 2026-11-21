@@ -29,7 +29,6 @@ vi.mock("@/state/store", async (original) => {
     useStore: () => ({ state: useSyncExternalStore(subscribe, () => fixture.state), dispatch: fixture.dispatch, refreshInstances: vi.fn() }),
   };
 });
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => true }));
 vi.mock("@/components/CloudTrialNotice", () => ({ useCloudPlanSnapshot: () => null }));
 vi.mock("@/components/EngineSetup", () => ({ EngineSetup: () => null }));

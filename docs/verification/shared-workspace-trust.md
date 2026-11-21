@@ -63,7 +63,7 @@ description is in [self-hosting](../self-hosting.md#loopback-trust-owner-or-serv
 ```sh
 pnpm exec vitest run server/request-auth.test.ts server/decision-log.test.ts \
   server/card-answerers.e2e.test.ts server/cli-service-trust.e2e.test.ts \
-  server/hosted-access.test.ts server/decision-log-wiring.test.ts server/hosted-models-api.test.ts \
+  server/decision-log-wiring.test.ts \
   src/components/PeopleSection.test.ts src/components/ServerPairingCard.test.ts src/lib/session.test.ts
 ```
 
@@ -71,15 +71,6 @@ pnpm exec vitest run server/request-auth.test.ts server/decision-log.test.ts \
   calls through the resolver under each trust level, sessions under
   `service`, the desktop capability overriding `service`, the serving CLI's
   secret opening the pairing route and nothing else, and the start-up choice.
-- `server/hosted-access.test.ts` ("treats a session-less local caller as a
-  service by default") boots a portal-membership workspace with shared Full
-  access and no override: the start-up log line, the worker's whole path over
-  loopback (health, bot list, a Full-access thread, a guarded send, its
-  request fence), 403 for `PUT /api/config`, `POST /api/webhooks`, session
-  list and revocation, bot creation and loosening, and an unguarded send,
-  with nothing changed afterwards; then an admin portal session saves the
-  retention window and reads `membership`. The other cases in that file keep
-  `OMB_LOOPBACK_TRUST=owner` because they set fixtures up over loopback.
 - `server/card-answerers.e2e.test.ts` boots a server with one admin and two
   members on the sign-in list and the fake ACP engine asking permission every
   turn: another member is refused on both respond routes, the requester

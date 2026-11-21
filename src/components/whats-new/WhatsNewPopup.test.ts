@@ -3,7 +3,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
-import type { WhatsNewAction, WhatsNewSlide, WhatsNewView } from "@/lib/whats-new";
+import type { WhatsNewView } from "@/lib/whats-new";
 
 vi.mock("@/components/Avatar", () => ({ MausAvatar: ({ color }: { color: string }) => createElement("i", { "data-maus": color }) }));
 const { WhatsNewPopup } = await import("./WhatsNewPopup");
@@ -15,8 +15,7 @@ const TEAM_ONLY: WhatsNewView = { ...BOTH, slides: ["team"], audience: "own", pl
 const PRO = "Meet the new MausBot Cloud", TEAM = "Shared bots for your whole team";
 
 let host: HTMLDivElement, root: Root, opener: HTMLButtonElement;
-let steps: Array<[WhatsNewAction, WhatsNewSlide]>;
-const props = { report: vi.fn((action: WhatsNewAction, slide: WhatsNewSlide) => void steps.push([action, slide])), onBuy: vi.fn(), onDone: vi.fn() };
+const props = { onBuy: vi.fn(), onDone: vi.fn() };
 const show = async (view: WhatsNewView = BOTH) => { await act(async () => { root.render(createElement(WhatsNewPopup, { view, ...props })); }); };
 const dialog = () => host.querySelector<HTMLElement>('[role="dialog"]')!;
 const title = () => document.getElementById(dialog().getAttribute("aria-labelledby")!)!.textContent;
@@ -33,7 +32,7 @@ const focused = () => (document.activeElement as HTMLElement).textContent || doc
 const flush = async () => { for (let i = 0; i < 5; i++) await act(async () => { await Promise.resolve(); }); };
 
 beforeEach(() => {
-  setLocale("en"); vi.clearAllMocks(); steps = [];
+  setLocale("en"); vi.clearAllMocks();
   opener = document.body.appendChild(document.createElement("button")); opener.textContent = "composer"; opener.focus();
   host = document.body.appendChild(document.createElement("div")); root = createRoot(host);
   (window as { ogb?: unknown }).ogb = { openExternal: vi.fn(async () => true) };
@@ -76,9 +75,8 @@ describe("the What's new popup", () => {
     expect(live().querySelector("img")!.getAttribute("src")).toMatch(/cloud-home-light\.webp/);
   });
 
-  it("Next, Back, the dots and the arrow keys move between the slides; each slide is counted seen once, and each move from where it was", async () => {
+  it("Next, Back, the dots and the arrow keys move between the slides", async () => {
     await show();
-    expect(steps).toEqual([["seen", "pro"]]);
     await click("Next");
     expect(title()).toBe(TEAM); expect(document.activeElement!.textContent).toBe(TEAM);
     expect(live().getAttribute("aria-label")).toBe("Slide 2 of 2");
@@ -93,7 +91,6 @@ describe("the What's new popup", () => {
     await key("ArrowLeft"); expect(title(), "nothing before the first").toBe(PRO);
     await key("ArrowRight"); expect(title()).toBe(TEAM);
     await key("ArrowRight"); expect(title(), "nothing after the last").toBe(TEAM);
-    expect(steps).toEqual([["seen", "pro"], ["next", "pro"], ["seen", "team"], ["back", "team"], ["next", "pro"], ["back", "team"], ["next", "pro"]]);
     expect(props.onDone).not.toHaveBeenCalled();
   });
 
@@ -108,25 +105,23 @@ describe("the What's new popup", () => {
     expect(slide.querySelector('svg[role="img"]')!.getAttribute("aria-label")).toBe("Ada, Ben, Cleo and Dara, each with their own MausBot, share the team's Support and Sales bots on one Team Cloud.");
     expect([...slide.querySelectorAll("button")].map(item => item.textContent)).toEqual(["Start a Team"]);
     expect(button("Next")).toBeUndefined(); expect(button("Back")).toBeUndefined(); expect(button("Slide 1 of 1"), "one slide has no dots").toBeUndefined();
-    expect(steps).toEqual([["seen", "team"]]);
   });
 
   it("Get Pro opens the buy flow; See the new Cloud and Start a Team open the Cloud website with the slide's tag; each ends it", async () => {
     await show();
     await click("Get Pro");
     expect(props.onBuy).toHaveBeenCalledExactlyOnceWith("pro"); expect(props.onDone).toHaveBeenCalledOnce();
-    expect(steps.at(-1)).toEqual(["get_pro", "pro"]);
     expect(window.ogb!.openExternal, "Get Pro stays in the app").not.toHaveBeenCalled();
 
     vi.clearAllMocks(); await show();
     await click("See the new Cloud"); await flush();
     expect(window.ogb!.openExternal).toHaveBeenCalledWith("https://cloud.openmausbot.com/cloud?src=app_whats_new_pro");
-    expect(props.onDone).toHaveBeenCalledOnce(); expect(steps.at(-1)).toEqual(["see_cloud", "pro"]);
+    expect(props.onDone).toHaveBeenCalledOnce();
 
     vi.clearAllMocks(); await show(); await click("Next");
     await click("Start a Team"); await flush();
     expect(window.ogb!.openExternal).toHaveBeenCalledWith("https://cloud.openmausbot.com/pro/buy?plan=team&src=app_whats_new_team");
-    expect(props.onDone).toHaveBeenCalledOnce(); expect(steps.at(-1)).toEqual(["start_team", "team"]);
+    expect(props.onDone).toHaveBeenCalledOnce();
     expect(props.onBuy).not.toHaveBeenCalled();
   });
 
@@ -135,7 +130,6 @@ describe("the What's new popup", () => {
     await click("Start a Team"); await flush();
     expect(props.onBuy).toHaveBeenCalledExactlyOnceWith("team"); expect(props.onDone).toHaveBeenCalledOnce();
     expect(window.ogb!.openExternal).not.toHaveBeenCalled();
-    expect(steps.at(-1)).toEqual(["start_team", "team"]);
   });
 
   it("an app on the staging Admin opens the staging Cloud website", async () => {
@@ -152,19 +146,19 @@ describe("the What's new popup", () => {
     expect(live().textContent).toContain("Could not open your browser. Please try again.");
   });
 
-  it("Not now, the X, Escape and a click outside end it, each counted on the slide it was on; a click inside does not", async () => {
+  it("Not now, the X, Escape and a click outside end it; a click inside does not", async () => {
     await show();
     await click("Next");
     await click("Not now");
-    expect(steps.at(-1)).toEqual(["not_now", "team"]);
+    expect(props.onDone).toHaveBeenCalledOnce();
     for (const how of ["Close", "Escape", "outside", "inside"] as const) {
-      vi.clearAllMocks(); steps = []; await act(async () => root.render(null)); await show();
+      vi.clearAllMocks(); await act(async () => root.render(null)); await show();
       if (how === "Escape") expect((await key("Escape")).defaultPrevented).toBe(true);
       else if (how === "outside") await act(async () => { host.firstElementChild!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); });
       else if (how === "inside") await act(async () => { dialog().dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); });
       else await click(how);
       if (how === "inside") { expect(props.onDone, how).not.toHaveBeenCalled(); continue; }
-      expect(props.onDone, how).toHaveBeenCalledOnce(); expect(steps.at(-1), how).toEqual(["close", "pro"]);
+      expect(props.onDone, how).toHaveBeenCalledOnce();
     }
   });
 

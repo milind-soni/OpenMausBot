@@ -14,7 +14,6 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
   useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false }, host: { packaged: true, platform: "other" }, localComputer: { available: false } }, ready: true }),
 }));
-vi.mock("@/lib/analytics", () => ({ track: vi.fn(), analyticsEnabled: () => false, setAnalyticsEnabled: vi.fn() }));
 // What shows the time draws again as a minute turns; these counts are of store changes alone.
 vi.mock("@/lib/minute-tick", () => ({ useMinuteTick: () => 0 }));
 vi.mock("@/lib/cloud-guest", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/cloud-guest")>(), useCanWriteIn: () => true, useReactor: () => "user" }));

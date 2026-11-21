@@ -16,7 +16,6 @@ vi.mock("@/state/store", () => ({
     return f.state.config;
   }),
 }));
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 const { useAnnouncements } = await import("./use-announcements");
 const { forgetAnnouncementCards } = await import("@/lib/announcements");
 const { api } = await import("@/state/store");

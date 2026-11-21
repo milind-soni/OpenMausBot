@@ -5,7 +5,6 @@ import { Loader2, PhoneOff, X } from "lucide-react";
 
 import { currentCall, deferCallCleanup, endCall, useOnCall } from "@/lib/call";
 import { routeSpokenGroupMessage } from "@/lib/group-call";
-import { track } from "@/lib/analytics";
 import { normalizeState } from "@/lib/mascot";
 import { speaker } from "@/lib/tts";
 import { useSpeech } from "@/lib/tts/useSpeech";
@@ -41,7 +40,6 @@ export function GroupCallButton({ group, members, placement, fill, ink }: { grou
       voices={members.map((member) => member.voice)}
       setupBotId={members.find((member) => !member.voice)?.id ?? members[0]?.id}
       requireExplicitVoices
-      onStart={() => track("group_call_started", { memberCount: members.length })}
     />
   );
 }

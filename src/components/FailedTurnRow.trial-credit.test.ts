@@ -21,7 +21,6 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   useCaptionChrome: () => ({}),
 }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => null }));
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
 const { FailedTurnRow } = await import("./ChatView");
 const engine = { instanceId: "trial-credit", trialCredit: "used_up" } as unknown as InstanceInfo;

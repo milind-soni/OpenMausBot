@@ -3,12 +3,10 @@ import { api, type Action, type Bot, type ModelSelection } from "@/state/store";
 import { teamChats } from "@/state/team-chats";
 import { currentTeamPeople, departmentOwner, type TeamPeople } from "@/state/team-people";
 import { openBot } from "@/state/thread-navigation";
-import type { BotSource } from "./analytics-allowlist";
 import { BotCreationDraft } from "./bot-creation-draft";
 import { isBotLimitRefusal, showCreatedPaused } from "./bot-limit";
 import { createConfiguredBot } from "./create-configured-bot";
 import { t } from "./i18n";
-import { botCreated } from "./product-events";
 
 export interface BotDefaultsAnswer { defaults: NewBotDefaults; modelSelection: ModelSelection; suggestedName: string }
 
@@ -39,8 +37,7 @@ export function reportsToFor(chosen: string | null, section: string | undefined,
 /** A bot just made joins the sidebar and, unless the caller keeps its own place, its chat opens: on a team's Cloud the
  * creator's own conversation, never the main chat every member reads. One that starts paused offers to swap it in. */
 export function announceNewBot(dispatch: (action: Action) => void, bot: Bot, warnings: readonly string[],
-  { preserveSelection = false, showThreads, source, role, paused }: { preserveSelection?: boolean; showThreads: boolean; source: BotSource; role?: string; paused?: boolean }) {
-  botCreated(source, role);
+  { preserveSelection = false, showThreads, paused }: { preserveSelection?: boolean; showThreads: boolean; paused?: boolean }) {
   dispatch({ type: "botAdded", bot, preserveSelection });
   if (!preserveSelection && teamChats()) openBot(dispatch, bot, showThreads);
   if (warnings.length) dispatch({ type: "error", message: warnings.join("\n") });
@@ -101,7 +98,7 @@ export async function makeNewBot(action: Extract<Action, { type: "newBot" }>, bo
     else dispatch({ type: "error", message });
     return;
   }
-  announceNewBot(dispatch, made.bot, made.warnings, { preserveSelection: action.preserveSelection, showThreads, source: "blank", paused: made.paused });
+  announceNewBot(dispatch, made.bot, made.warnings, { preserveSelection: action.preserveSelection, showThreads, paused: made.paused });
   if (made.startsOnAsk) dispatch({ type: "notice", notice: { kind: "note", botName: null, text: t("newBot.startsOnAsk", { name: made.bot.name }) } });
   action.onCreated?.(made.bot);
 }

@@ -6,7 +6,6 @@ import type { RailPlace, RailState } from "../../electron/cloud-rail.mjs";
 import { setLocale } from "@/lib/i18n";
 import { placeInitials, refreshPlaces } from "@/lib/places";
 
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("./cloud-buy/CloudMascotScene", () => ({ CloudMascotScene: () => null }));
 const { PlacesRail, matchingPlaces, placeLabel, shownPlaces } = await import("./PlacesRail");
 const { DesktopWorkspaceSwitcher } = await import("./DesktopWorkspaceSwitcher");

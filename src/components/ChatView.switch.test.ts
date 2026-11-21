@@ -12,7 +12,6 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
   useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false }, host: { packaged: true, platform: "other" }, localComputer: { available: false } }, ready: true }),
 }));
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 // The frame after the click's paint, run by the test: rows queued for it are drawn exactly when `paint()` says.
 const painted = vi.hoisted(() => [] as (() => void)[]);
 vi.mock("@/lib/after-paint", () => ({ afterPaint: (callback: () => void) => {

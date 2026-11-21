@@ -16,7 +16,6 @@ vi.mock("@/state/store", async (original) => {
     useStore: () => ({ state: { ...actual.initialState, config: { deepseek: { configured: true, last4: "9z9z" } }, instances }, dispatch: vi.fn(), refreshInstances: fx.refreshInstances }),
   };
 });
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
 const { KeyRow } = await import("./KeyRow");
 

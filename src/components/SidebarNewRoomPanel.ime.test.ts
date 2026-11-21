@@ -14,7 +14,6 @@ vi.mock("@/state/store", async (importOriginal) => {
     useStore: () => ({ state: { ...original.initialState, bots: [bot], sections: ["Research"] }, dispatch: fixture.dispatch }),
   };
 });
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
 import { NewRoomPanel } from "./SidebarNewRoomPanel";
 import { TeamDialog } from "./TeamDialog";

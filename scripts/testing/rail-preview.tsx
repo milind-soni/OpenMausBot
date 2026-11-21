@@ -4,7 +4,7 @@ import type { AddCloudView, RailPlace, RailState } from "../../electron/cloud-ra
 import type { PlaceLook } from "../../electron/place-look.mjs";
 import App from "../../src/App";
 import { ChromeRail } from "../../src/components/ChromeRail";
-import { setAnalyticsEnabled, setEmailGateDone } from "../../src/lib/analytics";
+import { setEmailGateDone } from "../../src/lib/email-gate";
 import { setAdvancedMode } from "../../src/lib/interface-mode";
 import { NOTICES } from "../../src/lib/notices";
 import { setSidebarDensity, SIDEBAR_WIDTH_KEY, SIMPLE_SIDEBAR_WIDTH_KEY } from "../../src/lib/sidebar-preferences";
@@ -33,7 +33,6 @@ import "../../src/styles.css";
 // starts again. ?settings=frame opens Settings at the window frame's switch. Each page starts with the sidebar at its
 // own width.
 const params = new URLSearchParams(location.search);
-setAnalyticsEnabled(false);
 setEmailGateDone("skipped");
 markSimpleModePromptSeen();
 localStorage.setItem(GROK_MOVE_NOTICE, "1");

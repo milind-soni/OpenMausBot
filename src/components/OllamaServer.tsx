@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { t } from "@/lib/i18n";
-import { keySaved } from "@/lib/product-events";
 import { addedServers, isAddedServer } from "@/lib/openai-compat-endpoints";
 import type { OllamaStatus } from "../../shared/local-model";
 import { KEY_FIELD } from "./keys/KeyRow";
@@ -69,12 +68,10 @@ export function OllamaServer({ visible }: { visible: boolean }) {
       body: JSON.stringify({ displayName: "Ollama", url: target, key: PLACEHOLDER_KEY, catalog: "ollama" }),
     }).then(
       async (created) => {
-        keySaved("custom_endpoint", "settings", "unverified");
         if (Array.isArray(created.instances)) dispatch({ type: "instances", instances: created.instances as InstanceInfo[] });
         else await refreshInstances({ reportErrors: true });
       },
       (cause: unknown) => {
-        keySaved("custom_endpoint", "settings", "error");
         setError(cause instanceof Error && cause.message ? cause.message : t("apiInstances.failed"));
       },
     ).finally(() => setBusy(false));

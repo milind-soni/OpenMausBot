@@ -26,11 +26,9 @@ vi.mock("@/state/store", async (original) => {
     },
   };
 });
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("@/lib/live-call-media", () => ({ dismissLiveNotice: vi.fn() }));
 
 const { KeysPage } = await import("./KeysPage");
-const { track } = await import("@/lib/analytics");
 const { BOAT_OFFER, boatClaimMailto } = await import("@/lib/boat-offer");
 const { BOAT_OFFER_NOTICE } = await import("@/lib/notices");
 const { applyBrand, DEFAULT_BRAND } = await import("@/lib/brand");
@@ -527,8 +525,6 @@ describe("Boat's credit offer on the Boat card", () => {
     await vi.waitFor(() => expect(openExternal).toHaveBeenCalledWith("https://boat.dev"));
     flushSync(() => buttons()[1]!.click());
     await vi.waitFor(() => expect(openExternal).toHaveBeenCalledWith(boatClaimMailto()));
-    await vi.waitFor(() => expect(track).toHaveBeenCalledWith("boat_offer", { action: "claim", place: "settings" }));
-    expect(track).toHaveBeenCalledWith("boat_offer", { action: "get_boat", place: "settings" });
     expect(offer()).not.toBeNull();
     expect(fx.api).not.toHaveBeenCalled();
   });

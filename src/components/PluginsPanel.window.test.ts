@@ -32,7 +32,6 @@ vi.mock("@/lib/connected-apps", () => ({
   rememberConnectorStatus: () => {},
 }));
 vi.mock("@/lib/connected-apps-cache", () => ({ readCachedInventory: () => null, writeCachedInventory: () => {} }));
-vi.mock("@/lib/product-events", () => ({ connectorConnect: vi.fn() }));
 vi.mock("./McpServersPanel", () => ({ McpServersPanel: () => null }));
 vi.mock("./XCard", async () => {
   const { createElement: element } = await import("react");

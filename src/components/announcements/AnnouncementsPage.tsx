@@ -5,8 +5,8 @@ import { itemSeen, rememberNoticeSeen, type HistoryAction, type HistoryItem, typ
 import { openEmailDraft, openExternalLink } from "@/lib/app-links";
 import { cn } from "@/lib/cn";
 import { activeLocale, t } from "@/lib/i18n";
-import { reportTeams, teamsAction } from "@/lib/teams-whats-new";
-import { reportWhatsNew, WHATS_NEW_SOURCES, whatsNewView, type WhatsNewView } from "@/lib/whats-new";
+import { teamsAction } from "@/lib/teams-whats-new";
+import { WHATS_NEW_SOURCES, whatsNewView, type WhatsNewView } from "@/lib/whats-new";
 import { useStore } from "@/state/store";
 import { localized, type AnnouncementAction, type AnnouncementPlace } from "../../../shared/announcements";
 import { announcementPlaceAction, KIND_ICON, MARK } from "../AnnouncementCard";
@@ -131,12 +131,12 @@ function Replay({ modal, found, whatsNew, onClose }: { modal: HistoryModal; foun
   };
   if (modal === "teams") {
     const action = teamsAction({ team: state.config?.team, viewer: found.viewer, account: found.account, canAddCloud: found.cloudBridge });
-    return <TeamsPopup action={action} onStep={step => reportTeams(step, action)} onDone={done}
+    return <TeamsPopup action={action} onDone={done}
       onStart={() => dispatch({ type: "openCloudAdd", source: WHATS_NEW_SOURCES.team })} />;
   }
   if (modal === "whats-new") {
     if (!whatsNew) return null;
-    return <WhatsNewPopup view={whatsNew} report={(action, slide) => reportWhatsNew(action, slide, whatsNew)} onDone={done}
+    return <WhatsNewPopup view={whatsNew} onDone={done}
       onBuy={slide => dispatch({ type: "openCloudAdd", source: WHATS_NEW_SOURCES[slide] })} />;
   }
   if (moving) return <GrokMoveDialog onClose={onClose} />;

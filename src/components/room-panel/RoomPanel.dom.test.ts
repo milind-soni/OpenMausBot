@@ -21,7 +21,6 @@ vi.mock("../DesktopCapabilities", async (importOriginal) => ({
   useDesktopCapabilities: () => ({ capabilities: { host: { homeDir: "/Users/ada" } }, ready: true }),
 }));
 vi.mock("../Avatar", () => ({ BotAvatar: () => null, MausAvatar: () => null }));
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
 const bot = (id: string, name: string): Bot => ({
   id, threadId: `${id}-thread`, name, title: "", description: "", color: "green",

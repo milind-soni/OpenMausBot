@@ -20,7 +20,6 @@ vi.mock("@/state/store", async (original) => ({
   useStore: () => ({ state: fixture.state, dispatch: fixture.dispatch, refreshInstances: vi.fn() }),
   api: fixture.api,
 }));
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => true }));
 vi.mock("@/components/CloudTrialNotice", () => ({ useCloudPlanSnapshot: () => fixture.plan }));
 // The sign-in cards and the team library have their own tests.

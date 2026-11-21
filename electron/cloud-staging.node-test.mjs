@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
+import { managedCloudConfigured } from "./managed-cloud.mjs";
 import { CLOUD_ORIGIN, STAGING_CLOUD_ORIGIN, checkoutDestination, cloudOrigin, cloudTarget, createCloudAccountClient } from "./cloud-account.mjs";
 
 const accessToken = `omc_${"S".repeat(43)}`;
@@ -79,4 +80,32 @@ test("main keeps each Admin's sign-in, saved servers, Files state and Cloud name
   assert.match(main, /createCloudAccountStore\(\{ file: path\.join\(app\.getPath\("userData"\), cloudTarget\(process\.env\)\.saved\)/);
   assert.match(ensure, /origin: cloudTarget\(process\.env\)\.origin,/);
   assert.equal(main.includes('"cloud-account.bin"'), false, "no second, fixed token file");
+});
+
+test("without OMB_CLOUD_ACCOUNT=1 or OMB_CLOUD_STAGING=1 the client never reaches MausBot Cloud", async () => {
+  assert.equal(managedCloudConfigured({}), false);
+  for (const value of ["0", "true", " 1", ""]) assert.equal(managedCloudConfigured({ OMB_CLOUD_ACCOUNT: value }), false, JSON.stringify(value));
+  assert.equal(managedCloudConfigured({ OMB_CLOUD_ACCOUNT: "1" }), true);
+  assert.equal(managedCloudConfigured({ OMB_CLOUD_STAGING: "1" }), true);
+  if (managedCloudConfigured()) return;
+  const real = globalThis.fetch, reached = [];
+  globalThis.fetch = async url => { reached.push(String(url)); return new Response("{}"); };
+  const opened = [];
+  const client = createCloudAccountClient({ deviceName: "Mac", platform: "darwin", store: { read: async () => null, write: async () => {} }, openBrowser: async url => { opened.push(url); }, setTimer: () => 1, clearTimer: () => {}, warn: () => {} });
+  try {
+    await client.start();
+    assert.equal(await client.offer(), null);
+    assert.deepEqual(await client.emailStart("person@example.test"), { outcome: "not-set-up" });
+    assert.equal((await client.begin()).message, "not-set-up", "the sheet can say the Cloud is not set up, not that sign-in failed");
+    await assert.rejects(client.openDashboard(), /not set up/);
+    assert.deepEqual(reached, []);
+    assert.deepEqual(opened, [], "no upstream Cloud page opens in the browser");
+  } finally { client.close(); globalThis.fetch = real; }
+});
+
+test("Cloud offers (Add a Cloud, checkout, the product-updates question) need a configured Cloud", () => {
+  const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
+  const rule = /function cloudOffersAllowed\(\) \{\n {2}return ([^\n]*);\n\}/.exec(main.replace(/\r\n/g, "\n"));
+  assert.ok(rule, "main.mjs keeps one cloudOffersAllowed rule");
+  assert.match(rule[1], /^managedCloudConfigured\(\) && /);
 });

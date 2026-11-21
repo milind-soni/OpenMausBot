@@ -4,7 +4,6 @@ import { api, ApiError, useStore } from "@/state/store";
 import { intlLocale, t } from "@/lib/i18n";
 import { openExternalLink } from "@/lib/app-links";
 import { useCopyFeedback } from "@/lib/copy-text";
-import { engineSignedIn } from "@/lib/product-events";
 import type { LocaleKey } from "@/locales";
 import { deviceSignInHasCode, deviceSignInLink, isDeviceSignInCode, type DeviceSignInProvider } from "../../shared/device-sign-in";
 import { CodexMark } from "./ProviderIcons";
@@ -171,7 +170,6 @@ export function DeviceSignIn({ instanceId, browserPkce = false, provider = "code
 
   // The sign-in already succeeded: a failed catalog refresh must not read as a failed sign-in.
   const refresh = async () => {
-    engineSignedIn(provider, browserPkce ? "browser" : "device_code");
     try { await refreshInstances(); } catch {}
     try { await refreshModels(instanceId); } catch {}
     onDone?.(true);

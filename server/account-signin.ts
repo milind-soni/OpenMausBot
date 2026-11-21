@@ -62,8 +62,8 @@ export function createEmailSignIn(options: {
   let client: ControlPlaneClient | null = options.client ?? null;
   const controlPlane = (): ControlPlaneClient => {
     if (client) return client;
-    const url = resolveCompanionControlPlaneURL({ isPackaged: true, environment: env });
-    if (!url) throw new Error("OMB_CONTROL_PLANE_URL is set but is not an https address");
+    const url = resolveCompanionControlPlaneURL({ environment: env });
+    if (!url) throw new Error("Emailed sign-in codes need a mail server: set OMB_SIGNIN_SMTP_URL");
     client = createControlPlaneClient({ baseURL: url, fetchImpl: options.fetchImpl });
     return client;
   };

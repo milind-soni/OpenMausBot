@@ -83,7 +83,7 @@ function Preview() {
   if (popup && typeof popup === "object") {
     return <div className="relative h-screen overflow-hidden">
       <MockApp />
-      <WhatsNewPopup view={popup} report={noop} onBuy={noop} onDone={noop} />
+      <WhatsNewPopup view={popup} onBuy={noop} onDone={noop} />
     </div>;
   }
   const view = VIEWS[state] ?? VIEWS.choose!;

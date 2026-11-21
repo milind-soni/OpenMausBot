@@ -3,7 +3,6 @@ import { Check, Loader2, Minus } from "lucide-react";
 import { useCloudSendNotice } from "@/components/CloudSendStrip";
 import { countedList } from "@/lib/cloud-send";
 import { WindowDragStrip } from "@/components/DesktopCapabilities";
-import { track } from "@/lib/analytics";
 import { teamPeoplePage } from "@/lib/app-links";
 import { reopenCloudIntent } from "@/lib/cloud-intent";
 import {
@@ -95,7 +94,6 @@ export function CloudWelcome() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
-    track("cloud_welcome_step", { step: view });
     if (!navigated.current) return;
     navigated.current = false;
     heading.current?.focus();
@@ -147,20 +145,19 @@ export function CloudWelcome() {
     go(welcomeViewAfter(withEarlyHints(record, ids), step), focus);
   };
   const finishBring = (outcome: BringOutcome) => finish("bring", outcome === "skipped" ? [CLOUD_SETUP_MOVE_SKIPPED] : []);
-  const end = (reason: "done" | "skipped") => {
-    track("cloud_welcome_ended", { reason, at: view });
+  const end = () => {
     remember([CLOUD_WELCOME_DONE]);
     endWelcomeHere();
   };
 
   const sayHi = () => {
-    end("done");
+    end();
     dispatch({ type: "showChat" });
     if (bot) openBot(dispatch, bot, showThreads);
   };
   const giveJob = () => {
     if (!bot) return;
-    end("done");
+    end();
     dispatch({ type: "showChat" });
     dispatch({ type: "select", id: bot.id });
     reopenCloudIntent(true);
@@ -205,7 +202,7 @@ export function CloudWelcome() {
               </li>;
             })}
           </ol>
-          {view !== "done" && <button type="button" onClick={() => end("skipped")}
+          {view !== "done" && <button type="button" onClick={end}
             className="shrink-0 rounded-md px-1.5 py-1 text-[13px] text-ink-secondary transition-colors hover:text-ink motion-reduce:transition-none @2xl/welcome:mt-auto @2xl/welcome:self-start">
             {t("cloudWelcome.skip")}
           </button>}
