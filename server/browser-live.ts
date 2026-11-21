@@ -11,6 +11,7 @@ import type { Cdp, CdpListeners } from "./browser-sites.ts";
 import { relay } from "./browser-relay.ts";
 import { HOLD_LIMITS, HoldClock, type HoldLimits } from "./browser/hold.ts";
 import { BrowserLiveError, INPUT_BATCH_LIMIT, integer, number, object, parseBrowserLiveAction, RequestOnce, text, type ObjectValue } from "./browser/live-action.ts";
+import { EngineProgress, engineDaemonAlive, statusReadMs } from "./browser/live-start.ts";
 import { activeTargetOf, keyEvent, LivePage, pressChord, pressedAtOnce, type OpenSelect } from "./browser/live-page.ts";
 import type { PersonReason } from "./browser/input-log.ts";
 import { BROWSER_HELD_ELSEWHERE } from "../shared/browser-held.ts";
@@ -22,7 +23,6 @@ const MAX_FRAME = 4 * 1024 * 1024;
 const MAX_BUFFER = 8 * 1024 * 1024;
 const HEARTBEAT_MS = 10_000;
 const COMMAND_TIMEOUT_MS = 30_000;
-const STATUS_PROBE_MS = 10_000;
 const BUSY_RETRY_MS = [1_000, 2_000, 5_000];
 const BUSY_LIMIT_MS = 10 * 60_000;
 const RESTART_NEEDED = "A browser action was interrupted. Choose Restart browser… in the browser menu before continuing.";
@@ -36,6 +36,8 @@ const ENDED_PROBE = { timeoutMs: 5_000, maxBytes: 65_536 };
 export const BROWSER_ASLEEP_ERROR = { type: "error", retryable: false, asleep: true, message: "This browser closed after it sat unused, to save memory. Reconnect to open it again." };
 /** What a view hears while its browser cannot show it yet; it keeps waiting. */
 export const BROWSER_WAITING = { type: "waiting", reason: "busy" };
+/** What a view hears while its browser is slow to start: it keeps waiting, and is not told a bot is busy. */
+const BROWSER_STARTING = { type: "waiting", reason: "starting" };
 export { BrowserLiveError, INPUT_BATCH_LIMIT, parseBrowserLiveAction } from "./browser/live-action.ts";
 
 export class BrowserActionFailedError extends BrowserLiveError {
@@ -53,6 +55,9 @@ export class BrowserBusyError extends BrowserLiveError {
     super(message, 503, "busy"); this.name = "BrowserBusyError";
   }
 }
+
+/** The engine left a status read unanswered while still starting or making progress: the view waits for it. */
+class BrowserStartingError extends BrowserBusyError {}
 
 /** The engine left a status read unanswered with no bot or person working in it: it hung, and its session is being reset. */
 class BrowserUnresponsiveError extends BrowserLiveError {
@@ -231,9 +236,17 @@ export class BrowserLive {
   private readonly dialogs = new Map<string, { watch: DialogWatch; views: Set<string> }>();
   private readonly devTools?: BrowserLiveDevTools;
   private readonly requests = new RequestOnce();
+  private readonly progress: EngineProgress;
+  private readonly engineAlive: (env: NodeJS.ProcessEnv) => boolean;
+  private readonly load: () => number;
   private order = 0;
-  constructor({ runtime, devTools, holdLimits = HOLD_LIMITS }: { runtime: BrowserRuntime; devTools?: BrowserLiveDevTools; holdLimits?: HoldLimits }) {
+  constructor({ runtime, devTools, holdLimits = HOLD_LIMITS, engine = {} }: { runtime: BrowserRuntime; devTools?: BrowserLiveDevTools; holdLimits?: HoldLimits;
+    /** How a slow engine is told from a hung one: the clock, whether its daemon still runs, and the status read's limit. */
+    engine?: { now?: () => number; alive?: (env: NodeJS.ProcessEnv) => boolean; statusReadMs?: () => number } }) {
     this.runtime = runtime;
+    this.progress = new EngineProgress(engine.now);
+    this.engineAlive = engine.alive ?? engineDaemonAlive;
+    this.load = engine.statusReadMs ?? statusReadMs;
     this.devTools = devTools;
     this.holdLimits = holdLimits;
     runtime.onIdleClose((session) => this.asleep(session));
@@ -483,6 +496,7 @@ export class BrowserLive {
         signal: viewer.abort.signal,
       });
       if (!this.current(viewer)) throw new Error("stale viewer");
+      this.progress.answered(viewer.session);
       const result = object(JSON.parse(stdout));
       const data = object(result?.data);
       if (result?.success !== true || !data) {
@@ -526,12 +540,18 @@ export class BrowserLive {
       throw new BrowserLiveError(error instanceof Error ? error.message : "The browser is not ready yet.", 503);
     });
     let status: ObjectValue;
-    try { status = await this.command(viewer, ["stream", "status"], STATUS_PROBE_MS); }
+    try { status = await this.command(viewer, ["stream", "status"], this.load()); }
     catch (error) {
-      // Only a bot call or a person's action can hold the engine past this read; with neither, it has hung.
+      // A bot call or a person's action can hold the engine past this read; with neither, it is starting, slow or hung.
       if (!(error instanceof BrowserBusyError) || this.runtime.working(viewer.session)) throw error;
+      const env = browserRuntimeEnv({ ...viewer.spec.env, AGENT_BROWSER_SESSION: viewer.session });
+      if (this.progress.verdict(viewer.session, { alive: this.engineAlive(env), held: Boolean(this.runtime.heldBy(viewer.session)) }) === "slow") throw new BrowserStartingError();
+      this.progress.forget(viewer.session);
+      const restarting = new BrowserUnresponsiveError();
+      // Every other view of it, its holder's included, hears why before its stream ends.
+      for (const other of this.viewers.values()) if (other !== viewer && other.session === viewer.session) this.send(other, { type: "error", retryable: true, message: restarting.message, ...userErrorFields(restarting) });
       this.resetSession(viewer, "a status read the browser never answered");
-      throw new BrowserUnresponsiveError();
+      throw restarting;
     }
     if (status.enabled !== true) {
       try { status = await this.command(viewer, ["stream", "enable"]); }
@@ -550,14 +570,16 @@ export class BrowserLive {
   private async connectWhenFree(viewer: Viewer): Promise<number> {
     const deadline = Date.now() + BUSY_LIMIT_MS;
     for (let attempt = 0; ; attempt++) {
+      let starting = false;
       try { return await this.connect(viewer); }
       catch (error) {
         if (!(error instanceof BrowserBusyError) || !this.current(viewer)) throw error;
         if (Date.now() >= deadline) throw new BrowserBusyError("The bot is still using this browser. Reconnect when it has finished.");
+        starting = error instanceof BrowserStartingError;
       }
       viewer.waiting = true;
       this.startEvents(viewer);
-      this.send(viewer, BROWSER_WAITING);
+      this.send(viewer, starting ? BROWSER_STARTING : BROWSER_WAITING);
       await new Promise<void>((resolve) => {
         const done = () => { clearTimeout(timer); viewer.abort.signal.removeEventListener("abort", done); resolve(); };
         const timer = setTimeout(done, BUSY_RETRY_MS[Math.min(attempt, BUSY_RETRY_MS.length - 1)]);

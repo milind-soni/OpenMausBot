@@ -157,6 +157,14 @@ describe("the v1 live client", () => {
     expect(handlers.onGone).not.toHaveBeenCalled();
   });
 
+  it("waits on a browser slow to start as it opens, and on a busy bot as the bot's", () => {
+    const { handlers, source } = open();
+    source.emit("waiting", { reason: "starting" });
+    expect(handlers.onMessage).not.toHaveBeenCalled();
+    source.emit("waiting", { reason: "busy" });
+    expect(handlers.onMessage).toHaveBeenCalledExactlyOnceWith({ type: "starting" });
+  });
+
   it("passes on the server's dropdown list for a press, and sends the option chosen", async () => {
     const { client, post, handlers, source } = open();
     source.emit("ready", { viewerId: "v1" });

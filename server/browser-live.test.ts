@@ -83,7 +83,7 @@ beforeEach(() => {
     launched: vi.fn(async () => {}),
     pageSizes: { resize: vi.fn(async () => {}) },
   } as unknown as BrowserRuntime;
-  live = new BrowserLive({ runtime });
+  live = new BrowserLive({ runtime, engine: { statusReadMs: () => 10_000 } });
   SocketFixture.instances = [];
   SocketFixture.initialMessages = []; SocketFixture.failOpen = false;
   vi.stubGlobal("WebSocket", SocketFixture);
@@ -1255,7 +1255,8 @@ describe("opening a view while the bot holds the browser", () => {
     expect(execute.mock.calls[0]?.[2]).toMatchObject({ timeout: 10_000, killSignal: "SIGKILL" });
   });
 
-  it("resets an engine that stops answering while nothing works in it, says so, and reconnects to a fresh session (#3728)", async () => {
+  it("resets an engine whose process is gone, says so, and reconnects to a fresh session", async () => {
+    live = new BrowserLive({ runtime, engine: { alive: () => false } });
     vi.mocked(runtime.working).mockReturnValue(false);
     execute.mockRejectedValueOnce(busy());
     const { res, opening } = start();
@@ -1272,6 +1273,7 @@ describe("opening a view while the bot holds the browser", () => {
   });
 
   it("carries the restart error code and original English over an isolated HTTP event stream", async () => {
+    live = new BrowserLive({ runtime, engine: { alive: () => false } });
     vi.mocked(runtime.working).mockReturnValue(false);
     execute.mockRejectedValueOnce(busy());
     const server = createServer((_req, res) => {
@@ -1304,6 +1306,47 @@ describe("opening a view while the bot holds the browser", () => {
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     }
+  });
+
+  it("waits for an engine still starting on a slow machine, as starting, not as a busy bot, and resets nothing", async () => {
+    vi.useFakeTimers();
+    live = new BrowserLive({ runtime, engine: { alive: () => true, now: () => Date.now(), statusReadMs: () => 10_000 } });
+    vi.mocked(runtime.working).mockReturnValue(false);
+    execute.mockRejectedValueOnce(busy()).mockRejectedValueOnce(busy()).mockResolvedValue(output(ready));
+    const { res, opening } = start();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await opening;
+    expect(res.events("waiting")).toEqual([{ reason: "starting" }, { reason: "starting" }]);
+    expect(res.events("ready")).toHaveLength(1);
+    expect(res.events("error")).toEqual([]);
+    expect(nativeClose).not.toHaveBeenCalled();
+  });
+
+  it("resets an engine that leaves status reads unanswered for minutes, alive or not, unless a person holds the browser", async () => {
+    vi.useFakeTimers();
+    let now = 0;
+    live = new BrowserLive({ runtime, engine: { alive: () => true, now: () => now, statusReadMs: () => 10_000 } });
+    vi.mocked(runtime.working).mockReturnValue(false);
+    execute.mockImplementation(async () => { now += 10_000; throw busy(); });
+    const { res, opening } = start();
+    await vi.advanceTimersByTimeAsync(200_000);
+    await opening;
+    // Some 18 reads of 10 s each: three minutes of an engine that never answered.
+    expect(now).toBeGreaterThanOrEqual(180_000);
+    expect(res.events("waiting").length).toBeGreaterThan(10);
+    expect(res.events("error")).toEqual([expect.objectContaining({ errorKey: "serverError.browser.restartingUnresponsive" })]);
+    expect(nativeClose).toHaveBeenCalledOnce();
+    // Held by a person, a silent engine is never reset under them.
+    nativeClose.mockClear();
+    held.set("profile-a", "admin-b");
+    now = 0;
+    live = new BrowserLive({ runtime, engine: { alive: () => true, now: () => now, statusReadMs: () => 10_000 } });
+    const again = start();
+    await vi.advanceTimersByTimeAsync(200_000);
+    expect(again.res.events("error")).toEqual([]);
+    expect(nativeClose).not.toHaveBeenCalled();
+    again.res.destroy();
+    await vi.advanceTimersByTimeAsync(10_000);
   });
 
   it("keeps waiting, and resets nothing, while a bot call still works in the browser", async () => {

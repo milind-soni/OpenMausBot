@@ -273,7 +273,8 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
       heardAt = Date.now();
       try { handler(JSON.parse((event as MessageEvent).data) as Record<string, unknown>); } catch {}
     });
-    listen("waiting", () => events.onMessage?.({ type: "starting" }));
+    // A browser slow to start keeps the view's "opening" wait; any other wait is the bot's.
+    listen("waiting", (data) => { if (data.reason !== "starting") events.onMessage?.({ type: "starting" }); });
     listen("ready", (data) => {
       if (typeof data.viewerId !== "string" || !data.viewerId) return;
       viewerId = data.viewerId;
