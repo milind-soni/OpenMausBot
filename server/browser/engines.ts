@@ -168,10 +168,10 @@ export class ChromeEngine {
   /** A deleted bot's or profile's browser: stopped, and its folder, downloads and screenshots gone. */
   async erase(request: { kind: "bot" | "profile"; id: string; partitionId: string }): Promise<boolean> {
     const key = request.kind === "bot" ? `bot:${request.id}` : `shared:${request.partitionId}`;
-    this.#options.pane?.backend.erase(key);
-    if (!this.#everUsed()) return true;
+    if (!this.#everUsed() && !this.#options.pane) return true;
     try {
       await this.service.erase(key);
+      this.#options.pane?.backend.erase(key);
       return true;
     } catch (error) {
       this.#options.log?.(`browser cleanup: could not erase ${key}: ${error instanceof Error ? error.message : String(error)}`);

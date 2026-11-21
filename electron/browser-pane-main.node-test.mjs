@@ -13,6 +13,7 @@ function fakeElectron() {
   const views = [];
   const sessions = new Map();
   const window = {
+    webContents: new EventEmitter(),
     destroyed: false,
     children: [],
     isDestroyed() { return this.destroyed; },
@@ -30,6 +31,8 @@ function fakeElectron() {
       loaded: [],
       closed: false,
       openHandler: null,
+      webrtc: null,
+      setWebRTCIPHandlingPolicy(policy) { this.webrtc = policy; },
       getURL() { return this.url; },
       getTitle: () => "",
       loadURL(url) { this.loaded.push(url); return Promise.resolve(); },
@@ -66,6 +69,7 @@ function fakeElectron() {
         setPermissionCheckHandler(handler) { this.check = handler; },
         async clearStorageData() { this.erased++; },
         async clearCache() {},
+        async setProxy(config) { this.proxy = config; },
         webRequest: { onBeforeSendHeaders(handler) { sessions.get(name).headers = handler; } },
       });
     }
@@ -86,21 +90,26 @@ function setup() {
   return { electron, panes, server, posted, send, last, advance: (ms) => { clock += ms; } };
 }
 
-test("says hello to the server it starts and ignores any other process", () => {
-  const { panes, posted } = setup();
+test("says hello to the server it starts, again when that server asks, and ignores any other process", () => {
+  const { panes, posted, send } = setup();
   assert.deepEqual(posted[0], { type: MSG, op: "hello" });
+  send({ op: "hello" });
+  assert.deepEqual(posted[1], { type: MSG, op: "hello" });
+  posted.length = 1;
   assert.equal(panes.receive({ postMessage() {} }, { type: MSG, op: "open", browser: "bot:a", partition: PARTITION }), true);
   assert.equal(posted.length, 1);
   assert.equal(panes.receive({}, { type: "something-else" }), false);
 });
 
-test("opens a profile on its partition with Electron's and the app's tokens out of the user agent", () => {
+test("opens a profile on its partition, behind its egress gate, with Electron's and the app's tokens out of the user agent", async () => {
   const { send, last, electron } = setup();
-  send({ op: "open", browser: "bot:a", partition: PARTITION });
+  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000 });
+  await tick();
   const opened = last("opened");
   assert.equal(opened.version, "146.0.7680.0");
   assert.equal(opened.userAgent, "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.0 Safari/537.36");
   const session = electron.sessions.get(PARTITION);
+  assert.deepEqual(session.proxy, { proxyRules: "socks5://127.0.0.1:41000", proxyBypassRules: "<-loopback>" });
   let granted = null;
   session.request(null, "geolocation", (value) => { granted = value; });
   assert.equal(granted, false);
@@ -119,16 +128,19 @@ test("can give one host Electron's own user agent, and every other the stripped 
   assert.equal(paneUserAgent(electronAgent), "Mozilla/5.0 Chrome/146.0.7680.0 Safari/537.36");
 });
 
-test("refuses a partition outside the pane pattern", () => {
+test("refuses a partition outside the pane pattern, and a profile without an egress gate", async () => {
   const { send, posted, electron } = setup();
-  send({ op: "open", browser: "bot:a", partition: "persist:openmausbot-app" });
+  send({ op: "open", browser: "bot:a", partition: "persist:openmausbot-app", egress: 41000 });
+  send({ op: "open", browser: "bot:a", partition: PARTITION });
+  await tick();
   assert.equal(posted.length, 1);
   assert.equal(electron.sessions.size, 0);
 });
 
 test("creates a sandboxed view per tab, attaches its debugger and relays its CDP both ways", async () => {
   const { send, last, electron, posted } = setup();
-  send({ op: "open", browser: "bot:a", partition: PARTITION });
+  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000 });
+  await tick();
   send({ op: "create", browser: "bot:a", req: 1, url: "https://example.com/" });
   await tick();
   const created = last("created");
@@ -139,6 +151,7 @@ test("creates a sandboxed view per tab, attaches its debugger and relays its CDP
   assert.equal(view.options.webPreferences.nodeIntegration, false);
   assert.equal(view.options.webPreferences.devTools, false);
   assert.deepEqual(view.webContents.loaded, ["https://example.com/"]);
+  assert.equal(view.webContents.webrtc, "disable_non_proxied_udp");
   assert.deepEqual(view.bounds, { x: 0, y: 0, width: 1280, height: 800 });
   assert.equal(view.visible, false);
 
@@ -161,7 +174,8 @@ test("creates a sandboxed view per tab, attaches its debugger and relays its CDP
 
 test("shows the bot's tab in front over the panel's rectangle and hides it under an overlay", async () => {
   const { send, panes, posted, electron } = setup();
-  send({ op: "open", browser: "bot:a", partition: PARTITION });
+  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000 });
+  await tick();
   send({ op: "create", browser: "bot:a", req: 1, url: "about:blank" });
   send({ op: "create", browser: "bot:a", req: 2, url: "about:blank", background: true });
   await tick();
@@ -187,7 +201,8 @@ test("shows the bot's tab in front over the panel's rectangle and hides it under
 
 test("makes a page's popup another tab of the same profile, with its opener", async () => {
   const { send, last, electron } = setup();
-  send({ op: "open", browser: "bot:a", partition: PARTITION });
+  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000 });
+  await tick();
   send({ op: "create", browser: "bot:a", req: 1, url: "about:blank" });
   await tick();
   const opener = electron.views[0].webContents;
@@ -205,7 +220,8 @@ test("makes a page's popup another tab of the same profile, with its opener", as
 
 test("tells the server when the person uses a pane, at most four times a second", async () => {
   const { send, posted, electron, advance } = setup();
-  send({ op: "open", browser: "bot:a", partition: PARTITION });
+  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000 });
+  await tick();
   send({ op: "create", browser: "bot:a", req: 1, url: "about:blank" });
   await tick();
   const contents = electron.views[0].webContents;
@@ -221,7 +237,8 @@ test("tells the server when the person uses a pane, at most four times a second"
 
 test("draws a hidden pane for a screenshot, then hides it again", async () => {
   const { send, last, electron } = setup();
-  send({ op: "open", browser: "bot:a", partition: PARTITION });
+  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000 });
+  await tick();
   send({ op: "create", browser: "bot:a", req: 1, url: "about:blank" });
   await tick();
   send({ op: "cdp", browser: "bot:a", req: 2, tab: "p1", method: "Page.captureScreenshot", params: {} });
@@ -233,7 +250,8 @@ test("draws a hidden pane for a screenshot, then hides it again", async () => {
 
 test("closes a profile's views, detaches their debuggers, erases a partition and drops everything for a new server", async () => {
   const { send, panes, last, electron, posted } = setup();
-  send({ op: "open", browser: "bot:a", partition: PARTITION });
+  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000 });
+  await tick();
   send({ op: "create", browser: "bot:a", req: 1, url: "about:blank" });
   await tick();
   const [view] = electron.views;
@@ -247,7 +265,8 @@ test("closes a profile's views, detaches their debuggers, erases a partition and
   await tick();
   assert.equal(electron.sessions.get(PARTITION).erased, 1);
 
-  send({ op: "open", browser: "bot:b", partition: PARTITION });
+  send({ op: "open", browser: "bot:b", partition: PARTITION, egress: 41000 });
+  await tick();
   send({ op: "create", browser: "bot:b", req: 2, url: "about:blank" });
   await tick();
   const next = { postMessage: (message) => posted.push(message) };
@@ -258,9 +277,24 @@ test("closes a profile's views, detaches their debuggers, erases a partition and
 
 test("a crashed page or a detached debugger is a tab gone", async () => {
   const { send, last, electron } = setup();
-  send({ op: "open", browser: "bot:a", partition: PARTITION });
+  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000 });
+  await tick();
   send({ op: "create", browser: "bot:a", req: 1, url: "about:blank" });
   await tick();
   electron.views[0].webContents.emit("render-process-gone", {}, { reason: "crashed" });
   assert.deepEqual(last("tab-gone"), { type: MSG, op: "tab-gone", browser: "bot:a", tab: "p1", crashed: true });
+});
+
+test("hides the shown pane when the app's page reloads or its renderer crashes", async () => {
+  const { send, panes, posted, electron } = setup();
+  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000 });
+  await tick();
+  send({ op: "create", browser: "bot:a", req: 1, url: "about:blank" });
+  await tick();
+  const showing = panes.show({ botId: "a", threadId: null, bounds: { x: 0, y: 0, width: 800, height: 600 }, visible: true });
+  send({ op: "resolved", req: posted.find((message) => message.op === "which").req, browser: "bot:a" });
+  await showing;
+  assert.equal(electron.views[0].visible, true);
+  electron.window.webContents.emit("did-start-navigation", {}, "http://127.0.0.1/", false, true);
+  assert.equal(electron.views[0].visible, false);
 });

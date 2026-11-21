@@ -3,7 +3,9 @@ type CdpParams = Record<string, unknown>;
 type Base = { type: "openmausbot:browser-pane" };
 
 export type PaneToMain = Base & (
-  | { op: "open"; browser: string; partition: string }
+  | { op: "hello" }
+  /** `egress`: the loopback port of the profile's egress gate; every request of its panes goes through it. */
+  | { op: "open"; browser: string; partition: string; egress: number }
   | { op: "create"; browser: string; req: number; url: string; background?: boolean }
   | { op: "cdp"; browser: string; req: number; tab: string; method: string; params: CdpParams; session?: string }
   | { op: "front" | "close-tab"; browser: string; tab: string }

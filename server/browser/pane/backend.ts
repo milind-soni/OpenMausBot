@@ -6,7 +6,7 @@ import { CdpBrowser } from "../cdp/browser.ts";
 import { profileHash, profileKind, workspaceId } from "../chrome/profile.ts";
 import type { PaneLink } from "./link.ts";
 
-const PANE_CAPS: BackendCaps = { persistentProfile: true, window: true, egressGate: false, identityOverride: false, ownsAllTabs: true, downloads: "none", uploads: "path", botPasskeys: false };
+const PANE_CAPS: BackendCaps = { persistentProfile: true, window: true, egressGate: true, identityOverride: false, ownsAllTabs: true, downloads: "none", uploads: "path", botPasskeys: false };
 
 /** Sign-ins are the profile's own and never shared between data folders; a temporary profile's die with the app. */
 export function panePartition(dataDir: string, key: string, nonce = () => randomBytes(4).toString("hex")): string {
@@ -19,11 +19,14 @@ export class PaneBackend implements Backend {
   readonly caps = PANE_CAPS;
   readonly #link: PaneLink;
   readonly #dataDir: string;
+  readonly #egressPort: (key: string) => Promise<number>;
   readonly #platform: NodeJS.Platform;
 
-  constructor(link: PaneLink, dataDir: string, platform: NodeJS.Platform = process.platform) {
+  /** `egressPort`: the profile's egress gate, which the panes' partition is proxied through as a launched Chrome is. */
+  constructor(link: PaneLink, dataDir: string, egressPort: (key: string) => Promise<number>, platform: NodeJS.Platform = process.platform) {
     this.#link = link;
     this.#dataDir = dataDir;
+    this.#egressPort = egressPort;
     this.#platform = platform;
   }
 
@@ -32,7 +35,7 @@ export class PaneBackend implements Backend {
   }
 
   async open(request: OpenRequest): Promise<OpenedBrowser> {
-    const opened = await this.#link.open(request.key, panePartition(this.#dataDir, request.key));
+    const opened = await this.#link.open(request.key, panePartition(this.#dataDir, request.key), await this.#egressPort(request.key));
     let browser: CdpBrowser;
     try {
       browser = await CdpBrowser.connect(opened.endpoint, { identity: null, headless: false, permissions: false, downloadDir: null, viewport: null, platform: this.#platform, maxPages: 8, handleAuth: true });

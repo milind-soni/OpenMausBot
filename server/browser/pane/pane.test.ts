@@ -36,8 +36,7 @@ function setup({ quietMs = 1_000 } = {}) {
   folders.push(dataDir);
   const main = new FakeMain(documents);
   const link = new PaneLink(main, { quietMs, maxHoldMs: 2_000 });
-  main.hello();
-  const backend = new PaneBackend(link, dataDir, "darwin");
+  const backend = new PaneBackend(link, dataDir, async () => 41_000, "darwin");
   const service = new BrowserService({ dataDir, backend: () => backend, maxRunning: 4, idleMs: () => 600_000, takeoverMs: 200 });
   services.push(service);
   const target = { session: "bot-a", key: "bot:a" };
@@ -71,6 +70,7 @@ describe("the bots' browser as desktop panes", () => {
     expect(main.toMain.filter((message) => message.op === "create")).toHaveLength(1);
     expect(main.partitions).toHaveLength(1);
     expect(main.partitions[0]).toMatch(PANE_PARTITION);
+    expect(main.egress).toEqual([41_000]);
   });
 
   it("opens a new tab as another pane and closes every pane with the browser", async () => {
@@ -129,11 +129,13 @@ describe("the bots' browser as desktop panes", () => {
     const targetId = run.browser.activePage!.targetId;
     expect(control.owner(targetId)).toBe(null);
     control.hold(targetId, true);
+    main.commands.length = 0;
     expect(control.owner(targetId)).toBe("person");
     const refused = await call("agent_browser_click", { selector: "#go" });
     expect(refused.isError).toBe(true);
     expect(text(refused)).toContain("The person is using this tab.");
-    expect(main.commands.some((command) => command.method.startsWith("Input."))).toBe(false);
+    expect((await call("agent_browser_navigate", { url: "https://example.com/away" })).isError).toBe(true);
+    expect(main.commands.some((command) => command.method.startsWith("Input.") || command.method === "Page.navigate")).toBe(false);
     control.hold(targetId, false);
     const stale = await call("agent_browser_click", { ref: "e2" });
     expect(text(stale)).toContain("Take a fresh snapshot");
@@ -142,6 +144,11 @@ describe("the bots' browser as desktop panes", () => {
     main.personInput("bot:a", "p1");
     await sleep(5);
     expect(control.owner(targetId)).toBe("person");
+  });
+
+  it("keeps every pane emulating focus, so a pane the person is not in still takes the bot's keys", async () => {
+    const { main, call } = setup();
+    await call("agent_browser_open", { url: "https://example.com/a" });
     expect(main.commands.filter((command) => command.method === "Emulation.setFocusEmulationEnabled").map((command) => command.params)).toEqual([{ enabled: true }]);
   });
 
@@ -156,12 +163,11 @@ describe("the bots' browser as desktop panes", () => {
   it("fails to open when the app has not said it shows panes", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "omb-browser-pane-"));
     folders.push(dataDir);
-    const main = new FakeMain(documents);
-    const link = new PaneLink(main);
+    const silent = { on: () => undefined, postMessage: () => undefined };
+    const link = new PaneLink(silent);
     expect(link.available).toBe(false);
-    const backend = new PaneBackend(link, dataDir);
+    const backend = new PaneBackend(link, dataDir, async () => 41_000);
     await expect(backend.open({ key: "bot:a", mode: "headless", fresh: false, viewport: { width: 1280, height: 720 }, downloadDir: dataDir })).rejects.toThrow(/does not show browser panes/);
-    expect(main.toMain).toEqual([]);
     expect(new PaneLink(null).available).toBe(false);
   });
 });
@@ -184,8 +190,10 @@ describe("the pane link", () => {
   it("answers which profile a bot's panel shows, and ignores what is not a pane message", async () => {
     const main = new FakeMain();
     const link = new PaneLink(main);
-    link.resolveWith((botId, threadId) => (botId === "a" ? `bot:${botId}${threadId ? "" : ""}` : null));
-    main.hello();
+    link.resolveWith((botId) => (botId === "a" ? `bot:${botId}` : null));
+    await sleep(5);
+    expect(link.available).toBe(true);
+    main.toMain.length = 0;
     main.post({ op: "which", req: 1, botId: "a", threadId: null });
     main.post({ op: "which", req: 2, botId: "b", threadId: "t-1" });
     await sleep(5);

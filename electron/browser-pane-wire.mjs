@@ -11,7 +11,7 @@ const SESSION = /^[\w.:-]{1,128}$/;
 const METHOD = /^[A-Z][A-Za-z]*\.[a-z][A-Za-z]*$/;
 const BOT = /^[\w.-]{1,128}$/;
 
-const TO_MAIN = new Set(["open", "create", "cdp", "front", "close-tab", "close", "erase", "resolved"]);
+const TO_MAIN = new Set(["hello", "open", "create", "cdp", "front", "close-tab", "close", "erase", "resolved"]);
 const TO_SERVER = new Set(["hello", "opened", "failed", "created", "answer", "event", "tab", "tab-gone", "closed", "input", "which"]);
 
 const isObject = (value) => Object.prototype.toString.call(value) === "[object Object]";
@@ -29,7 +29,8 @@ function fieldsValid(message) {
   if ("params" in message && !isObject(message.params)) return false;
   if ("partition" in message && !text(message.partition, PANE_PARTITION)) return false;
   switch (op) {
-    case "open": case "erase": return text(message.partition, PANE_PARTITION);
+    case "open": return text(message.partition, PANE_PARTITION) && Number.isInteger(message.egress) && message.egress > 0 && message.egress < 65_536;
+    case "erase": return text(message.partition, PANE_PARTITION);
     case "create": return count(message.req) && typeof message.url === "string" && message.url.length <= 8192;
     case "cdp": return count(message.req) && text(message.tab, TAB) && text(message.method, METHOD) && isObject(message.params);
     case "front": case "close-tab": case "tab-gone": return text(message.tab, TAB);

@@ -168,7 +168,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   const chromeEngine = new ChromeEngine({
     dataDir: DATA_DIR,
     host,
-    ...(paneLink ? { pane: { backend: new PaneBackend(paneLink, DATA_DIR), wanted: () => browserPaneWanted(cfg) } } : {}),
+    ...(paneLink ? { pane: { backend: new PaneBackend(paneLink, DATA_DIR, (key) => browserEgress.open(key)), wanted: () => browserPaneWanted(cfg) } } : {}),
     egressPort: (key) => browserEgress.open(key),
     egressNotice: (key) => browserEgress.takeNotice(key),
     idleMs,

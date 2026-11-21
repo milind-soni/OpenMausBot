@@ -60,6 +60,8 @@ export const PERSON_HOLDS_TAB = "The person is using this tab. Wait until they h
 class Refusal extends Error {}
 
 const PAGE_PREFIX = "pane-";
+/** What a held tab refuses: the bot's input, and leaving or closing the page. Reading it (and evaluating) still runs. */
+const ACTS = /^(?:Input\.|Page\.(?:navigate|reload|navigateToHistoryEntry|close)$|DOM\.(?:focus|setFileInputFiles)$)/;
 const PRIMED = ["Network.enable", "Page.enable", "Page.setLifecycleEventsEnabled"] as const;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -234,9 +236,12 @@ export class PaneEndpoint implements CdpTransport {
         this.tabOpened(created);
         return { targetId: created.target };
       }
-      case "Target.closeTarget":
-        this.#channel.closeTab(this.#tab(String(params.targetId)).tab);
+      case "Target.closeTarget": {
+        const tab = this.#tab(String(params.targetId));
+        if (tab.held) throw new Refusal(PERSON_HOLDS_TAB);
+        this.#channel.closeTab(tab.tab);
         return { success: true };
+      }
       case "Target.activateTarget":
         this.#channel.front(this.#tab(String(params.targetId)).tab);
         return {};
@@ -274,6 +279,7 @@ export class PaneEndpoint implements CdpTransport {
   }
 
   async #page(tab: TabState, method: string, params: Params): Promise<Params> {
+    if (tab.held && ACTS.test(method)) throw new Refusal(PERSON_HOLDS_TAB);
     if (method === "Page.bringToFront") {
       this.#channel.front(tab.tab);
       return {};
@@ -286,7 +292,6 @@ export class PaneEndpoint implements CdpTransport {
     const ahead = tab.gate;
     const input = method.startsWith("Input.");
     if (input) {
-      if (tab.held) throw new Refusal(PERSON_HOLDS_TAB);
       const released = ahead.then(() => this.#personStill());
       tab.gate = released;
       await released;
@@ -295,7 +300,7 @@ export class PaneEndpoint implements CdpTransport {
     } else {
       await ahead;
     }
-    // Real input follows window focus; a pane the person is not in must still take the bot's keys (Chromium 146).
+    // Real input follows window focus; a pane the person is not in must still take the bot's keys.
     if (method === "Page.enable") void this.#channel.command(tab.tab, "Emulation.setFocusEmulationEnabled", { enabled: true }).catch(() => undefined);
     if (method === "Page.navigate" || method === "Page.reload") await this.#prime(tab.tab);
     // The person's page outlives this server: a frame paused for it would stay frozen after a server restart.

@@ -23,6 +23,7 @@ export class FakeMain implements PanePort {
   readonly commands: PaneCommand[] = [];
   readonly toMain: PaneToMain[] = [];
   readonly partitions: string[] = [];
+  readonly egress: number[] = [];
   readonly panes = new Map<string, FakePane>();
   /** Answers a pane's command before FakeChrome does; undefined lets it through. */
   answer: (command: PaneCommand) => Record<string, unknown> | undefined = () => undefined;
@@ -79,8 +80,12 @@ export class FakeMain implements PanePort {
 
   async #handle(message: PaneToMain): Promise<void> {
     switch (message.op) {
+      case "hello":
+        this.hello();
+        return;
       case "open":
         this.partitions.push(message.partition);
+        this.egress.push(message.egress);
         this.post({ op: "opened", browser: message.browser, version: "146.0.7680.0", userAgent: "Mozilla/5.0 Chrome/146.0.0.0 Safari/537.36" });
         return;
       case "create": {

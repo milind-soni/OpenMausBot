@@ -60,6 +60,8 @@ export class PaneLink {
         console.warn(`browser pane: rejected a message from the app: ${error instanceof Error ? error.message : String(error)}`);
       }
     });
+    // The app's own greeting may arrive before this listener exists; asking makes it greet again.
+    this.#post({ op: "hello" });
   }
 
   /** True once the desktop app said it shows panes. */
@@ -72,7 +74,7 @@ export class PaneLink {
     this.#resolver = resolver;
   }
 
-  async open(browser: string, partition: string): Promise<OpenedPanes> {
+  async open(browser: string, partition: string, egress: number): Promise<OpenedPanes> {
     if (!this.available) throw new Error("The desktop app does not show browser panes here.");
     this.close(browser);
     const answer = await new Promise<{ version: string; userAgent: string }>((resolve, reject) => {
@@ -84,7 +86,7 @@ export class PaneLink {
         resolve: (value) => { clearTimeout(timer); resolve(value); },
         reject: (error) => { clearTimeout(timer); reject(error); },
       });
-      this.#post({ op: "open", browser, partition });
+      this.#post({ op: "open", browser, partition, egress });
     });
     const inputs = new Set<() => void>();
     const channel: PaneChannel = {

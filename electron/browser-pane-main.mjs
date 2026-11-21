@@ -27,6 +27,7 @@ export function createBrowserPanes({ createView, fromPartition, owner, chromeVer
   const configured = new Set();
   const pings = new Map();
   const resolving = new Map();
+  const watched = new WeakSet();
   let server = null;
   let tabCount = 0;
   let requests = 0;
@@ -129,6 +130,7 @@ export function createBrowserPanes({ createView, fromPartition, owner, chromeVer
       ...(adopt ? { webContents: adopt } : {}),
     });
     const contents = view.webContents;
+    contents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp");
     const entry = { tab: `p${++tabCount}`, view, contents, window: win, target: null, visible: false, ...(opener ? { opener } : {}) };
     contents.debugger.attach("1.3");
     browser.tabs.set(entry.tab, entry);
@@ -140,7 +142,7 @@ export function createBrowserPanes({ createView, fromPartition, owner, chromeVer
     contents.on("destroyed", () => removeTab(key, entry.tab));
     for (const event of ["did-navigate", "did-navigate-in-page", "page-title-updated"]) contents.on(event, () => info(key, entry));
     contents.on("input-event", (_event, input) => { if (PERSON_INPUT.has(input?.type)) ping(key, entry.tab); });
-    contents.setWindowOpenHandler(() => ({
+    contents.setWindowOpenHandler(() => (!browsers.has(key) || !owner() || openTabs() >= MAX_TABS ? { action: "deny" } : {
       action: "allow",
       // OAuth pop-ups answer their opener, so the popup is the page's own child, made a tab here.
       createWindow: (options) => {
@@ -180,6 +182,33 @@ export function createBrowserPanes({ createView, fromPartition, owner, chromeVer
     if (announce) post({ op: "closed", browser: key, reason: "closed by the app" });
   }
 
+  async function open(message) {
+    try {
+      closeBrowser(message.browser, false);
+      const session = configure(message.partition);
+      // Security: the panes reach the network only through the profile's egress gate, as a launched Chrome does.
+      await session.setProxy({ proxyRules: `socks5://127.0.0.1:${message.egress}`, proxyBypassRules: "<-loopback>" });
+      browsers.set(message.browser, { partition: message.partition, tabs: new Map(), active: null });
+      post({ op: "opened", browser: message.browser, version: chromeVersion, userAgent: session.getUserAgent() });
+      layout();
+    } catch (error) {
+      post({ op: "failed", browser: message.browser, error: error?.message ?? String(error) });
+    }
+  }
+
+  /** A renderer that reloads or crashes never hides what its panel showed. */
+  function watchRenderer(win) {
+    if (watched.has(win.webContents)) return;
+    watched.add(win.webContents);
+    const hide = () => {
+      panel = { botId: null, threadId: null, browser: Promise.resolve(null) };
+      shown = { ...shown, browser: null, visible: false };
+      layout();
+    };
+    win.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => { if (isMainFrame && !isInPlace) hide(); });
+    win.webContents.on("render-process-gone", hide);
+  }
+
   async function create(message) {
     try {
       const entry = createTab(message.browser, { background: message.background === true });
@@ -210,17 +239,10 @@ export function createBrowserPanes({ createView, fromPartition, owner, chromeVer
 
   function handle(message) {
     switch (message.op) {
-      case "open":
-        try {
-          closeBrowser(message.browser, false);
-          const session = configure(message.partition);
-          browsers.set(message.browser, { partition: message.partition, tabs: new Map(), active: null });
-          post({ op: "opened", browser: message.browser, version: chromeVersion, userAgent: session.getUserAgent() });
-          layout();
-        } catch (error) {
-          post({ op: "failed", browser: message.browser, error: error?.message ?? String(error) });
-        }
+      case "hello":
+        post({ op: "hello" });
         return;
+      case "open": return void open(message);
       case "create": return void create(message);
       case "cdp": return void command(message);
       case "front": {
@@ -285,6 +307,7 @@ export function createBrowserPanes({ createView, fromPartition, owner, chromeVer
       if (!isObject(input) || typeof input.botId !== "string" || !BOT.test(input.botId)) throw new Error("Browser pane input is invalid");
       const threadId = typeof input.threadId === "string" && BOT.test(input.threadId) ? input.threadId : null;
       const win = owner();
+      if (win && !win.isDestroyed()) watchRenderer(win);
       const bounds = input.visible === true && win && !win.isDestroyed() ? normalizeDesktopWorkspaceBounds(input.bounds, win.getContentSize()) : shown.bounds;
       if (input.botId !== panel.botId || threadId !== panel.threadId) {
         panel = { botId: input.botId, threadId, browser: resolveBrowser(input.botId, threadId) };

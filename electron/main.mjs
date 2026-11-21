@@ -1148,10 +1148,10 @@ async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmen
   proc.on("message", (message) => {
     if (!serverSupervisor.isCurrent(proc)) return;
     try {
-      if (trustedApprovalMode.receive(proc, message)) return;
+      if (browserPanes.receive(proc, message) || trustedApprovalMode.receive(proc, message)) return;
       if (managedDesktopRelay.receive(proc, message)) return;
       if (orgLibrary?.receive(message)) return;
-      if (receivePhoneSecretSave(proc, message) || oneHome.receive(proc, message) || tailnetShare.receive(message) || browserPanes.receive(proc, message)) return;
+      if (receivePhoneSecretSave(proc, message) || oneHome.receive(proc, message) || tailnetShare.receive(message)) return;
     } catch (error) {
       slog(`desktop private sync rejected: ${error?.message ?? error}`);
     }
