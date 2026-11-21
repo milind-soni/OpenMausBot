@@ -89,6 +89,7 @@ export interface ViewerOptions {
   pagePopups?: boolean;
   /** The viewer draws the agent's pointer, which the agent's actions wait for; false for the v1 view, which draws none. */
   pointer?: boolean;
+  frames?: boolean; // false: its person sees the browser's window another way, on a remote desktop, so no screencast runs
 }
 
 /** What a hub needs from the browser service. */
@@ -111,6 +112,7 @@ export interface HubHost {
   showTab(tab: Tab): Promise<void>;
   download(id: string): Download | undefined;
   extensions(): InstalledExtension[]; // installed in this browser's profile with a page to open; empty where OMB keeps none
+  desktop?(): boolean; // its window fills a display the person sees as it is, so no viewer sizes it
 }
 
 const num = (value: unknown, fallback = 0) => (typeof value === "number" && Number.isFinite(value) ? value : fallback);
@@ -165,7 +167,7 @@ export class Viewer {
       pace: options.pace ?? "hi",
       authPrompts: options.authPrompts === true,
       pagePopups: options.pagePopups === true,
-      pointer: options.pointer !== false,
+      pointer: options.pointer !== false, frames: options.frames !== false,
     };
   }
 
@@ -177,9 +179,7 @@ export class Viewer {
     try { this.#push(output); } catch {}
   }
 
-  get session(): CdpSession | null {
-    return this.#session;
-  }
+  get session(): CdpSession | null { return this.#session; }
 
   /** Follows the tab in front: a new session and screencast for it, the old ones let go. */
   bind(tab: Tab | null): Promise<void> {
@@ -228,7 +228,7 @@ export class Viewer {
     this.#scale = scale;
     const session = this.#session;
     this.#params = this.#params.then(async () => {
-      if (!session || session !== this.#session || session.detached || this.#paused > 0 || this.#hidden || this.closed) return;
+      if (!session || session !== this.#session || session.detached || this.#paused > 0 || this.#hidden || this.closed || !this.options.frames) return;
       await session.send("Page.stopScreencast").catch(() => {});
       await session.send("Page.startScreencast", {
         format: "jpeg",
@@ -338,7 +338,7 @@ export class Viewer {
   async pushStill(): Promise<void> {
     const tab = this.tab;
     const session = this.#session;
-    if (!tab || !session || session.detached || this.#hidden || this.closed) return;
+    if (!tab || !session || session.detached || this.#hidden || this.closed || !this.options.frames) return;
     try {
       const metrics = await session.send<{ cssVisualViewport: { pageX: number; pageY: number; clientWidth: number; clientHeight: number; scale?: number } }>("Page.getLayoutMetrics");
       const view = metrics.cssVisualViewport;
@@ -447,9 +447,8 @@ export class ViewerHub {
 
   handBack(): Promise<void> { return this.#hold.handBack(); }
 
-  get size(): number {
-    return this.viewers.size;
-  }
+  get size(): number { return this.viewers.size; }
+  personUsed(): void { this.host.used(); this.#hold.used(); } // input from a remote desktop of the browser's window
 
   /** Someone watching could answer a site's HTTP sign-in. */
   answersAuth(): boolean {
@@ -470,7 +469,7 @@ export class ViewerHub {
 
   async #apply(): Promise<void> {
     const browser = this.host.browser();
-    if (!browser) return;
+    if (!browser || this.host.desktop?.()) return;
     const size = this.viewport();
     const zoom = this.zoom;
     const emulated = size.width < MIN_WINDOW_WIDTH || zoom !== 1 || !fitsScreen(size, this.host.pageLimit());

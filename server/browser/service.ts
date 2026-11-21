@@ -23,6 +23,8 @@ import type { CdpPage } from "./cdp/page.ts";
 import { browserRoot, profileDir, profileHash, profileKind, removeProfile, workspaceId } from "./chrome/profile.ts";
 import { BROWSER_CONTROL_REFUSAL, ProfileControl, type TakeResult } from "./control.ts";
 import { executeTool, personUrl, readsDuringHold, toolFailure, type ToolContext } from "./dispatch.ts";
+import type { DesktopTarget } from "./desktop/views.ts";
+import { fillDisplay, resizeDisplay } from "./desktop/window.ts";
 import { installedExtensions } from "./extensions.ts";
 import { HealthShown, pageHealthLine } from "./health.ts";
 import type { HoldLimits } from "./hold.ts";
@@ -71,6 +73,8 @@ interface Running {
   readonly browser: CdpBrowser;
   readonly offs: Array<() => void>;
   closing: boolean;
+  /** The person resized the browser's display away from its usual size. */
+  resized?: boolean;
 }
 
 type Reopened = { kind: "idle" | "restart" | "crash"; pages: string[] } | null;
@@ -242,6 +246,13 @@ export class BrowserService {
     }));
     if (browser.downloads) run.offs.push(browser.downloads.onChange((download) => profile.hub.downloaded(download)));
     if (opened.onPersonInput) run.offs.push(opened.onPersonInput(() => { profile.lastUsed = Date.now(); }));
+    // A display the person resized goes back to its usual size when they hand the browser back, as the page does.
+    const display = opened.display;
+    if (display) run.offs.push(profile.control.onChange(() => {
+      if (profile.control.owner !== null || !run.resized || run.closing) return;
+      run.resized = false;
+      void resizeDisplay(display.socket, display.size).then(() => fillDisplay(browser, display.size)).catch(() => undefined);
+    }));
     try {
       this.#stillWanted(profile, epoch);
       await browser.waitForPage(() => true, 15_000);
@@ -644,6 +655,20 @@ export class BrowserService {
     return profile.hub.attach(options, push);
   }
 
+  /** The display a person sees this browser's window on: "pictures" when it runs headless, "stopped" while it does not
+   * run. A desktop view never starts a browser: the person's v2 view does, and an idle one stays closed. */
+  async desktop(target: BrowserTarget): Promise<DesktopTarget | "pictures" | "stopped"> {
+    const profile = this.#profiles.get(target.key);
+    const run = profile?.run && !profile.run.closing ? profile.run : await profile?.starting?.catch(() => null);
+    if (!profile || !run || run.closing) return "stopped";
+    const display = run.opened.display;
+    if (!display) return "pictures";
+    return { socket: display.socket, control: profile.control, used: () => profile.hub.personUsed(), resized: (width, height) => {
+      run.resized = width !== display.size.width || height !== display.size.height;
+      void fillDisplay(run.browser, { width, height });
+    } };
+  }
+
   heldBy(session: string): string | null {
     return this.#bySession(session)?.control.owner ?? null;
   }
@@ -710,6 +735,7 @@ export class BrowserService {
       running: async () => { await this.running(profile); },
       used: () => { profile.lastUsed = Date.now(); },
       pageLimit: () => (profile.run && !profile.run.closing ? profile.run.opened.pageLimit ?? null : null),
+      desktop: () => Boolean(profile.run?.opened.display),
       take: async (owner: string): Promise<TakeResult> => {
         await this.running(profile);
         const taken = await profile.control.take(owner);

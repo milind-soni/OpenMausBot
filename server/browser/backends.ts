@@ -8,6 +8,7 @@ import { fitPage, pageLimit, type BrowserMode, type HostKind, type ScreenSpec } 
 import { launchChrome, type ChromeProcess, type LaunchOptions } from "./chrome/launch.ts";
 import { clearSingleton, staleSingletonLock, type ProcessRegistry } from "./chrome/processes.ts";
 import { languageList } from "./chrome/wrapper.ts";
+import type { DesktopDisplay } from "./desktop/displays.ts";
 import { downgradeRefusal, ensureProfile, forgetOpenTabs, markCleanExit, profileDir, profileHash, recordOpenedBy, versionOf, workspaceId } from "./chrome/profile.ts";
 
 export type BackendKind = "local" | "my-chrome" | "cdp-url" | "pane";
@@ -48,6 +49,8 @@ export interface OpenedBrowser {
   /** Where the person uses the page directly: holds the bot's input to a tab while the person has it (refs drop on
    * release), and says who acted last in it. */
   personControl?: { hold(targetId: string, held: boolean): void; owner(targetId: string): "person" | "bot" | null };
+  /** The private display its window is on, which a person sees as a remote desktop; absent when it runs headless. */
+  readonly display?: DesktopDisplay | null;
 }
 
 export interface Backend {
@@ -81,6 +84,8 @@ export interface LocalBackendOptions {
   log?: (line: string) => void;
   /** Starts Chrome; tests pass a fake. */
   launch?: (options: LaunchOptions) => Promise<ChromeProcess>;
+  /** A private display for this profile's window, or null to run it headless. */
+  display?: (key: string) => Promise<DesktopDisplay | null>;
 }
 
 const LOCAL_CAPS: BackendCaps = { persistentProfile: true, window: true, egressGate: true, identityOverride: true, ownsAllTabs: true, downloads: "local", uploads: "path", botPasskeys: true };
@@ -116,7 +121,9 @@ export class LocalBackend implements Backend {
     if (staleSingletonLock(dir)) clearSingleton(dir);
     markCleanExit(dir);
     if (request.fresh) forgetOpenTabs(dir);
-    const headless = request.mode === "headless";
+    const display = (await options.display?.(request.key)) ?? null;
+    const mode = display ? "window" : request.mode;
+    const headless = mode === "headless";
     const locale = options.locale?.() ?? null;
     const egressPort = await options.egressPort(request.key);
     const screen = headless ? await options.screen() : null;
@@ -125,7 +132,7 @@ export class LocalBackend implements Backend {
     const chrome: ChromeProcess = await (options.launch ?? launchChrome)({
       executablePath: binary.path,
       userDataDir: dir,
-      mode: request.mode,
+      mode,
       host: options.host,
       platform,
       userAgent: headless ? binary.identity.userAgent : null,
@@ -140,6 +147,10 @@ export class LocalBackend implements Backend {
       profileMarker: profileHash(workspaceId(options.dataDir), request.key),
       registry: options.registry ?? null,
       ...(options.handshakeTimeoutMs === undefined ? {} : { handshakeTimeoutMs: options.handshakeTimeoutMs }),
+      ...(display ? { env: { ...process.env, ...display.env }, fillScreen: display.size, wrap: display.wrap } : {}),
+    }).catch(async (error: unknown) => {
+      await display?.release();
+      throw error;
     });
     const version = versionOf(chrome.version.product);
     try {
@@ -147,7 +158,8 @@ export class LocalBackend implements Backend {
       const browserOptions: BrowserOptions = {
         identity: headless ? binary.identity : null,
         acceptLanguage: locale ? languageList(locale) : undefined,
-        headless,
+        // A window on a private display is still one nobody sits at: file pickers and passkeys go to the panel.
+        headless: headless || display !== null,
         downloadDir: request.downloadDir,
         platform,
         maxPages: 8,
@@ -162,14 +174,17 @@ export class LocalBackend implements Backend {
         pageLimit: limit,
         pid: chrome.pid,
         version,
-        exited: chrome.exited.then(() => undefined),
+        exited: chrome.exited.then(() => display?.release()),
         async close() {
           await browser.close();
           await chrome.close(5_000);
+          await display?.release();
         },
+        display,
       };
     } catch (error) {
       await chrome.kill();
+      await display?.release();
       throw error;
     }
   }
