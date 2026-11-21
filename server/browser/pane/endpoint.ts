@@ -1,7 +1,10 @@
 // One profile's desktop panes as one browser-level CDP connection. Each pane is an Electron webContents whose debugger
 // speaks page-level CDP only (no Browser domain, no Target.createTarget): this endpoint answers the browser-level
 // commands itself and asks the main process for tabs, so the CDP driver runs on it unchanged.
+import { GOOGLE_REJECTED, passkeyWallAt } from "../../../shared/passkey-wall.ts";
+import type { SiteRefusal } from "../backends.ts";
 import type { Params } from "../cdp/connection.ts";
+import { NO_PASSKEY_COMMANDS } from "../cdp/passkeys.ts";
 import type { CdpTransport, SendMeta } from "../cdp/transport.ts";
 
 export interface PaneTab {
@@ -91,6 +94,7 @@ function heldAllows(method: string, readOnly: boolean): boolean {
   return HELD_READS.has(method) || HELD_SETUP.test(method) || (readOnly && RUNTIME_CALLS.has(method));
 }
 const PRIMED = ["Network.enable", "Page.enable", "Page.setLifecycleEventsEnabled"] as const;
+const UA_OVERRIDES = new Set(["Emulation.setUserAgentOverride", "Network.setUserAgentOverride"]);
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class PaneEndpoint implements CdpTransport {
@@ -101,6 +105,8 @@ export class PaneEndpoint implements CdpTransport {
   readonly #quietMs: number;
   readonly #maxHoldMs: number;
   readonly #primeMs: number;
+  readonly #refusals = new Set<(refusal: SiteRefusal) => void>();
+  readonly #holds = new Set<(targetId: string, held: boolean) => void>();
   #autoAttach = false;
   #viewerCount = 0;
   #lastInput = 0;
@@ -174,6 +180,11 @@ export class PaneEndpoint implements CdpTransport {
     const state = this.#tabs.get(tab);
     if (!state) return;
     const page = pageSession(tab);
+    // A frame left waiting for a debugger never runs its scripts: Google's sign-in then says the browser has no JavaScript.
+    if (method === "Target.attachedToTarget" && params.waitingForDebugger === true && typeof params.sessionId === "string") {
+      void this.#channel.command(tab, "Runtime.runIfWaitingForDebugger", {}, params.sessionId).catch(() => undefined);
+    }
+    if (method === "Page.frameNavigated" && !session) this.#refusedHere(state, params);
     if (session) {
       this.#event(method, renamed(method, params, page), `${page}:${session}`);
       return;
@@ -188,6 +199,23 @@ export class PaneEndpoint implements CdpTransport {
     }
     if (state.announced) this.#event(method, params, page);
     for (const viewer of state.viewers) this.#event(method, params, viewer);
+  }
+
+  /** Called when a site turns this browser away; the panel can offer the person's own Chrome or their sign-ins. */
+  onRefusal(listener: (refusal: SiteRefusal) => void): () => void {
+    this.#refusals.add(listener);
+    return () => this.#refusals.delete(listener);
+  }
+
+  #refusedHere(tab: TabState, params: Params): void {
+    const frame = params.frame as { id?: unknown; parentId?: unknown; url?: unknown; urlFragment?: unknown } | undefined;
+    if (!frame || frame.parentId !== undefined || typeof frame.url !== "string") return;
+    const url = frame.url;
+    const kind = GOOGLE_REJECTED.test(url) ? "google-rejected" : passkeyWallAt(url) ? "passkey" : null;
+    if (!kind) return;
+    for (const listener of this.#refusals) {
+      try { listener({ kind, url, targetId: tab.target }); } catch {}
+    }
   }
 
   /** The person pressed, typed or scrolled in one of these panes (`tab` when the app knows which). */
@@ -211,7 +239,44 @@ export class PaneEndpoint implements CdpTransport {
 
   /** While held, the bot may only read that tab, and may not bring another tab to the front. */
   hold(targetId: string, held: boolean): void {
-    for (const tab of this.#tabs.values()) if (tab.target === targetId) tab.held = held;
+    for (const tab of this.#tabs.values()) if (tab.target === targetId) this.#setHeld(tab, held);
+  }
+
+  /** `hold` by the app's own name for the tab; the tab's target, or null when it is not one of these panes. */
+  holdTab(tab: string, held: boolean): string | null {
+    const state = this.#tabs.get(tab);
+    if (!state) return null;
+    this.#setHeld(state, held);
+    return state.target;
+  }
+
+  /** Every hold ends: the app window the person held them from has gone. */
+  releaseAll(): void {
+    for (const tab of this.#tabs.values()) if (tab.held) this.#setHeld(tab, false);
+  }
+
+  /** Called as a tab is held or handed back. */
+  onHold(listener: (targetId: string, held: boolean) => void): () => void {
+    this.#holds.add(listener);
+    return () => this.#holds.delete(listener);
+  }
+
+  #setHeld(tab: TabState, held: boolean): void {
+    tab.held = held;
+    for (const listener of this.#holds) {
+      try { listener(tab.target, held); } catch {}
+    }
+  }
+
+  /** Whether the person holds any tab: the bot's tabs then stay behind it. */
+  holding(): boolean {
+    return this.#anyHeld();
+  }
+
+  /** The person holds this tab now. */
+  held(targetId: string): boolean {
+    for (const tab of this.#tabs.values()) if (tab.target === targetId) return tab.held;
+    return false;
   }
 
   owner(targetId: string): PaneOwner {
@@ -243,7 +308,8 @@ export class PaneEndpoint implements CdpTransport {
     if (!command.sessionId) return this.#browser(command.method, params);
     const route = this.#route(command.sessionId);
     if (route.kind !== "viewer" && route.tab.held && !heldAllows(command.method, command.readOnly === true)) throw new Refusal(PERSON_HOLDS_TAB);
-    if (route.kind === "child") return this.#channel.command(route.tab.tab, command.method, unrenamed(command.method, params), route.child);
+    if (UA_OVERRIDES.has(command.method) && !params.userAgentMetadata) throw new Refusal("A desktop pane keeps Chromium's own client hints: a user agent override needs userAgentMetadata.");
+    if (route.kind === "child") return this.#channel.command(route.tab.tab, command.method, unattached(command.method, unrenamed(command.method, params)), route.child);
     if (route.kind === "viewer") return this.#viewer(route.tab, command.sessionId, command.method, params);
     return this.#page(route.tab, command.method, params);
   }
@@ -327,9 +393,9 @@ export class PaneEndpoint implements CdpTransport {
   }
 
   async #page(tab: TabState, method: string, params: Params): Promise<Params> {
+    // The driver fronts a page before it navigates; while the person holds another tab, the page loads behind it.
     if (method === "Page.bringToFront") {
-      this.#refuseFront(tab);
-      this.#channel.front(tab.tab);
+      if (!this.#heldOtherThan(tab)) this.#channel.front(tab.tab);
       return {};
     }
     if (method === "Page.close") {
@@ -337,6 +403,8 @@ export class PaneEndpoint implements CdpTransport {
       return {};
     }
     if (method === "Emulation.setDeviceMetricsOverride") throw new Refusal("A desktop pane is sized by the app window.");
+    // An answer to the page's dialog waits on nothing: what is under way on the page may be waiting on that dialog.
+    if (method === "Page.handleJavaScriptDialog") return this.#channel.command(tab.tab, method, params);
     const ahead = tab.gate;
     const input = method.startsWith("Input.");
     if (input) {
@@ -348,12 +416,18 @@ export class PaneEndpoint implements CdpTransport {
     } else {
       await ahead;
     }
-    // Real input follows window focus; a pane the person is not in must still take the bot's keys.
-    if (method === "Page.enable") void this.#channel.command(tab.tab, "Emulation.setFocusEmulationEnabled", { enabled: true }).catch(() => undefined);
+    if (method === "Page.enable") this.#setUpPane(tab.tab);
     if (method === "Page.navigate" || method === "Page.reload") await this.#prime(tab.tab);
-    // The person's page outlives this server: a frame paused for it would stay frozen after a server restart.
-    const sent = method === "Target.setAutoAttach" ? { ...params, waitForDebuggerOnStart: false } : params;
-    return this.#channel.command(tab.tab, method, sent);
+    return this.#channel.command(tab.tab, method, unattached(method, params));
+  }
+
+  /**
+   * Real input follows window focus; a pane the person is not in must still take the bot's keys. Electron draws no
+   * passkey sheet, so a passkey request would wait for good (Electron 43): it is turned down at once instead.
+   */
+  #setUpPane(tab: string): void {
+    void this.#channel.command(tab, "Emulation.setFocusEmulationEnabled", { enabled: true }).catch(() => undefined);
+    for (const [method, params] of NO_PASSKEY_COMMANDS) void this.#channel.command(tab, method, params).catch(() => undefined);
   }
 
   async #viewer(tab: TabState, sessionId: string, method: string, params: Params): Promise<Params> {
@@ -390,9 +464,14 @@ export class PaneEndpoint implements CdpTransport {
     return false;
   }
 
+  #heldOtherThan(tab: TabState): boolean {
+    for (const other of this.#tabs.values()) if (other.held && other !== tab) return true;
+    return false;
+  }
+
   /** Bringing a tab to the front while the person holds another would take the page they use away from them. */
   #refuseFront(tab: TabState): void {
-    for (const other of this.#tabs.values()) if (other.held && other !== tab) throw new Refusal(PERSON_HOLDS_TAB);
+    if (this.#heldOtherThan(tab)) throw new Refusal(PERSON_HOLDS_TAB);
   }
 
   #tab(targetId: string): TabState {
@@ -443,6 +522,11 @@ function unrenamed(method: string, params: Params): Params {
     return { ...params, sessionId: params.sessionId.replace(/^pane-p\d+:/, "") };
   }
   return params;
+}
+
+/** The person's page outlives this server: a frame paused for it would stay frozen after a server restart. */
+function unattached(method: string, params: Params): Params {
+  return method === "Target.setAutoAttach" ? { ...params, waitForDebuggerOnStart: false } : params;
 }
 
 function errorOf(error: unknown): { message: string; code?: number } {

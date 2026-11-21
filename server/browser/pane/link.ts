@@ -1,5 +1,5 @@
 // The server's end of the desktop app's pane messages: one PaneEndpoint per profile the main process shows natively.
-import { PANE_MESSAGE, paneMessageToServer, type PaneToMain, type PaneToServer } from "../../../electron/browser-pane-wire.mjs";
+import { PANE_MESSAGE, paneMessageToServer, type CookieImportResult, type CookieSource, type PaneCookie, type PaneToMain, type PaneToServer } from "../../../electron/browser-pane-wire.mjs";
 import type { Params } from "../cdp/connection.ts";
 import { PaneEndpoint, type PaneChannel, type PaneEndpointOptions, type PaneTab } from "./endpoint.ts";
 
@@ -41,6 +41,13 @@ const REQUEST_TIMEOUT_MS = 120_000;
 /** No app window can host a pane now (the window is closed); a launched Chrome can run the browser instead. */
 export class PaneUnavailable extends Error {}
 
+/** What the person's sign-in imports ask of the server. */
+export interface CookieRequests {
+  sources(): Promise<CookieSource[]>;
+  offer(request: { botId: string; threadId: string | null; site: string }): Promise<{ offered: boolean; reason?: string }>;
+  import(request: { botId: string; threadId: string | null; site: string; source: string; profile: string }): Promise<CookieImportResult>;
+}
+
 export class PaneProtocolError extends Error {
   readonly code: number | undefined;
 
@@ -57,6 +64,7 @@ export class PaneLink {
   readonly #opening = new Map<string, { resolve(answer: { version: string; userAgent: string }): void; reject(error: Error): void }>();
   readonly #pending = new Map<number, Pending>();
   #resolver: ((botId: string, threadId: string | null) => string | null) | null = null;
+  #cookies: CookieRequests | null = null;
   #ready = false;
   #next = 0;
 
@@ -85,7 +93,17 @@ export class PaneLink {
     this.#resolver = resolver;
   }
 
-  async open(browser: string, partition: string, egress: number, downloads: string): Promise<OpenedPanes> {
+  /** Answers the person's sign-in imports, which reach this server only from the app's own window, through its main process. */
+  answerCookieRequests(requests: CookieRequests): void {
+    this.#cookies = requests;
+  }
+
+  /** Writes an import's cookies into a pane partition, whether or not a pane of it is open. */
+  setCookies(partition: string, cookies: PaneCookie[]): Promise<{ written: number; refused: number }> {
+    return this.#request(null, (req) => ({ op: "set-cookies", req, partition, cookies })) as Promise<{ written: number; refused: number }>;
+  }
+
+  async open(browser: string, partition: string, egress: number, downloads: string, identity: "native" | "cleaned" = "native"): Promise<OpenedPanes> {
     if (!this.available) throw new PaneUnavailable("The desktop app does not show browser panes here.");
     this.close(browser);
     const answer = await new Promise<{ version: string; userAgent: string }>((resolve, reject) => {
@@ -99,7 +117,7 @@ export class PaneLink {
         resolve: (value) => { clearTimeout(timer); resolve(value); },
         reject: (error) => { clearTimeout(timer); reject(error); },
       });
-      this.#post({ op: "open", browser, partition, egress, downloads });
+      this.#post({ op: "open", browser, partition, egress, downloads, identity });
     });
     const inputs = new Set<() => void>();
     const channel: PaneChannel = {
@@ -142,8 +160,8 @@ export class PaneLink {
     if (this.#port) this.#post({ op: "erase", partition });
   }
 
-  #request(browser: string, message: (req: number) => Outgoing): Promise<Params | PaneTab> {
-    if (!this.#browsers.has(browser)) return Promise.reject(new PaneProtocolError("Target closed"));
+  #request(browser: string | null, message: (req: number) => Outgoing): Promise<Params | PaneTab> {
+    if (browser === null ? !this.available : !this.#browsers.has(browser)) return Promise.reject(new PaneProtocolError("Target closed"));
     const req = ++this.#next;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -153,6 +171,20 @@ export class PaneLink {
       this.#pending.set(req, { browser, resolve: (value) => { clearTimeout(timer); resolve(value); }, reject: (error) => { clearTimeout(timer); reject(error); }, timer });
       this.#post(message(req));
     });
+  }
+
+  /** Security: a failure is answered by its fixed fallback, never by its message, which could quote what was read. */
+  async #answer(req: number, answer: () => Promise<Outgoing>, fallback: () => Outgoing): Promise<void> {
+    if (!this.#cookies) {
+      this.#post(fallback());
+      return;
+    }
+    try {
+      this.#post(await answer());
+    } catch {
+      console.warn(`browser pane: a sign-in import request (${req}) failed`);
+      this.#post(fallback());
+    }
   }
 
   #fail(browser: string, reason: string): void {
@@ -204,6 +236,36 @@ export class PaneLink {
         this.#post({ op: "resolved", req: message.req, browser });
         return;
       }
+      case "cookies-set": {
+        const pending = this.#pending.get(message.req);
+        if (!pending || pending.browser !== null) return;
+        this.#pending.delete(message.req);
+        pending.resolve({ written: message.written, refused: message.refused });
+        return;
+      }
+      case "cookie-sources":
+        void this.#answer(message.req, async () => ({ op: "cookie-sources-result", req: message.req, sources: await this.#cookies!.sources() }),
+          () => ({ op: "cookie-sources-result", req: message.req, sources: [] }));
+        return;
+      case "cookie-offer":
+        void this.#answer(message.req, async () => ({ op: "cookie-offer-result", req: message.req, ...(await this.#cookies!.offer(message)) }),
+          () => ({ op: "cookie-offer-result", req: message.req, offered: false, reason: "unreadable" }));
+        return;
+      case "cookie-import":
+        void this.#answer(message.req, async () => ({ op: "cookie-import-result", req: message.req, result: await this.#cookies!.import(message) }),
+          () => ({ op: "cookie-import-result", req: message.req, result: { ok: false, reason: "unreadable" } }));
+        return;
+      case "hold": {
+        // The tab must be one of the browser this server shows for that bot and conversation.
+        const shown = this.#resolver?.(message.botId, message.threadId) ?? null;
+        const shownOpen = shown === message.browser ? this.#browsers.get(shown) : undefined;
+        const target = shownOpen?.endpoint.holdTab(message.tab, message.held) ?? null;
+        this.#post({ op: "hold-result", req: message.req, held: target !== null && message.held });
+        return;
+      }
+      case "let-go":
+        for (const open of this.#browsers.values()) open.endpoint.releaseAll();
+        return;
     }
     const open = this.#browsers.get(message.browser);
     if (!open) return;

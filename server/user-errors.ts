@@ -158,6 +158,7 @@ export const USER_ERROR = {
   "serverError.signIn.answeredInChat": "this sign-in request was already answered in the chat",
   "serverError.signIn.alreadyDone": "this sign-in request was already marked done",
   "serverError.signIn.alreadyCancelled": "this sign-in request was already cancelled",
+  "serverError.signIn.expired": "this request already expired",
   "serverError.inbox.answerNotPassed": "That answer can't be passed back.",
   "serverError.room.nameOneLine": "room name must fit on one line",
   "serverError.computer.systemUnsupported": "bots can't use this computer on this system — choose another place for this bot to work",
