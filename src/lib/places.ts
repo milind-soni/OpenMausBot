@@ -91,6 +91,18 @@ export function computerName(place: Pick<RailPlace, "profile"> & Partial<Pick<Ra
   return place.profile && place.named && place.name ? place.name : t("rail.thisComputer");
 }
 
+export type WorkspaceState = Awaited<ReturnType<NonNullable<NonNullable<typeof window.ogb>["workspaces"]>["state"]>>;
+
+const CLOUD_HOME_NAME = "My Cloud";
+
+/** The name of the place a window shows: its team, the Cloud's own name, the workspace or This computer. */
+export function windowPlaceName(place: WorkspaceState, team: string | undefined): string {
+  if (place.home) return team || (place.name && place.name !== CLOUD_HOME_NAME ? place.name : t("cloudSetup.myCloud"));
+  if (place.profile) return place.profileName || computerName({ profile: place.profile });
+  if (place.local && !place.localPath) return t("rail.thisComputer");
+  return place.name;
+}
+
 /** A new workspace's first name: Work, then Personal, then Workspace 2, 3 and on, whichever no place here has yet. */
 export function suggestedLocalName(taken: readonly string[]): string {
   const used = new Set(taken.map((name) => name.toLocaleLowerCase()));

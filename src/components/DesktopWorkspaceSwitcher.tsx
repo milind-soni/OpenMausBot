@@ -6,10 +6,9 @@ import type { Action } from "@/state/store";
 import type { CloudPlanSnapshot } from "../../electron/cloud-account.mjs";
 import { cloudColor } from "@/lib/cloud-look";
 import { t } from "@/lib/i18n";
-import { railShown, usePlaces } from "@/lib/places";
+import { railShown, usePlaces, windowPlaceName } from "@/lib/places";
 import { CloudTile } from "./cloud-buy/parts";
 import { SIMPLE_RAIL_BUTTON } from "./SidebarSimpleTop";
-import { windowPlaceName } from "./WindowPlaceTitle";
 
 export function openServerMenu(bridge: { menu: (options?: { from?: "howto" }) => Promise<void> }, { howTo = false, onClosed }: { howTo?: boolean; onClosed?: () => void } = {}): Promise<void> {
   return bridge.menu(howTo ? { from: "howto" } : undefined).finally(() => { if (howTo) onClosed?.(); });
