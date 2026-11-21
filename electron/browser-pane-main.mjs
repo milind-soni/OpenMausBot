@@ -6,7 +6,8 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 import desktopWorkspace from "./desktop-workspace.cjs";
-import { PANE_MESSAGE, PANE_PARTITION, PANE_TABS_PER_BROWSER, paneMessageToMain, paneUserAgent } from "./browser-pane-wire.mjs";
+import { paneBaseUserAgent, paneIdentityMode, paneRequestUserAgent, paneTabUserAgent } from "./browser-pane-identity.mjs";
+import { PANE_MESSAGE, PANE_PARTITION, PANE_TABS_PER_BROWSER, paneMessageToMain } from "./browser-pane-wire.mjs";
 
 const { normalizeDesktopWorkspaceBounds } = desktopWorkspace;
 const PERSON_INPUT = new Set(["mouseDown", "keyDown", "rawKeyDown", "char", "mouseWheel", "gestureScrollBegin", "touchStart"]);
@@ -14,6 +15,9 @@ const PING_MS = 250;
 /** Input events this soon after the bot's own input count as the bot's, should Electron report debugger input too. */
 const BOT_INPUT_ECHO_MS = 150;
 const RESOLVE_MS = 5_000;
+/** A window.open this soon after the person's own press or key, with Chromium's user gesture, is the person's. */
+const GESTURE_MS = 1_000;
+const POPUP_SIZE = { width: 520, height: 680 };
 const CAPTURE_MS = 10_000;
 const HIDDEN_SIZE = { width: 1280, height: 800 };
 /** Granted as a normal profile has them; everything else is refused without a prompt. */
@@ -21,18 +25,21 @@ const GRANTED = new Set(["clipboard-sanitized-write", "fullscreen", "pointerLock
 const BOT = /^[\w.-]{1,128}$/;
 const PROFILE = /^[\w.:-]{1,128}$/;
 
-const hostOf = (url) => { try { return new URL(url).hostname; } catch { return ""; } };
+const originOf = (url) => { try { return new URL(url).origin; } catch { return ""; } };
 const isObject = (value) => Object.prototype.toString.call(value) === "[object Object]";
 const NO_PANEL = Object.freeze({ botId: null, threadId: null, profile: null, wanted: false, bounds: null, browser: null });
 const samePanel = (a, b) => a.botId === b.botId && a.threadId === b.threadId && a.profile === b.profile;
 
 /**
- * `createView(options)`: a WebContentsView. `fromPartition(name)`: Electron's session. `owner()`: the app window or null.
- * `chromeVersion`: process.versions.chrome.
+ * `createView(options)`: a WebContentsView. `createPopup(options)`: a BrowserWindow, for a sign-in popup the person
+ * opened. `fromPartition(name)`: Electron's session. `owner()`: the app window or null. `chromeVersion`:
+ * process.versions.chrome.
  */
-export function createBrowserPanes({ createView, fromPartition, owner, chromeVersion, log = () => {}, now = Date.now, captureMs = CAPTURE_MS }) {
+export function createBrowserPanes({ createView, createPopup = null, fromPartition, owner, chromeVersion, log = () => {}, now = Date.now, captureMs = CAPTURE_MS }) {
   const browsers = new Map();
   const configured = new Set();
+  /** Per partition: Electron's own UA, read before this module changed it, and the identity mode in force. */
+  const identities = new Map();
   const pings = new Map();
   const resolving = new Map();
   const watched = new WeakSet();
@@ -80,17 +87,19 @@ export function createBrowserPanes({ createView, fromPartition, owner, chromeVer
     });
   }
 
-  function configure(partition) {
+  function configure(partition, mode) {
     const session = fromPartition(partition);
+    if (!identities.has(partition)) identities.set(partition, { electron: session.getUserAgent(), mode });
+    const identity = identities.get(partition);
+    identity.mode = paneIdentityMode(mode);
+    session.setUserAgent(paneBaseUserAgent(identity.electron, identity.mode));
     if (configured.has(partition)) return session;
     configured.add(partition);
-    const electronAgent = session.getUserAgent();
-    const agent = paneUserAgent(electronAgent);
-    session.setUserAgent(agent);
+    // Only the User-Agent header: client hints stay Chromium's own.
     session.webRequest.onBeforeSendHeaders((details, callback) => {
-      const host = hostOf(details.url);
-      const wanted = host ? paneUserAgent(electronAgent, host) : agent;
-      callback({ requestHeaders: wanted === agent ? details.requestHeaders : { ...details.requestHeaders, "User-Agent": wanted } });
+      const wanted = paneRequestUserAgent(identity.electron, identity.mode, details);
+      const name = Object.keys(details.requestHeaders).find((header) => header.toLowerCase() === "user-agent") ?? "User-Agent";
+      callback({ requestHeaders: details.requestHeaders[name] === wanted ? details.requestHeaders : { ...details.requestHeaders, [name]: wanted } });
     });
     session.setPermissionRequestHandler((_contents, permission, callback) => callback(GRANTED.has(permission)));
     session.setPermissionCheckHandler((_contents, permission) => GRANTED.has(permission));
@@ -106,6 +115,7 @@ export function createBrowserPanes({ createView, fromPartition, owner, chromeVer
     const win = owner();
     for (const [key, browser] of browsers) {
       for (const [tab, entry] of browser.tabs) {
+        if (entry.popup) continue;
         const visible = Boolean(panel.wanted && panel.bounds && panel.browser === key && browser.active === tab);
         try {
           if (visible) {
@@ -141,6 +151,7 @@ export function createBrowserPanes({ createView, fromPartition, owner, chromeVer
 
   function ping(key, entry) {
     if (entry.botInputs > 0 || now() - entry.botInputAt < BOT_INPUT_ECHO_MS) return;
+    entry.personAt = now();
     const last = pings.get(key);
     if (last !== undefined && last.tab === entry.tab && now() - last.at < PING_MS) return;
     pings.set(key, { tab: entry.tab, at: now() });
@@ -167,43 +178,100 @@ export function createBrowserPanes({ createView, fromPartition, owner, chromeVer
     return null;
   }
 
-  function createTab(key, { background = false, adopt, opener } = {}) {
+  function webPreferences(browser) {
+    return { partition: browser.partition, sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false, backgroundThrottling: false, safeDialogs: true };
+  }
+
+  /** A sign-in popup the person's own click opened: Chromium's user gesture, the person's input, no bot input. */
+  function personOpened(entry, url) {
+    const report = entry.windowOpen;
+    return Boolean(report && report.userGesture && report.url === url && now() - report.at < GESTURE_MS)
+      && now() - entry.personAt < GESTURE_MS && entry.botInputs === 0 && now() - entry.botInputAt >= GESTURE_MS;
+  }
+
+  /**
+   * A popup the person opened becomes a real child window on the pane's session, the page's own child so its opener
+   * stays; one per opener. Anything else (the bot's clicks, a late open) becomes a tab, its opener kept as well.
+   */
+  function openPopup(key, entry, details) {
+    if (tabRefusal(key)) return { action: "deny" };
+    if (createPopup && personOpened(entry, details.url)) {
+      const open = entry.popupChild && browsers.get(key)?.tabs.get(entry.popupChild);
+      if (open && !open.popup.isDestroyed()) {
+        open.popup.focus();
+        return { action: "deny" };
+      }
+      return {
+        action: "allow",
+        createWindow: (options) => {
+          const child = createTab(key, { adopt: options?.webContents, opener: entry.tab, windowed: true });
+          entry.popupChild = child.tab;
+          void targetOf(child.contents).then((target) => { child.target = target; info(key, child); }, () => removeTab(key, child.tab));
+          return child.contents;
+        },
+      };
+    }
+    return {
+      action: "allow",
+      createWindow: (options) => {
+        const popup = createTab(key, { adopt: options?.webContents, opener: entry.tab });
+        void targetOf(popup.contents).then((target) => { popup.target = target; info(key, popup); }, () => removeTab(key, popup.tab));
+        return popup.contents;
+      },
+    };
+  }
+
+  function createTab(key, { background = false, adopt, opener, windowed = false } = {}) {
     const refusal = tabRefusal(key);
     if (refusal) throw new Error(refusal);
     const browser = browsers.get(key);
     const win = owner();
-    const view = createView({
-      webPreferences: { partition: browser.partition, sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false, backgroundThrottling: false, safeDialogs: true },
-      ...(adopt ? { webContents: adopt } : {}),
-    });
-    const contents = view.webContents;
+    let view = null;
+    let popup = null;
+    if (windowed) {
+      popup = createPopup({
+        parent: win, modal: false, show: true, autoHideMenuBar: true, ...POPUP_SIZE,
+        webPreferences: webPreferences(browser), ...(adopt ? { webContents: adopt } : {}),
+      });
+    } else {
+      view = createView({ webPreferences: webPreferences(browser), ...(adopt ? { webContents: adopt } : {}) });
+    }
+    const contents = (popup ?? view).webContents;
     contents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp");
     // DevTools would take the debugger from the bot: one client per webContents.
     contents.on("devtools-opened", () => contents.closeDevTools());
-    const entry = { tab: `p${++tabCount}`, view, contents, window: win, target: null, visible: false, botInputs: 0, botInputAt: -Infinity, ...(opener ? { opener } : {}) };
+    const entry = { tab: `p${++tabCount}`, view, popup, contents, window: win, target: null, visible: false, botInputs: 0, botInputAt: -Infinity, personAt: -Infinity, windowOpen: null, ...(opener ? { opener } : {}) };
     contents.debugger.attach("1.3");
     browser.tabs.set(entry.tab, entry);
     contents.debugger.on("message", (_event, method, params, sessionId) => {
+      if (method === "Page.windowOpen" && !sessionId && isObject(params)) entry.windowOpen = { url: String(params.url), userGesture: params.userGesture === true, at: now() };
       post({ op: "event", browser: key, tab: entry.tab, method, params: isObject(params) ? params : {}, ...(sessionId ? { session: sessionId } : {}) });
+    });
+    // Sites with a rule of their own see it in the page's navigator.userAgent too.
+    contents.on("did-start-navigation", (_event, url, isInPlace, isMainFrame) => {
+      if (!isMainFrame || isInPlace) return;
+      const identity = identities.get(browser.partition);
+      if (identity) contents.setUserAgent(paneTabUserAgent(identity.electron, identity.mode, url));
     });
     contents.debugger.on("detach", () => removeTab(key, entry.tab));
     contents.on("render-process-gone", () => removeTab(key, entry.tab, true));
     contents.on("destroyed", () => removeTab(key, entry.tab));
     for (const event of ["did-navigate", "did-navigate-in-page", "page-title-updated"]) contents.on(event, () => info(key, entry));
     contents.on("input-event", (_event, input) => { if (PERSON_INPUT.has(input?.type)) ping(key, entry); });
-    contents.setWindowOpenHandler(() => (tabRefusal(key) ? { action: "deny" } : {
-      action: "allow",
-      // OAuth pop-ups answer their opener, so the popup is the page's own child, made a tab here.
-      createWindow: (options) => {
-        const popup = createTab(key, { adopt: options?.webContents, opener: entry.tab });
-        void targetOf(popup.contents).then((target) => { popup.target = target; info(key, popup); }, () => removeTab(key, popup.tab));
-        return popup.contents;
-      },
-    }));
-    view.setBounds({ x: 0, y: 0, ...size() });
-    view.setVisible(false);
-    win.contentView.addChildView(view);
-    if (!background) browser.active = entry.tab;
+    contents.setWindowOpenHandler((details) => openPopup(key, entry, details));
+    if (popup) {
+      // The person sees whose page this is, whatever its title says.
+      popup.on("page-title-updated", (event) => {
+        event.preventDefault();
+        popup.setTitle(originOf(contents.getURL()));
+      });
+      popup.on("closed", () => removeTab(key, entry.tab));
+    } else {
+      view.setBounds({ x: 0, y: 0, ...size() });
+      view.setVisible(false);
+      win.contentView.addChildView(view);
+      if (!background) browser.active = entry.tab;
+    }
     layout();
     return entry;
   }
@@ -214,8 +282,12 @@ export function createBrowserPanes({ createView, fromPartition, owner, chromeVer
     if (!entry) return;
     browser.tabs.delete(tab);
     if (browser.active === tab) browser.active = [...browser.tabs.keys()].at(-1) ?? null;
-    try { entry.view.setVisible(false); } catch {}
-    try { if (!entry.window.isDestroyed()) entry.window.contentView.removeChildView(entry.view); } catch {}
+    if (entry.popup) {
+      try { if (!entry.popup.isDestroyed()) entry.popup.close(); } catch {}
+    } else {
+      try { entry.view.setVisible(false); } catch {}
+      try { if (!entry.window.isDestroyed()) entry.window.contentView.removeChildView(entry.view); } catch {}
+    }
     try { if (entry.contents.debugger.isAttached()) entry.contents.debugger.detach(); } catch {}
     try { if (!entry.contents.isDestroyed()) entry.contents.close({ waitForBeforeUnload: false }); } catch {}
     post({ op: "tab-gone", browser: key, tab, ...(crashed ? { crashed: true } : {}) });
@@ -242,7 +314,7 @@ export function createBrowserPanes({ createView, fromPartition, owner, chromeVer
     }
     try {
       closeBrowser(message.browser, false);
-      const session = configure(message.partition);
+      const session = configure(message.partition, message.identity);
       // Security: the panes reach the network only through the profile's egress gate, as a launched Chrome does.
       await session.setProxy({ proxyRules: `socks5://127.0.0.1:${message.egress}`, proxyBypassRules: "<-loopback>" });
       browsers.set(message.browser, { partition: message.partition, downloads: message.downloads, tabs: new Map(), items: new Map(), active: null });

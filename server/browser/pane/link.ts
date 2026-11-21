@@ -85,7 +85,7 @@ export class PaneLink {
     this.#resolver = resolver;
   }
 
-  async open(browser: string, partition: string, egress: number, downloads: string): Promise<OpenedPanes> {
+  async open(browser: string, partition: string, egress: number, downloads: string, identity: "native" | "cleaned" = "native"): Promise<OpenedPanes> {
     if (!this.available) throw new PaneUnavailable("The desktop app does not show browser panes here.");
     this.close(browser);
     const answer = await new Promise<{ version: string; userAgent: string }>((resolve, reject) => {
@@ -99,7 +99,7 @@ export class PaneLink {
         resolve: (value) => { clearTimeout(timer); resolve(value); },
         reject: (error) => { clearTimeout(timer); reject(error); },
       });
-      this.#post({ op: "open", browser, partition, egress, downloads });
+      this.#post({ op: "open", browser, partition, egress, downloads, identity });
     });
     const inputs = new Set<() => void>();
     const channel: PaneChannel = {

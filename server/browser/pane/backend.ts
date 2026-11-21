@@ -29,14 +29,20 @@ export class PaneBackend implements Backend {
   readonly #dataDir: string;
   readonly #egressPort: (key: string) => Promise<number>;
   readonly #platform: NodeJS.Platform;
+  readonly #identity: () => "native" | "cleaned";
   #fallback: Backend | null = null;
 
-  /** `egressPort`: the profile's egress gate, which the panes' partition is proxied through as a launched Chrome is. */
-  constructor(link: PaneLink, dataDir: string, egressPort: (key: string) => Promise<number>, platform: NodeJS.Platform = process.platform) {
+  /**
+   * `egressPort`: the profile's egress gate, which the panes' partition is proxied through as a launched Chrome is.
+   * `identity`: browserEngine.paneIdentity. The driver applies no identity of its own to a pane: no user agent or client
+   * hint override, no automation flags; the pane is Electron's Chromium as it is.
+   */
+  constructor(link: PaneLink, dataDir: string, egressPort: (key: string) => Promise<number>, { platform = process.platform, identity = () => "native" }: { platform?: NodeJS.Platform; identity?: () => "native" | "cleaned" } = {}) {
     this.#link = link;
     this.#dataDir = dataDir;
     this.#egressPort = egressPort;
     this.#platform = platform;
+    this.#identity = identity;
   }
 
   get available(): boolean {
@@ -58,7 +64,7 @@ export class PaneBackend implements Backend {
     const partition = panePartition(this.#dataDir, request.key);
     let opened: OpenedPanes;
     try {
-      opened = await this.#link.open(request.key, partition, await this.#egressPort(request.key), request.downloadDir);
+      opened = await this.#link.open(request.key, partition, await this.#egressPort(request.key), request.downloadDir, this.#identity());
     } catch (error) {
       if (error instanceof PaneUnavailable && this.#fallback) return this.#fallback.open(request);
       throw error;
@@ -86,6 +92,8 @@ export class PaneBackend implements Backend {
       pid: null,
       version: opened.version,
       exited,
+      surface: "pane",
+      onSiteRefusal: (listener) => opened.endpoint.onRefusal(listener),
       onPersonInput: (listener) => opened.onPersonInput(listener),
       personControl: {
         hold: (targetId, held) => {

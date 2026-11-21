@@ -25,6 +25,12 @@ export interface BackendCaps {
   botPasskeys: boolean;
 }
 
+export interface SiteRefusal {
+  kind: "google-rejected" | "passkey";
+  url: string;
+  targetId: string;
+}
+
 export interface OpenRequest {
   key: string;
   mode: BrowserMode;
@@ -44,6 +50,11 @@ export interface OpenedBrowser {
   readonly exited: Promise<void>;
   /** Chrome's own quit: session restore keeps the tabs and session cookies. */
   close(): Promise<void>;
+  /** "pane" for the desktop app's native panes. */
+  readonly surface?: "pane";
+  /** A site turned this browser away (Google's refused sign-in, a passkey it cannot serve): the person's own Chrome or
+   * their imported sign-ins are the way on. */
+  onSiteRefusal?(listener: (refusal: SiteRefusal) => void): () => void;
   /** Where the person uses the page directly: called as they press, type or scroll in it. */
   onPersonInput?(listener: () => void): () => void;
   /** Where the person uses the page directly: holds the bot's input to a tab while the person has it (refs drop on
