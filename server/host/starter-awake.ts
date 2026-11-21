@@ -1,8 +1,8 @@
 // Which of a Starter Cloud's bots stay awake. Starter makes as many bots as the person likes, but only this many take turns;
 // the rest are paused until the person swaps them in or upgrades. The awake set is written down while every bot still fits,
 // so a bot made past the limit starts paused and never pushes out one the person was using, and a paused bot that receives
-// a message never does either. When a place opens (a chosen bot was deleted, or a restore or move into a Cloud that never
-// wrote one down) it goes to a bot with an enabled routine first, then to the most recently active.
+// a message never does either. A restore or a move into a Cloud that never wrote one down wakes the most recently active. A
+// place freed later (a chosen bot was deleted) goes to a bot with an enabled routine first, then to the most recently active.
 //
 // A routine gets priority for its bot (wakeForRoutine): the limit is the plan's, the routine is the person's, so a routine
 // never fails because its bot is paused for the limit. A bot with an enabled routine (or trigger) that is paused takes the

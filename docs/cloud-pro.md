@@ -1189,8 +1189,8 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   answers it with `"paused": true`, and the app opens **Keep these awake** with the new bot
   chosen in place of the least recently active one that isn't working (`POST /api/starter/awake`).
   A Chief's `create_bot` answers with a `paused` line for the person. A restore or a move into a
-  Cloud that never wrote a set down wakes the bots with an enabled routine first, then the most
-  recently active. A paused bot's turn answers `409` `{"code":"bot_paused"}`, a hand-off to it is
+  Cloud that never wrote a set down wakes the most recently active; a place freed later (a chosen
+  bot deleted) goes to a bot with an enabled routine first. A paused bot's turn answers `409` `{"code":"bot_paused"}`, a hand-off to it is
   refused, and its daily memory upkeep waits.
 - **A routine gets priority for its bot.** The limit never fails a routine, webhook, app-event or
   Run now run. When a routine (or trigger) is made or switched on, or runs, for a bot only the
