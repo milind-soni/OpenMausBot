@@ -1,38 +1,39 @@
 // A pinned web page shown in place of the chat, like Team map. The page is
 // framed with a sandbox and no referrer; a page that refuses framing (or
 // never loads) falls back to a button that opens it in the browser.
-// A pinned chat page (a bot's show_html page) is fetched from the server and
-// framed exactly as the chat frames it.
-import { AppWindow, ExternalLink, Globe, PinOff, RotateCw } from "lucide-react";
+import { AppWindow, ExternalLink, Globe, MessageSquare, Pin, PinOff, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { openExternalLink } from "@/lib/app-links";
 import { t } from "@/lib/i18n";
 import { SITE_FRAME_SANDBOX } from "@/lib/published-apps";
-import { setWebPanels, useWebPanels } from "@/lib/web-panel-preferences";
-import { isAppOrigin, type PinnedChatPage, type WebPanel } from "@/lib/web-panels";
+import { useShowThreads } from "@/lib/thread-preferences";
+import { useWebPanels } from "@/lib/web-panel-preferences";
+import { isAppOrigin, MAX_WEB_PANELS, type PinnedChatPage } from "@/lib/web-panels";
 import { api } from "@/state/api";
-import { useStore, type Bot } from "@/state/store";
+import { openThread, useStore, type Bot } from "@/state/store";
 import { useAppPagePatch } from "@/state/held-tails";
 import type { AppDocument } from "../../shared/app";
 import { AppDocumentError, fetchAppDocument } from "./app/app-api";
 import { AppFrame, type AppFrameHandle } from "./app/AppFrame";
 import { AppPlaceholder } from "./app/AppChrome";
+import { usePagePin } from "./app/PageTools";
 
 const LOAD_TIMEOUT_MS = 10_000;
 
 export function WebPanelPage() {
   const { state, dispatch } = useStore();
   const panels = useWebPanels();
-  const panel = panels.find((entry) => entry.id === state.webPanelId);
+  const opened = state.chatPage;
+  const panel = opened ? undefined : panels.find((entry) => entry.id === state.webPanelId);
   const [reloads, setReloads] = useState(0);
   const [status, setStatus] = useState<"loading" | "loaded" | "failed">("loading");
   const [refusedUrl, setRefusedUrl] = useState<string>();
 
   // A removed panel leaves nothing to show: go back to the conversation.
   useEffect(() => {
-    if (!panel) dispatch({ type: "showChat" });
-  }, [panel, dispatch]);
+    if (!panel && !opened) dispatch({ type: "showChat" });
+  }, [panel, opened, dispatch]);
 
   useEffect(() => {
     setStatus("loading");
@@ -50,8 +51,9 @@ export function WebPanelPage() {
     return () => check.abort();
   }, [panel?.url, reloads]);
 
+  if (opened) return <ChatPageView key={`${opened.page.threadId}:${opened.page.messageId}`} name={opened.name} page={opened.page} />;
   if (!panel) return null;
-  if (panel.page) return <PinnedChatPageView key={panel.id} panel={panel} page={panel.page} panels={panels} />;
+  if (panel.page) return <ChatPageView key={panel.id} name={panel.name} page={panel.page} />;
   const refused = refusedUrl === panel.url;
   const openInBrowser = () => void openExternalLink(panel.url).catch(() => undefined);
 
@@ -109,8 +111,10 @@ function storedPageVersion(bots: readonly Bot[] | undefined, page: PinnedChatPag
   return app ? `${app.doc}:${app.rev ?? 0}` : "";
 }
 
-function PinnedChatPageView({ panel, page, panels }: { panel: WebPanel; page: PinnedChatPage; panels: readonly WebPanel[] }) {
+function ChatPageView({ name, page }: { name: string; page: PinnedChatPage }) {
   const { state, dispatch } = useStore();
+  const showThreads = useShowThreads();
+  const pin = usePagePin(page, name);
   // Only a new stored version means the page changed: while its chat is not loaded (switching threads) it stays put.
   const patched = useAppPagePatch(page.threadId, page.messageId);
   const stored = storedPageVersion(state.bots, page) || patched;
@@ -133,13 +137,16 @@ function PinnedChatPageView({ panel, page, panels }: { panel: WebPanel; page: Pi
     return () => controller.abort();
   }, [page.threadId, page.messageId, reloads, version]);
 
-  const unpin = () => setWebPanels(panels.filter((entry) => entry.id !== panel.id));
+  const openInChat = () => {
+    openThread(dispatch, page, state, showThreads);
+    dispatch({ type: "focusMessage", threadId: page.threadId, messageId: page.messageId });
+  };
 
   return (
-    <main className="flex min-w-0 flex-1 flex-col bg-app" aria-label={panel.name} data-pinned-page={page.messageId}>
+    <main className="flex min-w-0 flex-1 flex-col bg-app" aria-label={name} data-pinned-page={page.messageId}>
       <header className="flex items-center gap-2 border-b border-hairline/40 px-4 py-2.5">
         <AppWindow size={16} className="shrink-0 text-ink-secondary" />
-        <h1 className="min-w-0 flex-1 truncate text-[14px] font-semibold text-ink">{panel.name}</h1>
+        <h1 className="min-w-0 flex-1 truncate text-[14px] font-semibold text-ink">{name}</h1>
         <button
           type="button"
           className="ui-icon-button shrink-0"
@@ -149,10 +156,17 @@ function PinnedChatPageView({ panel, page, panels }: { panel: WebPanel; page: Pi
         >
           <RotateCw size={16} />
         </button>
-        <button type="button" className="ui-button" onClick={unpin}>
-          <PinOff size={14} />
-          {t("chat.preview.unpin")}
+        <button type="button" className="ui-button" onClick={openInChat}>
+          <MessageSquare size={14} />
+          {t("webPanels.page.openInChat")}
         </button>
+        {(pin.show || pin.pinned) && (
+          <button type="button" className="ui-button" data-page-pin aria-pressed={pin.pinned} onClick={pin.toggle} disabled={pin.full}
+            title={pin.full ? t("chat.preview.pinFull", { max: MAX_WEB_PANELS }) : t(pin.pinned ? "chat.preview.unpinHint" : "chat.preview.pinHint")}>
+            {pin.pinned ? <PinOff size={14} /> : <Pin size={14} />}
+            {t(pin.pinned ? "chat.preview.unpin" : "chat.preview.pin")}
+          </button>
+        )}
       </header>
       {load && "doc" in load ? (
         <div className="relative min-h-0 flex-1">
@@ -160,7 +174,7 @@ function PinnedChatPageView({ panel, page, panels }: { panel: WebPanel; page: Pi
             doc={load.doc}
             botId={page.botId}
             threadId={page.threadId}
-            title={panel.name}
+            title={name}
             height={600}
             handle={handle}
             onHeight={() => {}}

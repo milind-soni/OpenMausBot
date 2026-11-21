@@ -4123,7 +4123,6 @@
   "botPanel.library.pages": "頁面",
   "botPanel.library.apps": "應用程式",
   "botPanel.library.files": "檔案",
-  "botPanel.library.scope": "來自這個對話",
   "botPanel.thisConversation": "在這個對話中",
   "botPanel.acts.customHint": "在進階模式中變更",
   "botPanel.section.settings": "設定",
