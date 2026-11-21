@@ -296,6 +296,8 @@ function formatEpoch(seconds: number, dateOnly: boolean): string {
 class BotDb implements BotDatabase {
   private state: Promise<Open> | null = null;
   private closing: Promise<boolean> | null = null;
+  /** Instances a close could not stop a statement in: still open, so tried again and reported until they close. */
+  private readonly stuck = new Set<Open>();
   private idleTimer: NodeJS.Timeout | null = null;
   private inFlight = 0;
   private readonly statsCache = new Map<string, DataColumnStats>();
@@ -709,6 +711,13 @@ FROM ${from} AS omb_source, omb_range WHERE ${finite} GROUP BY bin ORDER BY bin`
       clearTimeout(this.idleTimer);
       this.idleTimer = null;
     }
+    const earlier = [...this.stuck];
+    const now = await this.shutCurrent();
+    const before = await Promise.all(earlier.map((open) => this.closeOpen(open)));
+    return now && before.every(Boolean);
+  }
+
+  private async shutCurrent(): Promise<boolean> {
     const pending = this.state;
     if (!pending) return this.closing ?? true;
     this.state = null;
@@ -716,19 +725,25 @@ FROM ${from} AS omb_source, omb_range WHERE ${finite} GROUP BY bin ORDER BY bin`
     const closing = (async () => {
       let open: Open;
       try { open = await pending; } catch { return true; }
-      // Closing a connection with a statement in flight is undefined: interrupt first, then let the lanes drain.
-      for (const lane of Object.values(open.lanes)) lane.interrupt();
-      if (!await drainLanes(Object.values(open.lanes), CLOSE_DRAIN_MS)) {
-        console.warn(`data: ${this.botId}'s database still had a statement running after ${CLOSE_DRAIN_MS} ms; its handles are left to the process`);
-        return false;
-      }
-      for (const lane of Object.values(open.lanes)) lane.connection.closeSync();
-      // The last close writes the WAL into the file and removes it: the file then holds every table on its own.
-      open.instance.closeSync();
-      return true;
+      return this.closeOpen(open);
     })();
     this.closing = closing;
     try { return await closing; } finally { if (this.closing === closing) this.closing = null; }
+  }
+
+  private async closeOpen(open: Open): Promise<boolean> {
+    // Closing a connection with a statement in flight is undefined: interrupt first, then let the lanes drain.
+    for (const lane of Object.values(open.lanes)) lane.interrupt();
+    if (!await drainLanes(Object.values(open.lanes), CLOSE_DRAIN_MS)) {
+      console.warn(`data: ${this.botId}'s database still had a statement running after ${CLOSE_DRAIN_MS} ms; its handles are left to the process`);
+      this.stuck.add(open);
+      return false;
+    }
+    this.stuck.delete(open);
+    for (const lane of Object.values(open.lanes)) lane.connection.closeSync();
+    // The last close writes the WAL into the file and removes it: the file then holds every table on its own.
+    open.instance.closeSync();
+    return true;
   }
 
   get isOpen(): boolean {

@@ -19,7 +19,8 @@ const PASSWORD = "correct horse battery staple";
 // Real encrypted backups: a few seconds here, much longer on the Windows runners.
 const TIMEOUT_MS = 120_000;
 const scratch: string[] = [];
-afterEach(() => { for (const path of scratch.splice(0)) rmSync(path, { recursive: true, force: true }); });
+// Windows keeps a just-closed file busy for a moment; rm retries EBUSY/EPERM.
+afterEach(() => { for (const path of scratch.splice(0)) rmSync(path, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); });
 const directory = () => { const path = mkdtempSync(join(tmpdir(), "omb-backup-databases-")); scratch.push(path); return path; };
 
 async function restored(backup: string): Promise<string> {
@@ -149,7 +150,8 @@ describe("a bot's Data tables in a full backup", () => {
     } finally { await engine.closeAll(); }
   }, TIMEOUT_MS);
 
-  it("carries a database and its WAL as they lie when no engine holds them, as after a crash, and DuckDB applies the WAL", async () => {
+  // Copies the files from under an open instance, which Windows' file sharing may refuse.
+  it.skipIf(process.platform === "win32")("carries a database and its WAL as they lie when no engine holds them, as after a crash, and DuckDB applies the WAL", async () => {
     const source = directory();
     const folder = join(source, "bots", "b2");
     mkdirSync(folder, { recursive: true });
@@ -163,7 +165,7 @@ describe("a bot's Data tables in a full backup", () => {
       mkdirSync(crashed);
       for (const name of ["data.duckdb", "data.duckdb.wal"]) copyFileSync(join(folder, name), join(crashed, name));
     } finally { connection.closeSync(); instance.closeSync(); }
-    rmSync(folder, { recursive: true });
+    rmSync(folder, { recursive: true, maxRetries: 20, retryDelay: 100 });
     const exported = await createWorkspaceBackup(source, { password: PASSWORD });
     const target = await restored(exported.path);
     expect(readdirSync(join(target, "bots", "b3")).sort()).toEqual(["data.duckdb", "data.duckdb.wal"]);
@@ -172,10 +174,36 @@ describe("a bot's Data tables in a full backup", () => {
     expect(tables.result).toHaveLength(2);
   }, TIMEOUT_MS);
 
-  it("waits for a Data statement that did not stop rather than copy the database it holds", async () => {
+  it("waits for a Data statement that did not stop rather than copy the database it holds, every time until it closes", async () => {
     await expect(releaseDataForBackup({ release: async () => ["b1"] })).rejects.toMatchObject({ status: 409 });
     await expect(releaseDataForBackup({ release: async () => [] })).resolves.toBeUndefined();
-  });
+    // A statement DuckDB does not stop (seen on Windows): the engine leaves its instance open, and says so again on the
+    // next try rather than report a database it no longer tracks as closed.
+    let finish = () => {};
+    let closed = 0;
+    const result = { statementType: 1, chunkCount: 0, columnCount: 0, rowCount: 0 };
+    const connection = () => ({
+      run: async (sql: string) => sql === "SELECT stuck" ? new Promise((resolve) => { finish = () => resolve(result); }) : result,
+      runAndReadAll: async () => ({ getRowsJson: () => [] }),
+      interrupt() {},
+      closeSync() {},
+    });
+    const binding = {
+      version: () => "fake",
+      DuckDBInstance: { create: async () => ({ connect: async () => connection(), closeSync() { closed++; } }) },
+      StatementType: { SELECT: 1, EXPLAIN: 2 },
+    } as unknown as NonNullable<Parameters<typeof createDataEngine>[0]>["binding"];
+    const engine = createDataEngine({ botFolder: (id) => join(directory(), id), dataDir: directory(), binding });
+    const running = (await engine.forBot("b1")).run("SELECT stuck", { connection: "bot", timeoutMs: 60_000 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(await engine.release()).toEqual(["b1"]);
+    expect(await engine.release()).toEqual(["b1"]);
+    expect(closed).toBe(0);
+    finish();
+    await running;
+    expect(await engine.release()).toEqual([]);
+    expect(closed).toBe(1);
+  }, TIMEOUT_MS);
 });
 
 /** A backup as releases before this one made it (the same format): its SQLite databases copied raw, a WAL beside its

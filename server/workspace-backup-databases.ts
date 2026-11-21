@@ -32,7 +32,9 @@ export async function snapshotDatabases(root: string, snapshot: string): Promise
     const db = new DatabaseSync(sourceDb, { readOnly: true, timeout: 5_000 });
     // Node 26's native backup completion can wait on unrelated event-loop activity after an async scrypt; this pulse keeps it moving.
     const completionPulse = setInterval(() => {}, 25);
-    try { await backup(db, join(snapshot, snapshotName)); }
+    // In one step (-1: every page): a backup in steps starts again whenever another connection writes between them, and a
+    // writer that keeps writing would keep it from ever finishing.
+    try { await backup(db, join(snapshot, snapshotName), { rate: -1 }); }
     finally { clearInterval(completionPulse); db.close(); }
     const snapshotDb = new DatabaseSync(join(snapshot, snapshotName));
     try { snapshotDb.exec("PRAGMA journal_mode = DELETE"); } finally { snapshotDb.close(); }
