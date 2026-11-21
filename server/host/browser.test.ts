@@ -521,6 +521,22 @@ describe("the bots' browser host by default", () => {
     expect(host.signedInSitesRefusal("work")).toBeNull();
     expect(host.engineSummary({ kind: "engine", version: "0.37.0", myChrome: true })).toEqual({ kind: "engine", version: "0.37.0", myChrome: true, engine: "agent-browser" });
   });
+
+  it("says when agent-browser runs its headless shell because Google Chrome is not installed", () => {
+    const shell = vi.spyOn(chromeLauncher, "runsShellForWantOfChrome").mockReturnValue(true);
+    try {
+      const { cfg, host } = setup(undefined);
+      expect(host.engineSummary({ kind: "engine", version: "0.37.0", myChrome: true })).toMatchObject({ kind: "engine", engine: "agent-browser", noChrome: true });
+      expect(host.engineSummary({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true }).noChrome, "nothing runs yet").toBeUndefined();
+      cfg.browserEngine = { engine: "chrome" };
+      expect(host.engineSummary({ kind: "engine", version: "0.37.0", myChrome: true }).noChrome, "the new browser needs Chrome and never runs the shell").toBeUndefined();
+      shell.mockReturnValue(false);
+      cfg.browserEngine = { engine: "agent-browser" };
+      expect(host.engineSummary({ kind: "engine", version: "0.37.0", myChrome: true }).noChrome).toBeUndefined();
+    } finally {
+      shell.mockRestore();
+    }
+  });
 });
 
 describe("a deleted bot's browser", () => {

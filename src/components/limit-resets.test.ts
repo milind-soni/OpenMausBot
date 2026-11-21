@@ -113,6 +113,13 @@ describe("the words", () => {
     expect(due.map((candidate) => candidate.id)).toEqual(["before"]);
   });
 
+  it("name Antigravity's windows as Gemini's, and keep them out of the automations, which wait for the engine's own reset", () => {
+    const gemini: EngineLimit = { ...claude(95), engine: "antigravity", name: "Antigravity", driver: "antigravity", meter: "Gemini" };
+    expect(limits.limitLine(gemini, NOW)).toBe("Antigravity (Gemini): 95% used · resets 3:40 PM");
+    expect(limits.nearLimitEngines([claude(92), gemini]).map((limit) => limit.engine)).toEqual(["claude"]);
+    expect(limits.resetMarkers([claude(92), gemini], NOW, NOW + 24 * HOUR, NOW).map((marker) => marker.engine)).toEqual(["claude"]);
+  });
+
   it("put each known reset in the calendar's range", () => {
     expect(limits.resetMarkers([claude(92), { ...claude(10), engine: "codex", name: "Codex", resetsAt: null }], NOW, NOW + 24 * HOUR, NOW))
       .toEqual([{ engine: "claude", name: "Claude", at: RESET }]);

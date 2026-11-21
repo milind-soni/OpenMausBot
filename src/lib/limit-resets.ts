@@ -75,11 +75,15 @@ export function resetTime(at: number, now = Date.now()): string {
 
 /** "Claude: 92% used · resets 3:40 PM", or "Claude: at its limit · resets 3:40 PM"; a screen reader's copy joins with a comma. */
 export function limitLine(limit: EngineLimit, now = Date.now(), separator = " · "): string {
-  const used = limit.blocked ? t("limits.atLimit", { engine: limit.name }) : t("limits.used", { engine: limit.name, percent: Math.round(limit.usedPercent ?? 0) });
+  const engine = limit.meter ? t("limits.meterName", { engine: limit.name, meter: limit.meter }) : limit.name;
+  const used = limit.blocked ? t("limits.atLimit", { engine }) : t("limits.used", { engine, percent: Math.round(limit.usedPercent ?? 0) });
   return limit.resetsAt !== null && limit.resetsAt > now ? `${used}${separator}${t("limits.resets", { time: resetTime(limit.resetsAt, now) })}` : used;
 }
 
-export const nearLimitEngines = (engines: readonly EngineLimit[]) => engines.filter(nearLimit);
+/** An engine whose windows are its own, so its reset is the engine's; Antigravity's are Gemini's alone, shown only. */
+export const timesEngineReset = (limit: EngineLimit) => !limit.meter;
+
+export const nearLimitEngines = (engines: readonly EngineLimit[]) => engines.filter((limit) => timesEngineReset(limit) && nearLimit(limit));
 
 export type UsageTone = "fine" | "near" | "out";
 
@@ -125,7 +129,9 @@ export function usageRows(limit: EngineLimit): UsageRow[] {
   });
 }
 
-export function windowLabel(window: LimitWindowName): string {
+/** "5-hour", or "Gemini 5-hour" when the windows measure one allowance of the engine's (EngineLimit.meter). */
+export function windowLabel(window: LimitWindowName, meter?: string): string {
+  if (meter && window !== "other") return t(window === "5-hour" ? "limits.meterFiveHour" : "limits.meterWeekly", { meter });
   return window === "5-hour" ? t("planUsage.fiveHour") : window === "weekly" ? t("planUsage.weekly") : t("usage.title");
 }
 
@@ -133,7 +139,7 @@ export interface ResetMarker { engine: string; name: string; at: number }
 
 /** The calendar's markers: each engine's next known reset inside the range. */
 export function resetMarkers(engines: readonly EngineLimit[], from: number, to: number, now = Date.now()): ResetMarker[] {
-  return engines.flatMap((limit) => limit.resetsAt !== null && limit.resetsAt >= Math.max(from, now) && limit.resetsAt < to
+  return engines.flatMap((limit) => timesEngineReset(limit) && limit.resetsAt !== null && limit.resetsAt >= Math.max(from, now) && limit.resetsAt < to
     ? [{ engine: limit.engine, name: limit.name, at: limit.resetsAt }] : []);
 }
 

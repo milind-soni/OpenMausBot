@@ -7,6 +7,9 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { htmlFallbackText } from "../../shared/app.ts";
+import { parseWidgetInput, widgetToText } from "../../shared/widget.ts";
+import { WIDGET_SAMPLES } from "../../shared/widget-samples.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import type { HeadlessIo } from "./output.ts";
 import { safeName } from "./export.ts";
@@ -322,8 +325,45 @@ describe("export", () => {
     expect(safeName("console.md")).toBe("console.md");
   });
 
+  it.each(["widget", "app"])("keeps %s fallback text in the Markdown transcript", async (kind) => {
+    const parsed = parseWidgetInput(WIDGET_SAMPLES.pullRequests);
+    if (!parsed.ok) throw new Error(parsed.error);
+    const text = kind === "widget" ? widgetToText(parsed.value) : htmlFallbackText("Sales by month", "<h1>Sales</h1><p>Up 12%</p>");
+    const out = join(dir, kind);
+    const lead = messages[LEAD]!;
+    messages[LEAD] = [
+      { id: "before", role: "user", kind: "text", text: "Show the result" },
+      { id: "card", role: "bot", kind, text },
+      { id: "after", role: "user", kind: "text", text: "Thanks for the result" },
+    ];
+    try {
+      expect((await run(["export", "--thread", LEAD, "--out", out, "--json"])).code).toBe(0);
+    } finally {
+      messages[LEAD] = lead;
+    }
+    const transcript = JSON.parse(readFileSync(join(out, "transcripts/conversation-lead-thr.json"), "utf8"));
+    expect(transcript.messages[1]).toMatchObject({ kind, text });
+    const markdown = readFileSync(join(out, "transcripts/conversation-lead-thr.md"), "utf8");
+    expect(markdown).toContain(`**Room Lead:**\n\n${text}`);
+    expect(markdown.indexOf(text)).toBeGreaterThan(markdown.indexOf("Show the result"));
+    expect(markdown.indexOf("Thanks for the result")).toBeGreaterThan(markdown.indexOf(text));
+  });
+
   it("keeps one job of the conversation with --root, and says so when there is none", async () => {
     const missing = await run(["export", "--thread", LEAD, "--out", join(dir, "none"), "--root", "nope", "--json"]);
     expect(missing).toMatchObject({ code: 2, result: { error: "no job with root nope in this conversation" } });
+  });
+
+  it("leaves an earlier export intact when --force is paired with an unknown job root", async () => {
+    const out = join(dir, "invalid-root");
+    expect((await run(["export", "--thread", LEAD, "--out", out, "--json"])).code).toBe(0);
+    const saved = [
+      "manifest.json", "job.json", "transcripts/conversation-lead-thr.json", "transcripts/conversation-lead-thr.md",
+      "files/conversation-lead-thr/report.md", "screens/conversation-lead-thr/001-s1.png",
+    ].map((file) => ({ file, bytes: readFileSync(join(out, file)) }));
+
+    const refused = await run(["export", "--thread", LEAD, "--out", out, "--force", "--root", "nope", "--json"]);
+    expect(refused).toMatchObject({ code: 2, result: { error: "no job with root nope in this conversation" } });
+    for (const { file, bytes } of saved) expect(readFileSync(join(out, file))).toEqual(bytes);
   });
 });

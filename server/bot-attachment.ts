@@ -28,6 +28,8 @@ function statusError(status: number, message: string): Error & { status: number 
   return Object.assign(new Error(message), { status });
 }
 
+const sourceFileLink = (path: string): string => /^file:/i.test(path) ? path : path.replace(/[%?#]/g, encodeURIComponent);
+
 /** Maps a guest workspace path onto its bind-mounted host directory; anything outside it, `..` escapes included, is null. */
 export function guestWorkspaceToHost(input: string, guestRoot: string, hostRoot: string): string | null {
   let value = input.trim();
@@ -104,14 +106,15 @@ async function sha256Of(file: OpenedMessageFile): Promise<string> {
  * Opened at the store's limit, not the preview one: the copy streams, and a person may send the same size. A path the
  * roots do not hold is tried in the conversation's inbox before anything else. */
 async function openSource(path: string, roots: readonly string[], savedThisTurn: SaveBotAttachmentInput["savedThisTurn"], inbox: InboxRead | undefined): Promise<OpenedMessageFile> {
+  const href = sourceFileLink(path);
   try {
-    return await openMessageFile(path, roots, FILE_MAX_BYTES);
+    return await openMessageFile(href, roots, FILE_MAX_BYTES);
   } catch (error) {
     const status = (error as { status?: unknown } | null)?.status, outside = (error as { code?: unknown } | null)?.code === "outside_workspace";
     const received = inbox && (outside || status === 404) ? await openInboxFile(path, inbox, FILE_MAX_BYTES) : null;
     if (received) return { ...received, mime: mimeFor(received.name) };
     if (!savedThisTurn || !outside) throw error;
-    return openFileSavedSince(path, savedThisTurn, FILE_MAX_BYTES);
+    return openFileSavedSince(href, savedThisTurn, FILE_MAX_BYTES);
   }
 }
 
@@ -203,7 +206,7 @@ export function deliveredCopy(
     const bySource = inScope.filter((attachment) => {
       if (!attachment.source) return false;
       try {
-        return referencedPathIdentity(attachment.source) === wanted;
+        return referencedPathIdentity(sourceFileLink(attachment.source)) === wanted;
       } catch {
         return false;
       }

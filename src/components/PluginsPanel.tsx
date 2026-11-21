@@ -552,17 +552,6 @@ export function PluginsPanel() {
                 className="min-w-0 flex-1 bg-transparent text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none"
               />
             </label>
-            <button
-              type="button"
-              data-apps-filter="mcp"
-              aria-pressed={filter === "mcp"}
-              onClick={() => chooseFilter(filter === "mcp" ? "all" : "mcp")}
-              className={cn(pill, "h-9 border border-hairline/40 px-3.5", filter === "mcp" ? "bg-ink text-app" : "text-ink hover:bg-raised")}
-            >
-              <Server size={14} aria-hidden="true" />
-              <span className="hidden sm:inline">{t("apps.filter.mcp")}</span>
-              <span className="sr-only sm:hidden">{t("apps.filter.mcp")}</span>
-            </button>
           </div>
           <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t("apps.categoriesAria")}>
             <button
@@ -598,6 +587,16 @@ export function PluginsPanel() {
                 )}
               />
             )}
+            <button
+              type="button"
+              data-apps-filter="mcp"
+              aria-pressed={filter === "mcp"}
+              onClick={() => chooseFilter(filter === "mcp" ? "all" : "mcp")}
+              className={cn(pill, pillTone(filter === "mcp"))}
+            >
+              <Server size={14} aria-hidden="true" />
+              {t("apps.filter.mcp")}
+            </button>
           </div>
         </header>
 
