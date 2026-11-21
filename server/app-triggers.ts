@@ -211,6 +211,7 @@ export class AppTriggerManager {
   private abort = new AbortController();
   private nextReconcileAt = 0;
   private loop: Promise<void> | null = null;
+  private runVersion = 0;
   /** A deleted automation's service copy could not be removed yet; reconciliation removes it. */
   private releasePending = false;
 
@@ -438,14 +439,16 @@ export class AppTriggerManager {
     this.stopped = false;
     this.abort = new AbortController();
     this.nextReconcileAt = 0;
-    this.loop = this.run().catch((error) => this.log(`app events stopped: ${error instanceof Error ? error.message : String(error)}`));
+    this.loop = this.run(++this.runVersion).catch((error) => this.log(`app events stopped: ${error instanceof Error ? error.message : String(error)}`));
   }
 
   async stop(): Promise<void> {
+    const loop = this.loop;
     this.stopped = true;
+    this.runVersion += 1;
     this.abort.abort();
-    await this.loop;
-    this.loop = null;
+    await loop;
+    if (this.loop === loop) this.loop = null;
   }
 
   /** Cuts the current wait short: a trigger changed, or access to the service arrived. */
@@ -540,9 +543,9 @@ export class AppTriggerManager {
     }
   }
 
-  private async run(): Promise<void> {
+  private async run(version: number): Promise<void> {
     let failures = 0;
-    while (!this.stopped) {
+    while (!this.stopped && version === this.runVersion) {
       const signal = this.abort.signal;
       try {
         if (this.options.service().available && this.now() >= this.nextReconcileAt && (this.triggers.length > 0 || this.releasePending)) {
@@ -552,6 +555,7 @@ export class AppTriggerManager {
             this.log(`reconciliation failed: ${error instanceof Error ? error.message : String(error)}`);
           });
         }
+        if (this.stopped || version !== this.runVersion) break;
         if (!this.pollable()) {
           await this.sleep(IDLE_CHECK_MS, signal);
           continue;
@@ -559,7 +563,7 @@ export class AppTriggerManager {
         await this.pollOnce(signal);
         failures = 0;
       } catch (error) {
-        if (this.stopped) break;
+        if (this.stopped || version !== this.runVersion) break;
         if (signal.aborted) continue;
         failures += 1;
         const retry = error instanceof BrokerError && error.status === 409 && error.retryAfterS ? error.retryAfterS * 1000 : 0;
@@ -571,6 +575,7 @@ export class AppTriggerManager {
   /** One long-poll: acks everything handled so far (the cursor) and handles what comes back. */
   async pollOnce(signal?: AbortSignal, waitS = POLL_WAIT_S): Promise<number> {
     const { events, cursor } = await this.options.broker.poll({ after: this.cursor, waitS, poller: this.pollerId, signal });
+    if (signal?.aborted) return 0;
     if (events.length || cursor > this.cursor) this.receive(events, cursor);
     return events.length;
   }
