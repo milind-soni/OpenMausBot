@@ -95,7 +95,7 @@ describe("Settings full backups", () => {
     expect([...session.values()]).toEqual([requestId]);
     expect(render().html).not.toContain('value="correct horse battery"');
     expect(render().html).not.toContain('id="backup-export"');
-    fixture.api.mockResolvedValueOnce({ state: "ready", id: "download-id", filename: "fixture.ombbackup", expiresAt: Date.now() + 60_000 })
+    fixture.api.mockResolvedValueOnce({ state: "ready", id: "download-id", filename: "fixture.ombbackup", expiresInMs: 60_000 })
       .mockResolvedValueOnce({ busy: false });
     const stopPolling = fixture.effects[1]();
     try {
@@ -111,15 +111,21 @@ describe("Settings full backups", () => {
     const link = { click: vi.fn() };
     vi.stubGlobal("document", { createElement: () => link });
     await ready();
-    fixture.api.mockResolvedValueOnce({ state: "ready", id: "recovered-id", filename: "recovered.ombbackup", expiresAt: Date.now() + 60_000 })
+    fixture.api.mockResolvedValueOnce({ state: "ready", id: "recovered-id", filename: "recovered.ombbackup", expiresInMs: 2_000 })
       .mockResolvedValueOnce({ busy: false });
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() - 10 * 60_000);
     const stopPolling = fixture.effects[1]();
     try {
       await flush();
       expect(fixture.api.mock.calls[1][0]).toBe("/api/workspace-backup/export-jobs/e4238912-594a-44bf-a952-929eb79ac4cb");
       expect(render().html).toContain('href="/api/workspace-backup/download/recovered-id"');
       expect(link.click).not.toHaveBeenCalled();
-    } finally { stopPolling?.(); }
+      fixture.api.mockRejectedValueOnce(Object.assign(new Error("Expired"), { status: 404 })).mockResolvedValueOnce({ busy: false });
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(render().html).not.toContain("recovered.ombbackup");
+      expect(render().html).toContain("Start another export and enter your backup password");
+    } finally { stopPolling?.(); vi.useRealTimers(); }
   });
 
   it("asks for a fresh export when the saved job is gone", async () => {

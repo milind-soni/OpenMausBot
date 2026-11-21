@@ -29,7 +29,7 @@ export type WorkspaceBackupClientState = Record<string, string>;
 
 export type WorkspaceBackupExportStatus =
   | { state: "running" }
-  | { state: "ready"; id: string; filename: string; expiresAt: number }
+  | { state: "ready"; id: string; filename: string; expiresInMs: number }
   | { state: "failed"; error: string; errorKey?: string; errorParams?: Record<string, string | number> };
 
 export interface WorkspaceBackupPrivateMetadata {

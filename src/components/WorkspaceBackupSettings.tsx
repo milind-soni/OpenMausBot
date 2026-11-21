@@ -121,10 +121,7 @@ export function WorkspaceBackupSettings({ layout = BOTH_ROWS }: { layout?: (rows
             link.remove();
           }
         }
-        if (job.state === "ready") {
-          const remaining = job.expiresAt - Date.now();
-          timer = setTimeout(() => void poll(), remaining > 0 ? remaining : 30_000);
-        }
+        if (job.state === "ready") timer = setTimeout(() => void poll(), Math.max(1_000, job.expiresInMs));
         void refresh();
       } catch (cause) {
         if (signal.aborted || currentExport.current !== exportRequest) return;

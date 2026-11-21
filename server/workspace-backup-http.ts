@@ -25,6 +25,9 @@ const exportSchema = z.object({ password: passwordSchema, clientState: z.record(
 const failure = (message: string, status = 400) => Object.assign(new Error(message), { status });
 type Artifact = { owner: string; kind: "download" | "upload" | "staged"; path?: string; expires: number; summary?: WorkspaceBackupSummary; keepUntilExpiry?: boolean };
 type RestoreResult = { id?: string; restored?: boolean; safetyCopyPath?: string; clientState?: Record<string, string> };
+type ExportJob =
+  | Exclude<WorkspaceBackupExportStatus, { state: "ready" }>
+  | { state: "ready"; id: string; filename: string; expiresAt: number };
 
 function backupError(error: unknown) {
   return {
@@ -53,7 +56,7 @@ export function createWorkspaceBackupRoutes(options: {
   restart?: () => void;
 }) {
   const artifacts = new Map<string, Artifact>();
-  const exportJobs = new Map<string, WorkspaceBackupExportStatus>();
+  const exportJobs = new Map<string, ExportJob>();
   let operating = false;
   const json = (res: ServerResponse, status: number, body: unknown) => {
     res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
@@ -78,7 +81,7 @@ export function createWorkspaceBackupRoutes(options: {
       const delay = statSync(directory).mtimeMs + EXPIRES_MS - Date.now();
       const reclaim = () => { try { removeWorkspaceBackupJob(options.dataDir, entry.name); } catch {} };
       if (delay <= 0) reclaim();
-      else if (existsSync(join(directory, "workspace.ombbackup"))) setTimeout(reclaim, Math.min(delay, EXPIRES_MS)).unref();
+      else setTimeout(reclaim, Math.min(delay, EXPIRES_MS)).unref();
     }
     const uploads = join(root, "uploads");
     if (!existsSync(uploads) || lstatSync(uploads).isSymbolicLink()) return;
@@ -140,7 +143,7 @@ export function createWorkspaceBackupRoutes(options: {
       }
     });
   }
-  function finishExport(key: string, status: Exclude<WorkspaceBackupExportStatus, { state: "running" }>) {
+  function finishExport(key: string, status: Exclude<ExportJob, { state: "running" }>) {
     exportJobs.set(key, status);
     setTimeout(() => {
       exportJobs.delete(key);
@@ -184,9 +187,12 @@ export function createWorkspaceBackupRoutes(options: {
         check(req, auth);
         const key = `${owner(auth)}/${id}`;
         const existing = exportJobs.get(key);
-        if (existing?.state === "ready" && existing.expiresAt <= Date.now()) throw failure("This backup has expired. Start another export.", 404);
         if (existing) {
-          json(res, input ? 202 : 200, existing);
+          const status: WorkspaceBackupExportStatus = existing.state === "ready"
+            ? { state: "ready", id: existing.id, filename: existing.filename, expiresInMs: existing.expiresAt - Date.now() }
+            : existing;
+          if (status.state === "ready" && status.expiresInMs <= 0) throw failure("This backup has expired. Start another export.", 404);
+          json(res, input ? 202 : 200, status);
           return true;
         }
         if (!input) throw failure("This backup export is no longer available. Start another export.", 404);

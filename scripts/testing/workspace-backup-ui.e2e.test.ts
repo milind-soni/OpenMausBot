@@ -69,7 +69,7 @@ describe("full backup Settings in the real renderer", () => {
         if (path.includes('/export-jobs/')) {
           if (init.method === 'POST') { fixture.exportPath = path; return reply({ error: 'Fixture proxy timed out' }, 524); }
           if (path === fixture.exportPath) return reply(fixture.exportReady
-            ? { state: 'ready', id: 'download-stage', filename: 'fixture.ombbackup', expiresAt: Date.now() + 60 * 60_000 }
+            ? { state: 'ready', id: 'download-stage', filename: 'fixture.ombbackup', expiresInMs: 60 * 60_000 }
             : { state: 'running' });
         }
         if (path.endsWith('/upload')) return reply({ id: 'uploaded-file' });

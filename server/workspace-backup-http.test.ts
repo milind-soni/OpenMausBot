@@ -1,6 +1,6 @@
 // Archive work is mocked so revocation can be held at a deterministic boundary.
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer, request, type IncomingMessage, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -181,7 +181,7 @@ it("reports a failed job when polled and accepts a new explicit export", async (
   expect(archive.create).toHaveBeenCalledOnce();
   const retry = `/api/workspace-backup/export-jobs/${randomUUID()}`;
   expect((await post(retry, { password: PASSWORD })).status).toBe(202);
-  await expect.poll(async () => (await get(retry)).json()).toMatchObject({ state: "ready", expiresAt: expect.any(Number) });
+  await expect.poll(async () => (await get(retry)).json()).toMatchObject({ state: "ready", expiresInMs: expect.any(Number) });
   expect(archive.create).toHaveBeenCalledTimes(2);
 });
 
@@ -191,17 +191,35 @@ it("retains each successful async archive for one hour from completion", async (
   archive.create.mockResolvedValueOnce(artifact);
   expect((await post(first, { password: PASSWORD })).status).toBe(202);
   await expect.poll(async () => (await get(first)).json()).toMatchObject({ state: "ready" });
-  const { expiresAt } = await (await get(first)).json() as { expiresAt: number };
-  expect(expiresAt - Date.now()).toBeGreaterThan(59 * 60_000);
+  const { expiresInMs } = await (await get(first)).json() as { expiresInMs: number };
+  expect(expiresInMs).toBeGreaterThan(59 * 60_000);
   expect((await post("/api/workspace-backup/export", { password: PASSWORD })).status).toBe(200);
   const download = `/api/workspace-backup/download/${artifact.id}`;
   expect((await get(download)).status).toBe(200);
-  const clock = vi.spyOn(Date, "now").mockReturnValue(expiresAt);
+  const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + expiresInMs);
   try {
     expect((await get(first)).status).toBe(404);
     expect((await get(download)).status).toBe(404);
     expect(existsSync(artifact.path)).toBe(false);
   } finally { clock.mockRestore(); }
+});
+
+it("schedules cleanup for an interrupted export that left a snapshot but no archive", async () => {
+  server.closeAllConnections();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  const id = randomUUID();
+  const directory = join(dataDir, ".backups", id);
+  mkdirSync(join(directory, "snapshot"), { recursive: true });
+  const createdAt = new Date(Date.now() - 60 * 60_000 + 5_000);
+  utimesSync(directory, createdAt, createdAt);
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    await listen();
+    expect(existsSync(directory)).toBe(true);
+    await vi.advanceTimersByTimeAsync(5_001);
+    expect(archive.remove).toHaveBeenCalledWith(dataDir, id);
+    expect(existsSync(directory)).toBe(false);
+  } finally { vi.useRealTimers(); }
 });
 
 it("carries a fixed backup refusal and its redacted string path to the client", async () => {
