@@ -94,7 +94,11 @@ export function HandoffPreview({ botId, threadId, place, label, onOpen, disabled
     >
       {live && <canvas ref={canvas} aria-hidden="true" className={cn("absolute inset-0 h-full w-full object-contain", phase !== "live" && "opacity-0")} />}
       {!live && frame && <img src={frame} alt="" className="absolute inset-0 h-full w-full object-contain" />}
-      {(phase === "connecting" || phase === "none") && (
+      {live && !streaming && phase !== "live" ? (
+        <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-[13px] text-white/70">
+          <Monitor size={20} aria-hidden="true" />{t(panelOpen ? "handoff.inPanel" : "handoff.noPicture")}
+        </span>
+      ) : (phase === "connecting" || phase === "none") && (
         <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-[13px] text-white/70">
           {phase === "connecting"
             ? <><Loader2 size={18} aria-hidden="true" className="motion-safe:animate-spin" />{t("handoff.connecting")}</>

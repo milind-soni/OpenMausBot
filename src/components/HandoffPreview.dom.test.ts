@@ -37,6 +37,7 @@ it("watches the bot's browser at card width, with one stream of its own", async 
 it("opens no second stream while the Browser panel shows this bot, and stops its own when the panel opens", async () => {
   await show({ computerOpen: true, selectedId: "scout" });
   expect(streams.started).toBe(0);
+  expect(container.textContent).toContain("Showing in the Browser panel");
   await show({});
   expect(streams.started).toBe(1);
   await show({ computerOpen: true, selectedId: "scout" });

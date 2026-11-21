@@ -11477,5 +11477,6 @@
   "viewer.stop": "Stop",
   "viewer.collapse": "Back to the chat",
   "sidebar.preview.waitingFor": "Waiting for you: {what}",
-  "handoff.importSignIn": "Use my sign-in from my own browser"
+  "handoff.importSignIn": "Use my sign-in from my own browser",
+  "handoff.inPanel": "Showing in the Browser panel"
 }

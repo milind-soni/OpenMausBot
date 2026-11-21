@@ -11477,5 +11477,6 @@
   "viewer.stop": "Parar",
   "viewer.collapse": "Voltar ao chat",
   "sidebar.preview.waitingFor": "Esperando você: {what}",
-  "handoff.importSignIn": "Usar meu login do meu próprio navegador"
+  "handoff.importSignIn": "Usar meu login do meu próprio navegador",
+  "handoff.inPanel": "Aparece no painel do navegador"
 }

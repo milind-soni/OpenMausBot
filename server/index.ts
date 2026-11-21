@@ -11423,7 +11423,7 @@ function signInPlace(bot: BotRecord, threadId: string): Surface | null {
 const handoffRequests = createHandoffRequests({
   store, owner: connectorThread, place: signInPlace, browserOn: (bot) => builtInBrowserEnabled(cfg) && bot.browser !== false, threadsWithCards: threadsWithCardsSince, botOf: (threadId) => store.botByThread(threadId)?.id ?? null,
   computer: (bot, threadId) => { const surface = store.taskByThread(bot.id, threadId)?.surface ?? parseSurface(bot.computer) ?? null; return surface === "browser" ? null : surface; },
-  pageNow: async (bot, threadId) => { const browser = await botBrowserTarget(botForThread(bot.id, threadId) ?? bot, threadId); return browser ? (await observeSignInPage(loginInput(browser.session, browser.spec, browser.env).engine))?.host ?? null : null; },
+  pageNow: async (bot, threadId) => { const browser = await botBrowserTarget(botForThread(bot.id, threadId) ?? bot, threadId); return browser ? (await observeSignInPage(loginInput(browser.session, browser.spec, browser.env).engine))?.page ?? null : null; },
   cardText: (name, site, threadId) => signInCardText(name, site, threadLanguage(threadId)), expire: (botId, threadId, messageId) => void signInSettle.expire(botId, threadId, messageId),
   supersede: (threadId, prior, next) => { store.patchMessage(threadId, prior.id, { signIn: { ...prior.signIn!, superseded: true } }); coordinator.followCard(threadId, prior.id, next.id); computerControl.settleHelp(prior.id); },
   requestHelp: (from, threadId, place, reason, ref) => void computerControl.requestHelp(sharedVm.signInKey(from, threadId, place), reason, ref),
