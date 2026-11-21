@@ -6449,6 +6449,8 @@
   "backup.exportPassword": "Backup password",
   "backup.confirmPassword": "Confirm backup password",
   "backup.exporting": "Creating encrypted backup…",
+  "backup.exportReconnecting": "Reconnecting to check your backup…",
+  "backup.exportUnavailable": "This backup is no longer available. Start another export and enter your backup password.",
   "backup.downloadAgain": "Download {filename}",
   "backup.import": "Import backup",
   "backup.importHint": "Choose an encrypted .ombbackup file and validate it before changing anything. Backups support up to 10 GB of installation data. Older team backups and shareable templates can still be imported from Templates.",
