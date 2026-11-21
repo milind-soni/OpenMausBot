@@ -42,12 +42,16 @@ import type { HostKind } from "../browser/chrome/flags.ts";
 import { browserEngineKind, type BrowserEngineKind } from "../browser/config.ts";
 import { parseSocks5Proxy } from "../browser/egress/policy.ts";
 import { ChromeEngine, chromeTarget, LiveRouter, profileKey, RuntimeRouter } from "../browser/engines.ts";
+import { CEILING_TICK_MS, ceilingLines, createBrowserCeiling } from "../browser/memory-ceiling.ts";
+import { browserProcessTree } from "../browser-processes.ts";
+import { pssBytes } from "../bot-memory-cap.ts";
+import { boxMemory } from "../box-memory.ts";
 import { CHROME_BROWSER_SYSTEM_PROMPT } from "../browser/prompt.ts";
 import { passkeyAnnotation } from "../browser/passkey-notice.ts";
 import { LentChromeDoors, lentChromeGuidance, type ChromeLender } from "../browser/lent-chrome.ts";
 import type { ChromeRoute } from "../device-links.ts";
 import type { EngineBrowsers } from "../engine-memory.ts";
-import { createBrowserReclaim } from "./browser-reclaim.ts";
+import { createBrowserReclaim, reclaimable } from "./browser-reclaim.ts";
 import { BROWSER_TASKS, processBudget } from "../process-room.ts";
 import { idleAfter } from "../drivers/session-idle.ts";
 import { augmentedPath } from "../env-path.ts";
@@ -230,7 +234,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     },
     annotate: passkeyAnnotation(CLOUD_HOME ? "cloud" : DESKTOP_MANAGED ? "desktop" : "server"),
     // agent-browser's own error names only the CDP connection; the door knows what went wrong on the way.
-    afterCall: (session, spec, result) => {
+    afterCall: (session, spec, answer) => {
+      const result = withCeilingNote(session, answer);
       const failed = result as { isError?: unknown; content?: unknown };
       const found = failed?.isError === true && viaDoor(session, spec) ? doors?.problem(session) : null;
       // A door refused under an earlier holder says nothing about a caller that may use it.
@@ -280,22 +285,66 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     running: (session) => browserRunning(session, usedBrowserSessions.get(session)),
     inUse: (session) => !turnResources.free(`browser:${session}`) || agentBrowserRuntime.working(session) });
   let gateTimer: ReturnType<typeof setInterval> | undefined;
+  let ceilingTimer: ReturnType<typeof setInterval> | undefined;
   const browserSweep = {
     start() {
       gateTimer = setInterval(() => void releaseGates().catch(() => undefined), 60_000);
       gateTimer.unref?.();
+      if (browserCeiling) {
+        ceilingTimer = setInterval(() => void browserCeiling.tick().catch(() => undefined), CEILING_TICK_MS);
+        ceilingTimer.unref?.();
+      }
       agentBrowserSweep.start();
       chromeEngine.start({ inUse: browserEngineKind(cfg) === "chrome", prepare: builtInBrowserEnabled(cfg) });
       return browserSweep;
     },
     closeAll: () => {
       clearInterval(gateTimer);
+      clearInterval(ceilingTimer);
       doors?.close();
       doorUrls.clear();
       leftovers.clear();
       return agentBrowserSweep.closeAll();
     },
   };
+  // Linux servers only: there a browser's proportional size can be read, and its memory is the home's.
+  const browserCeiling = process.platform === "linux" && !DESKTOP_MANAGED ? createBrowserCeiling({
+    lines: ceilingLines(boxMemory().bytes),
+    browsers: async () => (await Promise.all(browserOwners().map(async ({ pid, session }) => {
+      const spec = usedBrowserSessions.get(session);
+      const tree = spec ? await browserProcessTree(spec.command, pid, session) : null;
+      return tree ? [{ session, pids: [...tree.members.keys()] }] : [];
+    }))).flat(),
+    pss: (pid) => pssBytes(pid),
+    quiet: (session) => !agentBrowserRuntime.working(session),
+    tabs: async (session) => {
+      const tabs = (await inRunningSession(session, ["tab", "list"]))?.tabs;
+      return Array.isArray(tabs) ? tabs.flatMap((tab: { tabId?: unknown; title?: unknown; url?: unknown; active?: unknown }) =>
+        typeof tab.tabId === "string" ? [{ tabId: tab.tabId, title: String(tab.title ?? ""), url: String(tab.url ?? ""), active: tab.active === true }] : []) : null;
+    },
+    closeTab: async (session, tabId) => (await inRunningSession(session, ["tab", "close", tabId])) !== null,
+    // Memory relief's rules under ordinary shortage; which bots have a turn running is not known here.
+    close: async (session) => {
+      const spec = usedBrowserSessions.get(session);
+      if (!spec) return false;
+      const working = agentBrowserRuntime.working(session), spare = agentBrowserRuntime.spare(session);
+      const candidate = { session, held: !turnResources.free(`browser:${session}`), working, running: browserRunning(session, spec),
+        attached: Boolean(chromeTarget(session, spec)) || attachesToChrome(spec.env), watched: spare === null && !working, turnRunning: false,
+        savesSignIns: spare?.savesSignIns ?? spec.env.AGENT_BROWSER_RESTORE_SAVE === "auto" };
+      return reclaimable(candidate, false) && browserRuntime.closeUnused(session, spec);
+    },
+  }) : null;
+  function inRunningSession(session: string, args: string[]): Promise<Record<string, unknown> | null> {
+    const spec = usedBrowserSessions.get(session);
+    return spec ? inRunningBrowser(spec.command, browserRuntimeEnv({ ...spec.env, AGENT_BROWSER_SESSION: session }), args).catch(() => null) : Promise.resolve(null);
+  }
+  /** The ceiling's word on what it closed, added to the bot's next call in that browser. */
+  function withCeilingNote(session: string, result: unknown): unknown {
+    const content = (result as { content?: unknown } | null)?.content;
+    const note = Array.isArray(content) ? browserCeiling?.takeNote(session) : null;
+    if (!note || !Array.isArray(content)) return result;
+    return { ...(result as object), content: [...content, { type: "text", text: note }] };
+  }
   // The viewer and the agent must address the SAME temporary browser.
   const temporaryBrowserSessions = new Map<string, string>();
   /** The suffix an audience gives a browser's name, remembered so a deletion erases every audience's browser. */
