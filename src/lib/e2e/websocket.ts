@@ -120,7 +120,12 @@ export class StreamWebSocket {
     this.#state = "closing";
     this.#control(OP.close, code === undefined ? EMPTY : closePayload(code, why));
     // A computer that never answers would hold the stream: reset it, and the read loop reports 1006.
-    this.#closeTimer = setTimeout(() => this.#stream.reset(), this.#options.closeTimeoutMs ?? CLOSE_TIMEOUT_MS);
+    this.#closeTimer ??= this.#deadline();
+  }
+
+  /** Resets the stream after the close deadline; a reset rejects any write still waiting, so nothing waits past it. */
+  #deadline(): ReturnType<typeof setTimeout> {
+    return setTimeout(() => this.#stream.reset(), this.#options.closeTimeoutMs ?? CLOSE_TIMEOUT_MS);
   }
 
   /** Frames go out in call order; a failed write leaves the chain rejected, so later sends fail too. */
@@ -144,8 +149,13 @@ export class StreamWebSocket {
         return this.#finish({ code: 1006, reason: "", wasClean: false });
       }
       // Fail the connection: tell the computer why, then end the stream. The page sees 1006, as a browser reports it.
-      if (this.#state === "open") this.#control(OP.close, closePayload(error.code, utf8(error.message.slice(0, 123))));
-      this.#end();
+      // Once this side's close is out there is nothing left to say or wait for: reset at once.
+      if (this.#state === "open") {
+        this.#control(OP.close, closePayload(error.code, utf8(error.message.slice(0, 123))));
+        this.#end();
+      } else {
+        this.#stream.reset();
+      }
       this.#finish({ code: 1006, reason: "", wasClean: false });
     }
     // Read on to the end of the stream so it is not reset under the computer.
@@ -156,12 +166,15 @@ export class StreamWebSocket {
     }
   }
 
-  /** FIN once every queued frame is handed to the session, so the closing frame goes before it. */
+  /** FIN once every queued frame is handed to the session, so the closing frame goes before it; reset at the deadline. */
   #end(): void {
-    void this.#sending.then(
-      () => this.#stream.end(),
-      () => this.#stream.reset(),
-    );
+    const deadline = this.#deadline();
+    void this.#sending
+      .then(
+        () => this.#stream.end(),
+        () => this.#stream.reset(),
+      )
+      .finally(() => clearTimeout(deadline));
   }
 
   /** Reads frames until the closing handshake; throws a Failure for a protocol error, anything else when the stream ends. */
@@ -241,6 +254,8 @@ export class StreamWebSocket {
     // Answer the computer's close with its code, unless this side already sent one.
     if (this.#state === "open") this.#control(OP.close, payload.length ? closePayload(code, EMPTY) : EMPTY);
     this.#state = "closing";
+    // A computer that stops reading would hold the answer forever: the close deadline covers this side too.
+    this.#closeTimer ??= this.#deadline();
     // Clean only once every frame, the answer included, is handed to the session; a reset meanwhile is a 1006.
     try {
       await this.#sending;

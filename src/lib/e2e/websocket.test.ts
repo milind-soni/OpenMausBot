@@ -276,6 +276,47 @@ describe("StreamWebSocket frames", () => {
     expect(fake.state.reset).toBe(true);
   });
 
+  /** Writes from now on wait until the stream is reset, as a session's do when the computer stops reading. */
+  function holdWrites(fake: Fake, held: (bytes: Uint8Array) => boolean) {
+    const stream = fake.open();
+    const { write, reset } = stream;
+    const waiting: ((error: Error) => void)[] = [];
+    stream.write = (bytes) => (held(bytes) ? new Promise<void>((_, reject) => void waiting.push(reject)) : write(bytes));
+    stream.reset = () => {
+      reset();
+      for (const reject of waiting.splice(0)) reject(new Error("stream reset"));
+    };
+    return waiting;
+  }
+
+  it("resets the stream and reports 1006 when its answer to the computer's close is not handed over in time", async () => {
+    const fake = fakeComputer();
+    const { page } = await switched(fake, { closeTimeoutMs: 50 });
+    const waiting = holdWrites(fake, () => true);
+    fake.push(serverFrame(8, Uint8Array.of(0x03, 0xe8)));
+    await vi.waitFor(() => expect(waiting).toHaveLength(1));
+    await vi.waitFor(() => expect(page.closes).toEqual([{ code: 1006, reason: "", wasClean: false }]));
+    expect(fake.state.reset).toBe(true);
+  });
+
+  it("resets at once on a protocol error while waiting for the computer's close", async () => {
+    const fake = fakeComputer();
+    const { socket, page } = await switched(fake);
+    socket.close(1000);
+    fake.push(serverFrame(1, "x", { rsv: 4 }));
+    await vi.waitFor(() => expect(page.closes).toEqual([{ code: 1006, reason: "", wasClean: false }]));
+    expect(fake.state).toMatchObject({ reset: true, ended: false });
+  });
+
+  it("resets the stream when the close frame for a protocol error is not handed over in time", async () => {
+    const fake = fakeComputer();
+    const { page } = await switched(fake, { closeTimeoutMs: 50 });
+    holdWrites(fake, () => true);
+    fake.push(serverFrame(1, "x", { rsv: 4 }));
+    await vi.waitFor(() => expect(page.closes).toEqual([{ code: 1006, reason: "", wasClean: false }]));
+    await vi.waitFor(() => expect(fake.state.reset).toBe(true));
+  });
+
   it("puts a message of 300,000 one-byte fragments back together, empty fragments between them, and an all-empty one", async () => {
     const fake = fakeComputer();
     const { page } = await switched(fake);
