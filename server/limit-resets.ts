@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 
 import { NEAR_LIMIT_PERCENT, type EngineLimit, type EngineLimitsReport, type LimitWindowName } from "../shared/limit-reset.ts";
 import { writeFileAtomic } from "./atomic.ts";
-import { LIMIT_POLL_MS, limitReadDue } from "./limit-poll.ts";
+import { LIMIT_IDLE_POLL_MS, LIMIT_POLL_MS, limitReadDue } from "./limit-poll.ts";
 import { codexHasCreditRoom } from "./codex-credits.ts";
 import { claudeHasExtraUsageRoom, loadPlanUsage, type PlanAccount, type PlanProviderRow, type PlanUsageReport, type PlanWindow } from "./plan-usage.ts";
 import type { RuntimeEvent } from "../shared/runtime-events.ts";
@@ -114,6 +114,8 @@ export class LimitResetClock {
   private readonly options: LimitClockOptions;
   private readonly now: () => number;
   private usage = new Map<string, EngineLimit>();
+  /** When each engine's usage was last read successfully. */
+  private readonly readAt = new Map<string, number>();
   private readonly refusals = new Map<string, number>();
   /** Engines held by a refusal that named no reset time: the hold is a guess, never shown as a reset. */
   private readonly guessed = new Set<string>();
@@ -163,7 +165,8 @@ export class LimitResetClock {
    * the Go subscription's and never covers Zen's free models. */
   private meterFor(engine: string, model?: string): EngineLimit | undefined {
     const usage = this.reading(engine);
-    if (!usage || !meterHoldsEngine(usage.driver)) return undefined;
+    // A reading kept through a failed read (lastReading) is shown only: whether the engine is held is left to fresh ones.
+    if (!usage || !meterHoldsEngine(usage.driver) || usage.checkedAt !== undefined) return undefined;
     return usage.driver !== "opencode" || !model || (typedOpenCodeModel(model) ?? model).startsWith(OPENCODE_GO_MODEL_PREFIX) ? usage : undefined;
   }
 
@@ -247,8 +250,13 @@ export class LimitResetClock {
     const recovered: Array<{ engine: string; reset: number }> = [];
     for (const row of report.providers) {
       const limit = engineLimitFromUsage(row);
-      if (!limit) continue;
+      if (!limit) {
+        const kept = row.ok ? undefined : this.lastReading(row.id);
+        if (kept) next.set(row.id, kept);
+        continue;
+      }
       next.set(limit.engine, limit);
+      this.readAt.set(limit.engine, this.now());
       const reset = this.refusals.get(limit.engine);
       if (reset !== undefined && meterHoldsEngine(row.driver) && fetchedAt >= (this.heldAt.get(limit.engine) ?? 0) && holdGone(row, limit, reset, this.guessed.has(limit.engine))) {
         this.refusals.delete(limit.engine);
@@ -264,6 +272,16 @@ export class LimitResetClock {
     this.checkedAt = this.now();
     for (const { engine, reset } of recovered) this.options.onCodexRecovery?.(engine, reset);
     this.options.onChange?.();
+  }
+
+  /** A failed read (a refused or timed-out request, a laptop just woken) leaves the engine's last reading in place, so
+   * the usage shown does not vanish until the next read: for an hour at most, and only while none of its windows has
+   * reset since. It carries when it was read, and is shown only: it never says the engine refuses work. */
+  private lastReading(engine: string): EngineLimit | undefined {
+    const usage = this.usage.get(engine), at = this.readAt.get(engine), now = this.now();
+    if (!usage || at === undefined || now - at > LIMIT_IDLE_POLL_MS) return undefined;
+    if ((usage.windows ?? []).some((window) => window.resetsAt !== null && window.resetsAt <= now)) return undefined;
+    return { ...usage, blocked: false, checkedAt: at };
   }
 
   /** The person's "Try again now": the engine's hold ends at once, so the next turn goes to it. A refusal holds it again. */

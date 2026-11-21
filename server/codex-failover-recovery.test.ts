@@ -155,3 +155,20 @@ it("does not shorten a non-Codex wait when its own account hold clears", async (
   expect(f.clock.blockedUntil("claude")).toBeNull();
   expect(f.failovers.restore("bot", "t")).toBe(false);
 });
+
+it("keeps the last reading visible without using a failed refresh to release the backup", async () => {
+  const f = fixture();
+  await f.clock.refresh(true);
+  f.clock.noteRefusal(codex.instanceId, RESET);
+  f.record("t");
+  f.advance(AT + 60_000);
+  f.usage({ ...healthy(codex.instanceId), ok: false, error: "Not available" });
+  await f.clock.refresh(true);
+  expect(f.clock.limit(codex.instanceId)).toMatchObject({ checkedAt: AT, blocked: true });
+  expect(f.failovers.list()[0]?.engineRefusal).toBe("waiting");
+  expect(f.failovers.restore("bot", "t")).toBe(false);
+  f.usage(healthy(codex.instanceId));
+  await f.clock.refresh(true);
+  expect(f.clock.limit(codex.instanceId)?.checkedAt).toBeUndefined();
+  expect(f.failovers.restore("bot", "t")).toBe(true);
+});
