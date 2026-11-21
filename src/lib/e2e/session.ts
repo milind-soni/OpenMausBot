@@ -1,5 +1,5 @@
 import { b64u, type Bytes } from "./bytes.ts";
-import { encodePayload1, newConn, NoiseError, phoneHello, TRANSPORT_DIRECT, TRANSPORT_RELAY, type SessionKeys } from "./noise.ts";
+import { encodePayload1, MAX_RECORD_BYTES, newConn, NoiseError, phoneHello, TRANSPORT_DIRECT, TRANSPORT_RELAY, type SessionKeys } from "./noise.ts";
 import { decodeFrame, encodeFrame, GO_AWAY, Mux, PING_INTERVAL_MS, PING_TIMEOUT_MS, YamuxError, type Frame } from "./yamux.ts";
 
 export const DIRECT_PROTOCOL = "omb-e2e.v1";
@@ -27,6 +27,9 @@ const DRAIN_POLL_MS = 5;
 const READ_HIGH_WATER = 256 * 1024;
 /** The longest wait a 4503 can ask for. */
 const MAX_RETRY_MS = 60_000;
+/** Records held while message 2 is checked: control frames only, since no stream is open yet. */
+const MAX_EARLY_RECORDS = 64;
+const MAX_EARLY_BYTES = MAX_RECORD_BYTES;
 
 export class SessionClosed extends Error {
   readonly code: number;
@@ -101,12 +104,16 @@ export async function dial(options: DialOptions): Promise<PhoneSession> {
     let stage: "connecting" | "relay" | "message2" | "finishing" | "done" = "connecting";
     /** Records that arrive while message 2 is checked go to the session in order. */
     const early: MessageEvent[] = [];
+    let earlyBytes = 0;
+    /** More arrived than a session's start can need; the queue is dropped and the session refused once verified. */
+    let overflowed = false;
     /** A close while message 2 is checked: a failed check wins over it, since a node's 4404 must not hide a hard stop. */
     let closedWhileFinishing: CloseEvent | null = null;
     const fail = (error: Error, code?: number) => {
       if (stage === "done") return;
       stage = "done";
       clearTimeout(timer);
+      clearTimeout(noiseTimer);
       reject(error);
       if (code !== undefined) closeSocket(socket, code);
     };
@@ -114,8 +121,11 @@ export async function dial(options: DialOptions): Promise<PhoneSession> {
       () => fail(new SessionClosed(CLOSE.deadline), CLOSE.deadline),
       options.timeoutMs ?? HANDSHAKE_DEADLINE_MS + (relay ? RELAY_EXTRA_MS : 0),
     );
+    let noiseTimer: ReturnType<typeof setTimeout> | undefined;
     const sendMessage1 = () => {
       stage = "message2";
+      // The handshake's own 10 s run from the socket opening, or from the relay's ready (README section 5).
+      noiseTimer = setTimeout(() => fail(new SessionClosed(CLOSE.deadline), CLOSE.deadline), HANDSHAKE_DEADLINE_MS);
       hello.then(
         (started) => {
           if (stage === "message2") socket.send(started.message1);
@@ -134,7 +144,16 @@ export async function dial(options: DialOptions): Promise<PhoneSession> {
         if (typeof event.data === "string" && isReady(event.data)) return sendMessage1();
         return fail(new SessionClosed(CLOSE.relayBadMessage), CLOSE.normal);
       }
-      if (stage === "finishing") return void early.push(event);
+      if (stage === "finishing") {
+        // Before the session exists the phone has opened no stream, so only a few control records can be due. Too many
+        // is a protocol error, reported after the check so that a message 2 that fails to verify still stops hard.
+        if (overflowed) return;
+        earlyBytes += typeof event.data === "string" ? event.data.length : (event.data as ArrayBuffer).byteLength;
+        if (early.length < MAX_EARLY_RECORDS && earlyBytes <= MAX_EARLY_BYTES) return void early.push(event);
+        overflowed = true;
+        early.length = 0;
+        return;
+      }
       if (stage !== "message2" || typeof event.data === "string") return fail(new SessionClosed(CLOSE.protocol), CLOSE.protocol);
       stage = "finishing";
       hello
@@ -142,8 +161,10 @@ export async function dial(options: DialOptions): Promise<PhoneSession> {
         .then(
           (keys) => {
             if (stage !== "finishing") return;
+            if (overflowed) return fail(new SessionClosed(CLOSE.protocol), CLOSE.protocol);
             stage = "done";
             clearTimeout(timer);
+            clearTimeout(noiseTimer);
             const session = new PhoneSession(socket, keys, options);
             for (const message of early) session.receive(message);
             if (!closedWhileFinishing) return resolve(session);
@@ -376,8 +397,10 @@ export class PhoneSession {
     socket.onmessage = (event: MessageEvent) => this.receive(event);
     // A record already received, such as GoAway(3) just before a 4001, is read before the close ends the session.
     socket.onclose = (event: CloseEvent) => {
-      if (this.#opening === 0) this.#end(event.code);
-      else this.#closedMeanwhile = event.code;
+      if (this.#opening === 0) return this.#end(event.code);
+      // The socket is gone, so no pong can come: only the records already in may still settle the session.
+      this.#closedMeanwhile = event.code;
+      this.#stopLiveness();
     };
     const pingTimeoutMs = timers.pingTimeoutMs ?? PING_TIMEOUT_MS;
     this.#pingTimer = setInterval(() => this.#ping(pingTimeoutMs), timers.pingIntervalMs ?? PING_INTERVAL_MS);
@@ -473,13 +496,18 @@ export class PhoneSession {
   #end(code: number): void {
     if (this.#state === "closed") return;
     this.#state = "closed";
-    clearInterval(this.#pingTimer);
-    if (this.#pongTimer) clearTimeout(this.#pongTimer);
+    this.#stopLiveness();
     // Each reset forgets its stream; a Map may drop the entry being visited.
     for (const stream of this.#streams.values()) stream.remoteReset();
     this.#mux.closeAll();
     for (const waiter of this.#drainWaiters.splice(0)) waiter();
     this.#settleClosed(code);
+  }
+
+  #stopLiveness(): void {
+    clearInterval(this.#pingTimer);
+    if (this.#pongTimer) clearTimeout(this.#pongTimer);
+    this.#awaitingPong = null;
   }
 
   #ping(timeoutMs: number): void {
