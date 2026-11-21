@@ -26,7 +26,7 @@ export type BotReason = typeof BOT_REASONS[number];
 
 /** The page actions a bot's failure is logged for. */
 const PAGE_ACTIONS = new Set(["click", "dblclick", "fill", "type", "press", "check", "uncheck", "select", "hover", "upload"]);
-const ACTION_KINDS = new Set(["mouse", "wheel", "key", "text", "take", "release", "input_mouse", "input_keyboard", "input_batch", "dialog", "navigate", "back", "forward", "reload", "tab-new", "tab-select", "tab-close", "restart"]);
+const ACTION_KINDS = new Set(["mouse", "wheel", "key", "text", "take", "release", "input_mouse", "input_keyboard", "input_batch", "select_choose", "dialog", "navigate", "back", "forward", "reload", "tab-new", "tab-select", "tab-close", "restart"]);
 const QUIET_MS = 5_000;
 const MAX_SESSIONS = 200;
 const SESSION = /^[\w.:-]{1,128}$/;

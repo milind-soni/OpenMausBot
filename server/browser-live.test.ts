@@ -759,7 +759,7 @@ describe("authenticated browser viewer relay", () => {
   });
   describe("the page's own dialogs", () => {
     const URL = "ws://127.0.0.1:9222/devtools/browser/abc-123";
-    function devTools() {
+    function devTools(reply: (method: string, params?: Record<string, unknown>) => Record<string, unknown> = () => ({})) {
       const sent: Array<{ method: string; params?: Record<string, unknown>; sessionId?: string }> = [];
       let listeners: CdpListeners = {};
       let answered!: () => void;
@@ -768,7 +768,7 @@ describe("authenticated browser viewer relay", () => {
         send: vi.fn(async (method: string, params?: Record<string, unknown>, sessionId?: string) => {
           sent.push({ method, params, sessionId });
           if (method === "Page.handleJavaScriptDialog") { answered(); listeners.event?.({ method: "Page.javascriptDialogClosed", params: {}, sessionId }); }
-          return {};
+          return reply(method, params);
         }),
         close: vi.fn(),
       };
@@ -832,6 +832,97 @@ describe("authenticated browser viewer relay", () => {
       expect(tools.cdp.close).not.toHaveBeenCalled();
       b.socket.close();
       expect(tools.cdp.close).toHaveBeenCalledOnce();
+    });
+
+    /** A view of a page its DevTools client is attached to, shown as the active tab. */
+    async function attachedView(tools: ReturnType<typeof devTools>) {
+      live = new BrowserLive({ runtime, devTools: { url: tools.url, connect: tools.connect } });
+      const a = await open();
+      tools.emit("Target.attachedToTarget", { sessionId: "page-1", targetInfo: { type: "page", targetId: "TARGET-1" } });
+      a.socket.receive({ type: "tabs", tabs: [{ tabId: "t1", targetId: "TARGET-1", title: "Page", url: "https://example.com/", active: true }] });
+      await a.action({ type: "take" });
+      return a;
+    }
+    const keyEvents = (tools: ReturnType<typeof devTools>) => tools.sent.filter((call) => call.method === "Input.dispatchKeyEvent").map((call) => ({ ...call.params, sessionId: call.sessionId }));
+
+    it("sends a person's keys to the page with their key code, modifiers and location, each one confirmed", async () => {
+      const tools = devTools();
+      const a = await attachedView(tools);
+      nativeInput.mockClear();
+      await a.action({ type: "input_keyboard", eventType: "keyDown", key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16, modifiers: 8 });
+      await a.action({ type: "input_keyboard", eventType: "keyDown", key: "Z", code: "KeyZ", windowsVirtualKeyCode: 90, modifiers: 8, text: "Z" });
+      await a.action({ type: "input_keyboard", eventType: "keyUp", key: "Z", code: "KeyZ", windowsVirtualKeyCode: 90, modifiers: 8 });
+      await a.action({ type: "input_keyboard", eventType: "keyUp", key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16 });
+      await a.action({ type: "input_keyboard", eventType: "keyDown", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: 2 });
+      await a.action({ type: "input_keyboard", eventType: "keyDown", key: "F2", code: "F2", windowsVirtualKeyCode: 113 });
+      expect(keyEvents(tools)).toEqual([
+        { type: "rawKeyDown", key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16, nativeVirtualKeyCode: 16, modifiers: 8, location: 1, sessionId: "page-1" },
+        { type: "keyDown", key: "Z", code: "KeyZ", windowsVirtualKeyCode: 90, nativeVirtualKeyCode: 90, modifiers: 8, text: "Z", unmodifiedText: "Z", sessionId: "page-1" },
+        { type: "keyUp", key: "Z", code: "KeyZ", windowsVirtualKeyCode: 90, nativeVirtualKeyCode: 90, modifiers: 8, sessionId: "page-1" },
+        { type: "keyUp", key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16, nativeVirtualKeyCode: 16, modifiers: 0, location: 1, sessionId: "page-1" },
+        // A shortcut is pressed and let go at once, as macOS sends no key-up under Cmd.
+        { type: "rawKeyDown", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65, modifiers: 2, sessionId: "page-1" },
+        { type: "keyUp", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65, modifiers: 2, sessionId: "page-1" },
+        { type: "rawKeyDown", key: "F2", code: "F2", windowsVirtualKeyCode: 113, nativeVirtualKeyCode: 113, modifiers: 0, sessionId: "page-1" },
+      ]);
+      expect(nativeInput).not.toHaveBeenCalled();
+      await a.action({ type: "input_keyboard", eventType: "keyUp", key: "F2", code: "F2", windowsVirtualKeyCode: 113 });
+      expect(keyEvents(tools).at(-1)).toMatchObject({ type: "keyUp", key: "F2", code: "F2", windowsVirtualKeyCode: 113 });
+      await a.action({ type: "release" });
+      expect(runtime.abandonHumanInput).not.toHaveBeenCalled();
+    });
+
+    it("sends keys through the engine when the active tab is not one its DevTools client is attached to", async () => {
+      const tools = devTools();
+      const a = await attachedView(tools);
+      a.socket.receive({ type: "tabs", tabs: [{ tabId: "t2", targetId: "TARGET-2", title: "New", url: "about:blank", active: true }] });
+      nativeInput.mockClear();
+      await a.action({ type: "input_keyboard", eventType: "keyDown", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, text: "a" });
+      expect(keyEvents(tools)).toEqual([]);
+      expect(nativeInput.mock.calls.map(([, options]) => JSON.parse(options.body))).toEqual([{ action: "input_keyboard", type: "keyDown", key: "a", code: "KeyA", text: "a" }]);
+    });
+
+    it("draws a dropdown list for a press on one, keeps that press and its release from the page, and applies the option chosen", async () => {
+      let selected = 0;
+      const tools = devTools((method, params) => {
+        if (method === "Page.getFrameTree") return { frameTree: { frame: { id: "FRAME-1" } } };
+        if (method === "Page.createIsolatedWorld") return { executionContextId: 7 };
+        if (method !== "Runtime.evaluate") return {};
+        const script = String(params?.expression);
+        if (script.includes("getBoundingClientRect")) return { result: { value: { options: [{ label: "Alpha", disabled: false }, { label: "Beta", disabled: false }], selectedIndex: 0, rect: { x: 40, y: 160, width: 200, height: 30 } } } };
+        if (script.includes("startsWith(label)")) return { result: { value: "Beta" } };
+        if (script.includes("dispatchEvent")) return { result: { value: true } };
+        selected = 1;
+        return { result: { value: selected } };
+      });
+      const a = await attachedView(tools);
+      nativeInput.mockClear();
+      await a.action({ type: "input_mouse", eventType: "mouseMoved", x: 140, y: 175, button: "none" });
+      await a.action({ type: "input_mouse", eventType: "mousePressed", x: 140, y: 175, button: "left", clickCount: 1 });
+      await a.action({ type: "input_mouse", eventType: "mouseReleased", x: 140, y: 175, button: "left", clickCount: 1 });
+      expect(nativeInput.mock.calls.map(([, options]) => JSON.parse(options.body).type)).toEqual(["mouseMoved"]);
+      const [popup] = a.res.events("selectPopup");
+      expect(popup).toMatchObject({ options: [{ label: "Alpha" }, { label: "Beta" }], selectedIndex: 0, rect: { x: 40, y: 160, width: 200, height: 30 } });
+      expect(tools.sent.filter((call) => call.method === "Runtime.evaluate").every((call) => call.params?.contextId === 7 && call.sessionId === "page-1")).toBe(true);
+      await expect(a.action({ type: "select_choose", id: "another", index: 1 })).resolves.toMatchObject({ notice: expect.any(String) });
+      await a.action({ type: "input_mouse", eventType: "mousePressed", x: 140, y: 175, button: "left", clickCount: 1 });
+      const again = a.res.events("selectPopup").at(-1);
+      expect(again.id).not.toBe(popup.id);
+      await expect(a.action({ type: "select_choose", id: again.id, index: 1 })).resolves.toEqual({ ok: true });
+      expect(keyEvents(tools).map((event) => `${event.type}:${event.key}`)).toEqual(["keyDown:B", "keyUp:B", "keyDown:e", "keyUp:e", "keyDown:t", "keyUp:t", "keyDown:a", "keyUp:a"]);
+      expect(selected).toBe(1);
+      // The list is chosen from once.
+      await expect(a.action({ type: "select_choose", id: again.id, index: 0 })).resolves.toMatchObject({ notice: expect.any(String) });
+    });
+
+    it("lets a press that is not on a dropdown list through to the page", async () => {
+      const tools = devTools((method) => method === "Page.getFrameTree" ? { frameTree: { frame: { id: "FRAME-1" } } } : method === "Page.createIsolatedWorld" ? { executionContextId: 7 } : method === "Runtime.evaluate" ? { result: { value: null } } : {});
+      const a = await attachedView(tools);
+      nativeInput.mockClear();
+      await a.action({ type: "input_mouse", eventType: "mousePressed", x: 10, y: 10, button: "left", clickCount: 1 });
+      await a.action({ type: "input_mouse", eventType: "mouseReleased", x: 10, y: 10, button: "left", clickCount: 1 });
+      expect(nativeInput.mock.calls.map(([, options]) => JSON.parse(options.body).type)).toEqual(["mousePressed", "mouseReleased"]);
+      expect(a.res.events("selectPopup")).toEqual([]);
     });
 
     it("never connects to a DevTools address off this machine", async () => {
