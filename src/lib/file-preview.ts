@@ -8,10 +8,12 @@ import { SIDEBAR_AND_PANEL_FIT } from "./use-media-query";
 
 /** A file from a message, shown beside the chat. Renderer-only: nothing about it is stored or sent anywhere. */
 export interface FilePreview {
-  kind: "html" | "markdown" | "table";
+  kind: "html" | "markdown" | "table" | "changes";
   path: string;
   name: string;
   message: { threadId: string; messageId: string };
+  /** For "changes": the person's file this one is an edit of, in the message that attached it. */
+  original?: { path: string; name: string; messageId: string };
   /** What opened it, to take focus back when the person closes the pane. */
   opener: HTMLElement | null;
 }
