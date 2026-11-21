@@ -269,6 +269,7 @@
   "server.teammates.gotYourApproval": "{who} dostał twoje zatwierdzenie",
   "server.teammates.questionAnswered": "Na pytanie {who} odpowiedziano",
   "server.teammates.requestApproved": "Prośbę {who} zatwierdzono",
+  "server.teammates.noLongerWaiting": "{who} już na ciebie nie czeka",
   "server.teammates.queuedBehind.answer": "W kolejce dla @{bot} po twojej odpowiedzi w „{title}”",
   "server.teammates.queuedBehind.approval": "W kolejce dla @{bot} po twoim zatwierdzeniu w „{title}”",
   "server.teammates.queuedBehind.review": "W kolejce dla @{bot} po twoim przeglądzie w „{title}”",

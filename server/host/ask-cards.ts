@@ -7,7 +7,9 @@
 import { formatQuestionAnswers, isPersistentQuestionCard } from "../../shared/ask-question.ts";
 import { liveCardKind } from "../../shared/live-approval.ts";
 import { allowsTool, type ToolIdentity } from "../../shared/tool-scope.ts";
+import type { PersonWait } from "../../shared/person-wait.ts";
 import type { OptionCardData } from "../../shared/wire.ts";
+import { noticeTool, type ChatNoticeKey } from "../chat-notices.ts";
 import type { RuntimeEvent } from "../contracts.ts";
 import type { HandoffView } from "../coordinator.ts";
 import { buildNotification, type Notification } from "../notify.ts";
@@ -73,6 +75,13 @@ function beforeQuestion(text: string): string {
 const ownQuestionCard = (message: Message): boolean =>
   Boolean(message.card?.requestId && !message.inbox && !message.card.tool && isPersistentQuestionCard(message.card));
 
+const CARD_CHIP: Partial<Record<PersonWait["kind"], ChatNoticeKey>> = {
+  password: "chat.notice.waitingPasswordElsewhere",
+  "sign-in": "chat.notice.waitingSignInElsewhere",
+  connect: "chat.notice.waitingConnectElsewhere",
+  review: "chat.notice.waitingReviewElsewhere",
+};
+
 export function createAskCards(deps: AskCardsDeps) {
   const { store, delegatorOf, notify } = deps;
   const now = deps.now ?? Date.now;
@@ -99,6 +108,38 @@ export function createAskCards(deps: AskCardsDeps) {
         tool: { ...existing.tool, ...settledWaitingChip(chip.name, chip.kind, resolved?.behavior ?? "deny", resolved?.source ?? "system", conversationLanguage(chip.threadId)) },
       });
     }
+  }
+
+  const waitingCardChips = new Map<string, { threadId: string; messageId: string; name: string }>();
+
+  /** A sign-in, password, connect or review card left open in handed-off work: the conversation that handed it on links to
+   * it, as it does for a question or approval. Keyed by the card, so it shows once. */
+  function showWaitingOnCardChip(threadId: string, wait: Pick<PersonWait, "kind" | "messageId" | "label">, asker: BotRecord) {
+    const key = CARD_CHIP[wait.kind];
+    const id = `${threadId}:${wait.messageId}`;
+    if (!key || waitingCardChips.has(id)) return;
+    const delegator = delegatorOf(threadId);
+    if (!delegator || delegator.threadId === threadId || deps.copiedInto(delegator.threadId, asker.id, threadId)) return;
+    const chip = store.appendMessage(delegator.threadId, { role: "bot", kind: "activity",
+      from: { botId: asker.id, name: asker.name, color: asker.color },
+      tool: noticeTool(key, { name: asker.name, label: wait.label }, {}),
+      threadRef: { botId: asker.id, threadId, title: store.taskByThread(asker.id, threadId)?.title ?? asker.name },
+    });
+    waitingCardChips.set(id, { threadId: delegator.threadId, messageId: chip.id, name: asker.name });
+  }
+
+  /** The card was saved, declined, replaced or stopped: its chip says the work no longer waits. */
+  function settleWaitingOnCardChip(threadId: string, cardMessageId: string) {
+    const id = `${threadId}:${cardMessageId}`;
+    const chip = waitingCardChips.get(id);
+    if (!chip) return;
+    waitingCardChips.delete(id);
+    const existing = store.messagesFor(chip.threadId).find((message) => message.id === chip.messageId);
+    if (!existing?.tool) return;
+    const { nameCode: _code, nameParams: _params, ...tool } = existing.tool;
+    store.patchMessage(chip.threadId, chip.messageId, {
+      tool: { ...tool, name: serverLine(conversationLanguage(chip.threadId), "server.teammates.noLongerWaiting", { who: `@${chip.name}` }), ok: true },
+    });
   }
 
   /** In a room only the asking member's own lines. */
@@ -277,5 +318,5 @@ export function createAskCards(deps: AskCardsDeps) {
     questionCard({ id: `${botId}-${turnId}`, threadId, botId, executions: 1, createdAt: reply.at, startedAt: reply.at } as HandoffView, question);
   }
 
-  return { park, remind, decided, closed, askedAgain, answerParked, answeredInWords, typed, ownQuestion, showWaitingOnPersonChip, settleWaitingOnPersonChips };
+  return { park, remind, decided, closed, askedAgain, answerParked, answeredInWords, typed, ownQuestion, showWaitingOnPersonChip, settleWaitingOnPersonChips, showWaitingOnCardChip, settleWaitingOnCardChip };
 }

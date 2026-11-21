@@ -312,6 +312,7 @@
   "server.teammates.gotYourApproval": "{who}이(가) 회원님의 승인을 받았어요",
   "server.teammates.questionAnswered": "{who}의 질문에 답이 달렸어요",
   "server.teammates.requestApproved": "{who}의 요청이 승인됐어요",
+  "server.teammates.noLongerWaiting": "{who}이(가) 더 이상 회원님을 기다리지 않아요",
   "server.teammates.queuedBehind.answer": "“{title}”에서 회원님의 답 다음으로 @{bot} 대기 중",
   "server.teammates.queuedBehind.approval": "“{title}”에서 회원님의 승인 다음으로 @{bot} 대기 중",
   "server.teammates.queuedBehind.review": "“{title}”에서 회원님의 검토 다음으로 @{bot} 대기 중",

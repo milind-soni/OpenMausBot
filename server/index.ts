@@ -4912,7 +4912,7 @@ const providerLabel = (provider: string): string => {
 };
 
 // Rewritten by every dispatch, so a quiet turn never silences the next one.
-const quietTurnThreads = new Set<string>(); const doneNotice = createDoneNotice({ awaitingTeammates: (threadId) => coordinator.awaitingTeammateThreads().has(threadId), queuedFollowUp: hasQueuedPersonMessage }); const personWaits = createPersonWaits({ store, notify, threadsWithCards: threadsWithCardsSince });
+const quietTurnThreads = new Set<string>(); const doneNotice = createDoneNotice({ awaitingTeammates: (threadId) => coordinator.awaitingTeammateThreads().has(threadId), queuedFollowUp: hasQueuedPersonMessage }); const personWaits = createPersonWaits({ store, notify, threadsWithCards: threadsWithCardsSince, waitingElsewhere: askCards.showWaitingOnCardChip, waitSettled: askCards.settleWaitingOnCardChip });
 const QUIET_TURN_NEWS: ReadonlySet<Notification["kind"]> = new Set(["done", "turn-failed", "incident"]);
 
 function notify(notification: Notification | null, how?: { routine?: boolean; summary?: boolean }) {

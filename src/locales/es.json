@@ -257,6 +257,7 @@
   "server.teammates.gotYourApproval": "{who} recibió tu aprobación",
   "server.teammates.questionAnswered": "Se respondió la pregunta de {who}",
   "server.teammates.requestApproved": "Se aprobó la solicitud de {who}",
+  "server.teammates.noLongerWaiting": "{who} ya no te espera",
   "server.teammates.queuedBehind.answer": "En cola para @{bot} detrás de tu respuesta en «{title}»",
   "server.teammates.queuedBehind.approval": "En cola para @{bot} detrás de tu aprobación en «{title}»",
   "server.teammates.queuedBehind.review": "En cola para @{bot} detrás de tu revisión en «{title}»",

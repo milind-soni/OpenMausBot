@@ -319,6 +319,7 @@
   "server.teammates.gotYourApproval": "{who} にあなたの承認が届きました",
   "server.teammates.questionAnswered": "{who} の質問に回答がありました",
   "server.teammates.requestApproved": "{who} のリクエストは承認されました",
+  "server.teammates.noLongerWaiting": "{who} はもうあなたを待っていません",
   "server.teammates.queuedBehind.answer": "「{title}」でのあなたの回答の後に @{bot} 向けに順番待ちしています",
   "server.teammates.queuedBehind.approval": "「{title}」でのあなたの承認の後に @{bot} 向けに順番待ちしています",
   "server.teammates.queuedBehind.review": "「{title}」でのあなたの確認の後に @{bot} 向けに順番待ちしています",

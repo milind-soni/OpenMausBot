@@ -258,6 +258,7 @@
   "server.teammates.gotYourApproval": "{who} đã nhận phê duyệt của bạn",
   "server.teammates.questionAnswered": "Câu hỏi của {who} đã được trả lời",
   "server.teammates.requestApproved": "Yêu cầu của {who} đã được phê duyệt",
+  "server.teammates.noLongerWaiting": "{who} không còn chờ bạn nữa",
   "server.teammates.queuedBehind.answer": "Đang chờ cho @{bot} sau câu trả lời của bạn trong “{title}”",
   "server.teammates.queuedBehind.approval": "Đang chờ cho @{bot} sau phê duyệt của bạn trong “{title}”",
   "server.teammates.queuedBehind.review": "Đang chờ cho @{bot} sau phần xem xét của bạn trong “{title}”",

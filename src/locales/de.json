@@ -312,6 +312,7 @@
   "server.teammates.gotYourApproval": "{who} hat deine Freigabe bekommen",
   "server.teammates.questionAnswered": "Die Frage von {who} wurde beantwortet",
   "server.teammates.requestApproved": "Die Anfrage von {who} wurde freigegeben",
+  "server.teammates.noLongerWaiting": "{who} wartet nicht mehr auf dich",
   "server.teammates.queuedBehind.answer": "Für @{bot} hinter deiner Antwort in „{title}“ eingereiht",
   "server.teammates.queuedBehind.approval": "Für @{bot} hinter deiner Freigabe in „{title}“ eingereiht",
   "server.teammates.queuedBehind.review": "Für @{bot} hinter deiner Prüfung in „{title}“ eingereiht",
