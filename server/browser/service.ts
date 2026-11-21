@@ -297,6 +297,9 @@ export class BrowserService {
     }
     profile.reopened = { kind: "crash", pages: [] };
     profile.control.settle();
+    // A hold of a browser that is gone ends with it: the bot is not left paused for nobody, and the person's views show
+    // the browser free when it starts again.
+    if (profile.control.owner !== null) void profile.hub.handBack();
     this.#options.log?.(`browser ${profile.key}: Chrome exited unexpectedly; the next call starts it again`);
     profile.hub.stopped("crashed");
   }
