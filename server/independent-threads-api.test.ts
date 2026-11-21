@@ -257,8 +257,9 @@ describe("independent bot tasks through the isolated control surface", () => {
   it.each(["finish", "fail"] as const)("tells a delegating bot that its teammate's approval went unanswered, so the step did not run (turn ends: %s)", async (ending) => {
     const chief = (await tool("create_bot", { name: "Delegating Chief", instance_id: "claude", model: models[0] })).bot;
     const peer = (await tool("create_bot", { name: "Delegated Peer", instance_id: "claude", model: models[1] })).bot;
-    // Both at Ask: the run's conversation saves its bot's level, and the peer's new work thread opens at that level.
-    for (const bot of [chief, peer]) expect((await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask" })).status).toBe(200);
+    // The Chief stays at the default Full access: a routine run's conversation hands the peer's new work thread no level, as
+    // nobody chose one there, so the peer's own Ask holds.
+    expect((await api("PATCH", `/api/bots/${peer.id}`, { approvalMode: "ask" })).status).toBe(200);
     const routine = await api("POST", "/api/routines", {
       name: "Release checks", prompt: "Delegate the release checks to the reviewer.", botId: chief.id, enabled: false,
       schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 },

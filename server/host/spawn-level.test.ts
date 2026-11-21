@@ -112,7 +112,7 @@ describe("a thread a bot opens from a conversation takes that conversation's lev
     expect(h.own.approvalFor(h.store.bot(opener.id)!, claude(), edits)).toEqual({ from: "edits" });
   });
 
-  it("keeps the bot's level when the chat has none of its own, or the same, or is still being confirmed", () => {
+  it("keeps the bot's level when the chat has none of its own, the same, a routine run's, or one still being confirmed", () => {
     const h = host();
     const opener = botAt(h.store, "ask");
     const teammate = botAt(h.store, "edits", "Helper");
@@ -126,6 +126,11 @@ describe("a thread a bot opens from a conversation takes that conversation's lev
 
     const same = chatAt(h.store, opener, "ask");
     expect(h.own.inherited(opener.id, same)).toEqual({});
+
+    // A routine run's conversation saves its bot's level when the run opens it: nobody chose it there.
+    const run = chatAt(h.store, opener, "full");
+    h.store.patchTask(opener.id, run, { routineRunId: "run-1" });
+    expect(h.own.levelFor(h.store.bot(teammate.id)!, undefined, { botId: opener.id, threadId: run })).toBeUndefined();
 
     // The person picks Full access in that chat; the desktop is still confirming it: no Ask mask, no unconfirmed Full.
     const confirming = chatAt(h.store, opener, "full");

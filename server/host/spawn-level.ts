@@ -31,13 +31,14 @@ export function createSpawnLevel(deps: SpawnLevelDeps) {
     const ownCarries = needsAsk(own, target.modelSelection, selection) ? "ask" as const : undefined;
     const task = from && store.taskByThread(from.botId, from.threadId);
     const view = from && store.projectBotForTask(from.botId, from.threadId);
-    // No level of its own, or one the desktop is still confirming (never its Ask mask, never an unconfirmed Full), or the
-    // target's own bot-wide change pending, under which a new thread follows its bot: as before.
-    if (!from || !task || !view || view.approvalGrant || (task.approvalMode === undefined && task.autoApprove === undefined) ||
+    // No level of its own, or none a person chose (a routine run's conversation copies its bot's), or one the desktop is still
+    // confirming (never its Ask mask, never an unconfirmed Full), or the target's own bot-wide change pending, under which a
+    // new thread follows its bot: as before.
+    if (!from || !task || !view || view.approvalGrant || task.routineRunId || (task.approvalMode === undefined && task.autoApprove === undefined) ||
       (target.approvalGrant && !target.approvalGrant.threadOnly)) return ownCarries;
     const chosen = approvalModeFor(view);
     const runs = deps.sourceLevel(from.botId, from.threadId);
-    // A floor held that conversation at Ask (a guest, a Bot API key, the fence, its engine): so does what it opens, with no grants.
+    // A floor held that conversation at Ask (a guest, a Bot API key, the fence, its engine): so does what it opens.
     if (runs !== chosen) return "ask";
     // Custom is one Codex configuration the desktop alone may grant: never copied, and nothing above it comes in its place.
     const level: ApprovalMode = chosen === "custom" && (own !== "custom" || from.botId !== target.id) ? "ask" : chosen;

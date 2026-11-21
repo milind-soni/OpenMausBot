@@ -34,8 +34,7 @@ from the operator's dedicated policy.
 when the conversation has one of its own that differs from the bot's: its own
 `start_thread` (with `report_back` too), a burst's parts, and a teammate's new
 thread or work thread opened by a hand-off (`coordinate_bots`, `start_thread`
-on a teammate). A consultation (`consult: true`) acts on nothing, so its
-thread starts at the teammate's own level. It works both ways: a chat set to Full access in its composer
+on a teammate). It works both ways: a chat set to Full access in its composer
 opens Full access threads even on a bot saved at Ask, and a chat at Ask opens
 Ask threads even on a bot at Full access, so nothing a bot opens runs above
 what the person chose in that chat. The level is saved on the new thread, which
@@ -44,9 +43,12 @@ The resolver is `server/host/spawn-level.ts`.
 
 The floors stay:
 
-- **No level of its own.** A conversation without one, a room (a room keeps
-  no level, so a room job's thread starts at its bot's level), and a routine
-  run start at the bot's level as before.
+- **No level a person chose.** What a conversation without a level of its
+  own opens starts at the bot's level as before, and so does what a routine
+  run's conversation opens (it only copies its bot's level), a room job's
+  thread (a room keeps no level: room jobs open only from inside a room), a
+  consultation's thread (`consult: true` acts on nothing), and a thread an
+  external runtime's hand-off opens.
 - **Being confirmed.** A level change the desktop is still confirming never
   travels: a composer change in progress leaves the new thread at its bot's
   level, and while a bot-wide change is unconfirmed the new thread follows the
@@ -54,11 +56,11 @@ The floors stay:
 - **Engines.** The level is capped by the engine the new thread runs on, as
   an engine switch would: Auto-accept edits opens a Codex thread at Ask.
   Custom is never copied: a thread opened from a Custom chat starts at Ask,
-  unless it is the same bot, itself on Custom.
+  unless it is the same bot, itself on Custom. A bot on Custom keeps Custom
+  in the threads opened on it, whatever the chat handing it work is set to.
 - **A turn held at Ask opens Ask threads.** A guest's turn on a Cloud, a Bot
   API key's thread, a fenced proactive turn, or an engine that cannot run the
-  level opens its threads at Ask, with no saved grants. A Bot API thread itself
-  stays at Ask.
+  level opens its threads at Ask. A Bot API thread itself stays at Ask.
 - **No raise without the right to set it.** Only someone who may set a level
   there can carry one above the bot's: on a Cloud only its owner, never work
   from outside (a webhook, an app event), and on a hosted company workspace
