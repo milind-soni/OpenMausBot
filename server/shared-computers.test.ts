@@ -630,3 +630,26 @@ describe("MCP servers a lent computer runs for this server", () => {
     await closed;
   });
 });
+
+describe("the computer the person types on", () => {
+  it("is the online computer lent by the session that sent the line, put first; no other session or person sees it", async () => {
+    vi.useFakeTimers({ now: Date.now() });
+    const dir = mkdtempSync(join(tmpdir(), "omb-typing-on-"));
+    const broker = new SharedComputers(() => true, new LentComputers(join(dir, "lent.json")));
+    const pc = { ...registration(), name: "WIN-1", platform: "win32" as const };
+    const laptop = { ...registration(), name: "UBUNTU-1", platform: "linux" as const };
+    broker.register(pc, { session: "pc", person: alice.person }, secret);
+    await vi.advanceTimersByTimeAsync(1_000);
+    broker.register(laptop, { session: "laptop", person: alice.person }, other);
+    const typing = (session?: string) => broker.known(alice.person, session).map(computer => [computer.name, computer.typing === true]);
+    expect(typing()).toEqual([["UBUNTU-1", false], ["WIN-1", false]]);
+    expect(typing("pc")).toEqual([["WIN-1", true], ["UBUNTU-1", false]]);
+    expect(typing("laptop")).toEqual([["UBUNTU-1", true], ["WIN-1", false]]);
+    expect(typing("phone")).toEqual([["UBUNTU-1", false], ["WIN-1", false]]);
+    expect(broker.known(bob.person, "pc")).toEqual([]);
+    await vi.advanceTimersByTimeAsync(40_001);
+    expect(typing("pc")).toEqual([["UBUNTU-1", false], ["WIN-1", false]]);
+    broker.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
