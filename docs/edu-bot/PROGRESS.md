@@ -6,8 +6,8 @@ Hecho = verificado. Cada línea dice cómo se probó.
 
 | Hito | Qué es | Estado |
 | --- | --- | --- |
-| M0 | El repo instala, compila y pasa tests en Linux | En curso |
-| M1 | Nombre Edu Bot, licencias, sin telemetría, sin `enterprise/` | En pausa hasta cerrar M0 (plan listo) |
+| M0 | El repo instala, compila y pasa tests en Linux | Hecho (PR #1, 21-11) |
+| M1 | Nombre Edu Bot, licencias, sin telemetría, sin `enterprise/` | En curso |
 | M2 | Memoria Edu en cada bot, con aprobaciones | Pendiente |
 | M3 | Organización, áreas y bots en archivos | Pendiente |
 | M4 | Conector SQL, permisos por bot, registro de auditoría | Pendiente |
@@ -39,15 +39,16 @@ Hecho = verificado. Cada línea dice cómo se probó.
 - [x] La app abre en Linux (Omarchy, Wayland), con HOME y datos temporales, sin tocar datos reales.
   Ventana "MausBot". Se pasó la bienvenida con clic y cargó la pantalla principal.
   Cero errores en los logs. Capturas y logs en `~/Projects/edu-bot-wt/reports/m0-shots/`.
-- [ ] Auditoría de otro proveedor. Grok, ronda 1: pidió 3 arreglos (estado de M1, explicación de fallos,
-  prueba de apertura). Hechos. Ronda 2 en curso.
+- [x] Auditoría de otro proveedor (Grok). Ronda 1: pidió 3 arreglos (estado de M1, explicación de fallos,
+  prueba de apertura). Ronda 2: PASS. Reportes en `~/Projects/edu-bot-wt/reports/grok-m0-audit-v*.md`.
+- [x] CI verde en el último commit (34 checks). PR #1 fusionado.
 
 ## Cómo trabajamos
 
 - Regla de memoria (12 GB): máximo 2 agentes a la vez, el líder y 1 trabajador.
   Auditorías de Grok y Agy, una después de la otra. Build y tests en primer plano con 4 GB.
 - El 21-11 a las 00:39 el sistema cortó todo por memoria. Se perdió el avance de Codex, Grok y Agy.
-  Su trabajo quedó guardado en sus carpetas. M1 queda en pausa hasta cerrar M0.
+  Su trabajo quedó guardado en sus carpetas. M1 sigue ahora, un agente a la vez.
 - Cerré 7 agentes inactivos de otros proyectos para liberar memoria. Sus sesiones se pueden reabrir:
   la lista está en `~/Projects/edu-bot-wt/reports/closed-idle-agents.txt`.
 
@@ -70,6 +71,14 @@ Hecho = verificado. Cada línea dice cómo se probó.
 - Desactivé 18 workflows de upstream (Release, Docker, Promote to stable, npm, etc.).
   No aplican aún o fallarían por secretos que no tenemos. Se reactivan en M5 con
   `gh workflow enable <nombre>` cuando estén adaptados a Edu Bot.
+
+## Tests inestables vistos en CI (upstream)
+
+Fallan a veces y pasan al re-correr. No vienen de nuestros cambios.
+- `server/env-path.test.ts` (Linux): carrera con un proceso en segundo plano.
+- `server/long-running-chief.e2e.test.ts` (Linux y Windows): 2 tests distintos.
+- `server/room-roots.e2e.test.ts` (Windows): reinicio de un turno.
+Se sumaron a `scripts/testing/ci-retry-list.json`: 2 reintentos solo en CI. Si siguen, hay que arreglarlos.
 
 ## Para el lanzamiento (M5)
 

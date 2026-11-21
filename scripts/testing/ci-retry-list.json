@@ -63,6 +63,34 @@
       "owner": "milind-soni",
       "reason": "Failed 11 times since Oct 26 in browser driver S4 (ubuntu-latest), on the host and in the container; five of the six logged failures are one stall of about 50 s in which navigate through tab-new get no picture. Not reproduced in 72 runs on ubuntu-latest on Oct 29. Each attempt starts its own Chrome.",
       "since": "2026-10-29"
+    },
+    {
+      "file": "server/env-path.test.ts",
+      "test": "augmentedPath > stops reading once the login shell's answer is complete, ignoring a background job's later output",
+      "owner": "EduardoMoraga",
+      "reason": "Ubuntu shard 8/8 of https://github.com/EduardoMoraga/edu-bot/actions/runs/44901128853: the unread background job exited 0; same commit green on re-run.",
+      "since": "2026-11-21"
+    },
+    {
+      "file": "server/long-running-chief.e2e.test.ts",
+      "test": "tells the Chief what happened to each approval: allowed or denied, and parks a hand-off on the person when nobody answered",
+      "owner": "EduardoMoraga",
+      "reason": "Ubuntu shard 5/8 of https://github.com/EduardoMoraga/edu-bot/actions/runs/44901128853: done notification lacked APPROVALS-FINAL; same commit green on re-run.",
+      "since": "2026-11-21"
+    },
+    {
+      "file": "server/long-running-chief.e2e.test.ts",
+      "test": "holds a teammate's screen call while another job has the computer, and both jobs finish",
+      "owner": "EduardoMoraga",
+      "reason": "Windows shard 8/8 of https://github.com/EduardoMoraga/edu-bot/actions/runs/44904448436; same commit green on re-run.",
+      "since": "2026-11-21"
+    },
+    {
+      "file": "server/room-roots.e2e.test.ts",
+      "test": "R6 reruns a member's cut turn once after a restart, in place, with the restart note and the member's resuming chip",
+      "owner": "EduardoMoraga",
+      "reason": "Windows shard 1/8 of https://github.com/EduardoMoraga/edu-bot/actions/runs/44904448436; same commit green on re-run.",
+      "since": "2026-11-21"
     }
   ]
 }
