@@ -113,7 +113,8 @@ describe("a step the bot handed to the person", () => {
       await show([row("m1", handoff({ need: "sign_in", site: "github.com", url: "https://github.com/" }))], 0, { browserEngine: { cookieImport: true } });
       expect(offer).toHaveBeenCalledWith({ botId: "scout", threadId: null, site: "github.com" });
       await act(async () => button("Use my sign-in from my own browser")!.click());
-      await act(async () => { await new Promise((done) => setTimeout(done, 0)); });
+      // The dialog's code loads on its first open.
+      await vi.waitFor(async () => { await act(async () => { await new Promise((done) => setTimeout(done, 0)); }); expect(container.querySelector("dialog form")).not.toBeNull(); });
       await act(async () => { container.querySelector<HTMLFormElement>('dialog form')!.requestSubmit(); await new Promise((done) => setTimeout(done, 0)); });
       expect(importIt).toHaveBeenCalledWith({ botId: "scout", threadId: null, site: "github.com", source: "chrome", profile: "Default" });
       expect(calls.find((call) => call.url.endsWith("/sign-in-cards/m1/done"))?.body).toEqual({ threadId: "t1", note: "imported the person's sign-in for github.com from their own Chrome" });

@@ -6,6 +6,8 @@ import { t } from "@/lib/i18n";
 import { Select } from "../Select";
 import type { LocaleKey } from "@/locales";
 
+export { cookieImportAvailable, siteOfAddress } from "./cookie-import";
+
 const button = "rounded-md p-1.5 text-ink-secondary hover:bg-inset hover:text-ink";
 const field = "w-full rounded-lg bg-inset px-3 py-2 text-[13px] outline-none focus:ring-1 focus:ring-accent disabled:opacity-60";
 
@@ -22,16 +24,6 @@ const REASONS: Record<string, LocaleKey> = {
   "no-destination": "browser.cookieImport.reason.noDestination",
 };
 
-/** The site a page address belongs to, for the form to start from; empty for anything but a web page. */
-export function siteOfAddress(address: string): string {
-  try {
-    const url = new URL(address);
-    return url.protocol === "https:" || url.protocol === "http:" ? url.hostname.replace(/^www\./u, "") : "";
-  } catch {
-    return "";
-  }
-}
-
 /** The site an import takes, as the server reads it: the registrable domain of what was typed. */
 export function importedSite(typed: string): string {
   const text = typed.trim().toLowerCase();
@@ -41,11 +33,6 @@ export function importedSite(typed: string): string {
     try { host = new URL(text).hostname; } catch { return text; }
   }
   return loginSite(host);
-}
-
-/** Whether this app can import a sign-in for a bot here: the desktop app, with the server's import ready. */
-export function cookieImportAvailable(config: { browserEngine?: { cookieImport?: true } } | null | undefined): boolean {
-  return config?.browserEngine?.cookieImport === true && Boolean(window.ogb?.browserCookies);
 }
 
 /**
