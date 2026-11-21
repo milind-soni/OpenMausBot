@@ -141,9 +141,10 @@ export function createActingPeople(deps: ActingPeopleDeps) {
     requester,
     /** Work this turn hands on now acts for whoever this turn acts for; the first hand-on of a turn that started its
      * work is kept for that turn too, so it still acts for them if a restart runs it again. `lends`: this turn could use
-     * the person's lent computer (cloud-lending-turns handsOnLending). */
-    handOn(turn: { threadId: string; generation: string }, work: { id: string; rootId: string }, lends = false): void {
-      const person = requester(turn.threadId, turn.generation);
+     * the person's lent computer (cloud-lending-turns handsOnLending). `lender`: whom work that `lends` acts for when no
+     * person's own line names one (the desktop app's own window on a server of one person's own). */
+    handOn(turn: { threadId: string; generation: string }, work: { id: string; rootId: string }, lends = false, lender?: string): void {
+      const person = requester(turn.threadId, turn.generation) ?? (lends ? lender ?? null : null);
       deps.handed.record(work.id, person, lends);
       if (work.rootId === turn.generation) deps.handed.record(work.rootId, person, lends);
     },
