@@ -60,6 +60,12 @@ user-initiated XDG portal capture path and is not a control provider. This rule
 does not replace remote/cloud boats or the isolated Local VM provider. Local
 alternatives evaluated and rejected:
 
+On macOS, **Settings → Desktops & browser → Show the agent cursor** lets you
+turn off the bundled driver's cursor overlay if it interferes with wallpaper or
+other apps that pause when the screen is covered. Restart OpenMausBot to apply
+the choice. With the overlay off, tools that require the drawn agent cursor are
+unavailable. The setting applies to OpenMausBot's embedded driver.
+
 The Ubuntu GNOME beta uses the same official CUA provider with the Phase 5
 supply-chain contract tracked in [#113](https://github.com/milind-soni/OpenMausBot/issues/113): pinned archive
 and inner hashes, exact archive allowlist, outside-ASAR resources, full notices/SBOM, no runtime download/update,

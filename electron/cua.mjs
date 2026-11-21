@@ -51,6 +51,7 @@ const WIN_INSTALLED_DRIVERS = [
   path.join(app.getPath("home"), "AppData", "Local", "Programs", "CuaDriver", "cua-driver.exe"),
 ];
 let embeddedHost = null;
+let desktopPrefs = null;
 let embeddedGeneration = null;
 let startupAbort = null;
 /** On Windows a start that failed for a reason that passes (a slow first start while the system scans the new helper)
@@ -292,7 +293,7 @@ async function startEmbedded(binary, signal) {
     dangerouslyBypassApprovals: false,
     environment: [],
     inheritStderr: true,
-    noOverlay: false,
+    noOverlay: process.platform === "darwin" && desktopPrefs?.agentCursorOverlay() === false,
     captureStderr: false,
   });
   try {
@@ -516,7 +517,15 @@ export async function requestComputerUse() {
   return (await ensureLinuxRuntime()).getStatus();
 }
 
-export function registerCuaIpc() {
+export function registerCuaIpc({ desktopPrefs: prefs = null } = {}) {
+  desktopPrefs = prefs;
+  if (process.platform === "darwin" && prefs) {
+    ipcMain.handle("cua:agent-cursor-overlay", localOnly("cua:agent-cursor-overlay", () => prefs.agentCursorOverlay()));
+    ipcMain.handle("cua:set-agent-cursor-overlay", localOnly("cua:set-agent-cursor-overlay", (_, enabled) => {
+      prefs.setAgentCursorOverlay(enabled);
+      return prefs.agentCursorOverlay();
+    }));
+  }
   ipcMain.handle("cua:connection", localOnly("cua:connection", () => connectionStore.get()));
   ipcMain.handle("cua:permissions", localOnly("cua:permissions", () => cuaPermissionsStatus()));
   ipcMain.handle("cua:linux-status", localOnly("cua:linux-status", async () =>

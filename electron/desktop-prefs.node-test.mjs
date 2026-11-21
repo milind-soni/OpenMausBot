@@ -450,6 +450,27 @@ test("the window draws its own frame until the person turns it off, and the choi
   assert.equal(createDesktopPrefs({ read: () => ({ windowFrame: "no" }), write: () => {} }).windowFrame(), true);
 });
 
+test("the agent cursor preference survives unrelated writes, and a failed save keeps the last choice", () => {
+  let saved = { agentCursorOverlay: false, analytics: false };
+  let writable = true;
+  const file = {
+    read: () => saved,
+    write: value => {
+      if (!writable) throw new Error("disk full");
+      saved = structuredClone(value);
+    },
+  };
+  const prefs = createDesktopPrefs(file);
+  prefs.setLanguage("en");
+  assert.equal(createDesktopPrefs(file).agentCursorOverlay(), false);
+  assert.equal(saved.analytics, false);
+
+  writable = false;
+  assert.throws(() => prefs.setAgentCursorOverlay(true), /disk full/);
+  assert.equal(prefs.agentCursorOverlay(), false);
+  assert.equal(saved.agentCursorOverlay, false);
+});
+
 test("Settings reads and changes the window's frame on any page of the window; on Windows the change waits for a restart", async () => {
   const prefs = createDesktopPrefs({ read: () => null, write: () => {} });
   const handlers = new Map();

@@ -70,6 +70,7 @@ function parse(raw) {
     ...(isTalkKey(record.talkKey) ? { talkKey: record.talkKey } : {}),
     ...(typeof record.railHidden === "boolean" ? { railHidden: record.railHidden } : {}),
     ...(typeof record.windowFrame === "boolean" ? { windowFrame: record.windowFrame } : {}),
+    ...(typeof record.agentCursorOverlay === "boolean" ? { agentCursorOverlay: record.agentCursorOverlay } : {}),
     ...(Object.keys(quickAsks).length ? { quickAsks } : {}) };
 }
 
@@ -153,6 +154,15 @@ export function createDesktopPrefs({ read, write }) {
     setRailHidden(hidden) {
       const railHidden = hidden === true;
       if ((current().railHidden === true) !== railHidden) save({ ...current(), railHidden });
+    },
+    agentCursorOverlay: () => current().agentCursorOverlay !== false,
+    setAgentCursorOverlay(enabled) {
+      if (typeof enabled !== "boolean") throw new TypeError("Agent cursor preference must be a boolean");
+      const saved = current();
+      if ((saved.agentCursorOverlay !== false) === enabled) return;
+      const next = { ...saved, agentCursorOverlay: enabled };
+      write(next);
+      record = next;
     },
     /** The window draws its own frame until the person turns it off. */
     windowFrame: () => current().windowFrame !== false,

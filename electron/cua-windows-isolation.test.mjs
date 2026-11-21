@@ -47,6 +47,8 @@ afterEach(async () => {
 
 describe("Windows owned CUA host", () => {
   it("uses embedded control even in dev, without a shared pipe or macOS permissions", async () => {
+    cua.registerCuaIpc({ desktopPrefs: { agentCursorOverlay: () => false } });
+    expect(fixture.handlers.has("cua:agent-cursor-overlay")).toBe(false);
     await expect(cua.startCua()).resolves.toMatchObject({
       mode: "embedded", ...connection,
       mcpArgs: ["mcp", "--embedded", "--socket", connection.socketPath],
@@ -54,6 +56,7 @@ describe("Windows owned CUA host", () => {
     });
     expect(fixture.start.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
     expect(fixture.hosts[0].binary).toBe(process.env.CUA_DRIVER_PATH);
+    expect(fixture.hosts[0].options.noOverlay).toBe(false);
     await cua.stopCua();
     expect(fixture.hosts[0].stop).toHaveBeenCalledOnce();
     expect(fixture.hosts[0].uniffiDestroy).toHaveBeenCalledOnce();

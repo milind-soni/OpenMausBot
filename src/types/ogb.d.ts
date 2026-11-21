@@ -405,6 +405,7 @@ const __APP_VERSION__: string;
         /** From the person's click on another server's page. */
         set(on: boolean): Promise<import("../../electron/desktop-prefs.mjs").WindowFrameState>;
       };
+      agentCursorOverlay?: { get(): Promise<boolean>; set(enabled: boolean): Promise<boolean> };
       /** The renderer-drawn Windows caption buttons; absent outside the
        * frameless Windows shell (macOS/Linux/browser keep native chrome). */
       windowControls?: {

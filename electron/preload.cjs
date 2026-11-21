@@ -323,6 +323,12 @@ const bridge = {
     disable: () => ipcRenderer.invoke("cua:linux-disable"),
     retry: () => ipcRenderer.invoke("cua:linux-retry"),
   },
+  ...(process.platform === "darwin" ? {
+    agentCursorOverlay: {
+      get: () => ipcRenderer.invoke("cua:agent-cursor-overlay"),
+      set: (enabled) => ipcRenderer.invoke("cua:set-agent-cursor-overlay", enabled),
+    },
+  } : {}),
   /** Arms exactly one display-media request from the current renderer frame. */
   beginScreenPreviewIntent: () => ipcRenderer.sendSync("screen:preview-intent"),
   screenFrame: () => ipcRenderer.invoke("screen:frame"),

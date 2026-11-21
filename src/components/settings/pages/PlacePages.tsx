@@ -6,6 +6,7 @@ import { skillsLibraryEnabled } from "@/lib/feature-flags";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { useTeamPeople } from "@/state/team-people";
 import { AdminOnly } from "../../AdminOnly";
+import { AgentCursorOverlayRow } from "../../AgentCursorOverlayRow";
 import { AutomaticRecoverySettings } from "../../AutomaticRecoverySettings";
 import { AwayEmailsSetting } from "../../AwayEmailsSetting";
 import { PausedBotsButton } from "../../AwakeBotsPicker";
@@ -184,7 +185,7 @@ export function DesktopsPage() {
     <SettingsGroup label={t("settings.desktops.browserSection")} block="browser">
       <SettingsRows><BuiltInBrowserRow /><ServerSitesRow /><BrowserProxyRow />{ctx.advanced && <div data-settings-block="new-browser" className="contents"><NewBrowserSettings /></div>}</SettingsRows>
     </SettingsGroup>
-    <AdminOnly><DesktopKinds /></AdminOnly>
+    <AdminOnly><DesktopKinds />{ctx.here && <AgentCursorOverlayRow />}</AdminOnly>
     <BrowserProfilesRow />
     {ctx.advanced && (
       <AdminOnly>

@@ -4,6 +4,7 @@ import os, { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createDesktopPrefs, jsonFile } from "./desktop-prefs.mjs";
 
 const fixture = vi.hoisted(() => ({ home: "", script: "", socketReady: false, children: [], calls: [], embeddedDelays: [], hosts: [], hostOptions: [], handlers: new Map() }));
 vi.mock("electron", () => ({ app: { isPackaged: false, getPath: () => fixture.home }, ipcMain: { handle: (name, handler) => fixture.handlers.set(name, handler) } }));
@@ -111,6 +112,34 @@ describe.skipIf(process.platform !== "darwin")("async standalone CUA launch (iso
       expect(ticks).toBeGreaterThan(2);
       expect(fixture.calls[0]).toMatchObject({ command: "/usr/bin/open", args: ["-a", "CuaDriver"], options: { timeout: 8_000, killSignal: "SIGKILL" } });
     } finally { clearInterval(timer); }
+  });
+
+  it("keeps the embedded cursor on by default and honors a saved local opt-out on its next start", async () => {
+    const preferenceFile = jsonFile(join(fixture.home, "desktop-prefs.json"));
+    cua.registerCuaIpc({ desktopPrefs: createDesktopPrefs(preferenceFile) });
+    const state = fixture.handlers.get("cua:agent-cursor-overlay");
+    const set = fixture.handlers.get("cua:set-agent-cursor-overlay");
+    const local = { senderFrame: { url: "http://127.0.0.1:19777/" } };
+    const remote = { senderFrame: { url: "https://remote.example/" } };
+
+    fixture.embeddedDelays = [1, 1, 1];
+    await expect(cua.startCua()).resolves.toMatchObject({ mode: "embedded" });
+    expect(fixture.hostOptions[0].noOverlay).toBe(false);
+    expect(state(local)).toBe(true);
+    expect(() => set(remote, false)).toThrow(/local server/);
+    expect(() => set(local, "false")).toThrow(/boolean/);
+    expect(set(local, false)).toBe(false);
+    expect(state(local)).toBe(false);
+    expect(fixture.hostOptions).toHaveLength(1);
+    expect(createDesktopPrefs(preferenceFile).agentCursorOverlay()).toBe(false);
+
+    await cua.stopCua();
+    await expect(cua.startCua()).resolves.toMatchObject({ mode: "embedded" });
+    expect(fixture.hostOptions[1].noOverlay).toBe(true);
+    expect(set(local, true)).toBe(true);
+    await cua.stopCua();
+    await expect(cua.startCua()).resolves.toMatchObject({ mode: "embedded" });
+    expect(fixture.hostOptions[2].noOverlay).toBe(false);
   });
 
   it("keeps the embedded and fallback launch failures visible", async () => {
