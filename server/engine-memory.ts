@@ -605,8 +605,6 @@ export class EngineMemory {
    * memory below the critical line, when the Admin's restart that follows would stop it and everything else. */
   tick(): void {
     try { this.idleSweep?.(); } catch (error) { this.log(`idle sweep failed: ${error instanceof Error ? error.message : String(error)}`); }
-    // Watched while an engine or a bot's browser runs; with neither, the next engine starts the watch again.
-    if (!this.engines.size && !this.browsersRunning()) { if (this.timer) { clearInterval(this.timer); this.timer = null; } return; }
     const memory = this.read();
     if (!memory) return;
     if ((memory.fullStall10 ?? 0) >= STALL_PERCENT) this.ledger.note(this.now(), "stalled");
@@ -614,6 +612,9 @@ export class EngineMemory {
     if (this.kernelKilled(memory.oomKills)) return;
     const free = this.free(memory), count = this.busy();
     if (free < this.floor(memory)) for (const threadId of this.active) this.pressure.set(threadId, Math.max(this.pressure.get(threadId) ?? 1, count));
+    // Short memory is noted against the running turns above on every look. Relief, and the watch itself, only while an
+    // engine or a bot's browser runs; with neither, the next engine starts the watch again.
+    if (!this.engines.size && !this.browsersRunning()) { if (this.timer) { clearInterval(this.timer); this.timer = null; } return; }
     // Memory available, not counting swap: a home with gigabytes of swap free thrashes all the same (Nov 2026: memory
     // available 0–100 MB, the stall at 40–98%, with 1.8–3.9 GB of swap free).
     const thrashing = (memory.fullStall10 ?? 0) >= THRASH_PERCENT && memory.availableBytes < this.floor(memory);
