@@ -90,6 +90,8 @@ export interface BotPatchRouteDeps {
   chiefChanged?(changed: readonly BotRecord[]): void;
   /** The bots of the turns now running, each with the grants its turn reads. */
   turnBots?: { values(): Iterable<BotRecord> };
+  /** A bot's model changed, from `before` to `after`, seen in `threadId` (host/no-terminal.ts says there what it takes away). */
+  modelSwitched?(botId: string, threadId: string, before: ModelSelection, after: ModelSelection, routinesFollow: boolean): void;
 }
 
 export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
@@ -713,6 +715,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       if (computerSpecified && requestedComputer !== undefined) store.clearAutoSurfacePins(m[1], requestedComputer);
       if (normalizedSelection && movedTask) store.patchTask(bot.id, movedTask.threadId, { modelSelection: undefined,
         ...hostedModels?.resetTask(movedTask.modelSelection, normalizedSelection) });
+      if (normalizedSelection && existingBot) deps.modelSwitched?.(bot.id, movedTask?.threadId ?? existingBot.threadId, movedTask?.modelSelection ?? existingBot.modelSelection, normalizedSelection, true);
       if (existingBot) {
         settleBrowserChange(bot, { browserProfile: beforeBrowserProfile, browser: beforeBrowserEnabled }, { closeForBot: (id) => browserLive.closeForBot(id), forgetTemporaryBrowser });
       }
