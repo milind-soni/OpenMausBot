@@ -94,6 +94,14 @@ describe("the preview", () => {
     expect(previewGrokMove(bots(DESK), facts({ bots: [{ id: "other", name: "Desk" }] })).plans[0]!.addedAs).toBe("Desk 2");
   });
 
+  it("still knows a Bot moved before when it words its instructions differently the second time", () => {
+    const first = previewGrokMove(bots(DESK), facts()).plans[0]!;
+    const reworded = { ...DESK, instructions: `${DESK.instructions} Reworded on the second export.` };
+    const again = previewGrokMove(bots(reworded), facts({ bots: [{ id: "here-Desk", name: "Desk", installedPackage: { id: first.packageId, name: "Desk" } as never }] }));
+    expect(again.plans).toEqual([]);
+    expect(again.moved).toEqual([{ name: "Desk", botId: "here-Desk" }]);
+  });
+
   it("a Bot moved before gets its chat on a second move, into the bot already here, and nothing else is imported", async () => {
     const first = previewGrokMove(bots(DESK), facts()).plans[0]!;
     fixture.history = { messages: 214 };

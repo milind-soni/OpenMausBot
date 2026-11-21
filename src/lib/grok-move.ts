@@ -126,10 +126,13 @@ export interface GrokPreviewFacts {
 const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 /** The bot added from a Bot whose setup is no longer waiting: an installed bot that carries the Bot's name. */
 const movedEarlier = (bots: GrokPreviewFacts["bots"], grokName: string) => bots.find((bot) => bot.installedPackage && sameName(bot.name, grokName));
+/** A Bot moved before, found by its name: the id's hash also covers the instructions, which a Bot words a little
+ * differently each time it writes its setup down. */
+const movedKey = (packageId: string) => packageId.replace(/-[0-9a-f]{6}$/, "");
 
 /** The whole plan, nothing written. A Bot already moved or that can't be read is named, and costs the others nothing. */
 export function previewGrokMove(bots: readonly GrokBot[], facts: GrokPreviewFacts): GrokPreview {
-  const installed = new Map(facts.bots.flatMap((bot) => bot.installedPackage ? [[bot.installedPackage.id, bot.id] as const] : []));
+  const installed = new Map(facts.bots.flatMap((bot) => bot.installedPackage ? [[movedKey(bot.installedPackage.id), bot.id] as const] : []));
   const names = new Set(facts.bots.map((bot) => bot.name.trim().toLowerCase()));
   const servers = new Set(facts.servers);
   const preview: GrokPreview = { plans: [], moved: [], unreadable: [], noSetup: [] };
@@ -141,7 +144,7 @@ export function previewGrokMove(bots: readonly GrokBot[], facts: GrokPreviewFact
   for (const bot of bots) {
     try {
       const plan = grokMovePlan(bot, { timeZone: facts.timeZone, takenServers: servers });
-      const here = installed.get(plan.packageId);
+      const here = installed.get(movedKey(plan.packageId));
       if (here) {
         preview.moved.push({ name: plan.name, botId: here, ...(plan.handover ? { handover: plan.handover } : {}), ...waiting(plan.name) });
         continue;
