@@ -147,7 +147,7 @@ export function createAskCards(deps: AskCardsDeps) {
   /** The same card waits again (the person went back to its branch): its chip says so again, on the same line. */
   function reopenWaitingOnCardChip(threadId: string, cardMessageId: string) {
     const chip = waitingCardChips.get(`${threadId}:${cardMessageId}`);
-    if (!chip?.settled) return;
+    if (!chip?.settled || deps.keptPrivate(threadId, chip.threadId)) return;
     chip.settled = false;
     const existing = store.messagesFor(chip.threadId).find((message) => message.id === chip.messageId);
     if (!existing?.tool) return;

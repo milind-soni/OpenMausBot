@@ -436,6 +436,16 @@ describe("the chip in the conversation that handed the work on", () => {
     expect(team.rows("inbox")).toEqual([]);
   });
 
+  it("leaves a settled chip settled when its conversation has since become private to someone else", () => {
+    const privateThreads: string[] = [];
+    const team = world({ privateThreads });
+    team.cards.showWaitingOnCardChip("work", { kind: "sign-in", messageId: "c1", label: "example.com" }, asker);
+    team.cards.settleWaitingOnCardChip("work", "c1");
+    privateThreads.push("work");
+    team.cards.reopenWaitingOnCardChip("work", "c1");
+    expect(team.rows("inbox")[0]!.tool).toMatchObject({ name: "@Ledger no longer waits on you", ok: true });
+  });
+
   it("leaves a card's chip out of the person's inbox, which has the card, and out of work nobody handed on", () => {
     const team = world({ inboxThread: "inbox" });
     team.cards.showWaitingOnCardChip("work", { kind: "password", messageId: "c1", label: "API key" }, asker);
