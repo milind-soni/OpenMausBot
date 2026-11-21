@@ -62,9 +62,10 @@ export function ephemeralWorkspaceTokenPath(path: string): boolean {
   return /^(?:hook-tokens(?:\/|$)|sessions\.json\.open$)/.test(path);
 }
 
-/** Not a consistent snapshot while the engine holds it open (unflushed WAL), and reloadable from its sources. */
-export function liveDataEnginePath(path: string): boolean {
-  return /^bots\/[^/]+\/(?:data\.duckdb(?:\.wal)?$|data-tmp(?:\/|$))/.test(path);
+/** DuckDB's spill folder for a bot's Data tables: scratch space for one query, emptied when the database closes. The
+ * database itself (data.duckdb) goes, taken at rest (workspace-backup-databases.ts). */
+export function dataEngineSpillPath(path: string): boolean {
+  return /^bots\/[^/]+\/data-tmp(?:\/|$)/.test(path);
 }
 
 /** Read the link text, never follow it. A link points at the bot's own skill, or at the same-named skill brought in

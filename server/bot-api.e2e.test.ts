@@ -68,7 +68,8 @@ it("answers the card's own curl with the bot's reply, and refuses a wrong key, a
   // The app shows the thread as the API's, with what the caller asked and what the bot said.
   const bots = (await api("GET", "/api/bots")).bots as any[];
   const task = bots.find((candidate) => candidate.id === bot.id).tasks.find((candidate: any) => candidate.threadId === answered.thread);
-  expect(task).toMatchObject({ botApi: true, title: "Hello! What can you do?" });
+  // At Ask, though the bot is at the default Full access: an API thread never takes a level from anywhere.
+  expect(task).toMatchObject({ botApi: true, title: "Hello! What can you do?", approvalMode: "ask" });
   const lines = (await api("GET", `/api/threads/${answered.thread}/messages`)).messages as any[];
   expect(lines.find((line) => line.role === "user")).toMatchObject({ text: "Hello! What can you do?", via: "api" });
   expect(lines.filter((line) => line.role === "bot" && line.kind === "text").map((line) => line.text)).toEqual(["hello from fake claude"]);

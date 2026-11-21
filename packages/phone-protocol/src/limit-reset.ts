@@ -57,6 +57,9 @@ export interface EngineLimit {
   meter?: string;
   /** Every window the engine reported, in the engine's order. A server that predates it sends only the deciding window above. */
   windows?: LimitWindowUsage[];
+  /** When these windows were read, when that is before the report's checkedAt: the latest read failed and this is the
+   * reading before it. Absent when the windows are from the latest read. */
+  checkedAt?: number;
 }
 
 export interface EngineLimitsReport {

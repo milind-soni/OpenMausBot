@@ -15,6 +15,7 @@ import type { HostTurnResult } from "../coordinator.ts";
 import type { WorkOrigin } from "../peer-provenance.ts";
 import { serverLine, type ServerLineKey } from "../server-lines.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
+import type { NewThreadLevel } from "../task-record.ts";
 
 const INBOX_TEXT_MAX = 2_000;
 const CARD_LINE: Record<BurstPhase, ServerLineKey> = {
@@ -52,7 +53,8 @@ export interface BurstHostDeps {
   opened(threadId: string, parentThreadId: string): void;
   /** Whom this request came from, in the record's words, for what a turn may reach. */
   origin(burst: BurstRecord): WorkOrigin;
-  approval(bot: BotRecord, selection: ModelSelection): "ask" | undefined;
+  /** The level a child opened from `fromThreadId` on `selection` starts at (spawn-level.ts). */
+  approval(bot: BotRecord, selection: ModelSelection, fromThreadId: string): NewThreadLevel | undefined;
   /** The model a burst defaults to: the bot's own engine's fast model, or the model of the chat that asked. */
   defaultModel(bot: BotRecord, threadId: string): ModelSelection;
   modelName(selection: ModelSelection): string;
@@ -81,7 +83,7 @@ export function createBurstHost(deps: BurstHostDeps): BurstManager & { model(bot
       const bot = store.bot(burst.botId);
       if (!bot) return null;
       const task = store.createTask(bot.id, child.title, false, undefined,
-        { botId: bot.id, name: bot.name, threadId: burst.threadId, burstId: burst.id, at: Date.now() }, deps.approval(bot, burst.model), burst.model);
+        { botId: bot.id, name: bot.name, threadId: burst.threadId, burstId: burst.id, at: Date.now() }, deps.approval(bot, burst.model, burst.threadId), burst.model);
       if (!task) return null;
       deps.opened(task.threadId, burst.threadId);
       return task.threadId;
