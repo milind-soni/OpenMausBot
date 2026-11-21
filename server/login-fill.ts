@@ -305,8 +305,12 @@ function listed(logins: Array<LoginPlace & { username: string }>): string {
   return `Your saved logins: ${shown.join(", ")}${logins.length > shown.length ? ` and ${logins.length - shown.length} more` : ""}.`;
 }
 
+function hasUsername(login: FillCandidate): boolean {
+  return login.username.trim() !== "";
+}
+
 function usernames(logins: FillCandidate[]): string {
-  const named = logins.map((login) => login.username).filter(Boolean);
+  const named = logins.filter(hasUsername).map((login) => login.username);
   const blank = logins.length - named.length;
   if (!blank) return `${named.join(", ")}.`;
   return `${[...named, `${blank} with no username saved`].join(", ")}. A login with no username can't be chosen by name: ask the person to add its username where it is saved (Settings → Vault, or the password manager it comes from), or call request_sign_in so the person signs in.`;
@@ -392,11 +396,13 @@ export async function fillLogin(input: FillLoginInput, deps: FillLoginDeps): Pro
   if (wanted) {
     chosen = all.filter((login) => login.username.toLowerCase() === wanted.toLowerCase());
     if (!chosen.length) {
-      return { ok: false, host: pageHost, text: `No saved login for ${pageHost} has the username ${JSON.stringify(wanted)}. The usernames saved there: ${usernames(all)}` };
+      const onlyBlank = all.length === 1 && !hasUsername(all[0]!) ? " Or call fill_login again without a username to use that one login." : "";
+      return { ok: false, host: pageHost, text: `No saved login for ${pageHost} has the username ${JSON.stringify(wanted)}. The usernames saved there: ${usernames(all)}${onlyBlank}` };
     }
   }
   if (chosen.length > 1) {
-    return { ok: false, host: pageHost, text: `There are ${chosen.length} saved logins for ${pageHost}: ${usernames(chosen)} Call fill_login again with the username to use.` };
+    const byName = chosen.some(hasUsername) ? " Call fill_login again with the username to use." : "";
+    return { ok: false, host: pageHost, text: `There are ${chosen.length} saved logins for ${pageHost}: ${usernames(chosen)}${byName}` };
   }
   const login = chosen[0]!;
   if (!loginOriginCheck(pageUrl, login).ok) {
