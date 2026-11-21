@@ -7,10 +7,10 @@ import { conversationLanguage, serverLine, type ServerLineKey } from "../server-
 import type { Store } from "../store.ts";
 import type { StarterAwake } from "./starter-awake.ts";
 
-/** The owner's choice (off): while a routine's bot stays paused, only the routine's own turns pass in its conversation, not
+/** The owner's choice (on): while a routine's bot stays paused, only the routine's own turns pass in its conversation, not
  * a person's new message there (starter-caps.ts), and a run started by hand of a switched-off routine or trigger is refused
  * with the paused line. */
-export const PAUSED_RUN_ROUTINE_TURNS_ONLY = false;
+export const PAUSED_RUN_ROUTINE_TURNS_ONLY = true;
 
 /** A routine, webhook or app trigger, as much of it as the rule reads. A webhook that only posts its event to a chat or a
  * room (`delivery: "post"`) starts no turn, so it does not count. */

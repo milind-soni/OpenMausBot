@@ -7168,7 +7168,7 @@ async function acceptDirectSend(
         throw Object.assign(new Error("the target task no longer exists"), { status: 409 });
       }
 
-      if (guardedStart) return guardedStart(currentAtStart);
+      if (guardedStart) return guardedStart(currentAtStart); const planPaused = starterCaps.pausedText(botId, threadLanguage(threadId), threadId, false); if (planPaused) throw Object.assign(new Error(planPaused), { status: 409, code: BOT_PAUSED_CODE }); // a person's message never joins a paused bot's routine run (PAUSED_RUN_ROUTINE_TURNS_ONLY)
 
       const typedStop = await stopOnTypedCommand({ botId, threadId, text, trigger, personPresent, fromApp: Boolean(app), busy: currentAtStart.busy === true, row: { replyToId: replyTo?.id, sendId, sender, ...spokenLineFields(via, callId) }, by: { ...(sender?.id ? { person: sender.id } : {}), admin: admin === true } });
       if (typedStop) return typedStop;

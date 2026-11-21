@@ -1208,7 +1208,9 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   it and which bot was paused for it. A routine bot the person left paused in their own last
   choice stays paused, so does one no awake bot can make room for, and a run of a switched-off
   routine swaps nothing: in each case the run still goes ahead in its own conversation (the rest of
-  the bot stays paused), and the bot's chat says so once. Such a routine's next run counts as due,
+  the bot stays paused, and a person's new message in that conversation meets the paused line
+  too), and the bot's chat says so once. Run now of a switched-off routine, or a person's test of a
+  switched-off trigger, for a bot the limit paused is refused with the paused line. Such a routine's next run counts as due,
   so a sleeping home is woken for it. The two turns at once below still apply: the run waits for a
   place like any turn. A bot the person paused (`paused-bots.json`) is never woken by a routine.
 - **How much a Starter Cloud runs at once.** Two turns Cloud-wide, and four hand-offs waiting
