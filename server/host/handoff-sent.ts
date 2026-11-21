@@ -1,4 +1,5 @@
-import { isServerLine, serverLine } from "../server-lines.ts";
+import type { ModelSelection } from "../contracts.ts";
+import { isServerLine, serverLine, type ServerLineKey } from "../server-lines.ts";
 import type { Message } from "../store.ts";
 
 export const WAIT_CARD_CLOSED_REASON = "The card it waited on was replaced or closed";
@@ -18,9 +19,24 @@ export function outsideRoomNote(room: AddressedRoom | undefined, via: SentVia): 
   return room && via === "direct" ? `it isn't in ${roomWords(room)}, so it got this directly: ` : "";
 }
 
-/** `language`: the sender's conversation's, where the row is shown. */
+const LEVEL_WORDS = {
+  default: "server.teammates.effort.default", none: "server.teammates.effort.none", low: "server.teammates.effort.low",
+  medium: "server.teammates.effort.medium", high: "server.teammates.effort.high", xhigh: "server.teammates.effort.xhigh", max: "server.teammates.effort.max",
+} as const satisfies Record<NonNullable<ModelSelection["effort"]> | "default", ServerLineKey>;
+
+/** The model the work runs on, as the hand-off row names it, by the same rule as the app's own (src/lib/model-with-reasoning.ts):
+ * its display name, with its reasoning level ("Opus 5 · High reasoning") only where the engine has a reasoning setting
+ * and does not pick reasoning by model variant. */
+export function modelWords(language: string | undefined, selection: ModelSelection, engine: { label?: string; levels?: readonly string[]; variants?: boolean } = {}): string {
+  const model = engine.label || selection.model;
+  if (engine.variants || !engine.levels?.length) return model;
+  return serverLine(language, "server.teammates.onModel", { model, level: serverLine(language, LEVEL_WORDS[selection.effort ?? "default"]) });
+}
+
+/** `language`: the sender's conversation's, where the row is shown. `model`: the receiving thread's, from modelWords,
+ * shown after the row's words. */
 export function sentRow(input: { sender: Who; recipient: Who; threadId: string; title?: string; reason?: string; doneWhen?: string; room?: AddressedRoom; via: SentVia;
-  language?: string; /** The files passed with it, shown as chips. */ attachments?: Message["attachments"] }): Omit<Message, "id" | "at"> {
+  language?: string; /** The files passed with it, shown as chips. */ attachments?: Message["attachments"]; model?: string }): Omit<Message, "id" | "at"> {
   const { sender, recipient, threadId, room, via, language } = input;
   const outside = room && via === "direct" ? room : undefined;
   const name = sender.id === recipient.id ? serverLine(language, "server.rooms.openedThread", { title: input.title ?? "" })
@@ -33,7 +49,7 @@ export function sentRow(input: { sender: Who; recipient: Who; threadId: string; 
     from: { botId: sender.id, name: sender.name, color: sender.color },
     tool: {
       name,
-      ok: true, ...(input.reason ? { output: input.reason } : {}),
+      ok: true, ...(input.reason ? { output: input.reason } : {}), ...(input.model && sender.id !== recipient.id ? { assignedModel: input.model } : {}),
     },
     ...(input.doneWhen ? { doneWhen: input.doneWhen } : {}),
     ...(input.attachments?.length ? { attachments: input.attachments } : {}),

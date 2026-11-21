@@ -46,6 +46,11 @@ describe("ThreadChip", () => {
     expect(markup).toContain('data-thread-chip="qa-245"');
   });
 
+  it("names the model and reasoning level the work went to after the row's words", () => {
+    const markup = renderToStaticMarkup(createElement(ThreadChip, { message: { ...receipt(), tool: { name: "Sent to Scout", ok: true, assignedModel: "Opus 5 · High reasoning" } } }));
+    expect(markup).toContain("Sent to Scout · Opus 5 · High reasoning");
+  });
+
   it("says in the person's words that work addressed into a room went to a bot outside it directly", () => {
     const sent = (sentDirectly: Message["sentDirectly"]) => renderToStaticMarkup(createElement(ThreadChip, {
       message: { ...receipt(), tool: { name: "server English", ok: true }, sentDirectly },

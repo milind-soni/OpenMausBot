@@ -48,6 +48,9 @@ it("carries a request as long as a hand-off takes to the checker whole, and refu
   expect(refused).toMatch(/was not run|nothing was done/);
   const brief = told(f.turns(f.checker.id)[0]);
   expect(brief).toContain(whole);
+  const sent = (await f.api(`/api/threads/${f.worker.activeTaskId}/messages`)).messages.find((message: any) => message.tool?.name === "Sent to Vera");
+  expect(sent.tool.assignedModel).toMatch(/ · Default reasoning$/);
+  expect(sent.tool).not.toHaveProperty("summary");
   expect(brief).not.toContain("LOST-TAIL");
 }), 90_000);
 
