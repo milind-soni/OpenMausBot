@@ -104,9 +104,10 @@ let lastTick = performance.now(), busy = false, taken = 0, lastTakenAt = 0, stuc
 setInterval(() => {
   const now = performance.now(), late = now - lastTick - 1000;
   lastTick = now;
-  // This thread itself ran late: the whole process was paused (a computer asleep), not its main thread stuck.
-  if (late > 1500) { stuck = false; taken = 0; return; }
   const age = Date.now() - Number(Atomics.load(beat, 0));
+  // This thread ran late for most of the heartbeat's age: the whole process was paused (a computer asleep) or starved of
+  // CPU, not its main thread stuck. Looked at again on the next tick, which a main thread that runs will have beaten by.
+  if (late > 1500 && late > age / 2) return;
   if (age < data.thresholdMs) { stuck = false; taken = 0; return; }
   if (busy || taken >= data.perStall || (stuck && Date.now() - lastTakenAt < data.repeatMs)) return;
   stuck = true;

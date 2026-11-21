@@ -35,8 +35,9 @@ describe("stall watch", () => {
     watches.push(watch!);
     // Let the thread start before the main thread is held.
     await new Promise((resolve) => setTimeout(resolve, 1_500));
-    heldMainThreadForStallWatchTest(9_000);
-    await waitFor(() => readStallRecords(join(dir, STALL_FILE)).length > 0, 10_000);
+    // Long enough for a slow, busy machine (a shared CI runner): the record needs the threshold, a tick, and the profile.
+    heldMainThreadForStallWatchTest(12_000);
+    await waitFor(() => readStallRecords(join(dir, STALL_FILE)).length > 0, 20_000);
     const [record] = readStallRecords(join(dir, STALL_FILE));
     expect(record).toBeDefined();
     expect(record!.kind).toBe("js");
