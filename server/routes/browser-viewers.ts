@@ -139,7 +139,7 @@ export function createBrowserViewerRoutes(deps: BrowserViewerRouteDeps): RouteHa
       if (method === "GET" && live[2] === "live") {
         req.socket.setTimeout(0);
         const size = requestedSize(Number(url.searchParams.get("width")), Number(url.searchParams.get("height")));
-        return await deps.viewers.open({ botId: browser.botId, session: browser.session, spec: browser.spec, owner, person, isCurrent, res, resume: url.searchParams.get("resume"), size });
+        return await deps.viewers.open({ botId: browser.botId, session: browser.session, spec: browser.spec, owner, person, isCurrent, res, resume: url.searchParams.get("resume"), size, drawsSelects: url.searchParams.get("selects") === "1" });
       }
       if (method === "POST" && live[2] === "action") {
         const body = await readBody(req, 32_768);

@@ -1,11 +1,46 @@
 // One tool-free ACP exchange for memory upkeep: a fresh process and session, no MCP servers, an empty
 // folder. It fails closed: any agent request, or any tool call it reports, ends the call.
-import type { TextGenerationOptions, TextGenerationUsage } from "../../contracts.ts";
+import type { ModelCatalog, TextGenerationOptions, TextGenerationUsage } from "../../contracts.ts";
 import type { BoxSpawnOptions, killCliTree, spawnCli } from "../../procs.ts";
+import { acpModelOption } from "./config-options.ts";
+import type { AcpSupport } from "./core.ts";
 
 export const BACKGROUND_TEXT_TIMEOUT_MS = 120_000;
 export const BACKGROUND_TEXT_MAX_CHARS = 200_000;
 const MAX_STDOUT_BYTES = 4_000_000;
+
+/** Sets a one-shot's env for the bot's own model, not the engine's default (a local model server may hold only the
+ * model its chats run on), and returns that model for the session to pick. */
+export function applyOneShotEnv(
+  support: Pick<AcpSupport, "selectModel" | "resolveTurnModel" | "applyTurnEnv">,
+  env: Record<string, string | undefined>,
+  options: TextGenerationOptions,
+  models: ModelCatalog,
+  ctx: { fullAuto: false; cwd: string; threadId: string; mcpServers: [] },
+): AcpOneShotInput["model"] {
+  const selection = support.selectModel;
+  const requestedModel = selection ? options.model ?? options.fallback?.model : undefined;
+  const model = requestedModel && requestedModel !== selection?.agentDefault
+    ? resolveOneShotModel(support, requestedModel, env, models)
+    : undefined;
+  support.applyTurnEnv?.(env, { ...(model ? { model, requestedModel } : {}), ...ctx });
+  return model && selection ? { configId: selection.configId, id: model } : undefined;
+}
+
+/** A model the engine can no longer route (e.g. a deleted Qwen provider entry) leaves the session's default to run, as an
+ * unoffered one does. */
+function resolveOneShotModel(
+  support: Pick<AcpSupport, "resolveTurnModel">,
+  requestedModel: string,
+  env: Record<string, string | undefined>,
+  models: ModelCatalog,
+): string | undefined {
+  try {
+    return support.resolveTurnModel?.(requestedModel, env, models) ?? requestedModel;
+  } catch {
+    return undefined;
+  }
+}
 
 export interface AcpOneShotInput {
   displayName: string;
@@ -21,6 +56,8 @@ export interface AcpOneShotInput {
   prompt: string;
   /** The model usage is booked to when the session names none. */
   defaultModel: string;
+  /** Picked through this session config option when the session offers it; otherwise the session's own model runs. */
+  model?: { configId: string; id: string } | undefined;
   pickAuthMethod: (methods: Array<{ id?: string }>) => string | null;
   authRequired: boolean | "if-requested";
   loginNote: string;
@@ -169,6 +206,17 @@ export function runAcpOneShot(input: AcpOneShotInput): Promise<string> {
       sessionId = session.sessionId;
       model = typeof session?.models?.currentModelId === "string" ? session.models.currentModelId
         : typeof init?._meta?.modelState?.currentModelId === "string" ? init._meta.modelState.currentModelId : undefined;
+      const wanted = input.model;
+      const offered = wanted ? acpModelOption(session, wanted.configId) : undefined;
+      if (wanted && offered?.configId && offered.options.some(({ id }) => id === wanted.id)) {
+        if (offered.currentValue !== wanted.id) {
+          const reply = await request("session/set_config_option", { sessionId, configId: offered.configId, value: wanted.id });
+          // Some engines confirm a switch with an empty reply; one that names another model did not switch.
+          const now = acpModelOption(reply, offered.configId)?.currentValue;
+          if (now !== undefined && now !== wanted.id) throw new Error(`${name} background call did not switch to ${wanted.id} (still ${now})`);
+        }
+        model = wanted.id;
+      }
       await input.configure?.({ request: (method, params) => request(method, params), sessionId: session.sessionId, session });
       const result = await request("session/prompt", { sessionId, prompt: [{ type: "text", text: input.prompt }] });
       const reported = result?.usage ?? result?._meta ?? {};

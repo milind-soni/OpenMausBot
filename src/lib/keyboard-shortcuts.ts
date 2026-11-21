@@ -90,6 +90,12 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
         winKeys: ["↑"],
       },
       {
+        id: "dictation-toggle",
+        description: "Start or stop dictation",
+        macKeys: ["⌘", "D"],
+        winKeys: ["Ctrl", "D"],
+      },
+      {
         id: "close-panel",
         description: "Close active drawer, modal, or find bar",
         macKeys: ["Esc"],
@@ -190,6 +196,20 @@ export function botCycleStep(event: Pick<KeyboardEvent, "key">): 1 | -1 | null {
   if (event.key === "]" || event.key === "}") return 1;
   if (event.key === "[" || event.key === "{") return -1;
   return null;
+}
+
+/**
+ * ⌘D on macOS, Ctrl+D elsewhere. Ctrl+D on macOS stays the text field's delete-forward key. The physical key counts only
+ * when the layout types no Latin letter there (Russian), not when it types another one (Dvorak).
+ */
+export function isDictationToggle(
+  event: Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey" | "defaultPrevented" | "isComposing">,
+  isMac: boolean = isMacPlatform(),
+): boolean {
+  if (event.defaultPrevented || event.isComposing || event.shiftKey || event.altKey) return false;
+  if (isMac ? !event.metaKey || event.ctrlKey : !event.ctrlKey || event.metaKey) return false;
+  const key = event.key.toLowerCase();
+  return key === "d" || (event.code === "KeyD" && !/^[a-z]$/.test(key));
 }
 
 export function shouldOpenKeyboardShortcuts(event: KeyboardEvent): boolean {

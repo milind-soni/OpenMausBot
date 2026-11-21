@@ -42,7 +42,7 @@ function SimpleSidebarFooter({ owner, archived }: { owner: string | null; archiv
       <div className="flex items-center gap-2 not-first:mt-2">
         <SidebarProfileMenu simple={account} />
         <SidebarConnectApps />
-        <UpdateIndicator className="size-9" />
+        <UpdateIndicator />
       </div>
     </div>
   );

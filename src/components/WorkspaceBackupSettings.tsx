@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
-import type { WorkspaceBackupSummary } from "../../shared/workspace-backup";
+import type { WorkspaceBackupExportStatus, WorkspaceBackupSummary } from "../../shared/workspace-backup";
 import { api } from "@/state/store";
 import { intlLocale, t } from "@/lib/i18n";
+import { randomUuid } from "@/lib/random-uuid";
+import { serverErrorText } from "@/lib/server-error";
 import { collectWorkspaceClientState, WORKSPACE_RESTORE_MARKER } from "@/lib/workspace-backup-client";
 import { LearnMore, SETTINGS_INPUT, SettingRow, SettingsField, SettingsRows } from "./SettingsPrimitives";
 import { SettingsDialog } from "./settings/SettingsDialog";
@@ -11,6 +13,25 @@ import { WorkspaceBackupRestartNotice, type BackupStatus } from "./WorkspaceBack
 export { WorkspaceBackupRecovery, WorkspaceBackupRestartNotice } from "./WorkspaceBackupRecovery";
 
 const validPassword = (value: string) => value.length >= 12 && value.length <= 1024;
+const EXPORT_REQUEST = "omb-backup-export-request";
+const exportJobPath = (id: string) => `/api/workspace-backup/export-jobs/${encodeURIComponent(id)}`;
+const downloadPath = (id: string) => `/api/workspace-backup/download/${encodeURIComponent(id)}`;
+
+function savedExportRequest(): string | null {
+  try { return sessionStorage.getItem(EXPORT_REQUEST); } catch { return null; }
+}
+
+function rememberExportRequest(id: string | null): void {
+  try {
+    if (id === null) sessionStorage.removeItem(EXPORT_REQUEST);
+    else sessionStorage.setItem(EXPORT_REQUEST, id);
+  } catch {}
+}
+
+function retryableExportRequest(error: unknown): boolean {
+  const status = (error as { status?: number } | null)?.status;
+  return status === undefined || status === 408 || status === 429 || status >= 500;
+}
 
 export function WorkspaceBackupSummaryView({ summary }: { summary: WorkspaceBackupSummary }) {
   return <div className="rounded-[12px] border-[0.5px] border-(--settings-edge) bg-menu p-3">
@@ -47,28 +68,88 @@ export function WorkspaceBackupSettings({ layout = BOTH_ROWS }: { layout?: (rows
   const [uploadedId, setUploadedId] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ id: string; summary: WorkspaceBackupSummary } | null>(null);
   const [confirmation, setConfirmation] = useState("");
-  const [download, setDownload] = useState<{ url: string; filename: string } | null>(null);
+  const [exportRequest, setExportRequest] = useState(savedExportRequest);
+  const [exportJob, setExportJob] = useState<WorkspaceBackupExportStatus | null>(null);
+  const [exportReconnecting, setExportReconnecting] = useState(false);
+  const currentExport = useRef(exportRequest);
+  const autoDownload = useRef<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
   const [more, setMore] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     try {
       const result: BackupStatus = await api("/api/workspace-backup/status");
       if (alive.current) { setStatus(result); setError(null); }
     } catch (cause) {
       if (alive.current) { setStatus(null); setError(cause instanceof Error ? cause.message : String(cause)); }
     }
-  };
+  }, []);
   useEffect(() => {
     alive.current = true;
     void refresh();
     return () => { alive.current = false; };
-  }, []);
+  }, [refresh]);
 
+  useEffect(() => {
+    if (!exportRequest) return;
+    const controller = new AbortController();
+    const { signal } = controller;
+    let timer: ReturnType<typeof setTimeout>;
+    let retryMissing = true;
+    const poll = async () => {
+      try {
+        const job = await api<WorkspaceBackupExportStatus>(exportJobPath(exportRequest), { background: true, timeoutMs: 10_000, signal });
+        if (signal.aborted || currentExport.current !== exportRequest) return;
+        if (job.state !== "running" && job.state !== "ready" && job.state !== "failed") throw new Error("Invalid backup export status.");
+        retryMissing = false;
+        setExportJob(job);
+        setExportReconnecting(false);
+        if (job.state === "running") {
+          timer = setTimeout(() => void poll(), 2_000);
+          return;
+        }
+        if (autoDownload.current === exportRequest) {
+          autoDownload.current = null;
+          if (job.state === "ready") {
+            const link = document.createElement("a");
+            link.href = downloadPath(job.id);
+            link.download = job.filename;
+            document.body.append(link);
+            link.click();
+            link.remove();
+          }
+        }
+        if (job.state === "ready") timer = setTimeout(() => void poll(), Math.max(1_000, job.expiresInMs));
+        void refresh();
+      } catch (cause) {
+        if (signal.aborted || currentExport.current !== exportRequest) return;
+        const missing = (cause as { status?: number } | null)?.status === 404;
+        if (retryableExportRequest(cause) || (missing && retryMissing)) {
+          if (missing) retryMissing = false;
+          setExportReconnecting(true);
+          timer = setTimeout(() => void poll(), 3_000);
+          return;
+        }
+        if (savedExportRequest() === exportRequest) rememberExportRequest(null);
+        currentExport.current = null;
+        setExportRequest(null);
+        setExportReconnecting(false);
+        if (autoDownload.current === exportRequest) autoDownload.current = null;
+        setExportJob({ state: "failed", error: missing
+          ? t("backup.exportUnavailable")
+          : cause instanceof Error ? cause.message : t("backup.exportUnavailable") });
+        void refresh();
+      }
+    };
+    void poll();
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [exportRequest, refresh]);
+
+  const exportPending = Boolean(exportRequest) && (exportJob === null || exportJob.state === "running");
   const perform = async (operation: NonNullable<typeof busy>, work: () => Promise<void>) => {
-    if (lock.current || !status || status.busy || status.pendingRestore) return;
+    if (lock.current || exportPending || !status || status.busy || status.pendingRestore) return;
     lock.current = true;
     setBusy(operation);
     setError(null);
@@ -79,20 +160,26 @@ export function WorkspaceBackupSettings({ layout = BOTH_ROWS }: { layout?: (rows
 
   const exportBackup = () => perform("export", async () => {
     if (!validPassword(exportPassword) || exportPassword !== confirmPassword) return;
-    const result: { id: string; filename: string } = await api("/api/workspace-backup/export", {
-      method: "POST", body: JSON.stringify({ password: exportPassword, clientState: collectWorkspaceClientState() }),
-    });
-    if (alive.current) { setExportPassword(""); setConfirmPassword(""); }
+    const id = randomUuid();
+    rememberExportRequest(id);
+    try {
+      await api(exportJobPath(id), {
+        method: "POST", timeoutMs: 10_000,
+        body: JSON.stringify({ password: exportPassword, clientState: collectWorkspaceClientState() }),
+      });
+    } catch (cause) {
+      if (!retryableExportRequest(cause)) {
+        if (savedExportRequest() === id) rememberExportRequest(exportRequest);
+        throw cause;
+      }
+    }
     if (!alive.current) return;
-    const url = `/api/workspace-backup/download/${encodeURIComponent(result.id)}`;
-    setDownload({ url, filename: result.filename });
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = result.filename;
-    document.body.append(link);
-    link.click();
-    link.remove();
-    setExporting(false);
+    autoDownload.current = id;
+    currentExport.current = id;
+    setExportJob(null);
+    setExportReconnecting(false);
+    setExportRequest(id);
+    closeExport();
   });
 
   const previewBackup = () => perform("preview", async () => {
@@ -135,7 +222,7 @@ export function WorkspaceBackupSettings({ layout = BOTH_ROWS }: { layout?: (rows
     if (alive.current) { setStatus({ busy: false, pendingRestore: true, restarts: restarting }); setPreview(null); setConfirmation(""); }
   });
 
-  const disabled = busy !== null || !status || status.busy || Boolean(status.pendingRestore);
+  const disabled = busy !== null || exportPending || !status || status.busy || Boolean(status.pendingRestore);
   const closeExport = () => { setExporting(false); setExportPassword(""); setConfirmPassword(""); };
   const closeImport = () => { setImporting(false); setFile(null); setUploadedId(null); setPreview(null); setConfirmation(""); setImportPassword(""); };
   if (status?.pendingRestore) {
@@ -146,8 +233,11 @@ export function WorkspaceBackupSettings({ layout = BOTH_ROWS }: { layout?: (rows
       exportRow: <SettingRow title={t("backup.export")} subtitle={<>{t("backup.exportShort")}{" "}<LearnMore onClick={() => setMore((open) => !open)} /></>}
         message={<>
           {more && <span data-backup-more="" className="flex flex-col gap-1"><span>{t("backup.scope")}</span><span>{t("backup.excluded")}</span><span>{t("backup.privacy")}</span></span>}
-          {download && <a href={download.url} download={download.filename} className="break-all text-accent-text hover:underline">{t("backup.downloadAgain", { filename: download.filename })}</a>}
-          {(!status || status.busy) && <span role="status">{status?.busy ? t("backup.serverBusy") : t("backup.checkStatus")}{" "}<button type="button" onClick={() => void refresh()} className="cursor-pointer text-accent-text hover:underline">{t("connectors.action.retry")}</button></span>}
+          {exportJob?.state === "ready" && <a href={downloadPath(exportJob.id)} download={exportJob.filename} className="break-all text-accent-text hover:underline">{t("backup.downloadAgain", { filename: exportJob.filename })}</a>}
+          {exportReconnecting && <span role="status">{t("backup.exportReconnecting")}</span>}
+          {exportPending && !exportReconnecting && <span role="status">{t("backup.exporting")}</span>}
+          {exportJob?.state === "failed" && <span role="alert" className="block break-words text-danger">{serverErrorText(exportJob, exportJob.error)}</span>}
+          {!exportPending && (!status || status.busy) && <span role="status">{status?.busy ? t("backup.serverBusy") : t("backup.checkStatus")}{" "}<button type="button" onClick={() => void refresh()} className="cursor-pointer text-accent-text hover:underline">{t("connectors.action.retry")}</button></span>}
           {error && <span role="alert" className="block break-words text-danger">{error}</span>}
         </>}>
         <button type="button" className="ui-button" disabled={disabled} data-backup-export="" onClick={() => setExporting(true)}>{t("backup.exportAction")}</button>

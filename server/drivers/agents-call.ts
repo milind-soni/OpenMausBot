@@ -258,7 +258,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   if (DEVS_TOOL_NAMES.has(name)) return callDevsTool(name, args, context);
   if (TRIGGER_TOOL_NAMES.has(name)) return callTriggerTool(name, args, context);
   if (WAIT_TOOL_NAMES.has(name)) return callWaitTool(name, args, context); if (CHECK_BACK_TOOL_NAMES.has(name)) return callCheckBackTool(args, context);
-  if (name === USAGE_LIMITS_TOOL) return callUsageLimitsTool(context);
+  if (name === USAGE_LIMITS_TOOL) return callUsageLimitsTool(context, args);
   if (COMPUTER_ASK_TOOL_NAMES.has(name)) return callComputerAskTool(args, context);
   // Second lock: with sharing off the catalog already omits these tools.
   if (SHARED_COMPUTER_TOOL_NAMES.has(name) && !context.sharedComputers) {

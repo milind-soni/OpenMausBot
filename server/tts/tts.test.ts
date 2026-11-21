@@ -639,30 +639,27 @@ describe("Chatterbox (local server)", () => {
     expect(message).toMatch(/couldn't reach the Chatterbox server/i);
   });
 
-  it("lists the server's models as voices, with audio/voices and Default as fallbacks", async () => {
+  it("lists the server's audio/voices first, with models and Default as fallbacks", async () => {
     refuse = null;
     modelsFail = false;
     modelsDrop = false;
     audioVoicesFail = false;
     const { listVoices } = await voice();
     expect(await listVoices(cfg(chatCfg({ baseUrl: stubBase })))).toEqual([
+      { id: "Emily.wav", label: "Emily" },
+      { id: "Gianna.wav", label: "Gianna" },
+    ]);
+    audioVoicesFail = true;
+    expect(await listVoices(cfg(chatCfg({ baseUrl: stubBase })))).toEqual([
       { id: "alex", label: "alex" },
       { id: "turbo-en", label: "turbo-en" },
     ]);
-    modelsFail = true;
-    expect(await listVoices(cfg(chatCfg({ baseUrl: stubBase })))).toEqual([
-      { id: "Emily.wav", label: "Emily" },
-      { id: "Gianna.wav", label: "Gianna" },
-    ]);
-    modelsFail = false;
     modelsDrop = true;
     expect(await listVoices(cfg(chatCfg({ baseUrl: stubBase })))).toEqual([
-      { id: "Emily.wav", label: "Emily" },
-      { id: "Gianna.wav", label: "Gianna" },
+      { id: "default", label: "Default", description: "the server's built-in Chatterbox voice" },
     ]);
     modelsDrop = false;
     modelsFail = true;
-    audioVoicesFail = true;
     expect(await listVoices(cfg(chatCfg({ baseUrl: stubBase })))).toEqual([
       { id: "default", label: "Default", description: "the server's built-in Chatterbox voice" },
     ]);

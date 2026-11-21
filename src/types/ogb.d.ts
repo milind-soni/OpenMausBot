@@ -46,7 +46,7 @@ const __APP_VERSION__: string;
     };
     dictation: {
       available: boolean;
-      engine: "apple-speech" | "fish-audio" | "none";
+      engine: "apple-speech" | "windows-speech" | "fish-audio" | "none";
       onDevice: boolean;
       reasonCode?: string;
     };
@@ -441,6 +441,11 @@ const __APP_VERSION__: string;
         setInteractive(contextId: string | null): Promise<boolean>;
         close(contextId?: string): Promise<boolean>;
         onState(cb: (state: DesktopWorkspaceState) => void): () => void;
+      };
+      /** A bot's browser as a native view over its Browser panel (browserEngine.surface "pane"). The main process asks
+       * the server which browser the bot's panel shows; the page never names one. */
+      browserPane?: {
+        show(input: { botId: string; threadId: string | null; profile: string | null; bounds: DesktopWorkspaceBounds | null; visible: boolean }): Promise<{ shown: boolean }>;
       };
       /** Native folder picker; resolves null when the user cancels. */
       pickFolder?(current?: string): Promise<string | null>;

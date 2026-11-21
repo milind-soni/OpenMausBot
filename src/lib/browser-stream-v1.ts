@@ -49,16 +49,42 @@ const releases = (body: Body) => (body.type === "input_mouse" && body.eventType 
 /** What still goes once input has halted: releases, so nothing stays held, and toolbar actions. */
 const afterHalt = (body: Body) => releases(body) || !batchable(body);
 
-/** One request at a time: key and button order is kept, movement coalesced, and a reconnect never replays old input. Where
- * the server takes batches (`batchLimit` above 1), every input queued behind a request goes in the next one. */
-export function createLiveInputQueue(send: (body: Body) => Promise<unknown>, onError: (cause: unknown) => void, batchLimit: () => number = () => 1, onDrop: (reason: InputDropReason) => void = () => {}) {
+/** Waits before each repeat of a request whose answer was lost or that the server asked to wait: about 8 s in all. */
+export const LIVE_RETRY_DELAYS = [250, 500, 1_000, 2_000, 4_000];
+
+/** A failure worth repeating the same request for: no answer at all (the connection dropped or timed out), the server busy
+ * with too many of this view's actions, or a proxy in front of it failing. The server runs a numbered request once. */
+export function transientFailure(cause: unknown): boolean {
+  const status = (cause as { status?: unknown } | null)?.status;
+  return status === undefined || status === 429 || status === 502 || status === 504;
+}
+
+/**
+ * One request at a time: key and button order is kept, movement coalesced, and a reconnect never replays old input. Where
+ * the server takes batches (`batchLimit` above 1), every input queued behind a request goes in the next one. Each request
+ * carries a number, and a transient failure repeats it, head of line, under the same number. A failure that stays halts
+ * input (releases and toolbar actions still go) and says so through `onHalted`, until a request gets through again or
+ * `resume` is called once the person holds the browser again.
+ */
+export function createLiveInputQueue(send: (body: Body, requestId: number) => Promise<unknown>, onError: (cause: unknown) => void, batchLimit: () => number = () => 1, onDrop: (reason: InputDropReason) => void = () => {}, options: { onHalted?: (halted: boolean) => void; delays?: readonly number[] } = {}) {
+  const delays = options.delays ?? LIVE_RETRY_DELAYS;
   let queue: Body[] = [];
   let active: Promise<void> | null = null;
   let generation = 0;
+  let requests = 0;
   let stopped = false;
   const halt = (cause: unknown) => {
+    for (const body of queue) if (!afterHalt(body) && !movement(body)) onDrop("queue_halted");
     queue = queue.filter(afterHalt);
-    if (!stopped) { stopped = true; onError(cause); }
+    if (stopped) return;
+    stopped = true;
+    onError(cause);
+    options.onHalted?.(true);
+  };
+  const resume = () => {
+    if (!stopped) return;
+    stopped = false;
+    options.onHalted?.(false);
   };
   const next = (): Body[] => {
     const taken = [queue.shift()!];
@@ -72,14 +98,29 @@ export function createLiveInputQueue(send: (body: Body) => Promise<unknown>, onE
     }
     return taken;
   };
+  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  /** The request, repeated under its number while it fails transiently; rejects with the failure that stayed. */
+  const deliver = async (body: Body, current: number) => {
+    const requestId = ++requests;
+    for (let attempt = 0; ; attempt++) {
+      try { return await send(body, requestId); }
+      catch (cause) {
+        if (current !== generation || attempt >= delays.length || !transientFailure(cause)) throw cause;
+      }
+      await wait(delays[attempt]!);
+      if (current !== generation) return;
+    }
+  };
   const run = () => {
     if (active || !queue.length) return;
     const current = generation;
     active = (async () => {
       while (current === generation && queue.length) {
         const taken = next();
-        try { await send(taken.length === 1 ? taken[0]! : { type: "input_batch", events: taken }); }
-        catch (cause) {
+        try {
+          await deliver(taken.length === 1 ? taken[0]! : { type: "input_batch", events: taken }, current);
+          if (current === generation) resume();
+        } catch (cause) {
           if (current !== generation) continue;
           // The server stops a batch at its first failure, so its later releases may never have been sent.
           if (taken.length > 1) queue.unshift(...taken.slice(1).filter(releases));
@@ -124,7 +165,9 @@ export function createLiveInputQueue(send: (body: Body) => Promise<unknown>, onE
     async settle() { while (active || queue.length) { run(); await active; } },
     size: () => queue.length + (active ? 1 : 0),
     stopped: () => stopped,
-    clear() { generation++; queue = []; stopped = false; },
+    /** The person holds the browser again: input goes to it again. */
+    resume,
+    clear() { generation++; queue = []; resume(); },
   };
 }
 
@@ -196,9 +239,9 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
     if (typeof message === "string" && message) notice(message);
   };
   const drops = createInputDropReport((counts) => post({ type: "client_drops", counts }, viewerId), () => viewerId !== "");
-  const queue = createLiveInputQueue((body) => (viewerId ? postTo(body, viewerId).then(noticed) : Promise.reject(new Error(t("browser.panel.connectionFirst")))), (cause) => {
+  const queue = createLiveInputQueue((body, requestId) => (viewerId ? postTo({ ...body, requestId }, viewerId).then(noticed) : Promise.reject(new Error(t("browser.panel.connectionFirst")))), (cause) => {
     notice(cause instanceof Error ? cause.message : String(cause));
-  }, () => inputBatch, drops.count);
+  }, () => inputBatch, drops.count, { onHalted: (halted) => events.onMessage?.({ type: "inputHalted", halted }) });
 
   /** One resize request at a time, the newest size last; a refusal changes nothing. */
   const sendSize = () => {
@@ -216,6 +259,7 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
     retry = null;
     if (stopped) return;
     const params = new URLSearchParams(resume.viewer ? { resume: resume.viewer } : {});
+    params.set("selects", "1");
     const opening = size;
     if (size) {
       params.set("width", String(Math.round(size.width)));
@@ -230,7 +274,8 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
       heardAt = Date.now();
       try { handler(JSON.parse((event as MessageEvent).data) as Record<string, unknown>); } catch {}
     });
-    listen("waiting", () => events.onMessage?.({ type: "starting" }));
+    // A browser slow to start keeps the view's "opening" wait; any other wait is the bot's.
+    listen("waiting", (data) => { if (data.reason !== "starting") events.onMessage?.({ type: "starting" }); });
     listen("ready", (data) => {
       if (typeof data.viewerId !== "string" || !data.viewerId) return;
       viewerId = data.viewerId;
@@ -260,6 +305,7 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
     });
     listen("tabs", (data) => { if (Array.isArray(data.tabs)) events.onMessage?.({ type: "tabs", tabs: data.tabs }); });
     listen("url", (data) => { if (typeof data.url === "string") events.onMessage?.({ type: "url", url: data.url }); });
+    listen("selectPopup", (data) => { if (typeof data.id === "string" && Array.isArray(data.options)) events.onMessage?.({ ...data, type: "selectPopup" }); });
     listen("status", (data) => {
       if (viewport || !(Number(data.viewportWidth) > 0 && Number(data.viewportHeight) > 0)) return;
       viewport = { width: Number(data.viewportWidth), height: Number(data.viewportHeight) };
@@ -268,7 +314,9 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
     listen("control", (data) => {
       const next = liveControl(data, generation);
       if (control && next.controller === control.controller && next.owned === control.owned && JSON.stringify(next.dialog) === JSON.stringify(control.dialog)) return;
+      const regained = next.controller === "you" && control?.controller !== "you";
       control = next.controller === control?.controller ? next : liveControl(data, ++generation);
+      if (regained) queue.resume();
       events.onControl?.(control);
     });
     live.addEventListener("error", (event) => {
@@ -356,6 +404,7 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
       take: async () => {
         if (!viewerId) throw new Error(t("browser.panel.notConnected"));
         const reply = await postTo({ type: "take" }, viewerId) as { waited?: unknown } | null;
+        queue.resume();
         return { waited: reply?.waited === true };
       },
       release: async () => { if (viewerId) await postTo({ type: "release" }, viewerId); },
