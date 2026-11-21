@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import path from "node:path";
 import test from "node:test";
 
-import { createBrowserPanes } from "./browser-pane-main.mjs";
+import { createBrowserPanes, fromAppWindow } from "./browser-pane-main.mjs";
 
 const PARTITION = "persist:omb-pane-0123456789abcdef01234567";
 const MSG = "openmausbot:browser-pane";
@@ -75,6 +75,8 @@ function fakeElectron() {
         async clearStorageData() { this.erased++; },
         async clearCache() {},
         async setProxy(config) { this.proxy = config; },
+        written: [],
+        cookies: { async set(details) { if (details.name === "refuse") throw new Error(`Failed to set cookie ${details.value}`); sessions.get(name).written.push(details); } },
         webRequest: { onBeforeSendHeaders(handler) { sessions.get(name).headers = handler; } },
       }));
     }
@@ -99,13 +101,14 @@ function fakeElectron() {
 function setup({ captureMs } = {}) {
   const electron = fakeElectron();
   let clock = 0;
-  const panes = createBrowserPanes({ createView: electron.createView, createPopup: electron.createPopup, fromPartition: electron.fromPartition, owner: () => (electron.window.destroyed ? null : electron.window), chromeVersion: "146.0.7680.0", now: () => clock, ...(captureMs ? { captureMs } : {}) });
+  const logged = [];
+  const panes = createBrowserPanes({ createView: electron.createView, createPopup: electron.createPopup, fromPartition: electron.fromPartition, owner: () => (electron.window.destroyed ? null : electron.window), chromeVersion: "146.0.7680.0", now: () => clock, log: (line) => logged.push(line), ...(captureMs ? { captureMs } : {}) });
   const posted = [];
   const server = { postMessage: (message) => posted.push(message) };
   panes.attach(server);
   const send = (message) => panes.receive(server, { type: MSG, ...message });
   const last = (op) => posted.filter((message) => message.op === op).at(-1);
-  return { electron, panes, server, posted, send, last, advance: (ms) => { clock += ms; } };
+  return { electron, panes, server, posted, send, last, logged, advance: (ms) => { clock += ms; } };
 }
 
 test("says hello to the server it starts, again when that server asks, and ignores any other process", () => {
@@ -501,4 +504,49 @@ test("a popup the bot's click opened stays a tab, its opener kept", async () => 
   assert.equal(electron.popups.length, 0);
   assert.equal(electron.views.at(-1).options.webContents, guest);
   assert.equal(posted.filter((message) => message.op === "tab").at(-1).opener, "p1");
+});
+
+test("writes an import's cookies into the pane partition and counts what Chromium refused, naming none", async () => {
+  const { send, last, electron, logged, posted } = setup();
+  const cookie = { url: "https://github.com/", name: "user_session", value: "fixture-value", domain: ".github.com", path: "/", secure: true, httpOnly: true, sameSite: "lax", expirationDate: 2_000_000_000 };
+  send({ op: "set-cookies", req: 7, partition: PARTITION, cookies: [cookie, { ...cookie, name: "refuse", value: "never-logged" }] });
+  await tick();
+  assert.deepEqual(last("cookies-set"), { type: MSG, op: "cookies-set", req: 7, written: 1, refused: 1 });
+  assert.deepEqual(electron.sessions.get(PARTITION).written, [cookie]);
+  // A cookie Chromium would not hold, or another partition, never reaches cookies.set.
+  send({ op: "set-cookies", req: 8, partition: "persist:someone-else", cookies: [cookie] });
+  send({ op: "set-cookies", req: 9, partition: PARTITION, cookies: [{ ...cookie, value: "x".repeat(5000) }] });
+  await tick();
+  assert.equal(last("cookies-set").req, 7);
+  const said = JSON.stringify([logged, posted.filter((message) => message.op !== "set-cookies")]);
+  assert.ok(!said.includes("fixture-value") && !said.includes("never-logged"));
+  assert.ok(logged.length > 0);
+});
+
+test("relays the person's import requests to the server and brings back counts only", async () => {
+  const { panes, send, posted } = setup();
+  const sources = panes.cookieSources();
+  const asked = posted.at(-1);
+  assert.equal(asked.op, "cookie-sources");
+  send({ op: "cookie-sources-result", req: asked.req, sources: [{ id: "chrome", name: "Google Chrome", engine: "chromium", profiles: [{ id: "Default", name: "Person" }] }] });
+  assert.deepEqual(await sources, [{ id: "chrome", name: "Google Chrome", engine: "chromium", profiles: [{ id: "Default", name: "Person" }] }]);
+  const imported = panes.importCookies({ botId: "a", threadId: null, site: "github.com", source: "chrome", profile: "Default" });
+  const request = posted.at(-1);
+  assert.deepEqual({ op: request.op, botId: request.botId, site: request.site, source: request.source, profile: request.profile }, { op: "cookie-import", botId: "a", site: "github.com", source: "chrome", profile: "Default" });
+  send({ op: "cookie-import-result", req: request.req, result: { ok: true, site: "github.com", imported: 3, sessionOnly: 0, skipped: {} } });
+  assert.deepEqual(await imported, { ok: true, site: "github.com", imported: 3, sessionOnly: 0, skipped: {} });
+  const offered = panes.cookieOffer({ botId: "a", threadId: null, site: "google.com" });
+  send({ op: "cookie-offer-result", req: posted.at(-1).req, offered: false, reason: "google" });
+  assert.deepEqual(await offered, { offered: false, reason: "google" });
+  await assert.rejects(panes.importCookies({ botId: "a", site: "x.com", source: "../chrome", profile: "Default" }), /invalid/);
+  await assert.rejects(panes.cookieOffer({ botId: "../a", site: "x.com" }), /invalid/);
+});
+
+test("takes an import request only from the app window's own top page", () => {
+  const mainFrame = {};
+  const window = { webContents: { mainFrame }, isDestroyed: () => false };
+  fromAppWindow({ sender: window.webContents, senderFrame: mainFrame }, window);
+  assert.throws(() => fromAppWindow({ sender: window.webContents, senderFrame: {} }, window), /main app window/);
+  assert.throws(() => fromAppWindow({ sender: { mainFrame }, senderFrame: mainFrame }, window), /main app window/);
+  assert.throws(() => fromAppWindow({ sender: window.webContents, senderFrame: mainFrame }, null), /main app window/);
 });

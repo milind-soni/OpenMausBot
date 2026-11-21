@@ -21,6 +21,8 @@ import { findBwrap } from "./desktop/policy.ts";
 import { DesktopViews, type DesktopRequest } from "./desktop/views.ts";
 import { botReason, browserInputLog, pageAction, type BotReason, type BrowserInputLog } from "./input-log.ts";
 import type { PaneBackend } from "./pane/backend.ts";
+import type { CookieSink } from "./cookies/importer.ts";
+import { cdpSink } from "./cookies/sinks.ts";
 import type { Download } from "./cdp/downloads.ts";
 import { BrowserService, type BrowserTarget } from "./service.ts";
 import { LiveV1 } from "./viewers/live-v1.ts";
@@ -150,6 +152,13 @@ export class ChromeEngine {
   spec(session: string, key: string): { command: string; args: string[]; env: Record<string, string> } {
     this.#targets.set(session, key);
     return { command: CHROME_ENGINE, args: [key], env: {} };
+  }
+
+  /** Where a profile's browser takes an imported sign-in: its pane partition, or its launched Chrome (started for it). */
+  cookieSink(target: BrowserTarget): CookieSink {
+    const pane = this.#options.pane;
+    if (pane && pane.wanted() && pane.backend.available) return pane.backend.cookieSink(target.key);
+    return cdpSink(async (method, params) => (await this.service.running(this.service.profile(target))).browser.connection.root.send(method, params));
   }
 
   /** Whether a session's browser runs as desktop panes now. */

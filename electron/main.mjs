@@ -1,4 +1,4 @@
-import { launchRecord } from "./launch-record-main.mjs"; import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, Tray, WebContentsView, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, net, powerMonitor, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, utilityProcess, nativeTheme } from "electron"; import { createBrowserPanes } from "./browser-pane-main.mjs";
+import { launchRecord } from "./launch-record-main.mjs"; import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, Tray, WebContentsView, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, net, powerMonitor, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, utilityProcess, nativeTheme } from "electron"; import { createBrowserPanes, fromAppWindow } from "./browser-pane-main.mjs";
 import { createRequire } from "node:module";
 import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -2298,7 +2298,7 @@ ipcMain.handle("desktop-workspace:layout", localOnly("desktop-workspace:layout",
   const manager = desktopWorkspaceForEvent(event);
   if (!manager) return false;
   return manager.layout(items);
-})); ipcMain.handle("browser-pane:show", localOnly("browser-pane:show", (event, input) => { if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error("The browser pane belongs to the main app window"); return browserPanes.show(input); }));
+})); ipcMain.handle("browser-pane:show", localOnly("browser-pane:show", (event, input) => { if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error("The browser pane belongs to the main app window"); return browserPanes.show(input); })); ipcMain.handle("browser-cookies:sources", localOnly("browser-cookies:sources", (event) => { fromAppWindow(event, mainWindow); return browserPanes.cookieSources(); })); ipcMain.handle("browser-cookies:offer", localOnly("browser-cookies:offer", (event, input) => { fromAppWindow(event, mainWindow); return browserPanes.cookieOffer(input); })); ipcMain.handle("browser-cookies:import", localOnly("browser-cookies:import", (event, input) => { fromAppWindow(event, mainWindow); return browserPanes.importCookies(input); }));
 ipcMain.handle("desktop-workspace:set-interactive", localOnly("desktop-workspace:set-interactive", (event, contextId) => {
   const manager = desktopWorkspaceForEvent(event);
   if (!manager) return contextId == null;

@@ -27,6 +27,18 @@ const PROFILE = /^[\w.:-]{1,128}$/;
 
 const originOf = (url) => { try { return new URL(url).origin; } catch { return ""; } };
 const isObject = (value) => Object.prototype.toString.call(value) === "[object Object]";
+/**
+ * Security: a sign-in import reads the person's own browsers, so only the app window's own top page may ask for one:
+ * not another window, and not a frame inside it. This holds while the app frames a bot's pages only from another origin
+ * or sandboxed (published apps and web panels refuse the app's own origin): a same-origin frame could call the top
+ * page's bridge.
+ */
+export function fromAppWindow(event, window) {
+  if (!window || window.isDestroyed() || event?.sender !== window.webContents || event.senderFrame !== event.sender.mainFrame) {
+    throw new Error("Sign-in import belongs to the main app window");
+  }
+}
+
 const NO_PANEL = Object.freeze({ botId: null, threadId: null, profile: null, wanted: false, bounds: null, browser: null });
 const samePanel = (a, b) => a.botId === b.botId && a.threadId === b.threadId && a.profile === b.profile;
 
@@ -42,6 +54,7 @@ export function createBrowserPanes({ createView, createPopup = null, fromPartiti
   const identities = new Map();
   const pings = new Map();
   const resolving = new Map();
+  const asking = new Map();
   const watched = new WeakSet();
   let server = null;
   let tabCount = 0;
@@ -413,7 +426,51 @@ export function createBrowserPanes({ createView, createPopup = null, fromPartiti
         resolve?.(message.browser);
         return;
       }
+      case "set-cookies": return void setCookies(message);
+      case "cookie-sources-result":
+      case "cookie-import-result":
+      case "cookie-offer-result": {
+        const answer = asking.get(message.req);
+        asking.delete(message.req);
+        answer?.(message);
+        return;
+      }
     }
+  }
+
+  /** An import's cookies into a pane's partition. Security: a refused cookie is counted, never named or logged. */
+  async function setCookies(message) {
+    const session = fromPartition(message.partition);
+    let written = 0;
+    let refused = 0;
+    for (const cookie of message.cookies) {
+      try {
+        await session.cookies.set(cookie);
+        written++;
+      } catch {
+        refused++;
+      }
+    }
+    post({ op: "cookies-set", req: message.req, written, refused });
+  }
+
+  /** The person's import requests, to the server and back; `fallback` when it does not answer. */
+  function askServer(op, fields, fallback, timeoutMs) {
+    if (!server) return Promise.resolve(fallback);
+    const req = ++requests;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => { asking.delete(req); resolve(fallback); }, timeoutMs);
+      asking.set(req, (message) => { clearTimeout(timer); resolve(message); });
+      post({ op, req, ...fields });
+    });
+  }
+
+  function importInput(input) {
+    if (!isObject(input) || typeof input.botId !== "string" || !BOT.test(input.botId) || typeof input.site !== "string" || input.site.length > 2048
+      || (input.source !== undefined && (typeof input.source !== "string" || !/^[a-z][a-z0-9-]{0,31}$/.test(input.source)))) {
+      throw new Error("Sign-in import input is invalid");
+    }
+    return { botId: input.botId, threadId: typeof input.threadId === "string" && BOT.test(input.threadId) ? input.threadId : null, site: input.site };
   }
 
   function resolveBrowser(botId, threadId) {
@@ -474,6 +531,27 @@ export function createBrowserPanes({ createView, createPopup = null, fromPartiti
       layout();
       if (panel.browser === null) await ask();
       return { shown: Boolean(panel.wanted && panel.browser && browsers.get(panel.browser)?.active) };
+    },
+
+    /** The browsers and profiles a sign-in can be imported from: names only. */
+    async cookieSources() {
+      const answer = await askServer("cookie-sources", {}, { sources: [] }, RESOLVE_MS * 2);
+      return answer.sources;
+    },
+
+    /** Whether a site's sign-in can be imported into a bot's browser, and why not. */
+    async cookieOffer(input) {
+      const answer = await askServer("cookie-offer", importInput(input), { offered: false, reason: "unreadable" }, RESOLVE_MS * 2);
+      return { offered: answer.offered, ...(answer.reason ? { reason: answer.reason } : {}) };
+    },
+
+    /** One site's sign-in from the person's own browser into a bot's: counts and a reason code come back, never a cookie. */
+    async importCookies(input) {
+      const request = importInput(input);
+      if (typeof input.source !== "string" || typeof input.profile !== "string" || !input.profile || input.profile.length > 512) throw new Error("Sign-in import input is invalid");
+      // The person may sit at a Keychain prompt for a while.
+      const answer = await askServer("cookie-import", { ...request, source: input.source, profile: input.profile }, { result: { ok: false, reason: "unreadable" } }, 180_000);
+      return answer.result;
     },
 
     closeAll() {
