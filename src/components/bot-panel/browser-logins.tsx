@@ -5,7 +5,7 @@ import { t } from "@/lib/i18n";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { type Bot } from "@/state/store";
 import { SignedInSites } from "../SignedInSites";
-import { CookieImportDialog, cookieImportAvailable } from "../browser/CookieImportDialog";
+import { CookieImportDialog, cookieImportAvailable } from "../browser/cookie-import";
 import { browserScope } from "@/lib/team-browser";
 import { Card, ColRow, LinkRow, NoteRow } from "./rows";
 import { sameFields, sameItems, useStoreSelector } from "@/state/store-select";

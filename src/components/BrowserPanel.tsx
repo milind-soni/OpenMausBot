@@ -21,7 +21,7 @@ import { passkeyWallAt } from "../../shared/passkey-wall";
 import { browserScope, withBrowserScope } from "@/lib/team-browser";
 import { followBounds } from "@/lib/follow-bounds";
 import { useNativeViewObscured } from "@/lib/native-view-obscured";
-import { CookieImportDialog, cookieImportAvailable, siteOfAddress } from "./browser/CookieImportDialog";
+import { CookieImportDialog, cookieImportAvailable, siteOfAddress } from "./browser/cookie-import";
 
 const BrowserDesktop = lazy(() => import("./browser/BrowserDesktop").then((module) => ({ default: module.BrowserDesktop })));
 

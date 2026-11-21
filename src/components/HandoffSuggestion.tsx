@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Copy, Loader2, RefreshCw, X } from "lucide-react";
 
-import { appForSite } from "../../shared/app-sites";
 import type { ComputerHelpRef } from "../../shared/wire";
 import { appSwitchPatch, botAppScope } from "@/lib/bot-app-access";
 import { loadAppCatalog } from "@/lib/app-catalog-cache";
@@ -15,7 +14,7 @@ import { mcpSignInLink } from "@/lib/mcp-sign-in";
 import { answerSignIn } from "@/lib/sign-in";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { browserScope } from "@/lib/team-browser";
-import { cookieImportAvailable } from "./browser/CookieImportDialog";
+import { cookieImportAvailable } from "./browser/cookie-import";
 import { api } from "@/state/store";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { ASK_DARK_PRIMARY, ASK_QUIET_BUTTON } from "./AskCard";
@@ -38,7 +37,14 @@ const readStatus = (slug: string): Promise<ConnectorStatus | undefined> =>
 
 /** The app a waiting sign-in could use instead, once the catalogue lists it and the bot does not have it yet. */
 export function useSuggestedApp(site: string, botId: string): { card: ToolkitCard; status: ConnectorStatus | undefined } | null {
-  const slug = appForSite(site);
+  // The matcher reads the public-suffix list, which the launch bundle leaves out: it loads with the first request card.
+  const [matched, setMatched] = useState<{ site: string; slug: string | null } | null>(null);
+  useEffect(() => {
+    let live = true;
+    void import("../../shared/app-sites").then(({ appForSite }) => { if (live) setMatched({ site, slug: appForSite(site) }); }, () => undefined);
+    return () => { live = false; };
+  }, [site]);
+  const slug = matched?.site === site ? matched.slug : null;
   const bot = useStoreSelector((state) => state.bots.find((one) => one.id === botId));
   const [found, setFound] = useState<{ card: ToolkitCard; status: ConnectorStatus | undefined } | null>(null);
   useEffect(() => {
