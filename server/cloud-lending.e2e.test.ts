@@ -73,10 +73,13 @@ const readTurns = () => new Map(readdirSync(turnDumps()).filter((name) => name.e
   try { return [[name, readFileSync(join(turnDumps(), name), "utf8")] as const]; } catch { return []; }
 }));
 
-/** Each engine process dumps its own turn, so the turns a restart resumes never take the place of this one. */
-async function agentsFor(start: () => Promise<void>, botId: string, threadId?: string) {
+/** Each engine process dumps its own turn, so the turns a restart resumes never take the place of this one. `threadId`
+ * may be found only once `start` is done (a routine's run, whose conversation the scheduler makes): the wait for the
+ * turn then starts from there. */
+async function agentsFor(start: () => Promise<void>, botId: string, threadId?: string | (() => Promise<string>)) {
   const before = readTurns();
   await start();
+  if (typeof threadId === "function") threadId = await threadId();
   await expect.poll(() => {
     for (const [name, text] of readTurns()) {
       if (before.get(name) === text) continue;
@@ -90,7 +93,7 @@ async function agentsFor(start: () => Promise<void>, botId: string, threadId?: s
   return turn.mcpConfig.mcpServers.agents;
 }
 
-async function proxyFor(start: () => Promise<void>, botId: string, threadId?: string) {
+async function proxyFor(start: () => Promise<void>, botId: string, threadId?: Parameters<typeof agentsFor>[2]) {
   const agents = await agentsFor(start, botId, threadId);
   const proxy = spawn(agents.command, agents.args, { env: { PATH: process.env.PATH, HOME: home, ...agents.env }, stdio: ["pipe", "pipe", "pipe"] });
   proxies.push(proxy);
@@ -661,15 +664,24 @@ it("a routine the bot changes in the owner's own chat keeps the lent computer on
     expect((await api("POST", `/api/bots/${bot.id}/messages`, { token: owner, body: { text, threadId: bot.threadId } })).status).toBe(202);
   }, bot.id, bot.threadId);
   const stop = async () => expect((await api("POST", `/api/bots/${bot.id}/interrupt`, { token: owner, body: { threadId: bot.threadId } })).status).toBe(200);
-  const runs = async () => (await api("GET", "/api/routines", { token: owner })).body.runs as Array<{ id: string; routineId: string; status: string; threadId?: string; triggerSource?: string; error?: string; partial?: boolean }>;
-  /** A run `start` begins (Run now by default; a schedule, after what `start` does): its tools, and its row once its turn ends well. */
+  type Row = { id: string; routineId: string; status: string; threadId?: string; triggerSource?: string; error?: string; partial?: boolean; attention?: string };
+  const runs = async () => (await api("GET", "/api/routines", { token: owner })).body.runs as Row[];
+  const seen = new Set<string>();
+  /** A run `start` begins (Run now by default; a schedule, after what `start` does): its tools, and its row once its turn
+   * ends well. It waits for the run itself to start, however long the scheduler or a busy bot holds it, and only then for
+   * that run's own turn. */
   const runOf = async (routineId: string, start = async () => { expect((await api("POST", `/api/routines/${routineId}/run`, { token: owner })).status).toBe(201); }) => {
-    const call = await proxyFor(start, bot.id);
-    const dump = turnDump, threadId = turn.mcpConfig.mcpServers.agents.env.OMB_THREAD_ID;
-    // The turn these tools belong to is this run's own.
-    const started = (await runs()).find((run) => run.routineId === routineId && run.threadId === threadId && ["running", "waiting"].includes(run.status));
-    expect(started).toBeTruthy();
-    const runId = started!.id;
+    let started: Row | undefined;
+    const call = await proxyFor(start, bot.id, async () => {
+      await expect.poll(async () => {
+        const mine = (await runs()).filter((run) => run.routineId === routineId && !seen.has(run.id));
+        started = mine.find((run) => run.threadId && ["running", "waiting"].includes(run.status));
+        return started ? "started" : JSON.stringify(mine.map(({ status, attention, error }) => ({ status, attention, error })));
+      }, { timeout: hostTimeout(90_000), interval: 250 }).toBe("started");
+      seen.add(started!.id);
+      return started!.threadId!;
+    });
+    const dump = turnDump, runId = started!.id;
     return { call, runId, trigger: started!.triggerSource, ended: async () => {
       finish(dump);
       let row: Awaited<ReturnType<typeof runs>>[number] | undefined;
