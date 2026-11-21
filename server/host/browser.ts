@@ -543,6 +543,15 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       const browser = threadBrowser(threadId);
       if (browser?.session !== undefined && browser.spec) void closeForMemory(browser.session, browser.spec);
     },
+    reclaimUnused: () => {
+      let closing = 0;
+      for (const [session, spec] of usedBrowserSessions) {
+        if (!turnResources.free(`browser:${session}`) || !browserRunning(session, spec)) continue;
+        closing += 1;
+        void browserRuntime.closeUnused(session, spec).then((closed) => { if (closed) console.info(`browser ${session}: closed to free memory, no task was using it`); }, () => undefined);
+      }
+      return closing;
+    },
   };
   deps.engineMemory?.useBrowsers(engineBrowsers);
   /** A deleted bot's or profile's browser on the new engine, whatever the flag says now. */

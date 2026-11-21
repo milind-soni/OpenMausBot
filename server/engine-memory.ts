@@ -41,6 +41,10 @@ export const BOT_TURN_GIVES_WAY_MS = 5 * 60_000;
 /** A minute counts as stalled on memory when every task that could run waited on memory this much of ten seconds (the
  * kernel's `full avg10`, in percent). */
 const STALL_PERCENT = 20;
+/** Every task stalled on memory this much of the time, with room below the floor: the machine is thrashing. A Cloud home
+ * that does stops answering, and its Admin restarts it within minutes, every turn with it (Nov 2026: 75 of 112 restarts
+ * on Fly in a week, 58 of them 2 GB homes without swap, memory available 7 MB and the stall 70% at the median). */
+const THRASH_PERCENT = 40;
 const MINUTE_MS = 60_000, DAY_MINUTES = 24 * 60;
 /** Engines that run each thread's turns in processes of their own. */
 export const ENGINE_PROCESS_KINDS: ReadonlySet<string> = new Set(["claudeAgent", "codex", "opencodeGo", "grokAgent", "geminiAgent", "kimiAgent",
@@ -170,6 +174,8 @@ export interface EngineBrowsers {
   running(threadId: string): boolean;
   /** This thread's engine was stopped for memory: its browser can close too once no turn holds it. */
   stopped(threadId: string): void;
+  /** Closes every running browser no turn holds and no call runs in, before its idle time is up; how many it is closing. */
+  reclaimUnused?(): number;
 }
 
 /** A plan's limit on how many turns run at once, whatever memory allows. */
@@ -570,8 +576,10 @@ export class EngineMemory {
   /** The last day's memory pressure, for the Admin's health check (cloud-health.ts): times only, never what ran. */
   dayPressure(): RoomReport { return this.ledger.read(this.now(), this.waitingSince.values()); }
 
-  /** Every couple of seconds while engines run: notes short memory against the running turns, and stops an engine before
-   * the machine runs out: an idle one first, else the newest of two or more busy ones. */
+  /** Every couple of seconds while engines run: notes short memory against the running turns, and makes room before the
+   * machine runs out: an idle engine first, then the browsers no turn is using, then the newest of two or more busy
+   * engines; the only busy one only once the machine thrashes (THRASH_PERCENT), when the restart that follows would stop
+   * it and everything else. */
   tick(): void {
     try { this.idleSweep?.(); } catch (error) { this.log(`idle sweep failed: ${error instanceof Error ? error.message : String(error)}`); }
     const memory = this.read();
@@ -581,11 +589,22 @@ export class EngineMemory {
     if (this.kernelKilled(memory.oomKills)) return;
     const free = this.free(memory), count = this.busy();
     if (free < this.floor(memory)) for (const threadId of this.active) this.pressure.set(threadId, Math.max(this.pressure.get(threadId) ?? 1, count));
-    const critical = free < Math.max(160 * MB, memory.totalBytes * 0.04) || ((memory.fullStall10 ?? 0) >= 40 && free < this.floor(memory));
+    const thrashing = (memory.fullStall10 ?? 0) >= THRASH_PERCENT && free < this.floor(memory);
+    const critical = free < Math.max(160 * MB, memory.totalBytes * 0.04) || thrashing;
     if (!critical || this.now() - this.lastRelief < RELIEF_COOLDOWN_MS) return;
     const idle = this.idle();
+    if (!idle) {
+      // A browser no turn is using goes before any turn does: its idle time may be minutes away.
+      let closing = 0;
+      try { closing = this.browsers?.reclaimUnused?.() ?? 0; } catch {}
+      if (closing > 0) {
+        this.lastRelief = this.now();
+        this.log(`closing ${closing} browser${closing === 1 ? "" : "s"} no task is using to make room; ${tasks(this.busy())} running`);
+        return;
+      }
+    }
     const newest = [...this.engines.values()].filter((engine) => !engine.stopping && this.working(engine).length).sort((a, b) => b.startedAt - a.startedAt);
-    const victim = idle ?? (newest.length >= 2 ? newest[0]! : null);
+    const victim = idle ?? (newest.length >= 2 || (thrashing && newest.length === 1) ? newest[0]! : null);
     if (!victim) return;
     this.lastRelief = this.now();
     if (idle) { void this.stop(victim, "idle"); return; }

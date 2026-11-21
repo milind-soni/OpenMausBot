@@ -370,6 +370,56 @@ describe("running short", () => {
     expect(h.memory.stopText("a")).toBeNull();
   });
 
+  it("stops the only busy engine once the machine thrashes, where the restart that follows would stop everything", async () => {
+    const h = host();
+    h.memory.turnStarted("a"); h.spawn("a");
+    h.state.available = 100 * MB + 700 * MB;
+    // Short, but not stalled: the only busy engine keeps running.
+    h.state.fullStall10 = 10;
+    h.memory.tick();
+    await settle();
+    expect(h.signals).toEqual([]);
+    // Every task stalled on memory most of the time: it goes, and its turn says why.
+    h.state.fullStall10 = 70;
+    h.memory.tick();
+    await settle();
+    expect(h.signals).toEqual(["SIGKILL -1000"]);
+    expect(h.memory.stopText("a")).toBe(memoryStopText(false));
+  });
+
+  it("closes the browsers no task is using before it stops a busy engine", async () => {
+    const h = host();
+    let unused = 1, asked = 0;
+    h.memory.useBrowsers({ starts: () => false, running: () => false, stopped: () => undefined, reclaimUnused: () => { asked += 1; const closing = unused; unused = 0; return closing; } });
+    for (const thread of ["a", "b"]) { h.memory.turnStarted(thread); h.spawn(thread); h.advance(1_000); }
+    h.state.available = 100 * MB + 2 * 700 * MB;
+    h.memory.tick();
+    await settle();
+    expect([asked, h.signals]).toEqual([1, []]);
+    expect(h.logs.at(-1)).toBe("closing 1 browser no task is using to make room; 2 tasks running");
+    // Within the cooldown nothing more; past it, still short and no browser left to close: the newest busy engine goes.
+    h.memory.tick();
+    await settle();
+    expect(asked).toBe(1);
+    h.advance(20_000);
+    h.memory.tick();
+    await settle();
+    expect([asked, h.signals]).toEqual([2, ["SIGKILL -1001"]]);
+  });
+
+  it("stops an idle engine before closing any browser", async () => {
+    const h = host();
+    let asked = 0;
+    h.memory.useBrowsers({ starts: () => false, running: () => false, stopped: () => undefined, reclaimUnused: () => { asked += 1; return 1; } });
+    h.memory.turnStarted("a"); h.spawn("a");
+    h.memory.turnStarted("b"); h.spawn("b");
+    h.memory.turnEnded("b");
+    h.state.available = 100 * MB + 2 * 700 * MB;
+    h.memory.tick();
+    await settle();
+    expect([asked, h.signals]).toEqual([0, ["SIGTERM -1001"]]);
+  });
+
   it("lets the memory the kernel's OOM killer just freed come back before stopping anything itself", async () => {
     const h = host({ tickMs: 60_000 });
     for (const thread of ["a", "b", "c"]) { h.memory.turnStarted(thread); h.spawn(thread); h.advance(1_000); }
