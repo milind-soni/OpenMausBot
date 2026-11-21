@@ -111,33 +111,40 @@ export class SecretsManagerClient {
   /** Every secret the machine account reads, by id and name; no value is read. */
   async list(): Promise<SecretName[]> {
     const { answer, key } = await this.call("GET", (session) => `/organizations/${session.organizationId}/secrets`);
-    const secrets = (answer as { secrets?: unknown } | null)?.secrets;
-    return (Array.isArray(secrets) ? secrets as Array<{ id?: unknown; key?: unknown }> : []).flatMap((secret) =>
+    const secrets = (this.parse(answer) as { secrets?: unknown } | null)?.secrets;
+    if (!Array.isArray(secrets)) throw new SecretsApiError("unreadable");
+    return (secrets as Array<{ id?: unknown; key?: unknown }>).flatMap((secret) =>
       typeof secret?.id === "string" && UUID.test(secret.id) ? [{ id: secret.id, name: decryptText(secret.key, key) }] : []);
   }
 
   /** The secrets named, decrypted; one the account no longer reads is left out. */
   async get(ids: readonly string[]): Promise<SecretValue[]> {
     const found: SecretValue[] = [];
-    for (let start = 0; start < ids.length; start += BATCH) {
-      const { answer, key } = await this.call("POST", () => "/secrets/get-by-ids", { ids: ids.slice(start, start + BATCH) });
-      const data = (answer as { data?: unknown } | null)?.data;
-      for (const secret of Array.isArray(data) ? data as Array<{ id?: unknown; key?: unknown; value?: unknown; note?: unknown }> : []) {
-        if (typeof secret?.id !== "string") continue;
-        found.push({ id: secret.id, name: decryptText(secret.key, key), value: decryptText(secret.value, key), note: secret.note ? decryptText(secret.note, key) : "" });
-      }
-    }
+    for (let start = 0; start < ids.length; start += BATCH) found.push(...await this.getBatch(ids.slice(start, start + BATCH)));
     return found;
   }
 
-  /** Signs in again once when the bearer token was refused. `answer` is null for a 404. */
-  private async call(method: "GET" | "POST", path: (session: Session) => string, body?: unknown): Promise<{ answer: unknown; key: SecretsKey }> {
+  /** Bitwarden refuses a whole batch with 404 when one secret in it is gone, so a refused batch is read again in halves. */
+  private async getBatch(ids: readonly string[]): Promise<SecretValue[]> {
+    const { answer, key } = await this.call("POST", () => "/secrets/get-by-ids", { ids });
+    if (answer.status === 404) {
+      if (ids.length < 2) return [];
+      const half = Math.ceil(ids.length / 2);
+      return [...await this.getBatch(ids.slice(0, half)), ...await this.getBatch(ids.slice(half))];
+    }
+    const data = (this.parse(answer) as { data?: unknown } | null)?.data;
+    if (!Array.isArray(data)) throw new SecretsApiError("unreadable");
+    return (data as Array<{ id?: unknown; key?: unknown; value?: unknown; note?: unknown }>).flatMap((secret) => typeof secret?.id === "string"
+      ? [{ id: secret.id, name: decryptText(secret.key, key), value: decryptText(secret.value, key), note: secret.note ? decryptText(secret.note, key) : "" }] : []);
+  }
+
+  /** Signs in again once when the bearer token was refused. */
+  private async call(method: "GET" | "POST", path: (session: Session) => string, body?: unknown): Promise<{ answer: { status: number; text: string }; key: SecretsKey }> {
     for (let attempt = 0; ; attempt++) {
       const session = await this.signIn();
       const answer = await this.send(`${this.server.api}${path(session)}`, method, { authorization: `Bearer ${session.bearer}`, ...(body ? { "content-type": "application/json" } : {}) },
         body ? JSON.stringify(body) : undefined);
-      if (answer.status === 404) return { answer: null, key: session.key };
-      if (answer.status !== 401 || attempt > 0) return { answer: this.parse(answer), key: session.key };
+      if (answer.status !== 401 || attempt > 0) return { answer, key: session.key };
       if (this.session === session) this.session = null;
     }
   }

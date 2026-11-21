@@ -12,7 +12,8 @@ import { parseAccessToken, SecretsApiError, SecretsManagerClient, type SecretsFe
 
 const ID_PREFIX = "bitwarden-secrets:";
 const STALE_MS = 10 * 60_000;
-const MAX_ITEMS = 1_000;
+/** Secrets past this many are still listed by name; only these have their notes read for logins. */
+const NOTES_MAX = 1_000;
 const HOSTS_MAX = 20;
 /** A note line naming a login's site (`url:` or `site:`), its username or its 2FA key, as `<word>: <text>`. */
 const NOTE_LINE = /^\s*(url|site|username|totp)\s*:\s*(\S.*?)\s*$/iu;
@@ -71,6 +72,8 @@ interface LoginEntry extends LoginPlace { id: string; secretId: string; username
 
 const hostOf = (serverUrl: string) => { try { return new URL(serverUrl).host; } catch { return serverUrl; } };
 const sameText = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+const sameConnection = (a: BitwardenSecretsCredentials | null, b: BitwardenSecretsCredentials) => a?.serverUrl === b.serverUrl && a.accessToken === b.accessToken;
+interface Catalog { logins: LoginEntry[]; entries: Map<string, Entry> }
 
 export class BitwardenSecrets implements VaultProvider {
   readonly id = "bitwarden-secrets";
@@ -106,11 +109,25 @@ export class BitwardenSecrets implements VaultProvider {
     return this.credentials() ? this.error?.failure : undefined;
   }
 
-  refresh(candidate?: BitwardenSecretsCredentials): Promise<BitwardenSecretsStatus> {
-    if (!candidate && this.refreshing) return this.refreshing;
-    const run = this.load(candidate).finally(() => { if (this.refreshing === run) this.refreshing = null; });
-    if (!candidate) this.refreshing = run;
+  /** Reads the saved connection's list again. */
+  refresh(): Promise<BitwardenSecretsStatus> {
+    if (this.refreshing) return this.refreshing;
+    const run = this.load().finally(() => { if (this.refreshing === run) this.refreshing = null; });
+    this.refreshing = run;
     return run;
+  }
+
+  /** Checks a new connection by reading its list; it replaces the current one only once `save` has kept its token. */
+  async connect(candidate: BitwardenSecretsCredentials, save: () => void): Promise<BitwardenSecretsStatus> {
+    const generation = ++this.generation;
+    let catalog: Catalog;
+    try { catalog = await this.catalog(candidate); }
+    catch (error) { throw problemOf(error); }
+    // A connection made or cleared meanwhile wins; a connect it overtook keeps nothing.
+    if (generation !== this.generation) throw new BitwardenSecretsProblem("unavailable");
+    save();
+    this.publish(catalog);
+    return this.status();
   }
 
   async fresh(): Promise<void> {
@@ -137,50 +154,57 @@ export class BitwardenSecrets implements VaultProvider {
     return this.client.client;
   }
 
-  private async load(candidate?: BitwardenSecretsCredentials): Promise<BitwardenSecretsStatus> {
-    const credentials = candidate ?? this.credentials();
-    if (!credentials) { this.clear(); return this.status(); }
-    const generation = candidate ? ++this.generation : this.generation;
-    try {
-      const client = this.clientFor(credentials);
-      const names = (await client.list()).slice(0, MAX_ITEMS);
-      // Notes say which secrets are logins; every value in this answer is dropped here and read again when a bot uses it.
-      const secrets = await client.get(names.map((secret) => secret.id));
-      // A connection made or cleared meanwhile wins; a connect it overtook keeps nothing.
-      if (generation !== this.generation) {
-        if (candidate) throw new BitwardenSecretsProblem("unavailable");
-        return this.status();
+  /** Every listed secret by name; the first NOTES_MAX are read for their notes, which say which are logins. */
+  private async catalog(credentials: BitwardenSecretsCredentials): Promise<Catalog> {
+    const client = this.clientFor(credentials);
+    const names = await client.list();
+    // Every value in this answer is dropped here and read again when a bot uses it.
+    const notes = new Map((await client.get(names.slice(0, NOTES_MAX).map((secret) => secret.id))).map((secret) => [secret.id, secret.note]));
+    const logins: LoginEntry[] = [];
+    const entries = new Map<string, Entry>();
+    for (const secret of names) {
+      const login = loginFromNote(notes.get(secret.id) ?? "");
+      entries.set(secret.id, { secretId: secret.id, name: secret.name.trim() || "Untitled", login: Boolean(login) });
+      if (!login) continue;
+      const sites = new Map<string, string[]>();
+      for (const host of login.hosts) sites.set(loginSite(host), [...(sites.get(loginSite(host)) ?? []), host]);
+      for (const [site, hosts] of sites) {
+        logins.push({ id: `${ID_PREFIX}${secret.id}:${site}`, secretId: secret.id, site, hosts, exactHost: false, username: login.username, hasTotp: Boolean(parseTotpKey(login.totp)) });
       }
-      const logins: LoginEntry[] = [];
-      const entries = new Map<string, Entry>();
-      for (const secret of secrets) {
-        const login = loginFromNote(secret.note);
-        entries.set(secret.id, { secretId: secret.id, name: secret.name.trim() || "Untitled", login: Boolean(login) });
-        if (!login) continue;
-        const sites = new Map<string, string[]>();
-        for (const host of login.hosts) sites.set(loginSite(host), [...(sites.get(loginSite(host)) ?? []), host]);
-        for (const [site, hosts] of sites) {
-          logins.push({ id: `${ID_PREFIX}${secret.id}:${site}`, secretId: secret.id, site, hosts, exactHost: false, username: login.username, hasTotp: Boolean(parseTotpKey(login.totp)) });
-        }
-      }
-      this.logins = logins.sort((a, b) => a.site.localeCompare(b.site) || a.username.localeCompare(b.username));
-      this.entries = entries;
-      this.refreshedAt = this.now();
-      this.error = undefined;
-      return this.status();
-    } catch (error) {
-      const problem = problemOf(error);
-      if (candidate) throw problem;
-      if (generation === this.generation) this.error = problem;
-      return this.status();
     }
+    return { logins: logins.sort((a, b) => a.site.localeCompare(b.site) || a.username.localeCompare(b.username)), entries };
+  }
+
+  private publish(catalog: Catalog): void {
+    this.logins = catalog.logins;
+    this.entries = catalog.entries;
+    this.refreshedAt = this.now();
+    this.error = undefined;
+  }
+
+  private async load(): Promise<BitwardenSecretsStatus> {
+    const credentials = this.credentials();
+    if (!credentials) { this.clear(); return this.status(); }
+    const generation = this.generation;
+    // A list read for a connection that was replaced or cleared meanwhile is never kept.
+    const current = () => generation === this.generation && sameConnection(this.credentials(), credentials);
+    try {
+      const catalog = await this.catalog(credentials);
+      if (current()) this.publish(catalog);
+    } catch (error) {
+      if (current()) this.error = problemOf(error);
+    }
+    return this.status();
   }
 
   private async secret(secretId: string): Promise<SecretValue | null> {
     const credentials = this.credentials();
     if (!credentials) return null;
-    try { return (await this.clientFor(credentials).get([secretId])).find((secret) => secret.id === secretId) ?? null; }
+    let found: SecretValue | null;
+    try { found = (await this.clientFor(credentials).get([secretId])).find((secret) => secret.id === secretId) ?? null; }
     catch (error) { throw problemOf(error); }
+    // Security: a value that arrives after its connection was removed or replaced is dropped.
+    return sameConnection(this.credentials(), credentials) ? found : null;
   }
 
   private secretOf(entry: Entry): LinkedSecret {
@@ -215,8 +239,10 @@ export class BitwardenSecrets implements VaultProvider {
     const login = this.logins.find((entry) => entry.id === itemId);
     if (login) {
       const secret = await this.secret(login.secretId);
-      if (!secret?.value) return {};
-      return { password: secret.value, totp: parseTotpKey(loginFromNote(secret.note)?.totp) };
+      const note = secret ? loginFromNote(secret.note) : null;
+      // Security: the note may name another site by now; the password goes only to the site it still names.
+      if (!secret?.value || !note?.hosts.some((host) => loginSite(host) === login.site)) return {};
+      return { password: secret.value, totp: parseTotpKey(note.totp) };
     }
     const id = itemId.startsWith(ID_PREFIX) ? itemId.slice(ID_PREFIX.length) : "";
     if (!this.entries.has(id)) return {};

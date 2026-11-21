@@ -55,8 +55,8 @@ the API key or the master password.
 
 A second row, *Bitwarden Secrets Manager*, connects a machine account by its access token
 (`server/host/bitwarden-secrets.ts`). An admin picks the server (the same three choices) and pastes a token from Secrets
-Manager → Machine accounts → Access tokens. The machine account's projects are the boundary: every bot may use what it
-reads, so it should read only what bots should.
+Manager → Machine accounts → Access tokens. What the machine account reads is the boundary, through the projects it is
+given and any secret granted to it directly: every bot may use what it reads, so it should read only what bots should.
 
 - **Its own client.** `server/host/bitwarden-secrets-api.ts` speaks Secrets Manager's public HTTP API with Node's crypto,
   no `bws` and no Bitwarden SDK: it signs in at `<identity>/connect/token` (`client_credentials`, scope `api.secrets`),
@@ -73,8 +73,10 @@ reads, so it should read only what bots should.
 - **Secrets by name**: every other secret, by its name (its key in Secrets Manager).
 - **References**: `bws://<secret id or name>` reaches any secret the machine account reads, resolved where `op://` and
   `bw://` are. A name two secrets share is refused (use the id).
-- The list is read at most every 10 minutes, or on Refresh; its values are dropped at once. A value is read from
-  Bitwarden when a bot uses it, and masked like any other.
+- The list is read at most every 10 minutes, or on Refresh. Reading it decrypts every listed secret, value included, to
+  see which notes name a site; those values are dropped at once. A value is read from Bitwarden again when a bot uses it,
+  and masked like any other. Every secret is listed by name, but only the first 1,000 are read for notes, so a login past
+  them shows as a secret by name.
 - On a Team Cloud only an admin connects it, for the whole team; a member's Vault shows
   `bitwardenSecrets: { connected: false }`. The Admin's signed report does not list it yet.
 

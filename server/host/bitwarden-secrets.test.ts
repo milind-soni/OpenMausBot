@@ -17,8 +17,8 @@ import { encryptForBitwarden, fakeBws, type FakeBwsSecret } from "../testing/fak
 import { parseTotpKey } from "../totp.ts";
 import { TEAM_READER, VaultStore } from "../vault-store.ts";
 import { findLinkedSecret, linkedCandidates, linkedSecrets, linkedSites, readLinkedSecret } from "../vault/providers.ts";
-import { BITWARDEN_SECRETS_BAD_TOKEN, BitwardenSecrets, loginFromNote, parseBitwardenSecretsReference } from "./bitwarden-secrets.ts";
-import { accessTokenKey, decryptEncString, parseAccessToken, SecretsApiError, secretsServer } from "./bitwarden-secrets-api.ts";
+import { BITWARDEN_SECRETS_BAD_TOKEN, BitwardenSecrets, BitwardenSecretsProblem, loginFromNote, parseBitwardenSecretsReference } from "./bitwarden-secrets.ts";
+import { accessTokenKey, decryptEncString, parseAccessToken, SecretsApiError, SecretsManagerClient, secretsServer, type SecretsFetch } from "./bitwarden-secrets-api.ts";
 
 // Obvious fakes only; no network.
 const SERVER = "https://vault.bitwarden.com";
@@ -92,7 +92,7 @@ describe("a Secrets Manager access token", () => {
 describe("Bitwarden Secrets Manager in the Vault", () => {
   it("connects with the access token and lists a secret whose note names a site as a login, the others by name, never a value", async () => {
     const { vault, fake } = setup();
-    expect(await vault.refresh({ serverUrl: SERVER, accessToken: fake.accessToken })).toEqual({ connected: true, server: "vault.bitwarden.com", items: 4 });
+    expect(await vault.connect({ serverUrl: SERVER, accessToken: fake.accessToken }, () => {})).toEqual({ connected: true, server: "vault.bitwarden.com", items: 4 });
     expect(fake.state.calls).toEqual(["POST identity/connect/token", expect.stringMatching(/^GET api\/organizations\/[0-9a-f-]{36}\/secrets$/u), "POST api/secrets/get-by-ids"]);
     const text = JSON.stringify(vault.items());
     for (const value of [GITHUB_PASSWORD, STRIPE_KEY, "JBSWY3DPEHPK3PXP", "fake-twin-1", fake.accessToken]) expect(text).not.toContain(value);
@@ -132,7 +132,9 @@ describe("Bitwarden Secrets Manager in the Vault", () => {
     for (const pick of ["revoked", "wrongSeed"] as const) {
       const { vault, fake, setSaved } = setup();
       setSaved(null);
-      await expect(vault.refresh({ serverUrl: SERVER, accessToken: fake[pick] }), pick).rejects.toThrow(BITWARDEN_SECRETS_BAD_TOKEN);
+      const save = vi.fn();
+      await expect(vault.connect({ serverUrl: SERVER, accessToken: fake[pick] }, save), pick).rejects.toThrow(BITWARDEN_SECRETS_BAD_TOKEN);
+      expect(save).not.toHaveBeenCalled();
       expect(vault.items()).toEqual([]);
       expect(vault.status()).toEqual({ connected: false });
     }
@@ -172,6 +174,82 @@ describe("Bitwarden Secrets Manager in the Vault", () => {
     open();
     await reading;
     expect(vault.items()).toEqual([]);
+  });
+
+  it("reads the others of a batch when Bitwarden refuses it for one secret that is gone", async () => {
+    const fake = fakeBws({ secrets: SECRETS });
+    const client = new SecretsManagerClient({ serverUrl: SERVER, token: parseAccessToken(fake.accessToken)!, fetch: fake.fetch });
+    const ids = fake.secrets.map((secret) => secret.id);
+    const gone = "00000000-0000-4000-8000-000000000000";
+    expect((await client.get([ids[0]!, gone, ids[1]!])).map((secret) => secret.value)).toEqual([GITHUB_PASSWORD, STRIPE_KEY]);
+    expect(await client.get([gone])).toEqual([]);
+  });
+
+  it("says Bitwarden could not be read, and keeps nothing, when the list answer is not a list", async () => {
+    for (const answer of [{ status: 200, body: {} }, { status: 404, body: {} }]) {
+      const fake = fakeBws({ secrets: SECRETS });
+      const fetch: SecretsFetch = (url, init) => (url.includes("/organizations/") ? Promise.resolve({ status: answer.status, text: async () => JSON.stringify(answer.body) }) : fake.fetch(url, init));
+      const vault = new BitwardenSecrets({ credentials: () => null, fetch });
+      const save = vi.fn();
+      await expect(vault.connect({ serverUrl: SERVER, accessToken: fake.accessToken }, save), String(answer.status)).rejects.toThrow(BitwardenSecretsProblem);
+      expect(save).not.toHaveBeenCalled();
+    }
+  });
+
+  it("lists every secret by name past the first 1,000, which are the ones read for login notes", async () => {
+    const many = Array.from({ length: 1_001 }, (_, index) => ({ key: `KEY_${index}`, value: `fake-value-${index}` }));
+    const { vault, fake } = setup(many);
+    expect((await vault.refresh()).items).toBe(1_001);
+    expect(fake.state.calls.filter((call) => call === "POST api/secrets/get-by-ids")).toHaveLength(10);
+    expect(await readLinkedSecret(findLinkedSecret([vault], `bws://${fake.secrets[1_000]!.id}`, "pepper")!)).toBe("fake-value-1000");
+  });
+
+  it("keeps the connection it had when the new token could not be saved, and a list read for the old one never replaces the new", async () => {
+    const old = fakeBws({ secrets: SECRETS });
+    const next = fakeBws({ secrets: [{ key: "NEXT_KEY", value: "fake-next" }], serverUrl: "https://bw.example.test" });
+    const fetch: SecretsFetch = (url, init) => (url.startsWith("https://bw.example.test") ? next.fetch(url, init) : old.fetch(url, init));
+    let saved = { serverUrl: SERVER, accessToken: old.accessToken };
+    const vault = new BitwardenSecrets({ credentials: () => saved, fetch });
+    await vault.refresh();
+    const nextCredentials = { serverUrl: "https://bw.example.test", accessToken: next.accessToken };
+    await expect(vault.connect(nextCredentials, () => { throw new Error("disk full"); })).rejects.toThrow("disk full");
+    expect(linkedSecrets(vault).map((secret) => secret.name).sort()).toEqual(["STRIPE_KEY", "Twin", "twin"]);
+    expect(vault.status()).toMatchObject({ server: "vault.bitwarden.com" });
+
+    let open!: () => void;
+    const connecting = vault.connect(nextCredentials, () => { saved = nextCredentials; });
+    old.state.gate = new Promise((done) => { open = done; });
+    const oldList = vault.refresh();
+    await connecting;
+    open();
+    await oldList;
+    expect(linkedSecrets(vault).map((secret) => secret.name)).toEqual(["NEXT_KEY"]);
+  });
+
+  it("drops a value that arrives after it was disconnected", async () => {
+    const { vault, fake, setSaved } = setup();
+    await vault.refresh();
+    const stripe = findLinkedSecret([vault], "STRIPE_KEY", "pepper")!;
+    let open!: () => void;
+    try {
+      fake.state.gate = new Promise((done) => { open = done; });
+      const reading = readLinkedSecret(stripe);
+      setSaved(null);
+      vault.clear();
+      open();
+      await expect(reading).rejects.toThrow("no longer in");
+    } finally { open(); }
+  });
+
+  it("gives a login's password only to the site its note still names", async () => {
+    const { vault, fake } = setup();
+    await vault.refresh();
+    const [candidate] = linkedCandidates(vault, "github.com", "pepper");
+    fake.secrets[0]!.note = "url: https://other.example\nusername: deploy-bot";
+    await expect(candidate!.secrets()).rejects.toThrow("no longer in");
+    fake.secrets[0]!.note = "url: https://github.com/session\nusername: deploy-bot";
+    fake.secrets[0]!.value = "fake-rotated-Passw0rd";
+    expect((await candidate!.secrets()).password, "a new password on the same site").toBe("fake-rotated-Passw0rd");
   });
 
   it("reads a login only from the note's url: or site: lines, its username and 2FA key", () => {
@@ -250,17 +328,19 @@ describe("Settings → Vault → Bitwarden Secrets Manager", () => {
     let open!: () => void;
     fake.state.gate = new Promise((done) => { open = done; });
     const connecting = call("POST", "/api/logins/bitwarden-secrets", { serverUrl: SERVER, accessToken: fake.accessToken });
-    await vi.waitFor(() => expect(fake.state.calls).toContain("POST identity/connect/token"));
-    expect((await call("DELETE", "/api/logins/bitwarden-secrets")).body).toEqual({ bitwardenSecrets: { connected: false } });
-    open();
+    try {
+      await vi.waitFor(() => expect(fake.state.calls).toContain("POST identity/connect/token"));
+      expect((await call("DELETE", "/api/logins/bitwarden-secrets")).body).toEqual({ bitwardenSecrets: { connected: false } });
+    } finally { open(); }
     expect((await connecting).status).toBe(400);
     expect(store.bitwardenSecretsCredentials()).toBeNull();
     expect((await call("GET", "/api/vault")).body).toMatchObject({ logins: [], secrets: [], bitwardenSecrets: { connected: false } });
   });
 
   it("shows a member nothing of it", async () => {
-    const { store, fake, call } = await serve(false);
-    store.setBitwardenSecretsCredentials({ serverUrl: SERVER, accessToken: fake.accessToken });
+    const { fake, logins, call } = await serve(false);
+    expect((await call("POST", "/api/logins/bitwarden-secrets", { serverUrl: SERVER, accessToken: fake.accessToken })).status).toBe(200);
+    expect(logins.linkedSecrets().map((secret) => secret.name)).toContain("STRIPE_KEY");
     const answer = await call("GET", "/api/vault");
     expect(answer.body).toMatchObject({ logins: [], secrets: [], bitwardenSecrets: { connected: false } });
     expect(answer.text).not.toContain("STRIPE_KEY");

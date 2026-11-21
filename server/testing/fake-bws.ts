@@ -60,6 +60,8 @@ export function fakeBws(options: { secrets: FakeBwsSecret[]; serverUrl?: string 
     if (init.method === "POST" && path === "api/secrets/get-by-ids") {
       const ids = (JSON.parse(init.body ?? "{}") as { ids?: string[] }).ids ?? [];
       const found = secrets.filter((secret) => ids.includes(secret.id));
+      // Bitwarden refuses the whole batch when any secret named is gone.
+      if (found.length !== new Set(ids).size) return reply(404, {});
       return reply(200, { data: found.map((secret) => ({ id: secret.id, organizationId, key: encryptForBitwarden(secret.key, key),
         value: encryptForBitwarden(secret.value, key), note: encryptForBitwarden(secret.note ?? "", key) })) });
     }

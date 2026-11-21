@@ -235,11 +235,7 @@ function bitwardenSecretsRoutes(store: VaultStore, secrets: BitwardenSecrets): N
   return {
     status: () => secrets.status(),
     list: () => { void secrets.fresh(); return secrets.items().flatMap(({ kind, ...item }) => (kind === "login" ? [item as LoginSummary] : [])); },
-    connect: async (credentials) => {
-      await secrets.refresh(credentials);
-      store.setBitwardenSecretsCredentials(credentials);
-      return secrets.status();
-    },
+    connect: (credentials) => secrets.connect(credentials, () => store.setBitwardenSecretsCredentials(credentials)),
     refresh: () => secrets.refresh(),
     disconnect: () => {
       store.setBitwardenSecretsCredentials(null);
