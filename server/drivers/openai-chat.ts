@@ -617,7 +617,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         const questionAllowed = !toolsOff && allowsTool(scope, { kind: "native", name: ASK_USER_TOOL });
           // An MCP server squatting ask_user cannot shadow it (dispatch intercepts the name); skip its definition.
         if (questionAllowed && !tools.definitions.some((definition) => definition.function.name === ASK_USER_TOOL)) {
-          tools.definitions.push(ASK_USER_TOOL_DEFINITION); tools.definitions.sort((a, b) => a.function.name.localeCompare(b.function.name));
+          tools.definitions.push(ASK_USER_TOOL_DEFINITION);
         }
         for (let round = 0; ; round++) {
           abort.signal.throwIfAborted();
