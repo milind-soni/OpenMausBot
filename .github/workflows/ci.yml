@@ -586,8 +586,10 @@ jobs:
           # Mirrors the local `pnpm broker:deploy` script so CI is the same
           # command a developer runs by hand. The token is created in the
           # Cloudflare dashboard with Workers Scripts:Edit on the broker
-          # account (plus D1 read, for the migration check above); store it as
-          # the CLOUDFLARE_API_TOKEN repo secret. The message names the commit,
+          # account, plus D1 Edit: the migration check above runs SQL through
+          # D1's query API (a `CREATE TABLE IF NOT EXISTS d1_migrations` and a
+          # read), which D1 Read does not allow. Store it as the
+          # CLOUDFLARE_API_TOKEN repo secret. The message names the commit,
           # so `wrangler deployments list` shows what is live.
           command: deploy --config cloudflare/composio-broker/wrangler.jsonc --message "main ${{ github.sha }} (CI ${{ github.event_name }})"
 
