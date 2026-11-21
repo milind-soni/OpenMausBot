@@ -562,7 +562,7 @@ export class AppTriggerManager {
         if (this.stopped) break;
         if (signal.aborted) continue;
         failures += 1;
-        const retry = error instanceof BrokerError && error.status === 409 && error.retryAfterS ? error.retryAfterS * 1000 : 0;
+        const retry = error instanceof BrokerError && (error.status === 409 || error.transient) && error.retryAfterS ? error.retryAfterS * 1000 : 0;
         await this.sleep(retry || Math.min(60_000, 1_000 * 2 ** Math.min(failures, 6)), this.abort.signal);
       }
     }
