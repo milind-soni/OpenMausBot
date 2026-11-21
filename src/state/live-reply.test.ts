@@ -12,7 +12,6 @@ import {
   resetLiveReplies,
   roomLiveSpeaker,
   settleLiveReplies,
-  stopLiveReply,
   streamedReply,
   withLiveRows,
 } from "./live-reply";
@@ -109,10 +108,6 @@ describe("a reply as it streams from an older server", () => {
     note({ type: "runtime.error", message: "a warning" } as Partial<RuntimeEvent>);
     expect(shown(), "a passing warning is no end").toEqual(["A third "]);
 
-    stopLiveReply("t");
-    expect(shown(), "what streamed before Stop stays, as an engine may keep it").toEqual(["A third "]);
-    delta("late words ");
-    expect(shown(), "the rest of a stopped item is not drawn").toEqual(["A third "]);
     note({ type: "turn.completed", ok: false } as Partial<RuntimeEvent>);
     expect(liveReplies("t"), "not kept: the turn's end removes it").toEqual([]);
     note({ type: "turn.started" });
@@ -154,6 +149,14 @@ describe("a reply as it streams from an older server", () => {
     delta("abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ done.");
     expect(shown()[0]).not.toContain("abcdefghijklmnopqrstuvwxyz");
     expect(liveReplyText({ text: "plain words", done: false })).toBe("plain ");
+  });
+
+  it("shows unspaced Chinese prose before completion while holding an unfinished credential", () => {
+    delta("这是第一段，");
+    expect(shown()).toEqual(["这是第一段，"]);
+    delta("这是第二段。sk-ant-api03-");
+    expect(shown()).toEqual(["这是第一段，这是第二段。"]);
+    expect(liveReplyText({ text: "网址 https://user:中文密码", done: false })).toBe("网址 ");
   });
 
   it("draws nothing for a client abort sentence", () => {

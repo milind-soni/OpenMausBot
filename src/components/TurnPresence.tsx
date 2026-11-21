@@ -43,10 +43,10 @@ export function useRotatingPhrase(
 
 const SHEEN_PERIOD_MS = 2000;
 
-function ShimmerPhrase({ text, className }: { text: string; className?: string }) {
-  const [delay] = useState(() => `-${Date.now() % SHEEN_PERIOD_MS}ms`);
+export function ShimmerPhrase({ text, className, periodMs = SHEEN_PERIOD_MS }: { text: string; className?: string; periodMs?: number }) {
+  const [delay] = useState(() => `-${Date.now() % periodMs}ms`);
   return (
-    <span className={cn("thinking-shimmer [grid-area:1/1]", className)} style={{ "--sheen-period": `${SHEEN_PERIOD_MS}ms`, "--sheen-delay": delay } as CSSProperties}>
+    <span className={cn("thinking-shimmer [grid-area:1/1]", className)} style={{ "--sheen-period": `${periodMs}ms`, "--sheen-delay": delay } as CSSProperties}>
       {text}
       <span aria-hidden="true" className="thinking-sheen"><span data-text={text} /></span>
     </span>

@@ -1,3 +1,4 @@
+import { StreamingText } from "./StreamingText";
 import { useEffect, useRef, useState } from "react";
 import { ExternalLink, Mic, MicOff, PhoneOff, RotateCcw, Settings, X } from "lucide-react";
 
@@ -177,7 +178,7 @@ export function LiveCallBar({ bot }: { bot: Bot }) {
         )}
         title={spoken || undefined}
       >
-        <bdi dir="ltr">{spoken}</bdi>
+        <bdi dir="ltr"><StreamingText text={spoken} /></bdi>
       </span>
       {view.hint && <span role="status" className="order-last w-full min-w-0 truncate text-[12px] text-warning" title={view.hint}>{view.hint}</span>}
       <span className="ml-auto flex shrink-0 items-center gap-1">

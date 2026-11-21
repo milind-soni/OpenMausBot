@@ -24,12 +24,6 @@ export interface LiveReplyItem {
   savedAs?: string;
 }
 
-interface ThreadReplies {
-  items: readonly LiveReplyItem[];
-  /** Deltas were missed (a stream gap or a Stop): later ones of the same item would draw a reply without its start. */
-  skipping: boolean;
-}
-
 /** True around a reply still streaming in: its actions wait for it to finish. */
 export const StreamingReplyContext = createContext(false);
 
@@ -40,23 +34,20 @@ const MAX_STREAMED = 500;
 /** A backstop: a thread nobody has on screen settles nothing, and a turn's start already drops the turns before it. */
 const MAX_ITEMS = 32;
 const EMPTY: readonly LiveReplyItem[] = [];
-const threads = new Map<string, ThreadReplies>();
+const threads = new Map<string, readonly LiveReplyItem[]>();
 const listeners = new Map<string, Set<() => void>>();
 const seenEvents = new Set<string>();
-const streamed = new Set<string>();
+const streamed = new Map<string, string>();
 /** Set when the stream restarted without the frames it missed; a thread then draws deltas only after its next item or
  * turn boundary, since any item open across the gap lost its start. */
 let gapped = false;
 const boundarySinceGap = new Set<string>();
 
-function put(threadId: string, next: ThreadReplies): void {
-  const current = threads.get(threadId);
-  if (current && current.items === next.items && current.skipping === next.skipping) return;
-  if (next.items.length > MAX_ITEMS) next = { ...next, items: next.items.slice(-MAX_ITEMS) };
+function put(threadId: string, items: readonly LiveReplyItem[]): void {
+  if ((threads.get(threadId) ?? EMPTY) === (items.length ? items : EMPTY)) return;
   threads.delete(threadId);
-  if (next.items.length || next.skipping) threads.set(threadId, next);
+  if (items.length) threads.set(threadId, items.length > MAX_ITEMS ? items.slice(-MAX_ITEMS) : items);
   if (threads.size > MAX_THREADS) threads.delete(threads.keys().next().value!);
-  if ((current?.items ?? EMPTY) === next.items) return;
   for (const listener of Array.from(listeners.get(threadId) ?? [])) listener();
 }
 
@@ -80,36 +71,35 @@ const isTurnEnd = (event: RuntimeEvent) =>
 /** One live runtime frame. A frame seen before (a resumed stream replaying it) changes nothing. */
 export function noteLiveReplyEvent(event: RuntimeEvent): void {
   const { threadId } = event;
-  const current = threads.get(threadId) ?? { items: EMPTY, skipping: false };
-  const { items } = current;
+  const items = threads.get(threadId) ?? EMPTY;
   if (event.type === "content.delta") {
-    if (event.streamKind !== "assistant_text" || !event.delta || !firstSeen(event.eventId) || current.skipping) return;
+    if (event.streamKind !== "assistant_text" || !event.delta || !firstSeen(event.eventId)) return;
     if (gapped && !boundarySinceGap.has(threadId)) return;
     const at = event.itemId ? items.findIndex((item) => item.itemId === event.itemId) : legacyOpen(items, event.turnId);
     const growing = items[at];
     if (growing) {
-      if (!growing.done) put(threadId, { ...current, items: items.map((item, index) => index === at ? { ...item, text: item.text + event.delta, ...(event.botId ? { botId: event.botId } : {}) } : item) });
+      if (!growing.done) put(threadId, items.map((item, index) => index === at ? { ...item, text: item.text + event.delta, ...(event.botId ? { botId: event.botId } : {}) } : item));
       return;
     }
     // The server opens a message only once the one before it is over: an earlier one still open never completes.
     const fresh: LiveReplyItem = { key: event.itemId ?? event.eventId, ...(event.itemId ? { itemId: event.itemId } : {}),
       ...(event.turnId ? { turnId: event.turnId } : {}), ...(event.botId ? { botId: event.botId } : {}), text: event.delta, at: Date.now(), done: false };
-    put(threadId, { ...current, items: [...kept(items, (item) => item.done), fresh] });
+    put(threadId, [...kept(items, (item) => item.done), fresh]);
   } else if (event.type === "item.completed" && event.itemType === "assistant_text") {
     if (!firstSeen(event.eventId)) return;
     if (gapped) boundarySinceGap.add(threadId);
     const at = event.itemId ? items.findIndex((item) => item.itemId === event.itemId) : legacyOpen(items, event.turnId);
     const next = at >= 0 && !items[at]!.done ? items.map((item, index) => index === at ? { ...item, text: event.text, done: true } : item) : items;
-    put(threadId, { items: next, skipping: false });
+    put(threadId, next);
   } else if (event.type === "item.started" && event.itemType === "tool") {
     if (gapped) boundarySinceGap.add(threadId);
   } else if (event.type === "turn.started") {
     if (gapped) boundarySinceGap.add(threadId);
     // The turns before this one are over: their saved messages are in the thread's transcript by now, drawn or not.
-    put(threadId, { items: kept(items, (item) => isSaved(item) && event.turnId !== undefined && item.turnId === event.turnId), skipping: false });
+    put(threadId, kept(items, (item) => isSaved(item) && event.turnId !== undefined && item.turnId === event.turnId));
   } else if (isTurnEnd(event)) {
     if (gapped) boundarySinceGap.add(threadId);
-    put(threadId, { items: kept(items, isSaved), skipping: false });
+    put(threadId, kept(items, isSaved));
   }
 }
 
@@ -125,21 +115,15 @@ function legacyOpen(items: readonly LiveReplyItem[], turnId: string | undefined)
 export function noteLiveReplyMessage(threadId: string, message: (Pick<Message, "id" | "role" | "kind" | "turnId"> & { itemId?: string }) | undefined): void {
   if (!message || message.role !== "bot" || message.kind !== "text") return;
   const current = threads.get(threadId);
-  if (!current || current.items.some((item) => item.savedAs === message.id)) return;
+  if (!current || current.some((item) => item.savedAs === message.id)) return;
   const index = message.itemId
-    ? current.items.findIndex((item) => item.itemId === message.itemId)
-    : current.items.findIndex((item) => !item.itemId && item.done && item.savedAs === undefined && sameTurn(item, message.turnId));
+    ? current.findIndex((item) => item.itemId === message.itemId)
+    : current.findIndex((item) => !item.itemId && item.done && item.savedAs === undefined && sameTurn(item, message.turnId));
   if (index < 0) return;
-  streamed.add(message.id);
-  if (streamed.size > MAX_STREAMED) streamed.delete(streamed.values().next().value!);
-  const items = current.items.map((item, at) => at === index ? { ...item, savedAs: message.id } : item);
-  put(threadId, { ...current, items });
-}
-
-/** The person pressed Stop: what streamed so far stays as it is and grows no more. An engine that keeps the words a
- * Stop cut short completes the item and its saved message takes its place; otherwise the turn's end removes it. */
-export function stopLiveReply(threadId: string): void {
-  put(threadId, { items: threads.get(threadId)?.items ?? EMPTY, skipping: true });
+  streamed.set(message.id, `${LIVE_ID}${current[index]!.key}`);
+  if (streamed.size > MAX_STREAMED) streamed.delete(streamed.keys().next().value!);
+  const items = current.map((item, at) => at === index ? { ...item, savedAs: message.id } : item);
+  put(threadId, items);
 }
 
 /** The live stream restarted without the frames it missed: no thread's open item can be completed from here. */
@@ -147,7 +131,7 @@ export function forgetLiveReplies(): void {
   gapped = true;
   boundarySinceGap.clear();
   for (const [threadId, current] of Array.from(threads)) {
-    put(threadId, { ...current, items: kept(current.items, isSaved) });
+    put(threadId, kept(current, isSaved));
   }
 }
 
@@ -155,11 +139,11 @@ export function forgetLiveReplies(): void {
 export function settleLiveReplies(threadId: string, keys: readonly string[]): void {
   const current = threads.get(threadId);
   if (!current || !keys.length) return;
-  put(threadId, { ...current, items: kept(current.items, (item) => !keys.includes(item.key)) });
+  put(threadId, kept(current, (item) => !keys.includes(item.key)));
 }
 
 export function liveReplies(threadId: string | null | undefined): readonly LiveReplyItem[] {
-  return (threadId && threads.get(threadId)?.items) || EMPTY;
+  return (threadId && threads.get(threadId)) || EMPTY;
 }
 
 /** Whether the thread draws a streamed reply, or one waiting for its saved message to take its place. */
@@ -172,14 +156,21 @@ export function streamedReply(messageId: string): boolean {
   return messageId.startsWith(LIVE_ID) || streamed.has(messageId);
 }
 
+export function priorLiveReplyId(messageId: string): string | undefined {
+  return streamed.get(messageId);
+}
+
 export function isLiveReply(message: Pick<Message, "id">): boolean {
   return message.id.startsWith(LIVE_ID);
 }
 
-/** What a streaming item shows. The last word waits for the space after it, so a secret is masked whole or not shown. */
+/** Keep an unfinished credential-shaped token intact for redaction. Unspaced CJK prose can stream before a space. */
+const CJK_PROSE_PREFIX = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}、。！？；：，（）「」『』《》【】…]+/u;
+
 export function liveReplyText(item: Pick<LiveReplyItem, "text" | "done">): string {
-  const end = item.done ? item.text.length : Math.max(item.text.lastIndexOf(" "), item.text.lastIndexOf("\n")) + 1;
-  const text = item.text.slice(0, end);
+  const boundary = Math.max(item.text.lastIndexOf(" "), item.text.lastIndexOf("\n")) + 1;
+  const prose = item.done ? "" : CJK_PROSE_PREFIX.exec(item.text.slice(boundary))?.[0] ?? "";
+  const text = item.done ? item.text : item.text.slice(0, boundary + prose.length);
   return isClientCancellation(text) ? "" : redactSecretsInText(text);
 }
 

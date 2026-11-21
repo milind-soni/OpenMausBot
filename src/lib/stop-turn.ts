@@ -7,13 +7,13 @@ import { useSyncExternalStore } from "react";
 import type { RuntimeEvent } from "../../shared/runtime-events";
 import { isCancelledTranscriptRow } from "../../shared/client-cancel";
 import type { Message } from "@/state/store";
-import { stopLiveReply } from "@/state/live-reply";
 
 export const STOP_REPEAT_MS = 1_000;
 
 const liveTurns = new Map<string, string>();
 const turnStarts = new Map<string, number>();
 const lastStops = new Map<string, number>();
+const stopPresentation = new Map<string, "pending" | "settled">();
 const stopsHere = new Map<string, number>();
 const watchers = new Set<() => void>();
 const notify = () => { for (const watch of Array.from(watchers)) watch(); };
@@ -27,6 +27,7 @@ export function noteRuntimeTurn(event: Pick<RuntimeEvent, "type" | "threadId" | 
   if (!event.turnId) return;
   if (event.type === "turn.started") {
     liveTurns.set(event.threadId, event.turnId);
+    stopPresentation.delete(event.threadId);
     turnStarts.set(event.threadId, (turnStarts.get(event.threadId) ?? 0) + 1);
   }
   else if (event.type === "turn.completed" && liveTurns.get(event.threadId) === event.turnId) liveTurns.delete(event.threadId);
@@ -55,6 +56,7 @@ export function forgetStops(): void {
   forgetLiveTurns();
   lastStops.clear();
   stopsHere.clear();
+  stopPresentation.clear();
   turnStarts.clear();
 }
 
@@ -65,30 +67,44 @@ export function sendStop(api: Api, action: StopAction, showError: (error: unknow
   const key = action.threadId ?? `bot:${action.botId}`;
   const now = Date.now();
   const last = lastStops.get(key);
+  const threadId = action.threadId;
   if (last !== undefined && now - last < STOP_REPEAT_MS) return;
   lastStops.set(key, now);
-  if (action.threadId) stopLiveReply(action.threadId);
+  if (threadId) {
+    stopPresentation.set(threadId, "pending");
+    notify();
+  }
   const turnId = action.threadId ? liveTurns.get(action.threadId) : undefined;
   api(`/api/bots/${action.botId}/interrupt`, {
     method: "POST",
     body: action.threadId ? JSON.stringify({ threadId: action.threadId, ...(turnId ? { turnId } : {}) }) : undefined,
   }).then((result) => {
+    if (threadId && lastStops.get(key) === now && stopPresentation.get(threadId) === "pending") {
+      stopPresentation.set(threadId, "settled");
+    }
     // That turn was over: this client missed its end. Name none next time, so the next press reaches what runs.
     const over = (result as { outcome?: unknown } | null)?.outcome === "already-stopped";
     if (!over && action.threadId) {
       stopsHere.set(action.threadId, now);
-      notify();
     }
     if (over && action.threadId && liveTurns.get(action.threadId) === turnId) {
       liveTurns.delete(action.threadId);
-      notify();
     }
+    notify();
   }).catch((error) => {
     // Refused: the next press is a new Stop, not a repeat.
-    if (lastStops.get(key) === now) lastStops.delete(key);
+    if (lastStops.get(key) === now) {
+      lastStops.delete(key);
+      if (threadId) stopPresentation.delete(threadId);
+    }
+    notify();
     showError(error);
     action.onError?.();
   });
+}
+
+export function useStopPresentation(threadId: string) {
+  return useSyncExternalStore(subscribe, () => stopPresentation.get(threadId), () => undefined);
 }
 
 /** When this client's Stop last reached a turn in the thread. */

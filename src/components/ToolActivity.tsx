@@ -27,7 +27,7 @@ export function ToolActivity({ tool, place = null, live = false, source }: { too
   const status = tool.ok === undefined ? (live ? t("toolDetail.running") : t("toolDetail.unverified")) : failed ? t("toolDetail.failed") : t("toolDetail.completed");
   return (
     <div className={cn("w-fit max-w-full rounded-xl border border-hairline/40 bg-panel text-[13px] [interpolate-size:allow-keywords] motion-safe:transition-[width] motion-safe:duration-200 motion-safe:ease-in-out",
-      expanded && "w-[min(38rem,100%)]")} data-testid="tool-activity">
+      expanded && "w-[min(38rem,100%)]")} data-testid="tool-activity" data-live={live && tool.ok === undefined ? "" : undefined}>
       <button type="button" onClick={() => setExpanded(value => !value)} aria-controls={bodyId}
         aria-expanded={expanded}
         aria-label={t("toolDetail.label", { name: label, status })}
@@ -35,7 +35,7 @@ export function ToolActivity({ tool, place = null, live = false, source }: { too
       >
         <span className="shrink-0" aria-hidden="true">{tool.ok === undefined ? (live ? <WorkingDots size={3.5} /> : <Circle size={13} />) : failed ? <X size={13} /> : <Check size={13} className="text-success" />}</span>
         {place && <PlaceIcon place={place} size={13} className="shrink-0 opacity-70" role="img" aria-label={t(placeLabelKey(place))} data-testid="tool-place" />}
-        <span className={cn("min-w-0 max-w-[30rem]", !problem && "truncate", "leading-5", !notice && !problem ? "font-mono" : "font-medium")}>{label}</span>
+        <span className={cn("tool-activity-label min-w-0 max-w-[30rem]", !problem && "truncate", "leading-5", !notice && !problem ? "font-mono" : "font-medium")}>{label}</span>
         {tool.summary && tool.summary !== tool.name && !nameIsCommand(tool.name) && <span className="min-w-0 flex-1 truncate font-mono" title={summary}>{summary}</span>}
         <ChevronRight size={13} className={cn("ms-auto shrink-0 motion-safe:transition-transform motion-safe:duration-200", expanded && "rotate-90")} aria-hidden="true" />
       </button>
@@ -43,7 +43,7 @@ export function ToolActivity({ tool, place = null, live = false, source }: { too
         className={cn("grid [contain:inline-size] motion-safe:transition-[grid-template-rows,opacity] motion-safe:duration-200 motion-safe:ease-in-out",
           expanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0")}>
         <div className="min-h-0 min-w-0 overflow-clip">
-          <div className="space-y-3 border-t border-hairline/40 p-3 text-ink-secondary">
+          <div className="space-y-3 border-t border-hairline/40 p-3 text-ink-secondary [[data-chat-v2]_&]:mx-3 [[data-chat-v2]_&]:px-0">
             <div className={cn("text-[11px] font-medium", failed && "text-danger")}>{status}</div>
             {label !== tool.name && !notice && <div>
               <div className="mb-1 text-[11px] font-medium">{t("toolDetail.tool")}</div>

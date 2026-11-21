@@ -1,4 +1,5 @@
-import { useContext, useState, type ReactNode } from "react";
+import { useMenuMotion } from "./MenuMotion";
+import { useContext, useId, useState, type ReactNode } from "react";
 import { Check, Clock3, ShieldCheck, Undo2, X } from "lucide-react";
 import { api, ApiError, StoreContext, type Bot, type Message, type OptionCardData } from "@/state/store";
 import { shareLearnedSkillsMode } from "@/lib/feature-flags";
@@ -238,6 +239,7 @@ function AppliedChangeLine({
   summary: { line: string; canUndo: boolean; cancels?: boolean };
 }) {
   const [open, setOpen] = useState(false);
+  const detailsId = useId();
   const [undoing, setUndoing] = useState(false);
   const [error, setError] = useState<string>();
   const [sharing, setSharing] = useState(false);
@@ -315,6 +317,7 @@ function AppliedChangeLine({
         <button
           type="button"
           aria-expanded={open}
+          aria-controls={detailsId}
           onClick={() => setOpen((value) => !value)}
           className={cn(TEXT_ACTION, "text-ink-tertiary hover:text-ink-secondary")}
         >
@@ -328,17 +331,27 @@ function AppliedChangeLine({
         <div className="mt-1 text-[13px] text-warning">{t("approval.applied.shareFailed", { error: skill.shareError })}</div>
       )}
       {error && <div role="alert" className="mt-1 text-[13px] text-warning">{error}</div>}
-      {open && (
-        <pre
-          tabIndex={0}
-          aria-label={t("approval.aria.appliedDetails")}
-          className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-2xl bg-inset px-4 py-3 font-mono text-[13px] leading-relaxed text-ink"
-        >
-          {activeLocale() !== "en" && card.waitRequest ? t("approval.applied.waitFollowUp", { name: originalName ?? name, followUp: card.waitRequest.followUp ?? "" }) : card.subtitle}
-        </pre>
-      )}
+      <ApprovalDetails id={detailsId} open={open} label={t("approval.aria.appliedDetails")} className="text-[13px]">
+        {activeLocale() !== "en" && card.waitRequest ? t("approval.applied.waitFollowUp", { name: originalName ?? name, followUp: card.waitRequest.followUp ?? "" }) : card.subtitle}
+      </ApprovalDetails>
     </div>
   );
+}
+
+function ApprovalDetails({ id, open, label, className, children }: {
+  id: string; open: boolean; label: string; className: string; children: ReactNode;
+}) {
+  const motion = useMenuMotion(open);
+  return <div id={id} inert={!open} aria-hidden={!open || undefined}
+    className={cn("grid min-w-0 motion-safe:transition-[grid-template-rows,opacity] motion-safe:duration-200 motion-safe:ease-in-out [[data-reduced-motion=true]_&]:transition-none",
+      open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0")}>
+    <div className="min-h-0 min-w-0 overflow-clip">
+      {motion.shown && <pre tabIndex={0} aria-label={label}
+        className={cn("mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-2xl bg-inset px-4 py-3 font-mono leading-relaxed text-ink", className)}>
+        {children}
+      </pre>}
+    </div>
+  </div>;
 }
 
 export const APPROVAL_CODE_CHIP =
@@ -376,6 +389,7 @@ function CompactApprovalRow({
   answeredBelow: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const detailsId = useId();
   const toggle = () => setOpen((value) => !value);
   if (waiting && answeredBelow) {
     return (
@@ -405,6 +419,7 @@ function CompactApprovalRow({
             <button
               type="button"
               aria-expanded={open}
+              aria-controls={detailsId}
               title={detail}
               onClick={toggle}
               className={cn(APPROVAL_CODE_CHIP, "text-left interaction:bg-raised/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus")}
@@ -419,6 +434,7 @@ function CompactApprovalRow({
           <button
             type="button"
             aria-expanded={open}
+            aria-controls={detailsId}
             onClick={toggle}
             className={cn(TEXT_ACTION, "text-ink-tertiary hover:text-ink-secondary")}
           >
@@ -426,15 +442,9 @@ function CompactApprovalRow({
           </button>
         )}
       </div>
-      {open && (
-        <pre
-          tabIndex={0}
-          aria-label={t("approval.aria.details")}
-          className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-2xl bg-inset px-4 py-3 font-mono text-[12px] leading-relaxed text-ink"
-        >
-          {detail}
-        </pre>
-      )}
+      <ApprovalDetails id={detailsId} open={open} label={t("approval.aria.details")} className="text-[12px]">
+        {detail}
+      </ApprovalDetails>
     </div>
   );
 }

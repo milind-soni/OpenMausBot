@@ -12,10 +12,11 @@ it("groups adjacent peer records and keeps ordinary messages in place", () => {
       ...(name && { peerAsk: { botId: name, name } }) },
   }));
   const html = renderToStaticMarkup(createElement(ExchangeTimeline, { items, botId: "host", focusId: null,
-    unreadId: null, render: (_, i) => String(i) }));
+    unreadId: null, working: true, render: (_, i) => String(i) }));
   expect(html.match(/<details/g)).toHaveLength(2);
   expect(html).toContain("2 bots");
-  expect(html).toMatch(/<\/details>2<details/);
+  expect(html).not.toContain("data-live-entry");
+  expect(html).toMatch(/<\/details>(?:<\/div>)*2(?:<div[^>]*>)*<details/);
 });
 
 it("keeps the first unread peer record outside a collapsed exchange", () => {
@@ -27,7 +28,7 @@ it("keeps the first unread peer record outside a collapsed exchange", () => {
     items, botId: "host", focusId: null, unreadId: "unread",
     render: item => item.kind === "message" ? item.message.id : null,
   }));
-  expect(html).toContain("</details>unread<details");
+  expect(html).toMatch(/<\/details>(?:<\/div>)*unread(?:<div[^>]*>)*<details/);
 });
 
 it("only allows editing plain messages without embedded attachments or citations", () => {

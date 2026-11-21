@@ -16,7 +16,8 @@ function Fixture({ initiallyOpen, rtl }: { initiallyOpen: boolean; rtl: boolean 
   const events = useBotListSwipe(true, open, () => setOpen(true), () => setOpen(false));
   return h("div", { ...events, dir: rtl ? "rtl" : "ltr", style: { direction: rtl ? "rtl" : "ltr" }, "data-open": open },
     h("aside", { "data-look": "sidebar" }, h("button", { onClick: clickRow }, "Chat")),
-    h("section", { "data-bot-list-chat": "" }),
+    h("div", { "data-bot-list-trigger-layer": "" }),
+    h("div", null, h("section", { "data-bot-list-chat": "" })),
   );
 }
 
@@ -37,7 +38,7 @@ function pointer(target: HTMLElement, type: string, x: number, at: number, y = 8
   act(() => { target.dispatchEvent(event); });
 }
 
-const progress = () => Number(stage.style.getPropertyValue("--drawer-progress"));
+const progress = () => Number(chat.style.getPropertyValue("--drawer-progress"));
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -67,7 +68,7 @@ it("follows the mouse one to one, reverses in place, and returns after a short s
   pointer(stage, "pointerup", 62, 750);
   expect(stage.dataset.open).toBe("false");
   expect(stage.hasAttribute("data-drawer-dragging")).toBe(false);
-  expect(stage.style.getPropertyValue("--drawer-progress")).toBe("");
+  expect(chat.style.getPropertyValue("--drawer-progress")).toBe("");
 });
 
 it("commits a quick touch flick even before halfway", () => {
@@ -113,17 +114,21 @@ it.each([[80, 10, 80], [8, 24, 160]])("leaves interior and vertical gestures alo
 
 it("paints the latest position once per frame and discards pending updates on release", () => {
   mount();
-  const write = vi.spyOn(stage.style, "setProperty");
+  const write = vi.spyOn(chat.style, "setProperty");
+  const stageWrite = vi.spyOn(stage.style, "setProperty");
   pointer(chat, "pointerdown", 8, 100);
   pointer(stage, "pointermove", 44, 160);
   pointer(stage, "pointermove", 98, 200);
   expect(write).not.toHaveBeenCalled();
   vi.advanceTimersToNextFrame();
   expect(write).toHaveBeenCalledExactlyOnceWith("--drawer-progress", "0.25");
+  expect(stageWrite).not.toHaveBeenCalled();
+  const otherLayers = Array.from(stage.querySelectorAll<HTMLElement>("aside, [data-bot-list-trigger-layer]"));
+  for (const layer of otherLayers) expect(layer.style.getPropertyValue("--drawer-progress")).toBe("0.25");
 
   pointer(stage, "pointermove", 110, 300);
   pointer(stage, "pointerup", 208, 500);
   expect(stage.dataset.open).toBe("true");
   vi.advanceTimersToNextFrame();
-  expect(stage.style.getPropertyValue("--drawer-progress")).toBe("");
+  for (const layer of [chat, ...otherLayers]) expect(layer.style.getPropertyValue("--drawer-progress")).toBe("");
 });

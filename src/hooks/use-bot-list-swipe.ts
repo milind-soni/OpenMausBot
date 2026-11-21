@@ -5,6 +5,7 @@ type StagePointer = PointerEvent<HTMLDivElement>;
 type Swipe = {
   id: number;
   chat: HTMLElement;
+  layers: HTMLElement[];
   x: number;
   y: number;
   direction: number;
@@ -22,6 +23,12 @@ const SLOP = 10;
 const FLICK_DISTANCE = 24;
 const FLICK_SPEED = 0.45;
 const FLICK_AGE = 90;
+const DRAWER_PROGRESS = "--drawer-progress";
+
+function draw(drag: Swipe) {
+  const progress = String(drag.position / drag.width);
+  for (const layer of drag.layers) layer.style.setProperty(DRAWER_PROGRESS, progress);
+}
 
 export function useBotListSwipe(enabled: boolean, open: boolean, show: () => void, hide: () => void) {
   const swipe = useRef<Swipe | null>(null);
@@ -53,7 +60,7 @@ export function useBotListSwipe(enabled: boolean, open: boolean, show: () => voi
     }
     if (commit) {
       track(event, drag);
-      stage.style.setProperty("--drawer-progress", String(drag.position / drag.width));
+      draw(drag);
       const distance = (event.clientX - drag.x) * drag.direction;
       const flick = Math.abs(distance) >= FLICK_DISTANCE &&
         event.timeStamp - drag.sampleAt <= FLICK_AGE && Math.abs(drag.velocity) >= FLICK_SPEED;
@@ -62,7 +69,7 @@ export function useBotListSwipe(enabled: boolean, open: boolean, show: () => voi
     }
     drag.chat.getBoundingClientRect();
     stage.removeAttribute("data-drawer-dragging");
-    stage.style.removeProperty("--drawer-progress");
+    for (const layer of drag.layers) layer.style.removeProperty(DRAWER_PROGRESS);
     if (stage.hasPointerCapture(drag.id)) stage.releasePointerCapture(drag.id);
   }
 
@@ -84,7 +91,9 @@ export function useBotListSwipe(enabled: boolean, open: boolean, show: () => voi
       const leading = direction === 1 ? event.clientX - bounds.left : bounds.right - event.clientX;
       if (!open && (leading < 0 || leading > EDGE)) return;
       swipe.current = {
-        id: event.pointerId, chat, x: event.clientX, y: event.clientY, direction,
+        id: event.pointerId, chat,
+        layers: Array.from(stage.querySelectorAll<HTMLElement>('[data-bot-list-chat], [data-bot-list-trigger-layer], [data-look="sidebar"]')),
+        x: event.clientX, y: event.clientY, direction,
         width: bounds.width, position: 0, origin: 0,
         sampleX: event.clientX, sampleAt: event.timeStamp, velocity: 0, dragging: false,
       };
@@ -109,10 +118,9 @@ export function useBotListSwipe(enabled: boolean, open: boolean, show: () => voi
       }
       track(event, drag);
       if (frame.current !== null) return;
-      const stage = event.currentTarget;
       frame.current = requestAnimationFrame(() => {
         frame.current = null;
-        stage.style.setProperty("--drawer-progress", String(drag.position / drag.width));
+        draw(drag);
       });
     },
     onPointerUp(event: StagePointer) {

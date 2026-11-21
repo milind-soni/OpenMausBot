@@ -6,14 +6,16 @@ import { MentionText } from "./MentionText";
 const TEXT_LAYOUT = ["font-family", "font-size", "font-weight", "font-style", "font-stretch", "font-feature-settings", "font-variation-settings",
   "letter-spacing", "word-spacing", "line-height", "text-indent", "tab-size", "padding-top", "padding-right", "padding-bottom", "padding-left"] as const;
 
-export function MentionTextarea({ inputRef, peers, everyone = false, wrapperClassName, singleLinePlaceholder, onOpenBot, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement> & {
+export function MentionTextarea({ inputRef, peers, everyone = false, wrapperClassName, singleLinePlaceholder, smoothHeight = false, onOpenBot, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement> & {
   wrapperClassName?: string;
   singleLinePlaceholder?: boolean;
+  smoothHeight?: boolean;
   onOpenBot?: (botId: string) => void;
   inputRef: RefObject<HTMLTextAreaElement | null>;
   peers: readonly MentionPeer[];
   everyone?: boolean;
 }) {
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const mirrorRef = useRef<HTMLDivElement>(null);
   const hoveredMention = useRef<HTMLElement | null>(null);
   const highlightMention = (mention: HTMLElement | null) => {
@@ -29,9 +31,10 @@ export function MentionTextarea({ inputRef, peers, everyone = false, wrapperClas
     const style = getComputedStyle(input);
     for (const property of TEXT_LAYOUT) mirror.style.setProperty(property, style.getPropertyValue(property));
     mirror.style.width = `${input.clientWidth}px`;
+    if (smoothHeight) mirror.style.height = `${input.clientHeight}px`;
     mirror.scrollTop = input.scrollTop;
     mirror.scrollLeft = input.scrollLeft;
-  }, [inputRef]);
+  }, [inputRef, smoothHeight]);
   const resize = useCallback(() => {
     const input = inputRef.current;
     if (!input) return;
@@ -39,9 +42,10 @@ export function MentionTextarea({ inputRef, peers, everyone = false, wrapperClas
     const line = parseFloat(getComputedStyle(input).lineHeight) || 24;
     input.style.height = "auto";
     input.style.height = `${Math.min(input.scrollHeight, line * 6)}px`;
+    if (smoothHeight && wrapperRef.current) wrapperRef.current.style.height = `${input.offsetHeight}px`;
     input.scrollTop = scrollTop;
     sync();
-  }, [inputRef, sync]);
+  }, [inputRef, smoothHeight, sync]);
   useLayoutEffect(resize, [props.value, props.className, resize]);
   useLayoutEffect(() => {
     let width = inputRef.current?.clientWidth;
@@ -71,7 +75,7 @@ export function MentionTextarea({ inputRef, peers, everyone = false, wrapperClas
     return Array.from(mentions).find(mention => Array.from(mention.getClientRects()).some(rect =>
       clientX >= rect.left && clientX < rect.right && clientY >= rect.top && clientY < rect.bottom));
   };
-  return <div className={cn("mention-editor relative min-w-0 flex-1 self-center", wrapperClassName)}
+  return <div ref={wrapperRef} className={cn("mention-editor relative min-w-0 flex-1 self-center", wrapperClassName, smoothHeight && "v2-composer-field")}
     data-mention-navigation={onOpenBot ? "" : undefined}
     onMouseMove={({ clientX, clientY, target }) => {
       highlightMention(target === inputRef.current ? mentionAt(clientX, clientY) ?? null : null);

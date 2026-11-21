@@ -1,3 +1,4 @@
+import { StreamingText } from "./StreamingText";
 // Half-duplex: the dictation helper is Apple's SFSpeechRecognizer on raw AVAudioEngine input with no echo cancellation,
 // so a mic open during playback transcribes the bot's own voice back. The buffer-backed recognizer does not finalize on
 // silence; the helper ends the stream.
@@ -799,13 +800,13 @@ function Call({ bot, transcript }: { bot: Bot; transcript?: Message[] }) {
 
       <div className="min-h-[3.5rem] max-w-[560px] px-6 text-center text-[15px] leading-relaxed text-ink">
         {phase === "listening" ? (
-          heard || (
+          heard ? <StreamingText text={heard} /> : (
             <span className="text-ink-secondary">
               {pushToTalk ? t("call.turns.releaseToSend", { keys: pushToTalkKeys() }) : t("call.turns.saySomething")}
             </span>
           )
         ) : (
-          speech.caption
+          <StreamingText text={speech.caption ?? ""} />
         )}
       </div>
 

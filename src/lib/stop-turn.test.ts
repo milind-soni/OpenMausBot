@@ -1,8 +1,12 @@
+// @vitest-environment happy-dom
+import { createElement } from "react";
+import { flushSync } from "react-dom";
+import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runtimeFrameAction } from "@/state/store";
 import type { RuntimeEvent } from "../../shared/runtime-events";
-import { forgetStops, sendStop, STOP_REPEAT_MS } from "./stop-turn";
+import { forgetStops, sendStop, STOP_REPEAT_MS, useStopPresentation } from "./stop-turn";
 
 const frame = (type: string, turnId: string, threadId = "thread-1") =>
   ({ eventId: `e-${Math.random()}`, provider: "fake", threadId, turnId, createdAt: "", type, ok: true }) as unknown as RuntimeEvent;
@@ -19,6 +23,32 @@ afterEach(() => {
 });
 
 describe("Stop", () => {
+  it("clears the Stop presentation for the next turn before a late response arrives", async () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    function Presentation() {
+      return useStopPresentation("thread-1") ?? "normal";
+    }
+    const read = () => {
+      flushSync(() => root.render(createElement(Presentation)));
+      return container.textContent;
+    };
+    const reply = Promise.withResolvers<{ ok: boolean }>();
+    try {
+      runtimeFrameAction(frame("turn.started", "turn-1"));
+      sendStop(() => reply.promise, { type: "interrupt", botId: "bot-1", threadId: "thread-1" }, vi.fn());
+      expect(read()).toBe("pending");
+      runtimeFrameAction(frame("turn.completed", "turn-1"));
+      runtimeFrameAction(frame("turn.started", "turn-2"));
+      const presentationAtStart = read();
+      reply.resolve({ ok: true });
+      await reply.promise;
+      expect([presentationAtStart, read()]).toEqual(["normal", "normal"]);
+    } finally {
+      root.unmount();
+    }
+  });
+
   it("names the turn the live frames say is running", () => {
     const api = vi.fn().mockResolvedValue({ ok: true });
     runtimeFrameAction(frame("turn.started", "turn-1"));

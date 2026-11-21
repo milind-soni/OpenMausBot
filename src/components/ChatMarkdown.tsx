@@ -1,3 +1,4 @@
+import { streamWords, useStreamingFade } from "./StreamingText";
 import { BotMention } from "./MentionText";
 // Security: model output never reaches the DOM as raw HTML (no rehype-raw); Shiki's output is generator-escaped.
 import { createContext, Fragment, memo, use, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
@@ -194,6 +195,7 @@ interface HastNode {
   type?: string;
   tagName?: string;
   value?: string;
+  properties?: Record<string, unknown>;
   children?: HastNode[];
 }
 
@@ -800,6 +802,26 @@ const rehypePluginsFor = (math: KatexPlugin | null) => {
   return katexPlugins.list;
 };
 
+const KEEP_STREAM_NODE = new Set(["a", "annotation", "code", "math", "pre", "span", "svg"]);
+function rehypeStreamingWords() {
+  const wrap = (node: HastNode): void => {
+    if (!node.children || KEEP_STREAM_NODE.has(node.tagName ?? "")) return;
+    node.children = node.children.flatMap(child => {
+      if (child.type !== "text" || !child.value?.trim()) {
+        wrap(child);
+        return [child];
+      }
+      return streamWords(child.value).map((value): HastNode => {
+        const text = { type: "text", value };
+        return /\S/u.test(value) ? {
+          type: "element", tagName: "span", properties: { className: ["chat-stream-word"] }, children: [text],
+        } : text;
+      });
+    });
+  };
+  return wrap;
+}
+
 const markdownCache = createMarkdownRenderCache();
 const peerSignatures = new WeakMap<readonly MentionPeer[], string>();
 const peerSignature = (peers: readonly MentionPeer[]) => {
@@ -857,6 +879,7 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
   // use() may be called conditionally: only a message that can hold a thread link subscribes to the thread list.
   const { threads, currentBotId } = MAY_LINK_THREAD.test(text) ? use(ThreadRefsContext) : NO_THREAD_REFS;
   const streaming = use(StreamingReplyContext);
+  const streamRoot = useStreamingFade<HTMLDivElement>(streaming);
   const parts = useMemo(() => markdownParts(text, streaming), [text, streaming]);
   const needsMath = parts.some((part) => !part.fence && normalizedSourceHasMath(part.source));
   const [katexReady, setKatexReady] = useState(() => katexPlugin !== null);
@@ -879,22 +902,24 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
   const linksThreads = threads.length > 0;
   const draw = ({ text: partText, source, finished }: MarkdownPart) => {
     const mentions = source.includes("@");
-    const variant = `${mathPlugin ? "math" : ""}\u0003${mentions ? `${peerSignature(mentionPeers)}\u0001${everyone ? 1 : 0}\u0001${mentionPerson?.profileName ?? ""}` : ""}\u0003${linksThreads ? `${threadListId(threads)}\u0001${currentBotId ?? ""}` : ""}`;
+    const variant = `${streaming ? "stream" : "static"}\u0003${mathPlugin ? "math" : ""}\u0003${mentions ? `${peerSignature(mentionPeers)}\u0001${everyone ? 1 : 0}\u0001${mentionPerson?.profileName ?? ""}` : ""}\u0003${linksThreads ? `${threadListId(threads)}\u0001${currentBotId ?? ""}` : ""}`;
     // Markdown is a plain function of its options (no hooks), so its elements can be kept and drawn again.
     const render = () => {
       const remarkPlugins = [...BASE_REMARK_PLUGINS];
       if (mentions) remarkPlugins.push([remarkMentions, { peers: mentionPeers, everyone, person: mentionPerson }]);
       if (linksThreads) remarkPlugins.push(remarkThreadRefs(threads, currentBotId));
-      return Markdown({ children: source, remarkPlugins, rehypePlugins: rehypePluginsFor(mathPlugin), urlTransform: chatUrlTransform, components: MARKDOWN_COMPONENTS });
+      const rehypePlugins = rehypePluginsFor(mathPlugin);
+      return Markdown({ children: source, remarkPlugins, rehypePlugins: streaming ? [...rehypePlugins, rehypeStreamingWords] : rehypePlugins, urlTransform: chatUrlTransform, components: MARKDOWN_COMPONENTS });
     };
     // Streamed text grows each render; keeping its drawing would only fill the cache with prefixes.
-    return finished ? markdownCache.render(partText, variant, render) : <StreamSourceContext value={source}>{render()}</StreamSourceContext>;
+    const content = finished ? markdownCache.render(partText, variant, render) : render();
+    return streaming ? <StreamSourceContext value={finished ? null : source}>{content}</StreamSourceContext> : content;
   };
   // A message still streaming has no saved files to fetch yet.
   const scope = { mentionPeers, message: streaming ? undefined : message, imageOffsets: streaming ? undefined : parts[0]?.imageOffsets, threads, currentBotId, delivered, originals, userImages };
   return (
     <MessageScopeContext.Provider value={scope}>
-      <div data-look="bot-text" className="chat-md min-w-0 [&>*+*]:mt-2">
+      <div ref={streamRoot} data-look="bot-text" className="chat-md min-w-0 [&>*+*]:mt-2">
         {parts.map((part, index) => (
           // The whole text's tree puts a line break between its top-level blocks; the parts keep it.
           <Fragment key={index}>{index > 0 && "\n"}{part.fence ? <CodeBlock code={part.fence.code} lang={part.fence.lang} initialWrap={part.fence.wrap} open /> : draw(part)}</Fragment>

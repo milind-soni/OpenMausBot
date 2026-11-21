@@ -26,7 +26,11 @@ describe("a reply's Markdown while it streams", () => {
   let root: Root;
   const draw = (text: string, streaming: boolean) =>
     act(() => root.render(createElement(StreamingReplyContext, { value: streaming }, createElement(ChatMarkdown, { text }))));
-  const markup = () => host.innerHTML;
+  const markup = () => {
+    const copy = host.cloneNode(true) as HTMLElement;
+    for (const word of copy.querySelectorAll(".chat-stream-word")) word.replaceWith(...word.childNodes);
+    return copy.innerHTML;
+  };
 
   beforeEach(() => {
     setLocale("en");
@@ -51,6 +55,26 @@ describe("a reply's Markdown while it streams", () => {
     parsed.length = 0;
     draw(`${head}Second paragraph grows`, true);
     expect(parsed).toEqual(["Second paragraph grows"]);
+  });
+
+  it("fades only appended words and retains rendered words across Markdown blocks", () => {
+    const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
+    const animate = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "animate", { configurable: true, value: animate });
+    try {
+      draw("Hello 世界", true);
+      const hello = host.querySelector(".chat-stream-word");
+      expect(hello?.textContent).toBe("Hello");
+      animate.mockClear();
+      draw("Hello 世界\n\nNew paragraph", true);
+      expect(host.querySelector(".chat-stream-word")).toBe(hello);
+      expect(animate.mock.contexts.map(element => (element as HTMLElement).textContent)).toEqual(["New", "paragraph"]);
+      draw("Hello 世界\n\nNew paragraph", false);
+      expect(host.querySelector(".chat-stream-word")).toBeNull();
+    } finally {
+      if (original) Object.defineProperty(HTMLElement.prototype, "animate", original);
+      else Reflect.deleteProperty(HTMLElement.prototype, "animate");
+    }
   });
 
   it("draws the same page as the finished reply, so the saved message replaces it without a change", () => {

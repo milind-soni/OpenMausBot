@@ -1,3 +1,4 @@
+import { reducedMotion } from "@/lib/onboarding";
 import { ChatImagePreloads } from "../CachedChatImage";
 import type { MentionPeer } from "@/lib/mentions";
 import { useTeammates } from "@/state/team-people";
@@ -13,13 +14,13 @@ import { replyAndCopy, useBotMessageMenu } from "../message-menu";
 import { ChatHeaderMenu } from "../ChatMoreMenu";
 import { ChatFindBar } from "../ChatFindBar";
 import { useChatFindRequests, useChatFindShortcut } from "@/lib/chat-find";
-import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ClipboardList, ChevronRight, Loader2 } from "lucide-react";
 import { currentTaskBot, formatTime, type Bot, type Message } from "@/state/store";
 import { rememberComputerPanelOpen } from "@/lib/computer-panel-focus";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { useChatHistory } from "@/state/use-chat-history";
-import { useLiveTranscript } from "@/state/live-reply";
+import { isLiveReply, priorLiveReplyId, StreamingReplyContext, useLiveTranscript } from "@/state/live-reply";
 import { useTranscriptViewport } from "@/hooks/use-transcript-viewport";
 import { useUnreadDivider } from "@/hooks/use-unread-divider";
 import { useCanWriteIn } from "@/lib/cloud-guest";
@@ -29,6 +30,7 @@ import { botLineText, canEditTypedMessage } from "@/lib/transcript-derivations";
 import { botEngine, failedTurnCause } from "@/lib/failed-turn";
 import { lastNonReceipt } from "@/lib/receipts";
 import { t } from "@/lib/i18n";
+import { useStopPresentation } from "@/lib/stop-turn";
 import { peerLine, peerRequest } from "@/lib/peer-message";
 import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard";
 import { RETRY_LEAD } from "../../../shared/failed-turn";
@@ -61,7 +63,7 @@ import { FailedTurnRow } from "../ChatView";
 import { useSharedRun } from "../shared-run";
 import { SetupOffer } from "../SetupOffer";
 import { ReplyQuote } from "../ReplyQuote";
-import { TurnPresence, useRotatingPhrase } from "../TurnPresence";
+import { ShimmerPhrase, useRotatingPhrase } from "../TurnPresence";
 
 const EMPTY_TRANSCRIPT: Message[] = [];
 
@@ -82,19 +84,22 @@ function BotBubbleActions({ message, botId, threadId, text, canReact, onReply, r
   </MessageActions>;
 }
 
-function ChatV2Presence({ bot }: { bot: Bot }) {
-  const visible = Boolean(bot.busy && bot.activity !== "waiting-on-you");
+function ChatV2Presence({ bot, stopping }: { bot: Bot; stopping: boolean }) {
+  const visible = Boolean(!stopping && bot.busy && bot.activity !== "waiting-on-you");
   const { current } = useRotatingPhrase(
     [t("chat.friendly.mulling"), t("chat.friendly.thinking")],
     "thinking", `${bot.threadId}:${bot.turnStartedAt ?? ""}`, visible,
   );
-  return <div role="status" className="v2-turn-status">
-    <TurnPresence visible={visible} label={current} avatar={
-      <span className="v2-working-symbol" aria-hidden="true">
-        <span className="v2-working-dots"><i /><i /><i /></span>
-        <span className="v2-working-avatar"><BotAvatar bot={bot} size={34} state={stateForBot(bot)} /></span>
-      </span>
-    } />
+  return <div className="v2-turn-status" data-visible={visible || undefined} aria-hidden={!visible || undefined}>
+    <div className="v2-turn-status-clip">
+      <div role="status" className="v2-turn-status-content">
+        <span className="v2-working-symbol" aria-hidden="true">
+          <span className="v2-working-dots"><i /><i /><i /></span>
+          <span className="v2-working-avatar"><BotAvatar bot={bot} size={34} state={stateForBot(bot)} /></span>
+        </span>
+        <ShimmerPhrase text={current} periodMs={4000} />
+      </div>
+    </div>
   </div>;
 }
 
@@ -177,7 +182,9 @@ export const Row = memo(function Row({ message: m, botId, botName, color, thread
         botName={botName} inverse={false} canJump={canLoadQuote} pending={loadingQuote} onJump={() => jumpTo(m.replyToId!, false)} />}
       {!own && <MessageAttachmentGallery text={text} attachments={m.attachments} message={attachmentContext} />}
       {m.attachments?.map(a => a.kind === "audio" && <VoiceNoteBubble key={a.path} attachment={a} />)}
-      {raw ? <pre className="whitespace-pre-wrap">{text}</pre> : <ChatMarkdown text={text} mentionPeers={mentionPeers} userImages={own} message={{ threadId: threadId, messageId: m.id }} />}
+      {raw ? <pre className="whitespace-pre-wrap">{text}</pre> : <StreamingReplyContext value={isLiveReply(m)}>
+        <ChatMarkdown text={text} mentionPeers={mentionPeers} userImages={own} message={{ threadId: threadId, messageId: m.id }} />
+      </StreamingReplyContext>}
       {!own && Boolean(m.reactions?.length) && <div className="v2-reaction-badge">
         <ReactionChips threadId={threadId} message={m} canReact={Boolean(reply) && !peer} badgeOnly />
       </div>}
@@ -197,6 +204,10 @@ export const Row = memo(function Row({ message: m, botId, botName, color, thread
   </article>;
 });
 
+function messageRowKey(message: Message) {
+  return message.role === "user" && message.sendId ? `send:${message.sendId}` : message.id;
+}
+
 function ChatWork({ item, focusedId, children }: {
   item: Extract<TranscriptItem, { kind: "turn" }>;
   focusedId?: string;
@@ -209,17 +220,19 @@ function ChatWork({ item, focusedId, children }: {
   useEffect(() => {
     if (focusedId) setOverride({ active: item.active, open: true });
   }, [focusedId, item.active]);
-  return <div className="min-w-0">
-    <button type="button" aria-controls={bodyId} aria-expanded={open}
-      onClick={() => setOverride({ active: item.active, open: !open })}
-      className="flex min-h-7 items-center gap-1.5 rounded-md text-sm text-ink-tertiary hover:text-ink">
-      {item.label}<ChevronRight size={14} aria-hidden className={cn("motion-safe:transition-transform motion-safe:duration-200", open && "rotate-90")} />
-    </button>
-    <div id={bodyId} inert={!open} aria-hidden={!open || undefined}
-      className={cn("grid motion-safe:transition-[grid-template-rows,opacity] motion-safe:duration-200 motion-safe:ease-in-out",
-        open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0")}>
-      <div className="min-h-0 min-w-0 overflow-clip">
-        {motion.shown && <div className="v2-work-steps grid min-w-0 gap-2 border-s border-hairline/40 ps-3 pt-1">{children}</div>}
+  return <div className="v2-work min-w-0" data-active={item.active || undefined}>
+    <div className="v2-work-content">
+      <button type="button" aria-controls={bodyId} aria-expanded={open}
+        onClick={() => setOverride({ active: item.active, open: !open })}
+        className="flex min-h-7 items-center gap-1.5 rounded-md text-sm text-ink-tertiary hover:text-ink">
+        <span className="v2-wave-label">{item.label}</span><ChevronRight size={14} aria-hidden className={cn("motion-safe:transition-transform motion-safe:duration-200", open && "rotate-90")} />
+      </button>
+      <div id={bodyId} inert={!open} aria-hidden={!open || undefined}
+        className={cn("grid motion-safe:transition-[grid-template-rows,opacity] motion-safe:duration-200 motion-safe:ease-in-out",
+          open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0")}>
+        <div className="min-h-0 min-w-0 overflow-clip">
+          {motion.shown && <div className="v2-work-steps grid min-w-0 border-s border-hairline/40 ps-1">{children}</div>}
+        </div>
       </div>
     </div>
   </div>;
@@ -247,14 +260,21 @@ export function ChatV2({ profile, phoneLayout = false }: { profile: Bot; phoneLa
   const teammates = useTeammates();
   const mentionPeers = useMemo(() => [...bots, ...teammates.peers], [bots, teammates]);
   const historyPage = useChatHistory(bot);
-  const { history } = historyPage;
+  const stopPresentation = useStopPresentation(bot.threadId);
+  const stopping = stopPresentation === "pending";
+  const lastDrawn = useRef<{ history: Message[]; messages: Message[]; busy: boolean } | null>(null);
+  const frozen = stopping ? lastDrawn.current : null;
+  const history = frozen?.history ?? historyPage.history;
+  const busy = frozen?.busy ?? Boolean(bot.busy);
+  const storedRowKeys = useMemo(() => new Set(history.map(messageRowKey)), [history]);
   const messageById = useMemo(() => new Map(history.map(message => [message.id, message])), [history]);
   const viewport = useTranscriptViewport({ ownerId: bot.id, threadId: bot.threadId, messages: history,
-    hasMore: historyPage.hasMore, historyPage, rests: staysInView, pinOn: [bot.busy] });
-  const messages = useLiveTranscript(bot.threadId, viewport.windowedMessages, history);
+    hasMore: historyPage.hasMore, historyPage, rests: staysInView, pinOn: [busy] });
+  const liveMessages = useLiveTranscript(bot.threadId, viewport.windowedMessages, historyPage.history);
+  const messages = frozen?.messages ?? liveMessages;
   const unread = useUnreadDivider({ threadId: bot.threadId, messages: history, following: viewport.following, hasMore: historyPage.hasMore });
   const focusId = focused?.threadId === bot.threadId && !focused.consumed ? focused.messageId : undefined;
-  const items = useMemo(() => groupChatWork(messages, Boolean(bot.busy), history, focusId), [messages, bot.busy, history, focusId]);
+  const items = useMemo(() => groupChatWork(messages, busy, history, focusId), [messages, busy, history, focusId]);
   const digestByReply = useMemo(() => {
     const replies = new Map<string, string>();
     const digests = new Map<string, Message>();
@@ -283,23 +303,72 @@ export function ChatV2({ profile, phoneLayout = false }: { profile: Bot; phoneLa
     : undefined;
   const [editing, setEditing] = useState<Message | null>(null);
   const lastTyped = history.findLast(m => m.role === "user" && m.kind === "text" && !peerLine(m) && !m.reaction);
-  const renderMessage = (message: Message) => <div key={message.id} data-mid={message.id}>
-    {message.automation && <div className="pb-3"><AutomationCaption message={message} line={message.automation} botId={bot.id} /></div>}
-    {message.id === unread.messageId && <NewMessagesDivider fading={unread.fading} />}
-    {editing?.id === message.id ? <form onSubmit={e => { e.preventDefault(); const text = String(new FormData(e.currentTarget).get("text") ?? "").trim(); if (text) { dispatch({ type: "editMessage", botId: bot.id, threadId: bot.threadId, messageId: editing.id, text }); setEditing(null); } }}>
-      <input autoFocus className="outline-none focus:bg-raised/50" name="text" defaultValue={editing.text} onKeyDown={e => { if (e.key === "Escape") setEditing(null); }} /></form> :
-      <Row mentionPeers={mentionPeers} phoneLayout={phoneLayout} ownBubbleStyle={ownBubbleStyle} digest={digestByReply.get(message.id)} message={message} botId={bot.id} botName={bot.name} color={bot.color} threadId={bot.threadId}
-        busy={Boolean(bot.busy)} hasMore={message.kind === "call" && historyPage.hasMore}
-        failure={message.tool && failedTurnCause(message.tool.name) !== null
-          ? <FailedTurnRow tool={message.tool} engine={engine} botId={bot.id} threadId={bot.threadId}
-              messageAt={message.at} onRetry={message.id === retryable ? retry : undefined} />
-          : undefined}
-        transcript={message.setupOffer || richRowKind(message) === "options" || message.kind === "call" ? history : EMPTY_TRANSCRIPT}
-        quoted={message.replyToId ? messageById.get(message.replyToId) : undefined}
-        jumpTo={historyPage.jumpTo} canLoadQuote={historyPage.hasMore} loadingQuote={Boolean(message.replyToId && historyPage.pending)}
-        reply={writable ? draft.selectReply : undefined} />}
-  </div>;
-  return <main data-chat-v2 className="v2-page">
+  const sendOrigin = useRef<{ sendId: string; bounds: DOMRect } | null>(null);
+  const transcriptRef = viewport.transcriptRef;
+  useLayoutEffect(() => {
+    const paper = transcriptRef.current;
+    if (!paper) return;
+    if (stopPresentation === "pending") {
+      for (const word of paper.querySelectorAll(".chat-stream-word")) {
+        for (const animation of word.getAnimations?.() ?? []) animation.finish();
+      }
+    } else if (stopPresentation === "settled" && lastDrawn.current && !reducedMotion()) {
+      const before = new Set(lastDrawn.current.messages.map(message => message.id));
+      for (const row of paper.querySelectorAll<HTMLElement>("[data-mid]")) {
+        if (!before.has(row.dataset.mid!)) {
+          row.animate?.([{ opacity: 0 }, { opacity: 1 }], { duration: 180, easing: "ease-out" });
+        }
+      }
+    }
+    if (!stopping) lastDrawn.current = { history, messages, busy };
+  }, [stopPresentation, stopping, history, messages, busy, transcriptRef]);
+  useLayoutEffect(() => {
+    const origin = sendOrigin.current;
+    if (!origin) return;
+    const row = transcriptRef.current?.querySelector<HTMLElement>(`[data-send-id="${CSS.escape(origin.sendId)}"]`);
+    if (!row) return;
+    sendOrigin.current = null;
+    row.style.animation = "none";
+    row.closest(".v2-timeline-row")?.classList.add("v2-sent-row");
+    const bubble = row.querySelector<HTMLElement>(".v2-user-content");
+    if (!bubble?.animate || reducedMotion()) return;
+    const end = bubble.getBoundingClientRect();
+    bubble.animate([
+      { transform: `translate(${origin.bounds.left - end.left}px, ${origin.bounds.top - end.top}px) scale(.96)`, opacity: 0.55 },
+      { transform: "translate(0, 0) scale(1)", opacity: 1 },
+    ], { duration: 360, easing: "cubic-bezier(0.3, 0.15, 0.25, 1)" });
+  }, [messages, transcriptRef]);
+  const shownStreams = useRef(new Set<string>());
+  useLayoutEffect(() => {
+    const current = shownStreams.current;
+    for (const row of transcriptRef.current?.querySelectorAll<HTMLElement>("[data-streaming][data-mid]") ?? []) {
+      current.add(row.dataset.mid!);
+      if (current.size > 500) current.delete(current.values().next().value!);
+    }
+  }, [messages, transcriptRef]);
+
+  const renderMessage = (message: Message) => {
+    const prior = priorLiveReplyId(message.id);
+    const replacement = prior && shownStreams.current.has(prior) ? prior : undefined;
+    return <div key={replacement ?? messageRowKey(message)} data-mid={message.id}
+      data-send-id={message.role === "user" ? message.sendId : undefined} data-streaming={isLiveReply(message) || undefined} data-streamed={Boolean(replacement) || undefined} className="v2-message-enter">
+      {message.automation && <div className="pb-3"><AutomationCaption message={message} line={message.automation} botId={bot.id} /></div>}
+      {message.id === unread.messageId && <NewMessagesDivider fading={unread.fading} />}
+      {editing?.id === message.id ? <form onSubmit={e => { e.preventDefault(); const text = String(new FormData(e.currentTarget).get("text") ?? "").trim(); if (text) { dispatch({ type: "editMessage", botId: bot.id, threadId: bot.threadId, messageId: editing.id, text }); setEditing(null); } }}>
+        <input autoFocus className="outline-none focus:bg-raised/50" name="text" defaultValue={editing.text} onKeyDown={e => { if (e.key === "Escape") setEditing(null); }} /></form> :
+        <Row mentionPeers={mentionPeers} phoneLayout={phoneLayout} ownBubbleStyle={ownBubbleStyle} digest={digestByReply.get(message.id)} message={message} botId={bot.id} botName={bot.name} color={bot.color} threadId={bot.threadId}
+          busy={busy} hasMore={message.kind === "call" && historyPage.hasMore}
+          failure={message.tool && failedTurnCause(message.tool.name) !== null
+            ? <FailedTurnRow tool={message.tool} engine={engine} botId={bot.id} threadId={bot.threadId}
+                messageAt={message.at} onRetry={message.id === retryable ? retry : undefined} />
+            : undefined}
+          transcript={message.setupOffer || richRowKind(message) === "options" || message.kind === "call" ? history : EMPTY_TRANSCRIPT}
+          quoted={message.replyToId ? messageById.get(message.replyToId) : undefined}
+          jumpTo={historyPage.jumpTo} canLoadQuote={historyPage.hasMore} loadingQuote={Boolean(message.replyToId && historyPage.pending)}
+          reply={writable ? draft.selectReply : undefined} />}
+    </div>;
+  };
+  return <main data-chat-v2 data-stop-presentation={stopPresentation} className="v2-page">
     <CallOverlay bot={bot} transcript={history} />
     <div className="v2-floating">
       <div className="v2-model"><ModelPicker bot={bot} threadId={bot.threadId} iconOnly={phoneLayout} /></div>
@@ -331,12 +400,14 @@ export function ChatV2({ profile, phoneLayout = false }: { profile: Bot; phoneLa
           </div>
         )}
         <ChatImagePreloads.Provider value={imagePreloads}>
-        <ExchangeTimeline items={items} botId={bot.id} focusId={focused?.messageId ?? null} unreadId={unread.messageId}
+        <ExchangeTimeline key={bot.threadId} working={!stopPresentation && Boolean(busy || history.at(-1)?.id.startsWith("optimistic-"))} ready={!bot.switchingTo && !bot.awaitingThreadSnapshot} storedKeys={storedRowKeys} items={items} botId={bot.id} focusId={focused?.messageId ?? null} unreadId={unread.messageId}
           render={item => {
             if (item.kind === "message") return renderMessage(item.message);
             if (item.kind !== "turn") return null;
             return <ChatWork key={item.id} item={item} focusedId={item.messages.some(message => message.id === focusId) ? focusId : undefined}>
-              {item.messages.map(renderMessage)}
+              {item.messages.map(message => <div key={message.id} className="v2-work-step-enter">
+                <div className="v2-work-step-content">{renderMessage(message)}</div>
+              </div>)}
             </ChatWork>;
           }} />
         </ChatImagePreloads.Provider>
@@ -345,8 +416,10 @@ export function ChatV2({ profile, phoneLayout = false }: { profile: Bot; phoneLa
     </div>
     <footer className="v2-dock chat-column-dock">{(viewport.showJumpToLatest || viewport.laterCount > 0) && <JumpToLatestButton className="v2-jump-to-latest bottom-full mb-2" onClick={viewport.jumpToLatest} />}
       <LiveCallBar bot={bot} />
-      <ChatV2Presence bot={bot} />
-      {writable ? <Composer bot={profile} locked={Boolean(bot.switchingTo)} replyTo={draft.replyTo} onClearReply={draft.clearReply} onRestoreReply={draft.restoreReply} onConsumeReply={draft.consumeReply}
+      <ChatV2Presence bot={bot} stopping={stopping} />
+      {writable ? <Composer bot={profile} smoothHeight onSendFrom={(sendId, input) => {
+        if (!reducedMotion()) sendOrigin.current = { sendId, bounds: input.getBoundingClientRect() };
+      }} locked={Boolean(bot.switchingTo)} replyTo={draft.replyTo} onClearReply={draft.clearReply} onRestoreReply={draft.restoreReply} onConsumeReply={draft.consumeReply}
         onEditLast={lastTyped && !bot.busy && canEditTypedMessage(lastTyped) ? () => setEditing(lastTyped) : undefined} /> :
         <NewConversationInstead bot={bot} onNew={() => dispatch({ type: "newTask", botId: bot.id })} />}
     </footer>

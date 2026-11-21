@@ -3719,15 +3719,24 @@ button:disabled.bg-danger {
 
 :root[data-reduced-motion="true"] :is([data-modal-motion] > *, [data-overlay-fade], [data-side-panel-motion], [data-look="sidebar"], [data-sidebar-drawer-scrim]) { transition: none; }
 
+@property --drawer-progress {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
 @media (width < 768px) {
   [data-bot-list-stage]:has([data-bot-list-chat]) {
     --drawer-direction: 1;
-    --drawer-progress: 0;
-    --drawer-travel: calc(var(--drawer-direction) * var(--drawer-progress));
+    --drawer-rest-progress: 0;
   }
 
   [data-bot-list-stage]:dir(rtl):has([data-bot-list-chat]) { --drawer-direction: -1; }
-  [data-bot-list-stage="open"]:has([data-bot-list-chat]) { --drawer-progress: 1; }
+  [data-bot-list-stage="open"]:has([data-bot-list-chat]) { --drawer-rest-progress: 1; }
+
+  [data-bot-list-stage]:has([data-bot-list-chat]) :is([data-bot-list-chat], [data-bot-list-trigger-layer], [data-look="sidebar"]) {
+    --drawer-progress: var(--drawer-rest-progress);
+  }
 
   [data-bot-list-stage]:has([data-bot-list-chat]) [data-look="sidebar"] {
     z-index: 20;
@@ -3741,6 +3750,7 @@ button:disabled.bg-danger {
     inset: 0;
     z-index: 1;
     background: black;
+    --drawer-progress: inherit;
     opacity: calc(0.22 * (1 - var(--drawer-progress)));
     pointer-events: none;
   }
@@ -3760,7 +3770,7 @@ button:disabled.bg-danger {
   }
 
   [data-bot-list-stage]:has([data-bot-list-chat]) :is([data-bot-list-chat], [data-bot-list-trigger-layer]) {
-    translate: calc(100% * var(--drawer-travel)) 0;
+    translate: calc(100% * var(--drawer-direction) * var(--drawer-progress)) 0;
   }
 
   [data-bot-list-stage="closed"]:not([data-drawer-dragging]):has([data-bot-list-chat])

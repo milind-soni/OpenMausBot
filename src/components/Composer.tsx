@@ -2,7 +2,7 @@ import { openBot } from "@/state/thread-navigation";
 import { directMessageSent, roomMessageSent } from "@/lib/product-events";
 import { TeamAudienceLabel } from "./TeamSideSwitch";
 import { useComposerDictation } from "@/lib/use-composer-dictation";
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type SetStateAction } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type SetStateAction } from "react";
 import { Mic, Square, X } from "lucide-react";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { useStoreRef } from "@/state/store-ref"; import { sameDrawnBots } from "@/lib/drawn-bots";
 import { visibleMessages, currentTaskBot, type Bot, type Group, type InstanceInfo, type Message } from "@/state/store";
@@ -101,6 +101,8 @@ export function Composer({
   onConsumeReply,
   onRestoreReply,
   locked: setupLocked = false,
+  smoothHeight = false,
+  onSendFrom,
 }: {
   bot?: Bot;
   group?: Group;
@@ -111,6 +113,8 @@ export function Composer({
   onConsumeReply?: () => void;
   onRestoreReply?: (message: Message, threadId: string) => void;
   locked?: boolean;
+  smoothHeight?: boolean;
+  onSendFrom?: (sendId: string, input: HTMLTextAreaElement) => void;
 }) {
   const bot = profile ? currentTaskBot(profile) : undefined;
   const locked = setupLocked || Boolean(bot?.awaitingThreadSnapshot);
@@ -206,6 +210,19 @@ export function Composer({
   const { recording, ready: micReady, speechError, toggle: toggleMic, stop: stopDictation } = useComposerDictation({ draftId, text, onText: editText });
   const [caret, setCaret] = useState(0);
   const shellRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const shell = shellRef.current;
+    const frame = shell?.parentElement;
+    if (!smoothHeight || singleRow || !shell || !frame || typeof ResizeObserver === "undefined") return;
+    const resize = () => frame.style.setProperty("--composer-height", `${shell.getBoundingClientRect().height}px`);
+    resize();
+    const observer = new ResizeObserver(resize);
+    observer.observe(shell);
+    return () => {
+      observer.disconnect();
+      frame.style.removeProperty("--composer-height");
+    };
+  }, [smoothHeight, singleRow]);
 
   const [highlight, setHighlight] = useState(0);
   const [dismissedAt, setDismissedAt] = useState<number | null>(null);
@@ -495,6 +512,7 @@ export function Composer({
     } else if (bot) {
       const points = effectiveChannelMode === "goal" ? null : takePointedChips(threadId);
       const page = effectiveChannelMode === "goal" ? undefined : openPageFor(threadId);
+      if (inputRef.current) onSendFrom?.(sentDraft.sendId, inputRef.current);
       dispatch({
         type: "send", botId: bot.id, text: body, sendId: sentDraft.sendId, replyToId: replyTo?.id, threadId, dataContext, mode: effectiveChannelMode, mentions: sentDraft.mentions,
         ...(points ? { pointed: points.pointed } : {}), ...(page ? { openPage: page } : {}),
@@ -679,7 +697,7 @@ export function Composer({
           uploadImage={uploadImage}
         />
         <TeamAudienceLabel bot={bot} group={group} />
-        <div className="relative">
+        <div className={cn("relative", smoothHeight && !singleRow && "v2-composer-frame")}>
           {/* Plain canvas behind the composer and the strip below it, so the transcript ends at the composer
               with no fade. */}
           <div
@@ -687,7 +705,7 @@ export function Composer({
             data-composer-backdrop
             className={cn("pointer-events-none absolute -left-5 -right-5 bg-app", "-bottom-3 top-1/2")}
           />
-        <div ref={shellRef} data-tour="composer" data-look="composer" className={cn("@container/composer relative z-[1]", singleRow ? "flex min-w-0 items-center gap-2 pb-1 [[data-phone-keyboard]_&]:pb-0" : cn("rounded-2xl px-2 py-1.5", ELEVATED_FLOAT))}>
+        <div ref={shellRef} data-tour="composer" data-look="composer" className={cn("@container/composer relative z-[1]", singleRow ? "flex min-w-0 items-center gap-2 pb-1 [[data-phone-keyboard]_&]:pb-0" : cn("rounded-2xl px-2 py-1.5", !smoothHeight && ELEVATED_FLOAT))}>
         {singleRow && toolsMenu}
         <div className={singleRow ? cn("min-w-0 flex-1 rounded-[26px] px-3 py-1.5 [--composer-reply-gap:6px]", ELEVATED_FLOAT) : "contents"}>
         {replyTo && <ComposerReplyStrip message={replyTo} fallbackName={bot?.name} onClear={onClearReply} />}
@@ -705,6 +723,7 @@ export function Composer({
           />
           {!singleRow && toolsMenu}
           <MentionTextarea
+          smoothHeight={smoothHeight && singleRow}
           singleLinePlaceholder={singleRow}
           wrapperClassName={singleRow ? undefined : cn("@max-[30rem]/composer:order-first @max-[30rem]/composer:basis-full", stacked && "order-first basis-full")}
           inputRef={inputRef}

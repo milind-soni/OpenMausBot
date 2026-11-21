@@ -1,3 +1,4 @@
+import { StreamingText } from "./StreamingText";
 // Half-duplex like CallView: the native recognizer has no echo cancellation. Replies are queued so a fast second member
 // never cuts off the first.
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -523,7 +524,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
 
       <div className="min-h-[3.5rem] max-w-[620px] text-center text-[15px] leading-relaxed text-ink">
         {phase === "listening" ? (
-          heard || (
+          heard ? <StreamingText text={heard} /> : (
             <span className="text-ink-secondary">
               {pushToTalk
                 ? t("call.turns.releaseToSend", { keys: pushToTalkKeys() })
@@ -531,7 +532,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
             </span>
           )
         ) : phase === "speaking" ? (
-          speech.caption
+          <StreamingText text={speech.caption ?? ""} />
         ) : (
           <span className="text-ink-secondary">{workingMember ? t("call.group.inTurn") : ""}</span>
         )}
