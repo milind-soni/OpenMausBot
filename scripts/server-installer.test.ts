@@ -62,6 +62,7 @@ esac`,
   curl: `echo "curl $*" >> "$FAKE_LOG"
 blocked() { case " \${FAKE_BLOCKED:-} " in *" $1 "*) return 0 ;; esac; return 1; }
 case "$*" in
+  *"-K -"*releases/latest*) cat >> "$FAKE_LOG.stdin"; printf '{\\n  "tag_name": "%s",\\n  "name": "x"\\n}\\n' "$FAKE_RELEASE" ;;
   *"-K - -fsSL"*) cat >> "$FAKE_LOG.stdin"
     case "$*" in
       */manifests/sha256:*) printf '%s' "\${FAKE_MANIFEST:-}" ;;
@@ -354,6 +355,20 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     // Asked for no sandbox, or a registry that does not say: nothing to add.
     expect(run(["--check", "--domain", "maus.example.com", "--no-sandbox"], registry("")).stdout).not.toContain("no bots' sandbox");
     expect(run(["--check", "--domain", "maus.example.com"]).stdout).not.toContain("no bots' sandbox");
+  });
+
+  it("reads the newest release without a token, and sends one only when a test run's OMB_INSTALL_GITHUB_TOKEN gives it, never on a command line", () => {
+    const stdin = (dir: string) => (existsSync(join(dir, "calls.log.stdin")) ? readFileSync(join(dir, "calls.log.stdin"), "utf8") : "");
+    const plain = run(["--check", "--domain", "maus.example.com"]);
+    expect(plain.stdout).toContain("  ok    version: v0.1.151, the newest release");
+    expect(plain.calls.filter((call) => call.includes("releases/latest"))).toEqual(["curl -fsS --max-time 15 https://api.github.com/repos/milind-soni/OpenMausBot/releases/latest"]);
+    expect(stdin(plain.dir)).not.toContain("api-token");
+
+    const token = run(["--check", "--domain", "maus.example.com"], { env: { OMB_INSTALL_GITHUB_TOKEN: "api-token-123" } });
+    expect(token.stdout).toContain("  ok    version: v0.1.151, the newest release");
+    expect(token.calls.filter((call) => call.includes("releases/latest"))).toEqual(["curl -K - -fsS --max-time 15 https://api.github.com/repos/milind-soni/OpenMausBot/releases/latest"]);
+    expect(token.calls.some((call) => call.includes("api-token-123"))).toBe(false);
+    expect(stdin(token.dir)).toContain('header = "Authorization: Bearer api-token-123"\n');
   });
 
   it("uses the stable channel once it is published, and never the latest tag", () => {
