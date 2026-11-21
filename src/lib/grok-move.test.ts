@@ -23,7 +23,28 @@ vi.mock("@/state/store", () => ({
   }),
 }));
 
-import { GROK_EXPORT_FORMAT, parseGrokExport } from "../../shared/grok-import";
+const memory = vi.hoisted(() => ({ files: new Map<string, string>(), writesBeforeNextSave: [] as Array<() => void>, broken: false }));
+vi.mock("@/lib/memory", () => ({
+  MEMORY_INDEX: "MEMORY.md",
+  fetchMemoryDoc: async (botId: string, path: string) => {
+    const text = memory.files.get(`${botId}/${path}`) ?? "";
+    return { path, text, hash: `#${text}`, exists: memory.files.has(`${botId}/${path}`) };
+  },
+  saveMemoryDoc: async (botId: string, path: string, text: string, expectedHash: string | undefined) => {
+    if (memory.broken) throw new Error("offline");
+    memory.writesBeforeNextSave.shift()?.();
+    const current = memory.files.get(`${botId}/${path}`) ?? "";
+    if (expectedHash !== undefined && expectedHash !== `#${current}`) return { ok: false, conflict: true, current, currentHash: `#${current}` };
+    memory.files.set(`${botId}/${path}`, text);
+    return { ok: true, doc: { path, text, hash: `#${text}`, exists: true }, overview: {} };
+  },
+  deleteMemoryDoc: async (botId: string, path: string) => {
+    memory.files.delete(`${botId}/${path}`);
+    return { overview: {} };
+  },
+}));
+
+import { GROK_EXPORT_FORMAT, GROK_HANDOVER_FILE, parseGrokExport } from "../../shared/grok-import";
 import { foundExports, previewGrokMove, runGrokMove, type GrokAsset, type GrokPreviewFacts } from "./grok-move";
 
 const bots = (...list: unknown[]) => parseGrokExport(JSON.stringify({ format: GROK_EXPORT_FORMAT, bots: list }));
@@ -43,6 +64,9 @@ beforeEach(() => {
   fixture.failSkill = "";
   fixture.history = {};
   fixture.assets = {};
+  memory.files.clear();
+  memory.writesBeforeNextSave.length = 0;
+  memory.broken = false;
 });
 
 describe("the preview", () => {
@@ -88,7 +112,7 @@ describe("the import", () => {
       "PATCH /api/bots/id-Desk/skills/greet",
     ]);
     expect(fixture.requests[1]![2]).toEqual({ enabled: true });
-    expect(report.bots).toEqual([{ name: "Desk", skills: 2, skillsOff: ["Risky"], routines: 1, notes: 1, memories: 1, apps: 2 }]);
+    expect(report.bots).toEqual([{ name: "Desk", skills: 2, skillsOff: ["Risky"], routines: 1, notes: 1, memories: 1, apps: 2, handover: false }]);
     expect(JSON.stringify(fixture.requests)).not.toContain("/api/webhooks");
     expect(JSON.stringify(fixture.requests)).not.toContain("connected-apps");
   });
@@ -179,6 +203,68 @@ describe("each Bot's pages and files, sent through the link", () => {
     fixture.failImport = "Desk";
     await runGrokMove(previewGrokMove(bots(DESK), waiting), vi.fn(), true);
     expect(asked()).toEqual([]);
+  });
+});
+
+describe("each Bot's handover note", () => {
+  const MINE = "# Notes from Grok Bot\n\n- The door sticks\n- 2026-11-01 · from chat · Likes tea\n";
+  const here = (packageId: string) => facts({ bots: [{ id: "here-Desk", name: "Desk", installedPackage: { id: packageId, name: "Desk" } as never }] });
+  const DESK_ID = previewGrokMove(bots(DESK), facts()).plans[0]!.packageId;
+  const moveAgain = (handover: unknown, local = false) => runGrokMove(previewGrokMove(bots({ ...DESK, handover }), here(DESK_ID)), vi.fn(), local);
+  const index = () => memory.files.get("here-Desk/MEMORY.md")!;
+
+  it("comes with a new bot inside its package, and is counted", async () => {
+    const report = await runGrokMove(previewGrokMove(bots({ ...DESK, handover: "Drafting the deck." }), facts()), vi.fn());
+    const sent = fixture.requests.find(([path]) => path.startsWith("/api/teams/import"))![2] as { package: { agents: Array<{ seed: { memory: Record<string, string> } }> } };
+    expect(sent.package.agents[0]!.seed.memory["MEMORY.md"]).toContain("Drafting the deck.");
+    expect(report.bots[0]!.handover).toBe(true);
+  });
+
+  it("goes into the memory of a Bot moved before, anywhere the move runs: first, and its own lines stay as they were", async () => {
+    memory.files.set("here-Desk/MEMORY.md", MINE);
+    const report = await moveAgain("Drafting the deck.");
+    expect(report.moved).toEqual([{ name: "Desk", handover: "written" }]);
+    expect(index().indexOf("Drafting the deck.")).toBeLessThan(index().indexOf("# Notes from Grok Bot"));
+    expect(index().endsWith(MINE)).toBe(true);
+    expect(fixture.requests.map(([path]) => path)).not.toContain("/api/teams/import?mode=add");
+  });
+
+  it("moved again, replaces the earlier note instead of adding a second, and the same note again changes nothing", async () => {
+    memory.files.set("here-Desk/MEMORY.md", MINE);
+    await moveAgain("Drafting the deck.");
+    await moveAgain("Deck sent; waiting on legal.");
+    expect(index()).not.toContain("Drafting the deck.");
+    expect(index().match(/## Where things stand/g)).toHaveLength(1);
+    expect(index().endsWith(MINE)).toBe(true);
+    const once = index();
+    await moveAgain("Deck sent; waiting on legal.", true);
+    expect(index()).toBe(once);
+  });
+
+  it("keeps a long note whole beside MEMORY.md, and lets that go when a later note fits", async () => {
+    await moveAgain(Array.from({ length: 150 }, (_, i) => `Line ${i + 1}: a step.`));
+    expect(memory.files.get(`here-Desk/${GROK_HANDOVER_FILE}`)).toContain("Line 150: a step.");
+    expect(index()).toContain(GROK_HANDOVER_FILE);
+    await moveAgain("Done: all steps.");
+    expect(memory.files.has(`here-Desk/${GROK_HANDOVER_FILE}`)).toBe(false);
+    expect(index()).not.toContain(GROK_HANDOVER_FILE);
+  });
+
+  it("keeps a note the bot writes to its memory meanwhile, and is named as failed when it can't be saved", async () => {
+    memory.files.set("here-Desk/MEMORY.md", MINE);
+    memory.writesBeforeNextSave.push(() => memory.files.set("here-Desk/MEMORY.md", `${MINE}- 2026-11-21 · from chat · Prefers mornings\n`));
+    expect((await moveAgain("Drafting the deck.")).moved).toEqual([{ name: "Desk", handover: "written" }]);
+    expect(index()).toContain("Drafting the deck.");
+    expect(index()).toContain("Prefers mornings");
+
+    memory.broken = true;
+    expect((await moveAgain("Deck sent.")).moved).toEqual([{ name: "Desk", handover: "failed" }]);
+  });
+
+  it("is not asked for when the Bot wrote none", async () => {
+    memory.files.set("here-Desk/MEMORY.md", MINE);
+    expect((await moveAgain(undefined)).moved).toEqual([{ name: "Desk" }]);
+    expect(index()).toBe(MINE);
   });
 });
 

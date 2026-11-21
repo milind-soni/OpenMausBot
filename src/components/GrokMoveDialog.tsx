@@ -19,8 +19,8 @@ const LINE = "text-[13px] leading-relaxed text-ink-secondary";
 const NONE_WAITING: GrokWaiting = { pages: [], files: 0 };
 
 /** A Bot as one heading and a count per kind; a kind it has none of is left out. */
-export function BotCounts({ heading, skills, routines, memories, notes, skillsOff, history, waiting = NONE_WAITING, brought }: {
-  heading: string; skills: number; routines: number; memories: number; notes: number; skillsOff: readonly string[]; history?: GrokHistory;
+export function BotCounts({ heading, skills, routines, memories, notes, handover, skillsOff, history, waiting = NONE_WAITING, brought }: {
+  heading: string; skills: number; routines: number; memories: number; notes: number; handover: boolean; skillsOff: readonly string[]; history?: GrokHistory;
   waiting?: GrokWaiting;
   brought?: GrokBrought;
 }) {
@@ -41,6 +41,7 @@ export function BotCounts({ heading, skills, routines, memories, notes, skillsOf
           </div>
         ))}
       </dl>
+      {handover && <p data-grok-move-handover className={LINE}>{t("grokMove.handover")}</p>}
       {skillsOff.length > 0 && <p className={LINE}>{t("grokMove.skillsOff", { names: skillsOff.join(", ") })}</p>}
       {history && "reason" in history && <p className={LINE}>{t(`grokMove.history.${history.reason}` as LocaleKey)}</p>}
       {waiting.pages.length > 0 && <p data-grok-move-pages className={LINE}>{t("grokMove.pagesNamed", { names: waiting.pages.join(", ") })}</p>}
@@ -311,17 +312,20 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
                 "pages" in brought && <p key={name} className={LINE}>{t("grokMove.movedBrought", { name, pages: brought.pages, files: brought.files })}</p>,
                 <BroughtLines key={`${name} lines`} brought={brought} />,
               ])}
+              {report.moved.flatMap(({ name, handover }) => !handover ? [] : [
+                <p key={`${name} handover`} data-grok-move-handover={handover} {...(handover === "failed" ? { role: "alert" } : {})} className={LINE}>{t(handover === "written" ? "grokMove.movedHandover.written" : "grokMove.movedHandover.failed", { name })}</p>,
+              ])}
               {report.moved.flatMap(({ name, history }) => !history ? [] : [
                 <p key={name} className={LINE}>{"messages" in history ? t("grokMove.movedChat", { name, count: history.messages })
                   : t("grokMove.movedNoChat", { name, why: t(`grokMove.history.${history.reason}` as LocaleKey) })}</p>,
               ])}
               <GrokMoveLines paused={report.bots.some((bot) => bot.routines > 0) ? t("grokMove.pausedReport") : null} files={anyBrought ? t("grokMove.broughtWhere") : local ? t("grokMove.filesViaLink") : t("grokMove.filesStay")} apps={report.bots.reduce((total, bot) => total + bot.apps, 0)}
-                moved={report.moved.flatMap(({ name, history, brought }) => history || brought ? [] : [name])} unreadable={report.unreadable} failed={report.failed} />
+                moved={report.moved.flatMap(({ name, history, brought, handover }) => history || brought || handover ? [] : [name])} unreadable={report.unreadable} failed={report.failed} />
             </>
           ) : preview ? (
             <>
               {preview.plans.map((plan) => (
-                <BotCounts key={plan.packageId} heading={plan.addedAs} skills={plan.skills.length} routines={plan.routines} memories={plan.memories} notes={plan.notes}
+                <BotCounts key={plan.packageId} heading={plan.addedAs} skills={plan.skills.length} routines={plan.routines} memories={plan.memories} notes={plan.notes} handover={plan.handover !== null}
                   skillsOff={plan.skills.filter((skill) => !skill.on).map((skill) => skill.name)} {...(local ? { waiting: plan } : {})} />
               ))}
               <GrokMoveLines history={local ? t("grokMove.historyPreview") : null} paused={preview.plans.some((plan) => plan.routines > 0) ? t("grokMove.pausedPreview") : null}
@@ -330,6 +334,9 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
               {local && preview.moved.length > 0 && <p className={LINE}>{t("grokMove.alreadyHereChats", { names: preview.moved.map(({ name }) => name).join(", ") })}</p>}
               {local && preview.moved.filter((moved) => moved.pages.length || moved.files).map((moved) => (
                 <p key={moved.name} data-grok-move-waiting className={LINE}>{t("grokMove.movedWaiting", { name: moved.name, pages: moved.pages.length, files: moved.files })}</p>
+              ))}
+              {preview.moved.filter((moved) => moved.handover).map((moved) => (
+                <p key={`${moved.name} handover`} data-grok-move-handover className={LINE}>{t("grokMove.movedHandover.comes", { name: moved.name })}</p>
               ))}
               {preview.noSetup.length > 0 && <p data-grok-move-no-setup className={LINE}>{t("grokMove.noSetup", { names: preview.noSetup.join(", ") })}</p>}
             </>
@@ -352,7 +359,7 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
           ) : preview ? (
             <>
               <button type="button" disabled={importing} onClick={() => setPreview(null)} className={SECONDARY}>{t("grokMove.back")}</button>
-              <button type="button" data-grok-move-import disabled={importing || !(preview.plans.length || (local && preview.moved.length))} onClick={() => void start()} className={cn(PRIMARY, "inline-flex items-center gap-2")}>
+              <button type="button" data-grok-move-import disabled={importing || !(preview.plans.length || preview.moved.some((moved) => local || moved.handover))} onClick={() => void start()} className={cn(PRIMARY, "inline-flex items-center gap-2")}>
                 {importing && <Loader2 size={15} className="animate-spin" />}
                 {importing ? t("grokMove.importing") : t("grokMove.import")}
               </button>

@@ -28,6 +28,7 @@ const EXPORT = JSON.stringify({ format: GROK_EXPORT_FORMAT, version: 1, bots: [{
 }] });
 const FILES_STAY = "Files on Grok Bot's computer don't come over. Add any your Bot needs.";
 const HISTORY_COMES = "Each Bot's chat comes over too, from the Grok Bot app on this computer.";
+const HANDOVER_LINE = "Handover note: where each piece of its work stands, read in every conversation.";
 const QUIET = JSON.stringify({ format: GROK_EXPORT_FORMAT, bots: [{ name: "Quiet", instructions: "Just chat." }] });
 
 let root: Root;
@@ -144,6 +145,45 @@ describe("Move from Grok Bot", () => {
     await paste(QUIET);
     expect(shown()).toContain("Already here: Quiet");
     expect(button("Import")!.disabled).toBe(true);
+  });
+
+  it("names each Bot's handover note in the preview and the report, and has none for a Bot that wrote none", async () => {
+    await open();
+    await paste(JSON.stringify({ format: GROK_EXPORT_FORMAT, bots: [{ name: "Quiet", instructions: "Just chat.", handover: "Drafting the deck." }] }));
+    expect(host.querySelector("[data-grok-move-handover]")?.textContent).toBe(HANDOVER_LINE);
+    plain();
+    expect(shown()).not.toContain("Drafting the deck.");
+    await importIt();
+    expect(host.querySelector("[data-grok-move-handover]")?.textContent).toBe(HANDOVER_LINE);
+    await act(async () => button("Move another Bot")!.click());
+    await paste(QUIET);
+    expect(host.querySelector("[data-grok-move-handover]")).toBeNull();
+  });
+
+  it("from a browser, a Bot already here with a new handover note can still be imported, and its note goes into its memory", async () => {
+    const plan = (await import("@/lib/grok-move")).previewGrokMove;
+    const { plans } = plan(JSON.parse(QUIET).bots.map((bot: object) => ({ ...bot, title: "", description: "", memories: [], userFacts: [], skills: [], routines: [], apps: [], handover: "" })), { bots: [], servers: new Set(), timeZone: "UTC" });
+    f.state = { config: {}, bots: [{ id: "here-Quiet", name: "Quiet", installedPackage: { id: plans[0]!.packageId, name: "Quiet" } }] };
+    const saved: Array<{ path: string; text: string }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: { body: string }) => {
+      const body = JSON.parse(init.body) as { path: string; text: string };
+      saved.push(body);
+      return new Response(JSON.stringify({ ok: true, ...body, hash: "h2", exists: true, overview: {} }), { status: 200 });
+    }));
+    f.api.mockImplementation(async (path: string) => (path.startsWith("/api/bots/here-Quiet/memory/file?path=MEMORY.md")
+      ? { path: "MEMORY.md", text: "- The door sticks\n", hash: "h1", exists: true }
+      : path === "/api/mcp/servers" ? { servers: [] } : {}));
+    await open();
+    await paste(JSON.stringify({ format: GROK_EXPORT_FORMAT, bots: [{ name: "Quiet", instructions: "Just chat.", handover: "Drafting the deck." }] }));
+    expect(shown()).toContain("Already here: Quiet");
+    expect(shown()).toContain("Quiet: its handover note comes over into its memory, in place of an earlier one.");
+    expect(button("Import")!.disabled).toBe(false);
+    await importIt();
+    expect(saved.map((write) => write.path)).toEqual(["MEMORY.md"]);
+    expect(saved[0]!.text).toMatch(/Drafting the deck\.[\s\S]*- The door sticks\n$/);
+    expect(shown()).toContain("Quiet: its handover note is in its memory now.");
+    expect(shown()).not.toContain("Already here");
+    expect(f.api.mock.calls.map(([path]) => path)).not.toContain("/api/teams/import?mode=add");
   });
 
   it("ends on the report: no sign-in, no setup steps, no links out", async () => {
