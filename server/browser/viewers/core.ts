@@ -23,6 +23,7 @@ import { extensionInput, type InstalledExtension } from "../extensions.ts";
 import type { HoldLimits } from "../hold.ts";
 import type { Tab } from "../tabs.ts";
 import { ACCEPT_OF, chooseOption, cursorAt, editableAt, selectAt, type SelectPopup } from "./popups.ts";
+import { DrawnView, type FrameMetadata } from "./drawn-view.ts";
 import { ViewerHold } from "./hold.ts";
 import { fitsScreen, MIN_WINDOW_WIDTH, requestedSize, VIEWPORT_PRESETS, viewportFor, ZOOM_LIMITS, zoomedLayout, type ViewportSetting } from "./viewport.ts";
 
@@ -41,15 +42,7 @@ const TEXT_LIMIT = 10_000;
 const HELD_LIMIT = 64;
 const CURSOR_EVERY_MS = 120;
 
-export interface FrameMetadata {
-  deviceWidth: number;
-  deviceHeight: number;
-  offsetTop: number;
-  pageScaleFactor: number;
-  scrollOffsetX: number;
-  scrollOffsetY: number;
-  timestamp?: number;
-}
+export type { FrameMetadata } from "./drawn-view.ts";
 
 export type Controller = "agent" | "you" | "another-viewer" | "unclaimed";
 
@@ -280,6 +273,7 @@ export class Viewer {
       return;
     }
     this.#frameSeen = true;
+    if (this.tab) this.#hub.drawn.frame(this.tab, params.metadata as FrameMetadata);
     if (this.#framesInFlight > 0) this.#mayHaveDropped = true;
     this.#framesInFlight++;
     const arrivedAt = Date.now();
@@ -443,6 +437,8 @@ export class ViewerHub {
   #emulated = false;
   #applying: Promise<void> = Promise.resolve();
   readonly #hold: ViewerHold;
+  /** Applies a page's emulation again when its frames show the window's size instead. */
+  readonly drawn = new DrawnView((tab, work) => this.paused(tab, work));
 
   constructor(host: HubHost) {
     this.host = host;
