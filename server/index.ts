@@ -13452,7 +13452,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!connectorThread(from.id, fromThreadId)) {
           return json(res, 403, { error: "source conversation does not belong to sender" });
         }
-        return json(res, ...skillsHost.harnessListing(from, url.searchParams, () => listStagedSkillWrites(from.id).map(stagedSkillListing)));
+        return json(res, ...skillsHost.harnessListing(from, fromThreadId, url.searchParams, () => listStagedSkillWrites(from.id).map(stagedSkillListing)));
       }
       if (method === "POST" && path === "/api/internal/skills/stage") {
         if (!skillAuthoringEnabled(cfg)) return json(res, 403, { error: "skill authoring is not enabled in Settings" });

@@ -442,14 +442,14 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
       return [201, { state: "applied", name: updated.name, action: "update", summary: updated.summary, shared: updated.shared }];
     },
 
-    harnessListing(from: BotRecord, search: URLSearchParams, staged: () => unknown[]): [number, Record<string, unknown>] {
+    harnessListing(from: BotRecord, threadId: string, search: URLSearchParams, staged: () => unknown[]): [number, Record<string, unknown>] {
       const target = search.get("target_bot_id")?.trim();
       if (target) {
         if (!skillsLibraryEnabled(cfg)) return [404, { error: "Skills library is not enabled." }];
         const listing = listSkillAssignments(assignments, from.id, target, (search.get("query") ?? "").trim().slice(0, 300));
         return listing ? [200, listing] : [403, { error: "Only a current Chief can manage a visible target in their authorized scope." }];
       }
-      const skills = listBotSkills(from).map((skill) => mode() !== "off" && !skill.editable && editable(from.id, skill.name)
+      const skills = listBotSkills(from, threadId).map((skill) => mode() !== "off" && !skill.editable && editable(from.id, skill.name)
         ? { ...skill, editable: true, revision: skill.sha256.slice(0, SHARED_REVISION_CHARS) }
         : skill);
       return [200, { skills, staged: staged() }];

@@ -1,15 +1,14 @@
 import type { SkillAssignmentAction } from "../../shared/skill-assignment.ts";
-import type { ToolCallContext, ToolCallResult } from "./agents-call.ts";
-import type { Json } from "./agents-client.ts";
+import type { HarnessClient, Json } from "./agents-client.ts";
 
-type SkillContext = Pick<ToolCallContext, "client" | "botId" | "threadId">;
+type SkillContext = { botId: string; threadId: string; client: Pick<HarnessClient, "apiResponse"> };
 
 function field(args: Json, name: string): string {
   const value = args[name];
   return typeof value === "string" ? value.trim() : "";
 }
 
-export async function callSkillAssignmentList(args: Json, { client, botId, threadId }: SkillContext): Promise<ToolCallResult | null> {
+export async function callSkillAssignmentList(args: Json, { client, botId, threadId }: SkillContext) {
   const target = field(args, "target_bot_id");
   if (!target) return null;
   const query = new URLSearchParams({ fromBotId: botId, fromThreadId: threadId, target_bot_id: target });
@@ -20,7 +19,7 @@ export async function callSkillAssignmentList(args: Json, { client, botId, threa
   return { text: JSON.stringify(response.body) };
 }
 
-export async function callSkillAssignment(action: SkillAssignmentAction, args: Json, { client, botId, threadId }: SkillContext): Promise<ToolCallResult> {
+export async function callSkillAssignment(action: SkillAssignmentAction, args: Json, { client, botId, threadId }: SkillContext) {
   const name = field(args, "skill_name"), target = field(args, "target_bot_id"), revision = field(args, "base_revision");
   if (!name || !target || !revision) {
     return { text: "Call skills_list with target_bot_id first, then pass skill_name, target_bot_id and management_revision as base_revision.", isError: true };

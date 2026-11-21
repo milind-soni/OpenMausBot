@@ -4,7 +4,7 @@ import { callSkillAssignment, callSkillAssignmentList } from "./agents-skill-ass
 
 function fixture() {
   const apiResponse = vi.fn<HarnessClient["apiResponse"]>();
-  const context = { client: { apiResponse } as HarnessClient, botId: "chief", threadId: "thread" };
+  const context = { client: { apiResponse }, botId: "chief", threadId: "thread" };
   return { apiResponse, context };
 }
 
