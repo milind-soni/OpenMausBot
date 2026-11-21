@@ -50,6 +50,11 @@ describe("redactSecretsInText with the bounded name parts", () => {
     expect(redactSecretsInText(`${name}_token=abcd1234efgh`)).not.toContain("abcd1234efgh");
   });
 
+  it("masks a JWT with a large payload, up to the bound", () => {
+    const jwt = `eyJ${"h".repeat(40)}.${"p".repeat(12_000)}.${"s".repeat(342)}`;
+    expect(redactSecretsInText(`Authorization header was ${jwt} here`)).not.toContain("p".repeat(100));
+  });
+
   it("masks URL passwords and JWTs as before", () => {
     expect(redactSecretsInText("postgres://admin:hunter2pass@db.example.test/app")).not.toContain("hunter2pass");
     const jwt = `eyJ${"h".repeat(20)}.${"p".repeat(40)}.${"s".repeat(40)}`;

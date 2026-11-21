@@ -36,9 +36,9 @@ const KEY_PREFIXES: RegExp[] = [
   /\bwhsec_[A-Za-z0-9_-]{20,}/g, // webhook secrets, alone or in an automation's address
   /\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g, // sendgrid api keys
   /\bbak_[A-Za-z0-9_-]{20,}/g, // Bot API keys
-  // jwt; each part bounded (at most 8 KB) for the reason KEY_VALUE's name is: unbounded, every `eyJ` in a long run of
-  // base64url scanned to its end
-  /\beyJ[A-Za-z0-9_-]{8,8192}\.[A-Za-z0-9_-]{8,8192}\.[A-Za-z0-9_-]{8,8192}\b/g,
+  // jwt; each part at most 16 KB (real tokens are a few KB; a part longer is not masked by this shape), bounded for the
+  // reason KEY_VALUE's name is: unbounded, every `eyJ` in a long run of base64url scanned to the run's end
+  /\beyJ[A-Za-z0-9_-]{8,16384}\.[A-Za-z0-9_-]{8,16384}\.[A-Za-z0-9_-]{8,16384}\b/g,
 ];
 const KEY_PREFIX_TESTS = KEY_PREFIXES.map((re) => new RegExp(re.source));
 const PRIVATE_KEY_BLOCK = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
