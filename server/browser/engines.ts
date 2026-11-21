@@ -83,6 +83,8 @@ export class ChromeEngine {
   #timer: ReturnType<typeof setInterval> | null = null;
   #inUse = false;
   #cleared = false;
+  /** Why Chrome could not start on a display here: every browser then stays headless until the server restarts. */
+  #displayRefused: string | null = null;
 
   constructor(options: ChromeEngineOptions) {
     this.#options = options;
@@ -116,6 +118,11 @@ export class ChromeEngine {
       registry: this.#registry,
       sandbox,
       display: async (key) => (this.desktopView() ? this.displays.acquire(key, { width: desktopSize.width, height: desktopSize.height }) : null),
+      displayFailed: (reason) => {
+        if (this.#displayRefused !== null) return;
+        this.#displayRefused = reason;
+        options.log?.(`browser display: Chrome could not start on a private display, so browsers stay headless and show as pictures: ${reason}`);
+      },
       ...(options.log ? { log: options.log } : {}),
     });
     options.pane?.backend.fallBackTo(backend);
@@ -136,7 +143,7 @@ export class ChromeEngine {
 
   /** A browser that starts now shows its window on a private display, which the panel shows as a remote desktop. */
   desktopView(): boolean {
-    return this.#options.cloudDisplay?.() === true && this.displays.available;
+    return this.#options.cloudDisplay?.() === true && this.#displayRefused === null && this.displays.available;
   }
 
   /** The spec a session gets on the new engine, remembered so its live view finds the profile. */

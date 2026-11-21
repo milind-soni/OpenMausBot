@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { removeTempDir } from "../testing/cleanup.ts";
 import { LocalBackend } from "./backends.ts";
-import type { ChromeProcess, LaunchOptions } from "./chrome/launch.ts";
+import { ChromeLaunchError, type ChromeProcess, type LaunchOptions } from "./chrome/launch.ts";
 import { ProcessRegistry } from "./chrome/processes.ts";
 import { browserRoot, profileDir } from "./chrome/profile.ts";
 import type { DesktopDisplay } from "./desktop/displays.ts";
@@ -93,11 +93,12 @@ describe("a local browser's profile folder", () => {
 });
 
 describe("a local browser on a private display", () => {
-  function onDisplay(fail = false) {
+  function onDisplay(failOnDisplay = false) {
     const dataDir = mkdtempSync(join(tmpdir(), "omb-backends-test-"));
     folders.push(dataDir);
     const launches: LaunchOptions[] = [];
     let released = 0;
+    const failures: string[] = [];
     const display: DesktopDisplay = {
       number: 21, socket: "/d21/rfb", env: { DISPLAY: ":21", XAUTHORITY: "/d21/Xauthority" }, size: { width: 1280, height: 800 }, wrap: { command: "/usr/bin/bwrap", args: ["--dev-bind", "/", "/", "--"] },
       exited: new Promise(() => {}), release: async () => { released++; },
@@ -110,9 +111,10 @@ describe("a local browser on a private display", () => {
       screen: async () => ({ width: 1920, height: 1080, deviceScaleFactor: 1 }),
       egressPort: async () => null,
       display: async () => display,
+      displayFailed: (reason) => { failures.push(reason); },
       launch: async (options) => {
         launches.push(options);
-        if (fail) throw new Error("Chrome did not start");
+        if (failOnDisplay && options.mode === "window") throw new ChromeLaunchError("Chrome did not start", "[FATAL:zygote_host_impl_linux.cc] No usable sandbox!\n");
         const chrome = new FakeChrome();
         const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => chrome.onClose(() => resolve({ code: 0, signal: null })));
         return {
@@ -122,7 +124,7 @@ describe("a local browser on a private display", () => {
       },
     });
     const open = () => local.open({ key: "bot:a", mode: "headless", fresh: false, viewport: { width: 1000, height: 700 }, downloadDir: join(dataDir, "downloads") });
-    return { open, launches, released: () => released, display };
+    return { open, launches, released: () => released, display, failures };
   }
 
   it("opens a window that fills the display, with nothing a headless browser pretends", async () => {
@@ -143,9 +145,16 @@ describe("a local browser on a private display", () => {
     expect(released()).toBeGreaterThanOrEqual(1);
   });
 
-  it("gives the display back when Chrome does not start", async () => {
-    const { open, released } = onDisplay(true);
-    await expect(open()).rejects.toThrow("Chrome did not start");
+  it("gives the display back when Chrome does not start on it, says why, and starts the browser headless instead", async () => {
+    const { open, released, launches, failures } = onDisplay(true);
+    const opened = await open();
     expect(released()).toBe(1);
+    expect(launches.map((launch) => launch.mode)).toEqual(["window", "headless"]);
+    expect(launches[1]!.wrap ?? null).toBeNull();
+    expect(opened.display ?? null).toBeNull();
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toContain("Chrome did not start");
+    expect(failures[0]).toContain("No usable sandbox!");
+    await opened.close();
   });
 });

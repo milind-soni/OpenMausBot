@@ -5,7 +5,7 @@ import { loopbackPage, openOwnPage } from "./chrome/calibrate.ts";
 import type { Identity } from "./cdp/identity.ts";
 import { webSocketTransport } from "./cdp/transport.ts";
 import { fitPage, pageLimit, type BrowserMode, type HostKind, type ScreenSpec } from "./chrome/flags.ts";
-import { launchChrome, type ChromeProcess, type LaunchOptions } from "./chrome/launch.ts";
+import { ChromeLaunchError, launchChrome, type ChromeProcess, type LaunchOptions } from "./chrome/launch.ts";
 import { clearSingleton, staleSingletonLock, type ProcessRegistry } from "./chrome/processes.ts";
 import { languageList } from "./chrome/wrapper.ts";
 import type { DesktopDisplay } from "./desktop/displays.ts";
@@ -86,6 +86,19 @@ export interface LocalBackendOptions {
   launch?: (options: LaunchOptions) => Promise<ChromeProcess>;
   /** A private display for this profile's window, or null to run it headless. */
   display?: (key: string) => Promise<DesktopDisplay | null>;
+  /** Chrome could not start on its display, so it was started headless instead; `reason` is what Chrome said. */
+  displayFailed?: (reason: string) => void;
+}
+
+/** Chrome did not start on its private display. */
+class DisplayLaunchError extends Error {
+  readonly reason: string;
+  constructor(error: unknown) {
+    const output = error instanceof ChromeLaunchError ? error.output.trim().split("\n").slice(-20).join("\n") : "";
+    const reason = `${error instanceof Error ? error.message : String(error)}${output ? `\n${output}` : ""}`;
+    super(reason);
+    this.reason = reason;
+  }
 }
 
 const LOCAL_CAPS: BackendCaps = { persistentProfile: true, window: true, egressGate: true, identityOverride: true, ownsAllTabs: true, downloads: "local", uploads: "path", botPasskeys: true };
@@ -105,13 +118,21 @@ export class LocalBackend implements Backend {
     const platform = options.platform ?? process.platform;
     const release = options.registry?.reserve(profileDir(options.dataDir, request.key));
     try {
-      return await this.#open(request, platform);
+      try {
+        return await this.#open(request, platform, true);
+      } catch (error) {
+        if (!(error instanceof DisplayLaunchError)) throw error;
+        // A host whose Chrome cannot keep its sandbox in the display's mount namespace (an AppArmor-confined bubblewrap)
+        // still gets the bot's browser: headless, shown as pictures.
+        options.displayFailed?.(error.reason);
+        return await this.#open(request, platform, false);
+      }
     } finally {
       release?.();
     }
   }
 
-  async #open(request: OpenRequest, platform: NodeJS.Platform): Promise<OpenedBrowser> {
+  async #open(request: OpenRequest, platform: NodeJS.Platform, onDisplay: boolean): Promise<OpenedBrowser> {
     const options = this.#options;
     const binary = await options.binary();
     const { dir, record, created } = ensureProfile(options.dataDir, request.key, { acceptLanguages: options.acceptLanguages?.() ?? "en-US,en" });
@@ -121,7 +142,7 @@ export class LocalBackend implements Backend {
     if (staleSingletonLock(dir)) clearSingleton(dir);
     markCleanExit(dir);
     if (request.fresh) forgetOpenTabs(dir);
-    const display = (await options.display?.(request.key)) ?? null;
+    const display = onDisplay ? (await options.display?.(request.key)) ?? null : null;
     const mode = display ? "window" : request.mode;
     const headless = mode === "headless";
     const locale = options.locale?.() ?? null;
@@ -149,8 +170,9 @@ export class LocalBackend implements Backend {
       ...(options.handshakeTimeoutMs === undefined ? {} : { handshakeTimeoutMs: options.handshakeTimeoutMs }),
       ...(display ? { env: { ...process.env, ...display.env }, fillScreen: display.size, wrap: display.wrap } : {}),
     }).catch(async (error: unknown) => {
-      await display?.release();
-      throw error;
+      if (!display) throw error;
+      await display.release();
+      throw new DisplayLaunchError(error);
     });
     const version = versionOf(chrome.version.product);
     try {

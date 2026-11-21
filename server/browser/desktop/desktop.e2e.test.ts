@@ -220,6 +220,10 @@ suite("a bot's browser on a private display", () => {
   let page: string;
   const target: BrowserTarget = { session: "desk", key: "bot:desk" };
   const filesTarget: BrowserTarget = { session: "files", key: "bot:files" };
+  /** What Chrome said each time it could not start on its display (it then starts headless): the first failure's whole
+   * text, Chrome's own last lines included, is what a failing run reports. */
+  const displayFailures: string[] = [];
+  const startedOnDisplay = () => expect(displayFailures.join("\n\n") || "started on its display").toBe("started on its display");
   let workspace: string;
   const person = "alice";
 
@@ -231,7 +235,10 @@ suite("a bot's browser on a private display", () => {
     workspace = join(root, "workspace");
     mkdirSync(workspace);
     writeFileSync(join(workspace, "report.html"), "<!doctype html><title>report</title><p>the bot's own report</p>");
-    real = await startService({ display: (key) => displays.acquire(key, DESKTOP_SIZE, key === filesTarget.key ? [workspace] : []) });
+    real = await startService({
+      display: (key) => displays.acquire(key, DESKTOP_SIZE, key === filesTarget.key ? [workspace] : []),
+      displayFailed: (reason) => { displayFailures.push(reason); },
+    });
     views = new DesktopViews({ desktop: (asked) => real.service.desktop(asked) });
     server = createServer();
     server.on("upgrade", (req, socket, head) => {
@@ -262,6 +269,7 @@ suite("a bot's browser on a private display", () => {
 
   it("shows a window that fills the display, and lets only the person holding the browser drive it", async () => {
     expect((await real.call(target, "agent_browser_open", { url: page })).isError).toBeUndefined();
+    startedOnDisplay();
     const profile = real.service.profiles().find((candidate) => candidate.key === target.key)!;
     expect(profile.run?.opened.display?.size).toEqual(DESKTOP_SIZE);
     // With no window manager, X11 Chrome 156 keeps its window a pixel short of the size it was given.
@@ -320,6 +328,7 @@ suite("a bot's browser on a private display", () => {
 
   it("lets the person's view size the display as the picture view sizes the page, the window follow it, and gives it back on hand-back", async () => {
     expect((await real.call(target, "agent_browser_open", { url: page })).isError).toBeUndefined();
+    startedOnDisplay();
     const profile = real.service.profiles().find((candidate) => candidate.key === target.key)!;
     await profile.control.take(person);
     const desk = await RfbClient.connect(url());
@@ -362,6 +371,7 @@ suite("a bot's browser on a private display", () => {
     const refused = real.text(await real.call(filesTarget, "agent_browser_open", { url: `file://${workspace}/report.html` }));
     expect(refused).toMatch(/Only http\(s\), about:blank and data: addresses open here/);
     expect((await real.call(filesTarget, "agent_browser_open", { url: page })).isError).toBeUndefined();
+    startedOnDisplay();
     expect(await shown(real, filesTarget, `file://${workspace}/report.html`)).toContain("the bot's own report");
     expect(await shown(real, filesTarget, "file:///etc/hostname")).toMatch(/ERR_BLOCKED_BY_ADMINISTRATOR|This page is blocked/);
     const headless = await startService();
@@ -377,6 +387,7 @@ suite("a bot's browser on a private display", () => {
 
   it("keeps Chrome's own address bar and shortcuts away from files, Chrome's pages and DevTools", async () => {
     expect((await real.call(target, "agent_browser_open", { url: page })).isError).toBeUndefined();
+    startedOnDisplay();
     const profile = real.service.profiles().find((candidate) => candidate.key === target.key)!;
     const browser = profile.run!.browser;
     await profile.control.take(person);
