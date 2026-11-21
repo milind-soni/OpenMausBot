@@ -417,7 +417,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       const localItems = new Map(mine.items.map((item) => [item.key, item]));
       const cloudItems = new Map(theirs.items.map((item) => [item.key, item]));
       const ctx = { origin, session, result, cloudBots, localItems, cloudItems, planned: new Map(planned.rows.map((row) => [row.key, row])), bots: null, skillLists: new Map(),
-        sentKeys: new Set(), sentParts: {}, recorded: new Set(), move, ownMove: move && !team, summaryRoute, computer: computer?.label ?? null };
+        sentKeys: new Set(), sentParts: {}, keepCreated: new Set(), recorded: new Set(), move, ownMove: move && !team, summaryRoute, computer: computer?.label ?? null };
       const order = { "library-skill": 0, "imported-skill": 0, bot: 1, skill: 2, setting: 3, login: 4, secret: 4, "1password": 5 };
       const automations = new Set(AUTOMATION_KINDS);
       const goRow = async (row) => {
@@ -631,8 +631,8 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     await flush();
   }
 
-  /** What was sent is recorded against what My Cloud holds right after, a part it refused included: that part is tried
-   * again only once it changes here. `keys`: only these. */
+  /** What was sent and accepted is recorded against what My Cloud holds right after; a part it refused stays unrecorded
+   * so it remains pending on the next comparison. `keys`: only these. */
   function remember(origin, ctx, after, keys = ctx.sentKeys) {
     const kept = entry(origin);
     const there = new Map(after.items.map((item) => [item.key, item]));
@@ -641,7 +641,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       if (!mine || !theirs) continue;
       kept.sent[key] = { ...kept.sent[key] };
       for (const part of ctx.sentParts[key] ?? Object.keys(mine.parts)) kept.sent[key][part] = [mine.parts[part], theirs.parts[part] ?? EMPTY];
-      delete kept.created[key];
+      if (!ctx.keepCreated.has(key)) delete kept.created[key];
       ctx.recorded.add(key);
     }
   }
@@ -672,7 +672,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     persist();
   }
 
-  const done = (ctx, key, parts = null) => { ctx.sentKeys.add(key); if (parts) ctx.sentParts[key] = parts; };
+  const done = (ctx, key, parts = null, keepCreated = false) => { ctx.sentKeys.add(key); if (parts) ctx.sentParts[key] = parts; if (keepCreated) ctx.keepCreated.add(key); };
   /** A bot this send made on My Cloud: its fields go whatever My Cloud's defaults are, until they are recorded, and it
    * counts as sent before, so one removed there before then stays removed. */
   function markCreated(ctx, key) {
@@ -767,7 +767,8 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     if (ctx.move) Object.assign(refused, await kinds.sendBotFields(ctx, bot.id, Object.keys(MOVE_BOT_PARTS)));
     const picture = await sendPicture(ctx, bot);
     if (picture) refused[PICTURE_PART] = picture;
-    done(ctx, row.key);
+    const accepted = Object.keys(refused).length ? Object.keys(ctx.localItems.get(row.key)?.parts ?? {}).filter((part) => !Object.hasOwn(refused, part)) : null;
+    if (!accepted || accepted.length) done(ctx, row.key, accepted, Boolean(accepted));
     ctx.result.bots.push(bot.name);
     if ((!modelKept && model) || refused.model) ctx.result.notes.push({ kind: "model", bot: bot.name });
     if (Object.keys(refused).some((part) => part !== "model")) ctx.result.notes.push({ kind: "settings", bot: bot.name });
@@ -787,12 +788,9 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     const refused = fields.length ? await patchBot(ctx, bot, fields) : {};
     const moveParts = ctx.move ? parts.filter((part) => MOVE_BOT_PARTS[part]) : [];
     if (moveParts.length) Object.assign(refused, await kinds.sendBotFields(ctx, bot.id, moveParts));
-    if (parts.includes(PICTURE_PART)) {
-      const picture = await sendPicture(ctx, bot);
-      if (picture) refused[PICTURE_PART] = picture;
-    }
-    done(ctx, row.key, parts);
-    if (Object.keys(refused).length < parts.length) ctx.result.updatedBots.push(bot.name);
+    if (parts.includes(PICTURE_PART)) { const picture = await sendPicture(ctx, bot); if (picture) refused[PICTURE_PART] = picture; }
+    const accepted = parts.filter((part) => !Object.hasOwn(refused, part));
+    if (accepted.length) { done(ctx, row.key, accepted, accepted.length < parts.length); ctx.result.updatedBots.push(bot.name); }
     if (refused.model) ctx.result.notes.push({ kind: "model", bot: bot.name });
     if (Object.keys(refused).some((part) => part !== "model")) ctx.result.notes.push({ kind: "settings", bot: bot.name });
     if (entry(ctx.origin).created[row.key] && !ctx.move) await sendMemory(ctx, bot.id).catch(() => ctx.result.notes.push({ kind: "memory", bot: bot.name }));
