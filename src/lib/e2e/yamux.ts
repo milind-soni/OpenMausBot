@@ -1,7 +1,3 @@
-// The yamux profile carried inside the records, for the phone web app: one frame per record, phone-opened streams
-// only, 2 MiB windows. A browser port of companion/src/e2e/yamux.ts with the same rules, on plain Uint8Array and
-// DataView. Wire spec: companion/src/e2e/README.md, "Multiplexing"; vectors V5 and V6 pin it. This module does no I/O.
-
 import type { Bytes } from "./bytes.ts";
 
 export const VERSION = 0;
@@ -309,7 +305,7 @@ export class Mux {
     if (stream.established) throw new YamuxError("duplicate_ack");
     stream.established = true;
     this.#events.accepted?.(frame.streamId);
-    if (!this.#still(frame.streamId, stream)) return;
+    if (!this.#isCurrentStream(frame.streamId, stream)) return;
     this.#receiveOnStream(frame.streamId, stream, { ...frame, flags: frame.flags & ~FLAG.ack });
   }
 
@@ -321,6 +317,7 @@ export class Mux {
     }
     if (stream.remoteFin && (frame.type === TYPE.data || frame.flags & FLAG.fin)) throw new YamuxError("data_after_fin");
     if (frame.type === TYPE.data) {
+      if (this.role === "phone" && !stream.established) throw new YamuxError("data_before_ack");
       if (frame.length > stream.receiveWindow) throw new YamuxError("window_exceeded");
       stream.receiveWindow -= frame.length;
       if (frame.length > 0) this.#events.data(streamId, frame.data as Uint8Array);
@@ -328,7 +325,7 @@ export class Mux {
       stream.sendWindow += frame.length;
       this.#events.writable(streamId);
     }
-    if (!this.#still(streamId, stream)) return;
+    if (!this.#isCurrentStream(streamId, stream)) return;
     if (frame.flags & FLAG.fin) {
       stream.remoteFin = true;
       this.#events.ended(streamId);
@@ -336,8 +333,7 @@ export class Mux {
     }
   }
 
-  /** False once a callback reset the stream while this frame was being handled. */
-  #still(streamId: number, stream: StreamState): boolean {
+  #isCurrentStream(streamId: number, stream: StreamState): boolean {
     return this.#streams.get(streamId) === stream;
   }
 
