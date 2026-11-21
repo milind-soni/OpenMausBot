@@ -47,8 +47,9 @@ export interface PerfHostDeps {
   pruneOwners?: (rows: readonly ProcessRow[]) => void;
   /** The memory one bot may use and how it is enforced (bot-memory-cap.ts). */
   cap?: () => BotCapReport;
-  /** Tests: no stall watch thread (stall-watch.ts); it also never starts without the sampler timer. */
-  stallWatch?: false;
+  /** Watch for main-thread stalls (stall-watch.ts): on a Cloud home and a self-hosted server, not in the desktop app. Never
+   * without the sampler timer. */
+  watchStalls?: boolean;
   /** The desktop app started this server: its launches are recorded (launch-timings.ts). */
   launches?: Pick<NonNullable<Parameters<typeof createLaunchTimings>[0]>, "launchId" | "counts" | "server">;
 }
@@ -116,9 +117,11 @@ export function createPerfHost(deps: PerfHostDeps) {
   if (deps.timer !== false && !windows) sampler.start();
   const stalls = deps.stalls ?? createLoopStalls({ resumed: (ms) => say("sleep", `the computer slept or the server was paused: the event loop waited through a ${duration(ms)} gap, not counted as a stall`) });
   if (deps.timer !== false) stalls.start();
-  const watch: StallWatch | null = deps.timer !== false && deps.stallWatch !== false
+  const watch: StallWatch | null = deps.timer !== false && deps.watchStalls === true
     ? guarded("stall-watch", () => startStallWatch({ dataDir: deps.dataDir, ...(deps.log ? { log: deps.log } : {}) }), null) : null;
   const caught = () => guarded("stall-watch", () => stallReportLines(watch?.recent() ?? []), []);
+  /** Stall records right under the heading: a @devs report keeps only the first lines of this part. */
+  const stallsFirst = (lines: string[]) => { const stalls = caught(); return lines[0]?.startsWith("## ") ? [lines[0], ...stalls, ...lines.slice(1)] : [...stalls, ...lines]; };
   if (deps.timer !== false && linux) guarded("limits", () => (deps.log ?? ((line: string) => console.warn(line)))(processes.startLine()), undefined);
 
   const sources = () => ({ hour: timings.window(), day: timings.day(), live: timings.live(), limits: limits(), process: windows ? null : sampler.report(), stalls: guarded("stalls", () => stalls.report(), null), processes: processes.report(),
@@ -143,11 +146,11 @@ export function createPerfHost(deps: PerfHostDeps) {
     health: (): PerfHealth | null => guarded("health", () => perfHealth(sources()), null),
     /** For a @devs report: these conversations' and bots' latest turns, then everything else. */
     lines(filter: { threadIds: readonly string[]; botIds: readonly string[] }): string[] {
-      return [...guarded("lines", () => perfLines(sources(), timings.recent({ ...filter, limit: RECENT_IN_REPORT }), "Latest turns in this conversation or of its bots, newest last:"), PERF_UNAVAILABLE), ...caught()];
+      return stallsFirst(guarded("lines", () => perfLines(sources(), timings.recent({ ...filter, limit: RECENT_IN_REPORT }), "Latest turns in this conversation or of its bots, newest last:"), PERF_UNAVAILABLE));
     },
     /** For the desktop's diagnostics export: every bot's latest turns. */
     text(): string {
-      return [...guarded("text", () => perfLines(sources(), timings.recent({ limit: RECENT_IN_REPORT }), "Latest turns, newest last:"), PERF_UNAVAILABLE), ...caught()].join("\n");
+      return stallsFirst(guarded("text", () => perfLines(sources(), timings.recent({ limit: RECENT_IN_REPORT }), "Latest turns, newest last:"), PERF_UNAVAILABLE)).join("\n");
     },
     /** The graceful shutdown: no more samples, and the turns since the last save written now. */
     stop() { sampler.stop(); stalls.stop(); watch?.stop(); guarded("save", () => timings.flush(), undefined); if (launches) guarded("launch", () => launches.flush(), undefined); },

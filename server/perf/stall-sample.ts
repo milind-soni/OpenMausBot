@@ -16,8 +16,12 @@ export interface StallRecord {
   at: number;
   blockedSinceMs: number;
   /** "js": the profile answered, and `top` and `stack` say where; "outside-js": it did not answer in time (a system call,
-   * a page fault, native code), and the thread's state and the machine's pressure are all there is. */
-  kind: "js" | "outside-js";
+   * a page fault, native code), and the thread's state and the machine's pressure are all there is; "not-profiled": no
+   * profile was tried (`why`). */
+  kind: "js" | "outside-js" | "not-profiled";
+  /** Why no profile: memory too short for one, the hour's profiles taken, no inspector in this Node, or still to come (the
+   * record saved before its profile). */
+  why?: "memory" | "hourly-cap" | "no-inspector" | "pending";
   /** The frames with the most samples of their own, most first. */
   top: StallFrame[];
   /** The path from the outermost frame to the busiest leaf, outermost first. */
@@ -32,15 +36,16 @@ export interface StallRecord {
 
 const SAFE_NAME = /^[\w$.<>[\] -]{1,80}$/;
 
-/** A code location with nothing of the machine's paths: the file's place in the app (from `server/`, `dist-server/` or a
- * package's name on), or only its base name. */
-export function codeLocation(frame: ProfileFrame): string {
+/** A code location with nothing of the machine's paths: the file's place in the app (its path under `appRoot`, the
+ * app's own folder), a package's name and path, a Node built-in, or only its base name. */
+export function codeLocation(frame: ProfileFrame, appRoot = ""): string {
   const pseudo = /^\([a-z ]{1,40}\)$/.test(frame.functionName);
   const name = frame.functionName && (pseudo || SAFE_NAME.test(frame.functionName)) ? frame.functionName : "(anonymous)";
   if (!frame.url) return name;
   const path = frame.url.replace(/^file:\/\//, "").replace(/\\/g, "/").split("?")[0]!;
-  const app = /(?:^|\/)((?:dist-server|server|shared|packages)\/.*)$/.exec(path)?.[1];
+  const root = appRoot.replace(/\\/g, "/").replace(/\/?$/, "/");
   const pkg = /node_modules\/((?:@[^/]+\/)?[^/]+\/.*)$/.exec(path)?.[1];
+  const app = !pkg && root !== "/" && path.startsWith(root) ? path.slice(root.length) : undefined;
   const builtin = /^node:[\w/]+$/.test(path) ? path : null;
   const file = (builtin ?? pkg ?? app ?? path.split("/").pop() ?? "?").replace(/[^\w@./:-]/g, "_").slice(0, 120);
   return frame.lineNumber >= 0 ? `${name} ${file}:${frame.lineNumber + 1}:${frame.columnNumber + 1}` : `${name} ${file}`;
@@ -48,7 +53,7 @@ export function codeLocation(frame: ProfileFrame): string {
 
 /** The busiest frames by own samples, and the stack to the busiest leaf. Idle and garbage-collection pseudo-frames count
  * as themselves: a stall that is mostly `(garbage collector)` says so. */
-export function summarizeProfile(profile: CpuProfile, topN = 8, depth = 24): { top: StallFrame[]; stack: string[] } {
+export function summarizeProfile(profile: CpuProfile, appRoot = "", topN = 8, depth = 24): { top: StallFrame[]; stack: string[] } {
   const byId = new Map(profile.nodes.map((node) => [node.id, node]));
   const parent = new Map<number, number>();
   for (const node of profile.nodes) for (const child of node.children ?? []) parent.set(child, node.id);
@@ -58,7 +63,7 @@ export function summarizeProfile(profile: CpuProfile, topN = 8, depth = 24): { t
   for (const [id, count] of own) {
     const node = byId.get(id);
     if (!node) continue;
-    const at = codeLocation(node.callFrame);
+    const at = codeLocation(node.callFrame, appRoot);
     byLocation.set(at, (byLocation.get(at) ?? 0) + count);
   }
   const top = [...byLocation].sort((a, b) => b[1] - a[1]).slice(0, topN).map(([at, samples]) => ({ at, samples }));
@@ -67,7 +72,7 @@ export function summarizeProfile(profile: CpuProfile, topN = 8, depth = 24): { t
   for (let id: number | undefined = busiest; id !== undefined && stack.length < depth; id = parent.get(id)) {
     const node = byId.get(id);
     if (!node || node.callFrame.functionName === "(root)") break;
-    stack.push(codeLocation(node.callFrame));
+    stack.push(codeLocation(node.callFrame, appRoot));
   }
   return { top, stack: stack.reverse() };
 }
@@ -103,9 +108,11 @@ export function stealPercent(before: string | null, after: string | null): numbe
 /** One line for the server log, and for a report. */
 export function stallLine(record: StallRecord): string {
   const blocked = Math.round(record.blockedSinceMs / 1000);
+  const state = `thread state ${record.thread.state ?? "?"}${record.thread.wchan ? `, waiting in ${record.thread.wchan}` : ""}`;
+  const why = { memory: "memory too short to profile", "hourly-cap": "the hour's profiles taken", "no-inspector": "no inspector here", pending: "profile to follow" };
   const where = record.kind === "js"
     ? `in JavaScript: ${record.top.slice(0, 3).map((frame) => `${frame.at} (${frame.samples})`).join("; ") || "no samples"}${record.stack.length ? `; stack ${record.stack.slice(-8).join(" > ")}` : ""}`
-    : `outside JavaScript (thread state ${record.thread.state ?? "?"}${record.thread.wchan ? `, waiting in ${record.thread.wchan}` : ""})`;
+    : record.kind === "outside-js" ? `outside JavaScript (${state})` : `not profiled, ${why[record.why ?? "pending"]} (${state})`;
   const m = record.machine, num = (value: number | null, unit = "") => value === null ? "?" : `${value}${unit}`;
   const memory = record.memory.slice(0, 4).map((entry) => `${entry.bucket} ${entry.rssMB} MB`).join(", ");
   return `main thread blocked ${blocked}s, ${where}; memory available ${num(m.availableMB, " MB")}, memory stall ${num(m.memoryFull10, "%")}, `

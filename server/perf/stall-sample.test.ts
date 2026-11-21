@@ -6,16 +6,24 @@ const frame = (functionName: string, url = "", lineNumber = 0) => ({ functionNam
 
 describe("codeLocation", () => {
   it("keeps the file's place in the app and drops the machine's paths", () => {
-    expect(codeLocation(frame("redactSecretsInText", "file:///home/ada/OpenMausBot/shared/redact.ts", 92))).toBe("redactSecretsInText shared/redact.ts:93:5");
-    expect(codeLocation(frame("x", "file:///app/dist-server/index.js", 10))).toBe("x dist-server/index.js:11:5");
-    expect(codeLocation(frame("parse", "file:///Users/ada/app/node_modules/@scope/pkg/lib/a.js"))).toBe("parse @scope/pkg/lib/a.js:1:5");
-    expect(codeLocation(frame("readFileSync", "node:fs"))).toBe("readFileSync node:fs:1:5");
-    expect(codeLocation(frame("", "file:///secret/place/thing.js"))).toBe("(anonymous) thing.js:1:5");
+    const root = "/home/ada/OpenMausBot";
+    expect(codeLocation(frame("redactSecretsInText", "file:///home/ada/OpenMausBot/shared/redact.ts", 92), root)).toBe("redactSecretsInText shared/redact.ts:93:5");
+    expect(codeLocation(frame("x", "file:///app/dist-server/index.js", 10), "/app")).toBe("x dist-server/index.js:11:5");
+    expect(codeLocation(frame("parse", "file:///Users/ada/app/node_modules/@scope/pkg/lib/a.js"), "/Users/ada/app")).toBe("parse @scope/pkg/lib/a.js:1:5");
+    expect(codeLocation(frame("readFileSync", "node:fs"), root)).toBe("readFileSync node:fs:1:5");
+    expect(codeLocation(frame("", "file:///secret/place/thing.js"), root)).toBe("(anonymous) thing.js:1:5");
     expect(codeLocation(frame("(garbage collector)"))).toBe("(garbage collector)");
+    expect(codeLocation({ ...frame("inlined", "file:///app/dist-server/index.js"), lineNumber: -1 }, "/app")).toBe("inlined dist-server/index.js");
+  });
+
+  it("matches the app's own folder, not a `packages` or `server` folder above it", () => {
+    const root = "/srv/packages/server/OpenMausBot";
+    expect(codeLocation(frame("tick", `file://${root}/server/perf/x.ts`, 1), root)).toBe("tick server/perf/x.ts:2:5");
+    expect(codeLocation(frame("tick", "file:///srv/packages/other/y.ts", 1), root)).toBe("tick y.ts:2:5");
   });
 
   it("never carries a function name that isn't an identifier", () => {
-    expect(codeLocation(frame("evil\nname with \"quotes\"", "file:///app/server/a.ts"))).toBe("(anonymous) server/a.ts:1:5");
+    expect(codeLocation(frame("evil\nname with \"quotes\"", "file:///app/server/a.ts"), "/app")).toBe("(anonymous) server/a.ts:1:5");
   });
 });
 
@@ -31,7 +39,7 @@ describe("summarizeProfile", () => {
       ],
       samples: [4, 4, 4, 3, 5, 5, 5, 5, 5],
     };
-    const summary = summarizeProfile(profile);
+    const summary = summarizeProfile(profile, "/app");
     expect(summary.top[0]).toEqual({ at: "(idle)", samples: 5 });
     expect(summary.top[1]).toEqual({ at: "replace", samples: 3 });
     expect(summary.stack).toEqual(["handle server/index.ts:10:5", "redact shared/redact.ts:100:5", "replace"]);
@@ -67,6 +75,12 @@ describe("stallLine", () => {
   it("says where the thread is and what the machine looks like", () => {
     expect(stallLine(base)).toBe("main thread blocked 12s, in JavaScript: redact shared/redact.ts:100:5 (1800); stack handle server/index.ts:10:5 > redact shared/redact.ts:100:5; "
       + "memory available 2300 MB, memory stall 0%, cpu stall 1%, steal 0%; largest: server 520 MB");
+  });
+
+  it("says why there is no profile", () => {
+    const line = stallLine({ ...base, kind: "not-profiled", why: "memory", top: [], stack: [], thread: { state: "D", wchan: null } });
+    expect(line).toContain("main thread blocked 12s, not profiled, memory too short to profile (thread state D)");
+    expect(stallLine({ ...base, kind: "not-profiled", why: "no-inspector", top: [], stack: [] })).toContain("not profiled, no inspector here");
   });
 
   it("says when the thread was outside JavaScript", () => {
