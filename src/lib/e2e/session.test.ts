@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { WebSocket as NodeWebSocket, WebSocketServer, type RawData } from "ws";
 
 import { b64u, concat, fromB64u, utf8, type Bytes } from "./bytes.ts";
@@ -19,6 +19,7 @@ interface Ready {
   direct: string;
   relayTransport: string;
   wrongKey: string;
+  removed: string;
   k: string;
   deviceToken: string;
   pairingToken: string;
@@ -34,6 +35,8 @@ interface RelayNode {
   url: string;
   /** What phones sent before ready. */
   firstMessages: unknown[];
+  /** When each phone connected, by Date.now(). */
+  connectedAt: number[];
   /** Codes this node closed phones with, in order. */
   closes: number[];
   admitted: Set<string>;
@@ -60,6 +63,7 @@ async function startNode(): Promise<RelayNode> {
   const node: RelayNode = {
     url: "",
     firstMessages: [],
+    connectedAt: [],
     closes: [],
     admitted: new Set(),
     refuseWith: null,
@@ -80,6 +84,7 @@ async function startNode(): Promise<RelayNode> {
     socket.close(code, reason);
   };
   wss.on("connection", (phone) => {
+    node.connectedAt.push(Date.now());
     if (node.refuseWith !== null) return refuse(phone, node.refuseWith, node.refuseReason);
     phone.once("message", (raw: RawData, isBinary: boolean) => {
       if (isBinary) return refuse(phone, 4400);
@@ -176,6 +181,17 @@ async function request(session: PhoneSession, head: string, body?: Bytes): Promi
 }
 
 const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+
+/** Reads until `want` has arrived whole: chunk edges need not match SSE events. */
+async function readUntil(reader: ReadableStreamDefaultReader<Uint8Array>, want: string): Promise<string> {
+  let seen = "";
+  while (!seen.includes(want)) {
+    const { done, value } = await reader.read();
+    if (done) throw new Error(`stream ended before ${JSON.stringify(want)}`);
+    seen += text(value);
+  }
+  return seen;
+}
 const health = async (session: PhoneSession) => text(await request(session, "GET /api/health HTTP/1.1\r\nHost: companion\r\nConnection: close\r\n\r\n"));
 
 describe("dialRelay: the browser phone through a relay node", () => {
@@ -242,10 +258,30 @@ describe("dialRelay: the browser phone through a relay node", () => {
     full.refuseWith = 4503;
     full.refuseReason = JSON.stringify({ retryInMs: 400 });
     const { node, options } = await admittingNode();
-    const started = Date.now();
-    const session = await dialRelay({ ...options, urls: [full.url, node.url] });
-    expect(Date.now() - started).toBeGreaterThanOrEqual(400);
-    session.shutdown();
+    // Jitter fixed at 10%: the wait is exactly 440 ms.
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.5);
+    try {
+      const session = await dialRelay({ ...options, urls: [full.url, node.url] });
+      // Measured between the two nodes, so only the wait lies between the refusal and the next attempt.
+      const waited = node.connectedAt[0] - full.connectedAt[0];
+      expect(waited).toBeGreaterThanOrEqual(440);
+      expect(waited).toBeLessThan(440 + 500);
+      session.shutdown();
+    } finally {
+      random.mockRestore();
+    }
+  });
+
+  it("reads a GoAway(3) that comes with message 2 before the 4001 behind it, and says the device was removed", async () => {
+    const { node, options } = await admittingNode();
+    node.computer = ready.removed;
+    await expect(dialRelay({ ...options, urls: [node.url] })).rejects.toMatchObject({ code: 4001, removed: true });
+  });
+
+  it("keeps a bare 4001 right after message 2 as not removed: through the relay it may be the relay's own", async () => {
+    const { node, options } = await admittingNode();
+    node.closeAfterFirst = 4001;
+    await expect(dialRelay({ ...options, urls: [node.url] })).rejects.toMatchObject({ code: 4001, removed: false });
   });
 
   it("stops hard on a message 2 that fails to verify, even when the node closes 4404 meanwhile", async () => {
@@ -297,6 +333,13 @@ describe("dial: the direct route", () => {
     expect(await session.closed).toBe(1000);
   });
 
+  it("rejects, rather than throws, when message 1 can't be built", async () => {
+    const { psk: key } = await credentials(ready.deviceToken);
+    let attempt: Promise<PhoneSession> | undefined;
+    expect(() => (attempt = dial({ url: ready.direct, remoteStatic, psk: key, app: "a".repeat(41) }))).not.toThrow();
+    await expect(attempt).rejects.toThrow("app_too_long");
+  });
+
   it("stops hard on a message 2 from a party without the key", async () => {
     const { psk: key } = await credentials(ready.deviceToken);
     await expect(dial({ url: ready.wrongKey, remoteStatic, psk: key, app: "web-test/1" })).rejects.toThrow("e2e: aead");
@@ -308,7 +351,7 @@ describe("dial: the direct route", () => {
     const stream = session.open();
     const reader = stream.readable.getReader();
     await stream.write(utf8("GET /hang HTTP/1.1\r\nHost: companion\r\n\r\n"));
-    expect(text((await reader.read()).value!)).toContain("data: start");
+    await readUntil(reader, "data: start\n\n");
     session.close(1000);
     await expect(reader.read()).rejects.toThrow("stream reset");
     await expect(stream.write(utf8("more"))).rejects.toThrow("stream reset");
@@ -321,7 +364,7 @@ describe("dial: the direct route", () => {
     const stream = session.open();
     const reader = stream.readable.getReader();
     await stream.write(utf8("GET /hang HTTP/1.1\r\nHost: companion\r\n\r\n"));
-    expect(text((await reader.read()).value!)).toContain("data: start");
+    await readUntil(reader, "data: start\n\n");
     stream.end();
     await expect(stream.write(utf8("more"))).rejects.toThrow("stream ended");
     session.close(1000);
@@ -335,6 +378,7 @@ function fakeSession(
 ) {
   const sent: Bytes[] = [];
   const closes: Array<number | undefined> = [];
+  /** bufferedAmount stays where a test sets it: what send() adds counts as gone out at once. */
   const socket = {
     bufferedAmount: 0,
     send: (record: Bytes) => sent.push(record.slice()),
@@ -346,7 +390,7 @@ function fakeSession(
   const session = new PhoneSession(socket as unknown as WebSocket, keys, timers);
   const record = (...bytes: number[]) => session.receive({ data: Uint8Array.from(bytes).buffer } as MessageEvent);
   const remoteClose = (code: number) => socket.onclose!({ code } as CloseEvent);
-  return { session, sent, closes, record, remoteClose };
+  return { session, socket, sent, closes, record, remoteClose };
 }
 
 const GO_AWAY_REMOVED = [0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3];
@@ -391,6 +435,39 @@ describe("PhoneSession records and closes", () => {
     expect(await session.closed).toBe(1000);
     expect(sent.at(-1)).toEqual(Uint8Array.from(GO_AWAY_NORMAL));
     expect(closes).toEqual([1000]);
+  });
+
+  it("starts the pong deadline once the ping has left the socket, not while it waits behind an upload", async () => {
+    vi.useFakeTimers();
+    try {
+      const { session, socket } = fakeSession(undefined, { pingIntervalMs: 10, pingTimeoutMs: 40 });
+      // An upload ahead of the ping, leaving at 1,000 bytes a ms: the ping goes out at about 100 ms.
+      socket.bufferedAmount = 100_000;
+      const drain = setInterval(() => (socket.bufferedAmount = Math.max(0, socket.bufferedAmount - 1_000)), 1);
+      await vi.advanceTimersByTimeAsync(129);
+      expect(session.state).toBe("open");
+      await vi.advanceTimersByTimeAsync(30);
+      expect(session.state).toBe("closed");
+      expect(await session.closed).toBe(1001);
+      clearInterval(drain);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("closes 1001 when the socket sends nothing for the ping timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const { session, socket } = fakeSession(undefined, { pingIntervalMs: 10, pingTimeoutMs: 40 });
+      socket.bufferedAmount = 100_000;
+      await vi.advanceTimersByTimeAsync(45);
+      expect(session.state).toBe("open");
+      await vi.advanceTimersByTimeAsync(20);
+      expect(session.state).toBe("closed");
+      expect(await session.closed).toBe(1001);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("handles a seal that fails while an earlier one is pending, and keeps send order", async () => {
