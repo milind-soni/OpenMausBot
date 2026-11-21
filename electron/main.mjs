@@ -1980,7 +1980,7 @@ function createWindow({ deferNavigation = false } = {}) {
   applyUnreadBadge(win);
   if (restored.maximized && !startupScreen) win.maximize();
   win.once("closed", () => {
-    if (mainWindow === win) mainWindow = null;
+    if (mainWindow === win) { mainWindow = null; browserPanes.closeAll(); }
   });
 
   win.webContents.setWindowOpenHandler(({ url }) => {
