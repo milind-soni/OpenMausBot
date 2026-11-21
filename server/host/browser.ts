@@ -47,6 +47,7 @@ import { passkeyAnnotation } from "../browser/passkey-notice.ts";
 import { LentChromeDoors, lentChromeGuidance, type ChromeLender } from "../browser/lent-chrome.ts";
 import type { ChromeRoute } from "../device-links.ts";
 import type { EngineBrowsers } from "../engine-memory.ts";
+import { createBrowserReclaim } from "./browser-reclaim.ts";
 import { BROWSER_TASKS, processBudget } from "../process-room.ts";
 import { idleAfter } from "../drivers/session-idle.ts";
 import { augmentedPath } from "../env-path.ts";
@@ -529,8 +530,19 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       await sleep(2_000);
     }
   }
-  /** When memory relief last asked each browser to close (engineBrowsers.reclaimUnused). */
-  const reclaimAsked = new Map<string, number>();
+  // Memory relief's early close of unused browsers (host/browser-reclaim.ts): attached and Chrome-engine ones never.
+  const browserReclaim = createBrowserReclaim({
+    candidates: (busy) => {
+      const busySessions = new Set(busy.flatMap((threadId) => threadBrowser(threadId)?.session ?? []));
+      return [...usedBrowserSessions].map(([session, spec]) => {
+        const working = agentBrowserRuntime.working(session), spare = agentBrowserRuntime.spare(session);
+        return { session, held: !turnResources.free(`browser:${session}`), working, running: browserRunning(session, spec),
+          attached: Boolean(chromeTarget(session, spec)) || attachesToChrome(spec.env), watched: spare === null && !working, turnRunning: busySessions.has(session),
+          savesSignIns: spare?.savesSignIns ?? spec.env.AGENT_BROWSER_RESTORE_SAVE === "auto" };
+      });
+    },
+    close: (session) => { const spec = usedBrowserSessions.get(session); return spec ? browserRuntime.closeUnused(session, spec) : Promise.resolve(false); },
+  });
   const engineBrowsers: EngineBrowsers = {
     starts: (threadId) => {
       const browser = threadBrowser(threadId);
@@ -543,21 +555,10 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     },
     stopped: (threadId) => {
       const browser = threadBrowser(threadId);
-      if (browser?.session !== undefined && browser.spec) void closeForMemory(browser.session, browser.spec);
+      return browser?.session !== undefined && browser.spec ? closeForMemory(browser.session, browser.spec) : undefined;
     },
-    reclaimUnused: () => {
-      let closing = 0;
-      const now = Date.now();
-      for (const [session, spec] of usedBrowserSessions) {
-        // One asked a minute ago and still running is not counted again: its close failed or hangs.
-        if ((reclaimAsked.get(session) ?? -Infinity) > now - 60_000) continue;
-        if (!turnResources.free(`browser:${session}`) || !browserRunning(session, spec)) continue;
-        reclaimAsked.set(session, now);
-        closing += 1;
-        void browserRuntime.closeUnused(session, spec).then((closed) => { if (closed) console.info(`browser ${session}: closed to free memory, no task was using it`); }, () => undefined);
-      }
-      return closing;
-    },
+    reclaimUnused: (pressure) => browserReclaim.reclaim(pressure),
+    anyRunning: () => [...usedBrowserSessions].some(([session, spec]) => browserRunning(session, spec)),
   };
   deps.engineMemory?.useBrowsers(engineBrowsers);
   /** A deleted bot's or profile's browser on the new engine, whatever the flag says now. */
