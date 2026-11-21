@@ -381,6 +381,14 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (typeof body.helperModel !== "boolean") return json(res, 400, { error: "helperModel must be true or false" });
         patch.helperModel = body.helperModel;
       }
+      // An object turns Check before done on, naming the bot that checks or none for a thread on another model; null turns it off.
+      if (body.checkWork !== undefined) {
+        const parsed = z.object({ checker: z.string().min(1).max(128).optional() }).strict().nullable().safeParse(body.checkWork);
+        if (!parsed.success) return json(res, 400, { error: "checkWork must be null or an object with an optional checker bot id" });
+        const checker = parsed.data?.checker;
+        if (checker !== undefined && (checker === m[1] || !store.bot(checker) || deps.levelOf(auth, checker) === "none")) return json(res, 400, { error: "checkWork.checker must be another bot here that you can reach" });
+        patch.checkWork = parsed.data ?? undefined;
+      }
       if (body.browser !== undefined) {
         if (typeof body.browser !== "boolean") return json(res, 400, { error: "browser must be true or false" });
         if (existingBot?.busy && body.browser !== (existingBot.browser !== false)) {

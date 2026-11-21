@@ -329,7 +329,7 @@ export interface Bot extends DefaultBotFields, Pick<WireBot, "mascotFaceColor" |
   recordBrowserSteps?: boolean;
   memoryUpkeep?: boolean;
   cacheKeepWarm?: boolean | null;
-  helperModel?: boolean;
+  helperModel?: boolean; checkWork?: import("../../shared/check-work").CheckWork | null;
   mcpServers?: string[] | null;
   browserProfile?: string | null;
   visibility?: BotVisibility;

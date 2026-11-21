@@ -430,6 +430,10 @@ const bridge = {
       return () => ipcRenderer.removeListener("desktop-workspace:state", handler);
     },
   },
+  // This computer's page only: where a bot's Browser panel shows its native browser view.
+  browserPane: {
+    show: (input) => ipcRenderer.invoke("browser-pane:show", input),
+  },
   pickFolder: (current) => ipcRenderer.invoke("desktop:pick-folder", current),
   exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),
   saveFile: (filePath) => invokeWithPlainError("desktop:save-file", filePath),
