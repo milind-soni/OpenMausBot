@@ -62,15 +62,17 @@ describe("runDoctor", () => {
 
   it.skipIf(process.platform === "win32")("changes nothing on the command when it runs as a user other than the data folder's owner", () => {
     const data = dataFolder();
-    const temp = join(data, `config.json.31337.${UUID}.tmp`);
+    const tempPid = process.pid + 1;
+    const temp = join(data, `config.json.${tempPid}.${UUID}.tmp`);
+    const pidAlive = (pid: number) => pid !== tempPid;
     writeFileSync(temp, "{}");
     const owner = statSync(data).uid;
-    const report = runDoctor({ dataDir: data, version: "9.9.9", mode: "command", fix: true, now: () => NOW, checks: [tempFilesCheck()], euid: () => owner + 1 });
+    const report = runDoctor({ dataDir: data, version: "9.9.9", mode: "command", fix: true, now: () => NOW, checks: [tempFilesCheck()], pidAlive, euid: () => owner + 1 });
     expect(report.fix).toMatchObject({ asked: true, ran: false, why: `The data folder belongs to user ${owner}, and this runs as user ${owner + 1}. Run it as the folder's owner. Nothing was changed.` });
     expect(existsSync(temp)).toBe(true);
     expect(existsSync(join(data, DOCTOR_BACKUPS_DIR))).toBe(false);
     // As the owner, it runs.
-    expect(runDoctor({ dataDir: data, version: "9.9.9", mode: "command", fix: true, now: () => NOW, checks: [tempFilesCheck()], euid: () => owner }).fix.ran).toBe(true);
+    expect(runDoctor({ dataDir: data, version: "9.9.9", mode: "command", fix: true, now: () => NOW, checks: [tempFilesCheck()], pidAlive, euid: () => owner }).fix.ran).toBe(true);
     expect(existsSync(temp)).toBe(false);
   });
 

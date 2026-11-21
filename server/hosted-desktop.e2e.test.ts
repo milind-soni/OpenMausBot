@@ -142,7 +142,7 @@ it("keeps the bot's own engine on the cloud computer, and a failed place never b
       const listed = (await client.request("tools/list")).result.tools;
       expect(listed).toHaveLength(13);
       expect(listed.find((tool: { name: string }) => tool.name === "exec").description)
-        .toContain("Completion does not automatically resume this turn or notify a delegator");
+        .toContain("when tracked, a terminal result resumes this assignment if the turn ends first");
       const shot = await client.request("tools/call", { name: "screenshot", arguments: {} });
       expect(shot.result.content[0]).toMatchObject({ type: "image", mimeType: "image/jpeg" });
       const exec = await client.request("tools/call", { name: "exec", arguments: { command: "printf hosted-desktop" } });
