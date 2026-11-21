@@ -1,20 +1,16 @@
-import { ShieldCheck } from "lucide-react";
 import { useId } from "react";
 
 import { CHECK_WORK_ROUNDS } from "../../../shared/check-work";
-import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { Bot } from "@/state/store";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { Select } from "../Select";
 import { Switch } from "../SettingsPrimitives";
-import { rowCls, SwitchRow } from "../bot-panel/rows";
 
 const OWN_THREAD = "";
 
-/** Check before done: a switch, and once on, who checks. `card` sits in Advanced's Model section, `row` under the
- * Simple panel's model rows. */
-export function CheckWorkSetting({ bot, variant }: { bot: Bot; variant: "card" | "row" }) {
+/** Check before done, in Advanced's Model section: a switch, and once it is on, who checks. */
+export function CheckWorkSetting({ bot }: { bot: Bot }) {
   const dispatch = useStoreDispatch();
   const others = useStoreSelector((state) => state.bots.filter((other) => other.id !== bot.id && !other.hidden).map((other) => `${other.id}\u0000${other.name}`).join("\n"));
   const pickerId = useId();
@@ -23,7 +19,7 @@ export function CheckWorkSetting({ bot, variant }: { bot: Bot; variant: "card" |
   const toggle = () => set(on ? null : {});
   const help = t("botSettings.checkWork.help", { rounds: CHECK_WORK_ROUNDS });
   const picker = on && (
-    <label htmlFor={pickerId} className={cn("flex items-center gap-3 text-[13px] text-ink-secondary", variant === "row" ? cn(rowCls, "pt-0") : "mt-3")}>
+    <label htmlFor={pickerId} className="mt-3 flex items-center gap-3 text-[13px] text-ink-secondary">
       <span className="shrink-0">{t("botSettings.checkWork.checker")}</span>
       <Select id={pickerId} size="sm" className="min-w-0 max-w-[260px]" value={bot.checkWork?.checker ?? OWN_THREAD}
         onChange={(event) => set(event.target.value === OWN_THREAD ? {} : { checker: event.target.value })}>
@@ -34,12 +30,6 @@ export function CheckWorkSetting({ bot, variant }: { bot: Bot; variant: "card" |
         })}
       </Select>
     </label>
-  );
-  if (variant === "row") return (
-    <div data-panel-row="check-work">
-      <SwitchRow icon={ShieldCheck} title={t("botSettings.checkWork.title")} hint={help} checked={on} onChange={toggle} color={bot.color} />
-      {picker}
-    </div>
   );
   return (
     <div className="rounded-xl bg-card p-4" data-check-work>

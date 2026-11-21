@@ -49,7 +49,7 @@ export function ModelSection({ bot }: { bot: Bot }) {
           </div>
         }
       />
-      {!draft && <CheckWorkSetting bot={bot} variant="card" />}
+      {!draft && <CheckWorkSetting bot={bot} />}
       {!draft && <FallbackChain bot={bot} onChange={(fallback) => dispatch({ type: "updateBot", botId: bot.id, patch: { fallback } })} />}
       {!draft && state.config?.cacheKeepWarm && (
         <KeepWarmRow bot={bot} workspaceOn={state.config.cacheKeepWarm.enabled}

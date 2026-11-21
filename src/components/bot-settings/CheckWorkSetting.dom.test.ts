@@ -18,7 +18,7 @@ const { CheckWorkSetting } = await import("./CheckWorkSetting");
 let root: Root;
 let host: HTMLElement;
 const nib = (checkWork?: Bot["checkWork"]) => ({ id: "nib", name: "Nib", color: "blue", modelSelection: { instanceId: "claude", model: "opus" }, ...(checkWork !== undefined ? { checkWork } : {}) }) as unknown as Bot;
-const render = (bot: Bot, variant: "card" | "row") => flushSync(() => root.render(createElement(CheckWorkSetting, { bot, variant })));
+const render = (bot: Bot) => flushSync(() => root.render(createElement(CheckWorkSetting, { bot })));
 const toggle = () => host.querySelector<HTMLButtonElement>('[role="switch"]')!;
 const picker = () => host.querySelector<HTMLSelectElement>("select");
 
@@ -32,8 +32,8 @@ beforeEach(() => {
 afterEach(() => { flushSync(() => root.unmount()); host.remove(); });
 
 describe("Check before done", () => {
-  it.each(["card", "row"] as const)("is off with no picker until turned on, and says it uses about twice the AI (%s)", (variant) => {
-    render(nib(), variant);
+  it("is off with no picker until turned on, and says it uses about twice the AI", () => {
+    render(nib());
     expect(toggle().getAttribute("aria-checked")).toBe("false");
     expect(toggle().getAttribute("aria-label")).toBe("Check before done");
     expect(host.textContent).toContain("Another bot or AI checks each finished answer against your request, with up to 3 rounds of fixes. Uses about twice as much AI.");
@@ -43,7 +43,7 @@ describe("Check before done", () => {
   });
 
   it("offers every other visible bot, or a thread of its own on another AI, and turns off again", () => {
-    render(nib({ checker: "vera" }), "card");
+    render(nib({ checker: "vera" }));
     expect(toggle().getAttribute("aria-checked")).toBe("true");
     expect([...picker()!.options].map((option) => [option.value, option.text])).toEqual([["", "Its own thread on another AI"], ["vera", "Vera"]]);
     expect(picker()!.value).toBe("vera");
