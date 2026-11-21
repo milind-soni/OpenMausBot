@@ -12,6 +12,7 @@ import type { Socket } from "node:net";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 
 import { hostSetupOf } from "../chrome/host-setup.ts";
+import { browserInputLog } from "../input-log.ts";
 import type { BrowserService, BrowserTarget } from "../service.ts";
 import { FRAME_CAP_LIMITS, type Viewer, type ViewerOptions, type ViewerOutput } from "./core.ts";
 import { requestedSize } from "./viewport.ts";
@@ -177,6 +178,7 @@ class StreamSession {
     }
     if (!this.viewer) {
       if (this.#early.length < EARLY_INPUT_LIMIT) this.#early.push(message);
+      else browserInputLog.record({ who: "person", reason: "too_many_pending", what: String((message as { type?: unknown } | null)?.type), engine: "chrome", transport: "v2", session: this.request.target.session });
       return;
     }
     this.#input(message, service);

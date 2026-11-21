@@ -16,6 +16,7 @@ import { ProcessRegistry, sweep } from "./chrome/processes.ts";
 import { browserRoot } from "./chrome/profile.ts";
 import { browserLanguage, browserTimeZone, languageList } from "./chrome/wrapper.ts";
 import { displayScreen } from "./display.ts";
+import { botReason, browserInputLog, pageAction, type BotReason, type BrowserInputLog } from "./input-log.ts";
 import type { Download } from "./cdp/downloads.ts";
 import { BrowserService, type BrowserTarget } from "./service.ts";
 import { LiveV1 } from "./viewers/live-v1.ts";
@@ -197,7 +198,14 @@ export interface RuntimeRouterOptions {
   annotate?(spec: BrowserSpawnSpec, result: unknown): unknown;
   /** The annotated answer, last, for what only the session's host knows about it. */
   afterCall?(session: string, spec: BrowserSpawnSpec, result: unknown): unknown;
+  /** Where a page action that failed is counted; the server's own log when unset. */
+  inputLog?: BrowserInputLog;
 }
+
+const resultText = (result: unknown): string => {
+  const first = (result as { content?: Array<{ text?: unknown }> } | null)?.content?.[0]?.text;
+  return typeof first === "string" ? first : "";
+};
 
 /** afterClaim's refusal, thrown out of the engine's dispatch and answered as the call's result. */
 class ClaimRefused extends Error {}
@@ -211,8 +219,10 @@ export class RuntimeRouter {
   readonly #afterClaim: RuntimeRouterOptions["afterClaim"];
   readonly #annotate: RuntimeRouterOptions["annotate"];
   readonly #afterCall: RuntimeRouterOptions["afterCall"];
+  readonly #log: BrowserInputLog;
 
   constructor(old: BrowserRuntime, chrome: ChromeEngine, options: RuntimeRouterOptions = {}) {
+    this.#log = options.inputLog ?? browserInputLog;
     this.#old = old;
     this.#chrome = chrome;
     this.#refusal = options.refusal;
@@ -223,11 +233,19 @@ export class RuntimeRouter {
   }
 
   async agentRpc(session: string, spec: BrowserSpawnSpec, method: "tools/list" | "tools/call", params: unknown, beforeDispatch?: () => void, ctx?: StepContext): Promise<unknown> {
-    const refusal = method === "tools/call" ? this.#refusal?.(session, spec, params) : null;
-    if (refusal) return { isError: true, content: [{ type: "text", text: refusal }] };
     const target = chromeTarget(session, spec);
+    const action = method === "tools/call" ? pageAction((params as { name?: unknown } | null)?.name) : null;
+    const failed = (reason: BotReason) => {
+      if (action) this.#log.record({ who: "bot", reason, what: action, engine: target ? "chrome" : "agent-browser", transport: "tools", session });
+    };
+    const refuse = (text: string, reason: BotReason = botReason(text)) => {
+      failed(reason);
+      return { isError: true, content: [{ type: "text", text }] };
+    };
+    const refusal = method === "tools/call" ? this.#refusal?.(session, spec, params) : null;
+    if (refusal) return refuse(refusal);
     const full = method === "tools/call" && target ? await this.#room?.(session, spec, params) : null;
-    if (full) return { isError: true, content: [{ type: "text", text: full }] };
+    if (full) return refuse(full, "no_room");
     const afterClaim = method === "tools/call" ? this.#afterClaim : undefined;
     const dispatch = afterClaim ? () => {
       beforeDispatch?.();
@@ -238,10 +256,13 @@ export class RuntimeRouter {
     try {
       result = await (target ? this.#chrome.service.agentRpc(target, method, params, dispatch) : this.#old.agentRpc(session, spec, method, params, dispatch, ctx));
     } catch (error) {
-      if (error instanceof ClaimRefused) return { isError: true, content: [{ type: "text", text: error.message }] };
+      if (error instanceof ClaimRefused) return refuse(error.message);
+      const reason = botReason(error instanceof Error ? error.message : "");
+      failed(reason === "engine_error" ? "threw" : reason);
       throw error;
     }
     if (method !== "tools/call") return result;
+    if ((result as { isError?: unknown } | null)?.isError === true) failed(botReason(resultText(result)));
     const annotated = this.#annotate ? this.#annotate(spec, result) : result;
     return this.#afterCall ? this.#afterCall(session, spec, annotated) : annotated;
   }

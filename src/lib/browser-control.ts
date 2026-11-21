@@ -1,3 +1,4 @@
+import type { InputDropReason } from "./browser-input-drops";
 import type { PreviewStreamClient, PreviewStreamControl, PreviewStreamInput } from "./browser-stream-client";
 import { t } from "./i18n";
 
@@ -15,6 +16,8 @@ export interface ControlTransport {
   /** Resolves once this viewer holds the browser; `waited` when bot work was running then. */
   take(): Promise<{ waited: boolean } | void>;
   release(): Promise<void>;
+  /** Counts input this control dropped, where the transport reports drops. */
+  dropped?(reason: InputDropReason): void;
 }
 
 export const BROWSER_HAND_BACK_MS = 8_000;
@@ -135,9 +138,14 @@ export function createBrowserControl(options: {
       if (closed) return;
       if (grant) {
         state = "held";
-        report(grant.reply?.waited === true && dropStale() ? "stale" : "");
+        const stale = grant.reply?.waited === true && dropStale();
+        if (stale) transport.dropped?.("stale_after_wait");
+        report(stale ? "stale" : "");
         await flush();
-      } else { report(""); state = "bot"; buffer = []; held.clear(); }
+      } else {
+        if (buffer.length) transport.dropped?.("take_failed");
+        report(""); state = "bot"; buffer = []; held.clear();
+      }
       arm();
     }).catch(() => {});
   };
@@ -151,7 +159,7 @@ export function createBrowserControl(options: {
       const waiting = state === "taking" || flushing;
       if (state !== "held" && !waiting) {
         if (!startsInteraction(input)) return;
-        if (transport.stopped() && !COMMANDS.has(input.type)) { options.onHalted(); return; }
+        if (transport.stopped() && !COMMANDS.has(input.type)) { transport.dropped?.("queue_halted"); options.onHalted(); return; }
       }
       if (COMMANDS.has(input.type) && waiting && buffer.some((queued) => COMMANDS.has(queued.type))) return;
       if (startsInteraction(input)) {
