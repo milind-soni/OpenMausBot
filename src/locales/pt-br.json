@@ -8298,8 +8298,6 @@
   "grokMove.connect.linkLabel": "Link para o Grok Bot",
   "grokMove.connect.copy": "Copiar o link",
   "grokMove.connect.where": "No Grok Bot, abra Connect apps, escolha Add a custom connector no final, dê o nome MausBot, cole isto como Server URL e escolha Add plugin. Depois adicione o bot MausBot e peça para ele mover seus bots.",
-  "grokMove.connect.private": "O link funciona por uma hora, enquanto o MausBot estiver aberto. Ele passa pela Cloudflare até este computador e nada fica guardado em nenhum outro lugar. Quem tiver o link pode enviar bots para cá, então não o compartilhe.",
-  "grokMove.connect.stopped": "O link parou de funcionar. Gere um novo e cole no Grok Bot no lugar do antigo.",
   "grokMove.connect.addBot": "Adicionar o bot MausBot no Grok Bot",
   "grokMove.connect.arrived": "Chegou do Grok Bot: {names}",
   "grokMove.connect.failed": "Não foi possível gerar o link. Verifique se você está online e tente de novo.",

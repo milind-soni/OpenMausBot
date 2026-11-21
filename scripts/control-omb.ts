@@ -204,11 +204,12 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
   // deletes sites there, never on Netlify.
   const netlifyUrl = parentEnv.OMB_NETLIFY_API_URL?.trim() ?? "";
   if (/^http:\/\/127\.0\.0\.1:\d{1,5}\/api\/v1$/.test(netlifyUrl)) childEnv.OMB_NETLIFY_API_URL = netlifyUrl;
-  // A loopback connected-apps service only (server/testing/broker-fake.ts): its token never reaches the real one.
+  // A loopback connected-apps service only (server/testing/broker-fake.ts): its token never reaches the real one. The
+  // URL crosses without a token too, as the desktop app hands it over: the Grok Bot link needs no installation.
   const brokerUrl = parentEnv.OMB_COMPOSIO_BROKER_URL?.trim() ?? "";
-  if (/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(brokerUrl) && parentEnv.OMB_COMPOSIO_BROKER_TOKEN) {
+  if (/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(brokerUrl)) {
     childEnv.OMB_COMPOSIO_BROKER_URL = brokerUrl;
-    childEnv.OMB_COMPOSIO_BROKER_TOKEN = parentEnv.OMB_COMPOSIO_BROKER_TOKEN;
+    if (parentEnv.OMB_COMPOSIO_BROKER_TOKEN) childEnv.OMB_COMPOSIO_BROKER_TOKEN = parentEnv.OMB_COMPOSIO_BROKER_TOKEN;
   }
   // Research against loopback stubs only (server/x-research.e2e.test.ts): the relay token crosses only with its stub,
   // and a treg stand-in replaces treg.to, so no test reaches a real relay or treg.

@@ -230,6 +230,7 @@ import {
 } from "./group-goal-run.ts";
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import { createGoalTurns } from "./host/goal-turns.ts";
+import { createGrokHandoff } from "./host/grok-handoff.ts";
 import { createGoalCards, type LiveGoalRun } from "./host/goal-cards.ts";
 import { createOneOnOneGoals } from "./host/one-on-one-goals.ts";
 
@@ -12285,7 +12286,7 @@ ROUTES.push(createMcpServerRoutes({
   fallbackPublicUrl: FALLBACK_PUBLIC_URL,
   mcpServerResponse, savedCustomDomain, appCatalog: chatAppsMcp, config: mcpConfig, lender: sessionLendingPrincipal, connectionHealth, ownsVault: () => !CLOUD_TEAM && !HOSTED_WORKSPACE, place: (server, auth) => lentMcp.place(server, { principal: sessionLendingPrincipal(auth), ...(auth.kind === "session" ? { session: auth.session.id } : {}), newest: true }) }));
 ROUTES.push(createSetupImportRoutes({ local: DESKTOP_MANAGED && !CLOUD_HOME && !HOSTED_WORKSPACE, cfg, mcpPolicyRefusal, persistMcpServers: persistAnnouncedMcpServers,
-  mcpConfigBusy: mcpConfig.busy, store }));
+  mcpConfigBusy: mcpConfig.busy, grokHost: createGrokHandoff({ store, coordinator, markOutside: (threadId) => outsideLineage.mark(threadId), startTurn }), store, grokAssets: { apps: chatApps, workspace: workspaceDir } }));
 ROUTES.push(createComputerRoutes({
   store, cfg, sessions, teamComputers, computerControl,
   routines: () => routines,

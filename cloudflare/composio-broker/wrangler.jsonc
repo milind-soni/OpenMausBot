@@ -22,13 +22,19 @@
   "ratelimits": [
     { "name": "REGISTRATION_LIMITER", "namespace_id": "8261701", "simple": { "limit": 30, "period": 60 } },
     { "name": "SESSION_LIMITER", "namespace_id": "8261702", "simple": { "limit": 120, "period": 60 } },
-    { "name": "EVENTS_LIMITER", "namespace_id": "8261703", "simple": { "limit": 60, "period": 60 } }
+    { "name": "EVENTS_LIMITER", "namespace_id": "8261703", "simple": { "limit": 60, "period": 60 } },
+    { "name": "LINK_LIMITER", "namespace_id": "8261704", "simple": { "limit": 60, "period": 60 } }
   ],
-  // Hourly: expire app events older than 7 days, pause the triggers of installations idle for 14 days.
+  // One object per Grok Bot link (src/grok-link.ts): the desktop's socket and the calls waiting on it.
+  "durable_objects": { "bindings": [{ "name": "GROK_LINK", "class_name": "GrokLinkObject" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GrokLinkObject"] }],
+  // Hourly: expire app events older than 7 days, pause the triggers of installations idle for 14 days, delete Grok Bot
+  // links no desktop attached to for 30 days.
   "triggers": { "crons": ["23 * * * *"] },
   "observability": {
     "enabled": true,
-    "logs": { "enabled": true, "head_sampling_rate": 1 },
+    // Security: invocation logs record each request's URL, and a Grok Bot link's URL is all a caller needs.
+    "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": false },
     "traces": { "enabled": true, "head_sampling_rate": 0.05 }
   }
 }

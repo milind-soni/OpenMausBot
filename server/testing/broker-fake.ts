@@ -3,6 +3,7 @@
 // machine: Composio calls from the Worker are answered by the broker's test harness.
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { WebSocketServer } from "ws";
 
 /** The broker sources are Worker code outside this program's type world; loaded at run time only. */
 const HARNESS = new URL("../../cloudflare/composio-broker/src/test-harness.ts", import.meta.url).href;
@@ -13,6 +14,7 @@ interface Harness {
   env: { COMPOSIO_WEBHOOK_SECRET?: string; CLOUD_GRANT_SECRET?: string };
   composio: { accounts: FakeAccount[]; instances: Map<string, { id: string; trigger_name: string; trigger_config: Record<string, unknown>; disabled_at: string | null }>; calls: Array<{ method: string; path: string; body?: Record<string, unknown> }>; fetchImpl: typeof fetch };
   fetch(path: string, init?: RequestInit): Promise<Response>;
+  grokLinks: { attach(name: string, socket: { send(text: string): void; close(code: number, reason: string): void }): { received(text: string): Promise<void>; closed(): void } };
   install(): Promise<{ id: string; token: string; userId: string }>;
   deliver(envelope: Record<string, unknown>, sign?: Record<string, unknown>): Promise<Response>;
 }
@@ -21,6 +23,7 @@ interface HarnessModule {
   message(triggerId: string, userId: string | undefined, data?: Record<string, unknown>, id?: string): Record<string, unknown>;
   cloudGrant(machineId: string): string;
   GMAIL_TYPE: Record<string, unknown>;
+  FAKE_GROK_LINK_ATTACHED: string;
 }
 
 export interface BrokerFake {
@@ -48,6 +51,12 @@ export interface BrokerFake {
   cloudMachine(installationId: string): string | null;
   cloudGrant(machineId: string): string;
   close(): Promise<void>;
+}
+
+function headersOf(req: IncomingMessage): Headers {
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(req.headers)) if (typeof value === "string") headers.set(key, value);
+  return headers;
 }
 
 function body(req: IncomingMessage): Promise<Buffer> {
@@ -121,9 +130,7 @@ export async function startBrokerFake(): Promise<BrokerFake> {
   const server: Server = createServer(async (req, res) => {
     try {
       const raw = await body(req);
-      const headers = new Headers();
-      for (const [key, value] of Object.entries(req.headers)) if (typeof value === "string") headers.set(key, value);
-      const response = await harness.fetch(req.url ?? "/", { method: req.method, headers, ...(raw.length ? { body: raw } : {}) });
+      const response = await harness.fetch(req.url ?? "/", { method: req.method, headers: headersOf(req), ...(raw.length ? { body: raw } : {}) });
       res.writeHead(response.status, Object.fromEntries(response.headers));
       res.end(Buffer.from(await response.arrayBuffer()));
     } catch (error) {
@@ -131,6 +138,18 @@ export async function startBrokerFake(): Promise<BrokerFake> {
       res.end(JSON.stringify({ error: String(error) }));
     }
   });
+  // The Grok Bot link's socket: the Worker's own route decides, and the socket then joins the link object it named.
+  const sockets = new WebSocketServer({ noServer: true });
+  server.on("upgrade", (req, socket, head) => void harness.fetch(req.url ?? "/", { headers: headersOf(req) }).then((response) => {
+    const name = response.headers.get(mod.FAKE_GROK_LINK_ATTACHED);
+    if (!name) return socket.end(`HTTP/1.1 ${response.status} Refused\r\n\r\n`);
+    sockets.handleUpgrade(req, socket, head, (ws) => {
+      const link = harness.grokLinks.attach(name, { send: (text) => ws.send(text), close: (code, reason) => ws.close(code, reason) });
+      // The real object answers the keepalive without waking (setWebSocketAutoResponse).
+      ws.on("message", (data) => (data.toString() === "ping" ? ws.send("pong") : void link.received(data.toString())));
+      ws.on("close", () => link.closed());
+    });
+  }));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   let accounts = 0;
@@ -175,6 +194,7 @@ export async function startBrokerFake(): Promise<BrokerFake> {
     cloudGrant: (machineId) => mod.cloudGrant(machineId),
     async close() {
       globalThis.fetch = realFetch;
+      for (const socket of sockets.clients) socket.terminate();
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },

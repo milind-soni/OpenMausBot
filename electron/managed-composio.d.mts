@@ -15,6 +15,8 @@ export declare function managedComposioAccess(
   brokerUrl: string,
   credentials: ManagedComposioCredentials | null | undefined,
 ): ManagedComposioAccess | null;
+/** The server's environment: the service's URL whenever there is one (the Grok Bot link needs no installation), and the
+ * installation's token only when it holds one, without which connected apps stay off. */
 export declare function managedComposioChildEnvironment(
   brokerUrl: string,
   credentials: ManagedComposioCredentials | null | undefined,

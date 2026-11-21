@@ -5,24 +5,30 @@ import { track } from "@/lib/analytics";
 import { openExternalLink } from "@/lib/app-links";
 import { cn } from "@/lib/cn";
 import { useCopyFeedback } from "@/lib/copy-text";
-import { foundExports, grokConnector, grokErrorText, lookForGrokBot, MAUSBOT_GROK_TEMPLATE_URL, NOTHING_FOUND, previewGrokMove, runGrokMove, type GrokConnector, type GrokHistory, type GrokLook, type GrokPreview, type GrokReport } from "@/lib/grok-move";
+import { foundExports, grokConnector, grokErrorText, lookForGrokBot, MAUSBOT_GROK_TEMPLATE_URL, NOTHING_FOUND, previewGrokMove, runGrokMove, type GrokAsset, type GrokBrought, type GrokConnector, type GrokHistory, type GrokLook, type GrokPreview, type GrokReport, type GrokWaiting } from "@/lib/grok-move";
 import { t } from "@/lib/i18n";
 import { localSetupImport } from "@/lib/setup-import";
 import { api, useStore } from "@/state/store";
 import type { LocaleKey } from "@/locales";
 import { GROK_EXPORT_MAX_CHARS, GROK_EXPORT_PROMPT, parseGrokExport, type GrokBot } from "../../shared/grok-import";
+import { GrokLink, grokReachLine } from "./GrokConnector";
 
 const PRIMARY = "ui-button ui-button-primary min-h-9 px-4 text-[14px]";
 const SECONDARY = "ui-button min-h-9 px-4 text-[14px]";
 const LINE = "text-[13px] leading-relaxed text-ink-secondary";
+const NONE_WAITING: GrokWaiting = { pages: [], files: 0 };
 
 /** A Bot as one heading and a count per kind; a kind it has none of is left out. */
-export function BotCounts({ heading, skills, routines, memories, notes, skillsOff, history }: {
-  heading: string; skills: number; routines: number; memories: number; notes: number; skillsOff: readonly string[]; history?: GrokHistory;
+export function BotCounts({ heading, skills, routines, memories, notes, handover, skillsOff, history, waiting = NONE_WAITING, brought }: {
+  heading: string; skills: number; routines: number; memories: number; notes: number; handover: boolean; skillsOff: readonly string[]; history?: GrokHistory;
+  waiting?: GrokWaiting;
+  brought?: GrokBrought;
 }) {
+  const came = brought && "pages" in brought ? brought : null;
   const rows = [
     [t("grokMove.count.skills"), skills], [t("grokMove.count.routines"), routines], [t("grokMove.count.memories"), memories], [t("grokMove.count.notes"), notes],
     [t("grokMove.count.messages"), history && "messages" in history ? history.messages : 0],
+    [t("grokMove.count.pages"), came ? came.pages : waiting.pages.length], [t("grokMove.count.files"), came ? came.files : waiting.files],
   ] as const;
   return (
     <section data-grok-move-bot className="flex flex-col gap-1.5">
@@ -35,10 +41,18 @@ export function BotCounts({ heading, skills, routines, memories, notes, skillsOf
           </div>
         ))}
       </dl>
+      {handover && <p data-grok-move-handover className={LINE}>{t("grokMove.handover")}</p>}
       {skillsOff.length > 0 && <p className={LINE}>{t("grokMove.skillsOff", { names: skillsOff.join(", ") })}</p>}
       {history && "reason" in history && <p className={LINE}>{t(`grokMove.history.${history.reason}` as LocaleKey)}</p>}
+      {waiting.pages.length > 0 && <p data-grok-move-pages className={LINE}>{t("grokMove.pagesNamed", { names: waiting.pages.join(", ") })}</p>}
+      {brought && <BroughtLines brought={brought} />}
     </section>
   );
+}
+
+function BroughtLines({ brought }: { brought: GrokBrought }) {
+  if ("reason" in brought) return <p role="alert" className={LINE}>{t("grokMove.brought.failed")}</p>;
+  return brought.skipped.length > 0 && <p role="alert" className={LINE}>{t("grokMove.brought.skipped", { names: brought.skipped.join(", ") })}</p>;
 }
 
 export function GrokMoveLines({ paused, history = null, files = null, apps, moved, unreadable, failed = [] }: { paused: string | null; history?: string | null; files?: string | null; apps: number; moved: readonly string[]; unreadable: readonly string[]; failed?: readonly string[] }) {
@@ -54,12 +68,12 @@ export function GrokMoveLines({ paused, history = null, files = null, apps, move
   return lines.length > 0 && <div className="flex flex-col gap-1">{lines.map((line) => <p key={line} className={LINE}>{line}</p>)}</div>;
 }
 
-const NO_CONNECTOR: Pick<GrokConnector, "available" | "connectorUrl" | "stopped"> = { available: false, stopped: false };
+const NO_CONNECTOR: Pick<GrokConnector, "available" | "connectorUrl" | "reach"> = { available: false };
 const POLL_MS = 3_000;
 
 /** The other way over: a link Grok Bot is given once, which the MausBot bot there sends every Bot through. */
-function ConnectGrokBot({ url, stopped, names, error, busy, onConnect, onUse }: {
-  url: string | undefined; stopped: boolean; names: readonly string[]; error: boolean; busy: boolean; onConnect: () => void; onUse: () => void;
+function ConnectGrokBot({ url, reach, names, error, busy, onConnect, onUse }: {
+  url: string | undefined; reach: GrokConnector["reach"]; names: readonly string[]; error: boolean; busy: boolean; onConnect: () => void; onUse: () => void;
 }) {
   const arrived = names.length > 0 && (
     <div data-grok-move-arrived role="status" className="mt-1 flex w-full items-center justify-between gap-3 rounded-xl border border-accent/40 bg-accent/[0.06] px-3 py-2">
@@ -67,23 +81,15 @@ function ConnectGrokBot({ url, stopped, names, error, busy, onConnect, onUse }: 
       <button type="button" data-grok-move-use-arrived onClick={onUse} className={cn(PRIMARY, "shrink-0")}>{t("grokMove.useFound")}</button>
     </div>
   );
-  const { state: copied, copy } = useCopyFeedback(url ?? "");
   return (
     <section data-grok-move-connect className="flex flex-col items-start gap-1.5">
       <h3 className="text-[14px] font-medium text-ink">{t("grokMove.connect.title")}</h3>
       <p className={LINE}>{t("grokMove.connect.hint")}</p>
       {url ? (
         <>
-          <div className="mt-1 flex w-full items-center gap-2">
-            <input readOnly value={url} aria-label={t("grokMove.connect.linkLabel")} onFocus={(event) => event.target.select()}
-              className="min-w-0 flex-1 rounded-xl border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12px] text-ink focus:outline-none" />
-            <button type="button" data-grok-move-copy-link onClick={copy} className={cn(SECONDARY, "inline-flex shrink-0 items-center gap-2")}>
-              {copied === "copied" ? <Check size={15} /> : <Copy size={15} />}
-              {copied === "copied" ? t("grokMove.copied") : copied === "failed" ? t("grokMove.copyFailed") : t("grokMove.connect.copy")}
-            </button>
-          </div>
-          <p className={LINE}>{t("grokMove.connect.where")}</p>
-          <p className={LINE}>{t("grokMove.connect.private")}</p>
+          <GrokLink url={url} />
+          {reach !== "connected" && <p role="status" data-grok-move-reach={reach} className={LINE}>{t(grokReachLine(reach))}</p>}
+          <p className={LINE}>{t("grokMove.connect.privacy")}</p>
           <button type="button" data-grok-move-template onClick={() => void openExternalLink(MAUSBOT_GROK_TEMPLATE_URL)} className={cn(SECONDARY, "mt-1 inline-flex items-center gap-2")}>
             <ExternalLink size={15} />{t("grokMove.connect.addBot")}
           </button>
@@ -91,7 +97,6 @@ function ConnectGrokBot({ url, stopped, names, error, busy, onConnect, onUse }: 
         </>
       ) : (
         <>
-          {stopped && <p role="status" data-grok-move-stopped className={LINE}>{t("grokMove.connect.stopped")}</p>}
           {arrived}
           <button type="button" data-grok-move-connect-start disabled={busy} onClick={onConnect} className={cn(SECONDARY, "mt-1 inline-flex items-center gap-2")}>
             {busy && <Loader2 size={15} className="animate-spin" />}{t("grokMove.connect.start")}
@@ -180,26 +185,22 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
   const onStart = !preview && !report;
   const [connector, setConnector] = useState(NO_CONNECTOR);
   const [arrivedFiles, setArrivedFiles] = useState<GrokLook["files"]>([]);
+  const [assets, setAssets] = useState<GrokAsset[]>([]);
   const [connecting, setConnecting] = useState(false);
   const [connectFailed, setConnectFailed] = useState(false);
   const lastSeq = useRef(0);
-  /** The Bots in the preview came through the link, so a finished import ends it. */
-  const viaLink = useRef(false);
+  /** The last arrival in the preview, when its Bots came through the link: a finished import lets go of it. */
+  const viaLinkThrough = useRef(0);
   const arrived = useMemo(() => foundExports(arrivedFiles).bots, [arrivedFiles]);
-  /** Leaving the dialog ends the link, so nothing stays open to the internet once the person has left the move. */
-  const linkOpen = useRef(false);
-  const left = useRef(false);
-  useEffect(() => {
-    left.current = false;
-    return () => {
-      left.current = true;
-      if (linkOpen.current) void grokConnector("DELETE").catch(() => {});
-    };
-  }, []);
+  const arrivedNames = useMemo(() => {
+    const names = arrived.map((bot) => bot.name);
+    for (const { bot } of assets) if (!names.some((name) => name.toLowerCase() === bot.toLowerCase())) names.push(bot);
+    return names;
+  }, [arrived, assets]);
   const takeConnector = useCallback((next: GrokConnector) => {
-    linkOpen.current = Boolean(next.connectorUrl);
-    setConnector({ available: next.available, stopped: next.stopped, ...(next.connectorUrl ? { connectorUrl: next.connectorUrl } : {}) });
-    if (!next.connectorUrl && !next.stopped) {
+    setConnector({ available: next.available, ...(next.connectorUrl ? { connectorUrl: next.connectorUrl, reach: next.reach } : {}) });
+    setAssets(next.connectorUrl ? next.assets : []);
+    if (!next.connectorUrl) {
       lastSeq.current = 0;
       setArrivedFiles([]);
     } else if (next.seq > lastSeq.current) {
@@ -220,19 +221,16 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
   const connect = async () => {
     setConnecting(true);
     setConnectFailed(false);
-    await grokConnector("POST").then((next) => {
-      if (!left.current) return takeConnector(next);
-      if (next.connectorUrl) void grokConnector("DELETE").catch(() => {});
-    }, () => setConnectFailed(true));
+    await grokConnector("POST").then(takeConnector, () => setConnectFailed(true));
     setConnecting(false);
   };
 
   const show = async (read: () => GrokBot[], fromLink = false) => {
     try {
       const bots = read();
-      viaLink.current = fromLink;
+      viaLinkThrough.current = fromLink ? lastSeq.current : 0;
       const servers = await api<{ servers?: Array<{ name: string }> }>("/api/mcp/servers").then((answer) => answer.servers ?? [], () => []);
-      setPreview(previewGrokMove(bots, { bots: state.bots, servers: new Set(servers.map((server) => server.name)), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }));
+      setPreview(previewGrokMove(bots, { bots: state.bots, servers: new Set(servers.map((server) => server.name)), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, assets }));
       setError("");
     } catch (cause) {
       setError(grokErrorText(cause));
@@ -268,10 +266,12 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
     setImporting(true);
     const done = await runGrokMove(preview, dispatch, local);
     track("team_imported", { members: preview.plans.length, source: "grok", mode: "add", format: "package" });
-    if (viaLink.current && done.bots.length > 0 && done.failed.length === 0) {
-      // Best effort: a link left behind stops working on its own within the hour.
-      void grokConnector("DELETE").then(takeConnector, () => {});
+    const through = viaLinkThrough.current;
+    if (through && done.bots.length > 0 && done.failed.length === 0) {
+      setArrivedFiles((files) => files.filter((file) => Number(file.name) > through));
+      void grokConnector("POST", 0, through).catch(() => {});
     }
+    setAssets([]);
     setReport(done);
     setPreview(null);
     setImporting(false);
@@ -283,6 +283,7 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
     refresh();
   };
 
+  const anyBrought = report ? [...report.bots, ...report.moved].some(({ brought }) => brought && "pages" in brought && brought.pages + brought.files > 0) : false;
   const panel = (
       <div ref={root} tabIndex={-1} {...(inline ? {} : { role: "dialog", "aria-modal": true, "aria-labelledby": "grok-move-title" })} data-grok-move={report ? "report" : preview ? "preview" : "start"}
         onKeyDown={(event) => {
@@ -307,29 +308,43 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
           {report ? (
             <>
               {report.bots.map((bot) => <BotCounts key={bot.name} heading={t("grokMove.isHere", { name: bot.name })} {...bot} />)}
+              {report.moved.flatMap(({ name, brought }) => !brought ? [] : [
+                "pages" in brought && <p key={name} className={LINE}>{t("grokMove.movedBrought", { name, pages: brought.pages, files: brought.files })}</p>,
+                <BroughtLines key={`${name} lines`} brought={brought} />,
+              ])}
+              {report.moved.flatMap(({ name, handover }) => !handover ? [] : [
+                <p key={`${name} handover`} data-grok-move-handover={handover} {...(handover === "failed" ? { role: "alert" } : {})} className={LINE}>{t(handover === "written" ? "grokMove.movedHandover.written" : "grokMove.movedHandover.failed", { name })}</p>,
+              ])}
               {report.moved.flatMap(({ name, history }) => !history ? [] : [
                 <p key={name} className={LINE}>{"messages" in history ? t("grokMove.movedChat", { name, count: history.messages })
                   : t("grokMove.movedNoChat", { name, why: t(`grokMove.history.${history.reason}` as LocaleKey) })}</p>,
               ])}
-              <GrokMoveLines paused={report.bots.some((bot) => bot.routines > 0) ? t("grokMove.pausedReport") : null} files={t("grokMove.filesStay")} apps={report.bots.reduce((total, bot) => total + bot.apps, 0)}
-                moved={report.moved.flatMap(({ name, history }) => history ? [] : [name])} unreadable={report.unreadable} failed={report.failed} />
+              <GrokMoveLines paused={report.bots.some((bot) => bot.routines > 0) ? t("grokMove.pausedReport") : null} files={anyBrought ? t("grokMove.broughtWhere") : local ? t("grokMove.filesViaLink") : t("grokMove.filesStay")} apps={report.bots.reduce((total, bot) => total + bot.apps, 0)}
+                moved={report.moved.flatMap(({ name, history, brought, handover }) => history || brought || handover ? [] : [name])} unreadable={report.unreadable} failed={report.failed} />
             </>
           ) : preview ? (
             <>
               {preview.plans.map((plan) => (
-                <BotCounts key={plan.packageId} heading={plan.addedAs} skills={plan.skills.length} routines={plan.routines} memories={plan.memories} notes={plan.notes}
-                  skillsOff={plan.skills.filter((skill) => !skill.on).map((skill) => skill.name)} />
+                <BotCounts key={plan.packageId} heading={plan.addedAs} skills={plan.skills.length} routines={plan.routines} memories={plan.memories} notes={plan.notes} handover={plan.handover !== null}
+                  skillsOff={plan.skills.filter((skill) => !skill.on).map((skill) => skill.name)} {...(local ? { waiting: plan } : {})} />
               ))}
               <GrokMoveLines history={local ? t("grokMove.historyPreview") : null} paused={preview.plans.some((plan) => plan.routines > 0) ? t("grokMove.pausedPreview") : null}
                 apps={preview.plans.reduce((total, plan) => total + plan.apps, 0)}
                 moved={local ? [] : preview.moved.map(({ name }) => name)} unreadable={preview.unreadable} />
               {local && preview.moved.length > 0 && <p className={LINE}>{t("grokMove.alreadyHereChats", { names: preview.moved.map(({ name }) => name).join(", ") })}</p>}
+              {local && preview.moved.filter((moved) => moved.pages.length || moved.files).map((moved) => (
+                <p key={moved.name} data-grok-move-waiting className={LINE}>{t("grokMove.movedWaiting", { name: moved.name, pages: moved.pages.length, files: moved.files })}</p>
+              ))}
+              {preview.moved.filter((moved) => moved.handover).map((moved) => (
+                <p key={`${moved.name} handover`} data-grok-move-handover className={LINE}>{t("grokMove.movedHandover.comes", { name: moved.name })}</p>
+              ))}
+              {preview.noSetup.length > 0 && <p data-grok-move-no-setup className={LINE}>{t("grokMove.noSetup", { names: preview.noSetup.join(", ") })}</p>}
             </>
           ) : (
             <BringBack local={local} look={look} found={found} reply={reply} error={error} onReply={setReply}
               onFile={(file) => readFile.current(file)} onFound={() => void show(() => found.bots)}
               connect={local && connector.available && (
-                <ConnectGrokBot url={connector.connectorUrl} stopped={connector.stopped} names={arrived.map((bot) => bot.name)} error={connectFailed} busy={connecting}
+                <ConnectGrokBot url={connector.connectorUrl} reach={connector.reach} names={arrivedNames} error={connectFailed} busy={connecting}
                   onConnect={() => void connect()} onUse={() => void show(() => arrived, true)} />
               )} />
           )}
@@ -344,7 +359,7 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
           ) : preview ? (
             <>
               <button type="button" disabled={importing} onClick={() => setPreview(null)} className={SECONDARY}>{t("grokMove.back")}</button>
-              <button type="button" data-grok-move-import disabled={importing || !(preview.plans.length || (local && preview.moved.length))} onClick={() => void start()} className={cn(PRIMARY, "inline-flex items-center gap-2")}>
+              <button type="button" data-grok-move-import disabled={importing || !(preview.plans.length || preview.moved.some((moved) => local || moved.handover))} onClick={() => void start()} className={cn(PRIMARY, "inline-flex items-center gap-2")}>
                 {importing && <Loader2 size={15} className="animate-spin" />}
                 {importing ? t("grokMove.importing") : t("grokMove.import")}
               </button>
