@@ -15,6 +15,9 @@ import {
 import type { RequestAuth } from "./request-auth.ts";
 import { userErrorFields } from "./user-errors.ts";
 
+/** For the gate's flush (server/index.ts): each bot's Data tables written into their files and let go. */
+export { releaseDataForBackup } from "./workspace-backup-databases.ts";
+
 const PREFIX = "/api/workspace-backup";
 const MAX_UPLOAD_BYTES = MAX_WORKSPACE_BACKUP_UPLOAD_BYTES;
 const MAX_CLIENT_STATE_BYTES = 2 * 1024 ** 2;

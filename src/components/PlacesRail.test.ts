@@ -611,7 +611,7 @@ it("a server of the person's own that main offers as home: its menu's one tap st
   await act(async () => { host.querySelector("[data-rail-menu]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
   const menu = await menuOf("garage");
   const row = menu!.querySelector("[data-rail-make-home-start]");
-  expect(row?.textContent).toBe("Make Garage server my homeMoves this computer's bots, chats, memory and routines to Garage server, and this computer then works for it.");
+  expect(row?.textContent).toBe("Make Garage server my homeMoves this computer's bots, chats, memory and routines to Garage server, and this computer then works for it. Tables your bots loaded in Data don't move: they stay on this computer, where your bots can't open them once they live on Garage server.");
   await click(row);
   await settle();
   expect(makeHome).toHaveBeenCalledWith("garage");

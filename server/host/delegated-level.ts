@@ -1,6 +1,6 @@
 // A Chief of Staff's level flows down every hop of the work it hands out, a teammate's teammate too, in threads and in
 // rooms alike: each hand-off resolves the nearest Chief conversation up its chain (docs/approval-levels.md).
-import type { ApprovalMode } from "../../shared/approval-mode.ts";
+import { approvalModeWidens, type ApprovalMode } from "../../shared/approval-mode.ts";
 import { delegatedApprovalMode } from "../auto-approve.ts";
 import { chiefLevel } from "../chief-level.ts";
 import type { HandoffView, RoomAddress } from "../coordinator.ts";
@@ -52,12 +52,15 @@ export function createDelegatedLevel(deps: DelegatedLevelDeps) {
     return level ? { level, chief: above.chief, chiefMode } : null;
   }
 
-  /** The teammate's thread switches to the level the work came down with, keeps it, and says so once. */
-  function apply(from: BotRecord, fromThreadId: string, fromNodeId: string | undefined, target: BotRecord, threadId: string): void {
+  /** The teammate's thread switches to the level the work came down with, keeps it, and says so once. A thread this hand-off
+   * just `opened` already took the sending conversation's level (spawn-level.ts): the Chief's is measured against the
+   * teammate's own, replaces it unless that is higher, and says so. */
+  function apply(from: BotRecord, fromThreadId: string, fromNodeId: string | undefined, target: BotRecord, threadId: string, opened = false): void {
     const parentId = fromNodeId ? deps.node(fromNodeId)?.parentId : undefined;
-    const own = deps.turnLevel(store.projectBotForTask(target.id, threadId) ?? target, false, threadId);
+    const own = deps.turnLevel(opened ? target : store.projectBotForTask(target.id, threadId) ?? target, false, threadId);
     const passed = handedDown({ botId: from.id, threadId: fromThreadId, ...(parentId ? { parentId } : {}) }, target, own);
-    if (!passed || store.taskByThread(target.id, threadId)?.approvalMode === passed.level) return;
+    const saved = store.taskByThread(target.id, threadId)?.approvalMode;
+    if (!passed || (opened ? approvalModeWidens(passed.level, saved ?? own) : saved === passed.level)) return;
     store.patchTask(target.id, threadId, { approvalMode: passed.level, autoApprove: false, alwaysAllow: [] });
     const name = NAMES[passed.level] ?? passed.level;
     const via = passed.chief.id === from.id ? "" : `from ${passed.chief.name}, `;
