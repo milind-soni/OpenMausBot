@@ -326,7 +326,8 @@ describe("input to a page on the default browser engine", () => {
     const errors = answers().map((entry: any) => `${entry.step.tool.replace("agent_browser_", "")}:${entry.response.result.isError === true}`);
     expect(errors).toEqual(["open:false", "click:true", "click:false", "fill:true", "type:true", "snapshot:false", "click:false", "fill:true"]);
     const text = (at: number) => answers()[at].response.result.content.map((part: any) => part.text).join(" ");
-    expect(text(1)).toContain("its target was disabled");
+    // Our own check's words on the pinned engine; agent-browser 0.39.2 and later refuse it themselves.
+    expect(text(1)).toMatch(/disabled/);
     expect(text(3)).toContain("does not hold the text");
     expect(text(7)).toContain("Take a new snapshot");
     expect(text(5)).toMatch(/textbox "Name" \[ref=e2\]/);
