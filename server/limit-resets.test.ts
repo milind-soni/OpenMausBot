@@ -292,7 +292,7 @@ describe("LimitResetClock", () => {
     expect(instance.blockedUntil("claude")).toBe(NOW + 2 * HOUR);
     next = report(failed);
     await instance.refresh(true);
-    expect(instance.limit("claude")).toMatchObject({ usedPercent: 100, blocked: true, checkedAt: NOW + HOUR + 60_000 });
+    expect(instance.limit("claude")).toMatchObject({ usedPercent: 100, blocked: false, checkedAt: NOW + HOUR + 60_000 });
     // Shown only: a kept reading never holds the engine, as before.
     expect(instance.blockedUntil("claude")).toBeNull();
     next = report(failed);

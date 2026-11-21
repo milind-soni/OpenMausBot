@@ -269,12 +269,12 @@ export class LimitResetClock {
 
   /** A failed read (a refused or timed-out request, a laptop just woken) leaves the engine's last reading in place, so
    * the usage shown does not vanish until the next read: for an hour at most, and only while none of its windows has
-   * reset since. It carries when it was read. */
+   * reset since. It carries when it was read, and is shown only: it never says the engine refuses work. */
   private lastReading(engine: string): EngineLimit | undefined {
     const usage = this.usage.get(engine), at = this.readAt.get(engine), now = this.now();
     if (!usage || at === undefined || now - at > LIMIT_IDLE_POLL_MS) return undefined;
     if ((usage.windows ?? []).some((window) => window.resetsAt !== null && window.resetsAt <= now)) return undefined;
-    return { ...usage, checkedAt: at };
+    return { ...usage, blocked: false, checkedAt: at };
   }
 
   /** The person's "Try again now": the engine's hold ends at once, so the next turn goes to it. A refusal holds it again. */
