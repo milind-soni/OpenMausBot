@@ -126,7 +126,8 @@ function WidgetCard({ botId, threadId, messageId, payload, viewOnly }: { botId: 
       if (url) openPage(url);
       const target = resolvedThreadTarget(widgetThreadTarget(entry), state);
       if (target) openThread(dispatch, target, state, showThreads);
-      return;
+      // A thread this device cannot resolve goes to the server, which answers with the conversation to open.
+      if (entry.action.type !== "open_thread" || target) return;
     }
     if (settled || viewOnly) return;
     let sending: WidgetValues | undefined;
@@ -168,6 +169,16 @@ function WidgetCard({ botId, threadId, messageId, payload, viewOnly }: { botId: 
         return;
       }
       retry.current = undefined;
+      if (result.device) {
+        answering.current = false;
+        setPending(undefined);
+        const device = result.device;
+        if ("openThread" in device) {
+          const open = device.openThread;
+          openThread(dispatch, "groupId" in open ? { botId: "", threadId: open.threadId } : open, state, showThreads);
+        } else openPage(device.openUrl);
+        return;
+      }
       if (entry.tone) {
         setSettledHere({ ref, label: entry.label, tone: entry.tone, at: Date.now(), sendId, ...(sending ? { values: sending } : {}), ...(sendingOther ? { other: sendingOther } : {}) });
         return;

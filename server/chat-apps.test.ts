@@ -40,6 +40,8 @@ function fakeStore(rooms: string[] = []) {
   const listeners = new Set<(change: StoreChange) => void>();
   const store: AgentCardStore & { onChange(listener: (change: StoreChange) => void): () => void } = {
     groupByThread: (threadId) => (rooms.includes(threadId) ? { id: "room-1" } : undefined),
+    taskByThread: () => undefined,
+    bot: () => null,
     messagesFor: rows,
     appendMessage: vi.fn((threadId: string, message: Omit<Message, "id" | "at">): Message => {
       const full: Message = { ...message, id: `m${next++}`, at: 1 };

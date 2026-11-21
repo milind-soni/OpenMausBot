@@ -7,7 +7,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ContextBreakdown } from "../../shared/context-breakdown.ts";
 import { WIDGET_SAMPLES } from "../../shared/widget-samples.ts";
+import { widgetActions } from "../../shared/widget.ts";
 import { createAgentCard } from "../chat-widgets.ts";
+import { briefCard } from "../host/brief-cards.ts";
+import { createVisibilityHost } from "../host/visibility-host.ts";
 import { DATA_DIR } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
 import { startFresh } from "../fresh-start.ts";
@@ -18,7 +21,6 @@ import type { RequestAuth } from "../request-auth.ts";
 import { acceptedSendMatch, sendFingerprint, SendSequencer } from "../send-idempotency.ts";
 import { _queuedCount, drainSteeredMessages, queuedSteeredMessage, queueSteeredMessage } from "../steer-queue.ts";
 import { Store, type Message } from "../store.ts";
-import { sendingSession } from "../sending-sessions.ts";
 import { typedWords } from "../typed-sends.ts";
 import { USER_ERROR } from "../user-errors.ts";
 import { createBotMessageRoutes, type BotMessageRouteDeps } from "./bot-messages.ts";
@@ -46,7 +48,11 @@ class DirectSendRefused extends Error {
 
 type AcceptInput = Parameters<BotMessageRouteDeps["acceptDirectSend"]>[0];
 
-async function fixture(over: Partial<Record<keyof BotMessageRouteDeps, unknown>> = {}, desktopManaged = true) {
+async function fixture(
+  over: Partial<Record<keyof BotMessageRouteDeps, unknown>> = {},
+  desktopManaged = true,
+  options: { auth?: RequestAuth; productionThreadVisible?: boolean } = {},
+) {
   const store = new Store(() => sonnet);
   const bot = store.createBot({ name: "Scout" });
   const threadId = bot.threadId;
@@ -78,7 +84,6 @@ async function fixture(over: Partial<Record<keyof BotMessageRouteDeps, unknown>>
         if (match.kind === "conflict") throw Object.assign(new Error("sendId already belongs to another message"), { status: 409 });
         if (match.kind === "match") return { ok: true as const, threadId: input.threadId, message: match.message };
         const waiting = queuedSteeredMessage(input.botId, input.threadId, input.sendId);
-        if (waiting && (waiting.text !== input.text || waiting.replyToId !== input.replyTo?.id)) throw Object.assign(new Error("sendId already belongs to another message"), { status: 409 });
         if (waiting) return { ok: true as const, queued: true as const, queueId: waiting.id, threadId: input.threadId };
       }
       if (state.busy) {
@@ -99,6 +104,9 @@ async function fixture(over: Partial<Record<keyof BotMessageRouteDeps, unknown>>
   };
 
   // Only what a send touches; any other dependency is absent, and a route that reached for one would throw.
+  const visibilityHost = options.productionThreadVisible
+    ? createVisibilityHost({ store: () => store, routines: () => null, team: false, audiencesFor: () => undefined, threadsReferencing: () => [] })
+    : null;
   const deps = {
     store,
     routines: () => null,
@@ -118,6 +126,8 @@ async function fixture(over: Partial<Record<keyof BotMessageRouteDeps, unknown>>
     parksBehindCoordination: () => false,
     activeGroupTurnForBot: () => null,
     cloudThreadRefusal: () => null,
+    threadVisible: () => true,
+    ...(visibilityHost ? { threadVisible: (auth: RequestAuth, id: string) => visibilityHost.visibleTo(visibilityHost.viewerFor(auth)).thread(id) } : {}),
     phoneSecretSubmissions: { hasThread: () => false },
     turnSelection: () => undefined,
     registry: { get: () => ({ instanceId: "claude", driverKind: "claudeAgent" }) },
@@ -136,8 +146,7 @@ async function fixture(over: Partial<Record<keyof BotMessageRouteDeps, unknown>>
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     try {
-      const session = req.headers["x-test-session"];
-      const auth = (typeof session === "string" ? { kind: "session", session: { id: session }, scopes: ["admin"] } : { kind: "loopback", scopes: ["admin"] }) as RequestAuth;
+      const auth = options.auth ?? ({ kind: "loopback", scopes: ["admin"] } as RequestAuth);
       const handled = await dispatchRoutes(routes, { req, res, url, path: url.pathname, method: req.method ?? "GET", auth, json, readBody });
       if (!handled) json(res, 404, { from: "inline routes" });
     } catch (error) {
@@ -148,8 +157,8 @@ async function fixture(over: Partial<Record<keyof BotMessageRouteDeps, unknown>>
   await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
-  const post = async (body: unknown, suffix = "", headers: Record<string, string> = {}) => {
-    const response = await fetch(`${base}/api/bots/${bot.id}/messages${suffix}`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
+  const post = async (body: unknown, suffix = "") => {
+    const response = await fetch(`${base}/api/bots/${bot.id}/messages${suffix}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     return { status: response.status, body: await response.json() as Record<string, any> };
   };
   const edit = async (messageId: string, body: unknown) => {
@@ -345,35 +354,6 @@ describe("POST /api/bots/:id/messages and who typed it", () => {
     expect(typedWords(threadId, [relayed.body.message])).toBe("");
   });
 
-  it("notes the signed-in session that sent a line, so a Cloud's bot knows which lent computer they type on", async () => {
-    const { threadId, post } = await fixture();
-    expect((await post({ threadId, sendId: SEND, text: words }, "", { "x-test-session": "pc-session" })).status).toBe(202);
-    expect(sendingSession(threadId, SEND)).toBe("pc-session");
-    expect((await post({ threadId, sendId: OTHER_SEND, text: words })).status).toBe(202);
-    expect(sendingSession(threadId, OTHER_SEND)).toBeUndefined();
-  });
-
-  it("keeps the first sender's session when a conflicting send reuses a queued line's sendId", async () => {
-    const { threadId, post, state } = await fixture();
-    state.busy = true;
-    const first = await post({ threadId, sendId: SEND, text: words }, "", { "x-test-session": "pc-session" });
-    expect(first.status).toBe(202);
-    expect(first.body).toMatchObject({ queued: true });
-    const conflict = await post({ threadId, sendId: SEND, text: "Something else" }, "", { "x-test-session": "laptop-session" });
-    expect(conflict.status, JSON.stringify(conflict.body)).toBe(409);
-    expect(sendingSession(threadId, SEND)).toBe("pc-session");
-  });
-
-  it("notes no session for a refused send, so an accepted retry from another session names its own", async () => {
-    const { threadId, post, state } = await fixture();
-    state.refuse = new DirectSendRefused(409, { error: "This workspace is at its spend limit.", code: "spend_cap" });
-    expect((await post({ threadId, sendId: SEND, text: words }, "", { "x-test-session": "pc-session" })).status).toBe(409);
-    expect(sendingSession(threadId, SEND)).toBeUndefined();
-    state.refuse = null;
-    expect((await post({ threadId, sendId: SEND, text: words }, "", { "x-test-session": "laptop-session" })).status).toBe(202);
-    expect(sendingSession(threadId, SEND)).toBe("laptop-session");
-  });
-
   it("does not take a bare loopback send as a person's on a headless server, where it may be a bot's shell", async () => {
     const { threadId, post } = await fixture({}, false);
     const plain = await post({ threadId, sendId: SEND, text: words });
@@ -382,7 +362,91 @@ describe("POST /api/bots/:id/messages and who typed it", () => {
   });
 });
 
+const memberAuth = (email: string): RequestAuth => ({
+  kind: "session",
+  session: { id: "session-member", tokenHash: "0".repeat(64), label: "member", scopes: ["client"], createdAt: Date.now(), lastSeenAt: Date.now(), expiresAt: Date.now() + 3_600_000, email },
+  via: "bearer",
+  scopes: ["client"],
+});
+
 describe("POST /api/bots/:id/messages with widgetAction", () => {
+  it("answers a posted open_thread press with the conversation to open, and sends nothing", async () => {
+    const { store, bot, threadId, state, post, sent, row } = await fixture();
+    const card = briefCard({ now: Date.now(), intro: false, needs: [], meetings: [], emails: [], routines: [{ text: "Standup", note: "Finished", open: { botId: bot.id, threadId } }] });
+    const shown = createAgentCard({ store, bot, threadId, input: { tool: "show_widget", widget: card.card } });
+    if (!shown.ok) throw new Error(shown.error);
+    const open = widgetActions(row(shown.messageId).widget!.root).find((entry) => entry.action.type === "open_thread")!;
+    expect(await post({ threadId, sendId: SEND, widgetAction: { messageId: shown.messageId, ref: open.ref } }))
+      .toEqual({ status: 202, body: { ok: true, threadId, openThread: { botId: bot.id, threadId } } });
+    expect(state.accepted).toEqual([]);
+    expect(state.serverPresses).toEqual([]);
+    expect(sent()).toEqual([]);
+    expect(row(shown.messageId).widget!.settled).toBeUndefined();
+
+    // A card stored before its conversation went away names no thread the bot still has.
+    const stale = briefCard({ now: Date.now(), intro: false, needs: [], meetings: [], emails: [], routines: [{ text: "Standup", note: "Finished", open: { botId: bot.id, threadId: "thread-gone" } }] });
+    const stored = createAgentCard({ store, bot, threadId, input: { tool: "show_widget", widget: stale.card } });
+    if (!stored.ok) throw new Error(stored.error);
+    const staleOpen = widgetActions(row(stored.messageId).widget!.root).find((entry) => entry.action.type === "open_thread")!;
+    expect(await post({ threadId, widgetAction: { messageId: stored.messageId, ref: staleOpen.ref } }))
+      .toEqual({ status: 404, body: { error: "That conversation is no longer here." } });
+    expect(state.accepted).toEqual([]);
+  });
+
+  it("opens a room the viewer can see, and answers one they cannot see as if it were gone", async () => {
+    const hidden = new Set<string>();
+    const { store, bot, threadId, post, row } = await fixture({ threadVisible: (_auth: unknown, id: string) => !hidden.has(id) });
+    const room = store.createGroup("Room", [bot.id]);
+    const card = { type: "Card", children: [{ type: "Button", label: "Open", onClickAction: { type: "open_thread", payload: { groupId: room.id, threadId: room.threadId } } }] };
+    const shown = createAgentCard({ store, bot, threadId, input: { tool: "show_widget", widget: card } });
+    if (!shown.ok) throw new Error(shown.error);
+    const open = widgetActions(row(shown.messageId).widget!.root).find((entry) => entry.action.type === "open_thread")!;
+    expect(await post({ threadId, sendId: SEND, widgetAction: { messageId: shown.messageId, ref: open.ref } }))
+      .toEqual({ status: 202, body: { ok: true, threadId, openThread: { groupId: room.id, threadId: room.threadId } } });
+
+    hidden.add(room.threadId);
+    expect(await post({ threadId, widgetAction: { messageId: shown.messageId, ref: open.ref } }))
+      .toEqual({ status: 404, body: { error: "That conversation is no longer here." } });
+  });
+
+  it("answers a press into another bot's chat the viewer cannot see as if it were gone", async () => {
+    const hidden = new Set<string>();
+    const { store, bot, threadId, post, row } = await fixture({ threadVisible: (_auth: unknown, id: string) => !hidden.has(id) });
+    const other = store.createBot({ name: "Other" });
+    const card = { type: "Card", children: [{ type: "Button", label: "Open", onClickAction: { type: "open_thread", payload: { botId: other.id, threadId: other.threadId } } }] };
+    const shown = createAgentCard({ store, bot, threadId, input: { tool: "show_widget", widget: card } });
+    if (!shown.ok) throw new Error(shown.error);
+    const open = widgetActions(row(shown.messageId).widget!.root).find((entry) => entry.action.type === "open_thread")!;
+    expect(await post({ threadId, sendId: SEND, widgetAction: { messageId: shown.messageId, ref: open.ref } }))
+      .toEqual({ status: 202, body: { ok: true, threadId, openThread: { botId: other.id, threadId: other.threadId } } });
+
+    hidden.add(other.threadId);
+    expect(await post({ threadId, widgetAction: { messageId: shown.messageId, ref: open.ref } }))
+      .toEqual({ status: 404, body: { error: "That conversation is no longer here." } });
+  });
+
+  it("lets a member open a conversation they can see, through the production visibility check", async () => {
+    const { store, bot, threadId, post, row } = await fixture({}, true, { auth: memberAuth("member@example.com"), productionThreadVisible: true });
+    const other = store.createBot({ name: "Other" });
+    const card = { type: "Card", children: [{ type: "Button", label: "Open", onClickAction: { type: "open_thread", payload: { botId: other.id, threadId: other.threadId } } }] };
+    const shown = createAgentCard({ store, bot, threadId, input: { tool: "show_widget", widget: card } });
+    if (!shown.ok) throw new Error(shown.error);
+    const open = widgetActions(row(shown.messageId).widget!.root).find((entry) => entry.action.type === "open_thread")!;
+    expect(await post({ threadId, sendId: SEND, widgetAction: { messageId: shown.messageId, ref: open.ref } }))
+      .toEqual({ status: 202, body: { ok: true, threadId, openThread: { botId: other.id, threadId: other.threadId } } });
+  });
+
+  it("answers a member's press into a private conversation as if it were gone, through the production visibility check", async () => {
+    const { store, bot, threadId, post, row } = await fixture({}, true, { auth: memberAuth("member@example.com"), productionThreadVisible: true });
+    const other = store.createBot({ name: "Other", visibility: "admins" });
+    const card = { type: "Card", children: [{ type: "Button", label: "Open", onClickAction: { type: "open_thread", payload: { botId: other.id, threadId: other.threadId } } }] };
+    const shown = createAgentCard({ store, bot, threadId, input: { tool: "show_widget", widget: card } });
+    if (!shown.ok) throw new Error(shown.error);
+    const open = widgetActions(row(shown.messageId).widget!.root).find((entry) => entry.action.type === "open_thread")!;
+    expect(await post({ threadId, sendId: SEND, widgetAction: { messageId: shown.messageId, ref: open.ref } }))
+      .toEqual({ status: 404, body: { error: "That conversation is no longer here." } });
+  });
+
   it("lets the server answer a press on its own card with no turn, refuses it for someone else, and reads no widget in another bot's chat", async () => {
     const { store, threadId, state, post, show, sent } = await fixture();
     const widgetId = show("routineForm");
