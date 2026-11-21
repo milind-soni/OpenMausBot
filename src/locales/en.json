@@ -3212,6 +3212,7 @@
   "attach.retryAria": "Retry loading {name}",
   "attach.imageUnavailable": "Image unavailable",
   "attach.imageOutsideWorkspace": "This picture is outside this chat's working folder, so it can't be shown here",
+  "attach.previewOutsideWorkspace": "This file is outside this chat's working folder, so it can't be opened here. Ask the bot that saved it to attach a copy.",
   "attach.previewImageAria": "Preview attached image {name}",
   "attach.externalHidden": "External image hidden for privacy",
   "attach.savedTo": "Saved to {path}",

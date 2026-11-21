@@ -3025,6 +3025,7 @@
   "attach.retryAria": "Tentar carregar {name} novamente",
   "attach.imageUnavailable": "Imagem indisponível",
   "attach.imageOutsideWorkspace": "Esta imagem está fora da pasta de trabalho desta conversa, então não pode ser exibida aqui",
+  "attach.previewOutsideWorkspace": "Este arquivo está fora da pasta de trabalho desta conversa, então não pode ser aberto aqui. Peça ao bot que o salvou para anexar uma cópia.",
   "attach.previewImageAria": "Ver prévia da imagem anexada {name}",
   "attach.externalHidden": "Imagem externa oculta para proteger sua privacidade",
   "attach.savedTo": "Salvo em {path}",

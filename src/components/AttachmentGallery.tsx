@@ -24,6 +24,7 @@ import { useEditSources } from "@/lib/use-edit-sources";
 
 export interface GalleryFile extends TranscriptFileAttachment {
   linked?: boolean;
+  shownPath?: string;
 }
 
 type MarkdownNode = {
@@ -62,7 +63,7 @@ export function collectMessageFiles(text: string, existingPaths: readonly string
     if (seen.has(identity)) return [];
     seen.add(identity);
     // Security: send the authored spelling; the server owns the one decode at its authorization boundary.
-    return [{ path: href, name: safeDownloadFilename(attachmentBasename(identity)), linked: true }];
+    return [{ path: href, shownPath: identity, name: safeDownloadFilename(attachmentBasename(identity)), linked: true }];
   });
 }
 
