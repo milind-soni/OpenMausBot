@@ -5,6 +5,7 @@ import type { spawnCli } from "../../procs.ts";
 import { noticeFailure } from "../../chat-notices.ts";
 import { errorReplyFailure, type ErrorReplyFailure } from "../engine-errors.ts";
 import type { AcpConfig } from "./core.ts";
+import type { AcpDriverHooks } from "./driver-hooks.ts";
 import type { AcpHost, AcpLink } from "./host.ts";
 import type { AcpTurnSteering } from "./steer.ts";
 
@@ -29,6 +30,8 @@ export interface AcpTurn {
     usagePeak: number | null;
     usageLast: number | null;
     usageCompacted: boolean;
+    /** A chunk the driver read as a failed model call, kept out of `text` while it is the agent's last words. */
+    failedChunk: { chunk: string; failure: string } | null;
     /** Stop went unanswered: only the cancel timeout settles the turn, once its session is closed or its process gone. */
     cancelling: boolean;
   };
@@ -83,6 +86,17 @@ export function trackRunningTool(current: AcpTurn, update: { toolCallId?: unknow
   const status = update.status ?? defaultStatus;
   if (status === "completed" || status === "failed") current.runningTools.delete(update.toolCallId);
   else if (status === "pending" || status === "in_progress") current.runningTools.add(update.toolCallId);
+}
+
+/** Adds a text chunk to the unsent reply and gives the text to stream. A chunk `read` names a failed model call is held
+ * back from both, so no flush sends it; later words return it ahead of themselves, as it was not the agent's last. */
+export function receiveText(state: AcpTurn["state"], delta: string, read: AcpDriverHooks["replyFailure"]): string {
+  const released = state.failedChunk?.chunk ?? "";
+  const failure = read?.(delta) ?? null;
+  state.failedChunk = failure === null ? null : { chunk: delta, failure };
+  const received = failure === null ? released + delta : released;
+  state.text += received;
+  return received;
 }
 
 /** Words the person can see: the turn has replied, and the wordless window after a tool is closed. */
