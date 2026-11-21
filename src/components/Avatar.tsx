@@ -13,11 +13,11 @@ import { CHROME_EYES, CHROME_GRADIENT, MAUS_COLORS, type MausColor, type MausMot
 import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
 import { ACTIVE_STATES } from "./mascot-motion";
 import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, mascotFaceInk, type BotAvatarCrop, type MascotFaceColor } from "../../shared/bot-avatar";
-import { MASCOT_BODIES, botMascotBody } from "../../shared/mascot-bodies";
+import { DEFAULT_MASCOT_BODY, MASCOT_BODIES, botMascotBody } from "../../shared/mascot-bodies";
 import { isCarvedBody, type BotBodyId } from "../../shared/bot-body";
 import { useFestivalDress, wornBody } from "@/lib/festival-dress";
 import { t } from "@/lib/i18n";
-import { CarvedAvatar } from "./CarvedAvatar";
+import { CarvedAvatar, vivid } from "./CarvedAvatar";
 import { steelBodyImage } from "@/lib/steel-body";
 
 export const EYE_SCALE = 1.12;
@@ -76,6 +76,15 @@ export function roomAvatarGradient(color: MausColor): [string, string, string] {
     roomGradients.set(color, (gradient = [`color-mix(in srgb, ${fill} 82%, #ffffff)`, fill, `color-mix(in srgb, ${fill} 82%, #000000)`]));
   }
   return gradient;
+}
+
+const flatPaints = new Map<string, [string, string, string]>();
+
+/** Every body but the shipped cursor is painted flat, like the carved bodies. */
+function flatPaint(fill: string): [string, string, string] {
+  let paint = flatPaints.get(fill);
+  if (!paint) flatPaints.set(fill, (paint = [fill, fill, fill]));
+  return paint;
 }
 
 export type MausAvatarHandle = CursorAvatarHandle;
@@ -158,6 +167,9 @@ function GradientAvatarComponent(
 ) {
   const silhouette = MASCOT_BODIES[botMascotBody(bodyId)];
   const chrome = color === "chrome";
+  const paint = chrome || silhouette.id === DEFAULT_MASCOT_BODY
+    ? gradient ?? gradientFor(color)
+    : flatPaint(gradient?.[1] ?? vivid(MAUS_COLORS[color] ?? MAUS_COLORS.green));
   const faceInk = mascotFaceInk(faceColor);
   const inner = useRef<CursorAvatarHandle>(null);
   useImperativeHandle(ref, () => ({
@@ -191,7 +203,7 @@ function GradientAvatarComponent(
         expression={expression}
         size={size}
         silhouette={silhouette}
-        gradient={gradient ?? gradientFor(color)}
+        gradient={paint}
         picture={chrome && !faceInk ? steelBodyImage(silhouette.id, size, globalThis.devicePixelRatio ?? 1) : null}
         eyeColor={faceInk ?? (chrome ? CHROME_EYES : undefined)}
         title={label ?? null}

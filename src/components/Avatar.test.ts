@@ -30,6 +30,13 @@ describe("MausAvatar body", () => {
     expect(markup).toContain(MASCOT_BODIES.star.fit);
   });
 
+  it("paints every body flat except the cursor, which keeps its gradient", () => {
+    const stops = (markup: string) => new Set([...markup.matchAll(/stop-color="([^"]+)"/g)].map((m) => m[1]));
+    expect(stops(render({ bodyId: "circle" })).size).toBe(1);
+    expect(stops(render({ bodyId: "circle", color: "blue" }))).not.toEqual(stops(render({ bodyId: "circle" })));
+    expect(stops(render({})).size).toBe(3);
+  });
+
   it("falls back to the cursor for an unknown body", () => {
     // SAFETY: "hexagram" is deliberately not a MascotBodyId, to exercise the runtime fallback for persisted or streamed
     // data.
