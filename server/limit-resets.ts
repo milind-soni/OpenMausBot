@@ -156,6 +156,11 @@ export class LimitResetClock {
     return until > now ? until : null;
   }
 
+  /** The reset explicitly named by a refusal, independent of the usage meter. */
+  namedRefusalAt(engine: string): number | null {
+    return this.guessed.has(engine) ? null : this.refusal(engine);
+  }
+
   /** Whether only the usage meter holds this engine now, with no refusal of its own. */
   meterOnly(engine: string, model?: string): boolean {
     return this.refusal(engine) === null && this.blockedUntil(engine, model) !== null;

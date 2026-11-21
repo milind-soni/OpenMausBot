@@ -61,6 +61,7 @@ export interface LimitTakeoverDeps {
   resetAt?(instanceId: string, model?: string): number | null;
   /** Only the usage meter holds this engine, with no refusal of its own. */
   meterOnly?(instanceId: string, model?: string): boolean;
+  namedRefusalAt?(instanceId: string): number | null;
   /** The backups the person chose for this bot, or for every bot. */
   chosen(botId: string): ModelSelection[];
   /** The backups a signed-out AI's turns go to, as for a turn its AI never started: the bot's own list, or the
@@ -256,8 +257,10 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
    * that ends. */
   const moved = (botId: string, threadId: string, from: ModelSelection, to: ModelSelection, resetsAt?: number, scope?: TakeoverScope): void => {
     const meter = scope === "engine" && deps.meterOnly?.(from.instanceId, from.model);
+    const refusalResetAt = scope === "engine" && !meter ? deps.namedRefusalAt?.(from.instanceId) : undefined;
     deps.record({ botId, threadId, from, to, resetsAt: resetsAt ?? null, at: now(), ...(scope === "signed-out" ? { why: "signed-out" } : {}),
-      ...(meter ? { meter: true } : {}), ...(scope === "engine" && !meter && resetsAt !== undefined ? { engineRefusal: "waiting" } : {}) });
+      ...(meter ? { meter: true } : {}), ...(scope === "engine" && !meter && resetsAt !== undefined && refusalResetAt !== null
+        ? { engineRefusal: "waiting", ...(refusalResetAt !== undefined ? { refusalResetAt } : {}) } : {}) });
   };
 
   /** A turn on `selection` worked for this bot: its engine's next limit is a new stretch, and it is plainly signed in. */

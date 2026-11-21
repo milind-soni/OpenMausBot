@@ -49,7 +49,8 @@ function fixture(accounts = [account(codex.instanceId)]) {
   const failovers = new LimitFailovers(deps);
   const takeover = createLimitTakeover({
     file: join(dir, "notices.json"), now: () => now, configs: () => ({}), engines: () => [], context: {},
-    blockedUntil: deps.blockedUntil, meterOnly: (engine, model) => clock.meterOnly(engine, model),
+    blockedUntil: deps.blockedUntil, resetAt: (engine, model) => clock.resetAt(engine, model),
+    namedRefusalAt: (engine) => clock.namedRefusalAt(engine), meterOnly: (engine, model) => clock.meterOnly(engine, model),
     record: (row) => failovers.record(row), chosen: () => [], engineName: deps.engineName, tell: () => {},
   });
   cleanups.push(() => { clock.stop(); rmSync(dir, { recursive: true, force: true }); });
@@ -84,6 +85,36 @@ it("makes only the matching saved engine refusal eligible early, without doing w
   expect(restarted.restore("bot", "eligible")).toBe(false);
   expect(f.switchBack).toHaveBeenCalledTimes(1);
   expect(f.note).toHaveBeenCalledTimes(1);
+});
+
+it("recovers a turn-start refusal whose saved wait includes the later usage window", async () => {
+  const f = fixture();
+  const later = RESET + HOUR;
+  const metered = healthy(codex.instanceId, later);
+  f.usage({ ...metered, fiveHour: { ...metered.fiveHour, usedPercent: 100, remainingPercent: 0 } });
+  await f.clock.refresh(true);
+  f.clock.noteRefusal(codex.instanceId, RESET);
+
+  const held = f.takeover.heldAtStart({ id: "bot", name: "Bot" }, codex, true);
+  expect(held).toEqual({ scope: "engine", resetsAt: later });
+  f.takeover.moved("bot", "turn-start", codex, backup, held?.resetsAt, held?.scope);
+  expect(f.failovers.list()[0]?.resetsAt).toBe(later);
+  expect(f.failovers.restore("bot", "turn-start")).toBe(false);
+
+  f.advance(AT + 60_000);
+  await f.clock.refresh(true); // The usage window is still full.
+  expect(f.failovers.restore("bot", "turn-start")).toBe(false);
+
+  f.usage({ ...metered, ok: false, error: "Unavailable" });
+  await f.clock.refresh(true); // Display-only readings must not end the wait.
+  expect(f.failovers.restore("bot", "turn-start")).toBe(false);
+  f.usage(healthy(codex.instanceId, later + HOUR));
+  await f.clock.refresh(true);
+  expect(f.switchBack).not.toHaveBeenCalled();
+  const restarted = new LimitFailovers(f.deps);
+  expect(restarted.list()[0]).toMatchObject({ resetsAt: later, refusalResetAt: RESET, engineRefusal: "recovered" });
+  expect(restarted.restore("bot", "turn-start")).toBe(true);
+  expect(f.switchBack).toHaveBeenCalledTimes(1);
 });
 
 it("keeps the existing engine, model, sign-in and switch checks on the next turn", async () => {
