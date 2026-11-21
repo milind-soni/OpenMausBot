@@ -70,8 +70,16 @@ function fakeStream(reply: (string | Uint8Array)[], { endAfter = true } = {}) {
       }
     },
   };
-  return { open: () => stream, state, sent: () => new TextDecoder().decode(Uint8Array.from(written.flatMap((part) => [...part]))) };
+  return {
+    open: () => stream,
+    state,
+    /** Ends the reply now, for a fake made with endAfter false. */
+    finish: () => source.close(),
+    sent: () => new TextDecoder().decode(Uint8Array.from(written.flatMap((part) => [...part]))) };
 }
+
+/** A wire string as its single bytes (0xA0 stays one byte), as the computer would send it. */
+const bytes = (wire: string) => Uint8Array.from(wire, (char) => char.charCodeAt(0));
 
 const pattern = (n: number, from = 0) => Uint8Array.from({ length: n }, (_, i) => (from + i) % 251);
 
@@ -88,6 +96,14 @@ describe("streamFetch over a real session (interop computer)", () => {
     const res = await fetchOver({ method: "POST", path: "/echo", body });
     expect(new Uint8Array(await res.arrayBuffer())).toEqual(body);
   });
+
+  it("echoes 6 MB, more than both stream windows, reading the reply while the upload is still going", async () => {
+    const body = pattern(6 * 1024 * 1024);
+    const res = await fetchOver({ method: "POST", path: "/echo", body, signal: AbortSignal.timeout(30_000) });
+    const echoed = new Uint8Array(await res.arrayBuffer());
+    expect(echoed.length).toBe(body.length);
+    expect(Buffer.from(echoed).equals(Buffer.from(body))).toBe(true);
+  }, 40_000);
 
   it("reads 300 KB byte for byte, and one Range as 206", async () => {
     expect(new Uint8Array(await (await fetchOver({ path: "/bytes?n=300000" })).arrayBuffer())).toEqual(pattern(300_000));
@@ -109,7 +125,11 @@ describe("streamFetch over a real session (interop computer)", () => {
     const reader = res.body!.getReader();
     // Chunk edges need not match events: read until the first whole one is in.
     let seen = "";
-    while (!seen.includes("data: start\n\n")) seen += new TextDecoder().decode((await reader.read()).value);
+    while (!seen.includes("data: start\n\n")) {
+      const { done, value } = await reader.read();
+      if (done) throw new Error(`the reply ended before its first event: ${seen}`);
+      seen += new TextDecoder().decode(value);
+    }
     const pending = reader.read();
     abort.abort(new Error("left the page"));
     await expect(pending).rejects.toThrow("left the page");
@@ -163,11 +183,13 @@ describe("streamFetch framing (fake computer)", () => {
     ["an unknown transfer coding", ["HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip, chunked\r\n\r\n"], "unsupported transfer-encoding"],
     ["two different lengths", ["HTTP/1.1 200 OK\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n"], "bad content-length"],
     ["chunked with two different lengths", ["HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n"], "bad content-length"],
+    ["a content-length padded with a 0xA0 byte", [bytes("HTTP/1.1 200 OK\r\nContent-Length: \u00a05\r\n\r\nhello")], "bad content-length"],
+    ["a transfer coding padded with a 0xA0 byte", [bytes("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\u00a0\r\n\r\n0\r\n\r\n")], "unsupported transfer-encoding"],
     ["a NUL in the reason phrase", ["HTTP/1.1 200 O\0K\r\nContent-Length: 0\r\n\r\n"], "bad status line"],
     ["a switch of protocols", ["HTTP/1.1 101 Switching Protocols\r\n\r\n"], "switched protocols"],
     ["a stream that ends inside the head", ["HTTP/1.1 200 OK\r\n"], "ended inside the reply head"],
   ])("refuses %s and resets the stream", async (_what, reply, message) => {
-    const fake = fakeStream(reply as string[]);
+    const fake = fakeStream(reply as (string | Uint8Array)[]);
     await expect(streamFetch(fake.open, { path: "/" })).rejects.toThrow(message);
     expect(fake.state.reset).toBe(true);
   });
@@ -222,6 +244,28 @@ describe("streamFetch framing (fake computer)", () => {
     expect(fake.state.reset).toBe(true);
   });
 
+  it("errors the body when its trailers together pass MAX_HEAD, though each one is small", async () => {
+    const trailers = Array.from({ length: 200 }, (_, i) => `X-T${i}: ${"t".repeat(90)}\r\n`).join("");
+    const fake = fakeStream([`HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nhi\r\n0\r\n${trailers}\r\n`]);
+    const res = await streamFetch(fake.open, { path: "/" });
+    await expect(res.text()).rejects.toThrow("trailer section is over");
+    expect(fake.state.reset).toBe(true);
+  });
+
+  it("still reads a few small trailers and ends the stream", async () => {
+    const fake = fakeStream(["HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nhi\r\n0\r\nX-A: 1\r\nX-B: 2\r\n\r\n"]);
+    expect(await (await streamFetch(fake.open, { path: "/" })).text()).toBe("hi");
+    expect(fake.state).toMatchObject({ ended: true, reset: false });
+  });
+
+  it("resets, not ends, the stream when the reply is done before the upload is (the computer stopped reading)", async () => {
+    const fake = fakeStream(["HTTP/1.1 413 Payload Too Large\r\nContent-Length: 3\r\n\r\nbig"]);
+    const open = () => ({ ...fake.open(), write: (bytes: Uint8Array) => (bytes.length === 5 ? new Promise<void>(() => {}) : Promise.resolve()) });
+    const res = await streamFetch(open, { method: "POST", path: "/", body: "abcde" });
+    expect(await res.text()).toBe("big");
+    expect(fake.state).toMatchObject({ ended: false, reset: true });
+  });
+
   it("errors the body with the abort reason, even for bytes already read past the head", async () => {
     const fake = fakeStream(["HTTP/1.1 200 OK\r\n\r\nabc"], { endAfter: false });
     const abort = new AbortController();
@@ -233,7 +277,7 @@ describe("streamFetch framing (fake computer)", () => {
 
   it("gives the reply once its head is in, while the upload waits for the reply to be read (an echo past both windows)", async () => {
     // The computer takes no more upload until this side reads what it echoed: waiting for the upload first never ends.
-    const fake = fakeStream(["HTTP/1.1 200 OK\r\n\r\n", "echo"]);
+    const fake = fakeStream(["HTTP/1.1 200 OK\r\n\r\n", "echo"], { endAfter: false });
     let taken!: () => void;
     const upload = new Promise<void>((resolve) => (taken = resolve));
     const open = () => ({ ...fake.open(), write: (bytes: Uint8Array) => (bytes.length === 4 ? upload : Promise.resolve()) });
@@ -243,8 +287,10 @@ describe("streamFetch framing (fake computer)", () => {
     const reader = res!.body!.getReader();
     expect(new TextDecoder().decode((await reader.read()).value)).toBe("echo");
     taken();
+    await upload;
+    fake.finish();
     expect((await reader.read()).done).toBe(true);
-    expect(fake.state.reset).toBe(false);
+    expect(fake.state).toMatchObject({ ended: true, reset: false });
   });
 
   it("errors the body when the upload fails after the head is in", async () => {
