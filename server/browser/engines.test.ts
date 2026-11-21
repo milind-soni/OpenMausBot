@@ -414,3 +414,45 @@ describe("the new engine's desktop view", () => {
     }
   });
 });
+
+describe("where a bot's browser shows: a desktop pane, a private display, or pictures of a headless Chrome", () => {
+  const local = { kind: "local" } as Backend;
+  const engines: ChromeEngine[] = [];
+  const folders: string[] = [];
+  afterEach(async () => {
+    for (const engine of engines.splice(0)) await engine.close();
+    for (const folder of folders.splice(0)) await removeTempDir(folder);
+  });
+
+  /** An engine on `host` with Xvnc on PATH (or not), the display setting, and the desktop app's panes when it has them. */
+  function surfaceOf({ host, xvnc = true, cloudDisplay, pane }: { host: "desktop" | "container"; xvnc?: boolean; cloudDisplay: boolean; pane?: { available: boolean; wanted: boolean } }) {
+    const dataDir = mkdtempSync(join(tmpdir(), "omb-chrome-engine-"));
+    folders.push(dataDir);
+    const bin = join(dataDir, "bin");
+    mkdirSync(bin);
+    if (xvnc) writeFileSync(join(bin, "Xvnc"), "", { mode: 0o755 });
+    const paneOption = pane ? { backend: { kind: "pane", available: pane.available, fallBackTo: () => undefined, used: () => false } as unknown as PaneBackend, wanted: () => pane.wanted } : undefined;
+    const engine = new ChromeEngine({
+      dataDir, host, env: { PATH: bin }, platform: "linux", egressPort: async () => 0, idleMs: () => 180_000, egressNotice: () => null,
+      cloudDisplay: () => cloudDisplay, probeBwrap: () => "/usr/bin/bwrap", ...(paneOption ? { pane: paneOption } : {}),
+    });
+    engines.push(engine);
+    const backend = backendFor(local, paneOption);
+    return backend !== local ? "pane" : engine.desktopView() ? "display" : "pictures";
+  }
+
+  it.skipIf(process.platform === "win32")("takes the pane on the desktop app when it is on, and never a display there", () => {
+    expect(surfaceOf({ host: "desktop", cloudDisplay: false, pane: { available: true, wanted: true } })).toBe("pane");
+    expect(surfaceOf({ host: "desktop", cloudDisplay: true, pane: { available: true, wanted: true } })).toBe("pane");
+    expect(surfaceOf({ host: "desktop", cloudDisplay: true, pane: { available: true, wanted: false } })).toBe("pictures");
+    expect(surfaceOf({ host: "desktop", cloudDisplay: true, pane: { available: false, wanted: true } })).toBe("pictures");
+  });
+
+  it.skipIf(process.platform === "win32")("takes a display on a server with the setting on and Xvnc, and pictures otherwise", () => {
+    expect(surfaceOf({ host: "container", cloudDisplay: true })).toBe("display");
+    expect(surfaceOf({ host: "container", cloudDisplay: true, xvnc: false })).toBe("pictures");
+    expect(surfaceOf({ host: "container", cloudDisplay: false })).toBe("pictures");
+    // A server has no app to host a pane, so the pane setting on it changes nothing.
+    expect(surfaceOf({ host: "container", cloudDisplay: true, pane: { available: false, wanted: true } })).toBe("display");
+  });
+});
