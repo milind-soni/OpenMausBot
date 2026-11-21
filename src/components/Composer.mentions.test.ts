@@ -28,7 +28,7 @@ vi.mock("./GroupCallView", () => ({ GroupCallButton: () => null }));
 import { Composer } from "./Composer";
 
 const scout: Bot = {
-  id: "scout", threadId: "scout-thread", name: "Scout", title: "Support agent", description: "",
+  id: "scout", threadId: "scout-thread", name: "Support Scout", title: "Support agent", description: "",
   color: "blue", notifications: false, unread: false, busy: false, messages: [],
   modelSelection: { instanceId: ENGINE, model: "fake" },
 };
@@ -151,6 +151,40 @@ describe("a room's @ list", () => {
     expect(input().querySelector(".bot-mention")?.textContent).toBe("Quill");
     send();
     expect(sent()).toEqual([expect.objectContaining({ type: "sendGroup", groupId: room.id, text: "@Quill", mentions: [chief.id] })]);
+  });
+
+  it("keeps the caret outside a multi-word bot mention and extends partial selections", () => {
+    type(drafts[0]!, "Ask @Support Scout now");
+    const field = input();
+    const { editor } = field;
+    expect(field.querySelector(".composer-mention-name")?.closest('[contenteditable="false"]')).not.toBeNull();
+
+    flushSync(() => editor.commands.setTextSelection(7));
+    expect(editor.state.selection.from).toBe(5);
+    flushSync(() => editor.commands.setTextSelection(17));
+    expect(editor.state.selection.from).toBe(19);
+    flushSync(() => editor.commands.setTextSelection({ from: 7, to: 9 }));
+    expect(editor.state.selection.from).toBe(5);
+    expect(editor.state.selection.to).toBe(19);
+  });
+
+  it.each([
+    ["Backspace", 19],
+    ["Delete", 5],
+    ["deleteContentBackward", 19],
+    ["deleteContentForward", 5],
+  ] as const)("removes the entire bot mention with %s", (action, position) => {
+    type(drafts[0]!, "Ask @Support Scout now");
+    const field = input();
+    const { editor } = field;
+    flushSync(() => editor.commands.setTextSelection(position));
+    const event = action === "Backspace" || action === "Delete"
+      ? new KeyboardEvent("keydown", { key: action, bubbles: true, cancelable: true })
+      : new InputEvent("beforeinput", { inputType: action, bubbles: true, cancelable: true });
+    flushSync(() => field.dispatchEvent(event));
+    expect(event.defaultPrevented).toBe(true);
+    expect(field.textContent).toBe("Ask  now");
+    expect(editor.state.selection.from).toBe(5);
   });
 
   it("sends a typed name with no ids, and forgets a pick once its line is sent", () => {

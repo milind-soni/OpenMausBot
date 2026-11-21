@@ -1,8 +1,8 @@
 import { Editor, Extension } from "@tiptap/core";
 import { Markdown } from "@tiptap/markdown";
-import { Fragment, Slice } from "@tiptap/pm/model";
-import { Plugin } from "@tiptap/pm/state";
-import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { Fragment, Slice, type Node } from "@tiptap/pm/model";
+import { Plugin, TextSelection, type EditorState } from "@tiptap/pm/state";
+import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import StarterKit from "@tiptap/starter-kit";
 import { Marked, type marked } from "marked";
 import { useLayoutEffect, useRef, type RefObject } from "react";
@@ -118,6 +118,31 @@ type Props = {
   onKeyDown: (event: KeyboardEvent, inList: boolean) => void;
 };
 
+function composerMentionsInBlock(node: Node, start: number, { peers, everyone }: Props) {
+  const text = node.textBetween(0, node.content.size, "\n", "\n");
+  return mentionRanges(text, peers, everyone).flatMap(range => {
+    if (node.type.spec.code || node.rangeHasMark(range.start, range.end, node.type.schema.marks.code!)) return [];
+    return [{ ...range, from: start + range.start, to: start + range.end }];
+  });
+}
+
+function botMentionAt(state: EditorState, pos: number, props: Props, side: -1 | 0 | 1 = 0) {
+  const $pos = state.doc.resolve(pos);
+  if (!$pos.parent.isTextblock) return undefined;
+  return composerMentionsInBlock($pos.parent, $pos.start(), props)
+    .find(range => range.bot && (range.from < pos || (side === 1 && range.from === pos))
+      && (pos < range.to || (side === -1 && pos === range.to)));
+}
+
+function deleteBotMention(view: EditorView, backward: boolean, props: Props) {
+  const { from, empty } = view.state.selection;
+  if (!empty) return false;
+  const range = botMentionAt(view.state, from, props, backward ? -1 : 1);
+  if (!range) return false;
+  view.dispatch(view.state.tr.delete(range.from, range.to).scrollIntoView());
+  return true;
+}
+
 export function ComposerEditor(props: Props) {
   const host = useRef<HTMLDivElement>(null);
   const latest = useRef(props);
@@ -131,20 +156,46 @@ export function ComposerEditor(props: Props) {
       name: "composerMentions",
       addProseMirrorPlugins() {
         return [new Plugin({
+          appendTransaction: (_transactions, _oldState, state) => {
+            const selection = state.selection;
+            if (!(selection instanceof TextSelection)) return null;
+            const { anchor, head, empty } = selection;
+            const snap = (pos: number, side: -1 | 0 | 1) => {
+              const range = botMentionAt(state, pos, latest.current);
+              if (!range) return pos;
+              return side < 0 || (side === 0 && pos - range.from < range.to - pos) ? range.from : range.to;
+            };
+            const nextAnchor = snap(anchor, empty ? 0 : anchor < head ? -1 : 1);
+            const nextHead = empty ? nextAnchor : snap(head, head < anchor ? -1 : 1);
+            if (anchor === nextAnchor && head === nextHead) return null;
+            return state.tr.setSelection(TextSelection.create(state.doc, nextAnchor, nextHead));
+          },
           props: {
+            handleKeyDown: (view, event) => {
+              if (view.composing || imeComposing(event) || (event.key !== "Backspace" && event.key !== "Delete")) return false;
+              return deleteBotMention(view, event.key === "Backspace", latest.current);
+            },
+            handleDOMEvents: {
+              beforeinput: (view, event) => {
+                if (!view.editable || !event.cancelable || view.composing || event.isComposing) return false;
+                if (event.inputType !== "deleteContentBackward" && event.inputType !== "deleteContentForward") return false;
+                if (!deleteBotMention(view, event.inputType === "deleteContentBackward", latest.current)) return false;
+                event.preventDefault();
+                return true;
+              },
+            },
             decorations: (state) => {
               const marks: Decoration[] = [];
               state.doc.descendants((node, pos) => {
                 if (!node.isTextblock || node.type.spec.code) return;
-                const text = node.textBetween(0, node.content.size, "\n", "\n");
-                for (const range of mentionRanges(text, latest.current.peers, latest.current.everyone)) {
-                  const start = pos + 1 + range.start;
-                  const end = pos + 1 + range.end;
-                  if (state.doc.rangeHasMark(start, end, state.schema.marks.code!)) continue;
+                for (const { from: start, to: end, ...range } of composerMentionsInBlock(node, pos + 1, latest.current)) {
                   const bot = range.bot;
                   if (bot) {
                     const id = bot.id ? { "data-mention-bot-id": bot.id } : {};
                     marks.push(
+                      Decoration.inline(start, end, {
+                        nodeName: "span", class: "composer-mention-token", contenteditable: "false", ...id,
+                      }),
                       Decoration.inline(start, start + 1, { class: "composer-mention-trigger" }),
                       Decoration.inline(start + 1, end, { class: "bot-mention composer-mention-name", ...id }),
                       Decoration.widget(start + 1, (view) => {
