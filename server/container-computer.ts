@@ -1068,7 +1068,7 @@ const defaultExecRunner: ContainerExecRunner = async (command, args, options) =>
 
 /** The limit is enforced inside the container, so a runaway process is really stopped. */
 export async function containerExec(
-  target: LocalVmTarget,
+  target: Pick<LocalVmTarget, "containerName">,
   command: string,
   options: { timeoutSeconds?: number; runtime?: Runtime; exec?: ContainerExecRunner } = {},
 ): Promise<ContainerExecResult> {

@@ -49,6 +49,20 @@ describe("bots.json saves that name their bot serialize only that bot", () => {
     expect(onDisk()).toBe(JSON.stringify(persistedBots(bots)));
   });
 
+  it("serializes the registry once when a whole pass and a deferred thread save are both waiting", () => {
+    const registry = new JsonRegistry();
+    const bots = Array.from({ length: 100 }, (_, index) => bot(`bot-${index}`));
+    const save = () => registry.writeBots(bots, true);
+    save();
+    bots[0]!.name = "Renamed";
+    registry.upsertThread(owner(bots[0]!.id), undefined, "now", save);
+    bots[1]!.tasks![0]!.title = "Deferred change";
+    registry.upsertThread(owner(bots[1]!.id), bots[1]!.threadId, "later", save);
+
+    expect(serialized(bots, flushLaterSaves)).toHaveLength(bots.length);
+    expect(onDisk()).toBe(JSON.stringify(persistedBots(bots)));
+  });
+
   it("writes a change made in place to a bot no save named with the whole pass that follows a narrowed save", () => {
     const registry = new JsonRegistry();
     const bots = [bot("a"), bot("b")];

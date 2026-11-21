@@ -95,8 +95,8 @@ export function capHeldInBackground(state: AppState, action: Action): AppState {
 export const shortHeld = <T extends { messages: Message[]; hasMore?: boolean }>(owner: T | undefined): owner is T =>
   Boolean(owner?.hasMore) && owner!.messages.length < MESSAGE_PAGE_SIZE;
 
-/** A row from before a short tail, landing in a conversation nobody has on screen (a frame queued while the snapshot was
- * read): appended, it would read as the newest row. The page before the tail brings it in order when the tail opens.
+/** A row from before a short tail (a frame queued while the snapshot was read): appended, it would read as the newest
+ * row, even if the conversation opened while its older page was loading. That page brings it in order.
  * Only a row that is older than the tail and continues a row the tail does not hold counts: a row continuing the held
  * rows is new, whatever its time says. */
 export function olderThanHeld(state: AppState, action: Action): boolean {
@@ -105,7 +105,7 @@ export function olderThanHeld(state: AppState, action: Action): boolean {
   const first = owner?.messages[0], parentId = action.message.parentId;
   if (!shortHeld(owner) || first === undefined || action.message.at >= first.at || typeof parentId !== "string") return false;
   if ("activeLeafId" in owner && owner.activeLeafId === parentId) return false;
-  return !shownThread(state, action.threadId) && !owner.messages.some((message) => message.id === action.message.id || message.id === parentId);
+  return !owner.messages.some((message) => message.id === action.message.id || message.id === parentId);
 }
 
 export function loadOlderPage(action: LoadOlderMessages, current: AppState, inFlight: Set<string>,

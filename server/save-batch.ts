@@ -91,6 +91,7 @@ export function flushLaterSaves(): void {
   const started = performance.now();
   let failed = false;
   for (const [owner, write] of Array.from(later)) { // a snapshot: a failed write is put back and must not be met again here
+    if (later.get(owner) !== write) continue;
     later.delete(owner);
     try {
       write();
@@ -103,5 +104,5 @@ export function flushLaterSaves(): void {
   lastLaterWriteMs = performance.now() - started;
   laterFailures = failed ? laterFailures + 1 : 0;
   // After SAVE_LATER_RETRIES failures in a row the write waits for the file's next save or the exit, instead of a timer.
-  if (later.size && laterFailures <= SAVE_LATER_RETRIES) laterTimer = setTimeout(flushLaterSaves, SAVE_LATER_MAX_MS);
+  if (later.size && laterFailures <= SAVE_LATER_RETRIES) laterTimer ??= setTimeout(flushLaterSaves, SAVE_LATER_MAX_MS);
 }

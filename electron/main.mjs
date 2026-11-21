@@ -2343,7 +2343,7 @@ ipcMain.handle("desktop:relaunch", localOnly("desktop:relaunch", (event) => {
   return true;
 }));
 
-const talk = installTalk({ ipcMain, localOnly, localOrHome, BrowserWindow, appleSpeech: nativeActions.appleSpeech,
+const talk = installTalk({ ipcMain, localOnly, localOrHome, BrowserWindow, appleSpeech: nativeActions.appleSpeech, windowsSpeech: nativeActions.windowsSpeech,
   speech: { start: startSpeech, stop: stopSpeech, finish: finishSpeech, busy: speechBusy }, packaged: app.isPackaged, devUrl: DEV_URL, nativeImage, iconPath: APP_ICON, openLink: queueChatLink, reveal: revealForLink, log: slog, t: nativeT });
 
 ipcMain.handle("companion:state", localOnly("companion:state", () => desktopCompanionState()));
@@ -3087,7 +3087,7 @@ app.on("before-quit", (e) => {
   try {
     desktopCompanionRelay?.close?.();
   } catch {}
-  if (nativeActions.appleSpeech) stopSpeech();
+  if (nativeActions.appleSpeech || nativeActions.windowsSpeech) stopSpeech();
   const ownedHelperCleanup = Promise.race([
     Promise.all([
       stopCua().catch(() => {}),
