@@ -4057,7 +4057,18 @@
       "voice.hearWithEleven.help": "fb2aab6844f1ecd9bbbb92b589062d6317fbfa2c1384b4c3ceb4e9f88f49c53a",
       "voice.hearLanguage": "e0e77e5c6f38efbd4bbb93e7b7641c5de9f88214c48133d6582fd0149cf8cbef",
       "voice.hearLanguage.help": "4047e2f61649a10025e8c030a9d3c0ba5a7f8af7704cf8ecad42ab589549c39e",
-      "voice.hearLanguage.auto": "836e5a7f8e818a97ddea1777b429755700ce1fc997f931e980501fa271b17d8f"
+      "voice.hearLanguage.auto": "836e5a7f8e818a97ddea1777b429755700ce1fc997f931e980501fa271b17d8f",
+      "chat.handoffConversation.view": "c93e433a00727e8425839a5b3c16827ed4484b7a3639d83c218dbdb88ac71093",
+      "chat.handoffConversation.label": "8db9e1f3cf661ac0b461e02f7dd335f11326ffdae367ca1f14a6753ad98cb7f9",
+      "chat.handoffConversation.count.one": "807543a3f05ba1192a47e2ca709387b8c0d0c4e00c655c68557c293514ee3db7",
+      "chat.handoffConversation.count.other": "353937076530c412ee10f5d6821b0b6da81ed78c2120f88580a5fa24e2d163a7",
+      "chat.handoffConversation.request": "7bc95d76afeb972bbe9624184b72e95797d2894ae488dfb29c79d491328f2835",
+      "chat.handoffConversation.loading": "08cd9919453184389e78d9924a9dc3d4b68f2529b79bdd195dd51fb6139f927c",
+      "chat.handoffConversation.failed": "9205f816010803c4e86ee0b2e43f1b99582f2dc452ac93d7c187e8d1e6686b2f",
+      "chat.handoffConversation.empty": "f0d5968f615ed7ab11fdf8f17586cfaeb2845eee5757459e804b4e9d663a3588",
+      "chat.handoffConversation.readOnly": "70610921fb6a051407b23e0a8aed1d10aeb923da963dae0f48a6592de0bdb1fe",
+      "chat.handoffConversation.talkTo": "c81dc51f491466f9c7dfa1b859fde2214b36561e384d7a413b2729d681c4def6",
+      "chat.handoffConversation.openThread": "a5bbee1c2f9f598ca9c35a91f01b1ceab780673f8010832839e52f7318c26b4b"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -37241,7 +37252,18 @@
       "settings.browser.noChrome": "79df31876d29f282b89f4f664f7c2cf3580ea4d34a8d62246c7457e36a008a70",
       "settings.browser.noChromeFix": "2dca5c1c139e89d04a910e2750801dc2bed77c9c4ab065edce7a4504ebad37eb",
       "settings.browser.noChromeMyChrome": "a928b4b926cd680e9822770795ab28cdee79a2614db0bcf66fefb554fa02ef39",
-      "settings.import.grokLineChats": "06062ac8d134d1797b3dd29c879e19eb50dbe93ec64fc9f24f25f75cd36f2047"
+      "settings.import.grokLineChats": "06062ac8d134d1797b3dd29c879e19eb50dbe93ec64fc9f24f25f75cd36f2047",
+      "chat.handoffConversation.view": "c93e433a00727e8425839a5b3c16827ed4484b7a3639d83c218dbdb88ac71093",
+      "chat.handoffConversation.label": "8db9e1f3cf661ac0b461e02f7dd335f11326ffdae367ca1f14a6753ad98cb7f9",
+      "chat.handoffConversation.count.one": "807543a3f05ba1192a47e2ca709387b8c0d0c4e00c655c68557c293514ee3db7",
+      "chat.handoffConversation.count.other": "353937076530c412ee10f5d6821b0b6da81ed78c2120f88580a5fa24e2d163a7",
+      "chat.handoffConversation.request": "7bc95d76afeb972bbe9624184b72e95797d2894ae488dfb29c79d491328f2835",
+      "chat.handoffConversation.loading": "08cd9919453184389e78d9924a9dc3d4b68f2529b79bdd195dd51fb6139f927c",
+      "chat.handoffConversation.failed": "9205f816010803c4e86ee0b2e43f1b99582f2dc452ac93d7c187e8d1e6686b2f",
+      "chat.handoffConversation.empty": "f0d5968f615ed7ab11fdf8f17586cfaeb2845eee5757459e804b4e9d663a3588",
+      "chat.handoffConversation.readOnly": "70610921fb6a051407b23e0a8aed1d10aeb923da963dae0f48a6592de0bdb1fe",
+      "chat.handoffConversation.talkTo": "c81dc51f491466f9c7dfa1b859fde2214b36561e384d7a413b2729d681c4def6",
+      "chat.handoffConversation.openThread": "a5bbee1c2f9f598ca9c35a91f01b1ceab780673f8010832839e52f7318c26b4b"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

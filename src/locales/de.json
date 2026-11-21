@@ -4054,5 +4054,16 @@
   "geminiServer.key": "Gemini-API-Schlüssel",
   "geminiServer.add": "Google AI Studio hinzufügen",
   "inbox.settled.title": "Erledigt",
-  "inbox.settled.read": "Gelesen"
+  "inbox.settled.read": "Gelesen",
+  "chat.handoffConversation.view": "Unterhaltung ansehen",
+  "chat.handoffConversation.label": "Unterhaltung zwischen {asker} und {helper}",
+  "chat.handoffConversation.count.one": "Unterhaltung zwischen Bots · {count} Nachricht",
+  "chat.handoffConversation.count.other": "Unterhaltung zwischen Bots · {count} Nachrichten",
+  "chat.handoffConversation.request": "{asker} hat {helper} um Hilfe gebeten",
+  "chat.handoffConversation.loading": "Unterhaltung wird geladen…",
+  "chat.handoffConversation.failed": "Die Unterhaltung konnte nicht geladen werden.",
+  "chat.handoffConversation.empty": "Noch keine Nachrichten.",
+  "chat.handoffConversation.readOnly": "Nur lesen. Um etwas zu ändern, sprich mit {asker}.",
+  "chat.handoffConversation.talkTo": "Mit {asker} sprechen",
+  "chat.handoffConversation.openThread": "Ganzen Thread öffnen"
 }
