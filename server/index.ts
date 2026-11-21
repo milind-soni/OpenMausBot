@@ -516,7 +516,7 @@ import { acquireDataDirLeaseForProcess, releaseOnceAtExit } from "./data-dir-lea
 import { createWorkspaceAccess, describeEdition, editionForSettings, editionStatus, entitled, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, licenseWarning, sharedWorkspaceFullAccessConfigured, loadEnterpriseLayer, workspaceMembership, type WorkspaceAccess } from "./enterprise.ts";
 import { environmentDescriptor, loadEnvironmentId, OWNER_LENDING, serverVersion } from "./environment.ts"; import { dataFormatAtStart } from "./data-format.ts"; import { doctorAtStart } from "./doctor/start.ts";
 import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.ts";
-import { createWorkspaceBackupRoutes, isWorkspaceBackupSessionControl } from "./workspace-backup-http.ts";
+import { createWorkspaceBackupRoutes, isWorkspaceBackupSessionControl, releaseDataForBackup } from "./workspace-backup-http.ts";
 import { applyPendingWorkspaceRestore, readLastWorkspaceRestore, type WorkspaceRestoreResult } from "./workspace-backup.ts";
 import { repairMovedWorkspacePaths } from "./moved-paths-repair.ts";
 import { createCustomDomainVerifier, customDomainIpv4, normalizeCustomDomain } from "./custom-domain.ts";
@@ -11960,7 +11960,7 @@ const workspaceBackupAccess = {
     pause: () => { routines?.stop(); calendarCalls?.stop(); botWaits.stop(); checkBacks.stop(); watchdog.stop(); memoryUpkeep.pause(); },
     resume: () => { if (!moveFreeze.frozen()) { routines?.start(); calendarCalls?.start(); botWaits.start(); checkBacks.start(); } watchdog.start(); memoryUpkeep.resume(); },
     flush: async () => {
-      await Promise.all([chatApps.settleLive(), flushAllProfileHistory(), flushAllMemoryJournals(), flushUsageLedger(DATA_DIR), flushDecisionLog(DATA_DIR), flushAdminActivity(DATA_DIR)]);
+      await Promise.all([chatApps.settleLive(), flushAllProfileHistory(), flushAllMemoryJournals(), flushUsageLedger(DATA_DIR), flushDecisionLog(DATA_DIR), flushAdminActivity(DATA_DIR), releaseDataForBackup(dataEngine, (id) => store.bot(id)?.name)]);
       // Writers gated and work idle: release the WAL connection for a consistent snapshot; Store reopens it lazily.
       await closeMessageSearch();
       closeMessageDb();
