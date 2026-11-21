@@ -1,4 +1,4 @@
-// A server of one person's own (`openmausbot serve` on their VPS or Mac mini) can be their home, as My Cloud is: its owner
+// A server of one person's own (`edubot serve` on their VPS or Mac mini) can be their home, as My Cloud is: its owner
 // moves a computer's bots into it, and that computer then works for it. Security: only where nobody else signs in, so no
 // one else's bots or turns ever reach a computer lent this way, and never a Cloud, a team's Cloud or a hosted workspace.
 import { nameFromEmail } from "../shared/bot-owner.ts";

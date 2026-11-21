@@ -181,10 +181,10 @@ export async function reconcile(client: HeadlessClient, file: TeamFile, options:
   for (const desired of file.bots.filter((bot) => bot.model)) {
     const { instanceId, model } = desired.model!;
     const instance = instances.find((candidate) => candidate.instanceId === instanceId);
-    if (!instance) throw new HeadlessError(`bot "${desired.name}": no engine "${instanceId}" here`, EXIT.failed, "openmausbot models lists the engines and their models");
+    if (!instance) throw new HeadlessError(`bot "${desired.name}": no engine "${instanceId}" here`, EXIT.failed, "edubot models lists the engines and their models");
     const offered = [instance.models?.default, ...(instance.models?.options ?? []).map((option: Rec) => option.id)];
     if (instance.snapshot?.state === "available" && !offered.includes(model)) {
-      throw new HeadlessError(`bot "${desired.name}": ${instanceId} offers no model "${model}"`, EXIT.failed, "openmausbot models lists them");
+      throw new HeadlessError(`bot "${desired.name}": ${instanceId} offers no model "${model}"`, EXIT.failed, "edubot models lists them");
     }
   }
   let current = await fleet();
@@ -347,7 +347,7 @@ const summary = (tally: Tally) => `${tally.created} to create, ${tally.changed} 
 
 export async function teamApplyVerb(ctx: VerbContext): Promise<VerbOutcome> {
   const path = ctx.positionals[0];
-  if (!path) throw usageError("name the team file: openmausbot team apply FILE");
+  if (!path) throw usageError("name the team file: edubot team apply FILE");
   const check = ctx.flags.check === true;
   const dryRun = ctx.flags["dry-run"] === true;
   if (check && dryRun) throw usageError("choose one of --dry-run and --check");
@@ -480,7 +480,7 @@ export async function teamExportVerb(ctx: VerbContext): Promise<VerbOutcome> {
   if (!botEntries.length) throw new HeadlessError("no bots to export", EXIT.failed);
   const serialized = /\.json$/i.test(out)
     ? `${JSON.stringify(document, null, 2)}\n`
-    : `# Written by openmausbot team export on ${new Date().toISOString().slice(0, 10)}.\n# Engine keys are placeholders (SET_ME): set them before applying this elsewhere.\n${stringifyYaml(document, { lineWidth: 0 })}`;
+    : `# Written by edubot team export on ${new Date().toISOString().slice(0, 10)}.\n# Engine keys are placeholders (SET_ME): set them before applying this elsewhere.\n${stringifyYaml(document, { lineWidth: 0 })}`;
   writeFileSync(resolve(out), serialized);
   return {
     result: { ok: true, file: resolve(out), teams: teamEntries.length, bots: botEntries.length, rooms: roomEntries.length, skills, engines: Object.keys(engines), skipped, redacted },

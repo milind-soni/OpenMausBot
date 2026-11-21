@@ -107,7 +107,7 @@ async function connected(call: ReturnType<typeof engineFor>) {
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-cloud-lent-mcp-"));
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".edubot");
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(turnDumps());
   const cli = join(home, "fixture-claude.mjs");

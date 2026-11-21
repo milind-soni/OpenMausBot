@@ -69,14 +69,14 @@ describe("doctor-backups", () => {
   });
 });
 
-describe("openmausbot doctor --data", () => {
+describe("edubot doctor --data", () => {
   it("reports without changing anything, and says --fix repairs it; exit 8 while a problem is left", () => {
     const data = dataFolder();
     const temp = stray(data);
     const outcome = dataDoctorOutcome(runDoctor({ dataDir: data, version: "1.0.0", mode: "command", fix: false, now: () => NOW, pidAlive: () => false }));
     expect(outcome.exitCode).toBe(8);
     expect(existsSync(temp)).toBe(true);
-    expect(outcome.human).toContain("        openmausbot doctor --data --fix repairs it");
+    expect(outcome.human).toContain("        edubot doctor --data --fix repairs it");
     expect(outcome.result).toMatchObject({ ok: false, counts: { problems: expect.any(Number), fixed: 0 } });
   });
 

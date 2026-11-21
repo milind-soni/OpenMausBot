@@ -592,7 +592,7 @@ required method, across eight existing drivers and 82 test files. Capability
 flags let drivers opt out of *behaviour*, not out of *implementing the surface*.
 Decide deliberately whether the promise survives, and record the answer.
 
-**On-disk forward compatibility.** `~/.openmausbot` is shared across app versions.
+**On-disk forward compatibility.** `~/.edubot` is shared across app versions.
 New message kinds (attachments, compaction), a new state field, and generation
 stamps all mean an older build may read a newer store. There is precedent —
 `server/store.ts:443` already migrates a pre-branching flat file — but a

@@ -429,7 +429,7 @@ jobs:
 
           # A SIGKILL leaves the server's lease behind; the same container starts again, and so does a new one.
           docker kill -s KILL own >/dev/null
-          docker run --rm -v omb-own-ci:/data:ro --entrypoint test omb-cloud-home:ci -s /data/.openmausbot/openmausbot-server.lease
+          docker run --rm -v omb-own-ci:/data:ro --entrypoint test omb-cloud-home:ci -s /data/.edubot/openmausbot-server.lease
           docker start own >/dev/null
           healthy own 18081
           docker kill -s KILL own >/dev/null

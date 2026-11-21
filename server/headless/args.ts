@@ -176,7 +176,7 @@ const OPTIONAL_SUBCOMMANDS = new Map([["bots", ["list", "get", "delete", "pause"
 /** Strict: an unknown flag or a missing value is a usage error (exit 2). */
 export function parseCommand(argv: readonly string[]): ParsedCommand {
   const [head, ...rest] = argv;
-  if (!head) throw usageError("name a verb", "run openmausbot help");
+  if (!head) throw usageError("name a verb", "run edubot help");
   let verb = head;
   let args = rest;
   if (OPTIONAL_SUBCOMMANDS.get(head)?.includes(rest[0] ?? "")) {
@@ -188,22 +188,22 @@ export function parseCommand(argv: readonly string[]): ParsedCommand {
     const action = rest[0];
     if (!action || !actions.includes(action)) {
       if (action === "--help" || action === "-h") return { verb: head, flags: { help: true }, positionals: [] };
-      throw usageError(`${head} needs one of: ${actions.join(", ")}`, `run openmausbot help ${head}`);
+      throw usageError(`${head} needs one of: ${actions.join(", ")}`, `run edubot help ${head}`);
     }
     verb = `${head} ${action}`;
     args = rest.slice(1);
   }
   const spec = VERBS[verb];
-  if (!spec) throw usageError(`unknown verb "${head}"`, "run openmausbot help");
+  if (!spec) throw usageError(`unknown verb "${head}"`, "run edubot help");
   let parsed: { values: Flags; positionals: string[] };
   try {
     parsed = parseArgs({ args: [...args], options: { ...GLOBAL, ...spec.options }, strict: true, allowPositionals: true }) as typeof parsed;
   } catch (error) {
-    throw usageError(error instanceof Error ? error.message.replace(/^Unknown option/, "unknown option") : String(error), `run openmausbot help ${head}`);
+    throw usageError(error instanceof Error ? error.message.replace(/^Unknown option/, "unknown option") : String(error), `run edubot help ${head}`);
   }
   if (!parsed.values.help && parsed.positionals.length > spec.positionals) {
     throw usageError(`${verb} takes at most ${spec.positionals} value${spec.positionals === 1 ? "" : "s"} besides its flags; put text with spaces in quotes`,
-      `run openmausbot help ${head}`);
+      `run edubot help ${head}`);
   }
   return { verb, flags: parsed.values, positionals: parsed.positionals };
 }

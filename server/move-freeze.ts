@@ -12,6 +12,7 @@ import type { CalendarCallManager } from "./calendar-calls.ts";
 import type { RoutineManager } from "./routines.ts";
 import type { WaitManager } from "./waits.ts";
 import type { WebhookManager } from "./webhooks.ts";
+import { SERVER_CHILD_DIR_NAME } from "../electron/app-identity.mjs";
 
 export const MOVED_REFUSAL = "This bot lives on My Cloud now.";
 /** Why a frozen copy refuses, naming the server of the person's own its bots moved to (`place`), else My Cloud. */
@@ -37,7 +38,7 @@ const READS = new Set(["GET", "HEAD", "OPTIONS"]);
 /** What a frozen copy keeps once its workspace is deleted: the marker, this server's identity, Files, downloaded tools
  * and caches, and its own runtime files. Everything else, credentials included, is the person's workspace. */
 const DEVICE_STATE = new Set(["moved.json", "environment-id", "sync", "tools", "cache", ".cache", "tmp", ".tmp", "dist-native", "tunnel-runtime",
-  ".openmausbot-server-child", "openmausbot-server.lease", "engine-runs"]);
+  SERVER_CHILD_DIR_NAME, "openmausbot-server.lease", "engine-runs"]);
 const kept = (name: string) => DEVICE_STATE.has(name) || name.startsWith("openmausbot-server.lease.");
 
 export type MoveFreeze = ReturnType<typeof createMoveFreeze>;

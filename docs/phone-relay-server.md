@@ -11,7 +11,7 @@ It is off unless asked for, and it changes nothing about `--tunnel`, your own
 domain, `--public-url`, `--lan` or `--tailscale`.
 
 **In this release `--relay` is only for a machine that has no tunnel address**,
-signed in with `openmausbot login --relay`. A server says it is one
+signed in with `edubot login --relay`. A server says it is one
 (`kind: "server"`) when it registers, asks for its address and asks for a relay
 token, and the hosted control plane never gives a server's tunnel to the relay.
 A control plane that predates that rule gives back the tunnel of any
@@ -19,22 +19,22 @@ installation that took a relay token in the last two days and then refuses it a
 tunnel for good, and a server may be pointed at one. So the server still keeps
 the relay off, and says why, when it serves `--tunnel`, runs on a fleet
 credential (`OMB_INSTALLATION_CREDENTIAL`), or holds a tunnel address from a
-plain `openmausbot account login`.
+plain `edubot account login`.
 
 ## Use it
 
 ```sh
-npx openmausbot login --relay   # once: an emailed code signs this machine in; no tunnel address is reserved
-npx openmausbot serve --relay   # prints a QR for the phone app once the relay connects
-npx openmausbot pair --phone    # a QR for another phone, later
-npx openmausbot devices         # every paired device; `devices revoke ID` removes one
+npx edubot login --relay   # once: an emailed code signs this machine in; no tunnel address is reserved
+npx edubot serve --relay   # prints a QR for the phone app once the relay connects
+npx edubot pair --phone    # a QR for another phone, later
+npx edubot devices         # every paired device; `devices revoke ID` removes one
 ```
 
 `--relay` can join `--domain`, `--public-url`, `--tailscale` or `--lan`: those
 stay the way in for browsers and the desktop app, and the QR also names the
 server's HTTPS address for a phone app that has no encrypted connection yet. It
 cannot join `--tunnel`, and `start --relay` refuses when the saved startup
-choice is a tunnel. As a service: `openmausbot service install --relay`. A
+choice is a tunnel. As a service: `edubot service install --relay`. A
 service prints no pairing QR into its log (the credential would sit in the
 journal); `serve --relay` shows it only at a terminal, and `pair --phone` makes
 one whenever asked.
@@ -44,8 +44,8 @@ the root `compose.yaml` and the compose file the installer writes all pass it to
 the server container), `docker compose up -d`, then:
 
 ```sh
-docker compose exec omb openmausbot login --relay
-docker compose exec omb openmausbot pair --phone
+docker compose exec omb edubot login --relay
+docker compose exec omb edubot pair --phone
 ```
 
 A phone code is chat and approvals only (`pair --phone`), as on every other way
@@ -127,7 +127,7 @@ declarations only.
 
 ## The control plane
 
-`openmausbot account login` registers the server as an installation (its platform, and
+`edubot account login` registers the server as an installation (its platform, and
 `appVersion` the npm package's version) and keeps its `omb_install_…`
 credential in `tunnel-account.json`, mode 0600. Plain `login` also reserves a
 tunnel address; `login --relay` reserves none (the account service's on-demand
@@ -151,7 +151,7 @@ A server qualifies today; no control plane change is needed to get a token:
 **Servers keep their tunnel.** A server's tunnel serves browsers and the
 desktop app, not only phones. The server sends `kind: "server"` on
 `POST /v1/installations`, `POST .../self/endpoint` and `POST .../self/relay-token`
-(`openmausbot account login`, `serve --tunnel`, a fleet container and `serve --relay`
+(`edubot account login`, `serve --tunnel`, a fleet container and `serve --relay`
 alike); the desktop app sends nothing new. The hosted control plane stores it,
 never marks a server's tunnel for the relay (`relay_proven`, `legacy_cutoff`)
 and never answers a server `relay_capable` (its README, "Self-hosted servers").
@@ -196,7 +196,7 @@ Unset, which is the default, browsers stay refused. It is for the phone web
 app over the relay, which is not built yet.
 
 **Pairing proves the owner.** The QR carries a 256-bit, single-use pairing
-credential that only the owner can mint: `openmausbot pair --phone` on the
+credential that only the owner can mint: `edubot pair --phone` on the
 machine (the owner, or on a shared server the per-launch owner token `serve`
 holds), or a signed-in admin in the web UI. It is both the handshake's key and
 the credential `/api/pair` redeems, so only someone holding the QR completes a
@@ -221,7 +221,7 @@ refused without being spent); before pairing, only `POST /api/pair` and
 signing the machine in to a different account gives it a new one, and phones
 paired before then pair again. Signing in again to the same account keeps it.
 
-**Removal.** `openmausbot devices revoke ID` (or the web UI) ends the session,
+**Removal.** `edubot devices revoke ID` (or the web UI) ends the session,
 and the phone hears GoAway(3) inside the encryption, then 4001; the relay stops
 admitting it at once. A session that expires is removed the same way.
 
@@ -250,8 +250,8 @@ The server keeps working on every other way in; the relay only adds one. What
 
 | Situation | Line |
 |---|---|
-| The machine serves a tunnel, runs on a fleet credential or holds a tunnel address | MausBot Relay stays off here: (why). A relay token would make that tunnel go for good; use the relay on a machine signed in with `openmausbot login --relay`. |
-| Not signed in, or the sign-in expired | MausBot Relay needs this machine signed in to a MausBot account: `openmausbot login --relay` |
+| The machine serves a tunnel, runs on a fleet credential or holds a tunnel address | MausBot Relay stays off here: (why). A relay token would make that tunnel go for good; use the relay on a machine signed in with `edubot login --relay`. |
+| Not signed in, or the sign-in expired | MausBot Relay needs this machine signed in to a MausBot account: `edubot login --relay` |
 | The control plane says no (rollout, blocked, switched off) | MausBot Relay is not available for this machine right now. The server keeps working here; it asks again every half hour. |
 | The control plane does not answer | The MausBot account service did not answer. The server keeps working here and keeps trying. |
 | The relay does not answer | Can't reach MausBot Relay yet. The server keeps working here and keeps trying; phones pair once it connects. |
@@ -270,7 +270,7 @@ again…".
   socket. Medium.
 - The web UI: a relay QR in the server's own Settings → Remote access, and the
   relay's state there. Medium.
-- `openmausbot setup` and `start` offering the relay, `status` showing it, and
+- `edubot setup` and `start` offering the relay, `status` showing it, and
   saving it with the startup choices. Small.
 - Moving a phone already paired over HTTPS onto the relay without pairing
   again (trust on first use of `k` from `/api/companion/endpoints`). Small to

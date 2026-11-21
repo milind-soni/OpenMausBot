@@ -80,7 +80,7 @@ posixOnly("a replayed respond for a settled card", () => {
   beforeAll(async () => {
     chmodSync(FAKE_CLI, 0o755);
     home = mkdtempSync(join(tmpdir(), "omb-respond-replay-"));
-    const data = join(home, ".openmausbot");
+    const data = join(home, ".edubot");
     mkdirSync(data, { recursive: true });
     writeFileSync(join(data, "config.json"), JSON.stringify({
       instances: { grok: { driver: "grokAgent", environment: { FAKE_ACP_MODE: "permission" }, config: { cli: FAKE_CLI, fullAuto: false } } },

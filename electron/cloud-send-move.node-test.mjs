@@ -63,14 +63,14 @@ function sides({ here = [], bots = {}, there = [], connections = [], secrets = {
       if (route.startsWith("/api/cloud-send/memory?bot=")) return json({ v: 1, files: [], journal: [] });
       if (route === "/api/cloud-send/memory") return json({ v: 1, about: { learned: [], removed: [] }, teams: [] });
       if (route === "/api/cloud-send/files") return json({ v: 1, files: [] });
-      if (route.startsWith("/api/cloud-send/kind?key=")) return json({ v: 1, dataDir: "/desk/.openmausbot", record: route.includes("routine") ? { enabled: true } : route.includes("app-event") ? { enabled: false } : {} });
-      if (route === "/api/cloud-send/chats?attachments=1") return json({ v: 1, dataDir: "/desk/.openmausbot", conversations, attachments: [] });
+      if (route.startsWith("/api/cloud-send/kind?key=")) return json({ v: 1, dataDir: "/desk/.edubot", record: route.includes("routine") ? { enabled: true } : route.includes("app-event") ? { enabled: false } : {} });
+      if (route === "/api/cloud-send/chats?attachments=1") return json({ v: 1, dataDir: "/desk/.edubot", conversations, attachments: [] });
       if (route === "/api/bots?messages=0") return json({ bots: Object.entries(bots).map(([id, fields]) => ({ id, threadId: `t-${id}`, name: id, ...fields })) });
       if (/^\/api\/bots\/[\w-]+\/skills$/u.test(route)) return json({ skills: [] });
       if (/^\/api\/bots\/[\w-]+\/memory$/u.test(route)) return json({ topics: [] });
       if (route.includes("/memory/file")) return json({ exists: false, text: "" });
       if (route === "/api/cloud-connections") return json({ computer: { environmentId: "env-desk", label: "Amit's Mac" }, connections, engines: [], commands: [] });
-      if (route === "/api/cloud-send/chats") return json({ v: 1, dataDir: "/desk/.openmausbot", conversations });
+      if (route === "/api/cloud-send/chats") return json({ v: 1, dataDir: "/desk/.edubot", conversations });
       const listed = /^\/api\/cloud-send\/chats\/ids\?thread=([\w-]+)&from=(\d+)$/u.exec(route);
       if (listed) {
         const all = Array.from({ length: rowIds[listed[1]] ?? 1 }, (_, i) => `${listed[1]}-${i + 1}`), from = Number(listed[2]);

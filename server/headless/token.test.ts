@@ -85,7 +85,7 @@ describe("token", () => {
     expect(tokens).toEqual([expect.objectContaining({ name: "Deploys", scope: "admin" })]);
     const refused = await run(["token", "revoke", device.session.id]);
     expect(refused.code).toBe(1);
-    expect(refused.err[1]).toContain("openmausbot sessions revoke");
+    expect(refused.err[1]).toContain("edubot sessions revoke");
     expect(registry.list()).toHaveLength(2);
     expect((await run(["token", "revoke", tokens[0].id])).code).toBe(0);
     expect(registry.list().map((session) => session.label)).toEqual(["Phone"]);

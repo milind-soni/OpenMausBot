@@ -25,7 +25,7 @@ let fx: CloudSendFixture, team: CloudTeamFixture;
 let olive = "", mira = "", ben = "";
 
 const planPath = () => join(team.home, "plan.json");
-const dataDir = (...rest: string[]) => join(team.home, ".openmausbot", ...rest);
+const dataDir = (...rest: string[]) => join(team.home, ".edubot", ...rest);
 const turns = (): Array<{ planKey?: string }> => existsSync(`${planPath()}.evidence.jsonl`)
   ? readFileSync(`${planPath()}.evidence.jsonl`, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
 const botsOf = async (token: string, messages = "") => (await team.as(token, "GET", `/api/bots${messages}`)).body.bots as Bot[];

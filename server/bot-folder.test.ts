@@ -19,7 +19,7 @@ const {
 describe("bot folder", () => {
   it("lives under DATA_DIR/bots/<id>", () => {
     // DATA_DIR is computed from homedir() during config.ts import
-    const DATA_DIR = join(homedir(), ".openmausbot");
+    const DATA_DIR = join(homedir(), ".edubot");
     expect(BOTS_DIR).toBe(join(DATA_DIR, "bots"));
     expect(botFolder("b1")).toBe(join(BOTS_DIR, "b1"));
     expect(soulFile("b1")).toBe(join(BOTS_DIR, "b1", "SOUL.md"));

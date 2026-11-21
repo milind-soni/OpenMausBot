@@ -1,5 +1,6 @@
+import { DEEP_LINK_PREFIX } from "./app-identity.mjs";
 // An action, not a router: it never carries an address, code or credential.
-export const CLOUD_DEEP_LINK = "openmausbot://cloud";
+export const CLOUD_DEEP_LINK = `${DEEP_LINK_PREFIX}cloud`;
 
 export const isCloudDeepLink = value => value === CLOUD_DEEP_LINK;
 export function takeCloudDeepLink(argv) {

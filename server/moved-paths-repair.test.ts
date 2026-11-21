@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { repairMovedWorkspacePaths } from "./moved-paths-repair.ts";
 
 const RESTORE_ID = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
-const WINDOWS = "C:\\Users\\Ada\\.openmausbot";
+const WINDOWS = "C:\\Users\\Ada\\.edubot";
 const scratch: string[] = [];
 function directory(): string {
   const path = mkdtempSync(join(tmpdir(), "omb-moved-paths-"));
@@ -26,7 +26,7 @@ function receipt(dataDir: string, extra: Record<string, unknown> = {}): string {
 function movedFromWindows(dataDir: string): void {
   json(join(dataDir, "bots.json"), [
     { id: "bot", threadId: "thread", cwd: "C:\\Users\\Ada\\Projects\\site", soul: `Read ${WINDOWS}\\files\\brief.md before you start.`, tasks: [
-      { threadId: "thread", cwd: "c:\\users\\ada\\.openmausbot\\task-workspaces\\bot\\thread", resumeCursors: { codex: "kept" } },
+      { threadId: "thread", cwd: "c:\\users\\ada\\.edubot\\task-workspaces\\bot\\thread", resumeCursors: { codex: "kept" } },
     ] },
   ]);
   json(join(dataDir, "groups.json"), [{ id: "room", memberIds: ["bot"], bulletin: `Shared notes live in ${WINDOWS}\\files.` }]);
@@ -36,7 +36,7 @@ function movedFromWindows(dataDir: string): void {
   ], runs: [] });
   mkdirSync(join(dataDir, "workspaces", "bot", "memory"), { recursive: true });
   writeFileSync(join(dataDir, "workspaces", "bot", "MEMORY.md"),
-    "- The register: c:\\users\\ada\\.openmausbot\\files\\register.xlsx\n- C:\\Users\\Ada\\.openmausbot-old\\notes.md is an old copy\n");
+    "- The register: c:\\users\\ada\\.edubot\\files\\register.xlsx\n- C:\\Users\\Ada\\.edubot-old\\notes.md is an old copy\n");
   writeFileSync(join(dataDir, "workspaces", "bot", "memory", "people.md"), "Ada prefers short replies.\n");
   mkdirSync(join(dataDir, "bots", "bot"), { recursive: true });
   writeFileSync(join(dataDir, "bots", "bot", "SOUL.md"), `Read ${WINDOWS}\\files\\brief.md before you start.`);
@@ -64,7 +64,7 @@ describe("repairing paths a move to My Cloud left behind", () => {
       { id: "off", botId: "bot", enabled: false, prompt: `Save the summary to ${dataDir}/files/out.` },
     ]);
     expect(text(join(dataDir, "workspaces", "bot", "MEMORY.md")))
-      .toBe(`- The register: ${dataDir}/files/register.xlsx\n- C:\\Users\\Ada\\.openmausbot-old\\notes.md is an old copy\n`);
+      .toBe(`- The register: ${dataDir}/files/register.xlsx\n- C:\\Users\\Ada\\.edubot-old\\notes.md is an old copy\n`);
     expect(text(join(dataDir, "workspaces", "bot", "memory", "people.md"))).toBe("Ada prefers short replies.\n");
     expect(text(join(dataDir, "bots", "bot", "SOUL.md"))).toBe(bot.soul);
   });
@@ -99,7 +99,7 @@ describe("repairing paths a move to My Cloud left behind", () => {
   it.skipIf(process.platform === "win32")("rewrites a Mac's data folder too", () => {
     const dataDir = directory();
     receipt(dataDir);
-    json(join(dataDir, "routines.json"), { version: 1, routines: [{ id: "r", botId: "bot", enabled: true, prompt: "Read /Users/ada/.openmausbot/files/brief.md." }], runs: [] });
+    json(join(dataDir, "routines.json"), { version: 1, routines: [{ id: "r", botId: "bot", enabled: true, prompt: "Read /Users/ada/.edubot/files/brief.md." }], runs: [] });
 
     expect(repairMovedWorkspacePaths(dataDir)).toEqual(["routines.json"]);
     expect(readJson(join(dataDir, "routines.json")).routines[0].prompt).toBe(`Read ${dataDir}/files/brief.md.`);
@@ -109,7 +109,7 @@ describe("repairing paths a move to My Cloud left behind", () => {
     const dataDir = directory();
     const path = receipt(dataDir);
     movedFromWindows(dataDir);
-    writeFileSync(join(dataDir, "workspaces", "bot", "memory", "people.md"), "Bob's notes are in C:\\Users\\Bob\\.openmausbot\\files.\n");
+    writeFileSync(join(dataDir, "workspaces", "bot", "memory", "people.md"), "Bob's notes are in C:\\Users\\Bob\\.edubot\\files.\n");
     const before = text(join(dataDir, "routines.json"));
 
     expect(repairMovedWorkspacePaths(dataDir)).toEqual([]);

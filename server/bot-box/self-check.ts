@@ -66,7 +66,7 @@ export async function runBoxSelfCheck(options: SelfCheckOptions): Promise<SelfCh
   const startedAt = Date.now();
   const marker = `${MARKER_PREFIX}${randomBytes(12).toString("hex")}`;
   const root = join(options.root, `check-${randomBytes(4).toString("hex")}`);
-  const home = join(root, "home"), data = join(home, ".openmausbot"), sockets = join(root, "s");
+  const home = join(root, "home"), data = join(home, ".edubot"), sockets = join(root, "s");
   const cwd = join(data, "task-workspaces", "probe", "t1"), botFolder = join(data, "workspaces", "probe");
   const otherWorkspace = join(data, "workspaces", "other"), otherTask = join(data, "task-workspaces", "other", "t2");
   for (const dir of [cwd, botFolder, otherWorkspace, otherTask, join(data, "providers"), join(data, "tools"), sockets]) mkdirSync(dir, { recursive: true, mode: 0o700 });

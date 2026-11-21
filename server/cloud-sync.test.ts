@@ -13,7 +13,7 @@ const open: CloudSync[] = [];
 function setup(options: { freeBytes?: number; now?: () => number } = {}) {
   const home = mkdtempSync(join(tmpdir(), "omb-cloud-sync-"));
   scratch.push(home);
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".edubot");
   mkdirSync(dataDir);
   const sync = createCloudSync({ dataDir, now: options.now, statfs: () => ({ totalBytes: 10 * GB, freeBytes: options.freeBytes ?? 9 * GB }) });
   open.push(sync);

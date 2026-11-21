@@ -165,7 +165,7 @@ account is out of credits for a 402.
 ## What is logged
 
 Each call that reaches the model adds one row to
-`~/.openmausbot/decider-log/YYYY-MM.ndjson` (mode 0600). This is separate
+`~/.edubot/decider-log/YYYY-MM.ndjson` (mode 0600). This is separate
 from the approvals log in `decisions/`.
 
 ```json

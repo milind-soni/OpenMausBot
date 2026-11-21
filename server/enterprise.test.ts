@@ -93,14 +93,14 @@ describe("enterprise hook point", () => {
     expect(editionStatus(new Date("2026-09-23T12:00:00Z").getTime())).toEqual({ ...status, expiresInDays: 100 });
     expect(entitled("whitelabel")).toBe(true);
     expect(entitled("budgets")).toBe(false);
-    expect(describeEdition(status)).toBe("openmausbot enterprise edition for Acme until 2027-01-01: sso, whitelabel");
+    expect(describeEdition(status)).toBe("edubot enterprise edition for Acme until 2027-01-01: sso, whitelabel");
   });
 
   it("loads a compiled layer (server/index.js) the way an image ships it", async () => {
     const dir = fakeLayer(`export function register() { return { customer: "Built", features: ["admin"], expiresAt: null }; }`, "index.js");
     const status = await loadEnterpriseLayer({ dir, licenseKey: "k" });
     expect(status).toEqual({ edition: "enterprise", customer: "Built", features: ["admin"], expiresAt: null });
-    expect(describeEdition(status)).toBe("openmausbot enterprise edition for Built: admin");
+    expect(describeEdition(status)).toBe("edubot enterprise edition for Built: admin");
   });
 
   it("warns for 30 days, keeps working for a 7-day grace, then stops granting features without a restart", async () => {

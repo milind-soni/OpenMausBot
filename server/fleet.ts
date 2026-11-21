@@ -1,6 +1,7 @@
 // Many client workspaces on one Linux server, each its own OS user and `openmausbot@<slug>` service. This module only plans:
 // it renders files and fixed argument lists as steps, and never builds a shell command string.
 import { posix } from "node:path";
+import { CLI_NAME, DATA_DIR_NAME } from "../electron/app-identity.mjs";
 
 const { join } = posix;
 
@@ -48,7 +49,7 @@ export function agentUnit(spec: { node: string; script: string; operator: string
   const layout = spec.layout ?? fleetLayout();
   const strip = spec.script.endsWith(".ts") ? " --experimental-strip-types" : "";
   return [
-    "# Written by `openmausbot fleet init`. The operator workspace creates and manages workspaces through this.",
+    "# Written by `edubot fleet init`. The operator workspace creates and manages workspaces through this.",
     "[Unit]",
     "Description=OpenMausBot fleet agent",
     "After=network-online.target",
@@ -116,7 +117,7 @@ export function workspaceHome(layout: FleetLayout, slug: string): string {
 }
 
 export function workspaceDataDir(layout: FleetLayout, slug: string): string {
-  return join(workspaceHome(layout, slug), ".openmausbot");
+  return join(workspaceHome(layout, slug), DATA_DIR_NAME);
 }
 
 export function assertSlug(slug: string): void {
@@ -146,7 +147,7 @@ export function templateUnit(spec: { node: string; script: string; layout?: Flee
   const layout = spec.layout ?? fleetLayout();
   const strip = spec.script.endsWith(".ts") ? " --experimental-strip-types" : "";
   return [
-    "# Written by `openmausbot fleet init`. One unit for every workspace: %i is the slug.",
+    "# Written by `edubot fleet init`. One unit for every workspace: %i is the slug.",
     "[Unit]",
     "Description=OpenMausBot workspace %i",
     "After=network-online.target openmausbot-fence.service",
@@ -181,7 +182,7 @@ export function templateUnit(spec: { node: string; script: string; layout?: Flee
 
 export function fenceUnit(layout = fleetLayout()): string {
   return [
-    "# Written by `openmausbot fleet init`: keeps each workspace's loopback ports to its own user.",
+    "# Written by `edubot fleet init`: keeps each workspace's loopback ports to its own user.",
     "[Unit]",
     "Description=OpenMausBot per-workspace loopback fence",
     "",
@@ -198,7 +199,7 @@ export function fenceUnit(layout = fleetLayout()): string {
 
 /** nftables: only a workspace's own user, Caddy and root may open its loopback ports, so a bot's shell cannot reach a sibling's API. */
 export function fenceRules(workspaces: FleetWorkspace[]): string {
-  const lines = ["#!/usr/sbin/nft -f", "# Written by `openmausbot fleet`; regenerated on every create, suspend, resume and delete.", "add table inet openmausbot", "flush table inet openmausbot", "table inet openmausbot {", "\tchain output {", "\t\ttype filter hook output priority 0; policy accept;"];
+  const lines = ["#!/usr/sbin/nft -f", "# Written by `edubot fleet`; regenerated on every create, suspend, resume and delete.", "add table inet openmausbot", "flush table inet openmausbot", "table inet openmausbot {", "\tchain output {", "\t\ttype filter hook output priority 0; policy accept;"];
   for (const workspace of [...workspaces].sort((a, b) => a.slug.localeCompare(b.slug))) {
     if (workspace.status !== "running" && workspace.status !== "suspended" && workspace.status !== "retained" && !workspace.accountCreated) continue;
     lines.push(`\t\toif lo tcp dport { ${workspace.port}, ${workspace.webhookPort} } meta skuid != { ${fleetUser(workspace.slug)}, caddy, root } reject`);
@@ -476,13 +477,13 @@ export function deletePlan(input: { registry: FleetRegistry; slug: string; keepD
 export function upgradePlan(input: { registry: FleetRegistry }): FleetStep[] {
   const running = Object.values(input.registry.workspaces).filter((workspace) => workspace.status === "running").sort((a, b) => a.slug.localeCompare(b.slug));
   return [
-    { kind: "run", argv: ["npm", "install", "-g", "openmausbot@latest"], why: "install the release every workspace runs from" },
+    { kind: "run", argv: ["npm", "install", "-g", `${CLI_NAME}@latest`], why: "install the release every workspace runs from" },
     ...running.map((workspace) => ({ kind: "run" as const, argv: ["systemctl", "restart", `openmausbot@${workspace.slug}.service`], why: `restart ${workspace.slug} on the new release` })),
     ...running.map((workspace) => ({ kind: "health" as const, url: `http://127.0.0.1:${workspace.port}/api/health`, why: `wait for ${workspace.slug}` })),
   ];
 }
 
-/** The same shape `openmausbot access` writes; the server reads it live. */
+/** The same shape `edubot access` writes; the server reads it live. */
 export function applySignIn(configText: string, action: "add" | "remove", email: string, chatOnly: boolean): { config: string; summary: string } {
   const entry = email.trim().toLowerCase();
   assertEmailOrDomain(entry);

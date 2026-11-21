@@ -52,7 +52,7 @@ export function registryCheck(options: { rename?: (from: string, to: string) => 
       const lost = damaged.filter((damage) => !damage.copy);
       const instructions = [
         ...(lost.length ? [`Stop the server and put back ${lost.map((damage) => damage.file).join(" and ")} from the copy taken before the last update (./update.sh --rollback) or from a workspace backup. Until then the server shows no ${lost.some((damage) => damage.file === "bots.json") ? "bots" : "rooms"}.`] : []),
-        ...(unchecked.length ? [`Give the server's user ${unchecked.map((item) => item.file).join(" and ")} back as a file it can read, then run openmausbot doctor --data again.`] : []),
+        ...(unchecked.length ? [`Give the server's user ${unchecked.map((item) => item.file).join(" and ")} back as a file it can read, then run edubot doctor --data again.`] : []),
       ];
       return {
         status: "problem",

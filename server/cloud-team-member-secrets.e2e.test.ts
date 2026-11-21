@@ -155,7 +155,7 @@ it("she deletes hers, and leaving deletes the rest of hers from the disk", async
 
   const left = await team.signed("POST", "/api/cloud/team/member-left", { email: ADA.email });
   expect(left.status, JSON.stringify(left.body)).toBeLessThan(300);
-  const dataDir = join(team.home, ".openmausbot");
+  const dataDir = join(team.home, ".edubot");
   const key = readFileSync(join(dataDir, LOGINS_KEY_FILE), "utf8").trim();
   const kept = JSON.parse(decryptBrowserState(readFileSync(join(dataDir, MEMBER_SECRETS_FILE)), key)) as { secrets: Array<{ id: string; person: string }> };
   expect(kept.secrets.filter((one) => one.person === personKey({ id: "", email: ADA.email })).map((one) => one.id), "hers, sealed on the disk").toEqual([]);

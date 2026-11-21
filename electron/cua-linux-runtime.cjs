@@ -15,7 +15,7 @@ const {
 const CONNECTION_SCHEMA_VERSION = 1;
 // Schema 2 is deliberately incompatible with early builds that started Cua without the Xorg seat-safety flags.
 const SETTINGS_SCHEMA_VERSION = 2;
-const HOST_BUNDLE_ID = "com.openmausbot.app";
+const { APP_ID: HOST_BUNDLE_ID } = require("./app-identity.mjs");
 const CERTIFIED_CONTRACT_VERSION = "0.8.0";
 const CERTIFIED_TOOLS_LIST_SCHEMA_VERSION = "1";
 const CERTIFIED_CAPABILITY_VERSION = "1";

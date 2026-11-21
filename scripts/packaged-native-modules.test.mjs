@@ -35,8 +35,10 @@ describe("packaged native modules", () => {
       mkdirSync(join(checkout, file, ".."), { recursive: true });
       writeFileSync(join(checkout, file), "");
     }
-    mkdirSync(join(checkout, "scripts"));
-    copyFileSync(join(root, "scripts", "build-npm-package.mjs"), join(checkout, "scripts", "build-npm-package.mjs"));
+    for (const file of ["scripts/build-npm-package.mjs", "electron/app-identity.mjs"]) {
+      mkdirSync(join(checkout, file, ".."), { recursive: true });
+      copyFileSync(join(root, file), join(checkout, file));
+    }
     execFileSync(process.execPath, [join(checkout, "scripts", "build-npm-package.mjs")], { stdio: "pipe" });
     const manifest = JSON.parse(readFileSync(join(checkout, "release", "npm", "package.json"), "utf8"));
     expect(manifest.dependencies).toEqual(pins);

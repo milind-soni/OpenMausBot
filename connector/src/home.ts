@@ -610,7 +610,7 @@ export class Home {
     if ((await this.docker.containersUsing(NAMES.dataVolume)).some((container) => container.State === "running" || container.State === "paused")) return;
     const cleared = await this.helper(image, [DATA], [
       "find", "/data", "-maxdepth", "3", "(",
-      "-path", "/data/.openmausbot/openmausbot-server.lease*", "-o", "-path", "/data/.openmausbot/.openmausbot-server-child/openmausbot-server.lease",
+      "-path", "/data/.edubot/openmausbot-server.lease*", "-o", "-path", "/data/.edubot/.edubot-server-child/openmausbot-server.lease",
       ")", "-print", "-delete",
     ], DELETE_CAPS);
     const paths = cleared.output.split("\n").map((line) => line.trim()).filter((line) => line.startsWith("/data/"));

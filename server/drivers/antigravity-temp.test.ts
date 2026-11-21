@@ -79,7 +79,7 @@ const linkType = process.platform === "win32" ? "junction" : "dir";
 
 describe("Antigravity's temp folder", () => {
   it("is one short, stable folder per instance under tmp/agy", () => {
-    const dataDir = join("C:", "Users", "ada", ".openmausbot");
+    const dataDir = join("C:", "Users", "ada", ".edubot");
     const work = antigravityTempDir(dataDir, "work");
     expect(work).toBe(antigravityTempDir(dataDir, "work"));
     expect(dirname(work)).toBe(join(dataDir, "tmp", "agy"));
@@ -92,11 +92,11 @@ describe("Antigravity's temp folder", () => {
   it("replaces every spelling of TEMP and TMP on Windows and changes nothing elsewhere", () => {
     const inherited = { Temp: "C:\\Users\\ada\\AppData\\Local\\Temp", tmp: "C:\\Temp", Path: "C:\\bin" };
     const windows: NodeJS.ProcessEnv = { ...inherited };
-    setAntigravityTempEnvironment(windows, "C:\\Users\\ada\\.openmausbot\\tmp\\agy\\0123456789ab", "win32");
+    setAntigravityTempEnvironment(windows, "C:\\Users\\ada\\.edubot\\tmp\\agy\\0123456789ab", "win32");
     expect(windows).toEqual({
       Path: "C:\\bin",
-      TEMP: "C:\\Users\\ada\\.openmausbot\\tmp\\agy\\0123456789ab",
-      TMP: "C:\\Users\\ada\\.openmausbot\\tmp\\agy\\0123456789ab",
+      TEMP: "C:\\Users\\ada\\.edubot\\tmp\\agy\\0123456789ab",
+      TMP: "C:\\Users\\ada\\.edubot\\tmp\\agy\\0123456789ab",
     });
     for (const platform of ["darwin", "linux"] as const) {
       const posix: NodeJS.ProcessEnv = { ...inherited };

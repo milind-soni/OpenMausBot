@@ -29,7 +29,7 @@ let scout: Bot, ledger: Bot;
 let bobThread = "", benThread = "", fileName = "";
 let kumquat = "", quince = "", standup = "", tally = "", digest = "", justMe = "", mausbotRoutine = "";
 
-const dataDir = (...rest: string[]) => join(team.home, ".openmausbot", ...rest);
+const dataDir = (...rest: string[]) => join(team.home, ".edubot", ...rest);
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 async function until(done: () => Promise<boolean> | boolean, timeoutMs = 60_000): Promise<void> {
   const end = Date.now() + timeoutMs;

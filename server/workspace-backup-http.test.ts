@@ -165,6 +165,16 @@ it("keeps a validated stage after rejecting a malformed or oversized upload", as
   expect(archive.commit).toHaveBeenCalledWith(dataDir, preview.id);
 });
 
+it("names the exported backup after Edu Bot and the day it was made", async () => {
+  const exported = await post("/api/workspace-backup/export", { password: PASSWORD });
+  const { id, filename } = await exported.json() as { id: string; filename: string };
+  expect(filename).toBe("EduBot-2026-09-11.ombbackup");
+  const download = await fetch(`${url}/api/workspace-backup/download/${id}`, { headers: { authorization: `Bearer ${admin.token}` } });
+  expect(download.status).toBe(200);
+  expect(download.headers.get("content-disposition")).toBe('attachment; filename="EduBot-2026-09-11.ombbackup"');
+  expect(await download.text()).toBe("fixture encrypted bytes");
+});
+
 it("accepts drafts between 1 and 2 MiB and enforces the preference cap in UTF-8 bytes", async () => {
   const clientState = { "omb-drafts": "a".repeat(1536 * 1024) };
   expect((await post("/api/workspace-backup/export", { password: PASSWORD, clientState })).status).toBe(200);

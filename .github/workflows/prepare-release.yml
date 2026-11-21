@@ -77,10 +77,6 @@ jobs:
             echo "::error::v$VERSION already exists in $GITHUB_REPOSITORY"
             exit 1
           fi
-          if gh release view "v$VERSION" --repo milind-soni/openmausbot-releases > /dev/null 2>&1; then
-            echo "::error::v$VERSION already exists in the legacy updater mirror"
-            exit 1
-          fi
           if git ls-remote --exit-code --heads origin "release/v$VERSION" > /dev/null 2>&1; then
             echo "::error::release/v$VERSION already exists — use its existing PR"
             exit 1

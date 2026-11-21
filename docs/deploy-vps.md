@@ -61,7 +61,7 @@ It runs the newest release, pinned by its version; once a `stable` channel is pu
 **Sign in as the first admin** with a one-time link made on the server. Run in a terminal, the installer makes one and prints it when it finishes. It does not when its output goes anywhere else, such as a log, because whoever reads the link can sign in as the admin until it is used or expires. To make one yourself:
 
 ```sh
-cd /opt/openmausbot && sudo docker compose exec omb openmausbot pair --label "First admin"
+cd /opt/openmausbot && sudo docker compose exec omb edubot pair --label "First admin"
 ```
 
 Open the link it prints, or paste it into the desktop app under **＋ → Connect to a server**. To sign in with an emailed code instead, run the installer with `--email you@example.com`.
@@ -87,7 +87,7 @@ Three ways to make the server reachable are covered. Pick one; the rest of the g
 | **B. Your own domain** (Docker + Caddy) | a domain name, ports 80/443 | anyone with a pairing code, over HTTPS | a permanent address you own |
 | **C. Your Tailscale network** (`serve --tailscale`) | Tailscale on the server and your devices | only your tailnet | the most private; nothing public at all |
 
-Only need the phone app? Add `--relay` to path B or C on a machine signed in with `openmausbot login --relay` (never on a machine with a path A address), or use it on its own: the app pairs by QR through MausBot Relay, end-to-end encrypted, with no domain, open port or VPN. See [Phones through MausBot Relay](phone-relay-server.md).
+Only need the phone app? Add `--relay` to path B or C on a machine signed in with `edubot login --relay` (never on a machine with a path A address), or use it on its own: the app pairs by QR through MausBot Relay, end-to-end encrypted, with no domain, open port or VPN. See [Phones through MausBot Relay](phone-relay-server.md).
 
 Whichever you pick, the login is the same: you **pair** each device once with a short code and it stays signed in. A session lasts 30 days; using it with half that or less left renews it to a full 30, up to 180 days from pairing (`OMB_SESSION_TTL_DAYS` and `OMB_SESSION_MAX_DAYS` change both numbers). There is no password.
 
@@ -152,18 +152,18 @@ root, sign in again as `maus`; those accounts have different homes and credentia
 No domain, no proxy, no open port. The server gets an address like `https://c-7f3a9c.openmausbot.com` through a Cloudflare tunnel; only traffic through the tunnel reaches it, and that traffic still has to pair.
 
 ```sh
-npx openmausbot setup          # once: choose AI access, connect, and choose a model
-npx openmausbot account login          # once: an emailed code signs this machine in and reserves its address
-npx openmausbot serve --tunnel # runs the server there and prints the pairing link with a QR code
+npx edubot setup          # once: choose AI access, connect, and choose a model
+npx edubot account login          # once: an emailed code signs this machine in and reserves its address
+npx edubot serve --tunnel # runs the server there and prints the pairing link with a QR code
 ```
 
 `setup` connects an AI provider; it is separate from the OpenMausBot account.
 Use Codex's device-code option over SSH, or enter a hidden API key for a
 chat-only connection. More engines can be added later. See [CLI setup](cli-onboarding.md).
 
-`login` asks for your email, sends an 8-digit code, and prints the address it reserved for this machine. `serve --tunnel` downloads `cloudflared` on the first run (a pinned version with a verified digest, into `~/.openmausbot`), starts the server, connects the tunnel, and after a few seconds prints `tunnel: live at https://…`. Leave it running; see "Keep it running" for a service.
+`login` asks for your email, sends an 8-digit code, and prints the address it reserved for this machine. `serve --tunnel` downloads `cloudflared` on the first run (a pinned version with a verified digest, into `~/.edubot`), starts the server, connects the tunnel, and after a few seconds prints `tunnel: live at https://…`. Leave it running; see "Keep it running" for a service.
 
-The account credentials live in `~/.openmausbot/tunnel-account.json`, readable only by your user. `npx openmausbot account logout` releases the address.
+The account credentials live in `~/.edubot/tunnel-account.json`, readable only by your user. `npx edubot account logout` releases the address.
 
 Skip to "Install and sign the engines in".
 
@@ -201,10 +201,10 @@ The [installer](#quick-start-one-command-on-your-own-domain) does these steps fo
 
    Caddy requests the certificate on its own; give it a minute. Then `https://maus.example.com` shows a page asking for a pairing code. That is correct: nothing works until you pair.
 
-In this path, every `npx openmausbot …` command below is run inside the container instead:
+In this path, every `npx edubot …` command below is run inside the container instead:
 
 ```sh
-docker compose exec omb openmausbot pair --label "My MacBook"
+docker compose exec omb edubot pair --label "My MacBook"
 ```
 
 ## Path C: only your Tailscale network
@@ -212,7 +212,7 @@ docker compose exec omb openmausbot pair --label "My MacBook"
 From the administrator shell, install Tailscale on the server and sign in (`curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up`). Enable HTTPS certificates for your tailnet once at https://login.tailscale.com/admin/dns (HTTPS Certificates), then run this from the `maus` shell:
 
 ```sh
-npx openmausbot serve --tailscale
+npx edubot serve --tailscale
 ```
 
 Tailscale terminates HTTPS with its own certificate and the pairing link uses the server's MagicDNS name (`https://maus.tail1234.ts.net`). `serve` runs `tailscale serve` in the foreground, so the share ends when it stops. Only devices on your tailnet can reach it, which is a very good property for a server that can run tools.
@@ -224,13 +224,13 @@ the image. For paths A and C, install Linux system libraries once from the
 administrator shell:
 
 ```sh
-sudo -H npx --yes openmausbot browser install --with-deps
+sudo -H npx --yes edubot browser install --with-deps
 ```
 
 Then install the browser in the service account's home, from the `maus` shell:
 
 ```sh
-npx --yes openmausbot browser install
+npx --yes edubot browser install
 ```
 
 The administrator's browser download is in a different home; it does not install
@@ -260,7 +260,7 @@ engines you use. For path B, run the installed CLI inside the container, for
 example `docker compose exec omb claude`.
 
 Engine logins belong to the service user's home (for example `~/.codex` and
-`~/.claude`), separately from OpenMausBot's `~/.openmausbot`. Keep that home when
+`~/.claude`), separately from OpenMausBot's `~/.edubot`. Keep that home when
 restarting or upgrading. The systemd example below includes `~/.local/bin` in PATH.
 
 ## Pair your first device
@@ -268,7 +268,7 @@ restarting or upgrading. The systemd example below includes `~/.local/bin` in PA
 `serve` already printed a pairing block when it started in a terminal (a service prints none into its log). For another device later:
 
 ```sh
-npx openmausbot pair --label "Kitchen iPad"
+npx edubot pair --label "Kitchen iPad"
 ```
 
 ```
@@ -290,14 +290,14 @@ Worth knowing: a code works **once**, for **10 minutes** (`--ttl 24h` keeps it o
 Every paired device is a session:
 
 ```sh
-npx openmausbot devices               # id, device, scope, last seen, expires
-npx openmausbot devices revoke ID     # signs that device out and closes its stream at once
-npx openmausbot account status                # the address others use, and whether it answers as this server
+npx edubot devices               # id, device, scope, last seen, expires
+npx edubot devices revoke ID     # signs that device out and closes its stream at once
+npx edubot account status                # the address others use, and whether it answers as this server
 ```
 
 ## Keep it running
 
-`npx openmausbot serve` is a plain foreground process. `npx openmausbot service install --tunnel` (or `--tailscale`) writes a unit like the one below for you, with a copy of the release it runs beside your data. To write it by hand for systemd (paths A and C),
+`npx edubot serve` is a plain foreground process. `npx edubot service install --tunnel` (or `--tailscale`) writes a unit like the one below for you, with a copy of the release it runs beside your data. To write it by hand for systemd (paths A and C),
 install a chosen release first, from the `maus` shell. Replace `X.Y.Z` with the
 published version you want to run:
 
@@ -328,11 +328,11 @@ WantedBy=multi-user.target
 ```
 
 ```sh
-sudo systemctl daemon-reload && sudo systemctl enable --now openmausbot
-journalctl -u openmausbot -f            # the server's log, including "tunnel: live at …"
+sudo systemctl daemon-reload && sudo systemctl enable --now edubot
+journalctl -u edubot -f            # the server's log, including "tunnel: live at …"
 ```
 
-Use `--tailscale` instead of `--tunnel` for path C. A service is not a terminal, so `serve` writes no pairing code into the journal; mint one with `npx openmausbot pair` when you need it. Docker (path B) restarts on its own (`restart: unless-stopped`).
+Use `--tailscale` instead of `--tunnel` for path C. A service is not a terminal, so `serve` writes no pairing code into the journal; mint one with `npx edubot pair` when you need it. Docker (path B) restarts on its own (`restart: unless-stopped`).
 
 Adjust the account, home, and PATH if yours differ; Node 24 must be available on
 that PATH. The service runs the installed CLI directly, so a restart uses the
@@ -508,10 +508,10 @@ every file's owner and mode either way. The script then:
 4. Waits, up to two minutes (`OMB_UPDATE_WAIT_S` for longer), until the new server answers `/api/health`
    steadily, says it is the new version, can still start a bot if it could
    before (the server's own count of ready engines, `GET /api/health/engines`,
-   which a hardened server answers too; `openmausbot doctor` on a version
+   which a hardened server answers too; `edubot doctor` on a version
    without it), and Caddy runs again.
    If it does not, the new version's doctor runs on the data
-   (`openmausbot doctor --data --fix`: in the server's container while it is up,
+   (`edubot doctor --data --fix`: in the server's container while it is up,
    else in a one-off one with the server stopped). When the doctor repaired
    something, the new version is started once more and step 4 is tried again.
    [What the doctor checks and repairs](self-hosting.md#the-doctor-checking-and-repairing-the-data).
@@ -590,25 +590,25 @@ There is no one-command updater for an npm install yet. Do what the script
 does: copy the data first, install one named version, check it, and keep the
 way back. Take the stable version number from
 [`stable.json`](https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json)
-(`"version"`), and note the one you run now (`openmausbot --version`). From
+(`"version"`), and note the one you run now (`edubot --version`). From
 the administrator shell, replacing `X.Y.Z`:
 
 ```sh
-sudo systemctl stop openmausbot
-sudo -iu maus sh -c 'umask 077; tar czf ~/openmausbot-before-update.tgz -C ~ .openmausbot && chmod 600 ~/openmausbot-before-update.tgz'
+sudo systemctl stop edubot
+sudo -iu maus sh -c 'umask 077; tar czf ~/openmausbot-before-update.tgz -C ~ .edubot && chmod 600 ~/openmausbot-before-update.tgz'
 sudo -iu maus npm install --global --prefix /home/maus/.local openmausbot@X.Y.Z
-sudo systemctl start openmausbot
-curl -sf http://127.0.0.1:8799/api/health && sudo -iu maus openmausbot doctor
+sudo systemctl start edubot
+curl -sf http://127.0.0.1:8799/api/health && sudo -iu maus edubot doctor
 ```
 
 If the install fails, or the last line does not end with the server answering
 and an engine ready, go back (replace `OLD` with the version you noted):
 
 ```sh
-sudo systemctl stop openmausbot
+sudo systemctl stop edubot
 sudo -iu maus npm install --global --prefix /home/maus/.local openmausbot@OLD
-sudo -iu maus sh -c 'mv ~/.openmausbot ~/.openmausbot-failed-update && tar xzf ~/openmausbot-before-update.tgz -C ~'
-sudo systemctl start openmausbot
+sudo -iu maus sh -c 'mv ~/.edubot ~/.edubot-failed-update && tar xzf ~/openmausbot-before-update.tgz -C ~'
+sudo systemctl start edubot
 ```
 
 A service restart by itself does not update the installed package. For
@@ -626,7 +626,7 @@ Routines and queued work survive a restart. A teammate turn running at that mome
 ## Back up
 
 Stop the server before copying its SQLite database: Ctrl-C for a foreground
-process, or `sudo systemctl stop openmausbot` from the administrator shell for
+process, or `sudo systemctl stop edubot` from the administrator shell for
 the service above. Stop any engine processes and managed desktops still writing
 files you intend to back up.
 
@@ -636,7 +636,7 @@ credentials, and paired sessions). Run it from the service account's shell:
 ```sh
 umask 077
 backup_dir=$(mktemp -d "$PWD/openmausbot-backup.XXXXXX")
-tar czf "$backup_dir/openmausbot-data.tgz" -C "$HOME" .openmausbot
+tar czf "$backup_dir/openmausbot-data.tgz" -C "$HOME" .edubot
 chmod 600 "$backup_dir/openmausbot-data.tgz"
 ```
 
@@ -698,7 +698,7 @@ Each path B backup creates a fresh private folder in the current directory, so i
 cannot overwrite an older archive with more permissive access. Keep the
 archive inside that folder privately on another machine. Restore paths A and C
 with the server stopped, using the same paths and original ownership. After
-backup or restore, start the service with `sudo systemctl start openmausbot`.
+backup or restore, start the service with `sudo systemctl start edubot`.
 Stop and start the Docker project as a whole, as above, rather than `omb` on
 its own.
 
@@ -714,11 +714,11 @@ Read this before putting anything else in front of the server.
 
 ## Troubleshooting
 
-**`serve --tunnel` says "no account on this machine yet".** Run `npx openmausbot account login` on this machine first; the credentials are per machine.
+**`serve --tunnel` says "no account on this machine yet".** Run `npx edubot account login` on this machine first; the credentials are per machine.
 
 **The server does not start and says its data "was written by a newer OpenMausBot".** An older version was started on data a newer one had already changed, which happens when a version is put back without its data. Nothing was changed. Install the version the message names (or a newer one), or put back the copy of the data from before that update.
 
-**The tunnel stays on "retrying".** The server is running and usable locally; the public hop is not verified yet. Wait a minute (Cloudflare needs a moment on a fresh address), then check `journalctl`/the terminal for the reason. If it never comes up, `npx openmausbot account logout && npx openmausbot account login` issues a fresh address.
+**The tunnel stays on "retrying".** The server is running and usable locally; the public hop is not verified yet. Wait a minute (Cloudflare needs a moment on a fresh address), then check `journalctl`/the terminal for the reason. If it never comes up, `npx edubot account logout && npx edubot account login` issues a fresh address.
 
 **Path B: the page never loads or shows a certificate error.** Caddy could not get a certificate. Check that the name resolves to the server and that ports 80 and 443 are open; `docker compose logs caddy` shows the reason.
 
@@ -730,9 +730,9 @@ Read this before putting anything else in front of the server.
 
 **A bot says the engine is not signed in.** Sign that engine in again on the server.
 
-**What does the server think it is?** `https://<address>/.well-known/openmausbot/environment` is public and shows its id, label, version and capabilities; `npx openmausbot account status` prints the same on the server.
+**What does the server think it is?** `https://<address>/.well-known/openmausbot/environment` is public and shows its id, label, version and capabilities; `npx edubot account status` prints the same on the server.
 
-**Something else.** `journalctl -u openmausbot --since -10m` (or `docker compose logs omb --tail 100`) shows the server's startup lines. Paste them with your question in the community channel.
+**Something else.** `journalctl -u edubot --since -10m` (or `docker compose logs omb --tail 100`) shows the server's startup lines. Paste them with your question in the community channel.
 
 ### Ubuntu 24.04 browser sandbox
 
@@ -780,7 +780,7 @@ sudo apparmor_parser -r /etc/apparmor.d/openmausbot-chrome
 
 Add the following line under `[Service]` in the systemd unit above, again using
 the exact installed version, then run `sudo systemctl daemon-reload` and
-`sudo systemctl restart openmausbot`:
+`sudo systemctl restart edubot`:
 
 ```ini
 Environment=AGENT_BROWSER_EXECUTABLE_PATH=/opt/openmausbot-browser/chrome-VERSION/chrome

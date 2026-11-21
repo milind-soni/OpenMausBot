@@ -27,7 +27,7 @@ The command exited with code 0. Stdout:
 Stderr:
 
 Log:
-file:///Users/jsmhh/.openmausbot/providers/antigravity/ac0a3dfd6dddb20962cecff6ee5fe65e19d3923be20e52c5ab52ff877f7e4c32/antigravity-acp/brain/a3cf0f98-46dc-449c-9867-68dfa3d6d3db/.system_generated/tasks/task-1457.log </SYSTEM_MESSAGE>`;
+file:///Users/jsmhh/.edubot/providers/antigravity/ac0a3dfd6dddb20962cecff6ee5fe65e19d3923be20e52c5ab52ff877f7e4c32/antigravity-acp/brain/a3cf0f98-46dc-449c-9867-68dfa3d6d3db/.system_generated/tasks/task-1457.log </SYSTEM_MESSAGE>`;
 
     expect(stripLeakedSystemHarnessMessages(leaked)).toBe("");
     expect(isPureLeakedSystemHarnessMessage(leaked)).toBe(true);

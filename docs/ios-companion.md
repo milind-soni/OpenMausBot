@@ -143,7 +143,7 @@ harness API:
   If an API payload changes, regenerate the fixtures with
   `node scripts/capture-companion-fixtures.mjs` and review the diff.
 
-The sidecar keeps its device registry in `~/.openmausbot/devices.json`. That is
+The sidecar keeps its device registry in `~/.edubot/devices.json`. That is
 security state owned by the network boundary, not transcript data, so it does
 not belong in the message database.
 
@@ -347,14 +347,14 @@ Allowed in the first release:
   relay when it does not. The
   phone speaks RFB over the relay. Hand back closes the viewer and releases
   the lease, and so does backgrounding the app.
-- A phone paired with the server directly (`openmausbot serve` behind
+- A phone paired with the server directly (`edubot serve` behind
   Tailscale Serve or a tunnel, no sidecar) drives the Local VM the same way,
   but the join answers it with the server's own authenticated desktop proxy
   (`/api/desktop-viewer/local/<target>/websockify`), bound to its control
   lease, and the VNC password; never the loopback address. The proxy re-checks
   the lease and the session every few seconds and closes the socket when
   either lapses; hand back closes it at once. Computer access is the pairing's
-  scope: Full access (`openmausbot pair`) may, chat-only (`--client`) is
+  scope: Full access (`edubot pair`) may, chat-only (`--client`) is
   answered 403 and the app shows computer access as off.
 - Phone control works in shared and per-bot Local VM modes. In shared mode
   the take holds the one shared desktop, so every bot working on it pauses

@@ -75,7 +75,7 @@ describe("the sandbox a published site runs in", () => {
   it("never frames the app's own origin or anything that is not a plain web address", async () => {
     const own = window.location.origin;
     for (const url of [`${own}/`, `${own}/api/bots`, "javascript:alert(document.cookie)", "data:text/html,<script>parent.ogb</script>", "file:///etc/passwd", "blob:https://x.test/1",
-      "about:srcdoc", "openmausbot://bot/pepper", "https://user:pw@bright-bakery.netlify.app/", "not a url", ""]) {
+      "about:srcdoc", "edubot://bot/pepper", "https://user:pw@bright-bakery.netlify.app/", "not a url", ""]) {
       expect(showable(url, own), url).toBe(false);
       await frame({ url });
       expect(host.querySelector("iframe"), url).toBeNull();

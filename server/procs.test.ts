@@ -57,7 +57,7 @@ describe("spawn ENOENT", () => {
 
   it("names a missing working folder instead of blaming the install (MOCA-309)", () => {
     const missing = join(mkdtempSync(join(tmpdir(), "omb-procs-")), "deleted-project");
-    expect(describeSpawnFailure(enoent(), "/home/u/.openmausbot/tools/npm/bin/codex", missing)).toEqual({
+    expect(describeSpawnFailure(enoent(), "/home/u/.edubot/tools/npm/bin/codex", missing)).toEqual({
       message: `This chat's working folder no longer exists: ${missing}. Choose another folder in the bot's settings, or create it again.`,
       setup: false,
     });

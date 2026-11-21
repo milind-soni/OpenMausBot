@@ -234,7 +234,7 @@ describe("on a Cloud someone else once used", () => {
       { key: "G2", match: ["G2-GO"], timeoutMs: 120_000, steps: [{ server: "ogb", tool: "ask_user", arguments: { question: "Owner's question?", choices: ["A", "B"] }, capture: { answer: "([\\s\\S]+)" } }], reply: "G2: {{answer}}" },
       { key: "G3", match: ["G3-GO"], reply: "G3 done" });
 
-    markLeftBehind(join(fx.root, "cloud", ".openmausbot"), { threadIds: [theirs] });
+    markLeftBehind(join(fx.root, "cloud", ".edubot"), { threadIds: [theirs] });
     await fx.relaunch({ cloud: {} });
     await h.say(zed.id, theirs, "G1-GO");
     await h.say(zed.id, owners, "G2-GO");

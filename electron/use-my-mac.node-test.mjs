@@ -7,6 +7,7 @@ import { Duplex } from "node:stream";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 
+import { DESKTOP_ENTRY_NAME } from "./app-identity.mjs";
 import { createCloudPowerGate } from "./cloud-power.mjs";
 import { createComputerSharing, saidNo } from "./computer-sharing.mjs";
 import { createLendingTarget } from "./lending-target.mjs";
@@ -253,7 +254,7 @@ test("lending on opens the app at login, out of sight; off removes only the logi
   const config = path.join(dir, "config");
   const linux = createOpenAtLogin({ app: fakeApp(), file: path.join(dir, "linux.json"), platform: "linux", home: dir, env: { XDG_CONFIG_HOME: config, APPIMAGE: "/home/me/Apps/Open Maus$Bot.AppImage" } });
   linux.follow(true);
-  const entry = path.join(config, "autostart", "openmausbot.desktop");
+  const entry = path.join(config, "autostart", DESKTOP_ENTRY_NAME);
   assert.equal(await readFile(entry, "utf8"), autostartEntry("/home/me/Apps/Open Maus$Bot.AppImage"));
   assert.match(await readFile(entry, "utf8"), /^Exec="\/home\/me\/Apps\/Open Maus\\\$Bot\.AppImage" --omb-hidden$/m);
   linux.follow(false);

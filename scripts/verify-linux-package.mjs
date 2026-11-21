@@ -19,6 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { LICENSE_FILES } from "./cua-linux-release.mjs";
+import { APP_ID, BROWSER_APPARMOR_PROFILE, DESKTOP_ENTRY_NAME, LINUX_EXECUTABLE_NAME, LINUX_INSTALL_DIR, PRODUCT_NAME } from "../electron/app-identity.mjs";
 import {
   CLOUDFLARED_ASSETS,
   CLOUDFLARED_VERSION,
@@ -75,8 +76,8 @@ function requireUpdaterTarget(resources, label) {
   const updateFile = path.join(resources, "app-update.yml");
   requireFile(updateFile);
   const update = readFileSync(updateFile, "utf8");
-  if (!/^owner: milind-soni$/m.test(update) || !/^repo: OpenMausBot$/m.test(update)) {
-    fail(`${label} app-update.yml does not point at milind-soni/OpenMausBot`);
+  if (!/^owner: EduardoMoraga$/m.test(update) || !/^repo: edu-bot$/m.test(update)) {
+    fail(`${label} app-update.yml does not point at EduardoMoraga/edu-bot`);
   }
 }
 
@@ -402,7 +403,7 @@ const appImage = exactlyOne(".AppImage");
 const deb = exactlyOne(".deb");
 const rpm = exactlyOne(".rpm");
 const unpacked = path.join(releaseDir, "linux-unpacked");
-const executable = path.join(unpacked, "openmausbot");
+const executable = path.join(unpacked, LINUX_EXECUTABLE_NAME);
 const resources = path.join(unpacked, "resources");
 
 requireExecutable(appImage);
@@ -426,9 +427,9 @@ const fields = execFileSync(
   { encoding: "utf8" },
 );
 for (const expected of [
-  "Package: openmausbot",
+  "Package: edu-bot",
   "Architecture: amd64",
-  "Maintainer: Milind Soni",
+  "Maintainer: Eduardo Moraga",
   "Section: utils",
   "Priority: optional",
 ]) {
@@ -437,7 +438,7 @@ for (const expected of [
 
 // The DEB and RPM install the same tree under /opt; check what each extracted.
 function verifySystemPackage(extracted, label, packageType) {
-  const appRoot = path.join(extracted, "opt", "OpenMausBot");
+  const appRoot = path.join(extracted, LINUX_INSTALL_DIR);
   requireDirectoryMode(appRoot, 0o755);
   const packageResources = path.join(appRoot, "resources");
   // Routes the in-app updater to the package-manager hand-off.
@@ -457,7 +458,7 @@ function verifySystemPackage(extracted, label, packageType) {
     "usr",
     "share",
     "applications",
-    "com.openmausbot.app.desktop",
+    DESKTOP_ENTRY_NAME,
   );
   const scalableIcon = path.join(
     extracted,
@@ -467,16 +468,16 @@ function verifySystemPackage(extracted, label, packageType) {
     "hicolor",
     "scalable",
     "apps",
-    "openmausbot.svg",
+    `${LINUX_EXECUTABLE_NAME}.svg`,
   );
   requireFile(desktopFile);
   requireFile(scalableIcon);
   const desktop = readFileSync(desktopFile, "utf8");
   for (const expected of [
-    "Name=OpenMausBot",
-    "Exec=/opt/OpenMausBot/openmausbot %U",
-    "Icon=openmausbot",
-    "StartupWMClass=com.openmausbot.app",
+    `Name=${PRODUCT_NAME}`,
+    `Exec=${LINUX_INSTALL_DIR}/${LINUX_EXECUTABLE_NAME} %U`,
+    `Icon=${LINUX_EXECUTABLE_NAME}`,
+    `StartupWMClass=${APP_ID}`,
     "Categories=Utility;",
   ]) {
     if (!desktop.includes(expected)) fail(`${label} desktop entry is missing ${JSON.stringify(expected)}`);
@@ -498,7 +499,7 @@ const rpmFields = execFileSync(
   { encoding: "utf8" },
 );
 for (const expected of [
-  "Name: openmausbot",
+  "Name: edu-bot",
   "Arch: x86_64",
   `Version: ${JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).version}`,
 ]) {
@@ -513,7 +514,7 @@ const rpmScripts = new Map(
 );
 for (const [scriptlet, line] of [
   ["postinstall", "repair_chromium_sandbox \"$APP_ROOT/chrome-sandbox\""],
-  ["postuninstall", "profile=$APPARMOR_DIR/openmausbot-browser"],
+  ["postuninstall", `profile=$APPARMOR_DIR/${BROWSER_APPARMOR_PROFILE}`],
 ]) {
   if (!rpmScripts.get(scriptlet)?.includes(line)) {
     fail(`RPM ${scriptlet} scriptlet does not run the Linux package hook`);

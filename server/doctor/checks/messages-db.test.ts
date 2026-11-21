@@ -174,7 +174,7 @@ describe("messages-db check", () => {
       const dbBytes = statSync(join(data, "messages.db")).size;
       const check = messagesDbCheck({ startCheckMaxBytes: dbBytes + 1024, largeWalBytes: 100_000, freeBytes: () => null, busyTimeoutMs: 0 });
       const finding = check.check(context(data, { mode: "start" }));
-      expect(finding).toMatchObject({ status: "problem", fixable: false, summary: expect.stringContaining("checked only by openmausbot doctor --data") });
+      expect(finding).toMatchObject({ status: "problem", fixable: false, summary: expect.stringContaining("checked only by edubot doctor --data") });
       expect(check.check(context(data, { mode: "command" }))).toMatchObject({ fixable: true, summary: expect.stringMatching(/^SQLite finds it sound; /) });
     } finally {
       writer.close();

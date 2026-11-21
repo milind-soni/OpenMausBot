@@ -14,7 +14,7 @@ process.env.CUA_DRIVER_RS_TELEMETRY_ENABLED = "0";
 const sdk = pathToFileURL(join(resources, "cua-sdk/cua-sdk.mjs")).href;
 const binary = join(resources, "cua-driver");
 const { EmbeddedCuaDriverHost } = await import(sdk);
-const host = new EmbeddedCuaDriverHost(binary, "com.openmausbot.app");
+const host = new EmbeddedCuaDriverHost(binary, "io.github.eduardomoraga.edubot");
 let proxy;
 
 try {
@@ -24,7 +24,7 @@ try {
       ...process.env,
       ...Object.fromEntries(connection.mcp.environment.map(({ name, value }) => [name, value])),
       CUA_DRIVER_EMBEDDED: "1",
-      CUA_DRIVER_HOST_BUNDLE_ID: "com.openmausbot.app",
+      CUA_DRIVER_HOST_BUNDLE_ID: "io.github.eduardomoraga.edubot",
       CUA_DRIVER_RS_TELEMETRY_ENABLED: "0",
     },
     stdio: ["pipe", "pipe", "pipe"],

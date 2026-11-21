@@ -155,7 +155,7 @@ sentinel reaches no answer, saved server or copied skill. The route test
 refuses a paired device, a service loopback and a hosted or Cloud server; the
 end-to-end test runs the real server from `launchVerificationServer` against a
 planted home, as the desktop app runs it (`OMB_TEST_DESKTOP_OWNER_TOKEN`), checks
-that a headless server (`openmausbot serve`) refuses the step, and checks that the starter bot and a bot made afterwards both
+that a headless server (`edubot serve`) refuses the step, and checks that the starter bot and a bot made afterwards both
 get the skills in their turn's index, task folder links and `/name`, that a
 Claude turn with "Also use my Claude Code skills" on sees a Claude Code skill
 once, and that a bot can switch one off for itself. The rows, working, failed

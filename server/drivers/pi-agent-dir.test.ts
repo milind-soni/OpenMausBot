@@ -19,7 +19,7 @@ describe("MausBot's own Pi agent folder", () => {
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "omb-pi-agent-dir-"));
     home = join(root, "home");
-    dataDir = join(home, ".openmausbot");
+    dataDir = join(home, ".edubot");
     person = join(home, ".pi", "agent");
     mkdirSync(join(person, "extensions"), { recursive: true });
     mkdirSync(join(person, "bin"), { recursive: true });

@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { verifyBrowserBundle } from "./prepare-browser.mjs";
 import { pinnedDuckdbVersion, pinnedOnePasswordVersion, pinnedResvgVersion, verifyDuckdbTree } from "./prepare-duckdb.mjs";
 import { LIPO_ARCH, isMachO, writeThinMachO } from "./mac-thin.mjs";
+import { PRODUCT_NAME } from "../electron/app-identity.mjs";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -120,7 +121,7 @@ async function thinMacPlatformTools(resources, arch) {
 export default async function afterPack(context) {
   const resources = context.packager?.getResourcesDir?.(context.appOutDir) ?? (
     context.electronPlatformName === "darwin"
-      ? path.join(context.appOutDir, "OpenMausBot.app", "Contents", "Resources")
+      ? path.join(context.appOutDir, `${PRODUCT_NAME}.app`, "Contents", "Resources")
       : path.join(context.appOutDir, "resources")
   );
   await validateCloudflared(resources, context.electronPlatformName, Boolean(context.packager));

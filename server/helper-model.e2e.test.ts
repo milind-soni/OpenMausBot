@@ -44,14 +44,14 @@ async function boot(extraConfig: Record<string, unknown>) {
   const port = workerPort(18800, 10_000);
   const base = `http://127.0.0.1:${port}`;
   const home = mkdtempSync(join(tmpdir(), "omb-helper-model-"));
-  mkdirSync(join(home, ".openmausbot"), { recursive: true });
+  mkdirSync(join(home, ".edubot"), { recursive: true });
   const routes = join(home, "one-shot-routes.json");
   writeFileSync(routes, JSON.stringify({
     [CAPTURE_MARKER]: JSON.stringify([{ text: "The person is vegetarian", kind: "preference", evidence: "I'm vegetarian", aboutUser: true, confidence: 0.9 }]),
     [SUMMARY_MARKER]: SUMMARY,
     [SKILL_REVIEW_MARKER]: JSON.stringify({ changes: [{ action: "create", skill_md: SKILL_MD, gist: "Five-bullet weekly report." }] }),
   }));
-  writeFileSync(join(home, ".openmausbot", "config.json"), JSON.stringify({
+  writeFileSync(join(home, ".edubot", "config.json"), JSON.stringify({
     instances: {
       claude: { driver: "claudeAgent", config: { cli: fake("fake-claude-cli.ts"), permissionMode: "bypassPermissions" } },
       codex: { driver: "codex", config: { cli: fake("fake-codex-app-server.ts") } },
@@ -116,12 +116,12 @@ async function boot(extraConfig: Record<string, unknown>) {
     }, `a turn of ${bot.id} to settle`);
   };
   const ledger = (botId: string): Row[] => {
-    const file = join(home, ".openmausbot", "usage", `${new Date().toISOString().slice(0, 7)}.jsonl`);
+    const file = join(home, ".edubot", "usage", `${new Date().toISOString().slice(0, 7)}.jsonl`);
     if (!existsSync(file)) return [];
     return readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Row).filter((row) => row.botId === botId);
   };
   const memory = async (botId: string) => ((await api("GET", `/api/bots/${botId}/memory/file?path=MEMORY.md`)).body?.text ?? "") as string;
-  return { api, waitFor, getBot, newBot, turn, ledger, memory, close, log: () => stdout, dataDir: join(home, ".openmausbot") };
+  return { api, waitFor, getBot, newBot, turn, ledger, memory, close, log: () => stdout, dataDir: join(home, ".edubot") };
 }
 
 posixOnly("the helper model, through the real server", () => {

@@ -15,7 +15,7 @@ export type PreviewStreamHostSetup =
   | { readonly need: "libraries" | "container"; readonly command: string };
 
 /** The server's LIBRARIES_COMMAND and SANDBOX_STEPS_URL: a close reason is too short to carry the link. */
-export const PREVIEW_STREAM_LIBRARIES_COMMAND = "sudo openmausbot browser install --with-deps";
+export const PREVIEW_STREAM_LIBRARIES_COMMAND = "sudo edubot browser install --with-deps";
 /** What a container's operator sets to run its browser without Chrome's own sandbox. */
 export const PREVIEW_STREAM_SANDBOX_OFF = "OMB_BROWSER_SANDBOX=0";
 export const PREVIEW_STREAM_SANDBOX_STEPS_URL =
@@ -547,7 +547,7 @@ export function createPreviewFramePainter(
 /** A malformed reason still stops the viewer, with the sandbox steps. */
 const decodeHostSetup = (reason: string): PreviewStreamHostSetup => {
   try {
-    // An older server's command for either need was `openmausbot browser setup`, which never existed.
+    // An older server's command for either need was `edubot browser setup`, which never existed.
     const need = (JSON.parse(reason) as { need?: unknown }).need;
     if (need === "libraries") return { need, command: PREVIEW_STREAM_LIBRARIES_COMMAND };
     if (need === "container") return { need, command: PREVIEW_STREAM_SANDBOX_OFF };

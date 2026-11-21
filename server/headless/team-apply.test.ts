@@ -323,7 +323,7 @@ describe("team export", () => {
         output: new Output({ out: () => undefined, err: () => undefined, readStdin: async () => "" }, {}), client: async () => client,
         signal: new AbortController().signal, defaultWaitMs: 1_000, botShell: false, saved: null, interactive: false, confirm: async () => false, openBrowser: async () => false } as VerbContext;
       await teamExportVerb(ctx);
-      if (extension === "yaml") expect(readFileSync(out, "utf8")).toMatch(/^# Written by openmausbot team export/);
+      if (extension === "yaml") expect(readFileSync(out, "utf8")).toMatch(/^# Written by edubot team export/);
       const back = loadTeamFile(out);
       expect(back.bots.map((bot) => [bot.name, bot.skills.map((s) => s.text.trim().split("\n").at(-1))])).toEqual([
         ["Dev A", ["first"]], ["Dev-A", ["second"]], ["Dev A 2", ["third"]],

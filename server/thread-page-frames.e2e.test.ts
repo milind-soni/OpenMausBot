@@ -64,7 +64,7 @@ describe("transcript pages on bot and room frames", () => {
 
   beforeAll(async () => {
     home = mkdtempSync(join(tmpdir(), "omb-thread-page-frames-"));
-    const data = join(home, ".openmausbot");
+    const data = join(home, ".edubot");
     mkdirSync(data, { recursive: true });
     // one deliberately unknown driver: no engine CLI runs, nothing answers
     writeFileSync(join(data, "config.json"), JSON.stringify({

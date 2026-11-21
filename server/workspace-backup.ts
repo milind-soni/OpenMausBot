@@ -19,6 +19,7 @@ import { ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, liveDataEngineP
 import { omittedAsTeamPrivate, routinesWithoutTeamPrivate, stripTeamPrivate, TEAM_PRIVATE_NOTE, teamPrivateAttachments, teamPrivateThreads, withoutTeamPrivate } from "./workspace-backup-team-private.ts";
 import { flushLaterSaves } from "./save-batch.ts";
 import type { WorkspaceBackupClientState, WorkspaceBackupPrivateMetadata, WorkspaceBackupSummary, WorkspaceLeftBehind } from "../shared/workspace-backup.ts";
+import { SERVER_CHILD_DIR_NAME } from "../electron/app-identity.mjs";
 
 export type { WorkspaceBackupSummary, WorkspaceBackupPrivateMetadata } from "../shared/workspace-backup.ts";
 export const MAX_WORKSPACE_BACKUP_BYTES = 10 * 1024 ** 3;
@@ -32,7 +33,7 @@ const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}
 const WAITS_FILE = "waits.json";
 const EXCLUDED = new Set([
   ".backups", "tools", "browser", "agent-browser-profiles", "cache", ".cache", "tmp", ".tmp", "dist-native", "tunnel-runtime", "evidence",
-  ".openmausbot-server-child", "environment-id", "sessions.json", "tunnel-account.json",
+  SERVER_CHILD_DIR_NAME, "environment-id", "sessions.json", "tunnel-account.json",
   "team-computers.json",
   // Slack messages a Cloud took from the Admin (team-slack.ts): this machine's own, of no use anywhere else.
   "team-slack-messages.json",

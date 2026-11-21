@@ -22,7 +22,7 @@ services:
       - ${PODMAN_SOCKET:?Run setup.sh first}:/run/omb-podman.sock
     environment:
       HOME: ${OMB_DATA_ROOT}
-      OMB_DATA_DIR: ${OMB_DATA_ROOT}/.openmausbot
+      OMB_DATA_DIR: ${OMB_DATA_ROOT}/.edubot
       OMB_STATIC_DIR: /app/dist
       CONTAINER_HOST: unix:///run/omb-podman.sock
       OMB_PORT: ${OMB_PORT:-8799}

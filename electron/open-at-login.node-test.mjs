@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { DESKTOP_ENTRY_NAME } from "./app-identity.mjs";
 import { autostartEntry, createOpenAtLogin, installOpenAtLogin } from "./open-at-login.mjs";
 
 /** Electron's login item API on macOS and Windows: one item per name, as Windows keeps one Run entry per name. */
@@ -109,11 +110,11 @@ test("Windows: turning it off removes every entry that starts the app, and lendi
 test("Linux: the person's autostart entry has no hidden flag and no lending mark, and lending never removes it", async t => {
   const dir = await temp(t);
   const config = path.join(dir, "config");
-  const entry = path.join(config, "autostart", "openmausbot.desktop");
+  const entry = path.join(config, "autostart", DESKTOP_ENTRY_NAME);
   const login = createOpenAtLogin({ app: fakeApp(), file: path.join(dir, "linux.json"), platform: "linux", home: dir, env: { XDG_CONFIG_HOME: config, APPIMAGE: "/home/me/OpenMausBot.AppImage" } });
   login.choose(true);
   assert.equal(await readFile(entry, "utf8"), autostartEntry("/home/me/OpenMausBot.AppImage", { lending: false }));
-  assert.doesNotMatch(await readFile(entry, "utf8"), /--omb-hidden|X-OpenMausBot-Lending/);
+  assert.doesNotMatch(await readFile(entry, "utf8"), /--omb-hidden|X-EduBot-Lending/);
   assert.equal(login.chosen(), true);
   login.follow(false);
   assert.equal(existsSync(entry), true, "lending stopping leaves it");

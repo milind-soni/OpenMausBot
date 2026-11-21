@@ -34,23 +34,23 @@ describe("programs a boxed bot could have written", () => {
   });
 
   it("while the box is on: nothing under HOME but the data folder, and no relative folder", () => {
-    distrustHomePrograms("/data", ["/data/.openmausbot"], ["/data/.openmausbot/workspaces", "/srv/omb/task-workspaces"]);
-    expect(serverMayRunFrom("/data/.openmausbot/workspaces/b1/tool")).toBe(false);
+    distrustHomePrograms("/data", ["/data/.edubot"], ["/data/.edubot/workspaces", "/srv/omb/task-workspaces"]);
+    expect(serverMayRunFrom("/data/.edubot/workspaces/b1/tool")).toBe(false);
     expect(serverMayRunFrom("/srv/omb/task-workspaces/b1/t1/tool")).toBe(false);
     expect(serverMayRunFrom("/data/.local/bin")).toBe(false);
     expect(serverMayRunFrom("/data/.local/bin/pi")).toBe(false);
     expect(serverMayRunFrom("/data")).toBe(false);
-    expect(serverMayRunFrom("/data/.openmausbot/tools/npm/bin")).toBe(true);
+    expect(serverMayRunFrom("/data/.edubot/tools/npm/bin")).toBe(true);
     expect(serverMayRunFrom("/database/bin")).toBe(true);
     expect(serverMayRunFrom("/usr/local/bin")).toBe(true);
     expect(serverMayRunFrom("bin")).toBe(false);
-    expect(serverPath(["/data/.openmausbot/tools/npm/bin", "/usr/local/bin", "/data/.local/bin", "", ".", "/usr/bin", "/data/bin"].join(delimiter)))
-      .toBe(["/data/.openmausbot/tools/npm/bin", "/usr/local/bin", "/usr/bin"].join(delimiter));
+    expect(serverPath(["/data/.edubot/tools/npm/bin", "/usr/local/bin", "/data/.local/bin", "", ".", "/usr/bin", "/data/bin"].join(delimiter)))
+      .toBe(["/data/.edubot/tools/npm/bin", "/usr/local/bin", "/usr/bin"].join(delimiter));
   });
 
   it.skipIf(!posix)("the server's PATH keeps the app's own engines and the system's, never HOME's program folders", () => {
     const home = homedir();
-    const dataDir = join(home, ".openmausbot");
+    const dataDir = join(home, ".edubot");
     const marker = join(home, "ran");
     plant(join(home, ".local", "bin"), "omb-planted-engine", marker);
     plant(join(home, ".opencode", "bin"), "omb-planted-engine-2", marker);
@@ -72,7 +72,7 @@ describe("programs a boxed bot could have written", () => {
 
   it.skipIf(!posix)("an unboxed spawn neither finds a program in HOME on the PATH it is given nor starts one by its path", async () => {
     const home = homedir();
-    const dataDir = join(home, ".openmausbot");
+    const dataDir = join(home, ".edubot");
     const marker = join(home, "ran-spawn");
     rmSync(marker, { force: true });
     const planted = plant(join(home, ".local", "bin"), "omb-planted-cli", marker);
@@ -107,9 +107,9 @@ describe("programs a boxed bot could have written", () => {
     mkdirSync(join(home, ".local", "bin"), { recursive: true });
     const runner = new BoxRunner({
       bwrap: "/usr/bin/bwrap", bridge: { socat: null, bridgeScript: "/x/bridge.js", node: "/usr/bin/node" },
-      setup: { dataDir: join(home, ".openmausbot"), home, codeRoots: [], engineRoots: [], bridges: [] }, denyEnv: new Set(),
+      setup: { dataDir: join(home, ".edubot"), home, codeRoots: [], engineRoots: [], bridges: [] }, denyEnv: new Set(),
     });
-    distrustHomePrograms(home, [join(home, ".openmausbot")]);
+    distrustHomePrograms(home, [join(home, ".edubot")]);
     const wrapped = runner.wrap({ command: "/usr/bin/true", args: [], env: { PATH: "/usr/bin:/bin", HOME: home }, net: "shared" });
     const path = wrapped.env.PATH!.split(delimiter);
     expect(path.slice(0, 2)).toEqual(["/usr/bin", "/bin"]);

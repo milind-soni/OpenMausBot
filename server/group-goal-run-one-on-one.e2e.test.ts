@@ -58,7 +58,7 @@ beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-one-on-one-goal-"));
   slowGate = join(home, "slow-finish");
   patientGate = join(home, "patient-finish");
-  const data = join(home, ".openmausbot");
+  const data = join(home, ".edubot");
   mkdirSync(data, { recursive: true });
   const fixture = (name: string, environment: Record<string, string>) => ({
     driver: "claudeAgent",

@@ -25,7 +25,7 @@ export function settingsFileCheck(): DoctorCheck {
       try { copies = readdirSync(ctx.dataDir).filter((name) => /^config\.json\.bak\.\d{8}-\d{6}(?:-\d+)?$/.test(name)).length; } catch {}
       return { status: "problem", summary: "config.json cannot be understood, so the server runs on default settings, without its keys.",
         instruction: copies
-          ? `Stop the server, then: openmausbot config backups, and openmausbot config restore latest (${copies} dated cop${copies === 1 ? "y" : "ies"} kept). The file it replaces is kept too.`
+          ? `Stop the server, then: edubot config backups, and edubot config restore latest (${copies} dated cop${copies === 1 ? "y" : "ies"} kept). The file it replaces is kept too.`
           : "Stop the server and put back config.json from a backup, or the data folder from the copy taken before the last update (./update.sh --rollback)." };
     },
   };

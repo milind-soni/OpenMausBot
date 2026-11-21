@@ -16,7 +16,7 @@ describe("a published page's link", () => {
     expect(isPublishedPageUrl(PAGE)).toBe(true);
     expect(isPublishedPageUrl(`${PAGE}charts/index.html?region=EU#top`)).toBe(true);
     for (const other of [
-      "openmausbot://thread/t1?bot=pepper", "openmausbot://bot/pepper", "http://abcdefghijklmnopqrstuvwxyz.mausbot.page/",
+      "edubot://thread/t1?bot=pepper", "edubot://bot/pepper", "http://abcdefghijklmnopqrstuvwxyz.mausbot.page/",
       "https://mausbot.page/", "https://www.mausbot.page/", "https://upload.mausbot.page/", "https://a.b.abcdefghijklmnopqrstuvwxyz.mausbot.page/",
       "https://abcdefghijklmnopqrstuvwxyz.mausbot.page.evil.test/", "https://abcdefghijklmnopqrstuvwxyz.mausbot.pages/",
       "https://user:pw@abcdefghijklmnopqrstuvwxyz.mausbot.page/", "https://abcdefghijklmnopqrstuvwxyz.mausbot.page:8443/",
@@ -46,7 +46,7 @@ describe("where a published page opens", () => {
   });
 
   it("never sends any other link to the panel", () => {
-    for (const link of ["https://example.com/", "openmausbot://thread/t1?bot=pepper", "https://mausbot.page/"]) expect(pagePanelBot(link, facts())).toBeNull();
+    for (const link of ["https://example.com/", "edubot://thread/t1?bot=pepper", "https://mausbot.page/"]) expect(pagePanelBot(link, facts())).toBeNull();
   });
 });
 

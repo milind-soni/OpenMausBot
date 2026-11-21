@@ -15,7 +15,7 @@ const available = detection.box === "bwrap" && detection.tools !== null;
 const root = mkdtempSync(join(tmpdir(), "omb-team-box-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-const home = join(root, "home"), dataDir = join(home, ".openmausbot");
+const home = join(root, "home"), dataDir = join(home, ".edubot");
 const team = join(dataDir, "workspaces", "bot-a"), miraLayer = join(dataDir, "workspaces", "bot-a--member-p_mira");
 const conversation = (threadId: string) => join(dataDir, "task-workspaces", "bot-a", threadId);
 const put = (path: string, text: string) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, text); };

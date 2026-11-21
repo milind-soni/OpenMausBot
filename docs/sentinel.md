@@ -10,9 +10,9 @@ crashes. The code lives in [`server/sentinel/`](../server/sentinel/). Every
 input is explicit, so the same scan could later run inside the server.
 
 ```sh
-openmausbot sentinel [--data-dir DIR] [--out DIR] [--once] [--json]
+edubot sentinel [--data-dir DIR] [--out DIR] [--once] [--json]
                      [--queue-wait SECONDS] [--cost USD]
-openmausbot sentinel --check-install [--json]
+edubot sentinel --check-install [--json]
 ```
 
 Each run does one scan, prints a short summary (or JSON with `--json`) and
@@ -86,7 +86,7 @@ Issues hold references and a normalized title, never raw content. A line in
   `$XDG_STATE_HOME/openmausbot-sentinel/` (by default
   `~/.local/state/openmausbot-sentinel/`), on Windows
   `%LOCALAPPDATA%\openmausbot-sentinel\`. You can choose another folder with
-  `--out`. A data dir other than `~/.openmausbot` gets its own `data-<hash>`
+  `--out`. A data dir other than `~/.edubot` gets its own `data-<hash>`
   subfolder. The folder is `0700` and its files are `0600`. Sentinel refuses
   an `--out` inside a git repository or inside the data dir, so it never
   writes into the folder it reads, and backups of the data dir never carry its
@@ -129,7 +129,7 @@ itself.
 ## Installing it
 
 ```sh
-openmausbot service install --sentinel [--data-dir DIR]
+edubot service install --sentinel [--data-dir DIR]
 ```
 
 This writes the schedule into Sentinel's own folder (above) and prints the
@@ -144,7 +144,7 @@ explicitly, so the paths it prints are the ones the scan uses.
 - **Windows:** prints a `schtasks` command that runs the same scan every two
   minutes.
 
-`openmausbot service uninstall --sentinel` prints the commands that remove it.
+`edubot service uninstall --sentinel` prints the commands that remove it.
 
 ### Which CLI the schedule runs
 
@@ -170,11 +170,11 @@ after an nvm upgrade or a fresh checkout.
 ### After an update
 
 ```sh
-openmausbot sentinel --check-install
+edubot sentinel --check-install
 ```
 
 This reads the installed plist or unit and checks that its Node and script
-paths still exist. It prints `stale install: … rerun openmausbot service
+paths still exist. It prints `stale install: … rerun edubot service
 install --sentinel` if either path is missing. This matters because launchd
 and systemd fail quietly when a path is gone: nothing reaches Sentinel's own
 log, because Sentinel never starts. After moving the app, upgrading Node, or

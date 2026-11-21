@@ -128,7 +128,7 @@ beforeAll(async () => {
   brokerUrl = `http://127.0.0.1:${(broker.address() as AddressInfo).port}`;
 
   home = mkdtempSync(join(tmpdir(), "omb-cloud-connected-apps-"));
-  dataDir = join(home, ".openmausbot");
+  dataDir = join(home, ".edubot");
   mkdirSync(dataDir, { recursive: true });
   const cli = join(home, "fixture-claude.mjs");
   writeFileSync(cli, `#!/usr/bin/env node

@@ -343,7 +343,7 @@ describe("a Team Cloud", () => {
     writeFileSync(notes, JSON.stringify({ facts: [{ text: "fact-from-a-chat", kind: "decision" }] }));
     expect((await team.as(ada, "PUT", "/api/config", { memory: { captureQuietMs: 1_000 } })).status).toBe(200);
     const saved = (botId: string) => {
-      const root = join(team.home, ".openmausbot", "workspaces");
+      const root = join(team.home, ".edubot", "workspaces");
       return readdirSync(root).filter((name) => name.startsWith(botId)).flatMap((name) => {
         const logs = join(root, name, "memory", "log");
         return [join(root, name, "MEMORY.md"), ...(existsSync(logs) ? readdirSync(logs).map((file) => join(logs, file)) : [])];
@@ -460,7 +460,7 @@ describe("a Team Cloud", () => {
     const scout = await newBot("Earlier bot");
     const { thread } = await webhookTurn(scout.id, "Earlier hook", "marker-earlier");
     await finish(scout.id);
-    const dataDir = join(team.home, ".openmausbot");
+    const dataDir = join(team.home, ".edubot");
     const { bots } = readRegistry(dataDir);
     const marked = bots.flatMap((bot: any) => bot.tasks ?? []).filter((task: any) => task.outside === true);
     expect(marked.length).toBeGreaterThan(0);
@@ -570,7 +570,7 @@ describe("a personal Cloud someone else has used", () => {
     writeFileSync(release, "");
     await sleep(1_500);
     for (const file of [release, dump]) rmSync(file, { force: true });
-    markLeftBehind(join(fx.root, "cloud", ".openmausbot"), { threadIds: [theirs] });
+    markLeftBehind(join(fx.root, "cloud", ".edubot"), { threadIds: [theirs] });
     await fx.relaunch({ kill: false, cloud: {} });
     expect((await cloud("POST", `/api/bots/${chief.id}/messages`, { text: "their-line", threadId: theirs })).status).toBe(202);
     expect(confined(await turnWith("their-line"))).toBe(true);

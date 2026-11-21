@@ -306,7 +306,7 @@ test("a foreign-host owner fails closed and identifies the preserved lease recor
 
 test("a foreign-host delegated child fails closed and identifies its preserved lease record", () => {
   const { dataDir } = temporaryDirectory();
-  const childLeasePath = path.join(dataDir, ".openmausbot-server-child", LEASE_NAME);
+  const childLeasePath = path.join(dataDir, ".edubot-server-child", LEASE_NAME);
   const child = {
     version: 1,
     pid: process.pid,
@@ -364,18 +364,18 @@ test("a foreign-host reaper fails closed and identifies its preserved recovery r
   assert.deepEqual(JSON.parse(readFileSync(reaperPath, "utf8")), reaper);
 });
 
-test("legacy data is moved before lease creation", () => {
+test("an older app's data folder beside a new one is left untouched", () => {
   const root = mkdtempSync(path.join(tmpdir(), "omb-electron-legacy-"));
   roots.push(root);
-  const legacyDataDir = path.join(root, ".opengrokbot");
-  const dataDir = path.join(root, ".openmausbot");
+  const legacyDataDir = path.join(root, ".openmausbot");
+  const dataDir = path.join(root, ".edubot");
   mkdirSync(legacyDataDir);
   writeFileSync(path.join(legacyDataDir, "keep-me.txt"), "kept");
 
   const lease = acquireDataDirLease(dataDir, { legacyDataDir });
   try {
-    assert.equal(readFileSync(path.join(dataDir, "keep-me.txt"), "utf8"), "kept");
-    assert.throws(() => readFileSync(path.join(legacyDataDir, "keep-me.txt")), /ENOENT/);
+    assert.equal(readFileSync(path.join(legacyDataDir, "keep-me.txt"), "utf8"), "kept");
+    assert.throws(() => readFileSync(path.join(dataDir, "keep-me.txt")), /ENOENT/);
   } finally {
     lease.release();
   }
@@ -523,7 +523,7 @@ test("a delegated child from an earlier boot cannot block a new parent", (t) => 
   const { dataDir } = temporaryDirectory();
   const current = recordWrittenByThisProcess(dataDir);
   if (current.boot === null) return t.skip("no boot identity on this platform");
-  const childPath = path.join(dataDir, ".openmausbot-server-child", LEASE_NAME);
+  const childPath = path.join(dataDir, ".edubot-server-child", LEASE_NAME);
   mkdirSync(path.dirname(childPath));
   writeFileSync(childPath, JSON.stringify({ ...current, boot: randomUUID() }));
 
@@ -591,7 +591,7 @@ test("iCloud Drive and File Provider folders count as synced, whatever their cas
   assert.equal(inMacSyncedFolder("/Users/someone/library/cloudstorage/Dropbox/omb", home), true);
   assert.equal(inMacSyncedFolder("/Users/someone/Library/CloudStorage", home), true);
   assert.equal(inMacSyncedFolder("/Users/someone/Library/CloudStorageOld/omb", home), false);
-  assert.equal(inMacSyncedFolder("/Users/someone/.openmausbot", home), false);
+  assert.equal(inMacSyncedFolder("/Users/someone/.edubot", home), false);
   assert.equal(inMacSyncedFolder("/Users/other/Library/CloudStorage/Dropbox", home), false);
 });
 
@@ -666,7 +666,7 @@ test("a delegated child this computer left under its old hostname cannot block a
   const { dataDir } = temporaryDirectory();
   const current = recordWrittenByThisProcess(dataDir);
   if (current.boot === null) return t.skip("no boot identity on this platform");
-  const childPath = path.join(dataDir, ".openmausbot-server-child", LEASE_NAME);
+  const childPath = path.join(dataDir, ".edubot-server-child", LEASE_NAME);
   mkdirSync(path.dirname(childPath));
   writeFileSync(childPath, JSON.stringify({ ...current, host: renamedHost(current), pid: await exitedPid(), token: randomUUID() }));
 
@@ -691,7 +691,7 @@ test("a lease under another name from another boot still fails closed, and says 
   assert.deepEqual(JSON.parse(readFileSync(leasePath, "utf8")), planted);
   rmSync(leasePath);
 
-  const childPath = path.join(dataDir, ".openmausbot-server-child", LEASE_NAME);
+  const childPath = path.join(dataDir, ".edubot-server-child", LEASE_NAME);
   mkdirSync(path.dirname(childPath));
   writeFileSync(childPath, JSON.stringify({ ...current, ...foreign }));
   assert.throws(() => acquireDataDirLease(dataDir), (error) => {
@@ -801,7 +801,7 @@ test("on request, the lease, delegated child and recovery record another machine
   const current = recordWrittenByThisProcess(dataDir);
   const foreign = { ...otherMachine(current), pid: await exitedPid(), token: randomUUID() };
   const leasePath = plantOwner(dataDir, foreign);
-  const childPath = path.join(dataDir, ".openmausbot-server-child", LEASE_NAME);
+  const childPath = path.join(dataDir, ".edubot-server-child", LEASE_NAME);
   mkdirSync(path.dirname(childPath));
   writeFileSync(childPath, JSON.stringify({ ...current, ...foreign, token: randomUUID() }));
   const reaperPath = path.join(dataDir, `${LEASE_NAME}.reap-${foreign.token}`);

@@ -15,7 +15,7 @@ const CANARY = "OPENMAUSBOT-COMMAND-LINE-CANARY";
 
 describe.skipIf(detection.box !== "bwrap")(`paths on a boxed command line (${detection.box === "bwrap" ? "bubblewrap works here" : `skipped: ${detection.reason}`})`, () => {
   const root = mkdtempSync(join(tmpdir(), "omb-argv-real-"));
-  const home = join(root, "home"), dataDir = join(home, ".openmausbot"), cwd = join(dataDir, "task-workspaces", "bot-1", "thread-1");
+  const home = join(root, "home"), dataDir = join(home, ".edubot"), cwd = join(dataDir, "task-workspaces", "bot-1", "thread-1");
   const settings = join(dataDir, "config.json"), handed = join(dataDir, "hook-tokens", "t", "token"), outside = join(root, "turn", "mcp.json");
   const box = new BotBox();
   beforeAll(async () => {

@@ -15,7 +15,7 @@ already have:
   — your existing logins and subscriptions, no new accounts, no proxy in the middle. Point any engine at a
   custom CLI binary (a versioned build or wrapper) in **Settings → Engines**.
 - **Local first.** One small harness server on `127.0.0.1` owns every agent process. Transcripts, keys, and
-  events live in `~/.openmausbot`, not a cloud.
+  events live in `~/.edubot`, not a cloud.
 - **Agents with hands.** Each bot can use a cloud Linux desktop, an isolated Local VM, or—where the platform
   safety boundary is currently certified—your own computer, plus 500+ apps through Composio. Host control is
   available on macOS and Ubuntu Xorg after explicit opt-in. Ubuntu Wayland host control remains disabled while
@@ -225,14 +225,14 @@ See [MCP server setup and tool reference](docs/mcp-server.md).
 
 ### Run it from scripts and CI
 
-The `openmausbot` command drives a running workspace without a screen: set a
+The `edubot` command drives a running workspace without a screen: set a
 team up from a file, give a bot one job, wait until it and every teammate it
 asked are done, and export what they made. One JSON document with `--json`,
 and exit codes a script can branch on.
 
 ```sh
-openmausbot team apply team.yaml
-openmausbot run "Room Lead" "Rehearse the launch of https://example.com" --export ./out
+edubot team apply team.yaml
+edubot run "Room Lead" "Rehearse the launch of https://example.com" --export ./out
 ```
 
 See [Run Edu Bot from scripts and CI](docs/headless-cli.md).
@@ -376,11 +376,11 @@ and when it is contacted.
 With Node 24 or newer, install once and run:
 
 ```sh
-npm install -g openmausbot
-openmausbot
+npm install -g edubot
+edubot
 ```
 
-Or use `npx openmausbot` without a global install. First launch guides you with
+Or use `npx edubot` without a global install. First launch guides you with
 arrow-key choices: choose AI access, sign in or paste a hidden API key, choose
 a model, and optionally connect a phone. Next time, the same command reuses your
 saved setup and opens Edu Bot on this computer. Keep the terminal open; Ctrl-C stops
@@ -399,10 +399,10 @@ The web UI can also be installed from Safari or Chrome as a standalone phone
 app. See [Install the phone web app](docs/phone-web-app.md) for Home Screen
 installation and pairing.
 
-Run `openmausbot setup` to reconfigure without resetting bots or conversations;
+Run `edubot setup` to reconfigure without resetting bots or conversations;
 the saved model default applies only to new bots. Native setup confirms provider
 sign-in; API setup asks before a potentially billable test message. API keys
-from `openmausbot setup` and the server are saved as plaintext, not encrypted,
+from `edubot setup` and the server are saved as plaintext, not encrypted,
 in private `config.json` (`0600` on Unix). The packaged desktop app keeps your
 AI provider and service keys encrypted through the operating system instead;
 its `config.json` still holds OpenCode provider keys, keys given to one engine,
@@ -415,7 +415,7 @@ For a server on a VPS or an always-on computer, run `npx openmausbot serve`
 with one way in: `--public-url` behind your own cloudflared, Caddy or nginx,
 `--domain` for a certificate on your own domain, `--tailscale` for your
 tailnet, `--lan` for this network only, or `--tunnel` (after
-`npx openmausbot account login`) for a free MausBot web address. It prints one
+`npx edubot account login`) for a free MausBot web address. It prints one
 pairing link; paste it into the desktop app under **＋ → Connect to a
 server**. The short path for each install method (npx, Docker, a service) is
 at the top of [docs/self-hosting.md](docs/self-hosting.md); a server from

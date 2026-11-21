@@ -17,7 +17,7 @@
 #   docker buildx build --platform linux/arm64 -t openmausbot .   # Raspberry Pi 4/5, ARM servers
 #
 # HOME is the /data volume, so engine CLI logins (~/.claude, ~/.codex, ~/.grok,
-# ...) and OpenMausBot's own state (~/.openmausbot) persist across container
+# ...) and Edu Bot's own state (~/.edubot) persist across container
 # restarts.
 #
 # The bots' browsers, engines and shells leave exited processes for an init to
@@ -128,7 +128,7 @@ RUN echo "agent-browser ${AGENT_BROWSER_VERSION}, Chrome for Testing ${CHROME_CA
 #  OMB_DUCKDB_DIR: the DuckDB binding tree the server requires (no node_modules here).
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/opt/openmausbot-browser/chrome \
     OMB_DUCKDB_DIR=/app/duckdb \
-    OMB_DATA_DIR=/data/.openmausbot \
+    OMB_DATA_DIR=/data/.edubot \
     OMB_STATIC_DIR=/app/dist \
     OMB_PORT=8799 \
     OMB_WEBHOOK_PORT=8800 \
@@ -258,10 +258,12 @@ COPY --from=build --chown=maus:maus /src/dist-server ./dist-server
 COPY --from=build --chown=maus:maus /src/dist ./dist
 COPY --from=build --chown=maus:maus /src/skills ./skills
 COPY --from=build --chown=maus:maus /src/LICENSE /src/NOTICE ./
-# `docker compose exec omb openmausbot pair`: the commands the CLI prints start the same way.
-RUN printf '#!/bin/sh\nexec node /app/dist-server/openmausbot.js "$@"\n' > /usr/local/bin/openmausbot && chmod 0755 /usr/local/bin/openmausbot
+# `docker compose exec omb edubot pair`: the commands the CLI prints start the same way. `openmausbot` stays as a
+# link: the self-hosting scripts run that name in upstream's image and in this one alike.
+RUN printf '#!/bin/sh\nexec node /app/dist-server/openmausbot.js "$@"\n' > /usr/local/bin/edubot && chmod 0755 /usr/local/bin/edubot \
+    && ln -s edubot /usr/local/bin/openmausbot
 ENV HOME=/data \
-    OMB_CLI_PREFIX="docker compose exec omb openmausbot"
+    OMB_CLI_PREFIX="docker compose exec omb edubot"
 VOLUME ["/data"]
 USER maus
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

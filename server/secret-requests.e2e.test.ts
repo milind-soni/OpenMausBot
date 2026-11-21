@@ -89,7 +89,7 @@ async function proxyFor(start: () => Promise<void>) {
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-secret-requests-"));
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".edubot");
   mkdirSync(dataDir, { recursive: true });
   const cli = join(home, "fixture-claude.mjs");
   writeFileSync(cli, `#!/usr/bin/env node
@@ -167,7 +167,7 @@ it("keeps a file secret and a ref secret out of every record, and the bot uses e
   expect(await save(fileCard.id, "")).toMatchObject({ status: 400 });
   expect(await save(fileCard.id, FILE_CANARY)).toMatchObject({ status: 200, body: { provided: true } });
   expect(await save(fileCard.id, FILE_CANARY)).toMatchObject({ status: 409, body: { error: "this secret was already saved" } });
-  const cardFile = join(home, ".openmausbot", "workspaces", bot.id, ".openmausbot-secrets", bot.threadId, fileCard.id);
+  const cardFile = join(home, ".edubot", "workspaces", bot.id, ".edubot-secrets", bot.threadId, fileCard.id);
   expect(readFileSync(cardFile, "utf8")).toBe(FILE_CANARY);
   const fileText = (await tools.call("request_credential", { label: "Stripe secret key", reason: "To create test charges.", delivery: "file" })).text;
   expect((await cards()).at(-1).id, "the Vault answers with no card").toBe(fileCard.id);
@@ -192,7 +192,7 @@ it("keeps a file secret and a ref secret out of every record, and the bot uses e
 
   const added = await tools.call("mcp_server", { action: "add", name: "notion", url: "https://mcp.notion.test/mcp", headers: { Authorization: `Bearer ${ref}`, "Notion-Version": "2022-06-28" } });
   expect(added).toEqual({ isError: false, text: expect.stringMatching(/^Added MCP server notion and turned it on\. Test: /u) });
-  const config = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
+  const config = JSON.parse(readFileSync(join(home, ".edubot", "config.json"), "utf8"));
   expect(config.mcpServers.notion.headers).toEqual({ Authorization: expect.stringMatching(/^Bearer vault:[0-9a-f-]{36}$/u), "Notion-Version": "2022-06-28" });
   expect(JSON.stringify(config)).not.toContain(REF_CANARY);
   const reused = await tools.call("mcp_server", { action: "add", name: "notion2", url: "https://mcp.notion.test/mcp", headers: { Authorization: `Bearer ${ref}` } });

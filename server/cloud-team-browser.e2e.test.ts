@@ -192,7 +192,7 @@ it.skipIf(!REAL_BROWSER)("keeps one member's sign-in out of another member's cha
   expect(roomSees, "the group chat's turn saw Ada's private sign-in").not.toContain("omb_member=ada");
   expect(await browserTurn(ada, adaThread, "Are you still signed in?", readCookies), "Ada's own browser kept her sign-in").toContain("omb_member=ada");
   // Each browser has its own profile on disk, and the team's own is not one of them.
-  const kept = JSON.parse(readFileSync(join(team.home, ".openmausbot", "browser", "audiences.json"), "utf8")) as { suffixes: string[] };
+  const kept = JSON.parse(readFileSync(join(team.home, ".edubot", "browser", "audiences.json"), "utf8")) as { suffixes: string[] };
   expect(kept.suffixes).toEqual(expect.arrayContaining([audienceBrowserSuffix(`room:${roomId}`)]));
   expect(kept.suffixes.filter((suffix) => suffix.startsWith("--member-"))).toHaveLength(2);
   scriptToolCalls(null);

@@ -77,7 +77,7 @@ describe("a new Cloud's first hour", () => {
   beforeAll(async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     home = mkdtempSync(join(tmpdir(), "omb-first-hour-"));
-    dataDir = join(home, ".openmausbot");
+    dataDir = join(home, ".edubot");
     mkdirSync(dataDir, { recursive: true });
     broker = await startBrokerFake();
     const markers = join(home, "markers.json");

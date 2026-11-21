@@ -5,7 +5,7 @@ import { engineInstallRoots } from "../engine-roots.ts";
 import { BOX_MUTATIONS, CPU_LIST_FILES, argvPaths, bwrapArgs, planBox, taskWorkspaceIds, under, visibleInBox, type BoxAudience, type BoxMutation, type BoxRequest, type BoxSetup } from "./plan.ts";
 
 const home = "/data";
-const dataDir = "/data/.openmausbot";
+const dataDir = "/data/.edubot";
 const setup = (mutate?: BoxMutation[]): BoxSetup => ({
   dataDir, home, codeRoots: ["/app"], engineRoots: engineInstallRoots(dataDir), seccompFd: 3,
   bridges: [{ name: "egress", port: 3128, socket: `${dataDir}/box/egress.sock` }, { name: "harness", port: 8799, socket: `${dataDir}/box/harness.sock` }],
@@ -133,12 +133,12 @@ linuxBox("the box plan", () => {
   });
 
   it("a shared-network box (a browser) has no bridges and no network namespace", () => {
-    const plan = planBox(setup(), { command: "/opt/chrome", args: [], env: {}, net: "shared", rw: ["/data/.openmausbot/browser/profiles/p1"] });
+    const plan = planBox(setup(), { command: "/opt/chrome", args: [], env: {}, net: "shared", rw: ["/data/.edubot/browser/profiles/p1"] });
     expect(plan.net).toBe("shared");
     expect(bwrapArgs(plan).join(" ")).not.toContain("--unshare-net");
     expect(bwrapArgs(plan).join(" ")).not.toContain("/run/omb");
-    expect(visibleInBox(plan, "/data/.openmausbot/browser/profiles/p1/Default")).toBe("rw");
-    expect(visibleInBox(plan, "/data/.openmausbot/messages.db")).toBe("none");
+    expect(visibleInBox(plan, "/data/.edubot/browser/profiles/p1/Default")).toBe("rw");
+    expect(visibleInBox(plan, "/data/.edubot/messages.db")).toBe("none");
   });
 
   it("a relay socket goes in at /run/omb/relay.sock only for a box with its own network", () => {
@@ -227,7 +227,7 @@ linuxBox("the box plan", () => {
   });
 
   it("shows no path on the command line that is in the data folder or holds it, unless the caller named it", () => {
-    for (const { dataDir, home } of [{ dataDir: "/data/.openmausbot", home: "/data" }, { dataDir: "/srv/omb", home: "/home/maus" }]) {
+    for (const { dataDir, home } of [{ dataDir: "/data/.edubot", home: "/data" }, { dataDir: "/srv/omb", home: "/home/maus" }]) {
       const server = ["config.json", "sessions.json", "messages.db", "workspaces/other/MEMORY.md"].map((file) => join(dataDir, file));
       const ask = (args: string[], ro: string[] = []) => planBox({ ...setup(), dataDir, home }, { command: "/bin/sh", args, cwd: join(dataDir, "task-workspaces", "b", "t"), env: {}, botId: "b", ro });
       for (const args of [server, [dataDir], [`--model=${server[0]}`], [`@${server[0]}`], [join(dataDir, "..")], [join(dataDir, "workspaces", "..")], ["/srv", "/var"]]) {
@@ -252,7 +252,7 @@ linuxBox("the box plan", () => {
   });
 
   it("makes nothing of the data folder writable for a configured server's environment, but the bot's own folders", () => {
-    const dataDir = "/data/.openmausbot";
+    const dataDir = "/data/.edubot";
     const ask = (env: Record<string, string>, configured: boolean) => planBox({ ...setup(), dataDir, home: "/data" }, { command: "sh", args: [], cwd: join(dataDir, "task-workspaces", "b", "t"), env, botId: "b", configured });
     for (const value of [join(dataDir, "config.json"), join(dataDir, "box"), dataDir, join(dataDir, "workspaces", "other"), "/"]) {
       for (const name of ["XDG_CACHE_HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "TMPDIR"]) {

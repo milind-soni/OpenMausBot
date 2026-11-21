@@ -1,15 +1,16 @@
-// openmausbot://team/<team id>: the join page's Open in the MausBot app, after someone joined a team in their browser. An
+import { DEEP_LINK_PREFIX } from "./app-identity.mjs";
+// edubot://team/<team id>: the join page's Open in the MausBot app, after someone joined a team in their browser. An
 // action, not a credential: it names a team by its id only, and the team is opened only as the Admin's verified session lists
 // it for whoever is signed in here. Signed out, it starts this app's own browser sign-in (its device code never leaves main);
 // signed in as someone the team isn't listed for, it says so and offers to sign in with another address. Another app that
 // catches the link learns a team id and can do nothing with it.
-export const TEAM_LINK_PREFIX = "openmausbot://team/";
+export const TEAM_LINK_PREFIX = `${DEEP_LINK_PREFIX}team/`;
 /** The Admin's team ids. */
 const TEAM_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** A link opened and waiting on a sign-in finishes it within this long, or is dropped. */
 export const TEAM_JOIN_WAIT_MS = 30 * 60_000;
 
-/** The team a link names, or null for anything but exactly `openmausbot://team/<team id>`. */
+/** The team a link names, or null for anything but exactly `edubot://team/<team id>`. */
 export function teamIdFromLink(value) {
   if (typeof value !== "string" || !value.startsWith(TEAM_LINK_PREFIX)) return null;
   const id = value.slice(TEAM_LINK_PREFIX.length);

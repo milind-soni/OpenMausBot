@@ -286,7 +286,7 @@ function rememberLiveSpawn(child: ChildProcess, line: readonly string[]): void {
 }
 
 /** `bot`: an engine running bots' turns, whose own servers that bot's browser may open on a server host.
- * `openmausbot`: everything else (logins, probes, the browser engine itself). */
+ * `edubot`: everything else (logins, probes, the browser engine itself). */
 export type CliOwner = "bot" | "openmausbot";
 
 /** The bot box (server/bot-box): a `bot` spawn runs in it where it is on; `box` asks for one for another owner, with more

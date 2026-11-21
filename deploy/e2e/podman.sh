@@ -73,7 +73,7 @@ finding "host: $(sed -n 's/^PRETTY_NAME=//p' /etc/os-release | tr -d '"'), kerne
 finding "host: kernel.apparmor_restrict_unprivileged_userns=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo absent)"
 
 step "the repository's fake engine, wired into the data folder before the first start"
-fake="$DIR/data/.openmausbot/fake-engine"
+fake="$DIR/data/.edubot/fake-engine"
 mkdir -p "$fake"
 # The fake and every file of server/testing it imports, however that list grows (CI runs this on the merge with main).
 copy_fake() {
@@ -86,11 +86,11 @@ copy_fake() {
 }
 copy_fake fake-claude-cli.ts
 chmod 755 "$fake/fake-claude-cli.ts"
-cat >"$DIR/data/.openmausbot/config.json" <<'JSON'
+cat >"$DIR/data/.edubot/config.json" <<'JSON'
 {
   "features": { "smartSetupChoices": false },
   "instances": {
-    "claude": { "driver": "claudeAgent", "displayName": "E2E fake engine", "config": { "cli": "/data/.openmausbot/fake-engine/fake-claude-cli.ts" } }
+    "claude": { "driver": "claudeAgent", "displayName": "E2E fake engine", "config": { "cli": "/data/.edubot/fake-engine/fake-claude-cli.ts" } }
   }
 }
 JSON
@@ -295,7 +295,7 @@ cat "$OUT/uninstall.txt"
 [ ! -e "$UNIT" ] || fail "the unit is still there"
 if systemctl --user is-active --quiet openmausbot; then fail "the service still runs"; fi
 if healthy; then fail "the server still answers"; fi
-[ -f "$DIR/data/.openmausbot/config.json" ] || fail "the uninstall removed the data"
+[ -f "$DIR/data/.edubot/config.json" ] || fail "the uninstall removed the data"
 finding "uninstall: the service and its unit are gone, the data stays"
 
 step "clean up"

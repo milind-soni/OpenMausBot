@@ -11,7 +11,7 @@ dist-server
 .DS_Store
 *.tsbuildinfo
 electron/resources/speech-helper
-electron/resources/OpenMausBot Speech.app
+electron/resources/Edu Bot Speech.app
 # stale helper from the removed Teach a skill recorder
 electron/resources/OpenMausBot Recorder.app
 release

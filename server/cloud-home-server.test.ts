@@ -60,7 +60,7 @@ async function api(method: string, path: string, options: { body?: unknown; remo
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-cloud-home-server-"));
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".edubot");
   mkdirSync(dataDir, { recursive: true });
   // A signed-in Claude Code whose turns record the environment they were given.
   // While the hang marker exists, a new turn records itself elsewhere and
@@ -92,7 +92,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   mkdirSync(join(dataDir, ".backups"));
   writeFileSync(join(dataDir, ".backups", "last-restore.json"), JSON.stringify({ restored: true, id: "7c9e6679-7425-40de-944b-e07fc1f90ae7" }));
   mkdirSync(join(dataDir, "workspaces", "moved"), { recursive: true });
-  writeFileSync(join(dataDir, "workspaces", "moved", "MEMORY.md"), "The register is C:\\Users\\Ada\\.openmausbot\\files\\register.xlsx.\n");
+  writeFileSync(join(dataDir, "workspaces", "moved", "MEMORY.md"), "The register is C:\\Users\\Ada\\.edubot\\files\\register.xlsx.\n");
   // The web UI's pages (a stand-in for the built app).
   mkdirSync(join(home, "web"));
   writeFileSync(join(home, "web", "index.html"), "<!doctype html><title>OpenMausBot</title>");
@@ -153,7 +153,7 @@ it("boots with a gateway's settings, says once that it ignores them, and never l
 
 // Cloud homes are Linux; on Windows the data folder is itself a drive path.
 it.skipIf(process.platform === "win32")("rewrites the data folder of the computer it was moved from before anything reads it", () => {
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".edubot");
   expect(readFileSync(join(dataDir, "workspaces", "moved", "MEMORY.md"), "utf8")).toBe(`The register is ${dataDir}/files/register.xlsx.\n`);
   expect(JSON.parse(readFileSync(join(dataDir, ".backups", "last-restore.json"), "utf8")).pathsRewritten).toBe(true);
 });
@@ -164,7 +164,7 @@ it("offers the included computers, voice and decisions with no key, and never sh
   expect(status.body.box).toEqual({ configured: true, included: true });
   expect(status.body.tts).toMatchObject({ configured: true, ready: true, provider: "elevenlabs", voice: "preset0voice0id", included: true });
   expect(status.body.decider).toEqual({ provider: "jev", configured: true, included: true, enabled: true, jobs: { roomRouting: true } });
-  const saved = readFileSync(join(home, ".openmausbot", "config.json"), "utf8");
+  const saved = readFileSync(join(home, ".edubot", "config.json"), "utf8");
   for (const includedToken of includedTokens) {
     expect(JSON.stringify(status.body)).not.toContain(includedToken);
     expect(saved).not.toContain(includedToken);
@@ -338,7 +338,7 @@ it("records when a bot's turn first finished here, once, in the Cloud's own sett
   const first = async () => (await api("GET", "/api/config")).body.onboarding?.firstTurnAt as string | undefined;
   await expect.poll(first, { timeout: 15_000 }).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   const recorded = await first();
-  expect(JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8")).onboarding.firstTurnAt).toBe(recorded);
+  expect(JSON.parse(readFileSync(join(home, ".edubot", "config.json"), "utf8")).onboarding.firstTurnAt).toBe(recorded);
   const created = await api("POST", "/api/bots", { body: {
     name: "Second fixture", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" }, requireAvailableModel: true,
   } });
@@ -461,7 +461,7 @@ it("streams a bot's 30 MB video to a browser signed in from the Cloud page, in r
   } });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   const botId = created.body.bot.id as string;
-  const clip = join(home, ".openmausbot", "workspaces", botId, "trip.mp4");
+  const clip = join(home, ".edubot", "workspaces", botId, "trip.mp4");
   const size = 30 * 1024 * 1024;
   mkdirSync(dirname(clip), { recursive: true });
   writeFileSync(clip, "");

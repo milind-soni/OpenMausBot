@@ -22,7 +22,7 @@ const TEAM = { id: "team-7f3a", name: "Acme" };
 
 class Fixture {
   home = mkdtempSync(join(tmpdir(), "omb-parallel-"));
-  dataDir = join(this.home, ".openmausbot");
+  dataDir = join(this.home, ".edubot");
   gates = join(this.home, "gates");
   base = "";
   log = "";

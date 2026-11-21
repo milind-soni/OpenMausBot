@@ -20,7 +20,7 @@ const env = {
   OMB_PUBLIC_URL: "https://acme.example.test", OMB_CLOUD_BOOTSTRAP_SECRET: SECRET, OMB_CLOUD_BOAT_TOKEN: RELAY,
 };
 const SECCOMP = '{"defaultAction":"SCMP_ACT_ERRNO","syscalls":[]}';
-const LEASE = ".openmausbot/openmausbot-server.lease";
+const LEASE = ".edubot/openmausbot-server.lease";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -205,12 +205,12 @@ describe("the home on an own server", () => {
   it("clears the lease a killed home left before each start, until the image clears it itself, and never while a home runs", async () => {
     const f = fixture();
     await f.docker.createVolume("mausbot-data", {});
-    for (const path of [LEASE, `${LEASE}.reap-0f5e6c4a-1b2c-4d3e-8f9a-0b1c2d3e4f5a`, ".openmausbot/.openmausbot-server-child/openmausbot-server.lease"]) f.write(path, "{}");
-    f.write(".openmausbot/state.json", "keep");
+    for (const path of [LEASE, `${LEASE}.reap-0f5e6c4a-1b2c-4d3e-8f9a-0b1c2d3e4f5a`, ".edubot/.edubot-server-child/openmausbot-server.lease"]) f.write(path, "{}");
+    f.write(".edubot/state.json", "keep");
     f.write("notes/openmausbot-server.lease", "someone's file");
     await started(f);
-    expect(f.data()).toEqual({ ".openmausbot/state.json": "keep", "notes/openmausbot-server.lease": "someone's file" });
-    expect(f.lines.some((line) => line.startsWith("cleared the data-directory lease records a stopped home left: /data/.openmausbot/openmausbot-server.lease"))).toBe(true);
+    expect(f.data()).toEqual({ ".edubot/state.json": "keep", "notes/openmausbot-server.lease": "someone's file" });
+    expect(f.lines.some((line) => line.startsWith("cleared the data-directory lease records a stopped home left: /data/.edubot/openmausbot-server.lease"))).toBe(true);
     // A start while the home runs never touches its live lease.
     f.write(LEASE, "{}");
     const finds = () => f.docker.helperRuns.filter((command) => command[0] === "find" && command[1] === "/data").length;

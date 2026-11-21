@@ -25,7 +25,7 @@ function fakeKeychain(): SecurityRunner {
   };
 }
 
-describe("openmausbot login, then status, bots, stop and threads against the desktop app's own server", () => {
+describe("edubot login, then status, bots, stop and threads against the desktop app's own server", () => {
   let fixture: VerificationServer;
   const owner = randomBytes(32).toString("base64url");
   const home = mkdtempSync(join(tmpdir(), "omb-cli-home-"));
@@ -64,7 +64,7 @@ describe("openmausbot login, then status, bots, stop and threads against the des
   it("signs in only after Allow in the app, then acts as the person; a bot's shell never uses that sign-in", async () => {
     const before = await cli(["bots", "delete", "QA Tester 1", "--url", fixture.info.url, "--yes"]);
     expect(before.code).toBe(4);
-    expect(before.out).toContain("hint: sign in once with `openmausbot login`");
+    expect(before.out).toContain("hint: sign in once with `edubot login`");
 
     let shown = "";
     const approving = (async () => {
@@ -143,7 +143,7 @@ describe("openmausbot login, then status, bots, stop and threads against the des
   });
 });
 
-describe("openmausbot login against a server started with openmausbot serve", () => {
+describe("edubot login against a server started with edubot serve", () => {
   let fixture: VerificationServer;
   const home = mkdtempSync(join(tmpdir(), "omb-cli-serve-home-"));
   const cli = async (argv: string[]) => {

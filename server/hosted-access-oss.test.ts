@@ -37,7 +37,7 @@ function call(path: string, options: { method?: string; token?: string; local?: 
 beforeAll(async () => {
   port = await freePortBlock([0, 1], 35_000, 5_000);
   home = mkdtempSync(join(tmpdir(), "omb-hosted-oss-"));
-  const data = join(home, ".openmausbot");
+  const data = join(home, ".edubot");
   mkdirSync(join(home, "static"), { recursive: true });
   writeFileSync(join(home, "static", "index.html"), "<!doctype html><title>Fixture workspace</title>");
   pairedToken = new SessionRegistry({ file: join(data, "sessions.json") }).issue({ label: "Pre-existing QR device", scopes: ["admin", "client"] }).token;

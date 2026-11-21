@@ -287,9 +287,9 @@ test("the talk shortcut is on with ⌃⌥Space until changed, and the choice sur
 test("each server keeps its own Quick asks chat; nothing malformed is read back", () => {
   let saved = null;
   const prefs = createDesktopPrefs({ read: () => saved, write: value => { saved = structuredClone(value); } });
-  prefs.setQuickAsksChat("/Users/a/.openmausbot", { botId: "bot-1", threadId: "t-1" });
-  assert.deepEqual(createDesktopPrefs({ read: () => saved, write: () => {} }).quickAsksChat("/Users/a/.openmausbot"), { botId: "bot-1", threadId: "t-1" });
-  assert.equal(prefs.quickAsksChat("/Users/a/.openmausbot-aprs"), null);
+  prefs.setQuickAsksChat("/Users/a/.edubot", { botId: "bot-1", threadId: "t-1" });
+  assert.deepEqual(createDesktopPrefs({ read: () => saved, write: () => {} }).quickAsksChat("/Users/a/.edubot"), { botId: "bot-1", threadId: "t-1" });
+  assert.equal(prefs.quickAsksChat("/Users/a/.edubot-aprs"), null);
   const broken = createDesktopPrefs({ read: () => ({ quickAsks: { a: { botId: "../x", threadId: "t" }, b: "t-1", c: { botId: "b", threadId: "t", extra: 1 } } }), write: () => {} });
   assert.equal(broken.quickAsksChat("a"), null);
   assert.equal(broken.quickAsksChat("b"), null);
@@ -842,7 +842,7 @@ git commit -m "feat(talk): Settings row, and calls tell main they hold the micro
 
 `talk-shortcut.md` sections (in this repo's recipe style, see `docs/verification/local-environments.md`):
 1. **Floor: automated checks** — `node --test electron/talk-*.node-test.mjs electron/desktop-prefs.node-test.mjs electron/preload.node-test.mjs electron/speech-helper-release.node-test.mjs`; `pnpm exec vitest run electron/speech.test.mjs server/task-select.test.ts server/talk-server.e2e.test.ts src/lib/call-presence.test.ts src/components/TalkShortcutRow.test.ts --maxWorkers=1`; `pnpm typecheck && pnpm lint && pnpm i18n:check`. What they prove and what they do not (the real hotkey, the microphone, focus, Spaces).
-2. **Setup** — a packaged build of the branch installed beside, never over, the installed OpenMausBot (maintainers: the OMB2 side-by-side build), launched with `OMB_DATA_DIR=$HOME/.openmausbot-test` unless the check needs real bots; only one running app may hold the key. Composer dictation used once first so Microphone and Speech Recognition are granted.
+2. **Setup** — a packaged build of the branch installed beside, never over, the installed OpenMausBot (maintainers: the OMB2 side-by-side build), launched with `OMB_DATA_DIR=$HOME/.edubot-test` unless the check needs real bots; only one running app may hold the key. Composer dictation used once first so Microphone and Speech Recognition are granted.
 3. **By hand**, each with its expected result:
    - Settings → General shows the row, on, "Hold ⌃⌥Space, speak, let go".
    - In Safari's address bar: hold ⌃⌥, tap Space, say "what can you do", let go of ⌃⌥. Live words, then the reply, bottom-centre of that display. `osascript -e 'tell application "System Events" to name of first application process whose frontmost is true'` prints `Safari` before and after; the caret still blinks in Safari; the MausBot window stays behind.

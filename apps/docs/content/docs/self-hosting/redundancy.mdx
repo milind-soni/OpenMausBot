@@ -16,18 +16,18 @@ Edu Bot has no built-in standby or automatic takeover. This page is a recipe you
 
 ## What makes up a server's state
 
-Everything is under the server's home: its own folder (`.openmausbot`) and the engines' sign-ins beside it (`.claude`, `.codex` and others).
+Everything is under the server's home: its own folder (`.edubot`) and the engines' sign-ins beside it (`.claude`, `.codex` and others).
 
 | Install | Folder to copy | The server's own folder inside it |
 |---|---|---|
-| [Installer](/docs/self-hosting/deploy-vps#quick-start-one-command-on-your-own-domain) | `/opt/openmausbot/data` | `.openmausbot` |
-| npm service, user `maus` | `/home/maus` | `.openmausbot` |
+| [Installer](/docs/self-hosting/deploy-vps#quick-start-one-command-on-your-own-domain) | `/opt/openmausbot/data` | `.edubot` |
+| npm service, user `maus` | `/home/maus` | `.edubot` |
 
 Most of it is ordinary files. Three are SQLite databases the server keeps open and writes all the time, in WAL mode: `messages.db`, `runtime.db` and `bursts.db`. Their newest changes sit in the `-wal` file beside each until SQLite folds them in. **Do not copy these files with `rsync` or `cp` while the server runs.** In our test, a plain copy of `messages.db` taken while the server ran was missing every message still in the WAL file. SQLite's own `VACUUM INTO` makes a complete, consistent copy while the server keeps writing.
 
 A fourth database, `sync/index.db`, is not copied at all: reading it while the server runs blocks the server's own writes to it. It holds the server side of desktop folder sync, file checksums and the sync trash list. On B it starts empty: checksums are worked out again, and files already in the sync trash stay on disk but are no longer listed.
 
-The folder also holds a **lease**, `.openmausbot/openmausbot-server.lease`, naming the process and machine running the server. A server refuses to start on a folder whose lease names another machine or a live process. The copy job below puts its own lease on B, naming no real machine, so a server started on B by mistake stops there. The lease does **not** stop A from starting again on its own folder while B runs: we tried it, and A came back on its own data beside B, with the same server id and different chats. Keeping A cut off is your job.
+The folder also holds a **lease**, `.edubot/openmausbot-server.lease`, naming the process and machine running the server. A server refuses to start on a folder whose lease names another machine or a live process. The copy job below puts its own lease on B, naming no real machine, so a server started on B by mistake stops there. The lease does **not** stop A from starting again on its own folder while B runs: we tried it, and A came back on its own data beside B, with the same server id and different chats. Keeping A cut off is your job.
 
 ## Set up the standby
 
@@ -41,7 +41,7 @@ Build B fresh, never from a disk snapshot or image of A. Both need `sqlite3` (3.
      cd /opt/openmausbot && sudo docker compose stop
      ```
 
-   - npm service: install the same `openmausbot@X.Y.Z` and the same systemd unit as on A, with the user `maus` having the **same user id** as on A (`id -u maus`), then `sudo systemctl disable --now openmausbot` and `sudo install -d -m 700 -o maus -g maus /home/maus/.openmausbot`.
+   - npm service: install the same `openmausbot@X.Y.Z` and the same systemd unit as on A, with the user `maus` having the **same user id** as on A (`id -u maus`), then `sudo systemctl disable --now edubot` and `sudo install -d -m 700 -o maus -g maus /home/maus/.edubot`.
 2. **On A, save the two scripts below** as `/usr/local/bin/mausbot-db-copies` and `/usr/local/bin/mausbot-standby-serve`, and `chmod 755` both. For the npm service, change the paths the comments name.
 
    ```sh
@@ -50,7 +50,7 @@ Build B fresh, never from a disk snapshot or image of A. Both need `sqlite3` (3.
    # Run as root, only through mausbot-standby-serve. Its last line names the data's owner.
    set -eu
    umask 077
-   STATE=${STATE:-/opt/openmausbot/data/.openmausbot}   # npm service: /home/maus/.openmausbot
+   STATE=${STATE:-/opt/openmausbot/data/.edubot}   # npm service: /home/maus/.edubot
    COPIES=${COPIES:-/opt/openmausbot/db-copies}         # npm service: /home/maus-db-copies
    for path in "$STATE" "$COPIES"; do
      case "$path" in /?*) ;; *) echo "refused: '$path' is not an absolute path below /" >&2; exit 1 ;; esac
@@ -100,7 +100,7 @@ Build B fresh, never from a disk snapshot or image of A. Both need `sqlite3` (3.
    A=${A:?set A, such as root@server-a.example.com}
    SSH_KEY=${SSH_KEY:-/root/.ssh/mausbot-standby}
    DATA=${DATA:-/opt/openmausbot/data}            # npm service: /home/maus
-   STATE=${STATE:-.openmausbot}
+   STATE=${STATE:-.edubot}
    COPIES=${COPIES:-/opt/openmausbot/db-copies}   # npm service: /home/maus-db-copies
    A_DATA=${A_DATA:-data}                         # on A, below mausbot-standby-serve's folder; npm: maus
    A_COPIES=${A_COPIES:-db-copies}                # npm service: maus-db-copies
@@ -144,7 +144,7 @@ Build B fresh, never from a disk snapshot or image of A. Both need `sqlite3` (3.
    # On B, once A is cut off for good: stop the copies for good and make the last copy B's data.
    set -eu
    DATA=${DATA:-/opt/openmausbot/data}            # npm service: /home/maus
-   STATE=${STATE:-.openmausbot}
+   STATE=${STATE:-.edubot}
    COPIES=${COPIES:-/opt/openmausbot/db-copies}   # npm service: /home/maus-db-copies
    ENV_FILE=${ENV_FILE-/opt/openmausbot/.env}     # npm service: ENV_FILE=
    MAX_AGE=${MAX_AGE:-600}                        # seconds; an older copy needs FORCE=1
@@ -198,7 +198,7 @@ Build B fresh, never from a disk snapshot or image of A. Both need `sqlite3` (3.
 1. **Cut A off for good.** Block all of A's traffic in your provider's firewall, then power A off. A power-off alone does not keep A off: providers restart machines after a host failure, and anyone can press start. A server cut off only from B may still be running, answering people and running its routines, and A starts Edu Bot by itself whenever it boots.
 2. **Put the last copy in place:** `sudo mausbot-takeover`. It removes the cron file, waits for a copy still running, marks the folder so no copy ever runs into it again, and refuses a copy older than 10 minutes unless you add `FORCE=1`. For the npm service: `sudo DATA=/home/maus COPIES=/home/maus-db-copies ENV_FILE= mausbot-takeover`.
 3. **Move the address** to B: change the DNS record to B's public address. Do this before starting B. Caddy on B asks for its certificate when it starts, and gets one only once the domain points at B.
-4. **Start B:** `cd /opt/openmausbot && sudo docker compose pull && sudo docker compose up -d`, or `sudo systemctl enable --now openmausbot`.
+4. **Start B:** `cd /opt/openmausbot && sudo docker compose pull && sudo docker compose up -d`, or `sudo systemctl enable --now edubot`.
 5. **Check:** `https://maus.example.com/api/health` answers and the app connects. B has the same server id and the same paired sessions as A, so paired devices should stay signed in.
 6. **Look at what was running.** A routine due in the last minutes may run again on B (see the limits below). Sign an engine in again if B says it is not signed in.
 
@@ -207,13 +207,13 @@ Build B fresh, never from a disk snapshot or image of A. Both need `sqlite3` (3.
 Treat A as the new standby, never as the server it was. A starts Edu Bot by itself when it boots, so prepare its disk first, from your provider's rescue system, with A's disk mounted at `/mnt` and A still blocked in the firewall:
 
 ```sh
-d=/mnt/opt/openmausbot     # npm service: move /mnt/home/maus/.openmausbot instead
+d=/mnt/opt/openmausbot     # npm service: move /mnt/home/maus/.edubot instead
 mv "$d/data" "$d/data.old"
-install -d -m 700 -o "$(stat -c %u "$d/data.old")" -g "$(stat -c %g "$d/data.old")" "$d/data" "$d/data/.openmausbot"
-printf '%s\n' '{"version":1,"pid":1,"host":"mausbot-standby","token":"00000000-0000-4000-8000-000000000000","createdAt":1,"machine":"00000000000000000000000000000000"}' > "$d/data/.openmausbot/openmausbot-server.lease"
+install -d -m 700 -o "$(stat -c %u "$d/data.old")" -g "$(stat -c %g "$d/data.old")" "$d/data" "$d/data/.edubot"
+printf '%s\n' '{"version":1,"pid":1,"host":"mausbot-standby","token":"00000000-0000-4000-8000-000000000000","createdAt":1,"machine":"00000000000000000000000000000000"}' > "$d/data/.edubot/openmausbot-server.lease"
 ```
 
-The last line is the standby's lease: Edu Bot on A refuses to start on that folder. Boot A normally, stop Edu Bot for good (`cd /opt/openmausbot && sudo docker compose stop`, or `sudo systemctl disable --now openmausbot`), lift the firewall block, and set up the copies the other way, from B to A. Anything made on A after the last copy is only in `data.old`; Edu Bot cannot merge it into B.
+The last line is the standby's lease: Edu Bot on A refuses to start on that folder. Boot A normally, stop Edu Bot for good (`cd /opt/openmausbot && sudo docker compose stop`, or `sudo systemctl disable --now edubot`), lift the firewall block, and set up the copies the other way, from B to A. Anything made on A after the last copy is only in `data.old`; Edu Bot cannot merge it into B.
 
 ## Limits
 
@@ -230,7 +230,7 @@ The last line is the standby's lease: Edu Bot on A refuses to start on that fold
 
 ## What we tested, and what we did not
 
-**On Linux.** We ran the five scripts in an Ubuntu 24.04 container (`/bin/sh` is dash, GNU rsync 3.2.7, sqlite3 3.45.1, OpenSSH 9.6) with Edu Bot 0.1.173 from npm (`openmausbot serve`), run as a user with id 1001 in folders laid out as the installer lays them out. A and B were the same machine: B's two scripts as printed, A's two with `/opt/openmausbot` changed to `/srv/a/opt/openmausbot`, and B reaching A over SSH at `127.0.0.1` with the restricted key above. What we saw:
+**On Linux.** We ran the five scripts in an Ubuntu 24.04 container (`/bin/sh` is dash, GNU rsync 3.2.7, sqlite3 3.45.1, OpenSSH 9.6) with Edu Bot 0.1.173 from npm (`edubot serve`), run as a user with id 1001 in folders laid out as the installer lays them out. A and B were the same machine: B's two scripts as printed, A's two with `/opt/openmausbot` changed to `/srv/a/opt/openmausbot`, and B reaching A over SSH at `127.0.0.1` with the restricted key above. What we saw:
 
 - A made 40 bots while B pulled 24 times without a failure. A server started on B by mistake before the takeover refused (`This Edu Bot data directory is already owned by a process on another machine`).
 - A was stopped with `kill -9` after 3 more bots. `mausbot-takeover` reported a 2-second-old copy. B answered with the 41 bots of the last copy, A's paired device was signed in on B, and both had the same server id and A's `.env`.

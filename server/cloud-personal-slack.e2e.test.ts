@@ -51,7 +51,7 @@ let owner = "", ownerSlack = "";
 let scout: Bot, mausbot: Bot;
 
 const file = (name: string) => join(fx.root, "cloud", name);
-const dataFile = (name: string) => join(fx.root, "cloud", ".openmausbot", name);
+const dataFile = (name: string) => join(fx.root, "cloud", ".edubot", name);
 async function as(token: string | null, method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {
   const response = await fetch(`${fx.cloudBase}${path}`, { method, headers: { ...fx.edge, ...(token ? { authorization: `Bearer ${token}` } : {}),
     ...(body === undefined ? {} : { "content-type": "application/json" }) }, body: body === undefined ? undefined : JSON.stringify(body) });

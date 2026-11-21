@@ -169,7 +169,7 @@ describe("doctor --host", () => {
     expect(seen).toEqual(["/srv/from-env", "/srv/mausbot"]);
     const homes = { under: () => "/fake-account/person", realHome: () => "/fake-account/person" };
     await hostDoctor(ctx({ host: true }), watching, homes);
-    expect(seen.at(-1)).toBe(posix.resolve(join("/fake-account/person", ".openmausbot")));
+    expect(seen.at(-1)).toBe(posix.resolve(join("/fake-account/person", ".edubot")));
     await expect(hostDoctor(ctx({ host: true }, { NODE_ENV: "test" }), watching, homes)).rejects.toThrow(/refusing to use the real data folder/);
     await hostDoctor(ctx({ host: true, "data-dir": "/srv/given" }, { NODE_ENV: "test" }), watching, homes);
     expect(seen.at(-1)).toBe("/srv/given");

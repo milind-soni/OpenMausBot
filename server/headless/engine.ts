@@ -138,6 +138,6 @@ export async function engineVerb(ctx: VerbContext): Promise<VerbOutcome> {
     ? `${result.dryRun ? "Would set" : "Set"} ${result.changed.join(", ")} for ${kind}`
     : `${kind} was already set up; nothing changed (pass --rotate to replace its key)`;
   const installed = result.installed === undefined ? "" : result.installed === "already" ? " Its command was already installed." : " Installed its command.";
-  return { result, exitCode: EXIT.done, human: [`${done}.${installed} Bots use it as ${result.instanceId}/MODEL (openmausbot models).`,
+  return { result, exitCode: EXIT.done, human: [`${done}.${installed} Bots use it as ${result.instanceId}/MODEL (edubot models).`,
     ...((result.warnings ?? []) as string[]).map((line) => `warning: ${line}`)] };
 }

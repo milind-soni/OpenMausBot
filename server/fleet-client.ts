@@ -35,9 +35,9 @@ export function fleetRequest(socketPath: string, method: string, path: string, b
     req.on("timeout", () => { req.destroy(new Error("the fleet agent did not answer in time")); });
     req.on("error", (error: NodeJS.ErrnoException) => {
       reject(new Error(error.code === "ENOENT" || error.code === "ECONNREFUSED"
-        ? "no fleet agent on this server: run `openmausbot fleet init --domain … --operator <this user>` as root"
+        ? "no fleet agent on this server: run `edubot fleet init --domain … --operator <this user>` as root"
         : error.code === "EACCES"
-          ? "this workspace's user may not open the fleet socket: re-run `openmausbot fleet init` with --operator set to it"
+          ? "this workspace's user may not open the fleet socket: re-run `edubot fleet init` with --operator set to it"
           : `fleet agent: ${error.message}`));
     });
     if (payload) req.write(payload);

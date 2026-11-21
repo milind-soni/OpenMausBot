@@ -204,7 +204,7 @@ it("a move carries everything, apps and keys first, and its check finds every ro
     expect((await local("POST", "/api/mcp/servers", server)).status).toBe(201);
     expect((await local("PATCH", `/api/mcp/servers/${server.name}`, { enabled: true })).status).toBe(200);
   }
-  const desktopSignIns = join(fx.root, "desktop", ".openmausbot", "mcp-oauth.json");
+  const desktopSignIns = join(fx.root, "desktop", ".edubot", "mcp-oauth.json");
   writeFileSync(desktopSignIns, JSON.stringify({ servers: { linear: { url: LINEAR_URL, state: "signed-in", clientId: "omb-fixture-client", tokenAuth: "client_secret_post",
     tokenEndpoint, tokens: { access: ACCESS, refresh: REFRESH, expiresAt: Date.now() + 3_600_000 } } } }));
   expect((await local("PATCH", "/api/config", { openrouter: { key: OPENROUTER_KEY } })).status).toBe(200);

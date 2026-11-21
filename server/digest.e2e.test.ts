@@ -63,7 +63,7 @@ posixOnly("work digest e2e (every fake engine)", () => {
   beforeAll(async () => {
     for (const e of ENGINES) chmodSync(fake(e.cli), 0o755);
     home = mkdtempSync(join(tmpdir(), "omb-digest-e2e-"));
-    mkdirSync(join(home, ".openmausbot"), { recursive: true });
+    mkdirSync(join(home, ".edubot"), { recursive: true });
     const instances: Record<string, unknown> = {};
     for (const e of ENGINES) {
       instances[e.id] = { driver: e.driver, environment: e.env, config: { cli: fake(e.cli), fullAuto: true } };
@@ -80,7 +80,7 @@ posixOnly("work digest e2e (every fake engine)", () => {
       environment: { FAKE_ACP_MODE: "echo-gated" },
       config: { cli: fake("fake-acp-cli.ts"), fullAuto: true },
     };
-    writeFileSync(join(home, ".openmausbot", "config.json"), JSON.stringify({ instances }));
+    writeFileSync(join(home, ".edubot", "config.json"), JSON.stringify({ instances }));
 
     const env: NodeJS.ProcessEnv = { HOME: home, USERPROFILE: home, OMB_PORT: String(PORT) };
     if (process.env.PATH) env.PATH = process.env.PATH;
@@ -172,7 +172,7 @@ posixOnly("work digest e2e (every fake engine)", () => {
     expect((await api("PATCH", `/api/bots/${created.id}`, { cwd: project })).status).toBe(200);
 
     // no message yet: the folder is read into the bot's checkpoint, and no snapshot is taken
-    const shadows = join(home, ".openmausbot", "checkpoints", created.id);
+    const shadows = join(home, ".edubot", "checkpoints", created.id);
     const shadow = () => (existsSync(shadows) ? readdirSync(shadows) : []).map((name) => join(shadows, name, ".git")).find((dir) => existsSync(join(dir, "index")));
     await waitFor(async () => shadow() !== undefined, "the project to be read ahead of the first message");
     const shadowGit = (...args: string[]) => execFileSync("git", args, { encoding: "utf8", env: { ...process.env, GIT_DIR: shadow()! } }).trim();

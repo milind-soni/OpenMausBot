@@ -1,4 +1,4 @@
-// How other devices reach a server `openmausbot serve` started, and the lines that say so. A route is chosen by a flag
+// How other devices reach a server `edubot serve` started, and the lines that say so. A route is chosen by a flag
 // (or the saved setup); the link always uses the first one in ROUTE_ORDER.
 import { allowedServerOrigin, isLoopbackHost } from "../electron/server-address.mjs";
 import { reachableAddresses, type ReachableAddresses } from "./lan-address.ts";

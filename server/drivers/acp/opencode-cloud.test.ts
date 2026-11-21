@@ -50,8 +50,8 @@ async function open(driver: ReturnType<typeof createOpenCodeDriver>, instanceId:
 
 describe("the keys saved for OpenCode inside the Cloud bot box", () => {
   const setup = {
-    dataDir: "/data/.openmausbot", home: "/data", codeRoots: ["/app"], engineRoots: engineInstallRoots("/data/.openmausbot"),
-    bridges: [{ name: "egress", port: BOX_EGRESS_PORT, socket: "/data/.openmausbot/box/egress.sock" }],
+    dataDir: "/data/.edubot", home: "/data", codeRoots: ["/app"], engineRoots: engineInstallRoots("/data/.edubot"),
+    bridges: [{ name: "egress", port: BOX_EGRESS_PORT, socket: "/data/.edubot/box/egress.sock" }],
   };
   const runner = new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge: { socat: null, bridgeScript: "/app/box-bridge.js", node: "/usr/bin/node" }, setup, denyEnv: BOX_DENY_ENV });
 

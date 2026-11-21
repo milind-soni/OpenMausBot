@@ -187,7 +187,7 @@ test("after an own-home move is done, an app update does not send the old worksp
     if (path === "/api/cloud-send/memory") return Response.json(query.startsWith("bot=") ? { v: 1, files: [], journal: [] } : { v: 1, about: { learned: [], removed: [] }, teams: [] });
     if (path.endsWith("/skills")) return Response.json({ skills: [] });
     if (path.endsWith("/memory")) return Response.json({ topics: [] });
-    if (path === "/api/cloud-send/chats") return Response.json({ v: 1, dataDir: "/desk/.openmausbot", conversations: [], attachments: [] });
+    if (path === "/api/cloud-send/chats") return Response.json({ v: 1, dataDir: "/desk/.edubot", conversations: [], attachments: [] });
     return Response.json({ v: 1 });
   };
   const fetch = async (url, init) => {

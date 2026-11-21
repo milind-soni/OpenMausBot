@@ -30,7 +30,7 @@ afterAll(async () => {
 
 type Side = CloudSendFixture["local"];
 type Row = { id: string; parentId?: string | null; kind: string; role: string; text?: string; at: number; sender?: { id?: string } };
-const dataDir = (side: "desktop" | "cloud") => join(fx.root, side, ".openmausbot");
+const dataDir = (side: "desktop" | "cloud") => join(fx.root, side, ".edubot");
 async function rows(side: Side, threadId: string): Promise<Row[]> {
   const out: Row[] = [];
   for (let before: string | null = null, more = true; more;) {

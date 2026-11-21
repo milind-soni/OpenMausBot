@@ -20,7 +20,7 @@ describe("settings-file check", () => {
     const finding = settingsFileCheck().check(context(data));
     expect(finding).toMatchObject({ status: "problem" });
     expect(finding.fixable).toBeFalsy();
-    expect(finding.instruction).toContain("openmausbot config restore latest");
+    expect(finding.instruction).toContain("edubot config restore latest");
     expect(JSON.stringify(finding)).not.toContain("sk-ant-secret");
   });
 

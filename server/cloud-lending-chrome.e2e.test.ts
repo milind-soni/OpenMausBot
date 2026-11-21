@@ -72,7 +72,7 @@ async function adminPairing(cloud: Cloud): Promise<string> {
 
 /** A personal Cloud home whose browser engine is `agentBrowser`, off the internet: its own fetches go nowhere. */
 async function bootCloud(home: string, agentBrowser: string, env: Record<string, string> = {}): Promise<Cloud> {
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".edubot");
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(join(home, "turns"), { recursive: true });
   const cli = join(home, "fixture-claude.mjs");

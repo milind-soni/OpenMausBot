@@ -35,7 +35,7 @@ prompt or dialog: visibility is access control and the log is a record.
   change is diffed around its request (config.json, the bot's audited
   fields, the bot and webhook lists, sessions, pairing codes, engine actions)
   and written to `<data>/admin-activity/YYYY-MM.ndjson` (0600) with the
-  actor and redacted before/after values; `openmausbot access` writes the
+  actor and redacted before/after values; `edubot access` writes the
   same row as the command line. Months are pruned by the decision log's
   retention window. The packaged desktop app records nothing.
 - **Activity view.** `GET /api/admin-activity?from=&to=&who=&what=&limit=`
@@ -76,7 +76,7 @@ pnpm exec vitest run server/bot-visibility.test.ts server/bot-visibility.e2e.tes
   with each filter and the CSV. It checks who is named, that display-only
   and refused changes leave no row, that neither secret reaches the file or
   the CSV, that the file is 0600, and that a member gets 403.
-- `server/cli.test.ts` ("openmausbot access") checks the command line's rows.
+- `server/cli.test.ts` ("edubot access") checks the command line's rows.
 
 ## Not proven here
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env -S node --experimental-strip-types
-// The openmausbot headless verbs for verifying an isolated fixture. A verb that
+// The edubot headless verbs for verifying an isolated fixture. A verb that
 // changes something never runs on a server it merely found.
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, writeFileSync } from "node:fs";
@@ -47,7 +47,7 @@ export const HELP_UI = `renderer (needs a ui launch handle; every verb takes --u
   ui wait-settle --ui HANDLE [--timeout 30]
   ui help`;
 
-export const HELP = `control-omb — the openmausbot headless verbs (docs/headless-cli.md), for verifying a fixture
+export const HELP = `control-omb — the edubot headless verbs (docs/headless-cli.md), for verifying a fixture
 
 read-only (every verb also takes --url URL):
   doctor

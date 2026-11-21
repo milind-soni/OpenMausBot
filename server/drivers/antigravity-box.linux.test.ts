@@ -19,7 +19,7 @@ const FAKE_SIGNIN = join(dirname(fileURLToPath(import.meta.url)), "..", "testing
 
 describe.skipIf(!available)(`Antigravity's Google sign-in in a real box (${available ? "bubblewrap works here" : `skipped: ${detection.reason}`})`, () => {
   const root = mkdtempSync(join(tmpdir(), "omb-ag-box-"));
-  const home = join(root, "home"), dataDir = join(home, ".openmausbot"), runtimeDir = join(home, "runtime");
+  const home = join(root, "home"), dataDir = join(home, ".edubot"), runtimeDir = join(home, "runtime");
   beforeAll(async () => {
     mkdirSync(dataDir, { recursive: true });
     mkdirSync(runtimeDir, { recursive: true });

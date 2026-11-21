@@ -58,7 +58,7 @@ beforeAll(async () => {
   queueFinishGate = join(home, "queue-finish");
   stopScopedLeadFinishGate = join(home, "stop-scoped-lead-finish");
   writeFileSync(stopScopedLeadFinishGate, "allow initial goal delegation");
-  const data = join(home, ".openmausbot");
+  const data = join(home, ".edubot");
   const staticDir = join(home, "static");
   mkdirSync(data, { recursive: true });
   mkdirSync(join(staticDir, "assets"), { recursive: true });

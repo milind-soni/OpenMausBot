@@ -363,7 +363,7 @@ describe("where the relay credential comes from", () => {
     expect(source.current()).toBeNull();
   });
 
-  it("then OMB_PUSH_CREDENTIAL, a fleet's credential, then `openmausbot login`'s file", () => {
+  it("then OMB_PUSH_CREDENTIAL, a fleet's credential, then `edubot login`'s file", () => {
     const at = (env: NodeJS.ProcessEnv) => new PhonePushAccessSource({ env, tunnelFile: tunnelFile(), defaultControlPlane: "https://accounts.openmausbot.com" }).current();
     expect(at({})).toBeNull();
     writeFileSync(tunnelFile(), JSON.stringify({ companionInstallationCredential: CREDENTIAL }));

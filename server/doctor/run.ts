@@ -1,6 +1,6 @@
 // Runs the checks, and with `fix` the repairs that cannot lose data. Every check is looked at first; repairs run only
 // when nothing blocks (a data format this version cannot read), and only in a process that holds the data folder's lease:
-// the server as it starts, or `openmausbot doctor --data --fix`, which takes the lease for its run and changes nothing
+// the server as it starts, or `edubot doctor --data --fix`, which takes the lease for its run and changes nothing
 // while a server uses the folder, and only as the folder's owner. Each repair looks again right before it runs, and once
 // more after; those looks skip what is slow to read (SQLite's check of messages.db) and take it from the first look.
 import { statSync } from "node:fs";

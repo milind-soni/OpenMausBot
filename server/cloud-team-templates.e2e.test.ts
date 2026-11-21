@@ -25,7 +25,7 @@ const as = (who: Who, method: string, path: string, body?: unknown) => team.as(t
 let reporter: { id: string; threadId: string };
 let templateId = "";
 
-const templates = () => join(team.home, ".openmausbot", "team-files", "templates");
+const templates = () => join(team.home, ".edubot", "team-files", "templates");
 const toolCalls = (list: unknown[]) => writeFileSync(join(team.home, "calls.json"), JSON.stringify(list));
 async function until(done: () => Promise<boolean>, timeoutMs = 60_000): Promise<void> {
   const end = Date.now() + timeoutMs;

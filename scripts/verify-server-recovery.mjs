@@ -189,7 +189,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
       fakePid = null;
       await until(() => active && active.pid !== initialPid, "replacement PID verified");
       const replacementPid = active.pid;
-      assert.equal(JSON.parse(readFileSync(join(dataDir, ".openmausbot-server-child/openmausbot-server.lease"), "utf8")).pid, replacementPid);
+      assert.equal(JSON.parse(readFileSync(join(dataDir, ".edubot-server-child/openmausbot-server.lease"), "utf8")).pid, replacementPid);
       const wait = await control("wait_for_conversation", { target_type: "bot", target_id: bot.id, task_id: bot.activeTaskId, timeout_seconds: 2 });
       assert.equal(wait.target.busy, false);
       const messages = await control("get_bot_messages", { bot_id: bot.id, task_id: bot.activeTaskId, limit: 10 });

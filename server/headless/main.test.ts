@@ -51,19 +51,19 @@ describe("the headless command line", () => {
     expect(out[0]).toContain("Give a bot or room one job and wait until it, and every teammate it asked, is done.");
     expect(await runHeadless(["team", "apply", "--help"], { io })).toBe(0);
     expect(out[1]).toContain("a second apply prints \"No changes.\"");
-    expect(USAGE).toContain("openmausbot run BOT \"do this\"         give a bot one job and wait until it and every teammate it asked are done");
+    expect(USAGE).toContain("edubot run BOT \"do this\"         give a bot one job and wait until it and every teammate it asked are done");
   });
 
   it("is reachable through the published entry, which keeps every other command as it was", () => {
     const entry = join(import.meta.dirname, "..", "openmausbot.ts");
     const help = spawnSync(process.execPath, ["--experimental-strip-types", entry, "help", "export"], { encoding: "utf8" });
     expect(help.status).toBe(0);
-    expect(help.stdout).toContain("openmausbot export TARGET --out DIR");
+    expect(help.stdout).toContain("edubot export TARGET --out DIR");
     const refused = spawnSync(process.execPath, ["--experimental-strip-types", entry, "run", "--json"], { encoding: "utf8", env: { ...process.env, OPENMAUSBOT_URL: "" } });
     expect(refused.status).toBe(2);
     expect(JSON.parse(refused.stdout)).toMatchObject({ ok: false, exitCode: 2 });
     const usage = spawnSync(process.execPath, ["--experimental-strip-types", entry, "--help"], { encoding: "utf8" });
-    expect(usage.stdout).toContain("openmausbot serve [--port 8799]");
+    expect(usage.stdout).toContain("edubot serve [--port 8799]");
     expect(usage.stdout).toContain("Drive a running workspace");
   });
 

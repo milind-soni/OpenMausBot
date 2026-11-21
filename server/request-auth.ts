@@ -155,7 +155,7 @@ function localBrowserTrust(env: NodeJS.ProcessEnv, fromSource: boolean, trust: L
   return { trusted: true, warning: `${LOCAL_BROWSER_TRUST}=1: browsers on this machine act as the owner (development only)` };
 }
 
-export const BROWSER_SIGN_IN = "unauthorized: this browser is not signed in. Open the sign-in link that openmausbot serve or openmausbot pair prints on this computer, or pair it with a code from Settings → Phone & devices";
+export const BROWSER_SIGN_IN = "unauthorized: this browser is not signed in. Open the sign-in link that edubot serve or edubot pair prints on this computer, or pair it with a code from Settings → Phone & devices";
 
 export function isAllowedOrigin(origin: string | undefined | null): boolean {
   if (!origin) return true; // non-browser clients (CLIs, curl, tests) send none
@@ -595,7 +595,7 @@ export interface ResolveOptions {
   features?: { sharedComputers?: boolean };
   /** Absent is `owner`; ignored while loopbackMutationToken is in force. */
   loopbackTrust?: LoopbackTrust;
-  /** Under `service`: a per-launch secret from `openmausbot serve` over stdin (never env, which other children read); it opens only pairing codes. */
+  /** Under `service`: a per-launch secret from `edubot serve` over stdin (never env, which other children read); it opens only pairing codes. */
   cliOwnerToken?: string;
   /** resolveLoopbackTrust's `localBrowsers`: a development server lets this machine's browsers use loopback trust. */
   trustLocalBrowser?: boolean;

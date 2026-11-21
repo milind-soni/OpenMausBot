@@ -1,19 +1,20 @@
 {
-  "name": "openmausbot",
+  "name": "edu-bot",
+  "productName": "Edu Bot",
   "private": true,
   "version": "0.1.174",
   "description": "A local-first chat app for running a team of AI agents.",
-  "homepage": "https://github.com/milind-soni/OpenMausBot",
+  "homepage": "https://github.com/EduardoMoraga/edu-bot",
   "repository": {
     "type": "git",
-    "url": "https://github.com/milind-soni/OpenMausBot.git"
+    "url": "https://github.com/EduardoMoraga/edu-bot.git"
   },
   "author": {
-    "name": "Milind Soni",
-    "email": "46266943+milind-soni@users.noreply.github.com"
+    "name": "Eduardo Moraga",
+    "email": "51273569+EduardoMoraga@users.noreply.github.com"
   },
   "license": "Apache-2.0",
-  "desktopName": "com.openmausbot.app.desktop",
+  "desktopName": "io.github.eduardomoraga.edubot.desktop",
   "type": "module",
   "main": "electron/main.mjs",
   "engines": {
@@ -75,14 +76,14 @@
     "package:prepare": "pnpm build && pnpm build:server && pnpm build:companion && pnpm build:updater && pnpm build:android-tools && pnpm build:cloudflared && pnpm build:browser && pnpm build:duckdb",
     "package:mac": "pnpm package:prepare && pnpm build:speech && pnpm build:cua && electron-builder --mac --publish never",
     "package:win": "pnpm package:prepare && pnpm build:cua:win && electron-builder --win --publish never",
-    "package:linux": "pnpm package:prepare && pnpm build:cua:linux && electron-builder --linux --x64 --publish never",
-    "package:arch": "pnpm package:prepare && pnpm build:cua:linux && electron-builder --linux pacman --x64 --publish never",
-    "package:linux:offline": "pnpm package:prepare && pnpm build:cua:linux:offline && electron-builder --linux --x64 --publish never",
+    "package:linux": "pnpm package:prepare && pnpm build:cua:linux && electron-builder --linux -c.productName=edu-bot --x64 --publish never",
+    "package:arch": "pnpm package:prepare && pnpm build:cua:linux && electron-builder --linux -c.productName=edu-bot pacman --x64 --publish never",
+    "package:linux:offline": "pnpm package:prepare && pnpm build:cua:linux:offline && electron-builder --linux -c.productName=edu-bot --x64 --publish never",
     "smoke:deb-command": "node scripts/smoke-deb-command.mjs",
     "smoke:linux-update": "xvfb-run -a electron --no-sandbox scripts/smoke-linux-update.mjs",
     "smoke:linux-package": "node scripts/run-linux-package-smoke.mjs",
     "smoke:cua-x11-input": "node scripts/smoke-cua-x11-input.mjs",
-    "package:linux:dir": "pnpm package:prepare && pnpm build:cua:linux && electron-builder --linux dir --x64 --publish never",
+    "package:linux:dir": "pnpm package:prepare && pnpm build:cua:linux && electron-builder --linux -c.productName=edu-bot dir --x64 --publish never",
     "package": "pnpm package:mac",
     "test:packaged-server": "pnpm build:server && node scripts/smoke-packaged-server.mjs",
     "broker:types": "wrangler types --config cloudflare/composio-broker/wrangler.jsonc cloudflare/composio-broker/worker-configuration.d.ts",

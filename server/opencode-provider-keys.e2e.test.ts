@@ -61,7 +61,7 @@ const written = (file: string, shape: "document" | "lines" = "document") => {
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-opencode-keys-"));
-  dataDir = join(home, ".openmausbot");
+  dataDir = join(home, ".edubot");
   mkdirSync(dataDir, { recursive: true });
   dump = join(home, "opencode.json");
   // Only OpenCode: nothing probes a CLI installed on this machine.

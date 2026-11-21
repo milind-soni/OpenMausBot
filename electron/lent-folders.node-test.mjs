@@ -92,7 +92,7 @@ function setup(t) {
   const clock = { now: AT + 60_000 };
   const service = createCloudFilesService({
     settingsFile: join(dir, "user", "settings.json"), stateFile: join(dir, "user", "state.db"),
-    documentsDir: join(home, "Documents"), localDataDir: join(home, ".openmausbot"), homeDir: home,
+    documentsDir: join(home, "Documents"), localDataDir: join(home, ".edubot"), homeDir: home,
     platform: process.platform, hostname: "Ash-MBP", cloudOrigin: () => "https://omb-u-aaaaaaaaaaaa.fly.dev", fetch: async () => { throw new Error("no network in tests"); },
     trashItem: async (file) => { trashed.push(readFileSync(file, "utf8")); rmSync(file); }, markDownloaded: async () => {},
     createClient: () => cloud.client, watch: () => () => {}, freeBytes: () => 100 * GB, now: () => clock.now, lending, planDisk: () => ({ maxBytes: 20 * GB }),

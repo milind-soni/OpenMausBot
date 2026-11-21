@@ -50,8 +50,8 @@ async function say(bot: { id: string }, threadId: string, text: string) {
 const onTeam = (who: string) => (method: string, path: string, body?: unknown) => team.as(tokens[who]!, method, path, body);
 const teamBots = async (who: string) => (await onTeam(who)("GET", "/api/bots")).body.bots as Bot[];
 const cloudBots = async () => (await fx.onCloud("GET", "/api/bots")).body.bots as Bot[];
-const cloudHome = (...rest: string[]) => join(fx.root, "cloud", ".openmausbot", ...rest);
-const teamHome = (...rest: string[]) => join(team.home, ".openmausbot", ...rest);
+const cloudHome = (...rest: string[]) => join(fx.root, "cloud", ".edubot", ...rest);
+const teamHome = (...rest: string[]) => join(team.home, ".edubot", ...rest);
 
 /** A bot on My Cloud with two chats, a routine that is on, two files and notes about Ada. */
 async function botWithEverything(name: string) {

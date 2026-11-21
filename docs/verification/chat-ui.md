@@ -7,7 +7,7 @@ The `ui` group of `control-omb` drives the real React renderer — the same
 `scripts/testing/control-omb-ui.ts`). Everything it touches is disposable: the
 fake-engine fixture from `launch`, a Vite preview of the app, and one browser
 session whose `HOME` is the fixture's data directory. The user's app on port
-8799 and `~/.openmausbot` are never involved.
+8799 and `~/.edubot` are never involved.
 
 ## Launch
 

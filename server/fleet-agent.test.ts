@@ -71,7 +71,7 @@ describe.skipIf(process.platform === "win32")("fleet agent over its socket", () 
     await boot(m);
     const created = await fleetRequest(socketPath, "POST", "/workspaces", { slug: "acme", admins: ["owner@example.test"], portalUrl: "https://admin.example.test", openrouterKey: "scoped-secret", openrouterUrl: "https://admin.example.test/api/gateway/acme/openrouter/v1", openrouterModels: ["provider/first"], openrouterDefault: true });
     expect(created.status).toBe(200);
-    const configPath = join(root, "var/lib/openmausbot/acme/.openmausbot/config.json");
+    const configPath = join(root, "var/lib/openmausbot/acme/.edubot/config.json");
     const original = m.files.get(configPath);
     expect(JSON.parse(original!).defaultModelSelection).toEqual({ instanceId: "opencodeGo", model: `${MANAGED_OPENROUTER}/provider/first` });
     const path = join(root, "var/lib/openmausbot/acme/.config/opencode/opencode.json");
@@ -103,14 +103,14 @@ describe.skipIf(process.platform === "win32")("fleet agent over its socket", () 
     const created = await fleetRequest(socketPath, "POST", "/workspaces", { slug: "acme", admins: ["ada@example.test"], members: ["@acme.test"], cap: 40, anthropicKey: "sk-ant-fixture", brandJson: '{"name":"Acme"}', portalUrl: "https://admin.example.test", anthropicUrl: "https://admin.example.test/api/gateway/acme/anthropic" });
     expect(created).toMatchObject({ status: 200, body: { ok: true, log: [expect.stringContaining("https://acme.agentada.cc is ready")] } });
     expect(m.calls).toContain("useradd --system --create-home --home-dir " + join(root, "var/lib/openmausbot/acme") + " --shell /usr/sbin/nologin --user-group omb-acme");
-    expect(JSON.parse(m.files.get(join(root, "var/lib/openmausbot/acme/.openmausbot/config.json"))!)).toMatchObject({ anthropic: { key: "sk-ant-fixture", url: "https://admin.example.test/api/gateway/acme/anthropic" }, budgets: { monthlyUsd: 40 } });
+    expect(JSON.parse(m.files.get(join(root, "var/lib/openmausbot/acme/.edubot/config.json"))!)).toMatchObject({ anthropic: { key: "sk-ant-fixture", url: "https://admin.example.test/api/gateway/acme/anthropic" }, budgets: { monthlyUsd: 40 } });
     expect(m.files.get(join(root, "etc/openmausbot/instances/acme.env"))).toContain("OMB_LICENSE_KEY=omb1.k");
     expect(m.files.get(join(root, "etc/openmausbot/instances/acme.env"))).toContain("OMB_ADMIN_URL=https://admin.example.test");
     expect(m.files.get(join(root, "etc/openmausbot/instances/acme.env"))).toContain("OMB_ADMIN_WORKSPACE=acme");
 
     // The fixture's ledger is summarized by the mocked unprivileged-usage seam.
     // The filesystem suite exercises the real privilege-dropped child.
-    const dataDir = join(root, "var/lib/openmausbot/acme/.openmausbot");
+    const dataDir = join(root, "var/lib/openmausbot/acme/.edubot");
     mkdirSync(dataDir, { recursive: true });
     appendUsage(dataDir, { at: "2026-09-03T10:00:00.000Z", botId: "b", botName: "B", threadId: "t", instanceId: "claude", driverKind: "claudeAgent", model: "m", input: 10, output: 5, costUsd: 0.25, trigger: { kind: "owner" } });
     appendUsage(dataDir, { at: "2026-08-03T10:00:00.000Z", botId: "b", botName: "B", threadId: "t", instanceId: "claude", driverKind: "claudeAgent", model: "m", input: 10, output: 5, costUsd: 9, trigger: { kind: "owner" } });
@@ -218,7 +218,7 @@ describe.skipIf(process.platform === "win32")("fleet agent over its socket", () 
     m.files.set(layout.registryFile, JSON.stringify(emptyRegistry("agentada.cc")));
     const writeText = m.deps.writeText;
     m.deps.writeText = (path, content, mode, owner) => {
-      if (path.endsWith("/alpha/.openmausbot/config.json")) throw new Error("fixture write refused");
+      if (path.endsWith("/alpha/.edubot/config.json")) throw new Error("fixture write refused");
       writeText(path, content, mode, owner);
     };
     await boot(m);

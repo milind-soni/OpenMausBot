@@ -94,7 +94,7 @@ it("connects Ada's own Gmail as her own Composio user in the team's project", as
   const read = await team.signed("GET", "/api/cloud/team/admin");
   expect(read.body.people.apps).toEqual({ gmail: [ADA.email] });
   expect(JSON.stringify(read.body)).not.toContain(ADA_USER);
-  expect(readFileSync(join(team.home, ".openmausbot", "config.json"), "utf8"), "the team's saved Composio user is never a member's").not.toContain(ADA_USER);
+  expect(readFileSync(join(team.home, ".edubot", "config.json"), "utf8"), "the team's saved Composio user is never a member's").not.toContain(ADA_USER);
 }, hostTimeout(60_000));
 
 it("runs her Gmail only for her own request in her own chat, as her", async () => {

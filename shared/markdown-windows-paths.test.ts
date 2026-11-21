@@ -23,11 +23,11 @@ function parsed(markdown: string): { urls: string[]; titles: string[]; text: str
 describe("Windows path destinations", () => {
   it("keeps a drive path's backslash before punctuation in links, images and definitions", () => {
     expect(parsed([
-      "[a](C:\\Users\\Maus\\.openmausbot\\_drafts\\-old\\report.md)",
+      "[a](C:\\Users\\Maus\\.edubot\\_drafts\\-old\\report.md)",
       "![b](<D:\\.hidden\\chart one.png>)",
       "[c]: C:\\.cache\\notes.md",
     ].join("\n\n")).urls).toEqual([
-      "C:\\Users\\Maus\\.openmausbot\\_drafts\\-old\\report.md",
+      "C:\\Users\\Maus\\.edubot\\_drafts\\-old\\report.md",
       "D:\\.hidden\\chart one.png",
       "C:\\.cache\\notes.md",
     ]);
@@ -35,12 +35,12 @@ describe("Windows path destinations", () => {
 
   it("still reads escaped backslashes, destination delimiters and character references", () => {
     expect(parsed([
-      "[a](C:\\\\Users\\\\Maus\\\\.openmausbot\\\\report.md)",
+      "[a](C:\\\\Users\\\\Maus\\\\.edubot\\\\report.md)",
       "[b](C:\\Apps\\x\\(1\\).md)",
       "[c](<C:\\a\\<b\\>.md>)",
       "[d](C:\\Users\\A&amp;B\\.x.md)",
     ].join("\n\n")).urls).toEqual([
-      "C:\\Users\\Maus\\.openmausbot\\report.md",
+      "C:\\Users\\Maus\\.edubot\\report.md",
       "C:\\Apps\\x(1).md",
       "C:\\a<b>.md",
       "C:\\Users\\A&B\\.x.md",
@@ -48,9 +48,9 @@ describe("Windows path destinations", () => {
   });
 
   it("leaves other destinations, titles and prose to ordinary Markdown escaping", () => {
-    const result = parsed("[a](docs/\\_notes.md \"C:\\.title\") [b](/Users/maus/\\.x) C:\\Users\\Maus\\.openmausbot");
+    const result = parsed("[a](docs/\\_notes.md \"C:\\.title\") [b](/Users/maus/\\.x) C:\\Users\\Maus\\.edubot");
     expect(result.urls).toEqual(["docs/_notes.md", "/Users/maus/.x"]);
     expect(result.titles).toEqual(["C:.title"]);
-    expect(result.text).toContain("C:\\Users\\Maus.openmausbot");
+    expect(result.text).toContain("C:\\Users\\Maus.edubot");
   });
 });

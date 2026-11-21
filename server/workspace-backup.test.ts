@@ -289,11 +289,11 @@ describe("encrypted full workspace backups", () => {
   // A Windows PC moves to a Linux Cloud; restored on Windows, its paths are this computer's own and are kept.
   it.skipIf(process.platform === "win32")("brings a Windows computer's data folder over wherever it is written, and clears and lists the folders and files left on that PC", async () => {
     const source = directory();
-    const windows = "C:\\Users\\Ada\\.openmausbot", site = "C:\\Users\\Ada\\Projects\\site";
+    const windows = "C:\\Users\\Ada\\.edubot", site = "C:\\Users\\Ada\\Projects\\site";
     const soul = `Read ${windows}\\files\\brief.md before you start.`;
     json(join(source, "bots.json"), [
       { id: "bot", threadId: "thread", cwd: site, soul, tasks: [
-        { threadId: "thread", cwd: "c:\\users\\ada\\.openmausbot\\task-workspaces\\bot\\thread", resumeCursors: { claude: "kept" } },
+        { threadId: "thread", cwd: "c:\\users\\ada\\.edubot\\task-workspaces\\bot\\thread", resumeCursors: { claude: "kept" } },
         { threadId: "other", cwd: site, resumeCursors: { claude: "only-on-that-pc" } },
       ] },
       { id: "helper", threadId: "helper-thread", soul: "No paths here.", tasks: [{ threadId: "helper-thread", cwd: null }] },
@@ -303,7 +303,7 @@ describe("encrypted full workspace backups", () => {
     json(join(source, "routines.json"), { version: 1, routines: [{ id: "routine", botId: "bot", enabled: true, prompt }], runs: [] });
     mkdirSync(join(source, "workspaces", "bot", "memory"), { recursive: true });
     writeFileSync(join(source, "workspaces", "bot", "MEMORY.md"),
-      "- The brief: c:\\users\\ada\\.openmausbot\\files\\brief.md\n- Drafts go to C:/Users/Ada/.openmausbot/files/drafts/\n- C:\\Users\\Ada\\.openmausbot-old\\notes.md is an old copy\n");
+      "- The brief: c:\\users\\ada\\.edubot\\files\\brief.md\n- Drafts go to C:/Users/Ada/.edubot/files/drafts/\n- C:\\Users\\Ada\\.edubot-old\\notes.md is an old copy\n");
     writeFileSync(join(source, "workspaces", "bot", "memory", "people.md"), "Ada prefers short replies.\n");
     mkdirSync(join(source, "bots", "bot"), { recursive: true });
     writeFileSync(join(source, "bots", "bot", "SOUL.md"), soul);
@@ -327,10 +327,10 @@ describe("encrypted full workspace backups", () => {
     expect(readJson(join(target, "routines.json")).routines[0].prompt)
       .toBe(`Each morning read ${target}/files/brief.md, compare it with C:\\Users\\Ada\\Desktop\\x.docx, and save ${target}/files/out/report.md.`);
     expect(readFileSync(join(target, "workspaces", "bot", "MEMORY.md"), "utf8"))
-      .toBe(`- The brief: ${target}/files/brief.md\n- Drafts go to ${target}/files/drafts/\n- C:\\Users\\Ada\\.openmausbot-old\\notes.md is an old copy\n`);
+      .toBe(`- The brief: ${target}/files/brief.md\n- Drafts go to ${target}/files/drafts/\n- C:\\Users\\Ada\\.edubot-old\\notes.md is an old copy\n`);
     expect(readFileSync(join(target, "workspaces", "bot", "memory", "people.md"), "utf8")).toBe("Ada prefers short replies.\n");
     expect(readFileSync(join(target, "bots", "bot", "SOUL.md"), "utf8")).toBe(bot.soul);
-    const leftBehind = { bots: 1, paths: [site, "C:\\Users\\Ada\\Shared", "C:\\Users\\Ada\\.openmausbot-old\\notes.md", "C:\\Users\\Ada\\Desktop\\x.docx"] };
+    const leftBehind = { bots: 1, paths: [site, "C:\\Users\\Ada\\Shared", "C:\\Users\\Ada\\.edubot-old\\notes.md", "C:\\Users\\Ada\\Desktop\\x.docx"] };
     expect(result.leftBehind).toEqual(leftBehind);
     expect(readLastWorkspaceRestore(target)!.leftBehind).toEqual(leftBehind);
     expect(readLastWorkspaceRestore(target)!.pathsRewritten).toBe(true);

@@ -30,7 +30,7 @@ import { createServerSupervisor } from "./server-supervisor.mjs";
 import { serverChildLaunch } from "./server-child-launch.mjs";
 import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-link.mjs";
 import { chatLinkFrom, chatLinkFromCommandLine } from "./chat-link.mjs"; import { installDesktopNotifications } from "./desktop-notifications.mjs";
-import { createOrganizationEntry, isOrganizationDeepLink, takeOrganizationDeepLink, organizationRestartIntent, withOrganizationRestartIntent, withoutOrganizationRestartIntent } from "./organization-entry.mjs";
+import { ORGANIZATION_DEEP_LINK, createOrganizationEntry, isOrganizationDeepLink, takeOrganizationDeepLink, organizationRestartIntent, withOrganizationRestartIntent, withoutOrganizationRestartIntent } from "./organization-entry.mjs";
 import { windowBackground, windowChromeOptions } from "./window-chrome.mjs";
 import { createAllWindowsClosedQuit } from "./window-all-closed.mjs";
 import { createStartupScreen } from "./startup-screen.mjs";
@@ -181,7 +181,8 @@ function applyUnreadBadge(win = mainWindow) {
 // A launch with --disable-gpu (a desktop entry or a user workaround) renders on the CPU too.
 const linuxSoftwareRendering = process.platform === "linux" && (linuxDisablesGpu() || app.commandLine.hasSwitch("disable-gpu"));
 if (linuxSoftwareRendering) app.disableHardwareAcceleration();
-if (process.platform === "linux") { app.setDesktopName("com.openmausbot.app.desktop"); disableWaylandColorManager(app.commandLine); }
+if (process.platform === "linux") { app.setDesktopName(DESKTOP_ENTRY_NAME); disableWaylandColorManager(app.commandLine); }
+if (process.platform === "win32") app.setAppUserModelId(APP_ID);
 
 if (!app.requestSingleInstanceLock()) {
   console.log("[desktop] Edu Bot is already running — focusing that window");
@@ -249,7 +250,7 @@ app.on("open-url", (event, url) => {
 
 app.on("second-instance", (_event, commandLine) => {
   if (takeOrganizationDeepLink(commandLine)) {
-    queueOrganizationEntry("openmausbot://organization");
+    queueOrganizationEntry(ORGANIZATION_DEEP_LINK);
     return;
   }
   if (cloudEntry.fromArgs(commandLine)) return; if (teamLinks.fromArgs(commandLine)) return;
@@ -336,7 +337,7 @@ const serverSupervisor = createServerSupervisor({
 
 function desktopDataDir() {
   // An empty OMB_DATA_DIR falls back here too; server/config.ts would not, so the child gets this path.
-  return process.env.OMB_DATA_DIR || path.join(app.getPath("home"), ".openmausbot");
+  return process.env.OMB_DATA_DIR || path.join(app.getPath("home"), DATA_DIR_NAME);
 }
 
 async function stopUtilityServer(proc, timeoutMs = UTILITY_SERVER_STOP_TIMEOUT_MS) {
@@ -455,6 +456,7 @@ import { autoStartCompanion } from "./companion-autostart.mjs";
 import { createPhoneLinkRoutes } from "./phone-link-routes.mjs"; import { reachableForKeepAwake } from "./keep-awake.mjs";
 import { createRoutineWakeHold, rememberRoutineWake, routineWakeSettings } from "./routine-wake.mjs";
 import { CREDENTIAL_PATCH, credentialSaveError } from "./credential-patch.mjs";
+import { APP_ID, DATA_DIR_NAME, DEEP_LINK_SCHEME, DESKTOP_ENTRY_NAME, dataDirNameFor } from "./app-identity.mjs";
 
 /** Second wall after preload's reduced bridge: computer-controlling IPC answers only the local server's UI.
  * Declared before any handler registration (temporal dead zone). */
@@ -1505,7 +1507,7 @@ function refreshApplicationMenu() {
       onSwitch: (id) => void workspaceMenuAction(() => switchEnvironment(id)),
       onAddFromClipboard: () => void addServerFromClipboard(),
       onConnect: () => void workspaceMenuAction(openWorkspaceSettings),
-      onOrganizationSignIn: () => queueOrganizationEntry("openmausbot://organization"),
+      onOrganizationSignIn: () => queueOrganizationEntry(ORGANIZATION_DEEP_LINK),
       onForget: (id) => void workspaceMenuAction(() => forgetEnvironment(id)),
       onOpenSettings: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("app:open-settings"); },
       openAtLogin: loginItem.available() ? { checked: loginItem.chosen(), onToggle: on => { loginItem.choose(on); refreshApplicationMenu(); } } : null,
@@ -1542,9 +1544,7 @@ function navigateMainWindow(url, keepingRecovery = false) {
 let rememberedHome = null;
 
 function acquireDataDirLeaseFor(dir) {
-  return dir === desktopDataDir()
-    ? acquireDataDirLease(dir, { t: nativeT, legacyDataDir: path.join(app.getPath("home"), ".opengrokbot") })
-    : acquireDataDirLease(dir, { t: nativeT });
+  return acquireDataDirLease(dir, { t: nativeT });
 }
 
 /** Pause the supervisor first, or its recovery forks on the wrong data dir; resume() stays in the finally. */
@@ -1669,7 +1669,7 @@ function createLocalEnvironment(name, dataDir) {
       ? name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
       : "";
     if (typeof name !== "string" || !name.trim()) return { ok: false, error: "name", state };
-    candidateDir = path.join(os.homedir(), `.openmausbot-${slug && slug !== "clean" && slug !== "profiles" ? slug : randomUUID().slice(0, 8)}`);
+    candidateDir = path.join(os.homedir(), dataDirNameFor(slug && slug !== "clean" && slug !== "profiles" ? slug : randomUUID().slice(0, 8)));
   } else {
     candidateDir = typeof dataDir === "string" ? dataDir.trim() : "";
     if (
@@ -1889,7 +1889,7 @@ async function forgetEnvironment(id, purge = false, confirmed = false) {
     const resolvedCanon = canonical(resolved);
     const rootCanon = canonical(root);
     if (runningDataDir && canonical(runningDataDir) === resolvedCanon) return { ok: false, error: "active" };
-    if (path.basename(resolved).startsWith(".openmausbot") && resolvedCanon !== rootCanon && !resolvedCanon.startsWith(rootCanon + path.sep)) {
+    if (path.basename(resolved).startsWith(DATA_DIR_NAME) && resolvedCanon !== rootCanon && !resolvedCanon.startsWith(rootCanon + path.sep)) {
       try {
         await fs.promises.rm(resolved, { recursive: true, force: true });
       } catch (error) {
@@ -2222,7 +2222,7 @@ ipcMain.handle("desktop:export-diagnostics", localOrHome("desktop:export-diagnos
   return result.filePath;
 }));
 
-// The path is renderer-controlled: it must resolve inside ~/.openmausbot to a regular file, never a symlink escape.
+// The path is renderer-controlled: it must resolve inside the data folder to a regular file, never a symlink escape.
 ipcMain.handle("desktop:save-file", localOnly("desktop:save-file", async (event, rawPath) => {
   return withSavableFile(rawPath, { home: os.homedir() }, async ({ defaultName, copyTo }) => {
     const parent = BrowserWindow.fromWebContents(event.sender);
@@ -2831,9 +2831,7 @@ app.whenReady().then(async () => { launchRecord.mark("ready");
   if (app.isPackaged) {
     try { launchRecord.begin("lease");
       // Acquire before either plaintext credential migration touches config.json.
-      desktopDataDirLease = acquireDataDirLease(bootDataDir, { t: nativeT,
-        legacyDataDir: path.join(app.getPath("home"), ".opengrokbot"),
-      });
+      desktopDataDirLease = acquireDataDirLease(bootDataDir, { t: nativeT });
       runningDataDir = bootDataDir; launchRecord.end("lease"); launchRecord.mark("leaseTaken");
     } catch (error) {
       dialog.showErrorBox(
@@ -2846,7 +2844,7 @@ app.whenReady().then(async () => { launchRecord.mark("ready");
   }
   installServerSessions({ app, defaultSession: session.defaultSession, serverPort: () => SERVER_PORT,
     ownerToken: () => (app.isPackaged && serverReady ? desktopMutationToken : null) });
-  if (app.isPackaged) app.setAsDefaultProtocolClient("openmausbot");
+  if (app.isPackaged) app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
   if (process.platform === "darwin") app.dock.setIcon(APP_ICON);
   secureCredentials = await bootHeadStart.take("credentials"); launchRecord.mark("keysRead");
   // An orphaned third-party key with no clear handler left: drop it rather than keep it at rest.
@@ -2968,9 +2966,7 @@ app.whenReady().then(async () => { launchRecord.mark("ready");
       }
       desktopDataDirLease = null;
       try {
-        desktopDataDirLease = acquireDataDirLease(desktopDataDir(), { t: nativeT,
-          legacyDataDir: path.join(app.getPath("home"), ".opengrokbot"),
-        });
+        desktopDataDirLease = acquireDataDirLease(desktopDataDir(), { t: nativeT });
         runningDataDir = desktopDataDir();
       } catch (error) {
         dialog.showErrorBox(

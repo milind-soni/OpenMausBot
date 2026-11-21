@@ -184,7 +184,7 @@ function lend(file: string, power = createCloudPowerGate()) {
 }
 
 async function boot() {
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".edubot");
   // Off the internet: My Cloud's own fetches go nowhere, and its own way out resolves no name, so it reaches nothing.
   const offlinePrelude = `data:text/javascript,${encodeURIComponent([
     'import dns from "node:dns/promises"; import { syncBuiltinESMExports } from "node:module";',
@@ -215,7 +215,7 @@ async function boot() {
 
 beforeAll(async () => {
   home = realpathSync(mkdtempSync(join(tmpdir(), "omb-use-my-mac-")));
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".edubot");
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(turnDumps());
   const cli = join(home, "fixture-claude.mjs");

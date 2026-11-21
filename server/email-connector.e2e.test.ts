@@ -64,7 +64,7 @@ describe.skipIf(!process.env.OMB_EMAIL_REAL_TEST)("Email end to end", () => {
       for (const raw of MAIL) await seed.append("INBOX", Buffer.from(raw), []);
     } finally { lock.release(); await seed.logout(); }
     home = mkdtempSync(join(tmpdir(), "omb-email-e2e-"));
-    const dataDir = join(home, ".openmausbot");
+    const dataDir = join(home, ".edubot");
     mkdirSync(dataDir, { recursive: true });
     const cli = join(home, "fixture-claude.mjs");
     writeFileSync(cli, `#!/usr/bin/env node

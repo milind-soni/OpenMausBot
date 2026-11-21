@@ -140,7 +140,7 @@ const PROBE_MAX_OUTPUT_BYTES = 1024 * 1024;
 function probeLoginShellPath(): void {
   const shell = process.env.SHELL || "/bin/zsh";
   // -l -i: nvm and friends live in .zshrc/.bashrc, which only interactive shells read; a marker isolates $PATH from rc noise.
-  // detached: an interactive shell makes its job the terminal's foreground, which stops `openmausbot setup` and its sign-in CLI (SIGTTOU).
+  // detached: an interactive shell makes its job the terminal's foreground, which stops `edubot setup` and its sign-in CLI (SIGTTOU).
   const child = spawn(shell, ["-l", "-i", "-c", 'printf "__OMB_PATH__%s__OMB_END__" "$PATH"'], {
     detached: true,
     stdio: ["ignore", "pipe", "ignore"],

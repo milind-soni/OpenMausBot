@@ -63,7 +63,7 @@ transport runs it. Podman cannot replace the Docker CLI here: this backend only 
 OpenMausBot connects only through a named alias in your `~/.ssh/config` — you type the alias into
 Settings → API keys, nothing else. Every bot action becomes a `docker exec` over SSH, so the app
 supplies connection sharing and fail-fast timeouts itself: it runs each VPS command through its own
-`ssh_config` (under `~/.openmausbot/ssh/`) that includes your file first and fills in `ControlMaster`,
+`ssh_config` (under `~/.edubot/ssh/`) that includes your file first and fills in `ControlMaster`,
 `ControlPersist`, keepalives and a connect timeout wherever your alias leaves them unset. Anything your
 alias sets wins. Startup, previews, bot tools and their connection probes use the same settings.
 The live desktop's tunnel is the exception: it opens its own connection (`ControlPath=none`), so
@@ -117,7 +117,7 @@ alias until it can be listed. Any alias from your
 
 Some cloud boxes pause after a while without traffic and refuse SSH until they are resumed. On macOS and Linux
 you can give the app a wake step: put an executable script named `wake` in the app's SSH folder
-(`~/.openmausbot/ssh/wake`, or `ssh/wake` in your data directory). When a server cannot be reached, the app
+(`~/.edubot/ssh/wake`, or `ssh/wake` in your data directory). When a server cannot be reached, the app
 runs it once with the alias as its only argument (`wake my-vps`), then tries the connection once more. Make the
 script resume the box with your provider's command or API and return once the server accepts SSH again; it gets
 up to two minutes. If it exits with an error, the app shows that error next to the SSH one. Without the file
@@ -125,7 +125,7 @@ nothing changes. Only someone who can write to the data directory can add it; no
 
 ```sh
 #!/bin/sh
-# ~/.openmausbot/ssh/wake: $1 is the SSH alias the app could not reach.
+# ~/.edubot/ssh/wake: $1 is the SSH alias the app could not reach.
 my-provider resume "$1" && my-provider wait-ready "$1"
 ```
 
@@ -173,7 +173,7 @@ internet, so firewall the machine: its SSH and Docker ports should accept connec
 - **Firewall the VPS to SSH only**, ideally from your IP. Nothing OpenMausBot does needs any other inbound
   port open, so anything else open is pure attack surface.
 - **Nothing sensitive is stored.** The only thing OpenMausBot persists is the alias name itself
-  (`~/.openmausbot/config.json`, plus a bot's own alias in `bots.json` when it has one); keys, passphrases,
+  (`~/.edubot/config.json`, plus a bot's own alias in `bots.json` when it has one); keys, passphrases,
   and agent state stay with SSH. Aliases are also kept out of the settings and bot records that paired phones
   and members of a shared workspace receive — they get configured-or-not, never the name. An SSH or Docker
   error that a bot reports in its conversation can still quote a server's name.

@@ -541,7 +541,7 @@ describe("the bots' browser host by default", () => {
 
 describe("a deleted bot's browser", () => {
   const PATH_ENGINE = "/usr/local/bin/agent-browser";
-  const MANAGED_ENGINE = "/data/.openmausbot/tools/agent-browser";
+  const MANAGED_ENGINE = "/data/.edubot/tools/agent-browser";
   const folders: string[] = [];
   afterEach(() => {
     vi.unstubAllEnvs();

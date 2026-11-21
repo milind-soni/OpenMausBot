@@ -80,7 +80,7 @@ describe("the box's environment allow-list", () => {
       OPENAI_API_KEY: "sk-1", CODEX_HOME: "/data/.codex", OMB_HOOK_URL: "http://127.0.0.1:8799/api/internal/hook", OMB_COMMS_TOKEN: "cap",
       HTTPS_PROXY: "http://127.0.0.1:3128", NO_PROXY: "127.0.0.1", NPM_CONFIG_LOGLEVEL: "error", ELECTRON_RUN_AS_NODE: "1",
       OMB_CLOUD_BOOTSTRAP_SECRET: "s", OMB_CLOUD_MACHINE_ID: "m", OMB_CLOUD_ADMIN_URL: "https://a", OMB_LICENSE_KEY: "k",
-      OMB_DATA_DIR: "/data/.openmausbot", OMB_PORT: "8799", OMB_LOOPBACK_TRUST: "owner", AWS_SECRET_ACCESS_KEY: "aws", SSH_AUTH_SOCK: "/x",
+      OMB_DATA_DIR: "/data/.edubot", OMB_PORT: "8799", OMB_LOOPBACK_TRUST: "owner", AWS_SECRET_ACCESS_KEY: "aws", SSH_AUTH_SOCK: "/x",
       SOME_RANDOM_NAME: "x", EMPTY: undefined,
     });
     expect(Object.keys(kept).sort()).toEqual([

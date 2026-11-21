@@ -143,7 +143,7 @@ export async function exportJob(client: HeadlessClient, options: ExportOptions, 
   const maxBytes = options.maxBytes ?? 500_000_000;
   const job = await readJob(client, options.threadId, { since: String(options.since ?? 0), full: "1" });
   const nodes: Rec[] = (job.nodes ?? []).filter((node: Rec) => !options.root || node.rootId === options.root);
-  if (options.root && !nodes.length) throw usageError(`no job with root ${options.root} in this conversation`, "openmausbot export TARGET without --root writes all of it");
+  if (options.root && !nodes.length) throw usageError(`no job with root ${options.root} in this conversation`, "edubot export TARGET without --root writes all of it");
   if (options.force) removeEarlierExport(out);
   for (const dir of ["transcripts", "files", "screens"]) mkdirSync(join(out, dir), { recursive: true });
 

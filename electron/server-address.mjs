@@ -1,11 +1,12 @@
 // What a person types or pastes to reach a MausBot server: a pairing link, an address, an address and a code typed
-// apart, or a code on its own. One reader for the desktop's Connect sheet, `openmausbot connect` and the MCP bridge.
+// apart, or a code on its own. One reader for the desktop's Connect sheet, `edubot connect` and the MCP bridge.
 import { isTailnetHost, isTailnetName } from "./tailnet.mjs";
+import { PHONE_LINK_SCHEME } from "./app-identity.mjs";
 
 export const PAIRING_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 export const PAIRING_CODE_LENGTH = 12;
 const PAIRING_CREDENTIAL = /^omb_pair_[A-Za-z0-9_-]{43}$/;
-/** The port `openmausbot serve` and the desktop app listen on. */
+/** The port `edubot serve` and the desktop app listen on. */
 export const DEFAULT_PORT = 8799;
 export const EXAMPLE_ADDRESS = `http://192.168.1.20:${DEFAULT_PORT}`;
 
@@ -123,7 +124,7 @@ function decoded(value) {
   }
 }
 
-/** `{ address, secret }` from an `openmausbot://pair` link; only one naming a server's own http(s) origin. */
+/** `{ address, secret }` from a phone pairing link (PHONE_LINK_SCHEME); only one naming a server's own http(s) origin. */
 function appLink(url) {
   const address = url.searchParams.get("address") ?? "";
   if (!/^https?:\/\//i.test(address)) return null;
@@ -150,7 +151,7 @@ export function parseServerInput(addressInput, codeInput = "") {
   if (asCode.kind === "wrong" && asCode.problem !== "notACode") return { ok: false, problem: asCode.problem };
   if (/[\s\\]/.test(text)) return { ok: false, problem: "notAnAddress" };
   let secret = null;
-  if (/^openmausbot:/i.test(text)) {
+  if (text.toLowerCase().startsWith(`${PHONE_LINK_SCHEME}:`)) {
     let link;
     try {
       link = appLink(new URL(text));

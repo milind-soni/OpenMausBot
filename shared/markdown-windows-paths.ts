@@ -1,8 +1,8 @@
 import type { CompileContext, Extension, Token } from "mdast-util-from-markdown";
 
 // Markdown reads a backslash before punctuation as an escape, so a link to
-// C:\Users\me\.openmausbot\report.md would lose the separator before
-// ".openmausbot". In a link, image or definition destination that starts with
+// C:\Users\me\.edubot\report.md would lose the separator before
+// ".edubot". In a link, image or definition destination that starts with
 // a drive letter, such a backslash stays a separator; "\\" and the delimiters
 // "\(", "\)", "\<" and "\>" still escape. The server and the client both parse
 // with this extension, so the file authorized is the file rendered.

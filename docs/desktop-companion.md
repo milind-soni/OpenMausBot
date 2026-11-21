@@ -67,7 +67,7 @@ holds it awake while a way in is on, and that includes **Your other computers**.
 ## Without Tailscale
 
 Share the computer with **My Cloud** from its own app, and open My Cloud from the other computer. A server of
-your own (`openmausbot serve`) is the other choice: see [self-hosting](self-hosting.md).
+your own (`edubot serve`) is the other choice: see [self-hosting](self-hosting.md).
 
 ## The earlier desktop companion connection
 

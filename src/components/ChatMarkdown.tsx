@@ -34,6 +34,7 @@ export { CodeBlock, HIGHLIGHT_CACHE_MAX, HIGHLIGHT_CACHE_MAX_CHARS, HIGHLIGHT_MA
 import { FilePreviewButton } from "./FilePreviewButton";
 import { SaveIconButton, useHtmlPreview } from "./HtmlFilePreview";
 import { useRevealOriginalMenu } from "./RevealOriginalMenu";
+import { DEEP_LINK_SCHEME } from "../../electron/app-identity.mjs";
 
 const mermaidCache = new Map<string, string>();
 const MERMAID_CACHE_MAX = 50;
@@ -781,7 +782,7 @@ const MARKDOWN_COMPONENTS: Components = {
 };
 
 // A thread link is "#" directly before a title, or an app link. A heading's "## " never reaches the plugin as text.
-const MAY_LINK_THREAD = /#[^\s#]|openmausbot/i;
+const MAY_LINK_THREAD = new RegExp(String.raw`#[^\s#]|${DEEP_LINK_SCHEME}`, "i");
 const NO_THREAD_REFS: ThreadRefsValue = { threads: [] };
 
 // One plugin list for everything every message shares; a message adds mentions only when it has an "@" and thread

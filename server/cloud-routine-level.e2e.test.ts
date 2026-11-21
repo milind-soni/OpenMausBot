@@ -60,7 +60,7 @@ async function adminPairing(): Promise<string> {
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-cloud-routine-level-"));
-  dataDir = join(home, ".openmausbot");
+  dataDir = join(home, ".edubot");
   mkdirSync(dataDir, { recursive: true });
   // Claude's turns hold until the test writes the release file; each engine dumps its latest start.
   const claude = join(home, "claude-cli.mjs");

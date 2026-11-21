@@ -285,7 +285,7 @@ it("remote access off refuses a phone code and signs phones out, while every mem
 it("a kept policy applies at once after a restart with the Admin unreachable, and never lapses; a document it can't read keeps the last good one and says so", async () => {
   const policy = publish({ allowedEngines: ["codex"] })!;
   await nudged(policy.fingerprint);
-  const kept = JSON.parse(readFileSync(join(team.home, ".openmausbot", TEAM_POLICY_FILE), "utf8"));
+  const kept = JSON.parse(readFileSync(join(team.home, ".edubot", TEAM_POLICY_FILE), "utf8"));
   expect(kept).toMatchObject({ teamId: team.id, fingerprint: policy.fingerprint, version: policy.version });
 
   admin.answer = { status: 503, body: "down", type: "text/plain" };
@@ -312,7 +312,7 @@ it("a kept policy applies at once after a restart with the Admin unreachable, an
   admin.answer = { status: 404, body: { error: "Not found." }, type: "application/json" };
   await team.signed("POST", "/api/cloud/team/policy-changed", {});
   await expect.poll(async () => (await team.as(owner, "GET", "/api/config")).body.managedPolicy, { timeout: 15_000, interval: 100 }).toBeNull();
-  expect(existsSync(join(team.home, ".openmausbot", TEAM_POLICY_FILE))).toBe(false);
+  expect(existsSync(join(team.home, ".edubot", TEAM_POLICY_FILE))).toBe(false);
 }, hostTimeout(120_000));
 
 it("require a fresh policy: with none to be had, new turns are refused in plain words; a good fetch lets them through", async () => {
@@ -322,7 +322,7 @@ it("require a fresh policy: with none to be had, new turns are refused in plain 
   expect(engineRan()).toBe(true);
 
   // A restart long after the last good fetch, with the Admin down: the kept rules say a fresh one is required.
-  const file = join(team.home, ".openmausbot", TEAM_POLICY_FILE);
+  const file = join(team.home, ".edubot", TEAM_POLICY_FILE);
   admin.answer = { status: 503, body: "down", type: "text/plain" };
   await team.relaunch();
   writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), fetchedAt: Date.now() - 3_600_000 }));

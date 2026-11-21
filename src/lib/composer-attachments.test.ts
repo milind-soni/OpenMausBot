@@ -33,7 +33,7 @@ describe("discardUnsentUpload", () => {
     const fetchMock = vi.fn(async () => new Response("{}"));
     vi.stubGlobal("fetch", fetchMock);
     try {
-      discardUnsentUpload(fileAttachment("notes.txt", "/home/a/.openmausbot/attachments/0f1e2d3c-aaaa-4bbb-8ccc-123456789abc.txt", 3));
+      discardUnsentUpload(fileAttachment("notes.txt", "/home/a/.edubot/attachments/0f1e2d3c-aaaa-4bbb-8ccc-123456789abc.txt", 3));
       discardUnsentUpload({ kind: "paste", id: "p", text: "hi", size: 2, lines: 1 });
       discardUnsentUpload({ kind: "image", id: "i", path: "", name: "x.png", size: 0, mime: "image/png", uploading: true });
       expect(fetchMock.mock.calls).toEqual([["/api/attachments/0f1e2d3c-aaaa-4bbb-8ccc-123456789abc.txt", { method: "DELETE" }]]);
@@ -85,9 +85,9 @@ function image(path: string): ImageAttachment {
 
 describe("composeMessage with images", () => {
   it("emits an attached-image tag carrying the server path and display name", () => {
-    const prompt = composeMessage("what is this?", [image("/home/u/.openmausbot/attachments/abc.png")]);
+    const prompt = composeMessage("what is this?", [image("/home/u/.edubot/attachments/abc.png")]);
     expect(prompt).toBe(
-      'what is this?\n\n<attached-image path="/home/u/.openmausbot/attachments/abc.png" name="shot.png" />',
+      'what is this?\n\n<attached-image path="/home/u/.edubot/attachments/abc.png" name="shot.png" />',
     );
   });
 
@@ -150,16 +150,16 @@ describe("splitTranscriptAttachments", () => {
 
   it("uses the saved basename for old file tags without a name", () => {
     const { display, files } = splitTranscriptAttachments(
-      '<attached-file path="/home/me/.openmausbot/attachments/report.pdf" />',
+      '<attached-file path="/home/me/.edubot/attachments/report.pdf" />',
     );
     expect(display).toBe("");
     expect(files).toEqual([
-      { path: "/home/me/.openmausbot/attachments/report.pdf", name: "report.pdf" },
+      { path: "/home/me/.edubot/attachments/report.pdf", name: "report.pdf" },
     ]);
   });
 
   it("marks only private-store UUID attachment names as actionable", () => {
-    const privatePath = "/home/me/.openmausbot/attachments/123e4567-e89b-42d3-a456-426614174000.pdf";
+    const privatePath = "/home/me/.edubot/attachments/123e4567-e89b-42d3-a456-426614174000.pdf";
     expect(splitTranscriptAttachments(`<attached-file path="${privatePath}" name="Report.pdf" />`).files[0])
       .toMatchObject({ path: privatePath, name: "Report.pdf", private: true });
     expect(splitTranscriptAttachments('<attached-file path="/Users/me/Desktop/report.pdf" />').files[0]?.private)

@@ -19,7 +19,7 @@ async function tokens(ctx: VerbContext): Promise<Rec[]> {
 
 async function create(ctx: VerbContext): Promise<VerbOutcome> {
   const name = ctx.positionals[0]?.trim();
-  if (!name) throw usageError("name the token", "openmausbot token create NAME --out FILE [--scope client|admin] [--expires 90d]");
+  if (!name) throw usageError("name the token", "edubot token create NAME --out FILE [--scope client|admin] [--expires 90d]");
   const out = flag(ctx.flags, "out")?.trim();
   if (!out) throw usageError("--out FILE is required: where to keep the token");
   if (existsSync(out) && ctx.flags.force !== true) throw usageError(`${out} already exists`, "pass --force to replace it");
@@ -35,7 +35,7 @@ async function create(ctx: VerbContext): Promise<VerbOutcome> {
   if (session.token !== true) {
     // A server from before tokens opened an ordinary session that renews itself: end it rather than hand it out.
     if (typeof session.id === "string") await client.json(`/api/auth/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" }).catch(() => undefined);
-    throw new HeadlessError("this OpenMausBot server cannot make access tokens", EXIT.unreachable, "update OpenMausBot on the server, or use openmausbot connect");
+    throw new HeadlessError("this OpenMausBot server cannot make access tokens", EXIT.unreachable, "update OpenMausBot on the server, or use edubot connect");
   }
   writeTokenFile(out, paired.token, ctx.flags.force === true);
   return {
@@ -43,8 +43,8 @@ async function create(ctx: VerbContext): Promise<VerbOutcome> {
     exitCode: EXIT.done,
     human: [
       `Token "${session.label}" (${scope === "admin" ? "full access" : "chat and approvals only"}) until ${day(session.expiresAt)}, id ${session.id}.`,
-      `Saved to ${out}. Use it with: openmausbot ${scope === "admin" ? "doctor" : "bots"} --url ${client.baseUrl} --token-file ${out}`,
-      `Revoke it with: openmausbot token revoke ${session.id}`,
+      `Saved to ${out}. Use it with: edubot ${scope === "admin" ? "doctor" : "bots"} --url ${client.baseUrl} --token-file ${out}`,
+      `Revoke it with: edubot token revoke ${session.id}`,
     ],
   };
 }
@@ -56,15 +56,15 @@ async function list(ctx: VerbContext): Promise<VerbOutcome> {
     result: { tokens: found }, exitCode: EXIT.done,
     human: found.length
       ? found.map((token) => `${token.name} · ${token.scope} · until ${day(token.expiresAt)} · last used ${day(token.lastSeenAt)} · id ${token.id}`)
-      : ["No access tokens. Make one with: openmausbot token create NAME --out FILE"],
+      : ["No access tokens. Make one with: edubot token create NAME --out FILE"],
   };
 }
 
 async function revoke(ctx: VerbContext): Promise<VerbOutcome> {
   const id = ctx.positionals[0]?.trim();
-  if (!id) throw usageError("give the token's id", "openmausbot token list shows them");
+  if (!id) throw usageError("give the token's id", "edubot token list shows them");
   const token = (await tokens(ctx)).find((session) => session.id === id);
-  if (!token) throw new HeadlessError(`no access token with id ${id}`, EXIT.failed, "openmausbot token list shows them; a device's session is revoked with openmausbot sessions revoke ID");
+  if (!token) throw new HeadlessError(`no access token with id ${id}`, EXIT.failed, "edubot token list shows them; a device's session is revoked with edubot sessions revoke ID");
   await (await ctx.client()).json(`/api/auth/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
   return { result: { ok: true, revoked: { id, name: token.label } }, exitCode: EXIT.done, human: [`Revoked "${token.label}" (${id}): it no longer works.`] };
 }

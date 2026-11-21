@@ -92,7 +92,7 @@ describe("browser tool shaping", () => {
       expect(shaped.content[0].text).toContain("missing libraries the browser needs (libatk-1.0.so.0)");
       // agent-browser's longer-stderr form of the marker counts too
       expect(shape({ content: [{ type: "text", text: launch.replace("Chrome stderr:", "Chrome stderr (last 20 lines):") }], isError: true }).content[0].text).toContain("--with-deps");
-      expect(shaped.content[0].text).toContain("`sudo openmausbot browser install --with-deps`");
+      expect(shaped.content[0].text).toContain("`sudo edubot browser install --with-deps`");
       // a page that merely mentions the loader's words, or another failure, gets no install advice
       const echoed = "Error: page script failed: /usr/bin/app: error while loading shared libraries: libfoo.so.1: cannot open shared object file";
       // a page error that quotes a whole launch error, marker included, did not come from our launch

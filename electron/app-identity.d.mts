@@ -1,0 +1,16 @@
+export const APP_ID: "io.github.eduardomoraga.edubot";
+export const DESKTOP_ENTRY_NAME: "io.github.eduardomoraga.edubot.desktop";
+export const PRODUCT_NAME: "Edu Bot";
+export const CLI_NAME: "edubot";
+export const DATA_DIR_NAME: ".edubot";
+export const COMPANION_DIR_NAME: ".edubot-companion";
+export const SERVER_CHILD_DIR_NAME: ".edubot-server-child";
+export const SECRET_FOLDER_NAME: ".edubot-secrets";
+export function dataDirNameFor(slug: string): string;
+export const DEEP_LINK_SCHEME: "edubot";
+export const DEEP_LINK_PREFIX: "edubot://";
+export const PHONE_LINK_SCHEME: "openmausbot";
+export const PHONE_DISCOVERY_SERVICE_TYPE: "_openmausbot._tcp";
+export const LINUX_EXECUTABLE_NAME: "edu-bot";
+export const LINUX_INSTALL_DIR: "/opt/edu-bot";
+export const BROWSER_APPARMOR_PROFILE: "edubot-browser";

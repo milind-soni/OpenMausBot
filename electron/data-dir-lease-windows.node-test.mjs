@@ -136,7 +136,7 @@ function windowsLeaseRecord(pid, createdAt = Date.now() - 60_000) {
 }
 
 function plantWindowsChildLease(dataDir, pid, createdAt) {
-  const childPath = path.join(dataDir, ".openmausbot-server-child", LEASE_NAME);
+  const childPath = path.join(dataDir, ".edubot-server-child", LEASE_NAME);
   mkdirSync(path.dirname(childPath));
   writeFileSync(childPath, `${JSON.stringify(windowsLeaseRecord(pid, createdAt))}\n`, { mode: 0o600 });
   return childPath;

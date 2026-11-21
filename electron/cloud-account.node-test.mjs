@@ -211,7 +211,7 @@ test("Dodo's own checkout page is the only checkout address ever opened", () => 
   assert.equal(checkoutDestination("https://checkout.dodopayments.com/session/cks_123?x=1"), "https://checkout.dodopayments.com/session/cks_123?x=1");
   for (const url of ["https://test.checkout.dodopayments.com/session/cks_123", "http://checkout.dodopayments.com/session/1", "https://checkout.dodopayments.com.evil.test/session/1",
     "https://user:pw@checkout.dodopayments.com/session/1", "https://checkout.dodopayments.com/session/1#x", "https://checkout.dodopayments.com/session/1#",
-    "javascript:alert(1)", "file:///etc/passwd", "openmausbot://cloud", "https://evil.example.test/", "", 42, null, `https://checkout.dodopayments.com/${"x".repeat(2100)}`]) {
+    "javascript:alert(1)", "file:///etc/passwd", "edubot://cloud", "https://evil.example.test/", "", 42, null, `https://checkout.dodopayments.com/${"x".repeat(2100)}`]) {
     assert.equal(checkoutDestination(url), null, String(url));
   }
   assert.equal(checkoutDestination("https://test.checkout.dodopayments.com/session/cks_123", { fixture: true }), "https://test.checkout.dodopayments.com/session/cks_123");

@@ -1,6 +1,6 @@
 # Run OpenMausBot from scripts and CI
 
-The `openmausbot` command can drive a running workspace without a screen: set
+The `edubot` command can drive a running workspace without a screen: set
 up a team from a file, give a bot a job, wait until it and every teammate it
 asked are done, and keep what they made. It works against the server on this
 computer or one somewhere else, and it is built for scripts, CI and other
@@ -8,11 +8,11 @@ agents: every command can print one JSON document, and the exit code says how
 things went.
 
 ```sh
-npm install -g openmausbot            # or use npx openmausbot …
-openmausbot serve --no-pair &         # a workspace with no screen (or use your desktop app)
-openmausbot engine set claude --key-env ANTHROPIC_API_KEY
-openmausbot team apply launch-room.yaml
-openmausbot run "Room Lead" "Rehearse the launch of https://example.com" --export ./rehearsal
+npm install -g edubot            # or use npx edubot …
+edubot serve --no-pair &         # a workspace with no screen (or use your desktop app)
+edubot engine set claude --key-env ANTHROPIC_API_KEY
+edubot team apply launch-room.yaml
+edubot run "Room Lead" "Rehearse the launch of https://example.com" --export ./rehearsal
 ```
 
 `run` prints progress as it goes, then the Room Lead's final reply and the
@@ -21,8 +21,8 @@ files it links, and writes everything to `./rehearsal`.
 ## Sign in once
 
 ```sh
-openmausbot login                     # the MausBot app on this computer
-openmausbot login https://maus.example.com   # a Cloud or a server elsewhere
+edubot login                     # the MausBot app on this computer
+edubot login https://maus.example.com   # a Cloud or a server elsewhere
 ```
 
 `login` asks the server, and the person allows it with one click. On this
@@ -30,7 +30,7 @@ computer the MausBot app shows a card, "A terminal wants to control MausBot",
 with a short code; the same code is printed in the terminal, so you allow the
 terminal you are looking at. For a Cloud or a server elsewhere your browser
 opens the server's page, where the same card waits (sign in there first if it
-asks). On a server you started yourself with `openmausbot serve`, a command on
+asks). On a server you started yourself with `edubot serve`, a command on
 the same computer is its owner, so `login` signs in without a card.
 
 The sign-in lasts 30 days and renews while you use it. It is kept in the macOS
@@ -69,21 +69,21 @@ Full access, which runs as you.
 
 Without a sign-in, a command on this computer can read from the desktop app
 (`bots`, `status`, `messages`, `export`, `events`) but every change is refused
-until you run `openmausbot login`. A server you started with `openmausbot
+until you run `edubot login`. A server you started with `edubot
 serve` treats a command on its own computer as its owner, and needs no
 sign-in. For scripts and CI, a token in a file works anywhere:
 
 ```sh
-openmausbot connect https://maus.example.com --code 7KQ2-M9XD-H4TP --out ~/.openmausbot-token
-openmausbot doctor --url https://maus.example.com --token-file ~/.openmausbot-token
+edubot connect https://maus.example.com --code 7KQ2-M9XD-H4TP --out ~/.edubot-token
+edubot doctor --url https://maus.example.com --token-file ~/.edubot-token
 ```
 
 `connect` also takes the whole link the server printed
 (`https://maus.example.com/pair#code=…`), so `--code` can be left out then.
 Make the pairing code in the app's Settings → Phone & devices, or on a server
-with `openmausbot pair` (add `--client --ttl 24h` for a chat-only code that
+with `edubot pair` (add `--client --ttl 24h` for a chat-only code that
 stays open up to a day; a code works once). On a server you started with
-`openmausbot serve`, `connect` makes the code itself (`--client` gives a token
+`edubot serve`, `connect` makes the code itself (`--client` gives a token
 that can chat but not change settings). The token goes to a file only
 you can read, and is never printed. Pass it with `--token-file FILE` or
 `OPENMAUSBOT_TOKEN`; there is no `--token` flag, because a command line can be
@@ -93,16 +93,16 @@ looking for a server: with a token, name the server.
 For CI, make an access token that ends on a date you choose:
 
 ```sh
-openmausbot token create "Nightly CI" --scope client --expires 90d --out ci-token   # on the server, or with an admin token
-openmausbot token list                     # name, scope, end date, last used (never the token)
-openmausbot token revoke ID                # it stops working at once
+edubot token create "Nightly CI" --scope client --expires 90d --out ci-token   # on the server, or with an admin token
+edubot token list                     # name, scope, end date, last used (never the token)
+edubot token revoke ID                # it stops working at once
 ```
 
 A `login` or `connect` session renews itself while it is used, up to 180 days; an access
 token never renews and ends on its date. `--expires` is at most the server's
 session limit (180 days unless `OMB_SESSION_MAX_DAYS` says otherwise), and
 `--scope client`, the default, can chat and answer approvals but not change
-settings. Tokens are listed and revoked like any session (`openmausbot
+settings. Tokens are listed and revoked like any session (`edubot
 sessions`, and Settings), and the token itself is written only to `--out`.
 
 ## Output and exit codes
@@ -119,7 +119,7 @@ redaction the transcript uses). Durations are written `90`, `90s`, `5m`, `2h` or
 | 1 | Failed, stopped or stalled, or you answered no |
 | 2 | The command line or a file is wrong, or a script left out `--yes` |
 | 3 | Someone must answer (a question or an approval card) |
-| 4 | Needs you signed in (`openmausbot login`); for `run` and `wait`, also timed out (the work keeps running) |
+| 4 | Needs you signed in (`edubot login`); for `run` and `wait`, also timed out (the work keeps running) |
 | 5 | Not allowed, cannot reach the server, or the server is too old |
 | 6 | Busy (stop it first); for `team apply --check`, it found changes |
 | 7 | Not found; for `doctor --host`, this machine is missing something the server needs |
@@ -128,13 +128,13 @@ redaction the transcript uses). Durations are written `90`, `90s`, `5m`, `2h` or
 
 ## Commands
 
-Run `openmausbot help VERB` for any of these. A TARGET is a bot or room by
+Run `edubot help VERB` for any of these. A TARGET is a bot or room by
 name or id, or `--bot ID`, `--channel ID` or `--thread ID`; `--task ID` picks
 one of its conversations.
 
 | Command | What it does |
 |---|---|
-| `doctor [--wait 2m]` | Checks the server answers, is new enough, who you are to it (and when your session expires), that an engine is ready, and whether bots have a browser. On a shared server without a session (`docker compose exec omb openmausbot doctor`), it learns only how many engines are ready, not which (`GET /api/health/engines`). |
+| `doctor [--wait 2m]` | Checks the server answers, is new enough, who you are to it (and when your session expires), that an engine is ready, and whether bots have a browser. On a shared server without a session (`docker compose exec omb edubot doctor`), it learns only how many engines are ready, not which (`GET /api/health/engines`). |
 | `doctor --host` | Checks this Linux machine can run the server and the bots' sandbox (below). |
 | `doctor --data [--fix] [--data-dir DIR]` | Checks this computer's data folder without the server; `--fix` applies the repairs that cannot lose data, while no server uses it ([self-hosting](self-hosting.md#the-doctor-checking-and-repairing-the-data)). |
 | `status` | Every bot at a glance: working, waiting on you, waiting on teammates, paused, failed or idle, with its computer and team. |
@@ -170,7 +170,7 @@ prints the list. They need a named server: the one you signed in to, or
 `--url`/`--port`. There is no flag that skips a permission or an approval.
 
 ```text
-$ openmausbot bots delete --team QA --dry-run
+$ edubot bots delete --team QA --dry-run
 Would delete 3 bots on "Studio" (http://127.0.0.1:8799), with their conversations and files:
   QA Tester 3 (35d41705…), team QA
   QA Tester 2 (53cbe304…), team QA
@@ -183,7 +183,7 @@ Nothing was changed (--dry-run).
 Before you install a server, check the machine it will run on:
 
 ```text
-$ sudo openmausbot doctor --host --data-dir /srv/mausbot
+$ sudo edubot doctor --host --data-dir /srv/mausbot
 ok    Ubuntu 24.04.1 LTS, kernel 6.8.0-45-generic
 ok    x86_64
 ok    Docker 27.3.1
@@ -205,7 +205,7 @@ It checks the system (Ubuntu 24.04 or 22.04, or Debian 12, are the ones we
 test), the processor (x86_64; arm64 runs a server but not a self-hosted Team
 server), Docker or Podman, that unprivileged user namespaces are allowed (the
 AppArmor and Debian switches), seccomp, cgroup v2, free disk for the data
-folder (`--data-dir`, else `OMB_DATA_DIR` or `~/.openmausbot`: at least 10 GB,
+folder (`--data-dir`, else `OMB_DATA_DIR` or `~/.edubot`: at least 10 GB,
 and 100 GB for a Team server), disk encryption, CPUs and memory (a Team needs
 4 CPUs and 8 GB), the server's port (`--port`, else 8799), ports 80 and 443
 (required with `--domain HOST`, else only a warning), and the clock against
@@ -227,14 +227,14 @@ servers, and exits 7.
 ## run and wait
 
 ```sh
-openmausbot run "Room Lead" --message-file brief.md --timeout 45m --on-input exit --export ./out
+edubot run "Room Lead" --message-file brief.md --timeout 45m --on-input exit --export ./out
 ```
 
 `run` starts a new conversation (titled by `--title` or the message's first
 line) unless `--task current` or `--task ID` says otherwise, sends the message
 once, and waits for the whole job: the bot's own turn and every piece of work
 it handed to a teammate, and theirs in turn. Its first progress line names the
-conversation and when the job began (`since`), so a later `openmausbot wait
+conversation and when the job began (`since`), so a later `edubot wait
 --thread ID --since MS` can pick the same job up again.
 
 - `--wait job` (the default) waits for the bot and every teammate; `--wait turn`
@@ -289,8 +289,8 @@ have).
 ## export
 
 ```sh
-openmausbot export "Room Lead" --out ./rehearsal          # its current conversation
-openmausbot export --thread 3f2a… --out ./rehearsal --root ROOT_ID
+edubot export "Room Lead" --out ./rehearsal          # its current conversation
+edubot export --thread 3f2a… --out ./rehearsal --root ROOT_ID
 ```
 
 | Written | What it holds |
@@ -313,7 +313,7 @@ lists are removed first, and nothing else in the folder is touched.
 ## events
 
 ```sh
-openmausbot events --job 3f2a… --until-settled > events.jsonl
+edubot events --job 3f2a… --until-settled > events.jsonl
 ```
 
 One JSON line per event: messages as they are written and changed, threads,
@@ -332,8 +332,8 @@ output longer than 1,000 characters arrives as its first 1,000 with
 ## engine
 
 ```sh
-openmausbot engine set claude --key-env ANTHROPIC_API_KEY --base-url https://gateway.example.com --install
-openmausbot engine list
+edubot engine set claude --key-env ANTHROPIC_API_KEY --base-url https://gateway.example.com --install
+edubot engine list
 ```
 
 KIND is `claude`, `openai`, `openrouter`, `openai-compatible` (needs
@@ -356,10 +356,10 @@ with their standing instructions, models, approval levels and computers,
 skills, rooms, and the engines they run on. Write it in YAML or JSON.
 
 ```sh
-openmausbot team apply launch-room.yaml             # plan, then apply
-openmausbot team apply launch-room.yaml --dry-run   # only the plan
-openmausbot team apply launch-room.yaml --check     # exit 6 if anything would change (CI)
-openmausbot team export --team "Launch Room" --out exported.yaml
+edubot team apply launch-room.yaml             # plan, then apply
+edubot team apply launch-room.yaml --dry-run   # only the plan
+edubot team apply launch-room.yaml --check     # exit 6 if anything would change (CI)
+edubot team export --team "Launch Room" --out exported.yaml
 ```
 
 Apply prints its plan, then makes the changes:
@@ -413,7 +413,7 @@ bots:                                       # at least one
     chief: true                             # Chief of Staff of its team (one per team); false removes it
     manages: [Support]                      # other teams this Chief is also in charge of (every bot reaches every bot anyway)
     soul: TEXT | { file: PATH }             # standing instructions, at most 24,000 bytes
-    model: claude/claude-sonnet-5-5         # INSTANCE/MODEL; openmausbot models lists them
+    model: claude/claude-sonnet-5-5         # INSTANCE/MODEL; edubot models lists them
     effort: none | low | medium | high | xhigh | max
     approval: ask | edits | auto | full     # a new bot starts at full; Custom is set in the desktop app
     computer: auto | off | browser | local | vm | cloud
@@ -469,7 +469,7 @@ One Room Lead and the visitors who rehearse a launch, on a sandbox with no
 Claude login: the key runs every Claude bot.
 
 ```yaml
-# launch-room.yaml — openmausbot team apply launch-room.yaml
+# launch-room.yaml — edubot team apply launch-room.yaml
 version: 1
 
 engines:
@@ -527,7 +527,7 @@ Then rehearse, wait for every visitor, and keep the report, transcripts and
 screenshots:
 
 ```sh
-openmausbot run "Room Lead" "Rehearse the launch of https://example.com with every visitor, then write report.md." \
+edubot run "Room Lead" "Rehearse the launch of https://example.com with every visitor, then write report.md." \
   --timeout 45m --export ./rehearsal
 ```
 
@@ -543,27 +543,27 @@ an engine that can limit built-in tools.
 
 ```yaml
 # .github/workflows/rehearse.yml (a sketch)
-- run: npm install -g openmausbot @anthropic-ai/claude-code
-- run: openmausbot serve --no-pair --data-dir "$RUNNER_TEMP/omb" &
+- run: npm install -g edubot @anthropic-ai/claude-code
+- run: edubot serve --no-pair --data-dir "$RUNNER_TEMP/omb" &
   env: { OMB_ANTHROPIC_API_KEY: "${{ secrets.ANTHROPIC_API_KEY }}" }   # the workspace's Claude key from the start
-- run: openmausbot doctor --wait 2m          # the server answers and an engine is ready
-- run: openmausbot team apply team.yaml
-- run: openmausbot run "Release checker" "Check the deploy at ${{ env.URL }}" --timeout 20m --strict --export ./out
+- run: edubot doctor --wait 2m          # the server answers and an engine is ready
+- run: edubot team apply team.yaml
+- run: edubot run "Release checker" "Check the deploy at ${{ env.URL }}" --timeout 20m --strict --export ./out
 - uses: actions/upload-artifact@v4
   with: { name: release-check, path: ./out }
 ```
 
 `doctor --wait` waits for an engine too, so the server gets its key in its
 own environment, as here (`OMB_ANTHROPIC_API_KEY`; the team file's `engines:`
-section, or `openmausbot engine set`, can set it later instead).
+section, or `edubot engine set`, can set it later instead).
 
 The step fails when the job fails (exit 1), needs someone (exit 3) or runs out
 of time (exit 4). To drive a workspace that is already running elsewhere, set
-`OPENMAUSBOT_URL` and pass a token made with `openmausbot connect` as a secret
+`OPENMAUSBOT_URL` and pass a token made with `edubot connect` as a secret
 file (`--token-file`).
 
 ## For other agents
 
-`openmausbot mcp` serves the same operations as MCP tools on stdin and stdout
+`edubot mcp` serves the same operations as MCP tools on stdin and stdout
 ([docs/mcp-server.md](mcp-server.md)): `wait_for_conversation` waits on the
 same job, and returns the same result, as `wait`.

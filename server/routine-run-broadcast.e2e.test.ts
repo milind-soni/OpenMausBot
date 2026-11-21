@@ -76,7 +76,7 @@ posixOnly("a routine run's task on the event stream", () => {
   beforeAll(async () => {
     chmodSync(FAKE_CLI, 0o755);
     home = mkdtempSync(join(tmpdir(), "omb-routine-broadcast-"));
-    const data = join(home, ".openmausbot");
+    const data = join(home, ".edubot");
     mkdirSync(data, { recursive: true });
     writeFileSync(join(data, "config.json"), JSON.stringify({
       signIn: { admins: [OWNER], members: [] },

@@ -49,10 +49,10 @@ posixOnly("bulk delete tasks e2e", () => {
   beforeAll(async () => {
     chmodSync(FAKE_CLAUDE, 0o755);
     home = mkdtempSync(join(tmpdir(), "omb-bulk-delete-"));
-    mkdirSync(join(home, ".openmausbot"), { recursive: true });
+    mkdirSync(join(home, ".edubot"), { recursive: true });
     finishGate = join(home, "finish-turn.gate");
     writeFileSync(
-      join(home, ".openmausbot", "config.json"),
+      join(home, ".edubot", "config.json"),
       JSON.stringify({
         instances: {
           claudeSlow: {

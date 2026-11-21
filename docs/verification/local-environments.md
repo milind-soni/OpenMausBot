@@ -35,7 +35,7 @@ They do not prove the user workflow — the recipe does.
 1. Open **Settings → Servers**. Under "Environments on this computer",
    enter the name `APRS Chat`, leave the data folder empty, choose
    **Create**.
-2. Expect: a row `APRS Chat` with path `~/.openmausbot-aprs-chat`, a
+2. Expect: a row `APRS Chat` with path `~/.edubot-aprs-chat`, a
    **Switch** button and a Forget (trash) affordance. No restart happens,
    and "This computer" still shows **Current**. Nothing is written to the
    new directory yet — creating registers the entry; the directory is
@@ -55,12 +55,12 @@ They do not prove the user workflow — the recipe does.
 3. Expect on arrival: an **empty bot list** (fresh environment), the sidebar
    pill reading `APRS Chat`, and "APRS Chat" marked Current in
    Settings → Servers.
-4. Expect from a terminal: `~/.openmausbot-aprs-chat/environment-id` exists
-   and is a UUID **different** from `~/.openmausbot/environment-id` — the
+4. Expect from a terminal: `~/.edubot-aprs-chat/environment-id` exists
+   and is a UUID **different** from `~/.edubot/environment-id` — the
    two environments are distinct servers, and every state file lives under
    its own directory. `environments.json` now has `activeId` set to the
    entry's id.
-5. Create a throwaway bot here, then confirm `~/.openmausbot/` gained no
+5. Create a throwaway bot here, then confirm `~/.edubot/` gained no
    trace of it.
 
 ## 3. Switch back

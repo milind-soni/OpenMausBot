@@ -1,4 +1,4 @@
-// Every test file gets a throwaway home, so DATA_DIR (~/.openmausbot) never touches the real one;
+// Every test file gets a throwaway home, so DATA_DIR (~/.edubot) never touches the real one;
 // os.homedir() reads HOME / USERPROFILE at call time, and this runs before server/config.ts is imported.
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -25,7 +25,7 @@ delete process.env.PI_CODING_AGENT_DIR;
 // No server in a test downloads the project's announcement cards; its tests hand the store a fake fetch.
 delete process.env.OMB_ANNOUNCEMENTS;
 // Named explicitly although homedir() already covers it: the device tests delete this directory wholesale.
-process.env.OMB_COMPANION_DIR = join(home, ".openmausbot-companion");
+process.env.OMB_COMPANION_DIR = join(home, ".edubot-companion");
 
 // Product code follows navigator.language; pin it so English assertions do not depend on the host locale.
 Object.defineProperty(globalThis.navigator, "language", { value: "en", configurable: true });

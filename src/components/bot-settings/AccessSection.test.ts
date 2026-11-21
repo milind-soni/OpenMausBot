@@ -447,7 +447,7 @@ describe("working folder note", () => {
   const inFolder = (cwd: string | null, botCwd?: string) => makeBot({ ...(botCwd ? { cwd: botCwd } : {}), tasks: [{ threadId: "thread-1", cwd }] as unknown as Bot["tasks"] });
 
   it("calls a thread pinned only to a folder chosen for it, or to an earlier working folder, never to its own folder", () => {
-    for (const own of ["/data/.openmausbot/task-workspaces/bot-1/thread-1", "C:\\Users\\Ada\\.openmausbot\\task-workspaces\\bot-1\\thread-1"]) {
+    for (const own of ["/data/.edubot/task-workspaces/bot-1/thread-1", "C:\\Users\\Ada\\.edubot\\task-workspaces\\bot-1\\thread-1"]) {
       expect(folderCard(inFolder(own, "/projects/site"))).not.toContain("This task is pinned");
       expect(folderCard(inFolder(own))).not.toContain("This task is pinned");
     }

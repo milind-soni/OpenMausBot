@@ -328,10 +328,10 @@ describe("containerComputerStatus", () => {
     const derived = perBotLocalVmTarget("bot-win");
     const target: LocalVmTarget = {
       ...derived,
-      workspaceDir: "C:\\Users\\light\\.openmausbot\\vm-homes\\win-target",
+      workspaceDir: "C:\\Users\\light\\.edubot\\vm-homes\\win-target",
     };
     const detail = JSON.parse(perBotReadyInspect("bot-win", 41629))[0];
-    detail.Mounts[0].Source = "/mnt/c/Users/light/.openmausbot/vm-homes/win-target";
+    detail.Mounts[0].Source = "/mnt/c/Users/light/.edubot/vm-homes/win-target";
     detail.HostConfig = {
       ...detail.HostConfig,
       CapDrop: ["CAP_CHOWN", "CAP_DAC_OVERRIDE"],

@@ -5,12 +5,12 @@ import { isCloudDeepLink } from "./cloud-entry.mjs";
 import { chatLinkFrom } from "./chat-link.mjs";
 
 const ACME = "0f8b6a3e-1c2d-4e5f-8a9b-0c1d2e3f4a5b", OTHER = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
-const LINK = `openmausbot://team/${ACME}`;
+const LINK = `edubot://team/${ACME}`;
 
 test("a team link names a team by its id and nothing else; anything more is no link", () => {
   assert.equal(teamIdFromLink(LINK), ACME);
-  for (const value of [null, undefined, 42, "", `${LINK}/`, `${LINK}?code=ABCDE`, `${LINK}#token=x`, "openmausbot://team/", "openmausbot://team/acme",
-    `openmausbot://team/${ACME.toUpperCase()}`, `OPENMAUSBOT://team/${ACME}`, `openmausbot://teams/${ACME}`, `https://evil.example/openmausbot://team/${ACME}`, ` ${LINK}`]) {
+  for (const value of [null, undefined, 42, "", `${LINK}/`, `${LINK}?code=ABCDE`, `${LINK}#token=x`, "edubot://team/", "edubot://team/acme",
+    `edubot://team/${ACME.toUpperCase()}`, `EDUBOT://team/${ACME}`, `edubot://teams/${ACME}`, `https://evil.example/edubot://team/${ACME}`, ` ${LINK}`]) {
     assert.equal(teamIdFromLink(value), null, String(value));
   }
   // Older handlers leave it alone, and it is no Cloud or chat link.
@@ -19,9 +19,9 @@ test("a team link names a team by its id and nothing else; anything more is no l
 });
 
 test("a launch's team link is taken out of the command line, so a relaunch doesn't open it again", () => {
-  const argv = ["/Applications/MausBot", "--flag", LINK, "openmausbot://cloud"];
+  const argv = ["/Applications/MausBot", "--flag", LINK, "edubot://cloud"];
   assert.equal(takeTeamLink(argv), ACME);
-  assert.deepEqual(argv, ["/Applications/MausBot", "--flag", "openmausbot://cloud"]);
+  assert.deepEqual(argv, ["/Applications/MausBot", "--flag", "edubot://cloud"]);
   assert.equal(takeTeamLink(argv), null);
 });
 
@@ -161,8 +161,8 @@ test("main's wiring: a team URL or command line is taken, anything else is left 
   const links = installTeamJoin({ argv, account: () => client, addAccount: async () => {}, openTeam: async () => {}, t: (key, params) => `${key}${params ? JSON.stringify(params) : ""}`,
     confirm: async (message, detail, button) => { asked.push([message, detail, button]); return false; }, reveal: () => {}, store: { read: () => null, write: () => {} }, ownPlace: () => false, log: () => {} });
   assert.deepEqual(argv, ["/app"]);
-  assert.equal(links.fromUrl("openmausbot://cloud"), false);
-  assert.equal(links.fromArgs(["/app", "openmausbot://cloud"]), false);
+  assert.equal(links.fromUrl("edubot://cloud"), false);
+  assert.equal(links.fromArgs(["/app", "edubot://cloud"]), false);
   await links.ready();
   await settle();
   assert.deepEqual(asked, [["native.teamLink.otherTitle", 'native.teamLink.otherDetail{"email":"me@home.test"}', "native.teamLink.signIn"]]);

@@ -285,10 +285,10 @@ describe("Computer panel tabs", () => {
   it("keeps showing the pinned private folder after the bot default is cleared", () => {
     fixture.view.current = "files";
     const rendered = render(makeBot({ tasks: [
-      { threadId: "thread-scout", title: "Existing chat", createdAt: 1, cwd: "/Users/me/.openmausbot/task-workspaces/scout/thread-scout" },
+      { threadId: "thread-scout", title: "Existing chat", createdAt: 1, cwd: "/Users/me/.edubot/task-workspaces/scout/thread-scout" },
     ] }));
-    expect(rendered.html).toContain('title="/Users/me/.openmausbot/task-workspaces/scout/thread-scout"');
-    expect(rendered.html).toContain("~/.openmausbot/task-workspaces/scout/thread-scout");
+    expect(rendered.html).toContain('title="/Users/me/.edubot/task-workspaces/scout/thread-scout"');
+    expect(rendered.html).toContain("~/.edubot/task-workspaces/scout/thread-scout");
     expect(rendered.html).not.toContain("Scout&#x27;s private folder");
   });
 

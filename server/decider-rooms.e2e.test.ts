@@ -85,7 +85,7 @@ beforeAll(async () => {
   const jevUrl = `http://127.0.0.1:${(jev.address() as AddressInfo).port}`;
 
   home = mkdtempSync(join(tmpdir(), "omb-decider-rooms-"));
-  data = join(home, ".openmausbot");
+  data = join(home, ".edubot");
   const staticDir = join(home, "static");
   mkdirSync(data, { recursive: true });
   mkdirSync(join(staticDir, "assets"), { recursive: true });

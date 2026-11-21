@@ -24,7 +24,7 @@ function cli(args: string[], env: NodeJS.ProcessEnv = {}): Promise<Ran> {
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += chunk; });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
-    const timer = setTimeout(() => { child.kill("SIGKILL"); reject(new Error(`openmausbot ${args.join(" ")} did not finish: ${stderr}`)); }, 90_000);
+    const timer = setTimeout(() => { child.kill("SIGKILL"); reject(new Error(`edubot ${args.join(" ")} did not finish: ${stderr}`)); }, 90_000);
     child.on("error", reject);
     child.on("close", (code) => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
   });
@@ -43,7 +43,7 @@ afterAll(async () => {
   if (dir) await removeTempDir(dir);
 });
 
-describe("openmausbot headless: team apply → run --wait job → export", () => {
+describe("edubot headless: team apply → run --wait job → export", () => {
   let model: string;
   let lead: any;
   let priya: any;

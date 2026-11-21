@@ -25,7 +25,7 @@ export function findBot(bots: readonly Rec[], wanted: string): Rec {
   if (named.length > 1) {
     throw usageError(`"${wanted}" names ${named.length} bots: ${named.map((bot) => `${bot.name} (id ${bot.id})`).join("; ")}`, "use the id");
   }
-  throw new HeadlessError(`no bot named "${wanted}"`, EXIT.notFound, "openmausbot status lists them");
+  throw new HeadlessError(`no bot named "${wanted}"`, EXIT.notFound, "edubot status lists them");
 }
 
 export type Selection = { kind: "names"; bots: Rec[] } | { kind: "team"; team: string; bots: Rec[] } | { kind: "all"; bots: Rec[] };
@@ -37,7 +37,7 @@ export function selectBots(bots: readonly Rec[], ctx: Pick<VerbContext, "flags" 
   const ways = [positionals.length > 0, team !== undefined, all].filter(Boolean).length;
   if (ways !== 1) {
     throw usageError(ways ? "pick bots one way: names or ids, --team NAME, or --all" : "name the bots",
-      `openmausbot ${ctx.verb} NAME…, --team NAME or --all`);
+      `edubot ${ctx.verb} NAME…, --team NAME or --all`);
   }
   if (all) return { kind: "all", bots: [...bots] };
   if (team !== undefined) {
@@ -151,7 +151,7 @@ async function confirmPlan(ctx: VerbContext, client: HeadlessClient, plan: { doi
     return { result: { ok: true, dryRun: true, server: client.baseUrl, ...plan.result }, exitCode: EXIT.done, human: [`Would ${header.charAt(0).toLowerCase()}${header.slice(1)}`, ...plan.lines, "Nothing was changed (--dry-run)."] };
   }
   if (!client.explicit) {
-    throw usageError("this deletes or stops things, so name the server it is for", "sign in with openmausbot login, or pass --url or --port");
+    throw usageError("this deletes or stops things, so name the server it is for", "sign in with edubot login, or pass --url or --port");
   }
   if (ctx.flags.yes === true) return null;
   if (!ctx.interactive) throw usageError(`this would ${plan.doing.charAt(0).toLowerCase()}${plan.doing.slice(1)} on ${where}: add --yes to go ahead`, "or --dry-run to only see the list");
@@ -194,7 +194,7 @@ async function pauseBots(ctx: VerbContext, client: HeadlessClient, selection: Se
     result: { ok: true, action: verb, requests: bodies, stopped },
     exitCode: EXIT.done,
     human: paused
-      ? [`Paused ${what}${stopped ? `, and stopped ${plural(stopped, "conversation")} that ${stopped === 1 ? "was" : "were"} working` : ""}. A pause lasts across restarts: openmausbot bots resume ${selection.kind === "all" ? "--all" : selection.kind === "team" ? `--team "${selection.team}"` : "NAME"} undoes it.`]
+      ? [`Paused ${what}${stopped ? `, and stopped ${plural(stopped, "conversation")} that ${stopped === 1 ? "was" : "were"} working` : ""}. A pause lasts across restarts: edubot bots resume ${selection.kind === "all" ? "--all" : selection.kind === "team" ? `--team "${selection.team}"` : "NAME"} undoes it.`]
       : [`Resumed ${what}. A bot or team paused on its own stays paused.`],
   };
 }
@@ -224,7 +224,7 @@ export async function botsVerb(ctx: VerbContext): Promise<VerbOutcome> {
   const bots = await readBots(client);
   if (ctx.verb === "bots get") {
     const wanted = ctx.positionals[0]?.trim();
-    if (!wanted) throw usageError("name a bot", "openmausbot bots get NAME");
+    if (!wanted) throw usageError("name a bot", "edubot bots get NAME");
     const bot = findBot(bots, wanted);
     const held = await pausedBots(client);
     const tasks: Rec[] = bot.tasks ?? [];
@@ -275,14 +275,14 @@ async function deleteThreads(ctx: VerbContext, client: HeadlessClient, bot: Rec,
     exitCode: refused.length === 0 ? EXIT.done : busy ? EXIT.conflict : EXIT.notFound,
     human: [
       `Deleted ${plural(deleted.length, "conversation")} of ${bot.name}.`,
-      ...(refused.length ? [`Kept ${refused.length}: ${busy ? `${busy} working now (stop it first: openmausbot stop "${bot.name}")` : ""}${refused.length - busy ? `${busy ? "; " : ""}${refused.length - busy} not found` : ""}.`] : []),
+      ...(refused.length ? [`Kept ${refused.length}: ${busy ? `${busy} working now (stop it first: edubot stop "${bot.name}")` : ""}${refused.length - busy ? `${busy ? "; " : ""}${refused.length - busy} not found` : ""}.`] : []),
     ],
   };
 }
 
 export async function threadsVerb(ctx: VerbContext): Promise<VerbOutcome> {
   const [wanted, ...threadIds] = ctx.positionals.map((value) => value.trim());
-  if (!wanted) throw usageError("name a bot", `openmausbot ${ctx.verb} BOT${ctx.verb === "threads delete" ? " THREAD…" : ""}`);
+  if (!wanted) throw usageError("name a bot", `edubot ${ctx.verb} BOT${ctx.verb === "threads delete" ? " THREAD…" : ""}`);
   const client = await ctx.client();
   const bot = findBot(await readBots(client), wanted);
   const tasks: Rec[] = bot.tasks ?? [];
@@ -300,10 +300,10 @@ export async function threadsVerb(ctx: VerbContext): Promise<VerbOutcome> {
     if (!tasks.length) return { result: { ok: true, deleted: [] }, exitCode: EXIT.done, human: [`${bot.name} has no conversations.`] };
     return deleteThreads(ctx, client, bot, tasks, true);
   }
-  if (!threadIds.length) throw usageError("name the conversations to delete", "openmausbot threads list BOT shows their ids");
+  if (!threadIds.length) throw usageError("name the conversations to delete", "edubot threads list BOT shows their ids");
   const picked = threadIds.map((id) => {
     const task = tasks.find((candidate) => candidate.threadId === id);
-    if (!task) throw new HeadlessError(`${bot.name} has no conversation ${id}`, EXIT.notFound, `openmausbot threads list "${bot.name}" shows them`);
+    if (!task) throw new HeadlessError(`${bot.name} has no conversation ${id}`, EXIT.notFound, `edubot threads list "${bot.name}" shows them`);
     return task;
   });
   return deleteThreads(ctx, client, bot, [...new Map(picked.map((task) => [task.threadId, task])).values()], false);
@@ -338,7 +338,7 @@ export async function computersVerb(ctx: VerbContext): Promise<VerbOutcome> {
     };
   }
   const wanted = ctx.positionals[0]?.trim();
-  if (!wanted) throw usageError("name a bot", `openmausbot ${ctx.verb} BOT`);
+  if (!wanted) throw usageError("name a bot", `edubot ${ctx.verb} BOT`);
   const bot = findBot(bots, wanted);
   const starting = ctx.verb === "computers start";
   if (ctx.flags["dry-run"] === true) {

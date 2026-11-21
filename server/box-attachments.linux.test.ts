@@ -16,7 +16,7 @@ const available = detection.box === "bwrap" && detection.tools !== null;
 const root = mkdtempSync(join(tmpdir(), "omb-box-attach-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-const home = join(root, "home"), dataDir = join(home, ".openmausbot"), uploads = join(dataDir, "attachments");
+const home = join(root, "home"), dataDir = join(home, ".edubot"), uploads = join(dataDir, "attachments");
 const cwd = join(dataDir, "task-workspaces", "bot-a", "t-1");
 const env = { PATH: "/usr/bin:/bin", HOME: home };
 

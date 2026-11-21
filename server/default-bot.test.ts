@@ -342,7 +342,7 @@ describe("MausBot, every person's helper", () => {
       let status = 0;
       await moveKindsRoute(deps(store), { path: "/api/cloud-send/kind", method: "PUT", url: new URL("http://127.0.0.1/api/cloud-send/kind"), auth: {} as never, req: {} as never,
         res: { setHeader() {} } as never, json: ((_res: unknown, code: number) => { status = code; }) as never,
-        readBody: (async () => ({ v: 1, key: `bot:${id}`, dataDir: "/Users/amit/.openmausbot", record, ...(computer ? { computer } : {}), ...extra })) as never });
+        readBody: (async () => ({ v: 1, key: `bot:${id}`, dataDir: "/Users/amit/.edubot", record, ...(computer ? { computer } : {}), ...extra })) as never });
       return status;
     }
     const fields = (bot: Record<string, unknown>) => Object.fromEntries(MOVE_BOT_FIELDS.map((name) => [name, bot[name] ?? null]));

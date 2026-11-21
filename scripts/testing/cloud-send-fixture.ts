@@ -226,7 +226,7 @@ export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswor
 
   async function start(name: string, own: NodeJS.ProcessEnv, port: number, extra: string[] = [], ipc = false, acceptedToken = onePasswordToken, calls = 0, engine = "", signedIn = true): Promise<ChildProcess> {
     const home = join(root, name);
-    const dataDir = join(home, ".openmausbot");
+    const dataDir = join(home, ".edubot");
     mkdirSync(dataDir, { recursive: true });
     if (bitwarden) installFakeBw(dataDir, bitwarden);
     const cli = join(home, "fixture-claude.mjs");
@@ -321,8 +321,8 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     const stopOverIpc = process.platform === "win32";
     const stopOnMessage = `data:text/javascript,${encodeURIComponent('process.on("message", (message) => { if (message === "stop") process.emit("SIGTERM"); }); process.channel?.unref();')}`;
     if (team.noAi) {
-      mkdirSync(join(root, "team", ".openmausbot"), { recursive: true });
-      writeFileSync(join(root, "team", ".openmausbot", "config.json"), JSON.stringify({ instances: Object.fromEntries(["claude", "codex", "cursor", "githubCopilot", "openaiCompat", "qwen", "hermes", "pi", "grok"].map((id) => [id, { driver: "not-a-real-driver" }])) }));
+      mkdirSync(join(root, "team", ".edubot"), { recursive: true });
+      writeFileSync(join(root, "team", ".edubot", "config.json"), JSON.stringify({ instances: Object.fromEntries(["claude", "codex", "cursor", "githubCopilot", "openaiCompat", "qwen", "hermes", "pi", "grok"].map((id) => [id, { driver: "not-a-real-driver" }])) }));
     }
     for (const scope of team.native ?? []) {
       mkdirSync(join(root, "team", "native", "node_modules"), { recursive: true });
@@ -560,7 +560,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     listenIt();
     desks.push({ close: () => deskMain.close() });
     return {
-      base, dataDir: join(root, name, ".openmausbot"), local: deskLocal, account: deskAccount, journalFile, spies,
+      base, dataDir: join(root, name, ".edubot"), local: deskLocal, account: deskAccount, journalFile, spies,
       oneHome: { kick: () => deskMain.kick(), view: () => deskMain.view(), away: () => deskMain.away() },
       async relaunch({ kill = true } = {}) {
         deskMain.close();
@@ -590,7 +590,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     get intercept() { return fixture.intercept; },
     set intercept(hook) { fixture.intercept = hook; },
     oneHome: { kick: () => main.kick(), view: () => main.view(), away: () => main.away() },
-    desktopDataDir: join(root, "desktop", ".openmausbot"),
+    desktopDataDir: join(root, "desktop", ".edubot"),
     async relaunch({ kill = true, cloud: cloudMore, dataDir } = {}) {
       main.close();
       await waitForExit(desktop, { signal: kill ? "SIGKILL" : "SIGTERM" });

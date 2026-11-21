@@ -61,7 +61,7 @@ async function ownerPairing(): Promise<string> {
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-lent-e2e-"));
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".edubot");
   mkdirSync(dataDir, { recursive: true });
   const cli = join(home, "fixture-claude.mjs");
   writeFileSync(cli, `#!/usr/bin/env node
@@ -159,7 +159,7 @@ it("a lent folder keeps working while the Mac is away: read from the copy, chang
   });
   const files = createCloudFilesService({
     settingsFile: join(pc, "user", "files.json"), stateFile: join(pc, "user", "state.db"),
-    documentsDir: join(pc, "Documents"), localDataDir: join(pc, ".openmausbot"), homeDir: join(pc, "home"), platform: process.platform, hostname: hostname(),
+    documentsDir: join(pc, "Documents"), localDataDir: join(pc, ".edubot"), homeDir: join(pc, "home"), platform: process.platform, hostname: hostname(),
     cloudOrigin: () => PC_ORIGIN, fetch: desktopFetch as typeof fetch, markDownloaded: async () => {}, watch: () => () => {}, now: () => Date.now() + 60_000,
     trashItem: async (file: string) => renameSync(file, join(trash, `${readdirSync(trash).length}-${file.split(/[\\/]/).at(-1)}`)),
     lending: lendingForFiles({ environment: () => env, sharing: () => connector, validate: validateSharedFolders }),
@@ -172,7 +172,7 @@ it("a lent folder keeps working while the Mac is away: read from the copy, chang
     await files.pass();
     expect(files.state().shared, JSON.stringify(files.state())).toMatchObject([{ name: "Notes", lent: true, status: "synced" }]);
     // The copy is in the data folder, which no bot's box shows: only shared_computer, with lending's rules, reaches it.
-    const copy = join(home, ".openmausbot", "sync", "lent");
+    const copy = join(home, ".edubot", "sync", "lent");
     const [computerDir] = readdirSync(copy);
     expect(readFileSync(join(copy, computerDir!, "Notes", "plan.md"), "utf8")).toBe("the plan");
     expect(existsSync(join(home, "Synced", computerDir!, "Notes"))).toBe(false);

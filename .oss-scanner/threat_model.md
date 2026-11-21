@@ -127,7 +127,7 @@ Bots have tools:
      (`server/cloud-secrets.ts`).
    - Text that crosses a boundary is redacted (`shared/redact.ts`).
 9. **Per-bot workspaces and memory.**
-   - Each bot's workspace (`~/.openmausbot/workspaces/<botId>`) holds its
+   - Each bot's workspace (`~/.edubot/workspaces/<botId>`) holds its
      memory. Harness tools such as memory, `session_search`, recall and the
      recent-work brief must return only the calling bot's own conversations
      and the rooms it belongs to.

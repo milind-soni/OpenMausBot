@@ -21,7 +21,7 @@ it("a full attachment store refuses the attachment in plain words, the chat stil
   const bot = (await fx.local("POST", "/api/bots", { name: "Ivy", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot as { id: string; threadId: string };
   const small = await fx.picture(randomBytes(1024));
   const big = await fx.picture(randomBytes(LIMIT * 2));
-  const folder = join(fx.root, "desktop", ".openmausbot", "attachments");
+  const folder = join(fx.root, "desktop", ".edubot", "attachments");
   const say = async (text: string, name: string) => {
     expect((await fx.local("POST", `/api/bots/${bot.id}/messages`, { text: `${text}\n\n<attached-image path="${join(folder, name)}" name="${name}" />`, threadId: bot.threadId })).status).toBe(202);
     await expect.poll(idle, { timeout: 60_000, interval: 100 }).toBe(true);
@@ -34,7 +34,7 @@ it("a full attachment store refuses the attachment in plain words, the chat stil
   expect(moved.result.failed).toEqual([{ key: `attachment:${bigName}`, kind: "chats", label: "Attachment",
     error: "My Cloud's room for attachments is full, so an attachment did not go. Its chat went without it." }]);
   expect(moved.result.chats?.left).toBe(0);
-  const stored = readdirSync(join(fx.root, "cloud", ".openmausbot", "attachments"));
+  const stored = readdirSync(join(fx.root, "cloud", ".edubot", "attachments"));
   expect(stored).toContain(smallName);
   expect(stored).not.toContain(bigName);
   expect(stored.filter((name) => name.endsWith(".partial")), "no partial file is left behind").toEqual([]);

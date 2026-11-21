@@ -17,7 +17,7 @@ export interface ClientDeps {
   requireExplicitForMutations?: boolean;
   callTool?: ToolCaller;
   request?: Requester;
-  /** What `openmausbot login` saved; absent in a bot's shell, which never uses the person's sign-in. */
+  /** What `edubot login` saved; absent in a bot's shell, which never uses the person's sign-in. */
   saved?: SavedServers;
 }
 
@@ -104,7 +104,7 @@ export async function openClient(flags: Flags, deps: ClientDeps, mutating: boole
       baseUrl = await mcp.probeBaseUrls(DISCOVERY_PORTS.map((port) => `http://127.0.0.1:${port}`));
     } catch {
       throw new HeadlessError(`no OpenMausBot server answered on 127.0.0.1 ports ${DISCOVERY_PORTS.join(", ")}`, EXIT.unreachable,
-        "start one with `openmausbot serve`, or name one with --url or OPENMAUSBOT_URL");
+        "start one with `edubot serve`, or name one with --url or OPENMAUSBOT_URL");
     }
   }
   // A saved sign-in goes only to the exact address it was made at: the current server, or a named one that is the same.
@@ -116,7 +116,7 @@ export async function openClient(flags: Flags, deps: ClientDeps, mutating: boole
     const live = await request("/.well-known/openmausbot/environment", {}, baseUrl).catch(() => null) as { environmentId?: unknown } | null;
     if (typeof live?.environmentId === "string" && live.environmentId !== signedIn.environmentId) {
       throw new HeadlessError(`the server at ${baseUrl} is not "${signedIn.label}", the one you signed in to`, EXIT.needsLogin,
-        "sign in to it with openmausbot login, or name another server with --url");
+        "sign in to it with edubot login, or name another server with --url");
     }
     token = savedToken;
     identity = { kind: "saved", name: signedIn.name, label: signedIn.label, scopes: signedIn.scopes, expiresAt: signedIn.expiresAt };
@@ -163,11 +163,11 @@ export interface RefusalContext {
 
 function signInHint(context: RefusalContext): string {
   if (context.botShell) return BOT_SHELL_HINT;
-  if (context.identity?.kind === "token") return "the token given was not accepted, or lacks the scope: make a new one with openmausbot token create";
+  if (context.identity?.kind === "token") return "the token given was not accepted, or lacks the scope: make a new one with edubot token create";
   if (context.identity?.kind === "saved" && !context.identity.scopes.includes("admin")) {
-    return "this sign-in is chat only: run openmausbot login again without --scope chat";
+    return "this sign-in is chat only: run edubot login again without --scope chat";
   }
-  return "sign in once with `openmausbot login` (the app shows a card to allow it)";
+  return "sign in once with `edubot login` (the app shows a card to allow it)";
 }
 
 export async function explain(error: unknown, baseUrl?: string, context: RefusalContext = {}): Promise<HeadlessError> {
@@ -180,7 +180,7 @@ export async function explain(error: unknown, baseUrl?: string, context: Refusal
   if (status === 401) {
     const said = context.identity?.kind === "saved" ? "your sign-in to this server ended" : context.identity?.kind === "token" ? "this server did not accept the token given" : "this server needs you signed in";
     return new HeadlessError(said, EXIT.needsLogin,
-      context.botShell ? BOT_SHELL_HINT : context.identity?.kind === "token" ? signInHint(context) : "run `openmausbot login`");
+      context.botShell ? BOT_SHELL_HINT : context.identity?.kind === "token" ? signInHint(context) : "run `edubot login`");
   }
   if (status === 403) {
     const said = message === raw && /paired session token/.test(raw) ? "a change from a program on this computer needs you signed in" : message;
@@ -188,15 +188,15 @@ export async function explain(error: unknown, baseUrl?: string, context: Refusal
     return new HeadlessError(`not allowed: ${said.replace(/^forbidden: /, "")}`, unsigned ? EXIT.needsLogin : EXIT.notAllowed, signInHint(context));
   }
   if (status === 404 && /^no such (bot|channel|conversation|task|message)\b/i.test(message)) {
-    return new HeadlessError(message, EXIT.notFound, "openmausbot bots and openmausbot channels list the ids");
+    return new HeadlessError(message, EXIT.notFound, "edubot bots and edubot channels list the ids");
   }
-  if (status === 409) return new HeadlessError(message, EXIT.conflict, "it is busy: stop it first (openmausbot stop BOT), or try again when it finishes");
+  if (status === 409) return new HeadlessError(message, EXIT.conflict, "it is busy: stop it first (edubot stop BOT), or try again when it finishes");
   if (/cannot report a conversation's job/.test(message)) return new HeadlessError(message, EXIT.unreachable, "update OpenMausBot on the server");
   const cause = (error as { cause?: { code?: unknown } })?.cause?.code;
   if ((error instanceof TypeError && /fetch failed/i.test(message)) || cause === "ECONNREFUSED" || cause === "ENOTFOUND"
     || (error instanceof Error && (error.name === "TimeoutError" || /timed out|aborted due to timeout/i.test(message)))) {
     return new HeadlessError(`cannot reach OpenMausBot${baseUrl ? ` at ${baseUrl}` : ""}`, EXIT.unreachable,
-      "check the server is running and the address is right (openmausbot doctor)");
+      "check the server is running and the address is right (edubot doctor)");
   }
   if (error instanceof Error && error.name === "AbortError") return new HeadlessError("stopped", EXIT.interrupted);
   return new HeadlessError(message, EXIT.failed);

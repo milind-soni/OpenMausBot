@@ -1,4 +1,4 @@
-// `openmausbot login`: a terminal asks, a person allows it in the app (or a browser signed in here), and the terminal
+// `edubot login`: a terminal asks, a person allows it in the app (or a browser signed in here), and the terminal
 // gets a session. Asking and polling need no session; only Allow, an ordinary admin route behind the auth gate, mints one.
 // Security: a request grants nothing by itself. Any program here (a bot's shell too) can ask, so the person and the
 // matching code shown in both places are the boundary; asking is capped and every request ends after ten minutes.
@@ -88,7 +88,7 @@ export function createCliLogin(deps: CliLoginDeps) {
 
   async function start(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) return void json(res, 415, { error: "send the sign-in request as JSON (content-type: application/json)" });
-    if (fromBrowser(req)) return void json(res, 403, { error: "a terminal sign-in starts from the openmausbot command, not a web page" });
+    if (fromBrowser(req)) return void json(res, 403, { error: "a terminal sign-in starts from the edubot command, not a web page" });
     const refusal = deps.refusal();
     if (refusal) return void json(res, 403, { error: refusal });
     const local = !isProxied(req) && isLoopbackHost(req.headers.host);

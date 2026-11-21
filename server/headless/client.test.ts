@@ -52,14 +52,14 @@ describe("the server and the credential", () => {
 describe("explain", () => {
   it("turns refusals and unreachable servers into exit codes a script can branch on", async () => {
     const status = (code: number, message = "nope") => Object.assign(new Error(message), { status: code });
-    expect(await explain(status(401))).toMatchObject({ exitCode: 4, message: "this server needs you signed in", hint: "run `openmausbot login`" });
+    expect(await explain(status(401))).toMatchObject({ exitCode: 4, message: "this server needs you signed in", hint: "run `edubot login`" });
     expect(await explain(status(401), undefined, { identity: { kind: "token" } })).toMatchObject({ exitCode: 4, message: "this server did not accept the token given" });
     expect(await explain(status(401), undefined, { botShell: true })).toMatchObject({ exitCode: 4, hint: expect.stringContaining("your own terminal") });
     const signedIn = { identity: { kind: "saved" as const, name: "local", label: "x", scopes: ["admin", "client"], expiresAt: 0 } };
     expect(await explain(status(403, "admin scope required"), undefined, signedIn)).toMatchObject({ exitCode: 5, message: "not allowed: admin scope required" });
     expect(await explain(status(403, "admin scope required"), undefined, { botShell: true })).toMatchObject({ exitCode: 5, hint: expect.stringContaining("your own terminal") });
     expect(await explain(status(403, "OpenMausBot refused this request because the installed desktop app requires a paired session token.")))
-      .toMatchObject({ exitCode: 4, message: "not allowed: a change from a program on this computer needs you signed in", hint: expect.stringContaining("openmausbot login") });
+      .toMatchObject({ exitCode: 4, message: "not allowed: a change from a program on this computer needs you signed in", hint: expect.stringContaining("edubot login") });
     expect(await explain(status(403, "admin scope required"), undefined, { identity: { kind: "saved", name: "local", label: "x", scopes: ["client"], expiresAt: 0 } }))
       .toMatchObject({ hint: expect.stringContaining("chat only") });
     expect(await explain(status(409, "stop this bot's turn first"))).toMatchObject({ exitCode: 6, message: "stop this bot's turn first" });

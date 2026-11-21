@@ -64,7 +64,7 @@ let scout: Bot, reporter: Bot, vault: Bot, payroll: Bot, notes: Bot, priyaOwn: B
 const sockets: Socket[] = [];
 
 const file = (name: string) => join(team.home, name);
-const dataFile = (...rest: string[]) => join(team.home, ".openmausbot", ...rest);
+const dataFile = (...rest: string[]) => join(team.home, ".edubot", ...rest);
 const bots = async (token: string) => (await team.as(token, "GET", "/api/bots?messages=0")).body.bots as Bot[];
 const taskOf = async (token: string, botId: string, threadId: string) => (await bots(token)).find((bot) => bot.id === botId)?.tasks?.find((task) => task.threadId === threadId);
 const rows = async (token: string, threadId: string) => ((await team.as(token, "GET", `/api/threads/${threadId}/messages?limit=200`)).body.messages ?? []) as Row[];

@@ -113,7 +113,7 @@ describe("run", () => {
     setTimeout(() => controller.abort(), 50);
     const { code, result } = await h.run(["run", "--bot", "lead", "Go", "--json"], controller.signal);
     expect(code).toBe(130);
-    expect(result).toMatchObject({ exitCode: 130, error: "stopped waiting; the work keeps running", hint: "wait again: openmausbot wait --thread t1 --since 1000" });
+    expect(result).toMatchObject({ exitCode: 130, error: "stopped waiting; the work keeps running", hint: "wait again: edubot wait --thread t1 --since 1000" });
     expect(h.calls.some((call) => call.name === "interrupt_conversation")).toBe(false);
   });
 
@@ -242,7 +242,7 @@ describe("wait", () => {
     setTimeout(() => controller.abort(), 50);
     const { code, result } = await h.run(["wait", "--thread", "t1", "--json"], controller.signal);
     expect(code).toBe(130);
-    expect(result).toMatchObject({ ok: false, exitCode: 130, error: "stopped waiting; the work keeps running", hint: "wait again: openmausbot wait --thread t1" });
+    expect(result).toMatchObject({ ok: false, exitCode: 130, error: "stopped waiting; the work keeps running", hint: "wait again: edubot wait --thread t1" });
     expect(h.calls.some((call) => call.name === "interrupt_conversation")).toBe(false);
   });
 });

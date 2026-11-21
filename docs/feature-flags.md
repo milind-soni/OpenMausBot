@@ -10,7 +10,7 @@ packaged releases may differ, including which controls Settings shows.
 
 ## Change a switch
 
-The default file is `~/.openmausbot/config.json` on the machine running the server.
+The default file is `~/.edubot/config.json` on the machine running the server.
 If the server uses `OMB_DATA_DIR`, edit `config.json` in that directory instead.
 Stop that server (or quit the app if it runs the server), back up the file, merge
 only the keys you want into its existing `features` object, then start it again.

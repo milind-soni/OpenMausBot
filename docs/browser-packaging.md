@@ -72,7 +72,7 @@ Nothing is invented: Chrome for Testing reports Chromium brands, Google Chrome
 its own. `OMB_BROWSER_SCREEN`, `OMB_BROWSER_LANG` and `OMB_BROWSER_TIMEZONE`
 override the display, language and zone.
 
-`openmausbot browser status`, the server's startup log and the
+`edubot browser status`, the server's startup log and the
 `browserEngine.chrome` field of its configuration status name the choice, for
 example `Google Chrome 155 (installed)`. **Rollback:** start the server with
 `OMB_BROWSER_LEGACY_SHELL=1` to run exactly the previous engine.

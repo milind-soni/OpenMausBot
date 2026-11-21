@@ -3,6 +3,7 @@ import nativeText from "./native-text.cjs";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
+import { DATA_DIR_NAME } from "./app-identity.mjs";
 
 export function revealDownloadWhenDone(item, reveal) {
   item.once("done", (_event, state) => {
@@ -53,7 +54,7 @@ function isSameFile(left, right) {
 async function resolveSource(rawPath, { home, fsp, platform }) {
   const target = normalizeSourcePath(rawPath);
   const root = await canonicalPath(
-    path.join(home, ".openmausbot"),
+    path.join(home, DATA_DIR_NAME),
     fsp,
     "Only files created by your bots can be saved",
   );

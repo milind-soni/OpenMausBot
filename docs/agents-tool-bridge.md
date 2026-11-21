@@ -40,7 +40,7 @@ worst case. Run the eval again before changing this.
 
 ## Turning it on
 
-In `~/.openmausbot/config.json`:
+In `~/.edubot/config.json`:
 
 ```json
 { "features": { "agentsToolBridge": true } }

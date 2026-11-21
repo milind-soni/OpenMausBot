@@ -63,7 +63,7 @@ test("missing parent dir: aborts with unavailable, rolls back, never persists", 
   const { dir, cleanup } = realDir();
   t.after(cleanup);
   const { calls, args, deps } = makeDeps();
-  const result = await switchLocalEnvironment({ targetDir: join(dir, "gone", ".openmausbot-x"), deps });
+  const result = await switchLocalEnvironment({ targetDir: join(dir, "gone", ".edubot-x"), deps });
   assert.deepEqual(result, { ok: false, error: "unavailable", rolledBack: true });
   assert.deepEqual(calls, ["stop", "release", "rollback"]);
   assert.deepEqual(args.rollback, [[8799]]);
@@ -91,7 +91,7 @@ test("needsCreate target: createDir runs after release and before acquire", asyn
   const { dir, cleanup } = realDir();
   t.after(cleanup);
   const { calls, args, deps } = makeDeps();
-  const targetDir = join(dir, ".openmausbot-new");
+  const targetDir = join(dir, ".edubot-new");
   const result = await switchLocalEnvironment({ targetDir, targetId: "env-3", deps });
   assert.deepEqual(result, { ok: true });
   assert.deepEqual(calls, ["stop", "release", "create", "acquire", "start", "probe", "persist"]);
@@ -142,17 +142,17 @@ test("probe reports exited: rollback restarts old child exactly once, no double 
 
 test("validateTargetDir: missing parent is unavailable", () => {
   const fsImpl = { existsSync: (p) => !p.includes("gone") };
-  assert.deepEqual(validateTargetDir("/volumes/gone/.openmausbot-x", fsImpl), { ok: false, error: "unavailable" });
+  assert.deepEqual(validateTargetDir("/volumes/gone/.edubot-x", fsImpl), { ok: false, error: "unavailable" });
 });
 
 test("validateTargetDir: absent directory with live parent needs create", () => {
   const fsImpl = { existsSync: (p) => p === "/volumes/live" };
-  assert.deepEqual(validateTargetDir("/volumes/live/.openmausbot-x", fsImpl), { ok: true, needsCreate: true });
+  assert.deepEqual(validateTargetDir("/volumes/live/.edubot-x", fsImpl), { ok: true, needsCreate: true });
 });
 
 test("validateTargetDir: existing directory needs no create", () => {
   const fsImpl = { existsSync: () => true };
-  assert.deepEqual(validateTargetDir("/volumes/live/.openmausbot-x", fsImpl), { ok: true, needsCreate: false });
+  assert.deepEqual(validateTargetDir("/volumes/live/.edubot-x", fsImpl), { ok: true, needsCreate: false });
 });
 
 test("validateTargetDir: default fs sees real temp directories", (t) => {

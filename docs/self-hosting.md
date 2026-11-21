@@ -23,12 +23,12 @@ For server feature switches, defaults and configuration-file instructions, see
 
 | You have | Run | Link it prints |
 |---|---|---|
-| HTTPS in front already (cloudflared, Caddy, nginx) | `npx openmausbot serve --public-url https://maus.example.com` | `https://maus.example.com/pair#code=…` |
-| A domain name, and ports 80 and 443 open | `npx openmausbot serve --domain maus.example.com` | `https://maus.example.com/pair#code=…` |
-| Tailscale on the server and your devices | `npx openmausbot serve --tailscale` | `https://<machine>.<tailnet>.ts.net/pair#code=…` |
-| Only this network (home or office) | `npx openmausbot serve --lan` | `http://192.168.1.20:8799/pair#code=…` |
-| Nothing at all | `npx openmausbot account login`, then `npx openmausbot serve --tunnel` | `https://c-….openmausbot.com/pair#code=…` |
-| Only the phone app, from anywhere (a machine with no tunnel address, for now) | `npx openmausbot login --relay`, then `npx openmausbot serve --relay` | a QR for the MausBot app ([MausBot Relay](phone-relay-server.md)) |
+| HTTPS in front already (cloudflared, Caddy, nginx) | `npx edubot serve --public-url https://maus.example.com` | `https://maus.example.com/pair#code=…` |
+| A domain name, and ports 80 and 443 open | `npx edubot serve --domain maus.example.com` | `https://maus.example.com/pair#code=…` |
+| Tailscale on the server and your devices | `npx edubot serve --tailscale` | `https://<machine>.<tailnet>.ts.net/pair#code=…` |
+| Only this network (home or office) | `npx edubot serve --lan` | `http://192.168.1.20:8799/pair#code=…` |
+| Nothing at all | `npx edubot account login`, then `npx edubot serve --tunnel` | `https://c-….openmausbot.com/pair#code=…` |
+| Only the phone app, from anywhere (a machine with no tunnel address, for now) | `npx edubot login --relay`, then `npx edubot serve --relay` | a QR for the MausBot app ([MausBot Relay](phone-relay-server.md)) |
 
 `--lan` can be added to any of the others. Plain `http://` is only for a
 private network: the desktop app accepts it on LAN addresses, Tailscale
@@ -42,15 +42,15 @@ refuses plain http on the open internet.
 On any machine with Node 24 or newer:
 
 ```sh
-npx openmausbot setup                                        # once: AI access and a default model
-npx openmausbot serve --public-url https://maus.example.com  # or --domain, --tailscale, --lan, --tunnel
+npx edubot setup                                        # once: AI access and a default model
+npx edubot serve --public-url https://maus.example.com  # or --domain, --tailscale, --lan, --tunnel
 ```
 
 In a terminal, `serve` checks the address and prints one pairing block:
 
 ```
 MausBot 0.1.147 · server "hetzner-1"
-data: /home/maus/.openmausbot
+data: /home/maus/.edubot
 Reach    https://maus.example.com   ✓ answers as this server (11:04)
 
 Pairing code   7KQ2-M9XD-H4TP   works once, until 11:14 · everything
@@ -60,8 +60,8 @@ Link           https://maus.example.com/pair#code=7KQ2-M9XD-H4TP
   Phone         scan with your camera or the MausBot app
 
   ▄▄▄▄▄▄▄ ▄ ▄▄ ▄▄▄▄▄▄▄   (QR of the link)
-For a phone (chat and approvals only)   npx openmausbot pair --phone
-New code later   npx openmausbot pair
+For a phone (chat and approvals only)   npx edubot pair --phone
+New code later   npx edubot pair
 Stop with Ctrl+C
 ```
 
@@ -77,8 +77,8 @@ hetzner-1** finishes. You can also type the address (`maus.example.com`,
 `192.168.1.20:8799`) and the pairing code in their own fields.
 
 `serve` with no way in mints no code. It lists the ways in instead. Every
-command the CLI prints starts the way you started it (`npx openmausbot`,
-`openmausbot`, `pnpm omb`, or `docker compose exec omb openmausbot`), so you
+command the CLI prints starts the way you started it (`npx edubot`,
+`edubot`, `pnpm omb`, or `docker compose exec omb edubot`), so you
 can paste it as is.
 
 ### Already have cloudflared, Caddy or nginx in front
@@ -89,13 +89,13 @@ and don't buffer the event stream ([details](#putting-a-proxy-in-front)).
 Then:
 
 ```sh
-npx openmausbot serve --public-url https://maus.example.com
+npx edubot serve --public-url https://maus.example.com
 ```
 
 Setting `OMB_PUBLIC_URL=https://maus.example.com` in the environment works the
 same way. If the Reach line says
 `✗ https://maus.example.com doesn't reach this server`, the tunnel points
-somewhere else. Fix that, then run `npx openmausbot account status` to check again.
+somewhere else. Fix that, then run `npx edubot account status` to check again.
 
 ### Docker on your computer or home network
 
@@ -103,7 +103,7 @@ From a checkout of the repository:
 
 ```sh
 docker compose up -d --build                  # http://localhost:8080 on this machine
-docker compose exec omb openmausbot pair      # a code, and a sign-in link for this machine's browser
+docker compose exec omb edubot pair      # a code, and a sign-in link for this machine's browser
 ```
 
 To pair from other devices on the same network, publish the port there and
@@ -111,7 +111,7 @@ name the address they use:
 
 ```sh
 OMB_BIND_ADDRESS=0.0.0.0 OMB_PUBLIC_URL=http://192.168.1.20:8080 docker compose up -d
-docker compose exec omb openmausbot pair      # Link http://192.168.1.20:8080/pair#code=…
+docker compose exec omb edubot pair      # Link http://192.168.1.20:8080/pair#code=…
 ```
 
 Do this only on a machine behind your router. A machine with a public address
@@ -126,7 +126,7 @@ domain:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/install.sh | sudo sh -s -- --domain maus.example.com
-cd /opt/openmausbot && sudo docker compose exec omb openmausbot pair   # Link https://<DOMAIN>/pair#code=…
+cd /opt/openmausbot && sudo docker compose exec omb edubot pair   # Link https://<DOMAIN>/pair#code=…
 ```
 
 Add `--check` to only check the server. Running it again repairs;
@@ -141,7 +141,7 @@ By hand, on any system with Docker:
 git clone https://github.com/milind-soni/OpenMausBot && cd OpenMausBot/deploy
 cp .env.example .env                          # set DOMAIN (and ENGINES)
 docker compose pull omb && docker compose up -d
-docker compose exec omb openmausbot pair      # Link https://<DOMAIN>/pair#code=…
+docker compose exec omb edubot pair      # Link https://<DOMAIN>/pair#code=…
 ```
 
 Caddy gets the certificate. See [Docker (with HTTPS on your own domain)](#docker-with-https-on-your-own-domain).
@@ -149,7 +149,7 @@ Caddy gets the certificate. See [Docker (with HTTPS on your own domain)](#docker
 ### Keep it running (a service)
 
 ```sh
-npx openmausbot service install --public-url https://maus.example.com   # the same way-in options as serve
+npx edubot service install --public-url https://maus.example.com   # the same way-in options as serve
 ```
 
 This writes a systemd unit (Linux) or a launchd agent (macOS) with the same
@@ -158,7 +158,7 @@ installs a copy of this exact version beside your data, because npm prunes
 its npx cache. The service log never shows a code. Get one with:
 
 ```sh
-npx openmausbot pair
+npx edubot pair
 ```
 
 ### Podman (rootless, as a service)
@@ -183,7 +183,7 @@ service:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/podman/install.sh | sh
-podman exec -it openmausbot openmausbot pair      # a code, and a sign-in link for this machine's browser
+podman exec -it edubot edubot pair      # a code, and a sign-in link for this machine's browser
 ```
 
 It writes a Quadlet unit, `~/.config/containers/systemd/openmausbot.container`,
@@ -196,7 +196,7 @@ prints the one line to run as an administrator; it never runs `sudo` itself:
 sudo loginctl enable-linger "$USER"
 ```
 
-The server uses the host's network, as `npx openmausbot serve` does. It
+The server uses the host's network, as `npx edubot serve` does. It
 listens on `127.0.0.1:8799` only, and a program on this machine counts as its
 owner ([Loopback trust](#loopback-trust-owner-or-service)). Nothing is
 forwarded into a container. `--local` and `--lan` decide only which
@@ -277,20 +277,20 @@ Debian 13 and Fedora), SELinux hosts and ARM64 have not been tried.
 |---|---|---|
 | "That's a pairing code. Also enter the server's address, like http://192.168.1.20:8799." | A code went into the address field. | Type the server's address in the first field; the code moves to its own field. |
 | "http://… is on the open internet and isn't encrypted…" | A plain http link to a public address. | Use its https address, or put HTTPS in front: `--public-url` behind cloudflared or Caddy, `--domain`, or `--tailscale`. |
-| "This points at this computer (127.0.0.1), not at the server." | A link to `127.0.0.1` or `localhost`, which is the computer you're on. | Use the address other devices reach the server at: run `openmausbot pair` on the server, or choose a way in. |
+| "This points at this computer (127.0.0.1), not at the server." | A link to `127.0.0.1` or `localhost`, which is the computer you're on. | Use the address other devices reach the server at: run `edubot pair` on the server, or choose a way in. |
 | "Can't reach 192.168.1.20:8799. Check the server is running and reachable from this computer." | Nothing answers there. | Start it with a way in (`serve --lan` for this network), and check a firewall allows the port. |
 | "maus.example.com doesn't exist yet." / "…certificate isn't valid yet." | DNS or the certificate isn't ready. | Wait for the DNS record, or give a new server a minute. |
 | "That address answers, but it isn't a MausBot server." | Something else answers there, often a proxy pointing at the wrong port. | Point it at `http://127.0.0.1:8799`. |
-| "That's a sign-in code from an email…" / "That code is for the phone app…" / "That's a script key…" | The wrong kind of code. | On the server, run `openmausbot pair` for a 12-character pairing code. |
+| "That's a sign-in code from an email…" / "That code is for the phone app…" / "That's a script key…" | The wrong kind of code. | On the server, run `edubot pair` for a 12-character pairing code. |
 | "Too many wrong codes. Try again at 11:19." | Five wrong codes in five minutes from one address. | Wait until then, or make a new code. |
-| `Reach    ✗ https://… doesn't reach this server (connection refused).` | Your tunnel or proxy doesn't reach port 8799. | Point it at `http://127.0.0.1:8799`, then run `openmausbot account status`. |
+| `Reach    ✗ https://… doesn't reach this server (connection refused).` | Your tunnel or proxy doesn't reach port 8799. | Point it at `http://127.0.0.1:8799`, then run `edubot account status`. |
 | `Reach    ✗ https://… answers as a different server.` | The address leads to another MausBot server. | Point the tunnel at this machine's port. |
 | `Reach    … https://… doesn't answer yet` (`--domain`) | DNS isn't pointing here yet, or ports 80 and 443 are closed. | Fix the A record and open the ports; the certificate follows. |
 | `--lan: this machine has no private network address…` | A VPS with only a public address. | Use `--public-url`, `--domain` or `--tailscale`. |
 | `tailscale: HTTPS certificates are off for this tailnet, so this server listens on http://…` | Tailscale can't serve HTTPS yet, so the server listens on its own tailnet address. It works, and only your tailnet reaches it. | For an `https://` address, turn on HTTPS certificates at https://login.tailscale.com/admin/dns, then run `serve --tailscale` again. |
 | `No MausBot server is running here. Start it: … serve` | `pair` found no server on this port. | Start it, or pass the server's `--port` and `--data-dir`. |
-| `Get a pairing code: openmausbot pair` and no code | The server runs as a service or under `docker compose logs`, where codes stay out of logs. | Run that command in a terminal. |
-| "This shared server takes no pairing commands from this machine." | The server runs with `OMB_LOOPBACK_TRUST=service`. | Let people sign in with their email (`openmausbot access add you@example.com`), or pair from a signed-in admin's Settings. |
+| `Get a pairing code: edubot pair` and no code | The server runs as a service or under `docker compose logs`, where codes stay out of logs. | Run that command in a terminal. |
+| "This shared server takes no pairing commands from this machine." | The server runs with `OMB_LOOPBACK_TRUST=service`. | Let people sign in with their email (`edubot access add you@example.com`), or pair from a signed-in admin's Settings. |
 
 ## Reference
 
@@ -310,7 +310,7 @@ Runs fully on a server:
 - text-to-speech (with a key), the web UI (the server serves it itself)
 
 - a browser for bots, once the engine is installed on the server
-  (`npx openmausbot browser install`, or nothing to do in the Docker image,
+  (`npx edubot browser install`, or nothing to do in the Docker image,
   which ships it): each bot gets its own isolated, persistent session.
   Watching it live from the app is the next step (docs/plans/browser-engine.md).
   It reaches the public internet and the dev servers a bot starts itself,
@@ -323,7 +323,7 @@ Desktop-only for now (needs the Mac/Linux app):
 
 ## Ways in, in detail
 
-`npx openmausbot start` (or plain `npx openmausbot`) is the guided start. It
+`npx edubot start` (or plain `npx edubot`) is the guided start. It
 asks for AI access, an account or API key, and the default model, then opens
 the workspace in this machine's browser. `setup` only configures, and `serve`
 starts without questions from the saved configuration and the flags you give
@@ -331,10 +331,10 @@ it (for services and scripts). The [setup guide](cli-onboarding.md) explains
 the choices. The npm package does not include engine CLIs (`claude`,
 `codex`, …); setup can install and sign in the supported ones. Run setup,
 engine sign-ins and the server as the same unprivileged user: engine
-credentials live in that user's home, not all under `.openmausbot`. For a
+credentials live in that user's home, not all under `.edubot`. For a
 Linux service, the [VPS guide](deploy-vps.md#before-you-start) covers the
 account, engines and browser libraries. After installing browser libraries
-as administrator, run `npx openmausbot browser install` as the service user
+as administrator, run `npx edubot browser install` as the service user
 too.
 
 - **`--public-url URL`**: you already have HTTPS in front. The address must
@@ -366,7 +366,7 @@ too.
   networks and VPN tunnels are skipped. A machine with no private address
   says so and stays on loopback. Plain http travels in clear, so use it only
   on a network you trust.
-- **`--tunnel`**: `npx openmausbot account login` reserves an address like
+- **`--tunnel`**: `npx edubot account login` reserves an address like
   `https://c-….openmausbot.com` for this machine (an emailed code signs it
   in). `serve --tunnel` connects it through a Cloudflare tunnel, the same one
   the desktop app uses for its companion. The first run downloads
@@ -375,17 +375,17 @@ too.
   lands on a separate listener that the server treats as "through a proxy",
   never as the owner. That listener gzips JSON replies of 1 KB or more when
   the client accepts gzip; the loopback port never compresses.
-  `npx openmausbot account logout` releases the address. The account credentials
-  live in `~/.openmausbot/tunnel-account.json` (mode 0600). Started from a
+  `npx edubot account logout` releases the address. The account credentials
+  live in `~/.edubot/tunnel-account.json` (mode 0600). Started from a
   fleet or a container, where nobody can type an emailed code? Set
   `OMB_INSTALLATION_CREDENTIAL` to the installation credential the fleet
   issued and skip `login`. The address and connector token are fetched at
   every start, and nothing is written to disk. A rejected credential stops
   the start with a clear message rather than serving locally.
 
-Later: `npx openmausbot pair --label "Kitchen iPad"` for another device
+Later: `npx edubot pair --label "Kitchen iPad"` for another device
 (`--phone` for one that may chat but not change settings), and
-`npx openmausbot devices` to see or sign them out. `openmausbot serve` is a
+`npx edubot devices` to see or sign them out. `edubot serve` is a
 plain foreground process. For unattended use, run `service install` (above)
 or follow the [systemd example](deploy-vps.md#keep-it-running). Restarting a
 service never downloads a new release on its own.
@@ -496,7 +496,7 @@ pairing code for your first device:
 
 ```sh
 docker compose exec omb claude                       # each CLI you listed in ENGINES
-docker compose exec omb openmausbot pair             # prints a code, a link and a QR
+docker compose exec omb edubot pair             # prints a code, a link and a QR
 ```
 
 Paste the link (`https://<DOMAIN>/pair#code=…`) into MausBot under **＋ →
@@ -556,8 +556,8 @@ hold. The server image (`ghcr.io/milind-soni/openmausbot`) is built for that:
   starts itself again under the image's tini, which then stays process 1; an
   init of the platform's own on top (`docker run --init`, Compose's
   `init: true`) does no harm. A command you give the container runs as
-  written, so start it with `openmausbot …` or `node …`
-  (`docker run --rm ghcr.io/milind-soni/openmausbot openmausbot --version`):
+  written, so start it with `edubot …` or `node …`
+  (`docker run --rm ghcr.io/milind-soni/openmausbot edubot --version`):
   a bare `--version` or `dist-server/openmausbot.js`, which older images
   passed on to Node, no longer starts.
 - **Chrome does not need a larger `/dev/shm`.** Where `/dev/shm` is under
@@ -587,7 +587,7 @@ hold. The server image (`ghcr.io/milind-soni/openmausbot`) is built for that:
     with no forwarding header and a loopback `Host` is taken to be the
     server's owner.
   - A tunnel that dials out, so nothing has to reach the container:
-    `openmausbot serve --tunnel` as the start command ([`--tunnel`](#ways-in-in-detail)).
+    `edubot serve --tunnel` as the start command ([`--tunnel`](#ways-in-in-detail)).
 
 **How many processes and how much memory.** A container's process limit
 (`pids.max`; Docker's `--pids-limit`, Kubernetes' `podPidsLimit`) counts
@@ -750,26 +750,26 @@ git clone https://github.com/milind-soni/OpenMausBot && cd OpenMausBot
 pnpm install
 
 # choose where data lives and start the server
-OMB_DATA_DIR="$HOME/.openmausbot" OMB_PORT=8799 \
+OMB_DATA_DIR="$HOME/.edubot" OMB_PORT=8799 \
   node --experimental-strip-types server/index.ts
 ```
 
 For something durable, let the CLI write the service for you:
 
 ```sh
-npx openmausbot service install --domain maus.example.com   # or --public-url, --tunnel, --tailscale, --lan
+npx edubot service install --domain maus.example.com   # or --public-url, --tunnel, --tailscale, --lan
 ```
 
 It renders a systemd unit (Linux) or a launchd agent (macOS) that runs the
-same `openmausbot serve …` with your options, restarts it if it stops, and,
+same `edubot serve …` with your options, restarts it if it stops, and,
 for `--domain`, grants the unit the capability to bind ports 80 and 443
 without root. The file is written next to your data and the two commands
 that install and start it are printed (they need `sudo` on Linux).
-`openmausbot service uninstall` prints the reverse. Run from `npx`, it
+`edubot service uninstall` prints the reverse. Run from `npx`, it
 first installs a copy of the same version into `<data dir>/app/<version>`,
 because npm may prune its npx cache. The unit points at that copy. Not being
 a terminal, the service writes no pairing code into its log: run
-`npx openmausbot pair` when you need one.
+`npx edubot pair` when you need one.
 
 Engine CLIs read their logins from the service user's home: sign them in
 from Settings → Engines (below), or as that user in a terminal, before you
@@ -821,7 +821,7 @@ Providers added with `opencode auth login` work everywhere.
 
 ## Many client workspaces on one server
 
-`openmausbot fleet` runs one workspace per client on a single Linux server,
+`edubot fleet` runs one workspace per client on a single Linux server,
 each as its own OS user, its own `openmausbot@<name>` service on its own
 loopback ports, its own data folder, brand, sign-in list and provider key,
 reached at `<name>.<your domain>` through the system Caddy. Bots of one
@@ -834,7 +834,7 @@ Once, as root, with the package installed permanently and a wildcard DNS
 record (`*.example.com`) pointing at the server:
 
 ```sh
-openmausbot fleet init --domain example.com
+edubot fleet init --domain example.com
 ```
 
 That writes the template unit, the fence and its unit, the workspace folders,
@@ -842,14 +842,14 @@ and adds `import /etc/caddy/omb.d/*.caddy` to `/etc/caddy/Caddyfile`. Then per
 client:
 
 ```sh
-openmausbot fleet create acme --admin owner@acme.test --member @acme.test \
+edubot fleet create acme --admin owner@acme.test --member @acme.test \
   --brand /root/acme-brand.json --anthropic-key-file /root/acme-anthropic.key \
   --cap 50 --memory 1G
-openmausbot fleet users acme add bob@acme.test --chat-only
-openmausbot fleet list
-openmausbot fleet suspend acme      # 503 page, service stopped; resume undoes it
-openmausbot fleet upgrade           # new release, then every running workspace restarted in turn
-openmausbot fleet delete acme --yes # add --keep-data to keep the home folder
+edubot fleet users acme add bob@acme.test --chat-only
+edubot fleet list
+edubot fleet suspend acme      # 503 page, service stopped; resume undoes it
+edubot fleet upgrade           # new release, then every running workspace restarted in turn
+edubot fleet delete acme --yes # add --keep-data to keep the home folder
 ```
 
 Give `init` `--operator USER` (the Unix user your own workspace runs as; the
@@ -891,9 +891,9 @@ Pair once, then use the server from any browser on any machine that can
 reach it. On the server:
 
 ```sh
-npx openmausbot pair                         # npm install
+npx edubot pair                         # npm install
 pnpm omb pair                                # from a checkout
-docker compose exec omb openmausbot pair     # Docker
+docker compose exec omb edubot pair     # Docker
 ```
 
 It prints a 12-character pairing code (it works once, for 10 minutes, or up
@@ -902,7 +902,7 @@ address the server is reached at (`--public-url`, `--domain`, `--tunnel`,
 `--tailscale`, `--lan`, or `OMB_PUBLIC_URL`). Open the link, or open `/pair`
 on that address and type the code. The browser gets a session cookie (30
 days, renewed on use up to 180 days from pairing, revocable) and the app
-loads. `npx openmausbot devices` lists the paired devices and
+loads. `npx edubot devices` lists the paired devices and
 `devices revoke ID` signs one out.
 
 From the **desktop app**, choose **＋ → Connect to a server** and paste the
@@ -913,7 +913,7 @@ field. The sheet looks the address up and names what it found, for example
 then plain http when the address is private. Plain http works only on a
 private network (LAN addresses, Tailscale's 100.64/10 and `*.ts.net`,
 `*.local`); a public http address is refused with what to do instead.
-Generate a fresh code for each device: `npx openmausbot pair --label "My
+Generate a fresh code for each device: `npx edubot pair --label "My
 desktop"` gives full access, and `--phone` gives chat and approvals only. A
 code already used by your phone cannot also pair your desktop.
 
@@ -1021,7 +1021,7 @@ address of its own:
 
 ```sh
 ssh -L 8799:localhost:8799 you@your-server
-# then run `openmausbot pair` on the server and open the "Browser on this machine" link it prints
+# then run `edubot pair` on the server and open the "Browser on this machine" link it prints
 ```
 
 The browser signs in once through the tunnel, like any browser on the server
@@ -1037,7 +1037,7 @@ server, even when it runs on the same machine. Programs are unaffected: the
 CLI, scripts, `curl` and the companion send neither header.
 
 So the first time you open the web UI in a browser on the server's own
-machine, it shows the sign-in page. With no way in, `openmausbot pair` prints
+machine, it shows the sign-in page. With no way in, `edubot pair` prints
 a link for it:
 
 ```
@@ -1045,7 +1045,7 @@ a link for it:
 ```
 
 Open it and choose **Connect** (or type the code on the sign-in page); the browser
-keeps its session cookie from then on. `openmausbot` (the guided start) prints
+keeps its session cookie from then on. `edubot` (the guided start) prints
 the same link when it opens the browser. The desktop app is unaffected:
 its window adds the app's own per-launch owner header to every request and
 WebSocket it sends to its server, and no other Electron session may reach the
@@ -1094,16 +1094,16 @@ it too and is always `service` (docs/cloud-pro.md).
 
 With `service` on a self-hosted server:
 
-- `openmausbot serve` in a terminal still prints the first pairing code. It
+- `edubot serve` in a terminal still prints the first pairing code. It
   hands the server it starts a one-off secret over the server's stdin (never
   its environment, which every engine inherits), and that secret opens the
   pairing route for that CLI alone. Pass `--no-pair` to skip the code; if
   the server refuses one anyway, `serve` says why and keeps running. Not in
   a terminal (a service), it prints no code and points at email sign-in.
-- `openmausbot pair` and `openmausbot devices`, run later from another
+- `edubot pair` and `edubot devices`, run later from another
   terminal, are refused like any other admin change and say so. Pair from
   the server's Settings while signed in as an admin, or let people sign
-  in with their email (`openmausbot access add you@example.com`, which edits
+  in with their email (`edubot access add you@example.com`, which edits
   the sign-in list on disk).
 - A browser on an SSH tunnel gets the sign-in page instead of the app.
 - The MCP server script works with `OPENMAUSBOT_TOKEN` set to a paired session.
@@ -1140,14 +1140,14 @@ npm package, the same thing from the command line, with the server running
 or not, no restart needed:
 
 ```sh
-npx openmausbot access add her@yourcompany.com
-npx openmausbot access add freelancer@example.com --chat-only
-npx openmausbot access list
+npx edubot access add her@yourcompany.com
+npx edubot access add freelancer@example.com --chat-only
+npx edubot access list
 ```
 
 An entry is an address or `@domain` (everyone at that domain). Admins get
-the same access as a pairing code from `openmausbot serve`; users get the
-chat-only scope, the same as `openmausbot pair --phone`. The same lists live
+the same access as a pairing code from `edubot serve`; users get the
+chat-only scope, the same as `edubot pair --phone`. The same lists live
 in `config.json` under `signIn.admins` and `signIn.members` and can be changed
 through the settings API without a restart. An environment variable that
 names someone wins over its list, which is how a container or a service unit
@@ -1161,7 +1161,7 @@ default. Your server sends the code, checks the answer, and then issues its own 
 cookie: the browser only ever talks to your server, and who is welcome is
 decided only by your allow-list. Wrong codes count against a lockout of
 their own: ten in a minute from one address pause sign-in there for a minute. Sessions from a sign-in show the email in
-`openmausbot devices` and can be revoked the same way.
+`edubot devices` and can be revoked the same way.
 
 To send the codes through your own mail server instead, so nobody signs in
 through the account service and no MausBot account is made, give the server
@@ -1378,21 +1378,21 @@ creates a one-time code with a QR right in the browser, and lists every
 paired device with a sign-out button. Nobody needs the command line.
 
 The iOS app pairs with a server the same way a laptop does: scan the QR
-code that `openmausbot serve` (or `openmausbot pair`) prints, paste the
+code that `edubot serve` (or `edubot pair`) prints, paste the
 whole `https://host/pair#code=…` link into the address field on the pairing
 screen, or type the address and then the code. The phone gets a session of
-its own, listed and revocable with `openmausbot devices`. What it may do is
-the code's scope: a code from `openmausbot pair` carries `admin` and the app
-shows everything; a code from `openmausbot pair --phone` (also what the
+its own, listed and revocable with `edubot devices`. What it may do is
+the code's scope: a code from `edubot pair` carries `admin` and the app
+shows everything; a code from `edubot pair --phone` (also what the
 guided phone setup mints) can chat, approve and read, and the app hides
 creating bots and sections, changing models, generating avatars, connecting
 apps and cloud desktops — those stay with the owner. A server reinstalled at
 the same address has a new identity; the app then asks to pair again rather
 than present the old session to it.
 
-Both native apps pair this way. `openmausbot pair --phone android` prints the
+Both native apps pair this way. `edubot pair --phone android` prints the
 app-scheme QR that Android's scanner needs, and the iOS app accepts either
-that QR or the web link, for example `docker compose exec omb openmausbot
+that QR or the web link, for example `docker compose exec omb edubot
 pair --phone android --public-url https://your-domain`. `pair` never asks
 questions, so it works the same from a script. Nothing extra to install, and
 the phone becomes a session like any other.
@@ -1400,7 +1400,7 @@ the phone becomes a session like any other.
 Older way, still supported, and only useful on a LAN or a tailnet: run the
 companion sidecar next to the harness and pair by its own QR. It advertises
 on your private networks (Tailscale-aware) and issues its own per-device
-credentials, which are **not** `openmausbot devices` and are revoked from
+credentials, which are **not** `edubot devices` and are revoked from
 its own page at the `127.0.0.1:8811/#token=…` link it prints. It also serves phones over cleartext HTTP
 on port 8810, so do not expose it from a public server. It ships only in a
 git checkout: neither the npm package nor the Docker image contains it.
@@ -1511,7 +1511,7 @@ unless its status still says signed out.
 
 ### Which engine a new bot uses
 
-A saved default model (Settings, `openmausbot setup`, or the New Bot
+A saved default model (Settings, `edubot setup`, or the New Bot
 defaults) always wins. Without one, new bots get the first engine that can
 run, in this order: a Claude account, a ChatGPT plan, Gemini, Grok, then the
 rest in the order of `instances`; OpenCode running only Zen's free no-login
@@ -1630,8 +1630,8 @@ shutdown): settings
 sessions, webhooks, MCP servers, engines and keys, bots created, deleted or
 given different permissions, spend limits and prices, and who can see a bot.
 Each row names who acted — the session's email or device label, `This
-computer` for the owner, `Command line` for `openmausbot` commands such as
-`openmausbot access add` — and the values before and after. Values are
+computer` for the owner, `Command line` for `edubot` commands such as
+`edubot access add` — and the values before and after. Values are
 redacted: anything under a key that names a credential, every value in a
 headers or environment map, the value after a flag such as `--api-key` or
 `-k`, URL parameters such as `?key=`, a token before a URL's host
@@ -1710,8 +1710,8 @@ umask 077
 BOT_ID=your-bot-id
 THREAD_ID=your-existing-thread-id
 TOKEN=$(openssl rand -hex 32)
-printf '{ "%s": {"token":"%s","threadId":"%s"} }\n' "$BOT_ID" "$TOKEN" "$THREAD_ID" > ~/.openmausbot/external-runtimes.json
-chmod 600 ~/.openmausbot/external-runtimes.json
+printf '{ "%s": {"token":"%s","threadId":"%s"} }\n' "$BOT_ID" "$TOKEN" "$THREAD_ID" > ~/.edubot/external-runtimes.json
+chmod 600 ~/.edubot/external-runtimes.json
 ```
 
 Keep the file private (`600` on Unix; restrict its Windows file permissions).
@@ -1914,12 +1914,12 @@ a bot or department that was paused by itself paused.
 From a terminal, to stop spending at once:
 
 ```sh
-openmausbot bots pause --all      # openmausbot bots resume --all undoes it
-openmausbot stop --all            # or only stop the work running now, pausing nothing
+edubot bots pause --all      # edubot bots resume --all undoes it
+edubot stop --all            # or only stop the work running now, pausing nothing
 ```
 
-Both are admin requests, so they need you signed in (`openmausbot login`),
-except on a server you started with `openmausbot serve` whose loopback trust is
+Both are admin requests, so they need you signed in (`edubot login`),
+except on a server you started with `edubot serve` whose loopback trust is
 `owner` (see "Loopback trust: owner or service"). With a token instead:
 
 ```sh
@@ -1952,7 +1952,7 @@ what it can and cannot do](deploy-vps.md#from-the-app-update-server).
 
 ```sh
 cd deploy && git pull && ./update.sh                                    # Docker: copy the data, update, roll back on failure
-git pull && pnpm install && sudo systemctl restart openmausbot          # from source
+git pull && pnpm install && sudo systemctl restart edubot          # from source
 ```
 
 `deploy/update.sh` is the whole routine for a Docker Compose install: the
@@ -2002,10 +2002,10 @@ starts the new version once more; otherwise it rolls back as before.
 You can run it yourself, as the server's user:
 
 ```sh
-openmausbot doctor --data                 # check and report; changes nothing
-openmausbot doctor --data --fix           # also apply the safe repairs (stop the server first)
-openmausbot doctor --data --json          # the report as JSON
-docker compose exec omb openmausbot doctor --data   # Docker
+edubot doctor --data                 # check and report; changes nothing
+edubot doctor --data --fix           # also apply the safe repairs (stop the server first)
+edubot doctor --data --json          # the report as JSON
+docker compose exec omb edubot doctor --data   # Docker
 ```
 
 `--data-dir DIR` points it at another folder. It exits 0 when everything is
@@ -2023,7 +2023,7 @@ macOS).
 | Engine-run records | `engine-runs/` | Records with neither a server nor a process to stop are moved into the backup. |
 | Messages database | `messages.db` | SQLite's `quick_check`. A write-ahead log over 64 MB is folded back into the database. A damaged database is reported, never rewritten. One that cannot be opened (permissions, another program's lock) is reported as not checked, not as damaged. |
 | Private files | `config.json`, `sessions.json`, `bots.json`, `messages.db`, … | Made owner-only (0600). Not on Windows. |
-| Settings file | `config.json` | Never: it tells you `openmausbot config restore latest` when dated copies exist. |
+| Settings file | `config.json` | Never: it tells you `edubot config restore latest` when dated copies exist. |
 
 Before changing anything, a repair copies it into
 `<data>/doctor-backups/<time>/`, with a `manifest.json` that lists what changed
@@ -2035,4 +2035,4 @@ computer and are not part of a workspace backup.
 
 As a server starts, the doctor reads `messages.db` through and copies it before
 a checkpoint only while it and its write-ahead log come to 256 MB or less, so an update never waits on a large database;
-`openmausbot doctor --data` does both at any size.
+`edubot doctor --data` does both at any size.

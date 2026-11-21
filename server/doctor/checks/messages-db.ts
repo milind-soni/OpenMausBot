@@ -11,7 +11,7 @@ import type { DoctorCheck } from "../types.ts";
 
 const DB = "messages.db";
 /** Above this, the check and the copy before a checkpoint are not done at start: both read the whole file, and an update
- * waits on the start. `openmausbot doctor --data` does them at any size. */
+ * waits on the start. `edubot doctor --data` does them at any size. */
 export const START_CHECK_MAX_BYTES = 256 * 1024 * 1024;
 /** A log this big is folded back into the database. */
 export const LARGE_WAL_BYTES = 64 * 1024 * 1024;
@@ -69,16 +69,16 @@ export function messagesDbCheck(limits: { startCheckMaxBytes?: number; largeWalB
       }
       if (verdict?.kind === "unchecked") {
         return { status: "problem", summary: `Could not check messages.db: ${verdict.reason}.`, detail: { verdict },
-          instruction: "Make sure the server's user can read messages.db and no other program holds it, then run openmausbot doctor --data again." };
+          instruction: "Make sure the server's user can read messages.db and no other program holds it, then run edubot doctor --data again." };
       }
-      const checked = verdict ? "SQLite finds it sound" : `${Math.round((dbBytes + walBytes) / 1024 / 1024)} MB with its log: checked only by openmausbot doctor --data`;
+      const checked = verdict ? "SQLite finds it sound" : `${Math.round((dbBytes + walBytes) / 1024 / 1024)} MB with its log: checked only by edubot doctor --data`;
       if (walBytes > largeWal) {
         const free = freeBytes(ctx.dataDir);
         const room = free === null || free > 2 * (dbBytes + walBytes);
         return { status: "problem", fixable: room && readable, detail: { file, verdict },
           summary: `${checked}; its write-ahead log is ${Math.round(walBytes / 1024 / 1024)} MB.`,
-          ...(!room ? { instruction: "There is not room to copy it first: free some disk, then run openmausbot doctor --data --fix." }
-            : !readable ? { instruction: "Too large to copy as the server starts: stop the server, then run openmausbot doctor --data --fix." } : {}) };
+          ...(!room ? { instruction: "There is not room to copy it first: free some disk, then run edubot doctor --data --fix." }
+            : !readable ? { instruction: "Too large to copy as the server starts: stop the server, then run edubot doctor --data --fix." } : {}) };
       }
       return { status: "ok", summary: `${checked}.`, detail: { verdict } };
     },

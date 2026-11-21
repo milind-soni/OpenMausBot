@@ -31,7 +31,7 @@ const scriptToolCalls = (calls: unknown[] | null) => {
   const file = join(team.home, "tool-calls.json");
   if (calls) writeFileSync(file, JSON.stringify(calls)); else rmSync(file, { force: true });
 };
-const dataDir = (...rest: string[]) => join(team.home, ".openmausbot", ...rest);
+const dataDir = (...rest: string[]) => join(team.home, ".edubot", ...rest);
 const messages = (token: string, threadId: string) => team.as(token, "GET", `/api/threads/${threadId}/messages?limit=200`);
 const idle = async (token: string) => ((await team.as(token, "GET", "/api/bots")).body.bots as Array<{ activity?: string; busy?: boolean }>)
   .every((entry) => entry.activity !== "working" && !entry.busy);

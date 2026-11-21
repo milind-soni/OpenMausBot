@@ -4,7 +4,7 @@
 //     node --experimental-strip-types evals/dream/run-dream.ts [--only id,id]
 //
 // Each case is one real model call on your account: never in CI, closed unless OMB_EVAL_LIVE=1. The server's data folder is
-// a temporary one, so nothing reads or writes ~/.openmausbot.
+// a temporary one, so nothing reads or writes ~/.edubot.
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";

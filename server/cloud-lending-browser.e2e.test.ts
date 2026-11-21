@@ -131,7 +131,7 @@ readline.createInterface({ input: process.stdin }).on("line", async line => {
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-lent-browser-"));
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".edubot");
   mkdirSync(dataDir, { recursive: true });
   const cli = join(home, "fixture-claude.mjs");
   writeFileSync(cli, `#!/usr/bin/env node

@@ -16,7 +16,7 @@ const available = detection.box === "bwrap" && detection.tools !== null;
 const root = mkdtempSync(join(tmpdir(), "omb-engine-box-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-const serverHome = join(root, "home"), dataDir = join(serverHome, ".openmausbot");
+const serverHome = join(root, "home"), dataDir = join(serverHome, ".edubot");
 const owner = audienceHome(dataDir, "member:p_olive"), bob = audienceHome(dataDir, "member:p_bob");
 const put = (path: string, text: string) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, text); };
 const cwd = join(dataDir, "task-workspaces", "bot-a", "t-owner");

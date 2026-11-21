@@ -96,7 +96,7 @@ node --experimental-strip-types scripts/testing/voice-latency-harness.ts --label
 
 No environment setup: the run is keyless and self-contained (it launches the
 stub, the disposable fixture server and the browser itself, and never reads
-the live `~/.openmausbot/config.json`). One warmup reply is spoken and
+the live `~/.edubot/config.json`). One warmup reply is spoken and
 discarded, then every corpus reply in order. Each log row: reply id, shape,
 t0-to-first-audio ms, gap count, total gap ms, longest gap ms (plus
 t0→message-frame and message-frame→first-audio splits). The summary carries

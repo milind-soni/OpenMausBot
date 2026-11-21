@@ -207,7 +207,7 @@ describe("which files a bot may send", () => {
 
   it("never sends the home folder's hidden folders or the app's own data, even when the bot works in the home folder", async () => {
     const home = dir();
-    const data = join(home, ".openmausbot"), desktop = join(home, "AppData", "Roaming", "MausBot");
+    const data = join(home, ".edubot"), desktop = join(home, "AppData", "Roaming", "MausBot");
     const inHome = scope({ roots: [home], refuse: [data, desktop], home });
     const sensitive = /hidden folder or in the app's own data/;
     await expect(openBotFile(put(join(home, ".ssh", "id_ed25519")), inHome)).rejects.toThrow(sensitive);

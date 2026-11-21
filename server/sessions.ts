@@ -87,7 +87,7 @@ const sessionSchema = z.object({
   owner: z.string().max(254).optional(),
   /** A Team Cloud's sign-in for moving one bot in (server/team-move-in.ts): it reaches that bot's move routes only. */
   moveIn: z.string().regex(/^[\w-]{1,128}$/).optional(),
-  /** An access token for a script (`openmausbot token create`): it ends at expiresAt and never renews. */
+  /** An access token for a script (`edubot token create`): it ends at expiresAt and never renews. */
   token: z.literal(true).optional(),
 });
 

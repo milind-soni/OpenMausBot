@@ -7,7 +7,7 @@ export interface DoctorContext {
   dataDir: string;
   /** The version running the checks. */
   version: string;
-  /** "start": the server's own run as it starts, holding the lease; "command": `openmausbot doctor --data`. */
+  /** "start": the server's own run as it starts, holding the lease; "command": `edubot doctor --data`. */
   mode: "start" | "command";
   now(): number;
   /** When this process started (ms): a temp file with its pid from before then is a predecessor's. */

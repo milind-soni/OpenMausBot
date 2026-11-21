@@ -151,7 +151,7 @@ describe.skipIf(process.platform === "win32")("Muse Code's process", () => {
   it("starts through the shared launcher, in the conversation's engine home, and stops with the instance", async () => {
     const { cli, log } = fakeMuse();
     const home = join(root, "home");
-    const dataDir = join(home, ".openmausbot");
+    const dataDir = join(home, ".edubot");
     mkdirSync(dataDir, { recursive: true });
     engineHomes.start({ dataDir, serverHome: home, audienceOf: () => "member:p_bob", threads: () => [], log: () => {} });
     const spawned = vi.spyOn(procs, "spawnCli");

@@ -35,7 +35,7 @@ let sales: Bot, archive: Bot, payroll: Bot, counsel: Bot, mausbot: Bot, mine = "
 let room = "";
 
 const planPath = () => join(team.home, "plan.json");
-const dataDir = (...rest: string[]) => join(team.home, ".openmausbot", ...rest);
+const dataDir = (...rest: string[]) => join(team.home, ".edubot", ...rest);
 const turns = (): Turn[] => existsSync(`${planPath()}.evidence.jsonl`)
   ? readFileSync(`${planPath()}.evidence.jsonl`, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Turn) : [];
 const turn = (key: string): Turn => { const found = turns().find((one) => one.planKey === key); if (!found) throw new Error(`no turn ${key}`); return found; };

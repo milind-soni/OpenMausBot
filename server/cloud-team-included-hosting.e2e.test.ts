@@ -83,7 +83,7 @@ beforeAll(async () => {
   benThread = (await team.as(ben, "POST", `/api/bots/${mira.id}/tasks`, { title: "Ben's plan" })).body.task.threadId;
   await turn(ada, mira, adaThread, "I'll build your portfolio.");
   await turn(ben, mira, benThread, "I'll draft your plan.");
-  data = join(team.home, ".openmausbot");
+  data = join(team.home, ".edubot");
   expect(existsSync(join(data, "task-workspaces", mira.id, adaThread)), "a conversation's turns work in its own folder").toBe(true);
 }, hostTimeout(300_000));
 

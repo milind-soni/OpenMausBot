@@ -35,7 +35,7 @@ ARG ENGINES=""
 RUN if [ -n "$ENGINES" ]; then npm install -g $ENGINES; fi
 ENV HOME=/data \
     OMB_DUCKDB_DIR=/app/duckdb \
-    OMB_DATA_DIR=/data/.openmausbot \
+    OMB_DATA_DIR=/data/.edubot \
     OMB_STATIC_DIR=/app/dist \
     OMB_PORT=8799 \
     OMB_WEBHOOK_PORT=8800 \

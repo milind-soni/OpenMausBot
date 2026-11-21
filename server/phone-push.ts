@@ -444,7 +444,7 @@ export function phonePushAccess(controlPlane: unknown, credential: unknown): Pho
 
 /** Where this server's control-plane access comes from, first match wins: the desktop app's private message (its
  * credential lives in the OS store this process cannot read), OMB_PUSH_CREDENTIAL, a fleet's
- * OMB_INSTALLATION_CREDENTIAL, `openmausbot login`'s tunnel-account.json. OMB_CONTROL_PLANE_URL overrides the origin. */
+ * OMB_INSTALLATION_CREDENTIAL, `edubot login`'s tunnel-account.json. OMB_CONTROL_PLANE_URL overrides the origin. */
 export class PhonePushAccessSource {
   private desktop: PhonePushAccess | null | undefined;
   private readonly env: NodeJS.ProcessEnv;

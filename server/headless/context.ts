@@ -18,7 +18,7 @@ export interface VerbContext {
   defaultWaitMs: number;
   /** Running in a bot's own shell: it acts as that bot (bot-shell.ts). */
   botShell: boolean;
-  /** What `openmausbot login` saved; null in a bot's shell. */
+  /** What `edubot login` saved; null in a bot's shell. */
   saved: SavedServers | null;
   /** Someone is at a terminal to answer a question. */
   interactive: boolean;
@@ -56,7 +56,7 @@ export async function resolveTarget(ctx: VerbContext, positional: string | undef
   const what = allow === "bot" ? "a bot" : allow === "channel" ? "a room" : "a bot or room";
   if (named.length !== 1) {
     throw usageError(named.length ? `name exactly one ${what.slice(2)}` : `${what} is required`,
-      `openmausbot ${ctx.verb} NAME, or --bot ID${allow === "bot" ? "" : ", --channel ID"} or --thread ID`);
+      `edubot ${ctx.verb} NAME, or --bot ID${allow === "bot" ? "" : ", --channel ID"} or --thread ID`);
   }
   const task = flag(ctx.flags, "task")?.trim();
   const withTask = (target: Target): Target => {
@@ -71,7 +71,7 @@ export async function resolveTarget(ctx: VerbContext, positional: string | undef
   if (thread) {
     const owner = bots.find((candidate) => owns(candidate, thread));
     const room = owner ? undefined : rooms.find((candidate) => owns(candidate, thread));
-    if (!owner && !room) throw usageError(`no conversation with id ${thread}`, "run openmausbot bots or openmausbot channels");
+    if (!owner && !room) throw usageError(`no conversation with id ${thread}`, "run edubot bots or edubot channels");
     return withTask(owner ? { type: "bot", id: owner.id, name: owner.name, taskId: thread } : { type: "channel", id: room!.id, name: room!.name, taskId: thread });
   }
   const wanted = positional!.trim();
@@ -83,7 +83,7 @@ export async function resolveTarget(ctx: VerbContext, positional: string | undef
     ...(allow !== "bot" ? rooms.filter((candidate) => String(candidate.name).trim().toLowerCase() === key).map((record) => ({ record, type: "channel" as const })) : []),
   ];
   if (matches.length === 0) {
-    throw usageError(`no ${allow === "channel" ? "room" : allow === "bot" ? "bot" : "bot or room"} named "${wanted}"`, "run openmausbot bots or openmausbot channels for the names");
+    throw usageError(`no ${allow === "channel" ? "room" : allow === "bot" ? "bot" : "bot or room"} named "${wanted}"`, "run edubot bots or edubot channels for the names");
   }
   if (matches.length > 1) {
     throw usageError(`"${wanted}" names ${matches.length} ${allow === "any" ? "bots or rooms" : `${what.slice(2)}s`}: ${matches
@@ -112,7 +112,7 @@ export async function readMessage(ctx: VerbContext, positional: string | undefin
   const sources = [positional !== undefined, text !== undefined, file !== undefined].filter(Boolean).length;
   if (sources !== 1) {
     throw usageError(sources ? "give the message one way: TEXT, --text TEXT, --message-file FILE or -" : "a message is required",
-      `openmausbot ${ctx.verb} TARGET "what to do", or --message-file FILE, or - to read it from stdin`);
+      `edubot ${ctx.verb} TARGET "what to do", or --message-file FILE, or - to read it from stdin`);
   }
   let message: string;
   if (file !== undefined) {

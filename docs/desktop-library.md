@@ -64,7 +64,7 @@ connection generation as company backups: signing out aborts it.
 | `<data dir>/org-library/blobs/<sha256>.json` | release files, owner-only, written atomically | Electron main |
 | `<data dir>/org-library/state.json`, `presets.json` | what this installation added | the runtime |
 
-`<data dir>` is `~/.openmausbot` unless `OMB_DATA_DIR` says otherwise.
+`<data dir>` is `~/.edubot` unless `OMB_DATA_DIR` says otherwise.
 
 Workspace and company backups leave out `catalog.json` and `blobs/`, because
 main downloads them again and sign-out deletes them. They keep the runtime's

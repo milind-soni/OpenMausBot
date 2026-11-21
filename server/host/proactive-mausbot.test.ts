@@ -296,7 +296,7 @@ describe("MausBot keeps an eye on the day", () => {
       let status = 0;
       await moveKindsRoute(deps(cloud), { path: "/api/cloud-send/kind", method: "PUT", url: new URL("http://127.0.0.1/api/cloud-send/kind"), auth: {} as never, req: {} as never,
         res: { setHeader() {} } as never, json: ((_res: unknown, code: number) => { status = code; }) as never,
-        readBody: (async () => ({ v: 1, key, dataDir: "/Users/amit/.openmausbot", record, ...(runs ? { runs } : {}) })) as never });
+        readBody: (async () => ({ v: 1, key, dataDir: "/Users/amit/.edubot", record, ...(runs ? { runs } : {}) })) as never });
       return status;
     };
     cloud.store.createBot({ name: "Clive" }, { id: clive.id, seedMessages: false });

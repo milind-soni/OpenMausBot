@@ -59,7 +59,7 @@ describe("engine set", () => {
 
     w.writes.length = 0;
     const again = await w.run(["engine", "set", "claude", "--key-env", "ANTHROPIC_API_KEY"]);
-    expect(again.out).toBe("claude was already set up; nothing changed (pass --rotate to replace its key). Bots use it as claude/MODEL (openmausbot models).");
+    expect(again.out).toBe("claude was already set up; nothing changed (pass --rotate to replace its key). Bots use it as claude/MODEL (edubot models).");
     expect(w.writes).toEqual([]);
     expect((await w.run(["engine", "set", "claude", "--key-env", "ANTHROPIC_API_KEY", "--rotate", "--json"])).code).toBe(0);
     expect(w.writes).toEqual([{ path: "/api/config", body: { anthropic: { key: KEY, everyClaudeBot: true } } }]);

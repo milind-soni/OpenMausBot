@@ -135,7 +135,7 @@ describe("publish-to-netlify helper: what may be uploaded", () => {
     for (const path of ["index.html", "assets/app.js", "img/logo.png", "_redirects", "_headers", ".well-known/security.txt", "docs/environment.html", "env.js", "keyboard.js", "data/monkey.json"]) {
       expect(helper.publishable(path), path).toBe(true);
     }
-    for (const path of [".env", ".env.production", "app/.env.local", "prod.env", "env", "env.local", ".openmausbot-secrets/t1/card", ".git/config", ".netlify-site.json", ".netlify/state.json",
+    for (const path of [".env", ".env.production", "app/.env.local", "prod.env", "env", "env.local", ".edubot-secrets/t1/card", ".git/config", ".netlify-site.json", ".netlify/state.json",
       ".DS_Store", "node_modules/x/index.js", "site/node_modules/x.js", "server.pem", "tls/private.key", "cert.p12", "id_rsa", "id_ed25519.pub", "credentials.json", "secrets.yaml",
       "service-account.prod.json", "what?.html", "a#b.html", "__MACOSX/x", "Thumbs.db", ""]) {
       expect(helper.publishable(path), path).toBe(false);
@@ -147,12 +147,12 @@ describe("publish-to-netlify helper: what may be uploaded", () => {
     try {
       const site = join(root, "site");
       mkdirSync(join(site, "assets"), { recursive: true });
-      mkdirSync(join(site, ".openmausbot-secrets", "t1"), { recursive: true });
+      mkdirSync(join(site, ".edubot-secrets", "t1"), { recursive: true });
       writeFileSync(join(site, "index.html"), "<h1>hi</h1>");
       writeFileSync(join(site, "assets", "a b.css"), "body{}");
       writeFileSync(join(site, "assets", "copy.css"), "body{}");
       writeFileSync(join(site, ".env"), "KEY=1");
-      writeFileSync(join(site, ".openmausbot-secrets", "t1", "card"), "nfp_secret");
+      writeFileSync(join(site, ".edubot-secrets", "t1", "card"), "nfp_secret");
       writeFileSync(join(root, "outside.txt"), "private");
       // Windows makes a file link only with a privilege CI lacks; a folder junction needs none.
       const fileLinks = process.platform !== "win32";
@@ -161,7 +161,7 @@ describe("publish-to-netlify helper: what may be uploaded", () => {
 
       const { files, skipped } = helper.collectFiles(site);
       expect(files.map((file) => file.path)).toEqual(["assets/a b.css", "assets/copy.css", "index.html"]);
-      expect(skipped.sort()).toEqual([".env", ".openmausbot-secrets", ...(fileLinks ? ["linked.txt"] : []), "up"]);
+      expect(skipped.sort()).toEqual([".edubot-secrets", ".env", ...(fileLinks ? ["linked.txt"] : []), "up"]);
       const { digest, bySha } = helper.buildDigest(files);
       expect(digest).toEqual({ "/assets/a b.css": sha1("body{}"), "/assets/copy.css": sha1("body{}"), "/index.html": sha1("<h1>hi</h1>") });
       expect(bySha.get(sha1("body{}"))?.path).toBe("assets/a b.css");
@@ -242,8 +242,8 @@ describe("publish-to-netlify helper, end to end against a stand-in on loopback",
     home = mkdtempSync(join(tmpdir(), "netlify-skill-home-"));
     project = join(home, "workspace", "bakery");
     mkdirSync(join(project, "dist", "assets"), { recursive: true });
-    mkdirSync(join(project, ".openmausbot-secrets", "thread1"), { recursive: true, mode: 0o700 });
-    tokenFile = join(project, ".openmausbot-secrets", "thread1", "card1");
+    mkdirSync(join(project, ".edubot-secrets", "thread1"), { recursive: true, mode: 0o700 });
+    tokenFile = join(project, ".edubot-secrets", "thread1", "card1");
     writeFileSync(tokenFile, `${TOKEN}\n`, { mode: 0o600 });
     writeFileSync(join(project, "dist", "index.html"), "<h1>Bakery</h1>");
     writeFileSync(join(project, "dist", "assets", "app.js"), "console.log('v1')");
@@ -320,7 +320,7 @@ describe("publish-to-netlify helper, end to end against a stand-in on loopback",
   });
 
   it("says plainly what Netlify answered, without the token", async () => {
-    const wrong = join(project, ".openmausbot-secrets", "thread1", "card2");
+    const wrong = join(project, ".edubot-secrets", "thread1", "card2");
     writeFileSync(wrong, "nfp_RevokedTokenNeverReal", { mode: 0o600 });
     const denied = await run(["--dir", "dist", "--token-file", wrong]);
     expect(denied).toMatchObject({ code: 1, json: { ok: false, error: "Starting the deploy: Netlify answered 401: Access Denied" } });
@@ -651,7 +651,7 @@ describe("publish-to-netlify helper, end to end against a stand-in on loopback",
 
     it("keeps the site and its record when Netlify refuses the token, and deletes nothing else", async () => {
       const { folder, siteId } = await publishIn("kept");
-      const wrong = join(project, ".openmausbot-secrets", "thread1", "card3");
+      const wrong = join(project, ".edubot-secrets", "thread1", "card3");
       writeFileSync(wrong, "nfp_RevokedTokenNeverReal", { mode: 0o600 });
       const refused = await run(["--delete", "--token-file", wrong], {}, folder);
       rmSync(wrong);

@@ -3,22 +3,22 @@
 <plist version="1.0">
   <dict>
     <key>CFBundleDisplayName</key>
-    <string>OpenMausBot</string>
+    <string>Edu Bot</string>
     <key>CFBundleExecutable</key>
     <string>speech-helper</string>
     <key>CFBundleIdentifier</key>
-    <string>com.openmausbot.app.speech-helper</string>
+    <string>io.github.eduardomoraga.edubot.speech-helper</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>OpenMausBot Speech</string>
+    <string>Edu Bot Speech</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSBackgroundOnly</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>OpenMausBot listens while you dictate messages or talk to a bot.</string>
+    <string>Edu Bot listens while you dictate messages or talk to a bot.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
-    <string>OpenMausBot converts your speech into text during dictation and calls.</string>
+    <string>Edu Bot converts your speech into text during dictation and calls.</string>
   </dict>
 </plist>

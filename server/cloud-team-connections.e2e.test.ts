@@ -155,7 +155,7 @@ it("lets Ada connect her own Gmail and mail key, and nobody reads them back", as
   expect(read.body.scopes).toEqual({ apps: ["gmail"], mcp: ["mail"] });
   const states = Object.fromEntries([OWNER, ADMIN, ADA, CLEO].map((member) => [member.email, member === ADA ? "connected" : "not-connected"]));
   expect(read.body.people).toEqual({ apps: { gmail: [ADA.email] }, mcp: { mail: [ADA.email] }, states: { apps: { gmail: states }, mcp: { mail: states } } });
-  const held = JSON.parse(readFileSync(join(team.home, ".openmausbot", "people-connections", "apps.json"), "utf8")).people[personKey({ id: "", email: ADA.email })].token as string;
+  const held = JSON.parse(readFileSync(join(team.home, ".edubot", "people-connections", "apps.json"), "utf8")).people[personKey({ id: "", email: ADA.email })].token as string;
   for (const answer of [read.body, (await team.as(owner, "GET", "/api/mcp/servers")).body, (await team.as(admin, "GET", "/api/config")).body,
     (await team.as(owner, "GET", "/api/connectors/connected")).body, (await team.as(admin, "GET", "/api/team/my-connections")).body]) {
     expect(JSON.stringify(answer)).not.toContain(ADA_KEY);
@@ -163,7 +163,7 @@ it("lets Ada connect her own Gmail and mail key, and nobody reads them back", as
     expect(JSON.stringify(answer)).not.toContain("ada.private@gmail.example");
   }
   // On the volume: a folder of its own, 0700, that no backup carries.
-  if (process.platform !== "win32") expect(statSync(join(team.home, ".openmausbot", "people-connections")).mode & 0o777).toBe(0o700);
+  if (process.platform !== "win32") expect(statSync(join(team.home, ".edubot", "people-connections")).mode & 0o777).toBe(0o700);
 }, hostTimeout(60_000));
 
 it("gives Ada's own Gmail and mail to her private chat, for her own request, and runs as her", async () => {
@@ -228,7 +228,7 @@ it("gives work her own message hands to another bot her own Gmail, and never wor
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   const helper = created.body.bot as { id: string; mainThreadId: string };
   const handOn = (who: string) => ({ name: "coordinate_bots", server: "agents", input: { bot_ids: [helper.id], message: `Fetch ${who}'s latest email.` } });
-  const helperThreads = () => (readRegistry(join(team.home, ".openmausbot")).bots as Array<{ id: string; tasks: Array<{ threadId: string }> }>)
+  const helperThreads = () => (readRegistry(join(team.home, ".edubot")).bots as Array<{ id: string; tasks: Array<{ threadId: string }> }>)
     .find((entry) => entry.id === helper.id)!.tasks.map((task) => task.threadId).filter((threadId) => threadId !== helper.mainThreadId);
   /** The Gmail step the helper ran in the work it was handed, once it has finished. */
   const helperGmail = async (token: string, known: readonly string[]) => {
@@ -287,7 +287,7 @@ it("runs work her group-chat line hands on in the receiving bot's chat with her,
     const created = await team.as(owner, "POST", "/api/bots", { name: "Clerk", visibility: "everyone" });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     const clerk = created.body.bot as { id: string; mainThreadId: string };
-    const clerkWork = () => (readRegistry(join(team.home, ".openmausbot")).bots as Array<{ id: string; tasks: Array<{ threadId: string }> }>)
+    const clerkWork = () => (readRegistry(join(team.home, ".edubot")).bots as Array<{ id: string; tasks: Array<{ threadId: string }> }>)
       .find((entry) => entry.id === clerk.id)!.tasks.map((task) => task.threadId).filter((threadId) => threadId !== clerk.mainThreadId);
     /** The room's row for Clerk's result: Scout is resumed with it in the room right after. */
     const clerkReplied = async () => ((await messages(ada, roomThread)).body.messages as Array<{ roomRequest?: { phase?: string }; tool?: { name?: string } }>)
@@ -447,7 +447,7 @@ it("skips automatic personal MCP probes after setup and restart while still prob
     expect.soft(personal.seenHeaders.filter((headers) => headers.authorization !== ownAuthorization), "after personal setup").toEqual([]);
 
     personal.seenHeaders.length = 0;
-    rmSync(join(team.home, ".openmausbot", "mcp-app-catalog.json"));
+    rmSync(join(team.home, ".edubot", "mcp-app-catalog.json"));
     await team.relaunch();
     await expect.poll(teamHasApps, { timeout: 40_000 }).toBe(true);
     expect(shared.toolsLists).toBe(2);

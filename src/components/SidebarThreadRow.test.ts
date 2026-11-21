@@ -564,8 +564,8 @@ describe("Copy link", () => {
     vi.stubGlobal("window", { innerWidth: 1024, innerHeight: 768 });
     vi.stubGlobal("document", { body: { nodeType: 1 } });
     const rows = [
-      { task: { threadId: "qa-245", title: "QA PR 245" }, ownerId: "scout", link: "openmausbot://thread/qa-245?bot=scout" },
-      { task: { threadId: "monday-1", title: "Monday plan" }, ownerId: "standup", link: "openmausbot://thread/monday-1?bot=standup" },
+      { task: { threadId: "qa-245", title: "QA PR 245" }, ownerId: "scout", link: "edubot://thread/qa-245?bot=scout" },
+      { task: { threadId: "monday-1", title: "Monday plan" }, ownerId: "standup", link: "edubot://thread/monday-1?bot=standup" },
     ];
     for (const { task, ownerId, link } of rows) {
       const closed = renderRow(task, ownerId);

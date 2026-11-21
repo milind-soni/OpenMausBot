@@ -35,7 +35,7 @@ describe("the container's server command", () => {
       env: { OMB_DATA_DIR: join("/srv", "omb"), OMB_PORT: "8799", OMB_SERVER_COMPILE_CACHE: join("/srv", "omb", "cache", "node-compile") },
     });
     expect(serverCommand(here, {}, { exists: () => true, box: small }).env.OMB_SERVER_COMPILE_CACHE)
-      .toBe(join(homedir(), ".openmausbot", "cache", "node-compile"));
+      .toBe(join(homedir(), ".edubot", "cache", "node-compile"));
   });
 
   it("runs index.js itself without the bootstrap, and leaves the heap alone without a limit or when NODE_OPTIONS sizes it", () => {

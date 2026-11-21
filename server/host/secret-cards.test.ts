@@ -164,7 +164,7 @@ describe("a secret a card saves to the Vault", () => {
     const one = fixture();
     const item = one.vaultStore.saveSecret({ name: "Stripe secret key", value: KEY, source: "settings", bots: "all" });
     const answer = await ask(one, "t1", { delivery: "file" });
-    const file = join(one.dataDir, ".openmausbot-secrets", "t1", `vault-${item.id}`);
+    const file = join(one.dataDir, ".edubot-secrets", "t1", `vault-${item.id}`);
     expect(answer).toMatchObject({ status: 200, body: { text: expect.stringContaining(`to the file ${file}`) } });
     expect(readFileSync(file, "utf8")).toBe(KEY);
     rmSync(file);
@@ -534,7 +534,7 @@ describe("a secret a linked 1Password holds", () => {
     const one = linked();
     const answer = await ask(one, { delivery: "file" });
     const file = /to the file (\S+)\. /u.exec(String(answer.body.text))?.[1];
-    expect(file?.startsWith(join(one.dataDir, ".openmausbot-secrets", "t1", "vault-linked-"))).toBe(true);
+    expect(file?.startsWith(join(one.dataDir, ".edubot-secrets", "t1", "vault-linked-"))).toBe(true);
     expect(readFileSync(file!, "utf8")).toBe(NOTION);
     if (process.platform !== "win32") expect(statSync(file!).mode & 0o777).toBe(0o600);
   });

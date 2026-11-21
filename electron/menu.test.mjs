@@ -35,11 +35,11 @@ describe("buildApplicationMenu", () => {
 
   it.each(["darwin", "linux", "win32"])("lists a saved local environment by its folder, so switching servers never fails on %s", platform => {
     const onSwitch = vi.fn();
-    const local = { id: "e1", kind: "local", name: "Work", dataDir: "/Users/me/.openmausbot-work" };
+    const local = { id: "e1", kind: "local", name: "Work", dataDir: "/Users/me/.edubot-work" };
     const tailnet = { id: "t1", name: "Mac mini", origin: "https://mac-mini.tail1f3f14.ts.net" };
     const template = build(platform, { environments: [local, tailnet], activeId: "t1", onSwitch });
     const items = template.find(entry => entry.label === "Server").submenu;
-    expect(items.find(entry => entry.label === "Work — /Users/me/.openmausbot-work")).toMatchObject({ checked: false });
+    expect(items.find(entry => entry.label === "Work — /Users/me/.edubot-work")).toMatchObject({ checked: false });
     expect(items.find(entry => entry.label === "Mac mini — mac-mini.tail1f3f14.ts.net")).toMatchObject({ checked: true });
     items.find(entry => entry.label.startsWith("Work")).click();
     expect(onSwitch).toHaveBeenCalledWith("e1");

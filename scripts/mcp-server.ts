@@ -75,7 +75,7 @@ async function fetchJson(url: string, options: RequestInit = {}): Promise<any> {
     const text = await response.text().catch(() => "");
     if (response.status === 403 && !new Headers(headers).has("Authorization")) {
       throw new OpenMausBotApiError(403, /on this shared server/.test(text) // the server says which kind refused it
-        ? "This is a shared server, so a program on it without a paired session token may only check its health. Set OPENMAUSBOT_TOKEN to a paired session (openmausbot connect), as described in docs/mcp-server.md."
+        ? "This is a shared server, so a program on it without a paired session token may only check its health. Set OPENMAUSBOT_TOKEN to a paired session (edubot connect), as described in docs/mcp-server.md."
         : "OpenMausBot refused this request because the installed desktop app requires a paired session token. Set OPENMAUSBOT_TOKEN as described in docs/mcp-server.md.");
     }
     throw new OpenMausBotApiError(response.status, `OpenMausBot API error (${response.status}): ${text || response.statusText}`);
@@ -750,7 +750,7 @@ function sendReceipt(receipt: unknown) {
   };
 }
 
-/** Hooks a caller can give a long tool call (the openmausbot CLI streams progress). */
+/** Hooks a caller can give a long tool call (the edubot CLI streams progress). */
 export interface ToolCallHooks {
   /** Each new state of the job a wait watches. */
   onProgress?(job: Record<string, any>): void;
@@ -1365,7 +1365,7 @@ export async function processMcpMessage(
 }
 
 /** Serve MCP on this process's stdin and stdout until stdin closes (then
- * resolves): what `pnpm mcp`, dist-server/mcp-server.js and `openmausbot mcp` run. */
+ * resolves): what `pnpm mcp`, dist-server/mcp-server.js and `edubot mcp` run. */
 export function runStdio(): Promise<void> {
   log("OpenMausBot MCP server running on stdio");
   const rl = readline.createInterface({

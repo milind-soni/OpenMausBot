@@ -25,7 +25,7 @@ let base = "", log = "", cookie = "";
 async function launch(legacy: string, port: number): Promise<{ child: ChildProcess; output: () => string }> {
   const home = mkdtempSync(join(tmpdir(), "omb-cloud-legacy-origin-"));
   homes.push(home);
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".edubot");
   mkdirSync(dataDir, { recursive: true });
   let output = "";
   const started = spawn(process.execPath, ["--import", offline, join(SERVER_DIR, "index.ts")], {

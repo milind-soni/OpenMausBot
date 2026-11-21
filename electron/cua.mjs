@@ -17,6 +17,7 @@ import { driverFailure } from "./cua-failure.mjs";
 import { createHelperRestarts, followLinuxConnection } from "./cua-restart.mjs";
 import { watchDriver } from "./cua-watch.mjs";
 import { missingPermissions } from "./lent-screen-failures.mjs";
+import { APP_ID } from "./app-identity.mjs";
 
 const { localOnly } = localOriginModule;
 
@@ -40,7 +41,7 @@ const STANDALONE_SOCKET = path.join(
   app.getPath("home"),
   "Library/Caches/cua-driver/cua-driver.sock",
 );
-const HOST_BUNDLE_ID = "com.openmausbot.app";
+const HOST_BUNDLE_ID = APP_ID;
 const CUA_ENV = { CUA_DRIVER_RS_TELEMETRY_ENABLED: "0" };
 const execFileAsync = promisify(execFile);
 process.env.CUA_DRIVER_RS_TELEMETRY_ENABLED ??= "0";

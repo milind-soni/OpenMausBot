@@ -402,15 +402,15 @@ const __APP_VERSION__: string;
         state(): Promise<{ maximized: boolean }>;
         onMaximizedChanged(cb: (maximized: boolean) => void): () => void;
       };
-      /** Receives a GitHub package URL opened through openmausbot://install. */
+      /** Receives a GitHub package URL opened through edubot://install. */
       onPackageInstall?(cb: (url: string) => void): () => void;
-      /** Receives a chat link (openmausbot://thread/… or openmausbot://bot/…)
+      /** Receives a chat link (edubot://thread/… or edubot://bot/…)
        * opened from outside the app. */
       onChatLink?(cb: (link: string) => void): () => void;
       /** The desktop shell's app-menu Preferences… item was activated; open
        * app Settings. Every server's page in the window receives it, and the
        * bridge is absent in the browser. "cloud" is the
-       * openmausbot://cloud link (Settings → OMB Cloud, opened by the link). */
+       * edubot://cloud link (Settings → OMB Cloud, opened by the link). */
       onOpenAppSettings?(cb: (section?: "organization" | "cloud" | "cloud-settings" | "cloud-add" | "cloud-add-howto" | import("../state/store").SettingsPageId) => void): () => void;
       /** Updates the native Dock/taskbar unread indicator. */
       setUnreadCount?(count: number): void;
@@ -446,7 +446,7 @@ const __APP_VERSION__: string;
       /** Writes the redacted diagnostics report to a user-chosen file;
        * resolves the path, or null when cancelled. */
       exportDiagnostics?(): Promise<string | null>;
-      /** Asks where to save a bot-created file (inside ~/.openmausbot), copies
+      /** Asks where to save a bot-created file (inside ~/.edubot), copies
        * it there and reveals it. Resolves the chosen path, or null if the
        * user cancelled the dialog. */
       saveFile?(filePath: string): Promise<string | null>;

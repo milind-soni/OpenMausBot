@@ -68,7 +68,7 @@ beforeAll(async () => {
   if (!posix) return;
   fx = await launchCloudSendFixture({ onePasswordToken: TOKEN, team: { id: "team-acme-homes", name: "Acme", engine: HOME_FILES }, cloudEngine: HOME_FILES });
   team = fx.team!;
-  dataDir = join(team.home, ".openmausbot");
+  dataDir = join(team.home, ".edubot");
   bobHome = audienceHome(dataDir, `member:${personKey({ id: "", email: BOB.email })}`);
   ownerHome = audienceHome(dataDir, `member:${personKey({ id: "", email: OWNER.email })}`);
   credentials(team.home, "tok-1");
@@ -188,5 +188,5 @@ it.runIf(posix)("My Cloud is unchanged: its engine runs in the server's HOME and
   expect(seen.env.HOME).toBe(cloudHome);
   expect(seen.signedInAs).toBe("tok-home");
   await expect.poll(() => transcriptsUnder(join(cloudHome, ".claude", "projects")).length, { timeout: 30_000, interval: 100 }).toBeGreaterThan(0);
-  expect(existsSync(join(cloudHome, ".openmausbot", "engine-homes"))).toBe(false);
+  expect(existsSync(join(cloudHome, ".edubot", "engine-homes"))).toBe(false);
 }, hostTimeout(90_000));

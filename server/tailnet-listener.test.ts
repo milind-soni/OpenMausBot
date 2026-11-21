@@ -30,7 +30,7 @@ describe("a tailnet share's configuration", () => {
     expect(readTailnetShare({ name: NAME, addresses: ["192.168.1.21"] }, "192.168.1.20")).toBeNull();
   });
 
-  it("reads the environment openmausbot serve --tailscale sets", () => {
+  it("reads the environment edubot serve --tailscale sets", () => {
     expect(tailnetShareFromEnv({})).toBeNull();
     expect(tailnetShareFromEnv({ OMB_TAILNET_NAME: NAME, OMB_TAILNET_ADDRESSES: "100.101.102.103, fd7a:115c:a1e0::1" }))
       .toEqual({ name: NAME, addresses: ["100.101.102.103", "fd7a:115c:a1e0::1"] });

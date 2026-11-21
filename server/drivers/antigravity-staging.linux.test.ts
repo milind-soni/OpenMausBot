@@ -25,7 +25,7 @@ describe.skipIf(detection.box !== "bwrap")("Antigravity profile staging in real 
     const root = mkdtempSync(join(tmpdir(), "omb-profile-staging-"));
     roots.push(root);
     const home = join(root, "home");
-    const dataDir = join(home, ".openmausbot");
+    const dataDir = join(home, ".edubot");
     const profile = join(dataDir, "providers", "antigravity", "account");
     const skills = join(profile, "omb-skills");
     const outside = join(home, "escaped");

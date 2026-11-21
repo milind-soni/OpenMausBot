@@ -1,4 +1,4 @@
-// A stand-in for cloudflare/control-plane for `openmausbot login` and `serve --tunnel` tests: the routes
+// A stand-in for cloudflare/control-plane for `edubot login` and `serve --tunnel` tests: the routes
 // the desktop's client uses, accepting only credentials it issued, recording every call.
 import { randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";

@@ -93,7 +93,7 @@ needs: `NSLocalNetworkUsageDescription` is only in packaged builds.
 
 ### A headless server
 
-On a Linux box, run `npx openmausbot serve --tailscale` with certificates on and then off, and once more as a user that
+On a Linux box, run `npx edubot serve --tailscale` with certificates on and then off, and once more as a user that
 is not Tailscale's operator. With certificates on, expect `https://$NAME`. In the other two runs expect the line that
 says it listens on `http://$NAME:8799`, and connect a client with the printed link.
 

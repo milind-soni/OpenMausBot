@@ -96,8 +96,8 @@ describe("rendered files", () => {
 
   it("writes the environment, the first config and the sign-in edits the server reads live", () => {
     const workspace: FleetWorkspace = { slug: "acme", host: "acme.agentada.cc", port: 8810, webhookPort: 8811, status: "running", createdAt: "" };
-    expect(instanceEnv({ workspace, dataDir: "/var/lib/openmausbot/acme/.openmausbot", licenseKey: "omb1.k" })).toBe(
-      "OMB_DATA_DIR=/var/lib/openmausbot/acme/.openmausbot\nOMB_PORT=8810\nOMB_WEBHOOK_PORT=8811\nOMB_PUBLIC_URL=https://acme.agentada.cc\nOMB_LICENSE_KEY=omb1.k\n",
+    expect(instanceEnv({ workspace, dataDir: "/var/lib/openmausbot/acme/.edubot", licenseKey: "omb1.k" })).toBe(
+      "OMB_DATA_DIR=/var/lib/openmausbot/acme/.edubot\nOMB_PORT=8810\nOMB_WEBHOOK_PORT=8811\nOMB_PUBLIC_URL=https://acme.agentada.cc\nOMB_LICENSE_KEY=omb1.k\n",
     );
     expect(JSON.parse(initialConfig({ admins: ["ada@example.test"], members: ["@acme.test"], anthropicKey: "sk-ant-x", monthlyCapUsd: 50 }))).toEqual({
       signIn: { admins: ["ada@example.test"], members: ["@acme.test"] }, anthropic: { key: "sk-ant-x" }, budgets: { monthlyUsd: 50 },
@@ -158,7 +158,7 @@ describe("plans", () => {
       "systemctl enable --now openmausbot@acme.service",
       "systemctl reload caddy",
     ]);
-    const config = plan.steps.find((step) => step.kind === "write" && step.path.endsWith("/acme/.openmausbot/config.json"));
+    const config = plan.steps.find((step) => step.kind === "write" && step.path.endsWith("/acme/.edubot/config.json"));
     expect(config).toMatchObject({ mode: 0o600, owner: "omb-acme" });
     const env = plan.steps.find((step) => step.kind === "write" && step.path === "/etc/openmausbot/instances/acme.env");
     expect(env).toMatchObject({ mode: 0o600 });
@@ -197,7 +197,7 @@ describe("plans", () => {
       expect(() => deletePlan({ registry: incomplete, slug: "acme", keepData: false, layout })).toThrow("operator recovery");
     }
     const two = createPlan({ registry: created.registry, slug: "globex", seed: { admins: ["g@x.test"], members: [] }, now, layout }).registry;
-    expect(argvOf(upgradePlan({ registry: suspendPlan({ registry: two, slug: "globex", layout }).registry }))).toEqual(["npm install -g openmausbot@latest", "systemctl restart openmausbot@acme.service"]);
+    expect(argvOf(upgradePlan({ registry: suspendPlan({ registry: two, slug: "globex", layout }).registry }))).toEqual(["npm install -g edubot@latest", "systemctl restart openmausbot@acme.service"]);
   });
 
   it("seeds only the trusted portal gateway and reserves the portal hostname", () => {
@@ -219,16 +219,16 @@ describe("plans", () => {
 
   it("renders privileged steps but never recommends root writes through tenant paths", () => {
     const lines = describeSteps([
-      { kind: "mkdir", path: "/var/lib/openmausbot/acme/.openmausbot", mode: 0o700, owner: "omb-acme" },
-      { kind: "write", path: "/var/lib/openmausbot/acme/.openmausbot/config.json", content: "secret", mode: 0o600, owner: "omb-acme" },
+      { kind: "mkdir", path: "/var/lib/openmausbot/acme/.edubot", mode: 0o700, owner: "omb-acme" },
+      { kind: "write", path: "/var/lib/openmausbot/acme/.edubot/config.json", content: "secret", mode: 0o600, owner: "omb-acme" },
       { kind: "write", path: "/etc/openmausbot/instances/acme.env", content: "OMB_PORT=8810\n", mode: 0o600 },
       { kind: "run", argv: ["useradd", "--comment", "Acme Inc", "omb-acme"], why: "the account" },
       { kind: "append-once", path: "/etc/caddy/Caddyfile", line: "import /etc/caddy/omb.d/*.caddy" },
       { kind: "note", text: "done" },
     ]);
     expect(lines).toEqual([
-      "# Create /var/lib/openmausbot/acme/.openmausbot mode 700 as omb-acme (use fleet --yes; never root chown on tenant paths)",
-      "# Write /var/lib/openmausbot/acme/.openmausbot/config.json mode 600 as omb-acme (use fleet --yes; tenant content omitted)",
+      "# Create /var/lib/openmausbot/acme/.edubot mode 700 as omb-acme (use fleet --yes; never root chown on tenant paths)",
+      "# Write /var/lib/openmausbot/acme/.edubot/config.json mode 600 as omb-acme (use fleet --yes; tenant content omitted)",
       "cat > /etc/openmausbot/instances/acme.env <<'OMB_EOF'",
       "OMB_PORT=8810",
       "OMB_EOF",

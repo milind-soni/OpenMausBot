@@ -19,7 +19,7 @@ const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const setup = vi.hoisted(() => ({ runSetup: vi.fn(), isSetupComplete: vi.fn(), readCliStartup: vi.fn(), saveCliStartup: vi.fn() }));
 vi.mock("./cli-setup.ts", () => setup);
 
-describe("openmausbot command line", () => {
+describe("edubot command line", () => {
   it("parses commands and flags, and explains mistakes", () => {
     const serve = parseArgs(["serve", "--port", "9001", "--data-dir", "/tmp/x", "--label", "cab mini", "--tailscale", "--no-pair"], {});
     // --data-dir is resolved against the platform: C:\tmp\x on Windows.
@@ -96,7 +96,7 @@ describe("openmausbot command line", () => {
   describe("the pairing block", () => {
     const now = Date.parse("2026-11-07T10:00:00");
     const link = "https://mini.example/pair#code=ABCD-EFGH-JKLM";
-    const base = { code: "ABCD-EFGH-JKLM", expiresAt: now + 10 * 60_000, chatOnly: false, link, prefix: "npx openmausbot", now };
+    const base = { code: "ABCD-EFGH-JKLM", expiresAt: now + 10 * 60_000, chatOnly: false, link, prefix: "npx edubot", now };
 
     it("shows one code, its link to paste into the desktop app, a QR, and the phone command the way the CLI was started", () => {
       const out = pairingBlock(base);
@@ -104,7 +104,7 @@ describe("openmausbot command line", () => {
       expect(out).toContain(`Link           ${link}`);
       expect(out).toContain("＋ → Connect to a server, paste the link");
       expect(out).toContain(qrToString(link));
-      expect(out).toContain("For a phone (chat and approvals only)   npx openmausbot pair --phone");
+      expect(out).toContain("For a phone (chat and approvals only)   npx edubot pair --phone");
       expect(out).not.toMatch(/omb_pair_|phone app:|this computer:/);
       expect(pairingBlock({ ...base, chatOnly: true })).toContain("· chat and approvals");
     });
@@ -114,7 +114,7 @@ describe("openmausbot command line", () => {
       const out = pairingBlock({ ...base, link: null, localLink: local });
       expect(out).toContain("reachable from this machine only");
       expect(out).toContain(`Browser on this machine     ${local}`);
-      expect(out).toContain("pick a way in first: npx openmausbot serve --help");
+      expect(out).toContain("pick a way in first: npx edubot serve --help");
       expect(out).not.toMatch(/[▀▄█]/);
       expect(pairingBlock({ ...base, link: null, localLink: "http://localhost:8080/pair#code=X", localPlace: "docker" })).toContain("Browser on the Docker host   http://localhost:8080/pair#code=X");
     });
@@ -138,7 +138,7 @@ describe("openmausbot command line", () => {
       const guided = browserSignInLines(local, "ABCD-EFGH-JKLM", Date.now() + 60_000);
       expect(guided).toContain(local);
       expect(guided).toContain("ABCD-EFGH-JKLM");
-      expect(guided).toContain("openmausbot pair");
+      expect(guided).toContain("edubot pair");
     });
   });
 
@@ -180,7 +180,7 @@ describe("openmausbot command line", () => {
       expect(out).toContain('server "cli test"');
       expect(out).toMatch(/Reach {4}✗ https:\/\/mini\.example doesn't reach this server/);
       expect(out, "not a terminal: no code goes into a log").not.toMatch(/Pairing code {3}[A-Z2-9]{4}-/);
-      expect(out).toContain("Get a pairing code: openmausbot pair");
+      expect(out).toContain("Get a pairing code: edubot pair");
       expect(out).not.toContain("Ctrl+C");
       const paired = spawnSync(process.execPath, ["--experimental-strip-types", join(SERVER_DIR, "openmausbot.ts"), "pair", "--port", String(port)], { cwd: join(SERVER_DIR, ".."), env: { PATH: process.env.PATH ?? "", HOME: home }, encoding: "utf8" });
       expect(paired.stdout).toMatch(/Pairing code {3}[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4} {3}works once, until .+ · everything/);
@@ -281,7 +281,7 @@ describe("terminal onboarding commands", () => {
     expect(setup.runSetup).toHaveBeenCalledWith({ dataDir: options.dataDir, port: options.port });
     expect(setup.isSetupComplete).not.toHaveBeenCalled();
     expect(serve).not.toHaveBeenCalled();
-    expect(output.log).toHaveBeenCalledWith(expect.stringContaining("Start with: openmausbot"));
+    expect(output.log).toHaveBeenCalledWith(expect.stringContaining("Start with: edubot"));
     expect(phoneSetup).toHaveBeenCalledOnce();
     expect(setup.saveCliStartup).toHaveBeenCalledWith(options.dataDir, { access: "local" });
   });
@@ -461,7 +461,7 @@ describe.skipIf(process.platform === "win32")("serve --tunnel", () => {
     child.stderr?.on("data", (chunk) => (err += String(chunk)));
     try {
       expect(await exited(child)).toBe(1);
-      expect(err).toContain("run openmausbot account login first");
+      expect(err).toContain("run edubot account login first");
       let dead = false;
       try {
         await fetch(`http://127.0.0.1:${port}/api/health`);
@@ -617,7 +617,7 @@ describe.skipIf(process.platform === "win32")("serve --tunnel", () => {
   }, 120_000);
 });
 
-describe("openmausbot access", () => {
+describe("edubot access", () => {
   it("edits the sign-in allow-list in config.json without a running server", async () => {
     const home = mkdtempSync(join(tmpdir(), "omb-cli-access-"));
     const dataDir = join(home, "data");

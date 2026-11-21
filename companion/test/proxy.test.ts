@@ -108,9 +108,9 @@ beforeAll(async () => {
   SIDECAR = `http://127.0.0.1:${SIDECAR_PORT}`;
 
   home = mkdtempSync(join(tmpdir(), "companion-test-"));
-  mkdirSync(join(home, ".openmausbot"), { recursive: true });
+  mkdirSync(join(home, ".edubot"), { recursive: true });
   writeFileSync(
-    join(home, ".openmausbot", "config.json"),
+    join(home, ".edubot", "config.json"),
     JSON.stringify({ instances: { ghost: { driver: "not-a-real-driver", displayName: "Ghost" } } }),
   );
 

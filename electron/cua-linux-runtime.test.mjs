@@ -72,7 +72,7 @@ function handshake(pid = 4321) {
       mcp_protocol_version: "2025-06-18",
       pid,
       embedded: true,
-      host_bundle_id: "com.openmausbot.app",
+      host_bundle_id: "io.github.eduardomoraga.edubot",
     },
     tools: ["click", "get_window_state", "list_apps", "type_text"],
   };
@@ -364,7 +364,7 @@ describe.skipIf(process.platform === "win32")("Linux CUA opt-in and lifecycle", 
     expect(spawnOptions.env).toMatchObject({
       CUA_DRIVER_EMBEDDED: "1",
       CUA_DRIVER_PARENT_LIVENESS_STDIN: "1",
-      CUA_DRIVER_HOST_BUNDLE_ID: "com.openmausbot.app",
+      CUA_DRIVER_HOST_BUNDLE_ID: "io.github.eduardomoraga.edubot",
       CUA_DRIVER_RS_UPDATE_CHECK: "false",
       CUA_DRIVER_RS_TELEMETRY_ENABLED: "false",
     });
@@ -397,7 +397,7 @@ describe.skipIf(process.platform === "win32")("Linux CUA opt-in and lifecycle", 
         args: ["mcp", "--embedded", "--socket", expect.stringMatching(/driver\.sock$/)],
         env: {
           CUA_DRIVER_EMBEDDED: "1",
-          CUA_DRIVER_HOST_BUNDLE_ID: "com.openmausbot.app",
+          CUA_DRIVER_HOST_BUNDLE_ID: "io.github.eduardomoraga.edubot",
           CUA_DRIVER_RS_UPDATE_CHECK: "false",
           CUA_DRIVER_RS_TELEMETRY_ENABLED: "false",
         },

@@ -180,9 +180,9 @@ beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-post-to-room-"));
   fakeClaudeDump = join(home, "fake-claude-dump.json");
   mentionerDump = join(home, "mentioner-dump.json");
-  mkdirSync(join(home, ".openmausbot"), { recursive: true });
+  mkdirSync(join(home, ".edubot"), { recursive: true });
   writeFileSync(
-    join(home, ".openmausbot", "config.json"),
+    join(home, ".edubot", "config.json"),
     JSON.stringify({
       instances: {
         claude: { driver: "claudeAgent", displayName: "Fixture Claude", config: { cli: FAKE_CLAUDE_CLI } },
@@ -274,7 +274,7 @@ describe("peer comms from a room turn", () => {
     expect(receipts[0]).toMatchObject({ botId: helper.id, outcome: "queued" });
     const requestId = str(field(receipts[0] as Record<string, unknown>, "requestId"));
 
-    const rows = readHandoffs(join(home, ".openmausbot"));
+    const rows = readHandoffs(join(home, ".edubot"));
     expect(rows.find((node) => node.id === requestId)).toMatchObject({
       botId: helper.id, groupId: room.id, threadId: room.threadId, mode: "consult", reply: "resume", text: "what is the status?", status: "queued",
     });
@@ -402,8 +402,8 @@ describe("list_rooms discovery", () => {
     });
     expect(asked.status, JSON.stringify(asked.body)).toBe(200);
     const requestId = str(field((Array.isArray(asked.body.receipts) ? asked.body.receipts : [])[0] as Record<string, unknown>, "requestId"));
-    await expect.poll(() => readHandoffs(join(home, ".openmausbot")).find((node) => node.id === requestId)?.status, { timeout: 15_000 }).toBe("completed");
-    expect(readHandoffs(join(home, ".openmausbot")).find((node) => node.id === requestId)?.threadId).not.toBe(b.threadId);
+    await expect.poll(() => readHandoffs(join(home, ".edubot")).find((node) => node.id === requestId)?.status, { timeout: 15_000 }).toBe("completed");
+    expect(readHandoffs(join(home, ".edubot")).find((node) => node.id === requestId)?.threadId).not.toBe(b.threadId);
 
     const listed = await internal("GET", `/api/internal/rooms?fromBotId=${a.id}&fromThreadId=${a.threadId}`);
     const rooms = Array.isArray(listed.body.rooms) ? listed.body.rooms : [];

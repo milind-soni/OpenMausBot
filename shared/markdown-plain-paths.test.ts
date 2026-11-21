@@ -22,7 +22,7 @@ function links(markdown: string): string[] {
 describe("plain file paths", () => {
   it("links POSIX, Windows and UNC paths in prose, keeping each one's spelling", () => {
     expect(links("I saved it to /Users/me/reports/q3.md, take a look.")).toEqual(["/Users/me/reports/q3.md"]);
-    expect(links(String.raw`Written to C:\Users\me\.openmausbot\report.md.`)).toEqual([String.raw`C:\Users\me\.openmausbot\report.md`]);
+    expect(links(String.raw`Written to C:\Users\me\.edubot\report.md.`)).toEqual([String.raw`C:\Users\me\.edubot\report.md`]);
     expect(links(String.raw`It's on \\fileserver\team\plans\roadmap.docx now.`)).toEqual([String.raw`\\fileserver\team\plans\roadmap.docx`]);
   });
 

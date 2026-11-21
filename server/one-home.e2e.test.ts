@@ -25,7 +25,7 @@ type Side = CloudSendFixture["local"];
 type Row = { id: string; role: string; text?: string };
 type Run = { id: string; routineId: string; scheduledFor: number; createdAt: number; manual?: boolean; triggerSource?: string };
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const dataDir = (side: "desktop" | "cloud") => join(fx.root, side, ".openmausbot");
+const dataDir = (side: "desktop" | "cloud") => join(fx.root, side, ".edubot");
 const journal = () => (existsSync(fx.journalFile) ? JSON.parse(readFileSync(fx.journalFile, "utf8")) as { phase: string; frozenAt?: number; doneAt?: number; retryAt?: number; error?: string } | null : null);
 async function rows(side: Side, threadId: string): Promise<Row[]> {
   const out: Row[] = [];

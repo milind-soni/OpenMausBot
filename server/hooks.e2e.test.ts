@@ -52,8 +52,8 @@ function harness(label: string, serverEnv: Record<string, string>, instanceEnv: 
   beforeAll(async () => {
     chmodSync(FAKE_CLAUDE, 0o755);
     home = mkdtempSync(join(tmpdir(), `omb-hooks-${label}-`));
-    mkdirSync(join(home, ".openmausbot"), { recursive: true });
-    writeFileSync(join(home, ".openmausbot", "config.json"), JSON.stringify({
+    mkdirSync(join(home, ".edubot"), { recursive: true });
+    writeFileSync(join(home, ".edubot", "config.json"), JSON.stringify({
       instances: {
         claude: {
           driver: "claudeAgent",
@@ -120,7 +120,7 @@ posixOnly("engine hooks e2e (fake Claude honouring the settings hooks)", () => {
       expect(row.tool).not.toHaveProperty("outputPath");
     }
     expect(JSON.stringify(tools)).not.toContain(h.home());
-    const root = join(h.home(), ".openmausbot", "tool-results");
+    const root = join(h.home(), ".edubot", "tool-results");
     const threads = readdirSync(root);
     expect(threads).toHaveLength(1);
     const dir = join(root, threads[0]!);
@@ -151,7 +151,7 @@ posixOnly("engine hooks e2e: full tool output that arrives after its turn ended"
     expect(bot.messages.find((m: Msg) => m.kind === "digest").digest?.hookCoverage).toBe("preview");
     const rows = async (): Promise<Msg[]> => (await h.getBot(bot.id)).messages.filter((m: Msg) => m.kind === "activity" && m.tool?.itemId);
     const tokenDir = createHash("sha256").update(`${bot.id}\0${bot.threadId}`).digest("hex").slice(0, 24);
-    const bearer = { authorization: `Bearer ${readFileSync(join(h.home(), ".openmausbot", "hook-tokens", tokenDir, "token"), "utf8").trim()}` };
+    const bearer = { authorization: `Bearer ${readFileSync(join(h.home(), ".edubot", "hook-tokens", tokenDir, "token"), "utf8").trim()}` };
 
     // While the late outputs are still owed, the ended turn's bearer writes only into its own bot and conversation.
     const owed = (await rows()).find((m) => m.tool!.fullResult !== true)!;
@@ -163,7 +163,7 @@ posixOnly("engine hooks e2e: full tool output that arrives after its turn ended"
     const digest = (await h.getBot(bot.id)).messages.find((m: Msg) => m.kind === "digest");
     expect(digest.digest?.hookCoverage).toBe("full");
     expect(digest.text).not.toContain("from tool previews");
-    const root = join(h.home(), ".openmausbot", "tool-results");
+    const root = join(h.home(), ".edubot", "tool-results");
     const spilled = readdirSync(join(root, readdirSync(root)[0]!)).map((name) => readFileSync(join(root, readdirSync(root)[0]!, name), "utf8"));
     expect(spilled.some((text) => text.includes(BIG.slice(0, 200)))).toBe(true);
     expect(spilled.some((text) => text.includes("forged"))).toBe(false);

@@ -1,6 +1,5 @@
-// Anything touching the new dir before ensureDirs() runs would make the ~/.opengrokbot rename a no-op: this pins the order.
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,15 +17,17 @@ let home: string;
 let child: ChildProcess;
 let stderr = "";
 
+const LEGACY_FOLDERS = [".openmausbot", ".opengrokbot"];
+// A non-product shadow: an empty map would select the full default fleet, whose CLI probes are not part of this test.
+const SHADOW_CONFIG = JSON.stringify({ instances: { fixture: { driver: "migration-test-shadow" } } });
+
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-legacy-test-"));
-  const legacy = join(home, ".opengrokbot");
-  mkdirSync(legacy, { recursive: true });
-  // A non-product shadow: an empty map would select the full default fleet, whose CLI probes are not part of this test.
-  writeFileSync(join(legacy, "config.json"), JSON.stringify({
-    instances: { fixture: { driver: "migration-test-shadow" } },
-  }));
-  writeFileSync(join(legacy, "keep-me.txt"), "carried over");
+  for (const name of LEGACY_FOLDERS) {
+    mkdirSync(join(home, name), { recursive: true });
+    writeFileSync(join(home, name, "config.json"), SHADOW_CONFIG);
+    writeFileSync(join(home, name, "keep-me.txt"), `left alone in ${name}`);
+  }
   child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
     cwd: ROOT,
     env: {
@@ -58,11 +59,15 @@ afterAll(async () => {
   await removeTempDir(home);
 });
 
-describe("legacy data dir", () => {
-  it("is renamed to the new name on first boot, with its contents and a fresh environment id", () => {
-    const fresh = join(home, ".openmausbot");
-    expect(existsSync(join(home, ".opengrokbot"))).toBe(false);
-    expect(readFileSync(join(fresh, "keep-me.txt"), "utf8")).toBe("carried over");
+describe("legacy data folders", () => {
+  it("start a fresh data folder and leave an older app's folders exactly as they were", () => {
+    const fresh = join(home, ".edubot");
     expect(readFileSync(join(fresh, "environment-id"), "utf8").trim()).toMatch(/^[0-9a-f-]{36}$/);
+    expect(existsSync(join(fresh, "keep-me.txt"))).toBe(false);
+    for (const name of LEGACY_FOLDERS) {
+      expect(readdirSync(join(home, name)).sort()).toEqual(["config.json", "keep-me.txt"]);
+      expect(readFileSync(join(home, name, "keep-me.txt"), "utf8")).toBe(`left alone in ${name}`);
+      expect(readFileSync(join(home, name, "config.json"), "utf8")).toBe(SHADOW_CONFIG);
+    }
   });
 });

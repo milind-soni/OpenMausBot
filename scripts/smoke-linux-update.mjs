@@ -57,12 +57,12 @@ async function main() {
   mkdirSync(applications);
 
   // The bug shape: a version in the filename, and a launcher pinned to it.
-  const launched = path.join(installDir, "OpenMausBot-0.0.1-x86_64.AppImage");
+  const launched = path.join(installDir, "EduBot-0.0.1-x86_64.AppImage");
   copyFileSync(packaged, launched);
-  const desktopEntry = path.join(applications, "com.openmausbot.app.desktop");
+  const desktopEntry = path.join(applications, "io.github.eduardomoraga.edubot.desktop");
   writeFileSync(
     desktopEntry,
-    `[Desktop Entry]\nName=OpenMausBot\nExec=${launched} %U\nType=Application\n`,
+    `[Desktop Entry]\nName=Edu Bot\nExec=${launched} %U\nType=Application\n`,
   );
 
   // Isolate every path the updater writes to.

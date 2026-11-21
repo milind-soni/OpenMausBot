@@ -37,7 +37,7 @@ afterEach(async () => {
 async function boot(env: NodeJS.ProcessEnv, config: Record<string, unknown> = {}) {
   chmodSync(FAKE_CLAUDE, 0o755);
   const home = mkdtempSync(join(tmpdir(), "omb-live-azure-"));
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".edubot");
   const fetches = join(home, "fetches.log");
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(join(home, "web"));

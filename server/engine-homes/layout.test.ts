@@ -7,7 +7,7 @@ import { audienceBrowserSuffix } from "../browser/audience.ts";
 import { audienceHome, audienceHomeKey, audienceHomes, homedSpawn } from "./layout.ts";
 
 const linux = describe.skipIf(process.platform === "win32");
-const serverHome = "/data", dataDir = "/data/.openmausbot";
+const serverHome = "/data", dataDir = "/data/.edubot";
 const bob = audienceHome(dataDir, "member:p_bob"), owner = audienceHome(dataDir, "member:p_olive");
 
 linux("an audience's engine home", () => {
@@ -15,7 +15,7 @@ linux("an audience's engine home", () => {
     expect(audienceHomeKey("team")).toBe("team");
     expect(audienceHomeKey("member:p_bob")).toBe(audienceBrowserSuffix("member:p_bob").slice(2));
     expect(audienceHomeKey("room:r1")).toMatch(/^room-[0-9a-f]{16}$/);
-    expect(audienceHome(dataDir, "team")).toBe("/data/.openmausbot/engine-homes/team");
+    expect(audienceHome(dataDir, "team")).toBe("/data/.edubot/engine-homes/team");
     expect(new Set([bob, owner, audienceHome(dataDir, "room:r1"), audienceHome(dataDir, "team")]).size).toBe(4);
     expect(bob.startsWith(`${owner}/`) || owner.startsWith(`${bob}/`)).toBe(false);
   });

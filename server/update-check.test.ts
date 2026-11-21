@@ -77,7 +77,7 @@ describe("server update check", () => {
     });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenCalledWith(STABLE_CHANNEL_URL, expect.anything());
-    expect(await createUpdateChecker({ current: "0.1.92", install: "npm", fetch })()).toMatchObject({ latest: "0.1.93", command: "npm install -g openmausbot@0.1.93", restart: true });
+    expect(await createUpdateChecker({ current: "0.1.92", install: "npm", fetch })()).toMatchObject({ latest: "0.1.93", command: "npm install -g edubot@0.1.93", restart: true });
   });
 
   it("offers nothing to a server that is already on the stable version or past it", async () => {
@@ -127,7 +127,7 @@ describe("server update check", () => {
     let now = 0;
     const fetch = github("v0.1.92", "0.1.92");
     const check = createUpdateChecker({ current: "0.1.92", install: "npm", fetch, now: () => now });
-    expect(await check()).toMatchObject({ available: false, latest: "0.1.92", command: "npm install -g openmausbot@0.1.92", restart: true });
+    expect(await check()).toMatchObject({ available: false, latest: "0.1.92", command: "npm install -g edubot@0.1.92", restart: true });
     now = 59 * 60_000;
     await check();
     expect(fetch).toHaveBeenCalledTimes(1);

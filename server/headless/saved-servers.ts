@@ -1,4 +1,4 @@
-// The servers `openmausbot login` signed in to, like kubectl's contexts: servers.json names each server and which one is
+// The servers `edubot login` signed in to, like kubectl's contexts: servers.json names each server and which one is
 // current; the session itself is in the macOS Keychain, or in a file only this user can read elsewhere. Nothing here is
 // ever printed. Paths come from the environment the command runs with, never from the process's own home.
 import { spawnSync } from "node:child_process";
@@ -7,6 +7,7 @@ import { join } from "node:path";
 
 import { HeadlessError, EXIT } from "./args.ts";
 import { inBotShell } from "./bot-shell.ts";
+import { CLI_NAME } from "../../electron/app-identity.mjs";
 
 export interface SavedServer {
   url: string;
@@ -32,7 +33,7 @@ export interface SavedServersOptions {
   security?: SecurityRunner;
 }
 
-const KEYCHAIN_SERVICE = "openmausbot-cli";
+const KEYCHAIN_SERVICE = `${CLI_NAME}-cli`;
 const NAME = /^[\w.-]{1,80}$/;
 
 const runSecurity: SecurityRunner = (args, stdin) => {
@@ -41,10 +42,10 @@ const runSecurity: SecurityRunner = (args, stdin) => {
 };
 
 export function cliConfigDir(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = process.platform): string | null {
-  if (env.XDG_CONFIG_HOME?.trim()) return join(env.XDG_CONFIG_HOME.trim(), "openmausbot");
-  if (platform === "win32" && env.APPDATA?.trim()) return join(env.APPDATA.trim(), "openmausbot");
+  if (env.XDG_CONFIG_HOME?.trim()) return join(env.XDG_CONFIG_HOME.trim(), CLI_NAME);
+  if (platform === "win32" && env.APPDATA?.trim()) return join(env.APPDATA.trim(), CLI_NAME);
   const home = env.HOME?.trim() || env.USERPROFILE?.trim();
-  return home ? join(home, ".config", "openmausbot") : null;
+  return home ? join(home, ".config", CLI_NAME) : null;
 }
 
 /** `security -i` reads its command from stdin, so the session never appears in a process list. */
@@ -72,7 +73,7 @@ export class SavedServers {
       const parsed = JSON.parse(readFileSync(file, "utf8")) as SavedFile;
       return { ...(typeof parsed.current === "string" ? { current: parsed.current } : {}), servers: parsed.servers && typeof parsed.servers === "object" ? parsed.servers : {} };
     } catch {
-      throw new HeadlessError(`${file} could not be read`, EXIT.failed, "fix or remove it, then run openmausbot login again");
+      throw new HeadlessError(`${file} could not be read`, EXIT.failed, "fix or remove it, then run edubot login again");
     }
   }
 
@@ -108,7 +109,7 @@ export class SavedServers {
 
   use(name: string): void {
     const saved = this.read();
-    if (!saved.servers[name]) throw new HeadlessError(`no saved server named "${name}"`, EXIT.notFound, "openmausbot servers lists them");
+    if (!saved.servers[name]) throw new HeadlessError(`no saved server named "${name}"`, EXIT.notFound, `${CLI_NAME} servers lists them`);
     this.write({ ...saved, current: name });
   }
 

@@ -27,7 +27,7 @@ export const AGENTS_PROXY_ENV = { ...AGENTS_NODE_FLAG, [TOOL_BRIDGE_ENV]: "0" } 
 
 type BridgeConfig = { features?: { agentsToolBridge?: boolean; claudeUserMcp?: boolean } };
 
-/** The workspace switch: `{"features": {"agentsToolBridge": true}}` in ~/.openmausbot/config.json, or
+/** The workspace switch: `{"features": {"agentsToolBridge": true}}` in ~/.edubot/config.json, or
  * OMB_AGENTS_TOOL_BRIDGE set to exactly "1" or "0", which wins over the saved setting. Either way a Claude turn whose tool
  * search is on is not bridged (agentsToolBridgeRefusal); ENABLE_TOOL_SEARCH=false in the instance's environment restores it. */
 export function agentsToolBridgeEnabled(cfg: BridgeConfig, env: NodeJS.ProcessEnv = process.env): boolean {

@@ -62,7 +62,7 @@ beforeAll(async () => {
   if (!posix) return;
   fx = await launchCloudSendFixture({ onePasswordToken: TOKEN, team: { id: "team-acme-box", name: "Acme", engine: SHELL }, cloudEngine: SHELL });
   team = fx.team!;
-  dataDir = join(team.home, ".openmausbot");
+  dataDir = join(team.home, ".edubot");
   owner = (await team.pair(OWNER)).token!;
   mira = (await team.pair(MIRA)).token!;
   ben = (await team.pair(BEN)).token!;

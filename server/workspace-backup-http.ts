@@ -21,6 +21,7 @@ const MAX_CLIENT_STATE_BYTES = 2 * 1024 ** 2;
 const EXPIRES_MS = 60 * 60_000;
 const passwordSchema = z.string().min(12, "Use a password of at least 12 characters.").max(1024);
 const failure = (message: string, status = 400) => Object.assign(new Error(message), { status });
+const backupFileName = (summary: WorkspaceBackupSummary) => `EduBot-${summary.createdAt.slice(0, 10)}.ombbackup`;
 type Artifact = { owner: string; kind: "download" | "upload" | "staged"; path?: string; expires: number; summary?: WorkspaceBackupSummary };
 type RestoreResult = { id?: string; restored?: boolean; safetyCopyPath?: string; clientState?: Record<string, string> };
 
@@ -133,7 +134,7 @@ export function createWorkspaceBackupRoutes(options: {
         }));
         try { check(req, auth); } catch (error) { removeWorkspaceBackupJob(options.dataDir, result.id); throw error; }
         artifacts.set(result.id, { owner: owner(auth), kind: "download", path: result.path, summary: result.summary, expires: Date.now() + EXPIRES_MS });
-        json(res, 200, { id: result.id, filename: `OpenMausBot-${result.summary.createdAt.slice(0, 10)}.ombbackup`, bytes: statSync(result.path).size, summary: result.summary });
+        json(res, 200, { id: result.id, filename: backupFileName(result.summary), bytes: statSync(result.path).size, summary: result.summary });
         return true;
       }
       const download = /^\/api\/workspace-backup\/download\/([\w-]+)$/.exec(path);
@@ -143,7 +144,7 @@ export function createWorkspaceBackupRoutes(options: {
         res.writeHead(200, {
           "content-type": "application/octet-stream",
           "content-length": statSync(file).size,
-          "content-disposition": `attachment; filename="OpenMausBot-${artifact.summary!.createdAt.slice(0, 10)}.ombbackup"`,
+          "content-disposition": `attachment; filename="${backupFileName(artifact.summary!)}"`,
           "x-content-type-options": "nosniff",
         });
         await pipeline(createReadStream(file), res);

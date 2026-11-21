@@ -20,6 +20,7 @@ import {
   defaultHostName,
   dnsLabel,
   MdnsResponder,
+  PHONE_SERVICE_TYPE,
   type ServiceInfo,
 } from "./mdns.ts";
 import { notifyDeviceRevoked } from "./harness-notice.ts";
@@ -72,7 +73,6 @@ const HARNESS_PORT = num(process.env.OMB_PORT, 8799);
 const WEBHOOK_PORT = num(process.env.OMB_WEBHOOK_PORT, HARNESS_PORT + 1);
 const COMPANION_PORT = num(process.env.OMB_COMPANION_PORT, 8810);
 const CONTROL_PORT = num(process.env.OMB_CONTROL_PORT, 8811);
-const SERVICE_TYPE = "_openmausbot._tcp";
 let hostedUrl = hostedCompanionUrl(process.env.OMB_COMPANION_HOSTED_URL);
 directRoutesFromEnv(process.env);
 const PRIVATE_ORIGIN = companionOriginSocket(process.env.OMB_COMPANION_INTERNAL_ORIGIN);
@@ -141,7 +141,7 @@ const watcher = createAddressWatcher({
 
 const service = (): ServiceInfo => ({
   name: dnsLabel(machineName()),
-  type: SERVICE_TYPE,
+  type: PHONE_SERVICE_TYPE,
   port: COMPANION_PORT,
   host: defaultHostName(),
   addresses: advertisableAddresses(),

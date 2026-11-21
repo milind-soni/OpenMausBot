@@ -74,7 +74,7 @@ const fixtureEnv = {
   XDG_CONFIG_HOME: join(home, ".config"),
   XDG_CACHE_HOME: join(home, ".cache"),
   XDG_DATA_HOME: join(home, ".local", "share"),
-  OMB_DATA_DIR: join(home, ".openmausbot"),
+  OMB_DATA_DIR: join(home, ".edubot"),
   OMB_PORT: String(port),
   OMB_WEBHOOK_PORT: String(webhookPort),
   // Not a genuine key: with no enterprise layer shipped the server must still run the open-source edition.
@@ -289,7 +289,7 @@ if (listening) {
   const [servicePort, serviceWebhookPort] = await freePorts(2);
   const service = spawn(process.execPath, [join(staging, "server", "index.js")], {
     cwd: staging,
-    env: { ...fixtureEnv, HOME: serviceHome, USERPROFILE: serviceHome, OMB_DATA_DIR: join(serviceHome, ".openmausbot"),
+    env: { ...fixtureEnv, HOME: serviceHome, USERPROFILE: serviceHome, OMB_DATA_DIR: join(serviceHome, ".edubot"),
       OMB_PORT: String(servicePort), OMB_WEBHOOK_PORT: String(serviceWebhookPort), OMB_LOOPBACK_TRUST: "service" },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -338,7 +338,7 @@ if (listening && process.platform !== "win32") {
   const [launcherPort, launcherWebhookPort] = await freePorts(2);
   const launcher = spawn(process.execPath, [join(staging, "server", "server-launcher.js")], {
     cwd: staging,
-    env: { ...fixtureEnv, HOME: launcherHome, USERPROFILE: launcherHome, OMB_DATA_DIR: join(launcherHome, ".openmausbot"), OMB_PORT: String(launcherPort), OMB_WEBHOOK_PORT: String(launcherWebhookPort) },
+    env: { ...fixtureEnv, HOME: launcherHome, USERPROFILE: launcherHome, OMB_DATA_DIR: join(launcherHome, ".edubot"), OMB_PORT: String(launcherPort), OMB_WEBHOOK_PORT: String(launcherWebhookPort) },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let launcherOutput = "";
@@ -356,7 +356,7 @@ if (listening && process.platform !== "win32") {
       if (serverPid === null) await new Promise((resolve) => setTimeout(resolve, 300));
     }
     // The bootstrap writes the cache about 10 s after the server starts.
-    const launcherCache = join(launcherHome, ".openmausbot", "cache", "node-compile");
+    const launcherCache = join(launcherHome, ".edubot", "cache", "node-compile");
     let cached = false;
     for (const written = Date.now() + 30_000; serverPid !== null && !cached && Date.now() < written && launcher.exitCode === null;) {
       try { cached = readdirSync(launcherCache).some((name) => /^v\d+\.\d+\.\d+-/.test(name)); } catch { /* not yet */ }
@@ -396,7 +396,7 @@ if (listening) {
       const [entryPort, entryWebhookPort] = await freePorts(2);
       const entry = spawn(process.execPath, [join(staging, "server", "desktop-entry.mjs")], {
         cwd: staging,
-        env: { ...fixtureEnv, HOME: entryHome, USERPROFILE: entryHome, OMB_DATA_DIR: join(entryHome, ".openmausbot"),
+        env: { ...fixtureEnv, HOME: entryHome, USERPROFILE: entryHome, OMB_DATA_DIR: join(entryHome, ".edubot"),
           OMB_PORT: String(entryPort), OMB_WEBHOOK_PORT: String(entryWebhookPort), OMB_SERVER_COMPILE_CACHE: cacheDir },
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -501,7 +501,7 @@ if (
 
 if (!headlessReport || headlessReport.error || headlessReport.doctor.body?.server?.capabilities?.jobs !== true ||
   headlessReport.bots.code !== 0 || !Array.isArray(headlessReport.bots.body?.bots)) {
-  console.error("the packaged openmausbot command's headless verbs failed:");
+  console.error("the packaged edubot command's headless verbs failed:");
   console.error(JSON.stringify(headlessReport, null, 2));
   process.exit(1);
 }
@@ -519,7 +519,7 @@ if (!serviceTrustReport || serviceTrustReport.error || serviceTrustReport.servin
 console.log(`packaged server started with no node_modules in reach (port ${port}) ✓`);
 console.log(`all ${count} spawned proxy paths resolve inside the packaged server dir ✓`);
 console.log("packaged MCP stdio server reached the API and flushed its final frames ✓");
-console.log("packaged openmausbot doctor and bots answered from the bundle ✓");
+console.log("packaged edubot doctor and bots answered from the bundle ✓");
 console.log("packaged backup worker exported an encrypted archive ✓");
 console.log("packaged loopback trust gate: health serves, a public mutation is refused at service trust ✓");
 if (launcherReport) console.log("packaged container launcher ran the server as its child and stopped it cleanly ✓");

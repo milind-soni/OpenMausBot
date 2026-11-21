@@ -131,7 +131,7 @@ Give the call an 8-minute `timeout`: a new site's first deploy can take Netlify 
 - Sites are public by default: once a deploy is ready, the site is opened to anyone with the link, even where their
   Netlify team keeps new sites private (a draft never changes it). Pass `--keep-private` only when the person asks for
   a private site: it is remembered for later runs, and `--make-public` alone undoes it when they ask.
-- It never uploads dotfiles and dot folders (`.env`, `.git`, `.openmausbot-secrets`, the site record),
+- It never uploads dotfiles and dot folders (`.env`, `.git`, `.edubot-secrets`, the site record),
   `node_modules`, env files, keys or certificates, or links to files elsewhere, and it stops if any file contains the
   token. The answer lists what it left out under `skipped`.
 - Only files Netlify does not already hold are uploaded (`uploaded`; `alreadyOnNetlify` counts the rest). Netlify allows 3 deploys a minute and 100 a day through its API: batch your

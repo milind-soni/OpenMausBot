@@ -1,4 +1,4 @@
-// `openmausbot doctor --data [--fix] [--data-dir DIR] [--json]`: the doctor on this computer's data folder, without the
+// `edubot doctor --data [--fix] [--data-dir DIR] [--json]`: the doctor on this computer's data folder, without the
 // server. It reports; with --fix it applies the safe repairs, only while no server uses the folder.
 import { resolve } from "node:path";
 
@@ -19,7 +19,7 @@ export function dataDoctorOutcome(report: DoctorReport): VerbOutcome {
       `${MARK[result.status]!.padEnd(8)}${result.title}: ${result.summary}`,
       ...(result.fixed ? [`        done: ${result.fixed}`] : []),
       ...(result.status !== "ok" && result.status !== "fixed" && result.instruction ? [`        what to do: ${result.instruction}`] : []),
-      ...(result.status === "problem" && result.fixable && !report.fix.ran ? ["        openmausbot doctor --data --fix repairs it"] : []),
+      ...(result.status === "problem" && result.fixable && !report.fix.ran ? ["        edubot doctor --data --fix repairs it"] : []),
     ]),
     ...(report.fix.asked && !report.fix.ran && report.fix.why ? [`No fixes ran: ${report.fix.why}`] : []),
     ...(report.backup ? [`What was changed was copied to ${report.backup} first.`] : []),

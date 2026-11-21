@@ -31,7 +31,7 @@ const streams: SseRecorder[] = [];
 
 async function boot(env: Record<string, string>): Promise<Fixture> {
   const home = mkdtempSync(join(tmpdir(), "omb-phone-push-"));
-  const data = join(home, ".openmausbot");
+  const data = join(home, ".edubot");
   mkdirSync(data, { recursive: true });
   writeFileSync(join(data, "config.json"), JSON.stringify({
     features: { smartSetupChoices: false },

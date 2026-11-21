@@ -89,7 +89,7 @@ beforeAll(async () => {
   chmodSync(FAKE_CLAUDE, 0o755);
   chmodSync(FAKE_ACP, 0o755);
   home = mkdtempSync(join(tmpdir(), "omb-notification-routing-"));
-  const data = join(home, ".openmausbot");
+  const data = join(home, ".edubot");
   mkdirSync(data, { recursive: true });
   dumpFile = join(home, "quick-dump.json");
   writeFileSync(join(data, "config.json"), JSON.stringify({
@@ -354,7 +354,7 @@ describe("a reply that tags the person", () => {
 });
 
 describe("bot-to-bot coordination is recorded, not announced", () => {
-  const handoffs = () => readHandoffs(join(home, ".openmausbot"));
+  const handoffs = () => readHandoffs(join(home, ".edubot"));
   const consultation = async (requestId: string) => {
     await expect.poll(() => handoffs().some((node) => node.id === requestId), { timeout: 15_000 }).toBe(true);
     return handoffs().find((node) => node.id === requestId)!;

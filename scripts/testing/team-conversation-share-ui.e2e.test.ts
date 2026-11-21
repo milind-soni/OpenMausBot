@@ -201,7 +201,7 @@ async function openAs(who: Who, size: readonly [string, string]) {
     await expect.poll(() => rui.clickText('[role="menuitem"]', "Save to team memory"), { timeout: 10_000 }).toBe(true);
     await expect.poll(() => rui.evaluate<string>("document.querySelector('[data-access-toast]')?.innerText ?? ''"), { timeout: 10_000 }).toContain("Saved to Scout's team memory");
     await rui.shot("06-rui-saved-to-team-memory-desktop");
-    expect(readFileSync(join(team.home, ".openmausbot", "workspaces", scout, "MEMORY.md"), "utf8")).toMatch(/Decision: we ship the Kumquat launch on 3 March \(saved by Rui, \d{4}-\d{2}-\d{2}\)/);
+    expect(readFileSync(join(team.home, ".edubot", "workspaces", scout, "MEMORY.md"), "utf8")).toMatch(/Decision: we ship the Kumquat launch on 3 March \(saved by Rui, \d{4}-\d{2}-\d{2}\)/);
     await rui.close();
   }, hostTimeout(300_000));
 

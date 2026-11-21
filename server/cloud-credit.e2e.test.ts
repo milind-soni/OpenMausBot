@@ -114,7 +114,7 @@ beforeAll(async () => {
   const relay = `http://127.0.0.1:${(stub.address() as AddressInfo).port}${RELAY_PATH}/v1`;
 
   home = mkdtempSync(join(tmpdir(), "omb-cloud-credit-"));
-  data = join(home, ".openmausbot");
+  data = join(home, ".edubot");
   mkdirSync(data, { recursive: true });
   // The person's own Claude Code, as on the image: signed out until the test
   // signs the person in. Each turn is a fresh process, which records its

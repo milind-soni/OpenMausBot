@@ -40,11 +40,11 @@ const base: FleetInput = {
 const registryFile = "/etc/openmausbot/fleet.json";
 const withRegistry = (workspaces = {}) => ({ [registryFile]: JSON.stringify({ ...emptyRegistry("agentada.cc"), workspaces }) });
 
-describe("openmausbot fleet", () => {
+describe("edubot fleet", () => {
   it("updates only managed OpenRouter models and rejects missing, malformed or redirected config", async () => {
     const workspace: FleetWorkspace = { slug: "acme", host: "acme.agentada.cc", port: 8810, webhookPort: 8811, status: "running", createdAt: "" };
     const path = "/var/lib/openmausbot/acme/.config/opencode/opencode.json";
-    const cfgPath = "/var/lib/openmausbot/acme/.openmausbot/config.json";
+    const cfgPath = "/var/lib/openmausbot/acme/.edubot/config.json";
     const config = { model: "my-own-default", provider: { unrelated: { models: { keep: {} } }, [MANAGED_OPENROUTER]: {
       npm: "@ai-sdk/openai-compatible", name: "Keep this name", options: { baseURL: "https://admin.example.test/api/gateway/acme/openrouter/v1", apiKey: "scoped-secret" }, models: { "old/model": { name: "Old" } },
     } } };
@@ -106,13 +106,13 @@ describe("openmausbot fleet", () => {
       `write ${registryFile} 600`,
       "run useradd --system --create-home --home-dir /var/lib/openmausbot/acme --shell /usr/sbin/nologin --user-group omb-acme",
       `write ${registryFile} 600`,
-      "mkdir /var/lib/openmausbot/acme/.openmausbot 700 as omb-acme",
-      "write /var/lib/openmausbot/acme/.openmausbot/config.json 600 as omb-acme",
+      "mkdir /var/lib/openmausbot/acme/.edubot 700 as omb-acme",
+      "write /var/lib/openmausbot/acme/.edubot/config.json 600 as omb-acme",
     ]);
-    expect(JSON.parse(files.get("/var/lib/openmausbot/acme/.openmausbot/config.json")!)).toEqual({
+    expect(JSON.parse(files.get("/var/lib/openmausbot/acme/.edubot/config.json")!)).toEqual({
       signIn: { admins: ["ada@example.test"], members: ["@acme.test"] }, anthropic: { key: "sk-ant-fixture" }, budgets: { monthlyUsd: 40 },
     });
-    expect(files.get("/var/lib/openmausbot/acme/.openmausbot/brand.json")).toBe('{"name":"Acme"}');
+    expect(files.get("/var/lib/openmausbot/acme/.edubot/brand.json")).toBe('{"name":"Acme"}');
     expect(files.get("/etc/openmausbot/instances/acme.env")).toContain("OMB_LICENSE_KEY=omb1.k");
     expect(calls).toContain("health http://127.0.0.1:8810/api/health");
     expect(calls.at(-1)).toBe(`write ${registryFile} 600`);
@@ -148,7 +148,7 @@ describe("openmausbot fleet", () => {
   });
 
   it("edits a workspace's sign-in list in place, owned by the workspace, and lists what runs", async () => {
-    const dataFile = "/var/lib/openmausbot/acme/.openmausbot/config.json";
+    const dataFile = "/var/lib/openmausbot/acme/.edubot/config.json";
     const ready = machine({ root: true, files: { ...withRegistry({ acme: { slug: "acme", host: "acme.agentada.cc", port: 8810, webhookPort: 8811, status: "running", createdAt: "" } }), [dataFile]: '{"signIn":{"admins":["ada@example.test"]}}' } });
     const added = io();
     expect(await runFleetCommand({ ...base, action: "users", slug: "acme", userAction: "add", email: "Bob@Acme.test", chatOnly: true }, added.io, ready.deps)).toBe(0);

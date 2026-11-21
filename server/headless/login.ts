@@ -56,7 +56,7 @@ async function serverToSignInTo(ctx: VerbContext): Promise<string> {
     return await mcp.probeBaseUrls(DISCOVERY_PORTS.map((port) => `http://127.0.0.1:${port}`));
   } catch {
     throw new HeadlessError("MausBot is not running on this computer", EXIT.unreachable,
-      "open the MausBot app, or name a server: openmausbot login https://maus.example.com (an OpenMausBot account for --tunnel is openmausbot account login)");
+      "open the MausBot app, or name a server: edubot login https://maus.example.com (an OpenMausBot account for --tunnel is edubot account login)");
   }
 }
 
@@ -67,7 +67,7 @@ export function defaultServerName(origin: string): string {
   return url.hostname.replace(/[^\w.-]/g, "-").slice(0, 80);
 }
 
-/** A server run by `openmausbot serve` with owner trust makes a code for a program on its own computer, as `connect` does. */
+/** A server run by `edubot serve` with owner trust makes a code for a program on its own computer, as `connect` does. */
 async function signInDirectly(origin: string, label: string, scopes: string[], signal: AbortSignal): Promise<Rec | null> {
   const minted = await call(origin, "/api/auth/pairing", { method: "POST", body: JSON.stringify({ label, scopes }) }, signal);
   if (minted.status !== 200 || typeof minted.body.code !== "string") return null;
@@ -80,7 +80,7 @@ async function signInWithCard(ctx: VerbContext, origin: string, label: string, s
   const verifierHash = createHash("sha256").update(verifier).digest("base64url");
   const started = await call(origin, "/api/auth/cli-login", { method: "POST", body: JSON.stringify({ label, scope, verifierHash }) }, ctx.signal);
   if (started.status === 404) {
-    throw new HeadlessError("this server does not take openmausbot login yet", EXIT.failed, "update MausBot there, or use openmausbot connect URL --code CODE --out FILE");
+    throw new HeadlessError("this server does not take edubot login yet", EXIT.failed, "update MausBot there, or use edubot connect URL --code CODE --out FILE");
   }
   if (started.status !== 201 || typeof started.body.id !== "string") {
     throw new HeadlessError(`the server would not start a sign-in: ${started.body.error ?? started.status}`, started.status === 403 ? EXIT.notAllowed : EXIT.failed);
@@ -105,9 +105,9 @@ async function signInWithCard(ctx: VerbContext, origin: string, label: string, s
     if (polled.status === 200 && typeof polled.body.token === "string") return polled.body;
     if (polled.body.state === "denied") throw new HeadlessError("the sign-in was denied in MausBot", EXIT.notAllowed);
     throw new HeadlessError(`the sign-in did not finish: ${polled.body.error ?? polled.status}`, polled.status === 403 ? EXIT.notAllowed : EXIT.failed,
-      "run openmausbot login again");
+      "run edubot login again");
   }
-  throw new HeadlessError("nobody allowed the sign-in within ten minutes", EXIT.failed, "run openmausbot login again, then press Allow in MausBot");
+  throw new HeadlessError("nobody allowed the sign-in within ten minutes", EXIT.failed, "run edubot login again, then press Allow in MausBot");
 }
 
 export async function loginVerb(ctx: VerbContext): Promise<VerbOutcome> {
@@ -120,7 +120,7 @@ export async function loginVerb(ctx: VerbContext): Promise<VerbOutcome> {
   }
   const environment = described.body;
   const name = flag(ctx.flags, "name")?.trim() || defaultServerName(origin);
-  const label = `openmausbot CLI on ${hostname().slice(0, 50)}`;
+  const label = `edubot CLI on ${hostname().slice(0, 50)}`;
   const scopes = scope === "admin" ? ["admin", "client"] : ["client"];
   const direct = LOOPBACK.test(origin) && !desktopApp(environment) ? await signInDirectly(origin, label, scopes, ctx.signal) : null;
   const answer = direct ?? await signInWithCard(ctx, origin, label, scope, environment);
@@ -146,9 +146,9 @@ export async function logoutVerb(ctx: VerbContext): Promise<VerbOutcome> {
   const name = ctx.positionals[0]?.trim() || saved.current()?.name;
   const server = name ? saved.get(name) : null;
   if (!name || !server) {
-    if (ctx.positionals[0]) throw new HeadlessError(`no saved server named "${name}"`, EXIT.notFound, "openmausbot servers lists them");
+    if (ctx.positionals[0]) throw new HeadlessError(`no saved server named "${name}"`, EXIT.notFound, "edubot servers lists them");
     return { result: { ok: true, signedOut: null }, exitCode: EXIT.done,
-      human: ["You are not signed in to any server. (To release a --tunnel address and sign this machine out of its OpenMausBot account: openmausbot account logout.)"] };
+      human: ["You are not signed in to any server. (To release a --tunnel address and sign this machine out of its OpenMausBot account: edubot account logout.)"] };
   }
   const token = saved.token(name);
   const ended = token
@@ -172,7 +172,7 @@ export async function whoamiVerb(ctx: VerbContext): Promise<VerbOutcome> {
   const who = session.kind === "session"
     ? `"${session.label || "unnamed"}" on ${where}: ${reach(session.scopes ?? [])}${typeof session.expiresAt === "number" ? `, until ${day(session.expiresAt)}` : ""}`
     : session.trust === "service" || desktopApp(environment)
-      ? `this computer, not signed in, on ${where}: you can look; a change needs openmausbot login`
+      ? `this computer, not signed in, on ${where}: you can look; a change needs edubot login`
       : `this computer's owner on ${where}`;
   return {
     result: { ok: true, url: client.baseUrl, server: { label: environment.label, environmentId: environment.environmentId }, botShell: ctx.botShell,
@@ -185,7 +185,7 @@ export async function whoamiVerb(ctx: VerbContext): Promise<VerbOutcome> {
 export async function useVerb(ctx: VerbContext): Promise<VerbOutcome> {
   const saved = savedOnly(ctx);
   const name = ctx.positionals[0]?.trim();
-  if (!name) throw usageError("name a saved server", "openmausbot servers lists them");
+  if (!name) throw usageError("name a saved server", "edubot servers lists them");
   saved.use(name);
   const server = saved.get(name)!;
   return { result: { ok: true, current: name, url: server.url }, exitCode: EXIT.done, human: [`Every command now goes to "${server.label}" (${server.url}).`] };
@@ -199,6 +199,6 @@ export async function serversVerb(ctx: VerbContext): Promise<VerbOutcome> {
     exitCode: EXIT.done,
     human: rows.length
       ? rows.map((server) => `${server.current ? "*" : " "} ${server.name}  ${server.url}  "${server.label}"  ${reach(server.scopes)}${server.expiresAt ? `, until ${day(server.expiresAt)}` : ""}`)
-      : ["No saved servers. Sign in with: openmausbot login [SERVER]"],
+      : ["No saved servers. Sign in with: edubot login [SERVER]"],
   };
 }

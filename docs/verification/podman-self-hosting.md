@@ -20,12 +20,12 @@ below. `repo` must be the candidate checkout's absolute Linux path, for example
 cd "$repo"
 podman build -f deploy/podman/Containerfile -t localhost/openmausbot-podman:verify .
 fixture=$(mktemp -d /tmp/omb-podman-verify-XXXXXXXX)
-mkdir -m 700 "$fixture/.openmausbot"
+mkdir -m 700 "$fixture/.edubot"
 cp server/testing/fake-claude-cli.ts "$fixture/fake-claude-cli.ts"
 # Windows checkouts may have CRLF; the fake is executed via its shebang on Linux.
 sed -i 's/\r$//' "$fixture/fake-claude-cli.ts"
 chmod 700 "$fixture/fake-claude-cli.ts"
-cat > "$fixture/.openmausbot/config.json" <<EOF
+cat > "$fixture/.edubot/config.json" <<EOF
 {"profile":{"name":"Podman verification"},"instances":{"claude":{"driver":"claudeAgent","displayName":"Podman verification","config":{"cli":"$fixture/fake-claude-cli.ts"}}},"localVm":{"mode":"per-bot","maxInstances":2}}
 EOF
 cd deploy/podman

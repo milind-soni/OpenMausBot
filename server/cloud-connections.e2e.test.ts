@@ -99,7 +99,7 @@ it("moves the MCP servers with their secrets and sign-ins, the keys and the conn
     expect((await local("PATCH", `/api/mcp/servers/${server.name}`, { enabled: true })).status).toBe(200);
   }
   // Signed in to linear with its own account here, its access token already expired: My Cloud must refresh it itself.
-  const desktopSignIns = join(fx.root, "desktop", ".openmausbot", "mcp-oauth.json");
+  const desktopSignIns = join(fx.root, "desktop", ".edubot", "mcp-oauth.json");
   writeFileSync(desktopSignIns, JSON.stringify({ servers: { linear: { url: LINEAR_URL, state: "signed-in", clientId: "omb-fixture-client", tokenAuth: "client_secret_post",
     tokenEndpoint, tokens: { access: ACCESS, refresh: REFRESH, expiresAt: Date.now() - 60_000 } } } }));
   expect((await local("PATCH", "/api/config", { openrouter: { key: OPENROUTER_KEY } })).status).toBe(200);

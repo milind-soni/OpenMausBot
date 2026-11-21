@@ -52,7 +52,7 @@ describe.skipIf(process.platform === "win32")("a turn's box in a configured proj
   it("gives the turn's bot its own folder and conversation folder read-write, so a key file saved there is readable", () => {
     const plan = runInTurn(turn, () => spawnIn(project));
     expect(visibleInBox(plan, project)).toBe("rw");
-    expect(visibleInBox(plan, join(workspaceDir(BOT), ".openmausbot-secrets", "key.txt"))).toBe("rw");
+    expect(visibleInBox(plan, join(workspaceDir(BOT), ".edubot-secrets", "key.txt"))).toBe("rw");
     expect(visibleInBox(plan, join(ensureTaskWorkspace(BOT, "t1"), "handed.txt"))).toBe("rw");
     expect(plan.botId).toBe(BOT);
   });
@@ -62,7 +62,7 @@ describe.skipIf(process.platform === "win32")("a turn's box in a configured proj
     mkdirSync(inOther, { recursive: true });
     const plan = runInTurn(turn, () => spawnIn(inOther));
     expect(visibleInBox(plan, inOther)).toBe("rw");
-    expect(visibleInBox(plan, join(workspaceDir(BOT), ".openmausbot-secrets", "key.txt"))).toBe("rw");
+    expect(visibleInBox(plan, join(workspaceDir(BOT), ".edubot-secrets", "key.txt"))).toBe("rw");
     expect(visibleInBox(plan, join(workspaceDir(OTHER), "MEMORY.md"))).toBe("none");
   });
 

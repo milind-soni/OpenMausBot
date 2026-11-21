@@ -31,7 +31,7 @@ function signed(method: "GET" | "POST", path: string, body = "") {
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-team-admin-"));
-  dataDir = join(home, ".openmausbot");
+  dataDir = join(home, ".edubot");
   mkdirSync(dataDir, { recursive: true });
   const cli = join(home, "fixture-claude.mjs");
   writeFileSync(cli, `#!/usr/bin/env node

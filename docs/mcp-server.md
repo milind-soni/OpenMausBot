@@ -14,9 +14,9 @@ OpenMausBot team while the desktop app and its harness are running.
 The v1 server intentionally cannot approve requests, remember permission grants, delete data, import teams,
 change credentials, or control computer/VM lifecycle. Those actions stay in the human-facing app.
 
-## From the openmausbot command
+## From the edubot command
 
-With the `openmausbot` npm package installed, the MCP client can run it
+With the `edubot` npm package installed, the MCP client can run it
 directly; it serves the same tools:
 
 ```json
@@ -76,8 +76,8 @@ client:
    ```
 
 The paired client appears under **Settings → Phone & devices** and can be
-revoked there (or with `openmausbot devices revoke ID` once you signed the
-terminal in with `openmausbot login`). Do not share the token or commit it to a repository.
+revoked there (or with `edubot devices revoke ID` once you signed the
+terminal in with `edubot login`). Do not share the token or commit it to a repository.
 
 ## From the installed desktop app
 

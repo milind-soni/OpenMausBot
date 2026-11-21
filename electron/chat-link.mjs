@@ -1,6 +1,7 @@
-// openmausbot://thread/<thread-id>?bot=<bot-id> and openmausbot://bot/<bot-id>. The page checks them strictly against
+import { DEEP_LINK_PREFIX } from "./app-identity.mjs";
+// edubot://thread/<thread-id>?bot=<bot-id> and edubot://bot/<bot-id>. The page checks them strictly against
 // its chats; opening one never sends, interrupts or creates anything.
-const CHAT_LINK_PREFIXES = ["openmausbot://thread/", "openmausbot://bot/"];
+const CHAT_LINK_PREFIXES = [`${DEEP_LINK_PREFIX}thread/`, `${DEEP_LINK_PREFIX}bot/`];
 const MAX_LINK_LENGTH = 1024;
 
 export function chatLinkFrom(value) {

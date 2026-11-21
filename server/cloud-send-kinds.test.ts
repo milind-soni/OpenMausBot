@@ -10,7 +10,7 @@ import type { Routine, RoutineRun } from "./routines.ts";
 import { installLibrarySkill, readSkillLibraryIndex } from "./skill-library.ts";
 import { WebhookManager } from "./webhooks.ts";
 
-const HERE = "/Users/amit/.openmausbot";
+const HERE = "/Users/amit/.edubot";
 const OWNER = { person: "p_owner0000000000000000", name: "Amit" };
 
 /** Routines held in memory as the routine manager holds them, adopting the way it does. */
@@ -54,7 +54,7 @@ describe("what a move compares", () => {
   it("hashes a definition the same on both servers once each names its own data folder, apart from its switch and next time", () => {
     const here = routinesHeld([routine()], [run("run-1", "completed")]);
     const [mine] = moveItems(deps(HERE, { routines: () => here }), new Set(["b1"])).filter((item) => item.kind === "routine");
-    const cloud = "/data/.openmausbot";
+    const cloud = "/data/.edubot";
     const moved = routine({ prompt: `Read ${cloud}/workspaces/b1/notes.md`, attachments: [{ id: "a1", kind: "file", name: "plan.md", path: `${cloud}/attachments/plan.md`, size: 4 }] as never,
       enabled: false, nextRunAt: null, updatedAt: 99 });
     const [theirs] = moveItems(deps(cloud, { routines: () => routinesHeld([moved], [run("run-1", "completed", { output: `Wrote ${cloud}/workspaces/b1/out.md` })]) }), new Set(["b1"]));

@@ -12,7 +12,7 @@ Stagehand, browser-use, browserless, Lightpanda) is summarised at the end.
   sandbox, and Electron 43 exits before ready with it on Windows
   (electron/electron#51761). A browser that is its own Chrome process, driven
   over CDP, does not depend on that.
-- **Servers have no browser today.** `openmausbot serve` and the Docker stack
+- **Servers have no browser today.** `edubot serve` and the Docker stack
   run without Electron, so `availableBrowserConnection()` is null and the
   toggle is greyed.
 - **One engine, one contract.** A skill written on a Mac runs on a VPS.

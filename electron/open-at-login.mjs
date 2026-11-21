@@ -3,9 +3,10 @@
 // launch starts hidden: one the person set up themselves, here or in the system's settings, opens the window.
 import fs from "node:fs";
 import path from "node:path";
+import { DESKTOP_ENTRY_NAME } from "./app-identity.mjs";
 
 export const HIDDEN_ARG = "--omb-hidden";
-const MARK = "X-OpenMausBot-Lending=true";
+const MARK = "X-EduBot-Lending=true";
 /** Windows keeps one Run entry per name, so the person's own entry has a name apart from lending's (the app's). */
 const CHOSEN_NAME = "Edu Bot at login";
 
@@ -27,7 +28,7 @@ export function autostartEntry(exec, { lending = true } = {}) {
  * adds the person's kind of item, and `homeRelease()` takes away only that one, or gives it to lending.
  */
 export function createOpenAtLogin({ app, file, platform = process.platform, env = process.env, home, argv = process.argv, execPath = process.execPath }) {
-  const autostart = path.join(env.XDG_CONFIG_HOME || path.join(home, ".config"), "autostart", "openmausbot.desktop");
+  const autostart = path.join(env.XDG_CONFIG_HOME || path.join(home, ".config"), "autostart", DESKTOP_ENTRY_NAME);
   const saved = () => { try { return JSON.parse(fs.readFileSync(file, "utf8")) ?? {}; } catch { return {}; } };
   const store = (fields) => { try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify({ ...saved(), ...fields })); } catch {} };
   const added = () => saved().added === true;

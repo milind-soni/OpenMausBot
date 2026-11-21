@@ -10,7 +10,7 @@ node --test electron/own-home-main.node-test.mjs electron/lending-target.node-te
 ```
 
 `scripts/testing/own-home-fixture.ts` starts this computer's server as the
-desktop app starts it, and servers of the person's own (`openmausbot serve`,
+desktop app starts it, and servers of the person's own (`edubot serve`,
 nothing of MausBot Cloud), each paired as a pairing link pairs it, with main's
 own wiring for the move (`electron/own-home-main.mjs`) between them. Its
 requests carry the pairing's session as the window's would. Temp homes and a

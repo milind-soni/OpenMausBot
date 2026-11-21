@@ -40,9 +40,9 @@ const server = { url: "http://127.0.0.1:8799", environmentId: "env-1", label: "S
 
 describe("saved servers", () => {
   it("lives under the command's own HOME or XDG_CONFIG_HOME, never the process's", () => {
-    expect(cliConfigDir({ HOME: "/h" }, "darwin")).toBe(join("/h", ".config", "openmausbot"));
-    expect(cliConfigDir({ HOME: "/h", XDG_CONFIG_HOME: "/x" }, "linux")).toBe(join("/x", "openmausbot"));
-    expect(cliConfigDir({ USERPROFILE: "C:\\u", APPDATA: "C:\\a" }, "win32")).toBe(join("C:\\a", "openmausbot"));
+    expect(cliConfigDir({ HOME: "/h" }, "darwin")).toBe(join("/h", ".config", "edubot"));
+    expect(cliConfigDir({ HOME: "/h", XDG_CONFIG_HOME: "/x" }, "linux")).toBe(join("/x", "edubot"));
+    expect(cliConfigDir({ USERPROFILE: "C:\\u", APPDATA: "C:\\a" }, "win32")).toBe(join("C:\\a", "edubot"));
     expect(cliConfigDir({}, "linux")).toBeNull();
   });
 
@@ -50,9 +50,9 @@ describe("saved servers", () => {
     const keychain = fakeKeychain();
     const saved = new SavedServers({ env: { HOME: join(home, "mac") }, platform: "darwin", security: keychain.runner });
     expect(saved.save("local", server, "omb_sess_secret_value")).toBe("keychain");
-    expect(keychain.items.get("openmausbot-cli/local")).toBe("omb_sess_secret_value");
+    expect(keychain.items.get("edubot-cli/local")).toBe("omb_sess_secret_value");
     expect(keychain.argv.flat().join(" ")).not.toContain("omb_sess_secret_value");
-    const file = join(home, "mac", ".config", "openmausbot", "servers.json");
+    const file = join(home, "mac", ".config", "edubot", "servers.json");
     expect(readFileSync(file, "utf8")).not.toContain("omb_sess_secret_value");
     if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
     expect(saved.token("local")).toBe("omb_sess_secret_value");
@@ -65,7 +65,7 @@ describe("saved servers", () => {
   it.skipIf(process.platform === "win32")("falls back to a file only this user can read when there is no Keychain", () => {
     const saved = new SavedServers({ env: { HOME: join(home, "linux") }, platform: "linux", security: () => { throw new Error("no security on Linux"); } });
     expect(saved.save("box", { ...server, url: "https://maus.example.com" }, "omb_sess_file_value")).toBe("file");
-    const file = join(home, "linux", ".config", "openmausbot", "sessions", "box");
+    const file = join(home, "linux", ".config", "edubot", "sessions", "box");
     expect(statSync(file).mode & 0o777).toBe(0o600);
     expect(saved.token("box")).toBe("omb_sess_file_value");
     expect(saved.at("https://maus.example.com")?.name).toBe("box");

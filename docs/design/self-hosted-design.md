@@ -130,7 +130,7 @@ Decided: the server installer brings MausBot; the connector attaches to that ins
 - **The report is rebuilt, not filtered.** `reducedHeartbeat` and `reducedReply` copy named fields; every string is an
   enumerated code or matches a pattern (a version, an image reference, a machine's own name for itself). A failed job
   sends its code and a fixed sentence; the reason stays in the audit log.
-- **Adoption.** `AdoptedHome` finds the Compose project `openmausbot` (service `omb`, Caddy in front, `/data` bound
+- **Adoption.** `AdoptedHome` finds the Compose project `edubot` (service `omb`, Caddy in front, `/data` bound
   to a folder). `start`, `stop` and `restart` start and stop those containers. `backup` and `restore` copy that folder
   to and from Docker volumes on the same server with helpers run from the home's own image.
 - **Update: the server's own updater.** The connector never recreates the owner's containers and never writes the

@@ -156,7 +156,7 @@ describe("applied to a live store", () => {
     const cloudLine = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "Said on My Cloud", at: 5000 });
     store.patchBot(bot.id, { approvalMode: "ask", description: "Cloud's own words" });
     const settings = JSON.stringify({ ...store.bot(bot.id)!, tasks: undefined });
-    const source = "/Users/someone/.openmausbot", image = "0f1e2d3c-4b5a-4968-8776-655443322110.png";
+    const source = "/Users/someone/.edubot", image = "0f1e2d3c-4b5a-4968-8776-655443322110.png";
     const desktopBot = { ...JSON.parse(JSON.stringify(store.bot(bot.id))), description: "Desktop's words", approvalMode: "full",
       tasks: [...store.bot(bot.id)!.tasks!.map((entry) => ({ ...entry })), { threadId: "desk-new", title: "From the desk", createdAt: 3000, resumeCursors: { claude: "s" } }] };
     const data = staged([desktopBot], [], {

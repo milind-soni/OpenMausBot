@@ -100,7 +100,7 @@ beforeAll(async () => {
   relayUrl = `${stubBase}${RELAY_PATH}`;
 
   home = mkdtempSync(join(tmpdir(), "omb-decider-included-"));
-  data = join(home, ".openmausbot");
+  data = join(home, ".edubot");
   mkdirSync(data, { recursive: true });
   engineDump = join(home, "engine-dump.json");
   writeFileSync(join(data, "config.json"), JSON.stringify({

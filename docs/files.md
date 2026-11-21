@@ -88,7 +88,7 @@ Folders shared from the Files page before lent folders keep working. Once this c
 - **Access.** `/api/sync/*` answers only on a Cloud home, and only to the owner's admin session.
 - **Where things live:**
   - Shared copies are under `/data/Synced/<computer>/<folder>`, outside the data folder, so workspace backups and Move to Cloud don't carry them, and bots read them there.
-  - Copies of lent folders are under `/data/.openmausbot/sync/lent/<computer>/<folder>` (`lentRoot`): in the data folder, which no bot's box shows, so only `shared_computer`, with lending's own rules (the owner's own conversations and routines, never a webhook or a guest), reaches them, and the prompt never names them. A folder shared from the Files page before it was lent keeps its copy in `/data/Synced`, where it was.
+  - Copies of lent folders are under `/data/.edubot/sync/lent/<computer>/<folder>` (`lentRoot`): in the data folder, which no bot's box shows, so only `shared_computer`, with lending's own rules (the owner's own conversations and routines, never a webhook or a guest), reaches them, and the prompt never names them. A folder shared from the Files page before it was lent keeps its copy in `/data/Synced`, where it was.
   - Both are on My Cloud's disk, in its daily backups.
   - Sync's own records (`sync/`) are left out of backups: `sync/lent.json` (what each computer lends and how fresh each copy is) and `sync/staged/` (bots' changes waiting for their computer) included.
 - **Changes.** Nothing watches the disk. When a bot's turn ends, `index.ts` tells the sync service (`noteSyncBotTurn`), which wakes the desktop's long poll for that conversation's folder. The desktop also runs a full pass every 5 minutes.

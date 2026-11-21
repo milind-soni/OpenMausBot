@@ -48,7 +48,7 @@ export function readTailnetShare(input: unknown, standIn = process.env.OMB_TEST_
   return addresses.every((address) => isIP(address) !== 0 && (inTailscaleRange(address) || address === standIn)) ? { name, addresses: [...new Set(addresses)] } : null;
 }
 
-/** `OMB_TAILNET_NAME`, set by `openmausbot serve --tailscale`, follows Tailscale's interface. With `OMB_TAILNET_SERVED`
+/** `OMB_TAILNET_NAME`, set by `edubot serve --tailscale`, follows Tailscale's interface. With `OMB_TAILNET_SERVED`
  * (the HTTPS origin `tailscale serve` gives it) nothing is bound; `OMB_TAILNET_ADDRESSES` (a comma list) pins the addresses. */
 export function tailnetShareFromEnv(env: NodeJS.ProcessEnv): TailnetShareConfig | null {
   if (!env.OMB_TAILNET_NAME) return null;

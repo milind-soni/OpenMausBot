@@ -18,7 +18,7 @@ The desktop app validates the key before saving it. The key is encrypted using E
 
 A MausBot Cloud plan includes connected apps: there is no key to add. At every start a Cloud home's server makes sure it has its own installation on OpenMausBot's managed connection service, the same one the packaged desktop app registers with (`server/cloud-connected-apps.ts`, sharing `electron/managed-composio.mjs` with the app):
 
-- The first start registers the installation (`POST /v1/installations`) and keeps its token in `connected-apps-installation.json` in the data folder (`/data/.openmausbot`), owner-only (0600). The token is never written to `config.json`, sent to a client or logged.
+- The first start registers the installation (`POST /v1/installations`) and keeps its token in `connected-apps-installation.json` in the data folder (`/data/.edubot`), owner-only (0600). The token is never written to `config.json`, sent to a client or logged.
 - Every later start serves that token at once and checks it with `GET /v1/me`. Only a refusal (401) registers a new installation; an outage or a rate limit keeps the token, so the Cloud's connected accounts are never stranded.
 - While the Cloud has no token (the service is down or refuses new registrations), the server keeps booting and serving, Connected apps says the service is temporarily unavailable, and it tries again after 30 seconds, then 1, 2, 5, 10 and every 30 minutes, with some jitter.
 - The file never goes into a backup or a move to another computer, and a restore keeps the Cloud's own (`server/workspace-backup-policy.ts`): its connected accounts belong to that installation.
@@ -86,7 +86,7 @@ Set the key in the server environment:
 COMPOSIO_API_KEY=ak_your_project_key pnpm dev:server
 ```
 
-The browser-only development UI can also save a key to the owner-only `~/.openmausbot/config.json` file. Using the environment variable is preferred for headless and shared development machines.
+The browser-only development UI can also save a key to the owner-only `~/.edubot/config.json` file. Using the environment variable is preferred for headless and shared development machines.
 
 OpenMausBot creates a stable random user identifier for the installation, stores the returned Session identifier, and reuses that Session across launches. A fresh personal installation that connects a project key uses the Composio user of an earlier OpenMausBot installation in that project when there is exactly one such user and it still has a live connection, so the apps connected there come back after a reinstall or on another computer. A Team Cloud, or a self-hosted server several people sign in to, never does this and does not even list the project's accounts, because every member's bots would then get that person's apps. No Gmail, GitHub, Slack, or other provider tokens are stored by OpenMausBot; Composio owns their connection lifecycle.
 

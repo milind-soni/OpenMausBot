@@ -77,7 +77,7 @@ function linuxDescriptor(userData: string, { session = "x11" }: { session?: "x11
       args: ["mcp", "--embedded", "--socket", socket],
       env: {
         CUA_DRIVER_EMBEDDED: "1",
-        CUA_DRIVER_HOST_BUNDLE_ID: "com.openmausbot.app",
+        CUA_DRIVER_HOST_BUNDLE_ID: "io.github.eduardomoraga.edubot",
         CUA_DRIVER_RS_UPDATE_CHECK: "false",
         CUA_DRIVER_RS_TELEMETRY_ENABLED: "false",
         ...(session === "wayland" ? { CUA_DRIVER_RS_ENABLE_WAYLAND: "1" } : {}),

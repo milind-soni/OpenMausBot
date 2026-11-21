@@ -154,7 +154,7 @@ has nothing to work on. Background checks never do this.
   turn until someone signs in from this page. A signed-in server gets
   `Authorization: Bearer …` in place of any `Authorization` header you set,
   so every engine that reaches URL servers can use it.
-- **Tokens are kept apart.** They live in `~/.openmausbot/mcp-oauth.json`
+- **Tokens are kept apart.** They live in `~/.edubot/mcp-oauth.json`
   (owner-only), never in `config.json` or an API response, and are left out of
   workspace backups. They belong to the server's address: changing the
   address or removing the server drops them. **Sign out** revokes them when
@@ -527,7 +527,7 @@ its engine list. Company Codex uses its own separate home, without your
 
 ## Advanced: edit the file
 
-The same registry lives in `~/.openmausbot/config.json`:
+The same registry lives in `~/.edubot/config.json`:
 
 ```json
 {

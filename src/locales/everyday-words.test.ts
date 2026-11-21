@@ -126,7 +126,7 @@ describe("everyday screens", () => {
     ]) expect(wordsIn(bad), bad).not.toEqual([]);
     for (const good of [
       "Switch this bot to another AI", "Pick a Discord server", "Post in your Slack servers", "Copy to {server}", "Add your own server",
-      "Run `openmausbot server start`", "Open the Cloud", "Start the cloud desktop", "Your MCP servers", "Add MCP server", "Private desktop",
+      "Run `edubot server start`", "Open the Cloud", "Start the cloud desktop", "Your MCP servers", "Add MCP server", "Private desktop",
     ]) expect(wordsIn(good), good).toEqual([]);
   });
 

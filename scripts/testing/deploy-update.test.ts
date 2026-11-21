@@ -48,8 +48,8 @@ function install(target: Record<string, unknown> = {}, extra: Record<string, unk
   const data = join(fake, "volumes", "deploy_data");
   mkdirSync(join(root, "bin"));
   mkdirSync(deploy);
-  mkdirSync(join(data, ".openmausbot"), { recursive: true });
-  writeFileSync(join(data, ".openmausbot", "bots.json"), '[{"name":"Mira"}]');
+  mkdirSync(join(data, ".edubot"), { recursive: true });
+  writeFileSync(join(data, ".edubot", "bots.json"), '[{"name":"Mira"}]');
   writeFileSync(join(data, "started-by.txt"), "0.1.150\n");
   copyFileSync(SCRIPT, join(deploy, "update.sh"));
   writeFileSync(join(deploy, "docker-compose.yml"), "services: {}\n");
@@ -386,7 +386,7 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
     const box = install();
     const before = tree(box.data);
     expect(box.run().status).toBe(0);
-    writeFileSync(join(box.data, ".openmausbot", "bots.json"), "[]");
+    writeFileSync(join(box.data, ".edubot", "bots.json"), "[]");
     const declined = box.run(["--rollback"], { input: "no\n" });
     expect(declined.status).toBe(4);
     expect(box.state().containers.omb.image).toBe(NEW.id);

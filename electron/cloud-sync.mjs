@@ -14,6 +14,7 @@ import { watchFolder } from "./cloud-sync-scan.mjs";
 import { RECHECK_MS, copiedLent, folderKey as pathKey, lentReport, planLentCopies, reconcileLent, sameFolderOn } from "./lent-folders.mjs";
 import { applyStaged } from "./lent-staged.mjs";
 import { lentGit } from "./lent-git.mjs";
+import { DATA_DIR_NAME } from "./app-identity.mjs";
 
 const FULL_PASS_MS = 5 * 60_000;
 const LONG_POLL_MS = 60_000;
@@ -21,7 +22,7 @@ const BACKOFF_MS = [1_000, 3_000, 8_000, 15_000, 30_000];
 const CHECK_FILES_MAX = 100_000, CHECK_MS = 3_000;
 // Keys and settings: never shared, wherever they sit.
 // Folders that hold keys or sign-ins, including the AI CLIs' own homes (their login files live there).
-const PRIVATE = [".ssh", ".aws", ".gnupg", ".kube", ".docker", ".config", ".local", ".npm", "Library", "AppData", ".openmausbot", ".claude", ".codex", ".gemini", ".grok"];
+const PRIVATE = [".ssh", ".aws", ".gnupg", ".kube", ".docker", ".config", ".local", ".npm", "Library", "AppData", DATA_DIR_NAME, ".openmausbot", ".claude", ".codex", ".gemini", ".grok"];
 
 const within = (child, parent, platform) => pathKey(child, platform) === pathKey(parent, platform) || pathKey(child, platform).startsWith(`${pathKey(parent, platform)}/`);
 

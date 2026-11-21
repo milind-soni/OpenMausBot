@@ -471,7 +471,7 @@ test("chats by row: the cursor moves only past what My Cloud took; one removed t
   };
   const local = sides.deps.local;
   sides.deps.local = async (route) => {
-    if (route === "/api/cloud-send/chats") return new Response(JSON.stringify({ v: 1, dataDir: "/desk/.openmausbot", conversations: heads() }), { status: 200 });
+    if (route === "/api/cloud-send/chats") return new Response(JSON.stringify({ v: 1, dataDir: "/desk/.edubot", conversations: heads() }), { status: 200 });
     const asked = /^\/api\/cloud-send\/chats\/rows\?thread=([\w-]+)&after=(\d+)&id=/u.exec(route);
     if (asked) {
       const list = rows[asked[1]], from = Number(asked[2]);
@@ -534,7 +534,7 @@ function chatSides({ threads, page = 300, answer = () => "accepted", onPost = ()
   const local = sides.deps.local;
   const json = (value) => new Response(JSON.stringify(value), { status: 200 });
   sides.deps.local = async (route) => {
-    if (route === "/api/cloud-send/chats") return json({ v: 1, dataDir: "/desk/.openmausbot", conversations: Object.entries(rows).map(([threadId, list]) => ({ bot: "ember", threadId, last: list.length, lastId: list.at(-1).id, busy: false })) });
+    if (route === "/api/cloud-send/chats") return json({ v: 1, dataDir: "/desk/.edubot", conversations: Object.entries(rows).map(([threadId, list]) => ({ bot: "ember", threadId, last: list.length, lastId: list.at(-1).id, busy: false })) });
     const asked = /^\/api\/cloud-send\/chats\/rows\?thread=([\w-]+)&after=(\d+)&id=/u.exec(route);
     if (asked) {
       onRead(asked[1]);
@@ -617,7 +617,7 @@ test("a room's chats go with the room, whatever bots My Cloud has, and never as 
   const local = sides.deps.local;
   const room = { name: "Launch", memberIds: ["ember"], bulletin: "Ship it." };
   sides.deps.local = async (route) => {
-    if (route === "/api/cloud-send/chats") return new Response(JSON.stringify({ v: 1, dataDir: "/desk/.openmausbot", conversations: [
+    if (route === "/api/cloud-send/chats") return new Response(JSON.stringify({ v: 1, dataDir: "/desk/.edubot", conversations: [
       { bot: "ember", threadId: "t-a", last: 1, lastId: "t-a-1", busy: false }, { room: "r-launch", threadId: "t-room", last: 1, lastId: "t-room-1", busy: false },
       { room: "r-busy", threadId: "t-busy", last: 1, lastId: "t-busy-1", busy: true }, { bot: "ember", room: "r-both", threadId: "t-both", last: 1, lastId: "t-both-1", busy: false },
     ] }), { status: 200 });
@@ -646,7 +646,7 @@ test("a room nobody wrote in yet goes once as its thread with no rows, so My Clo
   const room = { name: "Quiet", memberIds: ["ember"], bulletin: "" };
   const asked = [];
   sides.deps.local = async (route) => {
-    if (route === "/api/cloud-send/chats") return new Response(JSON.stringify({ v: 1, dataDir: "/desk/.openmausbot", conversations: [{ bot: "ember", threadId: "t-a", last: 1, lastId: "t-a-1", busy: false }],
+    if (route === "/api/cloud-send/chats") return new Response(JSON.stringify({ v: 1, dataDir: "/desk/.edubot", conversations: [{ bot: "ember", threadId: "t-a", last: 1, lastId: "t-a-1", busy: false }],
       rooms: [{ room: "r-quiet", threadId: "t-quiet", members: ["ember"] }, { room: "r-lonely", threadId: "t-lonely", members: [] }] }), { status: 200 });
     if (route.startsWith("/api/cloud-send/chats/rows?thread=t-quiet&")) {
       asked.push(route);

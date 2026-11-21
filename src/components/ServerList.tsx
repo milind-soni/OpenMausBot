@@ -11,6 +11,7 @@ import { t } from "@/lib/i18n";
 import { OwnServerLink, RailSheet } from "./PlaceAddSheet";
 import { SettingsLinkRow, SettingsRows, Switch } from "./SettingsPrimitives";
 import { PlaceBadge } from "./settings/SettingsNav";
+import { CLI_NAME } from "../../electron/app-identity.mjs";
 
 type Saved = Awaited<ReturnType<NonNullable<NonNullable<Window["ogb"]>["environments"]>["state"]>>;
 type Entry = Saved["environments"][number];
@@ -26,9 +27,9 @@ export function updateCommand(install: ServerInstall | null, version: string): s
   if (install === "docker") return "git pull && ./update.sh";
   // The rootless Podman service's own update.sh, in the folder its installer uses unless told another.
   if (install === "podman-service") return "~/.local/share/openmausbot/update.sh";
-  if (install === "global") return `npm install -g openmausbot@${version}`;
+  if (install === "global") return `npm install -g ${CLI_NAME}@${version}`;
   if (install === "source") return "git pull && pnpm install";
-  return `npx openmausbot@${version} serve`;
+  return `npx ${CLI_NAME}@${version} serve`;
 }
 
 function UpdateNote({ name, status, appVersion, onHide }: { name: string; status: ServerStatus; appVersion: string; onHide: () => void }) {

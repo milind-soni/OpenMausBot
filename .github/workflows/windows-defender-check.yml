@@ -42,7 +42,7 @@ jobs:
       - name: Install it like a download and watch Windows Security
         timeout-minutes: 45
         shell: bash
-        run: node scripts/defender-check-win.mjs --installer "$(ls release/OpenMausBot-*-setup.exe)" --out "$RUNNER_TEMP/defender-check"
+        run: node scripts/defender-check-win.mjs --installer "$(ls release/EduBot-*-setup.exe)" --out "$RUNNER_TEMP/defender-check"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

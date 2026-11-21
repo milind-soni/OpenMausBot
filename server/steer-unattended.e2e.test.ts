@@ -35,7 +35,7 @@ const threadMessages = async (threadId: string): Promise<Array<{ kind: string; c
 
 /** Duplicated, not imported: DATA_DIR there is fixed at import time from this process's HOME. Keep in lockstep with claude.ts. */
 function brokerCandidates(threadId: string, botId: string): string[] {
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".edubot");
   const prefix = threadId.replace(/[^\w-]/g, "").slice(0, 4);
   const digest = createHash("sha256").update(`${botId}\0${threadId}`).digest("hex").slice(0, 4);
   const scope = createHash("sha256").update(`${dataDir}\0${child.pid}\0${botId}\0${threadId}`).digest("hex").slice(0, 16);
@@ -76,7 +76,7 @@ posixOnly("a steered message does not lift the unattended mark on its own", () =
   beforeAll(async () => {
     chmodSync(FAKE_CLAUDE, 0o755);
     home = mkdtempSync(join(tmpdir(), "omb-steer-unattended-"));
-    const data = join(home, ".openmausbot");
+    const data = join(home, ".edubot");
     mkdirSync(data, { recursive: true });
     finishGate = join(home, "finish.gate");
     writeFileSync(join(data, "config.json"), JSON.stringify({

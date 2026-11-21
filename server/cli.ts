@@ -1,15 +1,15 @@
-// `openmausbot` on the command line: run the server anywhere and pair devices to it.
+// `edubot` on the command line: run the server anywhere and pair devices to it.
 //
-//   openmausbot setup [--data-dir ~/.openmausbot]
-//   openmausbot start [serve options]
-//   openmausbot serve [--port 8799] [--data-dir ~/.openmausbot] [--label "cab mini"]
+//   edubot setup [--data-dir ~/.edubot]
+//   edubot start [serve options]
+//   edubot serve [--port 8799] [--data-dir ~/.edubot] [--label "cab mini"]
 //                     [--public-url https://host] [--tailscale | --tunnel | --domain HOST] [--relay] [--no-pair]
-//   openmausbot pair  [--label "My MacBook"] [--client] [--public-url https://host]
-//   openmausbot sessions [revoke <id>]
-//   openmausbot account status
-//   openmausbot account login [--email you@example.com] [--relay]
-//   openmausbot account logout
-//   openmausbot run | send | wait | doctor | team apply | export | …
+//   edubot pair  [--label "My MacBook"] [--client] [--public-url https://host]
+//   edubot sessions [revoke <id>]
+//   edubot account status
+//   edubot account login [--email you@example.com] [--relay]
+//   edubot account logout
+//   edubot run | send | wait | doctor | team apply | export | …
 //
 // This module only exports: openmausbot.ts runs main(), so bundling this file into other entries never runs it twice.
 import { spawn, type ChildProcess } from "node:child_process";
@@ -41,7 +41,7 @@ import { defaultSetupIo, SetupCancelled, type SetupIo } from "./cli-prompts.ts";
 import { routeCli, usage } from "./cli-usage.ts"; import { savedSessionHeaders } from "./headless/saved-servers.ts";
 import { normalizePhoneOrigin, phonePairingInstructions, runPhoneSetup } from "./cli-phone-setup.ts";
 import { browserSignInLines, desktopOwnedRefusal, formatSessions, pairingBlock, RELAY_NOT_WITH_TUNNEL, relayPairingBlock, showRelayPairing } from "./cli-pairing.ts";
-import { cliCommand, cliPrefix } from "./cli-invocation.ts"; import { defaultDataDir, type DataHomes } from "./data-dir.ts";
+import { cliCommand, cliPrefix } from "./cli-invocation.ts"; import { defaultDataDir, type DataHomes } from "./data-dir.ts"; import { DATA_DIR_NAME } from "../electron/app-identity.mjs";
 import { checkReach, envPublicUrl, lanProblem, localLinkBase, noRouteLines, publicUrlProblem, reachLines, waitForReach, type Route } from "./cli-reach.ts";
 import { lanUrl } from "./lan-address.ts";
 import { isLoopbackHost } from "../electron/server-address.mjs";
@@ -261,7 +261,7 @@ async function api(port: number, path: string, init: { method?: string; body?: s
   return { status: res.status, body };
 }
 
-export const SERVICE_TRUST_HELP = "This server does not treat commands on this computer as its owner (OMB_LOOPBACK_TRUST=service, or a hosted workspace), so it will not pair devices or list sessions for them. Sign in as an admin and use Settings → Phone & devices, let people sign in with their email (openmausbot access add you@example.com), or restart the server with OMB_LOOPBACK_TRUST=owner.";
+export const SERVICE_TRUST_HELP = "This server does not treat commands on this computer as its owner (OMB_LOOPBACK_TRUST=service, or a hosted workspace), so it will not pair devices or list sessions for them. Sign in as an admin and use Settings → Phone & devices, let people sign in with their email (edubot access add you@example.com), or restart the server with OMB_LOOPBACK_TRUST=owner.";
 
 function refusedAsService(status: number, body: any): boolean {
   return status === 403 && typeof body?.error === "string" && /shared server|Sign in through the workspace portal/.test(body.error);
@@ -470,7 +470,7 @@ export async function runAccess(options: CliOptions, io: CliIo = defaultIo()): P
   };
   if (options.accessAction === "list") {
     if (!admins.length && !members.length) {
-      io.log("nobody can sign in with an email yet; pairing codes only. Add someone with: openmausbot access add you@example.com");
+      io.log("nobody can sign in with an email yet; pairing codes only. Add someone with: edubot access add you@example.com");
       return 0;
     }
     for (const entry of admins) io.log(`${entry.padEnd(40)} full access`);
@@ -570,7 +570,7 @@ export async function runBrowser(options: CliOptions, io: CliIo = defaultIo()): 
   const status = browserEngineStatus({ dataDir: options.dataDir });
   if (options.browserAction === "status") {
     io.log(describeBrowserEngine(status, status.kind === "ready" ? new (await import("./browser/chrome/launcher.ts")).ChromeLauncher({ dataDir: options.dataDir }).describe() : undefined));
-    if (status.kind !== "ready" && status.installable) io.log("install it with:  openmausbot browser install");
+    if (status.kind !== "ready" && status.installable) io.log("install it with:  edubot browser install");
     return status.kind === "ready" ? 0 : 1;
   }
   let binary = resolveAgentBrowserBinary({ dataDir: options.dataDir });
@@ -958,7 +958,7 @@ export async function runOnboardingCommand(
     }
     if (options.command === "setup") {
       io.log(`\nAll set. Start with: ${cliPrefix()}`);
-      if (options.dataDir !== join(homedir(), ".openmausbot") || options.port !== 8799) {
+      if (options.dataDir !== join(homedir(), DATA_DIR_NAME) || options.port !== 8799) {
         io.log(`Use the same --data-dir (${options.dataDir}) and --port (${options.port}) options when starting.`);
       }
       return 0;

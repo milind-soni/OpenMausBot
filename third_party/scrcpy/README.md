@@ -14,7 +14,7 @@ downloads it on first use from
 
 <https://github.com/Genymobile/scrcpy/releases/download/v5.0.1/scrcpy-server-v5.0.1>
 
-into `scrcpy/scrcpy-server-v5.0.1` in its data directory (`~/.openmausbot`
+into `scrcpy/scrcpy-server-v5.0.1` in its data directory (`~/.edubot`
 unless `OMB_DATA_DIR` says otherwise), and uses it only when its SHA-256
 equals the digest above. Every later use verifies the saved file again.
 

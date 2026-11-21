@@ -134,7 +134,7 @@ async function startCloudHome(at: string, tree: string, port: number, onLog: (ch
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-cloud-1password-"));
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".edubot");
   mkdirSync(dataDir, { recursive: true });
   const cli = join(home, "fixture-claude.mjs");
   writeFileSync(cli, `#!/usr/bin/env node
@@ -216,6 +216,6 @@ it("a bot asks for the 1Password token through request_credential's own slot, an
   expect((await api("POST", "/api/logins/1password", { token: TOKEN })).status).toBe(200);
   expect(await provided()).toMatchObject({ status: 200, body: { provided: true } });
   expect((await tools.call("request_credential", { credential_id: "onePasswordToken" })).content[0].text).toBe("1Password service account token is already configured. Continue the task.");
-  expect(readFileSync(join(home, ".openmausbot", "config.json"), "utf8")).not.toContain(TOKEN);
+  expect(readFileSync(join(home, ".edubot", "config.json"), "utf8")).not.toContain(TOKEN);
   for (const where of [...answers, log]) expect(where).not.toContain(TOKEN);
 });

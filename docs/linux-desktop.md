@@ -75,7 +75,7 @@ sudo apt install ./OpenMausBot-amd64.deb
 Then open **OpenMausBot** from the GNOME application launcher. To remove it:
 
 ```sh
-sudo apt remove openmausbot
+sudo apt remove edubot
 ```
 
 The portable AppImage does not install system files:
@@ -96,7 +96,7 @@ The `.rpm` is community-supported: every release builds and checks it, but it is
 sudo dnf install ./OpenMausBot-x86_64.rpm
 ```
 
-Remove it with `sudo dnf remove openmausbot`. Updates are downloaded by the app, which then copies the `rpm` install
+Remove it with `sudo dnf remove edubot`. Updates are downloaded by the app, which then copies the `rpm` install
 command and opens a terminal for you to run it. Other RPM distributions (RHEL, openSUSE) and image-based Fedora
 editions such as Silverblue are untested; use the AppImage there.
 
@@ -114,7 +114,7 @@ pnpm package:arch
 sudo pacman -U release/OpenMausBot-<version>-x64.pacman
 ```
 
-Replace `<version>` with the built version (for example, `0.1.149`). Then launch `openmausbot` from the application launcher or command line.
+Replace `<version>` with the built version (for example, `0.1.149`). Then launch `edubot` from the application launcher or command line.
 
 #### Portable AppImage
 A minimal Arch install lacks the FUSE helper and some desktop libraries the AppImage needs, so install them first:
@@ -156,7 +156,7 @@ user namespaces, its bundled browser can still report `No usable sandbox`. Insta
 do not add `--no-sandbox`, disable AppArmor globally, or allowlist arbitrary executables under your home
 directory. See [Chromium's explanation of the Ubuntu restriction](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md).
 
-Application data remains local in `~/.openmausbot`. Electron browser data and window state use the normal XDG
+Application data remains local in `~/.edubot`. Electron browser data and window state use the normal XDG
 configuration directory (`~/.config/openmausbot` unless the environment overrides it).
 
 ## Develop the desktop shell

@@ -16,6 +16,7 @@ import { boxMemory, heapSizeArgs } from "./box-memory.ts";
 import { clearRecordsFromOtherMachines } from "./data-dir-lease.ts";
 import { OOM_SCORE, protectInit, protectSupervisor, spawnWithOomScore } from "./oom-score.ts";
 import { restartLine, restartPolicy } from "./restart.ts";
+import { DATA_DIR_NAME } from "../electron/app-identity.mjs";
 
 const SERVICE_USER = "maus";
 const SECRETS_FD = 3;
@@ -185,7 +186,7 @@ export function tunnelCommand(bin: string, token: string): { command: string; ar
 
 /** The server's data directory on the volume. */
 export function cloudHomeDataDir(env: NodeJS.ProcessEnv, home: string): string {
-  return env.OMB_DATA_DIR || posix.join(home, ".openmausbot");
+  return env.OMB_DATA_DIR || posix.join(home, DATA_DIR_NAME);
 }
 
 /** flock(1)'s exit status when another process holds the lock (its --conflict-exit-code). */

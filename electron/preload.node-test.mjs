@@ -146,7 +146,7 @@ test("native Settings requests accept only the fixed organisation section, Cloud
   emit("app:open-settings", "cloud-settings");
   emit("app:open-settings", "https://other.example");
   emit("app:open-settings", "cloudAccount");
-  emit("app:open-settings", "openmausbot://cloud");
+  emit("app:open-settings", "edubot://cloud");
   emit("app:open-settings", { section: "organization", url: "https://other.example" });
   emit("app:open-settings", ["cloud"]);
   assert.deepEqual(calls, ["organization", "cloud", "cloud-settings", undefined, undefined, undefined, undefined, undefined]);

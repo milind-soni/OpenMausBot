@@ -7,11 +7,12 @@
 // runs and whether Start screen control worked; the run fails when any of those went wrong. It changes Defender's
 // settings and installs the app, so it runs only on a GitHub Windows runner.
 //
-//   node scripts/defender-check-win.mjs --installer release/OpenMausBot-<version>-setup.exe --out <folder> [--wait 120]
+//   node scripts/defender-check-win.mjs --installer release/EduBot-<version>-setup.exe --out <folder> [--wait 120]
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { PRODUCT_NAME } from "../electron/app-identity.mjs";
 
 const { values: options } = parseArgs({
   options: { installer: { type: "string" }, out: { type: "string" }, wait: { type: "string", default: "120" } },
@@ -21,7 +22,7 @@ if (process.platform !== "win32" || process.env.GITHUB_ACTIONS !== "true") {
   process.exit(2);
 }
 if (!options.installer || !existsSync(options.installer) || !options.out) {
-  console.error("usage: node scripts/defender-check-win.mjs --installer <OpenMausBot-<version>-setup.exe> --out <folder> [--wait 120]");
+  console.error("usage: node scripts/defender-check-win.mjs --installer <EduBot-<version>-setup.exe> --out <folder> [--wait 120]");
   process.exit(2);
 }
 
@@ -31,12 +32,12 @@ mkdirSync(SCRIPTS, { recursive: true });
 const WAIT_SECONDS = Math.max(10, Number(options.wait) || 120);
 const DEVTOOLS_PORT = 9339;
 const STARTED = new Date();
-const APP = "OpenMausBot.exe";
+const APP = `${PRODUCT_NAME}.exe`;
 const DRIVER = "cua-driver-background.exe";
 const DEFENDER_EVENTS = [1006, 1007, 1008, 1015, 1116, 1117];
 const MPCMDRUN = path.join(process.env.ProgramFiles ?? "C:\\Program Files", "Windows Defender", "MpCmdRun.exe");
 /** The app's own files: a detection naming one of these is about us, anything else is the machine's. */
-const OURS = /openmausbot|cua-driver|cua_driver|cua-sdk/i;
+const OURS = /edu ?bot|cua-driver|cua_driver|cua-sdk/i;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const quote = (value) => `'${String(value).replaceAll("'", "''")}'`;
@@ -217,7 +218,7 @@ $downloads = Join-Path $env:USERPROFILE 'Downloads'
 New-Item -ItemType Directory -Force -Path $downloads | Out-Null
 $target = Join-Path $downloads ${quote(path.basename(installer))}
 Copy-Item -LiteralPath ${quote(installer)} -Destination $target -Force
-Set-Content -LiteralPath $target -Stream Zone.Identifier -Value @('[ZoneTransfer]', 'ZoneId=3', 'ReferrerUrl=https://www.openmausbot.com/download', 'HostUrl=https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-setup.exe')
+Set-Content -LiteralPath $target -Stream Zone.Identifier -Value @('[ZoneTransfer]', 'ZoneId=3', 'ReferrerUrl=https://github.com/EduardoMoraga/edu-bot/releases', 'HostUrl=https://github.com/EduardoMoraga/edu-bot/releases/latest/download/EduBot-setup.exe')
 [pscustomobject]@{
   path = $target; bytes = (Get-Item -LiteralPath $target).Length; sha256 = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
   zone = @(Get-Content -LiteralPath $target -Stream Zone.Identifier) -join ' | '
@@ -287,7 +288,7 @@ if (-not $exited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyCon
 
 const installedFiles = (folder) => ps(String.raw`
 $root = ${quote(folder)}
-$names = @('OpenMausBot.exe', 'resources\cua-driver-background.exe', 'resources\cua-driver.exe')
+$names = @('Edu Bot.exe', 'resources\cua-driver-background.exe', 'resources\cua-driver.exe')
 $sdk = Join-Path $root 'resources\cua-sdk'
 if (Test-Path -LiteralPath $sdk) {
   $names += @(Get-ChildItem -LiteralPath $sdk -Recurse -File | Where-Object { $_.Extension -in '.exe', '.node', '.dll' } | ForEach-Object { $_.FullName.Substring($root.Length + 1) })
@@ -424,7 +425,7 @@ async function pressStart() {
 }
 
 function appLog() {
-  const folder = path.join(process.env.APPDATA ?? "", "OpenMausBot", "logs");
+  const folder = path.join(process.env.APPDATA ?? "", PRODUCT_NAME, "logs");
   const file = path.join(folder, "server.log");
   if (!existsSync(file)) return { file, present: false, lines: [] };
   for (const name of readdirSync(folder)) {
@@ -515,9 +516,9 @@ function judge(r) {
   const ourEvents = (r.findings?.events ?? []).filter((event) => OURS.test(`${event.path} ${event.process}`));
   const ourDetections = (r.findings?.detections ?? []).filter((detection) => detection.resources.some((resource) => OURS.test(resource)));
   for (const event of ourEvents) {
-    problems.push(`Windows Security flagged ${event.path || "an OpenMausBot file"}: ${event.threat || `event ${event.id}`}${event.action ? ` (${event.action})` : ""}`);
+    problems.push(`Windows Security flagged ${event.path || "an Edu Bot file"}: ${event.threat || `event ${event.id}`}${event.action ? ` (${event.action})` : ""}`);
   }
-  if (!ourEvents.length && ourDetections.length) problems.push(`Windows Security recorded ${ourDetections.length} detection(s) in OpenMausBot's files`);
+  if (!ourEvents.length && ourDetections.length) problems.push(`Windows Security recorded ${ourDetections.length} detection(s) in Edu Bot's files`);
   if (r.download?.error) problems.push(`the installer couldn't be saved to Downloads: ${r.download.error}`);
   else if (r.download && !r.download.stillThere) problems.push("the installer was gone 15 s after it was saved to Downloads");
   if (r.installerScan?.ran && !r.installerScan.clean) problems.push(`Defender's scan of the installer found ${r.installerScan.threats.join(", ") || "a threat"}`);
@@ -555,9 +556,9 @@ function render(r, verdict) {
   const before = r.asFound ?? {};
   const after = r.protection ?? {};
 
-  add("## Windows Security and the OpenMausBot installer");
+  add("## Windows Security and the Edu Bot installer");
   add();
-  add(`OpenMausBot ${r.version}, commit \`${String(r.commit).slice(0, 12)}\`, on ${r.machine?.os ?? "Windows"} ${r.machine?.version ?? ""} (GitHub's ${r.machine?.image || "windows-latest"}).`);
+  add(`Edu Bot ${r.version}, commit \`${String(r.commit).slice(0, 12)}\`, on ${r.machine?.os ?? "Windows"} ${r.machine?.version ?? ""} (GitHub's ${r.machine?.image || "windows-latest"}).`);
   add();
   if (verdict.problems.length) {
     add("**Verdict: something went wrong for a person installing the app.**");
@@ -670,7 +671,7 @@ function render(r, verdict) {
     }
     add(`- Defender Operational events ${DEFENDER_EVENTS.join(", ")}: ${findings.events.length ? "" : "none."}`);
     for (const event of findings.events) {
-      add(`  - ${event.time}, event ${event.id}: ${event.threat || "(no name)"}${event.path ? ` in ${event.path}` : ""}${event.source ? `, by ${event.source}` : ""}${event.action ? `, action ${event.action}` : ""}${OURS.test(`${event.path} ${event.process}`) ? "" : " (not OpenMausBot's)"}.`);
+      add(`  - ${event.time}, event ${event.id}: ${event.threat || "(no name)"}${event.path ? ` in ${event.path}` : ""}${event.source ? `, by ${event.source}` : ""}${event.action ? `, action ${event.action}` : ""}${OURS.test(`${event.path} ${event.process}`) ? "" : " (not Edu Bot's)"}.`);
     }
   }
   add();

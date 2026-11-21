@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { SECRET_FOLDER_NAME } from "./app-identity.mjs";
 import { clashPath, cloudReserveBytes, foldKey, neverFromCloud, safeFolderName, skipped, validWirePath, windowsProblem } from "./cloud-sync-rules.mjs";
 
 test("skips build folders, system litter, lock and temporary files, and sync's own downloads", () => {
   for (const dir of ["node_modules", ".git", ".venv", "venv", "__pycache__", ".next", ".cache"]) assert.equal(skipped(dir, true), true, dir);
   assert.equal(skipped("src", true), false);
+  for (const dir of [SECRET_FOLDER_NAME, ".openmausbot-secrets"]) {
+    assert.equal(skipped(dir, true), true, dir);
+    assert.equal(neverFromCloud(`bot/${dir}/token.txt`), true, dir);
+  }
   for (const file of [".DS_Store", "Thumbs.db", "desktop.ini", "~$port.docx", "draft.tmp", "movie.crdownload", "a.part", ".~lock.sheet.ods#", ".Report.docx.omb-sync-1a2b3c4d"]) {
     assert.equal(skipped(file, false), true, file);
   }

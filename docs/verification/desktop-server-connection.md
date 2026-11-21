@@ -73,7 +73,7 @@ sidebar search → **Connect to a server…**, or open **Settings →
 Servers**. Enter the server's HTTPS address or full pairing link and an
 optional name. Confirm the host in the native dialog, then complete pairing or
 email sign-in on that server. To generate an owner link without the CLI's
-phone wizard, run `npx openmausbot pair --label "My desktop"` on the server.
+phone wizard, run `npx edubot pair --label "My desktop"` on the server.
 Treat this link as a secret. Existing limited-access links retain their limits.
 
 Select **This computer** or a saved hosted workspace to switch. Each origin

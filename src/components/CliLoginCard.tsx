@@ -78,7 +78,7 @@ export function CliLoginPrompt() {
   </NoticeCard>;
 }
 
-/** A terminal running `openmausbot login` waits here for one click. Only the owner or an admin sees it. */
+/** A terminal running `edubot login` waits here for one click. Only the owner or an admin sees it. */
 export function CliLoginCard() {
   return useOwnerOrAdmin() === true ? <CliLoginPrompt /> : null;
 }

@@ -448,7 +448,7 @@ const OUTSIDE_WHY = "A webhook's run made or changed this routine, so it runs wi
  * no network beyond loopback, the scripted engine, and the owner's paired device. */
 async function launchCloudHome() {
   const home = mkdtempSync(join(SHORT_TMP, "omb-cloud-journey-"));
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".edubot");
   mkdirSync(join(home, "tmp"), { recursive: true });
   mkdirSync(dataDir, { recursive: true });
   const planPath = join(home, "room-plan.json");

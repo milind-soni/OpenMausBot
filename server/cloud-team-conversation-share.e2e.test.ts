@@ -213,7 +213,7 @@ describe("saving to team memory", () => {
       const refused = await as(who, "POST", `/api/bots/${scout}/memory/team`, { threadId: other, messageId: line, text: OTHER });
       expect(refused.status, `${who}: ${JSON.stringify(refused.body)}`).toBe(404);
     }
-    expect(readFileSync(join(team.home, ".openmausbot", "workspaces", scout, "MEMORY.md"), "utf8")).not.toContain(OTHER);
+    expect(readFileSync(join(team.home, ".edubot", "workspaces", scout, "MEMORY.md"), "utf8")).not.toContain(OTHER);
   }, hostTimeout(60_000));
 
   it("from a person's own private conversation and from a shared one, saying who and when, and the next conversation with the bot reads it", async () => {
@@ -225,7 +225,7 @@ describe("saving to team memory", () => {
     const fromShared = await as("ben", "POST", `/api/bots/${scout}/memory/team`, { threadId: handoff, messageId: await lastLine("ben", handoff), text: "Ortega's number is in the CRM" });
     expect(fromShared.status, JSON.stringify(fromShared.body)).toBe(201);
     benEntry = fromShared.body.entry.id;
-    const notes = readFileSync(join(team.home, ".openmausbot", "workspaces", scout, "MEMORY.md"), "utf8");
+    const notes = readFileSync(join(team.home, ".edubot", "workspaces", scout, "MEMORY.md"), "utf8");
     expect(notes).toContain(DECISION);
     expect(notes, "nothing else of the private chat").not.toContain(OTHER);
     for (const who of ["rui", "ben", "ana"] as const) expect(await inboxLines(who), `${who}: no inbox line`).toBe(inboxBefore[who]);
@@ -242,7 +242,7 @@ describe("saving to team memory", () => {
     expect(saved.body.entry.text).toMatch(/^word0 word1 .*… \(shortened; saved by .+, \d{4}-\d{2}-\d{2}\)$/);
     expect(saved.body.entry.text.length).toBeLessThan(1_100);
     expect((await as("rui", "DELETE", `/api/bots/${scout}/memory/team/${saved.body.entry.id}`)).status, "Undo").toBe(200);
-    expect(readFileSync(join(team.home, ".openmausbot", "workspaces", scout, "MEMORY.md"), "utf8")).not.toContain("word0 word1 word2");
+    expect(readFileSync(join(team.home, ".edubot", "workspaces", scout, "MEMORY.md"), "utf8")).not.toContain("word0 word1 word2");
   }, hostTimeout(60_000));
 
   it("lists each person their own lines and an admin every line; only the author or an admin removes one", async () => {
@@ -252,10 +252,10 @@ describe("saving to team memory", () => {
     expect(((await as("olive", "GET", `/api/bots/${scout}/memory/team`)).body.entries as Array<{ id: string }>).map((entry) => entry.id).sort()).toEqual([ruiEntry, benEntry].sort());
     expect((await as("ben", "DELETE", `/api/bots/${scout}/memory/team/${ruiEntry}`)).status).toBe(403);
     expect((await as("ben", "PUT", `/api/bots/${scout}/memory/file`, { path: "MEMORY.md", text: "" })).status, "nor edit the notes").toBe(403);
-    expect(readFileSync(join(team.home, ".openmausbot", "workspaces", scout, "MEMORY.md"), "utf8")).toContain(DECISION);
+    expect(readFileSync(join(team.home, ".edubot", "workspaces", scout, "MEMORY.md"), "utf8")).toContain(DECISION);
     expect((await as("rui", "DELETE", `/api/bots/${scout}/memory/team/${ruiEntry}`)).status).toBe(200);
     expect((await as("olive", "DELETE", `/api/bots/${scout}/memory/team/${benEntry}`)).status).toBe(200);
-    const notes = readFileSync(join(team.home, ".openmausbot", "workspaces", scout, "MEMORY.md"), "utf8");
+    const notes = readFileSync(join(team.home, ".edubot", "workspaces", scout, "MEMORY.md"), "utf8");
     expect(notes).not.toContain(DECISION);
     expect(notes).not.toContain("Ortega's number");
   }, hostTimeout(60_000));

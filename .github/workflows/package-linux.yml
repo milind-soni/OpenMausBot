@@ -83,7 +83,7 @@ jobs:
           sudo chmod 4755 release/linux-unpacked/chrome-sandbox
           test "$(stat -c '%U:%G %a' release/linux-unpacked/chrome-sandbox)" = "root:root 4755"
       - name: Verify the installed browser with Ubuntu sandbox restrictions
-        run: node scripts/smoke-browser-bundle.mjs --resources /opt/OpenMausBot/resources
+        run: node scripts/smoke-browser-bundle.mjs --resources "/opt/edu-bot/resources"
       - name: Launch packaged app and verify lifecycle
         env:
           OMB_KEEP_SMOKE_DIR: "1"
@@ -91,32 +91,32 @@ jobs:
         run: pnpm smoke:linux-package
       - name: Remove the installed upgrade fixture
         if: always()
-        run: sudo dpkg --purge openmausbot || true
+        run: sudo dpkg --purge edu-bot || true
       - name: Prepare release assets
         id: release
         shell: bash
         run: |
           set -euo pipefail
           version="$(node -p "require('./package.json').version")"
-          appimage="release/OpenMausBot-${version}-x86_64.AppImage"
-          deb="release/OpenMausBot-${version}-amd64.deb"
-          rpm="release/OpenMausBot-${version}-x86_64.rpm"
+          appimage="release/EduBot-${version}-x86_64.AppImage"
+          deb="release/EduBot-${version}-amd64.deb"
+          rpm="release/EduBot-${version}-x86_64.rpm"
           test -f "$appimage"
           test -f "$deb"
           test -f "$rpm"
-          cp "$appimage" release/OpenMausBot.AppImage
-          cp "$deb" release/OpenMausBot-amd64.deb
-          cp "$rpm" release/OpenMausBot-x86_64.rpm
-          chmod 0755 release/OpenMausBot.AppImage
+          cp "$appimage" release/EduBot.AppImage
+          cp "$deb" release/EduBot-amd64.deb
+          cp "$rpm" release/EduBot-x86_64.rpm
+          chmod 0755 release/EduBot.AppImage
           (
             cd release
             sha256sum \
               "$(basename "$appimage")" \
               "$(basename "$deb")" \
               "$(basename "$rpm")" \
-              OpenMausBot.AppImage \
-              OpenMausBot-amd64.deb \
-              OpenMausBot-x86_64.rpm > SHA256SUMS-ubuntu-x64.txt
+              EduBot.AppImage \
+              EduBot-amd64.deb \
+              EduBot-x86_64.rpm > SHA256SUMS-ubuntu-x64.txt
           )
           echo "artifact-name=openmausbot-ubuntu-${version}-x64" >> "$GITHUB_OUTPUT"
           echo "version: $version"
@@ -137,12 +137,12 @@ jobs:
         with:
           name: ${{ steps.release.outputs.artifact-name }}
           path: |
-            release/OpenMausBot-*-amd64.deb
-            release/OpenMausBot-*-x86_64.AppImage
-            release/OpenMausBot-amd64.deb
-            release/OpenMausBot-*-x86_64.rpm
-            release/OpenMausBot-x86_64.rpm
-            release/OpenMausBot.AppImage
+            release/EduBot-*-amd64.deb
+            release/EduBot-*-x86_64.AppImage
+            release/EduBot-amd64.deb
+            release/EduBot-*-x86_64.rpm
+            release/EduBot-x86_64.rpm
+            release/EduBot.AppImage
             release/SHA256SUMS-ubuntu-x64.txt
           if-no-files-found: error
           retention-days: 14

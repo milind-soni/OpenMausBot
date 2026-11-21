@@ -49,7 +49,7 @@ beforeAll(async () => {
   vi.spyOn(console, "warn").mockImplementation(() => {});
   broker = await startBrokerFake();
   home = mkdtempSync(join(tmpdir(), "omb-app-events-cloud-"));
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".edubot");
   mkdirSync(dataDir, { recursive: true });
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
     instances: { claude: { driver: "claudeAgent", displayName: "Fixture", config: { cli: join(SERVER_DIR, "testing", "fake-claude-cli.ts") } } },

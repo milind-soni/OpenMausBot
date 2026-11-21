@@ -18,7 +18,7 @@ const json = (value, status = 200) => new Response(JSON.stringify(value), { stat
 function computer(t, { frozen = { v: 1, at: 1, cloud: CLOUD } } = {}) {
   const parent = mkdtempSync(join(tmpdir(), "omb-clean-"));
   t.after(() => rmSync(parent, { recursive: true, force: true }));
-  const dataDir = join(parent, ".openmausbot");
+  const dataDir = join(parent, ".edubot");
   const w = { dataDir, cleanDir: cleanWorkspaceDir(dataDir), running: dataDir, swaps: [], requests: [], swapFails: false, changes: 0 };
   mkdirSync(dataDir, { recursive: true });
   w.write = (name, text) => { writeFileSync(join(dataDir, name), text); };
@@ -34,7 +34,7 @@ function computer(t, { frozen = { v: 1, at: 1, cloud: CLOUD } } = {}) {
 }
 
 test("a clean workspace sits beside the data folder, never in it: a move carries that folder and forgetting the copy empties it", () => {
-  assert.equal(cleanWorkspaceDir("/Users/a/.openmausbot"), "/Users/a/.openmausbot-clean");
+  assert.equal(cleanWorkspaceDir("/Users/a/.edubot"), "/Users/a/.edubot-clean");
 });
 
 test("opening it starts the server on its own folder, once, set up so the new-user setup never shows", async (t) => {
@@ -297,8 +297,8 @@ test("no lending from the clean workspace: nothing is lent or asked while it run
 });
 
 test("a profile sits in a folder of its own, by its stable id, under one folder beside the data folder: never in the frozen copy's", () => {
-  assert.equal(profilesDir("/Users/a/.openmausbot"), "/Users/a/.openmausbot-profiles");
-  assert.equal(profileDir("/Users/a/.openmausbot", DEFAULT_PROFILE), join("/Users/a/.openmausbot-profiles", "default"));
+  assert.equal(profilesDir("/Users/a/.edubot"), "/Users/a/.edubot-profiles");
+  assert.equal(profileDir("/Users/a/.edubot", DEFAULT_PROFILE), join("/Users/a/.edubot-profiles", "default"));
 });
 
 test("This Mac's profile opens fresh on its own folder, and the frozen copy stays frozen: its marker, its bots and its config untouched", async (t) => {
@@ -328,7 +328,7 @@ test("This Mac's profile opens fresh on its own folder, and the frozen copy stay
 
 test("a profile id is a folder name and nothing else, and the move's code never reaches a profile", async (t) => {
   const w = computer(t);
-  for (const id of ["../.openmausbot", "", "Work", "a/b", "."]) assert.equal(await w.clean.open(id), false, id);
+  for (const id of ["../.edubot", "", "Work", "a/b", "."]) assert.equal(await w.clean.open(id), false, id);
   assert.deepEqual(w.swaps, []);
   await w.clean.open();
   const request = w.clean.realCopy(w.request);
@@ -375,7 +375,7 @@ test("only the data folder itself is this computer's own copy: however it is spe
   const w = computer(t);
   w.running = `${w.dataDir}${sep}`;
   assert.equal(w.clean.ownCopy(), true, "a trailing separator is the same folder");
-  w.running = join(w.dataDir, "..", ".openmausbot");
+  w.running = join(w.dataDir, "..", ".edubot");
   assert.equal(w.clean.ownCopy(), true);
   w.running = null;
   assert.equal(w.clean.ownCopy(), false);

@@ -17,7 +17,7 @@ export function installTeamJoin({ argv, account, addAccount, openTeam, confirm, 
   const launched = takeTeamLink(argv);
   if (launched) join.request(launched, { launch: true });
   return {
-    /** An `openmausbot://team/…` URL (macOS open-url): handled, true; anything else is left to the other handlers. */
+    /** An `edubot://team/…` URL (macOS open-url): handled, true; anything else is left to the other handlers. */
     fromUrl(url) { const id = teamIdFromLink(url); return id ? join.request(id) : false; },
     /** A second instance's command line (Windows, Linux). */
     fromArgs(commandLine) { const id = takeTeamLink(commandLine); return id ? join.request(id) : false; },

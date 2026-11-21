@@ -1,11 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, hostname, uptime } from "node:os";
 import { dirname, join, posix } from "node:path";
 
+import { SERVER_CHILD_DIR_NAME } from "./app-identity.mjs";
+
 const LEASE_NAME = "openmausbot-server.lease";
-const DELEGATED_CHILD_DIR = ".openmausbot-server-child";
+const DELEGATED_CHILD_DIR = SERVER_CHILD_DIR_NAME;
 // Internal parent-to-child capability, obtained only from utilityServerLeaseEnvironment(); never public configuration.
 const CHILD_LEASE_ENV = "OPENMAUSBOT_INTERNAL_DATA_DIR_LEASE";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -563,18 +565,8 @@ function validateDataDir(dataDir) {
   return dataDir;
 }
 
-function prepareDataDir(dataDir, legacyDataDir) {
+function prepareDataDir(dataDir) {
   validateDataDir(dataDir);
-  if (legacyDataDir !== undefined) {
-    validateDataDir(legacyDataDir);
-    // Before acquiring: creating the new directory first would turn the one-time legacy rename into a no-op.
-    if (!existsSync(dataDir) && existsSync(legacyDataDir)) {
-      try {
-        renameSync(legacyDataDir, dataDir);
-      } catch {
-      }
-    }
-  }
   try {
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   } catch (error) {
@@ -657,7 +649,7 @@ function validateChildDelegation(dataDir, encoded) {
 }
 
 function acquireDataDirLeaseInternal(dataDir, options = {}) {
-  const leasePath = prepareDataDir(dataDir, options.legacyDataDir);
+  const leasePath = prepareDataDir(dataDir);
   if (options.guardDelegatedChild !== false) assertNoLiveDelegatedChild(dataDir, options.t);
   const owner = {
     version: 1,
@@ -792,7 +784,7 @@ function clearRecords(dataDir, stale) {
 }
 
 /**
- * Who holds the data directory's lease, read only (`openmausbot doctor`): "none"; "alive", a running process on this
+ * Who holds the data directory's lease, read only (`edubot doctor`): "none"; "alive", a running process on this
  * machine; "dead", a process of this machine that is gone, which the next acquireDataDirLease() retires; "other-machine";
  * or "invalid", a record that cannot be read, which acquireDataDirLease() refuses. Never changes a file.
  */

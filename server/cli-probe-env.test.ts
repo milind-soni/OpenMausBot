@@ -55,7 +55,7 @@ function expectNoCredentials(file: string) {
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-cli-probe-env-"));
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".edubot");
   mkdirSync(dataDir, { recursive: true });
   // Answers like a signed-in Claude Code; `probe` (the CLI test) and
   // `update` (the Claude update) record the environment they ran with.

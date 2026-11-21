@@ -49,5 +49,5 @@ resumed for each in its own place.
 - `POST /api/turns/stop` with `{ "all": true }` or `{ "botIds": [...] }` stops the work those bots are doing now and
   pauses nothing; it answers `{ botIds, stopped }`.
 
-All of these are admin requests. From a terminal: `openmausbot bots pause | resume (BOT… | --team NAME | --all)` and
-`openmausbot stop (BOT… | --team NAME | --all)` ([the command line](headless-cli.md)).
+All of these are admin requests. From a terminal: `edubot bots pause | resume (BOT… | --team NAME | --all)` and
+`edubot stop (BOT… | --team NAME | --all)` ([the command line](headless-cli.md)).

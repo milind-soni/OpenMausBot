@@ -57,6 +57,8 @@ const FLUSH = 0x8000;
 const QU = 0x8000;
 /** The meta-query browsers use to enumerate service types on a network. */
 export const SERVICE_ENUMERATION = "_services._dns-sd._udp.local";
+// The published MausBot phone apps browse for this service type to find a computer nearby.
+export const PHONE_SERVICE_TYPE = "_openmausbot._tcp";
 
 
 export interface Question {
@@ -244,7 +246,7 @@ export interface ServiceInfo {
   /** e.g. "_openmausbot._tcp" */
   type: string;
   port: number;
-  /** the name our A records claim, e.g. "openmausbot-1a2b3c4d.local" */
+  /** the name our A records claim, e.g. "edubot-1a2b3c4d.local" */
   host: string;
   addresses: string[];
   /** DNS-SD key=value pairs */
@@ -355,7 +357,7 @@ export function clampBytes(text: string, limit: number): string {
 /** Not `<hostname>.local`: on macOS mDNSResponder owns and defends that name. */
 export function defaultHostName(machine = hostname()): string {
   const digest = createHash("sha256").update(machine).digest("hex").slice(0, 8);
-  return `openmausbot-${digest}.local`;
+  return `edubot-${digest}.local`;
 }
 
 /** macOS point-to-point tunnels: utun (every VPN, Tailscale, tun2socks),

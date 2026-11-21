@@ -1,4 +1,5 @@
 import { HEADLESS_VERBS } from "./headless/args.ts";
+import { CLI_NAME } from "../electron/app-identity.mjs";
 
 export { HEADLESS_VERBS as HEADLESS_VERB_NAMES };
 
@@ -11,64 +12,64 @@ export function routeCli(argv: readonly string[]): { headless: boolean; argv: st
 }
 
 export const HEADLESS_USAGE = `Drive a running workspace (scripts, CI, other agents):
-  openmausbot login [SERVER]            sign this terminal in once: MausBot shows a card to allow it (logout, whoami, use NAME, servers)
-  openmausbot status                    every bot at a glance: working, waiting on you, paused, failed or idle, and its computer
-  openmausbot bots delete|pause|resume|stop (BOT… | --team T | --all)   act on bots; delete asks first (--yes, --dry-run)
-  openmausbot stop (BOT… | --team T | --all)   stop their work now, without pausing
-  openmausbot threads list|clear|delete BOT    a bot's conversations
-  openmausbot computers list|start|sleep       the bots' cloud computers
-  openmausbot doctor                    check the server answers and an engine is ready
-  openmausbot doctor --host             check this Linux machine can run a server (exit 7 if not)
-  openmausbot doctor --data [--fix]     check (and safely repair) this computer's data folder (exit 8 if a problem is left)
-  openmausbot bots | channels | models  your bots, your rooms, the engines and their models
-  openmausbot run BOT "do this"         give a bot one job and wait until it and every teammate it asked are done
-  openmausbot send BOT "text"           send one message and return at once
-  openmausbot wait BOT                  wait on work already running
-  openmausbot messages BOT              the latest messages of a conversation
-  openmausbot interrupt BOT [--tree]    press Stop (--tree: and every teammate on its job)
-  openmausbot export BOT --out DIR      write a job's transcripts, files and screens to DIR
-  openmausbot events [--job THREAD]     the server's live events as JSON lines
-  openmausbot team apply FILE           make the workspace match a team file (team export writes one)
-  openmausbot engine set claude --key-env ANTHROPIC_API_KEY   give it an engine without a screen
-  openmausbot connect URL --code CODE --out FILE              get a token for a workspace elsewhere
-  openmausbot token create NAME --out FILE [--expires 90d]    a token for CI that ends on its date (token list, token revoke ID)
-  openmausbot new-bot | new-channel | set-model | edit | mcp
+  edubot login [SERVER]            sign this terminal in once: MausBot shows a card to allow it (logout, whoami, use NAME, servers)
+  edubot status                    every bot at a glance: working, waiting on you, paused, failed or idle, and its computer
+  edubot bots delete|pause|resume|stop (BOT… | --team T | --all)   act on bots; delete asks first (--yes, --dry-run)
+  edubot stop (BOT… | --team T | --all)   stop their work now, without pausing
+  edubot threads list|clear|delete BOT    a bot's conversations
+  edubot computers list|start|sleep       the bots' cloud computers
+  edubot doctor                    check the server answers and an engine is ready
+  edubot doctor --host             check this Linux machine can run a server (exit 7 if not)
+  edubot doctor --data [--fix]     check (and safely repair) this computer's data folder (exit 8 if a problem is left)
+  edubot bots | channels | models  your bots, your rooms, the engines and their models
+  edubot run BOT "do this"         give a bot one job and wait until it and every teammate it asked are done
+  edubot send BOT "text"           send one message and return at once
+  edubot wait BOT                  wait on work already running
+  edubot messages BOT              the latest messages of a conversation
+  edubot interrupt BOT [--tree]    press Stop (--tree: and every teammate on its job)
+  edubot export BOT --out DIR      write a job's transcripts, files and screens to DIR
+  edubot events [--job THREAD]     the server's live events as JSON lines
+  edubot team apply FILE           make the workspace match a team file (team export writes one)
+  edubot engine set claude --key-env ANTHROPIC_API_KEY   give it an engine without a screen
+  edubot connect URL --code CODE --out FILE              get a token for a workspace elsewhere
+  edubot token create NAME --out FILE [--expires 90d]    a token for CI that ends on its date (token list, token revoke ID)
+  edubot new-bot | new-channel | set-model | edit | mcp
 
   Server: --url URL (or OPENMAUSBOT_URL), --port N (or OMB_PORT), else the one you signed in to, else this computer's.
-  Token: your openmausbot login, or OPENMAUSBOT_TOKEN or --token-file FILE for scripts. --json prints one JSON document;
+  Token: your edubot login, or OPENMAUSBOT_TOKEN or --token-file FILE for scripts. --json prints one JSON document;
   progress goes to stderr (--quiet drops it). Exit: 0 done, 1 failed, 2 usage, 4 needs login, 5 not allowed,
-  6 busy, 7 not found. openmausbot help VERB for the details.`;
+  6 busy, 7 not found. edubot help VERB for the details.`;
 
-/** The usage text, its commands written the way this CLI was started (`npx openmausbot …`). */
-export function usage(prefix = "openmausbot"): string {
-  return USAGE.split("\n").map((line) => line.replace(/^(\s+)openmausbot(?= )/, `$1${prefix}`)).join("\n");
+/** The usage text, its commands written the way this CLI was started (`npx edubot …`). */
+export function usage(prefix: string = CLI_NAME): string {
+  return USAGE.split("\n").map((line) => line.replace(new RegExp(`^(\\s+)${CLI_NAME}(?= )`), `$1${prefix}`)).join("\n");
 }
 
-export const USAGE = `openmausbot — your team of AI bots, ready in a few steps
+export const USAGE = `edubot — your team of AI bots, ready in a few steps
 
-  openmausbot                         set up once, then open your workspace
-  openmausbot setup [--data-dir DIR]
-  openmausbot start [the same options as serve]
-  openmausbot serve [--port 8799] [--data-dir DIR] [--label NAME]
+  edubot                         set up once, then open your workspace
+  edubot setup [--data-dir DIR]
+  edubot start [the same options as serve]
+  edubot serve [--port 8799] [--data-dir DIR] [--label NAME]
                     [--public-url https://host | --domain HOST | --tunnel | --tailscale] [--lan] [--relay]
-  openmausbot pair  [--label NAME] [--phone [ios|android]] [--ttl 24h] [--public-url https://host]
-  openmausbot devices [revoke ID]
-  openmausbot --version
-  openmausbot account login [--email you@example.com] [--relay] | logout | status
-  openmausbot access list | add EMAIL [--chat-only] | remove EMAIL
-  openmausbot service install [the same way-in options as serve] [--port N] [--data-dir DIR] | uninstall
+  edubot pair  [--label NAME] [--phone [ios|android]] [--ttl 24h] [--public-url https://host]
+  edubot devices [revoke ID]
+  edubot --version
+  edubot account login [--email you@example.com] [--relay] | logout | status
+  edubot access list | add EMAIL [--chat-only] | remove EMAIL
+  edubot service install [the same way-in options as serve] [--port N] [--data-dir DIR] | uninstall
                     [--sentinel]   (the health scan below, every two minutes, instead of the server)
-  openmausbot sentinel [--data-dir DIR] [--out DIR] [--once] [--json]   (read-only health scan; see --help)
-  openmausbot config backups | restore NAME    (dated copies of the settings file; see --help)
-  openmausbot browser install [--with-deps] | status
-  openmausbot fleet init --domain HOST [--operator USER] | create NAME --admin EMAIL [--member EMAIL] [--brand FILE]
+  edubot sentinel [--data-dir DIR] [--out DIR] [--once] [--json]   (read-only health scan; see --help)
+  edubot config backups | restore NAME    (dated copies of the settings file; see --help)
+  edubot browser install [--with-deps] | status
+  edubot fleet init --domain HOST [--operator USER] | create NAME --admin EMAIL [--member EMAIL] [--brand FILE]
                     [--anthropic-key-file FILE] [--cap USD] [--license-key KEY] [--memory 1G]
                   | list | users NAME add|remove EMAIL [--chat-only] | suspend NAME | resume NAME
                   | delete NAME --yes [--keep-data] | upgrade   (all take --dry-run)
                   | agent [--socket PATH] [--group USER]   (root; installed by init --operator)
 
 setup   choose AI access and optional phone access; keep existing bots and chats
-start   same as openmausbot: use your saved settings and open the workspace
+start   same as edubot: use your saved settings and open the workspace
 serve   starts the server without prompts; in a terminal it prints a pairing
         code, the link to paste into the desktop app (＋ → Connect to a
         server) and a QR for a phone
@@ -114,7 +115,7 @@ Ways in (pick one; --lan can join any):
              when serve stops
 --tunnel     serve at a public https://c-… address through a
              Cloudflare tunnel: no domain, no proxy, no open port. Run
-             \`openmausbot account login\` once on this machine first.
+             \`edubot account login\` once on this machine first.
 --domain     serve at https://HOST on your own domain: a pinned Caddy is
              downloaded once and run alongside the server, and gets the
              certificate itself. Point the domain's DNS at this machine and
@@ -123,7 +124,7 @@ Ways in (pick one; --lan can join any):
 --relay      phones only, and it can join any of the above except --tunnel:
              the MausBot phone app pairs by QR through MausBot Relay,
              end-to-end encrypted, with no address, open port or VPN. Run
-             \`openmausbot account login --relay\` once on this machine first. Not on a
+             \`edubot account login --relay\` once on this machine first. Not on a
              machine with a tunnel address: the relay stays off there.
 
 --no-open   do not open a browser window
@@ -132,6 +133,6 @@ Ways in (pick one; --lan can join any):
 
 ${HEADLESS_USAGE}
 
-Install once with \`npm install -g openmausbot\`, then type \`openmausbot\`.
-Or run without a global install: \`npx openmausbot\`. Node 24+ is required.
+Install once with \`npm install -g edubot\`, then type \`edubot\`.
+Or run without a global install: \`npx edubot\`. Node 24+ is required.
 `;

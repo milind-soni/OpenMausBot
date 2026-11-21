@@ -113,7 +113,7 @@ held to the same steps and the same promises:
 | Stop, copy `/data` aside | `stopAndCopy` → volume `mausbot-snapshot` | `stop_server` (checked stopped), `copy_aside` → a new volume `<project>_data-before-update-<time>`, compared with the data file by file; the copy before it is removed only then |
 | Never older | the update runner refuses an older image (exit 5) | `older_reason`: by the version the server reports; exit 5 unless `--allow-older` |
 | Start the new image | `createContainer`, `startHome` | `OMB_IMAGE` in `.env`, `docker compose up -d` |
-| Healthy, and bots can start | signed health report names the image; the bot box still passes every check it passed before | `/api/health` three times running, the version it reports, `openmausbot doctor` if it passed before, Caddy |
+| Healthy, and bots can start | signed health report names the image; the bot box still passes every check it passed before | `/api/health` three times running, the version it reports, `edubot doctor` if it passed before, Caddy |
 | On failure | `rollBack`: old image and the copy, reply `update_rolled_back` | `roll_back`: the copy (into a new folder, checked, then swapped in), `.env` and the old image, exit 1 with the reason; a restore that fails keeps the journal, exit 2 |
 | Interrupted | the operation in `home.json`; `recover` at the next start | `.update/journal`; a hangup is ignored, Ctrl-C undoes at once, and the next run keeps a healthy new version or asks before it puts data back |
 | Run twice | a job id is answered again, never run again | "already runs …, nothing to do" |

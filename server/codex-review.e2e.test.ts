@@ -41,8 +41,8 @@ const start = async () => {
 beforeAll(async () => {
   chmodSync(fake, 0o755);
   home = mkdtempSync(join(tmpdir(), "omb-codex-review-"));
-  mkdirSync(join(home, ".openmausbot"));
-  writeFileSync(join(home, ".openmausbot", "config.json"), JSON.stringify({ instances: {
+  mkdirSync(join(home, ".edubot"));
+  writeFileSync(join(home, ".edubot", "config.json"), JSON.stringify({ instances: {
     codex: { driver: "codex", environment: {
       FAKE_CODEX_MODE: "review-events",
       FAKE_CODEX_DUMP: join(home, "codex-dump.json"),

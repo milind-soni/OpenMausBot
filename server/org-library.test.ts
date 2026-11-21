@@ -76,7 +76,7 @@ async function installation(from?: string) {
   vi.resetModules();
   vi.stubEnv("HOME", home);
   vi.stubEnv("USERPROFILE", home);
-  vi.stubEnv("OMB_DATA_DIR", join(home, ".openmausbot"));
+  vi.stubEnv("OMB_DATA_DIR", join(home, ".edubot"));
   const { Store } = await import("./store.ts");
   const { RoutineManager } = await import("./routines.ts");
   const skills = await import("./skills.ts");

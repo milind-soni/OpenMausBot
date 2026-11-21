@@ -98,7 +98,7 @@ export async function ensureCaddy(options: {
 /** Certificates and state live under the data dir, so they survive restarts and upgrades. */
 export function caddyfileFor(input: { domain: string; appPort: number; webhookPort: number }): string {
   return [
-    "# Written by openmausbot serve --domain. Edit the command, not this file.",
+    "# Written by edubot serve --domain. Edit the command, not this file.",
     "{",
     "\tadmin off",
     "\tlog {",

@@ -70,7 +70,7 @@ beforeAll(async () => {
   if (!posix) return;
   fx = await launchCloudSendFixture({ onePasswordToken: TOKEN, team: { id: "team-acme-files", name: "Acme", engine: SHELL }, cloudEngine: SHELL });
   team = fx.team!;
-  dataDir = join(team.home, ".openmausbot");
+  dataDir = join(team.home, ".edubot");
   olive = (await team.pair(OLIVE)).token!;
   mira = (await team.pair(MIRA)).token!;
   ben = (await team.pair(BEN)).token!;
@@ -181,5 +181,5 @@ it.runIf(posix)("Mira leaving takes nothing of team files: what she wrote stays 
 it.runIf(posix)("a personal Cloud has no team files at all", async () => {
   expect((await fx.onCloud("GET", "/api/team-files")).status).toBe(404);
   expect((await fx.onCloud("POST", "/api/team-files/folder", { path: "x" })).status).toBe(404);
-  expect(existsSync(join(team.home, "..", "cloud", ".openmausbot", "team-files"))).toBe(false);
+  expect(existsSync(join(team.home, "..", "cloud", ".edubot", "team-files"))).toBe(false);
 }, hostTimeout(60_000));

@@ -494,7 +494,7 @@ to **Settings → MausBot Cloud** never signs in or connects by itself.
 
 The link does nothing in development builds, and in companion client mode it
 explains that the app must be disconnected from the other computer first.
-The `openmausbot` scheme belongs to the installed app: on macOS through the
+The `edubot` scheme belongs to the installed app: on macOS through the
 app bundle, on Linux through the `.deb`'s desktop entry, and on Windows (and
 for an AppImage) once the installed app has started at least once, since it
 registers itself at startup. Before that, or if the app is not installed, the
@@ -1153,7 +1153,7 @@ config (or any folder above them) is not root's, is writable by others, or
 is on the volume. Only the `/data` volume is `maus`'s.
 
 `HOME=/data`, so `~/.claude`, `~/.codex`, `~/.grok` and OpenMausBot's own
-data (`/data/.openmausbot`) persist on the volume.
+data (`/data/.edubot`) persist on the volume.
 
 ### Memory
 
@@ -1349,7 +1349,7 @@ too). Only the named peers are believed, and only the last address they add,
 so a client's own `X-Forwarded-For` or `Cf-Connecting-IP` changes nothing.
 
 **No inbound port: a Cloudflare tunnel.** The same managed tunnel as
-`openmausbot serve --tunnel`, one per server: the control plane's
+`edubot serve --tunnel`, one per server: the control plane's
 `ensureEndpoint`, called with the server's installation credential
 (`fleetAccess` in `server/tunnel.ts`), returns the address
 (`https://c-<32 hex>.<zone>`) and the connector token, which go into
@@ -1404,7 +1404,7 @@ never echoes a secret.
 - The machine must not also carry `OMB_ADMIN_URL`, `OMB_ADMIN_WORKSPACE` or
   `OMB_ADMIN_MEMBERSHIP`: a Cloud home is a personal server with pairing codes
   on, not a hosted team workspace with portal membership.
-- `HOME=/data` and `OMB_DATA_DIR=/data/.openmausbot` are set by the image.
+- `HOME=/data` and `OMB_DATA_DIR=/data/.edubot` are set by the image.
 - The server keeps the secret in memory and removes it from its environment at
   startup; no engine or tool it starts ever inherits it.
 
@@ -1545,7 +1545,7 @@ Connected apps (Gmail, Outlook, Slack, LinkedIn, Calendly and the rest of the
 catalog) come with the plan through OpenMausBot's managed connection service,
 the same one the packaged desktop app uses. The Admin sets nothing for it: at
 every start the server registers the Cloud's own installation if it has none,
-keeps the token owner-only in `/data/.openmausbot/connected-apps-installation.json`
+keeps the token owner-only in `/data/.edubot/connected-apps-installation.json`
 (never in a backup, a move or `config.json`), checks it with the service, and
 retries with backoff while the service is down, without holding up the start.
 An owner's own Composio project key still wins. The details are in

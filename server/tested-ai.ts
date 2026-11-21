@@ -10,7 +10,7 @@
 // The first bot the app made follows the default (the `follower`, kept with the results) until the person writes to it
 // or chooses a model for it or one of its conversations. It moves only after a test result, only to an AI that answered,
 // and only away from one that didn't answer or up to a better one: a status read alone never moves it. A saved default
-// (Settings, `openmausbot setup`, the New Bot defaults) or a hosted workspace's is never tested here and never moves.
+// (Settings, `edubot setup`, the New Bot defaults) or a hosted workspace's is never tested here and never moves.
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";

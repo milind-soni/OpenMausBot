@@ -11,5 +11,5 @@ export function inBotShell(env: NodeJS.ProcessEnv): boolean {
   return env.OMB_DESKTOP_PARENT === "1" || TURN_VARIABLES.some((name) => Boolean(env[name]?.trim()));
 }
 
-export const BOT_SHELL_REFUSAL = "inside a bot's shell the openmausbot command acts as that bot, so it does not sign in or use your saved sign-in";
+export const BOT_SHELL_REFUSAL = "inside a bot's shell the edubot command acts as that bot, so it does not sign in or use your saved sign-in";
 export const BOT_SHELL_HINT = "run this in your own terminal, or ask the person to do it";

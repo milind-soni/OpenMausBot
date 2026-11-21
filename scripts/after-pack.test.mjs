@@ -116,7 +116,7 @@ describe.skipIf(!canBuildMachO)("macOS afterPack platform-tools slices", () => {
   function macApp() {
     const appOutDir = fs.mkdtempSync(path.join(os.tmpdir(), "omb-after-pack-mac-"));
     temporaryDirectories.push(appOutDir);
-    const tools = path.join(appOutDir, "OpenMausBot.app", "Contents", "Resources", "android-platform-tools", "darwin");
+    const tools = path.join(appOutDir, "Edu Bot.app", "Contents", "Resources", "android-platform-tools", "darwin");
     fs.mkdirSync(path.join(tools, "lib64"), { recursive: true });
     fs.copyFileSync(binaries.fat, path.join(tools, "adb"));
     fs.copyFileSync(binaries.fat, path.join(tools, "lib64", "libc++.dylib"));

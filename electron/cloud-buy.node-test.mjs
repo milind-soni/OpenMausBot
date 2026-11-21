@@ -113,7 +113,7 @@ test("{name} is ready once per checkout from here: not while the sheet is open i
   assert.equal(watched(paid({ status: "ready", origin })), false, "once");
 });
 
-test("openmausbot://cloud shows the sheet while a purchase from here is under way, whether or not its checkout is still watched", () => {
+test("edubot://cloud shows the sheet while a purchase from here is under way, whether or not its checkout is still watched", () => {
   assert.equal(cloudLinkOpensSheet({ status: "connected", checkout: { plan: "pro", startedAt: 1 } }), true);
   assert.equal(cloudLinkOpensSheet({ status: "connected", purchase: { state: "confirming" } }), true);
   assert.equal(cloudLinkOpensSheet({ status: "connected", machine: { status: "provisioning" } }), true);

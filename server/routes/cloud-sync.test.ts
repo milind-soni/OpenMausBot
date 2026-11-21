@@ -19,10 +19,10 @@ let auth: RequestAuth, cloudHome: boolean, home: string, server: Server, base: s
 beforeEach(async () => {
   auth = owner; cloudHome = true;
   home = mkdtempSync(join(tmpdir(), "omb-sync-routes-"));
-  mkdirSync(join(home, ".openmausbot"));
+  mkdirSync(join(home, ".edubot"));
   // Never GitHub from a test: a repository that does not exist.
-  const clones = createLentClones({ dataDir: join(home, ".openmausbot"), url: () => `file://${join(home, "no-such-repo.git")}` });
-  routes = createCloudSyncRoutes({ dataDir: join(home, ".openmausbot"), cloudHome: () => cloudHome, statfs: () => ({ totalBytes: 10 * 1024 ** 3, freeBytes: 9 * 1024 ** 3 }), clones });
+  const clones = createLentClones({ dataDir: join(home, ".edubot"), url: () => `file://${join(home, "no-such-repo.git")}` });
+  routes = createCloudSyncRoutes({ dataDir: join(home, ".edubot"), cloudHome: () => cloudHome, statfs: () => ({ totalBytes: 10 * 1024 ** 3, freeBytes: 9 * 1024 ** 3 }), clones });
   server = createServer(async (req, res) => {
     const url = new URL(req.url!, "http://127.0.0.1");
     if (!await dispatchRoutes([routes], { req, res, url, path: url.pathname, method: req.method!, auth, json, readBody })) json(res, 404, { error: "not ours" });
@@ -99,7 +99,7 @@ it("survives a file that cannot be read while it is being served", async () => {
 it("answers the desktop's held changes poll \"asleep\" when a Cloud home agrees to sleep, and refuses new ones until it wakes", async () => {
   let sleeping = false, abort = new AbortController();
   routes.close();
-  routes = createCloudSyncRoutes({ dataDir: join(home, ".openmausbot"), cloudHome: () => cloudHome, statfs: () => ({ totalBytes: 10 * 1024 ** 3, freeBytes: 9 * 1024 ** 3 }),
+  routes = createCloudSyncRoutes({ dataDir: join(home, ".edubot"), cloudHome: () => cloudHome, statfs: () => ({ totalBytes: 10 * 1024 ** 3, freeBytes: 9 * 1024 ** 3 }),
     power: () => ({ sleeping: () => sleeping, sleepSignal: () => abort.signal }) });
   const cursor = (await call("GET", "/api/sync/changes?cursor=0&waitMs=0")).body.cursor as number;
   const held = call("GET", `/api/sync/changes?cursor=${cursor}&waitMs=60000`);
@@ -118,7 +118,7 @@ it("lent folders: says it keeps their copies, registers one out of bots' reach, 
   expect((await call("GET", "/api/sync")).body.lentCopies).toBe(true);
   const registered = await call("POST", "/api/sync/folders", { computerId: PC, computerName: "Ash-MBP", pcPath: "/Users/ash/Notes", name: "Notes", lent: true, git: { repo: "ash/notes", branch: "main", head: null } });
   const folder = registered.body.folder;
-  expect(folder.cloudPath).toBe(join(home, ".openmausbot", "sync", "lent", "Ash-MBP", "Notes"));
+  expect(folder.cloudPath).toBe(join(home, ".edubot", "sync", "lent", "Ash-MBP", "Notes"));
   // The repository can't be cloned here: once that is known, the copy is Files'.
   expect(folder.cloning).toBe(true);
   await routes.idle();

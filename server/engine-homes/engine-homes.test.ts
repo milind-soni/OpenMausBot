@@ -17,7 +17,7 @@ const setup = () => ({ dataDir, serverHome: home, audienceOf: (threadId: string)
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "omb-engine-homes-"));
   home = join(root, "home");
-  dataDir = join(home, ".openmausbot");
+  dataDir = join(home, ".edubot");
   mkdirSync(join(home, ".claude"), { recursive: true });
   writeFileSync(join(home, ".claude", ".credentials.json"), JSON.stringify({ claudeAiOauth: { accessToken: "tok-1" } }));
 });

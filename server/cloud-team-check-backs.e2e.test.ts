@@ -67,7 +67,7 @@ it("runs Ben's private check-back in his chat, for his request, with no human ac
     body: JSON.stringify({ when: "in 1 minute", note: "see the payroll export reached the bank" }) });
   expect(set.status, await set.clone().text()).toBe(201);
 
-  const stored = JSON.parse(readFileSync(join(team.home, ".openmausbot", "check-backs.json"), "utf8")).checkBacks;
+  const stored = JSON.parse(readFileSync(join(team.home, ".edubot", "check-backs.json"), "utf8")).checkBacks;
   expect(stored).toMatchObject([{ botId: scout.id, threadId: benThread, origin: { kind: "user", person: BEN_KEY } }]);
 
   rmSync(file("hang-mode"), { force: true });
@@ -90,7 +90,7 @@ it("runs Ben's private check-back in his chat, for his request, with no human ac
   const next = await fetch(`${team.base}/api/internal/check-backs`, { method: "POST", headers: { authorization: `Bearer ${woken}`, "content-type": "application/json" },
     body: JSON.stringify({ when: "in 3 hours", note: "look once more" }) });
   expect(next.status, `the woken turn runs as Ben's request: ${await next.clone().text()}`).toBe(201);
-  expect(JSON.parse(readFileSync(join(team.home, ".openmausbot", "check-backs.json"), "utf8")).checkBacks)
+  expect(JSON.parse(readFileSync(join(team.home, ".edubot", "check-backs.json"), "utf8")).checkBacks)
     .toMatchObject([{ threadId: benThread, note: "look once more", origin: { kind: "user", person: BEN_KEY } }]);
   const rows = (await team.as(ben, "GET", `/api/threads/${benThread}/messages?limit=200`)).body.messages as Row[];
   expect(rows.filter((row) => row.role === "user" && String(row.text ?? "").includes("[Check back:"))).toEqual([]);

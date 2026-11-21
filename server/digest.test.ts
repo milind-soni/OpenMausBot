@@ -53,7 +53,7 @@ describe("buildTurnDigest", () => {
     const d = buildTurnDigest({
       ...base,
       activities: [
-        activity('/bin/zsh -lc "jq \'.routines[]?\' ~/.openmausbot/bots/main/routines.json"', true, "jq '.routines[]?' routines.json"),
+        activity('/bin/zsh -lc "jq \'.routines[]?\' ~/.edubot/bots/main/routines.json"', true, "jq '.routines[]?' routines.json"),
         activity('/bin/zsh -lc "rg -n todo src/"', true, "rg -n todo src/"),
         activity("list_routines", true),
       ],
@@ -70,7 +70,7 @@ describe("buildTurnDigest", () => {
     const d = buildTurnDigest({
       ...base,
       activities: [
-        activity('cp "/Users/someone/.openmausbot/task-workspaces/9d6ab24f-15b8-45e2/out.png" ~/Desktop/', true, "cp out.png ~/Desktop/"),
+        activity('cp "/Users/someone/.edubot/task-workspaces/9d6ab24f-15b8-45e2/out.png" ~/Desktop/', true, "cp out.png ~/Desktop/"),
         activity("swift -e 'import AppKit\n// Target 1080 × 1080\nlet size = NSSize(width: 1080, height: 1080)'", true, "swift -e …"),
         activity("swift -e 'import AppKit\nlet canvas = NSImage()'", true, "swift -e …"),
         activity("memory_update", true),

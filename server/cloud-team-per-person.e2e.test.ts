@@ -199,7 +199,7 @@ it("a User's open chat counts as in front of them, and nobody can name another p
 }, hostTimeout(60_000));
 
 it("when Ada leaves the team, her own order and her read marks go with her, and Cleo's stay", async () => {
-  const dataDir = (...rest: string[]) => join(team.home, ".openmausbot", ...rest);
+  const dataDir = (...rest: string[]) => join(team.home, ".edubot", ...rest);
   const adaKey = personKey({ id: "", email: ADA.email }), cleoKey = personKey({ id: "", email: CLEO.email });
   const readers = () => {
     const db = new DatabaseSync(dataDir("messages.db"), { readOnly: true });

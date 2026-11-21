@@ -65,7 +65,7 @@ beforeAll(async () => {
   stubBase = `http://127.0.0.1:${(stub.address() as { port: number }).port}`;
 
   home = mkdtempSync(join(tmpdir(), "omb-boat-included-"));
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".edubot");
   mkdirSync(dataDir, { recursive: true });
   // One deliberately unknown engine: nothing probes an installed CLI.
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({ instances: { fixture: { driver: "not-a-real-driver" } } }));
@@ -118,7 +118,7 @@ it("refuses an own Boat key while this installation has computers on the include
   expect(refused.status).toBe(409);
   expect(refused.body.error).toBe("that Boat token cannot access the remembered cloud computers from this installation");
   expect((await api("GET", "/api/config")).body.box).toEqual({ configured: true, included: true });
-  expect(readFileSync(join(home, ".openmausbot", "config.json"), "utf8")).not.toContain(OWN);
+  expect(readFileSync(join(home, ".edubot", "config.json"), "utf8")).not.toContain(OWN);
   expect(crossed()).toEqual([]);
 });
 
@@ -132,7 +132,7 @@ it("once they are gone, the own key wins; clearing it falls back to the included
   const cleared = await api("PUT", "/api/config", { box: { token: "" } });
   expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
   expect(cleared.body.box).toEqual({ configured: true, included: true });
-  expect(readFileSync(join(home, ".openmausbot", "config.json"), "utf8")).not.toContain(INCLUDED);
+  expect(readFileSync(join(home, ".edubot", "config.json"), "utf8")).not.toContain(INCLUDED);
   expect(requests.some((request) => request.side === "boat" && request.auth === `Bearer ${OWN}`)).toBe(true);
   expect(crossed()).toEqual([]);
   expect(log).not.toContain(INCLUDED);

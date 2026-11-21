@@ -77,13 +77,13 @@ posixOnly("Live call e2e", () => {
     chmodSync(FAKE_CODEX, 0o755);
     live = await startFakeOpenAiLive();
     home = mkdtempSync(join(tmpdir(), "omb-live-call-"));
-    mkdirSync(join(home, ".openmausbot"), { recursive: true });
+    mkdirSync(join(home, ".edubot"), { recursive: true });
     steerGate = join(home, "steer.gate");
     titleRoutes = join(home, "title-routes.json");
     writeFileSync(titleRoutes, JSON.stringify({ "Requests:\nwhat is six times seven": "Times table question" }));
     queueSteerGate = join(home, "queue-steer.gate");
     writeFileSync(
-      join(home, ".openmausbot", "config.json"),
+      join(home, ".edubot", "config.json"),
       JSON.stringify({
         instances: {
           claude: {
@@ -632,7 +632,7 @@ posixOnly("Live call on the person's Cloud", () => {
     chmodSync(FAKE_CLAUDE, 0o755);
     live = await startFakeOpenAiLive();
     home = mkdtempSync(join(tmpdir(), "omb-live-cloud-"));
-    const dataDir = join(home, ".openmausbot");
+    const dataDir = join(home, ".edubot");
     mkdirSync(dataDir, { recursive: true });
     writeFileSync(join(dataDir, "config.json"), JSON.stringify({
       instances: {
@@ -751,7 +751,7 @@ posixOnly("Live calls for everyone, with the person's own OpenAI key", () => {
     chmodSync(FAKE_CLAUDE, 0o755);
     live = await startFakeOpenAiLive();
     home = mkdtempSync(join(tmpdir(), "omb-live-byok-"));
-    const dataDir = join(home, ".openmausbot");
+    const dataDir = join(home, ".edubot");
     mkdirSync(dataDir, { recursive: true });
     writeFileSync(join(dataDir, "config.json"), JSON.stringify({
       instances: {

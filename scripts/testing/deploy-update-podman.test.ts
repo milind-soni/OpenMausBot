@@ -46,8 +46,8 @@ function install(target: Record<string, unknown> = {}, extra: Record<string, unk
   mkdirSync(join(root, "bin"));
   mkdirSync(home, { recursive: true });
   mkdirSync(join(root, "config", "containers", "systemd"), { recursive: true });
-  mkdirSync(join(data, ".openmausbot"), { recursive: true });
-  writeFileSync(join(data, ".openmausbot", "bots.json"), '[{"name":"Mira"}]');
+  mkdirSync(join(data, ".edubot"), { recursive: true });
+  writeFileSync(join(data, ".edubot", "bots.json"), '[{"name":"Mira"}]');
   writeFileSync(join(data, "started-by.txt"), "0.1.150\n");
   copyFileSync(SCRIPT, join(home, "update.sh"));
   writeFileSync(join(home, ".env"), `OMB_IMAGE=${OLD.refs[1]}\n`, { mode: 0o600 });

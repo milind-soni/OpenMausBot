@@ -89,7 +89,7 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
     if (fleetRoute) {
       if (!entitled("admin")) return json(res, 403, { error: "Workspaces need an enterprise licence with the admin feature." });
       const socket = fleetSocketPath();
-      if (!fleetAvailable(socket)) return json(res, 404, { error: "No fleet agent on this server. Run `openmausbot fleet init --domain … --operator <this user>` as root." });
+      if (!fleetAvailable(socket)) return json(res, 404, { error: "No fleet agent on this server. Run `edubot fleet init --domain … --operator <this user>` as root." });
       const [, resource, slug, sub] = fleetRoute;
       let forward: { method: string; path: string; body?: unknown } | null = null;
       if (method === "GET" && !resource) forward = { method: "GET", path: "/workspaces" };

@@ -64,7 +64,7 @@ export function configSaveRefusal(read: { state: "unreadable" | "invalid"; reaso
   const aside = read.state === "invalid" ? keepUnreadableAside(path) : null;
   const kept = aside ? ` A copy of it was kept at ${aside}.` : "";
   return Object.assign(
-    new Error(`The settings file ${path} was left as it is because ${why}, so nothing was saved. Repair the file, or put a dated copy back with "openmausbot config restore".${kept}`),
+    new Error(`The settings file ${path} was left as it is because ${why}, so nothing was saved. Repair the file, or put a dated copy back with "edubot config restore".${kept}`),
     { status: 503 },
   );
 }
@@ -160,13 +160,13 @@ export type ConfigBackupCheck = (text: string) => string | null;
  * A dry run reports what it would do and changes nothing. Nothing is put back over a file that cannot be read or
  * kept: a restore never loses what it finds. */
 export function restoreConfigBackup(dir: string, name: string, options: { dryRun?: boolean; check?: ConfigBackupCheck } = {}): ConfigRestore {
-  if (!BACKUP_NAME.test(name)) return { ok: false, error: `${name} is not a dated copy of the settings file; run openmausbot config backups to see the copies` };
+  if (!BACKUP_NAME.test(name)) return { ok: false, error: `${name} is not a dated copy of the settings file; run edubot config backups to see the copies` };
   const source = join(dir, name);
   let text: string;
   try {
     text = readFileSync(source, "utf8");
   } catch {
-    return { ok: false, error: `The copy ${name} could not be read; run openmausbot config backups to see the copies` };
+    return { ok: false, error: `The copy ${name} could not be read; run edubot config backups to see the copies` };
   }
   try {
     const parsed = parseJson(text);

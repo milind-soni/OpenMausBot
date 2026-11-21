@@ -79,7 +79,7 @@ describe("ThreadRefText", () => {
 
   it("renders a sent canonical link as a chip labeled with the title", () => {
     const markup = inProvider(createElement(ThreadRefText, {
-      text: "done in [QA PR 245](openmausbot://thread/qa-245?bot=scout) today",
+      text: "done in [QA PR 245](edubot://thread/qa-245?bot=scout) today",
     }));
     expect(markup).toContain("done in ");
     expect(markup).toContain('<button type="button" data-thread-link="qa-245"');
@@ -88,8 +88,8 @@ describe("ThreadRefText", () => {
   });
 
   it("keeps a dead thread link as the raw text it was sent as", () => {
-    expect(inProvider(createElement(ThreadRefText, { text: "see [Gone](openmausbot://thread/dead?bot=scout)" })))
-      .toBe("see [Gone](openmausbot://thread/dead?bot=scout)");
+    expect(inProvider(createElement(ThreadRefText, { text: "see [Gone](edubot://thread/dead?bot=scout)" })))
+      .toBe("see [Gone](edubot://thread/dead?bot=scout)");
   });
 });
 
@@ -136,7 +136,7 @@ describe("openChatLink", () => {
 
   it("opens the chat a copied link names, and nothing else", async () => {
     const dispatch = vi.fn();
-    expect(openChatLink(dispatch, "openmausbot://thread/qa-245?bot=scout", await state(), true)).toBe(true);
+    expect(openChatLink(dispatch, "edubot://thread/qa-245?bot=scout", await state(), true)).toBe(true);
     expect(actions(dispatch)).toEqual([
       { type: "select", id: "scout" },
       { type: "switchTask", botId: "scout", threadId: "qa-245" },
@@ -146,13 +146,13 @@ describe("openChatLink", () => {
 
   it("opens a room's thread too", async () => {
     const dispatch = vi.fn();
-    expect(openChatLink(dispatch, "openmausbot://thread/standup-1?bot=standup", await state(), true)).toBe(true);
+    expect(openChatLink(dispatch, "edubot://thread/standup-1?bot=standup", await state(), true)).toBe(true);
     expect(actions(dispatch)).toContainEqual({ type: "revealThread", threadId: "standup-1" });
   });
 
   it("opens a bot-only link at its current conversation, switching nothing", async () => {
     const dispatch = vi.fn();
-    expect(openChatLink(dispatch, "openmausbot://bot/scout", await state(), true)).toBe(true);
+    expect(openChatLink(dispatch, "edubot://bot/scout", await state(), true)).toBe(true);
     expect(actions(dispatch)).toEqual([
       { type: "select", id: "scout" },
       { type: "revealThread", threadId: "scout-main" },
@@ -161,19 +161,19 @@ describe("openChatLink", () => {
 
   it("opens a room by its id, never a bot-to-bot channel", async () => {
     const dispatch = vi.fn();
-    expect(openChatLink(dispatch, "openmausbot://bot/standup", await state(), true)).toBe(true);
+    expect(openChatLink(dispatch, "edubot://bot/standup", await state(), true)).toBe(true);
     expect(actions(dispatch)).toEqual([
       { type: "select", id: "standup" },
       { type: "revealThread", threadId: "standup-1" },
     ]);
     const refused = vi.fn();
-    expect(openChatLink(refused, "openmausbot://bot/dm", await state(), true)).toBe(false);
+    expect(openChatLink(refused, "edubot://bot/dm", await state(), true)).toBe(false);
     expect(actions(refused)).toEqual([{ type: "notice", notice: { kind: "bot-gone", botName: null } }]);
   });
 
   it("refuses a thread that is not the named bot's, showing that bot instead", async () => {
     const dispatch = vi.fn();
-    expect(openChatLink(dispatch, "openmausbot://thread/qa-245?bot=ada", await state(), true)).toBe(false);
+    expect(openChatLink(dispatch, "edubot://thread/qa-245?bot=ada", await state(), true)).toBe(false);
     expect(actions(dispatch)).toEqual([
       { type: "select", id: "ada" },
       { type: "notice", notice: { kind: "thread-gone", botName: "Ada" } },
@@ -182,7 +182,7 @@ describe("openChatLink", () => {
 
   it("refuses a room's dead thread, showing that room instead", async () => {
     const dispatch = vi.fn();
-    expect(openChatLink(dispatch, "openmausbot://thread/gone?bot=standup", await state(), true)).toBe(false);
+    expect(openChatLink(dispatch, "edubot://thread/gone?bot=standup", await state(), true)).toBe(false);
     expect(actions(dispatch)).toEqual([
       { type: "select", id: "standup" },
       { type: "notice", notice: { kind: "thread-gone", botName: "Standup" } },
@@ -191,16 +191,16 @@ describe("openChatLink", () => {
 
   it("says a bot it does not know is gone", async () => {
     const dispatch = vi.fn();
-    expect(openChatLink(dispatch, "openmausbot://bot/nobody", await state(), true)).toBe(false);
+    expect(openChatLink(dispatch, "edubot://bot/nobody", await state(), true)).toBe(false);
     expect(actions(dispatch)).toEqual([{ type: "notice", notice: { kind: "bot-gone", botName: null } }]);
   });
 
   it("says so for a chat or link it does not know, and changes nothing", async () => {
     for (const link of [
-      "openmausbot://thread/missing?bot=nobody",
-      "openmausbot://thread/qa-245/extra",
-      "openmausbot://bot/scout/extra",
-      "openmausbot://bots/scout",
+      "edubot://thread/missing?bot=nobody",
+      "edubot://thread/qa-245/extra",
+      "edubot://bot/scout/extra",
+      "edubot://bots/scout",
       "not a link",
     ]) {
       const dispatch = vi.fn();
@@ -211,7 +211,7 @@ describe("openChatLink", () => {
 
   it("returns from the team map to the open chat, where the notice shows", async () => {
     const dispatch = vi.fn();
-    expect(openChatLink(dispatch, "openmausbot://bot/nobody", { ...await state(), activeView: "team-map" }, true)).toBe(false);
+    expect(openChatLink(dispatch, "edubot://bot/nobody", { ...await state(), activeView: "team-map" }, true)).toBe(false);
     expect(actions(dispatch)).toEqual([
       { type: "select", id: "ada" },
       { type: "notice", notice: { kind: "bot-gone", botName: null } },
@@ -221,19 +221,19 @@ describe("openChatLink", () => {
   it("opens a bot-only link at the bot's main thread while threads are hidden, as its row would", async () => {
     const left = { ...(await state()), bots: [{ ...scout, threadId: "qa-245", mainThreadId: "scout-main" }, ada] };
     const dispatch = vi.fn();
-    expect(openChatLink(dispatch, "openmausbot://bot/scout", left, false)).toBe(true);
+    expect(openChatLink(dispatch, "edubot://bot/scout", left, false)).toBe(true);
     expect(actions(dispatch)).toEqual([
       { type: "switchTask", botId: "scout", threadId: "scout-main" },
       { type: "revealThread", threadId: "scout-main" },
     ]);
     const dead = vi.fn();
-    expect(openChatLink(dead, "openmausbot://thread/gone?bot=scout", left, false)).toBe(false);
+    expect(openChatLink(dead, "edubot://thread/gone?bot=scout", left, false)).toBe(false);
     expect(actions(dead)).toEqual([
       { type: "switchTask", botId: "scout", threadId: "scout-main" },
       { type: "notice", notice: { kind: "thread-gone", botName: "Scout" } },
     ]);
     const shown = vi.fn();
-    expect(openChatLink(shown, "openmausbot://bot/scout", left, true)).toBe(true);
+    expect(openChatLink(shown, "edubot://bot/scout", left, true)).toBe(true);
     expect(actions(shown)).toEqual([
       { type: "select", id: "scout" },
       { type: "revealThread", threadId: "qa-245" },
@@ -242,7 +242,7 @@ describe("openChatLink", () => {
 
   it("opens a copied thread link by the switch alone while threads are hidden", async () => {
     const dispatch = vi.fn();
-    expect(openChatLink(dispatch, "openmausbot://thread/qa-245?bot=scout", await state(), false)).toBe(true);
+    expect(openChatLink(dispatch, "edubot://thread/qa-245?bot=scout", await state(), false)).toBe(true);
     expect(actions(dispatch)).toEqual([
       { type: "switchTask", botId: "scout", threadId: "qa-245" },
       { type: "revealThread", threadId: "qa-245" },

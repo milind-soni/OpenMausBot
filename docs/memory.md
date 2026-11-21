@@ -17,7 +17,7 @@ instructions to forbid that when memory must stay in another source of truth.
 ## Where it lives
 
 ```
-~/.openmausbot/workspaces/<botId>/
+~/.edubot/workspaces/<botId>/
 ├── MEMORY.md            the notes that load into every conversation
 └── memory/
     ├── <topic>.md       longer notes the bot reads on demand
@@ -377,7 +377,7 @@ agreed shows up in each member's next 1:1 brief.
 
 Every change to a memory file that the app can see is recorded — yours from
 the panel, the bot's during a task, an import, an undo — in
-`~/.openmausbot/memory-journal/<botId>.ndjson`. It lives *outside* the
+`~/.edubot/memory-journal/<botId>.ndjson`. It lives *outside* the
 workspace on purpose: the bot's file tools point at the workspace, and a
 record the bot could edit would not be a record.
 

@@ -48,7 +48,7 @@ describe("a save that cannot read the file", () => {
     const error = configSaveRefusal(read, configPath(dir));
     expect((error as { status?: number }).status).toBe(503);
     expect(error.message).toContain(configPath(dir));
-    expect(error.message).toContain("openmausbot config restore");
+    expect(error.message).toContain("edubot config restore");
   });
 
   it("keeps the bytes of a file it could not understand", () => {

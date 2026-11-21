@@ -33,7 +33,7 @@ describe("a failed turn's row", () => {
     const dir = new URL("../server/", import.meta.url);
     const handWritten = readdirSync(dir, { recursive: true, encoding: "utf8" })
       .map((file) => file.replaceAll("\\", "/"))
-      // server/headless is the openmausbot command line: it prints errors to a terminal and never writes a turn row
+      // server/headless is the edubot command line: it prints errors to a terminal and never writes a turn row
       .filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts") && !file.includes("testing") && !file.replaceAll("\\", "/").startsWith("headless/"))
       .flatMap((file) => readFileSync(new URL(file, dir), "utf8").split("\n")
         .filter((line) => /["'`]error: /.test(line))

@@ -310,7 +310,7 @@ test("production wiring: main answers this computer's page, My Cloud's own page 
   const context = vm.createContext({
     registerDesktopPrefs: value => { options = value; }, jsonFile: file => ({ read: () => file, write: () => {} }), ipcMain: {}, updatesConsent: null, cloudAccount: "the client",
     nativeText: { prefs: { kept: true }, set: code => { calls.push(["language", code]); return code === "pt-br"; }, follow: code => { calls.push(["shown", code]); return code === "de"; } }, applyNativeLanguage: () => calls.push("relabel"), talk: { relabel: () => calls.push("talk relabel") },
-    path: { join: (...parts) => parts.join("/") }, app: { getPath: () => "/user-data" }, desktopDataDir: () => "/home/.openmausbot",
+    path: { join: (...parts) => parts.join("/") }, app: { getPath: () => "/user-data" }, desktopDataDir: () => "/home/.edubot",
     navigateMainWindow: async url => { calls.push(["navigate", url]); return loads; },
     senderIsLocal: localOrigin.isLocalSender, workspaceSenderAllowed: environments.workspaceSenderAllowed,
     mainWindow: { webContents: contents }, environmentsState: { environments: [{ id: "vps", name: "VPS", origin: VPS }], activeId: "vps" },
@@ -325,7 +325,7 @@ test("production wiring: main answers this computer's page, My Cloud's own page 
   vm.runInContext(main.slice(start, end), context);
   assert.equal(options.prefs, context.nativeText.prefs, "the record main read before the tray and the startup screen");
   assert.match(main, /const nativeText = createDesktopText\(app\), nativeT = nativeText\.t;/);
-  assert.equal(options.localConfig(), "/home/.openmausbot/config.json", "This computer's own workspace, whichever server the window shows");
+  assert.equal(options.localConfig(), "/home/.edubot/config.json", "This computer's own workspace, whichever server the window shows");
   assert.deepEqual([options.frame.made(), options.frame.restarts], [false, true], "Windows: the frame its window was made with, until a restart");
   options.frame.changed();
   assert.equal(broadcasts, 1, "the pages hear the frame change");
@@ -382,9 +382,9 @@ test("the talk shortcut is on with ⌃⌥Space until changed, and the choice sur
 test("each server keeps its own Quick asks chat; nothing malformed is read back", () => {
   let saved = null;
   const prefs = createDesktopPrefs({ read: () => saved, write: value => { saved = structuredClone(value); } });
-  prefs.setQuickAsksChat("/Users/a/.openmausbot", { botId: "bot-1", threadId: "t-1" });
-  assert.deepEqual(createDesktopPrefs({ read: () => saved, write: () => {} }).quickAsksChat("/Users/a/.openmausbot"), { botId: "bot-1", threadId: "t-1" });
-  assert.equal(prefs.quickAsksChat("/Users/a/.openmausbot-aprs"), null);
+  prefs.setQuickAsksChat("/Users/a/.edubot", { botId: "bot-1", threadId: "t-1" });
+  assert.deepEqual(createDesktopPrefs({ read: () => saved, write: () => {} }).quickAsksChat("/Users/a/.edubot"), { botId: "bot-1", threadId: "t-1" });
+  assert.equal(prefs.quickAsksChat("/Users/a/.edubot-aprs"), null);
   const broken = createDesktopPrefs({ read: () => ({ quickAsks: { a: { botId: "../x", threadId: "t" }, b: "t-1", c: { botId: "b", threadId: "t", extra: 1 } } }), write: () => {} });
   assert.equal(broken.quickAsksChat("a"), null);
   assert.equal(broken.quickAsksChat("b"), null);

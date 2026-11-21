@@ -153,7 +153,7 @@ export function tunnelHolder(env: NodeJS.ProcessEnv, dataDir: string): string | 
   const account = openTunnelCredentials(dataDir);
   if (account.status === "unavailable") return `${account.file} could not be read, so this machine may hold a tunnel address`;
   const document = account.read();
-  if (describeTunnelAccount(document).address || document[MANAGED_COMPANION_ENDPOINT_FIELD]) return "this machine holds a tunnel address from `openmausbot account login`";
+  if (describeTunnelAccount(document).address || document[MANAGED_COMPANION_ENDPOINT_FIELD]) return "this machine holds a tunnel address from `edubot account login`";
   return null;
 }
 
@@ -181,7 +181,7 @@ export function startPhoneRelay(options: PhoneRelayOptions): PhoneRelay | null {
   const version = reportableServerVersion();
   const holder = tunnelHolder(options.env, dataDir);
   if (holder) {
-    log(`phone relay: off: ${holder}. Use the relay on a machine signed in with \`openmausbot login --relay\`, which holds no tunnel address.`);
+    log(`phone relay: off: ${holder}. Use the relay on a machine signed in with \`edubot login --relay\`, which holds no tunnel address.`);
     return offForTunnel(holder);
   }
   let key: KeyPair;
@@ -325,7 +325,7 @@ export function startPhoneRelay(options: PhoneRelayOptions): PhoneRelay | null {
     if (peer.kind === "pairing") {
       if (!PAIRING_SESSION_ROUTES.has(`${method} ${path}`)) return reply(res, 401, { error: "pair this phone first" });
       if (method === "POST" && devices.records().length >= MAX_RELAY_PHONES) {
-        return reply(res, 409, { error: `This server has ${MAX_RELAY_PHONES} phones on MausBot Relay. Remove one (openmausbot devices revoke ID), then pair again.` });
+        return reply(res, 409, { error: `This server has ${MAX_RELAY_PHONES} phones on MausBot Relay. Remove one (edubot devices revoke ID), then pair again.` });
       }
     } else {
       const bearer = bearerToken(req.headers.authorization);

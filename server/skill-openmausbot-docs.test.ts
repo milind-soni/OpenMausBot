@@ -38,7 +38,7 @@ describe("openmausbot-docs skill guide", () => {
 
   it("keeps the guide short, names the data folder, and every page it names exists", () => {
     expect(guide.split("\n").length).toBeLessThanOrEqual(110);
-    expect(guide).toContain("~/.openmausbot/");
+    expect(guide).toContain("~/.edubot/");
     expect(guide).toContain("config.json");
     expect(guide).toContain("bots/<botId>/SOUL.md");
     const pages = [...guide.matchAll(/`([a-z0-9-]+\.md)`/g)].map((match) => match[1]);

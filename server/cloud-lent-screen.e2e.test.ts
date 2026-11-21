@@ -82,7 +82,7 @@ async function lendPc(): Promise<void> {
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-cloud-lent-screen-"));
-  dataDir = join(home, ".openmausbot");
+  dataDir = join(home, ".edubot");
   mkdirSync(dataDir, { recursive: true });
   const claude = join(home, "claude-cli.mjs");
   writeFileSync(claude, `#!/usr/bin/env node

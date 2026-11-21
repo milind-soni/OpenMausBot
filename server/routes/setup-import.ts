@@ -9,7 +9,7 @@ import type { BusyFlag } from "./config.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface SetupImportRouteDeps {
-  /** True only on the desktop app's own server. Never on `openmausbot serve`, where any local process, a bot's shell
+  /** True only on the desktop app's own server. Never on `edubot serve`, where any local process, a bot's shell
    * among them, is the owner's loopback; nor on a Cloud home or a hosted organization server, whose files are not the
    * person's own. */
   local: boolean;

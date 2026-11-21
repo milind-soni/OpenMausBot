@@ -108,7 +108,7 @@ export class SecretVault {
     return ref;
   }
 
-  /** Writes the card's value to `<home>/.openmausbot-secrets/<thread>/<card>` (0600, in 0700 folders); returns its path
+  /** Writes the card's value to `<home>/.edubot-secrets/<thread>/<card>` (0600, in 0700 folders); returns its path
    * as the bot's commands see it. */
   saveFile(owner: SecretOwner, messageId: string, value: string, home: SecretFileHome): string {
     const saved = this.writeFile(owner, messageId, value, home);
@@ -116,7 +116,7 @@ export class SecretVault {
     return saved.file;
   }
 
-  /** Writes a Vault item's value to `<home>/.openmausbot-secrets/<thread>/vault-<item>`, replacing that conversation's
+  /** Writes a Vault item's value to `<home>/.edubot-secrets/<thread>/vault-<item>`, replacing that conversation's
    * earlier copy, for another 24 hours. */
   mintFile(owner: SecretOwner, itemId: string, value: string, home: SecretFileHome): string {
     const name = `vault-${itemId}`;

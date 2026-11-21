@@ -86,7 +86,7 @@ export function parsePrepareCloudflaredArgs(args = []) {
     if (argument === "--current" && !options.current) {
       options.current = true;
     } else if (argument === "--root" && !options.root && typeof next === "string" && next !== "") {
-      // `openmausbot serve --tunnel` stages into its data dir, not a checkout.
+      // `edubot serve --tunnel` stages into its data dir, not a checkout.
       options.root = next;
       index += 1;
     } else {

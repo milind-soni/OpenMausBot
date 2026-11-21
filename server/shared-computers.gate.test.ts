@@ -69,9 +69,9 @@ beforeAll(async () => {
   WEBHOOK_PORT = base + 1;
   BASE = `http://127.0.0.1:${PORT}`;
   home = mkdtempSync(join(tmpdir(), "omb-shared-computer-gate-"));
-  mkdirSync(join(home, ".openmausbot"), { recursive: true });
+  mkdirSync(join(home, ".edubot"), { recursive: true });
   // No `features` block at all: the shipped default.
-  writeFileSync(join(home, ".openmausbot", "config.json"), JSON.stringify({
+  writeFileSync(join(home, ".edubot", "config.json"), JSON.stringify({
     instances: { claude: { driver: "claudeAgent", displayName: "Gate fixture", config: { cli: FAKE_CLAUDE_CLI } } },
   }));
   child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
