@@ -256,10 +256,10 @@ export class LiveV1 {
     }
   }
 
-  #refusal(viewer: V1Viewer, otherwise: string): BrowserLiveError {
+  #refusal(viewer: V1Viewer, otherwise: string, reason: "not_controlling" | "take_refused" = "not_controlling"): BrowserLiveError {
     const holder = this.#service.heldBy(viewer.session);
-    if (holder && holder !== viewer.person) return new BrowserLiveError(BROWSER_HELD_ELSEWHERE, 409);
-    return new BrowserLiveError(this.#service.interrupted(viewer.session) ? RESTART_NEEDED : otherwise, 409);
+    if (holder && holder !== viewer.person) return new BrowserLiveError(BROWSER_HELD_ELSEWHERE, 409, "held_elsewhere");
+    return this.#service.interrupted(viewer.session) ? new BrowserLiveError(RESTART_NEEDED, 409, "restart_needed") : new BrowserLiveError(otherwise, 409, reason);
   }
 
   async action({ viewerId, botId, owner, body }: { viewerId: string; botId: string; owner: string; body: unknown }): Promise<unknown> {
@@ -302,12 +302,12 @@ export class LiveV1 {
     }
     if (action.type === "take") {
       const before = this.#service.heldBy(viewer.session);
-      if (before !== null && before !== viewer.person) throw this.#refusal(viewer, "Another browser view or bot action is using this browser. Try again shortly.");
+      if (before !== null && before !== viewer.person) throw this.#refusal(viewer, "Another browser view or bot action is using this browser. Try again shortly.", "take_refused");
       const busy = this.#service.profiles().find((profile) => profile.session === viewer.session)?.control.agents ?? 0;
       await core.input({ type: "takeControl" });
       this.#controlAll(viewer.session);
-      if (!core.controlState().controlling) throw this.#refusal(viewer, "Another browser view or bot action is using this browser. Try again shortly.");
-      if (!this.#current(viewer)) { this.#close(viewer); throw new BrowserLiveError("This browser view closed.", 409); }
+      if (!core.controlState().controlling) throw this.#refusal(viewer, "Another browser view or bot action is using this browser. Try again shortly.", "take_refused");
+      if (!this.#current(viewer)) { this.#close(viewer); throw new BrowserLiveError("This browser view closed.", 409, "view_gone"); }
       return { ok: true, waited: busy > 0 };
     }
     if (!core.controlState().controlling) throw this.#refusal(viewer, "Browser control changed. Try again.");
@@ -316,6 +316,7 @@ export class LiveV1 {
     try {
       if (action.type === "command") await core.input(commandMessage(action.args));
       else if (action.type === "input") await core.input(inputMessage(action.message));
+      else if (action.type === "inputs") { for (const message of action.messages) await core.input(inputMessage(message)); }
       if (!core.controlState().controlling) throw this.#refusal(viewer, "Browser control changed. Try again.");
       core.pushTabs();
       return { ok: true };

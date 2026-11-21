@@ -10,7 +10,7 @@ import { ExtensionsMenu, extensionsOf, type BrowserExtension } from "./browser/E
 import { MoreMenu } from "./browser/MoreMenu";
 import { PasskeyNotice } from "./browser/PasskeyNotice";
 import { StreamSurface, type StreamSurfaceHandle, type SurfaceConnect } from "./browser/StreamSurface";
-import { createBrowserControl, streamTransport, type BrowserControl, type BrowserTakeStatus } from "@/lib/browser-control";
+import { createBrowserControl, startsInteraction, streamTransport, type BrowserControl, type BrowserTakeStatus } from "@/lib/browser-control";
 import { resolveAddressBarInput } from "@/lib/browser-address";
 import { closeBrowserPictureInPicture, openBrowserPictureInPicture, supportsBrowserPictureInPicture, useBrowserPictureInPicture } from "@/lib/browser-pip";
 import { browserStreamAccess, createPreviewStreamClient, type PreviewStreamClient, type PreviewStreamControl, type PreviewStreamInput, type PreviewViewportSetting } from "@/lib/browser-stream-client";
@@ -122,7 +122,11 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   }, [bot.id, bot.browserProfile, scopedThread, stream]);
 
   const interact = useCallback((input: PreviewStreamInput) => {
-    if (controlRef.current?.controller === "another-viewer") { setError(BROWSER_HELD_ELSEWHERE); return; }
+    if (controlRef.current?.controller === "another-viewer") {
+      if (startsInteraction(input)) (clientRef.current as Partial<LiveStreamClient> | null)?.transport?.dropped?.("held_elsewhere");
+      setError(BROWSER_HELD_ELSEWHERE);
+      return;
+    }
     browserControl.current?.interact(input);
   }, []);
 
