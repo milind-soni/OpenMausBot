@@ -1,6 +1,6 @@
 // The store is the only state: tick() is the only place work is admitted or dispatched, and no timer lives here.
 import { randomUUID } from "node:crypto";
-import { redactSecretsInText } from "../../shared/redact.ts";
+import { redactSecrets, redactSecretsInText } from "../redact.ts";
 
 import { hostFaultOf, retryCannotFix } from "../host-fault.ts";
 import { composeEnvelope } from "./envelope.ts";
@@ -8,7 +8,7 @@ import { assignmentLevel } from "./level.ts";
 import type { RuntimeStore } from "./store.ts";
 import { answersSender, asking, awaited, childrenSince, settledSince, clip, continuations, CUT_TWICE, duration, isTerminal, loopStop, nextGuard, outwardDetail, ownsConversation, ownThread, path, restartNote, wakeOwner } from "./tree.ts";
 import { DEFAULT_LIMITS, type Answerer, type Assignment, type Assignee, type Clock, type EndResult, type EnqueueRequest, type EnqueueResult, type EnvelopeNames,
-  type EventKind, type InboxItem, type InboxKind, type Level, type Limits, type LiveEdge, type Origin, type Outcome, type Owner,
+  type BackgroundCommand, type EventKind, type InboxItem, type InboxKind, type Level, type Limits, type LiveEdge, type Origin, type Outcome, type Owner,
   type Reply, type Requester, type RunInput, type RunResult, type StatusView, type TurnRunner } from "./types.ts";
 
 export interface RuntimeOptions {
@@ -120,14 +120,16 @@ export class Runtime {
         if (n.status !== "running") continue;
         const carried = n.carrying ?? [];
         const handedOut = childrenSince(this.store, n).length > 0;
-        const outward = handedOut ? [] : this.outwardOf(n);
-        if (handedOut) {
+        const verifying = n.backgroundCommands?.some(command => command.verifying) === true;
+        const outward = !handedOut || verifying ? this.outwardOf(n) : [];
+        if (outward.length > 0) {
+          this.store.update(n, { kind: "restart_reconciled", at: now, detail: "failed: outward action done" });
+          this.cancelTree(n, outwardDetail(outward), "failed", "interrupted");
+        } else if (handedOut || n.backgroundCommands?.some(c => !c.delivered || c.verifying)) {
+          for (const command of n.backgroundCommands ?? []) if (command.verifying) { delete command.delivered; delete command.verifying; }
           n.status = "waiting"; n.restart = "cut"; n.lastActivityAt = now;
           this.store.update(n, { kind: "restart_reconciled", at: now, detail: "waiting: cut after handing out work" });
           this.touch(n);
-        } else if (outward.length > 0) {
-          this.store.update(n, { kind: "restart_reconciled", at: now, detail: "failed: outward action done" });
-          this.settle(n, "failed", "interrupted", outwardDetail(outward));
         } else if (n.restart === "rerun") {
           this.store.update(n, { kind: "restart_reconciled", at: now, detail: "failed: cut twice" });
           this.settle(n, "failed", "interrupted", CUT_TWICE);
@@ -194,6 +196,39 @@ export class Runtime {
   /** Remove terminal trees that finished before `before`. Returns rows removed. */
   prune(before: number): number {
     return this.store.prune(before);
+  }
+
+  trackBackground(id: string, command: Pick<BackgroundCommand, "boxId" | "processId" | "expiresAt" | "teamComputerId">): boolean {
+    const n = this.store.get(id);
+    if (!n || n.status !== "running" || n.origin.kind !== "person" || n.mode !== "work" || this.store.get(n.rootId)?.goalRunId) return false;
+    const commands = n.backgroundCommands ?? [];
+    if (commands.some(c => c.boxId === command.boxId && c.processId === command.processId)) return true;
+    if (commands.length >= 20) return false;
+    n.backgroundCommands = [...commands, command];
+    this.store.update(n);
+    this.touch(n);
+    return true;
+  }
+
+  backgroundResult(id: string, boxId: string, processId: string, result: string, observed = false): boolean {
+    const n = this.store.get(id);
+    if (!n || isTerminal(n) || n.origin.kind !== "person") return false;
+    const command = n.backgroundCommands?.find(c => c.boxId === boxId && c.processId === processId);
+    if (!command || command.delivered || (command.result !== undefined && !observed)) return false;
+    const parent = n.parentId ? this.store.get(n.parentId) : undefined;
+    const problem = this.safe("validate", () => this.runner.validate(n, parent));
+    if (this.lastThrew || problem) return false;
+    try { result = JSON.stringify(redactSecrets(JSON.parse(result))); }
+    catch { result = redactSecretsInText(result); }
+    command.result = clip(result, RESULT_MAX);
+    if (observed && n.status === "running") { command.delivered = true; command.verifying = true; }
+    const root = n.parentId ? this.store.get(n.rootId) : n;
+    this.store.transaction(() => {
+      if (root && !isTerminal(root)) { root.lastActivityAt = this.clock.now(); if (root.id !== n.id) this.store.update(root); }
+      this.store.update(n);
+    });
+    this.touch(n, ...root && root.id !== n.id ? [root] : []);
+    return true;
   }
 
   /** Hand work to a teammate from a running node. Never throws. */
@@ -340,6 +375,7 @@ export class Runtime {
       const anchor = Math.max(this.since(root.lastActivityAt), this.rootActivity.get(rootId) ?? 0);
       if (now - anchor <= this.limits.stallMs) continue;
       const tree = this.store.all({ rootId });
+      if (tree.some(n => !isTerminal(n) && n.backgroundCommands?.some(c => !c.delivered && c.result === undefined && now <= c.expiresAt + this.limits.stallMs))) continue;
       if (tree.some(n => n.status === "needs_input" || (n.status === "queued" && (n.continuation !== undefined || this.away(n))) || (n.status === "running" && this.away(n)))) continue;
       if (now - Math.max(anchor, ...tree.map(n => this.heldAway.get(n.id) ?? 0)) <= this.limits.stallMs) continue;
       this.store.update(root, { kind: "stalled", at: now, detail: `no progress for ${duration(now - anchor)}` });
@@ -360,7 +396,7 @@ export class Runtime {
         this.settle(n, "completed", "done");
       } else {
         n.status = "resume";
-        this.store.update(n, { kind: "resume_due", at: now, detail: due === "settled" ? "resume" : "resume: a teammate asks" });
+        this.store.update(n, { kind: "resume_due", at: now, detail: due === "settled" ? "resume" : due === "command" ? "resume: background command ended" : "resume: a teammate asks" });
         this.touch(n);
       }
     }
@@ -452,6 +488,8 @@ export class Runtime {
         ...(n.continuation ? { continuation: { note: n.continuation.note, ...(n.continuation.handoffPath ? { handoffPath: n.continuation.handoffPath } : {}) } } : {}),
         ...(settled.length ? { settled } : {}),
         ...(asked.length ? { asked } : {}),
+        ...(n.backgroundCommands?.some(c => c.result !== undefined && !c.delivered)
+          ? { backgroundResults: n.backgroundCommands.filter(c => c.result !== undefined && !c.delivered).map(c => c.result!) } : {}),
         level: n.level, mode: n.mode,
       };
       delivered = inbox.map(i => i.id);
@@ -463,6 +501,7 @@ export class Runtime {
     }
     n.status = "running"; n.startedAt = now; n.executions += 1; n.lastActivityAt = now;
     delete n.continuation; delete n.cards;
+    for (const command of n.backgroundCommands ?? []) if (command.result !== undefined && !command.delivered) { command.delivered = true; command.verifying = true; }
     if (carrying.length) n.carrying = carrying; else delete n.carrying;
     if (root.id !== n.id) root.lastActivityAt = now;
     if (root.budgets) { root.budgets.executions += 1; root.budgets.total = (root.budgets.total ?? 0) + 1; }
@@ -528,6 +567,7 @@ export class Runtime {
     const parentRow = n.parentId ? this.store.get(n.parentId) : undefined;
     const problem = this.safe("validate", () => this.runner.validate(n, parentRow));
     if (!this.lastThrew && problem) { this.settle(n, "failed", "refused", problem); return; }
+    for (const command of n.backgroundCommands ?? []) delete command.verifying;
     if (result.evidence) n.evidence = result.evidence;
     const root = n.parentId ? this.store.get(n.rootId) : n;
     if (result.kind === "continue") {
@@ -569,7 +609,7 @@ export class Runtime {
     if (result.kind === "completed" && result.statusOnly) n.statusOnly = true;
     const kids = awaited(this.store.children(n.id));
     const unseen = live !== undefined && kids.some(c => isTerminal(c) && !live.carried.has(c.id));
-    const outstanding = unseen || kids.some(c => !isTerminal(c)) || awaited(childrenSince(this.store, n)).length > 0;
+    const outstanding = n.backgroundCommands?.some(c => !c.delivered) || unseen || kids.some(c => !isTerminal(c)) || awaited(childrenSince(this.store, n)).length > 0;
     if (outstanding) {
       n.status = "waiting"; n.lastActivityAt = now;
       if (root && unattendedRoot(root)) root.lastActivityAt = now;
@@ -836,10 +876,11 @@ export class Runtime {
     return news.length > 0 && news.every(c => c.status === "completed" && c.statusOnly === true);
   }
 
-  private resumeReason(n: Assignment): "settled" | "asked" | undefined {
+  private resumeReason(n: Assignment): "settled" | "asked" | "command" | undefined {
+    if (n.backgroundCommands?.some(c => c.result !== undefined && !c.delivered)) return "command";
     const kids = awaited(this.store.children(n.id));
     if (kids.length === 0) return undefined;
-    if (kids.every(c => isTerminal(c) && c.reportedAt !== undefined)) return "settled";
+    if (!n.backgroundCommands?.some(c => !c.delivered) && kids.every(c => isTerminal(c) && c.reportedAt !== undefined)) return "settled";
     if (!n.parentId && n.reply === "poll") return undefined;
     const parked = new Set(kids.filter(asking).map(c => c.id));
     if (parked.size === 0) return undefined;

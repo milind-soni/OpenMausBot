@@ -58,9 +58,9 @@ const MAX_TRACKED_PER_COMPUTER = 20;
 /** The ones a bot's exec call handed back still running, with when. */
 const leftRunning = new Map<string, Map<number, number>>();
 
-export function trackProcess(boxId: string, processId: number): void {
+export function trackProcess(boxId: string, processId: number, startedAt = Date.now()): void {
   const mine = started.get(boxId) ?? new Map<number, number>();
-  mine.set(processId, Date.now());
+  mine.set(processId, startedAt);
   while (mine.size > MAX_TRACKED_PER_COMPUTER) mine.delete(mine.keys().next().value!);
   started.set(boxId, mine);
 }

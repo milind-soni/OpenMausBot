@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 import type { BeginTurnRequest, Coordinator, CoordinatorHost, CoordinatorOptions, HandoffLimit, HandoffOptions, HandoffView, HostTurnResult, LiveHandoffEdge, RoomAddress } from "./coordinator.ts";
 import type { WorkOrigin } from "./peer-provenance.ts";
-import { composeEnvelope, composeQuestion, composeReport, composeResume, composeRootTurn, continuationLine, envelopeNote } from "./runtime/envelope.ts";
+import { composeBackgroundResults, composeEnvelope, composeQuestion, composeReport, composeResume, composeRootTurn, continuationLine, envelopeNote } from "./runtime/envelope.ts";
 import { handoffLimits } from "./runtime/handoff-limits.ts";
 import { Runtime } from "./runtime/runtime.ts";
 import { importLegacyDelegations, importLegacyHandoffs, type LegacyThreadResolver } from "./runtime/import-legacy.ts";
@@ -10,7 +10,7 @@ import { openRuntimeStore, type RuntimeStore } from "./runtime/store.ts";
 import { personOnly, requesterDecides, withDefault } from "./runtime/questions.ts";
 import { isStatusOnly, mayBeStatusOnly, statusReplyPrompt } from "./runtime/status-reply.ts";
 import { answersSender, childrenSince, clip, isTerminal, ownThread, path } from "./runtime/tree.ts";
-import type { Answerer, Assignee, Assignment, EndResult, Origin, Owner, Reply, Requester, RunInput, RunResult, StatusView, TurnRunner } from "./runtime/types.ts";
+import type { Answerer, Assignee, Assignment, BackgroundCommand, EndResult, Origin, Owner, Reply, Requester, RunInput, RunResult, StatusView, TurnRunner } from "./runtime/types.ts";
 import { sameRequest } from "./same-request.ts";
 
 const NOT_RUNNING = "The originating room task is no longer running";
@@ -162,6 +162,8 @@ export class RuntimeCoordinator implements Coordinator {
   private stopCause: string | undefined;
   private opened = false;
   private prunedAt: number | undefined;
+  private readonly commandReads = new Map<string, { controller: AbortController; nextAt: number }>();
+  private closed = false;
 
   constructor(options: CoordinatorOptions) {
     this.host = options.host;
@@ -208,6 +210,18 @@ export class RuntimeCoordinator implements Coordinator {
     this.ready();
     const a = this.store.get(id);
     return a && this.project(a);
+  }
+
+  trackBackground(source: RoomAddress, id: string, command: Pick<BackgroundCommand, "boxId" | "processId" | "expiresAt" | "teamComputerId">): boolean {
+    this.ready();
+    const n = this.store.get(id);
+    return Boolean(n && sameSpeaker(n, source) && this.runtime.trackBackground(id, command));
+  }
+
+  observeBackground(source: RoomAddress, id: string, boxId: string, processId: string, result: string): boolean {
+    this.ready();
+    const n = this.store.get(id);
+    return Boolean(n && sameSpeaker(n, source) && n.status === "running" && this.runtime.backgroundResult(id, boxId, processId, result, true));
   }
 
   answersTo(id: string): { botId: string; threadId: string } | undefined {
@@ -557,6 +571,40 @@ export class RuntimeCoordinator implements Coordinator {
     this.ready();
     this.pruneDaily();
     this.runtime.tick();
+    this.pollBackground();
+  }
+
+  private pollBackground(): void {
+    if (this.closed || !this.host.backgroundStatus) return;
+    const now = this.now();
+    const live = new Set<string>();
+    for (const n of this.live()) for (const command of n.backgroundCommands ?? []) {
+      if (command.delivered || command.result !== undefined) continue;
+      const key = `${n.id}:${command.boxId}:${command.processId}`;
+      live.add(key);
+      const read = this.commandReads.get(key);
+      if (now >= command.expiresAt) {
+        read?.controller.abort();
+        this.runtime.backgroundResult(n.id, command.boxId, command.processId,
+          JSON.stringify({ processId: command.processId, status: "unknown", exitCode: null, error: "Completion tracking expired after two hours. Check the command and its artifacts before continuing; do not start another copy blindly." }));
+        continue;
+      }
+      if (read && now < read.nextAt) continue;
+      const controller = new AbortController();
+      const reading = { controller, nextAt: Number.POSITIVE_INFINITY };
+      this.commandReads.set(key, reading);
+      void Promise.resolve().then(() => {
+        if (!this.closed && !controller.signal.aborted && !this.host.validateBackground?.(this.project(n), command)) return this.host.backgroundStatus!(this.project(n), command, controller.signal);
+      }).then(result => {
+        if (!this.closed && !controller.signal.aborted && result !== undefined) this.runtime.backgroundResult(n.id, command.boxId, command.processId, result);
+      }).catch(error => {
+        if (!controller.signal.aborted) this.log(`background status failed: ${String(error)}`);
+      }).finally(() => { reading.nextAt = this.now() + 10_000; });
+    }
+    for (const [key, read] of this.commandReads) if (!live.has(key)) {
+      read.controller.abort();
+      this.commandReads.delete(key);
+    }
   }
 
   pace(): "busy" | "parked" | "idle" {
@@ -577,6 +625,9 @@ export class RuntimeCoordinator implements Coordinator {
   }
 
   close(): void {
+    this.closed = true;
+    for (const read of this.commandReads.values()) read.controller.abort();
+    this.commandReads.clear();
     this.runtime.close();
   }
 
@@ -605,7 +656,8 @@ export class RuntimeCoordinator implements Coordinator {
   private runner(): TurnRunner {
     const host = this.host;
     return {
-      validate: (a, parent) => host.validate(view(a, parent), parent && this.project(parent)),
+      validate: (a, parent) => host.validate(view(a, parent), parent && this.project(parent))
+        ?? a.backgroundCommands?.filter(c => !c.delivered || c.verifying).map(c => host.validateBackground?.(view(a, parent), c)).find(problem => problem !== undefined),
       canStart: a => {
         const node = this.project(a);
         return host.busy(node) ? host.holdReason?.(node) ?? false : true;
@@ -650,19 +702,26 @@ export class RuntimeCoordinator implements Coordinator {
     const settled = input.settled ?? [];
     const asked = input.asked ?? [];
     const root = a.parentId === undefined;
-    const body = resumed
-      ? composeResume(a, this.host.names(node, parent && this.project(parent)),
-        settled.map(child => composeReport(this.readable(child, a, node), this.host.names(view(child, a), node))),
-        asked.map(child => composeQuestion(this.readable(child, a, node), this.host.names(view(child, a), node))),
-        settled.flatMap(child => child.status === "failed" && child.fault ? [{ fault: child.fault, who: this.host.names(view(child, a), node).assignee }] : []))
+    const background = input.backgroundResults?.length ? composeBackgroundResults(input.backgroundResults) : "";
+    const reports = settled.map(child => composeReport(this.readable(child, a, node), this.host.names(view(child, a), node)));
+    const questions = asked.map(child => composeQuestion(this.readable(child, a, node), this.host.names(view(child, a), node)));
+    const faults = settled.flatMap(child => child.status === "failed" && child.fault ? [{ fault: child.fault, who: this.host.names(view(child, a), node).assignee }] : []);
+    const names = this.host.names(node, parent && this.project(parent));
+    const continuation = input.continuation ? continuationLine(input.continuation) : "";
+    const frame = resumed && background
+      ? [continuation, input.envelope, ...(settled.length || questions.length ? [composeResume(a, names, reports, questions, faults)] : [])].filter(Boolean).join("\n\n")
+      : resumed ? composeResume(a, names, reports, questions, faults)
       : root
         ? composeRootTurn(a, { turn: input.turn === "resume" ? "first" : input.turn, restartNote: "", ...(input.answer !== undefined ? { answer: input.answer } : {}),
           ...(input.continuation ? { continuation: input.continuation } : {}) })
         : input.continuation ? `${continuationLine(input.continuation)}\n${input.envelope}` : input.envelope;
-    const note = resumed || root ? body : envelopeNote(body);
+    const body = [background, frame].filter(Boolean).join("\n\n");
+    const note = resumed && background
+      ? [background, continuation, ...(settled.length || questions.length ? [composeResume(a, names, [], questions, faults)] : [])].filter(Boolean).join("\n\n")
+      : resumed || root ? body : envelopeNote(body);
     const evidence = (result: HostTurnResult) => result.evidence ? { evidence: result.evidence } : {};
     const result = await this.host.run(node, resumed, signal,
-      { text: `${input.restartNote}${body}`, note: `${input.restartNote}${note}`, restartNote: input.restartNote, turn: input.turn });
+      { text: `${input.restartNote}${body}`, note: `${input.restartNote}${note}`, restartNote: input.restartNote, ...(background ? { background: true } : {}), turn: input.turn });
     if (signal.aborted) return { kind: "failed", outcome: "stopped", text: result.text };
     if (result.cap) return { kind: "continue", text: result.text, note: result.cap.note, ...(result.cap.handoffPath ? { handoffPath: result.cap.handoffPath } : {}), ...evidence(result) };
     if (result.cards) return { kind: "needs_input", question: result.cards.question, cards: result.cards.ids, ...evidence(result) };

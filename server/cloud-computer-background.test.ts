@@ -195,15 +195,52 @@ describe.each([
     vi.stubEnv("OMB_CLOUD_BOAT_TOKEN", INCLUDED);
   });
 
-  const call = (name: string, args: unknown, boxId = BOX, budgetMs?: number) => {
+  const call = (name: string, args: unknown, boxId = BOX, budgetMs?: number, hooks?: import("./cloud-computer-background.ts").BackgroundCommandHooks) => {
     let gated = 0, checks = 0;
     const done = tools.cloudComputerRpc({ method: "tools/call", params: { name, arguments: args } }, {
-      cfg, boxId: () => boxId, signal: new AbortController().signal, ...(budgetMs ? { budgetMs } : {}),
+      cfg, boxId: () => boxId, signal: new AbortController().signal, ...(budgetMs ? { budgetMs } : {}), ...(hooks ? { background: hooks } : {}),
       gate: async () => { gated++; return { held: false }; }, assertActive: () => { checks++; },
     }) as Promise<Result>;
     return { done, gated: () => gated, checks: () => checks };
   };
   const start = async (boxId = BOX) => json(await call("exec", { command: "python3 job.py > out.csv", background: true }, boxId).done).processId as string;
+
+  it("registers the started process and observes its checked terminal status without starting it again", async () => {
+    const hooks = { started: vi.fn(() => true), observed: vi.fn() };
+    const start = json(await call("exec", { command: "synthetic fixture", background: true }, BOX, undefined, hooks).done);
+    expect(start.next).toContain("Completion is tracked for this task");
+    expect(hooks.started).toHaveBeenCalledExactlyOnceWith(BOX, start.processId);
+    const process = processes.get(`${BOX}:${start.processId.split("-")[1]}`)!;
+    process.runningFor = 0;
+    const detail = json(await call("exec_status", { process_id: start.processId }, BOX, undefined, hooks).done);
+    expect(detail.status).toBe("finished");
+    expect(hooks.observed).toHaveBeenCalledExactlyOnceWith(BOX, start.processId, expect.stringContaining('"status":"finished"'));
+    expect(calls.filter(call => call.method === "POST" && call.path.endsWith("/commands"))).toHaveLength(1);
+  });
+
+  it("keeps the process ID when saving completion tracking fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const hooks = tools.commandHandoff({
+        node: () => undefined, trackBackground: () => { throw new Error("fixture storage failure"); },
+        observeBackground: () => false,
+      }, { botId: "fixture-bot", threadId: "fixture-thread" }, "assignment", () => {});
+      const result = json(await call("exec", { command: "synthetic fixture", background: true }, BOX, undefined, hooks).done);
+      expect(result).toMatchObject({ status: "running", processId: expect.stringMatching(new RegExp(background.PROCESS_ID_PATTERN)) });
+      expect(result.next).toContain("use exec_status with wait_seconds in this turn");
+      expect(result.next).toContain("do not start another copy blindly");
+      expect(calls.filter(call => call.method === "POST" && call.path.endsWith("/commands"))).toHaveLength(1);
+    } finally { warn.mockRestore(); }
+  });
+
+  it("propagates revoked turn access rather than returning a process ID", async () => {
+    const trackBackground = vi.fn(() => true);
+    const hooks = tools.commandHandoff({
+      node: () => undefined, trackBackground, observeBackground: () => false,
+    }, { botId: "fixture-bot", threadId: "fixture-thread" }, "assignment", () => { throw new Error("fixture turn ended"); });
+    await expect(call("exec", { command: "synthetic fixture", background: true }, BOX, undefined, hooks).done).rejects.toThrow("fixture turn ended");
+    expect(trackBackground).not.toHaveBeenCalled();
+  });
 
   it("starts a command detached, through the gate, and answers at once with a process id", async () => {
     const started = call("exec", { command: "python3 job.py > out.csv", background: true });
@@ -383,6 +420,22 @@ describe.each([
       processes.get(`${BOX}:${processId.split("-")[1]}`)!.runningFor = 0;
       expect(json(await call("exec_status", { process_id: processId }).done)).toMatchObject({ status: "finished" });
       calls.length = 0;
+      expect(await background.backgroundCommandRunning(cfg, BOX)).toBe(false);
+      expect(calls).toEqual([]);
+    });
+
+    it("restores a recovered command's idle pin without extending its original deadline", async () => {
+      const processId = background.processIdOn(BOX, 700);
+      processes.set(`${BOX}:700`, { polls: 0, runningFor: Infinity, exitCode: null, stdout: "", stderr: "" });
+      const at = Date.now();
+      const now = vi.spyOn(Date, "now").mockReturnValue(at);
+      const command = { boxId: BOX, processId, expiresAt: at + 1_000 };
+      expect(await tools.commandResult(cfg, command, new AbortController().signal)).toBeUndefined();
+      expect(await background.backgroundCommandRunning(cfg, BOX)).toBe(true);
+      now.mockReturnValue(at + 500);
+      expect(await tools.commandResult(cfg, command, new AbortController().signal)).toBeUndefined();
+      expect(await background.backgroundCommandRunning(cfg, BOX)).toBe(true);
+      now.mockReturnValue(at + 1_001); calls.length = 0;
       expect(await background.backgroundCommandRunning(cfg, BOX)).toBe(false);
       expect(calls).toEqual([]);
     });
