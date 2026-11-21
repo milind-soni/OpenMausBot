@@ -4144,9 +4144,11 @@ describe("turning a schedule back on, and a deleted bot's schedules", () => {
     expect(h.started).toEqual([]);
   });
 
+  // The host hands this only a bot the person paused (bot-holds.ts): one the Starter limit paused is woken for its routine
+  // (host/starter-routine-wake.ts) and never reaches here.
   it("fails a paused bot's runs at once in the person's words, making no conversation and waking nothing for them", async () => {
     const h = harness(start);
-    let paused: string | null = "Paused: Starter keeps 5 bots awake.";
+    let paused: string | null = "Ada is paused, so it takes no new work.";
     h.options.pausedText = (botId) => (botId === "maus-1" ? paused : null);
     h.manager.create(once(start + 60_000));
     expect(h.manager.nextDueAt()).toBeNull();
@@ -4155,7 +4157,7 @@ describe("turning a schedule back on, and a deleted bot's schedules", () => {
     h.manager.enqueueWebhook({ webhookId: "hook", webhookName: "New lead", prompt: "Handle it", botId: "maus-1", runOn: "maus", deliveryId: "d1", receivedAt: start });
     await h.manager.tick();
     expect([h.taskTitles, h.started]).toEqual([[], []]);
-    expect(h.manager.listRuns().map((run) => [run.status, run.error])).toEqual([["failed", "Paused: Starter keeps 5 bots awake."], ["failed", "Paused: Starter keeps 5 bots awake."]]);
+    expect(h.manager.listRuns().map((run) => [run.status, run.error])).toEqual([["failed", "Ada is paused, so it takes no new work."], ["failed", "Ada is paused, so it takes no new work."]]);
 
     paused = null;
     h.manager.create(once(start + 120_000));
