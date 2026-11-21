@@ -80,6 +80,20 @@ const sent = () => fixture.dispatch.mock.calls.map(([action]) => action).filter(
 describe("a room's @ list", () => {
   beforeEach(() => flushSync(() => root.render(createElement(Composer, { group: room, members: [scout, analyst, chief] }))));
 
+  it("previews Markdown and sends the original draft", () => {
+    const markdown = "- **bold**\n- `console.log(123)`\n\n![remote](https://example.com/image.png)";
+    type(drafts[0]!, markdown);
+    flushSync(() => container.querySelector<HTMLButtonElement>('[aria-label="Preview Markdown"]')!.click());
+    const preview = container.querySelector("[data-composer-markdown-preview]")!;
+    expect(preview.querySelector("ul strong")?.textContent).toBe("bold");
+    expect(preview.querySelector("ul code")?.textContent).toBe("console.log(123)");
+    expect(preview.querySelector("img")).toBeNull();
+    flushSync(() => container.querySelector<HTMLButtonElement>('[aria-label="Edit Markdown"]')!.click());
+    expect(input().value).toBe(markdown);
+    send();
+    expect(sent()).toEqual([expect.objectContaining({ text: markdown })]);
+  });
+
   it("shows each Quill by its role, and sends the picked one's id", () => {
     type(drafts[0]!, "@Qu");
     expect(options().map((one) => one.textContent)).toEqual([expect.stringContaining("Analyst"), expect.stringContaining("Chief of Staff")]);

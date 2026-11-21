@@ -3,7 +3,9 @@ import { directMessageSent, roomMessageSent } from "@/lib/product-events";
 import { TeamAudienceLabel } from "./TeamSideSwitch";
 import { useComposerDictation } from "@/lib/use-composer-dictation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type SetStateAction } from "react";
-import { Mic, Square, X } from "lucide-react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { Eye, Mic, Pencil, Square, X } from "lucide-react";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { useStoreRef } from "@/state/store-ref"; import { sameDrawnBots } from "@/lib/drawn-bots";
 import { visibleMessages, currentTaskBot, type Bot, type Group, type InstanceInfo, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -153,6 +155,7 @@ export function Composer({
     draftId,
     !group && bot && !state.config?.team ? `bot:${bot.id}` : undefined,
   );
+  const [previewDraft, setPreviewDraft] = useState<string | null>(null);
   const attachmentPending = useDraftAttachmentPending(draftId);
   const failedSends = useFailedComposerSends(draftId); const picks = mentionPicksFor(draftId);
   const [channelMode, setChannelMode] = useComposerChannelMode(draftId);
@@ -319,7 +322,8 @@ export function Composer({
     available.push(...skillSlashCommands(slashSkills));
     return available.filter((command) => slashCommandMatches(command, slash.query));
   }, [slash, dismissedSlashAt, group, bot, canLearn, state.instances, locale, slashSkills]);
-  const commandPickerOpen = commandCandidates.length > 0;
+  const preview = previewDraft === draftId && Boolean(text.trim());
+  const commandPickerOpen = !preview && commandCandidates.length > 0;
 
   const mention = mentionQueryAt(text, caret); const teammates = useTeammates(); const viewer = useViewerEmail();
   const candidates = useMemo(() => {
@@ -335,7 +339,7 @@ export function Composer({
     return mentionChoicesForQuery([...pool, ...teammateChoices(teammates.people), DEVS_CHOICE], mention.query);
   }, [mention, dismissedAt, bots, bot?.id, group, members, teammates, viewer]);
   const mentionEveryoneCount = (members ?? []).filter((member) => !member.hidden).length;
-  const mentionPickerOpen = candidates.length > 0;
+  const mentionPickerOpen = !preview && candidates.length > 0;
   const commandMotion = useMenuMotion(commandPickerOpen);
   const mentionMotion = useMenuMotion(mentionPickerOpen);
 
@@ -520,6 +524,7 @@ export function Composer({
       });
       directMessageSent(state.instances, bot.modelSelection?.instanceId, false);
     }
+    setPreviewDraft(null);
     setText("");
     setAttachments([]); picks.clear();
     onConsumeReply?.();
@@ -722,10 +727,17 @@ export function Composer({
             onChange={onPickFiles}
           />
           {!singleRow && toolsMenu}
+          {preview && <div data-composer-markdown-preview tabIndex={0} aria-label={t("composer.markdown.preview")} dir="auto"
+            className="chat-md max-h-36 min-w-0 flex-1 overflow-auto px-1 py-1 text-[15px] [overflow-wrap:anywhere] [&>*+*]:mt-2">
+            <Markdown remarkPlugins={[remarkGfm]} skipHtml components={{
+              a: ({ children }) => <span>{children}</span>,
+              img: ({ alt }) => <span>{alt}</span>,
+            }}>{text}</Markdown>
+          </div>}
           <MentionTextarea
           smoothHeight={smoothHeight && singleRow}
           singleLinePlaceholder={singleRow}
-          wrapperClassName={singleRow ? undefined : cn("@max-[30rem]/composer:order-first @max-[30rem]/composer:basis-full", stacked && "order-first basis-full")}
+          wrapperClassName={cn(preview && "hidden", !singleRow && cn("@max-[30rem]/composer:order-first @max-[30rem]/composer:basis-full", stacked && "order-first basis-full"))}
           inputRef={inputRef}
           onOpenBot={(id) => {
             const mentioned = store.state().bots.find(candidate => candidate.id === id && !candidate.hidden);
@@ -821,6 +833,17 @@ export function Composer({
             )}
           />
           <div data-composer-actions className={cn("flex items-center", "gap-1", !singleRow && "@max-[30rem]/composer:ml-auto", stacked && "ml-auto")}>
+        {!locked && Boolean(text.trim()) && (
+          <button type="button" aria-label={t(preview ? "composer.markdown.edit" : "composer.markdown.preview")}
+            title={t(preview ? "composer.markdown.edit" : "composer.markdown.preview")}
+            className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary interaction:bg-raised/50 hover:text-ink"
+            onClick={() => {
+              setPreviewDraft(preview ? null : draftId);
+              if (preview) requestAnimationFrame(() => inputRef.current?.focus());
+            }}>
+            {preview ? <Pencil size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
+          </button>
+        )}
         {!locked && <ComposerContextMenu bot={bot} group={group} members={members} className={cn("size-8", "text-ink-secondary interaction:bg-raised/50 hover:text-ink")} />}
         {!locked && !busy && micReady && (
           <button
