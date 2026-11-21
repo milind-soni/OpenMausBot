@@ -3,6 +3,7 @@
 // environment value, nor any part of an MCP URL but its host.
 import type { ConnectorServiceState } from "./composio.ts";
 import type { ProviderSnapshot } from "./contracts.ts";
+import type { VaultProviderFailure } from "./onepassword.ts";
 
 export const CLOUD_TEAM_ADMIN_PATH = "/api/cloud/team/admin";
 
@@ -30,6 +31,14 @@ export interface ConnectionStatus {
 
 export type PersonConnectionState = "connected" | "needs-sign-in" | "not-connected";
 
+/** The team's Vault, by name only: the secrets an Admin saved or a shared chat's card kept (never a member's own), and the
+ * password managers linked to it. `usedBy`: the team bots that may use it (each member's own MausBot is left out).
+ * `label`: 1Password's vaults the token reads, or Bitwarden's server; "" while not connected. `lastError`: a fixed class, never the manager's words. */
+export interface TeamVaultSummary {
+  secrets: { name: string; addedAt: string; usedBy?: string[] }[];
+  providers: { kind: "1password" | "bitwarden"; connected: boolean; label: string; lastError?: VaultProviderFailure }[];
+}
+
 /** The wire shape of `GET /api/cloud/team/admin` (signed by the Admin). */
 export interface TeamAdminSummary {
   v: 1;
@@ -53,6 +62,7 @@ export interface TeamAdminSummary {
     apps: Record<string, string[]>; mcp: Record<string, string[]>;
     states?: { apps: Record<string, Record<string, PersonConnectionState>>; mcp: Record<string, Record<string, PersonConnectionState>> };
   };
+  vault?: TeamVaultSummary;
 }
 
 type ListedMcp = { name: string; enabled?: boolean; url?: string; type?: string; command?: string; headerKeys?: string[]; envKeys?: string[]; auth?: string };

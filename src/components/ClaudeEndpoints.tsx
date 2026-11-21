@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 
-import { api, useStore, type InstanceInfo } from "@/state/store";
+import { api, type InstanceInfo } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { KEY_FIELD } from "./keys/KeyRow";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 type Engine = "claude" | "codex";
 // Placeholders only: an Anthropic key already has its own engine in Settings → Keys. An empty Codex URL means OpenAI.
@@ -28,7 +29,7 @@ const draftOf = (instance: InstanceInfo): Draft => ({
 });
 
 function EndpointForm({ instance, engine, onDone }: { instance?: InstanceInfo; engine: Engine; onDone: () => void }) {
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   const official = OFFICIAL[engine];
   const [draft, setDraft] = useState<Draft>(instance ? draftOf(instance) : EMPTY);
   const [saving, setSaving] = useState(false);
@@ -99,13 +100,13 @@ function EndpointForm({ instance, engine, onDone }: { instance?: InstanceInfo; e
 }
 
 function EndpointRow({ instance, onEdit }: { instance: InstanceInfo; onEdit: () => void }) {
-  const { state, dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   const [confirming, setConfirming] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const usedBy = state.bots.filter((bot) => bot.modelSelection.instanceId === instance.instanceId
+  const usedBy = useStoreSelector((s) => s.bots.filter((bot) => bot.modelSelection.instanceId === instance.instanceId
     || bot.fallback?.some((candidate) => candidate.instanceId === instance.instanceId)
-    || bot.tasks?.some((task) => task.modelSelection?.instanceId === instance.instanceId)).length;
+    || bot.tasks?.some((task) => task.modelSelection?.instanceId === instance.instanceId)).length);
   const endpoint = instance.claudeEndpoint ?? instance.codexEndpoint;
   const remove = async () => {
     setConfirming(false);
@@ -146,7 +147,7 @@ function EndpointRow({ instance, onEdit }: { instance: InstanceInfo; onEdit: () 
 }
 
 function AgentEndpoints({ engine }: { engine: Engine }) {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ instances: s.instances }), sameFields);
   const endpoints = state.instances.filter((instance) => engine === "claude" ? instance.claudeEndpoint : instance.codexEndpoint);
   const [open, setOpen] = useState<string | null>(null);
   return (

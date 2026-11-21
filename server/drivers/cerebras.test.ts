@@ -26,14 +26,25 @@ describe("Cerebras provider", () => {
     expect(CerebrasDriver.decodeConfig({ url: "http://127.0.0.1:1234/v1/" }).url).toBe("http://127.0.0.1:1234/v1");
   });
 
+  it("keeps the desktop store's workspace key away from an instance with its own URL", async () => {
+    vi.stubEnv("OMB_DESKTOP_PARENT", "1");
+    vi.stubEnv("CEREBRAS_API_KEY", "fixture-workspace-key");
+    const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
+    const instance = await CerebrasDriver.create({ instanceId: "own-url", displayName: "Mine", enabled: true,
+      config: CerebrasDriver.decodeConfig({ url: "https://mine.example.test/v1" }), environment: {} });
+    expect(await instance.snapshot()).toMatchObject({ state: "unavailable" });
+    expect(fetcher).not.toHaveBeenCalled();
+    await instance.dispose();
+  });
+
   it("does not contact the provider without a key", async () => {
     vi.stubEnv("CEREBRAS_API_KEY", "");
     const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
     const instance = await CerebrasDriver.create({ instanceId: "empty", displayName: "Cerebras", enabled: true,
       config: CerebrasDriver.defaultConfig(), environment: {} });
     expect(await instance.snapshot()).toMatchObject({ state: "unavailable", reason: expect.stringContaining("Cerebras API key") });
-    expect((await instance.snapshot()).reason).toContain("Settings → API keys");
-    expect(CerebrasDriver.install?.signInCommand).toContain("Settings → API keys");
+    expect((await instance.snapshot()).reason).toContain("Settings → AI → Providers");
+    expect(CerebrasDriver.install?.signInCommand).toContain("Settings → AI → Providers");
     expect(fetcher).not.toHaveBeenCalled();
     await instance.dispose();
   });

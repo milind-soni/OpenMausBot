@@ -29,15 +29,17 @@ import type { RequestAuth } from "../request-auth.ts";
 import type { RoutineManager } from "../routines.ts";
 import { acceptedSendMatch, parseSendId } from "../send-idempotency.ts";
 import type { DirectSendInput, DirectSendReceipt } from "../direct-send.ts";
-import { cancelSteeredMessage, holdSteeredQueue, queuedSteeredMessage, restoreHeldSteeredQueue, settleHeldSteeredQueue } from "../steer-queue.ts";
+import { cancelSteeredMessage, holdSteeredQueue, queuedSteerSender, queuedSteeredMessage, restoreHeldSteeredQueue, settleHeldSteeredQueue } from "../steer-queue.ts";
+import { routeRunOwners, type Actor, type RouteRunOwners } from "../host/run-owner.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
 import { extractSteerImages } from "../turn-images.ts";
 import { followupFacts, helperFollowup, helperFollowupBody, mayFollowUp } from "../helper-followup.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
 import { noteTypedSend } from "../typed-sends.ts";
+import { engineSessionOutdated, startFresh } from "../fresh-start.ts";
 import { parseMentionPicks } from "../../shared/room-mentions.ts";
 import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
-import { refusalBody, userError } from "../user-errors.ts";
+import { refusalBody, refusalText, userError } from "../user-errors.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 type RunningInstance = ReturnType<ProviderRegistry["get"]>;
@@ -53,7 +55,7 @@ type Behavior = "allow" | "deny" | "answer";
 
 export interface BotMessageRouteDeps {
   store: Pick<Store,
-    | "activeLeaf" | "appendMessage" | "bot" | "botByThread" | "bots" | "groupByThread" | "messagesFor"
+    | "activeLeaf" | "activePath" | "appendMessage" | "bot" | "botByThread" | "bots" | "groupByThread" | "messagesFor"
     | "patchMessage" | "patchTask" | "projectBotForTask" | "setActiveLeaf" | "setTaskAskedAt" | "taskByThread" | "tasks">;
   registry: Pick<ProviderRegistry, "get">;
   /** On a team: the words for a turn with no AI to answer with, having told who can connect one. */
@@ -74,6 +76,8 @@ export interface BotMessageRouteDeps {
     threadId?: string; replyTo?: Message; sendId?: string; sender?: ResolvedSender; trigger?: UsageTrigger; relayed?: boolean;
     dataContext?: DataContext; compactOnly?: boolean; cardContinuation?: boolean; editedMessageId?: string;
   }): Promise<Message>;
+  /** Retry on a line a caller sent through the Bot API, run as that call ran (bot-api-host.ts); null for any other line. */
+  botApiRetry?(botId: string, threadId: string, source: Message, sendId?: string): Promise<Message | null>;
   usageTriggerFor(auth: RequestAuth): UsageTrigger;
   messageSender(auth: RequestAuth): ResolvedSender | undefined;
   cloudGuestSendRefusal(auth: RequestAuth, threadId: string): string | null;
@@ -108,7 +112,10 @@ export interface BotMessageRouteDeps {
     decidedFor?: { id: string; name: string }, always?: boolean, rememberCommand?: boolean,
   ): Promise<RequestOutcome>;
   deliverLateQuestionAnswer(auth: RequestAuth, threadId: string, requestId: string, answer: string, cardMessage: Message, owner: BotRecord): Promise<{ queued: boolean }>;
-  stopThreadForPerson(botId: string, threadId: string): Promise<void>;
+  stopThreadForPerson(botId: string, threadId: string, by?: ResolvedSender): Promise<void>;
+  /** Whoever asked owns the run, where several people write. */
+  runOwners?: RouteRunOwners;
+  runActor?(auth: RequestAuth): Actor;
   cancelDirectTurnDispatch(botId: string, expectedThreadId?: string): unknown;
   revokeInternalCapabilitiesForThread(threadId: string): void;
   cancelGroupTurnOperations(groupId: string, threadId: string): void;
@@ -159,6 +166,8 @@ const guardedSendSchema = z.object({
   }).strict().refine((who) => Boolean(who.email || who.name)).optional(),
 }).strict().refine((send) => (send.text === undefined) !== (send.reaction === undefined));
 
+const CONTEXT_BREAKDOWN_WAIT_MS = 5_000;
+
 export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler {
   const {
     store, registry, handoffs, liveTurn, phoneSecretSubmissions, directTurnDispatchClaims, groupSpeakers,
@@ -170,7 +179,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
     resolveAndSendRoutine, resolveAndSendProfile, resolveAndSendModel, resolveSkillRequest, sendSkillResolution, answerRequest,
     deliverLateQuestionAnswer, stopThreadForPerson, cancelDirectTurnDispatch, revokeInternalCapabilitiesForThread,
     cancelGroupTurnOperations, closeOpenApprovals, harnessCardOutcome, pressRecords, serverPress, relayedReaction, answeredIn, fromPhone, notePhoneSend, goals,
-  } = deps;
+  } = deps; const owners = routeRunOwners(deps.runOwners, deps.runActor);
   const pinnedClientThread = pinnedClientThreadGuard(store);
   /** Security: a bot's own shell must never approve its own card, so a local request counts only from the desktop app, or
    * from a browser while every bot is idle. */
@@ -276,7 +285,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const passedBack = !guarded && !press && !appSent && !pointed && target ? deps.inboxReply?.(auth, threadId, target.id, text, { sendId, sender: messageSender(auth) }) : null;
       const typedAnswer = passedBack || guarded || press || appSent || pointed ? null : await deps.typedCardAnswer?.(auth, threadId, text, target, { sendId, sender: messageSender(auth) });
       const answeredBack = passedBack ?? typedAnswer;
-      if (answeredBack) return json(res, answeredBack.status, answeredBack.message ? { ok: true, threadId, message: answeredBack.message } : { error: answeredBack.error });
+      if (answeredBack) return json(res, answeredBack.status, answeredBack.message ? { ok: true, threadId, message: answeredBack.message } : refusalText(answeredBack.error ?? ""));
       // Only a real press or reaction, or an app's own words, marks the reply; a typed reply to the same row never does, whatever its words.
       const records = press && target ? pressRecords(bot, press.action) : null;
       const replyTo: ReplyTarget | undefined = press && target ? { ...target, widgetPress: { label: press.label, action: press.action, ...(records ? { records } : {}) } }
@@ -336,7 +345,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       try {
         const receipt = await acceptDirectSend({
           botId: bot.id, threadId, text, sendId, replyTo, sender, trigger, dataContext, ...(app ? { app } : {}),
-          personPresent, ...(followUp ? { followUp } : {}),
+          personPresent, admin: owners.admin(auth), ...(followUp ? { followUp } : {}),
           ...(mentions?.length && !press && !appSent ? { mentions } : {}),
         }, guardedStart);
         press?.settle("queueId" in receipt ? receipt.queueId : undefined);
@@ -358,6 +367,9 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       requirePinnedClientThread(m[1], body?.threadId);
       const bot = requestedTaskBot(m[1], body?.threadId);
       const queueId = m[2];
+      const waiting = queuedSteerSender(bot.id, bot.threadId, queueId);
+      const notYours = waiting && owners.removeRefusal(auth, bot.threadId, waiting.sender);
+      if (notYours) return json(res, 403, { error: notYours, code: "queued_not_yours" });
       if (!cancelSteeredMessage(bot.id, queueId, bot.threadId)) {
         return json(res, 404, { error: "no such queued message" });
       }
@@ -374,6 +386,11 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       // Hold the whole queue atomically: a racing settle drains it or this request steers it, never both.
       const held = holdSteeredQueue(bot.id, bot.threadId, m[2]);
       if (!held) return json(res, 404, { error: "no such queued message" });
+      const waitsItsTurn = owners.joinRefusal(auth, bot.threadId, held.items.map((item) => item.sender));
+      if (waitsItsTurn) {
+        restoreHeldSteeredQueue(held);
+        return json(res, 403, { error: waitsItsTurn, code: "waits_its_turn" });
+      }
       const currentAtStart = store.projectBotForTask(bot.id, bot.threadId);
       const instance = currentAtStart?.busy ? runningTurnInstance(currentAtStart, bot.threadId) : undefined;
       const engineCanSteer = Boolean(currentAtStart?.busy && instance?.adapter.capabilities.queueing && instance.adapter.steer);
@@ -468,13 +485,41 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       return json(res, 202, { ok: true, threadId: bot.threadId });
     }
 
+    m = path.match(/^\/api\/bots\/([\w-]+)\/start-fresh$/);
+    if (m && method === "POST") {
+      const body = await readBody(req);
+      requirePinnedClientThread(m[1], body?.threadId);
+      const bot = requestedTaskBot(m[1], body?.threadId);
+      const notYours = cloudThreadRefusal(auth, bot.threadId);
+      if (notYours) return json(res, 403, { error: notYours });
+      // Synchronous from here: startTurn flips busy before the next request, so a turn cannot slip past this check.
+      if (threadBusy(bot.id, bot.threadId)) return json(res, 409, userError("serverError.chat.busyFresh"));
+      if (phoneSecretSubmissions.hasThread(bot.threadId)) return json(res, 409, userError("serverError.chat.savingCredential"));
+      return json(res, 200, { ok: true, message: startFresh(store, bot.id, bot.threadId), threadId: bot.threadId });
+    }
+
+    m = path.match(/^\/api\/bots\/([\w-]+)\/context$/);
+    if (m && method === "POST") {
+      const body = await readBody(req);
+      requirePinnedClientThread(m[1], body?.threadId);
+      const bot = requestedTaskBot(m[1], body?.threadId);
+      const notYours = cloudThreadRefusal(auth, bot.threadId);
+      if (notYours) return json(res, 403, { error: notYours });
+      // The engine process answers for the conversation it last read, which the next turn may be about to replace:
+      // already when asked, or by a Start fresh, rewind or summary that lands while it counts.
+      const stale = () => engineSessionOutdated(store, bot.id, bot.threadId);
+      const breakdown = stale() ? null : await registry.get(bot.modelSelection.instanceId)?.adapter
+        .contextBreakdown?.(bot.threadId, { signal: AbortSignal.timeout(CONTEXT_BREAKDOWN_WAIT_MS) }) ?? null;
+      return json(res, 200, { threadId: bot.threadId, breakdown: stale() ? null : breakdown });
+    }
+
     m = path.match(/^\/api\/bots\/([\w-]+)\/messages\/([\w-]+)\/edit$/);
     if (m && method === "POST") {
       const messageId = m[2];
       const body = await readBody(req);
       requirePinnedClientThread(m[1], body?.threadId);
       const bot = requestedTaskBot(m[1], body.threadId);
-      const notYours = cloudThreadRefusal(auth, bot.threadId);
+      const notYours = owners.decidesRetry(bot.threadId) ? null : cloudThreadRefusal(auth, bot.threadId);
       if (notYours) return json(res, 403, { error: notYours });
       const textRefused = messageTextRefusal(body.text);
       if (textRefused) return json(res, 400, { error: textRefused });
@@ -485,6 +530,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (!source || source.role !== "user" || source.kind !== "text") {
         return json(res, 404, { error: "only user messages can be edited" });
       }
+      const notYoursToRetry = owners.retryRefusal(auth, bot.threadId, source.sender);
+      if (notYoursToRetry) return json(res, 403, { error: notYoursToRetry, code: "retry_not_yours" });
       // Before the busy guard: a retried edit's own fork is what is busy.
       const sendId = parseSendId(body.sendId);
       if (sendId) {
@@ -510,6 +557,9 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const rerunInstance = registry.get(rerunSelection.instanceId)!;
       const rerunRefusal = policyModelRefusal(rerunInstance);
       if (rerunRefusal) return json(res, 409, { error: rerunRefusal });
+      // The same words again on a caller's line: the caller's message again, never the person's own.
+      const apiRetry = source.via === "api" && text === source.text?.trim() ? await deps.botApiRetry?.(bot.id, bot.threadId, source, sendId) : null;
+      if (apiRetry) return json(res, 202, { ok: true, message: apiRetry });
       const quoted = source.replyToId ? resolveReplyTarget(bot.threadId, source.replyToId) : undefined;
       const replyTo: ReplyTarget | undefined = quoted && source.reaction && text === source.text ? { ...quoted, reactedWith: source.reaction } : quoted;
       const dataContext = parseDataContext(body.dataContext) ?? (text === source.text ? source.dataContext : undefined);
@@ -548,7 +598,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (!behavior) return json(res, 400, { error: "behavior must be allow, deny, or answer" });
       const refusal = cardAnswerRefusal(auth, selected.threadId, String(body.requestId), behavior) ??
         (selected.threadId === bot.threadId ? null : cardAnswerRefusal(auth, bot.threadId, String(body.requestId), behavior));
-      if (refusal) return json(res, 403, { error: refusal });
+      if (refusal) return json(res, 403, refusalText(refusal));
       if (body.rememberCommand === true) {
         const refusal = commandRememberRefusal(auth, bot.threadId, String(body.requestId), behavior);
         if (refusal) return json(res, 403, { error: refusal });
@@ -619,7 +669,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const requestId = String(body.requestId);
       const threadId = answeredIn(m[1], requestId);
       const refusal = cardAnswerRefusal(auth, m[1], requestId, behavior) ?? (threadId === m[1] ? null : cardAnswerRefusal(auth, threadId, requestId, behavior));
-      if (refusal) return json(res, 403, { error: refusal });
+      if (refusal) return json(res, 403, refusalText(refusal));
       if (body.rememberCommand === true) {
         const refusal = commandRememberRefusal(auth, threadId, requestId, behavior);
         if (refusal) return json(res, 403, { error: refusal });
@@ -757,9 +807,15 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (body.turnId !== undefined && (!turnId || turnId.length > 200)) {
         return json(res, 400, { error: "turnId must name a turn" });
       }
+      const stopRefused = (threadId: string): boolean => {
+        const refusal = owners.stopRefusal(auth, threadId);
+        if (refusal) json(res, 403, { error: refusal, code: "stop_not_yours" });
+        return refusal !== null;
+      };
       if (typeof expectedThreadId === "string" && store.taskByThread(bot.id, expectedThreadId)) {
         if (!stopReachesLiveTurn(turnId, liveTurn(expectedThreadId))) return json(res, 200, { ok: true, outcome: "already-stopped" });
-        await stopThreadForPerson(bot.id, expectedThreadId);
+        if (stopRefused(expectedThreadId)) return;
+        await stopThreadForPerson(bot.id, expectedThreadId, messageSender(auth));
         return json(res, 200, { ok: true });
       }
       const directClaim = directTurnDispatchClaims.get(bot.threadId);
@@ -781,6 +837,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         if (expectedThreadId !== undefined && busyGroup.threadId !== expectedThreadId) {
           return json(res, 409, userError("serverError.chat.busyInRoom", { room: busyGroup.group.name }));
         }
+        if (stopRefused(busyGroup.threadId)) return;
         cancelGroupTurnOperations(busyGroup.group.id, busyGroup.threadId);
         revokeInternalCapabilitiesForThread(busyGroup.threadId);
         await instance?.adapter.interruptTurn(busyGroup.threadId).catch(() => {});
@@ -796,7 +853,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         return json(res, 409, { error: "the bot switched tasks before it could be interrupted" });
       }
       if (!stopReachesLiveTurn(turnId, liveTurn(expectedThreadId ?? bot.threadId))) return json(res, 200, { ok: true, outcome: "already-stopped" });
-      await stopThreadForPerson(bot.id, expectedThreadId ?? bot.threadId);
+      if (stopRefused(expectedThreadId ?? bot.threadId)) return;
+      await stopThreadForPerson(bot.id, expectedThreadId ?? bot.threadId, messageSender(auth));
       return json(res, 200, { ok: true });
     }
     return PASS;

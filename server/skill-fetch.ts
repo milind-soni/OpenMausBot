@@ -16,11 +16,12 @@ class ImportLimitError extends Error {}
 class GitHubApiError extends Error {}
 
 // One budget for the whole import, enforced while reading the stream.
-function boundedImportFetch(fetcher: typeof fetch): typeof fetch {
+function boundedImportFetch(fetcher: typeof fetch, cancel?: AbortSignal): typeof fetch {
   let apiRequests = 0;
   let downloads = 0;
   let bytes = 0;
-  const signal = AbortSignal.timeout(IMPORT_LIMITS.ms);
+  const timeout = AbortSignal.timeout(IMPORT_LIMITS.ms);
+  const signal = cancel ? AbortSignal.any([timeout, cancel]) : timeout;
   return async (input, init) => {
     const listing = String(input).startsWith(`${API}/`);
     if (listing ? ++apiRequests > IMPORT_LIMITS.apiRequests : ++downloads > IMPORT_LIMITS.downloads) {
@@ -85,6 +86,8 @@ function decodedPath(path: string): string | null {
 }
 
 function target(owner: string, repo: string, ref: string | undefined, path: string, extra: Partial<Target> = {}): Target | { error: string } {
+  try { ref = ref === undefined ? undefined : decodeURIComponent(ref); }
+  catch { return { error: "that does not look like a GitHub or skills.sh repository, folder, or SKILL.md URL" }; }
   const decoded = decodedPath(path);
   if (!OWNER_OR_REPO.test(owner) || !OWNER_OR_REPO.test(repo) || [owner, repo].some((part) => /^\.+$/.test(part)) || decoded === null ||
     (ref !== undefined && (!ref || ref === "." || ref === ".." || /[\s?#]/.test(ref)))) {
@@ -355,10 +358,11 @@ async function fetchSkills(target: Target, fetcher: typeof fetch): Promise<Fetch
 export async function fetchSkillFromSource(
   input: string,
   fetcher: typeof fetch = fetch,
+  cancel?: AbortSignal,
 ): Promise<{ skills: FetchedSkill[] } | { error: string }> {
   const parsed = parseSkillSource(input);
   if ("error" in parsed) return parsed;
-  fetcher = boundedImportFetch(fetcher);
+  fetcher = boundedImportFetch(fetcher, cancel);
   try {
     return { skills: await fetchSkills(parsed, fetcher) };
   } catch (error) {

@@ -56,6 +56,12 @@
   color: transparent;
   caret-color: var(--color-ink);
 }
+.mention-editor[data-composing] .mention-editor-mirror {
+  visibility: hidden;
+}
+.mention-editor[data-composing] textarea {
+  color: var(--color-ink);
+}
 .mention-editor textarea::selection {
   color: var(--color-ink);
   background: var(--color-raised-hover);
@@ -68,7 +74,7 @@
 }
 @media (forced-colors: active) {
   .mention-editor-mirror { display: none; }
-  .mention-editor textarea { color: CanvasText; caret-color: CanvasText; }
+  .mention-editor textarea, .mention-editor[data-composing] textarea { color: CanvasText; caret-color: CanvasText; }
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -164,9 +170,9 @@
   /* the 0.5px line where two panes meet: the sidebar and the chat */
   --color-edge: color-mix(in srgb, var(--color-ink) 8%, transparent);
   /* the window's frame: its top bar and the rail of places, around the
-     app's pane (the sidebar and the chat). The app's own colour a step darker, so it
-     stays in the skin's family: --frame-shade of black. */
-  --color-frame: color-mix(in oklab, var(--color-app), black var(--frame-shade));
+     app's card (the sidebar and the chat). The sidebar's colour in every skin,
+     so the bar, the rail and the sidebar read as one field. */
+  --color-frame: var(--color-panel);
   --color-ink: #f5f5f5;
   --color-ink-secondary: #f5f5f5a8;
   /* quiet text: timestamps, hints, placeholders, calendar hours. It used to
@@ -192,6 +198,8 @@
   /* Some engines map `ui-monospace` to a proportional face, so concrete names come first. */
   --font-mono: "Geist Mono Variable", "SF Mono", SFMono-Regular, ui-monospace, Menlo,
     Consolas, "Liberation Mono", monospace;
+  /* Geist's wght axis runs 100–900, so text sits between Regular and Medium; a static face rounds it to 400. */
+  --font-weight-normal: 415;
 
   --shadow-lg: 0 6px 16px -8px rgb(0 0 0 / 0.18), 0 1px 3px rgb(0 0 0 / 0.06);
   --shadow-xl: 0 10px 28px -12px rgb(0 0 0 / 0.24), 0 2px 6px -2px rgb(0 0 0 / 0.08);
@@ -215,6 +223,9 @@
   /* Menus; a phone rounds them like its sheets. */
   --radius-menu: 12px;
 }
+:root[data-font] {
+  --tracking-ui: 0;
+}
 :root[data-chat-width="wide"] {
   --chat-bubble-max: 64rem;
   --chat-bubble-pct: 92%;
@@ -232,10 +243,8 @@
 
 :root {
   --code-color-scheme: dark;
-  /* how far the frame steps from the app's colour toward black: further on
-     the dark skins, whose colours sit close to black, and a small step on the
-     light ones (2.5%), where the quiet ink must still clear 4.5:1 on it */
-  --frame-shade: 30%;
+  /* +0.012em suits Geist; a skin or a font choice with another face sets 0. */
+  --tracking-ui: 0.012em;
   /* ink carried by a filled accent / danger surface (see the rule at the
      bottom of this file, which is what makes them take effect) */
   --color-accent-ink: #ffffff;
@@ -248,6 +257,14 @@
   /* second speed line of the mascot — contrasts against the app ground */
   --color-maus-line: #f5f5f5;
   --shadow-float: 0 0 #0000;
+  /* The composer floats over the scrolling transcript: a soft lift with a 1px line of ink at 4%. One value for every
+     skin; on a dark ground it reads as nothing, so the dark skins keep their 0.5px ring alone. */
+  --shadow-composer: 0 2px 8px -1px rgb(0 0 0 / 0.05), 0 1px 2px rgb(0 0 0 / 0.03), 0 0 0 1px rgb(28 28 28 / 0.04);
+}
+/* Daylight's composer rests on that lift alone; its 0.5px ring comes back on hover and while it holds focus.
+   Unlayered, so it wins over the ring utility the shell carries. */
+:root[data-skin="daylight"] .composer-shell:not(:hover, :focus-within) {
+  --tw-ring-color: transparent;
 }
 
 /* ── Midnight ──────────────────────────────────────────────────────────────
@@ -296,6 +313,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   /* One radius scale, shared with Daylight. What takes which step: buttons
      and pills full; keycaps, chips and menu rows 6; fields, controls and
      sidebar rows 8; cards and menus 12; dialogs 16; bubbles and the cards in
@@ -333,7 +351,6 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="atelier"] {
   --code-color-scheme: light;
-  --frame-shade: 3%;
   --color-app: #f5f1eb;           /* outermost ground */
   --color-panel: #fbf8f2;         /* sidebar */
   --color-raised: #ffffff;        /* content — raised means lighter here */
@@ -374,6 +391,7 @@
   /* System faces rather than Geist: paper reads as the platform's own. */
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     Roboto, sans-serif;
+  --tracking-ui: 0;
   --radius-lg: 6px;
   --radius-xl: 10px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -449,6 +467,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   --radius-lg: 4px;
   --radius-xl: 8px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -484,7 +503,6 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="lagoon"] {
   --code-color-scheme: light;
-  --frame-shade: 4%;
   /* The tint is the point, so it is carried by the surfaces, not by a button:
      the ground sits 13 points of green-blue above its red channel, roughly
      three times Atelier's cream cast, which is what makes the skin read as
@@ -532,6 +550,7 @@
 
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     Roboto, sans-serif;
+  --tracking-ui: 0;
   --radius-lg: 8px;
   --radius-xl: 14px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -594,6 +613,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   --radius-lg: 6px;
   --radius-xl: 10px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -620,7 +640,6 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="linen"] {
   --code-color-scheme: light;
-  --frame-shade: 3.5%;
   --color-app: #eceff3;
   --color-panel: #f5f6f8;
   --color-raised: #ffffff;
@@ -657,6 +676,7 @@
 
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     Roboto, sans-serif;
+  --tracking-ui: 0;
   --radius-lg: 8px;
   --radius-xl: 12px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -718,6 +738,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   --radius-lg: 8px;
   --radius-xl: 12px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -756,10 +777,8 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="daylight"] {
   --code-color-scheme: light;
-  --frame-shade: 6%;
   --color-app: #fcfcfc;           /* the thread */
   --color-panel: #f5f5f5;         /* sidebar */
-  --color-frame: var(--color-panel);
   --color-raised: #e4e4e4;        /* the sidebar's selected row: 8% ink on the panel */
   --color-raised-hover: #d8d8d8;
   --color-card: #efefef;          /* what a bot says: 6% ink on the page */
@@ -796,6 +815,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   --radius-xs: 2px;
   --radius-sm: 4px;
   --radius-md: 6px;
@@ -827,7 +847,6 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="meadow"] {
   --code-color-scheme: light;
-  --frame-shade: 6%;
   --color-app: #ffffff;           /* the thread */
   --color-panel: #f6f8f6;         /* sidebar */
   --color-raised: #e9eeea;
@@ -864,6 +883,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   --radius-lg: 10px;
   --radius-xl: 16px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -892,7 +912,6 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="pop"] {
   --code-color-scheme: light;
-  --frame-shade: 6%;
   --color-app: #fdf5ea;           /* the page */
   --color-panel: #f6ebdb;         /* sidebar */
   --color-raised: #efe3d1;
@@ -929,6 +948,7 @@
 
   --font-sans: "Plus Jakarta Sans", ui-rounded, "SF Pro Rounded", "Geist Variable",
     -apple-system, system-ui, "Segoe UI", sans-serif;
+  --tracking-ui: 0;
   --radius-lg: 12px;
   --radius-xl: 18px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -986,6 +1006,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   --radius-lg: 8px;
   --radius-xl: 12px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -1043,6 +1064,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   --radius-lg: 8px;
   --radius-xl: 12px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -1103,6 +1125,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   --radius-xs: 2px;
   --radius-sm: 4px;
   --radius-md: 6px;
@@ -1132,7 +1155,7 @@
 }
 /* Lucide draws at 2px by default, heavy beside Geist; one lighter stroke for every icon left at that default. */
 :where(svg.lucide[stroke-width="2"]) {
-  stroke-width: 1.75;
+  stroke-width: 1.9;
 }
 :root[data-skin="midnight"] .popover-surface {
   box-shadow: 0 14px 32px -10px rgb(0 0 0 / 0.7), 0 2px 8px rgb(0 0 0 / 0.35);
@@ -1214,9 +1237,7 @@
   text-align: start;
 }
 
-/* Chat copy. 15px stays; the line box goes from Tailwind's leading-relaxed
-   (1.625) to 1.75 so Arabic and Latin both get a little more air without
-   moving the surrounding chrome. Arabic and Hebrew use a local face when
+/* Chat copy: 15px on a 22px line in both modes. Arabic and Hebrew use a local face when
    the machine has one. Geist and the UI stack do not carry those glyphs,
    and a generic family listed later would otherwise win. */
 @font-face {
@@ -1229,9 +1250,16 @@
   src: local("Noto Sans Hebrew"), local("Arial Hebrew"), local("SF Hebrew");
   unicode-range: U+0590-05FF, U+FB1D-FB4F;
 }
-/* A reply with a table is as wide as the message; its prose keeps the reading width. */
+/* A reply with a table is as wide as its widest table, never narrower than the reading width, and its prose fills it.
+   A percentage min-width counts as zero while the reply is measured and outranks max-width afterwards. */
+.chat-wide .chat-md {
+  width: fit-content;
+  min-width: min(100%, var(--chat-prose-max));
+  max-width: 100%;
+}
 .chat-wide .chat-md > :not(.chat-table) {
   max-width: var(--chat-prose-max);
+  min-width: 100%;
 }
 
 /* A reply's long unbroken text (a URL, a run of letters) wraps inside its bubble instead of running past the window.
@@ -1240,15 +1268,11 @@
 
 .chat-text,
 .chat-md {
-  line-height: 1.75;
+  line-height: 22px;
   font-family: "omb-chat", var(--font-sans);
 }
 .chat-md :is(strong, b) {
   font-weight: 600;
-}
-[data-chat-bubble="simple"] :is(.chat-md, .chat-text),
-[data-chat-bubble="simple"].chat-text {
-  line-height: 22px;
 }
 [data-chat-bubble="simple"] .chat-md > * + * {
   margin-top: 10px;
@@ -1258,10 +1282,10 @@
 .chat-md :is(p, li, blockquote) {
   text-wrap: pretty;
 }
-[data-chat-bubble="simple"] .chat-md > * + .md-heading {
+.chat-md > * + .md-heading {
   margin-top: 18px;
 }
-[data-chat-bubble="simple"] .chat-md > .md-heading:first-child {
+.chat-md > .md-heading:first-child {
   margin-top: 0;
 }
 /* A short line keeps the tight chat bubble; a structured reply gets room to breathe. */
@@ -1307,8 +1331,8 @@
 [data-simple-rows] > [data-tuck] > :first-child {
   margin-top: -4px;
 }
-/* Arabic and Hebrew script needs the taller line the rest of the app gives it. */
-[data-chat-bubble="simple"] .chat-md [dir="rtl"] {
+/* Arabic and Hebrew script needs a taller line than Latin. */
+.chat-md [dir="rtl"] {
   line-height: 1.75;
 }
 
@@ -1381,6 +1405,9 @@ body {
   background-color: var(--color-app);
   color: var(--color-ink);
   font-family: var(--font-sans);
+  font-weight: var(--font-weight-normal);
+  /* Declared once here, so an em value resolves at 16px and every size below inherits the same ~0.19px. */
+  letter-spacing: var(--tracking-ui);
   /* Chromium on macOS thickens every stem under the default (`auto`)
      smoothing, so regular text reads close to semibold on dark skins.
      Windows ignores both properties. */
@@ -1404,7 +1431,8 @@ body {
     font-size: 13px;
     font-weight: 500;
     line-height: 1.25rem;
-    transition: background-color 120ms ease, color 120ms ease;
+    /* transform: the press feedback below */
+    transition: background-color 120ms ease, color 120ms ease, transform 50ms cubic-bezier(0.165, 0.84, 0.44, 1);
   }
   .ui-button {
     /* 4px + 20px line + 4px + a 1px border each side = 30px, so the 32px
@@ -1442,7 +1470,7 @@ body {
   .ui-button-pill {
     border-radius: 9999px;
     font-size: 14px;
-    font-weight: 400;
+    font-weight: var(--font-weight-normal);
     line-height: 1.25rem;
   }
   .ui-button-lg {
@@ -1505,11 +1533,12 @@ body {
      an inline background already centers on the glyphs, and `clone` keeps
      the padding on every wrapped piece. */
   .ui-code-chip {
-    padding: 0.125em 0.35em;
+    padding: 0 0.27em;
     border-radius: 0.25rem;
-    background: color-mix(in srgb, var(--color-ink) 8%, transparent);
+    background: color-mix(in srgb, var(--color-ink) 4%, transparent);
+    color: var(--color-ink-secondary);
     font-family: var(--font-mono);
-    font-size: 0.86em;
+    font-size: 0.93em;
     line-height: 1;
     -webkit-box-decoration-break: clone;
     box-decoration-break: clone;
@@ -1525,7 +1554,7 @@ body {
     border-radius: 0.375rem;
     text-align: left;
     font-size: 14px;
-    font-weight: 400;
+    font-weight: var(--font-weight-normal);
     line-height: 18px;
   }
   .ui-menu-row:enabled:hover { background: var(--color-menu-hover); }
@@ -1598,7 +1627,46 @@ body {
     .ui-icon-button,
     .ui-pill { transition: none; }
   }
+  /* Press feedback: a button gives a little under the pointer, 98% over 50ms, and not at all with reduced motion
+     (DESIGN §10). Layered, so Pop's own sticker press still wins on its buttons. */
+  @media (prefers-reduced-motion: no-preference) {
+    :root:not([data-reduced-motion="true"]) :is(.ui-button, .ui-icon-button):not(:disabled):active {
+      transform: scale(0.98);
+    }
+  }
+  /* A bot's bubble on a light ground: its tint, a top-lit sheen and a 0.5px inset line of ink at 6% (DESIGN §8).
+     A dark ground keeps the flat tint: there the sheen would lift the bubble's top edge out of its tone. Layered, so
+     Pop's sticker outline on .bg-card still wins. */
+  .bubble-finish {
+    background-image: linear-gradient(rgb(255 255 255 / 0.16), transparent);
+    box-shadow:
+      inset 0 0.5px 0 rgb(255 255 255 / 0.16),
+      inset 0 -0.5px 0 rgb(255 255 255 / 0.16),
+      inset 0 0 0 0.5px color-mix(in srgb, var(--color-ink) 6%, transparent);
+  }
+  @container style(--code-color-scheme: dark) {
+    .bubble-finish { background-image: none; box-shadow: none; }
+  }
 }
+
+/* The sidebar's bot rows and pinned bots give under the pointer like a button (98% over 50ms), but not while a
+   button inside the row is the one pressed. The colour fade the rows already had is repeated here, because this
+   transition replaces theirs. */
+[data-sidebar-bot-row] {
+  transition-property: color, background-color, border-color, outline-color, fill, stroke, scale;
+  transition-duration: 150ms, 150ms, 150ms, 150ms, 150ms, 150ms, 50ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1), cubic-bezier(0.4, 0, 0.2, 1), cubic-bezier(0.4, 0, 0.2, 1),
+    cubic-bezier(0.4, 0, 0.2, 1), cubic-bezier(0.4, 0, 0.2, 1), cubic-bezier(0.4, 0, 0.2, 1), cubic-bezier(0.165, 0.84, 0.44, 1);
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduced-motion="true"]) [data-sidebar-bot-row]:active:not(:has(button:active)) {
+    scale: 0.98;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-sidebar-bot-row] { transition: none; }
+}
+:root[data-reduced-motion="true"] [data-sidebar-bot-row] { transition: none; }
 
 /* Liquid glass: the surface for centred pop-ups (Settings, Apps, Triggers).
    Every value is derived from the active skin's own tokens, so each of the
@@ -1637,14 +1705,16 @@ body {
 }
 /* On a phone Settings is a sheet: it fills the width, rises from the bottom and rounds only its top corners. */
 @media (max-width: 767.98px) {
+  /* The window's rail of places is a view of its own drawn over this page's left edge: the sheet starts beside it, and
+     below the window's top bar where the window draws one. */
   .glass-popup-frame[data-settings-sheet] {
     align-items: flex-end;
-    padding: 44px 0 0;
+    padding: var(--settings-narrow-top, 12px) 0 0 var(--rail-beside, 0px);
   }
   .glass-popup-frame[data-settings-sheet] > .glass-popup {
     width: 100%;
     height: 100%;
-    border-radius: 24px 24px 0 0;
+    border-radius: 16px 16px 0 0;
   }
 }
 /* Cards and rails sitting on the glass: a second, thinner pane. */
@@ -1696,10 +1766,133 @@ body {
 /* Settings: cards and fields edge in one faint ink line. In Midnight and Daylight the sheet is opaque, in the page
    colour, with no shadow; every other skin keeps its glass. */
 [data-settings-look] {
-  --settings-edge: color-mix(in srgb, var(--color-ink) 8%, transparent);
+  --settings-edge: color-mix(in srgb, var(--color-ink) 10%, transparent);
+  --switch-on: var(--color-accent);
+  --switch-knob-on: #fff;
+  --switch-outline: color-mix(in srgb, var(--color-ink) 50%, transparent);
 }
 :root[data-skin="midnight"] [data-settings-look] {
-  --settings-edge: color-mix(in srgb, var(--color-ink) 6%, transparent);
+  --settings-edge: color-mix(in srgb, var(--color-ink) 9%, transparent);
+  --switch-outline: color-mix(in srgb, var(--color-ink) 40%, transparent);
+}
+:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look] {
+  --switch-on: var(--color-ink);
+  --switch-knob-on: var(--color-app);
+}
+/* One switch in Settings: 32 by 20. Off is a light fill with an outline that keeps 3:1 against the card. */
+[data-settings-look] [data-switch] {
+  width: 32px;
+  height: 20px;
+  background: color-mix(in srgb, var(--color-ink) 22%, transparent);
+  box-shadow: inset 0 0 0 1px var(--switch-outline);
+  filter: none;
+}
+[data-settings-look] [data-switch][aria-checked="true"] {
+  background: var(--switch-on);
+  box-shadow: none;
+}
+[data-settings-look] [data-switch] > span {
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+  transition-duration: 150ms;
+}
+[data-settings-look] [data-switch][aria-checked="true"] > span {
+  left: 14px;
+  background: var(--switch-knob-on);
+}
+/* One button family in Settings: 28 tall pills, 13/20 500; secondary on a 5% ink fill. */
+[data-settings-look] .ui-button {
+  height: 28px;
+  min-height: 28px;
+  border-radius: 9999px;
+  border-color: transparent;
+  padding: 0 12px;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+}
+[data-settings-look] .ui-button:not(.ui-button-primary) {
+  background: color-mix(in srgb, var(--color-ink) 5%, transparent);
+  color: var(--color-ink);
+}
+[data-settings-look] .ui-button:not(.ui-button-primary):enabled:is(:hover, :active) {
+  background: color-mix(in srgb, var(--color-ink) 10%, transparent);
+}
+[data-settings-look] .settings-quiet {
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--color-ink-secondary);
+}
+/* A quiet button's text ends on the control edge (card right − 16), like a filled button's edge. */
+[data-settings-look] :is([data-settings-control], [data-settings-actions], [data-settings-form-foot]) > .settings-quiet:last-child { margin-inline-end: -6px; }
+[data-settings-look] .settings-quiet:enabled:hover { color: var(--color-ink); background: color-mix(in srgb, var(--color-ink) 5%, transparent); }
+[data-settings-look] .settings-quiet[data-danger]:enabled:hover { color: var(--color-danger); }
+/* Rows in a card part with a hairline that starts where their text starts: 16 in, 60 in a card whose rows lead with an icon. */
+/* A row wrapped in a `display: contents` element (for a data hook) parts from the one above all the same. */
+[data-settings-rows] > :not([hidden]) ~ :not([hidden], .contents),
+[data-settings-rows] > :not([hidden]) ~ .contents > :first-child {
+  background-image: linear-gradient(var(--settings-edge), var(--settings-edge));
+  background-repeat: no-repeat;
+  background-size: calc(100% - 32px) 0.5px;
+  background-position: 16px 0;
+}
+/* Rows kept together in a `display: contents` wrapper (a group with a data hook) part from each other the same way. */
+[data-settings-rows] > .contents > :not([hidden]) ~ :not([hidden], .contents) {
+  background-image: linear-gradient(var(--settings-edge), var(--settings-edge));
+  background-repeat: no-repeat;
+  background-size: calc(100% - 32px) 0.5px;
+  background-position: 16px 0;
+}
+[data-settings-rows][data-settings-icons] > :not([hidden]) ~ :not([hidden], .contents),
+[data-settings-rows][data-settings-icons] > :not([hidden]) ~ .contents > :first-child,
+[data-settings-rows][data-settings-icons] > .contents > :not([hidden]) ~ :not([hidden], .contents) {
+  background-size: calc(100% - 76px) 0.5px;
+  background-position: 60px 0;
+}
+/* Narrow cards (§6.12): below 480 a select, a segmented control or a wide button (one marked data-settings-drop, such as
+   Pair a phone) drops under its text, 8 below the description and at the text's left edge; a select takes the full
+   width. Switches and small buttons stay on the right. */
+@container rows (max-width: 480px) {
+  [data-settings-control]:has(select, [data-settings-segmented], [data-settings-drop]) {
+    flex-basis: 100%;
+    margin-inline-start: 0;
+  }
+  [data-settings-control] > [data-settings-select] {
+    flex: 1 1 auto;
+    max-width: none;
+    width: 100%;
+  }
+  [data-settings-control] > [data-settings-select] > select {
+    width: 100%;
+    max-width: none;
+  }
+}
+/* Narrow Midnight remaps the app's surfaces for the phone layout; Settings keeps the desktop sheet and card colours. */
+@media (max-width: 767.98px) {
+  :root[data-skin="midnight"] [data-settings-look] {
+    --color-app: #121212;
+    --color-menu: #1f1f1f;
+  }
+}
+/* Descriptions wrap without leaving one word alone on a line. Only the wrap style: `text-wrap: pretty` would also set
+   the wrap mode back to wrap and undo every one-line, ellipsis label (nav items, search results, sub-lines). */
+[data-settings-look] :is(p, span, div) { text-wrap-style: pretty; }
+[data-settings-highlight] {
+  animation: settings-highlight 1.2s ease-out;
+}
+@keyframes settings-highlight {
+  from { background-color: var(--color-menu-active); }
+  to { background-color: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-settings-highlight] { animation: none; }
 }
 :root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look] .glass-surface {
   background: var(--color-app);
@@ -1741,8 +1934,22 @@ body {
   scrollbar-width: thin;
   scrollbar-color: var(--color-scrollbar) transparent;
 }
+@property --settings-fade-top {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@keyframes settings-fade-top {
+  0% { --settings-fade-top: 0px; }
+  6%, 100% { --settings-fade-top: 12px; }
+}
 @supports (animation-timeline: scroll()) {
   .settings-scroll {
+    mask-image: linear-gradient(to bottom, transparent, #000 var(--settings-fade-top), #000 calc(100% - var(--settings-fade)), transparent);
+    animation: settings-fade linear both, settings-fade-top linear both;
+    animation-timeline: scroll(self), scroll(self);
+  }
+  .settings-scroll[data-settings-content] {
     mask-image: linear-gradient(to bottom, #000 calc(100% - var(--settings-fade)), transparent);
     animation: settings-fade linear both;
     animation-timeline: scroll(self);
@@ -1753,13 +1960,10 @@ body {
   box-shadow: 0 24px 64px -16px rgb(28 28 28 / 0.28), 0 2px 8px rgb(28 28 28 / 0.06);
 }
 @media (min-width: 768px) {
-  .glass-popup-frame[data-settings-sheet][data-settings-look="simple"] {
-    padding: 48px 16px;
-  }
   .glass-popup-frame[data-settings-sheet][data-settings-look="simple"] > .glass-popup {
-    width: min(860px, 100%);
-    height: min(700px, 100%);
-    border-radius: 12px;
+    width: min(920px, 100%);
+    height: min(720px, 100%);
+    border-radius: 14px;
   }
 }
 
@@ -1802,14 +2006,15 @@ body {
   top: calc(-1 * var(--glass-reach, 0px));
   mask-image: linear-gradient(to top, black calc(100% - var(--glass-reach, 0px)), transparent);
 }
-/* A fading bar has no tint and no blur. What scrolls under it fades straight into the canvas: hidden
-   at the window edge, back to full strength over the last --glass-fade of the bar, which is the whole
-   of Simple mode's 60px header. A taller bar (find, a notice) stays plain canvas above that stretch. */
+/* A fading bar has no tint and no blur. What scrolls under it stays hidden at the window edge and is
+   at most a tenth visible at the bar's inner edge, across the last --glass-fade of the bar, which is
+   the whole of Simple mode's 60px header: its controls stay readable over any content. A taller bar
+   (find, a notice) stays plain canvas above that stretch. */
 .glass-bar[data-glass-fade] {
   --glass-fade: 60px;
 }
 .glass-bar[data-glass-fade]::before {
-  background: linear-gradient(to bottom, var(--color-app), var(--color-app) calc(100% - var(--glass-fade)), transparent);
+  background: linear-gradient(to bottom, var(--color-app), var(--color-app) calc(100% - var(--glass-fade)), color-mix(in srgb, var(--color-app) 90%, transparent));
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
   mask-image: none;
@@ -1877,7 +2082,7 @@ body {
   padding-bottom: calc(var(--glass-bottom, 0px) + var(--glass-bottom-reach, 0px));
 }
 /* The transcript and its composer share one centered column with a fixed cap. The transcript sits
-   inside the scroller's px-5; the dock spans the pane and holds the composer's own px-5, so it adds
+   inside the scroller's px-4; the dock spans the pane and holds the composer's own px-4, so it adds
    that padding to the same cap and the composer's edges meet the transcript's. */
 .chat-column {
   margin-inline: auto;
@@ -1885,7 +2090,7 @@ body {
 }
 .chat-column-dock {
   margin-inline: auto;
-  max-width: calc(var(--chat-column-max) + 2.5rem);
+  max-width: calc(var(--chat-column-max) + 2rem);
 }
 @media (prefers-reduced-transparency: reduce) {
   .glass-bar::before {
@@ -1908,6 +2113,11 @@ body {
 :focus-visible {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
+}
+/* Settings: nav items, identity rows, search results and whole-row buttons (link, fold and card rows) take an inset
+   ring, so it is never clipped by the card or drawn into the nav's edge. */
+[data-settings-look] :is([data-settings-page], [data-settings-hit], [data-settings-key-result], [data-settings-rows] > button, [data-settings-rows] > * > button[aria-expanded], [data-settings-fold] > button, [data-settings-rows] > button[data-pair-with-cloud]):focus-visible {
+  outline-offset: -2px;
 }
 /* A menu row shows keyboard focus as its hover fill. */
 [role="menu"] :is(button, [role^="menuitem"]):focus-visible {
@@ -1939,6 +2149,12 @@ body {
    red does not vanish while the user is fixing it. */
 :is(input, textarea, select):focus-visible:not([aria-invalid="true"]) {
   border-color: var(--color-focus);
+}
+/* Settings: every control shows keyboard focus the same way, as the 2 px focus ring a switch or a button gets (§6.10).
+   A select or a field there edges in a 0.5 px hairline, which a border-colour change can't make visible. */
+[data-settings-look] :is(select, textarea, input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"], [data-settings-search])):focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 0;
 }
 
 ::selection {
@@ -2980,6 +3196,11 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
 [data-skin="pop"][data-skin-preview] {
   box-shadow: 0 0 0 1.5px var(--color-ink), 2px 2px 0 1.5px var(--color-ink);
 }
+/* In Settings every preview has the same 0.5 px frame (the tile draws it), so Pop's own heavy outline never reads as the
+   chosen tile's ring; its inner card outlines stay. */
+[data-settings-look] [data-skin="pop"][data-skin-preview] {
+  box-shadow: none;
+}
 [data-skin="pop"][data-skin-preview] .bg-card {
   box-shadow: 0 0 0 1px var(--color-ink);
 }
@@ -3159,7 +3380,10 @@ button:disabled.bg-danger {
   }
   /* lucide writes stroke-width="2" as an attribute, which any CSS outranks; an explicit strokeWidth prop is left alone. */
   :where(svg.lucide[stroke-width="2"]) {
-    stroke-width: 1.75;
+    stroke-width: 1.9;
+  }
+  :where(code, pre, kbd, samp, .font-mono) {
+    letter-spacing: 0;
   }
 }
 
@@ -3306,10 +3530,10 @@ button:disabled.bg-danger {
    scripts/check-skin-contrast.mjs measures these as "<skin> (phone)", so the
    AA pairs hold here exactly as on desktop. */
 @media (max-width: 767.98px) {
-  /* The window's frame keeps the desktop ground at any width: the rail of places is a page 36px wide beside a full
-     page, and both draw the frame's top bar or rail in one colour. */
+  /* The window's frame keeps the desktop sidebar's colour at any width: the rail of places is a page 36px wide beside
+     a full page, and both draw the frame's top bar or rail in one colour. */
   :is([data-skin="midnight"]) {
-    --color-frame: color-mix(in oklab, #121212, black var(--frame-shade));
+    --color-frame: #0e0e0e;
     --color-app: #141414;
     --color-panel: #1c1c1e;
     --color-raised: #2c2c2e;
@@ -3328,7 +3552,7 @@ button:disabled.bg-danger {
     --radius-menu: 22px;
   }
   :is([data-skin="meadow"]) {
-    --color-frame: color-mix(in oklab, #ffffff, black var(--frame-shade));
+    --color-frame: #f6f8f6;
     --color-app: #f6f8f6;
     --color-panel: #fcfdfc;
     --color-card: #ffffff;
@@ -3472,3 +3696,43 @@ button:disabled.bg-danger {
 .trace-step-box { background: color-mix(in srgb, #8b7cf6 14%, var(--color-card)); border-color: color-mix(in srgb, #8b7cf6 30%, var(--color-card)); }
 .trace-step-ink { color: color-mix(in srgb, #7c6cf0 85%, var(--color-ink)); }
 .trace-tool-ink { color: color-mix(in srgb, #1f9a8c 80%, var(--color-ink)); }
+
+.fade-end {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+}
+.fade-end:dir(rtl) {
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+}
+
+/* The Teams What's new: the card fades in growing slightly, then the four teammates join the bot one after another,
+   about 600 ms in all. Each rests visible, so without motion everything is simply there. */
+.teams-card-in { animation: teams-card-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.teams-face-in { animation: teams-face-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: calc(180ms + var(--face, 0) * 70ms); }
+@keyframes teams-card-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes teams-face-in {
+  from { opacity: 0; transform: translateX(var(--from-x, 0)) scale(0.6); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .teams-card-in, .teams-face-in { animation: none; }
+}
+:root[data-reduced-motion="true"] .teams-card-in,
+:root[data-reduced-motion="true"] .teams-face-in {
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .chat-run-log-actions {
+    animation: chat-run-log-reveal 160ms ease-out both;
+  }
+}
+
+@keyframes chat-run-log-reveal {
+  from { opacity: 0; transform: translateX(-0.375rem); }
+  to { opacity: 1; transform: translateX(0); }
+}

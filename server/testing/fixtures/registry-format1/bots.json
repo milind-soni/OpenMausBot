@@ -1,0 +1,92 @@
+[
+  {
+    "id": "<id-1>",
+    "threadId": "<id-2>",
+    "name": "Ben",
+    "title": "",
+    "description": "",
+    "soul": "",
+    "soulHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "notifications": true,
+    "color": "blue",
+    "unread": false,
+    "modelSelection": {
+      "instanceId": "claude",
+      "model": "claude-sonnet-5"
+    },
+    "resumeCursors": {},
+    "createdAt": 1794819601000,
+    "section": "Engineering",
+    "tasks": [
+      {
+        "threadId": "<id-2>",
+        "title": "New thread",
+        "createdAt": 1794819601000,
+        "updatedAt": 1794819601000,
+        "lastThreadOrderAt": 1794819601000,
+        "resumeCursors": {},
+        "unread": false
+      }
+    ]
+  },
+  {
+    "id": "<id-3>",
+    "threadId": "<id-4>",
+    "name": "Ada",
+    "title": "Researcher",
+    "description": "Reads papers",
+    "soul": "Be brief.",
+    "soulHash": "213c22ed7234eb11116e1e88f314c73cb3a019b5c87fe224b6ce5665bd9ec50e",
+    "notifications": true,
+    "color": "green",
+    "unread": true,
+    "modelSelection": {
+      "instanceId": "claude",
+      "model": "claude-sonnet-5"
+    },
+    "resumeCursors": {
+      "claude": "session-a"
+    },
+    "createdAt": 1794819600000,
+    "tasks": [
+      {
+        "threadId": "<id-4>",
+        "title": "Third thread",
+        "createdAt": 1794819603000,
+        "updatedAt": 1794819603000,
+        "resumeCursors": {
+          "claude": "session-a"
+        },
+        "approvalMode": "full",
+        "autoApprove": false,
+        "alwaysAllow": [],
+        "unread": false,
+        "lastInstanceId": "claude",
+        "askedAt": 1794819600500,
+        "archivedAt": 1794819603000
+      },
+      {
+        "threadId": "<id-5>",
+        "title": "Renamed thread",
+        "createdAt": 1794819602000,
+        "updatedAt": 1794819602000,
+        "resumeCursors": {},
+        "approvalMode": "full",
+        "autoApprove": false,
+        "alwaysAllow": [],
+        "unread": true,
+        "pinned": true,
+        "snoozedUntil": 1794906000000
+      },
+      {
+        "threadId": "<id-6>",
+        "title": "New thread",
+        "createdAt": 1794819600000,
+        "updatedAt": 1794819600000,
+        "lastThreadOrderAt": 1794819600000,
+        "resumeCursors": {},
+        "unread": false
+      }
+    ]
+  }
+]

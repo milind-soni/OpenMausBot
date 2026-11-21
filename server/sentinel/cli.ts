@@ -2,6 +2,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
+import { defaultDataDir, type DataHomes } from "../data-dir.ts";
 import { checkSentinelInstall, type SentinelInstallCheck } from "../service-unit.ts";
 import { defaultSentinelOut, outRefusal } from "./paths.ts";
 import { runScan, type ScanSummary } from "./scan.ts";
@@ -36,9 +37,9 @@ copy tool output or message text.
 --check-install  check that the installed schedule (service install --sentinel)
               still points at a node and a script that exist`;
 
-export function parseSentinelArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): SentinelArgs | { error: string; json: boolean } {
+export function parseSentinelArgs(argv: string[], env: NodeJS.ProcessEnv = process.env, homes: DataHomes = {}): SentinelArgs | { error: string; json: boolean } {
   const json = argv.includes("--json");
-  let dataDir = env.OMB_DATA_DIR || join(homedir(), ".openmausbot");
+  let dataDir = argv.includes("--data-dir") ? "" : defaultDataDir(env, homes.under, homes.realHome);
   let out: string | undefined;
   const args: Omit<SentinelArgs, "dataDir" | "out"> = { json };
   for (let i = 0; i < argv.length; i += 1) {

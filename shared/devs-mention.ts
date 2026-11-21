@@ -5,8 +5,15 @@ import { proseOnly } from "./person-mention.ts";
 
 export const DEVS_TAG = "devs";
 
-const startsWithName = (rest: string, name: string) =>
-  rest.slice(0, name.length).toLowerCase() === name.toLowerCase() && !isMentionNameContinuation(rest.slice(name.length));
+/** Chinese, Japanese and Korean are written without spaces, so "@devs总控坏了" ends the Latin tag at the first such
+ * character. Only the devs tag reads it this way; other names keep the shared word rule. */
+const CJK_START = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+
+const startsWithName = (rest: string, name: string) => {
+  if (rest.slice(0, name.length).toLowerCase() !== name.toLowerCase()) return false;
+  const after = rest.slice(name.length);
+  return !isMentionNameContinuation(after) || (name.toLowerCase() === DEVS_TAG && CJK_START.test(after));
+};
 
 /** The tag's length when `rest` (the text after an at-sign) starts with it. A bot or department named devs, or with a
  * longer name that starts with it, is tagged instead. */

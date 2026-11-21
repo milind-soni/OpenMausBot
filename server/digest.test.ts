@@ -124,6 +124,15 @@ describe("buildTurnDigest", () => {
     expect(long.reply).toHaveLength(200);
   });
 
+  it("never cuts the reply inside an emoji when there is no sentence end before the cap", () => {
+    const reply = `${"汇".repeat(199)}🔴之后还有很多内容`;
+    const d = buildTurnDigest({ ...base, reply, activities: [], memory: [] });
+    expect(d.reply).toBe("汇".repeat(199));
+    const loneSurrogate = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+    expect(d.reply).not.toMatch(loneSurrogate);
+    expect(renderDigest(d)).not.toMatch(loneSurrogate);
+  });
+
   it("masks a credential the reply repeats, as the stored reply is masked", () => {
     const secret = `${"whsec" + "_"}${"a1B2c3D4".repeat(5)}`;
     const d = buildTurnDigest({ ...base, activities: [], memory: [], reply: `Connected the watcher to http://127.0.0.1:8800/hooks/wh_abc/${secret}. Done.` });
@@ -214,6 +223,22 @@ describe("coverageForDriver", () => {
     expect(coverageForDriver("claudeAgent", true)).toBe("full");
     expect(coverageForDriver("grok", true)).toBe("full");
     expect(coverageForDriver(undefined)).toBe("none");
+  });
+});
+
+describe("digestCompletedLate", () => {
+  it("marks a preview digest full once every tool row of its turn has its full result, and leaves it otherwise", async () => {
+    const { digestCompletedLate } = await import("./digest.ts");
+    const preview = activity("Bash", true, "ls");
+    const full = { ...preview, tool: { ...preview.tool!, fullResult: true } };
+    const digest = buildTurnDigest({ ...base, activities: [preview], memory: [] });
+    const row: Message = { id: "d1", role: "bot", kind: "digest", at: 2, turnId: "turn-1", text: renderDigest(digest), digest };
+    expect(renderDigest(digest)).toContain("from tool previews");
+    expect(digestCompletedLate([preview, row], "turn-1")).toBeNull();
+    const completed = digestCompletedLate([full, row], "turn-1");
+    expect(completed).toMatchObject({ id: "d1", digest: { hookCoverage: "full" } });
+    expect(completed!.text).not.toContain("from tool previews");
+    expect(digestCompletedLate([full, { ...row, digest: completed!.digest }], "turn-1")).toBeNull();
   });
 });
 

@@ -2,46 +2,31 @@ import { useLayoutEffect, type RefObject } from "react";
 
 export const BOTTOM_FOLLOW_THRESHOLD = 4;
 
-export function shouldResumeBottomFollow({
-  following,
-  previousScrollTop,
-  scrollTop,
-  distanceFromBottom,
-}: {
-  following: boolean;
-  previousScrollTop: number;
-  scrollTop: number;
-  distanceFromBottom: number;
-}): boolean {
-  return !following && scrollTop > previousScrollTop && distanceFromBottom < BOTTOM_FOLLOW_THRESHOLD;
-}
-
 interface BottomFollowScroller {
   scrollHeight: number;
   scrollTo(options?: ScrollToOptions): void;
 }
 
-export function followBottomGrowth(scroller: BottomFollowScroller, following: boolean): boolean {
+export function followBottomGrowth(scroller: BottomFollowScroller, following: boolean, smooth = false): boolean {
   if (!following) return false;
-  scroller.scrollTo({ top: scroller.scrollHeight });
+  scroller.scrollTo(smooth ? { top: scroller.scrollHeight, behavior: "smooth" } : { top: scroller.scrollHeight });
   return true;
 }
 
+/** Calls `onResize` whenever the transcript's content changes size: a reply growing inside its last row included. */
 export function useBottomFollowResize(
   scrollRef: RefObject<HTMLElement | null>,
   transcriptRef: RefObject<HTMLElement | null>,
-  followingRef: RefObject<boolean>,
   observeKey: string | null,
+  onResize: () => void,
 ): void {
   useLayoutEffect(() => {
     const scroller = scrollRef.current;
     const transcript = transcriptRef.current;
     if (!scroller || !transcript || observeKey === null) return;
 
-    const observer = new ResizeObserver(() => {
-      followBottomGrowth(scroller, followingRef.current);
-    });
+    const observer = new ResizeObserver(onResize);
     observer.observe(transcript);
     return () => observer.disconnect();
-  }, [followingRef, observeKey, scrollRef, transcriptRef]);
+  }, [observeKey, onResize, scrollRef, transcriptRef]);
 }

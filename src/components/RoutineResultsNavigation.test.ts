@@ -24,6 +24,7 @@ vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 const { initialState } = await import("@/state/store");
 const { EventDetails } = await import("./RoutineCalendarPage");
 const { ChatView } = await import("./ChatView");
+const drawChatView = (ChatView as unknown as { type: (props: import("react").ComponentProps<typeof ChatView>) => import("react").ReactNode }).type;
 
 const bot: Bot = {
   id: "runner", threadId: "execution", name: "Runner", title: "", description: "", color: "green",
@@ -134,7 +135,7 @@ describe("routine results navigation", () => {
 
   it("returns from an execution chat to its group-owned source task", () => {
     fixture.state!.routineRuns = [{ ...run, sourceThreadId: "original-room-source" }];
-    const buttons = buttonsFrom(() => ChatView({ bot }));
+    const buttons = buttonsFrom(() => drawChatView({ bot }));
     expect(buttons.has("Back to results")).toBe(true);
     buttons.get("Back to results")!.onClick!();
     expect(fixture.dispatch.mock.calls).toEqual([
@@ -164,12 +165,12 @@ describe("routine results navigation", () => {
 
   it("omits Back to results when the execution's recorded destination was deleted", () => {
     fixture.state!.routineRuns = [{ ...run, resultsThreadId: "deleted-destination" }];
-    expect(buttonsFrom(() => ChatView({ bot })).has("Back to results")).toBe(false);
+    expect(buttonsFrom(() => drawChatView({ bot })).has("Back to results")).toBe(false);
   });
 
   it("shows no run banner when the run worked inside the conversation its results go to", () => {
     fixture.state!.routineRuns = [{ ...run, resultsThreadId: "execution", sourceThreadId: "execution" }];
-    const buttons = buttonsFrom(() => ChatView({ bot }));
+    const buttons = buttonsFrom(() => drawChatView({ bot }));
     expect(buttons.has("Back to results")).toBe(false);
     expect(buttons.has("Run logs")).toBe(false);
   });

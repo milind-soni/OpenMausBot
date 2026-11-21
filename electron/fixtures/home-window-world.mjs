@@ -59,6 +59,7 @@ export function world({ clean = null, journal = done(), marker = null, state = c
         return { origin: CLIENT, code: "CCCC-LLLL-AAAA", expiresAt: w.clock + 60_000 };
       }
       w.pairs++;
+      if (w.cloud.pairError) throw w.cloud.pairError;
       if (w.state?.status !== "connected" || w.cloud.down) throw new Error("My Cloud is not ready to connect yet.");
       return { origin: CLOUD, code: "AAAA-BBBB-CCCC", expiresAt: w.clock + 60_000 };
     },

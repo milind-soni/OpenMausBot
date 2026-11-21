@@ -1,4 +1,4 @@
-import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { memo, useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Video } from "lucide-react";
 
 import { BotAvatar } from "@/components/Avatar";
@@ -9,7 +9,7 @@ import { CALENDAR_SLOT_MINUTES } from "@/lib/routine-calendar";
 import { partlyDone, routineHeldNote, routineRunLabel } from "@/lib/routine-display";
 import type { RoutineRunStatus } from "@/lib/routines";
 import { intervalLabel, niceTime } from "@/lib/schedule-label";
-import type { Bot, Group } from "@/state/store";
+import type { BotApartFromTurns, GroupApartFromTurns } from "@/state/apart-from-turns";
 import type { CalendarEventItem } from "../RoutineCalendarPage";
 import { EVENT_DRAG_TYPE } from "./LimitResetMarkers";
 
@@ -31,7 +31,7 @@ export function cardLayout(height: number): "roomy" | "compact" | "tiny" {
   return height >= 22 ? "compact" : "tiny";
 }
 
-export function CalendarEventCard({
+export const CalendarEventCard = memo(function CalendarEventCard({
   item,
   bots,
   groups,
@@ -42,13 +42,15 @@ export function CalendarEventCard({
   onResize,
 }: {
   item: CalendarEventItem;
-  bots: Bot[];
-  groups: Group[];
+  bots: readonly BotApartFromTurns[];
+  groups: readonly GroupApartFromTurns[];
   compact: boolean;
   layout: { column: number; columns: number };
   selected?: boolean;
-  onOpen: () => void;
-  onResize: (minutes: number) => void;
+  onOpen: (item: CalendarEventItem) => void;
+  onResize: (item: CalendarEventItem, minutes: number) => void;
+  /** Drawn again in a new language. */
+  locale?: string;
 }) {
   const isCall = item.kind === "call";
   const routine = item.kind === "routine" ? item.routine : null;
@@ -94,7 +96,7 @@ export function CalendarEventCard({
         setPreviewDuration(item.durationMinutes);
         return;
       }
-      onResize(next);
+      onResize(item, next);
     };
     document.addEventListener("pointermove", move);
     document.addEventListener("pointerup", up, { once: true });
@@ -117,7 +119,7 @@ export function CalendarEventCard({
         event.dataTransfer.effectAllowed = "move";
         event.dataTransfer.setData(EVENT_DRAG_TYPE, JSON.stringify({ kind: item.kind, id: isCall ? item.call.id : routine!.id, at: item.at }));
       }}
-      onClick={(event) => { event.stopPropagation(); onOpen(); }}
+      onClick={(event) => { event.stopPropagation(); onOpen(item); }}
       aria-pressed={selected}
       aria-label={`${name}, ${niceTime(item.at)}${paused ? `, ${t("routines.pausedSchedule")}` : statusLabel ? `, ${statusLabel}` : ""}`}
       className={cn(
@@ -161,4 +163,4 @@ export function CalendarEventCard({
       {isCall && <div onPointerDown={beginResize} className="absolute inset-x-1 bottom-0 h-1.5 cursor-ns-resize rounded-full opacity-0 transition group-hover:opacity-100" aria-label={t("routines.event.resize")}><div className="mx-auto mt-0.5 h-0.5 w-5 rounded-full bg-current opacity-50" /></div>}
     </button>
   );
-}
+});

@@ -139,6 +139,8 @@ function liveStatusPhrases(status: LiveStatus): LiveActivityPhrases | null {
       return phaseOf("chat.activity.thinking");
     case "reply":
       return phaseOf("chat.activity.reply");
+    case "summarizing":
+      return phaseOf("chat.activity.summarizing");
     case "write":
     case "edit": {
       const file = status.file ?? status.target;

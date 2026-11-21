@@ -1,15 +1,15 @@
 // What the desktop app may find about Grok Bot on this computer. The Bot writes its own export (shared/grok-import.ts);
-// the only things read here are those files in Downloads and the roster slice of the UI cache the Grok Bot app keeps, for
-// the names of the Bots on this computer. Security: login material lives beside that cache (sand-secrets.json, cookies,
-// ~/.grokbot) and is never opened, nor is any other slice, chats included; no path here is built from anything but the two
-// names below or a file's own listing.
+// the only things read here are those files in Downloads, the roster slice of the UI cache the Grok Bot app keeps, for
+// the names of the Bots on this computer, and one Bot's chat slice, only while that Bot is being moved. Security: login
+// material lives beside that cache (sand-secrets.json, cookies, ~/.grokbot) and is never opened, nor is any other slice or
+// any other Bot's chat; no path here is built from anything but the two names below or a file's own listing.
 //
 // The cache's layout (Grok Bot desktop, recorded from a Windows install) and this reading of it adapt an MIT-licensed
 // importer; see NOTICE.
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 
-import { GROK_EXPORT_FILE, GROK_EXPORT_MAX_CHARS } from "../shared/grok-import.ts";
+import { GROK_EXPORT_FILE, GROK_EXPORT_MAX_CHARS, type GrokHistoryReason } from "../shared/grok-import.ts";
 import { redactSecretsInText } from "../shared/redact.ts";
 import type { SetupMachine } from "./setup-import.ts";
 
@@ -17,6 +17,7 @@ const USER_DATA_FOLDERS = [["Library", "Application Support", "Grok Bot"], ["App
 const CACHE_FOLDER = "sand-client-persistence";
 const SLICE_PREFIX = "sand.client.slice.account.";
 const ROSTER_SLICE = "roster.last-roster";
+const CHAT_SLICE = "transcript.replicas.";
 const MAX_SLICE_BYTES = 32 * 1024 * 1024;
 const MAX_EXPORT_FILES = 20;
 const MAX_EXPORT_BYTES = 16 * 1024 * 1024;
@@ -80,17 +81,51 @@ const shown = (value: unknown) => (typeof value === "string" ? redactSecretsInTe
 const rows = (value: unknown): Array<Record<string, unknown>> =>
   Array.isArray(value) ? value.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object") : [];
 
-/** A hint only: a missing or unreadable cache, or a layout this does not know, answers nothing. */
-function rosterBots(machine: SetupMachine): string[] {
+/** The Grok Bot app's cache here, or null when the app isn't. `bots` is empty when its roster is missing or unreadable. */
+function appCache(machine: SetupMachine) {
   const folder = USER_DATA_FOLDERS.map((parts) => join(machine.home, ...parts, CACHE_FOLDER))
     .find((path) => machine.fs.lstat(path)?.isDirectory());
   const listing = folder ? machine.fs.readdir(folder) : null;
-  const slice = listing?.find((name) => sliceKind(sliceId(name)) === ROSTER_SLICE);
-  if (!folder || !slice) return [];
-  return rows(sliceValue(machine, join(folder, slice))?.rows).flatMap((row) => {
+  if (!folder || !listing) return null;
+  const read = (kind: string) => {
+    const slice = listing.find((name) => sliceKind(sliceId(name)) === kind);
+    return slice ? sliceValue(machine, join(folder, slice)) : null;
+  };
+  return { bots: rows(read(ROSTER_SLICE)?.rows).filter((row) => !row.isGroup), read };
+}
+
+/** A hint only: a missing or unreadable cache, or a layout this does not know, answers nothing. */
+function rosterBots(machine: SetupMachine): string[] {
+  return (appCache(machine)?.bots ?? []).flatMap((row) => {
     const name = shown(row.name);
-    return name && !row.isGroup ? [name] : [];
+    return name ? [name] : [];
   });
+}
+
+const key = (text: string) => text.trim().toLowerCase();
+
+/** The roster row of the Bot an export names. Grok Bot lets names repeat, so the MausBot bot there adds the first 8
+ * characters of the Bot's id to a repeated name; a name that still fits several rows, or none, picks nothing. */
+function rosterRow(bots: Array<Record<string, unknown>>, exportName: string): Record<string, unknown> | "noMatch" | "ambiguous" {
+  const name = key(exportName);
+  const tokens = name.match(/\b[0-9a-f]{8}\b/g) ?? [];
+  const tagged = (row: Record<string, unknown>) => tokens.some((token) => String(row.id).toLowerCase().startsWith(token));
+  const named = bots.filter((row) => typeof row.id === "string" && row.id && typeof row.name === "string" &&
+    (key(row.name) === name || (tagged(row) && name.includes(key(row.name)))));
+  const picked = named.length > 1 ? named.filter(tagged) : named;
+  return picked.length === 1 ? picked[0]! : named.length ? "ambiguous" : "noMatch";
+}
+
+export type GrokChat = { entries: unknown[] } | { reason: GrokHistoryReason };
+
+/** One Bot's chat, as the entries of its slice; only the roster and that one slice are opened. */
+export function readGrokChat(machine: SetupMachine, exportName: string): GrokChat {
+  const cache = appCache(machine);
+  if (!cache) return { reason: "noApp" };
+  const row = rosterRow(cache.bots, exportName);
+  if (typeof row === "string") return { reason: row };
+  const entries = cache.read(`${CHAT_SLICE}${row.id as string}`)?.entries;
+  return Array.isArray(entries) && entries.length ? { entries } : { reason: "empty" };
 }
 
 /** The exports in Downloads, newest first. A symlink is refused: only a real file with that name counts. */

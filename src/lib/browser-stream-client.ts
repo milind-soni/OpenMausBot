@@ -9,13 +9,15 @@ import { t } from "./i18n";
 export const PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE = 4503;
 export const PREVIEW_STREAM_TAB_GONE_CODE = 4404;
 
-/** A sandbox has no command to run, only steps for an administrator; missing libraries have one. */
+/** A sandbox has no command to run, only steps for an administrator; missing libraries have one, a container a setting. */
 export type PreviewStreamHostSetup =
   | { readonly need: "sandbox" }
-  | { readonly need: "libraries"; readonly command: string };
+  | { readonly need: "libraries" | "container"; readonly command: string };
 
 /** The server's LIBRARIES_COMMAND and SANDBOX_STEPS_URL: a close reason is too short to carry the link. */
 export const PREVIEW_STREAM_LIBRARIES_COMMAND = "sudo openmausbot browser install --with-deps";
+/** What a container's operator sets to run its browser without Chrome's own sandbox. */
+export const PREVIEW_STREAM_SANDBOX_OFF = "OMB_BROWSER_SANDBOX=0";
 export const PREVIEW_STREAM_SANDBOX_STEPS_URL =
   "https://github.com/milind-soni/OpenMausBot/blob/main/docs/deploy-vps.md#ubuntu-2404-browser-sandbox";
 
@@ -104,6 +106,9 @@ export type PreviewStreamInput =
   | { readonly type: "dialog"; readonly accept: boolean; readonly promptText?: string }
   | { readonly type: "viewport"; readonly setting: PreviewViewportSetting }
   | { readonly type: "zoom"; readonly factor: number }
+  /** The installed extensions, for the Extensions menu; an extension's own page opens by its id only. */
+  | { readonly type: "extensions" }
+  | { readonly type: "openExtension"; readonly id: string }
   | {
       readonly type: "mouse";
       readonly action: "move" | "down" | "up";
@@ -543,13 +548,17 @@ export function createPreviewFramePainter(
 const decodeHostSetup = (reason: string): PreviewStreamHostSetup => {
   try {
     // An older server's command for either need was `openmausbot browser setup`, which never existed.
-    if ((JSON.parse(reason) as { need?: unknown }).need === "libraries") return { need: "libraries", command: PREVIEW_STREAM_LIBRARIES_COMMAND };
+    const need = (JSON.parse(reason) as { need?: unknown }).need;
+    if (need === "libraries") return { need, command: PREVIEW_STREAM_LIBRARIES_COMMAND };
+    if (need === "container") return { need, command: PREVIEW_STREAM_SANDBOX_OFF };
   } catch {}
   return { need: "sandbox" };
 };
 
-/** What a viewer tells the person; beside it, the libraries `command` ready to copy or a link to the sandbox steps. */
+/** What a viewer tells the person; beside it, the `command` ready to copy or a link to the sandbox steps. */
 export const previewStreamHostSetupMessage = (setup: PreviewStreamHostSetup) =>
   setup.need === "sandbox"
     ? "This server's host blocks the sandbox its browser runs in. An administrator can allow it for one copy of Chrome with these steps, then try again:"
+    : setup.need === "container"
+    ? "Chrome's sandbox can't start in this server's container. Its operator can set this to run the browser without it and rely on the container's isolation, then restart OpenMausBot:"
     : "This server's host is missing libraries its browser needs. Run this once on the host, then try again:";

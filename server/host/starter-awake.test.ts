@@ -51,6 +51,40 @@ describe("which of a Starter Cloud's bots stay awake", () => {
     expect(createStarterAwake({ dataDir: dir, starter: () => true, bots: () => bots(7) }).paused()).toEqual(["b0", "b1"]);
   });
 
+  it("starts a sixth bot and a twentieth paused, and never pauses one the person was using to make room", () => {
+    const dir = dataDir(), list = bots(4);
+    const awake = createStarterAwake({ dataDir: dir, starter: () => true, bots: () => list });
+    const make = (id: string) => { list.unshift({ id, createdAt: Date.now(), tasks: [{ updatedAt: Date.now() }] }); return awake.paused(); };
+    expect(make("fifth")).toEqual([]);
+    expect(make("sixth")).toEqual(["sixth"]);
+    for (let n = 7; n <= 20; n++) make(`bot${n}`);
+    expect(awake.paused()).toHaveLength(15);
+    expect(awake.paused()).toEqual(expect.arrayContaining(["sixth", "bot7", "bot20"]));
+    expect(new Set(list.map((bot) => bot.id).filter((id) => !awake.isPaused(id)))).toEqual(new Set(["b0", "b1", "b2", "b3", "fifth"]));
+    // A restart reads the same five.
+    expect(createStarterAwake({ dataDir: dir, starter: () => true, bots: () => list }).paused()).toHaveLength(15);
+  });
+
+  it("swaps a new bot in for one the person picks, keeping five awake", () => {
+    const list = bots(5);
+    const awake = createStarterAwake({ dataDir: dataDir(), starter: () => true, bots: () => list });
+    expect(awake.paused()).toEqual([]);
+    list.unshift({ id: "new", createdAt: Date.now() });
+    expect(awake.paused()).toEqual(["new"]);
+    expect(awake.choose(["new", "b1", "b2", "b3", "b4"])).toEqual({ ok: true });
+    expect(awake.paused()).toEqual(["b0"]);
+  });
+
+  it("gives a freed place to a bot already paused, not to the next one made", () => {
+    const list = bots(5);
+    const awake = createStarterAwake({ dataDir: dataDir(), starter: () => true, bots: () => list });
+    awake.paused();
+    list.unshift({ id: "sixth", createdAt: Date.now() });
+    expect(awake.paused()).toEqual(["sixth"]);
+    list.splice(list.findIndex((bot) => bot.id === "b2"), 1);
+    expect(awake.paused()).toEqual([]);
+  });
+
   it("wakes every bot at once on an upgrade", () => {
     let starter = true;
     const awake = createStarterAwake({ dataDir: dataDir(), starter: () => starter, bots: () => bots(9) });

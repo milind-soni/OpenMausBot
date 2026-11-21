@@ -1,7 +1,8 @@
 // Trades the one-time code for this server's place in the team: a key made here, whose public half the Admin keeps, and
 // the Admin's own keys, which the connector pins. Once, over HTTPS.
 import { errorText } from "./log.ts";
-import { ENROLL_PATH, checkEnrollCode, checkEnrollResponse, isLoopbackHost, type ConnectorIdentity, type EnrollRequest, type HostFacts } from "./protocol.ts";
+import { reducedFacts } from "./customer-run.ts";
+import { ENROLL_PATH, checkEnrollCode, checkEnrollResponse, isLoopbackHost, type ConnectorIdentity, type EnrollRequest, type HostFacts, type ServerMode } from "./protocol.ts";
 import { generateKeyPair } from "./signed.ts";
 import type { AgentRecord } from "./state.ts";
 
@@ -27,6 +28,8 @@ export async function enroll(options: {
   code: string;
   host: HostFacts;
   connector: ConnectorIdentity;
+  /** Absent: `operated`. */
+  mode?: ServerMode;
   fetch?: typeof fetch;
   now?: () => number;
   timeoutMs?: number;
@@ -34,7 +37,8 @@ export async function enroll(options: {
   const code = checkEnrollCode(options.code.trim());
   if (!code.ok) throw new Error(code.message);
   const key = generateKeyPair();
-  const request: EnrollRequest = { code: code.value, publicKey: key.publicKey, host: options.host, connector: options.connector };
+  const customerRun = options.mode === "customer-run";
+  const request: EnrollRequest = { code: code.value, publicKey: key.publicKey, host: customerRun ? reducedFacts(options.host) : options.host, connector: options.connector, ...(customerRun ? { mode: "customer-run" } : {}) };
   let response: Response;
   try {
     response = await (options.fetch ?? fetch)(`${options.admin}${ENROLL_PATH}`, {
@@ -55,5 +59,5 @@ export async function enroll(options: {
   const checked = checkEnrollResponse(body);
   if (!checked.ok) throw new Error(`MausBot's answer could not be used (${checked.message}). Try the install command again.`);
   const { boxId, teamId, adminKeys } = checked.value;
-  return { version: 2, admin: options.admin, boxId, teamId, publicKey: key.publicKey, privateKey: key.privateKey, adminKeys, enrolledAt: (options.now ?? Date.now)() };
+  return { version: 2, admin: options.admin, boxId, teamId, publicKey: key.publicKey, privateKey: key.privateKey, adminKeys, enrolledAt: (options.now ?? Date.now)(), ...(customerRun ? { mode: "customer-run" } : {}) };
 }

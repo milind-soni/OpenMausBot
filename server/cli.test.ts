@@ -461,7 +461,7 @@ describe.skipIf(process.platform === "win32")("serve --tunnel", () => {
     child.stderr?.on("data", (chunk) => (err += String(chunk)));
     try {
       expect(await exited(child)).toBe(1);
-      expect(err).toContain("run openmausbot login first");
+      expect(err).toContain("run openmausbot account login first");
       let dead = false;
       try {
         await fetch(`http://127.0.0.1:${port}/api/health`);

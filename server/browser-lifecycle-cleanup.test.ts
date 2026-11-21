@@ -289,6 +289,17 @@ describe("closing this data dir's browsers nothing uses", () => {
     expect(closed()).toEqual([]);
   });
 
+  it("still closes by pid file when agent-browser cannot list its browsers (it cannot start once the box is out of processes)", async () => {
+    home(["bot-a", "bot-b", "someone-elses"]);
+    vi.mocked(runningBrowserSessionNames).mockResolvedValue(null);
+    const { value, closeIdle, closed } = sweep({ live: ["bot-a"], idle: async () => true });
+    await value.sweep();
+    expect(closeIdle.mock.calls).toEqual([["bot-a"]]);
+    expect(closed()).toEqual(["/engine/agent-browser bot-b"]);
+    await value.closeAll(1_000);
+    expect(closed()).toEqual(["/engine/agent-browser bot-b", "/engine/agent-browser bot-a", "/engine/agent-browser bot-b"]);
+  });
+
   it("asks the engine nothing while no daemon has a pid file, or there is no engine", async () => {
     home([]);
     writeFileSync(join(process.env.XDG_RUNTIME_DIR!, "agent-browser", "dashboard.pid"), "0");

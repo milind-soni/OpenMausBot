@@ -11,7 +11,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { createComputerSharing } from "../electron/computer-sharing.mjs";
 import { cloudPairingSignature } from "./cloud-home.ts";
-import { HANDOFF_TICK_MS } from "./handoff-ticks.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { markLeftBehind } from "./testing/cloud-left-behind.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
@@ -149,27 +148,18 @@ async function leftBehind(of: { threadIds?: string[]; routineIds?: string[] }, s
 /** A turn a restart cuts reruns at the next start, beside this test's next turn. With `handedWork`, it also waits out
  * what stopped work starts: handed-on work that is stopped returns to its sender, and where the sender's turn is not
  * running (after a restart) that begins a turn of the sender's a moment after the work has ended, which a `held` engine
- * never ends. Stopping that turn resumes the sender on the next busy handoff tick, so idle has to hold across that tick. */
+ * never ends. So it stops turns until none runs and no handed-on work is left that could begin one. */
 async function stopRunningTurns(handedWork = false) {
   const running = async () => ((await api("GET", "/api/bots?messages=0", { token: owner })).body.bots as Array<{ id: string; tasks?: Array<{ threadId: string; busy?: boolean }> }>)
     .flatMap((bot) => (bot.tasks ?? []).filter((task) => task.busy).map((task) => ({ bot, threadId: task.threadId })));
   const unsettled = () => handedWork ? readHandoffs(join(home, ".openmausbot")).filter((node) => LIVE_HANDOFF.has(node.status)).map((node) => `hand-off ${node.id} ${node.status}`) : [];
-  const acrossTick = HANDOFF_TICK_MS.busy * 2;
-  let idleAt = 0;
   let left: string[] = [];
-  await within(hostTimeout(10_000), () => `still running: ${left.join(", ")}`, async () => {
+  await within(20_000, () => `still running: ${left.join(", ")}`, async () => {
     const turns = await running();
-    const pending = unsettled();
-    left = [...turns.map((turn) => `turn ${turn.threadId}`), ...pending];
-    if (turns.length > 0 || pending.length > 0) {
-      idleAt = 0;
-      for (const { bot, threadId } of turns) await stop(bot, threadId);
-      return false;
-    }
-    const now = Date.now();
-    if (idleAt === 0) idleAt = now;
-    return now - idleAt >= acrossTick;
-  }, 50);
+    for (const { bot, threadId } of turns) await stop(bot, threadId);
+    left = [...turns.map((turn) => `turn ${turn.threadId}`), ...unsettled()];
+    return left.length === 0;
+  }, 100);
 }
 const LIVE_HANDOFF: ReadonlySet<string> = new Set(["queued", "running", "waiting", "resume"]);
 /** After a restart, wait for the lent Mac's connector, so what a turn is offered is never just the Mac being offline. */
@@ -494,7 +484,8 @@ it("a process on the Cloud cannot write in the owner's running conversation, and
   // Its notes would be refused, so the teammate's turn is told to put facts in its result instead.
   const delegated = await heldTurn(before, (dump) => JSON.stringify(dump.prompt).includes(INJECTED), "the teammate's turn");
   expect(String(delegated.systemPrompt)).toContain("Notes cannot be saved from this conversation");
-  expect(String(delegated.systemPrompt)).not.toContain("Change MEMORY.md only with memory_update");
+  // The memory rules stay in the cached half whatever a turn's verdict, and this turn's note overrides them.
+  expect(String(delegated.systemPrompt)).toContain("Whatever your memory instructions say, do not call memory_update or memory_log or edit memory files this turn.");
   await stop(bot, receipt.receipts![0]!.threadId!);
 }, 60_000);
 

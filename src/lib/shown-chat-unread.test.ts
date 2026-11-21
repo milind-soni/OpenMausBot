@@ -24,6 +24,14 @@ describe("shownChatIsUnread", () => {
     expect(shownChatIsUnread(state({ selectedId: group.id }))).toBe(true);
   });
 
+  it("does not read a background room fork while the main conversation is shown", () => {
+    const withFork = { ...group, tasks: [
+      { threadId: "room-thread", title: "Main", createdAt: 1, unread: false },
+      { threadId: "fork", title: "Fork", createdAt: 2, unread: true },
+    ] };
+    expect(shownChatIsUnread(state({ selectedId: group.id, groups: [withFork] }))).toBe(false);
+  });
+
   it("is false away from the chat view or with nothing selected", () => {
     expect(shownChatIsUnread(state({ selectedId: group.id, activeView: "routines" }))).toBe(false);
     expect(shownChatIsUnread(state({ selectedId: "" }))).toBe(false);

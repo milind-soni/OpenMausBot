@@ -137,10 +137,22 @@ describe("serveWithWindow", () => {
     expect(lab.created).toHaveLength(1);
   });
 
-  it("leaves a cloud model alone", async () => {
+  it("leaves a model that runs on another host alone", async () => {
     const lab = ollama({ show: { remote_host: "https://ollama.com" } });
-    expect(await serveWithWindow(ORIGIN, "glm-5:cloud", lab.server)).toEqual({ model: "glm-5:cloud" });
+    expect(await serveWithWindow(ORIGIN, "glm-5:latest", lab.server)).toEqual({ model: "glm-5:latest" });
     expect(lab.created).toEqual([]);
+  });
+
+  it.each(["gemma4:cloud", "deepseek-v4.1-flash:1017-cloud"])("leaves %s alone, at the window it was trained on", async (model) => {
+    // Ollama v0.40.16 answers /api/show for a cloud name from ollama.com, with no remote_host or remote_model.
+    const lab = ollama({ show: { model_info: { "deepseek_v41.context_length": 1_048_576 }, capabilities: ["completion", "tools"] } });
+    expect(await serveWithWindow(ORIGIN, model, lab.server)).toEqual({ model, window: 1_048_576 });
+    expect(lab.created).toEqual([]);
+  });
+
+  it("still makes a window for a local model whose tag only mentions the cloud", async () => {
+    const lab = ollama();
+    expect((await serveWithWindow(ORIGIN, "wordcloud:7b", lab.server, 24 * GB)).model).toMatch(/^wordcloud:7b-omb-\d+k$/);
   });
 
   it.each([

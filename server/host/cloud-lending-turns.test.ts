@@ -231,3 +231,47 @@ describe("a card lifts a lock only for the owner's own line (server/host/cloud-l
     expect(withLifts([webhookPost, own, allowed]).host.cloudLendingView(turn)).toBe(false);
   });
 });
+
+describe("a routine someone else changed (email 1a1bca40)", () => {
+  const routinePrompt = { id: "m1", role: "user", automation: { routineId: "r1" } };
+  function routineRun({ trigger = "schedule" as "schedule" | "manual" | "webhook" | "startup", ownerStarted = false, ownerAuthored = false, flagged = false } = {}) {
+    const run = { id: "run1", routineId: "r1", threadId: "t1", triggerSource: trigger };
+    return createCloudLendingTurns({
+      store: {
+        groupByThread: () => undefined,
+        messagesFor: () => [routinePrompt],
+        botByThread: () => ({ id: "b1" }),
+        taskByThread: () => ({ threadId: "t1", routineRunId: "run1" }),
+      } as never,
+      cloudHome: true,
+      directRequest: () => ({ messageId: "m1", generations: new Set(["g1"]), automation: trigger }),
+      threadStarter: () => undefined,
+      ownerPerson: (person) => person === OWNER,
+      cardAnswerer: () => undefined,
+      activeRoutineRun: () => run as never,
+      ownerStartedRun: () => ownerStarted,
+      routineRunIsOwners: () => ownerAuthored,
+      memoryChangedBySomeoneElse: () => flagged,
+      routines: () => ({ listRoutines: () => [{ id: "r1", name: "Morning inbox" }] }) as never,
+      routineAuthors: { authored: () => ownerAuthored },
+      lentPlatform: () => "darwin",
+    });
+  }
+  const changed = "\"Morning inbox\" can't use your Mac because it isn't confirmed as yours: it was last changed or made outside your own chats. Open it and save it to make it yours again.";
+
+  it("its scheduled run is told, by name, how to make it theirs again", () => {
+    const host = routineRun();
+    expect(host.cloudLendingRefusal(turn)).toBe("not-owner");
+    expect(host.cloudLendingRefusalNotice(turn)).toBe(changed);
+    expect(host.cloudLendingRefusalForBot(turn)).toBe(`${changed} ${ONLY_THE_PERSON}`);
+    expect(routineRun({ trigger: "startup" }).cloudLendingRefusalNotice(turn)).toBe(changed);
+    expect(routineRun({ trigger: "manual", ownerStarted: true }).cloudLendingRefusalNotice(turn)).toBe(changed);
+  });
+  it("the owner's own routine still runs, and every other refusal keeps its words", () => {
+    expect(routineRun({ ownerAuthored: true }).cloudLendingRefusalNotice(turn)).toBeNull();
+    for (const host of [routineRun({ trigger: "webhook" }), routineRun({ trigger: "manual" }), routineRun({ flagged: true })]) {
+      expect(host.cloudLendingRefusalNotice(turn)).not.toBeNull();
+      expect(host.cloudLendingRefusalNotice(turn)).not.toContain("isn't confirmed as yours");
+    }
+  });
+});

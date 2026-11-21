@@ -1,0 +1,248 @@
+---
+title: Redundancy
+description: Keep a standby server in a second place that can take over when your server goes down. One server runs at a time.
+icon: ServerCog
+---
+
+A MausBot server keeps everything in one data folder, and only one server may run on it at a time. Redundancy is therefore one **active** server and one **standby** in another place: the standby keeps a copy of the active server's data, and starts on that copy only when the active server is gone. Never run both.
+
+MausBot has no built-in standby or automatic takeover. This page is a recipe you run yourself, with plain tools (`sqlite3`, `rsync`, `ssh`, `cron`). Below, A is the active server and B the standby.
+
+<Callout type="info" title="What you lose, and how long it takes">
+  - **Lost:** everything since the last copy. With a copy every minute, about the last minute or two of chats, bot changes and files.
+  - **Interrupted:** turns that were running on A stop with it. On B, ask again where a bot did not finish.
+  - **Takeover time:** how long you wait before deciding A is gone, plus cutting A off, plus your address moving to B, plus starting B. In our test the server answered within a second of starting; the rest is yours to set, so plan on a few minutes.
+</Callout>
+
+## What makes up a server's state
+
+Everything is under the server's home: its own folder (`.openmausbot`) and the engines' sign-ins beside it (`.claude`, `.codex` and others).
+
+| Install | Folder to copy | The server's own folder inside it |
+|---|---|---|
+| [Installer](/docs/self-hosting/deploy-vps#quick-start-one-command-on-your-own-domain) | `/opt/openmausbot/data` | `.openmausbot` |
+| npm service, user `maus` | `/home/maus` | `.openmausbot` |
+
+Most of it is ordinary files. Three are SQLite databases the server keeps open and writes all the time, in WAL mode: `messages.db`, `runtime.db` and `bursts.db`. Their newest changes sit in the `-wal` file beside each until SQLite folds them in. **Do not copy these files with `rsync` or `cp` while the server runs.** In our test, a plain copy of `messages.db` taken while the server ran was missing every message still in the WAL file. SQLite's own `VACUUM INTO` makes a complete, consistent copy while the server keeps writing.
+
+A fourth database, `sync/index.db`, is not copied at all: reading it while the server runs blocks the server's own writes to it. It holds the server side of desktop folder sync, file checksums and the sync trash list. On B it starts empty: checksums are worked out again, and files already in the sync trash stay on disk but are no longer listed.
+
+The folder also holds a **lease**, `.openmausbot/openmausbot-server.lease`, naming the process and machine running the server. A server refuses to start on a folder whose lease names another machine or a live process. The copy job below puts its own lease on B, naming no real machine, so a server started on B by mistake stops there. The lease does **not** stop A from starting again on its own folder while B runs: we tried it, and A came back on its own data beside B, with the same server id and different chats. Keeping A cut off is your job.
+
+## Set up the standby
+
+Build B fresh, never from a disk snapshot or image of A. Both need `sqlite3` (3.27 or newer) and `rsync` (Ubuntu 24.04 also brings `rrsync` with it): `sudo apt-get install -y sqlite3 rsync`. Run everything below as root.
+
+1. **Install MausBot on B the same way as on A, and leave it stopped.**
+   - Installer: run the install command with the DNS check off, since your domain still points at A. It ends saying HTTPS did not answer, because B cannot get a certificate yet; everything else is installed. Then stop B:
+
+     ```sh
+     curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/install.sh | sudo OMB_INSTALL_SKIP_DNS=1 sh -s -- --domain maus.example.com
+     cd /opt/openmausbot && sudo docker compose stop
+     ```
+
+   - npm service: install the same `openmausbot@X.Y.Z` and the same systemd unit as on A, with the user `maus` having the **same user id** as on A (`id -u maus`), then `sudo systemctl disable --now openmausbot` and `sudo install -d -m 700 -o maus -g maus /home/maus/.openmausbot`.
+2. **On A, save the two scripts below** as `/usr/local/bin/mausbot-db-copies` and `/usr/local/bin/mausbot-standby-serve`, and `chmod 755` both. For the npm service, change the paths the comments name.
+
+   ```sh
+   #!/bin/sh
+   # On A: a consistent copy of each of the server's databases, made with VACUUM INTO while it runs.
+   # Run as root, only through mausbot-standby-serve. Its last line names the data's owner.
+   set -eu
+   umask 077
+   STATE=${STATE:-/opt/openmausbot/data/.openmausbot}   # npm service: /home/maus/.openmausbot
+   COPIES=${COPIES:-/opt/openmausbot/db-copies}         # npm service: /home/maus-db-copies
+   for path in "$STATE" "$COPIES"; do
+     case "$path" in /?*) ;; *) echo "refused: '$path' is not an absolute path below /" >&2; exit 1 ;; esac
+   done
+   [ -f "$STATE/messages.db" ] || { echo "refused: no messages.db in $STATE" >&2; exit 1; }
+   mkdir -p "$COPIES"
+   # sync/index.db is left out: reading it blocks the server's own writes to it.
+   for db in messages.db runtime.db bursts.db; do
+     if [ -f "$STATE/$db" ]; then
+       rm -f "$COPIES/$db.tmp"
+       sqlite3 "$STATE/$db" ".timeout 5000" "VACUUM INTO '$COPIES/$db.tmp'"
+       [ "$(sqlite3 "$COPIES/$db.tmp" 'PRAGMA quick_check;')" = ok ]
+       mv "$COPIES/$db.tmp" "$COPIES/$db"
+     else
+       rm -f "$COPIES/$db"   # A no longer has it
+     fi
+   done
+   echo "owner=$(stat -c %u:%g "$STATE")"
+   ```
+
+   ```sh
+   #!/bin/sh
+   # On A: all the standby's SSH key may do (authorized_keys: restrict,command="/usr/local/bin/mausbot-standby-serve").
+   # Make the database copies, or read files below one folder. Nothing else, and never a write.
+   case "${SSH_ORIGINAL_COMMAND:-}" in
+     mausbot-db-copies) exec /usr/local/bin/mausbot-db-copies ;;
+     "rsync --server --sender "*) exec rrsync -ro /opt/openmausbot ;;   # npm service: /home
+     *) echo "refused: ${SSH_ORIGINAL_COMMAND:-}" >&2; exit 1 ;;
+   esac
+   ```
+
+3. **Give B a key that can do only that.** On B: `sudo ssh-keygen -t ed25519 -N '' -C mausbot-standby -f /root/.ssh/mausbot-standby`. On A, add one line to `/root/.ssh/authorized_keys`, with B's `/root/.ssh/mausbot-standby.pub` after it:
+
+   ```
+   restrict,command="/usr/local/bin/mausbot-standby-serve" ssh-ed25519 AAAA… mausbot-standby
+   ```
+
+   Then, on B, accept A's host key once (check its fingerprint) and see A answer: `sudo ssh -i /root/.ssh/mausbot-standby root@server-a.example.com mausbot-db-copies` ends with `owner=…`. The copy job never asks about host keys, so until you do this it fails.
+
+   **What this key gives B:** read access to everything in A's folder (every chat, key, sign-in and paired session) and the right to make the database copies. It cannot write to A or run anything else. Whoever takes over B has A's data; protect B as you protect A.
+4. **On B, save the two scripts below** as `/usr/local/bin/mausbot-standby-pull` and `/usr/local/bin/mausbot-takeover`, and `chmod 755` both. The pull copies A to B and refuses to touch a folder a server has used; the takeover turns the last copy into B's data and stops all further copies.
+
+   ```sh
+   #!/bin/sh
+   # On B: bring the standby's copy of A up to date. Run every minute by cron; safe to run by hand.
+   set -eu
+   A=${A:?set A, such as root@server-a.example.com}
+   SSH_KEY=${SSH_KEY:-/root/.ssh/mausbot-standby}
+   DATA=${DATA:-/opt/openmausbot/data}            # npm service: /home/maus
+   STATE=${STATE:-.openmausbot}
+   COPIES=${COPIES:-/opt/openmausbot/db-copies}   # npm service: /home/maus-db-copies
+   A_DATA=${A_DATA:-data}                         # on A, below mausbot-standby-serve's folder; npm: maus
+   A_COPIES=${A_COPIES:-db-copies}                # npm service: maus-db-copies
+   A_ENV=${A_ENV-.env}                            # A's .env, for the takeover; npm service: A_ENV=
+   MAX_DELETE=${MAX_DELETE:-2000}
+   fail() { echo "mausbot-standby-pull: $*" >&2; exit 1; }
+   for p in "$DATA" "$COPIES"; do case "$p" in /?*) ;; *) fail "'$p' must be an absolute path below /" ;; esac; done
+   for p in "$STATE" "$A_DATA" "$A_COPIES" $A_ENV; do case "$p" in /*|*..*) fail "'$p' must be a path below its folder" ;; esac; done
+   state=$DATA/$STATE lease=$DATA/$STATE/openmausbot-server.lease
+   [ -d "$state" ] || fail "$state is not a folder"
+
+   # One pull at a time, never after a takeover, never into a folder a server uses.
+   exec 9>/run/mausbot-standby.lock
+   flock -n 9 || exit 0
+   [ ! -e "$state/.standby-taken-over" ] || fail "B has taken over: $state is no longer a copy"
+   if [ -f "$lease" ] && ! grep -q '"host":"mausbot-standby"' "$lease"; then fail "a server has run on $state"; fi
+   if curl -sf --max-time 5 http://127.0.0.1:8799/api/health >/dev/null; then fail "a server answers on this machine"; fi
+   # A lease naming no real machine: a server started on this copy by mistake refuses to run.
+   printf '%s\n' '{"version":1,"pid":1,"host":"mausbot-standby","token":"00000000-0000-4000-8000-000000000000","createdAt":1,"machine":"00000000000000000000000000000000"}' > "$lease"
+
+   ssh="ssh -i $SSH_KEY -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=3"
+   # 1. Fresh database copies on A. The data must belong to the same user ids on A and B.
+   out=$($ssh "$A" mausbot-db-copies) || fail "A made no database copies"
+   [ "${out##*owner=}" = "$(stat -c %u:%g "$state")" ] || fail "A's data belongs to ${out##*owner=}, B's to $(stat -c %u:%g "$state")"
+   # 2. Every other file. Left out: the live databases, the lease, A's process records, sockets,
+   #    half-written *.tmp files and B's own .ssh. Exit 24 only says a file vanished mid-copy.
+   s=/$STATE/
+   rsync -a --delete --delete-excluded --numeric-ids --max-delete="$MAX_DELETE" --timeout=60 -e "$ssh" \
+     -f "P ${s}openmausbot-server.lease" -f "P /.ssh/" \
+     --exclude "${s}messages.db*" --exclude "${s}runtime.db*" --exclude "${s}bursts.db*" --exclude "${s}sync/index.db*" \
+     --exclude "${s}openmausbot-server.lease*" --exclude "${s}engine-runs/" --exclude /.ssh/ --exclude '*.sock' --exclude '*.tmp' \
+     "$A:$A_DATA/" "$DATA/" || [ $? -eq 24 ]
+   # 3. The database copies, and A's .env, kept beside the data until a takeover.
+   rsync -a --delete --exclude /a.env --timeout=60 -e "$ssh" "$A:$A_COPIES/" "$COPIES/"
+   [ -z "$A_ENV" ] || rsync -a --timeout=60 -e "$ssh" "$A:$A_ENV" "$COPIES/a.env"
+   echo "$(date -u +%FT%TZ) copied"
+   ```
+
+   ```sh
+   #!/bin/sh
+   # On B, once A is cut off for good: stop the copies for good and make the last copy B's data.
+   set -eu
+   DATA=${DATA:-/opt/openmausbot/data}            # npm service: /home/maus
+   STATE=${STATE:-.openmausbot}
+   COPIES=${COPIES:-/opt/openmausbot/db-copies}   # npm service: /home/maus-db-copies
+   ENV_FILE=${ENV_FILE-/opt/openmausbot/.env}     # npm service: ENV_FILE=
+   MAX_AGE=${MAX_AGE:-600}                        # seconds; an older copy needs FORCE=1
+   fail() { echo "mausbot-takeover: $*" >&2; exit 1; }
+   for p in "$DATA" "$COPIES"; do case "$p" in /?*) ;; *) fail "'$p' must be an absolute path below /" ;; esac; done
+   case "$STATE" in /*|*..*) fail "'$STATE' must be a folder name" ;; esac
+   state=$DATA/$STATE
+   [ -d "$state" ] || fail "$state is not a folder"
+   # A second run would put the old copy over the data B has written since the first.
+   [ ! -e "$state/.standby-taken-over" ] || fail "B has already taken over: nothing was changed"
+   if curl -sf --max-time 5 http://127.0.0.1:8799/api/health >/dev/null; then fail "a server answers on this machine: nothing was changed"; fi
+   [ -f "$COPIES/messages.db" ] || fail "no copy of messages.db in $COPIES"
+   age=$(( $(date +%s) - $(stat -c %Y "$COPIES/messages.db") ))
+   echo "the last copy of messages.db is $age seconds old"
+   [ "$age" -le "$MAX_AGE" ] || [ "${FORCE:-}" = 1 ] || fail "older than $MAX_AGE seconds; FORCE=1 takes it anyway"
+
+   # No pull starts, or finishes, after this.
+   rm -f /etc/cron.d/mausbot-standby
+   exec 9>/run/mausbot-standby.lock
+   flock -w 300 9 || fail "a pull is still running; run this again"
+   touch "$state/.standby-taken-over"
+   for db in messages.db runtime.db bursts.db; do
+     rm -f "$state/$db" "$state/$db-wal" "$state/$db-shm"
+     [ -f "$COPIES/$db" ] || continue
+     cp "$COPIES/$db" "$state/$db"
+     chown --reference="$state" "$state/$db"
+   done
+   [ -z "$ENV_FILE" ] || [ ! -f "$COPIES/a.env" ] || cp "$COPIES/a.env" "$ENV_FILE"
+   rm -f "$state/openmausbot-server.lease"   # the standby's lease from the pull
+   echo "ready: start the server"
+   ```
+
+5. **Run the pull every minute.** Save `/etc/cron.d/mausbot-standby` on B. For the npm service, add the lines `DATA=/home/maus`, `COPIES=/home/maus-db-copies`, `A_DATA=maus`, `A_COPIES=maus-db-copies` and `A_ENV=` under the first one.
+
+   ```sh
+   A=root@server-a.example.com
+   * * * * * root /usr/local/bin/mausbot-standby-pull >> /var/log/mausbot-standby.log 2>&1
+   ```
+
+   After a few minutes `/var/log/mausbot-standby.log` has one `copied` line a minute. A line starting `mausbot-standby-pull:` says why a copy did not happen. **When a pull stops at `--max-delete`**, A has lost more than 2,000 files since the last copy: find out why on A before anything else (a wiped or wrongly mounted disk on A would otherwise be copied to B), then run one pull by hand with a higher `MAX_DELETE=`.
+6. **Keep B on A's version.** The pull copies A's `.env`, which names A's version, and the takeover puts it in place. Updating A from the app (**Update server**) or with `update.sh` updates A only, so after each update run `cd /opt/openmausbot && sudo cp db-copies/a.env .env && sudo docker compose pull` on B. Otherwise B downloads A's version during the takeover, which takes longer. A newer version on B is fine; an older one may refuse A's data.
+7. **Put one address in front.** Your apps, webhooks and connected apps keep working after a takeover only if the address they use moves to B. Give your domain's DNS record a short TTL (60 seconds) so a change reaches people quickly. If A runs `serve --tunnel`, the copy carries its tunnel sign-in (`tunnel-account.json`), so B started with `--tunnel` uses A's tunnel address (not tested by us). Never let both run.
+8. **Watch A.** From B, or from a third place, check A directly every minute, and alert yourself when it fails several times in a row:
+
+   ```sh
+   curl -sf --max-time 10 --resolve maus.example.com:443:A_PUBLIC_IP https://maus.example.com/api/health | grep -q openmausbot
+   ```
+
+## Take over
+
+1. **Cut A off for good.** Block all of A's traffic in your provider's firewall, then power A off. A power-off alone does not keep A off: providers restart machines after a host failure, and anyone can press start. A server cut off only from B may still be running, answering people and running its routines, and A starts MausBot by itself whenever it boots.
+2. **Put the last copy in place:** `sudo mausbot-takeover`. It removes the cron file, waits for a copy still running, marks the folder so no copy ever runs into it again, and refuses a copy older than 10 minutes unless you add `FORCE=1`. For the npm service: `sudo DATA=/home/maus COPIES=/home/maus-db-copies ENV_FILE= mausbot-takeover`.
+3. **Move the address** to B: change the DNS record to B's public address. Do this before starting B. Caddy on B asks for its certificate when it starts, and gets one only once the domain points at B.
+4. **Start B:** `cd /opt/openmausbot && sudo docker compose pull && sudo docker compose up -d`, or `sudo systemctl enable --now openmausbot`.
+5. **Check:** `https://maus.example.com/api/health` answers and the app connects. B has the same server id and the same paired sessions as A, so paired devices should stay signed in.
+6. **Look at what was running.** A routine due in the last minutes may run again on B (see the limits below). Sign an engine in again if B says it is not signed in.
+
+## Bring A back
+
+Treat A as the new standby, never as the server it was. A starts MausBot by itself when it boots, so prepare its disk first, from your provider's rescue system, with A's disk mounted at `/mnt` and A still blocked in the firewall:
+
+```sh
+d=/mnt/opt/openmausbot     # npm service: move /mnt/home/maus/.openmausbot instead
+mv "$d/data" "$d/data.old"
+install -d -m 700 -o "$(stat -c %u "$d/data.old")" -g "$(stat -c %g "$d/data.old")" "$d/data" "$d/data/.openmausbot"
+printf '%s\n' '{"version":1,"pid":1,"host":"mausbot-standby","token":"00000000-0000-4000-8000-000000000000","createdAt":1,"machine":"00000000000000000000000000000000"}' > "$d/data/.openmausbot/openmausbot-server.lease"
+```
+
+The last line is the standby's lease: MausBot on A refuses to start on that folder. Boot A normally, stop MausBot for good (`cd /opt/openmausbot && sudo docker compose stop`, or `sudo systemctl disable --now openmausbot`), lift the firewall block, and set up the copies the other way, from B to A. Anything made on A after the last copy is only in `data.old`; MausBot cannot merge it into B.
+
+## Limits
+
+- **Not automatic.** Deciding that A is gone, cutting it off, running the takeover and moving the address are yours to do, by hand or with your own tools. Do not take over automatically unless the same tool can also cut A off.
+- **One active server.** Two servers on copies of the same data are two different servers with the same identity. Their chats diverge and cannot be merged.
+- **The last copy is what you get.** Work done on A after it is lost. Copying more often than every minute narrows the gap; it never closes it.
+- **Each copy rewrites the databases in full.** With databases of several GB, a copy every minute is too often for A's disk and your network: change the cron schedule and accept a bigger gap. A needs free disk for the copies plus another set while the next is written, and SQLite's temporary files (in `/tmp`) while it rebuilds their indexes; B needs room for the whole data folder plus the copies.
+- **The copies are not taken at one instant.** Each database is consistent on its own, but the databases and the other files are copied seconds apart. After a takeover, something made in those seconds may be missing in one place and present in another.
+- **Routines can run twice.** B knows only the routine runs that were in the last copy. A routine run on A since then looks unrun to B, which runs its most recent occurrence late (one that came due within the last 12 hours) and marks older ones as missed.
+- **Copied as plain files, not checked:** a bot's Data tables (`bots/<id>/data.duckdb`), the engines' own databases (such as `~/.codex/*.sqlite`), browser sign-ins and bots' work folders. A file being written at the moment of a copy may not open on B.
+- **Engine sign-ins** are copied from A. An engine that renewed its sign-in after the last copy may ask you to sign in again on B.
+- **Versions.** The data folder records its format. A release can read what the release after it writes, but a server whose release is further behind may refuse A's data ("written by a newer OpenMausBot"). Keep B on A's version, or newer.
+- **Secrets travel with the copy.** The data folder holds saved keys, logins (`logins.json.enc` with its key file `logins-key` beside it), engine sign-ins and paired sessions. Protect B, its copies and its SSH key as you protect A.
+
+## What we tested, and what we did not
+
+**On Linux.** We ran the five scripts in an Ubuntu 24.04 container (`/bin/sh` is dash, GNU rsync 3.2.7, sqlite3 3.45.1, OpenSSH 9.6) with MausBot 0.1.173 from npm (`openmausbot serve`), run as a user with id 1001 in folders laid out as the installer lays them out. A and B were the same machine: B's two scripts as printed, A's two with `/opt/openmausbot` changed to `/srv/a/opt/openmausbot`, and B reaching A over SSH at `127.0.0.1` with the restricted key above. What we saw:
+
+- A made 40 bots while B pulled 24 times without a failure. A server started on B by mistake before the takeover refused (`This OpenMausBot data directory is already owned by a process on another machine`).
+- A was stopped with `kill -9` after 3 more bots. `mausbot-takeover` reported a 2-second-old copy. B answered with the 41 bots of the last copy, A's paired device was signed in on B, and both had the same server id and A's `.env`.
+- A pull after the takeover refused, and so did a pull with the marker removed by hand while B's server ran, and a pull with a lease a crashed server left. B's bots and `messages.db` were unchanged.
+- Pulls running in a loop during a takeover: 8 copied before it, 1,909 refused after it. B's three databases matched the last copies, and B started with every bot in them.
+- `DATA`, `COPIES`, `A_DATA`, `A_COPIES`, `STATE` or `A_ENV` set to `/`, a relative path, `..` or an absolute path where a relative one belongs: each pull refused before calling rsync (checked with an rsync stand-in that records calls: none). Left empty or unset, each took its default. Relative paths run from inside a scratch folder of 55 entries left it unchanged.
+- With 30 files gone on A and `MAX_DELETE=5`, rsync stopped at 5 deletions and the pull failed; a normal pull then removed the rest.
+- B's data owned by another user id: refused. B's own `.ssh` was kept and A's was not copied.
+- The restricted key: any other command, and an rsync write to A, were refused.
+- With the cron file above, cron ran the pull at the start of each minute.
+- The rescue commands under "Bring A back", run on a copy of A's folder: MausBot then refused to start on it.
+
+**On macOS** (SQLite 3.51), `VACUUM INTO` copied a 400 MB database in about 2 seconds while another process wrote to it as fast as it could. SQLite's `.backup` command, under the same load, did not finish until the writing stopped, because it starts over whenever the database changes. A plain copy of a live `messages.db` was missing the rows still in its WAL file.
+
+**Not tested by us; standard practice:** two machines in two places, the Docker install (`docker compose`) as active or standby, the installer on B, DNS failover, Caddy's certificate on B, the provider firewall, the health check, and a real rescue system. Also not tested: the desktop and phone apps reconnecting after a takeover, webhooks and connected apps, a tunnel in front (`serve --tunnel`, a Cloudflare tunnel of your own, Tailscale), and phones paired through MausBot Relay. A tunnel with two connectors may send each request to either server. The routine behaviour, the version rule and the effect of leaving out `sync/index.db` are read from MausBot's code and docs, not tested here.

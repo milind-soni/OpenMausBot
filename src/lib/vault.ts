@@ -1,4 +1,4 @@
-import type { LoginBots, LoginSummary, OnePasswordStatus } from "../../shared/logins";
+import type { BitwardenStatus, LoginBots, LoginSummary, OnePasswordStatus } from "../../shared/logins";
 import type { LinkedSecret, VaultChoice, VaultSecret } from "../../shared/vault";
 import type { ComputerHelpRef } from "../../shared/wire";
 import { api } from "@/state/store";
@@ -9,6 +9,8 @@ export interface VaultList {
   logins: LoginSummary[];
   secrets: Array<VaultSecret | LinkedSecret>;
   onePassword: OnePasswordStatus;
+  /** Absent from a server that does not offer Bitwarden. */
+  bitwarden?: BitwardenStatus;
 }
 
 export async function listVault(): Promise<VaultList> {
@@ -27,8 +29,9 @@ export async function changeSecret(id: string, change: { name?: string; value?: 
   })).secret;
 }
 
-export async function deleteSecret(id: string): Promise<void> {
-  await api(`/api/vault/secrets/${encodeURIComponent(id)}`, { method: "DELETE" });
+/** The MCP servers that lost their key with it. */
+export async function deleteSecret(id: string): Promise<string[]> {
+  return (await api<{ keysOff?: string[] }>(`/api/vault/secrets/${encodeURIComponent(id)}`, { method: "DELETE" })).keysOff ?? [];
 }
 
 /** The NAME=value lines of a pasted .env file. `export`, quotes and trailing comments are dropped; a later line with the

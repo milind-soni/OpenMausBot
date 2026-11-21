@@ -6,6 +6,8 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import type { ChromeIdentity } from "./identity.ts";
 import { chromeForTestingExecutable, chromeForTestingPin, type installChromeForTesting } from "./install.ts";
+import { BrowserHostError, hostSetupOf } from "./host-setup.ts";
+import { ChromeLaunchError } from "./launch.ts";
 import { ChromeLauncher, runsLauncher } from "./launcher.ts";
 import { chromeHost } from "./resolve.ts";
 import type { IdentitySidecars } from "./sidecar.ts";
@@ -77,6 +79,42 @@ describe("the Chrome launcher", () => {
     expect(calibrate).toHaveBeenCalledOnce();
   });
 
+  it("refreshes the launcher language if the app language changes while its check is pending", async () => {
+    const machine = mac({ env: { LANG: "en_US.UTF-8" } });
+    let appLanguage = "en";
+    let beginCheck!: () => void;
+    let finishCheck!: () => void;
+    const checking = new Promise<void>((resolve) => { beginCheck = resolve; });
+    const check = new Promise<void>((resolve) => { finishCheck = resolve; });
+    const chrome = launcher(machine, {
+      language: () => appLanguage,
+      checkLauncher: async () => { beginCheck(); await check; },
+    });
+
+    const ready = chrome.ready(headless(chrome.path));
+    await checking;
+    expect(readFileSync(chrome.path, "utf8")).toContain("'--lang=en'");
+    appLanguage = "ko";
+    finishCheck();
+    await ready;
+
+    expect(readFileSync(chrome.path, "utf8")).toContain("'--lang=ko-KR'");
+  });
+
+  it("refreshes the launcher language between env and a cached ready call", async () => {
+    const machine = mac({ env: { LANG: "en_US.UTF-8" } });
+    let appLanguage = "en";
+    const chrome = launcher(machine, { language: () => appLanguage });
+    await chrome.ready(headless(chrome.path));
+    expect(readFileSync(chrome.path, "utf8")).toContain("'--lang=en'");
+
+    expect(chrome.env()).toEqual({ AGENT_BROWSER_EXECUTABLE_PATH: chrome.path, AGENT_BROWSER_HIDE_SCROLLBARS: "0" });
+    appLanguage = "ko";
+    await chrome.ready(headless(chrome.path));
+
+    expect(readFileSync(chrome.path, "utf8")).toContain("'--lang=ko-KR'");
+  });
+
   it("reads the identity again after Chrome updated itself in place", async () => {
     const machine = mac();
     const calibrate = vi.fn(async () => identity("155"));
@@ -114,6 +152,40 @@ describe("the Chrome launcher", () => {
     expect(chrome.describe()).toBe("Chrome for Testing 153 (downloaded)");
   });
 
+  it("on a Linux server keeps the download it started when agent-browser's PATH later shows a browser", async () => {
+    const root = mkdtempSync(join(tmpdir(), "omb-launcher-"));
+    folders.push(root);
+    // A drive-free PATH: on Windows a "C:" in the temp folder would be split at ":".
+    let enginePath = "/engine/bin";
+    const env = { HOME: root };
+    const real = chromeHost({ dataDir: join(root, "data"), env, platform: "linux", arch: "x64", enginePath: () => enginePath });
+    const host = { ...real, exists: (path: string) => path === "/engine/extra/chromium" ? existsSync(join(root, "extra", "chromium")) : path.startsWith(root) && existsSync(path), list: (folder: string) => folder.startsWith(root) ? real.list(folder) : [] };
+    let finish!: () => void;
+    const install = vi.fn(async (options: Parameters<typeof installChromeForTesting>[0]) => {
+      await new Promise<void>((resolve) => { finish = resolve; });
+      const path = chromeForTestingExecutable(options.dataDir, options.pin);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, "#!/bin/sh\n", { mode: 0o755 });
+      return path;
+    });
+    const chrome = new ChromeLauncher({
+      dataDir: join(root, "data"), env, platform: "linux", arch: "x64", host, engine: () => ({ managed: true }), install,
+      calibrate: async () => identity("153", "Not_A Brand"), screen: async () => ({ width: 1440, height: 900 }), sidecars: sidecars(), log: () => {}, checkLauncher: async () => {},
+    });
+    const launching = { AGENT_BROWSER_EXECUTABLE_PATH: chrome.path, AGENT_BROWSER_HIDE_SCROLLBARS: "0" };
+    expect(chrome.env()).toEqual(launching);
+    await vi.waitFor(() => expect(install).toHaveBeenCalledOnce());
+    // The login shell's PATH arrives while Chrome for Testing downloads, with a Chromium on it.
+    mkdirSync(join(root, "extra"), { recursive: true });
+    writeFileSync(join(root, "extra", "chromium"), "#!/bin/sh\n", { mode: 0o755 });
+    enginePath = "/engine/extra";
+    expect(chrome.env()).toEqual(launching);
+    finish();
+    await chrome.prepare();
+    expect(chrome.env()).toEqual(launching);
+    expect(install).toHaveBeenCalledOnce();
+  });
+
   it("uses Chrome for Testing when the installed Google Chrome cannot start headless", async () => {
     const machine = mac();
     const install = vi.fn(async (options: Parameters<typeof installChromeForTesting>[0]) => {
@@ -144,6 +216,48 @@ describe("the Chrome launcher", () => {
     expect(chrome.env()).toEqual({});
     expect(chrome.describe()).toContain("Chrome could not be started");
     expect(existsSync(chrome.path)).toBe(false);
+  });
+
+  it("counts a failed Chrome download as the engine's own shell, but not when an installed Google Chrome is what the engine uses", async () => {
+    const bare = launcher(mac({ chrome: false }));
+    expect(bare.runsShellForWantOfChrome()).toBe(false);
+    await bare.prepare();
+    expect(bare.env()).toEqual({});
+    expect(bare.runsShellForWantOfChrome()).toBe(true);
+    const machine = mac();
+    const managed = launcher({ ...machine, host: { ...machine.host, exists: (path: string) => path.endsWith("com.google.Chrome.plist") || machine.host.exists(path) } });
+    await managed.prepare();
+    expect(managed.env()).toEqual({});
+    expect(managed.runsShellForWantOfChrome()).toBe(false);
+  });
+
+  it("counts a downloaded Chrome that then fails its checks as the engine's own shell", async () => {
+    const install = vi.fn(async (options: Parameters<typeof installChromeForTesting>[0]) => {
+      const path = chromeForTestingExecutable(options.dataDir, options.pin);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, "#!/bin/sh\n", { mode: 0o755 });
+      return path;
+    });
+    const cached = launcher(mac({ chrome: false }), { install, calibrate: async () => { throw new Error("the browser exited (1) before it answered"); } });
+    await cached.prepare();
+    expect(install).toHaveBeenCalledTimes(1);
+    expect(cached.plan()).toMatchObject({ kind: "chrome", chrome: { source: "downloaded" } });
+    expect(cached.env()).toEqual({});
+    expect(cached.runsShellForWantOfChrome()).toBe(true);
+  });
+
+  it("keeps what the host needs behind the error a viewer gets, when Chrome cannot start there", async () => {
+    const named = mkdtempSync(join(tmpdir(), "omb-named-"));
+    folders.push(named);
+    writeFileSync(join(named, "chrome"), "#!/bin/sh\n", { mode: 0o755 });
+    const host = new BrowserHostError("container");
+    const chrome = launcher(mac({ env: { OMB_CHROME_PATH: join(named, "chrome") } }), {
+      calibrate: async () => { throw new ChromeLaunchError(host.message, "Running as root without --no-sandbox is not supported.", host); },
+    });
+    const failure = await chrome.binary().catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain("OMB_BROWSER_SANDBOX=0");
+    expect(hostSetupOf(failure)).toBe(host);
   });
 
   it("keeps a working launcher when reading a newer binary fails, rather than switch browsers mid-session", async () => {
@@ -216,14 +330,16 @@ describe("the Chrome launcher", () => {
   });
 
   it("gives a started browser its identity, with the person's languages as a list, only when it is this launcher's headless Chrome", async () => {
-    const machine = mac({ env: { LANG: "pt_BR.UTF-8" } });
+    const machine = mac({ env: { LANG: "en_US.UTF-8" } });
     const attached = sidecars();
     const chrome = launcher(machine, { sidecars: attached });
+    chrome.setLanguageProvider(() => "ko");
     await chrome.started("bot-1", headless(chrome.path));
     expect(attached.ensure).not.toHaveBeenCalled();
     await chrome.ready(headless(chrome.path));
+    expect(readFileSync(chrome.path, "utf8")).toContain("'--lang=ko-KR'");
     await chrome.started("bot-1", headless(chrome.path));
-    expect(attached.ensure).toHaveBeenCalledExactlyOnceWith("bot-1", headless(chrome.path), { ...identity("155"), acceptLanguage: "pt-BR,pt,en-US,en" });
+    expect(attached.ensure).toHaveBeenCalledExactlyOnceWith("bot-1", headless(chrome.path), { ...identity("155"), acceptLanguage: "ko-KR,ko,en-US,en" });
     await chrome.started("bot-2", { command: "/engine/agent-browser", env: { AGENT_BROWSER_EXECUTABLE_PATH: chrome.path } });
     await chrome.started("bot-3", { command: "/engine/agent-browser", env: { ...headless(chrome.path).env, AGENT_BROWSER_AUTO_CONNECT: "1" } });
     await chrome.started("bot-4", headless("/bundle/chrome-headless-shell"));

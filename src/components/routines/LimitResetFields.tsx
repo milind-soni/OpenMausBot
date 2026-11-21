@@ -1,13 +1,13 @@
 import type { LimitResetRepeat } from "../../../shared/limit-reset";
 import { t } from "@/lib/i18n";
-import { engineName, resetTime, useEngineLimits } from "@/lib/limit-resets";
+import { engineName, resetTime, timesEngineReset, useEngineLimits } from "@/lib/limit-resets";
 import { Select } from "../Select";
 
 export interface LimitResetChoice { engine: string; repeat: LimitResetRepeat }
 
 /** The editor's "When my AI limit resets": which AI, once or each time, and when that is if it is known. */
 export function LimitResetFields({ value, botEngine, onChange }: { value: LimitResetChoice; botEngine?: string; onChange: (next: LimitResetChoice) => void }) {
-  const limits = useEngineLimits();
+  const limits = useEngineLimits().filter(timesEngineReset);
   const engine = value.engine || botEngine || limits[0]?.engine || "";
   const choices = [...new Set([...(botEngine ? [botEngine] : []), ...limits.map((limit) => limit.engine), ...(engine ? [engine] : [])])];
   const reset = limits.find((limit) => limit.engine === engine)?.resetsAt ?? null;

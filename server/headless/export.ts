@@ -49,21 +49,28 @@ function unused(dir: string, name: string, taken: Set<string>): string {
   const ext = extname(name);
   const stem = name.slice(0, name.length - ext.length);
   let candidate = name;
-  for (let n = 2; taken.has(join(dir, candidate)); n++) candidate = `${stem} (${n})${ext}`;
+  for (let n = 2; taken.has(join(dir, candidate)) || existsSync(join(dir, candidate)); n++) candidate = `${stem} (${n})${ext}`;
   taken.add(join(dir, candidate));
   return candidate;
 }
 
+function unusedFolder(parent: string, name: string, taken: Set<string>): string {
+  let folder = join(parent, name);
+  for (let n = 2; taken.has(folder) || existsSync(folder); n++) folder = join(parent, `${name} (${n})`);
+  taken.add(folder);
+  return folder;
+}
+
 export function exportFolder(dir: string, force: boolean): string {
   const out = resolve(dir);
-  if (!existsSync(out) || force) return out;
+  if (!existsSync(out)) return out;
   let entries: string[];
   try {
     entries = readdirSync(out);
   } catch (error) {
     throw usageError(`${out} cannot be written into (${(error as NodeJS.ErrnoException).code ?? "error"})`, "choose a folder");
   }
-  if (entries.length) throw usageError(`${out} already has files in it`, "choose an empty folder, or pass --force to write into it");
+  if (entries.length && !force) throw usageError(`${out} already has files in it`, "choose an empty folder, or pass --force to write into it");
   return out;
 }
 
@@ -73,7 +80,7 @@ function markdownOf(title: string, messages: readonly Rec[], botName: string): s
     const who = message.role === "user"
       ? `${message.sender?.name ?? "User"}${message.via === "api" ? " (via the local API)" : ""}`
       : message.from?.name ?? botName;
-    if (message.kind === "text" && message.text) lines.push(`**${who}:**`, "", String(message.text), "");
+    if ((message.kind === "text" || message.kind === "widget" || message.kind === "app") && message.text) lines.push(`**${who}:**`, "", String(message.text), "");
     else if (message.kind === "activity" && message.tool) lines.push(`> ${message.tool.name}`, "");
     else if (message.kind === "screen") lines.push("> [screen capture]", "");
     else if (message.kind === "options" && message.card) lines.push(`> ${message.card.title}${message.card.answered ? ` — answered: ${message.card.answered}` : ""}`, "");
@@ -131,13 +138,13 @@ const refusal = async (response: Response | null): Promise<string> =>
 
 export async function exportJob(client: HeadlessClient, options: ExportOptions, output: Output): Promise<Rec> {
   const out = exportFolder(options.out, options.force === true);
-  if (options.force) removeEarlierExport(out);
   const maxFiles = options.maxFiles ?? 200;
   const maxScreens = options.maxScreens ?? 100;
   const maxBytes = options.maxBytes ?? 500_000_000;
   const job = await readJob(client, options.threadId, { since: String(options.since ?? 0), full: "1" });
   const nodes: Rec[] = (job.nodes ?? []).filter((node: Rec) => !options.root || node.rootId === options.root);
   if (options.root && !nodes.length) throw usageError(`no job with root ${options.root} in this conversation`, "openmausbot export TARGET without --root writes all of it");
+  if (options.force) removeEarlierExport(out);
   for (const dir of ["transcripts", "files", "screens"]) mkdirSync(join(out, dir), { recursive: true });
 
   const threads = new Map<string, string>([[options.threadId, "conversation"]]);
@@ -185,7 +192,7 @@ export async function exportJob(client: HeadlessClient, options: ExportOptions, 
       return keep(response, join(out, "files", folder), fileName(response.headers.get("content-disposition"), link), about, files);
     }
     const listing = await response.json() as Rec;
-    const dir = join(out, "files", folder, safeName(String(listing.name ?? "folder")));
+    const dir = unusedFolder(join(out, "files", folder), safeName(String(listing.name ?? "folder")), taken);
     for (const entry of Array.isArray(listing.entries) ? listing.entries as Rec[] : []) {
       const name = String(entry.name);
       const one = { ...about, entry: name };

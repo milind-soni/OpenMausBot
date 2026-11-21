@@ -6,9 +6,9 @@ import { Crown } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
-import { useStore, type Bot } from "@/state/store";
+import { threadApprovalModes, type Bot } from "@/state/store";
 import type { ApprovalMode } from "../../../shared/approval-mode";
-import { DEFAULT_OUTBOUND_POLICY, type OutboundPolicy } from "../../../shared/outbound";
+import { effectiveOutboundPolicy, type OutboundPolicy } from "../../../shared/outbound";
 import { ApprovalModeSelector } from "../ApprovalModeSelector";
 import { CommandAllowlistDialog } from "../CommandAllowlistDialog";
 import { LocalComputerAutoWarning } from "../LocalComputerAutoWarning";
@@ -17,6 +17,7 @@ import { ManagedTeamsSettings } from "./ManagedTeamsSettings";
 import { ProposalStatus } from "./ProposalStatus";
 import type { useBotSettingsDerived } from "./useBotSettingsDerived";
 import { useBotEditor } from "./BotEditorContext";
+import { sameItems, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 export type PermissionsPart = "chief" | "approval" | "outbound";
 
@@ -31,26 +32,30 @@ export function PermissionsSection({
 }) {
   const { patch, engine, canCoordinate, approvalMode, trustedModesAvailable, sectionName, currentChief } = derived;
   const team = useTeamPeople();
-  const { state, dispatch } = useStore();
+  const teams = useStoreSelector((s) => ["", ...(s.sections ?? []), ...[...s.bots, ...s.groups].map(member => member.section?.trim() || "")], sameItems), dispatch = useStoreDispatch();
   const ownerOrAdmin = useOwnerOrAdmin();
   const { draft } = useBotEditor();
   const displaySectionName = sectionName === "General" ? t("botAccess.teams.general") : sectionName;
   const [localAutoWarning, setLocalAutoWarning] = useState<string | null>(null);
   const [commandAllowlistTarget, setCommandAllowlistTarget] = useState<{ botId: string; botName: string } | null>(null);
   const shows = (part: PermissionsPart) => !parts || parts.includes(part);
-  const applyFullEverywhere = () =>
-    dispatch({ type: "updateBot", botId: bot.id, patch: { approvalMode: "full", applyToAllThreads: true } });
+  const applyEverywhere = (mode: "ask" | "full") =>
+    dispatch({ type: "updateBot", botId: bot.id, patch: { approvalMode: mode, applyToAllThreads: true } });
   const setApprovalMode = (mode: ApprovalMode) => {
-    if (mode === approvalMode) return;
-    if (mode === "full") {
-      applyFullEverywhere();
+    if (mode === "ask") {
+      const threadModes = threadApprovalModes(bot);
+      const reachesEveryThread = trustedModesAvailable || !threadModes.includes("custom");
+      if (reachesEveryThread && (approvalMode !== "ask" || threadModes.some((threadMode) => threadMode !== "ask"))) applyEverywhere("ask");
+      else if (approvalMode !== "ask") patch({ approvalMode: "ask" });
       return;
     }
+    if (mode === approvalMode) return;
     if (mode === "auto" && bot.computer === "local") {
       setLocalAutoWarning(bot.id);
       return;
     }
-    patch({ approvalMode: mode });
+    if (mode === "full") applyEverywhere("full");
+    else patch({ approvalMode: mode });
   };
 
   return (
@@ -98,7 +103,7 @@ export function PermissionsSection({
         {bot.chiefOfStaff && <ManagedTeamsSettings
           key={bot.id + JSON.stringify(bot.managedSections ?? [])}
           name={bot.name} ownTeam={bot.section?.trim() || ""}
-          teams={["", ...(state.sections ?? []), ...[...state.bots, ...state.groups].map(member => member.section?.trim() || "")]}
+          teams={teams}
           allowed={bot.managedSections ?? []}
           onSave={managedSections => patch({ managedSections, acknowledgePeerScope: true })}
         />}
@@ -128,7 +133,7 @@ export function PermissionsSection({
         {!draft && approvalMode === "full" && <button
           type="button"
           className="mt-3 text-[13px] text-accent hover:underline disabled:opacity-40"
-          onClick={applyFullEverywhere}
+          onClick={() => applyEverywhere("full")}
         >{t("permissions.approval.applyFull")}</button>}
         {!draft && ownerOrAdmin === true && <button
           type="button"
@@ -142,7 +147,7 @@ export function PermissionsSection({
         {...commandAllowlistTarget}
         onClose={() => setCommandAllowlistTarget(null)}
       />}
-      {!draft && shows("outbound") && <OutboundControl bot={bot} onChange={(outbound) => patch({ outbound })} />}
+      {!draft && shows("outbound") && <OutboundControl bot={bot} fullAccess={approvalMode === "full"} onChange={(outbound) => patch({ outbound })} />}
       <LocalComputerAutoWarning
         open={localAutoWarning !== null}
         onCancel={() => setLocalAutoWarning(null)}
@@ -157,8 +162,8 @@ export function PermissionsSection({
   );
 }
 
-function OutboundControl({ bot, onChange }: { bot: Bot; onChange: (policy: OutboundPolicy) => void }) {
-  const policy = bot.outbound ?? DEFAULT_OUTBOUND_POLICY;
+function OutboundControl({ bot, fullAccess, onChange }: { bot: Bot; fullAccess: boolean; onChange: (policy: OutboundPolicy) => void }) {
+  const policy = effectiveOutboundPolicy(bot.outbound, fullAccess);
 
   return (
     <div className="rounded-xl bg-card p-4">
@@ -179,7 +184,7 @@ function OutboundControl({ bot, onChange }: { bot: Bot; onChange: (policy: Outbo
             type="button"
             aria-pressed={policy.policy === value}
             onClick={() => {
-              if (value !== policy.policy) onChange({ policy: value });
+              if (value !== bot.outbound?.policy) onChange({ policy: value });
             }}
             className={cn(
               "flex-1 rounded-md px-2.5 py-1.5 text-[13px] font-medium",

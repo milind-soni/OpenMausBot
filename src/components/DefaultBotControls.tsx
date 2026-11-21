@@ -1,11 +1,13 @@
-import { EyeOff } from "lucide-react";
+import { EyeOff, UserMinus } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { DEFAULT_BOT_NAME, myDefaultBot, useViewerEmail } from "@/lib/default-bot";
-import { useStore, type Action, type Bot } from "@/state/store";
+import { type Action, type Bot } from "@/state/store";
 import { Card, NavRow } from "./bot-panel/rows";
 import { SettingRow, Switch } from "./SettingsPrimitives";
+import { useStoreDispatch } from "@/state/store-select";
+import { useBotApartFromTurns } from "@/state/apart-from-turns";
 
 /** Hiding MausBot is the Settings switch turned off: one place says whether it is in the sidebar. */
 export function showDefaultBot(dispatch: (action: Action) => void, bot: Pick<Bot, "id" | "name">, shown: boolean): void {
@@ -14,7 +16,7 @@ export function showDefaultBot(dispatch: (action: Action) => void, bot: Pick<Bot
 }
 
 export function HideDefaultBotItem({ bot, onDone, className = "flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px]" }: { bot: Bot; onDone: () => void; className?: string }) {
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   return (
     <button
       type="button"
@@ -30,10 +32,31 @@ export function HideDefaultBotItem({ bot, onDone, className = "flex w-full items
   );
 }
 
+/** Demotes the default bot to a regular bot: the mark is cleared server-side, so it can then be archived or deleted. */
+export function DemoteDefaultBotItem({ bot, onDone, className = "flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px]" }: { bot: Bot; onDone: () => void; className?: string }) {
+  const dispatch = useStoreDispatch();
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      data-default-bot-demote=""
+      onClick={() => {
+        dispatch({ type: "updateBot", botId: bot.id, patch: { defaultBot: null } });
+        onDone();
+      }}
+      title={t("defaultBot.demoteHint")}
+      className={cn(className, "text-ink hover:bg-menu-hover")}
+    >
+      <UserMinus size={16} className="text-ink-secondary" />
+      {t("defaultBot.demote")}
+    </button>
+  );
+}
+
 /** Settings → General: whether the viewer's own MausBot has a row in the sidebar. */
 export function DefaultBotSidebarRow({ simple = false }: { simple?: boolean }) {
-  const { state, dispatch } = useStore();
-  const bot = myDefaultBot(state.bots, useViewerEmail());
+  const viewer = useViewerEmail(), dispatch = useStoreDispatch();
+  const bot = useBotApartFromTurns((bots) => myDefaultBot(bots, viewer));
   if (!bot) return null;
   const shown = !bot.sidebarHidden;
   return (
@@ -50,7 +73,7 @@ export function DefaultBotSidebarRow({ simple = false }: { simple?: boolean }) {
 
 /** Bot settings: MausBot is never deleted, only taken off the sidebar. */
 export function DefaultBotHideRow({ bot }: { bot: Bot }) {
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   if (!bot.defaultBot || bot.sidebarHidden) return null;
   return (
     <Card anchor="default-bot">

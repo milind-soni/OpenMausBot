@@ -153,6 +153,22 @@ test("native Settings requests accept only the fixed organisation section, Cloud
   unsubscribe();
 });
 
+test("a Settings page name from Switch to This computer reaches Settings, also before React subscribes", async () => {
+  const calls = [];
+  const unsubscribe = exposed.api.onOpenAppSettings(section => calls.push(section));
+  try {
+    emit("app:open-settings", "app");
+    emit("app:open-settings", "account");
+    emit("app:open-settings", "phone");
+  } finally { unsubscribe(); }
+  assert.deepEqual(calls, ["app", "account", "phone"]);
+  emit("app:open-settings", "account");
+  const later = exposed.api.onOpenAppSettings(section => calls.push(section));
+  await Promise.resolve();
+  assert.deepEqual(calls.slice(3), ["account"]);
+  later();
+});
+
 test("a Cloud link arriving before React subscriptions is delivered exactly once after mount", async () => {
   emit("app:open-settings", "https://other.example");
   emit("app:open-settings", "cloud");

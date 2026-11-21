@@ -56,9 +56,9 @@ describe("schedulerDueOf: when this process's scheduler next has work", () => {
   type Run = Parameters<typeof schedulerDueOf>[1][number];
   const run = (fields: Partial<Run>) => ({ status: "running", ...fields }) as Run;
 
-  it("is null with nothing enabled, queued or limited", () => {
+  it("is null with nothing enabled, queued or started", () => {
     expect(schedulerDueOf([], [], NOW, NOW)).toBeNull();
-    expect(schedulerDueOf([{ enabled: false, nextRunAt: NOW }], [run({ status: "completed" }), run({ startedAt: NOW })], NOW, NOW)).toBeNull();
+    expect(schedulerDueOf([{ enabled: false, nextRunAt: NOW }], [run({ status: "completed" }), run({ status: "failed", startedAt: NOW })], NOW, NOW)).toBeNull();
   });
 
   it("the next run, a check no sooner than checks may start, and a check's meeting wake", () => {
@@ -79,5 +79,11 @@ describe("schedulerDueOf: when this process's scheduler next has work", () => {
     expect(schedulerDueOf([], [run({ startedAt: NOW - 10 * MINUTE, timeoutMinutes: 30 })], NOW, NOW)).toBe(NOW + 20 * MINUTE);
     expect(schedulerDueOf([], [run({ status: "waiting", startedAt: NOW - 10 * MINUTE, waitedMs: 5 * MINUTE, timeoutMinutes: 30 })], NOW, NOW)).toBe(NOW + 25 * MINUTE);
     expect(schedulerDueOf([], [run({ startedAt: NOW - 40 * MINUTE, timeoutMinutes: 30 })], NOW, NOW)).toBe(NOW);
+    // Under the default limit the scheduler comes back each minute to count the run's work, sooner when less is left.
+    expect(schedulerDueOf([], [run({ startedAt: NOW - 10 * MINUTE, target: "bot" })], NOW, NOW)).toBe(NOW + MINUTE);
+    expect(schedulerDueOf([], [run({ startedAt: NOW - 400 * MINUTE, workedMs: 180 * MINUTE - 20_000, target: "bot" })], NOW, NOW)).toBe(NOW + 20_000);
+    expect(schedulerDueOf([], [run({ startedAt: NOW - 400 * MINUTE, workedMs: 180 * MINUTE - 20_000, target: "room-goal" })], NOW, NOW)).toBe(NOW + MINUTE);
+    expect(schedulerDueOf([], [run({ status: "waiting", startedAt: NOW - 400 * MINUTE })], NOW, NOW)).toBeNull();
+    expect(schedulerDueOf([], [run({ status: "waiting", startedAt: NOW - 10 * MINUTE, timeoutMinutes: 30, asked: { approval: true, subject: "to run it", since: NOW - MINUTE } })], NOW, NOW)).toBeNull();
   });
 });

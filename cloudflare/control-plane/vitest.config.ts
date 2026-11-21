@@ -27,11 +27,18 @@ export default defineConfig({
           ALLOWED_ORIGINS: "https://app.openmausbot.test",
           // Production starts in observe (wrangler.jsonc); the suite exercises reclaiming.
           OMB_TUNNEL_RECLAIM: "on",
+          // The tunnel release switches as the code defaults them (off), whatever wrangler.jsonc has live; the
+          // release and cutoff tests turn each one on themselves.
+          RELAY_TUNNEL_RELEASE_PERCENT: "0",
+          RELAY_TUNNEL_RELEASE_DAYS: "3",
+          TUNNEL_LEGACY_PHONE_CUTOFF_PERCENT: "0",
+          TUNNEL_MIN_APP_VERSION: "",
+          TUNNEL_REASON_MIN_VERSION: "",
           TEST_MIGRATIONS: await readD1Migrations(`${root}migrations`),
         },
         // An empty database for migration tests that need data written by an
         // older schema before the next migration runs.
-        d1Databases: ["MIGRATION_DB"],
+        d1Databases: ["MIGRATION_DB", "PUSH_MIGRATION_DB"],
       },
     })),
   ],

@@ -3,6 +3,7 @@ import { writeFileSync } from "node:fs";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { fixtureApi } from "../scripts/testing/preview-fixture.ts";
+import { isTitleCall } from "./testing/title-call.ts";
 
 it("sends history once through the real OpenAI-compatible server route after a rewind", async () => {
   const requests: any[] = [];
@@ -16,7 +17,9 @@ it("sends history once through the real OpenAI-compatible server route after a r
     if (req.method === "GET") { res.statusCode = 404; res.end(); return; }
     let body = "";
     for await (const chunk of req) body += chunk;
-    requests.push(JSON.parse(body));
+    const request = JSON.parse(body);
+    if (isTitleCall(request)) { res.writeHead(500).end(); return; }
+    requests.push(request);
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.end(`data: ${JSON.stringify({ choices: [{ delta: { content: "Fixture reply" }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
   });

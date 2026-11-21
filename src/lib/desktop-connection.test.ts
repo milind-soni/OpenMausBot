@@ -7,6 +7,9 @@ const clients = vi.hoisted(() => [] as Array<{
   password: string;
   listeners: Map<string, Array<(event: { detail: { text: string } }) => void>>;
   disconnected: number;
+  viewOnly: boolean;
+  pasted: string[];
+  keys: unknown[][];
   emit(type: string, text?: string): void;
 }>);
 vi.mock("@novnc/novnc", () => ({
@@ -15,6 +18,9 @@ vi.mock("@novnc/novnc", () => ({
     password: string;
     listeners = new Map<string, Array<(event: { detail: { text: string } }) => void>>();
     disconnected = 0;
+    viewOnly = false;
+    pasted: string[] = [];
+    keys: unknown[][] = [];
     scaleViewport = false;
     background = "";
     constructor(_screen: HTMLElement, url: string, options: { credentials: { password: string } }) {
@@ -24,6 +30,12 @@ vi.mock("@novnc/novnc", () => ({
     }
     addEventListener(type: string, listener: (event: { detail: { text: string } }) => void) {
       this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+    }
+    clipboardPasteFrom(text: string) {
+      this.pasted.push(text);
+    }
+    sendKey(...key: unknown[]) {
+      this.keys.push(key);
     }
     disconnect() {
       this.disconnected++;
@@ -50,6 +62,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  delete window.ogb;
 });
 
 describe("connecting to a desktop", () => {
@@ -107,5 +120,100 @@ describe("connecting to a desktop", () => {
     const sent: number[] = [];
     typeOnDesktop({ sendKey: (keysym: number) => sent.push(keysym) } as never, "a\n\tП");
     expect(sent).toEqual([0x61, 0xff0d, 0xff09, 0x0100041f]);
+  });
+});
+
+describe("pasting into a desktop", () => {
+  // The canvas noVNC types from sits inside the screen; its own key listener stands in for noVNC's.
+  async function desktop(platform: string, leave = new AbortController()) {
+    window.ogb = { platform } as typeof window.ogb;
+    const screen = document.createElement("div");
+    const canvas = screen.appendChild(document.createElement("canvas"));
+    const forwarded: string[] = [];
+    canvas.addEventListener("keydown", (event) => forwarded.push(event.key));
+    await connectDesktop(screen, "local/shared", { signal: leave.signal, events: events() });
+    const client = clients[0]!;
+    const press = (key: string, init: KeyboardEventInit = {}) =>
+      canvas.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init }));
+    const paste = (text: string) => {
+      const event = new Event("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "clipboardData", { value: { getData: (type: string) => type === "text/plain" ? text : "" } });
+      canvas.dispatchEvent(event);
+      return event;
+    };
+    const lift = (code: string) => canvas.dispatchEvent(new KeyboardEvent("keyup", { code, bubbles: true }));
+    return { client, forwarded, press, lift, paste };
+  }
+
+  it("⌘V on a Mac puts the Mac's text on the desktop's clipboard and presses Ctrl+V there, not ⌘", async () => {
+    const { client, forwarded, press, lift, paste } = await desktop("darwin");
+    press("Meta", { code: "MetaLeft", metaKey: true });
+    press("v", { code: "KeyV", metaKey: true });
+    lift("KeyV"); // the app's Edit menu can deliver the paste after V is up
+    const event = paste("from the Mac");
+    expect(forwarded).toEqual(["Meta"]);
+    expect(event.defaultPrevented).toBe(true);
+    expect(client.pasted).toEqual(["from the Mac"]);
+    expect(client.keys).toEqual([[0xffe3, "ControlLeft", true], [0xffe9, "MetaLeft", false], [0x76, "KeyV"], [0xffe3, "ControlLeft", false]]);
+  });
+
+  it("Ctrl+V elsewhere pastes the same way, leaving the held Ctrl to the person's own release", async () => {
+    const { client, forwarded, press, paste } = await desktop("win32");
+    press("Control", { code: "ControlLeft", ctrlKey: true });
+    press("v", { code: "KeyV", ctrlKey: true });
+    paste("from Windows");
+    expect(forwarded).toEqual(["Control"]);
+    expect(client.pasted).toEqual(["from Windows"]);
+    expect(client.keys).toEqual([[0xffe3, "ControlLeft", true], [0x76, "KeyV"]]);
+  });
+
+  it("once ⌘ is let go, a paste from the menu presses the whole Ctrl+V", async () => {
+    const { client, press, lift, paste } = await desktop("darwin");
+    press("Meta", { code: "MetaLeft", metaKey: true });
+    lift("MetaLeft");
+    paste("menu");
+    expect(client.keys).toEqual([[0xffe3, "ControlLeft", true], [0x76, "KeyV"], [0xffe3, "ControlLeft", false]]);
+  });
+
+  it("a clipboard with no text still presses Ctrl+V, so the desktop pastes its own clipboard as before", async () => {
+    const { client, paste } = await desktop("linux");
+    paste("");
+    expect(client.pasted).toEqual([]);
+    expect(client.keys).toEqual([[0xffe3, "ControlLeft", true], [0x76, "KeyV"], [0xffe3, "ControlLeft", false]]);
+  });
+
+  it("the V key pastes on a non-Latin layout too, but a Latin layout's other letter there stays a key", async () => {
+    const { client, forwarded, press, paste } = await desktop("win32");
+    press("м", { code: "KeyV", ctrlKey: true }); // Russian layout
+    press("k", { code: "KeyV", ctrlKey: true }); // Dvorak: Ctrl+K, not a paste
+    paste("Привет");
+    expect(forwarded).toEqual(["k"]);
+    expect(client.pasted).toEqual(["Привет"]);
+  });
+
+  it("other shortcuts still reach the desktop as keys: Ctrl+V on a Mac, ⌘⇧V", async () => {
+    const { client, forwarded, press } = await desktop("darwin");
+    press("v", { code: "KeyV", ctrlKey: true });
+    press("V", { code: "KeyV", metaKey: true, shiftKey: true });
+    expect(forwarded).toEqual(["v", "V"]);
+    expect(client.keys).toEqual([]);
+  });
+
+  it("a view-only desktop gets nothing", async () => {
+    const { client, paste } = await desktop("darwin");
+    client.viewOnly = true;
+    paste("secret");
+    expect(client.pasted).toEqual([]);
+    expect(client.keys).toEqual([]);
+  });
+
+  it("stops once the viewer has left", async () => {
+    const leave = new AbortController();
+    const { client, forwarded, press, paste } = await desktop("darwin", leave);
+    leave.abort();
+    press("v", { code: "KeyV", metaKey: true });
+    paste("late");
+    expect(forwarded).toEqual(["v"]);
+    expect(client.pasted).toEqual([]);
   });
 });

@@ -131,10 +131,10 @@ describe("the mascot and its status line through a long turn", () => {
     engine({ type: "turn.progress", activity: "write", itemId: "toolu_write", file: "index.html", bytes: 14 * 1024 + 300 } as Partial<RuntimeEvent>);
     expect(statusLine()).toBe("Working · 1m 12s · Writing index.html · 14 KB");
 
-    // Ten silent minutes: no frame, no row. Nothing times the mascot out.
+    // Ten silent minutes: no frame, no row. Nothing times the mascot out; the line says how long it has been quiet.
     act(() => void vi.advanceTimersByTime(10 * 60_000));
     expect(mascot()).not.toBeNull();
-    expect(statusLine()).toBe("Working · 11m 12s · Writing index.html · 14 KB");
+    expect(statusLine()).toBe("Working · 11m 12s · Writing index.html · 14 KB · nothing new for 10 min");
   });
 
   it("stays through a long silent tool, keeping the call's own words while it runs", () => {

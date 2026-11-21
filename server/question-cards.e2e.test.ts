@@ -115,7 +115,7 @@ beforeAll(async () => {
   scout = await create({ name: "Scout", reportsTo: CLEO.email });
   expect((await team.as(cleo, "PATCH", `/api/bots/${scout.id}`, { chiefOfStaff: true })).status).toBe(200);
   ledger = await create({ name: "Ledger", reportsTo: CLEO.email });
-  // Questions reach the person on "Ask me first"; at Full access, the default, the requesting bot decides them instead.
+  // Questions reach the person on "Ask for approval"; at Full access, the default, the requesting bot decides them instead.
   for (const bot of [scout, ledger]) expect((await team.as(cleo, "PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask", applyToAllThreads: true })).status).toBe(200);
   const opened = await team.as(cleo, "POST", `/api/bots/${scout.id}/tasks`, { title: "Cleo and Scout" });
   expect(opened.status, JSON.stringify(opened.body)).toBe(201);

@@ -125,6 +125,22 @@ test("bots' work: new files come down marked as downloaded; nothing here is dele
   assert.equal(s.read("report.md"), "v1");
 });
 
+test("bots' work: waits for the local disk reserve, then downloads when it fits", async (t) => {
+  const s = setup(t);
+  s.cloud.put("f1", "report.md", "v1");
+  const waiting = await s.outputs({ freeBytes: () => GB + 1 });
+  assert.equal(waiting.status, "waiting");
+  assert.equal(waiting.waitingBytes, 2);
+  assert.equal(existsSync(join(s.local, "report.md")), false);
+  assert.deepEqual(s.cloud.calls.filter(([kind]) => kind === "download"), []);
+
+  const ready = await s.outputs({ freeBytes: () => GB + 2 });
+  assert.equal(ready.status, "synced");
+  assert.equal(ready.waitingBytes, 0);
+  assert.equal(s.read("report.md"), "v1");
+  assert.deepEqual(s.cloud.calls.filter(([kind]) => kind === "download"), [["download", "report.md"]]);
+});
+
 test("bots' work: a newer version replaces an untouched file (the old one to the Recycle Bin), and lands beside the person's edit", async (t) => {
   const s = setup(t);
   s.cloud.put("f1", "report.md", "v1");
@@ -158,4 +174,21 @@ test("bots' work: a damaged download is thrown away, and a path from My Cloud ne
   await s.outputs();
   assert.equal(s.read("ok.md"), "fine");
   assert.equal(existsSync(join(s.dir, "escape.md")), false);
+});
+
+test("bots' work: a repeatedly failing file is a problem rather than endless copying", async (t) => {
+  const s = setup(t);
+  s.cloud.put("f1", "report.md", "the report");
+  const download = s.cloud.client.download;
+  s.cloud.client.download = async () => { throw new Error("File is locked"); };
+  assert.equal((await s.outputs()).status, "copying");
+  assert.equal((await s.outputs()).status, "copying");
+  const failed = await s.outputs();
+  assert.equal(failed.status, "problem");
+  assert.equal(failed.problem, "report.md: File is locked");
+  s.cloud.client.download = download;
+  const recovered = await s.outputs();
+  assert.equal(recovered.status, "synced");
+  assert.equal(recovered.problem, null);
+  assert.deepEqual(s.state.failures(), []);
 });

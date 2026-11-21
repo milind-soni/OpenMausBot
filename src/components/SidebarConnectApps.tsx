@@ -81,7 +81,7 @@ export function SidebarConnectApps({ circle = false }: { circle?: boolean }) {
       onClick={() => dispatch({ type: "togglePlugins", open: true })}
       className={circle ? SIMPLE_TOP_BUTTON : cn("group/apps flex h-9 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-full pl-4 pr-3 text-[14px] font-medium leading-5 text-ink", ELEVATED_CONTROL, ELEVATED_HOVER)}
     >
-      {circle ? <Puzzle size={18} strokeWidth={1.5} aria-hidden="true" /> : <>
+      {circle ? <Puzzle size={16} aria-hidden="true" /> : <>
         <span className="min-w-0 truncate">{label}</span>
         {/* The logos rest grey and apart, with no tile, so the sidebar's loudest colour is never an ad; hover brings the tiles and colour back. */}
         <span aria-hidden="true" data-app-faces="" className="flex shrink-0 items-center gap-1 opacity-60 grayscale motion-safe:transition-[filter,opacity] group-hover/apps:opacity-100 group-hover/apps:grayscale-0 group-hover/apps:invert-0 group-hover/apps:mix-blend-normal group-focus-visible/apps:opacity-100 group-focus-visible/apps:grayscale-0 group-focus-visible/apps:invert-0 group-focus-visible/apps:mix-blend-normal">

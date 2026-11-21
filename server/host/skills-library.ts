@@ -2,22 +2,25 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
 import { skillCalls, skillCommandTurnText } from "../../shared/skill-command.ts";
-import { isSkillSwitchAction, type SkillAssignmentState, type SkillManagementAction, type SkillRequestCardData, type SkillShareRecord } from "../../shared/skill-request.ts";
+import type { SkillAssignmentAction } from "../../shared/skill-assignment.ts";
 import { isSkillName } from "../../shared/skill-md.ts";
-import { audienceWithin, narrowestAudience, intersectAudience } from "../bot-visibility.ts";
-import { DATA_DIR, type AppConfig } from "../config.ts";
+import { isSkillSwitchAction, type SkillRequestCardData, type SkillShareRecord } from "../../shared/skill-request.ts";
+import { narrowestAudience, intersectAudience } from "../bot-visibility.ts";
 import { chiefLevel } from "../chief-level.ts";
+import { DATA_DIR, type AppConfig } from "../config.ts";
 import { appendDecision } from "../decision-log.ts";
 import { UNDO_STALE, type DirectApply } from "../direct-apply.ts";
 import {
   importedSkillListings, importedSkillsFor, importedSkillsPrompt, listedImportedSkills, nativeSkillFolders, readImportedSkillFile,
   readImportedSkills, type ImportedSkillView, type SkillTurnEngine,
 } from "../imported-skills.ts";
-import { nativeSkillListing, nativeSkills, readNativeSkillFile } from "../native-skills.ts";
+import { isNativeSkillEnabled } from "../native-skill-choices.ts";
+import { nativeSkillListing, nativeSkills, projectSkillListing, projectSkills, projectSkillsPrompt, readNativeSkillFile, type NativeSkill } from "../native-skills.ts";
 import { canManage } from "../peer-roster.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { readSectionContext } from "../section-context.ts";
-import { assignedSkillsSchema, libraryManagementRevision, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, skillsLibraryEnabled, transferLibraryMaintainer } from "../skill-library.ts";
+import { assignedSkillsSchema, librarySkillOptOuts, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, skillsLibraryEnabled } from "../skill-library.ts";
+import { librarySkillFiles, ownSkillFiles, type StoredSkillFiles } from "../skill-side-files.ts";
 import {
   conversationAssignedSkills,
   prepareShareNote,
@@ -31,9 +34,10 @@ import {
 } from "../skill-share.ts";
 import { enabledSkillFiles, listSkills, readSkillFile, resolveBotSkills, skillsSystemPrompt, type SkillListing } from "../skills.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
-import { claudeUserSkillsEnabled } from "../turn-settings.ts";
+import { claudeUserSkillsEnabled, settingsTurnFields } from "../turn-settings.ts";
 import { typedWords } from "../typed-sends.ts";
-import { TASK_WORKSPACES_DIR } from "../workspace.ts";
+import { supportsWorkspaceFiles, TASK_WORKSPACES_DIR } from "../workspace.ts";
+import { changeSkillAssignment, listSkillAssignments, type AssignmentDeps } from "./skill-assignment.ts";
 
 type ReceiptArgs = {
   botId: string;
@@ -95,7 +99,13 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     const own = ownSkills(bot);
     const listed = [...own, ...importedSkillListings(bot.id, new Set(own.map((skill) => skill.name)), aboutBot(bot))];
     const names = new Set(listed.map((skill) => skill.name));
-    return [...listed, ...nativesFor(bot, threadId).filter((skill) => !names.has(skill.name)).map(nativeSkillListing)];
+    const natives = nativesFor(bot, threadId).filter((skill) => !names.has(skill.name));
+    for (const skill of natives) names.add(skill.name);
+    const project = projectFor(bot, threadId).filter((skill) => !names.has(skill.name));
+    return [
+      ...listed, ...natives.map((skill) => nativeSkillListing(skill, isNativeSkillEnabled(bot.id, skill.name))),
+      ...project.map(projectSkillListing),
+    ];
   };
   const readBotSkillFile = (bot: BotRecord, name: string): string | null => {
     const own = readSkillFile(bot.id, name);
@@ -103,10 +113,18 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     // Private wins collisions: a private skill that no longer verifies must not fall through to a same-named shared one.
     if (listSkills(bot.id).some((skill) => skill.name === name)) return null;
     // The library fallback is by assignment only, never by name alone.
-    if (skillsLibraryEnabled(cfg) && listLibrarySkills().some((skill) => skill.name === name && (skill.everyBot || bot.assignedSkills?.includes(name)))) return readLibrarySkillFile(name);
+    if (skillsLibraryEnabled(cfg) && listLibrarySkills().some((skill) => skill.name === name && (bot.assignedSkills?.includes(name) || (skill.everyBot && !librarySkillOptOuts(bot.id).has(name))))) return readLibrarySkillFile(name);
     if (readImportedSkills()[name]) return readImportedSkillFile(name);
-    const native = nativesFor(bot).find((skill) => skill.name === name);
+    const native = nativesFor(bot).find((skill) => skill.name === name) ?? projectFor(bot, bot.threadId).find((skill) => skill.name === name);
     return native ? readNativeSkillFile(native) : null;
+  };
+  /** The files beside the SKILL.md readBotSkillFile reads, from the same copy: none for a skill shared from this
+   * computer, null when they changed since they came in. */
+  const readBotSkillFiles = (bot: BotRecord, name: string): StoredSkillFiles => {
+    if (readSkillFile(bot.id, name) !== null) return ownSkillFiles(bot.id, name);
+    if (listSkills(bot.id).some((skill) => skill.name === name)) return null;
+    if (skillsLibraryEnabled(cfg) && listLibrarySkills().some((skill) => skill.name === name && (bot.assignedSkills?.includes(name) || (skill.everyBot && !librarySkillOptOuts(bot.id).has(name))))) return librarySkillFiles(name);
+    return [];
   };
 
   const shareBotsNow = (): ShareBot[] =>
@@ -130,6 +148,13 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
   const liveAssigned = (bot: BotRecord) => store.bot(bot.id)?.assignedSkills ?? bot.assignedSkills ?? [];
   const conversationSkills = (bot: BotRecord, threadId: string): string[] | undefined =>
     skillsLibraryEnabled(cfg) ? conversationAssignedSkills(bot.id, liveAssigned(bot), conversationStartedAt(threadId)) : undefined;
+  const turnSkillFiles = (bot: BotRecord, threadId: string, instance?: TurnInstance): string[] => {
+    const assigned = skillsLibraryEnabled(cfg) ? liveAssigned(bot) : undefined;
+    const names = resolveBotSkills(bot.id, assigned).filter((skill) => skill.enabled).map((skill) => skill.name);
+    return [...new Set([...enabledSkillFiles(bot.id, names, assigned).values(),
+      ...importsFor(bot, conversationSkills(bot, threadId), instance).map((skill) => skill.file),
+      ...importsFor(bot, assigned, instance).map((skill) => skill.file)])];
+  };
 
   const engineOf = (instance: TurnInstance | undefined): SkillTurnEngine | undefined => {
     if (!instance) return undefined;
@@ -148,15 +173,40 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
   /** The ones of those the turn's prompt lists and links into its task folder; it searches for the rest. */
   const listedImports = (bot: BotRecord, available: readonly ImportedSkillView[]) => listedImportedSkills(bot.id, available, aboutBot(bot));
 
-  /** The folder a thread's turns run in, as the store pins it on its first turn; null for a thread pinned to none. */
-  const threadFolder = (bot: BotRecord, threadId: string): string | null => {
+  /** The folder a thread's turns run in, as `store.pinTaskCwd` pins it on its first turn: its own task folder for a
+   * conversation that keeps a private one, none for a task that already resumes a session, since moving it breaks the
+   * resume. */
+  const threadFolder = (bot: BotRecord, threadId: string, privateOnly = false): string | null => {
     const task = store.taskByThread(bot.id, threadId);
-    return task?.cwd !== undefined ? task.cwd : bot.cwd ?? join(TASK_WORKSPACES_DIR, bot.id, threadId);
+    if (task?.cwd !== undefined) return task.cwd;
+    const own = join(TASK_WORKSPACES_DIR, bot.id, threadId);
+    if (privateOnly) return own;
+    if (task && Object.keys(task.resumeCursors ?? {}).length > 0) return null;
+    return bot.cwd ?? own;
   };
   /** Outside a turn, what the bot's main conversation would load. */
-  const nativesFor = (bot: BotRecord, threadId = bot.threadId, instance = deps.instanceOf?.(bot.modelSelection.instanceId)) => {
+  const nativesFor = (bot: BotRecord, threadId = bot.threadId, instance = deps.instanceOf?.(bot.modelSelection.instanceId), cwd?: string | null) => {
     const engine = engineOf(instance);
-    return engine ? nativeSkills(engine, { claudeUserSkills: claudeUserSkillsEnabled(cfg), cwd: threadFolder(bot, threadId) }) : [];
+    return engine ? nativeSkills(engine, { claudeUserSkills: claudeUserSkillsEnabled(cfg), cwd: cwd === undefined ? threadFolder(bot, threadId) : cwd }) : [];
+  };
+
+  /** What the project a turn works in ships for any agent; none for an engine that cannot read files. `cwd` undefined:
+   * the thread's own folder. */
+  const projectFor = (bot: BotRecord, threadId: string, cwd?: string | null, instance = deps.instanceOf?.(bot.modelSelection.instanceId)): NativeSkill[] => {
+    const engine = engineOf(instance);
+    if (!engine || !supportsWorkspaceFiles(engine.driverKind)) return [];
+    const folder = cwd === undefined ? threadFolder(bot, threadId) : cwd;
+    return folder ? projectSkills(engine, { cwd: folder, dataDir: DATA_DIR }) : [];
+  };
+  /** The project's skills a turn's prompt and `/` menu use, found by themselves as Claude Code finds `.claude/skills`: none
+   * of a name the bot already has or its engine loads by itself. */
+  const projectInUse = (bot: BotRecord, threadId: string, cwd: string | null | undefined, instance: TurnInstance | undefined, assigned: readonly string[] | undefined): NativeSkill[] => {
+    const folder = cwd === undefined ? threadFolder(bot, threadId) : cwd;
+    const names = new Set([
+      ...resolveBotSkills(bot.id, assigned).map((skill) => skill.name), ...Object.keys(readImportedSkills()),
+      ...nativesFor(bot, threadId, instance, folder).map((skill) => skill.name),
+    ]);
+    return projectFor(bot, threadId, folder, instance).filter((skill) => !names.has(skill.name));
   };
 
   const editable = (botId: string, name: string): boolean =>
@@ -244,120 +294,44 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     return { name: change.name, summary: `Shared skill ${change.name} updated.`, shared: summaryLine(updated.share) };
   }
 
-  const assignmentIds = (name: string) => store.bots.filter((bot) => bot.assignedSkills?.includes(name)).map((bot) => bot.id);
-  const managementTarget = (fromId: string, targetId: string): BotRecord | null => {
-    const from = store.bot(fromId);
-    const target = store.bot(targetId);
-    return from && !from.hidden && chiefLevel(from) && target && !target.hidden &&
-      (from.id === target.id || canManage(from, target)) ? target : null;
-  };
-  const assignmentReadbackFor = (target: BotRecord) => {
-    const entries = readSkillLibraryIndex();
-    const listings = new Map(listLibrarySkills().map((skill) => [skill.name, skill]));
-    const privateNames = new Set(listSkills(target.id).map((skill) => skill.name));
-    return (name: string): SkillAssignmentState => {
-      const entry = entries[name];
-      const assigned = target.assignedSkills?.includes(name) ?? false;
-      const shadowed = privateNames.has(name);
-      const enabled = listings.get(name)?.enabled ?? false;
-      return {
-        name, in_library: Boolean(entry), scope: entry ? entry.everyBot ? "all_bots" : "selected_bots" : null,
-        assigned, shadowed, enabled, available: enabled && !shadowed && (assigned || entry?.everyBot === true),
-        content_revision: entry?.sha256 ?? null, package_files_revision: entry?.filesSha256 ?? null,
-        management_revision: libraryManagementRevision(entry ?? { name, missing: true }, assignmentIds(name)),
-      };
-    };
-  };
-  const sharedReadbackFor = (botId: string) => {
-    if (!skillsLibraryEnabled(cfg)) return (_name: string) => null;
-    const bot = store.bot(botId);
-    const ownNames = new Set(listSkills(botId).map((skill) => skill.name));
-    const entries = readSkillLibraryIndex();
-    const listings = new Map(listLibrarySkills().map((skill) => [skill.name, skill]));
-    const privateNames = new Map<string, Set<string>>();
-    return (name: string) => {
-      if (ownNames.has(name)) return null;
-      const entry = entries[name];
-      const listing = listings.get(name);
-      if (!bot || !entry || !listing || !(entry.everyBot || bot.assignedSkills?.includes(name))) return null;
-      const maintainer = entry.maintainerBotId ? store.bot(entry.maintainerBotId) : undefined;
-      const visible = maintainer && audienceWithin(bot.visibility, maintainer.visibility);
-      if (maintainer && !privateNames.has(maintainer.id)) privateNames.set(maintainer.id, new Set(listSkills(maintainer.id).map((skill) => skill.name)));
-      const maintainerAccessible = Boolean(maintainer && (entry.everyBot || maintainer.assignedSkills?.includes(name)) && !privateNames.get(maintainer.id)?.has(name));
-      return {
-        scope: entry.everyBot ? "all_bots" : "selected_bots",
-        enabled: listing.enabled,
-        assigned: bot.assignedSkills?.includes(name) ?? false,
-        content_revision: entry.sha256,
-        package_files_revision: entry.filesSha256 ?? null,
-        management_revision: libraryManagementRevision(entry, assignmentIds(name)),
-        maintainer_bot_id: visible ? maintainer.id : null,
-        maintainer_status: !entry.maintainerBotId ? "unassigned" : !visible ? "unavailable" : maintainerAccessible ? "assigned" : "no_access",
-      };
-    };
+  const assignments: AssignmentDeps = {
+    resolveTarget(fromId, targetId) {
+      const from = store.bot(fromId), target = store.bot(targetId);
+      return from && !from.hidden && chiefLevel(from) && target && !target.hidden &&
+        (from.id === target.id || canManage(from, target)) ? target : null;
+    },
+    bot: (id) => store.bot(id) ?? null,
+    listLibrary: () => {
+      const entries = readSkillLibraryIndex();
+      return listLibrarySkills().map((skill) => ({ ...skill, filesSha256: entries[skill.name]?.filesSha256 }));
+    },
+    ownNames: (id) => new Set(listSkills(id).map((skill) => skill.name)),
+    optedOut: librarySkillOptOuts,
+    save: (id, assignedSkills) => store.patchBotProfile(id, { assignedSkills }),
+    validAssignments: (names) => assignedSkillsSchema.safeParse(names).success,
   };
 
   return {
-    listBotSkills,
-    assignmentListing(from: BotRecord, targetId: string): [number, Record<string, unknown>] {
-      if (!skillsLibraryEnabled(cfg)) return [404, { error: "skills library is not enabled" }];
-      const target = managementTarget(from.id, targetId);
-      if (!target) return [403, { error: "only a current Chief can manage a visible target in its authorized team and peer scope" }];
-      const sourceReadback = sharedReadbackFor(from.id);
-      const names = new Set([...Object.keys(readSkillLibraryIndex()).filter((name) => sourceReadback(name)), ...target.assignedSkills ?? []]);
-      const readback = assignmentReadbackFor(target);
-      return [200, { target_bot_id: target.id, assignedSkills: target.assignedSkills ?? [], library: [...names].sort().map(readback) }];
-    },
-    manageAssignment(from: BotRecord, threadId: string, action: Exclude<SkillManagementAction, "transfer_maintainer">,
-      name: string, targetId: string, revision: string, direct: DirectApply | null): [number, Record<string, unknown>] {
-      if (!skillsLibraryEnabled(cfg)) return [404, { state: "failed", error: "skills library is not enabled" }];
-      const target = managementTarget(from.id, targetId);
-      if (!direct || !target) return [403, { state: "failed", error: "this conversation needs current Chief authority over a visible target in its team and peer scope" }];
-      if (!isSkillName(name)) return [400, { state: "failed", error: "invalid skill name" }];
-      const before = assignmentReadbackFor(target)(name);
-      if (before.management_revision !== revision) return [409, { state: "failed", error: "the skill or its assignments changed; list with target_bot_id again" }];
-      if (action !== "unassign" && (!sharedReadbackFor(from.id)(name)?.enabled || !before.in_library || !before.enabled || before.shadowed)) {
-        return [422, { state: "failed", error: "assign/share requires the Chief's access to an enabled, intact shared library skill and no private namesake on the target" }];
-      }
-      const previous = target.assignedSkills ?? [];
-      const next = action === "unassign" ? previous.filter((skill) => skill !== name) : previous.includes(name) ? previous : [...previous, name];
-      if (next.length > previous.length && !assignedSkillsSchema.safeParse(next).success) {
-        return [422, { state: "failed", error: "the target's assignments must be a list of at most 200 skill names" }];
-      }
-      if (next.length !== previous.length) {
-        try { store.patchBotProfile(target.id, { assignedSkills: next }); }
-        catch { return [500, { state: "failed", error: "the assignment could not be saved; list with target_bot_id before retrying" }]; }
-      }
-      const result = assignmentReadbackFor(target)(name);
-      if (result.assigned !== (action !== "unassign")) return [500, { state: "failed", error: "the assignment could not be verified; list with target_bot_id before retrying" }];
-      appendDecision(DATA_DIR, { threadId, requestId: randomUUID(), botId: from.id, botName: from.name,
-        tool: "skill_manage", summary: `${action} ${name} for ${target.name}`, decision: "auto-approved", source: direct });
-      return [200, { state: "applied", name, action, result: { target_bot_id: target.id, assignedSkills: target.assignedSkills ?? [], skill: result },
-        summary: action === "unassign" ? "Explicit assignment removed. Every-bot access and private skills are unchanged." : "Shared library skill assigned. Scope, package, enabled state and execution permissions are unchanged." }];
-    },
-    transferMaintainer(from: BotRecord, threadId: string, name: string, targetId: string, revision: string, direct: DirectApply | null):
+    manageAssignment(fromId: string, threadId: string, action: SkillAssignmentAction, body: Record<string, unknown>, direct: DirectApply | null):
       [number, Record<string, unknown>] {
-      if (!direct) return [403, { state: "failed", error: "this conversation cannot transfer a shared skill's maintainer; no transfer occurred" }];
-      const target = managementTarget(from.id, targetId);
-      if (!target) return [403, { state: "failed", error: "only a current Chief can manage a visible target in its authorized team and peer scope" }];
-      from = store.bot(from.id)!;
-      const current = sharedReadbackFor(from.id)(name);
-      if (!current) return [422, { state: "failed", error: "only a shared library skill available to this bot supports a maintainer; private or unassigned skills cannot be transferred" }];
-      if (!current.enabled) return [422, { state: "failed", error: "the shared skill is disabled or its package failed verification" }];
-      const targetReadback = sharedReadbackFor(target.id)(name);
-      if (!targetReadback?.enabled) return [422, { state: "failed", error: "the target must already have access to the enabled shared skill without a private copy shadowing it; assignment is unchanged" }];
-      const updated = transferLibraryMaintainer({ name, maintainerBotId: target.id, baseRevision: revision, assignedBotIds: assignmentIds(name) });
-      if ("error" in updated) return [409, { state: "failed", error: updated.error }];
-      const result = sharedReadbackFor(from.id)(name);
-      if (!result || result.management_revision !== updated.revision || result.maintainer_bot_id !== target.id) {
-        return [500, { state: "failed", error: "the maintainer was saved but could not be verified; list the skill before retrying" }];
+      if (!skillsLibraryEnabled(cfg)) return [404, { error: "Skills library is not enabled." }];
+      if (!direct) return [403, { error: "This conversation cannot apply a skill assignment directly." }];
+      const name = typeof body.skill_name === "string" ? body.skill_name.trim() : "";
+      const target = typeof body.target_bot_id === "string" ? body.target_bot_id.trim() : "";
+      const revision = typeof body.base_revision === "string" ? body.base_revision.trim() : "";
+      if (!isSkillName(name) || !target || !/^[a-f0-9]{64}$/.test(revision)) {
+        return [400, { error: "Pass a valid skill_name, target_bot_id and the target's management_revision as base_revision." }];
       }
-      appendDecision(DATA_DIR, { threadId, requestId: randomUUID(), botId: from.id, botName: from.name,
-        tool: "skill_manage", summary: `Maintainer for ${name} assigned to ${target.name}`, decision: "auto-approved", source: direct });
-      return [200, { state: "applied", name, action: "transfer_maintainer", result,
-        summary: "Maintainer designated. Scope, assignments, enabled state, package and execution permissions were not changed." }];
+      const changed = changeSkillAssignment(assignments, fromId, target, action, name, revision);
+      if ("error" in changed) return [changed.status, { error: changed.error }];
+      appendDecision(DATA_DIR, { threadId, requestId: randomUUID(), botId: fromId, tool: "skill_manage",
+        summary: `${action} ${name} for ${target}`, decision: "auto-approved", source: direct });
+      return [200, { state: "applied", result: changed.result }];
     },
+
+    listBotSkills,
     readBotSkillFile,
+    readBotSkillFiles,
 
     mode,
 
@@ -366,13 +340,15 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     conversationSkills,
 
     /** A turn's skills index, or the preview's without a thread: the bot's own and library skills, then the ones from
-     * this computer, each with a budget of its own. */
-    skillsIndex(bot: BotRecord, threadId: string | undefined, instance?: TurnInstance): string {
+     * this computer, then the ones the project in `cwd` ships, each with a budget of its own. */
+    skillsIndex(bot: BotRecord, threadId: string | undefined, instance?: TurnInstance, cwd?: string | null): string {
       const assigned = threadId === undefined ? (skillsLibraryEnabled(cfg) ? bot.assignedSkills ?? [] : undefined) : conversationSkills(bot, threadId);
       const available = importsFor(bot, assigned, instance);
       const listed = listedImports(bot, available);
+      const thread = threadId ?? bot.threadId;
+      const project = thread ? projectInUse(bot, thread, cwd, instance, assigned) : [];
       return skillsSystemPrompt(bot.id, assigned, threadId === undefined ? undefined : conversationStartedAt(threadId)) +
-        importedSkillsPrompt(listed, available.length - listed.length);
+        importedSkillsPrompt(listed, available.length - listed.length) + projectSkillsPrompt(project);
     },
 
     /** The imported skills a turn links into its task folder: the same ones its index lists, so an engine that loads
@@ -381,9 +357,19 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
       return listedImports(bot, importsFor(bot, conversationSkills(bot, threadId), instance));
     },
 
-    /** Each `/name` called for one of the bot's own, library or imported skills, or one its engine loads by itself. `lines`
-     * are the turn's own lines when it is a person's turn: only words they typed can call a skill past the start of the text. */
-    expandSkillCommand(bot: BotRecord, threadId: string, text: string, instance?: TurnInstance, lines: ReadonlyArray<{ sendId?: string; text?: string }> = [], ownStart = false): string {
+    turnSkillFiles,
+
+    turnSettings(bot: BotRecord, threadId: string, instance: TurnInstance, restrictsMcp: boolean) {
+      return {
+        ...settingsTurnFields(cfg, DATA_DIR, restrictsMcp),
+        ...(instance.driverKind === "antigravityAgent" ? { skillFiles: turnSkillFiles(bot, threadId, instance) } : {}),
+      };
+    },
+
+    /** Each `/name` called for one of the bot's own, library or imported skills, one its engine loads by itself, or one its
+     * project ships. `lines` are the turn's own lines when it is a person's turn: only words they typed can call a skill
+     * past the start of the text. `privateOnly`: the conversation keeps a private folder, as `store.pinTaskCwd` is told. */
+    expandSkillCommand(bot: BotRecord, threadId: string, text: string, instance?: TurnInstance, lines: ReadonlyArray<{ sendId?: string; text?: string }> = [], ownStart = false, privateOnly = false): string {
       const typed = typedWords(threadId, lines);
       const mentioned = skillCalls(text, typed, ownStart);
       if (!mentioned.length) return text;
@@ -393,12 +379,15 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
         for (const skill of skills) if (mentioned.includes(skill.name) && !files.has(skill.name)) files.set(skill.name, skill.file);
       };
       if (files.size < mentioned.length) add(importsFor(bot, assigned, instance));
+      const engine = files.size < mentioned.length ? engineOf(instance ?? deps.instanceOf?.(bot.modelSelection.instanceId)) : undefined;
+      const cwd = engine ? threadFolder(bot, threadId, privateOnly) : null;
       if (files.size < mentioned.length) {
         // A skill switched off on the Skills page stays off, even when the engine holds one of the same name.
         const switched = new Set([...resolveBotSkills(bot.id, assigned), ...importedSkillListings(bot.id, new Set())]
           .filter((skill) => !skill.enabled).map((skill) => skill.name));
-        add(nativesFor(bot, threadId, instance).filter((skill) => !switched.has(skill.name)));
+        add(nativesFor(bot, threadId, instance, cwd).filter((skill) => !switched.has(skill.name) && isNativeSkillEnabled(bot.id, skill.name)));
       }
+      if (files.size < mentioned.length) add(projectInUse(bot, threadId, cwd, instance, assigned).filter((skill) => !skill.modelOnly));
       return skillCommandTurnText(text, files, typed, ownStart);
     },
 
@@ -453,14 +442,17 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
       return [201, { state: "applied", name: updated.name, action: "update", summary: updated.summary, shared: updated.shared }];
     },
 
-    harnessListing(botId: string, skills: SkillListing[]): Array<SkillListing & { revision?: string; shared?: ReturnType<ReturnType<typeof sharedReadbackFor>> }> {
-      const readback = sharedReadbackFor(botId);
-      return skills.map((skill) => {
-        const shared = readback(skill.name);
-        const revision = mode() !== "off" && !skill.editable && editable(botId, skill.name)
-          ? { editable: true, revision: skill.sha256.slice(0, SHARED_REVISION_CHARS) } : {};
-        return { ...skill, ...revision, ...(shared ? { shared } : {}) };
-      });
+    harnessListing(from: BotRecord, search: URLSearchParams, staged: () => unknown[]): [number, Record<string, unknown>] {
+      const target = search.get("target_bot_id")?.trim();
+      if (target) {
+        if (!skillsLibraryEnabled(cfg)) return [404, { error: "Skills library is not enabled." }];
+        const listing = listSkillAssignments(assignments, from.id, target, (search.get("query") ?? "").trim().slice(0, 300));
+        return listing ? [200, listing] : [403, { error: "Only a current Chief can manage a visible target in their authorized scope." }];
+      }
+      const skills = listBotSkills(from).map((skill) => mode() !== "off" && !skill.editable && editable(from.id, skill.name)
+        ? { ...skill, editable: true, revision: skill.sha256.slice(0, SHARED_REVISION_CHARS) }
+        : skill);
+      return [200, { skills, staged: staged() }];
     },
 
     /** A settlement still pending keeps its stage bound to the private copy, so it waits for the receipt's Share button. */

@@ -92,6 +92,21 @@ describe("per-bot tool selection", () => {
     expect(canUseMcpServer(undefined, "agents", [])).toBe(false);
   });
 
+  it.each([
+    { scope: { deny: ["mcp:phone:type_text"] }, allowed: false },
+    { scope: { deny: ["mcp:phone:batch"] }, allowed: false },
+    { scope: { allow: ["mcp:phone:batch", "mcp:phone:read_screen"] }, allowed: false },
+    { scope: { allow: ["mcp:phone:*"] }, allowed: true },
+    { scope: { allow: ["batch", "open_app", "tap_text", "tap", "swipe", "type_text", "press", "read_screen"].map((name) => `mcp:phone:${name}`) }, allowed: true },
+    { scope: undefined, allowed: true },
+  ])("lets a phone batch run only where all its step tools may: $scope", ({ scope, allowed }) => {
+    expect(allowsTool(scope, { kind: "mcp", server: "phone", name: "batch" })).toBe(allowed);
+  });
+
+  it("keeps another server's batch tool to its own selector", () => {
+    expect(allowsTool({ allow: ["mcp:notes:batch"] }, { kind: "mcp", server: "notes", name: "batch" })).toBe(true);
+  });
+
   it("detects added authority without mistaking narrower or equivalent selections for widening", () => {
     expect(toolScopeWidens({ allow: ["native:read"] }, { allow: ["native:edit", "native:read"] })).toBe(true);
     expect(toolScopeWidens({ allow: ["native:*"] }, { allow: ["native:read"] })).toBe(false);

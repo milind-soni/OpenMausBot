@@ -7,9 +7,11 @@ import { join } from "node:path";
 import type { InstanceConfigMap } from "./contracts.ts";
 import { resolveClaudeConfigDir } from "./drivers/claude.ts";
 import { codexHome } from "./drivers/codex-identity.ts";
+import { codexHasCredits } from "./codex-credits.ts";
+import { antigravityPlanUsage } from "./drivers/antigravity-usage-limits.ts";
 import { harnessHome, sealedFixture } from "./env-path.ts";
 
-export type PlanDriver = "claude" | "codex" | "grok" | "opencode";
+export type PlanDriver = "claude" | "codex" | "grok" | "opencode" | "antigravity";
 
 export interface PlanWindow {
   available: boolean;
@@ -46,19 +48,15 @@ export interface PlanWindows {
   weekly: PlanWindow;
   extra: PlanExtra[];
   models: PlanModelUsage[];
+  codexCredits?: true; // Codex only: the ChatGPT account has credits to spend past a full window, or has no limit
 }
 
-export interface PlanProviderRow {
+export interface PlanProviderRow extends PlanWindows {
   id: string;
   name: string;
   driver: string;
-  plan: string | null;
   ok: boolean;
   error: string | null;
-  fiveHour: PlanWindow;
-  weekly: PlanWindow;
-  extra: PlanExtra[];
-  models: PlanModelUsage[];
 }
 
 export interface PlanUsageReport {
@@ -72,7 +70,7 @@ export interface PlanAccount {
   driver: PlanDriver;
   environment: Record<string, string | undefined>;
   configDir?: string;
-  /** Signed in through OpenMausBot (ChatGPT plan), not a CLI login on disk, so it has no usage reading. */
+  /** No usage reading: a ChatGPT plan signed in through OpenMausBot has no CLI login on disk, and a Claude instance whose config sets `usageMeter: false` keeps its login unread (a refused turn still fails over). */
   noUsage?: true;
 }
 
@@ -94,7 +92,7 @@ export interface PlanResponse {
 
 export type PlanFetch = (
   url: string,
-  init: { headers: Record<string, string>; signal: AbortSignal },
+  init: { headers: Record<string, string>; signal: AbortSignal; method?: "POST"; body?: string; redirect?: "manual" },
 ) => Promise<PlanResponse>;
 
 export interface PlanUsageDeps {
@@ -136,18 +134,14 @@ const WEEK_MAX_SECONDS = 9 * 86400;
 const MONTH_MIN_SECONDS = 27 * 86400;
 const MONTH_MAX_SECONDS = 32 * 86400;
 
-const DRIVER_OF: Record<string, PlanDriver> = {
-  claudeAgent: "claude",
-  codex: "codex",
-  grokAgent: "grok",
-  opencodeGo: "opencode",
-};
+const DRIVER_OF: Record<string, PlanDriver> = { claudeAgent: "claude", codex: "codex", grokAgent: "grok", opencodeGo: "opencode", antigravityAgent: "antigravity" };
 
 const PRODUCT_NAME: Record<PlanDriver, string> = {
   claude: "Claude",
   codex: "Codex",
   grok: "Grok",
   opencode: "OpenCode",
+  antigravity: "Antigravity",
 };
 
 export function planAccountsFromInstances(instances: InstanceConfigMap): PlanAccount[] {
@@ -164,7 +158,7 @@ export function planAccountsFromInstances(instances: InstanceConfigMap): PlanAcc
       environment: { ...entry.environment },
       ...(configDir ? { configDir } : {}),
       // Reading ~/.codex/auth.json for a ChatGPT-plan provider would report (and hold it on) another account's limit.
-      ...(config?.authMode === "chatgpt-plan" ? { noUsage: true as const } : {}),
+      ...(config?.authMode === "chatgpt-plan" || (driver === "claude" && config?.usageMeter === false) ? { noUsage: true as const } : {}),
     });
   }
   return accounts;
@@ -206,7 +200,7 @@ export function parseCodexUsage(body: unknown): PlanWindows {
   const extra = [...assigned.extra];
   if (root) collectCodexNamedLimits(root, models, extra);
   sortModelWindows(models);
-  return { ...assigned, extra, models, plan: planLabel(root?.plan_type ?? root?.plan) };
+  return { ...assigned, extra, models, plan: planLabel(root?.plan_type ?? root?.plan), ...(codexHasCredits(root?.credits) ? { codexCredits: true as const } : {}) };
 }
 
 export function parseGrokUsage(credits: unknown, billing?: unknown, settings?: unknown): PlanWindows {
@@ -297,7 +291,7 @@ export async function fetchPlanUsage(accounts: PlanAccount[], deps: PlanUsageDep
   return { fetchedAt: new Date(now).toISOString(), providers };
 }
 
-let cachedReport: { at: number; key: string; report: PlanUsageReport } | null = null;
+let cachedReport: { at: number; key: string; accounts: Set<string>; report: PlanUsageReport } | null = null;
 
 export function clearPlanUsageCache(): void {
   cachedReport = null;
@@ -314,8 +308,9 @@ export async function loadPlanUsage(input: {
 }): Promise<PlanUsageReport> {
   const now = input.now ?? Date.now();
   const key = planUsageCacheKey(input.accounts);
-  if (!input.refresh && cachedReport && cachedReport.key === key && now - cachedReport.at < PLAN_USAGE_CACHE_MS) {
-    return cachedReport.report;
+  if (!input.refresh && cachedReport && now - cachedReport.at < PLAN_USAGE_CACHE_MS) { // a read of more accounts serves a caller that asks for some of them (the limit clock)
+    if (cachedReport.key === key) return cachedReport.report;
+    if (input.accounts.every((account) => cachedReport!.accounts.has(planUsageCacheKey([account])))) return { ...cachedReport.report, providers: cachedReport.report.providers.filter((row) => input.accounts.some((account) => account.id === row.id)) };
   }
   const report = await fetchPlanUsage(input.accounts, {
     fetch: input.fetch ?? ((url, init) => globalThis.fetch(url, init)),
@@ -323,7 +318,7 @@ export async function loadPlanUsage(input: {
     now: () => now,
     timeoutMs: input.timeoutMs,
   });
-  cachedReport = { at: now, key, report };
+  cachedReport = { at: now, key, accounts: new Set(input.accounts.map((account) => planUsageCacheKey([account]))), report };
   return report;
 }
 
@@ -709,7 +704,7 @@ function planUsageCacheKey(accounts: PlanAccount[]): string {
       .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
       .map(([name, value]) => `${name}=${value}`)
       .join("\n");
-    return [account.id, account.driver, account.name, account.configDir ?? "", environment].join("\u0000");
+    return [account.id, account.driver, account.name, account.configDir ?? "", environment, account.noUsage ? "no-usage" : "usage"].join("\u0000");
   }).join("\n");
 }
 
@@ -915,12 +910,13 @@ function okRow(account: PlanAccount, windows: PlanWindows): PlanProviderRow {
     fiveHour: windows.fiveHour,
     weekly: windows.weekly,
     extra: windows.extra,
-    models: windows.models,
+    models: windows.models, ...(windows.codexCredits ? { codexCredits: true as const } : {}),
   };
 }
 
 async function fetchProvider(account: PlanAccount, deps: PlanUsageDeps): Promise<PlanProviderRow | null> { // null: OpenCode, in every fleet, with no key of its own
   let credential: PlanCredential;
+  if (account.driver === "antigravity") { const windows = await antigravityPlanUsage(account.id, deps); return windows && okRow(account, windows); } // null: no sign-in, or Google gave nothing
   try {
     credential = await deps.credentials.read(account);
   } catch {

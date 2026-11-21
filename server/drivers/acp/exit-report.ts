@@ -2,6 +2,9 @@
 // The one description of an ACP engine's exit: a turn's (host.ts, core.ts) and Antigravity's setup (antigravity-acp.ts).
 // Lines are masked as they arrive and only the last few are kept, so no raw sign-in code or key is held.
 import { mask, redactSecretsInText } from "../../../shared/redact.ts";
+import { type ServerText } from "../../../shared/server-text.ts";
+import { noticeFailure } from "../../chat-notices.ts";
+import { nodeOlderThan } from "./node-version.ts";
 
 const SIGNAL_WORDS: Partial<Record<NodeJS.Signals, string>> = {
   SIGABRT: "it stopped itself (abort)",
@@ -128,4 +131,12 @@ export function exitDetail(code: number | null, signal: NodeJS.Signals | null, t
   if (words && tail) return `: ${words}. Last output: ${tail}`;
   if (words) return `: ${words}`;
   return tail ? `: ${tail}` : "";
+}
+
+/** Why an engine stopped before its reply: on a Node.js (`found`) older than it needs (`needed`), that, in the
+ * person's language; otherwise its exit in words, with its last output. */
+export function exitBeforeResult(provider: string, code: number | null, signal: NodeJS.Signals | null, tail: string,
+  needed?: string, found?: string | null): { message: string; text?: ServerText } {
+  if (needed && found && nodeOlderThan(found, needed)) return noticeFailure("chat.notice.acpNodeTooOld", { provider, needed, found });
+  return { message: `${provider} exited ${code ?? signal ?? "unexpectedly"} before the prompt result${exitDetail(code, signal, tail)}` };
 }

@@ -5,11 +5,15 @@
 //
 // Electron 43.7.9: a frame's self-navigation fires will-frame-navigate with frame.origin === "null" and an
 // empty frame.url, and preventDefault() stops it before any request leaves.
+//
+// A frame that has not loaded anything yet reads "null" as well, so the published-site preview beside the chat
+// (a frame with a real origin once loaded) is let through when the page that holds it gives it its address:
+// the initiator is the frame's parent and the parent's origin is not opaque.
 
 const OWN_DOCUMENTS = new Set(["about:srcdoc", "about:blank"]);
 
 /**
- * @param {{ isMainFrame?: boolean, url?: string, frame?: { origin?: string } | null } | null | undefined} details
+ * @param {{ isMainFrame?: boolean, url?: string, frame?: { origin?: string, parent?: { frameTreeNodeId?: number } | null } | null, initiator?: { frameTreeNodeId?: number, origin?: string } | null } | null | undefined} details
  * @returns {boolean} false when the navigation must be cancelled
  */
 export function appFrameNavigationAllowed(details) {
@@ -25,5 +29,17 @@ export function appFrameNavigationAllowed(details) {
     // frame that navigates again right after a cancelled navigation. A frame nobody can read is not let through.
     return false;
   }
-  return origin !== "null";
+  return origin !== "null" || givenByOpenParent(details);
+}
+
+/** @param {{ frame?: { parent?: { frameTreeNodeId?: number } | null } | null, initiator?: { frameTreeNodeId?: number, origin?: string } | null }} details */
+function givenByOpenParent(details) {
+  try {
+    const parent = details.frame?.parent;
+    const initiator = details.initiator;
+    if (!parent || !initiator || typeof parent.frameTreeNodeId !== "number") return false;
+    return initiator.frameTreeNodeId === parent.frameTreeNodeId && typeof initiator.origin === "string" && initiator.origin !== "null";
+  } catch {
+    return false;
+  }
 }

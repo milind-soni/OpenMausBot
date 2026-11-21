@@ -14,6 +14,8 @@ export interface FakeOAuthOptions {
   noRegistration?: boolean;
   /** refuse to register a client for a redirect URI this matches */
   refuseRedirect?: (redirectUri: string) => boolean;
+  /** answer every registration with this status, JSON body and headers */
+  registerRefusal?: { status: number; body: unknown; headers?: Record<string, string> };
   /** answer every refresh with invalid_grant */
   rejectRefresh?: boolean;
   /** /authorize answers ?error=access_denied instead of a code */
@@ -32,6 +34,10 @@ export interface FakeOAuthOptions {
   preRegistered?: Record<string, string | null>;
   /** advertised token_endpoint_auth_methods_supported */
   tokenAuthMethods?: string[];
+  /** registration issues a secret with this method, whatever the client asked for, and the token endpoint requires it */
+  registerConfidential?: "client_secret_basic" | "client_secret_post";
+  /** Require offline_access to issue a refresh token and advertise it only on the authorization server. */
+  offlineAccess?: boolean;
 }
 
 export interface FakeClientAuth {
@@ -65,7 +71,7 @@ function readBody(req: IncomingMessage): Promise<string> {
 }
 
 export async function startFakeOAuth(options: FakeOAuthOptions = {}): Promise<FakeOAuth> {
-  const codes = new Map<string, { challenge: string; clientId: string; redirectUri: string }>();
+  const codes = new Map<string, { challenge: string; clientId: string; redirectUri: string; offline: boolean }>();
   const access = new Set<string>();
   const refresh = new Set<string>();
   const clients = new Set<string>();
@@ -73,7 +79,7 @@ export async function startFakeOAuth(options: FakeOAuthOptions = {}): Promise<Fa
   let issuer = "";
   const clientAuths: FakeClientAuth[] = [];
   const fake: Partial<FakeOAuth> = { lastAuthorize: null, clientAuths, options };
-  const preRegistered = options.preRegistered ?? {};
+  const preRegistered = { ...options.preRegistered };
 
   /** The authenticated client, or null when its secret is missing or wrong (RFC 6749 §2.3: one method per request). */
   const authenticate = (req: IncomingMessage, form: URLSearchParams): string | null => {
@@ -100,12 +106,12 @@ export async function startFakeOAuth(options: FakeOAuthOptions = {}): Promise<Fa
     return clients.has(auth.clientId) && secret === null ? auth.clientId : null;
   };
 
-  const issue = () => {
+  const issue = (offline = true) => {
     const token = `at_${randomBytes(12).toString("hex")}`;
     const refreshToken = `rt_${randomBytes(12).toString("hex")}`;
     access.add(token);
     refresh.add(refreshToken);
-    return { access_token: token, token_type: "Bearer", expires_in: options.expiresIn ?? 3600, refresh_token: refreshToken, scope: "mcp" };
+    return { access_token: token, token_type: "Bearer", expires_in: options.expiresIn ?? 3600, ...(offline ? { refresh_token: refreshToken } : {}), scope: offline && options.offlineAccess ? "mcp offline_access" : "mcp" };
   };
   const json = (res: import("node:http").ServerResponse, status: number, body: unknown) =>
     res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
@@ -124,15 +130,25 @@ export async function startFakeOAuth(options: FakeOAuthOptions = {}): Promise<Fa
           ...(options.noRegistration ? {} : { registration_endpoint: `${issuer}/register` }),
           revocation_endpoint: `${issuer}/revoke`,
           code_challenge_methods_supported: ["S256"],
+          ...(options.offlineAccess ? { scopes_supported: ["mcp", "offline_access"] } : {}),
           ...(options.tokenAuthMethods ? { token_endpoint_auth_methods_supported: options.tokenAuthMethods } : {}),
         });
       }
       if (req.method === "POST" && url.pathname === "/register") {
         counts.register += 1;
         await options.beforeRegister?.();
+        if (options.registerRefusal) {
+          res.writeHead(options.registerRefusal.status, { "content-type": "application/json", ...options.registerRefusal.headers });
+          return res.end(JSON.stringify(options.registerRefusal.body));
+        }
         const body = JSON.parse(await readBody(req)) as { redirect_uris?: string[] };
         if (body.redirect_uris?.some((uri) => options.refuseRedirect?.(uri))) return json(res, 400, { error: "invalid_redirect_uri" });
         const clientId = `client_${counts.register}`;
+        if (options.registerConfidential) {
+          const secret = `secret_${randomBytes(8).toString("hex")}`;
+          preRegistered[clientId] = secret;
+          return json(res, 201, { client_id: clientId, client_secret: secret, token_endpoint_auth_method: options.registerConfidential, redirect_uris: body.redirect_uris });
+        }
         clients.add(clientId);
         return json(res, 201, { client_id: clientId, redirect_uris: body.redirect_uris });
       }
@@ -152,6 +168,7 @@ export async function startFakeOAuth(options: FakeOAuthOptions = {}): Promise<Fa
             challenge: url.searchParams.get("code_challenge") ?? "",
             clientId: url.searchParams.get("client_id") ?? "",
             redirectUri: url.searchParams.get("redirect_uri") ?? "",
+            offline: !options.offlineAccess || (url.searchParams.get("scope") ?? "").split(" ").includes("offline_access"),
           });
           redirect.searchParams.set("code", code);
         }
@@ -173,7 +190,7 @@ export async function startFakeOAuth(options: FakeOAuthOptions = {}): Promise<Fa
             && entry.clientId === client
             && entry.redirectUri === form.get("redirect_uri")
             && createHash("sha256").update(verifier).digest("base64url") === entry.challenge;
-          return ok ? json(res, 200, issue()) : json(res, 400, { error: "invalid_grant" });
+          return ok ? json(res, 200, issue(entry.offline)) : json(res, 400, { error: "invalid_grant" });
         }
         if (form.get("grant_type") === "refresh_token") {
           counts.refresh += 1;

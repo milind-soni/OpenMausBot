@@ -357,8 +357,12 @@ describe.skipIf(process.platform === "win32")("installing a standalone engine", 
 
   it("lets a slow download finish while bytes keep arriving", async () => {
     const release = await served("raw");
-    server.routes.set("assets.example.test/blob/fake", { body: Buffer.from(script()), trickle: { bytes: 16, everyMs: 120 } });
-    await expect(install(release, { stallMs: 400 })).resolves.toMatchObject({ version: VERSION });
+    // Pieces 60 ms apart against a 1 s stall limit: a busy runner once held one 120 ms piece past a 400 ms limit.
+    server.routes.set("assets.example.test/blob/fake", { body: Buffer.from(script()), trickle: { bytes: 8, everyMs: 60 } });
+    const started = performance.now();
+    await expect(install(release, { stallMs: 1_000 })).resolves.toMatchObject({ version: VERSION });
+    // The whole download outlasted the limit, so it is the arriving bytes that kept it alive.
+    expect(performance.now() - started).toBeGreaterThan(1_000);
   });
 
   it("refuses a redirect to a host it does not trust, without contacting that host", async () => {
@@ -514,6 +518,51 @@ describe.skipIf(process.platform === "win32")("installing a standalone engine", 
     symlinkSync("/etc/hosts", join(source, "hosts"));
     const file = join(scratch, "link.tar.gz");
     await tar.c({ gzip: true, file, cwd: source, portable: true }, ["fake-engine", "hosts"]);
+    await expect(install(fixtureRelease({ [standalonePlatformKey()]: serve(readFileSync(file), "tar.gz", "fake-engine", script()) }))).rejects.toThrow(/unsafe/);
+    expect(leftovers()).toEqual([]);
+  });
+
+  it("keeps a tar.gz whose links stay inside the folder, drops none, refuses an escaping one", async () => {
+    // Mistral Vibe's bundle: a Python.framework-style link tree beside the program.
+    const source = mkdtempSync(join(scratch, "tar-good-links-"));
+    writeFileSync(join(source, "fake-engine"), script(), { mode: 0o755 });
+    mkdirSync(join(source, "lib", "Versions", "3.12"), { recursive: true });
+    writeFileSync(join(source, "lib", "Versions", "3.12", "Python"), "dylib", { mode: 0o644 });
+    symlinkSync(join("Versions", "3.12", "Python"), join(source, "lib", "Current"));
+    symlinkSync(join("..", "..", "outside"), join(source, "escape"));
+    const file = join(scratch, `links-${Math.random().toString(36).slice(2)}.tar.gz`);
+    await tar.c({ gzip: true, file, cwd: source, portable: true }, ["fake-engine", "lib", "escape"]);
+    await expect(install(fixtureRelease({ [standalonePlatformKey()]: serve(readFileSync(file), "tar.gz", "fake-engine", script()) }))).rejects.toThrow(/unsafe/);
+    expect(leftovers()).toEqual([]);
+    await tar.c({ gzip: true, file, cwd: source, portable: true }, ["fake-engine", "lib"]);
+    const installed = await install(fixtureRelease({ [standalonePlatformKey()]: serve(readFileSync(file), "tar.gz", "fake-engine", script()) }));
+    expect(installed.executablePath).toBe(binPath());
+    expect(readFileSync(join(engineDir(), VERSION, "lib", "Current"), "utf8")).toBe("dylib");
+  });
+
+  it("refuses a link chain whose every entry alone stays inside, but composed leaves the folder", async () => {
+    // folder b, a -> b/.., c -> a/../outside: each link passes the per-entry check; followed as the kernel
+    // would, c lands outside the extracted folder.
+    const source = mkdtempSync(join(scratch, "tar-chain-"));
+    writeFileSync(join(source, "fake-engine"), script(), { mode: 0o755 });
+    mkdirSync(join(source, "b"), { recursive: true });
+    symlinkSync(join("b", ".."), join(source, "a"));
+    symlinkSync(join("a", "..", "outside"), join(source, "c"));
+    const file = join(scratch, `chain-${Math.random().toString(36).slice(2)}.tar.gz`);
+    await tar.c({ gzip: true, file, cwd: source, portable: true }, ["fake-engine", "b", "a", "c"]);
+    await expect(install(fixtureRelease({ [standalonePlatformKey()]: serve(readFileSync(file), "tar.gz", "fake-engine", script()) }))).rejects.toThrow(/unsafe/);
+    expect(leftovers()).toEqual([]);
+  });
+
+  it("resolves a nested link's .. from the link's own folder, not its full path", async () => {
+    // d/up -> ../../outside: measured from d (as the kernel resolves it) the chain leaves the folder;
+    // measured from d/up it would seem to stay inside.
+    const source = mkdtempSync(join(scratch, "tar-deep-chain-"));
+    writeFileSync(join(source, "fake-engine"), script(), { mode: 0o755 });
+    mkdirSync(join(source, "d"), { recursive: true });
+    symlinkSync(join("..", "..", "outside"), join(source, "d", "up"));
+    const file = join(scratch, `deep-chain-${Math.random().toString(36).slice(2)}.tar.gz`);
+    await tar.c({ gzip: true, file, cwd: source, portable: true }, ["fake-engine", "d"]);
     await expect(install(fixtureRelease({ [standalonePlatformKey()]: serve(readFileSync(file), "tar.gz", "fake-engine", script()) }))).rejects.toThrow(/unsafe/);
     expect(leftovers()).toEqual([]);
   });

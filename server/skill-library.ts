@@ -148,9 +148,6 @@ export interface SkillLibraryEntry {
   sha256: string;
   importedAt: string;
   reviewState: LibraryReviewState;
-  /** A responsibility label only; it does not grant access or edit rights. */
-  maintainerBotId?: string;
-  maintainerVersion?: string;
   /** Available to every existing and future bot, unless a private skill shadows it. */
   everyBot?: boolean;
   license?: string;
@@ -201,8 +198,6 @@ const skillLibraryEntrySchema = z.object({
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   importedAt: z.string(),
   reviewState: z.enum(["approved", "disabled"]),
-  maintainerBotId: z.string().min(1).max(200).optional(),
-  maintainerVersion: z.string().uuid().optional(),
   everyBot: z.boolean().optional(),
   license: z.string().optional(),
   compatibility: z.string().optional(),
@@ -310,42 +305,83 @@ function librarySkillListing(root: string, entry: SkillLibraryEntry): LibrarySki
   };
 }
 
-function canonicalValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalValue);
-  if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonicalValue(item)]));
+const libraryOptOutSchema = z.array(z.string());
+
+function libraryOptOutPath(botId: string): string | null {
+  if (!/^[\w-]+$/.test(botId)) return null;
+  return join(DATA_DIR, "skill-state", botId, "library-opt-out.json");
 }
 
-export function libraryManagementRevision(entry: SkillLibraryEntry | { name: string; missing: true }, assignedBotIds: readonly string[]): string {
-  return createHash("sha256").update(JSON.stringify([canonicalValue(entry), [...assignedBotIds].sort()])).digest("hex");
-}
+const unreadableOptOutsWarned = new Set<string>();
 
-export function transferLibraryMaintainer(input: {
-  name: string;
-  maintainerBotId: string;
-  baseRevision: string;
-  assignedBotIds: readonly string[];
-  root?: string;
-}): { entry: SkillLibraryEntry; revision: string } | { error: string } {
-  const root = input.root ?? skillsLibraryRoot();
-  if (!isSkillName(input.name)) return { error: "invalid skill name" };
-  const read = readSkillLibraryIndexState(root);
-  if ("error" in read) return read;
-  const entry = read.index[input.name];
-  if (!entry) return { error: "the shared skill no longer exists" };
-  if (libraryManagementRevision(entry, input.assignedBotIds) !== input.baseRevision || !libraryContentMatches(root, entry)) {
-    return { error: "the skill or its assignments changed; list it again before transferring responsibility" };
+function noLibraryOptOuts(path: string, why: string): ReadonlySet<string> {
+  if (!unreadableOptOutsWarned.has(path)) {
+    unreadableOptOutsWarned.add(path);
+    console.warn(`Library opt-outs at ${path} can't be read (${why}); every every-bot skill stays on for that bot until one is switched off again.`);
   }
-  if (!input.maintainerBotId || input.maintainerBotId.length > 200) return { error: "invalid target bot" };
-  const next = { ...entry, maintainerBotId: input.maintainerBotId, maintainerVersion: randomUUID() };
-  read.index[input.name] = next;
+  return new Set();
+}
+
+/** Names this bot has taken off its own list. An explicit assignment still wins; the shared copy stays. A list that is
+ * there but cannot be read counts as none, so the bot keeps working with every every-bot skill; the server logs it once. */
+export function librarySkillOptOuts(botId: string): ReadonlySet<string> {
+  const path = libraryOptOutPath(botId);
+  if (!path) return new Set();
+  let text: string;
   try {
-    writeSkillLibraryIndex(root, read.index);
-  } catch {
-    return { error: "the maintainer could not be saved; the transfer was not applied" };
+    text = readFileSync(path, "utf8");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return new Set();
+    return noLibraryOptOuts(path, code ?? "read failed");
   }
-  skillLibraryEvents.emit("invalidate", { kind: "maintainer", name: input.name });
-  return { entry: next, revision: libraryManagementRevision(next, input.assignedBotIds) };
+  try {
+    const parsed = libraryOptOutSchema.safeParse(JSON.parse(text));
+    if (parsed.success) return new Set(parsed.data.filter(isSkillName));
+  } catch {}
+  return noLibraryOptOuts(path, "not a list of skill names");
+}
+
+export function setLibrarySkillOptOut(botId: string, name: string, optedOut: boolean): void {
+  if (!isSkillName(name)) return;
+  const path = libraryOptOutPath(botId);
+  if (!path) return;
+  const names = new Set(librarySkillOptOuts(botId));
+  if (names.has(name) === optedOut) return;
+  if (optedOut) names.add(name);
+  else names.delete(name);
+  mkdirSync(join(DATA_DIR, "skill-state", botId), { recursive: true, mode: 0o700 });
+  writeFileAtomic(path, `${JSON.stringify([...names].sort(), null, 2)}\n`, { mode: 0o600 });
+}
+
+/** Library skills this bot has: an explicit assignment, or every bot unless this bot opted out. */
+export function librarySkillsForBot(botId: string, assigned: ReadonlySet<string>, owned: ReadonlySet<string>): LibrarySkillListing[] {
+  const optedOut = librarySkillOptOuts(botId);
+  return listLibrarySkills().filter((skill) => !owned.has(skill.name) && (assigned.has(skill.name) || (skill.everyBot && !optedOut.has(skill.name))));
+}
+
+/** Library skills this bot can still add: not owned, not assigned, and not already on for every bot. */
+export function librarySkillsToOffer(botId: string, assigned: ReadonlySet<string>, owned: ReadonlySet<string>): LibrarySkillListing[] {
+  const optedOut = librarySkillOptOuts(botId);
+  return listLibrarySkills().filter((entry) => !owned.has(entry.name) && !assigned.has(entry.name) && (!entry.everyBot || optedOut.has(entry.name)));
+}
+
+/** Drops one bot's assignment. A skill on for every bot is opted out here so the others keep it. */
+export function unassignLibrarySkill(
+  botId: string,
+  name: string,
+  assigned: readonly string[] | undefined,
+): { unassigned: true; assignedSkills?: string[] } | { absent: true } {
+  if (!isSkillName(name)) return { absent: true };
+  const listing = listLibrarySkills().find((skill) => skill.name === name);
+  if (!listing) return { absent: true };
+  const explicit = assigned?.includes(name) === true;
+  const viaEvery = listing.everyBot && !librarySkillOptOuts(botId).has(name);
+  if (!explicit && !viaEvery) return { absent: true };
+  setLibrarySkillOptOut(botId, name, true);
+  return explicit
+    ? { unassigned: true, assignedSkills: assigned!.filter((skill) => skill !== name) }
+    : { unassigned: true };
 }
 
 export function setLibrarySkillEveryBot(

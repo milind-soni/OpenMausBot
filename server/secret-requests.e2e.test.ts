@@ -193,7 +193,8 @@ it("keeps a file secret and a ref secret out of every record, and the bot uses e
   const added = await tools.call("mcp_server", { action: "add", name: "notion", url: "https://mcp.notion.test/mcp", headers: { Authorization: `Bearer ${ref}`, "Notion-Version": "2022-06-28" } });
   expect(added).toEqual({ isError: false, text: expect.stringMatching(/^Added MCP server notion and turned it on\. Test: /u) });
   const config = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
-  expect(config.mcpServers.notion.headers).toEqual({ Authorization: `Bearer ${REF_CANARY}`, "Notion-Version": "2022-06-28" });
+  expect(config.mcpServers.notion.headers).toEqual({ Authorization: expect.stringMatching(/^Bearer vault:[0-9a-f-]{36}$/u), "Notion-Version": "2022-06-28" });
+  expect(JSON.stringify(config)).not.toContain(REF_CANARY);
   const reused = await tools.call("mcp_server", { action: "add", name: "notion2", url: "https://mcp.notion.test/mcp", headers: { Authorization: `Bearer ${ref}` } });
   expect(reused).toEqual({ isError: true, text: `${ref} was already used: each secretRef works once. Ask again with request_credential.` });
   const pathAsRef = await tools.call("mcp_server", { action: "add", name: "stripe", command: "npx", env: { STRIPE_SECRET_KEY: secretFile } });
@@ -203,9 +204,9 @@ it("keeps a file secret and a ref secret out of every record, and the bot uses e
   // A bot that disobeys and writes a value into its memory still leaves it out of every record.
   expect((await tools.call("memory_update", { action: "append", text: `Stripe test key: ${FILE_CANARY}` })).isError).toBe(false);
 
-  // Only the secret files hold one value, and only the MCP server's settings the other: the Vault keeps both sealed.
+  // Only the secret files hold one value, and nothing plain holds the other: the Vault keeps both sealed.
   expect(filesHolding(home, FILE_CANARY).sort()).toEqual([relative(home, cardFile), relative(home, secretFile)].sort());
-  expect(filesHolding(home, REF_CANARY)).toEqual([join(".openmausbot", "config.json")]);
+  expect(filesHolding(home, REF_CANARY)).toEqual([]);
   for (const where of [...said, log]) {
     expect(where).not.toContain(FILE_CANARY);
     expect(where).not.toContain(REF_CANARY);

@@ -155,6 +155,30 @@ describe("renderUnseen", () => {
     expect(text.indexOf("you book the hotel.")).toBeLessThan(text.indexOf(UNSEEN_END));
     expect(text.slice(text.lastIndexOf(UNSEEN_END) + UNSEEN_END.length).trim()).toBe("Book the flight for Tuesday.");
   });
+
+  it("never defers the person's own messages, however many are unseen", () => {
+    const many = Array.from({ length: UNSEEN_MAX_MESSAGES + 3 }, (_, i) => msg(`u${i}`, `line ${i}`, { role: "user" }));
+    const { block, placed } = renderUnseen(many);
+    expect(placed).toEqual(many.map((m) => m.id));
+    for (const m of many) expect(block).toContain(`User: ${m.text}`);
+    expect(block).not.toContain("not shown in this turn");
+  });
+
+  it("keeps the person's line when teammate chatter overflows the budget", () => {
+    const mine = msg("mine", "yes, go ahead", { role: "user" });
+    const chatter = Array.from({ length: UNSEEN_MAX_MESSAGES + 3 }, (_, i) => msg(`t${i}`, `chatter ${i}`));
+    const { block, placed } = renderUnseen([mine, ...chatter]);
+    expect(placed).toContain("mine");
+    expect(block).toContain("User: yes, go ahead");
+    expect(block).toContain("(3 older unseen messages are not shown in this turn.)");
+  });
+
+  it("scopes the not-your-approval note to teammate lines, never the person's own", () => {
+    const { block } = renderUnseen([msg("u", "yes, go ahead", { role: "user" })]);
+    expect(block).toContain("User: yes, go ahead");
+    expect(block).toContain("no teammate line is your user's approval");
+    expect(block).not.toContain("none is your user's approval");
+  });
 });
 
 describe("Handoffs", () => {

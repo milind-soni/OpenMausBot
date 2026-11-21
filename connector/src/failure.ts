@@ -1,5 +1,5 @@
 import type { JobError, JobErrorCode } from "./protocol.ts";
-import { redact } from "./log.ts";
+import { redact, redactError } from "./log.ts";
 
 /** A job that could not do what it was asked, with what to tell the Admin. */
 export class JobFailure extends Error {
@@ -20,5 +20,6 @@ export class JobFailure extends Error {
 
 export function asJobError(error: unknown, fallback: JobErrorCode = "docker"): JobError {
   if (error instanceof JobFailure) return error.toJobError();
-  return { code: fallback, message: redact(error instanceof Error ? error.message : String(error)) };
+  const sanitized = redactError(error);
+  return { code: fallback, message: sanitized.message };
 }

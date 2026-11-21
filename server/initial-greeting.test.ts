@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { initialGreeting, setupRequestLine } from "./initial-greeting.ts";
+import { initialGreeting, initialGreetingMessage, setupChoices, setupRequestLine } from "./initial-greeting.ts";
 
 describe("the line after Set me up", () => {
   it("is written in the app's language, by region, with English for any other", () => {
@@ -30,6 +30,25 @@ describe("a new bot's greeting", () => {
   it("names no one when the person has not given a name", () => {
     for (const person of [undefined, "", "   "]) {
       expect(initialGreeting("Scout", "en", person)).toBe("Hi, I'm Scout. What would you like me to do?");
+    }
+  });
+});
+
+describe("Simplified Chinese", () => {
+  it("greets, asks and offers the setup answers in Simplified Chinese, not English", () => {
+    for (const language of ["zh", "zh-CN", "zh-Hans", "zh-SG"]) {
+      expect(initialGreeting("Sunny", language)).toBe("你好，我是 Sunny。你希望我帮你做什么？");
+      expect(setupRequestLine(language)).toMatch(/^好的。用你自己的话告诉我/);
+      expect(setupChoices(language)).toEqual(["研究和深入探讨主题", "帮我留意各种事情", "电子邮件、日历和消息",
+        "预订、购物和跑腿", "数据、电子表格和报告"]);
+    }
+    expect(initialGreeting("Sunny", "zh", "王小明")).toBe("你好 王小明，我是 Sunny。你希望我帮你做什么？");
+    expect(initialGreetingMessage("Sunny", () => "zh", true)).toMatchObject({ text: "你好，我是 Sunny。你希望我帮你做什么？", setupOffer: true });
+  });
+
+  it("leaves Traditional Chinese as it was", () => {
+    for (const language of ["zh-TW", "zh-HK", "zh-Hant-TW"]) {
+      expect(initialGreeting("Sunny", language)).toBe("嗨，我是 Sunny。你想要我幫你做什麼？");
     }
   });
 });

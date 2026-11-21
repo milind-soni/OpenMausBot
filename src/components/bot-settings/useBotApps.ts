@@ -6,7 +6,11 @@ import { api, type Bot } from "@/state/store";
 import type { ConnectorScope } from "../../../shared/connector-scopes";
 import { EMAIL_SLUG, type EmailStatus } from "../../../shared/email";
 import { preloadConnectedApps, type ConnectorInventory } from "@/lib/connected-apps";
+import type { ConnectorAccount } from "@/lib/connector-status";
 import type { ToolkitCard } from "../ServiceIcon";
+import { cardsBySlug, loadAppCards, onAppCatalog } from "@/lib/app-catalog-cache";
+
+export { loadAppCards };
 
 export interface BotApp {
   slug: string;
@@ -14,23 +18,14 @@ export interface BotApp {
   blurb: string;
   card: Pick<ToolkitCard, "logo" | "domain" | "label">;
   scope: ConnectorScope | null;
+  /** the app's connected accounts, when the inventory lists them */
+  accounts?: ConnectorAccount[];
 }
 
 export interface BotApps {
   phase: "loading" | "ready" | "unknown";
   apps: BotApp[];
   connectedSlugs: string[];
-}
-
-let cardsRequest: Promise<Map<string, ToolkitCard>> | null = null;
-export function loadAppCards(): Promise<Map<string, ToolkitCard>> {
-  cardsRequest ??= api("/api/connectors/catalog")
-    .then((response: { cards?: ToolkitCard[] }) => new Map((response.cards ?? []).map((card) => [card.slug, card])))
-    .catch(() => {
-      cardsRequest = null;
-      return new Map<string, ToolkitCard>();
-    });
-  return cardsRequest;
 }
 
 function slugLabel(slug: string): string {
@@ -68,29 +63,55 @@ export function botAppsFrom(
       blurb: card?.blurb ?? "",
       card: { logo: card?.logo ?? null, domain: card?.domain ?? null, label },
       scope: botAppScope(bot, slug),
+      accounts: inventory.services[slug]?.accounts ?? [],
     };
   });
   return { phase: "ready", apps, connectedSlugs };
 }
 
-export function useBotApps(bot: Bot): BotApps {
+/** The apps plus whether this lookup's inventory, app catalog and Email requests have answered (or failed); the values alone
+ * can't tell pending from failed, and an inventory kept from an earlier lookup is not this lookup's answer. */
+export interface BotAppsState extends BotApps {
+  inventorySettled: boolean;
+  cardsSettled: boolean;
+  emailSettled: boolean;
+}
+
+/** `load` false skips the requests until it turns true (the settings search loads apps only once someone searches). */
+export function useBotApps(bot: Bot, load = true): BotAppsState {
   const [inventory, setInventory] = useState<ConnectorInventory | null>(null);
   const [cards, setCards] = useState<ReadonlyMap<string, ToolkitCard>>(() => new Map());
   const [email, setEmail] = useState<EmailStatus | null>(null);
+  const [inventorySettled, setInventorySettled] = useState(false);
+  const [cardsSettled, setCardsSettled] = useState(false);
+  const [emailSettled, setEmailSettled] = useState(false);
 
   useEffect(() => {
+    if (!load) return;
     let cancelled = false;
+    setInventorySettled(false);
+    setCardsSettled(false);
+    setEmailSettled(false);
     void preloadConnectedApps().then((result) => {
-      if (!cancelled) setInventory(result);
+      if (cancelled) return;
+      setInventory(result);
+      setInventorySettled(true);
     });
     void loadAppCards().then((result) => {
-      if (!cancelled) setCards(result);
+      if (cancelled) return;
+      setCards(result);
+      setCardsSettled(true);
     });
-    void api("/api/email").then((result: EmailStatus) => { if (!cancelled) setEmail(result); }).catch(() => {});
+    const stopCatalog = onAppCatalog((catalog) => setCards(cardsBySlug(catalog)));
+    void api("/api/email")
+      .then((result: EmailStatus) => { if (!cancelled) setEmail(result); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setEmailSettled(true); });
     return () => {
       cancelled = true;
+      stopCatalog();
     };
-  }, []);
+  }, [load]);
 
-  return botAppsFrom(bot, inventory, cards, email);
+  return { ...botAppsFrom(bot, inventory, cards, email), inventorySettled, cardsSettled, emailSettled };
 }
