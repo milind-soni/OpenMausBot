@@ -30,7 +30,7 @@ test("the rail: My Cloud, the person's Clouds and teams' Clouds in the session's
     { id: "home", name: "Studio", color: "purple", kind: "cloud", opens: true, paint: { swatch: "violet" }, active: true },
     { id: "a", name: "Client A", color: "teal", kind: "cloud", opens: true, paint: { swatch: "green" } },
     { id: "acme", name: "Acme", color: "yellow", kind: "team", opens: true, paint: { swatch: "amber", locked: "member" } },
-    { id: "vps", name: "Office", color: null, kind: "server", opens: true, paint: { swatch: null }, removable: true, forget: true },
+    { id: "vps", name: "Office", color: null, kind: "server", opens: true, paint: { swatch: null }, removable: true, forget: true, renames: true },
   ], "each colour changed from the rail, but a team's by its admins alone");
   for (const origin of [HOME, CLIENT_A, TEAM, VPS, "/Users/person/lab"]) assert.equal(JSON.stringify(places).includes(origin), false, origin);
   const before = railPlaces({ saved: saved("local"), home: null, mine: HOME, state: session() });
@@ -84,7 +84,7 @@ test("a server of the person's own that signed in with their account: one saved 
     entry({ id: "s-render", name: "Render VPS", color: "rose", tier: null, runsOn: "server", managed: false, status: "offline", origin: RENDER, lastSeenAt: 1_761_000_100_000 })]);
   const state = session({ clouds });
   const places = railPlaces({ saved: saved(), home: HOME, mine: HOME, state });
-  assert.deepEqual(places.find(place => place.id === "vps"), { id: "vps", name: "Office", color: null, kind: "server", opens: true, paint: { swatch: null }, removable: true, forget: true, server: true },
+  assert.deepEqual(places.find(place => place.id === "vps"), { id: "vps", name: "Office", color: null, kind: "server", opens: true, paint: { swatch: null }, removable: true, forget: true, renames: true, server: true },
     "saved by hand at its address: the same circle, marked as theirs, online, opening as it always did");
   assert.deepEqual(places.slice(-2), [
     { id: "signed-in:s-mini", name: "Mac mini", color: null, kind: "server", opens: false, paint: { swatch: null }, ownNetwork: true, server: true, offline: true, lastSeenAt: 1_761_000_000_000 },
@@ -365,7 +365,7 @@ function preload(origin, { activation = false } = {}) {
 
 test("a Cloud's page gets the rail and the add sheet's narrow bridges; a circle, ＋ and checkout open only from the person's click", async () => {
   const page = preload(HOME);
-  assert.deepEqual(Object.keys(page.bridge.workspaces), ["state", "menu", "line", "places", "open", "add", "probe", "look", "color", "recolor", "remove", "makeHome", "homeOffers", "onChanged", "local", "onNewLocal"]);
+  assert.deepEqual(Object.keys(page.bridge.workspaces), ["state", "menu", "line", "places", "open", "add", "probe", "look", "color", "recolor", "remove", "rename", "makeHome", "homeOffers", "onChanged", "local", "onNewLocal"]);
   assert.deepEqual(Object.keys(page.bridge.cloudAdd), ["state", "start", "reopen", "copyLink", "open", "interest", "sheet", "organization"]);
   await page.bridge.workspaces.places();
   await page.bridge.cloudAdd.state();
@@ -379,6 +379,7 @@ test("a Cloud's page gets the rail and the add sheet's narrow bridges; a circle,
   await assert.rejects(page.bridge.workspaces.color("rose"), /Choose a color/, "a page changes its place's colour only from the person's click");
   await assert.rejects(page.bridge.workspaces.recolor("vps", "rose"), /Choose a color/);
   await assert.rejects(page.bridge.workspaces.remove("old"), /Choose Remove from list/, "Remove from list only from the person's click");
+  await assert.rejects(page.bridge.workspaces.rename("vps", "Office"), /Choose Rename/, "Rename only from the person's click");
   await assert.rejects(page.bridge.workspaces.makeHome("vps"), /Choose Make my home/, "a move starts only from the person's click");
   await assert.rejects(page.bridge.workspaces.local.create("Work", "rose"), /Choose a name/, "a workspace of this computer's own only from the person's click");
   await assert.rejects(page.bridge.workspaces.local.edit("profile:work", { name: "Office" }), /Choose a change/);
@@ -418,6 +419,20 @@ test("Remove from list on a server saved by hand: main forgets it here, by its o
   assert.deepEqual(forgotten, ["vps"], "never a Cloud, a team's Cloud or this computer's own");
   assert.deepEqual(await rail({ forget: async () => false }).call("workspaces:remove", "vps"), { outcome: "failed" });
   assert.deepEqual(await rail().call("workspaces:remove", "vps"), { outcome: "unsupported" }, "a main without forget says so");
+});
+
+test("Rename on a server saved by hand: main names it on this computer, by its own word for which one", async () => {
+  const named = [];
+  const installed = rail({ rename: (id, name) => { named.push([id, name]); return name !== ""; } });
+  const places = (await installed.call("workspaces:places")).places;
+  assert.deepEqual(places.filter(place => place.renames).map(place => place.id), ["vps"], "only a server saved by hand offers Rename");
+  assert.deepEqual(await installed.call("workspaces:rename", "vps", "Office"), { outcome: "saved" });
+  assert.deepEqual(installed.call("workspaces:rename", "vps", { toString: () => "Evil" }), { outcome: "name" }, "only plain text is a name");
+  named.pop();
+  for (const id of ["home", "a", "acme", "lab", "https://evil.example.test"]) assert.throws(() => installed.call("workspaces:rename", id, "Office"), /isn't here/, id);
+  assert.deepEqual(named, [["vps", "Office"]], "never a Cloud, a team's Cloud or this computer's own");
+  assert.deepEqual(rail({ rename: () => { throw new Error("disk full"); } }).call("workspaces:rename", "vps", "Office"), { outcome: "failed" }, "a save that throws says so");
+  assert.deepEqual(rail().call("workspaces:rename", "vps", "Office"), { outcome: "unsupported" }, "a main without rename says so");
 });
 
 test("a place with inbox lines waiting says so on its circle, this computer's too; the Admin's payment problem still does", () => {
