@@ -134,8 +134,10 @@ describe("check before done", () => {
     expect(f.runs.map((run) => [run.botId, run.threadId, run.kind])).toEqual([["v", "check-1", "check"]]);
     const brief = f.runs[0]!.text;
     expect(brief).toContain("<request>\nImprove the dialogue, keep every event.\n</request>");
-    expect(brief).toMatch(/\[From @Nib \(bot\) · files to check · information only[^\n]*\n- .*check\/round-1\/chapter\.md/);
-    expect(readFileSync(brief.match(/- (\S*chapter\.md)/)![1]!, "utf8")).toContain("She left at dawn.");
+    expect(brief).toMatch(/\[From @Nib \(bot\) · files to check · information only[^\n]*\n- /);
+    const copy = brief.match(/\n- (.+chapter\.md)\n/)![1]!;
+    expect(copy.endsWith(join("inbox", "check", "round-1", "chapter.md"))).toBe(true);
+    expect(readFileSync(copy, "utf8")).toContain("She left at dawn.");
     expect(brief).toContain(`<result>\n${CHAPTER.trim()}\n</result>`);
     expect(brief).toContain("with no source, a claim the answer gives no ground for");
     expect(f.posted).toEqual([{ name: "Checked by Vera · passed in round 1", ok: true, input: "Vera · round 1 of 3", output: "Pass - no issues.", ref: { botId: "v", threadId: "check-1" } }]);
@@ -236,8 +238,11 @@ describe("check before done", () => {
     expect([f.posted, f.done]).toEqual([[], []]);
   });
 
-  it("after a restart, ends a check it cut short with a line and the held notice", () => {
+  it("after a restart, ends a check it cut short with a line and the held notice, once the app has started", async () => {
     const f = fixture({ saved: [{ botId: "w", threadId: "chat", answer: "The answer." }] });
+    expect([f.posted, f.done]).toEqual([[], []]);
+    expect(f.saved()).toEqual([]);
+    await f.settle();
     expect(f.posted).toEqual([{ name: "Not checked: the app restarted", ok: false, input: "", output: "" }]);
     expect(f.done).toEqual(["The answer."]);
     expect(f.saved()).toEqual([]);

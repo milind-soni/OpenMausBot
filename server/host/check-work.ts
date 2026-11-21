@@ -276,13 +276,17 @@ export function createCheckWork(deps: CheckWorkDeps) {
     });
   }
 
-  // A check a restart cut short ends with its line, and the notice its first answer held back.
-  for (const left of deps.saved.read()) {
-    if (!deps.bot(left.botId)) continue;
-    deps.post(left.threadId, { name: deps.line(left.threadId, "server.checkWork.notChecked", { reason: deps.line(left.threadId, "server.checkWork.restarted") }), ok: false, input: "", output: "" });
-    deps.done(left.botId, left.threadId, left.answer);
-  }
+  // A check a restart cut short ends with its line, and the notice its first answer held back: once the app has
+  // started, since what notifies is made after this.
+  const cutShort = deps.saved.read();
   deps.saved.write([]);
+  if (cutShort.length) deps.timer(() => {
+    for (const left of cutShort) {
+      if (!deps.bot(left.botId)) continue;
+      deps.post(left.threadId, { name: deps.line(left.threadId, "server.checkWork.notChecked", { reason: deps.line(left.threadId, "server.checkWork.restarted") }), ok: false, input: "", output: "" });
+      deps.done(left.botId, left.threadId, left.answer);
+    }
+  }, 0);
 
   return {
     /** The thread's answer is being checked: its "done" waits, and it shows as waiting with a Stop. */
