@@ -94,7 +94,7 @@ export const WORDS = Object.freeze({
     "lending.action.screenTools": "Ha controllato i comandi di app e schermo",
     "lending.action.screen": "Ha usato app e schermo",
     "lending.action.website": "Ha aperto un sito",
-    "lending.action.chrome": "Used your Chrome",
+    "lending.action.chrome": "Ha usato il tuo Chrome",
     "lending.action.invalid": "Richiesta malformata",
     "lending.action.other": "Altra richiesta",
   }),
