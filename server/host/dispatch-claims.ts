@@ -8,37 +8,39 @@ export function createDispatchClaims<Claim extends { id: string }>(): DispatchCl
 }
 
 class ClaimsByThread<Claim extends { id: string }> extends Map<string, Claim> {
-  private readonly waiting = new Map<string, Array<() => void>>();
+  private readonly waiting = new Map<string, { claimId: string; resolvers: Array<() => void> }>();
 
   released(threadId: string): Promise<void> {
     const claim = this.get(threadId);
     if (!claim) return Promise.resolve();
-    return new Promise((resolve) => this.waiting.set(claim.id, [...(this.waiting.get(claim.id) ?? []), resolve]));
+    return new Promise((resolve) => {
+      const waiters = this.waiting.get(threadId);
+      if (waiters?.claimId === claim.id) waiters.resolvers.push(resolve);
+      else this.waiting.set(threadId, { claimId: claim.id, resolvers: [resolve] });
+    });
   }
 
   override set(threadId: string, claim: Claim): this {
-    const before = this.get(threadId);
     super.set(threadId, claim);
-    if (before && before.id !== claim.id) this.release(before.id);
+    if (this.waiting.get(threadId)?.claimId !== claim.id) this.release(threadId);
     return this;
   }
 
   override delete(threadId: string): boolean {
-    const before = this.get(threadId);
     const deleted = super.delete(threadId);
-    if (before) this.release(before.id);
+    this.release(threadId);
     return deleted;
   }
 
   override clear(): void {
-    const before = [...this.values()];
+    const threads = [...this.waiting.keys()];
     super.clear();
-    for (const claim of before) this.release(claim.id);
+    for (const threadId of threads) this.release(threadId);
   }
 
-  private release(claimId: string): void {
-    const waiters = this.waiting.get(claimId) ?? [];
-    this.waiting.delete(claimId);
-    for (const resolve of waiters) resolve();
+  private release(threadId: string): void {
+    const waiters = this.waiting.get(threadId);
+    this.waiting.delete(threadId);
+    for (const resolve of waiters?.resolvers ?? []) resolve();
   }
 }

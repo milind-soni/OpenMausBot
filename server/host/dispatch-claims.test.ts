@@ -21,8 +21,9 @@ describe("createDispatchClaims", () => {
     const released = claims.released("t1");
     claims.set("t1", { id: "c1", phase: "dispatching" });
     expect(await settledYet(released)).toBe(false);
+    claims.set("t2", { id: "c1", phase: "setup" });
     claims.delete("t2");
-    expect(await settledYet(released)).toBe(false);
+    expect(await settledYet(released), "another thread's claim, even one with the same id").toBe(false);
     claims.delete("t1");
     expect(await settledYet(released)).toBe(true);
   });
