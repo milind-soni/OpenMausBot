@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { providerMcpTool, providerToolAllowKey } from "./provider-tool-allow.ts";
+import { providerMcpTool, providerToolAllowKey, providerToolConfig } from "./provider-tool-allow.ts";
 
 describe("provider MCP tool grants", () => {
   it("parses the server and exact tool from provider-facing names", () => {
@@ -10,13 +10,36 @@ describe("provider MCP tool grants", () => {
     expect(providerMcpTool("mcp____list_issues")).toBeNull();
   });
 
-  it("creates durable keys only for exact read tools", () => {
+  it("creates durable keys for exact tools that send nothing and drive no computer or phone", () => {
     const config = { type: "http", url: "https://linear.example/mcp", headers: { Authorization: "secret" } };
     expect(providerToolAllowKey("claude", "mcp__linear__list_issues", config))
       .toMatch(/^provider-tool:claude:linear:list_issues:[a-f0-9]{16}$/);
-    expect(providerToolAllowKey("claude", "mcp__linear__save_issue", config)).toBeNull();
+    expect(providerToolAllowKey("claude", "mcp__linear__save_issue", config)).toMatch(/^provider-tool:claude:linear:save_issue:[a-f0-9]{16}$/);
+    expect(providerToolAllowKey("claude", "mcp__gmail__send_email", config)).toBeNull();
+    expect(providerToolAllowKey("claude", "mcp__linear__create_comment", config)).toBeNull();
+    expect(providerToolAllowKey("claude", "mcp__telnyx__invoke_api_endpoint", config)).toBeNull();
     expect(providerToolAllowKey("claude", "mcp__computer__click", config)).toBeNull();
+    expect(providerToolAllowKey("claude", "mcp__phone__tap", { builtin: "phone" })).toBeNull();
+    expect(providerToolAllowKey("codex", "mcp__openmausbot_phone__tap_text", config)).toBeNull();
+    expect(providerToolAllowKey("claude", "mcp__agents__shared_computer", { builtin: "agents" })).toBeNull();
+    expect(providerToolAllowKey("claude", "mcp__agents__list_bots", { builtin: "agents" })).toMatch(/^provider-tool:claude:agents:list_bots:/);
     expect(providerToolAllowKey("", "mcp__linear__list_issues", config)).toBeNull();
+    expect(providerToolAllowKey("claude", "mcp__linear__list_issues", undefined)).toBeNull();
+  });
+
+  it("names a built-in bridge, never its turn token, and nothing for a server neither configured nor built in", () => {
+    expect(providerToolConfig("composio", {})).toEqual({ builtin: "composio" });
+    expect(providerToolConfig("own_apps", {})).toEqual({ builtin: "own_apps" });
+    expect(providerToolConfig("phone", {})).toBeUndefined();
+    expect(providerToolConfig("computer", {})).toBeUndefined();
+    expect(providerToolConfig("unmounted", {})).toBeUndefined();
+    const linear = { url: "https://linear.example/mcp" };
+    expect(providerToolConfig("linear", { linear })).toBe(linear);
+    const tool = "mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL";
+    const first = providerToolAllowKey("kimi", tool, providerToolConfig("composio", {}));
+    expect(first).toMatch(/^provider-tool:kimi:composio:COMPOSIO_MULTI_EXECUTE_TOOL:/);
+    expect(providerToolAllowKey("kimi", tool, providerToolConfig("composio", {}))).toBe(first);
+    expect(providerToolAllowKey("kimi", "mcp__composio__GMAIL_SEND_EMAIL", providerToolConfig("composio", {}))).toBeNull();
   });
 
   it("invalidates a key when the configured server changes", () => {

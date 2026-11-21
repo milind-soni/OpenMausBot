@@ -370,7 +370,7 @@ describe("a searched MCP catalog", () => {
     });
     await f.start({ integrations: { custom: { whop: { type: "http", url: remote.url, headers: {} } } } });
     const opened = await f.recorder.until((event) => event.type === "request.opened");
-    expect(opened).toMatchObject({ requestType: "permission", tool: "whop_payments_list", summary: expect.stringContaining("biz_1") });
+    expect(opened).toMatchObject({ requestType: "permission", tool: "mcp__whop__payments_list", summary: expect.stringContaining("biz_1") });
     expect(remote.calls).toEqual([]);
     await f.instance.adapter.respondToRequest(f.threadId, opened.requestId!, { behavior: "allow" });
     expect(await f.completed()).toMatchObject({ ok: true });
@@ -397,7 +397,7 @@ describe("approvals that follow the other engines", () => {
     await settledServer("audit");
     auditReady.resolve();
     const opened = await f.recorder.until((event) => event.type === "request.opened");
-    expect(opened).toMatchObject({ requestType: "permission", tool: "audit_write" });
+    expect(opened).toMatchObject({ requestType: "permission", tool: "mcp__audit__write" });
     expect(f.requests[1].tools?.map((tool) => tool.function.name)).toContain("audit_write");
     expect(f.effects()).toEqual([{ name: "peer", value: "sent" }]);
     await f.instance.adapter.respondToRequest(f.threadId, opened.requestId!, { behavior: "allow" });
@@ -421,7 +421,7 @@ describe("approvals that follow the other engines", () => {
     const opened = () => f.recorder.events.filter((event) => event.type === "request.opened");
     await f.start();
     const first = await f.recorder.until((event) => event.type === "request.opened");
-    expect(first).toMatchObject({ tool: "audit_write", allowSession: true });
+    expect(first).toMatchObject({ tool: "mcp__audit__write", allowSession: true });
     expect(await f.instance.adapter.respondToRequest(f.threadId, first.requestId!, { behavior: "allow", always: true })).toBe("allowed-once");
     expect(await f.completed()).toMatchObject({ ok: true });
     expect(opened()).toHaveLength(1);
@@ -430,7 +430,7 @@ describe("approvals that follow the other engines", () => {
     f.recorder.events.splice(0);
     await f.start();
     const other = await f.recorder.until((event) => event.type === "request.opened");
-    expect(other).toMatchObject({ tool: "audit_fail", allowSession: true });
+    expect(other).toMatchObject({ tool: "mcp__audit__fail", allowSession: true });
     expect(f.effects().map((effect) => effect.name)).toEqual(["one", "two", "three"]);
     await f.instance.adapter.respondToRequest(f.threadId, other.requestId!, { behavior: "deny" });
     await f.completed();
@@ -438,10 +438,10 @@ describe("approvals that follow the other engines", () => {
     f.recorder.events.splice(0);
     await f.start({ guestConfined: true });
     const guest = await f.recorder.until((event) => event.type === "request.opened");
-    expect(guest).toMatchObject({ tool: "audit_write", allowSession: false });
+    expect(guest).toMatchObject({ tool: "mcp__audit__write", allowSession: false });
     expect(await f.instance.adapter.respondToRequest(f.threadId, guest.requestId!, { behavior: "allow", always: true })).toBe("allowed-once");
     const again = await f.recorder.until((event) => event.type === "request.opened" && event.requestId !== guest.requestId);
-    expect(again).toMatchObject({ tool: "audit_write", allowSession: false });
+    expect(again).toMatchObject({ tool: "mcp__audit__write", allowSession: false });
     await f.instance.adapter.respondToRequest(f.threadId, again.requestId!, { behavior: "deny" });
     await f.completed();
     expect(f.effects().map((effect) => effect.name)).toEqual(["one", "two", "three", "guest"]);
@@ -449,7 +449,7 @@ describe("approvals that follow the other engines", () => {
     f.recorder.events.splice(0);
     await f.instance.adapter.sendTurn({ threadId: randomUUID(), text: "Store it here too.", model: "fixture-model", integrations: f.integrations });
     const elsewhere = await f.recorder.until((event) => event.type === "request.opened");
-    expect(elsewhere).toMatchObject({ tool: "audit_write" });
+    expect(elsewhere).toMatchObject({ tool: "mcp__audit__write" });
     await f.instance.adapter.respondToRequest(elsewhere.threadId, elsewhere.requestId!, { behavior: "deny" });
     await f.completed();
     expect(f.effects().map((effect) => effect.name)).toEqual(["one", "two", "three", "guest"]);
@@ -479,7 +479,7 @@ describe("whose allow \"Always allow this session\" keeps", () => {
     f.recorder.events.splice(0);
     await f.start({ botId: "clive" });
     const roommate = await f.recorder.until((event) => event.type === "request.opened");
-    expect(roommate).toMatchObject({ tool: "audit_write", allowSession: true });
+    expect(roommate).toMatchObject({ tool: "mcp__audit__write", allowSession: true });
     await f.instance.adapter.respondToRequest(f.threadId, roommate.requestId!, { behavior: "deny" });
     await f.completed();
 
@@ -493,7 +493,7 @@ describe("whose allow \"Always allow this session\" keeps", () => {
     f.recorder.events.splice(0);
     await f.start({ botId: "mira", integrations: { custom: { audit: { ...audit, env: { ...audit.env, AUDIT_PROFILE: "other" } } } } });
     const changed = await f.recorder.until((event) => event.type === "request.opened");
-    expect(changed).toMatchObject({ tool: "audit_write", allowSession: true });
+    expect(changed).toMatchObject({ tool: "mcp__audit__write", allowSession: true });
     await f.instance.adapter.respondToRequest(f.threadId, changed.requestId!, { behavior: "deny" });
     await f.completed();
     expect(f.effects().map((effect) => effect.name)).toEqual(["mira", "mira2"]);

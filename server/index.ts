@@ -52,7 +52,7 @@ import { RoomMemberLock } from "./room-member-lock.ts";
 import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, undeliveredApprovalTool } from "./auto-approve.ts"; import { readsOwnFiles } from "./own-file-reads.ts";
 import { bindSafetyFloor, denyAtSafetyFloor, heldAtSafetyFloor, safetyFloorOn } from "./safety-floor-gate.ts";
 import { CommandAllowlistStore, commandAllowlistCandidate } from "./command-allowlist.ts";
-import { providerMcpTool, providerToolAllowKey } from "./provider-tool-allow.ts";
+import { providerMcpTool, providerToolAllowKey, providerToolConfig } from "./provider-tool-allow.ts";
 import type { CommandAllowlistCandidate, CommandAllowlistResponse } from "../shared/command-allowlist.ts";
 import { claudeAccountInfo } from "./claude-accounts.ts";
 import {
@@ -6438,7 +6438,7 @@ bus.subscribe((event: RuntimeEvent) => {
     case "request.opened": {
       // A structured ask is a question whatever channel carried it, and no approval mode answers a question for the person (at Full access one nobody is there for is not asked).
       const permission = event.requestType === "permission" && !event.questions?.length;
-      // The provider's own mode already ran; only Full access, an exact saved command or an exact remembered MCP read tool answers here.
+      // The provider's own mode already ran; only Full access, an exact saved command or an exact remembered MCP tool that sends nothing answers here.
       const asker = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
       if (asker && proactive.fence.answers(event, asker, pushMessage)) break;
       const unattended = permission && asker && event.requestId ? isUnattended(asker.id, event.threadId) : false;
@@ -6454,12 +6454,12 @@ bus.subscribe((event: RuntimeEvent) => {
       const command = permission && asker && event.requestId && !event.requiresExplicitApproval && event.command && !guestDriven
         ? commandAllowlistCandidate({ ...event.command, providerInstanceId: event.providerInstanceId ?? asker.modelSelection.instanceId })
         : null;
-      // Bound to provider and server config, so a switch or edit invalidates the grant; built-in or spoofed server names never get a durable key.
+      // Bound to provider and server config, so a switch or edit invalidates the grant; a built-in bridge is named, never its turn token, and a local-computer ask is never remembered.
       const providerInstanceId = asker ? event.providerInstanceId ?? asker.modelSelection.instanceId : "";
-      const providerTool = permission && asker && event.requestId && !event.requiresExplicitApproval && !guestDriven
+      const providerTool = permission && asker && event.requestId && !event.requiresExplicitApproval && !guestDriven && event.approvalScope !== "local-computer"
         ? providerMcpTool(event.tool)
         : null;
-      const configuredMcp = providerTool && asker ? engineMcpServers(asker)[providerTool.server] : undefined;
+      const configuredMcp = providerTool && asker ? providerToolConfig(providerTool.server, engineMcpServers(asker)) : undefined;
       const toolAllowKey = configuredMcp === undefined
         ? null
         : providerToolAllowKey(providerInstanceId, event.tool, configuredMcp);
