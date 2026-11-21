@@ -258,6 +258,7 @@
   "server.teammates.gotYourApproval": "{who} onayınızı aldı",
   "server.teammates.questionAnswered": "{who} sorusu yanıtlandı",
   "server.teammates.requestApproved": "{who} isteği onaylandı",
+  "server.teammates.noLongerWaiting": "{who} artık sizi beklemiyor",
   "server.teammates.queuedBehind.answer": "“{title}” içindeki yanıtınızdan sonra @{bot} için sırada",
   "server.teammates.queuedBehind.approval": "“{title}” içindeki onayınızdan sonra @{bot} için sırada",
   "server.teammates.queuedBehind.review": "“{title}” içindeki incelemenizden sonra @{bot} için sırada",

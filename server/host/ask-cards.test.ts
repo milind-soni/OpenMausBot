@@ -395,6 +395,34 @@ describe("the chip in the conversation that handed the work on", () => {
     team.cards.showWaitingOnPersonChip("work", "req-1", asker, "answer");
     expect(team.rows("inbox")).toEqual([]);
   });
+
+  it("links to a sign-in, password or app to connect left open in the work, once, and says when it no longer waits", () => {
+    const desk = world();
+    desk.cards.showWaitingOnCardChip("work", { kind: "sign-in", messageId: "c1", label: "example.com" }, asker);
+    desk.cards.showWaitingOnCardChip("work", { kind: "sign-in", messageId: "c1", label: "example.com" }, asker);
+    desk.cards.showWaitingOnCardChip("work", { kind: "connect", messageId: "c2", label: "Gmail" }, asker);
+    expect(desk.rows("inbox")).toMatchObject([
+      { kind: "activity", from: { botId: "ledger", name: "Ledger" }, threadRef: { botId: "ledger", threadId: "work", title: "Pricing page: fix" },
+        tool: { name: "Waiting on you to sign in to example.com in @Ledger", nameCode: "chat.notice.waitingSignInElsewhere", nameParams: { name: "Ledger", label: "example.com" } } },
+      { tool: { name: "Waiting on you to connect Gmail in @Ledger", nameCode: "chat.notice.waitingConnectElsewhere" } },
+    ]);
+    desk.cards.settleWaitingOnCardChip("work", "c1");
+    const [settled, open] = desk.rows("inbox");
+    expect(settled?.tool).toMatchObject({ name: "@Ledger no longer waits on you", ok: true });
+    expect(settled?.tool?.nameCode).toBeUndefined();
+    expect(settled?.threadRef).toMatchObject({ threadId: "work" });
+    expect(open?.tool?.name).toBe("Waiting on you to connect Gmail in @Ledger");
+  });
+
+  it("leaves a card's chip out of the person's inbox, which has the card, and out of work nobody handed on", () => {
+    const team = world({ inboxThread: "inbox" });
+    team.cards.showWaitingOnCardChip("work", { kind: "password", messageId: "c1", label: "API key" }, asker);
+    expect(team.rows("inbox")).toEqual([]);
+    const desk = world();
+    desk.cards.showWaitingOnCardChip("inbox", { kind: "password", messageId: "c1", label: "API key" }, asker);
+    desk.cards.showWaitingOnCardChip("work", { kind: "question", messageId: "c2", label: "Which?" }, asker);
+    expect(desk.rows("inbox")).toEqual([]);
+  });
 });
 
 describe("askToolName", () => {

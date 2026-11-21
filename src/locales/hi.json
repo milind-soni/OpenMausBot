@@ -225,6 +225,7 @@
   "server.teammates.gotYourApproval": "{who} को आपकी मंज़ूरी मिल गई",
   "server.teammates.questionAnswered": "{who} के सवाल का जवाब दिया गया",
   "server.teammates.requestApproved": "{who} का अनुरोध मंज़ूर किया गया",
+  "server.teammates.noLongerWaiting": "{who} अब आपका इंतज़ार नहीं कर रहा",
   "server.teammates.queuedBehind.answer": "“{title}” में आपके जवाब के बाद @{bot} के लिए कतार में",
   "server.teammates.queuedBehind.approval": "“{title}” में आपकी मंज़ूरी के बाद @{bot} के लिए कतार में",
   "server.teammates.queuedBehind.review": "“{title}” में आपकी समीक्षा के बाद @{bot} के लिए कतार में",

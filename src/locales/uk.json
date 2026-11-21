@@ -226,6 +226,7 @@
   "server.teammates.gotYourApproval": "{who} отримав ваше схвалення",
   "server.teammates.questionAnswered": "На запитання {who} відповіли",
   "server.teammates.requestApproved": "Запит {who} схвалено",
+  "server.teammates.noLongerWaiting": "{who} більше не чекає на вас",
   "server.teammates.queuedBehind.answer": "У черзі для @{bot} після вашої відповіді в «{title}»",
   "server.teammates.queuedBehind.approval": "У черзі для @{bot} після вашого схвалення в «{title}»",
   "server.teammates.queuedBehind.review": "У черзі для @{bot} після вашої перевірки в «{title}»",
