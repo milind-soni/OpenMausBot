@@ -137,6 +137,27 @@ describe("a routine whose runs fail", () => {
     h.done("thread-3");
     expect(h.manager.health(100)).toEqual([{ routineId: routine.id, status: "completed", at: START + 3 * HOUR, consecutiveFailures: 0 }]);
   });
+
+  it("refused the lent computer it tried to use, a run fails reading as not finished, says so every time, and is never spaced out for it", async () => {
+    const SAID = "\"Fix new bugs\" can't use your PC because it isn't confirmed as yours: it was last changed or made outside your own chats. Open it and save it to make it yours again.";
+    const h = harness();
+    const refusals = new Set<string>();
+    h.options.refusedHandoff = (threadId) => (refusals.has(threadId) ? { text: SAID, partial: false, lendingRefused: true } : null);
+    h.restart();
+    h.manager.create(every(24 * 60));
+    for (const day of [1, 2, 3, 4]) {
+      await h.tickAt(START + day * 24 * HOUR);
+      refusals.add(`thread-${day}`);
+      h.event(`thread-${day}`, "item.completed", { itemType: "assistant_text", text: "No execution environment was mounted." });
+      h.done(`thread-${day}`);
+      expect(h.routine(), "its schedule is never held back for it").toMatchObject({ enabled: true, nextRunAt: START + (day + 1) * 24 * HOUR });
+    }
+    expect(h.runs().map((run) => [run.status, run.error, run.partial, run.lendingRefused])).toEqual(Array(4).fill(["failed", SAID, undefined, true]));
+    expect(h.failed.map((failure) => failure.alert), "said on every run, never silenced as a repeat").toEqual([undefined, undefined, undefined, undefined]);
+    await h.tickAt(START + 5 * 24 * HOUR);
+    expect(h.started, "its fifth occurrence runs on time").toHaveLength(5);
+    expect(h.runs().some((run) => run.status === "missed")).toBe(false);
+  });
 });
 
 describe("routines an earlier version turned off after three cloud-computer start failures", () => {

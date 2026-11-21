@@ -559,6 +559,13 @@ wait_healthy() {
     if [ -z "$cid" ] && [ -n "$UNIT" ]; then WHY="it stopped as it started ($(last_words))"; return 1; fi
     if [ -z "$cid" ]; then WHY="its container is gone"; return 1; fi
     state=$(inspect '{{.State.Status}} {{.RestartCount}} {{.Image}}' "$cid")
+    # Gone between the two reads: Podman removes a container that exits as it starts, so the next read says what became
+    # of it. An empty answer is never taken for a container on another image.
+    if [ -z "$state" ]; then
+      if [ "$(date +%s)" -ge "$deadline" ]; then WHY="its container is gone"; return 1; fi
+      sleep "$POLL_S"
+      continue
+    fi
     status=${state%% *}
     restarts=$(printf '%s' "$state" | cut -d' ' -f2)
     image=${state##* }
