@@ -32,11 +32,11 @@ beforeEach(() => {
 afterEach(() => { flushSync(() => root.unmount()); host.remove(); });
 
 describe("Check before done", () => {
-  it("is off with no picker until turned on, and says it uses about twice the AI", () => {
+  it("is off with no picker until turned on, and says what it costs: up to 3 checks and 2 fixes per answer", () => {
     render(nib());
     expect(toggle().getAttribute("aria-checked")).toBe("false");
     expect(toggle().getAttribute("aria-label")).toBe("Check before done");
-    expect(host.textContent).toContain("Another bot or AI checks each finished answer against your request, with up to 3 rounds of fixes. Uses about twice as much AI.");
+    expect(host.textContent).toContain("Another bot or AI checks each finished answer against your request before it counts as done: up to 3 checks and 2 fixes per answer, each a full AI turn.");
     expect(picker()).toBeNull();
     flushSync(() => toggle().click());
     expect(fixture.dispatched).toEqual([{ type: "updateBot", botId: "nib", patch: { checkWork: {} } }]);

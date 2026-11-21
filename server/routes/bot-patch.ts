@@ -384,7 +384,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         const parsed = z.object({ checker: z.string().min(1).max(128).optional() }).strict().nullable().safeParse(body.checkWork);
         if (!parsed.success) return json(res, 400, { error: "checkWork must be null or an object with an optional checker bot id" });
         const checker = parsed.data?.checker;
-        if (checker !== undefined && (checker === m[1] || !store.bot(checker))) return json(res, 400, { error: "checkWork.checker must be another bot here" });
+        if (checker !== undefined && (checker === m[1] || !store.bot(checker) || deps.levelOf(auth, checker) === "none")) return json(res, 400, { error: "checkWork.checker must be another bot here that you can reach" });
         patch.checkWork = parsed.data ?? undefined;
       }
       if (body.browser !== undefined) {
