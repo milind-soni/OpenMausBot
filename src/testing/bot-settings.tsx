@@ -79,7 +79,7 @@ function Fixture() {
     <button className="rounded bg-control px-3 py-2" onClick={() => dispatch({ type: "newBot" })}>New bot</button>
     {state.error && <p role="alert" className="text-danger">{state.error}</p>}
     <pre aria-label="Saved profiles" className="my-4 whitespace-pre-wrap">{JSON.stringify(saved.map(({ id, name, description, soul }) => ({ id, name, description, soul })), null, 2)}</pre>
-    {state.settingsOpen && bot && <BotSettingsDialog key={bot.id} bot={bot} />}
+    {state.settingsOpen && bot && <BotSettingsDialog key="settings" bot={bot} />}
   </main>;
 }
 

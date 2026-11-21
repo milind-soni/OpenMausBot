@@ -28,6 +28,7 @@ import { BotPanel } from "./bot-panel/PanelShell";
 import { LibraryTab } from "./bot-panel/LibraryTab";
 import type { SimplePageId } from "./bot-panel/page-registry";
 import { BOT_PANEL_ID, sidePanelCls } from "./bot-panel/side-panel";
+import { sidePanelSectionBodyCls } from "./bot-panel/rows";
 import { HistoryRollbackDialog, useBotHistory, useBotOverview } from "./bot-settings/useBotOverview";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { ShareBotButton, useTeamName } from "./bot-access/ShareBotButton";
@@ -80,6 +81,10 @@ export function BotSettingsDialog({ bot, overlay = false }: {
     dialogRef.current?.querySelector(`[data-bot-settings-section="${section}"]`)
       ?.scrollIntoView({ block: "nearest" });
   }, [collapsed, section, q]);
+
+  useEffect(() => {
+    setQuery("");
+  }, [bot.id]);
 
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -136,9 +141,16 @@ export function BotSettingsDialog({ bot, overlay = false }: {
       case "slack":
         return slackUrl ? <SlackSection managementUrl={slackUrl} /> : null;
       case "skills":
-        return <SkillsSection bot={bot} />;
+        return <SkillsSection key={bot.id} bot={bot} />;
       case "memory":
-        return <MemorySection bot={bot} active={!collapsed && section === "memory"} onToggle={(enabled) => derived.patch({ memoryEnabled: enabled })} />;
+        return (
+          <MemorySection
+            key={bot.id}
+            bot={bot}
+            active={!collapsed && section === "memory"}
+            onToggle={(enabled) => derived.patch({ memoryEnabled: enabled })}
+          />
+        );
       case "library":
         return <LibraryTab bot={bot} onOpen={(page) => dispatch({ type: "toggleSettings", open: true, section: LIBRARY_LINKS[page] ?? "overview" })} />;
       case "routines":
@@ -207,7 +219,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
           </span>
         </div>
 
-        <div className="mx-4 mb-2 flex shrink-0 items-center gap-2 rounded-lg border border-transparent bg-control/70 px-2.5 py-2 focus-within:border-focus">
+        <div className="mx-4 mb-4 flex shrink-0 items-center gap-2 rounded-lg border border-transparent bg-control/70 px-2.5 py-2 focus-within:border-focus">
           <Search size={14} className="shrink-0 text-ink-secondary" />
           <input
             value={query}
@@ -273,11 +285,11 @@ export function BotSettingsDialog({ bot, overlay = false }: {
                 </button>
                 {/* Memory stays mounted (hidden when collapsed) so its unsaved draft survives. */}
                 {id === "memory" ? (
-                  <div hidden={!open} className="px-4 pb-4 pt-1">
+                  <div hidden={!open} className={sidePanelSectionBodyCls}>
                     {renderSectionBody("memory")}
                   </div>
                 ) : (
-                  open && <div className="px-4 pb-4 pt-1">{renderSectionBody(id)}</div>
+                  open && <div className={sidePanelSectionBodyCls}>{renderSectionBody(id)}</div>
                 )}
               </div>
             );

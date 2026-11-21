@@ -15,7 +15,7 @@ import { screenFramePreview } from "../ScreenFrame";
 import { CloudPreference } from "../bot-settings/AccessSection";
 import type { BotPatch, useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
 import type { SimplePageId } from "./page-registry";
-import { Card, NavRow, RadioRow } from "./rows";
+import { Card, NavRow, panelTabStackCls, RadioRow } from "./rows";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 type Derived = ReturnType<typeof useBotSettingsDerived>;
@@ -99,7 +99,7 @@ export function WherePage({ bot, derived }: { bot: Bot; derived: Derived }) {
   return (
     <>
       <Card>
-        <div role="radiogroup" aria-label={t("computer.simple.whereWorks", { name: bot.name })} className="flex flex-col divide-y divide-ink/[0.05]">
+        <div role="radiogroup" aria-label={t("computer.simple.whereWorks", { name: bot.name })} className="flex flex-col divide-y divide-ink/5">
           {options.map((option) => (
             <RadioRow
               key={option.value}
@@ -141,13 +141,14 @@ export function ComputerTab({ bot, derived, onOpen }: { bot: Bot; derived: Deriv
   const screenSrc = screen ? screenFramePreview({ threadId: bot.threadId, messageId: screen.id }, screen.mime).src : null;
 
   return (
-    <div data-panel-tabpanel="computer">
+    <div data-panel-tabpanel="computer" className={panelTabStackCls}>
+      <div className="flex flex-col gap-1.5">
       <button
         type="button"
         data-panel-action="open-computer"
         aria-label={`${t("place.action.watch")}: ${screenOf}`}
         onClick={() => openComputer()}
-        className="group relative mt-2.5 flex aspect-[16/10] w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-xl bg-composer ring-1 ring-inset ring-ink/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-border"
+        className="group relative flex aspect-16/10 w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-xl bg-composer ring-1 ring-inset ring-ink/6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-border"
       >
         {screenSrc ? (
           <img src={screenSrc} alt="" className="absolute inset-0 size-full object-cover" />
@@ -170,7 +171,8 @@ export function ComputerTab({ bot, derived, onOpen }: { bot: Bot; derived: Deriv
           {t("place.action.watch")}
         </span>
       </button>
-      <div className="mt-3 text-center text-[13px] text-ink-tertiary">{screenOf}</div>
+      <div className="text-center text-[13px] text-ink-tertiary">{screenOf}</div>
+      </div>
 
       <Card anchor="where">
         <NavRow
