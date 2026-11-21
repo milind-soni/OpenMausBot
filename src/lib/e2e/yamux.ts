@@ -307,6 +307,7 @@ export class Mux {
     if (stream.established) throw new YamuxError("duplicate_ack");
     stream.established = true;
     this.#events.accepted?.(frame.streamId);
+    if (!this.#still(frame.streamId, stream)) return;
     this.#receiveOnStream(frame.streamId, stream, { ...frame, flags: frame.flags & ~FLAG.ack });
   }
 
@@ -317,7 +318,7 @@ export class Mux {
       return;
     }
     if (frame.type === TYPE.data) {
-      if (stream.remoteFin && (frame.length > 0 || frame.flags & FLAG.fin)) throw new YamuxError("data_after_fin");
+      if (stream.remoteFin) throw new YamuxError("data_after_fin");
       if (frame.length > stream.receiveWindow) throw new YamuxError("window_exceeded");
       stream.receiveWindow -= frame.length;
       if (frame.length > 0) this.#events.data(streamId, frame.data as Uint8Array);
@@ -325,12 +326,18 @@ export class Mux {
       stream.sendWindow += frame.length;
       this.#events.writable(streamId);
     }
+    if (!this.#still(streamId, stream)) return;
     if (frame.flags & FLAG.fin) {
       if (stream.remoteFin) throw new YamuxError("data_after_fin");
       stream.remoteFin = true;
       this.#events.ended(streamId);
       this.#closeIfDone(streamId, stream);
     }
+  }
+
+  /** False once a callback reset the stream while this frame was being handled. */
+  #still(streamId: number, stream: StreamState): boolean {
+    return this.#streams.get(streamId) === stream;
   }
 
   #closeIfDone(streamId: number, stream: StreamState): void {

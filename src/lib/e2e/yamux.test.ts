@@ -193,3 +193,52 @@ describe("the browser mux", () => {
     expect(() => phone.receive({ type: 1, flags: 1, streamId: 2, length: 0 })).toThrow(YamuxError);
   });
 });
+
+describe("the browser mux, after the peer's FIN and inside callbacks", () => {
+  /** A phone mux whose callbacks are recorded, and may act on the mux while it handles a frame. */
+  function phoneWith(onEvent: (mux: Mux, event: string, id: number) => void = () => {}) {
+    const log: string[] = [];
+    const note = (event: string) => (id: number) => {
+      log.push(`${event} ${id}`);
+      onEvent(mux, event, id);
+    };
+    const mux: Mux = new Mux("phone", {
+      send: () => {},
+      accepted: note("accepted"),
+      data: note("data"),
+      ended: note("ended"),
+      reset: note("reset"),
+      writable: note("writable"),
+    });
+    return { mux, log };
+  }
+
+  it("refuses an empty Data frame after the peer's FIN, but still takes window for the open local half", () => {
+    const { mux } = phoneWith();
+    const id = mux.open();
+    mux.receive({ type: 1, flags: 2 | 4, streamId: id, length: 0 });
+    mux.receive({ type: 1, flags: 0, streamId: id, length: 10 });
+    expect(() => mux.receive({ type: 0, flags: 0, streamId: id, length: 0, data: new Uint8Array(0) })).toThrow(YamuxError);
+  });
+
+  it("stops handling a frame once the data callback resets the stream", () => {
+    const { mux, log } = phoneWith((m, event, id) => event === "data" && m.reset(id));
+    const id = mux.open();
+    mux.receive({ type: 1, flags: 2, streamId: id, length: 0 });
+    mux.receive({ type: 0, flags: 4, streamId: id, length: 1, data: utf8("x") });
+    expect(log).toEqual(["accepted 1", "data 1", "reset 1"]);
+  });
+
+  it("stops handling a frame once the accepted or writable callback resets the stream", () => {
+    const accepted = phoneWith((m, event, id) => event === "accepted" && m.reset(id));
+    const first = accepted.mux.open();
+    accepted.mux.receive({ type: 1, flags: 2 | 4, streamId: first, length: 0 });
+    expect(accepted.log).toEqual(["accepted 1", "reset 1"]);
+
+    const writable = phoneWith((m, event, id) => event === "writable" && m.reset(id));
+    const second = writable.mux.open();
+    writable.mux.receive({ type: 1, flags: 2, streamId: second, length: 0 });
+    writable.mux.receive({ type: 1, flags: 4, streamId: second, length: 10 });
+    expect(writable.log).toEqual(["accepted 1", "writable 1", "reset 1"]);
+  });
+});
