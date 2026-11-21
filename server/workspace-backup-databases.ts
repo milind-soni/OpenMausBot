@@ -14,6 +14,7 @@ import type { DataEngine } from "./data/types.ts";
 
 /** Each database the server keeps in WAL mode at the data folder's top, and the name of its snapshot. */
 export const SNAPSHOT_DATABASES: Record<string, string> = { "messages.db": "messages-snapshot.db", "runtime.db": "runtime-snapshot.db", "bursts.db": "bursts-snapshot.db" };
+const ONE_STEP = 2_147_483_647;
 const LABELS: Record<string, string> = { "messages.db": "message", "runtime.db": "runtime", "bursts.db": "burst" };
 
 /** The live WAL and shared-memory files of the snapshotted databases. */
@@ -32,9 +33,10 @@ export async function snapshotDatabases(root: string, snapshot: string): Promise
     const db = new DatabaseSync(sourceDb, { readOnly: true, timeout: 5_000 });
     // Node 26's native backup completion can wait on unrelated event-loop activity after an async scrypt; this pulse keeps it moving.
     const completionPulse = setInterval(() => {}, 25);
-    // In one step (-1: every page): a backup in steps starts again whenever another connection writes between them, and a
-    // writer that keeps writing would keep it from ever finishing.
-    try { await backup(db, join(snapshot, snapshotName), { rate: -1 }); }
+    // In one step: a backup in steps starts again whenever another connection writes between them, and a writer that keeps
+    // writing would keep it from ever finishing. SQLite reads -1 as every page, but Node 24.22 refuses a rate under 1, so
+    // the step is the largest rate Node takes, more pages than any database here holds.
+    try { await backup(db, join(snapshot, snapshotName), { rate: ONE_STEP }); }
     finally { clearInterval(completionPulse); db.close(); }
     const snapshotDb = new DatabaseSync(join(snapshot, snapshotName));
     try { snapshotDb.exec("PRAGMA journal_mode = DELETE"); } finally { snapshotDb.close(); }
