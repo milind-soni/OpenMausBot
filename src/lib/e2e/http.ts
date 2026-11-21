@@ -6,12 +6,12 @@ import type { E2EStream } from "./session.ts";
 /** Status line plus headers of one reply, the same ceiling Node's HTTP server puts on a request head. */
 export const MAX_HEAD = 16 * 1024;
 const MAX_CHUNK_LINE = 1024;
-const TOKEN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+export const TOKEN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 /** Framing and connection headers this client writes itself; a caller's own would contradict them. */
 const OWN = new Set(["host", "connection", "content-length", "transfer-encoding", "upgrade", "keep-alive", "te", "trailer", "accept-encoding"]);
 /** Statuses whose Response must have a null body. */
 const NULL_BODY = new Set([204, 205, 304]);
-const CRLF2 = [13, 10, 13, 10];
+export const CRLF2 = [13, 10, 13, 10];
 
 export class HttpError extends Error {
   constructor(message: string) {
@@ -30,8 +30,9 @@ export interface StreamRequest {
   signal?: AbortSignal;
 }
 
-/** The request head, refused before anything is sent when a part could split or reframe the request. */
-export function requestHead(method: string, path: string, headers: Headers, length: number | null): string {
+/** The request line, Host and the caller's headers, refused before anything is sent when a part could split or reframe
+ * the request. The caller adds its own framing and connection lines and the blank line. */
+export function headStart(method: string, path: string, headers: Headers): string {
   if (!TOKEN.test(method)) throw new TypeError(`e2e http: bad method ${JSON.stringify(method)}`);
   if (!path.startsWith("/") || [...path].some((char) => char <= " " || char === "\x7f" || char === "#")) {
     throw new TypeError("e2e http: path must be origin-form with no spaces, controls or fragment");
@@ -41,15 +42,20 @@ export function requestHead(method: string, path: string, headers: Headers, leng
   let head = `${method} ${target} HTTP/1.1\r\nHost: companion\r\n`;
   // Headers already refuses names that are not tokens and values with CR, LF or NUL.
   for (const [name, value] of headers) {
-    if (OWN.has(name)) throw new TypeError(`e2e http: ${name} is set by the stream client`);
+    if (OWN.has(name) || name.startsWith("sec-websocket-")) throw new TypeError(`e2e http: ${name} is set by the stream client`);
     head += `${name}: ${value}\r\n`;
   }
-  if (length !== null) head += `Content-Length: ${length}\r\n`;
-  return `${head}Connection: close\r\n\r\n`;
+  return head;
+}
+
+/** The whole head of a plain request. */
+export function requestHead(method: string, path: string, headers: Headers, length: number | null): string {
+  const head = headStart(method, path, headers);
+  return `${head}${length !== null ? `Content-Length: ${length}\r\n` : ""}Connection: close\r\n\r\n`;
 }
 
 /** Reads a stream's bytes with the leftover of the last read kept for the next parse. */
-class ByteReader {
+export class ByteReader {
   readonly #reader: ReadableStreamDefaultReader<Uint8Array>;
   #held: Uint8Array = new Uint8Array(0);
 
@@ -89,6 +95,14 @@ class ByteReader {
     return part;
   }
 
+  /** Exactly `count` bytes as a copy, or null when the stream ends first. */
+  async exact(count: number): Promise<Uint8Array | null> {
+    while (this.#held.length < count) if (!(await this.#more())) return null;
+    const part = this.#held.slice(0, count);
+    this.#held = this.#held.subarray(count);
+    return part;
+  }
+
   release(): void {
     this.#reader.releaseLock();
   }
@@ -103,7 +117,7 @@ function indexOf(bytes: Uint8Array, delimiter: number[], from: number): number {
 }
 
 /** Head characters as bytes, the way fetch writes header values: one character, one byte (Headers holds only 0-255). */
-const latin1 = (text: string): Uint8Array => Uint8Array.from(text, (char) => char.charCodeAt(0));
+export const latin1 = (text: string): Uint8Array => Uint8Array.from(text, (char) => char.charCodeAt(0));
 
 /** Header bytes as fetch reads them: one byte, one character. */
 const byteString = (bytes: Uint8Array): string => {
@@ -112,7 +126,7 @@ const byteString = (bytes: Uint8Array): string => {
   return text;
 };
 
-interface Head {
+export interface Head {
   status: number;
   statusText: string;
   headers: Headers;
@@ -133,7 +147,7 @@ function appendField(headers: Headers, line: string): void {
   }
 }
 
-function parseHead(bytes: Uint8Array): Head {
+export function parseHead(bytes: Uint8Array): Head {
   const [statusLine, ...lines] = byteString(bytes).split("\r\n");
   // The reason phrase as Response takes it: tab, space, visible and obs-text bytes.
   const status = /^HTTP\/1\.[01] ([1-5]\d\d)(?: ([\t\x20-\x7e\x80-\xff]*))?$/.exec(statusLine);
