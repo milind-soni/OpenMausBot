@@ -6,6 +6,7 @@ import {
   decodeFrame,
   encodeFrame,
   GO_AWAY,
+  goAwayFrame,
   INITIAL_WINDOW,
   MAX_DATA_PAYLOAD,
   Mux,
@@ -280,5 +281,24 @@ describe("the browser mux, GoAway(removed)", () => {
     expect(codes).toEqual([]);
     mux.receive({ type: 3, flags: 0, streamId: 0, length: GO_AWAY.normal });
     expect(codes).toEqual([GO_AWAY.normal]);
+  });
+
+  it("the phone never sends GoAway(3); its other codes and the computer's GoAway(3) still go out", () => {
+    const sent = (role: Role, code: number) => {
+      const frames: Frame[] = [];
+      const mux = new Mux(role, { send: (frame) => frames.push(frame), data: () => {}, ended: () => {}, reset: () => {}, writable: () => {} });
+      try {
+        mux.goAway(code);
+      } catch (error) {
+        return { frames, error };
+      }
+      return { frames, error: undefined };
+    };
+    const refused = sent("phone", GO_AWAY.removed);
+    expect(refused.error).toBeInstanceOf(YamuxError);
+    expect(refused.frames).toEqual([]);
+    expect(sent("phone", GO_AWAY.normal).frames).toEqual([goAwayFrame(GO_AWAY.normal)]);
+    expect(sent("phone", GO_AWAY.protocol).frames).toEqual([goAwayFrame(GO_AWAY.protocol)]);
+    expect(sent("computer", GO_AWAY.removed).frames).toEqual([goAwayFrame(GO_AWAY.removed)]);
   });
 });
