@@ -16,6 +16,10 @@ export const buttonCls =
 /** The panel's action rows, New conversation and Add a routine: flat like every other row, so the only fill in the
  * tab is the conversation you are in. */
 export const panelActionCls = "flex h-9 min-w-0 items-center gap-2.5 rounded-[8px] [&>svg]:size-4 px-3.5 text-[14px] font-medium text-ink transition-colors hover:bg-ink/[0.04]";
+/** Vertical rhythm between stacked panel cards and sections (matches sub-page `pageSurfaceCls`). */
+export const panelTabStackCls = "flex flex-col gap-3";
+/** Padding under an accordion header in side panels with card stacks. */
+export const sidePanelSectionBodyCls = "px-4 pb-4 pt-4";
 export const chipCls = (on: boolean) =>
   cn(
     "rounded-full px-2.5 py-1 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-50",
@@ -24,7 +28,7 @@ export const chipCls = (on: boolean) =>
 
 export function CardLabel({ children, action }: { children: ReactNode; action?: ReactNode }) {
   return (
-    <div className="mx-3.5 mb-2 mt-5 flex min-h-5 items-center justify-between gap-3 text-[13px] font-semibold text-ink-secondary">
+    <div className="mx-3.5 mb-2 flex min-h-5 items-center justify-between gap-3 text-[13px] font-semibold text-ink-secondary">
       <span className="min-w-0 truncate">{children}</span>
       {action}
     </div>

@@ -11,7 +11,7 @@ import { recentChangedFiles, sharedFileReferences } from "../ComputerFilesPane";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { skillSwitchOn, useManagedSkills } from "../bot-settings/SkillsSection";
 import type { SimplePageId } from "./page-registry";
-import { Card, CardLabel, NavRow } from "./rows";
+import { Card, CardLabel, NavRow, panelTabStackCls } from "./rows";
 import { panelMemoryNotes } from "./memory-notes";
 import { useMemoryDoc } from "./use-memory-doc";
 import { useStoreDispatch } from "@/state/store-select";
@@ -90,8 +90,8 @@ export function LibraryTab({ bot, onOpen }: { bot: Bot; onOpen: (page: SimplePag
 
   if (pages.length + apps.length + shared.length + unshared.length === 0) {
     return (
-      <div data-panel-tabpanel="library">
-        <p data-panel-empty="library" className="px-3 py-7 text-center text-[13px] leading-[18px] text-ink-tertiary">
+      <div data-panel-tabpanel="library" className={panelTabStackCls}>
+        <p data-panel-empty="library" className="px-3 py-7 text-center text-[13px] leading-4.5 text-ink-tertiary">
           {t("botPanel.library.empty")}
         </p>
         {keeps}
@@ -99,7 +99,7 @@ export function LibraryTab({ bot, onOpen }: { bot: Bot; onOpen: (page: SimplePag
     );
   }
   return (
-    <div data-panel-tabpanel="library">
+    <div data-panel-tabpanel="library" className={panelTabStackCls}>
       {pages.length > 0 && (
         <Card label={t("botPanel.library.pages")} anchor="pages">
           {pages.map((page) => (
