@@ -3729,6 +3729,7 @@ button:disabled.bg-danger {
   [data-bot-list-stage]:has([data-bot-list-chat]) {
     --drawer-direction: 1;
     --drawer-rest-progress: 0;
+    --drawer-settle: 315ms cubic-bezier(0.25, 0.5, 0.35, 1);
   }
 
   [data-bot-list-stage]:dir(rtl):has([data-bot-list-chat]) { --drawer-direction: -1; }
@@ -3785,12 +3786,12 @@ button:disabled.bg-danger {
   @media (prefers-reduced-motion: no-preference) {
     :root:not([data-reduced-motion="true"]) [data-bot-list-stage]:not([data-drawer-dragging]):has([data-bot-list-chat])
       :is([data-bot-list-chat], [data-bot-list-trigger-layer], [data-look="sidebar"]) {
-      transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 260ms ease-out;
+      transition: transform var(--drawer-settle), box-shadow var(--drawer-settle);
     }
 
     :root:not([data-reduced-motion="true"]) [data-bot-list-stage]:not([data-drawer-dragging]):has([data-bot-list-chat])
       [data-look="sidebar"]::after {
-      transition: opacity 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+      transition: opacity var(--drawer-settle);
     }
   }
 
