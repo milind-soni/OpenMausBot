@@ -2691,7 +2691,7 @@
   "signIn.settled.saved": "Inicio de sesión guardado para {site}",
   "browser.live.botBusy": "{name} está usando este navegador. La vista en vivo se abrirá cuando esté libre…",
   "browser.input.tooSlow": "La entrada al navegador se detuvo porque el navegador no da abasto (puede estar bloqueado o la conexión puede ser lenta). Vuelve a conectar la vista antes de seguir escribiendo. Si sigue bloqueado, reinicia el navegador.",
-  "browser.input.notReaching": "Tus clics y lo que escribes no llegan a la página. Vuelve a conectar para intentarlo de nuevo.",
+  "browser.input.notReaching": "Tus clics y lo que escribes no llegan a la página.",
   "browser.profiles.heldElsewhere": "Otra ventana está usando este navegador. Cambia de perfil cuando termine.",
   "browser.profiles.busy": "Los perfiles se desbloquean cuando termina la acción actual del navegador.",
   "browser.viewport.keysHint": "Cuando hagas clic o escribas en la página, tus teclas irán a ella; hasta entonces, Tab pasa al siguiente elemento. Pulsa Shift+Escape para volver a la barra de direcciones del navegador.",

@@ -3299,7 +3299,7 @@
   "signIn.settled.saved": "{site}のログイン情報を保存しました",
   "browser.live.botBusy": "{name} がこのブラウザーを使用中です。空くとライブビューが開きます…",
   "browser.input.tooSlow": "ブラウザーが入力に追いつかないため、入力を停止しました（ブラウザーが応答していないか、接続が遅い可能性があります）。再び入力する前にビューを再接続してください。応答しないままの場合は、ブラウザーを再起動してください。",
-  "browser.input.notReaching": "クリックや入力がページに届いていません。再接続してもう一度お試しください。",
+  "browser.input.notReaching": "クリックや入力がページに届いていません。",
   "browser.profiles.heldElsewhere": "別のウィンドウがこのブラウザーを使用中です。操作が終わってからプロファイルを切り替えてください。",
   "browser.profiles.busy": "現在のブラウザー操作が終わると、プロファイルを変更できます。",
   "browser.viewport.keysHint": "ページをクリックするか入力すると、キー入力はページに送られます。それまでは Tab で次の項目へ移動します。Shift+Escape でブラウザーのアドレスバーに戻れます。",

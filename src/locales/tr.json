@@ -2359,7 +2359,7 @@
   "signIn.settled.saved": "{site} için giriş bilgileri kaydedildi",
   "browser.live.botBusy": "{name} bu tarayıcıyı kullanıyor. Canlı görünüm, tarayıcı boşaldığında açılır…",
   "browser.input.tooSlow": "Tarayıcı yetişemediği için tarayıcı girişi durduruldu (takılmış olabilir veya bağlantı yavaş olabilir). Tekrar yazmadan önce görünümü yeniden bağlayın. Takılı kalmaya devam ederse tarayıcıyı yeniden başlatın.",
-  "browser.input.notReaching": "Tıklamalarınız ve yazdıklarınız sayfaya ulaşmıyor. Tekrar denemek için yeniden bağlanın.",
+  "browser.input.notReaching": "Tıklamalarınız ve yazdıklarınız sayfaya ulaşmıyor.",
   "browser.profiles.heldElsewhere": "Bu tarayıcıyı başka bir pencere kullanıyor. İşlem bittiğinde profilleri değiştirin.",
   "browser.profiles.busy": "Mevcut tarayıcı eylemi bittiğinde profillerin kilidi açılır.",
   "browser.viewport.keysHint": "Sayfaya tıkladığınızda veya yazdığınızda tuş vuruşlarınız sayfaya gider; o zamana kadar Tab bir sonrakine geçer. Tarayıcı adres çubuğuna dönmek için Shift+Escape tuşlarına basın.",
