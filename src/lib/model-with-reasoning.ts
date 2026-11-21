@@ -3,19 +3,6 @@ import type { InstanceInfo, ModelSelection } from "@/state/store";
 import { t } from "./i18n";
 import { modelName } from "./simple-model-menu";
 
-const ORDER: readonly EffortLevel[] = ["none", "low", "medium", "high", "xhigh", "max"];
-
-/** The level the Reasoning hint names, when a selection thinks less than its engine offers: none or low with a higher
- * level available, or no level at all where the engine offers high or more. Null otherwise, and for an engine that picks
- * reasoning by model variant. */
-export function reasoningHintLevel(selection: ModelSelection, instance: InstanceInfo | undefined): EffortLevel | "default" | null {
-  if (instance?.capabilities?.modelVariants) return null;
-  const levels = instance?.capabilities?.effortLevels ?? [];
-  const highest = Math.max(-1, ...levels.map((level) => ORDER.indexOf(level)));
-  if (selection.effort === undefined) return highest >= ORDER.indexOf("high") ? "default" : null;
-  return ORDER.indexOf(selection.effort) <= ORDER.indexOf("low") && highest > ORDER.indexOf(selection.effort) ? selection.effort : null;
-}
-
 /** A reasoning level's own word, as the reasoning control shows it. */
 export function levelLabel(level: EffortLevel | "default"): string {
   return t(`model.effort.${level}` as Parameters<typeof t>[0]);

@@ -47,8 +47,8 @@ describe("ThreadChip", () => {
   });
 
   it("names the model and reasoning level the work went to after the row's words", () => {
-    const markup = renderToStaticMarkup(createElement(ThreadChip, { message: { ...receipt(), tool: { name: "Sent to Scout", ok: true, summary: "Opus 5 · high reasoning" } } }));
-    expect(markup).toContain("Sent to Scout · Opus 5 · high reasoning");
+    const markup = renderToStaticMarkup(createElement(ThreadChip, { message: { ...receipt(), tool: { name: "Sent to Scout", ok: true, assignedModel: "Opus 5 · High reasoning" } } }));
+    expect(markup).toContain("Sent to Scout · Opus 5 · High reasoning");
   });
 
   it("says in the person's words that work addressed into a room went to a bot outside it directly", () => {

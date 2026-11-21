@@ -19,15 +19,18 @@ export function outsideRoomNote(room: AddressedRoom | undefined, via: SentVia): 
   return room && via === "direct" ? `it isn't in ${roomWords(room)}, so it got this directly: ` : "";
 }
 
-/** The model the work runs on and its reasoning level, as the hand-off row says them: "Opus 5 · high reasoning". */
 const LEVEL_WORDS = {
   default: "server.teammates.effort.default", none: "server.teammates.effort.none", low: "server.teammates.effort.low",
   medium: "server.teammates.effort.medium", high: "server.teammates.effort.high", xhigh: "server.teammates.effort.xhigh", max: "server.teammates.effort.max",
 } as const satisfies Record<NonNullable<ModelSelection["effort"]> | "default", ServerLineKey>;
 
-export function modelWords(language: string | undefined, selection: ModelSelection, label?: string): string {
-  const level = serverLine(language, LEVEL_WORDS[selection.effort ?? "default"]);
-  return serverLine(language, "server.teammates.onModel", { model: label || selection.model, level });
+/** The model the work runs on, as the hand-off row names it, by the same rule as the app's own (src/lib/model-with-reasoning.ts):
+ * its display name, with its reasoning level ("Opus 5 · High reasoning") only where the engine has a reasoning setting
+ * and does not pick reasoning by model variant. */
+export function modelWords(language: string | undefined, selection: ModelSelection, engine: { label?: string; levels?: readonly string[]; variants?: boolean } = {}): string {
+  const model = engine.label || selection.model;
+  if (engine.variants || !engine.levels?.length) return model;
+  return serverLine(language, "server.teammates.onModel", { model, level: serverLine(language, LEVEL_WORDS[selection.effort ?? "default"]) });
 }
 
 /** `language`: the sender's conversation's, where the row is shown. `model`: the receiving thread's, from modelWords,
@@ -46,7 +49,7 @@ export function sentRow(input: { sender: Who; recipient: Who; threadId: string; 
     from: { botId: sender.id, name: sender.name, color: sender.color },
     tool: {
       name,
-      ok: true, ...(input.reason ? { output: input.reason } : {}), ...(input.model && sender.id !== recipient.id ? { summary: input.model } : {}),
+      ok: true, ...(input.reason ? { output: input.reason } : {}), ...(input.model && sender.id !== recipient.id ? { assignedModel: input.model } : {}),
     },
     ...(input.doneWhen ? { doneWhen: input.doneWhen } : {}),
     ...(input.attachments?.length ? { attachments: input.attachments } : {}),

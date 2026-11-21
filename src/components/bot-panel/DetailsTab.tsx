@@ -10,7 +10,6 @@ import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerive
 import { BotConversations } from "./Conversations";
 import type { SimplePageId } from "./page-registry";
 import { TryAsking } from "./TryAsking";
-import { ReasoningHint } from "../bot-settings/ReasoningHint";
 import { Card, CardLabel, LabelAction, panelActionCls, NavRow, RowIcon, rowCls, RowText } from "./rows";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { newChatBot } from "@/state/new-chat";
@@ -78,7 +77,6 @@ export function DetailsTab({ bot, derived, onOpen }: {
           className={cn(rowCls, "min-w-0 flex-1 rounded-[8px]")}
           label={<span className="flex shrink-0 items-center gap-2.5"><RowIcon icon={Sparkles} /><RowText title={t("model.simple.reasoning")} /></span>}
         />
-        <ReasoningHint bot={thread} className="px-3.5 pb-2 text-[13px] leading-[1.35] text-ink-secondary" />
       </section>
 
       <BotConversations bot={bot} />
