@@ -453,7 +453,7 @@ describe("Settings → AI in Simple mode", () => {
     ];
     const html = simple();
     expect(html).toContain(">Providers</h3>");
-    expect(rows(html)).toEqual(["claude", "codex"]);
+    expect(rows(html)).toEqual(["claude", "codex", "google-ai-studio"]);
     expect(html).toMatch(/data-simple-engine="claude"[\s\S]*?>Manage<\/button>/);
     expect(html).toMatch(/data-simple-engine="codex"[\s\S]*?>Set up<\/button>/);
     expect(html).not.toContain("Model providers and accounts");
@@ -461,8 +461,8 @@ describe("Settings → AI in Simple mode", () => {
 
   it("folds every other provider under More providers, in the same card, with the count", () => {
     fixture.instances = [engine("claude", "claudeAgent", true), engine("kimi", "kimiAgent", false), engine("mistral", "mistral", false)];
-    // Kimi, Mistral and the Google AI Studio row (a Gemini key).
-    expect(simple()).toMatch(/aria-expanded="false"[^>]*>[\s\S]*?More providers[\s\S]*?>3</);
+    // Kimi and Mistral; the Google AI Studio row (a Gemini key) is in the main list.
+    expect(simple()).toMatch(/aria-expanded="false"[^>]*>[\s\S]*?More providers[\s\S]*?>2</);
     expect(simple()).not.toContain('data-simple-engine="kimi"');
     expect(simple(true)).toContain('data-simple-engine="kimi"');
   });
