@@ -30,12 +30,15 @@ export function SignInRequestCard({
   color,
   threadId,
   message,
+  stays = true,
 }: {
   botId: string;
   botName: string;
   color?: Bot["color"];
   threadId: string;
   message: Message;
+  /** False when the host already pins the card in a reserved slot outside the scrollport. */
+  stays?: boolean;
 }) {
   const { state, dispatch } = useStore();
   const card = message.signIn!;
@@ -128,10 +131,10 @@ export function SignInRequestCard({
   try { pageHost = new URL(card.url).hostname; } catch {}
   return (
     <AskCard
+      stays={stays}
       ariaLabel={t("signIn.cardLabel", { name: botName, site: card.site })}
       icon={<LogIn size={15} />}
       title={t("signIn.title")}
-      stays
       footer={saving ? undefined : <>
         <button type="button" onClick={() => void answer("cancel")} disabled={pending !== null} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
           {pending === "cancel" ? <Loader2 size={14} className="animate-spin" /> : <X size={14} />}
