@@ -39,7 +39,7 @@
     "shots": "node --experimental-strip-types scripts/shots.ts",
     "eval": "node --experimental-strip-types evals/runners/run-evals.ts",
     "dev:desktop": "node scripts/prepare-cloudflared.mjs --current && electron .",
-    "build": "tsc -b && tsc -p tsconfig.server.json && vite build",
+    "build": "tsc -b && tsc -p tsconfig.server.json && node --max-old-space-size=4096 node_modules/vite/bin/vite.js build",
     "typecheck": "tsc -b && tsc -p tsconfig.server.json && tsc -p packages/phone-protocol/tsconfig.json",
     "test": "vitest run && pnpm broker:test && pnpm test:electron && pnpm test:packaged-server",
     "test:electron": "node --test \"electron/*.node-test.mjs\"",
