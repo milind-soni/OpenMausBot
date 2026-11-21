@@ -7,7 +7,9 @@ import { t } from "@/lib/i18n";
 import { localSetupImport } from "@/lib/setup-import";
 import { useShowThreads } from "@/lib/thread-preferences";
 import type { LocaleKey } from "@/locales";
-import { openThread, useStore } from "@/state/store";
+import { openThread } from "@/state/store";
+import { useStoreRef } from "@/state/store-ref";
+import { useStoreSelector } from "@/state/store-select";
 import { GrokBotMark } from "./GrokBotMark";
 import { SettingRow, SettingsMark } from "./SettingsPrimitives";
 
@@ -49,9 +51,9 @@ export function GrokLink({ url, where = "grokMove.connect.where" }: { url: strin
 
 /** Settings → Import: the Grok Bot connector, on until it is turned off, and the last tasks Grok Bot handed off. */
 export function GrokConnectorPart() {
-  const { state, dispatch } = useStore();
+  const store = useStoreRef(), dispatch = store.dispatch;
   const showThreads = useShowThreads();
-  const local = localSetupImport(state.config?.cloudHome === true);
+  const local = localSetupImport(useStoreSelector((state) => state.config?.cloudHome === true));
   const [connector, setConnector] = useState<GrokConnector | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -100,7 +102,7 @@ export function GrokConnectorPart() {
             {connector.handoffs.map((handoff) => (
               <li key={handoff.threadId}>
                 <button type="button" data-grok-handoff={handoff.threadId} title={handoff.title}
-                  onClick={() => openThread(dispatch, handoff, state, showThreads)}
+                  onClick={() => openThread(dispatch, handoff, store.state(), showThreads)}
                   className="flex min-h-8 w-full items-center gap-3 rounded-lg px-2 text-start text-[13px] leading-[18px] text-ink transition-colors hover:bg-ink/[0.06] active:bg-ink/[0.08] motion-reduce:transition-none">
                   <span dir="auto" className="min-w-0 flex-1 truncate">{handoff.title}</span>
                   <span className="shrink-0 text-[12px] leading-4 text-ink-secondary">{t(STATE[handoff.state])}</span>
