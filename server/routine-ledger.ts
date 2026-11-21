@@ -68,6 +68,15 @@ export function ledgerPaths(routinesFile: string): { ledger: string; mark: strin
   return { ledger: `${stem}.ledger.jsonl`, mark: `${stem}.ledger.mark` };
 }
 
+function fileState(file: string): { size: number; identity: string } {
+  try {
+    const info = statSync(file);
+    return { size: info.size, identity: `${info.dev}:${info.ino}:${info.mtimeMs}:${info.ctimeMs}` };
+  } catch {
+    return { size: 0, identity: "missing" };
+  }
+}
+
 const time = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= MAX_TIME;
 const optionalTime = (value: unknown): number | undefined => time(value) ? value : undefined;
 
@@ -117,6 +126,7 @@ export class RoutineLedger {
   private sequence = 0;
   private lines = 0;
   private bytes = 0;
+  private identity = "missing";
   private endsMidLine = false;
   private total = 0;
   private changes = 0;
@@ -135,6 +145,7 @@ export class RoutineLedger {
   get size(): number { return this.total; }
 
   open(): LedgerOpened {
+    this.identity = fileState(this.file).identity;
     const mark = this.readMark(), text = this.text(), state = text === undefined ? "damaged" : this.read(text);
     const restored = state === "ok" && mark !== null && this.sequence < mark.seq;
     // The mark is written with every change, so it holds the last sequence number even when the ledger itself is lost.
@@ -175,6 +186,7 @@ export class RoutineLedger {
     this.endsMidLine = false;
     this.sequence = seq;
     this.bytes += Buffer.byteLength(text);
+    this.identity = fileState(this.file).identity;
     this.lines += lines.length;
     this.changes += 1;
     for (const gone of remove) this.drop(gone);
@@ -197,12 +209,12 @@ export class RoutineLedger {
   /** Reads the file again when something else has written to it since this process last did. True when it had. A
    * file that cannot be read just now leaves what is in memory as it is. */
   sync(): boolean {
-    let size: number;
-    try { size = statSync(this.file).size; } catch { size = 0; }
-    if (size === this.bytes) return false;
+    const { size, identity } = fileState(this.file);
+    if (size === this.bytes && identity === this.identity) return false;
     const text = this.text(), seq = this.sequence;
     if (text === undefined) return false;
     this.read(text);
+    this.identity = identity;
     this.sequence = Math.max(seq, this.sequence);
     return true;
   }
@@ -283,6 +295,7 @@ export class RoutineLedger {
     try {
       writeFileAtomic(this.file, text, { mode: 0o600 });
       this.bytes = Buffer.byteLength(text);
+      this.identity = fileState(this.file).identity;
       this.lines = this.total + 1;
       this.endsMidLine = false;
     } catch (error) {
