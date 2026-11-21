@@ -28,6 +28,19 @@ subscription sign-in, or with unpriced models, cap tokens.
 Days and months are UTC, as the usage ledger's are. The reset time is shown
 in the server's own time zone.
 
+## Reading usage from a bot
+
+`usage_limits` reports AI account subscription quotas when called without
+arguments. With `scope: "bot"`, it reads this bot's settled tokens, estimated
+cost and usage cap headroom. The UTC period defaults to `today` and also
+supports `month`. Pass `thread: "this"` to limit the usage totals to the
+current conversation.
+
+The tool includes exact cap totals only when the calling turn can read all
+usage counted toward that cap. If `capsComplete` is false, some cap totals
+are unavailable in the conversation. A running turn can still read visible
+headroom and the reset time after a cap is reached.
+
 ## What a reached cap stops
 
 `stops` chooses, for all caps together:

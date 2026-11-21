@@ -22,6 +22,18 @@ describe("the usage_limits tool", () => {
     await expect(callTool(USAGE_LIMITS_TOOL, {}, asked)).resolves.toEqual({ text: '{"accounts":[]}' });
   });
 
+  it("reads bot usage only when the caller selects it", async () => {
+    const asked = context({ ok: true, body: { text: '{"totals":{"input":12}}' } });
+    await expect(callTool(USAGE_LIMITS_TOOL, { scope: "bot", period: "month", thread: "this" }, asked))
+      .resolves.toEqual({ text: '{"totals":{"input":12}}' });
+    expect(asked.client.apiResponse).toHaveBeenCalledWith("/api/internal/engine-limits?scope=bot&period=month&thread=this");
+
+    vi.mocked(asked.client.apiResponse).mockClear();
+    await expect(callTool(USAGE_LIMITS_TOOL, { scope: "subscription", thread: "this" }, asked))
+      .resolves.toMatchObject({ isError: true });
+    expect(asked.client.apiResponse).not.toHaveBeenCalled();
+  });
+
   it("hands the bot the route's answer, and its refusal as an error", async () => {
     const asked = context({ ok: true, body: { text: '{"accounts":[]}' } });
     await expect(callUsageLimitsTool(asked)).resolves.toEqual({ text: '{"accounts":[]}' });

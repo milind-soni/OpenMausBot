@@ -200,12 +200,13 @@ function parseMonth(text: string): ParsedFile["rows"] {
 
 /** The file's valid rows in file order, parsed again only when its size, times or identity changed. Callers share the
  * row objects and must not change them. */
-function monthRows(file: string): ParsedFile["rows"] {
+function monthRows(file: string, requireReadable: boolean): ParsedFile["rows"] {
   let fd: number;
   try {
     fd = openSync(file, "r");
-  } catch {
+  } catch (error) {
     parsedFiles.delete(file);
+    if (requireReadable && (error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     return [];
   }
   try {
@@ -219,20 +220,21 @@ function monthRows(file: string): ParsedFile["rows"] {
     parsedFiles.set(file, { stamp, rows });
     if (parsedFiles.size > PARSED_FILES_KEPT) parsedFiles.delete(parsedFiles.keys().next().value!);
     return rows;
-  } catch {
+  } catch (error) {
     parsedFiles.delete(file);
+    if (requireReadable) throw error;
     return [];
   } finally {
     closeSync(fd);
   }
 }
 
-export function readUsage(dataDir: string, range: { from: Date; to: Date }): UsageRow[] {
+export function readUsage(dataDir: string, range: { from: Date; to: Date }, { requireReadable = false } = {}): UsageRow[] {
   const rows: UsageRow[] = [];
   const from = range.from.getTime();
   const to = range.to.getTime();
   for (const key of monthsBetween(range.from, range.to)) {
-    for (const { at, row } of monthRows(join(dataDir, DIR, `${key}.jsonl`))) {
+    for (const { at, row } of monthRows(join(dataDir, DIR, `${key}.jsonl`), requireReadable)) {
       if (at >= from && at <= to) rows.push(row);
     }
   }
