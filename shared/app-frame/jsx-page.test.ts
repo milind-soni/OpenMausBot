@@ -137,6 +137,9 @@ export default function Page() { const theme = useTheme(); return <div><p id="th
     // The chart is drawn in an effect after the render: wait for it, not for a fixed time.
     await vi.waitFor(() => expect(fakeEcharts.made).toHaveLength(1), { timeout: 10_000 });
     expect(fakeEcharts.made[0]).toMatchObject({ theme: "dark", options: [{ backgroundColor: "transparent", series: [{ type: "bar", data: [1, 2] }] }] });
+    // An error in the chart's effect shows only after it ran.
+    expect(problems).toEqual([]);
+    expect(document.querySelector("[data-page-problem]")).toBeNull();
   });
 
   it("runs a published page's transpiled code without loading the compiler", async () => {

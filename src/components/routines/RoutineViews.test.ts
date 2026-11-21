@@ -19,10 +19,13 @@ function list(props: Partial<Parameters<typeof RoutineList>[0]> = {}) {
 afterEach(() => vi.useRealTimers());
 
 describe("routine list", () => {
-  it("warns on an enabled routine whose bot is paused, with a way to swap it in", () => {
+  it("says an enabled routine whose bot the plan paused still runs, with a way to swap it in, and only the person's pause when both are", () => {
     const paused = list({ pausedBots: ["scout"] });
-    expect(paused).toContain("bot is paused on this plan, so it won&#x27;t run.");
+    expect(paused).toContain("bot is paused on this plan, but the routine still runs.");
     expect(paused).toContain("Swap awake bots");
+    const both = list({ pausedBots: ["scout"], heldBots: ["scout"] });
+    expect(both).not.toContain("still runs");
+    expect(both).toContain("won’t run until the bot is resumed");
     expect(list({ pausedBots: ["scout"], routines: [{ ...routine, enabled: false }] })).not.toContain("Swap awake bots");
     expect(list({ pausedBots: ["other"] })).not.toContain("Swap awake bots");
     expect(list()).not.toContain("Swap awake bots");
