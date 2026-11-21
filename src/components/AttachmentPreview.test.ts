@@ -172,16 +172,16 @@ describe("attachment preview surfaces", () => {
   });
 });
 
-describe("Show in folder for a file outside the workspace", () => {
+describe("Open containing folder for a file outside the workspace", () => {
   const render = (filePath: string) => renderToStaticMarkup(createElement(OutsideWorkspaceFile, { filePath }));
 
   it("offers the reveal only for an absolute local path, and only in the local desktop app", () => {
     vi.stubGlobal("window", { ogb: { revealInFolder: vi.fn(), remoteClient: { active: false } } });
     try {
-      expect(render("/Users/maus/_draft/ollama-gen.js")).toContain("Show in folder");
-      expect(render("C:\\Users\\Maus\\_draft\\ollama-gen.js")).toContain("Show in folder");
+      expect(render("/Users/maus/_draft/ollama-gen.js")).toContain("Open containing folder");
+      expect(render("C:\\Users\\Maus\\_draft\\ollama-gen.js")).toContain("Open containing folder");
       for (const filePath of ["_draft/ollama-gen.js", "\\\\server\\share\\ollama-gen.js"]) {
-        expect(render(filePath)).not.toContain("Show in folder");
+        expect(render(filePath)).not.toContain("Open containing folder");
         expect(render(filePath)).toContain(`>${filePath}</code>`);
       }
     } finally {
