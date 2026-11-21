@@ -63,7 +63,6 @@ export function createBrowserControl(options: {
   mine?: () => boolean;
   onTakeStatus: (status: BrowserTakeStatus) => void;
   onError: (message: string) => void;
-  onHalted: () => void;
 }) {
   const transport = options.transport;
   let state: "bot" | "taking" | "held" | "releasing" = "bot";
@@ -158,10 +157,8 @@ export function createBrowserControl(options: {
       if (isRelease(input) && dropped.delete(id)) return;
       if (isPress(input)) dropped.delete(id);
       const waiting = state === "taking" || flushing;
-      if (state !== "held" && !waiting) {
-        if (!startsInteraction(input)) return;
-        if (transport.stopped() && !COMMANDS.has(input.type)) { transport.dropped?.("queue_halted"); options.onHalted(); return; }
-      }
+      // A take also brings a halted v1 queue back, so a press after a halt takes the browser again.
+      if (state !== "held" && !waiting && !startsInteraction(input)) return;
       if (COMMANDS.has(input.type) && waiting && buffer.some((queued) => COMMANDS.has(queued.type))) return;
       if (startsInteraction(input)) {
         soon = false;

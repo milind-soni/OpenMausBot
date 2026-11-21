@@ -2931,6 +2931,7 @@
   "signIn.settled.saved": "Zapisano dane logowania do {site}",
   "browser.live.botBusy": "{name} używa tej przeglądarki. Widok na żywo otworzy się, gdy będzie wolna…",
   "browser.input.tooSlow": "Wprowadzanie w przeglądarce zatrzymano, ponieważ przeglądarka nie nadąża (może się zawiesiła lub połączenie jest wolne). Połącz ponownie widok przed ponownym wpisywaniem. Jeśli nadal się zawiesza, uruchom przeglądarkę ponownie.",
+  "browser.input.notReaching": "Twoje kliknięcia i wpisywany tekst nie docierają do strony.",
   "browser.profiles.heldElsewhere": "Inne okno używa tej przeglądarki. Przełącz profile, gdy skończy.",
   "browser.profiles.busy": "Profile odblokują się po zakończeniu bieżącej akcji w przeglądarce.",
   "browser.viewport.keysHint": "Gdy klikniesz lub wpiszesz coś na stronie, twoje klawisze będą do niej trafiać; do tego czasu Tab przechodzi dalej. Naciśnij Shift+Escape, aby wrócić do paska adresu przeglądarki.",

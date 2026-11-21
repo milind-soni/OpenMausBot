@@ -3491,6 +3491,7 @@
   "signIn.settled.saved": "已儲存 {site} 的登入資訊",
   "browser.live.botBusy": "{name} 正在使用這個瀏覽器。空閒時就會開啟即時畫面…",
   "browser.input.tooSlow": "瀏覽器跟不上輸入速度，因此已停止輸入（瀏覽器可能卡住，或連線速度較慢）。請重新連接畫面後再輸入。如果仍然卡住，請重新啟動瀏覽器。",
+  "browser.input.notReaching": "你的點擊和輸入沒有傳到頁面。",
   "browser.profiles.heldElsewhere": "另一個視窗正在使用這個瀏覽器。待其完成後再切換設定檔。",
   "browser.profiles.busy": "目前的瀏覽器動作完成後，即可切換設定檔。",
   "browser.viewport.keysHint": "在頁面中點選或輸入後，按鍵會傳送到頁面；在此之前，按 Tab 會移到下一個項目。按 Shift+Escape 可回到瀏覽器網址列。",

@@ -52,6 +52,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   const [extensions, setExtensions] = useState<BrowserExtension[] | null>(null);
   const [takeStatus, setTakeStatus] = useState<BrowserTakeStatus>("");
   const [error, setError] = useState("");
+  const [notReaching, setNotReaching] = useState(false);
   const [starting, setStarting] = useState(false);
   const [gone, setGone] = useState(false);
   const [asleep, setAsleep] = useState<"" | "asleep" | "waking">("");
@@ -107,6 +108,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     setNav(stream ? NO_NAV : { ...NO_NAV, canGoBack: true, canGoForward: true });
     setStarting(false);
     setGone(false);
+    setNotReaching(false);
     setAsleep("");
     pageNow.current = null;
   }, [bot.id, bot.browserProfile, scopedThread, attempt, stream]);
@@ -148,7 +150,6 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
       mine: () => controlRef.current?.owned === true,
       onTakeStatus: setTakeStatus,
       onError: setError,
-      onHalted: () => setError(t("browser.input.tooSlow")),
     });
     created.keep(keepNow.current);
     browserControl.current = created;
@@ -188,6 +189,8 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
       const next = message.setting as PreviewViewportSetting | undefined;
       if (next && (next.mode === "fill" || next.mode === "preset")) setSetting(next);
       if (typeof message.zoom === "number") setZoom(message.zoom);
+    } else if (message.type === "inputHalted") {
+      setNotReaching(message.halted === true);
     } else if (message.type === "starting") {
       setStarting(true);
     } else if (message.type === "asleep" || message.type === "awake") {
@@ -345,7 +348,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
         onRestart={restart}
       /></>}
     />
-    {error && <div role="alert" className="flex shrink-0 items-center justify-between gap-2 border-b border-hairline/30 px-3 py-2 text-[12px] text-danger"><span>{error}</span>{!connected && <button className="shrink-0 underline" onClick={reconnect}>{t("browser.panel.reconnect")}</button>}</div>}
+    {(error || (notReaching && connected)) && <div role="alert" className="flex shrink-0 items-center justify-between gap-2 border-b border-hairline/30 px-3 py-2 text-[12px] text-danger"><span>{notReaching && connected ? t("browser.input.notReaching") : error}</span>{(!connected || notReaching) && <button className="shrink-0 underline" onClick={reconnect}>{t("browser.panel.reconnect")}</button>}</div>}
     {takeStatus === "stale" && <div role="status" className="shrink-0 border-b border-hairline/30 px-3 py-1.5 text-[12px] text-accent-text">{t("browser.control.stale", { name: bot.name })}</div>}
     {passkeyWall && passkeyDismissed !== nav.url && <PasskeyNotice wall={passkeyWall} botName={bot.name} onDismiss={() => setPasskeyDismissed(nav.url)} />}
     <div className="relative flex min-h-0 flex-1 flex-col bg-inset/40">

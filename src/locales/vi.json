@@ -2360,6 +2360,7 @@
   "signIn.settled.saved": "Đã lưu thông tin đăng nhập cho {site}",
   "browser.live.botBusy": "{name} đang sử dụng trình duyệt này. Chế độ xem trực tiếp sẽ mở khi trình duyệt rảnh…",
   "browser.input.tooSlow": "Đã dừng thao tác nhập vào trình duyệt vì trình duyệt không theo kịp (có thể bị kẹt hoặc kết nối bị chậm). Hãy kết nối lại chế độ xem trước khi nhập lại. Nếu vẫn bị kẹt, hãy khởi động lại trình duyệt.",
+  "browser.input.notReaching": "Các lần nhấp và nội dung bạn gõ không đến được trang.",
   "browser.profiles.heldElsewhere": "Một cửa sổ khác đang sử dụng trình duyệt này. Hãy chuyển hồ sơ sau khi cửa sổ đó hoàn tất.",
   "browser.profiles.busy": "Các hồ sơ sẽ mở khóa sau khi hành động hiện tại của trình duyệt kết thúc.",
   "browser.viewport.keysHint": "Khi bạn nhấp hoặc nhập vào trang, phím gõ sẽ được gửi đến trang; trước thời điểm đó, phím Tab sẽ chuyển vùng chọn. Nhấn Shift+Escape để quay lại thanh địa chỉ trình duyệt.",

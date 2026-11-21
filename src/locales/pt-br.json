@@ -3686,6 +3686,7 @@
   "signIn.settled.saved": "Login salvo para {site}",
   "browser.live.botBusy": "{name} está usando este navegador. A visualização ao vivo abre quando o navegador estiver livre…",
   "browser.input.tooSlow": "O envio de comandos ao navegador parou porque ele não está conseguindo processá-los (pode estar travado ou a conexão pode estar lenta). Reconecte a visualização antes de digitar novamente. Se continuar travado, reinicie o navegador.",
+  "browser.input.notReaching": "Seus cliques e o que você digita não estão chegando à página.",
   "browser.profiles.heldElsewhere": "Outra janela está usando este navegador. Troque de perfil quando o navegador estiver livre.",
   "browser.profiles.busy": "Os perfis são liberados quando a ação atual do navegador terminar.",
   "browser.viewport.keysHint": "Depois que você clicar ou digitar na página, ela passa a receber os comandos do teclado; até lá, Tab avança o foco. Aperte Shift+Escape para voltar à barra de endereço do navegador.",

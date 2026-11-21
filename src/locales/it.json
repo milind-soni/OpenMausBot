@@ -2859,6 +2859,7 @@
   "signIn.settled.saved": "Accesso salvato per {site}",
   "browser.live.botBusy": "{name} sta usando questo browser. La vista dal vivo si apre quando è libero…",
   "browser.input.tooSlow": "I comandi al browser si sono fermati perché il browser non sta al passo (può essere bloccato, oppure la connessione è lenta). Riconnetti la vista prima di scrivere di nuovo. Se resta bloccato, riavvia il browser.",
+  "browser.input.notReaching": "I tuoi clic e ciò che scrivi non arrivano alla pagina.",
   "browser.profiles.heldElsewhere": "Un'altra finestra sta usando questo browser. Cambia profilo quando ha finito.",
   "browser.profiles.busy": "I profili si sbloccano quando finisce l'azione corrente del browser.",
   "browser.viewport.keysHint": "Appena fai clic o scrivi nella pagina, i tasti vanno lì; fino ad allora Tab prosegue. Premi Maiusc+Esc per tornare alla barra degli indirizzi del browser.",
