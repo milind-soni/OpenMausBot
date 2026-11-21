@@ -75,6 +75,8 @@ export interface NoTerminalDeps {
 
 type Selection = { instanceId: string; model?: string };
 
+const FLAGS_KEPT = 2_000;
+
 export function createNoTerminal(deps: NoTerminalDeps) {
   /** Conversations whose latest turn started with no way to run commands, and when. */
   const flagged = new Map<string, number>();
@@ -82,7 +84,10 @@ export function createNoTerminal(deps: NoTerminalDeps) {
     /** A turn is starting: its context line, empty when it can run commands. */
     turn(threadId: string, reach: Omit<TurnReach, "cloudHome">, prompt: { bot: string; model: string; cloudComputer: boolean; routine: boolean }, now = Date.now()): string {
       if (!cannotRunCommands({ ...reach, cloudHome: deps.cloudHome })) { flagged.delete(threadId); return ""; }
+      flagged.delete(threadId);
       flagged.set(threadId, now);
+      // Newest last: the oldest conversations' flags go first, long after any run of theirs was reported.
+      for (const oldest of flagged.keys()) { if (flagged.size <= FLAGS_KEPT) break; flagged.delete(oldest); }
       return noTerminalPrompt(prompt);
     },
     /** The app's sentence a routine run's line in its results chat ends with, in that chat's language; null unless a turn

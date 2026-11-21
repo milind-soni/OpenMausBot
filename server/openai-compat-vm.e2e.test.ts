@@ -230,6 +230,11 @@ describe("openai-compat Local VM tools", () => {
     expect(toolNames(continuation)).toContain("agents_select_computer");
     const shown = (await api("GET", "/api/bots")).bots.find((item: any) => item.id === bot.id).messages;
     expect(shown.filter((message: any) => message.card)).toEqual([]);
+    // The move lands on another machine's disk: the bot hears its files stayed behind, and the person reads one line of it.
+    expect(JSON.stringify(continuation!.messages.filter((message) => message.role === "user").at(-1)?.content))
+      .toContain("The computer selection is now the Local VM. The Local VM is a different machine from this computer, with its own disk. Your earlier files are still on this computer and are not lost");
+    expect(shown.filter((message: any) => message.tool?.name.startsWith("notice: ")).map((message: any) => message.tool.name))
+      .toEqual(["notice: openai select vm now works on the Local VM, a different machine from this computer. Its files on this computer are still there; nothing was lost."]);
   }, 60_000);
 
   // An API model on its Private desktop, asked for the person's OneDrive folder, sent them to a settings screen that does not exist.
