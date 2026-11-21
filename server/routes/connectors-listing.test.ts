@@ -14,7 +14,7 @@ function setup(overrides: Partial<ConnectorListingDeps["composio"]> = {}) {
     sharedConnectedInventory: vi.fn(async () => ({ complete: true, services: { gmail: { connected: true, pending: false, status: "ACTIVE", accounts: [] } } })),
     ...overrides,
   };
-  const route = createConnectorListingRoutes({ cfg: () => ({}), composio, managedHost: true });
+  const route = createConnectorListingRoutes({ cfg: () => ({}), composio, host: "desktop" });
   const call = async (method: string, path: string, headers: Record<string, string> = {}) => {
     const json = vi.fn();
     const out = await route({ req: { headers } as IncomingMessage, res: {} as ServerResponse, path, method, json } as unknown as RouteContext);
@@ -32,7 +32,7 @@ describe("the Apps page's listing routes", () => {
       configured: true, mode: "managed", setup: "ready", source: "api",
       cards: [expect.objectContaining({ slug: "gmail" })], pagination: { items: 1, stalled: false, complete: true },
     });
-    expect(composio.connectorSetup).toHaveBeenCalledWith({}, true);
+    expect(composio.connectorSetup).toHaveBeenCalledWith({}, "desktop");
   });
 
   it("answers the connected apps from the shared read, and reads anew only for Refresh", async () => {

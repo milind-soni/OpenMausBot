@@ -7,8 +7,8 @@ import { PASS, type RouteHandler } from "./table.ts";
 export interface ConnectorListingDeps {
   cfg(): AppConfig;
   composio: Pick<typeof Composio, "listToolkits" | "configured" | "connectionMode" | "connectorSetup" | "connectorAvailability" | "sharedConnectedInventory">;
-  /** The desktop app or a Cloud home: a host the managed service comes with. */
-  managedHost: boolean;
+  /** Which host serves the catalog: "cloud-home" reports a missing service as an outage; "desktop" reports missing setup the person can add. */
+  host: Composio.ConnectorSetupHost;
 }
 
 export function createConnectorListingRoutes(deps: ConnectorListingDeps): RouteHandler {
@@ -21,7 +21,7 @@ export function createConnectorListingRoutes(deps: ConnectorListingDeps): RouteH
       return json(res, 200, {
         configured: composio.configured(cfg),
         mode: composio.connectionMode(cfg),
-        setup: composio.connectorSetup(cfg, deps.managedHost),
+        setup: composio.connectorSetup(cfg, deps.host),
         source,
         cards,
         ...(pagination ? { pagination } : {}),
