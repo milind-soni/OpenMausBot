@@ -1224,6 +1224,40 @@
       }
     },
     {
+      "name": "what_changed",
+      "description": "Exactly what differs between a text and its edited version: sentences changed ([-old-]{+new+}), added, removed or moved, by paragraph. Use before saying what you changed, or to check an edit.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "original_file": {
+            "type": "string",
+            "description": ".md or .txt in your working folder or attached here."
+          },
+          "edited_file": {
+            "type": "string"
+          },
+          "original_text": {
+            "type": "string",
+            "description": "Instead of a file."
+          },
+          "edited_text": {
+            "type": "string"
+          },
+          "start": {
+            "type": "integer",
+            "description": "Continue a long list from this change."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
       "name": "edit_image",
       "description": "Change an existing image from a text instruction, optionally guided by a markup PNG: marks (circles, arrows, scribbles) drawn on a transparent background at the image's exact size, which point at where to change. Both files are paths in your working folder. The result is attached to your reply when the turn ends. Needs a GPT-Image-2.6 model on OpenAI.",
       "inputSchema": {

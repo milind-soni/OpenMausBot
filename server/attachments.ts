@@ -14,6 +14,7 @@ import { link, open, unlink } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { FILE_MAX_BYTES, PREVIEW_MAX_BYTES } from "../shared/upload-limits.ts";
 import { DATA_DIR } from "./config.ts";
+import { dropKeptOriginals } from "./attachment-originals.ts";
 import { boxUploadsDir } from "./bot-box/plan.ts";
 
 export { FILE_MAX_BYTES, PREVIEW_MAX_BYTES } from "../shared/upload-limits.ts";
@@ -213,7 +214,10 @@ export function deleteAttachment(path: string): void {
     // An upload still on disk (a busy file on Windows) keeps its box copies; one already gone loses them.
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") return;
   }
-  if (resolve(dirname(path)) === resolve(ATTACHMENTS_DIR)) dropBoxUploadCopies([basename(path)]);
+  if (resolve(dirname(path)) === resolve(ATTACHMENTS_DIR)) {
+    dropBoxUploadCopies([basename(path)]);
+    dropKeptOriginals([basename(path)]);
+  }
 }
 
 /** Settings → General: what the store holds against its ceiling, rescanned so files removed outside the app count. */
@@ -267,6 +271,7 @@ export function clearAttachments(kept: ReadonlySet<string>, now = Date.now()): {
     }
   }
   dropBoxUploadCopies(gone);
+  dropKeptOriginals(gone);
   invalidateAttachmentAccounting();
   return { removed, freedBytes, failed };
 }

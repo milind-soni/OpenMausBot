@@ -3,6 +3,7 @@ import { basename, join } from "node:path";
 
 import type { BotsResponse, SearchResponse, WireBot, WireGroup } from "../../shared/wire.ts";
 import { NO_SUCH_BOT } from "../../shared/bot-read.ts";
+import { KEPT_ORIGINALS_DIR, keptOriginal } from "../attachment-originals.ts";
 import {
   ATTACHMENTS_DIR, attachmentStorageUsage, clearAttachments, deleteAttachment, extensionForMime, FILE_MAX_BYTES, IMAGE_MAX_BYTES,
   parseAudioRange, readAttachment, saveFile, saveImageUpload, validateAttachmentUploadId, type SavedAttachment,
@@ -277,9 +278,11 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
       const maxBytes = streamsMessageImage ? MESSAGE_FILE_MAX_BYTES : MESSAGE_FILE_DOWNLOAD_MAX_BYTES;
       let file: Awaited<ReturnType<typeof openMessageFile>>;
       try {
+        // What the person sent, even when a bot has since saved over the stored file.
+        const kept = message.role === "user" && !folderEntry ? keptOriginal(href, ATTACHMENTS_DIR) : null;
         file = folderEntry
           ? await openMessageFolderEntry(href, folderEntry, roots, maxBytes)
-          : await openMessageFile(href, roots, maxBytes);
+          : kept ? await openMessageFile(kept, [KEPT_ORIGINALS_DIR], maxBytes) : await openMessageFile(href, roots, maxBytes);
       } catch (error) {
         const code = (error as { code?: unknown } | null)?.code;
         const status = (error as { status?: unknown } | null)?.status;
