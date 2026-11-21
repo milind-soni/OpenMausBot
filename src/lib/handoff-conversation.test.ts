@@ -55,6 +55,14 @@ describe("handoffTranscript", () => {
     expect(conversationRows(state, asker, helper, "You").map((row) => row.text)).toEqual(["Ask", "First", "Next"]);
   });
 
+  it("moves the branch on to a live line that the loaded copy also holds", () => {
+    let state = handoffTranscript(LOADING_TRANSCRIPT, { type: "active", activeLeafId: "m1" });
+    state = handoffTranscript(state, { type: "message", message: line("m2", "bot", "Reply", { parentId: "m1" }) });
+    state = handoffTranscript(state, { type: "loaded", messages: [line("m1", "user", "Ask", { parentId: null }), line("m2", "bot", "Reply", { parentId: "m1" })], activeLeafId: "m2" });
+    expect(state.activeLeafId).toBe("m2");
+    expect(conversationRows(state, asker, helper, "You").map((row) => row.text)).toEqual(["Ask", "Reply"]);
+  });
+
   it("follows the branch with each new line and patches lines it holds", () => {
     let state = loaded([line("m1", "user", "Ask", { parentId: null })], "m1");
     state = handoffTranscript(state, { type: "message", message: line("m2", "bot", "Working", { parentId: "m1" }) });

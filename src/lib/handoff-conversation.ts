@@ -27,8 +27,8 @@ export function handoffTranscript(state: HandoffTranscript, action: HandoffTrans
       const loaded = new Set(action.messages.map((message) => message.id));
       const newer = state.messages.filter((message) => !loaded.has(message.id));
       const messages = [...action.messages.map((message) => live.get(message.id) ?? message), ...newer];
-      // A line that came in while loading and continues the loaded branch moves it on.
-      const activeLeafId = newer.reduce((leaf, message) => (message.parentId ?? null) === leaf ? message.id : leaf,
+      // A line that came in while loading and continues the branch moves it on, also when the loaded copy holds it.
+      const activeLeafId = state.messages.reduce((leaf, message) => (message.parentId ?? null) === leaf ? message.id : leaf,
         state.activeLeafId ?? action.activeLeafId);
       return { messages, activeLeafId, loading: false, failed: false };
     }
