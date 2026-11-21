@@ -59,11 +59,10 @@ function open(): DatabaseSync {
       PRIMARY KEY (thread_id, id)
     );
     CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread_id);
-    -- at is not part of the primary key, so newest-per-thread reads cannot
-    -- walk these rows in time order on messages_thread. Created on every
-    -- open, including a database that already has messages.
+    -- The primary key has no time column, so newest-per-thread reads need this index.
     CREATE INDEX IF NOT EXISTS messages_thread_at ON messages(thread_id, at);
     -- Partial, so no other query's plan can move onto them: only a statement that repeats the WHERE may use one.
+    CREATE INDEX IF NOT EXISTS messages_thread_bot_text ON messages(thread_id, at) WHERE kind = 'text' AND role = 'bot' AND text IS NOT NULL;
     CREATE INDEX IF NOT EXISTS messages_thread_order ON messages(thread_id, ${ORDERING_AT}) WHERE ${ORDERING_ROW};
     CREATE INDEX IF NOT EXISTS messages_work_at ON messages(kind, at) WHERE ${WORK_KINDS};
     CREATE INDEX IF NOT EXISTS messages_cards_at ON messages(kind, at) WHERE ${CARD_KINDS};
@@ -902,7 +901,7 @@ export interface ThreadLatest {
   head: string;
 }
 
-/** CROSS JOIN pins the order: the list, then messages_thread_at per thread, then the primary key (thread_id, id). `id` alone has no index. */
+/** CROSS JOIN pins the order: the list, then a seek in each thread's bot text, then the primary key (thread_id, id). `id` alone has no index. */
 export const LATEST_SAID_BY_BOT_SQL =
   "WITH latest(thread_id, id) AS MATERIALIZED (" +
   "SELECT j.value, (SELECT m2.id FROM messages m2 " +

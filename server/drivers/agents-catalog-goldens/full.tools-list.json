@@ -238,11 +238,35 @@
     },
     {
       "name": "usage_limits",
-      "description": "Each AI account's usage limits: percent used, reset time, when checked. status: ok, unknown (no data now; see why) or unsupported.",
+      "description": "AI subscription limits and reset times by default. With scope bot, read this bot's visible tokens, estimated cost and usage cap headroom. Bot periods use UTC.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {}
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "subscription",
+              "bot"
+            ],
+            "default": "subscription"
+          },
+          "period": {
+            "type": "string",
+            "enum": [
+              "today",
+              "month"
+            ],
+            "description": "Bot scope only. Defaults to today."
+          },
+          "thread": {
+            "type": "string",
+            "enum": [
+              "this"
+            ],
+            "description": "Bot scope only. Omit for all visible conversations."
+          }
+        }
       },
       "annotations": {
         "readOnlyHint": true,

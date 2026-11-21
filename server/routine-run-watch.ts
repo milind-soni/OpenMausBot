@@ -26,10 +26,11 @@ export class RunWatch {
 
   /** The runs whose turn has now been gone for TURN_GONE_MS. */
   lost<R extends RoutineRun>(runs: readonly R[], now: number): R[] {
-    const lost: R[] = [], watched = new Set<string>();
+    const lost: R[] = [], watched = new Set<string>(), threads = new Set<string>();
     if (!this.live) return lost;
     for (const run of runs) {
       if (!started(run)) continue;
+      threads.add(run.threadId!);
       const events = this.events.get(run.threadId!) ?? 0, before = this.gone.get(run.id);
       if (this.live(run) !== false) continue;
       watched.add(run.id);
@@ -38,7 +39,7 @@ export class RunWatch {
       if (ms >= TURN_GONE_MS) lost.push(run);
     }
     for (const id of this.gone.keys()) if (!watched.has(id)) this.gone.delete(id);
-    for (const threadId of this.events.keys()) if (!runs.some((run) => run.threadId === threadId && started(run))) this.events.delete(threadId);
+    for (const threadId of this.events.keys()) if (!threads.has(threadId)) this.events.delete(threadId);
     return lost;
   }
 
