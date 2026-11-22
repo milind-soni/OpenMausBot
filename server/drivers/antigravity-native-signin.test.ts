@@ -100,6 +100,17 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
     expect(fixture.methods()).not.toContain("authenticate");
   }, 120_000);
 
+  it("starts no process of its own to ask about the sign-in before a turn", async () => {
+    const fixture = nativeFixture(folder());
+    const instanceId = "antigravity-native-one-process";
+    const instance = await create(instanceId, fixture);
+    await loginAt(fixture, antigravityProfileDirectory(instanceId), "fixture-code");
+    const before = fixture.methods().filter((method) => method === "initialize").length;
+    const { done } = await turn(instance, "native-one-process", fixture.directory);
+    expect(done).toMatchObject({ ok: true });
+    expect(fixture.methods().filter((method) => method === "initialize").length - before).toBe(1);
+  }, 120_000);
+
   it("sends no authenticate for model discovery, background text or a refused turn, and fails each as a sign-in request", async () => {
     const fixture = nativeFixture(folder());
     const instance = await create("antigravity-native-no-authenticate", fixture);
@@ -131,10 +142,10 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
       const snapshot = await instance.snapshot();
       expect(snapshot.state).toBe("available");
       expect("authenticated" in snapshot).toBe(false);
-      const recorder = recordEvents(instance.adapter);
-      await expect(instance.adapter.sendTurn({ threadId: "crash", text: "hello", approvalMode: "ask", cwd: fixture.directory })).rejects.toThrow(/exited/u);
-      expect(recorder.events.some((event) => event.type === "turn.completed" && (event as { stopReason?: string }).stopReason === "auth_required")).toBe(false);
-      recorder.stop();
+      const { done, events } = await turn(instance, "crash", fixture.directory);
+      expect(done).toMatchObject({ ok: false });
+      expect(done).not.toMatchObject({ stopReason: "auth_required" });
+      expect(events.some((event) => event.type === "runtime.error" && (event as { setup?: boolean }).setup === true)).toBe(false);
       await expect(instance.generateMemoryText!("hello")).rejects.toThrow(/exited/u);
       expect(antigravityNativeCredentialsHeld(instanceId)).toBe(false);
     }, 120_000);

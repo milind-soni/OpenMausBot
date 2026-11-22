@@ -117,11 +117,22 @@ export class NativeSignInCache {
     return this.#generations.get(instanceId) ?? 0;
   }
 
+  #fresh(instanceId: string, runtime: string): Entry | undefined {
+    const known = this.#entries.get(instanceId);
+    const age = known ? this.#now() - known.at : -1;
+    return known && known.generation === this.#generation(instanceId) && known.runtime === runtime && age >= 0 && age < this.#ttlMs ? known : undefined;
+  }
+
+  /** What the CLI last said, while it still stands; undefined when it has to be asked. */
+  known(instanceId: string, runtime: string): NativeSignIn | undefined {
+    return this.#fresh(instanceId, runtime)?.state;
+  }
+
   /** `runtime` names the executable and version asked, so a switch of runtime is a new question. A failed read is not kept. */
   async state(instanceId: string, runtime: string, read: () => Promise<NativeSignIn>): Promise<NativeSignIn> {
     const generation = this.#generation(instanceId);
-    const known = this.#entries.get(instanceId);
-    if (known && known.generation === generation && known.runtime === runtime && this.#now() - known.at < this.#ttlMs && this.#now() >= known.at) return known.state;
+    const known = this.#fresh(instanceId, runtime);
+    if (known) return known.state;
     const running = this.#reading.get(instanceId);
     if (running && running.generation === generation && running.runtime === runtime) return running.read;
     const current = { generation, runtime, read: read().then((state) => {

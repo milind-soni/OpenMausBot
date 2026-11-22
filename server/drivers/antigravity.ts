@@ -107,10 +107,12 @@ const launched = new Map<string, { version: string | null; nativeCli: boolean }>
 
 const nativeSignIn = new NativeSignInCache();
 
+const nativeRuntimeKey = (runtime: AntigravityRuntime) => `${runtime.executablePath}\0${runtime.version}`;
+
 /** Whether the native CLI accepts a session for this instance, kept for a short while. Throws when the CLI could not say:
  * that is not "signed out". */
 async function nativeSignedIn(instanceId: string, runtime: AntigravityRuntime, profile: AntigravityProfile): Promise<boolean> {
-  return await nativeSignIn.state(instanceId, `${runtime.executablePath}\0${runtime.version}`, async () => {
+  return await nativeSignIn.state(instanceId, nativeRuntimeKey(runtime), async () => {
     const found = await antigravityCliSignIn(runtime, profile);
     if (found === "in") noteAntigravityNativeCredentials(instanceId);
     return found;
@@ -209,7 +211,8 @@ const support: AcpSupport = {
   allowsAlone: (instanceId, turn, toolCall) => launched.get(instanceId)?.nativeCli === true && turn.approvalMode === "edits" && acpFileEditWithin(toolCall, turn.cwd),
   promptOutcome: (instanceId, sessionId) => watchAntigravityPromptOutcome(support.displayName, antigravityProfileDirectory(instanceId), sessionId),
   requireAuthenticationBeforeSpawn: true,
-  // The native CLI is asked, and a failure to ask is thrown: only its own refusal means a sign-in is needed.
+  // Before a native turn only a refusal the CLI gave recently stops it: otherwise the turn's own session/new is the
+  // question, and its refusal ends the turn as a sign-in request.
   isAuthenticated: async (env, config, instanceId) => {
     let runtime: AntigravityRuntime;
     let profile: AntigravityProfile;
@@ -219,7 +222,7 @@ const support: AcpSupport = {
     } catch {
       return false;
     }
-    return runtime.harnessPath === null ? nativeSignedIn(instanceId, runtime, profile) : antigravityProfileAuthenticated(profile);
+    return runtime.harnessPath === null ? nativeSignIn.known(instanceId, nativeRuntimeKey(runtime)) !== "out" : antigravityProfileAuthenticated(profile);
   },
   snapshot: async (env, config, instanceId): Promise<ProviderSnapshot> => {
     try {
