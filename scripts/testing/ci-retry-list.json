@@ -98,6 +98,27 @@
       "owner": "EduardoMoraga",
       "reason": "Failed on PR #3 and PR #13 (https://github.com/EduardoMoraga/edu-bot/actions/runs/44982739184); same commits green on re-run.",
       "since": "2026-11-22"
+    },
+    {
+      "file": "server/checkpoints-perf.test.ts",
+      "test": "incremental shadow index > stops a running collection for a new turn's snapshot, and runs it again behind that turn",
+      "owner": "EduardoMoraga",
+      "reason": "Ubuntu shard 2/8 on PR #16 (twice) and PR #17; green on re-run of the same commits and 3/3 locally.",
+      "since": "2026-11-22"
+    },
+    {
+      "file": "server/browser/cdp/s4-pages.e2e.test.ts",
+      "test": "S4 pages, tabs and page state on real Chrome > opens, lists, fronts and closes tabs; input goes to the tab acted on",
+      "owner": "EduardoMoraga",
+      "reason": "browser driver S4 (windows-latest) on PR #9 and PR #16; same commits green on re-run.",
+      "since": "2026-11-22"
+    },
+    {
+      "file": "server/browser/cdp/s4-pages.e2e.test.ts",
+      "test": "S4 pages, tabs and page state on real Chrome > keeps a popup in the same profile as a new tab, opener intact",
+      "owner": "EduardoMoraga",
+      "reason": "browser driver S4 (windows-latest) on PR #16; failed beside the tab test above; green on re-run.",
+      "since": "2026-11-22"
     }
   ]
 }

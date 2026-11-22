@@ -9,7 +9,7 @@ Hecho = verificado. Cada línea dice cómo se probó.
 | M0 | El repo instala, compila y pasa tests en Linux | Hecho (PR #1, 21-11) |
 | M1 | Nombre Edu Bot, licencias, sin telemetría, sin `enterprise/` | Hecho (PR #3, #4, #5, 21-11) |
 | M2 | Memoria Edu en cada bot, con aprobaciones | Hecho (PR #7, #8, #9, #10, 22-11) |
-| M3 | Organización, áreas y bots en archivos | En curso (exploración) |
+| M3 | Organización, áreas y bots en archivos | Hecho (PR #13 a #17, 22-11) |
 | M4 | Conector SQL, permisos por bot, registro de auditoría | Pendiente |
 | M5 | CI en 3 sistemas, instaladores, README, versión 0.1.0 | Pendiente |
 | M6 | Auditoría final con dos proveedores | Pendiente |
@@ -99,6 +99,42 @@ Plan (exploración de Claude, `~/Projects/edu-bot-wt/reports/claude-m2-scout.md`
 - [x] Prueba final en la app real, aislada: el bot "Edu" tiene su cerebro listo (Edu 6.0.0), lee el cerebro global
   temporal y no toca tu `~/.edu`. Cero errores en logs.
 
+## M3: organización, áreas y bots en archivos
+
+Plan (exploración de Claude, `~/Projects/edu-bot-wt/reports/claude-m3-scout.md`):
+- Una carpeta de archivos (en un repo git) define la organización, las áreas (por ejemplo "BI") y sus bots.
+  Cada bot es un archivo Markdown: arriba sus datos (modelo, herramientas, memoria), abajo sus instrucciones.
+- Dos personas con la misma carpeta tienen los mismos bots. Las llaves y logins nunca van en los archivos:
+  cada persona pone las suyas en su computador.
+- La app lee la carpeta y muestra un plan ("agrega el área BI con 3 bots"). Nada cambia hasta que tú lo apruebas.
+  Lo que da más acceso a un bot siempre pide tu confirmación en la app.
+- Memoria compartida por área: un cerebro Edu por área en tu computador, o uno en edu-cloud para el equipo.
+
+- [x] PR1 (#13, fusionado): formato de la carpeta de perfiles y `edubot profiles check` (revisa sin conectarse).
+  Rechaza llaves escritas en los archivos, rutas de tu computador y caracteres invisibles, con una frase clara
+  que dice archivo y línea. Grok auditó 5 rondas: buscó formas de esconder llaves y rutas. Al final las reglas
+  se hicieron estructurales (sin listas de casos), y dio PASS. CI verde (34).
+- [x] PR2 (#14, fusionado): la app lee la carpeta y arma un plan. Detecta cambios hechos aquí y conflictos,
+  y nada que dé más acceso se aplica sin tu confirmación en la app. Dos personas con la misma carpeta
+  obtienen los mismos bots (prueba real con dos instalaciones separadas).
+  Agy auditó 2 rondas: 9 hallazgos (cambiar un archivo entre el plan y aplicar, rutas de red, un `.git` trampa,
+  bots borrados por error), luego PASS. CI verde.
+- [x] PR3 (#15, fusionado): pantalla Ajustes -> Perfiles. Eliges la carpeta, ves el plan en frases simples
+  ("Agregará", "Cambiará", "Da más acceso"), y aplicas. Dar más acceso pide una segunda confirmación.
+  En los ajustes de cada bot se ve "Viene del perfil bi/analista" y qué llaves faltan ("Falta tu llave").
+  Grok auditó 2 rondas: 7 hallazgos de claridad (una frase decía "borra" cuando el bot se queda), luego PASS.
+  Capturas: `~/Projects/edu-bot-wt/reports/m3-shots/`.
+- [x] PR4 (#16, fusionado): cerebro compartido por área en tu computador, o en edu-cloud para el equipo.
+  Opción `personalBrain: false` para que los bots del área no lean tu `~/.edu`.
+  La llave de edu-cloud nunca llega al motor del bot: Edu Bot hace de intermediario y la agrega él mismo.
+  Agy auditó 3 rondas (fuga de tu `~/.edu`, llave visible para el bot, redirecciones), luego PASS.
+  PR del repo edu-cloud (llave por persona): auditado PASS, abierto para que tú lo fusiones.
+- [x] PR #17 (fusionado): arreglo de seguridad encontrado en la prueba final. Si el motor de un bot no admite
+  el nivel de aprobación del archivo, el bot baja al más restrictivo que sí admite ("Pedir aprobación").
+  Nunca queda con más acceso que su archivo. Grok auditó: PASS.
+- [x] Prueba final en la app real, aislada: aplicó la carpeta de ejemplo (2 áreas, 3 bots). Closer quedó en
+  "Pedir aprobación" y explica por qué. Dar más acceso sin la app de escritorio fue rechazado. Sin errores en logs.
+
 ## M4: SQL, permisos, auditoría y conectores
 
 Pedido nuevo de Eduardo (22-11): en su Mac los conectores no funcionan, porque dependen del servicio
@@ -106,7 +142,7 @@ de MausBot (broker de Composio) que no tenemos. Entra en M4:
 - [ ] Conectores sin el broker de MausBot: usar tu propia llave de Composio (`ak_`), con pasos claros.
   Sin textos que hablen de MausBot Cloud.
 - [ ] Servidores MCP propios como camino principal (Notion, Gmail, servidor de Cheil, edu-cloud),
-  configurables por bot y por área, desde la app y desde los perfiles YAML de M3.
+  configurables por bot y por área, desde la app y desde los perfiles YAML de M3 (primer PR de M4).
 - [ ] Sin llave, la pantalla "Connected apps" explica en simple qué hacer. Nunca rota ni vacía.
 - [ ] Prueba real de punta a punta: un conector MCP y uno por Composio. Auditoría de otro proveedor.
 - [ ] Conector SQL (Postgres, SQLite/DuckDB), solo lectura por defecto, con permisos por bot.
@@ -150,6 +186,10 @@ Fallan a veces y pasan al re-correr. No vienen de nuestros cambios.
 - Vistos 1 vez más (PR #3 a #5): `routine-failure-spacing`, `surface-pins.e2e`, `thread-aware-bots.e2e`,
   `decider-rooms.e2e`, `antigravity-turn-outcome`, `session-credentials.e2e`. Si se repiten, van a la lista.
 Se sumaron a `scripts/testing/ci-retry-list.json`: 2 reintentos solo en CI. Si siguen, hay que arreglarlos.
+- También en la lista (22-11): `post-to-room` (2 veces), `checkpoints-perf` (3 veces) y 2 tests de pestañas de
+  Chrome en Windows (2 veces). Pasan solos en este PC; fallan por carga en CI.
+- Pendiente: recalibrar el reparto de tests entre partes de CI (`update-shard-weights`). Los tests nuevos de
+  M2 y M3 no tienen tiempo registrado y una parte quedó más lenta.
 
 ## Mejoras sugeridas para el repo de Edu
 
@@ -180,8 +220,11 @@ Edu Bot funciona sin ellas, pero serían más seguras. Detalle en `~/Projects/ed
 
 ## Necesito de Eduardo
 
-1. **Nombre en npm (para M5).** El comando se llama `edubot`. Los nombres `edubot` y `edu-bot` están libres en npm.
+1. **Revisar y fusionar el PR de edu-cloud** (cuando esté auditado): https://github.com/EduardoMoraga/edu-cloud/pull/2
+   Agrega una llave por persona, con permiso de "miembro" o "aprobador". Es tu repo privado, por eso no lo fusiono yo.
+   Edu Bot funciona sin él, pero sin él nadie puede aprobar memoria del área desde la app.
+2. **Nombre en npm (para M5).** El comando se llama `edubot`. Los nombres `edubot` y `edu-bot` están libres en npm.
    Para que nadie los tome, conviene reservarlos con tu cuenta de npm. No es urgente.
-2. **Memoria del equipo.** Con 12 GB y 5 agentes, el sistema corta los procesos largos.
+3. **Memoria del equipo.** Con 12 GB y 5 agentes, el sistema corta los procesos largos.
    Opcional: iniciar Claude Code con `CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP=1`,
    o cerrar las otras sesiones de agentes que no uses.
