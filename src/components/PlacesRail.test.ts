@@ -893,3 +893,34 @@ it("two quick clicks: the place still marked can be clicked to stay, so the last
   await click(host.querySelector('[data-rail-place="profile:work"]'));
   expect(workspaces.open.mock.calls).toEqual([["profile:default"], ["profile:work"]]);
 });
+
+it("a server saved by hand: its menu offers Rename, saved by main on this computer only; a Cloud's menu does not", async () => {
+  const rename = vi.fn(async (_id: string, _name: string): Promise<{ outcome: "saved" | "name" | "failed" | "unsupported" }> => ({ outcome: "failed" }));
+  rail = { places: [
+    place("home", "My Cloud", { active: true, paint: { swatch: null } }),
+    place("vps", "ubuntu-lan", { kind: "server", renames: true, removable: true, forget: true, paint: { swatch: null } }),
+  ], add: { cloud: false, link: true, address: false } };
+  Object.assign(window, { ogb: { workspaces: { ...workspaces, rename }, cloudAdd, rail: { expand: vi.fn(async () => {}), onSkin: () => () => {} } } });
+  await mount(createElement(PlacesRail, { chrome: true }));
+  const settle = () => act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+  const menuOf = async (id: string) => {
+    await act(async () => { host.querySelector(`[data-rail-place="${id}"]`)!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })); });
+    return host.querySelector(`[data-rail-menu="${id}"]`)!;
+  };
+  expect((await menuOf("home")).querySelector("[data-rail-rename]"), "a Cloud keeps the name its Admin gives it").toBeNull();
+  await act(async () => { host.querySelector("[data-rail-menu]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  const menu = await menuOf("vps");
+  expect(document.activeElement, "Rename is the first row").toBe(menu.querySelector("[data-rail-rename]"));
+  await click(menu.querySelector("[data-rail-rename]"));
+  const field = menu.querySelector<HTMLInputElement>("[data-rail-rename-form] input")!;
+  expect(field.value, "starts from the name it has").toBe("ubuntu-lan");
+  await type(field, " 家里的服务器 ");
+  await submit(menu.querySelector("[data-rail-rename-form]"));
+  await settle();
+  expect(menu.querySelector("[data-rail-rename-form] [role='alert']")?.textContent).toBe("That didn't work. Try again in a moment.");
+  rename.mockResolvedValueOnce({ outcome: "saved" });
+  await submit(menu.querySelector("[data-rail-rename-form]"));
+  await settle();
+  expect(rename.mock.calls, "by the circle's own id, which main listed").toEqual([["vps", "家里的服务器"], ["vps", "家里的服务器"]]);
+  expect(host.querySelector("[data-rail-menu]"), "saved: the menu closes").toBeNull();
+});

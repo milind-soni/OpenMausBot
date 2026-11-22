@@ -137,13 +137,23 @@ export function createActingPeople(deps: ActingPeopleDeps) {
     const handed = request.origin?.kind === "user" ? request.origin.person : undefined;
     return handed && onlyTheirs(thread, handed, 0) ? handed : null;
   };
+  /** This one-on-one turn began with a line that names no sender (the desktop app's own window), and nobody's words
+   * joined it since: no named person's line, no line sent in by someone the server can't name, no card answer. */
+  const unnamedAlone = (threadId: string, generation: string): boolean => {
+    const request = deps.direct(threadId);
+    if (deps.store.groupByThread(threadId) || !request?.messageId || request.stopped || !request.generations.has(generation) || request.automation !== undefined) return false;
+    const thread = deps.store.messagesFor(threadId);
+    const line = thread.find((message) => message.id === request.messageId);
+    return Boolean(line && line.role === "user" && !line.peerAsk && !line.sender?.id && !line.steered && !line.relayed && onlyTheirs(thread, "", line.at));
+  };
   return {
     requester,
     /** Work this turn hands on now acts for whoever this turn acts for; the first hand-on of a turn that started its
      * work is kept for that turn too, so it still acts for them if a restart runs it again. `lends`: this turn could use
-     * the person's lent computer (cloud-lending-turns handsOnLending). */
-    handOn(turn: { threadId: string; generation: string }, work: { id: string; rootId: string }, lends = false): void {
-      const person = requester(turn.threadId, turn.generation);
+     * the person's lent computer (cloud-lending-turns handsOnLending). `lender`: whom work that `lends` acts for when the
+     * turn began with an unnamed line (the desktop app's own window on a server of one person's own) nobody else joined. */
+    handOn(turn: { threadId: string; generation: string }, work: { id: string; rootId: string }, lends = false, lender?: string): void {
+      const person = requester(turn.threadId, turn.generation) ?? (lends && lender && unnamedAlone(turn.threadId, turn.generation) ? lender : null);
       deps.handed.record(work.id, person, lends);
       if (work.rootId === turn.generation) deps.handed.record(work.rootId, person, lends);
     },

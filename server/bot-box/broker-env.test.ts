@@ -42,4 +42,19 @@ describe("the broker's rewrite of a spawn's environment", () => {
     expect(usableUpstream(undefined, "https://d")).toBe("https://d");
     expect(BROKERED_PROVIDERS.map((provider) => provider.name)).toEqual(["anthropic", "anthropic-token", "openai", "gemini", "google"]);
   });
+
+  it("two keys behind one base URL share one grant with both headers, and neither stays raw in the box", () => {
+    // A Claude endpoint for a non-Anthropic address sets both; Ollama answers only the bearer.
+    const { env, grants } = brokerRewrite({
+      ANTHROPIC_API_KEY: "ol-real", ANTHROPIC_AUTH_TOKEN: "ol-real", ANTHROPIC_BASE_URL: "https://ollama.com",
+      GEMINI_API_KEY: "gm-real", GOOGLE_API_KEY: "gg-real",
+    }, token, 3);
+    expect(grants.anthropic).toEqual({ upstream: "https://ollama.com", headers: { "x-api-key": "ol-real", authorization: "Bearer ol-real" } });
+    expect(grants.gemini).toEqual({ upstream: "https://generativelanguage.googleapis.com", headers: { "x-goog-api-key": "gm-real" } });
+    expect(Object.keys(grants).sort()).toEqual(["anthropic", "gemini"]);
+    expect(env).toEqual({
+      ANTHROPIC_API_KEY: token, ANTHROPIC_AUTH_TOKEN: token, ANTHROPIC_BASE_URL: `http://127.0.0.1:3/b/${token}/anthropic`,
+      GEMINI_API_KEY: token, GOOGLE_API_KEY: token, GOOGLE_GEMINI_BASE_URL: `http://127.0.0.1:3/b/${token}/gemini`,
+    });
+  });
 });

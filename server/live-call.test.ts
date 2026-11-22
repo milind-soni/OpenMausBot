@@ -404,4 +404,26 @@ describe("spokenHangUp", () => {
   it("tells the voice to delegate a hang-up request and never to end a call on its own", () => {
     expect(liveInstructions({ name: "Rigel" })).toContain("- The user clearly asks you to hang up or end the call. Never end or offer to end the call on your own.");
   });
+
+  it("accepts a whole Chinese request to hang up, including polite requests and farewells", () => {
+    for (const text of [
+      "挂断", "挂断。", "挂掉", "挂了", "挂了吧", "挂机", "挂吧", "挂电话", "挂断电话", "挂掉电话", "把电话挂了", "把电话挂断",
+      "结束通话", "结束这次通话", "结束本次通话", "请挂断", "请挂断电话。", "麻烦挂断", "你可以挂断了", "可以挂了", "你挂吧", "帮我挂断",
+      "就挂了吧", "好的，挂断吧", "嗯，可以挂了", "那就这样，挂断吧", "没事了，挂了吧", "谢谢，结束通话", "OK，挂断吧", "挂断吧，谢谢",
+      "结束通话，再见", "挂了，拜拜", "好的，结束通话吧，再见。", "掛斷", "掛掉", "掛了吧", "掛電話", "把電話掛了", "結束通話",
+      "請掛斷電話", "好的，掛斷吧，謝謝", "沒事了，結束通話，再見", "嗯嗯Okay那就這樣麻煩您幫我把電話掛掉了、謝謝！", "掛機", "結束這次通話",
+    ]) {
+      expect.soft(spokenHangUp(text), text).toBe(true);
+    }
+  });
+
+  it("ignores Chinese farewells, negations, questions and mentions of hanging up", () => {
+    for (const text of [
+      "再见", "拜拜", "谢谢", "好的", "就这样", "没事了", "挂", "不要挂断", "别挂", "先别挂断", "请不要结束通话", "不，挂断",
+      "怎么挂断电话？", "可以挂断吗？", "要挂断吗", "我该挂断吗", "挂断那个任务", "把电话挂在墙上", "结束通话记录的整理",
+      "查完天气就挂断", "结束它", "帮我查一下怎么结束通话", "挂断？", "掛斷?", "再見，謝謝",
+    ]) {
+      expect(spokenHangUp(text), text).toBe(false);
+    }
+  });
 });

@@ -6,6 +6,7 @@ import { isBotLimitRefusal, isBotPausedRefusal, showBotLimit } from "../lib/bot-
 import { noteRefusedRequest } from "../lib/session-ended";
 import { forgetSharedSession } from "../lib/session-reuse";
 import { serverErrorText } from "../lib/server-error";
+import { serverFetch } from "../lib/relay-server";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -39,7 +40,7 @@ export async function api<T = any>(path: string, init?: ApiInit): Promise<T> {
   // answer from before it is served again.
   const writes = (rest.method ?? "GET").toUpperCase() !== "GET";
   if (writes) forgetSharedSession();
-  const res = await fetch(path, {
+  const res = await serverFetch(path, {
     ...rest,
     headers: sent,
     signal: timeoutMs === undefined

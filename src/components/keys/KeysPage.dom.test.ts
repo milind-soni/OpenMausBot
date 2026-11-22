@@ -553,4 +553,37 @@ describe("Self-hosted VPS alias", () => {
     expect(text).toContain("Any Linux machine with Docker that you reach over SSH works");
     expect(text).toContain("Tailscale name as the alias's HostName");
   });
+
+  it("adds and removes named servers as one list, leaving the default alias alone", async () => {
+    const { VpsConnection } = await import("./KeyPanels");
+    setConfig({ ...fx.config, vps: { configured: true, sshAlias: "production-vps", servers: [{ name: "Office", sshAlias: "office-vps" }] } });
+    fx.api.mockImplementation(async (_path: string, init: RequestInit) => {
+      const { vpsServers } = JSON.parse(init.body as string);
+      return { ...fx.config, vps: { configured: true, sshAlias: "production-vps", servers: vpsServers } };
+    });
+    render(() => createElement(VpsConnection, { key: "vps" }));
+    const list = () => [...host.querySelectorAll<HTMLElement>("[data-vps-server]")].map((element) => element.dataset.vpsServer);
+    expect(list()).toEqual(["office-vps"]);
+    type(host.querySelector<HTMLInputElement>('input[aria-label="Server name"]')!, " Home lab ");
+    type(host.querySelector<HTMLInputElement>('input[aria-label="Server SSH config alias"]')!, "home-lab");
+    await answered(() => [...host.querySelectorAll("button")].find((button) => button.textContent === "Add")!.click());
+    expect(fx.api).toHaveBeenLastCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ vpsServers: [{ name: "Office", sshAlias: "office-vps" }, { name: "Home lab", sshAlias: "home-lab" }] }) });
+    expect(list()).toEqual(["office-vps", "home-lab"]);
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Server name"]')!.value).toBe("");
+    await answered(() => host.querySelector<HTMLButtonElement>('button[aria-label="Remove Office"]')!.click());
+    expect(fx.api).toHaveBeenLastCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ vpsServers: [{ name: "Home lab", sshAlias: "home-lab" }] }) });
+    expect(list()).toEqual(["home-lab"]);
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Self-hosted VPS SSH config alias"]')!.value).toBe("production-vps");
+  });
+
+  it("shows why a named server was refused and keeps what was typed", async () => {
+    const { VpsConnection } = await import("./KeyPanels");
+    fx.api.mockRejectedValue(new Error("vpsServers: each server needs its own SSH alias"));
+    render(() => createElement(VpsConnection, { key: "vps" }));
+    type(host.querySelector<HTMLInputElement>('input[aria-label="Server name"]')!, "Lab");
+    type(host.querySelector<HTMLInputElement>('input[aria-label="Server SSH config alias"]')!, "lab");
+    await answered(() => [...host.querySelectorAll("button")].find((button) => button.textContent === "Add")!.click());
+    expect(host.querySelector("[data-vps-servers] [role=alert]")!.textContent).toContain("own SSH alias");
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Server name"]')!.value).toBe("Lab");
+  });
 });

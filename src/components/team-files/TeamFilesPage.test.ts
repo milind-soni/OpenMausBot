@@ -15,7 +15,7 @@ class FakeApiError extends Error {
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: fixture.state, dispatch: fixture.dispatch }) }));
 vi.mock("@/state/api", () => ({ api: fixture.api, ApiError: FakeApiError }));
 
-const { TeamFilesPage, changedLine, formatSize, refusalText } = await import("./TeamFilesPage");
+const { TeamFilesPage, changedLine, formatSize, refusalText, uploadFile } = await import("./TeamFilesPage");
 
 const NOW = Date.parse("2026-11-17T12:00:00Z");
 const GB = 1024 ** 3;
@@ -139,5 +139,14 @@ describe("its words", () => {
     expect(refusalText(new FakeApiError("x", 413, { code: "too_large" }), limits)).toBe("A file may be at most 100 MB.");
     expect(refusalText(new FakeApiError("x", 403, { code: "forbidden" }), limits)).toBe("Only an admin, or whoever uploaded it, can do that.");
     expect(refusalText(new Error("offline"), limits)).toBe("That didn't work. Try again.");
+  });
+
+  it("refuses a file over the upload limit before sending it, with the server's too-large words", async () => {
+    const send = vi.spyOn(globalThis, "fetch");
+    const big = new File(["x".repeat(11)], "big.bin");
+    const refused = await uploadFile("", big, 10).catch((error: unknown) => error);
+    expect(send).not.toHaveBeenCalled();
+    expect(refusalText(refused, { uploadMax: 10 * 1024 ** 2, cap: 5 * GB })).toBe("A file may be at most 10 MB.");
+    send.mockRestore();
   });
 });

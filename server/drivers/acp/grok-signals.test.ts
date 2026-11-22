@@ -10,10 +10,13 @@ import { ensureDirs } from "../../config.ts";
 import type { ProviderInstance, RuntimeEvent } from "../../contracts.ts";
 import { processBudget } from "../../process-room.ts";
 import { outOfProcesses } from "../../process-shortage.ts";
+import { classifyRoutineFailure } from "../../routine-recovery.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { recordEvents } from "../../testing/events.ts";
 import { CustomAcpDriver } from "./custom.ts";
+import { AcpReportedFailure, acpRuntimeFailure } from "./failure-words.ts";
 import { GrokAgentDriver } from "./grok.ts";
+import { grokReportedFailure } from "./grok-signals.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "../../testing/fake-acp-cli.ts");
 const TOKIO = "grok: failed to start tokio runtime: blocking pool pre-warm stalled after 14 of 16 threads";
@@ -170,5 +173,26 @@ describe("a Grok that could not start its threads", () => {
     const [error] = of(await ask(), "runtime.error");
     expect(processBudget.counts().spawnFailed.EAGAIN).toBe(before);
     expect(error!.message).toContain("unexpected key");
+  });
+});
+
+describe("Grok's sign-in check failing for a moment", () => {
+  // grok 1.0.41's words, as a session/prompt error on a Cloud whose Grok stayed signed in.
+  const BLIP = "Internal error: Unauthorized (401) from https://cli-chat-proxy.grok.com/v1/responses: Authentication required\n\n"
+    + "  Model:     grok-4.6\n  Auth:      Oidc\n  Version:   1.0.41\n  Available: grok-4.6, grok-4.5\n\n"
+    + "Authentication is temporarily unavailable (often a network blip right after wake). Your session is still signed in and will "
+    + "recover automatically — retry in a few seconds; no need to run /login. (session/prompt)";
+
+  it("is a passing failure a routine run retries, never a sign-out", () => {
+    expect(classifyRoutineFailure(BLIP)).toMatchObject({ kind: "owner", cause: "signed_out" });
+    const reported = grokReportedFailure(Object.assign(new Error(BLIP), { code: -32603 }));
+    expect(reported).toBeInstanceOf(AcpReportedFailure);
+    expect(acpRuntimeFailure(reported, "Grok").message).toBe(
+      "Grok couldn't confirm its sign-in for a moment (often a network error right after waking). It is still signed in: try again in a few seconds.");
+    expect(classifyRoutineFailure(reported!.message)).toMatchObject({ kind: "retry" });
+  });
+
+  it("leaves a real sign-out as it was", () => {
+    expect(grokReportedFailure(Object.assign(new Error("Internal error: Unauthorized (401): Authentication required. Run grok login."), { code: -32603 }))).toBeUndefined();
   });
 });

@@ -116,7 +116,7 @@ export interface BotLinkDeps {
   model?(bot: LocalBot): string | undefined;
   level(bot: LocalBot): Level;
   /** Opens the thread another place's work runs in, and returns its id. */
-  openThread(bot: LocalBot, title: string, opener: { botId: string; name: string; threadId: string }): string | undefined;
+  openThread(bot: LocalBot, title: string, opener: { botId: string; name: string; threadId: string }, brief: string): string | undefined;
   hasThread(botId: string, threadId: string): boolean;
   personName(threadId: string): string | undefined;
   /** "Sent to …" in the requester's conversation. */
@@ -470,7 +470,7 @@ export function createBotLink(deps: BotLinkDeps) {
       const key = `${peer}:${frame.thread}`;
       let threadId = state.threads[key]?.threadId;
       if (!threadId || !deps.hasThread(bot.id, threadId)) {
-        const opened = deps.openThread(bot, `@${frame.from.name} · work`, { botId: address.botId, name: frame.from.name, threadId: address.threadId });
+        const opened = deps.openThread(bot, `@${frame.from.name} · work`, { botId: address.botId, name: frame.from.name, threadId: address.threadId }, frame.text);
         if (!opened) throw new Error("That bot is no longer here.");
         threadId = opened;
       }

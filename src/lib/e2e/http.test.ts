@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { fromB64u, utf8 } from "./bytes.ts";
 import { credentialHash, keyId, psk } from "./credentials.ts";
@@ -46,8 +46,10 @@ function fakeStream(reply: (string | Uint8Array)[], { endAfter = true } = {}) {
   const state = { ended: false, reset: false, written };
   const parts = reply.map((part) => (typeof part === "string" ? utf8(part) : part));
   let source!: ReadableStreamDefaultController<Uint8Array>;
+  let fin!: () => void;
   const stream: E2EStream = {
     id: 1,
+    ended: new Promise<void>((resolve) => (fin = resolve)),
     readable: new ReadableStream<Uint8Array>({
       start(controller) {
         source = controller;
@@ -75,6 +77,8 @@ function fakeStream(reply: (string | Uint8Array)[], { endAfter = true } = {}) {
     state,
     /** Ends the reply now, for a fake made with endAfter false. */
     finish: () => source.close(),
+    /** The computer's FIN arriving, whether or not the reply has been read. */
+    fin: () => fin(),
     sent: () => new TextDecoder().decode(Uint8Array.from(written.flatMap((part) => [...part]))) };
 }
 
@@ -135,6 +139,14 @@ describe("streamFetch over a real session (interop computer)", () => {
     await expect(pending).rejects.toThrow("left the page");
     expect((await fetchOver({ path: "/api/health" })).status).toBe(200);
   });
+
+  it("frees the stream of every reply nobody reads, so 100 of them do not use up the session's 64", async () => {
+    for (let i = 0; i < 100; i++) {
+      // Each reply's head is in; its body (a chunked echo) is left unread, as a caller that only checks the status does.
+      expect((await fetchOver({ method: "POST", path: "/echo", body: `read ${i}` })).status).toBe(200);
+    }
+    expect(await (await fetchOver({ method: "POST", path: "/echo", body: "last" })).text()).toBe("last");
+  });
 });
 
 describe("streamFetch framing (fake computer)", () => {
@@ -145,6 +157,15 @@ describe("streamFetch framing (fake computer)", () => {
     expect(fake.state.ended).toBe(false);
     expect(await res.text()).toBe("hi");
     expect(fake.state.ended).toBe(true);
+    expect(fake.state.reset).toBe(false);
+  });
+
+  it("ends the request side once the computer's FIN is in, though nobody reads the reply", async () => {
+    const fake = fakeStream(["HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi"]);
+    await streamFetch(fake.open, { method: "POST", path: "/api/bots/b/read", body: "{}" });
+    expect(fake.state.ended).toBe(false);
+    fake.fin();
+    await vi.waitFor(() => expect(fake.state.ended).toBe(true));
     expect(fake.state.reset).toBe(false);
   });
 

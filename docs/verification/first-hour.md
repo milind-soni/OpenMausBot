@@ -52,8 +52,10 @@ pnpm exec vitest run server/host/first-hour.test.ts server/host/brief-morning.te
   decline carries on to the phone with no brief line; a first look that could
   not run says so; the first look's three-draft fence; the push to a phone
   paired after the first look; the day-two recap ("So far I've sorted 40
-  emails, drafted 6 replies and prepped 4 meetings: about 2 hours back.") only
-  after 8:00 on day two, once, and never when nothing was done.
+  emails for your morning brief, drafted 6 replies and prepped 4 meetings:
+  about 2 hours back.") only after 8:00 on day two, once, and never when
+  nothing was done; with emails sorted, it replies to the newest brief card in
+  the same chat, so one tap opens that brief.
 - `server/host/brief-morning.test.ts`: the brief posted and pushed at 8:00 in the person's
   zone and not a minute before, once a day; its first line from the counts since
   the person was last here, left out when they just were; a running watch run
