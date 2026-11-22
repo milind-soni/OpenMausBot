@@ -1,5 +1,7 @@
 // /setup coaching rewrites only this turn's text and adds a prompt block; it grants no authority (the services still check the caller).
 
+import type { ConnectorSetup } from "./composio.ts";
+
 const SETUP_COMMAND = /^\/setup(?:\s+|$)([\s\S]*)$/i;
 
 export function parseSetupCommand(text: string): { request: string } | null {
@@ -33,27 +35,27 @@ function folderClause(cwd: string | undefined): string {
 export type SetupConnectedApps =
   | { state: "available" }
   | { state: "off"; noTools: boolean }
-  | { state: "not-configured"; host: "server" | "desktop" | "cloud" }
+  | { state: "needs-key" }
+  | { state: "not-answering"; ownKey: boolean }
   | { state: "unsupported" };
 
 export function connectedAppsForSetup(input: {
   mounted: boolean;
   engine: boolean;
-  configured: boolean;
+  setup: ConnectorSetup;
   enabled: boolean;
   grants: Record<string, unknown> | undefined;
-  host: "server" | "desktop" | "cloud";
 }): SetupConnectedApps {
   const noTools = input.grants !== undefined && Object.keys(input.grants).length === 0;
   if (input.mounted && !noTools) return { state: "available" };
   if (!input.engine) return { state: "unsupported" };
-  if (!input.configured) return { state: "not-configured", host: input.host };
+  if (input.setup === "needs-setup") return { state: "needs-key" };
   if (!input.enabled || noTools) return { state: "off", noTools };
-  return { state: "not-configured", host: input.host };
+  return { state: "not-answering", ownKey: input.setup === "ready" };
 }
 
 const NO_APP = "so you cannot connect an app such as Gmail yourself. If the job needs one,";
-const KEY_PLACE = "Composio project key in Settings → AI → Other services, under Self-host connected apps";
+const KEY_PLACE = "Composio project key in Settings → AI → Other services → Apps and tools";
 
 function connectedAppsClause(apps: SetupConnectedApps): string {
   switch (apps.state) {
@@ -63,10 +65,10 @@ function connectedAppsClause(apps: SetupConnectedApps): string {
       return apps.noTools
         ? ` You have no connected-app tools, ${NO_APP} ask the user to open your settings → Access → Connected apps, turn it on, connect the app with Connect an app…, and give you its tools.`
         : ` Connected apps are switched off for you, ${NO_APP} ask the user to turn on Connected apps in your settings under Access, then tell you to go on; you can start the connection after that.`;
-    case "not-configured":
-      if (apps.host === "cloud") return ` Connected apps come with their MausBot Cloud plan but are not answering right now, ${NO_APP} say so in one sentence and suggest trying again in a few minutes.`;
-      if (apps.host === "desktop") return ` Connected apps are not answering right now, ${NO_APP} say so in one sentence: restarting OpenMausBot usually brings them back, or they can add their own ${KEY_PLACE}.`;
-      return ` Connected apps are not set up here, ${NO_APP} say so in one sentence: they are set up by adding a ${KEY_PLACE}.`;
+    case "needs-key":
+      return ` Connected apps need the person's own Composio project key, and none is saved here, ${NO_APP} say so in one sentence: they add a ${KEY_PLACE}.`;
+    case "not-answering":
+      return ` Connected apps are not answering right now, ${NO_APP} say so in one sentence: try again in a few minutes, or ${apps.ownKey ? "check the" : "add their own"} ${KEY_PLACE}.`;
     case "unsupported":
       return ` Your current model cannot use connected apps, ${NO_APP} say so in one sentence.`;
   }

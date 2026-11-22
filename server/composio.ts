@@ -5,7 +5,6 @@ import { ACCOUNT_ID, inventoryAccountSchema, toolkitInventoryPageSchema, toolkit
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { managedConnectorUnavailableReason, managedCustomAuthReason } from "../shared/connector-availability.ts";
 import {
-  DEFAULT_BACKEND_ORIGIN,
   apiBase,
   canonicalToolkitSlug,
   deleteConnectedAccount,
@@ -41,8 +40,9 @@ import { catalogFor, type CatalogPagination, type ToolkitCard } from "./composio
 import { forgetInventory, inventoryDiffers, sharedInventory } from "./composio-inventory-cache.ts";
 export { onCatalogChange, rememberCatalogIn, toolkitCategories, type CatalogPagination, type CatalogStopReason, type ToolkitCard } from "./composio-catalog.ts";
 
+/** The project key goes only to the backend OMB_COMPOSIO_API names: with it set, the toolkit listing is asked there too. */
 function toolkitBase() {
-  return (process.env.OMB_COMPOSIO_TOOLKITS_API ?? `${DEFAULT_BACKEND_ORIGIN}/api/v3`).replace(/\/$/, "");
+  return (process.env.OMB_COMPOSIO_TOOLKITS_API ?? apiBase().replace(/\/v3\.1$/, "/v3")).replace(/\/$/, "");
 }
 
 export interface ConnectedAccountSummary {

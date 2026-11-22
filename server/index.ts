@@ -2411,10 +2411,9 @@ function setupConnectedApps(bot: Pick<BotRecord, "composio" | "connectorTools">,
   return connectedAppsForSetup({
     mounted,
     engine,
-    configured: composio.configured(cfg),
+    setup: composio.connectorSetup(cfg, DESKTOP_MANAGED || CLOUD_HOME !== null),
     enabled: bot.composio !== false,
     grants: bot.connectorTools,
-    host: CLOUD_HOME ? "cloud" : DESKTOP_MANAGED ? "desktop" : "server",
   });
 }
 

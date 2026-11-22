@@ -83,6 +83,8 @@ const PENDING_WORDS: readonly Word[] = [
   { word: "lent", pattern: /\b(?:lent|lends?|lending)\b/i, say: "shared, or let … use" },
 ];
 
+const OWN_COMPOSIO_KEY = "the own-key path: the person makes a Composio project and pastes its key in the field named Composio project key";
+
 const ALLOWED: Record<string, string> = {
   "grokMove.connect.where": "names the Server URL field of Grok Bot's own form, where the link is pasted",
   "sidebar.servers": "the switcher's own Servers list, renamed with the one-workspace switcher",
@@ -94,6 +96,15 @@ const ALLOWED: Record<string, string> = {
   "chat.notice.modelServerStoppedAnswering": "the person's model server at a named host, not the app's internal server",
   "rail.local": "the owner's own name for the ＋ choice that adds a workspace of this computer's own",
   "rail.localNumbered": "a new workspace's first name, which the person may change, in the owner's word for it",
+  "connectors.setupNeeded": OWN_COMPOSIO_KEY,
+  "connectors.setupNeededRemote": OWN_COMPOSIO_KEY,
+  "connectors.notConfigured": OWN_COMPOSIO_KEY,
+  "connectors.setup.step1": OWN_COMPOSIO_KEY,
+  "connectors.setup.openComposio": OWN_COMPOSIO_KEY,
+  "connectors.setup.step2": OWN_COMPOSIO_KEY,
+  "connectors.selfHostOnlyReason": OWN_COMPOSIO_KEY,
+  "connectors.tile.needsKey": OWN_COMPOSIO_KEY,
+  "connectors.empty.noKeyDesc": OWN_COMPOSIO_KEY,
 };
 
 const prefixes = Object.values(EVERYDAY_PREFIXES).flat();

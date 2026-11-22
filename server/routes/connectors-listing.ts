@@ -7,7 +7,7 @@ import { PASS, type RouteHandler } from "./table.ts";
 export interface ConnectorListingDeps {
   cfg(): AppConfig;
   composio: Pick<typeof Composio, "listToolkits" | "configured" | "connectionMode" | "connectorSetup" | "connectorAvailability" | "sharedConnectedInventory">;
-  /** The desktop app or a Cloud home: a host the managed service comes with. */
+  /** The desktop app or a Cloud home: a host where a connection service named by OMB_COMPOSIO_BROKER_URL counts as an outage when it is down. */
   managedHost: boolean;
 }
 

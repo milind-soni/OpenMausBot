@@ -239,24 +239,24 @@ const reasonOf = (error: unknown) => (error instanceof Error ? error.message : S
 
 /** What the bot is told when a file it named may not be sent. */
 export function unreadableFileText(reference: Pick<FileReference, "tool" | "field" | "path">, app: string, reason: string): string {
-  return `OpenMausBot did not run ${reference.tool}: it could not send ${reference.path} to ${app} (${reason}). `
+  return `Edu Bot did not run ${reference.tool}: it could not send ${reference.path} to ${app} (${reason}). `
     + `Nothing was written to ${app}. Give ${reference.field || "the file field"} the full path of a file in your working folder or one `
-    + "attached to this conversation, and OpenMausBot uploads it for the call. For plain text, a tool that takes the text itself, "
+    + "attached to this conversation, and Edu Bot uploads it for the call. For plain text, a tool that takes the text itself, "
     + "such as GOOGLEDRIVE_CREATE_FILE_FROM_TEXT, needs no file.";
 }
 
 /** What the bot is told when the file was read but Composio did not take it. */
 export function uploadFailedText(reference: Pick<FileReference, "tool">, name: string, app: string, reason: string): string {
-  return `OpenMausBot did not run ${reference.tool}: uploading ${name} for ${app} failed (${reason}). Nothing was written to ${app}. `
+  return `Edu Bot did not run ${reference.tool}: uploading ${name} for ${app} failed (${reason}). Nothing was written to ${app}. `
     + "This is usually brief: try the call once more. If it fails again, tell the person the upload to "
     + `${app} failed and why, and do not keep retrying.`;
 }
 
 /** What the bot is told when the connected-apps service is too old to take the file. */
 function uploadServiceOutdatedText(reference: Pick<FileReference, "tool">, name: string, app: string): string {
-  return `OpenMausBot did not run ${reference.tool}: uploading ${name} for ${app} failed: the connected-apps service is out of date `
+  return `Edu Bot did not run ${reference.tool}: uploading ${name} for ${app} failed: the connected-apps service is out of date `
     + `and does not take file uploads yet. Nothing was written to ${app}. Trying again will not help: tell the person that sending `
-    + `files to ${app} works once the OpenMausBot team updates that service. A ${app} tool that takes text instead of a file still works.`;
+    + `files to ${app} works once that service is updated. A ${app} tool that takes text instead of a file still works.`;
 }
 
 export interface PreparedFiles {
@@ -286,7 +286,7 @@ export async function prepareConnectorFiles(frame: unknown, deps: FileStagingDep
     }
     if (!file) continue;
     if (ready.length === MAX_FILES_PER_REQUEST) {
-      return { refusal: `OpenMausBot did not run this call: it names more than ${MAX_FILES_PER_REQUEST} files, and one call can upload at most ${MAX_FILES_PER_REQUEST}. Send them in smaller batches.` };
+      return { refusal: `Edu Bot did not run this call: it names more than ${MAX_FILES_PER_REQUEST} files, and one call can upload at most ${MAX_FILES_PER_REQUEST}. Send them in smaller batches.` };
     }
     ready.push({ reference, file, name: reference.name ?? file.name, mimetype: reference.mimetype ?? file.mime.split(";")[0]!.trim() });
   }
@@ -332,10 +332,10 @@ export async function stageConnectorFiles(frame: unknown, deps: FileStagingDeps)
 const MISSING_STAGED_FILE = /Failed to download file|storage returned HTTP 404|invalid s3key|s3key (?:was )?not found/i;
 
 export function missingFileHint(): string {
-  return "OpenMausBot note: Composio could not get the file this call named. Composio runs the tool on its own servers, so it "
+  return "Edu Bot note: Composio could not get the file this call named. Composio runs the tool on its own servers, so it "
     + "never reads this computer's disk and an s3key cannot be made up. Give the file field the full path of a file in your "
     + 'working folder or attached to this conversation, for example {"file_to_upload": "C:\\\\Users\\\\you\\\\report.pdf"} '
-    + "or a path starting with /, and OpenMausBot uploads it for the call. For plain text, use a tool that takes the text itself, "
+    + "or a path starting with /, and Edu Bot uploads it for the call. For plain text, use a tool that takes the text itself, "
     + "such as GOOGLEDRIVE_CREATE_FILE_FROM_TEXT.";
 }
 

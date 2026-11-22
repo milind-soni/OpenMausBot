@@ -1,6 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { AppConfig } from "../config.ts";
+import { configured, connectionMode, connectorAvailability, connectorSetup, setManagedBrokerAccess } from "../composio.ts";
 import { createConnectorListingRoutes, type ConnectorListingDeps } from "./connectors-listing.ts";
 import { PASS, type RouteContext } from "./table.ts";
 
@@ -55,5 +57,42 @@ describe("the Apps page's listing routes", () => {
     for (const [method, path] of [["POST", "/api/connectors/catalog"], ["GET", "/api/connectors"], ["GET", "/api/connectors/tools"], ["GET", "/api/connectors/suggestions"], ["DELETE", "/api/connectors/connected"]] as const) {
       expect((await call(method, path)).out).toBe(PASS);
     }
+  });
+});
+
+describe("the Apps page's setup state on a desktop with no MausBot service", () => {
+  const listToolkits = vi.fn(async () => ({ cards: [], source: "curated" as const, fresh: false }));
+  const real = { listToolkits, configured, connectionMode, connectorSetup, connectorAvailability, sharedConnectedInventory: vi.fn() };
+  const catalog = async (cfg: AppConfig) => {
+    const json = vi.fn();
+    const route = createConnectorListingRoutes({ cfg: () => cfg, composio: real, managedHost: true });
+    await route({ req: { headers: {} } as IncomingMessage, res: {} as ServerResponse, path: "/api/connectors/catalog", method: "GET", json } as unknown as RouteContext);
+    const [, , body] = json.mock.calls[0] as [unknown, number, Record<string, unknown>];
+    return { configured: body.configured, mode: body.mode, setup: body.setup };
+  };
+  const clearEnvironment = () => {
+    for (const name of ["OMB_COMPOSIO_BROKER_URL", "OMB_COMPOSIO_BROKER_TOKEN", "OMB_COMPOSIO_BROKER", "COMPOSIO_API_KEY"]) vi.stubEnv(name, "");
+    setManagedBrokerAccess(null);
+  };
+  afterEach(() => {
+    setManagedBrokerAccess(null);
+    vi.unstubAllEnvs();
+  });
+
+  it("asks for the person's own Composio key when nothing is set", async () => {
+    clearEnvironment();
+    expect(await catalog({})).toEqual({ configured: false, mode: "unavailable", setup: "needs-setup" });
+  });
+
+  it("works with the person's own project key and no service", async () => {
+    clearEnvironment();
+    expect(await catalog({ composio: { apiKey: "ak_fixture_project" } })).toEqual({ configured: true, mode: "self-hosted", setup: "ready" });
+  });
+
+  it("reports an outage only for a service the person named and that is not answering", async () => {
+    clearEnvironment();
+    vi.stubEnv("OMB_COMPOSIO_BROKER_URL", "https://broker.example.test");
+    expect(await catalog({})).toEqual({ configured: false, mode: "unavailable", setup: "service-unavailable" });
+    expect(await catalog({ composio: { apiKey: "ak_fixture_project" } })).toEqual({ configured: true, mode: "self-hosted", setup: "ready" });
   });
 });

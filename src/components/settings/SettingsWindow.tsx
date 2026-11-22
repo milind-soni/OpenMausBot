@@ -15,7 +15,7 @@ import { SettingsLook } from "../SettingsPrimitives";
 import { SettingsPageBody } from "./pages/SettingsPageBody";
 import { useSwitchToComputer } from "./inert";
 import { KEY_CATALOG, keyHidden, keyMatches, type KeyEntry } from "../keys/key-catalog";
-import { openKeySettings } from "../keys/key-focus";
+import { keyFocusPending, openKeySettings } from "../keys/key-focus";
 import { useSettingsContext, useSettingsPlace } from "./settings-context";
 import { needsAdvanced, pageById, resolveSettingsTarget, searchSettings, visiblePages, type SearchHit, type SettingsPageId } from "./settings-index";
 import { SettingsShellContext, type SettingsShell } from "./settings-shell";
@@ -67,6 +67,7 @@ export function SettingsWindow() {
 
   useEffect(() => { setAnchor(target.anchor ?? null); setNarrowPage((open) => open || section !== "overview"); }, [section, target.anchor]);
   useEffect(() => {
+    if (keyFocusPending()) return;
     const frame = window.requestAnimationFrame(() => {
       if (anchor) revealAnchor(scrollRef.current, anchor);
       else if (scrollRef.current) scrollRef.current.scrollTop = 0;

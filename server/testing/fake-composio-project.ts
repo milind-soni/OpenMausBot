@@ -1,6 +1,6 @@
 // A loopback stand-in for a team's own Composio project, as OMB_COMPOSIO_API names it: Tool Router Sessions, connect
-// links, connected accounts and each Session's MCP endpoint, kept per Composio user. Every request is recorded with the
-// user it was made for, so a test can say whose connection a call used. Nothing leaves the machine.
+// links, connected accounts, the toolkit listing and each Session's MCP endpoint, kept per Composio user. Every request
+// is recorded with the user it was made for, so a test can say whose connection a call used. Nothing leaves the machine.
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -25,6 +25,12 @@ export interface FakeComposioProject {
   down: boolean;
   close(): Promise<void>;
 }
+
+const FAKE_TOOLKITS = [
+  { slug: "gmail", name: "Gmail", meta: { description: "Email", logo: null, categories: [{ id: "email", name: "Email" }] } },
+  { slug: "slack", name: "Slack", meta: { description: "Team chat", logo: null, categories: [{ id: "chat", name: "Communication" }] } },
+  { slug: "github", name: "GitHub", meta: { description: "Code and issues", logo: null, categories: [{ id: "dev", name: "Developer tools" }] } },
+];
 
 async function json(req: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
@@ -60,6 +66,7 @@ export async function startFakeComposioProject(apiKey: string): Promise<FakeComp
     const body = req.method === "POST" || req.method === "PATCH" ? await json(req) : {};
 
     if (path === "/auth_configs") return send(200, { items: [] });
+    if (url.pathname === "/api/v3/toolkits" && req.method === "GET") return send(200, { items: FAKE_TOOLKITS });
     if (path === "/tool_router/session" && req.method === "POST") {
       const id = `trs_fake${++serial}`;
       record.user = String(body.user_id);

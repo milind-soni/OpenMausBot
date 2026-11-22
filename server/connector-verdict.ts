@@ -18,7 +18,7 @@ export const APP_SANDBOX_REFUSAL = "This call was not performed. A bot with its 
   + "COMPOSIO_MULTI_EXECUTE_TOOL). It never runs while the bot's settings limit its connected apps, such as an app set to read only, "
   + "because that code could reach past the limit. Use a direct app tool, or tell the person what this needs.";
 
-const OPAQUE_CODE_REFUSAL = "OpenMausBot cannot verify this code against this bot's tool grants. Use a direct app tool.";
+const OPAQUE_CODE_REFUSAL = "Edu Bot cannot verify this code against this bot's tool grants. Use a direct app tool.";
 
 /** A tools/call frame that calls the apps' sandbox directly. */
 function appSandboxCall(frame: unknown): boolean {
@@ -171,13 +171,13 @@ export function connectorRefusalText(denials: ConnectorDenial[]): string {
   return [
     named + " " + (one ? "is" : "are") + " not granted to this bot.",
     "This call was not performed.",
-    "Ask the person to grant " + (one ? "it" : "these tools") + " in OpenMausBot if they want " + (one ? "it" : "them") + " run.",
+    "Ask the person to grant " + (one ? "it" : "these tools") + " in Edu Bot if they want " + (one ? "it" : "them") + " run.",
   ].join(" ");
 }
 
 export function connectorUnrecognizedText(invoked: string, reason: string): string {
   return [
-    "A " + invoked + " call arrived in a shape OpenMausBot could not read (" + reason + "), so it was not performed.",
+    "A " + invoked + " call arrived in a shape Edu Bot could not read (" + reason + "), so it was not performed.",
     invoked === COMPOSIO_MULTI_EXECUTE_TOOL
       ? "Send it again with the tools to execute as tools: [{ tool_slug, arguments }]."
       : "Send a well-formed call that names the tools to execute.",
@@ -188,12 +188,12 @@ export function connectorUnrecognizedText(invoked: string, reason: string): stri
 export function connectorScopeRefusalText(call: ConnectorCall, reason: "app" | "write" | "account", bot: string, app: string, tool: string, allowed: readonly string[] = []): string {
   if (call.kind === "unrecognized") return connectorUnrecognizedText(call.invoked, call.reason);
   if (reason === "account") {
-    return `OpenMausBot did not run this: ${bot} may use only account id ${allowed.map((id) => `"${id}"`).join(" or ")} in ${app}. `
+    return `Edu Bot did not run this: ${bot} may use only account id ${allowed.map((id) => `"${id}"`).join(" or ")} in ${app}. `
       + "Name one of those in the call's account field, or ask the user to allow another account under the bot's Access settings.";
   }
   return reason === "app"
-    ? `OpenMausBot did not run this: ${bot} has not been given access to ${app}. Ask the user to allow it under the bot's Access settings, and do not retry.`
-    : `OpenMausBot did not run this: ${app} is read-only for ${bot}, and ${tool} would write to it. Ask the user before trying again.`;
+    ? `Edu Bot did not run this: ${bot} has not been given access to ${app}. Ask the user to allow it under the bot's Access settings, and do not retry.`
+    : `Edu Bot did not run this: ${app} is read-only for ${bot}, and ${tool} would write to it. Ask the user before trying again.`;
 }
 
 /** Connected-app services a connectorTools grant names. The built-in Email app is never in the connected-apps inventory or

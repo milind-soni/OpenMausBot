@@ -7,7 +7,7 @@ import type { ConnectorToolGrant } from "../shared/wire.ts";
 import { appEventCatalog, appLabel } from "./app-event-catalog.ts";
 import { brokerClient, type AppTriggerBroker, type BrokerAccess } from "./app-trigger-broker.ts";
 import { AppTriggerRequestService, type AppTriggerRequestStore } from "./app-trigger-requests.ts";
-import { AppTriggerError, AppTriggerManager, type AppTriggerPatch } from "./app-triggers.ts";
+import { AppTriggerError, AppTriggerManager, OWN_KEY_APP_EVENTS_REFUSAL, type AppTriggerPatch } from "./app-triggers.ts";
 import { managedComposioBrokerOff } from "./composio-broker-access.ts";
 import type { RosterMember } from "./peer-roster.ts";
 import type { RequestAuth } from "./request-auth.ts";
@@ -87,7 +87,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
   const requests = new AppTriggerRequestService({ store: deps.store, triggers: manager, botName: (botId) => deps.store.bot(botId)?.name ?? "the bot" });
 
   const unavailableText = (reason: "self-hosted" | "unavailable" | "off") => reason === "self-hosted"
-    ? "App events need OpenMausBot's connected apps. This server uses its own Composio key, so a bot cannot watch apps here yet: use a schedule that checks the app, or a webhook."
+    ? OWN_KEY_APP_EVENTS_REFUSAL
     : "Connected apps are not set up here, so a bot cannot watch apps yet.";
 
   async function catalog(bot: Bot, app?: string, search?: string): Promise<AppEventCatalog> {

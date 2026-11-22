@@ -131,17 +131,17 @@ export function filterToolsListFrame(
 
 const AUTH_CONFIG_PARAMETER = {
   type: "string",
-  description: "Optional, read by OpenMausBot: the id (ac_…) of an auth config in the person's own Composio project to "
+  description: "Optional, read by Edu Bot: the id (ac_…) of an auth config in the person's own Composio project to "
     + "connect the one listed toolkit with. Leave it out to use their most recently created enabled config for it.",
 };
 
 const FIND_PARAMETER = {
   type: "string",
-  description: "Read by OpenMausBot, instead of toolkits: what the app is for, in plain words (\"something for spreadsheets\"). "
+  description: "Read by Edu Bot, instead of toolkits: what the app is for, in plain words (\"something for spreadsheets\"). "
     + "Searches every app that can be connected and lists their slugs. Use it when you are not sure of an app's exact slug.",
 };
 
-/** COMPOSIO_MANAGE_CONNECTIONS as OpenMausBot's connection cards read it: Composio's schema has no auth config id and no
+/** COMPOSIO_MANAGE_CONNECTIONS as Edu Bot's connection cards read it: Composio's schema has no auth config id and no
  * search, and a search names no toolkits. */
 export function withConnectionParameters(frame: Record<string, unknown>): Record<string, unknown> {
   const result = frame.result;

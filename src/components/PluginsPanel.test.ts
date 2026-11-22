@@ -75,7 +75,7 @@ describe("connected-app status races", () => {
     }
   });
   it("does not render a dead Twitter connect action for managed installs", () => {
-    expect(managedConnectorUnavailableReason("managed", "twitter")).toMatch(/self-hosted/i);
+    expect(managedConnectorUnavailableReason("managed", "twitter")).toMatch(/own Composio project key/);
     expect(managedConnectorUnavailableReason("self-hosted", "twitter")).toBeNull();
   });
   it("does not let an older not_connected response erase a newer OAuth attempt", async () => {

@@ -173,6 +173,9 @@ describe("one name per thing", () => {
       ["native.boot.unhealthy.body", [label("native.menu.server")]],
       ["native.dialog.connectFailed.detail", [withoutEllipsis("native.menu.connect")]],
       ["native.dialog.share.detail", [settings("settings.page.app", "settings.app.computers")]],
+      ["connectors.setup.step2", [settings("settings.group.ai", "settings.ai.otherServices", "keys.section.apps"), label("keys.composio.label")]],
+      ["connectors.setup.step3", [label("connectors.action.connect")]],
+      ["connectors.setupNeededRemote", [settings("settings.group.ai", "settings.ai.otherServices", "keys.section.apps")]],
     ];
     const staleIn = (text: Text, prefix: string) => pointers.flatMap(([key, labels]) => labels.map((of) => of(text))
       .filter((shown) => !text(key).includes(shown)).map((shown) => `${prefix}${key} → ${shown}`));

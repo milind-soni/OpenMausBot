@@ -32,17 +32,17 @@ export function scopeHint(slugs: readonly string[]): string {
     // the person left unticked on the provider's consent screen: signing in again with it ticked fixes it.
     const toolkit = slug.split("_")[0] ?? "";
     const named = GOOGLE_APPS[toolkit] ?? app ?? "the app";
-    return `OpenMausBot note: ${app ?? "The app"} refused this because the connected account has not granted the permission this action needs. `
+    return `Edu Bot note: ${app ?? "The app"} refused this because the connected account has not granted the permission this action needs. `
       + `${app === "Google" ? "Google's sign-in screen lets a person leave a permission unticked, and then every call that needs it fails. " : ""}`
       + `Tell the person to open Connected apps, go to the Connected tab, choose Disconnect on ${named}, then Connect it again `
       + "and allow every permission the sign-in screen asks for. If it still fails after that, the default Composio connection does not "
       + `ask for this permission: with their own Composio project key they can add it in an auth config for ${named}. Do not retry this call before they reconnect.`;
   }
   const permission = `the ${scope} permission`;
-  return `OpenMausBot note: ${app ?? "The app"} refused this because the connected account has not granted ${permission}. ` +
+  return `Edu Bot note: ${app ?? "The app"} refused this because the connected account has not granted ${permission}. ` +
     `Reconnecting will not add it: the default Composio connection never asks for it. ` +
     `To allow it, the person creates their own ${app ? `${app} ` : ""}auth config in their Composio project that includes ${permission}, ` +
-    `then reconnects ${app ?? "the app"} under Connected apps; OpenMausBot uses that config automatically. ` +
+    `then reconnects ${app ?? "the app"} under Connected apps; Edu Bot uses that config automatically. ` +
     `Tell the person this. Do not retry this call.`;
 }
 

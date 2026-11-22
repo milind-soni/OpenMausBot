@@ -52,6 +52,15 @@ describe("the fixture's Netlify stand-in", () => {
   });
 });
 
+describe("the fixture's Composio stand-in", () => {
+  it("lets only a loopback stand-in's API address cross, so a key saved in a fixture never reaches Composio", () => {
+    expect(childEnv({ OMB_COMPOSIO_API: " http://127.0.0.1:4020/api/v3.1 " }).OMB_COMPOSIO_API).toBe("http://127.0.0.1:4020/api/v3.1");
+    for (const url of ["https://backend.composio.dev/api/v3.1", "http://localhost:4020/api/v3.1", "http://127.0.0.1:4020", "http://127.0.0.1:4020/api/v3.1@evil.test", "http://192.0.2.1:4020/api/v3.1", ""]) {
+      expect(childEnv({ OMB_COMPOSIO_API: url }), url).not.toHaveProperty("OMB_COMPOSIO_API");
+    }
+  });
+});
+
 describe("the fixture's Live call environment", () => {
   it("passes a loopback fake GPT-Live and its key through", () => {
     expect(childEnv({ OMB_OPENAI_LIVE_URL: " http://127.0.0.1:4100 ", OMB_OPENAI_LIVE_KEY: "sk-fake" }))

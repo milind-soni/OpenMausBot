@@ -163,7 +163,7 @@ it("a bot without a grant sees no phone tools", async () => {
   // The owner's own turn, refused for the grant alone.
   const refused = (await rpc(token, "tools/call", { name: "PHONE_LIST_EVENTS", arguments: { from: "2026-10-23T00:00:00+05:30", to: "2026-10-24T00:00:00+05:30" } })).body.result;
   expect(refused.isError).toBe(true);
-  expect(refused.content[0].text).toBe("OpenMausBot did not run this: Scout has not been given access to Phone Calendar. Ask the user to allow it under the bot's Access settings, and do not retry.");
+  expect(refused.content[0].text).toBe("Edu Bot did not run this: Scout has not been given access to Phone Calendar. Ask the user to allow it under the bot's Access settings, and do not retry.");
 }, 60_000);
 
 it("any bot left on the default hears where the person is talking from: the paired phone's send, or the computer", async () => {

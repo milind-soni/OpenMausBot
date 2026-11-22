@@ -30,7 +30,7 @@ vi.mock("@/lib/live-call-media", () => ({ dismissLiveNotice: vi.fn() }));
 
 const { KeysPage } = await import("./KeysPage");
 const { LiveKeyNeeded } = await import("../LiveKeyNeeded");
-const { openKeySettings } = await import("./key-focus");
+const { keyFocusPending, openKeySettings } = await import("./key-focus");
 
 let host: HTMLDivElement;
 let root: Root;
@@ -256,6 +256,14 @@ describe("the keys page", () => {
     flushSync(() => { openKeySettings("box"); });
     await vi.waitFor(() => expect(document.activeElement).toBe(row("box")!.querySelector("[data-key-input]")));
     expect(host.querySelector<HTMLInputElement>("[data-keys-search]")!.value).toBe("");
+  });
+
+  it("holds the pane's scroll from the link until the key's row is landed on", async () => {
+    page();
+    flushSync(() => { openKeySettings("box"); });
+    expect(keyFocusPending()).toBe(true);
+    await vi.waitFor(() => expect(document.activeElement).toBe(row("box")!.querySelector("[data-key-input]")));
+    expect(keyFocusPending()).toBe(false);
   });
 
   it("warns, and saves nothing, when a pasted key looks like another provider's", () => {

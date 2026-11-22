@@ -97,7 +97,7 @@ describe("what a bot is told", () => {
     expect(note).toContain('Call it again with the arguments its schema names, for example {"queries":[{"use_case":"…"}]} with your own values.');
     expect(note).toContain("it says nothing about which apps or tools exist, so do not tell the person a tool is missing. Connected apps you can use: gemini, gmail.");
     expect(argumentRefusalNote("GMAIL_SEND_EMAIL", undefined, [])).toContain("Read its arguments with COMPOSIO_GET_TOOL_SCHEMAS");
-    expect(fittedArgumentsNote("COMPOSIO_SEARCH_TOOLS", ["job as queries"])).toBe("OpenMausBot note: COMPOSIO_SEARCH_TOOLS's arguments were read with job as queries. Send them in that shape next time.");
+    expect(fittedArgumentsNote("COMPOSIO_SEARCH_TOOLS", ["job as queries"])).toBe("Edu Bot note: COMPOSIO_SEARCH_TOOLS's arguments were read with job as queries. Send them in that shape next time.");
   });
 
   it("knows Composio's refusal of a call's arguments", () => {

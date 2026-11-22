@@ -26,6 +26,11 @@ export function openKeySettings(id?: KeyId, purpose?: KeyId): typeof OPEN_KEYS {
   return OPEN_KEYS;
 }
 
+/** A key's row is still to be landed on: that landing owns the pane's scroll, not the page's anchor. */
+export function keyFocusPending(): boolean {
+  return latest !== null;
+}
+
 export function finishKeyFocus(request: KeyFocusRequest) {
   if (latest?.nonce === request.nonce) publish(null);
 }

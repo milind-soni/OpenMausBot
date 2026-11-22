@@ -8,15 +8,16 @@ import {
   setupSystemPrompt,
   type SetupConnectedApps,
 } from "./setup-mode.ts";
+import type { ConnectorSetup } from "./composio.ts";
 
 const AVAILABLE: SetupConnectedApps = { state: "available" };
 const EVERY_STATE: Array<[string, SetupConnectedApps]> = [
   ["available", AVAILABLE],
   ["switched off", { state: "off", noTools: false }],
   ["no tools", { state: "off", noTools: true }],
-  ["server without a key", { state: "not-configured", host: "server" }],
-  ["desktop service down", { state: "not-configured", host: "desktop" }],
-  ["Cloud service down", { state: "not-configured", host: "cloud" }],
+  ["no key", { state: "needs-key" }],
+  ["service down", { state: "not-answering", ownKey: false }],
+  ["own key not answering", { state: "not-answering", ownKey: true }],
   ["model cannot", { state: "unsupported" }],
 ];
 
@@ -134,7 +135,7 @@ describe("setupSystemPrompt for a Chief of Staff", () => {
 });
 
 describe("connectedAppsForSetup", () => {
-  const facts = { mounted: true, engine: true, configured: true, enabled: true, grants: undefined, host: "server" as const };
+  const facts = { mounted: true, engine: true, setup: "ready" as ConnectorSetup, enabled: true, grants: undefined };
 
   it("is available when the turn mounted the tools and the bot has any connected-app tools", () => {
     expect(connectedAppsForSetup(facts)).toEqual({ state: "available" });
@@ -147,17 +148,19 @@ describe("connectedAppsForSetup", () => {
     expect(connectedAppsForSetup({ ...facts, mounted: false, enabled: false, grants: {} })).toEqual({ state: "off", noTools: true });
   });
 
-  it("is not configured when there is no connection service, saying where the bot runs", () => {
-    for (const host of ["server", "desktop", "cloud"] as const) {
-      expect(connectedAppsForSetup({ ...facts, mounted: false, configured: false, enabled: false, host }))
-        .toEqual({ state: "not-configured", host });
-    }
-    expect(connectedAppsForSetup({ ...facts, mounted: false, host: "desktop" })).toEqual({ state: "not-configured", host: "desktop" });
+  it("needs a key when there is neither a Composio project key nor a connection service", () => {
+    expect(connectedAppsForSetup({ ...facts, mounted: false, setup: "needs-setup", enabled: false })).toEqual({ state: "needs-key" });
+    expect(connectedAppsForSetup({ ...facts, mounted: false, setup: "needs-setup" })).toEqual({ state: "needs-key" });
+  });
+
+  it("is not answering when a key or a connection service is there but the tools did not mount", () => {
+    expect(connectedAppsForSetup({ ...facts, mounted: false, setup: "service-unavailable" })).toEqual({ state: "not-answering", ownKey: false });
+    expect(connectedAppsForSetup({ ...facts, mounted: false })).toEqual({ state: "not-answering", ownKey: true });
   });
 
   it("is unsupported when the bot's model cannot mount connected apps at all", () => {
     expect(connectedAppsForSetup({ ...facts, mounted: false, engine: false })).toEqual({ state: "unsupported" });
-    expect(connectedAppsForSetup({ ...facts, mounted: false, engine: false, configured: false, enabled: false })).toEqual({ state: "unsupported" });
+    expect(connectedAppsForSetup({ ...facts, mounted: false, engine: false, setup: "needs-setup", enabled: false })).toEqual({ state: "unsupported" });
   });
 });
 
@@ -180,16 +183,21 @@ describe("setupSystemPrompt connected apps", () => {
     );
   });
 
-  it("says in one sentence where connected apps are set up when this OpenMausBot has none", () => {
-    expect(prompt({ state: "not-configured", host: "server" })).toContain(
-      "Connected apps are not set up here, so you cannot connect an app such as Gmail yourself. If the job needs one, say so in one sentence: they are set up by adding a Composio project key in Settings → AI → Other services, under Self-host connected apps.",
+  it("says in one sentence that the key is missing and where to add it, never to restart", () => {
+    const place = "Composio project key in Settings → AI → Other services → Apps and tools.";
+    const missing = prompt({ state: "needs-key" });
+    expect(missing).toContain(
+      "Connected apps need the person's own Composio project key, and none is saved here, so you cannot connect an app such as Gmail yourself. If the job needs one, say so in one sentence: they add a " + place,
     );
-    expect(prompt({ state: "not-configured", host: "desktop" })).toContain(
-      "restarting OpenMausBot usually brings them back, or they can add their own Composio project key in Settings → AI → Other services, under Self-host connected apps.",
+    expect(prompt({ state: "not-answering", ownKey: false })).toContain(
+      "Connected apps are not answering right now, so you cannot connect an app such as Gmail yourself. If the job needs one, say so in one sentence: try again in a few minutes, or add their own " + place,
     );
-    const cloud = prompt({ state: "not-configured", host: "cloud" });
-    expect(cloud).toContain("Connected apps come with their MausBot Cloud plan but are not answering right now");
-    expect(cloud).not.toContain("Composio");
+    expect(prompt({ state: "not-answering", ownKey: true })).toContain("try again in a few minutes, or check the " + place);
+    for (const [name, connectedApps] of EVERY_STATE) {
+      const text = prompt(connectedApps);
+      expect(text, name).not.toMatch(/restart/i);
+      expect(text, name).not.toMatch(/MausBot/);
+    }
     expect(prompt({ state: "unsupported" })).toContain("Your current model cannot use connected apps");
   });
 

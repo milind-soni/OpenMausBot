@@ -221,7 +221,7 @@ describe("phone MCP host", () => {
     const request = vi.spyOn(h.jobs, "request");
     const result = await h.handle(call("PHONE_SEND_MESSAGE", { to: "Mom", text: "On my way" })) as PhoneToolResult;
     expect(result).toMatchObject({ isError: true, structuredContent: { code: "refused" } });
-    expect(text(result)).toBe("OpenMausBot did not run this: Phone Messages is read-only for Scout, and Send message would write to it. Ask the user before trying again.");
+    expect(text(result)).toBe("Edu Bot did not run this: Phone Messages is read-only for Scout, and Send message would write to it. Ask the user before trying again.");
     expect(request).not.toHaveBeenCalled();
     expect(h.messages).toEqual([]);
     expect((await h.rows()).map((row) => [row.decision, row.rule])).toEqual([["auto-denied", "scope:phone:messages:write"]]);

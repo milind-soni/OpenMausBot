@@ -40,6 +40,8 @@ export interface AppTileProps {
   aliasDraft: string | null;
   busy: boolean;
   configured: boolean;
+  /** No Composio project key here yet, so Connect can't work until one is added. */
+  needsKey: boolean;
   inventoryPhase: ConnectorInventoryPhase;
   mode: "managed" | "self-hosted" | "unavailable";
   policy: NonNullable<AppState["config"]>["managedPolicy"] | undefined;
@@ -77,7 +79,7 @@ export function useTileActions(actions: AppTileActions): AppTileActions {
 }
 
 /** One app in the Apps panel. Props only and no hooks: it is rendered again only when something it shows changed. */
-export function AppTileView({ card, serviceStatus, pendingUrl, aliasDraft, busy, configured, inventoryPhase, mode, policy, usedBy, limited, canChangeBots, actions }: AppTileProps) {
+export function AppTileView({ card, serviceStatus, pendingUrl, aliasDraft, busy, configured, needsKey, inventoryPhase, mode, policy, usedBy, limited, canChangeBots, actions }: AppTileProps) {
   const { failed, pending, accounts, included, connected } = tileStanding(card, serviceStatus);
   const pendingAuthorization = pending && !failed ? pendingUrl : undefined;
   const authorizationUrl = reusableConnectionUrl(pendingAuthorization);
@@ -133,42 +135,48 @@ export function AppTileView({ card, serviceStatus, pendingUrl, aliasDraft, busy,
             {description}
           </div>
         </div>
-        <button
-          type="button"
-          disabled={!configured || inventoryPhase !== "ready" || busy || included || Boolean(unavailableReason)}
-          title={unavailableReason ?? undefined}
-          onClick={() => {
-            if (pending && !failed) {
-              const url = reusableConnectionUrl(pendingAuthorization);
-              if (url) {
-                actions.openUrl(url);
+        {needsKey && !unavailableReason ? (
+          <span data-app-needs-key className="max-w-36 shrink-0 text-end text-[12px] leading-4 text-ink-secondary">
+            {t("connectors.tile.needsKey")}
+          </span>
+        ) : (
+          <button
+            type="button"
+            disabled={!configured || inventoryPhase !== "ready" || busy || included || Boolean(unavailableReason)}
+            title={unavailableReason ?? undefined}
+            onClick={() => {
+              if (pending && !failed) {
+                const url = reusableConnectionUrl(pendingAuthorization);
+                if (url) {
+                  actions.openUrl(url);
+                } else {
+                  actions.connect(card.slug);
+                }
+              } else if (reconnect) {
+                actions.connect(card.slug, reconnect.alias, reconnect);
               } else {
-                actions.connect(card.slug);
+                actions.toggleAlias(card.slug);
               }
-            } else if (reconnect) {
-              actions.connect(card.slug, reconnect.alias, reconnect);
-            } else {
-              actions.toggleAlias(card.slug);
-            }
-          }}
-          className="inline-flex h-7 min-w-[64px] shrink-0 items-center justify-center gap-2 rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink transition-colors hover:bg-raised-hover disabled:opacity-40"
-        >
-          {unavailableReason ? (
-            t("connectors.selfHostOnly")
-          ) : busy ? (
-            <Loader2 size={14} className="animate-spin" />
-          ) : (
-            connectorActionLabel(inventoryPhase, {
-              busy,
-              included,
-              canContinue: Boolean(pendingAuthorization),
-              pending,
-              reconnect: Boolean(reconnect),
-              hasAccounts: accounts.length > 0,
-              failed: Boolean(failed),
-            })
-          )}
-        </button>
+            }}
+            className="inline-flex h-7 min-w-[64px] shrink-0 items-center justify-center gap-2 rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink transition-colors hover:bg-raised-hover disabled:opacity-40"
+          >
+            {unavailableReason ? (
+              t("connectors.selfHostOnly")
+            ) : busy ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              connectorActionLabel(inventoryPhase, {
+                busy,
+                included,
+                canContinue: Boolean(pendingAuthorization),
+                pending,
+                reconnect: Boolean(reconnect),
+                hasAccounts: accounts.length > 0,
+                failed: Boolean(failed),
+              })
+            )}
+          </button>
+        )}
       </div>
       <div className="ps-[52px]">
         {authorizationUrl && (

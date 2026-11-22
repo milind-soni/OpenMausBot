@@ -44,6 +44,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { ServiceIcon, type ToolkitCard } from "./ServiceIcon"; import { AppsSection } from "./AppsSection";
 import { AppTile, tileStanding, useTileActions } from "./AppTile";
 import { useAppTileWindow } from "./app-tile-window";
+import { ComposioKeySteps, ConnectedEmptyWithoutKey } from "./AppsKeySetup";
 import { appCatalogMemory, loadAppCatalog, onAppCatalog, type AppCatalog, type CatalogPagination, type ConnectorSetup } from "@/lib/app-catalog-cache";
 export { ServiceIcon, type ToolkitCard } from "./ServiceIcon";
 
@@ -418,6 +419,8 @@ export function PluginsPanel() {
   const connectedEmptyCopy = connectedInventoryCopy(inventoryPhase);
   const close = () => dispatch({ type: "togglePlugins", open: false });
   const setupNotice = connectorSetupNotice({ configured, stale, setup, remoteClient });
+  const needsKey = !configured && !stale && setup === "needs-setup";
+  const pasteKey = () => { close(); dispatch(openKeySettings("composio")); };
   const chooseFilter = (next: AppsFilter) => {
     setCategory(null);
     if (next === "mcp") {
@@ -441,6 +444,9 @@ export function PluginsPanel() {
   const allCards = sectioned ? allSection?.cards ?? [] : categoryCards;
   const allCapped = sectioned && !showAllApps && allCards.length > APPS_PREVIEW_COUNT;
   const allShown = allCapped ? allCards.slice(0, APPS_PREVIEW_COUNT) : allCards;
+  const listEmpty = cards !== null && allShown.length === 0 && !nativeCardsShown && sections.length <= 1;
+  const connectedEmptyWithoutKey = needsKey && !remoteClient && listEmpty && listing === "connected";
+  const mcpFirst = needsKey && filter === "all" && category === null && !searching;
   const connectedCards = useMemo(() => (cards ?? []).filter((card) => hasActiveConnection(status[card.slug])), [cards, status]);
   const botLists = useMemo(() => {
     const cached = (find: (slug: string) => Bot[]) => {
@@ -612,14 +618,16 @@ export function PluginsPanel() {
           ) : (
             <SavedKeysReset notice />
           )}
-          {setupNotice && filter !== "mcp" && (
+          {setupNotice?.key === "connectors.setupNeeded" ? (
+            filter !== "mcp" && !connectedEmptyWithoutKey && <ComposioKeySteps onPasteKey={pasteKey} />
+          ) : setupNotice && filter !== "mcp" && (
             <div
               className={cn(
                 "mb-3 rounded-xl px-4 py-3 text-[13px]",
                 setupNotice.tone === "warning" ? "bg-warning/10 text-warning" : "bg-control/50 text-ink-secondary",
               )}
             >
-              {connectedHosted.length > 0
+              {connectedHosted.length > 0 && setupNotice.tone === "warning"
                 ? t("hostedMcp.otherAppsSetup", { services: new Intl.ListFormat(activeLocale(), { style: "long", type: "conjunction" }).format(connectedHosted.map((app) => app.label)) })
                 : t(setupNotice.key)}{" "}
               <button
@@ -628,21 +636,19 @@ export function PluginsPanel() {
                   setupNotice.tone === "info" && "text-ink",
                   remoteClient && "hidden",
                 )}
-                onClick={() => { close(); dispatch(openKeySettings("composio")); }}
+                onClick={pasteKey}
               >
                 {t("connectors.openSettings")}
               </button>
             </div>
           )}
+          {mcpFirst && renderMcpSection()}
           {configured && !remoteClient && source === "curated" && mode === "self-hosted" && filter !== "mcp" && (
             <div className="mb-3 text-[12px] text-ink-secondary">
               {t("connectors.featuredBefore")}{" "}
               <button
                 className="underline underline-offset-2 hover:text-ink"
-                onClick={() => {
-                  close();
-                  dispatch({ type: "toggleAppSettings", open: true });
-                }}
+                onClick={pasteKey}
               >
                 {t("connectors.updateKey")}
               </button>{" "}
@@ -709,7 +715,8 @@ export function PluginsPanel() {
                         </button>
                       </div>
                     )}
-                    {cards !== null && allShown.length === 0 && !nativeCardsShown && sections.length <= 1 && (
+                    {connectedEmptyWithoutKey && <ConnectedEmptyWithoutKey onPasteKey={pasteKey} onAddMcp={() => chooseFilter("mcp")} />}
+                    {listEmpty && !connectedEmptyWithoutKey && (
                       <div className="flex min-h-40 flex-col items-center justify-center text-center">
                         <div className="text-[14px] font-medium text-ink">
                           {listing === "connected" ? connectedEmptyCopy.title : t("connectors.noAppsFound")}
@@ -742,11 +749,7 @@ export function PluginsPanel() {
             </div>
           )}
 
-          {filter !== "connected" && category === null && (
-            <div className={cn(filter === "all" && "mt-8 border-t border-hairline/30 pt-6", filter === "mcp" && "pt-1")}>
-              <McpServersPanel embedded hideHosted={filter === "all"} />
-            </div>
-          )}
+          {filter !== "connected" && category === null && !mcpFirst && renderMcpSection()}
         </div>
         <ConfirmDialog open={disconnecting !== null} layer="z-[60]" tone="danger" title={t("connectors.disconnect")} confirmLabel={t("connectors.disconnect")}
           body={disconnecting ? disconnectAccountConfirmation(disconnecting.label, disconnecting.account) : ""} onCancel={() => setDisconnecting(null)}
@@ -764,6 +767,17 @@ export function PluginsPanel() {
       </div>
     </div>
   );
+
+  function renderMcpSection() {
+    return (
+      <div
+        data-apps-mcp-section={mcpFirst ? "first" : "last"}
+        className={cn(filter === "all" && (mcpFirst ? "mb-8 border-b border-hairline/30 pb-6" : "mt-8 border-t border-hairline/30 pt-6"), filter === "mcp" && "pt-1")}
+      >
+        <McpServersPanel embedded hideHosted={filter === "all"} />
+      </div>
+    );
+  }
 
   function renderSuggested() {
     const shown = suggestions.cards.filter((card) => !isConnected(card.slug));
@@ -792,6 +806,7 @@ export function PluginsPanel() {
         aliasDraft={aliasSlug === card.slug ? aliasDraft : null}
         busy={busySlug === card.slug}
         configured={configured}
+        needsKey={needsKey}
         inventoryPhase={inventoryPhase}
         mode={mode}
         policy={policy}

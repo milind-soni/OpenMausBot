@@ -54,14 +54,14 @@ export function eventBlock(trigger: Pick<AppTrigger, "appName" | "eventName" | "
   let text: string;
   try { text = JSON.stringify(event.data, null, 2) ?? "{}"; } catch { text = String(event.data); }
   const room = MAX_EVENT_CHARS - 400;
-  if (text.length > room) text = `${text.slice(0, room)}\n\n[Event truncated by OpenMausBot]`;
+  if (text.length > room) text = `${text.slice(0, room)}\n\n[Event truncated by Edu Bot]`;
   const header = [
     `App: ${trigger.appName}${trigger.accountLabel ? ` (${trigger.accountLabel})` : ""}`,
     `Event: ${trigger.eventName}`,
     `Received: ${new Date(event.receivedAt).toISOString()}`,
     `Event ID: ${event.id.slice(0, 200)}`,
   ].join("   ");
-  const test = event.test ? "\nTEST EVENT, started from OpenMausBot: nothing really happened. Do not reply to, send or change anything; say what you would do." : "";
+  const test = event.test ? "\nTEST EVENT, started from Edu Bot: nothing really happened. Do not reply to, send or change anything; say what you would do." : "";
   return [fromNote(appEventWho(trigger.appName, trigger.eventName), "event", AUTHORITY.info), BLOCK_OPEN, `${defused(header)}${test}`, "", defused(text), BLOCK_CLOSE].join("\n");
 }
 

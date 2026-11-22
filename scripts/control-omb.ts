@@ -227,6 +227,10 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
   // deletes sites there, never on Netlify.
   const netlifyUrl = parentEnv.OMB_NETLIFY_API_URL?.trim() ?? "";
   if (/^http:\/\/127\.0\.0\.1:\d{1,5}\/api\/v1$/.test(netlifyUrl)) childEnv.OMB_NETLIFY_API_URL = netlifyUrl;
+  // A loopback stand-in for a person's own Composio project only (server/testing/fake-composio-project.ts): a key saved
+  // in the fixture never reaches Composio.
+  const composioApi = parentEnv.OMB_COMPOSIO_API?.trim() ?? "";
+  if (/^http:\/\/127\.0\.0\.1:\d{1,5}\/api\/v3\.1$/.test(composioApi)) childEnv.OMB_COMPOSIO_API = composioApi;
   // A loopback connected-apps service only (server/testing/broker-fake.ts): its token never reaches the real one.
   const brokerUrl = parentEnv.OMB_COMPOSIO_BROKER_URL?.trim() ?? "";
   if (/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(brokerUrl) && parentEnv.OMB_COMPOSIO_BROKER_TOKEN) {

@@ -879,7 +879,7 @@ describe.sequential("Composio Sessions", () => {
     });
     try {
       await expect(authorizeService({} as AppConfig, "twitter")).rejects.toThrow(/X Developer app/i);
-      await expect(authorizeService({} as AppConfig, "x")).rejects.toThrow(/self-hosted connected apps/i);
+      await expect(authorizeService({} as AppConfig, "x")).rejects.toThrow(/Add your own Composio project key/);
     } finally {
       setManagedBrokerAccess(null);
     }
