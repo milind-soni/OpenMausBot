@@ -1,6 +1,7 @@
 // The real chat/composer against the disposable approval smoke server.
 import { createRoot } from "react-dom/client";
-import { ChatView, ErrorRow } from "../components/ChatView";
+import { ChatV2 } from "../components/chat-v2/ChatV2";
+import { ErrorRow } from "../components/FailedTurnRow";
 import { DesktopCapabilitiesProvider } from "../components/DesktopCapabilities";
 import { StoreProvider, useStore, type Bot } from "../state/store";
 import { PermissionsSection } from "../components/bot-settings/PermissionsSection";
@@ -23,7 +24,7 @@ function Fixture() {
   return <div className="flex h-screen flex-col bg-app text-ink">
     {state.error && <p role="alert">{state.error}</p>}
     {!new URLSearchParams(location.search).has("model-switch") && <div className="p-4"><ErrorRow message="This task was blocked by our safety systems." onRetry={() => { throw new Error("Safety errors must not expose Retry"); }} /></div>}
-    {bot && <div className="min-h-0 flex-1"><ChatView bot={bot} /></div>}
+    {bot && <div className="min-h-0 flex-1"><ChatV2 profile={bot} /></div>}
   </div>;
 }
 setAnalyticsEnabled(false);

@@ -1,4 +1,4 @@
-// The day and time line between a conversation's days (ChatView.tsx).
+// The day and time line between a conversation's days.
 import { dayLabel } from "@/lib/transcript-derivations";
 import { formatTime } from "@/state/store";
 

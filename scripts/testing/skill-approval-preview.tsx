@@ -1,6 +1,6 @@
 // Real conversation and task controls, connected only to the disposable server.
 import { createRoot } from "react-dom/client";
-import { ChatView } from "../../src/components/ChatView";
+import { ChatV2 } from "../../src/components/chat-v2/ChatV2";
 import { DesktopCapabilitiesProvider } from "../../src/components/DesktopCapabilities";
 import { StoreProvider, useStore } from "../../src/state/store";
 import { setAnalyticsEnabled } from "../../src/lib/analytics";
@@ -14,7 +14,7 @@ function Fixture() {
     {state.error && <p role="alert">{state.error}</p>}
     <output hidden id="fixture-state">{JSON.stringify({ threadId: bot?.threadId, pending: bot?.awaitingThreadSnapshot,
       messageIds: bot?.messages.map(message => message.id) })}</output>
-    {bot && <div className="min-h-0 flex-1"><ChatView bot={bot} /></div>}
+    {bot && <div className="min-h-0 flex-1"><ChatV2 profile={bot} /></div>}
   </main>;
 }
 setAnalyticsEnabled(false);

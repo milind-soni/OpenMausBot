@@ -34,7 +34,7 @@ const limits = await import("@/lib/limit-resets");
 const { automationSentence, isDone, statusLine } = await import("@/lib/automations");
 const { LimitWarnings } = await import("./automations/LimitWarnings");
 const { UsageAlert, UsageBars, UsageRows } = await import("./EngineUsage");
-const { FailedTurnRow } = await import("./ChatView");
+const { FailedTurnRow } = await import("./FailedTurnRow");
 const { CalendarGrid } = await import("./RoutineCalendarPage");
 
 const NOW = new Date(2026, 9, 19, 10, 0, 0).getTime();

@@ -21,7 +21,7 @@ import type { EngineInstall } from "./engine-install";
 import { optimisticMessageId, optimisticUserMessage, sendArrived, sendReconciled } from "./optimistic-send";
 import { patchedGroups, roomAnswers, snapshotPatch } from "./room-frames";
 import { savedStateAction, type SavedOwner, type SavedSnapshot } from "./saved-state";
-import { reduceChatView, reduceHydrate, usePhoneLayout, visibleMessages } from "./snapshot-navigation";
+import { reduceHydrate, usePhoneLayout, visibleMessages } from "./snapshot-navigation";
 export { visibleMessages } from "./snapshot-navigation";
 export { awayFromMainThread, botOpensTo, markedThread, openBot, openBotRow, openBotThread, openRoomThread, openThread, visibleNotificationThread, type ThreadTarget } from "./thread-navigation";
 import type { TurnDigest } from "../../shared/digest";
@@ -502,8 +502,6 @@ export interface ModelVariantSession {
 }
 
 export interface AppState {
-  chatV2?: boolean;
-  desktopChatV2?: boolean;
   phoneLayout?: boolean;
   bots: Bot[];
   groups: Group[];
@@ -580,7 +578,6 @@ export interface AppState {
 export type BotAnnouncement = Omit<Bot, "messages"> & { messages?: Message[] };
 
 export type Action =
-  | { type: "chatView"; v2: boolean }
   | { type: "phoneLayout"; enabled: boolean }
   | { type: "historyReady"; held: Message[]; leaf?: string | null; threadId: string; messages: Message[]; hasMore: boolean; activeLeafId: string | null }
   | {
@@ -826,7 +823,7 @@ function patchGroupCard(state: AppState, groupId: string, messageId: string, pat
 
 function cardMessages(state: AppState, botId: string, groupId?: string, threadId?: string): Message[] | undefined {
   const panel = state.forkPanel;
-  if (threadId && panel?.threadId === threadId && panel.kind === (groupId ? "group" : "bot") && panel.ownerId === (groupId ?? botId)) {
+  if (threadId && panel?.threadId === threadId && panel.ownerId === groupId) {
     return panel.messages;
   }
   const host = groupId ? state.groups.find((group) => group.id === groupId) : state.bots.find((bot) => bot.id === botId);
@@ -835,7 +832,7 @@ function cardMessages(state: AppState, botId: string, groupId?: string, threadId
 
 function patchThreadCard(state: AppState, action: { botId: string; messageId: string; threadId?: string; groupId?: string }, patch: Partial<OptionCardData>): AppState {
   const panel = state.forkPanel;
-  if (action.threadId && panel?.threadId === action.threadId && panel.kind === (action.groupId ? "group" : "bot") && panel.ownerId === (action.groupId ?? action.botId)) {
+  if (action.threadId && panel?.threadId === action.threadId && panel.ownerId === action.groupId) {
     return { ...state, forkPanel: { ...panel, messages: withPatchedCard(panel.messages, action.messageId, patch) } };
   }
   if (action.groupId) {
@@ -874,7 +871,7 @@ export function reducer(state: AppState, action: Action): AppState {
   }
   if (isNotificationFeedAction(action)) return { ...state, notifications: reduceNotificationFeed(state.notifications, action) };
   switch (action.type) {
-    case "chatView": case "phoneLayout": return reduceChatView(state, action);
+    case "phoneLayout": return { ...state, phoneLayout: action.enabled };
     case "historyReady":
       return reduceHistoryReady(state, action);
     case "hydrate":
@@ -1271,7 +1268,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return updateBot(next, bot.id, (b) => ({
         ...b,
         messages: b.messages.map((m) => (m.id === action.message.id ? action.message : m)),
-        chatPatches: state.chatV2 && inChatHistory(action.message, true) && !b.messages.some(m => m.id === action.message.id)
+        chatPatches: inChatHistory(action.message, true) && !b.messages.some(m => m.id === action.message.id)
           ? new Map(b.chatPatches).set(action.message.id, action.message)
           : b.chatPatches,
       }));
@@ -1582,11 +1579,11 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, pendingQueued, consumedQueueIds: rememberConsumedQueueId(state.consumedQueueIds, action.queueId) };
     }
     case "send": {
-      const animated = addForkOptimistic(withMascotMotion(
+      const animated = withMascotMotion(
         dismissOnboardingCard(state, action.botId),
         action.botId,
         "working",
-      ), action);
+      );
       if (!action.sendId) return animated;
       const bot = animated.bots.find((candidate) => candidate.id === action.botId);
       const threadId = action.threadId ?? bot?.threadId;
@@ -1756,7 +1753,6 @@ export function dataSheetFromResponse(body: unknown, botId: string): DataSheet {
 }
 
 export const initialState: AppState = {
-  chatV2: true,
   modelVariantSessions: {},
   backgroundThreadEvents: {},
   loadingOlder: {},
@@ -2006,7 +2002,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   stateRef.current = state;
   const selectedBot = state.bots.find(bot => bot.id === state.selectedId);
   const selectedOwner = selectedBot ?? state.groups.find(group => group.id === state.selectedId);
-  const rawThread = selectedOwner?.needsHistory && !(selectedBot && state.chatV2 && !selectedBot.busy) ? selectedOwner.threadId : undefined;
+  const rawThread = selectedOwner?.needsHistory && !(selectedBot && !selectedBot.busy) ? selectedOwner.threadId : undefined;
   const rawGeneration = rawThread ? state.transcriptGeneration[rawThread] : undefined;
   useEffect(() => {
     if (!rawThread) return;
@@ -2258,11 +2254,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const threadId =
             action.threadId ?? stateRef.current.bots.find((bot) => bot.id === action.botId)?.threadId;
           const sendId = action.sendId ?? randomUuid();
-          const arrived = () => {
-            const panel = stateRef.current.forkPanel;
-            return sendArrived(panel?.kind === "bot" && panel.ownerId === action.botId && panel.threadId === threadId
-              ? panel.messages : stateRef.current.bots.find((bot) => bot.id === action.botId && bot.threadId === threadId)?.messages, sendId);
-          };
+          const arrived = () => sendArrived(
+            stateRef.current.bots.find(bot => bot.id === action.botId && bot.threadId === threadId)?.messages, sendId,
+          );
           void waitForExecutionSettings(botBeforeSend ? [botBeforeSend] : [], threadId)
             .then(() => sendReconciled(() => api(`/api/bots/${action.botId}/messages`, {
                 method: "POST",
@@ -2652,7 +2646,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const selectedAtStart = selectionRevision.current;
           const currentBot = stateRef.current.bots.find(bot => bot.id === action.botId);
           const warm = action.type === "switchTask" && currentBot?.threadId === action.threadId && !currentBot.needsHistory;
-          const compact = action.type === "switchTask" && !action.whole && !warm && stateRef.current.chatV2
+          const compact = action.type === "switchTask" && !action.whole && !warm
             && !currentBot?.tasks?.find(task => task.threadId === action.threadId)?.busy;
           const ready = action.type === "newTask"
             ? botPatchQueue.flush(action.botId)

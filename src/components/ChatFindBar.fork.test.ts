@@ -10,7 +10,7 @@ vi.mock("@/state/store", async (importOriginal) => {
   return {
     ...original,
     useStore: () => ({ state: { ...original.initialState,
-      forkPanel: { kind: "bot", ownerId: "bot", threadId: "fork", messages: [], activeLeafId: null,
+      forkPanel: { kind: "group", ownerId: "room", threadId: "fork", messages: [], activeLeafId: null,
         loading: false, loadId: "load", loadFailed: false } }, dispatch: fixture.dispatch }),
     api: fixture.api,
   };

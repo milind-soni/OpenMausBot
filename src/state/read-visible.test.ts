@@ -2,16 +2,16 @@ import { expect, it } from "vitest";
 import { markVisibleBotThreadsRead, markVisibleGroupThreadsRead } from "./read-visible";
 import type { AppState, BotAnnouncement, Group } from "./store";
 
-it("marks both visible bot threads read while leaving a hidden task unread", () => {
+it("marks the visible bot thread read while leaving a hidden task unread", () => {
   const bot = { id: "bot", unread: true, tasks: [
     { threadId: "main", unread: true, updatedAt: 10 }, { threadId: "fork", unread: true, updatedAt: 20 }, { threadId: "hidden", unread: true },
   ] } as unknown as BotAnnouncement;
   const state = { selectedId: "bot", activeView: "chat", bots: [{ id: "bot", threadId: "main" }],
-    forkPanel: { kind: "bot", ownerId: "bot", threadId: "fork" } } as unknown as AppState;
+    forkPanel: { kind: "group", ownerId: "room", threadId: "fork" } } as unknown as AppState;
   const read: Array<[string, number]> = [];
   markVisibleBotThreadsRead(state, bot, true, (_path, threadId, updatedAt) => read.push([threadId, updatedAt]));
-  expect(read).toEqual([["main", 10], ["fork", 20]]);
-  expect(bot.tasks?.map((task) => task.unread)).toEqual([false, false, true]);
+  expect(read).toEqual([["main", 10]]);
+  expect(bot.tasks?.map((task) => task.unread)).toEqual([false, true, true]);
   expect(bot.unread).toBe(true);
 });
 

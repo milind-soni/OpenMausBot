@@ -27,7 +27,7 @@ vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admi
 vi.mock("@/lib/use-media-query", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/use-media-query")>(), useMediaQuery: () => fixture.phone }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
-const { FailedTurnRow } = await import("./ChatView");
+const { FailedTurnRow } = await import("./FailedTurnRow");
 
 const CREDITS = "Your OpenRouter account is out of credits. Add credits with OpenRouter, then run it again.";
 const show = (tool: NonNullable<Message["tool"]>, room = false) =>

@@ -10,7 +10,7 @@ Run the regression tests with synthetic Japanese text:
 
 ```sh
 node --test electron/speech-transcript.node-test.mjs
-pnpm exec vitest run electron/speech.test.mjs src/components/Composer.dictation.test.ts src/components/Composer.ime.test.ts src/components/CallView.composer.test.ts src/components/CallView.voiceSetup.test.ts src/components/ChatView.voice.test.ts --maxWorkers=1
+pnpm exec vitest run electron/speech.test.mjs src/components/Composer.dictation.test.ts src/components/Composer.ime.test.ts src/components/CallView.composer.test.ts src/components/CallView.voiceSetup.test.ts src/components/VoiceNoteBubble.test.ts --maxWorkers=1
 pnpm exec vitest run scripts/testing/dictation.e2e.test.ts --maxWorkers=1
 ```
 

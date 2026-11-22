@@ -4,7 +4,7 @@
 import { StrictMode, useMemo, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import type { InboxRow, InboxView } from "../shared/inbox";
-import { ChatView } from "@/components/ChatView";
+import { ChatV2 } from "@/components/chat-v2/ChatV2";
 import { InboxPanel } from "@/components/inbox/InboxPanel";
 import { loadLocale } from "@/lib/i18n";
 import { applySkinChoice, SKIN_IDS, type SkinId } from "@/lib/skins";
@@ -125,7 +125,7 @@ function Gallery() {
   return (
     <StoreContext.Provider value={value}>
       <Frame>
-        <div className="flex min-w-0 flex-1 flex-col"><ChatView bot={shown} /></div>
+        <div className="flex min-w-0 flex-1 flex-col"><ChatV2 profile={shown} /></div>
         {surface === "panel" && <InboxPanel />}
       </Frame>
     </StoreContext.Provider>

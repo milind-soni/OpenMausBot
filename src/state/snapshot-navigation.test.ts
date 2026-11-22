@@ -23,10 +23,11 @@ class FixtureEventSource {
 
 const line = (id: string): Message => ({ id, at: 1, role: "user", kind: "text", text: id, parentId: null });
 const tasks = ["a", "b"].map(threadId => ({ threadId, title: threadId, createdAt: 1 }));
+let busy = false;
 const bot = (threadId: string, id = threadId): Bot => ({
   id: "bot", threadId, name: "Fixture", title: "", description: "", notifications: false,
   unread: false, color: "green", modelSelection: { instanceId: "fake", model: "fixture" },
-  tasks, messages: [line(id)], activeLeafId: id,
+  busy, tasks: tasks.map(task => ({ ...task, busy })), messages: [line(id)], activeLeafId: id,
 });
 const room = (threadId: string, id = threadId): Group => ({
   id: "room", threadId: `room-${threadId}`, name: "Fixture room", memberIds: [],
@@ -45,7 +46,7 @@ let dispatch!: Dispatch<Action>;
 function Probe() {
   ({ state, dispatch } = useStore());
   const active = state.bots.find(bot => bot.id === state.selectedId);
-  return state.chatV2 && active ? createElement(ChatV2, { key: active.threadId, profile: active }) : null;
+  return active ? createElement(ChatV2, { key: active.threadId, profile: active }) : null;
 }
 let root: Root;
 let container: HTMLDivElement;
@@ -75,12 +76,13 @@ const switchBot = async (threadId: string) => {
   await vi.waitFor(() => expect(shown().messages[0]?.id).toBe(`fresh-${threadId}`));
 };
 
-async function mount(v2: boolean, speech?: Partial<Window["ogb"]>, fixture?: {
+async function mount(idle: boolean, speech?: Partial<Window["ogb"]>, fixture?: {
   pages: Record<string, { messages: Message[]; hasMore: boolean }>;
   setupRequests?: unknown[];
   quote?: { message: Message; onActivePath: boolean };
   lastReadMessageId?: string;
 }) {
+  busy = !idle;
   snapshots = 0;
   sends = [];
   retries = [];
@@ -148,11 +150,11 @@ async function mount(v2: boolean, speech?: Partial<Window["ogb"]>, fixture?: {
   root = createRoot(container);
   const app = createElement(StoreProvider, null, createElement(Probe));
   flushSync(() => root.render(speech ? createElement(DesktopCapabilitiesProvider, null, app) : app));
-  if (!v2) flushSync(() => dispatch({ type: "chatView", v2: false }));
+
   FixtureEventSource.current.send({ kind: "hello", resumed: false, cursor: "fixture:0" });
   await vi.waitFor(() => {
     expect(state.hydrated).toBe(true);
-    if (!v2) expect(shown().needsHistory).toBe(false);
+    if (!idle) expect(shown().needsHistory).toBe(false);
   });
 }
 afterEach(() => {

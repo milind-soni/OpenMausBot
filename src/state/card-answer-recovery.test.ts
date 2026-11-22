@@ -42,7 +42,6 @@ const answers: Record<string, unknown> = {
 };
 let respond: () => Promise<Response>;
 const requests: string[] = [];
-const cardWrites: Array<{ path: string; body: Record<string, unknown> }> = [];
 const json = (body: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(body), { status }));
 
 const { StoreProvider, useStore } = await import("./store");
@@ -68,11 +67,8 @@ beforeAll(async () => {
   vi.stubGlobal("EventSource", FixtureEventSource);
   vi.stubGlobal("fetch", (path: string, options?: RequestInit) => {
     requests.push(path);
-    if (path.includes("/cards/") && options?.body) cardWrites.push({ path, body: JSON.parse(String(options.body)) });
     if (path.startsWith("/api/bots?")) return json({ bots: [bot], groups: [room] });
-    if (path.startsWith("/api/threads/bot-fork/messages?")) return json({ messages: [question("ask")], activeLeafId: "ask", hasMore: false });
     if (path.startsWith("/api/threads/room-fork/messages?")) return json({ messages: [question("room-ask")], activeLeafId: "room-ask", hasMore: false });
-    if (path.startsWith("/api/threads/choice-fork/messages?")) return json({ messages: [choice("choice")], activeLeafId: "choice", hasMore: false });
     if (path.endsWith("/respond")) return respond();
     return json(answers[path.replace(/\?since=[^&]*$/, "")] ?? {});
   });
@@ -87,7 +83,6 @@ beforeAll(async () => {
 beforeEach(() => {
   respond = () => json({ error: "the bot is busy" }, 500);
   requests.length = 0;
-  cardWrites.length = 0;
   flushSync(() => dispatch({ type: "closeForkPanel" }));
 });
 afterAll(() => {
@@ -112,7 +107,6 @@ describe("answering a waiting card", () => {
   });
 
   it.each([
-    { kind: "bot" as const, ownerId: "bot", threadId: "bot-fork", messageId: "ask", groupId: undefined },
     { kind: "group" as const, ownerId: "room", threadId: "room-fork", messageId: "room-ask", groupId: "room" },
   ])("answers and reopens a failed card in the $kind fork without changing the main conversation", async ({ kind, ownerId, threadId, messageId, groupId }) => {
     flushSync(() => dispatch({ type: "openForkPanel", kind, ownerId, threadId }));
@@ -130,17 +124,6 @@ describe("answering a waiting card", () => {
     expect(roomCard("room-ask")?.answered).toBeUndefined();
   });
 
-  it("settles a choice in the bot fork without settling the copied card in the main chat", async () => {
-    flushSync(() => dispatch({ type: "openForkPanel", kind: "bot", ownerId: "bot", threadId: "choice-fork" }));
-    await settle();
-    flushSync(() => dispatch({ type: "answerCard", botId: "bot", threadId: "choice-fork", messageId: "choice", answer: "Right" }));
-    expect(card(seen.forkPanel ?? undefined, "choice")).toMatchObject({ answered: "Right", dismissed: true });
-    expect(botCard("choice")?.answered).toBeUndefined();
-    await settle();
-    expect(cardWrites).toContainEqual({ path: "/api/bots/bot/cards/choice",
-      body: { answered: "Right", dismissed: true, threadId: "choice-fork" } });
-    expect(requests).toContain("/api/bots/bot/messages");
-  });
 
   it("keeps a card the server settled while the failed request was out", async () => {
     let fail!: () => void;

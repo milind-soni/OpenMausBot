@@ -373,7 +373,7 @@ const cpuDelta = (before: Record<string, number>, after: Record<string, number>)
 const COMPONENT_GROUPS: Record<string, RegExp> = {
   sidebar: /^(Sidebar|BotThreadList|BotListItem|GroupListItem|PinnedCircle|ThreadRow|PlacesRail)/,
   composer: /Composer|MentionTextarea/,
-  transcript: /^(ChatView|ChatRows?|MessagesList|Bubble|MessageActions|ReactionChips|AttachmentGallery|ActivityChip|TurnPresence|CallRecordRow)/,
+  transcript: /^(ChatV2|ChatWork|Row|MessageActions|ReactionChips|AttachmentGallery|ActivityChip|TurnPresence|CallRecordRow)/,
   markdown: /Markdown/,
   avatars: /Avatar/,
 };

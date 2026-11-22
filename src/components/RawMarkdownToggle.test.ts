@@ -1,6 +1,5 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { setLocale } from "@/lib/i18n";
 import { locales } from "@/locales";
@@ -75,9 +74,4 @@ describe("RawMarkdownView", () => {
     expect(markup).not.toContain("<script>");
   });
 
-  it("remounts the message boundary when toggling away from a failed renderer", () => {
-    const source = readFileSync(new URL("./ChatView.tsx", import.meta.url), "utf8");
-    expect(source).toContain('<MessageBoundary key={viewRaw ? "raw" : "rendered"}');
-    expect(source).toContain("<RawMarkdownView text={text} />");
-  });
 });

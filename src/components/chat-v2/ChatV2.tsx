@@ -59,7 +59,7 @@ import { ChatErrorBanner } from "../ChatErrorBanner";
 import { NewMessagesDivider } from "../NewMessagesDivider";
 import { LiveCallBar } from "../LiveCallBar";
 import { CallOverlay } from "../CallView";
-import { FailedTurnRow } from "../ChatView";
+import { FailedTurnRow } from "../FailedTurnRow";
 import { useSharedRun } from "../shared-run";
 import { SetupOffer } from "../SetupOffer";
 import { ReplyQuote } from "../ReplyQuote";

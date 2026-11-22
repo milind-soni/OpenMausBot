@@ -22,7 +22,6 @@ import { BOT_BUTTON, botButtonTone } from "@/lib/bot-button";
 import { closeInbox, currentInbox, currentInboxPanel, inboxVersion, openInbox, setInboxView, useInboxLoader } from "@/state/inbox";
 import { approvalRow, INBOX_NOW, inboxView, messageRow, questionRow, reportRow, settledRow } from "@/testing/inbox-fixture";
 import type { InboxRow, InboxView } from "../../../shared/inbox";
-import { InboxCardSlot } from "./InboxCard";
 import { InboxPanel } from "./InboxPanel";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -159,38 +158,6 @@ describe("the inbox panel", () => {
   });
 });
 
-describe("the inbox's card in the chat", () => {
-  const lines = (ids: string[]) => createElement("div", null, ...ids.map((id) => createElement(InboxCardSlot, { key: id, threadId: "inbox", messageId: id })));
-
-  it("sits once, under the newest line that needed the person, and opens the inbox", async () => {
-    await mount(lines([settledRow.id, reportRow.id, messageRow.id, questionRow.id, approvalRow.id]));
-    expect(document.querySelectorAll("[data-inbox-card]")).toHaveLength(1);
-    expect(document.querySelector('[data-inbox-card="open"]')!.getAttribute("aria-label")).toBe("2 need you · 2 for your info");
-    expect([...document.querySelectorAll("[data-inbox-card] [data-inbox-row]")].map((row) => (row as HTMLElement).dataset.inboxRow)).toEqual([approvalRow.id, questionRow.id]);
-    expect([...document.querySelectorAll('[data-inbox-card] [data-inbox-action="allow"]')].filter((button) => !button.closest("[data-inbox-row]")),
-      "the line the card sits under answers on its own card").toEqual([]);
-    await click('[data-inbox-card] [data-inbox-choice="Pricing"]');
-    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "decideRequest", threadId: "inbox", requestId: "req-question", behavior: "answer", message: "Pricing" }));
-    await click('[data-inbox-card] header button');
-    expect(currentInboxPanel()).toMatchObject({ open: true, reading: null });
-    await mount(createElement(InboxCardSlot, { threadId: "elsewhere", messageId: approvalRow.id }));
-    expect(document.querySelector("[data-inbox-card]"), "never in another conversation").toBeNull();
-  });
-
-  it("shrinks to one line when nothing waits, and moves under a new ask once it lands", async () => {
-    const caughtUp = inboxView([messageRow, reportRow, { ...settledRow }]);
-    shown({ ...caughtUp, anchor: settledRow.id });
-    await mount(lines([settledRow.id, reportRow.id, messageRow.id]));
-    expect(document.querySelector('[data-inbox-card="caught-up"]')?.textContent).toContain("All caught up · 2 for your info");
-    const later = { ...approvalRow, id: "line-later" };
-    await act(async () => { shown({ ...inboxView([later, messageRow, reportRow, settledRow]), anchor: later.id }); });
-    await mount(lines([settledRow.id, reportRow.id, messageRow.id, later.id]));
-    const cards = document.querySelectorAll("[data-inbox-card]");
-    expect(cards).toHaveLength(1);
-    expect(cards[0]!.getAttribute("data-inbox-card")).toBe("open");
-  });
-});
-
 describe("answer buttons in the asking bot's colour", () => {
   const reporter = { id: "reporter", name: "Reporter", color: "orange" } as Bot;
   /** The answer under a line, not the quick action on the row itself. */
@@ -202,11 +169,8 @@ describe("answer buttons in the asking bot's colour", () => {
     expect(button.style.getPropertyValue("--bot-button-ink")).toBe(botButtonTone("orange").ink);
   };
 
-  it("paints Allow on the chat's card and in the panel in the colour of the bot the line is from", async () => {
+  it("paints Allow in the panel in the colour of the bot the line is from", async () => {
     shown({ ...inboxView(), anchor: questionRow.id });
-    await mount(createElement(InboxCardSlot, { threadId: "inbox", messageId: questionRow.id }), [reporter]);
-    own('[data-inbox-card] [data-inbox-action="allow"]');
-    expect(answer('[data-inbox-card] [data-inbox-action="deny"]').className.split(" ")).not.toContain(BOT_BUTTON);
     openInbox({ reading: approvalRow.id });
     await mount(createElement(InboxPanel), [reporter]);
     own('[data-inbox-reading] [data-inbox-action="allow"]');
@@ -219,8 +183,9 @@ describe("answer buttons in the asking bot's colour", () => {
     expect(send.className.split(" ")).not.toContain(BOT_BUTTON);
     expect(send.className.split(" ")).toContain("bg-accent");
     shown({ ...inboxView(), anchor: questionRow.id });
-    await mount(createElement(InboxCardSlot, { threadId: "inbox", messageId: questionRow.id }));
-    expect(answer('[data-inbox-card] [data-inbox-action="allow"]').className.split(" ")).not.toContain(BOT_BUTTON);
+    openInbox({ reading: approvalRow.id });
+    await mount(createElement(InboxPanel));
+    expect(answer('[data-inbox-reading] [data-inbox-action="allow"]').className.split(" ")).not.toContain(BOT_BUTTON);
   });
 });
 

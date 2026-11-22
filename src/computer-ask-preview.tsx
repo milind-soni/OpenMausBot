@@ -5,7 +5,7 @@
 import { StrictMode, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import type { ComputerAskCard } from "../shared/computer-ask";
-import { ChatView } from "@/components/ChatView";
+import { ChatV2 } from "@/components/chat-v2/ChatV2";
 import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { WindowsLocalControl } from "@/components/WindowsLocalControl";
 import { applySkinChoice, SKIN_IDS, type SkinId } from "@/lib/skins";
@@ -66,7 +66,7 @@ function Gallery() {
   const value = { state, dispatch: () => {}, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
   return (
     <StoreContext.Provider value={value}>
-      <Frame><div className="flex min-w-0 flex-1 flex-col" data-preview="chat"><ChatView bot={bot} /></div></Frame>
+      <Frame><div className="flex min-w-0 flex-1 flex-col" data-preview="chat"><ChatV2 profile={bot} /></div></Frame>
     </StoreContext.Provider>
   );
 }

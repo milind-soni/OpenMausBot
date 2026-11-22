@@ -44,7 +44,7 @@ export function OptionCard({
   const card = message.card;
   const bot = state.bots.find((candidate) => candidate.id === botId);
   const panel = state.forkPanel;
-  const transcript = panel && panel.threadId === threadId && panel.kind === (groupId ? "group" : "bot") && panel.ownerId === (groupId ?? botId)
+  const transcript = panel && panel.threadId === threadId && panel.ownerId === groupId
     ? visibleMessages(panel)
     : groupId
       ? state.groups.find((group) => group.id === groupId && group.threadId === threadId)?.messages ?? []

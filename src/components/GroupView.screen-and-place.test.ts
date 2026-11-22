@@ -48,7 +48,7 @@ const render = (members: Bot[], g: Group) => {
 };
 
 describe("GroupView: computer/browser session visibility", () => {
-  it("loads a screenshot message through the image route, matching the 1:1 ChatView", () => {
+  it("loads a screenshot message through the image route", () => {
     const markup = render([bot()], group({
       messages: [{ id: "shot", role: "bot", kind: "screen", hasImage: true, mime: "image/png", at: 1, from: { botId: "aleta", name: "Aleta", color: "green" } }] as Message[],
     }));
@@ -63,7 +63,7 @@ describe("GroupView: computer/browser session visibility", () => {
     expect(markup).not.toContain("PRIVATE_BASE64_PIXELS");
   });
 
-  it("drops a screen message with no image, same as ChatView", () => {
+  it("drops a screen message with no image", () => {
     const markup = render([bot()], group({
       messages: [{ id: "shot", role: "bot", kind: "screen", at: 1, from: { botId: "aleta", name: "Aleta", color: "green" } }] as Message[],
     }));
@@ -92,7 +92,7 @@ describe("GroupView: computer/browser session visibility", () => {
 });
 
 describe("GroupView: the transcript", () => {
-  it("holds every row's positioned parts inside it, as ChatView does, so nothing in it can make the window scroll", () => {
+  it("holds every row's positioned parts inside it, so nothing in it can make the window scroll", () => {
     const markup = render([bot()], group());
     const transcript = markup.match(/class="(glass-scroller-content[^"]*)"[^>]*role="log"/)?.[1];
     expect(transcript?.split(" ")).toContain("relative");

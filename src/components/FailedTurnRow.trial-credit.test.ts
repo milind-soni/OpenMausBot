@@ -23,7 +23,7 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => null }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
-const { FailedTurnRow } = await import("./ChatView");
+const { FailedTurnRow } = await import("./FailedTurnRow");
 const engine = { instanceId: "trial-credit", trialCredit: "used_up" } as unknown as InstanceInfo;
 const stored = (kind: keyof typeof TRIAL_CREDIT_REFUSED): NonNullable<Message["tool"]> => failedTurnTool(TRIAL_CREDIT_REFUSED[kind], { setup: kind !== "paused" });
 const show = (tool: NonNullable<Message["tool"]>, onRetry?: () => void) => {

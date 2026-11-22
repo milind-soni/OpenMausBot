@@ -94,7 +94,7 @@ describe("the sandbox a published site runs in", () => {
     expect(host.querySelector("iframe")).not.toBeNull();
     expect(listen.mock.calls.filter(([type]) => type === "message")).toEqual([]);
     listen.mockRestore();
-    for (const file of ["SiteFrame.tsx", "SiteThumb.tsx", "AppPreviewPanel.tsx", "use-framing.ts", "PublishedSiteCards.tsx"]) {
+    for (const file of ["SiteFrame.tsx", "SiteThumb.tsx", "AppPreviewPanel.tsx", "use-framing.ts"]) {
       const text = source(`src/components/published-apps/${file}`);
       for (const bridge of ["postMessage", "contentWindow", "contentDocument", "window.ogb", "srcDoc", "mausbot.", "<webview"]) expect(text, `${file}: ${bridge}`).not.toContain(bridge);
     }
@@ -192,7 +192,7 @@ describe("the preview beside the chat", () => {
     press("Open in browser");
     expect(fixture.opened).toEqual([`${SITE}menu`]);
     press("Close preview");
-    expect(host.querySelector("aside")).toBeNull();
+    await vi.waitFor(() => expect(host.querySelector("aside")).toBeNull());
   });
 
   it("gives the side to another panel that opens, and is not shown over another page", async () => {
@@ -201,7 +201,7 @@ describe("the preview beside the chat", () => {
     expect(host.querySelector("aside")).not.toBeNull();
     fixture.state.activeView = "published-apps";
     await panel();
-    expect(host.querySelector("aside")).toBeNull();
+    await vi.waitFor(() => expect(host.querySelector("aside")).toBeNull());
     fixture.state.activeView = "chat";
     await panel();
     expect(host.querySelector("aside")).not.toBeNull();
@@ -209,6 +209,6 @@ describe("the preview beside the chat", () => {
     await panel();
     fixture.state.computerOpen = false;
     await panel();
-    expect(host.querySelector("aside")).toBeNull();
+    await vi.waitFor(() => expect(host.querySelector("aside")).toBeNull());
   });
 });

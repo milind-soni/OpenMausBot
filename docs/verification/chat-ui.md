@@ -217,11 +217,11 @@ The desktop shows a reply once it is finished; while a turn runs, the chat
 shows the bot's busy state. The renderer keeps no streamed text:
 `runtimeFrameAction` in `src/state/store.tsx` passes only the model-variant
 frames on, and `src/state/store.test.ts` checks that a reply or reasoning
-delta leaves the store state unchanged. `src/components/ChatView.follow.test.ts`
+delta leaves the store state unchanged. `src/hooks/use-transcript-viewport.test.ts`
 checks that the finished reply still moves a following transcript to its end.
 
 ```sh
-pnpm exec vitest run src/state/store.test.ts src/components/ChatView.follow.test.ts
+pnpm exec vitest run src/state/store.test.ts src/hooks/use-transcript-viewport.test.ts
 ```
 
 ## What a bot is doing right now
@@ -293,8 +293,7 @@ The engine-level checks, which need no browser, are
 `server/drivers/codex.test.ts`, `server/drivers/pi.test.ts` and
 `server/drivers/openai-chat-tools.test.ts` (each OpenAI-compatible provider).
 The client's checks are `src/state/live-reply.test.ts`,
-`src/components/ChatView.live-reply.test.ts` and
-`src/components/ChatMarkdown.streaming.test.ts`.
+and `src/components/ChatMarkdown.streaming.test.ts`.
 
 The before-and-after screenshots were removed because they showed real example
 data; run the `scripts/control-omb.ts ui launch` command above to see the
@@ -305,8 +304,7 @@ The checks are `server/step-summary.test.ts` (the words and their redaction),
 for every engine, the sign of life, the output's last lines),
 `server/bot-visibility.test.ts` (a step reaches only someone who may see the
 chat), `src/components/TurnPresence.test.ts`,
-`src/components/ChatView.live-status.test.ts` (the line and the card) and
-`src/components/Sidebar.simple-mode.test.ts` (the sidebar row).
+and `src/components/Sidebar.simple-mode.test.ts` (the sidebar row).
 
 ## Bot setup and MCP access recipe
 

@@ -273,7 +273,7 @@ describe("launch bundle", () => {
     const page = launchModules("main.tsx");
     expect(page.has("pair/PairPage.tsx")).toBe(true);
     expect(page.has("components/HomeScreen.tsx")).toBe(true);
-    expect(["App.tsx", "state/store.tsx", "components/Sidebar.tsx", "components/ChatView.tsx"].filter((file) => page.has(file))).toEqual([]);
+    expect(["App.tsx", "state/store.tsx", "components/Sidebar.tsx", "components/chat-v2/ChatV2.tsx"].filter((file) => page.has(file))).toEqual([]);
   });
 
   it("carries English and no other language: the one a person chose loads before the first render", () => {
@@ -284,7 +284,7 @@ describe("launch bundle", () => {
     const rail = launchModules("rail.tsx");
     expect(rail.has("components/PlacesRail.tsx")).toBe(true);
     expect(rail.has("components/PlaceAddSheet.tsx")).toBe(true);
-    expect(["App.tsx", "state/store.tsx", "components/Sidebar.tsx", "components/ChatView.tsx"].filter((file) => rail.has(file))).toEqual([]);
+    expect(["App.tsx", "state/store.tsx", "components/Sidebar.tsx", "components/chat-v2/ChatV2.tsx"].filter((file) => rail.has(file))).toEqual([]);
     expect([...rail].filter((file) => file.startsWith("locales/")).sort()).toEqual(["locales/en.json", "locales/index.ts"]);
   });
 });
