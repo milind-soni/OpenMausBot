@@ -14,7 +14,7 @@ const servers: Server[] = [];
 afterEach(async () => { await Promise.all(servers.splice(0).map((server) => new Promise((done) => server.close(done)))); });
 
 const ADA = { kind: "session", scopes: ["client"], session: { id: "s1", email: "ada@acme.test" } } as unknown as RequestAuth;
-const BOT = { id: "scout", threadId: "open", tasks: [{ threadId: "open" }, { threadId: "archived" }, { threadId: "rui-private" }] };
+const BOT = { id: "scout", threadId: "open", tasks: [{ threadId: "open" }, { threadId: "archived", archivedAt: 5 }, { threadId: "rui-private" }] };
 const PAGE: PublishedPageRecord = { pageId: "aaaaaaaaaaaaaaaaaaaa", url: "https://aaaaaaaaaaaaaaaaaaaa.mausbot.page/", title: "Menu", botId: "scout", source: "/w/menu",
   cards: [{ threadId: "rui-private", messageId: "p1" }], createdAt: 1, updatedAt: 1 };
 

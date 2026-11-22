@@ -25,7 +25,7 @@ export const messageRows: BotLibraryRows = {
   fileReplies: (threadIds, limit) => prepared(
     `SELECT thread_id AS threadId, id AS messageId, at, text, json_extract(json, '$.attachments') AS attachments FROM messages
      WHERE ${IN_THREADS} AND role = 'bot' AND kind = 'text'
-       AND (json_extract(json, '$.attachments') IS NOT NULL OR instr(text, '](') > 0 OR instr(text, ']:') > 0 OR instr(text, '<file:') > 0)
+       AND (instr(text, '](') > 0 OR instr(text, ']:') > 0 OR instr(text, '<file:') > 0 OR json_extract(json, '$.attachments') IS NOT NULL)
      ORDER BY at DESC, rowid LIMIT ?`,
   ).all(JSON.stringify(threadIds), limit) as ReturnType<BotLibraryRows["fileReplies"]>,
 };
