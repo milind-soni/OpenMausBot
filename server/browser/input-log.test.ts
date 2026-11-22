@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildDevsReport } from "../devs-report.ts";
 import { actionKind, botReason, createBrowserInputLog, pageAction } from "./input-log.ts";
+import { BROWSER_STARTING } from "./service.ts";
 
 describe("the browser input log", () => {
   it("prints one line a drop with its reason, engine, transport and session, and counts every one", () => {
@@ -56,6 +57,8 @@ describe("the browser input log", () => {
     expect(botReason("Element '#covered' is covered by <div#cover> at its click point, so the input would land on that element instead.")).toBe("target_not_actionable");
     expect(botReason("Browser tools are paused while a person controls this browser.")).toBe("person_holds_control");
     expect(botReason("The browser engine is stuck. Press Restart.")).toBe("browser_stuck");
+    expect(botReason(BROWSER_STARTING), "still starting is not a lost call").toBe("browser_starting");
+    expect(botReason("The browser did not answer this agent_browser_click call.")).toBe("call_lost");
     expect(botReason("Something nobody expected")).toBe("engine_error");
   });
 
