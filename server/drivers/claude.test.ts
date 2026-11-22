@@ -2992,6 +2992,66 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(instance.adapter.capabilities.localComputerMcp).toBe(true);
   });
 
+  it("mounts a cloud computer without pre-allowing its tools", async () => {
+    await create();
+    const dump = join(scratch, "cloud-dump.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    await instance.adapter.sendTurn({
+      threadId: "t-cloud",
+      text: "fill in the form",
+      approvalMode: "ask",
+      integrations: {
+        localComputer: {
+          command: process.execPath,
+          args: ["/fake/harness-mcp", "computer"],
+          env: { OMB_HARNESS_URL: "http://127.0.0.1:1" },
+          platform: "linux",
+        },
+      },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.mcpConfig.mcpServers.computer).toBeDefined();
+    const allowed = seen.argv[seen.argv.indexOf("--allowedTools") + 1];
+    expect(allowed).not.toContain("mcp__computer");
+  });
+
+  it("asks before a cloud computer acts, with session allowance like a command", async () => {
+    await create("hang");
+    await instance.adapter.sendTurn({
+      threadId: "t-cloud-ask",
+      text: "go",
+      approvalMode: "ask",
+      integrations: {
+        localComputer: {
+          command: process.execPath,
+          args: ["/fake/harness-mcp", "computer"],
+          env: {},
+          platform: "linux",
+        },
+      },
+    });
+    await recorder.until((e) => e.type === "session.started");
+
+    const conn = connect(permissionSocketPath("t-cloud-ask"));
+    await new Promise<void>((resolve, reject) => {
+      conn.on("connect", resolve);
+      conn.on("error", reject);
+    });
+    conn.write(JSON.stringify({ t: "ask", id: "ask-1", tool: "mcp__computer__click", input: { x: 1, y: 2 } }) + "\n");
+
+    const opened = await recorder.until((e) => e.type === "request.opened" && e.requestId === "ask-1");
+    expect(opened).toMatchObject({ requestType: "permission", tool: "mcp__computer__click" });
+    expect(opened).toHaveProperty("allowSession", true);
+    expect(opened).toHaveProperty("approvalScope", undefined);
+    await instance.adapter.respondToRequest("t-cloud-ask", "ask-1", { behavior: "deny" });
+
+    conn.end();
+    await instance.adapter.interruptTurn("t-cloud-ask");
+    await recorder.until((e) => e.type === "turn.completed");
+  });
+
   it("resumes with --resume when a cursor exists and reports that session id", async () => {
     await create();
     const dump = join(scratch, "dump.json");
