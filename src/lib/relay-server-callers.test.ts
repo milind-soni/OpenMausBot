@@ -16,8 +16,8 @@ function appFiles(): string[] {
 }
 
 /** A call to fetch, whitespace or a line break before its `(` too, or fetch handed on as a value (`fetchImpl = fetch`,
- * `run(fetch)`, `impl ?? fetch`, `custom || fetch`); not `.fetch(` or a `fetch:` key. */
-const BARE_FETCH = /(?<![\w$.])fetch\s*\(|(?:[=(,:]|\?\?|\|\||&&)\s*fetch\b(?![\w$.(]|\s*[:(])/g;
+ * `run(fetch)`, `impl ?? fetch`, `custom || fetch`, `return fetch`, `() => fetch`); not `.fetch(` or a `fetch:` key. */
+const BARE_FETCH = /(?<![\w$.])fetch\s*\(|(?:[=(,:]|=>|\?\?|\|\||&&|\breturn)\s*fetch\b(?![\w$.(]|\s*[:(])/g;
 
 /** The 1-based lines of `source` with a bare fetch, `//` comments left out. */
 function bareFetchLines(source: string): number[] {
@@ -38,6 +38,7 @@ describe("app requests to its own server", () => {
     expect(bareFetchLines('const a = 1;\nawait fetch\n  ("/api/bots");')).toEqual([2]);
     expect(bareFetchLines("const run = fetch;\nuse(fetch)")).toEqual([1, 2]);
     expect(bareFetchLines('const impl = options.fetchImpl ?? fetch;\nconst alt = custom || fetch;')).toEqual([1, 2]);
+    expect(bareFetchLines("function impl() { return fetch; }\nconst get = () => fetch;")).toEqual([1, 2]);
     expect(bareFetchLines('link.fetch("/api/bots");\nconst x = { fetch: go };\n// fetch("/api/bots")\nserverFetch("/api/bots");')).toEqual([]);
     expect(bareFetchLines("const UNREACHABLE = /Load failed|fetch failed$/i;")).toEqual([]);
   });

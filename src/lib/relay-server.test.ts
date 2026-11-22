@@ -124,9 +124,10 @@ describe("serverFetch", () => {
     const { link, sent } = fakeLink(() => new Response(null, { status: 204 }));
     setRelayLink(link);
     await serverFetch("https://app.example/api/bots/b1/browser/upload?chooser=c1&token=t", { method: "POST", body: new FormData() });
+    await serverFetch("https://APP.example:443/api/bots");
     await serverFetch("https://other.example/api/bots");
     await serverFetch("https://app.example/apiary");
-    expect(sent.map((one) => one.path)).toEqual(["/api/bots/b1/browser/upload?chooser=c1&token=t"]);
+    expect(sent.map((one) => one.path)).toEqual(["/api/bots/b1/browser/upload?chooser=c1&token=t", "/api/bots"]);
     expect(plain.mock.calls.map(([path]) => path)).toEqual(["https://other.example/api/bots", "https://app.example/apiary"]);
   });
 
