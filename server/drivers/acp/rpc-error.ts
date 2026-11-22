@@ -44,3 +44,11 @@ export function acpMissingSession(error: unknown, cursor: string): boolean {
   const named = refusal.message.match(MISSING_SESSION_MESSAGE);
   return named?.[1] === cursor;
 }
+
+/** Whether a failed session/load must reach the person instead of falling back to a fresh session. OpenCode sends invalidParams
+ * with only the rejected sessionId; Cursor puts the id in the message: Invalid params: Session "<id>" not found (session/load).
+ * Other invalidParams must not erase history. */
+export function acpLoadFailureFatal(error: unknown, cursor: string, classification: string | undefined): boolean {
+  return classification === "invalid_credentials" || classification === "inactive_subscription"
+    || ((error as any)?.code === -32602 && !acpMissingSession(error, cursor));
+}
