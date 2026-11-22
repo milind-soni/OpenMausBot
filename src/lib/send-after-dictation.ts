@@ -49,9 +49,14 @@ function subscribe(listener: () => void): () => void {
 }
 
 export function setSendAfterDictation(enabled: boolean): void {
+  // Held for this window only until it is saved: after that the saved value counts, so another window can change it.
   sessionChoice = enabled;
   try {
-    storage()?.setItem(SEND_AFTER_DICTATION_KEY, enabled ? "1" : "0");
+    const store = storage();
+    if (store) {
+      store.setItem(SEND_AFTER_DICTATION_KEY, enabled ? "1" : "0");
+      sessionChoice = undefined;
+    }
   } catch {
   }
   notify();

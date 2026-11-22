@@ -56,7 +56,8 @@ export function useComposerDictation({ draftId, text, onText, onDone }: {
     };
     cancel.current = cancelSession;
     const spoke = () => {
-      if (lastText !== base) setHeard((count) => count + 1);
+      // Only the words as dictated: a draft a picker or an edit changed since the last words is not sent.
+      if (lastText !== base && draft.current.text === lastText) setHeard((count) => count + 1);
     };
     finish.current = recordsClips(bridge) ? () => void bridge.speechFinish?.() : () => {
       cancelSession();

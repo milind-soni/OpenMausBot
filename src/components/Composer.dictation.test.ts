@@ -227,6 +227,45 @@ describe("native dictation in the real composer", () => {
       expect(sent()).toEqual([]);
       expect(input().value).toBe("手で直した。");
     });
+
+    // Typed through the field, so the caret moves and a picker can open; typing stops the first session.
+    const type = (value: string) => flushSync(() => {
+      const field = input();
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, value);
+      field.setSelectionRange(value.length, value.length);
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const key = (name: string) => flushSync(() => input().dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true })));
+    const dictateWithPickerOpen = () => {
+      type("/");
+      click(t("composer.dictation.start"));
+      hear("ゴール");
+      expect(container.textContent).toContain("/goal");
+    };
+
+    it("stops without sending when Esc closes a picker", () => {
+      dictateWithPickerOpen();
+      key("Escape");
+      expect(speechStop).toHaveBeenCalled();
+      flushSync(() => end({ code: 0, reason: "completed" }));
+      expect(sent()).toEqual([]);
+      expect(input().value).toBe("/ ゴール");
+    });
+
+    it("does not send a draft a picker changed after the last words, when speech ends", () => {
+      dictateWithPickerOpen();
+      key("Enter");
+      expect(input().value).not.toBe("/ ゴール");
+      flushSync(() => end({ code: 0, reason: "completed" }));
+      expect(sent()).toEqual([]);
+    });
+
+    it("does not send a draft a picker changed after the last words, when the mic is stopped", () => {
+      dictateWithPickerOpen();
+      key("Enter");
+      click(t("composer.dictation.stop"));
+      expect(sent()).toEqual([]);
+    });
   });
 
   it("leaves dictated text in the box when the setting is off", () => {

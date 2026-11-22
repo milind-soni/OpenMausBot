@@ -861,6 +861,7 @@ export function Composer({
               if (e.key === "Escape") {
                 e.preventDefault();
                 setDismissedSlashAt(slash?.start ?? null);
+                if (recording) stopDictation();
                 return;
               }
             }
@@ -879,6 +880,7 @@ export function Composer({
               if (e.key === "Escape") {
                 e.preventDefault();
                 setDismissedAt(mention?.start ?? null);
+                if (recording) stopDictation();
                 return;
               }
             }
