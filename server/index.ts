@@ -5437,6 +5437,7 @@ async function scheduleTurnDigest(input: {
   driverKind: string | undefined;
   instanceId?: string;
   reply: string;
+  error?: string;
   from?: Message["from"];
   isCurrent: () => boolean;
   usage?: { input: number; output: number; cachedInput?: number; costUsd?: number | null };
@@ -5461,6 +5462,7 @@ async function scheduleTurnDigest(input: {
       activities,
       memory,
       reply: input.reply,
+      ...(input.error ? { error: input.error } : {}),
       ...(input.usage ? { usage: input.usage } : {}),
       hookCoverage: coverageForDriver(input.driverKind, toolEvidence(activities, input.turnId), activities.some(m => m.kind === "activity" && m.turnId === input.turnId && m.tool?.itemId)),
     });
@@ -6623,6 +6625,7 @@ bus.subscribe((event: RuntimeEvent) => {
         pushStoppedTurn(event.turnId);
         break;
       }
+      console.warn(`[omb-turn] thread=${event.threadId} turn=${event.turnId ?? "none"} failed: ${redactSecretsInText(event.message).replace(/\s+/g, " ").slice(0, 600)}`);
       landParkedFiles(); // above the failure row, which stays the last, retryable line
       pushMessage({ role: "bot", kind: "activity", tool: failedTurnTool(event.message, event) });
       if (event.setup && bot) store.setTaskActivity(bot.id, event.threadId, "dead");
@@ -6746,6 +6749,7 @@ bus.subscribe((event: RuntimeEvent) => {
             threadId: event.threadId,
             turnId: completedTurnId,
             succeeded: event.ok,
+            ...(failed ? { error: failureDetail } : {}),
             driverKind: registry.get(selection.instanceId)?.driverKind,
             instanceId: selection.instanceId,
             reply,
