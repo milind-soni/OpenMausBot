@@ -25,9 +25,20 @@ describe("a bot whose setup failed once", () => {
     store.setTaskActivity(bot.id, later.threadId, "working");
     store.setTaskActivity(bot.id, later.threadId, "idle");
     expect(roster(store, bot.id)).toBe("unavailable — needs setup");
-    clearSetupFailures(store, bot.id);
+    clearSetupFailures(store, bot.id, later.threadId);
     expect(roster(store, bot.id)).toBe("available");
     expect(store.taskByThread(bot.id, failed.threadId)?.activity).toBe("idle");
+  });
+
+  it("keeps a conversation on another engine marked: a turn that works on one engine says nothing of another's sign-in", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const other = store.createTask(bot.id, "other engine", true, undefined, undefined, undefined, { instanceId: "codex", model: "gpt-5" })!;
+    const same = store.createTask(bot.id, "same engine")!;
+    store.setTaskActivity(bot.id, other.threadId, "dead");
+    clearSetupFailures(store, bot.id, same.threadId);
+    expect(store.taskByThread(bot.id, other.threadId)?.activity).toBe("dead");
+    expect(roster(store, bot.id)).toBe("unavailable — needs setup");
   });
 
   it("leaves other activities as they are", () => {
@@ -35,8 +46,8 @@ describe("a bot whose setup failed once", () => {
     const bot = store.createBot();
     const waiting = store.createTask(bot.id, "asks")!;
     store.setTaskActivity(bot.id, waiting.threadId, "waiting-on-you");
-    clearSetupFailures(store, bot.id);
+    clearSetupFailures(store, bot.id, waiting.threadId);
     expect(store.taskByThread(bot.id, waiting.threadId)?.activity).toBe("waiting-on-you");
-    clearSetupFailures(store, "no-such-bot");
+    clearSetupFailures(store, "no-such-bot", waiting.threadId);
   });
 });

@@ -6670,7 +6670,7 @@ bus.subscribe((event: RuntimeEvent) => {
       const held = facts.limit ?? (signedOutStop(facts.stopReason, failureDetail) ? "signed-out" as const : undefined); // a limit or a sign-out: one incident a stretch, the person told by its own notice
       const fileIncident = () => { if (broken && (!held || limitTakeover.firstIncident(broken.id, broken.modelSelection, held, facts.limitResetsAt))) reportIncident({ kind: "failed", bot: broken, threadId: event.threadId, detail: failureDetail, facts, notified: Boolean(held) }); };
       let directSettled = () => {}; const settledDirect = new Promise<void>((resolve) => { directSettled = resolve; }); if (failed && bot) void quotaSwitch.turnFailed(bot, event, internal, Promise.all([settledDirect, directTurnDispatchClaims.released(event.threadId)]));
-      else if (bot && event.ok) { quotaSwitch.turnSucceeded(bot, event.threadId); clearSetupFailures(store, bot.id); }
+      else if (bot && event.ok) { quotaSwitch.turnSucceeded(bot, event.threadId); clearSetupFailures(store, bot.id, event.threadId); }
       if (bot && event.ok && !stopped && completedTurnId && !routineRun && !coordinator.assignerOf(event.threadId)) askCards.ownQuestion(bot.id, event.threadId, completedTurnId);
       const lastReported = turnUsage.get(event.threadId);
       turnUsage.delete(event.threadId);
