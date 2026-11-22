@@ -1208,6 +1208,8 @@ export class Store {
       parentId: source.parentId ?? null,
       replyToId: source.replyToId,
       ...(source.reaction && source.text === text ? { reaction: source.reaction } : {}),
+      // Regenerate and Try again send the stored words back: an automation's line stays the automation's.
+      ...(source.automated === true && source.text?.trim() === text.trim() ? { automated: true } : {}),
       ...(sendId ? { sendId } : {}),
       ...(sender ? { sender } : {}),
       ...(dataContext ? { dataContext } : {}), ...from,
