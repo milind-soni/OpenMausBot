@@ -365,7 +365,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           if (!instance) return json(res, 404, { error: "unknown instance" });
           // The official local OAuth callback terminates on this machine, not a phone or a remote browser.
           if ((instance.authenticationMethod === "browser-pkce" || instance.authenticationMethod === "browser")
-            && (isProxied(req) || !isLoopbackHost(req.socket.remoteAddress))) {
+            && (isProxied(req) || !isLoopbackHost(req.socket.remoteAddress) || (auth.kind === "loopback" && auth.companionDevice !== undefined))) {
             if (instance.authenticationMethod === "browser") {
               return json(res, 403, { error: `This sign-in happens in a browser on the computer running ${productName()}. Open ${productName()} there to sign in.` });
             }

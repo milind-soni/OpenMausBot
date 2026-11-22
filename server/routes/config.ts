@@ -34,7 +34,7 @@ import type { ProviderRegistry } from "../harness/registry.ts";
 import { HOSTED_PROVIDER_SETTINGS_ERROR } from "../hosted-models.ts";
 import { forgetKey } from "../key-rejections.ts";
 import type { ComputerIdleTimer } from "../computer-idle.ts";
-import { PROVIDER_KEY_KINDS } from "../provider-key-check.ts";
+import { isPhoneKeyPatch, PROVIDER_KEY_KINDS } from "../provider-key-check.ts";
 import type { SessionRegistry } from "../sessions.ts";
 import type { SharedComputerControl } from "../shared-computer-control.ts";
 import type { SharedComputers } from "../shared-computers.ts";
@@ -138,6 +138,9 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
     }
     if ((method === "PUT" || method === "PATCH") && path === "/api/config") {
       const body = await readBody(req);
+      if (auth.kind === "loopback" && auth.companionDevice !== undefined && !isPhoneKeyPatch(body)) {
+        return json(res, 403, { error: "From a phone, only API keys can be changed. Change other settings on your computer." });
+      }
       if (hostedModels && ["instances", "anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "modelgo", "meta", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
       const patch = parseConfigPatchForPerson(body);
       if (deps.cloudTeam && patch.browserEngine?.egress?.proxy !== undefined && !(auth.kind === "session" && auth.session.teamRole === "owner")) {
