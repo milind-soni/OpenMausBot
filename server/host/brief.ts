@@ -272,6 +272,10 @@ export function createBrief(deps: BriefDeps) {
         case "place": return row("", w.unreachable, w.chooseAnother, { text: words("brief.row.place"), note: words("brief.row.placeNote") });
         case "question": { const bot = deps.store.bot(item.botId)?.name; return row(bot ?? "", w.asked(bot ?? w.aBot), clip(item.text, 140), { text: words("brief.row.asked", { name: bot ?? words("brief.part.aBot") }) }); }
         case "message": return row(item.from, w.asked(item.from), clip(item.text, 140), { text: words("brief.row.asked", { name: item.from }) });
+        case "edu-proposal": {
+          const title = clip(item.title, 80);
+          return row(item.proposalId, w.eduProposal(title), w.eduDecide, { text: words("brief.row.eduProposal", { title }), note: words("brief.row.eduDecide") });
+        }
       }
     });
   }

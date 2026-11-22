@@ -11,6 +11,8 @@ export interface TodayRouteDeps {
   asks?: (auth: RequestAuth, botId: string | undefined, threadId: string) => boolean;
   /** A Team Cloud: the teammate tags and passed messages waiting for this session's person, after everything else. */
   messages?: (auth: RequestAuth) => NeedsYouItem[];
+  /** Pending Edu brain proposals, shown to an admin. */
+  edu?: () => NeedsYouItem[];
   now?: () => number;
 }
 
@@ -27,16 +29,17 @@ export function createTodayRoutes(deps: TodayRouteDeps): RouteHandler {
       ...(asks ? { asks: (botId: string | undefined, threadId: string) => asks(auth, botId, threadId) } : {}),
     };
   };
+  const extra = (auth: RequestAuth) => [...(auth.scopes.includes("admin") ? deps.edu?.() ?? [] : []), ...(deps.messages?.(auth) ?? [])];
   return async ({ res, path, method, url, auth, json }) => {
     if (path === "/api/needs-you") {
       if (method !== "GET") return json(res, 405, { error: "method not allowed" });
-      return json(res, 200, { items: [...needsYouNow(deps.sources(), viewerFor(auth), deps.now?.() ?? Date.now()), ...(deps.messages?.(auth) ?? [])] });
+      return json(res, 200, { items: [...needsYouNow(deps.sources(), viewerFor(auth), deps.now?.() ?? Date.now()), ...extra(auth)] });
     }
     if (path !== "/api/today") return PASS;
     if (method !== "GET") return json(res, 405, { error: "method not allowed" });
     const since = Number(url.searchParams.get("since") ?? Number.NaN);
     if (!Number.isFinite(since)) return json(res, 400, { error: "since must be a time in milliseconds" });
     const report = todayReport(deps.sources(), viewerFor(auth), since, deps.now?.() ?? Date.now());
-    return json(res, 200, { ...report, needsYou: [...report.needsYou, ...(deps.messages?.(auth) ?? [])] });
+    return json(res, 200, { ...report, needsYou: [...report.needsYou, ...extra(auth)] });
   };
 }

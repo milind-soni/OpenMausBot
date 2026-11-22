@@ -203,6 +203,19 @@ describe("the Bot API door on the webhook receiver", () => {
     expect(h.recorded.map((row) => (row as { action: string }).action)).toEqual(["bot-api.on", "bot-api.new-key"]);
   });
 
+  it("returns the reply past an Edu proposal card, which waits in the app and holds no turn", async () => {
+    const h = await harness((fake, _botId, _prompt, opts) => {
+      setTimeout(() => {
+        fake.store.appendMessage(opts.threadId, { role: "bot", kind: "text", text: "Noted." });
+        fake.store.appendMessage(opts.threadId, { role: "bot", kind: "options", card: { title: "Save to b1's Edu brain?", subtitle: "Use ISO dates", options: ["Approve", "Reject"], requestId: "edu-1", tool: "edu_propose_canonical",
+          eduProposal: { id: "K-iso", title: "Use ISO dates", kind: "standard", band: "verified", why: "", brain: "/b", global: false, location: "/b" } } as never });
+        opts.onSettled({ ok: true, text: "Noted." });
+      }, 30);
+    });
+    const key = (await h.app("POST", "/api/bots/b1/bot-api", { enabled: true })).body.key as string;
+    expect(await h.call("b1", key, { message: "Remember ISO dates" })).toMatchObject({ status: 200, body: { reply: "Noted." } });
+  });
+
   it("stops at an approval the bot asks for and says so; the caller reads the thread again later", async () => {
     const h = await harness((fake, _botId, _prompt, opts) => {
       setTimeout(() => fake.store.appendMessage(opts.threadId, { role: "bot", kind: "options", card: { title: "Approval needed", subtitle: "Bash", options: ["Allow", "Deny"], requestId: "r1", requestType: "permission" } as never }), 30);

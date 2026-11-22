@@ -149,3 +149,9 @@ export class CommandAllowlistStore {
     this.rules = rules;
   }
 }
+
+/** The engines whose native command approvals a remembered rule can answer. */
+export const COMMAND_ALLOWLIST_DRIVERS: ReadonlySet<string> = new Set([
+  "claudeAgent", "codex", "antigravityAgent", "grokAgent", "opencodeGo", "kimiAgent",
+  "droidAgent", "cursorAgent", "qwenAgent", "geminiAgent", "hermesAgent", "customAcp",
+]);

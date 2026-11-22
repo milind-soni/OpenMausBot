@@ -24,6 +24,7 @@ function setup() {
   const route = createTodayRoutes({
     visibleFor: () => new VisibleSet(store.bots, store.groups, SEES_EVERYTHING),
     sources: () => ({ bots: store.bots, groups: store.groups, routines: null, engines: [], parked: [] }),
+    edu: () => [{ kind: "edu-proposal", id: "edu:k", at: NOW, botId: bot.id, proposalId: "K-iso", title: "Use ISO dates", global: false }],
     now: () => NOW,
   });
   const call = async (method: string, target: string, scopes: RequestAuth["scopes"] = ["admin", "client"]) => {
@@ -46,7 +47,7 @@ describe("GET /api/today", () => {
     expect(status).toBe(200);
     expect(body).toMatchObject({ since: NOW - 3_600_000, until: NOW, tiles: [], minutesSaved: 0, routineCount: 0 });
     expect(body.lines).toEqual([expect.objectContaining({ ok: false, error: "Invalid API key · Please run /login" })]);
-    expect(body.needsYou.map((item: { kind: string }) => item.kind)).toEqual(["signed-out", "question"]);
+    expect(body.needsYou.map((item: { kind: string }) => item.kind)).toEqual(["signed-out", "question", "edu-proposal"]);
   });
 
   it("refuses a missing window and other methods, and leaves other paths alone", async () => {
@@ -60,7 +61,7 @@ describe("GET /api/today", () => {
   it("gives engine and app fixes only to an admin, and opens the read to a paired client", async () => {
     const { call } = setup();
     const admin = await call("GET", `/api/today?since=${NOW - 3_600_000}`);
-    expect(admin.body.needsYou.map((item: { kind: string }) => item.kind)).toEqual(["signed-out", "question"]);
+    expect(admin.body.needsYou.map((item: { kind: string }) => item.kind)).toEqual(["signed-out", "question", "edu-proposal"]);
     expect((await call("GET", `/api/today?since=${NOW - 3_600_000}`, ["client"])).body.needsYou.map((item: { kind: string }) => item.kind)).toEqual(["question"]);
     expect(requiredScope("GET", "/api/today")).toBe("client");
     expect(requiredScope("POST", "/api/today")).toBe("admin");

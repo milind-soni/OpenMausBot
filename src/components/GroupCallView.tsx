@@ -17,7 +17,7 @@ import { CallTargetButton, type CallButtonPlacement } from "./CallView";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { CALL_ENDPOINT_MS, speechBridge } from "@/lib/speech";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
-import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
+import { isRoutineApproval, isSkillApproval, spokenApprovalPrompt, turnApprovals } from "./PendingApproval";
 import { titledCard } from "./ApprovalCard";
 
 const YES = /^(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|allow|approve|approved|fine|please do)\b/i;
@@ -82,7 +82,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   });
 
   const messages = group.messages;
-  const approval = pendingApprovals(messages)[0];
+  const approval = turnApprovals(messages)[0];
   const question = questionIn(messages);
   const membersRef = useRef(members);
   const busyRef = useRef(Boolean(group.working || group.busyBotId));

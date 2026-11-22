@@ -36,6 +36,7 @@ import { panelMemoryNotes, withMemoryNote, withoutMemoryNote, type PanelMemoryNo
 import type { SimplePageId } from "./page-registry";
 import { BotSwitch, buttonCls, Card, ColRow, ItemRow, LinkRow, NoteRow, RadioRow, RowIcon, rowCls, RowText, SwitchRow, TextRow, TrashButton } from "./rows";
 import { MemoryUpkeepCards } from "./MemoryUpkeepCards";
+import { EduBrainCard } from "./EduBrainCard";
 import { useMemoryDoc } from "./use-memory-doc";
 import { useTeamMemoryEntries } from "../conversation-share/conversation-share";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
@@ -285,6 +286,7 @@ export function MemoryPage({ bot }: PageContext) {
         </Card>
       )}
       {memoryOn && !memory.mine && <MemoryUpkeepCards bot={bot} onChanged={memory.reload} />}
+      {!memory.mine && <EduBrainCard bot={bot} />}
     </>
   );
 }

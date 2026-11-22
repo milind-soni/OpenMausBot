@@ -19,6 +19,7 @@ import { useCloudGuest } from "@/lib/cloud-guest";
 import { yourComputerAsk } from "@/lib/your-computer";
 import { computerAskWords } from "@/lib/computer-ask";
 import { mcpRequestActionLabel } from "@/lib/mcp-request-label";
+import { eduProposalFields, eduProposalOutcome, eduProposalSummary, eduProposalTitle } from "@/lib/edu-proposal-words";
 import { TriggerCard } from "./TriggerCard";
 import { CardHint } from "./CardHint";
 
@@ -82,9 +83,15 @@ const staleRoutineCard = (card: OptionCardData) => Boolean(card.routineRequest &
 
 /** Cards whose server-written title and first option say what approving does. */
 export const titledCard = (card: OptionCardData | undefined) =>
-  Boolean(card?.teamSetupRequest || card?.mcpRequest || card?.lendingLift || isSkillSwitchAction(card?.skillRequest?.action));
+  Boolean(card?.teamSetupRequest || card?.mcpRequest || card?.lendingLift || card?.eduProposal || isSkillSwitchAction(card?.skillRequest?.action));
+
+/** A titled card's title in the person's language where the card carries its own words. */
+export function titledCardTitle(card: OptionCardData, botName: string): string {
+  return card.eduProposal ? eduProposalTitle(card.eduProposal, botName) : card.title;
+}
 
 export function titledCardAction(card: OptionCardData): string {
+  if (card.eduProposal) return t("server.edu.approve");
   if (card.mcpRequest) return mcpRequestActionLabel(card.mcpRequest.action);
   if (card.teamSetupRequest) return t(card.teamSetupRequest.deletion ? "approval.action.deleteBot" : "approval.action.applySetup");
   return card.options[0] ?? t("approval.action.confirm");
@@ -93,6 +100,7 @@ export function titledCardAction(card: OptionCardData): string {
 export function approvalCardOutcome(card: OptionCardData): string | undefined {
   const isProposal = Boolean(card.routineRequest || card.skillRequest || card.profileRequest || card.modelRequest || titledCard(card));
   if (card.expired === true || staleRoutineCard(card)) return t(isProposal || !card.tool ? "approval.status.expired" : "approval.status.timedOut");
+  if (card.eduProposal) return eduProposalOutcome(card.answered);
   if (!card.answered) return undefined;
   if (card.undone === true) return t("approval.status.undone");
   if (card.answered !== "allow") return isProposal ? t("approval.status.cancelled") : t("approval.status.denied");
@@ -506,6 +514,17 @@ export function ApprovalCard({
       </div>
     );
   }
+  const edu = card.eduProposal;
+  if (edu) {
+    const waiting = !settled && !expired;
+    return (
+      <div data-edu-proposal={waiting ? "pending" : "settled"} className="w-full">
+        <CompactApprovalRow header={waiting ? eduProposalTitle(edu, bot?.name ?? t("approval.someone")) : edu.title} summary={waiting ? edu.title : undefined}
+          detail={`${eduProposalSummary(edu, bot?.name)}\n\n${eduProposalFields(edu)}`} showDetailInline={false} outcome={outcome}
+          allowed={settled === "allow"} expired={expired} byVoice={byVoice} waiting={waiting} answeredBelow={waiting && Boolean(card.requestId)} />
+      </div>
+    );
+  }
   if (!isRoutineRequest && !isSkillRequest && !isProfileRequest && !titled && !card.modelRequest) {
     const waiting = !settled && !expired;
     const ask = yourComputerAsk(card, bot?.name ?? t("approval.someone"));
@@ -541,7 +560,7 @@ export function ApprovalCard({
     >
       <div className="flex items-baseline justify-between gap-3">
         <div className="text-[15px] font-semibold text-ink">
-          {titled ? card.title : outbound ? outbound.headline : profileHeader ?? (
+          {titled ? titledCardTitle(card, bot?.name ?? t("approval.someone")) : outbound ? outbound.headline : profileHeader ?? (
             <>
               {bot
                 ? t("approval.card.namedWantsTo", { name: bot.name, action: toolLabel(displayTool) })

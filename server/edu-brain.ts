@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 
-import type { EduBrainSetting } from "../shared/edu-brain.ts";
+import type { EduBrainSetting, EduState } from "../shared/edu-brain.ts";
 import { augmentedPath, findCliCandidates, resolveCliSpawn, userHome } from "./env-path.ts";
 import { AGENTS_NODE_FLAG } from "./proxy-paths.ts";
 import { isInside, resolveThroughLinks } from "./sentinel/paths.ts";
@@ -17,7 +17,7 @@ export const EDU_PREALLOWED_TOOLS = [
   "edu_remember", "edu_feedback", "edu_propose_canonical", "edu_session_open", "edu_session_close",
 ] as const;
 
-export type EduState = "off" | "missing" | "old" | "broken" | "ready";
+export type { EduState };
 
 export interface EduRuntime {
   state: EduState;
@@ -65,6 +65,8 @@ export interface EduBrainDeps {
   /** Runs the script with Node; defaults to this process's runtime. */
   run?(cli: string): Run;
   now?(): number;
+  /** A turn starting in `threadId` got this bot's brain in `folder` mounted, or none (`null`). */
+  mounted?(threadId: string, bot: EduBot, folder: string | null): void;
 }
 
 const RECHECK_MS = 30_000;
@@ -286,8 +288,8 @@ export function createEduBrains(deps: EduBrainDeps) {
     };
   }
 
-  /** The turn's `edu` server, or null whenever Edu cannot serve this bot here. Never throws. */
-  async function integration(bot: EduBot, where: { local: boolean }): Promise<EduStdioServer | null> {
+  /** The turn's `edu` server and brain folder, or null whenever Edu cannot serve this bot here. Never throws. */
+  async function mount(bot: EduBot, where: { local: boolean }): Promise<{ server: EduStdioServer; folder: string } | null> {
     if (!where.local) return null;
     try {
       const runtime = await detect();
@@ -297,11 +299,15 @@ export function createEduBrains(deps: EduBrainDeps) {
         if (bot.eduBrain?.mode !== "off") console.warn(`edu: no brain for bot ${bot.id}: ${brain.reason}`);
         return null;
       }
-      return server(runtime, brain.folder);
+      return { server: server(runtime, brain.folder), folder: brain.folder };
     } catch (error) {
       console.warn(`edu: not mounted for bot ${bot.id}: ${error instanceof Error ? error.message : String(error)}`);
       return null;
     }
+  }
+
+  async function integration(bot: EduBot, where: { local: boolean }): Promise<EduStdioServer | null> {
+    return (await mount(bot, where))?.server ?? null;
   }
 
   return {
@@ -316,10 +322,22 @@ export function createEduBrains(deps: EduBrainDeps) {
 
     /** Adds the turn's `edu` server when the engine mounts one and the turn runs on this computer. */
     async attach(integrations: { edu?: EduStdioServer }, bot: EduBot, capabilities: { eduMcp?: boolean }, turn: EduTurn): Promise<void> {
-      if (capabilities.eduMcp !== true) return;
       const local = (deps.hostLocal?.() ?? true) && turn.computer !== "box" && turn.computer !== "vps" && !turn.confined;
-      const edu = await integration(bot, { local });
-      if (edu) integrations.edu = edu;
+      const edu = capabilities.eduMcp === true ? await mount(bot, { local }) : null;
+      if (turn.threadId) deps.mounted?.(turn.threadId, bot, edu?.folder ?? null);
+      if (edu) integrations.edu = edu.server;
+    },
+
+    /** This bot's brain folder, created for an `own` brain, with the Edu that serves it; never throws. */
+    async brain(bot: EduBot): Promise<{ ok: true; folder: string; runtime: EduRuntime } | { ok: false; reason: string }> {
+      try {
+        const runtime = await detect();
+        if (runtime.state !== "ready") return { ok: false, reason: runtime.reason ?? `Edu is ${runtime.state}` };
+        const brain = await ensureBrain(bot, runtime);
+        return brain.ok ? { ok: true, folder: brain.folder, runtime } : { ok: false, reason: brain.reason };
+      } catch (error) {
+        return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+      }
     },
 
     async status(bot: EduBot): Promise<EduBrainStatus> {
@@ -344,6 +362,7 @@ export interface EduTurn {
   computer?: string | null;
   /** A turn fenced from the person's own data (a proactive fence, a Bot API thread). */
   confined?: boolean;
+  threadId?: string;
 }
 
 /** Claude Code 2.1.330 starts an MCP child with its own environment plus the server's `env`, an empty value included, so

@@ -640,6 +640,18 @@ describe("waiting on a conversation's job", () => {
     })).toMatchObject({ status: "failed" });
   });
 
+  it("reads a turn that left an Edu proposal card as completed: no turn waits on the proposal", async () => {
+    const tail = [
+      { id: "u1", at: 1, role: "user", kind: "text", text: "Remember ISO dates" },
+      { id: "b1", at: 2, role: "bot", kind: "text", text: "Noted." },
+      { id: "c1", at: 3, role: "bot", kind: "options", card: { title: "Save to Pepper's Edu brain?", subtitle: "", options: ["Approve", "Reject"], requestId: "edu-1",
+        tool: "edu_propose_canonical", eduProposal: { id: "K-iso", title: "Use ISO dates", kind: "standard", band: "verified", why: "", brain: "/b", global: false, location: "/b" } } },
+    ];
+    const waited = await handleToolCall("wait_for_conversation", { target_type: "bot", target_id: "bot-1", timeout_seconds: 1 },
+      server({ fleet: bot(), tail, jobs: [{ state: "completed", version: "v1" }] }).fetcher);
+    expect(waited).toMatchObject({ status: "settled" });
+  });
+
   it("waits on a pinned task and projects the bot as it is at the end", async () => {
     let fleetReads = 0;
     const { fetcher } = server({ thread: "task-a", fleet: undefined, jobs: [{ state: "running", version: "v1" }, { state: "completed", version: "v2" }],

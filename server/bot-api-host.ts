@@ -110,9 +110,10 @@ function statusOf(error: unknown): number {
   return parsed.success ? parsed.data.status : 500;
 }
 
-/** A card the bot put to the person and nobody has answered: the call stops there. */
+/** A card the bot put to the person and nobody has answered: the call stops there. An Edu proposal waits in Memory
+ * settings instead, and no turn waits on it. */
 function pendingCard(lines: readonly Message[]): boolean {
-  return lines.some((line) => line.card?.requestId !== undefined && !line.card.answered && !line.card.dismissed);
+  return lines.some((line) => line.card?.requestId !== undefined && !line.card.answered && !line.card.dismissed && !line.card.eduProposal);
 }
 
 function replyText(lines: readonly Message[]): string {

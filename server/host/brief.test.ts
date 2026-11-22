@@ -123,6 +123,13 @@ describe("the brief", () => {
     expect(await s.brief.active("desktop")).toEqual({ returned: false });
   });
 
+  it("lists a pending Edu proposal with where to decide it", async () => {
+    const s = setup({ needsYou: [{ kind: "edu-proposal", id: "edu:k", at: 0, botId: "luna", proposalId: "K-iso", title: "Use ISO dates", global: false }] });
+    await s.brief.active("desktop", "UTC");
+    expect(s.shown()).toContain("Edu wants to remember “Use ISO dates”");
+    expect(s.shown()).toContain("Approve or reject it in the bot's Memory settings.");
+  });
+
   it("shows on the first open of a day, saying what it does, and once more only after three hours away", async () => {
     const s = setup({ needsYou: [{ kind: "signed-out", id: "x", at: 0, instanceId: "claude", botIds: [] }] });
     expect(await s.brief.active("desktop", "UTC")).toEqual({ returned: false, open: { botId: s.chief.id, threadId: s.thread() } });

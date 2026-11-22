@@ -39,7 +39,7 @@ export function personWait(row: WaitRow): PersonWait | null {
     if (!connector || connector.status === "connected" || connector.dismissed || connector.superseded || connector.resumed || connector.stopped) return null;
     return connector.resumeKey.startsWith(FIRST_HOUR_OFFER_KEY) ? null : { ...own, kind: "connect", label: connector.label };
   }
-  if (row.kind !== "options" || row.inbox || card?.quotaSwitch || card?.teamMemoryRequest || card?.autoApplied) return null;
+  if (row.kind !== "options" || row.inbox || card?.quotaSwitch || card?.teamMemoryRequest || card?.autoApplied || card?.eduProposal) return null;
   const kind = liveCardKind(card);
   if (!kind) return null;
   return { ...own, kind, label: card?.subtitle || card?.title || "", ...(card?.tool ? { tool: card.tool } : {}) };

@@ -12,6 +12,7 @@ import { askingWhom, ownerChanged, ownerOf, pictureOf, refreshNeedsYou, useTeamP
 import type { NeedsYouItem } from "../../shared/today";
 import { useInboxSupport } from "@/state/inbox";
 import { useHeldMenuMotion } from "./MenuMotion";
+import { openBotSettings } from "./bot-panel/panel-link";
 import { MENU_HEADING, MENU_SHEET } from "./menu-recipe";
 
 export type OwnerPickerTarget = { botId: string; current: string | null; x: number; y: number };
@@ -134,11 +135,13 @@ export function NeedsYouLine({ item, onOpened }: { item: NeedsYouItem; onOpened?
   const botName = (botId: string) => state.bots.find((bot) => bot.id === botId)?.name ?? t("needsYou.aBot");
   const botId = "botId" in item ? item.botId : item.botIds[0]!;
   const title = item.kind === "message" ? t("needsYou.message", { name: item.from })
-    : item.kind === "question" ? t("needsYou.asking", { bot: botName(botId) }) : t("needsYou.fix", { bot: botName(botId) });
+    : item.kind === "question" ? t("needsYou.asking", { bot: botName(botId) })
+    : item.kind === "edu-proposal" ? t("needsYou.eduProposal", { title: item.title }) : t("needsYou.fix", { bot: botName(botId) });
   const text = "text" in item ? item.text : "";
   return <button type="button" role="menuitem"
     onClick={() => {
       onOpened?.();
+      if (item.kind === "edu-proposal") return openBotSettings(dispatch, "memory", { botId, page: "memory" });
       if (!item.threadId) return;
       openThread(dispatch, { botId, threadId: item.threadId }, state, showThreads);
       if (item.kind === "message") readConversation(state.groups, botId, item.threadId);

@@ -28,7 +28,7 @@ export function createTeamAwayEvents(deps: TeamAwayEventsDeps) {
   const shared = (threadId: string) => audienceMember(deps.audienceOf(threadId)) === null;
   const groupName = (threadId: string, groupId?: string) => (groupId ? deps.store.groupByThread(threadId)?.name : undefined);
   const openCard = (threadId: string, requestId?: string) => deps.store.messagesFor(threadId)
-    .findLast((message) => !message.inbox && liveCardKind(message.card) !== null && (!requestId || message.card?.requestId === requestId));
+    .findLast((message) => !message.inbox && !message.card?.eduProposal && liveCardKind(message.card) !== null && (!requestId || message.card?.requestId === requestId));
 
   /** A line reached a person's inbox. */
   function delivered(item: Item, delivery: Delivery): void {

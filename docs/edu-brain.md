@@ -22,8 +22,41 @@ Edu's memory tools only:
 "Asks first?" is for Claude bots below Full access, where these tools are pre-allowed. Codex asks for tools that are
 not read-only, as it does for any server. Edu's crew tools (`edu_crew_*`, `edu_orchestrate`) are not mounted.
 
-Canonical notes can only be proposed. Accepting one is a person's decision, made with `edu brain approve` in a
-terminal (an approval card in Edu Bot comes next).
+Canonical notes can only be proposed. Accepting one is a person's decision (see [Approvals](#approvals)).
+
+## Approvals
+
+When a turn that had the brain mounted ends, however it ends, Edu Bot runs `edu --cwd <brain> brain proposals --json`
+(one listing of a brain at a time) and posts a card in that conversation for each new proposal in the bot's own brain
+that has no open card yet, in any conversation of the bots on that brain or a room they are in. The card says, in plain
+words, where the note goes ("Pepper's Edu brain", "Shared brain (team-notes)"), its title, its kind and band ("Rule ·
+Verified"; an unbanded note says no band) and the note; Edu's id, kind, band, reason and the full path are under
+Details. No turn waits on the card: the composer stays open, the conversation is not "Waiting for you", `wait` and
+the Bot API return the reply, and a call never reads it out. Approve runs `edu --cwd <brain> brain approve <id> --yes --json`; Reject runs
+`edu --cwd <brain> brain approve --reject <id> --reason "Rejected in Edu Bot" --yes --json`. Both run without
+`EDU_CREW_JOB`, and each answer is logged in the decision log. A proposal already decided elsewhere (in a terminal,
+another CLI or the settings below) turns its card to "Already decided elsewhere".
+
+Bot settings → Memory → Edu brain shows the status, the brain folders and every pending proposal, including those in
+the global brain and those made outside Edu Bot, with Approve and Reject. A global proposal says that approving it
+changes the global brain every coding CLI with Edu reads; global proposals get no card in a chat. Pending proposals
+are also a Needs you item (`edu-proposal`) and a line in the brief.
+
+Who may decide:
+
+- Approve: the desktop app, or a paired device with the admin scope. A local request outside the desktop app is
+  refused, because a bot's shell is one too. A local service (`OMB_LOOPBACK_TRUST=service`) may only reject.
+- Reject: also any local request. A paired device without the admin scope may do neither.
+- Nobody, when Edu Bot itself runs inside an Edu crew job: Edu refuses, and the settings say so.
+- Never by voice: a call skips the card, and on a Live call it is reviewed on screen.
+- A card or the settings take only approve or reject; any other answer is refused (400).
+
+The chat card offers Approve exactly when the settings do (`GET /api/edu/rights`: `mayApprove`, `mayReject`,
+`crewWorker`), with the same note.
+
+`GET /api/bots/:id/edu` returns the status and the pending proposals; `POST /api/bots/:id/edu/proposals/:id` with
+`{"action": "approve" | "reject"}` decides one. Opening the settings creates a bot's own brain if its first turn has
+not yet.
 
 ## Where the brain lives
 
@@ -115,7 +148,9 @@ ACP and Pi keep Edu Bot's, and Codex mounts the custom one under another name.
 ```sh
 pnpm exec vitest run server/edu-brain.test.ts
 pnpm exec vitest run server/drivers/claude.test.ts -t "Edu brain"
+pnpm exec vitest run server/edu-proposals.test.ts src/components/bot-panel/EduBrainCard.dom.test.ts src/components/ApprovalCard.edu-proposal.test.ts
 pnpm exec vitest run server/edu-brain.real.test.ts server/edu-brain.e2e.test.ts   # need Edu installed; skipped otherwise
+pnpm exec vitest run server/edu-proposals.real.test.ts server/edu-proposals.e2e.test.ts   # the same
 ```
 
 The real-binary tests run Edu in temporary folders only: the fixture's data folder, and a temporary global brain

@@ -60,7 +60,7 @@ const OWNER_PLACES: ReadonlySet<PlaceState> = new Set([
 ]);
 /** A connected app refusing for want of a working sign-in, as Composio and the apps behind it word it. */
 const BROKEN_CONNECTION = /\b(?:401|unauthori[sz]ed|invalid[_ ]grant|(?:token|credentials?) (?:has |have )?(?:expired|been revoked)|expired (?:token|credentials?)|re-?authori[sz]e|re-?authenticate|reconnect|no (?:active )?connected account|connected ?account (?:not found|is (?:inactive|expired|disabled))|connection (?:is )?(?:inactive|expired|revoked|not found)|insufficient[_ ](?:scopes?|permissions?)|ACCESS_TOKEN_SCOPE_INSUFFICIENT|not connected)\b/i;
-const KIND_ORDER: Record<NeedsYouItem["kind"], number> = { "signed-out": 0, "out-of-credit": 1, "usage-limit": 2, connection: 3, place: 4, question: 5, message: 6 };
+const KIND_ORDER: Record<NeedsYouItem["kind"], number> = { "signed-out": 0, "out-of-credit": 1, "usage-limit": 2, connection: 3, place: 4, question: 5, message: 6, "edu-proposal": 7 };
 const DAY_MS = 24 * 60 * 60_000;
 const TITLE_CHARS = 160;
 /** A failed row and the summary its turn ends with are written this close together. */
@@ -74,7 +74,7 @@ type Owner = { botId?: string; groupId?: string };
 /** A card's fields that tell a question for the person from an approval, a receipt or an offer to switch engines. */
 type QuestionCard = NonNullable<Parameters<typeof isPersistentQuestionCard>[0]> & {
   requestId?: string; title?: string; subtitle?: string; questionRequest?: QuestionRequestCardData; outboundRequest?: unknown; quotaSwitch?: unknown;
-  teamMemoryRequest?: unknown; autoApplied?: boolean;
+  teamMemoryRequest?: unknown; autoApplied?: boolean; eduProposal?: unknown;
 };
 
 function threadOwners(sources: TodaySources): Map<string, Owner> {
@@ -281,7 +281,7 @@ function needsYou(sources: TodaySources, viewer: TodayViewer, owners: Map<string
     if (row.kind === "options") {
       const card = parse<QuestionCard>(row.card);
       const botId = botOf(row);
-      if (!card || !botId || card.outboundRequest || card.quotaSwitch || card.teamMemoryRequest || card.autoApplied) continue;
+      if (!card || !botId || card.outboundRequest || card.quotaSwitch || card.teamMemoryRequest || card.autoApplied || card.eduProposal) continue;
       const approval = viewer.asks !== undefined && (card.requestType === "permission" || Boolean(card.tool));
       if (!(approval || isPersistentQuestionCard(card)) || (viewer.asks && !viewer.asks(botId, row.threadId))) continue;
       const earlier = card.requestId ? askedIn.get(card.requestId) : undefined;

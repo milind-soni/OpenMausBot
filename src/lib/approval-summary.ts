@@ -1,8 +1,10 @@
 import { t } from "@/lib/i18n";
 import type { OptionCardData } from "@/state/store";
 import { noticeText } from "./activity-text";
+import { eduProposalSummary } from "./edu-proposal-words";
 
-export function approvalDetailText(card: Pick<OptionCardData, "subtitle" | "summaryCode" | "summaryParams">): string {
+export function approvalDetailText(card: Pick<OptionCardData, "subtitle" | "summaryCode" | "summaryParams" | "eduProposal">): string {
+  if (card.eduProposal) return eduProposalSummary(card.eduProposal);
   return noticeText(card.summaryCode, card.subtitle, card.summaryParams);
 }
 

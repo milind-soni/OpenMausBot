@@ -27,8 +27,8 @@ export interface TodayLine {
   outcomes: OutcomeCounts;
 }
 
-/** Only what the person can fix: never an approval. Each kind has exactly
- * one next action in the clients. */
+/** Only what the person can fix, and Edu brain proposals, which only a person may decide. Each kind has exactly one
+ * next action in the clients. */
 export type NeedsYouItem =
   | { kind: "signed-out"; id: string; at: number; instanceId: string; botIds: string[]; threadId?: string }
   | { kind: "usage-limit"; id: string; at: number; instanceId?: string; botIds: string[]; threadId: string; text: string;
@@ -41,7 +41,10 @@ export type NeedsYouItem =
   /** On a Team Cloud: a teammate tagged this person, or a bot passed them a message. `from` names who, and `fromEmail`
    * is that teammate's address when a person (not a bot) sent it; `messageId` is the line to open. It goes once they
    * open that conversation or write in it. */
-  | { kind: "message"; id: string; at: number; botId: string; threadId: string; messageId?: string; from: string; fromEmail?: string; text: string };
+  | { kind: "message"; id: string; at: number; botId: string; threadId: string; messageId?: string; from: string; fromEmail?: string; text: string }
+  /** A canonical note Edu holds until a person approves or rejects it, from `botId`'s Edu brain or, when `global`, the
+   * global brain every coding CLI with Edu reads. Decided in that bot's Memory settings. */
+  | { kind: "edu-proposal"; id: string; at: number; botId: string; threadId?: string; proposalId: string; title: string; global: boolean };
 
 export interface TodayReport {
   since: number;

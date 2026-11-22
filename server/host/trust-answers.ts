@@ -2,6 +2,7 @@ import type { ServerResponse } from "node:http";
 
 import { appendDecision } from "../decision-log.ts";
 import { json } from "../harness/http.ts";
+import type { EduProposals } from "../edu-proposals.ts";
 import type { OutboundRequestService } from "../outbound-requests.ts";
 import type { Store } from "../store.ts";
 
@@ -15,18 +16,25 @@ export interface TrustAnswerDeps {
   dataDir: string;
   teamMemoryRequests: Remembered;
   outsideWrites: Remembered;
+  eduProposals: Pick<EduProposals, "resolve">;
   outboundRequests: OutboundRequestService;
 }
 
-/** The person's answer to a team-memory, outside-write or "Send on your behalf?" card. */
+/** The person's answer to a team-memory, outside-write, Edu proposal or "Send on your behalf?" card. */
 export function createTrustAnswers(deps: TrustAnswerDeps) {
-  const { store, teamMemoryRequests, outsideWrites, outboundRequests } = deps;
+  const { store, teamMemoryRequests, outsideWrites, eduProposals, outboundRequests } = deps;
   const DATA_DIR = deps.dataDir;
 
-  function resolveAndSendTrust(res: ServerResponse, threadId: string, requestId: string, behavior: "allow" | "deny" | "answer"): boolean {
+  async function resolveAndSendTrust(res: ServerResponse, threadId: string, requestId: string, behavior: "allow" | "deny" | "answer"): Promise<boolean> {
     const remembered = teamMemoryRequests.resolve(threadId, requestId, behavior) ?? outsideWrites.resolve(threadId, requestId, behavior);
     if (remembered) {
       json(res, 200, remembered);
+      return true;
+    }
+    const edu = await eduProposals.resolve(threadId, requestId, behavior);
+    if (edu) {
+      if (edu.ok) json(res, 200, edu);
+      else json(res, edu.status, { error: edu.error });
       return true;
     }
     const outboundCard = store.messagesFor(threadId).find(

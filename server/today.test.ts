@@ -170,7 +170,7 @@ describe("today's report", () => {
 });
 
 describe("needs you", () => {
-  const kinds = (items: NeedsYouItem[]) => items.map((item) => [item.kind, "instanceId" in item ? item.instanceId : "app" in item ? item.app : "place" in item ? item.place.state : "credit" in item ? item.credit : item.text]);
+  const kinds = (items: NeedsYouItem[]) => items.map((item) => [item.kind, "instanceId" in item ? item.instanceId : "app" in item ? item.app : "place" in item ? item.place.state : "credit" in item ? item.credit : "text" in item ? item.text : item.title]);
 
   function blocked() {
     const w = world();
@@ -241,6 +241,13 @@ describe("needs you", () => {
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject(title ? { text: `Approve: ${title}`, textCode: "chat.notice.approve", textParams: { what: title } } : { text: "Approve:" });
     if (!title) expect(items[0]).not.toHaveProperty("textCode");
+  });
+
+  it("leaves an Edu proposal card to its own Needs you row, not a question", () => {
+    const w = world();
+    w.say(w.atlas.threadId, { role: "bot", kind: "options", at: at(12), card: { title: "Save to Atlas's Edu brain?", subtitle: "Use ISO dates", options: ["Approve", "Reject"], requestId: "edu-1", tool: "edu_propose_canonical",
+      eduProposal: { id: "K-iso", title: "Use ISO dates", kind: "standard", band: "verified", why: "", brain: "/b", global: false, location: "/b" } } });
+    expect(todayReport(w.sources(), { ...ADMIN, asks: () => true }, MIDNIGHT, NOW).needsYou).toEqual([]);
   });
 
   it("keeps a question nobody answered after its turn ends, until the person answers it, within the week", () => {

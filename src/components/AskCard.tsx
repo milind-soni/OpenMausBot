@@ -102,14 +102,17 @@ export function AskDetail({ text, mono = false, label }: { text: string; mono?: 
   const long = text.length > 180 || text.split("\n").length > 3;
   return (
     <div className="mt-2">
-      <div
-        dir="auto"
-        aria-label={label}
-        className={cn("rounded-xl bg-ink/[0.045] px-3 py-2 text-ink-secondary [overflow-wrap:anywhere]",
-          mono ? "font-mono text-[12px] leading-[18px] whitespace-pre-wrap" : "whitespace-pre-wrap text-[13px] leading-5",
-          long && !open && "line-clamp-3")}
-      >
-        {text}
+      {/* The clamp sits inside the padding: a clamped box still paints the next line into its own bottom padding, cut in half. */}
+      <div className="rounded-xl bg-ink/[0.045] px-3 py-2">
+        <div
+          dir="auto"
+          aria-label={label}
+          className={cn("text-ink-secondary [overflow-wrap:anywhere]",
+            mono ? "font-mono text-[12px] leading-[18px] whitespace-pre-wrap" : "whitespace-pre-wrap text-[13px] leading-5",
+            long && !open && "line-clamp-3")}
+        >
+          {text}
+        </div>
       </div>
       {long && (
         <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className={cn(ASK_QUIET_BUTTON, "mt-1 -ms-2")}>

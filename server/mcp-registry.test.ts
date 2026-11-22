@@ -47,7 +47,8 @@ describe("custom MCP registry", () => {
 
   it("refuses unsafe and reserved routing names", () => {
     expect(mcpServerNameError("Bad.Name")).toMatch(/lowercase/);
-    expect(mcpServerNameError("computer")).toMatch(/reserved/);
+    expect(mcpServerNameError("computer")).toBe("That name is reserved by Edu Bot.");
+    expect(mcpServerNameError("edu")).toBe("That name is reserved by Edu Bot.");
     expect(mcpServerNameError("data")).toMatch(/reserved/);
     expect(mcpServerNameError("edu")).toMatch(/reserved/);
     expect(importedMcpServerName("Edu")).toBe("mcp-edu");
@@ -59,17 +60,17 @@ describe("custom MCP registry", () => {
     for (const key of ["OMB_HARNESS_URL", "OGB_BOX_TOKEN"]) {
       expect(parseStoredMcpServer("notes", { command: "notes-mcp", env: { [key]: "bad" } })).toEqual({
         ok: false,
-        error: `Environment variable “${key}” is reserved by OpenMausBot.`,
+        error: `Environment variable “${key}” is reserved by Edu Bot.`,
       });
       expect(parseMcpServerMutation("notes", { command: "notes-mcp", env: { [key]: "bad" } })).toEqual({
         ok: false,
-        error: `Environment variable “${key}” is reserved by OpenMausBot.`,
+        error: `Environment variable “${key}” is reserved by Edu Bot.`,
       });
     }
   });
 
   it("lets a custom server run an Electron binary as node, and nothing else", () => {
-    const refused = "Environment variable “ELECTRON_RUN_AS_NODE” is reserved by OpenMausBot; a custom server may set it to “1” only.";
+    const refused = "Environment variable “ELECTRON_RUN_AS_NODE” is reserved by Edu Bot; a custom server may set it to “1” only.";
     expect(parseStoredMcpServer("notes", { command: "notes-mcp", env: { ELECTRON_RUN_AS_NODE: "0" } })).toEqual({ ok: false, error: refused });
     expect(parseMcpServerMutation("notes", { command: "notes-mcp", env: { ELECTRON_RUN_AS_NODE: "true" } })).toEqual({ ok: false, error: refused });
     const stored = parseStoredMcpServer("bundled", {

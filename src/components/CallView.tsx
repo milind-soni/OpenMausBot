@@ -21,7 +21,7 @@ import { BotAvatar } from "./Avatar";
 import { navigateThreadMenu } from "./BotProjects";
 import { LiveKeyNeeded } from "./LiveKeyNeeded";
 import { liveLineHeldElsewhere } from "./LiveCallBar";
-import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
+import { isRoutineApproval, isSkillApproval, spokenApprovalPrompt, turnApprovals } from "./PendingApproval";
 import { titledCard } from "./ApprovalCard";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { callCapabilityHelp, type CallCapabilityHelp } from "@/lib/call-capability";
@@ -478,7 +478,7 @@ function Call({ bot }: { bot: Bot }) {
   });
 
   const messages = visibleMessages(bot);
-  const approval = pendingApprovals(messages)[0];
+  const approval = turnApprovals(messages)[0];
   const question = messages.find(
     (message) =>
       message.kind === "options" &&

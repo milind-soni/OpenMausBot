@@ -33,7 +33,7 @@ it("refuses an MCP card's Turn on from a local browser while a bot is busy, and 
     answeredIn: (threadId: string) => threadId,
     cardAnswerRefusal: () => null,
     answeringCardAs: async (_auth: RequestAuth, _threadId: string, _requestId: string, work: () => Promise<unknown>) => { await work(); },
-    resolveAndSendTrust: () => false,
+    resolveAndSendTrust: async () => false,
     resolveAndSendMcp: async (res: Parameters<BotMessageRouteDeps["resolveAndSendMcp"]>[0], args: Parameters<BotMessageRouteDeps["resolveAndSendMcp"]>[1], ownerReview: boolean) => {
       const outcome = await cards.respond(args, ownerReview);
       if (!outcome) return false;
