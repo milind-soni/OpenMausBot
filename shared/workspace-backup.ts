@@ -27,6 +27,11 @@ export interface WorkspaceLeftBehind {
 
 export type WorkspaceBackupClientState = Record<string, string>;
 
+export type WorkspaceBackupExportStatus =
+  | { state: "running" }
+  | { state: "ready"; id: string; filename: string; expiresInMs: number }
+  | { state: "failed"; error: string; errorKey?: string; errorParams?: Record<string, string | number> };
+
 export interface WorkspaceBackupPrivateMetadata {
   summary: WorkspaceBackupSummary;
   clientState: WorkspaceBackupClientState;

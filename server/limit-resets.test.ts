@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { codexLimitResetsAt } from "./drivers/codex-errors.ts";
-import { engineLimitFromUsage, LimitResetClock, nearLimitNote, UNNAMED_LIMIT_MS } from "./limit-resets.ts";
+import { antigravityPlanWindows, antigravitySummaryWindows } from "./drivers/antigravity-usage-limits.ts";
+import { engineLabel, engineLimitFromUsage, LimitResetClock, nearLimitNote, UNNAMED_LIMIT_MS } from "./limit-resets.ts";
 import type { RuntimeEvent } from "../shared/runtime-events.ts";
 import { parseClaudeUsage, parseCodexUsage, parseOpenCodeUsage, planAccountsFromInstances, type PlanProviderRow, type PlanUsageReport, type PlanWindows } from "./plan-usage.ts";
 
@@ -16,7 +17,7 @@ const iso = (at: number) => new Date(at).toISOString();
 
 /** A plan-usage row for one driver, named as the usage panel names it. */
 function row(id: string, driver: PlanProviderRow["driver"], windows: PlanWindows): PlanProviderRow {
-  const name = driver === "claude" ? "Claude" : driver === "codex" ? "Codex" : driver === "opencode" ? "OpenCode" : "Grok";
+  const name = driver === "claude" ? "Claude" : driver === "codex" ? "Codex" : driver === "opencode" ? "OpenCode" : driver === "antigravity" ? "Antigravity" : "Grok";
   return { id, name, driver, ok: true, error: null, ...windows };
 }
 /** As the Claude usage endpoint answers (utilization, resets_at). */
@@ -32,6 +33,18 @@ const codex = (primary: [number, number], secondary: [number, number]) => row("c
     secondary_window: { used_percent: secondary[0], limit_window_seconds: 7 * 86400, reset_at: Math.floor(secondary[1] / 1000) },
   },
 }));
+/** As Google's quota summary answers for an Antigravity sign-in: Gemini's own windows, and the allowance Claude and GPT
+ * share. */
+const antigravity = (fiveHour: [number, number], weekly: [number, number], shared: [number, number] = [0, NOW + 3 * HOUR]) => row("antigravity", "antigravity",
+  antigravityPlanWindows(antigravitySummaryWindows({ groups: [
+    { displayName: "Gemini Models", buckets: [
+      { bucketId: "gemini-5h", window: "5h", remainingFraction: 1 - fiveHour[0] / 100, resetTime: iso(fiveHour[1]), description: "used" },
+      { bucketId: "gemini-weekly", window: "weekly", remainingFraction: 1 - weekly[0] / 100, resetTime: iso(weekly[1]), description: "used" },
+    ] },
+    { displayName: "Claude and GPT models", buckets: [
+      { bucketId: "3p-5h", window: "5h", remainingFraction: 1 - shared[0] / 100, resetTime: iso(shared[1]), description: "used" },
+    ] },
+  ] }, NOW)));
 const report = (...providers: PlanProviderRow[]): PlanUsageReport => ({ fetchedAt: iso(NOW), providers });
 
 describe("a Claude account's usage", () => {
@@ -111,6 +124,30 @@ describe("engineLimitFromUsage", () => {
       engine: "codex", driver: "codex", blocked: true, window: "5-hour", resetsAt: Math.floor((NOW + HOUR) / 1000) * 1000,
     });
     expect(engineLimitFromUsage(codex([10, NOW + HOUR], [97, NOW + 90 * HOUR]))).toMatchObject({ blocked: false, window: "weekly", usedPercent: 97 });
+  });
+
+  it("does not hold Codex at a full window while its ChatGPT credits can pay for more", () => {
+    const withCredits = (credits: unknown) => row("codex", "codex", parseCodexUsage({
+      plan_type: "plus",
+      rate_limit: {
+        primary_window: { used_percent: 100, limit_window_seconds: 5 * 3600, reset_at: Math.floor((NOW + HOUR) / 1000) },
+        secondary_window: { used_percent: 50, limit_window_seconds: 7 * 86400, reset_at: Math.floor((NOW + 90 * HOUR) / 1000) },
+      },
+      ...(credits === undefined ? {} : { credits }),
+    }));
+    const resetsAt = Math.floor((NOW + HOUR) / 1000) * 1000;
+    expect(engineLimitFromUsage(withCredits({ has_credits: true, unlimited: false, balance: "12.50" }))).toMatchObject({ blocked: false, window: "5-hour", usedPercent: 100, resetsAt });
+    expect(engineLimitFromUsage(withCredits({ has_credits: false, unlimited: true, balance: null }))).toMatchObject({ blocked: false, usedPercent: 100 });
+    expect(engineLimitFromUsage(withCredits({ has_credits: false, unlimited: false, balance: "0" }))).toMatchObject({ blocked: true, resetsAt });
+    expect(engineLimitFromUsage(withCredits({ has_credits: true, unlimited: false, balance: "0" }))).toMatchObject({ blocked: true });
+    for (const odd of [undefined, null, "yes", 1, [], {}, { has_credits: "true", unlimited: 1 }, { has_credits: null, unlimited: null }]) {
+      expect(engineLimitFromUsage(withCredits(odd))).toMatchObject({ blocked: true, resetsAt });
+    }
+  });
+
+  it("holds Claude at a full window as before, whatever credits fields it carries", () => {
+    const claudeFull = row("claude", "claude", { ...parseClaudeUsage({ five_hour: { utilization: 100, resets_at: iso(NOW + 2 * HOUR) } }), codexCredits: true });
+    expect(engineLimitFromUsage(claudeFull)).toMatchObject({ blocked: true });
   });
 
   it("has nothing to say for a row that could not be read, and no time for a row without windows", () => {
@@ -226,6 +263,58 @@ describe("LimitResetClock", () => {
     expect(fixture.limit("claude")).toMatchObject({ usedPercent: 91, resetsAt: NOW + 5 * HOUR });
   });
 
+  it("keeps the last reading through a failed read, for an hour at most and only until one of its windows resets", async () => {
+    const failed: PlanProviderRow = { ...claude([0, null], [0, null]), ok: false, error: "Claude's usage could not be reached",
+      fiveHour: { available: false, remainingPercent: null, usedPercent: null, resetsAt: null }, weekly: { available: false, remainingPercent: null, usedPercent: null, resetsAt: null } };
+    let next = report(claude([38, NOW + 3 * HOUR], [12, NOW + 90 * HOUR]));
+    const { instance, at } = clock({ loadUsage: async () => next });
+    await instance.refresh(true);
+    expect(instance.limit("claude")).toMatchObject({ usedPercent: 38 });
+    expect(instance.limit("claude")?.checkedAt).toBeUndefined();
+
+    next = report(failed);
+    at(NOW + 10 * 60_000);
+    await instance.refresh(true);
+    expect(instance.report().checkedAt).toBe(NOW + 10 * 60_000);
+    expect(instance.limit("claude")).toMatchObject({ usedPercent: 38, window: "5-hour", checkedAt: NOW, windows: [
+      { window: "5-hour", usedPercent: 38, resetsAt: NOW + 3 * HOUR }, { window: "weekly", usedPercent: 12, resetsAt: NOW + 90 * HOUR },
+    ] });
+    at(NOW + HOUR);
+    await instance.refresh(true);
+    expect(instance.limit("claude")).toMatchObject({ usedPercent: 38, checkedAt: NOW });
+    at(NOW + HOUR + 60_000);
+    await instance.refresh(true);
+    expect(instance.report().engines).toEqual([]);
+
+    next = report(claude([100, NOW + 2 * HOUR], [12, NOW + 90 * HOUR]));
+    await instance.refresh(true);
+    expect(instance.limit("claude")).toMatchObject({ usedPercent: 100, blocked: true });
+    expect(instance.blockedUntil("claude")).toBe(NOW + 2 * HOUR);
+    next = report(failed);
+    await instance.refresh(true);
+    expect(instance.limit("claude")).toMatchObject({ usedPercent: 100, blocked: false, checkedAt: NOW + HOUR + 60_000 });
+    // Shown only: a kept reading never holds the engine, as before.
+    expect(instance.blockedUntil("claude")).toBeNull();
+    next = report(failed);
+    at(NOW + 2 * HOUR);
+    await instance.refresh(true);
+    expect(instance.report().engines).toEqual([]);
+  });
+
+  it("drops an engine whose account is no longer read, failed read or not", async () => {
+    let current: Array<(typeof accounts)[number] & { noUsage?: true }> = accounts;
+    let next = report(claude([38, NOW + 3 * HOUR], [12, NOW + 90 * HOUR]));
+    const instance = new LimitResetClock({ accounts: () => current, now: () => NOW, loadUsage: async () => next });
+    await instance.refresh(true);
+    next = report();
+    await instance.refresh(true);
+    expect(instance.report().engines).toEqual([]);
+    next = report(claude([38, NOW + 3 * HOUR], [12, NOW + 90 * HOUR]));
+    await instance.refresh(true);
+    current = [{ ...accounts[0]!, noUsage: true }];
+    expect(instance.report().engines).toEqual([]);
+  });
+
   it("reads usage once an account is added after a refresh that had none", async () => {
     const load = vi.fn(async () => report(claude([50, NOW + HOUR], [5, NOW + 90 * HOUR])));
     let current: typeof accounts = [];
@@ -236,16 +325,61 @@ describe("LimitResetClock", () => {
     expect(load).toHaveBeenCalledTimes(1);
   });
 
-  it("does not ask for the usage of an engine whose usage holds nothing here", async () => {
-    const load = vi.fn(async (_asked: Array<{ id: string }>) => report(claude([50, NOW + HOUR], [5, NOW + 90 * HOUR])));
-    const antigravity = { id: "antigravity", name: "Antigravity", driver: "antigravity" as const, environment: {} };
-    let current = [...accounts, antigravity];
-    const instance = new LimitResetClock({ accounts: () => current, now: () => NOW, loadUsage: load });
+});
+
+describe("an Antigravity account's usage", () => {
+  const accounts = planAccountsFromInstances({ claude: { driver: "claudeAgent" }, antigravity: { driver: "antigravityAgent" } });
+
+  it("is read beside the other engines and shows Gemini's 5-hour and weekly windows", async () => {
+    const load = vi.fn(async (_asked: Array<{ id: string }>) => report(
+      claude([50, NOW + HOUR], [5, NOW + 90 * HOUR]),
+      antigravity([50, NOW + 2 * HOUR], [25, NOW + 60 * HOUR], [99, NOW + 4 * HOUR]),
+    ));
+    const instance = new LimitResetClock({ accounts: () => accounts, now: () => NOW, loadUsage: load });
     await instance.refresh(true);
-    expect(load.mock.calls.map(([asked]) => asked.map((account) => account.id))).toEqual([["claude"]]);
-    current = [antigravity];
-    await instance.refresh(true);
-    expect(load).toHaveBeenCalledTimes(1);
+    expect(load.mock.calls.map(([asked]) => asked.map((account) => account.id))).toEqual([["claude", "antigravity"]]);
+    expect(instance.limit("antigravity")).toEqual({
+      engine: "antigravity", name: "Antigravity", driver: "antigravity", meter: "Gemini", window: "5-hour", usedPercent: 50, resetsAt: NOW + 2 * HOUR, blocked: false,
+      windows: [{ window: "5-hour", usedPercent: 50, resetsAt: NOW + 2 * HOUR }, { window: "weekly", usedPercent: 25, resetsAt: NOW + 60 * HOUR }],
+    });
+  });
+
+  it("at Gemini's limit shows the window full and its reset, and neither holds the engine nor times its reset", () => {
+    const instance = new LimitResetClock({ accounts: () => accounts, now: () => NOW });
+    instance.noteUsage(report(antigravity([100, NOW + 2 * HOUR], [60, NOW + 60 * HOUR])));
+    expect(instance.limit("antigravity")).toMatchObject({ meter: "Gemini", window: "5-hour", usedPercent: 100, resetsAt: NOW + 2 * HOUR, blocked: false });
+    expect(instance.limit("antigravity")?.held).toBeUndefined();
+    expect(instance.blockedUntil("antigravity")).toBeNull();
+    expect(instance.blockedUntil("antigravity", "gemini-3-pro")).toBeNull();
+    expect(instance.resetAt("antigravity")).toBeNull();
+  });
+
+  it("never ends a hold on the engine by Gemini's windows, and shows the hold as the whole engine's", () => {
+    const instance = new LimitResetClock({ accounts: () => accounts, now: () => NOW });
+    instance.noteRefusal("antigravity", NOW + 5 * HOUR);
+    instance.noteUsage(report(antigravity([10, NOW + 2 * HOUR], [20, NOW + 60 * HOUR])));
+    expect(instance.blockedUntil("antigravity")).toBe(NOW + 5 * HOUR);
+    const held = instance.limit("antigravity")!;
+    expect(held).toMatchObject({ engine: "antigravity", name: "Antigravity", driver: "antigravity", blocked: true, held: true, resetsAt: NOW + 5 * HOUR });
+    expect(held.meter).toBeUndefined();
+    expect(held.windows).toBeUndefined();
+  });
+
+  it("has no row when Google gave nothing usable, or only allowances other than Gemini's", () => {
+    const instance = new LimitResetClock({ accounts: () => accounts, now: () => NOW });
+    instance.noteUsage(report(claude([50, NOW + HOUR], [5, NOW + 90 * HOUR])));
+    expect(instance.report().engines.map((limit) => limit.engine)).toEqual(["claude"]);
+    const sharedOnly = row("antigravity", "antigravity", antigravityPlanWindows(antigravitySummaryWindows({ groups: [
+      { displayName: "Claude and GPT models", buckets: [{ bucketId: "3p-weekly", window: "weekly", remainingFraction: 0.5, resetTime: iso(NOW + 30 * HOUR), description: "used" }] },
+    ] }, NOW)));
+    expect(engineLimitFromUsage(sharedOnly)).toBeNull();
+    instance.noteUsage(report(claude([50, NOW + HOUR], [5, NOW + 90 * HOUR]), sharedOnly));
+    expect(instance.report().engines.map((limit) => limit.engine)).toEqual(["claude"]);
+  });
+
+  it("is named Antigravity when the instance has no name of its own", () => {
+    expect(engineLabel("antigravity", { driverKind: "antigravityAgent" })).toBe("Antigravity");
+    expect(engineLabel("antigravity", { driverKind: "antigravityAgent", displayName: "Work Google" })).toBe("Work Google");
   });
 });
 
@@ -297,6 +431,12 @@ describe("nearLimitNote", () => {
     expect(nearLimitNote(limit, "Claude", "UTC")).toBe(" Claude's usage limit is 92% used; it resets Mon 3:40 PM (UTC).");
     expect(nearLimitNote({ ...limit, usedPercent: 89 }, "Claude", "UTC")).toBe("");
     expect(nearLimitNote(undefined, "Claude", "UTC")).toBe("");
+  });
+
+  it("says nothing for Antigravity, whose windows are Gemini's and not the whole engine's", () => {
+    const limit = engineLimitFromUsage(antigravity([95, NOW + 2 * HOUR], [10, NOW + 90 * HOUR]))!;
+    expect(limit.usedPercent).toBe(95);
+    expect(nearLimitNote(limit, "Antigravity", "UTC")).toBe("");
   });
 });
 

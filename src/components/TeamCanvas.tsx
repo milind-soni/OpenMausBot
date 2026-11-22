@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { ArrowRight, BookOpen, Brain, Crown, MessageCircle, Minus, Monitor, MoreHorizontal, Pencil, Plus, Trash2, Users } from "lucide-react";
 import { api, openBot, useStore, type Bot } from "@/state/store";
 import { teamBotName, useTeamPeople } from "@/state/team-people";
@@ -86,6 +86,8 @@ function BotCard({ bot, selected, moving, connected, tagged = false, sent, onCom
 }
 
 const NO_COMPUTERS: MapComputer[] = [];
+/** The longest the teams stay hidden while the saved layout and the computers beside them are still on their way. */
+const SETTLE_LIMIT_MS = 1_500;
 
 /** What the bot is doing right now, in one line: its newest tool step in the open thread, else the working thread's title. */
 function currentActivity(bot: Bot | undefined, instances: ReturnType<typeof useStore>["state"]["instances"]): string | undefined {
@@ -96,7 +98,7 @@ function currentActivity(bot: Bot | undefined, instances: ReturnType<typeof useS
   return bot.tasks?.find((task) => task.busy && task.threadId !== bot.threadId && task.title.trim())?.title;
 }
 
-export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemory, onEditTeam, onDeleteTeam, onComputer, onComputerDrop, onTeamComputer, teamComputers = {}, connectedBotIds = [], computers = NO_COMPUTERS, computerFrames = {}, onOpenComputer, taggedBotIds = [], sent, bottomInset = 0 }: {
+export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemory, onEditTeam, onDeleteTeam, onComputer, onComputerDrop, onTeamComputer, teamComputers = {}, connectedBotIds = [], computers = NO_COMPUTERS, computerFrames = {}, onOpenComputer, taggedBotIds = [], sent, bottomInset = 0, settling = false }: {
   sections: TeamMapSection<Bot>[];
   canManage: boolean;
   onMove: (bot: Bot, destination: string) => Promise<boolean | void>;
@@ -120,6 +122,8 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
   sent?: { botIds: string[]; key: number } | null;
   /** Height covered at the bottom (the map composer): fitting keeps the teams above it. */
   bottomInset?: number;
+  /** Something that changes the layout, such as the computers drawn beside the bots, is still loading. */
+  settling?: boolean;
 }) {
   const { state } = useStore();
   const viewport = useRef<HTMLDivElement>(null);
@@ -139,6 +143,10 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
   const [layoutLoaded, setLayoutLoaded] = useState(false);
   const [menuAbove, setMenuAbove] = useState<string | null>(null);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
+  const [settleLimitReached, setSettleLimitReached] = useState(false);
+  const [settled, setSettled] = useState(false);
+  const ready = settled || settleLimitReached || (layoutLoaded && !settling);
+  if (ready && !settled) setSettled(true);
   const geometries = useMemo<Array<TeamGeometry | null>>(() => sections.map((section) => {
     if (!computers.length) return null;
     const order = Object.hasOwn(botOrders, section.key) ? botOrders[section.key] : [];
@@ -202,13 +210,20 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
     if (bounds) setView(fitTeams(current.current.tiles, bounds.width, Math.max(200, bounds.height - current.current.bottomInset)));
   }, []);
   useEffect(() => {
+    const timer = window.setTimeout(() => setSettleLimitReached(true), SETTLE_LIMIT_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
+  useLayoutEffect(() => {
     const element = viewport.current;
     if (!element) return;
-    let previousSize: { width: number; height: number } | null = null;
+    const first = element.getBoundingClientRect();
+    let previousSize = { width: first.width, height: first.height };
+    setViewportSize(previousSize);
     const observer = new ResizeObserver(() => {
       const bounds = element.getBoundingClientRect();
+      if (bounds.width === previousSize.width && bounds.height === previousSize.height) return;
       setViewportSize({ width: bounds.width, height: bounds.height });
-      if (!previousSize) fit();
+      if (!previousSize.width || !previousSize.height) fit();
       else {
         const card = current.current.settingsOpen ? [...element.querySelectorAll<HTMLElement>("[data-bot-id]")]
           .find((node) => node.dataset.botId === current.current.selectedId)?.getBoundingClientRect() : undefined;
@@ -222,7 +237,8 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
     return () => observer.disconnect();
   }, [fit]);
   const teamSizes = JSON.stringify(tiles.map(({ key, width, height }) => [key, width, height]));
-  useEffect(() => { fit(); }, [fit, teamSizes, layoutLoaded]);
+  const measured = viewportSize.width > 0 && viewportSize.height > 0;
+  useLayoutEffect(() => { fit(); }, [fit, teamSizes, layoutLoaded, ready, measured]);
   useEffect(() => {
     const open = viewport.current?.querySelector<HTMLDetailsElement>("details[open]");
     const bounds = viewport.current?.getBoundingClientRect();
@@ -408,7 +424,7 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
       if (event.key === "-") { event.preventDefault(); zoom(1 / 1.2); }
       if (event.key === "0") { event.preventDefault(); fit(); }
     }}>
-    <div data-canvas-world className="absolute left-0 top-0 origin-top-left" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}>
+    <div data-canvas-world className="absolute left-0 top-0 origin-top-left" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`, visibility: ready ? undefined : "hidden" }}>
       {sections.map((section, index) => {
         const tile = tiles[index];
         const geometry = geometries[index];

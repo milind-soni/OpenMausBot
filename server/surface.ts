@@ -245,10 +245,17 @@ export function failedOnHostPath(command: unknown, result: { exitCode?: unknown;
   return Number(result.exitCode ?? 0) !== 0 && result.timedOut !== true && namesHostPath(command, platform);
 }
 
-/** On a server where This computer can be picked: a host path or "my PC" is this computer, never the mounted place. */
-function ownFilesSentence(own: { bot: string; botId?: string; platform: NodeJS.Platform }, place: Surface | null, canSelect: boolean): string {
+/** On a server where This computer can be picked: a host path (or "my PC", when nothing is lent) is this computer, never the mounted place. */
+function ownFilesSentence(own: { bot: string; botId?: string; platform: NodeJS.Platform }, place: Surface | null, canSelect: boolean,
+  lent?: ReadonlyArray<{ name: string; platform: LentPlatform | null }>): string {
   const example = HOST_PATHS[own.platform]?.example;
-  return ` A file or folder on the person's own computer (${example ? `a path such as ${example}, ` : ""}their Desktop, Documents, Downloads or OneDrive, or "my PC") is on this computer${place ? `, which ${surfaceLabel(place)} cannot reach` : ""}, and it is never one of the shared computers. ${thisComputerSwitch({ place, bot: own.bot, canSelect, ...(own.botId ? { botId: own.botId } : {}) })}`;
+  const unreachable = place ? `, which ${surfaceLabel(place)} cannot reach` : "";
+  const switchLine = thisComputerSwitch({ place, bot: own.bot, canSelect, ...(own.botId ? { botId: own.botId } : {}) });
+  // A person who lends this server a computer has their own files there too: "my PC" no longer names this computer.
+  if (lent?.length) {
+    return ` A file or folder at a path of this computer${example ? ` (a path such as ${example})` : ""} is on this computer${unreachable}. A file or folder on ${theirComputer(lent).theirs} is on that computer: reach it only through shared_computer, as above. When they don't say which computer a file is on, ask in one line. ${switchLine}`;
+  }
+  return ` A file or folder on the person's own computer (${example ? `a path such as ${example}, ` : ""}their Desktop, Documents, Downloads or OneDrive, or "my PC") is on this computer${unreachable}, and it is never one of the shared computers. ${switchLine}`;
 }
 
 /** A Cloud home without the shared-computer tools cannot reach the person's own computer at all. */
@@ -290,11 +297,13 @@ export function computerSelectionPrompt(opts: { cloudHome?: boolean } = {}): str
 }
 
 /** Built from what was actually mounted, never from the setting, so the model is only told about tools it can call.
- * `ownComputer`: on a Cloud home, the person's lent computers (newest first) when this turn has the shared-computer tools. */
+ * `ownComputer`: on a Cloud home, the person's lent computers (newest first) when this turn has the shared-computer tools.
+ * `lentToServer`: the same on any other server, for a person who lends it a computer. */
 export function surfacePrompt(
   mounted: MountedSurfaces,
   opts: { pinned?: Surface | null; note?: string; canSelect?: boolean; selectionRules?: boolean; cloudHome?: boolean; botOpened?: boolean;
     ownComputer?: ReadonlyArray<{ name: string; platform: LentPlatform | null }>;
+    lentToServer?: ReadonlyArray<{ name: string; platform: LentPlatform | null }>;
     /** This computer can be picked for this bot here: its name, and the platform this server runs on. */
     thisComputer?: { bot: string; botId?: string; platform: NodeJS.Platform } } = {},
 ): string {
@@ -336,8 +345,12 @@ export function surfacePrompt(
     for (const [nowhere, places] of OWN_COMPUTER_WORDING) text = text.replace(nowhere, places);
     text = text.replace(UNREACHABLE_OWN, `${theirComputer(opts.ownComputer).theirs} is not one of these places`) + ownComputerSentence(opts.ownComputer, computer);
   }
+  if (!opts.cloudHome && opts.lentToServer?.length) {
+    for (const [nowhere, places] of OWN_COMPUTER_WORDING) text = text.replace(nowhere, places);
+    text += ownComputerSentence(opts.lentToServer, computer);
+  }
   if (opts.thisComputer && !opts.cloudHome && !reportBack && mounted.computer !== "local") {
-    text += ownFilesSentence(opts.thisComputer, mounted.computer, Boolean(opts.canSelect));
+    text += ownFilesSentence(opts.thisComputer, mounted.computer, Boolean(opts.canSelect), opts.lentToServer);
   }
   return text + (opts.note ?? "");
 }

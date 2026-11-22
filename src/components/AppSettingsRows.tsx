@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, useStore, type ConfigStatus } from "@/state/store";
+import { api, type ConfigStatus } from "@/state/store";
 import { builtInBrowserEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
 import { localeChoices } from "@/locales";
 import { activeLocale, activePackComplete, t } from "@/lib/i18n";
@@ -23,6 +23,7 @@ import { parseSendKey, SEND_KEYS, sendKeyLabel, setSendKey, useSendKey } from "@
 import { alternateSendLabel, parseFollowUpDefault, setFollowUpDefault, useFollowUpDefault } from "@/lib/follow-up";
 import { effectiveLanguage, setLanguageChoice, useLanguageChoice } from "@/lib/language-preference";
 import { Select } from "./Select";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 export function UpdatesRow({ title = t("settings.updates.title") }: { title?: string }) {
   const s = useUpdaterState();
@@ -83,7 +84,7 @@ export function UpdatesRow({ title = t("settings.updates.title") }: { title?: st
 }
 
 function useNewBotEffort() {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const current = state.config?.newBots?.effort ?? "";
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -155,7 +156,7 @@ export function NewBotDefaultsRow({ onEdit }: { onEdit: () => void }) {
 }
 
 function ReplayAppTourButton({ label = t("settings.welcome.appTour") }: { label?: string }) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState(false);
   return (
@@ -191,7 +192,7 @@ function ReplayAppTourButton({ label = t("settings.welcome.appTour") }: { label?
 
 /** The two tours, one row each, each with its one Replay. */
 export function ReplayTourRow() {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   // A team member's app has no tours of its own to replay.
   if (state.config?.team) return null;
   return <>
@@ -205,7 +206,7 @@ export function ReplayTourRow() {
 }
 
 export function LanguageRow({ simple = false }: { simple?: boolean }) {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
   const current = effectiveLanguage(useLanguageChoice(), state.config?.language);
 
   return (
@@ -345,7 +346,7 @@ export function UniversalPinsRow() {
 }
 
 export function ToolCallsRow() {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const enabled = showToolCallsEnabled(state.config);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -385,7 +386,7 @@ export function ToolCallsRow() {
 }
 
 export function ExperimentalFeaturesRow() {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const skillAuthoring = skillAuthoringEnabled(state.config);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -428,7 +429,7 @@ export function ExperimentalFeaturesRow() {
 }
 
 export function BrowserProfilesRow() {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
   const profiles = state.config?.browserProfiles ?? [];
   if (!builtInBrowserEnabled(state.config) && profiles.length === 0) return null;
   // The manager draws its own section, with Add as the section's action.

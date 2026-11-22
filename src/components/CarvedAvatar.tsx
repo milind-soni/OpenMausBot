@@ -12,8 +12,8 @@ import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/
 import { avatarMarks, type AvatarKind } from "@/lib/avatar-marks";
 import { CARVED_BODIES, type CarvedBody, type CarvedBodyId } from "../../shared/carved-bodies";
 import type { CursorAvatarHandle } from "./CursorAvatar";
-import { mascotClock, usePrefersReducedMotion } from "./mascot-clock";
-import { frameFloorMs, nextFrameAt } from "./mascot-motion";
+import { mascotClock, put, usePrefersReducedMotion, type MascotTicket } from "./mascot-clock";
+import { ACTIVE_STATES, HOVER_BLINK_MS, blinkOpenness, frameFloorMs, nextFrameAt } from "./mascot-motion";
 import { mascotFaceInk, type MascotFaceColor } from "../../shared/bot-avatar";
 
 /** Where the face looks and how it feels. */
@@ -159,22 +159,23 @@ export type CarvedAvatarProps = {
 };
 
 function CarvedAvatarComponent(
-  { body: bodyId, color, faceColor, size = 44, state = "idle", motion = "none", motionKey = 0, gaze, trackPointer = true, animated = true, label, kind }: CarvedAvatarProps,
+  { body: bodyId, color, faceColor, size = 44, state = "idle", motion = "none", motionKey = 0, gaze, trackPointer = true, animated, label, kind }: CarvedAvatarProps,
   ref: React.Ref<CursorAvatarHandle>,
 ) {
   const body = CARVED_BODIES[bodyId];
   const faceInk = mascotFaceInk(faceColor);
   const uid = useId().replace(/:/g, "");
   const reduced = usePrefersReducedMotion();
-  const live = animated && !reduced;
+  const live = !reduced && (animated ?? ACTIVE_STATES.has(state));
   const group = useRef<SVGGElement>(null);
   const eyes = [useRef<SVGRectElement>(null), useRef<SVGRectElement>(null)] as const;
   const smile = useRef<SVGPathElement>(null);
   const open = useRef<SVGEllipseElement>(null);
   const pose = useRef<CarvedPose>(moodPose(state));
-  const cue = useRef({ blinkAt: -1, startleUntil: 0, pointer: null as null | { x: number; y: number } });
-  const props = useRef({ state, gaze });
-  props.current = { state, gaze };
+  const cue = useRef({ blinkAt: -1, startleUntil: 0, pointer: null as null | { x: number; y: number }, hovered: false });
+  const props = useRef({ state, gaze, live });
+  props.current = { state, gaze, live };
+  const ticket = useRef<MascotTicket | null>(null);
   const [initial] = useState(() => carvedGeometry(body, pose.current));
 
   const startle = () => {
@@ -182,41 +183,45 @@ function CarvedAvatarComponent(
     cue.current.blinkAt = performance.now();
   };
   useImperativeHandle(ref, () => ({
-    blink: () => { cue.current.blinkAt = performance.now(); },
-    spin: () => startle(),
+    blink: () => { cue.current.blinkAt = performance.now(); ticket.current?.wake(); },
+    spin: () => {
+      startle();
+      ticket.current?.wake();
+    },
     setExpression: () => {},
   }));
 
   useEffect(() => {
-    if (!live || motion === "none") return;
+    if (reduced || animated === false || motion === "none") return;
     if (motion === "blink") cue.current.blinkAt = performance.now();
     else if (STARTLE.has(motion)) startle();
-  }, [motion, motionKey, live]);
+    ticket.current?.wake();
+  }, [motion, motionKey, animated, reduced]);
 
   const paint = (p: CarvedPose) => {
     const g = carvedGeometry(body, p);
-    group.current?.setAttribute("transform", g.body);
+    if (group.current) put(group.current, "transform", g.body);
     g.eyes.forEach((rect, i) => {
       const el = eyes[i].current;
       if (!el) return;
-      for (const [k, v] of Object.entries(rect)) el.setAttribute(k, String(v));
+      for (const [k, v] of Object.entries(rect)) put(el, k, String(v));
     });
     if (smile.current) {
-      smile.current.setAttribute("d", g.smile.d);
-      smile.current.setAttribute("transform", g.smile.transform);
-      smile.current.setAttribute("opacity", String(g.smile.opacity));
+      put(smile.current, "d", g.smile.d);
+      put(smile.current, "transform", g.smile.transform);
+      put(smile.current, "opacity", String(g.smile.opacity));
     }
-    if (open.current) for (const [k, v] of Object.entries(g.open)) open.current.setAttribute(k, String(v));
+    if (open.current) for (const [k, v] of Object.entries(g.open)) put(open.current, k, String(v));
   };
 
   useEffect(() => {
-    if (live) return;
+    if (!reduced) return;
     pose.current = moodPose(state);
     paint(pose.current);
-  }, [state, live, body]);
+  }, [state, reduced, body]);
 
   useEffect(() => {
-    if (!live) return;
+    if (reduced) return;
     let last = performance.now();
     let glanceAt = last + 900 + Math.random() * 2600;
     let blinkAt = last + 1500 + Math.random() * 3500;
@@ -230,15 +235,18 @@ function CarvedAvatarComponent(
         target = GLANCES[Math.floor(Math.random() * GLANCES.length)];
         glanceAt = now + (1400 + Math.random() * 3200) / rate;
       }
-      if (now > blinkAt) {
+      const engaged = props.current.live || cue.current.hovered;
+      if (!engaged) blinkAt = now + 300 + Math.random() * 400;
+      else if (now > blinkAt) {
         cue.current.blinkAt = now;
-        blinkAt = now + 2600 + Math.random() * 4200;
+        blinkAt = now + HOVER_BLINK_MS[0] + Math.random() * (HOVER_BLINK_MS[1] - HOVER_BLINK_MS[0]);
       }
       const pointer = cue.current.pointer;
       const outside = props.current.gaze;
+      const roam = engaged && rate > 0;
       const want: CarvedPose = {
-        gx: pointer?.x ?? (mood.gx ?? (rate > 0 ? target[0] : 0)) + (outside?.x ?? 0),
-        gy: pointer?.y ?? (mood.gy ?? (rate > 0 ? target[1] : 0)) + (outside?.y ?? 0),
+        gx: pointer?.x ?? (mood.gx ?? (roam ? target[0] : 0)) + (outside?.x ?? 0),
+        gy: pointer?.y ?? (mood.gy ?? (roam ? target[1] : 0)) + (outside?.y ?? 0),
         wide: now < cue.current.startleUntil ? 1 : mood.wide ?? 0,
         shut: mood.shut ?? 0,
         smile: mood.smile ?? 1,
@@ -249,24 +257,45 @@ function CarvedAvatarComponent(
       p.gy += (Math.max(-1, Math.min(1, want.gy)) - p.gy) * k(9);
       p.wide += (want.wide - p.wide) * k(want.wide > p.wide ? 18 : 7);
       p.smile += (want.smile - p.smile) * k(8);
-      const since = cue.current.blinkAt < 0 ? 1 : (now - cue.current.blinkAt) / 200;
-      const blink = since >= 1 ? 0 : since < 0.45 ? since / 0.45 : 1 - (since - 0.45) / 0.55;
-      p.shut += (Math.max(want.shut, blink) - p.shut) * (blink > 0 ? 1 : k(10));
+      const open = cue.current.blinkAt < 0 ? null : blinkOpenness(now - cue.current.blinkAt);
+      const blink = open === null ? 0 : 1 - open;
+      p.shut += (Math.max(want.shut, blink) - p.shut) * (open !== null ? 1 : k(10));
       paint(p);
-      return nextFrameAt(now, frameFloorMs(size));
+      const settled = open === null && (Object.keys(want) as Array<keyof CarvedPose>).every((key) => Math.abs(want[key] - p[key]) < 0.003);
+      if (!engaged && settled) return now < cue.current.startleUntil ? cue.current.startleUntil : Infinity;
+      return nextFrameAt(now, frameFloorMs(size, cue.current.hovered));
     };
-    const ticket = mascotClock().add(step, group.current?.ownerSVGElement);
-    return () => ticket.remove();
-  }, [body, live, size]);
+    const added = mascotClock().add(step, group.current?.ownerSVGElement);
+    ticket.current = added;
+    return () => {
+      added.remove();
+      ticket.current = null;
+    };
+  }, [body, reduced, size]);
+
+  useEffect(() => {
+    ticket.current?.wake();
+  }, [state, live, gaze?.x, gaze?.y]);
 
   const onPointerMove = (event: ReactPointerEvent<HTMLSpanElement>) => {
+    if (!cue.current.hovered) return;
+    ticket.current?.wake();
     const rect = event.currentTarget.getBoundingClientRect();
     cue.current.pointer = {
       x: Math.max(-1, Math.min(1, ((event.clientX - rect.left) / rect.width) * 2 - 1)),
       y: Math.max(-1, Math.min(1, ((event.clientY - rect.top) / rect.height) * 2 - 1)),
     };
   };
-  const onPointerLeave = () => { cue.current.pointer = null; };
+  const onPointerEnter = (event: ReactPointerEvent<HTMLSpanElement>) => {
+    if (event.pointerType === "touch") return;
+    cue.current.hovered = true;
+    ticket.current?.wake();
+  };
+  const onPointerLeave = () => {
+    cue.current.pointer = null;
+    cue.current.hovered = false;
+    ticket.current?.wake();
+  };
 
   const fills = carvedFills(body, color);
   const resolve = (fill: string) => (fill === "body" ? fills.body : fill === "accent" ? fills.accent : fill);
@@ -290,8 +319,9 @@ function CarvedAvatarComponent(
     <span
       {...avatarMarks(kind, "mascot")}
       className="inline-flex shrink-0"
-      onPointerMove={trackPointer && live ? onPointerMove : undefined}
-      onPointerLeave={trackPointer && live ? onPointerLeave : undefined}
+      onPointerEnter={trackPointer && !reduced ? onPointerEnter : undefined}
+      onPointerMove={trackPointer && !reduced ? onPointerMove : undefined}
+      onPointerLeave={trackPointer && !reduced ? onPointerLeave : undefined}
     >
       <svg
         viewBox="-14 -14 268 268"

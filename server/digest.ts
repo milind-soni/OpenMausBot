@@ -6,6 +6,7 @@ import type { Message } from "./store.ts";
 import type { DigestFiles, DigestTool, HookCoverage, TurnDigest } from "../shared/digest.ts";
 import { redactSecretsInText } from "../shared/redact.ts";
 import { toolIdentity } from "../shared/tool-name.ts";
+import { toolResultPrefix } from "./tool-results.ts";
 export type { DigestFiles, DigestTool, HookCoverage, TurnDigest } from "../shared/digest.ts";
 
 /** Evidence is observed, never inferred from a provider's brand. */
@@ -30,6 +31,7 @@ export const MAX_TOOLS = 8;
 export const MAX_FILES = 20;
 export const MAX_MEMORY = 20;
 export const REPLY_CHARS = 200;
+export const ERROR_CHARS = 300;
 export const RENDER_BYTES = 1_500;
 
 export interface DigestInput {
@@ -42,6 +44,7 @@ export interface DigestInput {
   memory: readonly MemoryJournalEntry[];
   files?: DigestFiles;
   reply: string;
+  error?: string;
   usage?: TurnDigest["usage"];
   hookCoverage: HookCoverage;
 }
@@ -82,6 +85,7 @@ export function buildTurnDigest(input: DigestInput): TurnDigest {
     ...(input.memory.length > memory.length ? { memoryDropped: input.memory.length - memory.length } : {}),
     // The digest's copy of the reply is stored and replayed like the reply itself, so it is scrubbed the same way.
     reply: firstSentence(redactSecretsInText(input.reply)),
+    ...(input.error?.trim() ? { error: toolResultPrefix(redactSecretsInText(input.error).replace(/\s+/g, " ").trim(), ERROR_CHARS) } : {}),
     ...(input.usage ? { usage: input.usage } : {}),
     hookCoverage: input.hookCoverage,
   };
@@ -107,11 +111,12 @@ function firstSentence(reply: string): string {
   const flat = reply.replace(/\s+/g, " ").trim();
   const end = flat.search(/[.!?](\s|$)/);
   const sentence = end === -1 ? flat : flat.slice(0, end + 1);
-  return sentence.slice(0, REPLY_CHARS);
+  return toolResultPrefix(sentence, REPLY_CHARS);
 }
 
 export function renderDigest(d: TurnDigest): string {
   const parts: string[] = ["[digest]"];
+  if (d.error) parts.push(`turn failed: ${d.error}`);
   if (d.tools.length) {
     // Every entry ends at "×N" or "(N failed)": the phones split the tools part on exactly that.
     parts.push(`tools: ${digestTools(d)}${d.hookCoverage === "preview" ? " (from tool previews)" : ""}`);

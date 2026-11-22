@@ -4,7 +4,7 @@ import Markdown, { defaultUrlTransform, type Components, type ExtraProps, type O
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { fromMarkdown, type Options as MarkdownParseOptions } from "mdast-util-from-markdown";
-import { Check, Copy, Download, Eye, LoaderCircle, RotateCcw, WrapText, X } from "lucide-react";
+import { Check, Copy, Download, Eye, FolderOpen, LoaderCircle, RotateCcw, WrapText, X } from "lucide-react";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
@@ -27,6 +27,8 @@ import { GITHUB_REF_ICONS, LinkHoverCard } from "@/components/LinkHoverCard";
 import { useThreadLinkMenu } from "@/components/ThreadLinkMenu";
 import { looksLikeThreadRefUrl, parseThreadRefUrl, resolveThreadRefAddress, remarkThreadRefs } from "../lib/thread-refs";
 import { MarkdownImagePreview, MessageFolderFiles, OutsideWorkspaceFile, saveFailureText, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
+import { useMessageFileOutsideWorkspace } from "./outside-workspace-probe";
+import { canRevealHostPath, revealHostPath, revealProblemText } from "@/lib/reveal-host-path";
 import { ThreadLink, ThreadRefsContext, threadLinkFromProps, type ThreadRefsValue } from "./ThreadRefs";
 import { MarkdownTable } from "./MarkdownTable";
 import { CodeBlock, CodePlate, codeHash } from "./CodeBlock";
@@ -155,9 +157,28 @@ function unwrapLinkedImages() {
 // directions falls back to LTR. JS regexes cannot match Bidi_Class, so these are the blocks Unicode reserves for
 // right-to-left letters.
 const RTL_LETTER = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF\u{10800}-\u{10FFF}\u{1E800}-\u{1EFFF}]/u;
+const ADDRESS = /(?:[a-z][a-z0-9+.-]*:\/\/|www\.)[^\s\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF()]+/giu;
+const TECHNICAL = /[\d._/\\@=]|^-|\p{Ll}\p{Lu}/u;
 
+/** The script with more words decides; the first word only breaks a tie. Addresses, numbers and code-like tokens are
+ * not counted. An Arabic answer often opens on a name ("Chrome 158" or "**Node.js**" then Arabic), and the first letter
+ * alone laid that whole paragraph or list out left-to-right. */
 export function textDirection(value: string): "rtl" | "ltr" {
-  const strong = /\p{Letter}/u.exec(value);
+  const text = value.replace(ADDRESS, " ");
+  let rtl = 0, ltr = 0, first: "rtl" | "ltr" | null = null;
+  for (const raw of text.split(/\s+/)) {
+    const word = raw.replace(/[.,;:!?]+$/u, "");
+    const direction = [...word].some((char) => RTL_LETTER.test(char) && /\p{Letter}/u.test(char)) ? "rtl"
+      : /\p{Letter}/u.test(word) && !TECHNICAL.test(word) ? "ltr"
+      : null;
+    if (!direction) continue;
+    first ??= direction;
+    if (direction === "rtl") rtl += 1;
+    else ltr += 1;
+  }
+  if (rtl !== ltr) return rtl > ltr ? "rtl" : "ltr";
+  if (first) return first;
+  const strong = /\p{Letter}/u.exec(text);
   return strong && RTL_LETTER.test(strong[0]) ? "rtl" : "ltr";
 }
 
@@ -344,16 +365,37 @@ function LocalFileLink({ filePath, shownPath, shownName, name, source, children,
   const save = useLocalFileSave(filePath, name, message);
   const preview = useHtmlPreview(filePath, shownName, message);
   const revealMenu = useRevealOriginalMenu();
+  const fileOutsideWorkspace = useMessageFileOutsideWorkspace(filePath, message);
+  const revealHere = typeof window !== "undefined" && Boolean(window.ogb?.revealInFolder) && !window.ogb?.remoteClient?.active;
+  const revealOnClick = fileOutsideWorkspace === true && canRevealHostPath(shownPath) && revealHere;
+  const [revealProblem, setRevealProblem] = useState("");
   if (!message) {
     return <span title={t("chat.file.legacy")} className="break-words text-ink-secondary">{children}</span>;
   }
+  // Only the desktop app probes; elsewhere the hook stays null and the link must stay usable.
+  const probing = revealHere && canRevealHostPath(filePath) && fileOutsideWorkspace === null;
+  const pathAction = async (event: { currentTarget: HTMLElement }) => {
+    if (preview.opens) {
+      preview.show(event);
+      return;
+    }
+    if (revealOnClick) {
+      setRevealProblem("");
+      const result = await revealHostPath(shownPath);
+      const problem = revealProblemText(result);
+      if (problem) setRevealProblem(problem);
+      return;
+    }
+    void save.save();
+  };
   const label = save.state === "saving"
     ? t("common.saving")
     : save.state === "saved"
       ? t("common.saved")
-      : save.state === "failed"
+      : save.state === "failed" && !revealOnClick
         ? t("chat.retry")
         : null;
+  const pathTitle = preview.opens ? preview.label : revealOnClick ? t("attach.showInFolder") : t("chat.file.saveCopy");
 
   return (
     <span dir="ltr" className="inline-flex flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]" {...revealMenu.targetProps(source)}>
@@ -363,14 +405,18 @@ function LocalFileLink({ filePath, shownPath, shownName, name, source, children,
         : <FilePreviewButton path={filePath} name={shownName} message={message} />}
       <button
         type="button"
-        onClick={preview.opens ? preview.show : () => void save.save()}
-        disabled={!preview.opens && save.state === "saving"}
-        title={preview.opens ? preview.label : t("chat.file.saveCopy")}
+        onClick={(event) => void pathAction(event)}
+        disabled={!preview.opens && (save.state === "saving" || probing)}
+        title={pathTitle}
         className="inline-flex items-center gap-1 break-words text-start text-accent underline decoration-accent/40 hover:decoration-accent disabled:cursor-wait"
       >
         {children}
         {preview.opens ? (
           <Eye size={12} className="shrink-0" aria-hidden="true" />
+        ) : probing ? (
+          <LoaderCircle size={12} className="shrink-0 animate-spin" aria-hidden="true" />
+        ) : revealOnClick ? (
+          <FolderOpen size={12} className="shrink-0" aria-hidden="true" />
         ) : save.state === "saving" ? (
           <LoaderCircle size={12} className="shrink-0 animate-spin" aria-hidden="true" />
         ) : save.state === "saved" ? (
@@ -381,6 +427,7 @@ function LocalFileLink({ filePath, shownPath, shownName, name, source, children,
           <Download size={12} className="shrink-0" aria-hidden="true" />
         )}
       </button>
+      {revealProblem && <span role="alert" className="text-[12px] text-danger">{revealProblem}</span>}
       {label && (
         <span
           role={save.state === "failed" ? "alert" : "status"}
@@ -390,7 +437,7 @@ function LocalFileLink({ filePath, shownPath, shownName, name, source, children,
           {save.state === "failed" ? saveFailureText(save) : label}
         </span>
       )}
-      {save.state === "failed" && save.outsideWorkspace && (
+      {save.state === "failed" && save.outsideWorkspace && !revealOnClick && (
         <span className="inline-flex flex-wrap items-center gap-x-1.5 text-[12px]">
           <OutsideWorkspaceFile filePath={shownPath} />
         </span>

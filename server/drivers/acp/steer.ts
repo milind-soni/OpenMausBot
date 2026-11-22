@@ -20,13 +20,17 @@ export interface AcpRequestSteer {
   supported(initializeResult: unknown): boolean;
 }
 
-/** Devin: a second `session/prompt` joins the running turn, for a CLI whose `initialize` sets `agentCapabilities._meta[capability]`.
- * Both prompts end together; their replies carry the same usage and the same `run`. */
+/** A second `session/prompt` joins the running turn: Devin, for a CLI whose `initialize` sets `agentCapabilities._meta[capability]`
+ * (both prompts end together; their replies carry the same usage and the same `run`), and Grok, whose config opts in (`enabled`). */
 export interface AcpPromptSteer {
   kind: "prompt";
-  capability: string;
+  capability?: string;
+  /** For an agent that does not announce the capability: whether this process's environment opts in. */
+  enabled?(env: Record<string, string | undefined>): boolean;
   /** The run a prompt reply ends; replies of one run report their usage once. */
-  run(response: unknown): string | undefined;
+  run?(response: unknown): string | undefined;
+  /** A steer reply that only reports its message was taken into the running turn; the turn's own reply is the outcome. */
+  folded?(response: unknown): boolean;
 }
 
 export type AcpSteerSupport = AcpCommandSteer | AcpRequestSteer | AcpPromptSteer;
@@ -158,11 +162,18 @@ export function acpPromptSteering(running: () => boolean, send: (text: string) =
   return steering;
 }
 
+/** The replies that decide a turn: its own, then each steer's, without those that only report the message was taken in. */
+export function turnAnswers(support: AcpSteerSupport | undefined, result: any, replies: readonly unknown[] = []): any[] {
+  const folded = support && "folded" in support ? support.folded : undefined;
+  return [result, ...replies.filter((reply) => !folded?.(reply))];
+}
+
 export interface AcpSteerIo {
   /** The turn's own prompt is out, nothing stopped it, and the session is live. */
   open(): boolean;
   commands(): ReadonlySet<string> | undefined;
   initializeResult(): any;
+  env: Record<string, string | undefined>;
   prompt(text: string): Promise<unknown>;
   extension(method: string, text: string): Promise<unknown>;
 }
@@ -173,7 +184,7 @@ export function turnSteering(support: AcpSteerSupport, io: AcpSteerIo): AcpTurnS
       (text) => io.extension(support.method, text));
   }
   if ("kind" in support && support.kind === "prompt") {
-    return acpPromptSteering(() => io.open() && io.initializeResult()?.agentCapabilities?._meta?.[support.capability] === true, io.prompt);
+    return acpPromptSteering(() => io.open() && (support.enabled ? support.enabled(io.env) : io.initializeResult()?.agentCapabilities?._meta?.[support.capability ?? ""] === true), io.prompt);
   }
   return acpTurnSteering(support, () => io.open() && io.commands()?.has(support.command) === true, io.prompt);
 }

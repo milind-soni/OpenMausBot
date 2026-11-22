@@ -5,10 +5,13 @@
  * secrets.
  */
 import { getDomain } from "tldts";
+import { browserMatesOf } from "./browser-mates.ts";
+
+export { browserMatesOf };
 
 /** Where a login came from: the sign-in card's Save, Settings, or the person's
- * 1Password or Bitwarden vault (read-only here). */
-export type LoginSource = "card" | "settings" | "1password" | "bitwarden";
+ * 1Password, Bitwarden or Bitwarden Secrets Manager (read-only here). */
+export type LoginSource = "card" | "settings" | "1password" | "bitwarden" | "bitwarden-secrets";
 
 /** Which bots may use a login: every bot, or the ones named. */
 export type LoginBots = "all" | string[];
@@ -87,6 +90,23 @@ export interface BitwardenCredentials {
   password: string;
 }
 
+/** Bitwarden Secrets Manager, connected with a machine account's access token, which never leaves the server.
+ * `server`: the Bitwarden server's host. */
+export interface BitwardenSecretsStatus {
+  connected: boolean;
+  server?: string;
+  /** How many logins and secrets it lists. */
+  items?: number;
+  error?: string;
+}
+
+/** What an admin connects Bitwarden Secrets Manager with: the server's https address and a machine account's access
+ * token. Sent once, kept sealed on the server, never sent back. */
+export interface BitwardenSecretsCredentials {
+  serverUrl: string;
+  accessToken: string;
+}
+
 /** The Bitwarden servers an admin picks from; anything else is a self-hosted (or Vaultwarden) address. */
 export const BITWARDEN_SERVERS = ["https://vault.bitwarden.com", "https://vault.bitwarden.eu"] as const;
 
@@ -163,13 +183,6 @@ export function loginOriginCheck(pageUrl: string, login: LoginPlace): { ok: true
   const page = loginPageCheck(pageUrl);
   if (!page.ok) return page;
   return loginMatchesHost(login, page.pageHost) ? page : { ok: false, pageHost: page.pageHost, reason: "host" };
-}
-
-/** The other bots that use this bot's named browser profile, and so share what it is signed in to. A guest browser is
- * the bot's own temporary one (server/host/browser.ts sessionFor), so it has none. */
-export function browserMatesOf(bots: ReadonlyArray<{ id: string; browserProfile?: string | null }>, botId: string): string[] {
-  const profile = bots.find((bot) => bot.id === botId)?.browserProfile;
-  return profile && profile !== "guest" ? bots.filter((bot) => bot.id !== botId && bot.browserProfile === profile).map((bot) => bot.id) : [];
 }
 
 /** The bots a login is kept to that it is still not filled for, because they share a browser with a bot it isn't kept to. */

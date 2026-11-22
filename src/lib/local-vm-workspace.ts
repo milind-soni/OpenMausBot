@@ -50,6 +50,8 @@ export interface NativeViewOverlayCandidate {
   explicit: boolean;
   visible: boolean;
   zIndex: number | null;
+  /** Whether the candidate paints above the host where they meet; undefined where the page cannot tell. */
+  above?: boolean;
 }
 
 /** Native views paint above renderer content, so hide them only under a visible overlay. */
@@ -65,6 +67,7 @@ export function nativeViewOverlayIntersects(
   return candidates.some(
     (candidate) =>
       candidate.visible &&
+      candidate.above !== false &&
       candidate.rect.width > 0 &&
       candidate.rect.height > 0 &&
       (candidate.explicit || (candidate.zIndex !== null && candidate.zIndex >= 10)) &&

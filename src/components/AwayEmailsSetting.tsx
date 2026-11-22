@@ -1,12 +1,13 @@
 import { useEffect, useId, useState } from "react";
-import { api, useStore } from "@/state/store";
+import { api } from "@/state/store";
+import { useStoreSelector } from "@/state/store-select";
 import { t } from "@/lib/i18n";
 import { Switch } from "./SettingsPrimitives";
 
 /** Settings → General on a Team Cloud (a row of Account, or in Profile): the person's own "Email me when I'm away"
  * (GET/PUT /api/me/away-emails). Nothing off a team. */
 export function AwayEmailsSetting({ row = false }: { row?: boolean }) {
-  const team = Boolean(useStore().state.config?.team);
+  const team = useStoreSelector((state) => Boolean(state.config?.team));
   const [on, setOn] = useState<boolean | null>(null);
   const [failed, setFailed] = useState(false);
   const label = useId();

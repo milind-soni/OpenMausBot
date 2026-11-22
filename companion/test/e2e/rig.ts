@@ -13,6 +13,7 @@ import { admission, b64u, credentialHash, ed25519RawPublicKey, fromB64u, keyId, 
 import { TRANSPORT_DIRECT, TRANSPORT_RELAY } from "../../src/e2e/noise.ts";
 import { dial } from "../../src/e2e/phone.ts";
 import type { E2ESession } from "../../src/e2e/session.ts";
+import { waitFor } from "./wait.ts";
 import { startFakeHarness, type FakeHarness } from "./fake-harness.ts";
 
 const ENTRY = fileURLToPath(new URL("../../src/index.ts", import.meta.url));
@@ -31,15 +32,7 @@ export async function freePorts(count: number): Promise<number[]> {
 
 export const freePort = async () => (await freePorts(1))[0];
 
-export const waitFor = async <T>(check: () => Promise<T | null | undefined | false> | T | null | undefined | false, ms = 5_000): Promise<T> => {
-  const deadline = Date.now() + ms;
-  for (;;) {
-    const value = await check();
-    if (value) return value;
-    if (Date.now() > deadline) throw new Error("timed out waiting");
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-};
+export { waitFor };
 
 export interface RelayProcess {
   url: string;

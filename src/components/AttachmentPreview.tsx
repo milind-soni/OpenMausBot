@@ -33,11 +33,12 @@ import {
 } from "@/lib/composer-attachments";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { revealBridge, revealHostPath, revealProblemText, REVEALABLE_PATH } from "@/lib/reveal-host-path";
 import { serverErrorText } from "@/lib/server-error";
 import { CopyImageButton } from "./CopyImageButton";
 import { FilePreviewButton } from "./FilePreviewButton";
 import { chipNameAction, SaveIconButton, useHtmlPreview } from "./HtmlFilePreview";
-import { ImageLoading } from "./ImageLoading"; import { openLinkedFolder } from "./RevealOriginalMenu";
+import { ImageLoading } from "./ImageLoading"; import { openLinkedFolder } from "./RevealOriginalMenu"; import { serverFetch } from "@/lib/relay-server";
 
 export interface PreviewImage {
   src: string;
@@ -203,7 +204,7 @@ export function messageImagePreviewUrl(
 
 export async function messageImageOutsideWorkspace(src: string): Promise<boolean> {
   try {
-    const response = await fetch(src, { cache: "no-store" });
+    const response = await serverFetch(src, { cache: "no-store" });
     if (response.ok) {
       await response.body?.cancel();
       return false;
@@ -226,7 +227,7 @@ export async function requestMessageFile(
   signal: AbortSignal,
   options?: { entry?: string; list?: boolean; mediaLink?: boolean },
 ): Promise<Response> {
-  const response = await fetch(`/api/threads/${encodeURIComponent(message.threadId)}/messages/${encodeURIComponent(message.messageId)}/file`, {
+  const response = await serverFetch(`/api/threads/${encodeURIComponent(message.threadId)}/messages/${encodeURIComponent(message.messageId)}/file`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -416,12 +417,6 @@ export function MessageFolderFiles({ folderPath, listing, message }: {
   );
 }
 
-const REVEALABLE_PATH = /^(?:\/(?!\/)|[a-zA-Z]:[\\/])/;
-function revealBridge(): NonNullable<Window["ogb"]>["revealInFolder"] {
-  const ogb = typeof window === "undefined" ? undefined : window.ogb;
-  return ogb?.remoteClient?.active ? undefined : ogb?.revealInFolder;
-}
-
 export function OutsideWorkspaceFile({ filePath }: { filePath: string }) {
   const [problem, setProblem] = useState("");
   const reveal = revealBridge();
@@ -434,13 +429,9 @@ export function OutsideWorkspaceFile({ filePath }: { filePath: string }) {
   }
   const show = async () => {
     setProblem("");
-    try {
-      const result = await reveal(filePath);
-      if (result === "missing") setProblem(t("attach.revealMissing"));
-      else if (result !== "shown") setProblem(t("attach.revealFailed"));
-    } catch {
-      setProblem(t("attach.revealFailed"));
-    }
+    const result = await revealHostPath(filePath);
+    const text = revealProblemText(result);
+    if (text) setProblem(text);
   };
   return (
     <>
@@ -976,7 +967,7 @@ function CompactFileChip({ file, message, linked, save, preview, className }: {
   if (!message || (!file.private && !linked)) {
     return (
       <span title={t("attach.legacyFile", { name: file.name })} className={cn(FILE_CHIP, "gap-1.5 px-2.5", className)}>
-        <FileText size={14} strokeWidth={1.75} className="shrink-0" aria-hidden="true" />
+        <FileText size={14} className="shrink-0" aria-hidden="true" />
         {name}
         <span className="shrink-0 text-[12px]">{t("attach.unavailable")}</span>
       </span>
@@ -993,16 +984,16 @@ function CompactFileChip({ file, message, linked, save, preview, className }: {
           {...chipNameAction(preview, save, file.name, save.retryable)}
           className="inline-flex h-7 min-w-0 items-center gap-1.5 rounded-full ps-2.5 pe-2 transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-wait"
         >
-          <FileText size={14} strokeWidth={1.75} className="shrink-0" aria-hidden="true" />
+          <FileText size={14} className="shrink-0" aria-hidden="true" />
           {name}
-          {preview.opens ? <Eye size={13} strokeWidth={1.75} className="shrink-0" aria-hidden="true" /> : save.state === "saving" ? (
+          {preview.opens ? <Eye size={13} className="shrink-0" aria-hidden="true" /> : save.state === "saving" ? (
             <LoaderCircle size={13} className="shrink-0 animate-spin" aria-hidden="true" />
           ) : save.state === "saved" ? (
             <Check size={13} className="shrink-0 text-success" aria-hidden="true" />
           ) : failed ? (
             save.retryable && <RotateCcw size={13} className="shrink-0 text-danger" aria-hidden="true" />
           ) : (
-            <Download size={13} strokeWidth={1.75} className="shrink-0" aria-hidden="true" />
+            <Download size={13} className="shrink-0" aria-hidden="true" />
           )}
         </button>
         {preview.opens ? <SaveIconButton name={file.name} save={save} retryable={save.retryable} /> : <FilePreviewButton path={file.path} name={file.name} message={message} />}

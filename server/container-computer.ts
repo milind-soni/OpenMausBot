@@ -33,6 +33,7 @@ import {
   type HostUser,
 } from "./container-isolation.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
+import { runtimeHealthy } from "./container-runtime-probe.ts";
 
 // Its own group: a timeout also ends the docker CLI plugins and credential helpers it started.
 const run = execFileInGroupAsync;
@@ -252,25 +253,7 @@ export async function containerRuntimeStatus(
     : RUNTIMES.filter((runtime) => runtime !== "container" || platform === "darwin");
   const present = await Promise.all(candidates.map((runtime) => installed(runtime, runner, platform)));
   const available = candidates.filter((_, index) => present[index]);
-  const healthy = await Promise.all(
-    available.map(async (candidate) => {
-      try {
-        const infoArgs = candidate === "container"
-          ? ["system", "status"]
-          : candidate === "podman"
-            ? ["info", "--format", "json"]
-            : ["info", "--format", "{{.ServerVersion}}"];
-        await runner(
-          candidate,
-          infoArgs,
-          10_000,
-        );
-        return true;
-      } catch {
-        return false;
-      }
-    }),
-  );
+  const healthy = await Promise.all(available.map((candidate) => runtimeHealthy(runner, candidate)));
   const healthyIndex = healthy.indexOf(true);
   return {
     runtime: healthyIndex >= 0 ? available[healthyIndex] : (available[0] ?? null),
@@ -1068,7 +1051,7 @@ const defaultExecRunner: ContainerExecRunner = async (command, args, options) =>
 
 /** The limit is enforced inside the container, so a runaway process is really stopped. */
 export async function containerExec(
-  target: LocalVmTarget,
+  target: Pick<LocalVmTarget, "containerName">,
   command: string,
   options: { timeoutSeconds?: number; runtime?: Runtime; exec?: ContainerExecRunner } = {},
 ): Promise<ContainerExecResult> {

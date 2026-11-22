@@ -129,9 +129,11 @@ export function createEnginePrestart(deps: EnginePrestartDeps) {
       const launch = { ...(JSON.parse(input) as SendTurnInput), text: "" };
       const timer = setTimeout(() => release(threadId, !deps.busy(botId, threadId)), (deps.idleMs ?? PRESTART_IDLE_MS) + RELEASE_AFTER_MS);
       timer.unref?.();
-      reserved.set(threadId, { botId, instanceId: from.instanceId, timer });
-      void adapter.start(launch).then((up) => { if (!up && !deps.busy(botId, threadId)) release(threadId, true); },
-        () => release(threadId, !deps.busy(botId, threadId)));
+      const reservation = { botId, instanceId: from.instanceId, timer };
+      reserved.set(threadId, reservation);
+      const releaseOwn = (retire: boolean) => { if (reserved.get(threadId) === reservation) release(threadId, retire); };
+      void adapter.start(launch).then((up) => { if (!up && !deps.busy(botId, threadId)) releaseOwn(true); },
+        () => releaseOwn(!deps.busy(botId, threadId)));
     },
 
     /** The conversation's bearers were retired (a Stop, a delete): an engine started ahead with them goes too. */

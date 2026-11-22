@@ -1,3 +1,5 @@
+import { readTranscriptPosition } from "@/lib/transcript-follow";
+import { latestWebPanels } from "@/lib/web-panel-preferences";
 import { placeUnreadDivider } from "@/lib/unread-divider";
 import { api } from "./api";
 import { visibleMessages } from "./snapshot-navigation";
@@ -49,10 +51,17 @@ export function trimmedHeld<T extends HeldOwner>(owner: T, keepFromId?: string):
   return from > 0 ? { ...owner, messages: owner.messages.slice(from), hasMore: true } : owner;
 }
 
+/** The selected room or bot, or the first bot when the selection names neither: what the chat and its panels show. */
+export const selectedOwner = (state: Pick<AppState, "bots" | "groups" | "selectedId">) =>
+  state.groups.find((group) => group.id === state.selectedId) ?? state.bots.find((bot) => bot.id === state.selectedId) ?? state.bots[0];
+
+/** A conversation on screen: the one the chat draws, or the chat a pinned page in the web panel comes from. */
+const shownThread = (state: AppState, threadId: string) =>
+  (state.activeView === "chat" && selectedOwner(state)?.threadId === threadId) ||
+  (state.activeView === "web-panel" && latestWebPanels().find((panel) => panel.id === state.webPanelId)?.page?.threadId === threadId);
+
 export function reduceTrimHeldMessages(state: AppState, { threadId, keepFromId }: TrimHeldMessages): AppState {
-  const shown = state.activeView === "chat" &&
-    [...state.bots, ...state.groups].some((owner) => owner.id === state.selectedId && owner.threadId === threadId);
-  if (shown) return state;
+  if (shownThread(state, threadId)) return state;
   let changed = false;
   const trim = <T extends HeldOwner>(owner: T): T => {
     if (owner.threadId !== threadId) return owner;
@@ -63,6 +72,40 @@ export function reduceTrimHeldMessages(state: AppState, { threadId, keepFromId }
   const bots = state.bots.map(trim);
   const groups = state.groups.map(trim);
   return changed ? { ...state, bots, groups } : state;
+}
+
+/** The most rows a conversation nobody has on screen gathers from live frames before it is trimmed again. */
+export const HELD_IN_BACKGROUND = HELD_FOR_PLACE + HELD_AFTER_LEAVING;
+
+/** After a row lands in a conversation nobody has on screen: past `HELD_IN_BACKGROUND` rows it is trimmed as when the
+ * reader left it, keeping the row the reader was at; when its pinned message or branch lies further back than that
+ * keeps, it holds what a fresh snapshot would, its newest page. */
+export function capHeldInBackground(state: AppState, action: Action): AppState {
+  if (action.type !== "messageAdded") return state;
+  const owner = [...state.bots, ...state.groups].find((candidate) => candidate.threadId === action.threadId);
+  if (!owner || owner.messages.length <= HELD_IN_BACKGROUND || shownThread(state, action.threadId)) return state;
+  const place = readTranscriptPosition(`${owner.id}:${owner.threadId}`);
+  const trimmed = reduceTrimHeldMessages(state, { type: "trimHeldMessages", threadId: action.threadId, keepFromId: place?.atEnd ? undefined : place?.rowId });
+  const page = <T extends HeldOwner>(held: T): T => held.threadId === action.threadId && held.messages.length > HELD_IN_BACKGROUND
+    ? { ...held, messages: held.messages.slice(-MESSAGE_PAGE_SIZE), hasMore: true } : held;
+  return { ...trimmed, bots: trimmed.bots.map(page), groups: trimmed.groups.map(page) };
+}
+
+/** Holds fewer rows than one page while the server has more: a snapshot's tail, or a conversation switched to. */
+export const shortHeld = <T extends { messages: Message[]; hasMore?: boolean }>(owner: T | undefined): owner is T =>
+  Boolean(owner?.hasMore) && owner!.messages.length < MESSAGE_PAGE_SIZE;
+
+/** A row from before a short tail (a frame queued while the snapshot was read): appended, it would read as the newest
+ * row, even if the conversation opened while its older page was loading. That page brings it in order.
+ * Only a row that is older than the tail and continues a row the tail does not hold counts: a row continuing the held
+ * rows is new, whatever its time says. */
+export function olderThanHeld(state: AppState, action: Action): boolean {
+  if (action.type !== "messageAdded") return false;
+  const owner = [...state.bots, ...state.groups].find((candidate) => candidate.threadId === action.threadId);
+  const first = owner?.messages[0], parentId = action.message.parentId;
+  if (!shortHeld(owner) || first === undefined || action.message.at >= first.at || typeof parentId !== "string") return false;
+  if ("activeLeafId" in owner && owner.activeLeafId === parentId) return false;
+  return !owner.messages.some((message) => message.id === action.message.id || message.id === parentId);
 }
 
 export function loadOlderPage(action: LoadOlderMessages, current: AppState, inFlight: Set<string>,

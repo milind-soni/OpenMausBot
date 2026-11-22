@@ -2,6 +2,7 @@ import { draftSummary, foldPoint } from "../compaction-summary.ts";
 import { compactBudget, compactionReading, contextWindowFor, shouldCompact } from "../context-budget.ts";
 import { MAX_SUMMARY_BYTES, selectReplay } from "../context-rebuild.ts";
 import type { ModelCatalog } from "../contracts.ts";
+import type { EngineCompactCheck, EngineCompactOutcome } from "./warm-summary-host.ts";
 import type { ContextMessage } from "../delta-context.ts";
 import { sinceFreshStart } from "../fresh-start.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
@@ -53,16 +54,22 @@ export interface ConversationCompactionDeps {
   directContext(bot: BotRecord, threadId: string, messages: Message[]): ContextMessage[];
   latestCompaction(messages: readonly Message[]): ({ id: string; firstKeptId?: string } & Record<string, unknown>) | undefined;
   /** Where the engine compacts by itself, in tokens, when OpenMausBot set that point. */
-  nativeCompactTokens(instance: CompactionInstance): number | undefined;
+  nativeCompactTokens(instance: CompactionInstance, model: string): number | undefined;
   /** False for an engine whose own compaction is switched off in its environment. */
   engineCompactionOn(instance: CompactionInstance): boolean;
-  /** The engine's own compaction of this conversation's session, asked for by the person; false when it has none to offer now. */
-  engineCompact(target: { botId: string; threadId: string; instanceId: string }, signal: AbortSignal): Promise<boolean>;
+  /** The engine's own compaction of this conversation's session, asked for by the person; `skipped` when it has none to offer now. */
+  engineCompact(target: { botId: string; threadId: string; instanceId: string }, signal: AbortSignal, check: EngineCompactCheck): Promise<EngineCompactOutcome>;
+  /** Whether the conversation's next turn carries on `session`, by the decision that turn makes before it dispatches. */
+  resumesSession(input: CompactConversationInput, session: string): boolean;
+  /** The engine instance and model the conversation's next turn would run on now. */
+  currentSelection(botId: string, threadId: string): { instanceId: string; model: string | null } | undefined;
   generateText(botId: string, instance: CompactionInstance): ((prompt: string, options?: { signal?: AbortSignal }) => Promise<string>) | undefined;
   claimIsCurrent(botId: string, generation: string, threadId: string): boolean;
   controllers: Map<string, { generation: string; controller: AbortController }>;
   cancelled(reason: string): Error;
   idleFraction: number;
+  /** Told true when a summary of a conversation someone is waiting on starts, and false once it is written, failed or stopped. */
+  summarizing?(threadId: string, active: boolean): void;
 }
 
 export function createConversationCompaction(deps: ConversationCompactionDeps) {
@@ -88,14 +95,15 @@ export function createConversationCompaction(deps: ConversationCompactionDeps) {
     const measurement = compactionReading(instance.adapter.capabilities, task.lastContextModel === `${instance.instanceId}:${model}` && !task.rewound ? task.usage?.context : undefined);
     const window = contextWindowFor(model, instance.models, measurement?.window);
     const bytes = history.reduce((n, entry) => n + Buffer.byteLength(entry.text), 0);
-    let floor = task.contextFloor;
+    let floor = task.contextFloor, seededFloor = false;
     if (record && record.id === task.appliedCompactionId && floor === undefined && measurement?.tokens) {
       floor = measurement.tokens;
-      store.patchTask(bot.id, threadId, { contextFloor: floor });
+      seededFloor = true;
+      if (!manual) store.patchTask(bot.id, threadId, { contextFloor: floor });
     }
     const engineCompacts = instance.adapter.capabilities.nativeCompaction === true && deps.engineCompactionOn(instance);
     if (!manual && !foldDue({ engineCompacts, configuredCompactAt: settings?.compactAt, contextTokens: measurement?.tokens, estimatedBytes: bytes,
-      window, nativeCompactAt: deps.nativeCompactTokens(instance), floor, idleFraction: idle ? deps.idleFraction : 1 })) return;
+      window, nativeCompactAt: deps.nativeCompactTokens(instance, model), floor, idleFraction: idle ? deps.idleFraction : 1 })) return;
     const fold = manual ? { folded: history, firstKeptId: "" } : foldPoint(history);
     if (!fold) return;
     const foldedThroughId = manual
@@ -107,9 +115,17 @@ export function createConversationCompaction(deps: ConversationCompactionDeps) {
     idle?.addEventListener("abort", () => controller.abort(), { once: true });
     if (idle?.aborted) controller.abort();
     deps.controllers.set(threadId, { generation, controller });
+    // Someone waits on this summary (not an idle one): the status line says so until every way out below, in the finally.
+    let shown = false;
     try {
-      if (manual && engineCompacts && await deps.engineCompact({ botId: bot.id, threadId, instanceId: instance.instanceId }, controller.signal)) return;
+      const engine = manual && engineCompacts ? await deps.engineCompact({ botId: bot.id, threadId, instanceId: instance.instanceId }, controller.signal, {
+        model, compactAtSet: positive(settings?.compactAt), resumes: (session) => deps.resumesSession(input, session), selectionNow: () => deps.currentSelection(bot.id, threadId),
+        current: () => deps.claimIsCurrent(bot.id, generation, threadId),
+      }) : "skipped";
       controller.signal.throwIfAborted();
+      if (engine !== "skipped") return;
+      if (seededFloor && manual) store.patchTask(bot.id, threadId, { contextFloor: floor });
+      if (!idle && deps.summarizing) { shown = true; deps.summarizing(threadId, true); }
       const summary = await draftSummary(fold.folded, { signal: controller.signal, generateText: deps.generateText(bot.id, instance) });
       if (!idle && !deps.claimIsCurrent(bot.id, generation, threadId)) throw deps.cancelled("context summarization stopped");
       controller.signal.throwIfAborted();
@@ -123,6 +139,7 @@ export function createConversationCompaction(deps: ConversationCompactionDeps) {
           tokensBefore: measurement?.tokens ?? Math.ceil(bytes / 4), by: manual ? "person" : "harness" },
       }, { kind: "compaction.append", key: `${threadId}:${messages.at(-1)?.id}:${fold.firstKeptId}` });
     } finally {
+      if (shown) deps.summarizing?.(threadId, false);
       if (deps.controllers.get(threadId)?.generation === generation) deps.controllers.delete(threadId);
     }
   };

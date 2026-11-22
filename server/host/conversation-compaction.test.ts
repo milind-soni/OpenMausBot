@@ -70,35 +70,46 @@ describe("claudeCompactionDisabled", () => {
 describe("compactConversation", () => {
   const bot = { id: "bot" } as BotRecord;
   const thread = "thread";
-  function setup(options: { tokens: number; nativeCompaction?: boolean; engineCompactionOn?: boolean; engineCompact?: boolean; compactAt?: number }) {
+  function setup(options: { tokens: number; nativeCompaction?: boolean; engineCompactionOn?: boolean; engineCompact?: boolean | "stale"; compactAt?: number;
+    generateText?: ConversationCompactionDeps["generateText"]; claimIsCurrent?: () => boolean; resumes?: boolean; applied?: string }) {
     const messages: Message[] = ["one", "two", "three", "four"].flatMap((word, index) => [
       { id: `u${index}`, role: "user", kind: "text", text: `ask ${word}`, at: index * 2 } as Message,
       { id: `b${index}`, role: "bot", kind: "text", text: `answer ${word}`, at: index * 2 + 1 } as Message,
     ]);
     const asked: string[] = [];
+    const checks: Array<{ model: string; compactAtSet: boolean; resumes: boolean; current: boolean; selection: { instanceId: string; model: string | null } | undefined }> = [];
+    const summarizing: boolean[] = [];
+    const patches: Array<Record<string, unknown>> = [];
     const deps: ConversationCompactionDeps = {
       store: {
-        taskByThread: () => ({ lastContextModel: "engine:model", usage: { context: { tokens: options.tokens, window: 200_000 } }, resumeCursors: {} }) as never,
+        taskByThread: () => ({ lastContextModel: "engine:model", usage: { context: { tokens: options.tokens, window: 200_000 } }, resumeCursors: {}, appliedCompactionId: options.applied }) as never,
         activePath: () => messages,
-        patchTask: () => undefined as never,
+        patchTask: (_botId: string, _threadId: string, patch: Record<string, unknown>) => { patches.push(patch); return undefined as never; },
         appendMessage: (_threadId: string, message: Partial<Message>) => { const made = { id: `m${messages.length}`, ...message } as Message; messages.push(made); return made; },
       } as never,
       context: () => (options.compactAt === undefined ? undefined : { compactAt: options.compactAt }),
       directContext: (_bot, _thread, all) => all.filter((m) => m.kind === "text").map((m) => ({ id: m.id, role: m.role === "user" ? "user" as const : "assistant" as const, text: m.text ?? "" })),
-      latestCompaction: () => undefined,
+      latestCompaction: () => (options.applied ? { id: options.applied } : undefined) as never,
       nativeCompactTokens: () => 200_000,
       engineCompactionOn: () => options.engineCompactionOn ?? true,
-      engineCompact: async (target) => { asked.push(target.instanceId); return options.engineCompact ?? false; },
-      generateText: () => undefined,
-      claimIsCurrent: () => true,
+      engineCompact: async (target, _signal, check) => {
+        asked.push(target.instanceId);
+        checks.push({ model: check.model, compactAtSet: check.compactAtSet, resumes: check.resumes("session-1"), current: check.current(), selection: check.selectionNow() });
+        return options.engineCompact === "stale" ? "stale" : options.engineCompact ? "done" : "skipped";
+      },
+      resumesSession: () => options.resumes ?? true,
+      currentSelection: () => ({ instanceId: "engine", model: "model" }),
+      generateText: options.generateText ?? (() => undefined),
+      claimIsCurrent: options.claimIsCurrent ?? (() => true),
       controllers: new Map(),
       cancelled: (reason) => new Error(reason),
       idleFraction: 0.85,
+      summarizing: (threadId, active) => { if (threadId === thread) summarizing.push(active); },
     };
     const instance = { instanceId: "engine", driverKind: "claudeAgent", adapter: { capabilities: { nativeCompaction: options.nativeCompaction ?? true } } };
     const run = (manual: boolean) => createConversationCompaction(deps)({ bot, threadId: thread, generation: "g", instance, model: "model", excludedIds: new Set(), manual });
     const folds = () => messages.filter((m) => m.kind === "compaction");
-    return { run, folds, asked, deps };
+    return { run, folds, asked, checks, deps, summarizing, patches };
   }
 
   it("writes no fold before a turn at 164k on an engine that compacts itself, and one on an engine that does not", async () => {
@@ -142,5 +153,78 @@ describe("compactConversation", () => {
     await fed.run(true);
     expect(fed.asked).toEqual([]);
     expect(fed.folds()).toHaveLength(1);
+  });
+  it("asks the engine with what its compaction is checked against, and folds nothing when the engine compacted but the conversation moved on", async () => {
+    const stale = setup({ tokens: 50_000, engineCompact: "stale", resumes: false });
+    await stale.run(true);
+    expect(stale.asked).toEqual(["engine"]);
+    expect(stale.checks).toEqual([{ model: "model", compactAtSet: false, resumes: false, current: true, selection: { instanceId: "engine", model: "model" } }]);
+    expect(stale.folds()).toHaveLength(0);
+    expect(stale.summarizing).toEqual([]);
+    const gone = setup({ tokens: 50_000, engineCompact: "stale", claimIsCurrent: () => false });
+    await gone.run(true);
+    expect(gone.folds()).toHaveLength(0);
+    expect(gone.checks[0]).toMatchObject({ current: false });
+    const set = setup({ tokens: 50_000, compactAt: 3_000, engineCompact: "stale" });
+    await set.run(true);
+    expect(set.checks[0]).toMatchObject({ compactAtSet: true });
+  });
+
+  describe("the floor an applied fold leaves", () => {
+    const applied = { applied: "rec" };
+
+    it("is written for an automatic check as it always was", async () => {
+      const auto = setup({ tokens: 50_000, ...applied });
+      await auto.run(false);
+      expect(auto.patches).toEqual([{ contextFloor: 50_000 }]);
+    });
+
+    it("is written for Compact now only once it goes on to fold, not when the engine compacted or the conversation moved on", async () => {
+      for (const engineCompact of [true, "stale"] as const) {
+        const engine = setup({ tokens: 50_000, engineCompact, ...applied });
+        await engine.run(true);
+        expect(engine.patches).toEqual([]);
+      }
+      const folded = setup({ tokens: 50_000, ...applied });
+      await folded.run(true);
+      expect(folded.patches).toEqual([{ contextFloor: 50_000 }]);
+    });
+  });
+
+  it("says it is summarizing while a summary someone waits on is written, and clears it on every way out", async () => {
+    const written = setup({ tokens: 50_000 });
+    await written.run(true);
+    expect(written.folds()).toHaveLength(1);
+    expect(written.summarizing).toEqual([true, false]);
+
+    const stopped = setup({ tokens: 164_274, nativeCompaction: false, claimIsCurrent: () => false });
+    await expect(stopped.run(false)).rejects.toThrow("context summarization stopped");
+    expect(stopped.folds()).toHaveLength(0);
+    expect(stopped.summarizing).toEqual([true, false]);
+
+    let started: () => void = () => {};
+    const begun = new Promise<void>((resolve) => { started = resolve; });
+    const aborted = setup({ tokens: 50_000, nativeCompaction: false,
+      generateText: () => (_prompt, options) => new Promise<string>((_resolve, reject) => {
+        started();
+        options?.signal?.addEventListener("abort", () => reject(options?.signal?.reason), { once: true });
+      }) });
+    const pending = aborted.run(true);
+    await begun;
+    expect(aborted.summarizing).toEqual([true]);
+    aborted.deps.controllers.get(thread)!.controller.abort();
+    await expect(pending).rejects.toBeDefined();
+    expect(aborted.folds()).toHaveLength(0);
+    expect(aborted.summarizing).toEqual([true, false]);
+    expect(aborted.deps.controllers.size).toBe(0);
+  });
+
+  it("never shows the summarizing line for a session left to its engine, or for an idle summary", async () => {
+    const own = setup({ tokens: 164_274 });
+    await own.run(false);
+    expect(own.summarizing).toEqual([]);
+    const done = setup({ tokens: 50_000, engineCompact: true });
+    await done.run(true);
+    expect(done.summarizing).toEqual([]);
   });
 });

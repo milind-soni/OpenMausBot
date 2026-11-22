@@ -103,8 +103,10 @@ refuses the relay-only QR, the change it needs is to try the relay when no
 direct route resolves, which is what the spec's route order already says.
 
 Computer viewing and live browser views use WebSocket upgrades. Over the relay
-these answer `501` for now, so a phone shows computer access as unavailable;
-chat, approvals, events and files work.
+an upgrade meets the same checks as a request (pairing window, the stream's own
+device, header scrubbing, the request gate), then the route that owns the path
+answers the handshake on the encrypted stream, as it would on a TCP socket. Each
+route keeps its own rules: viewing a computer still needs an `admin` session.
 
 ## Shared code; the desktop is unchanged
 
@@ -185,6 +187,16 @@ from it), and cannot mint a relay token (the control plane holds the signing
 key). A phone treats only the authenticated GoAway(3) inside the session as
 "removed", so a forged 4001 cannot make it forget the server.
 
+**Browser pages.** The relay refuses every WebSocket upgrade that carries an
+`Origin` header, so a web page cannot dial it, unless the relay's operator
+lists that page's exact `https://` origin in `RELAY_PHONE_ORIGINS`
+(comma-separated, at most 8, no wildcards, paths or `http://`; a bad value
+stops the relay at start). A listed origin may open only `/v1/phone`, never
+`/v1/host` or `/v1/host/data`, and it gets no further than any other phone:
+the page still needs the pairing credential and the end-to-end handshake.
+Unset, which is the default, browsers stay refused. It is for the phone web
+app over the relay, which is not built yet.
+
 **Pairing proves the owner.** The QR carries a 256-bit, single-use pairing
 credential that only the owner can mint: `openmausbot pair --phone` on the
 machine (the owner, or on a shared server the per-launch owner token `serve`
@@ -255,9 +267,6 @@ again…".
 
 ## Not yet
 
-- WebSocket routes through the relay (Local VM and computer viewing, live
-  browser): they need the upgrade path to accept a socket that is not a TCP
-  socket. Medium.
 - The web UI: a relay QR in the server's own Settings → Remote access, and the
   relay's state there. Medium.
 - `openmausbot setup` and `start` offering the relay, `status` showing it, and

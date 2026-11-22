@@ -70,6 +70,8 @@ export interface DevsReportInput {
   log: string[];
   /** One line per cloud computer used since the server started: its opaque id and counts, nothing it ran. */
   cloudComputers?: string[];
+  /** One line per kind of browser input that did not reach a page since the server started: reason codes and counts. */
+  browserInput?: string[];
   contactEmail?: string;
 }
 
@@ -156,6 +158,7 @@ function diagnose(input: DevsReportInput, redact: (text: string) => string): str
   const problems = input.problems.slice(-DEVS_REPORT_LIMITS.problems).map((line) => oneLine(redact(line), DEVS_REPORT_LIMITS.problemChars));
   lines.push(...(problems.length ? problems : ["(none)"]));
   if (input.cloudComputers?.length) lines.push("", "## Cloud computers since the server started", ...input.cloudComputers.slice(0, DEVS_REPORT_LIMITS.problems).map((line) => oneLine(redact(line), DEVS_REPORT_LIMITS.problemChars)));
+  if (input.browserInput?.length) lines.push("", "## Browser input that did not reach the page since the server started", ...input.browserInput.slice(0, DEVS_REPORT_LIMITS.problems).map((line) => oneLine(redact(line), DEVS_REPORT_LIMITS.problemChars)));
   if (input.performance?.length) lines.push("", ...input.performance.slice(0, DEVS_REPORT_LIMITS.performanceLines).map((line) => oneLine(redact(line), DEVS_REPORT_LIMITS.performanceChars)));
   lines.push("", "## Server warnings and errors, newest last");
   const log = input.log.slice(-DEVS_REPORT_LIMITS.logLines).map((line) => oneLine(redact(line), DEVS_REPORT_LIMITS.logLineChars));

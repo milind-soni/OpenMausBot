@@ -17,6 +17,7 @@ vi.mock("@/state/store", async (importOriginal) => ({
 
 const { setTeamPeople } = await import("@/state/team-people");
 const { HeaderShare, sharedWith } = await import("./HeaderShare");
+await (await import("../lazy-screens")).ShareBotDialog.preload();
 
 const RUI = { email: "rui@acme.test", name: "Rui", role: "admin" };
 const MEMBERS = ["Marta", "Bob", "Cara", "Dan", "Eve"].map((name) => ({ email: `${name.toLowerCase()}@acme.test`, name, role: "member" }));

@@ -9,6 +9,7 @@ import { PROBE_TIMEOUT_MS } from "./engine-install.ts";
 import { closeMessageDb } from "./message-db.ts";
 import { createQuotaSwitch, NOT_NOW, quotaSwitchEnabled, type QuotaRequest, type QuotaSwitch, type QuotaSwitchDeps, type QuotaSwitchEngine } from "./quota-switch.ts";
 import { Store, type BotRecord, type Message } from "./store.ts";
+import type { SkippedBackup } from "./host/limit-takeover.ts";
 import { toolFailureMessage } from "./drivers/tool-failure.ts";
 
 const QUOTA = "You've hit your weekly limit · resets Oct 12 at 2:30pm (Asia/Calcutta)";
@@ -81,9 +82,9 @@ describe("quota switch", () => {
     return { id, event: { threadId, turnId: `turn-${id}`, ok: false, stopReason: "quota" } };
   };
   /** The fold's report of that turn, broken on `why`: the module decides what carries on. */
-  const ranOut = (turn: ReturnType<typeof begin>, why = QUOTA, internal = false, on = thread()) => {
+  const ranOut = (turn: ReturnType<typeof begin>, why = QUOTA, internal = false, on = thread(), settled?: Promise<unknown>) => {
     cause = why;
-    return quota.turnFailed(on, turn.event, internal);
+    return quota.turnFailed(on, turn.event, internal, settled);
   };
   /** The quota card an earlier version left open for that turn: the other engines here, then Not now. */
   const fails = async (turn: ReturnType<typeof begin>, _why = QUOTA, _internal = false, on = thread()) => {
@@ -177,16 +178,19 @@ describe("quota switch", () => {
     let told: Array<{ botId: string; from: ModelSelection; facts: unknown }>;
     let moves: Array<{ threadId: string; from: ModelSelection; to: ModelSelection; resetsAt?: number }>;
     let backups: ModelSelection[];
+    let passed: SkippedBackup[];
     let flags: { limit?: "engine" | "model" | "credits"; limitResetsAt?: number } | undefined;
     const CODEX = { instanceId: "codex", model: "codex-default" }, CURSOR = { instanceId: "cursor", model: "cursor-default" };
     beforeEach(() => {
       told = [];
       moves = [];
       backups = [CODEX, CURSOR];
+      passed = [];
       flags = undefined;
       deps.turnStops = { failureCause: () => cause, read: () => (flags ? { flags } : undefined) };
       deps.takeover = {
-        backups: () => backups, tell: (who, from, facts) => { told.push({ botId: who.id, from, facts }); return null; },
+        weighBackups: () => ({ backups, skipped: [] }), passedOver: (_bot, _from, _scope, left) => { passed.push(...left); },
+        tell: (who, from, facts) => { told.push({ botId: who.id, from, facts }); return null; },
         moved: (_botId, threadId, from, to, resetsAt) => { moves.push({ threadId, from, to, ...(resetsAt ? { resetsAt } : {}) }); },
       };
       quota = createQuotaSwitch(deps);
@@ -215,6 +219,111 @@ describe("quota switch", () => {
       expect(notices()).toContainEqual({ name: "notice: continuing on Codex after hitting the usage limit", nameCode: "chat.notice.backupContinuingLimit", nameParams: { name: "Codex", engine: "Claude" }, ok: true });
       expect(told).toEqual([{ botId: bot.id, from: defaultSelection(), facts: { scope: "engine", backup: CODEX } }]);
       expect(moves, "so it goes back once the limit resets").toEqual([{ threadId: bot.threadId, from: defaultSelection(), to: CODEX }]);
+    });
+
+    it("moves the request only once the turn's conversation has settled, since a working conversation's model cannot change", async () => {
+      gate.mockImplementation((_thread, selection) => deps.busy(bot.id, bot.threadId) ? { ok: false, error: "the bot is working — stop it before changing models" } : { ok: true, selection });
+      store.setTaskActivity(bot.id, bot.threadId, "working");
+      const turn = begin(bot.threadId, { messageId: said("find three papers on reef recovery") });
+      coordinator.endTurn(turn.id, { ok: false, text: QUOTA });
+      cause = QUOTA;
+      let settle = () => {};
+      const failing = quota.turnFailed(thread(), turn.event, false, new Promise<void>((resolve) => { settle = resolve; }));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(gate, "nothing is tried while the conversation still works").not.toHaveBeenCalled();
+      store.setTaskActivity(bot.id, bot.threadId, "idle");
+      settle();
+      expect(await failing).toBeNull();
+      expect(thread().modelSelection).toEqual(CODEX);
+      expect(resend).toHaveBeenCalledTimes(1);
+      expect(passed).toEqual([]);
+    });
+
+    it("moves nothing when the person stops the request, or sends another, before its conversation has settled", async () => {
+      for (const change of ["stopped", "replaced"] as const) {
+        const turn = begin(bot.threadId, { messageId: said(`find papers (${change})`) });
+        coordinator.endTurn(turn.id, { ok: false, text: QUOTA });
+        let settle = () => {};
+        const failing = quota.turnFailed(thread(), turn.event, false, new Promise<void>((resolve) => { settle = resolve; }));
+        await new Promise((resolve) => setImmediate(resolve));
+        if (change === "stopped") requests.get(bot.threadId)!.stopped = true;
+        else begin(bot.threadId, { messageId: said("something else") });
+        settle();
+        expect(await failing).toBeNull();
+        expect(thread().modelSelection, change).toEqual(defaultSelection());
+        expect(resend, change).not.toHaveBeenCalled();
+      }
+    });
+
+    it("moves nothing when the request is stopped, its backup taken off the bot's list, or the model switched by hand while the backup is probed", async () => {
+      for (const change of ["stopped", "unlisted", "switched", "variant"] as const) {
+        let answer = () => {};
+        engines[1] = engine("codex", "codex", "Codex", { snapshot: () => new Promise((resolve) => { answer = () => resolve({ state: "available", authenticated: true }); }) });
+        backups = [CODEX];
+        const turn = begin(bot.threadId, { messageId: said(`find papers (${change})`) });
+        coordinator.endTurn(turn.id, { ok: false, text: QUOTA });
+        passed = [];
+        const failing = quota.turnFailed(thread(), turn.event, false, Promise.resolve());
+        await new Promise((resolve) => setImmediate(resolve));
+        if (change === "stopped") requests.get(bot.threadId)!.stopped = true;
+        else if (change === "unlisted") backups = [];
+        else store.switchTaskModel(bot.id, bot.threadId, change === "switched" ? CURSOR : { ...defaultSelection(), variant: "high" }, false, false);
+        answer();
+        expect(await failing).toBeNull();
+        expect(thread().modelSelection, change).toEqual(change === "switched" ? CURSOR : change === "variant" ? { ...defaultSelection(), variant: "high" } : defaultSelection());
+        expect(resend, change).not.toHaveBeenCalled();
+        expect(passed, change).toEqual([{ selection: CODEX, why: change === "unlisted" ? "not-configured" : "conversation-changed" }]);
+        if (change === "switched" || change === "variant") store.switchTaskModel(bot.id, bot.threadId, defaultSelection(), false, false);
+      }
+    });
+
+    it("moves a request whose turn had already run something to the backup without sending it again", async () => {
+      for (const ran of ["tool", "reply"] as const) {
+        const turn = begin(bot.threadId, { messageId: said(`file the ticket (${ran})`) });
+        if (ran === "tool") store.appendMessage(bot.threadId, { role: "bot", kind: "activity", turnId: turn.event.turnId, tool: { name: "create_ticket", itemId: "call-1", ok: true } });
+        else store.appendMessage(bot.threadId, { role: "bot", kind: "text", turnId: turn.event.turnId, text: "Filed it as T-42." });
+        coordinator.endTurn(turn.id, { ok: false, text: QUOTA });
+        expect(await ranOut(turn)).toBeNull();
+        expect(thread().modelSelection, ran).toEqual(CODEX);
+        expect(resend, ran).not.toHaveBeenCalled();
+        expect(notices().at(-1), ran).toEqual({ name: "notice: switched to Codex. Part of your request had already run, so it was not sent again. Send what is still to do.", nameCode: "chat.notice.backupAlreadyRan", nameParams: { name: "Codex" }, ok: false });
+        store.switchTaskModel(bot.id, bot.threadId, defaultSelection(), false, false);
+      }
+    });
+
+    it("sends a request again when the only row before the refusal is a summary of the conversation's earlier context", async () => {
+      const messageId = said("plan the launch");
+      const turn = begin(bot.threadId, { messageId });
+      store.appendMessage(bot.threadId, { role: "bot", kind: "compaction", compaction: { summary: "Earlier: the launch is on Friday.", firstKeptId: messageId, foldedThroughId: messageId, tokensBefore: 90_000, by: "harness" } });
+      coordinator.endTurn(turn.id, { ok: false, text: QUOTA });
+      expect(await ranOut(turn)).toBeNull();
+      expect(thread().modelSelection).toEqual(CODEX);
+      expect(resend).toHaveBeenCalledTimes(1);
+    });
+
+    it("sends a request again when the screen captured as its refused turn settled is the only row after it", async () => {
+      const turn = begin(bot.threadId, { messageId: said("plan the launch") });
+      coordinator.endTurn(turn.id, { ok: false, text: QUOTA });
+      let settle = () => {};
+      const failing = ranOut(turn, QUOTA, false, thread(), new Promise<void>((resolve) => { settle = resolve; }));
+      store.appendMessage(bot.threadId, { role: "bot", kind: "screen", png: "iVBORw0KGgo=", mime: "image/png" });
+      settle();
+      expect(await failing).toBeNull();
+      expect(thread().modelSelection).toEqual(CODEX);
+      expect(resend).toHaveBeenCalledTimes(1);
+    });
+
+    it("sends a request again when a routine's report landed in the conversation while its refused turn settled", async () => {
+      const turn = begin(bot.threadId, { messageId: said("plan the launch") });
+      coordinator.endTurn(turn.id, { ok: false, text: QUOTA });
+      let settle = () => {};
+      const failing = ranOut(turn, QUOTA, false, thread(), new Promise<void>((resolve) => { settle = resolve; }));
+      store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "Your morning digest is ready.",
+        automation: { routineId: "r1", runId: "run-1", name: "Morning digest", trigger: "schedule", executionThreadId: "routine-thread", scheduledFor: 1_800_000_000_000 } });
+      settle();
+      expect(await failing).toBeNull();
+      expect(thread().modelSelection).toEqual(CODEX);
+      expect(resend).toHaveBeenCalledTimes(1);
     });
 
     it("never takes a failed tool call for the AI's usage limit, whatever the tool is called", async () => {
@@ -246,25 +355,37 @@ describe("quota switch", () => {
       expect(told[0]!.facts).toEqual({ scope: "credits", backup: { instanceId: "claude", model: "claude-plan" } });
     });
 
-    it.each<[string, () => void]>([
-      ["one that cannot run a turn now", () => { engines[1] = engine("codex", "codex", "Codex", { snapshot: async () => ({ state: "unavailable", reason: "signed out" }) }); }],
-      ["one the model-switch gate refuses", () => { gate.mockImplementationOnce(() => ({ ok: false, error: "the bot is working" })); }],
-      ["one that does not support this AI's tools", () => { engines[0] = engine("claude", "claudeAgent", "Claude", { adapter: { capabilities: caps({ agentsMcp: true }) } }); engines[2] = engine("cursor", "cursorAgent", "Cursor", { adapter: { capabilities: caps({ agentsMcp: true }) } }); }],
-    ])("skips %s and carries on with the next", async (_name, arrange) => {
+    it.each<[string, () => void, Omit<SkippedBackup, "selection">]>([
+      ["one that cannot run a turn now", () => { engines[1] = engine("codex", "codex", "Codex", { snapshot: async () => ({ state: "unavailable", reason: "signed out" }) }); }, { why: "not-ready" }],
+      ["one the model-switch gate refuses", () => { gate.mockImplementationOnce(() => ({ ok: false, error: "the bot is working" })); }, { why: "switch-refused", detail: "the bot is working" }],
+      ["one that does not support this AI's tools", () => { engines[0] = engine("claude", "claudeAgent", "Claude", { adapter: { capabilities: caps({ agentsMcp: true }) } }); engines[2] = engine("cursor", "cursorAgent", "Cursor", { adapter: { capabilities: caps({ agentsMcp: true }) } }); }, { why: "missing-capability" }],
+    ])("skips %s, says why, and carries on with the next", async (_name, arrange, why) => {
       arrange();
       await limited({ messageId: said("hi") });
       expect(thread().modelSelection).toEqual(CURSOR);
       expect(resend).toHaveBeenCalledTimes(1);
       expect(told[0]!.facts).toMatchObject({ backup: CURSOR });
+      expect(passed).toEqual([{ selection: CODEX, ...why }]);
     });
 
-    it("skips an AI that does not say how it is in time", async () => {
+    it("skips an AI that does not say how it is in time, and says so", async () => {
       engines[1] = silent("codex", "Codex");
       const going = limited({ messageId: said("hi") });
       await vi.waitFor(() => expect(timers.filter((timer) => !timer.cancelled).map((timer) => timer.ms)).toEqual([PROBE_TIMEOUT_MS]));
       timers.find((timer) => !timer.cancelled)!.fire();
       await going;
       expect(thread().modelSelection).toEqual(CURSOR);
+      expect(passed).toEqual([{ selection: CODEX, why: "probe-timed-out" }]);
+    });
+
+    it("says why a backup was left out even when nothing is sent again", async () => {
+      const left: SkippedBackup = { selection: CODEX, why: "same-plan" };
+      deps.takeover = { ...deps.takeover!, weighBackups: () => ({ backups: [CURSOR], skipped: [left] }) };
+      quota = createQuotaSwitch(deps);
+      await ranOut(begin(bot.threadId, { messageId: said("hi") }), QUOTA, true);
+      expect(resend).not.toHaveBeenCalled();
+      expect(passed).toEqual([left]);
+      expect(told[0]!.facts).toMatchObject({ backup: CURSOR });
     });
 
     it("never moves to an AI known to be at its own limit, until a turn on it works again", async () => {
@@ -337,13 +458,15 @@ describe("quota switch", () => {
 
     it("moves a request the job runtime still holds but sends nothing again: the runtime resumes it", async () => {
       const turn = begin(bot.threadId, { messageId: said("ask the team for the numbers") });
+      store.appendMessage(bot.threadId, { role: "bot", kind: "activity", turnId: turn.event.turnId, tool: { name: "ask_teammate", itemId: "call-1", ok: true } });
       const mate = store.createBot();
       coordinator.enqueue({ botId: bot.id, threadId: bot.threadId }, turn.id, undefined, { botId: mate.id, threadId: mate.threadId }, "Pull the quarter's numbers");
       coordinator.endTurn(turn.id, { ok: false, text: QUOTA });
       await ranOut(turn);
       expect(thread().modelSelection).toEqual(CODEX);
       expect(resend).not.toHaveBeenCalled();
-      expect(notices()).toEqual([{ name: "notice: switched to Codex. Your request is still under way here and continues on Codex.", nameCode: "chat.notice.backupRequestUnderWay", nameParams: { name: "Codex" }, ok: true }]);
+      expect(notices().filter((tool) => tool.name.startsWith("notice:")), "what it already ran is the runtime's to resume, not the person's to send again")
+        .toEqual([{ name: "notice: switched to Codex. Your request is still under way here and continues on Codex.", nameCode: "chat.notice.backupRequestUnderWay", nameParams: { name: "Codex" }, ok: true }]);
     });
 
     describe("an AI that is signed out", () => {
@@ -353,7 +476,7 @@ describe("quota switch", () => {
       beforeEach(() => {
         scopes = [];
         deps.takeover = {
-          backups: (_botId, _from, scope) => { scopes.push(scope); return backups; },
+          weighBackups: (_botId, _from, scope) => { scopes.push(scope); return { backups, skipped: [] }; }, passedOver: () => {},
           tell: (who, from, facts) => { told.push({ botId: who.id, from, facts }); return told.length === 1 ? NOTICE : null; },
           moved: (_botId, threadId, from, to, resetsAt, scope) => { moves.push({ threadId, from, to, ...(resetsAt ? { resetsAt } : {}), ...(scope ? { scope } : {}) } as never); },
         };
@@ -375,7 +498,7 @@ describe("quota switch", () => {
           { name: `notice: ${NOTICE}`, ok: true, setup: true },
           { name: "notice: continuing on Codex while Claude is signed out", nameCode: "chat.notice.backupContinuingSignedOut", nameParams: { name: "Codex", engine: "Claude" }, ok: true },
         ]);
-        expect(scopes).toEqual(["signed-out"]);
+        expect(new Set(scopes), "the backups are weighed for a sign-out, at the refusal and again before the move").toEqual(new Set(["signed-out"]));
         expect(thread().modelSelection).toEqual(CODEX);
         expect(resend).toHaveBeenCalledTimes(1);
         expect(resend.mock.calls[0]![2]).toMatchObject({ id: messageId });

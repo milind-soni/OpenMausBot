@@ -88,6 +88,8 @@ jobs:
 
       - name: Commit the version bump
         env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_VERSION: ${{ steps.version.outputs.current }}
           VERSION: ${{ steps.version.outputs.next }}
         run: |
           npm pkg set "version=$VERSION"
@@ -97,9 +99,19 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "release/v$VERSION"
           node scripts/tighten-ratchets.mjs
-          node scripts/record-data-format.mjs
+          published_format=()
+          previous_format=$(node -p 'const {reads, writes} = require("./server/data-format-released.json"); [reads, writes].join(":")')
+          if [[ "$previous_format" == "2:1" ]]; then
+            published_tag=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name == \"v$PREVIOUS_VERSION\" and .draft == false and .prerelease == false) | .tag_name")
+            if [[ -n "$published_tag" ]]; then
+              git fetch --no-tags origin "refs/tags/$published_tag:refs/tags/$published_tag"
+              git show "refs/tags/$published_tag:server/data-format-released.json" > "$RUNNER_TEMP/published-format.json"
+              published_format=("$RUNNER_TEMP/published-format.json")
+            fi
+          fi
+          node scripts/record-data-format.mjs "${published_format[@]}"
           node scripts/generate-locale.mjs --record-hashes
-          git add package.json server/data-format-released.json scripts/testing/file-size-ratchet.test.ts scripts/testing/index-route-ratchet.test.ts src/locales/source-hashes.json
+          git add package.json server/data-format.ts server/data-format-released.json scripts/testing/file-size-ratchet.test.ts scripts/testing/index-route-ratchet.test.ts src/locales/source-hashes.json
           git commit -m "chore(release): bump version to $VERSION"
           git push --set-upstream origin "release/v$VERSION"
 
@@ -109,11 +121,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.next }}
         run: |
+          body="Bumps OpenMausBot to \`$VERSION\`. Merging this PR automatically starts the existing release workflow and assembles a draft release from the exact merge commit."
+          # A bump that raises the written data format changes what the app does, so its PR says so.
+          if ! git diff --quiet HEAD~1 HEAD -- server/data-format.ts; then
+            body="$body
+
+          **This bump also raises the data format this version writes** (\`server/data-format.ts\`). Data it writes can be read only by the previous published release and newer; older versions refuse to start on it."
+          fi
           url=$(gh pr create \
             --base main \
             --head "release/v$VERSION" \
             --title "chore(release): bump version to $VERSION" \
-            --body "Bumps OpenMausBot to \`$VERSION\`. Merging this PR automatically starts the existing release workflow and assembles a draft release from the exact merge commit.")
+            --body "$body")
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "### Release PR" >> "$GITHUB_STEP_SUMMARY"
           echo "$url" >> "$GITHUB_STEP_SUMMARY"

@@ -2397,6 +2397,59 @@ describe("RoutineManager", () => {
     ]);
   });
 
+  it("keeps a run that already delivered its report as partly done when its limit stops it", async () => {
+    const h = harness();
+    const routine = h.manager.create({
+      name: "Bounded check",
+      prompt: "Check the queue",
+      botId: "maus-timeout",
+      schedule: { type: "daily", time: "23:59", weekdays: [1] },
+      timeoutMinutes: 5,
+    });
+    const run = h.manager.runNow(routine.id)!;
+    await h.manager.tick();
+    const startedAt = h.manager.listRuns().find((candidate) => candidate.id === run.id)?.startedAt;
+    h.manager.handleRuntimeEvent({ eventId: "reply", provider: "fake", threadId: "thread-1", createdAt: new Date().toISOString(), type: "item.completed", itemType: "assistant_text", itemId: "reply", text: "The invoice is issued and validated." } as Parameters<typeof h.manager.handleRuntimeEvent>[0]);
+
+    h.setNow(startedAt! + 5 * 60_000);
+    await h.manager.tick();
+
+    expect(h.manager.listRuns().find((candidate) => candidate.id === run.id)).toMatchObject({
+      status: "failed",
+      partial: true,
+      output: "The invoice is issued and validated.",
+      error: "Stopped after reaching the 5-minute run limit",
+    });
+  });
+
+  it("keeps the report it delivered when a later empty item arrives before its limit stops it", async () => {
+    const h = harness();
+    const routine = h.manager.create({
+      name: "Bounded check",
+      prompt: "Check the queue",
+      botId: "maus-timeout",
+      schedule: { type: "daily", time: "23:59", weekdays: [1] },
+      timeoutMinutes: 5,
+    });
+    const run = h.manager.runNow(routine.id)!;
+    await h.manager.tick();
+    const startedAt = h.manager.listRuns().find((candidate) => candidate.id === run.id)?.startedAt;
+    const say = (itemId: string, text: string) => h.manager.handleRuntimeEvent({ eventId: itemId, provider: "fake", threadId: "thread-1", createdAt: new Date().toISOString(), type: "item.completed", itemType: "assistant_text", itemId, text } as Parameters<typeof h.manager.handleRuntimeEvent>[0]);
+    say("reply", "The invoice is issued and validated.");
+    say("blank", "   ");
+    say("empty", "");
+
+    h.setNow(startedAt! + 5 * 60_000);
+    await h.manager.tick();
+
+    expect(h.manager.listRuns().find((candidate) => candidate.id === run.id)).toMatchObject({
+      status: "failed",
+      partial: true,
+      output: "The invoice is issued and validated.",
+      error: "Stopped after reaching the 5-minute run limit",
+    });
+  });
+
   it("keeps legacy duration metadata without imposing a timeout", async () => {
     const h = harness();
     const routine = h.manager.create({
@@ -4091,9 +4144,11 @@ describe("turning a schedule back on, and a deleted bot's schedules", () => {
     expect(h.started).toEqual([]);
   });
 
+  // The host hands this only a bot the person paused (bot-holds.ts): one the Starter limit paused is woken for its routine
+  // (host/starter-routine-wake.ts) and never reaches here.
   it("fails a paused bot's runs at once in the person's words, making no conversation and waking nothing for them", async () => {
     const h = harness(start);
-    let paused: string | null = "Paused: Starter keeps 5 bots awake.";
+    let paused: string | null = "Ada is paused, so it takes no new work.";
     h.options.pausedText = (botId) => (botId === "maus-1" ? paused : null);
     h.manager.create(once(start + 60_000));
     expect(h.manager.nextDueAt()).toBeNull();
@@ -4102,7 +4157,7 @@ describe("turning a schedule back on, and a deleted bot's schedules", () => {
     h.manager.enqueueWebhook({ webhookId: "hook", webhookName: "New lead", prompt: "Handle it", botId: "maus-1", runOn: "maus", deliveryId: "d1", receivedAt: start });
     await h.manager.tick();
     expect([h.taskTitles, h.started]).toEqual([[], []]);
-    expect(h.manager.listRuns().map((run) => [run.status, run.error])).toEqual([["failed", "Paused: Starter keeps 5 bots awake."], ["failed", "Paused: Starter keeps 5 bots awake."]]);
+    expect(h.manager.listRuns().map((run) => [run.status, run.error])).toEqual([["failed", "Ada is paused, so it takes no new work."], ["failed", "Ada is paused, so it takes no new work."]]);
 
     paused = null;
     h.manager.create(once(start + 120_000));

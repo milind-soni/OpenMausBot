@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PreviewStreamEvents } from "./browser-stream-client";
+import { createBrowserControl } from "./browser-control";
 import { browserFrameSize, createLiveInputQueue, createLiveStreamClient, jpegSize, liveAction, liveControl } from "./browser-stream-v1";
 
 const deferred = () => {
@@ -45,9 +46,9 @@ describe("the v1 view of one conversation's browser", () => {
     createLiveStreamClient("scout", events(), vi.fn(), { viewer: "v-1" }, { threadId: "ada-chat" });
     createLiveStreamClient("scout", events(), vi.fn());
     expect(FixtureEventSource.instances.map((source) => source.url)).toEqual([
-      "/api/bots/scout/browser/live?threadId=ada-chat",
-      "/api/bots/scout/browser/live?resume=v-1&threadId=ada-chat",
-      "/api/bots/scout/browser/live",
+      "/api/bots/scout/browser/live?selects=1&threadId=ada-chat",
+      "/api/bots/scout/browser/live?resume=v-1&selects=1&threadId=ada-chat",
+      "/api/bots/scout/browser/live?selects=1",
     ]);
   });
 });
@@ -69,7 +70,8 @@ describe("the v1 view in the stream's words", () => {
     expect(liveAction({ type: "tabSelect", tabId: "t2" })).toEqual({ type: "tab-select", tabId: "t2" });
     expect(liveAction({ type: "tabClose", tabId: "t2" })).toEqual({ type: "tab-close", tabId: "t2" });
     expect(liveAction({ type: "restart" })).toEqual({ type: "restart" });
-    for (const unsupported of [{ type: "resize", width: 1, height: 1 }, { type: "zoom", factor: 2 }, { type: "probe", x: 1, y: 1 }, { type: "selectChoose", id: "s", index: 0 }] as const) {
+    expect(liveAction({ type: "selectChoose", id: "s-1", index: 2 })).toEqual({ type: "select_choose", id: "s-1", index: 2 });
+    for (const unsupported of [{ type: "resize", width: 1, height: 1 }, { type: "zoom", factor: 2 }, { type: "probe", x: 1, y: 1 }] as const) {
       expect(liveAction(unsupported)).toBeNull();
     }
   });
@@ -104,7 +106,7 @@ describe("the v1 live client", () => {
 
   it("connects to the bot's live view, shows its frames and acknowledges each one", () => {
     const { post, handlers, source } = open();
-    expect(source.url).toBe("/api/bots/pepper/browser/live");
+    expect(source.url).toBe("/api/bots/pepper/browser/live?selects=1");
     source.emit("ready", { viewerId: "v1" });
     expect(handlers.onConnectedChange).toHaveBeenCalledWith(true);
     source.emit("frame", { seq: 7, data: base64(JPEG_2X1), metadata: { deviceWidth: 2, deviceHeight: 1 } });
@@ -121,7 +123,7 @@ describe("the v1 live client", () => {
     const post = vi.fn<(body: Record<string, unknown>, viewerId: string) => Promise<unknown>>().mockResolvedValue({ ok: true });
     const client = createLiveStreamClient("pepper", events(), post, { viewer: "" }, {}, { width: 365.4, height: 686 });
     const source = FixtureEventSource.instances.at(-1)!;
-    expect(source.url).toBe("/api/bots/pepper/browser/live?width=365&height=686");
+    expect(source.url).toBe("/api/bots/pepper/browser/live?selects=1&width=365&height=686");
     expect(client.send({ type: "resize", width: 400, height: 700 })).toBe(true);
     expect(post).not.toHaveBeenCalled();
     source.emit("ready", { viewerId: "v1" });
@@ -151,9 +153,71 @@ describe("the v1 live client", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     client.transport.send({ type: "text", text: "hi" });
     await client.transport.settle();
-    expect(post).toHaveBeenLastCalledWith({ type: "input_keyboard", eventType: "char", text: "hi" }, "v1");
+    expect(post).toHaveBeenLastCalledWith({ type: "input_keyboard", eventType: "char", text: "hi", requestId: 1 }, "v1");
     expect(handlers.onMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "notice" }));
     expect(handlers.onGone).not.toHaveBeenCalled();
+  });
+
+  it("waits on a browser slow to start as it opens, and on a busy bot as the bot's", () => {
+    const { handlers, source } = open();
+    source.emit("waiting", { reason: "starting" });
+    expect(handlers.onMessage).not.toHaveBeenCalled();
+    source.emit("waiting", { reason: "busy" });
+    expect(handlers.onMessage).toHaveBeenCalledExactlyOnceWith({ type: "starting" });
+  });
+
+  it("after control changed under a press, the person's next press takes the browser again and reaches the page", async () => {
+    const { client, post, handlers, source } = open();
+    let controller = "you";
+    vi.mocked(handlers.onControl!).mockImplementation((next) => { controller = next?.controller ?? ""; browser.observe(); });
+    const browser = createBrowserControl({ transport: client.transport, owned: () => controller === "you", onTakeStatus: vi.fn(), onError: vi.fn() });
+    source.emit("ready", { viewerId: "v1" });
+    source.emit("control", { held: true, owned: true, controlling: true });
+    const down = { type: "mouse", action: "down", x: 4, y: 5, button: "left", buttons: 1, clickCount: 1, modifiers: 0 } as const;
+    const up = { ...down, action: "up", buttons: 0 } as const;
+    let refuse = true;
+    post.mockImplementation(async (body) => {
+      if (body.type === "input_mouse" && refuse) { refuse = false; throw Object.assign(new Error("Browser control changed. Try again."), { status: 409 }); }
+      return { ok: true };
+    });
+    browser.interact(down); browser.interact(up);
+    await vi.waitFor(() => expect(refuse).toBe(false));
+    await client.transport.settle();
+    source.emit("control", { held: false, owned: false, controlling: false });
+    post.mockImplementation(async (body) => { if (body.type === "take") source.emit("control", { held: true, owned: true, controlling: true }); return { ok: true }; });
+    browser.interact({ ...down, x: 40 }); browser.interact({ ...up, x: 40 });
+    await vi.waitFor(() => expect(post.mock.calls.map(([body]) => `${body.type}:${body.eventType ?? ""}:${body.x ?? ""}`)).toContain("input_mouse:mouseReleased:40"));
+    const sent = post.mock.calls.map(([body]) => `${body.type}:${body.eventType ?? ""}:${body.x ?? ""}`);
+    expect(sent).toEqual(["take::", "input_mouse:mousePressed:4", "input_mouse:mouseReleased:4", "take::", "input_mouse:mousePressed:40", "input_mouse:mouseReleased:40"]);
+    expect(client.transport.stopped()).toBe(false);
+    browser.close();
+  });
+
+  it("passes on the server's dropdown list for a press, and sends the option chosen", async () => {
+    const { client, post, handlers, source } = open();
+    source.emit("ready", { viewerId: "v1" });
+    source.emit("control", { held: true, owned: true, controlling: true });
+    const popup = { id: "list-1", options: [{ label: "Alpha", disabled: false }], selectedIndex: 0, rect: { x: 1, y: 2, width: 3, height: 4 } };
+    source.emit("selectPopup", popup);
+    expect(handlers.onMessage).toHaveBeenCalledWith({ type: "selectPopup", ...popup });
+    expect(client.send({ type: "selectChoose", id: "list-1", index: 0 })).toBe(true);
+    await client.transport.settle();
+    expect(post).toHaveBeenLastCalledWith({ type: "select_choose", id: "list-1", index: 0, requestId: 1 }, "v1");
+  });
+
+  it("says when its input stops reaching the page, and takes input again once the person takes the browser again", async () => {
+    const { client, post, handlers, source } = open();
+    source.emit("ready", { viewerId: "v1" });
+    source.emit("control", { held: true, owned: true, controlling: true });
+    post.mockRejectedValueOnce(Object.assign(new Error("Browser control changed. Try again."), { status: 409 }));
+    client.transport.send({ type: "mouse", action: "down", x: 4, y: 5, button: "left", buttons: 1, clickCount: 1, modifiers: 0 });
+    await client.transport.settle();
+    expect(handlers.onMessage).toHaveBeenCalledWith({ type: "inputHalted", halted: true });
+    expect(client.transport.stopped()).toBe(true);
+    source.emit("control", { held: false, owned: false, controlling: false });
+    source.emit("control", { held: true, owned: true, controlling: true });
+    expect(handlers.onMessage).toHaveBeenLastCalledWith({ type: "inputHalted", halted: false });
+    expect(client.transport.stopped()).toBe(false);
   });
 
   it("takes control with a POST, then sends input in order while it controls", async () => {
@@ -171,6 +235,30 @@ describe("the v1 live client", () => {
     expect(post.mock.calls.slice(1).map(([body]) => body.type)).toEqual(["input_mouse", "input_keyboard"]);
     await client.transport.release();
     expect(post).toHaveBeenLastCalledWith({ type: "release" }, "v1");
+  });
+
+  it("stops sending presses after one refused request until it reconnects, and tells the server how many it dropped", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { client, post, handlers, source } = open();
+      source.emit("ready", { viewerId: "v1" });
+      source.emit("control", { held: true, owned: true, controlling: true });
+      const press = { type: "mouse", action: "down", x: 1, y: 2, button: "left", buttons: 1, clickCount: 1, modifiers: 0 } as const;
+      post.mockRejectedValueOnce(Object.assign(new Error("Browser control changed. Try again."), { status: 409 }));
+      client.transport.send(press);
+      await client.transport.settle();
+      expect(client.transport.stopped()).toBe(true);
+      expect(handlers.onMessage).toHaveBeenCalledWith({ type: "notice", message: "Browser control changed. Try again." });
+      post.mockClear();
+      client.transport.send(press);
+      client.transport.send({ type: "text", text: "typed words" });
+      client.transport.send({ type: "mouse", action: "move", x: 3, y: 4, button: "none", buttons: 0, clickCount: 0, modifiers: 0 });
+      await client.transport.settle();
+      expect(post).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(post.mock.calls).toEqual([[{ type: "client_drops", counts: { send_failed: 1, queue_halted: 2 } }, "v1"]]);
+      client.stop();
+    } finally { vi.useRealTimers(); }
   });
 
   it("batches the input queued behind a request only for a server that said it takes batches", async () => {
@@ -284,19 +372,19 @@ describe("a v1 live view whose stream dropped", () => {
 
   it("asks to carry on with the view it had until a new one is ready", () => {
     const { client } = open();
-    expect(latest().url).toBe("/api/bots/pepper/browser/live");
+    expect(latest().url).toBe("/api/bots/pepper/browser/live?selects=1");
     latest().emit("ready", { viewerId: "old-viewer" });
     interrupted(latest());
     vi.advanceTimersByTime(1_000);
-    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer");
+    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer&selects=1");
     interrupted(latest());
     vi.advanceTimersByTime(2_000);
-    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer");
+    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer&selects=1");
     latest().emit("ready", { viewerId: "new-viewer" });
     latest().emit("heartbeat", {});
     interrupted(latest());
     vi.advanceTimersByTime(1_000);
-    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=new-viewer");
+    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=new-viewer&selects=1");
     latest().emit("ready", { viewerId: "newest-viewer" });
     client.stop();
   });
@@ -307,7 +395,7 @@ describe("a v1 live view whose stream dropped", () => {
     latest().emit("ready", { viewerId: "old-viewer" });
     first.client.stop();
     const second = open(resume);
-    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer");
+    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer&selects=1");
     latest().emit("ready", { viewerId: "new-viewer" });
     expect(resume.viewer).toBe("");
     second.client.stop();
@@ -328,7 +416,7 @@ describe("a v1 live view whose stream dropped", () => {
     expect(FixtureEventSource.instances).toHaveLength(6);
     shown.visibilityState = "visible"; page.dispatchEvent(new Event("focus"));
     expect(FixtureEventSource.instances).toHaveLength(7);
-    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer");
+    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer&selects=1");
     latest().emit("ready", { viewerId: "back-viewer" });
     expect(handlers.onConnectedChange).toHaveBeenLastCalledWith(true);
     client.stop();
@@ -378,7 +466,7 @@ describe("a v1 live view whose stream dropped", () => {
     expect(source.close).toHaveBeenCalledOnce();
     expect(handlers.onConnectedChange).toHaveBeenLastCalledWith(false);
     vi.advanceTimersByTime(1_000);
-    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=quiet-viewer");
+    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=quiet-viewer&selects=1");
     client.stop();
   });
 
@@ -405,7 +493,7 @@ describe("a v1 live view whose stream dropped", () => {
     expect(source.close).toHaveBeenCalledOnce();
     expect(handlers.onMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "notice" }));
     vi.advanceTimersByTime(1_000);
-    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=gone-viewer");
+    expect(latest().url).toBe("/api/bots/pepper/browser/live?resume=gone-viewer&selects=1");
     client.stop();
   });
 
@@ -501,7 +589,7 @@ describe("the v1 input queue", () => {
     first.resolve(); await queue.drain();
     expect(send.mock.calls.map(([body]) => body)).toEqual([key("keyDown", "held"), key("keyUp", "held"), up, { type: "reload" }]);
     queue.clear(); queue.enqueue(key("keyDown", "after reconnect")); await queue.drain();
-    expect(send).toHaveBeenLastCalledWith(key("keyDown", "after reconnect"));
+    expect(send.mock.lastCall?.[0]).toEqual(key("keyDown", "after reconnect"));
   });
 
   it("sends every input queued behind a request in the next one where the server takes batches, and commands alone", async () => {
@@ -543,22 +631,90 @@ describe("the v1 input queue", () => {
     const onError = vi.fn();
     const send = vi.fn<(body: Record<string, unknown>) => Promise<void>>().mockResolvedValue();
     const first = deferred();
-    send.mockImplementationOnce(() => first.promise).mockRejectedValueOnce(new Error("could not confirm"));
+    send.mockImplementationOnce(() => first.promise).mockRejectedValueOnce(Object.assign(new Error("could not confirm"), { status: 503 }));
     const queue = createLiveInputQueue(send, onError, () => 64);
     queue.enqueue(key("keyDown", "a"));
     queue.enqueue(key("keyDown", "shift")); queue.enqueue(key("keyDown", "b")); queue.enqueue(key("keyUp", "b")); queue.enqueue(up); queue.enqueue(key("keyUp", "shift"));
     first.resolve(); await queue.settle();
-    expect(send.mock.calls.slice(2).map(([body]) => body)).toEqual([key("keyUp", "b"), up, key("keyUp", "shift")]);
+    // Once one gets through, the rest go as a batch again.
+    expect(send.mock.calls.slice(2).flatMap(([body]) => (body.events as Array<Record<string, unknown>> | undefined) ?? [body])).toEqual([key("keyUp", "b"), up, key("keyUp", "shift")]);
     expect(onError).toHaveBeenCalledOnce();
   });
 
   it("does not replay queued presses after a transport failure", async () => {
     const onError = vi.fn();
-    const send = vi.fn<(body: Record<string, unknown>) => Promise<void>>().mockRejectedValueOnce(new Error("uncertain input")).mockResolvedValue();
+    const send = vi.fn<(body: Record<string, unknown>) => Promise<void>>().mockRejectedValueOnce(Object.assign(new Error("uncertain input"), { status: 503 })).mockResolvedValue();
     const queue = createLiveInputQueue(send, onError);
     queue.enqueue(key("keyDown")); queue.enqueue(key("keyDown", "b")); queue.enqueue(key("keyUp"));
     await queue.drain();
     expect(send.mock.calls.map(([body]) => body)).toEqual([key("keyDown"), key("keyUp")]);
     expect(onError).toHaveBeenCalledOnce();
+  });
+});
+
+describe("input that fails on its way to the page", () => {
+  const press = (key: string) => ({ type: "input_keyboard", eventType: "keyDown", key });
+  const release = (key: string) => ({ type: "input_keyboard", eventType: "keyUp", key });
+  const failure = (status?: number) => Object.assign(new Error(status ? `HTTP ${status}` : "Failed to fetch"), status ? { status } : {});
+  const quick = { delays: [1, 1, 1, 1, 1] };
+
+  it.each([[undefined], [429], [502], [504]])("repeats a request that failed with %s under its own number, in order, and halts nothing", async (status) => {
+    const onHalted = vi.fn();
+    const send = vi.fn<(body: Record<string, unknown>, id: number) => Promise<void>>().mockRejectedValueOnce(failure(status)).mockRejectedValueOnce(failure(status)).mockResolvedValue();
+    const queue = createLiveInputQueue(send, vi.fn(), () => 1, vi.fn(), { ...quick, onHalted });
+    queue.enqueue(press("a")); queue.enqueue(release("a")); queue.enqueue(press("b"));
+    await queue.settle();
+    expect(send.mock.calls.map(([body, id]) => `${id}:${body.eventType}:${body.key}`)).toEqual(["1:keyDown:a", "1:keyDown:a", "1:keyDown:a", "2:keyUp:a", "3:keyDown:b"]);
+    expect(queue.stopped()).toBe(false);
+    expect(onHalted).not.toHaveBeenCalled();
+  });
+
+  it("does not repeat a refusal: it halts, says so, counts what it drops, and takes input again once a request gets through", async () => {
+    const onHalted = vi.fn();
+    const onDrop = vi.fn();
+    const send = vi.fn<(body: Record<string, unknown>, id: number) => Promise<void>>().mockRejectedValueOnce(failure(409)).mockResolvedValue();
+    const queue = createLiveInputQueue(send, vi.fn(), () => 1, onDrop, { ...quick, onHalted });
+    queue.enqueue(press("a"));
+    await queue.settle();
+    expect(send).toHaveBeenCalledOnce();
+    expect(onHalted.mock.calls).toEqual([[true]]);
+    queue.enqueue(press("b"));
+    expect(onDrop).toHaveBeenCalledWith("queue_halted");
+    // A release still goes, and its answer shows the server takes input again.
+    queue.enqueue(release("a"));
+    await queue.settle();
+    expect(onHalted.mock.calls).toEqual([[true], [false]]);
+    queue.enqueue(press("c"));
+    await queue.settle();
+    expect(send.mock.calls.map(([body]) => body.key)).toEqual(["a", "a", "c"]);
+  });
+
+  it("halts after the repeats run out, and takes input again when the person holds the browser again", async () => {
+    const onHalted = vi.fn();
+    const send = vi.fn<(body: Record<string, unknown>, id: number) => Promise<void>>().mockRejectedValue(failure());
+    const queue = createLiveInputQueue(send, vi.fn(), () => 1, vi.fn(), { ...quick, onHalted });
+    queue.enqueue(press("a"));
+    await queue.settle();
+    expect(send).toHaveBeenCalledTimes(6);
+    expect(onHalted.mock.calls).toEqual([[true]]);
+    queue.resume();
+    expect(onHalted.mock.calls).toEqual([[true], [false]]);
+    send.mockResolvedValue();
+    queue.enqueue(press("b"));
+    await queue.settle();
+    expect(send.mock.calls.at(-1)![0]).toMatchObject({ key: "b" });
+  });
+
+  it("waits between repeats, about 8 s in all, before it gives up", async () => {
+    vi.useFakeTimers();
+    const send = vi.fn<(body: Record<string, unknown>, id: number) => Promise<void>>().mockRejectedValue(failure());
+    const queue = createLiveInputQueue(send, vi.fn());
+    queue.enqueue(press("a"));
+    await vi.advanceTimersByTimeAsync(7_000);
+    expect(queue.stopped()).toBe(false);
+    expect(send).toHaveBeenCalledTimes(5);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(queue.stopped()).toBe(true);
+    expect(send).toHaveBeenCalledTimes(6);
   });
 });

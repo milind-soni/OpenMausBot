@@ -6,6 +6,7 @@ import type { Action } from "@/state/store";
 import { readMembership } from "./membership";
 import { isOwnerOrAdmin, readSessionState, type SessionState } from "./session";
 import { scrollWithin } from "./scroll-within";
+import { serverFetch } from "./relay-server";
 
 export type PhonePairingTarget = "computer" | "cloud" | "server";
 
@@ -73,7 +74,7 @@ export function phoneDestinations(entry: ConnectPhoneEntry | null, cloud: CloudP
 
 let pending: Promise<PhonePairingAccess> | null = null;
 
-export function loadPhonePairingAccess(fetchImpl: typeof fetch = fetch): Promise<PhonePairingAccess> {
+export function loadPhonePairingAccess(fetchImpl: typeof serverFetch = serverFetch): Promise<PhonePairingAccess> {
   pending ??= readSessionState(fetchImpl).then(async (session): Promise<PhonePairingAccess> => {
     if (!isOwnerOrAdmin(session)) return { session, pairingCodes: false };
     const config: unknown = await fetchImpl("/api/config", { credentials: "same-origin" })

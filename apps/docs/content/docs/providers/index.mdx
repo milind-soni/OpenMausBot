@@ -14,7 +14,7 @@ MausBot does not proxy every message through its own model account. It starts su
 |---|---|---|
 | Claude | Claude CLI login | Strong support for tools, approvals, sessions, and local computer use |
 | Codex | Codex CLI login | Model discovery, approvals, steering, and computer tools |
-| Grok | Grok CLI login | ACP-based local model catalog and session support |
+| Grok | Grok CLI login | ACP-based local model catalog and session support; steering a running turn, turned on in Grok's own config the first time you chat |
 | Cursor | Cursor Agent CLI login or API key | ACP driver with live model discovery |
 | GitHub Copilot | `copilot login`, or `COPILOT_GITHUB_TOKEN` | ACP driver with the plan's live models, each labelled with its premium request multiplier |
 | Command Code | `cmd login`, or `COMMAND_CODE_API_KEY` | ACP driver with the account's live models and their effort levels |
@@ -60,7 +60,7 @@ For a server deployment, set `MISTRAL_API_KEY` or save `mistral.key` in the serv
 
 MausBot checks common installation directories and the login shell in the background. Restart the app after installing or authenticating a CLI.
 
-If detection fails, use **Settings → Engines** to set an explicit executable path. This is supported for every engine and is the most reliable solution for version managers, wrappers, custom builds, and Windows installations outside the normal path.
+If detection fails, use **Settings → AI → Providers** to set an explicit executable path. This is supported for every engine and is the most reliable solution for version managers, wrappers, custom builds, and Windows installations outside the normal path.
 
 ## Model selection
 

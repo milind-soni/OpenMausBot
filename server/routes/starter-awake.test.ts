@@ -1,9 +1,12 @@
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { json, readBody } from "../harness/http.ts";
-import type { StarterAwake } from "../host/starter-awake.ts";
+import { createStarterAwake, type StarterAwake } from "../host/starter-awake.ts";
 import { requiredScope } from "../request-auth.ts";
 import { createStarterAwakeRoutes, STARTER_AWAKE_PATH } from "./starter-awake.ts";
 import { dispatchRoutes } from "./table.ts";
@@ -29,7 +32,7 @@ function fakeAwake() {
   const chosen: string[][] = [];
   const awake: StarterAwake = {
     limit: () => 5, paused: () => ["b5"], isPaused: () => false,
-    choose: (ids) => { if (ids.length !== 5) return { ok: false, error: "choose 5 bots to keep awake" }; chosen.push([...ids]); return { ok: true }; },
+    choose: (ids) => { if (ids.length !== 5) return { ok: false, error: "choose 5 bots to keep awake" }; chosen.push([...ids]); return { ok: true }; }, wakeForRoutine: () => ({ kind: "awake" }), useRoutines: () => {},
   };
   return { awake, chosen };
 }
@@ -56,5 +59,27 @@ describe("choosing a Starter Cloud's awake bots", () => {
     expect([refused.status, await refused.json()]).toEqual([400, { error: "choose 5 bots to keep awake" }]);
     expect((await fetch(url)).status).toBe(405);
     expect(chosen).toEqual([]);
+  });
+});
+
+describe("the person's choice after a routine woke a bot", () => {
+  it("stands: the routine bot they leave paused stays paused while its routine still runs, and they can wake it again", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "starter-awake-route-"));
+    try {
+      const list = Array.from({ length: 7 }, (_, n) => ({ id: `b${n}`, createdAt: 0, tasks: [{ updatedAt: n * 60_000 }] }));
+      const awake = createStarterAwake({ dataDir: dir, starter: () => true, bots: () => list });
+      awake.paused();
+      awake.useRoutines({ routineBots: () => new Set(["b0"]), busy: () => false, held: () => false });
+      expect(awake.wakeForRoutine("b0", true)).toEqual({ kind: "woke", out: "b2" });
+      const url = await serve(awake);
+      const back = await post(url, { awake: ["b2", "b3", "b4", "b5", "b6"] });
+      expect([back.status, await back.json()]).toEqual([200, { paused: ["b0", "b1"] }]);
+      expect(awake.wakeForRoutine("b0", true)).toMatchObject({ kind: "ran", why: "chosen" });
+      expect(awake.paused()).toEqual(["b0", "b1"]);
+      const again = await post(url, { awake: ["b0", "b3", "b4", "b5", "b6"] });
+      expect([again.status, await again.json()]).toEqual([200, { paused: ["b1", "b2"] }]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from "react";
-import { api, useStore } from "@/state/store";
+import { api } from "@/state/store";
+import { useStoreSelector } from "@/state/store-select";
 import { t } from "@/lib/i18n";
 import { SETTINGS_INPUT } from "./SettingsPrimitives";
 
@@ -8,7 +9,7 @@ interface OwnName { displayName: string; shownAs: string }
 /** Settings → Bots → About you on a self-hosted server: the name a signed-in person goes by there (GET/PUT /api/me).
  * Nothing on a team, or on the owner's own computer, which goes by the profile's name. */
 export function DisplayNameSetting() {
-  const team = Boolean(useStore().state.config?.team);
+  const team = useStoreSelector((state) => Boolean(state.config?.team));
   const [own, setOwn] = useState<OwnName | null>(null);
   const [draft, setDraft] = useState("");
   const [failed, setFailed] = useState(false);

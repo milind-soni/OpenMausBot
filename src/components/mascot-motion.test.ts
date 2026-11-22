@@ -34,16 +34,16 @@ function delay(state: CursorState, sizePx: number, extra: Partial<CadenceInput> 
 describe("mascot cadence", () => {
   it("picks the slowest frame tier that keeps each step smooth", () => {
     expect(frameIntervalFor(0)).toBe(Infinity);
-    expect(frameIntervalFor(SMOOTH_STEP_PX / 50)).toBe(50);
-    expect(frameIntervalFor(SMOOTH_STEP_PX / 40)).toBeCloseTo(1000 / 30);
+    expect(frameIntervalFor(SMOOTH_STEP_PX / 50)).toBeCloseTo(1000 / 30);
+    expect(frameIntervalFor(SMOOTH_STEP_PX / 34)).toBeCloseTo(1000 / 30);
     expect(frameIntervalFor(SMOOTH_STEP_PX / 20)).toBeCloseTo(FULL_FRAME_MS);
     expect(frameIntervalFor(1)).toBeCloseTo(FULL_FRAME_MS);
   });
 
   it("gives idle breathing no frames where it cannot be seen and a slow tier where it can", () => {
-    expect(delay("idle", 24)).toBe(Infinity);
+    expect(delay("idle", 16)).toBe(Infinity);
     expect(delay("idle", 64)).toBeGreaterThan(30);
-    expect(delay("idle", 64)).toBeLessThanOrEqual(50);
+    expect(delay("idle", 64)).toBeLessThanOrEqual(1000 / 30 + 1);
     expect(delay("sleeping", 112)).toBeGreaterThan(30);
   });
 
@@ -55,13 +55,14 @@ describe("mascot cadence", () => {
     expect(delay("spawning", 96, { stateElapsedMs: 5_000 })).toBeGreaterThan(30);
   });
 
-  it("draws row, chip and header mascots at most 20 times a second", () => {
+  it("draws row, chip and header mascots 30 times a second, and 60 under the pointer", () => {
     for (const size of [24, 36, 42, SMALL_MASCOT_PX]) {
-      expect(delay("working", size)).toBeGreaterThan(40);
-      expect(delay("working", size)).toBeLessThanOrEqual(50);
-      expect(delay("celebrate", size)).toBeLessThanOrEqual(50);
-      expect(delay("idle", size, { blinkingOrSpinning: true })).toBeLessThanOrEqual(50);
-      expect(delay("idle", size, { blinkingOrSpinning: true })).toBeGreaterThan(40);
+      expect(delay("working", size)).toBeGreaterThan(30);
+      expect(delay("working", size)).toBeLessThanOrEqual(1000 / 30 + 1);
+      expect(delay("celebrate", size)).toBeLessThanOrEqual(1000 / 30 + 1);
+      expect(delay("idle", size, { blinkingOrSpinning: true })).toBeGreaterThan(30);
+      expect(delay("idle", size, { blending: true })).toBeGreaterThan(30);
+      expect(delay("idle", size, { hovered: true, blinkingOrSpinning: true })).toBeCloseTo(FULL_FRAME_MS);
     }
     expect(delay("working", SMALL_MASCOT_PX + 1)).toBeCloseTo(FULL_FRAME_MS);
   });
@@ -84,20 +85,20 @@ describe("mascot cadence", () => {
   it("draws an alert glyph's fades at full rate and rests between them", () => {
     const glyph = EFFECTS.confused!.glyph!;
     const shown = glyph.period - glyph.hold;
-    const at = (position: number) => delay("confused", 112, { stateElapsedMs: glyph.period * 3 + position });
+    const at = (position: number) => delay("confused", 112, { stateElapsedMs: glyph.period * 3 + position, motion: {} });
     expect(at(shown - 400)).toBeGreaterThan(2 * FULL_FRAME_MS);
     expect(at(shown - 400)).toBeLessThanOrEqual(400);
     expect(at(shown + 10)).toBeCloseTo(FULL_FRAME_MS);
     expect(at(shown + GLYPH_EASE_MS + 100)).toBeGreaterThan(2 * FULL_FRAME_MS);
     expect(at(glyph.period - 10)).toBeCloseTo(FULL_FRAME_MS);
-    expect(delay("confused", 112, { stateElapsedMs: glyph.period * 3 + shown + 10, showGlyphs: false })).toBeGreaterThan(2 * FULL_FRAME_MS);
+    expect(delay("confused", 112, { stateElapsedMs: glyph.period * 3 + shown + 10, showGlyphs: false, motion: {} })).toBeGreaterThan(2 * FULL_FRAME_MS);
   });
 
   it("follows an expression change until it settles", () => {
     expect(morphUnitsPerMs(0, 1, 7, 40)).toBe(0);
     const start = morphUnitsPerMs(0, 0, 7, 40);
     expect(start).toBeGreaterThan(0);
-    expect(delay("idle", 24, { faceUnitsPerMs: start })).toBeLessThan(Infinity);
+    expect(delay("idle", 16, { faceUnitsPerMs: start })).toBeLessThan(Infinity);
     expect(morphUnitsPerMs(0, 0.99, 7, 40)).toBeLessThan(start / 50);
   });
 });

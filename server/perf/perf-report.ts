@@ -90,6 +90,7 @@ export const stallLines = (stalls: StallsReport): string[] => [
   `Event loop stalls, measured all the time: last minute ${stallLine(stalls.m1)}; last hour ${stallLine(stalls.h1)}`,
   `  Whole-file saves: last minute ${tallyLine(stalls.saves.m1)}; last hour ${tallyLine(stalls.saves.h1)}`,
   `  Runtime store reads: last minute ${tallyLine(stalls.runtimeReads.m1)}; last hour ${tallyLine(stalls.runtimeReads.h1)}`,
+  `  Sleeps or pauses, left out of the stalls: last minute ${tallyLine(stalls.pauses.m1)}; last hour ${tallyLine(stalls.pauses.h1)}`,
 ];
 
 /** 850ms, 14s, 6m12s, 1h03m. */

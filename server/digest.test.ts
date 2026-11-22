@@ -124,6 +124,28 @@ describe("buildTurnDigest", () => {
     expect(long.reply).toHaveLength(200);
   });
 
+  it("says why a failed turn ended, on one bounded line with secrets scrubbed", () => {
+    const quiet = { ...base, reply: "", activities: [], memory: [], hookCoverage: "none" as const };
+    expect(buildTurnDigest(quiet).error).toBeUndefined();
+    expect(renderDigest(buildTurnDigest(quiet))).toBe("[digest] · no tool activity observed in this turn");
+    const failed = buildTurnDigest({ ...quiet, error: 'upstream HTTP 429: [{"error":{"code":429,\n"message":"Quota exceeded, retry in 11h32m"}}]' });
+    expect(failed.error).toBe('upstream HTTP 429: [{"error":{"code":429, "message":"Quota exceeded, retry in 11h32m"}}]');
+    expect(renderDigest(failed)).toBe(`[digest] · turn failed: ${failed.error} · no tool activity observed in this turn`);
+    const leaked = buildTurnDigest({ ...quiet, error: "upstream HTTP 401: Incorrect API key provided: sk-proj-abcdefghijklmnopqrstuvwxyz0123456789" });
+    expect(leaked.error).toContain("upstream HTTP 401");
+    expect(leaked.error).not.toContain("abcdefghijklmnopqrstuvwxyz0123456789");
+    expect(buildTurnDigest({ ...quiet, error: `upstream HTTP 503: ${"x".repeat(900)}` }).error).toHaveLength(300);
+  });
+
+  it("never cuts the reply inside an emoji when there is no sentence end before the cap", () => {
+    const reply = `${"汇".repeat(199)}🔴之后还有很多内容`;
+    const d = buildTurnDigest({ ...base, reply, activities: [], memory: [] });
+    expect(d.reply).toBe("汇".repeat(199));
+    const loneSurrogate = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+    expect(d.reply).not.toMatch(loneSurrogate);
+    expect(renderDigest(d)).not.toMatch(loneSurrogate);
+  });
+
   it("masks a credential the reply repeats, as the stored reply is masked", () => {
     const secret = `${"whsec" + "_"}${"a1B2c3D4".repeat(5)}`;
     const d = buildTurnDigest({ ...base, activities: [], memory: [], reply: `Connected the watcher to http://127.0.0.1:8800/hooks/wh_abc/${secret}. Done.` });

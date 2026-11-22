@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { createCloudLook } from "./cloud-buy.mjs";
 import { parseCloudList } from "./cloud-list.mjs";
 import environments from "./environments.cjs";
 import { createHomePlaces } from "./home-places.mjs";
@@ -10,11 +11,12 @@ const acme = { id: "team-acme", name: "Acme", role: "admin", machine: { status: 
 const beta = { id: "team-beta", name: "Beta", role: "member", machine: { status: "ready", origin: OTHER } };
 const connected = (teams) => ({ status: "connected", account: { id: "acct-1" }, teams });
 
-function world({ saved = null, state = { environments: [{ id: "c", kind: "remote", name: "My Cloud", origin: HOME, home: true }], activeId: "c" } } = {}) {
+function world({ saved = null, state = { environments: [{ id: "c", kind: "remote", name: "My Cloud", origin: HOME, home: true }], activeId: "c" }, homeName } = {}) {
   const w = { saved, state, persisted: [], ids: 0, log: [] };
   w.places = createHomePlaces({
     store: { read: () => { if (w.saved === null) throw new Error("ENOENT"); return w.saved; }, write: (value) => { if (w.failWrite) throw new Error("disk full"); w.saved = value; } },
     environments: () => w.state, persist: (next) => { w.persisted.push(next); w.state = next; }, makeId: () => `id-${++w.ids}`, homeOrigin: () => HOME, log: (line) => w.log.push(line),
+    ...(homeName ? { homeName } : {}),
   });
   return w;
 }
@@ -114,4 +116,28 @@ test("a listed name never renames a place that isn't home at the machine's addre
   const w = world({ state: { environments: [{ id: "s", kind: "remote", name: "Saved by hand", origin: HOME }], activeId: "s" } });
   w.places.sync(withHome("Freedom Fox"));
   assert.equal(w.state.environments[0].name, "Saved by hand");
+});
+
+test("the name chosen while setting up My Cloud stays when the Admin lists it under its own name, until it is renamed there", () => {
+  let listed = null, record = null;
+  const look = createCloudLook({ store: { read: () => record, write: (value) => { record = value; } }, accountId: () => "acct-1", homeEntry: () => null, saveEntry: () => {}, listedName: () => listed });
+  look.save("Juniper Cloud", "teal");
+  const w = world({ state: { environments: [{ id: "c", kind: "remote", name: "Juniper Cloud", origin: HOME, home: true }], activeId: "c" }, homeName: (name) => look.homeName(name) });
+  w.places.sync(withHome("My Cloud"));
+  assert.equal(w.state.environments[0].name, "Juniper Cloud", "the Admin's first name is not a rename");
+  w.places.sync(withHome("My Cloud"));
+  assert.equal(w.state.environments[0].name, "Juniper Cloud");
+  w.places.sync(withHome("Freedom Fox"));
+  assert.equal(w.state.environments[0].name, "Freedom Fox", "renamed in the Admin: its name wins");
+  w.places.sync(withHome("Freedom Fox"));
+  assert.equal(w.state.environments[0].name, "Freedom Fox");
+  w.places.sync(withHome("A name longer than twenty-eight letters"));
+  w.places.sync(withHome("A name longer than twenty-eight letters"));
+  assert.equal(w.state.environments[0].name, "A name longer than twenty-eight letters", "renamed there again: still the Admin's name");
+  listed = "Studio"; look.save("Juniper Cloud", "teal");
+  w.places.sync(withHome("Studio"));
+  assert.equal(w.state.environments[0].name, "Juniper Cloud", "chosen while the Admin listed it: that name is the one to compare");
+  record = { accountId: "acct-1", name: "Old choice", color: "teal" };
+  w.places.sync(withHome("Lab"));
+  assert.equal(w.state.environments[0].name, "Lab", "a choice saved before the Admin name was kept: the Admin's name, as before");
 });

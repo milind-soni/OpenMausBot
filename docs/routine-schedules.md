@@ -246,7 +246,8 @@ use an appropriate event/webhook workflow instead of a fake weekly schedule.
   lifts.
 - A run stops when it reaches its limit, ends as failed with the limit named
   ("Stopped: this run ran longer than the 3-hour limit"), and the schedule
-  carries on. A routine may set its own limit, 5 minutes to 24 hours: that one
+  carries on. A run that had already delivered its report keeps it: its row
+  says the work was partly done. A routine may set its own limit, 5 minutes to 24 hours: that one
   counts the time since the run started, less the time its approvals and
   questions were open. Without one, the default applies to every run, whether
   the schedule, an event or **Run now** started it: 3 hours of work for a

@@ -43,7 +43,7 @@ import type {
   TextGenerationOptions,
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
-import { codexSelectedProviderArgs, decodeCodexSelection, OFFICIAL_CODEX_PROVIDER, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
+import { codexSelectedProviderArgs, codexThreadSelection, decodeCodexSelection, OFFICIAL_CODEX_PROVIDER, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 import { codexBackgroundProviderArgs, codexBackgroundRoute, runCodexBackgroundRoute, runCodexOneShot } from "./codex-background-text.ts";
 import { augmentedPath } from "../env-path.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
@@ -58,7 +58,7 @@ import { codexAccountEmail, codexHome } from "./codex-identity.ts";
 import { keepChatsOutOfCodexHistory, linkSharedCodexHome } from "./codex-shared-home.ts";
 import { mcpAppApprovalForm, mcpAppApprovalText, mcpElicitationDeclined, plainRecord } from "./codex-app-approval.ts";
 import { archivedNativeCodexThread, CODEX_MISSING_CREDENTIALS, codexProviderMismatch, CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, CodexRpcError, codexSignInExpired, codexPlanModelRefused, codexPlanUnsupportedInput, codexSignInRefused, codexUserError, codexUserFailure, missingNativeCodexThread, type CodexRoute } from "./codex-errors.ts";
-import { codexLoginCheck, codexLoginKind, readCodexLogin, storedCodexLogin } from "./codex-login.ts";
+import { codexTierOf } from "./codex-tier.ts"; import { codexLoginCheck, codexLoginKind, readCodexLogin, storedCodexLogin } from "./codex-login.ts";
 import { keyRejected, noteKeyAccepted, noteKeyRejected } from "../key-rejections.ts";
 import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
 import { extractMcpImages } from "../mcp-tool-images.ts"; import { codexImageInputs, withoutInlineImages } from "./codex-images.ts";
@@ -66,7 +66,7 @@ import { parseProtocolAskQuestions, questionChoices } from "../../shared/ask-que
 import { codexQuestionReply, openAsyncQuestion, type CodexAsk } from "./codex-questions.ts";
 import { codexReleaseUpdate, codexUpdateCommand } from "./codex-update.ts";
 export { codexUpdateCommand };
-import { customApprovalParams, namedApprovalParams, permissionProfileUnsupported, withResolvedSandbox, type CodexApprovalParams } from "./codex-approval-config.ts"; import { CodexConnection, codexConfigDigest, codexContractDiff, codexLoginIdentity, codexSpawnContract, codexWarmSessions } from "./codex-warm.ts"; import { AGENTS_TOOL_TIMEOUT_SECONDS } from "./agents-tool-limit.ts"; import { COMPUTER_PROXY_TIMEOUT_MS } from "../harness-budget.ts";
+import { customApprovalParams, namedApprovalParams, permissionProfileUnsupported, withResolvedSandbox, type CodexApprovalParams } from "./codex-approval-config.ts"; import { CodexConnection, codexConfigDigest, codexContractDiff, codexIdentityInputs, codexOwnLogin, codexSpawnContract, codexWarmSessions, type CodexIdentityInputs } from "./codex-warm.ts"; import { codexCompactSession } from "./codex-compact.ts"; import { AGENTS_TOOL_TIMEOUT_SECONDS } from "./agents-tool-limit.ts"; import { COMPUTER_PROXY_TIMEOUT_MS } from "../harness-budget.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
 import { appMountFor, gateServer, mcpStdioServer } from "../mcp-gate-config.ts"; import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
@@ -604,14 +604,14 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const commandCwd = permissionLaunchCwd(turn.cwd ?? homedir());
         // A plan login reaches its process through this turn's token or bridge, which end with the turn.
         const contract = plan ? null : codexSpawnContract({ cli: config.cli, args: appServerArgs, env, cwd: turn.cwd ?? homedir(), box: customBox,
-          login: codexLoginIdentity(ownLogin ? storedCodexLogin(env) : null), thread: { model: turn.model ?? null, approvalMode, ...selectionConfig } });
+          login: codexOwnLogin(ownLogin, env), thread: { model: turn.model ?? null, approvalMode, ...selectionConfig } });
         const reused = contract && attempt === 0 ? warm.take(threadId, contract, typeof turn.resumeCursor === "string" ? turn.resumeCursor : null) : null;
         const releaseSlot = reused ? () => {} : tryCodexLaunchSlot() ?? await waitForLaunchSlot(attempt);
         if (!releaseSlot) return;
         const connection = reused?.connection ?? new CodexConnection(spawnHoldingSlot(releaseSlot, () => spawnCli(...codexLaunch(config.cli, appServerArgs), {
           cwd: turn.cwd ?? homedir(),
           env,
-          stdio: ["pipe", "pipe", "pipe"], ...customBox,
+          stdio: ["pipe", "pipe", "pipe"], ...(authBridge ? { box: { ...customBox.box, rw: [authBridge.socketPath] } } : customBox),
         }, "bot")));
         const child = connection.child;
 
@@ -621,7 +621,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       let startingNativeTurn = false;
       const earlyNotifications: any[] = [];
       const mcpStartup = reused ? null : mcpStartupTracker(child);
-      let mcpFailed = false, keepable: { configDigest: string; cwd: string; carried: { initialized: any; approvalParams: CodexApprovalParams; rolloutPath: unknown } } | null = null;
+      let mcpFailed = false, keepable: { configDigest: string; cwd: string; identity: CodexIdentityInputs; provider: string | null; model: string | null; carried: { initialized: any; approvalParams: CodexApprovalParams; rolloutPath: unknown } } | null = null;
       const state = {
         settled: false,
         lastError: "",
@@ -1310,11 +1310,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         // Codex's `never` means "do not ask to escalate", not "grant every requested permission":
         // only Full may synthesize approvals.
         autoAcceptPermissions = approvalMode === "full";
-        const selection: { model?: string | null; modelProvider: string | null; serviceTier?: string } = routed
-          ? { model: turn.model, modelProvider: routedProvider }
-          : config.authMode === "chatgpt-plan" && planLane === "maus"
-            ? { model: turn.model, modelProvider: "openai_chatgpt_plan" }
-            : decodeCodexSelection(turn.model);
+        const selection = codexThreadSelection({ routedProvider: routed ? routedProvider : undefined, plan: plan && planLane === "maus" }, turn.model);
         const cursor = !droppedUnsupportedSession && typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
         let startedModel: string | null = null;
         // The plan refused the dropped session before anything ran, so replaying the chat repeats no side effects.
@@ -1411,7 +1407,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         ];
         const startTurn = () => {
           promptSubmitted = true;
-          startingNativeTurn = true; keepable = { configDigest, cwd: turn.cwd ?? homedir(), carried: { initialized, approvalParams, rolloutPath: rolloutAt?.path } };
+          startingNativeTurn = true; keepable = { configDigest, cwd: turn.cwd ?? homedir(), identity: codexIdentityInputs(config.cli, env, ownLogin), provider: selection.modelProvider, model: turn.model && selection.serviceTier ? codexTierOf(turn.model)?.model ?? turn.model : turn.model ?? null, carried: { initialized, approvalParams, rolloutPath: rolloutAt?.path } };
           return request("turn/start", {
             threadId: codexThreadId,
             input: turnInput,
@@ -1678,6 +1674,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         strictResume: true, nativeCompaction: true,
       },
       sendTurn,
+      compactSession: codexCompactSession({ instanceId, warm, active, turnId: newId, providerOf: (model) => codexThreadSelection({ routedProvider: routed ? routedProvider : undefined, plan }, model).modelProvider,
+        refusal: () => disposed ? "this provider was removed" : planSigningOut ? "this account is being disconnected" : null }),
       interruptTurn: async (threadId) => {
         await active.get(threadId)?.stop();
       },

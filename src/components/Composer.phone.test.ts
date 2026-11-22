@@ -33,6 +33,7 @@ vi.mock("./CallView", () => ({ CallButton: (props: Record<string, unknown>) => {
   fixture.call = props;
   return null;
 } }));
+vi.mock("./ModelPicker", () => ({ ModelPicker: () => null }));
 vi.mock("./GroupCallView", () => ({ GroupCallButton: (props: Record<string, unknown>) => {
   fixture.groupCall = props;
   return null;
@@ -111,12 +112,13 @@ describe("the phone composer", () => {
     expect(item("place")?.textContent).toContain("Works on");
   });
 
-  it("keeps Advanced mode's buttons in a row on a wider screen", () => {
+  it("gives Advanced mode on a wider screen its quiet footer + instead of the round one", () => {
     vi.stubGlobal("matchMedia", (query: string) => ({ matches: !query.includes("max-width"), addEventListener() {}, removeEventListener() {} }));
     fixture.advanced = true;
     render({ bot });
-    expect(container.querySelector('button[aria-label="Attach a file"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="place-chip"]')).not.toBeNull();
+    expect(container.querySelector("[data-composer-tools] [data-composer-plus]")).not.toBeNull();
+    expect(container.querySelector("[data-composer-plus]")!.className.split(" ")).toContain("size-8");
     expect(fixture.call?.inverse).toBe(false);
+    expect(fixture.call?.modeMenu).toBe(false);
   });
 });

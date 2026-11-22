@@ -53,7 +53,7 @@ const drawSidebar = (Sidebar as unknown as { type: (props: import("react").Compo
 import { NEW_DEPARTMENT } from "./SidebarBotDrag";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { TeamDialog } from "./TeamDialog";
+import { TeamDialog } from "./lazy-screens";
 
 const bot = (id: string, extra: Partial<Bot> = {}): Bot => ({
   id, threadId: `${id}-thread`, name: id, title: "", description: "", notifications: true,

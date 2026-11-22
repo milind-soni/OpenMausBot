@@ -17,7 +17,7 @@ export function withoutMentions(text: string, mentions: (text: string) => boolea
   const removed: string[] = [];
   for (const entry of parseMemoryEntries(text)) {
     for (let line = entry.line; line < entry.end; line += 1) entryLines.add(line);
-    if (!mentions(entry.body)) continue;
+    if (!mentions([entry.body, ...lines.slice(entry.line + 1, entry.end)].join("\n"))) continue;
     for (let line = entry.line; line < entry.end; line += 1) drop.add(line);
     removed.push(entry.body);
   }

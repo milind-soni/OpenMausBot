@@ -103,6 +103,9 @@ ARG CHROME_CACHE_TAG=""
 # Chrome for Testing has no Linux ARM64 build, so an arm64 image takes
 # Debian's Chromium instead, linked at the same path; the publish job passes
 # its newest bookworm version so a Debian security update rebuilds it too.
+# A browser on a private display reads Chrome's lock-down policy from a folder
+# its own mount namespace covers (server/browser/desktop/policy.ts); Debian's
+# Chromium makes no /etc/chromium/policies, so the image does.
 ARG CHROMIUM_CACHE_TAG=""
 ARG TARGETARCH
 # The global link must be the native binary for this platform (agent-browser's
@@ -111,7 +114,7 @@ RUN echo "agent-browser ${AGENT_BROWSER_VERSION}, Chrome for Testing ${CHROME_CA
   && npm install -g --cache /tmp/npm-cache agent-browser@${AGENT_BROWSER_VERSION} \
   && if [ "$TARGETARCH" = arm64 ]; then \
        apt-get update && apt-get install -y --no-install-recommends chromium && rm -rf /var/lib/apt/lists/* \
-       && mkdir -p /opt/openmausbot-browser && ln -s /usr/lib/chromium/chromium /opt/openmausbot-browser/chrome; \
+       && mkdir -p /opt/openmausbot-browser /etc/chromium/policies && ln -s /usr/lib/chromium/chromium /opt/openmausbot-browser/chrome; \
      else HOME=/opt/openmausbot-browser agent-browser install \
        && ln -s /opt/openmausbot-browser/.agent-browser/browsers/chrome-*/chrome /opt/openmausbot-browser/chrome; \
      fi \
@@ -141,20 +144,23 @@ FROM runtime AS cloud-home
 # runs every bot turn in its own namespaces, socat bridges a box's loopback
 # ports to the server's gates. Their own layer, so the Chrome layers beneath
 # stay cached. pnpm, so a bot's shell can install what its project asks for.
+# Xvnc (TigerVNC, run unmodified as its own process), for browserEngine.cloudDisplay: the bots' Chrome shows its window
+# on a private display that the browser panel shows as a remote desktop (server/browser/desktop). It only runs while a
+# browser does, and that Chrome alone starts under bubblewrap with Chrome's lock-down policy in its policy folders.
 # uv and uvx, so a connector someone runs with uvx comes along when they move here
 # (server/cloud-connections.ts) as an npx one does: about 32 MB, on every user's
 # PATH and out of the volume. What it downloads lives in the volume's cache.
 ARG UV_VERSION=0.13.4
 ARG TARGETARCH
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 poppler-utils unzip bubblewrap socat \
+  && apt-get install -y --no-install-recommends python3 poppler-utils unzip bubblewrap socat tigervnc-standalone-server \
   && rm -rf /var/lib/apt/lists/* \
   && HOME=/tmp/omb-build-home npm install -g pnpm@10.33.0 \
   && uv_arch=x86_64 && if [ "$TARGETARCH" = arm64 ]; then uv_arch=aarch64; fi \
   && mkdir -p /tmp/uv-install \
   && curl -fsSL "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${uv_arch}-unknown-linux-gnu.tar.gz" | tar -xz -C /tmp/uv-install --strip-components=1 \
   && install -m 0755 /tmp/uv-install/uv /tmp/uv-install/uvx /usr/local/bin/ \
-  && bwrap --version && socat -V | head -1 && HOME=/tmp/omb-build-home pnpm --version && uv --version | grep -qF "uv ${UV_VERSION}" \
+  && bwrap --version && socat -V | head -1 && test -x /usr/bin/Xvnc && { Xvnc -version 2>&1 | head -1; } && HOME=/tmp/omb-build-home pnpm --version && uv --version | grep -qF "uv ${UV_VERSION}" \
   && rm -rf /tmp/omb-build-home /tmp/uv-install /tmp/node-compile-cache
 # Caddy and Grok are pinned, so they sit beneath the engines, which change
 # more often.

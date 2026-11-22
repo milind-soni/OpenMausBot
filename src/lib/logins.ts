@@ -1,4 +1,4 @@
-import type { BitwardenCredentials, BitwardenStatus, LoginBots, LoginSummary, OnePasswordStatus } from "../../shared/logins";
+import type { BitwardenCredentials, BitwardenSecretsCredentials, BitwardenSecretsStatus, BitwardenStatus, LoginBots, LoginSummary, OnePasswordStatus } from "../../shared/logins";
 import type { ComputerHelpRef } from "../../shared/wire";
 import { api } from "@/state/store";
 
@@ -36,6 +36,18 @@ export async function refreshBitwarden(): Promise<BitwardenStatus> {
 
 export async function disconnectBitwarden(): Promise<BitwardenStatus> {
   return (await api<{ bitwarden: BitwardenStatus }>("/api/logins/bitwarden", { method: "DELETE" })).bitwarden;
+}
+
+export async function connectBitwardenSecrets(credentials: BitwardenSecretsCredentials): Promise<BitwardenSecretsStatus> {
+  return (await api<{ bitwardenSecrets: BitwardenSecretsStatus }>("/api/logins/bitwarden-secrets", { method: "POST", body: JSON.stringify(credentials) })).bitwardenSecrets;
+}
+
+export async function refreshBitwardenSecrets(): Promise<BitwardenSecretsStatus> {
+  return (await api<{ bitwardenSecrets: BitwardenSecretsStatus }>("/api/logins/bitwarden-secrets/refresh", { method: "POST", body: "{}" })).bitwardenSecrets;
+}
+
+export async function disconnectBitwardenSecrets(): Promise<BitwardenSecretsStatus> {
+  return (await api<{ bitwardenSecrets: BitwardenSecretsStatus }>("/api/logins/bitwarden-secrets", { method: "DELETE" })).bitwardenSecrets;
 }
 
 export async function addLogin(site: string, fields: LoginFieldsInput, bots: LoginBots, exactHost = false): Promise<LoginSummary> {

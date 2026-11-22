@@ -2,9 +2,12 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   accessSync,
+  closeSync,
   constants,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -397,6 +400,7 @@ function verifyCloudflaredResources(resources, label, { directoryMode = 0o755 } 
 
 const appImage = exactlyOne(".AppImage");
 const deb = exactlyOne(".deb");
+const rpm = exactlyOne(".rpm");
 const unpacked = path.join(releaseDir, "linux-unpacked");
 const executable = path.join(unpacked, "openmausbot");
 const resources = path.join(unpacked, "resources");
@@ -431,23 +435,22 @@ for (const expected of [
   if (!fields.includes(expected)) fail(`DEB metadata is missing ${JSON.stringify(expected)}`);
 }
 
-const extracted = mkdtempSync(path.join(tmpdir(), "omb-deb-verify-"));
-try {
-  execFileSync("dpkg-deb", ["--extract", deb, extracted]);
-  const debAppRoot = path.join(extracted, "opt", "OpenMausBot");
-  requireDirectoryMode(debAppRoot, 0o755);
-  const debResources = path.join(debAppRoot, "resources");
+// The DEB and RPM install the same tree under /opt; check what each extracted.
+function verifySystemPackage(extracted, label, packageType) {
+  const appRoot = path.join(extracted, "opt", "OpenMausBot");
+  requireDirectoryMode(appRoot, 0o755);
+  const packageResources = path.join(appRoot, "resources");
   // Routes the in-app updater to the package-manager hand-off.
-  requirePackageType(debResources, "DEB", "deb");
-  requireUpdaterTarget(debResources, "DEB");
-  const debHashes = verifyCuaResources(debResources, "DEB");
-  const debCloudflaredHash = verifyCloudflaredResources(debResources, "DEB");
-  if (debCloudflaredHash !== unpackedCloudflaredHash) {
-    fail(`DEB and linux-unpacked cloudflared hashes differ`);
+  requirePackageType(packageResources, label, packageType);
+  requireUpdaterTarget(packageResources, label);
+  const packageHashes = verifyCuaResources(packageResources, label);
+  const packageCloudflaredHash = verifyCloudflaredResources(packageResources, label);
+  if (packageCloudflaredHash !== unpackedCloudflaredHash) {
+    fail(`${label} and linux-unpacked cloudflared hashes differ`);
   }
   for (const [unpackedFile, expected] of unpackedCuaHashes) {
-    const packaged = path.join(debResources, "cua-linux-x64", path.basename(unpackedFile));
-    if (debHashes.get(packaged) !== expected) fail(`DEB and linux-unpacked CUA hashes differ`);
+    const packaged = path.join(packageResources, "cua-linux-x64", path.basename(unpackedFile));
+    if (packageHashes.get(packaged) !== expected) fail(`${label} and linux-unpacked CUA hashes differ`);
   }
   const desktopFile = path.join(
     extracted,
@@ -476,11 +479,65 @@ try {
     "StartupWMClass=com.openmausbot.app",
     "Categories=Utility;",
   ]) {
-    if (!desktop.includes(expected)) fail(`desktop entry is missing ${JSON.stringify(expected)}`);
+    if (!desktop.includes(expected)) fail(`${label} desktop entry is missing ${JSON.stringify(expected)}`);
   }
   execFileSync("desktop-file-validate", [desktopFile], { stdio: "inherit" });
+}
+
+const extracted = mkdtempSync(path.join(tmpdir(), "omb-deb-verify-"));
+try {
+  execFileSync("dpkg-deb", ["--extract", deb, extracted]);
+  verifySystemPackage(extracted, "DEB", "deb");
 } finally {
   rmSync(extracted, { recursive: true, force: true });
+}
+
+const rpmFields = execFileSync(
+  "rpm",
+  ["-qp", "--queryformat", "Name: %{NAME}\nArch: %{ARCH}\nVersion: %{VERSION}\n", rpm],
+  { encoding: "utf8" },
+);
+for (const expected of [
+  "Name: openmausbot",
+  "Arch: x86_64",
+  `Version: ${JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).version}`,
+]) {
+  if (!rpmFields.includes(expected)) fail(`RPM metadata is missing ${JSON.stringify(expected)}`);
+}
+// rpm runs these as %post and %postun; without them the Chromium sandbox
+// stays unprivileged and an upgrade would drop the browser policy.
+const rpmScripts = new Map(
+  execFileSync("rpm", ["-qp", "--scripts", rpm], { encoding: "utf8" })
+    .split(/^(?=\w+ scriptlet)/m)
+    .map((section) => [section.slice(0, section.indexOf(" ")), section]),
+);
+for (const [scriptlet, line] of [
+  ["postinstall", "repair_chromium_sandbox \"$APP_ROOT/chrome-sandbox\""],
+  ["postuninstall", "profile=$APPARMOR_DIR/openmausbot-browser"],
+]) {
+  if (!rpmScripts.get(scriptlet)?.includes(line)) {
+    fail(`RPM ${scriptlet} scriptlet does not run the Linux package hook`);
+  }
+}
+
+const rpmExtracted = mkdtempSync(path.join(tmpdir(), "omb-rpm-verify-"));
+try {
+  const archive = path.join(rpmExtracted, "payload.cpio");
+  const archiveFd = openSync(archive, "w");
+  try {
+    execFileSync("rpm2cpio", [rpm], { stdio: ["ignore", archiveFd, "inherit"] });
+  } finally {
+    closeSync(archiveFd);
+  }
+  const payload = path.join(rpmExtracted, "payload");
+  mkdirSync(payload);
+  execFileSync("cpio", ["-idm", "--quiet", "--no-absolute-filenames", "-F", archive], {
+    cwd: payload,
+    stdio: ["ignore", "ignore", "inherit"],
+  });
+  verifySystemPackage(payload, "RPM", "rpm");
+} finally {
+  rmSync(rpmExtracted, { recursive: true, force: true });
 }
 
 const appImageExtracted = mkdtempSync(path.join(tmpdir(), "omb-appimage-verify-"));
@@ -530,4 +587,6 @@ try {
   rmSync(appImageExtracted, { recursive: true, force: true });
 }
 
-console.log(`[verify-linux-package] OK\n- ${path.basename(appImage)}\n- ${path.basename(deb)}`);
+console.log(
+  `[verify-linux-package] OK\n- ${path.basename(appImage)}\n- ${path.basename(deb)}\n- ${path.basename(rpm)}`,
+);

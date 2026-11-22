@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
-import { isOwnerOrAdmin, readSessionState } from "./session";
+import { isOwnerOrAdmin } from "./session";
+import { readSharedSessionState } from "./shared-session";
 
 const RETRY_MS = 10_000;
 let known: boolean | null = null;
@@ -19,7 +20,7 @@ function lookUp(): void {
     return;
   }
   looking = true;
-  void readSessionState()
+  void readSharedSessionState()
     .then((state) => state.kind === "unreachable" ? null : isOwnerOrAdmin(state), () => null)
     .then((allowed) => {
       looking = false;

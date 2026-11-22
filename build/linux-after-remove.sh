@@ -3,9 +3,12 @@ set -eu
 
 # dpkg runs the old postrm during an upgrade too. Keep the installed profile
 # until the package is actually removed or purged. pacman's post_remove runs
-# only on removal and passes the old version instead of an action word.
+# only on removal and passes the old version instead of an action word. rpm's
+# %postun passes how many copies stay installed: 0 on erase, 1 or more after
+# an upgrade, where it runs after the new package's install hook.
 case "${1:-}" in
-  remove|purge|[0-9]*) ;;
+  remove|purge|0) ;;
+  [0-9]*[!0-9]*) ;;
   *) exit 0 ;;
 esac
 
@@ -30,7 +33,9 @@ fi
 
 # Preserve electron-builder's cleanup of the exact legacy launcher. Never
 # remove an unrelated file that now happens to use the same command name.
-if [ "$TEST_MODE" -eq 0 ]; then
+# The rpm (erase passes 0) never shipped that launcher, and Fedora's
+# update-alternatives fails on a link group that does not exist.
+if [ "$TEST_MODE" -eq 0 ] && [ "${1:-}" != 0 ]; then
   if command -v update-alternatives >/dev/null 2>&1; then
     update-alternatives --remove openmausbot /opt/OpenMausBot/openmausbot
   elif [ -L /usr/bin/openmausbot ] && [ "$(readlink /usr/bin/openmausbot)" = /opt/OpenMausBot/openmausbot ]; then

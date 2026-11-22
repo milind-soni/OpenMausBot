@@ -1,7 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 import { removeTempDir } from "../testing/cleanup.ts";
 import { forbiddenCommand } from "./cdp/testing/real-chrome.ts";
@@ -214,18 +214,44 @@ describe("the bots' browser tools", () => {
 });
 
 describe("a person and the bot sharing one browser", () => {
-  it("refuses every bot call while a person holds the browser, reads included, and lets the bot back on release", async () => {
-    const { service, call, target } = setup();
+  it("lets the bot only read the tab in front while a person holds the browser, and act again on release", async () => {
+    const { service, call, target, backend } = setup();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    await call("agent_browser_tabs", { action: "new", url: "https://example.com/other" });
+    await call("agent_browser_tabs", { action: "switch", tab: "t1" });
+    const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 2560, maxHeight: 1600 }, () => {});
+    await viewer.input({ type: "takeControl" });
+    expect(service.heldBy("bot-a")).toBe("local-owner");
+    const fronted = () => backend.chrome.sent.filter((sent) => sent.method === "Page.bringToFront").length;
+    const before = fronted();
+    for (const [name, args] of [["agent_browser_status", {}], ["agent_browser_snapshot", {}], ["agent_browser_screenshot", {}], ["agent_browser_read", {}], ["agent_browser_tabs", { action: "list" }]] as const) {
+      expect((await call(name, args)).isError, name).toBeUndefined();
+    }
+    expect(fronted()).toBe(before);
+    for (const [name, args] of [["agent_browser_click", { ref: "e2" }], ["agent_browser_eval", { expression: "1" }], ["agent_browser_dialog", { accept: true }],
+      ["agent_browser_read", { url: "https://example.com/elsewhere" }], ["agent_browser_snapshot", { tab: "t2" }], ["agent_browser_tabs", { action: "switch", tab: "t2" }],
+      ["agent_browser_screenshot", { fullPage: true }], ["agent_browser_screenshot", { selector: "button" }]] as const) {
+      await expect(call(name, args), name).rejects.toThrow(BROWSER_CONTROL_REFUSAL);
+    }
+    await viewer.input({ type: "releaseControl" });
+    expect(service.heldBy("bot-a")).toBeNull();
+    // Hand-back revokes the refs a snapshot taken during the hold gave out.
+    expect(JSON.stringify((await call("agent_browser_click", { ref: "e2" })).content)).toMatch(/snapshot/i);
+    expect((await call("agent_browser_tabs", { action: "switch", tab: "t2" })).isError).toBeUndefined();
+  });
+
+  it("ends the person's hold when the browser they hold dies, so the bot is not left paused for a browser that is gone", async () => {
+    const { service, call, text, target, backend } = setup();
     await call("agent_browser_open", { url: "https://example.com/form" });
     const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 2560, maxHeight: 1600 }, () => {});
     await viewer.input({ type: "takeControl" });
     expect(service.heldBy("bot-a")).toBe("local-owner");
-    for (const name of ["agent_browser_status", "agent_browser_snapshot", "agent_browser_click", "agent_browser_eval", "agent_browser_dialog"]) {
-      await expect(call(name, name === "agent_browser_click" ? { ref: "e2" } : name === "agent_browser_eval" ? { expression: "1" } : name === "agent_browser_dialog" ? { accept: true } : {})).rejects.toThrow(BROWSER_CONTROL_REFUSAL);
-    }
-    await viewer.input({ type: "releaseControl" });
+    backend.chrome.exit("killed");
+    await sleep(50);
     expect(service.heldBy("bot-a")).toBeNull();
-    expect((await call("agent_browser_status")).isError).toBeUndefined();
+    const again = await call("agent_browser_status");
+    expect(again.isError).toBeUndefined();
+    expect(text(again)).toContain("stopped unexpectedly");
   });
 
   it("waits for the bot's running action before the person's control starts, and turns that action's answer into the refusal", async () => {
@@ -451,6 +477,29 @@ describe("browsers on one computer", () => {
     const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 1280, maxHeight: 1280 }, (output) => { if (output.type === "frame") output.ack(); });
     expect(await service.closeIdle(20)).toEqual([]);
     await viewer.close();
+  });
+
+  it("gives a slow machine's first tab as long as Chrome's own start, so a start that takes 20 s is not refused at 15 s", async () => {
+    // On a busy or CPU-capped computer Chrome answers on its pipe but its first tab runs late; refusing then made the bot
+    // start Chrome all over again. Only the timers are fake: nothing here waits on the wall clock.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const slow = new FakeBackend(() => {
+        const chrome = new FakeChrome({ documents });
+        chrome.delay = (method) => (method === "Page.enable" ? 20_000 : 0);
+        return chrome;
+      });
+      backends.push(slow);
+      const { call, text } = setup({ backend: () => slow });
+      let result: Awaited<ReturnType<typeof call>> | null = null;
+      void call("agent_browser_open", { url: "https://example.com/form" }).then((answer) => { result = answer; });
+      for (let waited = 0; result === null && waited < 90_000; waited += 1_000) await vi.advanceTimersByTimeAsync(1_000);
+      expect(result).not.toBeNull();
+      expect(text(result!)).not.toContain("No matching tab opened");
+      expect(text(result!)).toContain("Opened https://example.com/form in t1.");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("makes room by closing the least recently used idle browser, and waits, then refuses, when none is idle", async () => {

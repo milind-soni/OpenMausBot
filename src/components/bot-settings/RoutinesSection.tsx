@@ -1,13 +1,14 @@
 import { CalendarClock, ChevronRight, FileText, Plus } from "lucide-react";
 import { useState } from "react";
-import { useStore, type Bot } from "@/state/store";
+import { type Bot } from "@/state/store";
 import type { Routine, RoutineRun, RoutineRunOn } from "@/lib/routines";
 import { t } from "@/lib/i18n";
 import { RoutineEditor } from "../RoutinesPage";
 import { RoutineList } from "../routines/RoutineList";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 export function RoutinesSection({ bot, routines, runs, defaultRunOn }: { bot: Bot; routines: Routine[]; runs: RoutineRun[]; defaultRunOn?: RoutineRunOn }) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config, routinesLoadState: s.routinesLoadState }), sameFields), dispatch = useStoreDispatch();
   const [editing, setEditing] = useState<Routine | "new" | null>(null);
   return <div className="flex flex-col gap-4">
     <div className="rounded-xl bg-card p-4">

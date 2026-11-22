@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { cloudHomeLendingRefusal, createCloudRoutineAuthors, type CloudLendingTurn } from "../cloud-lending.ts";
+import { cloudHomeLendingRefusal, createCloudRoutineAuthors, type CloudLendingRefusal, type CloudLendingTurn } from "../cloud-lending.ts";
 import { personKey } from "../person-key.ts";
 import type { PhoneBot, PhonePlace } from "../phones/access.ts";
 import { createPhoneHost } from "../phones/host.ts";
@@ -24,6 +24,9 @@ type Turn = { botId: string; threadId: string; generation: string };
 /** The owner of a desktop's phones: whoever works at this machine or holds an admin session. */
 const DESKTOP_OWNER = "owner";
 
+/** Why a turn is not the owner's own: a server several people share, a service-trust machine, or the lent-computer verdict. */
+export type TurnOwnerRefusal = "shared" | "service" | CloudLendingRefusal | "memory-changed" | "memory-changed-here";
+
 export interface PhonesDeps {
   dataDir: string;
   /** A Team Cloud or a hosted workspace: several people share it, so no phone is anyone's. */
@@ -39,7 +42,7 @@ export interface PhonesDeps {
   ownerOrAdmin(auth: RequestAuth): boolean;
   cloudOwnerSession(auth: RequestAuth): boolean;
   /** The lent-Mac test on a Cloud home: null when the turn may use the owner's things. */
-  cloudLendingRefusal(turn: Turn): string | null;
+  cloudLendingRefusal(turn: Turn): CloudLendingRefusal | "memory-changed" | "memory-changed-here" | null;
   cloudLendingTurn(turn: Turn): CloudLendingTurn;
   /** The harness's record says this turn's work came from the user. */
   originIsUser(turn: Turn): boolean;
@@ -81,9 +84,15 @@ export function createPhones(deps: PhonesDeps) {
 
   /** Whose phones a turn may use: on a Cloud home the owner's, when the lent Mac would allow the turn; elsewhere the desktop owner's. */
   function turnOwner(turn: Turn): string | null {
-    if (deps.shared) return null;
-    if (deps.cloudHome) return deps.cloudLendingRefusal(turn) === null ? deps.cloudOwnerKey : null;
-    if (!desktopPhones()) return null;
+    if (turnOwnerRefusal(turn) !== null) return null;
+    return deps.cloudHome ? deps.cloudOwnerKey : DESKTOP_OWNER;
+  }
+
+  /** Null when the turn is the owner's own (turnOwner); otherwise why not. */
+  function turnOwnerRefusal(turn: Turn): TurnOwnerRefusal | null {
+    if (deps.shared) return "shared";
+    if (deps.cloudHome) return deps.cloudLendingRefusal(turn);
+    if (!desktopPhones()) return deps.sharedMembership() ? "shared" : "service";
     const lending = desktopLendingTurn({ ...deps.cloudLendingTurn(turn), thread: store.messagesFor(turn.threadId) }, {
       adminPersons: () => new Set(deps.sessions.list().filter((session) => session.scopes.includes("admin")).map((session) => personKey(session))),
       originIsUser: () => deps.originIsUser(turn),
@@ -92,7 +101,7 @@ export function createPhones(deps: PhonesDeps) {
         return Boolean(routine && routineAuthors?.authored(routine.id, routine));
       },
     });
-    return cloudHomeLendingRefusal(lending) === null ? DESKTOP_OWNER : null;
+    return cloudHomeLendingRefusal(lending);
   }
 
   const fromPhone = (auth: RequestAuth): boolean => {
@@ -118,6 +127,7 @@ export function createPhones(deps: PhonesDeps) {
       return sendId;
     },
     turnOwner,
+    turnOwnerRefusal,
     /** Where the person is, from where the turn came from: the phone's send, the person at the computer, or nobody. */
     place(threadId: string, personAsked: boolean): PhonePlace {
       const request = deps.request(threadId);

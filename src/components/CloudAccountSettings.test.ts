@@ -198,15 +198,21 @@ it("a saved sign-in that can't be read right now says the app tries again by its
   expect(html).toContain("This computer couldn&#x27;t open its saved Cloud sign-in. Unlock your keychain, and the app tries again by itself.");
   none(html, ["could not be read or cleared", "sign out again", "Sign out of MausBot Cloud, then"]);
 });
-it("a saved sign-in this computer can't read or remove: one button clears it and starts the sign-in, whatever the platform", async () => {
-  for (const [platform, onSignIn] of [["win32", undefined], ["darwin", vi.fn()]] as const) {
+it("a saved sign-in this computer still can't read: what may open it first, then a secondary button that clears it and starts the sign-in", async () => {
+  for (const [platform, onSignIn, step] of [["win32", undefined, "Restarting the app may fix it."], ["darwin", vi.fn(), "Unlock your keychain or restart the app"],
+    ["linux", vi.fn(), "Unlock your system keyring or restart the app"]] as const) {
     f.values = []; f.platform = platform;
-    bridge.resetSaved = vi.fn().mockResolvedValue({ status: "signed-out" }); vi.mocked(bridge.begin).mockClear();
+    bridge.resetSaved = vi.fn().mockResolvedValue({ status: "signed-out" }); vi.mocked(bridge.begin).mockClear(); if (onSignIn) onSignIn.mockClear();
     await ready({ status: "unavailable", message: "restore-failed", reset: true });
     const html = render({ onSignIn }).html;
-    expect(html).toContain("This computer can&#x27;t read or remove its saved MausBot Cloud sign-in. Clear it to sign in again.");
+    expect(html, platform).toContain(step);
+    expect(html, platform).toContain("If it doesn&#x27;t, clear it to sign in again.");
+    if (platform === "win32") expect(html).not.toMatch(/keychain|keyring|unlock/i);
     none(html, ["tries again by itself", "nothing you need to do"]);
-    render({ onSignIn }).nodes.find(node => node.type === "button" && node.props.children === "Clear and sign in again")!.props.onClick!(); await flush();
+    const clears = render({ onSignIn }).nodes.filter(node => node.type === "button" && node.props.children === "Clear and sign in again");
+    expect(clears.length, platform).toBeGreaterThan(0);
+    for (const clear of clears) expect(String((clear.props as { className?: string }).className), "never the primary button").not.toContain("ui-button-primary");
+    clears[0]!.props.onClick!(); await flush();
     expect(bridge.resetSaved).toHaveBeenCalledOnce();
     if (onSignIn) { expect(onSignIn).toHaveBeenCalledOnce(); expect(bridge.begin).not.toHaveBeenCalled(); }
     else expect(bridge.begin).toHaveBeenCalledOnce();

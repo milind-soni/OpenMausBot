@@ -33,6 +33,8 @@ export interface TurnDigest {
   memoryDropped?: number;
   /** First sentence of the terminal assistant text, at most REPLY_CHARS. */
   reply: string;
+  /** Why a failed turn ended (the provider's status and message, redacted), at most ERROR_CHARS. */
+  error?: string;
   usage?: { input: number; output: number; cachedInput?: number; costUsd?: number | null };
   hookCoverage: HookCoverage;
 }

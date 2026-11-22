@@ -66,7 +66,12 @@ describe("full backup Settings in the real renderer", () => {
         fixture.calls.push({ path, body, rawFile: init.body instanceof File, type: init.headers?.['content-type'] });
         const reply = (value, status = 200) => Promise.resolve(new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } }));
         if (path.endsWith('/status')) return reply({ busy: false, pendingRestore: fixture.pending });
-        if (path.endsWith('/export')) return reply({ id: 'download-stage', filename: 'fixture.ombbackup' });
+        if (path.includes('/export-jobs/')) {
+          if (init.method === 'POST') { fixture.exportPath = path; return reply({ error: 'Fixture proxy timed out' }, 524); }
+          if (path === fixture.exportPath) return reply(fixture.exportReady
+            ? { state: 'ready', id: 'download-stage', filename: 'fixture.ombbackup', expiresInMs: 60 * 60_000 }
+            : { state: 'running' });
+        }
         if (path.endsWith('/upload')) return reply({ id: 'uploaded-file' });
         if (path.endsWith('/preview')) {
           if (body.password !== 'fixture password 123') return reply({ error: 'Fixture password rejected' }, 400);
@@ -94,8 +99,8 @@ describe("full backup Settings in the real renderer", () => {
     await click("Close templates");
     await click("You");
     await click("Settings");
-    await expect.poll(snapshot, { timeout: 10_000 }).toContain('button "Data"');
-    await click("Data");
+    await expect.poll(snapshot, { timeout: 10_000 }).toContain('button "Import & export"');
+    await click("Import & export");
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Export full backup");
     await click("Learn more");
     expect(await snapshot()).toContain("Saved account credentials and connections are not included");
@@ -107,10 +112,13 @@ describe("full backup Settings in the real renderer", () => {
     await type("Backup password", "fixture password 123");
     await type("Confirm backup password", "fixture password 123");
     await ui("press", "--keys", "Enter");
+    await expect.poll(snapshot).toContain("Creating encrypted backup");
+    await ui("screenshot", "--out", join(ROOT, ".omb-scratch", "verify-evidence", "workspace-backup-exporting.png"));
+    await evaluate("window.backupFixture.exportReady = true");
     await expect.poll(() => evaluate("window.backupFixture.download"), { timeout: 10_000 }).toEqual({ href: "/api/workspace-backup/download/download-stage", filename: "fixture.ombbackup" });
-    expect(await evaluate("window.backupFixture.calls.find(call => call.path.endsWith('/export')).body.clientState['fixture-auth-token'] ?? null")).toBeNull();
-    expect(await evaluate("window.backupFixture.calls.find(call => call.path.endsWith('/export')).body.clientState['omb-webhook-credentials'] ?? null")).toBeNull();
-    expect(await evaluate("Object.values(localStorage).some(value => value.includes('fixture password 123'))")).toBe(false);
+    expect(await evaluate("window.backupFixture.calls.find(call => call.path === window.backupFixture.exportPath && call.body).body.clientState['fixture-auth-token'] ?? null")).toBeNull();
+    expect(await evaluate("window.backupFixture.calls.find(call => call.path === window.backupFixture.exportPath && call.body).body.clientState['omb-webhook-credentials'] ?? null")).toBeNull();
+    expect(await evaluate("[...Object.values(localStorage), ...Object.values(sessionStorage)].some(value => value.includes('fixture password 123'))")).toBe(false);
 
     await expect.poll(() => evaluate("document.querySelector('[data-backup-import]')?.disabled")).toBe(false);
     await click("Choose file…");

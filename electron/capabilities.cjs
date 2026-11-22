@@ -13,6 +13,7 @@ function nativeDesktopActions(platform) {
     appleMediaPermissions: appleNative,
     applePrivacySettings: appleNative,
     appleSpeech: appleNative,
+    windowsSpeech: normalizedPlatform(platform) === "win32",
   });
 }
 
@@ -65,6 +66,13 @@ function linuxLocalControlSupport(platform, env, { hyprlandPlugin } = {}) {
     reasonCode: "headless-session",
     message: "Local control needs an active Ubuntu Xorg desktop session.",
   });
+}
+
+/** macOS 12 and older (Darwin before 22): the driver is built for macOS 13 and fails to load, so it is never tried there. */
+function macDriverUnsupported(platform, release) {
+  const darwinMajor = Number(String(release).split(".")[0]);
+  if (platform !== "darwin" || !darwinMajor || darwinMajor >= 22) return null;
+  return { reasonCode: "macos-version-unsupported", reason: "Local desktop control needs macOS 13 Ventura or later." };
 }
 
 /** Computer control's helper is gone, or the system refused to run it: access denied (os error 5), or Windows Security
@@ -137,12 +145,14 @@ function desktopCapabilities({
     screenPreview.reasonCode =
       hostPlatform === "linux" ? "headless-session" : "unsupported-platform";
   }
-  // Off the Mac the page listens itself and Fish Audio turns each clip into text (src/lib/fish-speech.ts).
-  const fishListening = hostPlatform === "win32" || hostPlatform === "linux";
+  // Windows listens through its own recognizer (speech-helper-windows.ps1). On Linux the page listens itself and Fish
+  // Audio turns each clip into text (src/lib/fish-speech.ts).
+  const isWindows = hostPlatform === "win32";
+  const fishListening = hostPlatform === "linux";
   const dictation = {
-    available: isMac || fishListening,
-    engine: isMac ? "apple-speech" : fishListening ? "fish-audio" : "none",
-    onDevice: isMac,
+    available: isMac || isWindows || fishListening,
+    engine: isMac ? "apple-speech" : isWindows ? "windows-speech" : fishListening ? "fish-audio" : "none",
+    onDevice: isMac || isWindows,
   };
   if (!dictation.available) dictation.reasonCode = "unsupported-platform";
   const localComputer = {
@@ -247,5 +257,6 @@ module.exports = {
   linuxLocalControlSupport,
   linuxSession,
   localComputerReady,
+  macDriverUnsupported,
   nativeDesktopActions,
 };

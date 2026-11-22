@@ -76,10 +76,12 @@ describe("conversational replies", () => {
     expect(bubbles).toHaveLength(3);
     expect(bubbles.every((el) => !el.classList.contains("reply-bubble-in"))).toBe(true);
     for (const el of bubbles) expect([...el.classList]).toEqual(expect.arrayContaining(["bg-card", "rounded-[18px]", "px-3", "text-[15px]", "leading-[22px]", "min-w-9"]));
-    expect([...bubbles[0]!.classList]).toContain("rounded-es-[6px]");
-    expect([...bubbles[1]!.classList]).toEqual(expect.arrayContaining(["rounded-ss-[6px]", "rounded-es-[6px]"]));
-    expect([...bubbles[2]!.classList]).toContain("rounded-ss-[6px]");
-    expect([...bubbles[2]!.classList]).not.toContain("rounded-es-[6px]");
+    // Each bubble in the run keeps a 6px tail at its bottom start corner; the top corners stay round.
+    for (const el of bubbles) {
+      expect([...el.classList]).toContain("rounded-es-[6px]");
+      expect([...el.classList]).not.toContain("rounded-ss-[6px]");
+      expect([...el.classList]).toContain("bubble-finish");
+    }
     expect(document.querySelector("[data-conversational-reply]")!.classList).toContain("gap-1");
   });
 

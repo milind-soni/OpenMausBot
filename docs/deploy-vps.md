@@ -584,11 +584,32 @@ published image with `./update.sh --replace-local-build`. Building needs about 6
 on a smaller server, add swap first or use the published image. Engines you install
 from **Settings → Engines** live on the data volume and survive either way.
 
-### Paths A and C (npm with the service above): the same steps by hand
+### Paths A and C (npm with the service above)
 
-There is no one-command updater for an npm install yet. Do what the script
-does: copy the data first, install one named version, check it, and keep the
-way back. Take the stable version number from
+From a trusted checkout on the Linux server, run this from the administrator shell:
+
+```sh
+sudo ./deploy/update-npm.sh
+```
+
+The script needs systemd with cgroup v2, curl, jq, and the
+[fixed-prefix unit above](#keep-it-running) with the default data directory and
+port. It stages the newer stable package as the service user before downtime,
+then stops the service, copies its data, and starts the new version. It checks
+the local service and verifies that an engine is still ready if one was ready
+before. A failed start or health check restores the previous package and data.
+The script prints the backup location. Keep the backup private because it can
+contain credentials.
+
+If the machine shuts down or the update is interrupted, the next run reports
+the unfinished update and the backup location. To restore the old version and
+the workspace from before the update, run
+`sudo ./deploy/update-npm.sh --rollback`. Data written by the failed version
+is saved alongside the backup. Update between runs to avoid interrupting work.
+
+#### Manual update
+
+For a custom unit, apply the same steps by hand. Take the stable version number from
 [`stable.json`](https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json)
 (`"version"`), and note the one you run now (`openmausbot --version`). From
 the administrator shell, replacing `X.Y.Z`:
@@ -611,8 +632,8 @@ sudo -iu maus sh -c 'mv ~/.openmausbot ~/.openmausbot-failed-update && tar xzf ~
 sudo systemctl start openmausbot
 ```
 
-A service restart by itself does not update the installed package. For
-foreground `npx` usage, name the release: `npx --yes openmausbot@X.Y.Z serve --tunnel`.
+A service restart keeps the installed release. For foreground `npx` usage,
+start the version you want with `npx --yes openmausbot@X.Y.Z serve --tunnel`.
 
 ### How far behind a server may fall
 
@@ -708,7 +729,7 @@ Read this before putting anything else in front of the server.
 
 - The server only ever listens on loopback (`127.0.0.1:8799`). Never publish that port yourself. The tunnel, Caddy and Tailscale each reach it from the same machine; path B's Caddy, in its own container, reaches it over a Unix socket (`OMB_TUNNEL_SOCKET`), and a request on that socket always counts as a remote one.
 - A request that arrives through a proxy or the tunnel is treated as remote and needs a session, whatever headers it carries. A proxy of your own (nginx, Traefik, Cloudflare Tunnel) must forward the real `Host` and add `X-Forwarded-For` and `X-Forwarded-Proto`, must not buffer the event stream, and must **not** rewrite `Host` to `127.0.0.1`.
-- Pairing is the login. Want a second wall in front of it? Path B's `Caddyfile` has a commented `basic_auth` block for a shared password.
+- Pairing is the login. Caddy adds no password: a `basic_auth` block would need variables neither Compose file passes to Caddy, the installer rewrites its `Caddyfile` on every run, and a password at Caddy would also refuse clients that send their own `Authorization` header. For a second wall, use path C or a firewall.
 - The session cookie is marked `Secure`; do not serve this over plain HTTP on the public internet.
 - The one thing a stranger can read is `/.well-known/openmausbot/environment` (the server's id, label, version, capabilities) and `/api/health` (only the app name). Everything else answers "pair this device".
 

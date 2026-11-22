@@ -464,6 +464,8 @@ export function ApiKeyHint({ instance }: { instance: InstanceInfo }) {
   );
 }
 
+const UNREADABLE_NOTE = { failed: "model.unreadable.failed", signedOut: "model.unreadable.signedOut", timedOut: "model.unreadable.timedOut" } as const;
+
 export function InstanceAccountNotes({ instance, listsModels }: { instance: InstanceInfo; listsModels: boolean }) {
   const account = instance.snapshot.authenticated && instance.snapshot.account
     ? [instance.snapshot.account.email, instance.snapshot.account.organization].filter(Boolean).join(" · ")
@@ -473,7 +475,7 @@ export function InstanceAccountNotes({ instance, listsModels }: { instance: Inst
       {account !== null && <p className="mt-1 truncate text-[12px] leading-4 text-ink-tertiary" title={account}>{account}</p>}
       {instance.modelsUnconfirmed && listsModels && (
         <p data-models-unconfirmed className="mt-1 text-[12px] leading-4 text-ink-tertiary">
-          {t("model.unconfirmed", { name: instance.displayName })}
+          {t(instance.modelsUnreadable ? UNREADABLE_NOTE[instance.modelsUnreadable] : "model.unconfirmed", { name: instance.displayName })}
         </p>
       )}
     </>
