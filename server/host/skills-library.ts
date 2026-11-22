@@ -320,9 +320,10 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
 
     turnSkillFiles,
 
-    turnSettings(bot: BotRecord, threadId: string, instance: TurnInstance, restrictsMcp: boolean) {
+    /** `cwd`: the turn's folder, whose project skills win over the person's own of the same name. */
+    turnSettings(bot: BotRecord, threadId: string, instance: TurnInstance, restrictsMcp: boolean, cwd?: string) {
       return {
-        ...settingsTurnFields(cfg, DATA_DIR, restrictsMcp),
+        ...settingsTurnFields(cfg, DATA_DIR, restrictsMcp, undefined, cwd),
         ...(instance.driverKind === "antigravityAgent" ? { skillFiles: turnSkillFiles(bot, threadId, instance) } : {}),
       };
     },
