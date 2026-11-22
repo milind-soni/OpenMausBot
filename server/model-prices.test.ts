@@ -85,6 +85,16 @@ describe("what the ledger books for a settled turn", () => {
     expect(estimatePriceFor({ driverKind: "codex", model: "local::foo+priority" }, { "codex/local::foo": { inputPerMillion: 9, outputPerMillion: 9 } })).toBeNull();
   });
 
+  it("prices an Antigravity id with a thinking level or an Orchestrator name as its base Gemini model", () => {
+    const operator: PriceList = { "gemini-4-neon": { inputPerMillion: 3, outputPerMillion: 15 }, "antigravityAgent/gemini-4-argon": { inputPerMillion: 2, outputPerMillion: 10 } };
+    for (const model of ["gemini-4-neon", "gemini-4-neon-high", "gemini-pro-orchestrator-neon"]) {
+      expect(estimatePriceFor({ driverKind: "antigravityAgent", model }, operator), model).toEqual({ inputPerMillion: 3, outputPerMillion: 15 });
+    }
+    expect(estimatePriceFor({ driverKind: "antigravityAgent", model: "gemini-pro-orchestrator-g1-pro" }, operator)?.inputPerMillion).toBe(2);
+    expect(estimatePriceFor({ driverKind: "antigravityAgent", model: "gemini-3.8-flash-extra-low" }, null)).toEqual(listPriceFor("gemini-3.8-flash"));
+    expect(estimatePriceFor({ driverKind: "acp", model: "gemini-4-neon-high" }, operator)).toBeNull();
+  });
+
   it("books an unpriced model as unpriced, not as free", () => {
     expect(ledgerCost({ driverKind: "grokAgent", model: "fake-model", input: 5000, output: 100, costUsd: null }, null)).toEqual({ costUsd: null });
     expect(ledgerCost({ driverKind: "codex", model: "gpt-5.3-codex-spark", input: 5000, output: 100, costUsd: undefined }, { "claude-sonnet-5": { inputPerMillion: 1, outputPerMillion: 1 } })).toEqual({ costUsd: null });
