@@ -29,7 +29,7 @@ No personal provider account, real credentials, or user workspace is used.
 5. Open Settings: search has focus. General uses aligned language/analytics
    rows; Appearance retains the existing skins and flattens simple switches.
    Search for Appearance, press Escape to clear search, then Escape to close.
-   New or share displays the actual platform shortcut next to New Bot.
+   New or share displays the actual platform shortcut next to New bot.
 6. Check 1280×900 and 390×844, in Midnight and Atelier. Controls must remain
    reachable, filenames/results wrap or truncate within their surfaces, and the
    document must not overflow horizontally. Restore the viewport afterward.
@@ -61,7 +61,7 @@ Manually driven with computer use against the isolated fixture:
 Successful, failed, and missing tool results were observed; redacted details
 survived reload. The local MP4 decoded at 1592×1524, duration 14.03 s, and playback
 advanced without a media error. Both gallery expansion directions, the image
-dialog, settings search/Escape, and the New Bot shortcut hint were exercised.
+dialog, settings search/Escape, and the New bot shortcut hint were exercised.
 At 390 px, document scroll width remained 390 px. No browser console errors were
 reported in this run. The retained fixture log was
 `server-1789307799660-26000.log` in the temporary `openmausbot-verification-evidence`

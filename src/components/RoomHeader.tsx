@@ -242,12 +242,12 @@ export function RoomHeader({
             aria-label={t("chat.find")}
             aria-pressed={findOpen}
             className={cn(
-              "flex size-8 items-center justify-center rounded-full transition-colors hover:bg-ink/[0.06]",
+              "flex size-9 items-center justify-center rounded-full transition-colors hover:bg-ink/[0.06]",
               findOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
             )}
             title={t("chat.findShortcut")}
           >
-            <Search size={18} />
+            <Search size={16} />
           </button>
           <ExportTranscriptMenu
             title={group.name}

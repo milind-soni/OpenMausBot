@@ -67,7 +67,7 @@ type Tuning = {
 const DEFAULTS: Tuning = {
   eyeScale: EYE_SCALE,
   mouthStroke: MOUTH_WEIGHT,
-  spring: 7,
+  spring: 14,
   turn: 0,
   gazeX: 0,
   gazeY: 0,

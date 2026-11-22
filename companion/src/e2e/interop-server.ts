@@ -6,6 +6,7 @@
 //   /v1/e2e                  direct transport (0x02), the normal case
 //   /test/relay-transport    the relay prologue (0x01) without a relay
 //   /test/wrong-key          a key swap: any message 1 gets a well-formed message 2 that can't verify (a hard stop)
+//   /test/removed            the relay prologue; right after message 2 the device is removed: GoAway(3), then 4001
 // Origin paths, over any stream:
 //   GET  /api/health                     {"ok":true}
 //   POST /upload                         {"bytes":N,"sha256":"<hex>"} of the body
@@ -140,6 +141,7 @@ const routes: Record<string, TransportByte | "impostor"> = {
   "/v1/e2e": TRANSPORT_DIRECT,
   "/test/relay-transport": TRANSPORT_RELAY,
   "/test/wrong-key": "impostor",
+  "/test/removed": TRANSPORT_RELAY,
 };
 
 /** What a relay holding no key can do: answer with a fresh point and bytes of the right length. */
@@ -148,7 +150,8 @@ const impostorMessage2 = () => Buffer.concat([generateKeyPair().publicKey, rando
 const pingIntervalMs = arg("ping-interval-ms") ? Number(arg("ping-interval-ms")) : undefined;
 const server = createServer((_req, res) => res.writeHead(404).end());
 server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-  const route = routes[new URL(req.url ?? "/", "http://interop").pathname];
+  const path = new URL(req.url ?? "/", "http://interop").pathname;
+  const route = routes[path];
   if (!route) return void socket.destroy();
   if (route === "impostor") {
     acceptWebSocket(req, socket, head, { protocol: "omb-e2e.v1", maxPayload: MAX_RECORD_BYTES }, (connection) => ({
@@ -170,7 +173,10 @@ server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
           const originSocket = connect({ host: "127.0.0.1", port, allowHalfOpen: true }, () => resolve(originSocket));
           originSocket.once("error", reject);
         }),
-      opened: (id, payload1) => console.error(`session ${req.url} ${id} ${payload1.app ?? ""}`),
+      opened: (id, payload1) => {
+        console.error(`session ${req.url} ${id} ${payload1.app ?? ""}`);
+        if (path === "/test/removed") session?.remove();
+      },
       pingIntervalMs,
     });
     return {
@@ -194,6 +200,7 @@ console.log(
     direct: `${base}/v1/e2e`,
     relayTransport: `${base}/test/relay-transport`,
     wrongKey: `${base}/test/wrong-key`,
+    removed: `${base}/test/removed`,
     k: b64u(T.publicKey),
     deviceToken: tokens.device,
     pairingToken: tokens.pairing,

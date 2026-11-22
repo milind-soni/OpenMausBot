@@ -7,11 +7,20 @@ import { backupFolder, context, dataFolder, manifest, NOW } from "../../testing/
 import { runDoctor } from "../run.ts";
 import { messagesDbCheck } from "./messages-db.ts";
 
+/** Every row in one transaction: a commit per row is a flush to disk per row, about 12 ms each on a Windows runner in
+ * WAL mode and about 100 ms in the default rollback-journal mode (which also creates and deletes messages.db-journal
+ * each time). A test needs the rows, not hundreds of commits. */
+function insertRows(db: DatabaseSync, rows: number, text: (n: number) => string): void {
+  const insert = db.prepare("INSERT INTO messages VALUES (?, ?)");
+  db.exec("BEGIN");
+  for (let n = 0; n < rows; n += 1) insert.run(String(n), text(n));
+  db.exec("COMMIT");
+}
+
 function database(data: string, rows = 10): DatabaseSync {
   const db = new DatabaseSync(join(data, "messages.db"));
   db.exec("PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0; CREATE TABLE messages (id TEXT, text TEXT)");
-  const insert = db.prepare("INSERT INTO messages VALUES (?, ?)");
-  for (let n = 0; n < rows; n += 1) insert.run(String(n), "x".repeat(2000));
+  insertRows(db, rows, () => "x".repeat(2000));
   return db;
 }
 
@@ -76,10 +85,8 @@ describe("messages-db check", () => {
   it("reports what SQLite's own check finds damaged inside a database it can open", () => {
     const data = dataFolder();
     const db = new DatabaseSync(join(data, "messages.db"));
-    db.exec("CREATE TABLE messages (id TEXT, text TEXT); CREATE INDEX by_text ON messages (text); BEGIN");
-    const insert = db.prepare("INSERT INTO messages VALUES (?, ?)");
-    for (let n = 0; n < 500; n += 1) insert.run(String(n), `${"y".repeat(200)}${n}`);
-    db.exec("COMMIT");
+    db.exec("CREATE TABLE messages (id TEXT, text TEXT); CREATE INDEX by_text ON messages (text)");
+    insertRows(db, 500, (n) => `${"y".repeat(200)}${n}`);
     db.close();
     // Overwrite part of a page in the middle: the header still reads, the tree does not.
     const bytes = readFileSync(join(data, "messages.db"));

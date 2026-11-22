@@ -9,13 +9,14 @@ import { addLogin, changeLogin, connectOnePassword, deleteLogin, disconnectOnePa
 import { relativeTime } from "@/lib/memory";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { deleteSecret, listVault } from "@/lib/vault";
-import { useStore } from "@/state/store";
 import { Segmented } from "./bot-panel/rows";
 import { LoginBotPicker, LoginForm } from "./LoginForm";
 import { Card, LearnMore, SETTINGS_INPUT, SettingsEmptyRow, SettingsField, SettingsGroup, SettingsLinkRow, SettingsRows } from "./SettingsPrimitives";
 import { SettingsDialog } from "./settings/SettingsDialog";
 import { EnvImportForm, SecretForm } from "./VaultSecretForms";
 import { BitwardenConnection } from "./BitwardenConnection";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
+import { useBotsApartFromTurns } from "@/state/apart-from-turns";
 
 // Security: a row never shows a password or a secret, which no route returns. A saved value can only be replaced.
 
@@ -47,10 +48,10 @@ function rowsOf(logins: LoginSummary[], secrets: Array<VaultSecret | LinkedSecre
 }
 
 export function VaultSettings() {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), allBots = useBotsApartFromTurns(), dispatch = useStoreDispatch();
   const ownerOrAdmin = useOwnerOrAdmin();
   const member = ownerOrAdmin === false && Boolean(state.config?.team);
-  const bots = state.bots.map((bot) => ({ id: bot.id, name: bot.name }));
+  const bots = allBots.map((bot) => ({ id: bot.id, name: bot.name }));
   const [logins, setLogins] = useState<LoginSummary[] | null>(null);
   const [secrets, setSecrets] = useState<Array<VaultSecret | LinkedSecret>>([]);
   const [onePassword, setOnePassword] = useState<OnePasswordStatus>({ connected: false });
@@ -164,9 +165,9 @@ export function VaultSettings() {
           <div className="mt-0.5 text-[12px] leading-snug text-ink-tertiary">
             {[t(SOURCE_KEYS[login.source]), whoLine(login.bots, login.onePassword), used(login.lastUsedAt)].join(" · ")}
           </div>
-          {loginHeldBackFor(login, state.bots).length > 0 && (
+          {loginHeldBackFor(login, allBots).length > 0 && (
             <div className="mt-0.5 text-[12px] leading-snug text-warning" data-login-held-back>
-              {t("settings.logins.sharedBrowser", { bots: botNames(loginHeldBackFor(login, state.bots)) })}
+              {t("settings.logins.sharedBrowser", { bots: botNames(loginHeldBackFor(login, allBots)) })}
             </div>
           )}
         </div>

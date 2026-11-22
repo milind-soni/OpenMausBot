@@ -70,6 +70,7 @@ export const VITEST_SUBSETS = {
       "scripts/testing/team-private-default-ui.e2e.test.ts",
       "scripts/testing/team-side-switch-ui.e2e.test.ts",
       "server/body-thread-guards.e2e.test.ts",
+      "server/check-work-team.e2e.test.ts",
       "server/client-notifications.e2e.test.ts",
       "server/cloud-connections.e2e.test.ts",
       "server/cloud-lending-browser.e2e.test.ts",
@@ -90,6 +91,7 @@ export const VITEST_SUBSETS = {
       "server/cloud-team-bitwarden.e2e.test.ts",
       "server/cloud-team-box-audience.e2e.test.ts",
       "server/cloud-team-browser.e2e.test.ts",
+      "server/cloud-team-check-backs.e2e.test.ts",
       "server/cloud-team-connections.e2e.test.ts",
       "server/cloud-team-conversation-share.e2e.test.ts",
       "server/cloud-team-engine-homes.e2e.test.ts",
@@ -211,6 +213,7 @@ export const SRC_OUTSIDE_RENDERER = [
   "src/components/app/app-frame-host.ts",
   "src/lib/citations.ts",
   "src/lib/composer-attachments.ts",
+  "src/lib/peer-message.ts",
   "src/lib/random-uuid.ts",
   "src/lib/receipts.ts",
 ];
@@ -353,9 +356,11 @@ export function laneOf(event) {
   return "full";
 }
 
-// The slowest shard sets the run's length. Windows and macOS run only the e2e files that depend on their OS, so their
-// shards stay as short as Linux's, and macOS keeps four: the account runs five macOS jobs at a time.
-export const VITEST_SHARDS = { "macos-latest": 4, "ubuntu-latest": 8, "windows-latest": 8 };
+// The slowest shard sets the run's length. Windows and macOS run only the e2e files that depend on their OS. A macOS
+// shard runs one file at a time: four took 24 minutes each on average in November 2026, and about one in eight hit
+// the 30-minute cap, so macOS runs five. The account runs five macOS jobs at a time; the full lane's other macOS jobs
+// (the smokes, browser identity and the browser driver) wait for a free one.
+export const VITEST_SHARDS = { "macos-latest": 5, "ubuntu-latest": 8, "windows-latest": 8 };
 
 // Test files at once on each platform's runner (OMB_VITEST_WORKERS, vite.config.ts). A Linux shard mostly waits on real
 // servers and fake engines: its 4 vCPU sat 70% idle one file at a time, and four files take a third of the time. A

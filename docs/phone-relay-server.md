@@ -19,7 +19,7 @@ installation that took a relay token in the last two days and then refuses it a
 tunnel for good, and a server may be pointed at one. So the server still keeps
 the relay off, and says why, when it serves `--tunnel`, runs on a fleet
 credential (`OMB_INSTALLATION_CREDENTIAL`), or holds a tunnel address from a
-plain `openmausbot login`.
+plain `openmausbot account login`.
 
 ## Use it
 
@@ -127,7 +127,7 @@ declarations only.
 
 ## The control plane
 
-`openmausbot login` registers the server as an installation (its platform, and
+`openmausbot account login` registers the server as an installation (its platform, and
 `appVersion` the npm package's version) and keeps its `omb_install_…`
 credential in `tunnel-account.json`, mode 0600. Plain `login` also reserves a
 tunnel address; `login --relay` reserves none (the account service's on-demand
@@ -151,7 +151,7 @@ A server qualifies today; no control plane change is needed to get a token:
 **Servers keep their tunnel.** A server's tunnel serves browsers and the
 desktop app, not only phones. The server sends `kind: "server"` on
 `POST /v1/installations`, `POST .../self/endpoint` and `POST .../self/relay-token`
-(`openmausbot login`, `serve --tunnel`, a fleet container and `serve --relay`
+(`openmausbot account login`, `serve --tunnel`, a fleet container and `serve --relay`
 alike); the desktop app sends nothing new. The hosted control plane stores it,
 never marks a server's tunnel for the relay (`relay_proven`, `legacy_cutoff`)
 and never answers a server `relay_capable` (its README, "Self-hosted servers").
@@ -184,6 +184,16 @@ phone (it never holds a pairing credential, only a digest of a value derived
 from it), and cannot mint a relay token (the control plane holds the signing
 key). A phone treats only the authenticated GoAway(3) inside the session as
 "removed", so a forged 4001 cannot make it forget the server.
+
+**Browser pages.** The relay refuses every WebSocket upgrade that carries an
+`Origin` header, so a web page cannot dial it, unless the relay's operator
+lists that page's exact `https://` origin in `RELAY_PHONE_ORIGINS`
+(comma-separated, at most 8, no wildcards, paths or `http://`; a bad value
+stops the relay at start). A listed origin may open only `/v1/phone`, never
+`/v1/host` or `/v1/host/data`, and it gets no further than any other phone:
+the page still needs the pairing credential and the end-to-end handshake.
+Unset, which is the default, browsers stay refused. It is for the phone web
+app over the relay, which is not built yet.
 
 **Pairing proves the owner.** The QR carries a 256-bit, single-use pairing
 credential that only the owner can mint: `openmausbot pair --phone` on the

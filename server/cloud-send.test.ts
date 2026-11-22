@@ -81,7 +81,7 @@ describe("saved Vault secrets in the comparison", () => {
 });
 
 describe("a bot sent from the person's other computer keeps its id", () => {
-  const store = { bot: (id: string) => (id === "taken-0001" ? ({} as BotRecord) : null), botByThread: (id: string) => (id === "thread-taken" ? ({} as BotRecord) : null), groupByThread: () => undefined };
+  const store = { bot: (id: string) => (id === "taken-0001" ? ({} as BotRecord) : null), botByThread: (id: string) => (id === "thread-taken" ? ({} as BotRecord) : null), groupByThread: () => undefined, bots: [] as Array<{ id: string }> };
   it("takes the server's own id form, only while nothing here uses it", () => {
     expect(keptBotIds({}, store)).toEqual({});
     expect(keptBotIds({ id: "ember-0001", threadId: "thread-0001" }, store)).toEqual({ id: "ember-0001", threadId: "thread-0001" });
@@ -91,5 +91,22 @@ describe("a bot sent from the person's other computer keeps its id", () => {
     expect(keptBotIds({ id: "ember-0001", threadId: "ember-0001" }, store)).toEqual({ error: "this conversation id is already used here" });
     for (const id of ["short", "../../etc/passwd", "x".repeat(129), 42]) expect(keptBotIds({ id }, store)).toHaveProperty("error");
     expect(keptBotIds({ threadId: "thread-0001" }, store)).toHaveProperty("error");
+  });
+
+  it("refuses an id shaped like another place's address, so a bot here is never also an address", () => {
+    // bot-link/protocol.ts addresses a bot of another place as `link-<that place's key>-<its id there>`.
+    for (const id of ["link-0123abcd-local-writer", "LINK-0123abcd-local-writer", "Link-0123abcd-writer"]) {
+      expect(keptBotIds({ id }, store), id).toEqual({ error: "id must not begin with \"link-\": that is how a bot in another place is addressed here" });
+    }
+    // The reserved shape only: an id that merely contains or ends in it is taken as usual.
+    for (const id of ["my-link-0001", "linker-00001", "bot-link-0001"]) expect(keptBotIds({ id }, store), id).toEqual({ id });
+  });
+
+  it("refuses an id that differs from one here only by case, so no case-variant twin can be brought in beside a bot", () => {
+    const here = { bot: () => null, botByThread: () => null, groupByThread: () => undefined, bots: [{ id: "ember-0001-4eea-ac52" }] };
+    expect(keptBotIds({ id: "EMBER-0001-4eea-ac52" }, here)).toEqual({ error: "a bot with this id already exists here" });
+    expect(keptBotIds({ id: "Ember-0001-4eea-ac52" }, here)).toEqual({ error: "a bot with this id already exists here" });
+    // An id that names no bot here, exactly or in another case, is taken as usual.
+    expect(keptBotIds({ id: "ember-0002-4eea-ac52" }, here)).toEqual({ id: "ember-0002-4eea-ac52" });
   });
 });

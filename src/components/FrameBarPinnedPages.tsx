@@ -98,7 +98,7 @@ export function FrameBarPinnedPages() {
           ariaLabel={t("webPanels.bar.label")}
           triggerTitle={t("webPanels.bar.label")}
           triggerClassName={BAR_BUTTON}
-          renderTrigger={() => <Globe size={15} strokeWidth={1.75} aria-hidden="true" />}
+          renderTrigger={() => <Globe size={15} aria-hidden="true" />}
         />
       )}
       <MeasureRow refEl={measureRef} panels={panels} />

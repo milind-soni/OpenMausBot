@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { api, useStore, type ConfigStatus } from "@/state/store";
+import { api, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
@@ -9,9 +9,10 @@ import { saveCredential } from "./keys/key-save";
 import { LearnMore, SETTINGS_INLINE_INPUT, SETTINGS_INPUT, SettingRow, SettingsField, SettingsGroup, SettingsRows, StatusDot } from "./SettingsPrimitives";
 import { Select } from "./Select";
 import { productName } from "@/lib/brand";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 const PROVIDER_LABEL: Record<ImageProvider, string> = {
-  openai: "OpenAI", xai: "Grok (xAI)", gemini: "Gemini", openrouter: "OpenRouter", custom: "Custom",
+  openai: "OpenAI", xai: "Grok (xAI)", gemini: "Gemini", openrouter: "OpenRouter", higgsfield: "Higgsfield", custom: "Custom",
 };
 const OWN_KEYS = {
   openai: { credential: "openaiImageApiKey", patch: (key: string) => ({ imageGen: { key } }), label: "imageGen.key.openai" },
@@ -43,6 +44,7 @@ function imageTestText(provider: ImageProvider, result: ImageProviderTest): { ok
   if (result.reason === "unreachable") return { ok: false, text: t("imageGen.test.unreachable") };
   if (result.reason === "no_key") return { ok: false, text: t("imageGen.key.missing") };
   if (result.reason === "no_url") return { ok: false, text: t("imageGen.test.noUrl") };
+  if (result.reason === "not_connected") return { ok: false, text: t("imageGen.higgsfield.notConnected") };
   return { ok: false, text: t("imageGen.test.unexpected") };
 }
 type ImageGenStatus = NonNullable<ConfigStatus["imageGen"]>;
@@ -52,11 +54,12 @@ function keyConfigured(status: ImageGenStatus | undefined, provider: ImageProvid
   if (provider === "xai") return status?.xaiConfigured === true;
   if (provider === "gemini") return status?.geminiConfigured === true;
   if (provider === "openrouter") return status?.openrouterConfigured === true;
+  if (provider === "higgsfield") return [status?.primary, status?.fallback].some((slot) => slot?.provider === provider && slot.configured);
   return status?.customKeyConfigured === true;
 }
 
 export function ImageGenerationSettings() {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const status = state.config?.imageGen;
   const primary = status?.primary ?? { provider: status?.provider ?? "openai", model: status?.model ?? IMAGE_DEFAULT_MODELS.openai, configured: status?.configured === true };
   const fallback = status?.fallback ?? null;
@@ -148,7 +151,9 @@ export function ImageGenerationSettings() {
         </SettingsRows>
       </SettingsGroup>
 
-      {providers.map((provider) => <ProviderKeyCard key={provider} provider={provider} status={status} />)}
+      {providers.map((provider) => provider === "higgsfield"
+        ? <HiggsfieldCard key={provider} connected={keyConfigured(status, provider)} />
+        : <ProviderKeyCard key={provider} provider={provider} status={status} />)}
     </>
   );
 }
@@ -169,7 +174,7 @@ function SlotRow({ slot, provider, model, configured, exclude, openrouterModels,
     <>
       <SettingRow
         title={label}
-        subtitle={provider && !configured ? t(provider === "custom" ? "imageGen.slot.needsConnection" : "imageGen.slot.needsKey") : t(slot === "primary" ? "imageGen.primary.help" : "imageGen.fallback.help")}
+        subtitle={provider && !configured ? t(provider === "custom" ? "imageGen.slot.needsConnection" : provider === "higgsfield" ? "imageGen.slot.needsHiggsfield" : "imageGen.slot.needsKey") : t(slot === "primary" ? "imageGen.primary.help" : "imageGen.fallback.help")}
       >
         <Select
           data-testid={`image-gen-${slot}`}
@@ -255,8 +260,30 @@ function ModelRow({ slot, slotLabel, provider, model, openrouterModels, disabled
   );
 }
 
+function HiggsfieldCard({ connected }: { connected: boolean }) {
+  const dispatch = useStoreDispatch();
+  return (
+    <SettingsGroup label={PROVIDER_LABEL.higgsfield} block="images-higgsfield">
+      <SettingsRows>
+        <div className="flex flex-col gap-2 px-4 pb-4 pt-3" data-image-higgsfield="">
+          <span role="status" className="flex items-center text-[13px] leading-[18px] text-ink-secondary">
+            {connected ? <StatusDot tone="success" /> : <span aria-hidden="true" className="mr-1.5 inline-block size-1.5 rounded-full bg-ink/20" />}
+            {t(connected ? "imageGen.higgsfield.connected" : "imageGen.higgsfield.notConnected")}
+          </span>
+          <p className="text-[13px] leading-[18px] text-ink-secondary">{t("imageGen.higgsfield.help", { app: productName() })}</p>
+          <div className="flex items-center justify-end gap-2" data-settings-form-foot="">
+            <button type="button" onClick={() => dispatch({ type: "togglePlugins", open: true, surface: "apps" })} className="ui-button ui-button-md cursor-pointer rounded-full">
+              {t("imageGen.higgsfield.open")}
+            </button>
+          </div>
+        </div>
+      </SettingsRows>
+    </SettingsGroup>
+  );
+}
+
 function ProviderKeyCard({ provider, status }: { provider: ImageProvider; status: ImageGenStatus | undefined }) {
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   const [value, setValue] = useState("");
   const [url, setUrl] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);

@@ -39,6 +39,7 @@
   "cloudAccount.refresh",
   "cloudAccount.reopen",
   "cloudAccount.reopenCheckout",
+  "cloudAccount.resetSaved",
   "cloudAccount.setLook",
   "cloudAccount.sheet",
   "cloudAccount.signInAgain",

@@ -51,7 +51,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "description": "A teammate's id as list_bots prints it, or its unique name."
+              "description": "A teammate's name, preferred, or its id from list_bots; an id's first 8 characters or more work too."
             }
           },
           "message": {
@@ -343,22 +343,40 @@
     },
     {
       "name": "request_sign_in",
-      "description": "Ask the person to sign in to a website themselves, in the browser or on the computer you are using now. Use it when a page needs a login you do not have, or a CAPTCHA, passkey or other step only they can do, or a one-time code you cannot read. A code the site sends to the person's own email or messages for a sign-in they asked for is not one: read it there and type it in yourself. They get a card and a notification, sign in where you work, and press Done. Never ask for a password or code in chat. After calling it, end your turn; OpenMausBot resumes you when they finish or decline, and then check you are signed in.",
+      "description": "Hand one step to the person where you work: a sign-in you have no login for, a CAPTCHA, passkey, code you cannot read, payment details or approval only they can give. Ask only when really blocked, for the smallest step; they type any password, code or payment details themselves, never in chat. It returns at once: say you are waiting, then stop or do other work. It expires in 30 minutes; you are resumed with done, skipped or expired and their note. Done is unverified: re-read the page.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "instruction": {
+            "type": "string",
+            "description": "One specific sentence, such as: Sign in to GitHub on the open page."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "sign_in",
+              "captcha",
+              "payment",
+              "approval",
+              "other"
+            ]
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "browser",
+              "computer"
+            ]
+          },
           "site": {
             "type": "string",
-            "description": "The page to sign in on: its address, or the domain, such as example.com."
-          },
-          "reason": {
-            "type": "string",
-            "description": "One short sentence, in your words, on what the sign-in is for."
+            "description": "Address or domain, if not the open page."
           }
         },
         "required": [
-          "site"
+          "instruction",
+          "kind"
         ]
       }
     },
@@ -537,7 +555,7 @@
     },
     {
       "name": "find_tool",
-      "description": "Find an OpenMausBot tool that is not in your tool list. Say what you want to do in a few words, or give the tool's name. Each match comes back with its description and exact input schema; run one with use_tool. Tools reached this way: list_shared_computers, shared_computer, assignment_status, usage_limits, list_threads, close_thread, rename_thread, start_thread, burst, list_models, vm_exec, show_widget, show_html, unpublish_page, create_bot, list_team_setup, list_team_library, propose_team_setup, propose_bot_deletion, manage_room, x_search, research_search, research_endpoint, research_call, decide, extract, edit_image, generate_image, report_bug, check_app_hosting, retry_thread, memory_log, session_search, trigger_info, trigger, delete_trigger, wait_until, list_waits, cancel_wait, propose_profile, propose_model, propose_team_memory, skills_list, skill_manage, mcp_server, app_settings.",
+      "description": "Find an OpenMausBot tool that is not in your tool list. Say what you want to do in a few words, or give the tool's name. Each match comes back with its description and exact input schema; run one with use_tool. Tools reached this way: list_shared_computers, shared_computer, assignment_status, usage_limits, list_threads, close_thread, rename_thread, start_thread, burst, list_models, vm_exec, show_widget, show_html, unpublish_page, create_bot, list_team_setup, list_team_library, propose_team_setup, propose_bot_deletion, manage_room, x_search, research_search, research_endpoint, research_call, decide, extract, what_changed, edit_image, generate_image, report_bug, check_app_hosting, retry_thread, memory_log, session_search, trigger_info, trigger, delete_trigger, wait_until, list_waits, cancel_wait, check_back, propose_profile, propose_model, propose_team_memory, skills_list, skill_manage, mcp_server, app_settings.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,

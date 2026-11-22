@@ -154,6 +154,7 @@ function probeLoginShellPath(): void {
     finished = true;
     clearTimeout(deadline);
     // An interactive shell ignores SIGTERM, and something its rc started in the background can hold stdout open after it exits.
+    // Killed before stdout closes: a closed pipe ends only the writer, and the shell would run its next command meanwhile.
     if (exitCode === undefined && child.pid) {
       try {
         process.kill(-child.pid, "SIGKILL");

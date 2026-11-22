@@ -3,7 +3,7 @@ import { modelLabel, modelProvider } from "@/lib/model-label";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, KeyRound, Loader2, RefreshCw, X } from "lucide-react";
-import { useStore, currentTaskBot, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store"; import { sameFields, useStoreActions, useStoreSelector } from "@/state/store-select";
+import { currentTaskBot, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store"; import { sameFields, useStoreActions, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import type { EffortLevel } from "../../shared/wire";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
 import { configuredModelInstances, isClaudeAccount, isCustomOnly, modelsAwaitEngine, SIGN_IN_FAMILY_LABEL, signInFamily } from "@/lib/engine-rail";
@@ -24,7 +24,7 @@ import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
 import { SimpleModelMenu, type SimpleThinking } from "./SimpleModelMenu";
 import { apiKeysLabel, ClaudeAccountSelect, engineStatus, FollowBotModelRow, ModelEngineRail, ModelRow, ModelSearch } from "./ModelPickerFull";
-import { MENU_LABEL, MENU_LINE, MENU_ROW, MENU_SEPARATOR, MENU_STROKE, MENU_TRAILING } from "./menu-recipe";
+import { MENU_LABEL, MENU_LINE, MENU_ROW, MENU_SEPARATOR, MENU_TRAILING } from "./menu-recipe";
 import { modelMenuKey, modelMenuPointerMove } from "./model-menu-keys";
 import { lockedWhileBusy, offersReasoning, useRefocusAfterPick, variantChoices, variantLabel } from "./model-picker-reasoning";
 import { BusyModelMenu } from "./ModelPickerBusyMenu";
@@ -66,7 +66,7 @@ export function EffortRow({
   label?: ReactNode;
   compact?: boolean;
 }) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ instances: s.instances }), sameFields), dispatch = useStoreDispatch();
   const selection = bot.modelSelection;
   const instance = state.instances.find((candidate) => candidate.instanceId === selection.instanceId);
   if (instance?.capabilities?.modelVariants) {
@@ -127,7 +127,7 @@ export function ModelVariantRow({ bot, threadId, updateBotDefault, className, la
   wide?: boolean;
   quiet?: boolean;
 }) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ instances: s.instances, modelVariantSessions: s.modelVariantSessions }), sameFields), dispatch = useStoreDispatch();
   const selection = bot.modelSelection;
   const choices = variantChoices(state, selection, threadId ?? bot.threadId);
   if (!choices) return null;
@@ -206,14 +206,14 @@ export function ModelPicker({
   className,
   contained = false,
   label,
-  size = "md",
+  size = "md", quiet = false,
 }: {
   bot: Bot;
   threadId?: string;
   className?: string;
   contained?: boolean;
   label?: ReactNode;
-  size?: "sm" | "md";
+  size?: "sm" | "md"; quiet?: boolean;
 }) {
   const { dispatch: storeDispatch, refreshInstances, refreshModels: refreshInstanceModels } = useStoreActions(), state = useStoreSelector((s) => ({ instances: s.instances, modelVariantSessions: s.modelVariantSessions, profile: s.bots.find((candidate) => candidate.id === shown.id) }), sameFields);
   const [open, setOpen] = useState(false);
@@ -313,7 +313,7 @@ export function ModelPicker({
   // never local models.
   const hasOfficialModels = Boolean(railInstance?.snapshot.chatgptPlan || railInstance?.models.options.some((option) => !option.custom));
   const customOnly = isCustomOnly(railInstance);
-  const { pane, setPane, loading: loadingList } = usePickerPane({ instanceId: displayedInstanceId, railId, hasOfficialModels, customOnly,
+  const { pane, setPane, loading: loadingList } = usePickerPane({ instanceId: displayedInstanceId, railId, hasOfficialModels, customOnly: customOnly && !hasOfficialModels,
     reading: open && (loadingInstances || refreshingId !== null),
     selectedIsCustom: Boolean(railInstance?.models.options.some((option) => option.id === selection.model && option.custom)) }, () => resetList());
 
@@ -368,7 +368,7 @@ export function ModelPicker({
     const selectedIsCustom = instance?.models.options.some(
       (option) => option.id === selection.model && option.custom,
     );
-    setPane(selectedIsCustom || isCustomOnly(instance) || (official.length === 0 && !instance?.snapshot.chatgptPlan) ? "custom" : "main");
+    setPane(selectedIsCustom || (official.length === 0 && !instance?.snapshot.chatgptPlan) ? "custom" : "main");
     resetList();
   };
 
@@ -405,7 +405,7 @@ export function ModelPicker({
     if (signInFamily(instance) === "openai") lastOpenaiIdRef.current = instance.instanceId;
     setRailId(instance.instanceId);
     const official = instance.models.options.filter((option) => !option.custom);
-    setPane(isCustomOnly(instance) || (official.length === 0 && !instance.snapshot.chatgptPlan) ? "custom" : "main");
+    setPane(official.length === 0 && !instance.snapshot.chatgptPlan ? "custom" : "main");
     resetList();
   };
 
@@ -492,7 +492,7 @@ export function ModelPicker({
 
   const resetVariant = contained && selection.variant !== undefined ? () => {
     const { variant: _variant, ...nextSelection } = selection;
-    dispatch({ type: "setModel", botId: bot.id, threadId: threadId ?? bot.threadId, updateBotDefault: !threadId || simpleUpdatesBotDefault, selection: nextSelection });
+    dispatch({ type: "setModel", botId: bot.id, threadId: threadId ?? bot.threadId, updateBotDefault: !threadId, selection: nextSelection });
     close(true);
   } : undefined;
 
@@ -513,7 +513,7 @@ export function ModelPicker({
       : needsCli(railInstance) || needsSignIn(railInstance)
     : false;
   const canOpenCustom = Boolean(railInstance && !needsCli(railInstance));
-  const canReturnToOfficial = official.length > 0 && !isCustomOnly(railInstance);
+  const canReturnToOfficial = official.length > 0;
   const lookingForLocal = Boolean(railInstance && probing.has(railInstance.instanceId));
   const lookingForLocalStatus = (
     <div role="status" className={cn(MENU_LINE, "justify-center text-ink-tertiary")}>
@@ -606,8 +606,8 @@ export function ModelPicker({
     <button
       {...triggerProps}
       className={cn(
-        "group flex items-center gap-1.5 rounded-full py-1 pl-2 pr-2.5 text-[13px] text-ink disabled:cursor-not-allowed",
-        contained
+        cn("group flex items-center gap-1.5 rounded-full pl-2 pr-2.5 text-[13px] text-ink disabled:cursor-not-allowed", contained || quiet ? "py-1" : "h-9"),
+        contained || quiet
           ? "hover:bg-ink/[0.06] aria-expanded:bg-ink/[0.08] disabled:opacity-50 disabled:hover:bg-transparent"
           : cn(ELEVATED_FLOAT, ELEVATED_HOVER, "disabled:text-ink-tertiary disabled:hover:bg-composer"),
         !contained && active && !showActiveAccount && cn(COMPACT_SQUARE, USAGE_WARN_WIDENS),
@@ -655,7 +655,7 @@ export function ModelPicker({
         contained
           ? "min-w-0 max-w-[72%] transition-colors duration-150 hover:bg-ink/[0.06] hover:text-ink aria-expanded:bg-ink/[0.08] aria-expanded:text-ink disabled:hover:bg-transparent"
           : cn("shrink-0", ELEVATED_FLOAT, ELEVATED_HOVER, "hover:text-ink aria-expanded:text-ink disabled:hover:bg-composer"),
-        size === "sm" ? "h-7 pl-2 pr-1.5" : "h-8 pl-2.5 pr-2",
+        size === "sm" ? "h-7 pl-2 pr-1.5" : contained ? "h-8 pl-2.5 pr-2" : "h-9 pl-3 pr-2.5",
       )}
     >
       <span className="relative mr-1.5 flex shrink-0 group-disabled:opacity-50">
@@ -688,7 +688,7 @@ export function ModelPicker({
       {fullView && !advanced && (
         <div className="shrink-0 border-b-[0.5px] border-ink/10 p-1.5">
           <button type="button" data-menu-row data-model-back onClick={(event) => backToList(event.detail === 0)} className={cn(MENU_ROW, "text-ink-secondary hover:text-ink")}>
-            <ChevronLeft size={16} strokeWidth={MENU_STROKE} className="shrink-0 rtl:-scale-x-100" aria-hidden="true" />
+            <ChevronLeft size={16} className="shrink-0 rtl:-scale-x-100" aria-hidden="true" />
             <span className="min-w-0 flex-1 truncate">{t("model.simple.back")}</span>
           </button>
         </div>
@@ -739,7 +739,7 @@ export function ModelPicker({
                       {loadingInstances || refreshingId !== null ? (
                         <Loader2 size={14} className="animate-spin" aria-hidden="true" />
                       ) : (
-                        <RefreshCw size={14} strokeWidth={MENU_STROKE} aria-hidden="true" />
+                        <RefreshCw size={14} aria-hidden="true" />
                       )}
                     </button>
                     <span
@@ -778,7 +778,7 @@ export function ModelPicker({
                     }}
                     className={cn(MENU_ROW, "text-ink-secondary hover:text-ink")}
                   >
-                    <ChevronLeft size={16} strokeWidth={MENU_STROKE} className="shrink-0 rtl:-scale-x-100" aria-hidden="true" />
+                    <ChevronLeft size={16} className="shrink-0 rtl:-scale-x-100" aria-hidden="true" />
                     <span className="min-w-0 flex-1 truncate">{t("model.backTo", { name: engineDisplayName(railInstance) })}</span>
                   </button>
                 </div>
@@ -847,13 +847,13 @@ export function ModelPicker({
                         {!query && !showAll && official.length > compactOfficial.length && (
                           <button type="button" data-menu-row onClick={() => setShowAll(true)} className={cn(MENU_ROW, "text-ink-secondary hover:text-ink")}>
                             <span className="min-w-0 flex-1 truncate">{t("model.showAll", { count: official.length })}</span>
-                            <ChevronDown size={16} strokeWidth={MENU_STROKE} className={MENU_TRAILING} aria-hidden="true" />
+                            <ChevronDown size={16} className={MENU_TRAILING} aria-hidden="true" />
                           </button>
                         )}
                         {!query && showAll && official.length > COMPACT_MODEL_COUNT && (
                           <button type="button" data-menu-row onClick={() => setShowAll(false)} className={cn(MENU_ROW, "text-ink-secondary hover:text-ink")}>
                             <span className="min-w-0 flex-1 truncate">{t("model.showSuggested")}</span>
-                            <ChevronUp size={16} strokeWidth={MENU_STROKE} className={MENU_TRAILING} aria-hidden="true" />
+                            <ChevronUp size={16} className={MENU_TRAILING} aria-hidden="true" />
                           </button>
                         )}
                       </>
@@ -911,7 +911,7 @@ export function ModelPicker({
                     {custom.length > 0 && (
                       <span className="text-[12px] leading-4 text-ink-tertiary">{t("model.available", { count: custom.length })}</span>
                     )}
-                    <ChevronRight size={16} strokeWidth={MENU_STROKE} className={MENU_TRAILING} aria-hidden="true" />
+                    <ChevronRight size={16} className={MENU_TRAILING} aria-hidden="true" />
                   </span>
                 </button>
               )}
@@ -927,7 +927,7 @@ export function ModelPicker({
               </button>
               <button type="button" data-model-add-api-keys onClick={openApiKeys}
                 className="flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] leading-4 text-ink-secondary hover:bg-ink/[0.06] hover:text-ink">
-                <KeyRound size={14} strokeWidth={MENU_STROKE} aria-hidden="true" />
+                <KeyRound size={14} aria-hidden="true" />
                 {apiKeysLabel(pickerInstances)}
               </button>
             </div>
@@ -1006,7 +1006,7 @@ export function ModelPicker({
       {menu && floating ? createPortal(menu, document.body) : menu}
       {!contained && changedBotModel && !open && ownModelThreads > 0 && (
         <div data-thread-models-notice role="status"
-          className="menu-surface absolute right-0 top-full z-30 mt-1 flex w-max max-w-[min(300px,calc(100vw-2rem))] items-center gap-2 py-1.5 pl-3 pr-1.5 text-[13px] leading-[18px]">
+          className={cn("menu-surface absolute z-30 flex w-max max-w-[min(300px,calc(100vw-2rem))] items-center gap-2 py-1.5 pl-3 pr-1.5 text-[13px] leading-[18px]", quiet ? "bottom-full left-0 mb-1" : "right-0 top-full mt-1")}>
           <ThreadModelsLine bot={profile} />
           <button type="button" aria-label={t("common.close")} onClick={() => setChangedBotModel(false)}
             className="flex size-6 shrink-0 items-center justify-center rounded-full text-ink-tertiary hover:bg-ink/[0.06] hover:text-ink">

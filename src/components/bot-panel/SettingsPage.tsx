@@ -10,7 +10,7 @@ import { callCapabilityHelp } from "@/lib/call-capability";
 import { listensHere, missingListenKey, speechBridge } from "@/lib/speech";
 import { requestNotificationPermission } from "@/lib/notify";
 import { firstSentence } from "@/lib/soul";
-import { currentTaskBot, useStore, type Bot } from "@/state/store";
+import { currentTaskBot, type Bot } from "@/state/store";
 import type { ApprovalMode } from "../../../shared/approval-mode";
 import { BOT_PROFILE_LIMITS } from "../../../shared/bot-profile";
 import { REPLY_STYLES, type ReplyStyle } from "../../../shared/reply-style";
@@ -32,6 +32,7 @@ import { HeavyBotRow } from "./HeavyBotRow";
 import { SoulChanges } from "./SoulChanges";
 import type { SimplePageId } from "./page-registry";
 import { buttonCls, Card, ColRow, NavRow, RowIcon, rowCls, RowText, Segmented, SwitchRow, TrashButton, type SegmentOption } from "./rows";
+import { sameFields, useStoreActions, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 type Derived = ReturnType<typeof useBotSettingsDerived>;
 
@@ -42,7 +43,7 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
   editingInstructions?: boolean;
   onEditInstructions?: (open: boolean) => void;
 }) {
-  const { state, dispatch, flushBotPatches } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch(), { flushBotPatches } = useStoreActions();
   const { capabilities, ready } = useDesktopCapabilities();
   const apps = useBotApps(bot);
   const { servers: allServers } = useMcpServers();
@@ -81,7 +82,7 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
     value: entry.id,
     label: t(entry.label),
     disabled: entry.id === "turns" && turnsHelp !== null,
-    tooltip: entry.id === "turns" && turnsHelp ? `${turnsHelp.label}. ${turnsHelp.reason}` : entry.id === "live" ? t("call.mode.liveHint") : callModeHint("turns"),
+    tooltip: entry.id === "turns" && turnsHelp ? `${turnsHelp.label}. ${turnsHelp.reason}` : entry.id === "live" ? t("call.mode.liveHint") : callModeHint("turns", { config: state.config }),
   }));
 
   const replyOptions: SegmentOption<ReplyStyle>[] = REPLY_STYLES.map((style) => ({

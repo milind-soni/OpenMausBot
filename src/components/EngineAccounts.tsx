@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Check, Loader2, MoreHorizontal, Plus } from "lucide-react";
 import { api, useStore, type InstanceInfo } from "@/state/store";
+import { useShowInstances } from "@/state/use-show-instances";
 import { t } from "@/lib/i18n";
 import { engineDisplayName } from "@/lib/engine-name";
 import { cn } from "@/lib/cn";
@@ -69,7 +70,8 @@ function summaryFor(group: AccountGroup, accounts: InstanceInfo[]): EngineCardSu
 }
 
 function AccountMenu({ group, instance, onRename }: { group: AccountGroup; instance: InstanceInfo; onRename: () => void }) {
-  const { state, dispatch, refreshInstances } = useStore();
+  const { state } = useStore();
+  const showInstances = useShowInstances();
   const [open, setOpen] = useState(false);
   const [confirm, setConfirm] = useState<"signOut" | "remove" | null>(null);
   const [busy, setBusy] = useState(false);
@@ -100,10 +102,7 @@ function AccountMenu({ group, instance, onRename }: { group: AccountGroup; insta
       const path = `/api/instances/${encodeURIComponent(instance.instanceId)}${action === "signOut" ? "/auth/sign-out" : ""}`;
       // Hide leaves the account out of every model list until Unhide (Settings → AI → More providers).
       const init = action === "signOut" ? { method: "POST" } : action === "remove" ? { method: "DELETE" } : { method: "PATCH", body: JSON.stringify({ hidden: true }) };
-      const { instances } = await api(path, init);
-      // The response is the confirmed state: a second request could fail and leave a stale row.
-      if (Array.isArray(instances)) dispatch({ type: "instances", instances });
-      else await refreshInstances().catch(() => {});
+      await showInstances(await api(path, init)).catch(() => {});
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {

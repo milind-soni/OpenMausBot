@@ -157,10 +157,29 @@ const foldedName = (value: string) => value.replace(/^@/, "").replace(/\s+/g, " 
 // Models slug names they saw ("Reviewer 2" → "reviewer-2").
 const looseName = (value: string) => foldedName(value.replace(/[-_]+/g, " "));
 
-/** Whether `raw`, as a bot wrote it, means this teammate: its id, or its name however it was typed. */
+/** The fewest characters of an id that name it: a model retyping a 36-character id drops one, and the first 8 have to agree. */
+export const ID_PREFIX_MIN = 8;
+
+/** Whether a spelling can be the start of an id at all. */
+export const isIdStart = (value: string): boolean => value.length >= ID_PREFIX_MIN && !/\s/u.test(value);
+
+/** Whether `raw` is this id in any case, or its first 8 characters or more. */
+const startsId = (id: string, raw: string): boolean => isIdStart(raw) && id.toLowerCase().startsWith(raw.toLowerCase());
+
+/** The one bot `raw` names by id when it is not the id exactly: the id in any case, else the start of one. Undefined when
+ * no bot's id matches that way; "ambiguous" when more than one does, so a brief never lands on the wrong one. */
+export function botById<T extends RosterMember>(bots: readonly T[], raw: string): T | "ambiguous" | undefined {
+  const wanted = raw.trim(), lower = wanted.toLowerCase();
+  const sameId = bots.filter(bot => bot.id.toLowerCase() === lower);
+  const found = sameId.length ? sameId : bots.filter(bot => startsId(bot.id, wanted));
+  return found.length > 1 ? "ambiguous" : found[0];
+}
+
+/** Whether `raw`, as a bot wrote it, means this teammate: its id (in any case, or its first 8 characters or more), or its
+ * name however it was typed. */
 export function namesTeammate(target: Pick<RosterMember, "id" | "name">, raw: string): boolean {
   const wanted = raw.trim();
-  return target.id === wanted || foldedName(target.name) === foldedName(wanted) || looseName(target.name) === looseName(wanted);
+  return target.id === wanted || startsId(target.id, wanted) || foldedName(target.name) === foldedName(wanted) || looseName(target.name) === looseName(wanted);
 }
 
 /** Their audiences alone would let `from` reach `target`, whatever its own list of peers says. */
@@ -197,6 +216,10 @@ export function resolveTeammate<T extends RosterMember>(
   const name = fold(wanted);
   const shown = peerName(wanted) || wanted;
   if (!name) return { error: `No bot with id "${shown}" — call list_bots and copy the exact id from the result` };
+  // The id in another case, or its first 8 characters or more, names that bot as its id would, before any name does.
+  const byId = botById(bots.filter(bot => !wider?.hides(bot)), wanted);
+  if (byId === "ambiguous") return { error: `More than one bot's id starts with "${shown}", so nothing was sent — call list_bots and copy the exact id from the result` };
+  if (byId) return { id: byId.id, byName: false };
   const reachable = reachablePeers(bots, from, wider?.reaches);
   const matches = reachable.filter(bot => fold(bot.name) === name);
   if (matches.length === 1) return { id: matches[0]!.id, byName: true };

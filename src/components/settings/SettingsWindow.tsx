@@ -6,7 +6,8 @@ import { glassPopupFrameStyle, glassPopupTopInset, GLASS_POPUP_GUTTER } from "@/
 import { scrollWithin } from "@/lib/scroll-within";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { setAdvancedMode } from "@/lib/interface-mode";
-import { api, useStore, type ConfigStatus } from "@/state/store";
+import { api, type ConfigStatus } from "@/state/store";
+import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { useIsTopLayer } from "../Layer";
 import { LicenseExpiryBanner } from "../LicenseExpiryBanner";
 import { shortcutLabel } from "../ShortcutHint";
@@ -50,20 +51,21 @@ export function revealAnchor(scroller: HTMLElement | null, anchor: string | null
 
 export function SettingsWindow() {
   const isTop = useIsTopLayer();
-  const { state, dispatch } = useStore();
+  const section = useStoreSelector((state) => state.appSettingsSection), config = useStoreSelector((state) => state.config);
+  const unreachable = useStoreSelector((state) => Boolean(state.error)), dispatch = useStoreDispatch();
   const ctx = useSettingsContext();
   const place = useSettingsPlace();
   const narrow = useMediaQuery(NARROW, false);
-  const target = resolveSettingsTarget(state.appSettingsSection, ctx);
+  const target = resolveSettingsTarget(section, ctx);
   const [anchor, setAnchor] = useState<string | null>(target.anchor ?? null);
-  const [narrowPage, setNarrowPage] = useState(state.appSettingsSection !== "overview");
+  const [narrowPage, setNarrowPage] = useState(section !== "overview");
   const [query, setQuery] = useState("");
   const pages = visiblePages(ctx);
   const page = pageById(target.page);
   const dialogRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { setAnchor(target.anchor ?? null); setNarrowPage((open) => open || state.appSettingsSection !== "overview"); }, [state.appSettingsSection, target.anchor]);
+  useEffect(() => { setAnchor(target.anchor ?? null); setNarrowPage((open) => open || section !== "overview"); }, [section, target.anchor]);
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       if (anchor) revealAnchor(scrollRef.current, anchor);
@@ -79,7 +81,7 @@ export function SettingsWindow() {
   const hits = useMemo(() => searchSettings(query, ctx, (entry) => hitLabel({ entry, elsewhere: false, score: 0 }, place, ctx.desktop),
     (candidate) => pageLabel(candidate, place, ctx.desktop)), [query, ctx, place]);
 
-  const keyHits = useMemo(() => (ctx.client || !query.trim() ? [] : KEY_CATALOG.filter((entry) => !keyHidden(entry.id, state.config) && keyMatches(entry, query.trim().toLowerCase(), state.config)).slice(0, 8)), [ctx.client, query, state.config]);
+  const keyHits = useMemo(() => (ctx.client || !query.trim() ? [] : KEY_CATALOG.filter((entry) => !keyHidden(entry.id, config) && keyMatches(entry, query.trim().toLowerCase(), config)).slice(0, 8)), [ctx.client, query, config]);
   const openKey = (entry: KeyEntry) => { setQuery(""); setNarrowPage(true); dispatch(entry.uses ? openKeySettings(entry.uses, entry.id) : openKeySettings(entry.id)); };
   const computer = useSwitchToComputer();
   const close = () => dispatch({ type: "toggleAppSettings", open: false });
@@ -186,13 +188,13 @@ export function SettingsWindow() {
                 <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
                   {!narrow && closeButton}
                   <div ref={scrollRef} data-settings-scroll data-settings-content=""
-                    className={cn("settings-scroll min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]", narrow ? "pb-12" : "px-8 pb-12")}>
+                    className={cn("settings-scroll min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]", narrow ? "pb-12" : "pb-12 pl-8 pr-16")}>
                     <div className={cn("flex max-w-[640px] flex-col", narrow && "max-w-none")}>
                       <SettingsPageHeader page={page} ctx={ctx} place={place} narrow={narrow} missing={missing} />
                       <div key={target.page} data-settings-page-body={target.page} className={cn("flex flex-col gap-6", narrow && "px-4")}>
-                        <LicenseExpiryBanner config={state.config} />
-                        {page.owner === "place" && state.config === null
-                          ? state.error ? <SettingsUnreachable place={place.name} onRetry={() => void api<ConfigStatus>("/api/config").then((config) => dispatch({ type: "configStatus", config })).catch(() => {})} />
+                        <LicenseExpiryBanner config={config} />
+                        {page.owner === "place" && config === null
+                          ? unreachable ? <SettingsUnreachable place={place.name} onRetry={() => void api<ConfigStatus>("/api/config").then((config) => dispatch({ type: "configStatus", config })).catch(() => {})} />
                             : <><SettingsSkeletonCard place={place.name} /><SettingsSkeletonCard place={place.name} /></>
                           : <SettingsPageBody page={target.page} />}
                       </div>

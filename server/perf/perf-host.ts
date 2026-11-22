@@ -11,8 +11,11 @@ import { duration, limitHolds, perfHealth, perfLines, turnLine, type PerfHealth 
 import { createProcessHealth, type ProcessHealthRecorder } from "./process-health.ts";
 import type { ProcessRow } from "./process-buckets.ts";
 import { createProcessSampler, linuxProcessList, LINUX_SAMPLE_MS, nodeUtilization, OTHER_SAMPLE_MS, psProcessList, type ProcessSampler } from "./process-sampler.ts";
+import { createSetupClock, type SetupClock, type SetupMs } from "./setup-steps.ts";
 import type { FailoverWhy } from "./turn-record.ts";
 import { createTurnTimings, type Refusal, type SlowNote, type TurnTimings } from "./turn-timings.ts";
+import { createLaunchTimings, LAUNCH_FILE, type LaunchTimings } from "./launch-timings.ts";
+import { startStallWatch, stallReportLines, type StallWatch } from "./stall-watch.ts";
 
 export const PERF_FILE = "perf-timings.json";
 /** One line per kind of slow event at most this often; the ones held back are counted on the next. */
@@ -44,6 +47,11 @@ export interface PerfHostDeps {
   pruneOwners?: (rows: readonly ProcessRow[]) => void;
   /** The memory one bot may use and how it is enforced (bot-memory-cap.ts). */
   cap?: () => BotCapReport;
+  /** Watch for main-thread stalls (stall-watch.ts): on a Cloud home and a self-hosted server, not in the desktop app. Never
+   * without the sampler timer. */
+  watchStalls?: boolean;
+  /** The desktop app started this server: its launches are recorded (launch-timings.ts). */
+  launches?: Pick<NonNullable<Parameters<typeof createLaunchTimings>[0]>, "launchId" | "counts" | "server">;
 }
 
 /** The health report shows this many bots, the ones using the most memory first; the admin's read shows every one. */
@@ -76,6 +84,7 @@ export function createPerfHost(deps: PerfHostDeps) {
     file: join(deps.dataDir, PERF_FILE), now, botOf: (threadId) => deps.store.botByThread(threadId)?.id ?? null,
     slow: (note) => say(note.kind, slowLine(note, now())),
   });
+  const launches: LaunchTimings | null = deps.launches ? createLaunchTimings({ file: join(deps.dataDir, LAUNCH_FILE), now, ...deps.launches }) : null;
   /** Runs `read`, or logs once a minute and returns `fallback`: nothing the recorder does may fail its caller. */
   const guarded = <T>(what: string, read: () => T, fallback: T): T => {
     try { return read(); } catch (error) { say(`failed:${what}`, `the performance recorder failed (${what}): ${error instanceof Error ? error.name : "error"}`); return fallback; }
@@ -102,15 +111,22 @@ export function createPerfHost(deps: PerfHostDeps) {
     list: linux ? () => linuxProcessList() : psProcessList, intervalMs: linux ? LINUX_SAMPLE_MS : OTHER_SAMPLE_MS,
     scope: deps.wholeMachine && linux ? "all" : "tree", utilization: nodeUtilization(), now, engines: enginePids,
     stalled: (ms) => say("loop", `event loop stalled: the ${linux ? 60 : 300}s sampler fired ${duration(ms)} late`), afterSample: watchHolds,
+    resumed: (ms) => say("sleep", `the computer slept or the server was paused: the ${linux ? 60 : 300}s sampler fired ${duration(ms)} late, not counted as a stall`),
     seen: (rows, buckets) => { processes.sample(rows, buckets); guarded("bots", () => footprints.sample(rows), null); },
   });
   if (deps.timer !== false && !windows) sampler.start();
-  const stalls = deps.stalls ?? createLoopStalls();
+  const stalls = deps.stalls ?? createLoopStalls({ resumed: (ms) => say("sleep", `the computer slept or the server was paused: the event loop waited through a ${duration(ms)} gap, not counted as a stall`) });
   if (deps.timer !== false) stalls.start();
+  const watch: StallWatch | null = deps.timer !== false && deps.watchStalls === true
+    ? guarded("stall-watch", () => startStallWatch({ dataDir: deps.dataDir, ...(deps.log ? { log: deps.log } : {}) }), null) : null;
+  const caught = () => guarded("stall-watch", () => stallReportLines(watch?.recent() ?? []), []);
+  /** Stall records right under the heading: a @devs report keeps only the first lines of this part. */
+  const stallsFirst = (lines: string[]) => { const stalls = caught(); return lines[0]?.startsWith("## ") ? [lines[0], ...stalls, ...lines.slice(1)] : [...stalls, ...lines]; };
   if (deps.timer !== false && linux) guarded("limits", () => (deps.log ?? ((line: string) => console.warn(line)))(processes.startLine()), undefined);
 
   const sources = () => ({ hour: timings.window(), day: timings.day(), live: timings.live(), limits: limits(), process: windows ? null : sampler.report(), stalls: guarded("stalls", () => stalls.report(), null), processes: processes.report(),
-    bots: windows ? null : guarded("bots", () => botReport(BOTS_IN_HEALTH), null) });
+    bots: windows ? null : guarded("bots", () => botReport(BOTS_IN_HEALTH), null),
+    launches: launches ? guarded("launches", () => ({ stats: launches.stats(), recent: launches.recent() }), null) : null });
   return {
     timings,
     sampler,
@@ -120,19 +136,24 @@ export function createPerfHost(deps: PerfHostDeps) {
     noteHeld: (threadId: string, why: "plan-limit" | "memory") => guarded("held", () => timings.noteHeld(threadId, why), undefined),
     noteFailover: (threadId: string, why: FailoverWhy) => guarded("failover", () => timings.noteFailover(threadId, why), undefined),
     noteNotStarted: (threadId: string, turnId: string | null, refusal?: Refusal) => guarded("refused", () => timings.noteNotStarted(threadId, turnId, refusal), undefined),
+    /** Times one direct turn's setup; its laps go to `noteSetup` just before the engine is asked. */
+    setupClock: (): SetupClock => createSetupClock(),
+    noteSetup: (threadId: string, ms: SetupMs) => guarded("setup", () => timings.noteSetup(threadId, ms), undefined),
+    /** A part of the app's launch from its main process or its page; null where no app starts this server. */
+    noteLaunch: (part: unknown) => (launches ? guarded("launch", () => launches.note(part), { ok: false, complete: false }) : null),
     /** Logs a usage-limit hold that started or ended since the last check; the sampler runs it after each sample. */
     checkHolds: watchHolds,
     health: (): PerfHealth | null => guarded("health", () => perfHealth(sources()), null),
     /** For a @devs report: these conversations' and bots' latest turns, then everything else. */
     lines(filter: { threadIds: readonly string[]; botIds: readonly string[] }): string[] {
-      return guarded("lines", () => perfLines(sources(), timings.recent({ ...filter, limit: RECENT_IN_REPORT }), "Latest turns in this conversation or of its bots, newest last:"), PERF_UNAVAILABLE);
+      return stallsFirst(guarded("lines", () => perfLines(sources(), timings.recent({ ...filter, limit: RECENT_IN_REPORT }), "Latest turns in this conversation or of its bots, newest last:"), PERF_UNAVAILABLE));
     },
     /** For the desktop's diagnostics export: every bot's latest turns. */
     text(): string {
-      return guarded("text", () => perfLines(sources(), timings.recent({ limit: RECENT_IN_REPORT }), "Latest turns, newest last:"), PERF_UNAVAILABLE).join("\n");
+      return stallsFirst(guarded("text", () => perfLines(sources(), timings.recent({ limit: RECENT_IN_REPORT }), "Latest turns, newest last:"), PERF_UNAVAILABLE)).join("\n");
     },
     /** The graceful shutdown: no more samples, and the turns since the last save written now. */
-    stop() { sampler.stop(); stalls.stop(); guarded("save", () => timings.flush(), undefined); },
+    stop() { sampler.stop(); stalls.stop(); watch?.stop(); guarded("save", () => timings.flush(), undefined); if (launches) guarded("launch", () => launches.flush(), undefined); },
   };
 }
 export type PerfHost = ReturnType<typeof createPerfHost>;

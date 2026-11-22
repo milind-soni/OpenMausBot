@@ -1290,7 +1290,68 @@ describe("a fence's wrap directive", () => {
 describe("bidi: message content carries its own direction", () => {
   const ARABIC = "مرحبا بالعالم";
 
-  it("reads direction from the first strong letter, ignoring weak characters", () => {
+  it("goes with the script that has more words, so an Arabic answer opening on a Latin name stays right-to-left", () => {
+    expect(textDirection("Chrome 158 هو الإصدار الأحدث من المتصفح")).toBe("rtl");
+    expect(textDirection("Node.js بيئة تشغيل لجافاسكريبت على الخادم")).toBe("rtl");
+    expect(textDirection("OpenMausBot v0.1.169 صدر في 2026-11-18 مع إصلاحات كثيرة")).toBe("rtl");
+    expect(textDirection("The Arabic word مرحبا means hello")).toBe("ltr");
+    expect(textDirection("שלום is how you say hello in Hebrew, among other things")).toBe("ltr");
+  });
+
+  it("does not count a bare address, which is Latin in any language", () => {
+    expect(textDirection("راجع https://github.com/milind-soni/OpenMausBot/issues/6541 للتفاصيل")).toBe("rtl");
+    expect(textDirection("https://openmausbot.com/download هو رابط التحميل الرسمي")).toBe("rtl");
+    expect(textDirection("انظر www.example.com/a/very/long/path/to/the/release/notes هنا")).toBe("rtl");
+    expect(textDirection("https://example.com/page")).toBe("ltr");
+  });
+
+  it("keeps an Arabic sentence right-to-left when it holds long technical Latin tokens", () => {
+    expect(textDirection("شغّل pnpm install --frozen-lockfile بعدين")).toBe("rtl");
+    expect(textDirection("استخدم TypeScriptLanguageServer")).toBe("rtl");
+    expect(textDirection("راجع pnpm.io/installation/and/more/details/here للتفاصيل")).toBe("rtl");
+  });
+
+  it("keeps an English sentence left-to-right when it holds an Arabic name", () => {
+    expect(textDirection("Meeting with محمد عبد الرحمن at 5")).toBe("ltr");
+    expect(textDirection("Set process.env.NODE_ENV in config.ts for مرحبا")).toBe("ltr");
+  });
+
+  it("counts a word that ends a sentence, and still skips a dotted technical token", () => {
+    expect(textDirection("Hello. Welcome. مرحبا")).toBe("ltr");
+    expect(textDirection("Done! Thanks, really? مرحبا بك")).toBe("ltr");
+    expect(textDirection("افتح config.ts. ثم احفظ")).toBe("rtl");
+  });
+
+  it("does not count digits as words, Arabic-Indic ones included", () => {
+    expect(textDirection("١٢٣ hello")).toBe("ltr");
+    expect(textDirection("١٢٣ مرحبا")).toBe("rtl");
+    expect(textDirection("٤٥٦ ٧٨٩ hello world")).toBe("ltr");
+  });
+
+  it("does not let an address swallow the RTL text glued to it", () => {
+    expect(textDirection("API https://x.io/aوالتفاصيل هنا")).toBe("rtl");
+    expect(textDirection("التوثيق (https://pnpm.io/installation) فيه كل التفاصيل")).toBe("rtl");
+    expect(textDirection("مرحبا welcome https://example.com،والتفاصيل")).toBe("rtl");
+  });
+
+  it("keeps a link label and the Arabic prose right after it apart when judging the block", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "مرحبا welcome [https://example.com](https://example.com)،والتفاصيل",
+    }));
+    expect(html).toMatch(/<p dir="rtl"/);
+  });
+
+  it("gives a list whose items open on Latin names the direction of its text", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: [
+        "- **Chrome**: متصفح من جوجل يعمل على كل الأنظمة",
+        "- **Firefox**: متصفح مفتوح المصدر من موزيلا",
+      ].join("\n"),
+    }));
+    expect(html).toMatch(/<ul dir="rtl"/);
+  });
+
+  it("breaks a tie with the first strong letter, ignoring weak characters", () => {
     expect(textDirection("مرحبا")).toBe("rtl");
     expect(textDirection("hello")).toBe("ltr");
     expect(textDirection("")).toBe("ltr");

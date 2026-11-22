@@ -112,6 +112,32 @@ describe("finished work reaches the inbox once", () => {
     const reopened = setup({}, f.dataDir);
     expect(infoRows(reopened).map((row) => row.text).sort()).toEqual(["All three pages are live.", "It stopped in eli-pricing."]);
   });
+
+  it("takes finished work out of the inbox once the person has read it", () => {
+    const f = setup();
+    f.inbox.route(routine, { routine: true });
+    expect(infoRows(f)).toHaveLength(1);
+    f.inbox.markRead(OWNER, f.inbox.view(OWNER).rows[0]!.id);
+    expect(infoRows(f), "finished work the person has read leaves the inbox").toEqual([]);
+    expect(f.inbox.view(OWNER).rows[0]!.tab).toBe("done");
+    expect(f.inbox.count(OWNER), "nothing waits on the person any more").toBe(0);
+  });
+
+  it("keeps a message that waits for an answer listed after the person read it", () => {
+    const f = setup();
+    expect(f.inbox.message("eli", "eli-main", "Can you look at the deck?").status).toBe(200);
+    const row = f.inbox.view(OWNER).rows[0]!;
+    expect(row.kind).toBe("message");
+    f.inbox.markRead(OWNER, row.id);
+    expect(f.inbox.view(OWNER).rows[0]!.tab, "it still waits for a reply").toBe("info");
+  });
+
+  it("points a line at the message it came from, so a client can open the conversation there", () => {
+    const f = setup();
+    const posted = f.store.appendMessage("eli-main", { role: "bot", text: "All three pages are live." });
+    f.inbox.route(summary, { summary: true });
+    expect(f.inbox.view(OWNER).rows[0]!.origin?.messageId).toBe(posted.id);
+  });
 });
 
 describe("who is asking for the inbox", () => {
@@ -157,6 +183,33 @@ describe("the inbox of a place that is no team's", () => {
     f.cards.length = 0;
     expect(f.inbox.count(OWNER)).toBe(0);
     expect(f.inbox.view(OWNER).rows).toEqual([]);
+  });
+
+  it("lists an automation's question once, though the run's Results chat holds a copy of its card", () => {
+    const f = setup();
+    const original = f.ask("eli-launch", "q");
+    f.cards.push({ ...original, threadId: "eli-pricing", id: "copy-q", at: original.at + 1, copyOf: original.id });
+    expect(f.inbox.view(OWNER).rows.map((row) => [row.id, row.origin?.threadId])).toEqual([["card-q", "eli-launch"]]);
+    expect(f.inbox.count(OWNER)).toBe(1);
+  });
+
+  it("keeps the Results chat's copy when the Inbox limit cuts the older original", () => {
+    const f = setup();
+    const original = f.ask("eli-launch", "q", {}, 1);
+    for (let index = 0; index < 200; index++) f.ask("eli-main", `r${index}`, {}, 2 + index);
+    f.cards.push({ ...original, threadId: "eli-pricing", id: "copy-q", at: 1_000, copyOf: original.id });
+    const ids = f.inbox.view(OWNER).rows.map((row) => row.id);
+    expect(ids).toHaveLength(200);
+    expect(ids[0]).toBe("copy-q");
+    expect(ids).not.toContain("card-q");
+    expect(f.inbox.view(OWNER).rows[0]).not.toHaveProperty("copyOf");
+  });
+
+  it("still lists the Results chat's copy when the person can't see the run's own chat", () => {
+    const f = setup({ sees: (_auth, threadId) => threadId !== "eli-launch" });
+    const original = f.ask("eli-launch", "q");
+    f.cards.push({ ...original, threadId: "eli-pricing", id: "copy-q", at: original.at + 1, copyOf: original.id });
+    expect(f.inbox.view(OWNER).rows.map((row) => [row.id, row.origin?.threadId])).toEqual([["copy-q", "eli-pricing"]]);
   });
 
   it("drops a question the person wrote past, unless a running turn still waits on it", () => {

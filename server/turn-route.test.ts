@@ -40,6 +40,16 @@ describe("classifyTurn", () => {
     expect(classifyTurn({ text: "and the other one?", attachments: 0, priorTurnUsedTools: true })).toBe("complex");
     expect(classifyTurn({ text: "thanks!", attachments: 0, priorTurnUsedTools: true })).toBe("simple");
   });
+
+  it.each([
+    "Продолжи",
+    "продолжай",
+    "Продолжайте, пожалуйста",
+    "давай дальше",
+    "дальше",
+  ])("a Russian continuation is complex: %s", (text) => {
+    expect(classifyTurn({ ...plain, text })).toBe("complex");
+  });
 });
 
 const claude: ModelCatalog = {
@@ -77,6 +87,41 @@ describe("fastModelFor", () => {
   it("keeps a model that is already fast, and gives up without a catalog", () => {
     expect(fastModelFor(claude, "claude-haiku-4-5")).toBe("claude-haiku-4-5");
     expect(fastModelFor(undefined, "claude-opus-5")).toBeUndefined();
+  });
+
+  it("does not treat two absent provider identities from different model families as compatible", () => {
+    const catalog: ModelCatalog = {
+      default: "gpt-6.1-sol",
+      options: [
+        { id: "gpt-6.1-sol", label: "GPT-6.1-Sol" },
+        { id: "glm-5.3-flash", label: "GLM-5.3-Flash" },
+      ],
+    };
+    expect(fastModelFor(catalog, "gpt-6.1-sol")).toBeUndefined();
+  });
+
+  it("does not guess a provider when the selected model is absent from the catalog", () => {
+    expect(fastModelFor(mixed, "unlisted-model")).toBeUndefined();
+  });
+
+  it("does not substitute a fast model for a custom model", () => {
+    expect(fastModelFor({
+      default: "custom-model",
+      options: [
+        { id: "custom-model", label: "Custom", provider: "openai", custom: true },
+        { id: "gpt-5.4-mini", label: "Mini", provider: "openai" },
+      ],
+    }, "custom-model")).toBeUndefined();
+  });
+
+  it("does not substitute an unqualified candidate for a provider-tagged model", () => {
+    expect(fastModelFor({
+      default: "gpt-6.1-sol",
+      options: [
+        { id: "gpt-6.1-sol", label: "GPT", provider: "openai" },
+        { id: "glm-5.3-flash", label: "GLM Flash" },
+      ],
+    }, "gpt-6.1-sol")).toBeUndefined();
   });
 });
 
@@ -136,6 +181,13 @@ describe("routeDirectTurn", () => {
     expect(routeDirectTurn(bot, {}, worked, message, instance, false).tier).toBe("complex");
   });
 
+  it("keeps a message whose only attachment is a video on the configured model", () => {
+    const video = { text: "and the other one?", images: [], videos: [{ path: "/attachments/clip.mp4" }] };
+    const route = routeDirectTurn(bot, {}, [], video, instance, false);
+    expect(route.tier).toBe("complex");
+    expect(route.quickModel).toBeUndefined();
+  });
+
   it("never moves a short line when the sign-in can refuse a catalog model, as Codex on a ChatGPT account does", () => {
     const codex = { models: mixed, adapter: { capabilities: { effortLevels: ["low", "high"] as const } } };
     const own = { replyStyle: "conversational" as const, modelSelection: { instanceId: "codex", model: "gpt-5.4", effort: "high" as const } };
@@ -150,4 +202,27 @@ describe("routeDirectTurn", () => {
     expect(routeDirectTurn(bot, { modelSelection: bot.modelSelection }, [], message, instance, false).tier).toBeNull();
     expect(routeDirectTurn(bot, {}, [], message, instance, true).tier).toBeNull();
   });
+
+  it.each(["Продолжи", "продолжай", "давай дальше", "дальше"])(
+    "keeps a Russian continuation on the configured model and effort: %s",
+    (text) => {
+      const codexBot = { replyStyle: "conversational" as const, modelSelection: { instanceId: "codex", model: "gpt-6.1-sol", effort: "high" as const } };
+      const codexInstance = {
+        models: {
+          default: "gpt-6.1-sol",
+          options: [
+            { id: "gpt-6.1-sol", label: "GPT-6.1-Sol" },
+            { id: "glm-5.3-flash", label: "GLM-5.3-Flash" },
+          ],
+        },
+        adapter: { capabilities: { effortLevels: ["low", "high"] as const } },
+      };
+      expect(routeDirectTurn(codexBot, {}, [{ role: "bot", kind: "compaction" }], { text, images: [] }, codexInstance, false)).toEqual({
+        tier: "complex",
+        model: "gpt-6.1-sol",
+        effort: "high",
+        variant: undefined,
+      });
+    },
+  );
 });

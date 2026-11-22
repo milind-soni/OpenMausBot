@@ -1,6 +1,12 @@
 // What a bot hears when a call is refused for length: which field, the limit, that nothing happened, and how to send it
 // again. Without the last part a bot retries the same words or gives up.
 
+import { BRIEF_MAX } from "./bot-link/protocol.ts";
+
+/** The longest brief a coordinate_bots call carries: exactly what the engine keeps of one, so the route refuses nothing
+ * the receiver would have kept, and the words below name the same number the catalog gives the tool. */
+export const coordinateMessageMax = BRIEF_MAX;
+
 type Issue = { code: string; path: readonly PropertyKey[]; maximum?: number | bigint };
 
 export const tooLongRefusal = (field: string, max: number | bigint, how: string): string =>
@@ -22,4 +28,11 @@ export function coordinateTooLong(issues: readonly Issue[]): string | undefined 
     return issue.code === "too_big" && how && issue.maximum !== undefined ? tooLongRefusal(field, issue.maximum, how) : undefined;
   });
   return refusals.length && refusals.every(Boolean) ? refusals.join(" ") : undefined;
+}
+
+/** A start_thread brief that reports back travels as a hand-off, so it has a hand-off's limit; undefined when it fits. */
+export function reportBackTooLong(message: string): string | undefined {
+  return message.length > coordinateMessageMax
+    ? tooLongRefusal("message", coordinateMessageMax, "Put only what the thread needs to start in the message, save the long detail to a file and name its full path, then call start_thread again.")
+    : undefined;
 }

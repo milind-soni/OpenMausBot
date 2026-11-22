@@ -155,7 +155,7 @@ const SUFFIXES = ["", "/tasks", "/tasks/t1", "/tasks/t1/title", "/tasks/delete",
   "/activity", "/overview", "/projects", "/projects/p1", "/projects/order", "/queue/q1", "/queue/q1/steer", "/read", "/respond", "/interrupt", "/compact",
   "/active-branch", "/start-fresh", "/setup-request", "/helper-followup", "/tool-budget", "/threads/follow-model", "/mcp-servers", "/data", "/data/x", "/computer",
   "/computer/exec", "/computer/control", "/computer/viewer-close", "/local-computer", "/local-computer/run", "/local-computer/join", "/local-computer/screenshot",
-  "/browser/live", "/browser/action", "/browser/upload", "/browser/download/d1", "/browser/stream", "/cards/c1", "/command-allowlist", "/command-allowlist/x",
+  "/browser/live", "/browser/action", "/browser/upload", "/browser/download/d1", "/browser/stream", "/browser/desktop", "/cards/c1", "/command-allowlist", "/command-allowlist/x",
   "/connector-cards/c1/status", "/connector-cards/c1/authorize", "/secret-cards/c1/provide", "/secret-cards/c1/save", "/sign-in-cards/c1/done", "/saved-steps/s1",
   "/requests/aaaaaaaaaaaaaaaaaaaa", "/requests/aaaaaaaaaaaaaaaaaaaa/interrupt", "/apps/a1/rpc", "/apps/a1/context", "/avatar/generate", "/slack-management", "/webhooks", "/routines", "/files", "/no-such-route"];
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"];

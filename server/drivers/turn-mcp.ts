@@ -113,9 +113,17 @@ export function ownMcpOverHttp(server: TurnStdioMcpServer): { url: string; heade
  * provider takes in all. */
 export function acpMcpServers(turn: SendTurnInput, options: { http?: boolean; engine?: string; toolBudget?: number } = {}): AcpMcpServer[] {
   const schemaProfile = toolSchemaProfileFor({ engine: options.engine })?.id;
-  return turnStdioMcpServers(turn, { schemaProfile, toolBudget: options.toolBudget }).map((server) => {
-    const own = options.http ? ownMcpOverHttp(server) : null;
-    const pairs = (record: Record<string, string>) => Object.entries(record).map(([name, value]) => ({ name, value: String(value) }));
-    return own ? { type: "http", name: server.name, url: own.url, headers: pairs(own.headers) } : { ...server, env: pairs(server.env) };
+  const servers: AcpMcpServer[] = turnStdioMcpServers(turn, { schemaProfile, toolBudget: options.toolBudget }).map((server) => ({ ...server, env: pairs(server.env) }));
+  return options.http ? acpOwnServersOverHttp(servers) : servers;
+}
+
+/** `servers` with each of OpenMausBot's own stdio proxies as its endpoint on this server; every other server as it was. */
+export function acpOwnServersOverHttp(servers: AcpMcpServer[]): AcpMcpServer[] {
+  return servers.map((server) => {
+    if (!("command" in server)) return server;
+    const own = ownMcpOverHttp({ ...server, env: Object.fromEntries(server.env.map(({ name, value }) => [name, value])) });
+    return own ? { type: "http", name: server.name, url: own.url, headers: pairs(own.headers) } : server;
   });
 }
+
+const pairs = (record: Record<string, string>): NameValue => Object.entries(record).map(([name, value]) => ({ name, value: String(value) }));

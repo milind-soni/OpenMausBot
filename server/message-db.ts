@@ -59,11 +59,10 @@ function open(): DatabaseSync {
       PRIMARY KEY (thread_id, id)
     );
     CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread_id);
-    -- at is not part of the primary key, so newest-per-thread reads cannot
-    -- walk these rows in time order on messages_thread. Created on every
-    -- open, including a database that already has messages.
+    -- The primary key has no time column, so newest-per-thread reads need this index.
     CREATE INDEX IF NOT EXISTS messages_thread_at ON messages(thread_id, at);
     -- Partial, so no other query's plan can move onto them: only a statement that repeats the WHERE may use one.
+    CREATE INDEX IF NOT EXISTS messages_thread_bot_text ON messages(thread_id, at) WHERE kind = 'text' AND role = 'bot' AND text IS NOT NULL;
     CREATE INDEX IF NOT EXISTS messages_thread_order ON messages(thread_id, ${ORDERING_AT}) WHERE ${ORDERING_ROW};
     CREATE INDEX IF NOT EXISTS messages_work_at ON messages(kind, at) WHERE ${WORK_KINDS};
     CREATE INDEX IF NOT EXISTS messages_cards_at ON messages(kind, at) WHERE ${CARD_KINDS};
@@ -370,11 +369,14 @@ export interface ThreadRows {
   activeLeafId: string | null;
 }
 
+export function readStoredActiveLeaf(threadId: string): string | null {
+  return (prepared(ACTIVE_LEAF).get(threadId) as { active_leaf_id: string | null } | undefined)?.active_leaf_id ?? null;
+}
+
 export function readThread(threadId: string, legacyFile: string): ThreadRows {
   const rows = prepared("SELECT json FROM messages WHERE thread_id = ? ORDER BY rowid").all(threadId) as Array<{ json: string }>;
   if (rows.length) {
-    const state = prepared(ACTIVE_LEAF).get(threadId) as { active_leaf_id: string | null } | undefined;
-    return { messages: rows.map(rowToMessage), activeLeafId: state?.active_leaf_id ?? null };
+    return { messages: rows.map(rowToMessage), activeLeafId: readStoredActiveLeaf(threadId) };
   }
   return importLegacy(threadId, legacyFile);
 }
@@ -388,16 +390,16 @@ export interface ThreadTailRows extends ThreadRows {
   hasMore?: boolean;
 }
 
+export function decodeMessagePage(rows: Array<{ json: string }>, limit: number): { messages: Message[]; hasMore: boolean } {
+  const hasMore = rows.length > limit;
+  if (hasMore) rows.length = limit;
+  return { messages: rows.reverse().map(rowToMessage), hasMore };
+}
+
 export function readThreadTail(threadId: string, legacyFile: string, limit: number): ThreadTailRows {
   const rows = prepared("SELECT json FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT ?").all(threadId, limit + 1) as Array<{ json: string }>;
-  if (rows.length) {
-    const hasMore = rows.length > limit;
-    if (hasMore) rows.length = limit;
-    rows.reverse();
-    const state = prepared(ACTIVE_LEAF).get(threadId) as { active_leaf_id: string | null } | undefined;
-    return { messages: rows.map(rowToMessage), activeLeafId: state?.active_leaf_id ?? null, hasMore };
-  }
-  return importLegacy(threadId, legacyFile);
+  if (!rows.length) return importLegacy(threadId, legacyFile);
+  return { ...decodeMessagePage(rows, limit), activeLeafId: readStoredActiveLeaf(threadId) };
 }
 
 function importLegacy(threadId: string, legacyFile: string): ThreadRows {
@@ -547,12 +549,12 @@ export function attentionRows(since: number): AttentionRow[] {
 }
 
 /** Every card still open, oldest first, whenever it was asked. */
-export function openCardRows(): Array<{ threadId: string; id: string; at: number; card: string | null; fromBotId: string | null }> {
+export function openCardRows(): Array<{ threadId: string; id: string; at: number; card: string | null; fromBotId: string | null; copyOf: string | null }> {
   return db().prepare(
-    `SELECT thread_id AS threadId, id, at, json_extract(json, '$.card') AS card, json_extract(json, '$.from.botId') AS fromBotId FROM messages INDEXED BY messages_work_at WHERE ${WORK_KINDS} AND kind = 'options' ` +
+    `SELECT thread_id AS threadId, id, at, json_extract(json, '$.card') AS card, json_extract(json, '$.from.botId') AS fromBotId, json_extract(json, '$.automation.copyOf') AS copyOf FROM messages INDEXED BY messages_work_at WHERE ${WORK_KINDS} AND kind = 'options' ` +
     "AND json_extract(json, '$.card.requestId') IS NOT NULL AND json_extract(json, '$.card.answered') IS NULL AND coalesce(json_extract(json, '$.card.dismissed'), 0) = 0 " +
     "AND coalesce(json_extract(json, '$.card.expired'), 0) = 0 AND json_extract(json, '$.helperIntro') IS NULL AND json_extract(json, '$.inbox') IS NULL ORDER BY at",
-  ).all() as Array<{ threadId: string; id: string; at: number; card: string | null; fromBotId: string | null }>;
+  ).all() as Array<{ threadId: string; id: string; at: number; card: string | null; fromBotId: string | null; copyOf: string | null }>;
 }
 
 /** The conversations with a card asked since `since` that has not been answered, oldest first; the caller reads each card. */
@@ -899,7 +901,7 @@ export interface ThreadLatest {
   head: string;
 }
 
-/** CROSS JOIN pins the order: the list, then messages_thread_at per thread, then the primary key (thread_id, id). `id` alone has no index. */
+/** CROSS JOIN pins the order: the list, then a seek in each thread's bot text, then the primary key (thread_id, id). `id` alone has no index. */
 export const LATEST_SAID_BY_BOT_SQL =
   "WITH latest(thread_id, id) AS MATERIALIZED (" +
   "SELECT j.value, (SELECT m2.id FROM messages m2 " +

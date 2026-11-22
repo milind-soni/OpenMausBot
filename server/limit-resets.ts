@@ -5,7 +5,8 @@ import { readFileSync } from "node:fs";
 
 import { NEAR_LIMIT_PERCENT, type EngineLimit, type EngineLimitsReport, type LimitWindowName } from "../shared/limit-reset.ts";
 import { writeFileAtomic } from "./atomic.ts";
-import { LIMIT_POLL_MS, limitReadDue } from "./limit-poll.ts";
+import { LIMIT_IDLE_POLL_MS, LIMIT_POLL_MS, limitReadDue } from "./limit-poll.ts";
+import { codexHasCreditRoom } from "./codex-credits.ts";
 import { claudeHasExtraUsageRoom, loadPlanUsage, type PlanAccount, type PlanProviderRow, type PlanUsageReport, type PlanWindow } from "./plan-usage.ts";
 import type { RuntimeEvent } from "../shared/runtime-events.ts";
 import { OPENCODE_GO_MODEL_PREFIX, typedOpenCodeModel } from "../shared/opencode-model-id.ts";
@@ -17,8 +18,12 @@ const SOON_AFTER_REFUSAL_MS = 5_000;
 
 type Driver = EngineLimit["driver"];
 
-/** The drivers whose plan usage gives a limit to show and to route around. */
-const REPORTED_DRIVERS: ReadonlySet<string> = new Set(["claude", "codex", "grok", "opencode"]);
+/** The drivers whose plan usage gives a limit to show. */
+const REPORTED_DRIVERS: ReadonlySet<string> = new Set(["claude", "codex", "grok", "opencode", "antigravity"]);
+/** Antigravity's 5-hour and weekly windows are Google's default Gemini allowance; its other models draw on allowances
+ * of their own. */
+const SHOWN_ONLY_METERS: Readonly<Record<string, string>> = { antigravity: "Gemini" };
+const meterHoldsEngine = (driver: string) => !Object.hasOwn(SHOWN_ONLY_METERS, driver);
 
 function windowLine(name: LimitWindowName, window: PlanWindow): { window: LimitWindowName; used: number; resetsAt: number | null } | null {
   if (!window.available || window.usedPercent === null) return null;
@@ -31,14 +36,14 @@ function windowLine(name: LimitWindowName, window: PlanWindow): { window: LimitW
 export function engineLimitFromUsage(row: PlanProviderRow): EngineLimit | null {
   if (!row.ok || !REPORTED_DRIVERS.has(row.driver)) return null;
   const windows = [windowLine("5-hour", row.fiveHour), windowLine("weekly", row.weekly)].filter((line) => line !== null);
-  const base = { engine: row.id, name: row.name, driver: row.driver as Driver,
+  const base = { engine: row.id, name: row.name, driver: row.driver as Driver, ...(meterHoldsEngine(row.driver) ? {} : { meter: SHOWN_ONLY_METERS[row.driver] }),
     windows: windows.map(({ window, used, resetsAt }) => ({ window, usedPercent: used, resetsAt })) };
-  if (!windows.length) return { ...base, window: null, usedPercent: null, resetsAt: null, blocked: false };
+  if (!windows.length) return meterHoldsEngine(row.driver) ? { ...base, window: null, usedPercent: null, resetsAt: null, blocked: false } : null;
   const full = windows.filter((line) => line.used >= 100);
   if (full.length) {
     const latest = full.reduce((left, right) => (right.resetsAt ?? 0) > (left.resetsAt ?? 0) ? right : left);
-    // Claude goes on past a full window on its paid extra usage while that has room; its own refusal still holds it.
-    return { ...base, window: latest.window, usedPercent: 100, resetsAt: full.some((line) => line.resetsAt === null) ? null : latest.resetsAt, blocked: !claudeHasExtraUsageRoom(row) };
+    // A full window is the meter only: the engine's own refusal still holds it. A shown-only meter never holds the engine.
+    return { ...base, window: latest.window, usedPercent: 100, resetsAt: full.some((line) => line.resetsAt === null) ? null : latest.resetsAt, blocked: meterHoldsEngine(row.driver) && !claudeHasExtraUsageRoom(row) && !codexHasCreditRoom(row) };
   }
   const fullest = [...windows].sort((left, right) => right.used - left.used || (left.resetsAt ?? Infinity) - (right.resetsAt ?? Infinity))[0]!;
   return { ...base, window: fullest.window, usedPercent: fullest.used, resetsAt: fullest.resetsAt, blocked: false };
@@ -59,7 +64,7 @@ function holdGone(row: PlanProviderRow, limit: EngineLimit, held: number | undef
   return windows.every((line) => line === null || (line.resetsAt !== null && Math.abs(line.resetsAt - held) > SAME_RESET_MS));
 }
 
-const PRODUCT_NAMES: Record<string, string> = { claudeAgent: "Claude", codex: "Codex", grokAgent: "Grok", opencodeGo: "OpenCode" };
+const PRODUCT_NAMES: Record<string, string> = { claudeAgent: "Claude", codex: "Codex", grokAgent: "Grok", opencodeGo: "OpenCode", antigravityAgent: "Antigravity" };
 
 /** "Claude", "Codex", or the name the person gave that engine. */
 export function engineLabel(engine: string, instance?: { displayName?: string; driverKind: string }): string {
@@ -68,7 +73,7 @@ export function engineLabel(engine: string, instance?: { displayName?: string; d
 
 /** A line for the turn's text when its engine is nearly out of usage, so the bot can set up its own continuation. */
 export function nearLimitNote(limit: EngineLimit | undefined, name: string, timeZone: string): string {
-  if (!limit || limit.usedPercent === null || limit.usedPercent < NEAR_LIMIT_PERCENT) return "";
+  if (!limit || !meterHoldsEngine(limit.driver) || limit.usedPercent === null || limit.usedPercent < NEAR_LIMIT_PERCENT) return "";
   let resets = "";
   if (limit.resetsAt !== null) {
     try { resets = `; it resets ${new Date(limit.resetsAt).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit", timeZone })} (${timeZone})`; }
@@ -108,6 +113,8 @@ export class LimitResetClock {
   private readonly options: LimitClockOptions;
   private readonly now: () => number;
   private usage = new Map<string, EngineLimit>();
+  /** When each engine's usage was last read successfully. */
+  private readonly readAt = new Map<string, number>();
   private readonly refusals = new Map<string, number>();
   /** Engines held by a refusal that named no reset time: the hold is a guess, never shown as a reset. */
   private readonly guessed = new Set<string>();
@@ -148,11 +155,18 @@ export class LimitResetClock {
     return until > now ? until : null;
   }
 
+  /** Whether only the usage meter holds this engine now, with no refusal of its own. */
+  meterOnly(engine: string, model?: string): boolean {
+    return this.refusal(engine) === null && this.blockedUntil(engine, model) !== null;
+  }
+
   /** The engine's usage reading when its meter covers `model` (every model when none is named): OpenCode's meter is
    * the Go subscription's and never covers Zen's free models. */
   private meterFor(engine: string, model?: string): EngineLimit | undefined {
     const usage = this.reading(engine);
-    return usage?.driver !== "opencode" || !model || (typedOpenCodeModel(model) ?? model).startsWith(OPENCODE_GO_MODEL_PREFIX) ? usage : undefined;
+    // A reading kept through a failed read (lastReading) is shown only: whether the engine is held is left to fresh ones.
+    if (!usage || !meterHoldsEngine(usage.driver) || usage.checkedAt !== undefined) return undefined;
+    return usage.driver !== "opencode" || !model || (typedOpenCodeModel(model) ?? model).startsWith(OPENCODE_GO_MODEL_PREFIX) ? usage : undefined;
   }
 
   limit(engine: string): EngineLimit | undefined {
@@ -163,8 +177,9 @@ export class LimitResetClock {
     const engines = new Map([...this.usage].filter(([engine]) => this.reading(engine)));
     for (const engine of this.refusals.keys()) {
       const until = this.blockedUntil(engine);
-      const known = engines.get(engine);
+      const reading = engines.get(engine);
       if (until === null) continue;
+      const known = reading?.meter ? undefined : reading;
       const limit: EngineLimit = { ...(known ?? this.unnamed(engine)), blocked: true, usedPercent: 100, resetsAt: this.guessed.has(engine) ? known?.resetsAt ?? null : until };
       if (!known?.blocked) limit.held = true;
       engines.set(engine, limit);
@@ -233,9 +248,14 @@ export class LimitResetClock {
     let released = false;
     for (const row of report.providers) {
       const limit = engineLimitFromUsage(row);
-      if (!limit) continue;
+      if (!limit) {
+        const kept = row.ok ? undefined : this.lastReading(row.id);
+        if (kept) next.set(row.id, kept);
+        continue;
+      }
       next.set(limit.engine, limit);
-      if (fetchedAt >= (this.heldAt.get(limit.engine) ?? 0) && holdGone(row, limit, this.refusals.get(limit.engine), this.guessed.has(limit.engine))) {
+      this.readAt.set(limit.engine, this.now());
+      if (meterHoldsEngine(row.driver) && fetchedAt >= (this.heldAt.get(limit.engine) ?? 0) && holdGone(row, limit, this.refusals.get(limit.engine), this.guessed.has(limit.engine))) {
         this.refusals.delete(limit.engine);
         this.heldAt.delete(limit.engine);
         released = true;
@@ -245,6 +265,16 @@ export class LimitResetClock {
     this.usage = next;
     this.checkedAt = this.now();
     this.options.onChange?.();
+  }
+
+  /** A failed read (a refused or timed-out request, a laptop just woken) leaves the engine's last reading in place, so
+   * the usage shown does not vanish until the next read: for an hour at most, and only while none of its windows has
+   * reset since. It carries when it was read, and is shown only: it never says the engine refuses work. */
+  private lastReading(engine: string): EngineLimit | undefined {
+    const usage = this.usage.get(engine), at = this.readAt.get(engine), now = this.now();
+    if (!usage || at === undefined || now - at > LIMIT_IDLE_POLL_MS) return undefined;
+    if ((usage.windows ?? []).some((window) => window.resetsAt !== null && window.resetsAt <= now)) return undefined;
+    return { ...usage, blocked: false, checkedAt: at };
   }
 
   /** The person's "Try again now": the engine's hold ends at once, so the next turn goes to it. A refusal holds it again. */
@@ -265,8 +295,7 @@ export class LimitResetClock {
 
   async refresh(force: boolean): Promise<void> {
     if (this.loading) return this.loading;
-    // An engine whose usage holds nothing here (engineLimitFromUsage) is not asked for it.
-    const accounts = this.options.accounts().filter((account) => REPORTED_DRIVERS.has(account.driver));
+    const accounts = this.options.accounts();
     this.loading = (async () => {
       try {
         if (!accounts.length) { this.checkedAt = this.now(); this.failures = 0; return; }

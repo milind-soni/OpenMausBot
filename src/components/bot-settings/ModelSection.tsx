@@ -1,16 +1,18 @@
 import { EffortRow, ModelPicker } from "../ModelPicker";
 import { X } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { useStore, type Bot, type InstanceInfo } from "@/state/store";
+import { type Bot, type InstanceInfo } from "@/state/store";
 import { useBotEditor } from "./BotEditorContext";
 import { ProposalStatus } from "./ProposalStatus";
+import { CheckWorkSetting } from "./CheckWorkSetting";
 import { ThreadModelsLine } from "../ThreadModelsLine";
 import { t } from "@/lib/i18n";
 import { Select } from "../Select";
 import { backupNote } from "@/lib/engine-rail";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 export function ModelSection({ bot }: { bot: Bot }) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config, instances: s.instances }), sameFields), dispatch = useStoreDispatch();
   const { draft } = useBotEditor();
   const modelVariants = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId)?.capabilities?.modelVariants;
   return (
@@ -47,6 +49,7 @@ export function ModelSection({ bot }: { bot: Bot }) {
           </div>
         }
       />
+      {!draft && <CheckWorkSetting bot={bot} />}
       {!draft && <FallbackChain bot={bot} onChange={(fallback) => dispatch({ type: "updateBot", botId: bot.id, patch: { fallback } })} />}
       {!draft && state.config?.cacheKeepWarm && (
         <KeepWarmRow bot={bot} workspaceOn={state.config.cacheKeepWarm.enabled}
@@ -73,7 +76,7 @@ function KeepWarmRow({ bot, workspaceOn, onChange }: { bot: Bot; workspaceOn: bo
 }
 
 export function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback: Bot["fallback"]) => void }) {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ instances: s.instances }), sameFields);
   const chain = bot.fallback ?? [];
   // Backups may share an account with the main AI or each other, never a model.
   const taken = (instanceId: string, model: string, except?: number) =>

@@ -1,4 +1,4 @@
-import { createContext, use, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Children, createContext, use, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Check, Copy, Ellipsis, Reply, X } from "lucide-react";
 import { popoverClosesOnKey, usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { cn } from "@/lib/cn";
@@ -76,6 +76,13 @@ export function MessageActions({
   const mirrored = side === "user";
   const streaming = use(StreamingReplyContext);
   const shown = !streaming && (forceOpen || menuOpen || hovered || keyboardFocus || tapped);
+  // The buttons mount on the row's first hover, focus, tap or right-click; until then the "more" button is the way in.
+  const [armed, setArmed] = useState(false);
+  if (!armed && (shown || forceOpen)) setArmed(true);
+  const drawn = armed || items.length === 0;
+  const armedRef = useRef(drawn);
+  armedRef.current = drawn;
+  const handOff = useRef(false);
   const canPointRef = useRef(false);
   canPointRef.current = !streaming && items.length + contextItems.length > 0;
 
@@ -86,7 +93,15 @@ export function MessageActions({
     let press: { x: number; y: number; at: number; timer: ReturnType<typeof setTimeout> } | null = null;
     const enter = (event: PointerEvent) => { if (event.pointerType !== "touch") setHovered(true); };
     const leave = (event: PointerEvent) => { if (event.pointerType !== "touch") setHovered(false); };
-    const focusIn = (event: FocusEvent) => setKeyboardFocus(focusVisible(event.target));
+    const focusIn = (event: FocusEvent) => {
+      if (!armedRef.current) {
+        // Tab from above lands on "more" before the buttons ahead of it exist: focus goes on to the first of them.
+        const from = event.relatedTarget;
+        handOff.current = event.target === moreRef.current && !(from instanceof Node && rootRef.current && rootRef.current.compareDocumentPosition(from) & Node.DOCUMENT_POSITION_FOLLOWING);
+        setArmed(true);
+      }
+      setKeyboardFocus(focusVisible(event.target));
+    };
     const focusOut = (event: FocusEvent) => {
       if (event.relatedTarget instanceof Node && row.contains(event.relatedTarget)) return;
       setKeyboardFocus(false);
@@ -151,6 +166,12 @@ export function MessageActions({
     };
   }, []);
 
+  useLayoutEffect(() => {
+    if (!drawn || !handOff.current) return;
+    handOff.current = false;
+    rootRef.current?.querySelector<HTMLElement>("button:not(:disabled)")?.focus();
+  }, [drawn]);
+
   usePopoverDismiss(tapped && !menuOpen, rowRef, () => setTapped(false));
   usePopoverDismiss(menuOpen, rootRef, () => {
     setMenuOpen(false);
@@ -210,7 +231,7 @@ export function MessageActions({
         (document.activeElement as HTMLElement | null)?.blur();
       }}
     >
-      {children}
+      {drawn ? children : Children.toArray(children).map((_, index) => <span key={index} aria-hidden="true" className="size-7 shrink-0" />)}
       {items.length > 0 && (
         <button
           ref={moreRef}
@@ -226,7 +247,7 @@ export function MessageActions({
           aria-controls={menuOpen ? menuId : undefined}
           className={cn(messageActionClass, menuOpen && "bg-ink/10 text-ink")}
         >
-          <Ellipsis {...ACTION_ICON} aria-hidden="true" />
+          {drawn && <Ellipsis {...ACTION_ICON} aria-hidden="true" />}
         </button>
       )}
       {menuOpen && (

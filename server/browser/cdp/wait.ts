@@ -137,7 +137,7 @@ async function elementPresent(context: WaitContext, target: { ref?: string; sele
   const ref = target.ref ?? (target.selector !== undefined ? parseRef(target.selector) : null);
   if (ref) {
     try {
-      return await callOnNode<boolean>(context.frames, context.refs.resolve(ref), CONNECTED);
+      return await callOnNode<boolean>(context.frames, context.refs.resolve(ref), CONNECTED, [], { readOnly: true });
     } catch (error) {
       if (error instanceof DriverError && error.code === "stale-ref") throw error;
       return false;

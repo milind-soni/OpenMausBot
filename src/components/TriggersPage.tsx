@@ -7,8 +7,11 @@ import { t } from "@/lib/i18n";
 import { isRoutineProblemRun } from "@/lib/routines";
 import { saveWebhookCredential, webhookCredentialStore } from "@/lib/webhook-credentials";
 import { botInDepartment, filterableDepartments, GENERAL_DEPARTMENT } from "@/lib/department-filter";
-import { useStore } from "@/state/store";
+import { type Bot } from "@/state/store";
+import { useBotsApartFromTurns } from "@/state/apart-from-turns";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { useAppTriggers } from "@/lib/app-triggers";
+import { useMinuteTick } from "@/lib/minute-tick";
 import { AppEventEditor } from "./automations/AppEventEditor";
 import { useAllAutomationActions } from "./automations/app-actions";
 import { AutomationPanel } from "./automations/AutomationPanel";
@@ -25,11 +28,16 @@ import { schedulableBots, useTeamPeople } from "@/state/team-people";
 
 /** The bot filter earns its place only on a long list shared by several bots. */
 const FILTER_FROM = 9;
+const NO_BOTS: Bot[] = [];
 
 /** Automations: every schedule and every "when another app sends something", each as one plain sentence. */
 export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpenRoom: (id: string) => void }) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({
+    routinesFocus: s.routinesFocus, routines: s.routines, webhooks: s.webhooks, routineRuns: s.routineRuns, sections: s.sections,
+    routinesUnreadable: s.config?.routinesUnreadable, routinesLoadState: s.routinesLoadState, hydrated: s.hydrated,
+  }), sameFields), bots = useBotsApartFromTurns(), dispatch = useStoreDispatch();
   const actions = useAllAutomationActions();
+  useMinuteTick();
   const appTriggers = useAppTriggers();
   const backButtonRef = useRef<HTMLButtonElement>(null);
   const focus = state.routinesFocus;
@@ -40,9 +48,11 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
   const [newText, setNewText] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ kind: SetUpKind; id?: string; botId?: string } | null>(null);
   const routinesOnly = window.ogb?.remoteClient?.active === true;
-  const visibleBots = state.bots.filter((bot) => !bot.hidden);
+  const visibleBots = bots.filter((bot) => !bot.hidden);
+  // An editor reads each bot's threads, so while one is open the page follows every change to the bots.
+  const editorBots = useStoreSelector((s) => editing ? s.bots : NO_BOTS).filter((bot) => !bot.hidden);
   const team = useTeamPeople();
-  const botName = (botId: string) => state.bots.find((bot) => bot.id === botId)?.name ?? t("routines.unavailableBot");
+  const botName = (botId: string) => bots.find((bot) => bot.id === botId)?.name ?? t("routines.unavailableBot");
 
   useEffect(() => {
     setBotFilter(focus?.botId ?? "all");
@@ -51,9 +61,9 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
   }, [focus]);
   useEffect(() => { backButtonRef.current?.focus({ preventScroll: true }); }, []);
 
-  const all = useMemo(() => automationsFrom({ routines: state.routines, webhooks: routinesOnly ? [] : state.webhooks, appTriggers: appTriggers.triggers, runs: state.routineRuns, bots: state.bots }),
-    [state.routines, state.webhooks, appTriggers.triggers, state.routineRuns, state.bots, routinesOnly]);
-  const departments = filterableDepartments(state.bots, [...new Set([...(state.sections ?? []), ...state.bots.flatMap((bot) => bot.section ? [bot.section] : [])])]);
+  const all = useMemo(() => automationsFrom({ routines: state.routines, webhooks: routinesOnly ? [] : state.webhooks, appTriggers: appTriggers.triggers, runs: state.routineRuns, bots }),
+    [state.routines, state.webhooks, appTriggers.triggers, state.routineRuns, bots, routinesOnly]);
+  const departments = filterableDepartments(bots, [...new Set([...(state.sections ?? []), ...bots.flatMap((bot) => bot.section ? [bot.section] : [])])]);
   const showDepartments = departments.names.length + (departments.hasGeneral ? 1 : 0) > 1;
   const activeDepartment = department === "all" || (department === GENERAL_DEPARTMENT ? departments.hasGeneral : departments.names.includes(department)) ? department : "all";
   useEffect(() => {
@@ -61,7 +71,7 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
     setDepartment("all");
     setBotFilter("all");
   }, [activeDepartment, department]);
-  const inDepartment = (botId: string) => botInDepartment(state.bots.find((bot) => bot.id === botId), activeDepartment);
+  const inDepartment = (botId: string) => botInDepartment(bots.find((bot) => bot.id === botId), activeDepartment);
   const departmentBots = visibleBots.filter((bot) => botInDepartment(bot, activeDepartment));
   const showFilter = all.length >= FILTER_FROM && new Set(all.map((automation) => automation.botId)).size > 1;
   const listed = orderAutomations(all.filter((automation) => inDepartment(automation.botId) && (!showFilter || botFilter === "all" || automation.botId === botFilter)));
@@ -107,8 +117,8 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="mx-auto w-full max-w-3xl p-4 sm:p-6">
               <LimitWarnings botFilter={showFilter ? botFilter : "all"} />
-              {state.config?.routinesUnreadable && <div role="alert" className="mb-4 rounded-lg bg-danger/10 p-3 text-[12px] leading-relaxed text-danger" data-routines-unreadable="">{t("routines.unreadable")}</div>}
-              {all.length === 0 && !state.config?.routinesUnreadable && state.routinesLoadState !== "loading" && state.hydrated ? (
+              {state.routinesUnreadable && <div role="alert" className="mb-4 rounded-lg bg-danger/10 p-3 text-[12px] leading-relaxed text-danger" data-routines-unreadable="">{t("routines.unreadable")}</div>}
+              {all.length === 0 && !state.routinesUnreadable && state.routinesLoadState !== "loading" && state.hydrated ? (
                 <section aria-label={t("automations.empty.title")} className="px-6 py-16 text-center">
                   <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-2xl bg-accent/10 text-accent"><Zap size={22} /></div>
                   <h2 className="text-[17px] font-semibold text-ink">{t("automations.empty.title")}</h2>
@@ -159,11 +169,11 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
       {newText !== null && (
         <NewAutomation initialText={newText} onClose={() => setNewText(null)} onSetUpYourself={(kind, botId) => { setNewText(null); setEditing({ kind, botId }); }} />
       )}
-      {editing?.kind === "schedule" && (editRoutine || !editing.id) && <RoutineEditor routine={editRoutine} bots={schedulableBots(visibleBots, team, editRoutine?.botId)} initialBotId={editing.botId} plain onClose={() => setEditing(null)} />}
+      {editing?.kind === "schedule" && (editRoutine || !editing.id) && <RoutineEditor routine={editRoutine} bots={schedulableBots(editorBots, team, editRoutine?.botId)} initialBotId={editing.botId} plain onClose={() => setEditing(null)} />}
       {editing?.kind === "webhook" && (editWebhook || !editing.id) && (
-        <WebhookEditor webhook={editWebhook} bots={visibleBots} initialBotId={editing.botId} onClose={() => setEditing(null)} onCredential={(credential, id) => { saveWebhookCredential(webhookCredentialStore(), id, credential); setOpenId(id); }} />
+        <WebhookEditor webhook={editWebhook} bots={editorBots} initialBotId={editing.botId} onClose={() => setEditing(null)} onCredential={(credential, id) => { saveWebhookCredential(webhookCredentialStore(), id, credential); setOpenId(id); }} />
       )}
-      {editing?.kind === "app" && (editApp || !editing.id) && <AppEventEditor trigger={editApp} bots={visibleBots} initialBotId={editing.botId} onClose={() => setEditing(null)} onSaved={(trigger) => setOpenId(trigger.id)} />}
+      {editing?.kind === "app" && (editApp || !editing.id) && <AppEventEditor trigger={editApp} bots={editorBots} initialBotId={editing.botId} onClose={() => setEditing(null)} onSaved={(trigger) => setOpenId(trigger.id)} />}
     </ToolPage>
   );
 }

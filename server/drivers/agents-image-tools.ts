@@ -41,7 +41,7 @@ export const IMAGE_TOOL_DEFINITIONS = [
         format: { type: "string", enum: ["gif"], description: "gif makes an animated GIF; only GPT-Image-2.6 models on OpenAI can." },
         frames: { type: "integer", minimum: 2, maximum: 16, description: "GIF frame count; 9 when omitted." },
         frameDurationMs: { type: "integer", minimum: 20, maximum: 2000, description: "GIF milliseconds per frame; 200 when omitted." },
-        provider: { type: "string", enum: ["openai", "xai", "gemini", "openrouter", "custom"], description: "Only when the person named one; it must be their base or backup." },
+        provider: { type: "string", enum: ["openai", "xai", "gemini", "openrouter", "higgsfield", "custom"], description: "Only when the person named one; it must be their base or backup." },
       },
       required: ["prompt"],
     },

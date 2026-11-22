@@ -241,7 +241,8 @@ describe("a place's inbox in the panel", () => {
     const section = document.querySelector<HTMLElement>("[data-inbox-active]")!;
     expect(section.textContent).toContain("Writing the page");
     expect(section.textContent).not.toContain("Pricing work");
-    expect(section.textContent, "unread news is already a line above").not.toContain("Told already");
+    expect(section.textContent, "an unread conversation stays until it is read").toContain("Told already");
+    expect(section.querySelector("[data-attention-unread-dot]"), "marked as unread").not.toBeNull();
     expect(section.textContent, "work still going stays reachable").toContain("Told and still working");
     await act(async () => { [...section.querySelectorAll<HTMLElement>("button")].find((one) => one.textContent?.includes("Writing the page"))!.click(); });
     expect(dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: "eli", threadId: "eli-work" });

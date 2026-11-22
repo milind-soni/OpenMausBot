@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { Loader2, Sparkles } from "lucide-react";
 
-import { useStore } from "@/state/store";
 import { t } from "@/lib/i18n";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 const INPUT_CLASS = "w-full min-w-0 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none disabled:opacity-50";
-const PROVIDER_LABEL = { openai: "OpenAI", xai: "Grok (xAI)", gemini: "Gemini", openrouter: "OpenRouter", custom: "Custom" } as const;
+const PROVIDER_LABEL = { openai: "OpenAI", xai: "Grok (xAI)", gemini: "Gemini", openrouter: "OpenRouter", higgsfield: "Higgsfield", custom: "Custom" } as const;
 
 export function AvatarImageGenerator({
   botLabel,
@@ -18,7 +18,7 @@ export function AvatarImageGenerator({
   generating: boolean;
   onGenerate: (direction: string) => Promise<void>;
 }) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const imageGen = state.config?.imageGen;
   const [direction, setDirection] = useState("");
   const busy = disabled || generating;

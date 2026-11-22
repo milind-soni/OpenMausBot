@@ -82,7 +82,9 @@ describe("what bots.json holds, and when", () => {
       const saved = onDisk(bot.id);
       check(saved);
       expect(task(saved).usage, `${what}: the waiting changes ride along`).toMatchObject({ turns: n + 1 });
-      expect(waitingSaves(), `${what}: nothing is left waiting`).toBe(0);
+      const now = written();
+      flushLaterSaves();
+      expect(written(), `${what}: nothing is left waiting`).toBe(now);
     });
   });
 
@@ -91,7 +93,9 @@ describe("what bots.json holds, and when", () => {
     const bot = store.createBot({ name: "Maus" }, { seedMessages: false });
     store.patchTask(bot.id, bot.threadId, { snoozedUntil: 0 });
     store.patchTask(bot.id, bot.threadId, { unread: true });
-    expect(waitingSaves()).toBe(0);
+    const now = written();
+    flushLaterSaves();
+    expect(written(), "nothing of it was left waiting").toBe(now);
     const task = onDisk(bot.id).tasks!.find((candidate) => candidate.threadId === bot.threadId)!;
     expect(task.unread).toBe(true);
     expect(task.snoozedUntil).toBeUndefined();

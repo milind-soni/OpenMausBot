@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { AppConfig } from "../config.ts";
 import { flushDecisionLog, readDecisions } from "../decision-log.ts";
 import { UNDO_STALE } from "../direct-apply.ts";
+import type { TurnOwnerRefusal } from "../host/phones.ts";
 import type { BotRecord } from "../store.ts";
 import { createAppSettings, WRITE_BUDGET } from "./host.ts";
 import { createSettingsRegistry } from "./registry.ts";
@@ -18,7 +19,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 });
 
-function fixture(options: { owner?: boolean; guest?: boolean; group?: boolean; window?: boolean; pictureRefusal?: string; patchRefusal?: string; automated?: boolean } = {}) {
+function fixture(options: { owner?: boolean; ownerRefusal?: TurnOwnerRefusal; guest?: boolean; group?: boolean; window?: boolean; pictureRefusal?: string; patchRefusal?: string; automated?: boolean } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "app-settings-"));
   dirs.push(dataDir);
   const bots: BotRecord[] = [
@@ -85,6 +86,7 @@ function fixture(options: { owner?: boolean; guest?: boolean; group?: boolean; w
   const host = createAppSettings({
     store: store as never, dataDir, entries,
     turnOwner: () => (options.owner === false ? null : "owner"),
+    ownerRefusal: () => (options.owner === false ? (options.ownerRefusal ?? null) : null),
     guestDriven: () => options.guest === true,
     automated: () => options.automated === true,
     requestCredential: async (_bot, _threadId, body) => { credentialCards.push(body); return { status: 201, body: { messageId: "secret-1", label: "OpenAI API key" } }; },
@@ -116,13 +118,23 @@ describe("reads", () => {
     expect(JSON.parse(String(got.body.text))).toMatchObject({ id: "rooms.turnTimeoutMinutes", value: "30", allowed: "1 to 1440 minutes", change: "set applies at once, with Undo on the card" });
   });
 
+  it("names the per-bot connected apps switch as the bot panel does, so find reaches it by those words", async () => {
+    const { host, turn } = fixture();
+    const found = JSON.parse(String((await host.handle({ action: "find", query: "connected apps" }, turn)).body.text)) as Array<{ id: string }>;
+    expect(found.map((hit) => hit.id)).toContain("bots.settings");
+    const got = JSON.parse(String((await host.handle({ action: "get", id: "bots.settings" }, turn)).body.text)) as { help: string };
+    expect(got.help).toContain("connected apps");
+    expect(got.help).not.toContain("Composio apps");
+  });
+
   it("names real places only: find falls back to where a thing is, places lists them all", async () => {
     const { host, turn } = fixture();
     const owner = await host.handle({ action: "get", id: "phone.pairing" }, turn);
     expect(JSON.parse(String(owner.body.text))).toMatchObject({ where: "Settings → Phone & devices → Pair a phone", change: "only the person, in Settings → Phone & devices → Pair a phone" });
     const none = await host.handle({ action: "find", query: "invoice" }, turn);
     expect(none.body.text).toMatch(/^No setting you can change matches "invoice"\. Where the person finds it in the app: Settings → Plan & billing/);
-    expect((await host.handle({ action: "places", query: "spending" }, turn)).body.text).toMatch(/^Settings → Spending \(shown in Advanced mode only/);
+    expect((await host.handle({ action: "places", query: "spending" }, turn)).body.text).toMatch(/^Settings → Spending$/m);
+    expect((await host.handle({ action: "places", query: "storage" }, turn)).body.text).toMatch(/^Settings → Data.*\(shown in Advanced mode only/m);
     const every = String((await host.handle({ action: "places" }, turn)).body.text).split("\n");
     expect(every[0]).toMatch(/^Settings opens from/);
     expect(every).toContain("Settings → AI → Other services");
@@ -136,6 +148,31 @@ describe("reads", () => {
     expect(refused.status).toBe(403);
     expect(refused.body.error).toContain("owner's own conversation");
     expect(saved).toEqual([]);
+  });
+
+  it("says why a turn is not the owner's own and what the person can do instead, and still changes nothing", async () => {
+    const said = async (options: Parameters<typeof fixture>[0]) => {
+      const { host, turn, set, saved } = fixture(options);
+      const where = (JSON.parse(String((await host.handle({ action: "get", id: "general.language" }, turn)).body.text)) as { where: string }).where;
+      const refused = await set("general.language", "de");
+      expect(refused.status).toBe(403);
+      expect(saved).toEqual([]);
+      const error = String(refused.body.error);
+      expect(error).toMatch(/^Settings change only in the owner's own conversation\. Nothing changed; you may still read settings\. /);
+      expect(error).toContain(`The person can change it themselves in ${where}.`);
+      return error;
+    };
+    expect(await said({ owner: false, ownerRefusal: "shared" })).toContain("Several people share this server");
+    expect(await said({ owner: false, ownerRefusal: "service" })).toContain("set up as a shared or hosted server");
+    expect(await said({ guest: true })).toContain("A guest writes in this conversation");
+    const someoneElse = await said({ owner: false, ownerRefusal: "someone-else" });
+    expect(someoneElse).toContain("asking again here won't work");
+    expect(someoneElse).toContain("a new conversation with this bot that only they write in");
+    expect(await said({ owner: false, ownerRefusal: "not-owner" })).toContain("started by someone other than the owner");
+    expect(await said({ owner: false, ownerRefusal: "memory-changed" })).toContain("tap Mark reviewed");
+    expect(await said({ owner: false, ownerRefusal: "unproven" })).toContain("can't be tied to a message the owner sent here");
+    // No reason given: the plain words, still refused.
+    expect(await said({ owner: false })).toContain("can't be tied to a message the owner sent here");
   });
 
   it("refuses writes in a guest-driven conversation", async () => {

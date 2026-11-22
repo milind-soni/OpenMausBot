@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, GripVertical, MoreHorizontal, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, GripVertical, MoreHorizontal, Share2, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent } from "react";
 
 import { cn } from "@/lib/cn";
@@ -21,6 +21,7 @@ export function SidebarSectionHeader({
   onDragEnd,
   onMove,
   onDelete,
+  onShare,
   onContextMenu,
   line = false,
   onMenu,
@@ -40,6 +41,7 @@ export function SidebarSectionHeader({
   onDragEnd?: () => void;
   onMove?: (direction: -1 | 1) => void;
   onDelete?: () => void;
+  onShare?: () => void;
   onContextMenu?: (event: MouseEvent<HTMLDivElement>) => void;
   line?: boolean;
   onMenu?: (button: HTMLButtonElement) => void;
@@ -76,7 +78,7 @@ export function SidebarSectionHeader({
 
   if (line) {
     const tail = onToggle && (
-      <Chevron size={14} aria-hidden="true" className="shrink-0 text-ink-secondary opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-within/section:opacity-100 touch:opacity-100" />
+      <Chevron size={12} aria-hidden="true" className="shrink-0 text-ink-secondary opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-within/section:opacity-100 touch:opacity-100" />
     );
     return (
       <div
@@ -141,19 +143,30 @@ export function SidebarSectionHeader({
           title={toggleTitle}
           className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-0.5 text-left hover:bg-raised/50"
         >
-          <span className="truncate text-[12px] font-semibold text-ink-secondary">
+          <span className="truncate text-[13px] leading-[18px] text-ink-secondary">
             {name}
           </span>
-          <Chevron size={13} className="shrink-0 text-ink-secondary" aria-hidden="true" />
+          <Chevron size={12} className="shrink-0 text-ink-secondary" aria-hidden="true" />
           <SectionAttention attention={attention} label={attentionLabel} alert={alert} />
         </button>
       ) : (
         <div className="flex min-w-0 flex-1 items-center gap-1.5 px-1 py-0.5">
-          <span className="truncate text-[12px] font-semibold text-ink-secondary">
+          <span className="truncate text-[13px] leading-[18px] text-ink-secondary">
             {name}
           </span>
           {attentionLabel && <span className="sr-only">{attentionLabel}</span>}
         </div>
+      )}
+      {onShare && !naming && (
+        <button
+          type="button"
+          onClick={onShare}
+          aria-label={t("template.shareDepartment", { name })}
+          title={t("template.shareDepartment", { name })}
+          className="flex size-6 shrink-0 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink"
+        >
+          <Share2 size={13} aria-hidden="true" />
+        </button>
       )}
       {onDelete && !naming && (
         <button

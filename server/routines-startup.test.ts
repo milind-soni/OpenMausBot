@@ -146,9 +146,14 @@ it("recovers queued/due work and a waiting routine's imported hand-off after res
       expect.objectContaining({ id: "interrupted-run", status: "completed" }),
     ]));
     expect(runs.filter(run => run.routineId === onStartup.id)).toHaveLength(1);
-    expect(runs.filter((run) => run.routineId === cron.id && run.status === "completed")).toEqual([expect.objectContaining({ scheduledFor: expect.any(Number) })]);
-    const ranFor = runs.find((run) => run.routineId === cron.id && run.status === "completed")!.scheduledFor;
-    expect(ranFor).toBeGreaterThan(cronDueAt);
+    // The every-minute rule fires again whenever a minute begins while this test waits, so recovery is judged on the minutes up to the first one that ran.
+    const cronRuns = runs.filter((run) => run.routineId === cron.id);
+    const ranFor = Math.min(...cronRuns.filter((run) => run.status === "completed").map((run) => run.scheduledFor));
+    expect(ranFor).toBeGreaterThanOrEqual(cronDueAt + 5 * 60_000);
+    expect(cronRuns.filter((run) => run.scheduledFor <= ranFor).sort((a, b) => a.scheduledFor - b.scheduledFor).map((run) => [run.scheduledFor, run.status]))
+      .toEqual([[cronDueAt, "missed"], [ranFor, "completed"]]);
+    const laterMinutes = cronRuns.filter((run) => run.scheduledFor > ranFor).map((run) => run.scheduledFor);
+    expect(new Set(laterMinutes).size).toBe(laterMinutes.length);
     // The ledger beside routines.json holds one record for the minute that ran and one that counts the minutes before it.
     const history = (await api("GET", `/api/routines?history=${cron.id}`)).occurrences as Array<Record<string, unknown>>;
     expect(history).toEqual(expect.arrayContaining([
@@ -165,10 +170,9 @@ it("recovers queued/due work and a waiting routine's imported hand-off after res
     const resumedThread = (await api("GET", `/api/threads/${interruptedBot.threadId}/messages?limit=100`)).messages as Array<{ tool?: { name?: string }; from?: { botId?: string } }>;
     expect(resumedThread.some((message) => message.tool?.name === "Waiting routine's peer replied" && message.from?.botId === orphanPeer.id)).toBe(true);
     expect(resumedThread.some((message) => message.tool?.name?.startsWith("Resumed with Waiting routine's peer results"))).toBe(true);
-    expect(runs.filter(run => run.routineId === cron.id && run.scheduledFor < Math.floor(Date.now() / 60_000) * 60_000)).toHaveLength(1);
-    const restoredCron = (await api("GET", "/api/routines")).routines.find((routine: { id: string }) => routine.id === cron.id);
-    expect(restoredCron.schedule).toEqual(cron.schedule);
-    expect(restoredCron.nextRunAt).toBeGreaterThan(Date.now());
+    const restoredCron = async () => (await api("GET", "/api/routines")).routines.find((routine: { id: string }) => routine.id === cron.id);
+    expect((await restoredCron()).schedule).toEqual(cron.schedule);
+    await expect.poll(async () => (await restoredCron()).nextRunAt - Date.now(), { timeout: 15_000 }).toBeGreaterThan(0);
     const recoveredPeer = (await api("GET", "/api/bots")).bots.find((bot: { id: string }) => bot.id === orphanPeer.id);
     expect(recoveredPeer.messages.some((message: { text?: string }) => message.text?.includes("This waiting routine's hand-off survives the restart"))).toBe(true);
     await expect.poll(async () => Boolean((await api("GET", "/api/bots?messages=0")).bots.find((bot: { id: string }) => bot.id === orphanPeer.id).busy), { timeout: 15_000 }).toBe(false);

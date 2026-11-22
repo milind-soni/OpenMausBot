@@ -34,7 +34,6 @@ function harness() {
     owned: () => server.owned,
     onTakeStatus: vi.fn(),
     onError: vi.fn(),
-    onHalted: vi.fn(),
   };
   const control = createBrowserControl(options);
   const interact = (...inputs: PreviewStreamInput[]) => { for (const input of inputs) control.interact(input); };
@@ -170,15 +169,12 @@ describe("taking browser control implicitly", () => {
     expect(h.sent).toEqual([back, press, lift]);
   });
 
-  it("does not take control for page input after the input queue halted", async () => {
+  it("takes the browser again for page input after the input queue halted, since a take brings the queue back", async () => {
     const h = harness();
     h.transport.stopped.mockReturnValue(true);
-    h.interact(press); await settle();
-    expect(h.transport.take).not.toHaveBeenCalled();
-    expect(h.options.onHalted).toHaveBeenCalledOnce();
-    h.interact({ type: "reload" }); await settle();
+    h.interact(press, lift); await settle();
     expect(h.transport.take).toHaveBeenCalledOnce();
-    expect(h.sent).toEqual([{ type: "reload" }]);
+    expect(h.sent).toEqual([press, lift]);
   });
 
   it("feeds a long buffer to the input queue in batches it always accepts", async () => {

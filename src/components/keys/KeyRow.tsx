@@ -174,12 +174,17 @@ export function KeyRow({
             : saved.included ? { tone: "ok", text: t("keys.includedWithCloudPro") }
               : null;
 
+  const testAt = state.config && target.testAt ? target.testAt(state.config) ?? "" : null;
+  const checkedAt = useRef(testAt);
+
   const runCheck = async (): Promise<KeyResult> => {
     if (!target.test) return "unverified";
     const mine = ++generation.current;
+    const at = checkedAt.current;
     setBusy("checking");
     try {
       const check = await checkKey(target.test);
+      if (mine === generation.current && checkedAt.current !== at) return await runCheck();
       if (mine === generation.current) {
         setWorks(check.ok);
         setVerdict(check.ok ? check.text : null);
@@ -187,6 +192,7 @@ export function KeyRow({
       }
       return check.result;
     } catch (cause) {
+      if (mine === generation.current && checkedAt.current !== at) return await runCheck();
       if (mine === generation.current) setProblem(errorText(cause));
       return "unverified";
     }
@@ -256,6 +262,12 @@ export function KeyRow({
       setBusy(null);
     }
   };
+
+  useEffect(() => {
+    const before = checkedAt.current;
+    checkedAt.current = testAt;
+    if (before !== null && testAt !== null && before !== testAt && saved.configured) void recheck();
+  }, [testAt]);
 
   const remove = async () => {
     if (busyRef.current) return;

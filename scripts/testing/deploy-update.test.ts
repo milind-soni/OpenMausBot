@@ -165,6 +165,29 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
     expect(box.journal()).toBe(false);
   });
 
+  it("reads a container's state again when a read answers nothing, and the update goes on", () => {
+    const box = install({ behaviour: "inspect-fails-once" });
+    const done = box.run();
+    expect(done.status, done.stdout + done.stderr).toBe(0);
+    expect(done.said).toContain("Updated from 0.1.150 to 0.1.151.");
+  });
+
+  it("says a container that never answers a read could not be inspected, never that it is gone", () => {
+    const box = install({ behaviour: "uninspectable" });
+    const failed = box.run([], { env: { OMB_UPDATE_WAIT_S: "2" } });
+    expect(failed.status).toBe(1);
+    expect(failed.said.at(-3)).toMatch(/^The update to 0\.1\.151 did not work: its container could not be inspected \(Docker answered nothing about omb-\d+\)\.$/);
+    expect(failed.said.at(-1)).toBe("Your server runs 0.1.150 again, with its data as it was before the update.");
+  });
+
+  it("counts three answers in a row only from one container", () => {
+    // Each read finds another container that answers: no one of them has answered three times.
+    const box = install({ behaviour: "replaced" });
+    const failed = box.run([], { env: { OMB_UPDATE_WAIT_S: "2" } });
+    expect(failed.status).toBe(1);
+    expect(failed.said.at(-3)).toBe("The update to 0.1.151 did not work: it did not answer within 2 seconds.");
+  });
+
   it("says why in the server's own last words when the new version stops as it starts", () => {
     const box = install({ behaviour: "crashes", lastWords: "This data was written by a newer MausBot." });
     const failed = box.run();

@@ -138,7 +138,9 @@ export const mistralVibeSupport: AcpSupport = {
   displayName: "Mistral (Vibe)",
   models: MISTRAL_VIBE_MODELS,
   defaultCli: "vibe-acp",
-  cliVersion: /^vibe-acp /u,
+  // On Windows the CLI prints its file name: PATHEXT resolves a bare `vibe-acp` to `vibe-acp.EXE`,
+  // and the standalone build keeps the extension and case it was launched as.
+  cliVersion: /^vibe-acp(?:\.exe)? /iu,
   nativeSource: "mistral-vibe.acp",
   images: true,
   loginNote:
@@ -182,6 +184,7 @@ export const mistralVibeSupport: AcpSupport = {
   // Model is a session config option (see header); ids pass through unchanged.
   selectModel: { configId: "model" },
   shareProcess: true,
+  closeBeforeLiveLoad: true,
   resolveModels: resolveMistralVibeModels,
   resolveModelsOnCreate: false,
   fallbackModel(sessionConfig, catalogDefault) {

@@ -2,14 +2,15 @@ import { useState } from "react";
 import { Check, Hand, KeyRound, Loader2, LockKeyhole, LogIn, RefreshCw, X } from "lucide-react";
 
 import type { ComputerHelpRef } from "../../shared/wire";
-import { browserMatesOf } from "../../shared/logins";
-import { signInOutcome } from "../../shared/sign-in-request";
+import { browserMatesOf } from "../../shared/browser-mates";
+import { isHandoff, signInOutcome } from "../../shared/sign-in-request";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { cardSaveTarget, saveLoginFromCard } from "@/lib/logins";
 import { answerSignIn, signInHostIsHere } from "@/lib/sign-in";
 import { useStore, type Bot, type Message } from "@/state/store";
 import { ASK_CHIP, ASK_CHIP_IDLE, askPrimary, ASK_QUIET_BUTTON, AskCard, AskSettledLine, returnFocusToComposer } from "./AskCard";
+import { HandoffCard } from "./HandoffCard";
 import { LoginForm } from "./LoginForm";
 import { VaultChoices } from "./VaultChoices";
 
@@ -24,19 +25,20 @@ const WHERE = {
   host: "signIn.where.host",
 } as const;
 
-export function SignInRequestCard({
-  botId,
-  botName,
-  color,
-  threadId,
-  message,
-}: {
+type CardProps = {
   botId: string;
   botName: string;
   color?: Bot["color"];
   threadId: string;
   message: Message;
-}) {
+};
+
+/** A bot's handoff (its own instruction) or a site sign-in. */
+export function SignInRequestCard(props: CardProps) {
+  return isHandoff(props.message.signIn) ? <HandoffCard {...props} /> : <SiteSignInCard {...props} />;
+}
+
+export function SiteSignInCard({ botId, botName, color, threadId, message }: CardProps) {
   const { state, dispatch } = useStore();
   const card = message.signIn!;
   // A login saved here is kept to every bot this browser signs in (server/bot-logins.ts cardBots).
@@ -216,7 +218,7 @@ export function SignInBanner({
   return (
     <div className="mt-3 rounded-xl border border-warning/25 bg-warning/10 p-4 text-start" data-testid="sign-in-banner">
       <div className="text-[13px] leading-relaxed text-warning">
-        <b>{askerName}</b> {t("signIn.banner", { site: help.site })}
+        <b>{askerName}</b> {help.instruction ? <bdi dir="auto">{help.instruction}</bdi> : t("signIn.banner", { site: help.site })}
       </div>
       {help.place === "local" && (
         <div className="mt-1 text-[12px] leading-relaxed text-ink-secondary">

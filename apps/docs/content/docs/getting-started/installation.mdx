@@ -14,9 +14,14 @@ Choose your computer below. Each link always downloads the latest published buil
 | macOS Intel | [Download `.dmg`](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-intel.dmg) | Signed and notarized. |
 | Windows x64 | [Download installer](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-setup.exe) | Per-user installer; Windows signing is not yet available. |
 | Ubuntu 24.04 x64 | [Download `.deb`](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-amd64.deb) · [AppImage](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot.AppImage) | The `.deb` is recommended; the AppImage is portable. |
+| Fedora x64 | [Download `.rpm`](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-x86_64.rpm) | Community-supported; install with `sudo dnf install ./OpenMausBot-x86_64.rpm`. |
 
 <Callout type="warn" title="Windows SmartScreen">
   The Windows installer is not code-signed yet. Windows may show “Unknown publisher.” Verify that you downloaded it from the official OpenMausBot releases repository before choosing **More info → Run anyway**.
+</Callout>
+
+<Callout title="Windows install folder">
+  By default the Windows app installs to `%LOCALAPPDATA%\Programs\OpenMausBot`, and every update goes back to the folder the installer recorded. Keep it where the installer put it: a copy moved by hand (for example from C: to D:) is left behind, and the next update lands in the recorded folder again.
 </Callout>
 
 ## Install an agent CLI
@@ -55,4 +60,4 @@ pnpm dev:desktop
 
 ## Where data lives
 
-MausBot stores its application data under `~/.openmausbot`. Electron window and browser data use the normal per-platform application data directory.
+MausBot stores its application data under `~/.openmausbot`. Workspaces you add are in `~/.openmausbot-profiles/`; once this computer's bots have moved to My Cloud, This Mac's (or This PC's) is there too, as `default`, and `~/.openmausbot` keeps the copy from before the move. On a server, see [Data and backups](/docs/self-hosting/data-and-backups) for the Docker and installer folders. Electron window and browser data use the normal per-platform application data directory.

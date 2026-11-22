@@ -15,6 +15,7 @@ import {
   type UsageRow,
   type UsageSplitBy,
 } from "../usage-ledger.ts";
+import { insightReadRange, summarizeInsights, validTimeZone } from "../usage-insights.ts";
 import { DETAIL_MAX, ERROR_MAX } from "../usage-trace/detail.ts";
 import type { ToolReceipt, TraceRecorder } from "../usage-trace/recorder.ts";
 import { createTraceService, PAGE_MAX, type TraceServiceDeps } from "../usage-trace/service.ts";
@@ -84,6 +85,18 @@ export function createUsageRoutes(deps: UsageRouteDeps): RouteHandler {
       const found = await traces.detail(id, around === null ? null : Number(around), deps.canSee(auth));
       res.setHeader("cache-control", "no-store");
       return found ? json(res, 200, found) : json(res, 404, { error: "no such trace" });
+    }
+    if (method === "GET" && path === "/api/usage/insights") {
+      const from = url.searchParams.get("from");
+      const to = url.searchParams.get("to");
+      const range = parseUsageRange(from, to);
+      if (!range || !from || !to) return json(res, 400, { error: "from and to must be YYYY-MM-DD, from no later than to, at most a year apart" });
+      const timeZone = validTimeZone(url.searchParams.get("tz") ?? "UTC");
+      if (!timeZone) return json(res, 400, { error: "tz must be an IANA time zone" });
+      await flushUsageLedger(deps.dataDir);
+      const rows = readUsage(deps.dataDir, insightReadRange(from, to)).map(deps.rowFor(auth));
+      res.setHeader("cache-control", "no-store");
+      return json(res, 200, summarizeInsights(rows, { from, to }, timeZone));
     }
     if (!(method === "GET" && (path === "/api/usage" || path === "/api/usage.csv"))) return PASS;
     const range = parseUsageRange(url.searchParams.get("from"), url.searchParams.get("to"));

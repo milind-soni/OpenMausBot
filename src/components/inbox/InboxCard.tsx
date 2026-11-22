@@ -15,7 +15,7 @@ import { InboxRowItem } from "./InboxRow";
 import { asMessage } from "./inbox-answer";
 import { askOf, CARD_ROWS, choiceResponse, choicesOf, rowsIn, tabCounts } from "./inbox-view";
 import { accessRequestWords } from "../bot-access/access-card";
-import { useInboxActions } from "./use-inbox-actions";
+import { useInboxActions, useInboxAsker } from "./use-inbox-actions";
 
 /** Most choices a question shows as buttons on the card; one with more opens in the inbox. */
 const CARD_CHOICES = 3;
@@ -28,7 +28,7 @@ export function InboxCardSlot({ threadId, messageId }: { threadId: string; messa
 }
 
 function Answers({ row, view }: { row: InboxRow; view: InboxView }) {
-  const { answer, askerOf } = useInboxActions(view);
+  const { answer } = useInboxActions(view), asker = useInboxAsker(row);
   const [sending, setSending] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const ask = askOf(row);
@@ -38,7 +38,7 @@ function Answers({ row, view }: { row: InboxRow; view: InboxView }) {
     const pending = view.threadId ? pendingApprovals([asMessage(row)])[0] : undefined;
     return pending ? (
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <PendingApprovalActions part="primary" tag="inbox" pending={pending} threadId={view.threadId!} bot={askerOf(row)} onCancelTurn={() => {}} />
+        <PendingApprovalActions part="primary" tag="inbox" pending={pending} threadId={view.threadId!} bot={asker} onCancelTurn={() => {}} />
       </div>
     ) : null;
   }

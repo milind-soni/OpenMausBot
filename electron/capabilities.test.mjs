@@ -7,6 +7,7 @@ const {
   linuxLocalControlSupport,
   linuxSession,
   localComputerReady,
+  macDriverUnsupported,
   nativeDesktopActions,
 } = require("./capabilities.cjs");
 const readyConnection = (mode = "embedded") => ({
@@ -19,12 +20,14 @@ describe("desktop capabilities", () => {
       appleMediaPermissions: false,
       applePrivacySettings: false,
       appleSpeech: false,
+      windowsSpeech: false,
     });
-    expect(nativeDesktopActions("win32")).toEqual(nativeDesktopActions("linux"));
+    expect(nativeDesktopActions("win32")).toEqual({ ...nativeDesktopActions("linux"), windowsSpeech: true });
     expect(nativeDesktopActions("darwin")).toEqual({
       appleMediaPermissions: true,
       applePrivacySettings: true,
       appleSpeech: true,
+      windowsSpeech: false,
     });
   });
 
@@ -126,12 +129,11 @@ describe("desktop capabilities", () => {
     expect(reasonOf("desktop-host-stopped")).toBe("cua-driver-unavailable");
   });
 
-  it.each(["win32", "linux"])("listens through Fish Audio on %s, but not from a server's page", (platform) => {
-    expect(desktopCapabilities({ platform, env: { DISPLAY: ":0" } }).dictation).toEqual({
-      available: true,
-      engine: "fish-audio",
-      onDevice: false,
-    });
+  it.each([
+    ["win32", { available: true, engine: "windows-speech", onDevice: true }],
+    ["linux", { available: true, engine: "fish-audio", onDevice: false }],
+  ])("listens on %s, but not from a server's page", (platform, dictation) => {
+    expect(desktopCapabilities({ platform, env: { DISPLAY: ":0" } }).dictation).toEqual(dictation);
     expect(desktopCapabilities({ platform, remote: true }).dictation).toEqual({
       available: false,
       engine: "none",
@@ -359,6 +361,25 @@ describe("desktop capabilities", () => {
       support: "unsupported",
       session: "wayland",
       compositor: "gnome-mutter",
+    });
+  });
+});
+
+describe("Mac driver support", () => {
+  it("names macOS 12 and older as too old for the driver, before it is loaded", () => {
+    const tooOld = { reasonCode: "macos-version-unsupported", reason: "Local desktop control needs macOS 13 Ventura or later." };
+    expect(macDriverUnsupported("darwin", "21.6.0")).toEqual(tooOld);
+    expect(macDriverUnsupported("darwin", "20.6.0")).toEqual(tooOld);
+    expect(macDriverUnsupported("darwin", "22.1.0")).toBeNull();
+    expect(macDriverUnsupported("darwin", "25.0.0")).toBeNull();
+    expect(macDriverUnsupported("win32", "10.0.19045")).toBeNull();
+    expect(macDriverUnsupported("darwin", "")).toBeNull();
+  });
+
+  it("keeps the too-old code for the page", () => {
+    const localConnection = { mode: "unavailable", ...macDriverUnsupported("darwin", "21.6.0") };
+    expect(desktopCapabilities({ platform: "darwin", localConnection }).localComputer).toMatchObject({
+      available: false, reasonCode: "macos-version-unsupported", message: "Local desktop control needs macOS 13 Ventura or later.",
     });
   });
 });

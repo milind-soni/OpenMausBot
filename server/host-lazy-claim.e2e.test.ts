@@ -93,6 +93,8 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
         TEMP: home, TMP: home, TMPDIR: home,
         OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_STATIC_DIR: ui, OMB_TEST_VM_STATE: stateFile,
         OMB_USER_DATA: join(home, "user-data"), OMB_TEST_DESKTOP_CUA_CONNECTION: join(home, "user-data", "cua-connection.json"),
+        // The env is built from scratch, so the suite's own switches are repeated: no boot downloads the model list or the announcements.
+        OMB_DISABLE_MODEL_MANIFEST_FETCH: "1", OMB_DISABLE_ANNOUNCEMENTS: "1",
         OMB_COMPUTER_CALL_WAIT_MS: String(CALL_WAIT_MS),
         OMB_COMPUTER_CALL_ACT_WITHIN_MS: String(ACT_WITHIN_MS), ...env,
       }, stdio: ["ignore", "pipe", "pipe"],
@@ -103,7 +105,10 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
     await until(async () => {
       if (proc.exitCode !== null) throw new Error(`server exited during boot:\n${output}`);
       try { return (await fetch(base + "/api/health")).ok; } catch { return false; }
-    }, Boolean);
+    }, Boolean).catch((error: unknown) => {
+      if (proc.exitCode !== null) throw error;
+      throw new Error(`the server was running and not yet healthy when the wait ended; it had printed:\n${output}`, { cause: error });
+    });
   }
   async function stop() {
     if (!child) return;

@@ -146,6 +146,13 @@ describe("a bot's conversations in its panel", () => {
     expect(more()!.textContent).toBe("Show 6 more");
   });
 
+  it("keeps the main thread listed, with its star, when it is older than the first three", () => {
+    render(research({ mainThreadId: "gift" }));
+    expect(listed()).toEqual(["hiring", "launch", "who", "gift"]);
+    expect(row("gift").querySelector('[aria-label="Main thread"]')).not.toBeNull();
+    expect(more()!.textContent).toBe("Show 6 more");
+  });
+
   it("offers only New conversation while the open one is the bot's only conversation", () => {
     render(research({ tasks: [task("who", "Who am I?", 2)] }));
     expect(host.querySelector("[data-conversations-new]")).not.toBeNull();
@@ -185,6 +192,19 @@ describe("a bot's conversations in its panel", () => {
     click(more());
     expect(row("pricing").querySelector("[data-thread-working]")!.textContent).toMatch(/^Working·1m 1[23]s$/);
     expect(host.querySelectorAll("[data-thread-working]")).toHaveLength(1);
+  });
+
+  it("marks the bot's main thread with the same star as the sidebar's thread list, and no other row", () => {
+    render(research({ mainThreadId: "launch" }));
+    const star = row("launch").querySelector('[role="img"][aria-label="Main thread"]');
+    expect(star?.getAttribute("title")).toBe("Main thread");
+    expect(star?.querySelector("svg")).not.toBeNull();
+    expect(row("who").querySelector('[aria-label="Main thread"]')).toBeNull();
+    render(research({ mainThreadId: "who" }));
+    expect(row("who").querySelector('[aria-label="Main thread"]')).not.toBeNull();
+    expect(row("launch").querySelector('[aria-label="Main thread"]')).toBeNull();
+    render(research());
+    expect(host.querySelector('[aria-label="Main thread"]')).toBeNull();
   });
 
   it("shows each listed conversation's last line, fetching only the listed ones that are not open", async () => {

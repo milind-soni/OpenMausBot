@@ -32,7 +32,7 @@ Add `--check` to only check the server; it changes nothing. Run the command agai
 | A domain name, ports 80 and 443 open | `npx openmausbot serve --domain maus.example.com` |
 | Tailscale | `npx openmausbot serve --tailscale` |
 | Only this network | `npx openmausbot serve --lan` |
-| Nothing at all | `npx openmausbot login`, then `npx openmausbot serve --tunnel` |
+| Nothing at all | `npx openmausbot account login`, then `npx openmausbot serve --tunnel` |
 
 A code works once, for 10 minutes. `npx openmausbot pair` makes another, and `npx openmausbot devices` lists the paired devices. See [Deploy on a VPS](/docs/self-hosting/deploy-vps) for a server from scratch, and [Networking](/docs/self-hosting/networking).
 
@@ -42,14 +42,20 @@ Stop the server before a filesystem backup. Application state under `.openmausbo
 
 ## What is still third party
 
-Self-hosting MausBot does not self-host every optional provider:
+Self-hosting MausBot does not self-host every service it talks to. A standalone server, or its web UI, contacts these:
 
 - Agent providers authenticate and bill through their own CLI or API.
-- Composio owns connected-app OAuth grants unless you replace that integration.
+- Composio owns connected-app OAuth grants. MausBot's connected-apps service serves only the desktop app and MausBot's Clouds; a server you run yourself needs your own Composio project key, in **Settings → AI → Other services**.
+- The MausBot account service (`accounts.openmausbot.com`) sends emailed sign-in codes unless you set your own mail server (`OMB_SIGNIN_SMTP_URL`), reserves the `serve --tunnel` address, and signs a server in to MausBot Relay for phones (`OMB_PHONE_RELAY`).
+- Cloudflare carries path A's traffic: `serve --tunnel` is a Cloudflare tunnel.
+- GitHub answers update checks (the release list and the stable channel's file), and by default serves the model list, refreshed about hourly (`OMB_DISABLE_MODEL_MANIFEST_FETCH=1` turns it off), and the announcements feed (`OMB_DISABLE_ANNOUNCEMENTS=1`).
+- PostHog receives usage analytics from the web UI, on unless each person turns it off under **Settings → General → Privacy** (shown in Advanced mode). [Analytics](/docs/security/analytics) lists what is sent.
+- The npm registry serves engine installs and a Codex version check; on an npm install, Google's `storage.googleapis.com` serves the bots' Chrome for Testing.
+- MausBot's own page publishing and sharing to the community go through MausBot from a Cloud or the desktop app only; a standalone server does not offer them.
 - Boat owns managed cloud computers.
 - ElevenLabs or Fish Audio synthesizes speech when its hosted voice engine is enabled. On Windows and Linux, Fish Audio also turns what you say into text for Take turns calls and dictation.
 
-These services are optional. Local chat through a locally installed agent CLI does not require them.
+Local chat through a locally installed agent CLI needs none of the optional ones, but the model list, announcements and analytics are contacted by default until switched off as above.
 
 ## Run headless during development
 

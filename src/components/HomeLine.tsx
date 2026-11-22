@@ -3,6 +3,7 @@ import { Cloud, Laptop, Users, X } from "lucide-react";
 import { freeFallback } from "../../shared/ai-ranking";
 import { engineReady } from "@/components/EngineLibrary";
 import { ConnectAiDialog } from "@/components/onboarding/ConnectAi";
+import { ConnectAiPlaceContext } from "@/lib/connect-ai-events";
 import { t } from "@/lib/i18n";
 import { HOME_LINE_NOTICE, homeLineShown, homeLineStage } from "@/lib/notices";
 import { hintSeenPatch } from "@/lib/onboarding";
@@ -25,7 +26,7 @@ function ConnectAiLink() {
   const [open, setOpen] = useState(false);
   return <>
     <button type="button" data-home-line-ai className="underline underline-offset-2 hover:text-ink" onClick={() => setOpen(true)}>{t("onboarding.meet.connectAi")}</button>
-    {open && <ConnectAiDialog tested={null} onClose={() => setOpen(false)} />}
+    {open && <ConnectAiPlaceContext.Provider value="home_line"><ConnectAiDialog tested={null} onClose={() => setOpen(false)} /></ConnectAiPlaceContext.Provider>}
   </>;
 }
 

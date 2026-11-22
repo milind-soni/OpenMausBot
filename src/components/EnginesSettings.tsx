@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
 
-import { api, useStore, type InstanceInfo } from "@/state/store";
+import { api, type InstanceInfo } from "@/state/store";
+import { useShowInstances } from "@/state/use-show-instances";
 import { EngineCard, EngineSections, RefreshEngines, engineReady } from "./EngineLibrary";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
@@ -25,6 +26,7 @@ import { InstanceProviderMark } from "./ProviderIcons";
 import { GEMINI_PRESET, GeminiServer, hasGeminiServer } from "./OpenAiCompatServers";
 import { HiddenEngines, HiddenProviderRows, useHiddenProviders } from "./HiddenProviders";
 import { AdminOnly } from "./AdminOnly";
+import { sameFields, useStoreActions, useStoreSelector } from "@/state/store-select";
 
 export { HiddenEngines };
 
@@ -194,7 +196,8 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
 
 /** The executable behind an engine: its path, Claude's self-update, and a reset to the default. */
 function EngineAdvanced({ instance }: { instance: InstanceInfo }) {
-  const { refreshInstances } = useStore();
+  const { refreshInstances } = useStoreActions();
+  const showInstances = useShowInstances();
   const [open, setOpen] = useState(false);
   const cliMotion = useMenuMotion(open);
   const [switching, setSwitching] = useState(false);
@@ -229,7 +232,7 @@ function EngineAdvanced({ instance }: { instance: InstanceInfo }) {
     setSwitching(true);
     setError(null);
     api(`/api/instances/${encodeURIComponent(instance.instanceId)}`, { method: "PATCH", body: JSON.stringify({ hidden: true }) })
-      .then(() => Promise.resolve(refreshInstances()).catch(() => {}))
+      .then((answer) => showInstances(answer).catch(() => {}))
       .catch((e) => setError(e.message))
       .finally(() => setSwitching(false));
   };
@@ -334,12 +337,12 @@ function EngineAdvanced({ instance }: { instance: InstanceInfo }) {
 /** Remove drops an added Antigravity account or an added server; Sign out forgets a signed-in account's sign-in (Antigravity's
  * Google one, or a CLI's own login such as Kimi's) and never hides the provider, which stays listed with Set up. */
 function EngineAccountAction({ instance, action, cli = false, removeBody = "accounts.removeBodyAntigravity" }: { instance: InstanceInfo; action: "remove" | "signOut"; cli?: boolean; removeBody?: LocaleKey }) {
-  const { state, dispatch, refreshInstances } = useStore();
+  const showInstances = useShowInstances();
   const [confirming, setConfirming] = useState(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const remove = action === "remove";
-  const usedBy = remove ? state.bots.filter((bot) => bot.modelSelection.instanceId === instance.instanceId).length : 0;
+  const usedBy = useStoreSelector((s) => remove ? s.bots.filter((bot) => bot.modelSelection.instanceId === instance.instanceId).length : 0);
   const label = t(remove ? "accounts.remove" : "accounts.signOut");
   const run = async () => {
     setConfirming(false);
@@ -347,9 +350,7 @@ function EngineAccountAction({ instance, action, cli = false, removeBody = "acco
     setError(null);
     try {
       const path = `/api/instances/${encodeURIComponent(instance.instanceId)}${remove ? "" : "/auth/sign-out"}`;
-      const { instances } = await api(path, { method: remove ? "DELETE" : "POST" });
-      if (Array.isArray(instances)) dispatch({ type: "instances", instances });
-      else await refreshInstances();
+      await showInstances(await api(path, { method: remove ? "DELETE" : "POST" }));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -374,7 +375,7 @@ function EngineAccountAction({ instance, action, cli = false, removeBody = "acco
 }
 
 function AntigravityAddAccount({ source }: { source: InstanceInfo }) {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ instances: s.instances }), sameFields);
   const [addedId, setAddedId] = useState<string | null>(null);
   const added = addedId ? state.instances.find((instance) => instance.instanceId === addedId && instance.snapshot.authenticated !== true) : undefined;
   return <>
@@ -541,7 +542,7 @@ function groupedAccounts(listed: InstanceInfo[]) {
 /** The chat's AI sign-in card: Simple Providers with only the accounts a person signs in to (Claude, ChatGPT or Codex,
  * Antigravity), for an owner or admin. */
 export function AiSignInSettings() {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ instances: s.instances }), sameFields);
   const { groups, groupOf, rows } = groupedAccounts(state.instances.filter((instance) => accountGroupOf(instance) !== null || (instance.driverKind === "antigravityAgent" && !instance.readOnly)));
   const isReady = (instance: InstanceInfo) => { const group = groupOf(instance); return group ? accountsReady(groups.get(group)!) : engineReady(instance); };
   const renderEngine = (instance: InstanceInfo, bare = false) => {
@@ -554,7 +555,7 @@ export function AiSignInSettings() {
 }
 
 export function EnginesSettings({ simple = false, more }: { simple?: boolean; more?: { id: string; open: boolean; onToggle: () => void } }) {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ instances: s.instances }), sameFields);
   // Leaving Settings ends the "now uses the copy OpenMausBot installed" lines.
   useEffect(() => forgetAppCopySwitches, []);
   const listed = state.instances.filter((i) => i.readOnly || i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable" || isApiKeyEngine(i) || i.claudeEndpoint !== undefined || i.claudeBedrock !== undefined || i.codexEndpoint !== undefined);

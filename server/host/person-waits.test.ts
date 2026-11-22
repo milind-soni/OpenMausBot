@@ -16,12 +16,17 @@ function fixture() {
   const store = new Store(() => ({ instanceId: "claude", model: "claude-sonnet-5" }));
   const sent: Notification[] = [];
   const known = new Set<string>();
-  const waits = createPersonWaits({ store, notify: (notification) => { if (notification) sent.push(notification); }, threadsWithCards: () => [...known] });
+  const elsewhere: string[] = [];
+  const resumed: string[] = [];
+  const waits = createPersonWaits({ store, notify: (notification) => { if (notification) sent.push(notification); }, threadsWithCards: () => [...known],
+    waitingElsewhere: (threadId, wait, asker) => elsewhere.push(`open ${threadId} ${wait.messageId} ${wait.kind} ${wait.label} ${asker.name}`),
+    waitSettled: (threadId, messageId) => elsewhere.push(`settled ${threadId} ${messageId}`),
+    waitResumed: (threadId, messageId) => resumed.push(`${threadId} ${messageId}`) });
   const bot = store.createBot({ name: "Postie" });
   const thread = store.createTask(bot.id, "Work", false)!.threadId;
   const task = () => store.taskByThread(bot.id, thread)!;
   const card = (patch: Record<string, unknown> = {}) => store.appendMessage(thread, { role: "bot", kind: "secret", text: "enter it", secret: { ...SECRET, ...patch } });
-  return { store, waits, sent, known, bot, thread, task, card };
+  return { store, waits, sent, known, bot, thread, task, card, elsewhere, resumed };
 }
 
 describe("a conversation resting on the person", () => {
@@ -199,6 +204,34 @@ describe("telling the person", () => {
     const asked = card();
     store.patchMessage(thread, asked.id, { secret: { ...SECRET, provided: true } });
     expect(waits.atTurnEnd(thread, "Read the mail.")).toBe(false);
+  });
+
+  it("tells the conversation that handed the work on of a card left open, and when it settles", async () => {
+    const { store, thread, card, elsewhere } = fixture();
+    const asked = card();
+    await flush();
+    expect(elsewhere).toEqual([`open ${thread} ${asked.id} password Mailbox password Postie`]);
+    store.patchMessage(thread, asked.id, { secret: { ...SECRET, provided: true } });
+    expect(elsewhere).toEqual([`open ${thread} ${asked.id} password Mailbox password Postie`, `settled ${thread} ${asked.id}`]);
+  });
+
+  it("tells it when the same card waits on the person again", async () => {
+    const { store, thread, card, elsewhere, resumed } = fixture();
+    const asked = card();
+    await flush();
+    store.patchMessage(thread, asked.id, { secret: { ...SECRET, dismissed: true } });
+    store.patchMessage(thread, asked.id, { secret: { ...SECRET, dismissed: false } });
+    expect(elsewhere.at(-1)).toBe(`settled ${thread} ${asked.id}`);
+    expect(resumed).toEqual([`${thread} ${asked.id}`, `${thread} ${asked.id}`]);
+  });
+
+  it("does not tell it of a card settled before anyone could hear of it, nor of a provider's question", async () => {
+    const { store, thread, card, elsewhere } = fixture();
+    const asked = card();
+    store.patchMessage(thread, asked.id, { secret: { ...SECRET, dismissed: true } });
+    store.appendMessage(thread, { role: "bot", kind: "options", text: "Which?", card: { title: "Which?", subtitle: "", options: [], requestId: "r1", requestType: "question" } });
+    await flush();
+    expect(elsewhere).toEqual([`settled ${thread} ${asked.id}`]);
   });
 
   it("honours a bot whose notifications are off", async () => {

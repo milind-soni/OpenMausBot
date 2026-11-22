@@ -7,7 +7,7 @@ import { DockerError, type ContainerSpec, type Docker, type Mount } from "./dock
 import { JobFailure } from "./failure.ts";
 import { publicHost, summarizeHealth, type HealthRead } from "./home-health.ts";
 import { digestPinnedOnly, type ImageCheck } from "./images.ts";
-import { errorText, registerSecret, type Log } from "./log.ts";
+import { errorText, registerHomeSecrets, type Log } from "./log.ts";
 import { EXPORT_PATH, UPDATE_HEALTH_WINDOW_MS, type CopyInfo, type HomeHealth, type HomeReport, type HomeState, type JobError, type JobReply, type JobResults } from "./protocol.ts";
 import {
   APPARMOR_PROFILE, BACKUPS_KEPT, HARDENED_LAUNCHER_VERSION, HIDEPID_CAPABILITIES, HOME_CAPABILITIES, HOME_OOM_SCORE_ADJ, HOME_PORT, HOME_SECRET_ENV, HOME_SECRETS_DIR, HOME_TLS_PORT,
@@ -770,10 +770,7 @@ export function backupId(now: number): string {
   return `${stamp}-${randomBytes(2).toString("hex")}`;
 }
 
-/** Every value of a secret-shaped name in the home's environment never reaches a log. */
-export function registerHomeSecrets(env: Record<string, string>): void {
-  for (const [name, value] of Object.entries(env)) if (/(?:SECRET|TOKEN|GRANT|KEY|PASSWORD)$/.test(name)) registerSecret(value);
-}
+export { registerHomeSecrets };
 
 /** The free bytes on the filesystem of `path`; 0 when it cannot be read. */
 export function freeBytes(statfs: () => { bavail: number | bigint; bsize: number | bigint }): number {

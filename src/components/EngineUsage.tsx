@@ -127,7 +127,7 @@ export function UsageRows({ limit }: { limit: EngineLimit }) {
   const [checking, setChecking] = useState(false);
   const { dispatch } = useStore();
   const now = Date.now();
-  const checkedAt = limitsCheckedAt();
+  const checkedAt = limit.checkedAt ?? limitsCheckedAt();
   return (
     <div data-usage-rows className="flex flex-col gap-2.5">
       <div className="flex items-baseline justify-between gap-3">
@@ -137,7 +137,7 @@ export function UsageRows({ limit }: { limit: EngineLimit }) {
       {usageRows(limit).map((row) => (
         <div key={row.window} data-usage-row={row.window} className="flex flex-col gap-1.5">
           <div className="flex items-baseline gap-3 text-[12px] leading-4">
-            <span className="shrink-0 text-ink-secondary">{windowLabel(row.window)}</span>
+            <span className="shrink-0 text-ink-secondary">{windowLabel(row.window, limit.meter)}</span>
             <span className={cn("ms-auto min-w-0 truncate text-end tabular-nums", row.tone === "fine" ? "text-ink" : TONE_INK[row.tone])}>
               <span className="font-medium">{row.tone === "out" ? t("limits.windowAtLimit") : t("planUsage.left", { remaining: row.left })}</span>
               {row.resetsAt !== null && row.resetsAt > now && ` · ${t("limits.resets", { time: resetTime(row.resetsAt, now) })}`}

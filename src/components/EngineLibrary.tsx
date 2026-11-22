@@ -2,10 +2,11 @@ import { useContext, useState, type ReactNode } from "react";
 import { SettingsLook } from "./SettingsPrimitives";
 import { useUpdatedOnce } from "@/hooks/use-updated-once";
 import { ArrowUpRight, Check, ChevronDown, RefreshCw } from "lucide-react";
-import { useStore, type InstanceInfo } from "@/state/store";
+import { type InstanceInfo } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { InstanceProviderMark } from "./ProviderIcons";
+import { useStoreActions } from "@/state/store-select";
 
 export function engineReady(instance: InstanceInfo): boolean {
   if (instance.driverKind === "clineAgent") {
@@ -101,7 +102,7 @@ export function EngineSections({ instances, renderEngine, isReady = engineReady 
 }
 
 export function RefreshEngines() {
-  const { refreshInstances } = useStore();
+  const { refreshInstances } = useStoreActions();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checked, setChecked] = useState(false);

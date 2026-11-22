@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { brokerHarness, Installation } from "./test-harness";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 const sendEmail = (h: ReturnType<typeof brokerHarness>, owner: Installation) => h.call(owner, "/v1/mcp", {
   method: "POST",
@@ -40,7 +43,12 @@ async function sharingFixture() {
 describe("Composio session identity across account adoption", () => {
   it.each(["creation", "lookup"])("retries a session %s that finishes after adoption", async (operation) => {
     const { h, desktop, cloud, gmail, adopt } = await sharingFixture();
-    if (operation === "lookup") await emailResult(await sendEmail(h, cloud));
+    if (operation === "lookup") {
+      await emailResult(await sendEmail(h, cloud));
+      // Past the five minutes a checked Session is reused for, so the request below looks it up.
+      const checkedAt = Date.now();
+      vi.spyOn(Date, "now").mockImplementation(() => checkedAt + 5 * 60_000 + 1_000);
+    }
     const started = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
     let held = false;

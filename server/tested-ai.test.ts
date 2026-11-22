@@ -455,7 +455,7 @@ describe("testing an AI with one tiny message before a new bot's default trusts 
     // Check again: a sign-out the last status read hasn't seen yet still shows, with the reason.
     answers.claude = async () => { throw new Error("Not logged in · Please run /login"); };
     await expect(tested.check(live)).resolves.toMatchObject({ ok: false });
-    expect(tested.info(instances[1]!)).toEqual({ aiTest: "failed", aiTestError: "claude isn't signed in on this computer anymore. Sign in again, then check again." });
+    expect(tested.info(instances[1]!)).toEqual({ aiTest: "failed", aiTestError: "claude isn't signed in on this computer anymore. Sign in again, then check again.", aiTestReason: "signed_out" });
   });
 
   it("sends nothing in the background where it is switched off, and still checks on request", async () => {

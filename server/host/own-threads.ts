@@ -1,16 +1,17 @@
 // A bot's own threads: list_models, start_thread and the thread's turn start share one check, so a model the list offers
 // always opens, and a second opinion never quietly comes from the opener's own model.
-import { approvalModeFor, modelSwitchNeedsAsk } from "../../shared/approval-mode.ts";
 import type { ModelSelection } from "../../shared/wire.ts";
 import { modelMenu, type MenuEngine, type ModelMenu } from "../routes/internal-models.ts";
 import type { BotRecord, Store } from "../store.ts";
+import type { NewThreadLevel } from "../task-record.ts";
 import type { ThreadModelFallback } from "../thread-model.ts";
+import { createSpawnLevel, type SpawnLevelDeps } from "./spawn-level.ts";
 
 type Placed = { botId: string; threadId: string; groupId?: string };
 type Node = Omit<Placed, "threadId"> & { parentId?: string };
 
-export function createOwnThreads(deps: {
-  store: Pick<Store, "bot" | "taskByThread">;
+export function createOwnThreads(deps: Pick<SpawnLevelDeps, "sourceLevel" | "mayRaise"> & {
+  store: Pick<Store, "bot" | "taskByThread" | "projectBotForTask">;
   registry: { instances(): readonly MenuEngine[]; cliTarget(instanceId: string): { driverKind: string } | null | undefined };
   node(id: string): Node | undefined;
   current(botId: string, threadId: string): ModelSelection | undefined;
@@ -21,6 +22,8 @@ export function createOwnThreads(deps: {
   modelName(selection: ModelSelection): string;
 }) {
   const { store } = deps;
+  /** The level a new thread opened from a conversation starts at (spawn-level.ts). */
+  const levelFor = createSpawnLevel({ ...deps, driverKind: (instanceId) => deps.registry.cliTarget(instanceId)?.driverKind });
   const own = (requester: Omit<Placed, "threadId">, child: Omit<Placed, "threadId">) =>
     requester.botId === child.botId && !requester.groupId && !child.groupId;
   const cannotRun = (selection: ModelSelection, bot: BotRecord): string | null => {
@@ -48,18 +51,18 @@ export function createOwnThreads(deps: {
       const requester = asked?.parentId === undefined ? undefined : deps.node(asked.parentId);
       return Boolean(asked && requester && requester.botId === botId && own(requester, asked));
     },
-    /** "ask" when running on `selection` crosses to an engine where this bot's permission level does not carry over. */
-    approvalFor(bot: BotRecord, selection: ModelSelection): "ask" | undefined {
-      return modelSwitchNeedsAsk(approvalModeFor(bot), deps.registry.cliTarget(bot.modelSelection.instanceId)?.driverKind, deps.registry.cliTarget(selection.instanceId)?.driverKind) ? "ask" : undefined;
+    levelFor,
+    /** A burst child's level: the conversation it was opened from, on `selection`; "ask" where that level does not carry over. */
+    approvalFor(bot: BotRecord, selection: ModelSelection, fromThreadId?: string): NewThreadLevel | undefined {
+      return levelFor(bot, selection, fromThreadId === undefined ? undefined : { botId: bot.id, threadId: fromThreadId });
     },
-    inherited(botId: string, parentThreadId: string): { modelSelection?: ModelSelection; approvalMode?: "ask" } {
+    /** A thread the bot opens on itself from `parentThreadId`: on `picked`, else that conversation's model, at its level. */
+    inherited(botId: string, parentThreadId: string, picked?: ModelSelection): { modelSelection?: ModelSelection; approvalMode?: NewThreadLevel } {
       const bot = store.bot(botId);
-      const modelSelection = bot && store.taskByThread(bot.id, parentThreadId)?.modelSelection;
-      if (!bot || !modelSelection) return {};
-      const needsAsk = modelSwitchNeedsAsk(approvalModeFor(bot),
-        deps.registry.cliTarget(bot.modelSelection.instanceId)?.driverKind,
-        deps.registry.cliTarget(modelSelection.instanceId)?.driverKind);
-      return { modelSelection, ...(needsAsk ? { approvalMode: "ask" as const } : {}) };
+      if (!bot) return {};
+      const modelSelection = picked ?? store.taskByThread(bot.id, parentThreadId)?.modelSelection;
+      const approvalMode = levelFor(bot, modelSelection, { botId, threadId: parentThreadId });
+      return { ...(modelSelection ? { modelSelection } : {}), ...(approvalMode ? { approvalMode } : {}) };
     },
     name(requester: Omit<Placed, "threadId">, child: Placed): string | undefined {
       return own(requester, child) ? `#${store.taskByThread(child.botId, child.threadId)?.title ?? "Thread"}` : undefined;

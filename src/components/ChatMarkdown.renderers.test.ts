@@ -89,12 +89,12 @@ describe("ChatMarkdown normalization", () => {
   });
 
   it("remembers a bounded number of messages, newest kept", () => {
-    const oldest = "The oldest message.";
+    const oldest = "The oldest message, $5.";
     markdownProps(before, oldest);
-    for (let i = 0; i < 1000; i++) markdownProps(before, `Message ${i}.`);
+    for (let i = 0; i < 1000; i++) markdownProps(before, `Message ${i}, $5.`);
 
     vi.mocked(fromMarkdown).mockClear();
-    markdownProps(before, "Message 999.");
+    markdownProps(before, "Message 999, $5.");
     expect(fromMarkdown).not.toHaveBeenCalled();
     markdownProps(before, oldest);
     expect(fromMarkdown).toHaveBeenCalledOnce();

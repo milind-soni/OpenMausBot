@@ -22,6 +22,7 @@ export const ROUTINE_LINE = {
   "routines.server.backupSignedOut": "Starting again on the backup AI: this bot's AI is signed out",
   "routines.server.busyTooLong": "Did not run: the bot was busy for more than {minutes} minutes",
   "routines.server.overLimit": "Stopped: this run ran longer than the {hours}-hour limit",
+  "routines.server.overOwnLimit": "Stopped after reaching the {minutes}-minute run limit",
   "routines.server.stopPending": "Its turn has not confirmed that it stopped. The next run waits for that, up to {minutes} minutes.",
   "routines.server.stopUnconfirmed": "Its turn never confirmed that it stopped, so the next run started without that.",
   "routines.server.skippedOne": "Skipped because {why}",
@@ -49,6 +50,9 @@ export const ROUTINE_LINE = {
   "routines.server.restored": "Not run again: this schedule was restored from a backup made before this run had its turn",
   "routines.server.restoredMany": "Not run again: {count} scheduled runs from before this schedule was restored from a backup",
   "routines.server.duplicate": "Not started: this scheduled run had already started once",
+  "routines.server.wakeRetry": "The cloud desktop did not wake, so this run has not started yet. It tries again at {resets}",
+  "routines.server.noWakeRetried": "The cloud desktop did not wake, even after more tries, so this run did not start. The next scheduled run tries again.",
+  "routines.server.noWakeRetriedLast": "The cloud desktop did not wake, even after more tries, so this run did not start.",
 } as const;
 
 export type RoutineLineKey = keyof typeof ROUTINE_LINE;
@@ -139,4 +143,9 @@ export function clipRunOutput(text: string, max: number): string {
   }
   const room = max - tail.length - 3;
   return room > 0 ? `${text.slice(0, room).trimEnd()}\n…\n${tail}` : tail;
+}
+
+/** A run's reply, kept: a later item that says nothing does not erase the report the run already delivered. */
+export function keptRunOutput(delivered: string | undefined, text: string, max: number): string | undefined {
+  return clipRunOutput(text, max) || delivered;
 }

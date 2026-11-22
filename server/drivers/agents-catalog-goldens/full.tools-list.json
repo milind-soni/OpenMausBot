@@ -135,7 +135,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "description": "A teammate's id as list_bots prints it, or its unique name."
+              "description": "A teammate's name, preferred, or its id from list_bots; an id's first 8 characters or more work too."
             }
           },
           "message": {
@@ -238,11 +238,35 @@
     },
     {
       "name": "usage_limits",
-      "description": "Each AI account's usage limits: percent used, reset time, when checked. status: ok, unknown (no data now; see why) or unsupported.",
+      "description": "AI subscription limits and reset times by default. With scope bot, read this bot's visible tokens, estimated cost and usage cap headroom. Bot periods use UTC.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {}
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "subscription",
+              "bot"
+            ],
+            "default": "subscription"
+          },
+          "period": {
+            "type": "string",
+            "enum": [
+              "today",
+              "month"
+            ],
+            "description": "Bot scope only. Defaults to today."
+          },
+          "thread": {
+            "type": "string",
+            "enum": [
+              "this"
+            ],
+            "description": "Bot scope only. Omit for all visible conversations."
+          }
+        }
       },
       "annotations": {
         "readOnlyHint": true,
@@ -444,7 +468,7 @@
     },
     {
       "name": "vm_exec",
-      "description": "Run a shell command inside your own Local VM (as the desktop user, starting in /home/cua/workspace) and get its exit code, stdout and stderr back as text. Use this for all command-line work in the VM: pip install --user, running a script, generating or converting a file, checking that a file exists. Do not type commands into a terminal window and read screenshots: that is slow and unreliable. GUI programs you start appear on the VM desktop. For a long job raise timeout_seconds (default 60, at most 300). Only available while you have a Local VM desktop.",
+      "description": "Run a shell command inside your own Local VM or VPS desktop (as the desktop user, starting in /home/cua/workspace) and get its exit code, stdout and stderr back as text. Use this for all command-line work in the VM: pip install --user, running a script, generating or converting a file, checking that a file exists. Do not type commands into a terminal window and read screenshots: that is slow and unreliable. GUI programs you start appear on the VM desktop. For a long job raise timeout_seconds (default 60, at most 300). Only available on a Local VM or VPS desktop.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -992,22 +1016,40 @@
     },
     {
       "name": "request_sign_in",
-      "description": "Ask the person to sign in to a website themselves, in the browser or on the computer you are using now. Use it when a page needs a login you do not have, or a CAPTCHA, passkey or other step only they can do, or a one-time code you cannot read. A code the site sends to the person's own email or messages for a sign-in they asked for is not one: read it there and type it in yourself. They get a card and a notification, sign in where you work, and press Done. Never ask for a password or code in chat. After calling it, end your turn; OpenMausBot resumes you when they finish or decline, and then check you are signed in.",
+      "description": "Hand one step to the person where you work: a sign-in you have no login for, a CAPTCHA, passkey, code you cannot read, payment details or approval only they can give. Ask only when really blocked, for the smallest step; they type any password, code or payment details themselves, never in chat. It returns at once: say you are waiting, then stop or do other work. It expires in 30 minutes; you are resumed with done, skipped or expired and their note. Done is unverified: re-read the page.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "instruction": {
+            "type": "string",
+            "description": "One specific sentence, such as: Sign in to GitHub on the open page."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "sign_in",
+              "captcha",
+              "payment",
+              "approval",
+              "other"
+            ]
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "browser",
+              "computer"
+            ]
+          },
           "site": {
             "type": "string",
-            "description": "The page to sign in on: its address, or the domain, such as example.com."
-          },
-          "reason": {
-            "type": "string",
-            "description": "One short sentence, in your words, on what the sign-in is for."
+            "description": "Address or domain, if not the open page."
           }
         },
         "required": [
-          "site"
+          "instruction",
+          "kind"
         ]
       }
     },
@@ -1224,6 +1266,38 @@
       }
     },
     {
+      "name": "what_changed",
+      "description": "What differs between a text and its edit: sentences changed ([-old-]{+new+}), added, removed, moved. Use before saying what you changed.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "original_file": {
+            "type": "string",
+            "description": "A .md/.txt you can read or attached here."
+          },
+          "edited_file": {
+            "type": "string"
+          },
+          "original_text": {
+            "type": "string"
+          },
+          "edited_text": {
+            "type": "string"
+          },
+          "start": {
+            "type": "integer"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
       "name": "edit_image",
       "description": "Change an existing image from a text instruction, optionally guided by a markup PNG: marks (circles, arrows, scribbles) drawn on a transparent background at the image's exact size, which point at where to change. Both files are paths in your working folder. The result is attached to your reply when the turn ends. Needs a GPT-Image-2.6 model on OpenAI.",
       "inputSchema": {
@@ -1295,6 +1369,7 @@
               "xai",
               "gemini",
               "openrouter",
+              "higgsfield",
               "custom"
             ],
             "description": "Only when the person named one; it must be their base or backup."
@@ -1624,7 +1699,7 @@
     },
     {
       "name": "trigger",
-      "description": "Set up or change an automation (a routine): when something happens, a bot does the instructions. Create it in this turn, without asking to confirm, whenever the person describes recurring or event-based work (\"every morning send me…\", \"whenever I get an email from…\", \"when another app calls…\"); something to do once, now, is not one. when=schedule runs on a time rule or cron (trigger_info first for the current time); app_event when a connected app's event happens (trigger_info action=events first; better than a schedule that keeps checking); webhook when another app calls its private address, which you may paste only into that app's setup; limit_reset when an AI's usage limit resets. update, pause, resume and run_now take a trigger_id from trigger_info. Pause a temporary monitor once its goal is met, then read it back; delete_trigger only at the person's request. To the person these are automations: write name and instructions as they would say them.",
+      "description": "Set up or change an automation (a routine): when something happens, a bot does the instructions. Create it in this turn, without asking to confirm, whenever the person describes recurring or event-based work; something to do once, now, is not one, and a later look at this chat is check_back. when=schedule runs on a time rule or cron (trigger_info first for the current time); app_event when a connected app's event happens (trigger_info action=events first; better than a schedule that keeps checking); webhook when another app calls its private address, which you may paste only into that app's setup; limit_reset when an AI's usage limit resets. update, pause, resume and run_now take a trigger_id from trigger_info. Pause a temporary monitor once its goal is met, then read it back; delete_trigger only at the person's request. To the person these are automations: write name and instructions as they would say them.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -1878,7 +1953,7 @@
     },
     {
       "name": "wait_until",
-      "description": "Tell the person in this chat when something happens. No AI runs while you wait, only plain code checks. Ends after hours (default 24, 1-168).",
+      "description": "Tell the person in this chat when something happens. No AI runs while you wait. Ends after hours (default 24, 1-168).",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -1960,6 +2035,31 @@
         "required": [
           "id"
         ]
+      }
+    },
+    {
+      "name": "check_back",
+      "description": "Come back to this chat later on your own; no one is asked. No args lists; cancel: id or \"all\".",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "when": {
+            "type": "string",
+            "description": "\"in 2 hours\", \"Fri 9am\" (person's zone) or ISO."
+          },
+          "note": {
+            "type": "string",
+            "description": "What to check then."
+          },
+          "if": {
+            "type": "string",
+            "description": "Act only if this holds then."
+          },
+          "cancel": {
+            "type": "string"
+          }
+        }
       }
     },
     {

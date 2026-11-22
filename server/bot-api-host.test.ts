@@ -26,6 +26,7 @@ type Task = { threadId: string; title: string; busy: boolean; botApi?: true; bot
 function fakeStore() {
   const bots = new Map<string, { id: string; name: string; tasks: Task[] }>([["b1", { id: "b1", name: "Scout", tasks: [] }]]);
   const messages = new Map<string, Message[]>();
+  const leaves = new Map<string, string>();
   let ids = 0;
   const listeners: Array<(change: { type: string; botId: string }) => void> = [];
   const store = {
@@ -50,9 +51,19 @@ function fakeStore() {
       return line;
     },
     messagesFor: (threadId: string) => messages.get(threadId) ?? [],
+    branchMessage: (threadId: string, sourceId: string, text: string, sendId?: string, _sender?: unknown, _dataContext?: unknown, from?: Partial<Message>) => {
+      const source = messages.get(threadId)?.find((line) => line.id === sourceId);
+      if (!source) return null;
+      const line = { ...from, id: `m${++ids}`, at: Date.now(), role: "user", kind: "text", text, parentId: source.parentId ?? null, ...(sendId ? { sendId } : {}) } as Message;
+      messages.set(threadId, [...(messages.get(threadId) ?? []), line]);
+      leaves.set(threadId, line.id);
+      return line;
+    },
+    activeLeaf: (threadId: string) => leaves.get(threadId) ?? messages.get(threadId)?.at(-1)?.id ?? null,
+    setActiveLeaf: (threadId: string, messageId: string) => { leaves.set(threadId, messageId); return messageId; },
     onChange: (listener: (change: { type: string; botId: string }) => void) => { listeners.push(listener); return () => {}; },
   };
-  return { store: store as unknown as BotApiHostDeps["store"], bots, messages, deleted: (botId: string) => { bots.delete(botId); for (const listener of listeners) listener({ type: "bot.deleted", botId }); } };
+  return { store: store as unknown as BotApiHostDeps["store"], bots, messages, leaves, deleted: (botId: string) => { bots.delete(botId); for (const listener of listeners) listener({ type: "bot.deleted", botId }); } };
 }
 
 type Fake = ReturnType<typeof fakeStore>;
@@ -543,5 +554,80 @@ describe("a key that acts as the owner", () => {
     h.manager.setActsAsOwner("b1", true);
     expect((await h.call("b1", key, { message: "Hi" })).status).toBe(200);
     expect(h.fake.bots.get("b1")!.tasks.at(-1)).toMatchObject({ approvalMode: "ask", outside: true });
+  });
+});
+
+describe("Retry in the app on a line a caller sent", () => {
+  it("runs the same words again as the caller's: on the API's line, framed and fenced, and the status reads the retried turn", async () => {
+    const answers = ["First answer", "Retried answer"];
+    const h = await harness((fake, _botId, _prompt, opts) => {
+      const text = answers.shift() ?? "Later";
+      setTimeout(() => { fake.store.appendMessage(opts.threadId, { role: "bot", kind: "text", text }); opts.onSettled({ ok: true, text }); }, 30);
+    });
+    const key = (await h.app("POST", "/api/bots/b1/bot-api", { enabled: true })).body.key as string;
+    const first = await h.call("b1", key, { message: "Sum up the report" });
+    const threadId = first.body.thread as string;
+    const sent = h.fake.messages.get(threadId)!.find((line) => line.role === "user")!;
+
+    const retried = await h.host.retry("b1", threadId, sent, "send-retry");
+    expect(retried).toMatchObject({ role: "user", text: "Sum up the report", via: "api", sendId: "send-retry" });
+    expect(retried!.apiAsOwner).toBeUndefined();
+    expect(h.fake.bots.get("b1")!.tasks[0]).toMatchObject({ rewound: true });
+    const turn = h.turns.at(-1)!;
+    expect(turn.opts).toMatchObject({ threadId, automationSource: "api", unattended: true, userMessage: retried });
+    expect(turn.opts).not.toHaveProperty("editedMessageId");
+    expect(turn.prompt).toContain("[UNTRUSTED BOT API MESSAGE]");
+    expect(turn.prompt).toContain(`Received: ${new Date(sent.at).toISOString()}`);
+    expect(turn.prompt).toContain("Sum up the report");
+
+    await vi.waitFor(() => expect(h.fake.bots.get("b1")!.tasks[0]!.busy).toBe(false));
+    expect(await h.call("b1", key, undefined, { method: "GET", query: `?thread=${threadId}` })).toEqual({ status: 200, body: { reply: "Retried answer", thread: threadId } });
+  });
+
+  it("leaves a person's line and a thread the person opened to the ordinary edit", async () => {
+    const h = await harness(replies("Done"));
+    const key = (await h.app("POST", "/api/bots/b1/bot-api", { enabled: true })).body.key as string;
+    const threadId = (await h.call("b1", key, { message: "Hi" })).body.thread as string;
+    const person = h.fake.store.appendMessage(threadId, { role: "user", kind: "text", text: "Mine" });
+    expect(await h.host.retry("b1", threadId, person)).toBeNull();
+    const own = h.fake.store.createTask("b1", "Mine")!;
+    const pasted = h.fake.store.appendMessage(own.threadId, { role: "user", kind: "text", text: "Hi", via: "api" });
+    expect(await h.host.retry("b1", own.threadId, pasted)).toBeNull();
+    expect(h.turns).toHaveLength(1);
+  });
+
+  it("runs an owner's thread as theirs only while the key still acts as the owner", async () => {
+    let allowed = true;
+    const h = await harness(replies("Done"), { owner: { available: () => allowed } });
+    const key = (await h.app("POST", "/api/bots/b1/bot-api", { enabled: true })).body.key as string;
+    await h.app("POST", "/api/bots/b1/bot-api/acts-as-owner", { enabled: true });
+    const threadId = (await h.call("b1", key, { message: "Tidy the build folder" })).body.thread as string;
+    const sent = h.fake.messages.get(threadId)!.find((line) => line.role === "user")!;
+
+    expect(await h.host.retry("b1", threadId, sent)).toMatchObject({ via: "api", apiAsOwner: true });
+    expect(h.turns.at(-1)!.prompt).toContain("on their behalf at your level");
+    await vi.waitFor(() => expect(h.fake.bots.get("b1")!.tasks[0]!.busy).toBe(false));
+
+    allowed = false;
+    const fenced = await h.host.retry("b1", threadId, sent);
+    expect(fenced!.via).toBe("api");
+    expect(fenced!.apiAsOwner).toBeUndefined();
+    expect(h.turns.at(-1)!.prompt).toContain("[UNTRUSTED BOT API MESSAGE]");
+    expect(h.turns.at(-1)!.prompt).not.toContain("on their behalf at your level");
+  });
+
+  it("puts the conversation back on the branch the person was reading when the turn is refused, and the status answers the refused line with no reply", async () => {
+    const h = await harness(replies("Done"));
+    const key = (await h.app("POST", "/api/bots/b1/bot-api", { enabled: true })).body.key as string;
+    const threadId = (await h.call("b1", key, { message: "Hi" })).body.thread as string;
+    const sent = h.fake.messages.get(threadId)!.find((line) => line.role === "user")!;
+    const leaf = h.fake.store.activeLeaf(threadId);
+    const refused = Object.assign(new Error("over the cap"), { status: 429 });
+    const refusing = createBotApiHost({ store: h.fake.store, manager: h.manager, startTurn: async () => { throw refused; }, threadBusy: () => false, canStart: () => true, canConfine: () => true,
+      hooksBaseUrl: () => "https://bots.example.test", manageRefusal: () => null });
+    await expect(refusing.retry("b1", threadId, sent)).rejects.toBe(refused);
+    expect(h.fake.store.activeLeaf(threadId)).toBe(leaf);
+    expect(h.fake.bots.get("b1")!.tasks[0]!).not.toHaveProperty("rewound", true);
+    expect(await h.call("b1", key, undefined, { method: "GET", query: `?thread=${threadId}` })).toEqual({ status: 200, body: { reply: "", thread: threadId } });
   });
 });

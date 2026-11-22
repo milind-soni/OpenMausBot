@@ -20,13 +20,20 @@ const render = (props: Partial<Omit<Props, "children">> = {}) =>
   );
 
 describe("MessageActions", () => {
-  it("shows only reply and copy, hidden until the message is hovered or focused", () => {
+  it("keeps reply and copy out until the message is hovered or focused, holding their room", () => {
     const html = render({ menu: [pin] });
-    expect(html).toContain(">reply<");
-    expect(html).toContain(">copy<");
+    expect(html).not.toContain(">reply<");
+    expect(html).not.toContain(">copy<");
+    expect(html.match(/<span aria-hidden="true" class="size-7 shrink-0"><\/span>/g)).toHaveLength(2);
     expect(html).toContain("opacity-0");
     expect(html).toContain("pointer-events-none");
     expect(html).not.toContain('data-shown="true"');
+  });
+
+  it("draws reply and copy at once with no more menu to reach them through", () => {
+    const html = render();
+    expect(html).toContain(">reply<");
+    expect(html).toContain(">copy<");
   });
 
   it("moves the rest behind a closed more menu", () => {
@@ -42,8 +49,9 @@ describe("MessageActions", () => {
   });
 
   it("stays out while a control must remain reachable", () => {
-    const html = render({ forceOpen: true });
+    const html = render({ forceOpen: true, menu: [pin] });
     expect(html).toContain('data-shown="true"');
+    expect(html).toContain(">reply<");
     expect(html).not.toContain("opacity-0");
   });
 

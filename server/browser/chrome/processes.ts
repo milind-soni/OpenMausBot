@@ -157,21 +157,37 @@ export function processAlive(pid: number): boolean {
   }
 }
 
-/** Browsers on OMB's profiles that no live server registered: left behind by a crash or a force-quit. */
+/** How far above a Chrome its registered launch may be: a wrapper (bubblewrap) and its own monitor process. */
+const WRAPPER_DEPTH = 3;
+
+/**
+ * Browsers on OMB's profiles that no live server registered: left behind by a crash or a force-quit. A launch wrapped in
+ * another program (a Chrome on a private display starts under bubblewrap) registers the wrapper's pid, so a Chrome under
+ * a live registered launch of the same profile is that launch's, not a stray.
+ */
 export function strays({ processes, registered, root, alive = processAlive }: {
   processes: readonly ListedProcess[];
   registered: readonly RegisteredProcess[];
   root: string;
   alive?: (pid: number) => boolean;
 }): ListedProcess[] {
+  const byPid = new Map(processes.map((listed) => [listed.pid, listed]));
+  const launchOf = (listed: ListedProcess): RegisteredProcess | null => {
+    const entry = registered.find((candidate) => candidate.pid === listed.pid);
+    if (!entry) return null;
+    if (entry.startTime !== null && listed.startTime !== null && entry.startTime !== listed.startTime) return null;
+    return alive(entry.ownerPid) ? entry : null;
+  };
   return processes.filter((listed) => {
     if (!isBrowserProcess(listed)) return false;
     const dir = userDataDirOf(listed);
     if (!dir || !inside(root, dir)) return false;
-    const entry = registered.find((candidate) => candidate.pid === listed.pid);
-    if (!entry) return true;
-    if (entry.startTime !== null && listed.startTime !== null && entry.startTime !== listed.startTime) return true;
-    return !alive(entry.ownerPid);
+    let at: ListedProcess | undefined = listed;
+    for (let depth = 0; at && depth <= WRAPPER_DEPTH; depth++, at = at.ppid === at.pid ? undefined : byPid.get(at.ppid)) {
+      const launch = launchOf(at);
+      if (launch && resolve(launch.userDataDir) === resolve(dir)) return false;
+    }
+    return true;
   });
 }
 

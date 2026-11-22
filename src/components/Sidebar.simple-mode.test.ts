@@ -89,7 +89,7 @@ describe("bot-first sidebar", () => {
     { advanced: true, enabled: true, density: "comfortable", size: 32, spacing: ["gap-2", "py-2", "pl-6"] },
     { advanced: true, enabled: true, density: "icons", size: 44, spacing: ["justify-center", "px-1", "py-1.5"] },
     { advanced: true, enabled: false, density: "comfortable", size: 44, spacing: ["gap-3", "py-2", "pl-2.5", "pr-9"] },
-    { advanced: false, enabled: false, density: "comfortable", size: 42, spacing: ["gap-2", "rounded-[8px]", "pl-2", "pr-2", "md:h-[54px]"] },
+    { advanced: false, enabled: false, density: "comfortable", size: 42, spacing: ["gap-2.5", "rounded-xl", "p-2", "md:h-[54px]"] },
     { advanced: false, enabled: false, density: "icons", size: 36, spacing: ["h-[54px]", "justify-center"] },
   ] as const)("sizes bot portraits and row spacing in $density density with threads $enabled (advanced $advanced)", ({ advanced, enabled, density, size, spacing }) => {
     fixture.advanced = advanced;
@@ -128,12 +128,12 @@ describe("bot-first sidebar", () => {
     });
   }
 
-  it.each([false, true])("uses 14px medium names in Simple comfortable rows and keeps 15px semibold otherwise (advanced %s)", (advanced) => {
+  it.each([false, true])("uses 14px medium names in comfortable rows in both modes (advanced %s)", (advanced) => {
     fixture.advanced = advanced;
     fixture.showThreads = false;
     const markup = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", { ...bot, tasks: [], projects: [] })));
     const name = markup.match(/<span class="flex min-w-0 grow items-center gap-1\.5 truncate text-ink ([^"]*)"/)?.[1];
-    expect(name).toBe(advanced ? "text-[15px] font-semibold leading-5" : "text-[14px] font-medium leading-5");
+    expect(name).toBe("text-[14px] font-medium leading-5");
     expect(markup).toContain("truncate text-[13px] leading-[18px]");
   });
 
@@ -165,6 +165,21 @@ describe("bot-first sidebar", () => {
     expect(String(findElement(tree, "data-sidebar-bot-row", bot.id)!.props.className)).not.toContain("group-hover:pr-9");
     expect(markup).not.toContain("group-hover:pe-7");
     expect(markup).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*end-\[3px\] top-1\.5 size-6 translate-y-0\b/);
+  });
+
+  it("shows a Simple row's engine mark only while the row is hovered, focused or on a touch screen, and Advanced's always", () => {
+    fixture.showThreads = false;
+    fixture.state = { ...fixture.state, instances: [{ instanceId: "fake", driverKind: "claudeAgent", displayName: "Claude" }] as unknown as AppState["instances"] };
+    const candidate = { ...bot, tasks: [], projects: [], messages: [{ id: "m", role: "bot", kind: "text", text: "Done.", at: 1 }] } as Bot;
+    const badgeClass = (markup: string) => /<span data-testid="model-badge"[^>]*class="([^"]*)"/.exec(markup)?.[1]?.split(" ") ?? [];
+    const simple = badgeClass(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate))));
+    expect(simple).toEqual(expect.arrayContaining(["opacity-0", "group-hover:opacity-100", "group-focus-within:opacity-100", "touch:opacity-100", "motion-reduce:transition-none"]));
+    // The row it reveals on is the hover group, so focus anywhere in the row (its ⋯ too) shows the mark.
+    expect(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)))).toMatch(/^<div class="group relative/);
+    fixture.advanced = true;
+    const advanced = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)));
+    expect(advanced).toContain('data-testid="model-badge"');
+    expect(badgeClass(advanced)).not.toContain("opacity-0");
   });
 
   it("fades the collapsed rail's engine badge in both modes", () => {
@@ -302,11 +317,11 @@ describe("bot-first sidebar", () => {
   });
 
   it.each([
-    { advanced: false, density: "comfortable", slot: "size-9", spacing: ["gap-2", "rounded-[8px]", "pl-2", "pr-2", "md:h-[54px]"], name: "font-medium", preview: "text-[13px]" },
-    { advanced: false, density: "icons", slot: "size-9", spacing: ["h-[54px]", "justify-center"], name: "font-semibold", preview: "text-[11px]" },
-    { advanced: true, density: "icons", slot: "size-12", spacing: ["justify-center", "px-1", "py-1.5"], name: "font-semibold", preview: "text-[11px]" },
-    { advanced: true, density: "comfortable", slot: "size-8", spacing: ["gap-2", "py-1.5", "pl-6", "pr-9"], name: "font-semibold", preview: "text-[11px]" },
-  ] as const)("sizes group chat rows in $density density (advanced $advanced)", ({ advanced, density, slot, spacing, name, preview }) => {
+    { advanced: false, density: "comfortable", slot: "size-9", spacing: ["gap-2.5", "rounded-xl", "pl-2", "pr-2", "md:h-[54px]"] },
+    { advanced: false, density: "icons", slot: "size-9", spacing: ["h-[54px]", "justify-center"] },
+    { advanced: true, density: "icons", slot: "size-12", spacing: ["justify-center", "px-1", "py-1.5"] },
+    { advanced: true, density: "comfortable", slot: "size-8", spacing: ["gap-2", "py-1.5", "pl-6", "pr-9"] },
+  ] as const)("sizes group chat rows in $density density (advanced $advanced), names at 14/20 medium and previews at 13/18", ({ advanced, density, slot, spacing }) => {
     fixture.advanced = advanced;
     const group: Group = { id: "room", threadId: "room-thread", name: "Launch", memberIds: [bot.id], messages: [], defaultResponder: { kind: "mentions" }, bulletin: "", unread: false, createdAt: 1 };
     let tree: ReactNode;
@@ -315,8 +330,8 @@ describe("bot-first sidebar", () => {
     const row = findElement(tree, "data-sidebar-group-row", group.id)!;
     expect(String(row.props.className).split(" ")).toEqual(expect.arrayContaining([...spacing]));
     expect(markup).toMatch(new RegExp(`data-room-mark="" class="[^"]*\\b${slot}\\b[^"]*"><svg[^>]*width="16" height="16"`));
-    expect(markup).toMatch(new RegExp(`truncate text-\\[14px\\] text-ink ${name}`));
-    expect(markup).toContain(`truncate text-ink-secondary ${preview}`);
+    expect(markup).toContain("truncate text-[14px] font-medium leading-5 text-ink");
+    expect(markup).toContain("truncate text-[13px] leading-[18px] text-ink-secondary");
   });
 
   it("keeps the queued dot small", () => {

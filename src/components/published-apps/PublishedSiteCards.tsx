@@ -4,6 +4,7 @@ import { ArrowUpRight, Eye } from "lucide-react";
 import { openExternalLink } from "@/lib/app-links";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { memoInLocale } from "@/lib/locale-memo";
 import { askAboutSite, useKnownPublishedApps } from "@/lib/own-published-apps";
 import { showAppBesideChat } from "@/lib/page-open";
 import { publishedSiteLinks, type SiteCardLink } from "@/lib/published-site-links";
@@ -16,12 +17,15 @@ import { SiteThumb } from "./SiteThumb";
 /** Which shown message links each site, so only the newest of them draws it. */
 const claims = new Map<string, Map<string, number>>();
 const claimListeners = new Set<() => void>();
-let claimsVersion = 0;
 
 function changeClaims(change: () => void): void {
   change();
-  claimsVersion += 1;
   for (const listener of claimListeners) listener();
+}
+
+function subscribeClaims(listener: () => void): () => void {
+  claimListeners.add(listener);
+  return () => { claimListeners.delete(listener); };
 }
 
 function newestClaim(appId: string): string | undefined {
@@ -40,15 +44,16 @@ function useNewestFor(links: readonly SiteCardLink[], messageId: string, at: num
     changeClaims(() => { for (const id of ids) { if (!claims.has(id)) claims.set(id, new Map()); claims.get(id)!.set(messageId, at); } });
     return () => changeClaims(() => { for (const id of ids) { claims.get(id)?.delete(messageId); if (claims.get(id)?.size === 0) claims.delete(id); } });
   }, [sites, messageId, at]);
-  useSyncExternalStore((listener) => { claimListeners.add(listener); return () => { claimListeners.delete(listener); }; }, () => claimsVersion, () => claimsVersion);
-  return links.filter((link) => newestClaim(link.appId) === messageId);
+  const newest = () => links.filter((link) => newestClaim(link.appId) === messageId).map((link) => link.appId).join("\n");
+  const shown = useSyncExternalStore(subscribeClaims, newest, newest);
+  return useMemo(() => links.filter((link) => shown.split("\n").includes(link.appId)), [links, shown]);
 }
 
 /** One card under a bot's reply for each of the viewer's own published sites it links to (their Published apps list),
  * on the newest reply that links it: the site drawn small, its name and address, Open (the preview beside the chat,
  * full screen on a phone) and Open in browser. Any other site stays a plain link. Nothing while the reply streams, and
  * nothing on a published page's or a template's own card. */
-export function PublishedSiteCards({ message }: { message: Message }) {
+export const PublishedSiteCards = memoInLocale(function PublishedSiteCards({ message }: { message: Message }) {
   const apps = useKnownPublishedApps();
   const done = message.role === "bot" && message.kind === "text" && !message.publishedPage && !message.template && !isLiveReply(message);
   const text = done ? message.text ?? "" : "";
@@ -62,7 +67,7 @@ export function PublishedSiteCards({ message }: { message: Message }) {
       {shown.map((link) => <PublishedSiteCard key={link.appId} link={link} />)}
     </div>
   );
-}
+});
 
 function PublishedSiteCard({ link }: { link: SiteCardLink }) {
   const store = useOptionalStoreRef();

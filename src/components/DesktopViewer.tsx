@@ -181,5 +181,5 @@ function ViewerTool({ id, label, icon: Icon, disabled, active, expanded, onClick
   return <button id={id} type="button" title={label} aria-label={label} aria-pressed={active} aria-expanded={expanded} disabled={disabled} onClick={onClick} className={cn(
     "ui-icon-button size-11 min-h-11 shrink-0 rounded-xl focus-visible:outline-2 focus-visible:outline-focus",
     active ? "bg-accent/15 text-accent-text hover:bg-accent/25" : "text-ink-secondary hover:bg-raised-hover hover:text-ink",
-  )}><Icon size={19} strokeWidth={1.75} aria-hidden="true" /></button>;
+  )}><Icon size={19} aria-hidden="true" /></button>;
 }

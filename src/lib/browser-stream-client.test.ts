@@ -221,6 +221,94 @@ describe("preview stream downloads, uploads and messages", () => {
     expect(onUnauthorized).toHaveBeenCalledOnce();
   });
 
+  it("waits out its server restarting, refused before open for a while, then takes a lasting refusal as unauthorized", () => {
+    vi.useFakeTimers();
+    const onConnectedChange = vi.fn();
+    const onUnauthorized = vi.fn();
+    createPreviewStreamClient(target, events({ onConnectedChange, onUnauthorized }));
+    FakeSocket.current.closeWith(1006, "");
+    for (let attempt = 0; attempt < 3; attempt++) {
+      vi.advanceTimersByTime(10_000);
+      FakeSocket.current.closeWith(1006, "", false);
+    }
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(10_000);
+    FakeSocket.current.dispatchEvent(new Event("open"));
+    expect(onConnectedChange.mock.calls).toEqual([[true], [false], [true]]);
+    // Connected again: a server that then keeps refusing is a refusal after its restart allowance.
+    FakeSocket.current.dispatchEvent(Object.assign(new Event("close"), { code: 1006, reason: "" }));
+    for (let attempt = 0; attempt < 8; attempt++) {
+      vi.advanceTimersByTime(10_000);
+      FakeSocket.current.closeWith(1006, "", false);
+    }
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(10_000);
+    FakeSocket.current.closeWith(1006, "", false);
+    expect(onUnauthorized).toHaveBeenCalledOnce();
+    vi.useRealTimers();
+  });
+
+  it("reconnects by itself when a connected stream drops as its server restarts, however the socket closed", () => {
+    for (const code of [1012, 1006, 1001]) {
+      vi.useFakeTimers();
+      const onConnectedChange = vi.fn();
+      const onUnauthorized = vi.fn();
+      const onGone = vi.fn();
+      createPreviewStreamClient(target, events({ onConnectedChange, onUnauthorized, onGone }));
+      const first = FakeSocket.current;
+      first.control(agent);
+      first.closeWith(code, "");
+      // The server is down for a moment: its refusals before open are waited out.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        vi.advanceTimersByTime(10_000);
+        FakeSocket.current.closeWith(1006, "", false);
+      }
+      vi.advanceTimersByTime(10_000);
+      expect(FakeSocket.current).not.toBe(first);
+      FakeSocket.current.dispatchEvent(new Event("open"));
+      expect(onConnectedChange.mock.calls).toEqual([[true], [false], [true]]);
+      expect(onUnauthorized).not.toHaveBeenCalled();
+      expect(onGone).not.toHaveBeenCalled();
+      vi.useRealTimers();
+    }
+  });
+
+  it("still stops at once on a real refusal after it was connected", () => {
+    for (const code of [1008, 4401]) {
+      vi.useFakeTimers();
+      const onUnauthorized = vi.fn();
+      createPreviewStreamClient(target, events({ onUnauthorized }));
+      const first = FakeSocket.current;
+      first.closeWith(code, "");
+      vi.advanceTimersByTime(20_000);
+      expect(FakeSocket.current).toBe(first);
+      expect(onUnauthorized).toHaveBeenCalledOnce();
+      vi.useRealTimers();
+    }
+  });
+
+  it("tells each new socket the app's native view covers it, as each is a new view on the server", () => {
+    vi.useFakeTimers();
+    const client = createPreviewStreamClient(target, events());
+    const first = FakeSocket.current;
+    first.control(agent);
+    expect(client.send({ type: "covered", covered: true })).toBe(true);
+    expect(first.sent).toContain(JSON.stringify({ type: "covered", covered: true }));
+    first.closeWith(1012, "reconnect");
+    vi.advanceTimersByTime(500);
+    const second = FakeSocket.current;
+    expect(second).not.toBe(first);
+    second.dispatchEvent(new Event("open"));
+    second.control(agent);
+    expect(second.sent).toContain(JSON.stringify({ type: "covered", covered: true }));
+    client.send({ type: "covered", covered: false });
+    second.closeWith(1012, "reconnect");
+    vi.advanceTimersByTime(1_000);
+    FakeSocket.current.control(agent);
+    expect(FakeSocket.current.sent.some((sent) => sent.includes("covered"))).toBe(false);
+    vi.useRealTimers();
+  });
+
   it("reconnects after the browser restarted, with the newest size and frame cap the viewer asked for", () => {
     vi.useFakeTimers();
     const onConnectedChange = vi.fn();

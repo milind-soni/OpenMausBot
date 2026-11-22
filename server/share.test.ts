@@ -38,13 +38,13 @@ function bot(overrides: Partial<BotRecord> = {}): BotRecord {
 const routine = { id: "r1", name: "Morning sweep", botId: "bot-1", prompt: "Sweep the inbox.", runOn: "maus", enabled: true,
   schedule: { type: "daily", time: "09:00", weekdays: [1, 2, 3, 4, 5] }, durationMinutes: 30 } as unknown as Routine;
 
-function host(options: { submit?: (submission: unknown) => Promise<CommunityResult>; signedIn?: boolean; bots?: BotRecord[]; picture?: (bot: BotRecord) => string | undefined } = {}) {
+function host(options: { submit?: (submission: unknown) => Promise<CommunityResult>; signedIn?: boolean; bots?: BotRecord[]; picture?: (bot: BotRecord) => string | undefined; brief?: string } = {}) {
   const dataDir = scratch(), botFolder = scratch();
   const patches: Array<{ messageId: string; card: TemplateCard }> = [];
   const bots = options.bots ?? [bot()];
   const publisher = createCommunityPublisher({ access: () => options.signedIn === false ? null : { kind: "desktop", url: "https://admin.example.com/api/cloud/pages/token", token: "t" } });
   const share = createShareHost({
-    dataDir, bots: () => bots, groups: () => [], routines: () => [routine], brief: () => undefined,
+    dataDir, bots: () => bots, groups: () => [], routines: () => [routine], brief: () => options.brief,
     collectTeamSkills: (list) => ({ ok: true, skipped: [], skillsByBot: new Map(list.map((each) => [each.id, [{ name: "triage", description: "Sort the inbox.", instructions: skillText, enabled: true }]])) }),
     picture: options.picture ?? (() => undefined), botFolder: (id) => join(botFolder, id),
     publisher: options.submit ? { ...publisher, submit: options.submit } : publisher,
@@ -70,6 +70,24 @@ describe("making a template", () => {
     expect(folder.document.package.agents[0]).toMatchObject({ tools: { off: ["images"] } });
     expect(folder.document.package.agents[0]).not.toHaveProperty("connections");
     expect(folder.document.package).not.toHaveProperty("connections");
+  });
+
+  it("never shows a department's shared instructions as its line, and says what arrives for a bot or a department", () => {
+    const { share } = host({ brief: "We sell a team plan at 49 per seat.\nNever promise discounts." });
+    const department = share.export({ scope: "department", section: "Ops", bots: [bot()] }, [routine]);
+    expect(department.card.tagline).toBe("");
+    const departmentDetails = share.get(department.card.id).details;
+    expect(departmentDetails.summary).toMatch(/^Shared from MausBot\. Its bots, skills, group chats and routines arrive/);
+    expect(departmentDetails.brief).toContain("49 per seat");
+    const quiet = host({ bots: [bot({ title: undefined, description: undefined })] });
+    const lone = quiet.share.export({ scope: "bot", bot: bot({ title: undefined, description: undefined }) }, []);
+    expect(lone.card.tagline).toBe("");
+    const loneSummary = quiet.share.get(lone.card.id).details.summary ?? "";
+    expect(loneSummary).toMatch(/^Shared from MausBot\. The bot arrives as a new copy/);
+    expect(loneSummary).not.toMatch(/group chats|OpenMausBot/);
+    const titled = share.export({ scope: "bot", bot: bot() }, []);
+    expect(titled.card.tagline).toBe("Inbox helper");
+    expect(share.get(titled.card.id).details.summary).toBe("Keeps the inbox tidy.");
   });
 
   it("makes the same template again in the same folder and keeps its card", () => {

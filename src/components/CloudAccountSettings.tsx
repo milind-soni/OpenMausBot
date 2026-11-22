@@ -97,9 +97,17 @@ const RESTORE_RETRY: Partial<Record<DesktopCapabilities["host"]["platform"], Loc
   darwin: "cloudAccount.restoreRetryKeychain",
   linux: "cloudAccount.restoreRetryKeyring",
 };
+/** Clear is offered only after a few minutes of failed reads, and still says what may open it first: the keychain or keyring
+ * unlocked, or the app restarted (a keyring that wasn't up when the app started). */
+const SAVED_STUCK: Partial<Record<DesktopCapabilities["host"]["platform"], LocaleKey>> = {
+  darwin: "cloudAccount.savedStuckKeychain",
+  linux: "cloudAccount.savedStuckKeyring",
+};
 
 function accountMessage(account: CloudAccountState | null, view: CloudPlanView, platform: DesktopCapabilities["host"]["platform"]): string | null {
   if (!account) return null;
+  // A saved sign-in this computer can't read or remove: Clear and sign in again is the way on (main offers it after a few tries).
+  if (account.reset) return t(SAVED_STUCK[platform] ?? "cloudAccount.savedStuck");
   if (account.message === "signout-local-only") return t("cloudAccount.signoutLocalOnly");
   if (account.message === "signout-storage-failed") return t("cloudAccount.storageFailed");
   if (account.message === "restore-failed") return t(RESTORE_RETRY[platform] ?? "cloudAccount.restoreRetry");
@@ -109,8 +117,9 @@ function accountMessage(account: CloudAccountState | null, view: CloudPlanView, 
   if (view.kind === "attention" && !account.machine && !account.trial) return t("cloudAccount.attention");
   if (account.status === "signed-out" && account.message === "enrollment-expired") return t("cloudAccount.codeExpired");
   if (account.status === "signed-out" && account.message === "restore-removed") return t("cloudAccount.restoreRemoved");
+  if (account.status === "signed-out" && account.message === "reset-kept") return t("cloudAccount.resetKept");
   if (account.status === "signed-out" && account.message && account.message !== "restoring") return t("cloudAccount.signinFailed");
-  return null;
+  return account.unsaved ? t("cloudAccount.unsaved") : null;
 }
 
 function dashboardLabel(account: CloudAccountState, view: CloudPlanView): string {
@@ -261,6 +270,15 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, teamH
   const signedOut = view.kind === "signed-out" || view.kind === "removed";
   const startLabel = t(offerTrialDays(offer) !== null ? "cloudIntro.start" : "cloudAccount.upgrade");
   const errorLine = error && <p role="alert" className="px-4 text-[12px] leading-4 text-danger">{t("cloudAccount.actionFailed")}</p>;
+  // Clear and sign in again: the saved sign-in goes, then the sign-in starts as Sign in's does.
+  const resetSaved = bridge.resetSaved && account?.reset ? () => void perform(async () => {
+    const next = await bridge.resetSaved!();
+    if (next.status !== "signed-out") return next;
+    if (onSignIn) { onSignIn(); return next; }
+    return bridge.begin();
+  }) : null;
+  // Never the primary button: a saved sign-in that a restart would read is gone once cleared.
+  const resetButton = () => resetSaved && <button type="button" disabled={busy} data-cloud-reset="" className="ui-button" onClick={resetSaved}>{t("cloudAccount.resetSaved")}</button>;
 
   if (part === "account") {
     // One layout on every rail (§1.6): an icon card with the person's picture in the first row's slot, who is signed in,
@@ -279,7 +297,7 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, teamH
             <button type="button" disabled={busy} className="settings-quiet cursor-pointer" onClick={() => void perform(() => bridge.cancel())}>{t("organization.cancel")}</button>
           </SettingRow>}
           {signed && <SettingRow title={account.account?.email ?? t("settings.account.signedIn")} leading={avatar ?? blank} subtitle={message ? <p role="status">{message}</p> : t("settings.account.signedIn")}>
-            {view.kind === "reauth"
+            {resetSaved ? resetButton() : view.kind === "reauth"
               ? <button type="button" disabled={busy} className="ui-button" onClick={() => void perform(() => bridge.signInAgain())}>{t("cloudAccount.signInAgain")}</button>
               : advanced && <button type="button" disabled={busy} className="settings-quiet cursor-pointer" onClick={() => void perform(() => bridge.refresh())}>{t("organization.refresh")}</button>}
           </SettingRow>}
@@ -300,7 +318,7 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, teamH
   if (part === "sign-out") return null;
 
   const cancelled = account?.status === "connected" && account.renewal?.cancelled === true;
-  const primary = signedOut || (view.kind === "free" && buyOfferAllowed(view))
+  const primary = resetSaved ? resetButton() : signedOut || (view.kind === "free" && buyOfferAllowed(view))
     ? onAddCloud && buyOfferAllowed(view) && <button type="button" disabled={busy} className="ui-button ui-button-primary" data-plan-add="" onClick={onAddCloud}>{startLabel}</button>
     : view.kind === "reauth"
       ? <button type="button" disabled={busy} className="ui-button ui-button-primary" onClick={() => void perform(() => bridge.signInAgain())}>{t("cloudAccount.signInAgain")}</button>

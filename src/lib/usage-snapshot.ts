@@ -32,7 +32,8 @@ export interface UsageInput {
   apps: { services: Record<string, ConnectorStatus>; authoritative: boolean } | null;
   sessions: { sessions: ReadonlyArray<{ id?: unknown; email?: unknown }>; current: unknown } | null;
   companionDevices: number | null;
-  cloud: CloudPlanFacts | null;
+  /** null when the plan could not be read; left out where this page has no way to ask. */
+  cloud?: CloudPlanFacts | null;
   computers: { cloudComputers: unknown; teamComputers: unknown } | null;
   platform: "desktop" | "browser";
   remoteClient: boolean;
@@ -147,7 +148,7 @@ export function buildUsageSnapshot(input: UsageInput): EventProps {
     live_calls: config.live?.configured === true,
     ...deviceFacts(input.sessions, input.companionDevices),
     cloud_home: config.cloudHome === true,
-    cloud_plan: input.cloud?.plan ?? "unknown",
+    cloud_plan: input.cloud === undefined ? undefined : input.cloud?.plan ?? "unknown",
     cloud_trial: input.cloud?.trial,
     edition: allow(config.edition?.edition ?? "oss", EDITION),
     org_managed: Boolean(config.managedPolicy),
@@ -161,11 +162,34 @@ export function buildUsageSnapshot(input: UsageInput): EventProps {
 
 const tierPlan = (tier: string | undefined): CloudPlanFacts["plan"] => tier === undefined ? "pro" : allow(tier, CLOUD_TIER);
 
+/** A sign-in that is not verified right now (offline, expired, signing in again) reports the plan it last verified; a
+ * sign-in that verified no paid plan is `none`. */
 export function cloudPlanFromAccount(account: CloudAccountState | null | undefined): CloudPlanFacts {
+  if (account?.status === "connected") {
+    const paid = account.entitlement?.plan === "pro" && account.entitlement.status === "active";
+    return { plan: paid ? tierPlan(account.entitlement?.tier) : "none", trial: trialRunning(account.trial) };
+  }
+  if (account?.lastPlan) return { plan: account.lastPlan.active ? tierPlan(account.lastPlan.tier) : "none" };
+  if (account?.account) return { plan: "none" };
   if (account?.status === "signed-out" && account.message !== "restoring") return { plan: "none" };
-  if (account?.status !== "connected") return { plan: "unknown" };
-  const paid = account.entitlement?.plan === "pro" && account.entitlement.status === "active";
-  return { plan: paid ? tierPlan(account.entitlement?.tier) : "none", trial: trialRunning(account.trial) };
+  return { plan: "unknown" };
+}
+
+/** Main is still reading this computer's saved sign-in: the plan is not known yet, though it will be in a moment. */
+export const accountSettling = (account: CloudAccountState | null | undefined): boolean =>
+  account?.status === "signed-out" && account.message === "restoring";
+
+const ACCOUNT_SETTLE_MS = 5_000;
+const ACCOUNT_SETTLE_LIMIT_MS = 30_000;
+
+async function settledAccount(read: () => Promise<CloudAccountState>, wait: (ms: number) => Promise<void>, now: () => number): Promise<CloudAccountState> {
+  const until = now() + ACCOUNT_SETTLE_LIMIT_MS;
+  let account = await read();
+  while (accountSettling(account) && now() + ACCOUNT_SETTLE_MS < until) {
+    await wait(ACCOUNT_SETTLE_MS);
+    account = await read();
+  }
+  return account;
 }
 
 export function cloudPlanFromSnapshot(snapshot: CloudPlanSnapshot | null | undefined): CloudPlanFacts {
@@ -220,7 +244,8 @@ function claimDay(day: string): boolean {
 }
 
 /** At most one app_snapshot per app origin per UTC day; an opted-out install makes no request at all. */
-export async function sendDailySnapshot(state: SnapshotState, sources: UsageSources, now = Date.now()): Promise<boolean> {
+export async function sendDailySnapshot(state: SnapshotState, sources: UsageSources, now = Date.now(),
+  wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)), clock = Date.now): Promise<boolean> {
   if (!analyticsEnabled() || gathering || !state.config) return false;
   if (!claimDay(utcDay(now))) return false;
   gathering = true;
@@ -231,9 +256,9 @@ export async function sendDailySnapshot(state: SnapshotState, sources: UsageSour
       settle(() => sources.connectedApps()),
       settle(() => sources.request<{ sessions?: unknown; current?: unknown }>("/api/auth/sessions")),
       companion ? settle(() => companion.state()) : null,
-      cloudAccount ? settle(() => cloudAccount.state()).then(cloudPlanFromAccount)
-        : cloudPlan ? settle(() => cloudPlan.state()).then(cloudPlanFromSnapshot)
-        : null,
+      cloudAccount ? settle(() => settledAccount(() => cloudAccount.state(), wait, clock)).then((account) => account ? cloudPlanFromAccount(account) : null)
+        : cloudPlan ? settle(() => cloudPlan.state()).then((snapshot) => snapshot ? cloudPlanFromSnapshot(snapshot) : null)
+        : undefined,
       config.box?.configured
         ? settle(() => sources.request<{ cloudComputers?: unknown; teamComputers?: unknown }>("/api/computers/usage"))
         : { cloudComputers: 0, teamComputers: 0 },

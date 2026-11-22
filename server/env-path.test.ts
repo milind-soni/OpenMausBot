@@ -1,5 +1,5 @@
-import { execFile, execFileSync } from "node:child_process";
-import { chmodSync, closeSync, constants, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -268,16 +268,9 @@ describe("augmentedPath", () => {
     const shell = join(homedir(), "fake-login-shell");
     const rcOnlyBin = join(homedir(), "rc-only", "bin");
     const jobStatus = join(homedir(), "late-job.status");
-    const jobGate = join(homedir(), "late-job.gate");
-    execFileSync("mkfifo", [jobGate]);
-    let released = false;
-    const releaseLateOutput = () => {
-      closeSync(openSync(jobGate, constants.O_WRONLY | constants.O_NONBLOCK));
-      released = true;
-    };
     writeFileSync(
       shell,
-      `#!/bin/sh\nprintf '__OMB_PATH__%s__OMB_END__' '${rcOnlyBin}'\n(cat '${jobGate}' > /dev/null; head -c 200000 /dev/zero; echo $? > '${jobStatus}') &\n`,
+      `#!/bin/sh\nprintf '__OMB_PATH__%s__OMB_END__' '${rcOnlyBin}'\n(head -c 800000 /dev/zero; echo $? > '${jobStatus}') &\n`,
     );
     chmodSync(shell, 0o755);
 
@@ -289,15 +282,13 @@ describe("augmentedPath", () => {
 
       augmentedPath();
       await vi.waitFor(() => expect(augmentedPath().split(delimiter)).toContain(rcOnlyBin));
-      await vi.waitFor(releaseLateOutput, { timeout: 5000 });
-      // 141 = 128 + SIGPIPE: the job's write hit a pipe nobody reads any more (0 would mean it was all read).
-      await vi.waitFor(() => expect(existsSync(jobStatus) && readFileSync(jobStatus, "utf8").trim()).toBe("141"), {
+      // A write nobody reads any more ends the job by SIGPIPE (141) on macOS and can fail with an error (1) on Linux;
+      // 0 would mean it was all read.
+      await vi.waitFor(() => expect(existsSync(jobStatus) && readFileSync(jobStatus, "utf8").trim()).toMatch(/^[1-9]\d*$/), {
         timeout: 5000,
       });
       expect(augmentedPath().split(delimiter)).toContain(rcOnlyBin);
     } finally {
-      if (!released) await vi.waitFor(releaseLateOutput, { timeout: 5000 }).catch(() => {});
-      rmSync(jobGate, { force: true });
       if (saved.SHELL === undefined) delete process.env.SHELL;
       else process.env.SHELL = saved.SHELL;
       if (saved.VITEST === undefined) delete process.env.VITEST;

@@ -5,7 +5,7 @@ import type { Bot } from "@/state/store";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
 import type { ApprovalModeSelector } from "./ApprovalModeSelector";
-import { CommandAllowlistDialog } from "./CommandAllowlistDialog";
+import { CommandAllowlistDialog } from "./lazy-screens";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 

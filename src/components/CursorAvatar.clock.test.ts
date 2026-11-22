@@ -77,13 +77,13 @@ describe("CursorAvatar on the shared clock", () => {
     expect(mascotClock().pending()).toBe(12);
   });
 
-  it("draws a sidebar full of working mascots 20 times a second", () => {
+  it("draws a sidebar full of working mascots 30 times a second", () => {
     render(Array.from({ length: 12 }, (_, i) => ({ state: "working" as const, size: [24, 28, 42, 56][i % 4] })));
     run(100);
     frameRequests = 0;
     run(1000);
-    expect(frameRequests).toBeGreaterThanOrEqual(18);
-    expect(frameRequests).toBeLessThanOrEqual(21);
+    expect(frameRequests).toBeGreaterThanOrEqual(28);
+    expect(frameRequests).toBeLessThanOrEqual(33);
   });
 
   it("paints a still mascot with its state's face and then asks for nothing", () => {
@@ -107,6 +107,21 @@ describe("CursorAvatar on the shared clock", () => {
     expect(mascotClock().pending()).toBe(0);
   });
 
+  it("keeps its body when drawn again with a new look", () => {
+    render([{ state: "idle", animated: false, size: 20, gradient: ["#111111", "#222222", "#333333"] }]);
+    run(100);
+    const watcher = new MutationObserver(() => {});
+    watcher.observe(host, { childList: true, subtree: true });
+    for (let turn = 1; turn <= 5; turn++) {
+      render([{ state: "idle", animated: false, size: 20, turn, gradient: ["#111111", "#222222", "#333333"] }]);
+      run(100);
+    }
+    const replaced = watcher.takeRecords();
+    watcher.disconnect();
+    expect(host.querySelector("clipPath")!.childElementCount).toBeGreaterThan(0);
+    expect(replaced).toEqual([]);
+  });
+
   it("lets a small idle mascot settle to no frames, and wakes it for a blink", () => {
     const ref = createRef<MausAvatarHandle>();
     render([{ state: "idle", size: 24, ref }]);
@@ -122,7 +137,7 @@ describe("CursorAvatar on the shared clock", () => {
   });
 
   it("leaves an alert glyph's layer alone between its appearances", () => {
-    render([{ state: "confused", size: 64 }]);
+    render([{ state: "confused", size: 64, animated: true }]);
     const { period } = EFFECTS.confused!.glyph!;
     run(period - (performance.now() % period) + 100);
     const glyphLayer = [...host.querySelectorAll("svg g")].find((g) => (g as SVGGElement).style.opacity === "0")!;
@@ -144,7 +159,7 @@ describe("CursorAvatar on the shared clock", () => {
     run(2000);
     expect(frameRequests).toBeGreaterThan(20);
     run(UNREAD_NOTICE_MS);
-    run(100);
+    run(1000);
     frameRequests = 0;
     run(30_000);
     expect(frameRequests).toBe(0);
