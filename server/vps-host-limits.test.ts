@@ -35,3 +35,21 @@ describe("VPS host limits", () => {
     expect(host).toHaveBeenCalledTimes(5);
   });
 });
+
+describe("VPS host limits across servers", () => {
+  const host = async () => ({ cpus: 4, memoryBytes: 16 * GIB });
+  it("does not check the default server when its alias is cleared", async () => {
+    const small = async () => ({ cpus: 1, memoryBytes: 16 * GIB });
+    expect(await vpsHostLimitProblem({ vps: { sshAlias: "main", cpus: 2 } }, { vps: { sshAlias: "" } }, small)).toBeNull();
+  });
+  it("checks a named server that inherits a raised default", async () => {
+    const cfg = { vps: { sshAlias: "main", cpus: 2 }, vpsServers: [{ name: "Small", sshAlias: "small" }] };
+    const capacity = async (alias: string) => (alias === "small" ? { cpus: 2, memoryBytes: 16 * GIB } : { cpus: 8, memoryBytes: 16 * GIB });
+    expect(await vpsHostLimitProblem(cfg, { vps: { cpus: 4 } }, capacity)).toContain("small has 2 CPU cores");
+  });
+  it("refuses a pin larger than the effective core limit", async () => {
+    const cfg = { vps: { sshAlias: "main", cpus: 2 }, vpsServers: [] };
+    const patch = { vpsServers: [{ name: "Pinned", sshAlias: "pinned", cpuset: "0-3" }] };
+    expect(await vpsHostLimitProblem(cfg, patch, host)).toContain("pins 4 CPUs");
+  });
+});

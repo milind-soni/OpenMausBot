@@ -1,4 +1,6 @@
 import type { AppConfig, VpsServer } from "./config.ts";
+import { cpusetSize } from "./container-limits.ts";
+import { vpsLimits } from "./vps-hosts.ts";
 import { defaultRunner, vpsDockerArgs, type VpsCommandRunner } from "./vps-computer.ts";
 
 export interface HostCapacity { cpus: number; memoryBytes: number }
@@ -38,26 +40,33 @@ export function hostLimitProblem(alias: string, host: HostCapacity, limits: { cp
 type Patch = { vps?: { sshAlias?: string; cpus?: number; cpuset?: string; memoryGb?: number }; vpsServers?: VpsServer[] };
 type Limits = { cpus?: number; cpuset?: string; memoryGb?: number };
 
-/** Checks each CPU and memory limit this save adds or changes against what the machine has. */
+/** The config as it will be once `patch` is saved: an omitted default alias is kept, an empty one clears it, and an empty pin removes it. */
+function afterPatch(cfg: AppConfig, patch: Patch): AppConfig {
+  if (patch.vps === undefined && patch.vpsServers === undefined) return cfg;
+  const { sshAlias, cpus, memoryGb, cpuset } = patch.vps ?? {};
+  const vps = { ...cfg.vps, ...(sshAlias === undefined ? {} : { sshAlias }), ...(cpus === undefined ? {} : { cpus }), ...(memoryGb === undefined ? {} : { memoryGb }) };
+  if (patch.vps && "cpuset" in patch.vps) delete vps.cpuset;
+  if (cpuset) vps.cpuset = cpuset;
+  return { ...cfg, vps, vpsServers: patch.vpsServers ?? cfg.vpsServers };
+}
+
+const sameLimits = (a: Limits, b: Limits) => a.cpus === b.cpus && a.cpuset === b.cpuset && a.memoryGb === b.memoryGb;
+
+/** Checks each CPU and memory limit this save adds or changes, as each server will effectively have it, against what the machine has. */
 export async function vpsHostLimitProblem(cfg: AppConfig, patch: Patch, capacity: (alias: string) => Promise<HostCapacity | null> = vpsHostCapacity): Promise<string | null> {
+  const after = afterPatch(cfg, patch);
+  const aliases = new Set<string>();
+  if (after.vps?.sshAlias) aliases.add(after.vps.sshAlias);
+  for (const server of after.vpsServers ?? []) aliases.add(server.sshAlias);
   const targets: ({ alias: string } & Limits)[] = [];
-  if (patch.vps !== undefined) {
-    const alias = patch.vps.sshAlias || cfg.vps?.sshAlias;
-    const cpus = patch.vps.cpus ?? cfg.vps?.cpus;
-    const memoryGb = patch.vps.memoryGb ?? cfg.vps?.memoryGb;
-    const cpuset = "cpuset" in patch.vps ? patch.vps.cpuset || undefined : cfg.vps?.cpuset;
-    const changed = patch.vps.sshAlias !== undefined && patch.vps.sshAlias !== cfg.vps?.sshAlias
-      || (patch.vps.cpus !== undefined && patch.vps.cpus !== cfg.vps?.cpus)
-      || (patch.vps.memoryGb !== undefined && patch.vps.memoryGb !== cfg.vps?.memoryGb)
-      || ("cpuset" in patch.vps && cpuset !== cfg.vps?.cpuset);
-    if (alias && changed && (cpus !== undefined || memoryGb !== undefined || cpuset)) targets.push({ alias, ...(cpus === undefined ? {} : { cpus }), ...(memoryGb === undefined ? {} : { memoryGb }), ...(cpuset ? { cpuset } : {}) });
-  }
-  for (const server of patch.vpsServers ?? []) {
-    const before = cfg.vpsServers?.find((entry) => entry.sshAlias === server.sshAlias);
-    const limited = server.cpus !== undefined || server.memoryGb !== undefined || Boolean(server.cpuset);
-    if (limited && (server.cpus !== before?.cpus || server.cpuset !== before?.cpuset || server.memoryGb !== before?.memoryGb)) {
-      targets.push({ alias: server.sshAlias, ...(server.cpus === undefined ? {} : { cpus: server.cpus }), ...(server.memoryGb === undefined ? {} : { memoryGb: server.memoryGb }), ...(server.cpuset ? { cpuset: server.cpuset } : {}) });
+  for (const alias of aliases) {
+    const limits = vpsLimits(after, alias);
+    if (limits.cpuset && limits.cpus !== undefined && cpusetSize(limits.cpuset) > limits.cpus) {
+      return `${alias} pins ${cpusetSize(limits.cpuset)} CPUs (${limits.cpuset}), more than its ${limits.cpus} cores`;
     }
+    const known = alias === cfg.vps?.sshAlias || (cfg.vpsServers ?? []).some((server) => server.sshAlias === alias);
+    const hasLimits = limits.cpus !== undefined || limits.memoryGb !== undefined || Boolean(limits.cpuset);
+    if (hasLimits && !(known && sameLimits(limits, vpsLimits(cfg, alias)))) targets.push({ alias, ...limits });
   }
   const hosts = new Map<string, Promise<HostCapacity | null>>();
   for (const target of targets) {

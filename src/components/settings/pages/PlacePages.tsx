@@ -123,8 +123,8 @@ export function AiPage() {
   // Simple ends after Providers: Other services is one closed fold row, so the page fits one window.
   const asksForKeys = anchor === "ai-keys" || anchor === KEYS_ANCHOR_FOR_FOCUS;
   const [services, setServices] = useState(ctx.advanced || asksForKeys);
-  // A key asked for by search or a link opens Other services whatever the fold says.
-  const shown = ctx.advanced || services || asksForKeys;
+  useEffect(() => { if (asksForKeys) setServices(true); }, [asksForKeys]);
+  const shown = ctx.advanced || services;
   const count = KEY_SECTIONS.filter((section) => section.id !== "ai").length;
   return <>
     <AdminOnly>

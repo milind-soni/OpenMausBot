@@ -343,7 +343,7 @@ export function VpsConnection() {
   };
 
   const add = (next: { name: string; alias: string } & Limits) => {
-    if (!defaultAlias) return put({ vps: { sshAlias: next.alias, ...limits(next) } }, "");
+    if (!defaultAlias) return put({ vps: { sshAlias: next.alias, ...limits(next), cpuset: next.cpuset ?? "" } }, "");
     return put({ vpsServers: [...named, { name: next.name, sshAlias: next.alias, ...limits(next) }] }, "");
   };
 

@@ -13,12 +13,14 @@ export interface DesktopResources {
 
 const CPUSET = /^\d{1,4}(-\d{1,4})?(,\d{1,4}(-\d{1,4})?)*$/;
 
-/** How many CPUs a valid `cpuset` names: "0,2" is 2, "4-7" is 4. */
+/** How many distinct CPUs a valid `cpuset` names: "0,2" is 2, "4-7" is 4, "0-3,2-5" is 6. */
 export function cpusetSize(value: string): number {
-  return value.split(",").reduce((total, part) => {
+  const ids = new Set<number>();
+  for (const part of value.split(",")) {
     const [from, to = from] = part.split("-").map(Number);
-    return total + (to! - from! + 1);
-  }, 0);
+    for (let id = from!; id <= to!; id++) ids.add(id);
+  }
+  return ids.size;
 }
 
 export function isValidCpuset(value: unknown): value is string {
@@ -56,11 +58,26 @@ export function raisePidsLimit(
   void Promise.resolve().then(() => docker(["update", "--pids-limit", String(PIDS_LIMIT), container], 15_000)).catch(() => {});
 }
 
-/** A stopped desktop takes the configured limits before it starts. An engine without `update --memory` keeps the old ones. */
+/** A stopped desktop takes the configured limits before it starts. An engine without `update --memory` keeps the old ones,
+ * so a failed update is returned for the caller to report, never thrown: the desktop still starts. */
 export async function applyResourcesBeforeStart(
   container: string,
   resources: DesktopResources,
   docker: (args: string[], timeoutMs?: number) => Promise<unknown>,
-): Promise<void> {
-  await docker(["update", ...resourceArgs(resources, { swap: true }), container], 15_000).catch(() => {});
+): Promise<string | null> {
+  return docker(["update", ...resourceArgs(resources, { swap: true }), container], 15_000).then(
+    () => null,
+    (error: unknown) => `The desktop started with its previous limits: ${error instanceof Error ? error.message : String(error)}`,
+  );
+}
+
+/** Starts a stopped desktop after applying the limits; returns the warning when they could not be applied. */
+export async function startWithResources(
+  container: string,
+  resources: DesktopResources,
+  docker: (args: string[], timeoutMs?: number) => Promise<unknown>,
+): Promise<string | null> {
+  const warning = await applyResourcesBeforeStart(container, resources, docker);
+  await docker(["start", container]);
+  return warning;
 }

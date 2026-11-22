@@ -207,7 +207,8 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       if (changingVoiceProvider && patch.tts?.model === undefined) patch.tts = { ...patch.tts, model: "" };
       if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
       if (patch.vps !== undefined || patch.vpsServers !== undefined) {
-        const overHost = await vpsHostLimitProblem(cfg, patch);
+        providerConfigBusy.set(true);
+        const overHost = await vpsHostLimitProblem(cfg, patch).finally(() => providerConfigBusy.set(false));
         if (overHost) return json(res, 400, { error: overHost });
       }
       if (patch.browserProfiles !== undefined && body.expectedBrowserProfiles !== undefined) {

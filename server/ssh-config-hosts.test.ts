@@ -31,3 +31,23 @@ describe("sshConfigHosts", () => {
     expect(sshConfigHosts("/h/.ssh", files({ "/h/.ssh/config": "Host bad;name ok-name user@host\n" }))).toEqual(["ok-name"]);
   });
 });
+
+describe("sshConfigHosts quoting and wildcards", () => {
+  it("reads quoted names and quoted Include paths with spaces", () => {
+    const hosts = sshConfigHosts("/h/.ssh", files({
+      "/h/.ssh/config": 'Host "prod" # note\nInclude "work hosts/a.conf"\n',
+      "/h/.ssh/work hosts/a.conf": "Host staging\n",
+    }));
+    expect(hosts).toEqual(["prod", "staging"]);
+  });
+
+  it("expands wildcards in directory components", () => {
+    const map: Record<string, string> = {
+      "/h/.ssh/config": "Include config.d/*/*.conf\n",
+      "/h/.ssh/config.d/a/one.conf": "Host one\n",
+      "/h/.ssh/config.d/b/two.conf": "Host two\n",
+    };
+    const children = (directory: string) => [...new Set(Object.keys(map).filter((path) => path.startsWith(`${directory}/`)).map((path) => path.slice(directory.length + 1).split("/")[0]!))].sort();
+    expect(sshConfigHosts("/h/.ssh", { read: (path) => map[path] ?? null, list: children })).toEqual(["one", "two"]);
+  });
+});

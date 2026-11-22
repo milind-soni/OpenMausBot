@@ -43,3 +43,10 @@ describe("CPU pinning", () => {
     expect(vpsLimits(cfg, "pin")).toEqual({ memoryGb: 6, cpus: 3, cpuset: "2" });
   });
 });
+
+describe("CPU pinning size", () => {
+  it("counts distinct CPUs when ranges overlap", () => {
+    expect(cpusetSize("0-3,2-5")).toBe(6);
+    expect(cpusetSize("0,2,4-7")).toBe(6);
+  });
+});

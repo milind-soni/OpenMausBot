@@ -208,8 +208,8 @@ name more CPUs than the cores field, and a named server never inherits the defau
 a new server's SSH alias lists the plain `Host` names in `~/.ssh/config`, including files it `Include`s.
 
 A new container takes the limits at once. A stopped one takes them when it next starts. A running container keeps
-its limits until it is recreated, and Docker cannot remove a pin from an existing container, so a removed pin applies
-to desktops made afterwards. When you save a limit, OpenMausBot asks the VPS's Docker engine for its CPU count and
+its limits until it stops; the next start applies the current ones, so recreating it is not needed. Docker cannot
+remove a pin from an existing container, so a removed pin applies to desktops made afterwards. When you save a limit, OpenMausBot asks the VPS's Docker engine for its CPU count and
 memory over SSH and refuses cores, memory or a pinning the machine does not have. A host that does not answer does
 not hold the save up.
 
