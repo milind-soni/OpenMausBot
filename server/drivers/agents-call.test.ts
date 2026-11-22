@@ -222,7 +222,7 @@ describe("skill_manage", () => {
     const sent: unknown[] = [];
     const ctx = context({ client: { api: async (path) => { sent.push(path); return {}; }, apiResponse: async () => ({ ok: true, status: 200, body: {} }) } });
     expect(await callTool("skill_manage", { action: "save" }, ctx)).toEqual({
-      text: 'skill_manage action must be "create", "update", "import", "enable", "disable" or "delete". It takes action, skill_name, skill_md, references, gist, base_revision, source.',
+      text: 'skill_manage action must be "create", "update", "import", "enable", "disable", "delete", "share", "assign" or "unassign". It takes action, skill_name, skill_md, references, gist, base_revision, target_bot_id, source.',
       isError: true,
     });
     expect((await callTool("skill_manage", { action: "create", source: "conversation" }, ctx)).text).toContain("---\\nname: file-expense\\ndescription:");

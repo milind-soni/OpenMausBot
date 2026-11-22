@@ -1524,7 +1524,7 @@ export class Store {
     return changed;
   }
 
-  patchBotProfile(id: string, patch: BotProfilePatch & Partial<Pick<BotRecord, "cwd" | "browserProfile" | "lastProfileRequestId">>): BotRecord | null {
+  patchBotProfile(id: string, patch: BotProfilePatch & Partial<Pick<BotRecord, "cwd" | "browserProfile" | "lastProfileRequestId" | "assignedSkills">>): BotRecord | null {
     const bot = this.own(id);
     if (!bot) return null;
     const next = { ...bot, ...reshowWhenMoved(bot, patch) };

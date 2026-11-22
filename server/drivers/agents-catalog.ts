@@ -720,22 +720,22 @@ const TOOL_DEFINITIONS = [
   {
     name: "skills_list",
     description:
-      "List this bot's skills (enabled and disabled) and any staged skill writes still waiting for the user's decision; pass query to find enabled skills for a task. Use this before skill_manage to avoid duplicate names. Listing does not enable anything.",
+      "List this bot's skills (enabled and disabled) and any staged skill writes still waiting for the user's decision; pass query to find enabled skills for a task. Use this before skill_manage to avoid duplicate names. Listing does not enable anything. A Chief can pass target_bot_id to list explicit assignments and revisions for one bot; query then filters by skill name.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
-      properties: { query: { type: "string", maxLength: 300, description: "Words about the task; returns the best matches and where to read each." } },
+      properties: { query: { type: "string", maxLength: 300, description: "Words about the task; returns the best matches and where to read each." }, target_bot_id: { type: "string", maxLength: 200, description: "Chief only: the exact target bot ID from list_bots." } },
     },
   },
   {
     name: "skill_manage",
     description:
-      "Create or update a reusable skill (SKILL.md), import one from GitHub or skills.sh (action import with source; same review as create, brings SKILL.md and references/*.md), or turn one of your own skills on or off, or delete it. Never change a skill unless the person explicitly asked for that named skill." + APPLIES_OUTCOME,
+      "Create or update a reusable skill (SKILL.md), import one from GitHub or skills.sh (action import with source; same review as create, brings SKILL.md and references/*.md), or turn one of your own skills on or off, or delete it. A Chief can share, assign or unassign one existing library skill for one named bot. Never change a skill unless the person explicitly asked for that named skill." + APPLIES_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
-        action: { type: "string", enum: ["create", "update", "import", "enable", "disable", "delete"] },
+        action: { type: "string", enum: ["create", "update", "import", "enable", "disable", "delete", "share", "assign", "unassign"] },
         skill_name: { type: "string", description: "Every action but create and import: the exact name from skills_list." },
         skill_md: { type: "string", description: "create or update: the full SKILL.md with its YAML frontmatter." },
         references: {
@@ -753,7 +753,8 @@ const TOOL_DEFINITIONS = [
           },
         },
         gist: { type: "string", description: "Optional one-line summary of the change." },
-        base_revision: { type: "string", description: "To update a skill shared with your team: its revision from skills_list." },
+        base_revision: { type: "string", description: "Update: revision from skills_list. Share, assign or unassign: the target’s management_revision from skills_list with target_bot_id." },
+        target_bot_id: { type: "string", maxLength: 200, description: "Share, assign or unassign: the exact bot ID from list_bots." },
         source: { type: "string", description: "create or update: the URL, folder or 'conversation' it came from. import: owner/repo, a GitHub link to the skill's folder or SKILL.md, or a skills.sh link." },
       },
       required: ["action"],

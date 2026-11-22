@@ -2170,7 +2170,8 @@ describe("agents-proxy MCP surface", () => {
     const manage = list.result.tools.find((t: { name: string }) => t.name === "skill_manage");
     expect(JSON.stringify(manage.inputSchema)).not.toMatch(/"(oneOf|anyOf|allOf|const|format)":/);
     expect(manage.inputSchema.required).toEqual(["action"]);
-    expect(manage.inputSchema.properties.action.enum).toEqual(["create", "update", "import", "enable", "disable", "delete"]);
+    expect(manage.inputSchema.properties.action.enum).toEqual(["create", "update", "import", "enable", "disable", "delete", "share", "assign", "unassign"]);
+    expect(manage.inputSchema.properties.target_bot_id.type).toBe("string");
 
     const listed = await callTool("skills_list", {});
     expect(listed.result.content[0].text).toContain("file-expense");
