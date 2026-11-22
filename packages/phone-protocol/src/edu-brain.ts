@@ -1,8 +1,19 @@
 import { z } from "zod";
 
 /** Where a bot's Edu brain lives. `own` (the default when absent): a brain of its own in the app's data folder, created on
- * first use. `folder`: the `.edu` brain already in `path`, which several bots may share. `off`: no Edu brain. */
-export type EduBrainSetting = { mode: "off" } | { mode: "own" } | { mode: "folder"; path: string };
+ * first use. `folder`: the `.edu` brain already in `path`, which several bots may share. `area`: one brain in the app's
+ * data folder shared by every bot of the area `area` on this computer, created on first use. `cloud`: an edu-cloud brain
+ * at `url`, reached with this person's token. `off`: no Edu brain. */
+export type EduBrainSetting =
+  | { mode: "off" }
+  | { mode: "own" }
+  | { mode: "folder"; path: string }
+  | { mode: "area"; area: string; personalBrain?: false }
+  | { mode: "cloud"; url: string; token: EduCloudToken };
+
+/** Where this person's edu-cloud token comes from: a secret of that name in their Vault, or an environment variable of
+ * the app. Never the token itself. */
+export type EduCloudToken = { secret: string } | { env: string };
 
 export interface EduBrainField {
   /** This bot's Edu brain. Absent: its own. */
@@ -12,12 +23,35 @@ export interface EduBrainField {
 }
 
 const ABSOLUTE_PATH = /^(?:\/|[A-Za-z]:[\\/]|\\\\)/;
+export const EDU_AREA_KEY = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const SECRET_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
+const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+
+/** Why `value` cannot be an edu-cloud address, or null: https, or http on this computer only, with no user, query or
+ * fragment, ending in /mcp. */
+export function eduCloudUrlProblem(value: string): string | null {
+  let url: URL;
+  try { url = new URL(value); } catch { return "must be a full https:// address"; }
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && LOOPBACK.has(url.hostname))) return "must be an https:// address (http:// only for this computer)";
+  if (url.username || url.password) return "must not hold a user name or password";
+  if (url.search || url.hash || value.includes("?") || value.includes("#")) return "must be a plain address, without ? or #";
+  if (!url.pathname.replace(/\/+$/, "").endsWith("/mcp")) return "must be the brain's /mcp address";
+  return null;
+}
+
+const cloudTokenSchema = z.union([
+  z.object({ secret: z.string().regex(SECRET_NAME) }).strict(),
+  z.object({ env: z.string().regex(ENV_NAME) }).strict(),
+]);
 
 /** An `EduBrainSetting` as a file carries it; `folder` needs an absolute path. */
 export const eduBrainSettingSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("off") }),
   z.object({ mode: z.literal("own") }),
   z.object({ mode: z.literal("folder"), path: z.string().trim().max(4096).refine((path) => ABSOLUTE_PATH.test(path) && !path.includes("\0"), "must be an absolute folder path") }),
+  z.object({ mode: z.literal("area"), area: z.string().regex(EDU_AREA_KEY), personalBrain: z.literal(false).optional() }),
+  z.object({ mode: z.literal("cloud"), url: z.string().max(2000).refine((url) => eduCloudUrlProblem(url) === null, "must be an https:// address"), token: cloudTokenSchema }),
 ]);
 
 export type EduState = "off" | "missing" | "old" | "broken" | "ready";
@@ -42,6 +76,8 @@ export interface EduProposal {
   shared?: boolean;
   /** The proposed note's text, shortened. */
   body?: string;
+  /** The note waits in an edu-cloud brain: `brain` is its address, and a steward decides it there. */
+  cloud?: true;
 }
 
 export interface EduProposalCardField {
@@ -70,6 +106,26 @@ export interface EduBrainView {
   /** Edu Bot itself runs inside an Edu crew job, so Edu refuses every decision. */
   crewWorker?: boolean;
   crew?: EduCrewView;
+  /** With `area`: the bot does not read the person's own global brain. */
+  personalBrain?: false;
+  /** With `cloud`: what this person's token may do there. */
+  cloud?: EduCloudView;
+}
+
+/** `EduBrainView.cloud`. */
+export interface EduCloudView {
+  url: string;
+  /** The name of the Vault secret or environment variable that holds this person's token. */
+  token: string;
+  /** No value is saved under `token` yet. */
+  tokenMissing?: true;
+  /** The token's label and scope there, when the server says. */
+  label?: string;
+  scope?: "member" | "steward";
+  /** The server has the review routes. Without them (an older edu-cloud) proposals are decided on the server itself. */
+  review: boolean;
+  /** Why the server could not be asked this time. */
+  error?: string;
 }
 
 /** `GET /api/edu/rights`: what this caller may do with an Edu proposal, by the same rule as `EduBrainView`. */

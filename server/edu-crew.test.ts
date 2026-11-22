@@ -3,10 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
+import type { EduBrainSetting } from "../shared/edu-brain.ts";
 import type { OptionCardData } from "../shared/wire.ts";
 import { agentsServerEnv } from "./agents-turn.ts";
 import { availableTools, catalogProfileFromEnv } from "./drivers/agents-catalog.ts";
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
+import { EDU_CREW_NOT_ON_CLOUD } from "./edu-cloud.ts";
 import { crewFolderRefusal, crewStatus, crewTurnRefusal, createEduCrew, EDU_CLI_BY_DRIVER, eduCliOf, eduCrewCommands, MAX_ACTIVE, MAX_ACTIVE_PER_CHAT, pickReviewer, reviewPathRefusal, type CrewTurn, type EduCrewRun } from "./edu-crew.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
@@ -30,13 +32,13 @@ type Message = { id: string; role: string; kind: string; card?: OptionCardData; 
 
 const LOCAL: CrewTurn = { room: false, hostLocal: true, confined: false, computer: "local" };
 
-function setup(options: { eduCrew?: boolean; engine?: string; desktop?: boolean; folder?: string | null; installed?: string[]; turn?: Partial<CrewTurn>; env?: NodeJS.ProcessEnv; ready?: boolean;
+function setup(options: { eduCrew?: boolean; eduBrain?: EduBrainSetting; engine?: string; desktop?: boolean; folder?: string | null; installed?: string[]; turn?: Partial<CrewTurn>; env?: NodeJS.ProcessEnv; ready?: boolean;
   git?: (args: string[]) => Promise<string>; edu?: (args: string[]) => { code?: number; stdout?: string; stderr?: string } | Promise<{ code?: number; stdout?: string; stderr?: string }> } = {}) {
   const calls: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
   const decisions: Array<Record<string, unknown>> = [];
   const threads = new Map<string, Message[]>();
   let next = 0;
-  const bot = { id: "bot-1", name: "Luna", color: "blue", threadId: "t-1", eduCrew: options.eduCrew ?? true };
+  const bot = { id: "bot-1", name: "Luna", color: "blue", threadId: "t-1", eduCrew: options.eduCrew ?? true, ...(options.eduBrain ? { eduBrain: options.eduBrain } : {}) };
   const run: EduCrewRun = async (args, { env }) => {
     calls.push({ args, env });
     const answer = (await options.edu?.(args.slice(1))) ?? {};
@@ -202,6 +204,14 @@ describe("Edu crew tools", () => {
     const answer = await ask(crew, { action: "plan", goal: "ship it" });
     expect(answer.status).toBe(409);
     expect(answer.body.error).toMatch(/off for this bot/);
+    expect(calls).toEqual([]);
+  });
+
+  it("says a cloud brain bot needs a brain on this computer for Edu crew, without running Edu", async () => {
+    const { crew, calls } = setup({ eduBrain: { mode: "cloud", url: "https://brain.example/mcp", token: { secret: "EDU_CLOUD_BI" } } });
+    expect((await ask(crew, { action: "plan", goal: "ship it" })).body.error).toBe(EDU_CREW_NOT_ON_CLOUD);
+    expect(await crew.view({ id: "bot-1", name: "Luna", color: "blue", eduCrew: true, eduBrain: { mode: "cloud", url: "https://brain.example/mcp", token: { secret: "EDU_CLOUD_BI" } } }))
+      .toEqual({ enabled: true, blocked: EDU_CREW_NOT_ON_CLOUD });
     expect(calls).toEqual([]);
   });
 

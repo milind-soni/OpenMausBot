@@ -144,7 +144,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
 export interface TeamBackupImportOptions {
   visibility?: BotVisibility;
   createdBy?: string;
-  /** Security: whether a bot's Edu brain may point at the folder the file names (a paired session or the desktop app); else it is off. */
+  /** Security: whether a bot's Edu brain may be the folder, area or cloud brain the file names (a paired session or the desktop app); else it is off. */
   eduFolders?: boolean;
 }
 
@@ -204,7 +204,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
       store.patchBot(bot.id, { composio: false, computer: "off", browser: false, autoApprove: false,
         connectorTools: {}, toolScope: source.toolScope, hidden: source.hidden, chiefOfStaff: source.chiefOfStaff, playbooks: source.playbooks,
         ...(source.helperModel === false ? { helperModel: false } : {}) });
-      if (source.eduBrain) store.patchBot(bot.id, { eduBrain: source.eduBrain.mode !== "folder" || options.eduFolders ? source.eduBrain : { mode: "off" } });
+      if (source.eduBrain) store.patchBot(bot.id, { eduBrain: source.eduBrain.mode === "own" || source.eduBrain.mode === "off" || options.eduFolders ? source.eduBrain : { mode: "off" } });
       if (source.memory) restoreMemory(bot.id, source.memory);
     }
     for (const source of backup.bots) {

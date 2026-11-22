@@ -240,19 +240,49 @@ describe("planProfiles", () => {
     expect(plan(wider).plan.noChanges).toBe(true);
   });
 
-  it("lists MCP server files and shared Edu brains as coming in a later update, and applies neither", async () => {
+  it("gives area and cloud Edu brains only as more access, takes the area's personalBrain, and lists MCP server files as coming later", async () => {
     const { plan, apply, bot } = fakeApp();
+    const brains = (lines: ProfilePlanLine[]) => lines.filter((line) => line.field === "eduBrain").map((line) => `${line.kind}: ${line.text}`);
     expect(kinds(plan().plan.lines, "later")).toEqual([
-      "Analista BI: keeps an Edu brain of its own for now; sharing one brain with its area comes in a later update",
-      "Reporter: keeps an Edu brain of its own for now; sharing one brain with its area comes in a later update",
-      "Closer: keeps an Edu brain of its own for now; using a brain in edu-cloud comes in a later update",
       "MCP server notion (mcp/notion.md) is set up from profiles in a later update; until then nothing here changes for it",
     ]);
-    await apply();
-    expect(bot("bi/analyst").eduBrain).toBeUndefined();
-    expect(kinds(plan().plan.lines, "later").slice(0, 1)).toEqual([
-      "Analista BI: keeps its current Edu brain for now; sharing one brain with its area comes in a later update",
+    expect(brains(plan().plan.lines)).toEqual([
+      "access: Analista BI: Edu brain the shared brain of area bi",
+      "access: Reporter: Edu brain the shared brain of area bi",
+      "access: Closer: Edu brain edu-cloud at https://brain.acme.example/mcp, token from secret EDU_CLOUD_SALES",
     ]);
+    await apply(folder(), { giveAccess: false });
+    expect(bot("bi/analyst").eduBrain).toBeUndefined();
+    expect(brains(plan().plan.lines)[0]).toBe("access: Analista BI: Edu brain own → the shared brain of area bi");
+    await apply(folder(), { giveAccess: true });
+    expect(bot("bi/analyst").eduBrain).toEqual({ mode: "area", area: "bi" });
+    expect(bot("sales/closer").eduBrain).toEqual({ mode: "cloud", url: "https://brain.acme.example/mcp", token: { secret: "EDU_CLOUD_SALES" } });
+    expect(plan().plan.noChanges).toBe(true);
+
+    const apart = folder({ "areas/bi/area.md": (text) => text.replace("eduBrain: { mode: area }", "eduBrain: { mode: area }\npersonalBrain: false") });
+    expect(apart.problems).toEqual([]);
+    expect(brains(plan(apart).plan.lines)).toEqual([
+      "change: Analista BI: Edu brain the shared brain of area bi → the shared brain of area bi, without the person's own brain",
+      "change: Reporter: Edu brain the shared brain of area bi → the shared brain of area bi, without the person's own brain",
+    ]);
+    await apply(apart, { giveAccess: false });
+    expect(bot("bi/reporter").eduBrain).toEqual({ mode: "area", area: "bi", personalBrain: false });
+    expect(brains(plan().plan.lines)).toEqual([
+      "access: Analista BI: Edu brain the shared brain of area bi, without the person's own brain → the shared brain of area bi",
+      "access: Reporter: Edu brain the shared brain of area bi, without the person's own brain → the shared brain of area bi",
+    ]);
+
+    for (const [token, words] of [["{ secret: EDU_CLOUD_BI }", "secret EDU_CLOUD_BI"], ["{ env: EDU_CLOUD_TOKEN }", "environment variable EDU_CLOUD_TOKEN"]]) {
+      const otherSlot = folder({ "areas/sales/area.md": (text) => text.replace("token: { secret: EDU_CLOUD_SALES }", `token: ${token}`) });
+      expect(otherSlot.problems).toEqual([]);
+      expect(brains(plan(otherSlot).plan.lines).filter((line) => line.includes("Closer")), "another token on the same address is another person's access").toEqual([
+        `access: Closer: Edu brain edu-cloud at https://brain.acme.example/mcp, token from secret EDU_CLOUD_SALES → edu-cloud at https://brain.acme.example/mcp, token from ${words}`,
+      ]);
+    }
+
+    const keyFile = folder({ "areas/sales/area.md": (text) => text.replace("token: { secret: EDU_CLOUD_SALES }", "token: { file: .secrets/edu-cloud }") });
+    expect(kinds(plan(keyFile).plan.lines, "note")).toContain(
+      "Closer: keeps its current Edu brain; this app reads an edu-cloud token from a secret slot ({ secret: NAME }) or an environment variable, not from a key file");
   });
 
   it("says Chief of Staff changed in this app in words, and bot settings reports it from the same comparison", async () => {

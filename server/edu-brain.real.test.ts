@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { createEduBrains, eduRegistryHome, locateEduCli, type EduStdioServer } from "./edu-brain.ts";
+import { createEduBrains, eduAreaFolder, eduNoPersonalHome, eduRegistryHome, locateEduCli, type EduStdioServer } from "./edu-brain.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
 const cli = locateEduCli({ PATH: process.env.PATH }, process.env.PATH ?? "");
@@ -142,5 +142,31 @@ describe.skipIf(!cli)("the installed Edu binary", () => {
 
     expect(await brains.integration(linked, { local: true })).toBeNull();
     expect(await brains.status(linked)).toMatchObject({ state: "broken", reason: expect.stringMatching(/\.edu\/brain is a link/) });
+  });
+  it("shares one area brain between two bots, and keeps an area that leaves the personal brain out from reading or writing it", async () => {
+    const analyst = { id: "area-analyst", name: "Analyst", eduBrain: { mode: "area" as const, area: "bi" } };
+    const reporter = { id: "area-reporter", name: "Reporter", eduBrain: { mode: "area" as const, area: "bi", personalBrain: false as const } };
+    const writer = await session((await brains.integration(analyst, { local: true }))!, {});
+    const remembered = await writer.call("edu_remember", { tier: "transitive", kind: "decision", band: "inferred", title: "Area real decision", body: "BI closes on Fridays." });
+    writer.close();
+    expect(remembered).toMatchObject({ ok: true });
+    expect(filesUnder(join(eduAreaFolder(dataDir, "bi"), ".edu", "brain")).some((file) => file.endsWith("area-real-decision.md"))).toBe(true);
+
+    const reader = await session((await brains.integration(reporter, { local: true }))!, {});
+    const recalled = await reader.call("edu_recall", { query: "area real decision" });
+    const personal = await reader.call("edu_recall", { query: "global overlay note" });
+    reader.close();
+    expect(recalled.text).toContain("Area real decision");
+    expect(personal.text).not.toContain("Global overlay note");
+    const withPersonal = await session((await brains.integration(analyst, { local: true }))!, {});
+    expect((await withPersonal.call("edu_recall", { query: "global overlay note" })).text).toContain("Global overlay note");
+    withPersonal.close();
+
+    const brief = async (one: typeof analyst | typeof reporter) => JSON.stringify(await brains.promptParts(one, {}, true));
+    expect(await brief(analyst)).toContain("Global overlay note");
+    expect(await brief(reporter)).toContain("Area real decision");
+    expect(await brief(reporter)).not.toContain("Global overlay note");
+    expect(readdirSync(eduNoPersonalHome(dataDir))).toEqual([]);
+    expect(filesUnder(eduHome).some((file) => file.includes("area-real-decision"))).toBe(false);
   });
 });

@@ -25,12 +25,18 @@ export type EduWordKey =
 /** The server's or the client's translation of an Edu word. */
 export type EduSay = (key: EduWordKey, params?: Readonly<Record<string, string>>) => string;
 
-type Proposal = Pick<EduProposal, "kind" | "band" | "global" | "brain"> & { shared?: boolean };
+type Proposal = Pick<EduProposal, "kind" | "band" | "global" | "brain"> & { shared?: boolean; cloud?: boolean };
 
 const wordOf = <T extends Record<string, EduWordKey>>(words: T, value: string): EduWordKey | undefined =>
   Object.hasOwn(words, value) ? words[value as keyof T] : undefined;
 
 const folderName = (path: string) => path.split(/[\\/]+/).filter(Boolean).at(-1) ?? path;
+
+/** A shared brain by name: an edu-cloud brain by its host, a folder (an area's is named by its key) by its last part. */
+function sharedName(proposal: Proposal): string {
+  if (!proposal.cloud) return folderName(proposal.brain);
+  try { return new URL(proposal.brain).host; } catch { return proposal.brain; }
+}
 
 /** Edu's kind and claim band as plain words; an unknown kind and an unbanded note say nothing. */
 export function eduProposalFacts(proposal: Proposal, say: EduSay): string {
@@ -40,12 +46,12 @@ export function eduProposalFacts(proposal: Proposal, say: EduSay): string {
 /** The brain the note joins, by name. */
 export function eduProposalPlace(proposal: Proposal, botName: string, say: EduSay): string {
   if (proposal.global) return say("server.edu.placeGlobal");
-  return proposal.shared ? say("server.edu.placeShared", { folder: folderName(proposal.brain) }) : say("server.edu.placeOwn", { name: botName });
+  return proposal.shared ? say("server.edu.placeShared", { folder: sharedName(proposal) }) : say("server.edu.placeOwn", { name: botName });
 }
 
 export function eduProposalTitle(proposal: Proposal, botName: string, say: EduSay): string {
   if (proposal.global) return say("server.edu.titleGlobal");
-  return proposal.shared ? say("server.edu.titleShared", { folder: folderName(proposal.brain) }) : say("server.edu.titleOwn", { name: botName });
+  return proposal.shared ? say("server.edu.titleShared", { folder: sharedName(proposal) }) : say("server.edu.titleOwn", { name: botName });
 }
 
 /** The proposal in plain words: its title, what kind of note it is, its text, where it goes (a bot's own brain only

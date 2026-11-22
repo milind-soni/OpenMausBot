@@ -127,7 +127,7 @@ export function botPatch(desired: DesiredBot, echo: Rec, team: string | undefine
     const apps = Object.keys(desired.connectorTools).sort();
     changes.push(apps.length ? `connected apps: ${apps.join(", ")}` : "no connected apps");
   }
-  if (desired.eduBrain !== undefined && (echo.eduBrain?.mode ?? "own") !== desired.eduBrain.mode) {
+  if (desired.eduBrain !== undefined && canonicalBrain(echo.eduBrain) !== canonicalBrain(desired.eduBrain)) {
     patch.eduBrain = desired.eduBrain;
     changes.push(`Edu brain ${echo.eduBrain?.mode ?? "own"} → ${desired.eduBrain.mode}`);
   }
@@ -141,4 +141,9 @@ export function botPatch(desired: DesiredBot, echo: Rec, team: string | undefine
     changes.push(`memory upkeep ${onOff(desired.memoryUpkeep)}`);
   }
   return { patch, changes };
+}
+
+export function canonicalBrain(setting: EduBrainSetting | undefined): string {
+  const value = (setting ?? { mode: "own" }) as Record<string, unknown>;
+  return JSON.stringify(Object.keys(value).sort().map((key) => [key, value[key]]));
 }

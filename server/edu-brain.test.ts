@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { claudeEduMount, compareVersions, EDU_PREALLOWED_TOOLS, createEduBrains, eduBrainWidens, eduRegistryHome, locateEduCli, parseEduBrainSetting, type EduConfig } from "./edu-brain.ts";
+import { claudeEduMount, compareVersions, EDU_PREALLOWED_TOOLS, createEduBrains, eduAreaFolder, eduBrainWidens, eduNoPersonalHome, eduRegistryHome, locateEduCli, parseEduBrainSetting, type EduBrainDeps, type EduConfig } from "./edu-brain.ts";
+import { createEduCloud, EDU_CLOUD_NO_TOKEN, EDU_CLOUD_RELAY_PATH } from "./edu-cloud.ts";
 import { parseStoredConfig } from "./config.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
@@ -35,6 +36,36 @@ describe("eduBrain setting", () => {
     expect(eduBrainWidens(folder("/a"), folder("/a"))).toBe(false);
     expect(eduBrainWidens(folder("/a"), { mode: "own" })).toBe(false);
     expect(eduBrainWidens(undefined, { mode: "off" })).toBe(false);
+  });
+
+  it("accepts an area brain by key and a cloud brain with an address and a token's name, never the token", () => {
+    expect(parseEduBrainSetting({ mode: "area", area: "bi" })).toEqual({ ok: true, value: { mode: "area", area: "bi" } });
+    expect(parseEduBrainSetting({ mode: "area", area: "bi", personalBrain: false })).toEqual({ ok: true, value: { mode: "area", area: "bi", personalBrain: false } });
+    expect(parseEduBrainSetting({ mode: "cloud", url: "https://brain.example/mcp", token: { secret: "EDU_CLOUD_BI" } }))
+      .toEqual({ ok: true, value: { mode: "cloud", url: "https://brain.example/mcp", token: { secret: "EDU_CLOUD_BI" } } });
+    expect(parseEduBrainSetting({ mode: "cloud", url: "http://127.0.0.1:8787/mcp", token: { env: "EDU_CLOUD_TOKEN" } }).ok).toBe(true);
+    for (const value of [
+      { mode: "area" }, { mode: "area", area: "../bi" }, { mode: "area", area: "BI" }, { mode: "area", area: "bi", personalBrain: true },
+      { mode: "cloud", url: "http://brain.example/mcp", token: { secret: "T" } }, { mode: "cloud", url: "https://u:p@brain.example/mcp", token: { secret: "T" } },
+      { mode: "cloud", url: "https://brain.example/mcp?x=1", token: { secret: "T" } }, { mode: "cloud", url: "https://brain.example/mcp", token: "a".repeat(64) },
+      { mode: "cloud", url: "https://brain.example/mcp", token: { secret: "T", env: "E" } }, { mode: "cloud", url: "https://brain.example/mcp" },
+    ]) expect(parseEduBrainSetting(value).ok, JSON.stringify(value)).toBe(false);
+  });
+
+  it("counts joining an area or a cloud brain, another one, or the personal brain beside an area as widening", () => {
+    const area = (key: string, personalBrain?: false) => ({ mode: "area" as const, area: key, ...(personalBrain === false ? { personalBrain } : {}) });
+    const cloud = (url: string, secret = "T") => ({ mode: "cloud" as const, url, token: { secret } });
+    expect(eduBrainWidens(undefined, area("bi"))).toBe(true);
+    expect(eduBrainWidens(area("bi"), area("sales"))).toBe(true);
+    expect(eduBrainWidens(area("bi"), area("bi"))).toBe(false);
+    expect(eduBrainWidens(area("bi"), area("bi", false))).toBe(false);
+    expect(eduBrainWidens(area("bi", false), area("bi"))).toBe(true);
+    expect(eduBrainWidens(area("bi"), { mode: "own" })).toBe(false);
+    expect(eduBrainWidens(undefined, cloud("https://a/mcp"))).toBe(true);
+    expect(eduBrainWidens(cloud("https://a/mcp"), cloud("https://a/mcp"))).toBe(false);
+    expect(eduBrainWidens(cloud("https://a/mcp"), cloud("https://b/mcp"))).toBe(true);
+    expect(eduBrainWidens(cloud("https://a/mcp"), cloud("https://a/mcp", "OTHER"))).toBe(true);
+    expect(eduBrainWidens(cloud("https://a/mcp"), { mode: "off" })).toBe(false);
   });
 
   it("compares versions numerically", () => {
@@ -87,7 +118,7 @@ describe("locateEduCli", () => {
 
 describe("createEduBrains", () => {
   const bot = { id: "b1", name: "Luna" };
-  const setup = (options: { version?: string; fail?: boolean; cli?: string | null; config?: EduConfig; initMakesBrain?: boolean; hostLocal?: boolean } = {}) => {
+  const setup = (options: { version?: string; fail?: boolean; cli?: string | null; config?: EduConfig; initMakesBrain?: boolean; hostLocal?: boolean; cloud?: EduBrainDeps["cloud"] } = {}) => {
     const dataDir = temp();
     const calls: string[][] = [];
     const initHomes: Array<string | undefined> = [];
@@ -97,6 +128,7 @@ describe("createEduBrains", () => {
       config: () => config,
       env: { HOME: dataDir },
       hostLocal: () => options.hostLocal ?? true,
+      ...(options.cloud ? { cloud: options.cloud } : {}),
       locate: () => options.cli === undefined ? "/opt/edu/cli.js" : options.cli,
       run: () => async (args, { env }) => {
         calls.push(args);
@@ -124,6 +156,65 @@ describe("createEduBrains", () => {
     expect(calls.filter((args) => args.includes("init"))).toEqual([["--cwd", folder, "init", "--name", "Luna"]]);
     expect(initHomes).toEqual([eduRegistryHome(dataDir)]);
     expect(await brains.status(bot)).toMatchObject({ state: "ready", mode: "own", brain: folder, version: "6.0.0" });
+  });
+
+  it("shares one area brain between the area's bots, made once, and leaves the person's own brain out when the area says so", async () => {
+    const { brains, dataDir, calls } = setup();
+    const analyst = { id: "b1", name: "Analyst", eduBrain: { mode: "area" as const, area: "bi" } };
+    const reporter = { id: "b2", name: "Reporter", eduBrain: { mode: "area" as const, area: "bi", personalBrain: false as const } };
+    const [first, second] = await Promise.all([brains.integration(analyst, { local: true }), brains.integration(reporter, { local: true })]);
+    const folder = eduAreaFolder(dataDir, "bi");
+    expect(calls.filter((args) => args.includes("init"))).toEqual([["--cwd", folder, "init", "--name", "Area bi"]]);
+    expect(first).toMatchObject({ args: ["/opt/edu/cli.js", "--cwd", folder, "mcp", "--profile", "memory"], env: { EDU_HOME: join(dataDir, ".edu") } });
+    expect(second).toMatchObject({ args: ["/opt/edu/cli.js", "--cwd", folder, "mcp", "--profile", "memory"], env: { EDU_HOME: eduNoPersonalHome(dataDir) } });
+    expect(brains.brainKey(reporter)).toBe(folder);
+    expect(await brains.status(analyst)).toMatchObject({ state: "ready", mode: "area", brain: folder, home: join(dataDir, ".edu") });
+    expect(await brains.status(reporter)).toMatchObject({ state: "ready", mode: "area", brain: folder, home: "", personalBrain: false });
+    const brief = calls.length;
+    await brains.promptParts(reporter, {}, true);
+    const briefed = calls.slice(brief).find((args) => args.includes("brief"));
+    expect(briefed).toEqual(["--cwd", folder, "brief", "--json"]);
+  });
+
+  it("never lets an area bot use another area's folder or a link in its place", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { brains, dataDir } = setup();
+    const other = eduAreaFolder(dataDir, "sales");
+    mkdirSync(join(other, ".edu"), { recursive: true });
+    mkdirSync(join(dataDir, "brains", "areas"), { recursive: true });
+    symlinkSync(other, eduAreaFolder(dataDir, "bi"));
+    expect(await brains.integration({ id: "b1", eduBrain: { mode: "area", area: "bi" } }, { local: true })).toBeNull();
+    expect(brains.folderRefusal({ id: "b1" }, other)).toMatch(/inside Edu Bot's data folder/);
+  });
+
+  it("mounts a cloud brain as Edu Bot's relay with the turn's capability, never the person's token, and nothing without one", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const tokens: Record<string, string> = { EDU_CLOUD_BI: "t".repeat(40) };
+    const minted: Array<{ id: string; threadId: string; generation: string }> = [];
+    const cloud = createEduCloud({ token: (_bot, ref) => "secret" in ref ? tokens[ref.secret] ?? null : null,
+      relay: { origin: "http://127.0.0.1:4100", mint: (bot, turn) => (minted.push({ id: bot.id, ...turn }), "c".repeat(48)) } });
+    const { brains, calls } = setup({ cli: null, cloud: { ...cloud, brief: async () => JSON.stringify({ text: "## Decisions\n- BI closes on Friday\n" }) } });
+    const closer = { id: "b3", name: "Closer", eduBrain: { mode: "cloud" as const, url: "https://brain.example/mcp", token: { secret: "EDU_CLOUD_BI" } } };
+    const turn = { threadId: "t-close", generation: "g-1" };
+    const server = await brains.integration(closer, { local: true, turn });
+    expect(server?.command).toBe(process.execPath);
+    expect(server?.args.join(" ")).toMatch(/mcp-remote-proxy/);
+    expect(JSON.parse(server!.env.OMB_REMOTE_MCP_SERVER!)).toEqual({ type: "http", url: `http://127.0.0.1:4100${EDU_CLOUD_RELAY_PATH}`, headers: { authorization: `Bearer ${"c".repeat(48)}` } });
+    expect(minted).toEqual([{ id: "b3", ...turn }]);
+    expect(JSON.stringify(server)).not.toContain(tokens.EDU_CLOUD_BI);
+    expect(JSON.stringify(server)).not.toContain("brain.example");
+    expect(await brains.integration(closer, { local: true }), "outside a running turn").toBeNull();
+    expect(await brains.integration(closer, { local: false, turn })).toBeNull();
+    expect(await brains.status(closer)).toEqual({ state: "ready", mode: "cloud", home: "", brain: "https://brain.example/mcp" });
+    expect(brains.brainFolder(closer)).toBeNull();
+    expect(brains.brainKey(closer)).toBe("https://brain.example/mcp");
+    const parts = await brains.promptParts(closer, {}, true);
+    expect(parts.find((part) => part.id === "edu-brief")?.text).toContain("BI closes on Friday");
+    expect(calls).toEqual([]);
+
+    tokens.EDU_CLOUD_BI = "short";
+    expect(await brains.integration(closer, { local: true, turn })).toBeNull();
+    expect(await brains.status(closer)).toMatchObject({ state: "broken", reason: EDU_CLOUD_NO_TOKEN });
   });
 
   it("reads as ready right away only after a check found Edu ready on this computer", async () => {

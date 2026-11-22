@@ -9,8 +9,9 @@ import type { EduBrainView, EduProposal } from "../../../shared/edu-brain";
 import { buttonCls, Card, ColRow, ItemRow, NoteRow, SwitchRow } from "./rows";
 
 /** What the Edu brain row says, what to do when Edu can't serve this bot, and Edu's own reason when it gave one. */
-export function eduStatusWords(view: Pick<EduBrainView, "state" | "mode" | "version" | "reason" | "brokenFolder" | "crewWorker">): { value: string; hint?: string; detail?: string; warn?: boolean } {
+export function eduStatusWords(view: Pick<EduBrainView, "state" | "mode" | "version" | "reason" | "brokenFolder" | "crewWorker" | "cloud">): { value: string; hint?: string; detail?: string; warn?: boolean } {
   if (view.mode === "off") return { value: t("eduBrain.state.botOff"), hint: t("eduBrain.state.botOffHint") };
+  if (view.mode === "cloud" && view.cloud?.tokenMissing) return { value: t("eduBrain.cloud.needsKey"), hint: t("eduBrain.cloud.needsKeyHint", { name: view.cloud.token }), warn: true };
   switch (view.state) {
     case "ready": return {
       value: view.version ? t("eduBrain.state.readyVersion", { version: view.version }) : t("eduBrain.state.ready"),
@@ -107,6 +108,7 @@ export function EduBrainCard({ bot }: { bot: Pick<Bot, "id" | "name" | "busy"> &
 
   const status = view ? eduStatusWords(view) : null;
   const ready = view?.state === "ready" && view.mode !== "off";
+  const cloudReadOnly = Boolean(view?.cloud && (!view.cloud.review || view.cloud.scope !== "steward"));
   return (
     <>
       <Card label={t("eduBrain.section")} anchor="edu-brain">
@@ -128,8 +130,15 @@ export function EduBrainCard({ bot }: { bot: Pick<Bot, "id" | "name" | "busy"> &
               )}
             </ItemRow>
             {view.brokenFolder && view.brain && <ItemRow data-panel-row="edu-folder" title={t("eduBrain.folder")} hint={<PathValue path={view.brain} />} />}
-            {ready && view.brain && <ItemRow data-panel-row="edu-folder" title={t("eduBrain.folder")} hint={<PathValue path={view.brain} />} />}
+            {ready && view.brain && view.mode !== "cloud" && <ItemRow data-panel-row="edu-folder" title={t("eduBrain.folder")} hint={<PathValue path={view.brain} />} />}
+            {view.cloud && <ItemRow data-panel-row="edu-cloud" title={t("eduBrain.cloud.title")} hint={<PathValue path={view.cloud.url} />} />}
+            {view.cloud?.label && (
+              <ItemRow data-panel-row="edu-cloud-token" title={t("eduBrain.cloud.token")}
+                hint={t(view.cloud.scope === "steward" ? "eduBrain.cloud.steward" : "eduBrain.cloud.member", { label: view.cloud.label })} />
+            )}
+            {view.cloud?.error && <NoteRow tone="warn">{t("eduBrain.cloud.unreachable", { reason: view.cloud.error })}</NoteRow>}
             {ready && view.home && <ItemRow data-panel-row="edu-home" title={t("eduBrain.global")} hint={<PathValue path={view.home} />} />}
+            {ready && view.personalBrain === false && <ItemRow data-panel-row="edu-home" title={t("eduBrain.global")} hint={t("eduBrain.personalOff")} />}
             {view.crew && (ready || view.crew.enabled) && (
               <SwitchRow data-panel-row="edu-crew" title={t("eduBrain.crew.title")} checked={view.crew.enabled} color={bot.color ?? "blue"}
                 disabled={busy !== null} onChange={() => void toggleCrew()}
@@ -143,17 +152,18 @@ export function EduBrainCard({ bot }: { bot: Pick<Bot, "id" | "name" | "busy"> &
       {view && ready && (
         <Card label={t("eduBrain.proposals")} anchor="edu-proposals">
           {view.crewWorker && <NoteRow tone="warn">{t("eduBrain.crewWorker")}</NoteRow>}
-          {!view.crewWorker && !view.mayApprove && view.proposals.length > 0 && <NoteRow>{t("eduBrain.approveElsewhere")}</NoteRow>}
+          {cloudReadOnly && <NoteRow>{t(view.cloud?.review ? "eduBrain.cloud.stewardOnly" : "eduBrain.cloud.approveOnServer")}</NoteRow>}
+          {!cloudReadOnly && !view.crewWorker && !view.mayApprove && view.proposals.length > 0 && <NoteRow>{t("eduBrain.approveElsewhere")}</NoteRow>}
           {view.listError && <NoteRow tone="warn">{t("eduBrain.listFailed", { reason: view.listError })}</NoteRow>}
-          {!view.listError && view.proposals.length === 0 && <NoteRow>{t("eduBrain.noProposals")}</NoteRow>}
+          {!view.listError && view.proposals.length === 0 && view.cloud?.review !== false && <NoteRow>{t("eduBrain.noProposals")}</NoteRow>}
           {view.proposals.map((proposal) => (
             <ColRow key={`${proposal.global ? "g" : "b"}:${proposal.id}`} data-panel-row="edu-proposal">
               <div className="min-w-0">
                 <EduProposalLines proposal={proposal} place={eduProposalPlace(proposal, bot.name)} titleClassName="mt-0 text-[14px] leading-5" />
                 <ProposalFields proposal={proposal} />
               </div>
-              <div className="flex flex-wrap justify-end gap-2">
-                <button type="button" data-edu-action="reject" className={buttonCls} disabled={busy !== null || view.crewWorker}
+              {!cloudReadOnly && <div className="flex flex-wrap justify-end gap-2">
+                <button type="button" data-edu-action="reject" className={buttonCls} disabled={busy !== null || view.crewWorker || (Boolean(view.cloud) && !view.mayApprove)}
                   onClick={() => void decide(proposal, "reject")}>
                   {busy === `reject:${proposal.id}` ? t("eduBrain.action.rejecting") : t("server.edu.reject")}
                 </button>
@@ -161,7 +171,7 @@ export function EduBrainCard({ bot }: { bot: Pick<Bot, "id" | "name" | "busy"> &
                   onClick={() => void decide(proposal, "approve")}>
                   {busy === `approve:${proposal.id}` ? t("eduBrain.action.approving") : t("server.edu.approve")}
                 </button>
-              </div>
+              </div>}
             </ColRow>
           ))}
           {failed && <NoteRow tone="warn">{failed}</NoteRow>}

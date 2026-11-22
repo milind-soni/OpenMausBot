@@ -193,6 +193,7 @@ field is an error, never ignored, so a misspelt field cannot silently do nothing
 | `chief` | The key of the bot that coordinates the area (its Chief of Staff). It must be a bot of this area. |
 | `stewards` | Email addresses of the people who may approve the area's shared canonical memory. |
 | `eduBrain` | The area's Edu brain, the same as setting it under `defaults` (set it in one place only). |
+| `personalBrain` | `false`: the area's bots on an area brain do not read each person's own global Edu brain (`~/.edu`), so a bot cannot copy personal notes into the area's. A cloud brain never reads it. |
 | `defaults` | Bot settings for the area's bots. |
 | `mcpServers` | MCP servers the area's bots may use, added to the organization's. |
 | `maxApproval` | The highest approval level an area's bot may have. |
@@ -366,12 +367,12 @@ The app reads the folder on its own computer. A plan line is one of:
 |---|---|
 | Adds | A new area (a department, with its brief) or a new bot. |
 | Changes | A field the file changed since the last apply, where this app still has the value it was given. |
-| Gives more access | A change that lets a bot do more: a higher approval level, tool selectors it did not have, an MCP server it did not mount, a connected app or tool it was not granted, a tool group switched back on, an Edu brain switched on, or the Edu crew. |
+| Gives more access | A change that lets a bot do more: a higher approval level, tool selectors it did not have, an MCP server it did not mount, a connected app or tool it was not granted, a tool group switched back on, an Edu brain switched on or moved to a brain others share (an area or edu-cloud brain, or the personal brain beside an area's), or the Edu crew. |
 | Conflicts | A field both the file and this app changed. Nothing is applied to it until you choose: keep mine, or take the file. |
 | Changed here | A field changed in this app since the profile set it, while the file still says the same. It is kept. |
 | No longer in your profiles | A bot or area whose file is gone. It is kept; `--prune` deletes such bots. |
 | Left as they are | A bot or area whose file has problems (see the check). A problem anywhere else in an area's folder (a link, an unreadable folder) leaves the whole area as it is, and nothing under a path with a problem is ever called gone or deleted. A broken `org.md`, skill or folder blocks the whole plan, since every bot depends on it. |
-| Comes in a later update | Something in the files this version does not apply yet: the servers under `mcp/`, and the area and edu-cloud Edu brains. |
+| Comes in a later update | Something in the files this version does not apply yet: the servers under `mcp/`. |
 | Notes | For example, a model whose engine this app does not have: the bot keeps its current model, or gets this app's default. |
 
 A second apply of the same commit says **No changes**.
@@ -431,3 +432,19 @@ pnpm exec vitest run shared/profile-format.test.ts server/profiles/load.test.ts 
 `two-people.e2e.test.ts` runs two isolated servers against one temporary git repository of the acme folder: both get
 the same bots, a second apply has no changes, a new commit reaches both, and a title changed on one computer is a
 conflict there only.
+
+## Area and edu-cloud Edu brains
+
+`eduBrain: { mode: area }` gives every bot of the area on this computer one shared brain, at
+`<data folder>/brains/areas/<area key>/.edu`, made on the first turn like a bot's own. Each person's app has its own
+copy: an area brain is shared by the bots on one computer, not across computers.
+
+`eduBrain: { mode: cloud, url, token: { secret: NAME } }` shares one [edu-cloud](https://github.com/EduardoMoraga/edu-cloud)
+brain across computers. Each person asks the edu-cloud admin for their own token (`edu-cloud token add <email>`) and
+saves it in **Settings → Vault** under the name the profile gives (`NAME`). Until then the bot shows **Needs your key**
+and has no Edu tools. `{ env: NAME }` reads the token from the app's environment instead; a `{ file: … }` token is for
+CI only, and this app then keeps the bot's current brain.
+
+Both are more access: the plan lists them under **Gives more access**, and only the desktop app or a paired admin
+device applies them. See [edu-brain.md](edu-brain.md).
+

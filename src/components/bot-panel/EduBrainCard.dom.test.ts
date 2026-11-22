@@ -190,3 +190,39 @@ it("offers the Edu crew switch, off by default, and says why the crew can't work
   expect(fixture.api).toHaveBeenCalledWith("/api/bots/luna", { method: "PATCH", body: JSON.stringify({ eduCrew: false }) });
   expect(crew().textContent).toContain("This chat has no working folder of its own.");
 });
+
+it("shows a cloud brain's address and this person's role, and decides nothing here without a steward token", async () => {
+  const url = "https://brain.example/mcp";
+  const proposal = { id: "C-net", title: "Revenue means net revenue", kind: "domain", band: "inferred", why: "interpretation", brain: url, global: false, location: url, shared: true, cloud: true as const };
+  fixture.view = ready({ mode: "cloud", brain: url, home: "", mayApprove: false, proposals: [proposal],
+    cloud: { url, token: "EDU_CLOUD_BI", review: true, label: "ana@example.com", scope: "member" } });
+  await render();
+  expect(text()).toContain(url);
+  expect(text()).toContain("ana@example.com: can read and save notes");
+  expect(text()).toContain("Only a steward of this area approves these");
+  expect(text()).not.toContain("Brain folder");
+  expect(rows()).toHaveLength(1);
+  expect(host.querySelector("[data-edu-action=approve]")).toBeNull();
+  expect(host.querySelector("[data-edu-action=reject]")).toBeNull();
+
+  const again = async (view: EduBrainView) => {
+    fixture.view = view;
+    act(() => root.unmount());
+    root = createRoot(host);
+    await render();
+  };
+  await again(ready({ mode: "cloud", brain: url, home: "", mayApprove: false, proposals: [proposal], cloud: { url, token: "EDU_CLOUD_BI", review: false } }));
+  expect(text()).toContain("Approve these on the edu-cloud server.");
+  expect(host.querySelector("[data-edu-action=approve]")).toBeNull();
+  await again({ state: "broken", mode: "cloud", brain: url, home: "", reason: "Save this person's edu-cloud token in the Vault first.", mayApprove: false, proposals: [],
+    cloud: { url, token: "EDU_CLOUD_BI", tokenMissing: true, review: false } });
+  expect(text()).toContain("Needs your key");
+  expect(text()).toContain("Save your edu-cloud token in Settings → Vault with the name EDU_CLOUD_BI.");
+});
+
+it("says an area bot leaves the person's own brain out", async () => {
+  fixture.view = ready({ mode: "area", brain: "/data/brains/areas/bi", home: "", personalBrain: false, proposals: [] });
+  await render();
+  expect(text()).toContain("/data/brains/areas/bi");
+  expect(text()).toContain("Not read: this area keeps your own Edu brain out.");
+});

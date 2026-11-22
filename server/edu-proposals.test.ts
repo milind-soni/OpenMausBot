@@ -3,10 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
-import type { EduProposal } from "../shared/edu-brain.ts";
+import type { EduBrainSetting, EduProposal } from "../shared/edu-brain.ts";
 import type { OptionCardData } from "../shared/wire.ts";
 import type { EduRuntime } from "./edu-brain.ts";
-import { createEduProposals, decisionOf, EDU_REJECT_REASON, eduCommands, eduDecisionRefusal, parseProposals, type EduRun } from "./edu-proposals.ts";
+import { createEduProposals, decisionOf, EDU_REJECT_REASON, eduCommands, eduDecisionRefusal, parseProposals, proposalCardWords, type EduRun } from "./edu-proposals.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import { createEduRoutes } from "./routes/edu.ts";
 import { PASS } from "./routes/table.ts";
@@ -37,8 +37,8 @@ const session = (admin: boolean): RequestAuth => ({ kind: "session", via: "beare
 type Bus = { subscribe(listener: (event: { type: string; threadId: string }) => void): () => void };
 
 function setup(options: { listing?: unknown[]; decide?: (args: string[]) => string; env?: NodeJS.ProcessEnv; desktop?: boolean;
-  groups?: Array<{ threadId: string; memberIds: string[]; tasks?: Array<{ threadId: string }> }>; others?: Array<{ id: string; folder: string }>; bus?: Bus; gate?: Promise<void> } = {}) {
-  const runtime: EduRuntime = { state: "ready", home, cli: CLI, version: "6.0.0" };
+  groups?: Array<{ threadId: string; memberIds: string[]; tasks?: Array<{ threadId: string }> }>; others?: Array<{ id: string; folder: string }>; bus?: Bus; gate?: Promise<void>; brainHome?: string; eduBrain?: EduBrainSetting } = {}) {
+  const runtime: EduRuntime = { state: "ready", home: options.brainHome ?? home, cli: CLI, version: "6.0.0" };
   const calls: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
   let listing = options.listing ?? [row("K-iso-dates", ownPath), row("K-short-answers", globalPath)];
   const run: EduRun = async (args, { env }) => {
@@ -51,7 +51,7 @@ function setup(options: { listing?: unknown[]; decide?: (args: string[]) => stri
   };
   const messages = new Map<string, Array<{ id: string; card?: OptionCardData; from?: { botId: string } }>>();
   const decisions: Array<Record<string, unknown>> = [];
-  const bot = { id: "bot-1", name: "Luna", color: "blue", threadId: "t-main" };
+  const bot = { id: "bot-1", name: "Luna", color: "blue", threadId: "t-main", ...(options.eduBrain ? { eduBrain: options.eduBrain } : {}) };
   const bots = [bot, ...(options.others ?? []).map((other) => ({ id: other.id, name: other.id, color: "red", threadId: `t-${other.id}` }))];
   const folderOf = (id: string) => options.others?.find((other) => other.id === id)?.folder ?? folder;
   let next = 0;
@@ -72,9 +72,9 @@ function setup(options: { listing?: unknown[]; decide?: (args: string[]) => stri
   };
   const start = () => createEduProposals({
     brains: {
-      detect: async () => runtime,
       brain: async (one) => ({ ok: true, folder: folderOf(one.id), runtime }),
       brainFolder: (one) => folderOf(one.id),
+      brainKey: (one) => folderOf(one.id),
     },
     store,
     inRoom: (threadId) => threadId.startsWith("t-room"),
@@ -253,6 +253,41 @@ describe("Edu proposal cards across rooms, restarts, sweeps and turn endings", (
   });
 });
 
+describe("a shared brain's proposal", () => {
+  it("names the brain, not the bot: an area by its key, an edu-cloud brain by its host", async () => {
+    const { proposals, cards } = setup({ eduBrain: { mode: "area", area: "bi" } });
+    await proposals.sweep("t-main", "bot-1", folder);
+    expect(cards("t-main")[0]?.eduProposal).toMatchObject({ id: "K-iso-dates", shared: true });
+
+    const base = { id: "K-a", title: "a", kind: "standard", band: "verified", why: "", global: false };
+    const area = join(root, "data", "brains", "areas", "bi");
+    expect(proposalCardWords({ ...base, brain: area, location: area, shared: true }, "Luna").title).toBe("Save to the shared brain (bi)?");
+    const url = "https://brain.example/team/mcp";
+    const cloud = proposalCardWords({ ...base, brain: url, location: url, shared: true, cloud: true }, "Luna");
+    expect(cloud.title).toBe("Save to the shared brain (brain.example)?");
+    expect(cloud.subtitle.split("\n").at(-1)).toBe("Shared brain (brain.example)");
+  });
+});
+
+describe("a bot that leaves the person's own brain out", () => {
+  it("runs every Edu call for it with its empty global home, and never sees the person's proposals", async () => {
+    const empty = join(root, "edu-no-personal");
+    const decide = () => JSON.stringify({ accepted: ["K-iso-dates"], rejected: [], errors: [] });
+    const { proposals, calls, cards } = setup({ brainHome: empty, decide });
+    await proposals.sweep("t-main", "bot-1", folder);
+    expect(cards("t-main").map((card) => card.eduProposal?.id)).toEqual(["K-iso-dates"]);
+    proposals.needsYou();
+    for (let tick = 0; tick < 20; tick += 1) await new Promise((done) => setImmediate(done));
+    expect(proposals.needsYou().map((item) => "proposalId" in item && item.proposalId)).toEqual(["K-iso-dates"]);
+    expect(await proposals.resolve("t-main", cards("t-main")[0]!.requestId!, "allow")).toEqual({ ok: true, outcome: "allowed-once" });
+    expect(await proposals.decideFor({ id: "bot-1", name: "Luna", color: "blue" }, "K-iso-dates", false)).toMatchObject({ ok: true });
+    const kinds = calls.map((call) => call.args.includes("proposals") ? "list" : "decide");
+    expect(kinds.filter((kind) => kind === "list").length).toBeGreaterThanOrEqual(3);
+    expect(kinds).toContain("decide");
+    expect(calls.map((call) => call.env.EDU_HOME)).toEqual(calls.map(() => empty));
+  });
+});
+
 describe("Edu proposal answers", () => {
   it("takes only approve or reject: any other answer is refused before Edu runs, and refused to a service", async () => {
     const { proposals, calls, cards } = setup();
@@ -356,6 +391,26 @@ describe("Edu routes", () => {
     expect((owner.body.proposals as unknown[]).length).toBe(2);
     expect(owner.body).not.toHaveProperty("cli");
     expect((await call(service, "GET", "/api/bots/bot-1/edu"))?.status).toBe(403);
+  });
+
+  it("offers Edu crew to a cloud brain bot only when it was turned on, so it can say why it can't run", async () => {
+    const cloud = { mode: "cloud" as const, url: "https://brain.example/mcp", token: { secret: "EDU_CLOUD_BI" } };
+    const crewFor = async (eduCrew: boolean, eduBrain?: typeof cloud) => {
+      const { proposals } = setup();
+      const route = createEduRoutes({
+        bot: (id) => ({ id, name: "Luna", color: "blue", eduCrew, ...(eduBrain ? { eduBrain } : {}) }),
+        status: async () => ({ state: "ready", mode: eduBrain?.mode ?? "own", home, brain: eduBrain?.url ?? folder }),
+        proposals: { ...proposals, view: async () => ({ proposals: [], mayApprove: false }) }, desktop: true,
+        crew: { view: async () => ({ enabled: eduCrew }), details: () => null, cancelFor: async () => ({ ok: false, status: 404, error: "" }) },
+      });
+      let body: Record<string, unknown> = {};
+      await route({ req: {} as never, res: {} as never, url: new URL("http://localhost/api/bots/bot-1/edu"), path: "/api/bots/bot-1/edu", method: "GET", auth: loopback,
+        json: ((_res: unknown, _status: number, value: Record<string, unknown>) => { body = value; }) as never, readBody: (async () => ({})) as never });
+      return body.crew;
+    };
+    expect(await crewFor(false)).toEqual({ enabled: false });
+    expect(await crewFor(false, cloud)).toBeUndefined();
+    expect(await crewFor(true, cloud)).toEqual({ enabled: true });
   });
 
   it("refuses a service's approve with 403 and lets it reject", async () => {

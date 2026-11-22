@@ -14,6 +14,7 @@ import type { OptionCardData } from "../shared/wire.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import type { DecisionRow } from "./decision-log.ts";
 import type { EduBot, EduBrains, EduRuntime } from "./edu-brain.ts";
+import { EDU_CREW_NOT_ON_CLOUD } from "./edu-cloud.ts";
 import { eduDecisionRefusal } from "./edu-proposals.ts";
 import { eduStoreRefusal, storeFile } from "./edu-store.ts";
 import { augmentedPath, findCliCandidates, userHome } from "./env-path.ts";
@@ -301,6 +302,7 @@ export function createEduCrew(deps: EduCrewDeps) {
   async function place(bot: CrewBot, threadId: string): Promise<{ ok: true; runtime: EduRuntime; brain: string; folder: string } | { ok: false; error: string }> {
     const refusal = accessRefusal(bot, threadId);
     if (refusal) return { ok: false, error: refusal };
+    if (bot.eduBrain?.mode === "cloud") return { ok: false, error: EDU_CREW_NOT_ON_CLOUD };
     const brain = await deps.brains.brain(bot);
     if (!brain.ok) return { ok: false, error: `Edu crew needs this bot's Edu brain: ${brain.reason}` };
     const folder = deps.folder(bot.id, threadId);

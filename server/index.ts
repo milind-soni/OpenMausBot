@@ -578,9 +578,8 @@ import { createNoAiNotice } from "./host/no-ai-notice.ts"; import { PASS, ROUTES
 import { createHostedSlackRoutes } from "./routes/hosted-slack.ts";
 import { createBotPresetRoutes } from "./routes/bot-presets.ts"; import { createWorkspaceBannerRoutes, workspaceBannerStore, workspaceBannerSummary } from "./routes/workspace-banner.ts";
 import { createBotMemoryRoutes } from "./routes/bot-memory.ts";
-import { createEduBrains } from "./edu-brain.ts";
-import { createEduProposals } from "./edu-proposals.ts";
-import { createEduCrew } from "./edu-crew.ts";
+import { createEduHost } from "./host/edu-host.ts";
+import { EDU_CLOUD_RELAY_PATH } from "./edu-cloud.ts";
 import { isEduDecisionCard } from "../shared/edu-brain.ts";
 import { createEduRoutes } from "./routes/edu.ts";
 import { streamCursorSeq } from "./host/stream-cursor.ts";
@@ -778,8 +777,6 @@ let desktopMutationToken: string | undefined = DESKTOP_MANAGED ? "" : undefined;
 let companionMutationToken: string | undefined = DESKTOP_MANAGED ? "" : undefined;
 const FALLBACK_PUBLIC_URL = process.env.OMB_PUBLIC_URL?.trim().replace(/\/+$/, "") || null; const tailnetShare = createTailnetShare({ port: PORT, handle: (req, res) => handleRequest(req, res), attach: (listener, handle) => upgrades.attach(listener, handle), log: (line) => console.log(line) });
 const cfg = loadConfig();
-const eduBrains = createEduBrains({ dataDir: DATA_DIR, config: () => cfg.edu, hostLocal: () => CLOUD_HOME === null && !botBox.enabled(),
-  mounted: (threadId, bot, folder) => eduProposals.mounted(threadId, bot, folder) });
 const hostedModels = hostedModelPolicy(DATA_DIR);
 const providerConfigs = () => hostedModels ? hostedModels.configs() : instanceConfigs(cfg);
 const decorateHostedProvider = hostedModels ? (instance: ProviderInstance) => hostedModels.decorate(instance) : undefined;
@@ -1560,7 +1557,7 @@ type InternalCapability = {
   threadId: string;
   generation: string;
   depth: number;
-  kind: "agents" | "connectors" | "computer" | "browser" | "hooks" | "phone" | "data" | "email" | "device" | "lent";
+  kind: "agents" | "connectors" | "computer" | "browser" | "hooks" | "phone" | "data" | "email" | "device" | "lent" | "edu";
   skillAuthoring: boolean;
   createdBots: number;
   createdRooms?: number;
@@ -2712,24 +2709,25 @@ const store = new Store(
   personLanguages.forPlace,
   () => sharedMembership() ? undefined : cfg.profile?.name,
 );
-const eduProposals = createEduProposals({ brains: eduBrains, store, bus, desktop: DESKTOP_MANAGED, inRoom: (threadId) => Boolean(store.groupByThread(threadId)),
-  decide: (row) => appendDecision(DATA_DIR, row) });
-const eduCrew = createEduCrew({
-  dataDir: DATA_DIR, brains: eduBrains, store, desktop: DESKTOP_MANAGED,
-  decide: (row) => appendDecision(DATA_DIR, row),
-  folder: (botId, threadId) => store.taskByThread(botId, threadId)?.cwd ?? store.bot(botId)?.cwd,
-  engine: (botId, threadId) => registry.get(botForThread(botId, threadId)?.modelSelection.instanceId ?? "")?.driverKind,
-  turn: (botId, threadId) => {
-    const bot = botForThread(botId, threadId);
-    return {
-      room: Boolean(store.groupByThread(threadId)), hostLocal: CLOUD_HOME === null && !botBox.enabled(),
-      confined: proactive.fence.confines(threadId) || botApiThread(threadId),
-      computer: bot ? turnProvider(bot, undefined, threadId) ?? turnSurfacePlan(bot, undefined, threadId).computer : "off",
-    };
+const eduHost = createEduHost({
+  dataDir: DATA_DIR, desktop: DESKTOP_MANAGED, config: () => cfg.edu, hostLocal: () => CLOUD_HOME === null && !botBox.enabled(), store, bus,
+  inRoom: (threadId) => Boolean(store.groupByThread(threadId)), decide: (row) => appendDecision(DATA_DIR, row),
+  token: (bot, ref) => "env" in ref ? process.env[ref.env] ?? null : logins.usableSecret(ref.secret, bot.id, "ref", vaultReaders.turn(bot.threadId ?? store.bot(bot.id)?.threadId ?? ""))?.value ?? null,
+  relay: { origin: `http://127.0.0.1:${PORT}`, mint: (bot, turn) => mintInternalCapability({ botId: bot.id, ...turn, kind: "edu", depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 }) },
+  crew: {
+    folder: (botId, threadId) => store.taskByThread(botId, threadId)?.cwd ?? store.bot(botId)?.cwd,
+    engine: (botId, threadId) => registry.get(botForThread(botId, threadId)?.modelSelection.instanceId ?? "")?.driverKind,
+    turn: (botId, threadId) => {
+      const bot = botForThread(botId, threadId);
+      return {
+        room: Boolean(store.groupByThread(threadId)), hostLocal: CLOUD_HOME === null && !botBox.enabled(),
+        confined: proactive.fence.confines(threadId) || botApiThread(threadId),
+        computer: bot ? turnProvider(bot, undefined, threadId) ?? turnSurfacePlan(bot, undefined, threadId).computer : "off",
+      };
+    },
   },
 });
-eduCrew.resume();
-void eduBrains.detect();
+const { brains: eduBrains, proposals: eduProposals, crew: eduCrew } = eduHost;
 const sharedVm = createSharedVmControl({ control: computerControl, store, mode: () => CLOUD_HOME ? null : localVmMode(cfg), botForThread, turnBots: directTurnBots,
   teamTurns: teamComputerTurns, teamComputer: (bot) => inheritedTeamComputer(bot)?.id, place: (bot, threadId) => turnSurfacePlan(bot, undefined, threadId).computer,
   turnVmTargets: { get: (threadId) => localVmThreadTargets.get(threadId) }, busy: () => localVmModeChangeBusy || localVmImageBusy || localVmLifecycleBusy.has(SHARED_LOCAL_VM_TARGET.key) });
@@ -8191,7 +8189,7 @@ async function beginTurn(
         if (data) integrations.data = data;
       }
       if (liveBot && instance.adapter.capabilities.emailMcp === true) { const mail = emailIntegration(liveBot, { threadId, generation: dispatchClaimId }); if (mail) integrations.email = mail; }
-      const eduTurn = { computer: computerKind, confined: proactive.fence.confines(threadId) || botApiThread(threadId), threadId };
+      const eduTurn = { computer: computerKind, confined: proactive.fence.confines(threadId) || botApiThread(threadId), threadId, generation: dispatchClaimId };
       if (liveBot) await eduBrains.attach(integrations, liveBot, instance.adapter.capabilities, eduTurn);
       const phone = liveBot && instance.adapter.capabilities.deviceMcp === true ? phones.integration(liveBot, { threadId, generation: dispatchClaimId }) : null;
       if (phone) integrations.device = phone;
@@ -9834,7 +9832,7 @@ async function runClaimedGroupMemberTurn(
     if (data) integrations.data = data;
   }
   if (instance.adapter.capabilities.emailMcp === true) { const mail = emailIntegration(readyBot, { threadId, generation: internalGeneration }); if (mail) integrations.email = mail; }
-  await eduBrains.attach(integrations, readyBot, instance.adapter.capabilities, { computer: roomKind, threadId });
+  await eduBrains.attach(integrations, readyBot, instance.adapter.capabilities, { computer: roomKind, threadId, generation: internalGeneration });
   const phone = instance.adapter.capabilities.deviceMcp === true ? phones.integration(readyBot, { threadId, generation: internalGeneration }) : null;
   if (phone) integrations.device = phone;
   if (roomPlan.browser && !(roomPlan.computer === undefined && roomTeamComputer)) {
@@ -12790,6 +12788,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         : path === DATA_INTERNAL_MCP_PATH
         ? "data"
         : path === EMAIL_INTERNAL_MCP_PATH ? "email"
+        : path === EDU_CLOUD_RELAY_PATH ? "edu"
         : path === PHONE_INTERNAL_MCP_PATH
         ? "device" : isLentMcpPath(path) ? "lent"
         : path === "/api/internal/phone/claim"
@@ -12829,7 +12828,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           throw Object.assign(new Error(TURN_ENDED_REFUSAL), { status: 401 });
         }
       };
-      if (await eduCrew.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, signal: () => turnCallSignals.signal(internalCapability, res) }) !== PASS) return;
+      if (await eduHost.internal({ method, path, req, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, signal: () => turnCallSignals.signal(internalCapability, res) }) !== PASS) return;
       const botFolders = async () => ({ roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), vmWorkspace: (await attachmentVmForTurn(internalCapability))?.workspaceDir ?? null }); if (await lentMcp.route({ method, path, req, res, json, turn: internalCapability, readBody: readInternalBody }) !== PASS || await internalToolRoutes({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, folders: botFolders }) !== PASS || await waitRoutes({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, ...waitTurnChecks(internalCapability, internalSender) }) !== PASS || await teamMessages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || await devsReports.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || (computerAsks && await computerAsks.internal({ method, path, res, json, turn: internalCapability, readBody: readInternalBody }) !== PASS) || await cloudComputerResets.internal({ method, path, res, json, sender: internalSender, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || await meetingsHost.internal({ method, path, res, json, readBody: readInternalBody, bot: internalSender, threadId: internalCapability.threadId, active: () => internalCapabilityIsActive(internalCapability) }) !== PASS || await imageTools.internal({ method, path, res, json, readBody: readInternalBody, folders: botFolders, threadId: internalCapability.threadId, requireActive: requireActiveInternalCapability, personTurn: turnOrigin(internalCapability).kind === "user" || (Boolean(roomRun(internalCapability.generation)?.requestMessageId) && guestDrivenTurns.get(internalCapability.threadId) !== internalCapability.generation) }) !== PASS || await share.tool({ method, path, res, json, readBody: readInternalBody, bot: internalSender, threadId: internalCapability.threadId, roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), actsForAdmin: teamConnections.actsForAdmin(internalCapability.threadId, internalCapability.generation), githubPerson: teamConnections.turnPerson(internalCapability.threadId, internalCapability.generation), actingName: CLOUD_TEAM ? teamHost.personName(actingPeople.requester(internalCapability.threadId, internalCapability.generation)) : undefined, personMessage: turnOrigin(internalCapability).kind === "user" ? store.messagesFor(internalCapability.threadId).find((line) => line.role === "user" && line.id === (directRequestOwners.get(internalCapability.threadId)?.messageId ?? roomRun(internalCapability.generation)?.requestMessageId))?.text ?? null : null, post: (text, template) => { const source = connectorThread(internalSender.id, internalCapability.threadId); return source ? store.appendMessage(internalCapability.threadId, { role: "bot", kind: "text", text, template, ...(source.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }).id : null; } }) !== PASS) return; const callSignal = turnCallSignals.signal(internalCapability, res); if (await publishedPages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, requireActive: requireActiveInternalCapability, signal: callSignal, folders: botFolders, post: (text, publishedPage, bundle) => { const source = connectorThread(internalSender.id, internalCapability.threadId); return !source ? null : (bundle && publishedPages.show({ threadId: internalCapability.threadId, card: publishedPage, bundle, bot: internalSender })) || store.appendMessage(internalCapability.threadId, { role: "bot", kind: "text", text, publishedPage, ...(source.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }).id; } }) !== PASS) return;
       const delegatedThisTurn = (taskId: string) => {
         (internalCapability.delegatedThisTurn ??= new Set()).add(taskId);

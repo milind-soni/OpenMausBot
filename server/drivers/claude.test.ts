@@ -6,6 +6,7 @@ import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createEduCloud, EDU_CLOUD_RELAY_PATH } from "../edu-cloud.ts";
 import { DATA_DIR, ensureDirs, instanceConfigs, NATIVE_DIR, type AppConfig } from "../config.ts";
 import { TurnAuthenticationRefusedError, type ProviderInstance, type SendTurnInput } from "../contracts.ts";
 import { UNGATED_MCP_OUTPUT_TOKENS } from "../mcp-gate-config.ts";
@@ -2145,6 +2146,22 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     } finally {
       delete process.env.EDU_CREW_JOB;
     }
+  });
+
+  it("mounts a cloud Edu brain as Edu Bot's relay: the person's edu-cloud token is in no MCP config, argument or engine variable", async () => {
+    await create();
+    const dump = join(scratch, "edu-cloud.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    const token = "person-token-".padEnd(48, "x");
+    const capability = "turn-capability-".padEnd(48, "c");
+    const cloud = createEduCloud({ token: () => token, relay: { origin: "http://127.0.0.1:4100", mint: () => capability } });
+    const edu = cloud.server({ id: "b-edu", eduBrain: { mode: "cloud", url: "https://brain.example/mcp", token: { secret: "EDU_CLOUD_BI" } } }, { threadId: "t-edu-cloud", generation: "g-1" })!;
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-edu-cloud", botId: "b-edu", text: "hi", cwd: scratch, integrations: { edu } });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    const seen = readFileSync(dump, "utf8");
+    expect(seen).not.toContain(token);
+    const mounted = (JSON.parse(seen) as { mcpConfig: { mcpServers: Record<string, { env?: Record<string, string> }> } }).mcpConfig.mcpServers.edu!;
+    expect(JSON.parse(mounted.env!.OMB_REMOTE_MCP_SERVER!)).toEqual({ type: "http", url: `http://127.0.0.1:4100${EDU_CLOUD_RELAY_PATH}`, headers: { authorization: `Bearer ${capability}` } });
   });
 
   it("honours a person who turned Claude Code's tool search off, and restarts when they change it", async () => {

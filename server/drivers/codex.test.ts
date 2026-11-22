@@ -10,6 +10,7 @@ import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createEduCloud, EDU_CLOUD_RELAY_PATH } from "../edu-cloud.ts";
 import type { ProviderInstance, RuntimeEvent } from "../contracts.ts";
 import { DATA_DIR, NATIVE_DIR } from "../config.ts";
 import { flushNativeLog } from "./native.ts";
@@ -187,6 +188,21 @@ describe("CodexDriver turns (fake app-server)", () => {
     await instance.adapter.sendTurn({ threadId: "team-tools", text: "Fixture" });
     await recorder.until((event) => event.type === "turn.completed");
     expect(recorder.events.filter((e) => e.type === "runtime.notice").map((e) => (e as { message: string }).message)).toEqual([TEAM_TOOLS_FAILED]);
+  });
+
+  it("mounts a cloud Edu brain as Edu Bot's relay: the person's edu-cloud token is in no argument or app-server variable", async () => {
+    const dump = join(scratch, "edu-cloud.json"); process.env.FAKE_CODEX_DUMP = dump;
+    await create({ environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex") } });
+    const token = "person-token-".padEnd(48, "x");
+    const capability = "turn-capability-".padEnd(48, "c");
+    const cloud = createEduCloud({ token: () => token, relay: { origin: "http://127.0.0.1:4100", mint: () => capability } });
+    const edu = cloud.server({ id: "b-edu", eduBrain: { mode: "cloud", url: "https://brain.example/mcp", token: { secret: "EDU_CLOUD_BI" } } }, { threadId: "edu-cloud", generation: "g-1" })!;
+    await instance.adapter.sendTurn({ threadId: "edu-cloud", text: "Fixture", integrations: { edu } });
+    await recorder.until((event) => event.type === "turn.completed");
+    const seen = readFileSync(dump, "utf8");
+    expect(seen).not.toContain(token);
+    expect(seen).not.toContain("brain.example");
+    expect(seen).toContain(EDU_CLOUD_RELAY_PATH);
   });
 
   it("says quietly when the Edu brain did not connect, and the turn still finishes", async () => {
