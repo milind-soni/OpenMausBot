@@ -68,6 +68,15 @@ export async function removePlace(id: string): Promise<CloudRemoveOutcome> {
   return answer.outcome;
 }
 
+/** Rename, from a server's menu: main saves the name for that server on this computer only. An older app (no such channel)
+ * answers `failed`. */
+export async function renamePlace(id: string, name: string): Promise<"saved" | "name" | "failed"> {
+  const answer = await bridge()?.rename?.(id, name).catch(() => null);
+  if (!answer) return "failed";
+  if (answer.outcome === "saved") void refreshPlaces();
+  return answer.outcome === "saved" || answer.outcome === "name" ? answer.outcome : "failed";
+}
+
 /** Make … my home, from a server's menu: main starts moving this computer's bots there. True once it started, else main's
  * own words for why not. */
 export async function makeHome(id: string): Promise<true | string> {
