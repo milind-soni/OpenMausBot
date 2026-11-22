@@ -44,7 +44,7 @@ import {
 } from "../shared/approval-mode.ts";
 import { createApprovalModeSupport } from "./harness-capabilities.ts";
 import { escapeAttribute } from "../src/lib/composer-attachments.ts";
-import { isPendingSignInRequest, normalizeSignInSite, signInCardWaits, signInOutcome, signInResumePrompt } from "../shared/sign-in-request.ts";
+import { signInCardResumePrompt, signInCardWaits, signInOutcome } from "../shared/sign-in-request.ts"; import { createHandoffRequests } from "./host/handoff-requests.ts";
 
 import { createRoomTurnLevels } from "./room-turn-level.ts";
 import { createSignInSettle } from "./host/sign-in-settle.ts"; import { createNoTerminal } from "./host/no-terminal.ts"; import { createPlaceMoves, type ComputerSelection } from "./host/place-move.ts"; import { createPersonLanguages, THIS_COMPUTER } from "./host/person-languages.ts"; import "./server-line-packs.ts"; import { conversationLanguage, serverLine, setConversationLanguage } from "./server-lines.ts";
@@ -1942,7 +1942,7 @@ function reconcileParkedNode(node: HandoffView): boolean {
     const signIn = message.signIn;
     const signedIn = signIn && !signIn.superseded ? signInOutcome(signIn) : null;
     if (signIn && signedIn) {
-      if (!coordinator.answerNode(node.id, signInResumePrompt(signIn.site, signedIn))) return false;
+      if (!coordinator.answerNode(node.id, signInCardResumePrompt(signIn, signedIn))) return false;
       if (!signIn.resumed) store.patchMessage(node.threadId, message.id, { signIn: { ...signIn, resumed: true, error: undefined } });
       return true;
     }
@@ -2384,7 +2384,7 @@ const emailIntegration = (bot: BotRecord, turn: { threadId: string; generation: 
 
 let browserEngineInstall: Promise<void> | null = null;
 let browserEngineInstallError: string | null = null;
-export function browserEngineSummary(): { kind: "engine" | "unavailable"; reason?: string; installable?: boolean; version?: string; chrome?: string; noChrome?: true; installing?: boolean; installError?: string; myChrome: boolean; proxyConfigured?: boolean; proxySaved?: boolean; myChromeOn?: { name: string; device: "PC" | "Mac" | "computer"; online: boolean }; myChromeLendable?: true; serverSites?: boolean; engine: "agent-browser" | "chrome" } {
+export function browserEngineSummary(): { kind: "engine" | "unavailable"; reason?: string; installable?: boolean; version?: string; chrome?: string; noChrome?: true; installing?: boolean; installError?: string; myChrome: boolean; proxyConfigured?: boolean; proxySaved?: boolean; myChromeOn?: { name: string; device: "PC" | "Mac" | "computer"; online: boolean }; myChromeLendable?: true; serverSites?: boolean; engine: "agent-browser" | "chrome"; desktopView?: true } {
   const status = browserEngineStatus();
   const progress = { myChrome: myChromeAvailable(), ...lentChromeSummary(), ...(browserEngineInstall ? { installing: true } : {}), ...(browserEngineInstallError ? { installError: browserEngineInstallError } : {}) };
   return engineSummary(status.kind === "ready"
@@ -11421,32 +11421,14 @@ function signInPlace(bot: BotRecord, threadId: string): Surface | null {
   return store.taskByThread(bot.id, threadId)?.surface ?? parseSurface(bot.computer) ?? null;
 }
 
-/** Appends the new card first, so a failed append leaves the older one actionable. */
-function requestSignIn(from: BotRecord, threadId: string, rawSite: unknown, rawReason: unknown):
-  { messageId: string; site: string; place: Surface } | { status: number; error: string } {
-  const owner = connectorThread(from.id, threadId);
-  if (!owner) return { status: 403, error: "source conversation does not belong to sender" };
-  const target = normalizeSignInSite(rawSite);
-  if (!target) return { status: 400, error: "site must be a web address or a domain, such as example.com" };
-  const place = signInPlace(from, threadId);
-  if (!place) return { status: 409, error: "this conversation has no browser or computer for the person to sign in on" };
-  const reason = typeof rawReason === "string" ? rawReason.trim().slice(0, 240) : "";
-  const message = store.appendMessage(threadId, {
-    role: "bot",
-    kind: "signin",
-    text: signInCardText(from.name, target.site, threadLanguage(threadId)),
-    ...(owner.group ? { from: { botId: from.id, name: from.name, color: from.color } } : {}),
-    signIn: { url: target.url, site: target.site, place, ...(reason ? { reason } : {}) },
-  });
-  for (const prior of store.activePath(threadId)) {
-    if (prior.id === message.id || !prior.signIn || !isPendingSignInRequest(prior, target.site, from.id, Boolean(owner.group))) continue;
-    store.patchMessage(threadId, prior.id, { signIn: { ...prior.signIn, superseded: true } }); coordinator.followCard(threadId, prior.id, message.id);
-    computerControl.settleHelp(prior.id);
-  }
-  computerControl.requestHelp(sharedVm.signInKey(from, threadId, place), `sign in to ${target.site}`,
-    { botId: from.id, threadId, messageId: message.id, site: target.site, place });
-  return { messageId: message.id, site: target.site, place };
-}
+const handoffRequests = createHandoffRequests({
+  store, owner: connectorThread, place: signInPlace, browserOn: (bot) => builtInBrowserEnabled(cfg) && bot.browser !== false, threadsWithCards: threadsWithCardsSince, botOf: (threadId) => store.botByThread(threadId)?.id ?? null,
+  computer: (bot, threadId) => { const surface = store.taskByThread(bot.id, threadId)?.surface ?? parseSurface(bot.computer) ?? null; return surface === "browser" ? null : surface; },
+  pageNow: async (bot, threadId) => { const browser = await botBrowserTarget(botForThread(bot.id, threadId) ?? bot, threadId); return browser ? (await observeSignInPage(loginInput(browser.session, browser.spec, browser.env).engine))?.page ?? null : null; },
+  cardText: (name, site, threadId) => signInCardText(name, site, threadLanguage(threadId)), expire: (botId, threadId, messageId) => void signInSettle.expire(botId, threadId, messageId),
+  supersede: (threadId, prior, next) => { store.patchMessage(threadId, prior.id, { signIn: { ...prior.signIn!, superseded: true } }); coordinator.followCard(threadId, prior.id, next.id); computerControl.settleHelp(prior.id); },
+  requestHelp: (from, threadId, place, reason, ref) => void computerControl.requestHelp(sharedVm.signInKey(from, threadId, place), reason, ref),
+});
 
 /** In a room, only the asking bot's own card. */
 function signInMessage(botId: string, threadId: string, messageId: string): Message | null {
@@ -14145,7 +14127,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (await dispatchRoutes([createInternalCredentialRequestRoutes({ readBody: readInternalBody, request: (body) => secretCards.requestCredential(internalSender, internalCapability.threadId, body) })], { req, res, url, path, method, auth, json, readBody })) return;
       if (await dispatchRoutes([createInternalSignInRoutes({
         readBody: readInternalBody,
-        request: (site, reason) => requestSignIn(internalSender, internalCapability.threadId, site, reason),
+        request: (body) => handoffRequests.request(internalSender, internalCapability.threadId, body),
       })], { req, res, url, path, method, auth, json, readBody })) return;
       if (method === "POST" && path === "/api/internal/fill-login") {
         const body = await readInternalBody();
@@ -15168,7 +15150,7 @@ botLink.start(); let pausedSent = starterAwake.paused().join(); store.onChange((
 server.listen(PORT, listenHost(server), async () => {
   companyRuntimeReady(); cloudHealth?.speed.ready(); void tailnetShare.start(process.env);
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`); launchListening();
-  personWaits.boot(); browserSweep.start(); startCloudTeamPolicy({ cloudHome: CLOUD_HOME, dataDir: DATA_DIR, managed: managedPolicy, sessions }); startCloudTeamRoster({ cloudHome: CLOUD_HOME, sessions }); moveFreeze.hold(() => appTriggers.start(), () => void appTriggers.stop()); startCloudHomeConnectedApps({ cloudHome: CLOUD_HOME !== null, dataDir: DATA_DIR, cloudGrant: CLOUD_ENV.OMB_CLOUD_CONNECTED_APPS_GRANT, ownKey: () => composio.connectionMode(cfg) === "self-hosted", apply: (access) => { composio.setManagedBrokerAccess(access); broadcast({ kind: "config", ...configStatus() }); } });
+  personWaits.boot(); handoffRequests.boot(); browserSweep.start(); startCloudTeamPolicy({ cloudHome: CLOUD_HOME, dataDir: DATA_DIR, managed: managedPolicy, sessions }); startCloudTeamRoster({ cloudHome: CLOUD_HOME, sessions }); moveFreeze.hold(() => appTriggers.start(), () => void appTriggers.stop()); startCloudHomeConnectedApps({ cloudHome: CLOUD_HOME !== null, dataDir: DATA_DIR, cloudGrant: CLOUD_ENV.OMB_CLOUD_CONNECTED_APPS_GRANT, ownKey: () => composio.connectionMode(cfg) === "self-hosted", apply: (access) => { composio.setManagedBrokerAccess(access); broadcast({ kind: "config", ...configStatus() }); } });
   void afterFirstEngineRead().then(() => { if (builtInBrowserEnabled(cfg)) chromeLauncher.start(); checkpointSeeds.start(); });
   followupsReady = true; engineUpdates.start();
   drainQueuedSends();
@@ -15238,7 +15220,7 @@ const gracefulShutdown = createGracefulShutdown({
       sharedComputers.close(); deviceLinks.close(); stopCloudTeamPolicy(); stopCloudTeamRoster();
       phones.close();
       sharedComputerControl.close();
-      browserLive.closeAll();
+      browserLive.closeAll({ stopping: true });
       desktopViewer.closeAll();
       upgrades.close();
       for (const idle of localVmIdles.values()) idle.cancel();

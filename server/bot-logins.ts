@@ -16,6 +16,8 @@ const linkedItemId = (secretId: string, field: string | undefined) => `linked-${
 /** What the bot's browser shows while the person answers a sign-in card. */
 export interface ObservedPage {
   host: string;
+  /** The page's address without its query or fragment, which can carry tokens. */
+  page?: string;
   /** It has a password box, shown or not yet, or a username or email box: a sign-in page, or its first step. */
   signIn: boolean;
 }
@@ -32,7 +34,9 @@ export async function observeSignInPage(engine: (args: string[]) => Promise<Reco
   const page = value as { href?: unknown; signIn?: unknown } | null;
   if (typeof page?.href !== "string") return null;
   const check = loginPageCheck(page.href);
-  return check.ok ? { host: check.pageHost, signIn: page.signIn === true } : null;
+  if (!check.ok) return null;
+  const address = new URL(page.href);
+  return { host: check.pageHost, page: `${address.origin}${address.pathname}`, signIn: page.signIn === true };
 }
 
 /** A sign-in page on another site than the card's, which a login saved from the card fills only once the person, shown

@@ -33,7 +33,7 @@ export function personWait(row: WaitRow): PersonWait | null {
   }
   if (row.kind === "signin") {
     if (!signIn || !signInWaits(signIn) || signIn.resumed || signIn.stopped) return null;
-    return { ...own, kind: "sign-in", label: signIn.site };
+    return { ...own, kind: "sign-in", label: signIn.instruction || signIn.site };
   }
   if (row.kind === "connector") {
     if (!connector || connector.status === "connected" || connector.dismissed || connector.superseded || connector.resumed || connector.stopped) return null;

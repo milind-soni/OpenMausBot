@@ -65,6 +65,17 @@ const __APP_VERSION__: string;
     };
   };
 
+  interface BrowserCookieSource {
+    id: string;
+    name: string;
+    engine: "chromium" | "firefox" | "safari";
+    profiles: Array<{ id: string; name: string }>;
+  }
+
+  type BrowserCookieImportResult =
+    | { ok: true; site: string; imported: number; sessionOnly: number; skipped: Partial<Record<string, number>> }
+    | { ok: false; reason: string };
+
   interface DesktopWorkspaceBounds {
     x: number;
     y: number;
@@ -446,6 +457,16 @@ const __APP_VERSION__: string;
        * the server which browser the bot's panel shows; the page never names one. */
       browserPane?: {
         show(input: { botId: string; threadId: string | null; profile: string | null; bounds: DesktopWorkspaceBounds | null; visible: boolean }): Promise<{ shown: boolean }>;
+        /** The person takes the tab the panel shows from the bot (`held`), or hands it back; the bot may only read a
+         * held tab. Every hold ends when the window closes. */
+        hold(input: { botId: string; threadId: string | null; held: boolean }): Promise<{ held: boolean }>;
+      };
+      /** A site's sign-in from the person's own browsers into a bot's browser, which the person starts. Counts and a
+       * reason code come back, never a cookie. `offer` says whether a site can be imported for a bot (Google never). */
+      browserCookies?: {
+        sources(): Promise<BrowserCookieSource[]>;
+        offer(input: { botId: string; threadId: string | null; site: string }): Promise<{ offered: boolean; reason?: string }>;
+        import(input: { botId: string; threadId: string | null; site: string; source: string; profile: string }): Promise<BrowserCookieImportResult>;
       };
       /** Native folder picker; resolves null when the user cancels. */
       pickFolder?(current?: string): Promise<string | null>;

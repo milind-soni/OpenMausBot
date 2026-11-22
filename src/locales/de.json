@@ -4091,5 +4091,7 @@
   "geminiServer.key": "Gemini-API-Schlüssel",
   "geminiServer.add": "Google AI Studio hinzufügen",
   "inbox.settled.title": "Erledigt",
-  "inbox.settled.read": "Gelesen"
+  "inbox.settled.read": "Gelesen",
+  "server.notify.handoff": "{who} wartet auf dich",
+  "serverError.signIn.expired": "Diese Anfrage ist bereits abgelaufen"
 }

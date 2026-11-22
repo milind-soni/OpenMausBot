@@ -32,13 +32,15 @@ describe("the loop stall recorder", () => {
     const dir = mkdtempSync(join(tmpdir(), "loop-stalls-"));
     stalls.start();
     try {
-      await delay(60);
+      // Several of the histogram's own firings on each side of the stall, so the stall is one sample among many.
+      await delay(5 * STALL_RESOLUTION_MS);
       const before = stalls.report().saves.m1.n;
       writeFileAtomic(join(dir, "a.json"), "{}");
       timeBlocking("runtimeReads", () => { const until = Date.now() + 300; while (Date.now() < until) { /* the stall */ } });
-      await delay(60);
+      await delay(5 * STALL_RESOLUTION_MS);
       const report = stalls.report();
-      expect(report.m1!.max).toBeGreaterThanOrEqual(250);
+      // A stall reads as its length less up to one firing interval, never less.
+      expect(report.m1!.max).toBeGreaterThanOrEqual(300 - STALL_RESOLUTION_MS);
       expect(report.m1!.over100ms).toBeGreaterThanOrEqual(1);
       // One stall does not set the median; the rest is timer slop, a few ms late on a busy runner (Windows ticks every 15.6 ms).
       expect(report.m1!.p50).toBeLessThan(50);
@@ -57,12 +59,18 @@ describe("the loop stall recorder", () => {
     }
   });
 
+  it("fires its timer at most ten times a second, so an idle server is not woken fifty times a second", () => {
+    // At 20 ms the firings were most of an idle Cloud's CPU; a stall still reads within one interval of its length.
+    expect(STALL_RESOLUTION_MS).toBeGreaterThanOrEqual(100);
+    expect(STALL_RESOLUTION_MS).toBeLessThan(1_000);
+  });
+
   it("counts a gap the loop only waited through as a sleep or a pause, and one it worked through as a stall", () => {
     const delays: number[] = [];
     const histogram = {
       get count() { return delays.length; },
       get max() { return delays.length ? (Math.max(...delays) + STALL_RESOLUTION_MS) * 1e6 : 0; },
-      get percentiles() { return new Map(delays.length ? [[0, 20.1e6], [99, 20.1e6], [100, (Math.max(...delays) + STALL_RESOLUTION_MS) * 1e6]] : []); },
+      get percentiles() { return new Map(delays.length ? [[0, (STALL_RESOLUTION_MS + 0.1) * 1e6], [99, (STALL_RESOLUTION_MS + 0.1) * 1e6], [100, (Math.max(...delays) + STALL_RESOLUTION_MS) * 1e6]] : []); },
       reset() { delays.length = 0; }, enable: () => true, disable: () => true,
     } as unknown as IntervalHistogram;
     let mono = 0, waited: number | null = 0;

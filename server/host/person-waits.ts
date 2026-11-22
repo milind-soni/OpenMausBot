@@ -3,6 +3,7 @@
 // the chat, a restart, another branch) reads the same. A card a person isn't looking at reaches them by notification,
 // and a turn that ends resting on them says so instead of "finished".
 import { openPersonWait, personWait, personWrote, restingOnPerson, type PersonWait } from "../../shared/person-wait.ts";
+import { isHandoff } from "../../shared/sign-in-request.ts";
 import type { Notification } from "../../shared/notification.ts";
 import { NEEDS_YOU_WINDOW_MS } from "../../shared/today.ts";
 import { buildNotification } from "../notify.ts";
@@ -71,10 +72,13 @@ export function createPersonWaits(deps: PersonWaitsDeps) {
     const asker = askerOf(threadId, wait);
     if (asker && resting.get(threadId)?.messageId === wait.messageId) deps.waitingElsewhere?.(threadId, wait, asker);
     const detail = message.secret ? message.secret.reason ?? message.secret.description
-      : message.signIn ? message.signIn.reason ?? serverLine(conversationLanguage(threadId), "server.notify.openToSignIn", { site: wait.label })
+      : message.signIn ? message.signIn.instruction || (message.signIn.reason ?? serverLine(conversationLanguage(threadId), "server.notify.openToSignIn", { site: wait.label }))
         : message.connector?.description ?? wait.label;
     deps.notify(cardNotification(threadId, wait, detail));
   }
+
+  const handoffOf = (threadId: string, wait: PersonWait): boolean =>
+    isHandoff(store.activePath(threadId).find((row) => row.id === wait.messageId)?.signIn);
 
   function cardNotification(threadId: string, wait: PersonWait, detail: string): Notification | null {
     const bot = askerOf(threadId, wait);
@@ -84,7 +88,7 @@ export function createPersonWaits(deps: PersonWaitsDeps) {
     const target = { ...bot, threadId };
     switch (wait.kind) {
       case "password": return buildNotification("secret", target, threadId, detail, { ...extra, label: wait.label });
-      case "sign-in": return buildNotification("sign-in", target, threadId, detail, { ...extra, site: wait.label });
+      case "sign-in": return buildNotification("sign-in", target, threadId, detail, { ...extra, ...(handoffOf(threadId, wait) ? { handoff: true } : { site: wait.label }) });
       case "connect": return buildNotification("sign-in", target, threadId, detail, { ...extra, app: wait.label });
       case "question": return buildNotification("question", target, threadId, detail, extra);
       default: return buildNotification("approval", target, threadId, detail, extra);

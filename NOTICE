@@ -100,6 +100,11 @@ viewers and screencast pacing, tool definitions and snapshot bound
 (apps/server/src/preview and apps/server/src/mcp), Copyright 2026 T3 Tools
 Inc., used under the MIT License (third_party/t3-code/LICENSE).
 
+The input gate of the bots' browser desktop view
+(server/browser/desktop/rfb-filter.ts) adapts the RFB client-message filter of
+Hermes Agent, https://github.com/NousResearch/hermes-agent, Copyright (c) 2025
+Nous Research, used under the MIT License (third_party/hermes-agent/LICENSE).
+
 The social post previews template (skills/social-posts/posts.html) adapts the
 post card markup and platform styling of MiniMock,
 https://github.com/minianon/MiniMock, Copyright (c) 2026 Tushar Bhardwaj, used

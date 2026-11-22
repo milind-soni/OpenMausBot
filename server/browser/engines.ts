@@ -15,9 +15,14 @@ import { ChromeLauncher } from "./chrome/launcher.ts";
 import { ProcessRegistry, sweep } from "./chrome/processes.ts";
 import { browserRoot } from "./chrome/profile.ts";
 import { browserLanguage, browserTimeZone, languageList } from "./chrome/wrapper.ts";
-import { displayScreen } from "./display.ts";
+import { displayScreen, parseDisplay } from "./display.ts";
+import { DESKTOP_SIZE, DisplaySupervisor, findXvnc } from "./desktop/displays.ts";
+import { findBwrap } from "./desktop/policy.ts";
+import { DesktopViews, type DesktopRequest } from "./desktop/views.ts";
 import { botReason, browserInputLog, pageAction, type BotReason, type BrowserInputLog } from "./input-log.ts";
 import type { PaneBackend } from "./pane/backend.ts";
+import type { CookieSink } from "./cookies/importer.ts";
+import { cdpSink } from "./cookies/sinks.ts";
 import type { Download } from "./cdp/downloads.ts";
 import { BrowserService, type BrowserTarget } from "./service.ts";
 import { LiveV1 } from "./viewers/live-v1.ts";
@@ -54,6 +59,10 @@ export interface ChromeEngineOptions {
   language?(): string | undefined;
   /** The desktop app's panes, used for a browser that starts while they are wanted and the app shows them. */
   pane?: { backend: PaneBackend; wanted(): boolean };
+  /** browserEngine.cloudDisplay is on here: a browser that starts gets a window on a private display. */
+  cloudDisplay?(): boolean;
+  /** Finds a usable bubblewrap; tests pass their own. */
+  probeBwrap?: (env: NodeJS.ProcessEnv, platform: NodeJS.Platform) => string | null;
   log?: (line: string) => void;
 }
 
@@ -68,12 +77,16 @@ export class ChromeEngine {
   readonly service: BrowserService;
   readonly live: LiveV1;
   readonly stream: StreamV2;
+  readonly desktop: DesktopViews;
+  readonly displays: DisplaySupervisor;
   readonly #targets = new Map<string, string>();
   readonly #registry: ProcessRegistry;
   readonly #options: ChromeEngineOptions;
   #timer: ReturnType<typeof setInterval> | null = null;
   #inUse = false;
   #cleared = false;
+  /** Why Chrome could not start on a display here: every browser then stays headless until the server restarts. */
+  #displayRefused: string | null = null;
 
   constructor(options: ChromeEngineOptions) {
     this.#options = options;
@@ -84,6 +97,13 @@ export class ChromeEngine {
     this.#registry = new ProcessRegistry(browserRoot(options.dataDir));
     let screen: ReturnType<typeof displayScreen> | null = null;
     const locale = () => browserLanguage(env, options.language?.()) ?? null;
+    this.displays = new DisplaySupervisor({
+      root: join(browserRoot(options.dataDir), "displays"),
+      xvnc: options.host === "desktop" ? null : () => findXvnc(env, platform),
+      bwrap: options.host === "desktop" ? null : () => (options.probeBwrap ?? findBwrap)(env, platform),
+      ...(options.log ? { log: options.log } : {}),
+    });
+    const desktopSize = parseDisplay(env.OMB_BROWSER_SCREEN?.trim() ?? "") ?? DESKTOP_SIZE;
     const backend = new LocalBackend({
       dataDir: options.dataDir,
       host: options.host,
@@ -99,6 +119,12 @@ export class ChromeEngine {
       egressPort: (key) => options.egressPort(key),
       registry: this.#registry,
       sandbox,
+      display: async (key) => (this.desktopView() ? this.displays.acquire(key, { width: desktopSize.width, height: desktopSize.height }) : null),
+      displayFailed: (reason) => {
+        if (this.#displayRefused !== null) return;
+        this.#displayRefused = reason;
+        options.log?.(`browser display: Chrome could not start on a private display, so browsers stay headless and show as pictures: ${reason}`);
+      },
       ...(options.log ? { log: options.log } : {}),
     });
     options.pane?.backend.fallBackTo(backend);
@@ -114,12 +140,31 @@ export class ChromeEngine {
     });
     this.live = new LiveV1({ service: this.service, target: (session) => this.target(session) });
     this.stream = new StreamV2({ service: this.service });
+    this.desktop = new DesktopViews({ desktop: (target) => this.service.desktop(target) });
+  }
+
+  /** A browser that starts now shows its window on a private display, which the panel shows as a remote desktop. */
+  desktopView(): boolean {
+    return this.#options.cloudDisplay?.() === true && this.#displayRefused === null && this.displays.available;
   }
 
   /** The spec a session gets on the new engine, remembered so its live view finds the profile. */
   spec(session: string, key: string): { command: string; args: string[]; env: Record<string, string> } {
     this.#targets.set(session, key);
     return { command: CHROME_ENGINE, args: [key], env: {} };
+  }
+
+  /** Where a profile's browser takes an imported sign-in: its pane partition, or its launched Chrome (started for it). */
+  cookieSink(target: BrowserTarget): CookieSink {
+    const pane = this.#options.pane;
+    if (pane && pane.wanted() && pane.backend.available) return pane.backend.cookieSink(target.key);
+    return cdpSink(async (method, params) => (await this.service.running(this.service.profile(target))).browser.connection.root.send(method, params));
+  }
+
+  /** Whether a session's browser runs as desktop panes now. */
+  onPane(spec: { command: string; args?: readonly string[] }): boolean {
+    const key = spec.command === CHROME_ENGINE ? spec.args?.[0] : undefined;
+    return key !== undefined && this.service.profiles().some((profile) => profile.key === key && profile.run?.opened.surface === "pane");
   }
 
   target(session: string): BrowserTarget | null {
@@ -162,8 +207,10 @@ export class ChromeEngine {
     if (this.#timer) clearInterval(this.#timer);
     this.#timer = null;
     this.live.closeAll();
-    this.stream.closeAll();
+    this.stream.closeAll({ stopping: true });
+    this.desktop.closeAll();
     await this.service.closeAll();
+    await this.displays.closeAll();
   }
 
   /** A deleted bot's or profile's browser: stopped, and its folder, downloads and screenshots gone. */
@@ -182,10 +229,10 @@ export class ChromeEngine {
   }
 
   /** For the browser status: what the new engine will run here. */
-  summary(): { kind: "engine"; version: string; chrome: string } | { kind: "unavailable"; reason: string } {
+  summary(): { kind: "engine"; version: string; chrome: string; desktopView?: true } | { kind: "unavailable"; reason: string } {
     const plan = this.launcher.plan();
     if (plan.kind === "legacy") return { kind: "unavailable", reason: `Chrome is needed for the new browser: ${plan.reason}` };
-    return { kind: "engine", version: "omb-cdp", chrome: this.launcher.describe() };
+    return { kind: "engine", version: "omb-cdp", chrome: this.launcher.describe(), ...(this.desktopView() ? { desktopView: true as const } : {}) };
   }
 
   /** fill_login's reads and typing on the new engine. */
@@ -352,6 +399,14 @@ export class LiveRouter {
     return this.#chrome.live.has(options.viewerId) ? this.#chrome.live.action(options) : this.#old.action(options);
   }
 
+  /** False when the session's browser cannot run on a private display: the panel keeps the picture view. */
+  desktop({ session, spec, ...request }: SessionSpec & Omit<DesktopRequest, "target">): boolean {
+    const target = chromeTarget(session, spec);
+    if (!target || !this.#chrome.desktopView()) return false;
+    this.#chrome.desktop.open({ ...request, target });
+    return true;
+  }
+
   /** False when the session runs on agent-browser, whose only view is v1. */
   stream({ session, spec, ...request }: SessionSpec & Omit<StreamRequest, "target">): boolean {
     const target = chromeTarget(session, spec);
@@ -368,15 +423,21 @@ export class LiveRouter {
     return chromeTarget(session, spec) ? this.#chrome.service.answerFileChooser(session, owner, chooserId, paths) : Promise.resolve(false);
   }
 
+  /** The person takes a tab of a desktop pane from the bot, or hands it back; null where there is no such pane tab. */
+  hold({ session, spec }: SessionSpec, tab: string, held: boolean): string | null {
+    return chromeTarget(session, spec) ? this.#chrome.service.holdTab(session, tab, held) : null;
+  }
+
   download({ session, spec }: SessionSpec, id: string): Download | undefined {
     return chromeTarget(session, spec) ? this.#chrome.service.download(session, id) : undefined;
   }
 
   handBack(session: string): void { this.#chrome.live.handBack(session); this.#old.handBack(session); }
-  closeForSession(session: string): void { this.#chrome.live.closeForSession(session); this.#chrome.stream.closeForSession(session); this.#old.closeForSession(session); }
-  closeForOwner(owner: string): void { this.#chrome.live.closeForOwner(owner); this.#chrome.stream.closeForOwner(owner); this.#old.closeForOwner(owner); }
-  closeForBot(botId: string): void { this.#chrome.live.closeForBot(botId); this.#chrome.stream.closeForBot(botId); this.#old.closeForBot(botId); }
-  closeAll(): void { this.#chrome.live.closeAll(); this.#chrome.stream.closeAll(); this.#old.closeAll(); }
-  /** Who may see what changed: every v2 view that no longer shows its browser to a person allowed to see it closes now. */
-  recheck(): void { this.#chrome.stream.recheck(); }
+  closeForSession(session: string): void { this.#chrome.live.closeForSession(session); this.#chrome.stream.closeForSession(session); this.#chrome.desktop.closeForSession(session); this.#old.closeForSession(session); }
+  closeForOwner(owner: string): void { this.#chrome.live.closeForOwner(owner); this.#chrome.stream.closeForOwner(owner); this.#chrome.desktop.closeForOwner(owner); this.#old.closeForOwner(owner); }
+  closeForBot(botId: string): void { this.#chrome.live.closeForBot(botId); this.#chrome.stream.closeForBot(botId); this.#chrome.desktop.closeForBot(botId); this.#old.closeForBot(botId); }
+  /** `stopping`: the server is stopping, and the panels' streams reconnect to the one that starts next. */
+  closeAll({ stopping = false }: { stopping?: boolean } = {}): void { this.#chrome.live.closeAll(); this.#chrome.stream.closeAll({ stopping }); this.#chrome.desktop.closeAll(); this.#old.closeAll(); }
+  /** Who may see what changed: every v2 or desktop view that no longer shows its browser to a person allowed to see it closes now. */
+  recheck(): void { this.#chrome.stream.recheck(); this.#chrome.desktop.recheck(); }
 }
