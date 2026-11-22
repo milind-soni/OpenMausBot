@@ -162,6 +162,11 @@ export function grokModelNotOffered(model: string, sessionModels: readonly { mod
   return `Grok can't use the model ${model} here: this Grok sign-in offers ${list}, so choose ${offered.length === 1 ? "it" : "one of those"} for this bot.`;
 }
 
+/** Grok's answer to set_model for a model it does not know: JSON-RPC invalid params, or its "unknown model id" words. */
+function unknownGrokModel(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === -32602 || /\bunknown model\b/i.test(error instanceof Error ? error.message : String(error));
+}
+
 function suggestGrokSlug(host: string, model: string, taken: Set<string>): string {
   let base = `${host}-${model}`.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
   if (!base || !/^[a-z]/.test(base)) base = `m-${base || "model"}`;
@@ -600,9 +605,10 @@ const support: AcpSupport = {
       try {
         await request("session/set_model", { sessionId, modelId: turn.model });
       } catch (e) {
-        // A model the signed-in account does not offer: a new process would be refused the same way.
-        const notOffered = grokModelNotOffered(turn.model, sessionModels);
-        if (notOffered) throw new Error(notOffered);
+        // Refused as unknown, and missing from the models this sign-in offers: this turn ends at once, since a new process
+        // would be refused the same way, and the process is retired, so the next turn reads the list afresh.
+        const notOffered = unknownGrokModel(e) ? grokModelNotOffered(turn.model, sessionModels) : null;
+        if (notOffered) throw Object.assign(new Error(notOffered), { acpSessionFailure: true });
         throw new LiveSwitchRefused(
           `Grok rejected model "${turn.model}" via session/set_model: ${(e as Error).message}. ` +
             `Check that grok is current (1.0.6+ supports it) and that this slug exists in ~/.grok/config.toml.`,
