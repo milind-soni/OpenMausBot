@@ -19,7 +19,7 @@
  * the marks a thinking or blocked bot turns into. Those stay where they are while the body hops
  * and rolls.
  */
-import { mix, oklch, parseHex, toHex, toOklch } from './color.ts';
+import { mix, parseHex, toHex } from './color.ts';
 import type { Rgb } from './color.ts';
 import { bodyScale, markParts, ribbonPieces, ribbonReach, rimOf } from './effects.ts';
 import type { Rim } from './effects.ts';
@@ -361,6 +361,19 @@ function eyeMark(e: EyeState): EyeMark {
   return { shape: 'pill', x: cx - e.w / 2, y: cy - e.open / 2, width: e.w, height: e.open, radius: Math.min(e.w, e.open) / 2 };
 }
 
+/**
+ * MausBot: a smile under the eyes, stroked like the happy arc. It follows the gaze with the eyes,
+ * deepens as the eyes turn happy and flattens as they turn to a waiting slit.
+ */
+function mouthMark(eyes: [EyeState, EyeState]): EyeMark {
+  const [a, b] = eyes;
+  const x = (a.x + b.x) / 2 + a.dx, y = a.y + a.h * 0.62 + a.dy;
+  const hw = Math.max((b.x - a.x) * 0.3, a.w * 0.7);
+  const happy = clamp(a.look.arc, 0, 1), flat = clamp(a.look.slit, 0, 1);
+  const depth = hw * (0.42 + 0.38 * happy) * (1 - 0.8 * flat);
+  return { shape: 'arc', d: `M${f(x - hw)} ${f(y)}Q${f(x)} ${f(y + 2 * depth)} ${f(x + hw)} ${f(y)}`, strokeWidth: a.w * 0.55 };
+}
+
 function colors(options: RenderOptions): { color: string; ink: string } {
   return {
     color: toHex(parseHex(options.color) ?? (parseHex(DEFAULT_COLOR) as Rgb)),
@@ -393,7 +406,7 @@ export type FrameShape =
       path: string;
       matrix: Matrix;
     }
-  | { kind: 'eye'; key: 'eye-0' | 'eye-1'; matrix: Matrix; mark: EyeMark }
+  | { kind: 'eye'; key: 'eye-0' | 'eye-1' | 'mouth'; matrix: Matrix; mark: EyeMark }
   | {
       /**
        * A piece of a ribbon: fill `d` in `fill`. Each ribbon has a hue of its own, set apart from
@@ -461,92 +474,21 @@ export function liveFrame(definition: AvatarDefinition, options: RenderOptions =
   return flatFrame(definition, options, options.size);
 }
 
-/**
- * The ribbons are steps along a ramp of the body's own color, painter's style: each step is
- * RAMP_LIGHT lighter or darker in OKLCH and turns RAMP_HUE degrees with it, toward yellow as it
- * lightens and toward blue as it darkens. Steps run +1, -1, +2, -2 and so on, skipping any that
- * would leave RAMP_RANGE, so a working bot's three are one lighter, one darker and one lighter
- * still on most bodies. A body lighter or darker than the range steps from its edge instead, so
- * a white body's ribbons are all well darker than it, and a black one's well lighter.
- */
-const RAMP_LIGHT = 0.09;
-const RAMP_HUE = 14;
-// Six steps wide: room for five besides the body's own, wherever it starts. Past it shades wash
-// out toward white or sink toward black.
-const RAMP_RANGE = [0.36, 0.9] as const;
-const WARM = 100;
-const palettes = new Map<string, Rgb[][]>();
-/**
- * How far a ribbon's colour runs from its tail (its shade) to its head: further from the body's
- * lightness by GRADIENT_LIGHT, turning GRADIENT_HUE degrees with it (warmer as it lightens,
- * cooler as it darkens). GRADIENT_STOPS colours along the way.
- */
-const GRADIENT_LIGHT = 0.13;
-const GRADIENT_HUE = 25;
-const GRADIENT_STOPS = 5;
-/** Below this chroma a body counts as white, gray or black, and its ribbons are grays with this much tint. */
-const NEUTRAL = 0.04;
-const NEUTRAL_TINT = 0.025;
-/**
- * Which shades (by their order along the ramp: +1, -1, +2, -2, +3 on most bodies) each band's lanes
- * take, a working bot's band first. A celebration's two bands lean to the lighter shades, so the
- * cage stays bright against a dark page.
- */
-const BAND_SHADES = [[0, 1, 2], [2, 0, 3], [1, 2, 0]] as const;
-
-/** Turn hue `h` by up to `by` degrees toward hue `to`, never past it. */
-function turnToward(h: number, to: number, by: number): number {
-  const d = ((to - h + 540) % 360) - 180;
-  return (h + Math.sign(d) * Math.min(Math.abs(d), by) + 360) % 360;
-}
-
-/**
- * The colors of the ribbons on a body this color, one per band and lane (see BAND_SHADES): five
- * steps along its own ramp (see RAMP_LIGHT), at least as vivid as the body. A white, gray or
- * black body gets grays: lighter or darker than it, with just a hint of a hue its seed picks.
- * A piece behind the body is a shade deeper than one in front of it.
- */
 /** The colour `t` (0..1) of the way along a colour run, in sRGB between its stops. */
 function runAt(run: Rgb[], t: number): string {
   const x = clamp(t, 0, 1) * (run.length - 1), n = Math.min(Math.floor(x), run.length - 2);
   return toHex(mix(run[n], run[n + 1], x - n));
 }
 
-function ribbonPalette(color: string | undefined, seed: number): Rgb[][] {
-  const key = `${color}|${seed}`;
-  let palette = palettes.get(key);
-  if (palette) return palette;
-  const [light, chroma, hue] = toOklch(parseHex(color) ?? (parseHex(DEFAULT_COLOR) as Rgb));
-  // A seed's hue skips the yellows (80 to 130), whose darker steps turn olive.
-  const neutral = chroma < NEUTRAL;
-  const base = neutral ? (130 + noise(seed, 500) * 310) % 360 : hue;
-  const c = neutral ? NEUTRAL_TINT : Math.max(chroma, 0.17);
-  const from = Math.min(RAMP_RANGE[1], Math.max(RAMP_RANGE[0], light));
-  const steps: number[] = [];
-  for (let k = 1; steps.length < 5 && k < 10; k++) {
-    for (const step of [k, -k]) {
-      const l = from + step * RAMP_LIGHT;
-      if (steps.length < 5 && l >= RAMP_RANGE[0] - 1e-9 && l <= RAMP_RANGE[1] + 1e-9) steps.push(step);
-    }
-  }
-  while (steps.length < 5) steps.push(steps[steps.length - 1] ?? 1);
-  const shades = steps.map((step) => {
-    const l = from + step * RAMP_LIGHT;
-    const h = turnToward(base, step > 0 ? WARM : WARM + 180, RAMP_HUE * Math.abs(step));
-    // Tail to head, away from the body's lightness: lighter and warmer, or darker and cooler.
-    const away = step > 0 ? 1 : -1;
-    const run = Array.from({ length: GRADIENT_STOPS }, (_, n) => {
-      const t = n / (GRADIENT_STOPS - 1);
-      const hue = turnToward(h, away > 0 ? WARM : WARM + 180, GRADIENT_HUE * t);
-      return oklch(clamp(l + away * GRADIENT_LIGHT * t, 0.26, 0.9), c, hue);
-    });
-    return { step, run };
-  });
-  // Each band takes three of the shades, lightest on the inside lane to darkest on the outside.
-  palette = BAND_SHADES.flatMap((pick) => pick.map((n) => shades[n]).sort((x, y) => y.step - x.step).map(({ run }) => run));
-  if (palettes.size >= 64) palettes.clear();
-  palettes.set(key, palette);
-  return palette;
+/** MausBot: every ribbon takes one of our comet palettes (three neighbouring hues head to tail), whatever the body's colour. */
+const COMET_COLORS: Rgb[][] = [
+  ['#A855F7', '#6366F1', '#38BDF8'], ['#22D3EE', '#34D399', '#A3E635'], ['#FB923C', '#F43F5E', '#D946EF'],
+  ['#818CF8', '#C084FC', '#F472B6'], ['#FACC15', '#FB923C', '#EC4899'], ['#34D399', '#22D3EE', '#60A5FA'],
+].map((run) => run.map((hex) => parseHex(hex) as Rgb));
+
+function cometPalette(seed: number): Rgb[][] {
+  const turn = Math.floor(noise(seed, 500) * COMET_COLORS.length);
+  return Array.from({ length: 9 }, (_, i) => COMET_COLORS[(i + turn) % COMET_COLORS.length]);
 }
 
 /** What a frame draws besides the body, in viewBox units outside the body's own motion. */
@@ -565,7 +507,7 @@ function effectsOf(p: Prepared, pose: Pose, options: RenderOptions): Effects {
   return {
     body: bodyScale(pose.bang, pose.dots),
     ribbons: still ? [] : ribbonPieces(b, pose.ribbons, p.seed, time, pose.sweep, pose.cage, ribbonsFollow(pose.cage >= 0.5 ? p.rims().cage : p.rims().work, pose, b)).map((r) => {
-      const hue = ribbonPalette(options.color, p.seed)[r.ribbon];
+      const hue = cometPalette(p.seed)[r.ribbon % 9];
       // The piece's stretch of its ribbon's colour run, front and back alike.
       const [s0, s1] = r.along;
       const stops = [s0, (s0 + s1) / 2, s1].map((t) => runAt(hue, t));
@@ -619,7 +561,15 @@ function flatFrame(definition: AvatarDefinition, options: RenderOptions, size: n
       items.push({ depth, shape: { kind: 'slice', key: `${i}${stack}${j}`, path: path.id, matrix: shrink(m) } });
     });
     // Painted on the surface; each eye goes once the surface under it turns away.
-    eyeStates(p, pose).forEach((e, idx) => {
+    const eyes = eyeStates(p, pose);
+    if (eyeVisible(vol, v, 0) && eyeVisible(vol, v, 1)) {
+      const z = (vol.eyeZ[0] + vol.eyeZ[1]) / 2 + EYE_LIFT;
+      items.push({
+        depth: projectPoint(v, [eyesMid[0], eyesMid[1], z], pivot)[2] + 1e-6,
+        shape: { kind: 'eye', key: 'mouth', matrix: shrink(planeMatrix(v, z, pivot)), mark: mouthMark(eyes) },
+      });
+    }
+    eyes.forEach((e, idx) => {
       if (eyeVisible(vol, v, idx)) {
         const z = vol.eyeZ[idx] + EYE_LIFT;
         items.push({

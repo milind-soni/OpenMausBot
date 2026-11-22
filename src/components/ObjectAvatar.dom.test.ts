@@ -34,12 +34,22 @@ describe("an object body", () => {
     document.body.append(host);
     const root = createRoot(host);
     flushSync(() => root.render(createElement(MausAvatar, { bodyId: "obj-mug", color: "blue", animated: false, label: "Mugsy", size: 64 })));
-    const avatar = host.querySelector<HTMLElement>("[data-object-body='obj-mug']")!;
+    const avatar = host.querySelector<HTMLElement>("[data-object-body='mug']")!;
     await vi.waitFor(() => expect(avatar.querySelector("svg")).not.toBeNull());
     expect(avatar.getAttribute("role")).toBe("img");
     expect(avatar.getAttribute("aria-label")).toBe("Mugsy");
     expect(avatar.style.width).toBe("64px");
     flushSync(() => root.unmount());
     expect(avatar.childElementCount).toBe(0);
+  });
+
+  it("paints a shape in the bot's custom colour", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    flushSync(() => root.render(createElement(MausAvatar, { bodyId: "circle", color: "blue", bodyColor: "#123456", animated: false, size: 64 })));
+    const avatar = host.querySelector<HTMLElement>("[data-object-body='circle']")!;
+    await vi.waitFor(() => expect(avatar.innerHTML).toContain('fill="#123456"'));
+    flushSync(() => root.unmount());
   });
 });

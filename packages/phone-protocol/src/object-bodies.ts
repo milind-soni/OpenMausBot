@@ -3,6 +3,7 @@
  * Dominik Scholz. Ids carry "obj-" so they never meet a shape or festival body's.
  */
 
+import type { MascotBodyId } from "./mascot-bodies.ts";
 import { examples } from "./open-bot-avatar/examples.ts";
 import type { AvatarDefinition } from "./open-bot-avatar/types.ts";
 
@@ -11,7 +12,7 @@ export const OBJECT_BODY_IDS = [
   "obj-controller", "obj-barbell", "obj-mug", "obj-lightbulb", "obj-chat", "obj-sprout",
   "obj-watering-can", "obj-book", "obj-brain", "obj-bull", "obj-bunny", "obj-camera",
   "obj-cat", "obj-cloud", "obj-egg", "obj-ghost", "obj-magnifier", "obj-paint-brush",
-  "obj-palette", "obj-rocket", "obj-shield", "obj-star", "obj-witch-hat",
+  "obj-palette", "obj-rocket", "obj-witch-hat",
 ] as const;
 
 export type ObjectBodyId = (typeof OBJECT_BODY_IDS)[number];
@@ -131,6 +132,31 @@ const GALLERY: AvatarDefinition[] = [
   },
 ];
 
+const SHIELD = GALLERY.find((one) => one.id === "shield") as AvatarDefinition;
+const STAR = GALLERY.find((one) => one.id === "star") as AvatarDefinition;
+
 export const OBJECT_BODIES = Object.fromEntries(
-  [...examples, ...GALLERY].map((definition) => [`obj-${definition.id}`, definition]),
+  [...examples, ...GALLERY].filter((one) => one !== SHIELD && one !== STAR).map((definition) => [`obj-${definition.id}`, definition]),
 ) as Record<ObjectBodyId, AvatarDefinition>;
+
+const shape = (id: string, name: string, path: string, eyes: AvatarDefinition["eyes"]): AvatarDefinition => ({ version: 1, id, name, body: { path }, eyes });
+
+/** Our shapes, drawn for the same engine; Shield and Star are Open Bot Avatar's own. The cursor keeps its own renderer. */
+export const SHAPE_BODIES: Record<Exclude<MascotBodyId, "cursor">, AvatarDefinition> = {
+  blob: shape("blob", "Blob", "M48 10C64 8 78 16 85 30C92 44 90 62 80 75C70 88 52 93 36 87C20 81 9 66 10 49C11 30 30 12 48 10Z", { x: 50, y: 48, spacing: 18, scale: 1.15 }),
+  circle: shape("circle", "Circle", "M50 10A40 40 0 1 1 50 90A40 40 0 1 1 50 10Z", { x: 50, y: 48, spacing: 18, scale: 1.15 }),
+  squircle: shape("squircle", "Squircle", "M50 12C78 12 88 22 88 50C88 78 78 88 50 88C22 88 12 78 12 50C12 22 22 12 50 12Z", { x: 50, y: 48, spacing: 18, scale: 1.15 }),
+  capsule: shape("capsule", "Capsule", "M50 8C66 8 78 20 78 36V64C78 80 66 92 50 92C34 92 22 80 22 64V36C22 20 34 8 50 8Z", { x: 50, y: 46, spacing: 16, scale: 1.1 }),
+  drop: shape("drop", "Drop", "M46.5 12Q50 7 53.5 12C64 27 80 45 80 62C80 79 66 91 50 91C34 91 20 79 20 62C20 45 36 27 46.5 12Z", { x: 50, y: 60, spacing: 16, scale: 1.1 }),
+  shield: { ...SHIELD, id: "shield" },
+  hexagon: shape("hexagon", "Hexagon", "M40.47 13.5Q50 8 59.53 13.5L76.85 23.5Q86.37 29 86.37 40L86.37 60Q86.37 71 76.85 76.5L59.53 86.5Q50 92 40.47 86.5L23.15 76.5Q13.63 71 13.63 60L13.63 40Q13.63 29 23.15 23.5Z", { x: 50, y: 47, spacing: 18, scale: 1.15 }),
+  diamond: shape("diamond", "Diamond", "M40.1 16.9Q50 7 59.9 16.9L83.1 40.1Q93 50 83.1 59.9L59.9 83.1Q50 93 40.1 83.1L16.9 59.9Q7 50 16.9 40.1Z", { x: 50, y: 47, spacing: 16, scale: 1.1 }),
+  star: { ...STAR, id: "star" },
+};
+
+/** The engine definition a body is drawn from, or undefined for the cursor and the festival bodies. */
+export function engineBody(id: unknown): AvatarDefinition | undefined {
+  if (typeof id !== "string") return undefined;
+  for (const table of [OBJECT_BODIES, SHAPE_BODIES] as Record<string, AvatarDefinition>[]) if (Object.hasOwn(table, id)) return table[id];
+  return undefined;
+}
