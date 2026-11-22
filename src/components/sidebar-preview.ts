@@ -1,6 +1,7 @@
 import { approvalCardOutcome } from "./ApprovalCard";
 import type { Bot, Group, InstanceInfo, Message } from "@/state/store";
 import type { RoutineRunCardData } from "../../shared/routine-run";
+import { automationNote, automationNoteTitle } from "@/lib/automation-note";
 import { peerLine } from "@/lib/peer-message";
 import { isReceipt } from "@/lib/receipts";
 import { activityPreview, botEngine, failedTurnCause, STATUS_MARKER } from "@/lib/failed-turn";
@@ -65,6 +66,8 @@ export function lastLine(bot: Bot, visible: Message[], instances: InstanceInfo[]
   if (last.kind === "routine.run" && last.routineRun) return automationRunPreview(last.routineRun);
   const peer = peerLine(last);
   if (peer) return `${peer.name}: ${plainPreviewText(peer.body)}`;
+  const note = automationNote(last);
+  if (note) return automationNoteTitle(note);
   if (last.role !== "user" && isClientCancellation(last.text ?? "")) return t("chat.turnStopped");
   return plainPreviewText(citationPreviewText(serverCardText(last) ?? last.text ?? ""));
 }
