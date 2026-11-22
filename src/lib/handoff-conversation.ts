@@ -1,4 +1,4 @@
-// What the read-only pop-up of a hand-off shows: the helper bot's thread as one conversation between two bots.
+// What a hand-off's exchange view shows: the helper bot's thread as one conversation between two bots.
 import { visibleMessages } from "@/state/snapshot-navigation";
 import type { Message } from "@/state/store";
 import { botLineText } from "./transcript-derivations";
