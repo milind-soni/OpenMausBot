@@ -221,6 +221,22 @@ export interface InstalledPlaybook {
   instructions: string;
 }
 
+/** Where a bot came from when a profile folder made it (docs/profiles.md). Provenance only: it grants nothing. */
+export interface ProfileSource {
+  /** The area's key in the profile folder. */
+  area: string;
+  /** The bot's key in its area; `area/key` is its identity across renames. */
+  key: string;
+  /** The bot's file, relative to the folder: `areas/bi/bots/analyst.md`. */
+  file: string;
+  /** The folder's git commit when it was last applied, read from `.git` without running git. */
+  commit?: string;
+  appliedAt: number;
+  /** Each managed field's value as last applied, as a short hash: a field whose value no longer matches was changed
+   * in the app since, and a field whose file value no longer matches was changed in the file. */
+  hashes: Record<string, string>;
+}
+
 /** Listing provenance and connector intent. It never means the apps are
  * authorized. */
 export interface InstalledPackageMetadata {
@@ -395,6 +411,8 @@ export interface WireBot extends DefaultBotFields, BotAccessFields, EduBrainFiel
   browserProfile?: string;
   playbooks?: InstalledPlaybook[];
   installedPackage?: InstalledPackageMetadata;
+  /** Set when a profile folder made or last updated this bot. */
+  profileSource?: ProfileSource;
   /** Aggregate of task and room activity; transient, reset on load. */
   busy?: boolean;
   /** What the bot is doing right now; transient like busy. */

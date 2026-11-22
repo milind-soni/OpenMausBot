@@ -8,7 +8,10 @@ import { z } from "zod";
 import { BOT_PROFILE_LIMITS, fitsOnOneLine } from "../../shared/bot-profile.ts";
 import { parseSkillMd } from "../../shared/skill-md.ts";
 import { parseToolScope, type ToolScope } from "../../shared/tool-scope.ts";
+import { everyTool, type DesiredBot } from "../desired-bot.ts";
 import { usageError } from "./args.ts";
+
+export { everyTool, type DesiredBot, type DesiredSkill } from "../desired-bot.ts";
 
 export const TEAM_BRIEF_MAX_BYTES = 24_000;
 export const ROOM_BRIEF_MAX_CHARS = 12_000;
@@ -81,27 +84,6 @@ const teamFileSchema = z.object({
 export type Secret = z.infer<typeof secret>;
 export type TeamFileInput = z.infer<typeof teamFileSchema>;
 
-export interface DesiredSkill { name: string; description: string; text: string; enabled: boolean; file: string }
-export interface DesiredBot {
-  name: string;
-  was?: string;
-  team?: string;
-  title?: string;
-  description?: string;
-  /** true: the Chief of Staff of its team; false: not; absent: left as it is. */
-  chief?: boolean;
-  manages: string[];
-  soul?: string;
-  model?: { instanceId: string; model: string };
-  effort?: string;
-  approval?: "ask" | "edits" | "auto" | "full";
-  computer?: "auto" | "off" | "browser" | "local" | "vm" | "cloud";
-  cwd?: string;
-  browser?: { enabled: boolean; profile?: string };
-  /** null: no selection, so every tool (a file's `tools: {}` or `{ deny: [] }`). */
-  tools?: ToolScope | null;
-  skills: DesiredSkill[];
-}
 export interface DesiredRoom { name: string; team?: string; members: string[]; brief?: string; responder?: string }
 export interface DesiredTeam { name: string; brief?: string; prune: boolean }
 export interface DesiredEngine { kind: string; key: Secret; baseUrl?: string | Secret; everyClaudeBot?: boolean; install?: boolean }
@@ -119,10 +101,6 @@ const ENGINE_KIND: Record<string, string> = {
   claude: "claude", openai: "openai", openrouter: "openrouter", xai: "xai", groq: "groq", greenference: "greenference", modelgo: "modelgo", mistral: "mistral", cerebras: "cerebras",
   openaiCompatible: "openai-compatible",
 };
-
-export function everyTool(scope: { allow?: unknown; deny?: unknown } | null | undefined): boolean {
-  return !scope || (!Array.isArray(scope.allow) && !(Array.isArray(scope.deny) && scope.deny.length > 0));
-}
 
 /** Tidied by the server's system's rules, never this computer's (a Windows laptop would turn /work/room into C:\work\room). */
 export function serverFolder(raw: string): string | undefined {

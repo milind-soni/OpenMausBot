@@ -167,7 +167,8 @@ export function profileFileRole(path: string): ProfileFileRole | null {
 }
 
 const KIND_OF_ROLE = { org: "organization", area: "area", bot: "bot", "mcp-server": "mcp-server" } as const;
-const KEY = /^[a-z0-9][a-z0-9-]{0,63}$/;
+/** An area or bot key. */
+export const PROFILE_KEY = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const KEY_RULE = "must be 1 to 64 lowercase letters, digits or hyphens, starting with a letter or digit";
 const MODEL = /^[\w.-]+\/\S.*$/;
 const SECRET_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
@@ -206,7 +207,7 @@ const SECRET_HINT = "put it in a secret slot instead: { secret: NAME }";
 const text = (max: number, what = "text") => z.string({ error: `must be ${what}` }).max(max, `must be at most ${max} characters`);
 const oneLine = (max: number) => text(max).refine(fitsOnOneLine, "must fit on one line");
 const requiredLine = (max: number) => oneLine(max).refine((value) => value.trim().length > 0, "must not be empty");
-const keySchema = z.string({ error: "must be text" }).regex(KEY, KEY_RULE);
+const keySchema = z.string({ error: "must be text" }).regex(PROFILE_KEY, KEY_RULE);
 const approvalSchema = z.string({ error: "must be text" }).superRefine((value, context) => {
   if (value === "custom") context.addIssue({ code: "custom", message: "custom is set in the desktop app; a profile may say ask, edits, auto or full" });
   else if (!(PROFILE_APPROVALS as readonly string[]).includes(value)) context.addIssue({ code: "custom", message: "must be ask, edits, auto or full" });
@@ -966,11 +967,11 @@ export function checkProfileFiles(files: ReadonlyArray<{ path: string; text: str
       problems.warn({ file: file.path, message: "is not a profile file, so it is ignored" });
       continue;
     }
-    if (file.role.role === "area" && !KEY.test(file.role.area)) {
+    if (file.role.role === "area" && !PROFILE_KEY.test(file.role.area)) {
       problems.add({ file: file.path, message: `is in a folder whose name is not an area key: it ${KEY_RULE}` });
       continue;
     }
-    if (file.role.role === "bot" && !KEY.test(file.role.key)) {
+    if (file.role.role === "bot" && !PROFILE_KEY.test(file.role.key)) {
       problems.add({ file: file.path, message: `has a file name that is not a bot key: it ${KEY_RULE}` });
       continue;
     }

@@ -127,6 +127,24 @@ export function sameAudience(a: unknown, b: unknown): boolean {
   return right.people.every((entry) => set.has(entry));
 }
 
+/** Why `members` cannot share one room: one of them not already in it (`existing`) is visible to other people. */
+export function roomAudienceConflict(members: ReadonlyArray<{ id: string; name: string; visibility?: unknown }>, existing: readonly string[] = []): string | null {
+  for (const added of members.filter((bot) => !existing.includes(bot.id))) {
+    const other = members.find((bot) => bot.id !== added.id && !sameAudience(bot.visibility, added.visibility));
+    if (other) {
+      return `Bots in one room must be visible to the same people. ${added.name} and ${other.name} are not: give them the same visibility first, or use separate rooms.`;
+    }
+  }
+  return null;
+}
+
+/** The bots a calendar call request puts in one room: its `botIds` when it names two or more. */
+export function calendarCallBotIds(body: unknown): string[] {
+  const botIds = body && typeof body === "object" ? (body as { botIds?: unknown }).botIds : undefined;
+  if (!Array.isArray(botIds) || botIds.length < 2 || botIds.some((id) => typeof id !== "string")) return [];
+  return botIds as string[];
+}
+
 export function audienceWithin(inner: unknown, outer: unknown): boolean {
   const small = storedVisibility(inner);
   const large = storedVisibility(outer);

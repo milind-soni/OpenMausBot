@@ -1,6 +1,7 @@
 // Security invariant: never read a file from outside the folder. A link anywhere in its layout is a problem, and each file
 // is checked after it is opened to be the very file inside the folder. Only the folder the person names may be a link.
 // Known open risk: Node has no openat, so a folder swapped for a link while it is listed can lend the listing its names.
+import { createHash } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, opendirSync, openSync, readSync, realpathSync, type Dir, type Dirent } from "node:fs";
 import { join } from "node:path";
 
@@ -17,7 +18,17 @@ import {
 
 export interface LoadedProfileFolder extends ProfileFolder {
   root: string;
+  contentHash: string;
 }
+
+/** One hash of every profile file's path and text. */
+export function profileFilesHash(files: ReadonlyArray<{ path: string; text: string }>): string {
+  const hash = createHash("sha256");
+  for (const file of [...files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))) hash.update(`${file.path}\0${file.text.length}\0${file.text}\0`);
+  return hash.digest("hex");
+}
+
+const EMPTY = profileFilesHash([]);
 
 /** The folder itself could not be opened: not there, not a folder, or unreadable. */
 export class ProfileFolderError extends Error {}
@@ -200,17 +211,17 @@ export function loadProfileFolder(folder: string): LoadedProfileFolder {
   }
   const walk: Walk = { root, wanted: [], problems: [], warnings: [], seen: 0, full: false };
   collect(walk);
-  if (walk.full) return { root, areas: [], bots: [], mcpServers: [], skills: [], problems: walk.problems, warnings: walk.warnings };
+  if (walk.full) return { root, contentHash: EMPTY, areas: [], bots: [], mcpServers: [], skills: [], problems: walk.problems, warnings: walk.warnings };
   if (!walk.wanted.length && !walk.problems.length) {
     const nested = entries(walk, "").find((entry) => entry.name === "edubot" && entry.isDirectory());
     if (nested) {
       walk.problems.push({ file: ".", message: `has no profiles of its own, but its edubot folder may: check ${join(folder, "edubot")}` });
-      return { root, areas: [], bots: [], mcpServers: [], skills: [], problems: walk.problems, warnings: walk.warnings };
+      return { root, contentHash: EMPTY, areas: [], bots: [], mcpServers: [], skills: [], problems: walk.problems, warnings: walk.warnings };
     }
   }
   if (walk.wanted.length > PROFILE_FOLDER_MAX_FILES) {
     walk.problems.push({ file: ".", message: `has ${walk.wanted.length} profile files; the most a folder may have is ${PROFILE_FOLDER_MAX_FILES}` });
-    return { root, areas: [], bots: [], mcpServers: [], skills: [], problems: walk.problems, warnings: walk.warnings };
+    return { root, contentHash: EMPTY, areas: [], bots: [], mcpServers: [], skills: [], problems: walk.problems, warnings: walk.warnings };
   }
   const files: Array<{ path: string; text: string }> = [];
   let total = 0;
@@ -223,7 +234,7 @@ export function loadProfileFolder(folder: string): LoadedProfileFolder {
     total += read.bytes.length;
     if (total > PROFILE_FOLDER_MAX_BYTES) {
       walk.problems.push({ file: ".", message: `has profile files larger than ${MB(PROFILE_FOLDER_MAX_BYTES)} together; the check stopped at ${path}` });
-      return { root, areas: [], bots: [], mcpServers: [], skills: [], problems: walk.problems, warnings: walk.warnings };
+      return { root, contentHash: EMPTY, areas: [], bots: [], mcpServers: [], skills: [], problems: walk.problems, warnings: walk.warnings };
     }
     try {
       files.push({ path, text: utf8.decode(read.bytes) });
@@ -233,7 +244,7 @@ export function loadProfileFolder(folder: string): LoadedProfileFolder {
   }
   const checked = checkProfileFiles(files, walk.wanted);
   return {
-    root, ...checked,
+    root, contentHash: profileFilesHash(files), ...checked,
     problems: [...walk.problems, ...checked.problems].slice(0, PROFILE_MAX_PROBLEMS),
     warnings: [...walk.warnings, ...checked.warnings].slice(0, PROFILE_MAX_PROBLEMS),
   };

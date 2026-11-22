@@ -49,7 +49,8 @@ function fixture(root: string): DatabaseSync {
   mkdirSync(join(root, "task-workspaces", "bot", "thread"), { recursive: true });
   writeFileSync(join(root, "task-workspaces", "bot", "thread", "binary.bin"), Buffer.alloc(2 * 1024 * 1024, 0xa5));
   json(join(root, "config.json"), { language: "ja", instances: { custom: { driver: "claudeAgent", config: { configDir: join(root, "providers", "account") } } }, apiKey: "private-key-in-config" });
-  json(join(root, "bots.json"), [{ id: "bot", threadId: "thread", cwd: join(root, "task-workspaces", "bot", "thread"), soul: `Each morning read ${root}/notes.md.`, avatarUrl: "/api/attachments/avatar.png", avatarCrop: "circle", voice: "source-provider-voice", tasks: [{ threadId: "thread", cwd: join(root, "task-workspaces", "bot", "thread") }] }]);
+  json(join(root, "bots.json"), [{ id: "bot", threadId: "thread", cwd: join(root, "task-workspaces", "bot", "thread"), soul: `Each morning read ${root}/notes.md.`, avatarUrl: "/api/attachments/avatar.png", avatarCrop: "circle", voice: "source-provider-voice",
+    profileSource: { area: "bi", key: "analyst", file: "../../outside.md", appliedAt: 1, hashes: {} }, tasks: [{ threadId: "thread", cwd: join(root, "task-workspaces", "bot", "thread") }] }]);
   json(join(root, "groups.json"), [{ id: "room", memberIds: ["bot"], cwd: "/external/project" }]);
   json(join(root, "routines.json"), { version: 1, routines: [{ id: "routine", enabled: true }], runs: [{ id: "waiting", status: "queued" }, { id: "historical", status: "completed" }] });
   json(join(root, "webhooks.json"), { version: 1, webhooks: [{ id: "hook", endpointId: "endpoint", enabled: true, secretHash: "a".repeat(64), sealedSecret: "sealed-webhook-secret" }], deliveries: [{ id: "delivery" }],
@@ -67,6 +68,7 @@ function fixture(root: string): DatabaseSync {
   json(join(root, "cloud-owner.json"), { identity: "source-owner-record" });
   writeFileSync(join(root, "environment-id"), "source-environment");
   json(join(root, "data-format.json"), { format: 2, writtenBy: "99.0.0", writtenAt: "2027-01-01T00:00:00.000Z" });
+  json(join(root, "profiles.json"), { version: 1, folder: "/source/profiles", areas: {} });
   mkdirSync(join(root, "tools"));
   writeFileSync(join(root, "tools", "downloaded"), "reinstallable");
   mkdirSync(join(root, "decider-log"));
@@ -183,6 +185,7 @@ describe("encrypted full workspace backups", () => {
       json(join(target, "team-computers.json"), targetComputers);
       writeFileSync(join(target, "environment-id"), "target-environment");
       json(join(target, "data-format.json"), { format: 1, writtenBy: "0.1.151", writtenAt: "2026-11-01T00:00:00.000Z" });
+      json(join(target, "profiles.json"), { version: 1, folder: "/target/profiles", areas: {} });
       writeFileSync(join(target, "openmausbot-server.lease"), "live-lease");
       writeFileSync(join(target, "messages.db-wal"), "old database WAL must not enter the new DB");
       writeFileSync(join(target, "messages.db-shm"), "old database shared memory");
@@ -196,6 +199,7 @@ describe("encrypted full workspace backups", () => {
       expect(existsSync(join(data, "runtime.db"))).toBe(true);
       expect(existsSync(join(data, "cloud-owner.json"))).toBe(false);
       expect(existsSync(join(data, "data-format.json"))).toBe(false);
+      expect(existsSync(join(data, "profiles.json"))).toBe(false);
       expect(readJson(join(data, "config.json"))).toEqual({ language: "ja" });
       expect(readJson(join(data, "webhooks.json")).webhooks[0]).not.toHaveProperty("secretHash");
       expect(readFileSync(join(data, "webhooks.json"), "utf8")).not.toContain("sealed-");
@@ -206,6 +210,8 @@ describe("encrypted full workspace backups", () => {
       const restoredBot = readJson(join(target, "bots.json"))[0];
       expect(restoredBot).toMatchObject({ id: "bot", cwd: join(target, "task-workspaces", "bot", "thread"), soul: `Each morning read ${join(target, "notes.md")}.`, avatarUrl: "/api/attachments/avatar.png", avatarCrop: "circle" });
       expect(restoredBot).not.toHaveProperty("voice");
+      expect(restoredBot).not.toHaveProperty("profileSource");
+      expect(readJson(join(target, "profiles.json")).folder).toBe("/target/profiles");
       expect(readFileSync(join(target, restoredBot.avatarUrl.slice("/api/".length)))).toEqual(AVATAR_BYTES);
       expect(readJson(join(target, "groups.json"))[0].cwd).toBe("/external/project");
       expect(readJson(join(target, "config.json"))).toEqual({ ...connections, language: "ja" });

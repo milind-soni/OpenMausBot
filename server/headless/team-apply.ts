@@ -7,18 +7,17 @@ import { stringify as stringifyYaml } from "yaml";
 
 import { approvalModeFor } from "../../shared/approval-mode.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
-import { lineDiff } from "../../shared/line-diff.ts";
 import { mask, redactSecretsInText } from "../../shared/redact.ts";
+import { APPROVAL_LABEL, botPatch, changedLines, everyTool, type DesiredBot } from "../desired-bot.ts";
 import { describeMs, EXIT, flag, HeadlessError, parseDuration, usageError } from "./args.ts";
 import { explain, type HeadlessClient } from "./client.ts";
 import type { VerbContext, VerbOutcome } from "./context.ts";
 import { applyEngine, ENGINE_KINDS, readSecret } from "./engine.ts";
-import { everyTool, loadTeamFile, type DesiredBot, type TeamFile } from "./team-file.ts";
+import { loadTeamFile, type TeamFile } from "./team-file.ts";
 
 type Rec = Record<string, any>;
 const enc = encodeURIComponent;
 const key = (name: string | undefined) => (name ?? "").trim().toLowerCase();
-const APPROVAL_LABEL: Record<string, string> = { ask: "Ask", edits: "Accept edits", auto: "Auto", full: "Full access", custom: "Custom" };
 
 export interface ApplyOptions {
   apply: boolean;
@@ -39,68 +38,7 @@ export interface Tally {
 }
 
 const sameSet = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((item) => b.includes(item));
-const canonicalScope = (scope: Rec | null | undefined) => everyTool(scope) ? "every tool"
-  : JSON.stringify(Object.fromEntries(["allow", "deny"].filter((field) => Array.isArray(scope![field])).map((field) => [field, [...new Set(scope![field] as string[])].sort()])));
-
 const lines = (n: number) => `${n} line${n === 1 ? "" : "s"}`;
-
-function changedLines(before: string, after: string): number {
-  const diff = lineDiff(before.trimEnd(), after.trimEnd());
-  return Math.max(diff.filter((line) => line.startsWith("+")).length, diff.filter((line) => line.startsWith("-")).length);
-}
-
-export function botPatch(desired: DesiredBot, echo: Rec, team: string | undefined): { patch: Rec; changes: string[] } {
-  const patch: Rec = {};
-  const changes: string[] = [];
-  if (echo.name !== desired.name) { patch.name = desired.name; changes.push(`renamed from "${echo.name}"`); }
-  if (team !== undefined && key(echo.section) !== key(team)) { patch.section = team; changes.push(`team "${echo.section ?? "none"}" → "${team}"`); }
-  if (desired.title !== undefined && (echo.title ?? "") !== desired.title) { patch.title = desired.title; changes.push(`title "${echo.title ?? ""}" → "${desired.title}"`); }
-  if (desired.description !== undefined && (echo.description ?? "") !== desired.description) { patch.description = desired.description; changes.push("description changed"); }
-  if (desired.soul !== undefined && (echo.soul ?? "").trimEnd() !== desired.soul.trimEnd()) {
-    patch.soul = desired.soul.trimEnd();
-    changes.push(echo.soul ? `soul ${lines(changedLines(echo.soul ?? "", desired.soul))} changed` : `soul set (${lines(desired.soul.trimEnd().split("\n").length)})`);
-  }
-  if (desired.model || desired.effort) {
-    const current: Rec = echo.modelSelection ?? {};
-    const instanceId = desired.model?.instanceId ?? current.instanceId;
-    const model = desired.model?.model ?? current.model;
-    if (current.instanceId !== instanceId || current.model !== model || (desired.effort !== undefined && current.effort !== desired.effort)) {
-      const effort = desired.effort ?? (instanceId === current.instanceId ? current.effort : undefined);
-      patch.modelSelection = { instanceId, model, ...(effort ? { effort } : {}) };
-      patch.requireAvailableModel = true;
-      changes.push(`model ${current.instanceId}/${current.model}${current.effort ? ` (${current.effort})` : ""} → ${instanceId}/${model}${effort ? ` (${effort})` : ""}`);
-    }
-  }
-  const approval = approvalModeFor(echo);
-  if (desired.approval && approval !== desired.approval) {
-    patch.approvalMode = desired.approval;
-    patch.applyToAllThreads = true;
-    changes.push(`approval ${APPROVAL_LABEL[approval]} → ${APPROVAL_LABEL[desired.approval]}`);
-  }
-  const computer = echo.computer ?? "auto";
-  if (desired.computer && computer !== desired.computer) {
-    patch.computer = desired.computer === "auto" ? null : desired.computer;
-    changes.push(`computer ${computer} → ${desired.computer}`);
-  }
-  // The file is the confirmation the server asks for to leave a bot on Auto on this computer.
-  if ((patch.computer !== undefined || patch.approvalMode !== undefined) && (desired.computer ?? computer) === "local" && (desired.approval ?? approval) === "auto") {
-    patch.acknowledgeLocalAuto = true;
-  }
-  if (desired.cwd && echo.cwd !== desired.cwd) { patch.cwd = desired.cwd; changes.push(`folder ${echo.cwd ?? "default"} → ${desired.cwd}`); }
-  if (desired.browser) {
-    if ((echo.browser !== false) !== desired.browser.enabled) { patch.browser = desired.browser.enabled; changes.push(`browser ${desired.browser.enabled ? "on" : "off"}`); }
-    if (desired.browser.profile !== undefined && echo.browserProfile !== desired.browser.profile) {
-      patch.browserProfile = desired.browser.profile;
-      changes.push(`browser profile ${echo.browserProfile ?? "its own"} → ${desired.browser.profile}`);
-    }
-  }
-  if (desired.tools !== undefined && canonicalScope(echo.toolScope) !== canonicalScope(desired.tools)) {
-    // null clears the selection on the server: every tool
-    patch.toolScope = desired.tools;
-    changes.push(desired.tools === null ? "tools: every tool" : "tools changed");
-  }
-  return { patch, changes };
-}
 
 const describeNew = (bot: DesiredBot) => [
   bot.chief === true ? `Chief of ${bot.team ?? "General"}` : bot.team ? `team ${bot.team}` : "",

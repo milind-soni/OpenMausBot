@@ -10,7 +10,8 @@ import { approvalModeFor } from "../../shared/approval-mode.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import type { VerbContext } from "./context.ts";
 import { Output } from "./output.ts";
-import { botPatch, botSkillDirs, reconcile, skillFilePath, teamExportVerb, type ApplyOptions } from "./team-apply.ts";
+import { botPatch } from "../desired-bot.ts";
+import { botSkillDirs, reconcile, skillFilePath, teamExportVerb, type ApplyOptions } from "./team-apply.ts";
 import { loadTeamFile, type DesiredBot, type TeamFile } from "./team-file.ts";
 
 type Rec = Record<string, any>;

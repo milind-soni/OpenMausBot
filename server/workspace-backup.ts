@@ -20,6 +20,7 @@ import { omittedAsTeamPrivate, routinesWithoutTeamPrivate, stripTeamPrivate, TEA
 import { flushLaterSaves } from "./save-batch.ts";
 import type { WorkspaceBackupClientState, WorkspaceBackupPrivateMetadata, WorkspaceBackupSummary, WorkspaceLeftBehind } from "../shared/workspace-backup.ts";
 import { SERVER_CHILD_DIR_NAME } from "../electron/app-identity.mjs";
+import { restoredProfileSource } from "./profiles/state.ts";
 
 export type { WorkspaceBackupSummary, WorkspaceBackupPrivateMetadata } from "../shared/workspace-backup.ts";
 export const MAX_WORKSPACE_BACKUP_BYTES = 10 * 1024 ** 3;
@@ -58,6 +59,8 @@ const EXCLUDED = new Set([
   // The doctor's copies of what it repaired, and the version it last ran for (doctor/backup.ts, doctor/start.ts): this
   // folder's own history, and copies of files a backup already holds.
   "doctor-backups", "doctor-state.json",
+  // The profile folder this machine applies, by its absolute path here.
+  "profiles.json",
 ]);
 const EXCLUSION_NOTES = [
   "Device pairing, server identity, live leases and runtime files (existing destination identities are preserved).",
@@ -739,6 +742,9 @@ function prepareRestore(dataDir: string, id: string, manifest: Manifest): string
       paths.definitions(bot, String(bot.id));
       if (typeof bot.soul === "string") bot.soul = paths.text(bot.soul);
       delete bot.voice;
+      const profileSource = restoredProfileSource(bot.profileSource);
+      if (profileSource) bot.profileSource = profileSource;
+      else delete bot.profileSource;
     }
   });
   changeJson("groups.json", (value) => {

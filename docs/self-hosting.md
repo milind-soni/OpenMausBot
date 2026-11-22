@@ -1628,7 +1628,8 @@ quiet server prunes on a timer, and pending rows are written out at
 shutdown): settings
 (which keys changed), sign-in lists and people, pairing codes and revoked
 sessions, webhooks, MCP servers, engines and keys, bots created, deleted or
-given different permissions, spend limits and prices, and who can see a bot.
+given different permissions, spend limits and prices, who can see a bot, and
+each profile folder applied (the folder, its commit, and each bot and field it changed).
 Each row names who acted — the session's email or device label, `This
 computer` for the owner, `Command line` for `edubot` commands such as
 `edubot access add` — and the values before and after. Values are

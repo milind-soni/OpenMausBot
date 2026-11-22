@@ -5,8 +5,8 @@ Sales…), the **bots** that work in each area, and the **MCP servers** they use
 front matter, so a bot's instructions read as plain text on GitHub. Keep the folder in a git repository: when two
 people use the same commit, they get the same bots.
 
-This version reads and checks a folder (`edubot profiles check`, below). Applying a folder to the app comes next; until
-then nothing in the app changes.
+`edubot profiles check` reads and checks a folder without a server. Applying a folder shows a plan first and changes
+the app only when you apply it ([Applying a folder](#applying-a-folder)).
 
 ## The folder
 
@@ -350,8 +350,84 @@ The check also refuses:
 A skill's text is scanned as imported skills are (a download piped into a shell, a long encoded blob, hidden text).
 What the scan finds is a warning for a person to read, not a refusal.
 
+## Applying a folder
+
+Applying goes one way, from the files to the app, and always as a plan you look at first. The app never applies a folder
+by itself, never writes to it and never runs git: pull the repository yourself, then plan again.
+
+```sh
+edubot profiles plan path/to/folder
+edubot profiles apply path/to/folder
+```
+
+The app reads the folder on its own computer. A plan line is one of:
+
+| Line | |
+|---|---|
+| Adds | A new area (a department, with its brief) or a new bot. |
+| Changes | A field the file changed since the last apply, where this app still has the value it was given. |
+| Gives more access | A change that lets a bot do more: a higher approval level, tool selectors it did not have, an MCP server it did not mount, a connected app or tool it was not granted, a tool group switched back on, an Edu brain switched on, or the Edu crew. |
+| Conflicts | A field both the file and this app changed. Nothing is applied to it until you choose: keep mine, or take the file. |
+| Changed here | A field changed in this app since the profile set it, while the file still says the same. It is kept. |
+| No longer in your profiles | A bot or area whose file is gone. It is kept; `--prune` deletes such bots. |
+| Left as they are | A bot or area whose file has problems (see the check). A problem anywhere else in an area's folder (a link, an unreadable folder) leaves the whole area as it is, and nothing under a path with a problem is ever called gone or deleted. A broken `org.md`, skill or folder blocks the whole plan, since every bot depends on it. |
+| Comes in a later update | Something in the files this version does not apply yet: the servers under `mcp/`, and the area and edu-cloud Edu brains. |
+| Notes | For example, a model whose engine this app does not have: the bot keeps its current model, or gets this app's default. |
+
+A second apply of the same commit says **No changes**.
+
+### How the app matches files and bots
+
+A bot is matched on its identity, `<area>/<bot>`, which the app keeps on the bot (`profileSource`). Changing `name:`
+in the file renames the bot; a new key adds a new bot. For each field the app keeps a short hash of the value it last
+applied, and of the value a field the file leaves out had then. Comparing the file, the app and that hash says which
+side changed: only the file (applied), only the app (kept, "changed here") or both (a conflict). With
+`edubot profiles apply`, a conflict's key is printed beside it: `--take-file KEY` or `--keep-mine KEY` settles it.
+Keeping yours records the file's value as seen, so the same conflict is not asked again.
+
+A bot's changes go in separate writes: the plain ones together, then the approval level and each "Gives more access"
+change on its own, so the app refusing one (Auto on this computer needs the warning only the bot's settings show) never
+drops the others. A new bot is made at its approval level.
+
+An area becomes a department named after its `name:`, found again by its key after a rename. Its brief is the
+organization's brief, then the area's.
+
+### Who may give more access
+
+A shared profile folder is someone else's commit, so the file is never the confirmation. "Gives more access" lines
+apply only from the desktop app or from a paired device signed in as an admin (`edubot login`), and pass through the
+same checks as a change made in a bot's settings. From a program on this computer they are refused, and
+`edubot profiles apply --without-access` applies the rest, narrowing included.
+
+### What the app keeps
+
+`<data>/profiles.json` keeps the chosen folder, the commit last applied (read from `.git` without running git, when the
+folder is inside a git checkout) and the department each area became; renaming that department in the app is followed
+there. The commit is read only from the checkout's own `.git` folder, or a linked worktree's folder in its repository
+once git's links back agree; links, pipes and anything else read as no commit. Workspace backups leave `profiles.json`
+out, and a restored bot keeps its `profileSource` only when it is one an apply could have written. Where the app keeps an admin activity log
+([self-hosting.md](self-hosting.md)), each apply adds a `profile.apply` row: the folder, the commit, and each bot and
+field it changed.
+
+The app's routes, for scripts and the Profiles screen:
+
+| Route | |
+|---|---|
+| `GET /api/profiles` | The chosen folder, what was last applied and each area's department. |
+| `PUT /api/profiles/folder` | `{ "folder": "/abs/path" }` chooses the folder; it must exist and must not be inside the app's data folder, through links either way. On Windows it must be on a drive, such as `C:\Profiles`, not a network share. |
+| `POST /api/profiles/plan` | `{ "folder"?, "choices"?, "prune"? }` answers the plan, with a `digest`. |
+| `POST /api/profiles/apply` | The same, plus `"giveAccess": true` to apply "Gives more access" lines (403 unless from the desktop app or an admin session) and `"expect": DIGEST` to refuse (409, with the new plan) a plan that changed since you saw it: the digest covers every file's bytes, the commit, what each write would send, the choices and `prune`. |
+
+`choices` maps a conflict's key, such as `bi/analyst:title`, to `"mine"` or `"file"`.
+
 ## Verify
 
 ```sh
-pnpm exec vitest run shared/profile-format.test.ts server/profiles/load.test.ts server/headless/profiles.test.ts
+pnpm exec vitest run shared/profile-format.test.ts server/profiles/load.test.ts server/headless/profiles.test.ts \
+  server/profiles/plan.test.ts server/profiles/apply.e2e.test.ts server/profiles/two-people.e2e.test.ts \
+  server/profiles/git-commit.test.ts server/profiles/state.test.ts server/routes/profiles.test.ts
 ```
+
+`two-people.e2e.test.ts` runs two isolated servers against one temporary git repository of the acme folder: both get
+the same bots, a second apply has no changes, a new commit reaches both, and a title changed on one computer is a
+conflict there only.

@@ -154,6 +154,7 @@ one of its conversations.
 | `events` | The server's live events as JSON lines (below). |
 | `team apply FILE`, `team export --out FILE` | Makes the workspace match a team file, or writes one (below). |
 | `profiles check FOLDER` | Checks a folder of organization, area and bot profiles on this computer, without a server ([docs/profiles.md](profiles.md)). |
+| `profiles plan FOLDER`, `profiles apply FOLDER` | Shows, then applies, what a profile folder changes in the workspace: areas, briefs, bots and skills. Changes that give a bot more access apply only from a paired admin device ([docs/profiles.md](profiles.md#applying-a-folder)). |
 | `engine set KIND`, `engine list` | Gives the workspace an engine key without a screen (below). |
 | `connect [URL]` | Gets a token for a workspace elsewhere. |
 | `token create NAME`, `token list`, `token revoke ID` | Access tokens for CI that end on their date (above). |

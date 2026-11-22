@@ -137,6 +137,11 @@ const VERBS: Record<string, { options: ParseArgsOptionsConfig; positionals: numb
   },
   "team export": { options: { team: { type: "string", multiple: true }, out: { type: "string" } }, positionals: 0 },
   "profiles check": { options: {}, positionals: 1 },
+  "profiles plan": { options: { prune: { type: "boolean" }, "keep-mine": { type: "string", multiple: true }, "take-file": { type: "string", multiple: true } }, positionals: 1 },
+  "profiles apply": {
+    options: { prune: { type: "boolean" }, "without-access": { type: "boolean" }, "keep-mine": { type: "string", multiple: true }, "take-file": { type: "string", multiple: true } },
+    positionals: 1,
+  },
   "engine set": {
     options: { "key-env": { type: "string" }, "key-file": { type: "string" }, "base-url": { type: "string" },
       "only-claude-api": { type: "boolean" }, install: { type: "boolean" }, rotate: { type: "boolean" }, "dry-run": { type: "boolean" } },
@@ -157,7 +162,7 @@ export const HEADLESS_VERBS: ReadonlySet<string> = new Set(Object.keys(VERBS).ma
 
 /** Verbs that change something; control-omb refuses them on a discovered server. */
 export const MUTATING_VERBS: ReadonlySet<string> = new Set([
-  "send", "send-channel", "run", "interrupt", "new-bot", "new-channel", "set-model", "edit", "team apply", "engine set", "token create", "token revoke",
+  "send", "send-channel", "run", "interrupt", "new-bot", "new-channel", "set-model", "edit", "team apply", "profiles apply", "engine set", "token create", "token revoke",
   "bots delete", "bots pause", "bots resume", "bots stop", "stop", "threads clear", "threads delete", "computers start", "computers sleep",
 ]);
 
@@ -169,7 +174,7 @@ export interface ParsedCommand {
   positionals: string[];
 }
 
-const SUBCOMMANDS = new Map([["team", ["apply", "export"]], ["profiles", ["check"]], ["engine", ["set", "list"]], ["token", ["create", "list", "revoke"]],
+const SUBCOMMANDS = new Map([["team", ["apply", "export"]], ["profiles", ["check", "plan", "apply"]], ["engine", ["set", "list"]], ["token", ["create", "list", "revoke"]],
   ["threads", ["list", "clear", "delete"]], ["computers", ["list", "start", "sleep"]]]);
 /** `bots` alone still lists them, as it always has. */
 const OPTIONAL_SUBCOMMANDS = new Map([["bots", ["list", "get", "delete", "pause", "resume", "stop"]]]);
