@@ -87,9 +87,10 @@ export function allLibraryItems(bot: Bot, local: LibraryItems, remote: BotLibrar
   };
 }
 
-/** The quiet line naming the conversation an item came from; none while the bot has only one. */
-export function threadLabel(bot: Pick<Bot, "threadId" | "mainThreadId" | "tasks">, threadId: string): string | undefined {
+/** The quiet line naming the conversation an item came from, none while the bot has only one: its title, or with threads
+ * hidden (Simple mode) "Main thread" for the one the bot opens to. */
+export function threadLabel(bot: Pick<Bot, "threadId" | "mainThreadId" | "tasks">, threadId: string, threadsShown: boolean): string | undefined {
   if (knownThreads(bot).size < 2) return undefined;
-  if (threadId === bot.mainThreadId) return t("sidebar.bot.simple.mainThread");
+  if (!threadsShown && threadId === bot.mainThreadId) return t("sidebar.bot.simple.mainThread");
   return bot.tasks?.find((task) => task.threadId === threadId)?.title || t("task.newShort");
 }
