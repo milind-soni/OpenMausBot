@@ -502,6 +502,50 @@ describe("browsers on one computer", () => {
     }
   });
 
+  it("keeps a first tab's wait inside the call's budget, so a start that fails says why instead of ending as a lost call", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      const slow = new FakeBackend(() => {
+        const chrome = new FakeChrome({ documents });
+        chrome.delay = (method) => (method === "Page.enable" ? 600_000 : 0);
+        return chrome;
+      });
+      backends.push(slow);
+      const { call, text } = setup({ backend: () => slow, callBudgetMs: 40_000 });
+      let result: Awaited<ReturnType<typeof call>> | null = null;
+      void call("agent_browser_open", { url: "https://example.com/form" }).then((answer) => { result = answer; });
+      for (let waited = 0; result === null && waited < 120_000; waited += 1_000) await vi.advanceTimersByTimeAsync(1_000);
+      expect(text(result!)).toContain("The browser could not start: No matching tab opened within 25000 ms.");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("says at once that the browser could not start when Chrome dies before its first tab runs", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const dying = new FakeBackend(() => {
+        const chrome = new FakeChrome({ documents });
+        chrome.delay = (method) => {
+          if (method !== "Page.enable") return 0;
+          setTimeout(() => chrome.exit("Chrome crashed"), 1_000);
+          return 600_000;
+        };
+        return chrome;
+      });
+      backends.push(dying);
+      const { call, text } = setup({ backend: () => dying });
+      let result: Awaited<ReturnType<typeof call>> | null = null;
+      void call("agent_browser_open", { url: "https://example.com/form" }).then((answer) => { result = answer; });
+      let waited = 0;
+      for (; result === null && waited < 120_000; waited += 1_000) await vi.advanceTimersByTimeAsync(1_000);
+      expect(text(result!)).toContain("The browser could not start: Chrome closed before its first tab opened.");
+      expect(waited, "not after the first-tab wait").toBeLessThanOrEqual(5_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("makes room by closing the least recently used idle browser, and waits, then refuses, when none is idle", async () => {
     const { service, call, backend } = setup({ maxRunning: 1, capacityWaitMs: 100 });
     const other = { session: "bot-b", key: "bot:b" };
