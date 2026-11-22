@@ -4,6 +4,8 @@ import type { ServerToolText } from "./server-text.ts";
 /** An activity chip serialized beside a transcript line. */
 export interface WireTool extends ServerToolText {
   name: string; ok?: boolean; spoken?: string; setup?: boolean; terminal?: boolean; summary?: string; input?: string; output?: string;
+  /** Hand-off rows: the model the work went to, with its reasoning level where the engine has one; shown after the row's words, never replayed to a model. */
+  assignedModel?: string;
   /** What the call works on, as its live status said it: the chip's and the "Now" card's specific words. `whose`: the person whose own app or MCP server the call used. */
   step?: import("./turn-progress.ts").LiveStep; whose?: { person: string; app: string };
   /** error rows: the installed Claude Code is too old for the model, and

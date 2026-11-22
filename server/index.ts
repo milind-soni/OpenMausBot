@@ -291,7 +291,7 @@ import { threadModelFallback, type ThreadEngine } from "./thread-model.ts";
 import { computerEngineMoveText, removedComputerInstanceIds, writeComputerEngineMoveLines } from "./computer-engine-removal.ts";
 import { peerDeliveryReceipt, refusalsOnlyInstructions, type PeerDeliveryReceipt } from "./peer-delivery.ts";
 import { createRoomAccess, PRIVATE_CHAT_ROOM_WRITE } from "./host/room-access.ts";
-import { outsideRoomNote, sentRow, teammateResultRow, WAIT_CARD_CLOSED_REASON } from "./host/handoff-sent.ts"; import { createHandoffFiles, handoffFilesSchema, inboxRead, turnsRunInOwnFolder } from "./host/handoff-files.ts"; import { conversationAttachments } from "./conversation-attachments.ts"; import { createReworkCap } from "./host/rework-cap.ts";
+import { modelWords, outsideRoomNote, sentRow, teammateResultRow, WAIT_CARD_CLOSED_REASON } from "./host/handoff-sent.ts"; import { createHandoffFiles, handoffFilesSchema, inboxRead, turnsRunInOwnFolder } from "./host/handoff-files.ts"; import { conversationAttachments } from "./conversation-attachments.ts"; import { createReworkCap } from "./host/rework-cap.ts";
 import { createWebhookRoomPost } from "./host/webhook-room-deps.ts";
 import { createRoomJobs, parallelRoomJobsEnabled, type RoomRoundLine } from "./host/room-jobs.ts";
 import { markGroupThreadUnreadAfterTurn } from "./group-task-state.ts";
@@ -13059,7 +13059,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               id: b.id,
               name: b.name,
               section: b.section?.trim() || "",
-              model: b.modelSelection.model,
+              model: b.modelSelection.effort ? `${b.modelSelection.model} (${b.modelSelection.effort} reasoning)` : b.modelSelection.model,
               busy: !!b.busy,
               status,
               statusText: peerStatusWords(status),
@@ -13648,7 +13648,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             if (!duplicate) {
               if (!EXTERNAL) delegatedThisTurn(node.id);
               const sentRowId = post ? undefined : store.appendMessage(address.threadId, sentRow({ sender: internalSender, recipient, threadId: node.threadId, room: addressedRoom, via, language: threadLanguage(address.threadId),
-                reason: call.reason, doneWhen: call.doneWhen ? redactSecretsInText(call.doneWhen) : undefined, title: store.taskByThread(recipient.id, node.threadId)?.title, ...handoffFiles.sentWith(node.id) })).id; if (sentRowId && via !== "room") handoffStatus.track(node.id, address.threadId, sentRowId);
+                reason: call.reason, doneWhen: call.doneWhen ? redactSecretsInText(call.doneWhen) : undefined, title: store.taskByThread(recipient.id, node.threadId)?.title, ...handoffFiles.sentWith(node.id), model: ((selection) => { const engine = registry.get(selection.instanceId); return modelWords(threadLanguage(address.threadId), selection, { label: engine?.models.options.find((option) => option.id === selection.model)?.label, levels: engine?.adapter.capabilities.effortLevels, variants: engine?.adapter.capabilities.modelVariants }); })(store.taskByThread(recipient.id, node.threadId)?.modelSelection ?? recipient.modelSelection) })).id; if (sentRowId && via !== "room") handoffStatus.track(node.id, address.threadId, sentRowId);
             }
           } catch (error) {
             if (createdThread) store.deleteTask(target.botId, createdThread);

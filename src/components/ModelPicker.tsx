@@ -43,7 +43,7 @@ import { Select } from "./Select";
 const COMPACT_MODEL_COUNT = 5;
 
 
-export function effortLabel(level: EffortLevel): string {
+export function effortLabel(level: EffortLevel | "default"): string {
   return t(`model.effort.${level}` as Parameters<typeof t>[0]);
 }
 
@@ -573,8 +573,8 @@ export function ModelPicker({
   const summary = active
     ? `${engineDisplayName(active)} · ${modelLabel(active, selection.model)}${
         modelProvider(active, selection.model) ? ` · ${modelProvider(active, selection.model)}` : ""
-      }${selectedVariantLabel ? ` · ${selectedVariantLabel}` : selection.effort
-        ? ` · ${t(advanced ? "model.effort.summary" : "model.simple.thinkingSummary", { level: effortLabel(selection.effort) })}` : ""}`
+      }${selectedVariantLabel ? ` · ${selectedVariantLabel}` : selection.effort || active.capabilities?.effortLevels?.length
+        ? ` · ${t(advanced ? "model.effort.summary" : "model.simple.thinkingSummary", { level: effortLabel(selection.effort ?? "default") })}` : ""}`
     : selection.model;
   const followLine = follows === true ? `\n${t("model.followsBot", { name: profile.name })}` : follows === false ? `\n${t("model.ownModel")}` : "";
   const attentionLine = !advanced && attention ? `\n${attention}` : "";
@@ -631,9 +631,9 @@ export function ModelPicker({
         </span>
         {selectedVariantLabel !== undefined ? (
           <span data-model-variant className="max-w-[120px] truncate text-ink-secondary">· {selectedVariantLabel}</span>
-        ) : selection.effort && (
+        ) : Boolean(selection.effort || active?.capabilities?.effortLevels?.length) && (
           <span data-model-effort className="shrink-0 text-ink-secondary">
-            · {effortLabel(selection.effort)}
+            · {effortLabel(selection.effort ?? "default")}
           </span>
         )}
       </span>
