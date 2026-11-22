@@ -56,8 +56,10 @@ export function refusalText(error: unknown, limits: { uploadMax: number; cap: nu
   return t((code && REFUSALS[code]) || "teamFiles.error.failed");
 }
 
-/** One file up, the bytes as the request body. */
-async function uploadFile(folder: string, file: File): Promise<void> {
+/** One file up, the bytes as the request body. One over `uploadMax` is refused here, as the server would refuse it: over
+ * a relay link the whole body is read into the page before it is sent. */
+export async function uploadFile(folder: string, file: File, uploadMax: number): Promise<void> {
+  if (file.size > uploadMax) throw new ApiError("413", 413, { code: "too_large" satisfies TeamFilesRefusal });
   const res = await serverFetch(`${BASE}/file?path=${encodeURIComponent(folder)}&name=${encodeURIComponent(file.name)}`, {
     method: "PUT", body: file, headers: { "content-type": "application/octet-stream" },
   });
@@ -112,7 +114,7 @@ export function TeamFilesPage() {
     try {
       for (const file of files) {
         setUploading(file.name);
-        await uploadFile(folder, file);
+        await uploadFile(folder, file, limits.uploadMax);
       }
     } finally {
       setUploading(null);
