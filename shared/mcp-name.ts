@@ -15,6 +15,8 @@ export const RESERVED_MCP_NAMES: ReadonlySet<string> = new Set([
   "openmausbot_phone",
 ]);
 
+export const MCP_SERVER_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
+
 /** A server name from any text: lowercase letters, numbers, `_` and `-`, starting with a letter, at most 32. */
 export function slugMcpName(raw: string): string {
   const slug = raw.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32).replace(/-+$/, "");

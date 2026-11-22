@@ -42,11 +42,11 @@ describe("parseCommand", () => {
   it("knows which verbs change something", () => {
     for (const verb of ["send", "run", "interrupt", "team apply", "engine set", "token create", "token revoke", "bots delete", "bots pause", "stop",
       "threads clear", "threads delete", "computers start", "computers sleep"]) expect(MUTATING_VERBS.has(verb), verb).toBe(true);
-    for (const verb of ["doctor", "bots", "bots list", "bots get", "status", "whoami", "threads list", "computers list", "wait", "messages", "export", "events", "team export", "engine list"]) {
+    for (const verb of ["doctor", "bots", "bots list", "bots get", "status", "whoami", "threads list", "computers list", "wait", "messages", "export", "events", "team export", "engine list", "profiles check"]) {
       expect(MUTATING_VERBS.has(verb), verb).toBe(false);
     }
     expect([...HEADLESS_VERBS].sort()).toEqual(["bots", "channels", "computers", "connect", "doctor", "edit", "engine", "events", "export", "interrupt", "login",
-      "logout", "mcp", "messages", "models", "new-bot", "new-channel", "run", "send", "send-channel", "servers", "set-model", "status", "stop", "team",
+      "logout", "mcp", "messages", "models", "new-bot", "new-channel", "profiles", "run", "send", "send-channel", "servers", "set-model", "status", "stop", "team",
       "threads", "token", "use", "wait", "whoami"]);
   });
 

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { RESERVED_MCP_NAMES, slugMcpName } from "../shared/mcp-name.ts";
+import { MCP_SERVER_NAME, RESERVED_MCP_NAMES, slugMcpName } from "../shared/mcp-name.ts";
 import type { McpServerSpec, RemoteMcpSpec, StdioMcpSpec } from "./contracts.ts";
 import { MCP_RESTART_ENV } from "./mcp-app-catalog.ts";
 
@@ -132,7 +132,6 @@ const resultBudgetSchema = z.number({ message: "The result size limit must be a 
   .int("The result size limit must be a whole number of characters.")
   .min(0, "The result size limit cannot be negative.")
   .max(MAX_RESULT_BUDGET, `The result size limit can be at most ${MAX_RESULT_BUDGET.toLocaleString("en-US")} characters; use 0 for no limit.`);
-const MCP_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
 
 /** A server the request named is not saved here: its name, in the words every route answers with. */
 export const mcpServerNotFound = (name: string): string => `MCP server "${name}" not found. It may have been removed: check Apps → MCP servers.`;
@@ -284,7 +283,7 @@ function looksRemote(raw: unknown): boolean {
 }
 
 export function mcpServerNameError(name: string): string | null {
-  if (!MCP_NAME.test(name)) {
+  if (!MCP_SERVER_NAME.test(name)) {
     return "Use 1–32 lowercase letters, numbers, underscores, or hyphens, starting with a letter.";
   }
   if (RESERVED_MCP_NAMES.has(name)) return "That name is reserved by Edu Bot.";

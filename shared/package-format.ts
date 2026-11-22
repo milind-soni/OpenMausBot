@@ -403,7 +403,7 @@ const presetSchema = z.object({
   seed: seedSchema.optional(),
 });
 
-function isLoopbackHost(hostname: string): boolean {
+export function isLoopbackHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(hostname);
 }
 

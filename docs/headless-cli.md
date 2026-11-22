@@ -153,6 +153,7 @@ one of its conversations.
 | `export TARGET --out DIR` | Writes a conversation's job to a folder (below). |
 | `events` | The server's live events as JSON lines (below). |
 | `team apply FILE`, `team export --out FILE` | Makes the workspace match a team file, or writes one (below). |
+| `profiles check FOLDER` | Checks a folder of organization, area and bot profiles on this computer, without a server ([docs/profiles.md](profiles.md)). |
 | `engine set KIND`, `engine list` | Gives the workspace an engine key without a screen (below). |
 | `connect [URL]` | Gets a token for a workspace elsewhere. |
 | `token create NAME`, `token list`, `token revoke ID` | Access tokens for CI that end on their date (above). |

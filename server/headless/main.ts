@@ -14,6 +14,7 @@ import { botsVerb, computersVerb, statusVerb, stopVerb, threadsVerb } from "./fl
 import { loginVerb, logoutVerb, serversVerb, useVerb, whoamiVerb } from "./login.ts";
 import { askOnTerminal, openInBrowser, terminalPresent } from "./prompt.ts";
 import { SavedServers, type SecurityRunner } from "./saved-servers.ts";
+import { profilesCheckVerb } from "./profiles.ts";
 import { teamApplyVerb, teamExportVerb } from "./team-apply.ts";
 import { tokenVerb } from "./token.ts";
 
@@ -124,6 +125,12 @@ edubot computers sleep BOT            put it to sleep; it wakes when the bot nee
   and rooms the file leaves out, in teams marked prune: true. Keys come from { env } or { file },
   and a key already set is kept unless --rotate-secrets. docs/headless-cli.md has the format.`,
   "team export": "edubot team export [--team NAME]… --out FILE\n  Write the workspace (or some teams) as a team file; skills go beside it, keys as placeholders,\n  and a key written into a soul, brief or skill is taken out.",
+  profiles: "edubot profiles check FOLDER   (see help profiles check)",
+  "profiles check": `edubot profiles check FOLDER
+  Read a folder of organization, area, bot and MCP server profiles (docs/profiles.md) and check every file:
+  fields, secret slots, paths, links, sizes and what each bot inherits. It never reaches a server and changes nothing.
+  Prints each problem as file, line and field, then each bot as its organization and area make it.
+  Exit 0 fine (warnings allowed), 1 a problem was found, 2 the folder is missing.`,
   engine: "edubot engine set KIND … | engine list   (see help engine set)",
   "engine set": `edubot engine set KIND (--key-env VAR | --key-file FILE) [--base-url URL] [--only-claude-api] [--install] [--rotate] [--dry-run]
   Give the workspace an engine key: claude, openai, openrouter, openai-compatible, xai, groq, greenference, modelgo, mistral or cerebras.
@@ -167,7 +174,7 @@ export interface HeadlessOptions {
 const VERBS: Record<string, (ctx: VerbContext) => Promise<VerbOutcome>> = {
   doctor, bots: list, channels: list, models: list, messages, send, "send-channel": send, run: runVerb, wait: waitVerb,
   interrupt, "new-bot": newBot, "new-channel": newChannel, "set-model": setModel, edit, export: exportVerb, events: eventsVerb,
-  "team apply": teamApplyVerb, "team export": teamExportVerb, "engine set": engineVerb, "engine list": engineVerb, connect: connectVerb,
+  "team apply": teamApplyVerb, "team export": teamExportVerb, "profiles check": profilesCheckVerb, "engine set": engineVerb, "engine list": engineVerb, connect: connectVerb,
   "token create": tokenVerb, "token list": tokenVerb, "token revoke": tokenVerb,
   login: loginVerb, logout: logoutVerb, whoami: whoamiVerb, use: useVerb, servers: serversVerb, status: statusVerb,
   "bots list": list, "bots get": botsVerb, "bots delete": botsVerb, "bots pause": botsVerb, "bots resume": botsVerb, "bots stop": botsVerb,

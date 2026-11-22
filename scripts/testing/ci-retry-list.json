@@ -91,6 +91,13 @@
       "owner": "EduardoMoraga",
       "reason": "Windows shard 1/8 of https://github.com/EduardoMoraga/edu-bot/actions/runs/44904448436; same commit green on re-run.",
       "since": "2026-11-21"
+    },
+    {
+      "file": "server/post-to-room.test.ts",
+      "test": "limits counted per turn on a bearer that outlives the turn > stops a turn at its third room post, and the next turn may post again",
+      "owner": "EduardoMoraga",
+      "reason": "Failed on PR #3 and PR #13 (https://github.com/EduardoMoraga/edu-bot/actions/runs/44982739184); same commits green on re-run.",
+      "since": "2026-11-22"
     }
   ]
 }

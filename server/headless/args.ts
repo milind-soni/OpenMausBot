@@ -136,6 +136,7 @@ const VERBS: Record<string, { options: ParseArgsOptionsConfig; positionals: numb
     positionals: 1,
   },
   "team export": { options: { team: { type: "string", multiple: true }, out: { type: "string" } }, positionals: 0 },
+  "profiles check": { options: {}, positionals: 1 },
   "engine set": {
     options: { "key-env": { type: "string" }, "key-file": { type: "string" }, "base-url": { type: "string" },
       "only-claude-api": { type: "boolean" }, install: { type: "boolean" }, rotate: { type: "boolean" }, "dry-run": { type: "boolean" } },
@@ -168,7 +169,7 @@ export interface ParsedCommand {
   positionals: string[];
 }
 
-const SUBCOMMANDS = new Map([["team", ["apply", "export"]], ["engine", ["set", "list"]], ["token", ["create", "list", "revoke"]],
+const SUBCOMMANDS = new Map([["team", ["apply", "export"]], ["profiles", ["check"]], ["engine", ["set", "list"]], ["token", ["create", "list", "revoke"]],
   ["threads", ["list", "clear", "delete"]], ["computers", ["list", "start", "sleep"]]]);
 /** `bots` alone still lists them, as it always has. */
 const OPTIONAL_SUBCOMMANDS = new Map([["bots", ["list", "get", "delete", "pause", "resume", "stop"]]]);

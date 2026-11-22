@@ -30,6 +30,7 @@ export const HEADLESS_USAGE = `Drive a running workspace (scripts, CI, other age
   edubot export BOT --out DIR      write a job's transcripts, files and screens to DIR
   edubot events [--job THREAD]     the server's live events as JSON lines
   edubot team apply FILE           make the workspace match a team file (team export writes one)
+  edubot profiles check FOLDER     check a folder of organization, area and bot profiles, offline (exit 1 on a problem)
   edubot engine set claude --key-env ANTHROPIC_API_KEY   give it an engine without a screen
   edubot connect URL --code CODE --out FILE              get a token for a workspace elsewhere
   edubot token create NAME --out FILE [--expires 90d]    a token for CI that ends on its date (token list, token revoke ID)
