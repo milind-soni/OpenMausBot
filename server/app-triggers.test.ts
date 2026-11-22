@@ -593,6 +593,38 @@ describe("a bot limited to some accounts of an app", () => {
     expect(triggers.runRefusal("no-such-automation")).toBeNull();
   });
 
+  it("refuses the run's turn right before it is sent when the bot lost the account during its setup", async () => {
+    const { createAppTriggerHost } = await import("./app-trigger-host.ts");
+    const bot: Record<string, unknown> = { id: "bot-1", name: "Scout", color: "#000" };
+    const seen: Array<string | null> = [];
+    let host: ReturnType<typeof createAppTriggerHost> | undefined;
+    const starting = new RoutineManager({
+      file: join(dir, "turn-routines.json"), botState: () => "ready", createTask: () => ({ threadId: "thread-turn" }),
+      startTurn: async (_botId, threadId, _prompt, _runOn, _source, _onDispatchError, runId) => {
+        seen.push(host!.turnRefusal(threadId, runId));
+        bot.connectorScopes = { apps: { gmail: "read" }, accounts: { gmail: [support] } };
+        seen.push(host!.turnRefusal(threadId, runId));
+      },
+    });
+    host = createAppTriggerHost({
+      file: join(dir, "turn-app-triggers.json"), store: { bot: (id: string) => (id === bot.id ? bot : undefined) } as never,
+      connectionMode: () => "managed", access: () => ({ url: broker.url, token: owner.token }),
+      connectedApps: async () => connected, routines: () => starting, webhooks: { list: () => [] } as never,
+      webhookBase: () => "http://127.0.0.1:8800", botState: () => "ready", timeZone: () => "UTC", visibleBot: () => true,
+      emit: () => {}, audit: () => {},
+    });
+    try {
+      const trigger = await host.manager.create({ botId: "bot-1", name: "Sales", prompt: "Draft a reply.", app: "gmail", event: "GMAIL_NEW_GMAIL_MESSAGE", account: "sales" });
+      await broker.deliver(trigger.remote.triggerId!, { subject: "Hello", sender: "j@acme.com" }, "msg_turn");
+      await drain(host.manager);
+      await starting.tick();
+      expect(seen).toEqual([null, expect.stringContaining("may no longer use this account")]);
+      expect(host.turnRefusal("thread-turn", undefined)).toBeNull();
+    } finally {
+      starting.close();
+    }
+  });
+
   it("lists only the accounts the bot may use in its event list", async () => {
     const client = brokerClient(() => ({ url: broker.url, token: owner.token }));
     const bot = { connectorScopes: { apps: { gmail: "read" as const }, accounts: { gmail: [support] } } };

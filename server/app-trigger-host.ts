@@ -221,6 +221,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
     }
   }
 
+  const runRefusal = (run: { webhookId?: string; eventSource?: string }) => (run.eventSource === "app" && run.webhookId ? manager.runRefusal(run.webhookId) : null);
   return {
     manager,
     routes,
@@ -229,7 +230,12 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
     undo: (args: { botId: string; threadId: string; requestId: string }) => requests.undo(args),
     isApp: (id: string) => manager.get(id) !== null,
     /** For the run scheduler, right before a queued run starts: why this app-event run may not. */
-    runRefusal: (run: { webhookId?: string; eventSource?: string }) => (run.eventSource === "app" && run.webhookId ? manager.runRefusal(run.webhookId) : null),
+    runRefusal,
+    /** The same check right before the run's turn is sent, since its setup awaits and the bot can lose the account meanwhile. */
+    turnRefusal: (threadId: string, runId: string | undefined) => {
+      const run = runId ? deps.routines().runForThread(threadId) : null;
+      return run && run.id === runId ? runRefusal(run) : null;
+    },
     start: () => manager.start(),
     stop: () => manager.stop(),
     /** Access to the service changed (the desktop handed its token over, or a Cloud registered). */
