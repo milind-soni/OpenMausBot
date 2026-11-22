@@ -4,7 +4,7 @@ import { restoredProfileSource, withDepartmentRenamed, type ProfilesState } from
 
 describe("profiles state", () => {
   it("moves the areas on a department the app renamed, and no others", () => {
-    const state: ProfilesState = { version: 1, areas: { bi: { section: "BI", hashes: { name: "a" } }, sales: { section: "Sales", hashes: {} } } };
+    const state: ProfilesState = { version: 1, areas: { bi: { section: "BI", hashes: { name: "a" } }, sales: { section: "Sales", hashes: {} } }, mcpServers: {} };
     expect(withDepartmentRenamed(state, "bi", "Analytics").areas).toEqual({ bi: { section: "Analytics", hashes: { name: "a" } }, sales: { section: "Sales", hashes: {} } });
   });
 

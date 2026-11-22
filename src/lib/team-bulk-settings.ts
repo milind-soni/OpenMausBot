@@ -16,7 +16,9 @@ export type TeamChange =
   | { kind: "approval"; mode: TeamApprovalMode }
   | { kind: "model"; model?: string; effort?: EffortLevel | null }
   /** A person's level null takes them off; the bot's owner is never listed, so they are left out for the bot they own. */
-  | { kind: "access"; everyone?: BotAccessLevel; person?: { email: string; level: GrantedLevel | null } };
+  | { kind: "access"; everyone?: BotAccessLevel; person?: { email: string; level: GrantedLevel | null } }
+  /** Added to each bot's own selection; a bot on every server already has them. */
+  | { kind: "mcp"; servers: readonly string[] };
 
 export type TeamPlanRow =
   | { bot: Bot; status: "apply"; patch: BotUpdatePatch }
@@ -86,6 +88,12 @@ export function planAccess(bot: Bot, change: Extract<TeamChange, { kind: "access
 export function planTeamChange(bots: readonly Bot[], instances: readonly InstanceInfo[], change: TeamChange): TeamPlanRow[] {
   return bots.map((bot): TeamPlanRow => {
     if (change.kind === "access") return planAccess(bot, change);
+    if (change.kind === "mcp") {
+      const own = bot.mcpServers;
+      if (own == null) return { bot, status: "unchanged" };
+      const next = [...new Set([...own, ...change.servers])];
+      return next.length === own.length ? { bot, status: "unchanged" } : { bot, status: "apply", patch: { mcpServers: next } };
+    }
     const engine = engineOf(bot, instances);
     const engineName = engine?.displayName ?? bot.modelSelection.instanceId;
     if (change.kind === "approval") {

@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { useMcpServers } from "@/lib/mcp-servers";
 import {
   applyTeamPlan,
   planAccess,
@@ -29,7 +30,7 @@ import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { effortLabel } from "./ModelPicker";
 import { Select } from "./Select";
 
-type Tab = "approval" | "model" | "access";
+export type TeamSettingsTab = "approval" | "model" | "access" | "mcp";
 const KEEP = "";
 const ENGINE_DEFAULT = "default";
 const ADD = "chat";
@@ -54,9 +55,12 @@ export function TeamSettingsRows({ rows }: { rows: ReadonlyArray<TeamPlanRow | T
   );
 }
 
-export function TeamSettingsDialog({ team, onClose }: { team: string; onClose: () => void }) {
+export function TeamSettingsDialog({ team, tab: initialTab = "approval", onClose }: { team: string; tab?: TeamSettingsTab; onClose: () => void }) {
   const { state, dispatch } = useStore();
-  const [tab, setTab] = useState<Tab>("approval");
+  const [tab, setTab] = useState<TeamSettingsTab>(initialTab);
+  const [servers, setServers] = useState<ReadonlySet<string>>(new Set());
+  const { servers: allServers } = useMcpServers();
+  const shared = (allServers ?? []).filter((server) => !server.bot);
   const [mode, setMode] = useState<TeamApprovalMode | null>(null);
   const [model, setModel] = useState<string>(KEEP);
   const [effort, setEffort] = useState<string>(KEEP);
@@ -78,7 +82,9 @@ export function TeamSettingsDialog({ team, onClose }: { team: string; onClose: (
   latestBots.current = state.bots;
   const models = useMemo(() => teamModelChoices(bots, state.instances), [bots, state.instances]);
   const efforts = useMemo(() => teamEffortChoices(bots, state.instances, EFFORT_LEVELS), [bots, state.instances]);
-  const change: TeamChange | null = tab === "approval"
+  const change: TeamChange | null = tab === "mcp"
+    ? servers.size ? { kind: "mcp", servers: [...servers] } : null
+    : tab === "approval"
     ? mode ? { kind: "approval", mode } : null
     : tab === "access" ? everyone === KEEP && person === KEEP ? null
       : {
@@ -158,8 +164,26 @@ export function TeamSettingsDialog({ team, onClose }: { team: string; onClose: (
               <button type="button" role="tab" aria-selected={tab === "approval"} disabled={running} className={tabClass(tab === "approval")} onClick={() => setTab("approval")}>{t("teamSettings.tab.approval")}</button>
               <button type="button" role="tab" aria-selected={tab === "model"} disabled={running} className={tabClass(tab === "model")} onClick={() => setTab("model")}>{t("teamSettings.tab.model")}</button>
               {teamName && <button type="button" role="tab" aria-selected={tab === "access"} disabled={running} className={tabClass(tab === "access")} onClick={() => setTab("access")}>{t("teamSettings.tab.access")}</button>}
+              <button type="button" role="tab" aria-selected={tab === "mcp"} disabled={running} className={tabClass(tab === "mcp")} onClick={() => setTab("mcp")}>{t("teamSettings.tab.mcp")}</button>
             </div>
-            {tab === "approval" ? (
+            {tab === "mcp" ? (
+              <fieldset disabled={running} className="flex flex-col gap-1" data-team-mcp>
+                <legend className="sr-only">{t("teamSettings.tab.mcp")}</legend>
+                {shared.length === 0 && <p className="text-[13px] text-ink-secondary">{t("teamSettings.mcpNone")}</p>}
+                {shared.map((server) => (
+                  <label key={server.name} className={cn("flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2", servers.has(server.name) ? "bg-raised" : "hover:bg-raised/60")}>
+                    <input type="checkbox" checked={servers.has(server.name)} onChange={() => setServers((current) => {
+                      const next = new Set(current);
+                      if (!next.delete(server.name)) next.add(server.name);
+                      return next;
+                    })} />
+                    <span className="text-[14px] text-ink">{server.name}</span>
+                    {!server.enabled && <span className="text-[12px] text-ink-secondary">{t("teamSettings.mcpOff")}</span>}
+                  </label>
+                ))}
+                <p className="mt-1 text-[12px] text-ink-secondary">{t("teamSettings.mcpHint")}</p>
+              </fieldset>
+            ) : tab === "approval" ? (
               <fieldset disabled={running} className="flex flex-col gap-1">
                 <legend className="sr-only">{t("teamSettings.tab.approval")}</legend>
                 {approvalModeOptions().filter((option) => (TEAM_APPROVAL_MODES as readonly string[]).includes(option.mode)).map((option) => (

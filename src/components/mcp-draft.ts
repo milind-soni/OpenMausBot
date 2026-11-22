@@ -33,6 +33,8 @@ export type McpServerListing = (StdioMcpListing | RemoteMcpListing) & {
   offFor?: string[];
   /** Its key was deleted from the Vault. */
   keyOff?: boolean;
+  /** A server from the person's profiles, left off until its key is in the Vault and the profiles are applied again. */
+  needsKey?: boolean;
 };
 
 export function isRemoteMcpListing(server: McpServerListing): server is RemoteMcpListing {

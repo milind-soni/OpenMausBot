@@ -39,13 +39,16 @@ const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 
 /** An app in memory, answering the routes apply calls the way the server does. `thisComputer`: the desktop app with its
  * computer connected, where a new bot not on Auto works on this computer and Auto there needs the person's confirmation. */
-function fakeApp(seed: { bots?: Rec[]; sections?: string[]; mcpServers?: string[]; models?: string[]; thisComputer?: boolean; codex?: boolean } = {}) {
+function fakeApp(seed: { bots?: Rec[]; sections?: string[]; mcpServers?: string[]; vault?: Record<string, string>; models?: string[]; thisComputer?: boolean; codex?: boolean } = {}) {
   const app = {
+    mcp: Object.fromEntries((seed.mcpServers ?? ["notion"]).map((name) => [name, { type: "http", url: `https://${name}.example/mcp`, headers: {}, enabled: true }])) as Record<string, Rec>,
+    vault: { ...seed.vault } as Record<string, string>,
+    granted: {} as Record<string, string[]>,
     bots: (seed.bots ?? []) as Rec[],
     sections: seed.sections ?? [],
     briefs: {} as Record<string, string>,
     skills: {} as Record<string, Record<string, { text: string; enabled: boolean }>>,
-    state: { version: 1, areas: {} } as ProfilesState,
+    state: { version: 1, areas: {}, mcpServers: {} } as ProfilesState,
     refuse: null as null | ((method: string, path: string, body: Rec) => string | null),
     calls: [] as string[],
   };
@@ -65,6 +68,18 @@ function fakeApp(seed: { bots?: Rec[]; sections?: string[]; mcpServers?: string[
         app.briefs[body.name] = app.briefs[from] ?? "";
         app.state = withDepartmentRenamed(app.state, from, body.name);
         return { status: 200, body: {} };
+      }
+      if (m[1] === "mcp" && m[2] === "servers") {
+        const { name: _name, vaultKeys, ...fields } = body;
+        const key = m[3] ?? body.name;
+        if (method === "POST" && app.mcp[key]) return { status: 409, body: { error: "An MCP server with that name already exists." } };
+        if (method !== "POST" && !app.mcp[key]) return { status: 404, body: { error: "not found" } };
+        if (method === "DELETE") { delete app.mcp[key]; return { status: 200, body: {} }; }
+        if (method === "PATCH") { app.mcp[key]!.enabled = body.enabled; return { status: 200, body: {} }; }
+        if (fields.oauth?.clientSecret === true) fields.oauth = { ...fields.oauth, clientSecret: app.mcp[key]!.oauth.clientSecret };
+        app.mcp[key] = { ...fields, enabled: method === "POST" ? false : fields.enabled ?? app.mcp[key]!.enabled };
+        if (vaultKeys) app.granted[key] = [...new Set([...app.granted[key] ?? [], ...vaultKeys])];
+        return { status: method === "POST" ? 201 : 200, body: {} };
       }
       if (url.pathname === "/api/section-context") { app.briefs[url.searchParams.get("section")!] = body.text; return { status: 200, body: {} }; }
       if (url.pathname === "/api/bots" && method === "POST") {
@@ -101,14 +116,14 @@ function fakeApp(seed: { bots?: Rec[]; sections?: string[]; mcpServers?: string[
     skills: Object.fromEntries(Object.entries(app.skills).map(([id, skills]) => [id, Object.entries(skills).map(([name, skill]) => ({ name, enabled: skill.enabled, sha256: sha(skill.text) }))])),
     instances: [{ instanceId: "claude", driverKind: "claudeAgent", models: seed.models ?? ["claude-sonnet-5-5", "claude-haiku-5"] },
       ...(seed.codex ? [{ instanceId: "codex", driverKind: "codex", models: ["gpt-5.5"] }] : [])],
-    mcpServers: seed.mcpServers ?? ["notion"],
+    mcpServers: app.mcp, vaultSecrets: app.vault,
   });
   const plan = (profiles = folder(), options: { choices?: Record<string, ProfileChoice>; prune?: boolean } = {}) =>
     planProfiles({ folder: profiles, app: view(), state: app.state, ...options });
   const apply = async (profiles = folder(), options: { choices?: Record<string, ProfileChoice>; prune?: boolean; giveAccess?: boolean } = {}) => {
     const planned = plan(profiles, options);
     const outcome = await applyProfilePlan(planned, app.state.areas, port, { giveAccess: options.giveAccess ?? true, now: 1, folderName: "acme" });
-    app.state = { ...app.state, areas: outcome.areas };
+    app.state = { ...app.state, areas: outcome.areas, mcpServers: outcome.mcpServers };
     return { planned, outcome };
   };
   const bot = (id: string) => app.bots.find((candidate) => `${candidate.profileSource?.area}/${candidate.profileSource?.key}` === id)!;
@@ -244,12 +259,9 @@ describe("planProfiles", () => {
     expect(plan(wider).plan.noChanges).toBe(true);
   });
 
-  it("gives area and cloud Edu brains only as more access, takes the area's personalBrain, and lists MCP server files as coming later", async () => {
+  it("gives area and cloud Edu brains only as more access, and takes the area's personalBrain", async () => {
     const { plan, apply, bot } = fakeApp();
     const brains = (lines: ProfilePlanLine[]) => lines.filter((line) => line.field === "eduBrain").map((line) => `${line.kind}: ${line.text}`);
-    expect(kinds(plan().plan.lines, "later")).toEqual([
-      "MCP server notion (mcp/notion.md) is set up from profiles in a later update; until then nothing here changes for it",
-    ]);
     expect(brains(plan().plan.lines)).toEqual([
       "access: Analista BI: Edu brain the shared brain of area bi",
       "access: Reporter: Edu brain the shared brain of area bi",
@@ -670,5 +682,163 @@ describe("access floor", () => {
     expect(outcome.applied.map((line) => line.text)).toContain("Analista BI: instructions 1 line changed");
     app.refuse = null;
     expect(changes(plan(narrower).plan.lines).find((line) => line.startsWith(text))).toBeDefined();
+  });
+});
+
+describe("MCP servers from profiles", () => {
+  const NOTION_ADD = "Adds MCP server notion at https://mcp.notion.com/mcp, sending header Authorization from your Vault secret NOTION_TOKEN";
+  const ITEM = "0f5f2a43-6f1e-4c55-9d0b-3c1f8a2b7e10";
+  const OTHER_ITEM = "7a1c9e55-2b3d-4f60-8e91-0d4c2b6a5f38";
+  const mcpLines = (lines: readonly ProfilePlanLine[]) => lines.filter((line) => line.subject.kind === "mcp-server").map((line) => `${line.kind}: ${line.text}`);
+  const fake = () => folder({ "mcp/fake.md": `---
+edubot: 1
+kind: mcp-server
+key: fake
+transport: stdio
+command: node
+args: [fake-server.mjs, --mode, "read only"]
+env:
+  FAKE_TOKEN: { secret: FAKE_TOKEN }
+  LOG_LEVEL: quiet
+---
+A local test server.
+` });
+
+  it("adds a server as more access with its Vault key as a pointer given to it alone, and a second plan has no changes", async () => {
+    const { app, plan, apply } = fakeApp({ mcpServers: [], vault: { NOTION_TOKEN: ITEM } });
+    const first = plan().plan;
+    expect(mcpLines(first.lines)).toEqual([`access: ${NOTION_ADD}`]);
+    expect(kinds(first.lines, "note").filter((text) => text.includes("no MCP server named")), "the file defines it").toEqual([]);
+    const without = await apply(folder(), { giveAccess: false });
+    expect(without.outcome.skipped.map((line) => line.text)).toContain(NOTION_ADD);
+    expect(app.mcp.notion).toBeUndefined();
+    expect(app.state.mcpServers).toEqual({});
+
+    await apply();
+    expect(app.mcp.notion).toEqual({ type: "http", url: "https://mcp.notion.com/mcp", headers: { Authorization: `vault:${ITEM}` }, enabled: true });
+    expect(app.granted.notion).toEqual([ITEM]);
+    expect(app.state.mcpServers).toEqual({ notion: { hash: expect.stringMatching(/^[0-9a-f]{16}$/) } });
+    const again = plan().plan;
+    expect(again.noChanges).toBe(true);
+    expect(mcpLines(again.lines)).toEqual([]);
+  });
+
+  it("saves a server whose key is not in the Vault off with Needs your key, and turns it on once the key is there", async () => {
+    const { app, plan, apply } = fakeApp({ mcpServers: [] });
+    expect(mcpLines(plan().plan.lines)).toEqual([`access: ${NOTION_ADD}; Needs your key: it stays off until you save NOTION_TOKEN in Settings → Vault and apply again`]);
+    await apply();
+    expect(app.mcp.notion).toEqual({ type: "http", url: "https://mcp.notion.com/mcp", headers: {}, enabled: false });
+    expect(app.state.mcpServers.notion).toMatchObject({ needsKey: true });
+    const waiting = plan().plan;
+    expect(waiting.noChanges).toBe(true);
+    expect(mcpLines(waiting.lines)).toEqual(["note: MCP server notion: Needs your key: it stays off until you save NOTION_TOKEN in Settings → Vault and apply again"]);
+
+    app.vault.NOTION_TOKEN = ITEM;
+    expect(mcpLines(plan().plan.lines)).toEqual(["access: MCP server notion: sends header Authorization from your Vault secret NOTION_TOKEN; it is turned on"]);
+    await apply();
+    expect(app.mcp.notion).toMatchObject({ headers: { Authorization: `vault:${ITEM}` }, enabled: true });
+    expect(app.state.mcpServers.notion!.needsKey).toBeUndefined();
+    expect(plan().plan.noChanges).toBe(true);
+  });
+
+  it("turns an enabled server off when a second secret slot is missing, even though the filled spec matches", async () => {
+    const { app, plan, apply } = fakeApp({ mcpServers: [], vault: { NOTION_TOKEN: ITEM } });
+    await apply();
+    expect(app.mcp.notion.enabled).toBe(true);
+    const extra = folder({ "mcp/notion.md": (text) => text.replace("  Authorization: { secret: NOTION_TOKEN }", "  Authorization: { secret: NOTION_TOKEN }\n  X-Extra: { secret: OTHER }") });
+    const waiting = plan(extra).plan;
+    expect(waiting.noChanges).toBe(false);
+    expect(mcpLines(waiting.lines)).toEqual(["change: MCP server notion: Needs your key: it stays off until you save OTHER in Settings → Vault and apply again"]);
+    const turnedOff = await apply(extra, { giveAccess: false });
+    expect(turnedOff.outcome.skipped).toEqual([]);
+    expect(app.mcp.notion).toEqual({ type: "http", url: "https://mcp.notion.com/mcp", headers: { Authorization: `vault:${ITEM}` }, enabled: false });
+    expect(app.state.mcpServers.notion).toMatchObject({ needsKey: true });
+    const again = plan(extra).plan;
+    expect(again.noChanges).toBe(true);
+    expect(mcpLines(again.lines)).toEqual(["note: MCP server notion: Needs your key: it stays off until you save OTHER in Settings → Vault and apply again"]);
+  });
+
+  it("shows a command server's exact command, and keeps it off until the person turns it on, again after each change", async () => {
+    const { app, plan, apply } = fakeApp({ mcpServers: [], vault: { NOTION_TOKEN: ITEM, FAKE_TOKEN: OTHER_ITEM } });
+    expect(mcpLines(plan(fake()).plan.lines)).toContain("access: Adds MCP server fake that runs `node fake-server.mjs --mode \"read only\"` on this computer, "
+      + "with variable FAKE_TOKEN from your Vault secret FAKE_TOKEN and variable LOG_LEVEL set to \"quiet\"; it stays off until you check this command and turn it on in Apps → MCP servers");
+    await apply(fake());
+    expect(app.mcp.fake).toEqual({ command: "node", args: ["fake-server.mjs", "--mode", "read only"], env: { FAKE_TOKEN: `vault:${OTHER_ITEM}`, LOG_LEVEL: "quiet" }, enabled: false });
+    app.mcp.fake!.enabled = true;
+    expect(plan(fake()).plan.noChanges, "turning it on is the person's, not a change").toBe(true);
+
+    const newArgs = folder({ "mcp/fake.md": `---
+edubot: 1
+kind: mcp-server
+key: fake
+transport: stdio
+command: node
+args: [fake-server.mjs, --mode, write]
+env:
+  FAKE_TOKEN: { secret: FAKE_TOKEN }
+  LOG_LEVEL: quiet
+---
+A local test server.
+` });
+    expect(mcpLines(plan(newArgs).plan.lines)).toEqual(["access: MCP server fake: now runs `node fake-server.mjs --mode write` on this computer; it stays off until you check this command and turn it on in Apps → MCP servers"]);
+    await apply(newArgs);
+    expect(app.mcp.fake).toMatchObject({ args: ["fake-server.mjs", "--mode", "write"], enabled: false });
+  });
+
+  it("never touches a server this app had before, and leaves bots that name it on that one", async () => {
+    const { app, plan, apply } = fakeApp({ vault: { NOTION_TOKEN: ITEM } });
+    const before = structuredClone(app.mcp.notion);
+    expect(mcpLines(plan().plan.lines)).toEqual(["note: MCP server notion: this app already has a server with this name that did not come from your profiles, so it is left as it is and bots use that one"]);
+    await apply();
+    expect(app.mcp.notion).toEqual(before);
+    expect(app.state.mcpServers).toEqual({});
+    expect(app.calls.filter((call) => call.includes("/api/mcp/"))).toEqual([]);
+  });
+
+  it("narrows without asking, keeps a change made here, asks about a change on both sides, and keeps the app's own settings for the server", async () => {
+    const { app, plan, apply } = fakeApp({ mcpServers: [], vault: { NOTION_TOKEN: ITEM } });
+    const withOrg = folder({ "mcp/notion.md": (text) => text.replace("  Authorization: { secret: NOTION_TOKEN }", "  Authorization: { secret: NOTION_TOKEN }\n  X-Org: acme") });
+    await apply(withOrg);
+    app.mcp.notion = { ...app.mcp.notion, resultBudget: 500, oauth: { clientId: "edu-bot", clientSecret: "kept-here" } };
+    expect(mcpLines(plan().plan.lines)).toEqual(["change: MCP server notion: stops sending header X-Org"]);
+    const narrowed = await apply(folder(), { giveAccess: false });
+    expect(narrowed.outcome.skipped).toEqual([]);
+    expect(app.mcp.notion).toEqual({ type: "http", url: "https://mcp.notion.com/mcp", headers: { Authorization: `vault:${ITEM}` }, resultBudget: 500,
+      oauth: { clientId: "edu-bot", clientSecret: "kept-here" }, enabled: true });
+
+    app.mcp.notion!.url = "https://notion.internal.example/mcp";
+    expect(mcpLines(plan().plan.lines)).toEqual(["changed-here: MCP server notion: changed in this app; that change stays"]);
+    const moved = folder({ "mcp/notion.md": (text) => text.replace("https://mcp.notion.com/mcp", "https://mcp.notion.com/v2/mcp") });
+    const conflict = plan(moved).plan.lines.find((line) => line.subject.kind === "mcp-server")!;
+    expect(conflict).toMatchObject({ kind: "conflict", text: "MCP server notion: the file and this app both changed it", conflict: { choice: "mcp:notion" } });
+    expect(mcpLines(plan(moved, { choices: { "mcp:notion": "mine" } }).plan.lines)).toEqual(["note: MCP server notion: you keep yours; the file's value is recorded, so this is no longer a conflict"]);
+    expect(mcpLines(plan(moved, { choices: { "mcp:notion": "file" } }).plan.lines)).toEqual(["access: MCP server notion: address https://notion.internal.example/mcp → https://mcp.notion.com/v2/mcp"]);
+    await apply(moved, { choices: { "mcp:notion": "file" } });
+    expect(app.mcp.notion!.url).toBe("https://mcp.notion.com/v2/mcp");
+    expect(plan(moved).plan.noChanges).toBe(true);
+  });
+
+  it("keeps a server whose file is gone or broken, and deletes it only when the plan prunes", async () => {
+    const { app, plan, apply } = fakeApp({ mcpServers: [], vault: { NOTION_TOKEN: ITEM } });
+    await apply();
+    const broken = withProblem(folder({ "mcp/notion.md": null }), "mcp/notion.md");
+    expect(mcpLines(plan(broken).plan.lines)).toEqual(["blocked: mcp/notion.md has problems, so MCP server notion is left as it is"]);
+    expect(mcpLines(plan(broken, { prune: true }).plan.lines)).toEqual(["blocked: mcp/notion.md has problems, so MCP server notion is left as it is"]);
+    const gone = folder({ "mcp/notion.md": null });
+    expect(mcpLines(plan(gone).plan.lines)).toEqual(["gone: MCP server notion is no longer in your profiles; it stays in this app as it is"]);
+    await apply(gone);
+    expect(app.mcp.notion).toBeDefined();
+    expect(app.state.mcpServers.notion).toBeDefined();
+    expect(mcpLines(plan(gone, { prune: true }).plan.lines)).toEqual(["remove: Deletes MCP server notion, which is no longer in your profiles"]);
+    await apply(gone, { prune: true, giveAccess: false });
+    expect(app.mcp.notion).toBeUndefined();
+    expect(app.state.mcpServers).toEqual({});
+  });
+
+  it("fills only secret slots: a server with a variable or key file slot stays off", () => {
+    const { plan } = fakeApp({ mcpServers: [] });
+    const env = folder({ "mcp/notion.md": (text) => text.replace("{ secret: NOTION_TOKEN }", "{ env: NOTION_TOKEN }") });
+    expect(mcpLines(plan(env).plan.lines)).toEqual(["access: Adds MCP server notion at https://mcp.notion.com/mcp, sending header Authorization from environment variable NOTION_TOKEN; "
+      + "Needs your key: this app fills an MCP server's keys only from secret slots ({ secret: NAME }), so it stays off"]);
   });
 });

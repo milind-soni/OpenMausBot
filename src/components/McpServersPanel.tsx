@@ -597,7 +597,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
     const needsSignIn = isRemoteMcpListing(server) && server.auth === "needs-sign-in";
     const result = probe[server.name];
     const failure = result && !result.ok && !result.auth ? t("mcp.check.failed", { reason: failureReason(server, result) }) : null;
-    const status = needsSignIn ? t("mcp.auth.needsSignIn") : server.offFor?.length ? t("mcp.offFor", { bots: server.offFor.map(botName).join(", ") }) : isRemoteMcpListing(server) ? server.url : [server.command, ...server.args].join(" ");
+    const status = needsSignIn ? t("mcp.auth.needsSignIn") : server.needsKey ? t("mcp.profile.needsKey") : server.offFor?.length ? t("mcp.offFor", { bots: server.offFor.map(botName).join(", ") }) : isRemoteMcpListing(server) ? server.url : [server.command, ...server.args].join(" ");
     return <div key={server.name} data-app-tile={server.name} data-mcp-tile="" className="flex min-w-0 flex-col rounded-xl px-2 py-2 transition-colors hover:bg-raised/40">
       <div className="flex items-center gap-3">
         <div className="flex size-10 shrink-0 items-center justify-center rounded-[8px] bg-raised text-ink-secondary">{isRemoteMcpListing(server) ? <Globe size={19} /> : <ServerCog size={19} />}</div>
@@ -730,6 +730,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
                       {server.bot && <div data-mcp-own-bot className="mt-1 text-[12px] text-ink-secondary">{t("mcp.ownBot", { bot: botName(server.bot) })}</div>}
                       {server.offFor?.length ? <div data-mcp-off-for className="mt-1 text-[12px] text-ink-secondary">{t("mcp.offFor", { bots: server.offFor.map(botName).join(", ") })}</div> : null}
                       {server.keyOff && <div data-mcp-key-off className="mt-1 text-[12px] text-warning">{t("mcp.keyOff")}</div>}
+                      {server.needsKey && <div data-mcp-needs-key className="mt-1 text-[12px] text-warning">{t("mcp.profile.needsKey")}</div>}
                       <div className="mt-1 truncate font-mono text-[12px] text-ink-secondary">{isRemoteMcpListing(server) ? server.url : [server.command, ...server.args].join(" ")}</div>
                       {isRemoteMcpListing(server)
                         ? server.headerKeys.length > 0 && <div className="mt-1 truncate text-[11px] text-ink-secondary">{t("mcp.headersSaved", { keys: server.headerKeys.join(", ") })}</div>

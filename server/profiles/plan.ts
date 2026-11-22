@@ -9,6 +9,7 @@ import type { ConnectorToolGrant } from "../../shared/wire.ts";
 import { APPROVAL_LABEL, canonicalBrain, canonicalGrants, canonicalScope, changedLines, everyTool, type DesiredBot } from "../desired-bot.ts";
 import { eduBrainWidens } from "../edu-brain.ts";
 import { SECTION_CONTEXT_MAX_BYTES } from "../section-context.ts";
+import { planMcpServers, type McpServerAction } from "./mcp-plan.ts";
 import type { ProfilesState } from "./state.ts";
 
 type Rec = Record<string, any>;
@@ -24,8 +25,10 @@ export interface AppView {
   skills: Record<string, Array<{ name: string; enabled: boolean; sha256: string }>>;
   /** GET /api/instances: each engine, its kind and the models it offers. */
   instances: Array<{ instanceId: string; driverKind?: string; models: string[] }>;
-  /** The MCP servers this app has, by name. */
-  mcpServers: string[];
+  /** The MCP servers this app has, by name, as config.json keeps them (a Vault key as its `vault:<id>` pointer). */
+  mcpServers: Record<string, unknown>;
+  /** The id of the team's Vault secret each secret slot of the folder's MCP servers names, for the names found. */
+  vaultSecrets: Record<string, string>;
 }
 
 export interface PlanInput {
@@ -98,13 +101,15 @@ export interface RemoveAction {
   line: ProfilePlanLine;
 }
 
-export type ProfileAction = AreaAction | BotAction | RemoveAction;
+export type ProfileAction = AreaAction | BotAction | RemoveAction | McpServerAction;
 
 export interface PlanOutput {
   plan: ProfilePlan;
   actions: ProfileAction[];
   /** Areas of the stored state the plan no longer maps, which applying forgets. */
   goneAreas: string[];
+  /** The MCP servers profiles.json keeps whatever applying does; each server written replaces its entry. */
+  mcpServers: ProfilesState["mcpServers"];
 }
 
 /** The levels POST /api/bots takes; a bot on any other level starts at Ask and is raised to it afterwards. */
@@ -424,7 +429,7 @@ export function planProfiles(input: PlanInput): PlanOutput {
     if (bot.eduBrain?.mode === "cloud" && "file" in bot.eduBrain.token) {
       note(`${bot.name}: keeps ${echo ? "its current Edu brain" : "an Edu brain of its own"}; this app reads an edu-cloud token from a secret slot ({ secret: NAME }) or an environment variable, not from a key file`, "eduBrain");
     }
-    for (const name of bot.mcpServers.filter((server) => !app.mcpServers.includes(server))) {
+    for (const name of bot.mcpServers.filter((server) => !Object.hasOwn(app.mcpServers, server) && !folder.mcpServers.some((defined) => defined.key === server))) {
       note(`${bot.name}: this app has no MCP server named ${name} yet, so the bot cannot use it until one is added`, "mcpServers");
     }
     let modelSkipped = false;
@@ -599,10 +604,11 @@ export function planProfiles(input: PlanInput): PlanOutput {
     }
   }
 
-  for (const server of folder.mcpServers) {
-    lines.push({ kind: "later", subject: { kind: "mcp-server", id: server.key, name: server.key }, file: server.file,
-      text: `MCP server ${server.key} (${server.file}) is set up from profiles in a later update; until then nothing here changes for it` });
-  }
+  const mcp = planMcpServers({ servers: folder.mcpServers, problems: folder.problems, blockedAll: blocked.all, app: app.mcpServers, vault: app.vaultSecrets,
+    state: state.mcpServers, choices, prune: input.prune === true });
+  lines.push(...mcp.lines);
+  actions.push(...mcp.actions);
+  settled += mcp.settled;
 
   if (blocked.all) {
     for (const line of lines) if (line.kind === "add" || line.kind === "change" || line.kind === "access" || line.kind === "remove") line.kind = "blocked";
@@ -611,7 +617,7 @@ export function planProfiles(input: PlanInput): PlanOutput {
   const counts = countLines(lines);
   const noChanges = counts.add + counts.change + counts.access + counts.conflict + counts.remove + settled === 0;
   const keptAreas = blocked.all ? [] : goneAreas;
-  const digest = planDigest({ folder, commit: input.commit, lines, actions, goneAreas: keptAreas, choices, prune: input.prune === true });
+  const digest = planDigest({ folder, commit: input.commit, lines, actions, goneAreas: keptAreas, mcpServers: mcp.kept, choices, prune: input.prune === true });
   return {
     plan: {
       folder: folder.root, ...(input.commit ? { commit: input.commit } : {}), ...(folder.org ? { organization: folder.org.name } : {}),
@@ -619,17 +625,18 @@ export function planProfiles(input: PlanInput): PlanOutput {
     },
     actions,
     goneAreas: keptAreas,
+    mcpServers: mcp.kept,
   };
 }
 
 /** Binds a plan to exactly what applying it writes: every file's bytes, the commit, the lines, every action's payload with
  * its hashes, the areas it forgets, the choices and prune. Security: any change between plan and apply gives a 409. */
 function planDigest(input: { folder: PlanInput["folder"]; commit: string | undefined; lines: readonly ProfilePlanLine[]; actions: readonly ProfileAction[];
-  goneAreas: readonly string[]; choices: Record<string, ProfileChoice>; prune: boolean }): string {
+  goneAreas: readonly string[]; mcpServers: ProfilesState["mcpServers"]; choices: Record<string, ProfileChoice>; prune: boolean }): string {
   const mutations = input.actions.map((action) => (action.kind === "bot" ? { ...action, echo: action.echo.id ?? null } : action));
   return createHash("sha256").update(JSON.stringify({
     folder: input.folder.root, contents: input.folder.contentHash, problems: input.folder.problems, commit: input.commit ?? null, lines: input.lines,
-    mutations, goneAreas: input.goneAreas, choices: Object.entries(input.choices).sort(([a], [b]) => a.localeCompare(b)), prune: input.prune,
+    mutations, goneAreas: input.goneAreas, mcpServers: input.mcpServers, choices: Object.entries(input.choices).sort(([a], [b]) => a.localeCompare(b)), prune: input.prune,
   })).digest("hex").slice(0, 32);
 }
 

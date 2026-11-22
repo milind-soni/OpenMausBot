@@ -23,7 +23,11 @@ export interface ProfilesRouteDeps {
   desktopManaged: boolean;
   /** The app's routes, which plan and apply call in this process as the person who asked. */
   routes(): readonly RouteHandler[];
-  mcpServerNames(): string[];
+  /** The app's MCP servers as config.json keeps them, by name. */
+  mcpServers(): Record<string, unknown>;
+  /** The id of the team's Vault secret each of `names` finds, for the names found. Security: only where whoever applies
+   * owns every Vault item, so a profile never points a server at a member's own secret. */
+  vaultSecretIds(names: readonly string[]): Record<string, string>;
   stamp(botId: string, source: ProfileSource): void;
   audit(row: { action: string; target: { kind: string; name: string }; changed: string[]; after: Record<string, unknown> }, auth: RequestAuth, req: IncomingMessage): void;
 }
@@ -114,7 +118,9 @@ export function createProfilesRoutes(deps: ProfilesRouteDeps): RouteHandler {
       ...(typeof instance.driverKind === "string" ? { driverKind: instance.driverKind } : {}),
       models: [instance.models?.default, ...(instance.models?.options ?? []).map((option: Rec) => option.id)].filter((id): id is string => typeof id === "string"),
     }));
-    return { bots, sections, briefs, skills, instances, mcpServers: deps.mcpServerNames() };
+    const slots = folder.mcpServers.flatMap((server) => Object.values({ ...server.headers, ...server.env }))
+      .flatMap((value) => typeof value === "object" && "secret" in value ? [value.secret] : []);
+    return { bots, sections, briefs, skills, instances, mcpServers: deps.mcpServers(), vaultSecrets: deps.vaultSecretIds([...new Set(slots)]) };
   };
 
   const plan = async (req: IncomingMessage, auth: RequestAuth, body: z.infer<typeof requestSchema>): Promise<{ planned: PlanOutput; folder: LoadedProfileFolder; state: ProfilesState }> => {
@@ -201,15 +207,15 @@ export function createProfilesRoutes(deps: ProfilesRouteDeps): RouteHandler {
     const outcome = await applyProfilePlan(planned, state.areas, { call, stamp: deps.stamp },
       { giveAccess: body.giveAccess === true, ...(commit ? { commit } : {}), now, folderName: basename(folder.root) });
     writeProfilesState(deps.dataDir, {
-      ...readProfilesState(deps.dataDir), folder: folder.root, areas: outcome.areas,
+      ...readProfilesState(deps.dataDir), folder: folder.root, areas: outcome.areas, mcpServers: outcome.mcpServers,
       applied: { at: now, ...(commit ? { commit } : {}), digest: planned.plan.digest, folder: folder.root },
     });
     if (outcome.applied.length) {
       deps.audit({
         action: "profile.apply", target: { kind: "profile-folder", name: folder.root },
-        changed: outcome.bots.flatMap((bot) => bot.fields.map((field) => `${bot.id}.${field}`)),
+        changed: [...outcome.servers.map((key) => `mcp/${key}`), ...outcome.bots.flatMap((bot) => bot.fields.map((field) => `${bot.id}.${field}`))],
         after: { folder: folder.root, ...(commit ? { commit } : {}), bots: outcome.bots.filter((bot) => bot.fields.length).map((bot) => ({ profile: bot.id, id: bot.botId, name: bot.name, fields: bot.fields })),
-          areas: Object.keys(outcome.areas), lines: outcome.applied.map((line) => line.text) },
+          areas: Object.keys(outcome.areas), ...(outcome.servers.length ? { mcpServers: outcome.servers } : {}), lines: outcome.applied.map((line) => line.text) },
       }, auth, req);
     }
     return { ...planned.plan, applied: { lines: outcome.applied, skipped: outcome.skipped } };

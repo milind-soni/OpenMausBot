@@ -10,6 +10,8 @@ import { launchRestartableServer, type RestartableServer } from "../testing/rest
 type Rec = Record<string, any>;
 const ACME = join(import.meta.dirname, "..", "testing", "fixtures", "profiles", "acme");
 const posixOnly = describe.skipIf(process.platform === "win32");
+const NOTION_ADD = "Adds MCP server notion at https://mcp.notion.com/mcp, sending header Authorization from your Vault secret NOTION_TOKEN; "
+  + "Needs your key: it stays off until you save NOTION_TOKEN in Settings → Vault and apply again";
 
 let server: RestartableServer;
 let scratch: string;
@@ -66,13 +68,13 @@ posixOnly("profile apply routes", () => {
   it("plans the chosen folder without changing anything", async () => {
     const plan = await api("POST", "/api/profiles/plan", {});
     expect(plan.status).toBe(200);
-    expect(plan.body).toMatchObject({ folder, organization: "Acme", noChanges: false, problems: [], counts: { add: 7, access: 4, later: 1 } });
+    expect(plan.body).toMatchObject({ folder, organization: "Acme", noChanges: false, problems: [], counts: { add: 7, access: 5, later: 0 } });
     expect(plan.body.commit).toBeUndefined();
     const closer = plan.body.lines.filter((line: Rec) => line.subject.id === "sales/closer" && line.kind !== "access").map((line: Rec) => line.text);
     expect(closer).toContain("Adds Closer to area Sales (Sales follow-up · codex/gpt-5.5 · Ask)");
     expect(closer).toContain("Closer: Accept edits isn't available for its AI here, so it starts at Ask for approval");
     expect(plan.body.lines.filter((line: Rec) => line.kind === "access").map((line: Rec) => line.text)).toEqual(["Analista BI: Edu brain the shared brain of area bi", "Analista BI: Edu crew on",
-      "Reporter: Edu brain the shared brain of area bi", "Closer: Edu brain edu-cloud at https://brain.acme.example/mcp, token from secret EDU_CLOUD_SALES"]);
+      "Reporter: Edu brain the shared brain of area bi", "Closer: Edu brain edu-cloud at https://brain.acme.example/mcp, token from secret EDU_CLOUD_SALES", NOTION_ADD]);
     expect(await profileBots()).toEqual([]);
   });
 
@@ -81,7 +83,7 @@ posixOnly("profile apply routes", () => {
     expect(refused.status).toBe(403);
     expect(refused.body.error).toBe("These changes give bots more access, so they have to be confirmed from the desktop app or a paired admin device.");
     expect(refused.body.lines.map((line: Rec) => line.text)).toEqual(["Analista BI: Edu brain the shared brain of area bi", "Analista BI: Edu crew on",
-      "Reporter: Edu brain the shared brain of area bi", "Closer: Edu brain edu-cloud at https://brain.acme.example/mcp, token from secret EDU_CLOUD_SALES"]);
+      "Reporter: Edu brain the shared brain of area bi", "Closer: Edu brain edu-cloud at https://brain.acme.example/mcp, token from secret EDU_CLOUD_SALES", NOTION_ADD]);
     expect(await profileBots()).toEqual([]);
     expect((await api("POST", "/api/profiles/apply", { giveAccess: true }, "member")).status).toBe(403);
     expect(await profileBots()).toEqual([]);
@@ -114,7 +116,7 @@ posixOnly("profile apply routes", () => {
     const plan = (await api("POST", "/api/profiles/plan", {})).body;
     const applied = await api("POST", "/api/profiles/apply", { expect: plan.digest });
     expect(applied.status).toBe(200);
-    expect(applied.body.applied.skipped.map((line: Rec) => line.text)).toEqual(["Analista BI: Edu brain the shared brain of area bi", "Analista BI: Edu crew on",
+    expect(applied.body.applied.skipped.map((line: Rec) => line.text)).toEqual([NOTION_ADD, "Analista BI: Edu brain the shared brain of area bi", "Analista BI: Edu crew on",
       "Reporter: Edu brain the shared brain of area bi", "Closer: Edu brain edu-cloud at https://brain.acme.example/mcp, token from secret EDU_CLOUD_SALES"]);
     expect(applied.body.applied.skipped[0].reason).toContain("desktop app or a paired admin device");
     expect((await profileBots()).map((bot) => bot.name).sort()).toEqual(["Analista BI", "Closer", "Reporter"]);
@@ -126,11 +128,12 @@ posixOnly("profile apply routes", () => {
     const again = (await api("POST", "/api/profiles/plan", {})).body;
     expect(again.lines.filter((line: Rec) => ["add", "change", "access", "conflict"].includes(line.kind)).map((line: Rec) => line.text))
       .toEqual(["Analista BI: Edu brain own → the shared brain of area bi", "Analista BI: Edu crew off → on",
-        "Reporter: Edu brain own → the shared brain of area bi", "Closer: Edu brain own → edu-cloud at https://brain.acme.example/mcp, token from secret EDU_CLOUD_SALES"]);
+        "Reporter: Edu brain own → the shared brain of area bi", "Closer: Edu brain own → edu-cloud at https://brain.acme.example/mcp, token from secret EDU_CLOUD_SALES", NOTION_ADD]);
     const confirmed = await api("POST", "/api/profiles/apply", { giveAccess: true, expect: again.digest }, "admin");
     expect(confirmed.status).toBe(200);
     expect(confirmed.body.applied.skipped).toEqual([]);
-    expect(confirmed.body.applied.lines).toHaveLength(4);
+    expect(confirmed.body.applied.lines).toHaveLength(5);
+    expect((await api("GET", "/api/mcp/servers")).body.servers).toEqual([expect.objectContaining({ name: "notion", url: "https://mcp.notion.com/mcp", headerKeys: [], enabled: false })]);
     expect((await analyst())!.eduCrew).toBe(true);
     expect((await analyst())!.eduBrain).toEqual({ mode: "area", area: "bi" });
     const settled = (await api("POST", "/api/profiles/plan", {})).body;
@@ -150,7 +153,7 @@ posixOnly("profile apply routes", () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
     const rows = (await api("GET", "/api/admin-activity?what=profile", undefined, "admin")).body.entries as Rec[];
     expect(rows.map((row) => row.action)).toEqual(["profile.apply", "profile.apply"]);
-    expect(rows.find((row) => row.changed?.includes("bi/analyst.eduCrew") && row.changed.includes("sales/closer.eduBrain") && row.changed.length === 4)).toBeTruthy();
+    expect(rows.find((row) => row.changed?.includes("bi/analyst.eduCrew") && row.changed.includes("sales/closer.eduBrain") && row.changed.includes("mcp/notion") && row.changed.length === 5)).toBeTruthy();
     expect(rows.find((row) => row.changed?.includes("sales/closer.connectors"))?.after).toMatchObject({ folder });
     const status = (await api("GET", "/api/profiles")).body;
     expect(status).toMatchObject({ folder, applied: { folder, digest: expect.any(String) }, areas: { bi: { section: "BI" }, sales: { section: "Sales" } } });

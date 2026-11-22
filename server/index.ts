@@ -588,7 +588,8 @@ import { createTeamOwnerRoutes } from "./routes/team-owners.ts";
 import { createBotSettingsRoutes } from "./routes/bot-settings.ts";
 import { createBotPatchRoutes } from "./routes/bot-patch.ts";
 import { createProfilesRoutes } from "./routes/profiles.ts";
-import { departmentRenamed } from "./profiles/state.ts";
+import { departmentRenamed, readProfilesState } from "./profiles/state.ts";
+import { teamVaultSecretIds } from "./profiles/mcp-plan.ts";
 import { createBotOrderRoutes } from "./routes/bot-order.ts";
 import { createGroupOrderRoutes } from "./routes/group-order.ts";
 import { createBotLifecycleRoutes } from "./routes/bot-lifecycle.ts";
@@ -9154,7 +9155,8 @@ async function resolveAndSendTeamSetup(res: ServerResponse, args: { botId: strin
 
 const { mcpRequests, mcpSignInCards, mcpServerDeps, resolveAndSendMcp, mcpServerResponse, mcpPolicyRefusal } = createMcpChat({ store, cfg, mcpOAuth, teamConnections, mcpServersHost, managedPolicy,
   secretCards: () => secretCards, mcpConfig: () => mcpConfig, teamCloud: Boolean(CLOUD_TEAM), threadLanguage, answerCardNode, followCard: (threadId, from, to) => coordinator.followCard(threadId, from, to), fullAccessForSource, cloudGuestDriven, liveTurnByThread, broadcast,
-  publicOrigins: () => [CLOUD_HOME?.publicOrigin, hostedWorkspaceConfiguration()?.tenant.origin, savedCustomDomain(), FALLBACK_PUBLIC_URL], threadVisible: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId), lending: () => lentMcp });
+  publicOrigins: () => [CLOUD_HOME?.publicOrigin, hostedWorkspaceConfiguration()?.tenant.origin, savedCustomDomain(), FALLBACK_PUBLIC_URL], threadVisible: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId), lending: () => lentMcp,
+  profileServers: () => readProfilesState(DATA_DIR).mcpServers });
 const routineTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 function sendRoutineResolution(
   res: ServerResponse,
@@ -12028,7 +12030,8 @@ const botPatchRoutes = createBotPatchRoutes({ turnBots: directTurnBots,
   revokeInternalCapabilitiesForThread, runningTurnInstance, closeOpenApprovals, assertTeamComputerChangeIdle, forgetTemporaryBrowser, levelOf, team: Boolean(CLOUD_TEAM), mainThreadTasks, chiefChanged: (changed) => chiefRooms.moved(changed), ...(personRooms.personMarkThread ? { personMarkThread: personRooms.personMarkThread, shownThread: (auth: RequestAuth, bot: BotRecord) => memberBot(wireBot(bot), visibleTo(viewerFor(auth))).threadId } : {}),
 }); ROUTES.push(botPatchRoutes);
 ROUTES.push(createProfilesRoutes({
-  dataDir: DATA_DIR, desktopManaged: DESKTOP_MANAGED, routes: () => ROUTES, mcpServerNames: () => Object.keys(cfg.mcpServers ?? {}),
+  dataDir: DATA_DIR, desktopManaged: DESKTOP_MANAGED, routes: () => ROUTES, mcpServers: () => ({ ...cfg.mcpServers }),
+  vaultSecretIds: (names) => (CLOUD_TEAM || HOSTED_WORKSPACE ? {} : teamVaultSecretIds(logins.listSecrets(TEAM_READER), names)),
   stamp: (botId, profileSource) => {
     const bot = store.patchBot(botId, { profileSource });
     if (bot) broadcast({ kind: "bot", bot: wireBot(bot) });

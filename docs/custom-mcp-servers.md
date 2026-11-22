@@ -329,6 +329,22 @@ turns before changing this selection; the next direct or channel turn gets the
 new list. The list does not filter project-local `.mcp.json` files and is not a
 shell sandbox. Individual tool approvals depend on the engine and approval mode.
 
+To give every bot of a department the same servers, open the department's **⋯** menu and choose **MCP servers for this
+area**. The servers you tick are added to each bot's own selection, one bot at a time and through the same request as
+the bot's own page, so every check of that page still applies. A bot set to use every enabled server already has them
+and is left as it is. Nothing is stored for the department itself: a bot added to it later gets only what you give it.
+Only the owner and admins see this item.
+
+### Servers from your profiles
+
+A profile folder can define servers under `mcp/<name>.md` ([profiles.md](profiles.md#mcp-servers)). Applying the folder
+adds each one here under its file's name, as **Gives more access**, so only the desktop app or a paired admin device
+applies it. A `{ secret: NAME }` header or variable points at the team Vault secret called `NAME` (`vault:<id>`); the
+value stays in the Vault. Until that secret exists the server is saved off and shows **Needs your key**: save the key
+in **Settings → Vault**, then apply the profiles again. A command server is always saved off, and again after each
+change to it: read the command the plan shows, then turn it on here. A server that was here before, and not from a
+profile, is never changed by one.
+
 ### A bot's own servers, and servers that don't start
 
 A bot can add a command server with `add_mcp_server` (saved switched off, as

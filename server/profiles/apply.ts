@@ -1,10 +1,11 @@
-// Not atomic: each department and bot is its own write. A refused write leaves that bot as it was and its stamp
+// Not atomic: each MCP server, department and bot is its own write. A refused write leaves that bot as it was and its stamp
 // unchanged, so the next plan offers the same change again; a refused approval instead falls to a lower level, which the
 // stamp records so the next plan explains it.
 import { APPROVAL_MODES, approvalModeFor, approvalModeWidens, levelWithin, type ApprovalMode } from "../../shared/approval-mode.ts";
 import type { ProfilePlanLine } from "../../shared/profile-plan.ts";
 import type { ProfileSource } from "../../shared/wire.ts";
 import { APPROVAL_LABEL, botPatch, type DesiredBot } from "../desired-bot.ts";
+import type { McpServerAction } from "./mcp-plan.ts";
 import { appHashes, approvalHash, approvalPhrase, type AreaAction, type BotAction, type PlanOutput } from "./plan.ts";
 import type { ProfilesState } from "./state.ts";
 
@@ -29,6 +30,9 @@ export interface ApplyOutcome {
   applied: ProfilePlanLine[];
   skipped: Array<ProfilePlanLine & { reason: string }>;
   areas: ProfilesState["areas"];
+  mcpServers: ProfilesState["mcpServers"];
+  /** Each MCP server written, by key. */
+  servers: string[];
   /** Each bot written: its id in the app and the fields that changed, for the admin activity log. */
   bots: Array<{ id: string; botId: string; name: string; fields: string[] }>;
 }
@@ -80,7 +84,7 @@ async function createBot(action: BotAction, write: (method: string, path: string
 }
 
 export async function applyProfilePlan(planned: PlanOutput, previous: ProfilesState["areas"], port: ProfileAppPort, options: ApplyOptions): Promise<ApplyOutcome> {
-  const outcome: ApplyOutcome = { applied: [], skipped: [], areas: { ...previous }, bots: [] };
+  const outcome: ApplyOutcome = { applied: [], skipped: [], areas: { ...previous }, mcpServers: { ...planned.mcpServers }, servers: [], bots: [] };
   for (const key of planned.goneAreas) delete outcome.areas[key];
   const skip = (line: ProfilePlanLine, why: string) => outcome.skipped.push({ ...line, reason: why });
   const write = async (method: string, path: string, body?: unknown) => {
@@ -88,6 +92,36 @@ export async function applyProfilePlan(planned: PlanOutput, previous: ProfilesSt
     if (result.status >= 400) throw new Refused(reason(result));
     return result.body;
   };
+
+  for (const action of planned.actions.filter((candidate): candidate is McpServerAction => candidate.kind === "mcp-server")) {
+    if (action.access && !options.giveAccess) {
+      skip(action.line, "gives more access; confirm it from the desktop app or a paired admin device");
+      continue;
+    }
+    const route = `/api/mcp/servers/${enc(action.key)}`;
+    try {
+      if (action.op === "remove") {
+        await write("DELETE", route);
+        delete outcome.mcpServers[action.key];
+      } else {
+        const body = { ...action.keep, ...action.spec, ...(action.enabled === undefined ? {} : { enabled: action.enabled }), vaultKeys: action.vaultKeys };
+        if (action.op === "add") await write("POST", "/api/mcp/servers", { name: action.key, ...body });
+        else await write("PUT", route, body);
+        outcome.mcpServers[action.key] = action.state!;
+      }
+      outcome.applied.push(action.line);
+      outcome.servers.push(action.key);
+    } catch (error) {
+      skip(action.line, (error as Error).message);
+      continue;
+    }
+    if (action.op !== "add" || !action.enabled) continue;
+    try {
+      await write("PATCH", route, { enabled: true });
+    } catch (error) {
+      skip({ ...action.line, kind: "note", text: `MCP server ${action.key} was added, but this app did not turn it on; turn it on in Apps → MCP servers` }, (error as Error).message);
+    }
+  }
 
   for (const action of planned.actions.filter((candidate): candidate is AreaAction => candidate.kind === "area")) {
     const hashes = { ...action.hashes };

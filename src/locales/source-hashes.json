@@ -10792,7 +10792,13 @@
       "connectors.tile.needsKey": "ffd45850a7c6ad83d83982690a89828ce7a5c365fbbd98191c2b81b93c3cc73f",
       "connectors.empty.noKeyDesc": "1081e4b2624467ff5c0a49e30dced77c3ec36a7435400e857f728a11215db983",
       "connectors.empty.addMcp": "6f731aa539076cd79dac1fc94c9a2b2e10ed23619b95b0ebff84f80e1a1ae71d",
-      "keys.section.apps": "c80fdc77d5ef4ea97e66f50f72428d1566ff235d66c1b7634d9d34b71c1ea349"
+      "keys.section.apps": "c80fdc77d5ef4ea97e66f50f72428d1566ff235d66c1b7634d9d34b71c1ea349",
+      "teamSettings.tab.mcp": "22a7559f09bf8f82c510280f934bf50db4c45cc611fd4dd47d7cbf7c7d4f5b82",
+      "teamSettings.mcpHint": "09f91a7554cecf7bd9665efd5208d1eb33497746cfbc38c3978c8846a839aec3",
+      "teamSettings.mcpNone": "a809ccf86e9a891fea4d6a2b5e53722de75afabc8e0d30e3f8564b75be38ffbb",
+      "teamSettings.mcpOff": "ca7981b46ecf2c1787b6d76d81d9fd7fa0ca95842e2fcc2a452869891a9334d1",
+      "mcp.profile.needsKey": "af326d73c83b7d660af4a18c5ddfe7c32e5e7793f08ba57c5ded010f185ee10a",
+      "team.mcpServers": "b118178a1b6ef74ba4e99b5b9f75683876acd34d09aabf25c657de8efe209577"
     },
     "fr": {
       "pro.fromPrice": "d987cb24a0047365eaccd50bf5ca52c7a9c255c22030969ca50e906d1a10ca56",
@@ -38199,7 +38205,13 @@
       "connectors.setup.pasteKey": "b958190e74570649b08b55d025771365d97da9f2f7b13bcbd78f76e2e863813f",
       "connectors.tile.needsKey": "ffd45850a7c6ad83d83982690a89828ce7a5c365fbbd98191c2b81b93c3cc73f",
       "connectors.empty.noKeyDesc": "1081e4b2624467ff5c0a49e30dced77c3ec36a7435400e857f728a11215db983",
-      "connectors.empty.addMcp": "6f731aa539076cd79dac1fc94c9a2b2e10ed23619b95b0ebff84f80e1a1ae71d"
+      "connectors.empty.addMcp": "6f731aa539076cd79dac1fc94c9a2b2e10ed23619b95b0ebff84f80e1a1ae71d",
+      "teamSettings.tab.mcp": "22a7559f09bf8f82c510280f934bf50db4c45cc611fd4dd47d7cbf7c7d4f5b82",
+      "teamSettings.mcpHint": "09f91a7554cecf7bd9665efd5208d1eb33497746cfbc38c3978c8846a839aec3",
+      "teamSettings.mcpNone": "a809ccf86e9a891fea4d6a2b5e53722de75afabc8e0d30e3f8564b75be38ffbb",
+      "teamSettings.mcpOff": "ca7981b46ecf2c1787b6d76d81d9fd7fa0ca95842e2fcc2a452869891a9334d1",
+      "mcp.profile.needsKey": "af326d73c83b7d660af4a18c5ddfe7c32e5e7793f08ba57c5ded010f185ee10a",
+      "team.mcpServers": "b118178a1b6ef74ba4e99b5b9f75683876acd34d09aabf25c657de8efe209577"
     },
     "zh": {
       "pro.fromPrice": "d987cb24a0047365eaccd50bf5ca52c7a9c255c22030969ca50e906d1a10ca56",

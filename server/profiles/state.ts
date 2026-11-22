@@ -13,9 +13,11 @@ const stateSchema = z.object({
   folder: z.string().optional(),
   applied: z.object({ at: z.number(), commit: z.string().optional(), digest: z.string(), folder: z.string() }).optional(),
   areas: z.record(z.string(), z.object({ section: z.string(), hashes })).default({}),
+  mcpServers: z.record(z.string(), z.object({ hash: z.string(), needsKey: z.literal(true).optional() })).default({}),
 });
 
-/** `<data>/profiles.json`: the folder the person chose, what was last applied, and each applied area's department. */
+/** `<data>/profiles.json`: the folder the person chose, what was last applied, each applied area's department, and each
+ * MCP server a profile made: the hash of what it was given, and whether it was left off for a missing key. */
 export type ProfilesState = z.infer<typeof stateSchema>;
 
 export const profilesStateFile = (dataDir: string) => join(dataDir, "profiles.json");
@@ -25,14 +27,14 @@ export function readProfilesState(dataDir: string): ProfilesState {
   try {
     raw = readFileSync(profilesStateFile(dataDir), "utf8");
   } catch {
-    return { version: 1, areas: {} };
+    return { version: 1, areas: {}, mcpServers: {} };
   }
   try {
     const parsed = stateSchema.safeParse(JSON.parse(raw));
     if (parsed.success) return parsed.data;
   } catch { /* falls through to the empty state */ }
   console.warn("profiles.json could not be read; starting with no applied profiles");
-  return { version: 1, areas: {} };
+  return { version: 1, areas: {}, mcpServers: {} };
 }
 
 export function writeProfilesState(dataDir: string, state: ProfilesState): void {

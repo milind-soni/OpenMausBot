@@ -42,6 +42,8 @@ export interface McpChatDeps {
   liveTurnByThread: ReadonlyMap<string, string>;
   broadcast(payload: Record<string, unknown>): void;
   publicOrigins(): ReadonlyArray<string | null | undefined>;
+  /** The servers profiles made, and whether each was left off for a key the Vault does not have yet. */
+  profileServers?(): Readonly<Record<string, { needsKey?: true }>>;
   threadVisible(auth: RequestAuth, threadId: string): boolean;
   /** MCP servers that run on a computer lent here. Built after this module, so read when used. */
   lending?(): Pick<LentMcp, "place" | "principal" | "given">;
@@ -138,7 +140,9 @@ export function createMcpChat(deps: McpChatDeps) {
       const managedBy = mcpManagedBy(server.name, server);
       return managedBy ? { ...server, managedBy } : server;
     });
-    return { servers, ...(policy && !policy.mcp.allowCustom ? { managed: { organizationName: policy.organizationName, allowlist: policy.mcp.allowlist } } : {}) };
+    const fromProfiles = deps.profileServers?.() ?? {};
+    const listed = servers.map((server) => !server.enabled && Object.hasOwn(fromProfiles, server.name) && fromProfiles[server.name]!.needsKey ? { ...server, needsKey: true as const } : server);
+    return { servers: listed, ...(policy && !policy.mcp.allowCustom ? { managed: { organizationName: policy.organizationName, allowlist: policy.mcp.allowlist } } : {}) };
   }
   function mcpPolicyRefusal(name: string, server: object): string | undefined {
     return managedPolicy.mcpRefusal(name, mcpServerUrl(server));

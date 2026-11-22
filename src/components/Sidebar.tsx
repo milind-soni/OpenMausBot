@@ -938,7 +938,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const [sectionPicker, setSectionPicker] = useState<MenuState | null>(null);
   const [newTeam, setNewTeam] = useState(false);
   const [teamMenu, setTeamMenu] = useState<{ name: string; x: number; y: number } | null>(null);
-  const [teamSettings, setTeamSettings] = useState<string | null>(null);
+  const [teamSettings, setTeamSettings] = useState<{ name: string; tab?: "mcp" } | null>(null);
   const teamSettingsAllowed = useOwnerOrAdmin();
   const teamMotion = useHeldMenuMotion(teamMenu);
   const teamMenuReturn = useRef<HTMLElement | null>(null);
@@ -1542,7 +1542,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
             onRename={() => { closeTeamMenu(); (advanced ? setRenameTeam : botDrag.startRename)(teamMotion.value!.name); }}
             onShare={() => { closeTeamMenu(); setShareTeam(teamMotion.value!.name); }}
             onDelete={() => { closeTeamMenu(); setDeletingTeam(teamMotion.value!.name); }}
-            onSetForAll={teamSettingsAllowed === true ? () => { closeTeamMenu(); setTeamSettings(teamMotion.value!.name); } : undefined}
+            onSetForAll={teamSettingsAllowed === true ? () => { closeTeamMenu(); setTeamSettings({ name: teamMotion.value!.name }); } : undefined} onMcpServers={teamSettingsAllowed === true ? () => { closeTeamMenu(); setTeamSettings({ name: teamMotion.value!.name, tab: "mcp" }); } : undefined}
           />
         </div>
       </div>, document.body)}
@@ -1561,7 +1561,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
         }} />
       {moveToTeam && <TeamDialog section={moveToTeam} onClose={() => setMoveToTeam(null)} />}
       {shareTeam !== null && <ShareDepartmentDialog department={shareTeam} onClose={() => setShareTeam(null)} />}
-      {teamSettings !== null && <TeamSettingsDialog team={teamSettings} onClose={() => setTeamSettings(null)} />}
+      {teamSettings !== null && <TeamSettingsDialog team={teamSettings.name} {...(teamSettings.tab ? { tab: teamSettings.tab } : {})} onClose={() => setTeamSettings(null)} />}
       <SectionPicker
           current={sectionPicker ? state.bots.find((b) => b.id === sectionPicker.botId)?.section : undefined}
           anchor={sectionPicker}

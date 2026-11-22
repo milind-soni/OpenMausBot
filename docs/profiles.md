@@ -244,6 +244,26 @@ field is an error, never ignored, so a misspelt field cannot silently do nothing
 A bot, area or organization can name a server that is not under `mcp/`; the check then warns that each person's app
 must already have a server with that name.
 
+### MCP servers
+
+Applying a folder adds each server under `mcp/` to the app's MCP servers (**Apps → MCP servers**) under its key, and
+the bots that name it in `mcpServers` use it. The plan says exactly what each server reaches: its address and the headers
+it sends, or the command and arguments it runs on this computer, and which Vault secret fills each key.
+
+- Adding a server, and any change that gives it a new address, command, argument, header or variable, is **Gives more
+  access**. A change that only drops a header or variable applies with the rest.
+- A `{ secret: NAME }` slot points at the team Vault secret named `NAME`; the value never leaves the Vault. Until that
+  secret is saved the server is saved off and shows **Needs your key**. Save the key in **Settings → Vault**, then plan
+  again: the plan fills the key and turns the server on. `{ env: … }` and `{ file: … }` slots are for checks in CI; this
+  app fills an MCP server's keys only from secret slots, so a server with one stays off.
+- A command server (`transport: stdio`) runs on each person's computer, so it is saved off, and again after each
+  change: the person reads the command and turns it on in **Apps → MCP servers**.
+- A server this app had before, with the same name, is never changed: the plan says so and the bots use that one.
+- Turning a server on or off is the person's; applying never changes it, except as above. A change made to a server in
+  the app is kept ("Changed here") or asked about (a conflict, keyed `mcp:<name>`), as for bots.
+- A server whose file is gone is kept ("No longer in your profiles"); `--prune` deletes it. A server whose file has
+  problems is left as it is.
+
 ## Inheritance
 
 Each bot setting comes whole from the nearest level that sets it: the bot, then its area's `defaults`, then the
@@ -367,12 +387,11 @@ The app reads the folder on its own computer. A plan line is one of:
 |---|---|
 | Adds | A new area (a department, with its brief) or a new bot. |
 | Changes | A field the file changed since the last apply, where this app still has the value it was given. |
-| Gives more access | A change that lets a bot do more: a higher approval level, tool selectors it did not have, an MCP server it did not mount, a connected app or tool it was not granted, a tool group switched back on, an Edu brain switched on or moved to a brain others share (an area or edu-cloud brain, or the personal brain beside an area's), or the Edu crew. |
+| Gives more access | A change that lets a bot do more: a higher approval level, tool selectors it did not have, an MCP server it did not mount, a connected app or tool it was not granted, a tool group switched back on, an Edu brain switched on or moved to a brain others share (an area or edu-cloud brain, or the personal brain beside an area's), or the Edu crew. Also a new MCP server, or a new address, command, argument, header or variable for one ([MCP servers](#mcp-servers)). |
 | Conflicts | A field both the file and this app changed. Nothing is applied to it until you choose: keep mine, or take the file. |
 | Changed here | A field changed in this app since the profile set it, while the file still says the same. It is kept. |
-| No longer in your profiles | A bot or area whose file is gone. It is kept; `--prune` deletes such bots. |
+| No longer in your profiles | A bot, area or MCP server whose file is gone. It is kept; `--prune` deletes such bots and servers. |
 | Left as they are | A bot or area whose file has problems (see the check). A problem anywhere else in an area's folder (a link, an unreadable folder) leaves the whole area as it is, and nothing under a path with a problem is ever called gone or deleted. A broken `org.md`, skill or folder blocks the whole plan, since every bot depends on it. |
-| Comes in a later update | Something in the files this version does not apply yet: the servers under `mcp/`. |
 | Notes | For example, a model whose engine this app does not have: the bot keeps its current model, or gets this app's default. |
 
 A second apply of the same commit says **No changes**.
@@ -418,7 +437,8 @@ same checks as a change made in a bot's settings. From a program on this compute
 ### What the app keeps
 
 `<data>/profiles.json` keeps the chosen folder, the commit last applied (read from `.git` without running git, when the
-folder is inside a git checkout) and the department each area became; renaming that department in the app is followed
+folder is inside a git checkout), the department each area became, and each MCP server a profile added (a hash of what
+it was given, and whether it waits for a key); renaming that department in the app is followed
 there. The commit is read only from the checkout's own `.git` folder, or a linked worktree's folder in its repository
 once git's links back agree; links, pipes and anything else read as no commit. Workspace backups leave `profiles.json`
 out, and a restored bot keeps its `profileSource` only when it is one an apply could have written. Where the app keeps an admin activity log
@@ -441,8 +461,13 @@ The app's routes, for scripts and the Profiles screen:
 ```sh
 pnpm exec vitest run shared/profile-format.test.ts server/profiles/load.test.ts server/headless/profiles.test.ts \
   server/profiles/plan.test.ts server/profiles/apply.e2e.test.ts server/profiles/two-people.e2e.test.ts \
-  server/profiles/git-commit.test.ts server/profiles/state.test.ts server/routes/profiles.test.ts
+  server/profiles/git-commit.test.ts server/profiles/state.test.ts server/routes/profiles.test.ts \
+  server/profiles/mcp-servers.e2e.test.ts
 ```
+
+`mcp-servers.e2e.test.ts` applies the acme folder's `mcp/notion.md`, pointed at a stand-in HTTP server, and a command
+server: both arrive off until their keys are in the Vault, the command one until the person turns it on, and then a
+bot's turn calls a tool on each with the Vault's value.
 
 `two-people.e2e.test.ts` runs two isolated servers against one temporary git repository of the acme folder: both get
 the same bots, a second apply has no changes, a new commit reaches both, and a title changed on one computer is a
