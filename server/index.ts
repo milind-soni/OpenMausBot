@@ -327,7 +327,7 @@ import { recordLiveCall, spokenLineFields, titleLiveCall } from "./live-call-rec
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { createTtsRoutes } from "./routes/tts.ts";
 import { turnStartLogLine } from "./turn-log.ts";
-import { TurnStops, outwardActions, stoppedTurnOutcome, turnEvidence } from "./turn-outcome.ts";
+import { TurnStops, logFailedTurn, outwardActions, stoppedTurnOutcome, turnEvidence } from "./turn-outcome.ts";
 import { buildRecoveryText, buildTurnContext, replaysNatively } from "./turn-context.ts"; import { resumePlan } from "./resume-plan.ts";
 import { Handoffs, isContextMessage, recordHanded, renderUnseen, sessionStart, withUnseenMessages, type ContextMessage } from "./delta-context.ts"; import { isFreshStart, sinceFreshStart } from "./fresh-start.ts";
 import { extractReplayImages, extractTurnImages, nativeClips, turnMedia, videoFramesWithin } from "./turn-images.ts";
@@ -999,6 +999,9 @@ function routineOpener(routineId: string): string {
 }
 
 /** Its turns run in Ask, confined to a private folder, and nothing in it reaches the owner's turns. */
+function keepsPrivateFolder(threadId: string, guestConfined = cloudGuestDriven(threadId) || botApiThread(threadId)): boolean {
+  return guestConfined || cloudGuestOpened(threadId);
+}
 function cloudGuestOpened(threadId: string): boolean {
   return Boolean(CLOUD_HOME) && cloudThreadStarters(threadId).some((person) => person !== undefined && !cloudOwnerPerson(person));
 }
@@ -5139,6 +5142,11 @@ function bookForkUsage({ threadId, botId, instanceId }: KeepWarmTarget, result: 
     model: result.model ?? store.taskByThread(bot.id, threadId)?.modelSelection?.model ?? bot.modelSelection.model,
     input: result.input + result.cacheRead + result.cacheWrite, output: result.output, cachedInput: result.cacheRead, costUsd: result.costUsd, trigger: { kind: "bot", botId: bot.id } });
 }
+function bookEngineCompactUsage({ threadId, botId, instanceId }: KeepWarmTarget, { usage, model }: { usage: { input: number; output: number; cachedInput: number } | null; model: string | null }) {
+  const bot = store.bot(botId), instance = registry.get(instanceId);
+  if (bot && instance) bookTurnUsage({ botId: bot.id, botName: bot.name, threadId, instanceId, driverKind: instance.driverKind, costUsd: null, trigger: turnTriggers.get(threadId) ?? { kind: "owner" },
+    model: model ?? store.taskByThread(bot.id, threadId)?.modelSelection?.model ?? bot.modelSelection.model, input: usage?.input ?? 0, output: usage?.output ?? 0, ...(usage ? { cachedInput: usage.cachedInput } : {}) }, usage !== null);
+}
 const cacheKeepWarm = createCacheKeepWarm({
   now: () => Date.now(),
   after: (ms, fn) => {
@@ -5180,7 +5188,7 @@ cacheKeepWarmStatus = (threadId) => cacheKeepWarm.status(threadId);
 const warmSummaries = createWarmSummaryHost({ store, instance: (id) => registry.get(id), queued: hasQueuedSteeredMessages, coordinator, waits: () => botWaits, routines: () => routines,
   enabled: () => cfg.context?.autoCompact !== false && process.env.OMB_WARM_SUMMARY !== "0" && spendState(cfg, DATA_DIR)?.exceeded !== true, memoryShort: () => engineMemory.headroom() < 0.3,
   nativeCompactAt: ({ botId, threadId, instanceId }) => { const instance = registry.get(instanceId), measured = store.taskByThread(botId, threadId)?.lastContextModel, at = instance ? nativeCompactTokens(instance, measured?.startsWith(`${instanceId}:`) ? measured.slice(instanceId.length + 1) : botForThread(botId, threadId)?.modelSelection.model) : undefined; return at && Number.isFinite(at) ? at : undefined; },
-  busy: (botId, threadId) => threadBusy(botId, threadId) || botHasActiveTurn(botId), keepWarmUntil: (threadId) => cacheKeepWarm.status(threadId)?.until, book: bookForkUsage, log: (line) => console.info(line), language: threadLanguage,
+  busy: (botId, threadId) => threadBusy(botId, threadId) || botHasActiveTurn(botId), keepWarmUntil: (threadId) => cacheKeepWarm.status(threadId)?.until, book: bookForkUsage, bookEngineCompact: bookEngineCompactUsage, log: (line) => console.info(line), language: threadLanguage,
   fold: async ({ botId, threadId, instanceId }, idle) => { const bot = store.projectBotForTask(botId, threadId), model = store.taskByThread(botId, threadId)?.lastContextModel, instance = registry.get(instanceId), before = latestCompaction(store.activePath(threadId))?.id;
     if (bot && instance && model?.startsWith(`${instanceId}:`)) await compactConversation({ bot, threadId, generation: `idle:${randomUUID()}`, instance, model: model.slice(instanceId.length + 1), excludedIds: new Set(), manual: false, idle });
     return latestCompaction(store.activePath(threadId))?.id !== before; } });
@@ -5435,7 +5443,7 @@ async function scheduleTurnDigest(input: {
   turnId: string;
   driverKind: string | undefined;
   instanceId?: string;
-  reply: string;
+  reply: string; error?: string;
   from?: Message["from"];
   isCurrent: () => boolean;
   usage?: { input: number; output: number; cachedInput?: number; costUsd?: number | null };
@@ -5459,7 +5467,7 @@ async function scheduleTurnDigest(input: {
       durationMs: startedAt ? Math.max(0, at - startedAt) : 0,
       activities,
       memory,
-      reply: input.reply,
+      reply: input.reply, ...(input.error ? { error: input.error } : {}),
       ...(input.usage ? { usage: input.usage } : {}),
       hookCoverage: coverageForDriver(input.driverKind, toolEvidence(activities, input.turnId), activities.some(m => m.kind === "activity" && m.turnId === input.turnId && m.tool?.itemId)),
     });
@@ -6622,7 +6630,7 @@ bus.subscribe((event: RuntimeEvent) => {
         pushStoppedTurn(event.turnId);
         break;
       }
-      landParkedFiles(); // above the failure row, which stays the last, retryable line
+      logFailedTurn(event); landParkedFiles(); // above the failure row, which stays the last, retryable line
       pushMessage({ role: "bot", kind: "activity", tool: failedTurnTool(event.message, event) });
       if (event.setup && bot) { store.setTaskActivity(bot.id, event.threadId, "dead"); setupRecovery.failed(bot.id, event.threadId); }
       break;
@@ -6744,7 +6752,7 @@ bus.subscribe((event: RuntimeEvent) => {
             botName: bot.name,
             threadId: event.threadId,
             turnId: completedTurnId,
-            succeeded: event.ok,
+            succeeded: event.ok, ...(failed ? { error: failureDetail } : {}),
             driverKind: registry.get(selection.instanceId)?.driverKind,
             instanceId: selection.instanceId,
             reply,
@@ -6964,12 +6972,16 @@ function peerReplayText(m: Message, name: string, text: string): string {
 }
 const { lineLabels, personPrompt, routineRunNote } = createLineLabels({ sharedChat: (threadId) => sharedMembership() && !store.groupByThread(threadId) && audienceMember(teamHost.audienceOf(threadId)) === null, userName: userNameFor, teamRole: (key) => (teamOwners.people?.list() ?? []).find((one) => personKey({ id: "", email: one.email }) === key)?.role, routineName: (threadId) => { const run = routines?.runForThread(threadId); return routines?.listRoutines().find((one) => one.id === run?.routineId)?.name; } });
 
-const { replayInputs, sessionConfigFor } = createResumeCheck({ directContext, latestCompaction, context: () => cfg.context, everyBotRules: () => cfg.everyBotRules, sectionPrompt: sectionContextSystemPrompt });
+const { replayInputs, sessionConfigFor, nextTurnResumes } = createResumeCheck({ store, directContext, latestCompaction, context: () => cfg.context, everyBotRules: () => cfg.everyBotRules, sectionPrompt: sectionContextSystemPrompt,
+  folderToFollow: (bot, threadId, task, driverKind) => folderToFollow(bot, threadId, task.cwd, { worksInFolders: supportsWorkspaceFiles(driverKind), keepsPrivateFolder: keepsPrivateFolder(threadId) }),
+  externalMarker: (lastInstanceId) => isExternalContextMarker(lastInstanceId) ? lastInstanceId : undefined, strictResume: (instanceId) => registry.get(instanceId)?.adapter.capabilities.strictResume === true, currentBot: (botId, threadId) => store.projectBotForTask(botId, threadId) });
 const compactConversation = createConversationCompaction({
   store, context: () => cfg.context, directContext, latestCompaction,
   nativeCompactTokens: (instance, model) => nativeCompactTokens(instance, model),
   engineCompactionOn: (instance) => instance.driverKind !== "claudeAgent" || !claudeCompactionDisabled({ ...process.env, ...cfg.instances?.[instance.instanceId]?.environment }),
-  engineCompact: (target, signal) => warmSummaries.compactNow(target, signal),
+  engineCompact: (target, signal, check) => warmSummaries.compactNow(target, signal, check),
+  resumesSession: (input, session) => nextTurnResumes(input, session),
+  currentSelection: (botId, threadId) => store.projectBotForTask(botId, threadId)?.modelSelection,
   generateText: (botId, instance) => sideJobs.text("compaction", botId, { instance: instance as NonNullable<ReturnType<typeof registry.get>> })?.generateText,
   claimIsCurrent: (botId, generation, threadId) => directTurnClaimIsCurrent(botId, generation, threadId),
   controllers: compactionControllers, cancelled: (reason) => new DirectTurnSetupCancelled(reason), idleFraction: HARNESS_IDLE_FRACTION, summarizing: (threadId, active) => bus.publish({ ...waitEventBase(threadId), type: "context.summarizing", active }),
