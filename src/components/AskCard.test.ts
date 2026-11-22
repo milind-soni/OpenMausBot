@@ -33,6 +33,13 @@ describe("AskCard", () => {
     expect(renderToStaticMarkup(createElement(AskCard, { ...base, onDismiss: () => {} }))).not.toContain("<button");
     expect(renderToStaticMarkup(createElement(AskCard, { ...base, onDismiss: () => {}, dismissLabel: "Not now" }))).toContain('aria-label="Not now"');
   });
+
+  it("stays in view below the header, however tall the header grows", () => {
+    const html = renderToStaticMarkup(createElement(AskCard, { ariaLabel: "Key", title: "API key", stays: true }));
+    const card = classesOf(html, /^<div[^>]*class="([^"]*)"/);
+    expect(card).toEqual(expect.arrayContaining(["sticky", "z-10", "top-[var(--glass-top,60px)]"]));
+    expect(card).not.toContain("top-[60px]");
+  });
 });
 
 describe("AskChoices", () => {

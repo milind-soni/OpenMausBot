@@ -12,6 +12,7 @@ import { activeLocale, t } from "@/lib/i18n";
 import { capital } from "@/lib/automations";
 import type { LocaleKey } from "@/locales";
 import { appendInspectorRuntime, mergeInspectorSnapshot, INSPECTOR_WINDOW_LIMIT } from "@/lib/inspector-window";
+import { serverFetch } from "@/lib/relay-server";
 
 const tabLabel = (key: LocaleKey) => (activeLocale() === "en" ? t(key) : capital(t(key)));
 
@@ -40,7 +41,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
     const controller = new AbortController();
     loadAbort.current = controller;
     try {
-      const res = await fetch(`/api/threads/${threadId}/events?limit=${INSPECTOR_WINDOW_LIMIT}`, { signal: controller.signal });
+      const res = await serverFetch(`/api/threads/${threadId}/events?limit=${INSPECTOR_WINDOW_LIMIT}`, { signal: controller.signal });
       if (!res.ok) throw new Error(`${res.status}`);
       // SAFETY: the same-version harness's typed inspector endpoint; malformed transport data is handled by catch.
       const next = (await res.json()) as InspectorPage;

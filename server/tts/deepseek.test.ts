@@ -83,6 +83,41 @@ describe("DeepSeek speech", () => {
     expect(JSON.parse(seen[0]!.body.toString())).toEqual({ text: "Hello there", voice_id: "tide", format: "wav", filter_markdown: true });
   });
 
+  it("repairs unknown streaming WAV lengths after the full response is read", async () => {
+    const expected = wav(0.5, 24_000);
+    reply = Buffer.from(expected);
+    reply.writeUInt32LE(0xffffffff, 4);
+    reply.writeUInt32LE(0xffffffff, 40);
+    const audio = await (await deepseek()).synthesize("hello", "stella", KEY);
+    expect(Buffer.from(audio.bytes)).toEqual(expected);
+    await expect((await deepseek()).transcribe(reply, KEY)).rejects.toThrow("16-bit PCM WAV");
+  });
+
+  it("handles an extra padded chunk before streaming audio", async () => {
+    const source = wav(0.5, 24_000);
+    const extra = Buffer.from([0x4a, 0x55, 0x4e, 0x4b, 1, 0, 0, 0, 7, 0]);
+    const expected = Buffer.concat([source.subarray(0, 36), extra, source.subarray(36)]);
+    expected.writeUInt32LE(expected.length - 8, 4);
+    reply = Buffer.from(expected);
+    reply.writeUInt32LE(0xffffffff, 4);
+    reply.writeUInt32LE(0xffffffff, 50);
+    expect(Buffer.from((await (await deepseek()).synthesize("hello", "stella", KEY)).bytes)).toEqual(expected);
+  });
+
+  it("rejects malformed streaming WAV headers and incomplete frames", async () => {
+    const { synthesize } = await deepseek();
+    const streaming = wav(0.5, 24_000);
+    streaming.writeUInt32LE(0xffffffff, 4);
+    streaming.writeUInt32LE(0xffffffff, 40);
+    for (const invalid of [streaming.subarray(0, 44), streaming.subarray(0, 45)]) {
+      reply = invalid;
+      await expect(synthesize("hi", "stella", KEY)).rejects.toThrow("incomplete audio");
+    }
+    reply = Buffer.from(streaming);
+    reply.writeUInt32LE(100_000, 16);
+    await expect(synthesize("hi", "stella", KEY)).rejects.toThrow("incomplete audio");
+  });
+
   it("refuses bad input before any request", async () => {
     const { synthesize, transcribe, TTS_MAX_CHARS } = await deepseek();
     await expect(synthesize("hi", "alloy", KEY)).rejects.toThrow("Stella or Tide");

@@ -124,6 +124,19 @@ describe("buildTurnDigest", () => {
     expect(long.reply).toHaveLength(200);
   });
 
+  it("says why a failed turn ended, on one bounded line with secrets scrubbed", () => {
+    const quiet = { ...base, reply: "", activities: [], memory: [], hookCoverage: "none" as const };
+    expect(buildTurnDigest(quiet).error).toBeUndefined();
+    expect(renderDigest(buildTurnDigest(quiet))).toBe("[digest] · no tool activity observed in this turn");
+    const failed = buildTurnDigest({ ...quiet, error: 'upstream HTTP 429: [{"error":{"code":429,\n"message":"Quota exceeded, retry in 11h32m"}}]' });
+    expect(failed.error).toBe('upstream HTTP 429: [{"error":{"code":429, "message":"Quota exceeded, retry in 11h32m"}}]');
+    expect(renderDigest(failed)).toBe(`[digest] · turn failed: ${failed.error} · no tool activity observed in this turn`);
+    const leaked = buildTurnDigest({ ...quiet, error: "upstream HTTP 401: Incorrect API key provided: sk-proj-abcdefghijklmnopqrstuvwxyz0123456789" });
+    expect(leaked.error).toContain("upstream HTTP 401");
+    expect(leaked.error).not.toContain("abcdefghijklmnopqrstuvwxyz0123456789");
+    expect(buildTurnDigest({ ...quiet, error: `upstream HTTP 503: ${"x".repeat(900)}` }).error).toHaveLength(300);
+  });
+
   it("never cuts the reply inside an emoji when there is no sentence end before the cap", () => {
     const reply = `${"汇".repeat(199)}🔴之后还有很多内容`;
     const d = buildTurnDigest({ ...base, reply, activities: [], memory: [] });

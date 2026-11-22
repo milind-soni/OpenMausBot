@@ -8,11 +8,12 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import { HELD_SECRET_MASK } from "../shared/redact.ts";
-import { LOGIN_FIELD_MAX, LOGIN_HOSTS_MAX, loginMatchesHost, loginPlace, loginSite, loginUsableBy, type BitwardenCredentials, type LoginBots, type LoginPlace, type LoginSummary } from "../shared/logins.ts";
-import { SECRET_VALUE_MAX_BYTES, VAULT_SECRET_NAME_MAX, vaultNameKey, type VaultSecret } from "../shared/vault.ts";
+import { LOGIN_FIELD_MAX, LOGIN_HOSTS_MAX, loginMatchesHost, loginPlace, loginSite, loginUsableBy, type BitwardenCredentials, type BitwardenSecretsCredentials, type LoginBots, type LoginPlace, type LoginSummary } from "../shared/logins.ts";
+import { VAULT_SECRET_NAME_MAX, vaultNameKey, type VaultSecret } from "../shared/vault.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { decryptBrowserState, encryptBrowserState } from "./browser-sites.ts";
 import type { TotpKey } from "./totp.ts";
+import { STORED_VAULT_VALUE_MAX_BYTES, VAULT_VALUE_MAX_BYTES } from "./vault/value-limits.ts";
 
 export const LOGINS_FILE = "logins.json.enc";
 export const LOGINS_KEY_FILE = "logins-key";
@@ -28,6 +29,12 @@ const totpSchema = z.object({
 });
 
 const botsSchema = z.union([z.literal("all"), z.array(z.string())]);
+
+function checkNewSecretValue(value: string): void {
+  if (Buffer.byteLength(value) > VAULT_VALUE_MAX_BYTES) {
+    throw new RangeError(`A new Vault secret value can be at most ${VAULT_VALUE_MAX_BYTES} bytes.`);
+  }
+}
 
 // The previous release reads `version: 1` records by `host` alone and replaces a file it cannot parse, so every record
 // keeps `host` (its first sign-in host) and the version stays 1: going back a release never loses a saved login.
@@ -50,7 +57,7 @@ const diskLoginSchema = z.object({
 const diskSecretSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1).max(VAULT_SECRET_NAME_MAX),
-  value: z.string().min(1).max(SECRET_VALUE_MAX_BYTES),
+  value: z.string().min(1).refine((value) => Buffer.byteLength(value) <= STORED_VAULT_VALUE_MAX_BYTES),
   source: z.enum(["card", "settings"]),
   bots: botsSchema,
   refOnly: z.literal(true).optional(),
@@ -67,6 +74,8 @@ const fileSchema = z.object({
   onePassword: z.object({ token: z.string().min(1), connectedAt: z.number() }).optional(),
   /** Bitwarden's server address, API key and master password, read only by its command line tool's environment. */
   bitwarden: z.object({ serverUrl: z.string().min(1), clientId: z.string().min(1), clientSecret: z.string().min(1), password: z.string().min(1), connectedAt: z.number() }).optional(),
+  /** Bitwarden Secrets Manager's server address and a machine account's access token. */
+  bitwardenSecrets: z.object({ serverUrl: z.string().min(1), accessToken: z.string().min(1), connectedAt: z.number() }).optional(),
   /** Vault id → the bots that may use its logins; a vault not named here is for every bot. Kept across reconnects. */
   onePasswordGrants: z.record(z.string(), botsSchema).optional(),
   /** 1Password item (`<vault id>:<item id>`) → the bots that may use it, ahead of its vault's choice. Kept across reconnects. */
@@ -371,6 +380,7 @@ export class VaultStore {
 
   /** The same name saved again for the same bots and the same person replaces its value; otherwise it is a new secret. */
   saveSecret(input: NewSecret): VaultSecret {
+    checkNewSecretValue(input.value);
     const data = this.read();
     const secrets = data.secrets ?? [];
     const at = this.now();
@@ -398,6 +408,7 @@ export class VaultStore {
     const at = this.now();
     const current = secrets.find((secret) => secret.id === input.id);
     if (current?.person) return null;
+    checkNewSecretValue(input.value);
     const received: StoredSecret = {
       id: input.id, name: input.name, value: input.value, source: input.source, bots: input.bots, ...(input.refOnly ? { refOnly: true } : {}),
       createdAt: current?.createdAt ?? at, updatedAt: at, ...(current?.lastUsedAt === undefined ? {} : { lastUsedAt: current.lastUsedAt }),
@@ -411,6 +422,7 @@ export class VaultStore {
     const data = this.read();
     const current = data.secrets?.find((secret) => secret.id === id);
     if (!data.secrets || !current) return null;
+    if (patch.value !== undefined) checkNewSecretValue(patch.value);
     const next: StoredSecret = {
       ...current,
       ...(patch.name === undefined ? {} : { name: patch.name }),
@@ -504,6 +516,16 @@ export class VaultStore {
     this.write(credentials ? { ...rest, bitwarden: { ...credentials, connectedAt: this.now() } } : rest);
   }
 
+  bitwardenSecretsCredentials(): BitwardenSecretsCredentials | null {
+    const saved = this.read().bitwardenSecrets;
+    return saved ? { serverUrl: saved.serverUrl, accessToken: saved.accessToken } : null;
+  }
+
+  setBitwardenSecretsCredentials(credentials: BitwardenSecretsCredentials | null): void {
+    const { bitwardenSecrets: _previous, ...rest } = this.read();
+    this.write(credentials ? { ...rest, bitwardenSecrets: { ...credentials, connectedAt: this.now() } } : rest);
+  }
+
   onePasswordGrants(): Record<string, LoginBots> {
     return this.read().onePasswordGrants ?? {};
   }
@@ -539,6 +561,7 @@ export class VaultStore {
       ...data.logins.flatMap((login) => [login.password, ...(login.totp ? [login.totp.secret] : [])]),
       ...(data.onePassword ? [data.onePassword.token] : []),
       ...(data.bitwarden ? [data.bitwarden.clientSecret, data.bitwarden.password] : []),
+      ...(data.bitwardenSecrets ? [data.bitwardenSecrets.accessToken] : []),
       ...(data.secrets ?? []).map((secret) => secret.value),
     ];
   }

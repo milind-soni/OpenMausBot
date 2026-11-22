@@ -1,6 +1,7 @@
 import { t } from "./i18n";
 import { serverErrorText } from "./server-error";
 import { forgetSharedSession } from "./session-reuse";
+import { serverFetch } from "./relay-server";
 
 export interface EnvironmentDescriptor {
   environmentId: string;
@@ -42,7 +43,7 @@ export function rememberedTeamSignIn(): string | null {
   try { return globalThis.localStorage?.getItem(TEAM_SIGN_IN_KEY) ?? null; } catch { return null; }
 }
 
-export async function readSessionState(fetchImpl: typeof fetch = fetch): Promise<SessionState> {
+export async function readSessionState(fetchImpl: typeof serverFetch = serverFetch): Promise<SessionState> {
   let res: Response;
   try {
     res = await fetchImpl("/api/auth/session", { credentials: "same-origin" });
@@ -137,7 +138,7 @@ function refusalText(body: unknown, res: Response): string {
 
 export async function pairWithCode(
   input: { code: string; label: string; attemptId?: string; browser?: boolean },
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof serverFetch = serverFetch,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   let res: Response;
   try {
@@ -157,7 +158,7 @@ export async function pairWithCode(
   return { ok: false, error: refusalText(body, res) };
 }
 
-export async function previewBrowserSignIn(credential: string, fetchImpl: typeof fetch = fetch): Promise<{ owner: string; team?: string } | null> {
+export async function previewBrowserSignIn(credential: string, fetchImpl: typeof serverFetch = serverFetch): Promise<{ owner: string; team?: string } | null> {
   try {
     const res = await fetchImpl("/api/auth/pair", {
       method: "POST",
@@ -173,7 +174,7 @@ export async function previewBrowserSignIn(credential: string, fetchImpl: typeof
   }
 }
 
-export function signInWithBrowserGrant(credential: string, attemptId: string, fetchImpl: typeof fetch = fetch): Promise<{ ok: true } | { ok: false; error: string }> {
+export function signInWithBrowserGrant(credential: string, attemptId: string, fetchImpl: typeof serverFetch = serverFetch): Promise<{ ok: true } | { ok: false; error: string }> {
   return pairWithCode({ code: credential, label: defaultDeviceLabel(), attemptId, browser: true }, fetchImpl);
 }
 
@@ -182,7 +183,7 @@ export function cloudOwnerOf(session: unknown): string | null {
   return record.cloudHome === true && typeof record.owner === "string" && record.owner ? record.owner : null;
 }
 
-async function postAuth(path: string, body: Record<string, unknown>, fetchImpl: typeof fetch): Promise<{ ok: true } | { ok: false; error: string }> {
+async function postAuth(path: string, body: Record<string, unknown>, fetchImpl: typeof serverFetch): Promise<{ ok: true } | { ok: false; error: string }> {
   let res: Response;
   try {
     res = await fetchImpl(path, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -196,11 +197,11 @@ async function postAuth(path: string, body: Record<string, unknown>, fetchImpl: 
   return { ok: false, error: refusalText(parsed, res) };
 }
 
-export function startEmailSignIn(email: string, fetchImpl: typeof fetch = fetch): Promise<{ ok: true } | { ok: false; error: string }> {
+export function startEmailSignIn(email: string, fetchImpl: typeof serverFetch = serverFetch): Promise<{ ok: true } | { ok: false; error: string }> {
   return postAuth("/api/auth/email/start", { email }, fetchImpl);
 }
 
-export function verifyEmailSignIn(input: { email: string; code: string; label: string }, fetchImpl: typeof fetch = fetch): Promise<{ ok: true } | { ok: false; error: string }> {
+export function verifyEmailSignIn(input: { email: string; code: string; label: string }, fetchImpl: typeof serverFetch = serverFetch): Promise<{ ok: true } | { ok: false; error: string }> {
   return postAuth("/api/auth/email/verify", { email: input.email, code: input.code, label: input.label }, fetchImpl);
 }
 

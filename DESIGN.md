@@ -187,9 +187,15 @@ element's job and never a pixel value:
   in both modes; pinned bots are 95 × 92px tiles with a 60px avatar. Pinned
   pages never join them: a bot's pages are in its bot panel's Library tab.
 - **The sidebar stays open beside a side panel** while the chat keeps 440px:
-  from 1040px with a 320px panel (Simple's bot panel, a room, Simple's inbox,
-  Notifications), from 1280px with a wider one. Narrower, it folds to its
-  avatars.
+  from 1040px with a 320px panel (a room, Simple's inbox, Notifications), from
+  1280px with a wider one. Narrower, it folds to its avatars.
+- **Simple's bot panel never moves the sidebar.** Opening or closing it leaves
+  the sidebar's width and its pinned bots exactly as they were. The chat makes
+  the room; under 920px, where the chat would get less than 320px, the panel
+  floats over the chat's edge instead.
+- **The chat header's model pill folds to its AI's mark** while a side panel
+  narrows the chat, in a round button the size of the header's others; its
+  label still names the model.
 - **Group with space before you group with lines.** Add a divider only between
   groups that space alone can't separate. Never a divider under a heading.
 - **No cards inside cards.** If a card needs sections, use spacing and a group
@@ -267,6 +273,11 @@ Motion explains a change. It never decorates.
 - **Use the tokens:** `animate-pop-in` / `pop-out` (menus, 200ms),
   `animate-panel-in` (240ms), `animate-msg-in` (180ms), `animate-fade-in`.
   Movement eases with `cubic-bezier(0.22, 1, 0.36, 1)`; fades use `ease-out`.
+- **Panes keep their width while they move.** A side panel slides in and out
+  over the window's edge at its full width (`animate-panel-beside-in`, 240ms)
+  while the room it takes grows or shrinks, so the chat glides and nothing in
+  the panel rewraps. Words leaving a control fade, drift a few pixels and soften
+  rather than being cut off; they never wrap mid-way.
 - **300ms ceiling.** Only first-run onboarding may run longer.
 - **Nothing scales in from zero.** Things grow from about 96% and fade.
 - **Hover and press transitions are 120ms** on colour and opacity only. Don't
