@@ -684,6 +684,8 @@ export async function probeAntigravityModels(input: {
   cwd?: string;
   fallbackDefault: string;
   timeoutMs?: number;
+  /** Called as soon as the agent starts a session, before its answer is read. */
+  sessionAccepted?: () => void;
 }): Promise<ModelCatalog> {
   const deadline = Date.now() + (input.timeoutMs ?? STARTUP_CAP_MS);
   const remaining = () => {
@@ -701,6 +703,7 @@ export async function probeAntigravityModels(input: {
       { cwd: input.cwd ?? input.profile.directory, mcpServers: [], ...antigravitySessionSetup(initialized) },
       remaining(),
     );
+    input.sessionAccepted?.();
     const catalog = catalogFromAntigravityConfigOptions(session?.configOptions, input.fallbackDefault);
     if (!catalog) throw new Error("Antigravity did not return a model catalog for this Google account.");
     const budget = Math.min(VARIANT_SURVEY_MS, deadline - Date.now());

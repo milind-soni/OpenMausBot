@@ -23,6 +23,8 @@ export interface AcpDriverHooks {
    * turns, background text and model discovery start the session directly, and a session it refuses for want of a sign-in
    * fails as a sign-in request. */
   skipsAuthenticate?(instanceId: string): boolean;
+  /** A turn's agent started a new session, before anything else about it is read. */
+  sessionAccepted?(instanceId: string, config: AcpConfig): void;
   /** Every agent process the driver starts for turns. */
   processStarted?(child: ChildProcess, instanceId: string): void;
   /** Extra session/new, session/load and session/resume parameters, from the agent's initialize answer. */

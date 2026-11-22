@@ -1,4 +1,4 @@
-import { realpathSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import { safetyFloorClears } from "../safety-floor-gate.ts";
@@ -88,6 +88,8 @@ function realTarget(path: string): string | undefined {
     try {
       return join(realpathSync(existing), ...rest);
     } catch {
+      // A link whose target is missing is there but cannot be followed here, while a write would follow it.
+      if (lstatSync(existing, { throwIfNoEntry: false })) return undefined;
       const parent = dirname(existing);
       if (parent === existing) return undefined;
       rest.unshift(basename(existing));

@@ -1229,7 +1229,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               await request("session/new", { cwd, mcpServers: support.mcpServersFromLaunch ? [] : acpSessionMcpServers(mcpServers, ownMcp, init), ...selectionParams, ...support.sessionSetupParams?.(init) }, NEW_SESSION_TIMEOUT, (result) => {
                 session.sessionId = typeof result?.sessionId === "string" ? result.sessionId : null;
                 session.sessionKey = sessionKey;
-                receiveModelVariants(result, true);
+                receiveModelVariants(result, true); support.sessionAccepted?.(instanceId, turnConfig);
               });
               break;
             }

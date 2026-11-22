@@ -35,8 +35,8 @@ import {
 import { antigravityLimitFacts, watchAntigravityPromptOutcome } from "./antigravity-turn-outcome.ts";
 import { splitAntigravityThinking } from "./antigravity-models.ts";
 import { AntigravityAuthController } from "./antigravity-auth.ts";
-import { AntigravityCliLogin } from "./antigravity-native-login.ts";
-import { NativeSignInCache, antigravityCliSignIn, signOutAntigravityCli } from "./antigravity-native-status.ts";
+import { AntigravityCliLogin, type LoginProcesses } from "./antigravity-native-login.ts";
+import { NativeSignInCache, antigravityCliRefusedSession, antigravityCliSignIn, signOutAntigravityCli } from "./antigravity-native-status.ts";
 import { antigravityNativeCredentials, antigravityNativeCredentialsHeld, clearAntigravityNativeCredentials, noteAntigravityNativeCredentials } from "./antigravity-native-credentials.ts";
 import { AcpDiscoveryRpcError, AcpDiscoveryTimeoutError } from "./acp/custom-model-catalog.ts";
 import {
@@ -106,6 +106,7 @@ const offeredModels = new Set<string>();
 const launched = new Map<string, { version: string | null; nativeCli: boolean }>();
 
 const nativeSignIn = new NativeSignInCache();
+const loginProcesses = new Map<string, LoginProcesses>();
 
 const nativeRuntimeKey = (runtime: AntigravityRuntime) => `${runtime.executablePath}\0${runtime.version}`;
 
@@ -121,7 +122,7 @@ async function nativeSignedIn(instanceId: string, cli: string | undefined, runti
 
 /** Model discovery's failure as the shared catalog classifies it: a refused session is "signedOut", a slow CLI "timedOut". */
 function nativeDiscoveryError(instanceId: string, error: unknown): unknown {
-  if (antigravitySignInError(error)) {
+  if (antigravityCliRefusedSession(error)) {
     nativeSignIn.forget(instanceId);
     const refusal = error as { code: unknown; message: unknown };
     return new AcpDiscoveryRpcError(refusal.code, typeof refusal.message === "string" ? refusal.message : "");
@@ -182,8 +183,8 @@ const support: AcpSupport = {
       runtime,
       profile,
       fallbackDefault: currentEngineCatalog("antigravity").default,
+      ...(native ? { sessionAccepted: () => noteAntigravityNativeCredentials(instanceId, config.cli) } : {}),
     }).catch((error: unknown) => { throw native ? nativeDiscoveryError(instanceId, error) : error; });
-    if (native) noteAntigravityNativeCredentials(instanceId, config.cli);
     for (const option of catalog.options) offeredModels.add(option.id);
     return catalog;
   },
@@ -194,6 +195,7 @@ const support: AcpSupport = {
   authFailure: "fail",
   // The native CLI answers `authenticate` by opening a browser on its own machine, so only `acp --login` signs it in.
   skipsAuthenticate: (instanceId) => launched.get(instanceId)?.nativeCli === true,
+  sessionAccepted: (instanceId, config) => { if (launched.get(instanceId)?.nativeCli === true) noteAntigravityNativeCredentials(instanceId, config.cli); },
   classifyError: (error) => antigravitySignInError(error) ? "invalid_credentials" : undefined,
   // With a stored token Google no longer honours, agy_acp_server 1.4.3 prints its sign-in link and waits on
   // `authenticate`.
@@ -247,7 +249,6 @@ const support: AcpSupport = {
 
   configureSession: async ({ request, sessionId, instanceId, config, turn, configOptions }) => {
     const nativeCli = launched.get(instanceId)?.nativeCli === true;
-    if (nativeCli) noteAntigravityNativeCredentials(instanceId, config.cli);
     if (!Array.isArray(configOptions) || !configOptions.some(option => option?.id === "mode")) {
       // The native CLI answers by the turn's level only in `default`; with no mode to confirm, nothing says it is there.
       if (nativeCli) throw new Error("Antigravity did not report its permission mode.");
@@ -295,6 +296,8 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       });
       return { runtime, profile };
     };
+    const alive = loginProcesses.get(input.instanceId) ?? new Map();
+    loginProcesses.set(input.instanceId, alive);
     const login = new AntigravityCliLogin({
       submitting: () => noteAntigravityNativeCredentials(input.instanceId, input.config.cli),
       signedIn: () => {
@@ -305,7 +308,7 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
         const { runtime, profile } = await runtimeAndProfile();
         return (await antigravityCliSignIn(runtime, profile)) === "in";
       },
-    });
+    }, {}, alive);
     let nativeFlow = false;
     // Starting a sign-in and signing out never overlap: a sign-in begun while one is being removed would be removed with it.
     let exclusive: Promise<unknown> = Promise.resolve();
@@ -321,7 +324,7 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       try { current = await runtimeAndProfile(); } catch {}
       if (current?.runtime.harnessPath !== null && !antigravityNativeCredentialsHeld(input.instanceId)) return;
       // Its processes are gone before the CLI is asked: one still running keeps the account it started with.
-      await runtimeProcesses.stopped(input.instanceId);
+      if (!(await runtimeProcesses.stopped(input.instanceId))) throw new Error("Antigravity is still running for this account and could not be stopped. Try again.");
       if (current?.runtime.harnessPath === null && !antigravityNativeCredentialsHeld(input.instanceId)) {
         const found = await antigravityCliSignIn(current.runtime, current.profile, { waitForExit: true })
           .catch(() => { throw new Error("Antigravity could not confirm whether this account is signed in. Try again."); });

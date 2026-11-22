@@ -122,8 +122,8 @@ interface UpdaterState {
 
 type Outcome =
   | { kind: "absent" | "current" | "busy" | "waiting" }
-  | { kind: "updated"; from: string; to: string }
-  | { kind: "failed"; from: string; to: string; reason: string; updated?: { from: string; to: string } };
+  | { kind: "updated"; from: string; to: string; busyAfter?: true }
+  | { kind: "failed"; from: string; to: string; reason: string; updated?: { from: string; to: string }; busyAfter?: true };
 
 export interface EngineUpdater {
   /** One pass over every engine now; resolves when it has finished. */
@@ -294,11 +294,13 @@ export function createEngineUpdater(options: EngineUpdaterOptions): EngineUpdate
     const tried: string[] = [];
     let updated: Extract<Outcome, { kind: "updated" }> | undefined;
     let failed: Extract<Outcome, { kind: "failed" }> | undefined;
+    let busyAfter = false;
     for (;;) {
       const found = await managed.older(tried);
       if (found === null) break;
       if (engineBusy(plan)) {
         if (!updated && !failed) return { kind: "busy" };
+        busyAfter = true;
         break;
       }
       const { version: older, channel } = typeof found === "string" ? { version: found, channel: undefined } : found;
@@ -308,8 +310,9 @@ export function createEngineUpdater(options: EngineUpdaterOptions): EngineUpdate
       if (channel === undefined || tried.includes(channel)) break;
       tried.push(channel);
     }
-    if (failed) return updated ? { ...failed, updated: { from: updated.from, to: updated.to } } : failed;
-    return updated ?? { kind: "absent" };
+    const busy = busyAfter ? { busyAfter: true as const } : {};
+    if (failed) return { ...failed, ...(updated ? { updated: { from: updated.from, to: updated.to } } : {}), ...busy };
+    return updated ? { ...updated, ...busy } : { kind: "absent" };
   }
 
   const updateOne = (plan: EnginePlan): Promise<Outcome> => {
@@ -337,7 +340,7 @@ export function createEngineUpdater(options: EngineUpdaterOptions): EngineUpdate
       } catch (error) {
         outcome = { kind: "failed", from: "?", to: plan.pin.target, reason: error instanceof Error ? error.message : String(error) };
       }
-      if (outcome.kind === "busy" || outcome.kind === "waiting") waiting = true;
+      if (outcome.kind === "busy" || outcome.kind === "waiting" || ("busyAfter" in outcome && outcome.busyAfter)) waiting = true;
       if (outcome.kind === "updated") {
         state.engines[plan.driverKind] = { updatedTo: outcome.to, updatedAt: now() };
         log(`Engine update: ${plan.name} ${outcome.from} → ${outcome.to}`);

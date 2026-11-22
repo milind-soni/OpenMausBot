@@ -9,7 +9,6 @@ import { join } from "node:path";
 import {
   AntigravityAcpClient,
   antigravitySessionSetup,
-  antigravitySignInError,
   type AntigravityProfile,
 } from "./antigravity-acp.ts";
 import type { AntigravityRuntime } from "./antigravity-runtime.ts";
@@ -28,11 +27,33 @@ const REQUEST_MS = 30_000;
 const SESSION_CLOSE_MS = 5_000;
 export const SIGN_IN_CACHE_MS = 30_000;
 
+/** The native CLI's own answer to a session it will not start without a sign-in (1.5.14: `-32000 Authentication
+ * required`). Another `-32000`, such as a sign-in service that is down, says nothing about the sign-in. */
+export function antigravityCliRefusedSession(error: unknown): boolean {
+  const value = error as { code?: unknown; message?: unknown } | null;
+  return value?.code === -32000 && typeof value.message === "string" && /\b(?:authentication|sign[- ]?in|log[- ]?in) (?:is )?required\b/iu.test(value.message);
+}
+
 const advertised = (value: unknown) => value === true || (typeof value === "object" && value !== null && !Array.isArray(value));
 
 /** The CLI's own file store for the sign-in, which it falls back to when the keyring is unavailable. */
 export const antigravityNativeTokenPath = (profile: Pick<AntigravityProfile, "directory">) =>
   join(profile.directory, "antigravity-acp", "antigravity-oauth-token");
+
+/** Runs `work` on a new CLI process and ends it; with `waitForExit` the process is gone before this resolves, or it throws. */
+async function withCli<T>(
+  runtime: AntigravityRuntime,
+  profile: AntigravityProfile,
+  waitForExit: boolean,
+  work: (client: AntigravityAcpClient) => Promise<T>,
+): Promise<T> {
+  const client = new AntigravityAcpClient(runtime, profile, profile.directory);
+  const result = await work(client).then((value) => ({ value }), (error: unknown) => ({ error }));
+  if (!waitForExit) client.close();
+  else if (!(await client.closeAndWait())) throw new Error("Antigravity did not shut down when asked to.");
+  if ("error" in result) throw result.error;
+  return result.value;
+}
 
 /** `waitForExit`: the process is gone before this resolves, for a check that must not race what the CLI may still write. */
 export async function antigravityCliSignIn(
@@ -40,8 +61,7 @@ export async function antigravityCliSignIn(
   profile: AntigravityProfile,
   timing: NativeProbeTiming & { waitForExit?: boolean } = {},
 ): Promise<NativeSignIn> {
-  const client = new AntigravityAcpClient(runtime, profile, profile.directory);
-  try {
+  return await withCli(runtime, profile, timing.waitForExit === true, async (client) => {
     const initialized = await client.initialize(timing.initializeMs ?? INITIALIZE_WINDOW_MS, Date.now() + (timing.capMs ?? INITIALIZE_CAP_MS));
     let session: { sessionId?: unknown } | undefined;
     try {
@@ -51,29 +71,23 @@ export async function antigravityCliSignIn(
         timing.requestMs ?? REQUEST_MS,
       );
     } catch (error) {
-      if (antigravitySignInError(error)) return "out";
+      if (antigravityCliRefusedSession(error)) return "out";
       throw error;
     }
     if (advertised(initialized?.agentCapabilities?.sessionCapabilities?.close) && typeof session?.sessionId === "string") {
       await client.request("session/close", { sessionId: session.sessionId }, SESSION_CLOSE_MS).catch(() => {});
     }
     return "in";
-  } finally {
-    if (timing.waitForExit) await client.closeAndWait();
-    else client.close();
-  }
+  });
 }
 
 /** Asks the CLI to forget its sign-in, then removes the file store it may have used. A refused `logout` is not final:
  * the sign-out is judged by a new session afterwards. */
 async function logoutAndForget(runtime: AntigravityRuntime, profile: AntigravityProfile, timing: NativeProbeTiming): Promise<void> {
-  const client = new AntigravityAcpClient(runtime, profile, profile.directory);
-  try {
+  await withCli(runtime, profile, true, async (client) => {
     const initialized = await client.initialize(timing.initializeMs ?? INITIALIZE_WINDOW_MS, Date.now() + (timing.capMs ?? INITIALIZE_CAP_MS));
     if (advertised(initialized?.agentCapabilities?.auth?.logout)) await client.request("logout", {}, timing.requestMs ?? REQUEST_MS).catch(() => {});
-  } finally {
-    await client.closeAndWait();
-  }
+  });
   for (const file of [antigravityNativeTokenPath(profile), profile.tokenPath]) {
     await rm(file, { force: true, maxRetries: 4, retryDelay: 250 });
   }

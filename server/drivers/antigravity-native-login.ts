@@ -102,17 +102,25 @@ export interface NativeLoginHooks {
   confirm?(): Promise<boolean>;
 }
 
+/** Every `--login` process started that has not exited yet, ended flows included: one that outlived its kill can still
+ * write the sign-in it was given. */
+export type LoginProcesses = Map<ReturnType<typeof spawnCli>, Promise<number | null>>;
+
 export class AntigravityCliLogin {
   #flow: LoginFlow | null = null;
-  /** Every `--login` process started here that has not exited yet, ended flows included: one that outlived its kill can
-   * still write the sign-in it was given. */
-  readonly #alive = new Map<LoginFlow["child"], Promise<number | null>>();
+  readonly #alive: LoginProcesses;
   #ended: ProviderAuthenticationStatus | null = null;
   readonly #hooks: NativeLoginHooks;
   readonly #timing: { startupMs: number; submitMs: number; lifetimeMs: number; exitConfirmMs: number };
 
-  constructor(hooks: NativeLoginHooks, timing: Partial<{ startupMs: number; submitMs: number; lifetimeMs: number; exitConfirmMs: number }> = {}) {
+  /** `alive`: the instance's `--login` processes, shared with a controller the instance is rebuilt with. */
+  constructor(
+    hooks: NativeLoginHooks,
+    timing: Partial<{ startupMs: number; submitMs: number; lifetimeMs: number; exitConfirmMs: number }> = {},
+    alive: LoginProcesses = new Map(),
+  ) {
     this.#hooks = hooks;
+    this.#alive = alive;
     this.#timing = { startupMs: STARTUP_TIMEOUT_MS, submitMs: SUBMIT_TIMEOUT_MS, lifetimeMs: LOGIN_TIMEOUT_MS, exitConfirmMs: EXIT_CONFIRM_MS, ...timing };
   }
 

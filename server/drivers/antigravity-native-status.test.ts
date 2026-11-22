@@ -12,7 +12,7 @@ import {
   clearAntigravityNativeCredentials,
   noteAntigravityNativeCredentials,
 } from "./antigravity-native-credentials.ts";
-import { NativeSignInCache, antigravityCliSignIn, antigravityNativeTokenPath, signOutAntigravityCli } from "./antigravity-native-status.ts";
+import { NativeSignInCache, antigravityCliRefusedSession, antigravityCliSignIn, antigravityNativeTokenPath, signOutAntigravityCli } from "./antigravity-native-status.ts";
 import type { AntigravityRuntime } from "./antigravity-runtime.ts";
 
 const WINDOWS = process.platform === "win32";
@@ -180,5 +180,15 @@ describe("the record that an instance may hold a sign-in in the CLI's own store"
     expect(antigravityNativeCredentials("a", baseDir)).toMatchObject({ cli: "/opt/antigravity" });
     noteAntigravityNativeCredentials("a", "antigravity", baseDir);
     expect(antigravityNativeCredentials("a", baseDir)).toMatchObject({ cli: "antigravity" });
+  });
+});
+
+describe("the native CLI's refusal of a session for want of a sign-in", () => {
+  it("is its own answer, and not another -32000 such as a sign-in service that is down", () => {
+    expect(antigravityCliRefusedSession({ code: -32000, message: "Authentication required" })).toBe(true);
+    expect(antigravityCliRefusedSession({ code: -32000, message: "Sign-in required" })).toBe(true);
+    expect(antigravityCliRefusedSession({ code: -32000, message: "Authentication service unavailable" })).toBe(false);
+    expect(antigravityCliRefusedSession({ code: -32603, message: "Authentication required" })).toBe(false);
+    expect(antigravityCliRefusedSession(new Error("Authentication required"))).toBe(false);
   });
 });
