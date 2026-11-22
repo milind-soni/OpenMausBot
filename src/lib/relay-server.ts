@@ -26,7 +26,9 @@ export async function serverFetch(path: string, init: RequestInit = {}): Promise
   // A Request turns any body fetch takes (FormData, Blob, URLSearchParams…) into bytes and gives it its content type.
   const request = new Request(new URL(path, "http://relay.invalid"), { ...init, signal: undefined });
   const body = request.method === "GET" || request.method === "HEAD" ? null : new Uint8Array(await request.arrayBuffer());
-  return current.fetch(path, { method: request.method, headers: request.headers, body, signal: init.signal ?? undefined });
+  // The normalized target: spaces and other unsafe characters encoded, any fragment left out.
+  const { pathname, search } = new URL(request.url);
+  return current.fetch(pathname + search, { method: request.method, headers: request.headers, body, signal: init.signal ?? undefined });
 }
 
 /** An EventSource on `url` through `current`, as the live events transport uses it (src/lib/live-events.ts): `onerror`
@@ -58,6 +60,8 @@ async function readEvents(body: ReadableStream<Uint8Array>, signal: AbortSignal,
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let pending = "";
+  // A chunk that ended in CR has ended that line already; an LF that starts the next chunk belongs to the same CRLF.
+  let skipLF = false;
   let data: string[] = [];
   let type = "";
   let lastEventId = "";
@@ -80,9 +84,14 @@ async function readEvents(body: ReadableStream<Uint8Array>, signal: AbortSignal,
     for (;;) {
       const { done, value } = await reader.read();
       if (done || signal.aborted) return;
-      pending += decoder.decode(value, { stream: true });
-      // A lone CR at the end may be the first half of a CRLF: it waits for the next chunk.
-      const parts = pending.split(/\r\n|\r(?!$)|\n/);
+      let text = decoder.decode(value, { stream: true });
+      if (skipLF && text.startsWith("\n")) {
+        text = text.slice(1);
+        skipLF = false;
+      }
+      if (text) skipLF = text.endsWith("\r");
+      pending += text;
+      const parts = pending.split(/\r\n|\r|\n/);
       pending = parts.pop()!;
       for (const part of parts) {
         line(part);

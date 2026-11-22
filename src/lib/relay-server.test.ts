@@ -97,6 +97,14 @@ describe("serverFetch", () => {
     expect(text).toContain("hello");
   });
 
+  it("forwards the normalized target: unsafe characters encoded, no fragment", async () => {
+    const { link, sent } = fakeLink(() => new Response("{}"));
+    setRelayLink(link);
+    await serverFetch("/api/bots?name=A B#section");
+    await serverFetch("/api/files/a b.txt");
+    expect(sent.map((one) => one.path)).toEqual(["/api/bots?name=A%20B", "/api/files/a%20b.txt"]);
+  });
+
   it("passes the caller's signal to the link", async () => {
     const { link, sent } = fakeLink(() => new Response("{}"));
     setRelayLink(link);
@@ -155,6 +163,27 @@ describe("relayEventSource", () => {
       { data: "a\nb", lastEventId: "8" },
       { data: "", lastEventId: "9" },
     ]);
+    expect(source.onerror).not.toHaveBeenCalled();
+  });
+
+  it("delivers an event whose last line ends in a CR at once, and counts a CRLF split across chunks once", async () => {
+    const stream = eventStream();
+    const { link } = fakeLink(() => stream.response);
+    const source = relayEventSource(link, "/api/events");
+    const messages: string[] = [];
+    source.onmessage = (event) => messages.push(event.data);
+    source.onerror = vi.fn();
+    await tick();
+
+    stream.push("data: x\r\r");
+    await tick();
+    expect(messages).toEqual(["x"]);
+
+    stream.push("data: y\r");
+    stream.push("\ndata: z\r");
+    stream.push("\n\r\n");
+    await tick();
+    expect(messages).toEqual(["x", "y\nz"]);
     expect(source.onerror).not.toHaveBeenCalled();
   });
 
