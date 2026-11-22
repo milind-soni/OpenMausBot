@@ -30,6 +30,7 @@ import { BotEditorStore, initialState, StoreProvider } from "@/state/store";
 import { setLocale } from "@/lib/i18n";
 import { ThreadRefsContext } from "./ThreadRefs";
 import * as AttachmentPreview from "./AttachmentPreview";
+import * as OutsideWorkspaceProbe from "./outside-workspace-probe";
 import { messageReferencesFile } from "../../server/message-file";
 
 // Most of this file pins Advanced mode's chrome; the Simple code block has its own tests below.
@@ -934,7 +935,7 @@ describe("ChatMarkdown attachments", () => {
       probedOutside: boolean | null = outsideWorkspace ? true : false,
       saveFailed = outsideWorkspace,
     ) => {
-      const probe = vi.spyOn(AttachmentPreview, "useMessageFileOutsideWorkspace").mockReturnValue(probedOutside);
+      const probe = vi.spyOn(OutsideWorkspaceProbe, "useMessageFileOutsideWorkspace").mockReturnValue(probedOutside);
       const save = vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
         state: saveFailed ? "failed" : "idle",
         reason: outsideWorkspace ? "the linked file is outside this conversation's workspace" : "",
@@ -1005,7 +1006,7 @@ describe("ChatMarkdown attachments", () => {
       const folder = "D:\\Claude Works\\v3\\";
       const text = `The videos are in \`${folder}\``;
       const outsideSave = () => {
-        vi.spyOn(AttachmentPreview, "useMessageFileOutsideWorkspace").mockReturnValue(null);
+        vi.spyOn(OutsideWorkspaceProbe, "useMessageFileOutsideWorkspace").mockReturnValue(null);
         return vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
           state: "failed", reason: "", savedTo: "", outsideWorkspace: true, retryable: false, folder: null,
           save: vi.fn(async () => undefined),
@@ -1035,7 +1036,7 @@ describe("ChatMarkdown attachments", () => {
 
       it("asks the desktop app to show the real folder", async () => {
         const save = outsideSave();
-        const probe = vi.spyOn(AttachmentPreview, "useMessageFileOutsideWorkspace").mockReturnValue(true);
+        const probe = vi.spyOn(OutsideWorkspaceProbe, "useMessageFileOutsideWorkspace").mockReturnValue(true);
         const ogb = (window as { ogb?: unknown }).ogb;
         const reveal = vi.fn(async () => "shown" as const);
         (window as { ogb?: unknown }).ogb = { revealInFolder: reveal, remoteClient: { active: false } };
@@ -1063,7 +1064,7 @@ describe("ChatMarkdown attachments", () => {
 
     it("leaves other failures alone", () => {
       vi.stubGlobal("window", { ogb: { revealInFolder, remoteClient: { active: false } } });
-      const probe = vi.spyOn(AttachmentPreview, "useMessageFileOutsideWorkspace").mockReturnValue(false);
+      const probe = vi.spyOn(OutsideWorkspaceProbe, "useMessageFileOutsideWorkspace").mockReturnValue(false);
       const save = vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
         state: "failed",
         reason: "the linked file is outside this conversation's workspace",

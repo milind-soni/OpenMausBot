@@ -33,6 +33,7 @@ import {
 } from "@/lib/composer-attachments";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { revealBridge, revealHostPath, revealProblemText, REVEALABLE_PATH } from "@/lib/reveal-host-path";
 import { serverErrorText } from "@/lib/server-error";
 import { CopyImageButton } from "./CopyImageButton";
 import { FilePreviewButton } from "./FilePreviewButton";
@@ -242,22 +243,6 @@ export async function requestMessageFile(
   return response;
 }
 
-/** true when the route refuses a copy into this chat's folder; false when it would stream; null when the probe failed for another reason. */
-export async function messageFileOutsideWorkspace(
-  filePath: string,
-  message: MessageAttachmentContext,
-  signal: AbortSignal,
-): Promise<boolean | null> {
-  try {
-    const response = await requestMessageFile(filePath, message, signal);
-    await response.body?.cancel();
-    return false;
-  } catch (error) {
-    if ((error as { code?: unknown } | null)?.code === "outside_workspace") return true;
-    return null;
-  }
-}
-
 export interface MessageFolderListing {
   name: string;
   entries: { name: string; bytes: number; mime: string }[];
@@ -430,56 +415,6 @@ export function MessageFolderFiles({ folderPath, listing, message }: {
       {listing.truncated && <span className="text-ink-secondary">{t("attach.folderTruncated")}</span>}
     </span>
   );
-}
-
-const REVEALABLE_PATH = /^(?:\/(?!\/)|[a-zA-Z]:[\\/])/;
-
-export function canRevealHostPath(filePath: string): boolean {
-  return REVEALABLE_PATH.test(filePath);
-}
-
-function revealBridge(): NonNullable<Window["ogb"]>["revealInFolder"] {
-  const ogb = typeof window === "undefined" ? undefined : window.ogb;
-  return ogb?.remoteClient?.active ? undefined : ogb?.revealInFolder;
-}
-
-export type RevealHostPathResult = "shown" | "missing" | "failed" | "unavailable";
-
-export async function revealHostPath(filePath: string): Promise<RevealHostPathResult> {
-  const reveal = revealBridge();
-  if (!reveal || !REVEALABLE_PATH.test(filePath)) return "unavailable";
-  try {
-    const result = await reveal(filePath);
-    if (result === "missing") return "missing";
-    if (result !== "shown") return "failed";
-    return "shown";
-  } catch {
-    return "failed";
-  }
-}
-
-export function revealProblemText(result: RevealHostPathResult): string {
-  if (result === "missing") return t("attach.revealMissing");
-  if (result === "failed") return t("attach.revealFailed");
-  return "";
-}
-
-export function useMessageFileOutsideWorkspace(filePath: string, message?: MessageAttachmentContext): boolean | null {
-  const [outside, setOutside] = useState<boolean | null>(null);
-  useEffect(() => {
-    const reveal = revealBridge();
-    if (!message || !reveal || !REVEALABLE_PATH.test(filePath)) {
-      setOutside(null);
-      return;
-    }
-    const controller = new AbortController();
-    setOutside(null);
-    void messageFileOutsideWorkspace(filePath, message, controller.signal).then((value) => {
-      if (!controller.signal.aborted) setOutside(value === null ? false : value);
-    });
-    return () => controller.abort();
-  }, [filePath, message?.messageId, message?.threadId]);
-  return outside;
 }
 
 export function OutsideWorkspaceFile({ filePath }: { filePath: string }) {

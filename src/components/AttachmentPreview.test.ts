@@ -16,7 +16,6 @@ import {
   contentDispositionFilename,
   imageGalleryLayout,
   isExternalImageSource,
-  messageFileOutsideWorkspace,
   messageImagePreviewUrl,
   previewImage,
   previewKeyAction,
@@ -26,6 +25,7 @@ import {
   useLocalFileSave,
   wrappedImageIndex,
 } from "./AttachmentPreview";
+import { messageFileOutsideWorkspace } from "./outside-workspace-probe";
 
 describe("attachment image navigation", () => {
   it("wraps previous and next navigation", () => {
