@@ -45,6 +45,10 @@ export const BROWSER_STUCK = `The browser engine is stuck. Press Restart in the 
 const RESTART_COST = "a restart closes every tab and loses page state such as form input";
 const PROBE_MS = 5_000;
 const CAPACITY_WAIT_MS = 30_000;
+/** How long a started Chrome's first tab may take to run: as long as Chrome itself gets to answer on its DevTools pipe
+ * (chrome/launch.ts). On a busy or CPU-capped computer the first tab can take longer than 15 s, and refusing it then only
+ * made the bot start Chrome again from nothing. */
+const FIRST_TAB_MS = 60_000;
 const SERVER_TAB_LIMIT = 32;
 const PROFILE_TAB_LIMIT = 8;
 
@@ -256,7 +260,7 @@ export class BrowserService {
     }));
     try {
       this.#stillWanted(profile, epoch);
-      await browser.waitForPage(() => true, 15_000);
+      await browser.waitForPage(() => true, FIRST_TAB_MS);
       for (const page of browser.pages()) await page.ready.then(() => adopt(page, "restored"), () => undefined);
       if (fresh) await this.#onlyBlankTab(profile, browser);
       // Chrome gives a new window's keyboard to its address bar, and the bot's DevTools Protocol work never moves it: on a
