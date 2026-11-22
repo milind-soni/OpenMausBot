@@ -40,8 +40,14 @@ const API = /^\/(?:api(?:[/?#]|$)|\.well-known\/openmausbot\/environment(?:[?#]|
 function ownApiPath(path: string): string | null {
   if (API.test(path)) return path;
   const origin = (globalThis as { location?: { origin?: string } }).location?.origin;
-  if (!origin || !path.startsWith(`${origin}/`)) return null;
-  const url = new URL(path);
+  if (!origin) return null;
+  // Parsed, so the same origin written another way (an explicit default port, upper case) still counts.
+  let url: URL;
+  try {
+    url = new URL(path);
+  } catch {
+    return null;
+  }
   return url.origin === origin && API.test(url.pathname) ? url.pathname + url.search : null;
 }
 
