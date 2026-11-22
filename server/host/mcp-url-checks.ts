@@ -1,5 +1,5 @@
-// A URL MCP server whose address answers MCP's first request with HTTP 404 or 405 is no MCP endpoint (a web page, a wrong
-// path). Every engine fails it at every session start, and a server that failed there makes the conversation's engine
+// A URL MCP server whose address answers MCP's first request with HTTP 405 is no MCP endpoint (a web page that takes no
+// POST). Every engine fails it at every session start, and a server that failed there makes the conversation's engine
 // start again from cold on its next turn (bot-box/broker-mcp.ts, drivers/codex.ts), so one such entry cost every turn of
 // every bot that has it. It is left out of turns as a command server that does not start is (mcp-health.ts), the person
 // hears it once, and it is tried again on its own. Only that definite answer turns a server off: a timeout, a refused key
@@ -10,8 +10,9 @@ import type { McpServerSpec, RemoteMcpSpec } from "../contracts.ts";
 import { offNotice } from "../mcp-health.ts";
 import { MAX_REMOTE_MCP_BYTES, McpHttpError, REMOTE_MCP_STARTUP_MS, RemoteMcpClient } from "../mcp-http.ts";
 
-/** What an address that is no MCP endpoint answers MCP's initialize with. */
-export const NOT_MCP_STATUSES: ReadonlySet<number> = new Set([404, 405]);
+/** What an address that is no MCP endpoint answers MCP's initialize with. Not 404: a server that hides behind it until
+ * signed in would be turned off by a check that sends no sign-in. */
+export const NOT_MCP_STATUSES: ReadonlySet<number> = new Set([405]);
 /** A server left out is tried again after this long, as a command server that did not start is. */
 export const RECHECK_NOT_MCP_MS = 30 * 60_000;
 

@@ -5,7 +5,7 @@ import { expect, it } from "vitest";
 import { createMcpUrlChecks, initializeAnswer, RECHECK_NOT_MCP_MS, type UrlAnswer } from "./mcp-url-checks.ts";
 
 it("tries a server left out again after half an hour, keeping it out meanwhile, and lets it back once it answers as MCP", async () => {
-  let clock = 1_000, answer: UrlAnswer = { ok: false, status: 404 };
+  let clock = 1_000, answer: UrlAnswer = { ok: false, status: 405 };
   const servers = { wiki: { type: "http" as const, url: "https://wiki.example.test/", headers: {} } };
   let probes = 0;
   const checks = createMcpUrlChecks({
@@ -25,6 +25,14 @@ it("tries a server left out again after half an hour, keeping it out meanwhile, 
   await checks.settled();
   expect(probes).toBe(2);
   expect(Object.keys(checks.usable({ ...servers }))).toEqual(["wiki"]);
+});
+
+it("keeps a server that answered 404, which may only hide until signed in", async () => {
+  const servers = { wiki: { url: "https://wiki.example.test/mcp", headers: {} } };
+  const checks = createMcpUrlChecks({ servers: () => servers, users: () => [], tell: () => {}, probe: async () => ({ ok: false, status: 404 }) });
+  checks.check(["wiki"]);
+  await checks.settled();
+  expect(checks.off(["wiki"])).toEqual([]);
 });
 
 it("a probe that throws keeps the server in", async () => {
