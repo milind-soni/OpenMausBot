@@ -14,6 +14,9 @@ import { LOGINS_FILE, LOGINS_KEY_FILE } from "./vault-store.ts";
 const ROOT = join(import.meta.dirname, "..");
 const { version: VERSION } = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { version: string };
 const released = JSON.parse(readFileSync(join(import.meta.dirname, "data-format-released.json"), "utf8")) as ReleasedDataFormat;
+/** Whether this tree still writes format 1. A plain boolean: the release bump changes DATA_FORMAT, and a literal
+ * comparison against its `as const` numbers would stop compiling on the other side of that change. */
+const WRITES_ONE = (DATA_FORMAT.writes as number) === 1;
 const dirs: string[] = [];
 const dataDir = () => {
   const dir = mkdtempSync(join(tmpdir(), "omb-data-format-"));
@@ -133,10 +136,10 @@ describe("the data folder's format marker", () => {
     try {
       // The release that reads format 2 and writes 1; this tree's own numbers too, while it writes 1.
       expect(() => checkDataFormat(dir, "0.1.152", 2, 1)).not.toThrow();
-      if (DATA_FORMAT.writes === 1) expect(() => checkDataFormat(dir, "0.1.152")).not.toThrow();
+      if (WRITES_ONE) expect(() => checkDataFormat(dir, "0.1.152")).not.toThrow();
       // The stamp cannot replace it (EACCES): said in the log, and the start goes on.
       expect(() => stampDataFormat(dir, "0.1.152", { writes: 1, reads: 2 })).not.toThrow();
-      if (DATA_FORMAT.writes === 1) expect(() => stampDataFormat(dir, "0.1.152")).not.toThrow();
+      if (WRITES_ONE) expect(() => stampDataFormat(dir, "0.1.152")).not.toThrow();
       expect(warn).toHaveBeenCalledWith(expect.stringMatching(/could not write .*data-format\.json .*starting without it/));
       expect(readdirSync(dir)).toEqual([DATA_FORMAT_FILE]);
     } finally {
@@ -233,7 +236,7 @@ describe("a server starting on a data folder", () => {
     expect(readdirSync(data)).toEqual([DATA_FORMAT_FILE]);
   }, 60_000);
 
-  it.runIf(DATA_FORMAT.writes === 1)("starts, and puts a good marker back, on a marker a power loss left empty or full of NULs", async () => {
+  it.runIf(WRITES_ONE)("starts, and puts a good marker back, on a marker a power loss left empty or full of NULs", async () => {
     for (const text of ["", "\0".repeat(64)]) {
       const dir = dataDir();
       const data = join(dir, "data");
@@ -246,7 +249,7 @@ describe("a server starting on a data folder", () => {
     }
   }, 120_000);
 
-  it.runIf(DATA_FORMAT.writes > 1)("refuses to open a Vault with a large value and an unreadable format marker", async () => {
+  it.runIf(!WRITES_ONE)("refuses to open a Vault with a large value and an unreadable format marker", async () => {
     for (const text of ["", "\0".repeat(64)]) {
       const dir = dataDir();
       const data = join(dir, "data");
