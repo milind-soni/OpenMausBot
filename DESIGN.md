@@ -191,6 +191,9 @@ element's job and never a pixel value:
   the sidebar's width and its pinned bots exactly as they were. The chat makes
   the room; under 920px, where the chat would get less than 320px, the panel
   floats over the chat's edge instead.
+- **Simple's chat header floats over the transcript** (see [section 8](#8-surfaces-and-depth)):
+  the first message rests just below it at the top of the history, and only its
+  controls take clicks.
 - **The chat header's model pill folds to its AI's mark** while a side panel
   narrows the chat, in a round button the size of the header's others; its
   label still names the model.
@@ -231,6 +234,11 @@ element's job and never a pixel value:
   composer (`shadow-(--shadow-composer)`, through `ELEVATED_COMPOSER`). The
   lift shows on light grounds only; in Daylight the composer drops its 0.5px
   ring at rest and gets it back on hover and focus.
+- **Simple's chat header has no band.** The transcript runs up to the
+  window's top edge under the floating pill and buttons and fades in, in even
+  steps, over the header's 60px (a mask on the scroller, so any skin's ground
+  shows through). A solid band cut messages off at the header; the floating
+  controls already carry their own lift. Advanced keeps its band.
 - **Borders are 1px `hairline`.** Panes meet on a 0.5px `edge`. An element in
   the page gets a border or a tint, not both, and no shadow. Floating surfaces
   take their surface class, which already balances all three. One exception:
