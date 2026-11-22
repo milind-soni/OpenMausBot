@@ -96,6 +96,8 @@
 //   FAKE_ACP_CANCEL_STOP_REASON  the stopReason a cancelled hanging prompt answers (default cancelled; OpenCode answers end_turn)
 //   FAKE_ACP_HANG_ONCE_FILE  with FAKE_ACP_HANG_ON, only the first matching prompt hangs; it writes this file
 //   FAKE_ACP_HOLD_FILE  while this file exists, a session/prompt waits before it is answered
+//   FAKE_ACP_GATEWAY_PID_FILE  the first `acp` process starts a stand-in for Hermes' shared gateway the way Hermes does
+//     (a session of its own, HERMES_GATEWAY_DETACHED=1, `gateway run`) and writes its pid here; later ones leave it be
 //   FAKE_ACP_AGY_STEPS_FILE  JSON [[stepType, text], …] re-read per prompt and appended to the session's log under
 //     GEMINI_HOME (antigravity-acp/conversations/<session>.db, a folder made at startup), as agy_acp_server 1.4.5
 //     writes its trajectory
@@ -427,6 +429,16 @@ if (argv[0] === "status" || argv[0] === "whoami") {
   const authenticated = process.env.FAKE_ACP_AUTH !== "0";
   console.log(JSON.stringify({ isAuthenticated: authenticated }));
   process.exit(0);
+}
+const gatewayPidFile = process.env.FAKE_ACP_GATEWAY_PID_FILE;
+if (gatewayPidFile && argv[0] === "acp" && !existsSync(gatewayPidFile)) {
+  const gateway = spawn(process.execPath, ["-e", "setInterval(() => {}, 1 << 30)", "gateway", "run", "--quiet"], {
+    detached: true,
+    stdio: "ignore",
+    env: { ...process.env, HERMES_GATEWAY_DETACHED: "1" },
+  });
+  gateway.unref();
+  writeFileSync(gatewayPidFile, String(gateway.pid));
 }
 const grokLogin = process.env.FAKE_ACP_GROK_LOGIN;
 if (argv[0] === "models" && grokLogin) {

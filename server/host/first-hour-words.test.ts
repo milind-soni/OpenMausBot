@@ -25,6 +25,8 @@ describe("the first hour's words", () => {
       for (const n of ["40", "6", "4"]) expect(done, language).toContain(n);
       expect(w.recap(done, w.time(110)), language).toContain("2");
       expect(w.overnight(w.list([w.sorted(1)])), language).toContain("1");
+      expect(w.briefSorted(40), language).toContain("40");
+      expect(w.briefSorted(40), language).not.toBe(w.sorted(40));
       expect(w.routines(3), language).toContain("3");
     }
   });
@@ -32,13 +34,15 @@ describe("the first hour's words", () => {
   it("count in English the way a person does", () => {
     const w = firstHourWords("en");
     expect(w.list([w.sorted(1), w.drafted(1), w.prepped(1)])).toBe("sorted 1 email, drafted 1 reply and prepped 1 meeting");
-    expect(w.recap(w.list([w.sorted(40), w.drafted(6), w.prepped(4)]), w.time(110))).toBe("So far I've sorted 40 emails, drafted 6 replies and prepped 4 meetings: about 2 hours back.");
+    expect(w.recap(w.list([w.briefSorted(40), w.drafted(6), w.prepped(4)]), w.time(110))).toBe("So far I've sorted 40 emails for your morning brief, drafted 6 replies and prepped 4 meetings: about 2 hours back.");
     expect(w.overnight(w.list([w.sorted(23), w.drafted(2)]))).toBe("While you slept, I sorted 23 emails and drafted 2 replies.");
+    expect([1, 14].map((n) => w.briefSorted(n))).toEqual(["sorted 1 email for your morning brief", "sorted 14 emails for your morning brief"]);
     expect([12, 47, 60, 89, 90, 151].map((minutes) => w.time(minutes))).toEqual(["about 10 minutes", "about 45 minutes", "about an hour", "about an hour", "about 2 hours", "about 3 hours"]);
   });
 
   it("use the plural forms of Russian, Ukrainian and Polish", () => {
     expect([1, 3, 5, 21].map((n) => firstHourWords("ru").sorted(n))).toEqual(["разобрано 1 письмо", "разобрано 3 письма", "разобрано 5 писем", "разобрано 21 письмо"]);
+    expect([1, 3, 5].map((n) => firstHourWords("pl").briefSorted(n))).toEqual(["posortowano 1 e-mail do porannego podsumowania", "posortowano 3 e-maile do porannego podsumowania", "posortowano 5 e-maili do porannego podsumowania"]);
     expect([1, 2, 5].map((n) => firstHourWords("uk").prepped(n))).toEqual(["підготовлено 1 зустріч", "підготовлено 2 зустрічі", "підготовлено 5 зустрічей"]);
     expect([1, 4, 12].map((n) => firstHourWords("pl").drafted(n))).toEqual(["napisano 1 szkic odpowiedzi", "napisano 4 szkice odpowiedzi", "napisano 12 szkiców odpowiedzi"]);
   });

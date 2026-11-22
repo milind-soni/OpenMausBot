@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, TriangleAlert } from "lucide-react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
+import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { Switch } from "../SettingsPrimitives";
@@ -206,6 +207,89 @@ export function VpsConnection() {
         </button>
       </div>
       {notice && <div role="status" className="text-[12px] leading-4 text-ink-secondary">{notice}</div>}
+      {error && <div role="alert" className="text-[12px] leading-4 text-danger">{error}</div>}
+      <VpsServers />
+    </div>
+  );
+}
+
+const NO_SERVERS: { name: string; sshAlias: string }[] = [];
+
+/** Named servers a bot can be put on from its own settings. Saving the list never moves a bot. */
+function VpsServers() {
+  const servers = useStoreSelector((s) => s.config?.vps?.servers ?? NO_SERVERS);
+  const dispatch = useStoreDispatch();
+  const [name, setName] = useState("");
+  const [alias, setAlias] = useState("");
+  const [saving, setSaving] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const put = (next: { name: string; sshAlias: string }[], busy: string) => {
+    setSaving(busy);
+    setError(null);
+    return api("/api/config", { method: "PUT", body: JSON.stringify({ vpsServers: next }) })
+      .then((status: ConfigStatus) => dispatch({ type: "configStatus", config: status }))
+      .finally(() => setSaving(null));
+  };
+  const add = () => {
+    if (saving || !name.trim() || !alias.trim()) return;
+    put([...servers, { name: name.trim(), sshAlias: alias.trim() }], "")
+      .then(() => { setName(""); setAlias(""); })
+      .catch((e) => setError(e.message));
+  };
+  const remove = (target: string) => {
+    if (saving) return;
+    put(servers.filter((server) => server.sshAlias !== target), target).catch((e) => setError(e.message));
+  };
+
+  return (
+    <div data-vps-servers className="mt-2 flex flex-col gap-2">
+      <div className="text-[13px] text-ink">{t("keys.vps.servers.title")}</div>
+      <p className="text-[12px] leading-4 text-ink-secondary">{t("keys.vps.servers.hint")}</p>
+      {servers.map((server) => (
+        <div key={server.sshAlias} data-vps-server={server.sshAlias} className="flex flex-wrap items-center gap-2">
+          <span className={cn(KEY_FIELD, "block flex-1 truncate text-ink")}>
+            {server.name} <span className="font-mono text-ink-secondary">{server.sshAlias}</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => remove(server.sshAlias)}
+            disabled={saving !== null}
+            aria-label={t("keys.vps.servers.removeAria", { name: server.name })}
+            className="ui-button shrink-0"
+          >
+            {saving === server.sshAlias ? <Loader2 size={13} className="animate-spin" aria-hidden="true" /> : t("keys.row.remove")}
+          </button>
+        </div>
+      ))}
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => { setError(null); setName(e.target.value); }}
+          onKeyDown={(e) => e.key === "Enter" && add()}
+          disabled={saving !== null}
+          placeholder={t("keys.vps.servers.namePlaceholder")}
+          aria-label={t("keys.vps.servers.name")}
+          autoComplete="off"
+          className={cn(KEY_FIELD, "w-auto min-w-[min(100%,10rem)] flex-1")}
+        />
+        <input
+          type="text"
+          value={alias}
+          onChange={(e) => { setError(null); setAlias(e.target.value); }}
+          onKeyDown={(e) => e.key === "Enter" && add()}
+          disabled={saving !== null}
+          placeholder="home-lab"
+          aria-label={t("keys.vps.servers.alias")}
+          autoComplete="off"
+          spellCheck={false}
+          className={cn(KEY_FIELD, "w-auto min-w-[min(100%,10rem)] flex-1 font-mono")}
+        />
+        <button type="button" onClick={add} disabled={saving !== null || !name.trim() || !alias.trim()} className="ui-button shrink-0">
+          {saving === "" ? <Loader2 size={13} className="animate-spin" aria-hidden="true" /> : t("keys.vps.servers.add")}
+        </button>
+      </div>
       {error && <div role="alert" className="text-[12px] leading-4 text-danger">{error}</div>}
     </div>
   );

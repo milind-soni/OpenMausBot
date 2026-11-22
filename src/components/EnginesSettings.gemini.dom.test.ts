@@ -55,7 +55,7 @@ const type = async (input: HTMLInputElement, value: string) => {
 };
 
 describe("Settings → AI → Providers: Google AI Studio (#6352)", () => {
-  it("offers Google AI Studio under More providers and adds its key as a Gemini server", async () => {
+  it("offers Google AI Studio and adds its key as a Gemini server", async () => {
     await render();
     expect(studio()?.textContent).toContain("Google AI Studio");
     await click(studio()!.querySelector("button"));
@@ -70,6 +70,20 @@ describe("Settings → AI → Providers: Google AI Studio (#6352)", () => {
     await render();
     expect(studio()).toBeNull();
     expect(container.querySelector("[data-simple-engine=\"openai-compat-gemini\"]")?.textContent).toContain("Google Gemini");
+  });
+
+  it("lists Google AI Studio in the main provider list, outside the closed More providers fold", async () => {
+    await act(async () => { root.render(createElement(EnginesSettings, { simple: true, more: { id: "more", open: false, onToggle: () => {} } })); });
+    expect(studio()?.textContent).toContain("Google AI Studio");
+    expect(studio()?.textContent).toContain("Not set up");
+    expect(container.textContent).not.toContain("More providers");
+  });
+
+  it("keeps an added Gemini server in the main list while its key is not working", async () => {
+    fixture.state = { ...fixture.state, instances: [{ ...gemini(GEMINI_URL), snapshot: { state: "available", authenticated: false } } as InstanceInfo] };
+    await act(async () => { root.render(createElement(EnginesSettings, { simple: true, more: { id: "more", open: false, onToggle: () => {} } })); });
+    expect(container.querySelector("[data-simple-engine=\"openai-compat-gemini\"]")?.textContent).toContain("Google Gemini");
+    expect(container.textContent).not.toContain("More providers");
   });
 
   it("is not offered once a Gemini server is added, nor on the chat's sign-in card", async () => {
