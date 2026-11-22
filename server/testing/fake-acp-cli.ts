@@ -74,6 +74,8 @@
 //   FAKE_ACP_OMIT_MODEL_VALUE  when the live model equals this id, the model option has no currentValue
 //     (Copilot CLI 1.0.105 does this for auto)
 //   FAKE_ACP_EXIT_ON_MODEL  the process exits when set_config_option selects this model
+//   FAKE_ACP_HANG_ON_MODEL  set_config_option never answers a switch to this model, as a stuck account can; other requests
+//     are still answered
 //   FAKE_ACP_VARIANTS  JSON map model -> {id?, currentValue?, options} of ACP select values
 //   FAKE_ACP_CONFIG_UPDATES  JSON [{after, sessionId?, configOptions, replay?}] emitted after the named response
 //   FAKE_ACP_USAGE_ROOT  usage at the prompt result's root, as opencode 1.18.18 sends it
@@ -1269,6 +1271,7 @@ function handle(msg: any) {
         break;
       }
       if (configId === "model" && value === process.env.FAKE_ACP_EXIT_ON_MODEL) process.exit(4);
+      if (configId === "model" && value === process.env.FAKE_ACP_HANG_ON_MODEL) break;
       if (configId !== "model" || !models.includes(value)) {
         out({
           jsonrpc: "2.0",
