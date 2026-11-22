@@ -132,6 +132,17 @@ it("counts a server of MCP's older HTTP+SSE transport, saved as http, as MCP: it
   expect(await initializeAnswer({ type: "http", url: `${legacy}/sse`, headers: {} }, { timeoutMs: 10_000 })).toEqual({ ok: true });
 });
 
+it("reads a legacy SSE server whatever case its content type is in, and a POST 405 whose GET tells nothing as no answer", async () => {
+  const upper = await serve((request, response) => {
+    if (request.method !== "GET") return void response.writeHead(405).end();
+    response.writeHead(200, { "content-type": "Text/Event-Stream" });
+    response.write("event: endpoint\ndata: /messages?session=1\n\n");
+  });
+  expect(await initializeAnswer({ type: "http", url: `${upper}/sse`, headers: {} }, { timeoutMs: 10_000 })).toEqual({ ok: true });
+  const refused = await serve((request, response) => { response.writeHead(request.method === "GET" ? 401 : 405).end(); });
+  expect(await initializeAnswer({ type: "http", url: `${refused}/mcp`, headers: {} }, { timeoutMs: 10_000 }), "neither MCP nor a page").toEqual({ ok: false });
+});
+
 it("never follows a redirect, so a server's keys never reach another address", async () => {
   const seen: IncomingHttpHeaders[] = [];
   const elsewhere = await serve((request, response) => { seen.push(request.headers); response.writeHead(405).end(); });

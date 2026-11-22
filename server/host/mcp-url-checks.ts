@@ -33,16 +33,19 @@ export type UrlAnswer = { ok: true } | { ok: false; status?: number };
 export const withoutRedirects = (base: typeof fetch = fetch): typeof fetch => (input, init) => base(input, { ...init, redirect: "manual" });
 
 /** MCP's backwards-compatibility rule for an address that refuses the POST: a server of the older HTTP+SSE transport
- * answers a GET with an event stream. Whatever this cannot tell, it counts as MCP, so only a plain refusal turns it off. */
-async function speaksSse(server: UrlServer, fetchImpl: typeof fetch, signal: AbortSignal): Promise<boolean> {
+ * answers a GET with an event stream ("sse"). A GET that is answered with anything else is a plain page ("not"); one that
+ * fails, is refused or redirects tells nothing ("unknown"). */
+async function speaksSse(server: UrlServer, fetchImpl: typeof fetch, signal: AbortSignal): Promise<"sse" | "not" | "unknown"> {
   const stop = new AbortController();
   try {
     const response = await fetchImpl(server.url, {
       method: "GET", headers: { ...server.headers, accept: "text/event-stream" }, signal: AbortSignal.any([signal, stop.signal]),
     });
-    return !response.ok || (response.headers.get("content-type") ?? "").includes("text/event-stream");
+    if (!response.ok) return "unknown";
+    // Media types are case-insensitive (RFC 9110).
+    return (response.headers.get("content-type") ?? "").toLowerCase().includes("text/event-stream") ? "sse" : "not";
   } catch {
-    return true;
+    return "unknown";
   } finally {
     stop.abort();
   }
@@ -59,7 +62,11 @@ export async function initializeAnswer(server: RemoteMcpSpec, options: { fetch?:
     return { ok: true };
   } catch (error) {
     const status = error instanceof McpHttpError && error.kind === "status" ? error.status : undefined;
-    if (status !== undefined && NOT_MCP_STATUSES.has(status) && server.type !== "sse" && await speaksSse(server, fetchImpl, signal)) return { ok: true };
+    if (status !== undefined && NOT_MCP_STATUSES.has(status) && server.type !== "sse") {
+      const sse = await speaksSse(server, fetchImpl, signal);
+      // An inconclusive GET is no answer either way: an included server stays in, an excluded one stays out.
+      if (sse !== "not") return sse === "sse" ? { ok: true } : { ok: false };
+    }
     return status !== undefined ? { ok: false, status } : { ok: false };
   } finally {
     await client.close().catch(() => {});

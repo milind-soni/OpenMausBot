@@ -148,8 +148,8 @@ export function createMcpServersHost(deps: McpServersHostDeps) {
       const stored = server as StoredRemoteMcpServer;
       await deps.keys?.warm(name, stored);
       const resolved = deps.keys ? deps.keys.resolve(name, stored) : { ok: true as const, server: stored };
-      // A server whose Vault key is off is off for that reason (keyed), not checked.
-      if (!resolved.ok || !("url" in resolved.server)) return { ok: true };
+      // A server whose Vault key is off is off for that reason (keyed), not checked: no answer either way.
+      if (!resolved.ok || !("url" in resolved.server)) return { ok: false };
       const probe = deps.probeUrl ?? initializeAnswer, path = deps.botsPath?.() ?? null;
       if (!path) return probe(resolved.server);
       const brokered = brokeredServer(path, name, resolved.server);
