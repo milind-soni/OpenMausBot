@@ -124,6 +124,26 @@ export function readWav(bytes: Uint8Array): WavInfo | undefined {
   return undefined;
 }
 
+function normalizeStreamingWav(bytes: Uint8Array): Uint8Array {
+  if (bytes.byteLength < 12) return bytes;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const tag = (at: number) => String.fromCharCode(...bytes.subarray(at, at + 4));
+  if (tag(0) !== "RIFF" || tag(8) !== "WAVE" || view.getUint32(4, true) !== 0xffffffff) return bytes;
+  for (let at = 12; at + 8 <= bytes.byteLength;) {
+    const size = view.getUint32(at + 4, true);
+    const body = at + 8;
+    if (tag(at) === "data" && size === 0xffffffff) {
+      const normalized = Buffer.from(bytes);
+      normalized.writeUInt32LE(bytes.byteLength - 8, 4);
+      normalized.writeUInt32LE(bytes.byteLength - body, at + 4);
+      return normalized;
+    }
+    if (body + size > bytes.byteLength) break;
+    at = body + size + (size % 2);
+  }
+  return bytes;
+}
+
 export async function synthesize(text: string, voiceId: string, key: string, signal?: AbortSignal): Promise<Audio> {
   if (!key) throw new DeepSeekSpeechError("Add a DeepSeek API key in Settings → AI → Other services to use DeepSeek voice.", 409);
   if (!isDeepSeekVoice(voiceId)) throw new DeepSeekSpeechError("Choose Stella or Tide as the DeepSeek voice.", 409);
@@ -141,8 +161,9 @@ export async function synthesize(text: string, voiceId: string, key: string, sig
     await response.body?.cancel().catch(() => {});
     throw new DeepSeekSpeechError("DeepSeek returned an unexpected audio format. Try again later.");
   }
-  const bytes = await readBounded(response, MAX_AUDIO_BYTES, "speech");
-  if (!bytes.byteLength) throw new DeepSeekSpeechError("DeepSeek returned empty audio. Try again.");
+  const received = await readBounded(response, MAX_AUDIO_BYTES, "speech");
+  if (!received.byteLength) throw new DeepSeekSpeechError("DeepSeek returned empty audio. Try again.");
+  const bytes = normalizeStreamingWav(received);
   if (!readWav(bytes)) throw new DeepSeekSpeechError("DeepSeek returned incomplete audio. Try again.");
   return { bytes, mime: "audio/wav" };
 }

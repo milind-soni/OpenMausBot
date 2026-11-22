@@ -400,6 +400,13 @@ export function recordSourceHashes(directory = LOCALES_DIR) {
 
 const DEFAULT_TERMS = "Keep OpenMausBot, MausBot Cloud, CLI, and AI unchanged.";
 const LOCALE_TERMS = {
+  it: [
+    "Keep OpenMausBot, MausBot Cloud, and CLI unchanged. Write AI as “IA”, skill as “abilità”,",
+    "sign in as “Accedi” (session is “accesso”), app as “app”, this app's Settings as",
+    "“Impostazioni” (never “Configurazioni” in the macOS sense; macOS System Settings stays “Impostazioni di Sistema”),",
+    "and conversation or thread as “conversazione” or “discussione” matching the existing Italian pack.",
+    "Put no article before a bot's name: “di {name}”, not “del {name}”. Use the informal tu/register.",
+  ].join(" "),
   "pt-br": [
     "Keep OpenMausBot, MausBot Cloud, and CLI unchanged. Write AI as “IA”, skill as “habilidade”,",
     "sign in as “Entrar” (the noun is “login”), app as “app” (never “aplicativo”), this app's Settings as",

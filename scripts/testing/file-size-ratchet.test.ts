@@ -16,19 +16,19 @@ const HARD_CAP = 2000;
 const LISTED_FROM = 1000;
 
 const LINES: Record<string, number> = {
-  "server/index.ts": 15283,
+  "server/index.ts": 15276,
   "src/state/store.tsx": 3285,
   "electron/main.mjs": 3124,
   "server/store.ts": 2265,
   "src/components/Sidebar.tsx": 1672,
   "server/drivers/claude.ts": 2069,
   "server/drivers/acp/core.ts": 1611,
-  "server/drivers/codex.ts": 1593,
+  "server/drivers/codex.ts": 1591,
   "server/routines.ts": 1553,
   "src/components/ComputerPanel.tsx": 1782,
   "src/components/RoutineCalendarPage.tsx": 1485,
-  "server/config.ts": 1243,
-  "src/components/ChatView.tsx": 1261,
+  "server/config.ts": 1228,
+  "src/components/ChatView.tsx": 1227,
   "server/routine-requests.ts": 1468,
   "src/components/LocalComputerSection.tsx": 1437,
   "src/components/CursorAvatar.tsx": 1064,
@@ -38,11 +38,11 @@ const LINES: Record<string, number> = {
   "server/boat.ts": 1253,
   "server/drivers/pi.ts": 1014,
   "server/plan-usage.ts": 1042,
-  "server/container-computer.ts": 1175,
+  "server/container-computer.ts": 1158,
   "src/components/ModelPicker.tsx": 1039,
   "src/components/PhoneSetupFlow.tsx": 1088,
   "server/cli.ts": 1053,
-  "src/components/AttachmentPreview.tsx": 1034,
+  "src/components/AttachmentPreview.tsx": 1025,
   "server/meetings/meetbot.ts": 1047,
   "electron/data-dir-lease.node-test.mjs": 846, // the data-folder lease's own tests: many platform cases (Windows probes in data-dir-lease-windows.node-test.mjs)
 };

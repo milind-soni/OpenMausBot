@@ -25,6 +25,7 @@ function fakeComputer() {
   let source!: ReadableStreamDefaultController<Uint8Array>;
   const stream: E2EStream = {
     id: 1,
+    ended: new Promise<void>(() => {}),
     readable: new ReadableStream<Uint8Array>({
       start(controller) {
         source = controller;

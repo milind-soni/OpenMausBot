@@ -6,6 +6,8 @@ import { join } from "node:path";
 
 import { findCliCandidates } from "../env-path.ts";
 import { captureCliTree, killCliTree } from "../procs.ts";
+import { keepStopping } from "./codex-process.ts";
+import { storedCodexLogin } from "./codex-login.ts";
 import { appendNative } from "./native.ts";
 import { armIdleClose, engineIdleMs, sessionIdlePolicy, stopIdleClose } from "./session-idle.ts";
 
@@ -118,19 +120,21 @@ export class CodexConnection {
         this.asked.delete(message.id);
         answer(message.result);
       } else if (this.link) this.link.message(message);
-      else this.unattended(message);
+      else this.absorb(message);
     }
   }
 
-  /** No turn is running: a request from the app-server is refused, and only the token total is kept. */
-  private unattended(message: any): void {
+  /** For a message no turn answers for: a request from the app-server is refused, and the token total of this connection's thread
+   * is kept. True when the message was one of those. */
+  absorb(message: any): boolean {
     if (message?.id !== undefined && message.method) {
       this.write({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "No OpenMausBot turn is running on this thread." } });
-      return;
+      return true;
     }
     const total = message?.method === "thread/tokenUsage/updated" && message.params?.threadId === this.nativeThreadId
       ? message.params.tokenUsage?.total : null;
     if (total) this.usageTotal = { input: total.inputTokens ?? 0, output: total.outputTokens ?? 0, cachedInput: total.cachedInputTokens ?? 0 };
+    return Boolean(total);
   }
 }
 
@@ -159,6 +163,31 @@ function cliIdentity(cli: string, path: string | undefined): string {
   }
 }
 
+export interface CodexIdentityInputs {
+  cli: string;
+  env: { CODEX_HOME?: string; HOME?: string; USERPROFILE?: string; PATH?: string };
+  ownLogin: boolean;
+}
+
+export const codexIdentityInputs = (cli: string, env: Record<string, string | undefined>, ownLogin: boolean): CodexIdentityInputs => ({
+  cli, ownLogin, env: { CODEX_HOME: env.CODEX_HOME, HOME: env.HOME, USERPROFILE: env.USERPROFILE, PATH: env.PATH },
+});
+
+function configFileDigest(env: CodexIdentityInputs["env"]): string | null {
+  try {
+    return digest(readFileSync(join(env.CODEX_HOME || join(env.HOME || env.USERPROFILE || homedir(), ".codex"), "config.toml"), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+export const codexOwnLogin = (ownLogin: boolean, env: CodexIdentityInputs["env"]): string | null =>
+  codexLoginIdentity(ownLogin ? storedCodexLogin(env) : null);
+
+export function codexOutsideIdentity(inputs: CodexIdentityInputs): { config: string | null; cli: string; login: string | null } {
+  return { config: configFileDigest(inputs.env), cli: cliIdentity(inputs.cli, inputs.env.PATH), login: codexOwnLogin(inputs.ownLogin, inputs.env) };
+}
+
 /** Everything an app-server is given when it starts and when its thread starts. A kept process serves a later turn only
  * when all of it is unchanged. Values are hashed: arguments and environment carry credentials. */
 export function codexSpawnContract(parts: {
@@ -170,12 +199,8 @@ export function codexSpawnContract(parts: {
   thread: unknown;
   login: string | null;
 }): string {
-  let config: string | null = null;
-  try {
-    config = digest(readFileSync(join(parts.env.CODEX_HOME || join(parts.env.HOME || parts.env.USERPROFILE || homedir(), ".codex"), "config.toml"), "utf8"));
-  } catch {}
   return JSON.stringify({
-    config,
+    config: configFileDigest(parts.env),
     cli: cliIdentity(parts.cli, parts.env.PATH),
     args: digest(parts.args),
     cwd: parts.cwd,
@@ -218,7 +243,18 @@ export interface KeptCodex<Carried> {
    * their MCP servers some time after it starts, so what it reports at start is not what it reports later. */
   configDigest: string;
   cwd: string;
+  identity: CodexIdentityInputs;
+  provider: string | null;
+  model: string | null;
   carried: Carried;
+}
+
+export interface CodexLease<Carried> {
+  readonly session: KeptCodex<Carried>;
+  readonly settled: Promise<void>;
+  readonly invalidated: boolean;
+  release(): Promise<void>;
+  discard(why: string): Promise<void>;
 }
 
 /** `OMB_CODEX_SESSION_KEEP=0` ends every app-server with its turn. */
@@ -231,8 +267,13 @@ const keepEnabled = (): boolean => process.env.OMB_CODEX_SESSION_KEEP !== "0";
  */
 export function codexWarmSessions<Carried>(instanceId: string) {
   const policy = sessionIdlePolicy("CODEX");
-  const kept = new Map<string, { session: KeptCodex<Carried>; idleTimer: ReturnType<typeof setTimeout> }>();
-  const stopping = new Set<Promise<boolean>>();
+  interface Entry { session: KeptCodex<Carried>; idleTimer: ReturnType<typeof setTimeout>; reread: Promise<void> }
+  const kept = new Map<string, Entry>();
+  interface Loan { session: KeptCodex<Carried>; invalidated: boolean; ending?: Promise<void> }
+  const lent = new Map<string, Loan>();
+  const stopping = new Set<Promise<unknown>>();
+  const lentEndings = new Set<Promise<void>>();
+  let closing = 0;
   const idleKey = (threadId: string) => `${instanceId}\0${threadId}`;
 
   const forget = (threadId: string, why: string, contractChanged?: string[]) => {
@@ -245,19 +286,59 @@ export function codexWarmSessions<Carried>(instanceId: string) {
   };
 
   /** Ends the whole tree: an app-server's MCP servers and shells can outlive it. */
-  const end = async (session: KeptCodex<Carried>): Promise<void> => {
+  const end = async (session: KeptCodex<Carried>): Promise<boolean> => {
     const stopped = killCliTree(session.connection.child);
     stopping.add(stopped);
     try {
-      await stopped;
+      return await stopped;
     } finally {
       stopping.delete(stopped);
     }
   };
 
+  /** A lent process's one full ending, shared by whoever ends it: the first attempt, then retries while it is not gone. */
+  const endLoan = (loan: Loan): Promise<void> => {
+    if (loan.ending) return loan.ending;
+    const ending = (async () => {
+      if (!await end(loan.session)) await keepStopping(() => killCliTree(loan.session.connection.child), () => true);
+    })();
+    loan.ending = ending;
+    lentEndings.add(ending);
+    void ending.finally(() => lentEndings.delete(ending));
+    return ending;
+  };
+
   const close = async (threadId: string, why: string, contractChanged?: string[]): Promise<void> => {
+    const loan = lent.get(threadId);
+    if (loan) {
+      if (!loan.invalidated) {
+        loan.invalidated = true;
+        appendNative(threadId, { dir: "out", source: "codex.session", msg: { close: why } });
+      }
+      await endLoan(loan);
+    }
     const session = forget(threadId, why, contractChanged);
     if (session) await end(session);
+  };
+
+  const place = (threadId: string, session: KeptCodex<Carried>, reread: Promise<void>): void => {
+    const { connection } = session;
+    connection.detach();
+    connection.nativeThreadId = session.nativeThreadId;
+    const entry: Entry = {
+      session,
+      reread,
+      idleTimer: armIdleClose(idleKey(threadId), engineIdleMs(threadId, policy), {
+        close: () => void close(threadId, "idle"),
+        idle: () => kept.get(threadId)?.session === session,
+        threadId,
+        policy,
+      }),
+    };
+    kept.set(threadId, entry);
+    connection.exitedIdle = () => {
+      if (kept.get(threadId) === entry && forget(threadId, "exited while idle")) void end(session);
+    };
   };
 
   return {
@@ -265,26 +346,13 @@ export function codexWarmSessions<Carried>(instanceId: string) {
     keep(threadId: string, session: KeptCodex<Carried>): boolean {
       const { connection } = session;
       captureCliTree(connection.child);
-      if (!keepEnabled() || !connection.alive || kept.has(threadId)) return false;
+      if (!keepEnabled() || !connection.alive || kept.has(threadId) || lent.has(threadId)) return false;
       connection.detach();
-      connection.nativeThreadId = session.nativeThreadId;
-      void connection.ask("config/read", { cwd: session.cwd, includeLayers: false }).then((result) => {
+      const reread = connection.ask("config/read", { cwd: session.cwd, includeLayers: false }).then((result) => {
         const config = (result as { config?: unknown } | undefined)?.config;
         if (config !== undefined) session.configDigest = codexConfigDigest(config);
       });
-      const entry = {
-        session,
-        idleTimer: armIdleClose(idleKey(threadId), engineIdleMs(threadId, policy), {
-          close: () => void close(threadId, "idle"),
-          idle: () => kept.get(threadId)?.session === session,
-          threadId,
-          policy,
-        }),
-      };
-      kept.set(threadId, entry);
-      connection.exitedIdle = () => {
-        if (kept.get(threadId) === entry && forget(threadId, "exited while idle")) void end(session);
-      };
+      place(threadId, session, reread);
       return true;
     },
 
@@ -304,15 +372,52 @@ export function codexWarmSessions<Carried>(instanceId: string) {
       return null;
     },
 
+    lend(threadId: string, nativeThreadId: string): CodexLease<Carried> | null {
+      const entry = kept.get(threadId);
+      if (!entry || closing > 0 || !entry.session.connection.alive || entry.session.nativeThreadId !== nativeThreadId) return null;
+      kept.delete(threadId);
+      stopIdleClose(idleKey(threadId), entry.idleTimer);
+      const { session } = entry;
+      const loan = { session, invalidated: false };
+      lent.set(threadId, loan);
+      const give = () => { if (lent.get(threadId) === loan) lent.delete(threadId); };
+      return {
+        session,
+        settled: entry.reread,
+        get invalidated() { return loan.invalidated; },
+        async release() {
+          give();
+          if (loan.invalidated) return;
+          if (!keepEnabled() || !session.connection.alive || kept.has(threadId) || closing > 0) {
+            await end(session);
+            return;
+          }
+          place(threadId, session, Promise.resolve());
+        },
+        async discard(why) {
+          give();
+          loan.invalidated = true;
+          appendNative(threadId, { dir: "out", source: "codex.session", msg: { close: why } });
+          await endLoan(loan);
+        },
+      };
+    },
+
     close,
 
-    /** Every kept process being ended has exited, so a new one may load its native thread. */
+    /** The first termination attempt of every ending has settled, so a new process may load a native thread. A lent
+     * process's retries are not waited for here: `closeAll` and the lease's `discard` wait for those. */
     async retired(): Promise<void> {
       await Promise.all(stopping);
     },
 
     async closeAll(why: string): Promise<void> {
-      await Promise.all([...[...kept.keys()].map((threadId) => close(threadId, why)), ...stopping]);
+      closing++;
+      try {
+        await Promise.all([...[...new Set([...kept.keys(), ...lent.keys()])].map((threadId) => close(threadId, why)), ...stopping, ...lentEndings]);
+      } finally {
+        closing--;
+      }
     },
 
     has: (threadId: string): boolean => kept.has(threadId),

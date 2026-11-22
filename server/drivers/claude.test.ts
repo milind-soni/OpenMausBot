@@ -44,6 +44,8 @@ import * as localInject from "./local-inject.ts";
 import { DEFER_TOOLS_ENV } from "./agents-claude-defer.ts";
 import { OWN_MCP_HTTP_ENV } from "./own-mcp-http.ts";
 
+const personalMemory = () => [join(homedir(), ".claude", "CLAUDE.md"), join(homedir(), ".claude", "rules", "**")];
+
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-claude-cli.ts");
 const dumpedPid = (dump: string): number => JSON.parse(readFileSync(dump, "utf8")).pid;
 
@@ -1796,7 +1798,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       expect(seen.settings.permissions).toEqual({ deny: ["Read(./.env)"] });
       expect(seen.settings.env).toMatchObject({ GUARD_LEVEL: "strict", ENABLE_TOOL_SEARCH: "true" });
       expect(seen.settings).not.toHaveProperty("model");
-      expect(seen.settings.claudeMdExcludes).toEqual([join(homedir(), ".claude", "CLAUDE.md")]);
+      expect(seen.settings.claudeMdExcludes).toEqual(personalMemory());
     });
 
     it("keeps an MCP output limit the bot's settings set instead of the automatic one", async () => {
@@ -1893,7 +1895,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.argv).toContain("--strict-mcp-config");
     expect(seen.argv[seen.argv.indexOf("--setting-sources") + 1]).toBe("project");
-    expect(seen.settings.claudeMdExcludes).toEqual([join(homedir(), ".claude", "CLAUDE.md")]);
+    expect(seen.settings.claudeMdExcludes).toEqual(personalMemory());
     // A bot's memory is OpenMausBot's: the CLI's per-folder one would split notes by thread and break the cached prompt.
     expect(seen.settings.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBe("1");
   });
@@ -2051,7 +2053,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await instance.adapter.sendTurn({ threadId: "t-auth-settings", text: "hi" });
     await recorder.until((e) => e.type === "turn.completed");
     const seen = JSON.parse(readFileSync(dump, "utf8"));
-    expect(seen.settings).toEqual({ claudeMdExcludes: [join(homedir(), ".claude", "CLAUDE.md")], apiKeyHelper: settings.apiKeyHelper, env: { ANTHROPIC_BASE_URL: settings.env.ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN: "synthetic-token", ENABLE_TOOL_SEARCH: "true", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" } });
+    expect(seen.settings).toEqual({ claudeMdExcludes: personalMemory(), apiKeyHelper: settings.apiKeyHelper, env: { ANTHROPIC_BASE_URL: settings.env.ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN: "synthetic-token", ENABLE_TOOL_SEARCH: "true", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" } });
     expect(seen.argv[seen.argv.indexOf("--setting-sources") + 1]).toBe("project");
     expect(JSON.stringify(seen.argv)).not.toContain("synthetic");
     const settingsPath = seen.argv[seen.argv.indexOf("--settings") + 1];
@@ -2162,7 +2164,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await instance.adapter.sendTurn({ threadId: "t-auth-explicit", text: "hi" });
     await recorder.until((e) => e.type === "turn.completed");
     const seen = JSON.parse(readFileSync(dump, "utf8"));
-    expect(seen.settings).toEqual({ claudeMdExcludes: [join(homedir(), ".claude", "CLAUDE.md")], env: { ENABLE_TOOL_SEARCH: "true", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" } });
+    expect(seen.settings).toEqual({ claudeMdExcludes: personalMemory(), env: { ENABLE_TOOL_SEARCH: "true", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" } });
     expect(seen.env.ANTHROPIC_API_KEY).toBe("workspace-key");
     expect(seen.env.ANTHROPIC_BASE_URL).toBeUndefined();
     expect(readClaudeAuthSettings({ HOME: scratch, CLAUDE_CONFIG_DIR: join(scratch, "other-account") })).toEqual({});
@@ -2988,6 +2990,66 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const allowed = seen.argv[seen.argv.indexOf("--allowedTools") + 1];
     expect(allowed).not.toContain("mcp__computer");
     expect(instance.adapter.capabilities.localComputerMcp).toBe(true);
+  });
+
+  it("mounts a cloud computer without pre-allowing its tools", async () => {
+    await create();
+    const dump = join(scratch, "cloud-dump.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    await instance.adapter.sendTurn({
+      threadId: "t-cloud",
+      text: "fill in the form",
+      approvalMode: "ask",
+      integrations: {
+        localComputer: {
+          command: process.execPath,
+          args: ["/fake/harness-mcp", "computer"],
+          env: { OMB_HARNESS_URL: "http://127.0.0.1:1" },
+          platform: "linux",
+        },
+      },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.mcpConfig.mcpServers.computer).toBeDefined();
+    const allowed = seen.argv[seen.argv.indexOf("--allowedTools") + 1];
+    expect(allowed).not.toContain("mcp__computer");
+  });
+
+  it("asks before a cloud computer acts, with session allowance like a command", async () => {
+    await create("hang");
+    await instance.adapter.sendTurn({
+      threadId: "t-cloud-ask",
+      text: "go",
+      approvalMode: "ask",
+      integrations: {
+        localComputer: {
+          command: process.execPath,
+          args: ["/fake/harness-mcp", "computer"],
+          env: {},
+          platform: "linux",
+        },
+      },
+    });
+    await recorder.until((e) => e.type === "session.started");
+
+    const conn = connect(permissionSocketPath("t-cloud-ask"));
+    await new Promise<void>((resolve, reject) => {
+      conn.on("connect", resolve);
+      conn.on("error", reject);
+    });
+    conn.write(JSON.stringify({ t: "ask", id: "ask-1", tool: "mcp__computer__click", input: { x: 1, y: 2 } }) + "\n");
+
+    const opened = await recorder.until((e) => e.type === "request.opened" && e.requestId === "ask-1");
+    expect(opened).toMatchObject({ requestType: "permission", tool: "mcp__computer__click" });
+    expect(opened).toHaveProperty("allowSession", true);
+    expect(opened).toHaveProperty("approvalScope", undefined);
+    await instance.adapter.respondToRequest("t-cloud-ask", "ask-1", { behavior: "deny" });
+
+    conn.end();
+    await instance.adapter.interruptTurn("t-cloud-ask");
+    await recorder.until((e) => e.type === "turn.completed");
   });
 
   it("resumes with --resume when a cursor exists and reports that session id", async () => {

@@ -45,3 +45,18 @@ export function lendingPerson(person: string | null, own: OwnServer, sessions: (
   if (own.admin !== null && person === personKey({ id: "", email: own.admin })) return OWN_SERVER_LENDER;
   return sessions().some((session) => !session.email && ownersDevice(session, own) && personKey(session) === person) ? OWN_SERVER_LENDER : person;
 }
+
+/** Who a line the desktop app's own window sent counts as, for shared computers: the server's one person, like their
+ * paired devices. That window has no session, so its lines name no sender. Nobody on any other server. */
+export function ownWindowLender(own: OwnServer, ownWindow: boolean): string | undefined {
+  return own && ownWindow ? OWN_SERVER_LENDER : undefined;
+}
+
+/** Work handed on (a teammate's own thread) by a turn that could use the one person's lent computers: it may go on using
+ * them while it still acts for that person (host/acting-person.ts requester). Never on any other server, never for work
+ * handed on without `lends`, and never for anyone the lender rule would not count as that one person. */
+export function handedOwnServerLender(own: OwnServer, origin: { lends?: true; person?: string } | undefined, actingFor: string | null,
+  sessions: () => readonly DeviceSession[]): string | null {
+  if (!own || origin?.lends !== true || !actingFor || actingFor !== origin.person) return null;
+  return lendingPerson(actingFor, own, sessions) === OWN_SERVER_LENDER ? OWN_SERVER_LENDER : null;
+}

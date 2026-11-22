@@ -55,6 +55,17 @@ describe("Linux local control on Omarchy", () => {
     expect(markup).not.toContain("GNOME may also ask");
   });
 
+  it("shows nothing on a page served by another server, whose bots can't use this desktop", () => {
+    fixture.localComputer = {
+      available: false,
+      support: "unsupported",
+      enabled: false,
+      status: "unavailable",
+      reasonCode: "remote-server",
+    } as DesktopCapabilities["localComputer"];
+    expect(renderToStaticMarkup(createElement(LinuxLocalControl))).toBe("");
+  });
+
   it("keeps the Wayland safety block on other desktops", () => {
     fixture.localComputer = {
       available: false,

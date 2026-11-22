@@ -54,7 +54,7 @@ async function boot(extraConfig: Record<string, unknown>) {
   writeFileSync(join(home, ".openmausbot", "config.json"), JSON.stringify({
     instances: {
       claude: { driver: "claudeAgent", config: { cli: fake("fake-claude-cli.ts"), permissionMode: "bypassPermissions" } },
-      codex: { driver: "codex", config: { cli: fake("fake-codex-app-server.ts") } },
+      codex: { driver: "codex", environment: { FAKE_CODEX_COMPACT: "unsupported" }, config: { cli: fake("fake-codex-app-server.ts") } },
       pi: { driver: "piAgent", environment: { FAKE_PI_MODE: "tooluse" }, config: { cli: fake("fake-pi-cli.ts"), fullAuto: true } },
     },
     memory: { captureQuietMs: 1_000 },
