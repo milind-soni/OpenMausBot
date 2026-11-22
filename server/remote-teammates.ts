@@ -2,8 +2,11 @@
 // (docs/bot-api.md) with the key its owner made there. The key is kept in this file alone (mode 600): it is never listed,
 // logged or sent anywhere but the Bot API address it was saved with.
 import { randomUUID } from "node:crypto";
+import { lookup as dnsLookup } from "node:dns";
 import { mkdirSync, readFileSync } from "node:fs";
+import { BlockList, isIP, type LookupFunction } from "node:net";
 import { dirname, join } from "node:path";
+import type { Agent } from "undici";
 import { z } from "zod";
 
 import { allowedServerOrigin } from "../electron/server-address.mjs";
@@ -29,6 +32,35 @@ const MAX_BASE_CHARS = 300;
 /** Link-local hosts (169.254/16, fe80::/10) and the cloud metadata service: never another OpenMausBot server, and a key
  * must not open a way from this server to them. */
 const LINK_LOCAL = /^(?:169\.254\.|\[fe[89ab][0-9a-f]:|\[::ffff:a9fe:|\[fd00:ec2::254\]$)/i;
+/** The same ranges as addresses, for what a name resolves to when a call connects. */
+const LINK_LOCAL_ADDRESSES = new BlockList();
+LINK_LOCAL_ADDRESSES.addSubnet("169.254.0.0", 16, "ipv4");
+LINK_LOCAL_ADDRESSES.addSubnet("fe80::", 10, "ipv6");
+LINK_LOCAL_ADDRESSES.addAddress("fd00:ec2::254", "ipv6");
+
+export function linkLocalAddress(address: string): boolean {
+  const family = isIP(address);
+  return family !== 0 && LINK_LOCAL_ADDRESSES.check(address, family === 6 ? "ipv6" : "ipv4");
+}
+
+/** Resolves a name as the system does, then refuses it when any address it gives is link-local or the metadata service,
+ * so a DNS name can't carry a teammate key where a typed address may not go. Runs for every connection a call makes. */
+export function linkLocalRefusingLookup(resolve: LookupFunction = dnsLookup as LookupFunction): LookupFunction {
+  return (hostname, options, callback) => resolve(hostname, options, (error, address, family) => {
+    const found = typeof address === "string" ? [address] : (address ?? []).map((entry) => entry.address);
+    const refused = error ? undefined : found.find(linkLocalAddress);
+    if (refused === undefined) return (callback as (...args: unknown[]) => void)(error, address, family);
+    callback(Object.assign(new Error(`${hostname} resolves to ${refused}, a link-local address, not another server`), { code: "ELINKLOCAL" }), "", 0);
+  });
+}
+
+let teammateAgent: Agent | undefined;
+/** fetch whose every connection goes through {@link linkLocalRefusingLookup}. */
+async function teammateFetch(url: string, init: RequestInit): Promise<Response> {
+  const { Agent: UndiciAgent, fetch: undiciFetch } = await import("undici");
+  teammateAgent ??= new UndiciAgent({ connect: { lookup: linkLocalRefusingLookup() } });
+  return undiciFetch(url, { ...init, dispatcher: teammateAgent } as Parameters<typeof undiciFetch>[1]) as unknown as Promise<Response>;
+}
 
 const recordSchema = z.object({
   id: z.string().uuid(),
@@ -207,13 +239,15 @@ async function callRemote(teammate: RemoteTeammate, query: string, init: Request
   let response: Response;
   try {
     // A redirect would carry the key to an address nobody saved.
-    response = await (options.fetch ?? fetch)(`${botApiEndpoint(teammate.base, teammate.botId)}${query}`, {
+    response = await (options.fetch ?? teammateFetch)(`${botApiEndpoint(teammate.base, teammate.botId)}${query}`, {
       ...init, redirect: "error", signal,
       headers: { ...(init.headers as Record<string, string> | undefined), authorization: `Bearer ${teammate.key}` },
     });
   } catch (error) {
     options.signal?.throwIfAborted();
-    return { ok: false, problem: "unreachable", detail: timeout.aborted ? "no answer in time" : error instanceof Error ? clip(error.message, DETAIL_CHARS) : undefined };
+    // fetch says only "fetch failed"; why it failed (refused, no such name, a link-local address) is its cause.
+    const reason = error instanceof Error ? (error.cause instanceof Error ? error.cause.message : error.message) : undefined;
+    return { ok: false, problem: "unreachable", detail: timeout.aborted ? "no answer in time" : reason === undefined ? undefined : clip(reason, DETAIL_CHARS) };
   }
   let body: unknown;
   try {
@@ -221,7 +255,9 @@ async function callRemote(teammate: RemoteTeammate, query: string, init: Request
   } catch {
     options.signal?.throwIfAborted();
     if (timeout.aborted) return { ok: false, problem: "unreachable", detail: "no answer in time" };
-    return { ok: false, problem: "bad_answer", status: response.status };
+    // Only a 200 or 202 must be the Bot API's JSON. A proxy's 502 page or a plain-text 429 is still that status.
+    if (response.status === 200 || response.status === 202) return { ok: false, problem: "bad_answer", status: response.status };
+    body = undefined;
   }
   if (response.status === 200 || response.status === 202) {
     const answer = parseAnswer(body, response.status);

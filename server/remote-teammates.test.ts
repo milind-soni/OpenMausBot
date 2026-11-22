@@ -1,5 +1,6 @@
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { LookupFunction } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { BotApiManager } from "./bot-api.ts";
 import { createBotApiHost, type BotApiHostDeps } from "./bot-api-host.ts";
 import { json, readBody } from "./harness/http.ts";
-import { checkRemote, readRemote, remoteAddress, RemoteTeammates, sendToRemote, type RemoteTeammate } from "./remote-teammates.ts";
+import { checkRemote, linkLocalAddress, linkLocalRefusingLookup, readRemote, remoteAddress, RemoteTeammates, sendToRemote, type RemoteTeammate } from "./remote-teammates.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import { createRemoteTeammateRoutes } from "./routes/remote-teammates.ts";
 import { dispatchRoutes } from "./routes/table.ts";
@@ -156,6 +157,41 @@ describe("calling a teammate's Bot API", () => {
     expect(await checkRemote(far)).toEqual({ ok: false, problem: "bad_answer", status: 404, detail: "Not found" });
     next = { status: 404, body: "<html>no page</html>" };
     expect(await checkRemote(far)).toEqual({ ok: false, problem: "bad_answer", status: 404 });
+  });
+
+  it("keeps an error status whose body isn't JSON, so a proxy's 502 or a plain-text 429 can be read again", async () => {
+    let next: { status: number; body: string; headers?: Record<string, string> } = { status: 502, body: "<html>Bad Gateway</html>" };
+    const base = await listen((_req, res) => { res.writeHead(next.status, { "content-type": "text/html", ...next.headers }); res.end(next.body); });
+    const far = teammate(base);
+    expect(await readRemote(far, "t1")).toEqual({ ok: false, problem: "failed", status: 502 });
+    next = { status: 429, body: "slow down", headers: { "retry-after": "7" } };
+    expect(await readRemote(far, "t1")).toEqual({ ok: false, problem: "rate_limited", status: 429, retryAfterSeconds: 7 });
+    next = { status: 202, body: "<html>proxy</html>" };
+    expect(await readRemote(far, "t1")).toEqual({ ok: false, problem: "bad_answer", status: 202 });
+  });
+
+  it("never connects to a name that resolves to a link-local or metadata address", async () => {
+    for (const address of ["169.254.169.254", "fe80::1", "fd00:ec2::254", "::ffff:169.254.169.254"]) expect(linkLocalAddress(address)).toBe(true);
+    for (const address of ["127.0.0.1", "100.64.1.2", "192.168.1.5", "::1", "not an address"]) expect(linkLocalAddress(address)).toBe(false);
+    const lookupWith = (answer: Array<{ address: string; family: number }>) => {
+      const resolve = ((_host: string, options: { all?: boolean }, callback: (...args: unknown[]) => void) => {
+        if (options.all) callback(null, answer);
+        else callback(null, answer[0]!.address, answer[0]!.family);
+      }) as unknown as LookupFunction;
+      const lookup = linkLocalRefusingLookup(resolve);
+      return (all: boolean) => new Promise<{ error: NodeJS.ErrnoException | null; address: unknown }>((done) => {
+        lookup("far.example.com", { all }, (error, address) => done({ error, address }));
+      });
+    };
+    const metadata = await lookupWith([{ address: "169.254.169.254", family: 4 }])(false);
+    expect(metadata.error).toMatchObject({ code: "ELINKLOCAL", message: "far.example.com resolves to 169.254.169.254, a link-local address, not another server" });
+    expect((await lookupWith([{ address: "100.64.1.2", family: 4 }, { address: "fe80::1", family: 6 }])(true)).error).toMatchObject({ code: "ELINKLOCAL" });
+    expect(await lookupWith([{ address: "100.64.1.2", family: 4 }])(false)).toEqual({ error: null, address: "100.64.1.2" });
+  });
+
+  it("calls a teammate saved by name through the checked lookup", async () => {
+    const base = await listen((_req, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ reply: "hi", thread: "t1" })); });
+    expect(await sendToRemote(teammate(base.replace("127.0.0.1", "localhost")), { message: "x", wait: 0 })).toEqual({ ok: true, answer: { reply: "hi", thread: "t1" } });
   });
 
   it("never follows a redirect, so the key reaches only the saved address", async () => {
