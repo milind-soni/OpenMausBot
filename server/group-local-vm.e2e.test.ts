@@ -1247,7 +1247,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
     }
   });
 
-  it("does not perform a queued call after a person took the shared VM and handed it back while it waited", async () => {
+  it("does not perform a queued call after a person took the shared VM and handed it back at once while it waited", async () => {
     vmState(); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
     const { bot: auto } = await api("POST", "/api/bots", { name: "Handed-back Auto", browser: false });
     const { bot: holder } = await api("POST", "/api/bots", { name: "VM holder", computer: "vm", browser: false });
@@ -1260,8 +1260,6 @@ describe("Group Local VM ownership on the real isolated server", () => {
       const waiting = check(autoComputer);
       await until(() => activityRows(auto.threadId, "Waiting for its turn on this computer"), count => count > 0);
       await api("POST", `/api/bots/${holder.id}/computer/control`, { action: "take" });
-      // The gate reads the person's hold on its 250 ms poll; nothing outside it signals that it has looked.
-      await new Promise(resolve => setTimeout(resolve, 600));
       await api("POST", `/api/bots/${holder.id}/computer/control`, { action: "release" });
       await api("POST", `/api/bots/${holder.id}/interrupt`, {});
       expect(await waiting).toEqual({ held: true, helpOpen: false, blockedReason: CONTROL_HANDED_BACK });

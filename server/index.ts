@@ -5559,7 +5559,7 @@ const localVmActiveThreads = new Map<string, string>();
 const autoVmClaims: AutoVmClaimTable = new Map();
 const COMPUTER_CALL_WAIT_MS = Math.min(CONTROL_WAIT_MS, Math.max(500, Number(process.env.OMB_COMPUTER_CALL_WAIT_MS) || CONTROL_WAIT_MS));
 const COMPUTER_CALL_ACT_WITHIN_MS = Math.min(CONTROL_ACT_WITHIN_MS, Math.max(100, Number(process.env.OMB_COMPUTER_CALL_ACT_WITHIN_MS) || CONTROL_ACT_WITHIN_MS));
-const COMPUTER_CALL_POLL_MS = 250; const computerGateAnswers = createComputerGateAnswers({ resources: turnResources, bound: (threadId) => turnComputerResources.get(threadId), personHolds: (resource) => sharedVm.personHolds(resource), pollMs: COMPUTER_CALL_POLL_MS });
+const COMPUTER_CALL_POLL_MS = 250; const computerGateAnswers = createComputerGateAnswers({ resources: turnResources, bound: (threadId) => turnComputerResources.get(threadId), personHolds: (resource) => sharedVm.personHolds(resource), personLastTake: (resource) => sharedVm.personLastTake(resource), takeSequence: () => sharedVm.takeSequence(), pollMs: COMPUTER_CALL_POLL_MS });
 const browserSeats = createBrowserSeats({ resources: turnResources, claim: claimTurnResource, active: (owner) => activeInternalGenerationByThread.get(owner.threadId) === owner.generation, working: (session) => browserRuntime.working(session), holderOf: holderOfTurn, language: threadLanguage, callWaitMs: COMPUTER_CALL_WAIT_MS, actWithinMs: COMPUTER_CALL_ACT_WITHIN_MS, ...(Number(process.env.OMB_BROWSER_IDLE_HANDOVER_MS) > 0 ? { idleHandoverMs: Number(process.env.OMB_BROWSER_IDLE_HANDOVER_MS) } : {}),
   row: (threadId, name, threadRef) => { store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name, ok: true }, ...(threadRef ? { threadRef } : {}) }); },
   waitStarted: (threadId, resource, position, holder) => bus.publish({ ...waitEventBase(threadId), type: "turn.wait_started", resource, position, ...(holder ? { holder } : {}) }),
@@ -5655,7 +5655,7 @@ async function computerCallGate(internalCapability: InternalCapability, signal?:
     } else if (lazyClaim?.lazy && !lazyClaim.claimed) {
       startAutoVmClaim(autoVmClaims, threadId, generation, call);
       if (lazyClaim.begin && Date.now() < deadline && !signal?.aborted) {
-        if (await computerGateAnswers.waitForClaim(lazyClaim.begin, deadline, { threadId, generation }, () => sharedVm.snapshot(botId, threadId).held, signal)) personHeld = true;
+        if (await computerGateAnswers.waitForClaim(lazyClaim.begin, deadline, { threadId, generation }, { held: () => sharedVm.snapshot(botId, threadId).held, lastTake: () => sharedVm.lastTake(botId, threadId) }, signal)) personHeld = true;
         if (lazyClaim.claimed || lazyClaim.failed || sharedVm.snapshot(botId, threadId).held) continue;
         if (lazyClaim.retryReason) return { held: true, helpOpen: false, blockedReason: lazyClaimRetryText(lazyClaim) };
       }

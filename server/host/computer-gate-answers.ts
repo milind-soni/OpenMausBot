@@ -4,11 +4,20 @@ import type { TurnOwner, TurnResources } from "../turn-resources.ts";
 
 export const PERSON_HOLDS = "person";
 
+/** A person's hold on the keys a conversation's own computer reads, and the latest hold started on any of them. */
+export interface PersonOnBot {
+  held: () => boolean;
+  lastTake: () => number;
+}
+
 export interface ComputerGateAnswersDeps {
   resources: TurnResources;
   /** The computer seat this thread's turn is bound to, if any. */
   bound: (threadId: string) => { owner: TurnOwner; resource: string } | undefined;
   personHolds: (resource: string) => boolean;
+  /** The latest hold a person started on this seat, as a `takeSequence`, so a take and hand-back between two looks still shows. */
+  personLastTake: (resource: string) => number;
+  takeSequence: () => number;
   pollMs: number;
 }
 
@@ -36,10 +45,10 @@ export function createComputerGateAnswers(deps: ComputerGateAnswersDeps) {
   }
 
   /**
-   * Waits for a pending claim while watching for a person's hold, and says whether one was seen: a click composed before
-   * a person took the screen and handed it back must not land on whatever is there now.
+   * Waits for a pending claim and says whether a person took the computer meanwhile, even one who already handed it back:
+   * a click composed before a person took the screen must not land on whatever is there now.
    */
-  async function waitForClaim(begin: Promise<unknown>, until: number, owner: TurnOwner, personHere: () => boolean, signal?: AbortSignal): Promise<boolean> {
+  async function waitForClaim(begin: Promise<unknown>, until: number, owner: TurnOwner, person: PersonOnBot, signal?: AbortSignal): Promise<boolean> {
     let settled = false;
     let wake: (() => void) | undefined;
     const settle = () => { settled = true; wake?.(); };
@@ -50,11 +59,16 @@ export function createComputerGateAnswers(deps: ComputerGateAnswersDeps) {
       signal?.addEventListener("abort", done, { once: true });
       wake = done;
     });
-    let personSeen = false;
-    while (!settled && Date.now() < until && !signal?.aborted) {
+    const since = deps.takeSequence();
+    const personCame = (): boolean => {
+      if (person.held() || person.lastTake() > since) return true;
       const seat = deps.resources.computerWaitOf(owner)?.resource ?? boundSeat(owner)?.resource;
-      if (personHere() || (seat !== undefined && deps.personHolds(seat))) personSeen = true;
+      return seat !== undefined && (deps.personHolds(seat) || deps.personLastTake(seat) > since);
+    };
+    let personSeen = personCame();
+    while (!settled && Date.now() < until && !signal?.aborted) {
       await tick(Math.min(deps.pollMs, until - Date.now()));
+      personSeen = personCame() || personSeen;
     }
     return personSeen;
   }

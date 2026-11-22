@@ -9,8 +9,8 @@ pnpm exec vitest run server/index.test.ts -t 'parks the turn at the wait ceiling
 pnpm exec vitest run server/runtime-roots.e2e.test.ts server/room-roots.e2e.test.ts
 pnpm exec vitest run server/turn-resources.test.ts server/group-local-vm.e2e.test.ts server/shared-computers.e2e.test.ts
 pnpm exec vitest run server/managed-desktop-cleanup.test.ts
-pnpm exec vitest run server/group-local-vm.e2e.test.ts -t 'queue place without naming|not that another thread has it|once the turn holds the seat|person.s hold, not another thread|handed it back while it waited'
-pnpm exec vitest run server/computer-wait.test.ts server/turn-resources.test.ts server/host/computer-gate-answers.test.ts server/mcp-bridge.test.ts server/saved-steps/computer-client.test.ts
+pnpm exec vitest run server/group-local-vm.e2e.test.ts -t 'queue place without naming|not that another thread has it|once the turn holds the seat|person.s hold, not another thread|handed it back at once while it waited'
+pnpm exec vitest run server/computer-wait.test.ts server/computer-control.test.ts server/turn-resources.test.ts server/host/computer-gate-answers.test.ts server/mcp-bridge.test.ts server/saved-steps/computer-client.test.ts
 ```
 
 The shared-team-computer case proves:
@@ -68,10 +68,9 @@ screen call is not performed, from what holds at that moment:
   has the seat and waits for readiness): the answer says the computer is not
   ready yet, never that another thread has it.
 - A person takes the shared desktop during a queued call: the answer is the
-  person's hold, read on the seat the turn queues for. When the call's 250 ms
-  look sees the person take it and they hand it back before the turn gets the
-  seat, the call is still not performed: the turn takes a fresh screenshot
-  first.
+  person's hold, read on the seat the turn queues for. When the person takes it
+  and hands it back before the turn gets the seat, however quickly, the call is
+  still not performed: the turn takes a fresh screenshot first.
 - At the wait ceiling the parked turn hears that it waited without getting the
   computer and should stop calling the computer tools; not a start failure, no
   holder, and no promise to resume (a goal step that parks is reassigned).

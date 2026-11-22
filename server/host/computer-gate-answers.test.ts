@@ -8,10 +8,13 @@ const waiter = { threadId: "waiter", generation: "2" };
 const third = { threadId: "third", generation: "3" };
 const SHARED = "computer:vm:shared";
 
-function setup(personOn: string[] = []) {
+const nobody = { held: () => false, lastTake: () => 0 };
+
+function setup(personOn: string[] = [], seatTakes = new Map<string, number>(), sequence = { now: 0 }) {
   const resources = new TurnResources();
   const bound = new Map<string, { owner: TurnOwner; resource: string }>();
-  const answers = createComputerGateAnswers({ resources, bound: (threadId) => bound.get(threadId), personHolds: (resource) => personOn.includes(resource), pollMs: 10 });
+  const answers = createComputerGateAnswers({ resources, bound: (threadId) => bound.get(threadId), personHolds: (resource) => personOn.includes(resource),
+    personLastTake: (resource) => seatTakes.get(resource) ?? 0, takeSequence: () => sequence.now, pollMs: 10 });
   return { resources, bound, answers };
 }
 
@@ -57,7 +60,7 @@ describe("what a screen call that was not performed tells the model", () => {
       resources.startWaiting(SHARED, waiter);
       let grant!: () => void;
       const begin = new Promise<void>((resolve) => { grant = resolve; });
-      const waited = answers.waitForClaim(begin, Date.now() + 5_000, waiter, () => false);
+      const waited = answers.waitForClaim(begin, Date.now() + 5_000, waiter, nobody);
       await vi.advanceTimersByTimeAsync(10);
       personOn.push(SHARED);
       await vi.advanceTimersByTimeAsync(10);
@@ -69,6 +72,34 @@ describe("what a screen call that was not performed tells the model", () => {
     }
   });
 
+  it("remembers a take and hand-back of a seat the turn queues for only after its first look", async () => {
+    const seatTakes = new Map([[SHARED, 3]]);
+    const sequence = { now: 3 };
+    const { resources, answers } = setup([], seatTakes, sequence);
+    resources.claim(SHARED, holder);
+    let grant!: () => void;
+    const begin = new Promise<void>((resolve) => { grant = resolve; });
+    const waited = answers.waitForClaim(begin, Date.now() + 5_000, waiter, nobody);
+    resources.startWaiting(SHARED, waiter);
+    sequence.now = 4;
+    seatTakes.set(SHARED, 4);
+    grant();
+    expect(await waited).toBe(true);
+  });
+
+  it("does not count a hold that started before the call, on a key the turn reads only later", async () => {
+    const sequence = { now: 7 };
+    const { resources, answers } = setup([], new Map(), sequence);
+    resources.startWaiting(SHARED, waiter);
+    let lastTake = 0;
+    let grant!: () => void;
+    const begin = new Promise<void>((resolve) => { grant = resolve; });
+    const waited = answers.waitForClaim(begin, Date.now() + 5_000, waiter, { held: () => false, lastTake: () => lastTake });
+    lastTake = 7;
+    grant();
+    expect(await waited).toBe(false);
+  });
+
   it("sees no person when nobody took the seat, stops at its deadline, and listens to the claim once", async () => {
     vi.useFakeTimers();
     try {
@@ -76,7 +107,7 @@ describe("what a screen call that was not performed tells the model", () => {
       resources.startWaiting(SHARED, waiter);
       const begin = new Promise<void>(() => {});
       const then = vi.spyOn(begin, "then");
-      const waited = answers.waitForClaim(begin, Date.now() + 1_000, waiter, () => false);
+      const waited = answers.waitForClaim(begin, Date.now() + 1_000, waiter, nobody);
       await vi.advanceTimersByTimeAsync(1_000);
       expect(await waited).toBe(false);
       expect(then).toHaveBeenCalledTimes(1);
