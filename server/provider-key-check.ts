@@ -22,7 +22,7 @@ export function isPhoneKeyPatch(body: unknown): boolean {
   const entries = Object.entries(body);
   return entries.length > 0 && entries.every(([kind, entry]) => {
     const fields = Object.hasOwn(PHONE_KEY_FIELDS, kind) ? PHONE_KEY_FIELDS[kind] : undefined;
-    return fields !== undefined && typeof entry === "object" && entry !== null && !Array.isArray(entry)
+    return fields !== undefined && typeof entry === "object" && entry !== null && !Array.isArray(entry) && Object.hasOwn(entry, "key")
       && Object.entries(entry).every(([name, value]) => Object.hasOwn(fields, name) && typeof value === fields[name]);
   });
 }

@@ -104,8 +104,11 @@ describe("engine sign-in routes", () => {
   });
 });
 
+const phoneHeaders = { "x-openmausbot-companion": "1", "x-openmausbot-companion-device": "phone-1" };
+
 describe("browser sign-in from a paired phone", () => {
-  const start = (base: string) => fetch(`${base}/api/instances/a/auth/start`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  const start = (base: string, headers: Record<string, string> = {}) =>
+    fetch(`${base}/api/instances/a/auth/start`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: "{}" });
 
   it("is refused with the instruction to use the computer, while a code sign-in and the desktop itself are not", async () => {
     const phone: RequestAuth = { kind: "loopback", scopes: ["admin", "client"], companionDevice: "phone-1" };
@@ -127,7 +130,25 @@ describe("browser sign-in from a paired phone", () => {
     expect((await start(onPhone.base)).status).toBe(200);
 
     instance(desktop).authenticationMethod = "browser";
+    // The standalone companion has no desktop token: its phone is plain loopback carrying only the companion's mark.
+    expect((await start(desktop.base, phoneHeaders)).status).toBe(403);
     expect((await start(desktop.base)).status).toBe(200);
+  });
+});
+
+describe("whose sign-in it is", () => {
+  it("gives a phone its own, so it never resumes or cancels the computer's", async () => {
+    const { base } = await serve();
+    const start = (headers: Record<string, string> = {}) =>
+      fetch(`${base}/api/instances/a/auth/start`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: "{}" });
+    const cancel = (headers: Record<string, string> = {}) =>
+      fetch(`${base}/api/instances/a/auth/cancel`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ flowId: "flow-1" }) });
+
+    expect((await start()).status).toBe(200);
+    expect((await start(phoneHeaders)).status).toBe(409);
+    expect((await cancel(phoneHeaders)).status).toBe(404);
+    expect((await start()).status).toBe(200);
+    expect((await cancel()).status).toBe(200);
   });
 });
 

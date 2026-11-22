@@ -26,7 +26,7 @@ import {
   type AppConfig,
 } from "../config.ts";
 import type { InstanceConfigMap, ModelSelection } from "../contracts.ts";
-import type { RequestAuth } from "../request-auth.ts";
+import { fromPairedDevice, type RequestAuth } from "../request-auth.ts";
 import { parseConfigPatchForPerson } from "../decider/config-errors.ts";
 import { teamPersonalHint } from "../../shared/cloud-hints.ts";
 import { DECIDER_KEY_ERROR, deciderIncludedHere, deciderPatchKey, deciderSavePatch, deciderBorrowedKey, type Decider } from "../decider/index.ts";
@@ -138,7 +138,8 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
     }
     if ((method === "PUT" || method === "PATCH") && path === "/api/config") {
       const body = await readBody(req);
-      if (auth.kind === "loopback" && auth.companionDevice !== undefined && !isPhoneKeyPatch(body)) {
+      const pairedDevice = fromPairedDevice(req, auth);
+      if (pairedDevice && !isPhoneKeyPatch(body)) {
         return json(res, 403, { error: "From a phone, only API keys can be changed. Change other settings on your computer." });
       }
       if (hostedModels && ["instances", "anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "modelgo", "meta", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
@@ -564,7 +565,8 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         : null;
       const enginesBefore = engineLaunches(providerConfigs());
       const localVmModeChanged = changingLocalVmMode ? localVmModeChanging() : null;
-      const externalSecretStorage = url.searchParams.get("secretStorage") === "external";
+      // Only the desktop's own save has put the key in the encrypted store; a phone's must land in config.json.
+      const externalSecretStorage = !pairedDevice && url.searchParams.get("secretStorage") === "external";
       try {
         if (patch.live) patch.live = liveSavePatch(cfg.live, patch.live);
         // Before the provider commit, so a failed write never leaves a foreign voice id to speak.
