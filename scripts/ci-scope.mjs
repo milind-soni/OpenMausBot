@@ -122,6 +122,7 @@ export const VITEST_SUBSETS = {
       "server/cloud-team-setup-request.e2e.test.ts",
       "server/cloud-team-templates.e2e.test.ts",
       "server/cloud-team.e2e.test.ts",
+      "server/desktop-updates-docs.test.ts",
       "server/host/brief-words.test.ts",
       "server/host/lending-lifts.test.ts",
       "server/lent-folders.e2e.test.ts",
@@ -198,7 +199,7 @@ export const VITEST_SUBSETS = {
   },
   "docs-tests": {
     part: "docs tests",
-    files: ["scripts/testing/analytics-docs.test.ts", "server/model-providers-docs.test.ts", "src/locales/vocabulary.test.ts"],
+    files: ["scripts/testing/analytics-docs.test.ts", "server/desktop-updates-docs.test.ts", "server/model-providers-docs.test.ts", "src/locales/vocabulary.test.ts"],
     shards: 1,
     nodeTests: false,
   },
