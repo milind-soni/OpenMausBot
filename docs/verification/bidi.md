@@ -44,7 +44,7 @@ catch that regression.
 ## Permanent regression checks
 
 ```sh
-pnpm exec vitest run src/components/ChatMarkdown.test.ts src/components/ChatView.controls.test.ts
+pnpm exec vitest run src/components/ChatMarkdown.test.ts src/components/chat-dir-auto.test.ts
 ```
 
 These cover first-strong-character resolution, per-block direction, the

@@ -224,7 +224,7 @@ scripted voice, so their recipe is the end-to-end test:
 ```sh
 pnpm exec vitest run server/live-call.e2e.test.ts server/chat-followups-restart.test.ts
 pnpm exec vitest run server/live-call-record.test.ts server/live-call-controller.test.ts server/steer-queue.test.ts server/thread-title.test.ts server/delta-context.test.ts server/live-call.test.ts server/store.test.ts
-pnpm exec vitest run src/lib/call-record.test.ts src/lib/live-activity.test.ts src/lib/activity-runs.test.ts src/components/CallRecordRow.test.ts src/components/ChatView.via-call.test.ts src/components/ChatView.rows.test.ts
+pnpm exec vitest run src/lib/call-record.test.ts src/lib/live-activity.test.ts src/lib/activity-runs.test.ts src/components/CallRecordRow.test.ts
 pnpm typecheck
 pnpm i18n:check
 ```
@@ -312,7 +312,7 @@ no `title`, because nothing was asked; and the snapshot's transcript has
   (running only while the chat works) and a call that began before the loaded
   page (the record says some of it may be in earlier messages) are covered by
   `src/lib/call-record.test.ts`, `src/components/CallRecordRow.test.ts` and
-  `src/components/ChatView.via-call.test.ts`, and a spoken yes by the e2e's
+  `src/components/CallRecordRow.test.ts`, and a spoken yes by the e2e's
   approval test. The fixture run below does not draw them.
 
 ## Last exercised
@@ -385,6 +385,6 @@ call, titles off, one spoken request ("what is six times seven"), hung up.
   a page of more than 200 messages is out of reach of a hand run: a step with no
   outcome (the dash), "Expired", and the partial-record hint. The component
   tests pin them (`src/components/CallRecordRow.test.ts`,
-  `src/components/ChatView.via-call.test.ts`).
+  `src/components/CallRecordRow.test.ts`).
 - SIGINT to the exact `ui launch` pid removed its data directory and the driver
   was stopped; `ps` showed no fixture, preview, driver or browser process left.

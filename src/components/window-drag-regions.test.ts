@@ -4,14 +4,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { Window } from "happy-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { StoreProvider, type Bot, type Group } from "@/state/store";
+import { StoreProvider, type Group } from "@/state/store";
 
 type Chrome = "mac-inset" | "win-caption" | "native";
 const PLATFORM: Record<Chrome, string> = { "mac-inset": "darwin", "win-caption": "win32", native: "linux" };
 const fixture = { chrome: "native" as Chrome };
 
 
-const { ChatView } = await import("./ChatView");
 const { GroupView } = await import("./GroupView");
 const { DesktopCapabilitiesProvider, WindowDragStrip, captionChrome, windowFramed } = await import("./DesktopCapabilities");
 
@@ -21,11 +20,6 @@ const noDragSelector = noDragRule![1].trim();
 
 const CONTROLS = "button, a[href], input, select, textarea, [role=button], [role=menuitem], [tabindex]:not([tabindex='-1'])";
 
-const bot: Bot = {
-  id: "bot", threadId: "thread", name: "Pepper", title: "", description: "", color: "green",
-  notifications: true, unread: false, busy: false, messages: [],
-  modelSelection: { instanceId: "test", model: "default" },
-};
 const room: Group = {
   id: "room", threadId: "room-thread", name: "Launch planning", memberIds: [],
   defaultResponder: { kind: "member", botId: "atlas" }, bulletin: "", unread: false,
@@ -90,7 +84,6 @@ describe("caption chrome", () => {
 });
 
 describe.each([
-  ["chat", () => createElement(ChatView, { bot }), "[data-chathead-row]"],
   ["room", () => createElement(GroupView, { group: room }), "[data-roomhead-row]"],
 ] as const)("%s header", (_name, view, rowSelector) => {
   it.each<Chrome>(["mac-inset", "win-caption"])("is a drag region with every control cut out on %s", (chrome) => {

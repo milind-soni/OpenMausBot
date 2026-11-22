@@ -23,7 +23,7 @@ vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => fixture.canWrite, useReactor: () => "user" }));
 
 const { Transcript } = await import("./GroupView");
-const { MessageBoundary } = await import("./ChatView");
+const { MessageBoundary } = await import("./MessageBoundary");
 
 const lead = { id: "lead", name: "Lead", color: "blue", voice: "verse" } as Bot;
 const room = {

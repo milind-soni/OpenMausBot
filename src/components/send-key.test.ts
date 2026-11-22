@@ -38,7 +38,7 @@ vi.mock("./onboarding/Spotlight", () => ({ Spotlight: ({ children }: { children:
 vi.mock("@/components/onboarding/view-transition", () => ({ withViewTransition: (update: () => void) => { update(); return null; } }));
 
 const { Composer } = await import("./Composer");
-const { ChatView } = await import("./ChatView");
+const { ChatV2 } = await import("./chat-v2/ChatV2");
 const { CitationBadge } = await import("./CitationUI");
 const { CloudIntent } = await import("./CloudIntent");
 const { GuidedTour } = await import("./onboarding/GuidedTour");
@@ -142,14 +142,12 @@ describe.each(SEND_KEYS)("in %s mode", (mode) => {
     expect(sends()).toEqual([expect.objectContaining({ type: "sendGroup", groupId: "room", text: "hello room" })]);
   });
 
-  it("editing a sent message submits on the same key", () => {
-    render(createElement(ChatView, { bot: { ...bot, messages: [{ id: "ask", role: "user", kind: "text", at: 1, text: "Try the new model" }] } }));
-    flushSync(() => host.querySelector<HTMLButtonElement>('[data-mid="ask"] button[aria-haspopup="menu"]')!.click());
-    const edit = [...host.querySelectorAll<HTMLButtonElement>('[data-mid="ask"] [role=menuitem]')].find((item) => (item.textContent ?? "").startsWith("Edit"))!;
-    flushSync(() => edit.click());
-    const editor = () => host.querySelector<HTMLTextAreaElement>("textarea:not([aria-label])")!;
-    expect(editor().value).toBe("Try the new model");
-    expectSendKey(mode, editor, () => sends().length);
+  it("edits the latest sent message from the empty composer", () => {
+    render(createElement(ChatV2, { profile: { ...bot, messages: [{ id: "ask", role: "user", kind: "text", at: 1, text: "Try the new model" }] } }));
+    flushSync(() => composer().dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true })));
+    const editor = host.querySelector<HTMLInputElement>('input[name="text"]')!;
+    expect(editor.value).toBe("Try the new model");
+    flushSync(() => editor.form!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
     expect(sends()).toEqual([expect.objectContaining({ type: "editMessage", messageId: "ask", text: "Try the new model" })]);
   });
 

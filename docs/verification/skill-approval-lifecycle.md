@@ -7,7 +7,7 @@ pnpm exec electron scripts/smoke-approval-modes.cjs --skill-ui-only
 ```
 
 The harness creates a temporary home, runs the real server with fake provider
-CLIs, and mounts the real ChatView, task picker, composer and StoreProvider in
+CLIs, and mounts the real ChatV2, task picker, composer and StoreProvider in
 two hidden Electron windows. It never touches the running app or user data.
 No skill is enabled, no real provider is called, and no cleanup instruction
 from the reported screenshot is executed.
@@ -31,7 +31,7 @@ data are cleaned up after the run; the evidence remains.
 ## Ordering regressions
 
 ```sh
-pnpm exec vitest run src/state/store.test.ts src/components/ChatView.controls.test.ts src/components/ApprovalCard.test.ts server/skills.test.ts server/independent-task-store.test.ts
+pnpm exec vitest run src/state/store.test.ts src/components/ApprovalCard.test.ts server/skills.test.ts server/independent-task-store.test.ts
 pnpm exec vitest run server/index.test.ts -t 'only enables the exact learned-skill'
 pnpm typecheck
 pnpm lint

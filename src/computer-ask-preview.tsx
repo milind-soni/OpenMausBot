@@ -5,7 +5,7 @@
 import { StrictMode, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import type { ComputerAskCard } from "../shared/computer-ask";
-import { ChatView } from "@/components/ChatView";
+import { ChatV2 } from "@/components/chat-v2/ChatV2";
 import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { WindowsLocalControl } from "@/components/WindowsLocalControl";
 import { applySkinChoice, SKIN_IDS, type SkinId } from "@/lib/skins";
@@ -66,7 +66,7 @@ function Gallery() {
   const value = { state, dispatch: () => {}, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
   return (
     <StoreContext.Provider value={value}>
-      <Frame><div className="flex min-w-0 flex-1 flex-col" data-preview="chat"><ChatView bot={bot} /></div></Frame>
+      <Frame><div className="flex min-w-0 flex-1 flex-col" data-preview="chat"><ChatV2 profile={bot} /></div></Frame>
     </StoreContext.Provider>
   );
 }
@@ -74,7 +74,13 @@ function Gallery() {
 const realFetch = window.fetch.bind(window);
 window.fetch = async (input, init) => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  if (!new URL(url, location.href).pathname.startsWith("/api/")) return realFetch(input, init);
+  const { pathname } = new URL(url, location.href);
+  if (!pathname.startsWith("/api/")) return realFetch(input, init);
+  const threadId = /^\/api\/threads\/([^/]+)\/messages$/.exec(pathname)?.[1];
+  if (threadId) {
+    const owner = bot.threadId === threadId ? bot : undefined;
+    return Response.json({ messages: owner?.messages ?? [], hasMore: false });
+  }
   return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
 };
 const blocked = "embedded host failed: Spawn: binaryPath C:\\Users\\you\\AppData\\Local\\Programs\\OpenMausBot\\resources\\cua-driver-background.exe; reason Operation did not complete successfully because the file contains a virus or potentially unwanted software. (os error 225)";

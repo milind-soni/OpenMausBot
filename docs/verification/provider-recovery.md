@@ -109,7 +109,7 @@ its own disposable server/browser data; the screenshots remain.
 ## Regression checks
 
 ```sh
-pnpm exec vitest run server/drivers/acp/acp.test.ts server/drivers/claude.test.ts server/drivers/claude-auth.test.ts server/drivers/codex.test.ts server/drivers/retry.test.ts server/store.test.ts src/components/ChatView.controls.test.ts
+pnpm exec vitest run server/drivers/acp/acp.test.ts server/drivers/claude.test.ts server/drivers/claude-auth.test.ts server/drivers/codex.test.ts server/drivers/retry.test.ts server/store.test.ts src/components/FailedTurnRow.controls.test.ts
 node --test electron/approval-trusted-mode.node-test.mjs
 pnpm typecheck
 pnpm lint

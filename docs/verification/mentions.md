@@ -8,7 +8,7 @@ node --experimental-strip-types scripts/verify-mentions.ts
 
 Open the printed `previewUrl`. The fixture creates Atlas, Juniper, a Japanese-named
 bot, and a Design review channel. It uses the real StoreProvider, Composer,
-ChatView and GroupView. No live account, provider, or user data is used. Ctrl-C
+ChatV2 and GroupView. No live account, provider, or user data is used. Ctrl-C
 stops the fixture servers and removes their temporary data directory.
 
 ## QA inventory

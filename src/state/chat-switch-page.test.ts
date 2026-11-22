@@ -30,7 +30,7 @@ function History({ bot }: { bot: Bot }) {
 function Probe() {
   const store = useStore();
   dispatch = store.dispatch;
-  return store.state.chatV2 ? createElement(History, { bot: store.state.bots[0]! }) : null;
+  return createElement(History, { bot: store.state.bots[0]! });
 }
 
 beforeEach(() => {
@@ -48,12 +48,6 @@ afterEach(() => {
   host.remove();
   Object.assign(initialState, original);
   vi.unstubAllGlobals();
-});
-
-it("asks for the newest 80 raw messages after toggling back to V1", async () => {
-  flushSync(() => dispatch({ type: "chatView", v2: false }));
-  flushSync(() => dispatch({ type: "switchTask", botId: "B", threadId: "B-other" }));
-  await vi.waitFor(() => expect(requests).toHaveBeenCalledWith("/api/bots/B/tasks/B-other?messages=80", expect.objectContaining({ method: "POST" })));
 });
 
 it("still asks for the whole chat when a jump needs it", async () => {
@@ -76,7 +70,6 @@ function showMessages(messages: Message[], hasMore = false) {
   flushSync(() => dispatch({ type: "taskSwitched", bot: {
     ...profile, needsHistory: true, activeLeafId: messages.at(-1)?.id, messages, hasMore,
   } }));
-  flushSync(() => dispatch({ type: "chatView", v2: true }));
 }
 
 it("replaces the compact page on branch changes and ignores an old page still in flight", async () => {
@@ -110,7 +103,7 @@ it("updates a visible card when its server patch arrives", () => {
   expect(host.textContent).toBe("Answered");
 });
 
-it("shares the phone's forced V2 mode with history loading and restores the desktop choice", async () => {
+it("uses compact history on both sides of the phone breakpoint", async () => {
   const media = window.matchMedia("(max-width: 767.98px)");
   const originalMatchMedia = window.matchMedia.bind(window);
   let narrow = false;
@@ -119,7 +112,6 @@ it("shares the phone's forced V2 mode with history loading and restores the desk
     query === media.media ? media : originalMatchMedia(query),
   );
   try {
-    flushSync(() => dispatch({ type: "chatView", v2: false }));
     narrow = true;
     flushSync(() => media.dispatchEvent(new Event("change")));
     flushSync(() => dispatch({ type: "switchTask", botId: "B", threadId: "B-other" }));
@@ -127,7 +119,7 @@ it("shares the phone's forced V2 mode with history loading and restores the desk
     narrow = false;
     flushSync(() => media.dispatchEvent(new Event("change")));
     flushSync(() => dispatch({ type: "switchTask", botId: "B", threadId: "B-other" }));
-    await vi.waitFor(() => expect(requests).toHaveBeenCalledWith("/api/bots/B/tasks/B-other?messages=80", expect.anything()));
+    await vi.waitFor(() => expect(requests).toHaveBeenCalledWith("/api/bots/B/tasks/B-other?messages=0", expect.anything()));
   } finally {
     spy.mockRestore();
   }
@@ -144,7 +136,6 @@ it("shows persisted messages while refreshing, then applies edits and deletions 
   try {
     flushSync(() => root.render(createElement(cache.ChatCacheScope.Provider, { value: "test" },
       createElement(StoreProvider, null, createElement(Probe)))));
-    flushSync(() => dispatch({ type: "chatView", v2: true }));
     await vi.waitFor(() => expect(host.textContent).toBe("cached,removed"));
     expect(requests).toHaveBeenCalledWith("/api/threads/B-old/messages?view=chat&limit=200", expect.anything());
     response.resolve(Response.json(fresh));

@@ -4,7 +4,7 @@ import { ACTION_ICON, type MessageMenuItem } from "./MessageActions";
 import { t } from "@/lib/i18n";
 import { useStore, type Action } from "@/state/store";
 
-type Owner = { kind: "bot" | "group"; ownerId: string; threadId: string; messageId: string };
+type Owner = { kind: "group"; ownerId: string; threadId: string; messageId: string };
 
 export function forkMessageItem(owner: Owner, dispatch: Dispatch<Action>, disabled: boolean): MessageMenuItem {
   return {
@@ -18,9 +18,7 @@ export function forkMessageItem(owner: Owner, dispatch: Dispatch<Action>, disabl
 
 export function ForkLinks(owner: Owner & { phone: boolean }) {
   const { state, dispatch } = useStore();
-  const tasks = owner.kind === "bot"
-    ? state.bots?.find((bot) => bot.id === owner.ownerId)?.tasks
-    : state.groups?.find((group) => group.id === owner.ownerId)?.tasks;
+  const tasks = state.groups?.find((group) => group.id === owner.ownerId)?.tasks;
   const forks = tasks?.filter((task) => task.origin?.threadId === owner.threadId && task.origin.messageId === owner.messageId) ?? [];
   if (owner.phone || !forks.length) return null;
   return (

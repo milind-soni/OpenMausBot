@@ -1,6 +1,6 @@
 import { useEffect, useSyncExternalStore, type Dispatch, type SetStateAction } from "react";
 
-// The find bar belongs to ChatView, but the chat's ⋯ menu can sit outside it (the bot panel's top bar in Simple
+// The find bar belongs to chat view, but the chat's ⋯ menu can sit outside it (the bot panel's top bar in Simple
 // mode). A request names its thread, so a menu left over from another chat never opens this one's bar.
 const requests = new Set<(threadId: string) => void>();
 const watchers = new Set<() => void>();
@@ -17,7 +17,7 @@ function publish(next: string | null) {
   for (const watch of Array.from(watchers)) watch();
 }
 
-/** ChatView's side: answers requests for its thread and tells menus elsewhere whether its bar is open. */
+/** chat view's side: answers requests for its thread and tells menus elsewhere whether its bar is open. */
 export function useChatFindRequests(threadId: string, open: boolean, setOpen: Dispatch<SetStateAction<boolean>>): void {
   useEffect(() => {
     const request = (target: string) => {

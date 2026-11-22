@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { StoreProvider, useStore } from "../state/store";
-import { ChatView } from "../components/ChatView";
+import { ChatV2 } from "../components/chat-v2/ChatV2";
 import { GroupView } from "../components/GroupView";
 import { DesktopCapabilitiesProvider } from "../components/DesktopCapabilities";
 import { applySkin } from "../lib/skins";
@@ -23,7 +23,7 @@ function Fixture() {
       <button onClick={() => applySkin("atelier")}>Light</button>
     </nav>
     <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      {room && group ? <GroupView group={dmPreview ? { ...group, dm: true } : group} /> : bot ? <ChatView bot={bot} /> : <p>Loading fixture…</p>}
+      {room && group ? <GroupView group={dmPreview ? { ...group, dm: true } : group} /> : bot ? <ChatV2 profile={bot} /> : <p>Loading fixture…</p>}
     </main>
   </div>;
 }

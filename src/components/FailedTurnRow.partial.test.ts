@@ -22,7 +22,7 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => null }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
-const { FailedTurnRow } = await import("./ChatView");
+const { FailedTurnRow } = await import("./FailedTurnRow");
 const { activityPreview } = await import("@/lib/failed-turn");
 const cause = "Stopped because the tool call “read_file” failed. The bot's reply isn't proof the work was done; the failed step shows the error.";
 const show = (tool: NonNullable<Message["tool"]>) => renderToStaticMarkup(createElement(FailedTurnRow, { tool, engine: undefined, onRetry: vi.fn() }));

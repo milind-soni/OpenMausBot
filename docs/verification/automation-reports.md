@@ -52,7 +52,7 @@ waits on a teammate, is never taken for the run's result or failure.
 ```sh
 pnpm exec vitest run server/automation-reports.test.ts server/automation-reports.e2e.test.ts \
   server/routine-results.e2e.test.ts server/triggers.e2e.test.ts server/routines.test.ts \
-  server/today.test.ts server/recent-work.test.ts src/components/ChatView.automation.test.ts src/lib/automations.test.ts
+  server/today.test.ts server/recent-work.test.ts src/components/ChatV2.automation.test.ts src/lib/automations.test.ts
 pnpm exec vitest run server/cloud-routine-level.e2e.test.ts server/cloud-lending-memory.e2e.test.ts server/card-answerers.e2e.test.ts
 ```
 

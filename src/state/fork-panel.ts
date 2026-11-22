@@ -1,10 +1,10 @@
 import { api } from "./api";
 import { loadFullThread } from "./message-history";
 import { optimisticMessageId, optimisticUserMessage } from "./optimistic-send";
-import type { Action, AppState, BotAnnouncement, Group, Message } from "./store";
+import type { Action, AppState, Group, Message } from "./store";
 
 export interface ForkPanelState {
-  kind: "bot" | "group";
+  kind: "group";
   ownerId: string;
   threadId: string;
   messages: Message[];
@@ -15,8 +15,8 @@ export interface ForkPanelState {
 }
 
 export type ForkPanelAction =
-  | { type: "forkMessage"; kind: "bot" | "group"; ownerId: string; threadId: string; messageId: string }
-  | { type: "openForkPanel"; kind: "bot" | "group"; ownerId: string; threadId: string; loadId?: string }
+  | { type: "forkMessage"; kind: "group"; ownerId: string; threadId: string; messageId: string }
+  | { type: "openForkPanel"; kind: "group"; ownerId: string; threadId: string; loadId?: string }
   | { type: "forkPanelLoaded"; threadId: string; loadId: string; messages: Message[]; activeLeafId: string | null }
   | { type: "forkPanelLoadFailed"; threadId: string; loadId: string }
   | { type: "forkPanelMessage"; threadId: string; message: Message; patch?: true }
@@ -65,18 +65,14 @@ export function reduceForkPanel(state: AppState, action: ForkPanelAction): AppSt
   }
 }
 
-type ForkSend = Extract<Action, { type: "send" | "sendGroup" }>;
+type ForkSend = Extract<Action, { type: "sendGroup" }>;
 export function addForkOptimistic(state: AppState, action: ForkSend): AppState {
   const panel = state.forkPanel;
-  const kind = action.type === "send" ? "bot" : "group";
-  const ownerId = action.type === "send" ? action.botId : action.groupId;
-  const selectedThreadId = action.type === "send"
-    ? state.bots.find((bot) => bot.id === ownerId)?.threadId
-    : state.groups.find((group) => group.id === ownerId)?.threadId;
-  if (!panel || panel.kind !== kind || panel.ownerId !== ownerId || !action.sendId ||
+  const selectedThreadId = state.groups.find(group => group.id === action.groupId)?.threadId;
+  if (!panel || panel.ownerId !== action.groupId || !action.sendId ||
     (action.threadId ?? selectedThreadId) !== panel.threadId || panel.messages.some((message) => message.sendId === action.sendId)) return state;
   const message = optimisticUserMessage(action.text, action.sendId, action.replyToId, panel.activeLeafId,
-    action.type === "sendGroup" ? action.mode ?? "chat" : undefined);
+    action.mode ?? "chat");
   return { ...state, forkPanel: { ...panel, messages: [...panel.messages, message], activeLeafId: message.id } };
 }
 
@@ -95,19 +91,16 @@ type ForkEffect = Extract<Action, { type: "forkMessage" | "openForkPanel" }>;
 export function runForkEffect(action: ForkEffect, dispatch: (action: Action) => void,
   rawDispatch: (action: Action) => void, showError: (error: unknown) => void): void {
   if (action.type === "forkMessage") {
-    const owner = action.kind === "bot" ? "bots" : "groups";
-    void api<{ bot?: BotAnnouncement; group?: Partial<Group> & { id: string }; task: { threadId: string } }>(
-      `/api/${owner}/${action.ownerId}/tasks/${action.threadId}/forks`,
+    void api<{ group?: Partial<Group> & { id: string }; task: { threadId: string } }>(
+      `/api/groups/${action.ownerId}/tasks/${action.threadId}/forks`,
       { method: "POST", body: JSON.stringify({ messageId: action.messageId }) },
     ).then((result) => {
-      if (result.bot) dispatch({ type: "botPatched", bot: result.bot });
       if (result.group) dispatch({ type: "groupPatched", group: result.group });
       dispatch({ type: "openForkPanel", kind: action.kind, ownerId: action.ownerId, threadId: result.task.threadId });
     }).catch(showError);
     return;
   }
-  const owner = action.kind === "bot" ? "bots" : "groups";
-  void api(`/api/${owner}/${action.ownerId}/read`, { method: "POST", body: JSON.stringify({ threadId: action.threadId }) }).catch(() => {});
+  void api(`/api/groups/${action.ownerId}/read`, { method: "POST", body: JSON.stringify({ threadId: action.threadId }) }).catch(() => {});
   const loadId = action.loadId ?? "";
   void loadFullThread(action.threadId).then(({ messages, activeLeafId }) => {
     rawDispatch({ type: "forkPanelLoaded", threadId: action.threadId, loadId, messages, activeLeafId });

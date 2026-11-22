@@ -1,8 +1,7 @@
 import { useHeldMenuMotion } from "./MenuMotion";
 import { X } from "lucide-react";
-import { currentTaskBot, useStore } from "@/state/store";
+import { useStore } from "@/state/store";
 import { t } from "@/lib/i18n";
-import { ChatView } from "./ChatView";
 import { GroupView } from "./GroupView";
 
 export function ForkPanel() {
@@ -10,12 +9,8 @@ export function ForkPanel() {
   const motion = useHeldMenuMotion(state.forkPanel);
   const panel = motion.value;
   if (!motion.shown || !panel) return null;
-  const bot = panel.kind === "bot" ? state.bots.find((candidate) => candidate.id === panel.ownerId) : undefined;
-  const group = panel.kind === "group" ? state.groups.find((candidate) => candidate.id === panel.ownerId) : undefined;
-  const botTask = bot?.tasks?.find((candidate) => candidate.threadId === panel.threadId);
+  const group = state.groups.find((candidate) => candidate.id === panel.ownerId);
   const groupTask = group?.tasks?.find((candidate) => candidate.threadId === panel.threadId);
-  const task = botTask ?? groupTask;
-  const openedBot = bot && botTask ? { ...currentTaskBot(bot, panel.threadId), messages: panel.messages, activeLeafId: panel.activeLeafId, hasMore: false } : null;
   const openedGroup = group && groupTask ? { ...group, threadId: panel.threadId, messages: panel.messages, hasMore: false,
     working: groupTask.working ?? false, busyBotId: groupTask.busyBotId ?? null,
     turnStartedAt: null, pinnedCwd: groupTask.pinnedCwd, pinnedMessageId: groupTask.pinnedMessageId } : null;
@@ -23,7 +18,7 @@ export function ForkPanel() {
   return (
     <aside data-drawer-motion={motion.closing ? "out" : "in"} {...motion.exitProps} aria-label={t("chat.forkPanel")} className="[--drawer-width:clamp(360px,48vw,640px)] relative flex h-full w-[min(48vw,640px)] min-w-[360px] flex-col border-l border-hairline bg-app">
       <div className="flex items-center justify-between border-b border-hairline px-4 py-2 text-sm font-medium text-ink">
-        <span className="truncate">{task?.title ?? t("chat.forkPanel")}</span>
+        <span className="truncate">{groupTask?.title ?? t("chat.forkPanel")}</span>
         <button type="button" aria-label={t("chat.closeForkPanel")} className="rounded p-1 text-ink-secondary interaction:bg-raised/50 hover:text-ink"
           onClick={() => dispatch({ type: "closeForkPanel" })}><X size={16} /></button>
       </div>
@@ -36,8 +31,7 @@ export function ForkPanel() {
               {t("chat.retry")}
             </button>
           </div>
-          : openedBot ? <ChatView key={panel.threadId} bot={openedBot} inForkPanel />
-            : openedGroup ? <GroupView key={panel.threadId} group={openedGroup} inForkPanel />
+          : openedGroup ? <GroupView key={panel.threadId} group={openedGroup} inForkPanel />
               : <p className="p-4 text-sm text-ink-secondary">{t("chat.forkUnavailable")}</p>}
       </div>
     </aside>

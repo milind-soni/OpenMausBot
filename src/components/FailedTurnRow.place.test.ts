@@ -26,7 +26,7 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.ownerOrAdmin }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
-const { FailedTurnRow } = await import("./ChatView");
+const { FailedTurnRow } = await import("./FailedTurnRow");
 const { panelCloudRefusal, placeRowViewFor } = await import("@/lib/place-view");
 
 

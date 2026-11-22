@@ -23,7 +23,7 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
 const { RoomToolChip } = await import("./GroupView");
-const { FailedTurnRow } = await import("./ChatView");
+const { FailedTurnRow } = await import("./FailedTurnRow");
 
 const claude = {
   instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude",

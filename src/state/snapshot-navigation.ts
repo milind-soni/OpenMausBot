@@ -12,17 +12,6 @@ export function usePhoneLayout(current: boolean | undefined, dispatch: Dispatch<
   }, [current, dispatch, phoneLayout]);
 }
 
-export function reduceChatView(state: AppState, action: Extract<Action, { type: "chatView" | "phoneLayout" }>): AppState {
-  const phoneLayout = action.type === "phoneLayout" ? action.enabled : state.phoneLayout;
-  const desktopChatV2 = action.type === "chatView" ? action.v2 : state.desktopChatV2 ?? state.chatV2;
-  const chatV2 = Boolean(phoneLayout || desktopChatV2);
-  return {
-    ...state, chatV2, desktopChatV2, phoneLayout,
-    bots: !chatV2 && state.chatV2 ? state.bots.map(bot => bot.chatPatches
-      ? { ...bot, chatPatches: undefined } : bot) : state.bots,
-  };
-}
-
 // One branch per transcript array and leaf: every sidebar row, the composer and the chat ask for it on each store
 // change, and an unchanged transcript keeps the same array (so memos keyed on it hold).
 const branches = new WeakMap<readonly Message[], { leafId: string; path: Message[] }>();
@@ -104,7 +93,7 @@ export function reduceHydrate(state: AppState, action: Extract<Action, { type: "
     bots: action.bots.map((sent) => {
       let bot = sent.messages ? sent : { ...sent, messages: [] };
       const previous = state.bots.find((candidate) => candidate.id === bot.id);
-      if (bot.needsHistory && previous?.threadId === bot.threadId && (!state.chatV2 || bot.busy)) bot = { ...bot, messages: previous.messages, hasMore: previous.hasMore };
+      if (bot.needsHistory && previous?.threadId === bot.threadId && bot.busy) bot = { ...bot, messages: previous.messages, hasMore: previous.hasMore };
       return keepBotNavigation(previous, previous ? { ...bot, tasks: mergeTaskStamps(previous.tasks, bot.tasks) } : bot,
         action.preserveNavigation === true && navigatedSince(previous, action.navigationSince, state.transcriptGeneration), action.taskIdsAtStart);
     }),
