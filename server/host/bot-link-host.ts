@@ -2,7 +2,7 @@
 // server's store and coordinator, the computer's end that asks the Cloud, and the routes. With the link off (no
 // bot-link.json in the data folder) `start` asks nobody and every hook here answers as if the link did not exist.
 import { dirname } from "node:path";
-import { mascotBodyColorSchema, mascotFurSchema } from "../../shared/bot-avatar.ts";
+import { mascotBodyColorSchema } from "../../shared/bot-avatar.ts";
 
 import { createDialer } from "../bot-link/dial.ts";
 import { createBotLink } from "../bot-link/link.ts";
@@ -45,14 +45,10 @@ export interface BotLinkHostDeps {
   log(line: string): void;
 }
 
-/** Another place's body tint and fur land here only as valid values, since the avatar paints them. */
+/** Another place's body tint lands here only as a valid hex, since the avatar paints it. */
 const bodyColor = (value: string | undefined) => {
   const color = mascotBodyColorSchema.safeParse(value).data;
   return color ? { mascotBodyColor: color } : {};
-};
-const fur = (value: string | undefined) => {
-  const style = mascotFurSchema.safeParse(value).data;
-  return style ? { mascotFur: style } : {};
 };
 
 export function createBotLinkHost(deps: BotLinkHostDeps) {
@@ -65,14 +61,14 @@ export function createBotLinkHost(deps: BotLinkHostDeps) {
       next.set(id, { id, name: bot.name, color: bot.color ?? "blue", threadId: "", tasks: [], resumeCursors: {}, modelSelection: { instanceId: "", model: bot.model ?? "" },
         home: { place: peer, placeName: place.name, botId: bot.id, kind }, ...(bot.title ? { title: bot.title } : {}), ...(bot.description ? { description: bot.description } : {}),
         ...(bot.mascotBody ? { mascotBody: bot.mascotBody } : {}), ...(bot.mascotFaceColor ? { mascotFaceColor: bot.mascotFaceColor } : {}),
-        ...bodyColor(bot.mascotBodyColor), ...fur(bot.mascotFur) } as unknown as BotRecord);
+        ...bodyColor(bot.mascotBodyColor) } as unknown as BotRecord);
     }
     // A far member of a room here that cannot be reached now (the link is off, its place is unlinked, or its place no
     // longer has it) stays a member: it is found by its address, named as it was last known, and takes no turn.
     rooms.sync();
-    for (const { id, gone, name, color, place, placeName, botId, kind, title, mascotBody, mascotFaceColor, mascotBodyColor, mascotFur } of rooms.absent()) {
+    for (const { id, gone, name, color, place, placeName, botId, kind, title, mascotBody, mascotFaceColor, mascotBodyColor } of rooms.absent()) {
       next.set(id, { id, name, color: color ?? "blue", threadId: "", tasks: [], resumeCursors: {}, modelSelection: { instanceId: "", model: "" },
-        home: { place, placeName, botId, ...(kind ? { kind } : {}), gone }, ...(title ? { title } : {}), ...(mascotBody ? { mascotBody } : {}), ...(mascotFaceColor ? { mascotFaceColor } : {}), ...bodyColor(mascotBodyColor), ...fur(mascotFur) } as unknown as BotRecord);
+        home: { place, placeName, botId, ...(kind ? { kind } : {}), gone }, ...(title ? { title } : {}), ...(mascotBody ? { mascotBody } : {}), ...(mascotFaceColor ? { mascotFaceColor } : {}), ...bodyColor(mascotBodyColor) } as unknown as BotRecord);
     }
     store.standIns.clear();
     for (const [id, record] of next) if (isLinkedId(id)) store.standIns.set(id, record);

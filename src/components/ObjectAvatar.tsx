@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 import type { MausState } from "@/lib/mascot";
 import { avatarMarks, type AvatarKind } from "@/lib/avatar-marks";
-import { mascotFaceInk, type MascotFaceColor, type MascotFur } from "../../shared/bot-avatar";
+import { mascotFaceInk, type MascotFaceColor } from "../../shared/bot-avatar";
 import { mountAvatar, type AvatarOptions, type MountedAvatar } from "../../packages/phone-protocol/src/open-bot-avatar/dom/index.ts";
 import type { AvatarDefinition, AvatarMood, AvatarState } from "../../packages/phone-protocol/src/open-bot-avatar/types.ts";
 import { DONE_TURN_S } from "../../packages/phone-protocol/src/open-bot-avatar/motion.ts";
@@ -56,7 +56,6 @@ export type ObjectAvatarProps = {
   /** Body colour as a hex. */
   fill: string;
   faceColor?: MascotFaceColor | null;
-  fur?: MascotFur;
   size?: number;
   state?: MausState;
   trackPointer?: boolean;
@@ -65,7 +64,7 @@ export type ObjectAvatarProps = {
   kind?: AvatarKind;
 };
 
-function ObjectAvatarComponent({ definition, fill, faceColor, fur, size = 44, state = "idle", trackPointer = true, animated, label, kind }: ObjectAvatarProps) {
+function ObjectAvatarComponent({ definition, fill, faceColor, size = 44, state = "idle", trackPointer = true, animated, label, kind }: ObjectAvatarProps) {
   const reduced = usePrefersReducedMotion();
   const cheering = useFinishCheer(state);
   const live = !reduced && (animated ?? (ACTIVE_STATES.has(state) || cheering));
@@ -74,7 +73,6 @@ function ObjectAvatarComponent({ definition, fill, faceColor, fur, size = 44, st
     definition,
     color: fill,
     eyeColor: mascotFaceInk(faceColor),
-    fur,
     followPointer: trackPointer,
     still: !live,
     label: label ?? "",

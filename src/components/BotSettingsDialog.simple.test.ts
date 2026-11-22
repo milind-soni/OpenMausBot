@@ -150,7 +150,6 @@ const { SignedInSites } = await import("./SignedInSites");
 const { AvatarImageGenerator } = await import("./AvatarImageGenerator");
 const { AvatarFraming } = await import("./avatar-editing");
 const { MascotFaceColorPicker } = await import("./MascotFaceColorPicker");
-const { MascotFurPicker } = await import("./MascotFurPicker");
 const { MascotBodyColorSwatch } = await import("./MascotBodyColorSwatch");
 const { Switch } = await import("./SettingsPrimitives");
 const { OrgSkillsCard } = await import("./bot-settings/OrgSkillsCard");
@@ -571,7 +570,7 @@ describe("the avatar editor", () => {
 
   it("resets the mascot as the Advanced card does", () => {
     click(find(editor(makeBot()), "data-avatar-reset"));
-    expect(patch).toHaveBeenLastCalledWith({ avatarCrop: "mascot", color: "green", mascotExpression: null, mascotBody: "cursor", mascotFaceColor: null, mascotBodyColor: null, mascotFur: null });
+    expect(patch).toHaveBeenLastCalledWith({ avatarCrop: "mascot", color: "green", mascotExpression: null, mascotBody: "cursor", mascotFaceColor: null, mascotBodyColor: null });
   });
 
   it("picks a custom body color after the swatches, and a named swatch clears it", () => {
@@ -602,31 +601,6 @@ describe("the avatar editor", () => {
     expect(choices.options.map((option) => option.value)).toEqual(["white", "black"]);
     choices.onChange("white");
     expect(patch).toHaveBeenLastCalledWith({ mascotFaceColor: "white" });
-  });
-
-  it("offers fur only on an engine-drawn body, and Off clears it", () => {
-    const fur = (bot: Bot) => {
-      const props = ofType(editor(bot), MascotFurPicker)!.props as Parameters<typeof MascotFurPicker>[0];
-      return capture(() => MascotFurPicker(props));
-    };
-    expect(fur(makeBot()).html).toBe("");
-    fresh();
-    expect(fur(makeBot({ mascotBody: "cursor" })).html).toBe("");
-    fresh();
-    const bare = fur(makeBot({ mascotBody: "blob" }));
-    expect(bare.html).toContain(">Fur<");
-    const choices = segment(bare, "data-avatar-fur");
-    expect(choices.value).toBe("off");
-    expect(choices.options.map((option) => [option.value, option.label])).toEqual([
-      ["off", "Off"], ["fuzzy", "Fuzzy"], ["fluffy", "Fluffy"], ["velvet", "Velvet"],
-    ]);
-    choices.onChange("fluffy");
-    expect(patch).toHaveBeenLastCalledWith({ mascotFur: "fluffy" });
-    fresh();
-    const furred = segment(fur(makeBot({ mascotBody: "obj-mug", mascotFur: "velvet" })), "data-avatar-fur");
-    expect(furred.value).toBe("velvet");
-    furred.onChange("off");
-    expect(patch).toHaveBeenLastCalledWith({ mascotFur: null });
   });
 
   it("generates with the shared generator, and uploads with shape and framing", () => {

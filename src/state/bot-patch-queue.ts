@@ -15,7 +15,6 @@ export type BotUpdatePatch = Partial<
     | "mascotBody"
     | "mascotFaceColor"
     | "mascotBodyColor"
-    | "mascotFur"
     | "avatarUrl"
     | "avatarCrop"
     | "avatarZoom"

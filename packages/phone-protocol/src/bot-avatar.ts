@@ -4,11 +4,6 @@ export const MASCOT_FACE_COLORS = ["white", "black"] as const;
 export const mascotFaceColorSchema = z.enum(MASCOT_FACE_COLORS);
 export type MascotFaceColor = z.infer<typeof mascotFaceColorSchema>;
 
-/** Fur on an engine-drawn avatar body (the shapes and Open Bot Avatar objects); absent or null is bare. */
-export const MASCOT_FURS = ["fuzzy", "fluffy", "velvet"] as const;
-export const mascotFurSchema = z.enum(MASCOT_FURS);
-export type MascotFur = z.infer<typeof mascotFurSchema>;
-
 /** A custom avatar body tint, stored as lowercase `#rrggbb`. */
 export const mascotBodyColorSchema = z
   .string()

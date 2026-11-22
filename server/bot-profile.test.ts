@@ -154,20 +154,6 @@ describe("mascotBodyColor", () => {
   });
 });
 
-describe("mascotFur", () => {
-  it.each(["fuzzy", "fluffy", "velvet", null] as const)("accepts %s at both profile boundaries", (mascotFur) => {
-    for (const strict of [true, false]) {
-      expect(parseBotProfilePatch({ mascotFur }, strict)).toEqual({ ok: true, patch: { mascotFur } });
-    }
-  });
-
-  it.each(["Fuzzy", "shaggy", "", 1, {}])("rejects %j", (mascotFur) => {
-    expect(parseBotProfilePatch({ mascotFur } as never, true)).toEqual({
-      ok: false, error: "mascotFur must be fuzzy, fluffy, velvet, or null",
-    });
-  });
-});
-
 describe("soul (standing instructions)", () => {
   it("accepts soul on both the strict and broad boundaries", () => {
     expect(parseBotProfilePatch({ soul: "Be brief." }, true)).toEqual({ ok: true, patch: { soul: "Be brief." } });

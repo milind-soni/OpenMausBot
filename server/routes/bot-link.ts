@@ -103,7 +103,7 @@ export function createBotLinkRoutes(deps: BotLinkRouteDeps): RouteHandler {
       // Names and looks only, as each place told this one: no message, address or sign-in.
       return json(res, 200, { bots: link.linked().map(({ id, peer, place, kind, online, bot }) => ({ id, home: { id: place.id, key: peer, kind, name: place.name, online }, botId: bot.id, name: bot.name,
         ...(bot.title ? { title: bot.title } : {}), ...(bot.color ? { color: bot.color } : {}), ...(bot.mascotBody ? { mascotBody: bot.mascotBody } : {}),
-        ...(bot.mascotFaceColor ? { mascotFaceColor: bot.mascotFaceColor } : {}), ...(bot.mascotBodyColor ? { mascotBodyColor: bot.mascotBodyColor } : {}), ...(bot.mascotFur ? { mascotFur: bot.mascotFur } : {}),
+        ...(bot.mascotFaceColor ? { mascotFaceColor: bot.mascotFaceColor } : {}), ...(bot.mascotBodyColor ? { mascotBodyColor: bot.mascotBodyColor } : {}),
         ...(bot.chief ? { chiefOfStaff: true } : {}), ...(bot.threadId ? { threadId: bot.threadId } : {}) })) });
     }
 
