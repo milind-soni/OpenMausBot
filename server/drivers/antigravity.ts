@@ -193,7 +193,7 @@ const support: AcpSupport = {
         state: "available",
         version: runtime.version,
         authenticated: await antigravityProfileAuthenticated(profile),
-        account: await antigravityAccount(profile.tokenPath),
+        account: await antigravityAccount(profile.tokenPath, { environment: profile.environment }),
       };
     } catch (error) {
       return { state: "unavailable", reason: error instanceof Error ? error.message : String(error) };

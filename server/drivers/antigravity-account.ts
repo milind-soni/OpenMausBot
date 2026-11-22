@@ -1,37 +1,48 @@
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
+import { createProxyFetch, resolveProxyUrl } from "./antigravity-proxy.ts";
 
 type Identity = { email: string; method: "login" } | undefined;
 const identities = new Map<string, { fingerprint: string; expires: number; result: Promise<Identity> }>();
 
+export interface AntigravityAccountOptions {
+  environment?: NodeJS.ProcessEnv;
+  fetchImpl?: AccessFetch;
+}
+
 /** The official ACP file stores refresh credentials, not the account email.
- * Resolve display identity through Google only; never expose or rewrite tokens. */
-export async function antigravityAccount(tokenPath: string): Promise<Identity> {
+ * Resolve display identity through Google only; never expose or rewrite tokens.
+ * When environment defines a proxy, OAuth refresh and userinfo strictly route through it. */
+export async function antigravityAccount(tokenPath: string, options?: AntigravityAccountOptions): Promise<Identity> {
+  let cacheKey = tokenPath;
   try {
     const info = await stat(tokenPath);
     if (!info.isFile() || info.size > 1024 * 1024) return undefined;
     const raw = await readFile(tokenPath, "utf8");
-    const fingerprint = createHash("sha256").update(raw).digest("hex");
-    const cached = identities.get(tokenPath);
+    const proxyUrl = resolveProxyUrl(options?.environment, "https://oauth2.googleapis.com/token");
+    cacheKey = proxyUrl ? `${tokenPath}\0${proxyUrl}` : tokenPath;
+    const fingerprint = createHash("sha256").update(`${raw}\0${proxyUrl ?? ""}`).digest("hex");
+    const cached = identities.get(cacheKey);
     if (cached?.fingerprint === fingerprint && cached.expires > Date.now()) return cached.result;
     const credentials = JSON.parse(raw);
     if (!credentials || !["client_id", "client_secret", "refresh_token"].every((key) => typeof credentials[key] === "string" && credentials[key].length > 0)) return undefined;
+    const fetcher = options?.fetchImpl ?? createProxyFetch<AccessFetch>(options?.environment);
     const entry = { fingerprint, expires: Date.now() + 60_000, result: Promise.resolve<Identity>(undefined) };
-    entry.result = lookup(credentials).then((account) => {
+    entry.result = lookup(credentials, fetcher).then((account) => {
       if (account) entry.expires = Date.now() + 60 * 60_000;
       return account;
     });
     if (identities.size >= 128) identities.delete(identities.keys().next().value!);
-    identities.set(tokenPath, entry);
+    identities.set(cacheKey, entry);
     return entry.result;
   } catch {
-    identities.delete(tokenPath);
+    identities.delete(cacheKey);
     return undefined;
   }
 }
 
 export interface AntigravityStoredSignIn { client_id: string; client_secret: string; refresh_token: string }
-type AccessFetch = (url: string, init: { method?: "POST"; headers?: Record<string, string>; body?: string | URLSearchParams; redirect: "error" | "manual"; signal: AbortSignal }) => Promise<Pick<Response, "ok" | "json">>;
+export type AccessFetch = (url: string, init: { method?: "POST"; headers?: Record<string, string>; body?: string | URLSearchParams; redirect: "error" | "manual"; signal: AbortSignal }) => Promise<Pick<Response, "ok" | "json">>;
 
 /** A short-lived access token for the stored sign-in, from Google only. The token stays in memory: it is never logged,
  * written or returned to a client. Undefined when Google refuses or cannot be reached. */
@@ -52,12 +63,12 @@ export async function refreshAntigravityAccess(
   return { accessToken: token.access_token, expiresInSeconds: typeof token.expires_in === "number" && token.expires_in > 0 ? token.expires_in : null };
 }
 
-async function lookup(credentials: AntigravityStoredSignIn): Promise<Identity> {
+async function lookup(credentials: AntigravityStoredSignIn, fetchImpl: AccessFetch): Promise<Identity> {
   try {
     const signal = AbortSignal.timeout(3_000);
-    const access = await refreshAntigravityAccess(credentials, signal);
+    const access = await refreshAntigravityAccess(credentials, signal, fetchImpl);
     if (!access) return undefined;
-    const identity = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+    const identity = await fetchImpl("https://www.googleapis.com/oauth2/v3/userinfo", {
       headers: { Authorization: `Bearer ${access.accessToken}` }, redirect: "error", signal,
     });
     if (!identity.ok) return undefined;
