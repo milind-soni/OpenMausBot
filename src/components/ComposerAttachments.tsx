@@ -204,7 +204,7 @@ export function ComposerAttachments({
                 </button>
               </div>
             ) : (
-              <div key={a.id} className="flex min-h-[42px] max-w-full items-center gap-2 rounded-xl border border-hairline/25 px-2.5 text-[12px] text-ink-secondary">
+              <div key={a.id} className="flex min-h-[42px] max-w-full items-center gap-2 self-end rounded-xl border border-hairline/25 px-2.5 text-[12px] text-ink-secondary">
                 <FileText size={14} className="shrink-0" aria-hidden="true" />
                 <span dir="auto" title={a.name} className="min-w-0 truncate text-ink">{a.name}</span>
                 <button
