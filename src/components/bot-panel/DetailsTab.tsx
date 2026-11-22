@@ -13,6 +13,7 @@ import { TryAsking } from "./TryAsking";
 import { Card, CardLabel, LabelAction, panelActionCls, NavRow, RowIcon, rowCls, RowText } from "./rows";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { newChatBot } from "@/state/new-chat";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 
 type Derived = ReturnType<typeof useBotSettingsDerived>;
 
@@ -53,6 +54,9 @@ export function DetailsTab({ bot, derived, onOpen }: {
   // set the blank chat's choices, which the first send applies to the conversation it makes.
   const newChat = useStoreSelector((state) => state.newChat);
   const thread = currentTaskBot(newChatBot(bot, newChat));
+  // Like the Model row, a Reasoning pick is also the bot's default, so new conversations start at it. A guest's pick
+  // stays in their own conversation.
+  const ownerOrAdmin = useOwnerOrAdmin();
   const routinesOn = derived.botRoutines.filter((routine) => routine.enabled).length;
   const conversationItems = CONVERSATION_ITEMS.flatMap((key) => items.filter((item) => item.key === key));
 
@@ -73,6 +77,7 @@ export function DetailsTab({ bot, derived, onOpen }: {
         <EffortRow
           bot={thread}
           threadId={thread.threadId}
+          updateBotDefault={ownerOrAdmin === true}
           compact
           className={cn(rowCls, "min-w-0 flex-1 rounded-[8px]")}
           label={<span className="flex shrink-0 items-center gap-2.5"><RowIcon icon={Sparkles} /><RowText title={t("model.simple.reasoning")} /></span>}
