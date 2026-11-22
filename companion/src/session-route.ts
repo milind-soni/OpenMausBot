@@ -112,7 +112,8 @@ export function forwardWebSessionUpgrade(target: WebSessionTarget, deviceId: str
     clearTimeout(deadline);
     answered = true;
     if (socket.destroyed) return harnessSocket.destroy();
-    socket.write(responseHead(harness.statusCode ?? 101, harness.statusMessage ?? "Switching Protocols", harness.rawHeaders));
+    const upgrade = `connection: Upgrade\r\nupgrade: ${String(harness.headers.upgrade ?? req.headers.upgrade)}`;
+    socket.write(responseHead(harness.statusCode ?? 101, harness.statusMessage ?? "Switching Protocols", harness.rawHeaders, hopByHop(harness.headers), upgrade));
     if (harnessHead.length) socket.write(harnessHead);
     if (head.length) harnessSocket.write(head);
     harnessSocket.pipe(socket).pipe(harnessSocket);

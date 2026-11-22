@@ -63,6 +63,10 @@ async function rig(harnessPortOverride?: number) {
   });
   const wss = new WebSocketServer({ noServer: true });
   harness.on("upgrade", (req, socket, head) => {
+    if (req.url === "/api/hop-upgrade") {
+      closers.push(() => socket.destroy());
+      return socket.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade, X-Reply-Hop\r\nX-Reply-Hop: harness-local\r\nX-From: server\r\n\r\n");
+    }
     if (req.url === "/api/cut-upgrade") {
       socket.write("HTTP/1.1 403 Forbidden\r\nContent-Length: 100\r\n\r\npartial");
       return setImmediate(() => socket.destroy());
@@ -227,4 +231,22 @@ it("ends a refused live socket when the harness drops mid-reply", async () => {
   stream.write("GET /api/cut-upgrade HTTP/1.1\r\nHost: desktop.invalid\r\nAuthorization: Bearer omb_sess_abc\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n");
   await ended;
   expect(text).toMatch(/^HTTP\/1\.1 403/);
+});
+
+it("drops the headers a Connection header names from a live socket's 101 reply", async () => {
+  const { origin } = await rig();
+  const stream = await origin.connect(DEVICE);
+  let text = "";
+  const head = new Promise<void>((resolve) => stream.on("data", (chunk) => {
+    text += chunk;
+    if (text.includes("\r\n\r\n")) resolve();
+  }));
+  stream.write("GET /api/hop-upgrade HTTP/1.1\r\nHost: desktop.invalid\r\nAuthorization: Bearer omb_sess_abc\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n");
+  await head;
+  expect(text).toMatch(/^HTTP\/1\.1 101 /);
+  expect(text).toMatch(/\r\nupgrade: websocket\r\n/i);
+  expect(text).toMatch(/\r\nconnection: upgrade\r\n/i);
+  expect(text).toMatch(/\r\nx-from: server\r\n/i);
+  expect(text.toLowerCase()).not.toContain("x-reply-hop");
+  stream.destroy();
 });
