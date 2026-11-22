@@ -46,6 +46,41 @@ describe("what a bot on My Cloud is told about connections that need the person"
     expect(prompt({ mcpServers: ["dodo", "linear", "jira"] })).toBe("");
   });
 
+  describe("a server that stands for a connected app", () => {
+    const hosted = (app: string) => ({ type: "http", url: `https://api.cursor.com/rest-mcp/${app}/mcp`, headers: {}, enabled: true });
+    const servers = {
+      "google-drive": hosted("google-drive"),
+      "google-sheets": hosted("google-sheets"),
+      "google-slides": hosted("google-slides"),
+      "google-docs": { type: "http", url: "https://docs-mcp.example/mcp", headers: {}, enabled: true },
+    };
+    const source: ConnectionPromptSources = { mcpServers: () => servers, mcpAuth: () => "needs-sign-in", composioConnected: async () => ({}) };
+    const link = (name: string) => `sign in here: https://omb-u-1.fly.dev/?connect=mcp%3A${name}`;
+    const apps: Record<string, { slug: string; label: string; connected: boolean }> = {
+      "google-drive": { slug: "googledrive", label: "Google Drive", connected: true },
+      "google-sheets": { slug: "googlesheets", label: "Google Sheets", connected: false },
+      "google-docs": { slug: "googledocs", label: "Google Docs", connected: true },
+    };
+    const elsewhere = " When a task needs one, do not send the person to sign in to it; where a connected app is named, call COMPOSIO_MANAGE_CONNECTIONS for it, which shows the person a card to connect it, and end the turn; otherwise say so in plain words.";
+
+    it("in a turn that can use the app: the app, and a sign-in link only where the server can sign in here", () => {
+      const prompt = createConnectionPrompt(source, ORIGIN);
+      expect(prompt({}, undefined, (name) => apps[name] ?? null)).toBe(
+        " Not signed in on My Cloud, but connected here as connected apps: google-drive (Google Drive). When a task needs one, use that connected app through the composio tools instead; do not send the person to sign in to the server."
+        + ` Not signed in on My Cloud yet, and also connected here as connected apps: google-docs (${link("google-docs")}; connected app: Google Docs). When a task needs one, use the connected app through the composio tools; give the server's link only when the task needs that server itself.`
+        + " Can't be signed in from OpenMausBot (their sign-in works only in another app): google-sheets (connect Google Sheets as a connected app instead); google-slides." + elsewhere);
+    });
+
+    it("in a turn that cannot use the app (its tool selection, scopes, policy or no connected apps): no app, and still no link that cannot finish", () => {
+      const prompt = createConnectionPrompt(source, ORIGIN);
+      for (const appFor of [undefined, () => null]) {
+        expect(prompt({}, undefined, appFor)).toBe(
+          ` Not connected on My Cloud yet: google-docs (${link("google-docs")}). When a task needs one, say in plain words that it needs the person once on My Cloud and give its link; do not try another way.`
+          + " Can't be signed in from OpenMausBot (their sign-in works only in another app): google-drive; google-sheets; google-slides." + elsewhere);
+      }
+    });
+  });
+
   it("connected apps assigned to the bot but not connected here, read in the background for the next turn", async () => {
     const source = sources({}, { gmail: false, slack: true });
     const prompt = createConnectionPrompt(source, ORIGIN);
