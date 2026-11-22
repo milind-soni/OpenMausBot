@@ -240,6 +240,12 @@ describe("a cloud computer starts only when the bot uses it", () => {
         OMB_BOAT_API: `${relayBase}/own-key-must-not-be-used`,
         OMB_CLOUD_BOAT_URL: `${relayBase}/relay/api/box/v1`,
         OMB_CLOUD_BOAT_TOKEN: INCLUDED,
+        // The host's container daemon is not this test's subject: a hung
+        // Docker Desktop answers the local-VM probe (`docker info`) only at
+        // its 10 s timeout, once per select_computer call. A socket nobody
+        // listens on makes the probe fail at once, as on a host without one.
+        DOCKER_HOST: `unix://${join(home, "no-docker.sock")}`,
+        CONTAINER_HOST: `unix://${join(home, "no-podman.sock")}`,
         // The provider's error is still read twice before a computer is deleted; here the reads need not be half an hour apart.
         OMB_CLOUD_COMPUTER_DEAD_CONFIRM_MS: "0",
       },
