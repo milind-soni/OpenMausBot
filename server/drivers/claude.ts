@@ -1081,7 +1081,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (turn.integrations?.localComputer) {
         const local = turn.integrations.localComputer;
         mcpServers.computer = { command: local.command, args: local.args, env: local.env };
-        if (!controlsHost) allowed.push("mcp__computer");
+        // Never pre-allowed: a computer call takes the turn's permission mode, cloud box or host.
       }
       const cwd = turn.cwd ?? homedir(), toolSearch = claudeToolSearchSetting(cwd, turnEnvironment);
       // Pre-allowed, or the CLI's own ListAgents look-alike shadows it.
@@ -1177,8 +1177,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       }
       // Every MCP server without alwaysLoad loads on demand behind ToolSearch (claude-tool-search.ts).
       const own: Record<string, unknown> = { ...authSettings, env: { ...authSettings.env, ENABLE_TOOL_SEARCH: toolSearch, ...(isolated ? CLAUDE_OWN_MEMORY_OFF : {}) } };
-      // Project-only settings still find the personal memory via ancestors when the bot lives under HOME.
-      if (isolated) own.claudeMdExcludes = [join(homedir(), ".claude", "CLAUDE.md")];
+      // Project-only settings still find the personal memory and rules via ancestors when the bot lives under HOME.
+      if (isolated) own.claudeMdExcludes = [join(homedir(), ".claude", "CLAUDE.md"), join(homedir(), ".claude", "rules", "**")];
       if (hooks) own.hooks = claudeHookSettings(HOOK_HELPER_PATH);
       if (turn.guestConfined) own.permissions = GUEST_CLAUDE_PERMISSIONS;
       // Approvals and browser credentials expire at the turn boundary; native background workers and cron jobs must not outlive it.

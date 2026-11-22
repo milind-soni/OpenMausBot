@@ -1,5 +1,5 @@
 import { cloudAsleep, onCloudPower } from "../lib/cloud-power";
-import { api, ApiError, retryRequest, snapshotArrays } from "./api";
+import { api, ApiError, retryRequest, snapshotArrays } from "./api"; import { serverFetch } from "@/lib/relay-server";
 import { capHeldInBackground, loadOlderPage, MESSAGE_PAGE_SIZE, olderThanHeld, reduceOlderMessages, reduceTrimHeldMessages } from "./message-history";
 import { readChatSnapshot } from "./chat-snapshot";
 import { followHeldTails, noteAppPagePatch } from "./held-tails";
@@ -461,7 +461,7 @@ export interface InstanceInfo extends InstanceEndpointInfo {
   cliDefault?: string;
   cliCandidates?: string[];
   claudeAccount?: { configDir: string; signInCommand: string; signInShell: "powershell" | "sh"; isDefault: boolean };
-  freeUpSpace?: boolean; replyWaitMinutes?: number; modelsUnconfirmed?: true; /** The app updated its own copy of this engine to this version lately. */ autoUpdated?: { version: string; at: number };
+  freeUpSpace?: boolean; replyWaitMinutes?: number; modelsUnconfirmed?: true; /** Why the engine's last read of its list failed. */ modelsUnreadable?: "signedOut" | "timedOut" | "failed"; /** The app updated its own copy of this engine to this version lately. */ autoUpdated?: { version: string; at: number };
 }
 
 /** A Settings page (`SettingsPageId`) or an older page name that `settings-index.ts` sends to its new page and section. */
@@ -2114,7 +2114,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return { host, card: cardMessages(stateRef.current, action.botId, action.groupId, action.threadId)?.find((m) => m.id === action.messageId)?.card, inRoom: !!action.groupId };
     };
     const persistCard = (botId: string, messageId: string, patch: Partial<OptionCardData>, threadId?: string) => {
-      fetch(`/api/bots/${botId}/cards/${messageId}`, {
+      serverFetch(`/api/bots/${botId}/cards/${messageId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...patch, threadId }),
@@ -3035,7 +3035,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const readsInFlight = new Map<string, { covers: number; again: boolean }>();
     const sendRead = (botId: string, threadId: string | undefined, key: string, covers: number): void => {
       readsInFlight.set(key, { covers, again: false });
-      void fetch(`/api/bots/${botId}/read`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId }) }).catch(() => {}).finally(() => {
+      void serverFetch(`/api/bots/${botId}/read`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId }) }).catch(() => {}).finally(() => {
         const open = readsInFlight.get(key); readsInFlight.delete(key);
         if (open?.again && alive) sendRead(botId, threadId, key, open.covers);
       });

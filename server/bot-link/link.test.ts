@@ -42,6 +42,8 @@ const call = (botIds: string[], message: string, more: Partial<CoordinateBotsCal
 function place(label: string, bots: Bot[], version?: number) {
   const dir = mkdtempSync(join(tmpdir(), `bot-link-${label}-`));
   const threads = new Set<string>();
+  /** Each work thread this place opened for a far bot: the job it was opened with names it. */
+  const opened: Array<{ threadId: string; title: string; from: string; brief: string }> = [];
   const runs: Array<{ botId: string; threadId: string; text: string; resumed: boolean; requester: string; origin: unknown }> = [];
   const sent: Array<{ recipient: string; threadId: string; roomId?: string }> = [];
   const results: Array<{ thread: string; name: string; status: string; result: string }> = [];
@@ -85,7 +87,7 @@ function place(label: string, bots: Bot[], version?: number) {
     patchGroup: (id: string, patch: { memberIds?: string[] }) => { const group = groups.find((one) => one.id === id); if (group && patch.memberIds) group.memberIds = patch.memberIds; return group ?? null; },
   };
   let coordinator!: Coordinator, link!: BotLink, dialer!: ReturnType<typeof createDialer>, ticker: NodeJS.Timeout | undefined, http: Server | undefined;
-  let opened = 0, port = 0, generation = 0, skew = 0, minted = 0, directoryChanges = 0;
+  let openedCount = 0, port = 0, generation = 0, skew = 0, minted = 0, directoryChanges = 0;
   const sockets = new Set<import("node:net").Socket>();
 
   function boot(options: { limits?: { queueMs?: number; stallMs?: number } } = {}) {
@@ -96,7 +98,7 @@ function place(label: string, bots: Bot[], version?: number) {
     link = createBotLink({
       rooms, directoryChanged: () => { directoryChanges += 1; rooms.sync(); },
       dataDir: dir, coordinator: () => coordinator, bots: () => bots, bot: (id) => bots.find((bot) => bot.id === id), level: () => "full",
-      openThread: (bot) => { const id = `${bot.id}-work-${++opened}`; threads.add(id); return id; },
+      openThread: (bot, title, opener, brief) => { const id = `${bot.id}-work-${++openedCount}`; threads.add(id); opened.push({ threadId: id, title, from: opener.name, brief }); return id; },
       hasThread: (_botId, threadId) => threads.has(threadId), personName: () => "Sam",
       sentRow: (input) => { sent.push({ recipient: input.recipient.name, threadId: input.threadId, ...(input.roomId ? { roomId: input.roomId } : {}) }); },
       resultRow: (parent, child, name) => { results.push({ thread: parent.threadId, name, status: child.status, result: child.result }); },
@@ -178,7 +180,7 @@ function place(label: string, bots: Bot[], version?: number) {
   }
 
   const api = {
-    dir, bots, runs, sent, results, requests, boot, listen, unplug, shutdown, handOff, keep, ledger,
+    dir, bots, runs, sent, results, requests, opened, boot, listen, unplug, shutdown, handOff, keep, ledger,
     failOnce: (match: RegExp, status = 500) => { failing.push({ match, status }); },
     /** What an assignment here carries one way: who it is from and each file's name and words. */
     carries: (id: string, way: "sent" | "returned") => { const batch = ledger.get(`${id}:${way}`); return batch ? { from: batch.from.name, files: batch.files.map((file) => [file.name, readFileSync(file.path, "utf8")]) } : undefined; },
@@ -380,6 +382,7 @@ describe("the link between a computer and its Cloud", () => {
     await computer.handOff("local-writer", call(["Analyst"], "Now the refunds"));
     await until(() => computer.results.length === 2, "the second result is back");
     expect(cloud.runs.filter((run) => run.botId === "cloud-analyst").map((run) => run.threadId)).toEqual(["cloud-analyst-work-1", "cloud-analyst-work-1"]);
+    expect(cloud.opened).toEqual([{ threadId: "cloud-analyst-work-1", title: "@Writer · work", from: "Writer", brief: "Count the orders" }]);
   });
 
   it("a call that got one instruction-only local refusal and one real refusal from the other place fails, and says why", async () => {

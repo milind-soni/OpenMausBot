@@ -13,7 +13,7 @@ import type { Notification } from "../../shared/notification.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { writeFileAtomic } from "../atomic.ts";
 import type { AppConfig } from "../config.ts";
-import { createConnectedReads, READ_APPS, type ReadApp } from "../connected-reads.ts";
+import { createConnectedReads, OUTLOOK_LIST_TOOL, READ_APPS, type ReadApp } from "../connected-reads.ts";
 import { evaluateConnectorTools } from "../connector-verdict.ts";
 import type { DecisionRow } from "../decision-log.ts";
 import type { ProviderAdapter } from "../contracts.ts";
@@ -34,7 +34,7 @@ export { WATCH_INSTRUCTIONS, WATCH_NAME } from "./default-watch.ts";
 export const WATCH_FILE = "watch.json";
 /** The engines whose every tool use outside a run's allowlist reaches OpenMausBot's answerer and is refused there. */
 const FENCED_ENGINES = new Set(["claudeAgent"]);
-const READ_SLUG: Record<ReadApp, string> = { gmail: "GMAIL_FETCH_EMAILS", googlecalendar: "GOOGLECALENDAR_EVENTS_LIST" };
+const READ_SLUG: Record<ReadApp, string> = { gmail: "GMAIL_FETCH_EMAILS", outlook: OUTLOOK_LIST_TOOL, googlecalendar: "GOOGLECALENDAR_EVENTS_LIST" };
 const ACTIVE = new Set(["queued", "running", "waiting"]);
 const MAX_HANDED = 50;
 const watchSchema = z.object({

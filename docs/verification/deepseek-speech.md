@@ -31,6 +31,11 @@ transcripts, input limits, safe errors, the Mac using the page recorder while
 DeepSeek is the voice, the 115-second recording cap with 64 ms frame rounding,
 and the Voice settings picker.
 
+The TTS fixture also sends a WAV with unknown RIFF and data sizes, as returned
+by the streaming service, and checks the output has concrete playable sizes.
+An unknown length cannot reveal a stream silently cut at a complete PCM frame;
+HTTP read errors, declared length mismatches, and partial frames still fail.
+
 Contract: [TTS](https://api-docs.deepseek.com/guides/tts/) and
 [ASR](https://api-docs.deepseek.com/guides/asr/).
 

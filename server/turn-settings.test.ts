@@ -30,6 +30,24 @@ describe("the person's own Claude Code skills", () => {
     expect(claudeUserSkillsDir(data, home)).toBe(root);
   });
 
+  it("leaves out the personal skills a bot's project ships itself, so the project's version wins", () => {
+    const home = temp(), data = temp(), cwd = temp();
+    for (const name of ["deploy", "crm"]) {
+      mkdirSync(join(home, ".claude", "skills", name), { recursive: true });
+      writeFileSync(join(home, ".claude", "skills", name, "SKILL.md"), `personal ${name}`);
+    }
+    mkdirSync(join(cwd, ".claude", "skills", "deploy"), { recursive: true });
+    writeFileSync(join(cwd, ".claude", "skills", "deploy", "SKILL.md"), "project deploy");
+    const root = claudeUserSkillsDir(data, home, cwd)!;
+    expect(root).not.toBe(join(data, "claude-user-skills"));
+    expect(existsSync(join(root, ".claude", "skills", "deploy"))).toBe(false);
+    expect(readFileSync(join(root, ".claude", "skills", "crm", "SKILL.md"), "utf8")).toBe("personal crm");
+    // The project drops its copy: the personal one comes back on the next turn.
+    rmSync(join(cwd, ".claude", "skills", "deploy"), { recursive: true });
+    expect(claudeUserSkillsDir(data, home, cwd)).toBe(join(data, "claude-user-skills"));
+    expect(claudeUserSkillsDir(data, home, temp())).toBe(join(data, "claude-user-skills"));
+  });
+
   it("has nothing to add without a skills folder", () => {
     expect(claudeUserSkillsDir(temp(), temp())).toBeNull();
   });
@@ -60,6 +78,20 @@ describe("turn fields from Settings", () => {
     settingsTurnFields({} as AppConfig, data, false, home);
     expect(existsSync(join(data, "claude-user-skills"))).toBe(false);
     expect(readFileSync(join(home, ".claude", "skills", "deploy", "SKILL.md"), "utf8")).toBe("mine");
+  });
+
+  it("takes a project's own links away too once the switch is off, never what they point to", () => {
+    const data = temp(), home = temp(), cwd = temp();
+    for (const name of ["deploy", "crm"]) {
+      mkdirSync(join(home, ".claude", "skills", name), { recursive: true });
+      writeFileSync(join(home, ".claude", "skills", name, "SKILL.md"), `personal ${name}`);
+    }
+    mkdirSync(join(cwd, ".claude", "skills", "deploy"), { recursive: true });
+    const on = settingsTurnFields({ features: { claudeUserSkills: true } } as AppConfig, data, false, home, cwd);
+    expect(on.userSkillsDir).toContain(join(data, "claude-user-skills", "for"));
+    settingsTurnFields({} as AppConfig, data, false, home, cwd);
+    expect(existsSync(join(data, "claude-user-skills"))).toBe(false);
+    expect(readFileSync(join(home, ".claude", "skills", "crm", "SKILL.md"), "utf8")).toBe("personal crm");
   });
 
   it("keeps the MCP switch its own, and an organization's MCP limit wins", () => {

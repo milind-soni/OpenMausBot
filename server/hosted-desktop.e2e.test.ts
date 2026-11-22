@@ -135,7 +135,7 @@ it("keeps the bot's own engine on the cloud computer, and a failed place never b
     expect(computer.env.OMB_HARNESS_URL).toBe(fixture.info.url);
     expect(JSON.stringify(sent)).not.toContain(BOAT_TOKEN);
     expect(Object.keys(sent.env).filter(key => /BOAT|BOX_TOKEN|OMB_CLOUD/.test(key))).toEqual([]);
-    expect(sent.argv[sent.argv.indexOf("--allowedTools") + 1].split(",")).toContain("mcp__computer");
+    expect(sent.argv[sent.argv.indexOf("--allowedTools") + 1].split(",")).not.toContain("mcp__computer");
     const client = mcpClient(computer);
     try {
       expect((await client.request("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "fixture", version: "1" } })).result.serverInfo.name).toBe("openmausbot-computer");

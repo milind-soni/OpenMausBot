@@ -20,9 +20,7 @@ import { CALL_ENDPOINT_MS, speechBridge } from "@/lib/speech";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
 import { titledCard } from "./ApprovalCard";
-
-const YES = /^(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|allow|approve|approved|fine|please do)\b/i;
-const NO = /^(no|nope|don'?t|do not|stop|deny|denied|cancel|never|skip it)\b/i;
+import { chineseConsent, NO, YES } from "../../shared/call-consent";
 
 type Phase = "listening" | "sending" | "working" | "speaking";
 
@@ -237,8 +235,10 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
           hush();
           return;
         }
-        if (YES.test(said) || NO.test(said)) {
-          const allow = YES.test(said);
+        // English is read exactly as before; chineseConsent only adds the Chinese answers.
+        const decision = YES.test(said) ? "allow" : NO.test(said) ? "deny" : chineseConsent(said);
+        if (decision) {
+          const allow = decision === "allow";
           if (allow && openApproval.skill) {
             setHeard("");
             enqueueSpeech(

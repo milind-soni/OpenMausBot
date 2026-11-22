@@ -1,6 +1,7 @@
 # Bitwarden in the Vault
 
-Settings → Vault can connect a Bitwarden account (Password Manager, not Secrets Manager) beside 1Password. Its logins fill
+Settings → Vault can connect a Bitwarden account (Password Manager) beside 1Password, and a Bitwarden Secrets Manager
+machine account under it ([below](#bitwarden-secrets-manager)). Its logins fill
 on their sites like any saved login, and its items serve bots as secrets, read from Bitwarden at the moment a bot uses
 one. On a desktop, a personal Cloud and a Team Cloud alike (`server/host/bitwarden-vault.ts`).
 
@@ -50,6 +51,35 @@ its logins and secrets serve the team's bots in shared, group and private chats,
 lists it in `vault.providers` as `{ kind: "bitwarden", connected, label: <server host>, lastError? }`, never a value,
 the API key or the master password.
 
+## Bitwarden Secrets Manager
+
+A second row, *Bitwarden Secrets Manager*, connects a machine account by its access token
+(`server/host/bitwarden-secrets.ts`). An admin picks the server (the same three choices) and pastes a token from Secrets
+Manager → Machine accounts → Access tokens. What the machine account reads is the boundary, through the projects it is
+given and any secret granted to it directly: every bot may use what it reads, so it should read only what bots should.
+
+- **Its own client.** `server/host/bitwarden-secrets-api.ts` speaks Secrets Manager's public HTTP API with Node's crypto,
+  no `bws` and no Bitwarden SDK: it signs in at `<identity>/connect/token` (`client_credentials`, scope `api.secrets`),
+  derives the token's key from its seed (HKDF-SHA256, salt `bitwarden-accesstoken`, info `sm-access-token`), decrypts the
+  organization's key from the sign-in answer, then lists `GET <api>/organizations/<id>/secrets` and reads
+  `POST <api>/secrets/get-by-ids`. Every encrypted field is a type 2 EncString (AES-256-CBC with HMAC-SHA256), checked
+  before it is decrypted. bitwarden.com and bitwarden.eu answer on `identity.` and `api.` hosts, a self-hosted server
+  under `/identity` and `/api`. Redirects are refused; every call has a 20 s timeout.
+- **Checked before it is kept.** A token Bitwarden refuses, or one whose seed opens nothing, says so and keeps nothing.
+  Once accepted it is sealed in the Vault's file like the others and never shown again. The bearer token and the
+  organization's key stay in the server's memory, renewed a minute before they end; a refused bearer signs in again, once.
+- **Logins**: a secret whose note has a `url:` or `site:` line (and optionally `username:` and `totp:` lines) is that
+  site's login, its value the password. Read-only here.
+- **Secrets by name**: every other secret, by its name (its key in Secrets Manager).
+- **References**: `bws://<secret id or name>` reaches any secret the machine account reads, resolved where `op://` and
+  `bw://` are. A name two secrets share is refused (use the id).
+- The list is read at most every 10 minutes, or on Refresh. Reading it decrypts every listed secret, value included, to
+  see which notes name a site; those values are dropped at once. A value is read from Bitwarden again when a bot uses it,
+  and masked like any other. Every secret is listed by name, but only the first 1,000 are read for notes, so a login past
+  them shows as a secret by name.
+- On a Team Cloud only an admin connects it, for the whole team; a member's Vault shows
+  `bitwardenSecrets: { connected: false }`. The Admin's signed report does not list it yet.
+
 ## The tool, and why OpenMausBot stays Apache-2.0
 
 The tool is Bitwarden's own command line client, built from github.com/bitwarden/clients, whose code is GPL-3.0 except
@@ -65,7 +95,8 @@ GPL code alone) and never bundles, ships or imports it:
 - No `@bitwarden/` package is a dependency: `scripts/testing/no-bitwarden-dependency.test.ts` fails if one enters a
   manifest, a lockfile or an import. (Bitwarden's Secrets Manager SDK, `@bitwarden/sdk-napi`, is under Bitwarden's own
   SDK license, which forbids offering an app built with it to others; `@bitwarden/sdk-internal` is GPL-3.0. Neither is
-  used.)
+  used, and neither is the `bws` tool, which is under the same SDK license: Secrets Manager goes through OpenMausBot's own
+  client of its HTTP API, written from the protocol, with no Bitwarden code or test data.)
 
 | Platform | Asset | Bytes | SHA-256 |
 |---|---|---|---|
@@ -80,6 +111,7 @@ macOS arm64 one was also checked against a download.
 
 ## Tests
 
+`server/host/bitwarden-secrets.test.ts` (an in-memory Secrets Manager, `server/testing/fake-bws.ts`),
 `server/host/bitwarden-vault.test.ts` and `server/host/bitwarden-cli.test.ts` (an in-process fake `bw`,
 `server/testing/fake-bw.ts`, and a fake download), and `server/cloud-team-bitwarden.e2e.test.ts` (a real Team Cloud with
 the fake installed where the real one would be, `server/testing/fake-bw-process.ts`). None touches the network or a real

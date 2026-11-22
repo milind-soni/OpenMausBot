@@ -21,6 +21,7 @@ import { readColorUserBubbles, setColorUserBubbles } from "./user-bubble-prefere
 import { latestWebPanels, setWebPanels } from "./web-panel-preferences";
 import { newWebPanelId, validateWebPanel, type WebPanel } from "./web-panels";
 import { onWindowPrefChanged } from "./window-pref-changes";
+import { serverFetch } from "./relay-server";
 
 type Pref<I extends WindowPrefId> = { read(): unknown; write(value: WindowPrefValue<I>): unknown };
 const ogb = () => (typeof window === "undefined" ? undefined : window.ogb);
@@ -118,7 +119,7 @@ export function reportWindowPrefs(): void {
   report = setTimeout(() => {
     report = null;
     void windowPrefValues()
-      .then((values) => fetch("/api/window-prefs", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ values }) }))
+      .then((values) => serverFetch("/api/window-prefs", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ values }) }))
       .catch(() => undefined);
   }, 200);
 }

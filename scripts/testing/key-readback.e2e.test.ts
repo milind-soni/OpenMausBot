@@ -98,7 +98,10 @@ beforeAll(async () => {
         const input = JSON.parse(raw) as { text: string };
         if (input.text.includes("refuse")) return reply(429, { error: input.text });
         res.writeHead(200, { "content-type": "audio/wav" });
-        res.end(pcmWav(0.25, 24_000));
+        const streaming = pcmWav(0.25, 24_000);
+        streaming.writeUInt32LE(0xffffffff, 4);
+        streaming.writeUInt32LE(0xffffffff, 40);
+        res.end(streaming);
         return;
       }
       return reply(200, { text: "hello from deepseek", request_id: "fixture", duration_ms: 1000 });
