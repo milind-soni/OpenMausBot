@@ -259,6 +259,10 @@ export class BrowserService {
       await browser.waitForPage(() => true, 15_000);
       for (const page of browser.pages()) await page.ready.then(() => adopt(page, "restored"), () => undefined);
       if (fresh) await this.#onlyBlankTab(profile, browser);
+      // Chrome gives a new window's keyboard to its address bar, and the bot's DevTools Protocol work never moves it: on a
+      // display a person's keys went there, and Google Chrome opened its suggestions over the page. The page takes it.
+      const front = browser.activePage ?? browser.pages()[0];
+      if (display && front) await front.session.send("Page.bringToFront").catch(() => undefined);
       this.#stillWanted(profile, epoch);
     } catch (error) {
       run.closing = true;
@@ -297,6 +301,9 @@ export class BrowserService {
     }
     profile.reopened = { kind: "crash", pages: [] };
     profile.control.settle();
+    // A hold of a browser that is gone ends with it: the bot is not left paused for nobody, and the person's views show
+    // the browser free when it starts again.
+    if (profile.control.owner !== null) void profile.hub.handBack();
     this.#options.log?.(`browser ${profile.key}: Chrome exited unexpectedly; the next call starts it again`);
     profile.hub.stopped("crashed");
   }

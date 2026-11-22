@@ -11477,5 +11477,12 @@
   "viewer.stop": "Parar",
   "sidebar.preview.waitingFor": "Esperando você: {what}",
   "handoff.importSignIn": "Usar meu login do meu próprio navegador",
-  "handoff.inPanel": "Aparece no painel do navegador"
+  "handoff.inPanel": "Aparece no painel do navegador",
+  "chat.handoffExchange.open": "Abrir conversa com {name}",
+  "chat.handoffExchange.label": "Conversa entre os bots {asker} e {helper}",
+  "chat.handoffExchange.backTo": "Voltar para {name}",
+  "chat.handoffExchange.back": "Voltar",
+  "chat.handoffExchange.loading": "Carregando a conversa…",
+  "chat.handoffExchange.failed": "Não foi possível carregar a conversa.",
+  "chat.handoffExchange.empty": "Nenhuma mensagem ainda."
 }

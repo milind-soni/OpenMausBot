@@ -11479,5 +11479,12 @@
   "viewer.stop": "Stop",
   "sidebar.preview.waitingFor": "Waiting for you: {what}",
   "handoff.importSignIn": "Use my sign-in from my own browser",
-  "handoff.inPanel": "Showing in the Browser panel"
+  "handoff.inPanel": "Showing in the Browser panel",
+  "chat.handoffExchange.open": "Open exchange with {name}",
+  "chat.handoffExchange.label": "Bot exchange between {asker} and {helper}",
+  "chat.handoffExchange.backTo": "Back to {name}",
+  "chat.handoffExchange.back": "Back",
+  "chat.handoffExchange.loading": "Loading the conversation…",
+  "chat.handoffExchange.failed": "Couldn't load the conversation.",
+  "chat.handoffExchange.empty": "No messages yet."
 }

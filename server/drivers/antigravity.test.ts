@@ -643,6 +643,27 @@ describe("official Antigravity runtime", () => {
     });
   }, 20_000);
 
+  it("offers Gemini 4 Neon from the account's own list with its thinking levels, keeping the bundled default", async () => {
+    const fake = fakeRuntime();
+    const runtime = await resolveAntigravityRuntime(fake.executable);
+    const levels = [{ value: "medium", name: "Medium" }, { value: "high", name: "High" }];
+    const profile = await prepareAntigravityProfile({
+      instanceId: "neon-catalog", runtime, baseDir: fake.directory,
+      baseEnv: {
+        PATH: process.env.PATH,
+        FAKE_ACP_AUTH_METHOD: "oauth-personal",
+        FAKE_ACP_MODELS: "gemini-4-neon,gemini-3.8-flash",
+        FAKE_ACP_VARIANTS: JSON.stringify({ "gemini-4-neon": { id: "thought_level", currentValue: "high", options: levels } }),
+      },
+    });
+    const catalog = await probeAntigravityModels({ runtime, profile, fallbackDefault: "gemini-3.8-flash" });
+    expect(catalog.default).toBe("gemini-3.8-flash");
+    expect(catalog.options.find((option) => option.id === "gemini-4-neon")).toEqual({
+      id: "gemini-4-neon", label: "gemini-4-neon", variants: [{ id: "medium", label: "Medium" }, { id: "high", label: "High" }],
+    });
+    await expect(probeAntigravityModels({ runtime, profile, fallbackDefault: "gemini-9-flash" })).resolves.toMatchObject({ default: "gemini-4-neon" });
+  }, 20_000);
+
   it("rejects a download redirected to insecure HTTP", async () => {
     const baseDir = mkdtempSync(join(tmpdir(), "omb-antigravity-insecure-"));
     scratch.push(baseDir);
@@ -1015,7 +1036,7 @@ describe("Antigravity driver over shared ACP", () => {
       environment: {
         FAKE_ACP_AUTH_METHOD: "oauth-personal",
         FAKE_ACP_MODELS: sessionModels,
-        FAKE_ACP_VARIANTS: JSON.stringify(Object.fromEntries(["gemini-3.8-flash", "gemini-4-argon"].map((id) => [id, {
+        FAKE_ACP_VARIANTS: JSON.stringify(Object.fromEntries(["gemini-3.8-flash", "gemini-4-argon", "gemini-4-neon"].map((id) => [id, {
           id: "thinking_level",
           currentValue: "high",
           options: [{ value: "low", name: "Low" }, { value: "medium", name: "Medium" }, { value: "high", name: "High" }],
@@ -1060,6 +1081,12 @@ describe("Antigravity driver over shared ACP", () => {
     expect(calls.some((call: any) => call.params.value === "gemini-4-argon-high")).toBe(false);
   });
 
+  it("runs a Gemini 4 Neon (High) pick as the base model at High thinking when the runtime offers only the base", async () => {
+    const { calls, selection } = await legacyPickTurn("antigravity-legacy-neon", "gemini-3.8-flash,gemini-4-neon", "gemini-4-neon-high");
+    expect(selection).toEqual({ sessionId: expect.any(String), model: "gemini-4-neon", variant: "high" });
+    expect(calls.some((call: any) => call.params.value === "gemini-4-neon-high")).toBe(false);
+  });
+
   it("keeps a suffixed Gemini 3.8 Flash pick unchanged when the runtime still offers it", async () => {
     const { calls, selection } = await legacyPickTurn("antigravity-suffixed-offered", "gemini-3.8-flash,gemini-3.8-flash-medium", "gemini-3.8-flash-medium");
     expect(selection).toEqual({ sessionId: expect.any(String), model: "gemini-3.8-flash-medium" });
@@ -1075,6 +1102,18 @@ describe("Antigravity driver over shared ACP", () => {
     expect(normalizeAntigravityTurn({ ...turn, model: "gemini-4-argon-medium" }, ["gemini-3.8-flash", "gemini-4-argon"])).toEqual({ ...turn, model: "gemini-4-argon", variant: "medium" });
     expect(normalizeAntigravityTurn({ ...turn, model: "gemini-4-argon-high" }, ["gemini-4-argon", "gemini-4-argon-high"])).toEqual({ ...turn, model: "gemini-4-argon-high" });
     expect(normalizeAntigravityTurn({ ...turn, model: "gemini-4-argon-high" }, ["gemini-3.8-flash"])).toEqual({ ...turn, model: "gemini-4-argon-high" });
+  });
+
+  it("splits a suffixed id only at a thinking level the catalog gives its base model", () => {
+    const turn = { threadId: "t", text: "hi", model: "gemini-4-neon-high" };
+    const catalog = { default: "gemini-3.8-flash", options: [
+      { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash" },
+      { id: "gemini-4-neon", label: "Gemini 4 Neon", variants: [{ id: "extra-low", label: "Extra Low" }, { id: "high", label: "High" }] },
+    ] };
+    const offered = ["gemini-3.8-flash", "gemini-4-neon"];
+    expect(normalizeAntigravityTurn(turn, offered, catalog)).toEqual({ ...turn, model: "gemini-4-neon", variant: "high" });
+    expect(normalizeAntigravityTurn({ ...turn, model: "gemini-4-neon-extra-low" }, offered, catalog)).toEqual({ ...turn, model: "gemini-4-neon", variant: "extra-low" });
+    expect(normalizeAntigravityTurn({ ...turn, model: "gemini-4-neon-medium" }, offered, catalog)).toEqual({ ...turn, model: "gemini-4-neon-medium" });
   });
 
   it("keeps one process across approval and model changes, starting on OMB's model", async () => {

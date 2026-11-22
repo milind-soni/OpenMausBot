@@ -240,6 +240,20 @@ describe("a person and the bot sharing one browser", () => {
     expect((await call("agent_browser_tabs", { action: "switch", tab: "t2" })).isError).toBeUndefined();
   });
 
+  it("ends the person's hold when the browser they hold dies, so the bot is not left paused for a browser that is gone", async () => {
+    const { service, call, text, target, backend } = setup();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 2560, maxHeight: 1600 }, () => {});
+    await viewer.input({ type: "takeControl" });
+    expect(service.heldBy("bot-a")).toBe("local-owner");
+    backend.chrome.exit("killed");
+    await sleep(50);
+    expect(service.heldBy("bot-a")).toBeNull();
+    const again = await call("agent_browser_status");
+    expect(again.isError).toBeUndefined();
+    expect(text(again)).toContain("stopped unexpectedly");
+  });
+
   it("waits for the bot's running action before the person's control starts, and turns that action's answer into the refusal", async () => {
     const { service, call, target, backend } = setup({ takeoverMs: 2_000 });
     await call("agent_browser_open", { url: "https://example.com/form" });
