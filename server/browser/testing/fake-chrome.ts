@@ -3,6 +3,7 @@
 import type { Backend, BackendCaps, OpenedBrowser, OpenRequest } from "../backends.ts";
 import { CdpBrowser } from "../cdp/browser.ts";
 import { fitPage } from "../chrome/flags.ts";
+import type { DesktopDisplay } from "../desktop/displays.ts";
 import type { Identity } from "../cdp/identity.ts";
 import type { CdpTransport } from "../cdp/transport.ts";
 
@@ -449,10 +450,13 @@ export class FakeBackend implements Backend {
   readonly opened: OpenRequest[] = [];
   readonly #make: (request: OpenRequest) => FakeChrome;
   readonly #pageLimit: { width: number; height: number } | null;
+  readonly #display: DesktopDisplay | null;
 
-  constructor(make: (request: OpenRequest) => FakeChrome = () => new FakeChrome(), { pageLimit = null }: { pageLimit?: { width: number; height: number } | null } = {}) {
+  /** `display`: every browser opens with its window on that private display, as LocalBackend does with cloudDisplay on. */
+  constructor(make: (request: OpenRequest) => FakeChrome = () => new FakeChrome(), { pageLimit = null, display = null }: { pageLimit?: { width: number; height: number } | null; display?: DesktopDisplay | null } = {}) {
     this.#make = make;
     this.#pageLimit = pageLimit;
+    this.#display = display;
   }
 
   get chrome(): FakeChrome {
@@ -470,10 +474,11 @@ export class FakeBackend implements Backend {
     chrome.window.height = viewport.height + CHROME_HEIGHT;
     this.chromes.push(chrome);
     const screen = limit ? { width: limit.width, height: limit.height + CHROME_HEIGHT } : null;
-    const browser = await CdpBrowser.connect(chrome, { identity: FAKE_IDENTITY, headless: true, downloadDir: null, permissions: true, platform: "darwin", maxPages: 8, viewport, screen, handleAuth: true });
+    const display = this.#display;
+    const browser = await CdpBrowser.connect(chrome, { identity: display ? null : FAKE_IDENTITY, headless: true, downloadDir: null, permissions: true, platform: "darwin", maxPages: 8, viewport: display ? null : viewport, screen: display ? null : screen, handleAuth: true });
     let exited!: () => void;
     const done = new Promise<void>((resolve) => { exited = resolve; });
     chrome.onClose(() => exited());
-    return { browser, pageLimit: limit, pid: null, version: "153.0.8010.12", exited: done, close: async () => { await browser.close(); } };
+    return { browser, pageLimit: display ? null : limit, pid: null, version: "153.0.8010.12", exited: done, close: async () => { await browser.close(); }, display };
   }
 }

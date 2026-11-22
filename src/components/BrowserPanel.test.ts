@@ -130,6 +130,24 @@ describe("the browser panel's connection", () => {
     expect(host.querySelector("[data-browser-transport]")!.getAttribute("data-browser-transport")).toBe("live");
   });
 
+  it("reconnects by itself, on the stream, when its server restarts, and shows no Reconnect", async () => {
+    const socket = await streaming();
+    const before = FakeSocket.instances.length;
+    // The server stops: it closes the view with the reconnect code, then refuses while it starts again.
+    await act(async () => socket.dispatchEvent(Object.assign(new Event("close"), { code: 1012, reason: "The server is restarting." })));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 600)); });
+    expect(FakeSocket.instances.length).toBe(before + 1);
+    await act(async () => FakeSocket.instances.at(-1)!.refuse());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1_100)); });
+    const next = FakeSocket.instances.at(-1)!;
+    expect(next).not.toBe(socket);
+    expect(button("Reconnect")).toBeUndefined();
+    expect(host.querySelector("[data-browser-transport]")!.getAttribute("data-browser-transport")).toBe("stream");
+    await act(async () => { next.open(); next.control("agent"); next.message(new ArrayBuffer(8)); });
+    await flush();
+    expect(button("Reconnect")).toBeUndefined();
+  });
+
   it("says the browser is starting until its first frame arrives", async () => {
     await render();
     const socket = FakeSocket.instances.at(-1)!;
@@ -392,6 +410,44 @@ describe("what the person does in the panel", () => {
     });
     await flush();
     expect(socket.sent).toEqual([{ type: "takeControl" }]);
+    await act(async () => socket.control("you"));
+    await flush();
+    expect(socket.sent.at(-1)).toEqual({ type: "navigate", url: "https://accounts.example.com/login" });
+  });
+
+  it("wakes a browser that sat unused before taking it for a sign-in", async () => {
+    await render({ signIn: { url: "https://accounts.example.com/login", site: "example.com", nonce: 1 } });
+    const socket = FakeSocket.instances.at(-1)!;
+    await act(async () => { socket.open(); socket.control("unclaimed"); socket.message({ type: "asleep" }); });
+    await flush();
+    expect(socket.sent).toEqual([{ type: "wake" }]);
+    await act(async () => socket.message({ type: "asleep" }));
+    await flush();
+    expect(socket.sent).toEqual([{ type: "wake" }]);
+    await act(async () => {
+      socket.message({ type: "awake" });
+      socket.message({ type: "tabs", tabs: [{ tabId: "t1", title: "", url: "about:blank", active: true }] });
+    });
+    await flush();
+    expect(socket.sent).toEqual([{ type: "wake" }, { type: "takeControl" }]);
+    await act(async () => socket.control("you"));
+    await flush();
+    expect(socket.sent.at(-1)).toEqual({ type: "navigate", url: "https://accounts.example.com/login" });
+  });
+  it("opens the sign-in page on the woken browser's blank tab, not the page it had before sleeping", async () => {
+    await render({ signIn: { url: "https://accounts.example.com/login", site: "example.com", nonce: 1 } });
+    const socket = FakeSocket.instances.at(-1)!;
+    await act(async () => {
+      socket.open();
+      socket.message({ type: "tabs", tabs: [{ tabId: "t1", title: "Docs", url: "https://docs.example.com/", active: true }] });
+      socket.control("unclaimed");
+      socket.message({ type: "asleep" });
+    });
+    await flush();
+    expect(socket.sent).toEqual([{ type: "wake" }]);
+    await act(async () => socket.message({ type: "awake" }));
+    await flush();
+    await act(async () => socket.message({ type: "tabs", tabs: [{ tabId: "t2", title: "", url: "about:blank", active: true }] }));
     await act(async () => socket.control("you"));
     await flush();
     expect(socket.sent.at(-1)).toEqual({ type: "navigate", url: "https://accounts.example.com/login" });

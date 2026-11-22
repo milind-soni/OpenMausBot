@@ -132,12 +132,12 @@ export function AiPage() {
       {!ctx.advanced && (
         <SettingsGroup block="ai-keys-fold">
           <SettingsRows>
-            <SettingsFoldRow id="ai-other-services" title={t("settings.ai.otherServices")} value={String(count)} open={shown} onToggle={() => setServices(!shown)} />
+            <SettingsFoldRow id="ai-other-services" title={t("settings.ai.otherServices")} subtitle={t("settings.ai.otherServicesLine")} value={String(count)} open={shown} onToggle={() => setServices(!shown)} />
           </SettingsRows>
         </SettingsGroup>
       )}
       {shown && (
-        <SettingsGroup label={ctx.advanced ? t("settings.ai.otherServices") : undefined} block="ai-keys">
+        <SettingsGroup label={ctx.advanced ? t("settings.ai.otherServices") : undefined} description={t("settings.ai.otherServicesLine")} block="ai-keys">
           <KeysPage bare exclude={anchor === "ai-keys" ? [] : ["ai"]} />
         </SettingsGroup>
       )}

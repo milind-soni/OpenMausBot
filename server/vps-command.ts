@@ -26,6 +26,9 @@ export class VpsHostUnreachableError extends Error {}
 
 // OpenSSH's own words when it never reached the host. Exit status 255 alone is not proof: ssh also passes on a remote command's 255.
 const SSH_TRANSPORT_FAILURE = /\bssh: (?:Could not resolve hostname|connect to host \S+ port \d+:)/i;
+// Docker reports its own SSH transport failing on one "error during connect" line that quotes ssh's words after "stderr=".
+// The container command shares that stderr, so ssh's words anywhere else are the command's own output.
+const DOCKER_SSH_TRANSPORT_FAILURE = /^error during connect: .*\bstderr=ssh: (?:Could not resolve hostname|connect to host \S+ port \d+:)/im;
 
 /** Only a lookup or connection failure ssh reports itself, or a timeout, means nothing on the host answered. */
 function sshNeverReachedHost(error: unknown): boolean {
@@ -121,7 +124,8 @@ export async function defaultRunner(args: string[], options: VpsCommandOptions =
         if (code === 0) return resolve({ stdout: stdout.text(), stderr: stderr.text() });
         const captured = stderr.text().trim();
         const message = captured.slice(-1000) || `Docker-over-SSH exited ${code ?? signal ?? "without a status"}`;
-        reject(SSH_TRANSPORT_FAILURE.test(captured) ? new VpsHostUnreachableError(message) : new Error(message));
+        const error = DOCKER_SSH_TRANSPORT_FAILURE.test(captured) ? new VpsHostUnreachableError(message) : new Error(message);
+        reject(Object.assign(error, { exitCode: code, stdout: stdout.text(), stderr: stderr.text() }));
       });
     });
     try {

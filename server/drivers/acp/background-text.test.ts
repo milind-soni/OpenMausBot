@@ -16,7 +16,7 @@ import { GrokAgentDriver } from "./grok.ts";
 import { QwenAgentDriver } from "./qwen.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "testing", "fake-acp-cli.ts");
-const ENV_KEYS = ["FAKE_ACP_MODE", "FAKE_ACP_DUMP", "FAKE_ACP_TEXT_REPLY"];
+const ENV_KEYS = ["FAKE_ACP_MODE", "FAKE_ACP_DUMP", "FAKE_ACP_TEXT_REPLY", "FAKE_ACP_MODELS", "FAKE_ACP_MODEL_STICKS"];
 
 describe("ACP memory one-shot (generateMemoryText)", () => {
   let instance: ProviderInstance | undefined;
@@ -124,6 +124,47 @@ describe("ACP memory one-shot (generateMemoryText)", () => {
     const outcome = await pending;
     if (refused) expect(outcome).toEqual(expect.objectContaining({ message: expect.stringMatching(/tried to use a tool/) }));
     else expect(outcome).toBe("[]");
+  });
+
+  describe("on an engine that picks its model in the session", () => {
+    const support: AcpSupport = {
+      driverKind: "session-model-test", displayName: "Session model", models: { default: "m-default", options: [{ id: "m-default", label: "m-default" }, { id: "m-bot", label: "m-bot" }] },
+      defaultCli: FAKE_CLI, nativeSource: "session-model-test.acp", loginNote: "sign in", spawnArgs: () => [],
+      pickAuthMethod: () => null, authFailure: "continue", isAuthenticated: () => true, selectModel: { configId: "model" },
+    };
+    const promptedModels = () => readFileSync(`${process.env.FAKE_ACP_DUMP}.prompts.jsonl`, "utf8").trim().split("\n").map((line) => JSON.parse(line).model);
+    const botModel = (model: string) => ({ model, refused: new Set<string>(), onRefused: () => {} });
+
+    beforeEach(() => {
+      process.env.FAKE_ACP_TEXT_REPLY = "[]";
+      process.env.FAKE_ACP_MODELS = "m-default,m-bot";
+      process.env.FAKE_ACP_DUMP = join(scratch, "dump.json");
+    });
+
+    it("runs on the bot's own model, not the session's default, and books it there", async () => {
+      const usage: TextGenerationUsage[] = [];
+      await (await create(createAcpDriver(support))).generateMemoryText!("prompt", { fallback: botModel("m-bot"), onUsage: (row) => usage.push(row) });
+      expect(promptedModels()).toEqual(["m-bot"]);
+      expect(usage).toEqual([expect.objectContaining({ model: "m-bot" })]);
+    });
+
+    it("keeps the session's default when the session does not offer the bot's model", async () => {
+      await (await create(createAcpDriver(support))).generateMemoryText!("prompt", { fallback: botModel("m-gone") });
+      expect(promptedModels()).toEqual(["m-default"]);
+    });
+
+    it("stops before the prompt when the session stays on another model after the switch", async () => {
+      process.env.FAKE_ACP_MODEL_STICKS = "1";
+      const engine = await create(createAcpDriver(support));
+      await expect(engine.generateMemoryText!("prompt", { fallback: botModel("m-bot") })).rejects.toThrow("did not switch to m-bot (still m-default)");
+      expect(existsSync(`${process.env.FAKE_ACP_DUMP}.prompts.jsonl`)).toBe(false);
+    });
+
+    it("keeps the session's default when the engine can no longer route the bot's model", async () => {
+      const resolveTurnModel = () => { throw new Error("model is no longer configured"); };
+      await (await create(createAcpDriver({ ...support, resolveTurnModel }))).generateMemoryText!("prompt", { fallback: botModel("m-bot") });
+      expect(promptedModels()).toEqual(["m-default"]);
+    });
   });
 
   it("is absent on an engine that opts out", async () => {

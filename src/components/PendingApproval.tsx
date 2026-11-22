@@ -1,12 +1,12 @@
 import { memo, useState, type ReactNode } from "react";
-import { ChevronDown, Send, ShieldCheck, TriangleAlert } from "lucide-react";
+import { ChevronDown, Monitor, Send, ShieldCheck, TriangleAlert } from "lucide-react";
 import { useStore, type Bot, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t, tFromServer } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { SkillRequestPreview } from "@/components/SkillRequestPreview";
 import { titledCard, titledCardAction, toolLabel } from "./ApprovalCard";
-import { ASK_QUIET_ANSWER, ASK_QUIET_BUTTON, ASK_SECONDARY_BUTTON, AskDetail, AskHeader, askPrimary, type Asker } from "./AskCard";
+import { ASK_DARK_PRIMARY, ASK_QUIET_ANSWER, ASK_QUIET_BUTTON, ASK_SECONDARY_BUTTON, AskDetail, AskHeader, AskKickerRow, askPrimary, type Asker } from "./AskCard";
 import { approvalDetailText, outboundSummary } from "@/lib/approval-summary";
 import { reviewedSkillSha256 } from "../../shared/skill-request";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
@@ -174,6 +174,7 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
   const detailsId = `approval-details-${pending.requestId}`;
   const hidden = detail && detail !== inline ? detail : "";
   const skill = pending.message.card?.skillRequest;
+  const placeCard = Boolean(pending.message.card?.computerAsk);
   return (
     <div
       role="region"
@@ -186,12 +187,12 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
               ? t("approval.aria.pendingProfile")
               : t("approval.aria.pending")
       }
-      data-ask-card="approval" data-look="approval-card"
-      className="px-4 pb-3.5 pt-3"
+      data-ask-card="approval" data-look="approval-card" data-shell={placeCard ? "kicker" : undefined}
+      className={placeCard ? "px-4 pb-4 pt-3.5" : "px-4 pb-3.5 pt-3"}
     >
       <div className="flex min-w-0 items-center gap-2" aria-live="polite">
         <div className="min-w-0 flex-1">
-          {asker ? pending.message.inbox?.origin ? <CopyHeader message={pending.message} asker={asker} line={line} /> : <AskHeader asker={asker} line={line} /> : (
+          {placeCard ? <AskKickerRow kicker={{ icon: <Monitor />, label: line }} /> : asker ? pending.message.inbox?.origin ? <CopyHeader message={pending.message} asker={asker} line={line} /> : <AskHeader asker={asker} line={line} /> : (
             <div className="flex items-center gap-1.5 text-[13px] leading-[18px] text-ink-secondary">
               <ShieldCheck size={15} className="shrink-0" aria-hidden="true" /><span className="min-w-0 truncate">{line}</span>
             </div>
@@ -216,7 +217,7 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
           </button>
         )}
       </div>
-      {summary && <p dir="auto" className="mt-1.5 break-words text-[15px] font-medium leading-[22px] text-ink">{summary}</p>}
+      {summary && <p dir="auto" className={cn("break-words text-[15px] leading-[22px] text-ink", placeCard ? "mt-2 font-semibold" : "mt-1.5 font-medium")}>{summary}</p>}
       {inline && <AskDetail text={inline} mono label={t("approval.aria.reviewDetails")} />}
       {note && <p dir="auto" data-computer-ask-reason className="mt-1 break-words text-[13px] leading-[18px] text-ink-secondary">{note}</p>}
       {heldNote && (outbound ? (
@@ -301,7 +302,7 @@ export function PendingApprovalActions({
           {t("computerAsk.action.notNow")}
         </button>
         {turnOn.turnOn && (
-          <button key="allow" {...marked("allow")} type="button" onClick={() => decide("allow")} className={allow.className} style={allow.style}>{turnOn.turnOn}</button>
+          <button key="allow" {...marked("allow")} type="button" onClick={() => decide("allow")} className={ASK_DARK_PRIMARY}>{turnOn.turnOn}</button>
         )}
       </>
     );

@@ -145,7 +145,7 @@ describe("buildApplicationMenu", () => {
     },
   };
   ELECTRON_DEFAULTS.linux = ELECTRON_DEFAULTS.win32;
-  const roles = (items) => items.map((item) => (item.type === "separator" ? "-" : item.submenu ? roles(item.submenu) : item.role));
+  const roles = (items) => items.filter((item) => item.visible !== false).map((item) => (item.type === "separator" ? "-" : item.submenu ? roles(item.submenu) : item.role));
   const labelled = (items) => items.flatMap((item) => (item.type === "separator" ? [] : [item, ...(item.submenu ? labelled(item.submenu) : [])]));
 
   it.each(["darwin", "win32", "linux"])("writes out Electron's own role menus on %s, each item with a label", (platform) => {
@@ -157,6 +157,13 @@ describe("buildApplicationMenu", () => {
     const items = labelled(template);
     expect(items.filter((item) => typeof item.label !== "string" || !item.label)).toEqual([]);
     expect(items.filter((item) => item.role).length).toBeGreaterThan(15);
+  });
+
+  it.each([["win32", true], ["linux", true], ["darwin", false]])("zooms in with Ctrl+= too on %s, without a second visible Zoom In", (platform, extra) => {
+    const view = build(platform).find((entry) => entry.role === "viewMenu").submenu;
+    const zoomIn = view.filter((entry) => entry.role === "zoomIn");
+    expect(zoomIn.filter((entry) => entry.visible !== false)).toEqual([{ role: "zoomIn", label: "Zoom In" }]);
+    expect(zoomIn.filter((entry) => entry.accelerator === "CommandOrControl+=")).toEqual(extra ? [{ role: "zoomIn", label: "Zoom In", accelerator: "CommandOrControl+=", visible: false }] : []);
   });
 
   it("keeps Electron's English labels for every role item in English", () => {
