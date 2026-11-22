@@ -1,7 +1,7 @@
 // The full web app over the desktop's encrypted connection. A paired device that also holds a session of the web server
 // (`omb_sess_…`, issued by the server's own pairing) reaches every route that session may use, not only the phone app's.
 // The server decides what the session may do; the companion only carries the request, as a remote one.
-import { request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http";
+import { request as httpRequest, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 
 import { bearerToken } from "./devices.ts";
@@ -9,10 +9,19 @@ import type { E2EContext } from "./e2e/registry.ts";
 
 /** What a page sends to sign in with the server's pairing code; the reply is the session token it uses from then on. */
 const SERVER_PAIRING = "POST /api/auth/pair";
-/** Never forwarded: hop-by-hop headers, and everything that names a client or carries this machine's trust. */
+const HOP_BY_HOP = ["connection", "keep-alive", "proxy-connection", "te", "trailer", "transfer-encoding", "upgrade"];
+/** Hop-by-hop headers of one message (RFC 9110 section 7.6.1): the fixed ones and every name its Connection header lists. */
+function hopByHop(headers: IncomingHttpHeaders): Set<string> {
+  const names = new Set(HOP_BY_HOP);
+  for (const name of String(headers.connection ?? "").split(",")) {
+    const nominated = name.trim().toLowerCase();
+    if (nominated) names.add(nominated);
+  }
+  return names;
+}
+/** Never forwarded besides the hop-by-hop headers: everything that names a client or carries this machine's trust. */
 const DROPPED = new Set([
-  "host", "origin", "cookie", "connection", "keep-alive", "proxy-authorization", "proxy-connection", "te", "trailer",
-  "transfer-encoding", "upgrade",
+  "host", "origin", "cookie", "proxy-authorization",
   "x-forwarded-for", "x-forwarded-proto", "x-forwarded-host", "forwarded", "x-real-ip", "cf-connecting-ip",
   "true-client-ip", "x-client-ip",
 ]);
@@ -30,8 +39,9 @@ export function webSessionPeer(context: E2EContext | null, req: IncomingMessage)
  * its session) and keeps nothing the device wrote that names a client, a cookie or the desktop's own credentials. */
 export function webSessionHeaders(req: IncomingMessage, deviceId: string, upgrade = false): Record<string, string | string[]> {
   const out: Record<string, string | string[]> = {};
+  const hop = hopByHop(req.headers);
   for (const [name, value] of Object.entries(req.headers)) {
-    if (value === undefined || DROPPED.has(name) || name.startsWith("x-openmausbot-")) continue;
+    if (value === undefined || hop.has(name) || DROPPED.has(name) || name.startsWith("x-openmausbot-")) continue;
     out[name] = value;
   }
   out.host = HOST;
@@ -64,9 +74,12 @@ export function forwardWebSession(target: WebSessionTarget, deviceId: string, re
     { hostname: "127.0.0.1", port: target.harnessPort, path: req.url, method: req.method, headers: webSessionHeaders(req, deviceId) },
     (harness) => {
       clearTimeout(deadline);
-      const { connection: _connection, "keep-alive": _keepAlive, ...headers } = harness.headers;
+      const hop = hopByHop(harness.headers);
+      const headers = Object.fromEntries(Object.entries(harness.headers).filter(([name]) => !hop.has(name)));
       res.writeHead(harness.statusCode ?? 502, harness.statusMessage, headers);
       harness.pipe(res);
+      // pipe() ends the reply only on a complete body: a harness that drops mid-reply must not leave the device waiting.
+      harness.once("close", () => { if (!harness.complete) res.destroy(); });
     },
   );
   const { deadline, timedOut } = headersDeadline(upstream, target.headersTimeoutMs);
@@ -90,7 +103,6 @@ function responseHead(status: number, message: string, rawHeaders: string[], ski
   if (extra) lines.push(extra);
   return `${lines.join("\r\n")}\r\n\r\n`;
 }
-const REFUSED_UPGRADE_SKIP = new Set(["connection", "transfer-encoding", "keep-alive"]);
 
 export function forwardWebSessionUpgrade(target: WebSessionTarget, deviceId: string, req: IncomingMessage, socket: Duplex, head: Buffer): void {
   const upstream = httpRequest({ hostname: "127.0.0.1", port: target.harnessPort, path: req.url, method: req.method, headers: webSessionHeaders(req, deviceId, true) });
@@ -117,8 +129,9 @@ export function forwardWebSessionUpgrade(target: WebSessionTarget, deviceId: str
     clearTimeout(deadline);
     answered = true;
     // Refused: the body is read to its end, then the socket closes (no chunked framing is passed on).
-    socket.write(responseHead(harness.statusCode ?? 502, harness.statusMessage ?? "", harness.rawHeaders, REFUSED_UPGRADE_SKIP, "connection: close"));
+    socket.write(responseHead(harness.statusCode ?? 502, harness.statusMessage ?? "", harness.rawHeaders, hopByHop(harness.headers), "connection: close"));
     harness.pipe(socket);
+    harness.once("close", () => { if (!harness.complete) socket.destroy(); });
   });
   upstream.once("error", () => {
     clearTimeout(deadline);

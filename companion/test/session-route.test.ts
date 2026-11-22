@@ -1,4 +1,4 @@
-import { createServer, request, type IncomingHttpHeaders, type Server } from "node:http";
+import { createServer, request, type IncomingHttpHeaders, type IncomingMessage, type Server } from "node:http";
 import { once } from "node:events";
 import type { Duplex } from "node:stream";
 import { afterEach, expect, it } from "vitest";
@@ -42,6 +42,16 @@ async function rig(harnessPortOverride?: number) {
   let hungClosed!: () => void;
   const hung = new Promise<void>((resolve) => { hungClosed = resolve; });
   const harness = createServer(async (req, res) => {
+    if (req.url === "/api/cut") {
+      // The harness goes away after half its reply.
+      res.writeHead(200, { "content-length": "100" });
+      res.write("partial");
+      return setImmediate(() => req.socket.destroy());
+    }
+    if (req.url === "/api/hop") {
+      received.push({ method: req.method, url: req.url, headers: req.headers, body: "" });
+      return res.writeHead(200, { connection: "x-reply-hop", "x-reply-hop": "harness-local", "x-from": "server" }).end("ok");
+    }
     if (req.url === "/api/hang") {
       req.socket.once("close", hungClosed);
       return received.push({ method: req.method, url: req.url, headers: req.headers, body: "" });
@@ -53,6 +63,10 @@ async function rig(harnessPortOverride?: number) {
   });
   const wss = new WebSocketServer({ noServer: true });
   harness.on("upgrade", (req, socket, head) => {
+    if (req.url === "/api/cut-upgrade") {
+      socket.write("HTTP/1.1 403 Forbidden\r\nContent-Length: 100\r\n\r\npartial");
+      return setImmediate(() => socket.destroy());
+    }
     received.push({ method: req.method, url: req.url, headers: req.headers, body: "" });
     wss.handleUpgrade(req, socket, head, (ws) => ws.on("message", (data) => ws.send(`echo:${data}`)));
   });
@@ -176,4 +190,41 @@ it("says so when OpenMausBot is not running, for requests and live sockets", asy
   ws.once("error", () => {});
   const [, refused] = await once(ws, "unexpected-response");
   expect((refused as { statusCode: number }).statusCode).toBe(502);
+});
+
+it("drops the headers a Connection header names, both ways", async () => {
+  const { received, origin } = await rig();
+  const res = await send(await origin.connect(DEVICE), null, "GET", "/api/hop", {
+    authorization: "Bearer omb_sess_abc", connection: "x-hop-state", "x-hop-state": "device-local",
+  });
+  expect(res.status).toBe(200);
+  expect(received[0].headers["x-hop-state"]).toBeUndefined();
+  expect(received[0].headers.authorization).toBe("Bearer omb_sess_abc");
+  expect(res.headers["x-reply-hop"]).toBeUndefined();
+  expect(res.headers["x-from"]).toBe("server");
+});
+
+it("ends the device's reply when the harness drops mid-reply", async () => {
+  const { origin } = await rig();
+  const stream = await origin.connect(DEVICE);
+  const req = request({ method: "GET", path: "/api/cut", headers: { authorization: "Bearer omb_sess_abc" }, createConnection: () => stream as never });
+  req.once("error", () => {});
+  req.end();
+  const [res] = await once(req, "response") as [IncomingMessage];
+  res.once("error", () => {}); // "aborted": the reply ends short
+  res.resume();
+  await new Promise((resolve) => res.once("close", resolve));
+  expect(res.complete).toBe(false);
+});
+
+it("ends a refused live socket when the harness drops mid-reply", async () => {
+  const { origin } = await rig();
+  const stream = await origin.connect(DEVICE);
+  let text = "";
+  stream.on("data", (chunk) => { text += chunk; });
+  stream.once("error", () => {});
+  const ended = new Promise((resolve) => { stream.once("end", resolve); stream.once("close", resolve); });
+  stream.write("GET /api/cut-upgrade HTTP/1.1\r\nHost: desktop.invalid\r\nAuthorization: Bearer omb_sess_abc\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n");
+  await ended;
+  expect(text).toMatch(/^HTTP\/1\.1 403/);
 });
