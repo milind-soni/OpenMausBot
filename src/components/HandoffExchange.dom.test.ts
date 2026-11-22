@@ -82,7 +82,7 @@ const render = (message: Message, shown: Bot = maestro) => flushSync(() => root.
 })));
 const chip = () => host.querySelector<HTMLButtonElement>("[data-thread-chip]")!;
 const exchange = () => host.querySelector<HTMLElement>("[data-handoff-exchange]");
-const chatShown = () => !host.querySelector("[data-chat]")!.parentElement!.classList.contains("hidden");
+const chatShown = () => host.querySelector("[data-chat]") !== null;
 const named = (name: string) => exchange()!.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`)!;
 const rows = () => Array.from(exchange()!.querySelectorAll("[data-side]")).map((row) => `${row.getAttribute("data-side")}: ${row.textContent}`);
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));

@@ -31,34 +31,16 @@ export interface HandoffExchange {
  * panel): a hand-off line there opens the helper's thread instead. */
 export const OpenExchangeContext = createContext<((exchange: HandoffExchange) => void) | null>(null);
 
-/** The main chat column: the chat, or a hand-off's exchange in its place. The chat stays mounted underneath. */
+/** The main chat column: the chat, or a hand-off's exchange in its place. Back mounts the chat again, which opens
+ * where the person was reading. */
 export function HandoffExchangeHost({ bot, children }: { bot: Bot; children: ReactNode }) {
   const chat = `${bot.id}:${bot.threadId}`;
   const [open, setOpen] = useState<{ chat: string; exchange: HandoffExchange } | null>(null);
   if (open && open.chat !== chat) setOpen(null);
-  const chatRef = useRef<HTMLDivElement>(null);
-  const scrolled = useRef<number | null>(null);
-  const scroller = () => chatRef.current?.querySelector<HTMLElement>(".glass-scroller");
-  const openExchange = useCallback((exchange: HandoffExchange) => {
-    scrolled.current = scroller()?.scrollTop ?? null;
-    setOpen({ chat, exchange });
-  }, [chat]);
+  const openExchange = useCallback((exchange: HandoffExchange) => setOpen({ chat, exchange }), [chat]);
   const exchange = open?.chat === chat ? open.exchange : null;
-  // A hidden element loses its scroll offset in Chromium, so Back puts the chat where it was by hand.
-  useLayoutEffect(() => {
-    const list = scroller();
-    if (exchange || scrolled.current === null || !list) return;
-    list.scrollTop = scrolled.current;
-    scrolled.current = null;
-  }, [exchange]);
-  return (
-    <>
-      {exchange && <HandoffExchangeView key={exchange.threadId} exchange={exchange} onBack={() => setOpen(null)} />}
-      <div ref={chatRef} className={exchange ? "hidden" : "contents"}>
-        <OpenExchangeContext value={openExchange}>{children}</OpenExchangeContext>
-      </div>
-    </>
-  );
+  if (exchange) return <HandoffExchangeView key={exchange.threadId} exchange={exchange} onBack={() => setOpen(null)} />;
+  return <OpenExchangeContext value={openExchange}>{children}</OpenExchangeContext>;
 }
 
 export function HandoffExchangeView({ exchange: { asker, helper, threadId }, onBack }: { exchange: HandoffExchange; onBack: () => void }) {
