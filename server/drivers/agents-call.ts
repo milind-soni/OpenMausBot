@@ -12,8 +12,7 @@ import { peerName } from "../peer-roster.ts";
 import { callCardTool, CARD_TOOL_NAMES } from "./agents-call-cards.ts";
 import { callTriggerTool, TRIGGER_TOOL_NAMES } from "./agents-call-triggers.ts";
 import { catalogProfileFromEnv, fullInputSchema, SHARED_COMPUTER_TOOL_NAMES } from "./agents-catalog.ts";
-import { harnessClientFromEnv } from "./agents-client.ts";
-import type { HarnessClient, Json } from "./agents-client.ts";
+import { harnessClientFromEnv, type HarnessClient, type Json } from "./agents-client.ts";
 import { memorySearchText } from "./memory-search-text.ts";
 import { apiAnswer, boundedAgentResult } from "./agents-result.ts";
 import { callSkillAssignment, callSkillAssignmentList } from "./agents-skill-assignments.ts";
@@ -875,10 +874,9 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     return { text: `[${when} · ${where} · ${recallSpeaker(r)} · message ${messageId}]\n\n${String(r.text ?? "")}\n\n${note}` };
   }
   if (name === "skills_list") {
-    const query = new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID });
     const assignmentList = await callSkillAssignmentList(args, context);
     if (assignmentList) return assignmentList;
-    const r = await api(`/api/internal/skills?${query.toString()}`);
+    const r = await api(`/api/internal/skills?${new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID })}`);
     const skills = Array.isArray(r.skills) ? r.skills : [];
     const staged = Array.isArray(r.staged) ? r.staged : [];
     const words = typeof args.query === "string" ? args.query.trim() : "";
