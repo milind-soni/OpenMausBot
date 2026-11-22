@@ -44,9 +44,9 @@ where they belong instead of adding new places.
   screen; Advanced mode's composer shows the model under its field instead. Anything else goes in the bot panel, a menu or the command palette.
   A button that exists only while the conversation has what it shows (its
   pinned message) is fine: it opens a menu and is gone when there is nothing
-  to show. One exception: **New thread** sits at the end of the header in both
-  modes, because it opens a blank tab in the thread tabs right under the
-  header, and starting a thread is an everyday action people look for at the top.
+  to show. One exception: **New thread** (a plus, also ⌘T) sits at the end of the
+  header in both modes, because starting a thread is an everyday action people
+  look for at the top.
 - **No count badges and no "needs you" summaries** above the sidebar list or
   in the header. A status mark on the row it belongs to is fine.
 - **Settings for one bot live in its bot panel.** App-wide settings live in
@@ -342,8 +342,9 @@ on. Simple is the default for new installs.
   place in both modes. Advanced may show more rows or more detail.
   One exception: where Advanced already shows something in place (a bot's
   threads as a tree under its row), Simple may offer a shortcut to the same
-  thing there instead of a second copy of it: a menu that opens on a click
-  of a small chevron, never on hover. A second: Advanced mode's composer puts
+  thing there instead of a second copy of it: a menu, or the threads unfolded
+  under the bot's row, that opens on a click of a small chevron, never on
+  hover. A second: Advanced mode's composer puts
   the field on its own line with a footer row under it, and the model and
   effort picker sits in that footer, next to the + menu both modes share.
 - **Switching modes never loses data.**

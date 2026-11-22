@@ -7120,18 +7120,9 @@
   "imageGen.higgsfield.open": "Otwórz Wtyczki",
   "inbox.settled.title": "Zakończone",
   "inbox.settled.read": "Przeczytane",
-  "threadTabs.aria": "Wątki z {name}",
-  "threadTabs.main": "Główny",
-  "threadTabs.hide": "Ukryj kartę",
-  "threadTabs.hideNamed": "Ukryj {title}",
-  "threadTabs.hidden": "Ukryto {title}. Jest w Wszystkie wątki.",
-  "threadTabs.yours": "Twoje wątki",
-  "threadTabs.onItsOwn": "Rozpoczęte samodzielnie",
-  "threadTabs.open": "Otwarty",
-  "threadTabs.hiddenState": "Ukryty",
-  "threadTabs.routine": "Rutyna",
-  "threadTabs.rename": "Zmień nazwę",
-  "threadTabs.renameAria": "Nazwa wątku",
-  "threadTabs.renameHint": "Kliknij dwukrotnie, aby zmienić nazwę",
-  "threadTabs.remember": "Co tu pamiętasz?"
+  "sidebar.threads.hidden": "Wątek ukryty",
+  "sidebar.threads.hide": "Ukryj {title}",
+  "sidebar.threads.hideShort": "Ukryj",
+  "sidebar.threads.running": "+{count} w toku",
+  "sidebar.threads.more": "jeszcze {count}"
 }

@@ -11485,18 +11485,9 @@
   "chat.handoffExchange.loading": "Loading the conversation…",
   "chat.handoffExchange.failed": "Couldn't load the conversation.",
   "chat.handoffExchange.empty": "No messages yet.",
-  "threadTabs.aria": "Threads with {name}",
-  "threadTabs.main": "Main",
-  "threadTabs.hide": "Hide tab",
-  "threadTabs.hideNamed": "Hide {title}",
-  "threadTabs.hidden": "{title} hidden. It's under All threads.",
-  "threadTabs.yours": "Your threads",
-  "threadTabs.onItsOwn": "Started on its own",
-  "threadTabs.open": "Open",
-  "threadTabs.hiddenState": "Hidden",
-  "threadTabs.routine": "Routine",
-  "threadTabs.rename": "Rename",
-  "threadTabs.renameAria": "Thread name",
-  "threadTabs.renameHint": "Double-click to rename",
-  "threadTabs.remember": "What do you remember here?"
+  "sidebar.threads.hidden": "Thread hidden",
+  "sidebar.threads.hide": "Hide {title}",
+  "sidebar.threads.hideShort": "Hide",
+  "sidebar.threads.running": "+{count} running",
+  "sidebar.threads.more": "{count} more"
 }

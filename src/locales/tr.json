@@ -5919,18 +5919,9 @@
   "imageGen.higgsfield.open": "Eklentileri aç",
   "inbox.settled.title": "Tamamlandı",
   "inbox.settled.read": "Okundu",
-  "threadTabs.aria": "{name} ile konular",
-  "threadTabs.main": "Ana",
-  "threadTabs.hide": "Sekmeyi gizle",
-  "threadTabs.hideNamed": "{title} gizle",
-  "threadTabs.hidden": "{title} gizlendi. Tüm konular altında.",
-  "threadTabs.yours": "Konuların",
-  "threadTabs.onItsOwn": "Kendiliğinden başlayanlar",
-  "threadTabs.open": "Açık",
-  "threadTabs.hiddenState": "Gizli",
-  "threadTabs.routine": "Rutin",
-  "threadTabs.rename": "Yeniden adlandır",
-  "threadTabs.renameAria": "Konu adı",
-  "threadTabs.renameHint": "Yeniden adlandırmak için çift tıkla",
-  "threadTabs.remember": "Burada neyi hatırlıyorsun?"
+  "sidebar.threads.hidden": "Konu gizlendi",
+  "sidebar.threads.hide": "{title} gizle",
+  "sidebar.threads.hideShort": "Gizle",
+  "sidebar.threads.running": "+{count} çalışıyor",
+  "sidebar.threads.more": "{count} tane daha"
 }

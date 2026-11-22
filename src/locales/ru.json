@@ -7174,18 +7174,9 @@
   "imageGen.higgsfield.open": "Открыть «Плагины»",
   "inbox.settled.title": "Завершено",
   "inbox.settled.read": "Прочитано",
-  "threadTabs.aria": "Ветки с {name}",
-  "threadTabs.main": "Главная",
-  "threadTabs.hide": "Скрыть вкладку",
-  "threadTabs.hideNamed": "Скрыть {title}",
-  "threadTabs.hidden": "{title} скрыта. Она в разделе Все ветки.",
-  "threadTabs.yours": "Ваши ветки",
-  "threadTabs.onItsOwn": "Начатые сами",
-  "threadTabs.open": "Открыта",
-  "threadTabs.hiddenState": "Скрыта",
-  "threadTabs.routine": "Рутина",
-  "threadTabs.rename": "Переименовать",
-  "threadTabs.renameAria": "Название ветки",
-  "threadTabs.renameHint": "Дважды щёлкните, чтобы переименовать",
-  "threadTabs.remember": "Что ты здесь помнишь?"
+  "sidebar.threads.hidden": "Ветка скрыта",
+  "sidebar.threads.hide": "Скрыть {title}",
+  "sidebar.threads.hideShort": "Скрыть",
+  "sidebar.threads.running": "+{count} в работе",
+  "sidebar.threads.more": "ещё {count}"
 }

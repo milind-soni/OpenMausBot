@@ -7957,18 +7957,9 @@
   "imageGen.higgsfield.open": "プラグインを開く",
   "inbox.settled.title": "完了",
   "inbox.settled.read": "既読",
-  "threadTabs.aria": "{name} とのスレッド",
-  "threadTabs.main": "メイン",
-  "threadTabs.hide": "タブを隠す",
-  "threadTabs.hideNamed": "{title} を隠す",
-  "threadTabs.hidden": "{title} を隠しました。すべてのスレッドにあります。",
-  "threadTabs.yours": "あなたのスレッド",
-  "threadTabs.onItsOwn": "自動で始まったもの",
-  "threadTabs.open": "開いている",
-  "threadTabs.hiddenState": "非表示",
-  "threadTabs.routine": "ルーティン",
-  "threadTabs.rename": "名前を変更",
-  "threadTabs.renameAria": "スレッド名",
-  "threadTabs.renameHint": "ダブルクリックで名前を変更",
-  "threadTabs.remember": "ここで何を覚えていますか？"
+  "sidebar.threads.hidden": "スレッドを非表示にしました",
+  "sidebar.threads.hide": "{title} を非表示",
+  "sidebar.threads.hideShort": "非表示",
+  "sidebar.threads.running": "+{count} 件実行中",
+  "sidebar.threads.more": "他 {count} 件"
 }

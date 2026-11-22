@@ -10108,18 +10108,9 @@
   "imageGen.higgsfield.notConnected": "未连接，或登录已失效",
   "imageGen.higgsfield.help": "{app} 使用你在“插件”中登录的 Higgsfield 账号生成图片。每张图片都会消耗该账号的额度。",
   "imageGen.higgsfield.open": "打开插件",
-  "threadTabs.aria": "与 {name} 的对话",
-  "threadTabs.main": "主要",
-  "threadTabs.hide": "隐藏标签页",
-  "threadTabs.hideNamed": "隐藏 {title}",
-  "threadTabs.hidden": "已隐藏 {title}。可在全部对话中找到。",
-  "threadTabs.yours": "你的对话",
-  "threadTabs.onItsOwn": "自行开始的",
-  "threadTabs.open": "已打开",
-  "threadTabs.hiddenState": "已隐藏",
-  "threadTabs.routine": "例行任务",
-  "threadTabs.rename": "重命名",
-  "threadTabs.renameAria": "对话名称",
-  "threadTabs.renameHint": "双击以重命名",
-  "threadTabs.remember": "你在这里记得什么？"
+  "sidebar.threads.hidden": "已隐藏对话",
+  "sidebar.threads.hide": "隐藏 {title}",
+  "sidebar.threads.hideShort": "隐藏",
+  "sidebar.threads.running": "+{count} 个运行中",
+  "sidebar.threads.more": "还有 {count} 个"
 }

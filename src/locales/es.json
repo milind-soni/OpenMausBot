@@ -6421,18 +6421,9 @@
   "imageGen.higgsfield.open": "Abrir Plugins",
   "inbox.settled.title": "Terminado",
   "inbox.settled.read": "Leído",
-  "threadTabs.aria": "Hilos con {name}",
-  "threadTabs.main": "Principal",
-  "threadTabs.hide": "Ocultar pestaña",
-  "threadTabs.hideNamed": "Ocultar {title}",
-  "threadTabs.hidden": "{title} oculto. Está en Todos los hilos.",
-  "threadTabs.yours": "Tus hilos",
-  "threadTabs.onItsOwn": "Iniciados por su cuenta",
-  "threadTabs.open": "Abierto",
-  "threadTabs.hiddenState": "Oculto",
-  "threadTabs.routine": "Rutina",
-  "threadTabs.rename": "Renombrar",
-  "threadTabs.renameAria": "Nombre del hilo",
-  "threadTabs.renameHint": "Doble clic para renombrar",
-  "threadTabs.remember": "¿Qué recuerdas aquí?"
+  "sidebar.threads.hidden": "Hilo oculto",
+  "sidebar.threads.hide": "Ocultar {title}",
+  "sidebar.threads.hideShort": "Ocultar",
+  "sidebar.threads.running": "+{count} en curso",
+  "sidebar.threads.more": "{count} más"
 }

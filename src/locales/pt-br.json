@@ -11485,18 +11485,9 @@
   "chat.handoffExchange.loading": "Carregando a conversa…",
   "chat.handoffExchange.failed": "Não foi possível carregar a conversa.",
   "chat.handoffExchange.empty": "Nenhuma mensagem ainda.",
-  "threadTabs.aria": "Conversas com {name}",
-  "threadTabs.main": "Principal",
-  "threadTabs.hide": "Ocultar aba",
-  "threadTabs.hideNamed": "Ocultar {title}",
-  "threadTabs.hidden": "{title} oculta. Está em Todas as conversas.",
-  "threadTabs.yours": "Suas conversas",
-  "threadTabs.onItsOwn": "Iniciadas sozinhas",
-  "threadTabs.open": "Aberta",
-  "threadTabs.hiddenState": "Oculta",
-  "threadTabs.routine": "Rotina",
-  "threadTabs.rename": "Renomear",
-  "threadTabs.renameAria": "Nome da conversa",
-  "threadTabs.renameHint": "Clique duas vezes para renomear",
-  "threadTabs.remember": "O que você lembra aqui?"
+  "sidebar.threads.hidden": "Conversa oculta",
+  "sidebar.threads.hide": "Ocultar {title}",
+  "sidebar.threads.hideShort": "Ocultar",
+  "sidebar.threads.running": "+{count} em andamento",
+  "sidebar.threads.more": "mais {count}"
 }

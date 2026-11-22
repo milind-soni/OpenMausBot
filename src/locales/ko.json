@@ -7650,18 +7650,9 @@
   "imageGen.higgsfield.open": "플러그인 열기",
   "inbox.settled.title": "완료됨",
   "inbox.settled.read": "읽음",
-  "threadTabs.aria": "{name}의 스레드",
-  "threadTabs.main": "메인",
-  "threadTabs.hide": "탭 숨기기",
-  "threadTabs.hideNamed": "{title} 숨기기",
-  "threadTabs.hidden": "{title}을(를) 숨겼어요. 모든 스레드에 있어요.",
-  "threadTabs.yours": "내 스레드",
-  "threadTabs.onItsOwn": "스스로 시작됨",
-  "threadTabs.open": "열림",
-  "threadTabs.hiddenState": "숨김",
-  "threadTabs.routine": "루틴",
-  "threadTabs.rename": "이름 바꾸기",
-  "threadTabs.renameAria": "스레드 이름",
-  "threadTabs.renameHint": "두 번 클릭해 이름 바꾸기",
-  "threadTabs.remember": "여기서 무엇을 기억하나요?"
+  "sidebar.threads.hidden": "스레드를 숨겼어요",
+  "sidebar.threads.hide": "{title} 숨기기",
+  "sidebar.threads.hideShort": "숨기기",
+  "sidebar.threads.running": "+{count}개 실행 중",
+  "sidebar.threads.more": "{count}개 더"
 }

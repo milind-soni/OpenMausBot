@@ -6986,18 +6986,9 @@
   "imageGen.higgsfield.open": "Apri Plugin",
   "inbox.settled.title": "Completato",
   "inbox.settled.read": "Letto",
-  "threadTabs.aria": "Conversazioni con {name}",
-  "threadTabs.main": "Principale",
-  "threadTabs.hide": "Nascondi scheda",
-  "threadTabs.hideNamed": "Nascondi {title}",
-  "threadTabs.hidden": "{title} nascosta. La trovi in Tutte le conversazioni.",
-  "threadTabs.yours": "Le tue conversazioni",
-  "threadTabs.onItsOwn": "Avviate da sole",
-  "threadTabs.open": "Aperta",
-  "threadTabs.hiddenState": "Nascosta",
-  "threadTabs.routine": "Routine",
-  "threadTabs.rename": "Rinomina",
-  "threadTabs.renameAria": "Nome della conversazione",
-  "threadTabs.renameHint": "Doppio clic per rinominare",
-  "threadTabs.remember": "Cosa ricordi qui?"
+  "sidebar.threads.hidden": "Conversazione nascosta",
+  "sidebar.threads.hide": "Nascondi {title}",
+  "sidebar.threads.hideShort": "Nascondi",
+  "sidebar.threads.running": "+{count} in corso",
+  "sidebar.threads.more": "altre {count}"
 }

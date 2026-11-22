@@ -4101,18 +4101,9 @@
   "chat.handoffExchange.loading": "Unterhaltung wird geladen…",
   "chat.handoffExchange.failed": "Die Unterhaltung konnte nicht geladen werden.",
   "chat.handoffExchange.empty": "Noch keine Nachrichten.",
-  "threadTabs.aria": "Threads mit {name}",
-  "threadTabs.main": "Haupt",
-  "threadTabs.hide": "Tab ausblenden",
-  "threadTabs.hideNamed": "{title} ausblenden",
-  "threadTabs.hidden": "{title} ausgeblendet. Zu finden unter Alle Threads.",
-  "threadTabs.yours": "Deine Threads",
-  "threadTabs.onItsOwn": "Von selbst gestartet",
-  "threadTabs.open": "Offen",
-  "threadTabs.hiddenState": "Ausgeblendet",
-  "threadTabs.routine": "Routine",
-  "threadTabs.rename": "Umbenennen",
-  "threadTabs.renameAria": "Thread-Name",
-  "threadTabs.renameHint": "Zum Umbenennen doppelklicken",
-  "threadTabs.remember": "Was merkst du dir hier?"
+  "sidebar.threads.hidden": "Thread ausgeblendet",
+  "sidebar.threads.hide": "{title} ausblenden",
+  "sidebar.threads.hideShort": "Ausblenden",
+  "sidebar.threads.running": "+{count} laufen",
+  "sidebar.threads.more": "{count} weitere"
 }
