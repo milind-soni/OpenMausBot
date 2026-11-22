@@ -84,4 +84,14 @@ describe("a streaming reply fades in what arrives", () => {
     draw("Streaming for someone who asked for less motion ");
     expect(take()).toEqual([]);
   });
+
+  it("leaves the reply still when the app is set to less motion, whatever the system asks", () => {
+    document.documentElement.dataset.reducedMotion = "true";
+    try {
+      draw("Streaming with the app set to less motion ");
+      expect(take()).toEqual([]);
+    } finally {
+      delete document.documentElement.dataset.reducedMotion;
+    }
+  });
 });

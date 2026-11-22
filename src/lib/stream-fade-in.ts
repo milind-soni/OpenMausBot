@@ -2,13 +2,12 @@
 // fade lives on the elements' animations, never in the markup, so the streamed page stays the page the saved message
 // draws.
 import { useLayoutEffect, useRef, type RefObject } from "react";
+import { reducedMotion } from "@/lib/onboarding";
 
 /** What fades in: the reply's top-level blocks (a list by its items), list items and table rows. */
 const STREAM_FADE_TARGETS = ":scope > :not(ul, ol), li, tr";
 const FADE: Keyframe[] = [{ opacity: 0 }, { opacity: 1 }];
 const FADE_TIMING: KeyframeAnimationOptions = { duration: 320, easing: "cubic-bezier(0.22, 1, 0.36, 1)" };
-
-const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
 /** Footnotes sit at the reply's end and a long table draws only the rows in view, so neither keeps page order. */
 const keepsPageOrder = (target: Element) => !target.closest("[data-footnotes], [data-virtual]");
