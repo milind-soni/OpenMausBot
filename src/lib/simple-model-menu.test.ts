@@ -342,6 +342,25 @@ describe("a model the organization turned off", () => {
   });
 });
 
+describe("custom ACP engine with a discovered catalog", () => {
+  // A customAcp engine (e.g. Devin) ships a discovered catalog whose options are NOT marked
+  // `custom`; the menu must list them instead of collapsing to hand-added models only.
+  const devin = engine("devin", "customAcp", "Devin", "custom", [
+    { id: "agent-default", label: "Agent default", custom: true },
+    { id: "swe-2-high", label: "SWE-2", variants: [{ id: "medium", label: "Medium" }, { id: "high", label: "High" }, { id: "max", label: "Max" }] },
+    { id: "deepseek-v4-1-flash-high", label: "DeepSeek V4.1 Flash" },
+  ]);
+  const devinSelection: ModelSelection = { instanceId: "devin", model: "swe-2-high", variant: "high" };
+
+  it("lists discovered catalog models alongside hand-added ones", () => {
+    const built = menu([devin], { selection: devinSelection, bot: { name: "Pepper", selection: devinSelection } });
+    const labels = rows(built);
+    expect(labels).toContain("SWE-2");
+    expect(labels).toContain("DeepSeek V4.1 Flash");
+    expect(labels).toContain("Agent default");
+  });
+});
+
 describe("custom Claude endpoint", () => {
   // The driver marks every endpoint catalog option `custom`; the picker keeps exactly those.
   const endpoint = claude({ access: "custom" }, [

@@ -8,11 +8,12 @@ import { visibleMessages, currentTaskBot, type Bot, type Group, type InstanceInf
 import { cn } from "@/lib/cn";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { useMenuMotion } from "./MenuMotion";
-import { ELEVATED_CARD, ELEVATED_FLOAT } from "./elevated";
+import { ELEVATED_CARD, ELEVATED_COMPOSER, ELEVATED_FLOAT } from "./elevated";
 import { uploadDraftImage } from "@/lib/composer-uploads";
 import { intakeFilesWithNotice } from "@/lib/attach-notice";
 import { activeLocale, t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
+import { isDictationToggle, isMacPlatform } from "@/lib/keyboard-shortcuts";
 import { imeComposing, sendKeyLabel, sendsMessage, useSendKey } from "@/lib/send-key";
 import { alternateSend, alternateSendLabel, useFollowUpDefault } from "@/lib/follow-up"; import { followUpChoices, resolveFollowUp, type FollowUp } from "../../shared/follow-up";
 import {
@@ -227,6 +228,7 @@ export function Composer({
     [text, editText, editAttachments],
   );
   const { recording, ready: micReady, speechError, toggle: toggleMic, stop: stopDictation } = useComposerDictation({ draftId, text, onText: editText });
+  const micShown = !locked && !busy && micReady;
   const [caret, setCaret] = useState(0);
   const shellRef = useRef<HTMLDivElement>(null);
   const tall = useTallPill(shellRef, simpleDock);
@@ -778,7 +780,7 @@ export function Composer({
             data-composer-backdrop
             className={cn("pointer-events-none absolute -left-4 -right-4 bg-app", advanced ? "-bottom-3 top-1/2" : cn("top-0", simpleDock ? "-bottom-4" : "-bottom-3"))}
           />
-        <div ref={shellRef} data-tour="composer" data-look="composer" data-multiline={multiline ? "" : undefined} className={cn("@container/composer relative z-[1]", singleRow ? "flex items-end gap-2" : simpleDock ? cn(SIMPLE_COMPOSER, multiline ? "rounded-[18px]" : "rounded-[22px]") : cn("rounded-[18px] px-2 pb-2 pt-2.5", ELEVATED_FLOAT))}>
+        <div ref={shellRef} data-tour="composer" data-look="composer" data-multiline={multiline ? "" : undefined} className={cn("@container/composer relative z-[1]", singleRow ? "flex items-end gap-2" : simpleDock ? cn(SIMPLE_COMPOSER, multiline ? "rounded-[18px]" : "rounded-[22px]") : cn("rounded-[18px] px-2 pb-2 pt-2.5", ELEVATED_COMPOSER))}>
         {singleRow && !locked && (
           <div className="flex shrink-0 items-center">
             <PhonePlus
@@ -877,6 +879,11 @@ export function Composer({
                 return;
               }
             }
+            if (micShown && isDictationToggle(e.nativeEvent)) {
+              e.preventDefault();
+              if (!e.nativeEvent.repeat) toggleMic();
+              return;
+            }
             if (onClearReply && escapeCancelsReply(e.nativeEvent, { replying: Boolean(replyTo), recording })) {
               e.preventDefault();
               onClearReply();
@@ -943,7 +950,7 @@ export function Composer({
           </button>
         )}
         {!locked && <ComposerContextMenu bot={bot} group={group} members={members} className={cn(simpleDock ? "size-7" : "size-8", advanced || singleRow ? "text-ink-secondary hover:bg-raised hover:text-ink" : SIMPLE_CONTROL)} />}
-        {!locked && !busy && micReady && (
+        {micShown && (
           <button
             onClick={toggleMic}
             aria-label={recording ? t("composer.dictation.stop") : t("composer.dictation.start")}
@@ -954,7 +961,7 @@ export function Composer({
                 ? "animate-pulse bg-danger/20 text-danger"
                 : advanced || singleRow ? "text-ink-secondary hover:bg-raised hover:text-ink" : SIMPLE_CONTROL,
             )}
-            title={recording ? t("composer.dictation.stopHint") : t("composer.dictation.hint")}
+            title={recording ? t("composer.dictation.stopHint") : t("composer.dictation.hintKey", { keys: isMacPlatform() ? "⌘D" : "Ctrl+D" })}
           >
             <Mic size={16} className="[&_rect]:fill-current" />
           </button>

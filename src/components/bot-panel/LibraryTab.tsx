@@ -5,7 +5,7 @@ import { t } from "@/lib/i18n";
 import { usePageOpener } from "@/lib/page-open";
 import { shortPath } from "@/lib/short-path";
 import { SIDEBAR_INLINE, useMediaQuery } from "@/lib/use-media-query";
-import { useStore, visibleMessages, type Bot, type Message } from "@/state/store";
+import { visibleMessages, type Bot, type Message } from "@/state/store";
 import { AttachedFileChip } from "../AttachmentPreview";
 import { recentChangedFiles, sharedFileReferences } from "../ComputerFilesPane";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
@@ -14,6 +14,7 @@ import type { SimplePageId } from "./page-registry";
 import { Card, CardLabel, NavRow } from "./rows";
 import { panelMemoryNotes } from "./memory-notes";
 import { useMemoryDoc } from "./use-memory-doc";
+import { useStoreDispatch } from "@/state/store-select";
 
 export interface LibraryItems {
   pages: Array<{ messageId: string; title: string; url: string }>;
@@ -50,7 +51,7 @@ export function libraryItems(bot: Bot, messages: readonly Message[] = visibleMes
 const fileName = (path: string) => path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
 
 export function LibraryTab({ bot, onOpen }: { bot: Bot; onOpen: (page: SimplePageId) => void }) {
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   const { capabilities } = useDesktopCapabilities();
   const openPage = usePageOpener();
   const phone = !useMediaQuery(SIDEBAR_INLINE, true);

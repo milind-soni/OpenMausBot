@@ -1,4 +1,4 @@
-import { launchRecord } from "./launch-record-main.mjs"; import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, Tray, WebContentsView, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, net, powerMonitor, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, utilityProcess, nativeTheme } from "electron";
+import { launchRecord } from "./launch-record-main.mjs"; import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, Tray, WebContentsView, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, net, powerMonitor, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, utilityProcess, nativeTheme } from "electron"; import { createBrowserPanes, fromAppWindow } from "./browser-pane-main.mjs";
 import { createRequire } from "node:module";
 import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -156,7 +156,7 @@ cloudEntry.fromLaunch(process.argv); const teamLinks = installTeamJoin({ argv: p
 let pendingPackageInstallUrl = pendingOrganizationEntry ? null : packageUrlFromCommandLine(process.argv);
 let pendingChatLink = pendingOrganizationEntry ? null : chatLinkFromCommandLine(process.argv);
 let organizationEntryReady = false;
-let mainWindow = null;
+let mainWindow = null; const browserPanes = createBrowserPanes({ createView: (options) => new WebContentsView(options), createPopup: (options) => new BrowserWindow(options), createParking: () => new BrowserWindow({ show: false, width: 1280, height: 800, skipTaskbar: true, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } }), keepsRunning: () => process.platform === "darwin" || hiddenStart || alwaysOnHome.on(), quitting: () => desktopShutdownStarted, fromPartition: (name) => session.fromPartition(name), owner: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null), chromeVersion: process.versions.chrome, log: (line) => slog(line) });
 const serverUnavailableWindows = new WeakSet();
 let unreadCount = 0;
 let unreadOverlayIcon;
@@ -1127,7 +1127,7 @@ async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmen
     OMB_CREDENTIAL_STORE: credentialStoreUnavailable ? "unavailable" : "ok",
     ...workspaceCredentialEnv(secureCredentials),
   });
-  delete childEnv.OMB_BROWSER_CONNECTION;
+  delete childEnv.OMB_BROWSER_CONNECTION; if (app.isPackaged) delete childEnv.OMB_TEST_COOKIE_KEY; // a live test's fixture key; never a packaged app's
   delete childEnv.OMB_SERVER_COMPILE_CACHE;
   if (compileCacheDir) childEnv.OMB_SERVER_COMPILE_CACHE = compileCacheDir;
   slog(`fork ${entry} port=${port}`); launchRecord.mark("serverForked");
@@ -1148,7 +1148,7 @@ async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmen
   proc.on("message", (message) => {
     if (!serverSupervisor.isCurrent(proc)) return;
     try {
-      if (trustedApprovalMode.receive(proc, message)) return;
+      if (browserPanes.receive(proc, message) || trustedApprovalMode.receive(proc, message)) return;
       if (managedDesktopRelay.receive(proc, message)) return;
       if (orgLibrary?.receive(message)) return;
       if (receivePhoneSecretSave(proc, message) || oneHome.receive(proc, message) || tailnetShare.receive(message)) return;
@@ -1160,7 +1160,7 @@ async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmen
     slog(`spawned pid=${proc.pid}`); launchAnalytics.stage("server_spawned"); launchRecord.mark("serverSpawned");
     if (!serverSupervisor.isCurrent(proc)) return;
     syncDesktopMutationToken(proc); void tailnetShare.attach(proc, port, companionSettings().routes.tailscale);
-    syncPhoneSecretKey(proc); grantLocalComputer(proc, (child) => serverSupervisor.isCurrent(child));
+    syncPhoneSecretKey(proc); grantLocalComputer(proc, (child) => serverSupervisor.isCurrent(child)); browserPanes.attach(proc);
   });
   let exited = false;
   proc.once("exit", (code) => {
@@ -1980,7 +1980,7 @@ function createWindow({ deferNavigation = false } = {}) {
   applyUnreadBadge(win);
   if (restored.maximized && !startupScreen) win.maximize();
   win.once("closed", () => {
-    if (mainWindow === win) mainWindow = null;
+    if (mainWindow === win) { mainWindow = null; browserPanes.windowClosed(win); }
   });
 
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -2298,7 +2298,7 @@ ipcMain.handle("desktop-workspace:layout", localOnly("desktop-workspace:layout",
   const manager = desktopWorkspaceForEvent(event);
   if (!manager) return false;
   return manager.layout(items);
-}));
+})); ipcMain.handle("browser-pane:show", localOnly("browser-pane:show", (event, input) => { if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error("The browser pane belongs to the main app window"); return browserPanes.show(input); })); ipcMain.handle("browser-pane:hold", localOnly("browser-pane:hold", (event, input) => { fromAppWindow(event, mainWindow); return browserPanes.hold(input); })); ipcMain.handle("browser-cookies:sources", localOnly("browser-cookies:sources", (event) => { fromAppWindow(event, mainWindow); return browserPanes.cookieSources(); })); ipcMain.handle("browser-cookies:offer", localOnly("browser-cookies:offer", (event, input) => { fromAppWindow(event, mainWindow); return browserPanes.cookieOffer(input); })); ipcMain.handle("browser-cookies:import", localOnly("browser-cookies:import", (event, input) => { fromAppWindow(event, mainWindow); return browserPanes.importCookies(input); }));
 ipcMain.handle("desktop-workspace:set-interactive", localOnly("desktop-workspace:set-interactive", (event, contextId) => {
   const manager = desktopWorkspaceForEvent(event);
   if (!manager) return contextId == null;
@@ -2343,7 +2343,7 @@ ipcMain.handle("desktop:relaunch", localOnly("desktop:relaunch", (event) => {
   return true;
 }));
 
-const talk = installTalk({ ipcMain, localOnly, localOrHome, BrowserWindow, appleSpeech: nativeActions.appleSpeech,
+const talk = installTalk({ ipcMain, localOnly, localOrHome, BrowserWindow, appleSpeech: nativeActions.appleSpeech, windowsSpeech: nativeActions.windowsSpeech,
   speech: { start: startSpeech, stop: stopSpeech, finish: finishSpeech, busy: speechBusy }, packaged: app.isPackaged, devUrl: DEV_URL, nativeImage, iconPath: APP_ICON, openLink: queueChatLink, reveal: revealForLink, log: slog, t: nativeT });
 
 ipcMain.handle("companion:state", localOnly("companion:state", () => desktopCompanionState()));
@@ -3067,7 +3067,7 @@ process.once("SIGINT", requestSignalQuit);
 process.once("SIGTERM", requestSignalQuit);
 
 app.on("before-quit", (e) => {
-  talk.close();
+  talk.close(); browserPanes.closeAll();
   desktopShutdownStarted = true;
   startupScreen?.dispose();
   companyBackupSchedule?.close();
@@ -3087,7 +3087,7 @@ app.on("before-quit", (e) => {
   try {
     desktopCompanionRelay?.close?.();
   } catch {}
-  if (nativeActions.appleSpeech) stopSpeech();
+  if (nativeActions.appleSpeech || nativeActions.windowsSpeech) stopSpeech();
   const ownedHelperCleanup = Promise.race([
     Promise.all([
       stopCua().catch(() => {}),

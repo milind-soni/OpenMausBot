@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { api, useStore, type ConfigStatus } from "@/state/store";
+import { api, type ConfigStatus } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { avatarMarks } from "@/lib/avatar-marks";
 import { saveTeamProfile } from "@/lib/own-profile";
@@ -11,6 +11,7 @@ import { EveryBotRules } from "./EveryBotRules";
 import { SETTINGS_INPUT, SettingsField } from "./SettingsPrimitives";
 import { profileInitials } from "./SidebarProfileMenu";
 import { User } from "lucide-react";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 const PHOTO_MIN_SIDE = 64;
 const PHOTO_MAX_SIDE = 8192;
@@ -65,7 +66,7 @@ function croppedPhoto(file: File, zoom: number): Promise<File> {
 
 /** The person's own picture beside their name in the sidebar. Kept in the app's attachment store; "" removes it. */
 function ProfilePhoto({ initials }: { initials: string }) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const avatarUrl = state.config?.profile?.avatarUrl ?? "";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -154,7 +155,7 @@ function ProfilePhoto({ initials }: { initials: string }) {
 }
 
 export function ProfileFields() {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const [name, setName] = useState(state.config?.profile?.name ?? "");
   const [email, setEmail] = useState(state.config?.profile?.email ?? "");
   useEffect(() => {
@@ -219,7 +220,7 @@ function ProfileAvatar({ profile }: { profile?: { name?: string; email?: string;
 }
 
 export function ProfileSummaryRow() {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
   const [editing, setEditing] = useState(false);
   const profile = state.config?.profile;
   const name = profile?.name?.trim() ?? "";

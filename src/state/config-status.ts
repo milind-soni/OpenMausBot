@@ -210,6 +210,8 @@ export interface BrowserEngineSummary {
   /** The browser the engine starts, e.g. "Google Chrome 153 (installed)", or while Chrome for Testing downloads,
    * "Chrome for Testing 153.0.8010.47 (downloading: 52 of 182 MB)". */
   chrome?: string;
+  /** agent-browser runs Chromium's headless shell, which many sites refuse, only because no Google Chrome is installed here. */
+  noChrome?: true;
   installing?: boolean;
   installError?: string;
   /** Whether a browser profile can use "My Chrome", the person's own running
@@ -221,6 +223,13 @@ export interface BrowserEngineSummary {
   myChromeLendable?: true;
   /** browserEngine.engine: "chrome" when the bots' browsers run on OpenMausBot's own Chrome driver. */
   engine?: "agent-browser" | "chrome";
+  /** The desktop app shows the Chrome engine's browsers as panes the person uses directly (browserEngine.surface "pane"). */
+  pane?: true;
+  /** browserEngine.cloudDisplay is on and this server can run it: the panel shows the browser's window as a remote
+   * desktop (GET /api/bots/:id/browser/desktop), and falls back to the picture view when that closes with 4415. */
+  desktopView?: true;
+  /** The person can import a site's sign-in from their own browsers into a bot's (the desktop app, Chrome engine). */
+  cookieImport?: true;
   /** Self-hosted servers only: whether bots' browsers may open this server's own sites and its local network
    * (browserEngine.egress.localNetwork, off by default). Absent on the desktop and on MausBot Cloud. */
   serverSites?: boolean;

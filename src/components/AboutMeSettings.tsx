@@ -1,14 +1,15 @@
 import { FIELD_EDGE } from "./SettingsPrimitives";
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { api, useStore, type ConfigStatus } from "@/state/store";
+import { api, type ConfigStatus } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { saveTeamProfile } from "@/lib/own-profile";
 import { createAboutMeDraft } from "./about-me-draft";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 const drafts = new WeakMap<object, { controller: ReturnType<typeof createAboutMeDraft>; team: { current: boolean } }>();
 
 export function AboutMeSettings() {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const confirmed = state.config?.profile?.aboutMe ?? "";
   const team = Boolean(state.config?.team);
   let draft = drafts.get(dispatch);

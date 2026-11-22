@@ -121,6 +121,7 @@ are never tracked. Titles of 17px and up keep `tracking-[-0.01em]`.
 | Body, rows, menu rows (`MENU_ROW`) | 13 / 18px | 415 | `ink` or `ink-secondary` |
 | Names in lists (bots in the sidebar 14 / 20px) | 13 / 18px | 500 | `ink` |
 | Sidebar group labels ("Bots", "Tools", a department) | 13 / 18px | 415 | `ink-secondary` |
+| Sidebar places (the rows under "Tools") | 14 / 20px | 415 | `ink` |
 | Pinned bot captions | 12 / 16px | 415 | `ink` |
 | Speaker names in transcripts (people and bots) | 13px | 600 | bot colour, else `ink-secondary` |
 | Meta, hints, menu group labels | 12 / 16px | 415 (menu group labels 500) | `ink-tertiary` |
@@ -156,7 +157,7 @@ element's job and never a pixel value:
 | Fields, controls | 8px | `rounded-lg` |
 | Cards, menus, popovers, sidebar rows and pinned bots | 12px | `rounded-xl` |
 | Dialogs | 14px | `.ui-modal` |
-| Bubbles, cards in the transcript | 18px | `rounded-4xl` |
+| Bubbles, cards in the transcript | 18px; a bubble in a run of its sender's bubbles keeps a 6px tail at its bottom corner on its own side (`joinedCorners`) | `rounded-4xl` |
 | Composer | 22px (18px once it wraps, and always in Advanced mode, whose field sits above a footer row) | set by the composer |
 | Window panes | 0 | |
 
@@ -181,7 +182,12 @@ element's job and never a pixel value:
   variant.
 - **Sidebar rows:** Simple's rows have 8px padding and a 10px gap after the
   36px avatar; every row hovers at `bg-ink/[0.06]`. The sidebar is 280px wide
-  in both modes; pinned bots are 95 × 92px tiles with a 60px avatar.
+  in both modes; pinned bots are 95 × 92px tiles with a 60px avatar. Pinned
+  pages never join them: a bot's pages are in its bot panel's Library tab.
+- **The sidebar stays open beside a side panel** while the chat keeps 440px:
+  from 1040px with a 320px panel (Simple's bot panel, a room, Simple's inbox,
+  Notifications), from 1280px with a wider one. Narrower, it folds to its
+  avatars.
 - **Group with space before you group with lines.** Add a divider only between
   groups that space alone can't separate. Never a divider under a heading.
 - **No cards inside cards.** If a card needs sections, use spacing and a group
@@ -213,10 +219,18 @@ element's job and never a pixel value:
 
 - **Only floating things cast shadows:** menus, popovers and dialogs. Use
   `menu-surface` or `popover-surface`, which carry each skin's shadow. Cards
-  in the page are flat, with a `hairline` border or a tint.
+  in the page are flat, with a `hairline` border or a tint. Two things in the
+  chat also float, over the scrolling transcript: the chat header's pill and
+  controls (`shadow-(--shadow-float)`, through `ELEVATED_FLOAT`) and the
+  composer (`shadow-(--shadow-composer)`, through `ELEVATED_COMPOSER`). The
+  lift shows on light grounds only; in Daylight the composer drops its 0.5px
+  ring at rest and gets it back on hover and focus.
 - **Borders are 1px `hairline`.** Panes meet on a 0.5px `edge`. An element in
   the page gets a border or a tint, not both, and no shadow. Floating surfaces
-  take their surface class, which already balances all three.
+  take their surface class, which already balances all three. One exception:
+  a bot's bubble is a tint finished with a faint top-lit sheen and a 0.5px
+  inset line of ink at 6% (`BOT_BUBBLE_FINISH`), on light grounds only; a
+  dark ground keeps the flat tint.
 - **Rich content in a reply stays in the bubble.** Tables, code and quotes are
   drawn alike: no fill of their own, a 1px hairline and a faint tint. One
   reply is one bubble.
@@ -254,9 +268,16 @@ Motion explains a change. It never decorates.
 - **300ms ceiling.** Only first-run onboarding may run longer.
 - **Nothing scales in from zero.** Things grow from about 96% and fade.
 - **Hover and press transitions are 120ms** on colour and opacity only. Don't
-  animate layout.
+  animate layout. One exception: buttons (`.ui-button`, `.ui-icon-button`)
+  and the sidebar's bot rows and pinned bots shrink to 98% while pressed, over
+  50ms, and not at all with reduced motion. The stylesheet does this; don't
+  add your own press scale.
 - **No loops** except a live status that is really live (a bot working).
   Never animate something just to draw the eye.
+- **Mascots hold still at rest.** A mascot moves while its bot is doing
+  something, for a beat that explains a change, and under the pointer (its
+  eyes follow, it blinks). Every change blends in over about 300ms, and it
+  settles and stops when the reason ends.
 - **Respect reduced motion.** Pair every transition with
   `motion-reduce:transition-none` and every animation with
   `motion-reduce:animate-none`, or gate it in CSS on

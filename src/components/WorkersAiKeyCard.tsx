@@ -3,8 +3,9 @@
 import { useState } from "react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { api, useStore, type ConfigStatus } from "@/state/store";
+import { api, type ConfigStatus } from "@/state/store";
 import { SETTINGS_INPUT, SettingsField, SettingsFormFoot, SettingsGroup, SettingsRows, StatusDot } from "./SettingsPrimitives";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 const TOKEN_URL = "https://dash.cloudflare.com/profile/api-tokens";
 const ACCOUNT_ID = /^[0-9a-f]{32}$/i;
@@ -12,7 +13,7 @@ const ACCOUNT_ID = /^[0-9a-f]{32}$/i;
 type TestResult = { ok: true; latencyMs: number; extraction?: { ok: boolean } } | { ok: false; reason: string; status?: number; extraction?: { ok: boolean } };
 
 export function WorkersAiKeyCard({ failureText }: { failureText: (result: { reason: string; status?: number }) => string }) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const helpers = state.config?.helpers;
   const saved = helpers?.own.workersAi === true;
   const savedAccount = helpers?.workersAiAccountId ?? "";

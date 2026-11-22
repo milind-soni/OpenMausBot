@@ -171,3 +171,19 @@ describe("a pinned web panel's page", () => {
     expect(host.querySelector("[data-app-placeholder]")).not.toBeNull();
   });
 });
+
+describe("a pinned chat page whose row the app does not hold", () => {
+  it("fetches the page again when a frame replaces it", async () => {
+    const { noteAppPagePatch } = await import("@/state/held-tails");
+    fixture.panels = [{ id: "panel-1", name: "Sales", page: { botId: "b1", threadId: "t1", messageId: "m1" } }];
+    fixture.state = { webPanelId: "panel-1", bots: [{ id: "b1", threadId: "t1", messages: [{ id: "newer", kind: "text" }] }] };
+    fixture.fetchAppDocument.mockClear();
+    await act(async () => root.render(createElement(WebPanelPage)));
+    expect(fixture.fetchAppDocument).toHaveBeenCalledTimes(1);
+    await act(async () => noteAppPagePatch("t1", { id: "m1", app: { title: "Sales", source: "html", doc: "d1", rev: 2 } } as never));
+    expect(fixture.fetchAppDocument).toHaveBeenCalledTimes(2);
+    await act(async () => noteAppPagePatch("t1", { id: "m1", app: { title: "Sales", source: "html", doc: "d1", rev: 2 } } as never));
+    expect(fixture.fetchAppDocument).toHaveBeenCalledTimes(2);
+    fixture.state = { webPanelId: "panel-1" };
+  });
+});

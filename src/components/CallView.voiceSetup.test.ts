@@ -56,7 +56,8 @@ vi.mock("./MenuMotion", async (importOriginal) => ({
   ...await importOriginal<typeof import("./MenuMotion")>(),
   useMenuMotion: (open: boolean) => ({ shown: open, closing: false, className: "", exitProps: {} }),
 }));
-vi.mock("./VoiceSetupDialog", () => ({
+vi.mock("./lazy-screens", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./lazy-screens")>(),
   VoiceSetupDialog: (props: Record<string, unknown>) => {
     fixture.dialog = props;
     return createElement("div", { "data-voice-setup-stub": (props.bot as Bot).id });

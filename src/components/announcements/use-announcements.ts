@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import type { CloudAccountState } from "../../../electron/cloud-account.mjs";
-import { announcementHistory, announcementsUnread, markAnnouncementsRead, useAnnouncementRecord, type HistoryFacts, type HistoryItem, type PersonRecord,
+import { announcementHistory, announcementsUnread, firstListedVersion, markAnnouncementsRead, useAnnouncementRecord, type HistoryFacts, type HistoryItem, type PersonRecord,
   type RecordWriter } from "@/lib/announcement-history";
 import { announcementConditions, announcementFeedUpdatedAt, announcementPlan, announcementPlatform, announcementSurface, cardsForPerson, providersRestricted,
-  SPONSOR_CARDS_FOR_TEAM_MEMBERS, useAnnouncementCards } from "@/lib/announcements";
-import { appVersion } from "@/lib/app-links";
+  SPONSOR_CARDS_FOR_TEAM_MEMBERS, useAnnouncementCards, useReleaseNotes } from "@/lib/announcements";
+import { appVersion, desktopAppVersion } from "@/lib/app-links";
 import { brandStatus } from "@/lib/brand";
 import { cloudPlanView } from "@/lib/cloud-plan";
 import { activeLocale } from "@/lib/i18n";
@@ -54,6 +54,8 @@ export interface Announcements {
   account: CloudAccountState | null;
   /** The app's Add a Cloud and Cloud sign-in are here: This computer's page. */
   cloudBridge: boolean;
+  /** A branded build: no release notes, nor a downloaded update's row. */
+  branded: boolean;
 }
 
 /** Every announcement this person could have had here, and whether one is new to them. */
@@ -85,13 +87,14 @@ export function useAnnouncements(now: () => number = Date.now): Announcements {
       conditions: announcementConditions(state) },
     branded, admin: canSave, sponsors: !providersRestricted(state.config?.managedPolicy) && sponsors,
   });
-  const items = announcementHistory({ facts, cards, feedUpdatedAt: announcementFeedUpdatedAt(), now: now() });
+  const releases = useReleaseNotes(!branded);
+  const items = announcementHistory({ facts, cards, feedUpdatedAt: announcementFeedUpdatedAt(), now: now(), releases });
   const record = state.config?.onboarding;
-  const person: PersonRecord = { record, desktopSeen: desktopState?.seen ?? [] };
+  const person: PersonRecord = { record, desktopSeen: desktopState?.seen ?? [], firstVersion: firstListedVersion(desktopAppVersion()) };
   const ready = viewer !== null && organization !== null && (!desktop || desktopState !== null) && state.config !== null;
   const writer: RecordWriter = { team, desktop, saved: config => dispatch({ type: "configStatus", config }) };
   return {
-    items, unread: ready && announcementsUnread(items, person), person, writer, viewer, account, cloudBridge: Boolean(bridge),
+    items, unread: ready && announcementsUnread(items, person), person, writer, viewer, account, cloudBridge: Boolean(bridge), branded,
     markRead: () => markAnnouncementsRead(now(), record, writer),
   };
 }

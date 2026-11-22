@@ -348,7 +348,9 @@ export async function readMessage(account: EmailAccount, guard: EmailGuard, inpu
       const { simpleParser } = await import("mailparser");
       const parsed = await simpleParser(full.source, { skipImageLinks: true, skipTextLinks: true });
       const text = (parsed.text ?? (typeof parsed.html === "string" ? parsed.html.replace(/<[^>]*>/gu, " ") : "")).trim();
-      const list = (value: typeof parsed.to) => (Array.isArray(value) ? value : value ? [value] : []).flatMap((group) => group.value.map((one) => named({ ...(one.name ? { name: one.name } : {}), ...(one.address ? { address: one.address } : {}) }))).filter(Boolean);
+      const list = (value: typeof parsed.to) => (Array.isArray(value) ? value : value ? [value] : [])
+        .flatMap((header) => header.value.flatMap((one) => one.group ?? [one]))
+        .map(named).filter(Boolean);
       return {
         ...summary(head),
         from: list(parsed.from)[0] ?? summary(head).from,

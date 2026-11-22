@@ -4,7 +4,7 @@ import { cloudPlanLabel, cloudPlanView } from "@/lib/cloud-plan";
 import { t } from "@/lib/i18n";
 import { profileForSession, type SessionState } from "@/lib/session";
 import { readSharedSessionState } from "@/lib/shared-session";
-import { useStore } from "@/state/store";
+import { useStoreSelector } from "@/state/store-select";
 
 export interface AccountSummary {
   /** read from the account bridge, the plan bridge or the server session; null until it answers */
@@ -53,14 +53,14 @@ export function useAccountSummary(): AccountSummary {
 
 /** The name and photo the chrome shows for you, and the server session they came from. */
 export function useYou(): { profile: { name?: string; email?: string; avatarUrl?: string } | undefined; session: SessionState | null } {
-  const { state } = useStore();
+  const profile = useStoreSelector((state) => state.config?.profile);
   const [session, setSession] = useState<SessionState | null>(null);
   useEffect(() => {
     let alive = true;
     void readSharedSessionState().then((next) => { if (alive) setSession(next); });
     return () => { alive = false; };
   }, []);
-  return { profile: profileForSession(state.config?.profile, session), session };
+  return { profile: profileForSession(profile, session), session };
 }
 
 /** "Pro · ada@example.com", "Not signed in"; in a browser, "Signed in to My Cloud". */

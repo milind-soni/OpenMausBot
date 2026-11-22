@@ -73,6 +73,16 @@ describe("saveBotAttachment", () => {
     expect(saved.attachment).toMatchObject({ source: realpathSync.native(join(WORK, name)) });
   });
 
+  it.each(["report#1.csv", "growth 20%.csv", "report%20one.pdf"])("attaches the literal source path %s", async (name) => {
+    const source = join(WORK, name);
+    writeFileSync(source, `contents of ${name}`);
+    for (const path of [name, source, pathToFileURL(source).href]) {
+      const saved = await saveBotAttachment({ path, roots: [WORK] });
+      expect(saved.attachment).toMatchObject({ name, source: realpathSync.native(source) });
+      expect(readFileSync(saved.attachment.path, "utf8")).toBe(`contents of ${name}`);
+    }
+  });
+
   it("reads a file from the VM guest workspace through its host mount", async () => {
     writeFileSync(join(VM_HOME, "reports", "nekoneko.pdf"), "%PDF-1.4 fake");
     const saved = await saveBotAttachment({
@@ -84,6 +94,17 @@ describe("saveBotAttachment", () => {
     expect(saved.attachment).toMatchObject({ kind: "file", mime: "application/pdf", name: "決算書.pdf",
       source: realpathSync.native(join(VM_HOME, "reports", "nekoneko.pdf")) });
     expect(readFileSync(saved.attachment.path, "utf8")).toBe("%PDF-1.4 fake");
+  });
+
+  it("preserves filename characters after mapping a guest file URL to the host", async () => {
+    const name = "forecast%20#1.csv";
+    const source = join(VM_HOME, "reports", name);
+    writeFileSync(source, "month,total\nJanuary,100\n");
+    for (const path of [`/home/cua/workspace/reports/${name}`, `file:///home/cua/workspace/reports/${encodeURIComponent(name)}`]) {
+      const saved = await saveBotAttachment({ path, roots: [WORK], guest: { root: "/home/cua/workspace", host: VM_HOME } });
+      expect(saved.attachment).toMatchObject({ name, source: realpathSync.native(source) });
+      expect(readFileSync(saved.attachment.path, "utf8")).toBe("month,total\nJanuary,100\n");
+    }
   });
 
   it("attaches a VM video over the preview size, up to the same limit a person's upload has", async () => {
@@ -237,6 +258,15 @@ describe("saveBotAttachment for a file a turn saved outside its folders", () => 
     expect(saved.attachment.path.startsWith(ATTACHMENTS_DIR)).toBe(true);
     expect(readFileSync(saved.attachment.path, "utf8")).toBe("jpeg-bytes");
     expect(readFileSync(source, "utf8")).toBe("jpeg-bytes");
+  });
+
+  it("preserves literal filename characters in a file saved outside the workspace", async () => {
+    const since = Date.now();
+    const source = join(DESIGNS, "draft#1.pdf");
+    writeFileSync(source, "pdf-bytes");
+    const saved = await saveBotAttachment({ path: source, roots: [WORK], savedThisTurn: { since, refuse } });
+    expect(saved.attachment).toMatchObject({ name: "draft#1.pdf", source: realpathSync.native(source) });
+    expect(readFileSync(saved.attachment.path, "utf8")).toBe("pdf-bytes");
   });
 
   it("stays roots only without the grant, for a VM turn, and for a relative path", async () => {
@@ -425,6 +455,14 @@ describe("deliveredCopy", () => {
     expect(deliveredCopy([ask, attached, reply], reply, "README.md", "D:\\AI\\openmausbot-skills\\README.md")).toEqual(renamed);
   });
 
+  it.each(["report#1.pdf", "report%20one.pdf"])("matches the literal stored source %s to its file URL", (name) => {
+    const attachment = { ...renamed, source: `/reports/${name}` };
+    const attached = bot("attached", "ask", { attachments: [attachment] });
+    const href = `file:///reports/${encodeURIComponent(name)}`;
+    const reply = bot("reply", "attached", { text: `[Report](${href})` });
+    expect(deliveredCopy([ask, attached, reply], reply, name, href)).toEqual(attachment);
+  });
+
   it("finds the same source spelled as a file:// URL or with an encoded space", () => {
     const spaced = { ...renamed, source: "D:\\AI\\openmausbot-skills\\my file.pdf", name: "团队技能包.pdf" };
     const attached = bot("attached", "ask", { attachments: [spaced] });
@@ -451,5 +489,30 @@ describe("deliveredCopy", () => {
     const peer = bot("peer", "ask", { ...by("other"), attachments: [renamed] });
     const reply = bot("reply", "peer", by("me"));
     expect(deliveredCopy([ask, peer, reply], reply, "README.md", "D:\\AI\\openmausbot-skills\\README.md")).toBeNull();
+  });
+});
+
+describe("saveBotAttachment for a file attached to the conversation", () => {
+  it("passes on a stored file by the name it was attached with", async () => {
+    mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+    const stored = join(ATTACHMENTS_DIR, "0b7f6a52-3c1d-4e8f-9a2b-5c6d7e8f9a0b.md");
+    writeFileSync(stored, "# Chapter 3");
+    const saved = await saveBotAttachment({ path: stored, roots: [WORK], attached: () => [{ path: stored, name: "chapter-3.md" }] });
+    expect(saved.attachment).toMatchObject({ kind: "file", name: "chapter-3.md" });
+    expect(readFileSync(saved.attachment.path, "utf8")).toBe("# Chapter 3");
+    const byLink = await saveBotAttachment({ path: pathToFileURL(stored).href, roots: [WORK], attached: () => [{ path: stored, name: "chapter-3.md" }] });
+    expect(byLink.attachment).toMatchObject({ name: "chapter-3.md" });
+  });
+
+  it("opens nothing outside the attachment store, whatever a tag names, and nothing in it that was not attached", async () => {
+    mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+    mkdirSync(process.env.OMB_DATA_DIR!, { recursive: true });
+    const config = join(process.env.OMB_DATA_DIR!, "config.json");
+    writeFileSync(config, "{\"secret\":true}");
+    await expect(saveBotAttachment({ path: config, roots: [WORK], attached: () => [{ path: config, name: "config.json" }] }))
+      .rejects.toMatchObject({ status: 403 });
+    const other = join(ATTACHMENTS_DIR, "1c8e7b63-4d2e-4f9a-8b3c-6d7e8f9a0b1c.md");
+    writeFileSync(other, "Someone else's");
+    await expect(saveBotAttachment({ path: other, roots: [WORK], attached: () => [] })).rejects.toMatchObject({ status: 403 });
   });
 });

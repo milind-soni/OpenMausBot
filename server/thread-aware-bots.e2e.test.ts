@@ -916,6 +916,9 @@ describe("a Chief of Staff tidying its team (MOCA-202)", () => {
       await expect.poll(() => handoffs().find(node => node.id === child.id)?.status, { timeout: 15_000 }).toBe("completed");
       await expect.poll(async () => (await taskOf(qa.id, child.threadId)).closedBy, { timeout: 15_000 })
         .toMatchObject({ botId: pm.id, name: "Parker" });
+      // The settled handoff wakes Parker once more on this thread. Between the first turn's end and that wake's start Parker
+      // is not busy, so a message sent then queues behind the wake: wait until the wake has started, then until it ends.
+      await expect.poll(() => promptsOf(pm.threadId).some((prompt) => JSON.stringify(prompt).includes("Your downstream room requests have settled.")), { timeout: 15_000 }).toBe(true);
       token = await heldTurn(pm, "Close the completed QA task.");
       const closed = await close(opened.body.threadId);
       expect(closed.status).toBe(200);

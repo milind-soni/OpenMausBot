@@ -1,5 +1,5 @@
 import type { OutboundPolicy } from "../shared/outbound.ts";
-import { DEFAULT_OUTBOUND_POLICY } from "../shared/outbound.ts";
+import { effectiveOutboundPolicy } from "../shared/outbound.ts";
 import type { Notification } from "../shared/notification.ts";
 import { HELD_NOTE } from "./auto-approve.ts";
 import { appendDecision } from "./decision-log.ts";
@@ -33,7 +33,7 @@ export type OutboundHoldAnswer = { ok: true; approved: boolean } | { ok: false; 
 function sendsWithoutAsking(rule: OutboundPolicy | undefined, fullAccess: boolean, opaque: boolean): "full-access" | "allow" | null {
   if (fullAccess && rule === undefined) return "full-access";
   // A call it cannot inspect (code run) goes out under "allow" only at Full access, as it would with no rule.
-  return (rule ?? DEFAULT_OUTBOUND_POLICY).policy === "allow" && (!opaque || fullAccess) ? "allow" : null;
+  return effectiveOutboundPolicy(rule, fullAccess).policy === "allow" && (!opaque || fullAccess) ? "allow" : null;
 }
 
 export interface OutboundHold {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Globe, Hand, Loader2, LockKeyhole, Moon, X } from "lucide-react";
 import { browserUnavailableReason } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
@@ -10,7 +10,8 @@ import { ExtensionsMenu, extensionsOf, type BrowserExtension } from "./browser/E
 import { MoreMenu } from "./browser/MoreMenu";
 import { PasskeyNotice } from "./browser/PasskeyNotice";
 import { StreamSurface, type StreamSurfaceHandle, type SurfaceConnect } from "./browser/StreamSurface";
-import { createBrowserControl, streamTransport, type BrowserControl, type BrowserTakeStatus } from "@/lib/browser-control";
+import { BrowserViewerPill, usePaneHold } from "./viewer-pill-host";
+import { createBrowserControl, startsInteraction, streamTransport, type BrowserControl, type BrowserTakeStatus } from "@/lib/browser-control";
 import { resolveAddressBarInput } from "@/lib/browser-address";
 import { closeBrowserPictureInPicture, openBrowserPictureInPicture, supportsBrowserPictureInPicture, useBrowserPictureInPicture } from "@/lib/browser-pip";
 import { browserStreamAccess, createPreviewStreamClient, type PreviewStreamClient, type PreviewStreamControl, type PreviewStreamInput, type PreviewViewportSetting } from "@/lib/browser-stream-client";
@@ -18,11 +19,19 @@ import { createLiveStreamClient, type LiveResume, type LiveStreamClient } from "
 import { BROWSER_HELD_ELSEWHERE } from "../../shared/browser-held";
 import { passkeyWallAt } from "../../shared/passkey-wall";
 import { browserScope, withBrowserScope } from "@/lib/team-browser";
+import { followBounds } from "@/lib/follow-bounds";
+import { useNativeViewObscured } from "@/lib/native-view-obscured";
+import { CookieImportDialog, cookieImportAvailable, siteOfAddress } from "./browser/cookie-import";
+
+const BrowserDesktop = lazy(() => import("./browser/BrowserDesktop").then((module) => ({ default: module.BrowserDesktop })));
 
 const button = "rounded-md p-1.5 text-ink-secondary hover:bg-inset hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed";
+const TAKE_TRIES = 3;
+const TAKE_RETRY_MS = 800;
 const NO_NAV: BrowserNav = { url: "", loading: false, canGoBack: false, canGoForward: false };
 
-export type BrowserSignIn = { url: string; site: string; nonce: number };
+/** `expand`: open the browser full size, as a handoff's Take over does. */
+export type BrowserSignIn = { url: string; site: string; nonce: number; expand?: boolean };
 /** A page to open in a new tab once the view is connected and awake: a published page's Open (usePageOpener). */
 export type BrowserPage = { url: string; nonce: number };
 
@@ -42,6 +51,14 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   const { state } = useStore();
   const [fallback, setFallback] = useState(false);
   const stream = state.config?.browserEngine?.engine === "chrome" && !fallback;
+  const [noDesktop, setNoDesktop] = useState(false);
+  const desktopView = stream && state.config?.browserEngine?.desktopView === true && !noDesktop;
+  // The desktop app shows this browser natively over the page area; the stream underneath shows through any overlay.
+  const paneMode = stream && state.config?.browserEngine?.pane === true && Boolean(window.ogb?.browserPane);
+  // The page shows as a remote desktop or a native pane, not from the stream's pictures: the stream's tab list, which comes
+  // once the browser runs, ends the starting state rather than a first picture.
+  const pageNotFromFrames = useRef(false);
+  pageNotFromFrames.current = desktopView || paneMode;
   const [attempt, setAttempt] = useState(0);
   const [connected, setConnected] = useState(false);
   const [control, setControl] = useState<PreviewStreamControl | null>(null);
@@ -52,12 +69,14 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   const [extensions, setExtensions] = useState<BrowserExtension[] | null>(null);
   const [takeStatus, setTakeStatus] = useState<BrowserTakeStatus>("");
   const [error, setError] = useState("");
+  const [notReaching, setNotReaching] = useState(false);
   const [starting, setStarting] = useState(false);
   const [gone, setGone] = useState(false);
   const [asleep, setAsleep] = useState<"" | "asleep" | "waking">("");
   const [kept, setKept] = useState(false);
   const [showProfiles, setShowProfiles] = useState(false);
   const [showTyping, setShowTyping] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [masked, setMasked] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [maximized, setMaximized] = useState(false);
@@ -65,6 +84,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   const floating = useBrowserPictureInPicture();
   const pageVisible = usePageVisible();
   const panel = useRef<HTMLDivElement>(null);
+  const pageArea = useRef<HTMLDivElement>(null);
   const address = useRef<HTMLInputElement>(null);
   const surface = useRef<StreamSurfaceHandle>(null);
   const profilesDialog = useRef<HTMLDialogElement>(null);
@@ -77,6 +97,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   const resume = useRef<LiveResume & { key: string }>({ key: "", viewer: "" });
   const keepNow = useRef(false);
   const signInHandled = useRef(0);
+  const signInWoken = useRef(0);
   const pageHandled = useRef(0);
   const signInPage = useRef<string | null>(null);
   const pageNow = useRef<string | null>(null);
@@ -99,30 +120,36 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     setAttempt((value) => value + 1);
   }, []);
   // Another profile may run on the other engine: it gets the stream again if it has one.
-  useEffect(() => { setFallback(false); }, [bot.id, bot.browserProfile, scopedThread]);
+  useEffect(() => { setFallback(false); setNoDesktop(false); }, [bot.id, bot.browserProfile, scopedThread]);
   useEffect(() => {
     setTabs([]);
     setExtensions(null);
     setNav(stream ? NO_NAV : { ...NO_NAV, canGoBack: true, canGoForward: true });
     setStarting(false);
     setGone(false);
+    setNotReaching(false);
     setAsleep("");
     pageNow.current = null;
   }, [bot.id, bot.browserProfile, scopedThread, attempt, stream]);
 
   const connect = useCallback<SurfaceConnect>((target, events) => {
     const scope: Record<string, string> = scopedThread ? { threadId: scopedThread } : {};
-    if (stream) return createPreviewStreamClient({ access: browserStreamAccess(bot.id, window.location, scope), ...target }, events);
+    // The desktop view shows the page, so the stream beside it carries no pictures.
+    if (stream) return createPreviewStreamClient({ access: browserStreamAccess(bot.id, window.location, desktopView ? { ...scope, frames: "0" } : scope), ...target }, events);
     const key = `${bot.id}\n${bot.browserProfile ?? ""}${scopedThread ? `\n${scopedThread}` : ""}`;
     if (resume.current.key !== key) resume.current = { key, viewer: "" };
     return createLiveStreamClient(bot.id, events, (body, viewerId) => api(withBrowserScope(`/api/bots/${encodeURIComponent(bot.id)}/browser/action`, scope), {
       // 120 s matches the server's browser requestTimeoutMs.
       method: "POST", body: JSON.stringify({ ...body, viewerId }), timeoutMs: 120_000,
     }), resume.current, scope, { width: target.width, height: target.height });
-  }, [bot.id, bot.browserProfile, scopedThread, stream]);
+  }, [bot.id, bot.browserProfile, scopedThread, stream, desktopView]);
 
   const interact = useCallback((input: PreviewStreamInput) => {
-    if (controlRef.current?.controller === "another-viewer") { setError(BROWSER_HELD_ELSEWHERE); return; }
+    if (controlRef.current?.controller === "another-viewer") {
+      if (startsInteraction(input)) (clientRef.current as Partial<LiveStreamClient> | null)?.transport?.dropped?.("held_elsewhere");
+      setError(BROWSER_HELD_ELSEWHERE);
+      return;
+    }
     browserControl.current?.interact(input);
   }, []);
 
@@ -143,7 +170,6 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
       mine: () => controlRef.current?.owned === true,
       onTakeStatus: setTakeStatus,
       onError: setError,
-      onHalted: () => setError(t("browser.input.tooSlow")),
     });
     created.keep(keepNow.current);
     browserControl.current = created;
@@ -163,6 +189,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     if (message.type === "tabs") {
       const next = tabsOf(message.tabs);
       setTabs(next);
+      if (pageNotFromFrames.current) setStarting(false);
       const active = next.find((tab) => tab.active);
       if (active) {
         setNav((current) => ({ ...current, url: active.url }));
@@ -183,16 +210,20 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
       const next = message.setting as PreviewViewportSetting | undefined;
       if (next && (next.mode === "fill" || next.mode === "preset")) setSetting(next);
       if (typeof message.zoom === "number") setZoom(message.zoom);
+    } else if (message.type === "inputHalted") {
+      setNotReaching(message.halted === true);
     } else if (message.type === "starting") {
       setStarting(true);
     } else if (message.type === "asleep" || message.type === "awake") {
+      if (message.type === "asleep") pageNow.current = null;
       setAsleep(message.type === "asleep" ? "asleep" : "");
     }
   }, []);
 
   useEffect(() => { browserControl.current?.keep(kept || signInOpen); }, [kept, signInOpen]);
-  const takeControl = () => { setKept(true); browserControl.current?.keep(true); browserControl.current?.takeControl(); };
-  const handBack = () => { setKept(false); browserControl.current?.handBack(); };
+  const paneHold = usePaneHold(bot.id, scopedThread ?? null, paneMode, signInOpen);
+  const takeControl = () => { setKept(true); browserControl.current?.keep(true); browserControl.current?.takeControl(); paneHold.set(true); };
+  const handBack = () => { setKept(false); browserControl.current?.handBack(); paneHold.set(false); };
   const openSignInPage = () => {
     const url = signInPage.current;
     if (!url || pageNow.current === null) return;
@@ -200,13 +231,30 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     if (!pageNow.current || pageNow.current === "about:blank") interact({ type: "navigate", url });
   };
   latest.current = { openSignInPage, takeControl };
+  // Woken once per request: a browser that cannot start answers "asleep" again, and Wake stays for the person.
   useEffect(() => {
     if (!signIn || !connected || signInHandled.current === signIn.nonce) return;
+    if (asleep) {
+      if (asleep === "asleep" && signInWoken.current !== signIn.nonce && clientRef.current?.send({ type: "wake" })) {
+        signInWoken.current = signIn.nonce;
+        setAsleep("waking");
+      }
+      return;
+    }
     signInHandled.current = signIn.nonce;
-    signInPage.current = signIn.url;
+    signInPage.current = signIn.url || null;
+    if (signIn.expand) { setMaximized(true); setTakeTries(TAKE_TRIES); }
     latest.current.takeControl();
     latest.current.openSignInPage();
-  }, [signIn, connected]);
+  }, [signIn, connected, asleep]);
+  // A take made as the view grew to full size can land while its stream reconnects: it is asked again, a few times.
+  const [takeTries, setTakeTries] = useState(0);
+  useEffect(() => {
+    if (!takeTries || !maximized || control?.controller === "you") { if (takeTries && control?.controller === "you") setTakeTries(0); return; }
+    if (!connected || takeStatus === "pending" || takeStatus === "slow") return;
+    const timer = setTimeout(() => { setTakeTries((left) => left - 1); latest.current.takeControl(); }, TAKE_RETRY_MS);
+    return () => clearTimeout(timer);
+  }, [takeTries, maximized, connected, control, takeStatus]);
 
   // A new tab, so whatever the bot has open stays as it was; a sleeping browser is woken first.
   useEffect(() => {
@@ -281,6 +329,49 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     setError("");
   }, [shown]);
   const typingReady = connected && you;
+  const obscured = useNativeViewObscured(showProfiles || showTyping || showImport, paneMode);
+  const profile = state.config?.browserProfiles?.find((candidate) => candidate.id === bot.browserProfile);
+  const importable = cookieImportAvailable(state.config) && bot.browserProfile !== "guest"
+    && !(profile?.browser === "chrome" && state.config?.browserEngine?.myChrome === true);
+  // A page's alert, confirm or prompt is answered in the panel's own card, under where the native pane would be.
+  const paneVisible = paneMode && shown && connected && !asleep && !heldElsewhere && !gone && !starting && !obscured && !control?.dialog;
+  const paneShown = useRef(paneVisible);
+  const placePane = useRef<() => void>(() => {});
+  // While the app shows the pane, the stream underneath sends no frames; it resumes as soon as the pane hides.
+  const [paneUp, setPaneUp] = useState(false);
+  const covered = paneVisible && paneUp;
+  const coveredSent = useRef(false);
+  useEffect(() => {
+    if (!stream || (!covered && !coveredSent.current)) return;
+    clientRef.current?.send({ type: "covered", covered });
+    coveredSent.current = covered;
+  }, [stream, covered, connected]);
+  paneShown.current = paneVisible;
+  useEffect(() => {
+    const bridge = window.ogb?.browserPane;
+    if (!paneMode || !bridge) return;
+    const threadId = scopedThread ?? null;
+    const profile = bot.browserProfile ?? null;
+    let placed = 0;
+    const place = () => {
+      const rect = pageArea.current?.getBoundingClientRect();
+      const bounds = rect && rect.width >= 1 && rect.height >= 1
+        ? { x: Math.round(rect.left), y: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height) } : null;
+      const visible = paneShown.current && bounds !== null;
+      const asked = ++placed;
+      void bridge.show({ botId: bot.id, threadId, profile, bounds, visible }).then((answer) => { if (asked === placed) setPaneUp(visible && answer?.shown === true); }, () => { if (asked === placed) setPaneUp(false); });
+    };
+    placePane.current = place;
+    const stop = pageArea.current ? followBounds(pageArea.current, place) : () => {};
+    return () => {
+      placePane.current = () => {};
+      stop();
+      setPaneUp(false);
+      void bridge.show({ botId: bot.id, threadId, profile, bounds: null, visible: false }).catch(() => undefined);
+    };
+  }, [paneMode, bot.id, bot.browserProfile, scopedThread]);
+  // A pane the app makes after the panel asked (as after a server restart) is shown once its tab is listed.
+  useEffect(() => { placePane.current(); }, [paneVisible, paneMode, bot.id, bot.browserProfile, scopedThread, tabs]);
   const pipSupported = stream && supportsBrowserPictureInPicture();
   const passkeyWall = passkeyWallAt(nav.url);
   return <div ref={panel} className={maximized
@@ -299,6 +390,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
       profileName={profileName}
       fullscreen={fullscreen}
       maximized={maximized}
+      pillBelow={maximized}
       onCommand={interact}
       onAddress={(text) => {
         const url = resolveAddressBarInput(text);
@@ -327,17 +419,18 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
         onPip={togglePip}
         onType={() => { setMasked(false); setShowTyping(true); }}
         onSecret={() => { setMasked(true); setShowTyping(true); }}
+        {...(importable ? { onImport: () => setShowImport(true) } : {})}
         onReconnect={reconnect}
         onRestart={restart}
       /></>}
     />
-    {error && <div role="alert" className="flex shrink-0 items-center justify-between gap-2 border-b border-hairline/30 px-3 py-2 text-[12px] text-danger"><span>{error}</span>{!connected && <button className="shrink-0 underline" onClick={reconnect}>{t("browser.panel.reconnect")}</button>}</div>}
+    {(error || (notReaching && connected)) && <div role="alert" className="flex shrink-0 items-center justify-between gap-2 border-b border-hairline/30 px-3 py-2 text-[12px] text-danger"><span>{notReaching && connected ? t("browser.input.notReaching") : error}</span>{(!connected || notReaching) && <button className="shrink-0 underline" onClick={reconnect}>{t("browser.panel.reconnect")}</button>}</div>}
     {takeStatus === "stale" && <div role="status" className="shrink-0 border-b border-hairline/30 px-3 py-1.5 text-[12px] text-accent-text">{t("browser.control.stale", { name: bot.name })}</div>}
     {passkeyWall && passkeyDismissed !== nav.url && <PasskeyNotice wall={passkeyWall} botName={bot.name} onDismiss={() => setPasskeyDismissed(nav.url)} />}
-    <div className="relative flex min-h-0 flex-1 flex-col bg-inset/40">
+    <div ref={pageArea} {...(paneMode ? { "data-native-view-host": "" } : {})} className="relative flex min-h-0 flex-1 flex-col bg-inset/40">
       {shown ? (
         <StreamSurface
-          key={`${attempt}:${stream ? "stream" : "live"}:${bot.browserProfile ?? ""}`}
+          key={`${attempt}:${stream ? "stream" : "live"}:${bot.browserProfile ?? ""}${desktopView ? ":desktop" : ""}`}
           ref={surface}
           connect={connect}
           input={interact}
@@ -353,6 +446,18 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
           onLeave={() => address.current?.focus()}
         />
       ) : null}
+      {shown && desktopView && connected && !starting && !asleep && !gone && !heldElsewhere ? (
+        <Suspense fallback={null}>
+          <BrowserDesktop
+            key={`${attempt}:${bot.browserProfile ?? ""}`}
+            botId={bot.id}
+            scope={scopedThread ? { threadId: scopedThread } : {}}
+            controlling={you}
+            label={t("browser.panel.pageLabel", { name: bot.name })}
+            onUnavailable={() => setNoDesktop(true)}
+          />
+        </Suspense>
+      ) : null}
       {asleep || heldElsewhere || gone || !connected || starting ? (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-card/95 p-6 text-center text-[13px] text-ink-secondary">
           {asleep ? <Moon size={24} /> : heldElsewhere ? <Hand size={24} /> : gone ? <Globe size={24} /> : <Loader2 size={24} className="animate-spin" />}
@@ -362,11 +467,13 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
         </div>
       ) : null}
     </div>
+    {maximized && <BrowserViewerPill bot={bot} you={paneMode ? paneHold.held : you} pending={takeStatus === "pending" || takeStatus === "slow"} onTake={takeControl} onStop={handBack} onDone={() => paneHold.set(false)} onCollapse={() => setMaximized(false)} />}
     <dialog ref={profilesDialog} onClose={() => setShowProfiles(false)} onClick={(e) => { if (e.target === e.currentTarget) setShowProfiles(false); }} className="m-auto w-[min(420px,calc(100%-32px))] max-h-[80vh] overflow-auto rounded-2xl border border-hairline/50 bg-card p-5 text-ink shadow-2xl backdrop:bg-black/40">
       <div className="mb-4 flex items-center justify-between"><h2 className="text-[15px] font-medium">{t("browser.panel.profiles")}</h2><button className={button} aria-label={t("browser.panel.closeProfiles")} onClick={() => setShowProfiles(false)}><X size={16} /></button></div>
       {(heldElsewhere || (you && takeStatus !== "")) && <p className="mb-3 text-[12px] text-ink-secondary">{t(heldElsewhere ? "browser.profiles.heldElsewhere" : "browser.profiles.busy")}</p>}
       <BrowserProfilesManager bot={bot} disabled={heldElsewhere || takeStatus === "pending" || takeStatus === "slow"} onProfileChanged={() => { setShowProfiles(false); reconnect(); }} />
     </dialog>
+    {importable ? <CookieImportDialog open={showImport} botId={bot.id} botName={bot.name} threadId={scopedThread ?? null} site={siteOfAddress(nav.url)} onClose={() => setShowImport(false)} /> : null}
     {/* Security: a password or code typed here goes only to the page's focused field; it is never held in state, logged or shown. */}
     <dialog ref={typingDialog} onClose={() => { const field = typingDialog.current?.querySelector("input"); if (field) field.value = ""; setShowTyping(false); }} className="m-auto w-[min(420px,calc(100%-32px))] rounded-2xl border border-hairline/50 bg-card p-5 text-ink shadow-2xl backdrop:bg-black/40">
       <div className="mb-3 flex items-center justify-between"><h2 className="text-[14px] font-medium">{masked ? t("browser.typeSecret.title") : t("browser.panel.typeTextTitle")}</h2><button className={button} aria-label={t("browser.panel.closeTyping")} onClick={() => setShowTyping(false)}><X size={16} /></button></div>

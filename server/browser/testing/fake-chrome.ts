@@ -3,6 +3,7 @@
 import type { Backend, BackendCaps, OpenedBrowser, OpenRequest } from "../backends.ts";
 import { CdpBrowser } from "../cdp/browser.ts";
 import { fitPage } from "../chrome/flags.ts";
+import type { DesktopDisplay } from "../desktop/displays.ts";
 import type { Identity } from "../cdp/identity.ts";
 import type { CdpTransport } from "../cdp/transport.ts";
 
@@ -37,6 +38,10 @@ export interface FakePage {
   focused: number | null;
   /** Emulation.setDeviceMetricsOverride's size, which the page then reports instead of its window's. */
   emulated?: { width: number; height: number } | null;
+  /** A window resize landed after the emulation: the page is drawn at its window's size, and still reports the emulated one. */
+  viewLost?: boolean;
+  /** The size of an emulation that ended, and how many more measures answer with it. */
+  lagging?: { width: number; height: number; measures: number } | null;
   /** A bar of this height over the page, as Chrome's first tab has. */
   bar?: number;
   screencasts: Map<string, { params: Record<string, unknown>; acked: number; sent: number }>;
@@ -63,6 +68,8 @@ export class FakeChrome implements CdpTransport {
   hang: (method: string) => boolean = () => false;
   /** Milliseconds before a command answers, to stand for a slow page. */
   delay: (method: string) => number = () => 0;
+  /** How many measures a page still answers with an emulation's size after it ended, as a renderer that has not yet taken the end does. */
+  lateClears = 0;
   /** What the next navigations fail with, in order, such as net::ERR_ABORTED. */
   readonly navigationErrors: string[];
   readonly #documents: (url: string) => FakeDocument;
@@ -241,7 +248,11 @@ export class FakeChrome implements CdpTransport {
 
   #evaluate(page: FakePage, expression: string): unknown {
     const viewport = page.emulated ?? { width: this.viewport.width, height: this.viewport.height - (page.bar ?? 0) };
-    if (expression === "[innerWidth, innerHeight]") return [viewport.width, viewport.height];
+    if (expression === "[innerWidth, innerHeight]") {
+      const lagging = page.lagging;
+      if (!lagging || page.emulated || lagging.measures-- <= 0) return [viewport.width, viewport.height];
+      return [lagging.width, lagging.height];
+    }
     if (expression === "devicePixelRatio") return this.dpr;
     if (expression === "document.readyState") return "complete";
     if (expression === "document.title") return page.title;
@@ -274,8 +285,10 @@ export class FakeChrome implements CdpTransport {
         return { frameTree: { frame: { id: page.targetId, url: page.url, loaderId: page.loaderId } } };
       case "Emulation.setDeviceMetricsOverride":
         page.emulated = { width: Number(params.width), height: Number(params.height) };
+        page.viewLost = false;
         return {};
       case "Emulation.clearDeviceMetricsOverride":
+        page.lagging = page.emulated && this.lateClears > 0 ? { ...page.emulated, measures: this.lateClears } : null;
         page.emulated = null;
         return {};
       case "Page.createIsolatedWorld":
@@ -394,8 +407,17 @@ export class FakeChrome implements CdpTransport {
     const cast = page.screencasts.get(sessionId);
     if (!cast) return;
     cast.sent++;
-    const viewport = this.viewport;
+    const viewport = page.emulated && !page.viewLost ? page.emulated : this.viewport;
     this.event("Page.screencastFrame", { data: JPEG, sessionId: cast.sent, metadata: { deviceWidth: viewport.width, deviceHeight: viewport.height, offsetTop: 0, pageScaleFactor: 1, scrollOffsetX: 0, scrollOffsetY: 0, timestamp: Date.now() / 1000 } }, sessionId);
+  }
+
+  /** A window resize lands after its pages were emulated, as a slow one does: they are drawn at the window's size again. */
+  landResize(): void {
+    for (const page of this.pages.values()) {
+      if (!page.emulated) continue;
+      page.viewLost = true;
+      this.paint(page);
+    }
   }
 
   /** The page repaints: every screencast on it gets a frame. */
@@ -428,10 +450,13 @@ export class FakeBackend implements Backend {
   readonly opened: OpenRequest[] = [];
   readonly #make: (request: OpenRequest) => FakeChrome;
   readonly #pageLimit: { width: number; height: number } | null;
+  readonly #display: DesktopDisplay | null;
 
-  constructor(make: (request: OpenRequest) => FakeChrome = () => new FakeChrome(), { pageLimit = null }: { pageLimit?: { width: number; height: number } | null } = {}) {
+  /** `display`: every browser opens with its window on that private display, as LocalBackend does with cloudDisplay on. */
+  constructor(make: (request: OpenRequest) => FakeChrome = () => new FakeChrome(), { pageLimit = null, display = null }: { pageLimit?: { width: number; height: number } | null; display?: DesktopDisplay | null } = {}) {
     this.#make = make;
     this.#pageLimit = pageLimit;
+    this.#display = display;
   }
 
   get chrome(): FakeChrome {
@@ -449,10 +474,11 @@ export class FakeBackend implements Backend {
     chrome.window.height = viewport.height + CHROME_HEIGHT;
     this.chromes.push(chrome);
     const screen = limit ? { width: limit.width, height: limit.height + CHROME_HEIGHT } : null;
-    const browser = await CdpBrowser.connect(chrome, { identity: FAKE_IDENTITY, headless: true, downloadDir: null, permissions: true, platform: "darwin", maxPages: 8, viewport, screen, handleAuth: true });
+    const display = this.#display;
+    const browser = await CdpBrowser.connect(chrome, { identity: display ? null : FAKE_IDENTITY, headless: true, downloadDir: null, permissions: true, platform: "darwin", maxPages: 8, viewport: display ? null : viewport, screen: display ? null : screen, handleAuth: true });
     let exited!: () => void;
     const done = new Promise<void>((resolve) => { exited = resolve; });
     chrome.onClose(() => exited());
-    return { browser, pageLimit: limit, pid: null, version: "153.0.8010.12", exited: done, close: async () => { await browser.close(); } };
+    return { browser, pageLimit: display ? null : limit, pid: null, version: "153.0.8010.12", exited: done, close: async () => { await browser.close(); }, display };
   }
 }

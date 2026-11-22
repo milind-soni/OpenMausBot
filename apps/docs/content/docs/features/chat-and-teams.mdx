@@ -114,6 +114,12 @@ A bot doesn't need a teammate to get work done on another model. It can open a t
 
 A provider that is signed out or unavailable shows in `list_models` with the reason, and a thread on it is refused when it is opened, so a second opinion never quietly comes from the bot's own model. These threads can't be opened from a group chat, and a thread opened this way can't open more of its own.
 
+### Work that is checked before it reaches you
+
+**Templates** has a pair made for careful edits: **Nib**, a writer and editor, and **Vera**, a checker. Nib changes only what you ask and lists every change. Before it gives you a draft or an edit of a document, it hands its result to the teammate whose role is Checker, with your request and the source as files (a file you attached is passed on as it is), and tells you in one line that the work is being checked. The result itself is visible on the hand-off line as a file you can open, but Nib's answer to you waits for the check. Vera compares the result with both and reports every changed fact, added detail, missed instruction and regression, answering "pass" only when there are none. Nib fixes what the report names and sends the files again, up to three rounds (the app refuses more than four reworks of one request to the same teammate), then gives you the result with one line about the check: who checked it, in how many rounds, and what is still open if it never passed. Without a Checker teammate, Nib asks a thread of its own on another provider's model instead; when a check can't run, the answer starts with "Not checked:" and the reason.
+
+When you add Vera, it starts on another provider's AI than your default when you have one connected, because a model rarely catches its own mistakes; the review says which. When no other AI is ready, it says so in one line and Vera uses yours.
+
 ### Creating a specialist with a chosen model
 
 A Chief also adds a specialist on its own when a job needs one: an ongoing area of work, a different skill set, or work to run in parallel. The bot is created at once, the Chief tells you in one line, and the change has an **Undo**. When what you want matches a ready-made team in the library, the Chief reads its roles with `list_team_library` and creates them the same way.
