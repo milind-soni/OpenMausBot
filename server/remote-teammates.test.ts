@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { BotApiManager } from "./bot-api.ts";
 import { createBotApiHost, type BotApiHostDeps } from "./bot-api-host.ts";
 import { json, readBody } from "./harness/http.ts";
-import { checkRemote, linkLocalAddress, linkLocalRefusingLookup, readRemote, remoteAddress, RemoteTeammates, sendToRemote, type RemoteTeammate } from "./remote-teammates.ts";
+import { checkRemote, notAServerAddress, serverOnlyLookup, readRemote, remoteAddress, RemoteTeammates, sendToRemote, type RemoteTeammate } from "./remote-teammates.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import { createRemoteTeammateRoutes } from "./routes/remote-teammates.ts";
 import { dispatchRoutes } from "./routes/table.ts";
@@ -189,22 +189,22 @@ describe("calling a teammate's Bot API", () => {
     expect((result as { detail?: string }).detail).toMatch(/ECONNREFUSED/);
   });
 
-  it("never connects to a name that resolves to a link-local or metadata address", async () => {
-    for (const address of ["169.254.169.254", "fe80::1", "fd00:ec2::254", "::ffff:169.254.169.254", "64:ff9b::a9fe:a9fe", "::a9fe:a9fe"]) expect(linkLocalAddress(address)).toBe(true);
-    for (const address of ["127.0.0.1", "100.64.1.2", "192.168.1.5", "::1", "not an address"]) expect(linkLocalAddress(address)).toBe(false);
+  it("never connects to a name that resolves to a link-local, metadata or reserved address", async () => {
+    for (const address of ["169.254.169.254", "fe80::1", "fd00:ec2::254", "::ffff:169.254.169.254", "64:ff9b::a9fe:a9fe", "::a9fe:a9fe", "100.100.100.200", "fe80::1%eth0"]) expect(notAServerAddress(address)).toBe(true);
+    for (const address of ["127.0.0.1", "100.64.1.2", "192.168.1.5", "::1", "not an address"]) expect(notAServerAddress(address)).toBe(false);
     const lookupWith = (answer: Array<{ address: string; family: number }>) => {
       const resolve = ((_host: string, options: { all?: boolean }, callback: (...args: unknown[]) => void) => {
         if (options.all) callback(null, answer);
         else callback(null, answer[0]!.address, answer[0]!.family);
       }) as unknown as LookupFunction;
-      const lookup = linkLocalRefusingLookup(resolve);
+      const lookup = serverOnlyLookup(resolve);
       return (all: boolean) => new Promise<{ error: NodeJS.ErrnoException | null; address: unknown }>((done) => {
         lookup("far.example.com", { all }, (error, address) => done({ error, address }));
       });
     };
     const metadata = await lookupWith([{ address: "169.254.169.254", family: 4 }])(false);
-    expect(metadata.error).toMatchObject({ code: "ELINKLOCAL", message: "far.example.com resolves to 169.254.169.254, a link-local address, not another server" });
-    expect((await lookupWith([{ address: "100.64.1.2", family: 4 }, { address: "fe80::1", family: 6 }])(true)).error).toMatchObject({ code: "ELINKLOCAL" });
+    expect(metadata.error).toMatchObject({ code: "ENOTSERVER", message: "far.example.com resolves to 169.254.169.254, a link-local, metadata or reserved address, not another server" });
+    expect((await lookupWith([{ address: "100.64.1.2", family: 4 }, { address: "fe80::1", family: 6 }])(true)).error).toMatchObject({ code: "ENOTSERVER" });
     expect(await lookupWith([{ address: "100.64.1.2", family: 4 }])(false)).toEqual({ error: null, address: "100.64.1.2" });
   });
 
