@@ -30,6 +30,8 @@ Quality bar: production grade, 10/10. The user must not hit errors in normal use
    SQLite/DuckDB) with per-bot allowlists.
 
 ## How to work (agents and loops)
+- Usage limits (added 2026-11-22): if Claude's weekly limit runs out, never stop silently: write "Necesito de Eduardo:
+  usar reinicio de límite" in PROGRESS.md and keep going with Codex, Grok and Agy meanwhile.
 - You are the lead (Claude Opus). Use Herdr (you run inside it; see `herdr --skill`) to start
   sibling agents in panes: **codex** (frontend/UI), **claude** (backend/harness), **grok** and
   **agy** (independent auditors/reviewers, cross-vendor). Use git worktrees per agent.
@@ -57,5 +59,9 @@ M4 SQL connector + per-bot permissions + audit log. Also connectors without upst
       area from the UI and from M3's YAML profiles.
    3) Without a key, the Connected apps screen explains in plain words what to do; never broken or empty.
    4) Real end-to-end test of at least one MCP connector and one Composio connector, plus a different-vendor audit.
+   5) (added 2026-11-22) Antigravity as a first-class provider so Google's models (Gemini) can be used from the app:
+      verify setup/sign-in/model choice/turns end to end with the real `agy` CLI, fix what fails, plus a real e2e test.
 M5 Cross-platform CI + installers + README (EN + ES) + first release v0.1.0 of Edu Bot.
 M6 Full audit pass (security, UX, docs, error paths) by two different vendors; fix all.
+   Also (added 2026-11-22): English and Spanish must be complete and reviewed (no half-translated text, no MausBot
+   leftovers), verified in the real app; other languages may stay as they are.

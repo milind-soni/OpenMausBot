@@ -12,7 +12,7 @@ Hecho = verificado. Cada línea dice cómo se probó.
 | M3 | Organización, áreas y bots en archivos | Hecho (PR #13 a #17, 22-11) |
 | M4 | Conector SQL, permisos por bot, registro de auditoría | Pendiente |
 | M5 | CI en 3 sistemas, instaladores, README, versión 0.1.0 | Pendiente |
-| M6 | Auditoría final con dos proveedores | Pendiente |
+| M6 | Auditoría final con dos proveedores, inglés y español completos | Pendiente |
 
 ## M0: salud del repo
 
@@ -137,18 +137,26 @@ Plan (exploración de Claude, `~/Projects/edu-bot-wt/reports/claude-m3-scout.md`
 
 ## M4: SQL, permisos, auditoría y conectores
 
-Pedido nuevo de Eduardo (22-11): en su Mac los conectores no funcionan, porque dependen del servicio
-de MausBot (broker de Composio) que no tenemos. Entra en M4:
-- [ ] Conectores sin el broker de MausBot: usar tu propia llave de Composio (`ak_`), con pasos claros.
-  Sin textos que hablen de MausBot Cloud.
-- [ ] Servidores MCP propios como camino principal (Notion, Gmail, servidor de Cheil, edu-cloud),
-  configurables por bot y por área, desde la app y desde los perfiles YAML de M3 (primer PR de M4).
-- [ ] Sin llave, la pantalla "Connected apps" explica en simple qué hacer. Nunca rota ni vacía.
-- [ ] Prueba real de punta a punta: un conector MCP y uno por Composio. Auditoría de otro proveedor.
-- [ ] Conector SQL (Postgres, SQLite/DuckDB), solo lectura por defecto, con permisos por bot.
-- [ ] Registro de auditoría.
+Pedido de Eduardo (22-11): en su Mac los conectores no funcionan, porque dependían del servicio de MausBot.
+Plan (exploración de Claude, `~/Projects/edu-bot-wt/reports/claude-m4-scout.md`), 5 PRs:
+- [x] M4-1 (#19, fusionado): "Apps" sin servicio de MausBot. Sin llave explica en 3 pasos qué hacer, con botón
+  "Pegar llave" que abre el campo correcto. Tus servidores MCP aparecen primero. Los bots ya no dicen "reinicia".
+  Agy auditó 2 rondas: 7 hallazgos (ruta de menú inexacta, la llave de prueba podía ir a Composio real), luego PASS.
+- [ ] M4-2: servidores MCP propios desde los archivos de perfiles y por área (Notion, Gmail, Cheil, etc.).
+  Un comando que corre en tu computador siempre pide tu confirmación. En curso (Claude).
+- [ ] M4-3: pruebas reales de punta a punta: un conector MCP y uno por Composio (con un Composio de prueba local;
+  la prueba con Composio real solo corre si das una llave de prueba).
+- [ ] M4-4: conector SQL (SQLite, DuckDB, Postgres), solo lectura por defecto, con conexiones guardadas en el Vault
+  y una lista de tablas por bot. Los números salen de las consultas, nunca del modelo. Escribir siempre pide aprobación.
+- [ ] M4-5: el tope de aprobación por área se cumple siempre, y un visor de auditoría por bot y por área.
+- [ ] M4-6 (pedido 22-11): Antigravity como proveedor, para usar los modelos de Google (Gemini) desde la app.
+  Ya existe como motor heredado; hay que probarlo de punta a punta con tu `agy` real y arreglar lo que falle.
 
 ## Cómo trabajamos
+
+- Límites de uso (pedido 22-11): si se acaba el límite semanal de Claude, no me detengo en silencio:
+  lo anoto abajo en "Necesito de Eduardo" y sigo con Codex, Grok y Agy.
+- Idiomas (pedido 22-11): inglés y español deben quedar completos y revisados en M6. Los demás pueden quedar como están.
 
 - Regla de memoria (12 GB): máximo 2 agentes a la vez, el líder y 1 trabajador.
   Auditorías de Grok y Agy, una después de la otra. Build y tests en primer plano con 4 GB.
@@ -220,11 +228,15 @@ Edu Bot funciona sin ellas, pero serían más seguras. Detalle en `~/Projects/ed
 
 ## Necesito de Eduardo
 
-1. **Revisar y fusionar el PR de edu-cloud** (cuando esté auditado): https://github.com/EduardoMoraga/edu-cloud/pull/2
+1. **Revisar y fusionar el PR de edu-cloud** (ya auditado, PASS): https://github.com/EduardoMoraga/edu-cloud/pull/2
    Agrega una llave por persona, con permiso de "miembro" o "aprobador". Es tu repo privado, por eso no lo fusiono yo.
    Edu Bot funciona sin él, pero sin él nadie puede aprobar memoria del área desde la app.
-2. **Nombre en npm (para M5).** El comando se llama `edubot`. Los nombres `edubot` y `edu-bot` están libres en npm.
+2. **Opcional: llave de prueba de Composio.** Un proyecto Composio vacío (sin tus cuentas reales), su llave
+   `ak_...` guardada como secreto `EDUBOT_COMPOSIO_TEST_KEY` en GitHub Actions. Sin ella, esa prueba se salta.
+3. **Probar en tu Mac** la app empaquetada (después de M1): "Apps" debe mostrar los pasos para la llave, no un error.
+   (Los instaladores llegan en M5.)
+4. **Nombre en npm (para M5).** El comando se llama `edubot`. Los nombres `edubot` y `edu-bot` están libres en npm.
    Para que nadie los tome, conviene reservarlos con tu cuenta de npm. No es urgente.
-3. **Memoria del equipo.** Con 12 GB y 5 agentes, el sistema corta los procesos largos.
+5. **Memoria del equipo.** Con 12 GB y 5 agentes, el sistema corta los procesos largos.
    Opcional: iniciar Claude Code con `CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP=1`,
    o cerrar las otras sesiones de agentes que no uses.
