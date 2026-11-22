@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import type { Agent } from "undici";
 import { z } from "zod";
 
+import { addressClass, type AddressClass } from "../electron/egress-addresses.mjs";
 import { allowedServerOrigin } from "../electron/server-address.mjs";
 import { botApiEndpoint, type BotApiReply } from "../shared/bot-api.ts";
 import { writeFileAtomic } from "./atomic.ts";
@@ -32,36 +33,32 @@ const MAX_BASE_CHARS = 300;
 /** Link-local hosts (169.254/16, fe80::/10) and the cloud metadata service: never another OpenMausBot server, and a key
  * must not open a way from this server to them. */
 const LINK_LOCAL = /^(?:169\.254\.|\[fe[89ab][0-9a-f]:|\[::ffff:a9fe:|\[fd00:ec2::254\]$)/i;
-/** The same ranges as addresses, for what a name resolves to when a call connects. */
-const LINK_LOCAL_ADDRESSES = new BlockList();
-LINK_LOCAL_ADDRESSES.addSubnet("169.254.0.0", 16, "ipv4");
-LINK_LOCAL_ADDRESSES.addSubnet("fe80::", 10, "ipv6");
-LINK_LOCAL_ADDRESSES.addAddress("fd00:ec2::254", "ipv6");
-// 169.254/16 inside IPv6: NAT64's 64:ff9b::/96 and the old IPv4-compatible ::/96.
-LINK_LOCAL_ADDRESSES.addSubnet("64:ff9b::a9fe:0", 112, "ipv6");
-LINK_LOCAL_ADDRESSES.addSubnet("::a9fe:0", 112, "ipv6");
+/** No other server answers on these, whatever a name resolves to. */
+const NOT_A_SERVER = new Set<AddressClass>(["link-local", "metadata", "reserved"]);
+/** This server's own addresses count as any other: a teammate may run on this computer. */
+const NONE_OWN = new BlockList();
 
-export function linkLocalAddress(address: string): boolean {
-  const family = isIP(address);
-  return family !== 0 && LINK_LOCAL_ADDRESSES.check(address, family === 6 ? "ipv6" : "ipv4");
+/** Whether a resolved address is link-local, a cloud metadata service or reserved (also inside NAT64 or 6to4). */
+export function notAServerAddress(address: string): boolean {
+  return isIP(address.split("%", 1)[0]!) !== 0 && NOT_A_SERVER.has(addressClass(address, NONE_OWN));
 }
 
-/** Resolves a name as the system does, then refuses it when any address it gives is link-local or the metadata service,
+/** Resolves a name as the system does, then refuses it when any address it gives is link-local, metadata or reserved,
  * so a DNS name can't carry a teammate key where a typed address may not go. Runs for every connection a call makes. */
-export function linkLocalRefusingLookup(resolve: LookupFunction = dnsLookup as LookupFunction): LookupFunction {
+export function serverOnlyLookup(resolve: LookupFunction = dnsLookup as LookupFunction): LookupFunction {
   return (hostname, options, callback) => resolve(hostname, options, (error, address, family) => {
     const found = typeof address === "string" ? [address] : (address ?? []).map((entry) => entry.address);
-    const refused = error ? undefined : found.find(linkLocalAddress);
+    const refused = error ? undefined : found.find(notAServerAddress);
     if (refused === undefined) return (callback as (...args: unknown[]) => void)(error, address, family);
-    callback(Object.assign(new Error(`${hostname} resolves to ${refused}, a link-local address, not another server`), { code: "ELINKLOCAL" }), "", 0);
+    callback(Object.assign(new Error(`${hostname} resolves to ${refused}, a link-local, metadata or reserved address, not another server`), { code: "ENOTSERVER" }), "", 0);
   });
 }
 
 let teammateAgent: Agent | undefined;
-/** fetch whose every connection goes through {@link linkLocalRefusingLookup}. */
+/** fetch whose every connection goes through {@link serverOnlyLookup}. */
 async function teammateFetch(url: string, init: RequestInit): Promise<Response> {
   const { Agent: UndiciAgent, fetch: undiciFetch } = await import("undici");
-  teammateAgent ??= new UndiciAgent({ connect: { lookup: linkLocalRefusingLookup() } });
+  teammateAgent ??= new UndiciAgent({ connect: { lookup: serverOnlyLookup() } });
   return undiciFetch(url, { ...init, dispatcher: teammateAgent } as Parameters<typeof undiciFetch>[1]) as unknown as Promise<Response>;
 }
 
