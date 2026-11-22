@@ -401,12 +401,12 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       };
       const sessionIdle = sessionIdlePolicy("ACP");
 
-      const backgroundEnds = new Map<string, Promise<void>>();
+      const backgroundEnds = new Map<string, Promise<void>>(), unstopped = new Map<string, AcpSession>();
       const endBackground = (threadId: string, session: AcpSession) => {
         if (!backgroundWork || session.child.exitCode !== null) return;
         if (backgroundEnds.has(threadId)) return backgroundEnds.get(threadId);
         const cleanup = backgroundWork.end(threadId, session, (method, params, timeoutMs) => session.host.request(null, method, params, timeoutMs))
-          .then(async (complete) => { if (complete === false) await endUncancelled(threadId, session); }).finally(() => backgroundEnds.delete(threadId));
+          .then(async (complete) => { if (complete === false && !await endUncancelled(threadId, session, true)) unstopped.set(threadId, session); }).finally(() => backgroundEnds.delete(threadId));
         backgroundEnds.set(threadId, cleanup);
         return cleanup;
       };
@@ -435,10 +435,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       };
       // A session that ignores session/cancel goes on working, and EOF on stdin does not stop it either. Only a confirmed
       // session/close or the end of its process stops it, and ending a shared process ends the other sessions' turns too.
-      const endUncancelled = async (threadId: string, session: AcpSession): Promise<boolean> => {
-        const { host } = session;
-        closeSession(threadId, "cancel-timeout");
-        if (host.links.size && await session.closeConfirmed) return true;
+      const endUncancelled = async (threadId: string, session: AcpSession, forced = false): Promise<boolean> => {
+        const { host } = session; closeSession(threadId, "cancel-timeout");
+        if (!forced && host.links.size && await session.closeConfirmed) return true;
         for (const link of host.links) {
           const other = sessions.get(link.threadId);
           if (other?.host !== host) continue;
@@ -991,8 +990,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           return { turnId };
         }
 
-        const cleanup = backgroundEnds.get(threadId);
-        if (cleanup) await cleanup;
+        await backgroundEnds.get(threadId);
+        const stuck = unstopped.get(threadId);
+        if (stuck && !await endUncancelled(threadId, stuck, true)) throw new Error(`${support.displayName} is still running background work that could not be stopped. Try again shortly.`); else unstopped.delete(threadId);
         requireRunning();
         if (active.has(threadId)) throw new Error("a turn is already running on this thread");
         const spawnArgs = support.spawnArgs(turnConfig, cliTurn);
