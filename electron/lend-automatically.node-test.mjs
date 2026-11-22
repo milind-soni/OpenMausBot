@@ -159,6 +159,7 @@ test("each Cloud of the person's own is lent this computer by itself: the intern
   const kept = JSON.parse(await readFile(mac.file, "utf8")).records[myCloud.id];
   assert.deepEqual({ home: kept.folders[0].home, path: kept.folders[0].path, write: kept.folders[0].write }, { home: true, path: home, write: true });
   assert.deepEqual(mac.summaries.at(-1).clouds, ["My Cloud"]);
+  await until(() => mac.summaries.at(-1).typing === true, "the menu bar to say bots use this computer while the person types on it");
 });
 
 test("a server of the person's own their bots moved to is lent as their Clouds are, only while it is home, says it is theirs alone and is the server the move chose", async t => {
@@ -179,6 +180,8 @@ test("a server of the person's own their bots moved to is lent as their Clouds a
   await until(() => server.connects.length === 1, "Garage server to be lent this computer, with no click");
   assert.equal(server.connects[0].terminal, false);
   assert.deepEqual(mac.summaries.at(-1).clouds, ["Garage server"], "the menu bar says who can use this computer");
+  await until(() => mac.summaries.at(-1).waiting.length === 0, "Garage server to accept this computer");
+  assert.equal(mac.summaries.at(-1).typing, undefined, "a server of the person's own never matches the computer typed on");
   mac.sharing.pause();
   assert.equal(mac.summaries.at(-1).paused, true);
   await mac.sharing.resume();
