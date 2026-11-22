@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -169,6 +169,17 @@ describe("the record that an instance may hold a sign-in in the CLI's own store"
     expect(existsSync(join(baseDir, "providers", "antigravity"))).toBe(false);
     clearAntigravityNativeCredentials("a", baseDir);
     expect(antigravityNativeCredentialsHeld("a", baseDir)).toBe(false);
+  });
+
+  it("throws, rather than reading as no record, when the record is there but cannot be read", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "omb-antigravity-held-"));
+    scratch.push(baseDir);
+    noteAntigravityNativeCredentials("a", undefined, baseDir);
+    const folder = join(baseDir, "providers", "antigravity-native-credentials");
+    const [file] = readdirSync(folder);
+    rmSync(join(folder, file!));
+    mkdirSync(join(folder, file!));
+    expect(() => antigravityNativeCredentialsHeld("a", baseDir)).toThrow();
   });
 
   it("keeps the CLI path the instance last held a sign-in with", async () => {

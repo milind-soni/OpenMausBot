@@ -19,9 +19,15 @@ function recordPath(instanceId: string, baseDir: string): string {
   return join(baseDir, "providers", "antigravity-native-credentials", `${createHash("sha256").update(instanceId).digest("hex")}.json`);
 }
 
+/** Null only when there is no record: a record that cannot be read throws, since it may stand for a sign-in. */
 export function antigravityNativeCredentials(instanceId: string, baseDir = DATA_DIR): NativeCredentialsRecord | null {
   let text: string;
-  try { text = readFileSync(recordPath(instanceId, baseDir), "utf8"); } catch { return null; }
+  try {
+    text = readFileSync(recordPath(instanceId, baseDir), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
   try {
     const parsed = JSON.parse(text) as Partial<NativeCredentialsRecord> | null;
     const cli = typeof parsed?.cli === "string" && parsed.cli.trim() ? parsed.cli : undefined;

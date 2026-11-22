@@ -111,10 +111,23 @@ const loginProcesses = new Map<string, LoginProcesses>();
 
 const tracked = (instanceId: string) => (child: ChildProcess) => runtimeProcesses.track(instanceId, child);
 
+/** Sessions the CLI started whose record could not be written, so this server still signs them out. */
+const unrecordedSessions = new Map<string, string | undefined>();
+
 /** Best effort: a record that cannot be written must not fail the session the CLI just started. */
 function noteNativeSession(instanceId: string, cli: string | undefined): void {
-  try { noteAntigravityNativeCredentials(instanceId, cli); }
-  catch (error) { console.warn(`antigravity: could not note a native sign-in: ${error instanceof Error ? error.message : String(error)}`); }
+  try {
+    noteAntigravityNativeCredentials(instanceId, cli);
+    unrecordedSessions.delete(instanceId);
+  } catch (error) {
+    unrecordedSessions.set(instanceId, cli);
+    console.warn(`antigravity: could not note a native sign-in: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/** Whether this instance may hold a native sign-in. Throws when its record cannot be read. */
+function nativeCredentialsHeld(instanceId: string): boolean {
+  return unrecordedSessions.has(instanceId) || antigravityNativeCredentialsHeld(instanceId);
 }
 
 const nativeRuntimeKey = (runtime: AntigravityRuntime) => `${runtime.executablePath}\0${runtime.version}`;
@@ -331,19 +344,19 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
     const signOutNative = async () => {
       let current: { runtime: AntigravityRuntime; profile: AntigravityProfile } | null = null;
       try { current = await runtimeAndProfile(); } catch {}
-      if (current?.runtime.harnessPath !== null && !antigravityNativeCredentialsHeld(input.instanceId)) return;
+      if (current?.runtime.harnessPath !== null && !nativeCredentialsHeld(input.instanceId)) return;
       // Its processes are gone before the CLI is asked: one still running keeps the account it started with.
       if (!(await runtimeProcesses.stopped(input.instanceId))) throw new Error("Antigravity is still running for this account and could not be stopped. Try again.");
-      if (current?.runtime.harnessPath === null && !antigravityNativeCredentialsHeld(input.instanceId)) {
+      if (current?.runtime.harnessPath === null && !nativeCredentialsHeld(input.instanceId)) {
         const found = await antigravityCliSignIn(current.runtime, current.profile, { waitForExit: true, onProcess: tracked(input.instanceId) })
           .catch(() => { throw new Error("Antigravity could not confirm whether this account is signed in. Try again."); });
         if (found === "in") noteAntigravityNativeCredentials(input.instanceId, input.config.cli);
       }
-      if (!antigravityNativeCredentialsHeld(input.instanceId)) return;
+      if (!nativeCredentialsHeld(input.instanceId)) return;
       let cli = current?.runtime.harnessPath === null ? current : null;
       if (!cli) {
         const failures: string[] = [];
-        for (const path of new Set([antigravityNativeCredentials(input.instanceId)?.cli, "antigravity"].filter((path) => path !== undefined))) {
+        for (const path of new Set([antigravityNativeCredentials(input.instanceId)?.cli ?? unrecordedSessions.get(input.instanceId), "antigravity"].filter((path) => path !== undefined))) {
           try {
             const found = await runtimeAndProfile(path);
             if (found.runtime.harnessPath === null) { cli = found; break; }
@@ -357,6 +370,7 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       nativeSignIn.forget(input.instanceId);
       await signOutAntigravityCli(cli.runtime, cli.profile, { onProcess: tracked(input.instanceId) });
       clearAntigravityNativeCredentials(input.instanceId);
+      unrecordedSessions.delete(input.instanceId);
     };
     return {
       ...base,
