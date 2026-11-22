@@ -586,7 +586,7 @@ const TOOL_DEFINITIONS = [
         scope: {
           type: "string",
           enum: ["all", "conversations", "memory", "team", "threads"],
-          description: "What to search. Leave it out for both; \"memory\" for only your memory files, \"conversations\" for only your earlier conversations; \"team\" for accepted shared notes.",
+          description: "What to search. Leave it out for both; \"memory\" for only your memory files, \"conversations\" for only your earlier conversations; \"team\" for accepted shared notes; \"threads\" your other chats, or one by thread_id, only if the person refers to it.",
         },
         thread_id: { type: "string", description: "Instead of searching: the thread id from a hit, with message_id, to read that message in full." },
         message_id: { type: "string", description: "The message id from the same hit." },

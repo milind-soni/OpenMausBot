@@ -197,6 +197,9 @@ describe("the bot-memory module through the route table", () => {
       ["GET", "/api/profile/learned"],
       ["POST", "/api/profile/learned/e1/remove"],
       ["POST", "/api/bots/b1/memory/open"],
+      ["GET", "/api/bots/b1/memory/thread/t1"],
+      ["PUT", "/api/bots/b1/memory/thread/t1"],
+      ["DELETE", "/api/bots/b1/memory/thread/t1"],
     ] as const) {
       expect(requiredScope(method, path), `${method} ${path}`).toBe("admin");
     }

@@ -13,7 +13,7 @@ import { callTriggerTool, TRIGGER_TOOL_NAMES } from "./agents-call-triggers.ts";
 import { catalogProfileFromEnv, fullInputSchema, SHARED_COMPUTER_TOOL_NAMES } from "./agents-catalog.ts";
 import { harnessClientFromEnv } from "./agents-client.ts";
 import type { HarnessClient, Json } from "./agents-client.ts";
-import { memorySavedText, memorySearchText, threadNotesSearchText } from "./memory-search-text.ts";
+import { memorySavedText, memorySearchText, threadReadText, threadsListText } from "./memory-search-text.ts";
 import { apiAnswer, boundedAgentResult } from "./agents-result.ts";
 import { argumentNames, outOfBounds } from "./agents-schema.ts";
 import { dropBlankArguments } from "./agents-blank-arguments.ts";
@@ -804,7 +804,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     const q = String(args.query ?? "").trim();
     const since = typeof args.since === "string" ? args.since.trim() : "";
     const until = typeof args.until === "string" ? args.until.trim() : "";
-    if (!q && !since) {
+    if (!q && !since && args.scope !== "threads") {
       return { text: "session_search needs a query (a few content words) or a since span, for example {\"query\":\"site audit broken links\"} or {\"since\":\"2d\"}.", isError: true };
     }
     const query = new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID });
@@ -813,7 +813,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (until) query.set("until", until);
     if (typeof args.limit === "number" && Number.isFinite(args.limit)) query.set("limit", String(Math.trunc(args.limit)));
     if (args.scope === "conversations" || args.scope === "memory" || args.scope === "team" || args.scope === "threads") query.set("scope", args.scope);
-    const r = await api(`/api/internal/session-search?${query.toString()}`); if (args.scope === "threads") return q ? { text: threadNotesSearchText(q, Array.isArray(r.threadNotes) ? r.threadNotes.filter(jsonRecord) : []) } : { text: "session_search scope \"threads\" needs a query: a few words naming the conversation or what was agreed there.", isError: true };
+    const r = await api(`/api/internal/session-search?${query.toString()}`); if (args.scope === "threads") return { text: threadsListText(q, r) };
     const hits = Array.isArray(r.hits) ? (r.hits as Json[]) : [];
     const memoryHits = Array.isArray(r.memoryHits) ? r.memoryHits.filter(jsonRecord) : [];
     const teamHits = Array.isArray(r.teamHits) ? r.teamHits.filter(jsonRecord) : [];
@@ -848,6 +848,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     };
   }
   if (member === "session_read") {
+    if (args.scope === "threads" && typeof args.thread_id === "string") return { text: threadReadText(await api(`/api/internal/session-search?${new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, scope: "threads", threadId: args.thread_id.trim(), ...(typeof args.message_id === "string" && args.message_id.trim() ? { before: args.message_id.trim() } : {}), ...(typeof args.limit === "number" && Number.isFinite(args.limit) ? { limit: String(Math.trunc(args.limit)) } : {}) }).toString()}`)) };
     const threadId = String(args.thread_id ?? "").trim();
     const messageId = String(args.message_id ?? "").trim();
     if (!threadId || !messageId) {

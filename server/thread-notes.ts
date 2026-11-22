@@ -135,7 +135,7 @@ const SCOPE_RULES =
   " memory_update takes scope. For the matter this conversation is about (the client, the parties, terms, deadlines, what was decided), leave scope out or pass \"thread\": it goes to this conversation's notes." +
   " Pass scope \"everywhere\" for what holds in every conversation: facts about the person, how they like to work, their standing preferences, or anything they ask you to remember everywhere or for all their clients; it goes to MEMORY.md." +
   " Choose the scope yourself; never ask the person which." +
-  " When the person asks you to use something from another of your conversations, read that conversation's notes with session_search scope \"threads\" and a few words naming it, for that request only.";
+  " Only when the person refers to another of your conversations (\"the clause we agreed for Supermouse\"), find it with session_search scope \"threads\" and words naming it, then read it with its thread_id, for that request only.";
 
 /** This conversation's notes and, in a conversation whose saves default to them, how to save there. For the volatile half
  * of the prompt, beside MEMORY.md, so a main conversation's prompt is unchanged and a compaction never drops them. */
@@ -155,32 +155,94 @@ export function threadNotesPrompt(
   return `${rules}\n\nThis conversation's notes:\n${notes.text || "(none yet)"}${cut}`;
 }
 
-export interface OtherThreadNotes {
+/** One of the bot's own conversations another may reach, as the caller found it allowed. */
+export interface ReachableThread {
   threadId: string;
   title?: string;
-  text: string;
+  updatedAt?: number;
+  createdAt?: number;
 }
 
-/** The notes of the bot's other conversations whose title or notes mention every word of `query`, best match first. */
-export function searchThreadNotes(
-  botId: string,
-  threads: readonly { threadId: string; title?: string }[],
-  query: string,
-  opts: { current?: string; limit?: number } = {},
-): OtherThreadNotes[] {
-  const words = query.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((word) => word.length > 1);
-  if (!words.length) return [];
-  const found: Array<OtherThreadNotes & { titled: number }> = [];
-  for (const thread of threads) {
-    if (thread.threadId === opts.current) continue;
-    const text = loadedThreadNotes(readThreadNotes(botId, thread.threadId)).text;
-    if (!text) continue;
-    const title = (thread.title ?? "").toLowerCase();
-    const haystack = `${title}\n${text.toLowerCase()}`;
-    if (!words.every((word) => haystack.includes(word))) continue;
-    found.push({ threadId: thread.threadId, ...(thread.title ? { title: thread.title } : {}), text, titled: words.filter((word) => title.includes(word)).length });
+interface ThreadLine {
+  id?: string;
+  role: string;
+  kind: string;
+  text?: string;
+  at?: number;
+}
+
+export const THREAD_LIST_LIMIT = 10;
+export const THREAD_LIST_MAX = 25;
+export const THREAD_READ_LIMIT = 10;
+export const THREAD_LINE_CHARS = 500;
+export const THREAD_READ_BUDGET = 8_000;
+const NOTES_PREVIEW_CHARS = 300;
+
+const cut = (text: string, max: number) => {
+  if (text.length <= max) return { text, truncated: false };
+  const end = /[\uD800-\uDBFF]/.test(text[max - 1] ?? "") ? max - 1 : max;
+  return { text: text.slice(0, end), truncated: true };
+};
+
+/** session_search scope "threads": the bot's other conversations, never another bot's. With `threadId`, that
+ * conversation's notes and a page of its messages, newest first, each cut short, before the message `before` names;
+ * with `query`, the conversations whose title or notes hold every word; with neither, the newest. An id that is not one
+ * of `threads` reads as not found, so the answer never says whether another bot's conversation exists. */
+export function reachThreads(input: {
+  botId: string;
+  current: string;
+  threads: readonly ReachableThread[];
+  messages(threadId: string): readonly ThreadLine[];
+  query?: string;
+  threadId?: string;
+  before?: string;
+  limit?: number;
+  /** False while the bot's memory is off: its conversations are still read, their notes are not. */
+  notes?: boolean;
+}) {
+  const notesOf = (threadId: string) => input.notes === false ? { text: "", truncated: false } : loadedThreadNotes(readThreadNotes(input.botId, threadId));
+  const others = input.threads.filter((thread) => thread.threadId !== input.current);
+  if (input.threadId) {
+    const thread = others.find((candidate) => candidate.threadId === input.threadId);
+    if (!thread) return { error: "not-found" as const };
+    const notes = notesOf(thread.threadId);
+    const lines = input.messages(thread.threadId).filter((line) => (line.role === "user" || line.role === "bot") && line.kind === "text" && line.text?.trim());
+    const end = input.before ? lines.findIndex((line) => line.id === input.before) : lines.length;
+    const limit = Math.min(Math.max(1, input.limit ?? THREAD_READ_LIMIT), THREAD_LIST_MAX);
+    let budget = THREAD_READ_BUDGET - notes.text.length;
+    const page: Array<{ messageId?: string; by: "person" | "bot"; at?: number; text: string; truncated: boolean }> = [];
+    for (let index = (end === -1 ? 0 : end) - 1; index >= 0 && page.length < limit && budget > 0; index -= 1) {
+      const line = lines[index]!;
+      const shown = cut(line.text!.trim(), Math.min(THREAD_LINE_CHARS, budget));
+      budget -= shown.text.length;
+      page.push({ ...(line.id ? { messageId: line.id } : {}), by: line.role === "user" ? "person" : "bot", ...(line.at ? { at: line.at } : {}), ...shown });
+    }
+    const oldest = (end === -1 ? 0 : end) - page.length;
+    return {
+      thread: { threadId: thread.threadId, ...(thread.title ? { title: thread.title } : {}) },
+      notes: notes.text, notesTruncated: notes.truncated,
+      messages: page,
+      earlier: oldest > 0 ? page.at(-1)?.messageId ?? null : null,
+    };
   }
-  return found.sort((a, b) => b.titled - a.titled).slice(0, opts.limit ?? 5).map(({ titled: _titled, ...hit }) => hit);
+  const words = (input.query ?? "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((word) => word.length > 1);
+  const found = others.flatMap((thread) => {
+    const notes = notesOf(thread.threadId).text;
+    const title = (thread.title ?? "").toLowerCase();
+    const haystack = `${title}\n${notes.toLowerCase()}`;
+    if (!words.every((word) => haystack.includes(word))) return [];
+    return [{ thread, notes, titled: words.filter((word) => title.includes(word)).length }];
+  }).sort((a, b) => b.titled - a.titled || (b.thread.updatedAt ?? b.thread.createdAt ?? 0) - (a.thread.updatedAt ?? a.thread.createdAt ?? 0));
+  const limit = Math.min(Math.max(1, input.limit ?? THREAD_LIST_LIMIT), THREAD_LIST_MAX);
+  return {
+    total: found.length,
+    threads: found.slice(0, limit).map(({ thread, notes }) => ({
+      threadId: thread.threadId,
+      ...(thread.title ? { title: thread.title } : {}),
+      ...(thread.updatedAt ?? thread.createdAt ? { updatedAt: thread.updatedAt ?? thread.createdAt } : {}),
+      notes: cut(notes, NOTES_PREVIEW_CHARS).text,
+    })),
+  };
 }
 
 /** "Saved to this thread", once, under the reply of a turn that saved to its conversation's notes. */

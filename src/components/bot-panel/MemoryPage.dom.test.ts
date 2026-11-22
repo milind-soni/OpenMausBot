@@ -18,6 +18,7 @@ const bot = (threadId: string, extra: Partial<Bot> = {}) => ({ id: "counsel", th
   unread: false, messages: [], modelSelection: { instanceId: "x", model: "x" }, ...extra }) as unknown as Bot;
 const files: Record<string, string> = {};
 const scoped = new Set<string>();
+let review: { token: string; changed: string[] } | null = null;
 const puts: Array<{ url: string; text: string; expectedHash?: string }> = [];
 const reply = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const hash = (text: string) => `h${text.length}:${text.split("\n").length}`;
@@ -30,6 +31,7 @@ beforeEach(() => {
   puts.length = 0;
   for (const key of Object.keys(files)) delete files[key];
   scoped.clear();
+  review = null;
   files["MEMORY.md"] = "- Prefers short replies.\n";
   // The memory routes with their hash check: a save against a stale hash is a 409 with the file as it is now.
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
@@ -41,10 +43,12 @@ beforeEach(() => {
       const target = body.path ?? path;
       puts.push({ url: url.pathname, text: body.text, expectedHash: body.expectedHash });
       const current = files[target] ?? "";
-      if ((body.expectedHash ?? hash("")) !== hash(current)) return reply(409, { error: "conflict", current, currentHash: hash(current) });
+      if (body.expectedHash !== hash(current)) return reply(409, { error: "conflict", current, currentHash: hash(current) });
       files[target] = body.text;
       return reply(200, { path: target, text: body.text, hash: hash(body.text), exists: true, scoped: Boolean(thread && scoped.has(thread)), overview: {} });
     }
+    if (url.pathname.endsWith("/memory/reviewed")) { review = null; return reply(200, { ok: true, lendingReview: false }); }
+    if (url.pathname.endsWith("/memory")) return reply(200, { topics: [], logs: [], ...(review ? { lendingReview: review } : {}) });
     const text = files[path] ?? "";
     return reply(200, { path, text, hash: hash(text), exists: path in files, ...(thread ? { scoped: scoped.has(thread) } : {}) });
   }));
@@ -117,4 +121,15 @@ it("says memory is off and nothing else when it is off", async () => {
   await show(bot("main", { memoryEnabled: false }));
   expect(host.textContent).toBe("Memory is off for Counsel.");
   expect(host.querySelector("textarea")).toBeNull();
+});
+
+it("keeps the one review a lent computer needs: someone else's change to memory, until the owner has looked", async () => {
+  review = { token: "a".repeat(64), changed: ["MEMORY.md"] };
+  await show(bot("main"));
+  expect(host.textContent).toContain("MEMORY.md");
+  const looked = [...host.querySelectorAll("button")].at(-1)!;
+  await act(async () => looked.click());
+  await settle();
+  expect(review).toBeNull();
+  expect(host.querySelectorAll("button")).toHaveLength(0);
 });

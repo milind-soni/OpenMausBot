@@ -16,13 +16,13 @@ export function MemoryText({ label, doc, placeholder, save, attr }: {
   label: string;
   doc: MemoryDoc;
   placeholder: string;
-  save: (text: string, expectedHash: string | undefined) => Promise<TextSaveResult<MemoryDoc>>;
+  save: (text: string, expectedHash: string) => Promise<TextSaveResult<MemoryDoc>>;
   attr: string;
 }) {
   const [text, setText] = useState(doc.text);
   const [status, setStatus] = useState<Status>("idle");
   const latest = useRef(doc.text);
-  const onDisk = useRef({ text: doc.text, hash: doc.exists ? doc.hash : undefined });
+  const onDisk = useRef({ text: doc.text, hash: doc.hash });
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const running = useRef<Promise<void> | null>(null);
   const saveRef = useRef(save);
@@ -43,9 +43,9 @@ export function MemoryText({ label, doc, placeholder, save, attr }: {
   useEffect(() => {
     if (latest.current !== onDisk.current.text || running.current) return;
     latest.current = doc.text;
-    onDisk.current = { text: doc.text, hash: doc.exists ? doc.hash : undefined };
+    onDisk.current = { text: doc.text, hash: doc.hash };
     setText(doc.text);
-  }, [doc.text, doc.hash, doc.exists]);
+  }, [doc.text, doc.hash]);
 
   const persist = async (): Promise<void> => {
     if (timer.current) clearTimeout(timer.current);

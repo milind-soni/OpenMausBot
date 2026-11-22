@@ -7,9 +7,9 @@ import { memoryOverview, parseMemoryPath, readMemoryDoc, threadNotesPath } from 
 import {
   THREAD_NOTES_MAX_LINES,
   createThreadScope,
+  reachThreads,
   readThreadNotes,
   scopedMemoryUpdate,
-  searchThreadNotes,
   threadNotesPrompt,
   updateThreadNotes,
 } from "./thread-notes.ts";
@@ -133,7 +133,7 @@ describe("what each conversation's prompt holds", () => {
   it("names the notes file to an engine that keeps memory with its own file tools", () => {
     const botId = freshBot();
     const prompt = threadNotesPrompt(botId, "acme", { scoped: true, managedWrites: false, fileTools: true });
-    expect(prompt).toContain(join(workspaceDir(botId), "memory", "threads", "acme.md"));
+    expect(prompt).toContain(JSON.stringify(join(workspaceDir(botId), "memory", "threads", "acme.md")));
   });
 
   it("shows nothing when memory is off, and notes without rules when writes are refused", () => {
@@ -155,23 +155,49 @@ describe("what each conversation's prompt holds", () => {
   });
 });
 
-describe("reading another conversation's notes on request", () => {
-  it("finds the same bot's other conversation by its name or its notes", () => {
-    const botId = freshBot();
-    updateThreadNotes(botId, "sm", { action: "append", text: "Agreed clause 7: liability capped at fees paid" });
-    const threads = [{ threadId: "sm", title: "Supermouse lease" }, { threadId: "here", title: "Acme NDA" }];
-    expect(searchThreadNotes(botId, threads, "supermouse", { current: "here" })).toEqual([
-      { threadId: "sm", title: "Supermouse lease", text: expect.stringContaining("liability capped") },
-    ]);
-    expect(searchThreadNotes(botId, threads, "liability clause", { current: "here" })).toHaveLength(1);
-    expect(searchThreadNotes(botId, threads, "supermouse", { current: "sm" })).toEqual([]);
+describe("reaching another conversation on request", () => {
+  const line = (id: string, role: string, text: string, at = 1) => ({ id, role, kind: "text", text, at });
+  const history: Record<string, ReturnType<typeof line>[]> = {
+    sm: [line("m1", "user", "Can we cap liability?"), line("m2", "bot", "Agreed: clause 7 caps it at fees paid."), line("m3", "user", "x".repeat(900))],
+  };
+  const reach = (botId: string, extra: Partial<Parameters<typeof reachThreads>[0]>) => reachThreads({
+    botId, current: "here", threads: [{ threadId: "sm", title: "Supermouse lease", updatedAt: 5 }, { threadId: "here", title: "Acme NDA", updatedAt: 9 }],
+    messages: (threadId) => history[threadId] ?? [], ...extra,
   });
 
-  it("never reads another bot's conversations", () => {
-    const owner = freshBot();
+  it("finds the same bot's other conversation by its name or its notes, never the one asking", () => {
+    const botId = freshBot();
+    updateThreadNotes(botId, "sm", { action: "append", text: "Agreed clause 7: liability capped at fees paid" });
+    expect(reach(botId, { query: "supermouse" })).toEqual({ total: 1, threads: [{ threadId: "sm", title: "Supermouse lease", updatedAt: 5, notes: expect.stringContaining("liability capped") }] });
+    expect(reach(botId, { query: "liability clause" })).toMatchObject({ total: 1 });
+    expect(reach(botId, { query: "acme" })).toEqual({ total: 0, threads: [] });
+    expect(reach(botId, {})).toMatchObject({ total: 1, threads: [{ threadId: "sm" }] });
+  });
+
+  it("reads one conversation's notes and its messages newest first, each cut short, with a cursor to older ones", () => {
+    const botId = freshBot();
+    updateThreadNotes(botId, "sm", { action: "append", text: "Clause 7 agreed" });
+    const page = reach(botId, { threadId: "sm", limit: 2 });
+    expect(page).toMatchObject({ thread: { threadId: "sm", title: "Supermouse lease" }, notes: expect.stringContaining("Clause 7 agreed"), earlier: "m2" });
+    const messages = "messages" in page ? page.messages ?? [] : [];
+    expect(messages.map((message) => [message.messageId, message.by, message.truncated])).toEqual([["m3", "person", true], ["m2", "bot", false]]);
+    expect(messages[0]!.text).toHaveLength(500);
+    expect(reach(botId, { threadId: "sm", before: "m2" })).toMatchObject({ messages: [{ messageId: "m1", by: "person" }], earlier: null });
+  });
+
+  it("answers not found for its own conversation, another bot's, and one it was not given", () => {
+    const botId = freshBot();
+    expect(reach(botId, { threadId: "here" })).toEqual({ error: "not-found" });
+    expect(reach(botId, { threadId: "elsewhere" })).toEqual({ error: "not-found" });
     const other = freshBot();
-    updateThreadNotes(owner, "sm", { action: "append", text: "Supermouse: liability capped" });
-    expect(searchThreadNotes(other, [{ threadId: "sm", title: "Supermouse lease" }], "supermouse")).toEqual([]);
+    updateThreadNotes(botId, "sm", { action: "append", text: "Supermouse: liability capped" });
+    expect(reach(other, { query: "liability" })).toEqual({ total: 0, threads: [] });
+  });
+
+  it("reads no notes while the bot's memory is off", () => {
+    const botId = freshBot();
+    updateThreadNotes(botId, "sm", { action: "append", text: "Clause 7 agreed" });
+    expect(reach(botId, { threadId: "sm", notes: false })).toMatchObject({ notes: "" });
   });
 });
 

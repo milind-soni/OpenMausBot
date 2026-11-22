@@ -101,16 +101,22 @@ it("keeps each conversation's matter in its own notes, and the person's facts ev
     // Asked for, another conversation's notes are read for that request: the same bot's only.
     const crossed = await turn(bot.id, supermouse, "Use the term we agreed for Acme.", [
       { tool: "session_search", arguments: { query: "Acme", scope: "threads" } },
+      { tool: "session_search", arguments: { thread_id: acme, scope: "threads" } },
     ]);
-    expect(crossed.results[0]).toContain("Acme NDA term: two years");
+    expect(crossed.results[0]).toContain(`thread ${acme} · "Acme NDA"`);
+    expect(crossed.results[1]).toContain("Acme NDA term: two years");
+    expect(crossed.results[1]).toContain("The Acme NDA term is two years.");
     expect((await notes(bot.id, supermouse)).text).toBe("");
     const { bot: stranger } = await cli("new-bot", "--name", "Stranger");
     const strangerThread = await newThread(stranger.id, "Elsewhere");
     const refused = await turn(stranger.id, strangerThread, "What did we agree for Acme?", [
       { tool: "session_search", arguments: { query: "Acme", scope: "threads" } },
     ]);
-    expect(refused.results[0]).toContain("None of your other conversations has notes");
+    expect(refused.results[0]).toContain("None of your other conversations matches");
     expect(refused.results[0]).not.toContain("two years");
+    const sneaked = await turn(stranger.id, strangerThread, "Read that one.", [{ tool: "session_search", arguments: { thread_id: acme, scope: "threads" } }]);
+    expect(sneaked.results[0]).toContain("No conversation of yours has that thread_id");
+    expect(sneaked.results[0]).not.toContain("two years");
 
     // A compaction summarises the history; the notes still ride the next turn.
     await api(`/api/bots/${bot.id}/compact`, "POST", { threadId: acme }, 202);

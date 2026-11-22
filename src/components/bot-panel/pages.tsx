@@ -1,17 +1,17 @@
-import { useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { FolderOpen, Plus, Server } from "lucide-react";
 
 import { appSwitchPatch } from "@/lib/bot-app-access";
 import { skillsLibraryEnabled } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
 import { mcpServersForBot, mcpServersOfBot, mcpSwitch, useMcpServers } from "@/lib/mcp-servers";
-import { MEMORY_INDEX, saveMemoryDoc, saveThreadNotes } from "@/lib/memory";
+import { fetchMemoryOverview, markMemoryReviewed, MEMORY_INDEX, saveMemoryDoc, saveThreadNotes, type LendingReview } from "@/lib/memory";
 import { openExternalLink } from "@/lib/app-links";
 import type { Routine } from "@/lib/routines";
 import type { SkillImportSummary } from "../../../shared/skill-import";
 import { shortPath } from "@/lib/short-path";
 import { skillImportLines } from "@/lib/skill-import";
-import { type Bot } from "@/state/store";
+import { ApiError, type Bot } from "@/state/store";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { connectAppFromBot } from "../AppGrantPrompt";
 import { ServiceIcon } from "../ServiceIcon";
@@ -30,6 +30,8 @@ import { BrowserLogins } from "./browser-logins";
 import { useOpenComputer, WherePage } from "./ComputerTab";
 import { SettingsPage } from "./SettingsPage";
 import { MemoryText } from "./MemoryText";
+import { LendingReviewNotice } from "../bot-settings/MemorySection";
+import { useTeamMemoryEntries } from "../conversation-share/conversation-share";
 import type { SimplePageId } from "./page-registry";
 import { BotSwitch, buttonCls, Card, ItemRow, LinkRow, NoteRow, RadioRow, RowIcon, rowCls, RowText, SwitchRow, TextRow, TrashButton } from "./rows";
 import { useMemoryDoc } from "./use-memory-doc";
@@ -166,24 +168,73 @@ export function RoutinesPage({ bot, derived }: PageContext) {
 }
 
 /** The bot's memory as plain text, saved as the person types: this conversation's own notes when it keeps them, and
- * MEMORY.md, which loads in every conversation. On a Team Cloud MEMORY.md is the person's own layer of it. */
+ * MEMORY.md, which loads in every conversation. On a Team Cloud the notes are the person's own layer of the bot's
+ * memory, its topic files included, with the lines they saved to the team's memory. */
 export function MemoryPage({ bot }: PageContext) {
   const memory = useMemoryDoc(bot);
-  if (bot.memoryEnabled === false) return <Card><NoteRow>{t("botPanel.library.memoryOff", { name: bot.name })}</NoteRow></Card>;
+  const memoryOn = bot.memoryEnabled !== false;
+  const teamSaved = useTeamMemoryEntries(bot.id, memory.mine && memoryOn && !bot.defaultBot?.person, memory.docs);
+  if (!memoryOn) return <Card><NoteRow>{t("botPanel.library.memoryOff", { name: bot.name })}</NoteRow></Card>;
   if (memory.error) return <Card><NoteRow tone="warn">{t("botPanel.library.memoryError")}</NoteRow></Card>;
   const index = memory.docs?.find((doc) => doc.path === MEMORY_INDEX);
   if (!index) return <Card><NoteRow>{t("common.checking")}</NoteRow></Card>;
   const thread = memory.thread;
+  const topics = memory.mine ? memory.docs!.filter((doc) => doc.path !== MEMORY_INDEX) : [];
   return (
     <div key={`${bot.id}:${bot.threadId}`} data-panel-memory="" className="flex flex-col gap-4 px-1 pt-2">
+      {!memory.mine && <MemoryReviewNotice bot={bot} />}
       {thread && (thread.scoped || thread.text.trim()) && (
         <MemoryText attr="thread" label={t("memoryPage.thisThread")} doc={thread} placeholder={t("memoryPage.empty")}
           save={(text, hash) => saveThreadNotes(bot.id, bot.threadId, text, hash)} />
       )}
       <MemoryText attr="everywhere" label={t("memoryPage.everywhere")} doc={index} placeholder={t("memoryPage.empty")}
         save={(text, hash) => saveMemoryDoc(bot.id, MEMORY_INDEX, text, hash, memory.mine)} />
+      {topics.map((doc) => (
+        <MemoryText key={doc.path} attr={doc.path} label={doc.path.replace(/^memory\//, "").replace(/\.md$/, "")} doc={doc} placeholder={t("memoryPage.empty")}
+          save={(text, hash) => saveMemoryDoc(bot.id, doc.path, text, hash, true)} />
+      ))}
+      {teamSaved.entries.length > 0 && (
+        <Card>
+          {teamSaved.entries.map((entry) => (
+            <div key={entry.id} data-team-memory-entry={entry.id} className={rowCls}>
+              <div className="min-w-0 flex-1 text-[13px] leading-[1.45] text-ink">
+                {entry.text}
+                {entry.yours && <span className="block text-[12px] text-ink-secondary">{t("teamMemorySave.yours")}</span>}
+              </div>
+              <TrashButton label={t("botPanel.memory.forget")} onClick={() => void teamSaved.remove(entry.id)} />
+            </div>
+          ))}
+        </Card>
+      )}
     </div>
   );
+}
+
+/** On a Cloud lending this computer, a change someone else made to the bot's memory holds lent turns until the owner
+ * has looked: the one review this page keeps. */
+function MemoryReviewNotice({ bot }: { bot: Pick<Bot, "id" | "busy"> }) {
+  const [review, setReview] = useState<{ value: LendingReview; stale: boolean } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => fetchMemoryOverview(bot.id).then((overview) => {
+    setReview((current) => (overview.lendingReview ? { value: overview.lendingReview, stale: current?.stale ?? false } : null));
+  }, () => {}), [bot.id]);
+  useEffect(() => { void load(); }, [load, bot.busy]);
+  if (!review) return null;
+  const reviewed = async () => {
+    setBusy(true);
+    try {
+      await markMemoryReviewed(bot.id, review.value.token);
+      setReview(null);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        setReview({ ...review, stale: true });
+        await load();
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <LendingReviewNotice changed={review.value.changed} stale={review.stale} busy={busy} onReviewed={() => void reviewed()} />;
 }
 
 export function SkillsPage({ bot }: PageContext) {
