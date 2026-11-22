@@ -3,7 +3,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BotLogins } from "../bot-logins.ts";
 import { json, readBody } from "../harness/http.ts";
@@ -15,6 +15,11 @@ import { TEAM_READER, VaultStore } from "../vault-store.ts";
 import { createLoginRoutes } from "./logins.ts";
 import { dispatchRoutes } from "./table.ts";
 import { createVaultRoutes, VAULT_ERRORS } from "./vault.ts";
+
+vi.mock("../data-format.ts", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../data-format.ts")>(),
+  DATA_FORMAT: { reads: 2, writes: 2 },
+}));
 
 const VALUE = "sk_test_fake-route-secret-1";
 const NEW_VALUE = "sk_test_fake-route-secret-2";
@@ -58,10 +63,27 @@ async function serve(onePasswordToken: string | null = null, team = false) {
     answers.push(text);
     return { status: response.status, body: JSON.parse(text), cache: response.headers.get("cache-control") };
   };
-  return { store, call, answers };
+  return { store, call, answers, reopen: () => new VaultStore({ dataDir: dir }) };
 }
 
 describe("the Vault routes", () => {
+  it("saves and replaces a large secret under format 2 without exposing its value", async () => {
+    const { call, reopen, answers } = await serve();
+    const original = "🔑".repeat(16_384);
+    const created = await call("POST", "/api/vault/secrets", { name: "Large fixture", value: original });
+    expect(created).toMatchObject({ status: 201, body: { secret: { name: "Large fixture" } } });
+    const { id } = created.body.secret;
+    expect(reopen().secret(id)?.value === original).toBe(true);
+
+    const value = "a" + "\u0001".repeat(65_534) + "b";
+    const path = `/api/vault/secrets/${id}`;
+    expect(await call("PATCH", path, { value })).toMatchObject({ status: 200 });
+    expect(await call("PATCH", path, { value: value + "c" })).toMatchObject({ status: 400, body: { error: VAULT_ERRORS.value } });
+    expect(reopen().secret(id)?.value === value).toBe(true);
+    expect((await call("GET", "/api/vault")).body.secrets).toMatchObject([{ id }]);
+    for (const answer of answers) expect(answer).not.toMatch(/"value":|🔑|\\u0001/u);
+  });
+
   it("deleting a secret says which MCP servers lost their key, and a move's secret keeps its id and who may use it", async () => {
     const { store, call } = await serve();
     const added = await call("POST", "/api/vault/secrets", { id: "55555555-5555-4555-8555-555555555555", name: "Stripe", value: VALUE, bots: ["pepper"], source: "card", refOnly: true });
@@ -105,7 +127,7 @@ describe("the Vault routes", () => {
     expect((await call("POST", "/api/vault/secrets", { name: "K", value: VALUE }, "text/plain")).status).toBe(415);
     expect(await call("POST", "/api/vault/secrets", { name: " ", value: VALUE })).toMatchObject({ status: 400, body: { error: VAULT_ERRORS.name } });
     expect(await call("POST", "/api/vault/secrets", { name: "K", value: " " })).toMatchObject({ status: 400, body: { error: VAULT_ERRORS.value } });
-    expect(await call("POST", "/api/vault/secrets", { name: "K", value: "x".repeat(4_097) })).toMatchObject({ status: 400, body: { error: VAULT_ERRORS.value } });
+    expect(await call("POST", "/api/vault/secrets", { name: "K", value: "x".repeat(65_537) })).toMatchObject({ status: 400, body: { error: VAULT_ERRORS.value } });
     expect((await call("POST", "/api/vault/secrets", { name: "K", value: VALUE, bots: ["ghost"] })).status).toBe(400);
     const id = (await call("POST", "/api/vault/secrets", { name: "K", value: VALUE })).body.secret.id;
     expect((await call("PATCH", `/api/vault/secrets/${id}`, { value: "" })).status).toBe(400);
