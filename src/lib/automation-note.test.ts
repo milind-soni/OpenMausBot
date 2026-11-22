@@ -5,7 +5,7 @@ import type { Bot, Message } from "@/state/store";
 import { continueNote, retryNote, startPrompt } from "../../server/routine-recovery";
 import { composeExecutionPrompt } from "../../server/routine-execution";
 import { createWaitHost } from "../../server/wait-host";
-import { automationNote, automationNoteTitle } from "./automation-note";
+import { automationNote, automationNoteTitle, knownWaits, lastRequests } from "./automation-note";
 import { setLocale } from "./i18n";
 import { unreadContextMessage } from "./unread-context";
 import { firstUnreadMessageId } from "./unread-divider";
@@ -24,7 +24,10 @@ function followUpLine(label: string, followUp: string, retried?: "restarted" | "
   return startPrompt({ retried }, queued, first, () => said);
 }
 
-const line = (text: string, extra: Partial<Message> = {}): Message => ({ id: "m", role: "user", kind: "text", at: 1, text, ...extra }) as Message;
+const typed = (text: string, extra: Partial<Message> = {}): Message => ({ id: "m", role: "user", kind: "text", at: 1, text, ...extra }) as Message;
+/** As the server stores a line an automation started a turn with. */
+const line = (text: string, extra: Partial<Message> = {}): Message => typed(text, { automated: true, ...extra });
+const waitCard = (label: string, followUp: string): Message => ({ id: `card-${label}`, role: "bot", kind: "options", at: 1, card: { title: "", options: [], waitRequest: { waitId: label, label, followUp } } }) as unknown as Message;
 
 describe("automationNote", () => {
   it("reads a wait's follow-up as the app's line, not the person's", () => {
@@ -44,10 +47,39 @@ describe("automationNote", () => {
     expect(automationNote(line(text))).toEqual({ instructions: "", resumed: "restart" });
   });
 
-  it("leaves what a person or a bot wrote alone", () => {
-    expect(automationNote(line("Tell me when the report is ready"))).toBeNull();
+  it("leaves what a person or a bot wrote alone, even in the app's own words", () => {
+    expect(automationNote(typed("Tell me when the report is ready"))).toBeNull();
     expect(automationNote(line(`I saw this:\n\n${retryNote("restarted")}`))).toBeNull();
     expect(automationNote(line("[Wait finished: x] y", { role: "bot" }))).toBeNull();
+    const pasted = typed("[Wait finished: teste] minhas palavras", { id: "pasted" });
+    expect(automationNote(pasted)).toBeNull();
+    expect(automationNote(pasted, [{ label: "teste", followUp: "minhas palavras" }])).toBeNull();
+    expect(automationNote(typed(continueNote("restarted")))).toBeNull();
+    expect(automationNote(typed(followUpLine("the build", "Ship it.", "restarted")))).toBeNull();
+    expect(bubbleGroup(pasted, "bot")).toBe("user");
+    expect(firstUnreadMessageId([pasted, { id: "answer", role: "bot", kind: "text", at: 2, text: "ok" } as Message])).toBe("answer");
+    expect(lastLine({} as Bot, [pasted], [], false)).toBe("[Wait finished: teste] minhas palavras");
+    expect(lastRequests([pasted]).typed).toBe(pasted);
+  });
+
+  it("takes a label that holds \"] \" whole from the wait's own card", () => {
+    const text = followUpLine("release [QA] aprovada", "Publish [the] notes.");
+    const card = waitCard("release [QA] aprovada", "Publish [the] notes.");
+    expect(automationNote(line(text), knownWaits([card]))).toEqual({ wait: "release [QA] aprovada", instructions: "Publish [the] notes." });
+    expect(automationNote(line(text), knownWaits([waitCard("release [QA", "Something else."), card]))?.wait).toBe("release [QA] aprovada");
+    expect(lastLine({} as Bot, [card, line(text)], [], false)).toBe("Following up on the wait: release [QA] aprovada");
+    expect(automationNote(line(text))?.wait).toBe("release [QA");
+  });
+
+  it("sends again the line a reply answers, and offers for editing only what the person typed", () => {
+    const asked = typed("Tell me when the report is ready", { id: "asked" });
+    const wait = line(followUpLine("the report", "Say it is ready."), { id: "wait" });
+    const reply = { id: "reply", role: "bot", kind: "text", at: 3, text: "It is ready." } as Message;
+    expect(lastRequests([asked, reply])).toEqual({ answered: asked, typed: asked });
+    expect(lastRequests([asked, reply, wait, reply])).toEqual({ answered: wait, typed: asked });
+    const later = typed("Thanks", { id: "later" }), liked = typed("👍", { id: "liked", reaction: "👍" } as Partial<Message>);
+    expect(lastRequests([asked, wait, reply, later, liked])).toEqual({ answered: liked, typed: later });
+    expect(lastRequests([reply])).toEqual({ answered: undefined, typed: undefined });
   });
 
   it("is no bubble of the person's, no line they wrote, and previews in the app's words", () => {
@@ -58,9 +90,9 @@ describe("automationNote", () => {
     expect(bubbleGroup(wait, "bot")).toBeNull();
     expect(firstUnreadMessageId([asked, wait, answer])).toBe("wait");
     expect(unreadContextMessage([asked, wait, answer], "answer")?.id).toBe("asked");
-    expect(lastLine({} as Bot, [asked, wait], [], false)).toBe("Wait over: the report");
+    expect(lastLine({} as Bot, [asked, wait], [], false)).toBe("Following up on the wait: the report");
     setLocale("pt-br");
-    expect(automationNoteTitle(automationNote(wait)!)).toBe("Espera concluída: the report");
+    expect(automationNoteTitle(automationNote(wait)!)).toBe("Continuação da espera: the report");
     expect(automationNoteTitle(automationNote(line(continueNote("restarted")))!)).toBe("Retomada depois que o OpenMausBot reiniciou");
   });
 });

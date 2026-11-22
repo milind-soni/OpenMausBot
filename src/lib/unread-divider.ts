@@ -2,7 +2,7 @@ import { automationNote } from "@/lib/automation-note";
 import { peerLine } from "@/lib/peer-message";
 import type { Message } from "@/state/store";
 
-type Line = Pick<Message, "id" | "role" | "kind" | "text" | "peerAsk">;
+type Line = Pick<Message, "id" | "role" | "kind" | "text" | "peerAsk" | "automated">;
 
 export const fromPerson = (message: Line) => message.role === "user" && !peerLine(message) && !automationNote(message);
 
