@@ -607,6 +607,23 @@ describe("connector MCP bridge", () => {
     expect(calls).toEqual(["COMPOSIO_SEARCH_TOOLS"]);
   });
 
+  it.each([
+    ["an HTTP refusal", 403, { error: "connected apps are not enabled for this bot" }],
+    ["a refusal answered as a result", 200, { jsonrpc: "2.0", id: 8, result: { content: [{ type: "text", text: "Only the member's own turn may use this." }], isError: true } }],
+  ])("lists nothing, once, after %s of the tool list", async (_case, status, body) => {
+    let listings = 0;
+    const upstream = await listen((request, response) => {
+      request.resume();
+      listings += 1;
+      response.writeHead(status, { "content-type": "application/json" });
+      response.end(JSON.stringify(body));
+    });
+    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream });
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 8, method: "tools/list" })}\n`);
+    expect(await nextJson(lines)).toEqual({ jsonrpc: "2.0", id: 8, result: { tools: [] } });
+    expect(listings).toBe(1);
+  });
+
   it("keeps a bot's grants on the service's own tools listed during a discovery outage", async () => {
     const upstream = await listen((request, response) => {
       request.resume();
