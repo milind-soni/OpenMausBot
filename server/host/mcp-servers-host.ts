@@ -15,7 +15,8 @@ import { probeMcpServer } from "../mcp-probe.ts";
 import { isRemoteMcpServer, parseStoredMcpServer, type StoredRemoteMcpServer, type StoredStdioMcpServer } from "../mcp-registry.ts";
 import type { McpKeys } from "../vault/mcp-keys.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
-import { createMcpUrlChecks, initializeAnswer } from "./mcp-url-checks.ts";
+import { brokeredServer, type BrokerPath } from "../bot-box/broker-probe.ts";
+import { createMcpUrlChecks, initializeAnswer, withoutRedirects } from "./mcp-url-checks.ts";
 
 type Bot = { id: string; name: string; mcpServers?: string[]; toolScope?: unknown; alwaysAllow?: string[] };
 /** A server left out of a bot's turns, with why; `key`: its Vault key is off, as against it not starting. */
@@ -39,6 +40,8 @@ export interface McpServersHostDeps {
   personMcp?(): readonly string[];
   /** How a URL server is checked: initializeAnswer. */
   probeUrl?: typeof initializeAnswer;
+  /** The credential broker bots' turns reach URL servers through, or null where turns aren't boxed. */
+  botsPath?(): BrokerPath | null;
   /** A server's `vault:<id>` keys, read when it is launched or called. */
   keys?: McpKeys;
   /** Drops a server's sign-in: its tokens and any sign-in still open. */
@@ -135,9 +138,10 @@ export function createMcpServersHost(deps: McpServersHostDeps) {
     tell: deps.tell,
   });
   const urls = createMcpUrlChecks({
+    // The organisation's policy first: a server it blocks is never contacted.
     servers: () => {
       const personal = new Set(deps.personMcp?.() ?? []);
-      return Object.fromEntries(Object.entries(enabledUrlServers(deps.cfg())).filter(([name]) => !personal.has(name)));
+      return deps.policy(Object.fromEntries(Object.entries(enabledUrlServers(deps.cfg())).filter(([name]) => !personal.has(name))));
     },
     users: (name) => deps.bots().filter((bot) => started(bot).includes(name)),
     probe: async (name, server) => {
@@ -145,15 +149,24 @@ export function createMcpServersHost(deps: McpServersHostDeps) {
       await deps.keys?.warm(name, stored);
       const resolved = deps.keys ? deps.keys.resolve(name, stored) : { ok: true as const, server: stored };
       // A server whose Vault key is off is off for that reason (keyed), not checked.
-      return resolved.ok && "url" in resolved.server ? (deps.probeUrl ?? initializeAnswer)(resolved.server) : { ok: true };
+      if (!resolved.ok || !("url" in resolved.server)) return { ok: true };
+      const probe = deps.probeUrl ?? initializeAnswer, path = deps.botsPath?.() ?? null;
+      if (!path) return probe(resolved.server);
+      const brokered = brokeredServer(path, name, resolved.server);
+      try {
+        return await probe({ ...resolved.server, url: brokered.url, headers: {} }, { fetch: withoutRedirects(brokered.fetch) });
+      } finally {
+        await brokered.done();
+      }
     },
     tell: deps.tell,
+    file: join(deps.dataDir, "mcp-url-checks.json"),
   });
   const restarts = new Map<string, number>();
   const health = {
     ...checks,
-    changed(name: string): void { restarts.set(name, (restarts.get(name) ?? 0) + 1); checks.changed(name); urls.check([name]); },
-    engineFailed(botId: string, names: readonly string[]): void { checks.engineFailed(botId, names); urls.check(names); },
+    changed(name: string): void { restarts.set(name, (restarts.get(name) ?? 0) + 1); checks.changed(name); urls.changed([name]); },
+    engineFailed(botId: string, names: readonly string[]): void { checks.engineFailed(botId, names); urls.engineFailed(names); },
     async settled(): Promise<void> { await Promise.all([checks.settled(), urls.settled()]); },
   };
 

@@ -11,6 +11,7 @@ import { providerToolAllowKey } from "../provider-tool-allow.ts";
 import { VaultStore } from "../vault-store.ts";
 import { createMcpKeys } from "../vault/mcp-keys.ts";
 import { claimedNotice, createMcpServersHost, startCheckTimeout } from "./mcp-servers-host.ts";
+import type { BrokerPath } from "../bot-box/broker-probe.ts";
 import { notMcpError, type UrlAnswer } from "./mcp-url-checks.ts";
 
 const dirs: string[] = [];
@@ -26,7 +27,7 @@ function script(data: string, ...parts: string[]): string {
   return path;
 }
 
-function setup(options: { boxed?: boolean; data?: string; bots?: Array<{ id: string; name: string; mcpServers?: string[]; toolScope?: unknown }>; urls?: Record<string, UrlAnswer> } = {}) {
+function setup(options: { boxed?: boolean; data?: string; bots?: Array<{ id: string; name: string; mcpServers?: string[]; toolScope?: unknown }>; urls?: Record<string, UrlAnswer>; policy?: <T extends object>(servers: Record<string, T>) => Record<string, T>; botsPath?: () => BrokerPath | null } = {}) {
   const data = options.data ?? mkdtempSync(join(tmpdir(), "omb-mcp-host-"));
   if (!options.data) dirs.push(data);
   const cfg: AppConfig = {
@@ -41,6 +42,7 @@ function setup(options: { boxed?: boolean; data?: string; bots?: Array<{ id: str
   const told: Array<{ text: string; about: string }> = [];
   const started: string[] = [];
   const probed: string[] = [];
+  const fetchers: Array<Record<string, string>> = [];
   const host = createMcpServersHost({
     dataDir: data,
     cfg: () => cfg,
@@ -48,7 +50,8 @@ function setup(options: { boxed?: boolean; data?: string; bots?: Array<{ id: str
     bots: () => options.bots ?? [IRIS, PAUL, ROSA, NOTES_ONLY, NO_SERVERS],
     startsServers: (botId) => botId !== NO_SERVERS.id,
     boxed: () => options.boxed ?? true,
-    policy: (servers) => servers,
+    policy: options.policy ?? ((servers) => servers),
+    ...(options.botsPath ? { botsPath: options.botsPath } : {}),
     tell: (text, about) => told.push({ text, about: about.id }),
     // The image's python has no `mcp` module: these start only in Iris's own box, where it is installed.
     start: async (name, server, botId) => {
@@ -57,12 +60,13 @@ function setup(options: { boxed?: boolean; data?: string; bots?: Array<{ id: str
       return server.command === "/usr/bin/python3" && botId !== "iris" ? { ok: false, error: "No module named 'mcp'" } : { ok: true };
     },
     // No network: a URL server answers as `urls` says, else it lists no tools.
-    probeUrl: async (server) => {
+    probeUrl: async (server, via) => {
       probed.push(server.url);
+      if (via?.fetch) fetchers.push(server.headers);
       return options.urls?.[server.url] ?? { ok: true };
     },
   });
-  return { cfg, host, told, started, data, probed };
+  return { cfg, host, told, started, data, probed, fetchers };
 }
 
 it("moves servers in one bot's folders to that bot once, says so once, and keeps them out of every other bot's turns", async () => {
@@ -192,6 +196,33 @@ it("leaves out a URL server whose address is no MCP endpoint, says so once, and 
   await host.health.settled();
   expect(Object.keys(host.mounted(PAUL))).toContain("wiki");
   expect(host.off(PAUL).map((off) => off.name)).not.toContain("wiki");
+});
+
+it("never contacts a URL server the organisation's policy blocks", async () => {
+  const { cfg, host, probed } = setup({ boxed: false, bots: [PAUL], policy: (servers) => Object.fromEntries(Object.entries(servers).filter(([name]) => name !== "blocked")) });
+  cfg.mcpServers!.blocked = { type: "http", url: "https://blocked.example.test/mcp", headers: {}, enabled: true };
+  host.boot();
+  host.health.changed("blocked");
+  host.health.engineFailed(PAUL.id, ["blocked"]);
+  await host.health.settled();
+  expect(probed).toEqual([]);
+});
+
+it("where turns are boxed, checks a URL server through the credential broker as turns reach it, with no headers of its own", async () => {
+  const minted: Array<{ threadId: string; grants: Record<string, { upstream: string; headers: Record<string, string> }> }> = [], revoked: string[] = [];
+  const path: BrokerPath = { socketPath: "/nonexistent/broker.sock", broker: {
+    port: 4567,
+    mintForThread: (grant: { threadId: string; grants: Record<string, { upstream: string; headers: Record<string, string> }> }) => { minted.push(grant); return { token: "tok" }; },
+    revokeThread: (threadId: string) => { revoked.push(threadId); },
+  } as unknown as BrokerPath["broker"] };
+  const { cfg, host, probed, fetchers } = setup({ boxed: true, bots: [PAUL], botsPath: () => path });
+  cfg.mcpServers!.wiki = { type: "http", url: "https://wiki.example.test/mcp", headers: { "x-api-key": "key-1" }, enabled: true };
+  host.health.changed("wiki");
+  await host.health.settled();
+  expect(probed).toEqual(["http://127.0.0.1:4567/b/tok/mcp-wiki"]);
+  expect(fetchers).toEqual([{}]);
+  expect(minted[0]!.grants["mcp-wiki"]).toMatchObject({ upstream: "https://wiki.example.test/mcp", headers: { "x-api-key": "key-1" } });
+  expect(revoked).toEqual([minted[0]!.threadId]);
 });
 
 it("a package runner's first check waits for its download; any other program's keeps the short wait", () => {
