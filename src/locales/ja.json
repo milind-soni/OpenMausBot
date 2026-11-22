@@ -7956,5 +7956,19 @@
   "imageGen.higgsfield.help": "{app} は、プラグインでサインインした Higgsfield アカウントで画像を作ります。画像 1 枚ごとにそのアカウントのクレジットを消費します。",
   "imageGen.higgsfield.open": "プラグインを開く",
   "inbox.settled.title": "完了",
-  "inbox.settled.read": "既読"
+  "inbox.settled.read": "既読",
+  "threadTabs.aria": "{name} とのスレッド",
+  "threadTabs.main": "メイン",
+  "threadTabs.hide": "タブを隠す",
+  "threadTabs.hideNamed": "{title} を隠す",
+  "threadTabs.hidden": "{title} を隠しました。すべてのスレッドにあります。",
+  "threadTabs.yours": "あなたのスレッド",
+  "threadTabs.onItsOwn": "自動で始まったもの",
+  "threadTabs.open": "開いている",
+  "threadTabs.hiddenState": "非表示",
+  "threadTabs.routine": "ルーティン",
+  "threadTabs.rename": "名前を変更",
+  "threadTabs.renameAria": "スレッド名",
+  "threadTabs.renameHint": "ダブルクリックで名前を変更",
+  "threadTabs.remember": "ここで何を覚えていますか？"
 }

@@ -7119,5 +7119,19 @@
   "imageGen.higgsfield.help": "{app} tworzy obrazy na koncie Higgsfield, na które logujesz się w sekcji Wtyczki. Każdy obraz zużywa kredyty z tego konta.",
   "imageGen.higgsfield.open": "Otwórz Wtyczki",
   "inbox.settled.title": "Zakończone",
-  "inbox.settled.read": "Przeczytane"
+  "inbox.settled.read": "Przeczytane",
+  "threadTabs.aria": "Wątki z {name}",
+  "threadTabs.main": "Główny",
+  "threadTabs.hide": "Ukryj kartę",
+  "threadTabs.hideNamed": "Ukryj {title}",
+  "threadTabs.hidden": "Ukryto {title}. Jest w Wszystkie wątki.",
+  "threadTabs.yours": "Twoje wątki",
+  "threadTabs.onItsOwn": "Rozpoczęte samodzielnie",
+  "threadTabs.open": "Otwarty",
+  "threadTabs.hiddenState": "Ukryty",
+  "threadTabs.routine": "Rutyna",
+  "threadTabs.rename": "Zmień nazwę",
+  "threadTabs.renameAria": "Nazwa wątku",
+  "threadTabs.renameHint": "Kliknij dwukrotnie, aby zmienić nazwę",
+  "threadTabs.remember": "Co tu pamiętasz?"
 }

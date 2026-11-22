@@ -6420,5 +6420,19 @@
   "imageGen.higgsfield.help": "{app} crea imágenes con la cuenta de Higgsfield en la que inicias sesión en Plugins. Cada imagen gasta créditos de esa cuenta.",
   "imageGen.higgsfield.open": "Abrir Plugins",
   "inbox.settled.title": "Terminado",
-  "inbox.settled.read": "Leído"
+  "inbox.settled.read": "Leído",
+  "threadTabs.aria": "Hilos con {name}",
+  "threadTabs.main": "Principal",
+  "threadTabs.hide": "Ocultar pestaña",
+  "threadTabs.hideNamed": "Ocultar {title}",
+  "threadTabs.hidden": "{title} oculto. Está en Todos los hilos.",
+  "threadTabs.yours": "Tus hilos",
+  "threadTabs.onItsOwn": "Iniciados por su cuenta",
+  "threadTabs.open": "Abierto",
+  "threadTabs.hiddenState": "Oculto",
+  "threadTabs.routine": "Rutina",
+  "threadTabs.rename": "Renombrar",
+  "threadTabs.renameAria": "Nombre del hilo",
+  "threadTabs.renameHint": "Doble clic para renombrar",
+  "threadTabs.remember": "¿Qué recuerdas aquí?"
 }

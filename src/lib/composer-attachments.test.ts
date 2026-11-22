@@ -806,6 +806,7 @@ describe("composerTakesFocusOnOpen", () => {
         for (let cur: Fake | undefined = self; cur; cur = cur.parent) {
           if (sel === "[data-tour=composer]" && cur.role === "composer") return cur;
           if (sel.includes("[role=dialog]") && cur.role === "dialog") return cur;
+          if (sel.includes("[data-thread-tabs]") && cur.role === "thread-tabs") return cur;
         }
         return null;
       },
@@ -827,6 +828,11 @@ describe("composerTakesFocusOnOpen", () => {
   it("takes focus from the thread row or New thread button that opened the thread", () => {
     expect(composerTakesFocusOnOpen(node({ tagName: "DIV", parent: sidebar }), input)).toBe(true);
     expect(composerTakesFocusOnOpen(node({ tagName: "BUTTON", parent: sidebar }), input)).toBe(true);
+  });
+
+  it("leaves focus on a thread tab moved to with the arrow keys", () => {
+    const tabs = node({ tagName: "DIV", role: "thread-tabs", parent: body });
+    expect(composerTakesFocusOnOpen(node({ tagName: "BUTTON", parent: tabs }), input)).toBe(false);
   });
 
   it("takes focus when nothing else holds it", () => {

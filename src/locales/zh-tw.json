@@ -10206,5 +10206,19 @@
   "imageGen.higgsfield.help": "{app} 使用你在「外掛」中登入的 Higgsfield 帳號產生圖片。每張圖片都會消耗該帳號的額度。",
   "imageGen.higgsfield.open": "開啟外掛",
   "inbox.settled.title": "已完成",
-  "inbox.settled.read": "已讀"
+  "inbox.settled.read": "已讀",
+  "threadTabs.aria": "與 {name} 的對話",
+  "threadTabs.main": "主要",
+  "threadTabs.hide": "隱藏分頁",
+  "threadTabs.hideNamed": "隱藏 {title}",
+  "threadTabs.hidden": "已隱藏 {title}。可在所有對話中找到。",
+  "threadTabs.yours": "你的對話",
+  "threadTabs.onItsOwn": "自行開始的",
+  "threadTabs.open": "開啟中",
+  "threadTabs.hiddenState": "已隱藏",
+  "threadTabs.routine": "例行工作",
+  "threadTabs.rename": "重新命名",
+  "threadTabs.renameAria": "對話名稱",
+  "threadTabs.renameHint": "按兩下以重新命名",
+  "threadTabs.remember": "你在這裡記得什麼？"
 }

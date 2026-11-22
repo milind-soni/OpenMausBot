@@ -7649,5 +7649,19 @@
   "imageGen.higgsfield.help": "{app}은(는) 플러그인에서 로그인한 Higgsfield 계정으로 이미지를 만듭니다. 이미지마다 그 계정의 크레딧이 소모됩니다.",
   "imageGen.higgsfield.open": "플러그인 열기",
   "inbox.settled.title": "완료됨",
-  "inbox.settled.read": "읽음"
+  "inbox.settled.read": "읽음",
+  "threadTabs.aria": "{name}의 스레드",
+  "threadTabs.main": "메인",
+  "threadTabs.hide": "탭 숨기기",
+  "threadTabs.hideNamed": "{title} 숨기기",
+  "threadTabs.hidden": "{title}을(를) 숨겼어요. 모든 스레드에 있어요.",
+  "threadTabs.yours": "내 스레드",
+  "threadTabs.onItsOwn": "스스로 시작됨",
+  "threadTabs.open": "열림",
+  "threadTabs.hiddenState": "숨김",
+  "threadTabs.routine": "루틴",
+  "threadTabs.rename": "이름 바꾸기",
+  "threadTabs.renameAria": "스레드 이름",
+  "threadTabs.renameHint": "두 번 클릭해 이름 바꾸기",
+  "threadTabs.remember": "여기서 무엇을 기억하나요?"
 }

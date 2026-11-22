@@ -3678,5 +3678,19 @@
   "imageGen.higgsfield.help": "{app} उस Higgsfield खाते से तस्वीरें बनाता है जिससे आप प्लगइन में साइन इन करते हैं। हर तस्वीर उस खाते के क्रेडिट खर्च करती है।",
   "imageGen.higgsfield.open": "प्लगइन खोलें",
   "inbox.settled.title": "पूर्ण",
-  "inbox.settled.read": "पढ़ा गया"
+  "inbox.settled.read": "पढ़ा गया",
+  "threadTabs.aria": "{name} के साथ थ्रेड",
+  "threadTabs.main": "मुख्य",
+  "threadTabs.hide": "टैब छिपाएँ",
+  "threadTabs.hideNamed": "{title} छिपाएँ",
+  "threadTabs.hidden": "{title} छिपा दिया गया। यह सभी थ्रेड में है।",
+  "threadTabs.yours": "आपके थ्रेड",
+  "threadTabs.onItsOwn": "अपने आप शुरू हुए",
+  "threadTabs.open": "खुला",
+  "threadTabs.hiddenState": "छिपा हुआ",
+  "threadTabs.routine": "रूटीन",
+  "threadTabs.rename": "नाम बदलें",
+  "threadTabs.renameAria": "थ्रेड का नाम",
+  "threadTabs.renameHint": "नाम बदलने के लिए डबल-क्लिक करें",
+  "threadTabs.remember": "आपको यहाँ क्या याद है?"
 }

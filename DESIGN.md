@@ -44,7 +44,9 @@ where they belong instead of adding new places.
   screen; Advanced mode's composer shows the model under its field instead. Anything else goes in the bot panel, a menu or the command palette.
   A button that exists only while the conversation has what it shows (its
   pinned message) is fine: it opens a menu and is gone when there is nothing
-  to show.
+  to show. One exception: **New thread** sits at the end of the header in both
+  modes, because it opens a blank tab in the thread tabs right under the
+  header, and starting a thread is an everyday action people look for at the top.
 - **No count badges and no "needs you" summaries** above the sidebar list or
   in the header. A status mark on the row it belongs to is fine.
 - **Settings for one bot live in its bot panel.** App-wide settings live in

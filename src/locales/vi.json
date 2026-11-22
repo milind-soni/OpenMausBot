@@ -5918,5 +5918,19 @@
   "imageGen.higgsfield.help": "{app} tạo ảnh bằng tài khoản Higgsfield mà bạn đăng nhập trong Plugin. Mỗi ảnh tốn tín dụng của tài khoản đó.",
   "imageGen.higgsfield.open": "Mở Plugin",
   "inbox.settled.title": "Đã xong",
-  "inbox.settled.read": "Đã đọc"
+  "inbox.settled.read": "Đã đọc",
+  "threadTabs.aria": "Luồng với {name}",
+  "threadTabs.main": "Chính",
+  "threadTabs.hide": "Ẩn thẻ",
+  "threadTabs.hideNamed": "Ẩn {title}",
+  "threadTabs.hidden": "Đã ẩn {title}. Nằm trong Tất cả luồng.",
+  "threadTabs.yours": "Luồng của bạn",
+  "threadTabs.onItsOwn": "Tự bắt đầu",
+  "threadTabs.open": "Đang mở",
+  "threadTabs.hiddenState": "Đã ẩn",
+  "threadTabs.routine": "Thói quen",
+  "threadTabs.rename": "Đổi tên",
+  "threadTabs.renameAria": "Tên luồng",
+  "threadTabs.renameHint": "Nhấp đúp để đổi tên",
+  "threadTabs.remember": "Bạn nhớ gì ở đây?"
 }

@@ -4098,5 +4098,19 @@
   "imageGen.higgsfield.help": "{app} створює зображення через акаунт Higgsfield, у який ви входите в розділі «Плагіни». Кожне зображення витрачає кредити цього акаунта.",
   "imageGen.higgsfield.open": "Відкрити «Плагіни»",
   "inbox.settled.title": "Завершено",
-  "inbox.settled.read": "Прочитано"
+  "inbox.settled.read": "Прочитано",
+  "threadTabs.aria": "Гілки з {name}",
+  "threadTabs.main": "Головна",
+  "threadTabs.hide": "Сховати вкладку",
+  "threadTabs.hideNamed": "Сховати {title}",
+  "threadTabs.hidden": "{title} приховано. Вона в розділі Усі гілки.",
+  "threadTabs.yours": "Ваші гілки",
+  "threadTabs.onItsOwn": "Розпочаті самі",
+  "threadTabs.open": "Відкрита",
+  "threadTabs.hiddenState": "Прихована",
+  "threadTabs.routine": "Рутина",
+  "threadTabs.rename": "Перейменувати",
+  "threadTabs.renameAria": "Назва гілки",
+  "threadTabs.renameHint": "Двічі клацніть, щоб перейменувати",
+  "threadTabs.remember": "Що ти тут пам'ятаєш?"
 }

@@ -7173,5 +7173,19 @@
   "imageGen.higgsfield.help": "{app} создаёт изображения через аккаунт Higgsfield, в который вы входите в разделе «Плагины». Каждое изображение расходует кредиты этого аккаунта.",
   "imageGen.higgsfield.open": "Открыть «Плагины»",
   "inbox.settled.title": "Завершено",
-  "inbox.settled.read": "Прочитано"
+  "inbox.settled.read": "Прочитано",
+  "threadTabs.aria": "Ветки с {name}",
+  "threadTabs.main": "Главная",
+  "threadTabs.hide": "Скрыть вкладку",
+  "threadTabs.hideNamed": "Скрыть {title}",
+  "threadTabs.hidden": "{title} скрыта. Она в разделе Все ветки.",
+  "threadTabs.yours": "Ваши ветки",
+  "threadTabs.onItsOwn": "Начатые сами",
+  "threadTabs.open": "Открыта",
+  "threadTabs.hiddenState": "Скрыта",
+  "threadTabs.routine": "Рутина",
+  "threadTabs.rename": "Переименовать",
+  "threadTabs.renameAria": "Название ветки",
+  "threadTabs.renameHint": "Дважды щёлкните, чтобы переименовать",
+  "threadTabs.remember": "Что ты здесь помнишь?"
 }

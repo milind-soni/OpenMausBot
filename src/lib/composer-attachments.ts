@@ -872,7 +872,7 @@ export function composerTakesFocusOnOpen(active: OpenFocusNode | null, input: Co
   if (!active) return true;
   const tag = active.tagName?.toUpperCase();
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || active.isContentEditable) return false;
-  return !active.closest?.("[role=dialog], [role=alertdialog], [aria-modal=true]");
+  return !active.closest?.("[role=dialog], [role=alertdialog], [aria-modal=true], [data-thread-tabs]");
 }
 
 export function replyTargetTakesFocus(previousId: string | null | undefined, nextId: string | null | undefined): boolean {

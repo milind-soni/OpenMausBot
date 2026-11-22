@@ -155,8 +155,9 @@ describe("the Simple header", () => {
       expect(pill[1]).toContain(">Pepper</span>");
       expect(pill[1]).toContain('data-chathead-elsewhere="true"');
       expect(pill[0].match(/class="([^"]*)"/)![1]!.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "bg-composer", "ring-[0.5px]", "shadow-(--shadow-float)", "py-[7.5px]", "pr-[13.5px]"]));
-      // Away from the bot's main conversation, the pill names the one on screen.
-      expect(pill[1]).toContain("data-chathead-conversation");
+      // Away from the bot's main conversation, the thread tabs under the header name the one on screen, so the pill doesn't.
+      expect(pill[1]).not.toContain("data-chathead-conversation");
+      expect(simple).toContain("data-thread-tabs");
       for (const gone of ["data-chathead-role", "data-background-activity", "data-chathead-back", 'data-testid="chat-more"']) {
         expect(simple, gone).not.toContain(gone);
       }
@@ -175,7 +176,9 @@ describe("the Simple header", () => {
     const advanced = renderToStaticMarkup(createElement(ChatView, { bot: busyElsewhere }));
     expect(advanced).not.toContain("data-chathead-elsewhere");
     expect(advanced).toContain("data-background-activity");
-    expect(advanced).toContain("data-chathead-back");
+    // Advanced adds to the same tab row, whose Main tab is the way back.
+    expect(advanced).not.toContain("data-chathead-back");
+    expect(advanced).toContain("data-thread-tabs");
     expect(advanced).toContain("data-chathead-role");
     fixture.showThreads = true;
   });
@@ -769,9 +772,9 @@ describe("the way back to the bot's own conversation", () => {
     try { return renderToStaticMarkup(createElement(ChatView, { bot: of })); } finally { fixture.showThreads = true; }
   };
 
-  it("offers it with threads hidden while a side thread is open, and opens the main thread", () => {
-    expect(header(false, visiting)).toContain("data-chathead-back");
-    expect(header(false, visiting)).toContain("Back to your chat");
+  it("is the Main tab while a side thread is open, and openBot still opens the main thread", () => {
+    expect(header(false, visiting)).not.toContain("data-chathead-back");
+    expect(header(false, visiting)).toMatch(/role="tab"[^>]*aria-selected="false"[^>]*>.*?Main</);
     expect(awayFromMainThread(visiting, false)).toBe(true);
     fixture.dispatch.mockReset();
     openBot(fixture.dispatch, visiting, false);
