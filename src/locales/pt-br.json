@@ -826,7 +826,7 @@
   "twoPlaces.failed": "Não foi possível começar a mover seus bots. Tente novamente em instantes.",
   "twoPlaces.confirmTitle": "Mover os bots deste computador para {place}?",
   "twoPlaces.confirm": "Os bots deste computador vão para {place} com suas conversas e automações e passam a trabalhar lá.",
-  "twoPlaces.typing": "Os bots em {place} ainda usam este computador quando você digita nele.",
+  "twoPlaces.typing": "Os bots em {place} ainda usam este computador quando você digita nele, a menos que você pause isso no menu do ícone do OpenMausBot.",
   "twoPlaces.undo": "Para trazê-los de volta depois, ative “Manter os bots deste computador neste computador” em Configurações → Importar e exportar.",
   "twoPlaces.move": "Mover bots",
   "rail.removeAsk": "Remover “{name}” da lista? Você pode comprar um novo Cloud quando quiser.",
