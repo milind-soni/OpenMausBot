@@ -105,6 +105,19 @@ describe("serverFetch", () => {
     expect(sent.map((one) => one.path)).toEqual(["/api/bots?name=A%20B", "/api/files/a%20b.txt"]);
   });
 
+  it("sends an absolute URL on this page's own origin and /api through the link; other origins stay plain", async () => {
+    const plain = vi.fn(async (_path: string) => new Response("plain"));
+    vi.stubGlobal("fetch", plain);
+    vi.stubGlobal("location", { origin: "https://app.example" });
+    const { link, sent } = fakeLink(() => new Response(null, { status: 204 }));
+    setRelayLink(link);
+    await serverFetch("https://app.example/api/bots/b1/browser/upload?chooser=c1&token=t", { method: "POST", body: new FormData() });
+    await serverFetch("https://other.example/api/bots");
+    await serverFetch("https://app.example/apiary");
+    expect(sent.map((one) => one.path)).toEqual(["/api/bots/b1/browser/upload?chooser=c1&token=t"]);
+    expect(plain.mock.calls.map(([path]) => path)).toEqual(["https://other.example/api/bots", "https://app.example/apiary"]);
+  });
+
   it("passes the caller's signal to the link", async () => {
     const { link, sent } = fakeLink(() => new Response("{}"));
     setRelayLink(link);

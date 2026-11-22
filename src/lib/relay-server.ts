@@ -34,13 +34,25 @@ export function relayLink(): ServerLink | null {
 
 const API = /^\/api(?:[/?#]|$)/;
 
-/** `fetch` for a path on this page's own server. */
+/** `path` as a request to this page's own `/api` routes: a root path, or an absolute URL on this page's origin (some
+ * links are built from `location`); null for anything else. */
+function ownApiPath(path: string): string | null {
+  if (API.test(path)) return path;
+  const origin = (globalThis as { location?: { origin?: string } }).location?.origin;
+  if (!origin || !path.startsWith(`${origin}/`)) return null;
+  const url = new URL(path);
+  return url.origin === origin && API.test(url.pathname) ? url.pathname + url.search : null;
+}
+
+/** `fetch` for a path on this page's own server. Over the relay, `keepalive` does not apply: the link lives in this page
+ * and ends with it. */
 export async function serverFetch(path: string, init?: RequestInit): Promise<Response> {
   const current = link;
+  const own = current ? ownApiPath(path) : null;
   // Called as the caller called it: with no options when it gave none.
-  if (!current || !API.test(path)) return init ? fetch(path, init) : fetch(path);
+  if (!current || own === null) return init ? fetch(path, init) : fetch(path);
   // A Request turns any body fetch takes (FormData, Blob, URLSearchParams…) into bytes and gives it its content type.
-  const request = new Request(new URL(path, "http://relay.invalid"), { ...init, signal: undefined });
+  const request = new Request(new URL(own, "http://relay.invalid"), { ...init, signal: undefined });
   const body = request.method === "GET" || request.method === "HEAD" ? null : new Uint8Array(await request.arrayBuffer());
   // The normalized target: spaces and other unsafe characters encoded, any fragment left out.
   const { pathname, search } = new URL(request.url);
