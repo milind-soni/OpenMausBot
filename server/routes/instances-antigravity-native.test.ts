@@ -7,10 +7,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { instanceConfigs, type AppConfig } from "../config.ts";
+import type { AppConfig } from "../config.ts";
 import type { InstanceConfigMap } from "../contracts.ts";
 import { antigravityProfileDirectory } from "../drivers/antigravity-acp.ts";
-import { antigravityNativeCredentialsHeld } from "../drivers/antigravity-native-credentials.ts";
 import { AntigravityDriver } from "../drivers/antigravity.ts";
 import { ProviderRegistry } from "../harness/registry.ts";
 import { json, readBody } from "../harness/http.ts";
@@ -142,17 +141,15 @@ describe.skipIf(WINDOWS)("the native Antigravity CLI through the instance routes
     expect(await call("POST", "/api/instances/antigravity/check", {})).toEqual({ ok: true });
   }, 120_000);
 
-  it("signs an added account out through the CLI before it is removed, and removes its sign-in and its record", async () => {
+  it("removes an added account and its profile without signing the CLI's shared sign-in out", async () => {
     const { fixture, cfg, registry } = await nativeSetup(["antigravity-added"]);
     const { request, call } = await serve(registry, cfg);
     const flow = (await call("POST", "/api/instances/antigravity-added/auth/start", {})).auth;
     await call("POST", "/api/instances/antigravity-added/auth/complete", { flowId: flow.flowId, callbackUrl: "fixture-code" });
-    expect(antigravityNativeCredentialsHeld("antigravity-added")).toBe(true);
 
     expect((await request("DELETE", "/api/instances/antigravity-added")).status).toBe(200);
-    expect(fixture.methods()).toContain("logout");
+    expect(fixture.methods()).not.toContain("logout");
     expect(existsSync(join(antigravityProfileDirectory("antigravity-added"), "antigravity-acp", "antigravity-oauth-token"))).toBe(false);
-    expect(antigravityNativeCredentialsHeld("antigravity-added")).toBe(false);
     expect(Object.keys(cfg.instances!)).not.toContain("antigravity-added");
   }, 180_000);
 
@@ -166,32 +163,15 @@ describe.skipIf(WINDOWS)("the native Antigravity CLI through the instance routes
     expect(await registry.get("antigravity")!.getAuthentication!(started.flowId)).toMatchObject({ phase: "cancelled" });
     expect(fixture.entries().some((entry) => entry.event === "login-code")).toBe(false);
   }, 120_000);
-
-  it("keeps the account when its CLI still reports a sign-in", async () => {
-    const keyring = folder();
-    const { fixture, cfg, registry } = await nativeSetup();
-    const entry = { driver: "antigravityAgent", config: { cli: fixture.executable }, environment: { FAKE_AGY_LOG: fixture.log, FAKE_AGY_KEYRING: keyring, FAKE_AGY_LOGOUT: "ignore" } };
-    cfg.instances = { ...cfg.instances, "antigravity-stuck": entry } as InstanceConfigMap;
-    await registry.load(cfg.instances);
-    const { request, call } = await serve(registry, cfg);
-    const flow = (await call("POST", "/api/instances/antigravity-stuck/auth/start", {})).auth;
-    await call("POST", "/api/instances/antigravity-stuck/auth/complete", { flowId: flow.flowId, callbackUrl: "fixture-code" });
-    const refused = await request("DELETE", "/api/instances/antigravity-stuck");
-    expect(refused.status).toBe(409);
-    expect(refused.body.error).toContain("still reports a Google sign-in");
-    expect(Object.keys(instanceConfigs(cfg))).toContain("antigravity-stuck");
-    expect(existsSync(antigravityProfileDirectory("antigravity-stuck"))).toBe(true);
-    expect(antigravityNativeCredentialsHeld("antigravity-stuck")).toBe(true);
-  }, 180_000);
 });
 
-describe("removing two accounts whose sign-out waits, at the same time", () => {
+describe("removing accounts while a ChatGPT account's sign-out waits", () => {
   async function setup() {
     const fake = makeFakeDriver();
     const registry = new ProviderRegistry([fake.driver]);
-    await registry.load({ "chatgpt-1": { driver: "fake" }, "antigravity-1": { driver: "fake" }, "antigravity-2": { driver: "fake" } });
+    await registry.load({ "chatgpt-1": { driver: "fake" }, "chatgpt-2": { driver: "fake" }, "antigravity-1": { driver: "fake" } });
     const gates = new Map<string, { entered: Promise<void>; release: () => void }>();
-    for (const id of ["chatgpt-1", "antigravity-1", "antigravity-2"]) {
+    for (const id of ["chatgpt-1", "chatgpt-2"]) {
       let enter!: () => void;
       let release!: () => void;
       const entered = new Promise<void>((resolve) => { enter = resolve; });
@@ -202,52 +182,43 @@ describe("removing two accounts whose sign-out waits, at the same time", () => {
     const cfg = { instances: {
       keep: { driver: "fake" },
       "chatgpt-1": { driver: "codex" },
+      "chatgpt-2": { driver: "codex" },
       "antigravity-1": { driver: "antigravityAgent" },
-      "antigravity-2": { driver: "antigravityAgent" },
     } } as unknown as AppConfig;
     return { registry, cfg, gates };
   }
 
-  it.each([
-    ["chatgpt-1", "antigravity-1"],
-    ["antigravity-1", "chatgpt-1"],
-    ["antigravity-1", "antigravity-2"],
-  ])("refuses the second while the first waits, and every removal that succeeded is still there when the config is read again (%s then %s)", async (first, second) => {
+  it.each([["antigravity-1"], ["chatgpt-2"]])("refuses %s while the first waits, and every removal that succeeded is still there when the config is read again", async (second) => {
     const { registry, cfg, gates } = await setup();
     const { request, persisted } = await serve(registry, cfg);
-    const one = request("DELETE", `/api/instances/${first}`);
-    await gates.get(first)!.entered;
+    const one = request("DELETE", "/api/instances/chatgpt-1");
+    await gates.get("chatgpt-1")!.entered;
     const crossed = await request("DELETE", `/api/instances/${second}`);
     expect(crossed.status).toBe(409);
     expect(crossed.body.error).toContain("already being updated");
     expect((await request("PATCH", "/api/instances/keep", { hidden: true })).status).toBe(409);
-    gates.get(first)!.release();
+    gates.get("chatgpt-1")!.release();
     expect((await one).status).toBe(200);
-    expect(Object.keys(cfg.instances!)).not.toContain(first);
     const two = request("DELETE", `/api/instances/${second}`);
-    await gates.get(second)!.entered;
-    gates.get(second)!.release();
+    const gate = gates.get(second);
+    if (gate) { await gate.entered; gate.release(); }
     expect((await two).status).toBe(200);
-    expect(Object.keys(cfg.instances!).sort()).toEqual(["keep", ...["chatgpt-1", "antigravity-1", "antigravity-2"].filter((id) => id !== first && id !== second)].sort());
-    expect(persisted.at(-1) && Object.keys(persisted.at(-1)!)).not.toContain(first);
+    expect(Object.keys(cfg.instances!).sort()).toEqual(["keep", ...["chatgpt-2", "antigravity-1"].filter((id) => id !== second)].sort());
+    expect(persisted.at(-1) && Object.keys(persisted.at(-1)!)).not.toContain("chatgpt-1");
   }, 30_000);
 
   it("reads the config after the lock is taken, so a removal that finished before is not undone", async () => {
     const { registry, cfg, gates } = await setup();
     const { request, setBusy } = await serve(registry, cfg);
     setBusy(true);
-    const blocked = await request("DELETE", "/api/instances/chatgpt-1");
-    expect(blocked.status).toBe(409);
+    expect((await request("DELETE", "/api/instances/chatgpt-1")).status).toBe(409);
     setBusy(false);
-    const done = request("DELETE", "/api/instances/antigravity-1");
-    await gates.get("antigravity-1")!.entered;
-    gates.get("antigravity-1")!.release();
-    expect((await done).status).toBe(200);
+    expect((await request("DELETE", "/api/instances/antigravity-1")).status).toBe(200);
     const next = request("DELETE", "/api/instances/chatgpt-1");
     await gates.get("chatgpt-1")!.entered;
     gates.get("chatgpt-1")!.release();
     expect((await next).status).toBe(200);
     expect(Object.keys(cfg.instances!)).toEqual(expect.not.arrayContaining(["chatgpt-1", "antigravity-1"]));
-    expect(Object.keys(cfg.instances!)).toEqual(expect.arrayContaining(["keep", "antigravity-2"]));
+    expect(Object.keys(cfg.instances!)).toEqual(expect.arrayContaining(["keep", "chatgpt-2"]));
   }, 30_000);
 });

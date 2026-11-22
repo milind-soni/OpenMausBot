@@ -107,14 +107,13 @@ describe.skipIf(WINDOWS)("a sign-in run by the CLI", () => {
 
   it("waits for the code with the link in hand, and ends signed in when the CLI exits 0", async () => {
     const { directory, runtime, env, fixture } = setup();
-    const hooks = { submitting: vi.fn(), signedIn: vi.fn() };
+    const hooks = { signedIn: vi.fn() };
     const login = new AntigravityCliLogin(hooks);
     const started = await login.start(runtime, await profileOf(directory, runtime, env));
     expect(started).toMatchObject({ phase: "waiting", kind: "pasted-code" });
     expect(started.authorizationUrl).toContain("accounts.google.com");
     expect(await login.get(started.flowId!)).toMatchObject({ phase: "waiting" });
     await login.complete(started.flowId!, "fixture-code");
-    expect(hooks.submitting).toHaveBeenCalledBefore(hooks.signedIn);
     expect(hooks.signedIn).toHaveBeenCalledTimes(1);
     expect(await login.get(started.flowId!)).toMatchObject({ phase: "succeeded" });
     expect(fixture.entries().find((entry) => entry.event === "login-code")).toMatchObject({ accepted: true, asAddress: false });
@@ -122,7 +121,7 @@ describe.skipIf(WINDOWS)("a sign-in run by the CLI", () => {
 
   it("hands the CLI the page's address when that is what was pasted", async () => {
     const { directory, runtime, env, fixture } = setup();
-    const login = new AntigravityCliLogin({ submitting: () => {}, signedIn: () => {} });
+    const login = new AntigravityCliLogin({ signedIn: () => {} });
     const started = await login.start(runtime, await profileOf(directory, runtime, env));
     await login.complete(started.flowId!, `${ANTIGRAVITY_LOGIN_REDIRECT}?code=fixture-code&state=fixture-state`);
     expect(fixture.entries().find((entry) => entry.event === "login-code")).toMatchObject({ accepted: true, asAddress: true });
@@ -130,7 +129,7 @@ describe.skipIf(WINDOWS)("a sign-in run by the CLI", () => {
 
   it("fails with one fixed line, never the CLI's own words, when the CLI refuses the code", async () => {
     const { directory, runtime, env } = setup();
-    const hooks = { submitting: vi.fn(), signedIn: vi.fn() };
+    const hooks = { signedIn: vi.fn() };
     const login = new AntigravityCliLogin(hooks);
     const started = await login.start(runtime, await profileOf(directory, runtime, env));
     const failure = await login.complete(started.flowId!, "secret-wrong-code").then(() => null, (error: Error) => error);
@@ -143,7 +142,7 @@ describe.skipIf(WINDOWS)("a sign-in run by the CLI", () => {
 
   it("takes a second paste of a code already sent as already sent, and does not write it twice", async () => {
     const { directory, runtime, env, fixture } = setup({ FAKE_AGY_LOGIN: "stay" });
-    const login = new AntigravityCliLogin({ submitting: () => {}, signedIn: () => {} }, { submitMs: 400 });
+    const login = new AntigravityCliLogin({ signedIn: () => {} }, { submitMs: 400 });
     const started = await login.start(runtime, await profileOf(directory, runtime, env));
     const first = login.complete(started.flowId!, "fixture-code").catch((error: Error) => error);
     await vi.waitFor(async () => expect(await login.get(started.flowId!)).toMatchObject({ phase: "verifying" }));
@@ -154,7 +153,7 @@ describe.skipIf(WINDOWS)("a sign-in run by the CLI", () => {
 
   it("is signed in when the CLI stays up after taking the code and a session is then accepted", async () => {
     const { directory, runtime, env } = setup({ FAKE_AGY_LOGIN: "stay" });
-    const hooks = { submitting: vi.fn(), signedIn: vi.fn(), confirm: vi.fn(async () => true) };
+    const hooks = { signedIn: vi.fn(), confirm: vi.fn(async () => true) };
     const login = new AntigravityCliLogin(hooks, { submitMs: 400 });
     const started = await login.start(runtime, await profileOf(directory, runtime, env));
     await login.complete(started.flowId!, "fixture-code");
@@ -166,14 +165,14 @@ describe.skipIf(WINDOWS)("a sign-in run by the CLI", () => {
 
   it("fails when the CLI stays up and no session is accepted", async () => {
     const { directory, runtime, env } = setup({ FAKE_AGY_LOGIN: "stay", FAKE_AGY_ACCEPT: "other" });
-    const login = new AntigravityCliLogin({ submitting: () => {}, signedIn: () => {}, confirm: async () => false }, { submitMs: 400 });
+    const login = new AntigravityCliLogin({ signedIn: () => {}, confirm: async () => false }, { submitMs: 400 });
     const started = await login.start(runtime, await profileOf(directory, runtime, env));
     await expect(login.complete(started.flowId!, "fixture-code")).rejects.toThrow("failed");
   }, 60_000);
 
   it("fails to start, with its process gone, when no link comes in time", async () => {
     const { directory, runtime, env, fixture } = setup({ FAKE_AGY_LOGIN: "no-link" });
-    const login = new AntigravityCliLogin({ submitting: () => {}, signedIn: () => {} }, { startupMs: 3_000 });
+    const login = new AntigravityCliLogin({ signedIn: () => {} }, { startupMs: 3_000 });
     await expect(login.start(runtime, await profileOf(directory, runtime, env))).rejects.toThrow("did not return a link");
     const pid = fixture.entries().find((entry) => entry.event === "login-start")!.pid as number;
     await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow());
@@ -181,7 +180,7 @@ describe.skipIf(WINDOWS)("a sign-in run by the CLI", () => {
 
   it("expires when the code is not pasted in time, and the CLI is stopped", async () => {
     const { directory, runtime, env, fixture } = setup({ FAKE_AGY_LOGIN: "hold" });
-    const login = new AntigravityCliLogin({ submitting: () => {}, signedIn: () => {} }, { lifetimeMs: 300 });
+    const login = new AntigravityCliLogin({ signedIn: () => {} }, { lifetimeMs: 300 });
     const started = await login.start(runtime, await profileOf(directory, runtime, env));
     await vi.waitFor(async () => expect(await login.get(started.flowId!)).toMatchObject({ phase: "expired", message: "Google sign-in expired. Start sign-in again." }));
     const pid = fixture.entries().find((entry) => entry.event === "login-start")!.pid as number;
@@ -191,7 +190,7 @@ describe.skipIf(WINDOWS)("a sign-in run by the CLI", () => {
 
   it("is cancelled with the CLI's process gone before cancel returns, and a cancel with nothing to cancel is done at once", async () => {
     const { directory, runtime, env, fixture } = setup({ FAKE_AGY_LOGIN: "hold" });
-    const login = new AntigravityCliLogin({ submitting: () => {}, signedIn: () => {} });
+    const login = new AntigravityCliLogin({ signedIn: () => {} });
     expect(await login.cancel()).toBe(true);
     const started = await login.start(runtime, await profileOf(directory, runtime, env));
     expect(await login.cancel()).toBe(true);
@@ -202,7 +201,7 @@ describe.skipIf(WINDOWS)("a sign-in run by the CLI", () => {
 
   it("keeps reporting a cancelled sign-in's process until it is gone, so a later sign-out cannot pass it by", async () => {
     const { directory, runtime, env, fixture } = setup({ FAKE_AGY_LOGIN: "hold" });
-    const login = new AntigravityCliLogin({ submitting: () => {}, signedIn: () => {} }, { exitConfirmMs: 200 });
+    const login = new AntigravityCliLogin({ signedIn: () => {} }, { exitConfirmMs: 200 });
     await login.start(runtime, await profileOf(directory, runtime, env));
     const pid = fixture.entries().find((entry) => entry.event === "login-start")!.pid as number;
     const kill = vi.spyOn(procs, "killCliTree").mockResolvedValue(false);
@@ -218,7 +217,7 @@ describe.skipIf(WINDOWS)("a sign-in run by the CLI", () => {
 
   it("never reports another sign-in's id as its own", async () => {
     const { directory, runtime, env } = setup({ FAKE_AGY_LOGIN: "hold" });
-    const login = new AntigravityCliLogin({ submitting: () => {}, signedIn: () => {} });
+    const login = new AntigravityCliLogin({ signedIn: () => {} });
     const first = await login.start(runtime, await profileOf(directory, runtime, env));
     const second = await login.start(runtime, await profileOf(directory, runtime, env));
     expect(await login.get(first.flowId!)).toMatchObject({ phase: "cancelled" });

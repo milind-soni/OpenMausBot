@@ -3732,6 +3732,7 @@
   "engineSetup.signInTitle": "Sign in to {name}",
   "engineSetup.installTitle": "Install {name}",
   "engineSetup.managedSignIn": "Each Antigravity setup has its own Google account. Your browser completes the secure sign-in.",
+  "engineSetup.nativeSharedSignIn": "Google's Antigravity CLI keeps one sign-in on this computer: every account on it, and the Antigravity CLI in a terminal, use the same Google account, and signing out here signs them all out. This is a limit of the Antigravity CLI.",
   "engineSetup.terminalSignIn": "Finish the account sign-in in Terminal. Reopen this menu afterward and we’ll check again.",
   "engineSetup.injectDesc": "Install the agent once, then you can run it with local models. No cloud sign-in required.",
   "engineSetup.managedDesc": "{app} installs its own verified Antigravity runtime. It is separate from the Antigravity app and agy CLI; install it here, sign in with Google, and this model list will refresh from your account.",

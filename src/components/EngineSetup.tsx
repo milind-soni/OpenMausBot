@@ -272,6 +272,11 @@ export function EngineWarningNotice({
   );
 }
 
+/** An Antigravity account whose CLI path names Google's native CLI (`antigravity`), not the pinned runtime. */
+function runsAntigravityCli(instance: InstanceInfo): boolean {
+  return instance.driverKind === "antigravityAgent" && /^antigravity(?:\.exe)?$/iu.test(instance.cli?.trim() ?? "");
+}
+
 function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; signInOnly: boolean }) {
   const { state, refreshInstances, refreshModels } = useStore();
   const signInStarted = useSignInStarted(instance.instanceId);
@@ -620,7 +625,7 @@ export function EngineSetup({
       : pasteSignIn
       ? t("engineSetup.claude.description")
       : install?.managed
-      ? t("engineSetup.managedSignIn")
+      ? t(runsAntigravityCli(instance) ? "engineSetup.nativeSharedSignIn" : "engineSetup.managedSignIn")
       : t("engineSetup.terminalSignInCheck")
     : intent === "inject"
       ? t("engineSetup.injectDesc")

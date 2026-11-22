@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, renameSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -11,7 +11,6 @@ import { removeTempDir } from "../testing/cleanup.ts";
 import { installFakeManagedCli, loginAt, nativeFixture, sessionAcceptedAt, type NativeFixture } from "../testing/antigravity-native-fixture.ts";
 import { recordEvents } from "../testing/events.ts";
 import { antigravityProfileDirectory } from "./antigravity-acp.ts";
-import { antigravityNativeCredentialsHeld } from "./antigravity-native-credentials.ts";
 import { AntigravityDriver } from "./antigravity.ts";
 
 const WINDOWS = process.platform === "win32";
@@ -160,7 +159,6 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
       expect(done).not.toMatchObject({ stopReason: "auth_required" });
       expect(events.some((event) => event.type === "runtime.error" && (event as { setup?: boolean }).setup === true)).toBe(false);
       await expect(instance.generateMemoryText!("hello")).rejects.toThrow(/exited/u);
-      expect(antigravityNativeCredentialsHeld(instanceId)).toBe(false);
     }, 120_000);
   });
 
@@ -183,17 +181,15 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
   });
 
   describe("signing out", () => {
-    it("asks the CLI to log out, removes what it kept, and forgets that the account may hold a sign-in", async () => {
+    it("asks the CLI to log out and removes what it kept", async () => {
       const fixture = nativeFixture(folder());
       const instanceId = "antigravity-native-sign-out";
       const instance = await create(instanceId, fixture);
       const started = await instance.startAuthentication!();
       await instance.completeAuthentication!(started.flowId!, "fixture-code");
-      expect(antigravityNativeCredentialsHeld(instanceId)).toBe(true);
       await instance.signOut!();
       expect(fixture.methods()).toContain("logout");
       expect(existsSync(credentials(instanceId))).toBe(false);
-      expect(antigravityNativeCredentialsHeld(instanceId)).toBe(false);
     }, 120_000);
 
     it.each([["answers logout and keeps the sign-in", "ignore"], ["refuses logout", "refuse"]])("fails, with the account kept, when the CLI %s in its keyring", async (_name, logout) => {
@@ -203,7 +199,6 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
       const started = await instance.startAuthentication!();
       await instance.completeAuthentication!(started.flowId!, "fixture-code");
       await expect(instance.signOut!()).rejects.toThrow("still reports a Google sign-in");
-      expect(antigravityNativeCredentialsHeld(instanceId)).toBe(true);
       expect(await instance.snapshot()).toMatchObject({ authenticated: true });
     }, 120_000);
 
@@ -214,88 +209,17 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
       const started = await instance.startAuthentication!();
       await instance.completeAuthentication!(started.flowId!, "fixture-code");
       await expect(instance.signOut!()).rejects.toThrow("could not confirm the sign-out");
-      expect(antigravityNativeCredentialsHeld(instanceId)).toBe(true);
     }, 120_000);
 
-    it("never marks an instance that was only probed signed out, so removing the CLI does not stop its account from going", async () => {
+    it("leaves the native CLI's shared sign-in alone when an account on the pinned runtime signs out", async () => {
       const fixture = nativeFixture(folder());
-      const instanceId = "antigravity-native-probed";
-      const instance = await create(instanceId, fixture);
-      expect(await instance.snapshot()).toMatchObject({ authenticated: false });
-      await instance.refreshModels!();
-      expect(antigravityNativeCredentialsHeld(instanceId)).toBe(false);
-      renameSync(fixture.executable, join(fixture.directory, "moved-away"));
-      await expect(instance.signOut!()).resolves.toBeUndefined();
-    }, 120_000);
-
-    it("signs the native CLI out before an account goes, after a login made with it, a switch back to the pinned runtime and a restart", async () => {
-      const fixture = nativeFixture(folder());
-      const instanceId = "antigravity-native-switched";
-      const first = await create(instanceId, fixture);
-      const started = await first.startAuthentication!();
-      await first.completeAuthentication!(started.flowId!, "fixture-code");
-      expect(antigravityNativeCredentialsHeld(instanceId)).toBe(true);
-      await first.dispose();
-      instances.splice(instances.indexOf(first), 1);
-
-      // The server restarts with the account on the default CLI path: the pinned runtime, which is not installed here.
+      const instanceId = "antigravity-native-pinned-signout";
+      await loginAt(fixture, antigravityProfileDirectory(instanceId), "fixture-code");
       installFakeManagedCli(DATA_DIR);
-      const restarted = await create(instanceId, fixture, {}, "agy");
-      const logoutsBefore = fixture.methods().filter((method) => method === "logout").length;
-      await restarted.signOut!();
-      expect(fixture.methods().filter((method) => method === "logout").length).toBe(logoutsBefore + 1);
-      expect(existsSync(credentials(instanceId))).toBe(false);
-      expect(antigravityNativeCredentialsHeld(instanceId)).toBe(false);
-    }, 180_000);
-
-    it("keeps the account, and what says it may hold a sign-in, when the native CLI is not there to sign it out", async () => {
-      const fixture = nativeFixture(folder());
-      const instanceId = "antigravity-native-missing";
-      const first = await create(instanceId, fixture);
-      const started = await first.startAuthentication!();
-      await first.completeAuthentication!(started.flowId!, "fixture-code");
-      await first.dispose();
-      instances.splice(instances.indexOf(first), 1);
-      renameSync(fixture.executable, join(fixture.directory, "moved-away"));
-      const restarted = await create(instanceId, fixture, {}, "agy");
-      await expect(restarted.signOut!()).rejects.toThrow(/native CLI is needed/u);
-      expect(antigravityNativeCredentialsHeld(instanceId)).toBe(true);
-      expect(existsSync(credentials(instanceId))).toBe(true);
-    }, 120_000);
-
-    it("signs out through the CLI path the sign-in was made with, after a switch back to agy with no managed native CLI", async () => {
-      const fixture = nativeFixture(folder());
-      const instanceId = "antigravity-native-custom-path";
-      const first = await create(instanceId, fixture);
-      const started = await first.startAuthentication!();
-      await first.completeAuthentication!(started.flowId!, "fixture-code");
-      await first.dispose();
-      instances.splice(instances.indexOf(first), 1);
-      const restarted = await create(instanceId, fixture, {}, "agy");
-      await restarted.signOut!();
-      expect(fixture.methods()).toContain("logout");
-      expect(antigravityNativeCredentialsHeld(instanceId)).toBe(false);
-    }, 120_000);
-
-    it("notes a sign-in made at a terminal once the CLI accepts a session for model discovery or a turn", async () => {
-      const fixture = nativeFixture(folder());
-      const discovered = await create("antigravity-native-noted-models", fixture);
-      await loginAt(fixture, antigravityProfileDirectory("antigravity-native-noted-models"), "fixture-code");
-      await discovered.refreshModels!();
-      expect(discovered.modelsUnconfirmed).toBe(false);
-      expect(antigravityNativeCredentialsHeld("antigravity-native-noted-models")).toBe(true);
-
-      const turned = await create("antigravity-native-noted-turn", fixture);
-      await loginAt(fixture, antigravityProfileDirectory("antigravity-native-noted-turn"), "fixture-code");
-      expect(antigravityNativeCredentialsHeld("antigravity-native-noted-turn")).toBe(false);
-      const { done } = await turn(turned, "native-noted-turn", fixture.directory);
-      expect(done).toMatchObject({ ok: true });
-      expect(antigravityNativeCredentialsHeld("antigravity-native-noted-turn")).toBe(true);
-
-      const background = await create("antigravity-native-noted-background", fixture);
-      await loginAt(fixture, antigravityProfileDirectory("antigravity-native-noted-background"), "fixture-code");
-      expect(await background.generateMemoryText!("hello")).toBe("fixture reply");
-      expect(antigravityNativeCredentialsHeld("antigravity-native-noted-background")).toBe(true);
+      const pinned = await create(instanceId, fixture, {}, "agy");
+      await pinned.signOut!();
+      expect(fixture.methods()).not.toContain("logout");
+      expect(await sessionAcceptedAt(fixture, antigravityProfileDirectory(instanceId))).toBe(true);
     }, 120_000);
 
     it("does not ask for a sign-in when the CLI's sign-in service is down, in a turn or background text", async () => {
@@ -338,7 +262,6 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
       await expect(instance.completeAuthentication!(started.flowId!, "https://example.test/oauth-callback?code=abc")).rejects.toThrow("not the page Google ends on");
       await expect(instance.completeAuthentication!(started.flowId!, "wrong-code")).rejects.toThrow("sign-in failed");
       expect(await instance.getAuthentication!(started.flowId!)).toMatchObject({ phase: "failed" });
-      expect(antigravityNativeCredentialsHeld("antigravity-native-paste")).toBe(true);
     }, 120_000);
 
     it("accepts the callback page's full address, and a new sign-in replaces one that was never finished", async () => {
@@ -362,7 +285,6 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
       await instance.cancelAuthentication!();
       expect(() => process.kill(pid, 0)).toThrow();
       expect(await instance.getAuthentication!(started.flowId!)).toMatchObject({ phase: "cancelled" });
-      expect(antigravityNativeCredentialsHeld("antigravity-native-cancel")).toBe(false);
     }, 120_000);
   });
 

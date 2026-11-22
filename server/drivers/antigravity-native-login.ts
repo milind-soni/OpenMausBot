@@ -95,8 +95,6 @@ interface LoginFlow {
 }
 
 export interface NativeLoginHooks {
-  /** Called before the person's code is given to the CLI: from then on the CLI may hold a sign-in for this instance. */
-  submitting(): void;
   signedIn(): void;
   /** Whether the CLI accepts a session after it gave no exit in time. */
   confirm?(): Promise<boolean>;
@@ -237,7 +235,6 @@ export class AntigravityCliLogin {
     const line = antigravityLoginInput(flow, pasted);
     flow.submitted = true;
     try {
-      this.#hooks.submitting();
       await new Promise<void>((resolveWrite, rejectWrite) => flow.child.stdin.write(`${line}\n`, (error) => error ? rejectWrite(error) : resolveWrite()));
     } catch {
       if (this.#end(flow, "failed", FAILED)) flow.settle.reject(new Error(FAILED));

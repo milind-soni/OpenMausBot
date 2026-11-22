@@ -163,6 +163,11 @@ export class NativeSignInCache {
     return current.read;
   }
 
+  /** A sign-in or sign-out of the CLI's one shared sign-in changes every instance's answer. */
+  forgetAll(): void {
+    for (const instanceId of new Set([...this.#entries.keys(), ...this.#reading.keys(), ...this.#generations.keys()])) this.forget(instanceId);
+  }
+
   /** The next question asks the CLI again: a sign-in, sign-out, runtime switch or refusal changed the answer. */
   forget(instanceId: string): void {
     this.#generations.set(instanceId, this.#generation(instanceId) + 1);

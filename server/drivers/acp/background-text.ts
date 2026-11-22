@@ -63,8 +63,6 @@ export interface AcpOneShotInput {
   loginNote: string;
   /** Whether a session/new refusal asks for a sign-in; it then fails with `loginNote`. */
   signInRefused?: (error: unknown) => boolean;
-  /** Called once the agent has started the session. */
-  sessionAccepted?: () => void;
   clientCapabilitiesMeta?: Record<string, unknown>;
   configure?: (ctx: { request: (method: string, params: unknown, timeoutMs?: number) => Promise<any>; sessionId: string; session: any }) => Promise<void>;
   options?: TextGenerationOptions;
@@ -206,7 +204,6 @@ export function runAcpOneShot(input: AcpOneShotInput): Promise<string> {
         throw new Error(input.loginNote);
       }
       const session = await request("session/new", { cwd: input.cwd, mcpServers: [] }).catch((error: unknown) => { throw input.signInRefused?.(error) ? new Error(input.loginNote) : error; });
-      input.sessionAccepted?.();
       if (typeof session?.sessionId !== "string") throw new Error(`${name} background session/new returned no sessionId`);
       sessionId = session.sessionId;
       model = typeof session?.models?.currentModelId === "string" ? session.models.currentModelId

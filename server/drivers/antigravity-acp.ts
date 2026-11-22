@@ -35,7 +35,6 @@ import type { ModelCatalog } from "../contracts.ts";
 import type { ChildProcess } from "node:child_process";
 import type { AntigravityRuntime } from "./antigravity-runtime.ts";
 import { acpVariantOption, surveyModelVariants } from "./acp/config-options.ts";
-import { clearAntigravityNativeCredentials } from "./antigravity-native-credentials.ts";
 import { StderrTail, exitDetail } from "./acp/exit-report.ts";
 import {
   VERIFICATION_TEMP_KEY,
@@ -192,7 +191,6 @@ export function antigravityProfileDirectory(instanceId: string, baseDir = DATA_D
 /** A removed account's Google sign-in goes with its profile, so no refresh token outlives the account. Best effort:
  * the account is already gone from the config, and Windows refuses while a retiring process still holds a file. */
 export async function removeAntigravityProfile(instanceId: string, baseDir = DATA_DIR): Promise<void> {
-  clearAntigravityNativeCredentials(instanceId, baseDir);
   await rm(antigravityProfileDirectory(instanceId, baseDir), { recursive: true, force: true, maxRetries: 4, retryDelay: 250 })
     .catch((error) => {
       console.warn(`antigravity: could not remove a removed account's profile: ${error instanceof Error ? error.message : String(error)}`);
@@ -684,8 +682,6 @@ export async function probeAntigravityModels(input: {
   cwd?: string;
   fallbackDefault: string;
   timeoutMs?: number;
-  /** Called as soon as the agent starts a session, before its answer is read. */
-  sessionAccepted?: () => void;
   onProcess?: (child: ChildProcess) => void;
 }): Promise<ModelCatalog> {
   const deadline = Date.now() + (input.timeoutMs ?? STARTUP_CAP_MS);
@@ -705,7 +701,6 @@ export async function probeAntigravityModels(input: {
       { cwd: input.cwd ?? input.profile.directory, mcpServers: [], ...antigravitySessionSetup(initialized) },
       remaining(),
     );
-    input.sessionAccepted?.();
     const catalog = catalogFromAntigravityConfigOptions(session?.configOptions, input.fallbackDefault);
     if (!catalog) throw new Error("Antigravity did not return a model catalog for this Google account.");
     const budget = Math.min(VARIANT_SURVEY_MS, deadline - Date.now());

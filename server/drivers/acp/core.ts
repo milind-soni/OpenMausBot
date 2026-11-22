@@ -1231,7 +1231,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 session.sessionKey = sessionKey;
                 receiveModelVariants(result, true);
               });
-              support.sessionAccepted?.(instanceId, turnConfig); break;
+              break;
             }
             const sessionId = session.sessionId;
             if (sessionId === null) throw new Error("session/new returned no sessionId");
@@ -1527,7 +1527,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             defaultModel: catalog.models.default, model,
             pickAuthMethod: (methods) => support.skipsAuthenticate?.(instanceId) ? null : support.pickAuthMethod(methods, spawnEnv),
             authRequired: !support.skipsAuthenticate?.(instanceId) && (support.authFailure === "fail-request" ? "if-requested" : support.authFailure === "fail"),
-            loginNote: support.loginNote, signInRefused: support.skipsAuthenticate?.(instanceId) && support.signInRequest ? (error) => support.signInRequest!.rpcError(error, instanceId) : undefined, sessionAccepted: () => support.sessionAccepted?.(instanceId, turnConfig),
+            loginNote: support.loginNote, signInRefused: support.skipsAuthenticate?.(instanceId) && support.signInRequest ? (error) => support.signInRequest!.rpcError(error, instanceId) : undefined,
             clientCapabilitiesMeta: support.clientCapabilitiesMeta,
             ...(support.configureSession ? {
               configure: ({ request, sessionId, session }) => support.configureSession!({
