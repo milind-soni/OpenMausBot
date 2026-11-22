@@ -374,9 +374,9 @@ function LocalFileLink({ filePath, shownPath, shownName, name, source, children,
   }
   // Only the desktop app probes; elsewhere the hook stays null and the link must stay usable.
   const probing = revealHere && canRevealHostPath(filePath) && fileOutsideWorkspace === null;
-  const pathAction = async () => {
+  const pathAction = async (event: { currentTarget: HTMLElement }) => {
     if (preview.opens) {
-      preview.show();
+      preview.show(event);
       return;
     }
     if (revealOnClick) {
@@ -405,7 +405,7 @@ function LocalFileLink({ filePath, shownPath, shownName, name, source, children,
         : <FilePreviewButton path={filePath} name={shownName} message={message} />}
       <button
         type="button"
-        onClick={() => void pathAction()}
+        onClick={(event) => void pathAction(event)}
         disabled={!preview.opens && (save.state === "saving" || probing)}
         title={pathTitle}
         className="inline-flex items-center gap-1 break-words text-start text-accent underline decoration-accent/40 hover:decoration-accent disabled:cursor-wait"
