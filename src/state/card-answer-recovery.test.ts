@@ -65,7 +65,7 @@ const roomCard = (id: string) => card(seen.groups.find((candidate) => candidate.
 
 beforeAll(async () => {
   vi.stubGlobal("EventSource", FixtureEventSource);
-  vi.stubGlobal("fetch", (path: string, options?: RequestInit) => {
+  vi.stubGlobal("fetch", (path: string) => {
     requests.push(path);
     if (path.startsWith("/api/bots?")) return json({ bots: [bot], groups: [room] });
     if (path.startsWith("/api/threads/room-fork/messages?")) return json({ messages: [question("room-ask")], activeLeafId: "room-ask", hasMore: false });
