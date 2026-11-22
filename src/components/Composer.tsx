@@ -663,6 +663,7 @@ export function Composer({
         )}
         <PointedChips threadId={threadId} />{!group && bot && <SetupRequestChip bot={bot} threadId={threadId} />}
         <ComposerAttachments
+          key={draftId}
           items={attachments}
           onAdd={addAttachments}
           onRemove={removeAttachment}

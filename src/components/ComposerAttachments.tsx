@@ -1,6 +1,7 @@
 import { CachedChatImage } from "./CachedChatImage";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ClipboardPaste, FileText, LoaderCircle, MessageSquareText, X } from "lucide-react";
+import { reducedMotion } from "@/lib/onboarding";
 import { cn } from "@/lib/cn";
 import {
   attachmentImageUrl,
@@ -46,6 +47,33 @@ export function ComposerAttachments({
 }) {
   const [dragging, setDragging] = useState(false);
   const [preview, setPreview] = useState<PreviewImage | null>(null);
+  const previousItems = useRef(items);
+  const [leaving, setLeaving] = useState<{ item: Attachment; before: string | undefined }[]>([]);
+  const liveIds = new Set(items.map(item => item.id));
+  const animate = !reducedMotion();
+  const pending = !animate ? [] : leaving.filter(({ item }) => !liveIds.has(item.id));
+  const removed = !animate ? [] : previousItems.current.flatMap((item, index, previous) =>
+    (item.kind === "image" || item.kind === "file") && !liveIds.has(item.id)
+      ? [{ item, before: previous.slice(index + 1).find(next => liveIds.has(next.id))?.id }]
+      : []);
+  const exits = [...pending.map(exit => exit.before && !liveIds.has(exit.before)
+    ? { ...exit, before: removed.find(({ item }) => item.id === exit.before)?.before }
+    : exit), ...removed];
+  const displayed = items.flatMap(item => [
+    ...exits.filter(exit => exit.before === item.id).map(exit => exit.item),
+    item,
+  ]).concat(exits.filter(exit => !exit.before || !liveIds.has(exit.before)).map(exit => exit.item));
+
+  useLayoutEffect(() => {
+    previousItems.current = items;
+    if (removed.length || pending.length !== leaving.length) setLeaving(exits);
+  });
+  useEffect(() => {
+    if (leaving.length === 0) return;
+    const timer = window.setTimeout(() => setLeaving([]), 200);
+    return () => window.clearTimeout(timer);
+  }, [leaving]);
+
   // dragenter/dragleave fire once per element crossed, so the overlay tracks depth.
   const depth = useRef(0);
   // A drop past the images the message can still take is left out with a notice.
@@ -132,9 +160,9 @@ export function ComposerAttachments({
         </div>
       )}
 
-      {items.length > 0 && (
+      {displayed.length > 0 && (
         <div className="mb-2 flex min-w-0 flex-wrap items-start gap-2">
-          {items.map((a) =>
+          {displayed.map((a) =>
             a.kind === "citation" ? (
               <CitationBadge
                 key={a.id}
@@ -168,7 +196,8 @@ export function ComposerAttachments({
                 </button>
               </PastedTextChip>
             ) : a.kind === "image" ? (
-              <div key={a.id} className="group relative aspect-square w-16 max-w-full rounded-lg md:w-20 motion-safe:animate-fade-in">
+              <div key={a.id} inert={!liveIds.has(a.id)} aria-hidden={!liveIds.has(a.id) || undefined}
+                className={cn("group relative aspect-square w-16 max-w-full rounded-lg md:w-20", attachmentFade(liveIds.has(a.id)))}>
                 <button
                   type="button"
                   onClick={() => {
@@ -204,7 +233,8 @@ export function ComposerAttachments({
                 </button>
               </div>
             ) : (
-              <div key={a.id} className="flex min-h-[42px] max-w-full items-center gap-2 self-end rounded-xl border border-hairline/25 px-2.5 text-[12px] text-ink-secondary">
+              <div key={a.id} inert={!liveIds.has(a.id)} aria-hidden={!liveIds.has(a.id) || undefined}
+                className={cn("flex min-h-[42px] max-w-full items-center gap-2 self-end rounded-xl border border-hairline/25 px-2.5 text-[12px] text-ink-secondary", attachmentFade(liveIds.has(a.id)))}>
                 <FileText size={14} className="shrink-0" aria-hidden="true" />
                 <span dir="auto" title={a.name} className="min-w-0 truncate text-ink">{a.name}</span>
                 <button
@@ -224,6 +254,11 @@ export function ComposerAttachments({
       {preview && <AttachmentPreviewDialog image={preview} onClose={() => setPreview(null)} />}
     </>
   );
+}
+
+function attachmentFade(visible: boolean) {
+  return cn("transition-opacity duration-200 motion-reduce:transition-none [html[data-reduced-motion=true]_&]:transition-none",
+    visible ? "opacity-100 starting:opacity-0" : "opacity-0 pointer-events-none");
 }
 
 function PastedTextChip({
