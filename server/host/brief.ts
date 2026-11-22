@@ -590,6 +590,12 @@ export function createBrief(deps: BriefDeps) {
       const bot = chief();
       return bot ? currentCard(bot)?.row.widget?.root : undefined;
     },
+    /** The newest brief card, from today or an earlier day, while it is still in its chat. */
+    latestCard: (): { threadId: string; messageId: string } | undefined => {
+      const card = state.card;
+      if (!card || !deps.store.messagesFor(card.threadId).some((row) => row.id === card.messageId && row.serverCard)) return undefined;
+      return { threadId: card.threadId, messageId: card.messageId };
+    },
     /** The brief moved to another bot: from now on it lives in that bot's main chat, and its next card says what it
      * does. Cards already posted stay where they are. */
     moveTo: (botId: string): void => {

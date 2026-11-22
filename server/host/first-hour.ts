@@ -104,6 +104,8 @@ export interface FirstHourDeps {
   briefOn(): boolean;
   /** An app it reads is in: the brief is made now if it was not yet. */
   ensureBrief(): void;
+  /** The newest morning brief card, which the recap's sorted count points to. */
+  briefCard(): { threadId: string; messageId: string } | undefined;
   phones(): number;
   startTurn(botId: string, text: string, opts: { threadId: string; cardContinuation: true; onSettled: (outcome: HostTurnResult) => void }): Promise<unknown>;
   notify(bot: BotRecord, threadId: string, body: string): void;
@@ -209,8 +211,8 @@ export function createFirstHour(deps: FirstHourDeps) {
   const soon = (step: () => Promise<void>): void => { setTimeout(() => void step(), SOON_MS).unref?.(); };
 
   /** One line from the Chief in its chat, unread, read by its next turn. */
-  function say(bot: BotRecord, threadId: string, text: string): Message {
-    const message = deps.store.appendMessage(threadId, { role: "bot", kind: "text", text });
+  function say(bot: BotRecord, threadId: string, text: string, replyToId?: string): Message {
+    const message = deps.store.appendMessage(threadId, { role: "bot", kind: "text", text, ...(replyToId ? { replyToId } : {}) });
     deps.store.patchTask(bot.id, threadId, { unread: true });
     deps.wrote(bot, threadId);
     return message;
@@ -391,7 +393,8 @@ export function createFirstHour(deps: FirstHourDeps) {
       return;
     }
     const w = words();
-    say(place.bot, place.threadId, w.recap(doneLine(counts, w, w.briefSorted)!, w.time(minutesSaved(counts))));
+    const brief = counts.sorted ? deps.briefCard() : undefined;
+    say(place.bot, place.threadId, w.recap(doneLine(counts, w, w.briefSorted)!, w.time(minutesSaved(counts))), brief?.threadId === place.threadId ? brief.messageId : undefined);
     mark({ recapAt: at });
   }
 
