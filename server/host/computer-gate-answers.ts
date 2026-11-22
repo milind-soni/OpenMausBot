@@ -1,4 +1,4 @@
-import { CONTROL_WAITED, CONTROL_WAITED_HELD, type ControlState } from "../control-client.ts";
+import { CONTROL_HANDED_BACK, CONTROL_WAITED, CONTROL_WAITED_HELD, type ControlState } from "../control-client.ts";
 import { computerBusyText, computerQueuedText } from "../computer-wait.ts";
 import type { TurnOwner, TurnResources } from "../turn-resources.ts";
 
@@ -17,7 +17,6 @@ export interface ComputerGateAnswersDeps {
   personHolds: (resource: string) => boolean;
   /** The latest hold a person started on this seat, as a `takeSequence`, so a take and hand-back between two looks still shows. */
   personLastTake: (resource: string) => number;
-  takeSequence: () => number;
   pollMs: number;
 }
 
@@ -44,11 +43,18 @@ export function createComputerGateAnswers(deps: ComputerGateAnswersDeps) {
     return waiting ? computerQueuedText({ ...facts, position: waiting.position }) : undefined;
   }
 
+  /** Whether a person holds this turn's computer now, or started a hold on it after `since` (a `takeSequence`), even one already handed back. */
+  function personCame(owner: TurnOwner, person: PersonOnBot, since: number): boolean {
+    if (person.held() || person.lastTake() > since) return true;
+    const seat = deps.resources.computerWaitOf(owner)?.resource ?? boundSeat(owner)?.resource;
+    return seat !== undefined && (deps.personHolds(seat) || deps.personLastTake(seat) > since);
+  }
+
   /**
    * Waits for a pending claim and says whether a person took the computer meanwhile, even one who already handed it back:
    * a click composed before a person took the screen must not land on whatever is there now.
    */
-  async function waitForClaim(begin: Promise<unknown>, until: number, owner: TurnOwner, person: PersonOnBot, signal?: AbortSignal): Promise<boolean> {
+  async function waitForClaim(begin: Promise<unknown>, until: number, owner: TurnOwner, person: PersonOnBot, since: number, signal?: AbortSignal): Promise<boolean> {
     let settled = false;
     let wake: (() => void) | undefined;
     const settle = () => { settled = true; wake?.(); };
@@ -59,22 +65,21 @@ export function createComputerGateAnswers(deps: ComputerGateAnswersDeps) {
       signal?.addEventListener("abort", done, { once: true });
       wake = done;
     });
-    const since = deps.takeSequence();
-    const personCame = (): boolean => {
-      if (person.held() || person.lastTake() > since) return true;
-      const seat = deps.resources.computerWaitOf(owner)?.resource ?? boundSeat(owner)?.resource;
-      return seat !== undefined && (deps.personHolds(seat) || deps.personLastTake(seat) > since);
-    };
-    let personSeen = personCame();
+    let personSeen = personCame(owner, person, since);
     while (!settled && Date.now() < until && !signal?.aborted) {
       await tick(Math.min(deps.pollMs, until - Date.now()));
-      personSeen = personCame() || personSeen;
+      personSeen = personCame(owner, person, since) || personSeen;
     }
     return personSeen;
   }
 
   return {
     contention,
+    personCame,
+    /** A claim that must be retried after a person took the computer and handed it back asks for a fresh screenshot first. */
+    retry(owner: TurnOwner, personCameMeanwhile: boolean, retryText: string): string {
+      return personCameMeanwhile && contention(owner) !== PERSON_HOLDS ? CONTROL_HANDED_BACK : retryText;
+    },
     waitForClaim,
     held(reason: string, helpOpen: boolean): ControlState {
       return reason === PERSON_HOLDS ? { held: true, helpOpen, reason: "person" } : { held: true, helpOpen: false, blockedReason: reason };
