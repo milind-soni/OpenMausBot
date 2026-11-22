@@ -68,8 +68,11 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
   }
 
   function cancel(ask) {
-    if (ask.state === "listening") speech.stop(ask.sink);
-    closeBox(ask);
+    try {
+      if (ask.state === "listening") speech.stop(ask.sink);
+    } finally {
+      closeBox(ask);
+    }
   }
 
   function hovered() {

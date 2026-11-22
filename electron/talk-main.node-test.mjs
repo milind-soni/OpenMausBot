@@ -323,5 +323,6 @@ test("quitting while listening logs a failure to stop speech and still lets the 
   h.fail.stop = "stop broke";
   assert.doesNotThrow(() => h.talk.close());
   assert.deepEqual(h.log, ["talk close failed: stop broke"]);
+  assert.equal(h.talk.busy(), false, "a failed speech stop still clears the active ask");
   assert.deepEqual([...h.registered.keys()], []);
 });
