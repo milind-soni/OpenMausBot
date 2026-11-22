@@ -1,4 +1,4 @@
-app = "APP_NAME"
+app = "shy-snowfall-893"
 primary_region = "fra"
 kill_signal = "SIGTERM"
 kill_timeout = "30s"
@@ -10,9 +10,9 @@ kill_timeout = "30s"
     ENGINES = "@anthropic-ai/claude-code @openai/codex"
 
 [env]
-  OMB_PUBLIC_URL = "https://APP_NAME.fly.dev"
-  OMB_WEBHOOK_PUBLIC_URL = "https://APP_NAME.fly.dev"
-  OMB_SERVER_NAME = "APP_NAME"
+  OMB_PUBLIC_URL = "https://shy-snowfall-893.fly.dev"
+  OMB_WEBHOOK_PUBLIC_URL = "https://shy-snowfall-893.fly.dev"
+  OMB_SERVER_NAME = "shy-snowfall-893"
 
 [[mounts]]
   source = "omb_data"
