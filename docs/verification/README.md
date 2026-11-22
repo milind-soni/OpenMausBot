@@ -115,6 +115,7 @@ Use only mapped, tested commands:
 - [Who can see, chat with and change each team bot](team-bot-access.md)
 - [Usage ledger](usage-ledger.md)
 - [Bounded built-in tool results](tool-results.md)
+- [Composio project key](composio-own-key.md)
 - [Memory: recall, upkeep and the tidy-up](memory-layer.md)
 - [Spend cap and sell prices](spend-cap.md)
 

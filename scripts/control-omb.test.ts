@@ -52,6 +52,16 @@ describe("the fixture's Netlify stand-in", () => {
   });
 });
 
+describe("the fixture's fetch log", () => {
+  it("lets only an absolute path cross, so a test can record every request the fixture makes", () => {
+    const log = join(tmpdir(), "edubot-fetch.log");
+    expect(childEnv({ OMB_TEST_FETCH_LOG: log }).OMB_TEST_FETCH_LOG).toBe(log);
+    for (const path of ["fetch.log", ` ${log}`, `${log}\n`, `${log}\0x`, ""]) {
+      expect(childEnv({ OMB_TEST_FETCH_LOG: path }), JSON.stringify(path)).not.toHaveProperty("OMB_TEST_FETCH_LOG");
+    }
+  });
+});
+
 describe("the fixture's Composio stand-in", () => {
   it("lets only a loopback stand-in's API address cross, so a key saved in a fixture never reaches Composio", () => {
     expect(childEnv({ OMB_COMPOSIO_API: " http://127.0.0.1:4020/api/v3.1 " }).OMB_COMPOSIO_API).toBe("http://127.0.0.1:4020/api/v3.1");

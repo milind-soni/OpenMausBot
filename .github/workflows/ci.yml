@@ -135,6 +135,8 @@ jobs:
           LANG: C.UTF-8
           LC_ALL: C.UTF-8
           TZ: UTC
+          # Empty on a fork PR and when the secret is absent, so the live Composio test skips. Same-repo runs inherit it into the Linux lanes.
+          EDUBOT_COMPOSIO_TEST_KEY: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.EDUBOT_COMPOSIO_TEST_KEY || '' }}
         # Boat's runner gives every process cap_dac_read_search as an ambient capability, so a test can still read a
         # file it set to mode 000, and Boat's desktop sets DISPLAY. GitHub's runners have neither.
         shell: setpriv --inh-caps=-all --ambient-caps=-all -- env -u DISPLAY -u XAUTHORITY bash --noprofile --norc -eo pipefail {0}
@@ -235,6 +237,8 @@ jobs:
           OMB_VITEST_E2E: ${{ matrix.e2e }}
           OMB_VITEST_SUBSET: ${{ matrix.files }}
           OMB_VITEST_WORKERS: ${{ matrix.workers }}
+          # Empty on a fork PR and when the secret is absent, so the live Composio test skips.
+          EDUBOT_COMPOSIO_TEST_KEY: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.EDUBOT_COMPOSIO_TEST_KEY || '' }}
         run: pnpm exec vitest run ${{ matrix.files }} --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=default --reporter=github-actions
       - name: Report flaky tests that needed a retry
         # Known flakes (scripts/testing/ci-retry-list.json) get two retries in

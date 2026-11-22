@@ -11,7 +11,14 @@ import { fileURLToPath } from "node:url";
 export function vitestLane(entry, retryLog) {
   return {
     name: `vitest (ubuntu-latest, ${entry.part})`,
-    env: { OMB_VITEST_RETRY_LOG: retryLog, OMB_VITEST_E2E: entry.e2e, OMB_VITEST_SUBSET: entry.files, OMB_VITEST_WORKERS: entry.workers },
+    env: {
+      OMB_VITEST_RETRY_LOG: retryLog,
+      OMB_VITEST_E2E: entry.e2e,
+      OMB_VITEST_SUBSET: entry.files,
+      OMB_VITEST_WORKERS: entry.workers,
+      // A blank string would wipe a secret this process already has. Unset stays empty, and the live test skips.
+      EDUBOT_COMPOSIO_TEST_KEY: process.env.EDUBOT_COMPOSIO_TEST_KEY ?? "",
+    },
     commands: [
       `pnpm exec vitest run ${entry.files} --shard=${entry.shard}/${entry.shards} --reporter=default --reporter=github-actions`,
       ...(entry.node_tests ? ["pnpm broker:test && pnpm test:electron"] : []),

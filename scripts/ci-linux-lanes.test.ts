@@ -25,7 +25,7 @@ describe("Linux lanes", () => {
     ]);
     expect(lanes[0]).toEqual({
       name: "vitest (ubuntu-latest, shard 1/8)",
-      env: { OMB_VITEST_RETRY_LOG: "/t/retries.jsonl", OMB_VITEST_E2E: "all", OMB_VITEST_SUBSET: "", OMB_VITEST_WORKERS: 4 },
+      env: { OMB_VITEST_RETRY_LOG: "/t/retries.jsonl", OMB_VITEST_E2E: "all", OMB_VITEST_SUBSET: "", OMB_VITEST_WORKERS: 4, EDUBOT_COMPOSIO_TEST_KEY: process.env.EDUBOT_COMPOSIO_TEST_KEY ?? "" },
       commands: ["pnpm exec vitest run  --shard=1/8 --reporter=default --reporter=github-actions", "pnpm broker:test && pnpm test:electron"],
     });
     expect(lanes.slice(1, 8).every((lane) => lane.commands.length === 1)).toBe(true);

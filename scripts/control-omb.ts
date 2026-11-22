@@ -265,6 +265,9 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
   if (parentEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE) {
     childEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE = parentEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE;
   }
+  // An absolute file the fixture appends every fetch URL to. Query strings stay off the log.
+  const fetchLog = parentEnv.OMB_TEST_FETCH_LOG ?? "";
+  if (fetchLog && isAbsolute(fetchLog) && !/[\n\0]/.test(fetchLog)) childEnv.OMB_TEST_FETCH_LOG = fetchLog;
   // The Claude broker's approval deadline fires on a marker file, not after 15 minutes.
   if (parentEnv.OMB_TEST_APPROVAL_CLOCK === "1") childEnv.OMB_TEST_APPROVAL_CLOCK = "1";
   // The stall watchdog fires on a marker file, not after 20 minutes of silence.
@@ -303,6 +306,7 @@ export function verificationServerArgs(childEnv: NodeJS.ProcessEnv): string[] {
   return [
     "--experimental-strip-types",
     ...(childEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE === "1" ? hook("fail-audio-append-once.mjs") : []),
+    ...(childEnv.OMB_TEST_FETCH_LOG ? hook("fetch-log-hook.mjs") : []),
     ...(childEnv.OMB_TEST_DESKTOP_OWNER_TOKEN || childEnv.OMB_TEST_DESKTOP_CUA_CONNECTION ? hook("desktop-parent.mjs") : []),
     ...(childEnv.OMB_TEST_APPROVAL_CLOCK === "1" ? hook("approval-clock-hooks.mjs") : []),
     ...(childEnv.OMB_TEST_STALL_CLOCK === "1" ? hook("stall-clock-hooks.mjs") : []),
