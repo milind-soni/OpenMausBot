@@ -13,7 +13,8 @@ function panel(): HTMLElement {
   aside.id = "bot-panel";
   aside.setAttribute("role", "dialog");
   aside.tabIndex = -1;
-  aside.innerHTML = '<h2 id="bot-settings-title">Scout</h2><button type="button">Close</button>';
+  aside.innerHTML = '<h2 id="bot-settings-title">Scout</h2><button type="button">Close</button>'
+    + '<svg><defs><linearGradient id="mascot-grad"></linearGradient></defs></svg><iframe src="about:blank"></iframe>';
   aside.getBoundingClientRect = () => ({ width: 320 }) as DOMRect;
   row.append(document.createElement("main"), aside);
   return aside;
@@ -44,7 +45,8 @@ describe("closing a side panel beside the chat", () => {
     expect(copy!.inert).toBe(true);
     expect(copy!.hasAttribute("role")).toBe(false);
     expect(copy!.hasAttribute("tabindex")).toBe(false);
-    expect(copy!.querySelector("[id]")).toBeNull();
+    expect([...copy!.querySelectorAll("[id]")].map((node) => node.id)).toEqual(["mascot-grad"]);
+    expect(copy!.querySelector("iframe")).toBeNull();
     expect(copy!.id).toBe("");
     expect(animate).toHaveBeenCalledWith(
       [{ marginInlineEnd: "0px", opacity: 1 }, { marginInlineEnd: "-320px", opacity: 0 }],
@@ -72,6 +74,17 @@ describe("closing a side panel beside the chat", () => {
     await Promise.resolve();
     expect(copies()).toHaveLength(0);
     expect(animate).not.toHaveBeenCalled();
+  });
+
+  it("gives the room at once to a panel that arrives while the copy is still sliding out", async () => {
+    const aside = panel();
+    leaveSidePanel(aside);
+    aside.remove();
+    await Promise.resolve();
+    expect(copies()).toHaveLength(1);
+    row.append(document.createElement("aside"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(copies()).toHaveLength(0);
   });
 });
 

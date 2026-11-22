@@ -25,8 +25,8 @@ function reducedMotion(doc: Document): boolean {
 
 /** The panel is gone the moment it closes: focus has gone back and its keys are off. Beside the chat, an inert copy
  * of it is left in its place and slides back out over the window's edge, giving the chat its room back over the
- * same 240ms it took. A floating panel, reduced motion, or another panel taking this one's place (a different bot's)
- * leaves no copy. */
+ * same 240ms it took. A floating panel, reduced motion, or another panel taking this one's place (a different bot's,
+ * or Computer) leaves no copy, or ends it. */
 export function leaveSidePanel(panel: HTMLElement): void {
   const parent = panel.parentElement, doc = panel.ownerDocument;
   if (!parent || typeof panel.animate !== "function" || reducedMotion(doc)) return;
@@ -37,7 +37,12 @@ export function leaveSidePanel(panel: HTMLElement): void {
   const before = new Set(parent.querySelectorAll(":scope > aside"));
   const next = panel.nextSibling;
   const copy = panel.cloneNode(true) as HTMLElement;
-  for (const node of [copy, ...copy.querySelectorAll("[id]")]) node.removeAttribute("id");
+  // HTML ids go (no duplicates for labels or tests to find); SVG ones stay, since the copy's marks fill through them.
+  for (const node of [copy, ...copy.querySelectorAll("[id]")]) if (!(node instanceof SVGElement)) node.removeAttribute("id");
+  // A copy starts scrolled to the top: note where each scrolled part of the panel was, while it still has a layout.
+  const from = [panel, ...panel.querySelectorAll<HTMLElement>("*")], to = [copy, ...copy.querySelectorAll<HTMLElement>("*")];
+  const scrolled = from.flatMap((node, index) => node.scrollTop ? [[to[index]!, node.scrollTop] as const] : []);
+  for (const node of copy.querySelectorAll("iframe, video, audio")) node.remove();
   for (const name of ["role", "aria-labelledby", "aria-modal", "tabindex"]) copy.removeAttribute(name);
   copy.setAttribute("aria-hidden", "true");
   copy.inert = true;
@@ -48,11 +53,20 @@ export function leaveSidePanel(panel: HTMLElement): void {
     if (panel.isConnected || !parent.isConnected) return;
     if ([...parent.querySelectorAll(":scope > aside")].some((node) => !before.has(node))) return;
     parent.insertBefore(copy, next?.parentNode === parent ? next : null);
+    for (const [node, top] of scrolled) node.scrollTop = top;
     const motion = copy.animate(
       [{ marginInlineEnd: "0px", opacity: 1 }, { marginInlineEnd: `${-width}px`, opacity: 0 }],
       { duration: LEAVE_MS, easing: LEAVE_EASE, fill: "forwards" },
     );
-    const done = () => copy.remove();
+    // A panel that arrives a little later (one that loads first, like Computer) takes the room at once.
+    let arrivals: MutationObserver | null = null;
+    const done = () => { arrivals?.disconnect(); copy.remove(); };
+    if (typeof MutationObserver === "function") {
+      arrivals = new MutationObserver((changes) => {
+        if (changes.some((change) => [...change.addedNodes].some((node) => node instanceof HTMLElement && node.tagName === "ASIDE"))) done();
+      });
+      arrivals.observe(parent, { childList: true });
+    }
     motion.finished.then(done, done);
   });
 }
