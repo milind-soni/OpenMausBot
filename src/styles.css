@@ -2067,6 +2067,26 @@ body {
   backdrop-filter: none;
   mask-image: none;
 }
+/* Simple mode's chat header has no band at all: the transcript runs up to the window's top edge under the floating pill
+   and buttons, and the scroller itself fades it in, in even steps, over the --top-fade just above the bar's bottom
+   edge, where the first row rests at the top of the history. A mask, not a fill, so whatever ground the skin paints
+   (Aurora's field included) shows through. A taller bar (find, a notice) keeps what lies above that stretch hidden.
+   Only the bar's controls take the pointer; between them, a click reaches the transcript. */
+.glass-bar[data-chathead-float]::before {
+  content: none;
+}
+.glass-scroller[data-top-fade] {
+  --top-fade: 60px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--glass-top, 0px) - var(--top-fade)), #000 var(--glass-top, 0px));
+  mask-image: linear-gradient(to bottom, transparent calc(var(--glass-top, 0px) - var(--top-fade)), #000 var(--glass-top, 0px));
+}
+[data-chathead-float] {
+  pointer-events: none;
+}
+[data-chathead-float] > :not([data-look="chat-header"]),
+[data-chathead-float] :is([data-chathead-identity], [data-chathead-controls]) > * {
+  pointer-events: auto;
+}
 /* The colour of the place on screen (PlaceTint), faint, from the very top of the sidebar to just below its head, under
    everything there: the head's words and controls stay on what is still almost the plain panel. Dark skins take a
    little more of it to show at all. Reduced transparency: a thin solid line at the top instead; forced colours: none. */
