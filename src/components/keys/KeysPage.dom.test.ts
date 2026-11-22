@@ -12,7 +12,17 @@ const fx = vi.hoisted(() => ({
   api: vi.fn(),
   dispatch: vi.fn(),
   refreshModels: vi.fn(),
+  sshHosts: [] as string[],
 }));
+vi.mock("@/lib/relay-server", async (original) => {
+  const actual = await original<typeof import("@/lib/relay-server")>();
+  return {
+    ...actual,
+    serverFetch: (path: string, init?: RequestInit) => path === "/api/computers/vps/ssh-hosts"
+      ? Promise.resolve(new Response(JSON.stringify({ hosts: fx.sshHosts })))
+      : actual.serverFetch(path, init),
+  };
+});
 vi.mock("@/state/store", async (original) => {
   const actual = await original<typeof import("@/state/store")>();
   const { useSyncExternalStore } = await import("react");
@@ -74,6 +84,7 @@ function paste(input: HTMLInputElement, text: string) {
 
 beforeEach(() => {
   setLocale("en");
+  fx.sshHosts = [];
   fx.api.mockReset();
   fx.dispatch.mockReset();
   fx.refreshModels.mockReset();
@@ -544,46 +555,160 @@ describe("Boat's credit offer on the Boat card", () => {
   });
 });
 
-describe("Self-hosted VPS alias", () => {
+describe("Self-hosted VPS servers", () => {
+  const status = (vps: Record<string, unknown>) => ({ ...fx.config, vps: { memoryGb: 4, cpus: 2, ...vps } });
+  const rowFor = (alias: string) => host.querySelector<HTMLElement>(`[data-vps-server="${alias}"]`)!;
+  const aliases = () => [...host.querySelectorAll<HTMLElement>("[data-vps-server]")].map((element) => element.dataset.vpsServer);
+  const click = (selector: string) => flushSync(() => host.querySelector<HTMLButtonElement>(selector)!.click());
+  const lastBody = () => JSON.parse((fx.api.mock.lastCall![1] as RequestInit).body as string);
+
   it("says any Linux machine with Docker over SSH works, including one on a Tailscale network", async () => {
-    const { VpsConnection } = await import("./KeyPanels");
+    const { VpsConnection } = await import("./VpsServersPanel");
     render(() => createElement(VpsConnection, { key: "vps" }));
-    const field = host.querySelector<HTMLInputElement>('input[aria-label="Self-hosted VPS SSH config alias"]')!;
-    const text = field.closest("div.flex-col")!.textContent!;
+    const text = host.querySelector("[data-vps-connection]")!.textContent!;
     expect(text).toContain("Any Linux machine with Docker that you reach over SSH works");
     expect(text).toContain("Tailscale name as the alias's HostName");
   });
 
-  it("adds and removes named servers as one list, leaving the default alias alone", async () => {
-    const { VpsConnection } = await import("./KeyPanels");
-    setConfig({ ...fx.config, vps: { configured: true, sshAlias: "production-vps", servers: [{ name: "Office", sshAlias: "office-vps" }] } });
-    fx.api.mockImplementation(async (_path: string, init: RequestInit) => {
-      const { vpsServers } = JSON.parse(init.body as string);
-      return { ...fx.config, vps: { configured: true, sshAlias: "production-vps", servers: vpsServers } };
-    });
+  it("lists the default first, shows names read-only, and renames only after the pencil is pressed", async () => {
+    const { VpsConnection } = await import("./VpsServersPanel");
+    setConfig(status({ configured: true, sshAlias: "production-vps", servers: [{ name: "Office", sshAlias: "office-vps", memoryGb: 8, cpuset: "4-7" }] }));
+    fx.api.mockImplementation(async (_path: string, init: RequestInit) => status({ configured: true, sshAlias: "production-vps", servers: JSON.parse(init.body as string).vpsServers }));
     render(() => createElement(VpsConnection, { key: "vps" }));
-    const list = () => [...host.querySelectorAll<HTMLElement>("[data-vps-server]")].map((element) => element.dataset.vpsServer);
-    expect(list()).toEqual(["office-vps"]);
+    expect(aliases()).toEqual(["production-vps", "office-vps"]);
+    expect(rowFor("office-vps").textContent).toContain("SSH alias: office-vps");
+    expect(rowFor("office-vps").querySelector<HTMLInputElement>('input[aria-label="Office memory (GB)"]')!.value).toBe("8");
+    expect(rowFor("office-vps").querySelector<HTMLInputElement>('input[aria-label="Office CPU pinning"]')!.value).toBe("4-7");
+    expect(rowFor("office-vps").querySelector('input[aria-label="Server name"]')).toBeNull();
+    click('button[aria-label="Edit Office name and alias"]');
+    type(rowFor("office-vps").querySelector<HTMLInputElement>('input[aria-label="Server name"]')!, "HQ");
+    await answered(() => [...rowFor("office-vps").querySelectorAll("button")].find((button) => button.textContent === "Done")!.click());
+    expect(lastBody()).toEqual({ vpsServers: [{ name: "HQ", sshAlias: "office-vps", memoryGb: 8, cpuset: "4-7" }] });
+  });
+
+  it("saves a named server's limits and CPU pinning", async () => {
+    const { VpsConnection } = await import("./VpsServersPanel");
+    setConfig(status({ configured: true, sshAlias: "production-vps", servers: [{ name: "Office", sshAlias: "office-vps" }] }));
+    fx.api.mockImplementation(async (_path: string, init: RequestInit) => status({ configured: true, sshAlias: "production-vps", servers: JSON.parse(init.body as string).vpsServers }));
+    render(() => createElement(VpsConnection, { key: "vps" }));
+    const save = () => [...rowFor("office-vps").querySelectorAll("button")].find((button) => button.textContent === "Save")!;
+    expect(save().disabled).toBe(true);
+    type(rowFor("office-vps").querySelector<HTMLInputElement>('input[aria-label="Office memory (GB)"]')!, "8");
+    type(rowFor("office-vps").querySelector<HTMLInputElement>('input[aria-label="Office CPU pinning"]')!, "nope");
+    expect(save().disabled).toBe(true);
+    type(rowFor("office-vps").querySelector<HTMLInputElement>('input[aria-label="Office CPU pinning"]')!, "0,2");
+    await answered(() => save().click());
+    expect(lastBody()).toEqual({ vpsServers: [{ name: "Office", sshAlias: "office-vps", memoryGb: 8, cpuset: "0,2" }] });
+  });
+
+  it("refuses a pinning that names more CPUs than the cores field", async () => {
+    const { VpsConnection } = await import("./VpsServersPanel");
+    setConfig(status({ configured: true, sshAlias: "production-vps", servers: [{ name: "Office", sshAlias: "office-vps", cpus: 4 }] }));
+    render(() => createElement(VpsConnection, { key: "vps" }));
+    const pin = () => rowFor("office-vps").querySelector<HTMLInputElement>('input[aria-label="Office CPU pinning"]')!;
+    const save = () => [...rowFor("office-vps").querySelectorAll("button")].find((button) => button.textContent === "Save")!;
+    type(pin(), "0-4");
+    expect(pin().getAttribute("aria-invalid")).toBe("true");
+    expect(save().disabled).toBe(true);
+    expect(rowFor("office-vps").querySelector("[role=alert]")!.textContent).toContain("5 CPUs, more than the 4 cores");
+    type(pin(), "0-3");
+    expect(pin().getAttribute("aria-invalid")).toBe("false");
+    expect(save().disabled).toBe(false);
+    type(rowFor("office-vps").querySelector<HTMLInputElement>('input[aria-label="Office CPU cores"]')!, "2");
+    expect(save().disabled).toBe(true);
+  });
+
+  it("saves the default server's limits and clears its pinning with an empty string", async () => {
+    const { VpsConnection } = await import("./VpsServersPanel");
+    setConfig(status({ configured: true, sshAlias: "production-vps", cpuset: "0-1", servers: [] }));
+    fx.api.mockImplementation(async () => status({ configured: true, sshAlias: "production-vps", memoryGb: 6, servers: [] }));
+    render(() => createElement(VpsConnection, { key: "vps" }));
+    type(rowFor("production-vps").querySelector<HTMLInputElement>('input[aria-label="production-vps memory (GB)"]')!, "6");
+    type(rowFor("production-vps").querySelector<HTMLInputElement>('input[aria-label="production-vps CPU pinning"]')!, "");
+    await answered(() => [...rowFor("production-vps").querySelectorAll("button")].find((button) => button.textContent === "Save")!.click());
+    expect(lastBody()).toEqual({ vps: { sshAlias: "production-vps", memoryGb: 6, cpus: 2, cpuset: "" } });
+  });
+
+  it("adds a named server below the default and clears the form", async () => {
+    const { VpsConnection } = await import("./VpsServersPanel");
+    setConfig(status({ configured: true, sshAlias: "production-vps", servers: [] }));
+    fx.api.mockImplementation(async (_path: string, init: RequestInit) => status({ configured: true, sshAlias: "production-vps", servers: JSON.parse(init.body as string).vpsServers }));
+    render(() => createElement(VpsConnection, { key: "vps" }));
     type(host.querySelector<HTMLInputElement>('input[aria-label="Server name"]')!, " Home lab ");
     type(host.querySelector<HTMLInputElement>('input[aria-label="Server SSH config alias"]')!, "home-lab");
     await answered(() => [...host.querySelectorAll("button")].find((button) => button.textContent === "Add")!.click());
-    expect(fx.api).toHaveBeenLastCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ vpsServers: [{ name: "Office", sshAlias: "office-vps" }, { name: "Home lab", sshAlias: "home-lab" }] }) });
-    expect(list()).toEqual(["office-vps", "home-lab"]);
+    expect(lastBody()).toEqual({ vpsServers: [{ name: "Home lab", sshAlias: "home-lab", memoryGb: 4, cpus: 2 }] });
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Memory (GB)"]')!.value).toBe("4");
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="CPU cores"]')!.value).toBe("2");
+    expect(aliases()).toEqual(["production-vps", "home-lab"]);
     expect(host.querySelector<HTMLInputElement>('input[aria-label="Server name"]')!.value).toBe("");
-    await answered(() => host.querySelector<HTMLButtonElement>('button[aria-label="Remove Office"]')!.click());
-    expect(fx.api).toHaveBeenLastCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ vpsServers: [{ name: "Home lab", sshAlias: "home-lab" }] }) });
-    expect(list()).toEqual(["home-lab"]);
-    expect(host.querySelector<HTMLInputElement>('input[aria-label="Self-hosted VPS SSH config alias"]')!.value).toBe("production-vps");
   });
 
-  it("shows why a named server was refused and keeps what was typed", async () => {
-    const { VpsConnection } = await import("./KeyPanels");
+  it("deletes servers in any order: a named one, then the default hands over to the next", async () => {
+    const { VpsConnection } = await import("./VpsServersPanel");
+    setConfig(status({ configured: true, sshAlias: "production-vps", memoryGb: 6, servers: [{ name: "Office", sshAlias: "office-vps" }, { name: "Lab", sshAlias: "lab-vps", cpus: 4 }] }));
+    fx.api.mockImplementation(async (_path: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string);
+      return status({ configured: Boolean(body.vps?.sshAlias ?? "production-vps"), sshAlias: body.vps?.sshAlias ?? "production-vps", memoryGb: body.vps?.memoryGb ?? 6, cpus: body.vps?.cpus ?? 2, servers: body.vpsServers ?? [{ name: "Office", sshAlias: "office-vps" }, { name: "Lab", sshAlias: "lab-vps", cpus: 4 }] });
+    });
+    render(() => createElement(VpsConnection, { key: "vps" }));
+    await answered(() => click('button[aria-label="Delete production-vps"]'));
+    expect(lastBody()).toEqual({
+      vps: { sshAlias: "office-vps", memoryGb: 6, cpus: 2, cpuset: "" },
+      vpsServers: [{ name: "Lab", sshAlias: "lab-vps", cpus: 4, memoryGb: 6 }],
+    });
+    expect(aliases()).toEqual(["office-vps", "lab-vps"]);
+    await answered(() => click('button[aria-label="Delete Lab"]'));
+    expect(lastBody()).toEqual({ vpsServers: [] });
+  });
+
+  it("clears the default alias when the default is the only server", async () => {
+    const { VpsConnection } = await import("./VpsServersPanel");
+    setConfig(status({ configured: true, sshAlias: "production-vps", servers: [] }));
+    fx.api.mockImplementation(async () => status({ configured: false, sshAlias: "", servers: [] }));
+    render(() => createElement(VpsConnection, { key: "vps" }));
+    await answered(() => click('button[aria-label="Delete production-vps"]'));
+    expect(lastBody()).toEqual({ vps: { sshAlias: "" } });
+    expect(aliases()).toEqual([]);
+  });
+
+  it("keeps the limits and pinning notes behind a details button", async () => {
+    const { VpsConnection } = await import("./VpsServersPanel");
+    setConfig(status({ configured: true, sshAlias: "production-vps", servers: [] }));
+    render(() => createElement(VpsConnection, { key: "vps" }));
+    const toggle = () => [...host.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Limits and pinning details")!;
+    expect(host.textContent).not.toContain("CPU pinning is optional");
+    expect(toggle().getAttribute("aria-expanded")).toBe("false");
+    flushSync(() => toggle().click());
+    expect(host.textContent).toContain("CPU pinning is optional");
+    expect(host.textContent).toContain("Keep these within what the VPS has");
+    expect(toggle().getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("offers the hosts from the SSH config as a dropdown, leaving out servers already listed", async () => {
+    const { VpsConnection } = await import("./VpsServersPanel");
+    setConfig(status({ configured: true, sshAlias: "production-vps", servers: [] }));
+    fx.sshHosts = ["production-vps", "example-host", "home-lab"];
+    fx.api.mockImplementation(async (_path: string, init: RequestInit) => status({ configured: true, sshAlias: "production-vps", servers: JSON.parse(init.body as string).vpsServers }));
+    render(() => createElement(VpsConnection, { key: "vps" }));
+    await vi.waitFor(() => expect(host.querySelector("select")).not.toBeNull());
+    const select = host.querySelector<HTMLSelectElement>('select[aria-label="Server SSH config alias"]')!;
+    expect([...select.options].map((option) => option.value)).toEqual(["", "example-host", "home-lab"]);
+    type(host.querySelector<HTMLInputElement>('input[aria-label="Server name"]')!, "Spare");
+    flushSync(() => { select.value = "example-host"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+    await answered(() => [...host.querySelectorAll("button")].find((button) => button.textContent === "Add")!.click());
+    expect(lastBody()).toEqual({ vpsServers: [{ name: "Spare", sshAlias: "example-host", memoryGb: 4, cpus: 2 }] });
+  });
+
+  it("shows why a server was refused and keeps what was typed", async () => {
+    const { VpsConnection } = await import("./VpsServersPanel");
+    setConfig(status({ configured: true, sshAlias: "production-vps", servers: [] }));
     fx.api.mockRejectedValue(new Error("vpsServers: each server needs its own SSH alias"));
     render(() => createElement(VpsConnection, { key: "vps" }));
     type(host.querySelector<HTMLInputElement>('input[aria-label="Server name"]')!, "Lab");
     type(host.querySelector<HTMLInputElement>('input[aria-label="Server SSH config alias"]')!, "lab");
     await answered(() => [...host.querySelectorAll("button")].find((button) => button.textContent === "Add")!.click());
-    expect(host.querySelector("[data-vps-servers] [role=alert]")!.textContent).toContain("own SSH alias");
+    expect(host.querySelector("[data-vps-connection] [role=alert]")!.textContent).toContain("own SSH alias");
     expect(host.querySelector<HTMLInputElement>('input[aria-label="Server name"]')!.value).toBe("Lab");
   });
 });

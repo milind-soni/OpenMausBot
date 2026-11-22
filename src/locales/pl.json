@@ -3191,7 +3191,6 @@
   "keys.vps.descAfter": " aby poznać wymagany format aliasu SSH.",
   "keys.vps.anyMachine": "Działa każdy komputer z Linuksem i Dockerem dostępny przez SSH, także komputer w Twojej sieci Tailscale: jako HostName aliasu podaj jego nazwę w Tailscale.",
   "keys.vps.aria": "Alias konfiguracji SSH samodzielnie hostowanego VPS",
-  "keys.vps.removeAlias": "Usuń zapisany alias",
   "usage.title": "Wykorzystanie",
   "planUsage.title": "Wykorzystanie planu",
   "planUsage.subtitle": "Pozostały limit u każdego zalogowanego dostawcy. Okna 5-godzinne i tygodniowe, jeśli plan je ma.",

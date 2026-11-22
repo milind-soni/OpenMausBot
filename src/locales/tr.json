@@ -2624,7 +2624,6 @@
   "keys.vps.descAfter": " bakın.",
   "keys.vps.anyMachine": "SSH ile ulaştığınız ve Docker çalıştıran her Linux makinesi olur, Tailscale ağınızdaki bir bilgisayar da: takma adın HostName değerine onun Tailscale adını yazın.",
   "keys.vps.aria": "Kendi barındırdığınız VPS SSH yapılandırma takma adı",
-  "keys.vps.removeAlias": "Kaydedilen takma adı kaldır",
   "usage.title": "Kullanım",
   "planUsage.title": "Plan kullanımı",
   "planUsage.subtitle": "Oturum açılmış her sağlayıcıdaki kalan hak. Planda mevcut olduğunda 5 saatlik ve haftalık pencereler.",

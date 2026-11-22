@@ -3466,7 +3466,6 @@
   "keys.vps.descAfter": "를 참고하세요.",
   "keys.vps.anyMachine": "SSH로 접속할 수 있고 Docker가 있는 Linux 컴퓨터라면 무엇이든 됩니다. Tailscale 네트워크의 컴퓨터도 가능합니다. 별칭의 HostName에 그 Tailscale 이름을 넣으세요.",
   "keys.vps.aria": "직접 호스팅하는 VPS의 SSH 설정 별칭",
-  "keys.vps.removeAlias": "저장된 별칭 제거",
   "usage.title": "사용량",
   "planUsage.title": "요금제 사용량",
   "planUsage.subtitle": "로그인한 각 제공자의 남은 허용량이에요. 요금제에 있으면 5시간 단위와 주간 단위로 보여 줘요.",

@@ -1349,7 +1349,6 @@
   "keys.vps.descAfter": " pour la forme d’alias requise.",
   "keys.vps.anyMachine": "Toute machine Linux avec Docker joignable en SSH convient, y compris un ordinateur de votre réseau Tailscale : utilisez son nom Tailscale comme HostName de l'alias.",
   "keys.vps.aria": "Alias de la config SSH du VPS auto-hébergé",
-  "keys.vps.removeAlias": "Supprimer l’alias enregistré",
   "usage.title": "Utilisation",
   "usage.bot.empty": "Aucune utilisation enregistrée pour ce bot pour l’instant.",
   "usage.bot.unpriced": "Ce fournisseur n’indique pas de prix ; les jetons sont comptés.",

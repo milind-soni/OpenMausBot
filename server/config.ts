@@ -571,6 +571,7 @@ export function vpsResources(cfg: AppConfig): DesktopResources {
   return {
     memoryGb: cfg.vps?.memoryGb ?? DEFAULT_DESKTOP_RESOURCES.memoryGb,
     cpus: cfg.vps?.cpus ?? DEFAULT_DESKTOP_RESOURCES.cpus,
+    ...(cfg.vps?.cpuset ? { cpuset: cfg.vps.cpuset } : {}),
   };
 }
 

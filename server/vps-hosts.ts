@@ -1,12 +1,13 @@
 // Which VPS host a bot's computer lives on: the app-wide SSH alias, or the bot's own.
 import { isValidSshAlias, vpsSshAlias, type AppConfig, type VpsConfig } from "./config.ts";
 
-/** A named server's own limits, each falling back to the default server's. */
-export function vpsLimits(cfg: AppConfig, alias?: string | null): Pick<VpsConfig, "memoryGb" | "cpus"> {
+/** A named server's own limits, each falling back to the default server's. CPU pinning is per machine, so a named server never inherits the default's. */
+export function vpsLimits(cfg: AppConfig, alias?: string | null): Pick<VpsConfig, "memoryGb" | "cpus" | "cpuset"> {
   const own = alias ? cfg.vpsServers?.find((server) => server.sshAlias === alias) : undefined;
   const memoryGb = own?.memoryGb ?? cfg.vps?.memoryGb;
   const cpus = own?.cpus ?? cfg.vps?.cpus;
-  return { ...(memoryGb ? { memoryGb } : {}), ...(cpus ? { cpus } : {}) };
+  const cpuset = own ? own.cpuset : cfg.vps?.cpuset;
+  return { ...(memoryGb ? { memoryGb } : {}), ...(cpus ? { cpus } : {}), ...(cpuset ? { cpuset } : {}) };
 }
 
 /** A bot's own SSH alias wins over the default; both are validated the same way. */

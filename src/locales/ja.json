@@ -3647,7 +3647,6 @@
   "keys.vps.descAfter": "をご覧ください。",
   "keys.vps.anyMachine": "SSH で接続できる Docker 入りの Linux マシンならどれでも使えます。Tailscale ネットワーク上のコンピューターも可能です。エイリアスの HostName にその Tailscale 名を指定してください。",
   "keys.vps.aria": "自分の VPS の SSH config エイリアス",
-  "keys.vps.removeAlias": "保存したエイリアスを削除",
   "usage.title": "使用状況",
   "planUsage.title": "プランの使用状況",
   "planUsage.subtitle": "サインイン済みプロバイダーごとの残り利用枠です。プランに応じて、5 時間枠と週間枠を表示します。",

@@ -7,6 +7,26 @@ const PREVIOUS_PIDS_LIMIT = 512;
 export interface DesktopResources {
   memoryGb: number;
   cpus: number;
+  /** Logical CPU ids the desktop may run on, in `docker --cpuset-cpus` form ("0,2", "4-7"); unset lets the host choose. */
+  cpuset?: string;
+}
+
+const CPUSET = /^\d{1,4}(-\d{1,4})?(,\d{1,4}(-\d{1,4})?)*$/;
+
+/** How many CPUs a valid `cpuset` names: "0,2" is 2, "4-7" is 4. */
+export function cpusetSize(value: string): number {
+  return value.split(",").reduce((total, part) => {
+    const [from, to = from] = part.split("-").map(Number);
+    return total + (to! - from! + 1);
+  }, 0);
+}
+
+export function isValidCpuset(value: unknown): value is string {
+  if (typeof value !== "string" || !CPUSET.test(value)) return false;
+  return value.split(",").every((part) => {
+    const [from, to = from] = part.split("-").map(Number);
+    return from! <= to!;
+  });
 }
 
 export const DEFAULT_DESKTOP_RESOURCES: DesktopResources = { memoryGb: 4, cpus: 2 };
@@ -19,7 +39,7 @@ export const MAX_DESKTOP_CPUS = 64;
  * letting it thrash the host. */
 export function resourceArgs(resources: DesktopResources, options: { swap: boolean }): string[] {
   const memory = `${resources.memoryGb}g`;
-  return ["--memory", memory, ...(options.swap ? ["--memory-swap", memory] : []), "--cpus", String(resources.cpus)];
+  return ["--memory", memory, ...(options.swap ? ["--memory-swap", memory] : []), "--cpus", String(resources.cpus), ...(resources.cpuset ? ["--cpuset-cpus", resources.cpuset] : [])];
 }
 
 const raised = new Set<string>();

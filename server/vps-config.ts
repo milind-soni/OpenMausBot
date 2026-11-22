@@ -1,7 +1,7 @@
 /** The self-hosted VPS settings: the default SSH alias (`vps`) and the named servers (`vpsServers`). */
 import { z } from "zod";
 
-import { MAX_DESKTOP_CPUS, MAX_DESKTOP_MEMORY_GB, MIN_DESKTOP_CPUS, MIN_DESKTOP_MEMORY_GB } from "./container-limits.ts";
+import { cpusetSize, DEFAULT_DESKTOP_RESOURCES, isValidCpuset, MAX_DESKTOP_CPUS, MAX_DESKTOP_MEMORY_GB, MIN_DESKTOP_CPUS, MIN_DESKTOP_MEMORY_GB } from "./container-limits.ts";
 
 const SSH_ALIAS = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 
@@ -10,7 +10,7 @@ export function isValidSshAlias(value: unknown): value is string {
 }
 
 /** A named host from the user's SSH config, authentication stays with SSH. `memoryGb` (no swap beyond it, 4 when unset) and `cpus` (2 when unset) cap each bot's VPS desktop; a running desktop takes a change when it is next provisioned or started. */
-export type VpsConfig = { sshAlias?: string; memoryGb?: number; cpus?: number };
+export type VpsConfig = { sshAlias?: string; memoryGb?: number; cpus?: number; cpuset?: string };
 
 /** The alias is replaced by every save; a limit the patch leaves out keeps its stored value. */
 export function normalizeVpsConfig(raw: unknown, stored?: unknown): VpsConfig {
@@ -36,24 +36,38 @@ export function normalizeVpsConfig(raw: unknown, stored?: unknown): VpsConfig {
     }
     out[key] = value;
   }
+  const cpuset = "cpuset" in patch ? patch.cpuset : kept.cpuset;
+  if (cpuset !== undefined && cpuset !== "") {
+    if (!isValidCpuset(cpuset)) throw new Error("vps.cpuset must be CPU ids like 0,2 or 4-7");
+    const cores = out.cpus ?? DEFAULT_DESKTOP_RESOURCES.cpus;
+    if (cpusetSize(cpuset) > cores) throw new Error(`vps.cpuset names ${cpusetSize(cpuset)} CPUs but vps.cpus is ${cores}`);
+    out.cpuset = cpuset;
+  }
   return out;
 }
 
 const memoryGbSchema = z.number().int().min(MIN_DESKTOP_MEMORY_GB).max(MAX_DESKTOP_MEMORY_GB);
+/** Empty clears the pinning on the default server; a named server just leaves it out. */
+const cpusetSchema = z.string().refine((value) => value === "" || isValidCpuset(value), { message: "must be CPU ids like 0,2 or 4-7" });
 const cpusSchema = z.number().int().min(MIN_DESKTOP_CPUS).max(MAX_DESKTOP_CPUS);
 export const vpsConfigSchema = z.object({
   sshAlias: z.string().refine((value) => value === "" || isValidSshAlias(value), { message: "must be a simple SSH config alias" }).optional(),
   memoryGb: memoryGbSchema.optional(),
   cpus: cpusSchema.optional(),
+  cpuset: cpusetSchema.optional(),
 });
 export const MAX_VPS_SERVERS = 20;
 /** `memoryGb` and `cpus` cap this server's desktops; a limit left out is the default server's (`vps`). */
-export interface VpsServer { name: string; sshAlias: string; memoryGb?: number; cpus?: number }
+export interface VpsServer { name: string; sshAlias: string; memoryGb?: number; cpus?: number; cpuset?: string }
 export const vpsServerSchema = z.object({
   memoryGb: memoryGbSchema.optional(),
   cpus: cpusSchema.optional(),
+  cpuset: z.string().refine(isValidCpuset, { message: "must be CPU ids like 0,2 or 4-7" }).optional(),
   name: z.string().trim().min(1).max(60).refine((value) => !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value), { message: "must be plain text" }),
   sshAlias: z.string().refine(isValidSshAlias, { message: "must be a simple SSH config alias" }),
+}).refine((server) => !server.cpuset || !server.cpus || cpusetSize(server.cpuset) <= server.cpus, {
+  message: "cpuset names more CPUs than cpus allows",
+  path: ["cpuset"],
 });
 /** Named servers a bot can be put on; the default server stays in `vps`, so saving this list never moves a bot. */
 export const vpsServersSchema = z.array(vpsServerSchema).max(MAX_VPS_SERVERS)
