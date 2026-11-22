@@ -34,7 +34,7 @@ export function plainPreviewText(text: string): string {
   // Underscores inside a word (snake_case) and a lone * (2 * 3) are not emphasis.
   out = out.replace(/(\*{1,3})(?=\S)([\s\S]*?\S)\1/gu, "$2");
   out = out.replace(/(_{1,3})(?=\S)([\s\S]*?\S)\1(?![\p{L}\p{N}])/gu, (match, _marks: string, inner: string, offset: number, whole: string) => {
-    if (/[\p{L}\p{N}]$/u.test(whole.slice(0, offset))) return match;
+    if (/(?:\p{L}|\p{N})$/u.test(whole.slice(0, offset))) return match;
     return inner;
   });
   out = out.replace(/~~(?=\S)([\s\S]*?\S)~~/g, "$1");
