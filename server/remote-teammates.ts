@@ -181,7 +181,7 @@ export function sendToRemote(teammate: RemoteTeammate, call: { message: string; 
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ message: call.message, ...(call.thread !== undefined ? { thread: call.thread } : {}), wait }),
-  }, wait * 1000 + CALL_MARGIN_MS, options);
+  }, Math.ceil(wait * 1000) + CALL_MARGIN_MS, options);
 }
 
 /** Reads a thread an earlier answer gave: its reply once the other bot is done, or what it is doing now. */

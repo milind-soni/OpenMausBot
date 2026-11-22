@@ -128,6 +128,9 @@ describe("calling a teammate's Bot API", () => {
     expect(await sendToRemote(far, { message: "hello", wait: 1 })).toEqual({ ok: true, answer: { reply: "hi", thread: "t1" } });
     expect(seen[0]).toMatchObject({ method: "POST", url: "/hooks/api/bots/b1/messages", auth: `Bearer ${KEY}` });
     expect(JSON.parse(seen[0]!.body)).toEqual({ message: "hello", wait: 1 });
+    // A fractional wait is a valid Bot API wait; it must not make the call throw before it is sent.
+    expect(await sendToRemote(far, { message: "soon", wait: 1 / 3 })).toEqual({ ok: true, answer: { reply: "hi", thread: "t1" } });
+    expect(JSON.parse(seen.pop()!.body)).toEqual({ message: "soon", wait: 1 / 3 });
 
     next = { status: 202, body: JSON.stringify({ thread: "t1", status: "needs_approval" }) };
     expect(await readRemote(far, "t1")).toEqual({ ok: true, answer: { thread: "t1", status: "needs_approval" } });
