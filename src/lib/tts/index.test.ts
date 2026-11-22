@@ -480,6 +480,28 @@ describe("prefetch window", () => {
     expect(speaker.state).toEqual({ status: "idle" });
   });
 
+  it("starts rendering a streamed block while the block before it is still playing", async () => {
+    installTts([]);
+    const speaker = new Speaker();
+    const stream = speaker.begin({ botId: "bot" });
+    stream.push("B0");
+    await vi.waitFor(() => expect(synthOrder).toEqual(["B0"]));
+    gates[0]!.respond(clip());
+    await vi.waitFor(() => expect(playedUrls).toEqual(["blob:block-1"]));
+
+    stream.push("B1");
+    await vi.waitFor(() => expect(synthOrder).toEqual(["B0", "B1"]));
+
+    gates[1]!.respond(clip());
+    FakeAudio.latest!.onended?.();
+    await vi.waitFor(() => expect(playedUrls).toEqual(["blob:block-1", "blob:block-2"]));
+    const ending = stream.end();
+    FakeAudio.latest!.onended?.();
+    await ending;
+
+    expect(speaker.state).toEqual({ status: "idle" });
+  });
+
   it("surfaces a prefetched block's error only after earlier blocks finish playing", async () => {
     installTts(["B0", "B1", "B2"]);
     const speaker = new Speaker();

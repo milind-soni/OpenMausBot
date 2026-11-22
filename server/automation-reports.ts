@@ -114,7 +114,14 @@ export interface AutomationReportDeps {
   brief?(run: RoutineRun, turnId?: string): void;
   /** The language a line in this conversation is written in (server/server-lines.ts); absent, English. */
   threadLanguage?(threadId: string): string | undefined;
+  /** A line the app adds under a run's reply or its failure line, in the language of the chat it reports to, taken once
+   * (host/refused-lending.ts, host/no-terminal.ts): it is said even when the bot's reply is quiet. */
+  notes?: { has(runId: string): boolean; take(runId: string, language: string | undefined): string | null };
 }
+
+/** The reply with the app's own line under it, apart from the bot's words. */
+const withNote = (reply: RunReply, note: string | null): RunReply =>
+  !note ? reply : reply.quiet ? { quiet: false, text: note } : { ...reply, text: `${reply.text}\n\n${note}` };
 
 export function createAutomationReports(deps: AutomationReportDeps) {
   const { store } = deps;
@@ -233,8 +240,8 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     }
     const source = line.kind === "reply" ? replyOf(run, line.messageId) : undefined;
     const language = deps.threadLanguage?.(target.threadId);
-    const said: RunReply = line.kind === "reply" ? read(run, source)
-      : { quiet: false, text: line.detail ? serverLine(language, run.partial ? "server.runs.partlyDoneWhy" : "server.runs.didNotFinishWhy", { detail: line.detail }) : serverLine(language, "server.runs.didNotFinish") };
+    const said: RunReply = line.kind === "reply" ? withNote(read(run, source), deps.notes?.take(run.id, language) ?? null)
+      : withNote({ quiet: false, text: line.detail ? serverLine(language, run.partial ? "server.runs.partlyDoneWhy" : "server.runs.didNotFinishWhy", { detail: line.detail }) : serverLine(language, "server.runs.didNotFinish") }, deps.notes?.take(run.id, language) ?? null);
     const recovered = said.quiet && lastSaidFailed(run, target.threadId);
     if (said.quiet && !recovered) {
       deps.routines()?.noteReport(run.id, { state: "quiet" });
@@ -324,9 +331,12 @@ export function createAutomationReports(deps: AutomationReportDeps) {
       const reply = read(run, said);
       const bot = store.bot(run.botId);
       const target = destination(run);
-      if (target && (!reply.quiet || lastSaidFailed(run, target.threadId))) hold(run.id, { kind: "reply", run, messageId: said?.id ?? null });
-      else if (reply.quiet) deps.routines()?.noteReport(run.id, { state: "quiet" });
-      else if (bot) deps.notify("done", bot, run.threadId, reply.text);
+      if (target && (!reply.quiet || lastSaidFailed(run, target.threadId) || deps.notes?.has(run.id))) hold(run.id, { kind: "reply", run, messageId: said?.id ?? null });
+      else {
+        const noted = withNote(reply, deps.notes?.take(run.id, deps.threadLanguage?.(run.threadId)) ?? null);
+        if (noted.quiet) deps.routines()?.noteReport(run.id, { state: "quiet" });
+        else if (bot) deps.notify("done", bot, run.threadId, noted.text);
+      }
     },
     /** A run failed in a way the person is told about: one line says so where its reports go. */
     runFailed(run: RoutineRun, detail: string): void {

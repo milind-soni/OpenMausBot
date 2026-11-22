@@ -1,9 +1,12 @@
-import { Plus } from "lucide-react";
+import { LogIn, Plus } from "lucide-react";
+import { useState } from "react";
 
 import { t } from "@/lib/i18n";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { type Bot } from "@/state/store";
 import { SignedInSites } from "../SignedInSites";
+import { CookieImportDialog, cookieImportAvailable } from "../browser/cookie-import";
+import { browserScope } from "@/lib/team-browser";
 import { Card, ColRow, LinkRow, NoteRow } from "./rows";
 import { sameFields, sameItems, useStoreSelector } from "@/state/store-select";
 
@@ -13,6 +16,7 @@ export function BrowserLogins({ bot, browserEnabled, onOpenBrowser }: {
   onOpenBrowser: () => void;
 }) {
   const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
+  const [importing, setImporting] = useState(false);
   const ownerOrAdmin = useOwnerOrAdmin();
   const profileId = bot.browserProfile ?? "";
   const profile = (state.config?.browserProfiles ?? []).find((candidate) => candidate.id === profileId);
@@ -40,6 +44,12 @@ export function BrowserLogins({ bot, browserEnabled, onOpenBrowser }: {
           )}
           <NoteRow>{t("botSettings.simple.loginsHint", { name: bot.name })}</NoteRow>
           <LinkRow data-panel-action="add-login" icon={Plus} onClick={onOpenBrowser}>{t("botSettings.simple.addLogin")}</LinkRow>
+          {cookieImportAvailable(state.config) && ownerOrAdmin !== false ? (
+            <>
+              <LinkRow data-panel-action="import-login" icon={LogIn} onClick={() => setImporting(true)}>{t("botSettings.simple.importLogin")}</LinkRow>
+              <CookieImportDialog open={importing} botId={bot.id} botName={bot.name} threadId={browserScope(state.config?.team, bot.threadId).threadId ?? null} site="" onClose={() => setImporting(false)} />
+            </>
+          ) : null}
         </>
       )}
     </Card>

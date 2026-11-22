@@ -2,6 +2,8 @@
 // changes behaviour.
 import type { ChildProcess } from "node:child_process";
 
+import type { SendTurnInput } from "../../contracts.ts";
+import type { AcpConfig } from "./core.ts";
 import type { AcpHost } from "./host.ts";
 
 export interface AcpDriverHooks {
@@ -29,7 +31,32 @@ export interface AcpDriverHooks {
   /** The failure a turn's thrown error stands for, in the person's words (a usage limit with its reset), or undefined to
    * keep the error as it is. Must not throw. */
   reportedFailure?(error: unknown): Error | undefined;
+  /** initialize's own `_meta` (beside clientCapabilities' vendor `_meta`), for an agent that reads who its client is there. */
+  initializeMeta?: Record<string, unknown>;
+  /** session/cancel's `_meta`, for an agent that reads how its turn was stopped there. */
+  cancelMeta?: Record<string, unknown>;
+  /** An agent that also ends each prompt with a notification of its own, which may come before the prompt's reply or
+   * without it. */
+  promptCompletion?: AcpPromptCompletion;
+  /** For an agent that can leave session/load unanswered after replaying the history: how long the replay must go quiet
+   * before the load counts as done. Undefined waits for the answer. */
+  loadReplayQuietMs?(turn: SendTurnInput): number | undefined;
+  /** The part of spawnArgs a running process must match for a turn to reuse it. What it leaves out, configureSession
+   * changes inside the live session, throwing LiveSwitchRefused when the agent refuses; a reused session then restarts. */
+  spawnContractArgs?(config: AcpConfig, turn: SendTurnInput): string[];
 }
+
+/** How an agent names the end of a prompt outside its session/prompt reply. */
+export interface AcpPromptCompletion {
+  /** `_meta` each session/prompt carries, so the agent names that prompt when it ends. */
+  meta(promptId: string): Record<string, unknown>;
+  /** The prompt a notification ends (its session, and its id or null when it names none) and its answer in a session/prompt
+   * reply's shape; null for any other notification. */
+  read(msg: { method?: unknown; params?: unknown }): { sessionId: string; promptId: string | null; result: { stopReason: string; error?: string } } | null;
+}
+
+/** configureSession could not change a running session's model or effort in place. */
+export class LiveSwitchRefused extends Error {}
 
 const MAX_LINE_CHARS = 64 * 1024;
 

@@ -55,10 +55,13 @@ export function teamPrivateThreads(files: { starters: string; groups: string; bo
 const memberLayer = (id: string): boolean => isLayerId(id) && layerAudience(id).startsWith("member:");
 
 /** A path in the data folder that is one member's: their folder under people/, their inbox, a file only their chats use,
- * or anything named for one of their conversations, their layers or their own bot, wherever it is kept. */
+ * or anything named for one of their conversations, their layers or their own bot, wherever it is kept. Every bot's Data
+ * tables too: a bot has one database whatever chat a table was loaded in, and it does not record which. */
 export function omittedAsTeamPrivate(path: string, privacy: TeamPrivacy): boolean {
   if (/^(?:people(?:\/|$)|person-inbox\.json)/.test(path)) return true;
-  const attachment = /^attachments\/([^/]+)$/.exec(path)?.[1];
+  if (/^bots\/[^/]+\/data\.duckdb(?:\.wal)?$/.test(path)) return true;
+  // A kept copy of an upload (attachment-originals.ts) is as private as the upload.
+  const attachment = /^(?:attachments|attachment-originals)\/([^/]+)$/.exec(path)?.[1];
   if (attachment && privacy.attachments.has(attachment)) return true;
   return path.split("/").some((part) => {
     const name = part.replace(/\.[^-]*$/, "");
@@ -184,4 +187,4 @@ export function stripTeamPrivate(snapshot: { messages: string; runtime: string }
   });
 }
 
-export const TEAM_PRIVATE_NOTE = "Members' private chats are theirs alone and are not in this export: their conversations, what bots remember from them, their own MausBot and their About you stay out.";
+export const TEAM_PRIVATE_NOTE = "Members' private chats are theirs alone and are not in this export: their conversations, what bots remember from them, their own MausBot and their About you stay out, and so do the bots' Data tables, which don't record whose chat loaded them.";

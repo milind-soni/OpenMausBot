@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hostFaultOf, retryCannotFix } from "./host-fault.ts";
+import { hostFaultOf, retryCannotFix, threadsRefused } from "./host-fault.ts";
 
 describe("hostFaultOf", () => {
   it.each([
@@ -30,6 +30,11 @@ describe("hostFaultOf", () => {
     ["unexpected status 401 Unauthorized: Missing bearer or basic authentication in header", "signed_out"],
     ["API error (status 401 Unauthorized): Invalid API key", "signed_out"],
     ["Not logged in · Please run /login", "signed_out"],
+    ["Grok exited 1 before the prompt result: Last output: grok: failed to start tokio runtime: blocking pool pre-warm stalled after 14 of 16 threads", "process_start"],
+    ["grok: failed to start tokio runtime: Resource temporarily unavailable (os error 11)", "process_start"],
+    ['thread \'main\' panicked at library/std/src/thread/mod.rs: failed to spawn thread: Os { code: 11, kind: WouldBlock, message: "Resource temporarily unavailable" }', "process_start"],
+    ["runtime/cgo: pthread_create failed: Resource temporarily unavailable", "process_start"],
+    ["runtime: failed to create new OS thread (have 12 already; errno=11)", "process_start"],
   ] as const)("%s is %s", (failure, fault) => {
     expect(hostFaultOf(failure)).toBe(fault);
   });
@@ -58,7 +63,19 @@ describe("hostFaultOf", () => {
     "Forbidden-words scan: Claude is overloaded right now (HTTP 529).",
     "Tool fetch_orders failed: the /orders endpoint returned 403 Forbidden",
     "401 Unauthorized",
+    "read: Resource temporarily unavailable",
+    "failed to spawn thread for the git status worker",
+    "grok: failed to start tokio runtime: invalid configuration",
   ])("%s is not this server's fault", (failure) => {
     expect(hostFaultOf(failure)).toBeNull();
+  });
+});
+
+describe("threadsRefused", () => {
+  it("reads an engine's own line for threads it could not start, and only that", () => {
+    expect(threadsRefused("grok: failed to start tokio runtime: blocking pool pre-warm stalled after 14 of 16 threads")).toBe(true);
+    expect(threadsRefused('failed to spawn thread: Os { code: 11, kind: WouldBlock, message: "Resource temporarily unavailable" }')).toBe(true);
+    expect(threadsRefused("Resource temporarily unavailable")).toBe(false);
+    expect(threadsRefused("spawn grok EAGAIN")).toBe(false);
   });
 });

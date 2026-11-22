@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { removeTempDir } from "../../testing/cleanup.ts";
-import { batchQuote, browserLanguage, browserTimeZone, languageList, launcherFlags, launcherPath, launcherScript, primaryScreen, writeLauncher, type LauncherSettings } from "./wrapper.ts";
+import { batchQuote, browserLanguage, browserTimeZone, HEADLESS_DISABLED_FEATURES, languageList, launcherFlags, launcherPath, launcherScript, primaryScreen, writeLauncher, type LauncherSettings } from "./wrapper.ts";
 
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36";
 const posix = process.platform !== "win32";
@@ -44,10 +44,16 @@ describe("the launcher agent-browser runs instead of Chrome", () => {
     const out = join(folder, "argv");
     execFileSync(path, ENGINE_ARGS, { env: { PATH: "/usr/bin:/bin", ARGV_OUT: out, HOME: join(folder, "temporary-home") } });
     const argv = readFileSync(out, "utf8").split("\0").slice(0, -1);
-    expect(argv).toEqual([...ENGINE_ARGS, ...launcherFlags(settings, "darwin")]);
+    expect(argv).toEqual([...ENGINE_ARGS, ...launcherFlags(settings, "darwin"), HEADLESS_DISABLED_FEATURES]);
     expect(argv).toContain(`--user-agent=${UA}`);
+    // Chrome keeps the last --disable-features, so the engine's own Translate stays off.
+    expect(argv.filter((arg) => arg.startsWith("--disable-features=")).at(-1)).toBe("--disable-features=Translate,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIReloadButton");
     expect(readFileSync(`${out}.tz`, "utf8")).toBe("America/New_York");
     expect(readFileSync(`${out}.home`, "utf8")).toBe("/Users/ada");
+    // A browser with a window keeps Chrome's own features: its omnibox and reload button are seen.
+    const headed = ENGINE_ARGS.filter((arg) => !arg.startsWith("--headless"));
+    execFileSync(path, headed, { env: { PATH: "/usr/bin:/bin", ARGV_OUT: out, HOME: join(folder, "temporary-home") } });
+    expect(readFileSync(out, "utf8").split("\0").slice(0, -1)).toEqual([...headed, ...launcherFlags(settings, "darwin")]);
   });
 
   it("writes a shell script that execs Chrome, so agent-browser keeps Chrome's own pid and process group", () => {
@@ -56,7 +62,9 @@ describe("the launcher agent-browser runs instead of Chrome", () => {
       "#!/bin/sh",
       "TZ='Asia/Kolkata'",
       "export TZ",
-      `exec '/opt/it'\\''s/chrome' "$@" '--disable-blink-features=AutomationControlled' '--user-agent=${UA}' '--screen-info={1512x982}' '--lang=en-IN' '--password-store=basic'`,
+      "headless=",
+      `for arg in "$@"; do case "$arg" in --headless|--headless=*) headless='${HEADLESS_DISABLED_FEATURES}' ;; esac; done`,
+      `exec '/opt/it'\\''s/chrome' "$@" '--disable-blink-features=AutomationControlled' '--user-agent=${UA}' '--screen-info={1512x982}' '--lang=en-IN' '--password-store=basic' $headless`,
       "",
     ]);
   });
@@ -93,7 +101,7 @@ describe("the launcher of a Team Cloud's boxed browsers", () => {
     const engine = ["--remote-debugging-port=0", "--headless=new", `--user-data-dir=${profile}`, "--x=it's $HOME"];
     execFileSync(path, engine, { env: { PATH: "/usr/bin:/bin", ARGV_OUT: out } });
     const argv = readFileSync(out, "utf8").split("\0").slice(0, -1);
-    expect(argv).toEqual(["--unshare-user", "--seccomp", "9", "--ro-bind", "/usr", "/usr", "--bind", profile, profile, "--setenv", "HOME", "/tmp", "--", "/opt/chrome/chrome", ...engine, ...launcherFlags(settings, "linux")]);
+    expect(argv).toEqual(["--unshare-user", "--seccomp", "9", "--ro-bind", "/usr", "/usr", "--bind", profile, profile, "--setenv", "HOME", "/tmp", "--", "/opt/chrome/chrome", ...engine, ...launcherFlags(settings, "linux"), HEADLESS_DISABLED_FEATURES]);
     expect(statSync(profile).isDirectory(), "the profile exists before bubblewrap binds it").toBe(true);
     expect(readFileSync(`${out}.fd9`, "utf8")).toBe("FILTER");
     // bubblewrap's --die-with-parent follows the thread that started it; the launcher, not agent-browser's thread, is its parent.

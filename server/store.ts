@@ -42,7 +42,8 @@ import { appsFromCreator } from "./inherited-apps.ts"; import { newBotOwner, sha
 import { ThreadCache, type ThreadState } from "./thread-cache.ts";
 import { lastMessageId, messagesBefore } from "./thread-history.ts";
 import { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
-import { buildTask, threadTitleFrom, UNTITLED_THREAD } from "./task-record.ts";
+import { buildTask, threadTitleFrom, UNTITLED_THREAD, type NewThreadLevel } from "./task-record.ts";
+import { repairLegacyWorkThreads } from "./legacy-work-threads.ts";
 import { createBotFork, createGroupFork } from "./store-forks.ts";
 import { createThreadBotIndex } from "./thread-bot-index.ts";
 import { activeGroupTask, groupTaskByThread, groupTasks, migrateGroupTaskRead, mirrorActiveGroupTask, refreshGroupUnread, setGroupTaskRead, syncGroupReadPatch } from "./group-task-state.ts";
@@ -304,7 +305,8 @@ export class Store {
       this.groups = [];
     }
     this.rememberSections([...this.bots, ...this.groups].map((record) => record.section));
-    let botsMigrated = false;
+    // Before the grant recovery below sets a thread to Ask: that Ask is not the legacy default's.
+    const legacyWork = repairLegacyWorkThreads(DATA_DIR, this.bots, botsLoaded || !existsSync(BOTS_FILE)); let botsMigrated = Boolean(legacyWork?.changed);
     const browserProfileAliases = loadBrowserProfileIdAliases();
     const chiefSectionsSeen = new Set<string>();
     let groupsMigrated = false;
@@ -475,16 +477,7 @@ export class Store {
         b.projects = b.projects.map(({ id, name, emoji }) => ({ id, name, ...(isProjectEmoji(emoji) ? { emoji } : {}) }));
         botsMigrated = true;
       }
-      if (!b.tasks?.length) {
-        b.tasks = [{
-          threadId: b.threadId,
-          title: this.firstUserLine(b.threadId) ?? UNTITLED_TASK,
-          createdAt: b.createdAt,
-          updatedAt: b.createdAt,
-          resumeCursors: b.resumeCursors ?? {},
-        }];
-        botsMigrated = true;
-      }
+      b.tasks ??= [];
       let active = b.tasks.find((task) => task.threadId === b.threadId);
       if (!active) {
         active = {
@@ -537,6 +530,7 @@ export class Store {
       b.unread = b.tasks.some(taskCountsAsBotUnread);
     }
     if (botsMigrated) this.saveBots();
+    legacyWork?.done();
     if (clearModelCopies) writeFileAtomic(THREAD_MODEL_COPIES_CLEARED, "Threads follow their bot's model; the copies older builds made are cleared.\n", { mode: 0o600 });
     const knownThreads = new Set([
       ...this.bots.flatMap((b) => [b.threadId, ...(b.tasks ?? []).map((task) => task.threadId)]),
@@ -1229,11 +1223,17 @@ export class Store {
   setActiveLeaf(threadId: string, messageId: string): string | null {
     const t = this.thread(threadId);
     if (!t.messages.some((m) => m.id === messageId)) return null;
+    const newestChild = new Map<string, Message>();
+    for (const message of t.messages) {
+      if (typeof message.parentId !== "string") continue;
+      const previous = newestChild.get(message.parentId);
+      if (!previous || message.at >= previous.at) newestChild.set(message.parentId, message);
+    }
     let cur = messageId;
     for (;;) {
-      const children = t.messages.filter((m) => m.parentId === cur);
-      if (!children.length) break;
-      cur = children.reduce((a, b) => (b.at >= a.at ? b : a)).id;
+      const child = newestChild.get(cur);
+      if (!child) break;
+      cur = child.id;
     }
     t.activeLeafId = cur;
     mdb.setActiveLeaf(threadId, cur);
@@ -2139,7 +2139,7 @@ export class Store {
     bot.pinnedMessageId = task.pinnedMessageId;
   }
 
-  createTask(botId: string, title?: string, activate = true, projectId?: string, openedBy?: TaskOpenedBy, approvalMode?: "ask" | "full",
+  createTask(botId: string, title?: string, activate = true, projectId?: string, openedBy?: TaskOpenedBy, approvalMode?: NewThreadLevel,
     modelSelection?: ModelSelection, cwd?: string, beforeShown?: (task: TaskRecord) => void): TaskRecord | null {
     const bot = this.own(botId);
     if (!bot) return null;

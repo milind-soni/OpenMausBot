@@ -119,6 +119,10 @@ export const CHAT_NOTICE = {
   "chat.notice.waitingApprovalElsewhere": "Waiting on your approval in @{name}",
   "chat.notice.waitingAnswerElsewhere": "Waiting on your answer in @{name}",
   "chat.notice.teammateNeedsInput": "{name} needs your input: {question}",
+  "chat.notice.waitingPasswordElsewhere": "Waiting on your {label} in @{name}",
+  "chat.notice.waitingSignInElsewhere": "Waiting on you to sign in to {label} in @{name}",
+  "chat.notice.waitingConnectElsewhere": "Waiting on you to connect {label} in @{name}",
+  "chat.notice.waitingReviewElsewhere": "Waiting on your review in @{name}",
   "chat.notice.relayCouldNotContinue": "this conversation could not carry on — {error}",
   "chat.notice.engineSignedOut": "{name} is signed out.",
   "chat.notice.failoverSignedInAgain": "{engine} is signed in again, so this conversation is back on {engine}.",
@@ -128,6 +132,7 @@ export const CHAT_NOTICE = {
   "chat.notice.backupConversationBusy": "switched to {name}. This conversation is working, so your message was not sent again.",
   "chat.notice.backupQuestionWaiting": "switched to {name}. A teammate's question is waiting for your answer in this conversation, so your message was not sent again. Answer it, then send your message again.",
   "chat.notice.backupMessageMissing": "switched to {name}, but your message could not be found to send again. Send it again.",
+  "chat.notice.backupAlreadyRan": "switched to {name}. Part of your request had already run, so it was not sent again. Send what is still to do.",
   "chat.notice.backupContinuingLimit": "continuing on {name} after hitting the usage limit",
   "chat.notice.backupContinuingSignedOut": "continuing on {name} while {engine} is signed out",
   "chat.notice.backupCouldNotContinue": "could not continue on {name}: {error}",
@@ -156,6 +161,8 @@ export const CHAT_NOTICE = {
     "{bot} used more memory than this computer allows for one bot ({used} MB of {cap} MB) while memory was running short, so I stopped this task to keep the other bots running. Send the message again to start over; if it keeps happening, give this task less to do at once, or give this computer more memory.",
   "chat.notice.memoryReclaimedBrowserDetail": "Ran out of room, so I closed the browser to keep everything else running. ({detail})",
   "chat.notice.memoryReclaimedTaskDetail": "Ran out of room, so I stopped this task to keep everything else running. ({detail})",
+  "chat.notice.memoryReclaimedOnly": "Ran out of room, so I stopped this task to keep everything here from freezing.",
+  "chat.notice.memoryReclaimedOnlyDetail": "Ran out of room, so I stopped this task to keep everything here from freezing. ({detail})",
   "chat.notice.outOfProcesses": "There is no room to start another program ({code}), so this task could not run. Nothing was sent to the AI. It starts again by itself when there is room.",
 } as const;
 

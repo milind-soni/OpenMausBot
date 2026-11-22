@@ -63,6 +63,26 @@ describe("default VPS command runner", () => {
     expect(error).not.toBeInstanceOf(VpsHostUnreachableError);
   });
 
+  it("keeps a command's own ssh-looking error output as its failure, not an unreachable host", async () => {
+    const child = fakeChild();
+    const failed = defaultRunner(["exec", "desktop", "sh", "-lc", "ssh example"]);
+    child.stdout.write("tried");
+    child.stderr.write("ssh: connect to host example port 22: Connection refused\n");
+    child.emit("close", 2, null);
+    const error = await failed.catch((failure: unknown) => failure);
+    expect(error).not.toBeInstanceOf(VpsHostUnreachableError);
+    expect(error).toMatchObject({ exitCode: 2, stdout: "tried", stderr: "ssh: connect to host example port 22: Connection refused\n" });
+  });
+
+  it("keeps a failed command's exit status and output on the error", async () => {
+    const child = fakeChild();
+    const failed = defaultRunner(["exec", "desktop", "false"]);
+    child.stdout.write("partial");
+    child.stderr.write("boom");
+    child.emit("close", 3, null);
+    await expect(failed).rejects.toMatchObject({ message: "boom", exitCode: 3, stdout: "partial", stderr: "boom" });
+  });
+
   it("collects output and resolves after the child closes", async () => {
     const child = fakeChild();
     const result = defaultRunner(["info"], { input: "request" });

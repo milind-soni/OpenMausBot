@@ -25,6 +25,8 @@ export class DialogWatch {
   #waiters = new Set<() => void>();
   #closed = false;
   #opened = 0;
+  /** Each attached page's session on this connection, by target id. */
+  #pages = new Map<string, string>();
 
   constructor(onChange: (dialog: PageDialog | null) => void) {
     this.#onChange = onChange;
@@ -38,7 +40,9 @@ export class DialogWatch {
   async start(url: string, connect: (url: string, timeoutMs: number, listeners: CdpListeners) => Promise<Cdp> = connectCdp): Promise<void> {
     const cdp = await connect(url, 10_000, {
       event: ({ method, params, sessionId }) => {
-        if (method === "Target.attachedToTarget" && (params?.targetInfo as { type?: unknown } | undefined)?.type === "page" && typeof params?.sessionId === "string") {
+        const target = params?.targetInfo as { type?: unknown; targetId?: unknown } | undefined;
+        if (method === "Target.attachedToTarget" && target?.type === "page" && typeof params?.sessionId === "string") {
+          if (typeof target.targetId === "string") this.#pages.set(target.targetId, params.sessionId);
           void cdp.send("Page.enable", {}, params.sessionId).catch(() => undefined);
         } else if (method === "Page.javascriptDialogOpening" && sessionId && (params?.type === "confirm" || params?.type === "prompt")) {
           this.#set({ session: sessionId, dialog: {
@@ -49,6 +53,7 @@ export class DialogWatch {
         } else if ((method === "Page.javascriptDialogClosed" || method === "Target.detachedFromTarget") && this.#open && (sessionId ?? params?.sessionId) === this.#open.session) {
           this.#set(null);
         }
+        if (method === "Target.detachedFromTarget") for (const [id, session] of this.#pages) if (session === params?.sessionId) this.#pages.delete(id);
       },
       closed: () => this.close(),
     });
@@ -74,6 +79,13 @@ export class DialogWatch {
     } catch { return false; }
     if (this.#open === open) this.#set(null);
     return true;
+  }
+
+  /** Sends a command to the page of `targetId` on this connection; null when that page is not attached to it. */
+  async toPage(targetId: string, method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown> | null> {
+    const session = this.#pages.get(targetId);
+    if (!session || !this.#cdp) return null;
+    return this.#cdp.send(method, params, session);
   }
 
   /** Resolves once no dialog is open, the watch stops, or `signal` aborts. */

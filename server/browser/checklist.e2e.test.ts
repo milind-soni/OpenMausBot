@@ -190,7 +190,7 @@ suite("the bots' browser service on real Chrome", () => {
     await viewer.close();
   }, hostTimeout(90_000));
 
-  it("refuses every bot call while a person holds the browser, and takes them again after hand-back", async () => {
+  it("lets the bot only read while a person holds the browser, and act again after hand-back", async () => {
     const target = bot();
     await real.call(target, "agent_browser_open", { url: page("/held", "<p>held</p>") });
     const viewer = await real.service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 1280, maxHeight: 800 }, (output) => {
@@ -198,8 +198,9 @@ suite("the bots' browser service on real Chrome", () => {
     });
     await viewer.input({ type: "takeControl" });
     expect(real.service.heldBy(target.session)).not.toBeNull();
-    for (const name of ["agent_browser_status", "agent_browser_snapshot", "agent_browser_eval"]) {
-      await expect(real.call(target, name, name === "agent_browser_eval" ? { expression: "1" } : {})).rejects.toThrow(BROWSER_CONTROL_REFUSAL);
+    for (const name of ["agent_browser_status", "agent_browser_snapshot", "agent_browser_screenshot"]) expect((await real.call(target, name)).isError, name).toBeUndefined();
+    for (const name of ["agent_browser_eval", "agent_browser_navigate"]) {
+      await expect(real.call(target, name, name === "agent_browser_eval" ? { expression: "1" } : { action: "reload" })).rejects.toThrow(BROWSER_CONTROL_REFUSAL);
     }
     await viewer.input({ type: "releaseControl" });
     expect(real.service.heldBy(target.session)).toBeNull();

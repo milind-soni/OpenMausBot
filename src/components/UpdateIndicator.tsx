@@ -6,8 +6,10 @@ import { updaterMessage, useUpdaterState, type UpdaterState } from "@/lib/update
 import { releaseHighlights } from "@/lib/release-highlights";
 import { RELEASES_URL, desktopAppVersion, openExternalLink } from "@/lib/app-links";
 import { productName } from "../lib/brand";
+import { BOT_BUTTON, botButtonStyle } from "@/lib/bot-button";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { useAdvancedMode } from "@/lib/interface-mode";
 import { useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
 
 export function updateIndicatorShown(state: UpdaterState | null): boolean {
@@ -26,18 +28,21 @@ export function updateIndicatorLabel(state: UpdaterState): string {
     : t("update.button.downloading", { percent: Math.round(state.percent) });
 }
 
-/** `bar`: in the window frame's top bar, a download arrow in that bar's button look (the class given). In a framed
- * window that arrow is the only one, so the sidebar's round buttons draw nothing. */
+/** `bar`: in the window frame's top bar, a download arrow in that bar's button look (the class given). In Advanced, a
+ * framed window shows only that arrow, so the sidebar's round buttons draw nothing. In Simple the sidebar's button is
+ * the one, a round blue button the height of the Connect apps pill, and the top bar leaves its arrow out while the
+ * sidebar is on screen (WindowFrameBar's `sidebarUpdate`). */
 export function UpdateIndicator({ className, bar }: { className?: string; bar?: string }) {
   const state = useUpdaterState();
   const framed = windowFramed(useDesktopCapabilities().capabilities);
+  const advanced = useAdvancedMode();
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const settled = !state || state.status === "idle" || state.status === "checking" || state.status === "handed-off";
   useEffect(() => {
     if (settled) setOpen(false);
   }, [settled]);
-  if (framed && bar === undefined) return null;
+  if (framed && advanced && bar === undefined) return null;
   if (!state || !updateIndicatorShown(state)) {
     return open && !settled ? <UpdateCard state={state} onClose={() => setOpen(false)} returnFocusRef={buttonRef} /> : null;
   }
@@ -56,6 +61,24 @@ export function UpdateIndicator({ className, bar }: { className?: string; bar?: 
         className={cn(bar, "text-accent hover:text-accent", className)}
       >
         <ArrowDownToLine size={15} strokeWidth={2} aria-hidden className={cn(!ready && "animate-pulse motion-reduce:animate-none")} />
+      </button>
+      {open && <UpdateCard state={state} onClose={() => setOpen(false)} returnFocusRef={buttonRef} />}
+    </>
+  );
+  if (!advanced) return (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        data-update-indicator={state.status}
+        aria-label={label}
+        aria-haspopup="dialog"
+        title={label}
+        onClick={() => setOpen(true)}
+        style={botButtonStyle("blue")}
+        className={cn(BOT_BUTTON, "flex size-9 shrink-0 items-center justify-center rounded-full shadow-sm transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus", !ready && "animate-pulse motion-reduce:animate-none")}
+      >
+        <ArrowDown size={18} strokeWidth={2.25} aria-hidden />
       </button>
       {open && <UpdateCard state={state} onClose={() => setOpen(false)} returnFocusRef={buttonRef} />}
     </>

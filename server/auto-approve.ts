@@ -1,6 +1,6 @@
 // Nothing here decides whether an action is safe: each level is the provider's own permission mode passed through, and a
 // request reaching this process is one the provider left for a person. The app's own grants are Full access, the person's
-// exact saved commands and remembered MCP read tools, Approve for me's web search, and a bot's plain reads of its own files
+// exact saved commands and remembered MCP tools that send nothing, Approve for me's web search, and a bot's plain reads of its own files
 // at every level (own-file-reads.ts). A bot's question always reaches a human.
 
 import { supportsApprovalMode, type ApprovalMode } from "../shared/approval-mode.ts";
@@ -26,8 +26,9 @@ export async function deliverFullAccessApproval(
   }
 }
 
-/** Full access is the person's grant to this receiving bot: never inherited from a sender (delegatedApprovalMode aside), and
- * peer-started Custom turns run as Auto. */
+/** Full access is the person's grant to this receiving bot: a turn never inherits it from a sender (delegatedApprovalMode
+ * aside; a thread a hand-off opens is saved at the sending conversation's own level, spawn-level.ts), and peer-started
+ * Custom turns run as Auto. */
 export function approvalModeForOrigin(mode: ApprovalMode, origin: { peerInitiated: boolean }): ApprovalMode {
   if (mode === "custom" && origin.peerInitiated) return "auto";
   return mode;
@@ -98,7 +99,7 @@ export function autoVerdict(
     requiresExplicitApproval?: boolean;
     /** Exact bot/provider/folder/command match against the person's saved rules. */
     commandAllowed?: boolean;
-    /** Exact provider/server/tool/config match against a person's saved MCP read grant. */
+    /** Exact provider/server/tool/config match against a person's saved MCP tool grant. */
     toolAllowed?: boolean;
     /** The request only reads the bot's own files: its SOUL.md, skills, memory and conversation folders. */
     ownFilesRead?: boolean;

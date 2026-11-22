@@ -3,13 +3,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceBackupSummary } from "../../shared/workspace-backup";
 
-const fixture = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[], api: vi.fn() }));
+const fixture = vi.hoisted(() => ({ values: [] as unknown[], refs: [] as Array<{ current: unknown }>, index: 0, refIndex: 0, effects: [] as EffectCallback[], api: vi.fn() }));
 vi.mock("react", async (original) => ({ ...await original<typeof import("react")>(),
   useState: (initial: unknown) => {
     const index = fixture.index++;
     if (!(index in fixture.values)) fixture.values[index] = typeof initial === "function" ? initial() : initial;
     return [fixture.values[index], (next: unknown) => { fixture.values[index] = typeof next === "function" ? next(fixture.values[index]) : next; }];
   },
+  useRef: (initial: unknown) => fixture.refs[fixture.refIndex++] ??= { current: initial },
   useEffect: (effect: EffectCallback) => { fixture.effects.push(effect); },
 }));
 vi.mock("@/state/store", () => ({ api: fixture.api }));
@@ -24,7 +25,7 @@ function nodes(value: ReactNode): Node[] {
   return [node, ...Children.toArray(node.props.children).flatMap(nodes), ...Children.toArray(extra.subtitle).flatMap(nodes), ...Children.toArray(extra.message).flatMap(nodes)];
 }
 function render(recovery: boolean | "restart" | "cloud" = false) {
-  fixture.index = 0; fixture.effects = [];
+  fixture.index = 0; fixture.refIndex = 0; fixture.effects = [];
   let tree: ReactNode;
   function Capture() { tree = recovery === "restart" ? WorkspaceBackupRestartNotice() : recovery === "cloud" ? WorkspaceBackupRestartNotice({ serverRestarts: true }) : recovery ? WorkspaceBackupRecovery({ children: createElement("p", null, "Normal app") }) : WorkspaceBackupSettings(); return tree; }
   const html = renderToStaticMarkup(createElement(Capture));
@@ -35,10 +36,13 @@ const submit = (form: Node) => form.props.onSubmit!({ preventDefault: vi.fn() })
 const change = (input: Node, value: string) => input.props.onChange!({ target: { value } });
 const summary: WorkspaceBackupSummary = { format: "openmaus.workspace-backup", version: 1, id: "archive-id", createdAt: "2026-09-11T00:00:00Z", appVersion: "0.1.71", files: 9, directories: 3, bytes: 1234, bots: 2, groups: 1, threads: 4, messages: 8, warnings: ["Fixture warning"], exclusions: ["Saved account credentials and connections", "External CLI sign-ins"] };
 let storage: Map<string, string>;
+let session: Map<string, string>;
 beforeEach(() => {
-  fixture.values = []; fixture.index = 0; fixture.effects = []; fixture.api.mockReset();
+  fixture.values = []; fixture.refs = []; fixture.index = 0; fixture.effects = []; fixture.api.mockReset();
   storage = new Map();
+  session = new Map();
   vi.stubGlobal("localStorage", { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key) });
+  vi.stubGlobal("sessionStorage", { getItem: (key: string) => session.get(key) ?? null, setItem: (key: string, value: string) => session.set(key, value), removeItem: (key: string) => session.delete(key) });
   vi.stubGlobal("window", { location: { reload: vi.fn() } });
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -78,30 +82,80 @@ describe("Settings full backups", () => {
     view = render();
     const link = { href: "", download: "", click: vi.fn(), remove: vi.fn() };
     vi.stubGlobal("document", { createElement: () => link, body: { append: vi.fn() } });
-    fixture.api.mockResolvedValueOnce({ id: "download-id", filename: "fixture.ombbackup" });
+    fixture.api.mockRejectedValueOnce(Object.assign(new Error("524"), { status: 524 }));
     const form = formOf("backup-export");
     submit(form); submit(form); await flush();
     expect(fixture.api).toHaveBeenCalledTimes(2); // one status, one export
     const [path, init] = fixture.api.mock.calls[1];
-    expect(path).toBe("/api/workspace-backup/export");
+    const requestId = session.get("omb-backup-export-request");
+    expect(requestId).toMatch(/^[a-f0-9-]{36}$/);
+    expect(path).toBe(`/api/workspace-backup/export-jobs/${requestId}`);
     expect(JSON.parse(init.body)).toEqual({ password: "correct horse battery", clientState: { "omb-drafts": "private draft" } });
-    expect(link.href).toBe("/api/workspace-backup/download/download-id");
-    expect(link.click).toHaveBeenCalledOnce();
     expect([...storage.values()]).not.toContain("correct horse battery");
+    expect([...session.values()]).toEqual([requestId]);
     expect(render().html).not.toContain('value="correct horse battery"');
     expect(render().html).not.toContain('id="backup-export"');
+    fixture.api.mockResolvedValueOnce({ state: "ready", id: "download-id", filename: "fixture.ombbackup", expiresInMs: 60_000 })
+      .mockResolvedValueOnce({ busy: false });
+    const stopPolling = fixture.effects[1]();
+    try {
+      await flush();
+      expect(fixture.api.mock.calls[2][0]).toBe(path);
+      expect(link.href).toBe("/api/workspace-backup/download/download-id");
+      expect(link.click).toHaveBeenCalledOnce();
+    } finally { stopPolling?.(); }
   });
 
-  it("keeps the export dialog open with its reason when the export fails, so it can be tried again", async () => {
+  it("recovers a saved export after reopening settings and offers a manual download", async () => {
+    session.set("omb-backup-export-request", "e4238912-594a-44bf-a952-929eb79ac4cb");
+    const link = { click: vi.fn() };
+    vi.stubGlobal("document", { createElement: () => link });
+    await ready();
+    fixture.api.mockResolvedValueOnce({ state: "ready", id: "recovered-id", filename: "recovered.ombbackup", expiresInMs: 2_000 })
+      .mockResolvedValueOnce({ busy: false });
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() - 10 * 60_000);
+    const stopPolling = fixture.effects[1]();
+    try {
+      await flush();
+      expect(fixture.api.mock.calls[1][0]).toBe("/api/workspace-backup/export-jobs/e4238912-594a-44bf-a952-929eb79ac4cb");
+      expect(render().html).toContain('href="/api/workspace-backup/download/recovered-id"');
+      expect(link.click).not.toHaveBeenCalled();
+      fixture.api.mockRejectedValueOnce(Object.assign(new Error("Expired"), { status: 404 })).mockResolvedValueOnce({ busy: false });
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(render().html).not.toContain("recovered.ombbackup");
+      expect(render().html).toContain("Start another export and enter your backup password");
+    } finally { stopPolling?.(); vi.useRealTimers(); }
+  });
+
+  it("asks for a fresh export when the saved job is gone", async () => {
+    session.set("omb-backup-export-request", "e4238912-594a-44bf-a952-929eb79ac4cb");
+    await ready();
+    const missing = Object.assign(new Error("Not found"), { status: 404 });
+    fixture.api.mockRejectedValueOnce(missing).mockRejectedValueOnce(missing).mockResolvedValueOnce({ busy: false });
+    vi.useFakeTimers();
+    const stopPolling = fixture.effects[1]();
+    try {
+      await flush();
+      expect(render().html).toContain("Reconnecting to check your backup");
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(render().html).toContain("Start another export and enter your backup password");
+      expect(session.size).toBe(0);
+      expect(fixture.api.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    } finally { stopPolling?.(); vi.useRealTimers(); }
+  });
+
+  it("keeps the export dialog open with its reason when the server refuses a new export", async () => {
     await ready();
     open("export");
     const passwords = render().nodes.filter((node) => node.type === "input" && node.props.type === "password");
     change(passwords[0], "correct horse battery"); change(passwords[1], "correct horse battery");
-    fixture.api.mockRejectedValueOnce(new Error("Disk full"));
+    fixture.api.mockRejectedValueOnce(Object.assign(new Error("Another backup is running"), { status: 409 }));
     submit(formOf("backup-export")); await flush();
     const html = render().html;
     expect(html).toContain('id="backup-export"');
-    expect(html).toMatch(/role="alert"[^>]*>Disk full</);
+    expect(html).toMatch(/role="alert"[^>]*>Another backup is running</);
+    expect(session.size).toBe(0);
   });
 
   it("uploads a raw file, validates it, and requires exact REPLACE with the staged ID", async () => {

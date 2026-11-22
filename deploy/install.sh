@@ -510,8 +510,23 @@ note_sandbox() { # tag or sha256:digest
   fi
 }
 
+release_tag() { sed -n 's/.*"tag_name": *"\(v[0-9][0-9.]*\)".*/\1/p' | head -n 1; }
+
 newest_release() {
-  curl -fsS --max-time 15 "$RELEASES_URL" 2>/dev/null | sed -n 's/.*"tag_name": *"\(v[0-9][0-9.]*\)".*/\1/p' | head -n 1
+  # OMB_INSTALL_GITHUB_TOKEN, for a test run on a shared CI machine only: api.github.com answers few reads without one
+  # from an address many others share. A person's run sends none. The token goes to curl on its standard input, inside a
+  # quoted value, so one with anything but letters, digits and _ (as GitHub's have) is not sent. A token GitHub refuses
+  # (401) answers nothing: the lookup is then made once more without it, as a person's run makes it.
+  gh_token=${OMB_INSTALL_GITHUB_TOKEN:-}
+  case "$gh_token" in *[!A-Za-z0-9_]*) gh_token="" ;; esac
+  if [ -n "$gh_token" ]; then
+    gh_tag=$(printf 'header = "Authorization: Bearer %s"\n' "$gh_token" | curl -K - -fsS --max-time 15 "$RELEASES_URL" 2>/dev/null | release_tag)
+    if [ -n "$gh_tag" ]; then
+      printf '%s\n' "$gh_tag"
+      return 0
+    fi
+  fi
+  curl -fsS --max-time 15 "$RELEASES_URL" 2>/dev/null | release_tag
 }
 
 # The stable channel when it is published, else the newest release. Never `latest`, which follows every commit.

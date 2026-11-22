@@ -33,6 +33,9 @@ export interface CloudLendingTurnsDeps {
   lifts?: () => Pick<ReturnType<typeof createLendingLifts>, "raise" | "declined" | "outsideAllowed"> | null;
   /** Work a bot handed into this conversation since `since`: made, or run, after then. Not the conversation's own turns, nor what they hand on. */
   handedSince?(threadId: string, since: number): boolean;
+  /** A routine's run was refused the lent computer only because its routine isn't confirmed as the owner's
+   * (host/refused-lending.ts): `used` when it tried to use the computer, not only to list it. */
+  routineRefused?(threadId: string, runId: string, routineName: string, used: boolean): void;
 }
 
 export function createCloudLendingTurns(deps: CloudLendingTurnsDeps) {
@@ -106,19 +109,22 @@ export function createCloudLendingTurns(deps: CloudLendingTurnsDeps) {
     const { conversation, memoryChanged } = shut;
     if (!conversation && !memoryChanged) return null;
     if (deps.team) return teamLendingRefusal(deps.team);
-    const changed = conversation === "not-owner" && !memoryChanged ? changedRoutine(capability) : undefined;
-    if (changed !== undefined) return changedRoutineRefusalText(changed, deviceWord(deps.lentPlatform()));
+    const changed = changedRoutineOnly(capability, shut);
+    if (changed) return changedRoutineRefusalText(changed.name, deviceWord(deps.lentPlatform()));
     const thread = store.messagesFor(capability.threadId);
     const others = thread.filter((line) => line.role === "user" && !deps.ownerPerson(line.peerAsk ? undefined : line.sender?.id));
     return cloudLendingRefusalText(conversation ?? "memory-changed", { room: Boolean(store.groupByThread(capability.threadId)), fromBefore: others.length > 0 && others.every(unstamped),
       botOpened: others.length === 0 && cloudBotOpened(capability.threadId), outside: others.length === 0 && thread.some(cloudReportFromOthers), memoryChanged, onCard: liftable(capability, shut) !== null, device: deviceWord(deps.lentPlatform()) });
   }
 
-  /** What a refused call answers: the notice, then that the bot should stop. Where the owner can lift it, the card goes up here. */
-  function cloudLendingRefusalForBot(capability: Turn): string | null {
+  /** What a refused call answers: the notice, then that the bot should stop. Where the owner can lift it, the card goes up
+   * here. `used`: the call tried to use the computer (or asked for it), not only to list it. */
+  function cloudLendingRefusalForBot(capability: Turn, used = true): string | null {
     const notice = cloudLendingRefusalNotice(capability);
     if (!notice || deps.team) return notice;
-    const lift = liftable(capability, gates(capability));
+    const shut = gates(capability), changed = changedRoutineOnly(capability, shut);
+    if (changed) deps.routineRefused?.(capability.threadId, changed.runId, changed.name, used);
+    const lift = liftable(capability, shut);
     if (lift) deps.lifts?.()?.raise({ botId: capability.botId, threadId: capability.threadId, ...lift });
     return `${notice} ${lift ? ON_THE_CARD : ONLY_THE_PERSON}`;
   }
@@ -134,16 +140,22 @@ export function createCloudLendingTurns(deps: CloudLendingTurnsDeps) {
     return deps.memoryChangedBySomeoneElse(capability.botId) ? "memory-changed" : conversationGate(capability, cloudHomeOwnTurnRefusal);
   }
 
-  /** The name of the routine this turn runs, when the run is refused only because the routine is no longer the owner's
-   * (someone else changed it); a webhook's or another app's run, or one somebody else started by hand, is not this. */
-  function changedRoutine(capability: Turn): string | undefined {
+  /** The routine this turn runs, when the run is refused only because the routine is no longer the owner's (someone else
+   * changed it); a webhook's or another app's run, or one somebody else started by hand, is not this. */
+  function changedRoutine(capability: Turn): { runId: string; name: string } | undefined {
     const turn = cloudLendingTurn(capability);
     const automation = turn.request?.automation;
     if (automation === undefined || automation === "webhook" || automation === "api") return undefined;
     const run = turn.routineRun();
     if (!run || run.ownerAuthored || run.triggerSource === "webhook" || run.triggerSource === "api" || (run.triggerSource === "manual" && !run.ownerStarted)) return undefined;
-    const routineId = deps.activeRoutineRun(capability.threadId)?.routineId;
-    return deps.routines()?.listRoutines().find((routine) => routine.id === routineId)?.name;
+    const active = deps.activeRoutineRun(capability.threadId);
+    const name = deps.routines()?.listRoutines().find((routine) => routine.id === active?.routineId)?.name;
+    return active && name !== undefined ? { runId: active.id, name } : undefined;
+  }
+
+  /** That routine, when it is the only gate shut. */
+  function changedRoutineOnly(capability: Turn, { conversation, memoryChanged }: ReturnType<typeof gates>) {
+    return conversation === "not-owner" && !memoryChanged ? changedRoutine(capability) : undefined;
   }
 
   /** A bot opened this conversation (a hand-off's work thread, one a bot started itself, a Chief's notices). */

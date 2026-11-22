@@ -31,7 +31,7 @@ vi.mock("@/state/store", async importOriginal => {
   const store = await importOriginal<typeof import("@/state/store")>();
   return { ...store, api: fixture.api, BotEditorStore: () => null, useStore: () => ({ state: { ...store.initialState, appSettingsOpen: fixture.appSettingsOpen, ...(fixture.teamName ? { config: { team: { id: "acme", name: fixture.teamName } } } : {}) }, dispatch: fixture.dispatch }) };
 });
-import { NewBotDialog } from "./NewBotDialog";
+import { CheckerModelLine, NewBotDialog } from "./NewBotDialog";
 import { setTeamChats } from "@/state/team-chats";
 import { setTeamPeople } from "@/state/team-people";
 import { Select } from "./Select";
@@ -56,11 +56,11 @@ function chooseStartingRole(dialog: Node[], value: string) {
   const select = output(role).find(node => node.type === Select)!;
   (select.props as unknown as { onChange: (event: { target: { value: string } }) => void }).onChange({ target: { value } });
 }
-function render(defaultsMode = false, onCreated?: () => void | Promise<void>) {
+function render(defaultsMode = false, onCreated?: () => void | Promise<void>, readyBotId?: string) {
   let tree: ReactNode = null;
   function Capture() {
     fixture.hook = 0;
-    const editor = (NewBotDialog({ defaultsMode, onCreated, onClose: fixture.close }) as Node).props.children as Node;
+    const editor = (NewBotDialog({ defaultsMode, onCreated, onClose: fixture.close, readyBotId }) as Node).props.children as Node;
     tree = (editor.type as (props: unknown) => ReactNode)(editor.props);
     return tree;
   }
@@ -161,6 +161,41 @@ describe("bot draft dialog", () => {
     fixture.effects[0]();
     await vi.waitFor(() => expect(fixture.setDraft).toHaveBeenCalledOnce());
     expect(fixture.setDraft.mock.calls[0]![0].bot.modelSelection).toEqual(selection);
+  });
+
+  it("starts the Checker from Templates on another provider's AI the server found, and every other bot on the default", async () => {
+    const other = { instanceId: "codex", model: "codex-default" };
+    const answer = { defaults: { profile: {}, memory: {}, skills: [], routines: [] }, modelSelection: { instanceId: "claude", model: "opus" }, suggestedName: "Fixture" };
+    fixture.api.mockResolvedValue({ ...answer, checkerModelSelection: other });
+    render(false, undefined, "checker");
+    fixture.effects[0]();
+    expect(fixture.api).toHaveBeenCalledExactlyOnceWith("/api/bot-defaults?checker=1");
+    await vi.waitFor(() => expect(fixture.setDraft).toHaveBeenCalledOnce());
+    expect(fixture.setDraft.mock.calls[0]![0].bot).toMatchObject({ name: "Vera", title: "Checker", modelSelection: other });
+
+    fixture.effects = []; fixture.api.mockReset(); fixture.setDraft.mockReset();
+    fixture.api.mockResolvedValue({ ...answer, checkerModelSelection: null });
+    render(false, undefined, "checker");
+    fixture.effects[0]();
+    await vi.waitFor(() => expect(fixture.setDraft).toHaveBeenCalledOnce());
+    expect(fixture.setDraft.mock.calls[0]![0].bot.modelSelection).toEqual(answer.modelSelection);
+
+    fixture.effects = []; fixture.api.mockReset(); fixture.setDraft.mockReset();
+    fixture.api.mockResolvedValue(answer);
+    render(false, undefined, "editor");
+    fixture.effects[0]();
+    expect(fixture.api).toHaveBeenCalledExactlyOnceWith("/api/bot-defaults");
+    await vi.waitFor(() => expect(fixture.setDraft).toHaveBeenCalledOnce());
+    expect(fixture.setDraft.mock.calls[0]![0].bot).toMatchObject({ name: "Nib", modelSelection: answer.modelSelection });
+  });
+
+  it("says which AI the Checker checks on only while the review is on the model it started on", () => {
+    const start = { instanceId: "codex", model: "codex-default" };
+    const line = (other: typeof start | null, modelSelection: typeof start) => renderToStaticMarkup(createElement(CheckerModelLine,
+      { bot: { name: "Vera", modelSelection } as never, other, start, instances: [] }));
+    expect(line(start, start)).toContain("Vera checks on codex-default, a different AI from your other bots");
+    expect(line(null, start)).toContain("No other AI is ready, so Vera checks on the same AI as your other bots.");
+    for (const other of [start, null]) expect(line(other, { instanceId: "claude", model: "opus" })).toBe("");
   });
 
   it("can cancel a loading draft without creating or deleting a bot", () => {
