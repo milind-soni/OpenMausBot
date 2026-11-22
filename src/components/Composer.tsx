@@ -906,7 +906,9 @@ export function Composer({
               }
               send(followUpFor(alternateSend(e.nativeEvent, sendKey)));
             }
-            if (e.key === "Escape" && recording) stopDictation();
+            if (e.key !== "Escape") return;
+            if (recording) stopDictation();
+            else if (!e.defaultPrevented) e.currentTarget.blur();
           }}
           // Not disabled during an upload: a disabled element drops keyboard focus for good. send() refuses while one
           // is pending.
