@@ -32,7 +32,8 @@ posixOnly("profile apply routes", () => {
     scratch = mkdtempSync(join(tmpdir(), "omb-profiles-apply-"));
     folder = join(scratch, "acme");
     cpSync(ACME, folder, { recursive: true });
-    server = await launchRestartableServer();
+    // Codex is listed but not signed in, and has no Accept edits level.
+    server = await launchRestartableServer({ instances: { codex: { driver: "codex", displayName: "Codex", config: { cli: join(scratch, "no-codex") } } } });
     await server.stop();
     const registry = new SessionRegistry({ file: join(server.dataDir, "sessions.json"), emailScopes: () => ["client"] });
     tokens.admin = registry.issue({ label: "Owner's laptop", scopes: ["admin", "client"] }).token;
@@ -67,6 +68,9 @@ posixOnly("profile apply routes", () => {
     expect(plan.status).toBe(200);
     expect(plan.body).toMatchObject({ folder, organization: "Acme", noChanges: false, problems: [], counts: { add: 7, access: 4, later: 1 } });
     expect(plan.body.commit).toBeUndefined();
+    const closer = plan.body.lines.filter((line: Rec) => line.subject.id === "sales/closer" && line.kind !== "access").map((line: Rec) => line.text);
+    expect(closer).toContain("Adds Closer to area Sales (Sales follow-up · codex/gpt-5.5 · Ask)");
+    expect(closer).toContain("Closer: Accept edits isn't available for its AI here, so it starts at Ask for approval");
     expect(plan.body.lines.filter((line: Rec) => line.kind === "access").map((line: Rec) => line.text)).toEqual(["Analista BI: Edu brain the shared brain of area bi", "Analista BI: Edu crew on",
       "Reporter: Edu brain the shared brain of area bi", "Closer: Edu brain edu-cloud at https://brain.acme.example/mcp, token from secret EDU_CLOUD_SALES"]);
     expect(await profileBots()).toEqual([]);
@@ -129,7 +133,17 @@ posixOnly("profile apply routes", () => {
     expect(confirmed.body.applied.lines).toHaveLength(4);
     expect((await analyst())!.eduCrew).toBe(true);
     expect((await analyst())!.eduBrain).toEqual({ mode: "area", area: "bi" });
-    expect((await api("POST", "/api/profiles/plan", {})).body.noChanges).toBe(true);
+    const settled = (await api("POST", "/api/profiles/plan", {})).body;
+    expect(settled.noChanges).toBe(true);
+    expect(settled.lines.filter((line: Rec) => line.field === "approval").map((line: Rec) => line.text))
+      .toEqual(["Closer: Accept edits isn't available for its AI here, so it stays at Ask for approval"]);
+  });
+
+  it("never leaves a bot whose engine has no Accept edits at Full access", async () => {
+    const closer = (await profileBots()).find((bot) => bot.profileSource.key === "closer")!;
+    expect(closer).toMatchObject({ approvalMode: "ask", modelSelection: { instanceId: "codex", model: "gpt-5.5" } });
+    expect((await api("PATCH", `/api/bots/${closer.id}`, { approvalMode: "edits", applyToAllThreads: true })).body.error)
+      .toBe("Every thread's provider must support this approval level");
   });
 
   it("records each apply in the admin activity log and the applied state", async () => {
@@ -137,7 +151,7 @@ posixOnly("profile apply routes", () => {
     const rows = (await api("GET", "/api/admin-activity?what=profile", undefined, "admin")).body.entries as Rec[];
     expect(rows.map((row) => row.action)).toEqual(["profile.apply", "profile.apply"]);
     expect(rows.find((row) => row.changed?.includes("bi/analyst.eduCrew") && row.changed.includes("sales/closer.eduBrain") && row.changed.length === 4)).toBeTruthy();
-    expect(rows.find((row) => row.changed?.includes("sales/closer.approval"))?.after).toMatchObject({ folder });
+    expect(rows.find((row) => row.changed?.includes("sales/closer.connectors"))?.after).toMatchObject({ folder });
     const status = (await api("GET", "/api/profiles")).body;
     expect(status).toMatchObject({ folder, applied: { folder, digest: expect.any(String) }, areas: { bi: { section: "BI" }, sales: { section: "Sales" } } });
   });

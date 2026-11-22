@@ -386,9 +386,24 @@ side changed: only the file (applied), only the app (kept, "changed here") or bo
 `edubot profiles apply`, a conflict's key is printed beside it: `--take-file KEY` or `--keep-mine KEY` settles it.
 Keeping yours records the file's value as seen, so the same conflict is not asked again.
 
-A bot's changes go in separate writes: the plain ones together, then the approval level and each "Gives more access"
-change on its own, so the app refusing one (Auto on this computer needs the warning only the bot's settings show) never
-drops the others. A new bot is made at its approval level.
+A bot's changes go in separate writes: the plain ones together, then each change that lowers access (approval, tools,
+tool groups, MCP servers, connected apps, Edu brain, Edu crew) on its own, then each "Gives more access" change on its
+own, so the app refusing one (Auto on this computer needs the warning only the bot's settings show) never drops the
+others.
+
+A bot from a profile never ends with more access than its file gives:
+
+- A new bot is made at its approval level, or at Ask when that level is set afterwards (Accept edits). It is never left
+  at the app's default, Full access.
+- A level the bot's AI does not have here is lowered to the highest one at or below it that the AI has, and the plan
+  says so: "Closer: Accept edits isn't available for its AI here, so it starts at Ask for approval". Codex, for one,
+  has no Accept edits. Moving the bot to an AI that has the level brings it back.
+- When the app refuses a lower approval level anyway, the bot goes to the highest level below it that the app takes,
+  never above the level it has. The app keeps that, so the next plan explains it ("this app refused Accept edits for
+  it, so it stays at Ask for approval") instead of offering it again, until the file's level changes.
+- When the app refuses any other change that lowers access, a new bot is not made, and an existing bot is reported as
+  keeping more access than its file gives, so a person narrows it in the bot's settings. The next plan offers the
+  change again.
 
 An area becomes a department named after its `name:`, found again by its key after a rename. Its brief is the
 organization's brief, then the area's.

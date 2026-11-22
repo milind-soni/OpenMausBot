@@ -27,7 +27,8 @@ export interface RestartableServer {
   close(): Promise<void>;
 }
 
-export async function launchRestartableServer(options: { scripted?: boolean; dataDirRoot?: string } = {}): Promise<RestartableServer> {
+/** `instances`: more engines for config.json beside the fake Claude, by instance id. */
+export async function launchRestartableServer(options: { scripted?: boolean; dataDirRoot?: string; instances?: Record<string, unknown> } = {}): Promise<RestartableServer> {
   const port = await freePortBlock([0, 1]);
   // Native browser daemons use UNIX sockets, and a macOS temp home can exceed their path limit.
   const dataDir = mkdtempSync(join(options.dataDirRoot ?? tmpdir(), "omb-restartable-"));
@@ -37,7 +38,7 @@ export async function launchRestartableServer(options: { scripted?: boolean; dat
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({ language: "en", instances: { claude: {
     driver: "claudeAgent", displayName: "Verification fixture", config: { cli: join(ROOT, "server", "testing", "fake-claude-cli.ts") },
     ...(options.scripted ? { environment: { FAKE_CLAUDE_ROOM_PLAN: planPath } } : {}),
-  } } }, null, 2));
+  }, ...options.instances } }, null, 2));
   // Kept after close, for a failed run's evidence.
   const evidenceDir = join(tmpdir(), "openmausbot-verification-evidence");
   mkdirSync(evidenceDir, { recursive: true });

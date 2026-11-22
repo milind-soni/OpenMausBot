@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { approvalModeFor, levelWithin, type ApprovalMode } from "../../shared/approval-mode.ts";
+import { APPROVAL_MODES, approvalModeFor, levelWithin, supportsApprovalMode, type ApprovalMode } from "../../shared/approval-mode.ts";
 import type { EduBrainSetting } from "../../shared/edu-brain.ts";
 import { problemSentence, type McpServerProfile, type ProfileFolder, type ProfileProblem, type ResolvedBot, type SkillProfile } from "../../shared/profile-format.ts";
 import type { ProfileChoice, ProfilePlan, ProfilePlanCounts, ProfilePlanLine, ProfileSecretSlot } from "../../shared/profile-plan.ts";
@@ -22,8 +22,8 @@ export interface AppView {
   briefs: Record<string, string>;
   /** GET /api/bots/:id/skills for every bot a profile made. */
   skills: Record<string, Array<{ name: string; enabled: boolean; sha256: string }>>;
-  /** GET /api/instances: each engine and the models it offers. */
-  instances: Array<{ instanceId: string; models: string[] }>;
+  /** GET /api/instances: each engine, its kind and the models it offers. */
+  instances: Array<{ instanceId: string; driverKind?: string; models: string[] }>;
   /** The MCP servers this app has, by name. */
   mcpServers: string[];
 }
@@ -84,6 +84,8 @@ export interface BotAction {
   create?: Rec;
   createLine?: ProfilePlanLine;
   hashes: Record<string, string>;
+  /** The approval level the file asks for, which may be above the level the plan sets when this app cannot give it. */
+  approval?: ApprovalMode;
   /** Fields the file leaves to the app: their values are stored too, so a later file value meets a change made here as
    * a conflict. A new bot's are read from the bot once made. */
   unmanaged: string[];
@@ -105,7 +107,7 @@ export interface PlanOutput {
   goneAreas: string[];
 }
 
-/** The levels POST /api/bots takes; Accept edits is set afterwards. */
+/** The levels POST /api/bots takes; a bot on any other level starts at Ask and is raised to it afterwards. */
 const CREATE_APPROVALS = new Set<string>(["ask", "auto", "full"]);
 const fold = (name: string | undefined) => (name ?? "").trim().toLowerCase();
 const sorted = (list: readonly string[] | undefined) => [...new Set(list ?? [])].sort();
@@ -114,6 +116,32 @@ const sorted = (list: readonly string[] | undefined) => [...new Set(list ?? [])]
 export function valueHash(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value) ?? "null").digest("hex").slice(0, 16);
 }
+
+/** The stored hash of a bot's approval: the file's level, or, when this app refused that level and the bot was left at a
+ * lower one, the pair, so the next plan explains the lower level instead of offering the refused one again. */
+export function approvalHash(file: ApprovalMode, at: ApprovalMode): string {
+  return file === at ? valueHash(file) : valueHash({ approval: file, at });
+}
+
+function refusedApproval(hash: string | undefined): { file: ApprovalMode; at: ApprovalMode } | undefined {
+  if (hash === undefined) return undefined;
+  for (const file of APPROVAL_MODES) for (const at of APPROVAL_MODES) if (file !== at && approvalHash(file, at) === hash) return { file, at };
+  return undefined;
+}
+
+/** The hash `decide` compares a stored hash as: a refused approval counts as the level the bot was left at. */
+function storedValueHash(field: string, hash: string | undefined): string | undefined {
+  const refused = field === "approval" ? refusedApproval(hash) : undefined;
+  return refused ? valueHash(refused.at) : hash;
+}
+
+/** The highest level at or below `wanted` that an engine of `driverKind` runs; `wanted` when the engine is not known. */
+export function approvalFloor(wanted: ApprovalMode, driverKind: string | undefined): ApprovalMode {
+  if (driverKind === undefined) return wanted;
+  return [...APPROVAL_MODES].reverse().find((mode) => levelWithin(mode, wanted) && supportsApprovalMode(driverKind, mode)) ?? "ask";
+}
+
+export const approvalPhrase = (mode: ApprovalMode) => (mode === "ask" ? "Ask for approval" : APPROVAL_LABEL[mode]!);
 
 const short = (text: string, max = 60) => {
   const line = text.split("\n")[0]!.trim();
@@ -224,7 +252,7 @@ export function appHashes(fields: readonly string[], echo: Rec): Record<string, 
 export function changedHereFields(hashes: Readonly<Record<string, string>>, echo: Rec, bot?: ResolvedBot): string[] {
   const specs: Array<Pick<FieldSpec, "field" | "file" | "app" | "canon">> = [...FIELDS, CHIEF];
   return specs.filter((spec) => hashes[spec.field] !== undefined && (!bot || spec.file(bot) !== undefined)
-    && hashes[spec.field] !== valueHash(canonOf(spec, spec.app(echo)))).map((spec) => spec.field);
+    && storedValueHash(spec.field, hashes[spec.field]) !== valueHash(canonOf(spec, spec.app(echo)))).map((spec) => spec.field);
 }
 
 /** The secret slots a bot's profile names: its Edu brain's token and the headers and variables of its MCP servers.
@@ -417,28 +445,47 @@ export function planProfiles(input: PlanInput): PlanOutput {
 
     const consider = (field: string, label: string, fileValue: unknown, fileCanon: unknown, appValue: unknown, appCanon: unknown, show: (value: unknown) => string,
       widens: boolean, apply: Omit<FieldChange, "field" | "line" | "hash" | "access">,
-      changedHere: (value: unknown) => string = (value) => `${label} changed in this app to ${show(value)}`) => {
-      const fileHash = valueHash(fileCanon);
+      changedHere: (value: unknown) => string = (value) => `${label} changed in this app to ${show(value)}`, storedHash?: string) => {
+      const fileHash = storedHash ?? valueHash(fileCanon);
       const choice = `${bot.id}:${field}`;
-      const outcome = echo ? settle(decide(base[field], fileHash, valueHash(appCanon)), choices[choice]) : "take";
+      const outcome = echo ? settle(decide(storedValueHash(field, base[field]), valueHash(fileCanon), valueHash(appCanon)), choices[choice]) : "take";
       if (outcome === "mine") kept({ subject, field, file: bot.file }, `${bot.name}: ${label}`);
-      if (outcome === "same" || outcome === "mine") { action.hashes[field] = fileHash; return; }
+      if (outcome === "same" || outcome === "mine") { action.hashes[field] = fileHash; return outcome; }
       if (outcome === "here") {
         action.hashes[field] = base[field]!;
         lines.push(fieldLine("changed-here", field, `${changedHere(appValue)}; that change stays`));
-        return;
+        return outcome;
       }
       if (outcome === "conflict") {
         action.hashes[field] = base[field]!;
         lines.push(fieldLine("conflict", field, `${label}: the file says ${show(fileValue)}, you have ${show(appValue)}`,
           { conflict: { choice, file: show(fileValue), mine: show(appValue) } }));
-        return;
+        return outcome;
       }
       if (base[field] !== undefined) action.hashes[field] = base[field]!;
       const text = field === "soul" && appValue ? `instructions ${changedLineCount(appValue as string, fileValue as string)} changed`
         : echo ? `${label} ${show(appValue)} → ${show(fileValue)}` : `${label} ${show(fileValue)}`;
       const line = fieldLine(widens ? "access" : echo ? "change" : "add", field, text);
       action.changes.push({ field, line, hash: fileHash, access: widens, ...apply });
+      return outcome;
+    };
+
+    let approvalShown: ApprovalMode | undefined;
+    const considerApproval = (spec: FieldSpec, wanted: ApprovalMode, appValue: ApprovalMode) => {
+      action.approval = wanted;
+      const engine = bot.model && !modelSkipped ? bot.model.split("/")[0] : echo?.modelSelection?.instanceId;
+      const floor = approvalFloor(wanted, app.instances.find((instance) => instance.instanceId === engine)?.driverKind);
+      const refused = echo ? refusedApproval(base.approval) : undefined;
+      const held = refused && refused.file === wanted && refused.at !== floor && levelWithin(refused.at, floor) ? refused.at : undefined;
+      const target = held ?? floor;
+      approvalShown = target;
+      const outcome = !echo && target === appValue ? (action.hashes.approval = valueHash(target), "same" as const)
+        : consider(spec.field, spec.label, target, target, appValue, appValue, spec.show, spec.widens!(appValue, target, action.echo), { set: spec.set(target) },
+          undefined, held ? base.approval : undefined);
+      if (target === wanted || outcome === "here" || outcome === "conflict" || outcome === "mine") return;
+      const how = !echo ? "starts at" : outcome === "take" ? "goes to" : "stays at";
+      note(held ? `${bot.name}: this app refused ${APPROVAL_LABEL[wanted]} for it, so it stays at ${approvalPhrase(target)}`
+        : `${bot.name}: ${APPROVAL_LABEL[wanted]} isn't available for its AI here, so it ${how} ${approvalPhrase(target)}`, "approval");
     };
 
     for (const spec of FIELDS) {
@@ -454,6 +501,7 @@ export function planProfiles(input: PlanInput): PlanOutput {
         continue;
       }
       if (!echo && spec.field === "name") continue;
+      if (spec.field === "approval") { considerApproval(spec, fileValue as ApprovalMode, appValue as ApprovalMode); continue; }
       const fileCanon = canonOf(spec, fileValue);
       const appCanon = canonOf(spec, appValue);
       if (!echo && JSON.stringify(fileCanon) === JSON.stringify(appCanon)) { action.hashes[spec.field] = valueHash(fileCanon); continue; }
@@ -511,18 +559,19 @@ export function planProfiles(input: PlanInput): PlanOutput {
     }
 
     if (!echo) {
-      const describe = [bot.title, bot.chief ? `Chief of ${section}` : "", bot.model && !modelSkipped ? bot.model : "", bot.approval ? APPROVAL_LABEL[bot.approval] : ""].filter(Boolean).join(" · ");
+      const describe = [bot.title, bot.chief ? `Chief of ${section}` : "", bot.model && !modelSkipped ? bot.model : "", approvalShown ? APPROVAL_LABEL[approvalShown] : ""].filter(Boolean).join(" · ");
       action.createLine = { kind: "add", subject, file: bot.file, text: `Adds ${bot.name} to area ${section}${describe ? ` (${describe})` : ""}` };
-      const approval = action.changes.find((change) => change.field === "approval" && !change.access && CREATE_APPROVALS.has(change.set!.approval!));
-      if (approval) {
-        action.changes.splice(action.changes.indexOf(approval), 1);
-        action.hashes.approval = approval.hash!;
+      const approvalChange = action.changes.find((change) => change.field === "approval");
+      const createdAt = approvalChange && !approvalChange.access && CREATE_APPROVALS.has(approvalChange.set!.approval!) ? approvalChange.set!.approval! : approvalChange ? "ask" : undefined;
+      if (approvalChange && createdAt === approvalChange.set!.approval) {
+        action.changes.splice(action.changes.indexOf(approvalChange), 1);
+        action.hashes.approval = approvalChange.hash!;
       }
       action.create = {
         useDefaults: false, name: bot.name, section,
         ...(bot.title !== undefined ? { title: bot.title } : {}), ...(bot.description !== undefined ? { description: bot.description } : {}),
         ...(bot.model && !modelSkipped ? { modelSelection: modelSelection(bot.model, bot.effort), requireAvailableModel: true } : {}),
-        ...(approval ? { settings: { approvalMode: approval.set!.approval } } : {}),
+        ...(createdAt ? { settings: { approvalMode: createdAt } } : {}),
       };
       lines.push(action.createLine);
       lines.push(...action.changes.filter((change) => change.access).map((change) => change.line));

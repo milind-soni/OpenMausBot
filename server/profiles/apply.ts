@@ -1,9 +1,11 @@
 // Not atomic: each department and bot is its own write. A refused write leaves that bot as it was and its stamp
-// unchanged, so the next plan offers the same change again.
+// unchanged, so the next plan offers the same change again; a refused approval instead falls to a lower level, which the
+// stamp records so the next plan explains it.
+import { APPROVAL_MODES, approvalModeFor, approvalModeWidens, levelWithin, type ApprovalMode } from "../../shared/approval-mode.ts";
 import type { ProfilePlanLine } from "../../shared/profile-plan.ts";
 import type { ProfileSource } from "../../shared/wire.ts";
-import { botPatch, type DesiredBot } from "../desired-bot.ts";
-import { appHashes, type AreaAction, type BotAction, type PlanOutput } from "./plan.ts";
+import { APPROVAL_LABEL, botPatch, type DesiredBot } from "../desired-bot.ts";
+import { appHashes, approvalHash, approvalPhrase, type AreaAction, type BotAction, type PlanOutput } from "./plan.ts";
 import type { ProfilesState } from "./state.ts";
 
 type Rec = Record<string, any>;
@@ -35,10 +37,15 @@ class Refused extends Error {}
 
 type Change = BotAction["changes"][number];
 
-/** The plain changes in one PATCH, then approval and each access change alone: a refusal of one never drops the others. */
-function patchGroups(changes: readonly Change[]): Change[][] {
-  const alone = (change: Change) => change.access || change.field === "approval";
-  return [changes.filter((change) => !alone(change)), ...changes.filter(alone).map((change) => [change])].filter((group) => group.length);
+/** Fields whose value bounds what a bot may do. Security: a bot from a profile never ends with more of these than its file
+ * gives, so a refused change that would lower one is never left silently wider. */
+const GUARDS = new Set(["approval", "tools", "toolsOff", "mcpServers", "connectors", "eduBrain", "eduCrew"]);
+const narrows = (change: Change) => !change.access && GUARDS.has(change.field);
+
+/** The levels to try for `target`, highest first: the target, then each lower level that is not above `current`. */
+function approvalLadder(target: ApprovalMode, current: ApprovalMode): ApprovalMode[] {
+  const lower = [...APPROVAL_MODES].reverse().filter((mode) => mode !== target && levelWithin(mode, target) && !approvalModeWidens(current, mode));
+  return [target, ...lower];
 }
 
 function groupPatch(group: readonly Change[], echo: Rec): Rec {
@@ -54,6 +61,23 @@ function groupPatch(group: readonly Change[], echo: Rec): Rec {
 }
 
 const reason = (result: { status: number; body: Rec }) => String(result.body?.error ?? result.body?.message ?? `refused (${result.status})`);
+
+/** Makes the bot at the level its plan gives; when the app refuses that level, at Ask, the lowest. */
+async function createBot(action: BotAction, write: (method: string, path: string, body?: unknown) => Promise<Rec>): Promise<{ bot: Rec; refused?: { level: ApprovalMode; why: string } }> {
+  try {
+    return { bot: (await write("POST", "/api/bots", action.create)).bot };
+  } catch (error) {
+    const level = action.create?.settings?.approvalMode as ApprovalMode | undefined;
+    if (!level || level === "ask") throw error;
+    let made: Rec;
+    try {
+      made = await write("POST", "/api/bots", { ...action.create, settings: { ...action.create!.settings, approvalMode: "ask" } });
+    } catch {
+      throw error;
+    }
+    return { bot: made.bot, refused: { level, why: (error as Error).message } };
+  }
+}
 
 export async function applyProfilePlan(planned: PlanOutput, previous: ProfilesState["areas"], port: ProfileAppPort, options: ApplyOptions): Promise<ApplyOutcome> {
   const outcome: ApplyOutcome = { applied: [], skipped: [], areas: { ...previous }, bots: [] };
@@ -102,36 +126,121 @@ export async function applyProfilePlan(planned: PlanOutput, previous: ProfilesSt
     }
     const hashes = { ...action.hashes };
     const fields: string[] = [];
-    let botId = action.botId;
+    const made = !action.botId;
+    const record = (change: Change, hash: string | null = change.hash) => {
+      if (hash === null) delete hashes[change.field];
+      else hashes[change.field] = hash;
+      fields.push(change.field);
+    };
+    let botId = action.botId!;
     let echo = action.echo;
-    try {
-      if (!botId) {
-        const made = await write("POST", "/api/bots", action.create);
-        botId = String(made.bot.id);
-        echo = made.bot;
+    const madeLines: ProfilePlanLine[] = [];
+    if (made) {
+      try {
+        const created = await createBot(action, write);
+        botId = String(created.bot.id);
+        echo = created.bot;
         Object.assign(hashes, appHashes(action.unmanaged, echo));
-        outcome.applied.push(action.createLine!);
+        madeLines.push(action.createLine!);
+        if (created.refused) {
+          hashes.approval = approvalHash(action.approval ?? created.refused.level, "ask");
+          madeLines.push({ ...action.createLine!, field: "approval",
+            text: `${action.name}: this app refused ${APPROVAL_LABEL[created.refused.level]} for it (${created.refused.why}), so it starts at Ask for approval` });
+        }
+      } catch (error) {
+        skip(action.createLine!, (error as Error).message);
+        for (const change of taking) skip(change.line, "the bot could not be made");
+        continue;
       }
-    } catch (error) {
-      skip(action.createLine!, (error as Error).message);
-      for (const change of taking) skip(change.line, "the bot could not be made");
-      continue;
     }
-    const patchChanges = taking.filter((change) => !change.skill && change.chief !== true);
-    for (const group of patchGroups(patchChanges)) {
+
+    /** Security: a new bot that would keep more access than its file gives is removed again. */
+    const unmake = async (change: Change, why: string): Promise<boolean> => {
+      if (!made) return false;
+      try {
+        await write("DELETE", `/api/bots/${enc(botId)}`);
+      } catch {
+        return false;
+      }
+      const skipped = new Set(outcome.skipped.map((entry) => entry.text));
+      skip(action.createLine!, `${why}, so ${action.name} was not made: it would have had more access than its file gives`);
+      for (const other of taking) if (other !== change && !skipped.has(other.line.text)) skip(other.line, "the bot could not be made");
+      skip(change.line, why);
+      return true;
+    };
+    const tooWide = (why: string) => `${why}, so ${action.name} still has more access than its file gives; narrow it in the bot's settings`;
+
+    /** Security: a refused approval falls to the highest lower level the app takes, never above the bot's current one. */
+    const setApproval = async (change: Change): Promise<"done" | "unmade"> => {
+      const target = change.set!.approval!;
+      const current = approvalModeFor(echo);
+      let why: string | undefined;
+      let at: ApprovalMode | undefined;
+      for (const level of approvalLadder(target, current)) {
+        if (level !== target && level === current) { at = level; break; }
+        try {
+          echo = (await write("PATCH", `/api/bots/${enc(botId)}`, { approvalMode: level, applyToAllThreads: true })).bot ?? echo;
+          at = level;
+          break;
+        } catch (error) {
+          why ??= (error as Error).message;
+        }
+      }
+      if (at === target) {
+        record(change);
+        if (!made) outcome.applied.push(change.line);
+        return "done";
+      }
+      if (at === undefined) {
+        if (await unmake(change, why!)) return "unmade";
+        skip(change.line, tooWide(why!));
+        return "done";
+      }
+      record(change, approvalHash(action.approval ?? target, at));
+      const how = made ? "starts at" : at === current ? "stays at" : "goes to";
+      const line = { ...change.line, kind: "change" as const, text: `${action.name}: this app refused ${APPROVAL_LABEL[target]} for it (${why}), so it ${how} ${approvalPhrase(at)}` };
+      (made ? madeLines : outcome.applied).push(line);
+      return "done";
+    };
+
+    const applyGroup = async (group: readonly Change[]) => {
       const patch = groupPatch(group, echo);
       try {
         if (Object.keys(patch).length) echo = (await write("PATCH", `/api/bots/${enc(botId)}`, patch)).bot ?? echo;
         for (const change of group) {
-          if (change.hash === null) delete hashes[change.field];
-          else hashes[change.field] = change.hash;
-          fields.push(change.field);
-          if (action.botId || change.access) outcome.applied.push(change.line);
+          record(change);
+          if (!made || change.access) outcome.applied.push(change.line);
         }
       } catch (error) {
         for (const change of group) skip(change.line, (error as Error).message);
       }
+    };
+    const patchChanges = taking.filter((change) => !change.skill && change.chief !== true && !narrows(change));
+    const plain = patchChanges.filter((change) => !change.access);
+    if (plain.length) await applyGroup(plain);
+    let unmade = false;
+    for (const change of taking.filter(narrows)) {
+      if (change.field === "approval") {
+        unmade = (await setApproval(change)) === "unmade";
+        if (unmade) break;
+        continue;
+      }
+      try {
+        const patch = groupPatch([change], echo);
+        if (Object.keys(patch).length) echo = (await write("PATCH", `/api/bots/${enc(botId)}`, patch)).bot ?? echo;
+        record(change);
+        if (!made) outcome.applied.push(change.line);
+      } catch (error) {
+        const why = (error as Error).message;
+        unmade = await unmake(change, why);
+        if (unmade) break;
+        skip(change.line, tooWide(why));
+      }
     }
+    if (unmade) continue;
+    outcome.applied.push(...madeLines);
+
+    for (const change of patchChanges.filter((candidate) => candidate.access)) await applyGroup([change]);
     for (const change of taking.filter((candidate) => candidate.skill)) {
       const op = change.skill!;
       const template = () => ({ name: op.name, description: op.description, warnings: [], source: `profile ${options.folderName}: ${op.file}`, text: op.text, enabled: op.enabled });
@@ -139,10 +248,8 @@ export async function applyProfilePlan(planned: PlanOutput, previous: ProfilesSt
         if (op.op === "remove" || op.op === "replace") await write("DELETE", `/api/bots/${enc(botId)}/skills/${enc(op.name)}`);
         if (op.op === "add" || op.op === "replace") await write("POST", `/api/bots/${enc(botId)}/skill-template`, template());
         if (op.op === "toggle") await write("PATCH", `/api/bots/${enc(botId)}/skills/${enc(op.name)}`, { enabled: op.enabled });
-        if (change.hash === null) delete hashes[change.field];
-        else hashes[change.field] = change.hash;
-        fields.push(change.field);
-        if (action.botId) outcome.applied.push(change.line);
+        record(change);
+        if (!made) outcome.applied.push(change.line);
       } catch (error) {
         skip(change.line, (error as Error).message);
       }

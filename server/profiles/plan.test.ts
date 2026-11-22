@@ -8,7 +8,7 @@ import type { ProfileChoice, ProfilePlanLine } from "../../shared/profile-plan.t
 import type { ProfileSource } from "../../shared/wire.ts";
 import { applyProfilePlan } from "./apply.ts";
 import { profileFilesHash } from "./load.ts";
-import { botSecretSlots, changedHereFields, decide, planProfiles, type AppView } from "./plan.ts";
+import { approvalFloor, botSecretSlots, changedHereFields, decide, planProfiles, type AppView } from "./plan.ts";
 import { withDepartmentRenamed, type ProfilesState } from "./state.ts";
 
 type Rec = Record<string, any>;
@@ -39,7 +39,7 @@ const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 
 /** An app in memory, answering the routes apply calls the way the server does. `thisComputer`: the desktop app with its
  * computer connected, where a new bot not on Auto works on this computer and Auto there needs the person's confirmation. */
-function fakeApp(seed: { bots?: Rec[]; sections?: string[]; mcpServers?: string[]; models?: string[]; thisComputer?: boolean } = {}) {
+function fakeApp(seed: { bots?: Rec[]; sections?: string[]; mcpServers?: string[]; models?: string[]; thisComputer?: boolean; codex?: boolean } = {}) {
   const app = {
     bots: (seed.bots ?? []) as Rec[],
     sections: seed.sections ?? [],
@@ -80,6 +80,9 @@ function fakeApp(seed: { bots?: Rec[]; sections?: string[]; mcpServers?: string[
         if (body.approvalMode === "auto" && bot.computer === "local" && body.acknowledgeLocalAuto !== true) {
           return { status: 400, body: { error: "Auto mode on this computer requires confirming the warning first (acknowledgeLocalAuto)" } };
         }
+        if (body.approvalMode === "edits" && (body.modelSelection ?? bot.modelSelection)?.instanceId === "codex") {
+          return { status: 400, body: { error: "Every thread's provider must support this approval level" } };
+        }
         const { applyToAllThreads: _all, requireAvailableModel: _require, ...fields } = body;
         Object.assign(bot, fields);
         return { status: 200, body: { bot } };
@@ -96,7 +99,8 @@ function fakeApp(seed: { bots?: Rec[]; sections?: string[]; mcpServers?: string[
   const view = (): AppView => ({
     bots: app.bots, sections: app.sections, briefs: app.briefs,
     skills: Object.fromEntries(Object.entries(app.skills).map(([id, skills]) => [id, Object.entries(skills).map(([name, skill]) => ({ name, enabled: skill.enabled, sha256: sha(skill.text) }))])),
-    instances: [{ instanceId: "claude", models: seed.models ?? ["claude-sonnet-5-5", "claude-haiku-5"] }],
+    instances: [{ instanceId: "claude", driverKind: "claudeAgent", models: seed.models ?? ["claude-sonnet-5-5", "claude-haiku-5"] },
+      ...(seed.codex ? [{ instanceId: "codex", driverKind: "codex", models: ["gpt-5.5"] }] : [])],
     mcpServers: seed.mcpServers ?? ["notion"],
   });
   const plan = (profiles = folder(), options: { choices?: Record<string, ProfileChoice>; prune?: boolean } = {}) =>
@@ -501,5 +505,170 @@ describe("planProfiles", () => {
     expect(kinds(planned.plan.lines, "note")).toContain("Analista BI: claude here offers no model claude-sonnet-5-5, so the bot uses this app's default model");
     const create = (planned.actions.find((action) => action.kind === "bot" && action.id === "bi/analyst") as Rec).create;
     expect(create).not.toHaveProperty("modelSelection");
+  });
+});
+
+describe("access floor", () => {
+  const refuseApproval = (refused: (body: Rec) => boolean, why = "Every thread's provider must support this approval level") =>
+    (method: string, path: string, body: Rec) => (method === "PATCH" && /^\/api\/bots\/[^/]+$/.test(path) && refused(body) ? why : null);
+  /** A bot left at Full access with no approval stored, as a bot made at the app's default before its level was set. */
+  const leftAtFull = (bot: Rec) => {
+    bot.approvalMode = "full";
+    delete bot.profileSource.hashes.approval;
+  };
+  const changes = (lines: readonly ProfilePlanLine[]) => lines.filter((line) => ["add", "change", "access", "conflict"].includes(line.kind)).map((line) => line.text);
+
+  it("is the highest level the engine runs at or below the file's, and the file's own level when the engine is unknown", () => {
+    expect(approvalFloor("edits", "codex")).toBe("ask");
+    expect(approvalFloor("edits", "claudeAgent")).toBe("edits");
+    expect(approvalFloor("full", "codex")).toBe("full");
+    expect(approvalFloor("edits", undefined)).toBe("edits");
+  });
+
+  it("makes a new bot at Ask when its engine has no Accept edits, says so, and the next plan has nothing to do", async () => {
+    const { app, plan, apply, bot } = fakeApp({ codex: true });
+    const first = plan();
+    expect(kinds(first.plan.lines, "add")).toContain("Adds Closer to area Sales (Sales follow-up · codex/gpt-5.5 · Ask)");
+    expect(kinds(first.plan.lines, "note")).toContain("Closer: Accept edits isn't available for its AI here, so it starts at Ask for approval");
+    expect((first.actions.find((action) => action.kind === "bot" && action.id === "sales/closer") as Rec).create.settings).toEqual({ approvalMode: "ask" });
+    const { outcome } = await apply();
+    expect(outcome.skipped).toEqual([]);
+    expect(bot("sales/closer")).toMatchObject({ approvalMode: "ask", modelSelection: { instanceId: "codex" } });
+    expect(app.calls.filter((call) => call.startsWith("PATCH /api/bots/bot-3"))).not.toContain(expect.stringContaining("approval"));
+    const second = plan().plan;
+    expect(changes(second.lines)).toEqual([]);
+    expect(second.noChanges).toBe(true);
+    expect(kinds(second.lines, "note")).toContain("Closer: Accept edits isn't available for its AI here, so it stays at Ask for approval");
+    expect(changedHereFields(bot("sales/closer").profileSource.hashes, bot("sales/closer"))).toEqual([]);
+  });
+
+  it("lowers an existing bot on Full access to Ask, never leaves it wider, and then stops offering the change", async () => {
+    const { plan, apply, bot } = fakeApp({ codex: true });
+    await apply();
+    leftAtFull(bot("sales/closer"));
+    const planned = plan().plan;
+    expect(changes(planned.lines)).toEqual(["Closer: approval Full access → Ask"]);
+    expect(kinds(planned.lines, "note")).toContain("Closer: Accept edits isn't available for its AI here, so it goes to Ask for approval");
+    expect((await apply()).outcome.skipped).toEqual([]);
+    expect(bot("sales/closer").approvalMode).toBe("ask");
+    expect(plan().plan.noChanges).toBe(true);
+  });
+
+  it("tries Accept edits again once the file moves the bot to an engine that has it", async () => {
+    const { plan, apply, bot } = fakeApp({ codex: true });
+    await apply();
+    const claude = folder({ "areas/sales/bots/closer.md": withField("model", "claude/claude-sonnet-5-5") });
+    expect(changes(plan(claude).plan.lines)).toEqual(["Closer: model codex/gpt-5.5 → claude/claude-sonnet-5-5", "Closer: approval Ask → Accept edits"]);
+    expect((await apply(claude)).outcome.skipped).toEqual([]);
+    expect(bot("sales/closer").approvalMode).toBe("edits");
+  });
+
+  it("starts a new bot at Ask when the app refuses Accept edits after the plan, and remembers it instead of offering it again", async () => {
+    const { app, plan, apply, bot } = fakeApp();
+    app.refuse = refuseApproval((body) => body.approvalMode === "edits");
+    const { outcome } = await apply();
+    expect(outcome.skipped).toEqual([]);
+    expect(outcome.applied.map((line) => line.text)).toContain(
+      "Closer: this app refused Accept edits for it (Every thread's provider must support this approval level), so it starts at Ask for approval");
+    expect(bot("sales/closer").approvalMode).toBe("ask");
+    const next = plan().plan;
+    expect(changes(next.lines)).toEqual([]);
+    expect(kinds(next.lines, "note")).toContain("Closer: this app refused Accept edits for it, so it stays at Ask for approval");
+    expect(changedHereFields(bot("sales/closer").profileSource.hashes, bot("sales/closer"))).toEqual([]);
+    app.refuse = null;
+    const ask = plan(folder({ "areas/sales/bots/closer.md": withField("approval", "ask") })).plan;
+    expect(ask.noChanges).toBe(true);
+    expect(ask.lines.filter((line) => line.field === "approval")).toEqual([]);
+    bot("sales/closer").approvalMode = "full";
+    expect(kinds(plan().plan.lines, "changed-here")).toEqual(["Closer: approval changed in this app to Full access; that change stays"]);
+  });
+
+  it("lowers an existing bot to the highest level the app takes below a refused one, and says so", async () => {
+    const { app, plan, apply, bot } = fakeApp();
+    await apply();
+    leftAtFull(bot("bi/analyst"));
+    app.refuse = refuseApproval((body) => body.approvalMode === "auto");
+    const { outcome } = await apply();
+    expect(outcome.skipped).toEqual([]);
+    expect(outcome.applied.map((line) => line.text)).toContain(
+      "Analista BI: this app refused Auto for it (Every thread's provider must support this approval level), so it goes to Accept edits");
+    expect(bot("bi/analyst").approvalMode).toBe("edits");
+    expect(changes(plan().plan.lines)).toEqual([]);
+  });
+
+  it("says plainly when no lower level is taken either, and offers the change again", async () => {
+    const { app, plan, apply, bot } = fakeApp();
+    await apply();
+    leftAtFull(bot("bi/analyst"));
+    app.refuse = refuseApproval((body) => body.approvalMode !== undefined, "A thread on Custom approval can only leave it from the packaged desktop app");
+    const { outcome } = await apply();
+    expect(outcome.skipped).toEqual([expect.objectContaining({ text: "Analista BI: approval Full access → Auto",
+      reason: "A thread on Custom approval can only leave it from the packaged desktop app, so Analista BI still has more access than its file gives; narrow it in the bot's settings" })]);
+    expect(bot("bi/analyst").approvalMode).toBe("full");
+    expect(changes(plan().plan.lines)).toEqual(["Analista BI: approval Full access → Auto"]);
+  });
+
+  it("makes a new bot at Ask when the app refuses its level at creation", async () => {
+    const { app, plan, apply, bot } = fakeApp();
+    app.refuse = (method, path, body) => (method === "POST" && path === "/api/bots" && body.settings?.approvalMode === "auto" ? "Full access is set by the operator here" : null);
+    const { outcome } = await apply();
+    expect(outcome.skipped).toEqual([]);
+    expect(outcome.applied.map((line) => line.text)).toContain("Analista BI: this app refused Auto for it (Full access is set by the operator here), so it starts at Ask for approval");
+    expect(bot("bi/analyst")).toMatchObject({ approvalMode: "ask", chiefOfStaff: true });
+    app.refuse = null;
+    expect(changes(plan().plan.lines)).toEqual([]);
+  });
+
+  it("does not make a new bot whose narrower tools the app refuses", async () => {
+    const { app, apply } = fakeApp();
+    app.refuse = (method, _path, body) => (method === "PATCH" && body.toolsOff !== undefined ? "tool groups are busy" : null);
+    const { outcome } = await apply();
+    expect(app.bots.map((candidate) => candidate.name).sort()).toEqual(["Analista BI", "Closer"]);
+    const skipped = outcome.skipped.map((line) => [line.text, line.reason]);
+    expect(skipped[0]).toEqual(["Adds Reporter to area BI (Weekly report writer · claude/claude-sonnet-5-5 · Ask)",
+      "tool groups are busy, so Reporter was not made: it would have had more access than its file gives"]);
+    expect(skipped.at(-1)).toEqual(["Reporter: tool groups off images", "tool groups are busy"]);
+    expect(skipped.slice(1, -1).every(([, reason]) => reason === "the bot could not be made")).toBe(true);
+    expect(outcome.applied.map((line) => line.text)).not.toContain("Adds Reporter to area BI (Weekly report writer · claude/claude-sonnet-5-5 · Ask)");
+    expect(outcome.bots.map((entry) => entry.id)).not.toContain("bi/reporter");
+  });
+
+  it("says an existing bot keeps more access when the app refuses a narrower setting, and applies the rest", async () => {
+    const { app, plan, apply, bot } = fakeApp();
+    await apply(folder({ "areas/bi/bots/reporter.md": withField("toolsOff", "[]") }));
+    app.refuse = (method, _path, body) => (method === "PATCH" && body.toolsOff !== undefined ? "tool groups are busy" : null);
+    const { outcome } = await apply(folder({ "areas/bi/bots/reporter.md": (text) => text.replace("in plain words.", "in short words.") }));
+    expect(outcome.skipped).toEqual([expect.objectContaining({ text: "Reporter: tool groups off none → images",
+      reason: "tool groups are busy, so Reporter still has more access than its file gives; narrow it in the bot's settings" })]);
+    expect(bot("bi/reporter").toolsOff ?? []).toEqual([]);
+    expect(bot("bi/reporter").soul).toContain("in short words.");
+    app.refuse = null;
+    expect(changes(plan().plan.lines)).toContain("Reporter: tool groups off none → images");
+  });
+
+  const narrowings: Array<[string, string, Record<string, string | ((text: string) => string)>, Record<string, string | ((text: string) => string)>]> = [
+    ["toolScope", "Analista BI: tool selection", {}, { "areas/bi/area.md": (text) => text.replace('"mcp:edu:*", "mcp:notion:*"', '"mcp:edu:*"') }],
+    ["mcpServers", "Analista BI: MCP servers drive, notion → notion", { "org.md": (text) => text.replace("mcpServers: [notion]", "mcpServers: [drive, notion]") }, {}],
+    ["connectorTools", "Closer: connected apps", {}, { "areas/sales/bots/closer.md": (text) => text.replace(", GMAIL_CREATE_EMAIL_DRAFT]", "]") }],
+    ["eduBrain", "Analista BI: Edu brain the shared brain of area bi → off", {}, { "areas/bi/bots/analyst.md": withField("eduBrain", "{ mode: off }") }],
+    ["eduCrew", "Analista BI: Edu crew on → off", {}, { "areas/bi/bots/analyst.md": withField("eduCrew", "false") }],
+  ];
+  it.each(narrowings)("lowers %s in its own write, and says the bot keeps more access when the app refuses it", async (key, text, before, after) => {
+    const { app, plan, apply } = fakeApp({ mcpServers: ["drive", "notion"] });
+    await apply(folder(before));
+    const narrower = folder({ ...after, "areas/bi/bots/analyst.md": (source) => {
+      const edited = typeof after["areas/bi/bots/analyst.md"] === "function" ? (after["areas/bi/bots/analyst.md"] as (text: string) => string)(source) : source;
+      return edited.replace("Check every number", "Check each number");
+    } });
+    const planned = plan(narrower).plan;
+    expect(changes(planned.lines).find((line) => line.startsWith(text))).toBeDefined();
+    expect(kinds(planned.lines, "access")).toEqual([]);
+    app.refuse = (method, _path, body) => (method === "PATCH" && body[key] !== undefined ? "busy" : null);
+    const { outcome } = await apply(narrower);
+    expect(outcome.skipped.find((line) => line.text.startsWith(text))).toBeDefined();
+    for (const line of outcome.skipped) expect(line.reason).toMatch(/^busy, so .+ still has more access than its file gives/);
+    expect(outcome.applied.map((line) => line.text)).toContain("Analista BI: instructions 1 line changed");
+    app.refuse = null;
+    expect(changes(plan(narrower).plan.lines).find((line) => line.startsWith(text))).toBeDefined();
   });
 });

@@ -111,6 +111,7 @@ export function createProfilesRoutes(deps: ProfilesRouteDeps): RouteHandler {
     for (const bot of bots.filter((candidate) => candidate.profileSource)) skills[bot.id] = (await read(`/api/bots/${enc(bot.id)}/skills`)).skills ?? [];
     const instances = ((await read("/api/instances")).instances ?? []).map((instance: Rec) => ({
       instanceId: String(instance.instanceId),
+      ...(typeof instance.driverKind === "string" ? { driverKind: instance.driverKind } : {}),
       models: [instance.models?.default, ...(instance.models?.options ?? []).map((option: Rec) => option.id)].filter((id): id is string => typeof id === "string"),
     }));
     return { bots, sections, briefs, skills, instances, mcpServers: deps.mcpServerNames() };
