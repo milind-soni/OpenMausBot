@@ -24,6 +24,7 @@ import { useBotEditor } from "../bot-settings/BotEditorContext";
 import { inputCls } from "../bot-settings/field";
 import { ConflictNotice } from "../bot-settings/MemorySection";
 import { OrgSkillsCard } from "../bot-settings/OrgSkillsCard";
+import { SavedWorkflowsCard } from "../skill-burger/SavedWorkflowsCard";
 import { SkillReviewDialog, skillSwitchOn, useManagedSkills, type ManagedSkill } from "../bot-settings/SkillsSection";
 import { useBotApps, type BotApp } from "../bot-settings/useBotApps";
 import { useChoosesVisibility, VisibilitySection } from "../bot-settings/VisibilitySection";
@@ -465,6 +466,7 @@ export function SkillsPage({ bot }: PageContext) {
 
   return (
     <>
+      <SavedWorkflowsCard />
       <Card>
         {skills.loading ? (
           <NoteRow>{t("skills.loading")}</NoteRow>

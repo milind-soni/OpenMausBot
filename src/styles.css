@@ -3820,3 +3820,36 @@ button:disabled.bg-danger {
     transition: none !important;
   }
 }
+
+/* Skill Burger. The fun is in shape and motion: buns with rounder outer corners, three sesame dots, layers that settle
+   in with a soft overshoot (the one place --ease-settle is used), and a single press of the bottom bun when the run is
+   saved. Nothing loops but the running layer's sheen, and reduced motion turns every bit of it off. */
+.skill-burger { --ease-settle: cubic-bezier(0.34, 1.4, 0.64, 1); }
+.burger-sesame {
+  position: absolute;
+  top: 6px;
+  inset-inline-start: 50%;
+  width: 26px;
+  height: 4px;
+  transform: translateX(-50%);
+  background:
+    radial-gradient(circle, color-mix(in srgb, var(--color-ink) 18%, transparent) 1.5px, transparent 2px) 0 50% / 9px 4px repeat-x;
+  pointer-events: none;
+}
+[dir="rtl"] .burger-sesame { transform: translateX(50%); }
+@keyframes burger-drop {
+  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+.burger-layer { animation: burger-drop 220ms var(--ease-settle) both; }
+@keyframes burger-press {
+  0%, 100% { transform: none; }
+  45% { transform: translateY(-3px); }
+}
+.burger-stacked .burger-bun-bottom { animation: burger-press 240ms cubic-bezier(0.22, 1, 0.36, 1); }
+.burger-stacked .burger-bun-bottom > * { animation: fade-in 200ms ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .burger-layer, .burger-stacked .burger-bun-bottom, .burger-stacked .burger-bun-bottom > * { animation: none; }
+}
+:root[data-reduced-motion="true"] :is(.burger-layer, .burger-stacked .burger-bun-bottom, .burger-stacked .burger-bun-bottom > *) { animation: none; }
+:root[data-reduced-motion="true"] .skill-burger .thinking-sheen { display: none; }

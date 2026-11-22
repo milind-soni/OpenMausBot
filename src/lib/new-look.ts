@@ -4,7 +4,6 @@ import { CHAT_WIDTH_KEY } from "./chat-width";
 import { FONT_KEY } from "./fonts";
 import { ADVANCED_MODE_KEY, setAdvancedMode, settleAdvancedModeDefault } from "./interface-mode";
 import { hasPriorRun } from "./prior-run";
-import { RUN_CARD_KEY } from "./run-card-preferences";
 import { SIMPLE_ONLY } from "./simple-only";
 import { SHOW_THREADS_KEY } from "./thread-preferences";
 import { WEB_PANELS_KEY } from "./web-panel-preferences";
@@ -15,7 +14,7 @@ export const NEW_LOOK_KEY = "omb-new-look";
 
 /** Device settings only Advanced mode could change: each goes back to its default once. The sidebar's are spelled out,
  * since importing its module would put zod in the first page's bundle. */
-export const ADVANCED_ONLY_PREFS = [FONT_KEY, CHAT_WIDTH_KEY, SHOW_THREADS_KEY, RUN_CARD_KEY, WEB_PANELS_KEY,
+export const ADVANCED_ONLY_PREFS = [FONT_KEY, CHAT_WIDTH_KEY, SHOW_THREADS_KEY, "omb-show-run-card", WEB_PANELS_KEY,
   "openmausbot.sidebarToolsLayout", "openmausbot.pinnedCircles", "openmausbot.universalPins"];
 
 /** "due" once a browser that was on Advanced is put back on it, until the word that Advanced is back is closed ("seen"). */
