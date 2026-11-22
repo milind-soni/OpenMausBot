@@ -15,12 +15,15 @@ function appFiles(): string[] {
     .filter((file) => file !== "src/lib/relay-server.ts" && !file.endsWith("-preview.tsx"));
 }
 
+/** A call to fetch, or fetch handed on as a value (`fetchImpl = fetch`, `run(fetch)`); not `.fetch(` or a `fetch:` key. */
+const BARE_FETCH = /(?<![\w$.])fetch\(|[=(,:]\s*fetch\b(?![\w$.(]|\s*:)/;
+
 describe("app requests to its own server", () => {
   it("all go through serverFetch, never a bare fetch", () => {
     const bare: string[] = [];
     for (const file of appFiles()) {
       readFileSync(new URL(file, ROOT), "utf8").split("\n").forEach((line, index) => {
-        if (/(?<![\w$.])fetch\(/.test(line.replace(/\/\/.*$/, ""))) bare.push(`${file}:${index + 1}`);
+        if (BARE_FETCH.test(line.replace(/\/\/.*$/, ""))) bare.push(`${file}:${index + 1}`);
       });
     }
     expect(bare).toEqual([]);
