@@ -995,6 +995,12 @@ describe("ChatMarkdown attachments", () => {
       expect(render(true, filePath, null)).toContain(`>${filePath}</code>`);
     });
 
+    it("keeps the link usable in a browser, where nothing probes it", () => {
+      const html = render(false, filePath, null);
+      expect(html).not.toContain("animate-spin");
+      expect(html).not.toContain('disabled=""');
+    });
+
     describe("a backticked folder path with a space", () => {
       const folder = "D:\\Claude Works\\v3\\";
       const text = `The videos are in \`${folder}\``;

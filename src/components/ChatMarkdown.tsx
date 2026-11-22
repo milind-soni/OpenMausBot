@@ -364,12 +364,14 @@ function LocalFileLink({ filePath, shownPath, shownName, name, source, children,
   const preview = useHtmlPreview(filePath, shownName, message);
   const revealMenu = useRevealOriginalMenu();
   const fileOutsideWorkspace = useMessageFileOutsideWorkspace(filePath, message);
-  const revealOnClick = fileOutsideWorkspace === true && canRevealHostPath(shownPath) && typeof window !== "undefined" && Boolean(window.ogb?.revealInFolder) && !window.ogb?.remoteClient?.active;
+  const revealHere = typeof window !== "undefined" && Boolean(window.ogb?.revealInFolder) && !window.ogb?.remoteClient?.active;
+  const revealOnClick = fileOutsideWorkspace === true && canRevealHostPath(shownPath) && revealHere;
   const [revealProblem, setRevealProblem] = useState("");
   if (!message) {
     return <span title={t("chat.file.legacy")} className="break-words text-ink-secondary">{children}</span>;
   }
-  const probing = canRevealHostPath(shownPath) && fileOutsideWorkspace === null;
+  // Only the desktop app probes; elsewhere the hook stays null and the link must stay usable.
+  const probing = revealHere && canRevealHostPath(filePath) && fileOutsideWorkspace === null;
   const pathAction = async () => {
     if (preview.opens) {
       preview.show();
