@@ -211,6 +211,15 @@ describe("calling a teammate's Bot API", () => {
     expect(await lookupWith([{ address: "100.64.1.2", family: 4 }])(false)).toEqual({ error: null, address: "100.64.1.2" });
   });
 
+  it("never sends the key to a saved link-local, metadata or reserved IP literal, which connects without a lookup", async () => {
+    let calls = 0;
+    const fetch = (async () => { calls += 1; return new Response("{}"); }) as typeof globalThis.fetch;
+    for (const base of ["http://100.100.100.200", "http://169.254.169.254", "http://[fd00:ec2::254]", "http://[64:ff9b::a9fe:a9fe]"]) {
+      expect(await readRemote(teammate(base), "t1", { fetch })).toEqual({ ok: false, problem: "unreachable", detail: `${base.slice(7).replace(/^\[|\]$/g, "")} is a link-local, metadata or reserved address, not another server` });
+    }
+    expect(calls).toBe(0);
+  });
+
   it("calls a teammate saved by name through the checked lookup", async () => {
     const base = await listen((_req, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ reply: "hi", thread: "t1" })); });
     expect(await sendToRemote(teammate(base.replace("127.0.0.1", "localhost")), { message: "x", wait: 0 })).toEqual({ ok: true, answer: { reply: "hi", thread: "t1" } });
