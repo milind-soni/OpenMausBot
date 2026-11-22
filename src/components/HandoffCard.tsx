@@ -11,7 +11,7 @@ import type { Bot, Message } from "@/state/store";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { ASK_DARK_PRIMARY, ASK_QUIET_BUTTON, ASK_SECONDARY_BUTTON, AskCard, AskError, returnFocusToComposer } from "./AskCard";
 import { ELEVATED_CARD } from "./elevated";
-import { CookieImportDialog } from "./browser/CookieImportDialog";
+import { CookieImportDialog } from "./browser/cookie-import";
 import { HandoffPreview } from "./HandoffPreview";
 import { HandoffSuggestion, useSignInImport, useSuggestedApp } from "./HandoffSuggestion";
 

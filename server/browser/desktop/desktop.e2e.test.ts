@@ -2,10 +2,12 @@
 // route sees the window, its clicks and keys reach the page only while the person holds the browser, and the bot's own
 // clicks and typing still work on the same page once it is handed back. Runs where OMB_CDP_CHROME (or OMB_CDP_E2E=1) names
 // a Chrome and Xvnc is installed; skipped elsewhere. OMB_DESKTOP_MEASURE=1 also prints memory and CPU against headless.
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { connect, type AddressInfo, type Socket } from "node:net";
 import { dirname, join } from "node:path";
+import { crc32, deflateSync } from "node:zlib";
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
@@ -13,6 +15,8 @@ import { WebSocket } from "ws";
 import { hostTimeout } from "../../testing/host-timeout.ts";
 import { FixtureServer } from "../cdp/testing/fixtures.ts";
 import { CHROME } from "../cdp/testing/real-chrome.ts";
+import { listProcesses, isBrowserProcess, sweep, userDataDirOf } from "../chrome/processes.ts";
+import { browserRoot, profileDir } from "../chrome/profile.ts";
 import { BROWSER_CONTROL_REFUSAL } from "../control.ts";
 import type { BrowserTarget } from "../service.ts";
 import { startService, until, type RealService } from "../testing/real-service.ts";
@@ -29,7 +33,8 @@ const PAGE = `<!doctype html><title>desk</title><style>body{margin:0}</style>
 <button id="b" style="position:absolute;left:100px;top:100px;width:200px;height:80px" onclick="document.body.dataset.clicks=String(Number(document.body.dataset.clicks||0)+1)">B</button>
 <input id="f" aria-label="Field" style="position:absolute;left:100px;top:250px;width:300px;height:40px">
 <select id="s" aria-label="Choice" style="position:absolute;left:100px;top:350px;width:200px;height:30px"><option>one</option><option>two</option><option>three</option></select>
-<input id="up" type="file" aria-label="Upload" style="position:absolute;left:100px;top:420px;width:300px;height:40px">`;
+<input id="up" type="file" aria-label="Upload" style="position:absolute;left:100px;top:420px;width:300px;height:40px">
+<script>addEventListener("keydown", (event) => { document.body.dataset.keys = (document.body.dataset.keys ?? "") + event.key; });</script>`;
 
 /** A minimal RFB 3.8 client over the desktop route: the handshake, then raw messages. */
 class RfbClient {
@@ -100,6 +105,61 @@ class RfbClient {
 
   send(bytes: Buffer): void {
     this.#ws.send(bytes);
+  }
+
+  /** The display's pixels in a rectangle as RGB rows, read raw in the server's own format (Xvnc: 32 bits, red at bit
+   * 16). Xvnc answers a full request with the screen layout first when the client takes it, so this asks again. */
+  async region(x: number, y: number, width: number, height: number): Promise<Buffer> {
+    this.#buffer = Buffer.alloc(0);
+    const ask = (incremental: number) => { const m = Buffer.alloc(10); m[0] = 3; m[1] = incremental; m.writeUInt16BE(x, 2); m.writeUInt16BE(y, 4); m.writeUInt16BE(width, 6); m.writeUInt16BE(height, 8); this.send(m); };
+    const out = Buffer.alloc(width * height * 3);
+    ask(0);
+    for (let updates = 0; updates < 6; updates++) {
+      const head = await this.read(4);
+      let pixels = false;
+      for (let rect = 0; rect < head.readUInt16BE(2); rect++) {
+        const r = await this.read(12);
+        const [rx, ry, w, h, encoding] = [r.readUInt16BE(0), r.readUInt16BE(2), r.readUInt16BE(4), r.readUInt16BE(6), r.readInt32BE(8)];
+        if (encoding === -308) { await this.read(16 * (await this.read(4))[0]!); continue; }
+        if (encoding !== 0) continue;
+        const data = await this.read(w * h * 4);
+        pixels = true;
+        for (let row = 0; row < h; row++) for (let column = 0; column < w; column++) {
+          const [ox, oy] = [rx + column - x, ry + row - y];
+          if (ox < 0 || oy < 0 || ox >= width || oy >= height) continue;
+          const from = (row * w + column) * 4, to = (oy * width + ox) * 3;
+          [out[to], out[to + 1], out[to + 2]] = [data[from + 2]!, data[from + 1]!, data[from]!];
+        }
+      }
+      if (pixels) return out;
+      ask(1);
+    }
+    throw new Error("the display sent no picture");
+  }
+
+  /** The display's colour at one point as "r,g,b". */
+  async pixel(x: number, y: number): Promise<string> {
+    return [...await this.region(x, y, 1, 1)].join(",");
+  }
+
+  /** The whole display as a PNG. */
+  async png(): Promise<Buffer> {
+    const rgb = await this.region(0, 0, this.width, this.height);
+    const rows = Buffer.alloc((this.width * 3 + 1) * this.height);
+    for (let row = 0; row < this.height; row++) rgb.copy(rows, row * (this.width * 3 + 1) + 1, row * this.width * 3, (row + 1) * this.width * 3);
+    const chunk = (type: string, data: Buffer) => {
+      const typed = Buffer.concat([Buffer.from(type, "latin1"), data]);
+      const length = Buffer.alloc(4), check = Buffer.alloc(4);
+      length.writeUInt32BE(data.length);
+      check.writeUInt32BE(crc32(typed));
+      return Buffer.concat([length, typed, check]);
+    };
+    const header = Buffer.alloc(13);
+    header.writeUInt32BE(this.width, 0);
+    header.writeUInt32BE(this.height, 4);
+    header[8] = 8;
+    header[9] = 2;
+    return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", header), chunk("IDAT", deflateSync(rows)), chunk("IEND", Buffer.alloc(0))]);
   }
 
   click(x: number, y: number): void {
@@ -211,11 +271,95 @@ function usedMemory(): number {
   return Math.round((field("MemTotal") - field("MemAvailable")) / 1024);
 }
 
+/** Where pictures of the display are kept for a failed CI run to upload (DESKTOP_E2E_SHOTS); nowhere when unset. */
+async function keepPicture(desk: RfbClient, name: string): Promise<string> {
+  const folder = process.env.DESKTOP_E2E_SHOTS;
+  if (!folder) return "not kept (DESKTOP_E2E_SHOTS unset)";
+  try {
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, `${name}.png`), await desk.png());
+    return `${name}.png`;
+  } catch (error) {
+    return `not kept: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+/**
+ * How long until the display shows the page's own colour at a point, or null if it never did. A window just started can
+ * stay unpainted after the bot's call returned (seen on the runner's Google Chrome: one flat grey rectangle), and a
+ * click sent into it is lost.
+ */
+async function untilPainted(desk: RfbClient, at: { x: number; y: number }, colour: string, timeoutMs: number): Promise<number | null> {
+  const began = Date.now();
+  for (;;) {
+    if (await desk.pixel(at.x, at.y).catch(() => null) === colour) return Date.now() - began;
+    if (Date.now() - began > timeoutMs) return null;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
+/** "r,g,b" from a computed CSS colour such as "rgb(239, 239, 239)". */
+const rgbOf = (css: string) => (/rgba?\((\d+), (\d+), (\d+)/.exec(css) ?? []).slice(1, 4).join(",");
+
 /** What a display's browser shows besides the page, for a failure message: its targets, and the page's focus and size. */
-async function shownState(profile: { run: { browser: { connection: { root: { send<T>(method: string): Promise<T> } } } } | null; active(): { page: { evaluate(expression: string, options: { world: "page" }): Promise<unknown> } } | null }): Promise<string> {
+type Shown = { run: { browser: { connection: { root: { send<T>(method: string, params?: Record<string, unknown>): Promise<T> }; session(id: string): { send<T>(method: string, params?: Record<string, unknown>): Promise<T> } | undefined } } } | null; active(): { page: { evaluate(expression: string, options: { world: "page" }): Promise<unknown> } } | null };
+
+/** What sits at a point of the display, for a failure message: the display's own pixel there, what the page has there,
+ * and whether Chrome's address bar dropdown (a window of its own over the page) is showing. */
+/** Chrome's address bar suggestions box, a page of Chrome's own in a window over the page: whether it shows, and what. */
+async function omniboxPopups(profile: Shown): Promise<Array<{ url: string; seen?: { visibility: string; size: [number, number]; at: [number, number]; text: string }; error?: string }>> {
+  const connection = profile.run?.browser.connection;
+  const all = await connection?.root.send<{ targetInfos: Array<{ targetId: string; type: string; url: string }> }>("Target.getTargets", { filter: [{}] }).catch(() => null);
+  const popups: Array<{ url: string; seen?: { visibility: string; size: [number, number]; at: [number, number]; text: string }; error?: string }> = [];
+  for (const info of all?.targetInfos.filter((target) => target.type === "page" && target.url.startsWith("chrome://omnibox-popup")) ?? []) {
+    const attached = await connection!.root.send<{ sessionId: string }>("Target.attachToTarget", { targetId: info.targetId, flatten: true }).catch(() => null);
+    const session = attached ? connection!.session(attached.sessionId) : undefined;
+    try {
+      if (!session) throw new Error("not attached");
+      // The driver evaluates only in an isolated world of a page's own.
+      const { frameTree } = await session.send<{ frameTree: { frame: { id: string } } }>("Page.getFrameTree");
+      const { executionContextId } = await session.send<{ executionContextId: number }>("Page.createIsolatedWorld", { frameId: frameTree.frame.id, worldName: "omb-e2e-diagnostic" });
+      const answer = await session.send<{ result: { value?: string } }>("Runtime.evaluate", { expression: "JSON.stringify({ visibility: document.visibilityState, size: [innerWidth, innerHeight], at: [screenX, screenY], text: document.body ? document.body.innerText.slice(0, 120) : '' })", contextId: executionContextId, returnByValue: true });
+      popups.push({ url: info.url, seen: JSON.parse(answer.result.value ?? "null") });
+    } catch (error) {
+      popups.push({ url: info.url, error: error instanceof Error ? error.message : String(error) });
+    } finally {
+      if (attached) await connection!.root.send("Target.detachFromTarget", { sessionId: attached.sessionId }).catch(() => undefined);
+    }
+  }
+  return popups;
+}
+
+async function coveredAt(profile: Shown, desk: RfbClient, onDisplay: { x: number; y: number }, onPage: { x: number; y: number }): Promise<string> {
+  const shown = await desk.pixel(onDisplay.x, onDisplay.y).catch((error: unknown) => String(error));
+  // Without a cursor encoding Xvnc draws the pointer into the picture, its tip at the click point: up and left of it is
+  // still the button, and clear of the arrow.
+  const beside = await desk.pixel(onDisplay.x - 20, onDisplay.y - 20).catch((error: unknown) => String(error));
+  const page = await profile.active()?.page.evaluate(`(() => { const at = document.elementFromPoint(${onPage.x}, ${onPage.y}); return at ? at.id + " " + getComputedStyle(at).backgroundColor : "nothing"; })()`, { world: "page" }).catch((error: unknown) => String(error));
+  const connection = profile.run?.browser.connection;
+  const all = await connection?.root.send<{ targetInfos: Array<{ targetId: string; type: string; url: string }> }>("Target.getTargets", { filter: [{}] }).catch(() => null);
+  const popups = (await omniboxPopups(profile)).map((popup) => JSON.stringify(popup));
+  return JSON.stringify({ displayPixel: shown, displayPixelBesidePointer: beside, pageThere: page, targets: all?.targetInfos.map((target) => `${target.type} ${target.url}`), omniboxPopups: popups });
+}
+
+async function shownState(profile: Shown): Promise<string> {
   const targets = await profile.run?.browser.connection.root.send<{ targetInfos: Array<{ type: string; url: string; title: string }> }>("Target.getTargets").then((answer) => answer.targetInfos.map((info) => `${info.type} ${info.url} "${info.title}"`), (error: unknown) => [String(error)]);
   const page = await profile.active()?.page.evaluate("JSON.stringify({ focus: document.hasFocus(), visibility: document.visibilityState, inner: [innerWidth, innerHeight], outer: [outerWidth, outerHeight], screen: [screenX, screenY] })", { world: "page" }).catch((error: unknown) => String(error));
   return JSON.stringify({ targets, page });
+}
+
+/** The browser processes (no renderers or helpers) on one profile: a display's launch is bubblewrap with Chrome under
+ * it, both carrying the profile. */
+async function browsersOn(dataDir: string, key: string): Promise<number[]> {
+  const dir = profileDir(dataDir, key);
+  return ((await listProcesses()) ?? []).filter((listed) => isBrowserProcess(listed) && userDataDirOf(listed) === dir).map((listed) => listed.pid).sort((a, b) => a - b);
+}
+
+/** A pid nothing runs as any more. */
+function deadPid(): number {
+  const pid = spawnSync("true").pid;
+  if (!pid) throw new Error("could not start true");
+  return pid;
 }
 
 const xvncPid = (socket: string) => readdirSync("/proc").filter((entry) => /^\d+$/.test(entry)).map(Number).find((pid) => {
@@ -250,6 +394,7 @@ suite("a bot's browser on a private display", () => {
     real = await startService({
       display: (key) => displays.acquire(key, DESKTOP_SIZE, key === filesTarget.key ? [workspace] : []),
       displayFailed: (reason) => { displayFailures.push(reason); },
+      registry: true,
     });
     views = new DesktopViews({ desktop: (asked) => real.service.desktop(asked) });
     server = createServer();
@@ -301,8 +446,24 @@ suite("a bot's browser on a private display", () => {
     const desk = await RfbClient.connect(url());
     expect([desk.width, desk.height]).toEqual([DESKTOP_SIZE.width, DESKTOP_SIZE.height]);
     await desk.picture();
+    // The display as the person first sees it; a failed CI run uploads it.
+    await keepPicture(desk, "first-case-start");
 
     const button = await onScreen(200, 140);
+    // Up and left of the click point is still the button, and clear of the pointer Xvnc draws into the picture.
+    const beside = { x: button.x - 20, y: button.y - 20 };
+    const face = rgbOf(await read<string>("getComputedStyle(document.getElementById('b')).backgroundColor"));
+    const firstPaintMs = await untilPainted(desk, beside, face, 30_000);
+    console.log(JSON.stringify({ firstPaintMs, after: "the bot's open returned and a view connected" }));
+    if (firstPaintMs === null) {
+      // Whether input is what it waits for: one pointer move from the person holding it, and five seconds more.
+      await keepPicture(desk, "first-case-unpainted");
+      await profile.control.take(person);
+      desk.send(Buffer.from([5, 0, 0, 10, 0, 10]));
+      const afterInput = await untilPainted(desk, beside, face, 5_000);
+      await keepPicture(desk, "first-case-after-input");
+      throw new Error(`the display never showed the page within 30 s of the bot's open without input; ${afterInput === null ? "nor within 5 s of a pointer move" : `it did ${afterInput} ms after a pointer move`}; what the display's browser showed: ${await shownState(profile)}`);
+    }
     desk.click(button.x, button.y);
     await desk.picture();
     expect(await read<string | undefined>("document.body.dataset.clicks")).toBeUndefined();
@@ -312,7 +473,7 @@ suite("a bot's browser on a private display", () => {
     expect(real.text(await real.call(target, "agent_browser_snapshot"))).toContain('button "B"');
     desk.click(button.x, button.y);
     expect(await until(() => read<string | undefined>("document.body.dataset.clicks"), (value) => value === "1").catch(async (error: unknown) => {
-      throw new Error(`${error instanceof Error ? error.message : String(error)}; what the display's browser showed: ${await shownState(profile)}`);
+      throw new Error(`${error instanceof Error ? error.message : String(error)}; what the display's browser showed: ${await shownState(profile)}; at the click (${button.x}, ${button.y}): ${await coveredAt(profile, desk, button, { x: 200, y: 140 })}; picture: ${await keepPicture(desk, "first-case-click-missed")}`);
     })).toBe("1");
     const field = await onScreen(250, 270);
     desk.click(field.x, field.y);
@@ -421,7 +582,7 @@ suite("a bot's browser on a private display", () => {
         const text = await tab.page.evaluate("document.documentElement.innerText", { world: "page" }).catch(() => "");
         return typeof text === "string" ? text : "";
       };
-      for (const address of ["file:///etc/passwd", "chrome://settings", "chrome://extensions", "chrome://settings/manageProfile", "chrome://inspect", "devtools://devtools/bundled/inspector.html", `view-source:${page}`, "about:settings"]) {
+      for (const address of ["file:///etc/passwd", "chrome://settings", "chrome://extensions", "chrome://settings/manageProfile", "chrome://inspect", "devtools://devtools/bundled/inspector.html", `view-source:${page}`, "about:settings", "chrome://customize-chrome-side-panel.top-chrome"]) {
         // Each address in a new tab of its own, typed into Chrome's own address bar; the new tab page itself is allowed.
         const before = profile.tabs.list().length;
         desk.chord([CONTROL], 0x74);
@@ -463,6 +624,102 @@ suite("a bot's browser on a private display", () => {
       desk.close();
     }
   }, hostTimeout(180_000));
+
+  it("keeps its Chrome through the engine's minute sweep while a person watches and holds it", async () => {
+    expect((await real.call(target, "agent_browser_open", { url: page })).isError).toBeUndefined();
+    startedOnDisplay();
+    const profile = real.service.profiles().find((candidate) => candidate.key === target.key)!;
+    const launched = await browsersOn(real.dataDir, target.key);
+    // bubblewrap, which the launch registered, and the Chrome it started.
+    expect(launched).toHaveLength(2);
+    expect(launched).toContain(profile.run!.opened.pid);
+    const desk = await RfbClient.connect(url());
+    await desk.picture();
+    await profile.control.take(person);
+    for (let tick = 1; tick <= 3; tick++) {
+      const report = await sweep({ root: browserRoot(real.dataDir), registry: real.registry! });
+      expect(report.killed, `sweep ${tick}`).toEqual([]);
+    }
+    expect(await browsersOn(real.dataDir, target.key)).toEqual(launched);
+    expect(profile.control.owner).toBe(person);
+    const button = await onScreen(200, 140);
+    const clicks = Number(await read<string | undefined>("document.body.dataset.clicks") ?? 0);
+    desk.click(button.x, button.y);
+    expect(await until(() => read<string | undefined>("document.body.dataset.clicks"), (value) => value === String(clicks + 1))).toBe(String(clicks + 1));
+    desk.close();
+  }, hostTimeout(120_000));
+
+  it("ends the person's hold when its Chrome is swept after its server is gone, and leaves nothing of it running", async () => {
+    expect((await real.call(target, "agent_browser_open", { url: page })).isError).toBeUndefined();
+    startedOnDisplay();
+    const profile = real.service.profiles().find((candidate) => candidate.key === target.key)!;
+    const shown = profile.run!.opened.display!;
+    const launched = await browsersOn(real.dataDir, target.key);
+    await profile.control.take(person);
+    // The registry now says the server that launched it is gone, as after a crash of the server.
+    const gone = deadPid();
+    for (const entry of real.registry!.list()) if (entry.userDataDir === profileDir(real.dataDir, target.key)) real.registry!.add({ ...entry, ownerPid: gone });
+    const report = await sweep({ root: browserRoot(real.dataDir), registry: real.registry! });
+    expect([...report.killed].sort((a, b) => a - b)).toEqual(launched);
+    await until(() => profile.run, (run) => run === null);
+    expect(profile.control.owner).toBeNull();
+    await Promise.race([shown.exited, new Promise((_, reject) => setTimeout(() => reject(new Error("its display is still running")), 10_000))]);
+    expect(xvncPid(shown.socket)).toBeUndefined();
+    expect(await browsersOn(real.dataDir, target.key)).toEqual([]);
+    // The bot's next call starts it again, and nothing refuses it for a hold of the browser that died.
+    const again = await real.call(target, "agent_browser_status");
+    expect(again.isError).toBeUndefined();
+    expect(real.text(again)).toContain("stopped unexpectedly");
+  }, hostTimeout(120_000));
+
+  it("shows the page with no bar over it, and keeps navigator.webdriver false", async () => {
+    // A fresh launch: Chrome's startup bars go on its first tab.
+    const bars: BrowserTarget = { session: "bars", key: "bot:bars" };
+    expect((await real.call(bars, "agent_browser_open", { url: page })).isError).toBeUndefined();
+    startedOnDisplay();
+    const first = await real.peek<number>(bars, "outerHeight - innerHeight");
+    expect(await real.peek<boolean>(bars, "navigator.webdriver")).toBe(false);
+    expect((await real.call(bars, "agent_browser_tabs", { action: "new", url: page })).isError).toBeUndefined();
+    // A later tab never has them: the window's own top is all there is above the page.
+    expect(await real.peek<number>(bars, "outerHeight - innerHeight")).toBe(first);
+    await real.service.close(bars.session);
+  }, hostTimeout(120_000));
+
+  it("gives the page the bot opened the keyboard, not Chrome's address bar, so a person's keys go to the page", async () => {
+    // A first start: Chrome puts a new window's keyboard in the address bar of its blank tab.
+    await real.service.erase(target.key);
+    expect((await real.call(target, "agent_browser_open", { url: page })).isError).toBeUndefined();
+    startedOnDisplay();
+    const profile = real.service.profiles().find((candidate) => candidate.key === target.key)!;
+    const desk = await RfbClient.connect(url());
+    await desk.picture();
+    await profile.control.take(person);
+    desk.type("k");
+    expect(await until(() => read<string | undefined>("document.body.dataset.keys"), (value) => value === "k").catch(async (error: unknown) => {
+      throw new Error(`${error instanceof Error ? error.message : String(error)}; the bot's view of it: ${JSON.stringify(await real.call(target, "agent_browser_status").then((result) => real.text(result).split("\n")[0]))}`);
+    })).toBe("k");
+    desk.close();
+  }, hostTimeout(120_000));
+
+  it("leaves Chrome's own address bar suggestions free of the lock-down, so typing there shows suggestions, not a blocked page", async () => {
+    expect((await real.call(target, "agent_browser_open", { url: page })).isError).toBeUndefined();
+    startedOnDisplay();
+    const profile = real.service.profiles().find((candidate) => candidate.key === target.key)!;
+    const desk = await RfbClient.connect(url());
+    await desk.picture();
+    await profile.control.take(person);
+    desk.chord([CONTROL], 0x6c);
+    desk.type("zz");
+    // Chrome keeps the box's pages from its start. Allowed, they are its own UI (browser_ui); blocked, each is a page
+    // showing "This page is blocked", which the box then shows over the page.
+    const all = await profile.run!.browser.connection.root.send<{ targetInfos: Array<{ type: string; url: string }> }>("Target.getTargets", { filter: [{}] });
+    expect(all.targetInfos.some((info) => info.url.startsWith("chrome://omnibox-popup"))).toBe(true);
+    const popups = await omniboxPopups(profile);
+    await keepPicture(desk, "address-bar-suggestions");
+    expect(popups.filter((popup) => BLOCKED.test(popup.seen?.text ?? "")), JSON.stringify(popups)).toEqual([]);
+    desk.keys([0xff1b, 0xff1b]);
+    desk.close();
+  }, hostTimeout(120_000));
 
   it.runIf(process.env.OMB_DESKTOP_MEASURE === "1")("spends this much CPU on a picture stream under the desktop view, and none without one", async () => {
     const animated = fx.page("/spin", `<!doctype html><style>@keyframes spin{to{transform:rotate(360deg)}}#s{width:300px;height:300px;background:#36c;animation:spin 1s linear infinite}</style><div id="s"></div>`);

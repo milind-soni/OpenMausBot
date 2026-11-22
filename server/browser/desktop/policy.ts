@@ -7,8 +7,11 @@ import { execFileSync } from "node:child_process";
 import { accessSync, constants, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 
-/** Pages a person may still open from Chrome's own address bar: the new tab page. */
-const ALLOWED_CHROME_PAGES = ["chrome://newtab", "chrome://new-tab-page", "chrome://new-tab-page-third-party"];
+/** Pages a person may still open from Chrome's own address bar: the new tab page. And the page Chrome draws the address
+ * bar's suggestions box with: blocked, that box showed "This page is blocked" over the page as soon as a person typed
+ * in the address bar. Chrome's other controls drawn as pages (top-chrome) stay blocked: the theme and history panels
+ * open in a tab from the address bar. */
+const ALLOWED_CHROME_PAGES = ["chrome://omnibox-popup.top-chrome", "chrome://newtab", "chrome://new-tab-page", "chrome://new-tab-page-third-party"];
 
 /** The policy, with `fileRoots` (absolute folders) the one exception to the block on files. */
 export function desktopPolicy(fileRoots: readonly string[] = []): Record<string, unknown> {
@@ -30,6 +33,9 @@ export function desktopPolicy(fileRoots: readonly string[] = []): Record<string,
     // page a person sees on the display, as no headless Chrome shows them.
     PrivacySandboxPromptEnabled: false,
     PromotionsEnabled: false,
+    // The bar over the page that calls --disable-blink-features=AutomationControlled unsupported: without that flag a
+    // windowed Chrome on a DevTools pipe shows its pages navigator.webdriver === true.
+    CommandLineFlagSecurityWarningsEnabled: false,
   };
 }
 

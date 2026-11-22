@@ -98,7 +98,13 @@ export function stallStats(minutes: readonly Minute[]): StallStats | null {
 const sum = (tallies: readonly Tally[]): Tally => tallies.reduce((all, tally) => ({ n: all.n + tally.n, ms: all.ms + tally.ms, maxMs: Math.max(all.maxMs, tally.maxMs) }), zero());
 const rounded = (tally: Tally): Tally => ({ n: tally.n, ms: Math.round(tally.ms), maxMs: Math.round(tally.maxMs * 10) / 10 });
 
-export const STALL_RESOLUTION_MS = 20;
+/** How often the histogram's timer fires. Each firing wakes an idle server: at 20 ms that was most of an idle server's CPU
+ * (up to about 0.2% of a core on a Fly shared vCPU, 1% under gVisor), every hour of the day. A stall of D ms reads as
+ * between D minus this and D: the longest delay reads up to this much short, so a stall just over 1 s (or just over
+ * 100 ms) may land under that line in the counts, and a pause's gap reads up to this much short too. The histogram records
+ * nothing from a reset to its next firing, so a stall that starts in the first interval after the minute rolls can drop out
+ * of the figures. Diagnostics only: nothing acts on these. */
+export const STALL_RESOLUTION_MS = 100;
 export const MINUTE_MS = 60_000;
 const MINUTES_KEPT = 60;
 
