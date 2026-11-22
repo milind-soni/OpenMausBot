@@ -155,6 +155,19 @@ describe("the brief", () => {
     expect(JSON.stringify(today.widget!.root)).not.toContain(ENGLISH_BRIEF.intro);
   });
 
+  it("gives the newest card, an earlier day's until today's is posted", async () => {
+    const s = setup({ needsYou: [{ kind: "signed-out", id: "x", at: 0, instanceId: "claude", botIds: [] }] });
+    expect(s.brief.latestCard()).toBeUndefined();
+    await s.brief.active("desktop", "UTC");
+    const first = s.card()!.id;
+    expect(s.brief.latestCard()).toEqual({ threadId: s.thread(), messageId: first });
+    s.advance(24 * 60 * MINUTE);
+    expect(s.brief.latestCard()).toEqual({ threadId: s.thread(), messageId: first });
+    await s.brief.active("desktop");
+    expect(s.card()!.id).not.toBe(first);
+    expect(s.brief.latestCard()).toEqual({ threadId: s.thread(), messageId: s.card()!.id });
+  });
+
   it("speaks the language set in Settings, dates included", async () => {
     const s = setup({ language: "pt-BR", needsYou: [{ kind: "signed-out", id: "x", at: 0, instanceId: "claude", botIds: [] }] });
     await s.brief.active("desktop", "UTC");
@@ -362,5 +375,17 @@ describe("the brief", () => {
     const s = setup({ hosted: true });
     expect(await s.brief.active("desktop", "UTC")).toEqual({ returned: false });
     expect(s.card()).toBeUndefined();
+  });
+
+  it("names Outlook in read trouble and press records for Outlook emails", async () => {
+    const s = setup();
+    await s.brief.active("desktop", "UTC");
+    const outlookEmail: EmailHeader = { id: "o1", threadId: "conv-1", at: s.now() - 5 * MINUTE, from: "Bob <bob@outlook.test>", subject: "Invoice", preview: "Due Friday", app: "outlook" };
+    await s.brief.report({ routine: {} as never, at: s.now(), picked: [{ email: outlookEmail, why: "Due Friday.", needsReply: true }], trouble: [{ app: "outlook", signedOut: true }] });
+    expect(s.shown()).toContain("Couldn't read Outlook");
+    expect(s.shown()).toContain("Reconnect Outlook in Connected apps.");
+    const records = s.brief.pressRecords(s.chief, { type: "draft_reply", payload: { messageId: "o1" } });
+    expect(records).toContain("[Records from Outlook.");
+    expect(records).toContain("Outlook draft");
   });
 });

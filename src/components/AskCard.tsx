@@ -91,7 +91,7 @@ export function AskCard({
       onKeyDown={onKeyDown}
       data-shell={kicker ? "kicker" : undefined}
       className={cn("w-full max-w-[560px] rounded-[18px] text-start", kicker ? "overflow-hidden px-4 pb-4 pt-3.5" : "px-4 pb-3.5 pt-3",
-        stays ? `sticky top-[60px] bottom-[72px] z-10 ${ELEVATED_FLOAT}` : ELEVATED_CARD)}
+        stays ? `sticky top-[var(--glass-top,60px)] bottom-[72px] z-10 ${ELEVATED_FLOAT}` : ELEVATED_CARD)}
     >
       {header && <div className="mb-1.5 pe-6">{header}</div>}
       {kicker && <div className="mb-2"><AskKickerRow kicker={kicker} /></div>}

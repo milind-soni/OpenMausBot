@@ -659,7 +659,29 @@ describe("the Details tab", () => {
       expect(capture(() => EffortRow(row.props as Parameters<typeof EffortRow>[0])).html).toMatch(/<option value="max" selected="">/);
     });
 
-    it.each([true, false, null] as const)("sets a reasoning level on the open conversation only, whatever its model (owner: %s)", (ownerOrAdmin) => {
+    it("sets an owner's reasoning level on the open conversation and as the bot's default, as the Model row does", () => {
+      fixture.ownerOrAdmin = true;
+      expect(pickHigh(thread())).toEqual({
+        type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: true, selection: { ...opus, effort: "high" },
+      });
+      const haiku = { instanceId: "claude", model: "claude-haiku-4-5" };
+      expect(pickHigh(thread({ ...haiku, effort: "low" }))).toEqual({
+        type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: true, selection: { ...haiku, effort: "high" },
+      });
+    });
+
+    it("keeps an owner's pick in a conversation on another engine to that conversation when the bot's approval level would first drop to Ask", () => {
+      fixture.ownerOrAdmin = true;
+      fixture.storeState = { ...fixture.storeState, instances: [engine(), engine({ instanceId: "codex", driverKind: "codex" })] };
+      const codex = { instanceId: "codex", model: "gpt-5.6" };
+      const onCodex = (approvalMode: Bot["approvalMode"]) => ({ ...thread({ ...codex, effort: "low" }), approvalMode });
+      expect(pickHigh(onCodex("edits"))).toEqual({ type: "setModel", botId: "scout", threadId: "thread-scout", selection: { ...codex, effort: "high" } });
+      expect(pickHigh(onCodex("full"))).toEqual({
+        type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: true, selection: { ...codex, effort: "high" },
+      });
+    });
+
+    it.each([false, null] as const)("sets a guest's reasoning level on the open conversation only, whatever its model (owner: %s)", (ownerOrAdmin) => {
       fixture.ownerOrAdmin = ownerOrAdmin;
       expect(pickHigh(thread())).toEqual({ type: "setModel", botId: "scout", threadId: "thread-scout", selection: { ...opus, effort: "high" } });
       const haiku = { instanceId: "claude", model: "claude-haiku-4-5" };
@@ -677,7 +699,8 @@ describe("the Details tab", () => {
         fixture.ownerOrAdmin = ownerOrAdmin;
         blank();
         const haiku = { instanceId: "claude", model: "claude-haiku-4-5", effort: "max" as const };
-        expect(pickHigh(thread(haiku))).toEqual({ type: "setModel", botId: "scout", threadId: "new-chat-scout", selection: { ...opus, effort: "high" } });
+        expect(pickHigh(thread(haiku))).toEqual({ type: "setModel", botId: "scout", threadId: "new-chat-scout",
+          ...(ownerOrAdmin ? { updateBotDefault: true } : {}), selection: { ...opus, effort: "high" } });
       });
 
       it("shows the blank chat's choices in both rows, and a held level as picked", () => {
@@ -700,6 +723,10 @@ describe("the Details tab", () => {
         const variants = capture(() => EffortRow(row.props as Parameters<typeof EffortRow>[0])).nodes[0]!;
         expect(variants.props.threadId).toBe("new-chat-scout");
         expect((variants.props.bot as Bot).modelSelection).toEqual({ ...opus, effort: "low" });
+        expect(variants.props.updateBotDefault).toBe(false);
+        fixture.ownerOrAdmin = true;
+        const owned = ofType(botTab(thread({ ...opus, variant: "deep" })), EffortRow)!;
+        expect(capture(() => EffortRow(owned.props as Parameters<typeof EffortRow>[0])).nodes[0]!.props.updateBotDefault).toBe(true);
       });
 
       it("leaves another bot's blank chat alone", () => {

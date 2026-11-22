@@ -19,7 +19,7 @@ export const CLIENT_REASONS = ["stale_after_wait", "queue_full", "queue_halted",
 export type ClientReason = typeof CLIENT_REASONS[number];
 
 export const BOT_REASONS = [
-  "person_holds_control", "browser_stuck", "call_lost", "browser_closing", "browser_busy", "no_room", "target_not_found",
+  "person_holds_control", "browser_stuck", "browser_starting", "call_lost", "browser_closing", "browser_busy", "no_room", "target_not_found",
   "target_not_actionable", "timed_out", "typed_not_landed", "engine_error", "threw",
 ] as const;
 export type BotReason = typeof BOT_REASONS[number];
@@ -55,6 +55,8 @@ export function actionKind(type: unknown): string {
 const BOT_TEXT: Array<[RegExp, BotReason]> = [
   [/paused while a person controls/i, "person_holds_control"],
   [/browser engine is stuck|press restart/i, "browser_stuck"],
+  // Before "did not run": a call that answered while the browser was still starting is not a lost call.
+  [/browser is still starting/i, "browser_starting"],
   [/did not (?:answer|run)|may still be running|timed out; restart/i, "call_lost"],
   [/browser is closing/i, "browser_closing"],
   [/browsers are already open|no room/i, "no_room"],

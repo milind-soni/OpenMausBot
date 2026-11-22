@@ -10,6 +10,7 @@ import type { LoginRouteDeps } from "./routes/logins.ts";
 import { savedSecretsPrompt } from "./system-prompt.ts";
 import { findLinkedSecret, linkedCandidates, linkedSecretNames, linkedSecrets, linkedSites, readLinkedSecret, type LinkedSecretUse, type VaultProvider } from "./vault/providers.ts";
 import type { BitwardenLogins } from "./host/bitwarden-vault.ts";
+import type { BitwardenSecrets } from "./host/bitwarden-secrets.ts";
 
 const linkedItemId = (secretId: string, field: string | undefined) => `linked-${createHash("sha256").update(`${secretId}\0${field ?? ""}`).digest("hex").slice(0, 32)}`;
 
@@ -60,6 +61,7 @@ export class BotLogins {
   readonly store: VaultStore;
   readonly onePassword: OnePasswordLogins;
   readonly bitwarden: BitwardenLogins | null;
+  readonly bitwardenSecrets: BitwardenSecrets | null;
   readonly providers: readonly VaultProvider[];
   private readonly bots: () => ReadonlyArray<{ id: string; browserProfile?: string | null }>;
   private readonly hold: (value: string) => void;
@@ -68,11 +70,12 @@ export class BotLogins {
 
   /** `hold` masks a value read from a linked manager wherever text crosses to a bot or a transcript. */
   constructor(store: VaultStore, onePassword: OnePasswordLogins, bots: () => ReadonlyArray<{ id: string; browserProfile?: string | null }> = () => [],
-    hold: (value: string) => void = () => {}, bitwarden: BitwardenLogins | null = null) {
+    hold: (value: string) => void = () => {}, bitwarden: BitwardenLogins | null = null, bitwardenSecrets: BitwardenSecrets | null = null) {
     this.store = store;
     this.onePassword = onePassword;
     this.bitwarden = bitwarden;
-    this.providers = bitwarden ? [onePassword, bitwarden] : [onePassword];
+    this.bitwardenSecrets = bitwardenSecrets;
+    this.providers = [onePassword, ...(bitwarden ? [bitwarden] : []), ...(bitwardenSecrets ? [bitwardenSecrets] : [])];
     this.bots = bots;
     this.hold = hold;
   }
@@ -207,6 +210,7 @@ export class BotLogins {
         setItemGrants: (grants, keep) => this.store.setOnePasswordItemGrants(keep ? { ...this.store.onePasswordItemGrants(), ...grants } : grants),
       },
       bitwarden: this.bitwarden ? bitwardenRoutes(this.store, this.bitwarden) : undefined,
+      bitwardenSecrets: this.bitwardenSecrets ? bitwardenSecretsRoutes(this.store, this.bitwardenSecrets) : undefined,
     };
   }
 }
@@ -226,6 +230,21 @@ function bitwardenRoutes(store: VaultStore, bitwarden: BitwardenLogins): NonNull
       store.setBitwardenCredentials(null);
       await bitwarden.disconnect();
       return bitwarden.status();
+    },
+  };
+}
+
+/** Connecting checks the token first and keeps it only once Bitwarden accepted it. */
+function bitwardenSecretsRoutes(store: VaultStore, secrets: BitwardenSecrets): NonNullable<LoginRouteDeps["bitwardenSecrets"]> {
+  return {
+    status: () => secrets.status(),
+    list: () => { void secrets.fresh(); return secrets.items().flatMap(({ kind, ...item }) => (kind === "login" ? [item as LoginSummary] : [])); },
+    connect: (credentials) => secrets.connect(credentials, () => store.setBitwardenSecretsCredentials(credentials)),
+    refresh: () => secrets.refresh(),
+    disconnect: () => {
+      store.setBitwardenSecretsCredentials(null);
+      secrets.clear();
+      return secrets.status();
     },
   };
 }

@@ -17,6 +17,7 @@
 //       FAKE_ACP_ASK_PARAMS; the client's reply is written to FAKE_ACP_ASK_ANSWER. FAKE_ACP_ASK_TIMING=with-result
 //       settles the turn with the card open; after-result asks between turns)
 //     | interleave (message, tool, message, tool, message) | no-session-config (set_mode/set_model answer -32601)
+//     | set-model-internal-error (set_model answers -32603)
 //     | ask-peer | delegate-peer | chief-delegate | create-peer (coordinate_bots through the injected agents
 //       MCP; FAKE_ACP_REDELEGATE_FILE, FAKE_ACP_TASKID_FILE; a hand-off result wake gets a fixed line)
 //     | echo-gated (echo the whole prompt; hold until FAKE_ACP_GATE_FILE exists) | safe-agent-reads
@@ -74,6 +75,8 @@
 //   FAKE_ACP_OMIT_MODEL_VALUE  when the live model equals this id, the model option has no currentValue
 //     (Copilot CLI 1.0.105 does this for auto)
 //   FAKE_ACP_EXIT_ON_MODEL  the process exits when set_config_option selects this model
+//   FAKE_ACP_HANG_ON_MODEL  set_config_option never answers a switch to this model, as a stuck account can; other requests
+//     are still answered
 //   FAKE_ACP_VARIANTS  JSON map model -> {id?, currentValue?, options} of ACP select values
 //   FAKE_ACP_CONFIG_UPDATES  JSON [{after, sessionId?, configOptions, replay?}] emitted after the named response
 //   FAKE_ACP_USAGE_ROOT  usage at the prompt result's root, as opencode 1.18.18 sends it
@@ -93,6 +96,8 @@
 //   FAKE_ACP_CANCEL_STOP_REASON  the stopReason a cancelled hanging prompt answers (default cancelled; OpenCode answers end_turn)
 //   FAKE_ACP_HANG_ONCE_FILE  with FAKE_ACP_HANG_ON, only the first matching prompt hangs; it writes this file
 //   FAKE_ACP_HOLD_FILE  while this file exists, a session/prompt waits before it is answered
+//   FAKE_ACP_GATEWAY_PID_FILE  the first `acp` process starts a stand-in for Hermes' shared gateway the way Hermes does
+//     (a session of its own, HERMES_GATEWAY_DETACHED=1, `gateway run`) and writes its pid here; later ones leave it be
 //   FAKE_ACP_AGY_STEPS_FILE  JSON [[stepType, text], …] re-read per prompt and appended to the session's log under
 //     GEMINI_HOME (antigravity-acp/conversations/<session>.db, a folder made at startup), as agy_acp_server 1.4.5
 //     writes its trajectory
@@ -424,6 +429,16 @@ if (argv[0] === "status" || argv[0] === "whoami") {
   const authenticated = process.env.FAKE_ACP_AUTH !== "0";
   console.log(JSON.stringify({ isAuthenticated: authenticated }));
   process.exit(0);
+}
+const gatewayPidFile = process.env.FAKE_ACP_GATEWAY_PID_FILE;
+if (gatewayPidFile && argv[0] === "acp" && !existsSync(gatewayPidFile)) {
+  const gateway = spawn(process.execPath, ["-e", "setInterval(() => {}, 1 << 30)", "gateway", "run", "--quiet"], {
+    detached: true,
+    stdio: "ignore",
+    env: { ...process.env, HERMES_GATEWAY_DETACHED: "1" },
+  });
+  gateway.unref();
+  writeFileSync(gatewayPidFile, String(gateway.pid));
 }
 const grokLogin = process.env.FAKE_ACP_GROK_LOGIN;
 if (argv[0] === "models" && grokLogin) {
@@ -1191,6 +1206,9 @@ function handle(msg: any) {
         // Cursor's answer when handed an argv slug like `auto`.
         return out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "Invalid params" } });
       }
+      if (msg.method === "session/set_model" && mode === "set-model-internal-error") {
+        return out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "Internal error: model switch failed" } });
+      }
       const settingId = msg.method === "session/set_mode" ? "modeId" : "modelId";
       if (typeof msg.params?.sessionId !== "string" || typeof msg.params?.[settingId] !== "string") {
         out({
@@ -1269,6 +1287,7 @@ function handle(msg: any) {
         break;
       }
       if (configId === "model" && value === process.env.FAKE_ACP_EXIT_ON_MODEL) process.exit(4);
+      if (configId === "model" && value === process.env.FAKE_ACP_HANG_ON_MODEL) break;
       if (configId !== "model" || !models.includes(value)) {
         out({
           jsonrpc: "2.0",

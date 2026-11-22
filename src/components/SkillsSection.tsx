@@ -8,6 +8,7 @@ import { Card, Switch } from "./SettingsPrimitives";
 import type { SkillsLibrarySkillWire } from "../../shared/wire";
 import { Layer } from "./Layer";
 import { Select } from "./Select";
+import { serverFetch } from "@/lib/relay-server";
 
 export function filterLibrarySkills(
   skills: readonly SkillsLibrarySkillWire[],
@@ -59,7 +60,7 @@ export function SkillsSection() {
 
   const refresh = async (cancelled?: () => boolean) => {
     try {
-      const response = await fetch("/api/skills-library");
+      const response = await serverFetch("/api/skills-library");
       const body = (await response.json()) as { skills?: SkillsLibrarySkillWire[]; error?: string };
       if (!response.ok) throw new Error(body.error ?? t("skills.library.loadError"));
       if (cancelled?.()) return;
@@ -90,12 +91,12 @@ export function SkillsSection() {
     try {
       // Read the complete current list while mutations are serialized, so a second row never overwrites an earlier
       // assignment.
-      const listing = await fetch("/api/skills-library");
+      const listing = await serverFetch("/api/skills-library");
       const listed = (await listing.json()) as { skills?: SkillsLibrarySkillWire[]; error?: string };
       if (!listing.ok) throw new Error(listed.error ?? t("skills.library.loadError"));
       const current = (listed.skills ?? []).filter((skill) => skill.assignedBots.some((bot) => bot.id === botId)).map((skill) => skill.name);
       const next = remove ? current.filter((skill) => skill !== name) : [...new Set([...current, name])];
-      const response = await fetch(`/api/bots/${encodeURIComponent(botId)}/skills-library`, {
+      const response = await serverFetch(`/api/bots/${encodeURIComponent(botId)}/skills-library`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ skills: next }),
@@ -127,7 +128,7 @@ export function SkillsSection() {
     setWorking(skill.name);
     setError("");
     try {
-      const response = await fetch(`/api/skills-library/${encodeURIComponent(skill.name)}`, {
+      const response = await serverFetch(`/api/skills-library/${encodeURIComponent(skill.name)}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ enabled: !skill.enabled }),
@@ -150,7 +151,7 @@ export function SkillsSection() {
     setWorking(skill.name);
     setError("");
     try {
-      const response = await fetch(`/api/skills-library/${encodeURIComponent(skill.name)}`, {
+      const response = await serverFetch(`/api/skills-library/${encodeURIComponent(skill.name)}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ everyBot: !skill.everyBot }),
@@ -169,7 +170,7 @@ export function SkillsSection() {
   const view = async (skill: SkillsLibrarySkillWire, review = false) => {
     setError("");
     try {
-      const response = await fetch(`/api/skills-library/${encodeURIComponent(skill.name)}`);
+      const response = await serverFetch(`/api/skills-library/${encodeURIComponent(skill.name)}`);
       const body = (await response.json()) as { text?: string; error?: string };
       if (!response.ok) throw new Error(body.error ?? t("skills.error.load"));
       if (!body.text) throw new Error(t("skills.error.contentsImport"));
@@ -186,7 +187,7 @@ export function SkillsSection() {
     setError("");
     setImportMessage("");
     try {
-      const response = await fetch("/api/skills-library", {
+      const response = await serverFetch("/api/skills-library", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ text }),

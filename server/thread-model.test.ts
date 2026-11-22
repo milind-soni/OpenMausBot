@@ -67,6 +67,23 @@ describe("threads follow their bot's model", () => {
     expect(ownModel(open(), bot.id, picked.threadId)).toEqual(codex);
   });
 
+  it("a reasoning level saved as the bot's default from a thread reaches its followers and new threads, not a thread with its own level", () => {
+    const store = open();
+    const bot = store.createBot();
+    const picked = bot.threadId;
+    const follower = store.createTask(bot.id, "Follower")!;
+    const own = store.createTask(bot.id, "Own level")!;
+    store.switchTaskModel(bot.id, own.threadId, { ...sonnet, effort: "low" }, false, false);
+
+    store.switchTaskModel(bot.id, picked, { ...sonnet, effort: "high" }, true, false);
+    expect(store.bot(bot.id)!.modelSelection).toEqual({ ...sonnet, effort: "high" });
+    expect(ownModel(store, bot.id, picked)).toBeUndefined();
+    expect(runsOn(store, bot.id, follower.threadId)).toEqual({ ...sonnet, effort: "high" });
+    expect(runsOn(store, bot.id, own.threadId)).toEqual({ ...sonnet, effort: "low" });
+    expect(runsOn(store, bot.id, store.createTask(bot.id, "Fresh")!.threadId)).toEqual({ ...sonnet, effort: "high" });
+    expect(open().bot(bot.id)!.modelSelection).toEqual({ ...sonnet, effort: "high" });
+  });
+
   it("picking the bot's own model in a thread is following the bot", () => {
     const store = open();
     const bot = store.createBot();

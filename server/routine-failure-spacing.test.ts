@@ -151,10 +151,12 @@ describe("a routine every 5 minutes whose tool server is dead", () => {
 
 describe("a routine every minute by cron whose tool server is dead", () => {
   it("is accepted, stays on, and is spaced out the same way", async () => {
+    vi.stubEnv("OMB_ROUTINE_FAILURE_SPACING_MS", String(2 * MINUTE));
+    vi.stubEnv("OMB_ROUTINE_FAILURE_SPACING_MAX_MS", String(4 * MINUTE));
     const h = harness(undefined, { type: "cron", expression: "* * * * *", timeZone: "UTC" });
-    await h.passTo(START + 6 * HOUR, h.fail(DEAD_TOOL));
-    console.log(`turns started in 6 hours by a routine every minute with a dead tool server: ${h.started.length}`);
-    expect(h.started).toHaveLength(5);
+    await h.passTo(START + 12 * MINUTE, h.fail(DEAD_TOOL));
+    const startMinutes = h.rows().filter((run) => run.startedAt != null).map((run) => (run.scheduledFor - START) / MINUTE);
+    expect(startMinutes).toEqual([1, 2, 3, 6, 11]);
     expect(h.routine()).toMatchObject({ enabled: true, schedule: { type: "cron", expression: "* * * * *" } });
   });
 });

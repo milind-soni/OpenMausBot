@@ -31,6 +31,8 @@ type CardProps = {
   color?: Bot["color"];
   threadId: string;
   message: Message;
+  /** False when the host already pins the card in a reserved slot outside the scrollport. */
+  stays?: boolean;
 };
 
 /** A bot's handoff (its own instruction) or a site sign-in. */
@@ -38,7 +40,7 @@ export function SignInRequestCard(props: CardProps) {
   return isHandoff(props.message.signIn) ? <HandoffCard {...props} /> : <SiteSignInCard {...props} />;
 }
 
-export function SiteSignInCard({ botId, botName, color, threadId, message }: CardProps) {
+export function SiteSignInCard({ botId, botName, color, threadId, message, stays = true }: CardProps) {
   const { state, dispatch } = useStore();
   const card = message.signIn!;
   // A login saved here is kept to every bot this browser signs in (server/bot-logins.ts cardBots).
@@ -130,10 +132,10 @@ export function SiteSignInCard({ botId, botName, color, threadId, message }: Car
   try { pageHost = new URL(card.url).hostname; } catch {}
   return (
     <AskCard
+      stays={stays}
       ariaLabel={t("signIn.cardLabel", { name: botName, site: card.site })}
       icon={<LogIn size={15} />}
       title={t("signIn.title")}
-      stays
       footer={saving ? undefined : <>
         <button type="button" onClick={() => void answer("cancel")} disabled={pending !== null} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
           {pending === "cancel" ? <Loader2 size={14} className="animate-spin" /> : <X size={14} />}

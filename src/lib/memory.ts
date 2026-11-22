@@ -1,6 +1,7 @@
 import { ApiError, api } from "@/state/store";
 import { intlLocale, t } from "@/lib/i18n";
 import { serverErrorText } from "@/lib/server-error";
+import { serverFetch } from "./relay-server";
 
 export const MEMORY_INDEX = "MEMORY.md";
 export const SOUL_PATH = "SOUL.md";
@@ -76,7 +77,7 @@ export function fetchMemoryDoc(botId: string, path: string, mine = false): Promi
 }
 
 export async function saveMemoryDoc(botId: string, path: string, text: string, expectedHash: string | undefined, mine = false): Promise<SaveResult> {
-  const response = await fetch(`${memoryRoute(botId, mine)}/file`, {
+  const response = await serverFetch(`${memoryRoute(botId, mine)}/file`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ path, text, expectedHash }),

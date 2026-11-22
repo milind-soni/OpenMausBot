@@ -85,6 +85,8 @@ export interface E2EStream {
   /** No more writes: FIN after what is already written. */
   end(): void;
   reset(): void;
+  /** Resolves on the computer's FIN: all it will send is in `readable`, read or not. */
+  readonly ended: Promise<void>;
 }
 
 /** Rejects with SessionClosed (the close code) or a NoiseError (a hard stop: the computer could not be verified). */
@@ -242,7 +244,9 @@ interface PendingWrite {
 class Stream implements E2EStream {
   readonly id: number;
   readonly readable: ReadableStream<Uint8Array>;
+  readonly ended: Promise<void>;
   readonly #session: PhoneSession;
+  #markEnded!: () => void;
   #controller!: ReadableStreamDefaultController<Uint8Array>;
   #writes: PendingWrite[] = [];
   #ending = false;
@@ -255,6 +259,7 @@ class Stream implements E2EStream {
   constructor(session: PhoneSession, id: number) {
     this.#session = session;
     this.id = id;
+    this.ended = new Promise((resolve) => (this.#markEnded = resolve));
     this.readable = new ReadableStream<Uint8Array>(
       {
         start: (controller) => {
@@ -304,6 +309,7 @@ class Stream implements E2EStream {
     if (this.#done) return;
     this.#remoteEnded = true;
     this.#controller.close();
+    this.#markEnded();
     this.#forgetIfDone();
   }
 

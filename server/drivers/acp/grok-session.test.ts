@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { ensureDirs, NATIVE_DIR } from "../../config.ts";
 import type { ProviderInstance, SendTurnInput } from "../../contracts.ts";
+import { classifyRoutineFailure } from "../../routine-recovery.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { recordEvents } from "../../testing/events.ts";
 import { GrokAgentDriver, grokPermissionRequest } from "./grok.ts";
@@ -156,6 +157,48 @@ describe("Grok changes model and effort inside the running session", () => {
       const toolScope = { allow: ["native:read_file"] };
       expect(await ask({ threadId, model: "grok-4.5", toolScope })).toMatchObject({ ok: true });
       await ask({ threadId, model: "grok-4.6", toolScope, resumeCursor: "fake-acp-session" });
+      expect(processes()).toBe(2);
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+    }
+  });
+
+  // grok 1.0.41 signed in to an account without grok-4.7 answers set_model "Invalid params: unknown model id".
+  it("says in plain words which models Grok offers when it refuses one it does not, without a second process", async () => {
+    const { instance, recorder, calls, processes, ask } = await start("grok-model-not-offered", {
+      FAKE_ACP_MODE: "set-model-invalid-params", FAKE_ACP_SESSION_MODELS: "grok-4.6|Grok 4.6,grok-4.5|Grok 4.5",
+    });
+    const threadId = "t-grok-model-not-offered";
+    try {
+      expect(await ask({ threadId, model: "grok-4.6" })).toMatchObject({ ok: true });
+      expect(await ask({ threadId, model: "grok-4.7", resumeCursor: "fake-acp-session" })).toMatchObject({ ok: false });
+      const errors = recorder.events.filter((event) => event.type === "runtime.error").map((event) => (event as { message: string }).message);
+      expect(errors).toEqual(["Grok can't use the model grok-4.7 here: this Grok sign-in offers grok-4.6 and grok-4.5, so choose one of those for this bot."]);
+      // A routine does not spend its one retry on it: the next start would be refused the same way.
+      expect(classifyRoutineFailure(errors[0]!)).toEqual({ kind: "final" });
+      expect(processes()).toBe(1);
+      expect(calls().filter((call) => call.method === "session/prompt")).toHaveLength(1);
+      // The refusing process is retired: the next turn starts a new one, which reads the offered models afresh.
+      expect(await ask({ threadId, model: "grok-4.7", resumeCursor: "fake-acp-session" })).toMatchObject({ ok: false });
+      expect(processes()).toBe(2);
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+    }
+  });
+
+  it("keeps the restart and Grok's own words when the switch to an unlisted model failed some other way", async () => {
+    const { instance, recorder, processes, ask } = await start("grok-model-switch-failed", {
+      FAKE_ACP_MODE: "set-model-internal-error", FAKE_ACP_SESSION_MODELS: "grok-4.6|Grok 4.6,grok-4.5|Grok 4.5",
+    });
+    const threadId = "t-grok-model-switch-failed";
+    try {
+      expect(await ask({ threadId, model: "grok-4.6" })).toMatchObject({ ok: true });
+      expect(await ask({ threadId, model: "grok-4.7", resumeCursor: "fake-acp-session" })).toMatchObject({ ok: false });
+      const errors = recorder.events.filter((event) => event.type === "runtime.error").map((event) => (event as { message: string }).message);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toMatch(/^Grok rejected model "grok-4.7" via session\/set_model: Internal error: model switch failed/);
       expect(processes()).toBe(2);
     } finally {
       recorder.stop();

@@ -161,7 +161,8 @@ const SECRET_NAMES_SHOWN = 40;
 const SECRET_NAME_SHOWN_MAX = 80;
 
 /** Names only, never a value. */
-const REFERENCE_FORMS: Record<string, string> = { "1password": "a 1Password reference (op://vault/item/field)", bitwarden: "a Bitwarden reference (bw://item/field)" };
+const REFERENCE_FORMS: Record<string, string> = { "1password": "a 1Password reference (op://vault/item/field)", bitwarden: "a Bitwarden reference (bw://item/field)",
+  "bitwarden-secrets": "a Bitwarden Secrets Manager reference (bws://secret)" };
 
 /** `references`: the password managers whose secrets the bot may use, so a reference a person gives works as a label too. */
 export function savedSecretsPrompt(secrets: ReadonlyArray<{ name: string; refOnly?: true }>, references: readonly string[] = []): string {

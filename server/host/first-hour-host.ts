@@ -100,6 +100,7 @@ export function startFirstHour(deps: FirstHourHostDeps): FirstHour | null {
     },
     briefOn: deps.briefOn,
     ensureBrief: deps.ensureBrief,
+    briefCard: () => deps.proactive.brief.latestCard(),
     phones: deps.phones,
     startTurn: deps.startTurn,
     notify: (bot, threadId, body) => deps.notify(bot.notifications === false ? null : { kind: "brief", botId: bot.id, botName: bot.name, threadId, title: bot.name, body, ...(bot.avatarUrl ? { avatarUrl: bot.avatarUrl } : {}) }),

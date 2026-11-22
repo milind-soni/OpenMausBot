@@ -66,6 +66,21 @@
 //   FAKE_CODEX_MCP_READY_MS  each `-c mcp_servers.*` mount is reported starting after the thread/start or
 //     thread/resume reply and ready at once, as codex-cli 0.166.0 does; with this, ready only this many ms
 //     later, and the dump records mcpReadyAtTurnStart
+//   FAKE_CODEX_CALL_LOG  append {pid, method, params} per request, across every process launched
+//   FAKE_CODEX_THREAD_IDS  "distinct": thread/start names its thread codex-thread-<pid>-<n>, not always codex-thread-1
+//   FAKE_CODEX_CONTEXT_TOKENS  the context reading (last.inputTokens) turns report, 7 by default: one number, or one per finished turn
+//     separated by commas (the last repeats);
+//     FAKE_CODEX_CONTEXT_TOKENS_AFTER_COMPACT  the reading once a thread/compact/start has completed
+//   FAKE_CODEX_COMPACT  thread/compact/start: unset (compacts, as codex-cli 0.171.0 does: the request returns {}, then the thread
+//     runs a turn with a contextCompaction item and reports no usage) | error | unsupported (method not found) | hang (the turn
+//     never completes; turn/interrupt for its turn ends it); FAKE_CODEX_COMPACT_MS how long the turn takes (default 20);
+//     FAKE_CODEX_COMPACT_HELPER "1": a helper thread's turn/completed and token usage arrive during it;
+//     FAKE_CODEX_COMPACT_USAGE  JSON {inputTokens, outputTokens, cachedInputTokens} added to the thread's total by it
+//   FAKE_CODEX_CONFIG_HANG_AFTER_TURNS  config/read is never answered once this many turns have finished
+//   FAKE_CODEX_COMPACT_HOLD_FILE  a compaction that starts while this file exists completes once it is removed
+//   FAKE_CODEX_COMPACT_NO_USAGE  "1": the compaction sends no thread/tokenUsage/updated at all
+//   FAKE_CODEX_CONFIG_HOLD_FILE  a config/read that arrives while this file exists is answered once it is removed
+//   FAKE_CODEX_CONFIG_HANG_FILE, FAKE_CODEX_CONFIG_ERROR_FILE  config/read is never answered / answered with an error while the file exists
 //   FAKE_CODEX_ROLLOUT  rollout path thread/start and thread/resume report as `thread.path`; each happy turn appends a
 //     namespace-less function_call for retry_thread and codex's "unsupported call: retry_thread" output to it
 import { spawn } from "node:child_process";
@@ -226,6 +241,16 @@ let nativeThreadId = "codex-thread-1";
 let nativeTurnId = "turn-1";
 let turnsStarted = 0;
 let turnsFinished = 0;
+let threadsStarted = 0;
+let compactions = 0;
+/** What compactions added to the thread's token total: it is cumulative, so every later turn's total carries it. */
+const compactedUsage = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 };
+let compactingTurn: string | null = null;
+const startedThreadId = () => {
+  threadsStarted += 1;
+  if (process.env.FAKE_CODEX_THREAD_IDS === "distinct") nativeThreadId = `codex-thread-${process.pid}-${threadsStarted}`;
+  return nativeThreadId;
+};
 const notify = (method: string, params: any) => out({
   jsonrpc: "2.0", method,
   params: {
@@ -386,6 +411,15 @@ const dump = () => {
   }
 };
 
+/** The context reading each turn reports: FAKE_CODEX_CONTEXT_TOKENS names one per finished turn (the last repeats), and
+ * FAKE_CODEX_CONTEXT_TOKENS_AFTER_COMPACT replaces them once a thread was compacted. */
+const contextReading = (): number => {
+  const afterCompact = Number(process.env.FAKE_CODEX_CONTEXT_TOKENS_AFTER_COMPACT);
+  if (compactions > 0 && afterCompact > 0) return afterCompact;
+  const schedule = (process.env.FAKE_CODEX_CONTEXT_TOKENS ?? "").split(",").map(Number).filter((n) => n > 0);
+  return schedule[Math.min(turnsFinished, schedule.length) - 1] ?? 7;
+};
+
 const finishTurn = () => {
   if (process.env.FAKE_CODEX_COMPACTION === "1") {
     notify("item/started", { item: { id: "c1", type: "contextCompaction" } });
@@ -420,8 +454,8 @@ const finishTurn = () => {
   notify("item/completed", { item: { id: "m1", type: "agentMessage", text: "done from fake codex" } });
   const carried = process.env.FAKE_CODEX_RESTORED_USAGE ? { inputTokens: 100, cachedInputTokens: 50, outputTokens: 10 } : { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 };
   notify("thread/tokenUsage/updated", { tokenUsage: {
-    total: { inputTokens: carried.inputTokens + 7 * ++turnsFinished, cachedInputTokens: carried.cachedInputTokens + 4 * turnsFinished, outputTokens: carried.outputTokens + 3 * turnsFinished },
-    last: { inputTokens: 7, cachedInputTokens: 4, outputTokens: 3 },
+    total: { inputTokens: carried.inputTokens + 7 * ++turnsFinished + compactedUsage.inputTokens, cachedInputTokens: carried.cachedInputTokens + 4 * turnsFinished + compactedUsage.cachedInputTokens, outputTokens: carried.outputTokens + 3 * turnsFinished + compactedUsage.outputTokens },
+    last: { inputTokens: contextReading(), cachedInputTokens: 4, outputTokens: 3 },
     modelContextWindow: 272000,
   } });
   if (process.env.FAKE_CODEX_ROLLOUT) {
@@ -539,7 +573,12 @@ process.stdin.on("data", (chunk) => {
       continue;
     }
 
-    if (msg.method) calls.push({ method: msg.method, params: msg.params ?? null });
+    if (msg.method && !msg.released) calls.push({ method: msg.method, params: msg.params ?? null });
+    if (msg.method && !msg.released && process.env.FAKE_CODEX_CALL_LOG) {
+      const entry = `${JSON.stringify({ pid: process.pid, method: msg.method, params: msg.params ?? null })}\n`;
+      const log = () => appendFileSync(process.env.FAKE_CODEX_CALL_LOG!, entry);
+      if (msg.method === "config/read") setImmediate(log); else log();
+    }
 
     switch (msg.method) {
       case "initialize": {
@@ -614,6 +653,21 @@ process.stdin.on("data", (chunk) => {
         break;
       case "config/read":
         logStartup("config/read");
+        if (process.env.FAKE_CODEX_CONFIG_HOLD_FILE && existsSync(process.env.FAKE_CODEX_CONFIG_HOLD_FILE) && !msg.released) {
+          const held = process.env.FAKE_CODEX_CONFIG_HOLD_FILE;
+          const timer = setInterval(() => {
+            if (existsSync(held)) return;
+            clearInterval(timer);
+            process.stdin.emit("data", `${JSON.stringify({ ...msg, released: true })}\n`);
+          }, 5);
+          break;
+        }
+        if ((process.env.FAKE_CODEX_CONFIG_HANG_FILE && existsSync(process.env.FAKE_CODEX_CONFIG_HANG_FILE))
+          || (process.env.FAKE_CODEX_CONFIG_HANG_AFTER_TURNS && turnsFinished >= Number(process.env.FAKE_CODEX_CONFIG_HANG_AFTER_TURNS))) break;
+        if (process.env.FAKE_CODEX_CONFIG_ERROR_FILE && existsSync(process.env.FAKE_CODEX_CONFIG_ERROR_FILE)) {
+          out({ jsonrpc: "2.0", id: msg.id, error: { code: -32000, message: "config unavailable" } });
+          break;
+        }
         if (mode === "config-read-error") {
           dump();
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32000, message: "config unavailable" } });
@@ -708,8 +762,56 @@ process.stdin.on("data", (chunk) => {
         streamTurn += 1;
         if (process.env.FAKE_CODEX_INTERRUPT_SILENT) break;
         out({ jsonrpc: "2.0", id: msg.id, result: {} });
+        if (compactingTurn && msg.params?.turnId === compactingTurn) {
+          notify("turn/completed", { turn: { id: compactingTurn, status: "interrupted" } });
+          compactingTurn = null;
+          break;
+        }
         notify("turn/completed", { turn: { status: "interrupted" } });
         break;
+      case "thread/compact/start": {
+        dump();
+        nativeThreadId = msg.params?.threadId ?? nativeThreadId;
+        const compact = process.env.FAKE_CODEX_COMPACT;
+        if (compact === "unsupported" || compact === "error") {
+          out({ jsonrpc: "2.0", id: msg.id, error: compact === "unsupported" ? { code: -32601, message: "method not found" } : { code: -32000, message: "compaction failed" } });
+          break;
+        }
+        out({ jsonrpc: "2.0", id: msg.id, result: {} });
+        const turnId = `compact-turn-${++compactions}`;
+        notify("turn/started", { turn: { id: turnId, status: "inProgress" } });
+        notify("item/started", { turnId, item: { id: "compaction-1", type: "contextCompaction" } });
+        if (process.env.FAKE_CODEX_COMPACT_HELPER === "1") {
+          notify("thread/tokenUsage/updated", { threadId: "helper-thread", turnId: "helper-turn", tokenUsage: { total: { inputTokens: 999, outputTokens: 999 } } });
+          notify("turn/completed", { threadId: "helper-thread", turn: { id: "helper-turn", status: "completed" } });
+          notify("item/started", { turnId, item: { id: "after-helper", type: "marker" } });
+        }
+        if (compact === "hang") {
+          compactingTurn = turnId;
+          break;
+        }
+        const finishCompaction = () => {
+          const added = process.env.FAKE_CODEX_COMPACT_USAGE ? JSON.parse(process.env.FAKE_CODEX_COMPACT_USAGE) : {};
+          for (const key of Object.keys(compactedUsage) as Array<keyof typeof compactedUsage>) compactedUsage[key] += added[key] ?? 0;
+          const carried = process.env.FAKE_CODEX_RESTORED_USAGE ? { inputTokens: 100, cachedInputTokens: 50, outputTokens: 10 } : { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 };
+          notify("item/completed", { turnId, item: { id: "compaction-1", type: "contextCompaction" } });
+          if (process.env.FAKE_CODEX_COMPACT_NO_USAGE !== "1") notify("thread/tokenUsage/updated", { turnId, tokenUsage: {
+            total: { inputTokens: carried.inputTokens + 7 * turnsFinished + compactedUsage.inputTokens, cachedInputTokens: carried.cachedInputTokens + 4 * turnsFinished + compactedUsage.cachedInputTokens, outputTokens: carried.outputTokens + 3 * turnsFinished + compactedUsage.outputTokens },
+            last: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 },
+            modelContextWindow: 272000,
+          } });
+          notify("turn/completed", { turn: { id: turnId, status: "completed" } });
+        };
+        const held = process.env.FAKE_CODEX_COMPACT_HOLD_FILE;
+        if (held && existsSync(held)) {
+          const timer = setInterval(() => {
+            if (existsSync(held)) return;
+            clearInterval(timer);
+            finishCompaction();
+          }, 5);
+        } else setTimeout(finishCompaction, Number(process.env.FAKE_CODEX_COMPACT_MS) || 20);
+        break;
+      }
       case "thread/start":
         dump();
         developerInstructions = msg.params?.developerInstructions ?? "";
@@ -723,10 +825,10 @@ process.stdin.on("data", (chunk) => {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "experimental API required for permissions" } });
         } else if (process.env.FAKE_CODEX_MCP_START === "1") {
           // Codex starts MCP servers with the thread; one that fails leaves the thread without its tools.
-          const reply = { jsonrpc: "2.0", id: msg.id, result: { thread: { id: "codex-thread-1" }, model: "fake-codex-model", sandbox: resolvedSandbox(msg.params ?? {}) } };
+          const reply = { jsonrpc: "2.0", id: msg.id, result: { thread: { id: startedThreadId() }, model: "fake-codex-model", sandbox: resolvedSandbox(msg.params ?? {}) } };
           void startMcpServers().then((startup) => { mcpStartup = startup; dump(); threadReply(reply); });
         } else {
-          threadReply({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: "codex-thread-1", ...(process.env.FAKE_CODEX_ROLLOUT ? { path: process.env.FAKE_CODEX_ROLLOUT } : {}) }, model: "fake-codex-model", sandbox: resolvedSandbox(msg.params ?? {}) } });
+          threadReply({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: startedThreadId(), ...(process.env.FAKE_CODEX_ROLLOUT ? { path: process.env.FAKE_CODEX_ROLLOUT } : {}) }, model: "fake-codex-model", sandbox: resolvedSandbox(msg.params ?? {}) } });
         }
         break;
       case "turn/start": {

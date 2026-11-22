@@ -31,6 +31,8 @@ export interface BotLinkHostDeps {
   coordinator(): Coordinator;
   kick(): void;
   level(bot: BotRecord): Level;
+  /** A work thread a far bot opened here is named from the job it handed, behind "@Sender · ". */
+  titleHanded?(botId: string, threadId: string, brief: string, prefix: string): void;
   refusal(bot: BotRecord): string | null;
   language(threadId: string): string | undefined;
   personName(threadId: string): string | undefined;
@@ -81,7 +83,11 @@ export function createBotLinkHost(deps: BotLinkHostDeps) {
     refusal: (bot) => deps.refusal(bot as BotRecord),
     model: (bot) => (bot as BotRecord).modelSelection.model,
     level: (bot) => deps.level(bot as BotRecord),
-    openThread: (bot, title, opener) => store.createTask(bot.id, title, false, undefined, { ...opener, at: Date.now(), kind: "work" })?.threadId,
+    openThread: (bot, title, opener, brief) => {
+      const threadId = store.createTask(bot.id, title, false, undefined, { ...opener, at: Date.now(), kind: "work" })?.threadId;
+      if (threadId) deps.titleHanded?.(bot.id, threadId, brief, `@${opener.name} · `);
+      return threadId;
+    },
     hasThread: (botId, threadId) => Boolean(store.taskByThread(botId, threadId)),
     personName: deps.personName,
     files: {

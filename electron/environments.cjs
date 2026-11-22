@@ -365,6 +365,16 @@ function withPlaceColor(state, id, color) {
   return { ...state, environments: state.environments.map((entry) => (entry === existing ? next : entry)) };
 }
 
+/** A server saved here under a name the person chose on this computer (its rail's Rename): only this app's own record
+ * changes, never the server or its own name for itself. Null for no such server or no name left once tidied. */
+function withPlaceName(state, id, name) {
+  const existing = state.environments.find((entry) => entry.id === id && entry.kind !== "local");
+  const next = existing ? cleanName(name, "") : "";
+  if (!next) return null;
+  if (next === existing.name) return state;
+  return { ...state, environments: state.environments.map((entry) => (entry === existing ? { ...entry, name: next } : entry)) };
+}
+
 /** The place `id` names (the one on screen by default): a saved entry, or This computer as one, named and coloured. */
 function savedPlace(state, id = state.activeId) {
   if (id === LOCAL_ID) return { id: LOCAL_ID, kind: "local", name: "This computer", ...(cleanColor(state.localColor) ? { color: state.localColor } : {}) };
@@ -483,6 +493,7 @@ module.exports = {
   withEnvironmentLook,
   withListedColors,
   withPlaceColor,
+  withPlaceName,
   withLocalEnvironment,
   withMicrophone,
   withoutEnvironment,
