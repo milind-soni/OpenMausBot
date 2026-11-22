@@ -235,6 +235,9 @@ async function callRemote(teammate: RemoteTeammate, query: string, init: Request
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
   let response: Response;
   try {
+    // An IP literal connects without a lookup, so serverOnlyLookup never sees it; a saved address is checked here too.
+    const host = new URL(teammate.base).hostname.replace(/^\[|\]$/g, "");
+    if (notAServerAddress(host)) throw new Error(`${host} is a link-local, metadata or reserved address, not another server`);
     // A redirect would carry the key to an address nobody saved.
     response = await (options.fetch ?? teammateFetch)(`${botApiEndpoint(teammate.base, teammate.botId)}${query}`, {
       ...init, redirect: "error", signal,
