@@ -526,3 +526,48 @@ describe("app-event automation that keeps one conversation", () => {
     expect(runsOf(trigger.id)[0]).not.toHaveProperty("sameConversation");
   });
 });
+
+describe("a bot limited to some accounts of an app", () => {
+  let support = "";
+  beforeEach(() => {
+    support = broker.account(owner.userId, "gmail", "support");
+    connected.gmail!.accounts.push({ id: support, alias: "support", status: "ACTIVE" });
+  });
+
+  it("watches only an account it may use: the one allowed is picked, another is refused", async () => {
+    const triggers = manager({ accountLimit: (botId, app) => (botId === "bot-1" && app === "gmail" ? [support] : undefined) });
+    const picked = await gmailTrigger(triggers);
+    expect(picked).toMatchObject({ accountId: support, accountLabel: "support" });
+    await expect(triggers.create({ botId: "bot-1", name: "Sales", prompt: "Draft a reply.", app: "gmail", event: "GMAIL_NEW_GMAIL_MESSAGE", account: "sales" }))
+      .rejects.toThrow("This bot may use only support in Gmail");
+    expect(triggers.list().map((trigger) => trigger.accountId)).toEqual([support]);
+  });
+
+  it("starts no run for an account the bot may no longer use", async () => {
+    let allowed: string[] | undefined;
+    const triggers = manager({ accountLimit: () => allowed });
+    const trigger = await triggers.create({ botId: "bot-1", name: "Sales", prompt: "Draft a reply.", app: "gmail", event: "GMAIL_NEW_GMAIL_MESSAGE", account: "sales" });
+    allowed = [support];
+    expect((await broker.deliver(trigger.remote.triggerId!, { subject: "Hello", sender: "j@acme.com" }, "msg_1")).status).toBe(200);
+    await drain(triggers);
+    expect(runsOf(trigger.id)).toHaveLength(0);
+    expect(triggers.attempts().at(-1)).toMatchObject({ triggerId: trigger.id, outcome: "rejected", reason: "its bot may no longer use this account" });
+    await expect(triggers.runNow(trigger.id)).rejects.toThrow("Its bot may no longer use this account");
+    // The app stops sending what would only be rejected, and the automation says why.
+    await triggers.reconcile();
+    const client = brokerClient(() => ({ url: broker.url, token: owner.token }));
+    expect((await client.inventory()).triggers.find((binding) => binding.triggerId === trigger.remote.triggerId)?.enabled).toBe(false);
+    expect(triggers.get(trigger.id)).toMatchObject({ enabled: true, problem: { kind: "error", text: expect.stringContaining("Access settings") } });
+    allowed = undefined;
+    await triggers.reconcile();
+    expect((await client.inventory()).triggers.find((binding) => binding.triggerId === trigger.remote.triggerId)?.enabled).toBe(true);
+    expect(triggers.get(trigger.id)?.problem).toBeUndefined();
+  });
+
+  it("lists only the accounts the bot may use in its event list", async () => {
+    const client = brokerClient(() => ({ url: broker.url, token: owner.token }));
+    const bot = { connectorScopes: { apps: { gmail: "read" as const }, accounts: { gmail: [support] } } };
+    const catalog = await appEventCatalog({ broker: client, connected, bot });
+    expect(catalog.apps.map((app) => app.accounts)).toEqual([[{ id: support, alias: "support" }]]);
+  });
+});

@@ -3,6 +3,7 @@
 import type { ServerResponse } from "node:http";
 
 import { botMayWatchApp, type AppEventCatalog } from "../shared/app-triggers.ts";
+import { accountLimit, type ConnectorScopes } from "../shared/connector-scopes.ts";
 import type { ConnectorToolGrant } from "../shared/wire.ts";
 import { appEventCatalog, appLabel } from "./app-event-catalog.ts";
 import { brokerClient, type AppTriggerBroker, type BrokerAccess } from "./app-trigger-broker.ts";
@@ -19,7 +20,7 @@ import type { WebhookManager } from "./webhooks.ts";
 
 type Bot = RosterMember & {
   color: string; composio?: boolean;
-  connectorTools?: Record<string, ConnectorToolGrant>; connectorScopes?: { apps: Record<string, "read" | "write"> };
+  connectorTools?: Record<string, ConnectorToolGrant>; connectorScopes?: ConnectorScopes;
 };
 type Connected = Record<string, { connected: boolean; accounts: Array<{ id: string; alias?: string; status: string }> }>;
 
@@ -75,6 +76,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
     service,
     connectedApps: deps.connectedApps,
     botState: deps.botState,
+    accountLimit: (botId, app) => accountLimit(deps.store.bot(botId)?.connectorScopes, app),
     runs: {
       enqueue: (input) => deps.routines().enqueueWebhook(input),
       merge: (triggerId, eventId, sameConversation, merge) => deps.routines().mergeIntoQueuedRun(triggerId, eventId, sameConversation, merge),
@@ -96,8 +98,9 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
     const connected = await deps.connectedApps();
     const result = await appEventCatalog({ broker, connected, bot, app, search });
     const wanted = app?.trim().toLowerCase();
-    if (wanted && !result.apps.length && connected[wanted]?.connected && !botMayWatchApp(bot, wanted)) {
-      return { ...result, unavailable: `${bot.name} has not been given access to ${appLabel(wanted)}. Ask the person to allow it under the bot's Access settings.` };
+    if (wanted && !result.apps.length && connected[wanted]?.connected) {
+      if (!botMayWatchApp(bot, wanted)) return { ...result, unavailable: `${bot.name} has not been given access to ${appLabel(wanted)}. Ask the person to allow it under the bot's Access settings.` };
+      if (accountLimit(bot.connectorScopes, wanted)) return { ...result, unavailable: `None of the ${appLabel(wanted)} accounts ${bot.name} may use is connected and working. Ask the person to reconnect one, or to allow another under the bot's Access settings.` };
     }
     return result;
   }
