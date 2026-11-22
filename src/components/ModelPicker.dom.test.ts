@@ -527,3 +527,32 @@ describe("while the bot is working", () => {
     expect(chip().disabled).toBe(true);
   });
 });
+
+describe("the header pill beside an open side panel", () => {
+  const renderFolded = (folded: boolean) => flushSync(() => root.render(createElement(ModelPicker, { bot: scout(), threadId: "thread-scout", folded })));
+  const pill = () => host.querySelector<HTMLButtonElement>("[data-model-pill]")!;
+
+  it("folds to its AI's mark, still names the model and its reasoning, and opens the same menu", async () => {
+    renderFolded(true);
+    expect(pill().hasAttribute("data-folded")).toBe(true);
+    expect(pill().getAttribute("aria-label")).toContain("Claude Opus 5.5");
+    expect(pill().getAttribute("aria-label")).toBe(pill().title.split("\n")[0]);
+    await openWith("click");
+    expect(menu()).not.toBeNull();
+    expect(chip().getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("opens back out to the full pill, named by its words again, when the panel closes", () => {
+    renderFolded(true);
+    renderFolded(false);
+    expect(pill().hasAttribute("data-folded")).toBe(false);
+    expect(pill().hasAttribute("aria-label")).toBe(false);
+    expect(pill().textContent).toContain("Claude Opus 5.5");
+  });
+
+  it("never folds the picker that sits inside a row", () => {
+    flushSync(() => root.render(createElement(ModelPicker, { bot: scout(), threadId: "thread-scout", contained: true, folded: true })));
+    expect(host.querySelector("[data-model-pill]")).toBeNull();
+    expect(chip().hasAttribute("aria-label")).toBe(false);
+  });
+});
