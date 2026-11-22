@@ -5637,8 +5637,7 @@ async function computerCallGate(internalCapability: InternalCapability, signal?:
   const { botId, threadId, generation } = internalCapability;
   const askedAt = Date.now();
   const deadline = askedAt + COMPUTER_CALL_WAIT_MS;
-  let personHeld = false;
-  const owner = { threadId, generation }, person = { held: () => sharedVm.snapshot(botId, threadId).held, lastTake: () => sharedVm.lastTake(botId, threadId) }, tookFrom = sharedVm.takeSequence();
+  let personHeld = false; const owner = { threadId, generation }, person = { held: () => sharedVm.snapshot(botId, threadId).held, lastTake: () => sharedVm.lastTake(botId, threadId) }, tookFrom = sharedVm.takeSequence();
   for (;;) {
     const snapshot = sharedVm.snapshot(botId, threadId);
     const helpOpen = snapshot.helpReason !== null;
@@ -5660,7 +5659,6 @@ async function computerCallGate(internalCapability: InternalCapability, signal?:
         if (lazyClaim.claimed || lazyClaim.failed || sharedVm.snapshot(botId, threadId).held) continue;
         if (lazyClaim.retryReason) return { held: true, helpOpen: false, blockedReason: computerGateAnswers.retry(owner, personHeld, lazyClaimRetryText(lazyClaim)) };
       }
-      // A queue place outranks a startup note: a team computer says "starting" once seated, then may queue again for its machine.
       held = computerGateAnswers.held(yourComputerWaiting(threadId, generation) ?? computerGateAnswers.contention(owner) ?? lazyClaim.pendingReason ?? CONTROL_NOT_READY, helpOpen); personHeld ||= held.reason === "person";
     } else {
       const computer = turnComputerResources.get(threadId);
