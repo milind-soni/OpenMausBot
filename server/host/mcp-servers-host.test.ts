@@ -11,6 +11,7 @@ import { providerToolAllowKey } from "../provider-tool-allow.ts";
 import { VaultStore } from "../vault-store.ts";
 import { createMcpKeys } from "../vault/mcp-keys.ts";
 import { claimedNotice, createMcpServersHost, startCheckTimeout } from "./mcp-servers-host.ts";
+import { notMcpError, type UrlAnswer } from "./mcp-url-checks.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -25,7 +26,7 @@ function script(data: string, ...parts: string[]): string {
   return path;
 }
 
-function setup(options: { boxed?: boolean; data?: string; bots?: Array<{ id: string; name: string; mcpServers?: string[]; toolScope?: unknown }> } = {}) {
+function setup(options: { boxed?: boolean; data?: string; bots?: Array<{ id: string; name: string; mcpServers?: string[]; toolScope?: unknown }>; urls?: Record<string, UrlAnswer> } = {}) {
   const data = options.data ?? mkdtempSync(join(tmpdir(), "omb-mcp-host-"));
   if (!options.data) dirs.push(data);
   const cfg: AppConfig = {
@@ -39,6 +40,7 @@ function setup(options: { boxed?: boolean; data?: string; bots?: Array<{ id: str
   } as AppConfig;
   const told: Array<{ text: string; about: string }> = [];
   const started: string[] = [];
+  const probed: string[] = [];
   const host = createMcpServersHost({
     dataDir: data,
     cfg: () => cfg,
@@ -54,8 +56,13 @@ function setup(options: { boxed?: boolean; data?: string; bots?: Array<{ id: str
       if (name === "broken") return { ok: false, error: "The server stopped before the MCP handshake finished." };
       return server.command === "/usr/bin/python3" && botId !== "iris" ? { ok: false, error: "No module named 'mcp'" } : { ok: true };
     },
+    // No network: a URL server answers as `urls` says, else it lists no tools.
+    probeUrl: async (server) => {
+      probed.push(server.url);
+      return options.urls?.[server.url] ?? { ok: true };
+    },
   });
-  return { cfg, host, told, started, data };
+  return { cfg, host, told, started, data, probed };
 }
 
 it("moves servers in one bot's folders to that bot once, says so once, and keeps them out of every other bot's turns", async () => {
@@ -151,6 +158,40 @@ it("leaves servers reached by URL alone", async () => {
   cfg.mcpServers!.linear = { type: "http", url: "https://mcp.linear.app/mcp", headers: {}, enabled: true };
   host.health.changed("linear");
   expect(host.mounted(PAUL).linear).toEqual({ type: "http", url: "https://mcp.linear.app/mcp", headers: {} });
+});
+
+it("leaves out a URL server whose address is no MCP endpoint, says so once, and keeps one that timed out or wants a key", async () => {
+  const PAGE = "https://docs.example.test/spreadsheets/u/1/", SLOW = "https://slow.example.test/mcp", KEYED = "https://keyed.example.test/mcp";
+  const { cfg, host, told, probed } = setup({ boxed: false, bots: [PAUL], urls: {
+    [PAGE]: { ok: false, status: 405 },
+    [SLOW]: { ok: false },
+    [KEYED]: { ok: false, status: 401 },
+  } });
+  cfg.mcpServers!.google = { type: "http", url: PAGE, headers: {}, enabled: true };
+  cfg.mcpServers!.slow = { type: "http", url: SLOW, headers: {}, enabled: true };
+  cfg.mcpServers!.keyed = { type: "http", url: KEYED, headers: {}, enabled: true };
+  expect(Object.keys(host.mounted(PAUL)), "before its check a URL server is mounted as before").toContain("google");
+  host.boot();
+  await host.health.settled();
+  expect(probed.sort()).toEqual([PAGE, KEYED, SLOW]);
+  expect(Object.keys(host.mounted(PAUL)).sort()).toEqual(["keyed", "notes", "slow"]);
+  expect(host.off(PAUL)).toContainEqual({ name: "google", error: notMcpError(405) });
+  expect(host.off(PAUL).map((off) => off.name)).not.toContain("slow");
+  expect(host.listing({ name: "google" }).offFor).toEqual(["paul"]);
+  expect(told.map((entry) => entry.text)).toContain("The Google tool doesn't start, so it's off for now. It comes back on its own once it starts.");
+
+  host.boot();
+  host.health.engineFailed(PAUL.id, ["google"]);
+  await host.health.settled();
+  expect(told.filter((entry) => entry.text.startsWith("The Google tool")), "said once").toHaveLength(1);
+
+  // The person fixes the address: it is mounted again at once and checked again.
+  cfg.mcpServers!.google = { type: "http", url: "https://mcp.example.test/sheets", headers: {}, enabled: true };
+  expect(Object.keys(host.mounted(PAUL))).toContain("google");
+  host.health.changed("google");
+  await host.health.settled();
+  expect(Object.keys(host.mounted(PAUL))).toContain("google");
+  expect(host.off(PAUL).map((off) => off.name)).not.toContain("google");
 });
 
 it("a package runner's first check waits for its download; any other program's keeps the short wait", () => {
