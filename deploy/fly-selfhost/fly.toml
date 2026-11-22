@@ -1,5 +1,5 @@
 app = "APP_NAME"
-primary_region = "iad"
+primary_region = "fra"
 kill_signal = "SIGTERM"
 kill_timeout = "30s"
 
@@ -22,9 +22,9 @@ kill_timeout = "30s"
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "stop"
+  auto_stop_machines = "off"
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
   [[http_service.checks]]
     grace_period = "30s"
     interval = "15s"
