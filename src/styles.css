@@ -3809,3 +3809,14 @@ button:disabled.bg-danger {
   from { opacity: 0; transform: translateX(-0.375rem); }
   to { opacity: 1; transform: translateX(0); }
 }
+
+/* The chat backdrop (GlassScrollFrame's ChatBackdrop) is a theme's to paint and animate; with reduced motion asked for,
+   whatever a theme animates there stands still, whether or not its CSS says so. */
+@media (prefers-reduced-motion: reduce) {
+  [data-look="chat-backdrop"],
+  [data-look="chat-backdrop"]::before,
+  [data-look="chat-backdrop"]::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

@@ -4,6 +4,7 @@ import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createAppSettings } from "../app-settings/host.ts";
+import { themeGuide } from "../../shared/theme.ts";
 import { pictureKind } from "./store.ts";
 import type { BotRecord } from "../store.ts";
 import { createThemeStore } from "./store.ts";
@@ -208,6 +209,14 @@ describe("app_settings theme actions", () => {
     expect(themes.list("owner")).toEqual({ active: null, themes: [{ id: "background", name: "Background", hasCss: false, assets: ["beach.jpg"] }] });
     expect(changed).toEqual([]);
     expect(messages.filter((m) => m.card)).toEqual([]);
+
+    expect(first.body.text, "the reply carries the guide's picture recipe, so no guide read is needed").toContain(`url("/api/theme-assets/background/beach.jpg") center / cover no-repeat; }`);
+    const veil = "color-mix(in srgb, var(--color-app) 62%, transparent)";
+    expect(first.body.text).toContain(`linear-gradient(${veil}, ${veil})`);
+    expect(themeGuide(), "the same veil as the guide's (palette.test.ts holds it readable)").toContain(`linear-gradient(${veil}, ${veil})`);
+    // Asked again with nothing worn, the same unworn theme takes the file: no Background 2.
+    expect((await call({ action: "add_theme_asset", path: "none" })).body.text).toContain("Added to the theme Background (id background)");
+    expect(themes.list("owner").themes.map((theme) => theme.id)).toEqual(["background"]);
 
     // set_theme wears it, with the card and Undo.
     const css = '[data-look="chat-backdrop"] { background: url("/api/theme-assets/background/beach.jpg") center / cover; }';

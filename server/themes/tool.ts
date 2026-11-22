@@ -42,6 +42,8 @@ async function picked(file: Opened, name: string): Promise<Picked> {
 }
 const HEIC = "That is a HEIC photo, which the app cannot show. Ask the person to send it as a JPEG or PNG (on an iPhone: share it, Options, Most Compatible), or, if you have a shell, convert it (on a Mac: sips -s format jpeg -Z 2560 in.heic --out out.jpg) and pass the new file.";
 const TOO_BIG = `A theme file may be up to ${THEME_LIMITS.assetBytes / 1024 / 1024} MB. Ask the person for a smaller one, or, if you have a shell, shrink it (on a Mac: sips -s format jpeg -Z 2560 in.jpg --out out.jpg) and pass the new file.`;
+/** The guide's veil over a picture background (shared/theme.ts; src/lib/theme/palette.test.ts holds it readable). */
+const VEIL = "color-mix(in srgb, var(--color-app) 62%, transparent)";
 const NOT_FOUND = "That file is not in your workspace or this conversation's attachments, or it cannot be read.";
 
 const BUILT_IN: readonly string[] = [...SKIN_IDS, "system"];
@@ -214,7 +216,9 @@ export function createThemeTool(deps: ThemeToolDeps) {
   async function addAsset(turn: Turn, person: string, body: Record<string, unknown>): Promise<Reply> {
     const asked = typeof body.id === "string" ? body.id.trim() : "";
     if (asked && (BUILT_IN.includes(asked) || !THEME_ID.test(asked) || asked === "none")) return refuse(400, `${asked} cannot be a saved theme's id. Use lowercase letters, digits and dashes, not a built-in skin's name.`);
-    const path = typeof body.path === "string" ? body.path.trim() : "";
+    const given = typeof body.path === "string" ? body.path.trim() : "";
+    // "none" and "latest" read as left out: models send a word where the schema says to leave a field out.
+    const path = /^(none|latest|null)$/i.test(given) ? "" : given;
     const opened = path ? await openNamed(turn, path) : await latestPicture(turn);
     if (!opened) return refuse(404, "No picture is attached in this conversation. Ask the person to attach one, or pass path.");
     if ("error" in opened) return refuse(opened.status, opened.error);
@@ -222,7 +226,10 @@ export function createThemeTool(deps: ThemeToolDeps) {
     try {
       if (kind === "heic") return refuse(400, HEIC);
       if (opened.size > THEME_LIMITS.assetBytes) return refuse(413, TOO_BIG);
-      const id = asked || store.active(person) || store.freeId(person, "Background");
+      // With nothing worn, the theme an earlier call made here and never wore (it has no CSS yet) takes the file, so
+      // trying again, or after Undo, does not leave Background, Background 2, ... behind.
+      const unworn = store.read(person, "background");
+      const id = asked || store.active(person) || (unworn && !unworn.css ? "background" : store.freeId(person, "Background"));
       const made = !store.read(person, id);
       if (made) {
         const saved = store.save(person, id, { name: asked || "Background" });
@@ -244,7 +251,7 @@ export function createThemeTool(deps: ThemeToolDeps) {
       const theme = store.read(person, id)!;
       return reply(200, { text: [
         made ? `Made the theme ${theme.name} (id ${id}) for this file over the person's built-in skin; it is not worn yet.` : `Added to the theme ${theme.name} (id ${id}).`,
-        `In its css write url("${added.url}").`,
+        `In its css write url("${added.url}")${kind ? `; as the chat background: [data-look="chat-backdrop"] { background: linear-gradient(${VEIL}, ${VEIL}), url("${added.url}") center / cover no-repeat; } (the veil of the theme's ground colour keeps text readable)` : ""}.`,
         `Then call set_theme with id ${id} and the whole theme to wear it${made ? "" : ", keeping its other fields (theme with this id returns them)"}.`,
       ].join(" ") });
     } finally {
