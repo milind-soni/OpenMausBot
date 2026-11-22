@@ -976,9 +976,12 @@ it("gives a teammate each request once, never also as a bare assistant line", ()
 /** The Engineering lead on a loopback OpenAI-compatible engine where `answer` replies to every chat request. */
 async function onLoopbackEngine(f: any, answer: (res: ServerResponse) => void): Promise<() => Promise<void>> {
   const llm = createServer(async (req, res) => {
-    for await (const _ of req) {}
+    let body = "";
+    for await (const chunk of req) body += chunk;
     // The chat engine asks a local server whether it is Ollama (/api/version); this one is not, and that is no model call.
     if (req.url?.endsWith("/api/version")) { res.statusCode = 404; res.end(); return; }
+    // Naming the work thread the hand-off opened is a one-shot of its own, not a step of the turn: it gets no title.
+    if (body.includes("Reply with only a short title")) { res.statusCode = 404; res.end(); return; }
     if (req.url?.endsWith("/models")) { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ data: [{ id: "loop-model" }] })); return; }
     answer(res);
   });
@@ -1072,6 +1075,49 @@ it("tells the Chief a teammate's turn stopped because its engine's settings chan
   expect(resumed.prompt.message.content).toContain("Turn interrupted — provider settings changed.");
   expect(resumed.prompt.message.content).not.toContain("The coordinated turn was interrupted");
 }), 45_000);
+
+// Each title reply is keyed to the job it names, so a thread named from the wrong message would show it.
+const titledHandoffs = () => {
+  const routes = join(mkdtempSync(join(tmpdir(), "omb-handed-title-")), "routes.json");
+  writeFileSync(routes, JSON.stringify({
+    "Message:\nImplement the CSV export": "CSV export build",
+    "Message:\nAdd the header row": "Header row follow-up",
+    "Message:\nSpec the PDF export": "PDF export spec",
+    "Message:\nRun the release QA": "Named by the model",
+  }));
+  return { FAKE_CLAUDE_TEXT_ROUTES: routes };
+};
+
+it("names a thread a teammate opened from the job it was handed, once, unless the sender named it", () => fixture(async f => {
+  f.plan[f.lead.id] = { turns: [{ reply: "Export implemented" }, { reply: "Header row added" }] };
+  f.plan[f.specialist.id] = { turns: [{ reply: "PDF spec written" }, { reply: "QA passed" }] };
+  f.plan[f.chief.id] = { turns: [
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Implement the CSV export" } }], reply: "Assigned the build" },
+    { reply: "The export is implemented" },
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Add the header row to that export" } }], reply: "Assigned the header row" },
+    { reply: "The header row is in" },
+    { steps: [
+      { arguments: { bot_ids: [f.specialist.id], message: "Spec the PDF export", thread: "new", reply: "none" } },
+      { arguments: { bot_ids: [f.specialist.id], message: "Run the release QA", thread: "new", title: "Release QA", reply: "none" } },
+    ], reply: "Sent both" },
+  ] };
+  f.save();
+  const send = async (text: string) => {
+    await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", text);
+    expect((await f.wait()).status).toBe("settled");
+  };
+  const tasksOf = async (botId: string) => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === botId).tasks;
+  await send("Ask Engineering to build the CSV export.");
+  const work = (await tasksOf(f.lead.id)).find((task: any) => task.openedBy?.kind === "work");
+  await expect.poll(async () => (await tasksOf(f.lead.id)).find((task: any) => task.threadId === work.threadId)?.title, { timeout: 15_000 })
+    .toBe("@Clive · CSV export build");
+  await send("Now ask them to add the header row.");
+  await send("Now have Reviewer spec the PDF export and run the release QA.");
+  await expect.poll(async () => (await tasksOf(f.specialist.id)).map((task: any) => task.title), { timeout: 15_000 })
+    .toEqual(expect.arrayContaining(["PDF export spec", "Release QA"]));
+  expect((await tasksOf(f.lead.id)).find((task: any) => task.threadId === work.threadId).title).toBe("@Clive · CSV export build");
+  expect((await tasksOf(f.specialist.id)).map((task: any) => task.title)).not.toContain("Named by the model");
+}, titledHandoffs()), 90_000);
 
 // The small model's word is the fixture's: what matters here is what the runtime does with it.
 const withStatusAnswer = (answer: string) => {

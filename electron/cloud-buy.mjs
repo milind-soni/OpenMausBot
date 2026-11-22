@@ -25,7 +25,10 @@ export const cleanCloudColor = value => (CLOUD_COLORS.includes(value) ? value : 
 /** The native switcher's dot for a saved colour (14 pt, sharp at 2x), drawn once per colour; null where it cannot be drawn. */
 export const colorDotIcons = nativeImage => dotIcons(nativeImage, CLOUD_COLOR_HEX);
 
-/** The name and colour chosen while the Cloud is set up, kept for its account until the Cloud is listed (userData). */
+const listedOf = saved => (saved.listed === null || typeof saved.listed === "string" ? { listed: saved.listed } : {});
+
+/** The name and colour chosen while the Cloud is set up, kept for its account (userData), with the name the Admin
+ * listed it under then (`listed`, null while it listed none). */
 export function lookFile(file, fs) {
   let cached;
   return {
@@ -34,7 +37,7 @@ export function lookFile(file, fs) {
       try {
         const saved = JSON.parse(fs.readFileSync(file(), "utf8"));
         cached = typeof saved?.accountId === "string" && cleanCloudName(saved.name) && cleanCloudColor(saved.color)
-          ? { accountId: saved.accountId, name: cleanCloudName(saved.name), color: saved.color } : null;
+          ? { accountId: saved.accountId, name: cleanCloudName(saved.name), color: saved.color, ...listedOf(saved) } : null;
       } catch { cached = null; }
       return cached;
     },
@@ -46,7 +49,7 @@ export function lookFile(file, fs) {
 }
 
 /** One answer to "what is this Cloud called, in which colour": its Servers entry once listed, else what was chosen, else My Cloud. */
-export function createCloudLook({ store, accountId, homeEntry, saveEntry }) {
+export function createCloudLook({ store, accountId, homeEntry, saveEntry, listedName = () => null }) {
   const chosen = () => { const saved = store.read(); return saved && saved.accountId === accountId() ? { name: saved.name, color: saved.color } : null; };
   const current = () => {
     const entry = homeEntry();
@@ -61,10 +64,21 @@ export function createCloudLook({ store, accountId, homeEntry, saveEntry }) {
       const look = { name: cleanCloudName(name), color: cleanCloudColor(color) };
       if (!look.name || !look.color) throw new Error(`Choose a name of up to ${CLOUD_NAME_MAX} characters and one of the colours.`);
       const id = accountId();
-      if (id) store.write({ accountId: id, ...look });
+      if (id) store.write({ accountId: id, ...look, listed: listedName() ?? null });
       const entry = homeEntry();
       if (entry) saveEntry(entry.origin, look);
       return current();
+    },
+    /** The name My Cloud's entry carries while the Admin lists it as `listed`: the one chosen here, until the Admin's
+     * name differs from the one it had when it was chosen (renamed there), which from then on is the one answer. */
+    homeName(listed) {
+      const saved = store.read();
+      if (!saved || saved.accountId !== accountId() || !("listed" in saved)) return listed;
+      if (saved.listed === listed) return saved.name;
+      if (saved.listed === null) { store.write({ ...saved, listed }); return saved.name; }
+      const { listed: _before, ...chosen } = saved;
+      store.write({ ...chosen, name: cleanCloudName(listed) ?? saved.name });
+      return listed;
     },
   };
 }

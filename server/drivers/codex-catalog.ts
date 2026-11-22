@@ -55,6 +55,13 @@ export function decodeCodexSelection(id: string | null | undefined): {
   return { model: id, modelProvider: OFFICIAL_CODEX_PROVIDER };
 }
 
+/** The model and provider a thread is started or resumed with: a routed (company or endpoint) instance and a ChatGPT plan
+ * name their own, any other follows the model's selection. */
+export function codexThreadSelection(route: { routedProvider?: string; plan: boolean }, model: string | null | undefined): { model?: string | null; modelProvider: string | null; serviceTier?: string } {
+  if (route.routedProvider) return { model, modelProvider: route.routedProvider };
+  return route.plan ? { model, modelProvider: "openai_chatgpt_plan" } : decodeCodexSelection(model);
+}
+
 /** Starts Codex on the chosen model's provider. codex-cli 0.167.0 refuses a turn whose thread provider differs from its
  * current one ("This chat uses custom, but your current provider is magpie"), whatever config.toml's model_provider says. */
 export function codexSelectedProviderArgs(env: Record<string, string | undefined>, modelId: string | null | undefined): string[] {

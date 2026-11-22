@@ -31,6 +31,7 @@ function setup(options: { start?: string; connected?: { gmail?: boolean; googlec
     connected: { gmail: false, googlecalendar: false, ...options.connected }, briefOn: false, phones: 0, busy: false,
     pushed: [] as string[], turns: [] as Array<{ text: string; threadId: string }>, welcomeDone: 0, runs: [] as RoutineRun[],
     reply: "This week: Standup Tue 10:00." as string | null,
+    briefCard: undefined as { threadId: string; messageId: string } | undefined,
     /** While set, the first look's turn runs until this is called. */
     held: null as null | (() => void), hold: false,
   };
@@ -39,7 +40,7 @@ function setup(options: { start?: string; connected?: { gmail?: boolean; googlec
     store, dataDir: dir, now: () => now, chief: () => store.bot(chief.id), mainThread: () => thread(), threadBusy: () => world.busy,
     person: () => world.person, language: () => world.language, timeZone: () => world.zone,
     apps: { reachable: () => true, connected: async () => ({ ...world.connected }), card: async (slug) => ({ label: slug === "gmail" ? "Gmail" : "Google Calendar", description: "" }) },
-    briefOn: () => world.briefOn, ensureBrief: () => { world.briefOn = true; }, phones: () => world.phones,
+    briefOn: () => world.briefOn, ensureBrief: () => { world.briefOn = true; }, briefCard: () => world.briefCard, phones: () => world.phones,
     startTurn: async (_botId, text, opts) => {
       world.turns.push({ text, threadId: opts.threadId });
       const end = () => {
@@ -247,8 +248,29 @@ describe("a new Cloud's first hour", () => {
     s.set("2026-10-28T12:00:00Z");
     fh.tick();
     fh.tick();
-    expect(s.texts().filter((text) => text?.startsWith("So far"))).toEqual(["So far I've sorted 40 emails, drafted 6 replies and prepped 4 meetings: about 2 hours back."]);
+    expect(s.texts().filter((text) => text?.startsWith("So far"))).toEqual(["So far I've sorted 40 emails for your morning brief, drafted 6 replies and prepped 4 meetings: about 2 hours back."]);
     expect(fh.tally()).toEqual({ sorted: 40, drafted: 6, prepped: 4, routines: 0 });
+  });
+
+  it("points the recap's sorted count to the morning brief card in the same chat, and nowhere else", () => {
+    const recapWith = (sorted: number, card: "here" | "none" | "elsewhere") => {
+      const s = setup({ start: "2026-10-27T09:00:00Z" });
+      const fh = s.make();
+      fh.begin();
+      const brief = s.store.appendMessage(s.thread(), { role: "bot", kind: "widget", text: "Your brief: 1 needs you", serverCard: true });
+      if (card !== "none") s.world.briefCard = { threadId: card === "here" ? s.thread() : "another-chat", messageId: brief.id };
+      if (sorted) s.ledger.add("sorted", sorted);
+      s.ledger.add("drafted", 2);
+      s.set("2026-10-28T09:00:00Z");
+      fh.tick();
+      return { recap: s.rows().findLast((row) => row.text?.startsWith("So far"))!, brief };
+    };
+    const linked = recapWith(12, "here");
+    expect(linked.recap.text).toBe("So far I've sorted 12 emails for your morning brief and drafted 2 replies: about 20 minutes back.");
+    expect(linked.recap.replyToId).toBe(linked.brief.id);
+    expect(recapWith(12, "none").recap.replyToId).toBeUndefined();
+    expect(recapWith(12, "elsewhere").recap.replyToId).toBeUndefined();
+    expect(recapWith(0, "here").recap.replyToId).toBeUndefined();
   });
 
   it("holds the recap while the person's newest message is still unanswered, so it never reads as the answer", () => {
@@ -265,7 +287,7 @@ describe("a new Cloud's first hour", () => {
     expect(s.texts().filter((text) => text?.startsWith("So far"))).toEqual([]);
     s.store.appendMessage(s.thread(), { role: "bot", kind: "widget", text: "Pick one", turnId: "turn-1" });
     fh.tick();
-    expect(s.texts().at(-1)).toBe("So far I've sorted 29 emails: about 30 minutes back.");
+    expect(s.texts().at(-1)).toBe("So far I've sorted 29 emails for your morning brief: about 30 minutes back.");
   });
 
   it("counts a routine's posted results in the recap, and says nothing at all when nothing was done", () => {

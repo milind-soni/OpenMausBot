@@ -39,6 +39,7 @@ import type { VaultReader, VaultStore } from "../vault-store.ts";
 import { loginUsableBy } from "../../shared/logins.ts";
 import { vaultNameKey, type VaultChoice } from "../../shared/vault.ts";
 import { fittingChoices } from "../vault/choices.ts";
+import { VAULT_VALUE_MAX_BYTES } from "../vault/value-limits.ts";
 import { linkedSecretNames } from "../vault/providers.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
 import { serverLine } from "../server-lines.ts";
@@ -257,8 +258,8 @@ export function createSecretCards(deps: SecretCardsDeps) {
     const message = openCustomCard(botId, threadId, messageId);
     if ("status" in message) return message;
     const value = typeof raw === "string" ? raw.trim() : "";
-    if (!value || Buffer.byteLength(value) > SECRET_VALUE_MAX_BYTES) {
-      return { status: 400, body: { ...userError("serverError.secret.valueSize", { bytes: SECRET_VALUE_MAX_BYTES }) } };
+    if (!value || Buffer.byteLength(value) > VAULT_VALUE_MAX_BYTES) {
+      return { status: 400, body: { ...userError("serverError.secret.valueSize", { bytes: VAULT_VALUE_MAX_BYTES }) } };
     }
     try {
       storeCustomSecret(message, botId, threadId, value);

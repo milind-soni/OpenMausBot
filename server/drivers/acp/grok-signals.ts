@@ -50,7 +50,14 @@ export async function grokPromptOutcome(): Promise<(result: unknown) => Promise<
   };
 }
 
+/** grok 1.0.41's words when its sign-in check failed for a moment while it stays signed in: its own 401 line comes first,
+ * so the raw text reads as a sign-out, and a routine run would stop for a sign-in nobody needs to do. */
+const GROK_AUTH_BLIP = /\bAuthentication is temporarily unavailable\b[\s\S]*\bstill signed in\b/i;
+
 export function grokReportedFailure(error: unknown): Error | undefined {
+  if (error instanceof Error && GROK_AUTH_BLIP.test(error.message)) {
+    return new AcpReportedFailure({ message: "Grok couldn't confirm its sign-in for a moment (often a network error right after waking). It is still signed in: try again in a few seconds." }, false);
+  }
   if ((error as { code?: unknown } | null)?.code !== GROK_RATE_LIMITED) return undefined;
   return grokLimitFailure(error instanceof Error ? error.message : "");
 }

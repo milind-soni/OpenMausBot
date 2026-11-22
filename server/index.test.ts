@@ -12435,8 +12435,14 @@ describe("harness HTTP API", () => {
 
     const saved = await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } });
     expect(saved.status).toBe(200);
-    expect(saved.body.vps).toEqual({ configured: true, sshAlias: "production-vps" });
+    expect(saved.body.vps).toEqual({ configured: true, sshAlias: "production-vps", servers: [] });
     expect(JSON.stringify(saved.body)).not.toContain("privateKey");
+
+    // Named servers are their own list: saving it leaves the default server alone.
+    const named = await api("PUT", "/api/config", { vpsServers: [{ name: "Home lab", sshAlias: "home-lab" }] });
+    expect(named.status, JSON.stringify(named.body)).toBe(200);
+    expect(named.body.vps).toEqual({ configured: true, sshAlias: "production-vps", servers: [{ name: "Home lab", sshAlias: "home-lab" }] });
+    expect((await api("PUT", "/api/config", { vpsServers: [{ name: "Bad", sshAlias: "prod; reboot" }] })).status).toBe(400);
 
     const patched = await api("PATCH", `/api/bots/${bot.id}`, { cloudBackend: "vps" });
     expect(patched.status).toBe(200);
@@ -12471,7 +12477,7 @@ describe("harness HTTP API", () => {
     const memberStream = await openSse(`${BASE}/api/events`, { authorization: `Bearer ${memberToken}` });
     const ownerStream = await openSse(`${BASE}/api/events`);
     try {
-      expect((await asMember("GET", "/api/config")).body.vps).toEqual({ configured: true, sshAlias: "" });
+      expect((await asMember("GET", "/api/config")).body.vps).toEqual({ configured: true, sshAlias: "", servers: [] });
       const listed = (await asMember("GET", "/api/bots?messages=0")).body.bots.find((candidate: any) => candidate.id === bot.id);
       expect(listed).toMatchObject({ id: bot.id, cloudBackend: "vps" });
       expect(listed).not.toHaveProperty("vpsAlias");
@@ -12497,6 +12503,8 @@ describe("harness HTTP API", () => {
     expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
     expect(cleared.body.bot.vpsAlias).toBeUndefined();
     expect((await api("PATCH", "/api/config", { vps: { sshAlias: "" } })).status).toBe(200);
+    const emptied = await api("PUT", "/api/config", { vpsServers: [] });
+    expect(emptied.body.vps.servers).toEqual([]);
   });
 
   it("validates a Composio project key, creates a Session, and keeps externally stored secrets off disk", async () => {

@@ -16,6 +16,7 @@ import {
 import { listenLiveFrames } from "@/lib/live-events";
 import { useActivityFocus } from "@/lib/activity-focus";
 import { t } from "@/lib/i18n";
+import { serverFetch } from "@/lib/relay-server";
 
 const LIMIT = 300;
 
@@ -38,7 +39,7 @@ export function ActivityPanel({ bot }: { bot: Bot }) {
     const controller = new AbortController();
     loadAbort.current = controller;
     try {
-      const res = await fetch(`/api/bots/${bot.id}/activity?limit=${LIMIT}`, { signal: controller.signal });
+      const res = await serverFetch(`/api/bots/${bot.id}/activity?limit=${LIMIT}`, { signal: controller.signal });
       if (!res.ok) throw new Error(`${res.status}`);
       // SAFETY: the same-version harness's typed activity endpoint; malformed transport data is handled by catch.
       const next = (await res.json()) as { rows: ActivityRow[] };

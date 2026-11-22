@@ -11,7 +11,9 @@ import {
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { pageOnRemoteServer } from "@/lib/local-computer";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
+import { serverFetch } from "@/lib/relay-server";
 
 const LINUX_GUIDE_URL =
   "https://github.com/milind-soni/OpenMausBot/blob/main/docs/linux-desktop.md#enable-local-control";
@@ -25,7 +27,7 @@ export function LinuxLocalControl() {
   const [pending, setPending] = useState<"enable" | "disable" | "retry" | null>(null);
   const [error, setError] = useState<string | { key: "computer.linux.stopFailed" } | null>(null);
 
-  if (capabilities.host.platform !== "linux") return null;
+  if (capabilities.host.platform !== "linux" || pageOnRemoteServer(capabilities)) return null;
   const busy = pending !== null || local.status === "checking" || local.status === "starting";
   const ready = local.available;
   const waylandSafetyBlocked = local.reasonCode === "linux-wayland-seat-safety-blocked";
@@ -40,7 +42,7 @@ export function LinuxLocalControl() {
     setError(null);
     try {
       if (action === "disable" || action === "retry") {
-        const response = await fetch("/api/local-computer/interrupt", { method: "POST" });
+        const response = await serverFetch("/api/local-computer/interrupt", { method: "POST" });
         if (!response.ok) {
           setError({ key: "computer.linux.stopFailed" });
           return;
