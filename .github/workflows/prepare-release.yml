@@ -121,11 +121,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.next }}
         run: |
+          body="Bumps OpenMausBot to \`$VERSION\`. Merging this PR automatically starts the existing release workflow and assembles a draft release from the exact merge commit."
+          # A bump that raises the written data format changes what the app does, so its PR says so.
+          if ! git diff --quiet HEAD~1 HEAD -- server/data-format.ts; then
+            body="$body
+
+          **This bump also raises the data format this version writes** (\`server/data-format.ts\`). Data it writes can be read only by the previous published release and newer; older versions refuse to start on it."
+          fi
           url=$(gh pr create \
             --base main \
             --head "release/v$VERSION" \
             --title "chore(release): bump version to $VERSION" \
-            --body "Bumps OpenMausBot to \`$VERSION\`. Merging this PR automatically starts the existing release workflow and assembles a draft release from the exact merge commit.")
+            --body "$body")
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "### Release PR" >> "$GITHUB_STEP_SUMMARY"
           echo "$url" >> "$GITHUB_STEP_SUMMARY"
