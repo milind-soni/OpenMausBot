@@ -38,7 +38,7 @@ import { serverErrorText } from "@/lib/server-error";
 import { CopyImageButton } from "./CopyImageButton";
 import { FilePreviewButton } from "./FilePreviewButton";
 import { chipNameAction, SaveIconButton, useHtmlPreview } from "./HtmlFilePreview";
-import { ImageLoading } from "./ImageLoading"; import { openLinkedFolder } from "./RevealOriginalMenu";
+import { ImageLoading } from "./ImageLoading"; import { openLinkedFolder } from "./RevealOriginalMenu"; import { serverFetch } from "@/lib/relay-server";
 
 export interface PreviewImage {
   src: string;
@@ -204,7 +204,7 @@ export function messageImagePreviewUrl(
 
 export async function messageImageOutsideWorkspace(src: string): Promise<boolean> {
   try {
-    const response = await fetch(src, { cache: "no-store" });
+    const response = await serverFetch(src, { cache: "no-store" });
     if (response.ok) {
       await response.body?.cancel();
       return false;
@@ -227,7 +227,7 @@ export async function requestMessageFile(
   signal: AbortSignal,
   options?: { entry?: string; list?: boolean; mediaLink?: boolean },
 ): Promise<Response> {
-  const response = await fetch(`/api/threads/${encodeURIComponent(message.threadId)}/messages/${encodeURIComponent(message.messageId)}/file`, {
+  const response = await serverFetch(`/api/threads/${encodeURIComponent(message.threadId)}/messages/${encodeURIComponent(message.messageId)}/file`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
