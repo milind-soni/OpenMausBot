@@ -324,7 +324,8 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
           } else if (plan.batch.length && aiAllowed) {
             items.mail = plan.batch;
             pending.mail = [...plan.batch.map((email) => email.id), ...plan.quiet.map((email) => email.id)];
-            pending.replies = plan.batch.map((email) => ({ threadId: email.threadId, to: addressOf(email.from) }));
+            // The only draft a fenced run may write is a Gmail one, so an Outlook email gets no reply slot.
+            pending.replies = plan.batch.filter((email) => email.app !== "outlook").map((email) => ({ threadId: email.threadId, to: addressOf(email.from) }));
             if (advanced !== undefined) pending.mailCursor = advanced;
           } else {
             if (plan.batch.length && !context.hold) report.unfenced = true;

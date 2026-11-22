@@ -242,6 +242,8 @@ describe("a routine's checks", () => {
     expect(result.run!.prompt).toContain("[Records from Outlook.");
     expect(result.run!.prompt).toContain("id o2 · from Sender o2 <o2@outlook.test>");
     expect(s.checks.items(result.run!.key)?.mail.map((email) => email.id)).toEqual(["o2", "o1"]);
+    // A fenced run drafts only in Gmail, so an Outlook conversation is never a draft it may write.
+    expect(s.checks.mayDraft(result.run!.key, "conv-o2", "o2@outlook.test")).toBe(false);
     s.checks.commit(result.run!.key);
     s.advance(15 * MINUTE);
     expect((await s.checks.check(s.routine(), { manual: true })).run).toBeUndefined();
