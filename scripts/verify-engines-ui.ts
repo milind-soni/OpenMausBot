@@ -38,6 +38,7 @@ const instances: InstanceInfo[] = [
   ["commandCode", "commandCodeAgent", "Command Code", true, "1.88.4"],
   ["kiro", "kiroAgent", "Kiro", true, "3.1.0"],
   ["devin", "devinAgent", "Devin", true, "3000.12.59"],
+  ["t3code", "t3codeAgent", "T3 Code", true, "0.1.11"],
 ].map(([id, driver, name, ready, version]) => ({
   instanceId: String(id), driverKind: String(driver), displayName: String(name),
   cliDefault: String(id),
