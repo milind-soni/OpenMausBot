@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { test } from "vitest";
 
 import { CLAUDE_IMAGE_KEEP, CLAUDE_IMAGE_LIMIT, foldTranscriptImages, imagesToKeep, transcriptImagesOver, transcriptPath } from "./claude-transcript-images.ts";
@@ -100,19 +100,39 @@ test("the transcript is found where Claude Code writes it: a linked working dire
   const base = mkdtempSync(join(tmpdir(), "claude-images-"));
   const configDir = join(base, ".claude-api");
   const rows = Array.from({ length: 21 }, (_, i) => userRow([image(i)], i)).join("\n");
-  // the folder named after the resolved directory, built here by the CLI's own rule rather than through transcriptPath
+  // the folder named after the resolved directory (the CLI resolves links, on macOS even /tmp to /private/tmp), built
+  // here by the CLI's own rule rather than through transcriptPath
   const real = join(base, "real");
   mkdirSync(real);
   const link = join(base, "link");
   symlinkSync(real, link);
-  const linked = join(configDir, "projects", real.replace(/[^A-Za-z0-9]/g, "-"));
+  const linked = join(configDir, "projects", realpathSync.native(real).replace(/[^A-Za-z0-9]/g, "-"));
   mkdirSync(linked, { recursive: true });
   writeFileSync(join(linked, "s1.jsonl"), rows);
   assert.equal(transcriptImagesOver({ configDir, cwd: link, sessionId: "s1" }), true);
   assert.equal(foldTranscriptImages({ configDir, cwd: link, sessionId: "s1" }).folded, 21 - CLAUDE_IMAGE_KEEP);
-  // a long working directory: cut at 200 characters, then '-' and the CLI's hash of the full path
-  const long = "/" + "deep/".repeat(50) + "thread";
-  assert.equal(transcriptPath(configDir, long, "s1"), join(configDir, "projects", `${long.replace(/[^A-Za-z0-9]/g, "-").slice(0, 200)}-h0oumx`, "s1.jsonl"));
+  // a long working directory: the CLI cuts the folder name at 200 characters and appends a hash of the resolved path
+  const suffix = (path: string) => {
+    let hash = 0;
+    for (let i = 0; i < path.length; i++) hash = ((hash << 5) - hash + path.charCodeAt(i)) | 0;
+    return Math.abs(hash).toString(36);
+  };
+  const long = mkdtempSync(join(tmpdir(), "claude-images-")) + "/" + "deep/".repeat(50) + "thread";
+  mkdirSync(long, { recursive: true });
+  const resolvedLong = realpathSync(long);
+  assert.ok(resolvedLong.length > 200);
+  const longName = transcriptPath(configDir, long, "s1");
+  assert.equal(longName, join(configDir, "projects", `${resolvedLong.replace(/[^A-Za-z0-9]/g, "-").slice(0, 200)}-${suffix(resolvedLong)}`, "s1.jsonl"));
+  // the CLI's own shape: the cut name, then '-' and a short base-36 hash
+  assert.equal(longName.split("/").at(-2)!.length, 200 + 1 + suffix(resolvedLong).length);
+  assert.match(longName.split("/").at(-2)!, /-[0-9a-z]+$/);
+  // reached through a link, the same folder: the resolution happens inside transcriptPath
+  const longLink = join(dirname(long), "link-" + basename(long).slice(0, 40));
+  symlinkSync(long, longLink);
+  assert.equal(transcriptPath(configDir, longLink, "s1"), longName);
+  // a working directory that is gone: named after the path as given, hashed the same way
+  const gone = "/" + "deep/".repeat(50) + "thread";
+  assert.equal(transcriptPath(configDir, gone, "s1"), join(configDir, "projects", `${gone.replace(/[^A-Za-z0-9]/g, "-").slice(0, 200)}-${suffix(gone)}`, "s1.jsonl"));
 });
 
 test("a transcript that cannot be read keeps the warm process and costs the turn nothing", () => {

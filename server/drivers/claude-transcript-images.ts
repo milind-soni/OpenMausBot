@@ -33,31 +33,33 @@ interface TranscriptOptions {
   sessionId: string;
 }
 
-/** Where Claude Code keeps one session's transcript, as its own code names it: the working directory with everything but
- * letters and digits turned into '-', cut at 200 characters plus a hash of the full path when longer. */
+/** Where Claude Code keeps one session's transcript, as its own code names it: the resolved working directory with
+ * everything but letters and digits turned into '-', cut at 200 characters plus a base-36 hash of the resolved path
+ * when longer (checked against the installed CLI: the hash runs over the path as resolved, not as given). */
 export function transcriptPath(configDir: string, cwd: string, sessionId: string): string {
-  let name = cwd.replace(/[^A-Za-z0-9]/g, "-");
-  if (name.length > PROJECT_DIR_MAX) {
-    let hash = 0;
-    for (let i = 0; i < cwd.length; i++) hash = ((hash << 5) - hash + cwd.charCodeAt(i)) | 0;
-    name = `${name.slice(0, PROJECT_DIR_MAX)}-${Math.abs(hash).toString(36)}`;
-  }
+  let dir = cwd, resolved = false;
+  try {
+    dir = realpathSync.native(cwd).normalize("NFC");
+    resolved = true;
+  } catch { /* a working directory that is gone: only the name given */ }
+  let name = dir.replace(/[^A-Za-z0-9]/g, "-");
+  if (name.length > PROJECT_DIR_MAX) name = `${name.slice(0, PROJECT_DIR_MAX)}-${folderHash(resolved ? dir : cwd)}`;
   return join(configDir, "projects", name, `${sessionId}.jsonl`);
 }
 
-/** The transcript under the working directory as given, or as resolved when it is reached through a link. */
+/** The suffix the CLI appends to a project folder over 200 characters: a rolling hash of the path, in base-36. */
+const folderHash = (path: string) => {
+  let hash = 0;
+  for (let i = 0; i < path.length; i++) hash = ((hash << 5) - hash + path.charCodeAt(i)) | 0;
+  return Math.abs(hash).toString(36);
+};
+
+/** The transcript for one session: the folder the CLI names after the resolved working directory. */
 function findTranscript(options: TranscriptOptions): { file: string; stat: Stats } | undefined {
-  const dirs = [options.cwd];
+  const file = transcriptPath(options.configDir, options.cwd, options.sessionId);
   try {
-    const real = realpathSync(options.cwd);
-    if (real !== options.cwd) dirs.push(real);
-  } catch { /* a working directory that is gone: only the name given */ }
-  for (const dir of dirs) {
-    const file = transcriptPath(options.configDir, dir, options.sessionId);
-    try {
-      return { file, stat: statSync(file) };
-    } catch { /* not under this name */ }
-  }
+    return { file, stat: statSync(file) };
+  } catch { /* no transcript under the resolved name, or the name as given when the directory is gone */ }
   return undefined;
 }
 
@@ -83,7 +85,7 @@ export const imagesToKeep = (incoming = 0) => Math.max(0, Math.min(CLAUDE_IMAGE_
 
 /** Whether a warm process on this session would send more than the limit with `incoming` new images: its transcript
  * already holds everything it will resend. False when there is no transcript, and when it cannot be read: the warm
- * process then keeps the turn, as it did before this check. */
+ * process then keeps the turn. */
 export function transcriptImagesOver(options: TranscriptOptions, incoming = 0): boolean {
   try {
     const found = findTranscript(options);
