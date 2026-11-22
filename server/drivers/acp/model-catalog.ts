@@ -47,8 +47,8 @@ export function acpModelCatalog(input: {
         problem = undefined;
       } else unconfirmedModelCatalog(models);
     } catch (error) {
-      problem = input.explain?.(error) ?? "failed";
       unconfirmedModelCatalog(models);
+      try { problem = input.explain?.(error) ?? "failed"; } catch { problem = "failed"; }
     }
     try { writeStartupModelCache(instanceId, models); } catch {}
   };

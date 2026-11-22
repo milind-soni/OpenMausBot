@@ -237,23 +237,20 @@ describe("a model list whose per-model effort reads are cut short (shared fake A
     catalog.options.filter((option) => option.variants?.length).map((option) => option.id);
 
   it("keeps every listed model when the whole read runs out of time, with efforts only for the models it reached", async () => {
-    const catalog = await discoverAcpModels(env({ FAKE_ACP_MODEL_SWITCH_DELAY_MS: "400" }), FAKE_ACP_CLI, [], { ...DEVIN_LIKE, timeoutMs: 1_000 });
+    const catalog = await discoverAcpModels(env({ FAKE_ACP_HANG_ON_MODEL: MODELS[3] }), FAKE_ACP_CLI, [], { ...DEVIN_LIKE, timeoutMs: 5_000 });
     expect(catalog.default).toBe("agent-default");
     expect(catalog.options.map((option) => option.id)).toEqual(["agent-default", ...MODELS]);
-    const read = withEfforts(catalog);
-    expect(read[0]).toBe(MODELS[0]);
-    expect(read.length).toBeGreaterThan(1);
-    expect(read.length).toBeLessThan(MODELS.length);
+    expect(withEfforts(catalog)).toEqual(MODELS.slice(0, 3));
     expect(catalog.options.find((option) => option.id === MODELS[1])?.variants).toEqual([{ id: "low", label: "Low" }, { id: "high", label: "High" }]);
     expect(discoveryCutShort(catalog)).toBe(true);
-  });
+  }, 20_000);
 
-  it("keeps every listed model when each switch takes longer than a request may", async () => {
-    const catalog = await discoverAcpModels(env({ FAKE_ACP_MODEL_SWITCH_DELAY_MS: "300" }), FAKE_ACP_CLI, [], { ...DEVIN_LIKE, requestTimeoutMs: 100 });
+  it("keeps every listed model, and reads the rest, when one switch takes longer than a request may", async () => {
+    const catalog = await discoverAcpModels(env({ FAKE_ACP_HANG_ON_MODEL: MODELS[2] }), FAKE_ACP_CLI, [], { ...DEVIN_LIKE, requestTimeoutMs: 5_000 });
     expect(catalog.options.map((option) => option.id)).toEqual(["agent-default", ...MODELS]);
-    expect(withEfforts(catalog)).toEqual([MODELS[0]]);
+    expect(withEfforts(catalog)).toEqual(MODELS.filter((model) => model !== MODELS[2]));
     expect(discoveryCutShort(catalog)).toBe(true);
-  });
+  }, 20_000);
 
   it("keeps every listed model when the agent exits partway through the switches", async () => {
     const catalog = await discoverAcpModels(env({ FAKE_ACP_EXIT_ON_MODEL: MODELS[3] }), FAKE_ACP_CLI, [], DEVIN_LIKE);
@@ -276,11 +273,11 @@ describe("a model list whose per-model effort reads are cut short (shared fake A
     scratch.push(dir);
     const cli = join(dir, "silent.mjs");
     await writeFile(cli, "process.stdin.resume();\n");
-    const error = await discoverAcpModels(process.env, `${JSON.stringify(process.execPath)} ${JSON.stringify(cli)}`, [], { requestTimeoutMs: 100 })
+    const error = await discoverAcpModels(process.env, `${JSON.stringify(process.execPath)} ${JSON.stringify(cli)}`, [], { requestTimeoutMs: 500 })
       .then(() => undefined, (failure: unknown) => failure);
     expect(error).toBeInstanceOf(AcpDiscoveryTimeoutError);
     expect(acpDiscoveryProblem(error)).toBe("timedOut");
-  });
+  }, 20_000);
 
   it("names a refused sign-in only when the engine's own classifier reads it as one", () => {
     const loggedOut = new AcpDiscoveryRpcError(-32000, "Please log in to use Devin. Use `/login` to authenticate again.");
