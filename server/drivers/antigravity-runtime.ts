@@ -36,7 +36,7 @@ import {
   type AntigravityReleaseAsset,
 } from "./antigravity-release.ts";
 import { parseVersionTriple, versionAtLeast } from "./acp/version-probe.ts";
-import { ANTIGRAVITY_NATIVE_CLI, activeAntigravityCli, installAntigravityCli, isAntigravityCliName } from "./antigravity-cli-install.ts";
+import { ANTIGRAVITY_NATIVE_CLI, activeAntigravityCli, antigravityNativeByDefault, installAntigravityCli, isAntigravityCliName } from "./antigravity-cli-install.ts";
 import { antigravityCliTarget, latestAntigravityCliRelease, type AntigravityCliReleaseAsset } from "./antigravity-cli-release.ts";
 
 const FREE_SPACE_MARGIN = 256 * 1024 * 1024;
@@ -108,6 +108,8 @@ export interface AntigravityInstallOptions {
   asset?: AntigravityReleaseAsset | null;
   /** The engine's CLI path asks for the native CLI: install it or fail, with no pinned runtime in its place. */
   native?: boolean;
+  /** Whether a configuration that names no CLI runs the native one; the platform's own rule when unset. */
+  nativeByDefault?: boolean;
   /** The native CLI release to install, instead of asking Google's channel. */
   cliRelease?: AntigravityCliReleaseAsset | null;
   fetchImpl?: typeof fetch;
@@ -212,7 +214,9 @@ export async function resolveAntigravityRuntime(
   binaryPath?: string,
   env: NodeJS.ProcessEnv = process.env,
   baseDir = DATA_DIR,
+  options: { nativeByDefault?: boolean } = {},
 ): Promise<AntigravityRuntime> {
+  const nativeDefault = options.nativeByDefault ?? antigravityNativeByDefault();
   const override = binaryPath?.trim();
   const legacyCli = override !== undefined && /(?:^|[\\/])agy(?:\.(?:cmd|bat|exe|ps1))?$/iu.test(override);
   const native = isAntigravityNativeAlias(override);
@@ -228,7 +232,7 @@ export async function resolveAntigravityRuntime(
     }
   }
 
-  const installedCli = ANTIGRAVITY_NATIVE_CLI ? await activeAntigravityCli(runtimeRoot(baseDir)) : null;
+  const installedCli = ANTIGRAVITY_NATIVE_CLI && (native || nativeDefault) ? await activeAntigravityCli(runtimeRoot(baseDir)) : null;
   if (native) {
     if (installedCli) return installedCli;
     throw new AntigravitySetupError("Antigravity's native CLI is not installed. Install the official Google runtime to continue, or set the CLI path back to agy.");
@@ -248,6 +252,9 @@ export async function resolveAntigravityRuntime(
     throw new AntigravitySetupError(legacyCli
       ? `Antigravity no longer runs the agy command, and Google does not publish its official runtime for ${process.platform}-${process.arch}. Set the custom executable path to ${names.executable}, with ${names.harness} in the same folder.`
       : `Google does not publish an Antigravity runtime for ${process.platform}-${process.arch}. Set a custom executable path.`);
+  }
+  if (!asset && !nativeDefault) {
+    throw new AntigravitySetupError(`Google does not publish the pinned Antigravity runtime for ${process.platform}-${process.arch}. Set the CLI path to antigravity to use Google's native CLI.`);
   }
   throw new AntigravitySetupError(legacyCli
     ? "Antigravity now uses Google's official runtime. Choose Install official Antigravity, then Sign in with Google. Your previous agy login is not copied."
@@ -284,6 +291,7 @@ async function extractPinnedArchive(
  * failure is thrown unless this is a new install the pinned runtime can stand in for. */
 async function installNativeCli(options: AntigravityInstallOptions, root: string): Promise<AntigravityRuntime | null> {
   if (!ANTIGRAVITY_NATIVE_CLI || options.asset !== undefined) return null;
+  if (!options.native && !(options.nativeByDefault ?? antigravityNativeByDefault())) return null;
   const pinned = resolveAntigravityReleaseAsset();
   const active = await activeAntigravityCli(root);
   if (!options.native && !active && pinned
@@ -313,7 +321,9 @@ async function installOnce(options: AntigravityInstallOptions): Promise<Antigrav
   const cli = await installNativeCli(options, root);
   if (cli) return cli;
   const asset = options.asset === undefined ? resolveAntigravityReleaseAsset() : options.asset;
-  if (!asset) throw new Error(`Google does not publish an Antigravity runtime for ${process.platform}-${process.arch}.`);
+  if (!asset) {
+    throw new Error(`Google does not publish an Antigravity runtime for ${process.platform}-${process.arch}.${ANTIGRAVITY_NATIVE_CLI && antigravityCliTarget(process.platform, process.arch) ? " Set the CLI path to antigravity to use Google's native CLI." : ""}`);
+  }
   const versions = join(root, "versions");
   const destination = join(versions, asset.sha256);
   await mkdir(versions, { recursive: true, mode: 0o700 });
@@ -444,8 +454,11 @@ export async function antigravityCliUpdate(options: {
   baseDir?: string; now?: number; latest?: () => Promise<AntigravityCliReleaseAsset | null>; asset?: AntigravityReleaseAsset | null;
   /** Every engine's configured CLI path. */
   configuredClis?: readonly string[];
+  nativeByDefault?: boolean;
 } = {}): Promise<string | null> {
   if (!ANTIGRAVITY_NATIVE_CLI) return null;
+  const wanted = (options.configuredClis ?? []).some(isAntigravityNativeAlias) || (options.nativeByDefault ?? antigravityNativeByDefault());
+  if (!wanted) return null;
   const root = runtimeRoot(options.baseDir);
   const active = await activeAntigravityCli(root);
   if (!active?.version) return null;

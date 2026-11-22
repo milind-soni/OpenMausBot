@@ -16,9 +16,17 @@ import type { PlanExtra, PlanFetch, PlanModelUsage, PlanWindow, PlanWindows } fr
 import { antigravityTokenPath } from "./antigravity-acp.ts";
 import { refreshAntigravityAccess } from "./antigravity-account.ts";
 import { antigravityQuotaFamily } from "./antigravity-turn-outcome.ts";
+import { antigravityNativeByDefault, isAntigravityCliName } from "./antigravity-cli-install.ts";
+import { resolveAntigravityReleaseAsset } from "./antigravity-release.ts";
 
 /** Whether Antigravity accounts are asked for their limits at all. Off, they have no row in the usage report. */
 export const ANTIGRAVITY_USAGE_LIMITS = true;
+
+/** Whether an instance with this CLI path runs the native CLI. Its sign-in is not the token file this report reads, and it
+ * has no limits here yet: a token file left from the pinned runtime must not stand for its account. */
+export function antigravityRunsNativeCli(cli: unknown, nativeByDefault = antigravityNativeByDefault()): boolean {
+  return (typeof cli === "string" && isAntigravityCliName(cli.trim())) || (nativeByDefault && resolveAntigravityReleaseAsset() === null);
+}
 
 export function antigravityUserAgent(platform: NodeJS.Platform, architecture: string): string {
   return `antigravity/hub/2.24.0 (aidev_client; os_type=${platform}; arch=${architecture}; cl=963137146)`;

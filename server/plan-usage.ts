@@ -8,7 +8,7 @@ import type { InstanceConfigMap } from "./contracts.ts";
 import { resolveClaudeConfigDir } from "./drivers/claude.ts";
 import { codexHome } from "./drivers/codex-identity.ts";
 import { codexHasCredits } from "./codex-credits.ts";
-import { antigravityPlanUsage } from "./drivers/antigravity-usage-limits.ts";
+import { antigravityPlanUsage, antigravityRunsNativeCli } from "./drivers/antigravity-usage-limits.ts";
 import { harnessHome, sealedFixture } from "./env-path.ts";
 
 export type PlanDriver = "claude" | "codex" | "grok" | "opencode" | "antigravity";
@@ -157,8 +157,8 @@ export function planAccountsFromInstances(instances: InstanceConfigMap): PlanAcc
       driver,
       environment: { ...entry.environment },
       ...(configDir ? { configDir } : {}),
-      // Reading ~/.codex/auth.json for a ChatGPT-plan provider would report (and hold it on) another account's limit.
-      ...(config?.authMode === "chatgpt-plan" || (driver === "claude" && config?.usageMeter === false) ? { noUsage: true as const } : {}),
+      // Reading ~/.codex/auth.json for a ChatGPT-plan provider would report (and hold it on) another account's limit; so would a left-over Antigravity token file under the native CLI, which keeps its sign-in elsewhere.
+      ...(config?.authMode === "chatgpt-plan" || (driver === "claude" && config?.usageMeter === false) || (driver === "antigravity" && antigravityRunsNativeCli(config?.cli)) ? { noUsage: true as const } : {}),
     });
   }
   return accounts;

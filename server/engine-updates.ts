@@ -31,10 +31,12 @@ const SWITCH_POLL_MS = 15_000;
 
 /** A runtime the app manages itself (Antigravity): it installs each version beside the others and checks it. */
 export interface ManagedRuntime {
-  /** The version installed when a newer one is to be installed, else null. */
-  older(): Promise<string | null>;
-  /** Resolves with the version it installed when that is not the pinned one. */
-  install(): Promise<string | void>;
+  /** The version installed when a newer one is to be installed, else null; with the release channel that version came
+   * from when the runtime has more than one. */
+  older(): Promise<string | { version: string; channel: string } | null>;
+  /** Installs from `channel` (the one `older` named). Resolves with the version of the runtime it installed when that
+   * is not the pinned one. */
+  install(channel?: string): Promise<string | void>;
   folder: string;
 }
 
@@ -275,18 +277,22 @@ export function createEngineUpdater(options: EngineUpdaterOptions): EngineUpdate
     return { kind: "updated", from: current, to: target };
   }
 
-  async function updateManaged(plan: EnginePlan, managed: ManagedRuntime): Promise<Outcome> {
-    const older = await managed.older();
-    if (older === null) return { kind: "absent" };
+  async function updateManaged(plan: EnginePlan, managed: ManagedRuntime, again = true): Promise<Outcome> {
+    const found = await managed.older();
+    if (found === null) return { kind: "absent" };
     if (engineBusy(plan)) return { kind: "busy" };
+    const { version: older, channel } = typeof found === "string" ? { version: found, channel: undefined } : found;
     let installed: string | void;
     try {
-      installed = await managed.install();
+      installed = await managed.install(channel);
     } catch (error) {
       return { kind: "failed", from: older, to: plan.pin.target, reason: error instanceof Error ? error.message : String(error) };
     }
     const to = installed ?? plan.pin.target;
-    return to === older ? { kind: "failed", from: older, to, reason: "the install left the same version in place" } : { kind: "updated", from: older, to };
+    if (to === older) return { kind: "failed", from: older, to, reason: "the install left the same version in place" };
+    // Another channel may be waiting too (the pinned runtime and the native CLI update separately).
+    const next = again && channel !== undefined ? await updateManaged(plan, managed, false) : null;
+    return next?.kind === "updated" ? next : { kind: "updated", from: older, to };
   }
 
   const updateOne = (plan: EnginePlan): Promise<Outcome> => {
