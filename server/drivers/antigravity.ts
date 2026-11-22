@@ -107,6 +107,16 @@ const launched = new Map<string, { version: string | null; nativeCli: boolean }>
 
 const nativeSignIn = new NativeSignInCache();
 const loginProcesses = new Map<string, LoginProcesses>();
+/** Every live instance's sign-in and turns: a native sign-out ends them all, since they share the CLI's one sign-in. */
+const liveInstances = new Map<string, { login: AntigravityCliLogin; stopAll: () => Promise<void> }>();
+/** Starting a sign-in and signing out never overlap, across instances: a sign-in begun while the shared one is being
+ * removed would be removed with it, or put it back. */
+let exclusive: Promise<unknown> = Promise.resolve();
+function alone<T>(work: () => Promise<T>): Promise<T> {
+  const run = exclusive.then(work, work);
+  exclusive = run.catch(() => {});
+  return run;
+}
 
 const tracked = (instanceId: string) => (child: ChildProcess) => runtimeProcesses.track(instanceId, child);
 
@@ -305,20 +315,20 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
         return (await antigravityCliSignIn(runtime, profile)) === "in";
       },
     }, {}, alive);
+    liveInstances.set(input.instanceId, { login, stopAll: () => base.adapter.stopAll() });
     let nativeFlow = false;
-    // Starting a sign-in and signing out never overlap: a sign-in begun while one is being removed would be removed with it.
-    let exclusive: Promise<unknown> = Promise.resolve();
-    const alone = <T>(work: () => Promise<T>): Promise<T> => {
-      const run = exclusive.then(work, work);
-      exclusive = run.catch(() => {});
-      return run;
-    };
     /** The native CLI keeps one sign-in for every instance run by it and for the Antigravity CLI in a terminal here
      * (1.5.14: one OS keyring entry, whatever `--gemini-dir` says), so this signs all of them out. Throws, keeping the
      * sign-in, when the CLI still accepts a session or cannot say. */
     const signOutNative = async (runtime: AntigravityRuntime, profile: AntigravityProfile) => {
-      // A process still running keeps the account it started with.
-      if (!(await runtimeProcesses.stopped(input.instanceId))) throw new Error("Antigravity is still running for this account and could not be stopped. Try again.");
+      for (const live of liveInstances.values()) {
+        if (!(await live.login.cancel())) throw new Error("An Antigravity sign-in in progress could not be stopped. Try again.");
+        await live.stopAll();
+      }
+      // A process still running keeps the account it started with, and may write it back when it refreshes it.
+      for (const instanceId of new Set([input.instanceId, ...liveInstances.keys()])) {
+        if (!(await runtimeProcesses.stopped(instanceId))) throw new Error("Antigravity is still running and could not be stopped. Try again.");
+      }
       nativeSignIn.forgetAll();
       await signOutAntigravityCli(runtime, profile, { onProcess: tracked(input.instanceId) });
       nativeSignIn.forgetAll();
@@ -382,7 +392,8 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
         auth.cancel();
         if (!(await login.cancel())) throw new Error("The Antigravity sign-in in progress could not be stopped. Try again.");
         await base.adapter.stopAll();
-        const current = await runtimeAndProfile().catch(() => null);
+        // An account set to the native CLI that cannot be started cannot be signed out of it: that must not pass as done.
+        const current = await runtimeAndProfile().catch((error: unknown) => { if (isAntigravityNativeAlias(input.config.cli)) throw error; return null; });
         if (current?.runtime.harnessPath === null) return await signOutNative(current.runtime, current.profile);
         await removeAntigravitySignIn(input.instanceId);
         if (!runtimeProcesses.count(input.instanceId)) return;
@@ -391,6 +402,7 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
           .catch((error) => console.warn(`antigravity: could not finish the sign-out: ${error instanceof Error ? error.message : String(error)}`));
       }),
       dispose: async () => {
+        if (liveInstances.get(input.instanceId)?.login === login) liveInstances.delete(input.instanceId);
         auth.cancel();
         await login.cancel();
         await base.dispose();

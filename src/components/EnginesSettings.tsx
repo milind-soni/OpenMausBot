@@ -8,7 +8,7 @@ import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { ApiKeyEngineManage, EngineSetup, EngineUpdateNotice, EngineWarningNotice, isApiKeyEngine } from "./EngineSetup";
+import { ApiKeyEngineManage, EngineSetup, EngineUpdateNotice, EngineWarningNotice, isApiKeyEngine, runsAntigravityCli } from "./EngineSetup";
 import { AppCopyNotice } from "./EngineAppCopy";
 import { forgetAppCopySwitches } from "@/state/engine-install";
 import { AccountsCard, AddAccount, accountGroupOf, accountsReady, type AccountGroup } from "./EngineAccounts";
@@ -369,6 +369,8 @@ function EngineAccountAction({ instance, action, cli = false, removeBody = "acco
       body={remove ? t(removeBody) : cli
         // The CLI's own sign-in is the one removed: its files in the home folder of the computer this app runs on.
         ? <>{t("accounts.signOutBody")}<span data-sign-out-cli="" className="mt-2 block">{t("accounts.signOutCliBody", { name: instance.displayName })}</span></>
+        : runsAntigravityCli(instance)
+        ? <>{t("accounts.signOutBody")}<span data-sign-out-shared="" className="mt-2 block">{t("accounts.signOutAntigravityShared")}</span></>
         : t("accounts.signOutBody")}
       confirmLabel={label} tone="neutral" pending={running} onCancel={() => { if (!running) setConfirming(false); }} onConfirm={() => void run()} />
   </>;

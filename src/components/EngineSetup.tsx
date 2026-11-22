@@ -272,9 +272,9 @@ export function EngineWarningNotice({
   );
 }
 
-/** An Antigravity account whose CLI path names Google's native CLI (`antigravity`), not the pinned runtime. */
-function runsAntigravityCli(instance: InstanceInfo): boolean {
-  return instance.driverKind === "antigravityAgent" && /^antigravity(?:\.exe)?$/iu.test(instance.cli?.trim() ?? "");
+/** An Antigravity account whose CLI path names Google's native CLI (`antigravity`, or a path to it), not the pinned runtime. */
+export function runsAntigravityCli(instance: InstanceInfo): boolean {
+  return instance.driverKind === "antigravityAgent" && /(?:^|[\\/])antigravity(?:\.exe)?$/iu.test(instance.cli?.trim() ?? "");
 }
 
 function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; signInOnly: boolean }) {

@@ -211,6 +211,11 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
       await expect(instance.signOut!()).rejects.toThrow("could not confirm the sign-out");
     }, 120_000);
 
+    it("fails, rather than pass as done, when an account set to the native CLI cannot start it", async () => {
+      const instance = await create("antigravity-native-missing-cli", nativeFixture(folder()), {}, "antigravity");
+      await expect(instance.signOut!()).rejects.toThrow(/native CLI is not installed/u);
+    }, 60_000);
+
     it("leaves the native CLI's shared sign-in alone when an account on the pinned runtime signs out", async () => {
       const fixture = nativeFixture(folder());
       const instanceId = "antigravity-native-pinned-signout";

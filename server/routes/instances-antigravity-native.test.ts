@@ -84,9 +84,9 @@ async function serve(registry: ProviderRegistry, cfg: AppConfig, extra: Partial<
   return { request, call, status, persisted, setBusy: (value: boolean) => { busy = value; } };
 }
 
-async function nativeSetup(extraIds: string[] = []) {
+async function nativeSetup(extraIds: string[] = [], environment: Record<string, string> = {}) {
   const fixture = nativeFixture(folder());
-  const entry = { driver: "antigravityAgent", config: { cli: fixture.executable }, environment: { FAKE_AGY_LOG: fixture.log } };
+  const entry = { driver: "antigravityAgent", config: { cli: fixture.executable }, environment: { FAKE_AGY_LOG: fixture.log, ...environment } };
   const instances = { antigravity: entry, ...Object.fromEntries(extraIds.map((id) => [id, structuredClone(entry)])) } as InstanceConfigMap;
   const cfg = { instances: structuredClone(instances) } as unknown as AppConfig;
   const registry = new ProviderRegistry([AntigravityDriver]);
@@ -151,6 +151,24 @@ describe.skipIf(WINDOWS)("the native Antigravity CLI through the instance routes
     expect(fixture.methods()).not.toContain("logout");
     expect(existsSync(join(antigravityProfileDirectory("antigravity-added"), "antigravity-acp", "antigravity-oauth-token"))).toBe(false);
     expect(Object.keys(cfg.instances!)).not.toContain("antigravity-added");
+  }, 180_000);
+
+  it("shares one keyring sign-in: an added account is signed in by it, keeps it when another is removed, and a sign-out ends it for all", async () => {
+    const { cfg, registry } = await nativeSetup(["antigravity-a", "antigravity-b"], { FAKE_AGY_KEYRING: folder(), FAKE_AGY_KEYRING_SHARED: "1" });
+    const { request, call, status } = await serve(registry, cfg);
+    const flow = (await call("POST", "/api/instances/antigravity-a/auth/start", {})).auth;
+    await call("POST", "/api/instances/antigravity-a/auth/complete", { flowId: flow.flowId, callbackUrl: "fixture-code" });
+    expect(await status("antigravity-b")).toMatchObject({ authenticated: true });
+
+    expect((await request("DELETE", "/api/instances/antigravity-a")).status).toBe(200);
+    await call("POST", "/api/instances/antigravity-b/check", {});
+    expect(await status("antigravity-b")).toMatchObject({ authenticated: true });
+
+    const waiting = (await call("POST", "/api/instances/antigravity/auth/start", {})).auth;
+    expect((await request("POST", "/api/instances/antigravity-b/auth/sign-out", {})).status).toBe(200);
+    expect(await registry.get("antigravity")!.getAuthentication!(waiting.flowId)).toMatchObject({ phase: "cancelled" });
+    await call("POST", "/api/instances/antigravity/check", {});
+    expect(await status("antigravity")).toMatchObject({ authenticated: false });
   }, 180_000);
 
   it("ends a sign-in that waits for its code, with the CLI's process gone, when the person signs out", async () => {
