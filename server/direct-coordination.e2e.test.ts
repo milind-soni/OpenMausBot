@@ -373,6 +373,63 @@ it("opens a fresh thread on a teammate with coordinate_bots thread \"new\" and g
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.tool?.name === "Engineering lead replied" && message.tool.output === "NEW_THREAD_RESULT verified")).toBe(true);
 }), 45_000);
 
+it("closes a thread \"new\" opened once its result is back, and opens it again for a follow-up sent to it", () => fixture(async f => {
+  const gate = join(f.session.info.dataDir, "follow-up.gate");
+  const opening = [
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "FRESH_BRIEF verify the CSV export yourself", thread: "new" } }], reply: "Opened a fresh thread" },
+    { reply: "The fresh thread reported back" },
+  ];
+  f.plan[f.chief.id] = { turns: opening };
+  f.plan[f.lead.id] = { turns: [{ reply: "FRESH_RESULT verified" }, { gateFile: gate, reply: "FRESH_RESULT checked again" }] };
+  const leadTask = async (threadId: string) => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks.find((task: any) => task.threadId === threadId);
+  const leadNodes = () => f.nodes().filter((node: any) => node.botId === f.lead.id);
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  const [child] = leadNodes();
+  const closed = await leadTask(child.threadId);
+  expect(closed.openedBy).not.toHaveProperty("kind");
+  expect(closed.closedBy).toMatchObject({ botId: f.chief.id, name: "Clive" });
+  expect((await f.messages(child.threadId)).map((message: any) => message.text).filter(Boolean).join("\n")).toContain("FRESH_RESULT verified");
+  expect(await leadTask(f.lead.activeTaskId)).not.toHaveProperty("closedBy");
+
+  f.plan[f.chief.id] = { turns: [...opening,
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "FRESH_FOLLOW_UP check it once more", thread: child.threadId } }], reply: "Sent the follow-up" },
+    { reply: "The follow-up reported back" },
+  ] };
+  f.save();
+  await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Ask them to check once more in that thread.");
+  await expect.poll(() => leadNodes().at(-1)?.status, { timeout: 15_000 }).toBe("running");
+  expect(leadNodes().map((node: any) => node.threadId)).toEqual([child.threadId, child.threadId]);
+  expect(await leadTask(child.threadId)).not.toHaveProperty("closedBy");
+  writeFileSync(gate, "go");
+  expect((await f.wait()).status).toBe("settled");
+  await expect.poll(async () => (await leadTask(child.threadId)).closedBy, { timeout: 15_000 }).toMatchObject({ botId: f.chief.id });
+}), 90_000);
+
+it("keeps a thread \"new\" opened open when a person wrote in it before its result came back", () => fixture(async f => {
+  const gate = join(f.session.info.dataDir, "person-wrote.gate");
+  f.plan[f.chief.id] = { turns: [
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "JOINED_BRIEF verify the CSV export yourself", thread: "new" } }], reply: "Opened a fresh thread" },
+    { reply: "The fresh thread reported back" },
+  ] };
+  f.plan[f.lead.id] = { turns: [{ gateFile: gate, reply: "JOINED_RESULT verified" }, { reply: "JOINED_RESULT noted" }] };
+  const leadTask = async (threadId: string) => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks.find((task: any) => task.threadId === threadId);
+  const stream = await openSse(`${f.session.info.url}/api/events`);
+  await f.start();
+  await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id)?.status, { timeout: 15_000 }).toBe("running");
+  const child = f.nodes().find((node: any) => node.botId === f.lead.id);
+  await f.api(`/api/bots/${f.lead.id}/messages`, { text: "Also check the header row while you are there.", threadId: child.threadId });
+  await expect.poll(async () => (await f.messages(child.threadId)).some((message: any) => message.role === "user" && !message.peerAsk && message.text === "Also check the header row while you are there."), { timeout: 15_000 }).toBe(true);
+  writeFileSync(gate, "go");
+  expect((await f.wait()).status).toBe("settled");
+  await expect.poll(async () => (await f.messages(f.chief.activeTaskId)).some((message: any) => message.tool?.output === "JOINED_RESULT verified"), { timeout: 15_000 }).toBe(true);
+  await expect.poll(async () => (await leadTask(child.threadId)).busy, { timeout: 15_000 }).toBeFalsy();
+  stream.close();
+  expect(stream.frames.some(frame => frame.kind === "bot" && frame.bot?.id === f.lead.id
+    && frame.bot.tasks?.find((task: any) => task.threadId === child.threadId)?.closedBy)).toBe(false);
+  expect(await leadTask(child.threadId)).not.toHaveProperty("closedBy");
+}), 90_000);
+
 it("names a fresh teammate thread with coordinate_bots title", () => fixture(async f => {
   f.plan[f.chief.id] = { steps: [{ arguments: { bot_ids: [f.lead.id], message: "TITLED_BRIEF verify the CSV export yourself", thread: "new", title: "CSV export: verify" } }],
     reply: "Opened a titled thread", resumeReply: "The titled thread reported back" };
