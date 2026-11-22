@@ -13,8 +13,8 @@ import { ToolResults, TOOL_RESULT_MAX_CHARS } from "./tool-results.ts";
 import { basename, join } from "node:path";
 import { authorizeExternalRuntime, externalRuntimeIsActive, type ExternalRuntimeGrant } from "./external-runtime.ts";
 import { z } from "zod";
-import { selectReplay, replayToolCalls, DEFAULT_REBUILD_BYTES } from "./context-rebuild.ts";
-import { claudeCompactionDisabled, createConversationCompaction } from "./host/conversation-compaction.ts";
+import { DEFAULT_REBUILD_BYTES } from "./context-rebuild.ts";
+import { claudeCompactionDisabled, createConversationCompaction } from "./host/conversation-compaction.ts"; import { createResumeCheck } from "./host/resume-check.ts";
 import { compactionReading } from "./context-budget.ts";
 import { autoCompactWindow } from "./drivers/claude.ts";
 import { RoomContextTracker, roomResetNote } from "./room-context.ts";
@@ -328,8 +328,8 @@ import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { createTtsRoutes } from "./routes/tts.ts";
 import { turnStartLogLine } from "./turn-log.ts";
 import { TurnStops, outwardActions, stoppedTurnOutcome, turnEvidence } from "./turn-outcome.ts";
-import { buildRecoveryText, buildTurnContext, engineIsFresh, replaysNatively } from "./turn-context.ts";
-import { Handoffs, handedStateUsable, isContextMessage, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts"; import { isFreshStart, sinceFreshStart } from "./fresh-start.ts";
+import { buildRecoveryText, buildTurnContext, replaysNatively } from "./turn-context.ts"; import { resumePlan } from "./resume-plan.ts";
+import { Handoffs, isContextMessage, recordHanded, renderUnseen, sessionStart, withUnseenMessages, type ContextMessage } from "./delta-context.ts"; import { isFreshStart, sinceFreshStart } from "./fresh-start.ts";
 import { extractReplayImages, extractTurnImages, nativeClips, turnMedia, videoFramesWithin } from "./turn-images.ts";
 import { callTitleExcerpt } from "./thread-title.ts";
 import { generateThreadTitle } from "./thread-title-generate.ts";
@@ -6964,6 +6964,7 @@ function peerReplayText(m: Message, name: string, text: string): string {
 }
 const { lineLabels, personPrompt, routineRunNote } = createLineLabels({ sharedChat: (threadId) => sharedMembership() && !store.groupByThread(threadId) && audienceMember(teamHost.audienceOf(threadId)) === null, userName: userNameFor, teamRole: (key) => (teamOwners.people?.list() ?? []).find((one) => personKey({ id: "", email: one.email }) === key)?.role, routineName: (threadId) => { const run = routines?.runForThread(threadId); return routines?.listRoutines().find((one) => one.id === run?.routineId)?.name; } });
 
+const { replayInputs, sessionConfigFor } = createResumeCheck({ directContext, latestCompaction, context: () => cfg.context, everyBotRules: () => cfg.everyBotRules, sectionPrompt: sectionContextSystemPrompt });
 const compactConversation = createConversationCompaction({
   store, context: () => cfg.context, directContext, latestCompaction,
   nativeCompactTokens: (instance, model) => nativeCompactTokens(instance, model),
@@ -7704,37 +7705,20 @@ async function beginTurn(
         if ((m.roomRequest.phase === "request" && m.roomRequest.id === opts.coordination.id) ||
           (m.roomRequest.phase === "result" && coordinationChildren?.has(m.roomRequest.id))) skipTranscript.add(m.id);
       }
-      const context = directContext(bot, threadId, activeMessages);
+      const { context, replayable, record, selection } = replayInputs(bot, threadId, activeMessages, skipTranscript);
       const contextOrder = context.map(m => m.id);
-      const replayable = context.filter(m => !skipTranscript.has(m.id));
-      const record = latestCompaction(activeMessages);
-      const selection = selectReplay(context, { budgetBytes: cfg.context?.rebuildBytes ?? DEFAULT_REBUILD_BYTES, excludedIds: skipTranscript, compaction: record, tools: replayToolCalls(activeMessages, cfg.context) });
       const transcript = selection.transcript.map(({ role, text }) => ({ role, text }));
-      const contextReset = selection.compacted > 0 && record?.id !== task.appliedCompactionId;
-      if (contextReset) store.patchTask(bot.id, threadId, { resumeCursors: {} });
       // Engines keep a session in the folder it started in, so a thread that follows its bot to the bot's working folder starts a new one there.
-      const followed = folderToFollow(bot, threadId, task.cwd, { worksInFolders: supportsWorkspaceFiles(instance.driverKind), keepsPrivateFolder: guestConfined || cloudGuestOpened(threadId) }); if (followed) store.patchTask(bot.id, threadId, { cwd: followed, resumeCursors: {} });
-
-      // After a rewind the native session still holds the abandoned branch; the flag clears only once dispatched, or a failed dispatch loses the next attempt's history.
-      const rewound = Boolean(task.rewound);
-      const externalContextMarker = isExternalContextMarker(task.lastInstanceId)
-        ? task.lastInstanceId
-        : undefined;
-      const fresh =
-        !rewound &&
-        !externalContextMarker &&
-        engineIsFresh({ instanceId, lastInstanceId: task.lastInstanceId, resumeCursors: task.resumeCursors, transcript: replayable });
+      const followed = folderToFollow(bot, threadId, task.cwd, { worksInFolders: supportsWorkspaceFiles(instance.driverKind), keepsPrivateFolder: guestConfined || cloudGuestOpened(threadId) });
       const strictResume = instance.adapter.capabilities.strictResume === true;
-      const cursor = task.resumeCursors[instanceId];
-      const handed = strictResume && !rewound && !contextReset && !fresh && !externalContextMarker && cursor !== undefined
-        ? task.handedMessages?.[instanceId] : undefined;
-      const unseen = handed && handedStateUsable(handed, cursor, contextOrder) ? unseenMessages(replayable, contextOrder, handed) : undefined;
-      const externalUpdate = Boolean(opts?.coordination?.resumed || unseen?.some((m) => m.keep));
-      // What a resumed session keeps from its launch; Codex reasserts model and provider on resume, but an in-flight turn and an omitted effort keep the prior selection.
-      const persistentConfig = [bot.name, bot.title, bot.description, sectionContextSystemPrompt(bot.section), ...(cfg.everyBotRules?.trim() ? [cfg.everyBotRules.trim()] : []),
-        ...(instance.driverKind === "codex" ? [model, effort ?? null] : [])];
-      const sessionConfig = (soul: string | undefined) =>
-        createHash("sha256").update(JSON.stringify([...persistentConfig, soul])).digest("hex").slice(0, 16);
+      const externalContextMarker = isExternalContextMarker(task.lastInstanceId) ? task.lastInstanceId : undefined;
+      const resuming = resumePlan({ task, instanceId, strictResume, compacted: selection.compacted, recordId: record?.id, folderChanged: followed !== undefined,
+        contextOrder, replayable, externalMarker: externalContextMarker, coordinationResumed: Boolean(opts?.coordination?.resumed), effort });
+      // After a rewind the native session still holds the abandoned branch; the flag clears only once dispatched, or a failed dispatch loses the next attempt's history.
+      const { contextReset, rewound, fresh, unseen, externalUpdate } = resuming;
+      if (contextReset) store.patchTask(bot.id, threadId, { resumeCursors: {} });
+      if (followed) store.patchTask(bot.id, threadId, { cwd: followed, resumeCursors: {} });
+      const sessionConfig = sessionConfigFor(bot, instance.driverKind, model, effort);
       const plannedConfig = sessionConfig(bot.soul);
       const skillAuthoring = skillAuthoringEnabled(cfg) && agentsMounted;
       const skillCommandText = supportsWorkspaceFiles(instance.driverKind)
@@ -7750,9 +7734,7 @@ async function beginTurn(
         ? extractReplayImages(selection.inline, turnImages, {}, turnVideos)
         : { transcript: selection.inline, images: [] };
       const decideContext = (config: string) => {
-        // A Codex thread keeps the last effort it was sent and no turn can clear it, so one holding a level is rebuilt, not resumed.
-        const effortHeld = !effort && typeof handed?.effort === "string";
-        const handedStale = Boolean(handed && (!unseen || effortHeld || (externalUpdate && handed.config !== config)));
+        const handedStale = resuming.stale(config);
         const { block: unseenBlock, placed } = unseen && !handedStale ? renderUnseen(unseen) : { block: "", placed: [] };
         const { turnText: contextTurnText, resume } = buildTurnContext({
           text: userTurnText,
