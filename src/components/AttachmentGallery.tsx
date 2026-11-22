@@ -53,9 +53,13 @@ export function collectMessageFiles(text: string, existingPaths: readonly string
     }
     if (node.children) pending.push(...[...node.children].reverse());
   }
+  return linkedFiles(links.map((node) => node.url ?? (node.identifier ? definitions.get(node.identifier) : undefined)), existingPaths);
+}
+
+/** The local files among link targets, as their chips show them, once each; never one of `existingPaths`. */
+export function linkedFiles(hrefs: ReadonlyArray<string | undefined>, existingPaths: readonly string[] = []): GalleryFile[] {
   const seen = new Set(existingPaths.map(fileIdentity));
-  return links.flatMap((node) => {
-    const href = node.url ?? (node.identifier ? definitions.get(node.identifier) : undefined);
+  return hrefs.flatMap((href) => {
     const path = localFilePath(href);
     if (!path || !href) return [];
     const identity = fileIdentity(href);

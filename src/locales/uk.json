@@ -4103,5 +4103,6 @@
   "sidebar.threads.hide": "Сховати {title}",
   "sidebar.threads.hideShort": "Сховати",
   "sidebar.threads.running": "+{count} у роботі",
-  "sidebar.threads.more": "ще {count}"
+  "sidebar.threads.more": "ще {count}",
+  "botPanel.library.showAll": "Показати всі"
 }

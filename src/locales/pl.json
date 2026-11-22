@@ -7124,5 +7124,6 @@
   "sidebar.threads.hide": "Ukryj {title}",
   "sidebar.threads.hideShort": "Ukryj",
   "sidebar.threads.running": "+{count} w toku",
-  "sidebar.threads.more": "jeszcze {count}"
+  "sidebar.threads.more": "jeszcze {count}",
+  "botPanel.library.showAll": "Pokaż wszystkie"
 }

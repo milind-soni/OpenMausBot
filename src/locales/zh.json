@@ -4164,7 +4164,7 @@
   "botPanel.library.pages": "页面",
   "botPanel.library.apps": "应用",
   "botPanel.library.files": "文件",
-  "botPanel.library.scope": "来自这个对话",
+  "botPanel.library.showAll": "显示全部",
   "botPanel.thisConversation": "在这个对话中",
   "botPanel.acts.customHint": "在高级模式中修改",
   "botPanel.section.settings": "设置",

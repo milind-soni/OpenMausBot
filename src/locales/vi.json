@@ -5923,5 +5923,6 @@
   "sidebar.threads.hide": "Ẩn {title}",
   "sidebar.threads.hideShort": "Ẩn",
   "sidebar.threads.running": "+{count} đang chạy",
-  "sidebar.threads.more": "thêm {count}"
+  "sidebar.threads.more": "thêm {count}",
+  "botPanel.library.showAll": "Hiển thị tất cả"
 }

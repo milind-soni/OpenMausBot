@@ -6428,5 +6428,6 @@
   "sidebar.threads.hide": "Ocultar {title}",
   "sidebar.threads.hideShort": "Ocultar",
   "sidebar.threads.running": "+{count} en curso",
-  "sidebar.threads.more": "{count} más"
+  "sidebar.threads.more": "{count} más",
+  "botPanel.library.showAll": "Mostrar todo"
 }

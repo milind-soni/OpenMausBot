@@ -4126,7 +4126,8 @@
       "settings.vault.bitwardenSecrets.guide": "a9cde30c280181181cdcc7f07ecf5bac7e8c50399b4ad010555cc091e55a69fb",
       "settings.vault.bitwardenSecrets.token": "9a911b08feb9d2928240dda42c6efa8794ab3457f8b59a7cfb5187e817f948e3",
       "settings.vault.bitwardenSecrets.note": "cb98c043ae54f73b55e675c6791759f93421cc65d2a3080b12d8af988997ef13",
-      "settings.vault.bitwardenSecrets.error": "393d6d3cb4d0776647976c6288ff1dac2198db77e9eb2613b6c389bca082694f"
+      "settings.vault.bitwardenSecrets.error": "393d6d3cb4d0776647976c6288ff1dac2198db77e9eb2613b6c389bca082694f",
+      "botPanel.library.showAll": "2150d8df37e489573fb8f0f19ef89d2eda2ba4b49b3beb36333e5096a99a6dc0"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -10553,7 +10554,8 @@
       "routines.botPausedSwap": "f3ba4b0a76a16a26a75be5dabbe0b1440b416a83983f17a79eeb937d5b0e42d1",
       "model.unreadable.failed": "992ebb278264c3cbf937046ef84a1afdd0d5a1bf50da8926187e28f8fd6b1965",
       "model.unreadable.signedOut": "fbb9251c3437926ddce45580e946b751ae1aa8d9e5b689a39b6a51958c06e2d1",
-      "model.unreadable.timedOut": "d15b91980ff8a0db2fb194f82b235e8c1cfca944320281b324e76632eb989898"
+      "model.unreadable.timedOut": "d15b91980ff8a0db2fb194f82b235e8c1cfca944320281b324e76632eb989898",
+      "botPanel.library.showAll": "2150d8df37e489573fb8f0f19ef89d2eda2ba4b49b3beb36333e5096a99a6dc0"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -14383,7 +14385,8 @@
       "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9",
       "server.teammates.noLongerWaiting": "49259fb62a6e8687efa6a6e69da294c81bd67a19c57687d0724ee4bdd5cc4645",
       "server.starter.routineRanPaused": "8e764711d6e5e39ee5620de0788fd03f39fc7818b9eabebdb8e1e37809e7931c",
-      "server.starter.routineWoke": "185957aa957f02f22a311ad4854698482210925bbe9fcb18e38b8e77a02ad668"
+      "server.starter.routineWoke": "185957aa957f02f22a311ad4854698482210925bbe9fcb18e38b8e77a02ad668",
+      "botPanel.library.showAll": "2150d8df37e489573fb8f0f19ef89d2eda2ba4b49b3beb36333e5096a99a6dc0"
     },
     "hi": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -18065,7 +18068,8 @@
       "decider.provider.line": "b74959fffc682f78c90fde2eb8e8d2c0a40eebac0d11000c8def7ae4db389462",
       "computer.worksOnHintServer": "2c3302d501a67067774aedcacfff8d16a80ea8238e2f14d8af97e3fd593f690b",
       "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9",
-      "server.teammates.noLongerWaiting": "49259fb62a6e8687efa6a6e69da294c81bd67a19c57687d0724ee4bdd5cc4645"
+      "server.teammates.noLongerWaiting": "49259fb62a6e8687efa6a6e69da294c81bd67a19c57687d0724ee4bdd5cc4645",
+      "botPanel.library.showAll": "2150d8df37e489573fb8f0f19ef89d2eda2ba4b49b3beb36333e5096a99a6dc0"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -24800,7 +24804,7 @@
       "botPanel.library.pages": "9046da16aea909ba75a36cec13b56cb2144dc2ede45cde361e99a8d79802eabf",
       "botPanel.library.apps": "89dd748442c194857825848e1500abbbc5f52fb067ad27fb05dc9fb23eebba3b",
       "botPanel.library.files": "abc7e9892806b047b4d4786b3685285543f76ca314c4c76246d5f6544c7856c9",
-      "botPanel.library.scope": "ccb3484334f80d18e57e6d21f45819795d249122a76b6b293b1ca23c5df2f604",
+      "botPanel.library.showAll": "2150d8df37e489573fb8f0f19ef89d2eda2ba4b49b3beb36333e5096a99a6dc0",
       "botPanel.thisConversation": "9e131d429cc96e7b146549ca5ac81a4e72426ce6dea3e7ee22b09191933d3083",
       "botPanel.acts.customHint": "310e55204091030f78b208a2ce0e448ed5cc5c6e2ec0daa20461efb6bece42f9",
       "botPanel.section.settings": "74a883a037bc227f91891ab654a753d3a99f31ab06ae5b5d2b6e594a692b41f8",
@@ -33086,7 +33090,7 @@
       "botPanel.library.pages": "9046da16aea909ba75a36cec13b56cb2144dc2ede45cde361e99a8d79802eabf",
       "botPanel.library.apps": "89dd748442c194857825848e1500abbbc5f52fb067ad27fb05dc9fb23eebba3b",
       "botPanel.library.files": "abc7e9892806b047b4d4786b3685285543f76ca314c4c76246d5f6544c7856c9",
-      "botPanel.library.scope": "ccb3484334f80d18e57e6d21f45819795d249122a76b6b293b1ca23c5df2f604",
+      "botPanel.library.showAll": "2150d8df37e489573fb8f0f19ef89d2eda2ba4b49b3beb36333e5096a99a6dc0",
       "botPanel.thisConversation": "9e131d429cc96e7b146549ca5ac81a4e72426ce6dea3e7ee22b09191933d3083",
       "botPanel.acts.customHint": "310e55204091030f78b208a2ce0e448ed5cc5c6e2ec0daa20461efb6bece42f9",
       "botPanel.section.settings": "74a883a037bc227f91891ab654a753d3a99f31ab06ae5b5d2b6e594a692b41f8",
@@ -42739,7 +42743,7 @@
       "botPanel.library.pages": "9046da16aea909ba75a36cec13b56cb2144dc2ede45cde361e99a8d79802eabf",
       "botPanel.library.apps": "89dd748442c194857825848e1500abbbc5f52fb067ad27fb05dc9fb23eebba3b",
       "botPanel.library.files": "abc7e9892806b047b4d4786b3685285543f76ca314c4c76246d5f6544c7856c9",
-      "botPanel.library.scope": "ccb3484334f80d18e57e6d21f45819795d249122a76b6b293b1ca23c5df2f604",
+      "botPanel.library.showAll": "2150d8df37e489573fb8f0f19ef89d2eda2ba4b49b3beb36333e5096a99a6dc0",
       "botPanel.thisConversation": "9e131d429cc96e7b146549ca5ac81a4e72426ce6dea3e7ee22b09191933d3083",
       "botPanel.acts.customHint": "310e55204091030f78b208a2ce0e448ed5cc5c6e2ec0daa20461efb6bece42f9",
       "botPanel.section.settings": "74a883a037bc227f91891ab654a753d3a99f31ab06ae5b5d2b6e594a692b41f8",
@@ -53749,7 +53753,7 @@
       "botPanel.library.pages": "9046da16aea909ba75a36cec13b56cb2144dc2ede45cde361e99a8d79802eabf",
       "botPanel.library.apps": "89dd748442c194857825848e1500abbbc5f52fb067ad27fb05dc9fb23eebba3b",
       "botPanel.library.files": "abc7e9892806b047b4d4786b3685285543f76ca314c4c76246d5f6544c7856c9",
-      "botPanel.library.scope": "ccb3484334f80d18e57e6d21f45819795d249122a76b6b293b1ca23c5df2f604",
+      "botPanel.library.showAll": "2150d8df37e489573fb8f0f19ef89d2eda2ba4b49b3beb36333e5096a99a6dc0",
       "botPanel.thisConversation": "9e131d429cc96e7b146549ca5ac81a4e72426ce6dea3e7ee22b09191933d3083",
       "botPanel.acts.customHint": "310e55204091030f78b208a2ce0e448ed5cc5c6e2ec0daa20461efb6bece42f9",
       "botPanel.section.settings": "74a883a037bc227f91891ab654a753d3a99f31ab06ae5b5d2b6e594a692b41f8",
@@ -61973,7 +61977,8 @@
       "decider.provider.line": "b74959fffc682f78c90fde2eb8e8d2c0a40eebac0d11000c8def7ae4db389462",
       "computer.worksOnHintServer": "2c3302d501a67067774aedcacfff8d16a80ea8238e2f14d8af97e3fd593f690b",
       "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9",
-      "server.teammates.noLongerWaiting": "49259fb62a6e8687efa6a6e69da294c81bd67a19c57687d0724ee4bdd5cc4645"
+      "server.teammates.noLongerWaiting": "49259fb62a6e8687efa6a6e69da294c81bd67a19c57687d0724ee4bdd5cc4645",
+      "botPanel.library.showAll": "2150d8df37e489573fb8f0f19ef89d2eda2ba4b49b3beb36333e5096a99a6dc0"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -67895,7 +67900,8 @@
       "computer.worksOnHintServer": "2c3302d501a67067774aedcacfff8d16a80ea8238e2f14d8af97e3fd593f690b",
       "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9",
       "server.teammates.noLongerWaiting": "49259fb62a6e8687efa6a6e69da294c81bd67a19c57687d0724ee4bdd5cc4645",
-      "browser.input.notReaching": "f9f70cbf8a66e3c8dc64443b9a11a273c24b39cf2f824fa65639e6cd73d88572"
+      "browser.input.notReaching": "f9f70cbf8a66e3c8dc64443b9a11a273c24b39cf2f824fa65639e6cd73d88572",
+      "botPanel.library.showAll": "2150d8df37e489573fb8f0f19ef89d2eda2ba4b49b3beb36333e5096a99a6dc0"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -73817,7 +73823,8 @@
       "computer.worksOnHintServer": "2c3302d501a67067774aedcacfff8d16a80ea8238e2f14d8af97e3fd593f690b",
       "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9",
       "server.teammates.noLongerWaiting": "49259fb62a6e8687efa6a6e69da294c81bd67a19c57687d0724ee4bdd5cc4645",
-      "browser.input.notReaching": "f9f70cbf8a66e3c8dc64443b9a11a273c24b39cf2f824fa65639e6cd73d88572"
+      "browser.input.notReaching": "f9f70cbf8a66e3c8dc64443b9a11a273c24b39cf2f824fa65639e6cd73d88572",
+      "botPanel.library.showAll": "2150d8df37e489573fb8f0f19ef89d2eda2ba4b49b3beb36333e5096a99a6dc0"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -80940,7 +80947,8 @@
       "computer.worksOnHintServer": "2c3302d501a67067774aedcacfff8d16a80ea8238e2f14d8af97e3fd593f690b",
       "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9",
       "server.teammates.noLongerWaiting": "49259fb62a6e8687efa6a6e69da294c81bd67a19c57687d0724ee4bdd5cc4645",
-      "browser.input.notReaching": "f9f70cbf8a66e3c8dc64443b9a11a273c24b39cf2f824fa65639e6cd73d88572"
+      "browser.input.notReaching": "f9f70cbf8a66e3c8dc64443b9a11a273c24b39cf2f824fa65639e6cd73d88572",
+      "botPanel.library.showAll": "2150d8df37e489573fb8f0f19ef89d2eda2ba4b49b3beb36333e5096a99a6dc0"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -88117,7 +88125,8 @@
       "computer.worksOnHintServer": "2c3302d501a67067774aedcacfff8d16a80ea8238e2f14d8af97e3fd593f690b",
       "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9",
       "server.teammates.noLongerWaiting": "49259fb62a6e8687efa6a6e69da294c81bd67a19c57687d0724ee4bdd5cc4645",
-      "browser.input.notReaching": "f9f70cbf8a66e3c8dc64443b9a11a273c24b39cf2f824fa65639e6cd73d88572"
+      "browser.input.notReaching": "f9f70cbf8a66e3c8dc64443b9a11a273c24b39cf2f824fa65639e6cd73d88572",
+      "botPanel.library.showAll": "2150d8df37e489573fb8f0f19ef89d2eda2ba4b49b3beb36333e5096a99a6dc0"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -96182,7 +96191,7 @@
       "botPanel.library.pages": "9046da16aea909ba75a36cec13b56cb2144dc2ede45cde361e99a8d79802eabf",
       "botPanel.library.apps": "89dd748442c194857825848e1500abbbc5f52fb067ad27fb05dc9fb23eebba3b",
       "botPanel.library.files": "abc7e9892806b047b4d4786b3685285543f76ca314c4c76246d5f6544c7856c9",
-      "botPanel.library.scope": "ccb3484334f80d18e57e6d21f45819795d249122a76b6b293b1ca23c5df2f604",
+      "botPanel.library.showAll": "2150d8df37e489573fb8f0f19ef89d2eda2ba4b49b3beb36333e5096a99a6dc0",
       "botPanel.thisConversation": "9e131d429cc96e7b146549ca5ac81a4e72426ce6dea3e7ee22b09191933d3083",
       "botPanel.advanced.title": "d823803689ad1713989d7cd80dde661392f93c2a6a5690e748ab88ed10c98237",
       "botPanel.advanced.hint": "434ef07a7c8eafd2789a2fc936f8d050b62d7658d6777b0494db07e3c7d6294f",
@@ -102860,7 +102869,7 @@
       "botPanel.library.pages": "9046da16aea909ba75a36cec13b56cb2144dc2ede45cde361e99a8d79802eabf",
       "botPanel.library.apps": "89dd748442c194857825848e1500abbbc5f52fb067ad27fb05dc9fb23eebba3b",
       "botPanel.library.files": "abc7e9892806b047b4d4786b3685285543f76ca314c4c76246d5f6544c7856c9",
-      "botPanel.library.scope": "ccb3484334f80d18e57e6d21f45819795d249122a76b6b293b1ca23c5df2f604",
+      "botPanel.library.showAll": "2150d8df37e489573fb8f0f19ef89d2eda2ba4b49b3beb36333e5096a99a6dc0",
       "botPanel.thisConversation": "9e131d429cc96e7b146549ca5ac81a4e72426ce6dea3e7ee22b09191933d3083",
       "botPanel.acts.customHint": "310e55204091030f78b208a2ce0e448ed5cc5c6e2ec0daa20461efb6bece42f9",
       "botPanel.section.settings": "74a883a037bc227f91891ab654a753d3a99f31ab06ae5b5d2b6e594a692b41f8",
