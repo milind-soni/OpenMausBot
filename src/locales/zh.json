@@ -10110,5 +10110,10 @@
   "imageGen.higgsfield.connected": "已连接到你的 Higgsfield 账号",
   "imageGen.higgsfield.notConnected": "未连接，或登录已失效",
   "imageGen.higgsfield.help": "{app} 使用你在“插件”中登录的 Higgsfield 账号生成图片。每张图片都会消耗该账号的额度。",
-  "imageGen.higgsfield.open": "打开插件"
+  "imageGen.higgsfield.open": "打开插件",
+  "sidebar.threads.hidden": "已隐藏对话",
+  "sidebar.threads.hide": "隐藏 {title}",
+  "sidebar.threads.hideShort": "隐藏",
+  "sidebar.threads.running": "+{count} 个运行中",
+  "sidebar.threads.more": "还有 {count} 个"
 }

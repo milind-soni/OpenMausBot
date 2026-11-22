@@ -7959,5 +7959,10 @@
   "imageGen.higgsfield.help": "{app} は、プラグインでサインインした Higgsfield アカウントで画像を作ります。画像 1 枚ごとにそのアカウントのクレジットを消費します。",
   "imageGen.higgsfield.open": "プラグインを開く",
   "inbox.settled.title": "完了",
-  "inbox.settled.read": "既読"
+  "inbox.settled.read": "既読",
+  "sidebar.threads.hidden": "スレッドを非表示にしました",
+  "sidebar.threads.hide": "{title} を非表示",
+  "sidebar.threads.hideShort": "非表示",
+  "sidebar.threads.running": "+{count} 件実行中",
+  "sidebar.threads.more": "他 {count} 件"
 }

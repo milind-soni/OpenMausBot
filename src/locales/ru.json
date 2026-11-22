@@ -7173,5 +7173,10 @@
   "imageGen.higgsfield.help": "{app} создаёт изображения через аккаунт Higgsfield, в который вы входите в разделе «Плагины». Каждое изображение расходует кредиты этого аккаунта.",
   "imageGen.higgsfield.open": "Открыть «Плагины»",
   "inbox.settled.title": "Завершено",
-  "inbox.settled.read": "Прочитано"
+  "inbox.settled.read": "Прочитано",
+  "sidebar.threads.hidden": "Ветка скрыта",
+  "sidebar.threads.hide": "Скрыть {title}",
+  "sidebar.threads.hideShort": "Скрыть",
+  "sidebar.threads.running": "+{count} в работе",
+  "sidebar.threads.more": "ещё {count}"
 }

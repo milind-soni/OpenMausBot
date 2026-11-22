@@ -11313,5 +11313,10 @@
   "insights.other": "Altro",
   "insights.breakdown": "Ripartizione",
   "insights.byHour": "Per ora",
-  "insights.share": "Quota"
+  "insights.share": "Quota",
+  "sidebar.threads.hidden": "Conversazione nascosta",
+  "sidebar.threads.hide": "Nascondi {title}",
+  "sidebar.threads.hideShort": "Nascondi",
+  "sidebar.threads.running": "+{count} in corso",
+  "sidebar.threads.more": "altre {count}"
 }

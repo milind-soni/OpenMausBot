@@ -11512,5 +11512,10 @@
   "chat.handoffExchange.back": "Back",
   "chat.handoffExchange.loading": "Loading the conversation…",
   "chat.handoffExchange.failed": "Couldn't load the conversation.",
-  "chat.handoffExchange.empty": "No messages yet."
+  "chat.handoffExchange.empty": "No messages yet.",
+  "sidebar.threads.hidden": "Thread hidden",
+  "sidebar.threads.hide": "Hide {title}",
+  "sidebar.threads.hideShort": "Hide",
+  "sidebar.threads.running": "+{count} running",
+  "sidebar.threads.more": "{count} more"
 }

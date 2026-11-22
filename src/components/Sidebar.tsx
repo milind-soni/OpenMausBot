@@ -22,7 +22,7 @@ import { copyText } from "@/lib/copy-text";
 import type { LocaleKey } from "@/locales";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { BulkSelectFilters, ThreadListFooter, deleteThreadsInBulk, retitleThreadsInBulk, useBulkSelect } from "./BulkSelectBar";
-import { SidebarBotThreadsPeek } from "./SidebarBotThreadsPeek";
+import { SidebarThreadLabels, ThreadFoldChevron, useRowUnfolded } from "./SidebarThreadLabels";
 import { RoomMark, StackedMauses } from "./StackedMauses";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { nextRename } from "@/lib/rename";
@@ -707,7 +707,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const iconOnly = density === "icons";
   const expanded = showThreads && !iconOnly && threadsOpen && hasThreadList;
   useEffect(() => { if (iconOnly) setRenaming(false); }, [iconOnly]);
-  const simpleRow = !advanced && !showThreads && density === "comfortable";
+  const simpleRow = !advanced && !showThreads && density === "comfortable", unfolded = useRowUnfolded(bot, props.drafting) && simpleRow, rowSelected = selected && !unfolded;
   const simpleList = !advanced && !iconOnly;
   const railTile = iconOnly && !advanced;
   const avatarSize = iconOnly ? (railTile ? 36 : 44) : showThreads ? 32 : simpleRow ? 36 : 44;
@@ -723,8 +723,8 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
       : simpleRow ? "gap-2.5 rounded-xl p-2 md:h-[54px] md:py-0"
         : cn(showThreads ? "gap-2 py-2" : "gap-3 py-2", showThreads ? "pl-6 pr-9 group-hover:pr-[5.75rem] group-focus-within:pr-[5.75rem] max-md:pr-9 touch:pr-[5.75rem]" : "pl-2.5 pr-9"),
     !iconOnly && "max-md:rounded-2xl max-md:py-2.5",
-    selected ? rowSelectedSurface : "hover:bg-ink/[0.06]",
-    simpleRow && rowSurface(selected),
+    rowSelected ? rowSelectedSurface : "hover:bg-ink/[0.06]",
+    simpleRow && rowSurface(rowSelected),
   );
   const { waiting, working, failed, teammateWait, queued } = sidebarBotStatus(bot, pendingQueued, visible);
   const { unread, noticing } = useBotUnread(bot);
@@ -865,7 +865,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
             : undefined
         }
         aria-busy={deleting || undefined} aria-keyshortcuts={drag ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
-        aria-current={selected && !expanded && !renaming ? "page" : undefined}
+        aria-current={rowSelected && !expanded && !renaming ? "page" : undefined}
         data-sidebar-bot-row={bot.id} data-look="sidebar-bot"
         title={renaming ? undefined : tooltip}
         onClick={onSelect}
@@ -900,7 +900,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
         <button type="button" data-bot-actions={bot.id} aria-label={t("sidebar.bot.actions", { name: bot.name })} title={t("sidebar.bot.actions", { name: bot.name })} aria-haspopup="menu" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onMenu({ botId: bot.id, x: rect.left, y: rect.bottom }); }}
           className={cn("absolute top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink", simpleRow ? "end-[3px] top-1.5 size-6 translate-y-0 rounded-lg" : "right-1",
             selected && !simpleRow ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:pointer-events-auto max-md:opacity-70 touch:pointer-events-auto touch:opacity-70")}><MoreHorizontal size={16} /></button>
-      </>}{!renaming && !deleting && simpleRow && <SidebarBotThreadsPeek bot={bot} onScreen={selected} dispatch={dispatch} />}
+      </>}{!renaming && !deleting && simpleRow && <ThreadFoldChevron bot={bot} dispatch={dispatch} />}
       {deleting && iconOnly && (
         <span className="pointer-events-none absolute bottom-1 right-1 rounded-full bg-card p-1 text-ink-secondary">
           <Loader2 size={12} className="animate-spin" />
@@ -910,7 +910,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
     {advanced && !iconOnly && threadsOpen && hasThreadList && <BotThreadList {...props} hidden={!showThreads}
       activityLabel={liveActivityLabel(sidebarMessage(last))}
       query={bot.name.toLowerCase().includes(query.toLowerCase()) || bot.title.toLowerCase().includes(query.toLowerCase()) ? "" : query} />}
-    {(advanced || (!iconOnly && (waiting || unread || bot.tasks?.some(runningRoutineRun)))) && <SidebarBotActivity bot={bot} rowThreadId={selected ? bot.threadId : botOpensTo(bot, showThreads)} density={density} pendingQueued={pendingQueued} dispatch={dispatch} waitingOnly={!advanced} runsOnly={expanded} />}
+    {simpleRow ? <SidebarThreadLabels bot={bot} selected={selected} drafting={props.drafting} rowThreadId={selected ? bot.threadId : botOpensTo(bot, showThreads)} pendingQueued={pendingQueued} dispatch={dispatch} /> : (advanced || (!iconOnly && (waiting || unread || bot.tasks?.some(runningRoutineRun)))) && <SidebarBotActivity bot={bot} rowThreadId={selected ? bot.threadId : botOpensTo(bot, showThreads)} density={density} pendingQueued={pendingQueued} dispatch={dispatch} waitingOnly={!advanced} runsOnly={expanded} />}
     {showThreads && creatingProject && <BotProjectDialog bot={bot} onClose={() => setCreatingProject(false)} />}
     </>
   );

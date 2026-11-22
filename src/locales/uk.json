@@ -4098,5 +4098,10 @@
   "imageGen.higgsfield.help": "{app} створює зображення через акаунт Higgsfield, у який ви входите в розділі «Плагіни». Кожне зображення витрачає кредити цього акаунта.",
   "imageGen.higgsfield.open": "Відкрити «Плагіни»",
   "inbox.settled.title": "Завершено",
-  "inbox.settled.read": "Прочитано"
+  "inbox.settled.read": "Прочитано",
+  "sidebar.threads.hidden": "Гілку приховано",
+  "sidebar.threads.hide": "Сховати {title}",
+  "sidebar.threads.hideShort": "Сховати",
+  "sidebar.threads.running": "+{count} у роботі",
+  "sidebar.threads.more": "ще {count}"
 }

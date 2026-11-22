@@ -10209,5 +10209,10 @@
   "imageGen.higgsfield.help": "{app} 使用你在「外掛」中登入的 Higgsfield 帳號產生圖片。每張圖片都會消耗該帳號的額度。",
   "imageGen.higgsfield.open": "開啟外掛",
   "inbox.settled.title": "已完成",
-  "inbox.settled.read": "已讀"
+  "inbox.settled.read": "已讀",
+  "sidebar.threads.hidden": "已隱藏對話",
+  "sidebar.threads.hide": "隱藏 {title}",
+  "sidebar.threads.hideShort": "隱藏",
+  "sidebar.threads.running": "+{count} 個執行中",
+  "sidebar.threads.more": "還有 {count} 個"
 }
