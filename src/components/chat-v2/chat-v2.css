@@ -14,7 +14,7 @@
   [data-chat-v2] .v2-composer-frame [data-look="composer"] {
     flex-shrink: 0;
     --composer-reply-gap: 10px;
-    padding: var(--composer-reply-gap) 8px;
+    padding: 6px 8px;
   }
 }
 .v2-exchange { width: 100%; margin-block: .45rem; }

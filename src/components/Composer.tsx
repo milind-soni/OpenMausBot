@@ -683,11 +683,11 @@ export function Composer({
             data-composer-backdrop
             className={cn("pointer-events-none absolute -left-5 -right-5 bg-app", "-bottom-3 top-1/2")}
           />
-        <div ref={shellRef} data-tour="composer" data-look="composer" className={cn("@container/composer relative z-[1]", singleRow ? "flex min-w-0 items-center gap-2 pb-1 [[data-phone-keyboard]_&]:pb-0" : cn("rounded-2xl px-2 py-1.5", !smoothHeight && ELEVATED_FLOAT))}>
+        <div ref={shellRef} data-tour="composer" data-look="composer" className={cn("@container/composer relative z-[1]", singleRow ? "flex min-w-0 items-center gap-2 pb-1 [[data-phone-keyboard]_&]:pb-0" : cn("rounded-2xl px-2 py-[7px]", !smoothHeight && ELEVATED_FLOAT))}>
         {singleRow && toolsMenu}
         <div className={singleRow ? cn("min-w-0 flex-1 rounded-[26px] px-3 py-1.5 [--composer-reply-gap:6px]", ELEVATED_FLOAT) : "contents"}>
         {replyTo && <ComposerReplyStrip message={replyTo} fallbackName={bot?.name} onClear={onClearReply} />}
-        <div data-composer-row className={cn("flex items-center gap-1", !singleRow && "@max-[30rem]/composer:flex-wrap", stacked && "flex-wrap")}>
+        <div data-composer-row className={cn("flex items-center gap-1", !singleRow && "min-h-9 @max-[30rem]/composer:flex-wrap", stacked && "flex-wrap")}>
           {singleRow && !locked && <>
             <input ref={photoInput} type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,image/avif,image/bmp,image/tiff,image/svg+xml" multiple hidden onChange={onPickFiles} />
             <input ref={cameraInput} type="file" accept="image/*" capture="environment" hidden onChange={onPickFiles} />
