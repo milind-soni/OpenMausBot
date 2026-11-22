@@ -1,0 +1,23 @@
+{
+  "id": "edu-crew",
+  "name": "Edu Crew",
+  "version": "0.1.0",
+  "description": "When to hand work to Edu crew (plan, build, checks, review) and when to ask for a cross-vendor review.",
+  "defaultEnabled": true,
+  "triggerTerms": [
+    "edu crew",
+    "edu_plan",
+    "edu_review",
+    "review",
+    "second opinion",
+    "cross-vendor",
+    "plan and build",
+    "build it",
+    "refactor",
+    "revisa",
+    "revisión",
+    "segunda opinión",
+    "planifica"
+  ],
+  "requiredCapabilities": ["eduCrew"]
+}

@@ -174,3 +174,19 @@ it("keeps saying why a decision failed after it reads the list again", async () 
   await act(async () => (rows()[0]!.querySelector("[data-edu-action=reject]") as HTMLButtonElement).click());
   expect(text()).toContain("Edu couldn't decide this proposal: locked");
 });
+
+it("offers the Edu crew switch, off by default, and says why the crew can't work when it can't", async () => {
+  fixture.view = ready({ crew: { enabled: false } });
+  await render();
+  const crew = () => host.querySelector("[data-panel-row=edu-crew]")!;
+  expect(crew().textContent).toContain("Edu crew");
+  expect(crew().querySelector("[role=switch]")?.getAttribute("aria-checked")).toBe("false");
+  fixture.view = ready({ crew: { enabled: true, blocked: "This chat has no working folder of its own." } });
+  await act(async () => (crew().querySelector("[role=switch]") as HTMLButtonElement).click());
+  expect(fixture.api).toHaveBeenCalledWith("/api/bots/luna", { method: "PATCH", body: JSON.stringify({ eduCrew: true }) });
+  expect(crew().querySelector("[role=switch]")?.getAttribute("aria-checked")).toBe("true");
+  await act(async () => (crew().querySelector("[role=switch]") as HTMLButtonElement).click());
+  expect(fixture.api).toHaveBeenLastCalledWith("/api/bots/luna/edu");
+  expect(fixture.api).toHaveBeenCalledWith("/api/bots/luna", { method: "PATCH", body: JSON.stringify({ eduCrew: false }) });
+  expect(crew().textContent).toContain("This chat has no working folder of its own.");
+});

@@ -126,6 +126,20 @@ describe("createEduBrains", () => {
     expect(await brains.status(bot)).toMatchObject({ state: "ready", mode: "own", brain: folder, version: "6.0.0" });
   });
 
+  it("reads as ready right away only after a check found Edu ready on this computer", async () => {
+    const ready = setup();
+    expect(ready.brains.readyNow()).toBe(false);
+    await ready.brains.detect();
+    expect(ready.brains.readyNow()).toBe(true);
+    ready.setConfig({ enabled: false });
+    expect(ready.brains.readyNow()).toBe(false);
+    for (const options of [{ cli: null }, { version: "5.9.0" }, { hostLocal: false }]) {
+      const other = setup(options);
+      await other.brains.detect();
+      expect(other.brains.readyNow(), JSON.stringify(options)).toBe(false);
+    }
+  });
+
   it("mounts nothing, and never throws, when Edu is missing, old, broken or off", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     for (const [options, state] of [[{ cli: null }, "missing"], [{ version: "5.0.1" }, "old"], [{ fail: true }, "broken"],

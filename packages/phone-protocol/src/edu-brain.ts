@@ -7,6 +7,8 @@ export type EduBrainSetting = { mode: "off" } | { mode: "own" } | { mode: "folde
 export interface EduBrainField {
   /** This bot's Edu brain. Absent: its own. */
   eduBrain?: EduBrainSetting;
+  /** Edu crew: the bot may ask Edu to plan and build (each gate approved by a person) or to review. Absent: off. */
+  eduCrew?: boolean;
 }
 
 const ABSOLUTE_PATH = /^(?:\/|[A-Za-z]:[\\/]|\\\\)/;
@@ -67,6 +69,7 @@ export interface EduBrainView {
   mayApprove: boolean;
   /** Edu Bot itself runs inside an Edu crew job, so Edu refuses every decision. */
   crewWorker?: boolean;
+  crew?: EduCrewView;
 }
 
 /** `GET /api/edu/rights`: what this caller may do with an Edu proposal, by the same rule as `EduBrainView`. */
@@ -74,4 +77,75 @@ export interface EduDecideRights {
   mayApprove: boolean;
   mayReject: boolean;
   crewWorker?: boolean;
+}
+
+/** Edu's read-only reviewers: the CLIs Edu 6.0.0 can hold to read-only work. */
+export const EDU_CREW_REVIEWERS = ["codex", "claude", "pi"] as const;
+export type EduCrewReviewer = (typeof EDU_CREW_REVIEWERS)[number];
+
+/** Where an Edu crew job stands, in Edu Bot's words. */
+export type EduCrewStatus = "running" | "waiting" | "done" | "failed" | "cancelled";
+
+/** The quiet line an Edu crew job keeps in its conversation (`WireMessage.eduCrew`), rewritten in place as it moves on. */
+export interface EduCrewLine {
+  /** Edu's job id. */
+  jobId: string;
+  /** `plan`: Edu's plan, build, checks and review loop. `review`: one read-only review by another vendor's CLI. */
+  kind: "plan" | "review";
+  status: EduCrewStatus;
+  /** The goal or the review question, shortened. */
+  title: string;
+  /** The reviewer CLI, for a review. */
+  cli?: string;
+  /** Failed: one line saying why. Done: Edu's summary, shortened. */
+  why?: string;
+  /** When the status last changed, epoch ms. */
+  at: number;
+}
+
+/** `WireMessage.eduCrew`. */
+export interface EduCrewLineField {
+  eduCrew?: EduCrewLine;
+}
+
+/** A card asking the person to pass one of Edu's approval gates (the spec, then each step) for a crew job. */
+export interface EduCrewGate {
+  jobId: string;
+  /** Edu's id for the open gate; deciding names it, so a decision never lands on a later gate. */
+  gateId: string;
+  /** Edu's name for the gate, e.g. "Approve spec". */
+  gate: string;
+  goal: string;
+  /** The spec Edu wrote, shortened. */
+  spec?: string;
+  /** Shell commands the planner proposed that approving this gate runs. */
+  commands?: string[];
+  /** The folder the crew works in. */
+  folder: string;
+}
+
+export interface EduCrewGateCardField {
+  eduCrewGate?: EduCrewGate;
+}
+
+/** A card only a person decides, outside any turn: no turn, call or composer waits on it. */
+export function isEduDecisionCard(card: (EduProposalCardField & EduCrewGateCardField) | undefined | null): boolean {
+  return Boolean(card?.eduProposal || card?.eduCrewGate);
+}
+
+/** `EduBrainView.crew`: this bot's Edu crew switch and whether it can work now. */
+export interface EduCrewView {
+  enabled: boolean;
+  /** Why the crew cannot work for this bot now, when it cannot. */
+  blocked?: string;
+  /** The folder crew jobs would work in. */
+  folder?: string;
+}
+
+/** `GET /api/edu/crew/:jobId`: what the status line's Details shows. */
+export interface EduCrewDetails {
+  line: EduCrewLine;
+  folder: string;
+  spec?: string;
+  summary?: string;
 }

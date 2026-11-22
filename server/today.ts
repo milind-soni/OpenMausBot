@@ -74,7 +74,7 @@ type Owner = { botId?: string; groupId?: string };
 /** A card's fields that tell a question for the person from an approval, a receipt or an offer to switch engines. */
 type QuestionCard = NonNullable<Parameters<typeof isPersistentQuestionCard>[0]> & {
   requestId?: string; title?: string; subtitle?: string; questionRequest?: QuestionRequestCardData; outboundRequest?: unknown; quotaSwitch?: unknown;
-  teamMemoryRequest?: unknown; autoApplied?: boolean; eduProposal?: unknown;
+  teamMemoryRequest?: unknown; autoApplied?: boolean; eduProposal?: unknown; eduCrewGate?: unknown;
 };
 
 function threadOwners(sources: TodaySources): Map<string, Owner> {
@@ -281,7 +281,7 @@ function needsYou(sources: TodaySources, viewer: TodayViewer, owners: Map<string
     if (row.kind === "options") {
       const card = parse<QuestionCard>(row.card);
       const botId = botOf(row);
-      if (!card || !botId || card.outboundRequest || card.quotaSwitch || card.teamMemoryRequest || card.autoApplied || card.eduProposal) continue;
+      if (!card || !botId || card.outboundRequest || card.quotaSwitch || card.teamMemoryRequest || card.autoApplied || card.eduProposal || card.eduCrewGate) continue;
       const approval = viewer.asks !== undefined && (card.requestType === "permission" || Boolean(card.tool));
       if (!(approval || isPersistentQuestionCard(card)) || (viewer.asks && !viewer.asks(botId, row.threadId))) continue;
       const earlier = card.requestId ? askedIn.get(card.requestId) : undefined;

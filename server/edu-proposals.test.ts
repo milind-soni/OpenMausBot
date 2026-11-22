@@ -338,7 +338,7 @@ describe("Edu routes", () => {
     const route = createEduRoutes({
       bot: (id) => (id === "bot-1" ? { id, name: "Luna", color: "blue" } : null),
       status: async () => ({ state: "ready", mode: "own", home, brain: folder, version: "6.0.0", cli: CLI }),
-      proposals, desktop,
+      proposals, desktop, crew: { view: async () => ({ enabled: false }), details: () => null, cancelFor: async () => ({ ok: false, status: 404, error: "No such Edu crew job." }) },
     });
     let sent: { status: number; body: unknown } | null = null;
     const out = await route({

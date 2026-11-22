@@ -1,26 +1,40 @@
 import type { EduBrainView } from "../../shared/edu-brain.ts";
 import type { EduBrainStatus, EduBot } from "../edu-brain.ts";
+import type { EduCrew } from "../edu-crew.ts";
 import { eduDecisionRefusal, type EduProposals } from "../edu-proposals.ts";
 import { ownerOrAdmin } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
-type Bot = EduBot & { name: string; color: string };
+type Bot = EduBot & { name: string; color: string; eduCrew?: boolean; threadId?: string };
 
 export interface EduRouteDeps {
   bot(id: string): Bot | null | undefined;
   status(bot: Bot): Promise<EduBrainStatus>;
   proposals: Pick<EduProposals, "view" | "decideFor" | "rights">;
+  crew: Pick<EduCrew, "view" | "details" | "cancelFor">;
   /** The packaged desktop app. */
   desktop: boolean;
 }
 
-/** GET /api/bots/:id/edu: the bot's Edu brain and its pending proposals. POST /api/bots/:id/edu/proposals/:pid
- * `{action: "approve" | "reject"}`. GET /api/edu/rights: what this caller may decide. */
+/** GET /api/bots/:id/edu: the bot's Edu brain, its pending proposals and its crew. POST /api/bots/:id/edu/proposals/:pid
+ * `{action: "approve" | "reject"}`. GET /api/edu/rights: what this caller may decide. GET /api/edu/crew/:job: a crew
+ * job's details; POST /api/edu/crew/:job/cancel stops it. */
 export function createEduRoutes(deps: EduRouteDeps): RouteHandler {
   return async ({ req, path, method, auth, res, json, readBody }) => {
     if (path === "/api/edu/rights") return method === "GET" ? json(res, 200, deps.proposals.rights(auth)) : json(res, 405, { error: "method not allowed" });
     const view = path.match(/^\/api\/bots\/([\w-]+)\/edu$/);
     const decide = path.match(/^\/api\/bots\/([\w-]+)\/edu\/proposals\/([^/]+)$/);
+    const crew = path.match(/^\/api\/edu\/crew\/([a-f0-9-]{36})(\/cancel)?$/i);
+    if (crew) {
+      if (method !== (crew[2] ? "POST" : "GET")) return json(res, 405, { error: "method not allowed" });
+      if (!ownerOrAdmin(auth)) return json(res, 403, { error: "Only the owner or a workspace admin can see Edu crew jobs." });
+      if (!crew[2]) {
+        const details = deps.crew.details(crew[1]!);
+        return details ? json(res, 200, details) : json(res, 404, { error: "No such Edu crew job." });
+      }
+      const cancelled = await deps.crew.cancelFor(crew[1]!);
+      return cancelled.ok ? json(res, 200, cancelled.line) : json(res, cancelled.status, { error: cancelled.error });
+    }
     if (!view && !decide) return PASS;
     const bot = deps.bot((view ?? decide)![1]);
     if (view) {
@@ -33,6 +47,7 @@ export function createEduRoutes(deps: EduRouteDeps): RouteHandler {
         ...(status.brain ? { brain: status.brain } : {}), ...(status.version ? { version: status.version } : {}), ...(status.reason ? { reason: status.reason } : {}),
         ...(status.brokenFolder ? { brokenFolder: true } : {}),
         ...(status.state === "ready" ? await deps.proposals.view(bot, deps.proposals.rights(auth).mayApprove) : { proposals: [], mayApprove: false }),
+        ...(status.state === "ready" || bot.eduCrew === true ? { crew: await deps.crew.view(bot) } : {}),
       };
       return json(res, 200, body);
     }

@@ -37,6 +37,8 @@ export interface CatalogProfile {
   meetings?: boolean;
   /** The plan's included app hosting reaches this server: publish_app is mounted. */
   appHosting?: boolean;
+  /** The bot's Edu crew switch is on and Edu is ready here: edu_plan, edu_review and the job reads are mounted. */
+  eduCrew?: boolean;
   /** The tool groups this bot's person turned off: none of their tools is mounted. */
   toolsOff?: readonly ToolGroup[];
 }
@@ -61,6 +63,7 @@ export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
     imageGeneration: env.OMB_IMAGE_GENERATION === "1",
     meetings: env.OMB_MEETINGS === "1",
     appHosting: env.OMB_APP_HOSTING === "1",
+    eduCrew: env.OMB_EDU_CREW === "1",
     toolsOff: toolsOffFromEnv(env.OMB_TOOLS_OFF),
   };
 }

@@ -512,6 +512,32 @@ describe("PATCH /api/bots/:id eduBrain", () => {
   });
 });
 
+describe("PATCH /api/bots/:id eduCrew", () => {
+  const paired = { auth: { kind: "session", via: "bearer", scopes: ["admin", "client"], session: { id: "s", label: "Laptop", scopes: ["admin", "client"] } } as unknown as RequestAuth };
+
+  it("is off by default; only the desktop app or a paired session turns it on, and anyone may turn it off", async () => {
+    const { store, bot, patch } = fixture();
+    expect(store.bot(bot.id)?.eduCrew).toBeUndefined();
+    expect((await patch(bot.id, { eduCrew: "yes" }, paired)).status).toBe(400);
+    for (const headers of [{}, { origin: "http://127.0.0.1" }] as Array<Record<string, string>>) {
+      const refused = await patch(bot.id, { eduCrew: true }, { headers });
+      expect(refused.status).toBe(403);
+      expect(refused.body.error).toMatch(/desktop app or a paired device/);
+    }
+    expect(store.bot(bot.id)?.eduCrew).toBeUndefined();
+    expect((await patch(bot.id, { eduCrew: true }, paired)).status).toBe(200);
+    expect(store.bot(bot.id)?.eduCrew).toBe(true);
+    expect((await patch(bot.id, { eduCrew: false })).status).toBe(200);
+    expect(store.bot(bot.id)?.eduCrew).toBeUndefined();
+  });
+
+  it("lets the desktop app turn it on", async () => {
+    const { store, bot, patch } = fixture({ desktopManaged: true });
+    expect((await patch(bot.id, { eduCrew: true })).status).toBe(200);
+    expect(store.bot(bot.id)?.eduCrew).toBe(true);
+  });
+});
+
 describe("PATCH /api/bots/:id connectorScopes", () => {
   it("refuses a local-API widening while another bot works in a room, and still allows narrowing", async () => {
     let roomBotId = "";

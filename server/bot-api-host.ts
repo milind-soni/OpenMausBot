@@ -7,6 +7,7 @@
 // its saved allowances, as the owner's work, and is not outside; the never-list, the safety floor and the level's own
 // holds still apply. That holds only while the key still acts as the owner and the server still allows it: otherwise the
 // thread is fenced like any other API thread, and the key can't go on in it.
+import { isEduDecisionCard } from "../shared/edu-brain.ts";
 import { z } from "zod";
 
 import { redactSecretsInText } from "../shared/redact.ts";
@@ -110,10 +111,10 @@ function statusOf(error: unknown): number {
   return parsed.success ? parsed.data.status : 500;
 }
 
-/** A card the bot put to the person and nobody has answered: the call stops there. An Edu proposal waits in Memory
- * settings instead, and no turn waits on it. */
+/** A card the bot put to the person and nobody has answered: the call stops there. An Edu proposal or crew gate waits
+ * for a person outside the turn, and no turn waits on it. */
 function pendingCard(lines: readonly Message[]): boolean {
-  return lines.some((line) => line.card?.requestId !== undefined && !line.card.answered && !line.card.dismissed && !line.card.eduProposal);
+  return lines.some((line) => line.card?.requestId !== undefined && !line.card.answered && !line.card.dismissed && !isEduDecisionCard(line.card));
 }
 
 function replyText(lines: readonly Message[]): string {

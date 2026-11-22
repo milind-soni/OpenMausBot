@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { t } from "@/lib/i18n";
-import { decideEduProposal, fetchEduBrain, turnOnEduBrain } from "@/lib/edu-brain";
+import { decideEduProposal, fetchEduBrain, setEduCrew, turnOnEduBrain } from "@/lib/edu-brain";
 import { eduProposalFields, eduProposalPlace } from "@/lib/edu-proposal-words";
 import { EduProposalLines } from "../EduProposalLines";
 import type { Bot } from "@/state/store";
 import type { EduBrainView, EduProposal } from "../../../shared/edu-brain";
-import { buttonCls, Card, ColRow, ItemRow, NoteRow } from "./rows";
+import { buttonCls, Card, ColRow, ItemRow, NoteRow, SwitchRow } from "./rows";
 
 /** What the Edu brain row says, what to do when Edu can't serve this bot, and Edu's own reason when it gave one. */
 export function eduStatusWords(view: Pick<EduBrainView, "state" | "mode" | "version" | "reason" | "brokenFolder" | "crewWorker">): { value: string; hint?: string; detail?: string; warn?: boolean } {
@@ -49,7 +49,7 @@ function ProposalFields({ proposal }: { proposal: EduProposal }) {
   );
 }
 
-export function EduBrainCard({ bot }: { bot: Pick<Bot, "id" | "name" | "busy"> }) {
+export function EduBrainCard({ bot }: { bot: Pick<Bot, "id" | "name" | "busy"> & Partial<Pick<Bot, "color">> }) {
   const [view, setView] = useState<EduBrainView | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -91,6 +91,20 @@ export function EduBrainCard({ bot }: { bot: Pick<Bot, "id" | "name" | "busy"> }
     }
   };
 
+  const toggleCrew = async () => {
+    if (busy || !view?.crew) return;
+    setBusy("crew");
+    try {
+      await setEduCrew(bot.id, !view.crew.enabled);
+      setFailed(null);
+    } catch (error) {
+      setFailed(error instanceof Error && error.message ? error.message : t("eduBrain.crew.failed"));
+    } finally {
+      setBusy(null);
+      await load(true);
+    }
+  };
+
   const status = view ? eduStatusWords(view) : null;
   const ready = view?.state === "ready" && view.mode !== "off";
   return (
@@ -116,6 +130,12 @@ export function EduBrainCard({ bot }: { bot: Pick<Bot, "id" | "name" | "busy"> }
             {view.brokenFolder && view.brain && <ItemRow data-panel-row="edu-folder" title={t("eduBrain.folder")} hint={<PathValue path={view.brain} />} />}
             {ready && view.brain && <ItemRow data-panel-row="edu-folder" title={t("eduBrain.folder")} hint={<PathValue path={view.brain} />} />}
             {ready && view.home && <ItemRow data-panel-row="edu-home" title={t("eduBrain.global")} hint={<PathValue path={view.home} />} />}
+            {view.crew && (ready || view.crew.enabled) && (
+              <SwitchRow data-panel-row="edu-crew" title={t("eduBrain.crew.title")} checked={view.crew.enabled} color={bot.color ?? "blue"}
+                disabled={busy !== null} onChange={() => void toggleCrew()}
+                hint={view.crew.blocked ? <span className="text-warning">{view.crew.blocked}</span>
+                  : view.crew.folder ? t("eduBrain.crew.folder", { folder: view.crew.folder }) : t("eduBrain.crew.hint")} />
+            )}
             {failed && !ready && <NoteRow tone="warn">{failed}</NoteRow>}
           </>
         )}

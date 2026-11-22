@@ -20,6 +20,7 @@ import { yourComputerAsk } from "@/lib/your-computer";
 import { computerAskWords } from "@/lib/computer-ask";
 import { mcpRequestActionLabel } from "@/lib/mcp-request-label";
 import { eduProposalFields, eduProposalOutcome, eduProposalSummary, eduProposalTitle } from "@/lib/edu-proposal-words";
+import { eduCrewGateDetail, eduCrewGateOutcome, eduCrewGateSummary, eduCrewGateTitle } from "@/lib/edu-crew-words";
 import { TriggerCard } from "./TriggerCard";
 import { CardHint } from "./CardHint";
 
@@ -83,15 +84,15 @@ const staleRoutineCard = (card: OptionCardData) => Boolean(card.routineRequest &
 
 /** Cards whose server-written title and first option say what approving does. */
 export const titledCard = (card: OptionCardData | undefined) =>
-  Boolean(card?.teamSetupRequest || card?.mcpRequest || card?.lendingLift || card?.eduProposal || isSkillSwitchAction(card?.skillRequest?.action));
+  Boolean(card?.teamSetupRequest || card?.mcpRequest || card?.lendingLift || card?.eduProposal || card?.eduCrewGate || isSkillSwitchAction(card?.skillRequest?.action));
 
 /** A titled card's title in the person's language where the card carries its own words. */
 export function titledCardTitle(card: OptionCardData, botName: string): string {
-  return card.eduProposal ? eduProposalTitle(card.eduProposal, botName) : card.title;
+  return card.eduProposal ? eduProposalTitle(card.eduProposal, botName) : card.eduCrewGate ? eduCrewGateTitle() : card.title;
 }
 
 export function titledCardAction(card: OptionCardData): string {
-  if (card.eduProposal) return t("server.edu.approve");
+  if (card.eduProposal || card.eduCrewGate) return t("server.edu.approve");
   if (card.mcpRequest) return mcpRequestActionLabel(card.mcpRequest.action);
   if (card.teamSetupRequest) return t(card.teamSetupRequest.deletion ? "approval.action.deleteBot" : "approval.action.applySetup");
   return card.options[0] ?? t("approval.action.confirm");
@@ -101,6 +102,7 @@ export function approvalCardOutcome(card: OptionCardData): string | undefined {
   const isProposal = Boolean(card.routineRequest || card.skillRequest || card.profileRequest || card.modelRequest || titledCard(card));
   if (card.expired === true || staleRoutineCard(card)) return t(isProposal || !card.tool ? "approval.status.expired" : "approval.status.timedOut");
   if (card.eduProposal) return eduProposalOutcome(card.answered);
+  if (card.eduCrewGate) return eduCrewGateOutcome(card.answered);
   if (!card.answered) return undefined;
   if (card.undone === true) return t("approval.status.undone");
   if (card.answered !== "allow") return isProposal ? t("approval.status.cancelled") : t("approval.status.denied");
@@ -511,6 +513,16 @@ export function ApprovalCard({
       <div data-computer-ask={state} className="w-full">
         <CompactApprovalRow header={turnOn.line} summary={waiting ? turnOn.reason : undefined} detail="" showDetailInline={false} outcome={turnOn.outcome}
           allowed={state === "on" || state === "turning-on"} byVoice={byVoice} waiting={waiting} answeredBelow={waiting && !card.dismissed} />
+      </div>
+    );
+  }
+  const gate = card.eduCrewGate;
+  if (gate) {
+    const waiting = !settled && !expired;
+    return (
+      <div data-edu-crew-gate={waiting ? "pending" : "settled"} className="w-full">
+        <CompactApprovalRow header={waiting ? eduCrewGateTitle() : gate.gate} summary={eduCrewGateSummary(gate)} detail={eduCrewGateDetail(gate)} showDetailInline={false}
+          outcome={outcome} allowed={settled === "allow"} expired={expired} byVoice={byVoice} waiting={waiting} answeredBelow={waiting && Boolean(card.requestId)} />
       </div>
     );
   }

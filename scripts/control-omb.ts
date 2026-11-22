@@ -132,7 +132,8 @@ export interface VerificationServer {
 }
 
 /** No Edu unless the caller asks for one with EDU_FIXTURE_HOME: the global Edu brain the fixture's bots read, a folder the
- * caller made. Security: it may never be the person's own brain, symlinks resolved. */
+ * caller made. Security: it may never be the person's own brain, symlinks resolved. EDU_FIXTURE_CREW_BIN puts a folder of
+ * fake crew CLIs (a fake `codex`) on the fixture's PATH, so Edu crew never finds a real coding CLI. */
 export function eduFixtureEnvironment(parentEnv: NodeJS.ProcessEnv, dataDir: string): Record<string, string> {
   const home = parentEnv.EDU_FIXTURE_HOME?.trim();
   if (!home) return { OMB_EDU_CLI: join(dataDir, "no-edu") };
@@ -144,7 +145,9 @@ export function eduFixtureEnvironment(parentEnv: NodeJS.ProcessEnv, dataDir: str
   }
   const cli = locateEduCli(parentEnv, parentEnv.PATH ?? "");
   if (!cli) throw new ControlOmbError("EDU_FIXTURE_HOME needs Edu installed on PATH, or OMB_EDU_CLI naming its cli.js");
-  return { EDU_HOME: real, OMB_EDU_CLI: cli };
+  const crew = parentEnv.EDU_FIXTURE_CREW_BIN?.trim();
+  if (crew && !isAbsolute(crew)) throw new ControlOmbError("EDU_FIXTURE_CREW_BIN must be an absolute folder of fake crew CLIs");
+  return { EDU_HOME: real, OMB_EDU_CLI: cli, ...(crew ? { OMB_EXTRA_PATH: crew } : {}) };
 }
 
 /** A temporary home in `dataDir`, the fake engine's knobs from `parentEnv`, node

@@ -11,6 +11,8 @@ import { approvalDetailText, outboundSummary } from "@/lib/approval-summary";
 import { eduProposalFields, eduRightsNote } from "@/lib/edu-proposal-words";
 import { useEduRights } from "@/lib/edu-brain";
 import { EduProposalLines } from "./EduProposalLines";
+import { eduCrewGateDetail, eduCrewGateSummary, eduCrewGateTitle } from "@/lib/edu-crew-words";
+import { isEduDecisionCard } from "../../shared/edu-brain";
 import { reviewedSkillSha256 } from "../../shared/skill-request";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useInboxOrigin } from "./InboxLine";
@@ -64,9 +66,9 @@ export function pendingApprovals(messages: Message[]): Pending[] {
     }));
 }
 
-/** An Edu proposal waits in its card and in Memory settings: no turn waits on it, so it never holds the composer, and a
+/** An Edu proposal or crew gate waits in its card for a person: no turn waits on it, so it never holds the composer, and a
  * call never reads it out or takes a spoken yes for it. */
-export const waitsOnTurn = (pending: Pending): boolean => !pending.message.card?.eduProposal;
+export const waitsOnTurn = (pending: Pending): boolean => !isEduDecisionCard(pending.message.card);
 
 /** The approvals a running turn waits on, which a call may put to the person. */
 export function turnApprovals(messages: Message[]): Pending[] {
@@ -148,6 +150,7 @@ function approvalWords(pending: Pending, botName?: string): { line: string; summ
   if (outbound) return { line: outbound.headline, ...(outbound.summary ? { summary: outbound.summary } : {}), detail };
   if (ask) return { line: ask.line, detail };
   if (card?.eduProposal) return { line: label(pending, botName), detail: eduProposalFields(card.eduProposal) };
+  if (card?.eduCrewGate) return { line: eduCrewGateTitle(), summary: eduCrewGateSummary(card.eduCrewGate), inline: eduCrewGateDetail(card.eduCrewGate), detail: eduCrewGateDetail(card.eduCrewGate) };
   if (card?.mcpRequest || card?.lendingLift) return { line: card.title, inline: detail, detail };
   if (isDurable(pending)) return { line: label(pending, botName), detail };
   const action = COMMAND_TOOLS.has(pending.tool) ? t("approval.tool.runCommand") : toolLabel(pending.tool);
@@ -303,7 +306,7 @@ export function PendingApprovalActions({
   const marked = (action: string) => (tag ? { [`data-${tag}-action`]: action } : {});
   const showPrimary = part !== "more";
   const showMore = part !== "primary";
-  if (pending.message.card?.eduProposal) return showPrimary ? <EduProposalActions decide={decide} marked={marked} allow={allow} /> : null;
+  if (isEduDecisionCard(pending.message.card)) return showPrimary ? <EduProposalActions decide={decide} marked={marked} allow={allow} /> : null;
   const turnOn = computerAskWords(pending.message.card, bot?.name ?? t("approval.someone"));
   if (turnOn) {
     if (!showPrimary) return null;

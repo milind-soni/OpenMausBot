@@ -177,3 +177,18 @@ describe("bundled phone-connection skill", () => {
     expect(guide.split("\n").length).toBeLessThanOrEqual(60);
   });
 });
+
+describe("bundled edu-crew skill", () => {
+  const skills = loadBundledSkills(join(process.cwd(), "skills"));
+  const guide = skills.find((skill) => skill.manifest.id === "edu-crew")?.instructions ?? "";
+
+  it("mounts only for a bot whose Edu crew is on, and says only the person approves", () => {
+    const ids = (text: string, capabilities: string[]) => selectBundledSkills(text, capabilities, skills).map((skill) => skill.manifest.id);
+    expect(ids("can you review my change with another vendor", [])).not.toContain("edu-crew");
+    expect(ids("can you review my change with another vendor", ["eduCrew"])).toContain("edu-crew");
+    expect(ids("plan and build the export feature", ["eduCrew"])).toContain("edu-crew");
+    for (const tool of ["edu_plan", "edu_review", "edu_crew_status", "edu_crew_result"]) expect(guide).toContain(tool);
+    expect(guide).toContain("Only the person approves");
+    expect(guide).not.toContain("edu_crew_approve");
+  });
+});

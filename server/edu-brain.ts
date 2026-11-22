@@ -9,6 +9,7 @@ import { canUseMcpServer } from "../shared/tool-scope.ts";
 import { createBriefCache, EDU_BRIEF_TIMEOUT_MS, eduBriefText, eduPromptParts } from "./edu-brief.ts";
 import { augmentedPath, findCliCandidates, resolveCliSpawn, userHome } from "./env-path.ts";
 import { AGENTS_NODE_FLAG } from "./proxy-paths.ts";
+import { eduStoreRefusal } from "./edu-store.ts";
 import { isInside, resolveThroughLinks } from "./sentinel/paths.ts";
 import type { PromptPart } from "./system-prompt.ts";
 
@@ -92,27 +93,14 @@ export interface EduFolderLimits {
   botId: string;
 }
 
-/** Security: a bot's brain folder, symlinks resolved, is never the global brain or inside it, never in Edu Bot's data
- * folder except the bot's own brain, its `.edu` is never a symlink, and its `.edu/brain` never resolves outside the
- * folder (Edu 6.0.0 writes through either link into another brain). */
+/** Security: a bot's brain folder, symlinks resolved, is never in Edu Bot's data folder except the bot's own brain, and its
+ * Edu store is its own (`eduStoreRefusal`). */
 export function eduFolderRefusal(folder: string, limits: EduFolderLimits): string | null {
   const real = resolveThroughLinks(folder);
-  const globalHome = resolveThroughLinks(limits.globalHome);
-  if (isInside(real, globalHome) || resolveThroughLinks(join(real, ".edu")) === globalHome) {
-    return "This folder is the global Edu brain; a bot needs a brain of its own";
-  }
   const dataDir = resolveThroughLinks(limits.dataDir);
-  if (isInside(real, dataDir) && real !== join(dataDir, "brains", limits.botId)) {
-    return "This folder is inside Edu Bot's data folder; pick a folder outside it";
-  }
-  if (isSymlink(join(real, ".edu"))) return "This folder's .edu is a link to another place; use a real .edu folder";
-  const notes = join(real, ".edu", "brain");
-  if (existsSync(notes) && !isInside(resolveThroughLinks(notes), real)) return "This folder's .edu/brain is a link to another place; use a real brain folder";
-  return null;
-}
-
-function isSymlink(path: string): boolean {
-  try { return lstatSync(path).isSymbolicLink(); } catch { return false; }
+  const store = eduStoreRefusal(real, limits.globalHome);
+  if (store) return store;
+  return isInside(real, dataDir) && real !== join(dataDir, "brains", limits.botId) ? "This folder is inside Edu Bot's data folder; pick a folder outside it" : null;
 }
 
 export function parseEduBrainSetting(value: unknown): { ok: true; value: EduBrainSetting | undefined } | { ok: false; error: string } {
@@ -333,6 +321,11 @@ export function createEduBrains(deps: EduBrainDeps) {
     detect,
     brainFolder,
     integration,
+
+    /** Whether the last check found Edu ready and turns run on this computer; never waits for a check. */
+    readyNow(): boolean {
+      return (deps.hostLocal?.() ?? true) && deps.config()?.enabled !== false && cached?.runtime.state === "ready";
+    },
 
     /** Why `folder` may not be this bot's brain, or null. */
     folderRefusal(bot: EduBot, folder: string): string | null {

@@ -5,7 +5,7 @@ import type { PresenceFrame } from "./team-presence.ts";
 import type { DataBroadcast } from "./data-surface.ts";
 import type { ApprovalMode } from "./approval-mode.ts";
 import type { ToolScope } from "./tool-scope.ts"; import type { ToolGroup } from "./tool-groups.ts";
-import type { EduBrainField, EduProposalCardField } from "./edu-brain.ts";
+import type { EduBrainField, EduCrewGateCardField, EduCrewLineField, EduProposalCardField } from "./edu-brain.ts";
 import type { CommandAllowlistCandidate } from "./command-allowlist.ts";
 import type { TurnDigest } from "./digest.ts";
 import type { BotAvatarCrop, MascotFaceColor } from "./bot-avatar.ts";
@@ -438,7 +438,7 @@ export type CardAnswerer = (
 export const EXCERPT_SUMMARY_HEADER = "Historical excerpts in chronological order; newer corrections override older requests. These excerpts may omit earlier details.";
 
 /** One transcript line, serialized as stored. */
-export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCardFields, WaitLineField, CheckBackLineField, HandoffStatusField, BugReportField {
+export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCardFields, WaitLineField, CheckBackLineField, HandoffStatusField, BugReportField, EduCrewLineField {
   roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";
@@ -607,7 +607,7 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
 export const movesThreadToTop = (message: Pick<WireMessage, "role" | "kind" | "peerAsk" | "turnId" | "turnTerminal">): boolean =>
   message.role === "user" ? !message.peerAsk : message.kind === "text" && (message.turnTerminal === true || !message.turnId);
 
-export interface OptionCardData extends WaitCardField, ComputerAskField, AccessRequestCardField, OutsideWriteCardField, AppSettingCardField, EduProposalCardField {
+export interface OptionCardData extends WaitCardField, ComputerAskField, AccessRequestCardField, OutsideWriteCardField, AppSettingCardField, EduProposalCardField, EduCrewGateCardField {
   /** The harness asks the owner to let this line of theirs use the lent computer (server/host/lending-lifts.ts). */ lendingLift?: { requestMessageId: string; memoryToken?: string; outside?: true; botOpened?: true; allowedAt?: number };
   /** calls: one per outbound call the card covers, in subtitle order. */
   outboundRequest?: { tool: string; app: string | null; calls?: Array<{ app: string | null; label: string }> };

@@ -96,6 +96,7 @@ export interface BotPatchRouteDeps {
 }
 
 /** Security: a bot's shell is a loopback caller, so only a paired session or the desktop app gives a bot an Edu brain. */
+const EDU_CREW_WIDEN_REFUSAL = "Turning on a bot's Edu crew has to come from the desktop app or a paired device.";
 const EDU_BRAIN_WIDEN_REFUSAL = "Turning on a bot's Edu brain, or pointing it at another folder, has to come from the desktop app or a paired device.";
 
 export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
@@ -338,6 +339,10 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         const refusal = parsed.value?.mode === "folder" ? deps.eduBrains.folderRefusal({ id: m[1] }, parsed.value.path) : null;
         if (refusal) return json(res, 400, { error: refusal });
         patch.eduBrain = parsed.value;
+      }
+      if (body.eduCrew !== undefined) {
+        if (typeof body.eduCrew !== "boolean") return json(res, 400, { error: "eduCrew must be true or false" });
+        patch.eduCrew = body.eduCrew || undefined;
       }
       // null drops the per-tool grants; {} means no tools.
       if (body.connectorTools !== undefined) {
@@ -638,6 +643,10 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       if (body.eduBrain !== undefined && eduBrainWidens(existingBot?.eduBrain, patch.eduBrain as EduBrainSetting | undefined)) {
         if (auth.kind === "loopback" && !DESKTOP_MANAGED) return json(res, 403, { error: EDU_BRAIN_WIDEN_REFUSAL });
         loosened.push("eduBrain");
+      }
+      if (body.eduCrew === true && existingBot?.eduCrew !== true) {
+        if (auth.kind === "loopback" && !DESKTOP_MANAGED) return json(res, 403, { error: EDU_CREW_WIDEN_REFUSAL });
+        loosened.push("eduCrew");
       }
       const browserOrigin = typeof req.headers.origin === "string" && req.headers.origin.trim() !== "";
       if (loosened.length && auth.kind === "loopback" && !DESKTOP_MANAGED && !browserOrigin) {

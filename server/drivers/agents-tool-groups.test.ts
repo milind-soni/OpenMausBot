@@ -9,11 +9,11 @@ import { EMAIL_TOOLS } from "../email/tools.ts";
 import { availableTools, catalogProfileFromEnv } from "./agents-catalog.ts";
 import { CORE_TOOLS, OWN_SWITCH_TOOLS, serverTurnedOff, TOOL_GROUP_MEMBERS, toolsOffNames } from "./agents-tool-groups.ts";
 
-/** Every host switch on: a Chief's MausBot on a server with a cloud computer, images, hosting and research. */
+/** Every host switch on: a Chief's MausBot on a server with a cloud computer, images, hosting, research and Edu crew. */
 const FULLEST = {
   OMB_BOT_ID: "bot-full", OMB_SKILL_AUTHORING_ENABLED: "1", OMB_SHARED_COMPUTERS_ENABLED: "1", OMB_VOICE_NOTES: "1", OMB_CHIEF_OF_STAFF: "1",
   OMB_COMPUTER_SELECTION: "1", OMB_X_RESEARCH: "1", OMB_RESEARCH: "1", OMB_TEAM_PEOPLE: "1", OMB_IMAGE_GENERATION: "1", OMB_APP_HOSTING: "1",
-  OMB_MEETINGS: "1", OMB_MAUSBOT: "1",
+  OMB_MEETINGS: "1", OMB_MAUSBOT: "1", OMB_EDU_CREW: "1",
 };
 const listed = (env: Record<string, string>) => availableTools(catalogProfileFromEnv(env));
 const names = (env: Record<string, string>) => listed(env).map((tool) => tool.name);

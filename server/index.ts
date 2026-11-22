@@ -579,6 +579,8 @@ import { createBotPresetRoutes } from "./routes/bot-presets.ts"; import { create
 import { createBotMemoryRoutes } from "./routes/bot-memory.ts";
 import { createEduBrains } from "./edu-brain.ts";
 import { createEduProposals } from "./edu-proposals.ts";
+import { createEduCrew } from "./edu-crew.ts";
+import { isEduDecisionCard } from "../shared/edu-brain.ts";
 import { createEduRoutes } from "./routes/edu.ts";
 import { streamCursorSeq } from "./host/stream-cursor.ts";
 import { createBotCreateRoutes } from "./routes/bots-create.ts"; import { privateUntilShared } from "./new-bot-sharing.ts"; import { createShareNotice } from "./host/share-notice.ts"; import { memberDeleteRefusal } from "./host/member-bots.ts";
@@ -647,6 +649,7 @@ import { createWebhookRoutes } from "./routes/webhooks.ts";
 import { withScopeHint } from "./connector-scope-hint.ts"; import { accountsByApp, withAccountHint } from "./connector-account-hint.ts";
 import { connectorFileDeps, connectorFileScope, prepareConnectorFiles, withMissingFileHint } from "./connector-files.ts";
 import { createConnectorCards } from "./host/connector-cards.ts";
+import { checkedMemberIds } from "./host/channel-members.ts";
 import { createLoginMailCodes } from "./host/login-mail-codes.ts"; import { createLateToolResults } from "./host/late-tool-results.ts"; import { internalBodyRefusal } from "./host/internal-body-ids.ts";
 import { onThreadMade, onThreadSeen, personAsks as personAskAt, sawThread } from "./thread-presence.ts"; import { bearerForGrants, createEnginePrestart } from "./engine-prestart.ts"; import { prestartAllowed } from "./drivers/session-idle.ts"; import { createWarmSummaryHost, HARNESS_IDLE_FRACTION } from "./host/warm-summary-host.ts";
 
@@ -1047,7 +1050,7 @@ function cloudCardRefusal(auth: RequestAuth & { kind: "session" }): string | nul
 
 /** Decides only whose answer to an existing card counts; it adds no card, gate or prompt. */
 function cardAnswerRefusal(auth: RequestAuth, threadId: string, requestId: string, behavior: string): string | null {
-  const eduRefusal = eduProposals.answerRefusal(auth, threadId, requestId, behavior);
+  const eduRefusal = [eduProposals, eduCrew].map((edu) => edu.answerRefusal(auth, threadId, requestId, behavior)).find((refusal) => refusal !== undefined);
   if (eduRefusal !== undefined) return eduRefusal;
   if (auth.kind === "loopback") {
     return auth.trust === "service" && behavior !== "deny"
@@ -1796,7 +1799,7 @@ function agentsIntegration(
   const bot = store.bot(botId), speaking = botForThread(botId, threadId) ?? bot;
   // Only advertises the tools; the routes behind them refuse regardless.
   const host = { skillAuthoring: skillAuthoringEnabled(cfg), sharedComputers: botLending(), cloudHome: Boolean(CLOUD_HOME), team: Boolean(CLOUD_TEAM),
-    voiceNotes: tts.voiceReady(cfg, speaking?.voice) && speaking?.voiceNotes !== false, x: Boolean(researchCredential(cfg.treg?.key)), research: researchAvailability.available(), imageGeneration: imageGenerationReady(cfg), meetings: boat.boatConfigured(cfg), appHosting: hostingCredential() !== null, localVm: localVmAvailability.available() };
+    voiceNotes: tts.voiceReady(cfg, speaking?.voice) && speaking?.voiceNotes !== false, x: Boolean(researchCredential(cfg.treg?.key)), research: researchAvailability.available(), imageGeneration: imageGenerationReady(cfg), meetings: boat.boatConfigured(cfg), appHosting: hostingCredential() !== null, localVm: localVmAvailability.available(), eduCrew: eduCrew.offered(botId, threadId) };
   return { ...agentsProxyLaunch(), env: agentsServerEnv({ threadId, bot: bot ?? { id: botId }, room: Boolean(store.groupByThread(threadId)), teamComputer: Boolean(bot && inheritedTeamComputer(bot)), botDriven: automated || botDrivenConversation(store.taskByThread(botId, threadId)), host },
     { generation, depth, skillAuthoring, roomHandoffId, ...(hostFiles && !CLOUD_HOME && !HOSTED_WORKSPACE ? { deliversSavedFiles: true } : {}) },
     (turn) => mintInternalCapability({ botId, threadId, kind: "agents", createdBots: 0, openedThreads: 0, ...turn }), `http://127.0.0.1:${PORT}`) };
@@ -2703,24 +2706,6 @@ function packageImportDeps(selection: ModelSelection): PackageImportDeps {
   };
 }
 
-function checkedMemberIds(value: unknown): { ok: true; memberIds: string[] } | { ok: false; error: string } {
-  if (!Array.isArray(value)) return { ok: false, error: "memberIds must be a list of bot IDs" };
-  const invalidIndex = value.findIndex(
-    (id) => typeof id !== "string" || !id.trim() || (!store.bot(id) && !id.startsWith("link-")),
-  );
-  if (invalidIndex !== -1) {
-    return { ok: false, error: `unknown channel member: ${String(value[invalidIndex])}` };
-  }
-  const memberIds = [...new Set(value as string[])].filter((id) => store.bot(id)); // An address of another place that no record here answers to (server/host/bot-link-rooms.ts) is left out, not refused.
-  if (!memberIds.length) return { ok: false, error: "a channel needs at least one bot" };
-  if (memberIds.every((id) => store.bot(id)?.hidden)) {
-    return {
-      ok: false,
-      error: "a channel needs at least one active bot — every member given is archived",
-    };
-  }
-  return { ok: true, memberIds };
-}
 let bootSelection = { instanceId: "", model: "" }; // Settled by one tiny test message through each AI it could be (server/tested-ai.ts).
 const testedAi = createTestedAi({ engine: (instanceId) => registry.get(instanceId), store: () => store, threadBusy, context: selectionContext, changed: () => refreshUnsetModelSelections().then(() => broadcast({ kind: "config", ...configStatus() })),
   saved: () => [cfg.defaultModelSelection, cfg.newBotDefaults?.profile.modelSelection], hosted: () => Boolean(hostedModels), identity: (instanceId) => configIdentity(providerConfigs()[instanceId]), file: join(DATA_DIR, "providers", "ai-checks.json"), forBot: (selection) => withNewBotEffort(selection, cfg.newBots?.effort, registry.get(selection.instanceId)?.adapter.capabilities.effortLevels) });
@@ -2736,6 +2721,22 @@ const store = new Store(
 );
 const eduProposals = createEduProposals({ brains: eduBrains, store, bus, desktop: DESKTOP_MANAGED, inRoom: (threadId) => Boolean(store.groupByThread(threadId)),
   decide: (row) => appendDecision(DATA_DIR, row) });
+const eduCrew = createEduCrew({
+  dataDir: DATA_DIR, brains: eduBrains, store, desktop: DESKTOP_MANAGED,
+  decide: (row) => appendDecision(DATA_DIR, row),
+  folder: (botId, threadId) => store.taskByThread(botId, threadId)?.cwd ?? store.bot(botId)?.cwd,
+  engine: (botId, threadId) => registry.get(botForThread(botId, threadId)?.modelSelection.instanceId ?? "")?.driverKind,
+  turn: (botId, threadId) => {
+    const bot = botForThread(botId, threadId);
+    return {
+      room: Boolean(store.groupByThread(threadId)), hostLocal: CLOUD_HOME === null && !botBox.enabled(),
+      confined: proactive.fence.confines(threadId) || botApiThread(threadId),
+      computer: bot ? turnProvider(bot, undefined, threadId) ?? turnSurfacePlan(bot, undefined, threadId).computer : "off",
+    };
+  },
+});
+eduCrew.resume();
+void eduBrains.detect();
 const sharedVm = createSharedVmControl({ control: computerControl, store, mode: () => CLOUD_HOME ? null : localVmMode(cfg), botForThread, turnBots: directTurnBots,
   teamTurns: teamComputerTurns, teamComputer: (bot) => inheritedTeamComputer(bot)?.id, place: (bot, threadId) => turnSurfacePlan(bot, undefined, threadId).computer,
   turnVmTargets: { get: (threadId) => localVmThreadTargets.get(threadId) }, busy: () => localVmModeChangeBusy || localVmImageBusy || localVmLifecycleBusy.has(SHARED_LOCAL_VM_TARGET.key) });
@@ -3520,7 +3521,7 @@ function createChannel(value: unknown): GroupRecord {
   }
   const body = value as Record<string, unknown>;
 
-  const roster = checkedMemberIds(body.memberIds);
+  const roster = checkedMemberIds(body.memberIds, (id) => store.bot(id));
   if (!roster.ok) throw Object.assign(new Error(roster.error), { status: 400 });
   const { memberIds } = roster;
   const audienceConflict = roomAudienceConflict(memberIds);
@@ -3607,7 +3608,7 @@ function updateChannel(groupId: string, value: unknown): GroupRecord {
   }
   if (body.memberIds !== undefined) {
     if (existing.dm) throw Object.assign(new Error("direct-message channels cannot change members"), { status: 400 });
-    const roster = checkedMemberIds(body.memberIds);
+    const roster = checkedMemberIds(body.memberIds, (id) => store.bot(id));
     if (!roster.ok) throw Object.assign(new Error(roster.error.replace("channel", "room")), { status: 400 });
     const audienceConflict = roomAudienceConflict(roster.memberIds, existing.memberIds);
     if (audienceConflict) throw Object.assign(new Error(audienceConflict), { status: 400 });
@@ -4862,12 +4863,13 @@ async function respondToCard(input: {
 }
 
 function closeOpenApprovals(threadId: string): void {
+  void eduCrew.stopped(threadId);
   for (const key of pendingCommandRules.keys()) if (key.startsWith(`${threadId}:`)) pendingCommandRules.delete(key);
   cancelYourComputerAsks(threadId); computerAsks?.asks.cancel(threadId);
   for (const message of store.messagesFor(threadId)) {
     const card = message.card;
     if (!card?.requestId || card.answered || card.dismissed) continue;
-    if (card.routineRequest || card.skillRequest || card.eduProposal || message.inbox) continue;
+    if (card.routineRequest || card.skillRequest || isEduDecisionCard(card) || message.inbox) continue;
     if (isPersistentQuestionCard(card)) {
       askMessageByRequest.delete(`${threadId}:${card.requestId}`);
       continue;
@@ -7793,6 +7795,7 @@ async function beginTurn(
         [
           ...(phoneOffered ? ["phoneMcp"] : []),
           ...(skillAuthoring ? ["skillAuthoring"] : []),
+          ...(eduCrew.offered(bot.id, threadId) ? ["eduCrew"] : []),
         ],
         skills,
       );
@@ -9095,7 +9098,7 @@ const outsideWrites = createOutsideWrites({ store, notify, language: (threadId) 
 const outboundRequests = new OutboundRequestService();
 const outboundHold = createOutboundHold({ store, dataDir: DATA_DIR, outboundRequests, holdMs: OUTBOUND_HOLD_MS, connectorThread, activeGroupTurnForBot, notify });
 
-const { resolveAndSendTrust } = createTrustAnswers({ store, dataDir: DATA_DIR, teamMemoryRequests, outsideWrites, eduProposals, outboundRequests });
+const { resolveAndSendTrust } = createTrustAnswers({ store, dataDir: DATA_DIR, teamMemoryRequests, outsideWrites, eduProposals, eduCrew, outboundRequests });
 
 const profileRequests = new ProfileRequestService({
   store,
@@ -12044,7 +12047,7 @@ ROUTES.push(phones.routes);
 ROUTES.push(createSkillShareRoutes({ enabled: () => skillsHost.mode() !== "off", botExists: (id) => Boolean(store.bot(id)),
   cardRefusal: (auth, threadId, requestId) => cardAnswerRefusal(auth, threadId, requestId, "allow"), shareFromReceipt: skillsHost.shareFromReceipt, shareFromBot: skillsHost.shareFromBot }));
 ROUTES.push(createTeamContextRoutes({ store, teamMemory }));
-ROUTES.push(createEduRoutes({ bot: (id) => store.bot(id), status: (bot) => eduBrains.status(bot), proposals: eduProposals, desktop: DESKTOP_MANAGED }));
+ROUTES.push(createEduRoutes({ bot: (id) => store.bot(id), status: (bot) => eduBrains.status(bot), proposals: eduProposals, crew: eduCrew, desktop: DESKTOP_MANAGED }));
 ROUTES.push(createBotMemoryRoutes({
   bot: (id) => store.bot(id),
   eduStatus: (bot) => eduBrains.status(bot),
@@ -12823,6 +12826,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           throw Object.assign(new Error(TURN_ENDED_REFUSAL), { status: 401 });
         }
       };
+      if (await eduCrew.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, signal: () => turnCallSignals.signal(internalCapability, res) }) !== PASS) return;
       const botFolders = async () => ({ roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), vmWorkspace: (await attachmentVmForTurn(internalCapability))?.workspaceDir ?? null }); if (await lentMcp.route({ method, path, req, res, json, turn: internalCapability, readBody: readInternalBody }) !== PASS || await internalToolRoutes({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, folders: botFolders }) !== PASS || await waitRoutes({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, ...waitTurnChecks(internalCapability, internalSender) }) !== PASS || await teamMessages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || await devsReports.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || (computerAsks && await computerAsks.internal({ method, path, res, json, turn: internalCapability, readBody: readInternalBody }) !== PASS) || await cloudComputerResets.internal({ method, path, res, json, sender: internalSender, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || await meetingsHost.internal({ method, path, res, json, readBody: readInternalBody, bot: internalSender, threadId: internalCapability.threadId, active: () => internalCapabilityIsActive(internalCapability) }) !== PASS || await imageTools.internal({ method, path, res, json, readBody: readInternalBody, folders: botFolders, threadId: internalCapability.threadId, requireActive: requireActiveInternalCapability, personTurn: turnOrigin(internalCapability).kind === "user" || (Boolean(roomRun(internalCapability.generation)?.requestMessageId) && guestDrivenTurns.get(internalCapability.threadId) !== internalCapability.generation) }) !== PASS || await share.tool({ method, path, res, json, readBody: readInternalBody, bot: internalSender, threadId: internalCapability.threadId, roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), actsForAdmin: teamConnections.actsForAdmin(internalCapability.threadId, internalCapability.generation), githubPerson: teamConnections.turnPerson(internalCapability.threadId, internalCapability.generation), actingName: CLOUD_TEAM ? teamHost.personName(actingPeople.requester(internalCapability.threadId, internalCapability.generation)) : undefined, personMessage: turnOrigin(internalCapability).kind === "user" ? store.messagesFor(internalCapability.threadId).find((line) => line.role === "user" && line.id === (directRequestOwners.get(internalCapability.threadId)?.messageId ?? roomRun(internalCapability.generation)?.requestMessageId))?.text ?? null : null, post: (text, template) => { const source = connectorThread(internalSender.id, internalCapability.threadId); return source ? store.appendMessage(internalCapability.threadId, { role: "bot", kind: "text", text, template, ...(source.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }).id : null; } }) !== PASS) return; const callSignal = turnCallSignals.signal(internalCapability, res); if (await publishedPages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, requireActive: requireActiveInternalCapability, signal: callSignal, folders: botFolders, post: (text, publishedPage, bundle) => { const source = connectorThread(internalSender.id, internalCapability.threadId); return !source ? null : (bundle && publishedPages.show({ threadId: internalCapability.threadId, card: publishedPage, bundle, bot: internalSender })) || store.appendMessage(internalCapability.threadId, { role: "bot", kind: "text", text, publishedPage, ...(source.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }).id; } }) !== PASS) return;
       const delegatedThisTurn = (taskId: string) => {
         (internalCapability.delegatedThisTurn ??= new Set()).add(taskId);
@@ -15261,6 +15265,7 @@ const gracefulShutdown = createGracefulShutdown({
       await browserRuntime.closeAll();
     },
     () => liveCalls.shutdown(),
+    () => eduCrew.shutdown(),
     () => flushAllProfileHistory(),
     () => flushAllMemoryJournals(),
     () => flushUsageLedger(DATA_DIR),

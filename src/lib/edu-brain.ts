@@ -16,6 +16,11 @@ export function turnOnEduBrain(botId: string): Promise<unknown> {
   return api(`/api/bots/${encodeURIComponent(botId)}`, { method: "PATCH", body: JSON.stringify({ eduBrain: { mode: "own" } }) });
 }
 
+/** Turns a bot's Edu crew on or off. The server refuses turning it on from a bot's shell. */
+export function setEduCrew(botId: string, on: boolean): Promise<unknown> {
+  return api(`/api/bots/${encodeURIComponent(botId)}`, { method: "PATCH", body: JSON.stringify({ eduCrew: on }) });
+}
+
 let known: EduDecideRights | null = null;
 let asking: Promise<EduDecideRights | null> | null = null;
 

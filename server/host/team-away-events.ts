@@ -1,6 +1,7 @@
 // What, of what reaches a Team Cloud person, is worth an email while they are away (team-away.ts), and the
 // names that email may carry. Security invariant: a private chat's event names no bot and no place, and nothing here
 // reads a message's words.
+import { isEduDecisionCard } from "../../shared/edu-brain.ts";
 import { liveCardKind } from "../../shared/live-approval.ts";
 import type { Notification, NotifyKind } from "../../shared/notification.ts";
 import { audienceMember, type Audience } from "../audience.ts";
@@ -28,7 +29,7 @@ export function createTeamAwayEvents(deps: TeamAwayEventsDeps) {
   const shared = (threadId: string) => audienceMember(deps.audienceOf(threadId)) === null;
   const groupName = (threadId: string, groupId?: string) => (groupId ? deps.store.groupByThread(threadId)?.name : undefined);
   const openCard = (threadId: string, requestId?: string) => deps.store.messagesFor(threadId)
-    .findLast((message) => !message.inbox && !message.card?.eduProposal && liveCardKind(message.card) !== null && (!requestId || message.card?.requestId === requestId));
+    .findLast((message) => !message.inbox && !isEduDecisionCard(message.card) && liveCardKind(message.card) !== null && (!requestId || message.card?.requestId === requestId));
 
   /** A line reached a person's inbox. */
   function delivered(item: Item, delivery: Delivery): void {

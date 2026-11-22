@@ -1,6 +1,7 @@
 // Every built-in tool a bot can be shown, by the switch that leaves it out. agents-tool-groups.test.ts holds every
 // catalog tool to exactly one entry here, so a new tool is placed on purpose.
 import { isToolGroup, type ToolGroup } from "../../shared/tool-groups.ts";
+import { EDU_CREW_TOOL_NAMES } from "./agents-edu-crew-tools.ts";
 import { HOSTING_TOOL_NAMES } from "./agents-hosting-tools.ts";
 import { IMAGE_TOOL_NAMES } from "./agents-image-tools.ts";
 import { MEETING_TOOL_NAMES } from "./agents-meeting-tools.ts";
@@ -17,11 +18,12 @@ export const TOOL_GROUP_MEMBERS: Readonly<Record<ToolGroup, { tools: ReadonlySet
   email: { tools: new Set(), servers: ["email"] },
 };
 
-/** Groups with a bot switch of their own, kept where it was: Memory (`memoryEnabled`), Research (`xResearch`), and
- * Connected apps (`composio`) and the built-in browser (`browser`), which are whole servers. */
-export const OWN_SWITCH_TOOLS: Readonly<Record<"memory" | "research", ReadonlySet<string>>> = {
+/** Groups with a bot switch of their own, kept where it was: Memory (`memoryEnabled`), Research (`xResearch`), Edu crew
+ * (`eduCrew`), and Connected apps (`composio`) and the built-in browser (`browser`), which are whole servers. */
+export const OWN_SWITCH_TOOLS: Readonly<Record<"memory" | "research" | "eduCrew", ReadonlySet<string>>> = {
   memory: new Set(["memory_update", "memory_log"]),
   research: RESEARCH_TOOL_NAMES,
+  eduCrew: EDU_CREW_TOOL_NAMES,
 };
 
 /** What every bot keeps: talking to the person and its team, its own setup, routines and waits, and its computer. */
