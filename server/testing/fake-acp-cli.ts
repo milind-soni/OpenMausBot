@@ -74,6 +74,8 @@
 //   FAKE_ACP_OMIT_MODEL_VALUE  when the live model equals this id, the model option has no currentValue
 //     (Copilot CLI 1.0.105 does this for auto)
 //   FAKE_ACP_EXIT_ON_MODEL  the process exits when set_config_option selects this model
+//   FAKE_ACP_MODEL_SWITCH_DELAY_MS  set_config_option answers a model switch after this many milliseconds, as a slow account
+//     can; the session's first model is answered at once
 //   FAKE_ACP_VARIANTS  JSON map model -> {id?, currentValue?, options} of ACP select values
 //   FAKE_ACP_CONFIG_UPDATES  JSON [{after, sessionId?, configOptions, replay?}] emitted after the named response
 //   FAKE_ACP_USAGE_ROOT  usage at the prompt result's root, as opencode 1.18.18 sends it
@@ -1284,6 +1286,12 @@ function handle(msg: any) {
       configCalls.push({ method: msg.method, params: msg.params });
       if (process.env.FAKE_ACP_DUMP) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.config.json`, JSON.stringify(configCalls, null, 2));
+      }
+      const switchDelay = Number(process.env.FAKE_ACP_MODEL_SWITCH_DELAY_MS ?? 0);
+      if (switchDelay > 0) {
+        const answer = { configOptions: configOptions() };
+        setTimeout(() => resultAndConfigUpdates(msg.id, answer, "model", msg.params.sessionId), switchDelay);
+        break;
       }
       resultAndConfigUpdates(msg.id, { configOptions: configOptions() }, "model", msg.params.sessionId);
       break;

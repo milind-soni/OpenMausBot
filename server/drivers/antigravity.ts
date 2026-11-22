@@ -253,6 +253,9 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       get modelsUnconfirmed() {
         return base.modelsUnconfirmed;
       },
+      get modelsUnreadable() {
+        return base.modelsUnreadable;
+      },
       snapshot: async () => {
         const snapshot = await base.snapshot();
         if (snapshot.state === "available") installFailure = undefined;
