@@ -3,7 +3,7 @@ import { codexConfigDigest, codexOutsideIdentity, type CodexConnection, type Cod
 import { appendNative } from "./native.ts";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
-const timeoutMs = (): number => Number(process.env.OMB_CODEX_COMPACT_TIMEOUT_MS) > 0 ? Number(process.env.OMB_CODEX_COMPACT_TIMEOUT_MS) : DEFAULT_TIMEOUT_MS;
+const timeoutMs = (): number => Number(process.env.FAKE_CODEX_COMPACT_TIMEOUT_MS) > 0 ? Number(process.env.FAKE_CODEX_COMPACT_TIMEOUT_MS) : DEFAULT_TIMEOUT_MS;
 const graceMs = (): number => Math.max(1, Number(process.env.FAKE_CODEX_INTERRUPT_GRACE_MS ?? 750) || 750);
 const sleep = (ms: number) => new Promise<void>((wake) => { const timer = setTimeout(wake, ms); timer.unref?.(); });
 

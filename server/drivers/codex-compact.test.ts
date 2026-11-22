@@ -239,7 +239,7 @@ describe("Codex's own compaction of a kept app-server's thread (fake app-server)
 
   describe("a configuration read that never answers", () => {
     it.each(["deadline", "stop", "exit", "stopAll"] as const)("ends on %s with the connection closed, and the conversation's next message goes through", async (how) => {
-      if (how === "deadline") vi.stubEnv("OMB_CODEX_COMPACT_TIMEOUT_MS", "300");
+      if (how === "deadline") vi.stubEnv("FAKE_CODEX_COMPACT_TIMEOUT_MS", "300");
       const { threadId, session, pid } = await kept({ FAKE_CODEX_CONFIG_HANG_AFTER_TURNS: "1" });
       const stop = new AbortController();
       const pending = compact(threadId, session, { signal: stop.signal });
@@ -259,7 +259,7 @@ describe("Codex's own compaction of a kept app-server's thread (fake app-server)
 
   describe("the compaction's own configuration read never answering", () => {
     it.each(["deadline", "stop", "exit"] as const)("ends on %s with the connection closed and no request sent, and the conversation's next message goes through", async (how) => {
-      if (how === "deadline") vi.stubEnv("OMB_CODEX_COMPACT_TIMEOUT_MS", "300");
+      if (how === "deadline") vi.stubEnv("FAKE_CODEX_COMPACT_TIMEOUT_MS", "300");
       const hang = join(scratch, "config-hang");
       const { threadId, session, pid } = await kept({ FAKE_CODEX_CONFIG_HANG_FILE: hang });
       writeFileSync(hang, "");
@@ -315,7 +315,7 @@ describe("Codex's own compaction of a kept app-server's thread (fake app-server)
     });
 
     it("fails at its deadline, with the connection closed", async () => {
-      vi.stubEnv("OMB_CODEX_COMPACT_TIMEOUT_MS", "400");
+      vi.stubEnv("FAKE_CODEX_COMPACT_TIMEOUT_MS", "400");
       const { threadId, session, pid } = await kept({ FAKE_CODEX_COMPACT: "hang" });
       await expect(compact(threadId, session)).resolves.toMatchObject({ ok: false, reason: "timed out" });
       expect(alive(pid)).toBe(false);
