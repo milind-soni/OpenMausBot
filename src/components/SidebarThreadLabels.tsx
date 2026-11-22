@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { ChevronRight, Clock3, Loader2, Plus, X } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -10,9 +10,15 @@ import type { Action, AppState, Bot } from "@/state/store";
 import { botOpensTo } from "@/state/thread-navigation";
 import { canUnfold, threadLabels, type LabelRow } from "./sidebar-thread-labels";
 import { isWorking } from "./SidebarThreadRow";
+import { showAllConversations } from "./bot-panel/Conversations";
+import { reducedMotion } from "./MenuMotion";
 
 const SLOT = "pointer-events-none absolute end-[30px] top-1.5 flex size-6 items-center justify-center rounded-lg text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:hidden touch:pointer-events-auto touch:opacity-70 motion-reduce:transition-none";
 const ROW = "group/label relative flex h-8 w-full min-w-0 items-center gap-2 rounded-lg ps-2.5 pe-2 text-start text-[13px] leading-[18px] outline-none transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none";
+/** Below tablet width a row's hover controls show at rest, so the fold chevron does too, under the row's ⋯ (its time
+ * sits where it is on a wide row): a bot unfolded in a wide window can still be folded after the window narrows. */
+const FOLD_SLOT = cn(SLOT, "max-md:flex max-md:pointer-events-auto max-md:opacity-70 max-md:top-auto max-md:bottom-1.5 max-md:end-[3px]");
+const FOLD_MS = 200;
 const STAGGER_MS = 25;
 /** Rows past the fourth arrive with it, so the slide stays near 250ms however many there are. */
 const STAGGER_STEPS = 3;
@@ -33,7 +39,7 @@ export function ThreadFoldChevron({ bot, dispatch }: { bot: FoldBot; dispatch: D
   return (
     <button type="button" data-bot-threads-fold={bot.id} aria-expanded={unfolded} aria-controls={unfolded ? threadLabelsId(bot.id) : undefined}
       aria-label={label} title={label} onClick={() => setThreadsUnfolded(bot.id, !unfolded)}
-      className={cn(SLOT, unfolded && "pointer-events-auto opacity-100")}>
+      className={cn(FOLD_SLOT, unfolded && "pointer-events-auto opacity-100")}>
       <ChevronRight size={14} aria-hidden="true" className={cn("transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none rtl:-scale-x-100", unfolded && "rotate-90 rtl:-rotate-90")} />
     </button>
   );
@@ -71,17 +77,30 @@ export function SidebarThreadLabels({ bot, selected, drafting = false, rowThread
   const [focusAt, setFocusAt] = useState<number | null>(null);
   const finishing = useRef(false);
   const tree = useRef<HTMLDivElement>(null);
+  // Folding plays the unfold backwards: the rows that go fade out in place before the list shortens.
+  const shown = useRef({ unfolded, rows, more });
+  const [leaving, setLeaving] = useState<{ rows: LabelRow[]; gone: ReadonlySet<string>; more: number } | null>(null);
+  useLayoutEffect(() => {
+    const was = shown.current;
+    if (!was.unfolded || unfolded || reducedMotion()) { setLeaving(null); return; }
+    const kept = new Set(rows.map((row) => row.task.threadId));
+    setLeaving({ rows: was.rows, gone: new Set(was.rows.filter((row) => !kept.has(row.task.threadId)).map((row) => row.task.threadId)), more: was.more });
+    const timer = window.setTimeout(() => setLeaving(null), FOLD_MS);
+    return () => window.clearTimeout(timer);
+  }, [unfolded]);
+  useLayoutEffect(() => { shown.current = { unfolded, rows, more }; });
   useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(null), 6000);
     return () => window.clearTimeout(timer);
   }, [toast]);
-  if (!rows.length && !more && !runningMore && !toast) return null;
+  if (!rows.length && !more && !runningMore && !toast && !leaving) return null;
 
   const items = () => Array.from(tree.current?.querySelectorAll<HTMLElement>("[role=treeitem]") ?? []);
   const focusItem = (index: number) => { setFocusAt(index); items()[index]?.focus(); };
   const open = (threadId: string) => dispatch({ type: "switchTask", botId: bot.id, threadId });
   const openPanel = () => {
+    showAllConversations(bot.id);
     dispatch({ type: "toggleSettings", open: true, botId: bot.id });
     requestAnimationFrame(() => requestAnimationFrame(() => document.querySelector('[data-panel-card="conversations"]')?.scrollIntoView({ block: "nearest" })));
   };
@@ -128,19 +147,21 @@ export function SidebarThreadLabels({ bot, selected, drafting = false, rowThread
   const stop = Math.min(focusAt ?? Math.max(0, rows.findIndex((row) => row.current)), rows.length + Number(more > 0) + Number(runningMore > 0) - 1);
   const roving = (index: number) => (index === stop ? 0 : -1);
   const stagger = (index: number) => ({ animationDelay: `${Math.min(index, STAGGER_STEPS) * STAGGER_MS}ms` });
+  const FOLDING = "pointer-events-none animate-pop-out motion-reduce:animate-none";
   const QUIET = cn(ROW, "animate-msg-in text-ink-tertiary [animation-fill-mode:backwards] hover:bg-ink/[0.06] hover:text-ink-secondary motion-reduce:animate-none");
 
   return <>
     <div ref={tree} id={threadLabelsId(bot.id)} role="tree" aria-label={t("task.namedList", { name: bot.name })} data-thread-labels={bot.id}
       onKeyDown={onKey} className="mb-1 ms-11 me-1 flex flex-col gap-0.5">
-      {rows.map((row, index) => {
+      {(leaving?.rows ?? rows).map((row, index) => {
         const title = localizedTaskTitle(row.task.title);
+        const gone = leaving?.gone.has(row.task.threadId) === true;
         return (
-          <div key={row.task.threadId} role="treeitem" aria-level={1} aria-selected={row.current} aria-current={row.current ? "page" : undefined}
+          <div key={row.task.threadId} role="treeitem" aria-hidden={gone || undefined} inert={gone || undefined} aria-level={1} aria-selected={row.current} aria-current={row.current ? "page" : undefined}
             data-thread-label={row.task.threadId} data-sidebar-activity-row={row.task.threadId} tabIndex={roving(index)} title={title}
             onClick={() => { if (renaming !== row.task.threadId) open(row.task.threadId); }}
             onDoubleClick={() => startRename(row)} onFocus={() => setFocusAt(index)} style={stagger(index)}
-            className={cn(ROW, "animate-msg-in cursor-default [animation-fill-mode:backwards] motion-reduce:animate-none",
+            className={cn(ROW, gone ? FOLDING : "animate-msg-in cursor-default [animation-fill-mode:backwards] motion-reduce:animate-none",
               row.current ? "bg-raised font-medium text-ink" : "text-ink-secondary hover:bg-ink/[0.06] hover:text-ink",
               row.status === "waiting" && !row.current && "text-warning")}>
             {renaming === row.task.threadId ? (
@@ -173,7 +194,10 @@ export function SidebarThreadLabels({ bot, selected, drafting = false, rowThread
           <Loader2 size={14} aria-hidden="true" className="shrink-0 animate-spin text-success motion-reduce:animate-none" />
         </div>
       )}
-      {more > 0 && (
+      {leaving && leaving.more > 0 && (
+        <div aria-hidden="true" className={cn(ROW, FOLDING, "text-ink-tertiary")}><span className="truncate">{t("sidebar.threads.more", { count: leaving.more })}</span></div>
+      )}
+      {!leaving && more > 0 && (
         <div role="treeitem" aria-level={1} aria-selected={false} tabIndex={roving(rows.length + Number(runningMore > 0))} onClick={openPanel}
           onFocus={() => setFocusAt(rows.length + Number(runningMore > 0))} style={stagger(rows.length + Number(runningMore > 0))} className={QUIET}>
           <span className="truncate">{t("sidebar.threads.more", { count: more })}</span>
