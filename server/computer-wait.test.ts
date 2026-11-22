@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 
+import { CONTROL_BUSY, CONTROL_BUSY_OPENING, CONTROL_CALL_LATE, CONTROL_NOT_READY, CONTROL_NOT_READY_OPENING, CONTROL_WAITED, CONTROL_WAITED_HELD } from "./control-client.ts";
 import {
+  computerBusyText,
   computerFreeAfterText,
+  computerParkedRefusal,
+  computerQueuedText,
   computerParkedText,
   computerStoppedWaitingText,
   computerWaitDuration,
   computerWaitingText,
+  isComputerParkedRefusal,
 } from "./computer-wait.ts";
 
 describe("computer wait wording", () => {
@@ -81,5 +86,50 @@ describe("computer wait wording", () => {
     expect(computerParkedText(undefined, 45_000)).toBe(
       "Computer still busy after 45 seconds. Parked — it continues automatically when the computer is free.",
     );
+  });
+});
+
+describe("what a waiting turn's model reads", () => {
+  const longest = "under a second";
+  it("says another thread holds it, with its queue place and timings, and never who", () => {
+    expect(computerBusyText({ position: 1, heldForMs: 120_000, estimateMs: 180_000 })).toBe(
+      "Another thread is using this computer. This call was not performed. No screen or app state was checked. " +
+      "This turn is 1st in line (the other thread has had it 2 minutes; recent waits 3 minutes) and gets it automatically. To keep waiting, take a screenshot.",
+    );
+  });
+
+  it("promises no automatic seat when the turn is not in the queue", () => {
+    const text = computerBusyText({ heldForMs: 5_000 });
+    expect(text.startsWith(CONTROL_BUSY_OPENING)).toBe(true);
+    expect(text).toContain("The other thread has had it 5 seconds. To check again");
+    expect(text).not.toContain("automatically");
+    expect(computerBusyText({ heldForMs: 120_000, estimateMs: 180_000 })).toContain("The other thread has had it 2 minutes; recent waits 3 minutes.");
+    expect(computerBusyText({})).not.toContain("(");
+  });
+
+  it("reports a queue place without claiming anyone holds the computer", () => {
+    const text = computerQueuedText({ position: 2, estimateMs: 3_000 });
+    expect(text).toBe(
+      "This computer is not ready for this turn yet, so this call was NOT performed. This turn is 2nd in line (recent waits 3 seconds) and gets it automatically. " +
+      "No screen or app state was checked. To keep waiting, take a screenshot.",
+    );
+    expect(text.startsWith(CONTROL_NOT_READY_OPENING)).toBe(true);
+    expect(text).not.toContain("Another thread");
+  });
+
+  it("parks without a holder, a failure, or a promise to continue", () => {
+    const text = computerParkedRefusal(30 * 60_000);
+    expect(text).toBe("This turn waited 30 minutes for this computer without getting it, so this call was NOT performed. Stop calling the computer tools now; nothing is broken.");
+    expect(isComputerParkedRefusal(text)).toBe(true);
+    expect(isComputerParkedRefusal(computerParkedRefusal(1_000))).toBe(true);
+    expect(isComputerParkedRefusal("This turn waited 5 seconds for the application window to appear.")).toBe(false);
+  });
+
+  it("fits the 300 characters a saved-steps fallback hands the model, at its longest", () => {
+    const facts = { position: 12, heldForMs: 500, estimateMs: 500 };
+    expect(computerWaitDuration(500)).toBe(longest);
+    for (const text of [computerBusyText(facts), computerBusyText({ heldForMs: 500, estimateMs: 500 }), computerQueuedText(facts), computerParkedRefusal(59 * 60_000), CONTROL_BUSY, CONTROL_NOT_READY, CONTROL_WAITED, CONTROL_WAITED_HELD, CONTROL_CALL_LATE]) {
+      expect(text.length).toBeLessThanOrEqual(300);
+    }
   });
 });

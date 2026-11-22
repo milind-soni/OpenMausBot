@@ -498,8 +498,8 @@ import { newBotWorksOn, shouldMountLocalComputer } from "./local-routing.ts";
 import { autoLocalVmAttachable, type ContainerComputerStatus } from "./container-computer.ts";
 import { startStoppedPodmanMachine } from "./podman-machine.ts";
 import { keepTransient, lazyClaimFailedText, lazyClaimRetryText, reclaimAutoVm, settledWithin, startAutoVmClaim, withinBudget, type AutoVmClaimSlot, type AutoVmClaimTable } from "./auto-vm-claims.ts";
-import { CONTROL_ACT_WITHIN_MS, CONTROL_BUSY, CONTROL_HANDED_BACK, CONTROL_WAIT_MS, CONTROL_WAITED, controlRefusal, type ControlState } from "./control-client.ts";
-import { computerFreeAfterText, computerParkedText, computerPersonAwayText, computerStoppedWaitingText, computerWaitingText, type ComputerHolder } from "./computer-wait.ts";
+import { CONTROL_ACT_WITHIN_MS, CONTROL_HANDED_BACK, CONTROL_NOT_READY, CONTROL_WAIT_MS, controlRefusal, type ControlState } from "./control-client.ts";
+import { computerFreeAfterText, computerParkedRefusal, computerParkedText, computerPersonAwayText, computerStoppedWaitingText, computerWaitingText, type ComputerHolder } from "./computer-wait.ts"; import { createComputerGateAnswers } from "./host/computer-gate-answers.ts";
 import { modelContextWindow } from "./model-context-window.ts";
 import { browserIsThePlace, chosenPin, cloudPlaceRefusal, computerSelectionPrompt, computerSkippedNote, computerToolsRefusal, handoffUsesOwnCloud, isHandedWork, failedOnHostPath, openBrowserBeside, ownCloudStateWithin, parseSurface, pinSource, PlaceUnavailableError, placeUnavailable, resolveSurface, surfaceLabel, surfaceOfComputerKind, surfacePrompt, thisComputerSwitch, whereWorksControl, type ComputerWant, type PlaceSource, type Surface } from "./surface.ts";
 import { cloudRefusal, type PlaceRow } from "../shared/place-view.ts";
@@ -2159,7 +2159,7 @@ async function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = 
         endWait("parked");
         owner.computerParkedOn = resource;
         computerParks.set(owner.generation, resource);
-        throw new ComputerWaitParked(computerParkedText(holder, COMPUTER_WAIT_MAX_MS), resource, owner.generation);
+        throw Object.assign(new ComputerWaitParked(computerParkedText(undefined, COMPUTER_WAIT_MAX_MS), resource, owner.generation), { parkedRefusal: computerParkedRefusal(COMPUTER_WAIT_MAX_MS) });
       }
       await new Promise<void>(resolve => setTimeout(resolve, 100));
     }
@@ -5559,7 +5559,7 @@ const localVmActiveThreads = new Map<string, string>();
 const autoVmClaims: AutoVmClaimTable = new Map();
 const COMPUTER_CALL_WAIT_MS = Math.min(CONTROL_WAIT_MS, Math.max(500, Number(process.env.OMB_COMPUTER_CALL_WAIT_MS) || CONTROL_WAIT_MS));
 const COMPUTER_CALL_ACT_WITHIN_MS = Math.min(CONTROL_ACT_WITHIN_MS, Math.max(100, Number(process.env.OMB_COMPUTER_CALL_ACT_WITHIN_MS) || CONTROL_ACT_WITHIN_MS));
-const COMPUTER_CALL_POLL_MS = 250;
+const COMPUTER_CALL_POLL_MS = 250; const computerGateAnswers = createComputerGateAnswers({ resources: turnResources, bound: (threadId) => turnComputerResources.get(threadId), personHolds: (resource) => sharedVm.personHolds(resource), pollMs: COMPUTER_CALL_POLL_MS });
 const browserSeats = createBrowserSeats({ resources: turnResources, claim: claimTurnResource, active: (owner) => activeInternalGenerationByThread.get(owner.threadId) === owner.generation, working: (session) => browserRuntime.working(session), holderOf: holderOfTurn, language: threadLanguage, callWaitMs: COMPUTER_CALL_WAIT_MS, actWithinMs: COMPUTER_CALL_ACT_WITHIN_MS, ...(Number(process.env.OMB_BROWSER_IDLE_HANDOVER_MS) > 0 ? { idleHandoverMs: Number(process.env.OMB_BROWSER_IDLE_HANDOVER_MS) } : {}),
   row: (threadId, name, threadRef) => { store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name, ok: true }, ...(threadRef ? { threadRef } : {}) }); },
   waitStarted: (threadId, resource, position, holder) => bus.publish({ ...waitEventBase(threadId), type: "turn.wait_started", resource, position, ...(holder ? { holder } : {}) }),
@@ -5655,22 +5655,23 @@ async function computerCallGate(internalCapability: InternalCapability, signal?:
     } else if (lazyClaim?.lazy && !lazyClaim.claimed) {
       startAutoVmClaim(autoVmClaims, threadId, generation, call);
       if (lazyClaim.begin && Date.now() < deadline && !signal?.aborted) {
-        await settledWithin(lazyClaim.begin, deadline - Date.now(), signal);
-        if (lazyClaim.claimed || lazyClaim.failed) continue;
+        if (await computerGateAnswers.waitForClaim(lazyClaim.begin, deadline, { threadId, generation }, () => sharedVm.snapshot(botId, threadId).held, signal)) personHeld = true;
+        if (lazyClaim.claimed || lazyClaim.failed || sharedVm.snapshot(botId, threadId).held) continue;
         if (lazyClaim.retryReason) return { held: true, helpOpen: false, blockedReason: lazyClaimRetryText(lazyClaim) };
       }
-      held = { held: true, helpOpen: false, blockedReason: yourComputerWaiting(threadId, generation) ?? lazyClaim.pendingReason ?? CONTROL_BUSY };
+      // A queue place outranks a startup note: a team computer says "starting" once seated, then may queue again for its machine.
+      held = computerGateAnswers.held(yourComputerWaiting(threadId, generation) ?? computerGateAnswers.contention({ threadId, generation }) ?? lazyClaim.pendingReason ?? CONTROL_NOT_READY, helpOpen); personHeld ||= held.reason === "person";
     } else {
       const computer = turnComputerResources.get(threadId);
       if (computer && computer.owner.generation === generation && !claimTurnResource(computer.owner, computer.resource)) {
-        held = { held: true, helpOpen: false, blockedReason: CONTROL_BUSY };
+        held = computerGateAnswers.held(computerGateAnswers.contention(computer.owner) ?? CONTROL_NOT_READY, helpOpen); personHeld ||= held.reason === "person";
       } else if (!internalCapabilityIsActive(internalCapability)) {
         // A call from a turn that is over never reaches the screen.
         return { held: true, helpOpen, blockedReason: "This turn no longer has this computer, so this call was not performed." };
       } else if (personHeld) {
         return { held: true, helpOpen, blockedReason: CONTROL_HANDED_BACK };
       } else {
-        return Date.now() - askedAt > COMPUTER_CALL_ACT_WITHIN_MS ? { held: true, helpOpen, blockedReason: CONTROL_WAITED } : { held: false, helpOpen };
+        return Date.now() - askedAt > COMPUTER_CALL_ACT_WITHIN_MS ? { held: true, helpOpen, blockedReason: computerGateAnswers.waited({ threadId, generation }) } : { held: false, helpOpen };
       }
     }
     if (Date.now() >= deadline || signal?.aborted || !internalCapabilityIsActive(internalCapability)) return held;

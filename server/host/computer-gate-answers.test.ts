@@ -1,0 +1,97 @@
+import { describe, expect, it, vi } from "vitest";
+import { CONTROL_WAITED, CONTROL_WAITED_HELD } from "../control-client.ts";
+import { TurnResources, type TurnOwner } from "../turn-resources.ts";
+import { createComputerGateAnswers, PERSON_HOLDS } from "./computer-gate-answers.ts";
+
+const holder = { threadId: "holder", generation: "1" };
+const waiter = { threadId: "waiter", generation: "2" };
+const third = { threadId: "third", generation: "3" };
+const SHARED = "computer:vm:shared";
+
+function setup(personOn: string[] = []) {
+  const resources = new TurnResources();
+  const bound = new Map<string, { owner: TurnOwner; resource: string }>();
+  const answers = createComputerGateAnswers({ resources, bound: (threadId) => bound.get(threadId), personHolds: (resource) => personOn.includes(resource), pollMs: 10 });
+  return { resources, bound, answers };
+}
+
+describe("what a screen call that was not performed tells the model", () => {
+  it("says another thread has it, with the queue place, while one holds the seat", () => {
+    const { resources, answers } = setup();
+    resources.claim(SHARED, holder);
+    resources.startWaiting(SHARED, waiter);
+    expect(answers.contention(waiter)).toMatch(/^Another thread is using this computer\. .* This turn is 1st in line \(the other thread has had it /);
+  });
+
+  it("gives a queue place without claiming a holder between turns", () => {
+    const { resources, answers } = setup();
+    resources.claim(SHARED, holder);
+    resources.startWaiting(SHARED, waiter);
+    resources.release(holder);
+    resources.startWaiting(SHARED, third);
+    expect(answers.contention(third)).toMatch(/^This computer is not ready for this turn yet, .* This turn is 2nd in line/);
+  });
+
+  it("answers with the person's hold on the seat the turn queues for, though its own computer key names another", () => {
+    const { resources, answers } = setup([SHARED]);
+    resources.claim(SHARED, holder);
+    resources.startWaiting(SHARED, waiter);
+    expect(answers.contention(waiter)).toBe(PERSON_HOLDS);
+    expect(answers.held(PERSON_HOLDS, true)).toEqual({ held: true, helpOpen: true, reason: "person" });
+  });
+
+  it("has nothing to say once the turn holds its seat and only waits for readiness", () => {
+    const { resources, bound, answers } = setup();
+    resources.claim(SHARED, waiter);
+    bound.set(waiter.threadId, { owner: waiter, resource: SHARED });
+    expect(answers.contention(waiter)).toBeUndefined();
+    expect(answers.contention(third)).toBeUndefined();
+  });
+
+  it("remembers a person who took the queued seat and handed it back while the claim was pending", async () => {
+    vi.useFakeTimers();
+    try {
+      const personOn: string[] = [];
+      const { resources, answers } = setup(personOn);
+      resources.claim(SHARED, holder);
+      resources.startWaiting(SHARED, waiter);
+      let grant!: () => void;
+      const begin = new Promise<void>((resolve) => { grant = resolve; });
+      const waited = answers.waitForClaim(begin, Date.now() + 5_000, waiter, () => false);
+      await vi.advanceTimersByTimeAsync(10);
+      personOn.push(SHARED);
+      await vi.advanceTimersByTimeAsync(10);
+      personOn.length = 0;
+      grant();
+      expect(await waited).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("sees no person when nobody took the seat, stops at its deadline, and listens to the claim once", async () => {
+    vi.useFakeTimers();
+    try {
+      const { resources, answers } = setup();
+      resources.startWaiting(SHARED, waiter);
+      const begin = new Promise<void>(() => {});
+      const then = vi.spyOn(begin, "then");
+      const waited = answers.waitForClaim(begin, Date.now() + 1_000, waiter, () => false);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await waited).toBe(false);
+      expect(then).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("says the turn now has the computer only for a seat it holds in this generation", () => {
+    const { resources, bound, answers } = setup();
+    expect(answers.waited(waiter)).toBe(CONTROL_WAITED);
+    bound.set(waiter.threadId, { owner: waiter, resource: SHARED });
+    expect(answers.waited(waiter)).toBe(CONTROL_WAITED);
+    resources.claim(SHARED, waiter);
+    expect(answers.waited(waiter)).toBe(CONTROL_WAITED_HELD);
+    expect(answers.waited({ ...waiter, generation: "older" })).toBe(CONTROL_WAITED);
+  });
+});
