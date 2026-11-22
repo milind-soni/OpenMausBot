@@ -5,6 +5,7 @@ import { serverFetch } from "@/lib/relay-server";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { Select } from "../Select";
 import { KEY_FIELD } from "./KeyRow";
 
 type NamedServer = NonNullable<ConfigStatus["vps"]["servers"]>[number];
@@ -231,10 +232,10 @@ function AddServer({ hasDefault, hosts, defaults, disabled, adding, onAdd }: {
           <input type="text" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={enter} disabled={disabled} placeholder={t("keys.vps.servers.namePlaceholder")} aria-label={t("keys.vps.servers.name")} autoComplete="off" className={KEY_FIELD} />
         )}
         {hosts.length > 0 ? (
-          <select data-key-input value={alias} onChange={(e) => setAlias(e.target.value)} disabled={disabled} aria-label={t("keys.vps.servers.alias")} className={cn(KEY_FIELD, "font-mono", alias === "" && "text-ink-tertiary")}>
+          <Select data-key-input value={alias} onChange={(e) => setAlias(e.target.value)} disabled={disabled} aria-label={t("keys.vps.servers.alias")} className="w-full font-mono" size="sm">
             <option value="">{t("keys.vps.servers.aliasPlaceholder")}</option>
             {hosts.map((host) => <option key={host} value={host}>{host}</option>)}
-          </select>
+          </Select>
         ) : (
           <input type="text" data-key-input value={alias} onChange={(e) => setAlias(e.target.value)} onKeyDown={enter} disabled={disabled} placeholder={t("keys.vps.servers.aliasPlaceholder")} aria-label={t("keys.vps.servers.alias")} autoComplete="off" spellCheck={false} className={cn(KEY_FIELD, "font-mono")} />
         )}
