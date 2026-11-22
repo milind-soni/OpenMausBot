@@ -21,7 +21,7 @@ async function put(auth: RequestAuth, body: unknown, method = "PUT") {
 const SENTENCE = "From a phone, only API keys can be changed. Change other settings on your computer.";
 
 describe("config writes from a paired phone", () => {
-  it.each([
+  it.each<Record<string, unknown>>([
     { mistral: { key: "k" } },
     { openai: { key: "" } },
     { anthropic: { key: "k", everyClaudeBot: false } },
@@ -29,7 +29,7 @@ describe("config writes from a paired phone", () => {
     expect((await put(phone, body))?.status).toBe(409);
   });
 
-  it.each([
+  it.each<Record<string, unknown>>([
     { signIn: { admins: ["a@b.c"] } },
     { browserEngine: { egress: { proxy: "socks5://127.0.0.1:1080" } } },
     { openaiCompat: { key: "k" } },
