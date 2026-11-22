@@ -13,6 +13,7 @@
  * single static SVG and never animate. Every avatar on the page shares one
  * animation loop.
  */
+import type { Fur } from '../fur.ts';
 import { createAnimator } from '../animator.ts';
 import { pointerGaze } from '../follow.ts';
 import { resolveLook } from '../motion.ts';
@@ -31,6 +32,8 @@ export interface AvatarOptions {
   eyeColor?: string;
   /** Volume amount 0..14 (6 = natural depth, 0 = flat). */
   depth?: number;
+  /** MausBot: fur on the body (see fur.ts). */
+  fur?: Fur;
   /** What the bot is doing (default `idle`). Changes ease from what is on screen. */
   state?: AvatarState;
   /**
@@ -250,6 +253,7 @@ export function mountAvatar(host: HTMLElement, initial: AvatarOptions): MountedA
           view: p.view,
           gaze: p.lookAt ?? undefined,
           reducedMotion: true,
+          fur: p.fur,
         });
         // The engine derives SVG ids from geometry, so repeated avatars can share them safely.
         if (svg !== lastStill) {
@@ -289,7 +293,7 @@ export function mountAvatar(host: HTMLElement, initial: AvatarOptions): MountedA
         const css = isHex(p.color) && isHex(p.eyeColor) ? null : getComputedStyle(host);
         const fill = css && !isHex(p.color) ? css.color || flat.color : flat.color;
         const ink = css && !isHex(p.eyeColor) ? css.getPropertyValue('--avatar-ink').trim() || flat.ink : flat.ink;
-        paintCanvas(surface, flat, size, fill, ink);
+        paintCanvas(surface, flat, size, fill, ink, p.fur);
         failed = false;
         return !reducedMotion || step.moving;
       }

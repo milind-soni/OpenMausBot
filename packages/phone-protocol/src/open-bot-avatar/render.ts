@@ -25,6 +25,8 @@ import { bodyScale, markParts, ribbonPieces, ribbonReach, rimOf } from './effect
 import type { Rim } from './effects.ts';
 import type { Box } from './effects.ts';
 import { eyePath, plainLook } from './eyes.ts';
+import { furFilter, isFur } from './fur.ts';
+import type { Fur } from './fur.ts';
 import type { EyeSpot } from './eyes.ts';
 import { computePose, hashString, noise } from './motion.ts';
 import type { EyeLook, Pose } from './motion.ts';
@@ -627,13 +629,20 @@ function ribbonSvg(d: string, g: RibbonGradient): string {
 export function renderAvatarSvg(definition: AvatarDefinition, options: RenderOptions = {}): string {
   const frame = avatarFrame(definition, options);
   const defsMarkup = frame.paths.map((d) => `<path id="${d.id}" d="${d.d}"${d.evenOdd ? ' fill-rule="evenodd"' : ''}/>`).join('');
-  const body = frame.shapes
-    .map((s) =>
-      s.kind === 'slice' ? `<use href="#${s.path}" transform="${mat(s.matrix)}"/>`
-      : s.kind === 'eye' ? `<g transform="${mat(s.matrix)}">${eyeSvg(s.mark, frame.ink)}</g>`
-      : `<g transform="${mat(s.matrix)}">${ribbonSvg(s.d, s.gradient)}</g>`,
-    )
-    .join('');
+  const shapeSvg = (s: FrameShape) =>
+    s.kind === 'slice' ? `<use href="#${s.path}" transform="${mat(s.matrix)}"/>`
+    : s.kind === 'eye' ? `<g transform="${mat(s.matrix)}">${eyeSvg(s.mark, frame.ink)}</g>`
+    : `<g transform="${mat(s.matrix)}">${ribbonSvg(s.d, s.gradient)}</g>`;
+  // MausBot: with fur, the body's slices are drawn together through its filter, the face on top.
+  const fur = isFur(options.fur) ? options.fur : null;
+  const furred = (s: FrameShape) => fur !== null && s.kind === 'slice' && !s.key.startsWith('mark-');
+  const first = frame.shapes.findIndex(furred);
+  const body = first < 0
+    ? frame.shapes.map(shapeSvg).join('')
+    : frame.shapes.slice(0, first).map(shapeSvg).join('') +
+      `<g filter="url(#oba-fur-${fur})">${frame.shapes.filter(furred).map(shapeSvg).join('')}</g>` +
+      frame.shapes.slice(first).filter((s) => !furred(s)).map(shapeSvg).join('');
+  const furDefs = first < 0 ? '' : furFilter(fur as Fur, `oba-fur-${fur}`);
   const size = Number.isFinite(options.size) && (options.size as number) > 0 ? f(clamp(options.size as number, 8, 4096)) : null;
   const dims = size ? ` width="${size}" height="${size}"` : '';
   const label = esc(frame.name);
@@ -641,7 +650,7 @@ export function renderAvatarSvg(definition: AvatarDefinition, options: RenderOpt
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"${dims} role="img" aria-label="${label}" overflow="visible">` +
     `<title>${label}</title>` +
-    `<defs>${defsMarkup}</defs>` +
+    `<defs>${furDefs}${defsMarkup}</defs>` +
     `<g transform="${mat(frame.root)}" fill="${frame.color}">` +
     body +
     `</g></svg>`

@@ -8,6 +8,8 @@ import {
   botAvatarUrlSchema,
   mascotBodyColorSchema,
   mascotFaceColorSchema,
+  mascotFurSchema,
+  MASCOT_FURS,
 } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS, fitsOnOneLine } from "../shared/bot-profile.ts";
 import { REPLY_STYLES } from "../shared/reply-style.ts";
@@ -31,6 +33,7 @@ export const BOT_PROFILE_PATCH_FIELDS = [
   "mascotBody",
   "mascotFaceColor",
   "mascotBodyColor",
+  "mascotFur",
   "voice",
   "speakReplies",
   "replyStyle",
@@ -71,6 +74,7 @@ export const profilePatchSchema = z.object({
   mascotBody: botBodySchema.optional(),
   mascotFaceColor: mascotFaceColorSchema.nullable().optional(),
   mascotBodyColor: mascotBodyColorSchema.nullable().optional(),
+  mascotFur: mascotFurSchema.nullable().optional(),
   voice: z
     .string({ error: "voice must be a string" })
     .max(BOT_PROFILE_LIMITS.voice, { error: "voice must be at most 200 characters" })
@@ -97,6 +101,7 @@ export type BotProfilePatch = Partial<
     | "mascotBody"
     | "mascotFaceColor"
     | "mascotBodyColor"
+    | "mascotFur"
     | "voice"
     | "speakReplies"
     | "replyStyle"
@@ -130,6 +135,9 @@ export function parseBotProfilePatch(input: BotProfilePatchInput, strict = false
     }
     if (issue?.path[0] === "mascotBodyColor") {
       return { ok: false, error: "mascotBodyColor must be a #rrggbb hex colour or null" };
+    }
+    if (issue?.path[0] === "mascotFur") {
+      return { ok: false, error: `mascotFur must be ${MASCOT_FURS.join(", ")}, or null` };
     }
     return { ok: false, error: issue?.message ?? "invalid profile patch" };
   }

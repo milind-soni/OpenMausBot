@@ -10,12 +10,16 @@ Vendored sources of [Open Bot Avatar](https://github.com/DominikScholz/open-bot-
 
 ## Our changes
 
-Only `render.ts` differs from upstream, each change marked `MausBot:`:
+Each change is marked `MausBot:`:
 
 - A smile under the eyes (`mouthMark`), drawn with the eyes in the canvas and SVG renderers. The CSS-3D
   `renderAvatarScene` path has no mouth; we never use it.
 - The ribbons of `working` and `done` take our six rainbow comet palettes (`COMET_COLORS`) instead of
   shades of the body colour.
+- Fur (`fur.ts`, new): three SVG filter styles for the body. `render.ts` draws a still's body slices
+  through it with the face on top; `dom/paint.ts` paints a live body on its own bitmap and draws it
+  through the same filter (scaled to the canvas) before the face; `types.ts` and `dom/mount.ts` carry
+  the `fur` option.
 
 `../object-bodies.ts` holds the starters from `examples.ts` and the definitions in the upstream `gallery/*.json`,
 each worn under an `obj-` id.

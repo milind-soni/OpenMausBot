@@ -64,3 +64,33 @@ it("saves, reads and clears a custom body color through the isolated HTTP routes
     await fixture.close();
   }
 }, 60_000);
+
+it("saves, reads and clears fur through the isolated HTTP routes", async () => {
+  const fixture = await launchVerificationServer();
+  const api = async (method: string, path: string, body?: unknown, status = 200) => {
+    const response = await fetch(`${fixture.info.url}${path}`, {
+      method, headers: { "content-type": "application/json", origin: fixture.info.url },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const data = await response.json() as { bot: WireBot; bots: WireBot[]; error?: string };
+    expect(response.status, JSON.stringify(data)).toBe(status);
+    return data;
+  };
+  try {
+    const { bot } = await api("POST", "/api/bots", {
+      name: "Fur fixture", useDefaults: false, settings: { color: "yellow", mascotBody: "blob", mascotFur: "fuzzy" },
+    }, 201);
+    expect(bot.mascotFur).toBe("fuzzy");
+    const path = `/api/bots/${bot.id}`;
+    for (const mascotFur of ["velvet", null]) {
+      expect((await api("PATCH", path, { mascotFur })).bot.mascotFur).toBe(mascotFur);
+      const saved = JSON.parse(readFileSync(join(fixture.info.dataDir, "bots.json"), "utf8"));
+      expect(saved.find((value: { id: string }) => value.id === bot.id).mascotFur).toBe(mascotFur);
+    }
+    expect((await api("PATCH", path, { mascotFur: "shaggy" }, 400)).error).toBe("mascotFur must be fuzzy, fluffy, velvet, or null");
+    const after = (await api("GET", "/api/bots")).bots.find((value: { id: string }) => value.id === bot.id);
+    expect(after).toMatchObject({ color: "yellow", mascotBody: "blob", mascotFur: null });
+  } finally {
+    await fixture.close();
+  }
+}, 60_000);

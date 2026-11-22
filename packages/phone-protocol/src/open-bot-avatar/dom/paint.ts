@@ -15,6 +15,8 @@
 import { avatarExtent } from '../render.ts';
 import type { AvatarFrame, EyeMark, FramePath, Matrix } from '../render.ts';
 import type { AvatarDefinition } from '../types.ts';
+import { furFilter } from '../fur.ts';
+import type { Fur } from '../fur.ts';
 
 /** A square in viewBox units. */
 export interface Square {
@@ -157,6 +159,28 @@ export interface CanvasSurface {
   layout: string;
   left: number;
   top: number;
+  /** MausBot: the body painted on its own, to be drawn through the fur filter. */
+  body?: HTMLCanvasElement;
+}
+
+/**
+ * MausBot: the document-level fur filter for `fur` at `k` canvas pixels per viewBox unit, created
+ * once; a canvas filter runs in its bitmap's pixels, so each scale gets its own.
+ */
+function furFilterId(fur: Fur, k: number): string {
+  const id = `oba-fur-${fur}-${Math.round(k * 100)}`;
+  if (!document.getElementById(id)) {
+    let host = document.getElementById('oba-fur-filters');
+    if (!host) {
+      host = document.createElementNS('http://www.w3.org/2000/svg', 'svg') as unknown as HTMLElement;
+      host.id = 'oba-fur-filters';
+      host.setAttribute('aria-hidden', 'true');
+      host.setAttribute('style', 'position:absolute;width:0;height:0;overflow:hidden');
+      document.body.append(host);
+    }
+    host.insertAdjacentHTML('beforeend', furFilter(fur, id, Math.round(k * 100) / 100));
+  }
+  return id;
 }
 
 export function mountCanvas(el: HTMLElement, key: string, definition: AvatarDefinition, depth: number | undefined): CanvasSurface {
@@ -173,7 +197,7 @@ export function mountCanvas(el: HTMLElement, key: string, definition: AvatarDefi
 }
 
 /** Paint one frame `size` CSS pixels wide. `fill` and `ink` override the frame's colors with any canvas color. */
-export function paintCanvas(surface: CanvasSurface, frame: AvatarFrame, size: number, fill = frame.color, ink = frame.ink) {
+export function paintCanvas(surface: CanvasSurface, frame: AvatarFrame, size: number, fill = frame.color, ink = frame.ink, fur?: Fur) {
   const { canvas, ctx } = surface;
   if (!ctx || size <= 0) return;
   const dpr = window.devicePixelRatio || 1;
@@ -201,12 +225,46 @@ export function paintCanvas(surface: CanvasSurface, frame: AvatarFrame, size: nu
     canvas.style.width = canvas.style.height = `${bitmap / dpr}px`;
   }
 
+  // MausBot: with fur, the body's slices go to their own bitmap, drawn through the filter where the first one falls.
+  const furred = (shape: AvatarFrame['shapes'][number]) => !!fur && shape.kind === 'slice' && !shape.key.startsWith('mark-');
+  let bodyCtx: CanvasRenderingContext2D | null = null;
+  if (fur) {
+    const body = (surface.body ??= document.createElement('canvas'));
+    if (body.width !== canvas.width || body.height !== canvas.height) {
+      body.width = canvas.width;
+      body.height = canvas.height;
+    }
+    bodyCtx = body.getContext('2d');
+    if (bodyCtx) {
+      bodyCtx.setTransform(1, 0, 0, 1, 0, 0);
+      bodyCtx.clearRect(0, 0, body.width, body.height);
+      bodyCtx.fillStyle = fill;
+      for (let i = 0; i < frame.shapes.length; i++) {
+        const shape = frame.shapes[i], m = matrices[i];
+        if (!furred(shape) || shape.kind !== 'slice') continue;
+        bodyCtx.setTransform(scale * m[0], scale * m[1], scale * m[2], scale * m[3], scale * m[4] - surface.left, scale * m[5] - surface.top);
+        const section = sections.get(shape.path) as Section;
+        bodyCtx.fill(section.path, section.rule);
+      }
+    }
+  }
+  let bodyDrawn = false;
+
   ctx.lineCap = 'round';
   ctx.strokeStyle = ink;
   ctx.fillStyle = fill;
   // Shapes run in the thousands per second across a page: one setTransform each beats save/restore.
   for (let i = 0; i < frame.shapes.length; i++) {
     const shape = frame.shapes[i], m = matrices[i];
+    if (bodyCtx && furred(shape)) {
+      if (bodyDrawn) continue;
+      bodyDrawn = true;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.filter = `url(#${furFilterId(fur as Fur, scale)})`;
+      ctx.drawImage(surface.body as HTMLCanvasElement, 0, 0);
+      ctx.filter = 'none';
+      continue;
+    }
     ctx.setTransform(scale * m[0], scale * m[1], scale * m[2], scale * m[3], scale * m[4] - surface.left, scale * m[5] - surface.top);
     if (shape.kind === 'slice') {
       const section = sections.get(shape.path) as Section;

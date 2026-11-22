@@ -7,6 +7,8 @@
  * runtime renderer.
  */
 
+import type { Fur } from './fur.ts';
+
 export interface AvatarEyes {
   /** Center of the eye pair, viewBox units. */
   x: number;
@@ -105,6 +107,8 @@ export interface RenderOptions {
   motionBlend?: AvatarMotionBlend;
   /** Freeze body motion, blinking, ribbons and marks at a calm pose; gaze still applies. */
   reducedMotion?: boolean;
+  /** MausBot: fur on the body (see fur.ts); the face stays crisp. */
+  fur?: Fur;
 }
 
 export type ValidationResult =
