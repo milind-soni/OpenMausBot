@@ -13,6 +13,7 @@ import { callTool } from "../drivers/agents-call.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { SessionRecord } from "../sessions.ts";
 import type { PassedFile } from "../host/handoff-files.ts";
+import { readBody } from "../harness/http.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { createDialer } from "./dial.ts";
 import { createBotLink, SPOOL_KEEP_MS, type BotLink } from "./link.ts";
@@ -141,14 +142,13 @@ function place(label: string, bots: Bot[], version?: number) {
       revoke: (sessionId) => { for (const [token, id] of issued) if (id === sessionId) issued.delete(token); },
     });
     const json = (res: ServerResponse, status: number, body: unknown) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(body)); };
-    const readBody = async (req: IncomingMessage) => { const chunks: Buffer[] = []; for await (const chunk of req) chunks.push(chunk as Buffer); return chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {}; };
     http = createServer((req, res) => {
       const url = new URL(req.url ?? "/", "http://127.0.0.1");
       requests.push(`${req.method} ${url.pathname}${url.searchParams.has("probe") ? "?probe" : ""}`);
       const fails = failing.findIndex((one) => one.match.test(requests.at(-1)!));
       if (fails >= 0) { const status = failing.splice(fails, 1)[0]!.status; req.resume(); json(res, status, { error: "try again" }); return; }
       void routes({ req, res, url, path: url.pathname, method: req.method ?? "GET", auth: auth(req), json: json as never, readBody: readBody as never })
-        .catch((error) => { if (!res.headersSent) json(res, 500, { error: String(error) }); });
+        .catch((error) => { if (!res.headersSent) json(res, (error as { status?: number }).status ?? 500, { error: String(error) }); });
     });
     http.on("connection", (socket) => { sockets.add(socket); socket.on("close", () => sockets.delete(socket)); });
     await new Promise<void>((resolve) => http!.listen(at, "127.0.0.1", resolve));
@@ -653,9 +653,9 @@ describe("the link between a computer and its Cloud", () => {
     await until(() => computer.link.online(), "the link is back");
   });
 
-  it("more results than one exchange carries go a part at a time, and all arrive", async () => {
+  it.each(["x", "界", "🚀"])("more %j results than one exchange carries go a part at a time, and all arrive", async (character) => {
     const { computer, cloud } = await two();
-    const words = "x".repeat(11_000);
+    const words = character.repeat(11_000);
     cloud.engine(async (node) => ({ ok: true, text: `${node.text}:${words}` }));
     await computer.dialer.stop();
     await until(() => !cloud.link.online(), "the link is down");
@@ -666,7 +666,7 @@ describe("the link between a computer and its Cloud", () => {
     cloud.link.sessionStarted(COMPUTER);
     const part = cloud.link.outgoing(COMPUTER, 0);
     expect(part.length).toBeLessThan(ids.length);
-    expect(JSON.stringify(part).length).toBeLessThan(EXCHANGE_BYTES + 20_000);
+    expect(Buffer.byteLength(JSON.stringify(part), "utf8")).toBeLessThan(EXCHANGE_BYTES + 20_000);
     const taken: string[] = [];
     for (let ack = 0, rounds = 0; rounds < 30; rounds += 1) {
       const next = cloud.link.outgoing(COMPUTER, ack);
@@ -677,6 +677,30 @@ describe("the link between a computer and its Cloud", () => {
     expect(taken.sort()).toEqual([...ids].sort());
     computer.dialer.start();
     await until(() => cloud.link.outgoing(COMPUTER, 0).every((entry) => entry.frame.t !== "result") && cloud.link.online(), "the computer took them all", 15_000);
+  }, 60_000);
+
+  it("queued multibyte results reach the Cloud through its HTTP body limit", async () => {
+    const { computer, cloud } = await two();
+    const words = "界".repeat(11_000);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    computer.engine(async () => { await gate; return { ok: true, text: words }; });
+    const requesters = Array.from({ length: 140 }, (_, index) => ({ id: `requester-${index}`, name: `Requester ${index}` }));
+    cloud.bots.push(...requesters);
+    cloud.link.botsChanged();
+    for (const requester of requesters) {
+      const { receipts } = await cloud.handOff(requester.id, call([onComputer("local-writer")], "Send the report"));
+      expect(receipts[0]?.outcome).toBe("queued");
+    }
+    await until(() => computer.coordinator.all().filter((node) => node.botId === "local-writer").length === requesters.length, "all assignments reach the computer", 30_000);
+    await computer.dialer.stop();
+    release();
+    await until(() => computer.coordinator.all().filter((node) => node.botId === "local-writer" && node.status === "completed").length === requesters.length, "all reports finish while disconnected", 30_000);
+    computer.dialer.start();
+    await until(() => cloud.results.length === requesters.length, "all reports cross the HTTP body limit");
+    expect(cloud.results.every((result) => result.status === "completed" && result.result === words)).toBe(true);
+    expect(cloud.results.map((result) => result.thread).sort()).toEqual(requesters.map((requester) => `${requester.id}-chat`).sort());
+    await until(() => computer.link.outgoing(CLOUD, 0).every((entry) => entry.frame.t !== "result"), "all delivered reports are acknowledged");
   }, 60_000);
 
   it("a requester cut by two restarts fails the hand-off and stops the work where it runs", async () => {

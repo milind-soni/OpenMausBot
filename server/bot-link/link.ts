@@ -881,7 +881,7 @@ export function createBotLink(deps: BotLinkDeps) {
       const taken: Numbered[] = [];
       let bytes = 0;
       for (const entry of one.outbox) {
-        bytes += JSON.stringify(entry.frame).length;
+        bytes += Buffer.byteLength(JSON.stringify(entry.frame), "utf8");
         if (taken.length > 0 && (bytes > EXCHANGE_BYTES || taken.length >= 500)) break;
         taken.push(entry);
       }
