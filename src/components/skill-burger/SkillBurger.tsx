@@ -159,7 +159,7 @@ export function SkillBurger({ layers, summary: initialSummary, canSave, botId, t
               {summary}
             </button>
           )}
-          <span role="status" aria-live="polite" aria-atomic="true" className="text-[12px] text-ink-secondary">
+          <span role="status" aria-live="polite" aria-atomic="true" className="truncate text-[12px] text-ink-secondary">
             {saved ? t("skillBurger.savedAs", { name: saved.name }) : count}
           </span>
         </div>
