@@ -77,6 +77,25 @@ describe("engine homes at run time", () => {
     expect(seen).toEqual([expect.stringMatching(/^member-[0-9a-f]{16}$/), "team", expect.stringMatching(/^member-[0-9a-f]{16}$/)]);
     expect(seen[2]).not.toBe(seen[0]);
   });
+
+  it("wrap an engine's in-place compaction in its conversation, and leave an engine without one without", async () => {
+    const homes = new EngineHomes();
+    homes.start(setup());
+    const seen: Array<string | null> = [];
+    const asked: unknown[] = [];
+    const instance = withEngineHomes({ adapter: {
+      sendTurn: async () => ({ turnId: "x" }),
+      compactSession: async (_threadId: string, options: unknown) => { asked.push(options); seen.push(homes.scope()); return { ok: true, usage: null, model: null }; },
+    } } as unknown as ProviderInstance, homes);
+    const options = { session: "native-1", model: "m", botId: "b1" };
+    await expect(instance.adapter.compactSession!("t-bob", options)).resolves.toEqual({ ok: true, usage: null, model: null });
+    await instance.adapter.compactSession!("t-owner", { session: "native-2" });
+    expect(asked[0]).toBe(options);
+    expect(seen).toEqual([expect.stringMatching(/^member-[0-9a-f]{16}$/), expect.stringMatching(/^member-[0-9a-f]{16}$/)]);
+    expect(seen[1]).not.toBe(seen[0]);
+    const without = withEngineHomes({ adapter: { sendTurn: async () => ({ turnId: "x" }) } } as unknown as ProviderInstance, homes);
+    expect(without.adapter.compactSession).toBeUndefined();
+  });
 });
 
 posix("a bot's engine spawned on a Team Cloud", () => {
