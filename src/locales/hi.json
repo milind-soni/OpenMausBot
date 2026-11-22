@@ -3683,5 +3683,6 @@
   "sidebar.threads.hide": "{title} छिपाएँ",
   "sidebar.threads.hideShort": "छिपाएँ",
   "sidebar.threads.running": "+{count} चल रहे",
-  "sidebar.threads.more": "{count} और"
+  "sidebar.threads.more": "{count} और",
+  "botPanel.library.showAll": "सभी दिखाएँ"
 }

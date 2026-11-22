@@ -7178,5 +7178,6 @@
   "sidebar.threads.hide": "Скрыть {title}",
   "sidebar.threads.hideShort": "Скрыть",
   "sidebar.threads.running": "+{count} в работе",
-  "sidebar.threads.more": "ещё {count}"
+  "sidebar.threads.more": "ещё {count}",
+  "botPanel.library.showAll": "Показать все"
 }

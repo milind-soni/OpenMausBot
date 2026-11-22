@@ -5923,5 +5923,6 @@
   "sidebar.threads.hide": "{title} gizle",
   "sidebar.threads.hideShort": "Gizle",
   "sidebar.threads.running": "+{count} çalışıyor",
-  "sidebar.threads.more": "{count} tane daha"
+  "sidebar.threads.more": "{count} tane daha",
+  "botPanel.library.showAll": "Tümünü göster"
 }

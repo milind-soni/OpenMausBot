@@ -4643,7 +4643,7 @@
   "botPanel.library.pages": "Pagine",
   "botPanel.library.apps": "Apps",
   "botPanel.library.files": "File",
-  "botPanel.library.scope": "Da questa conversazione",
+  "botPanel.library.showAll": "Mostra tutto",
   "botPanel.thisConversation": "In questa conversazione",
   "botPanel.advanced.title": "Più in modalità avanzata",
   "botPanel.advanced.hint": "L'invio per vostro conto e l'accesso alle app è impostato lì.",

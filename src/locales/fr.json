@@ -3831,5 +3831,6 @@
   "sidebar.threads.hide": "Masquer {title}",
   "sidebar.threads.hideShort": "Masquer",
   "sidebar.threads.running": "+{count} en cours",
-  "sidebar.threads.more": "{count} de plus"
+  "sidebar.threads.more": "{count} de plus",
+  "botPanel.library.showAll": "Tout afficher"
 }

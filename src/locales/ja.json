@@ -3982,7 +3982,7 @@
   "botPanel.library.pages": "ページ",
   "botPanel.library.apps": "アプリ",
   "botPanel.library.files": "ファイル",
-  "botPanel.library.scope": "この会話から",
+  "botPanel.library.showAll": "すべて表示",
   "botPanel.thisConversation": "この会話で",
   "botPanel.acts.customHint": "詳細モードで変更できます",
   "botPanel.section.settings": "設定",
