@@ -37,14 +37,16 @@ describe("composer dictation through Fish Audio", () => {
   let container: HTMLDivElement;
   let dictation: Dictation;
   let typed: string[];
+  let done: number;
 
   beforeEach(() => {
     cacheDesktopCapabilities({ ...initialDesktopCapabilities(), dictation: { available: true, engine: "fish-audio", onDevice: false } });
     fixture.config = { savedKeys: { fishAudioKey: { configured: true } } };
     typed = [];
+    done = 0;
     vi.clearAllMocks();
     const onText = (text: string) => typed.push(text);
-    const Probe = () => { dictation = useComposerDictation({ draftId: "d", text: "", onText }); return null; };
+    const Probe = () => { dictation = useComposerDictation({ draftId: "d", text: "", onText, onDone: () => done++ }); return null; };
     container = document.createElement("div");
     root = createRoot(container);
     flushSync(() => root.render(createElement(Probe)));
@@ -90,5 +92,23 @@ describe("composer dictation through Fish Audio", () => {
     fixture.config = null;
     flushSync(() => root.render(createElement(() => { dictation = useComposerDictation({ draftId: "d", text: "", onText: () => {} }); return null; })));
     expect(dictation.ready).toBe(false);
+  });
+
+  it("is done once a finished clip put words in the box, and not for an empty, failed or discarded one", () => {
+    toggle();
+    toggle();
+    flushSync(() => fish.listeners.line!({ partial: false, text: "hello" }));
+    flushSync(() => fish.listeners.end!({ code: 0, reason: "completed" }));
+    expect(done).toBe(1);
+    toggle();
+    toggle();
+    flushSync(() => fish.listeners.end!({ code: 0, reason: "completed" }));
+    toggle();
+    flushSync(() => fish.listeners.line!({ partial: false, text: "lost" }));
+    flushSync(() => fish.listeners.end!({ code: 1, reason: "transcribe-failed" }));
+    toggle();
+    flushSync(() => fish.listeners.line!({ partial: false, text: "dropped" }));
+    flushSync(() => dictation.stop());
+    expect(done).toBe(1);
   });
 });

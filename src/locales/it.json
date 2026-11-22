@@ -1393,6 +1393,8 @@
   "settings.font.aria": "Carattere dell'interfaccia",
   "settings.font.skin": "Predefinito del tema",
   "settings.font.system": "Sistema",
+  "settings.sendAfterDictation.subtitle": "Fermare il microfono invia ciò che hai detto. Esc lo ferma senza inviare.",
+  "settings.sendAfterDictation.title": "Invia quando la dettatura si ferma",
   "settings.sendKey.title": "Invia i messaggi con",
   "settings.sendKey.subtitle": "Scegli Maiusc+Invio o {key}, così Invio va a capo: utile se il metodo di input conferma il testo con Invio, come nella scrittura giapponese. {key} invia, con qualunque scelta. Solo su questo dispositivo.",
   "settings.userBubbles.title": "Colora i miei messaggi",

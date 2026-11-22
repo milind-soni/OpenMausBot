@@ -2189,6 +2189,8 @@
   "place.view.localUnavailable.short": "अभी इस्तेमाल नहीं हो सकता",
   "place.view.autoTeam.short": "साझा",
   "pro.name": "MausBot Cloud",
+  "settings.sendAfterDictation.subtitle": "माइक्रोफ़ोन रोकने पर आपकी कही बात भेज दी जाती है। Esc बिना भेजे रोकता है।",
+  "settings.sendAfterDictation.title": "श्रुतलेख रुकने पर भेजें",
   "settings.sendKey.title": "संदेश भेजने की कुंजी",
   "settings.sendKey.subtitle": "Shift+Enter या {key} चुनें ताकि Enter नई पंक्ति शुरू करे — यह तब काम आता है जब आपकी इनपुट विधि Enter से टेक्स्ट पक्का करती है, जैसे जापानी इनपुट में। {key} हर विकल्प में भेजता है। सिर्फ़ इस डिवाइस पर।",
   "notifications.status.problem": "समस्या",

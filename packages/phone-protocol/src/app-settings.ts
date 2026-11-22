@@ -71,6 +71,7 @@ export const WINDOW_PREFS = {
   "appearance.windowFrame": z.boolean(),
   "appearance.sidebarColor": z.enum([...PLACE_SWATCHES, "none"]),
   "general.followUp": z.enum(["steer", "queue"]),
+  "general.sendAfterDictation": z.boolean(),
   "general.finishedNotifications": z.boolean(),
   "general.notificationFeed": z.boolean(),
   "general.analytics": z.boolean(),

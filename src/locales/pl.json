@@ -1416,6 +1416,8 @@
   "settings.font.inter": "Inter",
   "settings.font.poppins": "Poppins",
   "settings.font.serif": "Szeryfowa",
+  "settings.sendAfterDictation.subtitle": "Zatrzymanie mikrofonu wysyła to, co zostało powiedziane. Esc zatrzymuje bez wysyłania.",
+  "settings.sendAfterDictation.title": "Wyślij po zakończeniu dyktowania",
   "settings.sendKey.title": "Wysyłaj wiadomości za pomocą",
   "settings.sendKey.subtitle": "Wybierz Shift+Enter lub {key}, aby Enter rozpoczynał nowy wiersz — przydatne, gdy twoja metoda wprowadzania zatwierdza tekst klawiszem Enter, jak robi to wprowadzanie japońskie. Niezależnie od wyboru wiadomość wysyła {key}. Dotyczy tylko tego urządzenia.",
   "settings.userBubbles.title": "Koloruj moje wiadomości",

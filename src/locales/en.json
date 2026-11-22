@@ -1943,6 +1943,8 @@
   "settings.font.inter": "Inter",
   "settings.font.poppins": "Poppins",
   "settings.font.serif": "Serif",
+  "settings.sendAfterDictation.subtitle": "Stopping the microphone sends what you said. Esc stops it without sending.",
+  "settings.sendAfterDictation.title": "Send when dictation stops",
   "settings.sendKey.title": "Send messages with",
   "settings.sendKey.subtitle": "Choose Shift+Enter or {key} so Enter starts a new line instead, handy when your input method confirms text with Enter, as Japanese input does. {key} sends whichever you choose. On this device only.",
   "settings.followUp.title": "Sending while a bot works",

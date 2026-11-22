@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot } from "@/state/store";
 import { restoreComposerDraft } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
+import { setSendAfterDictation } from "@/lib/send-after-dictation";
 import { isMacPlatform } from "@/lib/keyboard-shortcuts";
 
 const fixture = vi.hoisted(() => ({ dispatch: vi.fn() }));
@@ -80,6 +81,7 @@ describe("native dictation in the real composer", () => {
     restoreComposerDraft(draftId, { text: "", attachments: [] });
     restoreComposerDraft(`bot:${bot.id}:other-thread`, { text: "", attachments: [] });
     delete window.ogb;
+    setSendAfterDictation(false);
     vi.clearAllMocks();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -189,5 +191,48 @@ describe("native dictation in the real composer", () => {
     flushSync(() => end({ code: 1, reason: "recognition-error" }));
     hear("");
     expect(input().value).toBe("失敗しても残す文章。");
+  });
+
+  describe("with Send when dictation stops on", () => {
+    const sent = () => fixture.dispatch.mock.calls.filter(([action]) => action.type === "send");
+    beforeEach(() => setSendAfterDictation(true));
+
+    it("sends what was said when the mic is stopped", async () => {
+      hear("話した文章。");
+      click(t("composer.dictation.stop"));
+      expect(speechStop).toHaveBeenCalled();
+      expect(sent()).toEqual([[expect.objectContaining({ type: "send", text: "話した文章。" })]]);
+      await expect.poll(() => input().value).toBe("");
+    });
+
+    it("sends when the recognizer completes on its own", () => {
+      hear("自然に終わった文章。");
+      flushSync(() => end({ code: 0, reason: "completed" }));
+      expect(sent()).toEqual([[expect.objectContaining({ text: "自然に終わった文章。" })]]);
+    });
+
+    it("keeps the text on Esc, an error, a typed edit, or when nothing was heard", () => {
+      click(t("composer.dictation.stop"));
+      expect(sent()).toEqual([]);
+      click(t("composer.dictation.start"));
+      hear("Escで止めた文章。");
+      flushSync(() => input().dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+      click(t("composer.dictation.start"));
+      hear("失敗した。");
+      flushSync(() => end({ code: 1, reason: "recognition-error" }));
+      click(t("composer.dictation.start"));
+      hear("手で直す");
+      flushSync(() => restoreComposerDraft(draftId, { text: "手で直した。", attachments: [] }));
+      hear("手で直す 遅れた");
+      expect(sent()).toEqual([]);
+      expect(input().value).toBe("手で直した。");
+    });
+  });
+
+  it("leaves dictated text in the box when the setting is off", () => {
+    hear("送らない文章。");
+    click(t("composer.dictation.stop"));
+    expect(fixture.dispatch.mock.calls.some(([action]) => action.type === "send")).toBe(false);
+    expect(input().value).toBe("送らない文章。");
   });
 });

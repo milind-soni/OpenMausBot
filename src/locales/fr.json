@@ -2191,6 +2191,8 @@
   "place.view.localUnavailable.short": "Pas encore utilisable",
   "place.view.autoTeam.short": "Partagé",
   "pro.name": "MausBot Cloud",
+  "settings.sendAfterDictation.subtitle": "Arrêter le micro envoie ce que vous avez dit. Échap l'arrête sans envoyer.",
+  "settings.sendAfterDictation.title": "Envoyer à la fin de la dictée",
   "settings.sendKey.title": "Envoyer les messages avec",
   "settings.sendKey.subtitle": "Choisissez Shift+Enter ou {key} pour qu'Enter passe plutôt à la ligne, pratique si votre méthode de saisie valide le texte avec Enter, comme pour le japonais. {key} envoie quel que soit votre choix. Sur cet appareil uniquement.",
   "notifications.status.problem": "Problème",

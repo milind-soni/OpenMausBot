@@ -2327,6 +2327,8 @@
   "place.view.localUnavailable.short": "Noch nicht nutzbar",
   "place.view.autoTeam.short": "Gemeinsam",
   "pro.name": "MausBot Cloud",
+  "settings.sendAfterDictation.subtitle": "Wenn du das Mikrofon stoppst, wird das Gesagte gesendet. Esc stoppt, ohne zu senden.",
+  "settings.sendAfterDictation.title": "Senden, wenn das Diktieren endet",
   "settings.sendKey.title": "Nachrichten senden mit",
   "settings.sendKey.subtitle": "Wähle Shift+Enter oder {key}, damit Enter stattdessen eine neue Zeile beginnt – praktisch, wenn deine Eingabemethode Text mit Enter bestätigt, wie bei japanischer Eingabe. {key} sendet bei jeder Wahl. Nur auf diesem Gerät.",
   "notifications.status.problem": "Problem",
