@@ -170,6 +170,8 @@ describe("watchAntigravityPromptOutcome", () => {
     expect(antigravityLimitFacts("claude-sonnet-5", known)).toEqual({ limit: "model", limitModels: ["claude-sonnet-5", "gpt-6"] });
     expect(antigravityLimitFacts("gemini-3.8-flash-high", known)).toEqual({ limit: "model", limitModels: ["gemini-3.8-flash-high", "gemini-3.8-flash", "gemini-3.8-pro"] });
     expect(antigravityLimitFacts("gemini-4-argon", known)).toEqual({ limit: "model", limitModels: ["gemini-4-argon"] });
+    expect(antigravityQuotaFamily("gemini-4-neon")).toBe("gemini");
+    expect(antigravityLimitFacts("gemini-4-neon", known)).toEqual({ limit: "model", limitModels: ["gemini-4-neon", "gemini-3.8-flash", "gemini-3.8-pro"] });
     expect(antigravityLimitFacts(undefined, known)).toEqual({ limit: "model" });
   });
 

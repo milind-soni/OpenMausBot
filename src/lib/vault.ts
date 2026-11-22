@@ -1,4 +1,4 @@
-import type { BitwardenStatus, LoginBots, LoginSummary, OnePasswordStatus } from "../../shared/logins";
+import type { BitwardenSecretsStatus, BitwardenStatus, LoginBots, LoginSummary, OnePasswordStatus } from "../../shared/logins";
 import type { LinkedSecret, VaultChoice, VaultSecret } from "../../shared/vault";
 import type { ComputerHelpRef } from "../../shared/wire";
 import { api } from "@/state/store";
@@ -11,6 +11,7 @@ export interface VaultList {
   onePassword: OnePasswordStatus;
   /** Absent from a server that does not offer Bitwarden. */
   bitwarden?: BitwardenStatus;
+  bitwardenSecrets?: BitwardenSecretsStatus;
 }
 
 export async function listVault(): Promise<VaultList> {

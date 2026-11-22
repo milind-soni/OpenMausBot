@@ -3,6 +3,7 @@ import { SKILL_FILE_LIMITS, skillFilePathProblem } from "../../shared/skill-file
 import { t } from "./i18n";
 import { api, type Action, type Bot, type Group } from "@/state/store";
 import type { Routine } from "@/lib/routines";
+import { serverFetch } from "./relay-server";
 
 /** The most a chosen folder may hold, as the server's own folder cap. */
 export const TEMPLATE_FOLDER_MAX_BYTES = 4 * 1024 * 1024;
@@ -84,7 +85,7 @@ export async function saveTemplateFolder(card: Pick<TemplateCard, "id" | "name">
     if (!chosen) return null;
     return (await api<{ path: string }>(`/api/share/${encodeURIComponent(card.id)}/save`, post({ path: chosen }))).path;
   }
-  const response = await fetch(`/api/share/${encodeURIComponent(card.id)}/download`);
+  const response = await serverFetch(`/api/share/${encodeURIComponent(card.id)}/download`);
   if (!response.ok) throw new Error(t("template.failed"));
   const url = URL.createObjectURL(new Blob([await response.blob()], { type: "application/zip" }));
   const link = document.createElement("a");

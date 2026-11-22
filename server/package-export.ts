@@ -131,7 +131,8 @@ function requiredApps(bots: readonly BotRecord[]) {
   const requirements = new Map<string, { slug: string; label: string; reason: string; optional?: boolean }>();
   for (const bot of bots) {
     for (const app of bot.installedPackage?.requiredApps ?? []) {
-      if (!requirements.has(app.slug)) requirements.set(app.slug, { ...app });
+      const existing = requirements.get(app.slug);
+      if (!existing || (existing.optional === true && app.optional !== true)) requirements.set(app.slug, { ...app });
     }
   }
   return requirements;

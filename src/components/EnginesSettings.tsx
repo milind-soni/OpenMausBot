@@ -474,9 +474,12 @@ const GOOGLE_MARK = { driverKind: "openai-compat", icon: { kind: "preset", prese
  * whose own row takes this one's place once it is added. */
 function GeminiProviderRow({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   return <>
-    <div data-simple-engine="google-ai-studio" className="flex min-h-11 items-center gap-3 px-4 py-1.5">
+    <div data-simple-engine="google-ai-studio" className="flex min-h-16 items-center gap-3 px-4 py-3">
       <SettingsMark><InstanceProviderMark instance={GOOGLE_MARK} size={18} subtle /></SettingsMark>
-      <span className="min-w-0 flex-1 truncate text-[14px] leading-5 text-ink">{t("geminiServer.title")}</span>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate text-[14px] leading-5 text-ink">{t("geminiServer.title")}</span>
+        <span className="truncate text-[13px] leading-[18px] text-ink-secondary"><StatusDot tone={null} />{`${t("settings.ai.notSetUp")} · ${t("settings.ai.needsKey")}`}</span>
+      </span>
       <button type="button" aria-expanded={open} className="ui-button ml-3 shrink-0" onClick={onToggle}>
         {t(open ? "common.close" : "settings.simple.ai.setUp")}
       </button>
@@ -498,11 +501,11 @@ function SimpleEngines({ rows, isReady, renderEngine, more, accountsOnly = false
   const [opened, setOpened] = useState<string | null>(null);
   // A hidden provider is gone from the instance list, so without these rows nothing in Settings brings it back.
   const allHidden = useHiddenProviders(), hidden = accountsOnly ? [] : allHidden;
-  const featured = rows.filter((instance) => accountsOnly || isReady(instance) || instance.authentication !== undefined);
+  const featured = rows.filter((instance) => accountsOnly || isReady(instance) || instance.authentication !== undefined || hasGeminiServer([instance]));
   const others = rows.filter((instance) => !featured.includes(instance));
   // A hidden Gemini server comes back through its own hidden row; adding another would only make a second one.
   const gemini = offerGemini && !hidden.some((provider) => provider.driverKind === "openai-compat" && provider.displayName === GEMINI_PRESET.name);
-  const extra = hidden.length + (gemini ? 1 : 0);
+  const folded = others.length + hidden.length;
   const row = (instance: InstanceInfo, compact: boolean) => {
     const open = opened === instance.instanceId;
     return <ProviderRow key={instance.instanceId} instance={instance} ready={isReady(instance)} open={open} compact={compact}
@@ -512,11 +515,11 @@ function SimpleEngines({ rows, isReady, renderEngine, more, accountsOnly = false
     <SettingsGroup label={t("settings.ai.providers")} actions={<RefreshEngines />}>
       <SettingsRows icons>
         {featured.map((instance) => row(instance, false))}
-        {others.length + extra > 0 && (
-          <SettingsFoldRow id={more.id} title={t("settings.ai.moreProviders")} value={String(others.length + extra)} open={more.open} onToggle={more.onToggle}
+        {gemini && <GeminiProviderRow open={opened === "google-ai-studio"} onToggle={() => setOpened(opened === "google-ai-studio" ? null : "google-ai-studio")} />}
+        {folded > 0 && (
+          <SettingsFoldRow id={more.id} title={t("settings.ai.moreProviders")} value={String(folded)} open={more.open} onToggle={more.onToggle}
             leading={<span aria-hidden="true" />}>
             {others.map((instance) => row(instance, true))}
-            {gemini && <GeminiProviderRow open={opened === "google-ai-studio"} onToggle={() => setOpened(opened === "google-ai-studio" ? null : "google-ai-studio")} />}
             <HiddenProviderRows hidden={hidden} />
           </SettingsFoldRow>
         )}

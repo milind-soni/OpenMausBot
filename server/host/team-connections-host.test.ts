@@ -310,6 +310,13 @@ describe("apps each person connects", () => {
       expect(lookup("mail", "https://mail.example/mcp"), "an unknown server").toBeNull();
     });
 
+    it("reads the servers as they are saved in the settings, for the turn's connection prompt", async () => {
+      const host = await calendarConnected({ team: false });
+      const saved: Record<string, unknown> = { broken: "not a server", local: { command: "npx" }, drive: { type: "http", url: "https://api.cursor.com/rest-mcp/google-drive/mcp", headers: {}, enabled: true } };
+      expect(host.mcpServerApps(SCOUT, { ...open, servers: saved })!("drive", "https://api.cursor.com/rest-mcp/google-drive/mcp")).toEqual({ slug: "googledrive", label: "Google Drive", connected: false });
+      expect(host.mcpServerApps(SCOUT, { ...open, servers: { broken: "not a server", local: { command: "npx" } } }), "no server stands for an app").toBeUndefined();
+    });
+
     it("does so on a Team Cloud for a team app on the team's bridge, never for a person's app", async () => {
       const host = await calendarConnected();
       expect(host.mcpServerApps(SCOUT, open)!("gmail", "")).toEqual({ slug: "gmail", label: "Gmail", connected: false });

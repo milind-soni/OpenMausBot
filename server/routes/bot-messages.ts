@@ -35,6 +35,7 @@ import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
 import { extractSteerImages } from "../turn-images.ts";
 import { followupFacts, helperFollowup, helperFollowupBody, mayFollowUp } from "../helper-followup.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
+import { noteOwnWindowSend } from "../own-window-sends.ts";
 import { noteTypedSend } from "../typed-sends.ts";
 import { engineSessionOutdated, startFresh } from "../fresh-start.ts";
 import { parseMentionPicks } from "../../shared/room-mentions.ts";
@@ -352,6 +353,10 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       // paired session or the desktop capability proves a person and lifts the webhook block.
       const personPresent = auth.kind === "session" || DESKTOP_MANAGED;
       if (personPresent && sendId && !guarded && !press && !appSent) noteTypedSend(threadId, sendId, text);
+      // The desktop app's own window: in the desktop app a loopback change needs its private capability.
+      // Only a new line the send itself adds: a repeat or a collision must not lend the proof to a line already there or waiting.
+      const ownWindowSend = DESKTOP_MANAGED && auth.kind === "loopback" && !auth.companionDevice && sendId && !guarded && !press && !appSent
+        && !store.messagesFor(threadId).some((line) => line.sendId === sendId) && !queuedSteeredMessage(bot.id, threadId, sendId);
       if (pressKey) pressesInFlight.set(pressKey, sendId);
       try {
         const receipt = await acceptDirectSend({
@@ -359,6 +364,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
           personPresent, admin: owners.admin(auth), ...(followUp ? { followUp } : {}),
           ...(mentions?.length && !press && !appSent ? { mentions } : {}),
         }, guardedStart);
+        if (ownWindowSend) noteOwnWindowSend(threadId, sendId, text);
         press?.settle("queueId" in receipt ? receipt.queueId : undefined);
         appContext?.deliver();
         if (relayed && target && onBehalfOf) relayedReaction(threadId, target.id, onBehalfOf, relayed);

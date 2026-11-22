@@ -13,12 +13,13 @@ describe("the lock-down policy of a Chrome on a private display", () => {
   it("blocks files, Chrome's pages, DevTools and page source, but keeps the new tab page and the DevTools Protocol", () => {
     const policy = desktopPolicy();
     expect(policy.URLBlocklist).toEqual(["file://*", "chrome://*", "devtools://*", "view-source:*"]);
-    expect(policy.URLAllowlist).toEqual(["chrome://newtab", "chrome://new-tab-page", "chrome://new-tab-page-third-party"]);
+    expect(policy.URLAllowlist).toEqual(["chrome://omnibox-popup.top-chrome", "chrome://newtab", "chrome://new-tab-page", "chrome://new-tab-page-third-party"]);
     expect(policy.IncognitoModeAvailability).toBe(1);
     expect(policy.AllowFileSelectionDialogs).toBe(false);
     expect(policy).not.toHaveProperty("DeveloperToolsAvailability");
     expect(policy.PrivacySandboxPromptEnabled).toBe(false);
     expect(policy.PromotionsEnabled).toBe(false);
+    expect(policy.CommandLineFlagSecurityWarningsEnabled).toBe(false);
   });
 
   it("lets through only the folders named, and nothing beside them", () => {

@@ -103,8 +103,10 @@ refuses the relay-only QR, the change it needs is to try the relay when no
 direct route resolves, which is what the spec's route order already says.
 
 Computer viewing and live browser views use WebSocket upgrades. Over the relay
-these answer `501` for now, so a phone shows computer access as unavailable;
-chat, approvals, events and files work.
+an upgrade meets the same checks as a request (pairing window, the stream's own
+device, header scrubbing, the request gate), then the route that owns the path
+answers the handshake on the encrypted stream, as it would on a TCP socket. Each
+route keeps its own rules: viewing a computer still needs an `admin` session.
 
 ## Shared code; the desktop is unchanged
 
@@ -265,9 +267,6 @@ again…".
 
 ## Not yet
 
-- WebSocket routes through the relay (Local VM and computer viewing, live
-  browser): they need the upgrade path to accept a socket that is not a TCP
-  socket. Medium.
 - The web UI: a relay QR in the server's own Settings → Remote access, and the
   relay's state there. Medium.
 - `openmausbot setup` and `start` offering the relay, `status` showing it, and

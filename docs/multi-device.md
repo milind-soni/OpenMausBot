@@ -35,6 +35,8 @@ After a move to My Cloud or your own server, the computer you moved from stops r
 twice. The computer still lends the new home its folders, screen and Chrome while the desktop app runs and is signed in.
 On your own server this happens by itself only when you are its one owner; on a server with other members or admins,
 lending also needs `features.sharedComputers` set to `true` (see [feature-flags.md](feature-flags.md)).
+With two or more computers lent to My Cloud, its bots take the computer you are typing on as "my computer": the one
+whose desktop app sent the message. The lending icon's menu on each computer says so while My Cloud can use it.
 
 ## Moving bots by hand
 

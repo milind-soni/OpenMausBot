@@ -1,7 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 import { removeTempDir } from "../testing/cleanup.ts";
 import { forbiddenCommand } from "./cdp/testing/real-chrome.ts";
@@ -240,6 +240,20 @@ describe("a person and the bot sharing one browser", () => {
     expect((await call("agent_browser_tabs", { action: "switch", tab: "t2" })).isError).toBeUndefined();
   });
 
+  it("ends the person's hold when the browser they hold dies, so the bot is not left paused for a browser that is gone", async () => {
+    const { service, call, text, target, backend } = setup();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 2560, maxHeight: 1600 }, () => {});
+    await viewer.input({ type: "takeControl" });
+    expect(service.heldBy("bot-a")).toBe("local-owner");
+    backend.chrome.exit("killed");
+    await sleep(50);
+    expect(service.heldBy("bot-a")).toBeNull();
+    const again = await call("agent_browser_status");
+    expect(again.isError).toBeUndefined();
+    expect(text(again)).toContain("stopped unexpectedly");
+  });
+
   it("waits for the bot's running action before the person's control starts, and turns that action's answer into the refusal", async () => {
     const { service, call, target, backend } = setup({ takeoverMs: 2_000 });
     await call("agent_browser_open", { url: "https://example.com/form" });
@@ -463,6 +477,29 @@ describe("browsers on one computer", () => {
     const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 1280, maxHeight: 1280 }, (output) => { if (output.type === "frame") output.ack(); });
     expect(await service.closeIdle(20)).toEqual([]);
     await viewer.close();
+  });
+
+  it("gives a slow machine's first tab as long as Chrome's own start, so a start that takes 20 s is not refused at 15 s", async () => {
+    // On a busy or CPU-capped computer Chrome answers on its pipe but its first tab runs late; refusing then made the bot
+    // start Chrome all over again. Only the timers are fake: nothing here waits on the wall clock.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const slow = new FakeBackend(() => {
+        const chrome = new FakeChrome({ documents });
+        chrome.delay = (method) => (method === "Page.enable" ? 20_000 : 0);
+        return chrome;
+      });
+      backends.push(slow);
+      const { call, text } = setup({ backend: () => slow });
+      let result: Awaited<ReturnType<typeof call>> | null = null;
+      void call("agent_browser_open", { url: "https://example.com/form" }).then((answer) => { result = answer; });
+      for (let waited = 0; result === null && waited < 90_000; waited += 1_000) await vi.advanceTimersByTimeAsync(1_000);
+      expect(result).not.toBeNull();
+      expect(text(result!)).not.toContain("No matching tab opened");
+      expect(text(result!)).toContain("Opened https://example.com/form in t1.");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("makes room by closing the least recently used idle browser, and waits, then refuses, when none is idle", async () => {

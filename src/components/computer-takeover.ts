@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LocalizedPanelError } from "@/lib/computer-messages";
+import { serverFetch } from "@/lib/relay-server";
 
 export interface TakeoverSnapshot {
   held: boolean;
@@ -96,7 +97,7 @@ export async function openProviderDesktop({ botId, title, request, join, current
 }
 
 function post(path: string, body: unknown): void {
-  void fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), keepalive: true })
+  void serverFetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), keepalive: true })
     .catch(() => {});
 }
 

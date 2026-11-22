@@ -196,6 +196,14 @@ describe("Devin ACP driver", () => {
     expect(JSON.parse(readFileSync(rpc, "utf8"))).not.toContain("session/set_config_option");
   });
 
+  it("says in the picker why its model list could not be read", async () => {
+    const { instance } = await create({ FAKE_ACP_MODELS: "" });
+    await instance.refreshModels!();
+    expect(instance.modelsUnconfirmed).toBe(true);
+    expect(instance.modelsUnreadable).toBe("failed");
+    expect(instance.models.options.map((option) => option.id)).toEqual(["agent-default"]);
+  });
+
   it("starts nothing when the instance is created", async () => {
     await create();
     expect(existsSync(join(scratch, "launch.json"))).toBe(false);

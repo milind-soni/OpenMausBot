@@ -214,9 +214,19 @@ const HANG_UP_LEAD = /^(?:(?:um+|uh+|er+|so|well|ok|okay|alright|all right|great
 // "hang up the poster" never match, and neither does anything a page, file or bot said.
 const HANG_UP = /^(?:(?:please|you can|you may|go ahead and|can you|could you|would you|will you|let's|let us)[\s,]+)*(?:hang\s+up(?:\s+(?:the|this)\s+(?:call|phone))?|end\s+(?:(?:the|this|our)\s+)?call)(?:[\s,.!]+(?:now|please|thanks|thank you|bye|goodbye))*[\s.!?]*$/i;
 
+// Chinese has no word boundaries, so a hang-up request must match the whole utterance.
+// 嗯 mm, 好/好的 okay, 行/可以 sure, 那 then, 就这样 that's all, 没事了 nothing else.
+// 谢谢 thanks, 再见 goodbye, 拜拜 bye.
+const ZH_HANG_UP_LEAD = /^(?:(?:嗯|ok(?:ay)?|好的?|行|可以|那|就[这這][样樣]|[没沒]事了|[谢謝]{2}|再[见見]|拜拜)[\s,，、。.!！]*)+/i;
+// 请/麻烦 please, 你/您 you, 可以 can, 帮我 help me, 就 just, 吧/了 soften or mark the end of the request.
+// 挂断/挂掉/挂了/挂机 hang up, 挂吧 go ahead and hang up, 电话 phone, 挂电话/挂断电话/挂掉电话 hang up the phone.
+// 把电话挂了/把电话挂断/把电话挂掉 hang up the phone, 结束通话 end the call, 结束这次通话/结束本次通话 end this call.
+const ZH_HANG_UP = /^(?:[请請]|麻[烦煩]|你|您|可以|[帮幫]我|就)*(?:[挂掛](?:[断斷掉了机機吧](?:[电電][话話])?|[电電][话話])|把[电電][话話][挂掛][了断斷掉]|[结結]束(?:[这這]次|本次)?通[话話])[吧了]?(?:[\s,，、。.!！]*(?:[谢謝]{2}|再[见見]|拜拜))*[\s,，、。.!！]*$/;
+
 /** True only when the person's own words on a Live call are a clear request to hang up. */
 export function spokenHangUp(text: string): boolean {
-  return HANG_UP.test(text.trim().replace(/[\u2018\u2019]/g, "'").replace(HANG_UP_LEAD, ""));
+  return HANG_UP.test(text.trim().replace(/[\u2018\u2019]/g, "'").replace(HANG_UP_LEAD, ""))
+    || ZH_HANG_UP.test(text.trim().replace(ZH_HANG_UP_LEAD, ""));
 }
 
 export function liveInitialInput(history: LiveHistoryMessage[]) {

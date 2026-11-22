@@ -530,6 +530,24 @@ describe("configuration boundaries", () => {
     expect(vpsSshAlias({ vps: { sshAlias: "-bad" } })).toBeNull();
   });
 
+  it("keeps named VPS servers apart from the default and accepts only plain names and simple aliases", () => {
+    const servers = [{ name: "Home lab", sshAlias: "home-lab" }, { name: "Office", sshAlias: "office.vps" }];
+    expect(parseConfigPatch({ vpsServers: servers })).toEqual({ vpsServers: servers });
+    expect(parseConfigPatch({ vpsServers: [{ name: "  Home lab ", sshAlias: "home-lab" }] })).toEqual({ vpsServers: [{ name: "Home lab", sshAlias: "home-lab" }] });
+    expect(() => parseConfigPatch({ vpsServers: [{ name: "Bad", sshAlias: "prod; reboot" }] })).toThrow("vpsServers");
+    expect(() => parseConfigPatch({ vpsServers: [{ name: " ", sshAlias: "home-lab" }] })).toThrow("vpsServers");
+    expect(() => parseConfigPatch({ vpsServers: [{ name: "Line\nbreak", sshAlias: "home-lab" }] })).toThrow("vpsServers");
+    expect(() => parseConfigPatch({ vpsServers: [...servers, { name: "Again", sshAlias: "home-lab" }] })).toThrow("own SSH alias");
+    expect(() => parseConfigPatch({ vpsServers: Array.from({ length: 21 }, (_, index) => ({ name: `S${index}`, sshAlias: `s${index}` })) })).toThrow("vpsServers");
+    // A hand-edited bad entry is dropped on load, never the whole file.
+    expect(parseStoredConfig({ vpsServers: [...servers, { name: "Bad", sshAlias: "-bad" }, "junk"] })).toEqual({ vpsServers: servers });
+    expect(parseStoredConfig({ vpsServers: "home-lab" })).toEqual({});
+    expect(parseStoredConfig({ vpsServers: Array.from({ length: 25 }, (_, index) => ({ name: `S${index}`, sshAlias: `s${index}` })) }).vpsServers).toHaveLength(20);
+    expect(() => parseConfigPatch({ vpsServers: [{ name: "Lab\u202e", sshAlias: "home-lab" }] })).toThrow("vpsServers");
+    expect(parseStoredConfig({ vpsServers: [...servers, { name: "Copy", sshAlias: "home-lab" }] })).toEqual({ vpsServers: servers });
+    expect(parseStoredConfig({})).toEqual({});
+  });
+
   it("validates browserEngine.attachCdpUrl as a bare CDP port or an http(s)/ws(s) URL, and forwards it only when configured", () => {
     expect(parseStoredConfig({})).toEqual({});
     expect(browserEngineAttachCdpUrl({})).toBeNull();

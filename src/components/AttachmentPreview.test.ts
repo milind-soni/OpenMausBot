@@ -25,6 +25,7 @@ import {
   useLocalFileSave,
   wrappedImageIndex,
 } from "./AttachmentPreview";
+import { messageFileOutsideWorkspace } from "./outside-workspace-probe";
 
 describe("attachment image navigation", () => {
   it("wraps previous and next navigation", () => {
@@ -193,6 +194,23 @@ describe("Show in folder for a file outside the workspace", () => {
     vi.stubGlobal("window", { ogb: { revealInFolder: vi.fn(), remoteClient: { active: true } } });
     try {
       expect(render("/Users/maus/_draft/ollama-gen.js")).toContain(">/Users/maus/_draft/ollama-gen.js</code>");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("messageFileOutsideWorkspace", () => {
+  it("maps an outside_workspace refusal to true and an openable path to false", async () => {
+    const refused = () => new Response(JSON.stringify({ code: "outside_workspace" }), { status: 403, headers: { "content-type": "application/json" } });
+    const opened = () => new Response(new Blob(["x"]), { status: 200, headers: { "content-type": "text/plain" } });
+    vi.stubGlobal("fetch", vi.fn()
+      .mockImplementationOnce(async () => refused())
+      .mockImplementationOnce(async () => opened()));
+    const message = { threadId: "t", messageId: "m" };
+    try {
+      await expect(messageFileOutsideWorkspace("C:\\outside\\a.js", message, new AbortController().signal)).resolves.toBe(true);
+      await expect(messageFileOutsideWorkspace("inside/a.js", message, new AbortController().signal)).resolves.toBe(false);
     } finally {
       vi.unstubAllGlobals();
     }
