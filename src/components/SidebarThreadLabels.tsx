@@ -13,7 +13,9 @@ import { isWorking } from "./SidebarThreadRow";
 
 const SLOT = "pointer-events-none absolute end-[30px] top-1.5 flex size-6 items-center justify-center rounded-lg text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:hidden touch:pointer-events-auto touch:opacity-70 motion-reduce:transition-none";
 const ROW = "group/label relative flex h-8 w-full min-w-0 items-center gap-2 rounded-lg ps-2.5 pe-2 text-start text-[13px] leading-[18px] outline-none transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none";
-const STAGGER_MS = 30;
+const STAGGER_MS = 25;
+/** Rows past the fourth arrive with it, so the slide stays near 250ms however many there are. */
+const STAGGER_STEPS = 3;
 const YIELDS = "group-hover/label:[mask-image:linear-gradient(to_left,transparent_20px,black_36px)] rtl:group-hover/label:[mask-image:linear-gradient(to_right,transparent_20px,black_36px)]";
 
 type FoldBot = Pick<Bot, "id" | "name" | "tasks">;
@@ -37,9 +39,10 @@ export function ThreadFoldChevron({ bot, dispatch }: { bot: FoldBot; dispatch: D
   );
 }
 
-/** Whether a bot row's threads are unfolded under it, which takes the selected fill from the row itself. */
-export function useRowUnfolded(bot: FoldBot): boolean {
-  return useThreadsUnfolded(bot.id) && canUnfold(bot);
+/** Whether one of the bot's unfolded rows carries the selected fill instead of its row: not while its blank New thread
+ * chat (`drafting`) is open, which has no row of its own yet. */
+export function useRowUnfolded(bot: FoldBot, drafting = false): boolean {
+  return useThreadsUnfolded(bot.id) && canUnfold(bot) && !drafting;
 }
 
 function StatusMark({ row }: { row: LabelRow }) {
@@ -56,11 +59,11 @@ function StatusMark({ row }: { row: LabelRow }) {
 type Toast = { text: string; undo: () => void };
 
 /** The rows under a bot in Simple mode's sidebar: what is going on while folded, the bot's active threads unfolded. */
-export function SidebarThreadLabels({ bot, selected, rowThreadId, pendingQueued, dispatch }: {
-  bot: Bot; selected: boolean; rowThreadId: string; pendingQueued: AppState["pendingQueued"]; dispatch: Dispatch<Action>;
+export function SidebarThreadLabels({ bot, selected, drafting = false, rowThreadId, pendingQueued, dispatch }: {
+  bot: Bot; selected: boolean; drafting?: boolean; rowThreadId: string; pendingQueued: AppState["pendingQueued"]; dispatch: Dispatch<Action>;
 }) {
-  const unfolded = useRowUnfolded(bot);
-  const current = selected ? bot.switchingTo ?? bot.threadId : undefined;
+  const unfolded = useThreadsUnfolded(bot.id) && canUnfold(bot);
+  const current = selected && !drafting ? bot.switchingTo ?? bot.threadId : undefined;
   const { rows, more, runningMore } = threadLabels(bot, pendingQueued, { unfolded, current, rowThreadId, now: Date.now() });
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -124,7 +127,7 @@ export function SidebarThreadLabels({ bot, selected, rowThreadId, pendingQueued,
   };
   const stop = Math.min(focusAt ?? Math.max(0, rows.findIndex((row) => row.current)), rows.length + Number(more > 0) + Number(runningMore > 0) - 1);
   const roving = (index: number) => (index === stop ? 0 : -1);
-  const stagger = (index: number) => ({ animationDelay: `${index * STAGGER_MS}ms` });
+  const stagger = (index: number) => ({ animationDelay: `${Math.min(index, STAGGER_STEPS) * STAGGER_MS}ms` });
   const QUIET = cn(ROW, "animate-msg-in text-ink-tertiary [animation-fill-mode:backwards] hover:bg-ink/[0.06] hover:text-ink-secondary motion-reduce:animate-none");
 
   return <>

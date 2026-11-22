@@ -1,7 +1,7 @@
 import type { Bot, Task } from "@/state/store";
 import { botOpensTo } from "@/state/thread-navigation";
 import { runningRoutineRuns, sidebarBotActivityTasks } from "./SidebarBotActivity";
-import { isArchived, isWorking, threadRecency } from "./SidebarThreadRow";
+import { isArchived, isSnoozed, isWorking, threadRecency } from "./SidebarThreadRow";
 
 export const ACTIVE_DAYS = 7;
 export const ACTIVE_LIMIT = 4;
@@ -18,7 +18,7 @@ type LabelBot = Pick<Bot, "threadId"> & Partial<Pick<Bot, "mainThreadId" | "task
 /** The person started it: not a routine run, and not opened by a bot (its own new thread, a burst or a hand-off). */
 export const ownThread = (task: Pick<Task, "routineRunId" | "openedBy">): boolean => !task.routineRunId && !task.openedBy;
 
-const ownOpen = (bot: Pick<LabelBot, "tasks">) => (bot.tasks ?? []).filter((task) => ownThread(task) && !isArchived(task));
+const ownOpen = (bot: Pick<LabelBot, "tasks">) => (bot.tasks ?? []).filter((task) => ownThread(task) && !isArchived(task) && !isSnoozed(task));
 
 /** Only a bot with more than one thread of the person's own has anything to unfold. */
 export const canUnfold = (bot: Pick<LabelBot, "tasks">): boolean => ownOpen(bot).length > 1;
