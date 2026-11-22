@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { createElement } from "react";
+import { act, createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it, vi } from "vitest";
@@ -51,5 +51,29 @@ describe("an object body", () => {
     const avatar = host.querySelector<HTMLElement>("[data-object-body='circle']")!;
     await vi.waitFor(() => expect(avatar.innerHTML).toContain('fill="#123456"'));
     flushSync(() => root.unmount());
+  });
+
+  it("celebrates once with the ribbon cage when it finishes working, then rests", () => {
+    vi.useFakeTimers();
+    try {
+      const host = document.createElement("div");
+      document.body.append(host);
+      const root = createRoot(host);
+      const show = (state: MausState) => act(() => root.render(createElement(MausAvatar, { bodyId: "obj-mug", color: "blue", state, size: 64 })));
+      const shown = () => host.querySelector<HTMLElement>("[data-object-body]")!.dataset.objectState;
+      show("idle");
+      expect(shown()).toBe("idle");
+      show("working");
+      expect(shown()).toBe("working");
+      show("idle");
+      expect(shown()).toBe("done");
+      act(() => vi.advanceTimersByTime(5000));
+      expect(shown()).toBe("idle");
+      show("sleeping");
+      expect(shown()).toBe("idle");
+      act(() => root.unmount());
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
