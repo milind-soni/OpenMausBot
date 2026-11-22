@@ -45,4 +45,31 @@ describe("RelayLink", () => {
     await expect(link.fetch("/api/auth/session", { signal: AbortSignal.abort(reason) })).rejects.toBe(reason);
     expect(dials).toBe(0);
   });
+
+  it("stops waiting for the relay with the caller's reason when its signal aborts, and leaves the dial to the others", async () => {
+    const sockets: Array<{ onerror: (() => void) | null; onclose: ((event: { code: number }) => void) | null }> = [];
+    vi.stubGlobal("WebSocket", class {
+      binaryType = "blob";
+      onopen = null;
+      onerror = null;
+      onclose = null;
+      onmessage = null;
+      constructor() {
+        sockets.push(this);
+      }
+      close() {}
+    });
+    const link = new RelayLink(relayRoute({ v: 1, k, h, r: ["relay1.openmausbot.com"] })!, "token");
+    const stop = new AbortController();
+    const cancelled = link.fetch("/api/auth/session", { signal: stop.signal });
+    const other = link.fetch("/api/bots");
+    const reason = new Error("cancelled by the page");
+    stop.abort(reason);
+    await expect(cancelled).rejects.toBe(reason);
+    await vi.waitFor(() => expect(sockets).toHaveLength(1));
+    sockets[0].onclose?.({ code: 1006 });
+    await expect(other).rejects.toThrow();
+    await expect(cancelled).rejects.toBe(reason);
+    link.close();
+  });
 });

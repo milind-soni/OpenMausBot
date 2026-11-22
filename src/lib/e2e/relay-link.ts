@@ -97,8 +97,9 @@ export class RelayLink {
   }
 
   async fetch(path: string, request: RelayRequest = {}): Promise<Response> {
-    request.signal?.throwIfAborted();
-    const session = await this.#live();
+    const { signal } = request;
+    signal?.throwIfAborted();
+    const session = await (signal ? untilAborted(this.#live(), signal) : this.#live());
     const headers = new Headers(request.headers);
     headers.set("authorization", `Bearer ${this.#token}`);
     return streamFetch(() => session.open(), { ...request, path, headers });
@@ -122,4 +123,13 @@ export class RelayLink {
     dialing.then((session) => void session.closed.then(forget), forget);
     return dialing;
   }
+}
+
+/** `promise`, or `signal`'s reason as soon as it aborts; the promise itself goes on for anyone else waiting on it. */
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
 }
