@@ -368,9 +368,9 @@ export function createFirstHour(deps: FirstHourDeps) {
   }
 
   /** What was done, in the person's words, or undefined when nothing was. */
-  function doneLine(counts: Partial<ValueTally>, w: FirstHourWords): string | undefined {
+  function doneLine(counts: Partial<ValueTally>, w: FirstHourWords, sorted = w.sorted): string | undefined {
     const items = [
-      counts.sorted ? w.sorted(counts.sorted) : "",
+      counts.sorted ? sorted(counts.sorted) : "",
       counts.drafted ? w.drafted(counts.drafted) : "",
       counts.prepped ? w.prepped(counts.prepped) : "",
       counts.routines ? w.routines(counts.routines) : "",
@@ -391,7 +391,7 @@ export function createFirstHour(deps: FirstHourDeps) {
       return;
     }
     const w = words();
-    say(place.bot, place.threadId, w.recap(doneLine(counts, w)!, w.time(minutesSaved(counts))));
+    say(place.bot, place.threadId, w.recap(doneLine(counts, w, w.briefSorted)!, w.time(minutesSaved(counts))));
     mark({ recapAt: at });
   }
 

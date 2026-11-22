@@ -247,7 +247,7 @@ describe("a new Cloud's first hour", () => {
     s.set("2026-10-28T12:00:00Z");
     fh.tick();
     fh.tick();
-    expect(s.texts().filter((text) => text?.startsWith("So far"))).toEqual(["So far I've sorted 40 emails, drafted 6 replies and prepped 4 meetings: about 2 hours back."]);
+    expect(s.texts().filter((text) => text?.startsWith("So far"))).toEqual(["So far I've sorted 40 emails for your morning brief, drafted 6 replies and prepped 4 meetings: about 2 hours back."]);
     expect(fh.tally()).toEqual({ sorted: 40, drafted: 6, prepped: 4, routines: 0 });
   });
 
@@ -265,7 +265,7 @@ describe("a new Cloud's first hour", () => {
     expect(s.texts().filter((text) => text?.startsWith("So far"))).toEqual([]);
     s.store.appendMessage(s.thread(), { role: "bot", kind: "widget", text: "Pick one", turnId: "turn-1" });
     fh.tick();
-    expect(s.texts().at(-1)).toBe("So far I've sorted 29 emails: about 30 minutes back.");
+    expect(s.texts().at(-1)).toBe("So far I've sorted 29 emails for your morning brief: about 30 minutes back.");
   });
 
   it("counts a routine's posted results in the recap, and says nothing at all when nothing was done", () => {
