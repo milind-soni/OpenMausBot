@@ -64,6 +64,21 @@ export function phoneKeyCredential(patch) {
   };
 }
 
+/** The desktop's credential save has two callers: its own Settings (credential:set) and a paired phone's key, which takes
+ * the same save so it persists, and clears, exactly like one set here. The phone saver resolves `{ status, body }`. */
+export function serveCredentialSaves({ ipcMain, localOnly, setPhoneSaver, save }) {
+  ipcMain.handle("credential:set", localOnly("credential:set", (_event, name, value, options) => save(name, value, options)));
+  setPhoneSaver(async (patch) => {
+    const credential = phoneKeyCredential(patch);
+    if (!credential) return { status: 403, body: { error: "From a phone, only API keys can be changed. Change other settings on your computer." } };
+    try {
+      return { status: 200, body: await save(credential.name, credential.value, credential.options) };
+    } catch (error) {
+      return { status: Number.isInteger(error?.status) ? error.status : 503, body: { error: error instanceof Error ? error.message : String(error) } };
+    }
+  });
+}
+
 const DECIDER_ERRORS = Object.freeze({
   "serverError.decider.accountRequired": "native.decider.accountRequired",
   "serverError.decider.jevRejected": "native.decider.jevRejected",
