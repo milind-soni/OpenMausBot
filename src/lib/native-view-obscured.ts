@@ -11,9 +11,44 @@ const NATIVE_VIEW_OVERLAY_SELECTOR = [
   ".absolute",
 ].join(",");
 
+/** Rendered at all: a closed <details>' content, display:none, visibility:hidden or opacity 0 is not. */
+function rendered(candidate: HTMLElement, style: CSSStyleDeclaration): boolean {
+  const closed = candidate.closest("details:not([open])");
+  if (closed && !candidate.closest("summary")?.parentElement?.isSameNode(closed)) return false;
+  if (typeof candidate.checkVisibility === "function") return candidate.checkVisibility({ opacityProperty: true, visibilityProperty: true });
+  return style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity) !== 0;
+}
+
 /**
- * Electron's native views always paint above the renderer, so any intersecting overlay or popover counts, portals
- * included.
+ * Whether `candidate` paints above the native view's host where their rectangles meet: the topmost element at a few
+ * points of the overlap is the candidate or inside it. A sidebar under a maximised panel meets its rectangle but paints
+ * below it. Undefined where the page cannot hit-test there: no point answered (off screen or without layout), or the
+ * candidate takes no pointer events, which hit-testing passes through though it paints.
+ */
+function paintsAbove(candidate: HTMLElement, style: CSSStyleDeclaration, rect: DOMRect, hosts: readonly DOMRect[]): boolean | undefined {
+  if (typeof document.elementFromPoint !== "function" || style.pointerEvents === "none") return undefined;
+  let tested = false;
+  for (const host of hosts) {
+    const left = Math.max(rect.left, host.left);
+    const right = Math.min(rect.right, host.right);
+    const top = Math.max(rect.top, host.top);
+    const bottom = Math.min(rect.bottom, host.bottom);
+    if (left >= right || top >= bottom) continue;
+    const inset = (from: number, to: number, at: number) => from + Math.min(Math.max(1, (to - from) * at), to - from - 0.5);
+    const points = [[0.5, 0.5], [0.1, 0.1], [0.9, 0.1], [0.1, 0.9], [0.9, 0.9]].map(([x, y]) => [inset(left, right, x!), inset(top, bottom, y!)] as const);
+    for (const [x, y] of points) {
+      const hit = document.elementFromPoint(x, y);
+      if (!hit) continue;
+      tested = true;
+      if (hit === candidate || candidate.contains(hit)) return true;
+    }
+  }
+  return tested ? false : undefined;
+}
+
+/**
+ * Electron's native views always paint above the renderer, so an overlay or popover that paints above the view's host
+ * where they meet counts, portals included.
  */
 function rendererOverlayIntersectsNativeView() {
   const hosts = [...document.querySelectorAll<HTMLElement>("[data-native-view-host]")];
@@ -36,14 +71,15 @@ function rendererOverlayIntersectsNativeView() {
           '[aria-modal="true"], [role="dialog"], [role="menu"], [popover], [data-native-view-overlay]',
         );
       const zIndex = Number.parseInt(style.zIndex, 10);
+      const rect = candidate.getBoundingClientRect();
+      const visible = rendered(candidate, style);
+      const above = visible ? paintsAbove(candidate, style, rect, hostRects) : false;
       return {
-        rect: candidate.getBoundingClientRect(),
+        rect,
         explicit: explicitlyOverlay,
-        visible:
-          style.display !== "none" &&
-          style.visibility !== "hidden" &&
-          Number(style.opacity) !== 0,
+        visible,
         zIndex: Number.isFinite(zIndex) ? zIndex : null,
+        ...(above === undefined ? {} : { above }),
       };
     });
   return nativeViewOverlayIntersects(hostRects, candidates);

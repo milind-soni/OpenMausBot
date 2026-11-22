@@ -72,6 +72,21 @@ describe("review: a queued frame older than the snapshot's tail", () => {
   });
 });
 
+describe("a selected tail while its older page is still loading", () => {
+  it("does not append a queued historical frame after the newest reply", () => {
+    const rows = Array.from({ length: 31 }, (_, index) => ({ id: `r${index}`, at: index, parentId: index ? `r${index - 1}` : null,
+      role: index === 0 ? "user" : "bot", kind: "text", text: `r${index}` }) as Message);
+    const bot = { id: "b", threadId: "t", name: "B", messages: rows.slice(11), hasMore: true, activeLeafId: "r30", tasks: [] } as unknown as Bot;
+    let state: AppState = { ...initialState, bots: [bot], selectedId: "b", activeView: "chat", loadingOlder: { t: true } };
+    state = reducer(state, { type: "messageAdded", threadId: "t", message: rows[5]! });
+    expect(state.bots[0]!.messages.at(-1)?.id).toBe("r30");
+    expect(state.bots[0]!.activeLeafId).toBe("r30");
+    state = reducer(state, { type: "olderMessages", threadId: "t", generation: 0, before: "r11", messages: rows.slice(0, 11), hasMore: false });
+    expect(state.bots[0]!.messages).toEqual(rows);
+    expect(visibleMessages(state.bots[0]!)).toEqual(rows);
+  });
+});
+
 describe("review: the Computer panel's recently changed files on a tailed bot (opened from the Team map, no chat drawn)", () => {
   it("lists the same files as a whole page once the bot is selected and the page before its tail lands", async () => {
     const rows: Row[] = [];

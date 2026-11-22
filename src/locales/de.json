@@ -4103,5 +4103,7 @@
   "botAccess.cloud.serverPickHint": "Wähle einen benannten Server oder gib einen anderen SSH-Alias ein.",
   "botAccess.cloud.serverPickDefault": "Standardserver ({alias})",
   "botAccess.cloud.serverPickNone": "Kein Server gewählt",
-  "botAccess.cloud.serverPickOther": "Anderer SSH-Alias …"
+  "botAccess.cloud.serverPickOther": "Anderer SSH-Alias …",
+  "server.notify.handoff": "{who} wartet auf dich",
+  "serverError.signIn.expired": "Diese Anfrage ist bereits abgelaufen"
 }

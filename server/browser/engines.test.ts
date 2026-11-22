@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -49,6 +49,8 @@ function engines(options: RuntimeRouterOptions = {}) {
     },
     live: { open: vi.fn(async () => undefined), action: vi.fn(async () => "chrome"), has: vi.fn((viewerId: string) => viewerId === "v-chrome"), handBack: vi.fn(), closeForSession: vi.fn(), closeForOwner: vi.fn(), closeForBot: vi.fn(), closeAll: vi.fn() },
     stream: { open: vi.fn(), closeForSession: vi.fn(), closeForOwner: vi.fn(), closeForBot: vi.fn(), closeAll: vi.fn(), recheck: vi.fn() },
+    desktop: { open: vi.fn(), closeForSession: vi.fn(), closeForOwner: vi.fn(), closeForBot: vi.fn(), closeAll: vi.fn(), recheck: vi.fn() },
+    desktopView: vi.fn(() => true),
     close: vi.fn(async () => undefined),
   };
   const runtime = new RuntimeRouter(old as unknown as BrowserRuntime, chrome as unknown as ChromeEngine, options);
@@ -258,6 +260,21 @@ describe("the live view router", () => {
     expect(chrome.live.closeAll).toHaveBeenCalledOnce();
     expect(chrome.stream.closeAll).toHaveBeenCalledOnce();
     expect(oldLive.closeAll).toHaveBeenCalledOnce();
+    expect(chrome.desktop.recheck).toHaveBeenCalledOnce();
+    expect(chrome.desktop.closeForSession).toHaveBeenCalledWith("s");
+    expect(chrome.desktop.closeForOwner).toHaveBeenCalledWith("o");
+    expect(chrome.desktop.closeAll).toHaveBeenCalledOnce();
+  });
+
+  it("opens a desktop view only for a new-engine session on a server that runs browsers on a display", () => {
+    const { chrome, live } = engines();
+    const request = { botId: "a", owner: "o", person: "p", canOperate: true, req: {} as never, socket: {} as never, head: Buffer.alloc(0), isCurrent: () => true };
+    expect(live.desktop({ session: "s", spec: AGENT_BROWSER, ...request })).toBe(false);
+    chrome.desktopView.mockReturnValueOnce(false);
+    expect(live.desktop({ session: "s", spec: CHROME, ...request })).toBe(false);
+    expect(chrome.desktop.open).not.toHaveBeenCalled();
+    expect(live.desktop({ session: "s", spec: CHROME, ...request })).toBe(true);
+    expect(chrome.desktop.open).toHaveBeenCalledWith({ ...request, target: { session: "s", key: "bot:a" } });
   });
 
   it("streams, takes uploads for and serves downloads of new-engine sessions only", async () => {
@@ -356,5 +373,86 @@ describe("deleting a bot's browser on the desktop app, pane off", () => {
       await value.close();
       await removeTempDir(dataDir);
     }
+  });
+});
+
+describe("the new engine's desktop view", () => {
+  it.skipIf(process.platform === "win32")("never looks for bubblewrap while the setting is off, and looks once when it is on", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "omb-chrome-engine-"));
+    const bin = join(dataDir, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "Xvnc"), "", { mode: 0o755 });
+    let on = false;
+    const probeBwrap = vi.fn(() => "/usr/bin/bwrap");
+    const value = new ChromeEngine({ dataDir, host: "container", env: { PATH: bin }, platform: "linux", egressPort: async () => 0, idleMs: () => 180_000, egressNotice: () => null, cloudDisplay: () => on, probeBwrap });
+    try {
+      expect(value.summary()).not.toHaveProperty("desktopView");
+      expect(value.desktopView()).toBe(false);
+      expect(probeBwrap).not.toHaveBeenCalled();
+      on = true;
+      value.desktopView();
+      value.desktopView();
+      expect(probeBwrap).toHaveBeenCalledTimes(1);
+    } finally {
+      await value.close();
+      await removeTempDir(dataDir);
+    }
+  });
+
+  it("stays inert on a server without Xvnc, the setting on: no lookup at start, no bubblewrap probe, no desktop view", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "omb-chrome-engine-"));
+    const probeBwrap = vi.fn(() => "/usr/bin/bwrap");
+    const value = new ChromeEngine({ dataDir, host: "container", env: { PATH: join(dataDir, "no-such-bin") }, platform: "linux", egressPort: async () => 0, idleMs: () => 180_000, egressNotice: () => null, cloudDisplay: () => true, probeBwrap });
+    try {
+      expect(value.desktopView()).toBe(false);
+      expect(value.summary()).not.toHaveProperty("desktopView");
+      expect(probeBwrap).not.toHaveBeenCalled();
+      expect(value.displays.numbers()).toEqual([]);
+    } finally {
+      await value.close();
+      await removeTempDir(dataDir);
+    }
+  });
+});
+
+describe("where a bot's browser shows: a desktop pane, a private display, or pictures of a headless Chrome", () => {
+  const local = { kind: "local" } as Backend;
+  const engines: ChromeEngine[] = [];
+  const folders: string[] = [];
+  afterEach(async () => {
+    for (const engine of engines.splice(0)) await engine.close();
+    for (const folder of folders.splice(0)) await removeTempDir(folder);
+  });
+
+  /** An engine on `host` with Xvnc on PATH (or not), the display setting, and the desktop app's panes when it has them. */
+  function surfaceOf({ host, xvnc = true, cloudDisplay, pane }: { host: "desktop" | "container"; xvnc?: boolean; cloudDisplay: boolean; pane?: { available: boolean; wanted: boolean } }) {
+    const dataDir = mkdtempSync(join(tmpdir(), "omb-chrome-engine-"));
+    folders.push(dataDir);
+    const bin = join(dataDir, "bin");
+    mkdirSync(bin);
+    if (xvnc) writeFileSync(join(bin, "Xvnc"), "", { mode: 0o755 });
+    const paneOption = pane ? { backend: { kind: "pane", available: pane.available, fallBackTo: () => undefined, used: () => false } as unknown as PaneBackend, wanted: () => pane.wanted } : undefined;
+    const engine = new ChromeEngine({
+      dataDir, host, env: { PATH: bin }, platform: "linux", egressPort: async () => 0, idleMs: () => 180_000, egressNotice: () => null,
+      cloudDisplay: () => cloudDisplay, probeBwrap: () => "/usr/bin/bwrap", ...(paneOption ? { pane: paneOption } : {}),
+    });
+    engines.push(engine);
+    const backend = backendFor(local, paneOption);
+    return backend !== local ? "pane" : engine.desktopView() ? "display" : "pictures";
+  }
+
+  it.skipIf(process.platform === "win32")("takes the pane on the desktop app when it is on, and never a display there", () => {
+    expect(surfaceOf({ host: "desktop", cloudDisplay: false, pane: { available: true, wanted: true } })).toBe("pane");
+    expect(surfaceOf({ host: "desktop", cloudDisplay: true, pane: { available: true, wanted: true } })).toBe("pane");
+    expect(surfaceOf({ host: "desktop", cloudDisplay: true, pane: { available: true, wanted: false } })).toBe("pictures");
+    expect(surfaceOf({ host: "desktop", cloudDisplay: true, pane: { available: false, wanted: true } })).toBe("pictures");
+  });
+
+  it.skipIf(process.platform === "win32")("takes a display on a server with the setting on and Xvnc, and pictures otherwise", () => {
+    expect(surfaceOf({ host: "container", cloudDisplay: true })).toBe("display");
+    expect(surfaceOf({ host: "container", cloudDisplay: true, xvnc: false })).toBe("pictures");
+    expect(surfaceOf({ host: "container", cloudDisplay: false })).toBe("pictures");
+    // A server has no app to host a pane, so the pane setting on it changes nothing.
+    expect(surfaceOf({ host: "container", cloudDisplay: true, pane: { available: false, wanted: true } })).toBe("display");
   });
 });
