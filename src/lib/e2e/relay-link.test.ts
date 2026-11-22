@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { b64u } from "./bytes.ts";
-import { relayRoute } from "./relay-link.ts";
+import { RelayLink, relayRoute } from "./relay-link.ts";
 
 const k = b64u(new Uint8Array(65).fill(4));
 const h = b64u(new Uint8Array(16).fill(1));
@@ -26,5 +26,23 @@ describe("relayRoute", () => {
       { v: 1, k, h, r: ["evil.example"] },
       { v: 1, k, h, r: Array.from({ length: 5 }, (_, i) => `relay${i + 1}.openmausbot.com`) },
     ]) expect(relayRoute(bad), JSON.stringify(bad)).toBeNull();
+  });
+});
+
+describe("RelayLink", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("refuses a request whose signal is already aborted with its reason, without dialing the relay", async () => {
+    let dials = 0;
+    vi.stubGlobal("WebSocket", class {
+      constructor() {
+        dials += 1;
+        throw new Error("relay unreachable");
+      }
+    });
+    const link = new RelayLink(relayRoute({ v: 1, k, h, r: ["relay1.openmausbot.com"] })!, "token");
+    const reason = new Error("cancelled by the page");
+    await expect(link.fetch("/api/auth/session", { signal: AbortSignal.abort(reason) })).rejects.toBe(reason);
+    expect(dials).toBe(0);
   });
 });

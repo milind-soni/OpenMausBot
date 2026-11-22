@@ -97,6 +97,7 @@ export class RelayLink {
   }
 
   async fetch(path: string, request: RelayRequest = {}): Promise<Response> {
+    request.signal?.throwIfAborted();
     const session = await this.#live();
     const headers = new Headers(request.headers);
     headers.set("authorization", `Bearer ${this.#token}`);
