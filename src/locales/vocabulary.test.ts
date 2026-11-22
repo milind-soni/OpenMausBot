@@ -61,6 +61,7 @@ const ALLOWED: ReadonlyArray<{ file: string; snippet?: string; why: string }> = 
   { file: "src/lib/boat-offer.ts", snippet: "MausBot introduced me", why: "the email a person sends Boat to claim its credit" },
   { file: "server/workspace-backup.ts", snippet: "OMB-WORKSPACE-1", why: "a backup file's format marker" },
   { file: "electron/company-backups.mjs", snippet: "OMB-WORKSPACE-1", why: "a backup file's format marker" },
+  { file: "server/drivers/t3code.ts", why: "the T3 Code engine names the app it runs in, as every engine names its own" },
 ];
 
 function* sources(dir: string): Generator<string> {
