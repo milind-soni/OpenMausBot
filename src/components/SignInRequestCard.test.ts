@@ -281,6 +281,7 @@ describe("PinnedSignInSlot", () => {
     }
     expect(isPinnedSignIn({ ...card(), kind: "text", signIn: undefined })).toBe(false);
     expect(isPinnedSignIn({ ...card(), signIn: undefined })).toBe(false);
+    expect(isPinnedSignIn(card({ instruction: "Approve the payment" }))).toBe(false);
   });
 
   it("renders a waiting card in the reserved slot, in-flow and still answering", () => {

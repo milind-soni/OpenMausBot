@@ -1,9 +1,10 @@
-import { signInCardWaits } from "../../shared/sign-in-request";
+import { isHandoff, signInCardWaits } from "../../shared/sign-in-request";
 import type { Bot, Message } from "@/state/store";
 import { SignInRequestCard } from "./SignInRequestCard";
 
+/** A site sign-in card that still waits. A handoff card keeps its place in the chat, live picture and all. */
 export function isPinnedSignIn(message: Message): boolean {
-  return message.kind === "signin" && message.signIn !== undefined && signInCardWaits(message.signIn);
+  return message.kind === "signin" && message.signIn !== undefined && !isHandoff(message.signIn) && signInCardWaits(message.signIn);
 }
 
 export const NO_PINNED_SIGN_INS: ReadonlySet<string> = new Set();
