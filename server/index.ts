@@ -209,8 +209,7 @@ import {
   type SteerOutcome,
   newId,
 } from "./contracts.ts";
-import { httpStatusOf } from "./drivers/engine-errors.ts";
-import { classifyError, RETRY_MAX_ATTEMPTS } from "./drivers/retry.ts";
+import { RETRY_MAX_ATTEMPTS } from "./drivers/retry.ts";
 import { chosenBackups, recoveryCapabilityError, startupBackups } from "./automatic-recovery.ts"; import { outOfProcesses } from "./process-shortage.ts";
 import { createQuotaSwitchHost } from "./host/quota-switch.ts"; import { quotaSwitchEnabled } from "./quota-switch.ts"; import { createPeerLimitResend } from "./host/peer-limit-resend.ts"; import { createRoomLimitTakeover } from "./host/room-limit-takeover.ts";
 import { decodeGeneratedImage } from "./generated-image.ts";
@@ -328,7 +327,7 @@ import { recordLiveCall, spokenLineFields, titleLiveCall } from "./live-call-rec
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { createTtsRoutes } from "./routes/tts.ts";
 import { turnStartLogLine } from "./turn-log.ts";
-import { TurnStops, outwardActions, stoppedTurnOutcome, turnEvidence } from "./turn-outcome.ts";
+import { TurnStops, logFailedTurn, outwardActions, stoppedTurnOutcome, turnEvidence } from "./turn-outcome.ts";
 import { buildRecoveryText, buildTurnContext, engineIsFresh, replaysNatively } from "./turn-context.ts";
 import { Handoffs, handedStateUsable, isContextMessage, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts"; import { isFreshStart, sinceFreshStart } from "./fresh-start.ts";
 import { extractReplayImages, extractTurnImages, nativeClips, turnMedia, videoFramesWithin } from "./turn-images.ts";
@@ -5437,8 +5436,7 @@ async function scheduleTurnDigest(input: {
   turnId: string;
   driverKind: string | undefined;
   instanceId?: string;
-  reply: string;
-  error?: string;
+  reply: string; error?: string;
   from?: Message["from"];
   isCurrent: () => boolean;
   usage?: { input: number; output: number; cachedInput?: number; costUsd?: number | null };
@@ -5462,8 +5460,7 @@ async function scheduleTurnDigest(input: {
       durationMs: startedAt ? Math.max(0, at - startedAt) : 0,
       activities,
       memory,
-      reply: input.reply,
-      ...(input.error ? { error: input.error } : {}),
+      reply: input.reply, ...(input.error ? { error: input.error } : {}),
       ...(input.usage ? { usage: input.usage } : {}),
       hookCoverage: coverageForDriver(input.driverKind, toolEvidence(activities, input.turnId), activities.some(m => m.kind === "activity" && m.turnId === input.turnId && m.tool?.itemId)),
     });
@@ -6626,9 +6623,7 @@ bus.subscribe((event: RuntimeEvent) => {
         pushStoppedTurn(event.turnId);
         break;
       }
-      // Only the status and the failure's class: a provider's words can name the account, and the server log is read by more people than the chat.
-      { const status = httpStatusOf(event.message); console.warn(`[omb-turn] thread=${event.threadId} turn=${event.turnId ?? "none"} failed: ${classifyError({ text: event.message }).reason}${status ? ` HTTP ${status}` : ""}`); }
-      landParkedFiles(); // above the failure row, which stays the last, retryable line
+      logFailedTurn(event); landParkedFiles(); // above the failure row, which stays the last, retryable line
       pushMessage({ role: "bot", kind: "activity", tool: failedTurnTool(event.message, event) });
       if (event.setup && bot) store.setTaskActivity(bot.id, event.threadId, "dead");
       break;
@@ -6750,8 +6745,7 @@ bus.subscribe((event: RuntimeEvent) => {
             botName: bot.name,
             threadId: event.threadId,
             turnId: completedTurnId,
-            succeeded: event.ok,
-            ...(failed ? { error: failureDetail } : {}),
+            succeeded: event.ok, ...(failed ? { error: failureDetail } : {}),
             driverKind: registry.get(selection.instanceId)?.driverKind,
             instanceId: selection.instanceId,
             reply,
