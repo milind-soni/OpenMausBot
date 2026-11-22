@@ -1,6 +1,7 @@
 // EventSource hides SSE comment keepalives, so liveness comes from the server's visible `ping` frame.
 import type { ServerFrame } from "../../shared/wire";
 import { cloudAsleep, markCloudAsleep, onCloudPower, sleepingFrame } from "./cloud-power";
+import { relayEventSource, relayLink } from "./relay-server";
 import { recordBotTextMessage, recordRuntimeEvent } from "./voice-latency-probe";
 import { noteTurnEvent } from "@/state/turn-status";
 import { forgetLiveReplies, noteLiveReplyEvent, noteLiveReplyMessage } from "@/state/live-reply";
@@ -156,22 +157,23 @@ function browserPlatform(overrides: Partial<LiveEventsPlatform>): LiveEventsPlat
   const NativeEventSource = globalThis.EventSource;
   const createEventSource =
     overrides.createEventSource ??
-    (!NativeEventSource
-      ? undefined
-      : (url: string) => {
-          const native = new NativeEventSource(url);
-          const adapter: LiveEventSourceLike = {
-            onopen: null,
-            onerror: null,
-            onmessage: null,
-            close: () => native.close(),
-          };
-          native.onopen = () => adapter.onopen?.();
-          native.onerror = () => adapter.onerror?.();
-          native.onmessage = (event) => adapter.onmessage?.(event);
-          return adapter;
-        });
-  if (!createEventSource) return null;
+    ((url: string) => {
+      const relay = relayLink();
+      if (relay) return relayEventSource(relay, url);
+      if (!NativeEventSource) throw new Error("no EventSource");
+      const native = new NativeEventSource(url);
+      const adapter: LiveEventSourceLike = {
+        onopen: null,
+        onerror: null,
+        onmessage: null,
+        close: () => native.close(),
+      };
+      native.onopen = () => adapter.onopen?.();
+      native.onerror = () => adapter.onerror?.();
+      native.onmessage = (event) => adapter.onmessage?.(event);
+      return adapter;
+    });
+  if (!overrides.createEventSource && !NativeEventSource && !relayLink()) return null;
 
   const browserWindow = globalThis.window;
   const browserDocument = globalThis.document;
