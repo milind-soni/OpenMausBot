@@ -647,6 +647,8 @@ export class AppTriggerManager {
   private async reconcileOne(trigger: StoredTrigger, bindings: Map<string, BrokerInventory["triggers"][number]>, accounts: ConnectedApps | null): Promise<void> {
     // Its bot is gone: paused here, so Composio stops sending what no one would run.
     if (trigger.enabled && this.options.botState(trigger.botId) === "missing") trigger.enabled = false;
+    const allowed = this.botMayUse(trigger.botId, trigger.app, trigger.accountId);
+    if (!allowed) this.options.runs.cancelQueued(trigger.id, "Its bot may no longer use this account, so this event's run did not start");
     const account = accounts?.[trigger.app]?.accounts.find((candidate) => candidate.id === trigger.accountId);
     if (accounts && (!account || !active(account.status))) {
       if (trigger.problem?.kind !== "reconnect") trigger.problem = { kind: "reconnect", at: this.now() };
@@ -662,7 +664,6 @@ export class AppTriggerManager {
     }
     trigger.remote = { triggerId: binding.triggerId, state: "active", syncedAt: this.now() };
     // Kept, not re-stamped, while the account stays off the bot's list, so each pass does not announce it again.
-    const allowed = this.botMayUse(trigger.botId, trigger.app, trigger.accountId);
     if (trigger.problem?.kind === "error" && (allowed || trigger.problem.text !== ACCOUNT_NOT_ALLOWED)) delete trigger.problem;
     if (!allowed && !trigger.problem) trigger.problem = { kind: "error", text: ACCOUNT_NOT_ALLOWED, at: this.now() };
   }

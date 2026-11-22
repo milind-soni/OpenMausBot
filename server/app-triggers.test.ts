@@ -564,6 +564,18 @@ describe("a bot limited to some accounts of an app", () => {
     expect(triggers.get(trigger.id)?.problem).toBeUndefined();
   });
 
+  it("cancels runs still queued when the bot loses the account", async () => {
+    let allowed: string[] | undefined;
+    const triggers = manager({ accountLimit: () => allowed });
+    const trigger = await triggers.create({ botId: "bot-1", name: "Sales", prompt: "Draft a reply.", app: "gmail", event: "GMAIL_NEW_GMAIL_MESSAGE", account: "sales" });
+    await broker.deliver(trigger.remote.triggerId!, { subject: "Hello", sender: "j@acme.com" }, "msg_q1");
+    await drain(triggers);
+    expect(runsOf(trigger.id)).toMatchObject([{ status: "queued" }]);
+    allowed = [support];
+    await triggers.reconcile();
+    expect(runsOf(trigger.id)).toMatchObject([{ status: "cancelled", error: expect.stringContaining("may no longer use this account") }]);
+  });
+
   it("lists only the accounts the bot may use in its event list", async () => {
     const client = brokerClient(() => ({ url: broker.url, token: owner.token }));
     const bot = { connectorScopes: { apps: { gmail: "read" as const }, accounts: { gmail: [support] } } };
