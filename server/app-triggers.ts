@@ -166,6 +166,7 @@ export interface AppTriggerPatch {
 const utcDay = (at: number) => new Date(at).toISOString().slice(0, 10);
 const active = (status: string) => /^active$/i.test(status);
 const ACCOUNT_NOT_ALLOWED = "Its bot may no longer use this account. Allow it again under the bot's Access settings, or make the automation for an account the bot may use.";
+const QUEUED_RUN_REFUSED = "Its bot may no longer use this account, so this event's run did not start";
 const names = (accounts: Array<{ id: string; alias?: string }>) => accounts.map((account) => account.alias ?? account.id).join(", ");
 
 function cleanFilter(filter: AppTriggerFilter | null | undefined): AppTriggerFilter | undefined {
@@ -427,6 +428,12 @@ export class AppTriggerManager {
     });
   }
 
+  /** Why a queued run of this automation may not start now, checked as it starts: its bot lost the account since the event came in. */
+  runRefusal(id: string): string | null {
+    const trigger = this.triggers.find((candidate) => candidate.id === id);
+    return trigger && !this.botMayUse(trigger.botId, trigger.app, trigger.accountId) ? QUEUED_RUN_REFUSED : null;
+  }
+
   /** A test event marked as one, sent through the service's real queue when the automation has its copy there. */
   async runNow(id: string): Promise<{ via: "service" | "here"; runId?: string } | null> {
     const trigger = this.triggers.find((candidate) => candidate.id === id);
@@ -648,7 +655,7 @@ export class AppTriggerManager {
     // Its bot is gone: paused here, so Composio stops sending what no one would run.
     if (trigger.enabled && this.options.botState(trigger.botId) === "missing") trigger.enabled = false;
     const allowed = this.botMayUse(trigger.botId, trigger.app, trigger.accountId);
-    if (!allowed) this.options.runs.cancelQueued(trigger.id, "Its bot may no longer use this account, so this event's run did not start");
+    if (!allowed) this.options.runs.cancelQueued(trigger.id, QUEUED_RUN_REFUSED);
     const account = accounts?.[trigger.app]?.accounts.find((candidate) => candidate.id === trigger.accountId);
     if (accounts && (!account || !active(account.status))) {
       if (trigger.problem?.kind !== "reconnect") trigger.problem = { kind: "reconnect", at: this.now() };

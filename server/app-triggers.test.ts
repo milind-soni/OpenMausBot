@@ -576,6 +576,23 @@ describe("a bot limited to some accounts of an app", () => {
     expect(runsOf(trigger.id)).toMatchObject([{ status: "cancelled", error: expect.stringContaining("may no longer use this account") }]);
   });
 
+  it("refuses a queued run as it starts, before any reconcile, even while the service is unavailable", async () => {
+    let allowed: string[] | undefined;
+    let service: ReturnType<AppTriggerManagerOptions["service"]> = { available: true };
+    const triggers = manager({ accountLimit: () => allowed, service: () => service });
+    const trigger = await triggers.create({ botId: "bot-1", name: "Sales", prompt: "Draft a reply.", app: "gmail", event: "GMAIL_NEW_GMAIL_MESSAGE", account: "sales" });
+    await broker.deliver(trigger.remote.triggerId!, { subject: "Hello", sender: "j@acme.com" }, "msg_q2");
+    await drain(triggers);
+    expect(runsOf(trigger.id)).toMatchObject([{ status: "queued" }]);
+    expect(triggers.runRefusal(trigger.id)).toBeNull();
+    allowed = [support];
+    service = { available: false, reason: "unavailable" };
+    expect(triggers.runRefusal(trigger.id)).toContain("may no longer use this account");
+    allowed = undefined;
+    expect(triggers.runRefusal(trigger.id)).toBeNull();
+    expect(triggers.runRefusal("no-such-automation")).toBeNull();
+  });
+
   it("lists only the accounts the bot may use in its event list", async () => {
     const client = brokerClient(() => ({ url: broker.url, token: owner.token }));
     const bot = { connectorScopes: { apps: { gmail: "read" as const }, accounts: { gmail: [support] } } };

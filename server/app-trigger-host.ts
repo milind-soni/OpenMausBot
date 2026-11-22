@@ -228,6 +228,8 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
     submit,
     undo: (args: { botId: string; threadId: string; requestId: string }) => requests.undo(args),
     isApp: (id: string) => manager.get(id) !== null,
+    /** For the run scheduler, right before a queued run starts: why this app-event run may not. */
+    runRefusal: (run: { webhookId?: string; eventSource?: string }) => (run.eventSource === "app" && run.webhookId ? manager.runRefusal(run.webhookId) : null),
     start: () => manager.start(),
     stop: () => manager.stop(),
     /** Access to the service changed (the desktop handed its token over, or a Cloud registered). */
