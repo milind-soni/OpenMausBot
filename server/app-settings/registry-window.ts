@@ -36,6 +36,8 @@ export function windowEntries(windowPref: WindowPref): SettingEntry[] {
       `${PLACE_SWATCHES.join(", ")} or none`, { says: (swatch: string) => (swatch === "none" ? "Take the colour off this place's sidebar" : `Tint this place's sidebar ${swatch}`) }),
     windowPref("general.followUp", "Follow-up while a bot works", "What sending does while a bot is busy: steer its current run, or queue the message.", "send-key", ["follow up", "steer", "queue"], "steer or queue",
       { says: (choice: "steer" | "queue") => (choice === "steer" ? "Send follow-ups into the bot's current run" : "Queue follow-ups until the bot's run ends") }),
+    flag("general.sendAfterDictation", "Send when dictation stops", "Stopping the composer's microphone sends what was said (this device).", "send-after-dictation",
+      ["dictation", "auto send", "auto submit", "voice input", "microphone"], "Send the message when dictation stops", "Keep dictated text in the box until you send it"),
     flag("general.finishedNotifications", "Notifications on this device", "A system notification when a bot finishes or needs you; turning it on asks the system first.", "notifications", ["notify", "system notifications", "desktop notifications"],
       "Show a system notification when a bot finishes or needs you", "Stop system notifications from bots"),
     flag("general.notificationFeed", "Notification feed", "Keep a feed of what bots did in the notifications panel.", "notifications", ["feed", "notification feed", "inbox"],

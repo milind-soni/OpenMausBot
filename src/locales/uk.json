@@ -2660,6 +2660,8 @@
   "place.view.localUnavailable.short": "Поки не можна використати",
   "place.view.autoTeam.short": "Спільний",
   "pro.name": "MausBot Cloud",
+  "settings.sendAfterDictation.subtitle": "Зупинка мікрофона надсилає сказане. Esc зупиняє без надсилання.",
+  "settings.sendAfterDictation.title": "Надсилати після диктування",
   "settings.sendKey.title": "Клавіша надсилання повідомлень",
   "settings.sendKey.subtitle": "Оберіть Shift+Enter або {key}, щоб Enter починав новий рядок, — зручно, коли метод введення підтверджує текст клавішею Enter, як-от під час введення японською. {key} надсилає за будь-якого вибору. Лише на цьому пристрої.",
   "call.live.disclosure": "Live-дзвінок надсилає ваш голос в OpenAI разом з останніми повідомленнями чату, відповідями бота та подробицями будь-якого погодження, яке він просить. Ключ OpenAI залишається на вашому комп’ютері.",

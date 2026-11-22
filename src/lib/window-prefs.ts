@@ -13,6 +13,7 @@ import { finishedNotificationsEnabled, notificationFeedEnabled, notificationSoun
 import { requestNotificationPermission } from "./notify";
 import { choosePlaceColor } from "./place-look";
 import { setShowRunCard, showRunCard } from "./run-card-preferences";
+import { sendsAfterDictation, setSendAfterDictation } from "./send-after-dictation";
 import { readSendKey, setSendKey } from "./send-key";
 import { loadPinnedCircles, loadSidebarToolsLayout, loadUniversalPins, setPinnedCircles, setSidebarToolsLayout, setUniversalPins } from "./sidebar-preferences";
 import { applySkinChoice, readSkinChoice } from "./skins";
@@ -76,6 +77,7 @@ const PREFS: { [I in WindowPrefId]: Pref<I> } = {
     write: (swatch) => choosePlaceColor(swatch === "none" ? null : swatch),
   },
   "general.followUp": { read: () => readFollowUpDefault(), write: (choice) => setFollowUpDefault(choice) },
+  "general.sendAfterDictation": { read: () => sendsAfterDictation(), write: (on) => setSendAfterDictation(on) },
   "general.finishedNotifications": {
     read: () => finishedNotificationsEnabled(),
     // As the row does: turning it on asks the system for permission first.

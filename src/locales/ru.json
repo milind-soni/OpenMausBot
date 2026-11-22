@@ -1421,6 +1421,8 @@
   "settings.font.inter": "Inter",
   "settings.font.poppins": "Poppins",
   "settings.font.serif": "С засечками",
+  "settings.sendAfterDictation.subtitle": "Остановка микрофона отправляет сказанное. Esc останавливает без отправки.",
+  "settings.sendAfterDictation.title": "Отправлять после диктовки",
   "settings.sendKey.title": "Отправлять сообщения с помощью",
   "settings.sendKey.subtitle": "Выберите Shift+Enter или {key}, чтобы Enter вместо этого начинал новую строку. Это удобно, когда метод ввода подтверждает текст клавишей Enter, как при японском вводе. {key} отправляет выбранный вариант. Только на этом устройстве.",
   "settings.userBubbles.title": "Окрашивать мои сообщения",

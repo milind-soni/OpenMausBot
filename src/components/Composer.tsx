@@ -14,6 +14,7 @@ import { intakeFilesWithNotice } from "@/lib/attach-notice";
 import { activeLocale, t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { isDictationToggle, isMacPlatform } from "@/lib/keyboard-shortcuts";
+import { useSendAfterDictation } from "@/lib/send-after-dictation";
 import { imeComposing, sendKeyLabel, sendsMessage, useSendKey } from "@/lib/send-key";
 import { alternateSend, alternateSendLabel, useFollowUpDefault } from "@/lib/follow-up"; import { followUpChoices, resolveFollowUp, type FollowUp } from "../../shared/follow-up";
 import {
@@ -227,7 +228,9 @@ export function Composer({
     },
     [text, editText, editAttachments],
   );
-  const { recording, ready: micReady, speechError, toggle: toggleMic, stop: stopDictation } = useComposerDictation({ draftId, text, onText: editText });
+  const sendAfterDictation = useSendAfterDictation();
+  const { recording, ready: micReady, speechError, toggle: toggleMic, stop: stopDictation } = useComposerDictation({
+    draftId, text, onText: editText, onDone: sendAfterDictation ? () => send() : undefined });
   const micShown = !locked && !busy && micReady;
   const [caret, setCaret] = useState(0);
   const shellRef = useRef<HTMLDivElement>(null);
@@ -858,6 +861,7 @@ export function Composer({
               if (e.key === "Escape") {
                 e.preventDefault();
                 setDismissedSlashAt(slash?.start ?? null);
+                if (recording) stopDictation();
                 return;
               }
             }
@@ -876,6 +880,7 @@ export function Composer({
               if (e.key === "Escape") {
                 e.preventDefault();
                 setDismissedAt(mention?.start ?? null);
+                if (recording) stopDictation();
                 return;
               }
             }

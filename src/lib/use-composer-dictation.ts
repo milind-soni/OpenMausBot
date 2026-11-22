@@ -5,10 +5,12 @@ import { useStoreSelector } from "@/state/store-select";
 import { t } from "./i18n";
 import { listensHere, recordsClips, speechBridge } from "./speech";
 
-export function useComposerDictation({ draftId, text, onText }: {
+export function useComposerDictation({ draftId, text, onText, onDone }: {
   draftId: string;
   text: string;
   onText: (text: string) => void;
+  /** Dictation that put words in the draft ended as the person meant: they stopped the mic, or the speech completed. */
+  onDone?: () => void;
 }) {
   const { capabilities } = useDesktopCapabilities();
   const config = useStoreSelector((state) => state.config);
@@ -22,6 +24,13 @@ export function useComposerDictation({ draftId, text, onText }: {
   const session = useRef({ draftId: "", base: "" });
   const cancel = useRef<(() => void) | null>(null);
   const finish = useRef<(() => void) | null>(null);
+  // Counted, not called from the speech callback: the effect runs after the render that holds the last words.
+  const [heard, setHeard] = useState(0);
+  const done = useRef(onDone);
+  done.current = onDone;
+  useEffect(() => {
+    if (heard) done.current?.();
+  }, [heard]);
   const stop = useCallback(() => {
     cancel.current?.();
     setRecording(false);
@@ -46,7 +55,14 @@ export function useComposerDictation({ draftId, text, onText }: {
       setRecording(false);
     };
     cancel.current = cancelSession;
-    finish.current = recordsClips(bridge) ? () => void bridge.speechFinish?.() : null;
+    const spoke = () => {
+      // Only the words as dictated: a draft a picker or an edit changed since the last words is not sent.
+      if (lastText !== base && draft.current.text === lastText) setHeard((count) => count + 1);
+    };
+    finish.current = recordsClips(bridge) ? () => void bridge.speechFinish?.() : () => {
+      cancelSession();
+      spoke();
+    };
     const offTranscript = bridge.onSpeechTranscript((line) => {
       if (!active || draft.current.id !== draftId) return;
       if (draft.current.text !== lastText) {
@@ -62,6 +78,7 @@ export function useComposerDictation({ draftId, text, onText }: {
       if (!active || draft.current.id !== draftId) return;
       active = false;
       setRecording(false);
+      if (code === 0) spoke();
       if (code === 2) {
         setSpeechError(t("composer.dictation.macOnly"));
       } else if (code === 1) {

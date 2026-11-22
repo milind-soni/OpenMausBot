@@ -1564,6 +1564,8 @@
   "settings.font.inter": "Inter",
   "settings.font.poppins": "Poppins",
   "settings.font.serif": "セリフ体",
+  "settings.sendAfterDictation.subtitle": "マイクを止めると、話した内容を送信します。Esc で止めると送信しません。",
+  "settings.sendAfterDictation.title": "音声入力を停止したら送信",
   "settings.sendKey.title": "メッセージの送信キー",
   "settings.sendKey.subtitle": "日本語入力のように Enter で変換を確定する場合は、Shift+Enter か {key} を選ぶと Enter で改行できます。どの設定でも {key} で送信できます。このデバイスだけの設定です。",
   "settings.followUp.title": "ボットの作業中に送信したとき",

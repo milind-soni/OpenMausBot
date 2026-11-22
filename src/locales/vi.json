@@ -974,6 +974,8 @@
   "settings.font.inter": "Inter",
   "settings.font.poppins": "Poppins",
   "settings.font.serif": "Serif",
+  "settings.sendAfterDictation.subtitle": "Dừng micrô sẽ gửi những gì bạn đã nói. Esc dừng mà không gửi.",
+  "settings.sendAfterDictation.title": "Gửi khi dừng đọc chính tả",
   "settings.sendKey.title": "Gửi tin nhắn bằng",
   "settings.sendKey.subtitle": "Chọn Shift+Enter hoặc {key} để phím Enter xuống dòng mới, tiện lợi khi bộ gõ của bạn xác nhận văn bản bằng Enter, như bộ gõ tiếng Nhật. Phím {key} sẽ gửi tin nhắn dù bạn chọn tùy chọn nào. Chỉ áp dụng trên thiết bị này.",
   "settings.userBubbles.title": "Tô màu tin nhắn của tôi",

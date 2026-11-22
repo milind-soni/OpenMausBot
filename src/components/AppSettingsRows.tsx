@@ -19,6 +19,7 @@ import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { SIMPLE_ONLY } from "@/lib/simple-only";
 import { setPinnedCircles, setUniversalPins, usePinnedCircles, useUniversalPins } from "@/lib/sidebar-preferences";
 import { setShowRunCard, useShowRunCard } from "@/lib/run-card-preferences";
+import { setSendAfterDictation, useSendAfterDictation } from "@/lib/send-after-dictation";
 import { parseSendKey, SEND_KEYS, sendKeyLabel, setSendKey, useSendKey } from "@/lib/send-key";
 import { alternateSendLabel, parseFollowUpDefault, setFollowUpDefault, useFollowUpDefault } from "@/lib/follow-up";
 import { effectiveLanguage, setLanguageChoice, useLanguageChoice } from "@/lib/language-preference";
@@ -243,6 +244,15 @@ export function SendKeyRow({ simple = false }: { simple?: boolean }) {
           <option key={mode} value={mode}>{sendKeyLabel(mode)}</option>
         ))}
       </Select>
+    </SettingRow>
+  );
+}
+
+export function SendAfterDictationRow() {
+  const on = useSendAfterDictation();
+  return (
+    <SettingRow title={t("settings.sendAfterDictation.title")} subtitle={t("settings.sendAfterDictation.subtitle")}>
+      <Switch checked={on} aria-label={t("settings.sendAfterDictation.title")} onClick={() => setSendAfterDictation(!on)} />
     </SettingRow>
   );
 }

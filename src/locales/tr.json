@@ -974,6 +974,8 @@
   "settings.font.inter": "Inter",
   "settings.font.poppins": "Poppins",
   "settings.font.serif": "Serif",
+  "settings.sendAfterDictation.subtitle": "Mikrofonu durdurmak söylediklerinizi gönderir. Esc göndermeden durdurur.",
+  "settings.sendAfterDictation.title": "Dikte bitince gönder",
   "settings.sendKey.title": "Mesajları şununla gönder",
   "settings.sendKey.subtitle": "Enter'ın yeni satır başlatması için Shift+Enter veya {key} seçin; giriş yönteminiz metni Japonca girişte olduğu gibi Enter ile onaylıyorsa kullanışlıdır. Hangisini seçerseniz seçin {key} de gönderir. Yalnızca bu cihazda.",
   "settings.userBubbles.title": "Mesajlarımı renklendir",

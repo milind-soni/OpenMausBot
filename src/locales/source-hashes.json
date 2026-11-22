@@ -4096,7 +4096,9 @@
       "server.reach.place.thisCloud": "9d7319debd5cbf68bbf4d9455f9c4f78d9168a490f936d60f455ca673fa0e3da",
       "server.reach.place.cloudDesktop": "f5720ce8c1477b72dd219523d39dfe814771b693627de08bca13ef631370d579",
       "server.notify.handoff": "9e45c29c7a067fc2b830ef5647b7dcd0962f2dbb438a62792c3a09f1d7d48ddb",
-      "serverError.signIn.expired": "a3b5091baeded57a62e8410a1e0e9df538f73161f3613c3a879a3bf386c2d169"
+      "serverError.signIn.expired": "a3b5091baeded57a62e8410a1e0e9df538f73161f3613c3a879a3bf386c2d169",
+      "settings.sendAfterDictation.subtitle": "4cf9bacafa31c9495c6ad1342c1456e0bee89f84c7370c5daab5aa464249cd43",
+      "settings.sendAfterDictation.title": "6520edc456ee1ba776d9b646532d3e7b1d711148bedd3ee07c402c4d5ae671cf"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -10520,7 +10522,9 @@
       "server.starter.routineWoke": "185957aa957f02f22a311ad4854698482210925bbe9fcb18e38b8e77a02ad668",
       "browser.input.notReaching": "f9f70cbf8a66e3c8dc64443b9a11a273c24b39cf2f824fa65639e6cd73d88572",
       "routines.botPausedRuns": "051c1748da67fd82bad5a29e2769d469266a6893a1ba8efebc5e99f2af8069a6",
-      "routines.botPausedSwap": "f3ba4b0a76a16a26a75be5dabbe0b1440b416a83983f17a79eeb937d5b0e42d1"
+      "routines.botPausedSwap": "f3ba4b0a76a16a26a75be5dabbe0b1440b416a83983f17a79eeb937d5b0e42d1",
+      "settings.sendAfterDictation.subtitle": "4cf9bacafa31c9495c6ad1342c1456e0bee89f84c7370c5daab5aa464249cd43",
+      "settings.sendAfterDictation.title": "6520edc456ee1ba776d9b646532d3e7b1d711148bedd3ee07c402c4d5ae671cf"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -14350,7 +14354,9 @@
       "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9",
       "server.teammates.noLongerWaiting": "49259fb62a6e8687efa6a6e69da294c81bd67a19c57687d0724ee4bdd5cc4645",
       "server.starter.routineRanPaused": "8e764711d6e5e39ee5620de0788fd03f39fc7818b9eabebdb8e1e37809e7931c",
-      "server.starter.routineWoke": "185957aa957f02f22a311ad4854698482210925bbe9fcb18e38b8e77a02ad668"
+      "server.starter.routineWoke": "185957aa957f02f22a311ad4854698482210925bbe9fcb18e38b8e77a02ad668",
+      "settings.sendAfterDictation.subtitle": "4cf9bacafa31c9495c6ad1342c1456e0bee89f84c7370c5daab5aa464249cd43",
+      "settings.sendAfterDictation.title": "6520edc456ee1ba776d9b646532d3e7b1d711148bedd3ee07c402c4d5ae671cf"
     },
     "hi": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -18032,7 +18038,9 @@
       "decider.provider.line": "b74959fffc682f78c90fde2eb8e8d2c0a40eebac0d11000c8def7ae4db389462",
       "computer.worksOnHintServer": "2c3302d501a67067774aedcacfff8d16a80ea8238e2f14d8af97e3fd593f690b",
       "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9",
-      "server.teammates.noLongerWaiting": "49259fb62a6e8687efa6a6e69da294c81bd67a19c57687d0724ee4bdd5cc4645"
+      "server.teammates.noLongerWaiting": "49259fb62a6e8687efa6a6e69da294c81bd67a19c57687d0724ee4bdd5cc4645",
+      "settings.sendAfterDictation.subtitle": "4cf9bacafa31c9495c6ad1342c1456e0bee89f84c7370c5daab5aa464249cd43",
+      "settings.sendAfterDictation.title": "6520edc456ee1ba776d9b646532d3e7b1d711148bedd3ee07c402c4d5ae671cf"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -25992,7 +26000,9 @@
       "computer.worksOnHintServer": "2c3302d501a67067774aedcacfff8d16a80ea8238e2f14d8af97e3fd593f690b",
       "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9",
       "server.teammates.noLongerWaiting": "49259fb62a6e8687efa6a6e69da294c81bd67a19c57687d0724ee4bdd5cc4645",
-      "browser.input.notReaching": "f9f70cbf8a66e3c8dc64443b9a11a273c24b39cf2f824fa65639e6cd73d88572"
+      "browser.input.notReaching": "f9f70cbf8a66e3c8dc64443b9a11a273c24b39cf2f824fa65639e6cd73d88572",
+      "settings.sendAfterDictation.subtitle": "4cf9bacafa31c9495c6ad1342c1456e0bee89f84c7370c5daab5aa464249cd43",
+      "settings.sendAfterDictation.title": "6520edc456ee1ba776d9b646532d3e7b1d711148bedd3ee07c402c4d5ae671cf"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -37473,7 +37483,9 @@
       "viewer.stop": "cae7d57bc067a514b8e34c9589631a95c7dc051638ddd2a190773269279a99df",
       "sidebar.preview.waitingFor": "bb64342e2466a9319496bbb378b4711b661425abeb68b009163078d4c49524b6",
       "handoff.importSignIn": "6472eeb450eea0fc019b9f5d7e02adbb926cfdff1d9c4e43de7a2aaf9b081fd5",
-      "handoff.inPanel": "8ffda3f9407104c180c4fe7b48fa2b6903ca43c9eeea2b1b6ec83befed353a86"
+      "handoff.inPanel": "8ffda3f9407104c180c4fe7b48fa2b6903ca43c9eeea2b1b6ec83befed353a86",
+      "settings.sendAfterDictation.subtitle": "4cf9bacafa31c9495c6ad1342c1456e0bee89f84c7370c5daab5aa464249cd43",
+      "settings.sendAfterDictation.title": "6520edc456ee1ba776d9b646532d3e7b1d711148bedd3ee07c402c4d5ae671cf"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -47584,7 +47596,9 @@
       "server.reach.placeMovedNew": "36fdbc4e01a2160bae3b344e836e416dbf4b4b5ad37e48f60595b022acf7f543",
       "server.reach.place.myCloud": "9614e9048e064e27e2805c476cb49f65fac9834e5d634e79a514f2850ca266e1",
       "server.reach.place.thisCloud": "9d7319debd5cbf68bbf4d9455f9c4f78d9168a490f936d60f455ca673fa0e3da",
-      "server.reach.place.cloudDesktop": "f5720ce8c1477b72dd219523d39dfe814771b693627de08bca13ef631370d579"
+      "server.reach.place.cloudDesktop": "f5720ce8c1477b72dd219523d39dfe814771b693627de08bca13ef631370d579",
+      "settings.sendAfterDictation.subtitle": "4cf9bacafa31c9495c6ad1342c1456e0bee89f84c7370c5daab5aa464249cd43",
+      "settings.sendAfterDictation.title": "6520edc456ee1ba776d9b646532d3e7b1d711148bedd3ee07c402c4d5ae671cf"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -57794,7 +57808,9 @@
       "server.reach.placeMovedNew": "36fdbc4e01a2160bae3b344e836e416dbf4b4b5ad37e48f60595b022acf7f543",
       "server.reach.place.myCloud": "9614e9048e064e27e2805c476cb49f65fac9834e5d634e79a514f2850ca266e1",
       "server.reach.place.thisCloud": "9d7319debd5cbf68bbf4d9455f9c4f78d9168a490f936d60f455ca673fa0e3da",
-      "server.reach.place.cloudDesktop": "f5720ce8c1477b72dd219523d39dfe814771b693627de08bca13ef631370d579"
+      "server.reach.place.cloudDesktop": "f5720ce8c1477b72dd219523d39dfe814771b693627de08bca13ef631370d579",
+      "settings.sendAfterDictation.subtitle": "4cf9bacafa31c9495c6ad1342c1456e0bee89f84c7370c5daab5aa464249cd43",
+      "settings.sendAfterDictation.title": "6520edc456ee1ba776d9b646532d3e7b1d711148bedd3ee07c402c4d5ae671cf"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -61896,7 +61912,9 @@
       "decider.provider.line": "b74959fffc682f78c90fde2eb8e8d2c0a40eebac0d11000c8def7ae4db389462",
       "computer.worksOnHintServer": "2c3302d501a67067774aedcacfff8d16a80ea8238e2f14d8af97e3fd593f690b",
       "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9",
-      "server.teammates.noLongerWaiting": "49259fb62a6e8687efa6a6e69da294c81bd67a19c57687d0724ee4bdd5cc4645"
+      "server.teammates.noLongerWaiting": "49259fb62a6e8687efa6a6e69da294c81bd67a19c57687d0724ee4bdd5cc4645",
+      "settings.sendAfterDictation.subtitle": "4cf9bacafa31c9495c6ad1342c1456e0bee89f84c7370c5daab5aa464249cd43",
+      "settings.sendAfterDictation.title": "6520edc456ee1ba776d9b646532d3e7b1d711148bedd3ee07c402c4d5ae671cf"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -67818,7 +67836,9 @@
       "computer.worksOnHintServer": "2c3302d501a67067774aedcacfff8d16a80ea8238e2f14d8af97e3fd593f690b",
       "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9",
       "server.teammates.noLongerWaiting": "49259fb62a6e8687efa6a6e69da294c81bd67a19c57687d0724ee4bdd5cc4645",
-      "browser.input.notReaching": "f9f70cbf8a66e3c8dc64443b9a11a273c24b39cf2f824fa65639e6cd73d88572"
+      "browser.input.notReaching": "f9f70cbf8a66e3c8dc64443b9a11a273c24b39cf2f824fa65639e6cd73d88572",
+      "settings.sendAfterDictation.subtitle": "4cf9bacafa31c9495c6ad1342c1456e0bee89f84c7370c5daab5aa464249cd43",
+      "settings.sendAfterDictation.title": "6520edc456ee1ba776d9b646532d3e7b1d711148bedd3ee07c402c4d5ae671cf"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -73740,7 +73760,9 @@
       "computer.worksOnHintServer": "2c3302d501a67067774aedcacfff8d16a80ea8238e2f14d8af97e3fd593f690b",
       "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9",
       "server.teammates.noLongerWaiting": "49259fb62a6e8687efa6a6e69da294c81bd67a19c57687d0724ee4bdd5cc4645",
-      "browser.input.notReaching": "f9f70cbf8a66e3c8dc64443b9a11a273c24b39cf2f824fa65639e6cd73d88572"
+      "browser.input.notReaching": "f9f70cbf8a66e3c8dc64443b9a11a273c24b39cf2f824fa65639e6cd73d88572",
+      "settings.sendAfterDictation.subtitle": "4cf9bacafa31c9495c6ad1342c1456e0bee89f84c7370c5daab5aa464249cd43",
+      "settings.sendAfterDictation.title": "6520edc456ee1ba776d9b646532d3e7b1d711148bedd3ee07c402c4d5ae671cf"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -80863,7 +80885,9 @@
       "computer.worksOnHintServer": "2c3302d501a67067774aedcacfff8d16a80ea8238e2f14d8af97e3fd593f690b",
       "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9",
       "server.teammates.noLongerWaiting": "49259fb62a6e8687efa6a6e69da294c81bd67a19c57687d0724ee4bdd5cc4645",
-      "browser.input.notReaching": "f9f70cbf8a66e3c8dc64443b9a11a273c24b39cf2f824fa65639e6cd73d88572"
+      "browser.input.notReaching": "f9f70cbf8a66e3c8dc64443b9a11a273c24b39cf2f824fa65639e6cd73d88572",
+      "settings.sendAfterDictation.subtitle": "4cf9bacafa31c9495c6ad1342c1456e0bee89f84c7370c5daab5aa464249cd43",
+      "settings.sendAfterDictation.title": "6520edc456ee1ba776d9b646532d3e7b1d711148bedd3ee07c402c4d5ae671cf"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -88040,7 +88064,9 @@
       "computer.worksOnHintServer": "2c3302d501a67067774aedcacfff8d16a80ea8238e2f14d8af97e3fd593f690b",
       "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9",
       "server.teammates.noLongerWaiting": "49259fb62a6e8687efa6a6e69da294c81bd67a19c57687d0724ee4bdd5cc4645",
-      "browser.input.notReaching": "f9f70cbf8a66e3c8dc64443b9a11a273c24b39cf2f824fa65639e6cd73d88572"
+      "browser.input.notReaching": "f9f70cbf8a66e3c8dc64443b9a11a273c24b39cf2f824fa65639e6cd73d88572",
+      "settings.sendAfterDictation.subtitle": "4cf9bacafa31c9495c6ad1342c1456e0bee89f84c7370c5daab5aa464249cd43",
+      "settings.sendAfterDictation.title": "6520edc456ee1ba776d9b646532d3e7b1d711148bedd3ee07c402c4d5ae671cf"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -95029,7 +95055,9 @@
       "computer.worksOnHintServer": "2c3302d501a67067774aedcacfff8d16a80ea8238e2f14d8af97e3fd593f690b",
       "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9",
       "server.teammates.noLongerWaiting": "49259fb62a6e8687efa6a6e69da294c81bd67a19c57687d0724ee4bdd5cc4645",
-      "browser.input.notReaching": "f9f70cbf8a66e3c8dc64443b9a11a273c24b39cf2f824fa65639e6cd73d88572"
+      "browser.input.notReaching": "f9f70cbf8a66e3c8dc64443b9a11a273c24b39cf2f824fa65639e6cd73d88572",
+      "settings.sendAfterDictation.subtitle": "4cf9bacafa31c9495c6ad1342c1456e0bee89f84c7370c5daab5aa464249cd43",
+      "settings.sendAfterDictation.title": "6520edc456ee1ba776d9b646532d3e7b1d711148bedd3ee07c402c4d5ae671cf"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -102682,7 +102710,9 @@
       "computer.worksOnHintServer": "2c3302d501a67067774aedcacfff8d16a80ea8238e2f14d8af97e3fd593f690b",
       "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9",
       "server.teammates.noLongerWaiting": "49259fb62a6e8687efa6a6e69da294c81bd67a19c57687d0724ee4bdd5cc4645",
-      "browser.input.notReaching": "f9f70cbf8a66e3c8dc64443b9a11a273c24b39cf2f824fa65639e6cd73d88572"
+      "browser.input.notReaching": "f9f70cbf8a66e3c8dc64443b9a11a273c24b39cf2f824fa65639e6cd73d88572",
+      "settings.sendAfterDictation.subtitle": "4cf9bacafa31c9495c6ad1342c1456e0bee89f84c7370c5daab5aa464249cd43",
+      "settings.sendAfterDictation.title": "6520edc456ee1ba776d9b646532d3e7b1d711148bedd3ee07c402c4d5ae671cf"
     }
   }
 }

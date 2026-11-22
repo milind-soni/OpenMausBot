@@ -1803,6 +1803,8 @@
   "settings.font.inter": "Inter",
   "settings.font.poppins": "Poppins",
   "settings.font.serif": "衬线体",
+  "settings.sendAfterDictation.subtitle": "停止麦克风会发送你说的内容。按 Esc 停止则不发送。",
+  "settings.sendAfterDictation.title": "停止听写时发送",
   "settings.sendKey.title": "发送消息的按键",
   "settings.sendKey.subtitle": "选择 Shift+Enter 或 {key} 后，按 Enter 会换行，适合用 Enter 确认候选词的输入法（例如日文输入）。无论选哪一项，{key} 都会发送。仅对这台设备生效。",
   "settings.followUp.title": "机器人工作时发送消息",
