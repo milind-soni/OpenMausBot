@@ -1904,6 +1904,7 @@ async function forgetEnvironment(id, purge = false, confirmed = false) {
     }
   }
   persistEnvironments(withoutEnvironment(environmentsState, id));
+  if (env.kind !== "local") void ownHome?.kick().catch((error) => slog(`own home: ${error?.message ?? error}`));
   if (wasActive) navigateMainWindow(activeOrigin());
   if (!env.origin) return { ok: true };
   try {

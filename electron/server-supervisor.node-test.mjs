@@ -331,7 +331,7 @@ function runForget(state) {
   const start = MAIN_SOURCE.indexOf("async function forgetEnvironment(");
   const end = MAIN_SOURCE.indexOf("function showContextMenu(", start);
   assert.ok(start > 0 && end > start, "the forget helper exists");
-  const calls = { dialogs: [], shares: [], persisted: [], navigated: [], rm: [] };
+  const calls = { dialogs: [], shares: [], persisted: [], navigated: [], rm: [], homeKicks: [] };
   const rmOptions = [];
   const ctx = {
     environmentsState: state,
@@ -350,6 +350,7 @@ function runForget(state) {
     path,
     AbortSignal,
     remoteMicrophoneRefused: new Set(),
+    ownHome: { kick: async () => { calls.homeKicks.push(1); } },
     desktopDataDir: () => "/Users/me/.openmausbot",
     slog: () => {},
     session: { defaultSession: { fetch: async () => ({ ok: true }), clearStorageData: async () => {} } },
@@ -363,7 +364,7 @@ function runForget(state) {
 test("forgetting the ACTIVE local environment is refused with {error:active} and touches nothing", async () => {
   const { calls, context } = runForget({ environments: [LOCAL_FIXTURE], activeId: "l1" });
   assert.deepEqual(plain(await context.forgetEnvironment("l1", true)), { ok: false, error: "active" });
-  assert.deepEqual(calls, { dialogs: [], shares: [], persisted: [], navigated: [], rm: [] });
+  assert.deepEqual(calls, { dialogs: [], shares: [], persisted: [], navigated: [], rm: [], homeKicks: [] });
 });
 
 test("forgetting a local environment asks nothing of the user, and a failed purge keeps the entry with {error:purge}", async () => {
@@ -397,6 +398,7 @@ test("forgetting a remote environment keeps its sign-out confirmation and answer
   assert.equal(calls.dialogs[0].message, "Remove Office from this app?");
   assert.match(calls.dialogs[0].detail, /The server keeps running and your bots stay there/);
   assert.deepEqual(plain(calls.persisted[0].environments), []);
+  assert.equal(calls.homeKicks.length, 1, "a home on the removed server comes back to this computer now, not at the next launch");
 });
 
 test("forgetting a local environment whose folder the server child uses is refused with {error:active}", async () => {
