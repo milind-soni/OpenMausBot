@@ -3825,5 +3825,11 @@
   "imageGen.higgsfield.help": "{app} crée des images avec le compte Higgsfield auquel vous vous connectez sous Plugins. Chaque image consomme des crédits de ce compte.",
   "imageGen.higgsfield.open": "Ouvrir Plugins",
   "inbox.settled.title": "Terminé",
-  "inbox.settled.read": "Lu"
+  "inbox.settled.read": "Lu",
+  "sidebar.threads.hidden": "Fil masqué",
+  "sidebar.threads.hide": "Masquer {title}",
+  "sidebar.threads.hideShort": "Masquer",
+  "sidebar.threads.running": "+{count} en cours",
+  "sidebar.threads.more": "{count} de plus",
+  "botPanel.library.showAll": "Tout afficher"
 }

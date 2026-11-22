@@ -27,6 +27,9 @@ const notActions: Array<{ file: string; snippet: string; why: string }> = [
   { file: "components/ChatHeadPill.tsx", snippet: "-ml-2 flex w-0 shrink-0 overflow-hidden opacity-0", why: "decorative chevron in the Simple bot badge; the whole badge is the tap target" },
   { file: "components/RoomHeader.tsx", snippet: "-ml-1 w-0 shrink-0 text-ink-secondary", why: "decorative chevron on the Simple room name; the whole name is the tap target" },
   { file: "components/SidebarConnectApps.tsx", snippet: "opacity-60 grayscale", why: "decorative app logos, already visible at 60% without hover; the whole Apps row is the tap target" },
+  { file: "components/SidebarThreadLabels.tsx", snippet: "pointer-events-none absolute end-1 flex size-6", why: "hiding a thread on a touch screen goes through the bot panel's thread list; a ✕ on every sub-row would crowd the sidebar" },
+  { file: "components/SidebarThreadLabels.tsx", snippet: "group-hover/label:[mask-image", why: "the title fading under the hover ✕; nothing to tap" },
+  { file: "components/SidebarThreadLabels.tsx", snippet: "transition-opacity duration-[120ms] group-hover/label:opacity-0", why: "the status mark making room for the hover ✕; nothing to tap" },
   { file: "components/PlacesRail.tsx", snippet: "h-2 opacity-0 group-hover/tile:opacity-100", why: "decorative pill beside a rail tile on hover; the tile is the tap target and has its own focus ring" },
 ];
 

@@ -7118,5 +7118,11 @@
   "imageGen.higgsfield.help": "{app} tworzy obrazy na koncie Higgsfield, na które logujesz się w sekcji Wtyczki. Każdy obraz zużywa kredyty z tego konta.",
   "imageGen.higgsfield.open": "Otwórz Wtyczki",
   "inbox.settled.title": "Zakończone",
-  "inbox.settled.read": "Przeczytane"
+  "inbox.settled.read": "Przeczytane",
+  "sidebar.threads.hidden": "Wątek ukryty",
+  "sidebar.threads.hide": "Ukryj {title}",
+  "sidebar.threads.hideShort": "Ukryj",
+  "sidebar.threads.running": "+{count} w toku",
+  "sidebar.threads.more": "jeszcze {count}",
+  "botPanel.library.showAll": "Pokaż wszystkie"
 }

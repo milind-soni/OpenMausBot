@@ -5,7 +5,7 @@ import { BotAvatar, InitialsAvatar } from "./Avatar";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { DaySeparator } from "./DaySeparator";
 import { ClusterLabel } from "./RoomClusterLabel";
-import { GlassBar, GlassScrollFrame } from "./GlassScrollFrame";
+import { ChatBackdrop, GlassBar, GlassScrollFrame } from "./GlassScrollFrame";
 import { ELEVATED_FLOAT, ELEVATED_HOVER, ELEVATED_TINT } from "./elevated";
 import { joinedCorners, SIMPLE_BOT_BUBBLE, SIMPLE_BUBBLE_MAX, SIMPLE_STACKED, SIMPLE_USER_BUBBLE } from "./chat-bubble";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
@@ -91,6 +91,7 @@ export function HandoffExchangeView({ exchange: { asker, helper, threadId }, onB
 
   return (
     <main data-look="chat" data-handoff-exchange={threadId} className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
+      <ChatBackdrop />
       <GlassScrollFrame className="flex-1 [--glass-tint:var(--color-app)]">
         <GlassBar edge="top" fade={!remoteClient} className="z-[25]">
           <div {...dragProps} data-look="chat-header" className="px-5 pb-2.5 pt-2.5 max-md:pl-14 max-md:pr-3">

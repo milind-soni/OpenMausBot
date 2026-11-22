@@ -3787,7 +3787,7 @@
   "botPanel.library.pages": "페이지",
   "botPanel.library.apps": "앱",
   "botPanel.library.files": "파일",
-  "botPanel.library.scope": "이 대화에서",
+  "botPanel.library.showAll": "모두 보기",
   "botPanel.thisConversation": "이 대화에서",
   "botPanel.acts.customHint": "고급 모드에서 바꾸세요",
   "botPanel.section.settings": "설정",
@@ -7648,5 +7648,10 @@
   "imageGen.higgsfield.help": "{app}은(는) 플러그인에서 로그인한 Higgsfield 계정으로 이미지를 만듭니다. 이미지마다 그 계정의 크레딧이 소모됩니다.",
   "imageGen.higgsfield.open": "플러그인 열기",
   "inbox.settled.title": "완료됨",
-  "inbox.settled.read": "읽음"
+  "inbox.settled.read": "읽음",
+  "sidebar.threads.hidden": "스레드를 숨겼어요",
+  "sidebar.threads.hide": "{title} 숨기기",
+  "sidebar.threads.hideShort": "숨기기",
+  "sidebar.threads.running": "+{count}개 실행 중",
+  "sidebar.threads.more": "{count}개 더"
 }

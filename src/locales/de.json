@@ -4118,5 +4118,11 @@
   "botAccess.cloud.serverPickHint": "Wähle einen benannten Server oder gib einen anderen SSH-Alias ein.",
   "botAccess.cloud.serverPickDefault": "Standardserver ({alias})",
   "botAccess.cloud.serverPickNone": "Kein Server gewählt",
-  "botAccess.cloud.serverPickOther": "Anderer SSH-Alias …"
+  "botAccess.cloud.serverPickOther": "Anderer SSH-Alias …",
+  "sidebar.threads.hidden": "Thread ausgeblendet",
+  "sidebar.threads.hide": "{title} ausblenden",
+  "sidebar.threads.hideShort": "Ausblenden",
+  "sidebar.threads.running": "+{count} laufen",
+  "sidebar.threads.more": "{count} weitere",
+  "botPanel.library.showAll": "Alle anzeigen"
 }

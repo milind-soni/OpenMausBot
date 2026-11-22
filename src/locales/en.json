@@ -4681,7 +4681,7 @@
   "botPanel.library.pages": "Pages",
   "botPanel.library.apps": "Apps",
   "botPanel.library.files": "Files",
-  "botPanel.library.scope": "From this conversation",
+  "botPanel.library.showAll": "Show all",
   "botPanel.thisConversation": "In this conversation",
   "botPanel.advanced.title": "More in Advanced mode",
   "botPanel.advanced.hint": "Sending on your behalf and app access are set there.",
@@ -11532,5 +11532,10 @@
   "keys.vps.serverPinAria": "{name} CPU pinning",
   "keys.vps.servers.aliasPlaceholder": "SSH alias",
   "keys.vps.details": "Limits and pinning details",
-  "keys.vps.pinTooMany": "Pinning names {pinned} CPUs, more than the {cores} cores set. Lower the pinning or raise the cores."
+  "keys.vps.pinTooMany": "Pinning names {pinned} CPUs, more than the {cores} cores set. Lower the pinning or raise the cores.",
+  "sidebar.threads.hidden": "Thread hidden",
+  "sidebar.threads.hide": "Hide {title}",
+  "sidebar.threads.hideShort": "Hide",
+  "sidebar.threads.running": "+{count} running",
+  "sidebar.threads.more": "{count} more"
 }
