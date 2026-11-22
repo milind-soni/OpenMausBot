@@ -504,6 +504,9 @@ export interface ProviderAuthenticationStart {
   expiresAt: string | null;
   /** A short-lived code to enter only at the provider's authorization URL. */
   userCode?: string;
+  /** `pasted-code`: the page the link leads to ends on a code (or an address holding it) that the person pastes back, and
+   * not on a redirect to this computer. */
+  kind?: "pasted-code";
 }
 
 export interface ProviderAuthenticationStatus extends Omit<ProviderAuthenticationStart, "phase"> {
@@ -622,6 +625,8 @@ export interface ProviderInstance {
   readonly cancelAuthentication?: () => Promise<void>;
   /** Remove the provider CLI's stored sign-in on this server; never touches another instance's home. */
   readonly signOut?: () => Promise<void>;
+  /** Drops what was last learned about this instance's sign-in, so the next read asks the engine again. */
+  readonly forgetAuthentication?: () => void;
   readonly adapter: ProviderAdapter;
   snapshot(): Promise<ProviderSnapshot>;
   /** Cheap one-shot text call (titles, summaries); the signal is a best-effort cap. */

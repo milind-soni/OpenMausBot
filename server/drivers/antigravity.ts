@@ -20,12 +20,14 @@ import {
   antigravityProfileAuthenticated,
   antigravityProfileDirectory,
   antigravitySessionSetup,
+  antigravitySignInError,
   antigravityTokenPath,
   authorizationUrlFromLine,
   noteAntigravitySignedIn,
   noteAntigravitySignInRequired,
   prepareAntigravityProfile,
   probeAntigravityModels,
+  type AntigravityProfile,
   removeAntigravitySignIn,
   validateAntigravityRuntime,
   verifyAntigravityBrowserHelper,
@@ -33,11 +35,16 @@ import {
 import { antigravityLimitFacts, watchAntigravityPromptOutcome } from "./antigravity-turn-outcome.ts";
 import { splitAntigravityThinking } from "./antigravity-models.ts";
 import { AntigravityAuthController } from "./antigravity-auth.ts";
+import { AntigravityCliLogin } from "./antigravity-native-login.ts";
+import { NativeSignInCache, antigravityCliSignIn, signOutAntigravityCli } from "./antigravity-native-status.ts";
+import { antigravityNativeCredentialsHeld, clearAntigravityNativeCredentials, noteAntigravityNativeCredentials } from "./antigravity-native-credentials.ts";
+import { AcpDiscoveryRpcError, AcpDiscoveryTimeoutError } from "./acp/custom-model-catalog.ts";
 import {
   antigravityManagedInstallAvailable,
   isAntigravityNativeAlias,
   installAntigravityRuntime,
   resolveAntigravityRuntime,
+  type AntigravityRuntime,
 } from "./antigravity-runtime.ts";
 import { ANTIGRAVITY_NATIVE_CLI } from "./antigravity-cli-install.ts";
 import { acpFileEditWithin } from "./permission-command.ts";
@@ -47,6 +54,8 @@ import { VERIFICATION_TEMP_KEY, scheduleAntigravityTempSweep } from "./antigravi
 import { augmentedPath } from "../env-path.ts";
 import { bundledEngineCatalog } from "../model-manifest/bundled.ts";
 import { currentEngineCatalog } from "../model-manifest/manifest.ts";
+
+export { antigravitySignInError };
 
 export const STATIC_ANTIGRAVITY_MODELS: ModelCatalog = bundledEngineCatalog("antigravity");
 
@@ -89,22 +98,34 @@ export function antigravityUpdateFilter(): (update: Record<string, any>) => Reco
   };
 }
 
-const SIGN_IN_WORDS = /\bauthenticat|\bunauthenticated\b|\bsign(?:ed)?[ -]?in\b|\blog(?:ged)?[ -]?in\b|\bcredentials?\b/iu;
-
-/** -32000 is ACP's `auth_required`, but an agent may reuse it for other failures; the text must agree. */
-export function antigravitySignInError(error: unknown): boolean {
-  const value = error as { code?: unknown; message?: unknown; data?: unknown } | null;
-  if (value?.code !== -32000) return false;
-  const data = typeof value.data === "string" ? value.data : value.data && typeof value.data === "object" ? JSON.stringify(value.data) : "";
-  return SIGN_IN_WORDS.test(`${typeof value.message === "string" ? value.message : ""} ${data.slice(0, 2_000)}`);
-}
-
 const managedAsset = resolveAntigravityReleaseAsset();
 const runtimeProcesses = new AntigravityProcesses();
 /** Every model id an account here has been offered, beside the bundled catalog's. */
 const offeredModels = new Set<string>();
 /** The runtime each instance's turns were last started on, known before it answers initialize. */
 const launched = new Map<string, { version: string | null; nativeCli: boolean }>();
+
+const nativeSignIn = new NativeSignInCache();
+
+/** Whether the native CLI accepts a session for this instance, kept for a short while. Throws when the CLI could not say:
+ * that is not "signed out". */
+async function nativeSignedIn(instanceId: string, runtime: AntigravityRuntime, profile: AntigravityProfile): Promise<boolean> {
+  return await nativeSignIn.state(instanceId, `${runtime.executablePath}\0${runtime.version}`, async () => {
+    const found = await antigravityCliSignIn(runtime, profile);
+    if (found === "in") noteAntigravityNativeCredentials(instanceId);
+    return found;
+  }) === "in";
+}
+
+/** Model discovery's failure as the shared catalog classifies it: a refused session is "signedOut", a slow CLI "timedOut". */
+function nativeDiscoveryError(instanceId: string, error: unknown): unknown {
+  if (antigravitySignInError(error)) {
+    nativeSignIn.forget(instanceId);
+    const refusal = error as { code: unknown; message: unknown };
+    return new AcpDiscoveryRpcError(refusal.code, typeof refusal.message === "string" ? refusal.message : "");
+  }
+  return error instanceof Error && /timed out/iu.test(error.message) ? new AcpDiscoveryTimeoutError(error.message) : error;
+}
 
 const support: AcpSupport = {
   driverKind: "antigravityAgent",
@@ -153,12 +174,13 @@ const support: AcpSupport = {
   resolveModels: async (env, config, instanceId) => {
     const runtime = await resolveAntigravityRuntime(config.cli, env);
     const profile = await prepareAntigravityProfile({ instanceId, runtime, baseEnv: env });
-    if (!(await antigravityProfileAuthenticated(profile))) throw new Error(support.loginNote);
+    const native = runtime.harnessPath === null;
+    if (!native && !(await antigravityProfileAuthenticated(profile))) throw new Error(support.loginNote);
     const catalog = await probeAntigravityModels({
       runtime,
       profile,
       fallbackDefault: currentEngineCatalog("antigravity").default,
-    });
+    }).catch((error: unknown) => { throw native ? nativeDiscoveryError(instanceId, error) : error; });
     for (const option of catalog.options) offeredModels.add(option.id);
     return catalog;
   },
@@ -167,12 +189,15 @@ const support: AcpSupport = {
     ? "oauth-personal"
     : null,
   authFailure: "fail",
+  // The native CLI answers `authenticate` by opening a browser on its own machine, so only `acp --login` signs it in.
+  skipsAuthenticate: (instanceId) => launched.get(instanceId)?.nativeCli === true,
+  classifyError: (error) => antigravitySignInError(error) ? "invalid_credentials" : undefined,
   // With a stored token Google no longer honours, agy_acp_server 1.4.3 prints its sign-in link and waits on
   // `authenticate`.
   signInRequest: {
     stderrLine: (line) => authorizationUrlFromLine(line) !== null,
     rpcError: antigravitySignInError,
-    required: (instanceId) => noteAntigravitySignInRequired(antigravityTokenPath(instanceId)),
+    required: (instanceId) => { nativeSignIn.forget(instanceId); noteAntigravitySignInRequired(antigravityTokenPath(instanceId)); },
   },
   processStarted: (child, instanceId) => runtimeProcesses.track(instanceId, child),
   sessionSetupParams: antigravitySessionSetup,
@@ -184,19 +209,27 @@ const support: AcpSupport = {
   allowsAlone: (instanceId, turn, toolCall) => launched.get(instanceId)?.nativeCli === true && turn.approvalMode === "edits" && acpFileEditWithin(toolCall, turn.cwd),
   promptOutcome: (instanceId, sessionId) => watchAntigravityPromptOutcome(support.displayName, antigravityProfileDirectory(instanceId), sessionId),
   requireAuthenticationBeforeSpawn: true,
+  // The native CLI is asked, and a failure to ask is thrown: only its own refusal means a sign-in is needed.
   isAuthenticated: async (env, config, instanceId) => {
+    let runtime: AntigravityRuntime;
+    let profile: AntigravityProfile;
     try {
-      const runtime = await resolveAntigravityRuntime(config.cli, env);
-      const profile = await prepareAntigravityProfile({ instanceId, runtime, baseEnv: env });
-      return antigravityProfileAuthenticated(profile);
+      runtime = await resolveAntigravityRuntime(config.cli, env);
+      profile = await prepareAntigravityProfile({ instanceId, runtime, baseEnv: env });
     } catch {
       return false;
     }
+    return runtime.harnessPath === null ? nativeSignedIn(instanceId, runtime, profile) : antigravityProfileAuthenticated(profile);
   },
   snapshot: async (env, config, instanceId): Promise<ProviderSnapshot> => {
     try {
       const runtime = await resolveAntigravityRuntime(config.cli, env);
       const profile = await prepareAntigravityProfile({ instanceId, runtime, baseEnv: env });
+      if (runtime.harnessPath === null) {
+        // A CLI that could not answer leaves `authenticated` out, which no caller reads as signed out.
+        const authenticated = await nativeSignedIn(instanceId, runtime, profile).catch(() => undefined);
+        return { state: "available", version: runtime.version, ...(authenticated === undefined ? {} : { authenticated }) };
+      }
       return {
         state: "available",
         version: runtime.version,
@@ -243,16 +276,59 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
     });
     let signingOut: Promise<void> = Promise.resolve();
     let installFailure: string | undefined;
-    const runtimeAndProfile = async () => {
-      // A GUI launch's raw PATH may omit the official runtime the model picker found.
-      const environment = { ...process.env, ...input.environment, PATH: augmentedPath() };
-      const runtime = await resolveAntigravityRuntime(input.config.cli, environment);
+    // A GUI launch's raw PATH may omit the official runtime the model picker found.
+    const environmentNow = () => ({ ...process.env, ...input.environment, PATH: augmentedPath() });
+    const runtimeAndProfile = async (cli: string | undefined = input.config.cli) => {
+      const environment = environmentNow();
+      const runtime = await resolveAntigravityRuntime(cli, environment);
       const profile = await prepareAntigravityProfile({
         instanceId: input.instanceId,
         runtime,
         baseEnv: environment,
       });
       return { runtime, profile };
+    };
+    const login = new AntigravityCliLogin({
+      submitting: () => noteAntigravityNativeCredentials(input.instanceId),
+      signedIn: () => {
+        nativeSignIn.forget(input.instanceId);
+        void base.refreshModels?.();
+      },
+      confirm: async () => {
+        const { runtime, profile } = await runtimeAndProfile();
+        return (await antigravityCliSignIn(runtime, profile)) === "in";
+      },
+    });
+    let nativeFlow = false;
+    // Starting a sign-in and signing out never overlap: a sign-in begun while one is being removed would be removed with it.
+    let exclusive: Promise<unknown> = Promise.resolve();
+    const alone = <T>(work: () => Promise<T>): Promise<T> => {
+      const run = exclusive.then(work, work);
+      exclusive = run.catch(() => {});
+      return run;
+    };
+    /** Signs the native CLI out when it holds a sign-in for this instance (a login made here, or one it found), and
+     * confirms it no longer does. Throws when that cannot be confirmed: the account must then stay. */
+    const signOutNative = async () => {
+      let current: { runtime: AntigravityRuntime; profile: AntigravityProfile } | null = null;
+      try { current = await runtimeAndProfile(); } catch {}
+      if (current?.runtime.harnessPath !== null && !antigravityNativeCredentialsHeld(input.instanceId)) return;
+      // Its processes are gone before the CLI is asked: one still running keeps the account it started with.
+      await runtimeProcesses.stopped(input.instanceId);
+      if (current?.runtime.harnessPath === null && !antigravityNativeCredentialsHeld(input.instanceId)) {
+        const found = await antigravityCliSignIn(current.runtime, current.profile, { waitForExit: true })
+          .catch(() => { throw new Error("Antigravity could not confirm whether this account is signed in. Try again."); });
+        if (found === "in") noteAntigravityNativeCredentials(input.instanceId);
+      }
+      if (!antigravityNativeCredentialsHeld(input.instanceId)) return;
+      let cli = current?.runtime.harnessPath === null ? current : null;
+      if (!cli) {
+        try { cli = await runtimeAndProfile("antigravity"); }
+        catch (error) { throw new Error(`Antigravity's native CLI is needed to sign this account out, and could not be started: ${error instanceof Error ? error.message : String(error)}`); }
+      }
+      nativeSignIn.forget(input.instanceId);
+      await signOutAntigravityCli(cli.runtime, cli.profile);
+      clearAntigravityNativeCredentials(input.instanceId);
     };
     return {
       ...base,
@@ -290,28 +366,39 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
           }
         : {}),
       authenticationMethod: "callback-url",
-      startAuthentication: async () => {
+      startAuthentication: () => alone(async () => {
         await signingOut;
         const { runtime, profile } = await runtimeAndProfile();
+        await login.cancel();
+        auth.cancel();
+        nativeFlow = runtime.harnessPath === null;
+        if (nativeFlow) return login.start(runtime, profile);
         await verifyAntigravityBrowserHelper(profile);
         return auth.start(runtime, profile);
+      }),
+      getAuthentication: async (flowId) => nativeFlow ? login.get(flowId) : auth.get(flowId),
+      completeAuthentication: async (flowId, pasted) => nativeFlow ? login.complete(flowId, pasted) : auth.complete(flowId, pasted),
+      cancelAuthentication: async () => {
+        auth.cancel();
+        await login.cancel();
       },
-      getAuthentication: async (flowId) => auth.get(flowId),
-      completeAuthentication: async (flowId, callbackUrl) => auth.complete(flowId, callbackUrl),
-      cancelAuthentication: async () => auth.cancel(),
+      forgetAuthentication: () => nativeSignIn.forget(input.instanceId),
       // A runtime process keeps the account it started with, and can write the token file again as it exits: the
       // sign-in is removed at once, and once more when those processes are gone. A new sign-in waits for that.
-      signOut: async () => {
+      signOut: () => alone(async () => {
         auth.cancel();
+        if (!(await login.cancel())) throw new Error("The Antigravity sign-in in progress could not be stopped. Try again.");
         await base.adapter.stopAll();
+        await signOutNative();
         await removeAntigravitySignIn(input.instanceId);
         if (!runtimeProcesses.count(input.instanceId)) return;
         signingOut = runtimeProcesses.stopped(input.instanceId)
           .then(() => removeAntigravitySignIn(input.instanceId))
           .catch((error) => console.warn(`antigravity: could not finish the sign-out: ${error instanceof Error ? error.message : String(error)}`));
-      },
+      }),
       dispose: async () => {
         auth.cancel();
+        await login.cancel();
         await base.dispose();
       },
     };

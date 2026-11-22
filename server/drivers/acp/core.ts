@@ -1137,7 +1137,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   INIT_TIMEOUT,
                 ));
               }
-              if (!skipSubscriptionAuthForLocalInject(turn.model) && !session.authenticated) {
+              if (!skipSubscriptionAuthForLocalInject(turn.model) && !session.authenticated && !support.skipsAuthenticate?.(instanceId)) {
                 const methods: Array<{ id?: string }> = Array.isArray(session.initResult?.authMethods)
                   ? session.initResult.authMethods
                   : [];
@@ -1525,9 +1525,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             cwd,
             prompt,
             defaultModel: catalog.models.default, model,
-            pickAuthMethod: (methods) => support.pickAuthMethod(methods, spawnEnv),
-            authRequired: support.authFailure === "fail-request" ? "if-requested" : support.authFailure === "fail",
-            loginNote: support.loginNote,
+            pickAuthMethod: (methods) => support.skipsAuthenticate?.(instanceId) ? null : support.pickAuthMethod(methods, spawnEnv),
+            authRequired: !support.skipsAuthenticate?.(instanceId) && (support.authFailure === "fail-request" ? "if-requested" : support.authFailure === "fail"),
+            loginNote: support.loginNote, signInRefused: support.skipsAuthenticate?.(instanceId) ? support.signInRequest?.rpcError : undefined,
             clientCapabilitiesMeta: support.clientCapabilitiesMeta,
             ...(support.configureSession ? {
               configure: ({ request, sessionId, session }) => support.configureSession!({

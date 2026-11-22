@@ -35,6 +35,7 @@ import type { ModelCatalog } from "../contracts.ts";
 import type { ChildProcess } from "node:child_process";
 import type { AntigravityRuntime } from "./antigravity-runtime.ts";
 import { acpVariantOption, surveyModelVariants } from "./acp/config-options.ts";
+import { clearAntigravityNativeCredentials } from "./antigravity-native-credentials.ts";
 import { StderrTail, exitDetail } from "./acp/exit-report.ts";
 import {
   VERIFICATION_TEMP_KEY,
@@ -191,6 +192,7 @@ export function antigravityProfileDirectory(instanceId: string, baseDir = DATA_D
 /** A removed account's Google sign-in goes with its profile, so no refresh token outlives the account. Best effort:
  * the account is already gone from the config, and Windows refuses while a retiring process still holds a file. */
 export async function removeAntigravityProfile(instanceId: string, baseDir = DATA_DIR): Promise<void> {
+  clearAntigravityNativeCredentials(instanceId, baseDir);
   await rm(antigravityProfileDirectory(instanceId, baseDir), { recursive: true, force: true, maxRetries: 4, retryDelay: 250 })
     .catch((error) => {
       console.warn(`antigravity: could not remove a removed account's profile: ${error instanceof Error ? error.message : String(error)}`);
@@ -666,6 +668,16 @@ export function catalogFromAntigravityConfigOptions(
   };
 }
 
+const SIGN_IN_WORDS = /\bauthenticat|\bunauthenticated\b|\bsign(?:ed)?[ -]?in\b|\blog(?:ged)?[ -]?in\b|\bcredentials?\b/iu;
+
+/** -32000 is ACP's `auth_required`, but an agent may reuse it for other failures; the text must agree. */
+export function antigravitySignInError(error: unknown): boolean {
+  const value = error as { code?: unknown; message?: unknown; data?: unknown } | null;
+  if (value?.code !== -32000) return false;
+  const data = typeof value.data === "string" ? value.data : value.data && typeof value.data === "object" ? JSON.stringify(value.data) : "";
+  return SIGN_IN_WORDS.test(`${typeof value.message === "string" ? value.message : ""} ${data.slice(0, 2_000)}`);
+}
+
 export async function probeAntigravityModels(input: {
   runtime: AntigravityRuntime;
   profile: AntigravityProfile;
@@ -682,7 +694,8 @@ export async function probeAntigravityModels(input: {
   const client = new AntigravityAcpClient(input.runtime, input.profile, input.cwd ?? input.profile.directory);
   try {
     const initialized = await client.initialize(remaining(), deadline);
-    await client.request("authenticate", { methodId: "oauth-personal" }, remaining());
+    // Native CLI 1.5.14 opens the system browser on `authenticate` and waits 300 s for it; its sign-in is `acp --login`.
+    if (input.runtime.harnessPath !== null) await client.request("authenticate", { methodId: "oauth-personal" }, remaining());
     const session = await client.request(
       "session/new",
       { cwd: input.cwd ?? input.profile.directory, mcpServers: [], ...antigravitySessionSetup(initialized) },

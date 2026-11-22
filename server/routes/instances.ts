@@ -338,6 +338,9 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           const instance = registry.get(instanceId);
           if (!instance) return json(res, 404, { error: "unknown instance" });
           res.setHeader("cache-control", "no-store");
+          // A check is the person asking again: what was last read of the sign-in does not stand in for it.
+          instance.forgetAuthentication?.();
+          registry.forgetSnapshots();
           return json(res, 200, await (deps.checkInstance ?? checkEngine)(instance));
         }
         if (action === "refresh-models") {
@@ -559,29 +562,32 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
     if (method === "DELETE" && instancePatch) {
       const instanceId = instancePatch[1];
       if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
-      const instances = persistableInstanceConfigs(cfg);
-      if (!Object.hasOwn(instances, instanceId)) return json(res, 404, { error: "unknown instance" });
-      const addedChatgpt = instances[instanceId].driver === "codex" && instanceId.startsWith("chatgpt-");
-      const addedAntigravity = instances[instanceId].driver === "antigravityAgent" && instanceId.startsWith("antigravity-");
-      if (!addedChatgpt && !addedAntigravity && !isCodexEndpoint(instances[instanceId]) && !isAddedEndpoint(instanceId, instances[instanceId]) && (instances[instanceId].driver !== "claudeAgent" || instanceId === "claude")) {
-        return json(res, 400, { error: "Only added accounts and custom endpoints can be removed here." });
-      }
-      if (providerInUse(instanceId)) {
-        return json(res, 409, { error: "Choose another account for the bots and default model using this account before removing it." });
-      }
-      // OpenMausBot keeps a ChatGPT account's sign-in in its own data folder: removing the account clears it.
-      const live = addedChatgpt ? registry.get(instanceId) : undefined;
-      if (live?.signOut) {
-        try { await providerAuthSessions.signOut(live, auth.kind === "session" ? auth.session.id : "loopback"); }
-        catch (error) {
-          if ((error as { code?: unknown }).code !== "chatgpt_revocation_unconfirmed") {
-            return json(res, 409, { error: error instanceof Error ? error.message : String(error), ...userErrorFields(error) });
-          }
-        }
-      }
+      // Held from before the config is read until it is saved: a sign-out waits on a CLI, and another account added or
+      // removed meanwhile would be overwritten by this one's older copy.
       providerConfigBusy.set(true);
       providerInstancesChanging.add(instanceId);
       try {
+        const instances = persistableInstanceConfigs(cfg);
+        if (!Object.hasOwn(instances, instanceId)) return json(res, 404, { error: "unknown instance" });
+        const addedChatgpt = instances[instanceId].driver === "codex" && instanceId.startsWith("chatgpt-");
+        const addedAntigravity = instances[instanceId].driver === "antigravityAgent" && instanceId.startsWith("antigravity-");
+        if (!addedChatgpt && !addedAntigravity && !isCodexEndpoint(instances[instanceId]) && !isAddedEndpoint(instanceId, instances[instanceId]) && (instances[instanceId].driver !== "claudeAgent" || instanceId === "claude")) {
+          return json(res, 400, { error: "Only added accounts and custom endpoints can be removed here." });
+        }
+        if (providerInUse(instanceId)) {
+          return json(res, 409, { error: "Choose another account for the bots and default model using this account before removing it." });
+        }
+        // OpenMausBot keeps a ChatGPT account's sign-in in its own data folder: removing the account clears it. An added
+        // Antigravity account's may sit in the native CLI's own store: the CLI signs it out first, or the account stays.
+        const live = addedChatgpt || addedAntigravity ? registry.get(instanceId) : undefined;
+        if (live?.signOut) {
+          try { await providerAuthSessions.signOut(live, auth.kind === "session" ? auth.session.id : "loopback"); }
+          catch (error) {
+            if ((error as { code?: unknown }).code !== "chatgpt_revocation_unconfirmed") {
+              return json(res, 409, { error: error instanceof Error ? error.message : String(error), ...userErrorFields(error) });
+            }
+          }
+        }
         delete instances[instanceId];
         await persistProviderInstance(instanceId, instances);
         // An added Antigravity account's Google sign-in lives in OpenMausBot's data folder too: removing the account deletes it.

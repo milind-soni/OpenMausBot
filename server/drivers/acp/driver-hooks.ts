@@ -19,6 +19,10 @@ export interface AcpDriverHooks {
     rpcError(error: unknown): boolean;
     required(instanceId: string): void;
   };
+  /** Whether this instance's agent is never sent `authenticate`, because it answers by opening a browser nobody sees: its
+   * turns, background text and model discovery start the session directly, and a session it refuses for want of a sign-in
+   * fails as a sign-in request. */
+  skipsAuthenticate?(instanceId: string): boolean;
   /** Every agent process the driver starts for turns. */
   processStarted?(child: ChildProcess, instanceId: string): void;
   /** Extra session/new, session/load and session/resume parameters, from the agent's initialize answer. */
