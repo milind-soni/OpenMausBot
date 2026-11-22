@@ -30,9 +30,6 @@ const THREAD_ID = /^[\w-]{1,128}$/;
 const KEY = /^bak_[\w-]{16,200}$/;
 const ENDPOINT_PATH = /^(.*?)\/hooks\/api\/bots\/([^/]+)\/messages\/?$/;
 const MAX_BASE_CHARS = 300;
-/** Link-local hosts (169.254/16, fe80::/10) and the cloud metadata service: never another OpenMausBot server, and a key
- * must not open a way from this server to them. */
-const LINK_LOCAL = /^(?:169\.254\.|\[fe[89ab][0-9a-f]:|\[::ffff:a9fe:|\[fd00:ec2::254\]$)/i;
 /** No other server answers on these, whatever a name resolves to. */
 const NOT_A_SERVER = new Set<AddressClass>(["link-local", "metadata", "reserved"]);
 /** This server's own addresses count as any other: a teammate may run on this computer. */
@@ -107,7 +104,7 @@ export function remoteAddress(address: string, botId?: string): { base: string; 
   if (!allowedServerOrigin(url.origin)) {
     throw new RemoteTeammateError(url.protocol === "http:" ? `http://${url.host} is on the open internet and plain http isn't encrypted; use its https:// address` : "the address must start with https:// (or http:// on a private network)", 400);
   }
-  if (LINK_LOCAL.test(url.hostname)) throw new RemoteTeammateError(`${url.hostname} is a link-local address, not another server`, 400);
+  if (notAServerAddress(url.hostname.replace(/^\[|\]$/g, ""))) throw new RemoteTeammateError(`${url.hostname} is a link-local, metadata or reserved address, not another server`, 400);
   const endpoint = ENDPOINT_PATH.exec(url.pathname);
   const path = (endpoint ? endpoint[1]! : url.pathname).replace(/\/+$/, "");
   // A bot id is only word characters and dashes, so it never needs %-decoding.
