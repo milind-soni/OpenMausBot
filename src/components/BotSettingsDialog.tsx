@@ -27,7 +27,7 @@ import { useAdvancedMode } from "@/lib/interface-mode";
 import { BotPanel } from "./bot-panel/PanelShell";
 import { LibraryTab } from "./bot-panel/LibraryTab";
 import type { SimplePageId } from "./bot-panel/page-registry";
-import { BOT_PANEL_ID, sidePanelCls } from "./bot-panel/side-panel";
+import { BOT_PANEL_ID, sidePanelCls, useSidePanelLeave } from "./bot-panel/side-panel";
 import { HistoryRollbackDialog, useBotHistory, useBotOverview } from "./bot-settings/useBotOverview";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { ShareBotButton, useTeamName } from "./bot-access/ShareBotButton";
@@ -50,6 +50,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
   const section = state.botSettingsSection;
   const derived = useBotSettingsDerived(bot);
   const dialogRef = useRef<HTMLElement | null>(null);
+  useSidePanelLeave(dialogRef);
   const { dragProps } = useCaptionChrome();
   const [query, setQuery] = useState("");
   const collapsed = !state.botSettingsExpandAccordion;

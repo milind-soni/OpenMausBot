@@ -21,6 +21,10 @@ export const SIDEBAR_AND_PANEL_FIT = "(min-width: 1280px)";
 /** The open sidebar (280), a chat of at least 440 and a side panel of 320 or less (sidebar-fold.ts). */
 export const SIDEBAR_AND_NARROW_PANEL_FIT = "(min-width: 1040px)";
 
+/** The open sidebar (280), a chat of at least 320 and Simple's bot panel (320); narrower, that panel floats over the
+ * chat instead of folding the sidebar (sidebar-fold.ts). */
+export const SIDEBAR_AND_BOT_PANEL_FIT = "(min-width: 920px)";
+
 /** Tailwind's md breakpoint. */
 export const SIDEBAR_INLINE = "(min-width: 768px)";
 
