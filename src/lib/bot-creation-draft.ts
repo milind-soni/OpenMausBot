@@ -5,6 +5,7 @@ import type { Routine, RoutineInput } from "./routines";
 import type { ChosenPreset } from "./bot-presets";
 import { t } from "@/lib/i18n";
 import { randomUuid } from "./random-uuid";
+import { serverFetch } from "./relay-server";
 
 export const EMPTY_BOT_DEFAULTS: NewBotDefaults = { profile: {}, memory: {}, skills: [], routines: [] };
 
@@ -139,7 +140,7 @@ export class BotCreationDraft {
       const { dataUrl } = await this.network<{ dataUrl: string }>("/api/bot-defaults/avatar", {
         method: "POST", body: JSON.stringify({ profile: { name, title, description }, prompt: body.prompt }),
       });
-      const blob = await (await fetch(dataUrl)).blob();
+      const blob = await (await serverFetch(dataUrl)).blob();
       const avatarUrl = await this.uploadAvatar(new File([blob], "avatar.png", { type: blob.type }));
       result = { avatarUrl, bot: { ...this.bot, avatarUrl, avatarCrop: "circle" } };
     } else if ((path === "/api/routines" && method === "POST") || (path.startsWith("/api/routines/draft-") && method === "PATCH")) {

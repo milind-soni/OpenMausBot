@@ -12,6 +12,7 @@ import { SETTINGS_INPUT, SettingsField } from "./SettingsPrimitives";
 import { profileInitials } from "./SidebarProfileMenu";
 import { User } from "lucide-react";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
+import { serverFetch } from "@/lib/relay-server";
 
 const PHOTO_MIN_SIDE = 64;
 const PHOTO_MAX_SIDE = 8192;
@@ -171,7 +172,7 @@ export function ProfileFields() {
         .catch(() => {});
       return;
     }
-    void fetch("/api/config", {
+    void serverFetch("/api/config", {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ profile: { name: name.trim(), email: email.trim().toLowerCase() } }),

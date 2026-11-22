@@ -1,6 +1,7 @@
 import RFB from "@novnc/novnc";
 import { DESKTOP_VIEWER_TARGET } from "../../shared/desktop-viewer";
 import { isMacPlatform } from "./keyboard-shortcuts";
+import { serverFetch } from "./relay-server";
 
 export interface DesktopConnectionEvents {
   connected(): void;
@@ -29,13 +30,13 @@ export async function connectDesktop(screen: HTMLElement, target: string, option
   const signal = AbortSignal.any([cancelled, AbortSignal.timeout(30_000)]);
   if (target.startsWith("vps/")) {
     const query = options.threadId ? `?${new URLSearchParams({ threadId: options.threadId })}` : "";
-    const joined = await fetch(`/api/bots/${target.slice(4)}/computer/join${query}`, {
+    const joined = await serverFetch(`/api/bots/${target.slice(4)}/computer/join${query}`, {
       method: "POST", headers: { "content-type": "application/json" }, body: "{}", signal,
     });
     if (!joined.ok) throw new DesktopUnreachable();
   }
   const path = `/api/desktop-viewer/${target}`;
-  const response = await fetch(path, { signal, credentials: "same-origin", cache: "no-store" });
+  const response = await serverFetch(path, { signal, credentials: "same-origin", cache: "no-store" });
   if (!response.ok) throw new DesktopUnreachable();
   const config = await response.json();
   cancelled.throwIfAborted();

@@ -91,6 +91,7 @@ import { WebPanelPage } from "@/components/WebPanelPage";
 import { AppPreviewPanel } from "@/components/published-apps/AppPreviewPanel";
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { refreshPublishedApps } from "@/lib/own-published-apps";
+import { serverFetch } from "@/lib/relay-server";
 
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
@@ -330,7 +331,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     return window.ogb?.desktopViewer?.onState((viewer) => {
       if (viewer.open || !viewer.contextId) return;
       const botId = viewer.contextId, release = viewerClosedRelease(botId);
-      if (release) void fetch(`/api/bots/${botId}/computer/control`, {
+      if (release) void serverFetch(`/api/bots/${botId}/computer/control`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(release),
@@ -340,7 +341,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           if (snap) dispatch({ type: "computerControl", botId, held: snap.held === true, helpReason: snap.helpReason ?? null, help: parseComputerHelp(snap.help) });
         })
         .catch(() => {});
-      void fetch(`/api/bots/${botId}/computer/viewer-close`, {
+      void serverFetch(`/api/bots/${botId}/computer/viewer-close`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: "{}",

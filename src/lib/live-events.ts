@@ -1,7 +1,7 @@
 // EventSource hides SSE comment keepalives, so liveness comes from the server's visible `ping` frame.
 import type { ServerFrame } from "../../shared/wire";
 import { cloudAsleep, markCloudAsleep, onCloudPower, sleepingFrame } from "./cloud-power";
-import { relayEventSource, relayLink } from "./relay-server";
+import { relayEventSource, relayLink, type LiveEventSourceLike } from "./relay-server";
 import { recordBotTextMessage, recordRuntimeEvent } from "./voice-latency-probe";
 import { noteTurnEvent } from "@/state/turn-status";
 import { forgetLiveReplies, noteLiveReplyEvent, noteLiveReplyMessage } from "@/state/live-reply";
@@ -23,17 +23,7 @@ export interface LiveFrame {
   event?: unknown;
 }
 
-interface LiveMessageEvent {
-  data: string;
-  lastEventId?: string;
-}
-
-export interface LiveEventSourceLike {
-  onopen: (() => void) | null;
-  onerror: (() => void) | null;
-  onmessage: ((event: LiveMessageEvent) => void) | null;
-  close: () => void;
-}
+export type { LiveEventSourceLike };
 
 interface ListenerTarget {
   addEventListener: (type: string, listener: () => void) => void;

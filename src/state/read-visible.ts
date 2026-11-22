@@ -1,9 +1,10 @@
 import { botShowsUnread } from "@/lib/bot-unread";
 import type { AppState, BotAnnouncement, Group } from "./store";
+import { serverFetch } from "@/lib/relay-server";
 
 type SendRead = (path: string, threadId: string, updatedAt: number) => void;
 const sendRead: SendRead = (path, threadId) => {
-  void fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId }) }).catch(() => {});
+  void serverFetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId }) }).catch(() => {});
 };
 
 function visibleThreadIds(state: AppState, kind: "bot" | "group", ownerId: string, shown?: string): string[] {
