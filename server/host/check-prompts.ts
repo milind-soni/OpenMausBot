@@ -24,8 +24,16 @@ function when(ms: number, timeZone: string | undefined): string {
   }
 }
 
+const emailLine = (email: EmailHeader): string =>
+  `id ${clean(email.id, 120)} · from ${clean(email.from, 160)} · subject ${clean(email.subject, 200)} · preview ${clean(email.preview, 300)}`;
+
 export function emailRecords(emails: readonly EmailHeader[]): string {
-  return recordsBlock("Gmail", emails.map((email) => `id ${clean(email.id, 120)} · from ${clean(email.from, 160)} · subject ${clean(email.subject, 200)} · preview ${clean(email.preview, 300)}`));
+  const gmail = emails.filter((email) => email.app !== "outlook");
+  const outlook = emails.filter((email) => email.app === "outlook");
+  return [
+    ...(gmail.length ? [recordsBlock("Gmail", gmail.map(emailLine))] : []),
+    ...(outlook.length ? [recordsBlock("Outlook", outlook.map(emailLine))] : []),
+  ].join("\n");
 }
 
 export function meetingRecords(items: CheckItems["prep"], timeZone: string | undefined): string {
@@ -47,7 +55,7 @@ export function watchPrompt(input: { instructions: string; items: CheckItems; ti
   const { items } = input;
   return [
     input.instructions.trim(),
-    "Your checks found what is below. Work only from these records and from reading the person's Gmail and Google Calendar.",
+    "Your checks found what is below. Work only from these records and from reading the person's Gmail, Outlook and Google Calendar.",
     ...(items.mail.length ? [
       "New emails. Pick the ones the person must not miss: one that needs a reply from them, one from someone they meet today, or one with a deadline. Judge from the sender, subject and preview.",
       emailRecords(items.mail),

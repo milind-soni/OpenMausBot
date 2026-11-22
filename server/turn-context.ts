@@ -54,12 +54,16 @@ export function buildRecoveryText(input: {
   ].join("\n");
 }
 
+/** Whether a turn carries on its engine's session rather than rebuilding it from the transcript. */
+export const canResume = (input: Pick<TurnContextInput, "rewound" | "fresh" | "externallyUpdated">): boolean =>
+  !input.rewound && !input.fresh && !input.externallyUpdated;
+
 export function buildTurnContext(input: TurnContextInput): {
   turnText: string;
   resume: boolean;
 } {
-  const { text, transcript, rewound, fresh, externallyUpdated, replaysNatively } = input;
-  const resume = !rewound && !fresh && !externallyUpdated;
+  const { text, transcript, rewound, externallyUpdated, replaysNatively } = input;
+  const resume = canResume(input);
   const replay = !resume && !replaysNatively && transcript.length > 0;
   if (!replay) return { turnText: text, resume };
   return {
