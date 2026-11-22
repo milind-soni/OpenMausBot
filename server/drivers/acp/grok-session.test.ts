@@ -163,6 +163,27 @@ describe("Grok changes model and effort inside the running session", () => {
     }
   });
 
+  // grok 1.0.41 signed in to an account without grok-4.7 answers set_model "Invalid params: unknown model id".
+  it("says in plain words which models Grok offers when it refuses one it does not, without a second process", async () => {
+    const { instance, recorder, calls, processes, ask } = await start("grok-model-not-offered", {
+      FAKE_ACP_MODE: "set-model-invalid-params", FAKE_ACP_SESSION_MODELS: "grok-4.6|Grok 4.6,grok-4.5|Grok 4.5",
+    });
+    const threadId = "t-grok-model-not-offered";
+    try {
+      expect(await ask({ threadId, model: "grok-4.6" })).toMatchObject({ ok: true });
+      expect(await ask({ threadId, model: "grok-4.7", resumeCursor: "fake-acp-session" })).toMatchObject({ ok: false });
+      const errors = recorder.events.filter((event) => event.type === "runtime.error").map((event) => (event as { message: string }).message);
+      expect(errors).toEqual([
+        "This Grok sign-in doesn't offer grok-4.7. It offers grok-4.6 and grok-4.5: choose one of those as this bot's model.",
+      ]);
+      expect(processes()).toBe(1);
+      expect(calls().filter((call) => call.method === "session/prompt")).toHaveLength(1);
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+    }
+  });
+
   it("starts a new process when the effort is cleared, since a running session cannot drop one", async () => {
     const { instance, recorder, processes, ask } = await start("grok-live-cleared", { FAKE_ACP_GROK_EFFORT: "1" });
     const threadId = "t-grok-live-cleared";
