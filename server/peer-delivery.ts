@@ -65,13 +65,15 @@ export async function withTargetsHere<Call extends { botIds: string[] }>(call: C
   const rest = await local({ ...call, botIds: [...here] });
   const theirs = Array.isArray(rest.body.receipts) ? rest.body.receipts as PeerDeliveryReceipt[] : [];
   const ok = delivered || rest.status === 200;
-  const errors = [...refused, ...(typeof rest.body.error === "string" ? [rest.body.error] : [])];
+  // The local part's error and not-sent list are rebuilt below, so a success never carries its error.
+  const { instructionOnly: localInstructionOnly, error: localError, notSent: localNotSent, ...restBody } = rest.body;
+  const errors = [...refused, ...(typeof localError === "string" ? [localError] : [])];
+  const notSent = [...errors, ...(typeof localNotSent === "string" ? [localNotSent] : [])];
   // Instruction-only is the whole call's verdict: nothing was delivered anywhere and no refusal elsewhere is a real
   // failure. One genuine refusal, or a delivery, keeps this a failed call however the local part answered.
-  const { instructionOnly: localInstructionOnly, ...restBody } = rest.body;
   const instructionOnly = !ok && refused.length === 0 && localInstructionOnly === true;
   return { status: ok ? 200 : rest.status, body: { ...restBody, receipts: [...receipts, ...theirs],
-    ...(ok ? { message: [mine, rest.body.message].filter(Boolean).join(" "), ...(errors.length ? { notSent: errors.join("; ") } : {}) } : { error: errors.join("; ") }),
+    ...(ok ? { message: [mine, rest.body.message].filter(Boolean).join(" "), ...(notSent.length ? { notSent: notSent.join("; ") } : {}) } : { error: errors.join("; ") }),
     ...(instructionOnly ? { instructionOnly: true } : {}) } };
 }
 
