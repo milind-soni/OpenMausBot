@@ -150,14 +150,19 @@ describe("Escape in the composer", () => {
   });
 
   it("stays out of the composer when Escape comes between a finished paste and its refocus", async () => {
+    const frames: FrameRequestCallback[] = [];
+    const runFrames = () => frames.splice(0).forEach((frame) => frame(0));
+    vi.stubGlobal("requestAnimationFrame", (frame: FrameRequestCallback) => frames.push(frame));
+    vi.stubGlobal("cancelAnimationFrame", () => {});
     const input = render();
-    await nextFrame();
+    runFrames();
     focusWith(input, "");
     pasteFile(input);
     fixture.finishIntake();
     await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(frames).toHaveLength(1);
     pressEscape(input);
-    await nextFrame();
+    runFrames();
     expect(document.activeElement).not.toBe(input);
   });
 
