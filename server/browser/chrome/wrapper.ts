@@ -66,10 +66,27 @@ export function batchQuote(value: string): string {
   return `"${value.replaceAll("%", "%%")}"`;
 }
 
+/** Hides the console the launcher's cmd.exe owns: agent-browser starts it visible (no CREATE_NO_WINDOW), and the blank
+ * window would stay on the desktop while the browser runs (#6916). Only this console: ShowWindow on GetConsoleWindow, and
+ * PowerShell adds none. Batch files double every percent, and this line holds none. */
+const HIDE_OWN_CONSOLE = "powershell -NoProfile -NonInteractive -Command \"$w = Add-Type -MemberDefinition"
+  + " '[DllImport(\"user32.dll\")] public static extern IntPtr GetConsoleWindow();"
+  + " [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);'"
+  + " -Name W -Namespace M -PassThru; $w::ShowWindow($w::GetConsoleWindow(), 0) | Out-Null\"";
+
 export function launcherScript(settings: LauncherSettings, platform: NodeJS.Platform = process.platform): string {
   const flags = launcherFlags(settings, platform);
   if (platform === "win32") {
-    return ["@echo off", `${batchQuote(settings.chrome)} %* ${flags.map(batchQuote).join(" ")}`, ""].join("\r\n");
+    // agent-browser (Rust) runs this .cmd through cmd.exe without CREATE_NO_WINDOW, so the shell's blank console shows on
+    // the desktop and stays there while the browser runs (#6916). The launcher hides only the console it owns; Chrome's own
+    // windows, and any terminal the person opened, are untouched. PowerShell is a console app and joins this console, so it
+    // opens no window of its own; `\"` is how Windows PowerShell reads a quote inside a quoted command line.
+    return [
+      "@echo off",
+      HIDE_OWN_CONSOLE,
+      `${batchQuote(settings.chrome)} %* ${flags.map(batchQuote).join(" ")}`,
+      "",
+    ].join("\r\n");
   }
   // $headless holds one word without spaces or patterns, so it is expanded unquoted: nothing at all when Chrome has a window.
   const chrome = `${shellQuote(settings.chrome)} "$@" ${flags.map(shellQuote).join(" ")} $headless`;
