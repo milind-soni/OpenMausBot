@@ -655,6 +655,8 @@ it.each(["SIGTERM", "SIGKILL"] as const)("runs each teammate turn a restart cut 
     // Only a turn's POST carries a body; the Ollama probe GETs /api/version first (ollama-context.ts).
     if (req.method !== "POST") { res.writeHead(404); res.end(); return; }
     for await (const chunk of req) body += chunk;
+    // Naming a work thread a hand-off opened is a one-shot of its own, not a step of any turn here: it gets no title.
+    if (body.includes("Reply with only a short title")) { res.writeHead(404); res.end(); return; }
     const content = JSON.parse(body).messages.filter((m: any) => m.role === "user").at(-1)?.content;
     chats.push(typeof content === "string" ? content : JSON.stringify(content));
     if (chats.length === 1) return;
