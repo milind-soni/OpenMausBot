@@ -418,7 +418,7 @@ export function ChatV2({ profile, phoneLayout = false }: { profile: Bot; phoneLa
     <footer className="v2-dock chat-column-dock">{(viewport.showJumpToLatest || viewport.laterCount > 0) && <JumpToLatestButton className="v2-jump-to-latest bottom-full mb-2" onClick={viewport.jumpToLatest} />}
       <LiveCallBar bot={bot} />
       <ChatV2Presence bot={bot} stopping={stopping} />
-      {writable ? <Composer bot={profile} smoothHeight onSendFrom={(sendId, input) => {
+      {writable ? <Composer bot={profile} chatHistory={historyPage.history} smoothHeight onSendFrom={(sendId, input) => {
         if (!reducedMotion()) sendOrigin.current = { sendId, bounds: input.getBoundingClientRect() };
       }} locked={Boolean(bot.switchingTo)} replyTo={draft.replyTo} onClearReply={draft.clearReply} onRestoreReply={draft.restoreReply} onConsumeReply={draft.consumeReply}
         onEditLast={lastTyped && !bot.busy && canEditTypedMessage(lastTyped) ? () => setEditing(lastTyped) : undefined} /> :

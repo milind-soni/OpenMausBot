@@ -10,7 +10,7 @@ import { ComposerContextMenu } from "./ComposerContextMenu";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const store = { state: {}, dispatch: vi.fn(), flushBotPatches: vi.fn(async () => null) } as unknown as ReturnType<typeof useStore>;
+const store = { state: { transcriptGeneration: {} }, dispatch: vi.fn(), flushBotPatches: vi.fn(async () => null) } as unknown as ReturnType<typeof useStore>;
 const line = (id: string, role: Message["role"], kind: Message["kind"] = "text", more: Partial<Message> = {}): Message => ({ id, role, kind, at: 1, text: id, ...more });
 const chat = (context: NonNullable<TaskUsage["context"]>, more: Partial<Bot> = {}): Bot => ({
   id: "b1", name: "Pepper", threadId: "t1", busy: false,
@@ -48,6 +48,7 @@ const counted: ContextBreakdown = {
 
 beforeEach(() => {
   breakdown = null;
+  store.state.transcriptGeneration = {};
   fetched = vi.fn(async (url: unknown) => new Response(String(url).endsWith("/context") ? JSON.stringify({ threadId: "t1", breakdown }) : "{}", { status: 200, headers: { "content-type": "application/json" } }));
   vi.stubGlobal("fetch", fetched);
   host = document.createElement("div");
@@ -192,19 +193,19 @@ describe("the composer's context button", () => {
   });
 
   it("drops the count and asks again when another branch of the conversation is picked", async () => {
-    const bot = chat({ tokens: 12, window: 200_000 }, {
-      id: "b5", activeLeafId: "m2",
-      messages: [line("m1", "user"), line("m2", "bot", "text", { parentId: "m1" }), line("m2b", "bot", "text", { parentId: "m1" })],
-    });
+    const bot = chat({ tokens: 12, window: 200_000 }, { id: "paged-branch", activeLeafId: "m2", messages: [] });
+    const first = [line("m1", "user"), line("m2", "bot")];
+    const second = [first[0]!, line("m2b", "bot")];
     const asked = () => requests().filter(([path]) => path.endsWith("/context")).length;
     breakdown = { tokens: 6_000, window: 200_000, categories: [{ id: "messages", kind: "used", tokens: 6_000 }, { id: "free_space", kind: "free", tokens: 194_000 }] };
-    await render({ bot });
+    await render({ bot, chatHistory: first });
     await press(trigger());
     expect(words()).toContain("6k of 200k tokens");
     expect(asked()).toBe(1);
 
     breakdown = null;
-    await render({ bot: { ...bot, activeLeafId: "m2b" } as Bot });
+    store.state.transcriptGeneration = { t1: 1 };
+    await render({ bot: { ...bot, activeLeafId: "m2b" }, chatHistory: second });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     expect(asked()).toBe(2);
     expect(words()).not.toContain("6k");

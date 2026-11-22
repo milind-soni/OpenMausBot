@@ -255,6 +255,16 @@ describe("navigation while a reconnect snapshot is in flight", () => {
 });
 
 describe("the default Chat V2", () => {
+  it("enables context actions when a settled chat is loaded through paged history", async () => {
+    const reply: Message = { ...line("finished"), role: "bot", turnTerminal: true };
+    await mount(true, undefined, { pages: { "": { messages: [line("request"), reply], hasMore: false } } });
+    await vi.waitFor(() => expect(container.querySelector('[data-mid="finished"]')).not.toBeNull());
+    expect(shown().messages).toEqual([]);
+    flushSync(() => container.querySelector<HTMLButtonElement>("[data-composer-context] > button")!.click());
+    expect(container.querySelector<HTMLButtonElement>("[data-context-compact]")?.disabled).toBe(false);
+    expect(container.querySelector<HTMLButtonElement>("[data-context-fresh]")?.disabled).toBe(false);
+  });
+
   it("reloads the open conversation after a reconnect with the same active leaf", async () => {
     await mount(true);
     await vi.waitFor(() => expect(container.querySelector('[data-mid="a"]')?.textContent).toContain("a"));

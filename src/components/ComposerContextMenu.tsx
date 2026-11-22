@@ -8,6 +8,7 @@ import { contextReading, contextRowLabel, contextRows, roomContextReadings, type
 import { t } from "@/lib/i18n";
 import { formatTokens, type ContextTone } from "@/lib/usage";
 import { api } from "@/state/api";
+import { useStoreSelector } from "@/state/store-select";
 import { visibleMessages, type Bot, type Group, type Message } from "@/state/store";
 import type { ContextBreakdown } from "../../shared/context-breakdown";
 import { useContextAction } from "./ContextWarning";
@@ -94,27 +95,15 @@ let requests = 0;
 /** The engine's own count, asked for while the panel is open in Advanced mode and again whenever a turn starts or ends. The last answer
  * shows until the new one lands; none is asked for or shown between a summary or fresh start and the end of the next turn,
  * and a count taken on one branch of the conversation is dropped when another is picked. */
-function useContextBreakdown(bot: Bot | undefined, open: boolean): ContextBreakdown | null {
+function useContextBreakdown(bot: Bot | undefined, messages: readonly Message[], open: boolean): ContextBreakdown | null {
   const id = bot?.id;
   const threadId = bot?.threadId;
   const busy = Boolean(bot?.busy);
-  const messages = bot ? visibleMessages(bot) : [];
   const slot = `${id}:${threadId ?? ""}`;
   const withheld = summaryNotCounted(messages, busy);
-  const leaf = messages.at(-1)?.id;
-  const [path, setPath] = useState({ slot, leaf, switches: 0 });
-  if (path.slot !== slot || path.leaf !== leaf) {
-    // A message that is still in the conversation but no longer shown means another branch was picked.
-    const switched = path.slot === slot && !messages.some((message) => message.id === path.leaf) && Boolean(bot?.messages.some((message) => message.id === path.leaf));
-    setPath({ slot, leaf, switches: path.slot === slot ? path.switches + Number(switched) : 0 });
-  }
-  const moment = `${messages.filter((message) => message.kind === "compaction").length}:${withheld}:${path.switches}`;
+  const generation = useStoreSelector((state) => threadId ? state.transcriptGeneration[threadId] ?? 0 : 0);
+  const moment = `${messages.filter((message) => message.kind === "compaction").length}:${withheld}:${generation}`;
   const [answer, setAnswer] = useState<{ slot: string; moment: string; breakdown: ContextBreakdown | null } | null>(null);
-  useEffect(() => {
-    if (!path.switches) return;
-    lastBreakdown.delete(slot);
-    newestRequest.delete(slot);
-  }, [slot, path.switches]);
   useEffect(() => {
     if (withheld) {
       lastBreakdown.delete(slot);
@@ -139,10 +128,9 @@ function useContextBreakdown(bot: Bot | undefined, open: boolean): ContextBreakd
   return last?.moment === moment ? last.breakdown : null;
 }
 
-function ChatContext({ bot, reading, breakdown, detailed, onDone }: { bot: Bot; reading: ContextReading | null; breakdown: ContextBreakdown | null; detailed: boolean; onDone: () => void }) {
+function ChatContext({ bot, messages, reading, breakdown, detailed, onDone }: { bot: Bot; messages: readonly Message[]; reading: ContextReading | null; breakdown: ContextBreakdown | null; detailed: boolean; onDone: () => void }) {
   const compact = useContextAction();
   const fresh = useContextAction();
-  const messages = visibleMessages(bot);
   const rows = contextRows(breakdown);
   const atFreshStart = messages.at(-1)?.compaction?.fresh === true;
   const idle = !bot.busy && !compact.pending && !fresh.pending && messages.length > 0 && !atFreshStart;
@@ -193,7 +181,7 @@ function RoomContext({ group, members, detailed }: { group: Group; members: read
   );
 }
 
-export function ComposerContextMenu({ bot, group, members, className }: { bot?: Bot; group?: Group; members?: readonly Bot[]; className?: string }) {
+export function ComposerContextMenu({ bot, chatHistory, group, members, className }: { bot?: Bot; chatHistory?: readonly Message[]; group?: Group; members?: readonly Bot[]; className?: string }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLSpanElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -204,9 +192,10 @@ export function ComposerContextMenu({ bot, group, members, className }: { bot?: 
     if (open) panel.current?.focus();
   }, [open]);
 
-  const breakdown = useContextBreakdown(group ? undefined : bot, open);
+  const messages = chatHistory ?? (bot ? visibleMessages(bot) : []);
+  const breakdown = useContextBreakdown(group ? undefined : bot, messages, open);
   if (!bot && !group) return null;
-  const context = bot && currentContext(bot, visibleMessages(bot));
+  const context = bot && currentContext(bot, messages);
   const fullest = group
     ? roomContextReadings(group, members ?? []).map((entry) => entry.reading).sort((a, b) => (b.percent ?? 0) - (a.percent ?? 0))[0]
     : contextReading(breakdown?.tokens, breakdown?.window) ?? contextReading(context?.tokens, context?.window);
@@ -221,7 +210,7 @@ export function ComposerContextMenu({ bot, group, members, className }: { bot?: 
       <OverlayPresence>{open && (
         <div ref={panel} role="dialog" tabIndex={-1} aria-label={t("contextMenu.title")} data-context-panel
           className={cn("animate-pop-in absolute bottom-full end-0 z-50 mb-2 max-h-[min(28rem,calc(100dvh-8rem))] w-72 max-w-[calc(100vw-1.5rem)] overflow-y-auto overscroll-contain outline-none", MENU_SHEET)}>
-          {group ? <RoomContext group={group} members={members ?? []} detailed={true} /> : bot && <ChatContext bot={bot} reading={fullest ?? null} breakdown={breakdown} detailed={true} onDone={close} />}
+          {group ? <RoomContext group={group} members={members ?? []} detailed={true} /> : bot && <ChatContext bot={bot} messages={messages} reading={fullest ?? null} breakdown={breakdown} detailed={true} onDone={close} />}
         </div>
       )}</OverlayPresence>
     </span>

@@ -1174,8 +1174,8 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
         data-sidebar-top-row={corner ? "corner" : true}
         className={cn(
           "flex items-center",
-          // The corner is no drag region and takes no clicks but its buttons': the tiles rise into the rest of it.
-          density === "icons" ? "flex-col gap-1 px-2 pt-3.5 pb-1" : corner ? "pointer-events-none relative h-[34px] items-start justify-end px-1.5 pt-1.5" : simpleDesk ? "relative h-[60px] items-start pl-4 pr-4 pt-3" : "relative pl-4 pr-2",
+          density === "icons" ? "flex-col gap-1 px-2 pt-3.5 pb-1" : simpleDesk ? "relative h-[60px] items-start" : "relative pl-4 pr-2",
+          density !== "icons" && simpleDesk && (corner ? "pointer-events-none justify-end px-1.5 pt-1.5" : "px-4 pt-3"),
           density !== "icons" && !simpleDesk && !lights && "h-12 max-md:h-16",
         )}
         style={corner ? undefined : density !== "icons" && lights && !simpleDesk ? { ...windowDragStyle, height: MAC_TRAFFIC_LIGHT_CENTER_Y * 2 } : windowDragStyle}
@@ -1246,7 +1246,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
           onToggle={layoutInteractive ? () => toggleSection(PINNED_THREADS_SECTION_ID) : undefined}
         />
       )}
-      {tiles && <SidebarTileGrid primary={primary} row={botRow} corner={corner} />}
+      {tiles && <SidebarTileGrid primary={primary} row={botRow} />}
       {simpleDesk && !tiles && !desktopPinnedRows.length && <SidebarNoBots />}
       </GlassBar>
 

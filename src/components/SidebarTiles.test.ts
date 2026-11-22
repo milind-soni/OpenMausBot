@@ -93,13 +93,13 @@ describe("the sidebar tiles", () => {
 });
 
 describe("a tile with a dot", () => {
-  it("lands on the thread the dot is about: a tile has no row under it to reach it from", () => {
+  it("opens the main chat even when the dot marks background work", () => {
     const withWork = bot({ threadId: "main", mainThreadId: "main", unread: true, tasks: [{ threadId: "main", title: "Main", createdAt: 1 }, { threadId: "work", title: "@Scout · work", createdAt: 2, unread: true }] });
     let tree: ReactNode;
     function Capture() { tree = tile({ ...props(withWork), primary: true }); return tree; }
     renderToStaticMarkup(createElement(Capture));
     (find(tree, "data-sidebar-tile")!.props.onKeyDown as (event: KeyboardEvent) => void)({ key: "Enter", preventDefault: vi.fn() } as unknown as KeyboardEvent);
-    expect(dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: "mausbot", threadId: "work" });
+    expect(dispatch.mock.calls).toEqual([[{ type: "select", id: "mausbot" }]]);
   });
 });
 

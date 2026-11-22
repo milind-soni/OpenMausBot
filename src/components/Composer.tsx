@@ -94,6 +94,7 @@ interface ComposerDraftSnapshot extends ComposerSendSnapshot {
 
 export function Composer({
   bot: profile,
+  chatHistory,
   group,
   members,
   onEditLast,
@@ -106,6 +107,7 @@ export function Composer({
   onSendFrom,
 }: {
   bot?: Bot;
+  chatHistory?: readonly Message[];
   group?: Group;
   members?: Bot[];
   onEditLast?: () => void;
@@ -789,7 +791,7 @@ export function Composer({
           label={t("composer.placeholder.bot", { name: group ? group.name : (bot?.name ?? "") })}
           />
           <div data-composer-actions className={cn("flex items-center", "gap-1", !singleRow && "@max-[30rem]/composer:ml-auto", stacked && "ml-auto")}>
-        {!locked && <ComposerContextMenu bot={bot} group={group} members={members} className={cn("size-8", "text-ink-secondary interaction:bg-raised/50 hover:text-ink")} />}
+        {!locked && <ComposerContextMenu bot={bot} chatHistory={chatHistory} group={group} members={members} className={cn("size-8", "text-ink-secondary interaction:bg-raised/50 hover:text-ink")} />}
         {!locked && !busy && micReady && (
           <button
             onClick={toggleMic}

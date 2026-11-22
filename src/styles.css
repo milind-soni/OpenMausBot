@@ -3556,13 +3556,6 @@ button:disabled.bg-danger {
   -webkit-app-region: no-drag;
 }
 
-/* Simple's sidebar in the window frame: Search and New sit in its top corner
-   (Sidebar's corner row), and the bot tiles rise beside them while their first
-   row leaves the corner free (SidebarTileGrid measures it). */
-[data-sidebar-top-row="corner"] + [data-sidebar-tiles][data-beside-corner] {
-  margin-top: -34px;
-}
-
 /* Room speaker names. Each skin sets a tone of the bot's palette that clears
    4.5:1 on the thread (--color-app). The class below only picks the token. */
 .bot-identity[data-bot-color="green"] { color: var(--identity-green); }

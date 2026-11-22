@@ -105,7 +105,7 @@ describe("sidebar top row", () => {
     desktop();
     const html = render();
     const row = topRow(html);
-    expect(row, "the bot tiles rise into the rest of the corner: no drag region, no clicks but the buttons'").toMatch(/^data-sidebar-top-row="corner" class="[^"]*\bpointer-events-none\b[^"]*\bh-\[34px\][^"]*\bitems-start\b[^"]*">/);
+    expect(classesOf(row, "data-sidebar-top-row")).toEqual(expect.arrayContaining(["h-[60px]", "pointer-events-none", "items-start"]));
     expect(classesOf(row, "data-sidebar-top-row")).toEqual(expect.arrayContaining(["justify-end", "px-1.5", "pt-1.5"]));
     expect(row).not.toContain("data-workspace-switcher");
     expect(html).not.toContain("Switch server:");
@@ -121,6 +121,8 @@ describe("sidebar top row", () => {
     expect(html).not.toContain("data-sidebar-edge-toggle");
     expect(html).not.toContain('title="Active Threads"');
     expect(html).not.toContain("data-sidebar-search-pill");
+    fixture.windowChrome = undefined;
+    expect(classesOf(topRow(render()), "data-sidebar-top-row")).toContain("h-[60px]");
   });
 
   it("with the frame turned off on macOS, makes room for the traffic lights in its corner again, the rail's button after them", () => {
