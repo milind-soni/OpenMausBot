@@ -23,6 +23,7 @@ import {
 } from "./routes.ts";
 import { createJsonScrubber } from "./json-scrub.ts";
 import { acceptsGzip, gzipCandidate, sendTunnelJson, varyOnEncoding } from "./tunnel-gzip.ts";
+import { forwardWebSession, forwardWebSessionUpgrade, webSessionPeer, type WebSessionTarget } from "./session-route.ts";
 import { CompanionViewerRelay, requestTarget } from "./viewer-relay.ts";
 import { createSseScrubber, isJson, scrub } from "./wire.ts";
 
@@ -383,6 +384,8 @@ function harnessControlCheck(options: ProxyOptions) {
 }
 
 export function createProxyHandler(options: ProxyOptions) {
+  const webSessionTarget = (req: IncomingMessage): WebSessionTarget =>
+    ({ harnessPort: options.harnessPort, headersTimeoutMs: proxyHeadersTimeoutMs(req.url ?? "", options.headersTimeoutMs) });
   const viewers = new CompanionViewerRelay({ checkControl: harnessControlCheck(options) });
   const capabilityStreams = new Map<string, Set<() => void>>();
   /** Each device's open `/api/events` streams, for the events the sidecar itself sends. */
@@ -407,6 +410,8 @@ export function createProxyHandler(options: ProxyOptions) {
     const token = bearerToken(req.headers.authorization);
     const device = options.authenticate(token);
     const e2e = e2eContextOf(req.socket);
+    const webPeer = webSessionPeer(e2e, req);
+    if (webPeer) return forwardWebSession(webSessionTarget(req), webPeer, req, res);
     if (!e2e && listener === "lan" && device?.e2eAt && path !== "/api/health") return sendJson(res, 426, UPDATE_APP);
     const e2eDenial = e2e ? e2eRefusal(e2e, method, path, device?.id) : null;
     if (e2eDenial) return sendJson(res, 401, { error: e2eDenial });
@@ -801,6 +806,8 @@ export function createProxyHandler(options: ProxyOptions) {
     const token = bearerToken(req.headers.authorization);
     const device = options.authenticate(token);
     const e2e = e2eContextOf(req.socket);
+    const webPeer = webSessionPeer(e2e, req);
+    if (webPeer) return forwardWebSessionUpgrade(webSessionTarget(req), webPeer, req, socket, head);
     if (!e2e && listener === "lan" && device?.e2eAt) {
       socket.end("HTTP/1.1 426 Upgrade Required\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
       return;
