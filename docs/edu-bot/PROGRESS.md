@@ -8,8 +8,8 @@ Hecho = verificado. Cada línea dice cómo se probó.
 | --- | --- | --- |
 | M0 | El repo instala, compila y pasa tests en Linux | Hecho (PR #1, 21-11) |
 | M1 | Nombre Edu Bot, licencias, sin telemetría, sin `enterprise/` | Hecho (PR #3, #4, #5, 21-11) |
-| M2 | Memoria Edu en cada bot, con aprobaciones | En curso (exploración) |
-| M3 | Organización, áreas y bots en archivos | Pendiente |
+| M2 | Memoria Edu en cada bot, con aprobaciones | Hecho (PR #7, #8, #9, #10, 22-11) |
+| M3 | Organización, áreas y bots en archivos | En curso (exploración) |
 | M4 | Conector SQL, permisos por bot, registro de auditoría | Pendiente |
 | M5 | CI en 3 sistemas, instaladores, README, versión 0.1.0 | Pendiente |
 | M6 | Auditoría final con dos proveedores | Pendiente |
@@ -91,7 +91,13 @@ Plan (exploración de Claude, `~/Projects/edu-bot-wt/reports/claude-m2-scout.md`
   Grok encontró que una nota podía dar órdenes al bot (inyección de prompt); se arregló en 3 rondas, hasta PASS.
   Si Edu falla al conectar, sale una línea tranquila ("se reintenta en el próximo mensaje"), nunca un error.
   Se corrigió un error del PR1: con algunos motores, si Edu fallaba, fallaba toda la respuesta.
-- [ ] PR4: Edu crew (plan, construir, revisar) como opción por bot, apagada por defecto. En curso (Claude).
+- [x] PR4 (#10, fusionado): Edu crew. Un bot puede pedir un plan (plan, construir, revisar) o una revisión de
+  otro proveedor. Apagado por defecto. Cada paso del plan espera tu aprobación con una tarjeta.
+  Las llaves se borran antes de enviar algo a otro proveedor. Al cerrar la app se detienen los trabajos.
+  Agy auditó 3 rondas: 7 hallazgos (escape por enlaces, revisor del mismo proveedor, procesos vivos,
+  secretos), luego 1, luego PASS. CI verde (34).
+- [x] Prueba final en la app real, aislada: el bot "Edu" tiene su cerebro listo (Edu 6.0.0), lee el cerebro global
+  temporal y no toca tu `~/.edu`. Cero errores en logs.
 
 ## M4: SQL, permisos, auditoría y conectores
 
