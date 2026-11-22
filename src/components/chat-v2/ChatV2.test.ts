@@ -126,3 +126,14 @@ it("keeps live work when the previous turn and the newest request share a timest
     expect.objectContaining({ kind: "turn", turnId: "new", messages: [live], active: true }),
   ]);
 });
+
+it("hides wait follow-up prompts while keeping the notice, reply, and matching typed text", () => {
+  const text = "[Wait finished: the build] Check the deployment.";
+  const typed = { id: "typed", at: 1, role: "user", kind: "text", text } as const;
+  const notice = { id: "notice", at: 2, role: "bot", kind: "text", text: "The build is done.", wait: { id: "wait", status: "fired" } } as const;
+  const followUp = { ...typed, id: "internal", at: 3, automated: true };
+  const reply = { id: "reply", at: 4, role: "bot", kind: "text", text: "Deployment succeeded." } as const;
+  expect(groupChatWork([typed, notice, followUp, reply], false)).toEqual(
+    [typed, notice, reply].map(message => ({ kind: "message", message })),
+  );
+});

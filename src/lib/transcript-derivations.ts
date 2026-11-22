@@ -1,3 +1,4 @@
+import type { WireMessage } from "../../shared/wire";
 import type { Message } from "@/state/store";
 import { activeLocale, t } from "@/lib/i18n";
 import { lastNonReceipt } from "@/lib/receipts";
@@ -69,4 +70,9 @@ export function dayLabel(at: number, today = localDay(Date.now())): string {
 
 export function botLineText(message: { text?: string; textCode?: string; textParams?: ServerTextParams }): string {
   return noticeText(message.textCode, message.text ?? "", message.textParams);
+}
+
+export function isWaitFollowUpMessage(message: Pick<WireMessage, "role" | "kind" | "automated" | "text">): boolean {
+  return message.role === "user" && message.kind === "text" && message.automated === true
+    && Boolean(message.text?.startsWith("[Wait finished: "));
 }

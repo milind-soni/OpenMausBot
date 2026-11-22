@@ -37,14 +37,27 @@ describe("quote chip in the composer", () => {
   });
 });
 
-it("renders a draft photo as a bare thumbnail with the sent photo's size", () => {
+it("renders a draft photo as a smaller thumbnail at both viewport sizes", () => {
   const html = renderToStaticMarkup(createElement(ComposerAttachments, {
     items: [{ kind: "image", id: "photo", path: "", previewUrl: "blob:preview", name: "photo.png", size: 4096, mime: "image/png" }],
     onAdd: noop, onRemove: noop, onChangeCitation: noop, onDisplayInChatBox: noop,
     notice: null, onNotice: noop, uploadImage: async () => null,
   }));
-  expect(html).toContain("w-[min(150px,40vw)]");
+  expect(html).toContain("w-16");
+  expect(html).toContain("md:w-20");
   expect(html).toContain('aria-label="Remove file"');
   expect(html).toContain('alt="photo.png"');
   expect(html).not.toMatch(/border-hairline|>IMAGE<|4 KB/);
+});
+
+it("shows a draft file in one row with a remove button", () => {
+  const html = renderToStaticMarkup(createElement(ComposerAttachments, {
+    items: [{ kind: "file", id: "file", path: "/draft/slides.pptx", name: "slides.pptx", size: 4096 }],
+    onAdd: noop, onRemove: noop, onChangeCitation: noop, onDisplayInChatBox: noop,
+    notice: null, onNotice: noop, uploadImage: async () => null,
+  }));
+  expect(html).toContain(">slides.pptx<");
+  expect(html).toContain('aria-label="Remove file"');
+  expect(html).toContain("lucide-file-text");
+  expect(html).not.toMatch(/>FILE<|4 KB|aria-label="Download/);
 });

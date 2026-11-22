@@ -4,7 +4,7 @@ import { t } from "@/lib/i18n";
 import { activityText } from "@/lib/activity-text";
 import { failedTurnCause } from "../../shared/failed-turn";
 import { isStoppedTurnName } from "../../shared/client-cancel";
-import { localDay } from "@/lib/transcript-derivations";
+import { isWaitFollowUpMessage, localDay } from "@/lib/transcript-derivations";
 
 export type ActivityTranscriptItem =
   | { kind: "message"; message: Message }
@@ -200,6 +200,7 @@ export function groupChatWork(messages: Message[], busy: boolean, history: reado
   for (const message of messages) {
     if (message.reaction || message.kind === "digest") continue;
     if (message.role === "user") request = message;
+    if (isWaitFollowUpMessage(message)) continue;
     const terminal = message.turnId ? terminalByTurn.get(message.turnId) : undefined;
     const active = busy && request === latestRequest && !terminal && message.turnId === latestTurn;
     const narration = message.turnId && isNarration(message, message.turnId) && !message.attachments?.length &&

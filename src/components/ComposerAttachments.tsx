@@ -1,6 +1,6 @@
 import { CachedChatImage } from "./CachedChatImage";
 import { useEffect, useRef, useState } from "react";
-import { ClipboardPaste, File as FileIcon, LoaderCircle, MessageSquareText, X } from "lucide-react";
+import { ClipboardPaste, FileText, LoaderCircle, MessageSquareText, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import {
   attachmentImageUrl,
@@ -10,11 +10,11 @@ import {
   type Attachment,
   type PasteAttachment,
 } from "@/lib/composer-attachments";
-import { AttachmentPreviewDialog, CHAT_IMAGE_THUMBNAIL, previewImage, type PreviewImage } from "./AttachmentPreview";
+import { AttachmentPreviewDialog, previewImage, type PreviewImage } from "./AttachmentPreview";
 import { CitationBadge } from "./CitationUI";
 import type { CitationAttachment } from "@/lib/citations";
 import { t } from "@/lib/i18n";
-import { attachNoticeText, pasteSummaryText, sizeText } from "@/lib/attach-notice";
+import { attachNoticeText, pasteSummaryText } from "@/lib/attach-notice";
 
 /** Electron 32 removed File.path — only the preload can name a file. */
 export function pathForFile(file: File): string {
@@ -133,7 +133,7 @@ export function ComposerAttachments({
       )}
 
       {items.length > 0 && (
-        <div className="mb-2 flex min-w-0 flex-wrap gap-2">
+        <div className="mb-2 flex min-w-0 flex-wrap items-start gap-2">
           {items.map((a) =>
             a.kind === "citation" ? (
               <CitationBadge
@@ -144,9 +144,8 @@ export function ComposerAttachments({
                 solid
               />
             ) : a.kind === "paste" ? (
-              <Chip
+              <PastedTextChip
                 key={a.id}
-                label="PASTED"
                 title={a.text.slice(0, 4000)}
                 onRemove={() => onRemove(a.id)}
               >
@@ -167,9 +166,9 @@ export function ComposerAttachments({
                   <MessageSquareText size={12} aria-hidden="true" />
                   <span>{t("composer.chip.display")}</span>
                 </button>
-              </Chip>
+              </PastedTextChip>
             ) : a.kind === "image" ? (
-              <div key={a.id} className={cn(CHAT_IMAGE_THUMBNAIL, "group relative motion-safe:animate-fade-in")}>
+              <div key={a.id} className="group relative aspect-square w-16 max-w-full rounded-lg md:w-20 motion-safe:animate-fade-in">
                 <button
                   type="button"
                   onClick={() => {
@@ -199,21 +198,25 @@ export function ComposerAttachments({
                   type="button"
                   onClick={() => onRemove(a.id)}
                   aria-label={t("composer.chip.removeFile")}
-                  className="absolute end-1 top-1 flex size-8 items-center justify-center rounded-full bg-black/65 text-white opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 touch:opacity-100"
+                  className="absolute end-1 top-1 flex size-6 items-center justify-center rounded-full bg-black/65 text-white opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 touch:opacity-100"
                 >
                   <X size={15} aria-hidden="true" />
                 </button>
               </div>
             ) : (
-              <Chip key={a.id} label="FILE" title={a.path} onRemove={() => onRemove(a.id)}>
-                <div className="flex h-[76px] items-center gap-2">
-                  <FileIcon size={16} className="shrink-0 text-ink-secondary" />
-                  <div className="min-w-0">
-                    <div className="truncate text-[12px] text-ink">{a.name}</div>
-                    <div className="text-[11px] text-ink-tertiary">{sizeText(a.size)}</div>
-                  </div>
-                </div>
-              </Chip>
+              <div key={a.id} className="flex min-h-[42px] max-w-full items-center gap-2 rounded-xl border border-hairline/25 px-2.5 text-[12px] text-ink-secondary">
+                <FileText size={14} className="shrink-0" aria-hidden="true" />
+                <span dir="auto" title={a.name} className="min-w-0 truncate text-ink">{a.name}</span>
+                <button
+                  type="button"
+                  onClick={() => onRemove(a.id)}
+                  aria-label={t("composer.chip.removeFile")}
+                  title={t("composer.chip.removeFile")}
+                  className="flex size-7 shrink-0 items-center justify-center rounded-lg interaction:bg-raised/50 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                >
+                  <X size={13} aria-hidden="true" />
+                </button>
+              </div>
             ),
           )}
         </div>
@@ -223,20 +226,15 @@ export function ComposerAttachments({
   );
 }
 
-const CHIP_LABEL = { PASTED: "composer.chip.pasted", FILE: "composer.chip.file" } as const;
-
-function Chip({
+function PastedTextChip({
   children,
-  label,
   title,
   onRemove,
 }: {
   children: React.ReactNode;
-  label: keyof typeof CHIP_LABEL;
   title: string;
   onRemove: () => void;
 }) {
-  const Icon = label === "PASTED" ? ClipboardPaste : FileIcon;
   return (
     <div
       title={title}
@@ -247,15 +245,15 @@ function Chip({
     >
       {children}
       <div className="mt-1 flex items-center gap-1">
-        <Icon size={11} className="text-ink-tertiary" />
+        <ClipboardPaste size={11} className="text-ink-tertiary" />
         <span className="rounded border border-hairline/60 px-1 py-px text-[10px] font-medium tracking-wide text-ink-secondary">
-          {t(CHIP_LABEL[label])}
+          {t("composer.chip.pasted")}
         </span>
       </div>
       {/* Not `hidden`: that would take the only way to remove a chip out of the keyboard's reach. */}
       <button
         onClick={onRemove}
-        aria-label={t(label === "PASTED" ? "composer.chip.removePasted" : "composer.chip.removeFile")}
+        aria-label={t("composer.chip.removePasted")}
         className="absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full border border-hairline/60 bg-panel text-ink-secondary opacity-0 transition-opacity hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 touch:opacity-100"
       >
         <X size={11} />

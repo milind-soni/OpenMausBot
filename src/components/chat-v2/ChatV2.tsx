@@ -26,7 +26,7 @@ import { useUnreadDivider } from "@/hooks/use-unread-divider";
 import { useCanWriteIn } from "@/lib/cloud-guest";
 import { userBubbleStyle } from "@/lib/user-bubble-tone";
 import { useReplyDraft } from "@/lib/drafts";
-import { botLineText, canEditTypedMessage } from "@/lib/transcript-derivations";
+import { botLineText, canEditTypedMessage, isWaitFollowUpMessage } from "@/lib/transcript-derivations";
 import { botEngine, failedTurnCause } from "@/lib/failed-turn";
 import { lastNonReceipt } from "@/lib/receipts";
 import { t } from "@/lib/i18n";
@@ -299,11 +299,11 @@ export function ChatV2({ profile, phoneLayout = false }: { profile: Bot; phoneLa
   const lastUser = history.findLast(m => m.role === "user" && m.kind === "text"
     && !peerLine(m) && !m.text?.startsWith(RETRY_LEAD));
   const retryable = lastNonReceipt(history)?.id;
-  const retry = lastUser?.text && !lastUser.id.startsWith("optimistic-") && !bot.busy && writable && sharedRun.mayAct(lastUser.sender)
+  const retry = lastUser?.text && !isWaitFollowUpMessage(lastUser) && !lastUser.id.startsWith("optimistic-") && !bot.busy && writable && sharedRun.mayAct(lastUser.sender)
     ? () => dispatch({ type: "editMessage", botId: bot.id, threadId: bot.threadId, messageId: lastUser.id, text: lastUser.text! })
     : undefined;
   const [editing, setEditing] = useState<Message | null>(null);
-  const lastTyped = history.findLast(m => m.role === "user" && m.kind === "text" && !peerLine(m) && !m.reaction);
+  const lastTyped = history.findLast(m => m.role === "user" && m.kind === "text" && !peerLine(m) && !isWaitFollowUpMessage(m) && !m.reaction);
   const sendOrigin = useRef<{ sendId: string; bounds: DOMRect } | null>(null);
   const transcriptRef = viewport.transcriptRef;
   useLayoutEffect(() => {
