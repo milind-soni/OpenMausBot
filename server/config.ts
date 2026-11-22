@@ -10,10 +10,11 @@ import type { ImageGenerationConfig } from "../shared/image-generation.ts";
 import { imageGenConfigSchema, imageGenPatchSchema, keepKeysOutOfImageModels, type ImageGenCredentialPatch } from "./image-generation-config.ts";
 import { botAvatarUrlSchema } from "../shared/bot-avatar.ts";
 import { writeFileAtomic } from "./atomic.ts";
-import { isValidSshAlias, normalizeVpsConfig, storedVpsServersSchema, vpsConfigSchema, vpsServersSchema, type VpsServer } from "./vps-config.ts";
+import { isValidSshAlias, normalizeVpsConfig, storedVpsServersSchema, vpsConfigSchema, vpsServersSchema, type VpsConfig, type VpsServer } from "./vps-config.ts";
 import { configBackupRefusal, configSaveRefusal, readConfigFile, writeConfigBackup } from "./config-backup.ts";
 import { defaultBotThreads, MAX_CONCURRENT_BOT_THREADS } from "./bot-thread-limits.ts";
 import { anthropicKeyEnv } from "./anthropic-key-env.ts";
+import { DEFAULT_DESKTOP_RESOURCES, type DesktopResources } from "./container-limits.ts";
 import { withoutComputerEngine } from "./computer-engine-removal.ts";
 import { newBotDefaultsSchema, type NewBotDefaults } from "./new-bot-defaults.ts";
 import { replaySettings } from "./replay-settings.ts";
@@ -453,8 +454,7 @@ export interface AppConfig extends HelperConfig {
   composio?: { apiKey?: string; userId?: string; sessionId?: string };
   /** Boat token (ascii.dev renamed Box to Boat); config key "box", env BOX_TOKEN. */
   box?: { token?: string };
-  /** A named host from the user's SSH config. Authentication stays with SSH. */
-  vps?: { sshAlias?: string };
+  vps?: VpsConfig;
   vpsServers?: VpsServer[];
   opencodeGo?: { apiKey?: string; providerKeys?: Record<string, string> };
   tts?: { key?: string; fishKey?: string; geminiKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini" | "openai" | "deepseek"; baseUrl?: string; model?: string; fishModel?: FishTtsModel; everyReply?: boolean; hearWith?: "device" | "elevenlabs"; hearLanguage?: string };
@@ -565,6 +565,13 @@ export function parseConfigPatch(value: JsonValue): ConfigPatch {
     throw Object.assign(new Error(schemaIssue(parsed.error, "Invalid configuration")), { status: 400 });
   }
   return parsed.data;
+}
+
+export function vpsResources(cfg: AppConfig): DesktopResources {
+  return {
+    memoryGb: cfg.vps?.memoryGb ?? DEFAULT_DESKTOP_RESOURCES.memoryGb,
+    cpus: cfg.vps?.cpus ?? DEFAULT_DESKTOP_RESOURCES.cpus,
+  };
 }
 
 export function vpsSshAlias(cfg: AppConfig): string | null {
@@ -903,7 +910,7 @@ export function saveConfig(
     disk[key] = merged;
   }
   keepImageModels();
-  if (checkedPatch.vps !== undefined) disk.vps = normalizeVpsConfig(checkedPatch.vps);
+  if (checkedPatch.vps !== undefined) disk.vps = normalizeVpsConfig(checkedPatch.vps, disk.vps);
   // vpsServers is kept even when empty: the running config is updated by Object.assign, which cannot drop a key.
   for (const key of ["language", "computerName", "everyBotRules", "vpsServers"] as const) if (checkedPatch[key] !== undefined) disk[key] = checkedPatch[key];
   if (checkedPatch.customDomain !== undefined) disk.customDomain = checkedPatch.customDomain;
