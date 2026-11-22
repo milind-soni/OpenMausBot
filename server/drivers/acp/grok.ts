@@ -158,7 +158,8 @@ export function grokModelNotOffered(model: string, sessionModels: readonly { mod
   const offered = [...new Set(sessionModels.map((entry) => entry.modelId).filter((id): id is string => typeof id === "string" && id.length > 0))];
   if (offered.length === 0 || offered.includes(model)) return null;
   const list = offered.length === 1 ? offered[0] : `${offered.slice(0, -1).join(", ")} and ${offered.at(-1)}`;
-  return `This Grok sign-in doesn't offer ${model}. It offers ${list}: choose ${offered.length === 1 ? "it" : "one of those"} as this bot's model.`;
+  // "can't use the model" keeps a routine from retrying a run that would be refused the same way (retry.ts).
+  return `Grok can't use the model ${model} here: this Grok sign-in offers ${list}, so choose ${offered.length === 1 ? "it" : "one of those"} for this bot.`;
 }
 
 function suggestGrokSlug(host: string, model: string, taken: Set<string>): string {

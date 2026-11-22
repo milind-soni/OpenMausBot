@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { ensureDirs, NATIVE_DIR } from "../../config.ts";
 import type { ProviderInstance, SendTurnInput } from "../../contracts.ts";
+import { classifyRoutineFailure } from "../../routine-recovery.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { recordEvents } from "../../testing/events.ts";
 import { GrokAgentDriver, grokPermissionRequest } from "./grok.ts";
@@ -173,9 +174,9 @@ describe("Grok changes model and effort inside the running session", () => {
       expect(await ask({ threadId, model: "grok-4.6" })).toMatchObject({ ok: true });
       expect(await ask({ threadId, model: "grok-4.7", resumeCursor: "fake-acp-session" })).toMatchObject({ ok: false });
       const errors = recorder.events.filter((event) => event.type === "runtime.error").map((event) => (event as { message: string }).message);
-      expect(errors).toEqual([
-        "This Grok sign-in doesn't offer grok-4.7. It offers grok-4.6 and grok-4.5: choose one of those as this bot's model.",
-      ]);
+      expect(errors).toEqual(["Grok can't use the model grok-4.7 here: this Grok sign-in offers grok-4.6 and grok-4.5, so choose one of those for this bot."]);
+      // A routine does not spend its one retry on it: the next start would be refused the same way.
+      expect(classifyRoutineFailure(errors[0]!)).toEqual({ kind: "final" });
       expect(processes()).toBe(1);
       expect(calls().filter((call) => call.method === "session/prompt")).toHaveLength(1);
     } finally {
