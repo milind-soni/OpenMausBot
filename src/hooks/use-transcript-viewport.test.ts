@@ -480,8 +480,39 @@ describe("transcript viewport", () => {
 
     view.act(() => view.current.jumpToLatest());
     expect(view.current.following).toBe(true);
+    expect(scroller.calls.at(-1)).toEqual({ top: 240 * ROW, behavior: "smooth" });
+    view.act(() => view.current.scrollHandlers.onScroll());
     expect(view.current.hiddenCount).toBe(180);
-    expect(scroller.calls.at(-1)).toEqual({ top: 120 * ROW, behavior: "smooth" });
+  });
+
+  it("keeps a jump from a search window smooth while the transcript changes", () => {
+    store.state.focusMessage = { threadId: "thread", messageId: "m10", nonce: 1, consumed: false };
+    const view = mount({ messages: rows(300) });
+    expect(view.current.laterCount).toBe(180);
+
+    scroller.scrollTop = 500;
+    scroller.calls = [];
+    const scrollTo = scroller.scrollTo.bind(scroller);
+    vi.spyOn(scroller, "scrollTo").mockImplementation(options => {
+      if (options.behavior === "smooth") scroller.calls.push(options);
+      else scrollTo(options);
+    });
+    view.act(() => view.current.jumpToLatest());
+    expect(scroller.scrollTop).toBe(500);
+    expect(scroller.calls).toEqual([{ top: 300 * ROW, behavior: "smooth" }]);
+
+    view.rerender({ messages: rows(301) });
+    scroller.extra = 40;
+    view.act(() => resized.at(-1)?.());
+    expect(scroller.calls.slice(1)).toEqual([
+      { top: 301 * ROW, behavior: "smooth" },
+      { top: 301 * ROW + 40, behavior: "smooth" },
+    ]);
+
+    scroller.scrollTop = scroller.bottom;
+    view.act(() => view.current.scrollHandlers.onScroll());
+    expect(view.current.hiddenCount).toBe(181);
+    expect(view.current.following).toBe(true);
   });
 
   it("jumps without the smooth animation when motion is reduced", () => {

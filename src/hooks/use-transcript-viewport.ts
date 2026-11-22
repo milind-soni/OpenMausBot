@@ -88,8 +88,10 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   const transcriptRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
   const touchY = useRef(0);
+  const latestJump = useRef<{ key: string; target?: number } | null>(null);
 
   const transcriptKey = `${ownerId}:${threadId}`;
+  if (latestJump.current?.key !== transcriptKey) latestJump.current = null;
   const tailStart = tailWindowStart(messages.length);
   // One visit per conversation: switching back opens where the reader left it, or at the end if they were there.
   const [visit, setVisit] = useState(() => openVisit(transcriptKey, messages));
@@ -109,7 +111,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   const following = follow.mode === "following";
   const nextStart = switched
     ? current.restore?.start ?? tailStart
-    : following && transcriptWindow.end === null
+    : following && !latestJump.current && transcriptWindow.end === null
       ? followWindowStart(messages, transcriptWindow.start)
       : transcriptWindow.start;
   if (switched || nextStart !== transcriptWindow.start) {
@@ -135,12 +137,16 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   const followEvent = useCallback((event: TranscriptFollowEvent) => {
     const before = followNow.current.follow;
     const after = transitionTranscriptFollow(before, event);
-    if (event.type === "navigated") navigationCount.current += 1;
+    const interruptedJump = event.type === "navigated" && latestJump.current !== null;
+    if (event.type === "navigated") {
+      latestJump.current = null;
+      navigationCount.current += 1;
+    }
     if (after === before) return;
     followNow.current = { key: followNow.current.key, follow: after };
     followRef.current = after.mode === "following";
     const el = scrollRef.current;
-    if (el && before.mode === "following" && after.mode === "released" && smoothFollow()) {
+    if (el && before.mode === "following" && after.mode === "released" && (interruptedJump || smoothFollow())) {
       // A smooth follow scroll keeps running after the reader takes over; an instant scroll to where it is halts it.
       el.scrollTo({ top: el.scrollTop });
     }
@@ -172,10 +178,25 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   const noteLeftEnd = useCallback(() => {
     if (!atEndOf(scrollRef.current)) followEvent({ type: "leftEnd" });
   }, [followEvent]);
+  const scrollLatestJump = useCallback((el: HTMLElement) => {
+    const jump = latestJump.current;
+    if (!jump || jump.target === el.scrollHeight) return;
+    jump.target = el.scrollHeight;
+    el.scrollTo({ top: jump.target, behavior: "smooth" });
+  }, []);
+  const finishLatestJump = () => {
+    if (!latestJump.current || latestJump.current.target === undefined || !nearEnd()) return;
+    latestJump.current = null;
+    setTranscriptWindow({ key: transcriptKey, start: tailStart, end: null });
+  };
   const onTranscriptResize = useCallback(() => {
     const el = scrollRef.current;
+    if (el && latestJump.current) {
+      if (latestJump.current.target !== undefined) scrollLatestJump(el);
+      return;
+    }
     if (el && !followBottomGrowth(el, followRef.current, smoothFollow())) noteLeftEnd();
-  }, [noteLeftEnd, smoothFollow]);
+  }, [noteLeftEnd, scrollLatestJump, smoothFollow]);
   useBottomFollowResize(scrollRef, transcriptRef, transcriptShown ? transcriptKey : null, onTranscriptResize);
 
   // The person sent a message: whatever they were reading, the conversation follows its end again.
@@ -183,6 +204,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   const sentLast = Boolean(newestId?.startsWith("optimistic-"));
   useLayoutEffect(() => {
     if (!sentLast) return;
+    latestJump.current = null;
     setBottomFollow(true);
     setTranscriptWindow(window => window.end === null ? window : { key: transcriptKey, start: tailStart, end: null });
   }, [newestId, sentLast, setBottomFollow, transcriptKey, tailStart]);
@@ -221,6 +243,10 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     const el = scrollRef.current;
     if (!el) return;
     if (!followRef.current) return noteLeftEnd();
+    if (latestJump.current) {
+      if (latestJump.current.target !== undefined) scrollLatestJump(el);
+      return;
+    }
     el.scrollTo({ top: el.scrollHeight });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- pinOn is the caller's dependency list
   }, [transcriptKey, messages.length, sentLast ? newestId : null, transcriptWindow.end, ...pinOn]);
@@ -323,10 +349,28 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   // Rows that draw nothing (hidden tool steps) can leave a window too short to scroll while earlier ones exist.
   const canScrollUp = () => canScroll() || hiddenCount > 0 || Boolean(hasMore);
   const jumpToLatest = () => {
+    navigationCount.current += 1;
+    if (reducedMotion()) {
+      latestJump.current = null;
+      setBottomFollow(true);
+      setTranscriptWindow({ key: transcriptKey, start: tailStart, end: null });
+      requestAnimationFrame(() => {
+        if (followNow.current.key === transcriptKey && followRef.current && scrollRef.current) {
+          scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "auto" });
+        }
+      });
+      return;
+    }
+    const jump = { key: transcriptKey };
+    latestJump.current = jump;
+    preExpandHeight.current = null;
     setBottomFollow(true);
-    setTranscriptWindow({ key: transcriptKey, start: tailStart, end: null });
+    setTranscriptWindow({ key: transcriptKey, start: startIndex, end: null });
     requestAnimationFrame(() => {
-      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: reducedMotion() ? "auto" : "smooth" });
+      const el = scrollRef.current;
+      if (!el || latestJump.current !== jump) return;
+      scrollLatestJump(el);
+      finishLatestJump();
     });
   };
 
@@ -365,6 +409,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     onScroll: () => {
       const el = scrollRef.current;
       if (!el) return;
+      finishLatestJump();
       noteEnd();
       recordPosition();
       if (!followRef.current && el.scrollTop <= AUTO_EXPAND_TOP_THRESHOLD) triggerAutoEarlier();
