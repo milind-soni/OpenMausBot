@@ -3,7 +3,7 @@ export { managedCodexArgs, endpointCodexArgs } from "./codex-endpoint-config.ts"
 import { codexActionFailure } from "./codex-action-notice.ts";
 import { codexToolSurfaceArgs } from "./codex-tool-surface.ts";
 import { codexShellDisabled, codexTurnConfigArgs } from "./codex-guest.ts";
-import { TEAM_TOOLS_FAILED, teamToolsFailed } from "./team-tools.ts";
+import { mcpStartupNotices } from "./team-tools.ts";
 import { enabledMcpMounts, mcpStartupTracker, supportsMcpStartup } from "./codex-mcp-startup.ts";
 import { boxAdmittedEnv, boxProxyEnvNames, customServerEnvBox, type McpApprovalMode, mountMcpServer } from "./codex-mcp-mount.ts";
 import { reportUnsupportedCalls, rolloutMark, type RolloutMark } from "./codex-unsupported-calls.ts";
@@ -860,7 +860,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
 
       const seenReviews = new Set<string>();
       let reviewWarning = false;
-      let teamToolsNoticed = false;
+      const startupNotices = mcpStartupNotices(threadId);
       let rolloutAt: RolloutMark | null = null; // where the native rollout ended when this turn began: a refused call's only trace
       let timedOutReview = false;
       const retryMode = approvalMode[0].toUpperCase() + approvalMode.slice(1);
@@ -908,10 +908,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         // MCP servers start with the thread, before it has an id; this process serves this turn alone.
         if (msg.method === "mcpServer/startupStatus/updated") {
           mcpStartup?.record(p); mcpFailed ||= p.status === "failed" || p.status === "cancelled";
-          if (!teamToolsNoticed && teamToolsFailed(p)) {
-            teamToolsNoticed = true;
-            emit({ ...base(threadId, turnId), type: "runtime.notice", message: TEAM_TOOLS_FAILED });
-          }
+          for (const notice of startupNotices.of(p)) emit({ ...base(threadId, turnId), type: "runtime.notice", ...notice });
           return;
         }
           // The app-server also notifies for native helper threads; only this request's parent writes or settles.

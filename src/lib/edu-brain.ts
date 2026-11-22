@@ -11,6 +11,11 @@ export function decideEduProposal(botId: string, id: string, action: "approve" |
   return api(`/api/bots/${encodeURIComponent(botId)}/edu/proposals/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify({ action }) });
 }
 
+/** Gives a bot whose Edu brain is off its own brain again. The server refuses this from a bot's shell. */
+export function turnOnEduBrain(botId: string): Promise<unknown> {
+  return api(`/api/bots/${encodeURIComponent(botId)}`, { method: "PATCH", body: JSON.stringify({ eduBrain: { mode: "own" } }) });
+}
+
 let known: EduDecideRights | null = null;
 let asking: Promise<EduDecideRights | null> | null = null;
 

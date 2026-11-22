@@ -464,3 +464,65 @@ describe("DeepSeek Harness when a turn's tools change", () => {
     expect(agentsServer).toContain("token-two");
   });
 });
+
+describe("DeepSeek Harness when an MCP server fails to start", () => {
+  const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "testing", "fake-acp-cli.ts");
+  let cleanup: (() => Promise<void>) | null = null;
+  afterEach(async () => {
+    await cleanup?.();
+    cleanup = null;
+  });
+
+  const open = async (failing: string) => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-deepseek-mcp-"));
+    const instance = await DeepSeekAgentDriver.create({
+      instanceId: `deepseek-mcp-${failing}`, displayName: "DeepSeek Harness", enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false, workspace: scratch },
+      environment: {
+        HOME: scratch, USERPROFILE: scratch, DSH_HOME: join(scratch, "dsh"), DEEPSEEK_API_KEY: "sk-fixture",
+        FAKE_ACP_MCP_START_FAIL: failing, FAKE_ACP_TEXT_REPLY: "Done.", FAKE_ACP_RPC_APPEND_FILE: join(scratch, "rpc.jsonl"),
+      },
+    });
+    const recorder = recordEvents(instance.adapter);
+    cleanup = async () => {
+      recorder.stop();
+      await instance.dispose();
+      await removeTempDir(scratch);
+    };
+    const server = { command: process.execPath, args: [FAKE_CLI], env: {} };
+    const run = async (threadId: string) => {
+      const { turnId } = await instance.adapter.sendTurn({ threadId, text: "hello", integrations: { edu: server, agents: server } });
+      const done = await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      return { done, events: recorder.events.filter((event) => event.turnId === turnId) };
+    };
+    const methods = () => readFileSync(join(scratch, "rpc.jsonl"), "utf8").trim().split("\n").map((line) => (JSON.parse(line) as { method: string }).method);
+    return { run, methods };
+  };
+
+  it("runs the turn without the Edu brain and says so once, quietly", async () => {
+    const f = await open("edu");
+    const first = await f.run("t-edu-failed");
+    expect(first.done).toMatchObject({ ok: true });
+    expect(first.events.filter((event) => event.type === "runtime.error")).toEqual([]);
+    expect(first.events.filter((event) => event.type === "runtime.notice")).toEqual([
+      expect.objectContaining({ text: { key: "chat.notice.eduMemoryFailed" } }),
+    ]);
+    expect(first.events.some((event) => event.type === "item.completed" || event.type === "content.delta")).toBe(true);
+    expect(f.methods().filter((method) => method.startsWith("session/new"))).toEqual(["session/new", "session/new.mcp-start-failed", "session/new"]);
+    expect(f.methods().filter((method) => method === "session/prompt")).toHaveLength(1);
+
+    const second = await f.run("t-edu-failed");
+    expect(second.done).toMatchObject({ ok: true });
+    expect(second.events.filter((event) => event.type === "runtime.notice" || event.type === "runtime.error")).toEqual([]);
+    expect(f.methods().filter((method) => method === "session/new.mcp-start-failed")).toHaveLength(2);
+  });
+
+  it("still fails the reply for any other server", async () => {
+    const f = await open("agents");
+    const { done, events } = await f.run("t-agents-failed");
+    expect(done).toMatchObject({ ok: false });
+    expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ text: { key: "chat.notice.acpMcpServerFailed", params: { server: "agents" } } });
+    expect(events.some((event) => event.type === "runtime.notice")).toBe(false);
+    expect(f.methods().filter((method) => method.startsWith("session/new"))).toEqual(["session/new", "session/new.mcp-start-failed"]);
+  });
+});

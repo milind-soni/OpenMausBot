@@ -4100,7 +4100,13 @@
       "server.edu.band.verified": "4f7838402f37674e8ebedb6cf048c0aea66bacdb25607aa3eee4b53093d83f5c",
       "server.edu.band.inferred": "d461cbb490668b91c8a9dffc9884dc81291623e07cd31f4dde964f25e5fd7571",
       "server.edu.band.hypothesis": "2ad48012d6afd5f9090b7ae435483f860969e60a26a700481720d29daace1169",
-      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e"
+      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e",
+      "chat.notice.eduMemoryFailed": "01657f2c5aa29cf5fa2e7e645fbf79f1bfc9641310659e972caf303670246154",
+      "eduBrain.state.botOffHint": "d35e9481cefde58fe93e5f08d058650b564f2a8545a98efd4a6951690b39d0a7",
+      "eduBrain.state.folderHint": "23fb8a2aa137d4fa2ef915e31b85385a7fc0ff1ccb3dd15eb597d9cfc1f37eb0",
+      "eduBrain.state.crewWorkerHint": "76627ae9b69eb44f6ef89e61ea333539bf6d1138c585b4d867e1a7c7822d3fdc",
+      "eduBrain.turnOn": "5a1f096a0d8d767454ccb576f4fad61a5f204e942257554bdeb95b1ef7206409",
+      "eduBrain.turnOnFailed": "3ac40090c04ccd30a25dfb03134241de101ffca641909fcf3c96f0f25764a5b3"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -10558,7 +10564,13 @@
       "server.edu.band.verified": "4f7838402f37674e8ebedb6cf048c0aea66bacdb25607aa3eee4b53093d83f5c",
       "server.edu.band.inferred": "d461cbb490668b91c8a9dffc9884dc81291623e07cd31f4dde964f25e5fd7571",
       "server.edu.band.hypothesis": "2ad48012d6afd5f9090b7ae435483f860969e60a26a700481720d29daace1169",
-      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e"
+      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e",
+      "chat.notice.eduMemoryFailed": "01657f2c5aa29cf5fa2e7e645fbf79f1bfc9641310659e972caf303670246154",
+      "eduBrain.state.botOffHint": "d35e9481cefde58fe93e5f08d058650b564f2a8545a98efd4a6951690b39d0a7",
+      "eduBrain.state.folderHint": "23fb8a2aa137d4fa2ef915e31b85385a7fc0ff1ccb3dd15eb597d9cfc1f37eb0",
+      "eduBrain.state.crewWorkerHint": "76627ae9b69eb44f6ef89e61ea333539bf6d1138c585b4d867e1a7c7822d3fdc",
+      "eduBrain.turnOn": "5a1f096a0d8d767454ccb576f4fad61a5f204e942257554bdeb95b1ef7206409",
+      "eduBrain.turnOnFailed": "3ac40090c04ccd30a25dfb03134241de101ffca641909fcf3c96f0f25764a5b3"
     },
     "fr": {
       "pro.fromPrice": "d987cb24a0047365eaccd50bf5ca52c7a9c255c22030969ca50e906d1a10ca56",
@@ -14425,7 +14437,13 @@
       "server.edu.band.verified": "4f7838402f37674e8ebedb6cf048c0aea66bacdb25607aa3eee4b53093d83f5c",
       "server.edu.band.inferred": "d461cbb490668b91c8a9dffc9884dc81291623e07cd31f4dde964f25e5fd7571",
       "server.edu.band.hypothesis": "2ad48012d6afd5f9090b7ae435483f860969e60a26a700481720d29daace1169",
-      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e"
+      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e",
+      "chat.notice.eduMemoryFailed": "01657f2c5aa29cf5fa2e7e645fbf79f1bfc9641310659e972caf303670246154",
+      "eduBrain.state.botOffHint": "d35e9481cefde58fe93e5f08d058650b564f2a8545a98efd4a6951690b39d0a7",
+      "eduBrain.state.folderHint": "23fb8a2aa137d4fa2ef915e31b85385a7fc0ff1ccb3dd15eb597d9cfc1f37eb0",
+      "eduBrain.state.crewWorkerHint": "76627ae9b69eb44f6ef89e61ea333539bf6d1138c585b4d867e1a7c7822d3fdc",
+      "eduBrain.turnOn": "5a1f096a0d8d767454ccb576f4fad61a5f204e942257554bdeb95b1ef7206409",
+      "eduBrain.turnOnFailed": "3ac40090c04ccd30a25dfb03134241de101ffca641909fcf3c96f0f25764a5b3"
     },
     "hi": {
       "pro.fromPrice": "d987cb24a0047365eaccd50bf5ca52c7a9c255c22030969ca50e906d1a10ca56",
@@ -18146,7 +18164,13 @@
       "server.edu.band.verified": "4f7838402f37674e8ebedb6cf048c0aea66bacdb25607aa3eee4b53093d83f5c",
       "server.edu.band.inferred": "d461cbb490668b91c8a9dffc9884dc81291623e07cd31f4dde964f25e5fd7571",
       "server.edu.band.hypothesis": "2ad48012d6afd5f9090b7ae435483f860969e60a26a700481720d29daace1169",
-      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e"
+      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e",
+      "chat.notice.eduMemoryFailed": "01657f2c5aa29cf5fa2e7e645fbf79f1bfc9641310659e972caf303670246154",
+      "eduBrain.state.botOffHint": "d35e9481cefde58fe93e5f08d058650b564f2a8545a98efd4a6951690b39d0a7",
+      "eduBrain.state.folderHint": "23fb8a2aa137d4fa2ef915e31b85385a7fc0ff1ccb3dd15eb597d9cfc1f37eb0",
+      "eduBrain.state.crewWorkerHint": "76627ae9b69eb44f6ef89e61ea333539bf6d1138c585b4d867e1a7c7822d3fdc",
+      "eduBrain.turnOn": "5a1f096a0d8d767454ccb576f4fad61a5f204e942257554bdeb95b1ef7206409",
+      "eduBrain.turnOnFailed": "3ac40090c04ccd30a25dfb03134241de101ffca641909fcf3c96f0f25764a5b3"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -26144,7 +26168,13 @@
       "server.edu.band.verified": "4f7838402f37674e8ebedb6cf048c0aea66bacdb25607aa3eee4b53093d83f5c",
       "server.edu.band.inferred": "d461cbb490668b91c8a9dffc9884dc81291623e07cd31f4dde964f25e5fd7571",
       "server.edu.band.hypothesis": "2ad48012d6afd5f9090b7ae435483f860969e60a26a700481720d29daace1169",
-      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e"
+      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e",
+      "chat.notice.eduMemoryFailed": "01657f2c5aa29cf5fa2e7e645fbf79f1bfc9641310659e972caf303670246154",
+      "eduBrain.state.botOffHint": "d35e9481cefde58fe93e5f08d058650b564f2a8545a98efd4a6951690b39d0a7",
+      "eduBrain.state.folderHint": "23fb8a2aa137d4fa2ef915e31b85385a7fc0ff1ccb3dd15eb597d9cfc1f37eb0",
+      "eduBrain.state.crewWorkerHint": "76627ae9b69eb44f6ef89e61ea333539bf6d1138c585b4d867e1a7c7822d3fdc",
+      "eduBrain.turnOn": "5a1f096a0d8d767454ccb576f4fad61a5f204e942257554bdeb95b1ef7206409",
+      "eduBrain.turnOnFailed": "3ac40090c04ccd30a25dfb03134241de101ffca641909fcf3c96f0f25764a5b3"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -37499,7 +37529,13 @@
       "server.edu.band.verified": "4f7838402f37674e8ebedb6cf048c0aea66bacdb25607aa3eee4b53093d83f5c",
       "server.edu.band.inferred": "d461cbb490668b91c8a9dffc9884dc81291623e07cd31f4dde964f25e5fd7571",
       "server.edu.band.hypothesis": "2ad48012d6afd5f9090b7ae435483f860969e60a26a700481720d29daace1169",
-      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e"
+      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e",
+      "chat.notice.eduMemoryFailed": "01657f2c5aa29cf5fa2e7e645fbf79f1bfc9641310659e972caf303670246154",
+      "eduBrain.state.botOffHint": "d35e9481cefde58fe93e5f08d058650b564f2a8545a98efd4a6951690b39d0a7",
+      "eduBrain.state.folderHint": "23fb8a2aa137d4fa2ef915e31b85385a7fc0ff1ccb3dd15eb597d9cfc1f37eb0",
+      "eduBrain.state.crewWorkerHint": "76627ae9b69eb44f6ef89e61ea333539bf6d1138c585b4d867e1a7c7822d3fdc",
+      "eduBrain.turnOn": "5a1f096a0d8d767454ccb576f4fad61a5f204e942257554bdeb95b1ef7206409",
+      "eduBrain.turnOnFailed": "3ac40090c04ccd30a25dfb03134241de101ffca641909fcf3c96f0f25764a5b3"
     },
     "zh": {
       "pro.fromPrice": "d987cb24a0047365eaccd50bf5ca52c7a9c255c22030969ca50e906d1a10ca56",
@@ -47629,7 +47665,13 @@
       "server.edu.band.verified": "4f7838402f37674e8ebedb6cf048c0aea66bacdb25607aa3eee4b53093d83f5c",
       "server.edu.band.inferred": "d461cbb490668b91c8a9dffc9884dc81291623e07cd31f4dde964f25e5fd7571",
       "server.edu.band.hypothesis": "2ad48012d6afd5f9090b7ae435483f860969e60a26a700481720d29daace1169",
-      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e"
+      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e",
+      "chat.notice.eduMemoryFailed": "01657f2c5aa29cf5fa2e7e645fbf79f1bfc9641310659e972caf303670246154",
+      "eduBrain.state.botOffHint": "d35e9481cefde58fe93e5f08d058650b564f2a8545a98efd4a6951690b39d0a7",
+      "eduBrain.state.folderHint": "23fb8a2aa137d4fa2ef915e31b85385a7fc0ff1ccb3dd15eb597d9cfc1f37eb0",
+      "eduBrain.state.crewWorkerHint": "76627ae9b69eb44f6ef89e61ea333539bf6d1138c585b4d867e1a7c7822d3fdc",
+      "eduBrain.turnOn": "5a1f096a0d8d767454ccb576f4fad61a5f204e942257554bdeb95b1ef7206409",
+      "eduBrain.turnOnFailed": "3ac40090c04ccd30a25dfb03134241de101ffca641909fcf3c96f0f25764a5b3"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -57858,7 +57900,13 @@
       "server.edu.band.verified": "4f7838402f37674e8ebedb6cf048c0aea66bacdb25607aa3eee4b53093d83f5c",
       "server.edu.band.inferred": "d461cbb490668b91c8a9dffc9884dc81291623e07cd31f4dde964f25e5fd7571",
       "server.edu.band.hypothesis": "2ad48012d6afd5f9090b7ae435483f860969e60a26a700481720d29daace1169",
-      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e"
+      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e",
+      "chat.notice.eduMemoryFailed": "01657f2c5aa29cf5fa2e7e645fbf79f1bfc9641310659e972caf303670246154",
+      "eduBrain.state.botOffHint": "d35e9481cefde58fe93e5f08d058650b564f2a8545a98efd4a6951690b39d0a7",
+      "eduBrain.state.folderHint": "23fb8a2aa137d4fa2ef915e31b85385a7fc0ff1ccb3dd15eb597d9cfc1f37eb0",
+      "eduBrain.state.crewWorkerHint": "76627ae9b69eb44f6ef89e61ea333539bf6d1138c585b4d867e1a7c7822d3fdc",
+      "eduBrain.turnOn": "5a1f096a0d8d767454ccb576f4fad61a5f204e942257554bdeb95b1ef7206409",
+      "eduBrain.turnOnFailed": "3ac40090c04ccd30a25dfb03134241de101ffca641909fcf3c96f0f25764a5b3"
     },
     "uk": {
       "pro.fromPrice": "d987cb24a0047365eaccd50bf5ca52c7a9c255c22030969ca50e906d1a10ca56",
@@ -61999,7 +62047,13 @@
       "server.edu.band.verified": "4f7838402f37674e8ebedb6cf048c0aea66bacdb25607aa3eee4b53093d83f5c",
       "server.edu.band.inferred": "d461cbb490668b91c8a9dffc9884dc81291623e07cd31f4dde964f25e5fd7571",
       "server.edu.band.hypothesis": "2ad48012d6afd5f9090b7ae435483f860969e60a26a700481720d29daace1169",
-      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e"
+      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e",
+      "chat.notice.eduMemoryFailed": "01657f2c5aa29cf5fa2e7e645fbf79f1bfc9641310659e972caf303670246154",
+      "eduBrain.state.botOffHint": "d35e9481cefde58fe93e5f08d058650b564f2a8545a98efd4a6951690b39d0a7",
+      "eduBrain.state.folderHint": "23fb8a2aa137d4fa2ef915e31b85385a7fc0ff1ccb3dd15eb597d9cfc1f37eb0",
+      "eduBrain.state.crewWorkerHint": "76627ae9b69eb44f6ef89e61ea333539bf6d1138c585b4d867e1a7c7822d3fdc",
+      "eduBrain.turnOn": "5a1f096a0d8d767454ccb576f4fad61a5f204e942257554bdeb95b1ef7206409",
+      "eduBrain.turnOnFailed": "3ac40090c04ccd30a25dfb03134241de101ffca641909fcf3c96f0f25764a5b3"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -67959,7 +68013,13 @@
       "server.edu.band.verified": "4f7838402f37674e8ebedb6cf048c0aea66bacdb25607aa3eee4b53093d83f5c",
       "server.edu.band.inferred": "d461cbb490668b91c8a9dffc9884dc81291623e07cd31f4dde964f25e5fd7571",
       "server.edu.band.hypothesis": "2ad48012d6afd5f9090b7ae435483f860969e60a26a700481720d29daace1169",
-      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e"
+      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e",
+      "chat.notice.eduMemoryFailed": "01657f2c5aa29cf5fa2e7e645fbf79f1bfc9641310659e972caf303670246154",
+      "eduBrain.state.botOffHint": "d35e9481cefde58fe93e5f08d058650b564f2a8545a98efd4a6951690b39d0a7",
+      "eduBrain.state.folderHint": "23fb8a2aa137d4fa2ef915e31b85385a7fc0ff1ccb3dd15eb597d9cfc1f37eb0",
+      "eduBrain.state.crewWorkerHint": "76627ae9b69eb44f6ef89e61ea333539bf6d1138c585b4d867e1a7c7822d3fdc",
+      "eduBrain.turnOn": "5a1f096a0d8d767454ccb576f4fad61a5f204e942257554bdeb95b1ef7206409",
+      "eduBrain.turnOnFailed": "3ac40090c04ccd30a25dfb03134241de101ffca641909fcf3c96f0f25764a5b3"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -73919,7 +73979,13 @@
       "server.edu.band.verified": "4f7838402f37674e8ebedb6cf048c0aea66bacdb25607aa3eee4b53093d83f5c",
       "server.edu.band.inferred": "d461cbb490668b91c8a9dffc9884dc81291623e07cd31f4dde964f25e5fd7571",
       "server.edu.band.hypothesis": "2ad48012d6afd5f9090b7ae435483f860969e60a26a700481720d29daace1169",
-      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e"
+      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e",
+      "chat.notice.eduMemoryFailed": "01657f2c5aa29cf5fa2e7e645fbf79f1bfc9641310659e972caf303670246154",
+      "eduBrain.state.botOffHint": "d35e9481cefde58fe93e5f08d058650b564f2a8545a98efd4a6951690b39d0a7",
+      "eduBrain.state.folderHint": "23fb8a2aa137d4fa2ef915e31b85385a7fc0ff1ccb3dd15eb597d9cfc1f37eb0",
+      "eduBrain.state.crewWorkerHint": "76627ae9b69eb44f6ef89e61ea333539bf6d1138c585b4d867e1a7c7822d3fdc",
+      "eduBrain.turnOn": "5a1f096a0d8d767454ccb576f4fad61a5f204e942257554bdeb95b1ef7206409",
+      "eduBrain.turnOnFailed": "3ac40090c04ccd30a25dfb03134241de101ffca641909fcf3c96f0f25764a5b3"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -81080,7 +81146,13 @@
       "server.edu.band.verified": "4f7838402f37674e8ebedb6cf048c0aea66bacdb25607aa3eee4b53093d83f5c",
       "server.edu.band.inferred": "d461cbb490668b91c8a9dffc9884dc81291623e07cd31f4dde964f25e5fd7571",
       "server.edu.band.hypothesis": "2ad48012d6afd5f9090b7ae435483f860969e60a26a700481720d29daace1169",
-      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e"
+      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e",
+      "chat.notice.eduMemoryFailed": "01657f2c5aa29cf5fa2e7e645fbf79f1bfc9641310659e972caf303670246154",
+      "eduBrain.state.botOffHint": "d35e9481cefde58fe93e5f08d058650b564f2a8545a98efd4a6951690b39d0a7",
+      "eduBrain.state.folderHint": "23fb8a2aa137d4fa2ef915e31b85385a7fc0ff1ccb3dd15eb597d9cfc1f37eb0",
+      "eduBrain.state.crewWorkerHint": "76627ae9b69eb44f6ef89e61ea333539bf6d1138c585b4d867e1a7c7822d3fdc",
+      "eduBrain.turnOn": "5a1f096a0d8d767454ccb576f4fad61a5f204e942257554bdeb95b1ef7206409",
+      "eduBrain.turnOnFailed": "3ac40090c04ccd30a25dfb03134241de101ffca641909fcf3c96f0f25764a5b3"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -88295,7 +88367,13 @@
       "server.edu.band.verified": "4f7838402f37674e8ebedb6cf048c0aea66bacdb25607aa3eee4b53093d83f5c",
       "server.edu.band.inferred": "d461cbb490668b91c8a9dffc9884dc81291623e07cd31f4dde964f25e5fd7571",
       "server.edu.band.hypothesis": "2ad48012d6afd5f9090b7ae435483f860969e60a26a700481720d29daace1169",
-      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e"
+      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e",
+      "chat.notice.eduMemoryFailed": "01657f2c5aa29cf5fa2e7e645fbf79f1bfc9641310659e972caf303670246154",
+      "eduBrain.state.botOffHint": "d35e9481cefde58fe93e5f08d058650b564f2a8545a98efd4a6951690b39d0a7",
+      "eduBrain.state.folderHint": "23fb8a2aa137d4fa2ef915e31b85385a7fc0ff1ccb3dd15eb597d9cfc1f37eb0",
+      "eduBrain.state.crewWorkerHint": "76627ae9b69eb44f6ef89e61ea333539bf6d1138c585b4d867e1a7c7822d3fdc",
+      "eduBrain.turnOn": "5a1f096a0d8d767454ccb576f4fad61a5f204e942257554bdeb95b1ef7206409",
+      "eduBrain.turnOnFailed": "3ac40090c04ccd30a25dfb03134241de101ffca641909fcf3c96f0f25764a5b3"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -95322,7 +95400,13 @@
       "server.edu.band.verified": "4f7838402f37674e8ebedb6cf048c0aea66bacdb25607aa3eee4b53093d83f5c",
       "server.edu.band.inferred": "d461cbb490668b91c8a9dffc9884dc81291623e07cd31f4dde964f25e5fd7571",
       "server.edu.band.hypothesis": "2ad48012d6afd5f9090b7ae435483f860969e60a26a700481720d29daace1169",
-      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e"
+      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e",
+      "chat.notice.eduMemoryFailed": "01657f2c5aa29cf5fa2e7e645fbf79f1bfc9641310659e972caf303670246154",
+      "eduBrain.state.botOffHint": "d35e9481cefde58fe93e5f08d058650b564f2a8545a98efd4a6951690b39d0a7",
+      "eduBrain.state.folderHint": "23fb8a2aa137d4fa2ef915e31b85385a7fc0ff1ccb3dd15eb597d9cfc1f37eb0",
+      "eduBrain.state.crewWorkerHint": "76627ae9b69eb44f6ef89e61ea333539bf6d1138c585b4d867e1a7c7822d3fdc",
+      "eduBrain.turnOn": "5a1f096a0d8d767454ccb576f4fad61a5f204e942257554bdeb95b1ef7206409",
+      "eduBrain.turnOnFailed": "3ac40090c04ccd30a25dfb03134241de101ffca641909fcf3c96f0f25764a5b3"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -103013,7 +103097,13 @@
       "server.edu.band.verified": "4f7838402f37674e8ebedb6cf048c0aea66bacdb25607aa3eee4b53093d83f5c",
       "server.edu.band.inferred": "d461cbb490668b91c8a9dffc9884dc81291623e07cd31f4dde964f25e5fd7571",
       "server.edu.band.hypothesis": "2ad48012d6afd5f9090b7ae435483f860969e60a26a700481720d29daace1169",
-      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e"
+      "eduBrain.adminOnly": "6faf78b69ed4c003eff5f5c514305294b851323ba9b50a7b0d26bd69654fa99e",
+      "chat.notice.eduMemoryFailed": "01657f2c5aa29cf5fa2e7e645fbf79f1bfc9641310659e972caf303670246154",
+      "eduBrain.state.botOffHint": "d35e9481cefde58fe93e5f08d058650b564f2a8545a98efd4a6951690b39d0a7",
+      "eduBrain.state.folderHint": "23fb8a2aa137d4fa2ef915e31b85385a7fc0ff1ccb3dd15eb597d9cfc1f37eb0",
+      "eduBrain.state.crewWorkerHint": "76627ae9b69eb44f6ef89e61ea333539bf6d1138c585b4d867e1a7c7822d3fdc",
+      "eduBrain.turnOn": "5a1f096a0d8d767454ccb576f4fad61a5f204e942257554bdeb95b1ef7206409",
+      "eduBrain.turnOnFailed": "3ac40090c04ccd30a25dfb03134241de101ffca641909fcf3c96f0f25764a5b3"
     }
   }
 }

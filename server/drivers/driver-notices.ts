@@ -19,4 +19,5 @@ export const DRIVER_NOTICE = {
   "chat.notice.codexElicitationDeclined": "{server} asked for input Edu Bot can't show yet, so the request was declined.",
   "chat.notice.codexElicitationDeclinedGeneric": "An MCP server asked for input Edu Bot can't show yet, so the request was declined.",
   "chat.notice.usageLimitResets": "This {provider} account has reached its usage limit{detail}, which resets {resets}. Until then, switch this bot to another AI.",
+  "chat.notice.eduMemoryFailed": "Edu memory didn't connect this time; it retries next message.",
 } as const;

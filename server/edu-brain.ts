@@ -5,9 +5,12 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync 
 import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 
 import type { EduBrainSetting, EduState } from "../shared/edu-brain.ts";
+import { canUseMcpServer } from "../shared/tool-scope.ts";
+import { createBriefCache, EDU_BRIEF_TIMEOUT_MS, eduBriefText, eduPromptParts } from "./edu-brief.ts";
 import { augmentedPath, findCliCandidates, resolveCliSpawn, userHome } from "./env-path.ts";
 import { AGENTS_NODE_FLAG } from "./proxy-paths.ts";
 import { isInside, resolveThroughLinks } from "./sentinel/paths.ts";
+import type { PromptPart } from "./system-prompt.ts";
 
 export const EDU_MIN_VERSION = "6.0.0";
 
@@ -32,6 +35,8 @@ export interface EduBrainStatus extends EduRuntime {
   mode: EduBrainSetting["mode"];
   /** The folder whose `.edu` is this bot's brain. */
   brain?: string;
+  /** With `broken`: Edu works, and the brain folder is what it can't use. */
+  brokenFolder?: boolean;
 }
 
 export interface EduStdioServer {
@@ -44,6 +49,7 @@ export interface EduBot {
   id: string;
   name?: string;
   eduBrain?: EduBrainSetting;
+  toolScope?: unknown;
 }
 
 /** `config.json` `edu`. */
@@ -187,6 +193,7 @@ export function createEduBrains(deps: EduBrainDeps) {
   const runFor = deps.run ?? nodeRun;
   let cached: { at: number; cli: string | null; mtime: number; runtime: EduRuntime } | null = null;
   const inits = new Map<string, Promise<void>>();
+  const briefs = createBriefCache({ now });
 
   function home(): { ok: true; path: string } | { ok: false; reason: string } {
     const configured = deps.config()?.home?.trim();
@@ -279,6 +286,18 @@ export function createEduBrains(deps: EduBrainDeps) {
     return after ? { ok: false, folder, reason: after } : { ok: true, folder };
   }
 
+  /** This bot's brain folder, created for an `own` brain, with the Edu that serves it; never throws. */
+  async function brain(bot: EduBot): Promise<{ ok: true; folder: string; runtime: EduRuntime } | { ok: false; reason: string }> {
+    try {
+      const runtime = await detect();
+      if (runtime.state !== "ready") return { ok: false, reason: runtime.reason ?? `Edu is ${runtime.state}` };
+      const ready = await ensureBrain(bot, runtime);
+      return ready.ok ? { ok: true, folder: ready.folder, runtime } : { ok: false, reason: ready.reason };
+    } catch (error) {
+      return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
   function server(runtime: EduRuntime, folder: string): EduStdioServer {
     return {
       command: process.execPath,
@@ -328,16 +347,22 @@ export function createEduBrains(deps: EduBrainDeps) {
       if (edu) integrations.edu = edu.server;
     },
 
-    /** This bot's brain folder, created for an `own` brain, with the Edu that serves it; never throws. */
-    async brain(bot: EduBot): Promise<{ ok: true; folder: string; runtime: EduRuntime } | { ok: false; reason: string }> {
-      try {
-        const runtime = await detect();
-        if (runtime.state !== "ready") return { ok: false, reason: runtime.reason ?? `Edu is ${runtime.state}` };
-        const brain = await ensureBrain(bot, runtime);
-        return brain.ok ? { ok: true, folder: brain.folder, runtime } : { ok: false, reason: brain.reason };
-      } catch (error) {
-        return { ok: false, reason: error instanceof Error ? error.message : String(error) };
-      }
+    brain,
+
+    /** The turn's Edu parts of the system prompt: the brief whenever this bot's brain is ready here, for any engine, and
+     * the rule on what goes where only when `mounted` (the turn's `edu` server) is one the bot's tool selection keeps.
+     * Both are empty whenever Edu is missing, off or broken. Never throws. */
+    async promptParts(bot: EduBot, turn: EduTurn, mounted: boolean): Promise<PromptPart[]> {
+      const where = home();
+      const folder = brainFolder(bot);
+      if (!(deps.hostLocal?.() ?? true) || turn.confined || deps.config()?.enabled === false || !where.ok || !folder) return eduPromptParts("", false);
+      const tools = mounted && canUseMcpServer(bot.toolScope, "edu");
+      const stdout = await briefs.get(`${folder}\0${where.path}`, async () => {
+        const ready = await brain(bot);
+        if (!ready.ok) throw new Error(ready.reason);
+        return runFor(ready.runtime.cli!)(["--cwd", ready.folder, "brief", "--json"], { env: eduEnv(ready.runtime.home), timeoutMs: EDU_BRIEF_TIMEOUT_MS });
+      });
+      return eduPromptParts(stdout ? eduBriefText(stdout, { tools }) : "", tools, { readOnly: Boolean(env.EDU_CREW_JOB?.trim()) });
     },
 
     async status(bot: EduBot): Promise<EduBrainStatus> {
@@ -347,10 +372,10 @@ export function createEduBrains(deps: EduBrainDeps) {
       if (mode === "off") return { ...runtime, state: runtime.state === "ready" ? "off" : runtime.state, mode, ...(folder ? { brain: folder } : {}) };
       if (runtime.state !== "ready" || !folder) return { ...runtime, mode, ...(folder ? { brain: folder } : {}) };
       const refusal = folderRefusal(bot, folder);
-      if (refusal) return { ...runtime, state: "broken", mode, brain: folder, reason: refusal };
+      if (refusal) return { ...runtime, state: "broken", brokenFolder: true, mode, brain: folder, reason: refusal };
       if (hasBrain(folder)) return { ...runtime, mode, brain: folder };
       return mode === "own" ? { ...runtime, mode, brain: folder }
-        : { ...runtime, state: "broken", mode, brain: folder, reason: "This folder has no Edu brain: run `edu init` in it" };
+        : { ...runtime, state: "broken", brokenFolder: true, mode, brain: folder, reason: "This folder has no Edu brain: run `edu init` in it" };
     },
   };
 }

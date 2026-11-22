@@ -4,8 +4,10 @@
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
+import type { IncomingMessage } from "node:http";
 import { basename, join } from "node:path";
 
+import { parsedBodyOf } from "./harness/http.ts";
 import { actorLabel, boundRetentionDays, pruneMonthFiles, type DecisionActor, type DecisionRow } from "./decision-log.ts";
 import { redactSecrets } from "./redact.ts";
 import { csvCell, monthKey } from "./usage-ledger.ts";
@@ -244,6 +246,18 @@ export function botAuditSnapshot(bot: Record<string, unknown> | null | undefined
 function textDigest(value: unknown): { length: number; sha256: string } {
   const text = String(value);
   return { length: text.length, sha256: createHash("sha256").update(text).digest("hex").slice(0, 12) };
+}
+
+/** The bot fields a settings request names, for its audit rows. */
+export function requestedBotFields(req: IncomingMessage, path: string): string[] {
+  if (path.endsWith("/always-allow")) return ["alwaysAllow"];
+  if (path.endsWith("/model")) return ["modelSelection"];
+  const body = parsedBodyOf(req);
+  if (!body || typeof body !== "object" || Array.isArray(body)) return [];
+  const fields = new Set(Object.keys(body));
+  if (fields.has("autoApprove") || fields.has("approvalMode")) fields.add("autoApprove").add("approvalMode");
+  if (fields.has("chiefOfStaff")) fields.add("managedSections");
+  return [...fields];
 }
 
 export function botChangeRows(

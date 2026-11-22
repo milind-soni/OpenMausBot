@@ -1,22 +1,28 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { t } from "@/lib/i18n";
-import { decideEduProposal, fetchEduBrain } from "@/lib/edu-brain";
+import { decideEduProposal, fetchEduBrain, turnOnEduBrain } from "@/lib/edu-brain";
 import { eduProposalFields, eduProposalPlace } from "@/lib/edu-proposal-words";
 import { EduProposalLines } from "../EduProposalLines";
 import type { Bot } from "@/state/store";
 import type { EduBrainView, EduProposal } from "../../../shared/edu-brain";
 import { buttonCls, Card, ColRow, ItemRow, NoteRow } from "./rows";
 
-/** What the Edu brain row says, and what to do when Edu can't serve this bot. */
-export function eduStatusWords(view: Pick<EduBrainView, "state" | "mode" | "version" | "reason">): { value: string; hint?: string; warn?: boolean } {
-  if (view.mode === "off") return { value: t("eduBrain.state.botOff") };
+/** What the Edu brain row says, what to do when Edu can't serve this bot, and Edu's own reason when it gave one. */
+export function eduStatusWords(view: Pick<EduBrainView, "state" | "mode" | "version" | "reason" | "brokenFolder" | "crewWorker">): { value: string; hint?: string; detail?: string; warn?: boolean } {
+  if (view.mode === "off") return { value: t("eduBrain.state.botOff"), hint: t("eduBrain.state.botOffHint") };
   switch (view.state) {
-    case "ready": return { value: view.version ? t("eduBrain.state.readyVersion", { version: view.version }) : t("eduBrain.state.ready") };
+    case "ready": return {
+      value: view.version ? t("eduBrain.state.readyVersion", { version: view.version }) : t("eduBrain.state.ready"),
+      ...(view.crewWorker ? { hint: t("eduBrain.state.crewWorkerHint"), warn: true } : {}),
+    };
     case "off": return { value: t("eduBrain.state.appOff"), hint: t("eduBrain.state.appOffHint") };
     case "missing": return { value: t("eduBrain.state.missing"), hint: t("eduBrain.state.missingHint"), warn: true };
     case "old": return { value: t("eduBrain.state.old", { version: view.version ?? "?" }), hint: t("eduBrain.state.oldHint"), warn: true };
-    case "broken": return { value: t("eduBrain.state.broken"), hint: view.reason ?? t("eduBrain.state.brokenHint"), warn: true };
+    case "broken": return {
+      value: t("eduBrain.state.broken"), hint: t(view.brokenFolder ? "eduBrain.state.folderHint" : "eduBrain.state.brokenHint"), warn: true,
+      ...(view.reason ? { detail: view.reason } : {}),
+    };
   }
 }
 
@@ -47,10 +53,10 @@ export function EduBrainCard({ bot }: { bot: Pick<Bot, "id" | "name" | "busy"> }
   const [view, setView] = useState<EduBrainView | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const load = useCallback(async () => {
+  const load = useCallback(async (afterAction = false) => {
     try {
       setView(await fetchEduBrain(bot.id));
-      setFailed(null);
+      if (!afterAction) setFailed(null);
     } catch (error) {
       setFailed(error instanceof Error && error.message ? error.message : t("eduBrain.loadFailed"));
     }
@@ -67,7 +73,21 @@ export function EduBrainCard({ bot }: { bot: Pick<Bot, "id" | "name" | "busy"> }
       setFailed(error instanceof Error && error.message ? error.message : t("eduBrain.decideFailed"));
     } finally {
       setBusy(null);
-      await load();
+      await load(true);
+    }
+  };
+
+  const turnOn = async () => {
+    if (busy) return;
+    setBusy("turn-on");
+    try {
+      await turnOnEduBrain(bot.id);
+      setFailed(null);
+    } catch (error) {
+      setFailed(error instanceof Error && error.message ? error.message : t("eduBrain.turnOnFailed"));
+    } finally {
+      setBusy(null);
+      await load(true);
     }
   };
 
@@ -80,11 +100,23 @@ export function EduBrainCard({ bot }: { bot: Pick<Bot, "id" | "name" | "busy"> }
           <NoteRow tone={failed ? "warn" : undefined}>{failed ?? t("common.checking")}</NoteRow>
         ) : (
           <>
-            <ItemRow data-panel-row="edu-status" title={t("eduBrain.status")} hint={status?.hint && <span className={status.warn ? "text-warning" : undefined}>{status.hint}</span>}>
+            <ItemRow data-panel-row="edu-status" title={t("eduBrain.status")} hint={status?.hint && (
+              <>
+                <span className={status.warn ? "text-warning" : undefined}>{status.hint}</span>
+                {status.detail && <span data-edu-reason className="mt-0.5 block break-words text-[12px] text-ink-secondary">{status.detail}</span>}
+              </>
+            )}>
               <span className="shrink-0 text-[13px] text-ink-secondary">{status?.value}</span>
+              {view.mode === "off" && (
+                <button type="button" data-edu-action="turn-on" className={buttonCls} disabled={busy !== null} onClick={() => void turnOn()}>
+                  {t("eduBrain.turnOn")}
+                </button>
+              )}
             </ItemRow>
+            {view.brokenFolder && view.brain && <ItemRow data-panel-row="edu-folder" title={t("eduBrain.folder")} hint={<PathValue path={view.brain} />} />}
             {ready && view.brain && <ItemRow data-panel-row="edu-folder" title={t("eduBrain.folder")} hint={<PathValue path={view.brain} />} />}
             {ready && view.home && <ItemRow data-panel-row="edu-home" title={t("eduBrain.global")} hint={<PathValue path={view.home} />} />}
+            {failed && !ready && <NoteRow tone="warn">{failed}</NoteRow>}
           </>
         )}
       </Card>

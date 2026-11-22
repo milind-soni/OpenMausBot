@@ -31,6 +31,7 @@ export function createEduRoutes(deps: EduRouteDeps): RouteHandler {
       const body: EduBrainView = {
         state: status.state, mode: status.mode, home: status.home,
         ...(status.brain ? { brain: status.brain } : {}), ...(status.version ? { version: status.version } : {}), ...(status.reason ? { reason: status.reason } : {}),
+        ...(status.brokenFolder ? { brokenFolder: true } : {}),
         ...(status.state === "ready" ? await deps.proposals.view(bot, deps.proposals.rights(auth).mayApprove) : { proposals: [], mayApprove: false }),
       };
       return json(res, 200, body);

@@ -30,6 +30,7 @@ import {
 import { claudeCostSnapshot, restoredCostBase, turnCostFromRunningTotal } from "./claude-cost.ts";
 import { spawnContractDiff } from "./claude-spawn-contract.ts";
 import { TEAM_TOOLS_FAILED } from "./team-tools.ts";
+import { chatNotice } from "../chat-notices.ts";
 import { claudeLimitMessage } from "./claude-limits.ts";
 import { flushNativeLog } from "./native.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
@@ -3684,6 +3685,23 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(dumpedPid(dump)).toBe(dumpBefore);
     expect(recorder.events.filter((e) => e.type === "turn.started")).toHaveLength(2);
     expect(recorder.events.filter((e) => e.type === "turn.completed")).toHaveLength(2);
+  });
+
+  it("says quietly, once in an hour, when the Edu brain did not connect, finishes the turn, and retries it in a new process", async () => {
+    await create(undefined, { FAKE_CLAUDE_MCP_FAILED: "edu" });
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    const first = await instance.adapter.sendTurn({ threadId: "t-edu-failed", text: "one" });
+    const done = await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+    expect(done).toMatchObject({ ok: true });
+    expect(recorder.events.filter((e) => e.type === "runtime.error")).toEqual([]);
+    const notices = () => recorder.events.filter((e) => e.type === "runtime.notice") as Array<{ message: string; text?: { key: string } }>;
+    expect(notices()).toEqual([expect.objectContaining({ message: chatNotice("chat.notice.eduMemoryFailed"), text: { key: "chat.notice.eduMemoryFailed" } })]);
+    const failedLaunch = dumpedPid(dump);
+    const second = await instance.adapter.sendTurn({ threadId: "t-edu-failed", text: "two" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    expect(dumpedPid(dump)).not.toBe(failedLaunch);
+    expect(notices()).toHaveLength(1);
   });
 
   it("says when its team tools did not start, and starts the next turn in a new process that reconnects them", async () => {

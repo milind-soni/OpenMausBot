@@ -13,6 +13,7 @@ import type { ToolScope } from "../../shared/tool-scope.ts";
 import type { SendTurnInput } from "../contracts.ts";
 import { catalogServer, CUA_DRIVER_WINDOWS_TOOLS, syntheticToolNames } from "../testing/cua-driver-tools.ts";
 import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
+import { chatNotice } from "../chat-notices.ts";
 import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
 import { wideSchema } from "../testing/oversized-tool-schema.ts";
@@ -372,6 +373,24 @@ describe("Chat MCP session", () => {
         expect(alive(dead.read().pid)).toBe(false);
       } finally { warn.mockRestore(); }
     });
+  });
+
+  it("leaves out an Edu brain that can't start with one quiet line for the thread, and the turn goes on", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const broken = `if (message.method === "tools/list") { process.stdout.write('{"result":1}\\n'); continue; }`;
+      const notices: string[] = [];
+      for (const round of [1, 2]) {
+        const dead = fixture(broken), agents = fixture();
+        const session = await mountChatTools({ edu: dead.server, agents: agents.server } as SendTurnInput["integrations"], dead.controller.signal, false,
+          undefined, undefined, undefined, undefined, undefined, undefined, { conversation: "edu-thread", notice: ({ message }) => notices.push(message) });
+        sessions.push(session);
+        expect(session.skipped, `round ${round}`).toEqual([]);
+        expect(chatToolNotices(session)).toEqual([]);
+        expect(session.definitions.map((tool) => tool.function.name)).toEqual(["agents_write"]);
+      }
+      expect(notices).toEqual([chatNotice("chat.notice.eduMemoryFailed")]);
+    } finally { warn.mockRestore(); }
   });
 
   describe("a server the turn must not run without", () => {

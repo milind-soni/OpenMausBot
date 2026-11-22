@@ -44,7 +44,7 @@ import { classifyError, computeBackoff, interruptibleDelay, mayResendTurn, USAGE
 import { claudeApiError, claudeApiErrorMessage, claudeLimitError, claudeLimitFacts, claudeLimitRefusal, claudeUsageLimit, claudeVersionTooOld, type ClaudeLimit } from "./claude-limits.ts";
 import { createOrgModelBlocks, modelSwapNotice, withOrgBlocks } from "./claude-model-access.ts";
 import { engineHomes } from "../engine-homes/engine-homes.ts";
-import { TEAM_TOOLS_FAILED, failedCustomMcp, teamToolsFailed } from "./team-tools.ts";
+import { TEAM_TOOLS_FAILED, eduMemoryFailed, eduMemoryNotice, failedCustomMcp, teamToolsFailed } from "./team-tools.ts";
 import { PRESTART_IDLE_MS, armIdleClose, engineIdleMs, sessionIdlePolicy, stopIdleClose, stoppedForRoom } from "./session-idle.ts";
 import { keyedStable, promptHalves, withRosterNote, withVolatileNote } from "./prompt-split.ts"; import { CLAUDE_OWN_MEMORY_OFF } from "./claude-own-memory.ts";
 import { parseVersionTriple, versionAtLeast } from "./acp/version-probe.ts";
@@ -819,6 +819,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       tools?: ClaudePrestartTools;
       /** The engine could not start the `agents` MCP server: retired after this turn so the next one reconnects. */
       teamToolsFailed?: boolean;
+      eduFailed?: boolean;
       stderr: string;
       costTotal: number | null | undefined;
       /** Root close can precede a failed group stop; retry its finalization. */
@@ -1364,6 +1365,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         // `claude update` cannot change code this child already loaded, and a signed-out child can keep holding the shared OAuth refresh lock: retire both before completing.
         if (stopReason === "update_required" || stopReason === "auth_required") closeSession(threadId, stopReason === "auth_required" ? "authentication required" : "update required");
         else if (session.teamToolsFailed) closeSession(threadId, "team tools did not connect");
+        else if (session.eduFailed) closeSession(threadId, "edu memory did not connect");
         const cost = turnCostFromRunningTotal(total, session.costTotal ?? null);
         if (total !== null) session.costTotal = total;
         emit({ ...base(threadId, t.turnId), type: "turn.completed", ok, stopReason, cost, ...(usage ? { usage } : {}) });
@@ -1424,6 +1426,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               if (!session.teamToolsFailed && Array.isArray(o.mcp_servers) && o.mcp_servers.some(teamToolsFailed)) {
                 session.teamToolsFailed = true;
                 emit({ ...base(threadId, currentTurnId()), type: "runtime.notice", message: TEAM_TOOLS_FAILED });
+              }
+              if (!session.eduFailed && Array.isArray(o.mcp_servers) && o.mcp_servers.some(eduMemoryFailed)) {
+                session.eduFailed = true;
+                const notice = eduMemoryNotice(threadId);
+                if (notice) emit({ ...base(threadId, currentTurnId()), type: "runtime.notice", ...notice });
               }
               if (session.turn) session.turn.awaitingInit = false;
               session.nativePermissionMode = typeof o.permissionMode === "string" ? o.permissionMode : null;

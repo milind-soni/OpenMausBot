@@ -31,6 +31,7 @@ import { capToolList, learnToolCountLimit, shareToolBudget, toolCountLimitFromEr
 import type { ToolSchemaProfile } from "../tool-schema-profile.ts";
 import type { ServerText } from "../../shared/server-text.ts";
 import { allowsTool, canUseMcpServer, parseToolScope, type ToolScope } from "../../shared/tool-scope.ts";
+import { eduMemoryNotice } from "./team-tools.ts";
 import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
 import { CHAT_TOOL_LIMIT, type ToolBudget } from "../../shared/tool-budget.ts";
 
@@ -87,7 +88,7 @@ const REQUEST_TIMED_OUT = "MCP request timed out; execution outcome may be uncer
 const STDERR_TAIL_CHARS = 4_000, STDERR_LINE_CHARS = 300;
 /** Built-ins a turn can go on without, saying so. A turn can't run without the agents server, nor without a Local VM it
  * was given (mountChatTools `mustHave`). */
-const OPTIONAL_BUILT_INS: ReadonlySet<string> = new Set(["computer", "browser", "composio", OWN_APPS_SERVER, "data", "email", "device"]);
+const OPTIONAL_BUILT_INS: ReadonlySet<string> = new Set(["computer", "browser", "composio", OWN_APPS_SERVER, "data", "email", "device", "edu"]);
 
 /** How long a server that runs a command gets to start here: one of the app's own (`builtIn`) or one the person configured. */
 export function mcpStartupMs(env: Record<string, string | undefined> = process.env, platform: NodeJS.Platform = process.platform, builtIn = true): number {
@@ -658,7 +659,10 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   };
   const skip = async (server: string, error: unknown, client = started.get(server)) => {
     const reason = error instanceof Error ? error.message : "MCP server failed to start";
-    skipped.push({ server, reason });
+    if (server === "edu" && options.conversation !== undefined && options.notice) {
+      const notice = eduMemoryNotice(options.conversation);
+      if (notice) options.notice(notice);
+    } else skipped.push({ server, reason });
     console.warn(`chat-mcp: skipping MCP server "${server}" for this turn: ${reason}`);
     await client?.close();
   };

@@ -57,6 +57,8 @@ export interface EduBrainView {
   home: string;
   version?: string;
   reason?: string;
+  /** With `broken`: Edu works, and the bot's brain folder is what it can't use. */
+  brokenFolder?: boolean;
   /** Pending proposals in the bot's brain and the global one, including those made outside Edu Bot. */
   proposals: EduProposal[];
   /** Why the proposals could not be listed this time. */

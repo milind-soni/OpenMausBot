@@ -46,6 +46,7 @@
 //   FAKE_ACP_RPC_APPEND_FILE  one {"pid","method","cwd"} line appended per request
 //   FAKE_ACP_RPC_FAILURE_FILE  JSON-RPC error for session/prompt; once read the process stays poisoned
 //   FAKE_ACP_RPC_FAILURE_METHOD  initialize, session/new or session/prompt (default)
+//   FAKE_ACP_MCP_START_FAIL  a session/new whose mcpServers name this server fails as DeepSeek Harness 0.2 words it
 //   FAKE_ACP_RPC_FAILURE_GATE  hold the error until this file exists
 //   FAKE_ACP_RPC_FAILURE_AFTER_OUTPUT  emit text and a tool result before failing
 //   FAKE_ACP_RPC_FAILURE_AFTER_USAGE  emit the scripted usage updates and FAKE_ACP_UPDATES_FILE's before failing
@@ -969,6 +970,12 @@ function handle(msg: any) {
         break;
       }
       const servers: AnyMcpEntry[] = Array.isArray(msg.params?.mcpServers) ? msg.params.mcpServers : [];
+      const unstarted = servers.find((entry) => entry.name === process.env.FAKE_ACP_MCP_START_FAIL);
+      if (unstarted) {
+        recordMethod("session/new.mcp-start-failed");
+        out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: `Internal error: mcp-client(${unstarted.name}): initial connection or tool synchronization failed` } });
+        break;
+      }
       if (process.env.FAKE_ACP_DUMP) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.session.json`, JSON.stringify(msg.params));
         dumpState.mcpServers = servers;
