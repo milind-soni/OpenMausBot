@@ -161,37 +161,37 @@ it("leaves servers reached by URL alone", async () => {
 });
 
 it("leaves out a URL server whose address is no MCP endpoint, says so once, and keeps one that timed out or wants a key", async () => {
-  const PAGE = "https://docs.example.test/spreadsheets/u/1/", SLOW = "https://slow.example.test/mcp", KEYED = "https://keyed.example.test/mcp";
+  const PAGE = "https://docs.example.test/pages/1/", SLOW = "https://slow.example.test/mcp", KEYED = "https://keyed.example.test/mcp";
   const { cfg, host, told, probed } = setup({ boxed: false, bots: [PAUL], urls: {
     [PAGE]: { ok: false, status: 405 },
     [SLOW]: { ok: false },
     [KEYED]: { ok: false, status: 401 },
   } });
-  cfg.mcpServers!.google = { type: "http", url: PAGE, headers: {}, enabled: true };
+  cfg.mcpServers!.wiki = { type: "http", url: PAGE, headers: {}, enabled: true };
   cfg.mcpServers!.slow = { type: "http", url: SLOW, headers: {}, enabled: true };
   cfg.mcpServers!.keyed = { type: "http", url: KEYED, headers: {}, enabled: true };
-  expect(Object.keys(host.mounted(PAUL)), "before its check a URL server is mounted as before").toContain("google");
+  expect(Object.keys(host.mounted(PAUL)), "before its check a URL server is mounted as before").toContain("wiki");
   host.boot();
   await host.health.settled();
   expect(probed.sort()).toEqual([PAGE, KEYED, SLOW]);
   expect(Object.keys(host.mounted(PAUL)).sort()).toEqual(["keyed", "notes", "slow"]);
-  expect(host.off(PAUL)).toContainEqual({ name: "google", error: notMcpError(405) });
+  expect(host.off(PAUL)).toContainEqual({ name: "wiki", error: notMcpError(405) });
   expect(host.off(PAUL).map((off) => off.name)).not.toContain("slow");
-  expect(host.listing({ name: "google" }).offFor).toEqual(["paul"]);
-  expect(told.map((entry) => entry.text)).toContain("The Google tool doesn't start, so it's off for now. It comes back on its own once it starts.");
+  expect(host.listing({ name: "wiki" }).offFor).toEqual(["paul"]);
+  expect(told.map((entry) => entry.text)).toContain("The Wiki tool doesn't start, so it's off for now. It comes back on its own once it starts.");
 
   host.boot();
-  host.health.engineFailed(PAUL.id, ["google"]);
+  host.health.engineFailed(PAUL.id, ["wiki"]);
   await host.health.settled();
-  expect(told.filter((entry) => entry.text.startsWith("The Google tool")), "said once").toHaveLength(1);
+  expect(told.filter((entry) => entry.text.startsWith("The Wiki tool")), "said once").toHaveLength(1);
 
   // The person fixes the address: it is mounted again at once and checked again.
-  cfg.mcpServers!.google = { type: "http", url: "https://mcp.example.test/sheets", headers: {}, enabled: true };
-  expect(Object.keys(host.mounted(PAUL))).toContain("google");
-  host.health.changed("google");
+  cfg.mcpServers!.wiki = { type: "http", url: "https://mcp.example.test/wiki", headers: {}, enabled: true };
+  expect(Object.keys(host.mounted(PAUL))).toContain("wiki");
+  host.health.changed("wiki");
   await host.health.settled();
-  expect(Object.keys(host.mounted(PAUL))).toContain("google");
-  expect(host.off(PAUL).map((off) => off.name)).not.toContain("google");
+  expect(Object.keys(host.mounted(PAUL))).toContain("wiki");
+  expect(host.off(PAUL).map((off) => off.name)).not.toContain("wiki");
 });
 
 it("a package runner's first check waits for its download; any other program's keeps the short wait", () => {
