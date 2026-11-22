@@ -46,6 +46,31 @@ describe("what a bot on My Cloud is told about connections that need the person"
     expect(prompt({ mcpServers: ["dodo", "linear", "jira"] })).toBe("");
   });
 
+  it("a server that stands for an app connected here points the bot at that app, not at a sign-in it cannot finish", async () => {
+    const drive = { type: "http", url: "https://api.cursor.com/rest-mcp/google-drive/mcp", headers: {}, enabled: true };
+    const sheets = { type: "http", url: "https://api.cursor.com/rest-mcp/google-sheets/mcp", headers: {}, enabled: true };
+    const reads: string[][] = [];
+    const source: ConnectionPromptSources = {
+      mcpServers: () => ({ "google-drive": drive, "google-sheets": sheets }),
+      mcpAuth: () => "needs-sign-in",
+      composioConnected: async (slugs) => { reads.push(slugs); return Object.fromEntries(slugs.map((slug) => [slug, slug === "googledrive"])); },
+    };
+    const prompt = createConnectionPrompt(source, ORIGIN);
+    const signIn = (name: string) => `${name} (sign in here: https://omb-u-1.fly.dev/?connect=mcp%3A${name})`;
+    // Not read yet: as before, the sign-in links.
+    expect(prompt({})).toContain(`Not connected on My Cloud yet: ${signIn("google-drive")}; ${signIn("google-sheets")}.`);
+    await vi.waitFor(() => expect(reads).toEqual([["googledrive", "googlesheets"]]));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(prompt({})).toBe(
+      ` Not connected on My Cloud yet: ${signIn("google-sheets")}. When a task needs one, say in plain words that it needs the person once on My Cloud and give its link; do not try another way.`
+      + " Not signed in on My Cloud, but connected here as connected apps: google-drive (Google Drive). When a task needs one, use that connected app through the composio tools instead; do not send the person to sign in to the server.");
+    // A bot that may not use the app keeps the sign-in link.
+    for (const bot of [{ composio: false }, { connectorScopes: { apps: { gmail: "read" as const } } }, { connectorTools: { gmail: { tools: "*" as const } } }]) {
+      expect(prompt(bot)).toContain(signIn("google-drive"));
+      expect(prompt(bot)).not.toContain("connected here as connected apps");
+    }
+  });
+
   it("connected apps assigned to the bot but not connected here, read in the background for the next turn", async () => {
     const source = sources({}, { gmail: false, slack: true });
     const prompt = createConnectionPrompt(source, ORIGIN);

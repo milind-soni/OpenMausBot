@@ -8,15 +8,34 @@ export interface McpServerApp { slug: string; label: string; connected: boolean 
 type KnownApp = { slug: CuratedConnectorSlug; label: string };
 const GMAIL: KnownApp = { slug: "gmail", label: "Gmail" };
 const CALENDAR: KnownApp = { slug: "googlecalendar", label: "Google Calendar" };
+const DRIVE: KnownApp = { slug: "googledrive", label: "Google Drive" };
+const SHEETS: KnownApp = { slug: "googlesheets", label: "Google Sheets" };
+const DOCS: KnownApp = { slug: "googledocs", label: "Google Docs" };
 
 const BY_HOST: Record<string, KnownApp> = { "gmailmcp.googleapis.com": GMAIL, "calendarmcp.googleapis.com": CALENDAR };
+/** Another editor's hosted Google servers, `/rest-mcp/<app>/mcp`, which sign in only from that editor (Google refuses this
+ * app's address as the sign-in's return address): one copied here stands for the connected app. */
+const HOSTED: Record<string, Record<string, KnownApp>> = {
+  "api.cursor.com": { "google-drive": DRIVE, "google-sheets": SHEETS, "google-docs": DOCS },
+};
 /** At any other address, only a name that is the app's own: "gmail-filters" or "gcal2notion" is another tool. */
 const BY_NAME: ReadonlyArray<readonly [RegExp, KnownApp]> = [
   [/^gmail(?:[-_]mcp)?$/i, GMAIL],
   [/^(?:google[-_]?calendar|gcal(?:endar)?)(?:[-_]mcp)?$/i, CALENDAR],
+  [/^google[-_]?drive(?:[-_]mcp)?$/i, DRIVE],
+  [/^google[-_]?sheets(?:[-_]mcp)?$/i, SHEETS],
+  [/^google[-_]?docs(?:[-_]mcp)?$/i, DOCS],
 ];
+
+function hostedApp(url: string): KnownApp | undefined {
+  if (!URL.canParse(url)) return undefined;
+  const { hostname, pathname } = new URL(url);
+  const apps = Object.hasOwn(HOSTED, hostname.toLowerCase()) ? HOSTED[hostname.toLowerCase()] : undefined;
+  const app = /^\/rest-mcp\/([a-z-]+)(?:\/|$)/.exec(pathname)?.[1];
+  return apps && app && Object.hasOwn(apps, app) ? apps[app] : undefined;
+}
 
 export function knownMcpServerApp(name: string, url: string): KnownApp | null {
   const host = URL.canParse(url) ? new URL(url).hostname.toLowerCase() : "";
-  return (Object.hasOwn(BY_HOST, host) ? BY_HOST[host] : undefined) ?? BY_NAME.find(([pattern]) => pattern.test(name))?.[1] ?? null;
+  return (Object.hasOwn(BY_HOST, host) ? BY_HOST[host] : undefined) ?? hostedApp(url) ?? BY_NAME.find(([pattern]) => pattern.test(name))?.[1] ?? null;
 }
