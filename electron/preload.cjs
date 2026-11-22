@@ -433,6 +433,13 @@ const bridge = {
   // This computer's page only: where a bot's Browser panel shows its native browser view.
   browserPane: {
     show: (input) => ipcRenderer.invoke("browser-pane:show", input),
+    hold: (input) => ipcRenderer.invoke("browser-pane:hold", input),
+  },
+  // This computer's page only: a site's sign-in from the person's own browsers into a bot's, which they start themselves.
+  browserCookies: {
+    sources: () => ipcRenderer.invoke("browser-cookies:sources"),
+    offer: (input) => ipcRenderer.invoke("browser-cookies:offer", input),
+    import: (input) => ipcRenderer.invoke("browser-cookies:import", input),
   },
   pickFolder: (current) => ipcRenderer.invoke("desktop:pick-folder", current),
   exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),

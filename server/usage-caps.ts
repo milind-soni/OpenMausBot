@@ -249,12 +249,16 @@ export function capStates(saved: UsageCapsConfig | undefined, dataDir: string, n
   return [...statesOf("server", undefined, caps.server, totals.server, now), ...bots.flatMap(([id, limits]) => statesOf("bot", id, limits, totals.bots.get(id), now))];
 }
 
-/** The reached cap that keeps this work from starting, or null. A person's own message is stopped only by `everything`.
- * Of several reached caps, the one that resets last: the work cannot start before it does. */
+/** Of several reached caps, the one that resets last: the work cannot start before it does. */
+export function blockingCap(states: readonly CapState[]): CapState | null {
+  return states.reduce<CapState | null>((blocking, state) =>
+    state.reached && (!blocking || state.resetsAt > blocking.resetsAt) ? state : blocking, null);
+}
+
+/** The reached cap that keeps this work from starting, or null. A person's own message is stopped only by `everything`. */
 export function reachedCap(saved: UsageCapsConfig | undefined, dataDir: string, work: { botId?: string; personWaiting: boolean }, now = new Date(), env: NodeJS.ProcessEnv = process.env): CapState | null {
   if (work.personWaiting && effectiveCaps(saved, env).stops !== "everything") return null;
-  const reached = capStates(saved, dataDir, now, env, work.botId ?? "").filter((state) => state.reached);
-  return reached.sort((a, b) => b.resetsAt - a.resetsAt)[0] ?? null;
+  return blockingCap(capStates(saved, dataDir, now, env, work.botId ?? ""));
 }
 
 /** What the harness already knows of the conversation a turn runs in. */

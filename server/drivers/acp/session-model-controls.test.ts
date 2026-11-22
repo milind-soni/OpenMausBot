@@ -136,7 +136,7 @@ describe("picking the session model before the setter runs", () => {
   it("maps a legacy pick onto the live catalog before the stale and fallback checks", () => {
     const normalizeSessionSelection = vi.fn((turn, offered: readonly string[]) => offered.includes("two") ? { ...turn, model: "two", variant: "max" } : turn);
     const picked = pick({ displayName: "Agent", normalizeSessionSelection, fallbackModel: () => "one" }, "two-max");
-    expect(normalizeSessionSelection).toHaveBeenCalledWith(expect.objectContaining({ model: "two-max" }), ["one", "two"]);
+    expect(normalizeSessionSelection).toHaveBeenCalledWith(expect.objectContaining({ model: "two-max" }), ["one", "two"], catalog);
     expect(picked).toMatchObject({ turn: { model: "two", variant: "max" }, variant: "max", reportedModel: "two-max", staleProcess: false, notice: null });
   });
 

@@ -17,6 +17,7 @@
 //       FAKE_ACP_ASK_PARAMS; the client's reply is written to FAKE_ACP_ASK_ANSWER. FAKE_ACP_ASK_TIMING=with-result
 //       settles the turn with the card open; after-result asks between turns)
 //     | interleave (message, tool, message, tool, message) | no-session-config (set_mode/set_model answer -32601)
+//     | set-model-internal-error (set_model answers -32603)
 //     | ask-peer | delegate-peer | chief-delegate | create-peer (coordinate_bots through the injected agents
 //       MCP; FAKE_ACP_REDELEGATE_FILE, FAKE_ACP_TASKID_FILE; a hand-off result wake gets a fixed line)
 //     | echo-gated (echo the whole prompt; hold until FAKE_ACP_GATE_FILE exists) | safe-agent-reads
@@ -77,6 +78,8 @@
 //   FAKE_ACP_OMIT_MODEL_VALUE  when the live model equals this id, the model option has no currentValue
 //     (Copilot CLI 1.0.105 does this for auto)
 //   FAKE_ACP_EXIT_ON_MODEL  the process exits when set_config_option selects this model
+//   FAKE_ACP_HANG_ON_MODEL  set_config_option never answers a switch to this model, as a stuck account can; other requests
+//     are still answered
 //   FAKE_ACP_VARIANTS  JSON map model -> {id?, currentValue?, options} of ACP select values
 //   FAKE_ACP_CONFIG_UPDATES  JSON [{after, sessionId?, configOptions, replay?}] emitted after the named response
 //   FAKE_ACP_USAGE_ROOT  usage at the prompt result's root, as opencode 1.18.18 sends it
@@ -1209,6 +1212,9 @@ function handle(msg: any) {
         // Cursor's answer when handed an argv slug like `auto`.
         return out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "Invalid params" } });
       }
+      if (msg.method === "session/set_model" && mode === "set-model-internal-error") {
+        return out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "Internal error: model switch failed" } });
+      }
       const settingId = msg.method === "session/set_mode" ? "modeId" : "modelId";
       if (typeof msg.params?.sessionId !== "string" || typeof msg.params?.[settingId] !== "string") {
         out({
@@ -1287,6 +1293,7 @@ function handle(msg: any) {
         break;
       }
       if (configId === "model" && value === process.env.FAKE_ACP_EXIT_ON_MODEL) process.exit(4);
+      if (configId === "model" && value === process.env.FAKE_ACP_HANG_ON_MODEL) break;
       if (configId !== "model" || !models.includes(value)) {
         out({
           jsonrpc: "2.0",

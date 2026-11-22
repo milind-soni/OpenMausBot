@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 import { PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
 import { openStartupModelCatalog } from "../../startup-model-catalog.ts";
 import { acpModelCatalog } from "./model-catalog.ts";
+import { acpDiscoveryProblem } from "./custom-model-catalog.ts";
 import { decodeInjectId } from "../local-inject.ts";
 import { DeviceAuthController, deviceAuthInstanceSurface, type DeviceSignIn } from "../device-auth.ts";
 import { AcpBrowserAuth, acpBrowserAuthInstanceSurface, type AcpBrowserSignInSpec } from "./browser-auth.ts";
@@ -250,7 +251,7 @@ export interface AcpSupport extends AcpDriverHooks {
   /** Rewrite a picker id (`omlx::model`) into the CLI-native id before spawn and session/select. */
   resolveTurnModel?(model: string | undefined, env: Record<string, string | undefined>, catalog: ModelCatalog): string | undefined;
   /** Map a saved selection onto the live session's catalog (a retired model id), once session/new or load answers. */
-  normalizeSessionSelection?(turn: SendTurnInput, offeredModels: readonly string[]): SendTurnInput;
+  normalizeSessionSelection?(turn: SendTurnInput, offeredModels: readonly string[], catalog: ModelCatalog): SendTurnInput;
   /** Per-session settings between session/new (or load) and the first prompt. Some CLIs ignore argv
    * and take the model/mode over the wire (droid); a throw fails the turn rather than run another model. */
   configureSession?(ctx: {
@@ -355,7 +356,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         fixed: support.models,
         startFromSaved: Boolean(support.resolveModels) && support.resolveModelsOnCreate === false,
         resolve: support.resolveModels && ((fresh) => { const env = childEnv(); return support.resolveModels!(env, config, instanceId, fresh, instanceEnvNames(input.environment, env)); }),
-      });
+        explain: (error) => acpDiscoveryProblem(error, support.classifyError) });
       const refreshModels = (fresh?: boolean) => catalog.refresh(fresh);
       let startupModelRefresh: Promise<void> | null = null;
       if (support.resolveModels && support.resolveModelsOnCreate !== false) {
@@ -1591,9 +1592,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         get models() {
           return catalog.models;
         },
-        get modelsUnconfirmed() {
-          return catalog.unconfirmed;
-        },
+        get modelsUnconfirmed() { return catalog.unconfirmed; },
+        get modelsUnreadable() { return catalog.unreadable; },
         refreshModels: support.resolveModels ? () => refreshModels(true) : undefined,
         ...(startupModelRefresh ? { startupModelRefresh } : {}),
         ...(support.deviceSignIn && deviceSignIn ? deviceAuthInstanceSurface(deviceSignIn, support.deviceSignIn) : {}), ...(support.browserSignIn && browserSignIn ? acpBrowserAuthInstanceSurface(browserSignIn, support.browserSignIn) : {}),

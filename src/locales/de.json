@@ -4091,5 +4091,14 @@
   "geminiServer.key": "Gemini-API-Schlüssel",
   "geminiServer.add": "Google AI Studio hinzufügen",
   "inbox.settled.title": "Erledigt",
-  "inbox.settled.read": "Gelesen"
+  "inbox.settled.read": "Gelesen",
+  "server.notify.handoff": "{who} wartet auf dich",
+  "serverError.signIn.expired": "Diese Anfrage ist bereits abgelaufen",
+  "chat.handoffExchange.open": "Austausch mit {name} öffnen",
+  "chat.handoffExchange.label": "Austausch zwischen den Bots {asker} und {helper}",
+  "chat.handoffExchange.backTo": "Zurück zu {name}",
+  "chat.handoffExchange.back": "Zurück",
+  "chat.handoffExchange.loading": "Unterhaltung wird geladen…",
+  "chat.handoffExchange.failed": "Die Unterhaltung konnte nicht geladen werden.",
+  "chat.handoffExchange.empty": "Noch keine Nachrichten."
 }

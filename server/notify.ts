@@ -54,7 +54,7 @@ export function buildNotification(
   bot: Omit<NotifyBot, "threadId"> & { threadId?: string },
   threadId: string,
   detail: string,
-  extra?: { avatarUrl?: string; group?: { id: string; name: string }; site?: string; label?: string; app?: string },
+  extra?: { avatarUrl?: string; group?: { id: string; name: string }; site?: string; label?: string; app?: string; handoff?: boolean },
 ): Notification | null {
   if (bot.notifications === false) return null;
 
@@ -63,7 +63,8 @@ export function buildNotification(
   const who = extra?.group ? serverLine(language, "server.notify.inRoom", { bot: bot.name, room: extra.group.name }) : bot.name;
   const title = kind === "secret" ? serverLine(language, "server.notify.secret", { who, label: extra?.label ?? "" })
     : kind === "sign-in"
-      ? extra?.app ? serverLine(language, "server.notify.connect", { who, app: extra.app })
+      ? extra?.handoff ? serverLine(language, "server.notify.handoff", { who })
+        : extra?.app ? serverLine(language, "server.notify.connect", { who, app: extra.app })
         : extra?.site ? serverLine(language, "server.notify.signIn", { who, site: extra.site }) : serverLine(language, "server.notify.signInWebsite", { who })
       : serverLine(language, TITLE[kind] ?? "server.notify.done", { who });
 

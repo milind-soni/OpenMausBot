@@ -561,6 +561,16 @@ export async function saveNamedAttachment(name: string, chunks: AsyncIterable<Ui
   if (expectedBytes !== undefined && expectedBytes > FILE_MAX_BYTES) throw statusError(413, `attachments are limited to ${FILE_MAX_BYTES} bytes`);
   ensureAttachmentsDir();
   const path = join(ATTACHMENTS_DIR, name);
+  if (statSizeIfFile(path) !== null) {
+    // A retried move already owns these bytes. Drain its request without reserving another copy at a full store.
+    let bytes = 0;
+    for await (const chunk of chunks) {
+      bytes += chunk.byteLength;
+      if (bytes > FILE_MAX_BYTES) throw statusError(413, `attachments are limited to ${FILE_MAX_BYTES} bytes`);
+    }
+    if (statSizeIfFile(path) === null) throw statusError(409, "The attachment was removed during the retry. Retry the upload.");
+    return { stored: false };
+  }
   const partialPath = join(ATTACHMENTS_DIR, `.openmaus-upload-${randomUUID()}-${randomUUID()}.partial`);
   const reservation = new AttachmentReservation();
   activePartials.add(partialPath);

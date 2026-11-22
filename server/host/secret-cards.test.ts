@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import "../server-line-packs.ts";
 import type { BotRecord, Message } from "../store.ts";
@@ -15,6 +15,11 @@ import { BotLogins } from "../bot-logins.ts";
 import { OnePasswordLogins, sdkOnePasswordClient } from "../onepassword.ts";
 import { fakeOnePasswordSdk } from "../testing/fake-onepassword.ts";
 import type { LoginBots } from "../../shared/logins.ts";
+
+vi.mock("../data-format.ts", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../data-format.ts")>(),
+  DATA_FORMAT: { reads: 2, writes: 2 },
+}));
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -107,6 +112,18 @@ describe("a secret a card saves to the Vault", () => {
   const ask = (one: ReturnType<typeof fixture>, threadId: string, extra: Record<string, unknown> = {}) =>
     one.cards.requestCredential(one.bot, threadId, { label: "Stripe secret key", reason: "For test charges.", delivery: "ref", ...extra });
   const refIn = (text: unknown) => /secret-ref:[0-9a-f]{32}/u.exec(String(text))?.[0];
+
+  it("accepts a 64 KiB custom value without putting it in the card or resume message", async () => {
+    const one = fixture();
+    const card = await ask(one, "t1");
+    const id = String(card.body.messageId);
+    const value = "large-fixture--!".repeat(4_096);
+    expect(one.cards.saveCustomSecret("ledger", "t1", id, value + "x").status).toBe(400);
+    const saved = one.cards.saveCustomSecret("ledger", "t1", id, value);
+    expect(saved.status).toBe(200);
+    expect(one.vaultStore.secretValues()[0] === value).toBe(true);
+    expect(JSON.stringify([one.lines, one.resumed, saved])).not.toContain("large-fixture--!");
+  });
 
   it("is kept for the asking bot, and its next ask, in any conversation and after any ref is spent, gets a fresh one with no card", async () => {
     const one = fixture();
