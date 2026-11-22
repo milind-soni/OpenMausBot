@@ -59,8 +59,8 @@ async function fixture(over: Partial<Record<keyof BotMessageRouteDeps, unknown>>
     started: Array<{ text: string; opts: StartOpts }>;
     relayed: Array<Parameters<BotMessageRouteDeps["relayedReaction"]>>;
     serverPresses: Array<{ threadId: string; messageId: string; type: string }>; serverAnswer: "handled" | "refused" | null; records: string | null;
-    fromPhone: boolean; phoneSends: string[];
-  } = { accepted: [], hold: null, refuse: null, busy: false, prompts: [], started: [], relayed: [], serverPresses: [], serverAnswer: null, records: null, fromPhone: false, phoneSends: [] };
+    fromPhone: boolean; phoneSends: string[]; setupSaw: boolean[];
+  } = { accepted: [], hold: null, refuse: null, busy: false, prompts: [], started: [], relayed: [], serverPresses: [], serverAnswer: null, records: null, fromPhone: false, phoneSends: [], setupSaw: [] };
   const startTurn: BotMessageRouteDeps["startTurn"] = async (botId, text, opts = {}) => {
     state.started.push({ text, opts });
     state.prompts.push(promptWithReply(text, opts.replyTo));
@@ -87,6 +87,8 @@ async function fixture(over: Partial<Record<keyof BotMessageRouteDeps, unknown>>
         return { ok: true as const, queued: true as const, queueId: queued.id, threadId: input.threadId };
       }
       const message = store.appendMessage(input.threadId, { role: "user", kind: "text", text: input.text, replyToId: input.replyTo?.id, sendId: input.sendId });
+      // A turn that starts at once may set up (lent computers included) before the send answers.
+      state.setupSaw.push(ownWindowLine(input.threadId, message));
       return { ok: true as const, threadId: input.threadId, message };
     });
   };
@@ -756,6 +758,20 @@ describe("POST /api/bots/:id/messages from the desktop app's own window", () => 
     const plain = await post({ threadId, sendId: SEND, text: words });
     expect(plain.status, JSON.stringify(plain.body)).toBe(202);
     expect(ownWindowLine(threadId, plain.body.message)).toBe(true);
+  });
+
+  it("lets the turn a send starts at once see the window's line while it sets up", async () => {
+    const { threadId, state, post } = await fixture();
+    const plain = await post({ threadId, sendId: SEND, text: words });
+    expect(plain.status, JSON.stringify(plain.body)).toBe(202);
+    expect(state.setupSaw).toEqual([true]);
+  });
+
+  it("leaves no proof for a send that was refused", async () => {
+    const { threadId, state, post } = await fixture();
+    state.refuse = new DirectSendRefused(409, { error: "spend cap reached", code: "spend_cap" });
+    expect((await post({ threadId, sendId: SEND, text: words })).status).toBe(409);
+    expect(ownWindowLine(threadId, { role: "user", sendId: SEND, text: words })).toBe(false);
   });
 
   it("notes neither a press nor a relay", async () => {
