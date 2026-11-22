@@ -162,7 +162,7 @@ export const Row = memo(function Row({ message: m, botId, botName, color, thread
     <div className={own ? "v2-user-content" : "contents"}>
     {images && files && <AttachmentGallery images={images}
       files={[...files, ...collectMessageFiles(text, [...images.map(image => typeof image === "string" ? image : image.path), ...files.map(file => file.path)])]}
-      originals={attached?.originals} message={attachmentContext} photoStrip="square" />}
+      originals={attached?.originals} message={attachmentContext} photoStrip="square" alignEnd />}
     {((text && !attachmentsOnly) || m.replyToId || !own || voiceNotes?.length) &&
     <div className={bare ? "v2-body v2-body-bare" : own ? "v2-body user-bubble-colored" : "v2-body"} dir="auto"
       style={own && !bare ? ownBubbleStyle : undefined} data-chat-bubble={attachmentsOnly ? undefined : ""} data-look={own && !bare ? "user-bubble" : undefined}

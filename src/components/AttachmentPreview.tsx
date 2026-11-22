@@ -596,7 +596,7 @@ export function AttachedFileChip({ file, message, linked = false, compact = fals
       title={save.state === "saved" && save.savedTo ? t("attach.savedTo", { path: save.savedTo }) : file.name}
       className={cn("max-w-[280px] overflow-hidden rounded-lg border border-hairline/40 bg-inset/70 text-[12px] text-ink-secondary", className)}
     >
-      <div className="flex items-center pe-1">
+      <div className="flex items-center [&>.table-action]:me-1">
         <button
           type="button"
           {...chipNameAction(preview, save, file.name, save.retryable)}

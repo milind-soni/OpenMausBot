@@ -461,7 +461,7 @@ type GalleryItem = { key: string; source?: string } & (
 
 const BENEATH_LIMIT = 6;
 
-export function AttachmentGallery({ images = [], files = [], originals, message, eager = false, beneath = false, photoStrip, className }: {
+export function AttachmentGallery({ images = [], files = [], originals, message, eager = false, beneath = false, photoStrip, alignEnd = false, className }: {
   images?: Array<string | TranscriptImageAttachment>;
   files?: GalleryFile[];
   originals?: AttachmentOriginals;
@@ -469,6 +469,7 @@ export function AttachmentGallery({ images = [], files = [], originals, message,
   eager?: boolean;
   beneath?: boolean;
   photoStrip?: "square" | "oriented";
+  alignEnd?: boolean;
   className?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -550,9 +551,9 @@ export function AttachmentGallery({ images = [], files = [], originals, message,
   }
 
   return (
-    <section aria-label={label} className={cn("mb-1 max-w-full space-y-1.5 text-left whitespace-normal", compactPhotos && !documents.length ? "w-fit" : "mb-1.5 w-[min(34rem,70vw)]", className)}>
+    <section aria-label={label} className={cn("mb-1 max-w-full space-y-1.5 text-start whitespace-normal", compactPhotos && !documents.length ? "w-fit" : "mb-1.5 w-[min(34rem,70vw)]", className)}>
       {media.length > 0 && (
-        <div className={cn("max-w-full gap-2", compactPhotos ? "flex flex-wrap" : cn("grid", media.length === 1 ? "grid-cols-1" : "grid-cols-2"))}>
+        <div className={cn("max-w-full gap-2", compactPhotos ? cn("flex flex-wrap", alignEnd && "justify-end") : cn("grid", media.length === 1 ? "grid-cols-1" : "grid-cols-2"))}>
           {media.map((item) => item.kind === "image" ? (
             <div key={item.key} className="min-w-0 max-w-full" title={item.image.name} {...reveal.targetProps(item.source)}>
               <AttachmentThumbnail key={item.image.src} image={item.image} eager={eager} gallery={previews} onPreview={(items) => setSelected({ image: item.image, items })} layout={photoStrip} className={cn("max-h-72 max-w-full border-0 bg-transparent", !photoStrip && "rounded-2xl")} />
@@ -563,14 +564,14 @@ export function AttachmentGallery({ images = [], files = [], originals, message,
         </div>
       )}
       {documents.length > 0 && (
-        <div className="flex flex-col items-start gap-1.5">
+        <div className={cn("flex flex-col gap-1.5", alignEnd ? "items-end" : "items-start")}>
           {documents.map((item) => item.kind === "audio" && message
             ? <span key={`${message.threadId}:${message.messageId}:${item.key}`} className="contents" {...reveal.targetProps(item.source)}><AudioAttachment file={item.file} message={message} /></span>
-            : item.kind === "file" && <span key={item.key} className="contents" {...reveal.targetProps(item.source)}><AttachedFileChip file={item.file} linked={item.file.linked} message={message} className="max-w-none rounded-xl border-hairline/25 bg-transparent" /></span>)}
+            : item.kind === "file" && <span key={item.key} className="contents" {...reveal.targetProps(item.source)}><AttachedFileChip file={item.file} linked={item.file.linked} message={message} className="max-w-full rounded-xl border-hairline/25 bg-transparent" /></span>)}
         </div>
       )}
       {items.length > limit && (
-        <button type="button" onClick={() => setExpanded(!expanded)} aria-expanded={expanded} className="flex min-h-8 items-center gap-1 rounded-lg px-1 py-1 text-[11px] text-ink-secondary transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">
+        <button type="button" onClick={() => setExpanded(!expanded)} aria-expanded={expanded} className={cn("flex min-h-8 items-center gap-1 rounded-lg px-1 py-1 text-[11px] text-ink-secondary transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60", alignEnd && "ms-auto")}>
           {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
           {expanded ? t("attach.showLess") : t("attach.showMore", { count: items.length - limit })}
         </button>
