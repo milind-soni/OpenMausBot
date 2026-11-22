@@ -19,7 +19,7 @@ import {
   AskHeader,
   AskReply,
   AskSettledLine,
-  ASK_QUIET_BUTTON,
+  STATUS_TEXT_ACTION,
   ASK_SMALL_PILL,
   askPrimary,
   returnFocusToComposer,
@@ -250,7 +250,7 @@ function DecidedQuestion({ threadId, asker, card, questions }: { threadId: strin
       <AskSettledLine
         ariaLabel={t("question.aria.card")}
         action={!open ? (
-          <button type="button" onClick={() => setOpen(true)} className={ASK_QUIET_BUTTON}>{t(picked === undefined ? "question.decided.answer" : "question.decided.change")}</button>
+          <button type="button" onClick={() => setOpen(true)} className={STATUS_TEXT_ACTION}>{t(picked === undefined ? "question.decided.answer" : "question.decided.change")}</button>
         ) : undefined}
       >
         {picked === undefined ? t("question.decided.deciding", { name })
@@ -285,7 +285,7 @@ function SettledQuestion({ card, questions }: { card: NonNullable<Message["card"
     <AskSettledLine
       ariaLabel={t("question.aria.card")}
       action={many && full ? (
-        <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className={ASK_QUIET_BUTTON}>
+        <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className={STATUS_TEXT_ACTION}>
           {open ? t("question.hideDetails") : t("question.details")}
         </button>
       ) : undefined}

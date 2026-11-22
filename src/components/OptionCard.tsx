@@ -80,7 +80,7 @@ export function OptionCard({
         ariaLabel={card.title}
         tone={picked === undefined ? "closed" : "done"}
         action={dismiss && (
-          <button type="button" onClick={dismiss} aria-label={t("onboarding.card.dismiss")} title={t("onboarding.card.dismiss")} className={cn(ASK_QUIET_BUTTON, "w-7 px-0")}>
+          <button type="button" onClick={dismiss} aria-label={t("onboarding.card.dismiss")} title={t("onboarding.card.dismiss")} className={cn(ASK_QUIET_BUTTON, "w-7 self-center px-0")}>
             <X size={14} />
           </button>
         )}

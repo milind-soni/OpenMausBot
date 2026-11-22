@@ -7,7 +7,7 @@ import { cn } from "@/lib/cn";
 import { activeLocale, t } from "@/lib/i18n";
 import { keySaved, keySaveFailure, savedKeyResult } from "@/lib/product-events";
 import { api, useStore, type Bot, type ConfigStatus, type Message } from "@/state/store";
-import { ASK_FIELD, askPrimary, ASK_QUIET_BUTTON, AskCard, AskSettledLine, returnFocusToComposer } from "./AskCard";
+import { ASK_FIELD, askPrimary, STATUS_TEXT_ACTION, AskCard, AskSettledLine, returnFocusToComposer } from "./AskCard";
 import { EmailConnectForm, type EmailConnectRefusal } from "./EmailCard";
 import { EmailOutgoingRequestForm, EmailRequestSettled } from "./EmailRequestCard";
 import type { EmailConnectRequest, EmailOutgoingFields } from "../../shared/email";
@@ -207,7 +207,7 @@ export function SecretRequestCard({
 
   if (provided || declined) {
     const retry = !secret.resumed && !stopped && error ? (
-      <button type="button" onClick={() => void retryResume()} disabled={saving} className={cn(ASK_QUIET_BUTTON, "text-accent-text")}>
+      <button type="button" onClick={() => void retryResume()} disabled={saving} className={cn(STATUS_TEXT_ACTION, "text-accent-text")}>
         {saving ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
         {t("common.tryAgain")}
       </button>

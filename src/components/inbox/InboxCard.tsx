@@ -9,7 +9,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { openInbox, readInboxRow, useInboxView } from "@/state/inbox";
 import { pendingApprovals, PendingApprovalActions } from "../PendingApproval";
-import { ASK_QUIET_ANSWER, ASK_QUIET_BUTTON, AskChoices, AskError } from "../AskCard";
+import { ASK_QUIET_ANSWER, STATUS_TEXT_ACTION, AskChoices, AskError } from "../AskCard";
 import { ELEVATED_CARD } from "../elevated";
 import { InboxRowItem } from "./InboxRow";
 import { asMessage } from "./inbox-answer";
@@ -74,19 +74,19 @@ export function InboxCard({ view }: { view: InboxView }) {
   const shell = cn("my-1 w-full max-w-[560px] rounded-[18px]", ELEVATED_CARD);
   if (!rows.length) {
     return (
-      <section data-inbox-card="caught-up" aria-label={t("inbox.card.caughtUp")} className={cn(shell, "flex items-center gap-2 px-4 py-2 text-[13px] text-ink-secondary")}>
-        <Check size={14} aria-hidden="true" className="shrink-0 text-success" />
+      <section data-inbox-card="caught-up" aria-label={t("inbox.card.caughtUp")} className={cn(shell, "flex items-baseline gap-2 px-4 py-2 text-[13px] text-ink-secondary")}>
+        <Check size={14} aria-hidden="true" className="relative top-0.5 shrink-0 text-success" />
         <span className="min-w-0 flex-1 truncate">{t("inbox.card.caughtUp")}{counts.info > 0 && ` · ${t("inbox.card.forInfo", { count: counts.info })}`}</span>
-        <button type="button" onClick={openAll} className={cn(ASK_QUIET_BUTTON, "-me-2")}>{t("inbox.card.open")}</button>
+        <button type="button" onClick={openAll} className={STATUS_TEXT_ACTION}>{t("inbox.card.open")}</button>
       </section>
     );
   }
   return (
     <section data-inbox-card="open" aria-label={t("inbox.card.summary", { needs: counts["needs-you"], info: counts.info })} className={cn(shell, "overflow-hidden")}>
-      <header className="flex items-center gap-2 px-4 pb-1 pt-3">
-        <Inbox size={15} aria-hidden="true" className="shrink-0 text-ink-secondary" />
+      <header className="flex items-baseline gap-2 px-4 pb-1 pt-3">
+        <Inbox size={15} aria-hidden="true" className="relative top-0.5 shrink-0 text-ink-secondary" />
         <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink-secondary">{t("inbox.card.summary", { needs: counts["needs-you"], info: counts.info })}</span>
-        <button type="button" onClick={openAll} className={cn(ASK_QUIET_BUTTON, "-me-2")}>{t("inbox.card.open")}</button>
+        <button type="button" onClick={openAll} className={STATUS_TEXT_ACTION}>{t("inbox.card.open")}</button>
       </header>
       {rows.map((row) => (
         <div key={row.id} className="border-t border-ink/[0.06] first-of-type:border-t-0">

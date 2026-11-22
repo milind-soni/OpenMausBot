@@ -10,7 +10,7 @@ import { AUTHORIZATION_LINK_MS, reserveConnectionPage, reusableConnectionUrl, ty
 import { accountAliasTaken, requiresAccountAlias } from "@/lib/connector-status";
 import { mcpSignInLink } from "@/lib/mcp-sign-in";
 import { cn } from "@/lib/cn";
-import { askPrimary, ASK_QUIET_BUTTON, AskCard, AskSettledLine } from "./AskCard";
+import { askPrimary, STATUS_TEXT_ACTION, AskCard, AskSettledLine } from "./AskCard";
 import { ConnectorAlsoUseful } from "./ConnectorAlsoUseful";
 
 const STATUS_CHECK_MS = 4_000;
@@ -159,7 +159,7 @@ export function ConnectorCard({ botId, color, threadId, message }: { botId: stri
       <AskSettledLine
         ariaLabel={connector.label}
         action={!connector.resumed && !stopped && (
-          <button type="button" onClick={() => void resume()} disabled={busy} className={cn(ASK_QUIET_BUTTON, "text-accent-text")}>
+          <button type="button" onClick={() => void resume()} disabled={busy} className={cn(STATUS_TEXT_ACTION, "text-accent-text")}>
             {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
             {t("connectors.card.continueTask")}
           </button>

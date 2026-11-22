@@ -20,6 +20,7 @@ import { useCloudGuest } from "@/lib/cloud-guest";
 import { yourComputerAsk } from "@/lib/your-computer";
 import { computerAskWords } from "@/lib/computer-ask";
 import { mcpRequestActionLabel } from "@/lib/mcp-request-label";
+import { STATUS_TEXT_ACTION } from "./AskCard";
 import { TriggerCard } from "./TriggerCard";
 
 interface ToolLabels {
@@ -286,8 +287,8 @@ function AppliedChangeLine({
   return (
     <div className="w-full max-w-[840px] text-[13px] text-ink-tertiary" data-applied-change={name}>
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 leading-5">
-        <span className="flex min-w-0 max-w-full items-start gap-2">
-          {undone ? <Undo2 size={13} aria-hidden="true" className="mt-[3.5px] shrink-0" /> : <Check size={13} aria-hidden="true" className="mt-[3.5px] shrink-0 text-success/80" />}
+        <span className="flex min-w-0 max-w-full items-baseline gap-2">
+          {undone ? <Undo2 size={13} aria-hidden="true" className="relative top-0.5 shrink-0" /> : <Check size={13} aria-hidden="true" className="relative top-0.5 shrink-0 text-success/80" />}
           <span className="min-w-0 [overflow-wrap:anywhere]">
             {summary.line}
             {shared && !undone && (
@@ -301,7 +302,7 @@ function AppliedChangeLine({
             type="button"
             onClick={undo}
             disabled={undoing}
-            className={cn(TEXT_ACTION, "text-accent disabled:opacity-60")}
+            className={cn(STATUS_TEXT_ACTION, "text-accent-text")}
           >
             {cancels ? t(undoing ? "approval.applied.cancelling" : "common.cancel") : t(undoing ? "approval.applied.undoing" : "approval.applied.undo")}
           </button>
@@ -311,7 +312,7 @@ function AppliedChangeLine({
             type="button"
             onClick={share}
             disabled={sharing}
-            className="rounded-md px-1.5 py-0.5 font-medium text-accent interaction:bg-raised/50 disabled:opacity-60"
+            className={cn(STATUS_TEXT_ACTION, "text-accent-text")}
           >
             {sharing ? t("approval.applied.sharingSkill") : t("approval.applied.shareSkill")}
           </button>
@@ -321,7 +322,7 @@ function AppliedChangeLine({
           aria-expanded={open}
           aria-controls={detailsId}
           onClick={() => setOpen((value) => !value)}
-          className={cn(TEXT_ACTION, "text-ink-tertiary hover:text-ink-secondary")}
+          className={STATUS_TEXT_ACTION}
         >
           {open ? t("approval.applied.hideDetails") : t("approval.applied.details")}
         </button>
@@ -358,9 +359,6 @@ function ApprovalDetails({ id, open, label, className, children }: {
 
 export const APPROVAL_CODE_CHIP =
   "inline-flex min-w-0 max-w-full items-baseline rounded-full bg-inset px-2 pb-px pt-[3px] font-mono text-[13px] leading-5 text-ink";
-
-const TEXT_ACTION =
-  "inline-flex h-6 items-center rounded-full px-2 interaction:bg-raised/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus";
 
 function firstLineOf(text: string): string {
   const line = text.split("\n", 1)[0] ?? "";
@@ -407,14 +405,14 @@ function CompactApprovalRow({
       className={cn("w-full max-w-[840px] text-[13px]", waiting ? "text-ink-secondary" : "text-ink-tertiary")}
     >
       <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 leading-5">
-        <span className="flex min-w-0 max-w-full items-start gap-2">
+        <span className="flex min-w-0 max-w-full items-baseline gap-2">
           {waiting
-            ? <ShieldCheck size={14} className="mt-[3px] shrink-0 text-accent" aria-hidden="true" />
+            ? <ShieldCheck size={14} className="relative top-0.5 shrink-0 text-accent" aria-hidden="true" />
             : allowed
-              ? <Check size={14} className="mt-[3px] shrink-0 text-success" aria-hidden="true" />
+              ? <Check size={14} className="relative top-0.5 shrink-0 text-success" aria-hidden="true" />
               : expired
-                ? <Clock3 size={14} className="mt-[3px] shrink-0" aria-hidden="true" />
-                : <X size={14} className="mt-[3px] shrink-0" aria-hidden="true" />}
+                ? <Clock3 size={14} className="relative top-0.5 shrink-0" aria-hidden="true" />
+                : <X size={14} className="relative top-0.5 shrink-0" aria-hidden="true" />}
           <span className={cn("min-w-0 [overflow-wrap:anywhere]", waiting && "text-ink")}>{header}</span>
         </span>
         {summary && <span className="min-w-0 [overflow-wrap:anywhere]">{waiting ? summary : `· ${summary}`}</span>}
@@ -440,7 +438,7 @@ function CompactApprovalRow({
             aria-expanded={open}
             aria-controls={detailsId}
             onClick={toggle}
-            className={cn(TEXT_ACTION, "text-ink-tertiary hover:text-ink-secondary")}
+            className={STATUS_TEXT_ACTION}
           >
             {open ? t("approval.applied.hideDetails") : t("approval.applied.details")}
           </button>

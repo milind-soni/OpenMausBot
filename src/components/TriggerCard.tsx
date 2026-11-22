@@ -9,14 +9,13 @@ import { saveWebhookCredential, webhookCredentialStore } from "@/lib/webhook-cre
 import { api, ApiError, useStore, type OptionCardData } from "@/state/store";
 import { appWaitingLine } from "@/lib/app-automations";
 import { useAppTriggers } from "@/lib/app-triggers";
+import { STATUS_TEXT_ACTION } from "./AskCard";
 import { useAllAutomationActions } from "./automations/app-actions";
 
 // The editors live with the Automations page; a chat only loads one when Edit is pressed.
 const RoutineEditor = lazy(async () => ({ default: (await import("./RoutinesPage")).RoutineEditor }));
 const WebhookEditor = lazy(async () => ({ default: (await import("./WebhookTrigger")).WebhookEditor }));
 const AppEventEditor = lazy(async () => ({ default: (await import("./automations/AppEventEditor")).AppEventEditor }));
-
-const ACTION = "rounded-md px-1.5 py-0.5 font-medium interaction:bg-raised/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-50";
 
 /** What a chat-made automation leaves in the conversation: one sentence, what happens next or what happened last. */
 export function TriggerCard({ card, threadId }: { card: OptionCardData; threadId?: string }) {
@@ -75,13 +74,13 @@ export function TriggerCard({ card, threadId }: { card: OptionCardData; threadId
           {t("automations.card.setUp", { sentence })}
         </button>
       </div>
-      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-[22px] text-[12px]">
+      <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 pl-[22px] text-[12px]">
         <span className={cn("min-w-0 flex-1 basis-48 truncate", status.state === "needs-you" ? "text-warning" : "text-ink-secondary")} title={line}>{line}</span>
-        <span className="flex shrink-0 items-center gap-0.5 text-ink-secondary">
-          {status.state !== "done" && <><button type="button" disabled={Boolean(actions.busy)} onClick={() => void actions.toggle(automation)} className={ACTION}>{automation.enabled ? t("automations.pause") : t("automations.resume")}</button><span aria-hidden="true">·</span></>}
-          <button type="button" onClick={() => setEditing(true)} className={ACTION}>{t("automations.edit")}</button>
-          {automation.kind === "webhook" && <><span aria-hidden="true">·</span><button type="button" disabled={Boolean(actions.busy)} onClick={() => void actions.copyAddress(automation.id)} className={ACTION}>{actions.copied === automation.id ? t("automations.address.copied") : t("automations.address.copy")}</button></>}
-          {threadId && card.requestId && <><span aria-hidden="true">·</span><button type="button" onClick={undo} disabled={undoing} className={cn(ACTION, "text-accent")}>{undoing ? t("automations.card.undoing") : t("automations.card.undo")}</button></>}
+        <span className="flex max-w-full flex-wrap items-baseline gap-1 text-ink-secondary">
+          {status.state !== "done" && <><button type="button" disabled={Boolean(actions.busy)} onClick={() => void actions.toggle(automation)} className={STATUS_TEXT_ACTION}>{automation.enabled ? t("automations.pause") : t("automations.resume")}</button><span aria-hidden="true">·</span></>}
+          <button type="button" onClick={() => setEditing(true)} className={STATUS_TEXT_ACTION}>{t("automations.edit")}</button>
+          {automation.kind === "webhook" && <><span aria-hidden="true">·</span><button type="button" disabled={Boolean(actions.busy)} onClick={() => void actions.copyAddress(automation.id)} className={STATUS_TEXT_ACTION}>{actions.copied === automation.id ? t("automations.address.copied") : t("automations.address.copy")}</button></>}
+          {threadId && card.requestId && <><span aria-hidden="true">·</span><button type="button" onClick={undo} disabled={undoing} className={cn(STATUS_TEXT_ACTION, "text-accent-text")}>{undoing ? t("automations.card.undoing") : t("automations.card.undo")}</button></>}
         </span>
       </div>
       {(error || actions.error) && <div role="alert" className="mt-1 pl-[22px] text-[12px] text-warning">{error ?? actions.error}</div>}

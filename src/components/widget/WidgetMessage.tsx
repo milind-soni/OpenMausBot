@@ -13,7 +13,7 @@ import {
   PHONE_PAIRING_ACTION, widgetActions, widgetFields, widgetInitialValues, widgetScope, widgetString, type WidgetField, type WidgetNode, type WidgetOther, type WidgetPayload,
   type WidgetSettled, type WidgetValues,
 } from "../../../shared/widget";
-import { ASK_QUIET_BUTTON, AskSettledLine, returnFocusToComposer } from "../AskCard";
+import { STATUS_TEXT_ACTION, AskSettledLine, returnFocusToComposer } from "../AskCard";
 import { plainBotBubble } from "../chat-bubble";
 import { WidgetBody } from "./WidgetBody";
 import { WIDGET_COMPACT_BELOW, widgetActionUrl, widgetThreadTarget, WidgetButton, WidgetFormProvider, WidgetGlyph, type WidgetForm } from "./WidgetControls";
@@ -275,7 +275,7 @@ function WidgetCard({ botId, threadId, messageId, payload, viewOnly }: { botId: 
       ariaLabel={name}
       icon={settled.tone === "cancel" ? <X size={13} /> : undefined}
       action={(
-        <button type="button" aria-expanded={details} aria-controls={detailsId} onClick={() => setDetails((open) => !open)} className={ASK_QUIET_BUTTON}>
+        <button type="button" aria-expanded={details} aria-controls={detailsId} onClick={() => setDetails((open) => !open)} className={STATUS_TEXT_ACTION}>
           {details ? t("question.hideDetails") : t("question.details")}
         </button>
       )}

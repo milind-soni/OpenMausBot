@@ -9,7 +9,7 @@ import { t } from "@/lib/i18n";
 import { cardSaveTarget, saveLoginFromCard } from "@/lib/logins";
 import { answerSignIn, signInHostIsHere } from "@/lib/sign-in";
 import { useStore, type Bot, type Message } from "@/state/store";
-import { ASK_CHIP, ASK_CHIP_IDLE, askPrimary, ASK_QUIET_BUTTON, AskCard, AskSettledLine, returnFocusToComposer } from "./AskCard";
+import { ASK_CHIP, ASK_CHIP_IDLE, askPrimary, STATUS_TEXT_ACTION, AskCard, AskSettledLine, returnFocusToComposer } from "./AskCard";
 import { LoginForm } from "./LoginForm";
 import { VaultChoices } from "./VaultChoices";
 
@@ -97,7 +97,7 @@ export function SignInRequestCard({
   if (outcome) {
     const retry = !card.resumed && !stopped && error ? (
       <button type="button" onClick={() => void answer(outcome === "done" ? "done" : "cancel")} disabled={pending !== null}
-        className={cn(ASK_QUIET_BUTTON, "text-accent-text")}>
+        className={cn(STATUS_TEXT_ACTION, "text-accent-text")}>
         {pending ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
         {t("signIn.retry")}
       </button>

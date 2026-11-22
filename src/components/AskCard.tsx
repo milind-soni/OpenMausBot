@@ -250,8 +250,8 @@ export function AskSettledLine({
       data-tone={tone}
       className="w-full max-w-[560px] text-start text-[13px] leading-[18px] text-ink-tertiary"
     >
-      <div className="flex min-w-0 items-center gap-1.5">
-        <span aria-hidden="true" className="flex size-4 shrink-0 items-center justify-center">
+      <div className="flex min-w-0 items-baseline gap-1.5">
+        <span aria-hidden="true" className="w-4 shrink-0 text-center [&>svg]:inline-block [&>svg]:align-middle">
           {icon ?? SETTLED_ICON[tone]}
         </span>
         <span dir="auto" aria-live="polite" className="min-w-0 truncate">{children}</span>
@@ -299,6 +299,8 @@ const ASK_CHOICE = `flex min-h-10 w-full items-center gap-2.5 rounded-[12px] px-
 export const ASK_CHIP = `${ASK_CONTROL} max-w-full border`;
 export const ASK_CHIP_IDLE = "border-transparent bg-ink/[0.07] text-ink interaction:bg-raised/50";
 export const ASK_CHIP_PICKED = "border-accent bg-accent/15 text-ink";
+
+export const STATUS_TEXT_ACTION = "inline-block shrink-0 whitespace-nowrap bg-transparent text-ink-secondary underline-offset-2 enabled:hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-focus disabled:opacity-60 [&>svg]:me-1 [&>svg]:inline-block [&>svg]:align-middle";
 
 export const ASK_SMALL_PILL = ASK_CONTROL;
 export const ASK_QUIET_BUTTON = `${ASK_SMALL_PILL} -my-1 text-ink-tertiary interaction:bg-raised/50 hover:text-ink-secondary`;
