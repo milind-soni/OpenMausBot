@@ -30,7 +30,7 @@ person sends the same words again (design:
 Unit and route checks:
 
 ```sh
-pnpm exec vitest run server/saved-steps server/routes/saved-steps.test.ts server/routes/computer-journal.test.ts server/local-computer-proxy.test.ts server/local-computer.test.ts server/delta-context.test.ts src/components/SavedStepsChip.test.ts src/components/SavedStepsRow.test.ts server/testing/fake-cua-driver.test.ts
+pnpm exec vitest run server/saved-steps server/routes/saved-steps.test.ts server/routes/computer-journal.test.ts server/local-computer-proxy.test.ts server/local-computer.test.ts server/delta-context.test.ts src/components/SavedStepsRow.test.ts server/testing/fake-cua-driver.test.ts
 ```
 
 The fixture runs on macOS. A Linux server never mounts this computer from this
