@@ -149,6 +149,18 @@ describe("Escape in the composer", () => {
     expect(document.activeElement).not.toBe(input);
   });
 
+  it("stays out of the composer when Escape comes between a finished paste and its refocus", async () => {
+    const input = render();
+    await nextFrame();
+    focusWith(input, "");
+    pasteFile(input);
+    fixture.finishIntake();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    pressEscape(input);
+    await nextFrame();
+    expect(document.activeElement).not.toBe(input);
+  });
+
   it("still returns to the composer when a pasted file finishes without Escape", async () => {
     const input = render();
     await nextFrame();

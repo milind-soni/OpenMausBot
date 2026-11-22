@@ -242,10 +242,10 @@ export function Composer({
   const caretRef = useRef(0);
   caretRef.current = caret;
   const escapeBlurs = useRef(0);
-  const refocusInput = useCallback(() => {
+  const refocusInput = useCallback((escapesBefore: number) => {
     requestAnimationFrame(() => {
       const input = inputRef.current;
-      if (!input || input.disabled || !composerShouldRefocus(document.activeElement, input)) return;
+      if (escapeBlurs.current !== escapesBefore || !input || input.disabled || !composerShouldRefocus(document.activeElement, input)) return;
       const at = Math.min(caretRef.current, input.value.length);
       input.focus();
       input.setSelectionRange(at, at);
@@ -504,7 +504,7 @@ export function Composer({
     } finally {
       changeDraftAttachmentPending(draftId, false);
     }
-    if (escapeBlurs.current === escapesBefore) refocusInput();
+    refocusInput(escapesBefore);
   };
 
   const hasContent = Boolean(effectiveText.trim()) || attachments.length > 0;
