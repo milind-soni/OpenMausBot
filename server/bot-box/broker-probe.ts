@@ -42,7 +42,8 @@ export function brokeredServer(path: BrokerPath, name: string, server: { url: st
     fetch: brokered,
     done: async () => {
       path.broker.revokeThread(threadId);
-      await agent?.close().catch(() => {});
+      // Not awaited: a connection the server holds open (an event stream) must not hold the caller up.
+      void agent?.close().catch(() => {});
     },
   };
 }

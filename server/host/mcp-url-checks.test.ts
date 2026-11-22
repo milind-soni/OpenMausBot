@@ -114,12 +114,12 @@ it("tells the person once, across restarts, and again for a server whose address
 });
 
 it("reads a web page's answer to MCP's first request as its HTTP status, and a refused connection as no status", async () => {
-  // A web page that serves GET only, as a spreadsheet's address does.
+  // A web page that serves GET only.
   const page = await serve((request, response) => {
     response.writeHead(request.method === "GET" ? 200 : 405, { "content-type": "text/html" });
     response.end("<html></html>");
   });
-  expect(await initializeAnswer({ type: "http", url: `${page}/spreadsheets/u/1/`, headers: {} }, { timeoutMs: 10_000 })).toEqual({ ok: false, status: 405 });
+  expect(await initializeAnswer({ type: "http", url: `${page}/pages/1/`, headers: {} }, { timeoutMs: 10_000 })).toEqual({ ok: false, status: 405 });
   expect(await initializeAnswer({ type: "http", url: "http://127.0.0.1:9/mcp", headers: {} }, { timeoutMs: 10_000 })).toEqual({ ok: false });
 });
 
