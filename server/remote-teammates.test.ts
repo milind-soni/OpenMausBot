@@ -61,6 +61,9 @@ describe("remoteAddress", () => {
     expect(() => remoteAddress("http://2852039166", "b1")).toThrow(/link-local/);
     expect(() => remoteAddress("http://[fe80::1]:8799", "b1")).toThrow(/link-local/);
     expect(() => remoteAddress("http://[fd00:ec2::254]", "b1")).toThrow(/link-local/);
+    expect(() => remoteAddress("https://[64:ff9b::a9fe:a9fe]", "b1")).toThrow(/link-local/);
+    expect(() => remoteAddress("https://[::a9fe:a9fe]", "b1")).toThrow(/link-local/);
+    expect(() => remoteAddress("https://100.100.100.200", "b1")).toThrow(/link-local/);
     expect(() => remoteAddress(`https://maus.example.com/${"p".repeat(300)}`, "b1")).toThrow(/too long/);
   });
 
