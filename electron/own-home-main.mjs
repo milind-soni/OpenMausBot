@@ -141,7 +141,7 @@ export function installOwnHome({ localRequest, fetch: fetchImpl, environments, h
     const picked = chosen();
     if (!picked) return null;
     return { origin: picked.origin, account: `own:${picked.environmentId}`, machine: picked.origin, ready: true, moves: true, paid: false, name: picked.name,
-      ended: !placeOf(picked) && !awayIn(parseJournal(journal.read())) };
+      ended: !placeOf(picked) };
   };
   const home = createOneHome({
     journal,
