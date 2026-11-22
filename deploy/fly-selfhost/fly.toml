@@ -1,0 +1,37 @@
+app = "APP_NAME"
+primary_region = "iad"
+kill_signal = "SIGTERM"
+kill_timeout = "30s"
+
+[build]
+  dockerfile = "Dockerfile"
+  build-target = "fly-selfhost"
+  [build.args]
+    ENGINES = "@anthropic-ai/claude-code @openai/codex"
+
+[env]
+  OMB_PUBLIC_URL = "https://APP_NAME.fly.dev"
+  OMB_WEBHOOK_PUBLIC_URL = "https://APP_NAME.fly.dev"
+  OMB_SERVER_NAME = "APP_NAME"
+
+[[mounts]]
+  source = "omb_data"
+  destination = "/data"
+  initial_size = "3gb"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  [[http_service.checks]]
+    grace_period = "30s"
+    interval = "15s"
+    timeout = "5s"
+    method = "GET"
+    path = "/api/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "2gb"

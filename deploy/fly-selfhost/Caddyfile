@@ -1,0 +1,20 @@
+{
+	admin off
+	auto_https off
+	persist_config off
+}
+:8080 {
+	encode zstd gzip
+	handle /hooks/* {
+		reverse_proxy unix//run/openmausbot/hooks.sock {
+			header_up X-Forwarded-Proto https
+		}
+	}
+	handle {
+		reverse_proxy unix//run/openmausbot/http.sock {
+			header_up X-Forwarded-Proto https
+			header_up -Accept-Encoding
+			flush_interval -1
+		}
+	}
+}
