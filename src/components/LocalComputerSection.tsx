@@ -635,7 +635,7 @@ export function LocalComputerSection() {
               placeholder="my-linux-vm"
               aria-label="Existing VM SSH config alias"
               autoComplete="off"
-              className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+              className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
             />
             <button
               type="button"
@@ -649,7 +649,7 @@ export function LocalComputerSection() {
               {policyPending ? <Loader2 size={13} className="animate-spin" /> : !alias.trim() && savedAlias ? "Clear" : <><Check size={13} />Save</>}
             </button>
           </div>
-          <div className="mt-2 text-[11.5px] leading-relaxed text-ink-secondary">
+          <div className="mt-2 text-[12px] leading-relaxed text-ink-secondary">
             Alias names may contain letters, numbers, dots, dashes, and underscores. The remote command is fixed to <code>cua-driver mcp</code>.
           </div>
         </Card>
@@ -658,7 +658,7 @@ export function LocalComputerSection() {
           <div className="flex flex-wrap items-center gap-2">
             <span
               className={cn(
-                "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12.5px]",
+                "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px]",
                 existingStatus?.ready ? "bg-success/15 text-success" : "bg-raised text-ink-secondary",
               )}
             >
@@ -672,35 +672,35 @@ export function LocalComputerSection() {
                 setRefreshKey((key) => key + 1);
               }}
               disabled={loading || policyPending}
-              className="flex items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40"
+              className="flex items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40"
             >
               <RefreshCw size={12} /> Re-check
             </button>
           </div>
           <div className="mt-4 flex flex-col gap-3">
             <Step n={1} title="SSH config alias saved" done={Boolean(existingStatus?.sshAlias)}>
-              <div className="text-[12.5px] text-ink-secondary">Enter the alias for the Linux VM above, then save it.</div>
+              <div className="text-[12px] text-ink-secondary">Enter the alias for the Linux VM above, then save it.</div>
             </Step>
             <Step n={2} title="SSH connection" done={existingStatus?.ssh === "connected"}>
               {existingStatus?.errorCode === "ssh-missing" && (
-                <div className="text-[12.5px] text-danger">Install OpenSSH so the <code>ssh</code> command is available in OpenMausBot&apos;s PATH, then re-check.</div>
+                <div className="text-[12px] text-danger">Install OpenSSH so the <code>ssh</code> command is available in OpenMausBot&apos;s PATH, then re-check.</div>
               )}
               {existingStatus?.ssh === "unreachable" && existingStatus.errorCode !== "ssh-missing" && (
-                <div className="text-[12.5px] text-danger">Check the SSH alias, host key, and SSH agent, then re-check.</div>
+                <div className="text-[12px] text-danger">Check the SSH alias, host key, and SSH agent, then re-check.</div>
               )}
             </Step>
             <Step n={3} title="Linux guest" done={existingStatus?.os === "linux"}>
-              {existingStatus?.os === "unsupported" && <div className="text-[12.5px] text-danger">The Existing VM must report Linux.</div>}
+              {existingStatus?.os === "unsupported" && <div className="text-[12px] text-danger">The Existing VM must report Linux.</div>}
             </Step>
             <Step n={4} title={`CUA Driver ${existingStatus?.driver_version ?? "0.20.0"}`} done={existingStatus?.driver === "compatible"}>
-              {existingStatus?.driver === "missing" && <div className="text-[12.5px] text-danger">Install the pinned CUA Driver in the VM and re-check.</div>}
-              {existingStatus?.driver === "incompatible" && <div className="text-[12.5px] text-danger">The VM has a different CUA Driver version than this OpenMausBot build.</div>}
+              {existingStatus?.driver === "missing" && <div className="text-[12px] text-danger">Install the pinned CUA Driver in the VM and re-check.</div>}
+              {existingStatus?.driver === "incompatible" && <div className="text-[12px] text-danger">The VM has a different CUA Driver version than this OpenMausBot build.</div>}
             </Step>
             <Step n={5} title="CUA MCP tools" done={existingStatus?.mcp === "ready"}>
-              {existingStatus?.mcp === "failed" && <div className="text-[12.5px] text-danger">The CUA MCP bridge did not become ready.</div>}
+              {existingStatus?.mcp === "failed" && <div className="text-[12px] text-danger">The CUA MCP bridge did not become ready.</div>}
             </Step>
             <Step n={6} title="Desktop capture" done={Boolean(existingStatus?.desktopReady)}>
-              {existingStatus?.desktopReady === false && existingStatus?.mcp === "ready" && <div className="text-[12.5px] text-danger">CUA could not return a complete desktop image.</div>}
+              {existingStatus?.desktopReady === false && existingStatus?.mcp === "ready" && <div className="text-[12px] text-danger">CUA could not return a complete desktop image.</div>}
             </Step>
           </div>
           {existingStatus?.ready && (
