@@ -21,7 +21,7 @@ A preset is an allowlist. It can carry only:
 - the new bot's name, title, description and standing instructions;
 - its look: colour, mascot and picture;
 - playbooks;
-- skills (the `SKILL.md` text only, never scripts);
+- skills (`SKILL.md` and validated Markdown companion files from imported file presets, never scripts);
 - starter notes (`MEMORY.md` and topic notes).
 
 It has no field for a model, a folder, a computer, an approval level,

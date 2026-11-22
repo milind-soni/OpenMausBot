@@ -207,6 +207,23 @@ describe("creating a bot from a preset", () => {
     }
   });
 
+  it("restores validated Markdown companions from a file preset without enabling the skill or carrying scripts", async () => {
+    const app = await installation();
+    const input = fixture("full-team.v2.json");
+    const guide = { path: "references/Examples.MD", content: "# Examples\n\nUse the sample checklist.\n" };
+    input.package.skills.entries.find((entry: { name: string }) => entry.name === "objection-handling").files = [guide, { path: "scripts/check.sh", content: "# sample script\n" }];
+    const imported = app.importer.importPackageDocument(app.parsePackageDocument(input), { trust: "file", mode: "add" }, app.deps);
+    if (imported.alreadyAdded) throw new Error("unexpected");
+    const resolved = app.presets.createPresetStore(app.presetFile).resolve(imported.presets![0]!.id)!;
+    const bot = app.store.createBot({ name: "Example", modelSelection: { instanceId: "claude", model: "default-model" } });
+    expect(app.presets.applyPresetToBot(bot.id, resolved, app.applyDeps)).toEqual({ skills: ["objection-handling"], notes: 0 });
+    const entry = app.skills.readManifest(bot.id)["objection-handling"]!;
+    expect(entry).toMatchObject({ enabled: false, files: [guide.path], filesSha256: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    const directory = app.skills.skillDirectory(bot.id, "objection-handling", entry)!;
+    expect(readFileSync(join(directory, guide.path), "utf8")).toBe(guide.content);
+    expect(() => readFileSync(join(directory, "scripts/check.sh"))).toThrow(/ENOENT/);
+  });
+
   it("adds an organization preset's skills switched on, under the organization's own source, stamped for updates", async () => {
     const app = await installation();
     const org = app.org();

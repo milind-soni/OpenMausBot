@@ -382,7 +382,8 @@ export function applyPresetToBot(botId: string, resolved: ResolvedPreset, deps: 
       const added = deps.skills.installOrg(botId, source, skill.instructions, stamp);
       if ("error" in added) throw new Error(`The preset's skill "${name}" could not be added: ${added.error}`);
     } else {
-      const added = deps.skills.install(botId, source, [{ path: "SKILL.md", content: skill.instructions }]);
+      const references = org ? [] : (skill.files ?? []).filter((file) => /\.md$/i.test(file.path));
+      const added = deps.skills.install(botId, source, [{ path: "SKILL.md", content: skill.instructions }, ...references]);
       if ("error" in added) throw new Error(`The preset's skill "${name}" could not be added: ${added.error}`);
       if (org) {
         const enabled = deps.skills.setEnabled(botId, name, true);
