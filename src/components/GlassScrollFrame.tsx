@@ -127,3 +127,10 @@ export function GlassScroller({ className, children, ...rest }: HTMLAttributes<H
     </div>
   );
 }
+
+/** The chat background's own layer: empty and see-through, so nothing changes until a theme styles it (with its
+ * ::before and ::after). First in the chat area and positioned, so it paints under everything else there; it never takes
+ * a click, and what a theme animates in it stays inside the chat area. */
+export function ChatBackdrop() {
+  return <div aria-hidden="true" data-look="chat-backdrop" className="pointer-events-none absolute inset-0 overflow-hidden" />;
+}
