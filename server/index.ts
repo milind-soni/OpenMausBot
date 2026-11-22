@@ -885,8 +885,7 @@ function turnOrigin(capability: Pick<InternalCapability, "threadId" | "generatio
 /** Fail closed: only the person whose own message provably started this exact turn generation. Deliberately not the usage ledger's trigger, which defaults to the owner. */
 function sharedComputerPrincipal(capability: Pick<InternalCapability, "botId" | "threadId" | "generation">): string | null {
   if (CLOUD_HOME) { const lends = cloudLendingRefusal(capability) === null; if (lends) refusedLending.allowed(capability.threadId); return lends ? CLOUD_HOME_LENDER : null; }
-  const own = ownHome.ownServer(), request = directRequestOwners.get(capability.threadId);
-  const person = provenRequestPerson(request, capability.generation, (messageId) => { const line = store.messagesFor(capability.threadId).find((message) => message.id === messageId); return linePersonKey(line) ?? ownWindowLender(own, ownWindowLine(capability.threadId, line)); });
+  const own = ownHome.ownServer(), request = directRequestOwners.get(capability.threadId); const person = provenRequestPerson(request, capability.generation, (messageId) => { const line = store.messagesFor(capability.threadId).find((message) => message.id === messageId); return linePersonKey(line) ?? ownWindowLender(own, ownWindowLine(capability.threadId, line)); });
   return person ? lendingPerson(person, own, () => sessions.list()) : request?.origin?.kind === "user" ? handedOwnServerLender(own, request.origin, actingPeople.requester(capability.threadId, capability.generation), () => sessions.list()) : null;
 } /** On a self-hosted server, the computers lent to it by the person this turn provably acts for. */ function lentToServer(agents: unknown, turn: Pick<InternalCapability, "botId" | "threadId" | "generation">) { return CLOUD_HOME || CLOUD_TEAM || DESKTOP_MANAGED || !agents || !botLending() ? undefined : sharedComputers.known(sharedComputerPrincipal(turn)).filter((computer) => computer.lent); }
 
