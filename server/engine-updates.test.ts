@@ -402,14 +402,39 @@ describe("a runtime with more than one release channel", () => {
     }
   });
 
-  it("keeps the first channel's update when the second channel's cannot be installed, and judges each by the version installed", async () => {
+  it("keeps the first channel's update when the second channel's cannot be installed, and retries the second sooner than a day", async () => {
     const run = setup([{ version: "1.5.7", channel: "native" }, { version: "1.1.1", channel: "pinned" }], async (channel) => {
       if (channel === "pinned") throw new Error("Google download failed (404).");
       return "1.5.8";
     });
     try {
+      const started = Date.now();
       await run.engines.check();
-      expect(run.lines).toEqual(["Engine update: Managed 1.5.7 → 1.5.8"]);
+      expect(run.lines).toEqual([
+        "Engine update: Managed 1.5.7 → 1.5.8",
+        "Engine update: Managed stays on 1.1.1; 1.4.3 could not be installed (Google download failed (404).). Trying again later.",
+      ]);
+      expect(run.engines.shown("managedEngine").autoUpdated?.version).toBe("1.5.8");
+      expect(run.engines.dueAt() - started).toBeLessThan(2 * 60 * 60_000);
+    } finally {
+      await run.done();
+    }
+  });
+
+  it("still tries the other channel when the first channel's install fails", async () => {
+    const asked: Array<string | undefined> = [];
+    const run = setup([{ version: "1.5.7", channel: "native" }, { version: "1.1.1", channel: "pinned" }, null], async (channel) => {
+      asked.push(channel);
+      if (channel === "native") throw new Error("Google download failed (500).");
+      return "1.4.3";
+    });
+    try {
+      await run.engines.check();
+      expect(asked).toEqual(["native", "pinned"]);
+      expect(run.lines).toEqual([
+        "Engine update: Managed 1.1.1 → 1.4.3",
+        "Engine update: Managed stays on 1.5.7; 1.4.3 could not be installed (Google download failed (500).). Trying again later.",
+      ]);
     } finally {
       await run.done();
     }

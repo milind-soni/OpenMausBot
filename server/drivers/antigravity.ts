@@ -37,7 +37,7 @@ import { splitAntigravityThinking } from "./antigravity-models.ts";
 import { AntigravityAuthController } from "./antigravity-auth.ts";
 import { AntigravityCliLogin } from "./antigravity-native-login.ts";
 import { NativeSignInCache, antigravityCliSignIn, signOutAntigravityCli } from "./antigravity-native-status.ts";
-import { antigravityNativeCredentialsHeld, clearAntigravityNativeCredentials, noteAntigravityNativeCredentials } from "./antigravity-native-credentials.ts";
+import { antigravityNativeCredentials, antigravityNativeCredentialsHeld, clearAntigravityNativeCredentials, noteAntigravityNativeCredentials } from "./antigravity-native-credentials.ts";
 import { AcpDiscoveryRpcError, AcpDiscoveryTimeoutError } from "./acp/custom-model-catalog.ts";
 import {
   antigravityManagedInstallAvailable,
@@ -111,10 +111,10 @@ const nativeRuntimeKey = (runtime: AntigravityRuntime) => `${runtime.executableP
 
 /** Whether the native CLI accepts a session for this instance, kept for a short while. Throws when the CLI could not say:
  * that is not "signed out". */
-async function nativeSignedIn(instanceId: string, runtime: AntigravityRuntime, profile: AntigravityProfile): Promise<boolean> {
+async function nativeSignedIn(instanceId: string, cli: string | undefined, runtime: AntigravityRuntime, profile: AntigravityProfile): Promise<boolean> {
   return await nativeSignIn.state(instanceId, nativeRuntimeKey(runtime), async () => {
     const found = await antigravityCliSignIn(runtime, profile);
-    if (found === "in") noteAntigravityNativeCredentials(instanceId);
+    if (found === "in") noteAntigravityNativeCredentials(instanceId, cli);
     return found;
   }) === "in";
 }
@@ -183,6 +183,7 @@ const support: AcpSupport = {
       profile,
       fallbackDefault: currentEngineCatalog("antigravity").default,
     }).catch((error: unknown) => { throw native ? nativeDiscoveryError(instanceId, error) : error; });
+    if (native) noteAntigravityNativeCredentials(instanceId, config.cli);
     for (const option of catalog.options) offeredModels.add(option.id);
     return catalog;
   },
@@ -230,7 +231,7 @@ const support: AcpSupport = {
       const profile = await prepareAntigravityProfile({ instanceId, runtime, baseEnv: env });
       if (runtime.harnessPath === null) {
         // A CLI that could not answer leaves `authenticated` out, which no caller reads as signed out.
-        const authenticated = await nativeSignedIn(instanceId, runtime, profile).catch(() => undefined);
+        const authenticated = await nativeSignedIn(instanceId, config.cli, runtime, profile).catch(() => undefined);
         return { state: "available", version: runtime.version, ...(authenticated === undefined ? {} : { authenticated }) };
       }
       return {
@@ -246,6 +247,7 @@ const support: AcpSupport = {
 
   configureSession: async ({ request, sessionId, instanceId, config, turn, configOptions }) => {
     const nativeCli = launched.get(instanceId)?.nativeCli === true;
+    if (nativeCli) noteAntigravityNativeCredentials(instanceId, config.cli);
     if (!Array.isArray(configOptions) || !configOptions.some(option => option?.id === "mode")) {
       // The native CLI answers by the turn's level only in `default`; with no mode to confirm, nothing says it is there.
       if (nativeCli) throw new Error("Antigravity did not report its permission mode.");
@@ -270,6 +272,8 @@ const AcpAntigravityDriver = createAcpDriver(support);
 export const AntigravityDriver: ProviderDriver<AcpConfig> = {
   ...AcpAntigravityDriver,
   async create(input: DriverCreateInput<AcpConfig>): Promise<ProviderInstance> {
+    // A rebuilt instance may run another CLI, or the same one after a sign-in made outside MausBot.
+    nativeSignIn.forget(input.instanceId);
     const base = await AcpAntigravityDriver.create(input);
     scheduleAntigravityTempSweep(input.instanceId);
     scheduleAntigravityTempSweep(VERIFICATION_TEMP_KEY);
@@ -292,7 +296,7 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       return { runtime, profile };
     };
     const login = new AntigravityCliLogin({
-      submitting: () => noteAntigravityNativeCredentials(input.instanceId),
+      submitting: () => noteAntigravityNativeCredentials(input.instanceId, input.config.cli),
       signedIn: () => {
         nativeSignIn.forget(input.instanceId);
         void base.refreshModels?.();
@@ -321,13 +325,22 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       if (current?.runtime.harnessPath === null && !antigravityNativeCredentialsHeld(input.instanceId)) {
         const found = await antigravityCliSignIn(current.runtime, current.profile, { waitForExit: true })
           .catch(() => { throw new Error("Antigravity could not confirm whether this account is signed in. Try again."); });
-        if (found === "in") noteAntigravityNativeCredentials(input.instanceId);
+        if (found === "in") noteAntigravityNativeCredentials(input.instanceId, input.config.cli);
       }
       if (!antigravityNativeCredentialsHeld(input.instanceId)) return;
       let cli = current?.runtime.harnessPath === null ? current : null;
       if (!cli) {
-        try { cli = await runtimeAndProfile("antigravity"); }
-        catch (error) { throw new Error(`Antigravity's native CLI is needed to sign this account out, and could not be started: ${error instanceof Error ? error.message : String(error)}`); }
+        const failures: string[] = [];
+        for (const path of new Set([antigravityNativeCredentials(input.instanceId)?.cli, "antigravity"].filter((path) => path !== undefined))) {
+          try {
+            const found = await runtimeAndProfile(path);
+            if (found.runtime.harnessPath === null) { cli = found; break; }
+            failures.push(`${path} is not Antigravity's native CLI`);
+          } catch (error) {
+            failures.push(error instanceof Error ? error.message : String(error));
+          }
+        }
+        if (!cli) throw new Error(`Antigravity's native CLI is needed to sign this account out, and could not be started: ${failures.join(" ")}`);
       }
       nativeSignIn.forget(input.instanceId);
       await signOutAntigravityCli(cli.runtime, cli.profile);

@@ -54,7 +54,7 @@ async function serve(registry: ProviderRegistry, cfg: AppConfig, extra: Partial<
     providerInstancesChanging: new Set<string>(),
     describeInstances: () => registry.describe(),
     persistProviderInstance: async (_id: string, instances: InstanceConfigMap) => {
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await new Promise((resolve) => setImmediate(resolve));
       cfg.instances = instances;
       persisted.push(structuredClone(instances));
     },

@@ -105,7 +105,8 @@ export function acpFileEditWithin(toolCall: { kind?: unknown; rawInput?: unknown
   if (!realRoot || !Array.isArray(toolCall.locations) || !toolCall.locations.length) return false;
   return toolCall.locations.every((location) => {
     const path = (location as { path?: unknown } | null)?.path;
-    if (typeof path !== "string" || !isAbsolute(path) || path.includes("\0")) return false;
+    // A `..` after a link climbs from the link's target, not from where the path's text says: such a path is asked.
+    if (typeof path !== "string" || !isAbsolute(path) || path.includes("\0") || path.split(/[\\/]/u).includes("..")) return false;
     const target = realTarget(path);
     const inside = target === undefined ? "" : relative(realRoot, target);
     return inside !== "" && !inside.startsWith("..") && !isAbsolute(inside);

@@ -14,10 +14,10 @@ export function antigravityManagedRuntime(
   options: Pick<AntigravityInstallOptions, "baseDir" | "fetchImpl" | "cliRelease" | "validate"> & { latest?: NonNullable<Parameters<typeof antigravityCliUpdate>[0]>["latest"] } = {},
 ): ManagedRuntime {
   return {
-    older: async () => {
-      const cli = await antigravityCliUpdate({ configuredClis: configuredClis(), baseDir: options.baseDir, latest: options.latest });
+    older: async (skip = []) => {
+      const cli = skip.includes("native") ? null : await antigravityCliUpdate({ configuredClis: configuredClis(), baseDir: options.baseDir, latest: options.latest });
       if (cli) return { version: cli, channel: "native" };
-      const pinned = await antigravityOlderRuntime(options.baseDir);
+      const pinned = skip.includes("pinned") ? null : await antigravityOlderRuntime(options.baseDir);
       return pinned ? { version: pinned, channel: "pinned" } : null;
     },
     install: async (channel) => (await installAntigravityRuntime({

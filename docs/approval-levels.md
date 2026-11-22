@@ -336,8 +336,10 @@ when the CLI offers no mode or does not confirm `default`.
 A computer that already has the pinned runtime keeps it. To move an
 Antigravity account to the native CLI, set its **CLI path** to `antigravity`
 and choose **Install official Antigravity**; to move back, set the CLI path to
-`agy`. New installs get the native CLI when Google's channel can be reached and
-the pinned runtime otherwise.
+`agy`. An account with no CLI path, or `agy`, runs the pinned runtime even
+when the native CLI is installed. The native CLI signs in through its own
+`acp --login`: the link opens Google, and the code or address the page ends on
+is pasted back into the sign-in card.
 
 A new Antigravity bot starts on Auto, the default. Old Antigravity
 `auto` / `autoApprove` settings still behave as Ask and are displayed as Ask;

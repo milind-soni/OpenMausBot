@@ -100,6 +100,19 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
     expect(fixture.methods()).not.toContain("authenticate");
   }, 120_000);
 
+  it("forgets a signed-out answer when the instance is rebuilt, so a sign-in made meanwhile at a terminal is used at once", async () => {
+    const fixture = nativeFixture(folder());
+    const instanceId = "antigravity-native-rebuilt";
+    const first = await create(instanceId, fixture);
+    expect(await first.snapshot()).toMatchObject({ authenticated: false });
+    await first.dispose();
+    instances.splice(instances.indexOf(first), 1);
+    await loginAt(fixture, antigravityProfileDirectory(instanceId), "fixture-code");
+    const rebuilt = await create(instanceId, fixture);
+    const { done } = await turn(rebuilt, "native-rebuilt", fixture.directory);
+    expect(done).toMatchObject({ ok: true });
+  }, 120_000);
+
   it("starts no process of its own to ask about the sign-in before a turn", async () => {
     const fixture = nativeFixture(folder());
     const instanceId = "antigravity-native-one-process";
@@ -243,10 +256,41 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
       await first.completeAuthentication!(started.flowId!, "fixture-code");
       await first.dispose();
       instances.splice(instances.indexOf(first), 1);
+      renameSync(fixture.executable, join(fixture.directory, "moved-away"));
       const restarted = await create(instanceId, fixture, {}, "agy");
       await expect(restarted.signOut!()).rejects.toThrow(/native CLI is needed/u);
       expect(antigravityNativeCredentialsHeld(instanceId)).toBe(true);
       expect(existsSync(credentials(instanceId))).toBe(true);
+    }, 120_000);
+
+    it("signs out through the CLI path the sign-in was made with, after a switch back to agy with no managed native CLI", async () => {
+      const fixture = nativeFixture(folder());
+      const instanceId = "antigravity-native-custom-path";
+      const first = await create(instanceId, fixture);
+      const started = await first.startAuthentication!();
+      await first.completeAuthentication!(started.flowId!, "fixture-code");
+      await first.dispose();
+      instances.splice(instances.indexOf(first), 1);
+      const restarted = await create(instanceId, fixture, {}, "agy");
+      await restarted.signOut!();
+      expect(fixture.methods()).toContain("logout");
+      expect(antigravityNativeCredentialsHeld(instanceId)).toBe(false);
+    }, 120_000);
+
+    it("notes a sign-in made at a terminal once the CLI accepts a session for model discovery or a turn", async () => {
+      const fixture = nativeFixture(folder());
+      const discovered = await create("antigravity-native-noted-models", fixture);
+      await loginAt(fixture, antigravityProfileDirectory("antigravity-native-noted-models"), "fixture-code");
+      await discovered.refreshModels!();
+      expect(discovered.modelsUnconfirmed).toBe(false);
+      expect(antigravityNativeCredentialsHeld("antigravity-native-noted-models")).toBe(true);
+
+      const turned = await create("antigravity-native-noted-turn", fixture);
+      await loginAt(fixture, antigravityProfileDirectory("antigravity-native-noted-turn"), "fixture-code");
+      expect(antigravityNativeCredentialsHeld("antigravity-native-noted-turn")).toBe(false);
+      const { done } = await turn(turned, "native-noted-turn", fixture.directory);
+      expect(done).toMatchObject({ ok: true });
+      expect(antigravityNativeCredentialsHeld("antigravity-native-noted-turn")).toBe(true);
     }, 120_000);
   });
 

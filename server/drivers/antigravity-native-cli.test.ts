@@ -336,6 +336,8 @@ describe("the updater with an agy instance and an antigravity instance on one ma
     // The native CLI moved on, and the pinned runtime was asked of its own channel, not of the CLI's.
     expect(asked).toEqual([newer.asset.url, pinned.url]);
     expect(lines[0]).toBe("Engine update: Antigravity 1.5.7 → 1.5.8");
+    // The fake channel serves no pinned archive, so that update fails on its own and is retried, the CLI's kept.
+    expect(lines[1]).toMatch(/^Engine update: Antigravity stays on 1\.1\.1; .+ could not be installed/u);
     await expect(resolveAntigravityRuntime("antigravity", { PATH: "" }, baseDir)).resolves.toMatchObject({ version: "1.5.8" });
     expect(updater.shown("antigravityAgent").autoUpdated?.version).toBe("1.5.8");
   }, 60_000);

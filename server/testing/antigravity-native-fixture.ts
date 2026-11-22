@@ -1,11 +1,11 @@
 // A native Antigravity CLI on disk for tests: a program named `antigravity` that runs the fake CLI
 // (server/testing/fake-antigravity-cli.ts), and the log that fake writes.
-import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { antigravityRuntimesRoot } from "../engine-roots.ts";
+import { spawnCli } from "../procs.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "fake-antigravity-cli.ts");
 
@@ -50,10 +50,12 @@ export function installFakeManagedCli(baseDir: string, releaseId = "a".repeat(64
 /** Runs the fake's `acp --login` for a profile directory the way a person at a terminal would, and pastes `code`. */
 export function loginAt(fixture: NativeFixture, profileDirectory: string, code: string, env: Record<string, string> = {}): Promise<number | null> {
   return new Promise((done) => {
-    const child = spawn(fixture.executable, ["acp", "--login", "--gemini-dir", profileDirectory, "--app-data-dir", "antigravity-acp"], {
+    const child = spawnCli(fixture.executable, ["acp", "--login", "--gemini-dir", profileDirectory, "--app-data-dir", "antigravity-acp"], {
       env: { ...process.env, FAKE_AGY_LOG: fixture.log, ...env },
-      stdio: ["pipe", "ignore", "ignore"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
+    child.stdout.resume();
+    child.stderr.resume();
     child.stdin.end(`${code}\n`);
     child.once("close", (exit) => done(exit));
   });
@@ -62,10 +64,11 @@ export function loginAt(fixture: NativeFixture, profileDirectory: string, code: 
 /** Whether the CLI accepts a session for the profile directory, asked directly over ACP and by nothing of the app's. */
 export function sessionAcceptedAt(fixture: NativeFixture, profileDirectory: string): Promise<boolean> {
   return new Promise((done, fail) => {
-    const child = spawn(fixture.executable, ["acp", "--gemini-dir", profileDirectory, "--app-data-dir", "antigravity-acp"], {
+    const child = spawnCli(fixture.executable, ["acp", "--gemini-dir", profileDirectory, "--app-data-dir", "antigravity-acp"], {
       env: { ...process.env, FAKE_AGY_LOG: fixture.log },
-      stdio: ["pipe", "pipe", "ignore"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
+    child.stderr.resume();
     let buffer = "";
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {

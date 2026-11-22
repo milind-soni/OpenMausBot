@@ -32,8 +32,8 @@ const SWITCH_POLL_MS = 15_000;
 /** A runtime the app manages itself (Antigravity): it installs each version beside the others and checks it. */
 export interface ManagedRuntime {
   /** The version installed when a newer one is to be installed, else null; with the release channel that version came
-   * from when the runtime has more than one. */
-  older(): Promise<string | { version: string; channel: string } | null>;
+   * from when the runtime has more than one. `skip` names the channels this pass already tried. */
+  older(skip?: readonly string[]): Promise<string | { version: string; channel: string } | null>;
   /** Installs from `channel` (the one `older` named). Resolves with the version of the runtime it installed when that
    * is not the pinned one. */
   install(channel?: string): Promise<string | void>;
@@ -123,7 +123,7 @@ interface UpdaterState {
 type Outcome =
   | { kind: "absent" | "current" | "busy" | "waiting" }
   | { kind: "updated"; from: string; to: string }
-  | { kind: "failed"; from: string; to: string; reason: string };
+  | { kind: "failed"; from: string; to: string; reason: string; updated?: { from: string; to: string } };
 
 export interface EngineUpdater {
   /** One pass over every engine now; resolves when it has finished. */
@@ -277,11 +277,7 @@ export function createEngineUpdater(options: EngineUpdaterOptions): EngineUpdate
     return { kind: "updated", from: current, to: target };
   }
 
-  async function updateManaged(plan: EnginePlan, managed: ManagedRuntime, again = true): Promise<Outcome> {
-    const found = await managed.older();
-    if (found === null) return { kind: "absent" };
-    if (engineBusy(plan)) return { kind: "busy" };
-    const { version: older, channel } = typeof found === "string" ? { version: found, channel: undefined } : found;
+  async function installManaged(plan: EnginePlan, managed: ManagedRuntime, older: string, channel: string | undefined): Promise<Outcome> {
     let installed: string | void;
     try {
       installed = await managed.install(channel);
@@ -289,10 +285,31 @@ export function createEngineUpdater(options: EngineUpdaterOptions): EngineUpdate
       return { kind: "failed", from: older, to: plan.pin.target, reason: error instanceof Error ? error.message : String(error) };
     }
     const to = installed ?? plan.pin.target;
-    if (to === older) return { kind: "failed", from: older, to, reason: "the install left the same version in place" };
-    // Another channel may be waiting too (the pinned runtime and the native CLI update separately).
-    const next = again && channel !== undefined ? await updateManaged(plan, managed, false) : null;
-    return next?.kind === "updated" ? next : { kind: "updated", from: older, to };
+    return to === older ? { kind: "failed", from: older, to, reason: "the install left the same version in place" } : { kind: "updated", from: older, to };
+  }
+
+  /** Each channel is tried once a pass; one channel's failure is the pass's outcome (so it is retried), and never keeps
+   * another channel from updating. */
+  async function updateManaged(plan: EnginePlan, managed: ManagedRuntime): Promise<Outcome> {
+    const tried: string[] = [];
+    let updated: Extract<Outcome, { kind: "updated" }> | undefined;
+    let failed: Extract<Outcome, { kind: "failed" }> | undefined;
+    for (;;) {
+      const found = await managed.older(tried);
+      if (found === null) break;
+      if (engineBusy(plan)) {
+        if (!updated && !failed) return { kind: "busy" };
+        break;
+      }
+      const { version: older, channel } = typeof found === "string" ? { version: found, channel: undefined } : found;
+      const outcome = await installManaged(plan, managed, older, channel);
+      if (outcome.kind === "updated") updated = outcome;
+      else if (outcome.kind === "failed") failed ??= outcome;
+      if (channel === undefined || tried.includes(channel)) break;
+      tried.push(channel);
+    }
+    if (failed) return updated ? { ...failed, updated: { from: updated.from, to: updated.to } } : failed;
+    return updated ?? { kind: "absent" };
   }
 
   const updateOne = (plan: EnginePlan): Promise<Outcome> => {
@@ -327,7 +344,12 @@ export function createEngineUpdater(options: EngineUpdaterOptions): EngineUpdate
         changed = true;
       } else if (outcome.kind === "failed") {
         const failures = (engine.failures ?? 0) + 1;
-        state.engines[plan.driverKind] = { ...engine, failures, retryAt: now() + retryDelay(plan, outcome.from, failures) };
+        const moved = outcome.updated ? { updatedTo: outcome.updated.to, updatedAt: now() } : {};
+        if (outcome.updated) {
+          log(`Engine update: ${plan.name} ${outcome.updated.from} → ${outcome.updated.to}`);
+          changed = true;
+        }
+        state.engines[plan.driverKind] = { ...engine, ...moved, failures, retryAt: now() + retryDelay(plan, outcome.from, failures) };
         log(`Engine update: ${plan.name} stays on ${outcome.from}; ${outcome.to} could not be installed (${outcome.reason.split("\n")[0]}). Trying again later.`);
       } else if (engine.failures) {
         state.engines[plan.driverKind] = { updatedTo: engine.updatedTo, updatedAt: engine.updatedAt };

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import * as procs from "../procs.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { nativeFixture, type NativeFixture } from "../testing/antigravity-native-fixture.ts";
 import { prepareAntigravityProfile } from "./antigravity-acp.ts";
@@ -172,7 +173,7 @@ describe.skipIf(WINDOWS)("a sign-in run by the CLI", () => {
 
   it("fails to start, with its process gone, when no link comes in time", async () => {
     const { directory, runtime, env, fixture } = setup({ FAKE_AGY_LOGIN: "no-link" });
-    const login = new AntigravityCliLogin({ submitting: () => {}, signedIn: () => {} }, { startupMs: 400 });
+    const login = new AntigravityCliLogin({ submitting: () => {}, signedIn: () => {} }, { startupMs: 3_000 });
     await expect(login.start(runtime, await profileOf(directory, runtime, env))).rejects.toThrow("did not return a link");
     const pid = fixture.entries().find((entry) => entry.event === "login-start")!.pid as number;
     await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow());
@@ -197,6 +198,22 @@ describe.skipIf(WINDOWS)("a sign-in run by the CLI", () => {
     const pid = fixture.entries().find((entry) => entry.event === "login-start")!.pid as number;
     expect(() => process.kill(pid, 0)).toThrow();
     expect(await login.get(started.flowId!)).toMatchObject({ phase: "cancelled" });
+  }, 60_000);
+
+  it("keeps reporting a cancelled sign-in's process until it is gone, so a later sign-out cannot pass it by", async () => {
+    const { directory, runtime, env, fixture } = setup({ FAKE_AGY_LOGIN: "hold" });
+    const login = new AntigravityCliLogin({ submitting: () => {}, signedIn: () => {} }, { exitConfirmMs: 200 });
+    await login.start(runtime, await profileOf(directory, runtime, env));
+    const pid = fixture.entries().find((entry) => entry.event === "login-start")!.pid as number;
+    const kill = vi.spyOn(procs, "killCliTree").mockResolvedValue(false);
+    try {
+      expect(await login.cancel()).toBe(false);
+      expect(await login.cancel()).toBe(false);
+    } finally {
+      kill.mockRestore();
+    }
+    expect(await login.cancel()).toBe(true);
+    expect(() => process.kill(pid, 0)).toThrow();
   }, 60_000);
 
   it("never reports another sign-in's id as its own", async () => {

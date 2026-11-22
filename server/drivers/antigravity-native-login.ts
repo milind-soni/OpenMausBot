@@ -104,13 +104,16 @@ export interface NativeLoginHooks {
 
 export class AntigravityCliLogin {
   #flow: LoginFlow | null = null;
+  /** Every `--login` process started here that has not exited yet, ended flows included: one that outlived its kill can
+   * still write the sign-in it was given. */
+  readonly #alive = new Map<LoginFlow["child"], Promise<number | null>>();
   #ended: ProviderAuthenticationStatus | null = null;
   readonly #hooks: NativeLoginHooks;
-  readonly #timing: { startupMs: number; submitMs: number; lifetimeMs: number };
+  readonly #timing: { startupMs: number; submitMs: number; lifetimeMs: number; exitConfirmMs: number };
 
-  constructor(hooks: NativeLoginHooks, timing: Partial<{ startupMs: number; submitMs: number; lifetimeMs: number }> = {}) {
+  constructor(hooks: NativeLoginHooks, timing: Partial<{ startupMs: number; submitMs: number; lifetimeMs: number; exitConfirmMs: number }> = {}) {
     this.#hooks = hooks;
-    this.#timing = { startupMs: STARTUP_TIMEOUT_MS, submitMs: SUBMIT_TIMEOUT_MS, lifetimeMs: LOGIN_TIMEOUT_MS, ...timing };
+    this.#timing = { startupMs: STARTUP_TIMEOUT_MS, submitMs: SUBMIT_TIMEOUT_MS, lifetimeMs: LOGIN_TIMEOUT_MS, exitConfirmMs: EXIT_CONFIRM_MS, ...timing };
   }
 
   get active(): boolean {
@@ -131,6 +134,8 @@ export class AntigravityCliLogin {
       child.once("close", (code) => resolveExit(code));
       child.once("error", () => { if (child.pid === undefined) resolveExit(null); });
     });
+    this.#alive.set(child, exited);
+    void exited.then(() => this.#alive.delete(child));
     let output = "";
     let found: ReturnType<typeof antigravityLoginLink> = null;
     let onLink!: (link: NonNullable<ReturnType<typeof antigravityLoginLink>>) => void;
@@ -257,21 +262,21 @@ export class AntigravityCliLogin {
     await flow.settled;
   }
 
-  /** Ends the sign-in in progress and resolves true once its process is gone. */
+  /** Ends the sign-in in progress and resolves true once every `--login` process started here is gone. */
   async cancel(): Promise<boolean> {
     const flow = this.#flow;
-    if (!flow) return true;
-    this.#end(flow, "cancelled", CANCELLED);
-    clearTimeout(flow.timer);
-    flow.settle.reject(new Error(CANCELLED));
-    try { flow.child.stdin.end(); } catch {}
-    await killCliTree(flow.child).catch(() => false);
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const gone = await Promise.race([
-      flow.exited.then(() => true),
-      new Promise<boolean>((resolveGone) => { timer = setTimeout(() => resolveGone(false), EXIT_CONFIRM_MS); timer.unref?.(); }),
-    ]);
-    if (timer) clearTimeout(timer);
-    return gone;
+    if (flow) {
+      this.#end(flow, "cancelled", CANCELLED);
+      clearTimeout(flow.timer);
+      flow.settle.reject(new Error(CANCELLED));
+      try { flow.child.stdin.end(); } catch {}
+    }
+    await Promise.all([...this.#alive].map(async ([child, exited]) => {
+      await killCliTree(child).catch(() => false);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([exited, new Promise((resolveWait) => { timer = setTimeout(resolveWait, this.#timing.exitConfirmMs); timer.unref?.(); })]);
+      if (timer) clearTimeout(timer);
+    }));
+    return this.#alive.size === 0;
   }
 }

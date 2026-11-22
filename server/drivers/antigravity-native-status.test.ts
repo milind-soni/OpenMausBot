@@ -1,12 +1,13 @@
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { removeTempDir } from "../testing/cleanup.ts";
 import { loginAt, nativeFixture, type NativeFixture } from "../testing/antigravity-native-fixture.ts";
 import { prepareAntigravityProfile, type AntigravityProfile } from "./antigravity-acp.ts";
 import {
+  antigravityNativeCredentials,
   antigravityNativeCredentialsHeld,
   clearAntigravityNativeCredentials,
   noteAntigravityNativeCredentials,
@@ -39,8 +40,7 @@ describe("the native CLI's sign-in state, asked of the CLI", () => {
       expect(await antigravityCliSignIn(runtime, profile)).toBe("out");
       expect(await loginAt(fixture, profile.directory, "fixture-code")).toBe(0);
       expect(await antigravityCliSignIn(runtime, profile)).toBe("in");
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      expect(fixture.methods()).toEqual(expect.arrayContaining(["initialize", "session/new", "session/close"]));
+      await vi.waitFor(() => expect(fixture.methods()).toEqual(expect.arrayContaining(["initialize", "session/new", "session/close"])));
       expect(fixture.methods()).not.toContain("authenticate");
     }, 60_000);
 
@@ -160,14 +160,25 @@ describe("the record that an instance may hold a sign-in in the CLI's own store"
     const baseDir = mkdtempSync(join(tmpdir(), "omb-antigravity-held-"));
     scratch.push(baseDir);
     expect(antigravityNativeCredentialsHeld("a", baseDir)).toBe(false);
-    noteAntigravityNativeCredentials("a", baseDir);
+    noteAntigravityNativeCredentials("a", undefined, baseDir);
     const first = readFileSync(join(baseDir, "providers", "antigravity-native-credentials", (await import("node:fs")).readdirSync(join(baseDir, "providers", "antigravity-native-credentials"))[0]!), "utf8");
-    noteAntigravityNativeCredentials("a", baseDir);
+    noteAntigravityNativeCredentials("a", undefined, baseDir);
     expect(antigravityNativeCredentialsHeld("a", baseDir)).toBe(true);
     expect(antigravityNativeCredentialsHeld("b", baseDir)).toBe(false);
     expect(first).toContain("since");
     expect(existsSync(join(baseDir, "providers", "antigravity"))).toBe(false);
     clearAntigravityNativeCredentials("a", baseDir);
     expect(antigravityNativeCredentialsHeld("a", baseDir)).toBe(false);
+  });
+
+  it("keeps the CLI path the instance last held a sign-in with", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "omb-antigravity-held-"));
+    scratch.push(baseDir);
+    noteAntigravityNativeCredentials("a", "/opt/antigravity", baseDir);
+    expect(antigravityNativeCredentials("a", baseDir)).toMatchObject({ cli: "/opt/antigravity" });
+    noteAntigravityNativeCredentials("a", undefined, baseDir);
+    expect(antigravityNativeCredentials("a", baseDir)).toMatchObject({ cli: "/opt/antigravity" });
+    noteAntigravityNativeCredentials("a", "antigravity", baseDir);
+    expect(antigravityNativeCredentials("a", baseDir)).toMatchObject({ cli: "antigravity" });
   });
 });
