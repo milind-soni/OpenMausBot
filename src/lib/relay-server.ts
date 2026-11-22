@@ -32,10 +32,11 @@ export function relayLink(): ServerLink | null {
   return link;
 }
 
-const API = /^\/api(?:[/?#]|$)/;
+/** The server's own routes: `/api`, and the environment descriptor that says what this server is. */
+const API = /^\/(?:api(?:[/?#]|$)|\.well-known\/openmausbot\/environment(?:[?#]|$))/;
 
-/** `path` as a request to this page's own `/api` routes: a root path, or an absolute URL on this page's origin (some
- * links are built from `location`); null for anything else. */
+/** `path` as a request to this page's own server routes (API): a root path, or an absolute URL on this page's origin
+ * (some links are built from `location`); null for anything else. */
 function ownApiPath(path: string): string | null {
   if (API.test(path)) return path;
   const origin = (globalThis as { location?: { origin?: string } }).location?.origin;

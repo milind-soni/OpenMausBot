@@ -224,6 +224,9 @@ export async function streamFetch(open: () => E2EStream, request: StreamRequest)
     () => (uploaded = true),
     () => {},
   );
+  // Once the computer's FIN is in, its reply is whole and the request side can end too: a reply nobody reads to the end
+  // (a caller that only checks the status) still frees its stream, as both FINs drop it.
+  void Promise.all([sent, stream.ended]).then(() => stream.end(), () => {});
   try {
     const received = (async () => {
       for (;;) {
