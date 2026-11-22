@@ -12,6 +12,7 @@ import {
   withConnectionParameters,
 } from "./connector-advertisement.ts";
 import { APP_TOOL_NAMES_ENV, APP_TOOLS_ENV, appToolAnswer, appToolCall, appToolEntries, parseAppToolsEnv } from "./connector-app-tools.ts";
+import { DISCOVERY_FALLBACK_TOOLS } from "./connector-discovery-fallback.ts";
 import { ARGUMENT_REFUSAL, argumentRefusalNote, fitArguments, fittedArgumentsNote, preservesNumericText } from "./connector-arguments.ts";
 import { annotateFailedCall } from "./connector-scope-hint.ts";
 import { withSignedOutHint } from "./connector-signed-out-hint.ts";
@@ -280,7 +281,8 @@ async function listTools(message: Json): Promise<Json> {
     }
   }
   process.stderr.write("connector-proxy: Connected apps are temporarily unavailable; start a new session to retry discovery.\n");
-  return { jsonrpc: "2.0", id: message.id, result: { tools: [] } };
+  // With a service to send calls to, its own tools still go on the list: calls reach it once it answers again.
+  return { jsonrpc: "2.0", id: message.id, result: { tools: UPSTREAM ? structuredClone(DISCOVERY_FALLBACK_TOOLS) : [] } };
 }
 
 async function handle(received: Json): Promise<void> {
