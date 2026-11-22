@@ -61,11 +61,12 @@ describe("chat width", () => {
   it("centers the transcript and the composer in one column, in a chat and in a room", () => {
     expect(css).toMatch(/\.chat-column \{[^}]*margin-inline: auto;[^}]*max-width: var\(--chat-column-max\);/);
     expect(css).toMatch(/\.chat-column-dock \{[^}]*margin-inline: auto;[^}]*max-width: calc\(var\(--chat-column-max\) \+ 2\.5rem\);/);
-    for (const f of ["GroupView"]) {
-      const source = readFileSync(join(root, "components", `${f}.tsx`), "utf8");
-      expect(source, f).toMatch(/className="glass-scroller-content chat-column /);
-      expect(source, f).toMatch(/ref=\{composerDockRef\} className="[^"]* chat-column-dock"/);
-    }
+    const room = readFileSync(join(root, "components/GroupView.tsx"), "utf8");
+    expect(room).toMatch(/className="glass-scroller-content chat-column /);
+    expect(room).toMatch(/ref=\{composerDockRef\} className="[^"]* chat-column-dock"/);
+    const chat = readFileSync(join(root, "components/chat-v2/ChatV2.tsx"), "utf8");
+    expect(chat).toContain('className="v2-paper chat-column"');
+    expect(chat).toContain('className="v2-dock chat-column-dock"');
   });
 
   it("registers every stylesheet block", () => {
