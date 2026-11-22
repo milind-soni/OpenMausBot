@@ -1,6 +1,6 @@
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { DATA_FORMAT } from "../../data-format.ts";
 import { context, dataFolder, NOW, UUID } from "../../testing/doctor-folders.ts";
@@ -17,10 +17,16 @@ describe("data-format check", () => {
     expect(dataFormatCheck().check(context(data)).status).toBe("ok");
   });
 
-  it("blocks repair when the format 2 reader cannot read the marker", () => {
+  it("takes a marker it cannot read as format 1 while this version writes 1, and blocks repair once it writes 2", () => {
     const data = dataFolder();
     writeFileSync(join(data, "data-format.json"), "\0".repeat(64));
-    expect(dataFormatCheck(2).check(context(data))).toMatchObject({ status: "problem", blocking: true });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(dataFormatCheck({ writes: 1, reads: 2 }).check(context(data))).toMatchObject({ status: "ok" });
+    } finally {
+      warn.mockRestore();
+    }
+    expect(dataFormatCheck({ writes: 2, reads: 2 }).check(context(data))).toMatchObject({ status: "problem", blocking: true });
   });
 
   it("refuses a newer format, never fixes it, and then lets no other fix run", () => {

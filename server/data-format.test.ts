@@ -87,15 +87,18 @@ describe("the data folder's format marker", () => {
   // What a power loss, an editor or a restore by hand can leave behind.
   const GARBLED = ["", "\0".repeat(64), "{", "{}", "null", '{"format":"2"}', '{"format":0}', '{"format":1.5}'];
 
-  it("takes a marker it cannot read as format 1 while no version writes a newer one, and puts a good one back", () => {
+  it("takes a marker it cannot read as format 1 while this version writes nothing newer, and puts a good one back", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      for (const text of GARBLED) {
-        const dir = dataDir();
-        writeFileSync(join(dir, DATA_FORMAT_FILE), text);
-        expect(() => checkDataFormat(dir, "0.1.152", 1), JSON.stringify(text)).not.toThrow();
-        stampDataFormat(dir, "0.1.152", { writes: 1, reads: 1 });
-        expect(readDataFormat(dir), JSON.stringify(text)).toMatchObject({ format: 1, writtenBy: "0.1.152" });
+      // Before format 2 existed, and the release that reads format 2 but still writes 1.
+      for (const format of [{ writes: 1, reads: 1 }, { writes: 1, reads: 2 }]) {
+        for (const text of GARBLED) {
+          const dir = dataDir();
+          writeFileSync(join(dir, DATA_FORMAT_FILE), text);
+          expect(() => checkDataFormat(dir, "0.1.152", format.reads, format.writes), JSON.stringify(text)).not.toThrow();
+          stampDataFormat(dir, "0.1.152", format);
+          expect(readDataFormat(dir, format.writes), JSON.stringify(text)).toMatchObject({ format: 1, writtenBy: "0.1.152" });
+        }
       }
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("cannot be read; taking the data as format 1"));
     } finally {
@@ -103,12 +106,12 @@ describe("the data folder's format marker", () => {
     }
   });
 
-  it("refuses a marker it cannot read if the server can read format 2 data", () => {
+  it("refuses a marker it cannot read once this version writes format 2, since the data may then be in it", () => {
     for (const text of GARBLED) {
       const dir = dataDir();
       writeFileSync(join(dir, DATA_FORMAT_FILE), text);
-      expect(() => checkDataFormat(dir, "0.1.160", 2), JSON.stringify(text)).toThrow(/cannot be read, so this version cannot tell/);
-      expect(() => stampDataFormat(dir, "0.1.160", { reads: 2, writes: 1 })).toThrow(DataFormatError);
+      expect(() => checkDataFormat(dir, "0.1.160", 2, 2), JSON.stringify(text)).toThrow(/cannot be read, so this version cannot tell/);
+      expect(() => stampDataFormat(dir, "0.1.160", { reads: 2, writes: 2 })).toThrow(DataFormatError);
       expect(readFileSync(join(dir, DATA_FORMAT_FILE), "utf8")).toBe(text);
     }
   });
@@ -128,9 +131,12 @@ describe("the data folder's format marker", () => {
     chmodSync(join(dir, DATA_FORMAT_FILE), 0o000);
     chmodSync(dir, 0o555);
     try {
-      expect(() => checkDataFormat(dir, "0.1.152", 1)).not.toThrow();
+      // The release that reads format 2 and writes 1; this tree's own numbers too, while it writes 1.
+      expect(() => checkDataFormat(dir, "0.1.152", 2, 1)).not.toThrow();
+      if (DATA_FORMAT.writes === 1) expect(() => checkDataFormat(dir, "0.1.152")).not.toThrow();
       // The stamp cannot replace it (EACCES): said in the log, and the start goes on.
-      expect(() => stampDataFormat(dir, "0.1.152", { writes: 1, reads: 1 })).not.toThrow();
+      expect(() => stampDataFormat(dir, "0.1.152", { writes: 1, reads: 2 })).not.toThrow();
+      if (DATA_FORMAT.writes === 1) expect(() => stampDataFormat(dir, "0.1.152")).not.toThrow();
       expect(warn).toHaveBeenCalledWith(expect.stringMatching(/could not write .*data-format\.json .*starting without it/));
       expect(readdirSync(dir)).toEqual([DATA_FORMAT_FILE]);
     } finally {
@@ -183,7 +189,7 @@ describe("the data folder's format marker", () => {
     stampDataFormat(dir, VERSION, DATA_FORMAT);
     const stamped = readFileSync(join(dir, DATA_FORMAT_FILE), "utf8");
     // The image before: the last release, with the numbers it was released with.
-    expect(() => checkDataFormat(dir, `${released.version}-previous`, released.reads)).not.toThrow();
+    expect(() => checkDataFormat(dir, `${released.version}-previous`, released.reads, released.writes)).not.toThrow();
     stampDataFormat(dir, `${released.version}-previous`, released);
     expect(readFileSync(join(dir, DATA_FORMAT_FILE), "utf8")).toBe(stamped);
     stampDataFormat(dir, VERSION, DATA_FORMAT);
@@ -227,7 +233,20 @@ describe("a server starting on a data folder", () => {
     expect(readdirSync(data)).toEqual([DATA_FORMAT_FILE]);
   }, 60_000);
 
-  it("refuses to open a Vault with a large value and an unreadable format marker", async () => {
+  it.runIf(DATA_FORMAT.writes === 1)("starts, and puts a good marker back, on a marker a power loss left empty or full of NULs", async () => {
+    for (const text of ["", "\0".repeat(64)]) {
+      const dir = dataDir();
+      const data = join(dir, "data");
+      mkdirSync(data);
+      writeFileSync(join(data, DATA_FORMAT_FILE), text);
+      const marker = join(data, DATA_FORMAT_FILE);
+      const { stderr } = await start(dir, () => existsSync(join(data, "environment-id")) && readFileSync(marker, "utf8").includes('"format"'));
+      expect(stderr).not.toContain("startup failed");
+      expect(JSON.parse(readFileSync(marker, "utf8"))).toMatchObject({ format: DATA_FORMAT.writes, writtenBy: VERSION });
+    }
+  }, 120_000);
+
+  it.runIf(DATA_FORMAT.writes > 1)("refuses to open a Vault with a large value and an unreadable format marker", async () => {
     for (const text of ["", "\0".repeat(64)]) {
       const dir = dataDir();
       const data = join(dir, "data");

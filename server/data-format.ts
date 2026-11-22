@@ -43,14 +43,16 @@ function markerIn(dataDir: string): DataFormatMarker | null | "unreadable" {
 }
 
 /**
- * Null when the folder has no marker. A reader that understands a newer format may be opening data after rollback
- * from a newer writer. If the marker is unreadable, restamping it as format 1 could expose that data to an older reader.
+ * Null when the folder has no marker. A marker that cannot be read (empty or NUL-filled after a power loss, not
+ * readable by this user) is format 1 while this version writes nothing newer (`writes` 1): every version before this
+ * one already takes such a marker as format 1, so refusing here would protect no data and stop a healthy install. Once
+ * this version writes format 2 its format is unknown, and this throws.
  */
-export function readDataFormat(dataDir: string, reads: number = DATA_FORMAT.reads): DataFormatMarker | null {
+export function readDataFormat(dataDir: string, writes: number = DATA_FORMAT.writes): DataFormatMarker | null {
   const marker = markerIn(dataDir);
   if (marker !== "unreadable") return marker;
   const file = join(dataDir, DATA_FORMAT_FILE);
-  if (reads <= 1) {
+  if (writes <= 1) {
     console.warn(`[data-format] ${file} cannot be read; taking the data as format 1, the only format any version has written.`);
     return null;
   }
@@ -58,8 +60,8 @@ export function readDataFormat(dataDir: string, reads: number = DATA_FORMAT.read
 }
 
 /** Throws, having changed nothing, when a newer version left the data in a format `reads` does not cover. */
-export function checkDataFormat(dataDir: string, version: string, reads: number = DATA_FORMAT.reads): void {
-  const marker = readDataFormat(dataDir, reads);
+export function checkDataFormat(dataDir: string, version: string, reads: number = DATA_FORMAT.reads, writes: number = DATA_FORMAT.writes): void {
+  const marker = readDataFormat(dataDir, writes);
   if (marker && marker.format > reads) throw newerData(dataDir, version, marker);
 }
 
@@ -81,7 +83,7 @@ export function stampDataFormat(
   format: { writes: number; reads: number } = DATA_FORMAT,
   write: (path: string, text: string) => void = writeFileAtomic,
 ): void {
-  const marker = readDataFormat(dataDir, format.reads);
+  const marker = readDataFormat(dataDir, format.writes);
   if (marker && marker.format > format.reads) throw newerData(dataDir, version, marker);
   if (marker && marker.format >= format.writes) return;
   const file = join(dataDir, DATA_FORMAT_FILE);

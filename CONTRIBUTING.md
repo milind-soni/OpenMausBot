@@ -197,10 +197,12 @@ cause data loss on rollback:
 - The marker is one number for the whole folder. A workspace backup does not
   carry it (it describes the folder it is in), so a backup a newer version
   made, restored into an older server, is not stopped by it.
-- A server that reads format 2 or later stops startup when a marker is
-  unreadable. This includes versions that still write format 1, since they
-  can encounter newer data after a rollback. A failed marker write is
-  logged while `writes` is 1 and stops startup when a higher format is required.
+- A marker that cannot be read (empty or full of NULs after a power loss, not
+  readable by the server's user) counts as format 1 while `writes` is 1, and
+  a marker that cannot be written is said in the log and skipped: while a
+  version writes nothing newer, the check must never be the reason a healthy
+  install does not start. Once `writes` is 2, an unreadable marker, or one
+  that cannot be written, stops startup before any store opens.
 
 For the rule to hold by itself, these would have to change:
 
