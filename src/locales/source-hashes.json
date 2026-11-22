@@ -37487,7 +37487,9 @@
       "chat.handoffExchange.back": "76900f1bfd16c8d4dd3d25e6f46638d7165aee23883ccea6bfe071c514421769",
       "chat.handoffExchange.loading": "08cd9919453184389e78d9924a9dc3d4b68f2529b79bdd195dd51fb6139f927c",
       "chat.handoffExchange.failed": "9205f816010803c4e86ee0b2e43f1b99582f2dc452ac93d7c187e8d1e6686b2f",
-      "chat.handoffExchange.empty": "f0d5968f615ed7ab11fdf8f17586cfaeb2845eee5757459e804b4e9d663a3588"
+      "chat.handoffExchange.empty": "f0d5968f615ed7ab11fdf8f17586cfaeb2845eee5757459e804b4e9d663a3588",
+      "twoPlaces.typing": "d50ee391086ed674b71fed0670ce23baed875293149d71a57d37f6fe361dfb09",
+      "native.lendTray.typing": "5bb860619c3695e8804791c205e27ed08ed8e1f833ed0e63ccb4e8e008471f06"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
