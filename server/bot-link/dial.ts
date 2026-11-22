@@ -60,8 +60,13 @@ export function createDialer({ link, fetch: fetchImpl = fetch, log = () => {}, h
     },
     async push(id, way, index, file) {
       const target = cloud();
+      let body: Blob;
+      try { body = await openAsBlob(file.path); } catch (error) {
+        if (typeof error === "object" && error !== null && "code" in error && (error.code === "ENOENT" || error.code === "ENOTDIR")) throw Object.assign(error, { gone: true });
+        throw error;
+      }
       const response = await fetchImpl(fileUrl(target.origin, id, way, index, file.name), { method: "PUT", redirect: "error", signal: AbortSignal.timeout(FILE_MS),
-        headers: { ...target.headers, "content-type": "application/octet-stream" }, body: await openAsBlob(file.path) });
+        headers: { ...target.headers, "content-type": "application/octet-stream" }, body });
       if (!response.ok) throw await refusedFile(response);
       await response.body?.cancel();
     },
