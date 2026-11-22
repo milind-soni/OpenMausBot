@@ -241,6 +241,7 @@ export function Composer({
   draftIdRef.current = draftId;
   const caretRef = useRef(0);
   caretRef.current = caret;
+  const escapeBlurs = useRef(0);
   const refocusInput = useCallback(() => {
     requestAnimationFrame(() => {
       const input = inputRef.current;
@@ -488,6 +489,7 @@ export function Composer({
   const uploadImage = useCallback((file: File) => uploadDraftImage(draftId, file), [draftId]);
   const pickFiles = async (picked: FileList | readonly File[] | null) => {
     if (!picked?.length) return;
+    const escapesBefore = escapeBlurs.current;
     changeDraftAttachmentPending(draftId, true);
     try {
       const { attachments: added, notice } = await intakeFilesWithNotice(Array.from(picked), {
@@ -502,7 +504,7 @@ export function Composer({
     } finally {
       changeDraftAttachmentPending(draftId, false);
     }
-    refocusInput();
+    if (escapeBlurs.current === escapesBefore) refocusInput();
   };
 
   const hasContent = Boolean(effectiveText.trim()) || attachments.length > 0;
@@ -908,7 +910,10 @@ export function Composer({
             }
             if (e.key !== "Escape") return;
             if (recording) stopDictation();
-            else if (!e.defaultPrevented) e.currentTarget.blur();
+            else if (!e.defaultPrevented) {
+              escapeBlurs.current += 1;
+              e.currentTarget.blur();
+            }
           }}
           // Not disabled during an upload: a disabled element drops keyboard focus for good. send() refuses while one
           // is pending.

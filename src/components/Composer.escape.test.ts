@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, Message } from "@/state/store";
 import { restoreComposerDraft } from "@/lib/drafts";
 
-const fixture = vi.hoisted(() => ({ dispatch: vi.fn() }));
+const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), finishIntake: () => {} }));
 const ADDED_CLAUDE = "claude-5b0e1d2c-7a4f-4e1b-9c3d-2f6a8b1c4d5e";
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
@@ -22,6 +22,11 @@ vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("./ModelPicker", () => ({ ModelPicker: () => null }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => false }));
 vi.mock("./CallView", () => ({ CallButton: () => null }));
+vi.mock("@/lib/attach-notice", () => ({
+  intakeFilesWithNotice: () => new Promise((resolve) => {
+    fixture.finishIntake = () => resolve({ attachments: [], notice: null });
+  }),
+}));
 
 import { Composer } from "./Composer";
 
@@ -52,6 +57,20 @@ describe("Escape in the composer", () => {
 
   function pressEscape(input: HTMLTextAreaElement, init: KeyboardEventInit = {}) {
     flushSync(() => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true, ...init })));
+  }
+
+  function pasteFile(input: HTMLTextAreaElement) {
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", { value: { files: [new File(["notes"], "notes.txt", { type: "text/plain" })] } });
+    flushSync(() => input.dispatchEvent(event));
+  }
+
+  const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+
+  async function finishIntake() {
+    fixture.finishIntake();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await nextFrame();
   }
 
   beforeEach(() => {
@@ -117,6 +136,26 @@ describe("Escape in the composer", () => {
     } finally {
       window.removeEventListener("keydown", takeEscape, true);
     }
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("stays out of the composer when a pasted file finishes after Escape", async () => {
+    const input = render();
+    await nextFrame();
+    focusWith(input, "");
+    pasteFile(input);
+    pressEscape(input);
+    await finishIntake();
+    expect(document.activeElement).not.toBe(input);
+  });
+
+  it("still returns to the composer when a pasted file finishes without Escape", async () => {
+    const input = render();
+    await nextFrame();
+    focusWith(input, "");
+    pasteFile(input);
+    input.blur();
+    await finishIntake();
     expect(document.activeElement).toBe(input);
   });
 });
