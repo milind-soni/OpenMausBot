@@ -670,6 +670,17 @@ describe("the Details tab", () => {
       });
     });
 
+    it("keeps an owner's pick in a conversation on another engine to that conversation when the bot's approval level would first drop to Ask", () => {
+      fixture.ownerOrAdmin = true;
+      fixture.storeState = { ...fixture.storeState, instances: [engine(), engine({ instanceId: "codex", driverKind: "codex" })] };
+      const codex = { instanceId: "codex", model: "gpt-5.6" };
+      const onCodex = (approvalMode: Bot["approvalMode"]) => ({ ...thread({ ...codex, effort: "low" }), approvalMode });
+      expect(pickHigh(onCodex("edits"))).toEqual({ type: "setModel", botId: "scout", threadId: "thread-scout", selection: { ...codex, effort: "high" } });
+      expect(pickHigh(onCodex("full"))).toEqual({
+        type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: true, selection: { ...codex, effort: "high" },
+      });
+    });
+
     it.each([false, null] as const)("sets a guest's reasoning level on the open conversation only, whatever its model (owner: %s)", (ownerOrAdmin) => {
       fixture.ownerOrAdmin = ownerOrAdmin;
       expect(pickHigh(thread())).toEqual({ type: "setModel", botId: "scout", threadId: "thread-scout", selection: { ...opus, effort: "high" } });
