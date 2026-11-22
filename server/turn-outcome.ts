@@ -2,7 +2,8 @@ import { errorTranscript } from "../shared/client-cancel.ts";
 import { isOutboundTool } from "../shared/outbound.ts";
 import type { RuntimeEvent } from "./contracts.ts";
 import { buildTurnDigest, digestTools } from "./digest.ts";
-import { stopCause } from "./drivers/engine-errors.ts";
+import { httpStatusOf, stopCause } from "./drivers/engine-errors.ts";
+import { classifyError } from "./drivers/retry.ts";
 import type { TurnEvidence } from "./runtime/types.ts";
 import type { Message } from "./store.ts";
 
@@ -147,4 +148,10 @@ export function nothingRan(rows: readonly Message[], since: number, turnId: stri
     row.kind === "activity" ? Boolean(row.tool?.itemId)
       : row.kind === "text" ? Boolean(row.text?.trim()) && row.text!.trim() !== said
         : true));
+}
+
+/** Security invariant: the server log gets the failure's class and HTTP status, never the provider's words, which can name the account. */
+export function logFailedTurn(event: { threadId: string; turnId?: string; message: string }): void {
+  const status = httpStatusOf(event.message);
+  console.warn(`[omb-turn] thread=${event.threadId} turn=${event.turnId ?? "none"} failed: ${classifyError({ text: event.message }).reason}${status ? ` HTTP ${status}` : ""}`);
 }

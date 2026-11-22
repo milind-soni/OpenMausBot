@@ -327,7 +327,7 @@ import { recordLiveCall, spokenLineFields, titleLiveCall } from "./live-call-rec
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { createTtsRoutes } from "./routes/tts.ts";
 import { turnStartLogLine } from "./turn-log.ts";
-import { TurnStops, outwardActions, stoppedTurnOutcome, turnEvidence } from "./turn-outcome.ts";
+import { TurnStops, logFailedTurn, outwardActions, stoppedTurnOutcome, turnEvidence } from "./turn-outcome.ts";
 import { buildRecoveryText, buildTurnContext, engineIsFresh, replaysNatively } from "./turn-context.ts";
 import { Handoffs, handedStateUsable, isContextMessage, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts"; import { isFreshStart, sinceFreshStart } from "./fresh-start.ts";
 import { extractReplayImages, extractTurnImages, nativeClips, turnMedia, videoFramesWithin } from "./turn-images.ts";
@@ -5435,7 +5435,7 @@ async function scheduleTurnDigest(input: {
   turnId: string;
   driverKind: string | undefined;
   instanceId?: string;
-  reply: string;
+  reply: string; error?: string;
   from?: Message["from"];
   isCurrent: () => boolean;
   usage?: { input: number; output: number; cachedInput?: number; costUsd?: number | null };
@@ -5459,7 +5459,7 @@ async function scheduleTurnDigest(input: {
       durationMs: startedAt ? Math.max(0, at - startedAt) : 0,
       activities,
       memory,
-      reply: input.reply,
+      reply: input.reply, ...(input.error ? { error: input.error } : {}),
       ...(input.usage ? { usage: input.usage } : {}),
       hookCoverage: coverageForDriver(input.driverKind, toolEvidence(activities, input.turnId), activities.some(m => m.kind === "activity" && m.turnId === input.turnId && m.tool?.itemId)),
     });
@@ -6622,7 +6622,7 @@ bus.subscribe((event: RuntimeEvent) => {
         pushStoppedTurn(event.turnId);
         break;
       }
-      landParkedFiles(); // above the failure row, which stays the last, retryable line
+      logFailedTurn(event); landParkedFiles(); // above the failure row, which stays the last, retryable line
       pushMessage({ role: "bot", kind: "activity", tool: failedTurnTool(event.message, event) });
       if (event.setup && bot) store.setTaskActivity(bot.id, event.threadId, "dead");
       break;
@@ -6744,7 +6744,7 @@ bus.subscribe((event: RuntimeEvent) => {
             botName: bot.name,
             threadId: event.threadId,
             turnId: completedTurnId,
-            succeeded: event.ok,
+            succeeded: event.ok, ...(failed ? { error: failureDetail } : {}),
             driverKind: registry.get(selection.instanceId)?.driverKind,
             instanceId: selection.instanceId,
             reply,
