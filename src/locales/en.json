@@ -4314,9 +4314,7 @@
   "keys.vps.serverCpusAria": "{name} CPU cores",
   "keys.vps.servers.addTitle": "Add server",
   "keys.vps.servers.greyHint": "Grey values are inherited. CPU pinning is optional: logical CPU IDs like 0,2 or 4-7; blank lets the host choose. A desktop that already exists keeps a removed pin until it is recreated.",
-  "keys.vps.servers.hint": "Each bot picks one of these servers in its computer settings. Blank limits inherit the first server's.",
   "keys.vps.servers.name": "Server name",
-  "keys.vps.servers.namePlaceholder": "Display name",
   "keys.vps.servers.alias": "Server SSH config alias",
   "keys.vps.servers.add": "Add",
   "keys.vps.memory": "Memory (GB)",
@@ -11537,5 +11535,7 @@
   "sidebar.threads.hide": "Hide {title}",
   "sidebar.threads.hideShort": "Hide",
   "sidebar.threads.running": "+{count} running",
-  "sidebar.threads.more": "{count} more"
+  "sidebar.threads.more": "{count} more",
+  "keys.vps.servers.displayNamePlaceholder": "Display name",
+  "keys.vps.servers.listHint": "Each bot picks one of these servers in its computer settings. Blank limits inherit the first server's."
 }

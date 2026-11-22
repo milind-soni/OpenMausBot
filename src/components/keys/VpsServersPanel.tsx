@@ -229,7 +229,7 @@ function AddServer({ hasDefault, hosts, defaults, disabled, adding, onAdd }: {
       <div className="text-[13px] text-ink">{t("keys.vps.servers.addTitle")}</div>
       <div className={cn("grid gap-2.5", hasDefault ? "grid-cols-2" : "grid-cols-1")}>
         {hasDefault && (
-          <input type="text" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={enter} disabled={disabled} placeholder={t("keys.vps.servers.namePlaceholder")} aria-label={t("keys.vps.servers.name")} autoComplete="off" className={KEY_FIELD} />
+          <input type="text" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={enter} disabled={disabled} placeholder={t("keys.vps.servers.displayNamePlaceholder")} aria-label={t("keys.vps.servers.name")} autoComplete="off" className={KEY_FIELD} />
         )}
         {hosts.length > 0 ? (
           <Select data-key-input value={alias} onChange={(e) => setAlias(e.target.value)} disabled={disabled} aria-label={t("keys.vps.servers.alias")} className="w-full font-mono" size="sm">
@@ -357,7 +357,7 @@ export function VpsConnection() {
         {t("keys.vps.descAfter")}
       </p>
       <p className="text-[12px] leading-4 text-ink-secondary">{t("keys.vps.anyMachine")}</p>
-      <p className="text-[12px] leading-4 text-ink-secondary">{t("keys.vps.servers.hint")}</p>
+      <p className="text-[12px] leading-4 text-ink-secondary">{t("keys.vps.servers.listHint")}</p>
       <div data-vps-servers className="flex flex-col gap-3.5 rounded-lg border border-hairline/40 bg-inset p-3.5">
         {servers.map((server, index) => (
           <div key={server.alias} className={cn(index > 0 && "border-t border-hairline/40 pt-3.5")}>
