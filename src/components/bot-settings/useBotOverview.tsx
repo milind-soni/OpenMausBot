@@ -114,40 +114,47 @@ export function useBotOverview(bot: Bot, want: { overview: boolean; prompt: bool
   return { overview, overviewError, prompt, promptError };
 }
 
+type HistorySnapshot = { botId: string; rows: HistoryRow[] | null; revision: string | null; error: boolean };
+const emptyHistory = (botId: string): HistorySnapshot => ({ botId, rows: null, revision: null, error: false });
+
 export function useBotHistory(bot: Bot, active: boolean) {
   const dispatch = useStoreDispatch(), { flushBotPatches } = useStoreActions();
-  const [rows, setRows] = useState<HistoryRow[] | null>(null);
-  const [error, setError] = useState(false);
-  const [revision, setRevision] = useState<string | null>(null);
+  // Rows, revision and error belong to the bot they were read for: on the first render after a switch the previous bot's
+  // snapshot must not show under the new bot, so anything read for another bot is treated as empty.
+  const [snapshot, setSnapshot] = useState<HistorySnapshot>(() => emptyHistory(bot.id));
+  const view = snapshot.botId === bot.id ? snapshot : emptyHistory(bot.id);
+  const { rows, revision, error } = view;
   const request = useRef(0);
   const ownerId = useRef(bot.id);
   const [rollingBack, setRollingBack] = useState(false);
+  // Each rollback owns the flag only while it is the newest one: a rollback that ends after a bot switch must not clear another's.
+  const rollbackOp = useRef(0);
   const [rollbackTarget, setRollbackTarget] = useState<{ id: string; expectedRevision: string } | null>(null);
 
   useEffect(() => {
     ownerId.current = bot.id;
     request.current++;
-    setRows(null);
-    setRevision(null);
-    setError(false);
+    setSnapshot(emptyHistory(bot.id));
     setRollbackTarget(null);
     setRollingBack(false);
+    rollbackOp.current++;
   }, [bot.id]);
 
   const load = useCallback(() => {
     const readFor = bot.id;
     if (readFor !== ownerId.current) return Promise.resolve();
     const current = ++request.current;
-    setError(false);
+    setSnapshot((s) => (s.botId === readFor ? { ...s, error: false } : emptyHistory(readFor)));
     return flushBotPatches(bot.id)
       .then(() => api(`/api/bots/${bot.id}/history?limit=100`))
       .then((data: { rows: HistoryRow[]; revision: string }) => {
         if (current !== request.current || readFor !== ownerId.current) return;
-        setRows(data.rows);
-        setRevision(data.revision);
+        setSnapshot({ botId: readFor, rows: data.rows, revision: data.revision, error: false });
       })
       .catch(() => {
-        if (current === request.current && readFor === ownerId.current) setError(true);
+        if (current === request.current && readFor === ownerId.current) {
+          setSnapshot((s) => ({ ...(s.botId === readFor ? s : emptyHistory(readFor)), error: true }));
+        }
       });
   }, [bot.id, flushBotPatches]);
 
@@ -160,6 +167,7 @@ export function useBotHistory(bot: Bot, active: boolean) {
   const rollback = async (target: { id: string; expectedRevision: string }) => {
     if (rollingBack) return;
     const rollbackFor = bot.id;
+    const op = ++rollbackOp.current;
     setRollbackTarget(null);
     setRollingBack(true);
     try {
@@ -172,7 +180,7 @@ export function useBotHistory(bot: Bot, active: boolean) {
       dispatch({ type: "error", message: e instanceof Error ? e.message : t("botOverview.undoFailed") });
     } finally {
       if (rollbackFor === ownerId.current) await load();
-      setRollingBack(false);
+      if (op === rollbackOp.current) setRollingBack(false);
     }
   };
 

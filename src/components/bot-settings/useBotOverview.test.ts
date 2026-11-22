@@ -86,3 +86,27 @@ describe("reading a bot's overview", () => {
     expect(reads()).toEqual(["/api/bots/scout/overview", "/api/bots/scout/overview", "/api/bots/scout/system-prompt"]);
   });
 });
+
+describe("the history of a bot after a switch", () => {
+  it("never shows the previous bot's rows on the first render under the new bot", async () => {
+    const { useBotHistory } = await import("./useBotOverview");
+    const seen: Array<{ botId: string; rows: unknown }> = [];
+    function HistoryProbe({ of }: { of: Bot }) {
+      const history = useBotHistory(of, true);
+      seen.push({ botId: of.id, rows: history.rows });
+      return null;
+    }
+    fixture.api.mockImplementation(async (url: string) => {
+      const botId = url.split("/")[3];
+      return url.includes("/history") ? { rows: [{ id: `${botId}-1`, at: 1 }], revision: `rev-${botId}` } : {};
+    });
+    flushSync(() => root.render(createElement(HistoryProbe, { of: bot() })));
+    await settle();
+    expect(seen.at(-1)).toEqual({ botId: "scout", rows: [{ id: "scout-1", at: 1 }] });
+    seen.length = 0;
+    flushSync(() => root.render(createElement(HistoryProbe, { of: bot({ id: "other", name: "Other" }) })));
+    expect(seen[0]).toEqual({ botId: "other", rows: null });
+    await settle();
+    expect(seen.at(-1)).toEqual({ botId: "other", rows: [{ id: "other-1", at: 1 }] });
+  });
+});

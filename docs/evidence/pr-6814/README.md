@@ -23,4 +23,4 @@ Captured locally with `pnpm dev` + `pnpm shots` (`OMB_CDP_CHROME` on Windows):
 - `panel-spacing-reference-1440-midnight.png`
 - `panel-spacing-reference-1440-daylight.png`
 
-These pages use the same spacing tokens as the bot panels (`question-cards-preview`).
+The source page of these captures is not recorded here, so this README does not claim they share the bot-panel spacing tokens.
