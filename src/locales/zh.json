@@ -4306,7 +4306,7 @@
   "accounts.inUse": "有 {count} 个机器人使用此账户。请先为它们选择其他模型。",
   "accounts.signOutTitle": "退出 {name} 的登录？",
   "accounts.signOutBody": "使用此账户的机器人需要重新登录该账户，才能开始下一个任务。正在运行的任务不会被取消。",
-  "accounts.signOutAntigravityShared": "Google 的 Antigravity CLI 在这台电脑上只保存一个登录，所以用它的其他账户和终端里的 Antigravity CLI 也会一起退出。",
+  "accounts.signOutAntigravityShared": "Google 的 Antigravity CLI 在这台电脑上只保存一个登录：用它的其他账户和终端里的 Antigravity CLI 也会一起退出，它们正在运行的任务会停止。使用这些账户的机器人需要重新登录，才能开始下一个任务。",
   "accounts.signOutCliBody": "这也会让此电脑上 {name} 自己的命令行应用退出登录。",
   "accounts.signOutAria": "退出 {name} 的登录",
   "accounts.removeTitle": "移除 {name}？",

@@ -15,6 +15,7 @@
 //   FAKE_AGY_LOGIN          no-link | hold | stay | bad-domain | bad-redirect | state-less: how `--login` misbehaves
 //   FAKE_AGY_LOGOUT         refuse | ignore: `logout` fails, or answers and forgets nothing
 //   FAKE_AGY_HANG           initialize | session-new: never answers that request; crash: exits on session/new
+//   FAKE_AGY_LOGOUT_MS      how long `logout` takes before it answers
 //   FAKE_AGY_KEYRING_SHARED with FAKE_AGY_KEYRING: one entry for every --gemini-dir, as the macOS keyring holds in 1.5.14
 //   FAKE_AGY_SESSION_ERROR  a message session/new fails with as -32000, signed in or not
 //   FAKE_AGY_KEYRING        a folder that stands for the OS keyring: the sign-in is kept there, one entry per --gemini-dir,
@@ -111,7 +112,7 @@ const configOptions = () => [
   },
 ];
 
-createInterface({ input: process.stdin }).on("line", (line) => {
+createInterface({ input: process.stdin }).on("line", async (line) => {
   let message: { id?: unknown; method?: string; params?: { sessionId?: string; configId?: string; value?: string } };
   try { message = JSON.parse(line); } catch { return; }
   if (!message.method) return;
@@ -135,6 +136,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       failure(message.id, -32603, "fake antigravity does not sign in through authenticate; use acp --login");
       break;
     case "logout":
+      log({ event: "logout-start" });
+      if (process.env.FAKE_AGY_LOGOUT_MS) await new Promise((resolveWait) => setTimeout(resolveWait, Number(process.env.FAKE_AGY_LOGOUT_MS)));
       if (process.env.FAKE_AGY_LOGOUT === "refuse") failure(message.id, -32603, "logout refused");
       else {
         if (process.env.FAKE_AGY_LOGOUT !== "ignore") rmSync(credentialFile, { force: true });

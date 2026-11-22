@@ -1,7 +1,7 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DATA_DIR, ensureDirs } from "../config.ts";
 import type { ProviderInstance } from "../contracts.ts";
@@ -214,6 +214,23 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
     it("fails, rather than pass as done, when an account set to the native CLI cannot start it", async () => {
       const instance = await create("antigravity-native-missing-cli", nativeFixture(folder()), {}, "antigravity");
       await expect(instance.signOut!()).rejects.toThrow(/native CLI is not installed/u);
+      const moved = nativeFixture(folder());
+      const custom = await create("antigravity-native-moved-cli", moved);
+      renameSync(moved.executable, join(moved.directory, "moved-away"));
+      await expect(custom.signOut!()).rejects.toThrow();
+    }, 60_000);
+
+    it("starts no native process while the shared sign-in is being removed, so none reads the old sign-in", async () => {
+      const fixture = nativeFixture(folder());
+      const instanceId = "antigravity-native-gated";
+      const instance = await create(instanceId, fixture, { FAKE_AGY_LOGOUT_MS: "1500" });
+      await loginAt(fixture, antigravityProfileDirectory(instanceId), "fixture-code");
+      const signingOut = instance.signOut!();
+      await vi.waitFor(() => expect(fixture.entries().some((entry) => entry.event === "logout-start")).toBe(true), { timeout: 30_000 });
+      instance.forgetAuthentication!();
+      const during = instance.snapshot();
+      await signingOut;
+      expect(await during).toMatchObject({ authenticated: false });
     }, 60_000);
 
     it("leaves the native CLI's shared sign-in alone when an account on the pinned runtime signs out", async () => {

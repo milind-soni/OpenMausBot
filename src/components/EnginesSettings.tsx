@@ -370,7 +370,7 @@ function EngineAccountAction({ instance, action, cli = false, removeBody = "acco
         // The CLI's own sign-in is the one removed: its files in the home folder of the computer this app runs on.
         ? <>{t("accounts.signOutBody")}<span data-sign-out-cli="" className="mt-2 block">{t("accounts.signOutCliBody", { name: instance.displayName })}</span></>
         : runsAntigravityCli(instance)
-        ? <>{t("accounts.signOutBody")}<span data-sign-out-shared="" className="mt-2 block">{t("accounts.signOutAntigravityShared")}</span></>
+        ? <span data-sign-out-shared="">{t("accounts.signOutAntigravityShared")}</span>
         : t("accounts.signOutBody")}
       confirmLabel={label} tone="neutral" pending={running} onCancel={() => { if (!running) setConfirming(false); }} onConfirm={() => void run()} />
   </>;
