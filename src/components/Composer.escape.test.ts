@@ -83,7 +83,7 @@ describe("Escape in the composer", () => {
   it("closes an open mention picker first and stays in the composer", () => {
     const input = render();
     focusWith(input, "@");
-    expect(container.querySelector('[role="listbox"]:not([inert])')).not.toBeNull();
+    expect(container.querySelector('[role="listbox"]:not([inert])')?.textContent).toContain(peer.name);
     pressEscape(input);
     expect(container.querySelector('[role="listbox"]:not([inert])')).toBeNull();
     expect(document.activeElement).toBe(input);
