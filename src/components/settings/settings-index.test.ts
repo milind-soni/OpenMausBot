@@ -10,7 +10,7 @@ import {
 beforeEach(() => setLocale("en"));
 
 const ids = (ctx: SettingsContext) => visiblePages(ctx).map((page) => page.id);
-const PLACE_PAGES = ["overview", "phone", "ai", "bots", "desktops", "vault", "usage", "transfer", "data"];
+const PLACE_PAGES = ["overview", "phone", "ai", "bots", "profiles", "desktops", "vault", "usage", "transfer", "data"];
 const find = (query: string, ctx: SettingsContext = fullContext()) => searchSettings(query, ctx, (entry) => t(entry.labelKey), (page) => t(page.labelKey));
 const first = (query: string, ctx?: SettingsContext) => find(query, ctx)[0]?.entry;
 
@@ -29,14 +29,14 @@ describe("the pages", () => {
   });
 
   it.each(Object.entries(PEOPLE))("keeps the same place pages, in the same order, for %s", (who, ctx) => {
-    // A team's member is offered none of the installation's admin pages (AI, Desktops, Spending, Import & export, Data).
-    const expected = who === "a team member" ? PLACE_PAGES.filter((id) => !["ai", "desktops", "usage", "transfer", "data"].includes(id)) : PLACE_PAGES;
+    // A team's member is offered none of the installation's admin pages (AI, Profiles, Desktops, Spending, Import & export, Data).
+    const expected = who === "a team member" ? PLACE_PAGES.filter((id) => !["ai", "profiles", "desktops", "usage", "transfer", "data"].includes(id)) : PLACE_PAGES;
     expect(ids(ctx).filter((id) => PLACE_PAGES.includes(id))).toEqual(expected);
   });
 
   it.each(["local only", "This computer, with My Cloud", "My Cloud's page in the desktop window", "My Cloud in a browser (owner)"] as const)(
-    "shows Simple's ten entries for %s", (who) => {
-      expect(ids({ ...PEOPLE[who], advanced: false })).toEqual(["overview", "phone", "ai", "vault", "usage", "transfer", "account", "plan", "app", "appearance"]);
+    "shows Simple's eleven entries for %s", (who) => {
+      expect(ids({ ...PEOPLE[who], advanced: false })).toEqual(["overview", "phone", "ai", "profiles", "vault", "usage", "transfer", "account", "plan", "app", "appearance"]);
     });
 
   it("is shorter in Simple: the four Advanced pages come back in Advanced, in place", () => {

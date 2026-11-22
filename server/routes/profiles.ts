@@ -3,13 +3,13 @@ import { basename, isAbsolute, resolve } from "node:path";
 
 import { z } from "zod";
 
-import type { ProfileApplyResult, ProfilePlan, ProfilesStatus } from "../../shared/profile-plan.ts";
+import type { ProfileApplyResult, ProfileBotView, ProfilePlan, ProfilesStatus } from "../../shared/profile-plan.ts";
 import type { ProfileSource } from "../../shared/wire.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { applyProfilePlan } from "../profiles/apply.ts";
 import { gitCommitOf } from "../profiles/git-commit.ts";
 import { loadProfileFolder, ProfileFolderError, type LoadedProfileFolder } from "../profiles/load.ts";
-import { planProfiles, type AppView, type PlanOutput } from "../profiles/plan.ts";
+import { botSecretSlots, changedHereFields, planProfiles, type AppView, type PlanOutput } from "../profiles/plan.ts";
 import { readProfilesState, writeProfilesState, type ProfilesState } from "../profiles/state.ts";
 import { isInside, resolveThroughLinks } from "../sentinel/paths.ts";
 import { callRoutes } from "./in-process.ts";
@@ -135,6 +135,8 @@ export function createProfilesRoutes(deps: ProfilesRouteDeps): RouteHandler {
     if (!path.startsWith("/api/profiles")) return PASS;
     try {
       if (method === "GET" && path === "/api/profiles") return json(res, 200, status(readProfilesState(deps.dataDir)));
+      const botView = method === "GET" ? /^\/api\/profiles\/bots\/([^/]+)$/.exec(path) : null;
+      if (botView) return json(res, 200, await profileBot(req, auth, decodeURIComponent(botView[1]!)));
       if (method === "PUT" && path === "/api/profiles/folder") {
         const parsed = z.object({ folder: folderField }).strict().safeParse(await readBody(req));
         if (!parsed.success) return json(res, 400, { error: "folder must be an absolute folder path" });
@@ -171,6 +173,24 @@ export function createProfilesRoutes(deps: ProfilesRouteDeps): RouteHandler {
       throw error;
     }
   };
+
+  /** Secret slots are read from the chosen folder when it still loads; without it the bot shows its changes alone. */
+  async function profileBot(req: IncomingMessage, auth: RequestAuth, botId: string): Promise<ProfileBotView> {
+    const answer = await callRoutes(deps.routes(), req, auth, "GET", "/api/bots?messages=0");
+    if (answer.status >= 400) throw new RouteRefusal(answer.status, String(answer.body.error ?? "could not read the bots"));
+    const echo = ((answer.body.bots ?? []) as Rec[]).find((bot) => bot.id === botId);
+    const source = echo?.profileSource as ProfileSource | undefined;
+    if (!echo || !source) throw new RouteRefusal(404, "This bot did not come from a profile.");
+    const state = readProfilesState(deps.dataDir);
+    let folder: LoadedProfileFolder | undefined;
+    try {
+      folder = state.folder ? load(undefined, state) : undefined;
+    } catch {
+      folder = undefined;
+    }
+    const bot = folder?.bots.find((candidate) => candidate.area === source.area && candidate.key === source.key);
+    return { changedHere: changedHereFields(source.hashes ?? {}, echo, bot), secrets: bot ? botSecretSlots(bot, folder!.mcpServers) : [] };
+  }
 
   async function applyNow(req: IncomingMessage, auth: RequestAuth, body: z.infer<typeof requestSchema>, planned: PlanOutput, folder: LoadedProfileFolder,
     state: ProfilesState): Promise<ProfileApplyResult> {

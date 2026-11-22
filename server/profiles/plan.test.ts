@@ -8,7 +8,7 @@ import type { ProfileChoice, ProfilePlanLine } from "../../shared/profile-plan.t
 import type { ProfileSource } from "../../shared/wire.ts";
 import { applyProfilePlan } from "./apply.ts";
 import { profileFilesHash } from "./load.ts";
-import { decide, planProfiles, type AppView } from "./plan.ts";
+import { botSecretSlots, changedHereFields, decide, planProfiles, type AppView } from "./plan.ts";
 import { withDepartmentRenamed, type ProfilesState } from "./state.ts";
 
 type Rec = Record<string, any>;
@@ -174,7 +174,7 @@ describe("planProfiles", () => {
     const { app, plan, apply } = fakeApp();
     await apply();
     const without = folder({ "areas/sales/bots/closer.md": null });
-    expect(kinds(plan(without).plan.lines, "gone")).toEqual(["Closer is no longer in your profiles; it is kept (prune deletes it)"]);
+    expect(kinds(plan(without).plan.lines, "gone")).toEqual(["Closer is no longer in your profiles; it stays in this app as it is"]);
     await apply(without);
     expect(app.bots.some((candidate) => candidate.name === "Closer")).toBe(true);
     const pruned = await apply(without, { prune: true });
@@ -204,7 +204,7 @@ describe("planProfiles", () => {
 
     const unchanged = folder({ "areas/bi/bots/reporter.md": withField("title", "Report writer") });
     expect(kinds(plan(unchanged).plan.lines, "changed-here")).toEqual([
-      'Analista BI: title was changed here ("Local analyst"), so it is kept',
+      'Analista BI: title changed in this app to "Local analyst"; that change stays',
     ]);
 
     await apply(edited, { choices: { "bi/analyst:title": "file", "bi/reporter:description": "mine" } });
@@ -212,7 +212,7 @@ describe("planProfiles", () => {
     expect(bot("bi/reporter").description).toBe("Mine");
     const settled = plan(edited).plan;
     expect(settled.lines.filter((line) => line.kind === "conflict")).toEqual([]);
-    expect(kinds(settled.lines, "changed-here")).toEqual(['Reporter: description was changed here ("Mine"), so it is kept']);
+    expect(kinds(settled.lines, "changed-here")).toEqual(['Reporter: description changed in this app to "Mine"; that change stays']);
   });
 
   it("lists what gives more access apart, applies it only when confirmed, and narrows in the same plan", async () => {
@@ -243,13 +243,39 @@ describe("planProfiles", () => {
   it("lists MCP server files and shared Edu brains as coming in a later update, and applies neither", async () => {
     const { plan, apply, bot } = fakeApp();
     expect(kinds(plan().plan.lines, "later")).toEqual([
-      "Analista BI: an Edu brain its area shares comes in a later update; until then it keeps a brain of its own",
-      "Reporter: an Edu brain its area shares comes in a later update; until then it keeps a brain of its own",
-      "Closer: an Edu brain in edu-cloud comes in a later update; until then it keeps a brain of its own",
+      "Analista BI: keeps an Edu brain of its own for now; sharing one brain with its area comes in a later update",
+      "Reporter: keeps an Edu brain of its own for now; sharing one brain with its area comes in a later update",
+      "Closer: keeps an Edu brain of its own for now; using a brain in edu-cloud comes in a later update",
       "MCP server notion (mcp/notion.md) is set up from profiles in a later update; until then nothing here changes for it",
     ]);
     await apply();
     expect(bot("bi/analyst").eduBrain).toBeUndefined();
+    expect(kinds(plan().plan.lines, "later").slice(0, 1)).toEqual([
+      "Analista BI: keeps its current Edu brain for now; sharing one brain with its area comes in a later update",
+    ]);
+  });
+
+  it("says Chief of Staff changed in this app in words, and bot settings reports it from the same comparison", async () => {
+    const { plan, apply, bot } = fakeApp();
+    await apply();
+    bot("bi/analyst").chiefOfStaff = false;
+    expect(kinds(plan().plan.lines, "changed-here")).toEqual(["Analista BI: taken off Chief of Staff in this app; that change stays"]);
+    const analyst = folder().bots.find((candidate) => candidate.id === "bi/analyst")!;
+    expect(changedHereFields(bot("bi/analyst").profileSource.hashes, bot("bi/analyst"), analyst)).toEqual(["chief"]);
+  });
+
+  it("names a secret or an environment variable a bot's profile needs, and a key file without its path", () => {
+    const notion = (headers: string) => folder({ "mcp/notion.md": (text) => text.replace("Authorization: { secret: NOTION_TOKEN }", headers) });
+    const closerOf = (profiles: ReturnType<typeof folder>) => profiles.bots.find((candidate) => candidate.id === "sales/closer")!;
+    const env = notion("Authorization: { env: NOTION_TOKEN_ENV }");
+    expect(botSecretSlots(closerOf(env), env.mcpServers)).toEqual([
+      { kind: "secret", name: "EDU_CLOUD_SALES", for: "Edu brain" }, { kind: "env", name: "NOTION_TOKEN_ENV", for: "notion" },
+    ]);
+    const file = notion("Authorization: { file: .secrets/notion }");
+    expect(file.problems).toEqual([]);
+    const slots = botSecretSlots(closerOf(file), file.mcpServers);
+    expect(slots).toEqual([{ kind: "secret", name: "EDU_CLOUD_SALES", for: "Edu brain" }, { kind: "file", for: "notion" }]);
+    expect(JSON.stringify(slots)).not.toContain(".secrets");
   });
 
   it("leaves a bot whose file has problems as it is, without calling it gone", async () => {

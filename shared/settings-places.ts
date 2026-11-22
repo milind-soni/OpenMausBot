@@ -18,6 +18,7 @@ export const SETTINGS_PLACES = [
   {"id":"page:phone","path":"Settings → Phone & devices","words":["phone","pair","pairing","qr","code","iphone","android","mobile","tablet","device","devices","wifi","wi-fi","anywhere","relay","remote","companion","tailscale","connect your phone","get the phone app","pair a device","this server","remote access"]},
   {"id":"page:ai","path":"Settings → AI","words":["ai","models","model providers","providers","engines","api keys","keys","key","claude","codex","openai","anthropic","ollama","lm studio","local model"]},
   {"id":"page:bots","path":"Settings → You and your bots","words":["all bots","bots","about you","about me","profile","new bots","defaults","effort","limits","rules"],"advanced":true},
+  {"id":"page:profiles","path":"Settings → Profiles","words":["profiles","profile folder","organization files","areas","yaml","markdown","git","same bots","apply profiles"]},
   {"id":"page:desktops","path":"Settings → Desktops & browser","words":["bot desktops","computer","desktop","desktops","browser","built-in browser","proxy","socks5","private desktop","sandbox","docker","podman","container","vps","own server","cloud desktops"],"advanced":true},
   {"id":"page:vault","path":"Settings → Vault","words":["vault","password","passwords","login","logins","secrets","1password","2fa"]},
   {"id":"page:usage","path":"Settings → Spending","words":["spending","usage","cost","costs","tokens","money","runs","export csv"]},

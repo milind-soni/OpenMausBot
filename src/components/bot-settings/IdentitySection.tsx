@@ -12,6 +12,7 @@ import { Field, inputCls } from "./field";
 import type { BotPatch } from "./useBotSettingsDerived";
 import { useBotEditor } from "./BotEditorContext";
 import { PackageProvenance } from "./PackageProvenance";
+import { DriftMark, ProfileBotBadge, useProfileBotView } from "../profiles/ProfileBotBadge";
 import { ProposalStatus } from "./ProposalStatus";
 import { randomBotName } from "@/lib/random-bot-name";
 import { intlLocale, t } from "@/lib/i18n";
@@ -38,15 +39,17 @@ export function IdentitySection({
   const { draft } = useBotEditor();
   const store = useStoreRef();
   const shows = (part: IdentityPart) => !parts || parts.includes(part);
+  const profile = useProfileBotView(bot);
 
   return (
     <div className="flex flex-col gap-4">
       {shows("avatar") && <BotProfileAvatarCard bot={bot} activeState={activeState} mascotMotion={mascotMotion} onPatch={patch} />}
       {shows("provenance") && <PackageProvenance bot={bot} />}
+      {shows("provenance") && <ProfileBotBadge bot={bot} view={profile} />}
 
       {shows("name") && <div>
         <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-          <label htmlFor={`bot-name-${bot.id}`} className="text-[13px] text-ink-secondary">{t("botSettings.identity.name")}</label>
+          <label htmlFor={`bot-name-${bot.id}`} className="text-[13px] text-ink-secondary">{t("botSettings.identity.name")}<DriftMark view={profile} field="name" /></label>
           {draft && <div className="flex flex-wrap gap-1">
             {(["female", "male"] as const).map(kind => <button
               key={kind}
@@ -66,7 +69,7 @@ export function IdentitySection({
           onChange={(e) => patch({ name: e.target.value })}
         />
       </div>}
-      {shows("title") && <Field label={t("botSettings.identity.title")}>
+      {shows("title") && <Field label={<>{t("botSettings.identity.title")}<DriftMark view={profile} field="title" /></>}>
         <ProposalStatus bot={bot} kind="chief" />
         <input
           className={inputCls}

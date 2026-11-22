@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 
 import { approvalModeFor, levelWithin, type ApprovalMode } from "../../shared/approval-mode.ts";
 import type { EduBrainSetting } from "../../shared/edu-brain.ts";
-import { problemSentence, type ProfileFolder, type ProfileProblem, type ResolvedBot, type SkillProfile } from "../../shared/profile-format.ts";
-import type { ProfileChoice, ProfilePlan, ProfilePlanCounts, ProfilePlanLine } from "../../shared/profile-plan.ts";
+import { problemSentence, type McpServerProfile, type ProfileFolder, type ProfileProblem, type ResolvedBot, type SkillProfile } from "../../shared/profile-format.ts";
+import type { ProfileChoice, ProfilePlan, ProfilePlanCounts, ProfilePlanLine, ProfileSecretSlot } from "../../shared/profile-plan.ts";
 import { toolScopeWidens, type ToolScope } from "../../shared/tool-scope.ts";
 import type { ConnectorToolGrant } from "../../shared/wire.ts";
 import { APPROVAL_LABEL, canonicalGrants, canonicalScope, changedLines, everyTool, type DesiredBot } from "../desired-bot.ts";
@@ -197,11 +197,41 @@ const FIELDS: FieldSpec[] = [
     set: (v) => ({ memoryUpkeep: v as boolean }) },
 ];
 
-const canonOf = (spec: FieldSpec, value: unknown) => (spec.canon ? spec.canon(value) : value);
+const CHIEF: Pick<FieldSpec, "field" | "file" | "app"> = { field: "chief", file: (bot) => bot.chief, app: (echo) => echo.chiefOfStaff === true };
+
+const canonOf = (spec: Pick<FieldSpec, "canon">, value: unknown) => (spec.canon ? spec.canon(value) : value);
 
 /** The stored hashes of `fields` as `echo` has them. */
 export function appHashes(fields: readonly string[], echo: Rec): Record<string, string> {
   return Object.fromEntries(FIELDS.filter((spec) => fields.includes(spec.field)).map((spec) => [spec.field, valueHash(canonOf(spec, spec.app(echo)))]));
+}
+
+/** The fields of a stamped bot whose value in this app no longer matches the hash the profile last stored: changed here.
+ * With `bot`, only the fields its file sets count; a field left to the app is the app's to change. */
+export function changedHereFields(hashes: Readonly<Record<string, string>>, echo: Rec, bot?: ResolvedBot): string[] {
+  const specs: Array<Pick<FieldSpec, "field" | "file" | "app" | "canon">> = [...FIELDS, CHIEF];
+  return specs.filter((spec) => hashes[spec.field] !== undefined && (!bot || spec.file(bot) !== undefined)
+    && hashes[spec.field] !== valueHash(canonOf(spec, spec.app(echo)))).map((spec) => spec.field);
+}
+
+/** The secret slots a bot's profile names: its Edu brain's token and the headers and variables of its MCP servers.
+ * Security: a file slot never carries its path. */
+export function botSecretSlots(bot: ResolvedBot, servers: readonly McpServerProfile[]): ProfileSecretSlot[] {
+  const slots = new Map<string, ProfileSecretSlot>();
+  const add = (ref: unknown, used: string) => {
+    if (!ref || typeof ref !== "object") return;
+    const slot: ProfileSecretSlot | null = "secret" in ref && typeof ref.secret === "string" ? { kind: "secret", name: ref.secret, for: used }
+      : "env" in ref && typeof ref.env === "string" ? { kind: "env", name: ref.env, for: used }
+        : "file" in ref && typeof ref.file === "string" ? { kind: "file", for: used } : null;
+    const key = slot && (slot.kind === "file" ? `file:${used}` : `${slot.kind}:${slot.name}`);
+    if (slot && key && !slots.has(key)) slots.set(key, slot);
+  };
+  if (bot.eduBrain?.mode === "cloud") add(bot.eduBrain.token, "Edu brain");
+  for (const name of bot.mcpServers) {
+    const server = servers.find((candidate) => candidate.key === name);
+    for (const value of [...Object.values(server?.headers ?? {}), ...Object.values(server?.env ?? {})]) add(value, name);
+  }
+  return [...slots.values()];
 }
 
 /** Which areas and bots a folder's problems leave alone. A problem at a bot's file blocks that bot; anywhere else under
@@ -309,7 +339,7 @@ export function planProfiles(input: PlanInput): PlanOutput {
       if (outcome === "mine") kept({ subject, field: "brief", file: area.file }, `Area ${area.name}: its brief`);
       if (outcome === "same" || outcome === "mine") hashes.brief = fileHash;
       else if (outcome === "here") {
-        lines.push({ kind: "changed-here", subject, field: "brief", file: area.file, text: `Area ${area.name}: its brief was changed here, so it is kept` });
+        lines.push({ kind: "changed-here", subject, field: "brief", file: area.file, text: `Area ${area.name}: its brief changed in this app; that change stays` });
       } else if (outcome === "conflict") {
         lines.push({ kind: "conflict", subject, field: "brief", file: area.file, text: `Area ${area.name}: the file and this app both changed its brief`,
           conflict: { choice, file: short(brief), mine: short(current) } });
@@ -352,7 +382,7 @@ export function planProfiles(input: PlanInput): PlanOutput {
     const later = (text: string, field?: string) => lines.push({ kind: "later", subject, file: bot.file, text, ...(field ? { field } : {}) });
     const note = (text: string, field?: string) => lines.push({ kind: "note", subject, file: bot.file, text, ...(field ? { field } : {}) });
     if (bot.eduBrain && (bot.eduBrain.mode === "area" || bot.eduBrain.mode === "cloud")) {
-      later(`${bot.name}: an Edu brain ${bot.eduBrain.mode === "area" ? "its area shares" : "in edu-cloud"} comes in a later update; until then it keeps ${echo ? "its current brain" : "a brain of its own"}`, "eduBrain");
+      later(`${bot.name}: keeps ${echo ? "its current Edu brain" : "an Edu brain of its own"} for now; ${bot.eduBrain.mode === "area" ? "sharing one brain with its area" : "using a brain in edu-cloud"} comes in a later update`, "eduBrain");
     }
     for (const name of bot.mcpServers.filter((server) => !app.mcpServers.includes(server))) {
       note(`${bot.name}: this app has no MCP server named ${name} yet, so the bot cannot use it until one is added`, "mcpServers");
@@ -374,7 +404,8 @@ export function planProfiles(input: PlanInput): PlanOutput {
       ({ kind, subject, field, file: bot.file, text: `${bot.name}: ${text}`, ...extra });
 
     const consider = (field: string, label: string, fileValue: unknown, fileCanon: unknown, appValue: unknown, appCanon: unknown, show: (value: unknown) => string,
-      widens: boolean, apply: Omit<FieldChange, "field" | "line" | "hash" | "access">) => {
+      widens: boolean, apply: Omit<FieldChange, "field" | "line" | "hash" | "access">,
+      changedHere: (value: unknown) => string = (value) => `${label} changed in this app to ${show(value)}`) => {
       const fileHash = valueHash(fileCanon);
       const choice = `${bot.id}:${field}`;
       const outcome = echo ? settle(decide(base[field], fileHash, valueHash(appCanon)), choices[choice]) : "take";
@@ -382,7 +413,7 @@ export function planProfiles(input: PlanInput): PlanOutput {
       if (outcome === "same" || outcome === "mine") { action.hashes[field] = fileHash; return; }
       if (outcome === "here") {
         action.hashes[field] = base[field]!;
-        lines.push(fieldLine("changed-here", field, `${label} was changed here (${show(appValue)}), so it is kept`));
+        lines.push(fieldLine("changed-here", field, `${changedHere(appValue)}; that change stays`));
         return;
       }
       if (outcome === "conflict") {
@@ -423,7 +454,11 @@ export function planProfiles(input: PlanInput): PlanOutput {
     };
     if (echo) consider("area", "area", bot.area, bot.area, appArea, appArea, areaShow, false, { section });
     else action.hashes.area = valueHash(bot.area);
-    if (echo || bot.chief) consider("chief", "Chief of Staff", bot.chief, bot.chief, echo?.chiefOfStaff === true, echo?.chiefOfStaff === true, (v) => (v ? "yes" : "no"), false, { chief: bot.chief });
+    if (echo || bot.chief) {
+      const chief = echo ? CHIEF.app(echo) : false;
+      consider(CHIEF.field, "Chief of Staff", bot.chief, bot.chief, chief, chief, (v) => (v ? "yes" : "no"), false, { chief: bot.chief },
+        (v) => (v ? "made Chief of Staff in this app" : "taken off Chief of Staff in this app"));
+    }
 
     const installed = new Map((echo ? app.skills[echo.id] ?? [] : []).map((skill) => [skill.name, skill]));
     const names = new Set([...bot.skills.map((skill) => skill.name), ...Object.keys(base).filter((field) => field.startsWith("skills.")).map((field) => field.slice(7))]);
@@ -449,7 +484,7 @@ export function planProfiles(input: PlanInput): PlanOutput {
       if (outcome === "same" || outcome === "mine") { if (fileValue) action.hashes[field] = fileHash; continue; }
       if (outcome === "here") {
         if (fileValue) action.hashes[field] = base[field]!;
-        lines.push(fieldLine("changed-here", field, `${label} was changed here, so it is kept`));
+        lines.push(fieldLine("changed-here", field, `${label} changed in this app; that change stays`));
         continue;
       }
       if (outcome === "conflict") {
@@ -499,7 +534,7 @@ export function planProfiles(input: PlanInput): PlanOutput {
       lines.push(line);
       actions.push({ kind: "remove", botId: echo.id, line });
     } else {
-      lines.push({ kind: "gone", subject, file: echo.profileSource.file, text: `${echo.name} is no longer in your profiles; it is kept (prune deletes it)` });
+      lines.push({ kind: "gone", subject, file: echo.profileSource.file, text: `${echo.name} is no longer in your profiles; it stays in this app as it is` });
     }
   }
 

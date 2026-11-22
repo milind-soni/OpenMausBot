@@ -20,6 +20,7 @@ import { DefaultBotHideRow } from "../DefaultBotControls";
 import { SoulField } from "../SoulField";
 import { BotApiCard } from "../bot-settings/BotApiCard";
 import { PackageProvenance } from "../bot-settings/PackageProvenance";
+import { DriftMark, ProfileBotBadge, useProfileBotView } from "../profiles/ProfileBotBadge";
 import { REPLY_STYLE_LABELS } from "../bot-settings/ReplyStyleField";
 import { useChoosesVisibility, visibilityLabel } from "../bot-settings/VisibilitySection";
 import { useBotApps } from "../bot-settings/useBotApps";
@@ -51,6 +52,7 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
   const storedCallMode = useCallMode();
   const slackUrl = useSlackManagementUrl(bot.id);
   const choosesVisibility = useChoosesVisibility();
+  const profile = useProfileBotView(bot);
   const [jobDraft, setJobDraft] = useState<string | null>(null);
   const { patch, approvalMode, engine } = derived;
   const name = bot.name;
@@ -106,6 +108,7 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
   return (
     <div data-panel-settings>
       <PackageProvenance bot={bot} />
+      <ProfileBotBadge bot={bot} view={profile} />
       <Card anchor="instructions">
         {soulOpen ? (
           <ColRow data-panel-row="soul">
@@ -136,7 +139,7 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
           >
             <RowIcon icon={FileText} />
             <RowText
-              title={t("botSettings.simple.instructions")}
+              title={<>{t("botSettings.simple.instructions")}<DriftMark view={profile} field="soul" /></>}
               hint={<span className="line-clamp-1">{firstSentence(bot.soul ?? "") || t("botPanel.instructionsHint", { name })}</span>}
             />
             <ChevronRight size={15} className="shrink-0 text-ink-tertiary" aria-hidden="true" />
@@ -150,7 +153,7 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
         <ColRow data-panel-row="approval">
           <div className="flex items-center gap-2.5">
             <RowIcon icon={ShieldCheck} />
-            <RowText title={t("botSettings.simple.beforeActs", { name })} hint={bot.busy ? t("approvalMode.whileWorking") : undefined} />
+            <RowText title={<>{t("botSettings.simple.beforeActs", { name })}<DriftMark view={profile} field="approval" /></>} hint={bot.busy ? t("approvalMode.whileWorking") : undefined} />
           </div>
           <div className="pl-[38px]">
             <Segmented
@@ -237,7 +240,7 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
         />
         <label data-panel-row="job" className={cn(rowCls, "cursor-text")}>
           <RowIcon icon={Tag} />
-          <span className="shrink-0 text-[14px] font-medium text-ink">{t("botSettings.simple.job")}</span>
+          <span className="shrink-0 text-[14px] font-medium text-ink">{t("botSettings.simple.job")}<DriftMark view={profile} field="title" /></span>
           <input
             data-panel-job
             value={jobDraft ?? bot.title}

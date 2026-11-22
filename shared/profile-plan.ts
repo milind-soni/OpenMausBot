@@ -86,3 +86,16 @@ export interface ProfilesStatus {
   /** Each area applied, by its key: the department it became. */
   areas: Record<string, { section: string }>;
 }
+
+/** GET /api/profiles/bots/:id: what bot settings show for a bot that came from a profile. */
+export interface ProfileBotView {
+  /** Managed fields whose value was changed in this app since the profile last set it, by plan field name
+   * (`soul`, `title`, `approval`, `memory.enabled`, …). */
+  changedHere: string[];
+  /** Secret slots the bot's profile names: each person fills them with their own key. Values are never sent. */
+  secrets: ProfileSecretSlot[];
+}
+
+/** One key a bot's profile asks for, and what it is for (`Edu brain`, or an MCP server's name). A `secret` is named in
+ * the app's key store, an `env` is an environment variable; a `file` slot never carries its path. */
+export type ProfileSecretSlot = { kind: "secret" | "env"; name: string; for: string } | { kind: "file"; for: string };

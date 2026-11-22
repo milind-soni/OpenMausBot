@@ -11,14 +11,29 @@ export function decideEduProposal(botId: string, id: string, action: "approve" |
   return api(`/api/bots/${encodeURIComponent(botId)}/edu/proposals/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify({ action }) });
 }
 
+const eduChanges = new EventTarget();
+
+const patchEdu = async (botId: string, patch: { eduBrain: { mode: "own" } } | { eduCrew: boolean }) => {
+  const answer = await api(`/api/bots/${encodeURIComponent(botId)}`, { method: "PATCH", body: JSON.stringify(patch) });
+  eduChanges.dispatchEvent(new CustomEvent<string>("change", { detail: botId }));
+  return answer;
+};
+
+/** Calls `listener` with the bot's id after this page changed that bot's Edu brain or Edu crew; returns the unsubscribe. */
+export function onEduSettingsChanged(listener: (botId: string) => void): () => void {
+  const handle = (event: Event) => listener((event as CustomEvent<string>).detail);
+  eduChanges.addEventListener("change", handle);
+  return () => eduChanges.removeEventListener("change", handle);
+}
+
 /** Gives a bot whose Edu brain is off its own brain again. The server refuses this from a bot's shell. */
 export function turnOnEduBrain(botId: string): Promise<unknown> {
-  return api(`/api/bots/${encodeURIComponent(botId)}`, { method: "PATCH", body: JSON.stringify({ eduBrain: { mode: "own" } }) });
+  return patchEdu(botId, { eduBrain: { mode: "own" } });
 }
 
 /** Turns a bot's Edu crew on or off. The server refuses turning it on from a bot's shell. */
 export function setEduCrew(botId: string, on: boolean): Promise<unknown> {
-  return api(`/api/bots/${encodeURIComponent(botId)}`, { method: "PATCH", body: JSON.stringify({ eduCrew: on }) });
+  return patchEdu(botId, { eduCrew: on });
 }
 
 let known: EduDecideRights | null = null;
