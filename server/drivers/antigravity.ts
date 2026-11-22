@@ -88,7 +88,7 @@ export function antigravityUpdateFilter(): (update: Record<string, any>) => Reco
 
 const SIGN_IN_WORDS = /\bauthenticat|\bunauthenticated\b|\bsign(?:ed)?[ -]?in\b|\blog(?:ged)?[ -]?in\b|\bcredentials?\b/iu;
 const SIGN_IN_ASKED = /\bauthentication required\b|\bunauthenticated\b|\bnot (?:logged|signed)[ -]?in\b|\b(?:sign|log)[ -]?in again\b|\bplease (?:sign|log)[ -]?in\b|\blogin expired\b|\bplease re-?authenticate\b|\bre-?authentication required\b|\binvalid_grant\b|\b(?:credentials?|token) (?:has been |have been |was |were )?revoked\b/iu;
-const UNREACHABLE = /\bnetwork\b|\bunreachable\b|\boffline\b/iu;
+const UNREACHABLE = /\bnetwork\b|\bunreachable\b|\boffline\b|\bgetaddrinfo\b|\benotfound\b|\beai_again\b/iu;
 
 /** -32000 is ACP's `auth_required`, but an agent may reuse it for other failures, a sign-in service it cannot reach
  * among them. Words that ask for a sign-in decide; words that only mention one do unless the failure is one that passes. */

@@ -18,6 +18,7 @@ it("a sign-in Google cannot confirm for a moment is not a sign-out", async () =>
   const runtime = join(dataDir, "fake-antigravity");
   const failureFile = join(dataDir, "authenticate-failure.json");
   const rpcFile = join(dataDir, "antigravity-rpc.jsonl");
+  const codexLog = join(dataDir, "codex-launches.jsonl");
   const evidence: unknown[] = [{ url, dataDir }];
   const api = async (method: string, path: string, body?: unknown) => {
     const response = await fetch(url + path, {
@@ -35,6 +36,9 @@ it("a sign-in Google cannot confirm for a moment is not a sign-out", async () =>
   };
   const calls = (method: string): Array<{ pid: number }> => existsSync(rpcFile)
     ? readFileSync(rpcFile, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)).filter((call) => call.method === method)
+    : [];
+  const codexTurns = () => existsSync(codexLog)
+    ? readFileSync(codexLog, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)).filter((entry) => entry.event === "turn/start")
     : [];
   try {
     await waitForExit(fixture.child, { signal: "SIGTERM" });
@@ -57,7 +61,10 @@ it("a sign-in Google cannot confirm for a moment is not a sign-out", async () =>
         FAKE_ACP_RPC_FAILURE_METHOD: "authenticate", FAKE_ACP_RPC_FAILURE_FILE: failureFile, FAKE_ACP_RPC_APPEND_FILE: rpcFile,
       },
     };
-    config.instances.codex = { driver: "codex", config: { cli: fileURLToPath(new URL("./testing/fake-codex-app-server.ts", import.meta.url)) } };
+    config.instances.codex = {
+      driver: "codex", config: { cli: fileURLToPath(new URL("./testing/fake-codex-app-server.ts", import.meta.url)) },
+      environment: { FAKE_CODEX_STARTUP_LOG: codexLog },
+    };
     writeFileSync(configPath, JSON.stringify(config));
     const log = openSync(logPath, "a", 0o600);
     server = spawn(process.execPath, ["--experimental-strip-types", fileURLToPath(new URL("./index.ts", import.meta.url))], {
@@ -71,6 +78,7 @@ it("a sign-in Google cannot confirm for a moment is not a sign-out", async () =>
     const instance = async (id: string) => ((await api("GET", "/api/instances?fresh=1")).instances as any[]).find((entry) => entry.instanceId === id);
     await expect.poll(async () => (await instance("codex"))?.models.options.some((option: any) => option.id === codex.model), { timeout: 20_000 }).toBe(true);
     expect((await instance("antigravity"))?.snapshot.authenticated).toBe(true);
+    expect(existsSync(codexLog), "the backup's launches are recorded").toBe(true);
 
     const { bots } = await api("GET", "/api/bots") as { bots: Array<{ id: string; chiefOfStaff?: boolean }> };
     const starter = bots.find((bot) => bot.chiefOfStaff);
@@ -92,6 +100,7 @@ it("a sign-in Google cannot confirm for a moment is not a sign-out", async () =>
     expect((await instance("antigravity"))?.snapshot.authenticated, "still signed in").toBe(true);
     const notices = ((await api("GET", "/api/notifications")).notifications as any[]).filter((entry) => entry.kind === "notice");
     expect(notices.map((entry) => entry.body).filter((body) => /signed out/i.test(body))).toEqual([]);
+    expect(codexTurns(), "the backup did not take the turn").toEqual([]);
 
     rmSync(failureFile);
     const refused = calls("authenticate").map((call) => call.pid);
@@ -104,6 +113,7 @@ it("a sign-in Google cannot confirm for a moment is not a sign-out", async () =>
     const prompted = calls("session/prompt").map((call) => call.pid);
     expect(prompted, "the next turn ran on Antigravity").toHaveLength(1);
     expect(refused, "on a new process").not.toContain(prompted[0]);
+    expect(codexTurns(), "nor the next one").toEqual([]);
     evidence.push({ second: await messages() });
   } finally {
     const evidencePath = `${logPath}.antigravity-auth-blip.json`;

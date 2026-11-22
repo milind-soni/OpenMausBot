@@ -208,6 +208,8 @@ describe("a sign-in the runtime asks for in the middle of a turn", () => {
     [{ code: -32000, message: "Request failed", data: { details: "Authentication failed: connection refused" } }, false],
     [{ code: -32000, message: "Request failed", data: { reason: "Authentication failed: connection refused" } }, false],
     [{ code: -32000, message: "Request failed", data: { reason: "UNAUTHENTICATED" } }, true],
+    [{ code: -32000, message: "Authentication failed: getaddrinfo ENOTFOUND oauth2.googleapis.com" }, false],
+    [{ code: -32000, message: "Login check failed: getaddrinfo EAI_AGAIN oauth2.googleapis.com" }, false],
   ])("reads the runtime's own words, not the method OpenMausBot called (%j)", (answer, expected) => {
     expect(antigravitySignInError(acpRpcError(answer, "authenticate"))).toBe(expected);
   });
