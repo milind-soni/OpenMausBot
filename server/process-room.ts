@@ -1,6 +1,7 @@
 // A server in a container may hold only so many processes and threads (its cgroup's pids.max); past that every spawn
 // fails with EAGAIN. The gate that holds turns for memory (engine-memory.ts) asks here whether one more engine fits.
 import { readFileSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import { nameBucket, parseReapedChildrenMs, type ProcessRow } from "./perf/process-buckets.ts";
 import { linuxProcessList } from "./perf/process-sampler.ts";
 import { containerLimited, readPids } from "./process-limits.ts";
@@ -10,6 +11,14 @@ import type { ShortageCode } from "./process-shortage.ts";
  * 6 processes with 44 threads (a scripted engine on Node 24, 2026-11-16); a real engine CLI and the commands it runs add
  * to that. */
 export const ENGINE_TASKS = 60;
+/** Grok's engine is a native binary whose async runtime pre-warms a blocking pool of 16 threads before it answers (the count
+ * grok 1.0.x names when that fails, "blocking pool pre-warm stalled after 14 of 16 threads") and runs a worker thread per
+ * CPU; counted on top of the generic estimate, not measured. */
+const GROK_RUNTIME_THREADS = 16;
+
+/** What one engine of `driverKind` holds against pids.max while it works. */
+export const engineTasks = (driverKind: string, cpus: number = availableParallelism()): number =>
+  driverKind === "grokAgent" ? ENGINE_TASKS + GROK_RUNTIME_THREADS + cpus : ENGINE_TASKS;
 /** One more session in an engine process that is already running: its tool servers. */
 export const SESSION_TASKS = 40;
 /** One bot's browser: 13 processes with 163 threads (agent-browser 0.37.0 and Chromium 156 on one page, 2026-11-16). */

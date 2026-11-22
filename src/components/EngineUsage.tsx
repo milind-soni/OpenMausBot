@@ -127,7 +127,7 @@ export function UsageRows({ limit }: { limit: EngineLimit }) {
   const [checking, setChecking] = useState(false);
   const { dispatch } = useStore();
   const now = Date.now();
-  const checkedAt = limitsCheckedAt();
+  const checkedAt = limit.checkedAt ?? limitsCheckedAt();
   return (
     <div data-usage-rows className="flex flex-col gap-2.5">
       <div className="flex items-baseline justify-between gap-3">

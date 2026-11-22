@@ -47,6 +47,14 @@ describe("ready-made bots gallery", () => {
     expect(host.textContent).toContain("Includes a paused routine");
   });
 
+  it("says on each card of the checked-work pair which bot it works with", () => {
+    render();
+    const card = (id: string) => host.querySelector(`[data-ready-bot="${id}"]`)!.textContent;
+    expect(card("editor")).toContain("Pairs with Vera, Checker");
+    expect(card("checker")).toContain("Pairs with Nib, Writer and editor");
+    expect(card("writer")).not.toContain("Pairs with");
+  });
+
   it("narrows to a category and back to all", () => {
     render();
     flushSync(() => button("Design").click());

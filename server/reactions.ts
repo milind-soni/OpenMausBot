@@ -136,6 +136,14 @@ export function createReactions(deps: ReactionDeps) {
     try {
       const delivery = await deliver(auth, threadId, message, owner, entry, sent);
       withdrawPrevious();
+      if (delivery === "queued") {
+        const current = latest().reactions?.find((reaction) => reaction.by === reactor.by);
+        // Clearing or replacing the reaction may have reached the queue before this answer did.
+        if (!current || current.at !== entry.at || current.emoji !== entry.emoji) {
+          deps.withdraw(threadId, owner, sent.sendId(entry));
+          return { message: latest(), delivery: "none" };
+        }
+      }
       return { message: latest(), delivery };
     } catch (error) {
       const current = latest().reactions?.find((reaction) => reaction.by === reactor.by);

@@ -21,12 +21,12 @@ import { CloudScreenPreview } from "./CloudScreenPreview"; import { ResetCloudCo
 import { isActiveTurnRefusal, isRemoteScreenshotContention } from "@/lib/remote-desktop";
 import { CloudBackendPicker } from "./CloudBackendPicker";
 import { SimpleVpsChoices } from "./SimpleVpsChoices";
-import { placeManagedBy, worksOnChoices, WorksOnGrid, worksOnSelected } from "./WorksOnGrid";
+import { placeManagedBy, worksOnChoices, WorksOnGrid, worksOnHintKey, worksOnSelected } from "./WorksOnGrid";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { RoutinesSection } from "./bot-settings/RoutinesSection";
 import { routineRunLabel, routineRunTone } from "@/lib/routine-display";
 import { AndroidDevicePanel, useAndroidUsbDevices } from "./AndroidDevicePanel";
-import { BrowserPanel } from "./BrowserPanel";
+import { BrowserPanel, type BrowserSignIn } from "./BrowserPanel";
 import { usePanelPage, type PanelPage } from "@/lib/page-open";
 const DataPanel = lazy(() => import("./data/DataPanel").then((module) => ({ default: module.DataPanel })));
 const loadLiveDesktop = () => import("./LiveDesktop").then((module) => ({ default: module.LiveDesktop }));
@@ -322,17 +322,17 @@ export function ComputerPanel({
   }, [bot.id, dispatch, requestedDataResult]);
 
   const requestedSignIn = state.signInFocus?.botId === bot.id ? state.signInFocus : undefined;
-  const [signInRequest, setSignInRequest] = useState<{ url: string; site: string; nonce: number }>();
+  const [signInRequest, setSignInRequest] = useState<BrowserSignIn>();
+  const takeControlNow = useRef<(expand?: boolean) => Promise<void>>(async () => undefined);
   // A published page's Open (usePageOpener): this bot's browser shows, with the page in a new tab.
   const [pageRequest, setPageRequest] = useState<PanelPage>();
   usePanelPage(bot.id, (page) => { selectPanelView("browser"); setPageRequest(page); });
   useEffect(() => {
     if (!requestedSignIn || requestedSignIn.consumed) return;
     const view = requestedSignIn.place === "browser" ? "browser" : "computer";
-    explicitPanelView.current = true;
-    setPanelView(view);
-    writeComputerPanelView(bot.id, view);
-    if (view === "browser") setSignInRequest({ url: requestedSignIn.url, site: requestedSignIn.site, nonce: requestedSignIn.requestId });
+    explicitPanelView.current = true; setPanelView(view); writeComputerPanelView(bot.id, view);
+    if (view === "browser") setSignInRequest({ url: requestedSignIn.url, site: requestedSignIn.site, nonce: requestedSignIn.requestId, ...(requestedSignIn.expand ? { expand: true } : {}) });
+    else if (requestedSignIn.expand) queueMicrotask(() => void takeControlNow.current(true));
     dispatch({ type: "signInFocusConsumed", requestId: requestedSignIn.requestId });
   }, [bot.id, dispatch, requestedSignIn]);
 
@@ -899,7 +899,7 @@ export function ComputerPanel({
       setControlPending(false);
     }
   };
-
+  takeControlNow.current = takeControl;
   const handBack = async () => {
     setError(null);
     void window.ogb?.desktopViewer?.close(bot.id);
@@ -1316,7 +1316,7 @@ export function ComputerPanel({
           {liveHere && liveTarget ? (
             <Suspense fallback={<Loader2 size={18} className="animate-spin text-ink-secondary" />}>
               <LiveDesktop
-                target={liveTarget} threadId={bot.threadId} name={bot.name} poster={frameSrc}
+                target={liveTarget} threadId={bot.threadId} name={bot.name} poster={frameSrc} botId={bot.id}
                 expanded={takeover.expanded} onExpandedChange={takeover.setExpanded}
                 onHandBack={() => void handBack()} handingBack={takeover.handingBack}
                 onUnreachable={() => { takeover.leave(); setError(new LocalizedPanelError("computer.err.openDesktop")); }}
@@ -1671,7 +1671,7 @@ export function ComputerPanel({
           <div className="mt-4 rounded-xl bg-card p-4">
             <div className="text-[15px] font-medium text-ink">{t("computer.worksOn")}</div>
             <p className="mt-1 text-[12px] leading-5 text-ink-secondary">
-              {t(state.config?.cloudHome ? "computer.worksOnHintCloudHome" : "computer.worksOnHint")}
+              {t(worksOnHintKey(state.config, capabilities))}
             </p>
           <WorksOnGrid options={placeOptions} onSelect={selectPlace} />
           {livePin && (

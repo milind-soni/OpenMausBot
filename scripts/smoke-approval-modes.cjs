@@ -357,6 +357,7 @@ app.whenReady().then(async () => {
   }
   const questionBot = (await api("/api/bots", "POST", { modelSelection: { instanceId: "agy-question", model: "gemini-3.8-flash-high" } })).body.bot;
   await coordinator.request(child, questionBot.id, "full");
+  await until(async () => (await api("/api/bots?messages=0")).body.bots.every((bot) => !bot.busy));
   assert.equal((await api(`/api/bots/${questionBot.id}/messages`, "POST", { text: "Ask me a question under Full" })).status, 202);
   const question = await until(async () => pendingCard((await api("/api/bots")).body.bots.find((bot) => bot.id === questionBot.id)));
   assert.deepEqual(question.options, ["Blue", "Green"]);

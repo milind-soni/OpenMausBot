@@ -9,6 +9,7 @@ const withDictation = (dictation: DesktopCapabilities["dictation"]): DesktopCapa
   ({ ...initialDesktopCapabilities(), dictation });
 const FISH = { available: true, engine: "fish-audio", onDevice: false } as const;
 const APPLE = { available: true, engine: "apple-speech", onDevice: true } as const;
+const WINDOWS = { available: true, engine: "windows-speech", onDevice: true } as const;
 const savedFish = { savedKeys: { fishAudioKey: { configured: true } } } as unknown as ConfigStatus;
 
 afterEach(() => {
@@ -33,6 +34,31 @@ describe("speechBridge", () => {
   it("is nothing in a browser", () => {
     vi.stubGlobal("window", {});
     expect(speechBridge(null)).toBeUndefined();
+  });
+});
+
+describe("Windows dictation", () => {
+  it("listens on the computer through the desktop app's helper when no key is saved", () => {
+    const ogb = { speechStart: vi.fn() };
+    vi.stubGlobal("window", { ogb });
+    cacheDesktopCapabilities(withDictation(WINDOWS));
+    expect(missingListenKey(withDictation(WINDOWS), null)).toBeNull();
+    expect(listensHere(withDictation(WINDOWS), null)).toBe(true);
+    expect(speechBridge(null)).toBe(ogb);
+    expect(recordsClips(speechBridge(null))).toBe(false);
+  });
+
+  it("keeps hearing through a saved Fish Audio key, as before", () => {
+    vi.stubGlobal("window", { ogb: { speechStart: vi.fn() } });
+    cacheDesktopCapabilities(withDictation(WINDOWS));
+    expect(listensHere(withDictation(WINDOWS), savedFish)).toBe(true);
+    expect(speechBridge(savedFish)).toBe(fishSpeech);
+  });
+
+  it("still asks for the DeepSeek key while DeepSeek is the voice", () => {
+    const deepseekVoice = { tts: { provider: "deepseek" } } as unknown as ConfigStatus;
+    expect(missingListenKey(withDictation(WINDOWS), deepseekVoice)).toBe("deepseek");
+    expect(listensHere(withDictation(WINDOWS), deepseekVoice)).toBe(false);
   });
 });
 

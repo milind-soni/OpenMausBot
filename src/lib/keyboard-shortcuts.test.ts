@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   botCycleStep,
   filterShortcutGroups,
+  isDictationToggle,
   isSidebarToggle,
   SHORTCUT_GROUPS,
   shortcutGroupsFor,
@@ -177,5 +178,45 @@ describe("botCycleStep", () => {
   it("ignores other keys", () => {
     expect(botCycleStep({ key: "+" })).toBeNull();
     expect(botCycleStep({ key: "1" })).toBeNull();
+  });
+
+  describe("isDictationToggle", () => {
+    const key = (init: Partial<KeyboardEvent>) => ({
+      key: "d", code: "KeyD", metaKey: false, ctrlKey: false, shiftKey: false, altKey: false,
+      defaultPrevented: false, isComposing: false, ...init,
+    });
+
+    it("is ⌘D on macOS and Ctrl+D elsewhere", () => {
+      expect(isDictationToggle(key({ metaKey: true }), true)).toBe(true);
+      expect(isDictationToggle(key({ ctrlKey: true }), false)).toBe(true);
+      expect(isDictationToggle(key({ key: "D", metaKey: true }), true)).toBe(true);
+    });
+
+    it("leaves Ctrl+D on macOS to the text field and the Windows key alone elsewhere", () => {
+      expect(isDictationToggle(key({ ctrlKey: true }), true)).toBe(false);
+      expect(isDictationToggle(key({ metaKey: true }), false)).toBe(false);
+      expect(isDictationToggle(key({ metaKey: true, ctrlKey: true }), true)).toBe(false);
+    });
+
+    it("ignores Shift, Option/Alt, plain D, input-method composition and handled keys", () => {
+      expect(isDictationToggle(key({}), true)).toBe(false);
+      expect(isDictationToggle(key({ metaKey: true, shiftKey: true }), true)).toBe(false);
+      expect(isDictationToggle(key({ ctrlKey: true, altKey: true }), false)).toBe(false);
+      expect(isDictationToggle(key({ metaKey: true, isComposing: true }), true)).toBe(false);
+      expect(isDictationToggle(key({ metaKey: true, defaultPrevented: true }), true)).toBe(false);
+    });
+
+    it("uses the physical key only when the layout types no Latin letter there", () => {
+      expect(isDictationToggle(key({ key: "в", metaKey: true }), true)).toBe(true);
+      expect(isDictationToggle(key({ key: "e", metaKey: true }), true)).toBe(false);
+      expect(isDictationToggle(key({ key: "d", code: "KeyH", metaKey: true }), true)).toBe(true);
+    });
+
+    it("is listed in the shortcuts sheet", () => {
+      const item = SHORTCUT_GROUPS.flatMap((group) => group.items).find((entry) => entry.id === "dictation-toggle")!;
+      expect(shortcutKeysForPlatform(item, true)).toEqual(["⌘", "D"]);
+      expect(shortcutKeysForPlatform(item, false)).toEqual(["Ctrl", "D"]);
+      expect(shortcutDescription(item)).toBe("Start or stop dictation");
+    });
   });
 });

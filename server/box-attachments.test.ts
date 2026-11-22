@@ -20,7 +20,7 @@ describe("attachmentsForBox", () => {
     mkdirSync(cwd, { recursive: true });
   });
   afterEach(() => rmSync(root, { recursive: true, force: true }));
-  const run = (text: string, at: string | undefined = cwd, boxed = true) => attachmentsForBox(text, at, boxed, dataDir, uploads);
+  const run = (text: string, at: string | undefined = cwd, boxed = true) => attachmentsForBox(text, at, undefined, boxed, dataDir, uploads);
 
   it("puts each upload in the conversation's read-only uploads folder and points the engine there", () => {
     const upload = join(uploads, "1f0c2a.md");
@@ -60,7 +60,7 @@ describe("attachmentsForBox", () => {
     const dir = join(root, "a&b", "attachments");
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "x.md"), "x");
-    const out = attachmentsForBox(`<attached-file path="${join(root, "a&amp;b", "attachments", "x.md")}" name="x.md" />`, cwd, true, dataDir, dir);
+    const out = attachmentsForBox(`<attached-file path="${join(root, "a&amp;b", "attachments", "x.md")}" name="x.md" />`, cwd, undefined, true, dataDir, dir);
     expect(out).toBe(`<attached-file path="${join(shown, "x.md")}" name="x.md" />`);
   });
 
@@ -78,7 +78,7 @@ describe("attachmentsForBox", () => {
     writeFileSync(upload, "x");
     const text = `<attached-file path="${upload}" name="a.md" />`;
     expect(run(text, cwd, false)).toBe(text);
-    expect(attachmentsForBox(text, undefined, true, dataDir, uploads)).toBe(text);
+    expect(attachmentsForBox(text, undefined, undefined, true, dataDir, uploads)).toBe(text);
     expect(run(text, join(dataDir, "workspaces", "bot"))).toBe(text);
     expect(existsSync(shown)).toBe(false);
   });
@@ -103,5 +103,27 @@ describe("attachmentsForBox", () => {
     expect(plan.mounts[at]).toEqual({ kind: "ro", source: shown, target: shown, optional: true });
     expect(at).toBeGreaterThan(targets(cwd).indexOf(cwd));
     expect(targets(join(dataDir, "task-workspaces", "bot", "other"))).not.toContain(shown);
+  });
+
+  it("gives a turn in its bot's own folder (a room's) its own conversation's uploads, and no other's", () => {
+    const own = join(dataDir, "workspaces", "bot"), room = boxUploadsDir(dataDir, "bot", "room");
+    mkdirSync(own, { recursive: true });
+    const upload = join(uploads, "r1.md");
+    writeFileSync(upload, "room notes");
+    const text = `<attached-file path="${upload}" name="r1.md" />`;
+
+    expect(attachmentsForBox(text, own, { botId: "bot", threadId: "room" }, true, dataDir, uploads)).toBe(`<attached-file path="${join(room, "r1.md")}" name="r1.md" />`);
+    expect(readFileSync(join(room, "r1.md"), "utf8")).toBe("room notes");
+    expect(attachmentsForBox(text, join(dataDir, "workspaces", "other"), { botId: "bot", threadId: "room" }, true, dataDir, uploads)).toBe(text);
+
+    const setup = { dataDir, home: root, codeRoots: [], engineRoots: [], bridges: [] };
+    const mounts = (more: object) => planBox(setup, { command: "/usr/bin/true", args: [], cwd: own, env: {}, botId: "bot", conversationFolder: join(dataDir, "task-workspaces", "bot", "room"), ...more }).mounts;
+    expect(mounts({})).toContainEqual({ kind: "ro", source: room, target: room, optional: true });
+    expect(mounts({}).map((mount) => ("target" in mount ? mount.target : null))).not.toContain(shown);
+    // A process started for several conversations there serves only this one (procs.ts sharedBoxScope), so it gets the
+    // same, never every conversation's; a box of another bot gets none.
+    expect(mounts({ botThreads: true })).toContainEqual({ kind: "ro", source: room, target: room, optional: true });
+    expect(mounts({ botThreads: true })).not.toContainEqual(expect.objectContaining({ target: join(dataDir, "box-uploads", "bot") }));
+    expect(mounts({ botId: "other" })).not.toContainEqual(expect.objectContaining({ target: room }));
   });
 });
