@@ -135,7 +135,13 @@ function Gallery() {
 const realFetch = window.fetch.bind(window);
 window.fetch = async (input, init) => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  if (!new URL(url, location.href).pathname.startsWith("/api/")) return realFetch(input, init);
+  const { pathname } = new URL(url, location.href);
+  if (!pathname.startsWith("/api/")) return realFetch(input, init);
+  const threadId = /^\/api\/threads\/([^/]+)\/messages$/.exec(pathname)?.[1];
+  if (threadId) {
+    const owner = bots(stateName).find(candidate => candidate.threadId === threadId);
+    return Response.json({ messages: owner?.messages ?? [], hasMore: false });
+  }
   return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
 };
 setTeamPeople({ people: [{ ...CLEO, you: true }, { email: "ben@acme.test", name: "Ben", role: "member" }], me: { ...CLEO, you: true }, admin: true, needsYou: [] });

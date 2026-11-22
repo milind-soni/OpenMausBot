@@ -74,7 +74,13 @@ function Gallery() {
 const realFetch = window.fetch.bind(window);
 window.fetch = async (input, init) => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  if (!new URL(url, location.href).pathname.startsWith("/api/")) return realFetch(input, init);
+  const { pathname } = new URL(url, location.href);
+  if (!pathname.startsWith("/api/")) return realFetch(input, init);
+  const threadId = /^\/api\/threads\/([^/]+)\/messages$/.exec(pathname)?.[1];
+  if (threadId) {
+    const owner = bot.threadId === threadId ? bot : undefined;
+    return Response.json({ messages: owner?.messages ?? [], hasMore: false });
+  }
   return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
 };
 const blocked = "embedded host failed: Spawn: binaryPath C:\\Users\\you\\AppData\\Local\\Programs\\OpenMausBot\\resources\\cua-driver-background.exe; reason Operation did not complete successfully because the file contains a virus or potentially unwanted software. (os error 225)";
