@@ -49,14 +49,10 @@ const CAPACITY_WAIT_MS = 30_000;
  * (chrome/launch.ts). On a busy or CPU-capped computer the first tab can take longer than 15 s, and refusing it then only
  * made the bot start Chrome again from nothing. */
 const FIRST_TAB_MS = 60_000;
-/** What a call's budget keeps back from the first-tab wait, so a start that fails says "could not start" within the
- * budget instead of ending as a lost call. */
-const FIRST_TAB_MARGIN_MS = 15_000;
-/** The least a first tab is given, however little of the budget is left. */
-const FIRST_TAB_MIN_MS = 5_000;
-/** How long a first tab may take for a call due back by `deadline`: FIRST_TAB_MS, less when the call's budget ends sooner. */
-export const firstTabWait = (deadline: number | undefined, now = Date.now()): number =>
-  deadline === undefined ? FIRST_TAB_MS : Math.max(FIRST_TAB_MIN_MS, Math.min(FIRST_TAB_MS, deadline - now - FIRST_TAB_MARGIN_MS));
+/** What a bot's call keeps back from its budget while the browser starts: the call answers "still starting" by then, so
+ * it never ends as a lost call, and the start carries on for its next call. */
+const STARTING_MARGIN_MS = 15_000;
+export const BROWSER_STARTING = "The browser is still starting (this computer is busy), so this call did not run. Call again in a moment: the next call uses the same browser once it is up.";
 const SERVER_TAB_LIMIT = 32;
 const PROFILE_TAB_LIMIT = 8;
 
@@ -193,22 +189,22 @@ export class BrowserService {
   // Browsers.
 
   /** The profile's running browser, started if it is not. */
-  running(profile: ProfileState, deadline?: number): Promise<Running> {
+  running(profile: ProfileState): Promise<Running> {
     if (profile.run && !profile.run.closing && profile.run.browser.connected) return Promise.resolve(profile.run);
     if (profile.starting) return profile.starting;
     const epoch = profile.epoch;
     const starting = (async () => {
       for (let stopping = profile.stopping; stopping; stopping = profile.stopping) await stopping;
-      return this.#start(profile, epoch, deadline);
+      return this.#start(profile, epoch);
     })().finally(() => { if (profile.starting === starting) profile.starting = null; });
     profile.starting = starting;
     return starting;
   }
 
-  async #start(profile: ProfileState, epoch: number, deadline?: number): Promise<Running> {
+  async #start(profile: ProfileState, epoch: number): Promise<Running> {
     await this.#capacity(profile, epoch);
     this.#stillWanted(profile, epoch);
-    const opening = this.#open(profile, epoch, deadline);
+    const opening = this.#open(profile, epoch);
     profile.opening = opening;
     try {
       return await opening;
@@ -221,7 +217,7 @@ export class BrowserService {
     if (profile.epoch !== epoch || this.#profiles.get(profile.key) !== profile) throw new Error("The browser was closed while it was starting.");
   }
 
-  async #open(profile: ProfileState, epoch: number, deadline?: number): Promise<Running> {
+  async #open(profile: ProfileState, epoch: number): Promise<Running> {
     const fresh = profile.fresh;
     profile.fresh = false;
     rmSync(profile.downloadDir, { recursive: true, force: true });
@@ -269,7 +265,7 @@ export class BrowserService {
     try {
       this.#stillWanted(profile, epoch);
       // A Chrome that dies before any tab runs says so at once, not when the wait ends.
-      const firstTab = browser.waitForPage(() => true, firstTabWait(deadline));
+      const firstTab = browser.waitForPage(() => true, FIRST_TAB_MS);
       const died = opened.exited.then(() => { throw new Error("Chrome closed before its first tab opened."); });
       firstTab.catch(() => undefined);
       died.catch(() => undefined);
@@ -509,7 +505,9 @@ export class BrowserService {
     if (!parsed.ok) return errorResult(parsed.error);
     let run: Running;
     try {
-      run = await this.running(profile, deadline);
+      const started = await this.#startedBy(profile, deadline);
+      if (started === null) return errorResult(BROWSER_STARTING);
+      run = started;
     } catch (error) {
       return errorResult(`The browser could not start: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -535,6 +533,21 @@ export class BrowserService {
       return withParts(failure, this.#options.egressNotice?.(profile.key));
     } finally {
       if (control.call === parsed.call.name) control.call = null;
+    }
+  }
+
+  /** The running browser, or null when it is still starting as the call's budget nears its end. The start is shared and
+   * carries on; nothing is latched, so the next call takes the same browser. */
+  async #startedBy(profile: ProfileState, deadline: number): Promise<Running | null> {
+    const starting = this.running(profile);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), Math.max(0, deadline - Date.now() - STARTING_MARGIN_MS)); timer.unref?.(); });
+    try {
+      const outcome = await Promise.race([starting, late]);
+      if (outcome === null) starting.catch(() => undefined);
+      return outcome;
+    } finally {
+      clearTimeout(timer);
     }
   }
 

@@ -7,7 +7,7 @@ import { removeTempDir } from "../testing/cleanup.ts";
 import { forbiddenCommand } from "./cdp/testing/real-chrome.ts";
 import { BROWSER_CONTROL_REFUSAL } from "./control.ts";
 import { REDDIT_REFUSAL } from "./egress/reddit.ts";
-import { BrowserService, type BrowserServiceOptions } from "./service.ts";
+import { BROWSER_STARTING, BrowserService, type BrowserServiceOptions } from "./service.ts";
 import type { Backend } from "./backends.ts";
 import { FakeBackend, FakeChrome, type FakeDocument, type FakePage } from "./testing/fake-chrome.ts";
 import { TOOL_LIST } from "./tools.ts";
@@ -502,20 +502,32 @@ describe("browsers on one computer", () => {
     }
   });
 
-  it("keeps a first tab's wait inside the call's budget, so a start that fails says why instead of ending as a lost call", async () => {
+  it("never tears down a start that outlasts a call's budget: the bot hears it is still starting, and its next call takes that browser", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     try {
+      let ready = false;
       const slow = new FakeBackend(() => {
         const chrome = new FakeChrome({ documents });
-        chrome.delay = (method) => (method === "Page.enable" ? 600_000 : 0);
+        // The first tab runs 20 s in; later tabs at once.
+        chrome.delay = (method) => (method === "Page.enable" && !ready ? (ready = true, 20_000) : 0);
         return chrome;
       });
       backends.push(slow);
-      const { call, text } = setup({ backend: () => slow, callBudgetMs: 40_000 });
-      let result: Awaited<ReturnType<typeof call>> | null = null;
-      void call("agent_browser_open", { url: "https://example.com/form" }).then((answer) => { result = answer; });
-      for (let waited = 0; result === null && waited < 120_000; waited += 1_000) await vi.advanceTimersByTimeAsync(1_000);
-      expect(text(result!)).toContain("The browser could not start: No matching tab opened within 25000 ms.");
+      const { call, text } = setup({ backend: () => slow, callBudgetMs: 30_000 });
+      const answer = async (name: string, args: Record<string, unknown>) => {
+        let result: Awaited<ReturnType<typeof call>> | null = null;
+        void call(name, args).then((value) => { result = value; });
+        for (let waited = 0; result === null && waited < 120_000; waited += 1_000) await vi.advanceTimersByTimeAsync(1_000);
+        return result!;
+      };
+      const first = await answer("agent_browser_open", { url: "https://example.com/form" });
+      // 30 s budget, 15 s kept back: the call answers at 15 s, while the first tab runs at 20 s.
+      expect(first).toMatchObject({ isError: true });
+      expect(text(first)).toBe(BROWSER_STARTING);
+      const next = await answer("agent_browser_open", { url: "https://example.com/swap" });
+      expect(next.isError).toBeUndefined();
+      expect(text(next)).toContain("Opened https://example.com/swap");
+      expect(slow.chromes, "one Chrome, never torn down and started again").toHaveLength(1);
     } finally {
       vi.useRealTimers();
     }
