@@ -216,6 +216,7 @@ export const SRC_OUTSIDE_RENDERER = [
   "src/lib/peer-message.ts",
   "src/lib/random-uuid.ts",
   "src/lib/receipts.ts",
+  "src/lib/relay-server.ts",
 ];
 
 export const DOCS = /^(?:[^/]+\.md|docs\/.+\.md|\.github\/FUNDING\.yml)$/;

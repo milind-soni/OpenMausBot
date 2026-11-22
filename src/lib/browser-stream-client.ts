@@ -4,6 +4,7 @@
 // reconnect opens with the newest size and cap, and OpenMausBot's own messages are passed on.
 
 import { t } from "./i18n";
+import { serverFetch } from "./relay-server";
 
 /** Refusals before open a client that was connected takes as its server restarting: about 45 s with the backoff. */
 const RESTART_RETRIES = 8;
@@ -190,7 +191,7 @@ export async function uploadPreviewStreamFiles(
 ): Promise<void> {
   const body = new FormData();
   for (const file of files) body.append("file", file, file.name ?? "file");
-  const response = await fetch(chooser.uploadUrl, {
+  const response = await serverFetch(chooser.uploadUrl, {
     method: "POST",
     body,
     credentials: chooser.credentials ? "include" : "omit",

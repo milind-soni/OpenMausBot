@@ -1,40 +1,68 @@
 // The page's way to its own server's `/api` routes: through MausBot Relay while it holds a relay pairing (a phone
 // browser away from home, src/lib/e2e/relay-link.ts), as a plain same-origin request otherwise.
-import type { RelayLink } from "./e2e/relay-link";
-import type { LiveEventSourceLike } from "./live-events";
+// It imports nothing: server code type-checks src/lib/composer-attachments.ts, whose uploads come through here, and
+// must not take in the browser's relay crypto (e2e/) or the live events store with it.
 
-let link: RelayLink | null = null;
+/** What this file uses of a RelayLink (src/lib/e2e/relay-link.ts). */
+export interface ServerLink {
+  fetch(path: string, request?: { method?: string; headers?: Headers | Record<string, string>; body?: Uint8Array | null; signal?: AbortSignal }): Promise<Response>;
+  close(): void;
+}
+
+/** An EventSource as the live events transport uses it (src/lib/live-events.ts): the browser's own, or one through
+ * the relay link. */
+export interface LiveEventSourceLike {
+  onopen: (() => void) | null;
+  onerror: (() => void) | null;
+  onmessage: ((event: { data: string; lastEventId?: string }) => void) | null;
+  close: () => void;
+}
+
+let link: ServerLink | null = null;
 
 /** Sends this page's `/api` requests and live events through `next` from now on; null goes back to plain requests. A link
  * that is replaced is closed. */
-export function setRelayLink(next: RelayLink | null): void {
+export function setRelayLink(next: ServerLink | null): void {
   if (link === next) return;
   link?.close();
   link = next;
 }
 
-export function relayLink(): RelayLink | null {
+export function relayLink(): ServerLink | null {
   return link;
 }
 
 const API = /^\/api(?:[/?#]|$)/;
 
-/** `fetch` for a path on this page's own server. */
-export async function serverFetch(path: string, init: RequestInit = {}): Promise<Response> {
+/** `path` as a request to this page's own `/api` routes: a root path, or an absolute URL on this page's origin (some
+ * links are built from `location`); null for anything else. */
+function ownApiPath(path: string): string | null {
+  if (API.test(path)) return path;
+  const origin = (globalThis as { location?: { origin?: string } }).location?.origin;
+  if (!origin || !path.startsWith(`${origin}/`)) return null;
+  const url = new URL(path);
+  return url.origin === origin && API.test(url.pathname) ? url.pathname + url.search : null;
+}
+
+/** `fetch` for a path on this page's own server. Over the relay, `keepalive` does not apply: the link lives in this page
+ * and ends with it. */
+export async function serverFetch(path: string, init?: RequestInit): Promise<Response> {
   const current = link;
-  if (!current || !API.test(path)) return fetch(path, init);
+  const own = current ? ownApiPath(path) : null;
+  // Called as the caller called it: with no options when it gave none.
+  if (!current || own === null) return init ? fetch(path, init) : fetch(path);
   // A Request turns any body fetch takes (FormData, Blob, URLSearchParams…) into bytes and gives it its content type.
-  const request = new Request(new URL(path, "http://relay.invalid"), { ...init, signal: undefined });
+  const request = new Request(new URL(own, "http://relay.invalid"), { ...init, signal: undefined });
   const body = request.method === "GET" || request.method === "HEAD" ? null : new Uint8Array(await request.arrayBuffer());
   // The normalized target: spaces and other unsafe characters encoded, any fragment left out.
   const { pathname, search } = new URL(request.url);
-  return current.fetch(pathname + search, { method: request.method, headers: request.headers, body, signal: init.signal ?? undefined });
+  return current.fetch(pathname + search, { method: request.method, headers: request.headers, body, signal: init?.signal ?? undefined });
 }
 
 /** An EventSource on `url` through `current`, as the live events transport uses it (src/lib/live-events.ts): `onerror`
  * once, when the stream can't open or ends, and the caller reconnects. Like EventSource, only unnamed and `message`
  * events reach `onmessage`. */
-export function relayEventSource(current: RelayLink, url: string): LiveEventSourceLike {
+export function relayEventSource(current: ServerLink, url: string): LiveEventSourceLike {
   const stop = new AbortController();
   const source: LiveEventSourceLike = { onopen: null, onerror: null, onmessage: null, close: () => stop.abort() };
   void (async () => {

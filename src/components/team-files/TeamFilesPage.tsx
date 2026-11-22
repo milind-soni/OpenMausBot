@@ -9,6 +9,7 @@ import type { LocaleKey } from "@/locales";
 import { api, ApiError } from "@/state/api";
 import { useStore } from "@/state/store";
 import { TOOL_PAGE_TITLE, ToolPage, ToolPageActions, ToolPageHeader } from "../ToolPageShell";
+import { serverFetch } from "@/lib/relay-server";
 
 // Team files: the Team Cloud's one shared folder (server/routes/team-files.ts), for every teammate and bot. A folder list
 // with breadcrumbs, upload by button or drop, new folder, download, rename, delete (an admin anything, a member what they
@@ -57,7 +58,7 @@ export function refusalText(error: unknown, limits: { uploadMax: number; cap: nu
 
 /** One file up, the bytes as the request body. */
 async function uploadFile(folder: string, file: File): Promise<void> {
-  const res = await fetch(`${BASE}/file?path=${encodeURIComponent(folder)}&name=${encodeURIComponent(file.name)}`, {
+  const res = await serverFetch(`${BASE}/file?path=${encodeURIComponent(folder)}&name=${encodeURIComponent(file.name)}`, {
     method: "PUT", body: file, headers: { "content-type": "application/octet-stream" },
   });
   if (!res.ok) throw new ApiError(`${res.status}`, res.status, await res.json().catch(() => ({})));
@@ -136,7 +137,7 @@ export function TeamFilesPage() {
     if (kind !== "text") { setPreview({ entry }); return; }
     if (entry.size > PREVIEW_MAX_BYTES) { setPreview({ entry, tooLarge: true }); return; }
     try {
-      const res = await fetch(fileUrl(entry.path));
+      const res = await serverFetch(fileUrl(entry.path));
       setPreview({ entry, text: res.ok ? await res.text() : "" });
     } catch {
       setPreview({ entry, text: "" });

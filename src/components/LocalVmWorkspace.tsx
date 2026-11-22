@@ -37,6 +37,7 @@ import { Select } from "./Select";
 import { productName } from "@/lib/brand";
 import { randomUuid } from "@/lib/random-uuid";
 import { useNativeViewObscured } from "@/lib/native-view-obscured";
+import { serverFetch } from "@/lib/relay-server";
 
 const SLOT_CONTEXTS = ["local-vm-workspace:left", "local-vm-workspace:right"] as const;
 
@@ -81,7 +82,7 @@ async function readComputerControl(botId: string): Promise<LocalVmWorkspaceContr
 }
 
 function bestEffortRelease(botId: string, controlLeaseId: string) {
-  void fetch(`/api/bots/${botId}/computer/control`, {
+  void serverFetch(`/api/bots/${botId}/computer/control`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ action: "release", controlLeaseId }),
