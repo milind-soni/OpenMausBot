@@ -461,7 +461,7 @@ export interface InstanceInfo extends InstanceEndpointInfo {
   cliDefault?: string;
   cliCandidates?: string[];
   claudeAccount?: { configDir: string; signInCommand: string; signInShell: "powershell" | "sh"; isDefault: boolean };
-  freeUpSpace?: boolean; replyWaitMinutes?: number; modelsUnconfirmed?: true; /** The app updated its own copy of this engine to this version lately. */ autoUpdated?: { version: string; at: number };
+  freeUpSpace?: boolean; replyWaitMinutes?: number; modelsUnconfirmed?: true; /** Why the engine's last read of its list failed. */ modelsUnreadable?: "signedOut" | "timedOut" | "failed"; /** The app updated its own copy of this engine to this version lately. */ autoUpdated?: { version: string; at: number };
 }
 
 /** A Settings page (`SettingsPageId`) or an older page name that `settings-index.ts` sends to its new page and section. */
@@ -550,7 +550,7 @@ export interface AppState {
   dataSheets: Record<string, DataSheet>;
   dataTables: Record<string, DataTable[]>;
   dataResultFocus: { botId: string; id: string; requestId: number; consumed: boolean } | null;
-  signInFocus: { botId: string; messageId: string; url: string; site: string; place: import("../../shared/wire").Surface; requestId: number; consumed: boolean } | null;
+  signInFocus: { botId: string; messageId: string; url: string; site: string; place: import("../../shared/wire").Surface; expand?: boolean; threadId?: string; requestId: number; consumed: boolean } | null;
   dataView: import("@/lib/composer-attachments").DataViewContext | null;
   focusMessage: { threadId: string; messageId: string; matchText?: string; nonce: number; consumed: boolean } | null;
   unreadDivider: UnreadDivider | null;
@@ -735,7 +735,7 @@ export type Action =
   | { type: "toggleComputer"; open?: boolean; botId?: string }
   | { type: "openDataResult"; botId: string; cardId: string }
   | { type: "dataResultFocusConsumed"; requestId: number }
-  | { type: "openSignIn"; botId: string; messageId: string; url: string; site: string; place: import("../../shared/wire").Surface }
+  | { type: "openSignIn"; botId: string; messageId: string; url: string; site: string; place: import("../../shared/wire").Surface; expand?: boolean; threadId?: string }
   | { type: "signInFocusConsumed"; requestId: number }
   | { type: "toggleInspector"; open?: boolean }
   | { type: "toggleActivity"; open?: boolean }

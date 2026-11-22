@@ -25,6 +25,10 @@ export class FakeMain implements PanePort {
   readonly partitions: string[] = [];
   readonly egress: number[] = [];
   readonly downloadDirs: string[] = [];
+  /** What the app wrote into each partition, as its cookies.set would. */
+  readonly cookiesSet: Array<{ partition: string; cookies: unknown[] }> = [];
+  /** Answers the server sent to the person's import requests. */
+  readonly answers: Array<Record<string, unknown>> = [];
   /** No app window: opening answers that none can host a pane. */
   noWindow = false;
   /** Milliseconds before an open is answered. */
@@ -51,7 +55,8 @@ export class FakeMain implements PanePort {
 
   postMessage(message: object): void {
     const parsed = paneMessageToMain(message);
-    if (!parsed) throw new Error(`the server sent a malformed pane message: ${JSON.stringify(message)}`);
+    // Only the op: a message may carry a cookie's value.
+    if (!parsed) throw new Error(`the server sent a malformed pane message: ${String((message as { op?: unknown }).op)}`);
     this.toMain.push(parsed);
     void this.#handle(parsed);
   }
@@ -62,7 +67,7 @@ export class FakeMain implements PanePort {
 
   post(message: Record<string, unknown>): void {
     const data = { type: PANE_MESSAGE, ...message };
-    if (!paneMessageToServer(data)) throw new Error(`the fake main sent a malformed pane message: ${JSON.stringify(data)}`);
+    if (!paneMessageToServer(data)) throw new Error(`the fake main sent a malformed pane message: ${String(message.op)}`);
     queueMicrotask(() => { for (const listener of this.#listeners) listener({ data }); });
   }
 
@@ -128,6 +133,15 @@ export class FakeMain implements PanePort {
       case "close":
         for (const pane of this.panes.values()) if (pane.browser === message.browser) await this.#closeTab(pane.tab, false);
         this.post({ op: "closed", browser: message.browser, reason: "closed by the app" });
+        return;
+      case "set-cookies":
+        this.cookiesSet.push({ partition: message.partition, cookies: message.cookies });
+        this.post({ op: "cookies-set", req: message.req, written: message.cookies.length, refused: 0 });
+        return;
+      case "cookie-sources-result":
+      case "cookie-import-result":
+      case "cookie-offer-result":
+        this.answers.push(message as unknown as Record<string, unknown>);
         return;
       default:
         return;

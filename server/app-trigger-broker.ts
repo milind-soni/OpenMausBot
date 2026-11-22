@@ -114,7 +114,9 @@ export function brokerClient(access: () => BrokerAccess | null, fetchImpl: typeo
       throw new BrokerError(error instanceof Error ? error.message : String(error), 0);
     }
     if (!response.ok) {
-      const retryAfter = Number(response.headers.get("retry-after"));
+      const header = response.headers.get("retry-after") ?? "";
+      const seconds = Number(header);
+      const retryAfter = Number.isFinite(seconds) ? seconds : (Date.parse(header) - Date.now()) / 1000;
       throw new BrokerError(await errorText(response), response.status, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined);
     }
     return response;

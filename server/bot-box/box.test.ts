@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { BotBox, BoxRunner, BOX_EGRESS_PORT, flyApiPrivate, writeSeccompFile } from "./box.ts";
 import { processStart, seesProcess } from "./box-probe.ts";
 import { procHidepid } from "./hidepid.ts";
-import { visibleInBox } from "./plan.ts";
+import { boxUploadsDir, visibleInBox } from "./plan.ts";
 import { DENIED_SYSCALLS, seccompBytes } from "./seccomp.ts";
 import { engineInstallRoots, npmEnginesPrefix } from "../engine-roots.ts";
 import { spawnCli } from "../procs.ts";
@@ -52,6 +52,18 @@ describe("BoxRunner.wrap", () => {
       NO_PROXY: "127.0.0.1,localhost,::1,[::1]", no_proxy: "127.0.0.1,localhost,::1,[::1]",
     });
     expect(wrapped.plan.botId).toBe("b1");
+  });
+
+  it("makes the uploads folder of a turn in its bot's own folder before the box starts, so a later turn's upload shows in a running box", () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "omb-box-uploads-"));
+    try {
+      const runner = new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup: { ...setup, dataDir }, denyEnv: new Set() });
+      runner.wrap({ command: "/usr/local/bin/claude", args: [], cwd: join(dataDir, "workspaces", "b1"), botId: "b1", conversationFolder: join(dataDir, "task-workspaces", "b1", "t1"), env: { PATH: "/usr/bin" } });
+      expect(existsSync(boxUploadsDir(dataDir, "b1", "t1"))).toBe(true);
+      expect(existsSync(boxUploadsDir(dataDir, "b1", "t2"))).toBe(false);
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 
   it("a shared-network box gets no proxy and no bridge", () => {

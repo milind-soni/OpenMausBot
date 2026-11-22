@@ -281,6 +281,29 @@ describe("the brief", () => {
     expect(s.brief.dismissedFrom()).toEqual(["ada@x.test"]);
   });
 
+  it("Dismiss on an earlier day's brief takes the row off today's, with no turn, after a restart too", async () => {
+    const s = setup();
+    await s.brief.active("desktop", "UTC");
+    s.items.set("chk-1", { mail: [ada], prep: [] });
+    await s.brief.consume(s.watchRun("chk-1", '{"important": [{"id": "m1", "why": "Needs a reply.", "needsReply": false}]}'), "turn-1");
+    const yesterday = s.card()!;
+    s.advance(24 * 60 * MINUTE);
+    await s.brief.active("desktop");
+    expect(s.card()!.id).not.toBe(yesterday.id);
+    expect(s.shown()).toContain("Q3 numbers");
+    s.restart();
+    // Sorted again after the restart, so the row is on today's card before the press and only the press takes it off.
+    s.items.set("chk-2", { mail: [ada], prep: [] });
+    await s.brief.consume(s.watchRun("chk-2", '{"important": [{"id": "m1", "why": "Needs a reply.", "needsReply": false}]}'), "turn-1");
+    expect(s.failed).toEqual([]);
+    expect(s.shown()).toContain("Q3 numbers");
+    const dismiss = { type: "dismiss_row", payload: { messageId: "m1" } };
+    expect(s.brief.serverPress(s.chief, s.thread(), yesterday.id, dismiss, guest)).toBe("refused");
+    expect(s.brief.serverPress({ id: "someone-else" }, s.thread(), yesterday.id, dismiss, owner)).toBeNull();
+    expect(s.brief.serverPress(s.chief, s.thread(), yesterday.id, dismiss, owner)).toBe("handled");
+    await vi.waitFor(() => expect(s.shown()).not.toContain("Q3 numbers"));
+  });
+
   it("a Draft a reply press carries the email as records, by its id only", async () => {
     const s = setup();
     await s.brief.active("desktop", "UTC");
@@ -339,5 +362,17 @@ describe("the brief", () => {
     const s = setup({ hosted: true });
     expect(await s.brief.active("desktop", "UTC")).toEqual({ returned: false });
     expect(s.card()).toBeUndefined();
+  });
+
+  it("names Outlook in read trouble and press records for Outlook emails", async () => {
+    const s = setup();
+    await s.brief.active("desktop", "UTC");
+    const outlookEmail: EmailHeader = { id: "o1", threadId: "conv-1", at: s.now() - 5 * MINUTE, from: "Bob <bob@outlook.test>", subject: "Invoice", preview: "Due Friday", app: "outlook" };
+    await s.brief.report({ routine: {} as never, at: s.now(), picked: [{ email: outlookEmail, why: "Due Friday.", needsReply: true }], trouble: [{ app: "outlook", signedOut: true }] });
+    expect(s.shown()).toContain("Couldn't read Outlook");
+    expect(s.shown()).toContain("Reconnect Outlook in Connected apps.");
+    const records = s.brief.pressRecords(s.chief, { type: "draft_reply", payload: { messageId: "o1" } });
+    expect(records).toContain("[Records from Outlook.");
+    expect(records).toContain("Outlook draft");
   });
 });

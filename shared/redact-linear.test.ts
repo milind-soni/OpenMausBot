@@ -7,6 +7,9 @@ import { describe, expect, it } from "vitest";
 import { redactSecretsInText } from "./redact.ts";
 
 const MB = 1_048_576;
+// Random base64url can hold a real key's shape after a dash or underscore (`-sk-…`, `_ghp_…`), which redaction masks by
+// design; with neither character there is no word boundary inside, so no key pattern can start in it.
+const plainBlob = (bytes: number) => randomBytes(bytes).toString("base64url").replace(/[-_]/gu, "x");
 const timed = (text: string) => { const at = performance.now(); const out = redactSecretsInText(text); return { out, ms: performance.now() - at }; };
 
 describe("redactSecretsInText on large text", () => {
@@ -30,7 +33,7 @@ describe("redactSecretsInText on large text", () => {
   }
 
   it("still masks what it masked before, the blob around it unchanged", () => {
-    const blob = randomBytes(300_000).toString("base64url");
+    const blob = plainBlob(300_000);
     const text = `${blob} MY_SERVICE_API_KEY=abcd1234efgh ${blob}`;
     const out = redactSecretsInText(text);
     expect(out).not.toContain("abcd1234efgh");
@@ -67,7 +70,7 @@ describe("redactSecretsInText: names, schemes, JWTs and key blocks of any length
     expect(redactSecretsInText(`x${jwt}`)).toBe(`x${jwt}`);
     expect(redactSecretsInText(`a eyJhhhhhhhh.pppp.ssssssssss b`)).toBe("a eyJhhhhhhhh.pppp.ssssssssss b");
     // In a long run of base64url, after a dash.
-    const blob = randomBytes(50_000).toString("base64url");
+    const blob = plainBlob(50_000);
     expect(redactSecretsInText(`${blob}-${jwt} z`)).toBe(`${blob}-«redacted ${jwt.length} chars» z`);
   });
 

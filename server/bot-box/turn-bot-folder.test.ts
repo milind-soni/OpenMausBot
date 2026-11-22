@@ -13,7 +13,7 @@ import { boxedSpawn, sharedBoxScope } from "../procs.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { ensureTaskWorkspace, workspaceDir } from "../workspace.ts";
 import { botBox, type WrappedSpawn } from "./box.ts";
-import { visibleInBox, type BoxRequest } from "./plan.ts";
+import { boxUploadsDir, visibleInBox, type BoxRequest } from "./plan.ts";
 
 const BOT = "bot-with-project", OTHER = "bot-other";
 const turn = { botId: BOT, threadId: "t1" };
@@ -101,6 +101,19 @@ describe.skipIf(process.platform === "win32")("a turn's box in a configured proj
     const theirs = runInTurn({ botId: OTHER, threadId: "t2" }, () => sharedBoxScope(project));
     expect(mine).not.toBe(theirs);
     expect(runInTurn({ botId: BOT, threadId: "t3" }, () => sharedBoxScope(project))).toBe(mine);
+  });
+
+  it("gives a turn in its bot's own folder (a room's) its own conversation's uploads read-only, and keeps conversations' processes apart", () => {
+    const plan = runInTurn(turn, () => spawnIn(workspaceDir(BOT)));
+    expect(plan.botId).toBe(BOT);
+    expect(visibleInBox(plan, join(boxUploadsDir(DATA_DIR, BOT, "t1"), "notes.md"))).toBe("ro");
+    expect(visibleInBox(plan, join(boxUploadsDir(DATA_DIR, BOT, "t2"), "notes.md"))).toBe("none");
+    const shared = runInTurn(turn, () => spawnIn(workspaceDir(BOT), { botThreads: true }));
+    expect(visibleInBox(shared, join(boxUploadsDir(DATA_DIR, BOT, "t1"), "notes.md"))).toBe("ro");
+    expect(visibleInBox(shared, join(boxUploadsDir(DATA_DIR, BOT, "t2"), "notes.md"))).toBe("none");
+    const first = runInTurn(turn, () => sharedBoxScope(workspaceDir(BOT)));
+    expect(runInTurn({ botId: BOT, threadId: "t2" }, () => sharedBoxScope(workspaceDir(BOT)))).not.toBe(first);
+    expect(runInTurn(turn, () => sharedBoxScope(workspaceDir(BOT)))).toBe(first);
   });
 
   it("keeps the conversation folder out of a process the bot's conversations share", () => {

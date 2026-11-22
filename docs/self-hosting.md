@@ -1966,9 +1966,9 @@ is newer than the one it reports), and asks before it puts back data from an
 update an earlier run left unfinished.
 [Every step, the rollback and the exit codes](deploy-vps.md#update).
 
-For the npm service there is no one-command updater yet:
-[do the same steps by hand](deploy-vps.md#paths-a-and-c-npm-with-the-service-above-the-same-steps-by-hand),
-as the service user while the server is stopped. For a foreground invocation,
+For the [fixed-prefix Linux npm service](deploy-vps.md#paths-a-and-c-npm-with-the-service-above),
+run `sudo ./deploy/update-npm.sh` from a trusted checkout on the server. The
+[manual steps](deploy-vps.md#manual-update) cover custom units. For a foreground invocation,
 `npx --yes openmausbot@X.Y.Z serve --tunnel` selects a particular published
 release; replace `X.Y.Z` with that version.
 

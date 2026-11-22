@@ -126,15 +126,18 @@ export const lendScreenSteps = (device: "PC" | "Mac" | "computer") => device ===
 const dateText = (at: number) => new Date(at).toISOString().slice(0, 16).replace("T", " ") + " UTC";
 
 /** Every computer the person lent, as this turn's prompt tells it: names are theirs and may hold anything, so controls go. */
-export function lentComputersLine(known: ReadonlyArray<{ name: string; platform: LentPlatform | null; online?: boolean; lent?: boolean; lastSeenAt?: number }>): string {
+export function lentComputersLine(known: ReadonlyArray<{ name: string; platform: LentPlatform | null; online?: boolean; lent?: boolean; lastSeenAt?: number; typing?: boolean }>): string {
+  let typingOn: string | null = null;
   const statuses = known.flatMap((computer) => {
     if (computer.online === undefined) return [];
     // eslint-disable-next-line no-control-regex
     const name = computer.name.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, " ").slice(0, 80);
-    const state = computer.online ? "online" : computer.lent === false ? "no longer lent" : `offline since ${dateText(computer.lastSeenAt ?? 0)}`;
+    if (computer.online && computer.typing) typingOn = name;
+    const state = computer.online ? (computer.typing ? "online, they are typing on it now" : "online") : computer.lent === false ? "no longer lent" : `offline since ${dateText(computer.lastSeenAt ?? 0)}`;
     return [`${name} (${deviceWord(computer.platform)}): ${state}`];
   });
-  return statuses.length ? ` Their computers right now: ${statuses.join("; ")}.` : "";
+  if (!statuses.length) return "";
+  return ` Their computers right now: ${statuses.join("; ")}.` + (typingOn ? ` When they say "my computer" or "this computer", they mean ${typingOn}.` : "");
 }
 
 /**

@@ -426,6 +426,41 @@ describe("surfacePrompt", () => {
     expect(surfacePrompt({ computer: "cloud", browser: true }, { canSelect: true }))
       .toContain("this computer is the user's host, Local VM is an isolated desktop, the cloud computer is remote");
   });
+
+  // A self-hosted server with the person's Mac lent and a Local VM mounted: "open Terminal on my Mac" ran on the Local
+  // VM, since only a Cloud home's paragraph said a lent computer is reached through shared_computer.
+  it("tells a self-hosted server's bots a computer lent to it is reached through shared_computer", () => {
+    const lent = [{ name: "Studio", platform: "darwin" as const }];
+    const vm = surfacePrompt({ computer: "vm", browser: false }, { canSelect: true, lentToServer: lent });
+    expect(vm).toContain("Their Mac (Studio) is reached only through shared_computer, never select_computer: when they ask for something on it, check list_shared_computers, then use shared_computer on it");
+    expect(vm).toContain("say so in one sentence and don't do it on the Local VM instead unless they ask.");
+    for (const { mounted, opts } of shapes) {
+      expect(surfacePrompt(mounted, { ...opts, lentToServer: lent })).toContain("Their Mac (Studio) is reached only through shared_computer");
+      // Nothing lent, or a Cloud home (which says it from ownComputer): no change.
+      expect(surfacePrompt(mounted, { ...opts, lentToServer: [] })).toBe(surfacePrompt(mounted, opts));
+      expect(surfacePrompt(mounted, { ...opts, cloudHome: true, lentToServer: lent })).toBe(surfacePrompt(mounted, { ...opts, cloudHome: true }));
+    }
+    // Nothing mounted: the lent computer is still reachable, so the paragraph never says no screen can be reached.
+    const none = surfacePrompt({ computer: null, browser: false }, { lentToServer: lent });
+    expect(none).not.toContain("You cannot open apps, click, or inspect a screen through OpenMausBot.");
+    expect(none).toContain("No place's tools can open apps, click, or inspect a screen this turn.");
+    expect(surfacePrompt({ computer: "local", browser: false }, { lentToServer: lent })).toContain("Their Mac (Studio) is reached only through shared_computer");
+  });
+
+  // With This computer pickable too, the own-files line said the person's files are on this computer and never on a
+  // shared computer: a file on the lent Mac got two routes, one of them the server host.
+  it("gives a file on a computer lent to a self-hosted server one route, shared_computer", () => {
+    const lent = [{ name: "Studio", platform: "darwin" as const }];
+    const thisComputer = { bot: "Ada", platform: "linux" as const };
+    const both = surfacePrompt({ computer: "vm", browser: false }, { canSelect: true, lentToServer: lent, thisComputer });
+    expect(both).not.toContain("never one of the shared computers");
+    expect(both).not.toContain("or \"my PC\") is on this computer");
+    expect(both).toContain("A file or folder at a path of this computer (a path such as /home/…) is on this computer, which the Local VM cannot reach.");
+    expect(both).toContain("A file or folder on their Mac (Studio) is on that computer: reach it only through shared_computer, as above. When they don't say which computer a file is on, ask in one line.");
+    // Nothing lent: the own-files line is unchanged.
+    expect(surfacePrompt({ computer: "vm", browser: false }, { canSelect: true, lentToServer: [], thisComputer }))
+      .toBe(surfacePrompt({ computer: "vm", browser: false }, { canSelect: true, thisComputer }));
+  });
 });
 
 describe("surface parsing", () => {
