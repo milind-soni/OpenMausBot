@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { CURATED_CONNECTOR_SLUGS } from "../shared/connector-curated.ts";
-import { knownMcpServerApp } from "./mcp-server-app.ts";
+import { knownMcpServerApp, signsInOnlyElsewhere } from "./mcp-server-app.ts";
 
 describe("the connected app an MCP server stands for", () => {
   it.each([
@@ -48,5 +48,13 @@ describe("the connected app an MCP server stands for", () => {
     for (const [name, url] of [["gmail", ""], ["gcal", ""], ["google-drive", ""], ["google-sheets", ""], ["google-docs", ""]] as const) {
       expect(CURATED_CONNECTOR_SLUGS).toContain(knownMcpServerApp(name, url)!.slug);
     }
+  });
+
+  it("knows which servers can sign in only elsewhere, whatever app they are for", () => {
+    expect(signsInOnlyElsewhere("https://api.cursor.com/rest-mcp/google-slides/mcp")).toBe(true);
+    expect(signsInOnlyElsewhere("https://api.cursor.com/rest-mcp/google-drive/mcp")).toBe(true);
+    expect(signsInOnlyElsewhere("https://api.cursor.com/other/google-drive/mcp")).toBe(false);
+    expect(signsInOnlyElsewhere("https://mcp.example/rest-mcp/google-drive/mcp")).toBe(false);
+    expect(signsInOnlyElsewhere("not a url")).toBe(false);
   });
 });

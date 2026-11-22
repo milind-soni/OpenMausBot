@@ -27,12 +27,23 @@ const BY_NAME: ReadonlyArray<readonly [RegExp, KnownApp]> = [
   [/^google[-_]?docs(?:[-_]mcp)?$/i, DOCS],
 ];
 
-function hostedApp(url: string): KnownApp | undefined {
+/** The app path of a server at one of those hosted addresses, or undefined for any other address. */
+function hostedPath(url: string): string | undefined {
   if (!URL.canParse(url)) return undefined;
   const { hostname, pathname } = new URL(url);
-  const apps = Object.hasOwn(HOSTED, hostname.toLowerCase()) ? HOSTED[hostname.toLowerCase()] : undefined;
-  const app = /^\/rest-mcp\/([a-z-]+)(?:\/|$)/.exec(pathname)?.[1];
+  if (!Object.hasOwn(HOSTED, hostname.toLowerCase())) return undefined;
+  return /^\/rest-mcp\/([a-z-]+)(?:\/|$)/.exec(pathname)?.[1];
+}
+
+function hostedApp(url: string): KnownApp | undefined {
+  const app = hostedPath(url);
+  const apps = app === undefined ? undefined : HOSTED[new URL(url).hostname.toLowerCase()];
   return apps && app && Object.hasOwn(apps, app) ? apps[app] : undefined;
+}
+
+/** A server at one of those hosted addresses: its sign-in can never finish from here, whatever app it is for. */
+export function signsInOnlyElsewhere(url: string): boolean {
+  return hostedPath(url) !== undefined;
 }
 
 export function knownMcpServerApp(name: string, url: string): KnownApp | null {
