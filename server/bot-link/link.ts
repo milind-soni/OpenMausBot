@@ -490,7 +490,7 @@ export function createBotLink(deps: BotLinkDeps) {
     }
   }
 
-  function take(peer: string, frame: Frame): void {
+  function take(peer: string, frame: Frame, saveAcknowledgment = save): void {
     if (!state?.peers[peer]) return;
     switch (frame.t) {
       case "hello": {
@@ -529,7 +529,7 @@ export function createBotLink(deps: BotLinkDeps) {
       }
       case "done": {
         const work = state.work[frame.id];
-        if (work?.peer === peer && work.done && work.ackedAt === undefined) { work.ackedAt = now(); save(); }
+        if (work?.peer === peer && work.done && work.ackedAt === undefined) { work.ackedAt = now(); saveAcknowledgment(); }
         return;
       }
       case "cancel": {
@@ -867,11 +867,26 @@ export function createBotLink(deps: BotLinkDeps) {
     },
     /** Frames from a place, each checked; one that does not parse is dropped. */
     receive(peer: string, frames: readonly unknown[]): void {
-      for (const raw of frames) {
-        const parsed = frameSchema.safeParse(raw);
-        if (!parsed.success) { log("bot link: a frame that did not parse was dropped"); continue; }
-        try { take(peer, parsed.data); } catch (error) { log(`bot link: ${parsed.data.t} failed (${String(error)})`); }
-      }
+      let pendingAcknowledgments = 0;
+      const queueAcknowledgmentSave = () => { pendingAcknowledgments += 1; };
+      const flushAcknowledgments = () => {
+        const attempts = pendingAcknowledgments;
+        pendingAcknowledgments = 0;
+        for (let attempt = 0; attempt < attempts; attempt += 1) {
+          try { save(); return; } catch (error) { log(`bot link: done failed (${String(error)})`); }
+        }
+      };
+      try {
+        for (const raw of frames) {
+          const parsed = frameSchema.safeParse(raw);
+          if (!parsed.success || parsed.data.t !== "done") flushAcknowledgments();
+          if (!parsed.success) { log("bot link: a frame that did not parse was dropped"); continue; }
+          try { take(peer, parsed.data, queueAcknowledgmentSave); } catch (error) {
+            flushAcknowledgments();
+            log(`bot link: ${parsed.data.t} failed (${String(error)})`);
+          }
+        }
+      } finally { flushAcknowledgments(); }
     },
     /** What waits to go to a place, after `ack` (frames up to it were taken and are dropped), as much as one exchange carries. */
     outgoing(peer: string, ack: number): Numbered[] {
