@@ -75,10 +75,36 @@ Plan (exploración de Claude, `~/Projects/edu-bot-wt/reports/claude-m2-scout.md`
 - Los bots no pueden aprobar memoria canónica. Solo una persona aprueba, con una tarjeta en el chat.
 - Si `edu` no está instalado, la app funciona igual, sin errores.
 
-- [ ] PR1: detectar `edu`, cerebro por bot y conexión MCP. En curso (Claude).
-- [ ] PR2: tarjetas para aprobar o rechazar propuestas de memoria.
-- [ ] PR3: el resumen de Edu entra al prompt de cada bot, y mensajes claros si algo falla.
-- [ ] PR4: Edu crew (plan, construir, revisar) como opción por bot, apagada por defecto.
+- [x] PR1 (#7, fusionado): cada bot recibe la memoria Edu (MCP) con su propio cerebro en `~/.edubot/brains/<bot>`,
+  o una carpeta compartida. El bot puede recordar, guardar y proponer; no puede aprobar ni cambiar de cerebro.
+  Tu `~/.edu` se lee pero no se ensucia: los cerebros de bots se registran aparte.
+  Si `edu` no está, la app funciona igual. Se apaga con `"edu": {"enabled": false}` en `config.json`.
+  Prueba real: un bot guardó y recuperó una nota en su cerebro temporal. Grok auditó 3 rondas (7 hallazgos,
+  incluido un ataque con enlaces simbólicos; luego 1; luego PASS). CI verde (34).
+- [x] PR2 (#8, fusionado): cuando un bot propone una regla o preferencia, aparece una tarjeta en el chat
+  con palabras simples ("Regla", "Preferencia"). Se aprueba en la app de escritorio o desde un dispositivo emparejado.
+  Un bot o un script solo puede rechazar. Nunca se aprueba por voz. La tarjeta no bloquea el chat.
+  También aparece en Ajustes del bot -> Memoria y en "Necesita tu atención".
+  Agy auditó 2 rondas: 6 hallazgos (el chat se bloqueaba, voto por voz, carreras), luego PASS. CI verde (34).
+  Capturas: `~/Projects/edu-bot-wt/reports/m2-shots/round2-*.png`.
+- [x] PR3 (#9, fusionado): el resumen de tu cerebro Edu entra al prompt de cada bot, como dato y no como orden.
+  Grok encontró que una nota podía dar órdenes al bot (inyección de prompt); se arregló en 3 rondas, hasta PASS.
+  Si Edu falla al conectar, sale una línea tranquila ("se reintenta en el próximo mensaje"), nunca un error.
+  Se corrigió un error del PR1: con algunos motores, si Edu fallaba, fallaba toda la respuesta.
+- [ ] PR4: Edu crew (plan, construir, revisar) como opción por bot, apagada por defecto. En curso (Claude).
+
+## M4: SQL, permisos, auditoría y conectores
+
+Pedido nuevo de Eduardo (22-11): en su Mac los conectores no funcionan, porque dependen del servicio
+de MausBot (broker de Composio) que no tenemos. Entra en M4:
+- [ ] Conectores sin el broker de MausBot: usar tu propia llave de Composio (`ak_`), con pasos claros.
+  Sin textos que hablen de MausBot Cloud.
+- [ ] Servidores MCP propios como camino principal (Notion, Gmail, servidor de Cheil, edu-cloud),
+  configurables por bot y por área, desde la app y desde los perfiles YAML de M3.
+- [ ] Sin llave, la pantalla "Connected apps" explica en simple qué hacer. Nunca rota ni vacía.
+- [ ] Prueba real de punta a punta: un conector MCP y uno por Composio. Auditoría de otro proveedor.
+- [ ] Conector SQL (Postgres, SQLite/DuckDB), solo lectura por defecto, con permisos por bot.
+- [ ] Registro de auditoría.
 
 ## Cómo trabajamos
 
@@ -118,6 +144,17 @@ Fallan a veces y pasan al re-correr. No vienen de nuestros cambios.
 - Vistos 1 vez más (PR #3 a #5): `routine-failure-spacing`, `surface-pins.e2e`, `thread-aware-bots.e2e`,
   `decider-rooms.e2e`, `antigravity-turn-outcome`, `session-credentials.e2e`. Si se repiten, van a la lista.
 Se sumaron a `scripts/testing/ci-retry-list.json`: 2 reintentos solo en CI. Si siguen, hay que arreglarlos.
+
+## Mejoras sugeridas para el repo de Edu
+
+Edu Bot funciona sin ellas, pero serían más seguras. Detalle en `~/Projects/edu-bot-wt/reports/claude-m2-pr4.md`.
+1. Aprobar una puerta del crew con un secreto que solo tiene quien lo inició (hoy un proceso local podría aprobar).
+2. Comandos `edu crew review` y `edu orchestrate --no-auto-approve` en la línea de comandos.
+3. Que la revisión acepte una pregunta o archivos, no solo un diff de git.
+4. Una etiqueta por programa (`EDU_AGENT_LABEL`), para saber qué bot escribió cada nota.
+5. Una política por proyecto que limite qué CLIs puede usar el crew.
+6. Un `edu init` que no registre la carpeta en el cerebro global.
+- Tu copia local `~/Projects/edu` está vieja (v4). La versión instalada es 6.0.0.
 
 ## Pendientes vistos (para M5 o M6)
 

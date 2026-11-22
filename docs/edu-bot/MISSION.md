@@ -49,6 +49,13 @@ M0 Repo health: install deps, build and run upstream as-is on Linux; baseline te
 M1 Rebrand + license hygiene + telemetry off + remove enterprise from OSS build.
 M2 Edu brain integration (memory MCP wired per bot, approvals UI).
 M3 Org/workspace/bot profiles in Markdown/YAML + shared memory via edu-cloud.
-M4 SQL connector + per-bot permissions + audit log.
+M4 SQL connector + per-bot permissions + audit log. Also connectors without upstream services (added 2026-11-22,
+   after Eduardo tested on his Mac: connectors were unusable because they depend on MausBot's managed Composio broker):
+   1) Connected apps work without the MausBot broker: a clear flow with the user's own Composio project key (`ak_`),
+      and no copy that mentions MausBot Cloud.
+   2) Own MCP servers as a first-class path (Notion, Gmail, Cheil's server, edu-cloud), configurable per bot and per
+      area from the UI and from M3's YAML profiles.
+   3) Without a key, the Connected apps screen explains in plain words what to do; never broken or empty.
+   4) Real end-to-end test of at least one MCP connector and one Composio connector, plus a different-vendor audit.
 M5 Cross-platform CI + installers + README (EN + ES) + first release v0.1.0 of Edu Bot.
 M6 Full audit pass (security, UX, docs, error paths) by two different vendors; fix all.
