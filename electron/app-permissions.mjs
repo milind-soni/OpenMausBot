@@ -172,8 +172,10 @@ const OBSIDIAN_NOTE_FIELDS = new Set(["vault", "file"]);
 
 /** Security: only `open` with a vault and a file inside it. Obsidian's other actions (`new`, `search`, …), `open`'s
  * absolute `path`, and plugin-registered actions such as Advanced URI's `commandid` can write notes, open any folder
- * or run commands. A raw `+` is refused (`%2B` is fine) so every query decoder reads the same fields as this check. */
+ * or run commands. A raw `+` is refused (`%2B` is fine) so every query decoder reads the same fields as this check.
+ * Raw control characters are refused before parsing, since WHATWG URL parsing silently drops tabs and newlines. */
 export function obsidianNoteUrl(rawUrl) {
+  if (/\p{Cc}/u.test(rawUrl)) throw new Error("That Obsidian link is invalid");
   let url;
   try {
     url = new URL(rawUrl);

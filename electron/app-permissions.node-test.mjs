@@ -122,8 +122,12 @@ test("an Obsidian link opens only a note in a named vault", () => {
     "obsidian://open?vault=botbrain&file=C%3A%5CUsers", "obsidian://open?vault=botbrain&file=~%2F.bashrc"])
     assert.throws(() => externalLinkUrl(link), /inside its vault/, link);
   for (const link of ["obsidian://open?vault=botbrain&file=", "obsidian://open?vault=%20&file=x", "obsidian://open?vault=botbrain&file=a%0Ab",
+    "obsidian://open?vault=botbrain&file=a%09b", "obsidian://open?vault=botbrain&file=a%0Db", "obsidian://open?vault=botbrain&file=a%7Fb",
     "obsidian://open?vault=botbrain&file=%E0%A4%A", "obsidian://open?vault=botbrain&file=a+b"])
     assert.throws(() => externalLinkUrl(link), /invalid/, link);
+  for (const link of ["obsidian://open?vault=botbrain&file=a\tb", "obsidian://open?vault=botbrain&file=a\rb", "obsidian://open?vault=botbrain&file=a\nb",
+    "obsidian://open?vault=bot\nbrain&file=x", "obsidian://op\ten?vault=botbrain", "obsidian://open?vault=botbrain&file=x\n"])
+    assert.throws(() => externalLinkUrl(link), /invalid/, JSON.stringify(link));
   assert.throws(() => obsidianNoteUrl("https://example.com"), /Only Obsidian links/);
   for (const link of ["obsidianx://open?vault=botbrain", "x-obsidian://open?vault=botbrain", "zotero://select/items/1", "vscode://file/etc/passwd"])
     assert.throws(() => externalLinkUrl(link), /Only web/, link);
