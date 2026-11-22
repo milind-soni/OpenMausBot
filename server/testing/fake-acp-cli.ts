@@ -47,7 +47,7 @@
 //   FAKE_ACP_RPC_DUMP  this process's method list, rewritten after every request
 //   FAKE_ACP_RPC_APPEND_FILE  one {"pid","method","cwd"} line appended per request
 //   FAKE_ACP_RPC_FAILURE_FILE  JSON-RPC error for session/prompt; once read the process stays poisoned
-//   FAKE_ACP_RPC_FAILURE_METHOD  initialize, session/new or session/prompt (default)
+//   FAKE_ACP_RPC_FAILURE_METHOD  initialize, authenticate, session/new or session/prompt (default)
 //   FAKE_ACP_RPC_FAILURE_GATE  hold the error until this file exists
 //   FAKE_ACP_RPC_FAILURE_AFTER_OUTPUT  emit text and a tool result before failing
 //   FAKE_ACP_RPC_FAILURE_AFTER_USAGE  emit the scripted usage updates and FAKE_ACP_UPDATES_FILE's before failing
@@ -1041,6 +1041,7 @@ function handle(msg: any) {
       break;
     }
     case "authenticate":
+      if (failRpc(msg)) break;
       if (mode === "authenticate-failed") {
         out({ jsonrpc: "2.0", id: msg.id, error: { code: -32000, message: "Login expired" } });
         break;

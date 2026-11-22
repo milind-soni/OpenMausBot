@@ -22,6 +22,7 @@ import {
   probeAntigravityModels,
   verifyAntigravityBrowserHelper,
 } from "./antigravity-acp.ts";
+import { acpRpcError } from "./acp/rpc-error.ts";
 import { AntigravityAuthController } from "./antigravity-auth.ts";
 import { resolveAntigravityRuntime } from "./antigravity-runtime.ts";
 import { AntigravityDriver, antigravitySignInError } from "./antigravity.ts";
@@ -133,6 +134,28 @@ describe("a sign-in the runtime asks for in the middle of a turn", () => {
     expect((await instance.snapshot()).authenticated).toBe(false);
   }, 60_000);
 
+  it.each([-32603, -32000])("keeps the account signed in when authenticate fails (%i) without asking for a sign-in", async (code) => {
+    ensureDirs();
+    const fake = fakeRuntime(runtimeSource(
+      `reply(message.id, { error: { code: ${code}, message: "Failed to refresh token: network is unreachable" } });`,
+    ));
+    const instanceId = `antigravity-network-blip${code}`;
+    storeToken(instanceId);
+    const instance = await create(instanceId, fake.executable);
+    const recorder = recordEvents(instance.adapter);
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "blip", text: "hello", cwd: fake.directory });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+    const events = recorder.events.filter((event) => event.turnId === turnId);
+    expect(events).not.toContainEqual(expect.objectContaining({ message: LOGIN_NOTE }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "runtime.error",
+      message: expect.stringContaining("network is unreachable"),
+    }));
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+    expect(events.at(-1)).not.toMatchObject({ stopReason: "auth_required" });
+    expect((await instance.snapshot()).authenticated).toBe(true);
+  }, 60_000);
+
   it("reads signed in again after a sign-in that succeeds without rewriting the stored token", async () => {
     ensureDirs();
     const fake = fakeRuntime();
@@ -163,6 +186,30 @@ describe("a sign-in the runtime asks for in the middle of a turn", () => {
     [null, false],
   ])("reads a sign-in request only where the error's code and words agree (%j)", (error, expected) => {
     expect(antigravitySignInError(error)).toBe(expected);
+  });
+
+  it.each([
+    [{ code: -32000, message: "Request failed" }, false],
+    [{ code: -32000, message: "Authentication service unavailable" }, false],
+    [{ code: -32000, message: "Request failed", data: { trace: "x".repeat(2_500), details: "Please sign in again" } }, true],
+    [{ code: -32000, message: "Authentication required" }, true],
+    [{ code: -32000, message: "Authentication required", data: { network: "online" } }, true],
+    [{ code: -32000, message: "Authentication failed: connection refused" }, false],
+    [{ code: -32000, message: "Login check failed: socket hang up" }, false],
+    [{ code: -32000, message: "Authentication failed: network is unreachable" }, false],
+    [{ code: -32000, message: "Please sign in again", data: { details: "Previous refresh timed out" } }, true],
+    [{ code: -32000, message: "Login expired" }, true],
+    [{ code: -32000, message: "invalid_grant: Token has been expired or revoked." }, true],
+    [{ code: -32000, message: "Failed to reauthenticate: connection refused" }, false],
+    [{ code: -32000, message: "Please reauthenticate" }, true],
+    [{ code: -32000, message: "Reauthentication required" }, true],
+    [{ code: -32000, message: "Re-authentication required" }, true],
+    [{ code: -32000, message: "Access token expired", data: { details: "refresh failed: network is unreachable" } }, false],
+    [{ code: -32000, message: "Request failed", data: { details: "Authentication failed: connection refused" } }, false],
+    [{ code: -32000, message: "Request failed", data: { reason: "Authentication failed: connection refused" } }, false],
+    [{ code: -32000, message: "Request failed", data: { reason: "UNAUTHENTICATED" } }, true],
+  ])("reads the runtime's own words, not the method OpenMausBot called (%j)", (answer, expected) => {
+    expect(antigravitySignInError(acpRpcError(answer, "authenticate"))).toBe(expected);
   });
 
   it("stops a model lookup the same way instead of waiting on a link nobody sees", async () => {

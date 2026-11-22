@@ -13,6 +13,8 @@ import type {
   SendTurnInput,
 } from "../contracts.ts";
 import { createAcpDriver, type AcpConfig, type AcpSupport } from "./acp/core.ts";
+import { acpVendorMessage } from "./acp/rpc-error.ts";
+import { classifyError } from "./retry.ts";
 import {
   antigravityClientInfo,
   antigravityProfileAuthenticated,
@@ -85,13 +87,20 @@ export function antigravityUpdateFilter(): (update: Record<string, any>) => Reco
 }
 
 const SIGN_IN_WORDS = /\bauthenticat|\bunauthenticated\b|\bsign(?:ed)?[ -]?in\b|\blog(?:ged)?[ -]?in\b|\bcredentials?\b/iu;
+const SIGN_IN_ASKED = /\bauthentication required\b|\bunauthenticated\b|\bnot (?:logged|signed)[ -]?in\b|\b(?:sign|log)[ -]?in again\b|\bplease (?:sign|log)[ -]?in\b|\blogin expired\b|\bplease re-?authenticate\b|\bre-?authentication required\b|\binvalid_grant\b|\b(?:credentials?|token) (?:has been |have been |was |were )?revoked\b/iu;
+const UNREACHABLE = /\bnetwork\b|\bunreachable\b|\boffline\b/iu;
 
-/** -32000 is ACP's `auth_required`, but an agent may reuse it for other failures; the text must agree. */
+/** -32000 is ACP's `auth_required`, but an agent may reuse it for other failures, a sign-in service it cannot reach
+ * among them. Words that ask for a sign-in decide; words that only mention one do unless the failure is one that passes. */
 export function antigravitySignInError(error: unknown): boolean {
-  const value = error as { code?: unknown; message?: unknown; data?: unknown } | null;
+  const value = error as { code?: unknown; message?: unknown; data?: any } | null;
   if (value?.code !== -32000) return false;
-  const data = typeof value.data === "string" ? value.data : value.data && typeof value.data === "object" ? JSON.stringify(value.data) : "";
-  return SIGN_IN_WORDS.test(`${typeof value.message === "string" ? value.message : ""} ${data.slice(0, 2_000)}`);
+  const data = value.data;
+  const bounded = (fields: unknown[]) => fields.filter((field): field is string => typeof field === "string").map((field) => field.slice(0, 2_000)).join(" ");
+  const reason = bounded([acpVendorMessage(error) ?? value.message, ...(typeof data === "string" ? [data] : [data?.details, data?.message, data?.reason, data?.error?.message])]);
+  const whole = `${reason} ${bounded([data && typeof data === "object" ? JSON.stringify(data) : undefined])}`;
+  if (SIGN_IN_ASKED.test(whole)) return true;
+  return SIGN_IN_WORDS.test(whole) && !UNREACHABLE.test(reason) && !classifyError({ text: reason }).transient;
 }
 
 const managedAsset = resolveAntigravityReleaseAsset();
