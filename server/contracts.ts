@@ -522,6 +522,9 @@ export interface ModelCatalog {
   }>;
 }
 
+/** Why an engine's model list could not be read: it refused the sign-in, it took too long, or anything else. */
+export type ModelListProblem = "signedOut" | "timedOut" | "failed";
+
 /** "gpt-5.4-mini" → "Gpt 5.4 Mini", splitting on the caller's word breaks. */
 export function titleCaseModelId(id: string, wordBreaks: RegExp): string {
   return id
@@ -589,6 +592,8 @@ export interface ProviderInstance {
   readonly models: ModelCatalog;
   /** True while the catalog is the driver's fixed list or a failed read's leftover, not a list the engine gave. */
   readonly modelsUnconfirmed?: boolean;
+  /** Set with modelsUnconfirmed when the engine's last read of its list failed: why, for the picker to say. */
+  readonly modelsUnreadable?: ModelListProblem;
   /** False while the sign-in can refuse a model its catalog lists (Codex on a ChatGPT account): a short message and background text then stay on the bot's own model. */
   readonly quickModelsUsable?: () => boolean;
   /** Refresh a live catalog without recreating the provider instance. */
