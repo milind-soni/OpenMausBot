@@ -37,6 +37,9 @@ const LINK_LOCAL_ADDRESSES = new BlockList();
 LINK_LOCAL_ADDRESSES.addSubnet("169.254.0.0", 16, "ipv4");
 LINK_LOCAL_ADDRESSES.addSubnet("fe80::", 10, "ipv6");
 LINK_LOCAL_ADDRESSES.addAddress("fd00:ec2::254", "ipv6");
+// 169.254/16 inside IPv6: NAT64's 64:ff9b::/96 and the old IPv4-compatible ::/96.
+LINK_LOCAL_ADDRESSES.addSubnet("64:ff9b::a9fe:0", 112, "ipv6");
+LINK_LOCAL_ADDRESSES.addSubnet("::a9fe:0", 112, "ipv6");
 
 export function linkLocalAddress(address: string): boolean {
   const family = isIP(address);
@@ -245,8 +248,7 @@ async function callRemote(teammate: RemoteTeammate, query: string, init: Request
     });
   } catch (error) {
     options.signal?.throwIfAborted();
-    // fetch says only "fetch failed"; why it failed (refused, no such name, a link-local address) is its cause.
-    const reason = error instanceof Error ? (error.cause instanceof Error ? error.cause.message : error.message) : undefined;
+    const reason = failureReason(error);
     return { ok: false, problem: "unreachable", detail: timeout.aborted ? "no answer in time" : reason === undefined ? undefined : clip(reason, DETAIL_CHARS) };
   }
   let body: unknown;
@@ -255,8 +257,9 @@ async function callRemote(teammate: RemoteTeammate, query: string, init: Request
   } catch {
     options.signal?.throwIfAborted();
     if (timeout.aborted) return { ok: false, problem: "unreachable", detail: "no answer in time" };
-    // Only a 200 or 202 must be the Bot API's JSON. A proxy's 502 page or a plain-text 429 is still that status.
-    if (response.status === 200 || response.status === 202) return { ok: false, problem: "bad_answer", status: response.status };
+    // Busy, rate limited or failing means the same whatever the body: a proxy's 502 page, a plain-text 429. Any other
+    // answer that isn't JSON (an auth wall's 401 page, a proxy's 404) is not the Bot API's, so says nothing of the key.
+    if (response.status !== 409 && response.status !== 429 && response.status < 500) return { ok: false, problem: "bad_answer", status: response.status };
     body = undefined;
   }
   if (response.status === 200 || response.status === 202) {
@@ -270,6 +273,16 @@ async function callRemote(teammate: RemoteTeammate, query: string, init: Request
     ...(detail ? { detail } : {}),
     ...(Number.isFinite(retryAfter) && retryAfter > 0 ? { retryAfterSeconds: Math.ceil(retryAfter) } : {}),
   };
+}
+
+/** fetch says only "fetch failed"; why (refused, no such name, a link-local address) is its cause. A name with more
+ * than one address fails with an AggregateError whose message is empty: then its first error or its code says why. */
+function failureReason(error: unknown): string | undefined {
+  if (!(error instanceof Error)) return undefined;
+  const cause = error.cause as (Error & { code?: unknown; errors?: unknown[] }) | undefined;
+  if (!(cause instanceof Error)) return error.message;
+  const first = cause.errors?.[0];
+  return cause.message || (first instanceof Error ? first.message : undefined) || (typeof cause.code === "string" ? cause.code : undefined) || error.message;
 }
 
 const PROBLEM_BY_STATUS: Record<number, RemoteProblem> = {

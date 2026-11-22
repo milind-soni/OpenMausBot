@@ -168,10 +168,29 @@ describe("calling a teammate's Bot API", () => {
     expect(await readRemote(far, "t1")).toEqual({ ok: false, problem: "rate_limited", status: 429, retryAfterSeconds: 7 });
     next = { status: 202, body: "<html>proxy</html>" };
     expect(await readRemote(far, "t1")).toEqual({ ok: false, problem: "bad_answer", status: 202 });
+    next = { status: 409, body: "busy" };
+    expect(await readRemote(far, "t1")).toEqual({ ok: false, problem: "busy", status: 409 });
+  });
+
+  it("never reads an auth wall's or a proxy's page as the Bot API's wrong key or missing thread", async () => {
+    let status = 401;
+    const base = await listen((_req, res) => { res.writeHead(status, { "content-type": "text/html" }); res.end("<html>Sign in</html>"); });
+    expect(await readRemote(teammate(base), "t1")).toEqual({ ok: false, problem: "bad_answer", status: 401 });
+    status = 404;
+    expect(await readRemote(teammate(base), "t1")).toEqual({ ok: false, problem: "bad_answer", status: 404 });
+  });
+
+  it("says why a name could not be reached when it has more than one address", async () => {
+    const base = await listen((_req, res) => res.end("{}"));
+    const closed = servers.pop()!;
+    await new Promise<void>((done) => closed.close(() => done()));
+    const result = await readRemote(teammate(base.replace("127.0.0.1", "localhost")), "t1");
+    expect(result).toMatchObject({ ok: false, problem: "unreachable" });
+    expect((result as { detail?: string }).detail).toMatch(/ECONNREFUSED/);
   });
 
   it("never connects to a name that resolves to a link-local or metadata address", async () => {
-    for (const address of ["169.254.169.254", "fe80::1", "fd00:ec2::254", "::ffff:169.254.169.254"]) expect(linkLocalAddress(address)).toBe(true);
+    for (const address of ["169.254.169.254", "fe80::1", "fd00:ec2::254", "::ffff:169.254.169.254", "64:ff9b::a9fe:a9fe", "::a9fe:a9fe"]) expect(linkLocalAddress(address)).toBe(true);
     for (const address of ["127.0.0.1", "100.64.1.2", "192.168.1.5", "::1", "not an address"]) expect(linkLocalAddress(address)).toBe(false);
     const lookupWith = (answer: Array<{ address: string; family: number }>) => {
       const resolve = ((_host: string, options: { all?: boolean }, callback: (...args: unknown[]) => void) => {
