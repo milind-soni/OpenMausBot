@@ -152,6 +152,21 @@ export function readGrokModelCatalog(env: Record<string, string | undefined> = p
   };
 }
 
+/** What a person reads when Grok refused `model` and its session listed the models this sign-in offers without it; null
+ * when the session listed none, or listed this one (then the refusal was something else). */
+export function grokModelNotOffered(model: string, sessionModels: readonly { modelId?: string }[]): string | null {
+  const offered = [...new Set(sessionModels.map((entry) => entry.modelId).filter((id): id is string => typeof id === "string" && id.length > 0))];
+  if (offered.length === 0 || offered.includes(model)) return null;
+  const list = offered.length === 1 ? offered[0] : `${offered.slice(0, -1).join(", ")} and ${offered.at(-1)}`;
+  // "can't use the model" keeps a routine from retrying a run that would be refused the same way (retry.ts).
+  return `Grok can't use the model ${model} here: this Grok sign-in offers ${list}, so choose ${offered.length === 1 ? "it" : "one of those"} for this bot.`;
+}
+
+/** Grok's answer to set_model for a model it does not know: JSON-RPC invalid params, or its "unknown model id" words. */
+function unknownGrokModel(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === -32602 || /\bunknown model\b/i.test(error instanceof Error ? error.message : String(error));
+}
+
 function suggestGrokSlug(host: string, model: string, taken: Set<string>): string {
   let base = `${host}-${model}`.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
   if (!base || !/^[a-z]/.test(base)) base = `m-${base || "model"}`;
@@ -551,7 +566,7 @@ const support: AcpSupport = {
   toolScopeCacheKey: ({ config, env, cwd }) => JSON.stringify(grokInheritedProfile(config.cli, env, cwd) ?? null),
 
   // -m on argv is not enough: session/new still starts on [models].default.
-  async configureSession({ request, sessionId, turn, currentModelId, currentEffort, effortApplied, configOptions }) {
+  async configureSession({ request, sessionId, turn, sessionModels, currentModelId, currentEffort, effortApplied, configOptions }) {
     if (turn.toolScope !== undefined) {
       const available = new Set([
         ...(turn.integrations?.agents ? ["agents"] : []), ...(turn.integrations?.composio ? ["composio"] : []), ...(turn.integrations?.composioOwn ? [OWN_APPS_SERVER] : []),
@@ -590,6 +605,10 @@ const support: AcpSupport = {
       try {
         await request("session/set_model", { sessionId, modelId: turn.model });
       } catch (e) {
+        // Refused as unknown, and missing from the models this sign-in offers: this turn ends at once, since a new process
+        // would be refused the same way, and the process is retired, so the next turn reads the list afresh.
+        const notOffered = unknownGrokModel(e) ? grokModelNotOffered(turn.model, sessionModels) : null;
+        if (notOffered) throw Object.assign(new Error(notOffered), { acpSessionFailure: true });
         throw new LiveSwitchRefused(
           `Grok rejected model "${turn.model}" via session/set_model: ${(e as Error).message}. ` +
             `Check that grok is current (1.0.6+ supports it) and that this slug exists in ~/.grok/config.toml.`,

@@ -363,4 +363,16 @@ describe("the brief", () => {
     expect(await s.brief.active("desktop", "UTC")).toEqual({ returned: false });
     expect(s.card()).toBeUndefined();
   });
+
+  it("names Outlook in read trouble and press records for Outlook emails", async () => {
+    const s = setup();
+    await s.brief.active("desktop", "UTC");
+    const outlookEmail: EmailHeader = { id: "o1", threadId: "conv-1", at: s.now() - 5 * MINUTE, from: "Bob <bob@outlook.test>", subject: "Invoice", preview: "Due Friday", app: "outlook" };
+    await s.brief.report({ routine: {} as never, at: s.now(), picked: [{ email: outlookEmail, why: "Due Friday.", needsReply: true }], trouble: [{ app: "outlook", signedOut: true }] });
+    expect(s.shown()).toContain("Couldn't read Outlook");
+    expect(s.shown()).toContain("Reconnect Outlook in Connected apps.");
+    const records = s.brief.pressRecords(s.chief, { type: "draft_reply", payload: { messageId: "o1" } });
+    expect(records).toContain("[Records from Outlook.");
+    expect(records).toContain("Outlook draft");
+  });
 });
