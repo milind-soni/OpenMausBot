@@ -41,6 +41,21 @@ describe("a bot whose setup failed once", () => {
     expect(roster(store, bot.id)).toBe("unavailable — needs setup");
   });
 
+  it("goes by the engine each conversation last ran on: a turn a stand-in engine carried clears nothing on the signed-out one", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const failed = store.createTask(bot.id, "signed out")!;
+    const carried = store.createTask(bot.id, "carried by a stand-in")!;
+    store.markTaskDispatched(bot.id, failed.threadId, "claude");
+    store.setTaskActivity(bot.id, failed.threadId, "dead");
+    store.markTaskDispatched(bot.id, carried.threadId, "codex");
+    clearSetupFailures(store, bot.id, carried.threadId);
+    expect(store.taskByThread(bot.id, failed.threadId)?.activity).toBe("dead");
+    store.markTaskDispatched(bot.id, carried.threadId, "claude");
+    clearSetupFailures(store, bot.id, carried.threadId);
+    expect(store.taskByThread(bot.id, failed.threadId)?.activity).toBe("idle");
+  });
+
   it("leaves other activities as they are", () => {
     const store = new Store(selection);
     const bot = store.createBot();
