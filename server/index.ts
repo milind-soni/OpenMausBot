@@ -209,7 +209,8 @@ import {
   type SteerOutcome,
   newId,
 } from "./contracts.ts";
-import { RETRY_MAX_ATTEMPTS } from "./drivers/retry.ts";
+import { httpStatusOf } from "./drivers/engine-errors.ts";
+import { classifyError, RETRY_MAX_ATTEMPTS } from "./drivers/retry.ts";
 import { chosenBackups, recoveryCapabilityError, startupBackups } from "./automatic-recovery.ts"; import { outOfProcesses } from "./process-shortage.ts";
 import { createQuotaSwitchHost } from "./host/quota-switch.ts"; import { quotaSwitchEnabled } from "./quota-switch.ts"; import { createPeerLimitResend } from "./host/peer-limit-resend.ts"; import { createRoomLimitTakeover } from "./host/room-limit-takeover.ts";
 import { decodeGeneratedImage } from "./generated-image.ts";
@@ -6625,7 +6626,8 @@ bus.subscribe((event: RuntimeEvent) => {
         pushStoppedTurn(event.turnId);
         break;
       }
-      console.warn(`[omb-turn] thread=${event.threadId} turn=${event.turnId ?? "none"} failed: ${redactSecretsInText(event.message).replace(/\s+/g, " ").slice(0, 600)}`);
+      // Only the status and the failure's class: a provider's words can name the account, and the server log is read by more people than the chat.
+      { const status = httpStatusOf(event.message); console.warn(`[omb-turn] thread=${event.threadId} turn=${event.turnId ?? "none"} failed: ${classifyError({ text: event.message }).reason}${status ? ` HTTP ${status}` : ""}`); }
       landParkedFiles(); // above the failure row, which stays the last, retryable line
       pushMessage({ role: "bot", kind: "activity", tool: failedTurnTool(event.message, event) });
       if (event.setup && bot) store.setTaskActivity(bot.id, event.threadId, "dead");

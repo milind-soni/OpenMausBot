@@ -4,11 +4,11 @@ import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 
 const REJECTIONS = [
-  { status: 429, state: "RESOURCE_EXHAUSTED", message: "Quota exceeded for metric: generate_content_free_tier_requests, limit: 20. Please retry in 11h32m" },
-  { status: 503, state: "UNAVAILABLE", message: "This model is currently experiencing high demand" },
+  { status: 429, reason: "quota", state: "RESOURCE_EXHAUSTED", message: "Quota exceeded for metric: generate_content_free_tier_requests, limit: 20. Please retry in 11h32m" },
+  { status: 503, reason: "server_error", state: "UNAVAILABLE", message: "This model is currently experiencing high demand" },
 ] as const;
 
-it.each(REJECTIONS)("a provider HTTP $status ends the turn as failed, with the provider's words in the chat, the digest and the server log", async ({ status, state, message }) => {
+it.each(REJECTIONS)("a provider HTTP $status ends the turn as failed, with the provider's words in the chat and the digest, and its status in the server log", async ({ status, reason, state, message }) => {
   let chatRequests = 0;
   const upstream = createServer(async (req, res) => {
     if (req.url === "/v1/models") {
@@ -63,7 +63,8 @@ it.each(REJECTIONS)("a provider HTTP $status ends the turn as failed, with the p
     expect(digest.text).toContain(`turn failed: ${said}`);
     expect(digest.text).not.toContain("synthetic-fixture-key");
     const log = readFileSync(fixture.info.logPath, "utf8");
-    expect(log).toMatch(new RegExp(`\\[omb-turn\\] thread=\\S+ turn=\\S+ failed: ${said}`));
+    expect(log).toMatch(new RegExp(`\\[omb-turn\\] thread=\\S+ turn=\\S+ failed: ${reason} HTTP ${status}\\n`));
+    expect(log).not.toContain(message);
     expect(log).not.toContain("synthetic-fixture-key");
   } finally {
     await fixture.close();
