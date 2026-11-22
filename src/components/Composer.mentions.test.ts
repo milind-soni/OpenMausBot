@@ -65,6 +65,14 @@ const input = () => container.querySelector<HTMLElement & { editor: Editor }>(".
 function type(draftId: string, text: string) {
   flushSync(() => restoreComposerDraft(draftId, { text, attachments: [] }));
 }
+function typeText(text: string) {
+  const { view } = input().editor;
+  flushSync(() => {
+    const { from, to } = view.state.selection;
+    const insert = () => view.state.tr.insertText(text, from, to);
+    if (!view.someProp("handleTextInput", handle => handle(view, from, to, text, insert))) view.dispatch(insert());
+  });
+}
 const options = () => [...container.querySelectorAll<HTMLElement>('[role="option"]')];
 function pick(name: string, role: string) {
   const option = options().find((one) => one.textContent?.includes(name) && one.textContent.includes(role));
@@ -98,20 +106,47 @@ describe("a room's @ list", () => {
     expect(input().hasAttribute("data-empty")).toBe(true);
   });
 
-  it("recognizes bold after a soft break and combined emphasis", () => {
-    type(drafts[0]!, "hello");
+  it.each([["-", "ul", undefined], ["2.", "ol", 2]] as const)(
+    "converts %s after Shift+Enter only when a space is typed", (prefix, tag, start) => {
+      type(drafts[0]!, "那是");
+      const field = input();
+      flushSync(() => field.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "Enter", shiftKey: true, bubbles: true, cancelable: true,
+      })));
+      for (const char of prefix) typeText(char);
+      expect(field.querySelector(tag)).toBeNull();
+      expect(field.querySelector("p")?.textContent).toBe("那是" + prefix);
+      typeText(" ");
+      typeText("你好");
+      expect(field.querySelector("p")?.textContent).toBe("那是");
+      expect(field.querySelector(`${tag} > li`)?.textContent).toBe("你好");
+      if (start !== undefined) expect(field.querySelector("ol")?.start).toBe(start);
+      send();
+      expect(field.querySelectorAll("li")).toHaveLength(2);
+      expect(field.editor.state.selection.$from.parentOffset).toBe(0);
+    },
+  );
+
+  it("keeps committed Chinese text inside a numbered item after a soft break", () => {
+    type(drafts[0]!, "那是");
     const field = input();
-    const { view } = field.editor;
     flushSync(() => field.dispatchEvent(new KeyboardEvent("keydown", {
       key: "Enter", shiftKey: true, bubbles: true, cancelable: true,
     })));
-    for (const char of "**n** ***both***") {
-      flushSync(() => {
-        const { from, to } = view.state.selection;
-        const insert = () => view.state.tr.insertText(char, from, to);
-        if (!view.someProp("handleTextInput", handle => handle(view, from, to, char, insert))) view.dispatch(insert());
-      });
-    }
+    typeText("2.　你好");
+    expect(field.querySelector("ol")?.start).toBe(2);
+    expect(field.querySelector("li")?.textContent).toBe("你好");
+    expect(field.editor.state.selection.$from.parentOffset).toBe(2);
+    expect(field.editor.getMarkdown()).toBe("那是\n\n2. 你好");
+  });
+
+  it("recognizes bold after a soft break and combined emphasis", () => {
+    type(drafts[0]!, "hello");
+    const field = input();
+    flushSync(() => field.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Enter", shiftKey: true, bubbles: true, cancelable: true,
+    })));
+    for (const char of "**n** ***both***") typeText(char);
     expect(field.querySelector("br + strong")?.textContent).toBe("n");
     expect(field.querySelector("strong em, em strong")?.textContent).toBe("both");
   });

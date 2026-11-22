@@ -114,6 +114,24 @@ const markdownTyping = Extension.create({
     const editor = this.editor;
     return [
       new InputRule({
+        find: /(?:^|(?<=\n))([-+*]|(\d{1,9})\.)([ \u00a0\u3000])([^\n]*)$/,
+        handler: ({ state, range, match, chain }) => {
+          const $start = state.tr.doc.resolve(range.from);
+          const afterBreak = $start.nodeBefore?.type.name === "hardBreak";
+          const [ , marker, number, space, content ] = match;
+          if ($start.parent.type.name !== "paragraph" || (!afterBreak && $start.parentOffset !== 0)) return null;
+          if (!afterBreak && space === " " && !content) return null;
+          const start = range.from - (afterBreak ? 1 : 0);
+          const commands = chain().deleteRange({ from: start, to: range.from + marker!.length + 1 });
+          if (afterBreak) {
+            commands.setTextSelection(start).splitBlock({ keepMarks: false })
+              .command(({ tr, commands }) => commands.setTextSelection(tr.selection.from + content!.length));
+          }
+          commands.wrapInList(number === undefined ? "bulletList" : "orderedList",
+            number === undefined ? undefined : { start: Number(number) }).run();
+        },
+      }),
+      new InputRule({
         find: /^\[([ xX])\][ \t]$/,
         handler: ({ state, range, match, chain }) => {
           const { $from } = state.selection;
