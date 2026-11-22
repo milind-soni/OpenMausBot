@@ -17,6 +17,7 @@
 //       FAKE_ACP_ASK_PARAMS; the client's reply is written to FAKE_ACP_ASK_ANSWER. FAKE_ACP_ASK_TIMING=with-result
 //       settles the turn with the card open; after-result asks between turns)
 //     | interleave (message, tool, message, tool, message) | no-session-config (set_mode/set_model answer -32601)
+//     | set-model-internal-error (set_model answers -32603)
 //     | ask-peer | delegate-peer | chief-delegate | create-peer (coordinate_bots through the injected agents
 //       MCP; FAKE_ACP_REDELEGATE_FILE, FAKE_ACP_TASKID_FILE; a hand-off result wake gets a fixed line)
 //     | echo-gated (echo the whole prompt; hold until FAKE_ACP_GATE_FILE exists) | safe-agent-reads
@@ -1192,6 +1193,9 @@ function handle(msg: any) {
           (mode === "set-model-invalid-after-first" && configCalls.some((call) => call.method === "session/set_model")))) {
         // Cursor's answer when handed an argv slug like `auto`.
         return out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "Invalid params" } });
+      }
+      if (msg.method === "session/set_model" && mode === "set-model-internal-error") {
+        return out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "Internal error: model switch failed" } });
       }
       const settingId = msg.method === "session/set_mode" ? "modeId" : "modelId";
       if (typeof msg.params?.sessionId !== "string" || typeof msg.params?.[settingId] !== "string") {

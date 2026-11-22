@@ -1,7 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 import { removeTempDir } from "../testing/cleanup.ts";
 import { forbiddenCommand } from "./cdp/testing/real-chrome.ts";
@@ -477,6 +477,29 @@ describe("browsers on one computer", () => {
     const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 1280, maxHeight: 1280 }, (output) => { if (output.type === "frame") output.ack(); });
     expect(await service.closeIdle(20)).toEqual([]);
     await viewer.close();
+  });
+
+  it("gives a slow machine's first tab as long as Chrome's own start, so a start that takes 20 s is not refused at 15 s", async () => {
+    // On a busy or CPU-capped computer Chrome answers on its pipe but its first tab runs late; refusing then made the bot
+    // start Chrome all over again. Only the timers are fake: nothing here waits on the wall clock.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const slow = new FakeBackend(() => {
+        const chrome = new FakeChrome({ documents });
+        chrome.delay = (method) => (method === "Page.enable" ? 20_000 : 0);
+        return chrome;
+      });
+      backends.push(slow);
+      const { call, text } = setup({ backend: () => slow });
+      let result: Awaited<ReturnType<typeof call>> | null = null;
+      void call("agent_browser_open", { url: "https://example.com/form" }).then((answer) => { result = answer; });
+      for (let waited = 0; result === null && waited < 90_000; waited += 1_000) await vi.advanceTimersByTimeAsync(1_000);
+      expect(result).not.toBeNull();
+      expect(text(result!)).not.toContain("No matching tab opened");
+      expect(text(result!)).toContain("Opened https://example.com/form in t1.");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("makes room by closing the least recently used idle browser, and waits, then refuses, when none is idle", async () => {
