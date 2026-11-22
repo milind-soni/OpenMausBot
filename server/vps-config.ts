@@ -1,9 +1,18 @@
 /** The self-hosted VPS settings: the default SSH alias (`vps`) and the named servers (`vpsServers`). */
 import { z } from "zod";
 
-import { cpusetSize, DEFAULT_DESKTOP_RESOURCES, isValidCpuset, MAX_DESKTOP_CPUS, MAX_DESKTOP_MEMORY_GB, MIN_DESKTOP_CPUS, MIN_DESKTOP_MEMORY_GB } from "./container-limits.ts";
+import { cpusetSize, DEFAULT_DESKTOP_RESOURCES, isValidCpuset, MAX_DESKTOP_CPUS, MAX_DESKTOP_MEMORY_GB, MIN_DESKTOP_CPUS, MIN_DESKTOP_MEMORY_GB, type DesktopResources } from "./container-limits.ts";
 
 const SSH_ALIAS = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+
+/** What each bot's VPS desktop may use on the default server. */
+export function vpsResources(cfg: { vps?: VpsConfig }): DesktopResources {
+  return {
+    memoryGb: cfg.vps?.memoryGb ?? DEFAULT_DESKTOP_RESOURCES.memoryGb,
+    cpus: cfg.vps?.cpus ?? DEFAULT_DESKTOP_RESOURCES.cpus,
+    ...(cfg.vps?.cpuset ? { cpuset: cfg.vps.cpuset } : {}),
+  };
+}
 
 export function isValidSshAlias(value: unknown): value is string {
   return typeof value === "string" && SSH_ALIAS.test(value);

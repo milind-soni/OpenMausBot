@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ChevronRight, Loader2, Minus, Pencil, Plus, Trash2 } from "lucide-react";
-import { api, useStore, type ConfigStatus } from "@/state/store";
+import { api, type ConfigStatus } from "@/state/store";
 import { serverFetch } from "@/lib/relay-server";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { cn } from "@/lib/cn";
@@ -261,15 +261,13 @@ function AddServer({ hasDefault, hosts, defaults, disabled, adding, onAdd }: {
 
 /** The default server and the named ones as one list. Saving or deleting never moves a bot, except that bots following the default follow its replacement. */
 export function VpsConnection() {
-  const { state } = useStore();
   const dispatch = useStoreDispatch();
   const named = useStoreSelector((s) => s.config?.vps?.servers ?? NO_SERVERS);
-  const defaultAlias = state.config?.vps?.sshAlias ?? "";
-  const defaults = {
-    memoryGb: state.config?.vps?.memoryGb ?? MEMORY_GB.fallback,
-    cpus: state.config?.vps?.cpus ?? CPUS.fallback,
-  };
-  const defaultCpuset = state.config?.vps?.cpuset;
+  const defaultAlias = useStoreSelector((s) => s.config?.vps?.sshAlias ?? "");
+  const defaultMemory = useStoreSelector((s) => s.config?.vps?.memoryGb ?? MEMORY_GB.fallback);
+  const defaultCpus = useStoreSelector((s) => s.config?.vps?.cpus ?? CPUS.fallback);
+  const defaultCpuset = useStoreSelector((s) => s.config?.vps?.cpuset);
+  const defaults = { memoryGb: defaultMemory, cpus: defaultCpus };
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);

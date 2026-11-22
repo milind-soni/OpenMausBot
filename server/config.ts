@@ -14,7 +14,6 @@ import { isValidSshAlias, normalizeVpsConfig, storedVpsServersSchema, vpsConfigS
 import { configBackupRefusal, configSaveRefusal, readConfigFile, writeConfigBackup } from "./config-backup.ts";
 import { defaultBotThreads, MAX_CONCURRENT_BOT_THREADS } from "./bot-thread-limits.ts";
 import { anthropicKeyEnv } from "./anthropic-key-env.ts";
-import { DEFAULT_DESKTOP_RESOURCES, type DesktopResources } from "./container-limits.ts";
 import { withoutComputerEngine } from "./computer-engine-removal.ts";
 import { newBotDefaultsSchema, type NewBotDefaults } from "./new-bot-defaults.ts";
 import { replaySettings } from "./replay-settings.ts";
@@ -565,14 +564,6 @@ export function parseConfigPatch(value: JsonValue): ConfigPatch {
     throw Object.assign(new Error(schemaIssue(parsed.error, "Invalid configuration")), { status: 400 });
   }
   return parsed.data;
-}
-
-export function vpsResources(cfg: AppConfig): DesktopResources {
-  return {
-    memoryGb: cfg.vps?.memoryGb ?? DEFAULT_DESKTOP_RESOURCES.memoryGb,
-    cpus: cfg.vps?.cpus ?? DEFAULT_DESKTOP_RESOURCES.cpus,
-    ...(cfg.vps?.cpuset ? { cpuset: cfg.vps.cpuset } : {}),
-  };
 }
 
 export function vpsSshAlias(cfg: AppConfig): string | null {
