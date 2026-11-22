@@ -2441,7 +2441,7 @@
           },
           "path": {
             "type": "string",
-            "description": "add_theme_asset: a file of yours."
+            "description": "add_theme_asset: a file of yours or an attachment; left out: the latest picture."
           },
           "steps": {
             "type": "integer",
