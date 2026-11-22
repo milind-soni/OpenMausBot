@@ -28,6 +28,7 @@ const EXPORT = JSON.stringify({ format: GROK_EXPORT_FORMAT, version: 1, bots: [{
 }] });
 const FILES_STAY = "Files on Grok Bot's computer don't come over. Add any your Bot needs.";
 const HISTORY_COMES = "Each Bot's chat comes over too, from the Grok Bot app on this computer.";
+const HANDOVER_LINE = "Handover note: where each piece of its work stands, read in every conversation.";
 const QUIET = JSON.stringify({ format: GROK_EXPORT_FORMAT, bots: [{ name: "Quiet", instructions: "Just chat." }] });
 
 let root: Root;
@@ -136,7 +137,7 @@ describe("Move from Grok Bot", () => {
     await open();
     await paste(QUIET);
     const plan = (await import("@/lib/grok-move")).previewGrokMove;
-    const { plans } = plan(JSON.parse(QUIET).bots.map((bot: object) => ({ ...bot, title: "", description: "", memories: [], userFacts: [], skills: [], routines: [], apps: [] })), { bots: [], servers: new Set(), timeZone: "UTC" });
+    const { plans } = plan(JSON.parse(QUIET).bots.map((bot: object) => ({ ...bot, title: "", description: "", memories: [], userFacts: [], skills: [], routines: [], apps: [], handover: "" })), { bots: [], servers: new Set(), timeZone: "UTC" });
     f.state = { config: {}, bots: [{ id: "here-Quiet", name: "Quiet", installedPackage: { id: plans[0]!.packageId, name: "Quiet" } }] };
     await act(async () => root.unmount());
     root = createRoot(host);
@@ -144,6 +145,45 @@ describe("Move from Grok Bot", () => {
     await paste(QUIET);
     expect(shown()).toContain("Already here: Quiet");
     expect(button("Import")!.disabled).toBe(true);
+  });
+
+  it("names each Bot's handover note in the preview and the report, and has none for a Bot that wrote none", async () => {
+    await open();
+    await paste(JSON.stringify({ format: GROK_EXPORT_FORMAT, bots: [{ name: "Quiet", instructions: "Just chat.", handover: "Drafting the deck." }] }));
+    expect(host.querySelector("[data-grok-move-handover]")?.textContent).toBe(HANDOVER_LINE);
+    plain();
+    expect(shown()).not.toContain("Drafting the deck.");
+    await importIt();
+    expect(host.querySelector("[data-grok-move-handover]")?.textContent).toBe(HANDOVER_LINE);
+    await act(async () => button("Move another Bot")!.click());
+    await paste(QUIET);
+    expect(host.querySelector("[data-grok-move-handover]")).toBeNull();
+  });
+
+  it("from a browser, a Bot already here with a new handover note can still be imported, and its note goes into its memory", async () => {
+    const plan = (await import("@/lib/grok-move")).previewGrokMove;
+    const { plans } = plan(JSON.parse(QUIET).bots.map((bot: object) => ({ ...bot, title: "", description: "", memories: [], userFacts: [], skills: [], routines: [], apps: [], handover: "" })), { bots: [], servers: new Set(), timeZone: "UTC" });
+    f.state = { config: {}, bots: [{ id: "here-Quiet", name: "Quiet", installedPackage: { id: plans[0]!.packageId, name: "Quiet" } }] };
+    const saved: Array<{ path: string; text: string }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: { body: string }) => {
+      const body = JSON.parse(init.body) as { path: string; text: string };
+      saved.push(body);
+      return new Response(JSON.stringify({ ok: true, ...body, hash: "h2", exists: true, overview: {} }), { status: 200 });
+    }));
+    f.api.mockImplementation(async (path: string) => (path.startsWith("/api/bots/here-Quiet/memory/file?path=MEMORY.md")
+      ? { path: "MEMORY.md", text: "- The door sticks\n", hash: "h1", exists: true }
+      : path === "/api/mcp/servers" ? { servers: [] } : {}));
+    await open();
+    await paste(JSON.stringify({ format: GROK_EXPORT_FORMAT, bots: [{ name: "Quiet", instructions: "Just chat.", handover: "Drafting the deck." }] }));
+    expect(shown()).toContain("Already here: Quiet");
+    expect(shown()).toContain("Quiet: its handover note comes over into its memory, in place of an earlier one.");
+    expect(button("Import")!.disabled).toBe(false);
+    await importIt();
+    expect(saved.map((write) => write.path)).toEqual(["MEMORY.md"]);
+    expect(saved[0]!.text).toMatch(/Drafting the deck\.[\s\S]*- The door sticks\n$/);
+    expect(shown()).toContain("Quiet: its handover note is in its memory now.");
+    expect(shown()).not.toContain("Already here");
+    expect(f.api.mock.calls.map(([path]) => path)).not.toContain("/api/teams/import?mode=add");
   });
 
   it("ends on the report: no sign-in, no setup steps, no links out", async () => {
@@ -202,20 +242,21 @@ describe("Move from Grok Bot", () => {
     expect(shown()).toContain("No chat came over: the Grok Bot app isn't on this computer.");
   });
 
-  it("on the desktop app gives a link for Grok Bot, shows the Bots that arrive through it, and ends the link once they are imported", async () => {
+  it("on the desktop app gives a link for Grok Bot, shows the Bots that arrive through it, and lets go of them once imported with the link still up", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     const openExternal = vi.fn();
     vi.stubGlobal("ogb", { remoteClient: { active: false }, openExternal });
-    const link = "https://quiet-test-words.trycloudflare.com/mcp/move/abc";
-    let made = false, sent = false;
+    const link = "https://broker.test/mcp/move/abc";
+    let made = false, sent = false, taken = 0;
     const calls: string[] = [];
-    f.api.mockImplementation(async (path: string, init?: { method?: string }) => {
+    f.api.mockImplementation(async (path: string, init?: { method?: string; body?: string }) => {
       if (path.startsWith("/api/setup-import/grok/connector")) {
-        calls.push(`${init?.method} ${path}`);
+        calls.push(`${init?.method} ${path}${init?.body ? ` ${init.body}` : ""}`);
         if (init?.method === "POST") made = true;
         if (init?.method === "DELETE") made = false;
-        const after = Number(new URL(path, "http://x").searchParams.get("after") ?? 0);
-        return { available: true, ...(made ? { connectorUrl: link } : {}), arrived: made && sent && after < 1 ? [{ seq: 1, at: 5, text: EXPORT }] : [] };
+        taken = Math.max(taken, JSON.parse(init?.body ?? "{}").taken ?? 0);
+        const after = Math.max(taken, Number(new URL(path, "http://x").searchParams.get("after") ?? 0));
+        return { available: true, ...(made ? { link: { url: link, reach: "connected" } } : {}), arrived: made && sent && after < 1 ? [{ seq: 1, at: 5, text: EXPORT }] : [] };
       }
       return path.startsWith("/api/teams/import")
         ? { bots: [{ id: "b1", name: "Job Search", threadId: "t1" }], routines: [], connections: [] }
@@ -236,7 +277,8 @@ describe("Move from Grok Bot", () => {
     await act(async () => { vi.advanceTimersByTime(3_000); });
     await tick();
     expect(shown()).toContain("Arrived from Grok Bot: Job Search");
-    expect(shown()).toContain("The link works for an hour, while MausBot stays open.");
+    expect(shown()).toContain("The link stays on until you turn it off in Settings, and it never changes. What Grok Bot sends passes through MausBot's own service on the way to this computer and is not kept there.");
+    expect(shown()).not.toMatch(/an hour/);
     await act(async () => { vi.advanceTimersByTime(3_000); });
     await tick();
     expect(calls.at(-1)).toBe("GET /api/setup-import/grok/connector?after=1");
@@ -248,44 +290,136 @@ describe("Move from Grok Bot", () => {
     expect(counts()).toMatchObject({ Skills: 2, Routines: 1 });
     await importIt();
     expect(shown()).toContain("Job Search is here");
-    expect(calls.at(-1)).toBe("DELETE /api/setup-import/grok/connector");
+    expect(calls.at(-1)).toBe('POST /api/setup-import/grok/connector {"taken":1}');
+    expect(calls.filter((call) => call.startsWith("DELETE"))).toEqual([]);
+
+    await act(async () => button("Move another Bot")!.click());
+    await act(async () => { vi.advanceTimersByTime(3_000); });
+    await tick();
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Link for Grok Bot"]')!.value).toBe(link);
+    expect(host.querySelector("[data-grok-move-arrived]")).toBeNull();
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    await open();
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Link for Grok Bot"]')!.value).toBe(link);
+    expect(host.querySelector("[data-grok-move-arrived]")).toBeNull();
     vi.useRealTimers();
   });
 
-  it("ends the link when the dialog closes", async () => {
+  it("names the pages and counts the files that arrived for each Bot, brings them over with the Bot, and says where they are", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    vi.stubGlobal("ogb", { remoteClient: { active: false } });
+    const waiting = [{ seq: 2, kind: "page", bot: "Job Search", name: "Applications", bytes: 900 }, { seq: 3, kind: "page", bot: "job search", name: "Offers", bytes: 700 },
+      { seq: 4, kind: "file", bot: "Job Search", name: "cv/resume.md", bytes: 40 }, { seq: 5, kind: "file", bot: "Scout", name: "leads.csv", bytes: 12 }];
+    let brought: unknown = { pages: 2, files: 1, skipped: [] };
+    let held = waiting;
+    const asked: unknown[] = [];
+    f.api.mockImplementation(async (path: string, init?: { method?: string; body?: string }) => {
+      if (path.startsWith("/api/setup-import/grok/connector")) {
+        const after = Number(new URL(path, "http://x").searchParams.get("after") ?? 0);
+        return { available: true, link: { url: "https://broker.test/mcp/move/abc", reach: "connected" }, arrived: after < 1 && held.length ? [{ seq: 1, at: 5, text: EXPORT }] : [], assets: held };
+      }
+      if (path === "/api/setup-import/grok/assets") {
+        asked.push(JSON.parse(init!.body!));
+        held = held.filter((asset) => asset.bot === "Scout");
+        return brought;
+      }
+      return path.startsWith("/api/teams/import")
+        ? { bots: [{ id: "b1", name: "Job Search", threadId: "t1" }], routines: [], connections: [] }
+        : path === "/api/mcp/servers" ? { servers: [] } : {};
+    });
+    await open();
+    expect(shown()).toContain("Arrived from Grok Bot: Job Search, Scout");
+    expect(shown()).not.toMatch(/Applications|resume/);
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-grok-move-use-arrived]")!.click());
+    await tick();
+    expect(counts()).toMatchObject({ Pages: 2, Files: 1 });
+    expect(host.querySelector("[data-grok-move-pages]")!.textContent).toBe("Pages: Applications, Offers");
+    expect(host.querySelector("[data-grok-move-no-setup]")!.textContent).toBe("Pages or files arrived for Scout, but not the setup. Ask the MausBot bot in Grok Bot to send the setup too, then they come over.");
+    await importIt();
+    expect(asked).toEqual([{ botId: "b1", grokName: "Job Search" }]);
+    expect(counts()).toMatchObject({ Pages: 2, Files: 1 });
+    expect(shown()).toContain("Pages open in each bot's “Pages from Grok Bot” chat. Files are in its folder, under from-grok.");
+    expect(shown()).not.toContain(FILES_STAY);
+
+    await act(async () => button("Move another Bot")!.click());
+    expect(host.querySelector("[data-grok-move-arrived]")).toBeNull();
+    await act(async () => { vi.advanceTimersByTime(3_000); });
+    await tick();
+    expect(shown()).toContain("Arrived from Grok Bot: Scout");
+    vi.useRealTimers();
+  });
+
+  it("says which pages and files could not be brought, or that none could, and without any says how they would come", async () => {
+    vi.stubGlobal("ogb", { remoteClient: { active: false } });
+    let brought: unknown = { pages: 1, files: 0, skipped: ["Offers", "cv/huge.bin"] };
+    let assets = [{ seq: 2, kind: "page", bot: "Job Search", name: "Applications", bytes: 900 }];
+    f.api.mockImplementation(async (path: string) => {
+      if (path.startsWith("/api/setup-import/grok/connector")) return { available: true, link: { url: "https://broker.test/mcp/move/abc", reach: "connected" }, arrived: [], assets };
+      if (path === "/api/setup-import/grok/assets") {
+        if (brought instanceof Error) throw brought;
+        return brought;
+      }
+      return path.startsWith("/api/teams/import")
+        ? { bots: [{ id: "b1", name: "Job Search", threadId: "t1" }], routines: [], connections: [] }
+        : path === "/api/mcp/servers" ? { servers: [] } : {};
+    });
+    await open();
+    await paste(EXPORT);
+    await importIt();
+    expect(shown()).toContain("Couldn't be brought over: Offers, cv/huge.bin");
+
+    brought = new Error("offline");
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    await open();
+    await paste(EXPORT);
+    await importIt();
+    expect(shown()).toContain("Its pages and files couldn't be brought over. They are still waiting: choose Import again.");
+
+    assets = [];
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    await open();
+    await paste(EXPORT);
+    await importIt();
+    expect(counts()).not.toHaveProperty("Pages");
+    expect(shown()).toContain("Pages and files come over through the link: ask the MausBot bot in Grok Bot to send them, then choose Import again.");
+  });
+
+  it("leaves the link up when the dialog closes", async () => {
     vi.stubGlobal("ogb", { remoteClient: { active: false } });
     const calls: string[] = [];
     f.api.mockImplementation(async (path: string, init?: { method?: string }) => {
       if (!path.startsWith("/api/setup-import/grok/connector")) return path === "/api/mcp/servers" ? { servers: [] } : {};
       calls.push(`${init?.method} ${path}`);
-      return { available: true, connectorUrl: "https://quiet-test-words.trycloudflare.com/mcp/move/abc", arrived: [] };
+      return { available: true, link: { url: "https://broker.test/mcp/move/abc", reach: "connected" }, arrived: [] };
     });
     await open();
     expect(host.querySelector('input[aria-label="Link for Grok Bot"]')).not.toBeNull();
     expect(calls).not.toContain("DELETE /api/setup-import/grok/connector");
     await act(async () => root.unmount());
     root = createRoot(host);
-    expect(calls.at(-1)).toBe("DELETE /api/setup-import/grok/connector");
+    expect(calls.filter((call) => call.startsWith("DELETE"))).toEqual([]);
   });
 
-  it("says when the link stopped, keeps the Bots that had arrived, and offers a new link", async () => {
+  it("says when Grok Bot can't reach the app, and keeps the link and the Bots that had arrived", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     vi.stubGlobal("ogb", { remoteClient: { active: false } });
-    let stopped = false;
+    let reach = "connected";
     f.api.mockImplementation(async (path: string) => {
       if (!path.startsWith("/api/setup-import/grok/connector")) return path === "/api/mcp/servers" ? { servers: [] } : {};
       const after = Number(new URL(path, "http://x").searchParams.get("after") ?? 0);
-      return { available: true, ...(stopped ? { stopped: true } : { connectorUrl: "https://quiet-test-words.trycloudflare.com/mcp/move/abc" }), arrived: after < 1 ? [{ seq: 1, at: 5, text: EXPORT }] : [] };
+      return { available: true, link: { url: "https://broker.test/mcp/move/abc", reach }, arrived: after < 1 ? [{ seq: 1, at: 5, text: EXPORT }] : [] };
     });
     await open();
     expect(shown()).toContain("Arrived from Grok Bot: Job Search");
-    expect(host.querySelector("[data-grok-move-stopped]")).toBeNull();
-    stopped = true;
+    expect(host.querySelector("[data-grok-move-reach]")).toBeNull();
+    reach = "connecting";
     await act(async () => { vi.advanceTimersByTime(3_000); });
     await tick();
-    expect(host.querySelector("[data-grok-move-stopped]")?.textContent).toBe("The link stopped working. Get a new one and paste it into Grok Bot in place of the old one.");
-    expect(host.querySelector('input[aria-label="Link for Grok Bot"]')).toBeNull();
-    expect(button("Get the link")).toBeDefined();
+    expect(host.querySelector("[data-grok-move-reach]")?.textContent).toBe("On, but MausBot can't get online right now, so Grok Bot can't reach it. It keeps trying, and the link stays the same.");
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Link for Grok Bot"]')!.value).toBe("https://broker.test/mcp/move/abc");
     expect(shown().match(/Arrived from Grok Bot: Job Search/g)).toHaveLength(1);
     await act(async () => host.querySelector<HTMLButtonElement>("[data-grok-move-use-arrived]")!.click());
     await tick();

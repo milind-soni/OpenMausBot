@@ -3788,7 +3788,6 @@
   "botPanel.library.pages": "페이지",
   "botPanel.library.apps": "앱",
   "botPanel.library.files": "파일",
-  "botPanel.library.scope": "이 대화에서",
   "botPanel.thisConversation": "이 대화에서",
   "botPanel.acts.customHint": "고급 모드에서 바꾸세요",
   "botPanel.section.settings": "설정",

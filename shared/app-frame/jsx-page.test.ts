@@ -10,7 +10,7 @@ import packageJson from "../../package.json" with { type: "json" };
 import { BOT_HTML_CDNS } from "./csp.ts";
 import {
   JSX_PAGE_IMPORTS, JSX_PAGE_LIBRARIES, JSX_PAGE_MODULES, JSX_PAGE_SUCRASE, JSX_PAGE_TAILWIND, JSX_RUNTIME_SOURCE, JSX_TRANSFORM_OPTIONS,
-  jsxPageHtml, jsxPublishedHtml, scriptSafe,
+  jsxFolderPageHtml, jsxPageHtml, jsxPublishedHtml, scriptSafe,
 } from "./jsx-page.ts";
 
 type Problem = { kind: string; message: string; line: number | null; excerpt: string };
@@ -175,6 +175,17 @@ describe("the shell's HTML", () => {
     expect(html).not.toContain("<!--");
     expect(html.indexOf("importmap")).toBeLessThan(html.indexOf(JSX_PAGE_TAILWIND));
     expect(html.indexOf(JSX_PAGE_TAILWIND)).toBeLessThan(html.indexOf("type=\"module\""));
+  });
+
+  it("as a folder page's index.html, reads the component file beside it, and says so when it can't", async () => {
+    const html = jsxFolderPageHtml({ title: "Sales", file: "page.js" });
+    expect(html.indexOf("<script type=\"importmap\">")).toBeLessThan(html.indexOf("<script type=\"module\">"));
+    const boot = /<script type="module">([\s\S]*)<\/script><\/body>/.exec(html)![1]!;
+    expect(boot.startsWith("fetch(\"page.js\")")).toBe(true);
+    expect(boot).toContain("title: \"Sales\", source: source }");
+    const root = { textContent: "" };
+    new Function("fetch", "document", boot)(async () => ({ ok: false, status: 404 }), { getElementById: () => root });
+    await vi.waitFor(() => expect(root.textContent).toBe("This page's file, page.js, couldn't be read."));
   });
 
   it("publishes as static HTML: the transpiled code in a plain function, the theme colours, and no compiler", () => {

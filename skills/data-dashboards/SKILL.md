@@ -70,7 +70,7 @@ Cut cards rather than adding a fifth chart.
 **Layout and type**
 - Order: title and filters, then 3 to 5 KPI tiles, the main chart full width, 1 or 2 supporting charts, a detail table, and the source line.
 - Space on a 4, 8, 12, 16, 24, 32 px scale; align to the grid; hairline grid lines; let whitespace separate cards.
-- System font. Tabular numbers in tables and axes; KPI numbers stay proportional.
+- System font (the page already starts sans, line-height 1.385, antialiased); set body to 13 to 14px, headings `letter-spacing:-0.012em`. Tabular numbers (`font-variant-numeric:tabular-nums`) in tables and axes; KPI numbers stay proportional.
 - Format every number and date with `Intl`: compact for KPIs and axes ($1.2M), full in tables and tooltips.
 - Say where the data came from, the dates it covers and when it was refreshed, at the bottom.
 

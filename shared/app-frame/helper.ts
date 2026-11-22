@@ -1,4 +1,5 @@
-// Injected into a bot's page after the CSP meta: theme variables with light and dark defaults, and
+// Injected into a bot's page after the CSP meta: theme variables with light and dark defaults, a zero-specificity
+// base (sans, smoothed, 1.385 line-height) that any rule of the page's own beats, and
 // `window.mausbot`, a minimal MCP Apps View on the same bridge as @modelcontextprotocol/ext-apps `App`:
 //
 //   window.mausbot = {
@@ -27,6 +28,8 @@ export const APP_THEME_STYLE = [
   "--color-border-primary:light-dark(#d8d8de,#3a3a40);",
   "--font-sans:system-ui,-apple-system,\"Segoe UI\",Roboto,\"Helvetica Neue\",Arial,sans-serif;",
   "--font-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}",
+  ":where(html){-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}",
+  ":where(body){font-family:var(--font-sans);line-height:1.385;color:var(--color-text-primary)}",
 ].join("");
 
 /** The page's text selection, read by the desktop host beside the bridge: { text, left, bottom }, or { text: "" } once gone. */

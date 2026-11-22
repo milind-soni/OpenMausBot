@@ -1,6 +1,8 @@
 export interface WebhookMessageView {
   task: string;
   payload?: string;
+  /** The connected app that handed the task over, from the trusted note the server writes first. */
+  app?: string;
 }
 
 /** A view only: the stored model-safe prompt stays untouched, preserving the trust boundary. */
@@ -28,5 +30,6 @@ export function webhookMessageView(text: string): WebhookMessageView | null {
 
   const splitAt = eventData.indexOf("\n\n");
   const payload = (splitAt >= 0 ? eventData.slice(splitAt + 2) : "").trim();
-  return { task, payload: payload || undefined };
+  const app = trustedPrefix.match(/^\[From (.+?), an app the person connected · /)?.[1];
+  return { task, payload: payload || undefined, ...(app ? { app } : {}) };
 }

@@ -232,8 +232,7 @@ export const JSX_RUNTIME_SOURCE = `(function (env) {
 
 const BASE_STYLE = [
   "html,body{margin:0}",
-  "body{font-family:var(--font-sans,system-ui,sans-serif);color:var(--color-text-primary,#1d1d1f);",
-  "background:var(--color-background-primary,#fff);-webkit-font-smoothing:antialiased}",
+  "body{line-height:inherit;background:var(--color-background-primary,#fff)}",
   "#mausbot-root:empty::before{content:\"Loading\\2026\";display:block;box-sizing:border-box;min-height:100vh;padding:24px;font:14px/20px system-ui,sans-serif;opacity:.6}",
   ".mausbot-problem{position:fixed;inset:12px;overflow:auto;z-index:2147483646;border-radius:12px;padding:16px 18px;",
   "font:14px/1.5 system-ui,sans-serif;background:#fff6f5;color:#5c1712;border:1px solid #f3c2bd;box-shadow:0 8px 24px rgba(0,0,0,.12)}",
@@ -267,6 +266,14 @@ function shell(input: { title: string; head: string; boot: string }): string {
 export function jsxPageHtml(input: { title: string; source: string }): string {
   const env = `{ doc: document, win: window, load: function (name) { return import(name); }, title: ${scriptJson(input.title)}, source: ${scriptJson(input.source)} }`;
   return shell({ title: input.title, head: "", boot: `(${JSX_RUNTIME_SOURCE})(${env});` });
+}
+
+export function jsxFolderPageHtml(input: { title: string; file: string }): string {
+  const env = `{ doc: document, win: window, load: function (name) { return import(name); }, title: ${scriptJson(input.title)}, source: source }`;
+  const unread = `document.getElementById("mausbot-root").textContent = ${scriptJson(`This page's file, ${input.file}, couldn't be read.`)};`;
+  const boot = `fetch(${scriptJson(input.file)}).then(function (answer) { if (!answer.ok) throw new Error(String(answer.status)); return answer.text(); })`
+    + `.then(function (source) { (${JSX_RUNTIME_SOURCE})(${env}); }, function () { ${unread} });`;
+  return shell({ title: input.title, head: "", boot });
 }
 
 /** Code inside a script element: a `<` that would start `</script` or `<!--` is escaped, which reads the same in JS. */

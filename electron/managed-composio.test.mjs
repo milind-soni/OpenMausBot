@@ -31,6 +31,10 @@ describe("managed Composio desktop registration", () => {
     expect(managedComposioBrokerUrl("http://broker.example", true)).toBe("");
   });
 
+  it("keeps the service on mcp.mausbot.com: every Grok Bot link people paste is made from this address", () => {
+    expect(DEFAULT_MANAGED_COMPOSIO_BROKER_URL).toBe("https://mcp.mausbot.com");
+  });
+
   it("accepts HTTPS and loopback development brokers but rejects insecure remote URLs", async () => {
     expect(normalizeManagedComposioBrokerUrl("https://broker.example/root/")).toBe(
       "https://broker.example/root",
@@ -72,6 +76,10 @@ describe("managed Composio desktop registration", () => {
       OMB_COMPOSIO_BROKER_URL: "http://[::1]:8787",
       OMB_COMPOSIO_BROKER_TOKEN: TOKEN,
     });
+    expect(
+      managedComposioChildEnvironment("https://broker.example", {}, { PATH: "/usr/bin", OMB_COMPOSIO_BROKER_TOKEN: "attacker-controlled" }),
+      "the URL alone, for the Grok Bot link, which needs no installation",
+    ).toEqual({ PATH: "/usr/bin", OMB_COMPOSIO_BROKER_URL: "https://broker.example" });
   });
 
   it("registers a new installation and persists it", async () => {

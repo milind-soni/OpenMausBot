@@ -11,6 +11,7 @@ import { importOutcome, localSetupImport, setupImportApi, skillsSummary, toolsSu
 import { useStore } from "@/state/store";
 import { detectionCount, detectionSources, type SetupDetection, type SetupImportResult, type SetupSource } from "../../shared/setup-import";
 import { GrokBotMark } from "./GrokBotMark";
+import { GrokConnectorPart } from "./GrokConnector";
 import { HermesMark } from "./HermesMark";
 import { GrokMoveDialog } from "./lazy-screens";
 import { OpenClawMark } from "./OpenClawMark";
@@ -251,6 +252,7 @@ export function ImportSettings({ client = setupImportApi, children }: { client?:
     return (
       <SettingsRows>
         <GrokImportSection />
+        <GrokConnectorPart />
         <AiAppsImport client={client} local={localSetupImport(state.config?.cloudHome === true)} />
         {children}
       </SettingsRows>

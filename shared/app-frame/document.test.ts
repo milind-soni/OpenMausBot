@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { BOT_HTML_CSP, mcpAppCsp } from "./csp.ts";
-import { botHtmlDocument, buildSrcdoc, CSP_META_PREFIX, mcpAppDocument, stripDocumentPreamble } from "./document.ts";
+import { botHtmlDocument, buildSrcdoc, CSP_META_PREFIX, mcpAppDocument, publishedBotHtml, stripDocumentPreamble } from "./document.ts";
 import { APP_HELPER_SOURCE, APP_ROOM_HELPER_SOURCE, APP_THEME_STYLE } from "./helper.ts";
 import { APP_POINT_SOURCE } from "./point.ts";
 
@@ -41,6 +41,20 @@ describe("buildSrcdoc", () => {
     const bot = buildSrcdoc({ html: "<p>x</p>", csp: CSP, botHelper: true });
     expect(bot).toBe(`${head}<style>${APP_THEME_STYLE}</style><script>${APP_HELPER_SOURCE}</script><script>${APP_POINT_SOURCE}</script><p>x</p>`);
     expect(buildSrcdoc({ html: "<p>x</p>", csp: CSP })).not.toContain("mausbot");
+  });
+
+  it.each([
+    ["bot page", (html: string) => buildSrcdoc({ html, csp: CSP, botHelper: true })],
+    ["published page", (html: string) => publishedBotHtml(html)],
+  ])("a %s gets a sans, smoothed base ahead of its own CSS, at zero specificity", (_name, build) => {
+    const doc = build("<style>body{font-family:Georgia}</style><p>x</p>");
+    const base = doc.indexOf(":where(body){font-family:var(--font-sans);line-height:1.385");
+    expect(base).toBeGreaterThan(-1);
+    expect(doc.indexOf("-webkit-font-smoothing:antialiased")).toBeGreaterThan(-1);
+    expect(base).toBeLessThan(doc.indexOf("body{font-family:Georgia}"));
+    const rules = APP_THEME_STYLE.replace(/:root\{[^}]*\}/, "").match(/[^{}]+(?=\{)/g) ?? [];
+    expect(rules.length).toBeGreaterThan(0);
+    for (const selector of rules) expect(selector).toMatch(/^:where\([a-z]+\)$/);
   });
 
   it("keeps the helper free of anything that would end its script element", () => {
