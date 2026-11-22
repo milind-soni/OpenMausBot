@@ -15,6 +15,7 @@
 //   FAKE_AGY_LOGIN          no-link | hold | stay | bad-domain | bad-redirect | state-less: how `--login` misbehaves
 //   FAKE_AGY_LOGOUT         refuse | ignore: `logout` fails, or answers and forgets nothing
 //   FAKE_AGY_HANG           initialize | session-new: never answers that request; crash: exits on session/new
+//   FAKE_AGY_SESSION_ERROR  a message session/new fails with as -32000, signed in or not
 //   FAKE_AGY_KEYRING        a folder that stands for the OS keyring: the sign-in is kept there, one entry per --gemini-dir,
 //                           and only `logout` removes it
 import { createHash } from "node:crypto";
@@ -142,6 +143,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     case "session/new":
       if (process.env.FAKE_AGY_HANG === "session-new") return;
       if (process.env.FAKE_AGY_HANG === "crash") process.exit(3);
+      if (process.env.FAKE_AGY_SESSION_ERROR) return failure(message.id, -32000, process.env.FAKE_AGY_SESSION_ERROR);
       if (!signedIn()) return failure(message.id, -32000, "Authentication required");
       sessions += 1;
       result(message.id, { sessionId: `fixture-session-${process.pid}-${sessions}`, configOptions: configOptions() });

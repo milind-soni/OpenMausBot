@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -116,6 +116,8 @@ describe("the never-list on an ACP request", () => {
       expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/dangling` }] }, root)).toBe(false);
       expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/dangling/x` }] }, root)).toBe(false);
       expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/new-folder/x` }] }, root)).toBe(true);
+      writeFileSync(join(root, "file.txt"), "");
+      expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/file.txt/x` }] }, root)).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
       rmSync(outside, { recursive: true, force: true });

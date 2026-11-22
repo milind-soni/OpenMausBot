@@ -89,7 +89,7 @@ function realTarget(path: string): string | undefined {
       return join(realpathSync(existing), ...rest);
     } catch {
       // A link whose target is missing is there but cannot be followed here, while a write would follow it.
-      if (lstatSync(existing, { throwIfNoEntry: false })) return undefined;
+      try { if (lstatSync(existing, { throwIfNoEntry: false })) return undefined; } catch { return undefined; }
       const parent = dirname(existing);
       if (parent === existing) return undefined;
       rest.unshift(basename(existing));

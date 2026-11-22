@@ -1,5 +1,6 @@
 // Google Antigravity through its official ACP server: managed runtime, isolated Google profile,
 // model/mode configuration and OAuth.
+import type { ChildProcess } from "node:child_process";
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import { dirname, join } from "node:path";
 import { stageAntigravitySkills } from "./antigravity-skills.ts";
@@ -108,14 +109,22 @@ const launched = new Map<string, { version: string | null; nativeCli: boolean }>
 const nativeSignIn = new NativeSignInCache();
 const loginProcesses = new Map<string, LoginProcesses>();
 
+const tracked = (instanceId: string) => (child: ChildProcess) => runtimeProcesses.track(instanceId, child);
+
+/** Best effort: a record that cannot be written must not fail the session the CLI just started. */
+function noteNativeSession(instanceId: string, cli: string | undefined): void {
+  try { noteAntigravityNativeCredentials(instanceId, cli); }
+  catch (error) { console.warn(`antigravity: could not note a native sign-in: ${error instanceof Error ? error.message : String(error)}`); }
+}
+
 const nativeRuntimeKey = (runtime: AntigravityRuntime) => `${runtime.executablePath}\0${runtime.version}`;
 
 /** Whether the native CLI accepts a session for this instance, kept for a short while. Throws when the CLI could not say:
  * that is not "signed out". */
 async function nativeSignedIn(instanceId: string, cli: string | undefined, runtime: AntigravityRuntime, profile: AntigravityProfile): Promise<boolean> {
   return await nativeSignIn.state(instanceId, nativeRuntimeKey(runtime), async () => {
-    const found = await antigravityCliSignIn(runtime, profile);
-    if (found === "in") noteAntigravityNativeCredentials(instanceId, cli);
+    const found = await antigravityCliSignIn(runtime, profile, { onProcess: tracked(instanceId) });
+    if (found === "in") noteNativeSession(instanceId, cli);
     return found;
   }) === "in";
 }
@@ -183,7 +192,7 @@ const support: AcpSupport = {
       runtime,
       profile,
       fallbackDefault: currentEngineCatalog("antigravity").default,
-      ...(native ? { sessionAccepted: () => noteAntigravityNativeCredentials(instanceId, config.cli) } : {}),
+      ...(native ? { sessionAccepted: () => noteNativeSession(instanceId, config.cli), onProcess: tracked(instanceId) } : {}),
     }).catch((error: unknown) => { throw native ? nativeDiscoveryError(instanceId, error) : error; });
     for (const option of catalog.options) offeredModels.add(option.id);
     return catalog;
@@ -195,13 +204,13 @@ const support: AcpSupport = {
   authFailure: "fail",
   // The native CLI answers `authenticate` by opening a browser on its own machine, so only `acp --login` signs it in.
   skipsAuthenticate: (instanceId) => launched.get(instanceId)?.nativeCli === true,
-  sessionAccepted: (instanceId, config) => { if (launched.get(instanceId)?.nativeCli === true) noteAntigravityNativeCredentials(instanceId, config.cli); },
-  classifyError: (error) => antigravitySignInError(error) ? "invalid_credentials" : undefined,
+  sessionAccepted: (instanceId, config) => { if (launched.get(instanceId)?.nativeCli === true) noteNativeSession(instanceId, config.cli); },
+  classifyError: (error) => antigravityCliRefusedSession(error) ? "invalid_credentials" : undefined,
   // With a stored token Google no longer honours, agy_acp_server 1.4.3 prints its sign-in link and waits on
   // `authenticate`.
   signInRequest: {
     stderrLine: (line) => authorizationUrlFromLine(line) !== null,
-    rpcError: antigravitySignInError,
+    rpcError: (error, instanceId) => launched.get(instanceId)?.nativeCli === true ? antigravityCliRefusedSession(error) : antigravitySignInError(error),
     required: (instanceId) => { nativeSignIn.forget(instanceId); noteAntigravitySignInRequired(antigravityTokenPath(instanceId)); },
   },
   processStarted: (child, instanceId) => runtimeProcesses.track(instanceId, child),
@@ -326,7 +335,7 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       // Its processes are gone before the CLI is asked: one still running keeps the account it started with.
       if (!(await runtimeProcesses.stopped(input.instanceId))) throw new Error("Antigravity is still running for this account and could not be stopped. Try again.");
       if (current?.runtime.harnessPath === null && !antigravityNativeCredentialsHeld(input.instanceId)) {
-        const found = await antigravityCliSignIn(current.runtime, current.profile, { waitForExit: true })
+        const found = await antigravityCliSignIn(current.runtime, current.profile, { waitForExit: true, onProcess: tracked(input.instanceId) })
           .catch(() => { throw new Error("Antigravity could not confirm whether this account is signed in. Try again."); });
         if (found === "in") noteAntigravityNativeCredentials(input.instanceId, input.config.cli);
       }
@@ -346,7 +355,7 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
         if (!cli) throw new Error(`Antigravity's native CLI is needed to sign this account out, and could not be started: ${failures.join(" ")}`);
       }
       nativeSignIn.forget(input.instanceId);
-      await signOutAntigravityCli(cli.runtime, cli.profile);
+      await signOutAntigravityCli(cli.runtime, cli.profile, { onProcess: tracked(input.instanceId) });
       clearAntigravityNativeCredentials(input.instanceId);
     };
     return {

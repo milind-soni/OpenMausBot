@@ -16,16 +16,16 @@ export interface AcpDriverHooks {
     /** Whether a whole stderr line announces the request. */
     stderrLine(line: string): boolean;
     /** Whether a request's error means the same. */
-    rpcError(error: unknown): boolean;
+    rpcError(error: unknown, instanceId: string): boolean;
     required(instanceId: string): void;
   };
   /** Whether this instance's agent is never sent `authenticate`, because it answers by opening a browser nobody sees: its
    * turns, background text and model discovery start the session directly, and a session it refuses for want of a sign-in
    * fails as a sign-in request. */
   skipsAuthenticate?(instanceId: string): boolean;
-  /** A turn's agent started a new session, before anything else about it is read. */
+  /** The agent started a new session for a turn or background text. */
   sessionAccepted?(instanceId: string, config: AcpConfig): void;
-  /** Every agent process the driver starts for turns. */
+  /** Every agent process the driver starts for turns and background text. */
   processStarted?(child: ChildProcess, instanceId: string): void;
   /** Extra session/new, session/load and session/resume parameters, from the agent's initialize answer. */
   sessionSetupParams?(initializeResult: unknown): Record<string, unknown>;
@@ -112,7 +112,7 @@ export class SignInRequests {
   /** The sign-in failure `error` stands for, or null when it is some other failure. */
   asked(error: unknown): Error | null {
     if (this.is(error)) return error as Error;
-    if (!this.#support.signInRequest?.rpcError(error)) return null;
+    if (!this.#support.signInRequest?.rpcError(error, this.#instanceId)) return null;
     this.#support.signInRequest.required(this.#instanceId);
     return this.#error();
   }

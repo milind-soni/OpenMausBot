@@ -291,6 +291,23 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
       const { done } = await turn(turned, "native-noted-turn", fixture.directory);
       expect(done).toMatchObject({ ok: true });
       expect(antigravityNativeCredentialsHeld("antigravity-native-noted-turn")).toBe(true);
+
+      const background = await create("antigravity-native-noted-background", fixture);
+      await loginAt(fixture, antigravityProfileDirectory("antigravity-native-noted-background"), "fixture-code");
+      expect(await background.generateMemoryText!("hello")).toBe("fixture reply");
+      expect(antigravityNativeCredentialsHeld("antigravity-native-noted-background")).toBe(true);
+    }, 120_000);
+
+    it("does not ask for a sign-in when the CLI's sign-in service is down, in a turn or background text", async () => {
+      const fixture = nativeFixture(folder());
+      const instanceId = "antigravity-native-service-down";
+      const instance = await create(instanceId, fixture, { FAKE_AGY_SESSION_ERROR: "Authentication service unavailable" });
+      await loginAt(fixture, antigravityProfileDirectory(instanceId), "fixture-code");
+      const { done, events } = await turn(instance, "native-service-down", fixture.directory);
+      expect(done).toMatchObject({ ok: false });
+      expect(done).not.toMatchObject({ stopReason: "auth_required" });
+      expect(events.some((event) => event.type === "runtime.error" && (event as { setup?: boolean }).setup === true)).toBe(false);
+      await expect(instance.generateMemoryText!("hello")).rejects.not.toThrow(LOGIN_NOTE);
     }, 120_000);
   });
 

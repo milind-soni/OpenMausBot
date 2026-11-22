@@ -448,6 +448,29 @@ describe("a runtime with more than one release channel", () => {
     }
   });
 
+  it("comes back in minutes for a channel a turn kept it from, even after the first channel failed", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-engine-updates-"));
+    try {
+      let busy = false;
+      const queue: Array<{ version: string; channel: string }> = [{ version: "1.5.7", channel: "native" }, { version: "1.1.1", channel: "pinned" }];
+      const managed = {
+        older: async (skip: readonly string[] = []) => queue.find((entry) => !skip.includes(entry.channel)) ?? null,
+        install: async () => { busy = true; throw new Error("Google download failed (500)."); },
+        folder: join(scratch, "runtimes"),
+      };
+      const engines = createEngineUpdater({
+        plans: [{ driverKind: "managedEngine", name: "Managed", pin: { target: "1.4.3", minimum: "1.4.3" }, managed }],
+        baseDir: scratch, statePath: join(scratch, "state.json"), turnRunning: () => busy, log: () => {},
+        liveCommands: () => [], steps: noSteps(),
+      });
+      const started = Date.now();
+      await engines.check();
+      expect(engines.dueAt() - started).toBeLessThanOrEqual(6 * 60_000);
+    } finally {
+      await removeTempDir(scratch);
+    }
+  });
+
   it("still tries the other channel when the first channel's install fails", async () => {
     const asked: Array<string | undefined> = [];
     const run = setup([{ version: "1.5.7", channel: "native" }, { version: "1.1.1", channel: "pinned" }, null], async (channel) => {

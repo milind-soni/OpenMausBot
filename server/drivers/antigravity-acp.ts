@@ -686,6 +686,7 @@ export async function probeAntigravityModels(input: {
   timeoutMs?: number;
   /** Called as soon as the agent starts a session, before its answer is read. */
   sessionAccepted?: () => void;
+  onProcess?: (child: ChildProcess) => void;
 }): Promise<ModelCatalog> {
   const deadline = Date.now() + (input.timeoutMs ?? STARTUP_CAP_MS);
   const remaining = () => {
@@ -694,6 +695,7 @@ export async function probeAntigravityModels(input: {
     return Math.min(milliseconds, STARTUP_TIMEOUT_MS);
   };
   const client = new AntigravityAcpClient(input.runtime, input.profile, input.cwd ?? input.profile.directory);
+  input.onProcess?.(client.child);
   try {
     const initialized = await client.initialize(remaining(), deadline);
     // Native CLI 1.5.14 opens the system browser on `authenticate` and waits 300 s for it; its sign-in is `acp --login`.

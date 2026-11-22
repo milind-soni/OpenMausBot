@@ -352,7 +352,9 @@ export function createEngineUpdater(options: EngineUpdaterOptions): EngineUpdate
           log(`Engine update: ${plan.name} ${outcome.updated.from} → ${outcome.updated.to}`);
           changed = true;
         }
-        state.engines[plan.driverKind] = { ...engine, ...moved, failures, retryAt: now() + retryDelay(plan, outcome.from, failures) };
+        // A channel the pass did not reach for a turn is due in minutes, not on the failed channel's backoff.
+        const retryAt = now() + (outcome.busyAfter ? ENGINE_UPDATE_BUSY_RETRY_MS : retryDelay(plan, outcome.from, failures));
+        state.engines[plan.driverKind] = { ...engine, ...moved, failures, retryAt };
         log(`Engine update: ${plan.name} stays on ${outcome.from}; ${outcome.to} could not be installed (${outcome.reason.split("\n")[0]}). Trying again later.`);
       } else if (engine.failures) {
         state.engines[plan.driverKind] = { updatedTo: engine.updatedTo, updatedAt: engine.updatedAt };

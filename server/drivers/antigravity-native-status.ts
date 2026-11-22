@@ -3,6 +3,7 @@
 // The CLI keeps its sign-in in the OS keyring (or a file in the profile) and has no status command: the answer is
 // whether `session/new` is accepted. `-32000 Authentication required` is signed out; anything else that stops the
 // answer (a timeout, a crash) says nothing, and is thrown, never counted as signed out.
+import type { ChildProcess } from "node:child_process";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -19,6 +20,8 @@ export interface NativeProbeTiming {
   initializeMs?: number;
   capMs?: number;
   requestMs?: number;
+  /** Every CLI process started, so a sign-out can wait for it. */
+  onProcess?: (child: ChildProcess) => void;
 }
 
 const INITIALIZE_WINDOW_MS = 20_000;
@@ -44,12 +47,13 @@ export const antigravityNativeTokenPath = (profile: Pick<AntigravityProfile, "di
 async function withCli<T>(
   runtime: AntigravityRuntime,
   profile: AntigravityProfile,
-  waitForExit: boolean,
+  timing: NativeProbeTiming & { waitForExit?: boolean },
   work: (client: AntigravityAcpClient) => Promise<T>,
 ): Promise<T> {
   const client = new AntigravityAcpClient(runtime, profile, profile.directory);
+  timing.onProcess?.(client.child);
   const result = await work(client).then((value) => ({ value }), (error: unknown) => ({ error }));
-  if (!waitForExit) client.close();
+  if (!timing.waitForExit) client.close();
   else if (!(await client.closeAndWait())) throw new Error("Antigravity did not shut down when asked to.");
   if ("error" in result) throw result.error;
   return result.value;
@@ -61,7 +65,7 @@ export async function antigravityCliSignIn(
   profile: AntigravityProfile,
   timing: NativeProbeTiming & { waitForExit?: boolean } = {},
 ): Promise<NativeSignIn> {
-  return await withCli(runtime, profile, timing.waitForExit === true, async (client) => {
+  return await withCli(runtime, profile, timing, async (client) => {
     const initialized = await client.initialize(timing.initializeMs ?? INITIALIZE_WINDOW_MS, Date.now() + (timing.capMs ?? INITIALIZE_CAP_MS));
     let session: { sessionId?: unknown } | undefined;
     try {
@@ -84,7 +88,7 @@ export async function antigravityCliSignIn(
 /** Asks the CLI to forget its sign-in, then removes the file store it may have used. A refused `logout` is not final:
  * the sign-out is judged by a new session afterwards. */
 async function logoutAndForget(runtime: AntigravityRuntime, profile: AntigravityProfile, timing: NativeProbeTiming): Promise<void> {
-  await withCli(runtime, profile, true, async (client) => {
+  await withCli(runtime, profile, { ...timing, waitForExit: true }, async (client) => {
     const initialized = await client.initialize(timing.initializeMs ?? INITIALIZE_WINDOW_MS, Date.now() + (timing.capMs ?? INITIALIZE_CAP_MS));
     if (advertised(initialized?.agentCapabilities?.auth?.logout)) await client.request("logout", {}, timing.requestMs ?? REQUEST_MS).catch(() => {});
   });
