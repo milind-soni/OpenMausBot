@@ -3719,5 +3719,9 @@
   "skillBurger.menu.aria": "{name} के लिए और",
   "skillBurger.menu.rename": "नाम बदलें…",
   "skillBurger.card.everyChat": "हर चैट",
-  "skillBurger.page.empty": "आपके बॉट जो Skill Burgers बनाते हैं, वे यहाँ दिखते हैं।"
+  "skillBurger.page.empty": "आपके बॉट जो Skill Burgers बनाते हैं, वे यहाँ दिखते हैं।",
+  "chat.notice.savedToThread": "इस थ्रेड में सहेजा गया",
+  "memoryPage.thisThread": "यह थ्रेड",
+  "memoryPage.everywhere": "हर जगह",
+  "memoryPage.empty": "यहाँ अभी कुछ याद नहीं रखा गया है। जो भी आप चाहते हैं कि यह जाने, लिखें।"
 }

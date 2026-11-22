@@ -13,7 +13,7 @@ import { callTriggerTool, TRIGGER_TOOL_NAMES } from "./agents-call-triggers.ts";
 import { catalogProfileFromEnv, fullInputSchema, SHARED_COMPUTER_TOOL_NAMES } from "./agents-catalog.ts";
 import { harnessClientFromEnv } from "./agents-client.ts";
 import type { HarnessClient, Json } from "./agents-client.ts";
-import { memorySearchText } from "./memory-search-text.ts";
+import { memorySavedText, memorySearchText, threadNotesSearchText } from "./memory-search-text.ts";
 import { apiAnswer, boundedAgentResult } from "./agents-result.ts";
 import { argumentNames, outOfBounds } from "./agents-schema.ts";
 import { dropBlankArguments } from "./agents-blank-arguments.ts";
@@ -745,23 +745,19 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
         action: args.action,
         text: args.text,
         oldText: args.old_text,
-        ...(typeof args.until === "string" && args.until.trim() ? { until: args.until.trim() } : {}),
+        ...(typeof args.until === "string" && args.until.trim() ? { until: args.until.trim() } : {}), ...(args.scope === "thread" || args.scope === "everywhere" ? { scope: args.scope } : {}),
       }),
     });
     if (r.error || r.ok !== true) return { text: String(r.error ?? "Memory update was not confirmed."), isError: true };
     if (args.action === "forget") return { text: forgetText(String(args.old_text), r) };
     if (args.action === "prefer") return { text: preferText(r) };
-    const entry = typeof r.entry === "string" && r.entry ? ` Entry: ${r.entry}` : "";
     const moved = Array.isArray(r.moved) ? r.moved.filter((line) => typeof line === "string") : [];
-    const full = r.truncated
-      ? "\nSaved, but the lines that never move out of MEMORY.md (hand-written ones, health and safety facts) fill what loads each session, so the newest entries do not load. Tell the person their saved notes are full, and that they can remove ones they no longer need under What it remembers in your panel."
-      : "";
     const shown = moved.slice(0, MOVED_ENTRIES_SHOWN).map((text) => text.split("\n")[0]);
     const more = moved.length > shown.length ? `\n…and ${moved.length - shown.length} more` : "";
     const movedNote = moved.length
       ? `\nTo stay within what loads each session, moved ${moved.length === 1 ? "1 older entry" : `${moved.length} older entries`} to your archive (session_search finds them):\n${shown.join("\n")}${more}`
       : "";
-    return { text: `Memory updated.${entry}${full}${movedNote}` };
+    return { text: `${memorySavedText(r)}${movedNote}` };
   }
   if (name === "retry_thread") {
     const botId = String(args.bot_id ?? "").trim();
@@ -816,8 +812,8 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (since) query.set("since", since);
     if (until) query.set("until", until);
     if (typeof args.limit === "number" && Number.isFinite(args.limit)) query.set("limit", String(Math.trunc(args.limit)));
-    if (args.scope === "conversations" || args.scope === "memory" || args.scope === "team") query.set("scope", args.scope);
-    const r = await api(`/api/internal/session-search?${query.toString()}`);
+    if (args.scope === "conversations" || args.scope === "memory" || args.scope === "team" || args.scope === "threads") query.set("scope", args.scope);
+    const r = await api(`/api/internal/session-search?${query.toString()}`); if (args.scope === "threads") return q ? { text: threadNotesSearchText(q, Array.isArray(r.threadNotes) ? r.threadNotes.filter(jsonRecord) : []) } : { text: "session_search scope \"threads\" needs a query: a few words naming the conversation or what was agreed there.", isError: true };
     const hits = Array.isArray(r.hits) ? (r.hits as Json[]) : [];
     const memoryHits = Array.isArray(r.memoryHits) ? r.memoryHits.filter(jsonRecord) : [];
     const teamHits = Array.isArray(r.teamHits) ? r.teamHits.filter(jsonRecord) : [];

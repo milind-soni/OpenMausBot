@@ -270,7 +270,7 @@ import {
 import { EventBus } from "./harness/bus.ts"; import { publicReplyEvent } from "./harness/public-reply.ts";
 import { ENGINE_LIST_REUSE_MS, engineMemory, enginesByUse, ProviderRegistry } from "./harness/registry.ts"; import { afterFirstEngineRead, holdUntilFirstEngineRead } from "./first-engine-read.ts"; import { HANDOFF_BROWSER_NOTE, HANDOFF_BROWSER_ONLY, handoffSurface, StoppedHandoffs, stoppedHandoffResult } from "./host/handoff-browser.ts";
 import { ManagedDesktopProviders } from "./managed-desktop.ts";
-import { mainThread, wasOldestThread } from "./main-thread.ts";
+import { mainThread, wasOldestThread } from "./main-thread.ts"; import { createThreadSaveLines, createThreadScope, scopedMemoryUpdate, searchThreadNotes, threadNotesPrompt } from "./thread-notes.ts";
 import { computerKindForResource, ManagedDesktopPolicy, type ComputerKind } from "./managed-policy.ts"; import { nudgeCloudTeamPolicy, remoteAccessPaths, startCloudTeamPolicy, stopCloudTeamPolicy } from "./cloud-team-policy.ts"; import { startCloudTeamRoster, stopCloudTeamRoster } from "./cloud-team-roster.ts"; import { createTeamWelcomeStore } from "./team-welcome.ts"; import { teamOnboarding, teamSignInFor } from "./host/team-join-host.ts";
 import { hostedModelPolicy, HOSTED_MODEL_POLICY_HEADER } from "./hosted-models.ts";
 import { CLOUD_HOME_SECRET_KEYS, CLOUD_IGNORED_KEYS, cloudHomeConfiguration, cloudHomeOffersPlace, cloudHomePlaceRefusal, firstCloudTurnPatch } from "./cloud-home.ts";
@@ -5089,7 +5089,7 @@ const memoryUpkeep = createMemoryUpkeep({
     return captureTurnFor(threadId, turnId);
   },
   ...(lendingMemory ? { writing: <T>(botId: string, write: () => T): T => lendingMemory.trustedWrite(botId, write) } : {}),
-  conversations: (botId, since) => CLOUD_TEAM ? [] : dreamConversations(store, teamHost.baseBotId(botId), since, (threadId) => !routines?.runForThread(threadId) && (!CLOUD_PERSONAL || cloudOwnerOnlyThread(threadId)), CLOUD_PERSONAL ? (sender) => cloudProvenOwnerPerson(sender?.id) : undefined),
+  conversations: (botId, since) => CLOUD_TEAM ? [] : dreamConversations(store, teamHost.baseBotId(botId), since, (threadId) => !routines?.runForThread(threadId) && !threadScoped(teamHost.baseBotId(botId), threadId) && (!CLOUD_PERSONAL || cloudOwnerOnlyThread(threadId)), CLOUD_PERSONAL ? (sender) => cloudProvenOwnerPerson(sender?.id) : undefined),
   quietMs: () => captureQuietMs(cfg), tidyHour: () => tidyHour(cfg), dreamer: () => proactive.dreamer(),
   log: (line) => console.log(line),
 });
@@ -5271,7 +5271,7 @@ bus.subscribe((event: RuntimeEvent) => {
     }
     const bot = store.botByThread(event.threadId);
     if (!bot || !upkeepEnabled(bot) || isInternalTurn(event.threadId)
-      || isUnattended(bot.id, event.threadId) || routines?.runForThread(event.threadId)) return;
+      || isUnattended(bot.id, event.threadId) || routines?.runForThread(event.threadId) || threadScoped(bot.id, event.threadId)) return;
     if (CLOUD_PERSONAL && !cloudOwnerOnlyThread(event.threadId)) return;
     const turn = captureTurnFor(event.threadId, event.turnId);
     if (turn) memoryUpkeep.noteTurn(teamHost.layer(bot.id, event.threadId), event.threadId, teamHost.ownTurn(event.threadId) ? { ...turn, owner: true } : turn);
@@ -8293,7 +8293,7 @@ async function beginTurn(
         // Volatile, so a teammate starting or finishing never changes the stable half.
         teamAvailabilityPart(coordinationPrompt ? sectionPeers : []),
         { id: "recent", label: "Recent work", text: recentWorkPrompt(recentWork(recentWorkSources(bot), bot, { userName: CLOUD_TEAM ? teamHost.personName(teamConversationPerson(threadId)) ?? "the team" : cfg.profile?.name?.trim() || "User", currentThreadId: threadId, ...recentWorkFilter(threadId) })) },
-        { id: "memory-rules", label: "How memory works", text: memoryRulesPrompt(teamHost.layer(bot.id, threadId), memoryOpts) }, { id: "memory", label: "Memory", text: memoryNotesPrompt(teamHost.layer(bot.id, threadId), memoryOpts) + teamHost.sharedNotesPrompt(bot.id, threadId) },
+        { id: "memory-rules", label: "How memory works", text: memoryRulesPrompt(teamHost.layer(bot.id, threadId), memoryOpts) }, { id: "memory", label: "Memory", text: memoryNotesPrompt(teamHost.layer(bot.id, threadId), memoryOpts) + threadNotesPrompt(bot.id, threadId, { ...memoryOpts, scoped: threadScoped(bot.id, threadId) }) + teamHost.sharedNotesPrompt(bot.id, threadId) },
         // liveBot predates awaited setup work; an assignment PUT in that window must still reach this prompt.
         { id: "skills", label: "Skills index", text: privateWorkspace ? skillsHost.skillsIndex(store.bot(bot.id) ?? bot, threadId, instance, cwd ?? null) : "" },
         { id: "skill-instructions", label: "Skill instructions", text: skillInstructions },
@@ -8545,7 +8545,7 @@ function routineSourceOwner(run: Pick<RoutineRun, "botId" | "sourceThreadId" | "
 function mainThreadTasks(botId: string) { const tasks = store.tasks(botId), own = store.bot(botId)?.defaultBot?.person ? [...tasks].sort((a, b) => a.createdAt - b.createdAt)[0]?.threadId : undefined; return CLOUD_TEAM ? tasks.filter((task) => (teamHost.audienceOf(task.threadId) === "team" && !conversationShares.fromSlack(task.threadId)) || task.threadId === own) : CLOUD_HOME ? tasks.filter((task) => !cloudGuestOpened(task.threadId) && !personalSlackMessages?.channelThread(task.threadId)) : tasks; }
 function botMainThread(botId: string): string | undefined {
   return mainThread(mainThreadTasks(botId), store.bot(botId)?.threadId, store.bot(botId)?.mainThreadChoice);
-}
+} const threadScoped = createThreadScope({ tasks: mainThreadTasks, chosen: (botId) => store.bot(botId)?.mainThreadChoice, room: (threadId) => Boolean(store.groupByThread(threadId)), routineRun: (threadId) => Boolean(routines?.runForThread(threadId)), team: Boolean(CLOUD_TEAM) }), threadSaveLines = createThreadSaveLines({ bus, append: (threadId, tool) => void store.appendMessage(threadId, { role: "bot", kind: "activity", tool }) });
 
 function routineSourceThread(run: RoutineRun): string | null {
   return routineSourceOwner(run)?.threadId ?? null;
@@ -12025,7 +12025,7 @@ ROUTES.push(createSkillShareRoutes({ enabled: () => skillsHost.mode() !== "off",
   cardRefusal: (auth, threadId, requestId) => cardAnswerRefusal(auth, threadId, requestId, "allow"), shareFromReceipt: skillsHost.shareFromReceipt, shareFromBot: skillsHost.shareFromBot }));
 ROUTES.push(createTeamContextRoutes({ store, teamMemory }));
 ROUTES.push(createBotMemoryRoutes({
-  bot: (id) => store.bot(id),
+  bot: (id) => store.bot(id), threadNotes: { scoped: (botId, threadId) => threadScoped(botId, threadId), owns: (botId, threadId) => Boolean(store.taskByThread(botId, threadId)) },
   ...(CLOUD_TEAM ? { ownLayer: (auth: RequestAuth, botId: string) => auth.kind === "session" && visibleTo(viewerFor(auth)).bot(botId)
     ? layerId(botId, memberAudience(personKey(auth.session))) : null } : {}),
   taskByThread: (botId, threadId) => store.taskByThread(botId, threadId),
@@ -12903,8 +12903,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (method === "POST" && path === "/api/internal/memory") {
         const body = await readInternalBody();
         const ownersAsk = CLOUD_TEAM || (!store.groupByThread(internalCapability.threadId) && ownersOwnAsk(store.activePath(internalCapability.threadId)));
-        const result = ownersWrite(() => botMemoryUpdate(teamHost.layer(internalSender.id, internalCapability.threadId), body, { source: memorySource(), aboutMe: ownersAsk ? aboutMeFacts : null,
-          prefer: body?.action === "prefer" ? personPreference.target(internalCapability, internalSender) : null }));
+        const result = ownersWrite(() => scopedMemoryUpdate(teamHost.layer(internalSender.id, internalCapability.threadId), body, { source: memorySource(), aboutMe: ownersAsk ? aboutMeFacts : null,
+          prefer: body?.action === "prefer" ? personPreference.target(internalCapability, internalSender) : null }, threadScoped(internalSender.id, internalCapability.threadId) ? { botId: internalSender.id, threadId: internalCapability.threadId } : null)); if (result.ok && "scope" in result) threadSaveLines.saved(internalCapability.threadId);
         return json(res, result.ok ? 200 : result.code === "conflict" ? 409 : 400, result);
       }
       if (method === "POST" && path === "/api/internal/memory/log") {
@@ -13360,7 +13360,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           : undefined;
         const rawLimit = Number(url.searchParams.get("limit"));
         const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.trunc(rawLimit), 25) : 12;
-        const scope = url.searchParams.get("scope") ?? "all";
+        const scope = url.searchParams.get("scope") ?? "all"; if (scope === "threads") return json(res, 200, { hits: [], memoryHits: [], teamHits: [], threadNotes: q && from.memoryEnabled !== false ? searchThreadNotes(from.id, recallThreads(from, internalCapability).ownThreads.flatMap((id) => { const task = store.taskByThread(from.id, id); return task ? [{ threadId: id, title: task.title }] : []; }), q, { current: fromThreadId, limit }) : [] });
         if (scope !== "all" && scope !== "conversations" && scope !== "memory" && scope !== "team") {
           return json(res, 400, { error: "scope must be all, conversations, memory, or team" });
         }

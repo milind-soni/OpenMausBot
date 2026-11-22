@@ -6720,6 +6720,9 @@
   "skills.loading": "読み込み中…",
   "skills.empty": "インストール済みのスキルはまだありません。",
   "memory.title": "メモリー",
+  "memoryPage.thisThread": "このスレッド",
+  "memoryPage.everywhere": "すべての会話",
+  "memoryPage.empty": "ここにはまだ何も記憶されていません。知っておいてほしいことを書いてください。",
   "memory.enable": "このボットにメモリーの使用を許可",
   "memory.enableHelp": "オフにすると、メモリーのプロンプト、想起、ネイティブのメモリーツール、メンテナンス、ターンの自動ログが停止します。既存のファイルは、確認用に引き続き利用できます。",
   "memory.notesHelp": "このボットがタスクの合間に保持するメモです。このコンピューター上のフォルダーにあるプレーンな Markdown ファイルで、任意のエディターや Obsidian で開けます。",
@@ -7997,5 +8000,6 @@
   "skillBurger.menu.aria": "{name} のその他の操作",
   "skillBurger.menu.rename": "名前を変更…",
   "skillBurger.card.everyChat": "すべてのチャット",
-  "skillBurger.page.empty": "ボットが作った Skill Burger はここに表示されます。"
+  "skillBurger.page.empty": "ボットが作った Skill Burger はここに表示されます。",
+  "chat.notice.savedToThread": "このスレッドに保存しました"
 }

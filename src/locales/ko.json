@@ -6469,6 +6469,9 @@
   "skills.loading": "불러오는 중…",
   "skills.empty": "아직 설치된 스킬이 없어요.",
   "memory.title": "메모리",
+  "memoryPage.thisThread": "이 스레드",
+  "memoryPage.everywhere": "모든 곳",
+  "memoryPage.empty": "아직 여기에 기억된 내용이 없어요. 알아 두었으면 하는 내용을 적어 주세요.",
   "memory.enable": "이 봇이 메모리를 쓰게 하기",
   "memory.enableHelp": "끄면 메모리 프롬프트, 기억 불러오기, 기본 메모리 도구, 정리 작업, 자동 턴 로그가 멈춰요. 기존 파일은 계속 검토할 수 있어요.",
   "memory.notesHelp": "이 봇이 작업 사이에 보관하는 메모예요. 이 컴퓨터 폴더에 있는 일반 마크다운 파일이라 어떤 편집기나 Obsidian에서도 열 수 있어요.",
@@ -7687,5 +7690,6 @@
   "skillBurger.menu.aria": "{name} 더 보기",
   "skillBurger.menu.rename": "이름 바꾸기…",
   "skillBurger.card.everyChat": "모든 채팅",
-  "skillBurger.page.empty": "봇이 만든 Skill Burger가 여기에 표시됩니다."
+  "skillBurger.page.empty": "봇이 만든 Skill Burger가 여기에 표시됩니다.",
+  "chat.notice.savedToThread": "이 스레드에 저장했어요"
 }
