@@ -1,8 +1,78 @@
 {
   "$schema": "./releases.schema.json",
   "version": 1,
-  "updatedAt": "2026-11-21T21:31:14Z",
+  "updatedAt": "2026-11-22T16:22:54Z",
   "releases": [
+    {
+      "version": "0.1.177",
+      "date": "2026-11-22T16:22:19Z",
+      "sections": [
+        {
+          "title": "Bots and work",
+          "items": [
+            "**See what your bots said to each other.** When a bot hands work to a teammate, the hand-off shows as a small chip with the teammate's face and name. Click it to read their conversation right in the chat, live, with \"Back\" to return to where you were.",
+            "**Handed-off conversations get real names.** A conversation a teammate opens is named after the job it was handed.",
+            "**Reasoning sticks.** In Simple mode, picking a Reasoning level in a bot's panel now also makes it that bot's default, the same way Model does. New conversations start at that level.",
+            "**Chief of Staff mail checks** also read your connected Outlook.",
+            "**A failed turn says why it ended** in its summary.",
+            "**Codex \"Compact now\"** compacts the conversation in place.",
+            "**Your project's skills win.** With \"Use my Claude Code skills\" on, a project skill takes priority over your own skill of the same name.",
+            "**Lighter isolated Claude turns:** they no longer load your `~/.claude/rules`."
+          ]
+        },
+        {
+          "title": "Models and providers",
+          "items": [
+            "**Gemini 4 Neon** works in Antigravity with its thinking levels, including model names that carry the level (such as \"-high\").",
+            "**Google AI Studio** is in the main provider list.",
+            "**Devin and other ACP engines** keep their model list when reading it runs slow, and the picker says why a list couldn't be read.",
+            "**DeepSeek's spoken replies** play correctly."
+          ]
+        },
+        {
+          "title": "Vault",
+          "items": [
+            "**Bitwarden Secrets Manager** can be a Vault and sign-in source.",
+            "**Getting ready for larger secrets.** This version can read Vault secrets up to 64 KiB, such as cookie files or service-account JSON. Saving them switches on in the next update. Until then the limit stays at 4 KiB, so you can still go back to an earlier version safely."
+          ]
+        },
+        {
+          "title": "Computers and servers",
+          "items": [
+            "**Name your servers.** Rename a server you added by hand from its menu in the sidebar.",
+            "**VPS bots pick a server.** Each VPS bot can choose which named server it runs on.",
+            "**Your Cloud keeps the name** you chose at setup.",
+            "**Lent Macs:** chats typed in the desktop app's own window can use a lent Mac on a one-person server. The lending menu now says bots use the computer you type on.",
+            "**Cloud computer clicks follow your approval level.** On a cloud or remote computer, Claude's computer actions now ask under Ask or Edits, with \"allow for this session\". Full access is unchanged.",
+            "**A stuck Docker** no longer slows every check by 10 seconds.",
+            "**Self-hosted servers:** phones paired over the relay can open live screens and browser views. Removing the server that is your home brings this computer's copy back."
+          ]
+        },
+        {
+          "title": "Voice and languages",
+          "items": [
+            "**Chinese in live calls:** a clear Chinese request ends the call, and a Chinese yes or no answers a permission card.",
+            "**Italian** is almost fully translated."
+          ]
+        },
+        {
+          "title": "Fixes",
+          "items": [
+            "**Connected apps:** if the connected-apps service doesn't answer when a conversation starts, bots still get its search and run tools, not just Gmail and Calendar.",
+            "**Google Drive, Sheets and Docs:** bots use your connected Google app instead of asking you to sign in to another editor's Google tools, a sign-in that couldn't finish.",
+            "**Grok:** a brief sign-in hiccup is no longer reported as signed out, and a routine tries once more. Choosing a model your Grok sign-in doesn't offer now names the models it does offer, instead of failing with a config hint.",
+            "**Browser:** a slow start on a busy computer no longer fails with \"No matching tab opened\". The first tab gets up to a minute.",
+            "**Teammates** no longer show a bot as \"needs setup\" once its AI account works again.",
+            "**Sign-in cards** that wait for you sit under the chat header instead of covering the conversation.",
+            "**File links** outside the workspace open in their folder on the first click.",
+            "**Team Files** tells you a file is too big before uploading it.",
+            "**Hermes** keeps its shared gateway running when one conversation stops.",
+            "An idle app and an idle Cloud wake up far less often in the background.",
+            "Many smaller reliability fixes from contributors."
+          ]
+        }
+      ]
+    },
     {
       "version": "0.1.176",
       "date": "2026-11-21T21:30:49Z",
@@ -1128,49 +1198,6 @@
           "items": [
             "**Bots list only the imported skills that fit them** and find the rest by search, instead of listing every skill in every prompt. Bots pick the right skill more often, and each turn sends less to the model.",
             "**Computer use** runs on Cua Driver 0.41.3 on macOS, Windows and Linux."
-          ]
-        }
-      ]
-    },
-    {
-      "version": "0.1.148",
-      "date": "2026-11-07T21:50:56Z",
-      "sections": [
-        {
-          "title": "Connecting to your own server is simpler",
-          "items": [
-            "**One way to connect.** In the app, ＋ → **Connect to a server** takes the link your server prints, or its address and a pairing code. A plain `http://` address works on your own network (Wi-Fi, Tailscale, `.local`); a public `http://` address is refused with what to do instead.",
-            "**One pairing code.** Servers and the web `/pair` page use the same 12-character code, and a code of the wrong kind says so.",
-            "**Commands that work when pasted.** The server prints one link per way in, checks that the address really reaches it, and prints every command the way you started it (npx, a global install or Docker). `--lan` makes it reachable on this network.",
-            "**Nothing starts by itself.** Each way into this computer has its own switch, all off by default. Tailscale and the phone link never start until you turn them on, and a desktop that only connects to your server starts none of it.",
-            "**Phone & devices** shows who can reach this computer, with one **Pair a device** dialog. **Servers** says how each server is reached, retries a lost connection on its own, and offers Pair again and Remove.",
-            "The self-hosting guide now has one short path per install method and a troubleshooting table."
-          ]
-        },
-        {
-          "title": "The private desktop stays chosen",
-          "items": [
-            "A bot's **Where it works** now offers **Private desktop**.",
-            "On **Let it choose**, a bot keeps the place you picked, and starts your private desktop before waking or creating a cloud computer."
-          ]
-        },
-        {
-          "title": "Fixes and smaller changes",
-          "items": [
-            "**Codex** starts on the chosen model's provider.",
-            "Linked files over 25 MB are saved, and size limits are explained plainly.",
-            "**Long OpenRouter turns** no longer stop on the reasoning size limit.",
-            "**Google sign-in** is handed to you when Google refuses the bot's browser.",
-            "**Routines** read the newest account when several Gmail accounts are connected.",
-            "**The automation editors and shared-instruction dialogs** no longer lag or spin up the fan.",
-            "**A failed connected-apps connection** no longer fails the whole turn.",
-            "**An MCP tool's approval card** names the custom server asking for it.",
-            "**Paired clients** can use \"Continue when your limit resets\".",
-            "**A Watch button** shows while a bot uses its screen.",
-            "**Traditional Chinese** is complete. French uses \"vous\" in the Cloud move messages.",
-            "Notification previews show as plain text.",
-            "The sign-in pill slows its checks when a server is down, then says so.",
-            "More security hardening around proxies, local key checks and shared working folders."
           ]
         }
       ]
