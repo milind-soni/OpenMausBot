@@ -27,7 +27,7 @@ const reply: RuntimeEvent = { ...base, type: "content.delta", streamKind: "assis
  * `wake` runs what came due meanwhile, the kind named first. */
 function sleepingClock() {
   type Timer = { at: number; every?: number; run: () => void };
-  let now = 0, nextId = 0;
+  let now = 0, nextId = 0, sleepAfterRead = 0;
   const timers = new Map<number, Timer>();
   const add = (timer: Timer) => {
     const id = nextId++;
@@ -35,7 +35,12 @@ function sleepingClock() {
     return () => { timers.delete(id); };
   };
   const clock: RoomTurnClock = {
-    now: () => now,
+    now: () => {
+      const at = now;
+      now += sleepAfterRead;
+      sleepAfterRead = 0;
+      return at;
+    },
     after: (ms, run) => add({ at: now + ms, run }),
     every: (ms, run) => add({ at: now + ms, every: ms, run }),
   };
@@ -58,6 +63,10 @@ function sleepingClock() {
     },
     sleep(ms: number) {
       now += ms;
+    },
+    /** The next reading of the clock is the last before a sleep of `ms`. */
+    sleepAfterNextRead(ms: number) {
+      sleepAfterRead = ms;
     },
     wake(first: "after" | "every") {
       for (const kind of [first, first === "after" ? "every" : "after"] as const) {
@@ -204,6 +213,26 @@ describe("room turn timeout", () => {
       expect(onTimeout).toHaveBeenCalledOnce();
     });
   }
+
+  it("keeps the idle time from before a wait when the computer sleeps right as the wait ends", () => {
+    const time = sleepingClock();
+    const onTimeout = vi.fn();
+    const deadline = new RoomTurnDeadline(1, onTimeout, time.clock);
+    deadline.start();
+
+    time.advance(50_000);
+    deadline.setWaiting(true);
+    time.advance(10_000);
+    time.sleepAfterNextRead(2 * 60 * 60_000);
+    deadline.setWaiting(false);
+    time.wake("every");
+    expect(onTimeout).not.toHaveBeenCalled();
+
+    time.advance(10_000 - 1);
+    expect(onTimeout).not.toHaveBeenCalled();
+    time.advance(1);
+    expect(onTimeout).toHaveBeenCalledOnce();
+  });
 
   it("counts the time awake between many short wakes", () => {
     const time = sleepingClock();

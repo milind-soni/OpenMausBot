@@ -105,54 +105,62 @@ export class RoomTurnDeadline {
 
   start(): void {
     if (this.stopped || this.fired || this.stopLooking !== null) return;
-    this.progressAt = this.clock.now();
-    this.lookedAt = this.progressAt;
+    const at = this.clock.now();
+    this.progressAt = at;
+    this.lookedAt = at;
     this.stopLooking = this.clock.every(ROOM_TURN_CLOCK_LOOK_MS, () => this.discountSleep());
-    this.arm();
+    this.arm(at);
   }
 
   observe(e: RuntimeEvent): void {
-    this.discountSleep();
-    if (ROOM_TURN_PROGRESS.has(e.type)) this.progress();
-    if (e.type === "request.opened" || e.type === "turn.wait_started") this.setWaiting(true);
-    else if (e.type === "request.resolved" || e.type === "turn.wait_ended") this.setWaiting(false);
+    const at = this.discountSleep();
+    if (ROOM_TURN_PROGRESS.has(e.type)) this.progressed(at);
+    if (e.type === "request.opened" || e.type === "turn.wait_started") this.waiting(true, at);
+    else if (e.type === "request.resolved" || e.type === "turn.wait_ended") this.waiting(false, at);
     else if ((e.type === "item.started" || e.type === "item.completed") && e.itemType === "tool" && e.itemId) {
       if (e.type === "item.started") this.runningTools.add(e.itemId);
       else this.runningTools.delete(e.itemId);
-      this.rearm();
+      this.rearm(at);
     }
   }
 
   progress(): void {
-    // A delayed event loop can deliver progress after the limit, before the timer ran: it must not revive an idle turn.
-    if (this.cancelTimer !== null && this.idleMs() >= this.quietLimitMs()) {
-      this.expired();
-      return;
-    }
-    this.progressAt = this.clock.now();
+    this.progressed(this.discountSleep());
   }
 
   setWaiting(waiting: boolean): void {
-    if (this.stopped || this.fired) return;
-    this.discountSleep();
-    if (waiting) {
-      const wasIdle = this.openWaits === 0;
-      this.openWaits += 1;
-      if (wasIdle) this.hold();
-    } else if (this.openWaits > 0) {
-      this.openWaits -= 1;
-      if (this.openWaits === 0) {
-        // The wait paused the clock: idle time from before it still counts, progress during it counts as now.
-        const idleBefore = this.progressAt >= this.heldAt ? 0 : this.heldAt - this.progressAt;
-        this.progressAt = this.clock.now() - idleBefore;
-        this.arm();
-      }
-    }
+    this.waiting(waiting, this.discountSleep());
   }
 
   stop(): void {
     this.stopped = true;
     this.release();
+  }
+
+  private progressed(at: number): void {
+    // A delayed event loop can deliver progress after the limit, before the timer ran: it must not revive an idle turn.
+    if (this.cancelTimer !== null && at - this.progressAt >= this.quietLimitMs()) {
+      this.expired();
+      return;
+    }
+    this.progressAt = at;
+  }
+
+  private waiting(waiting: boolean, at: number): void {
+    if (this.stopped || this.fired) return;
+    if (waiting) {
+      const wasIdle = this.openWaits === 0;
+      this.openWaits += 1;
+      if (wasIdle) this.hold(at);
+    } else if (this.openWaits > 0) {
+      this.openWaits -= 1;
+      if (this.openWaits === 0) {
+        // The wait paused the clock: idle time from before it still counts, progress during it counts as now.
+        const idleBefore = this.progressAt >= this.heldAt ? 0 : this.heldAt - this.progressAt;
+        this.progressAt = at - idleBefore;
+        this.arm(at);
+      }
+    }
   }
 
   private release(): void {
@@ -162,52 +170,47 @@ export class RoomTurnDeadline {
     this.cancelTimer = null;
   }
 
-  /** A look late enough moves the turn's progress, and a wait's start, on by the whole gap. */
-  private discountSleep(): void {
-    if (this.stopLooking === null) return;
+  private discountSleep(): number {
     const at = this.clock.now();
+    if (this.stopLooking === null) return at;
     const gapMs = at - this.lookedAt;
     this.lookedAt = at;
-    if (gapMs <= SUSPENDED_LOOKS * ROOM_TURN_CLOCK_LOOK_MS) return;
+    if (gapMs <= SUSPENDED_LOOKS * ROOM_TURN_CLOCK_LOOK_MS) return at;
     this.progressAt = Math.min(at, this.progressAt + gapMs);
     if (this.openWaits > 0) this.heldAt = Math.min(at, this.heldAt + gapMs);
-  }
-
-  private idleMs(): number {
-    this.discountSleep();
-    return this.clock.now() - this.progressAt;
+    return at;
   }
 
   private quietLimitMs(): number {
     return this.runningTools.size > 0 ? Math.max(this.limitMs, ROOM_TOOL_QUIET_LIMIT_MS) : this.limitMs;
   }
 
-  private hold(): void {
-    this.heldAt = this.clock.now();
+  private hold(at: number): void {
+    this.heldAt = at;
     if (this.cancelTimer === null) return;
     this.cancelTimer();
     this.cancelTimer = null;
     // A delayed event loop can deliver the wait after the deadline: a wait must not revive an idle turn.
-    if (this.idleMs() >= this.quietLimitMs()) this.expired();
+    if (at - this.progressAt >= this.quietLimitMs()) this.expired();
   }
 
-  private rearm(): void {
+  private rearm(at: number): void {
     if (this.cancelTimer === null) return;
     this.cancelTimer();
     this.cancelTimer = null;
-    this.arm();
+    this.arm(at);
   }
 
-  private arm(): void {
+  private arm(at: number): void {
     if (this.stopped || this.fired || this.openWaits > 0) return;
-    const leftMs = this.quietLimitMs() - this.idleMs();
+    const leftMs = this.quietLimitMs() - (at - this.progressAt);
     if (leftMs <= 0) {
       this.expired();
       return;
     }
     this.cancelTimer = this.clock.after(leftMs, () => {
       this.cancelTimer = null;
-      this.arm();
+      this.arm(this.discountSleep());
     });
   }
 
