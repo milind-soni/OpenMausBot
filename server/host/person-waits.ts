@@ -51,6 +51,12 @@ export function createPersonWaits(deps: PersonWaitsDeps) {
     const bot = store.botByThread(threadId);
     const task = bot ? store.taskByThread(bot.id, threadId) : null;
     if (!bot || !task || task.busy) return;
+    // A closed thread stays closed: an unsettled card there is not waiting on the person any more,
+    // so its flag goes idle instead of being set back to waiting-on-you by a later refresh.
+    if (task.closedBy) {
+      if (task.activity === "waiting-on-you") store.setTaskActivity(bot.id, threadId, "idle");
+      return;
+    }
     if (wait && (task.activity ?? "idle") === "idle") store.setTaskActivity(bot.id, threadId, "waiting-on-you", true);
     else if (!wait && task.activity === "waiting-on-you") store.setTaskActivity(bot.id, threadId, "idle");
   }

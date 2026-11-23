@@ -42,6 +42,18 @@ describe("list_threads on a queued handoff", () => {
   });
 });
 
+describe("list_threads on a closed thread with an unsettled card", () => {
+  it("reports closed once closedBy is set, even though the waiting flag and parked card remain", async () => {
+    const closed = task("t-closed", "Results") as TaskRecord;
+    closed.activity = "waiting-on-you";
+    closed.closedBy = { botId: "bot-lead", name: "Lead", at: 9 } as TaskRecord["closedBy"];
+    tasks["bot-lead"] = [closed];
+    const rows = await listThreads(lead);
+    expect(rows.find((thread) => thread.threadId === "t-closed")).toMatchObject({ state: "closed" });
+    delete tasks["bot-lead"];
+  });
+});
+
 describe("list_threads past the first 100", () => {
   async function page(query: string) {
     const many = Array.from({ length: 130 }, (_, index) => task(`t-${index}`, `Event ${index}`, undefined));

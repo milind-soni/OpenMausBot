@@ -20,7 +20,7 @@ interface ThreadRow {
 
 /** Only dispatch inside the internal capability gate: `from` and `fromThreadId` come from the caller's capability. */
 export function createInternalThreadRoutes(deps: {
-  store: Pick<Store, "bot" | "bots" | "tasks" | "taskByThread" | "appendMessage" | "patchTask" | "setTaskClosedBy" | "renameTask">;
+  store: Pick<Store, "bot" | "bots" | "tasks" | "taskByThread" | "appendMessage" | "patchTask" | "setTaskActivity" | "setTaskClosedBy" | "renameTask">;
   coordinator: Pick<Coordinator, "awaitingAnswer" | "parkedDirect" | "activeDirect" | "active">;
   from: BotRecord;
   fromThreadId: string;
@@ -43,12 +43,14 @@ export function createInternalThreadRoutes(deps: {
       }
       const rows: ThreadRow[] = [];
       const stateOf = (bot: BotRecord, task: TaskRecord) => {
-        if (task.activity === "waiting-on-you" || coordinator.awaitingAnswer(task.threadId)) return "waiting-on-you" as const;
         if (deps.threadBusy(bot.id, task.threadId)) return "running" as const;
-        if (coordinator.parkedDirect(task.threadId)) return "waiting-on-you" as const;
         if (deps.queuedThreadPosition(bot.id, task.threadId) !== null) return "queued" as const;
         if (coordinator.activeDirect(task.threadId)) return "queued" as const;
+        // A thread the person's action folded stays closed: closing settles it, so an open card there
+        // does not keep it "waiting on the person" (list_threads must agree with close_thread's result).
         if (task.closedBy) return "closed" as const;
+        if (task.activity === "waiting-on-you" || coordinator.awaitingAnswer(task.threadId)) return "waiting-on-you" as const;
+        if (coordinator.parkedDirect(task.threadId)) return "waiting-on-you" as const;
         return "idle" as const;
       };
       // A queued handoff says why it waits and which handoff it is, so a bot can tell the person and match a report.
@@ -135,6 +137,9 @@ export function createInternalThreadRoutes(deps: {
       tool: { name: serverLine(conversationLanguage(threadId), "server.teammates.closedBy", { bot: from.name }), ok: true },
     });
     if (task.unread) store.patchTask(owner.id, threadId, { unread: false });
+    // Closing settles the thread: an open card there no longer rests on the person, so the sidebar's
+    // waiting flag goes with it and list_threads, the inbox and this result all say the same thing.
+    if (task.activity === "waiting-on-you") store.setTaskActivity(owner.id, threadId, "idle");
     store.setTaskClosedBy(owner.id, threadId, { botId: from.id, name: from.name, at: Date.now() });
     return json(res, 200, { closed: true, threadId, title: task.title, botName: owner.name });
   };
