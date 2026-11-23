@@ -47,26 +47,25 @@ export function ComposerAttachments({
 }) {
   const [dragging, setDragging] = useState(false);
   const [preview, setPreview] = useState<PreviewImage | null>(null);
-  const previousItems = useRef(items);
-  const [leaving, setLeaving] = useState<{ item: Attachment; before: string | undefined }[]>([]);
+  const previous = useRef({ live: items, displayed: items });
+  const [leaving, setLeaving] = useState<Attachment[]>([]);
   const liveIds = new Set(items.map(item => item.id));
   const animate = !reducedMotion();
-  const pending = !animate ? [] : leaving.filter(({ item }) => !liveIds.has(item.id));
-  const removed = !animate ? [] : previousItems.current.flatMap((item, index, previous) =>
-    (item.kind === "image" || item.kind === "file") && !liveIds.has(item.id)
-      ? [{ item, before: previous.slice(index + 1).find(next => liveIds.has(next.id))?.id }]
-      : []);
-  const exits = [...pending.map(exit => exit.before && !liveIds.has(exit.before)
-    ? { ...exit, before: removed.find(({ item }) => item.id === exit.before)?.before }
-    : exit), ...removed];
-  const displayed = items.flatMap(item => [
-    ...exits.filter(exit => exit.before === item.id).map(exit => exit.item),
-    item,
-  ]).concat(exits.filter(exit => !exit.before || !liveIds.has(exit.before)).map(exit => exit.item));
+  const pending = animate ? leaving.filter(item => !liveIds.has(item.id)) : [];
+  const removed = animate ? previous.current.live.filter(item =>
+    (item.kind === "image" || item.kind === "file") && !liveIds.has(item.id)) : [];
+  const exitingIds = new Set([...pending, ...removed].map(item => item.id));
+  const before = new Map<string | undefined, Attachment[]>();
+  let anchor: string | undefined;
+  for (const item of [...previous.current.displayed].reverse()) {
+    if (liveIds.has(item.id)) anchor = item.id;
+    else if (exitingIds.has(item.id)) before.set(anchor, [item, ...(before.get(anchor) ?? [])]);
+  }
+  const displayed = items.flatMap(item => [...(before.get(item.id) ?? []), item]).concat(before.get(undefined) ?? []);
 
   useLayoutEffect(() => {
-    previousItems.current = items;
-    if (removed.length || pending.length !== leaving.length) setLeaving(exits);
+    previous.current = { live: items, displayed };
+    if (removed.length || pending.length !== leaving.length) setLeaving([...pending, ...removed]);
   });
   useEffect(() => {
     if (leaving.length === 0) return;

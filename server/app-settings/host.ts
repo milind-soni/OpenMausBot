@@ -2,6 +2,7 @@
 // Writes happen only in the owner's own turn and apply at once with Undo, a secret never passes through the bot, and an
 // owner-only setting is only explained.
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import { isSettingsCardId, SETTINGS_CARD_IDS, type AppSettingRequest, type SettingsCardId } from "../../shared/app-settings.ts";
 import { appendDecision } from "../decision-log.ts";
@@ -52,7 +53,9 @@ export interface Turn {
 interface Undoable {
   entry: WritableEntry;
   before: unknown;
-  after: string;
+  after: unknown;
+  value: unknown;
+  themeOwner?: string;
 }
 
 export type UndoResult =
@@ -101,12 +104,13 @@ export function createAppSettings(deps: AppSettingsDeps) {
   };
 
   /** Applies the change, posts its applied card with Undo, and logs it in the decision log. */
-  async function apply(turn: Turn, bot: BotRecord, entry: WritableEntry, value: unknown, change?: string) {
+  async function apply(turn: Turn, bot: BotRecord, entry: WritableEntry, value: unknown, change?: string, themeOwner?: string) {
     const before = await entry.current(value);
     const was = entry.read();
     const refusal = await entry.write(value);
     if (refusal) return refuse(409, refusal);
     const after = entry.read();
+    const appliedValue = entry.undoByValue ? structuredClone(await entry.current(value)) : after;
     const shown: Shown = change === undefined ? { before: was, after } : { after: change };
     const requestId = randomUUID();
     const language = deps.language(turn.threadId);
@@ -117,7 +121,7 @@ export function createAppSettings(deps: AppSettingsDeps) {
       card: { title: serverLine(language, "server.appSettings.changed", { label: entry.label }), subtitle: shown.before === undefined ? shown.after : `${notSet(shown.before)} → ${notSet(shown.after)}`,
         options: [], requestId, tool: TOOL, fixedOptions: true, appSettingRequest, answered: "allow", dismissed: true, autoApplied: true },
     });
-    undoable.set(requestId, { entry, before, after });
+    undoable.set(requestId, { entry, before, after: appliedValue, value, themeOwner });
     appendDecision(deps.dataDir, { threadId: turn.threadId, requestId, botId: turn.botId, botName: bot.name, tool: TOOL, summary: `${entry.id}: ${said(shown)}`, decision: "auto-approved", source: "app-settings" });
     const done = change === undefined ? `Changed ${entry.label} from ${text(was)} to ${text(after)}.` : `Done: ${change}. ${entry.label} now: ${text(after)}.`;
     return reply(200, { text: `${done} The user can undo it from the card in the conversation.` });
@@ -182,7 +186,7 @@ export function createAppSettings(deps: AppSettingsDeps) {
     if (asked && "error" in asked) return refuse(400, asked.error);
     const budget = spendWrite(turn);
     if (budget) return refuse(429, budget);
-    return asked ? apply(turn, bot, themes.entry(person), asked.wear, asked.change) : themes.addAsset(turn, person, body);
+    return asked ? apply(turn, bot, themes.entry(person), asked.wear, asked.change, person) : themes.addAsset(turn, person, body);
   }
 
   /** Shows a setting's own control in the conversation. Security invariant: the reply and the row carry fixed words and
@@ -227,6 +231,10 @@ export function createAppSettings(deps: AppSettingsDeps) {
       return refuse(400, `action must be find, get, set, show_card, places, ${THEME_ACTIONS.join(", ")}.`);
     },
 
+    themeOwner(requestId: string): string | undefined {
+      return undoable.get(requestId)?.themeOwner;
+    },
+
     /** Undo on an applied card: restores the value read before the change, unless it changed since. */
     async undo(args: { threadId: string; requestId: string }): Promise<UndoResult> {
       const message = store.messagesFor(args.threadId).find((candidate) => candidate.card?.requestId === args.requestId && candidate.card.appSettingRequest);
@@ -235,7 +243,8 @@ export function createAppSettings(deps: AppSettingsDeps) {
       if (current.undone) return { claimed: true, state: "already_undone" };
       const change = undoable.get(args.requestId);
       if (!change || current.answered !== "allow") return { claimed: true, state: "invalid", error: "This change can't be undone here.", status: 409 };
-      if (change.entry.read() !== change.after) return { claimed: true, state: "invalid", error: UNDO_STALE, status: 409, stale: true };
+      const currentValue = change.entry.undoByValue ? await change.entry.current(change.value) : change.entry.read();
+      if (!isDeepStrictEqual(currentValue, change.after)) return { claimed: true, state: "invalid", error: UNDO_STALE, status: 409, stale: true };
       const refusal = change.before === undefined ? "The earlier value is not one that can be set back." : await change.entry.write(change.before);
       if (refusal) return { claimed: true, state: "invalid", error: refusal, status: 409 };
       undoable.delete(args.requestId);

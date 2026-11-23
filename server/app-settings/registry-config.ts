@@ -192,6 +192,7 @@ export function configEntries(deps: Pick<RegistryDeps, "cfg" | "saveConfig" | "b
       synonyms: ["skills", "skill library", "library", "every bot skill"],
       value: z.object({ name: z.string().regex(/^[a-z0-9-]{1,64}$/), enabled: z.boolean().optional(), everyBot: z.boolean().optional() }).strict().refine((value) => (value.enabled === undefined) !== (value.everyBot === undefined), "send enabled or everyBot, one of them"),
       allowed: '{"name","enabled":true|false} or {"name","everyBot":true|false}', read: () => "",
+      undoByValue: true,
       current: async ({ name, enabled }: { name: string; enabled?: boolean }) => {
         const skill = (await libraryList()).find((one) => one.name === name);
         return skill ? (enabled !== undefined ? { name, enabled: skill.enabled } : { name, everyBot: skill.everyBot }) : undefined;
@@ -202,6 +203,7 @@ export function configEntries(deps: Pick<RegistryDeps, "cfg" | "saveConfig" | "b
     writable({
       id: "bots.skills", label: "A bot's library skills", help: "Which library skills one bot uses. Send the full list.", where: "bot-settings", synonyms: ["skills", "assign skills", "bot skills"],
       value: z.object({ botId: z.string().regex(/^[\w-]{1,120}$/), skills: z.array(z.string().min(1).max(64)).max(200) }).strict(), allowed: '{"botId","skills":[names]}', read: () => "",
+      undoByValue: true,
       current: ({ botId }: { botId: string }) => { const bot = deps.bots().find((one) => one.id === botId); return bot ? { botId, skills: bot.assignedSkills ?? [] } : undefined; },
       describe: ({ botId, skills }: { botId: string; skills: string[] }) => { const name = botName(botId); return name ? { change: skills.length ? `Give ${name} the library skills ${skills.join(", ")}` : `Take every library skill from ${name}` } : { refusal: `No bot has the id ${botId}. Use list_bots for the ids.` }; },
       write: ({ botId, skills }: { botId: string; skills: string[] }) => deps.call("skills", "PUT", `/api/bots/${encodeURIComponent(botId)}/skills-library`, { skills }),

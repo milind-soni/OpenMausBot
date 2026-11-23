@@ -25,8 +25,11 @@ it("keeps removed uploads visible for their fade without letting them receive in
     const photo = host.querySelector("img");
     expect(photo?.closest(".opacity-100")?.className).toContain("starting:opacity-0");
 
+    render(files.slice(0, 1));
     render([]);
-    expect(host.querySelector("img")).toBe(photo);
+    const exiting = [...host.querySelectorAll('[aria-hidden="true"][inert].opacity-0')];
+    expect(exiting[0]?.textContent).toContain("notes.pdf");
+    expect(exiting[1]?.querySelector("img")).toBe(photo);
     expect(host.querySelectorAll('[aria-hidden="true"][inert].opacity-0')).toHaveLength(2);
 
     render(files.slice(1));

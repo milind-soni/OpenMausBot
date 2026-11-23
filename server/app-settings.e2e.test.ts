@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 
 import { launchVerificationServer, verificationServerArgs, verificationServerEnvironment, type VerificationServer } from "../scripts/control-omb.ts";
+import { launchCloudSendFixture } from "../scripts/testing/cloud-send-fixture.ts";
 import { waitForExit } from "./testing/cleanup.ts";
 import { readRegistry, writeRegistry } from "./testing/registry.ts";
 
@@ -419,4 +420,59 @@ it("a signed-in admin can ask the Chief to distribute library skills on a servic
   expect(atlasSaved.assignedSkills).toEqual(["existing", "notes"]);
   const { skills } = await api("GET", "/api/skills-library", undefined, 200, ownerDevice);
   expect(skills.find((skill: any) => skill.name === "notes")).toMatchObject({ enabled: true, everyBot: true });
+
+  const cards = await settingCards(bot.threadId);
+  const undo = (settingId: string, status: number, token = ownerDevice) =>
+    api("POST", `/api/threads/${bot.threadId}/undo`, {
+      requestId: cards.findLast((line) => line.card.appSettingRequest.settingId === settingId).card.requestId,
+    }, status, token);
+
+  await api("PUT", `/api/bots/${atlas.id}/skills-library`, { skills: ["notes"] }, 200, ownerDevice);
+  expect(await undo("bots.skills", 409)).toMatchObject({ code: "changed-since" });
+  expect(readRegistry(dataDir).bots.find((one: any) => one.id === atlas.id).assignedSkills).toEqual(["notes"]);
+
+  await api("PATCH", "/api/skills-library/notes", { everyBot: false }, 200, ownerDevice);
+  expect(await undo("skills.library", 409)).toMatchObject({ code: "changed-since" });
+  await api("PATCH", "/api/skills-library/notes", { everyBot: true }, 200, ownerDevice);
+  await undo("skills.library", 403, guest);
+  expect(await undo("skills.library", 200)).toMatchObject({ undone: true });
+}, 90_000);
+
+it("lets a Team Cloud member undo their own theme from its applied card", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "omb-team-theme-"));
+  const plan = join(directory, "room-plan.json");
+  try {
+    const cloud = await launchCloudSendFixture({
+      onePasswordToken: "fixture",
+      team: { id: "team-theme", name: "Theme", env: { FAKE_CLAUDE_ROOM_PLAN: plan } },
+    });
+    try {
+      const team = cloud.team!;
+      const { token: admin } = await team.pair({ email: "admin@example.test", role: "owner" });
+      const { token: member } = await team.pair({ email: "member@example.test", role: "member" });
+      const created = await team.as(admin!, "POST", "/api/bots", { name: "Stylist", visibility: "everyone" });
+      expect(created.status).toBe(201);
+      const { id } = created.body.bot;
+      const task = await team.as(member!, "POST", `/api/bots/${id}/tasks`, { title: "My theme" });
+      const { threadId } = task.body.task;
+      writeFileSync(plan, JSON.stringify({ [id]: { script: [{
+        key: "TEAM-THEME", match: ["TEAM-THEME"], reply: "Done",
+        steps: [step({ action: "set_theme", id: "neon", theme: JSON.stringify({ name: "Neon", canvas: "#0b1020" }) })],
+      }] } }));
+      expect((await team.as(member!, "POST", `/api/bots/${id}/messages`, { threadId, text: "TEAM-THEME" })).status).toBe(202);
+      const card = async () => {
+        const result = await team.as(member!, "GET", `/api/threads/${threadId}/messages`);
+        return result.body.messages?.find((line: any) => line.card?.appSettingRequest?.settingId === "appearance.theme")?.card;
+      };
+      await expect.poll(card, { timeout: 20_000 }).toBeDefined();
+      const { requestId } = await card();
+      const undo = await team.as(member!, "POST", `/api/threads/${threadId}/undo`, { requestId });
+      expect(undo).toMatchObject({ status: 200, body: { undone: true } });
+      expect((await team.as(member!, "GET", "/api/themes/active")).body.id).toBeNull();
+    } finally {
+      await cloud.close();
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 }, 90_000);

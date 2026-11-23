@@ -1066,8 +1066,13 @@ function cardAnswerRefusal(auth: RequestAuth, threadId: string, requestId: strin
       : null;
   }
   const reviewed = auth.scopes.includes("admin") ? undefined : store.messagesFor(threadId).find(message => message.card?.requestId === requestId && (message.card.teamMemoryRequest || message.card.outsideWrite || message.card.appSettingRequest?.tier === "safe"))?.card;
-  if (reviewed?.appSettingRequest) return "Only a workspace admin can undo an app setting.";
-  if (reviewed) return reviewed.outsideWrite ? "Only a workspace admin can save what came in from outside." : "Only a workspace admin can review shared team memory.";
+  if (reviewed?.appSettingRequest) {
+    if (!CLOUD_TEAM || reviewed.appSettingRequest.settingId !== "appearance.theme") return "Only a workspace admin can undo an app setting.";
+    if (!reviewed.undone) return appSettings.themeOwner(requestId) === personKey(auth.session)
+      ? null : "Only the person whose theme changed or a workspace admin can undo it.";
+  } else if (reviewed) {
+    return reviewed.outsideWrite ? "Only a workspace admin can save what came in from outside." : "Only a workspace admin can review shared team memory.";
+  }
   // A Cloud guest may read along but never answer: its words would reach the owner's turn and a lent Mac.
   if (CLOUD_PERSONAL) return cloudCardRefusal(auth);
   if (auth.scopes.includes("admin") || !sharedMembership()) return null; const setupRefused = CLOUD_TEAM ? botAccess.cardRefusal(auth, threadId, requestId) : null; if (setupRefused) return setupRefused;

@@ -44,6 +44,7 @@ interface Writable {
   /** The value's `path` names a picture file: `describe` sees the path, then the host stores the file and `current` and
    * `write` get the stored picture's `avatarUrl` in its place. An empty path stays, for taking the picture off. */
   fromFile?: true;
+  undoByValue?: true;
   current(value: unknown): unknown;
   write(value: unknown): Promise<string | null>;
   describe?(value: unknown): { change: string } | { refusal: string };
