@@ -19,7 +19,10 @@ import { parseJson } from "./schema.ts";
 
 export const MAX_REMOTE_TEAMMATES = 50;
 /** The Bot API's wait is at most 300 s; past that plus this margin the other server isn't answering. */
+const MAX_WAIT_S = 300;
 const CALL_MARGIN_MS = 15_000;
+/** The connection may stay quiet as long as the longest call: undici's own 300 s header and body timers would end a full wait first. */
+const LONGEST_CALL_MS = MAX_WAIT_S * 1000 + CALL_MARGIN_MS;
 const CHECK_TIMEOUT_MS = 15_000;
 const MAX_ANSWER_BYTES = 1_000_000;
 const DETAIL_CHARS = 300;
@@ -40,23 +43,34 @@ export function notAServerAddress(address: string): boolean {
   return isIP(address.split("%", 1)[0]!) !== 0 && NOT_A_SERVER.has(addressClass(address, NONE_OWN));
 }
 
+const onOpenInternet = (address: string): boolean => isIP(address.split("%", 1)[0]!) !== 0 && addressClass(address, NONE_OWN) === "public";
+
 /** Resolves a name as the system does, then refuses it when any address it gives is link-local, metadata or reserved,
- * so a DNS name can't carry a teammate key where a typed address may not go. Runs for every connection a call makes. */
-export function serverOnlyLookup(resolve: LookupFunction = dnsLookup as LookupFunction): LookupFunction {
+ * so a DNS name can't carry a teammate key where a typed address may not go. Runs for every connection a call makes.
+ * `privateOnly` is for plain http: a private-network name (`*.local`, `*.ts.net`) that resolves onto the open internet
+ * would send the key unencrypted. */
+export function serverOnlyLookup(resolve: LookupFunction = dnsLookup as LookupFunction, privateOnly = false): LookupFunction {
   return (hostname, options, callback) => resolve(hostname, options, (error, address, family) => {
     const found = typeof address === "string" ? [address] : (address ?? []).map((entry) => entry.address);
-    const refused = error ? undefined : found.find(notAServerAddress);
+    const refused = error ? undefined : found.find((one) => notAServerAddress(one) || (privateOnly && onOpenInternet(one)));
     if (refused === undefined) return (callback as (...args: unknown[]) => void)(error, address, family);
-    callback(Object.assign(new Error(`${hostname} resolves to ${refused}, a link-local, metadata or reserved address, not another server`), { code: "ENOTSERVER" }), "", 0);
+    const why = notAServerAddress(refused) ? "a link-local, metadata or reserved address, not another server" : "on the open internet, where plain http isn't encrypted";
+    callback(Object.assign(new Error(`${hostname} resolves to ${refused}, ${why}`), { code: "ENOTSERVER" }), "", 0);
   });
 }
 
-let teammateAgent: Agent | undefined;
+/** One for https, one for plain http (private addresses only). */
+const teammateAgents = new Map<boolean, Agent>();
 /** fetch whose every connection goes through {@link serverOnlyLookup}. */
 async function teammateFetch(url: string, init: RequestInit): Promise<Response> {
   const { Agent: UndiciAgent, fetch: undiciFetch } = await import("undici");
-  teammateAgent ??= new UndiciAgent({ connect: { lookup: serverOnlyLookup() } });
-  return undiciFetch(url, { ...init, dispatcher: teammateAgent } as Parameters<typeof undiciFetch>[1]) as unknown as Promise<Response>;
+  const plain = new URL(url).protocol === "http:";
+  let agent = teammateAgents.get(plain);
+  if (!agent) {
+    agent = new UndiciAgent({ connect: { lookup: serverOnlyLookup(undefined, plain) }, headersTimeout: LONGEST_CALL_MS, bodyTimeout: LONGEST_CALL_MS });
+    teammateAgents.set(plain, agent);
+  }
+  return undiciFetch(url, { ...init, dispatcher: agent } as Parameters<typeof undiciFetch>[1]) as unknown as Promise<Response>;
 }
 
 const recordSchema = z.object({
@@ -100,6 +114,8 @@ export function remoteAddress(address: string, botId?: string): { base: string; 
   } catch {
     throw new RemoteTeammateError("that is not a server address; give it like https://maus.example.com", 400);
   }
+  // A blob: URL's origin is the https one inside it, so the origin check alone would take it.
+  if (url.protocol !== "https:" && url.protocol !== "http:") throw new RemoteTeammateError("the address must start with https:// (or http:// on a private network)", 400);
   if (url.username || url.password || url.search || url.hash) throw new RemoteTeammateError("give the server's address without a sign-in, ? or #", 400);
   if (!allowedServerOrigin(url.origin)) {
     throw new RemoteTeammateError(url.protocol === "http:" ? `http://${url.host} is on the open internet and plain http isn't encrypted; use its https:// address` : "the address must start with https:// (or http:// on a private network)", 400);
@@ -175,7 +191,7 @@ export class RemoteTeammates {
   }
 
   private assertWritable(): void {
-    if (this.unreadable) throw new RemoteTeammateError("The saved teammates on other servers could not be read. Repair remote-teammates.json before changing them.", 503);
+    if (this.unreadable) throw new RemoteTeammateError("The saved teammates on other servers could not be read. Repair remote-teammates.json and restart OpenMausBot before changing them.", 503);
   }
 
   /** Writes `teammates` and only then keeps them, so a failed write leaves the list as the file has it. */
@@ -205,18 +221,18 @@ export interface RemoteCallOptions {
 
 /** Sends the other bot a message, as any Bot API caller would; `thread` goes on in a thread an earlier answer gave. */
 export function sendToRemote(teammate: RemoteTeammate, call: { message: string; thread?: string; wait?: number }, options: RemoteCallOptions = {}): Promise<RemoteResult> {
-  const wait = Number.isFinite(call.wait) ? Math.min(300, Math.max(0, call.wait!)) : 50;
+  const wait = Number.isFinite(call.wait) ? Math.min(MAX_WAIT_S, Math.max(0, call.wait!)) : 50;
   return callRemote(teammate, "", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ message: call.message, ...(call.thread !== undefined ? { thread: call.thread } : {}), wait }),
-  }, Math.ceil(wait * 1000) + CALL_MARGIN_MS, options);
+  }, Math.ceil(wait * 1000) + CALL_MARGIN_MS, options, call.thread);
 }
 
 /** Reads a thread an earlier answer gave: its reply once the other bot is done, or what it is doing now. */
 export function readRemote(teammate: RemoteTeammate, thread: string, options: RemoteCallOptions = {}): Promise<RemoteResult> {
   if (!THREAD_ID.test(thread)) return Promise.resolve({ ok: false, problem: "no_thread" });
-  return callRemote(teammate, `?thread=${encodeURIComponent(thread)}`, { method: "GET" }, CHECK_TIMEOUT_MS, options);
+  return callRemote(teammate, `?thread=${encodeURIComponent(thread)}`, { method: "GET" }, CHECK_TIMEOUT_MS, options, thread);
 }
 
 /** Whether the other server takes this key, without starting anything there: a read of a thread that can't exist is
@@ -230,7 +246,8 @@ export async function checkRemote(teammate: RemoteTeammate, options: RemoteCallO
   return { ok: false, problem: "bad_answer", status: 200 };
 }
 
-async function callRemote(teammate: RemoteTeammate, query: string, init: RequestInit, timeoutMs: number, options: RemoteCallOptions): Promise<RemoteResult> {
+/** `thread`: the thread the call goes on in, which its answer must be about; a call that starts one takes the thread it is given. */
+async function callRemote(teammate: RemoteTeammate, query: string, init: RequestInit, timeoutMs: number, options: RemoteCallOptions, thread?: string): Promise<RemoteResult> {
   const timeout = AbortSignal.timeout(timeoutMs);
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
   let response: Response;
@@ -260,10 +277,12 @@ async function callRemote(teammate: RemoteTeammate, query: string, init: Request
     body = undefined;
   }
   if (response.status === 200 || response.status === 202) {
-    const answer = parseAnswer(body, response.status);
+    const answer = parseAnswer(body, response.status, thread);
     return answer ? { ok: true, answer } : { ok: false, problem: "bad_answer", status: response.status };
   }
-  const detail = typeof (body as { error?: unknown })?.error === "string" ? clip((body as { error: string }).error, DETAIL_CHARS) : undefined;
+  // A server that echoes the key back must not hand it to whoever reads the result; it goes before the clip, so no part is left.
+  const said = (body as { error?: unknown } | undefined)?.error;
+  const detail = typeof said === "string" ? clip(said.split(teammate.key).join("[key]"), DETAIL_CHARS) : undefined;
   const retryAfter = Number(response.headers.get("retry-after"));
   return {
     ok: false, problem: PROBLEM_BY_STATUS[response.status] ?? (response.status >= 500 ? "failed" : "bad_answer"), status: response.status,
@@ -287,10 +306,10 @@ const PROBLEM_BY_STATUS: Record<number, RemoteProblem> = {
 };
 
 /** Only the two shapes docs/bot-api.md promises; a proxy's page or anything else is not an answer. */
-function parseAnswer(body: unknown, status: number): BotApiReply | null {
+function parseAnswer(body: unknown, status: number, expected?: string): BotApiReply | null {
   if (!body || typeof body !== "object") return null;
   const { reply, thread, status: state } = body as Record<string, unknown>;
-  if (typeof thread !== "string" || !THREAD_ID.test(thread)) return null;
+  if (typeof thread !== "string" || !THREAD_ID.test(thread) || (expected !== undefined && thread !== expected)) return null;
   if (status === 200) return typeof reply === "string" ? { reply, thread } : null;
   return state === "working" || state === "needs_approval" ? { thread, status: state } : null;
 }
