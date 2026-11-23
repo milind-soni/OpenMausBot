@@ -15,21 +15,33 @@
 // room's (a room's turns use a member bot's conversation folder under the room's own id); no remaining bot,
 // conversation or room works in it, inside it or in a folder between it and the data folder (a fork keeps working in
 // its source's folder), compared as the file system names it (case-insensitively on macOS and Windows); no link in
-// the bot's other folders leads into it; no process (Linux) works inside it; and neither the saved definitions and
-// instructions nor a remaining conversation's messages name it. While any of those cannot be read, it stays. That is
-// checked again just before each move, and nothing moves while the server is frozen or a backup is under way.
+// the bot's other folders leads into it; no process (Linux) works in it, holds a file open or has one mapped there;
+// and neither the saved definitions and instructions nor a remaining conversation's messages name it. While any of
+// those cannot be read, it stays. That is checked again just before each move, and nothing moves while the server is
+// frozen or a backup is under way.
 // Nothing is reached through a link: every folder from the data folder down must be a real folder, and what is moved
-// must be the very folder that was checked (device and inode, before and after the move; a mismatch is moved back).
-// What goes is first moved, in one rename, to <data>/.removing, and only then removed one entry at a time, so a crash
-// leaves either the whole tree in place or a part of it in .removing, which the next start finishes. Nothing runs on
-// the delete's own call: the work is queued, awaited one file at a time and paced, and the transcripts are read in a
-// worker, so a tree of hundreds of thousands of files never holds a turn or the event loop.
+// must be the very folder that was checked. It lands first under .removing/check-…, a name the drain never takes, is
+// compared there by device and inode, and only then gets the drain's name; a mismatch is moved back, or kept under
+// check-… when that fails. The drain leaves an entry a process is still in, and on Linux removes it with the system's
+// GNU rm (one file system, no link followed), elsewhere with a Node walk that re-checks each folder after listing it.
+// A crash leaves either the whole tree in place or a part of it in .removing, which the next start finishes. Nothing
+// runs on the delete's own call: the work is queued and paced, rm runs at low priority in its own process, and the
+// transcripts are read in a worker, so a tree of hundreds of thousands of files never holds a turn or the event loop.
+// Wired on a Cloud home only, and only with OMB_CONVERSATION_FOLDER_CLEANUP=on (off by default).
+import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { chmod, lstat, mkdir, readFile, readdir, readlink, realpath, rename, rmdir, unlink } from "node:fs/promises";
 import { lstatSync, readdirSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export const REMOVING_DIR = ".removing";
+export const FOLDER_CLEANUP_ENV = "OMB_CONVERSATION_FOLDER_CLEANUP";
+
+/** The delete-time cleanup, on a Cloud home with OMB_CONVERSATION_FOLDER_CLEANUP=on only (off by default, so a delete
+ * behaves as before until it has been proven on a test Cloud); undefined otherwise. */
+export function deleteTimeCleanup<T>(env: NodeJS.ProcessEnv, cloudHome: boolean, make: () => T): T | undefined {
+  return cloudHome && env[FOLDER_CLEANUP_ENV]?.trim().toLowerCase() === "on" ? make() : undefined;
+}
 const ID = /^[\w-]{1,128}$/;
 const RETIRED = /^\d{1,16}-[0-9a-f]{12}$/;
 const MAX_DEPTH = 8;
@@ -127,11 +139,16 @@ export interface FolderCleanupDeps {
   /** Why nothing may move now (frozen after a move, a backup being made or restored), else null. Asked before each move
    * and before the start's leftovers are finished. */
   paused?(): string | null;
-  /** The processes' working folders (Linux /proc/<pid>/cwd), or null where they cannot be read. */
+  /** Every path the processes work in, hold open or have mapped (linuxProcessPaths), or null where that cannot be read. */
   processFolders?(): Promise<readonly string[] | null>;
   /** When the start's leftover .removing is finished; false: only on request. Default: a minute after start. */
   drainAfterMs?: number | false;
   pause?(ms: number): Promise<void>;
+  /** Every path this machine's processes work in, hold open or have mapped (linuxProcessPaths), or null where that
+   * cannot be read; the drain leaves an entry one of them is in. */
+  processPaths?(): Promise<readonly string[] | null>;
+  /** The system's GNU rm, or null to walk in Node (gnuRm by default). */
+  systemRm?(): Promise<string | null>;
   /** For tests: runs between the last check of a tree and its move. */
   beforeMove?(path: string): void;
   log?(line: string): void;
@@ -147,16 +164,52 @@ export interface FoundTree { path: string; dev: number; ino: number }
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const code = (error: unknown) => (error as NodeJS.ErrnoException | undefined)?.code;
 
-/** The working folders of this machine's processes, from /proc on Linux; null elsewhere or when /proc cannot be read. */
-export async function linuxProcessFolders(): Promise<string[] | null> {
+/** Every path this machine's processes work in, hold open or have mapped, from /proc; null where that cannot be read. */
+export async function linuxProcessPaths(): Promise<string[] | null> {
   if (process.platform !== "linux") return null;
   let pids: string[];
   try { pids = (await readdir("/proc")).filter((name) => /^\d+$/.test(name)); } catch { return null; }
-  const folders: string[] = [];
+  const paths = new Set<string>();
   for (const pid of pids) {
-    try { folders.push(await readlink(`/proc/${pid}/cwd`)); } catch { /* gone, or another user's */ }
+    try { paths.add(await readlink(`/proc/${pid}/cwd`)); } catch { /* gone, or another user's */ }
+    for (const fd of await readdir(`/proc/${pid}/fd`).catch(() => [] as string[])) {
+      const target = await readlink(`/proc/${pid}/fd/${fd}`).catch(() => "");
+      if (target.startsWith("/")) paths.add(target.replace(/ \(deleted\)$/, ""));
+    }
+    const maps = await readFile(`/proc/${pid}/maps`, "utf8").catch(() => "");
+    for (const line of maps.split("\n")) {
+      const at = line.indexOf(" /");
+      if (at > 0) paths.add(line.slice(at + 1).replace(/ \(deleted\)$/, ""));
+    }
   }
-  return folders;
+  return [...paths];
+}
+
+/** The system's GNU rm (coreutils, as in the Cloud image's Debian base), found once; null elsewhere (macOS, Windows,
+ * busybox), where the cleanup walks in Node instead. */
+let gnuRmFound: Promise<string | null> | undefined;
+export function gnuRm(): Promise<string | null> {
+  return gnuRmFound ??= process.platform !== "linux" ? Promise.resolve(null) : new Promise((done) => {
+    execFile("rm", ["--version"], { timeout: 10_000, env: { PATH: process.env.PATH ?? "/usr/bin:/bin", LANG: "C" } }, (error, stdout) => {
+      done(!error && /GNU coreutils/.test(String(stdout)) ? "rm" : null);
+    });
+  });
+}
+
+/** `nice rm -rf --one-file-system -- entry`: true once the entry is gone. */
+function runRm(rm: string, entry: string): Promise<boolean> {
+  return new Promise((done) => {
+    execFile("nice", ["-n", "19", rm, "-rf", "--one-file-system", "--", entry], { timeout: 30 * 60_000, env: { PATH: process.env.PATH ?? "/usr/bin:/bin", LANG: "C" } }, () => {
+      lstat(entry).then(() => done(false), () => done(true));
+    });
+  });
+}
+
+/** Makes a moved tree's folders writable for its owner (GNU chmod never follows a link it meets), for rm's second go. */
+function chmodTree(entry: string): Promise<void> {
+  return new Promise((done) => {
+    execFile("chmod", ["-R", "u+rwx", "--", entry], { timeout: 10 * 60_000, env: { PATH: process.env.PATH ?? "/usr/bin:/bin", LANG: "C" } }, () => done());
+  });
 }
 
 /** Whether a git index (v2 or v3) names a file under `rel` (a path from the repository's top, `/`-separated); null when
@@ -417,7 +470,10 @@ export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
 
   const sameNode = (a: { dev: number; ino: number }, b: { dev: number; ino: number }) => a.dev === b.dev && a.ino === b.ino;
 
-  /** Moves `tree` into .removing in one rename; false (and the tree untouched) when that cannot be done safely. */
+  /** Moves `tree` into .removing; false (and the tree untouched) when that cannot be done safely. The move lands first
+   * under a name the drain never takes (check-…), is compared there by device and inode, and only then gets the drain's
+   * name; something else moved there (a link swapped in on the way) is put back, and if that fails it stays under check-…
+   * for a person to look at, never drained. */
   async function retire(root: string, tree: FoundTree): Promise<boolean> {
     const paused = deps.paused?.() ?? null;
     if (paused) { log(`cleanup: kept ${tree.path} for now: ${paused}`); return false; }
@@ -427,15 +483,24 @@ export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
       if (!plainFolderUnder(dataDir, root, tree.path)) throw new Error("not a plain folder in the data folder");
       const before = lstatSync(tree.path);
       if (!before.isDirectory() || !sameNode(before, tree)) throw new Error("it changed since it was checked");
+      const parent = realpathSync.native(dirname(tree.path));
       deps.beforeMove?.(tree.path);
-      const to = join(removing, `${Date.now()}-${randomBytes(6).toString("hex")}`);
-      await rename(tree.path, to);
-      const moved = await lstat(to);
+      // The last look, with no wait before the move: the folder it is in is still where it was (no link swapped in).
+      if (real(dirname(tree.path)) !== parent || !sameNode(lstatSync(tree.path), tree)) throw new Error("it changed since it was checked");
+      const name = `${Date.now()}-${randomBytes(6).toString("hex")}`;
+      const checking = join(removing, `check-${name}`);
+      await rename(tree.path, checking);
+      const moved = await lstat(checking);
       if (!sameNode(moved, tree)) {
-        // Something else was moved (a link swapped in on the way): put it back where it was and keep it.
-        await rename(to, tree.path).catch((error: unknown) => warn(`cleanup: could not put back ${to} at ${tree.path}: ${message(error)}`));
+        // Something else was moved: put it back where it was and keep it.
+        try {
+          await rename(checking, tree.path);
+        } catch (error) {
+          warn(`cleanup: MOVED SOMETHING ELSE AND COULD NOT PUT IT BACK: it is kept at ${checking} (it came from ${tree.path}, ${message(error)}); the cleanup never removes it`);
+        }
         throw new Error("what was moved is not what was checked; put back");
       }
+      await rename(checking, join(removing, name));
       return true;
     } catch (error) {
       warn(`cleanup: kept ${tree.path}: ${message(error)}`);
@@ -443,27 +508,36 @@ export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
     }
   }
 
-  /** Removes one entry of .removing, deepest first, a link as a link; what fails stays for the next pass. */
-  async function remove(path: string, totals: CleanupTotals): Promise<void> {
+  /** Removes one entry of .removing with Node, deepest first, a link as a link, never across a mount (`dev`); a folder
+   * that is no longer the folder it was when listed (a link swapped in) is left for the next pass. Used where GNU rm is
+   * not there (macOS, Windows); what fails stays for the next pass. */
+  async function remove(path: string, dev: number, totals: CleanupTotals): Promise<void> {
     await step();
     let stats;
     try { stats = await lstat(path); } catch (error) { if (code(error) !== "ENOENT") totals.failed++; return; }
+    if (stats.dev !== dev) { totals.failed++; return; }
     if (stats.isDirectory()) {
       let names: string[] = [];
       try { names = await readdir(path); } catch (error) {
         if (code(error) === "EACCES" || code(error) === "EPERM") { await chmod(path, 0o700).catch(() => {}); names = await readdir(path).catch(() => []); }
       }
-      for (const name of names) await remove(join(path, name), totals);
+      // The listing must be of the folder that was checked: a link swapped in before it is never walked.
+      const again = await lstat(path).catch(() => null);
+      if (!again || !again.isDirectory() || !sameNode(again, stats)) { totals.failed++; return; }
+      for (const name of names) await remove(join(path, name), dev, totals);
     }
     const drop = () => (stats.isDirectory() ? rmdir(path) : unlink(path));
     try {
       await drop();
     } catch (error) {
       if (code(error) === "ENOENT") return;
-      // A read-only file (Windows) or a folder without write permission: it and its folder made writable, then again.
+      // A read-only file (Windows) or a folder without write permission: it and its folder made writable, then again;
+      // only ever a real folder, never through a link.
       try {
-        await chmod(dirname(path), 0o700).catch(() => {});
-        if (!stats.isSymbolicLink()) await chmod(path, stats.isDirectory() ? 0o700 : 0o600).catch(() => {});
+        const parent = await lstat(dirname(path)).catch(() => null);
+        if (parent?.isDirectory() && parent.dev === dev) await chmod(dirname(path), 0o700).catch(() => {});
+        const self = await lstat(path).catch(() => null);
+        if (self && !self.isSymbolicLink() && sameNode(self, stats)) await chmod(path, stats.isDirectory() ? 0o700 : 0o600).catch(() => {});
         await drop();
       } catch {
         totals.failed++;
@@ -474,12 +548,32 @@ export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
     totals.bytes += stats.isDirectory() ? 0 : stats.size;
   }
 
-  /** Finishes what an earlier pass moved to .removing: only its own entries, and only in a plain .removing. */
+  /** Finishes what an earlier pass moved to .removing: only its own entries, only in a plain .removing, never one a
+   * process still works in, holds open or has mapped (it is tried again on a later pass). On Linux the system's GNU rm
+   * removes it (one file system, no link followed, a race-safe walk), at low priority. */
   async function drainPending(totals: CleanupTotals): Promise<void> {
     if (!realFolder(removing) || !plainFolderUnder(dataDir, dataDir, removing)) return;
-    const paused = deps.paused?.() ?? null;
-    if (paused) return;
-    for (const name of await readdir(removing).catch(() => [] as string[])) if (RETIRED.test(name)) await remove(join(removing, name), totals);
+    if (deps.paused?.()) return;
+    const names = (await readdir(removing).catch(() => [] as string[])).filter((name) => RETIRED.test(name));
+    if (!names.length) return;
+    const held = await (deps.processPaths ?? linuxProcessPaths)();
+    if (held === null && process.platform === "linux") return warn("cleanup: left .removing for now: which files processes hold cannot be read");
+    const removingDev = lstatSync(removing).dev;
+    const rm = await (deps.systemRm ?? gnuRm)();
+    for (const name of names) {
+      if (deps.paused?.()) return;
+      const entry = join(removing, name);
+      const stats = await lstat(entry).catch(() => null);
+      if (!stats) continue;
+      if (stats.dev !== removingDev) { totals.failed++; continue; }
+      const realEntry = await realpath(entry).catch(() => entry);
+      if (held && held.some((path) => within(entry, path) || within(realEntry, path))) { log(`cleanup: left ${entry} for now: a process still holds something in it`); continue; }
+      if (!rm || !stats.isDirectory()) { await remove(entry, stats.dev, totals); continue; }
+      const again = await lstat(entry).catch(() => null);
+      if (!again || !sameNode(again, stats)) { totals.failed++; continue; }
+      if (await runRm(rm, entry) || (await chmodTree(entry), await runRm(rm, entry))) totals.entries++;
+      else totals.failed++;
+    }
   }
 
   async function runJob(job: Job, totals: CleanupTotals, view: View, mentioned: () => Promise<ReadonlyMap<string, ReadonlySet<string>> | null>): Promise<void> {
