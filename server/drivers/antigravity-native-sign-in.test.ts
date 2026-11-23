@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { PlanFetch } from "../plan-usage.ts";
 import { antigravityProfileDirectory } from "./antigravity-acp.ts";
-import { defaultNativeSignInStore, nativeAccessToken, readNativeSignIn, type NativeSignInStore } from "./antigravity-native-sign-in.ts";
+import { defaultNativeSignInStore, nativeAccessToken, readNativeAccessToken, type NativeSignInStore } from "./antigravity-native-sign-in.ts";
 import { antigravityNativePlanUsage } from "./antigravity-usage-limits.ts";
 
 const NOW = Date.parse("2026-11-23T04:40:00Z");
@@ -37,44 +37,45 @@ describe("the access token of the native CLI's stored sign-in", () => {
   });
 });
 
-describe("where the native CLI's sign-in is read", () => {
+describe("which stored sign-in's access token is used", () => {
   const env = { HOME: "/Users/person" };
   const profileFile = `${antigravityProfileDirectory("native")}/antigravity-acp/antigravity-oauth-token`;
-  const store = (keychain: { item?: string; defaultKeychain: boolean } | null) => {
+  const store = (keychain: string | null | undefined, file: string | null) => {
     const calls: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
-    const readText = vi.fn(async (path: string) => path === profileFile ? "profile-sign-in" : null);
+    const readText = vi.fn(async (path: string) => path === profileFile ? file : null);
     const value: NativeSignInStore = {
-      security: keychain && (async (args, callEnv) => {
+      security: keychain === undefined ? null : async (args, callEnv) => {
         calls.push({ args, env: callEnv });
-        if (args[0] === "find-generic-password") return keychain.item === undefined ? { ok: false, stdout: "" } : { ok: true, stdout: keychain.item };
-        return { ok: keychain.defaultKeychain, stdout: "" };
-      }),
+        return keychain === null ? { ok: false, stdout: "" } : { ok: true, stdout: keychain };
+      },
       readText,
     };
     return { value, calls, readText };
   };
+  const live = (accessToken: string) => stored("2026-11-23T05:30:00Z", accessToken);
+  const dead = (accessToken: string) => stored("2026-11-23T04:30:00Z", accessToken);
 
-  it("is the keychain item the CLI keeps, asked with the CLI's own environment", async () => {
-    const { value, calls, readText } = store({ item: "keychain-sign-in", defaultKeychain: true });
-    expect(await readNativeSignIn("native", env, value)).toBe("keychain-sign-in");
+  it("is the keychain's while it is live, asked with the CLI's own environment, and the file is not read", async () => {
+    const { value, calls, readText } = store(inKeychain(live("keychain-access")), live("file-access"));
+    expect(await readNativeAccessToken("native", env, NOW, value)).toBe("keychain-access");
     expect(calls).toEqual([{ args: ["find-generic-password", "-s", "gemini", "-a", "antigravity", "-w"], env }]);
     expect(readText).not.toHaveBeenCalled();
   });
 
-  it("is none, not the profile's file, when the keychain the CLI uses holds no sign-in", async () => {
-    const { value, readText } = store({ defaultKeychain: true });
-    expect(await readNativeSignIn("native", env, value)).toBeNull();
-    expect(readText).not.toHaveBeenCalled();
+  it("is the profile file's when the keychain holds none or only an expired one, as after a failed keychain write", async () => {
+    expect(await readNativeAccessToken("native", env, NOW, store(inKeychain(dead("keychain-access")), live("file-access")).value)).toBe("file-access");
+    expect(await readNativeAccessToken("native", env, NOW, store(null, live("file-access")).value)).toBe("file-access");
   });
 
-  it("never asks a keychain off macOS", () => {
+  it("is none when every stored token has expired, so a file the CLI stopped writing soon shows nothing", async () => {
+    expect(await readNativeAccessToken("native", env, NOW, store(inKeychain(dead("keychain-access")), dead("file-access")).value)).toBeNull();
+    expect(await readNativeAccessToken("native", env, NOW, store(null, null).value)).toBeNull();
+  });
+
+  it("is the profile file's alone off macOS, where no keychain is asked", async () => {
     expect(defaultNativeSignInStore("linux").security).toBeNull();
     expect(defaultNativeSignInStore("win32").security).toBeNull();
-  });
-
-  it("is the profile's file when the CLI's HOME has no keychain, or the machine none it uses", async () => {
-    expect(await readNativeSignIn("native", env, store({ defaultKeychain: false }).value)).toBe("profile-sign-in");
-    expect(await readNativeSignIn("native", env, store(null).value)).toBe("profile-sign-in");
+    expect(await readNativeAccessToken("native", env, NOW, store(undefined, live("file-access")).value)).toBe("file-access");
   });
 });
 
@@ -94,10 +95,10 @@ describe("a native-CLI account's limits", () => {
 
   it("are Google's quota summary for the CLI's access token, asked without a project and without refreshing", async () => {
     const { requests, deps } = fixture();
-    const readSignIn = vi.fn(async () => inKeychain(valid));
-    const usage = await antigravityNativePlanUsage("native", { HOME: "/Users/person" }, deps, readSignIn);
+    const readAccessToken = vi.fn(async () => "native-access");
+    const usage = await antigravityNativePlanUsage("native", { HOME: "/Users/person" }, deps, readAccessToken);
     expect(usage).toMatchObject({ fiveHour: { available: true, usedPercent: 25 }, weekly: { available: true, usedPercent: 50 } });
-    expect(readSignIn).toHaveBeenCalledWith("native", expect.objectContaining({ HOME: "/Users/person" }));
+    expect(readAccessToken).toHaveBeenCalledWith("native", expect.objectContaining({ HOME: "/Users/person" }), NOW);
     expect(requests.map((request) => new URL(request.url).pathname)).toEqual(["/v1internal:retrieveUserQuotaSummary", "/v1internal:retrieveUserQuotaSummary"]);
     expect(requests.every((request) => request.authorization === "Bearer native-access" && request.body === "{}")).toBe(true);
     expect(JSON.stringify(usage)).not.toMatch(/native-access|native-refresh|person@example\.com/);
@@ -106,9 +107,8 @@ describe("a native-CLI account's limits", () => {
   it("are no row, and ask Google nothing, without a live token or once the switch is off", async () => {
     const { requests, deps } = fixture();
     expect(await antigravityNativePlanUsage("native", {}, deps, async () => null)).toBeNull();
-    expect(await antigravityNativePlanUsage("native", {}, deps, async () => stored("2026-11-23T04:00:00Z"))).toBeNull();
     expect(await antigravityNativePlanUsage("native", {}, deps, async () => { throw new Error("keychain"); })).toBeNull();
-    expect(await antigravityNativePlanUsage("native", {}, deps, async () => valid, false)).toBeNull();
+    expect(await antigravityNativePlanUsage("native", {}, deps, async () => "native-access", false)).toBeNull();
     expect(requests).toEqual([]);
   });
 });

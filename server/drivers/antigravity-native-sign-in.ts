@@ -10,9 +10,9 @@ import { sealedFixture } from "../env-path.ts";
 import { antigravityProfileDirectory } from "./antigravity-acp.ts";
 import { antigravityNativeTokenPath } from "./antigravity-native-status.ts";
 
-// Antigravity CLI 1.5.14 stores its sign-in with go-keyring: on macOS the login keychain item below whenever the HOME
-// it runs with has a default keychain, otherwise (and on every other platform without a keyring) the file in its
-// profile. Both hold the same JSON; the keychain's is prefixed and base64-encoded.
+// Antigravity CLI 1.5.14 stores its sign-in with go-keyring: on macOS in the login keychain item below, and in the file
+// in its profile when the keychain is missing or a write to it failed (the keychain then keeps an older copy); off macOS
+// the file is its store without a keyring. Both hold the same JSON; the keychain's is prefixed and base64-encoded.
 const KEYCHAIN_SERVICE = "gemini";
 const KEYCHAIN_ACCOUNT = "antigravity";
 const KEYRING_BASE64 = "go-keyring-base64:";
@@ -22,7 +22,7 @@ const STORED_MAX_BYTES = 1024 * 1024;
 const EXPIRY_MARGIN_MS = 60_000;
 
 export interface NativeSignInStore {
-  /** Runs `security` with the CLI's environment; null when this machine's keychain is not the CLI's store. */
+  /** Runs `security` with the CLI's environment; null where the CLI keeps no sign-in in a keychain. */
   security: ((args: string[], env: NodeJS.ProcessEnv) => Promise<{ ok: boolean; stdout: string }>) | null;
   readText: (path: string) => Promise<string | null>;
 }
@@ -51,14 +51,12 @@ export function defaultNativeSignInStore(platform: NodeJS.Platform = process.pla
   return { security: platform === "darwin" && !sealedFixture() ? runSecurity : null, readText: readSmallFile };
 }
 
-/** The sign-in the CLI run with `env` uses for this instance, as stored; null when it keeps none. */
-export async function readNativeSignIn(instanceId: string, env: NodeJS.ProcessEnv, store: NativeSignInStore = defaultNativeSignInStore()): Promise<string | null> {
-  if (store.security) {
-    const item = await store.security(["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", KEYCHAIN_ACCOUNT, "-w"], env);
-    if (item.ok) return item.stdout;
-    if ((await store.security(["default-keychain"], env)).ok) return null;
-  }
-  return store.readText(antigravityNativeTokenPath({ directory: antigravityProfileDirectory(instanceId) }));
+/** The live access token of the sign-in the CLI run with `env` keeps for this instance: the keychain's while it is live,
+ * else the profile file's; null when neither has one. A file the CLI no longer writes is dead within the hour. */
+export async function readNativeAccessToken(instanceId: string, env: NodeJS.ProcessEnv, now: number, store: NativeSignInStore = defaultNativeSignInStore()): Promise<string | null> {
+  const item = await store.security?.(["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", KEYCHAIN_ACCOUNT, "-w"], env);
+  return (item?.ok ? nativeAccessToken(item.stdout, now) : null)
+    ?? nativeAccessToken(await store.readText(antigravityNativeTokenPath({ directory: antigravityProfileDirectory(instanceId) })), now);
 }
 
 function decodeStored(raw: string): string {

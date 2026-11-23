@@ -18,7 +18,7 @@ import { refreshAntigravityAccess } from "./antigravity-account.ts";
 import { antigravityQuotaFamily } from "./antigravity-turn-outcome.ts";
 import { antigravityNativeByDefault, isAntigravityCliName } from "./antigravity-cli-install.ts";
 import { resolveAntigravityReleaseAsset } from "./antigravity-release.ts";
-import { nativeAccessToken, readNativeSignIn } from "./antigravity-native-sign-in.ts";
+import { readNativeAccessToken } from "./antigravity-native-sign-in.ts";
 
 /** Whether Antigravity accounts are asked for their limits at all. Off, they have no row in the usage report. */
 export const ANTIGRAVITY_USAGE_LIMITS = true;
@@ -361,17 +361,17 @@ export async function antigravityPlanUsage(
 }
 
 /** A native-CLI instance's limits for the usage report, read with the access token of the sign-in that CLI keeps for
- * `environment`; null for no row, as for the pinned runtime, and also while that token has expired. */
+ * `environment`; null for no row, as for the pinned runtime, and also while no stored token is live. */
 export async function antigravityNativePlanUsage(
   instanceId: string,
   environment: Record<string, string | undefined>,
   deps: AntigravityUsageDeps,
-  readSignIn: (instanceId: string, env: NodeJS.ProcessEnv) => Promise<string | null> = readNativeSignIn,
+  readAccessToken: (instanceId: string, env: NodeJS.ProcessEnv, now: number) => Promise<string | null> = readNativeAccessToken,
   enabled = ANTIGRAVITY_USAGE_LIMITS,
 ): Promise<PlanWindows | null> {
   if (!enabled) return null;
   try {
-    const accessToken = nativeAccessToken(await readSignIn(instanceId, { ...process.env, ...environment }), (deps.now ?? Date.now)());
+    const accessToken = await readAccessToken(instanceId, { ...process.env, ...environment }, (deps.now ?? Date.now)());
     if (!accessToken) return null;
     const windows = await antigravityQuotaWindows(accessToken, undefined, deps, AbortSignal.timeout(deps.timeoutMs ?? READ_DEADLINE_MS));
     return windows.length ? antigravityPlanWindows(windows) : null;
