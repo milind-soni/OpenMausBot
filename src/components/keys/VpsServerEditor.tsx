@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react";
 import { api, type ConfigStatus } from "@/state/store";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { cn } from "@/lib/cn";
+import { vpsAliasOfServerId } from "../../../shared/bot-computers";
 import { t } from "@/lib/i18n";
 import { SETTINGS_INLINE_INPUT } from "../SettingsPrimitives";
 import { KEY_FIELD } from "./KeyRow";
@@ -80,11 +81,17 @@ export function LimitInput({ label, unit, value, onChange, range, placeholder, d
  * that shows a server can open it. Empty limits on a named server use the default server's; the default's use 4 GB
  * and 2 cores. `onRemoved` hears the server's notice after a remove, since the editor is gone by then.
  */
-export function VpsServerEditor({ alias, onRemoved }: { alias: string; onRemoved?: (notice: string | null) => void }) {
+export type VpsServerEditorProps = ({ alias: string; serverId?: never } | { serverId: string; alias?: never }) & {
+  onRemoved?: (notice: string | null) => void;
+};
+
+/** Takes the server's SSH alias, or its `vps:<alias>` device id from the computers list or the Devices page. */
+export function VpsServerEditor({ onRemoved, ...which }: VpsServerEditorProps) {
+  const alias = which.alias ?? vpsAliasOfServerId(which.serverId ?? "") ?? "";
   const vps = useStoreSelector((s) => s.config?.vps);
   const named = vps?.servers ?? NO_SERVERS;
-  const isDefault = Boolean(vps?.sshAlias) && vps?.sshAlias === alias;
-  const own = isDefault ? undefined : named.find((server) => server.sshAlias === alias);
+  const isDefault = Boolean(alias) && vps?.sshAlias === alias;
+  const own = isDefault || !alias ? undefined : named.find((server) => server.sshAlias === alias);
   const saving = useVpsSaving();
   const save = useVpsSave();
   const savedName = isDefault ? alias : own?.name ?? "";

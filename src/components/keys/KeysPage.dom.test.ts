@@ -696,6 +696,20 @@ describe("Self-hosted VPS servers", () => {
     expect(field("Memory (GB)").value).toBe("");
   });
 
+  it("opens the same editor from a vps:<alias> server id, as the computers list carries it", async () => {
+    const { VpsServerEditor } = await import("./VpsServerEditor");
+    setConfig(status({ sshAlias: "production-vps", servers: [{ name: "Office", sshAlias: "office-vps", cpus: 4 }] }));
+    fx.api.mockImplementation(echo({ sshAlias: "production-vps" }));
+    render(() => createElement(VpsServerEditor, { key: "office", serverId: "vps:office-vps" }));
+    expect(aliases()).toEqual(["office-vps"]);
+    expect(field("Office CPU cores").value).toBe("4");
+    type(field("Office CPU cores"), "3");
+    await answered(() => button(rowFor("office-vps"), "Save").click());
+    expect(lastBody()).toEqual({ vpsServers: [{ name: "Office", sshAlias: "office-vps", cpus: 3 }] });
+    render(() => createElement(VpsServerEditor, { key: "gone", serverId: "vps:office-vps/openmausbot-vps-bot-abc" }));
+    expect(aliases()).toEqual([]);
+  });
+
   it("focuses the default server's alias when a link asks for the VPS row", async () => {
     setConfig(status({ sshAlias: "production-vps" }));
     page();
