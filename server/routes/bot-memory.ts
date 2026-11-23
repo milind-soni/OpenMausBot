@@ -5,10 +5,14 @@ import { json } from "../harness/http.ts";
 import {
   MEMORY_INDEX,
   MemoryStoreError,
+  deleteMemoryDoc,
   memoryCapacity,
   memoryOverview,
   openMemoryLocation,
+  parseMemoryPath,
   readMemoryDoc,
+  threadNotesPath,
+  writeMemoryDoc,
 } from "../memory-store.ts";
 import {
   flushMemoryJournal,
@@ -39,6 +43,18 @@ export interface BotMemoryRouteDeps {
   ownersWrite?: <T>(auth: RequestAuth, botId: string, write: () => T) => T;
   /** Team Cloud only: the signed-in person's own layer of this bot's memory (`/memory/mine`); null for anyone else. */
   ownLayer?(auth: RequestAuth, botId: string): string | null;
+  /** A conversation's own notes (`/memory/thread/<thread>`): `owns` when it is one of this bot's conversations, `scoped`
+   * when its saves default to its notes. */
+  threadNotes?: { owns(botId: string, threadId: string): boolean; scoped(botId: string, threadId: string): boolean };
+}
+
+/** A conversation's notes are kept out of the journal, which outlives a deleted conversation and travels in a move. */
+function isThreadNotes(path: string): boolean {
+  try {
+    return parseMemoryPath(path).kind === "thread";
+  } catch {
+    return false;
+  }
 }
 
 export function createBotMemoryRoutes(deps: BotMemoryRouteDeps): RouteHandler {
@@ -62,6 +78,7 @@ export function createBotMemoryRoutes(deps: BotMemoryRouteDeps): RouteHandler {
     const write = <T>(botId: string, change: () => T): T => deps.ownersWrite ? deps.ownersWrite(auth, botId, change) : change();
     /** One memory file of `id`, a bot's own folder or a layer of it. */
     const serveFile = async (id: string, guarded: <T>(change: () => T) => T) => {
+      if (isThreadNotes(url.searchParams.get("path") ?? "")) return json(res, 400, { error: "a conversation's notes are at /memory/thread/<thread id>", code: "path" });
       if (method === "GET") {
         try {
           return json(res, 200, readMemoryDoc(id, url.searchParams.get("path") ?? MEMORY_INDEX));
@@ -74,6 +91,7 @@ export function createBotMemoryRoutes(deps: BotMemoryRouteDeps): RouteHandler {
           .object({ path: z.string().default(MEMORY_INDEX), text: z.string(), expectedHash: z.string().optional() })
           .safeParse(await readBody(req));
         if (!parsed.success) return json(res, 400, { error: "text must be a string; path and expectedHash are optional strings" });
+        if (isThreadNotes(parsed.data.path)) return json(res, 400, { error: "a conversation's notes are at /memory/thread/<thread id>", code: "path" });
         try {
           const { doc, entry } = guarded(() => journalMemoryWrite(id, parsed.data.path, parsed.data.text, {
             actor: "person",
@@ -149,6 +167,25 @@ export function createBotMemoryRoutes(deps: BotMemoryRouteDeps): RouteHandler {
       if (!m[2]) return json(res, 200, memoryOverview(layer));
       if (!["GET", "PUT", "DELETE"].includes(method)) return PASS;
       return serveFile(layer, (change) => change());
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/thread\/([\w-]+)$/);
+    if (m && ["GET", "PUT", "DELETE"].includes(method)) {
+      const botId = m[1]!, threadId = m[2]!;
+      if (!deps.bot(botId) || !deps.threadNotes?.owns(botId, threadId)) return json(res, 404, { error: "no such conversation" });
+      const notesPath = threadNotesPath(threadId), scoped = deps.threadNotes.scoped(botId, threadId);
+      try {
+        if (method === "GET") return json(res, 200, { ...readMemoryDoc(botId, notesPath), scoped });
+        if (method === "DELETE") {
+          write(botId, () => deleteMemoryDoc(botId, notesPath));
+          return json(res, 200, { ...readMemoryDoc(botId, notesPath), scoped });
+        }
+        const parsed = z.object({ text: z.string(), expectedHash: z.string().optional() }).safeParse(await readBody(req));
+        if (!parsed.success) return json(res, 400, { error: "text must be a string; expectedHash is an optional string" });
+        write(botId, () => writeMemoryDoc(botId, notesPath, parsed.data.text, { expectedHash: parsed.data.expectedHash }));
+        return json(res, 200, { ok: true, ...readMemoryDoc(botId, notesPath), scoped });
+      } catch (error) {
+        return replyMemoryError(res, error);
+      }
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/journal$/);
     if (m && method === "GET") {

@@ -42,6 +42,19 @@ it("removes a failed bot fork send before buffering background thread events", (
   expect(removed.forkPanel?.activeLeafId).toBe(source.id);
 });
 
+it("switches to the selected branch in the panel while keeping the source thread selected", () => {
+  const alternate: Message = { ...source, id: "alternate", at: 2 };
+  const answer: Message = { ...source, id: "answer", role: "bot", at: 3, parentId: alternate.id };
+  const start = {
+    ...initialState,
+    bots: [{ id: "bot", threadId: "main", activeLeafId: "main-leaf" }],
+    forkPanel: { ...panel(), messages: [source, alternate, answer] },
+  } as unknown as AppState;
+  const switched = reducer(start, { type: "switchBranch", botId: "bot", threadId: "fork", messageId: alternate.id });
+  expect(switched.forkPanel?.activeLeafId).toBe(answer.id);
+  expect(switched.bots[0]?.activeLeafId).toBe("main-leaf");
+});
+
 it("ignores a stale load failure after retrying the same fork", () => {
   const retry = reduceForkPanel(state(), { type: "openForkPanel", kind: "bot", ownerId: "bot", threadId: "fork", loadId: "load-2" });
   expect(reduceForkPanel(retry, { type: "forkPanelLoadFailed", threadId: "fork", loadId: "load-1" })).toBe(retry);

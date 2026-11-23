@@ -203,6 +203,8 @@ export function createComputerFrames(options: ComputerFramesOptions) {
       return machine ? newest(machine.boxId) : undefined;
     },
     available: () => available,
+    /** When the machines were last listed; null before the first listing. */
+    listedAt: (): number | null => (listedAt === -Infinity ? null : listedAt),
     watching: () => timer !== null,
     captures: () => captures,
     tick,

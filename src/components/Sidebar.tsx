@@ -9,7 +9,7 @@ import { liveActivityLabel, sidebarMessage } from "@/lib/live-activity";
 import { SidebarWorkingStep } from "./SidebarWorkingStep"; import { FadeLine } from "./FadeLine";
 import { openBotRow } from "@/state/thread-navigation";
 
-import { BotAvatar } from "./Avatar";
+import { BotAvatar } from "./Avatar"; import { useMotionBeat } from "./mascot-beat";
 import { BotEngineMark, BotModelBadge, botTooltip } from "./BotModelBadge"; import { SidebarBotRole } from "./BotRole";
 import { stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
@@ -727,7 +727,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
     simpleRow && rowSurface(rowSelected),
   );
   const { waiting, working, failed, teammateWait, queued } = sidebarBotStatus(bot, pendingQueued, visible);
-  const { unread, noticing } = useBotUnread(bot);
+  const { unread, noticing } = useBotUnread(bot); const beat = useMotionBeat(mascotMotion?.kind, mascotMotion?.nonce ?? 0);
   const onLiveCall = liveBadgeFor(bot.id, liveMedia, liveCall);
   const body = (
     <>
@@ -736,9 +736,9 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
           bot={bot}
           state={stateForBot({ ...bot, messages: visible })}
           size={simpleRow ? avatarSize + 6 : avatarSize}
-          motion={mascotMotion?.kind ?? "none"}
+          motion={(beat && mascotMotion?.kind) || "none"}
           motionKey={mascotMotion?.nonce ?? 0}
-          animated={working || noticing || (mascotMotion?.kind ?? "none") !== "none"}
+          animated={beat || working || noticing}
         />
         {/* Bottom-left, clear of the status dots on the right and of the row's hover actions. */}
         {(iconOnly || !simpleList) && <BotModelBadge bot={bot} instances={instances} avatarSize={avatarSize} />}

@@ -60,6 +60,8 @@ const EXCLUDED = new Set([
   // The doctor's copies of what it repaired, and the version it last ran for (doctor/backup.ts, doctor/start.ts): this
   // folder's own history, and copies of files a backup already holds.
   "doctor-backups", "doctor-state.json",
+  // A Cloud server's database copies for its own backup of the volume (cloud-backup-stage.ts), removed when it is packed.
+  "backup-stage",
 ]);
 const EXCLUSION_NOTES = [
   "Device pairing, server identity, live leases and runtime files (existing destination identities are preserved).",

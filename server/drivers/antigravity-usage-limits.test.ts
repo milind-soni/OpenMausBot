@@ -103,6 +103,26 @@ afterEach(async () => {
 });
 
 describe("Antigravity subscription limits", () => {
+  it("reads the native CLI's sign-in with its own access token while it is fresh, and nothing once it is stale", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "omb-antigravity-usage-cli-"));
+    scratch.push(directory);
+    const tokenPath = join(directory, "antigravity-oauth-token");
+    const now = at("2026-11-23T12:00:00Z");
+    writeFileSync(tokenPath, JSON.stringify({ token: { access_token: "cli-access", refresh_token: "cli-refresh", expiry: "2026-11-23T12:30:00Z" } }));
+    const asked: Array<{ url: string; authorization?: string; body?: string }> = [];
+    const fetch: PlanFetch = async (url, init) => {
+      asked.push({ url, authorization: init.headers?.Authorization, body: init.body });
+      return { ok: true, status: 200, text: async () => JSON.stringify(summary) };
+    };
+    expect((await readAntigravityUsageWindows(tokenPath, { fetch, now: () => now })).map((window) => window.id)).toContain("gemini-5h");
+    // No refresh: the file names no OAuth client. The CLI refreshes it itself.
+    expect(asked.some((request) => request.url.endsWith("/token"))).toBe(false);
+    expect(asked.every((request) => request.authorization === "Bearer cli-access" && request.body === "{}")).toBe(true);
+    asked.length = 0;
+    expect(await readAntigravityUsageWindows(tokenPath, { fetch, now: () => at("2026-11-23T12:29:30Z") })).toEqual([]);
+    expect(asked).toEqual([]);
+  });
+
   it("omits rolling resets for untouched summary buckets and keeps used Gemini resets", async () => {
     const { windows } = fixture({
       now: at("2026-10-21T10:16:04Z"),

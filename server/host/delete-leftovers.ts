@@ -1,5 +1,5 @@
 // Deleting a conversation or a bot removes what it kept on disk outside its transcript: the files uploaded to the
-// conversation, its box uploads folder, the session files the engines wrote for it, and for a bot its checkpoints and
+// conversation, its box uploads folder, its own notes, the session files the engines wrote for it, and for a bot its checkpoints and
 // the memory layers kept beside its own folder. A conversation's own folder (task-workspaces/<bot>/<thread>) holds
 // files the bot made for the person, and stays when the conversation or the bot is deleted: on a Cloud home only its
 // package installs, and the conversation's full tool results, go (conversation-folder-cleanup.ts).
@@ -294,6 +294,12 @@ export function createDeleteLeftovers(deps: DeleteLeftoversDeps) {
     for (const bot of entries(root)) removeUnder(dataDir, join(root, bot, threadId));
   }
 
+  /** memory/threads/<thread>.md in the workspace of whichever bot kept the conversation. */
+  function removeThreadNotes(threadId: string): void {
+    const root = join(dataDir, "workspaces");
+    for (const bot of entries(root)) removeUnder(dataDir, join(root, bot, "memory", "threads", `${threadId}.md`));
+  }
+
   function removeBot(botId: string): void {
     if (!ID.test(botId) || isLayerId(botId)) return;
     const removeCheckpoints = () => attempt(`checkpoints of ${botId}`, () => void removeUnder(dataDir, join(dataDir, "checkpoints", botId)));
@@ -316,6 +322,7 @@ export function createDeleteLeftovers(deps: DeleteLeftoversDeps) {
     attempt("uploads", () => removeAttachments(new Set([...threads.values()].flatMap((found) => [...found.attachments]))));
     attempt("engine sessions", () => removeSessions(new Set([...threads.values()].flatMap((found) => [...found.sessions]))));
     for (const threadId of threads.keys()) attempt(`box uploads of ${threadId}`, () => removeBoxUploads(threadId));
+    for (const threadId of threads.keys()) attempt(`notes of ${threadId}`, () => removeThreadNotes(threadId));
     for (const botId of bots) removeBot(botId);
     if (deps.folders) {
       const folders = deps.folders;
