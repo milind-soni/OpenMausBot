@@ -122,6 +122,11 @@ export function workspacePreparationDockerfile(workspace: string): string {
       '  done' \
       '  exit "$status"' \
       ')' \
+      'device_inode() {' \
+      '  _id=$(stat -c "%d:%i" -- "$1" 2>/dev/null) || _id=$(stat -f "%d:%i" -- "$1" 2>/dev/null) || return 1' \
+      '  [ -n "$_id" ] || return 1' \
+      '  printf "%s\\n" "$_id"' \
+      '}' \
       'migrate_home() {' \
       '  source=$1' \
       '  target=$2' \
@@ -142,6 +147,18 @@ export function workspacePreparationDockerfile(workspace: string): string {
       '    preserve_home "$source" || return 1' \
       '    ln -s "$target" "$source"' \
       '    return 0' \
+      '  fi' \
+      '  source_id=$(device_inode "$source") || {' \
+      '    printf "%s\\n" "openmausbot: could not identify $source; leaving it in place" >&2' \
+      '    return 1' \
+      '  }' \
+      '  target_id=$(device_inode "$target") || {' \
+      '    printf "%s\\n" "openmausbot: could not identify $target; leaving it in place" >&2' \
+      '    return 1' \
+      '  }' \
+      '  if [ "$source_id" = "$target_id" ]; then' \
+      '    printf "%s\\n" "openmausbot: $source and $target resolve to the same directory; leaving it in place" >&2' \
+      '    return 1' \
       '  fi' \
       '  if merge_entry "$source" "$target"; then' \
       '    if [ -L "$source" ] || [ ! -d "$source" ]; then' \

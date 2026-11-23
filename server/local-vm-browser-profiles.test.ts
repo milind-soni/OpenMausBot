@@ -406,6 +406,143 @@ describe.skipIf(process.platform === "win32")("the image's start-up script keeps
     expect(lstatSync(join(sameHome, ".local")).isSymbolicLink()).toBe(true);
   });
 
+  it("does not delete browser profiles when ~/.config aliases the workspace profile directory", () => {
+    const dir = scratch();
+    const home = join(dir, "home");
+    const workspace = join(dir, "workspace");
+    const profiles = join(workspace, ".browser-profiles");
+    mkdirSync(home);
+    mkdirSync(profiles, { recursive: true });
+    symlinkSync(profiles, join(home, ".config"));
+    const seeded = [
+      [join(home, ".config", "google-chrome"), "chrome-bytes"],
+      [join(home, ".config", "chromium"), "chromium-bytes"],
+    ] as const;
+    for (const [profile, bytes] of seeded) {
+      mkdirSync(profile, { recursive: true });
+      writeFileSync(join(profile, "Cookies"), bytes);
+    }
+    const before = seeded.map(([profile]) => lstatSync(profile).ino);
+    const result = spawnSync("/bin/sh", [prepareScript(dir, workspace)], {
+      encoding: "utf8",
+      env: { PATH: process.env.PATH, HOME: home },
+    });
+    expect(result.status, result.stderr).not.toBe(0);
+    expect(result.stderr).toContain("resolve to the same directory");
+    expect(result.stderr).toContain(join(home, ".config", "google-chrome"));
+    expect(result.stderr).toContain(join(profiles, "google-chrome"));
+    for (const [profile, bytes] of seeded) {
+      const stat = lstatSync(profile);
+      expect(stat.isSymbolicLink()).toBe(false);
+      expect(stat.isDirectory()).toBe(true);
+      expect(readFileSync(join(profile, "Cookies"), "utf8")).toBe(bytes);
+    }
+    expect(before).toEqual(seeded.map(([profile]) => lstatSync(profile).ino));
+    expect(lstatSync(join(home, ".config")).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(join(home, ".config"))).toBe(profiles);
+    expect(lstatSync(join(profiles, "google-chrome")).isSymbolicLink()).toBe(false);
+    expect(lstatSync(join(profiles, "chromium")).isSymbolicLink()).toBe(false);
+    expect(recoveryDirectories(profiles, "google-chrome")).toEqual([]);
+    expect(recoveryDirectories(profiles, "chromium")).toEqual([]);
+  });
+
+  const sameDirectoryAliases = [
+    {
+      label: "~/.local",
+      leaf: ".local",
+      workspaceParts: [".desktop-apps", "local"] as const,
+    },
+    {
+      label: "~/.mozilla",
+      leaf: ".mozilla",
+      workspaceParts: [".browser-profiles", "mozilla"] as const,
+    },
+  ];
+  const bindMounts = process.platform === "linux"
+    && spawnSync("unshare", ["--user", "--map-root-user", "--mount", "true"], { encoding: "utf8", timeout: 5000 }).status === 0;
+
+  it.skipIf(!bindMounts).each(sameDirectoryAliases)(
+    "does not delete $label when an aliased path resolves it to the workspace directory",
+    (alias) => {
+      const dir = scratch();
+      const home = join(dir, "home");
+      const workspace = join(dir, "workspace");
+      const target = join(workspace, ...alias.workspaceParts);
+      const source = join(home, alias.leaf);
+      mkdirSync(home);
+      mkdirSync(target, { recursive: true });
+      mkdirSync(source);
+      writeFileSync(join(target, "cookies.sqlite"), `${alias.leaf}-bytes`);
+      const script = prepareScript(dir, workspace);
+      const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+      const result = spawnSync("unshare", [
+        "--user", "--map-root-user", "--mount",
+        "/bin/sh", "-c",
+        `mount --bind ${quote(target)} ${quote(source)} && exec /bin/sh ${quote(script)}`,
+      ], { encoding: "utf8", env: { PATH: process.env.PATH, HOME: home } });
+      expect(result.status, result.stderr).not.toBe(0);
+      expect(result.stderr).toContain("resolve to the same directory");
+      expect(result.stderr).toContain(source);
+      expect(result.stderr).toContain(target);
+      expect(readFileSync(join(target, "cookies.sqlite"), "utf8")).toBe(`${alias.leaf}-bytes`);
+      const sourceStat = lstatSync(source);
+      expect(sourceStat.isSymbolicLink()).toBe(false);
+      expect(sourceStat.isDirectory()).toBe(true);
+      expect(lstatSync(target).isSymbolicLink()).toBe(false);
+      expect(recoveryDirectories(home, alias.leaf)).toEqual([]);
+    },
+  );
+
+  it.each([
+    ["prints nothing", "#!/bin/sh\nexit 0\n"],
+    ["cannot stat", "#!/bin/sh\nexit 1\n"],
+  ])("leaves ~/.local untouched when stat %s", (_label, body) => {
+    const dir = scratch();
+    const home = join(dir, "home");
+    const workspace = join(dir, "workspace");
+    const local = join(workspace, ".desktop-apps", "local");
+    mkdirSync(join(home, ".local"), { recursive: true });
+    mkdirSync(local, { recursive: true });
+    writeFileSync(join(home, ".local", "cookies.sqlite"), "home-secret");
+    writeFileSync(join(local, "cookies.sqlite"), "workspace-secret");
+    const path = fakeCommand(dir, "stat", body);
+    const result = spawnSync("/bin/sh", [prepareScript(dir, workspace)], {
+      encoding: "utf8",
+      env: { PATH: path, HOME: home },
+    });
+    expect(result.status, result.stderr).not.toBe(0);
+    expect(result.stderr).toContain(`could not identify ${join(home, ".local")}`);
+    expect(result.stderr).toContain("leaving it in place");
+    expect(result.stderr).not.toContain("resolve to the same directory");
+    expect(lstatSync(join(home, ".local")).isSymbolicLink()).toBe(false);
+    expect(lstatSync(join(home, ".local")).isDirectory()).toBe(true);
+    expect(readFileSync(join(home, ".local", "cookies.sqlite"), "utf8")).toBe("home-secret");
+    expect(readFileSync(join(local, "cookies.sqlite"), "utf8")).toBe("workspace-secret");
+    expect(existsSync(join(local, "only-home"))).toBe(false);
+    expect(recoveryDirectories(home, ".local")).toEqual([]);
+  });
+
+  it("identifies a directory with stat -f when stat -c is unavailable", () => {
+    const dir = scratch();
+    const home = join(dir, "home");
+    const workspace = join(dir, "workspace");
+    mkdirSync(join(home, ".local", "share"), { recursive: true });
+    writeFileSync(join(home, ".local", "share", "apps.txt"), "kept");
+    mkdirSync(workspace);
+    const realStat = JSON.stringify(execFileSync("/bin/sh", ["-c", "command -v stat"], { encoding: "utf8" }).trim());
+    const body = process.platform === "linux"
+      ? `#!/bin/sh\nif [ "$1" = "-c" ]; then exit 1; fi\nexec ${realStat} -c "$2" -- "$4"\n`
+      : `#!/bin/sh\nif [ "$1" = "-c" ]; then exit 1; fi\nexec ${realStat} "$@"\n`;
+    const path = fakeCommand(dir, "stat", body);
+    const stderr = runPrepared(prepareScript(dir, workspace), home, path);
+    const local = join(workspace, ".desktop-apps", "local");
+    expect(lstatSync(join(home, ".local")).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(join(home, ".local"))).toBe(local);
+    expect(readFileSync(join(local, "share", "apps.txt"), "utf8")).toBe("kept");
+    expect(stderr).not.toContain("could not identify");
+    expect(stderr).not.toContain("resolve to the same directory");
+  });
+
   it("stops the driver wrapper when workspace preparation fails", () => {
     const dir = scratch();
     const prepare = join(dir, "prepare-fail.sh");
