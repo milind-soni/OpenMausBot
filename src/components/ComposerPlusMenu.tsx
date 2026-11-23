@@ -333,7 +333,7 @@ function ComposerMenu({ items, renderTrigger }: { items: SidebarMenuItem[]; rend
               <span className={cn("flex size-4 shrink-0 items-center justify-center [&_svg]:size-4", item.active ? "text-accent" : "text-ink-secondary")} aria-hidden="true">{item.icon}</span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate">{item.label}</span>
-                {inside && item.disabled && item.note && <span className="block truncate text-[12px] leading-4 text-ink-secondary">{item.note}</span>}
+                {inside && item.note && <span className="block truncate text-[12px] leading-4 text-ink-secondary">{item.note}</span>}
               </span>
               {item.subtitle && <span className="max-w-[45%] shrink-0 truncate text-[13px] text-ink-secondary">{item.subtitle}</span>}
               {item.submenu && <ChevronRight size={14} className="shrink-0 text-ink-secondary rtl:-scale-x-100" aria-hidden="true" />}

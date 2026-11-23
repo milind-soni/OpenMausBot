@@ -143,8 +143,8 @@ describe("the Simple composer in a bot chat", () => {
     const rows = [...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.getAttribute("data-menu-key"));
     expect(rows).toEqual(["back", "place:follow", "place:cloud", "place:vm", "place:local", "place:browser"]);
     expect(item("place:follow")?.getAttribute("aria-checked")).toBe("true");
-    expect(item("place:follow")?.textContent).toBe("Follow this bot's setting");
-    // A place this chat can't have stays listed, dimmed, with why under it.
+    expect(item("place:follow")?.textContent).toBe("Follow this bot's settingCurrently Private desktop");
+    // Each place says what it is, and one this chat can't have stays listed, dimmed, with why.
     expect(item("place:browser")?.disabled).toBe(true);
     expect(item("place:browser")?.textContent).toBe("BrowserNot with this model");
     click(item("place:follow"));
