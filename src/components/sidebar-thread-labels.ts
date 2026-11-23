@@ -18,10 +18,11 @@ type LabelBot = Pick<Bot, "threadId"> & Partial<Pick<Bot, "mainThreadId" | "task
 /** The person started it: not a routine run, and not opened by a bot (its own new thread, a burst or a hand-off). */
 export const ownThread = (task: Pick<Task, "routineRunId" | "openedBy">): boolean => !task.routineRunId && !task.openedBy;
 
-const ownOpen = (bot: Pick<LabelBot, "tasks">) => (bot.tasks ?? []).filter((task) => ownThread(task) && !isArchived(task) && !isSnoozed(task));
+/** The threads a bot unfolds to: the person's own open ones, and its main thread whoever opened it and whatever its state. */
+const ownOpen = (bot: Pick<LabelBot, "tasks" | "mainThreadId">) => (bot.tasks ?? []).filter((task) => task.threadId === bot.mainThreadId || (ownThread(task) && !isArchived(task) && !isSnoozed(task)));
 
 /** Only a bot with more than one thread of the person's own has anything to unfold. */
-export const canUnfold = (bot: Pick<LabelBot, "tasks">): boolean => ownOpen(bot).length > 1;
+export const canUnfold = (bot: Pick<LabelBot, "tasks" | "mainThreadId">): boolean => ownOpen(bot).length > 1;
 
 export function labelStatus(task: LabelTask): LabelStatus {
   if (task.activity === "waiting-on-you") return "waiting";

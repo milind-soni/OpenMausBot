@@ -155,14 +155,14 @@ export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activ
     if (!seen || run.createdAt > seen.createdAt) newestRun.set(run.routineId, run);
   }
   return orderedThreadList(tasks).filter((task) => {
-    if (task.pinned === true) return true;
+    if (task.pinned === true || task.threadId === mainId) return true;
     if (task.openedBy?.burstId) return task.threadId === activeId || demandsAttention(task, activeId);
     if (isArchived(task)) return task.threadId === activeId;
     const run = runOf.get(task.threadId);
     if (run && newestRun.get(run.routineId) !== run) return demandsAttention(task, activeId);
     return task.closedBy || isSnoozed(task)
       ? demandsAttention(task, activeId)
-      : open++ < 6 || task.threadId === mainId || demandsAttention(task, activeId);
+      : open++ < 6 || demandsAttention(task, activeId);
   });
 }
 

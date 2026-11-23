@@ -57,6 +57,14 @@ describe("sidebar thread visibility", () => {
     expect(visibleSidebarThreads(rows, "8", "", [], true)).toEqual(rows);
   });
 
+  it("keeps the bot's main thread listed whatever its state: snoozed, an idle burst lane, a thread its opener closed", () => {
+    const listed = (main: object) => visibleSidebarThreads([{ threadId: "open", title: "Open" }, { threadId: "main", title: "Main", ...main }], "open", "", [], false, [], "main").map((task) => task.threadId);
+    expect(listed({ snoozedUntil: Date.now() + 3_600_000 })).toEqual(["open", "main"]);
+    expect(listed({ openedBy: { botId: "maus", name: "Maus", burstId: "burst" } })).toEqual(["open", "main"]);
+    expect(listed({ openedBy: { botId: "atlas", name: "Atlas" }, closedBy: { botId: "atlas", name: "Atlas" } })).toEqual(["open", "main"]);
+    expect(visibleSidebarThreads([{ threadId: "open", title: "Open" }, { threadId: "main", title: "Main", snoozedUntil: Date.now() + 3_600_000 }], "open").map((task) => task.threadId)).toEqual(["open"]);
+  });
+
   it("keeps the bot's main thread listed when it is older than the six recent rows", () => {
     expect(visibleSidebarThreads(tasks, "0", "", [], false, [], "9").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5", "9"]);
     expect(visibleSidebarThreads(tasks, "0").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5"]);

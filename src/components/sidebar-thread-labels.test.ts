@@ -39,6 +39,18 @@ describe("a bot's threads under its sidebar row", () => {
     expect(labels.more).toBe(2);
   });
 
+  it("unfolded, lists the main thread first whoever opened it and whatever its state", () => {
+    const listed = (main: Partial<Task>) => {
+      const labels = threadLabels({ ...bot([thread("a", 1), thread("b", 2), thread("main", 30, main)], "a"), mainThreadId: "main" }, {}, { unfolded: true, current: "a", rowThreadId: "a", now: NOW });
+      return labels.rows.map((row) => [row.task.threadId, row.main]);
+    };
+    const first = [["main", true], ["a", false], ["b", false]];
+    expect(listed({ openedBy: { botId: "atlas", name: "Atlas", at: 1 } })).toEqual(first);
+    expect(listed({ openedBy: { botId: "maus", name: "Maus", at: 1, burstId: "burst" } })).toEqual(first);
+    expect(listed({ snoozedUntil: NOW + DAY })).toEqual(first);
+    expect(canUnfold({ ...bot([thread("a", 1), thread("main", 30, { openedBy: { botId: "atlas", name: "Atlas", at: 1 } })]), mainThreadId: "main" })).toBe(true);
+  });
+
   it("leaves a week-old thread nobody touched in the count, not the list", () => {
     const labels = threadLabels(bot([thread("main", 1), thread("stale", 8)]), {}, { unfolded: true, rowThreadId: "main", now: NOW });
     expect(ids(labels)).toEqual(["main"]);
