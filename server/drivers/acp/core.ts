@@ -25,7 +25,7 @@ import { applyOneShotEnv, runAcpOneShot } from "./background-text.ts"; import ty
 import { acpCapabilities } from "./capabilities.ts"; import { readAcpMediaLinks } from "./media-links.ts";
 import { acpNativeLogMessage } from "./tool-log.ts";
 import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
-import { formatQuietLimit, lastSeenPhrase, LIMIT_WORDS, promptIdleTimeoutMs, type LogSignal } from "./quiet-status.ts"; import { startAcpQuietWatch } from "./quiet-watch.ts"; import { AppliedConfig } from "./applied-config.ts";
+import { formatQuietLimit, lastSeenPhrase, LIMIT_WORDS, promptIdleTimeoutMs, type LogSignal } from "./quiet-status.ts"; import { startAcpQuietWatch } from "./quiet-watch.ts"; import { AppliedConfig } from "./applied-config.ts"; import { modelRefused, startupRefresh } from "./startup-refresh.ts";
 import { acpMissingSession } from "./rpc-error.ts";
 import { readSessionReport } from "./session-reports.ts";
 import { promptTokenUsage } from "./prompt-usage.ts";
@@ -351,17 +351,18 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         resolve: support.resolveModels && ((fresh) => { const env = childEnv(); return support.resolveModels!(env, config, instanceId, fresh, instanceEnvNames(input.environment, env)); }),
         explain: (error) => acpDiscoveryProblem(error, support.classifyError) });
       const refreshModels = (fresh?: boolean) => catalog.refresh(fresh);
-      let startupModelRefresh: Promise<void> | null = null;
+      let startupModelRefresh: Promise<void> | null = null, startupSaved = false;
       if (support.resolveModels && support.resolveModelsOnCreate !== false) {
         startupModelRefresh = (await openStartupModelCatalog({
           instanceId,
-          use: (saved) => { catalog.models = saved; },
+          use: (saved) => { catalog.models = saved; startupSaved = true; },
           current: () => catalog.models,
           refresh: refreshModels,
         }))?.pending ?? null;
       } else if (support.resolveModelsOnCreate !== false) {
         await refreshModels();
       }
+      const startup = startupRefresh({ pending: startupModelRefresh, saved: () => startupSaved, catalog: () => catalog.models, normalize: support.normalizeSessionSelection });
       const deviceSignIn = support.deviceSignIn ? new DeviceAuthController(support.deviceSignIn, { cli: config.cli, environment: () => childEnv(), onAuthenticated: refreshModels }) : null;
       const browserSignIn = support.browserSignIn ? new AcpBrowserAuth(support.browserSignIn, { cli: config.cli, environment: () => childEnv(), onAuthenticated: refreshModels }) : null;
       const listeners = new Set<RuntimeEventListener>();
@@ -838,7 +839,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
 
       const sendTurn = async (turn: SendTurnInput, retryOf?: string) => {
         requireRunning();
-        if (startupModelRefresh) await startupModelRefresh;
+        // A saved list that offers this turn's model stands in while the startup read runs (startup-refresh.ts).
+        const standIn = startup.standsIn(turn);
+        if (startupModelRefresh && !standIn) await startupModelRefresh;
         await backgroundEnds.get(turn.threadId); requireRunning();
         const parsedScope = parseToolScope(turn.toolScope);
         if (!parsedScope.ok) throw new Error(parsedScope.error);
@@ -913,7 +916,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           support.spawnFingerprint?.(spawnEnv, turnConfig) ?? null, launch.ro ?? [], boxAudienceKey(cwd)];
         const contractKey = JSON.stringify([...processContract, cwd, turn.toolScope ?? null, inheritedScopeFingerprint]);
         const launchModel = support.sessionModelEnv && cliTurn.model && /^[\w.:/-]{1,200}$/u.test(cliTurn.model)
-          && catalog.accountModels?.has(cliTurn.model) ? cliTurn.model : undefined;
+          && catalog.accountModels?.has(cliTurn.model) && !standIn ? cliTurn.model : undefined;
         const launchEnv = support.sessionModelEnv && launchModel
           ? { ...spawnEnv, [support.sessionModelEnv]: launchModel }
           : spawnEnv;
@@ -1343,6 +1346,13 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             }
             if (!state.settled && !state.cancelling) {
               const untouched = retryOf === undefined && !state.producedItem && !state.text && !current.runningTools.size && !asks.size && !state.stopped && !session.closing;
+              if (untouched && standIn && !state.promptSent && modelRefused(e)) { // the saved list was stale: read it, then once more
+                acknowledge(); state.settled = true; session.current = null; active.delete(threadId); current.stopQuietWatch?.(); closeSession(threadId, "stale-models");
+                return void startup.done().then(() => sendTurn({ ...turn, startupRecovery: undefined }, turnId)).catch((failure) => {
+                  emit({ ...base(threadId, turnId), type: "runtime.error", message: failure instanceof Error ? failure.message : String(failure) });
+                  emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "rpc_error", cost: null });
+                });
+              }
               if (untouched && retryUnderToolLimit(e, { key: toolLimitKey, model: resolvedModel, engine: DRIVER_KIND, retry: () => {
                 acknowledge(); state.settled = true; session.current = null; active.delete(threadId); current.stopQuietWatch?.();
                 return sendTurn({ ...turn, startupRecovery: undefined, sessionReset: undefined, resumeCursor: session.sessionId ?? turn.resumeCursor }, turnId);

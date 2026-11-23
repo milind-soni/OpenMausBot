@@ -304,7 +304,7 @@ describe("startup model catalogs", () => {
     }
   });
 
-  it("an ACP engine serves a saved catalog and lets the turn wait for the refresh", async () => {
+  it("an ACP engine serves a saved catalog and lets a turn for a model it lacks wait for the refresh", async () => {
     seedBots();
     writeStartupModelCache("cursor", CACHED, STALE);
     const gate = deferredCatalog();
@@ -322,13 +322,33 @@ describe("startup model catalogs", () => {
     expect(await settledSoon(creating)).toBe(true);
     const instance = await creating;
     expect(instance.models).toEqual(CACHED);
-    const turn = instance.adapter.sendTurn({ threadId: "thread-1", text: "hello", cwd: DATA_DIR });
+    const turn = instance.adapter.sendTurn({ threadId: "thread-1", text: "hello", model: "fresh-model", cwd: DATA_DIR });
     expect(await settledSoon(turn)).toBe(false);
     expect(spawn).not.toHaveBeenCalled();
     gate.release(FRESH);
     await expect(turn).rejects.toThrow("spawned");
     expect(instance.models).toEqual(FRESH);
     expect(spawn).toHaveBeenCalled();
+    await instance.dispose();
+  });
+
+  it("an ACP engine runs a turn the saved catalog serves without waiting for the refresh", async () => {
+    seedBots();
+    writeStartupModelCache("cursor", CACHED, STALE);
+    const gate = deferredCatalog();
+    const spawn = vi.spyOn(procs, "spawnCli").mockImplementation(() => {
+      throw new Error("spawned");
+    });
+    const driver = createAcpDriver(acpSupport(() => gate.promise));
+    const instance = await driver.create({ instanceId: "cursor", displayName: "Cursor", environment: {}, enabled: true, config: driver.defaultConfig() });
+    for (const model of ["cached-model", undefined]) {
+      await expect(instance.adapter.sendTurn({ threadId: `thread-${model ?? "default"}`, text: "hello", model, cwd: DATA_DIR })).rejects.toThrow("spawned");
+    }
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(instance.models).toEqual(CACHED);
+    gate.release(FRESH);
+    await instance.startupModelRefresh;
+    expect(instance.models).toEqual(FRESH);
     await instance.dispose();
   });
 });

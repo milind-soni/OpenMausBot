@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DATA_DIR, ensureDirs } from "../config.ts";
+import { startupModelCachePath } from "../startup-model-catalog.ts";
 import { TurnNotStartedError, type ProviderInstance } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
@@ -1209,6 +1210,78 @@ describe("Antigravity driver over shared ACP", () => {
     expect(configCalls()).toEqual([["mode", "yolo"], ["thought_level", "low"]]);
     await run("full", "low");
     expect(configCalls()).toEqual([["mode", "yolo"], ["thought_level", "low"]]);
+  });
+
+  describe("after a restart with a saved model list from another build", () => {
+    const levels = [{ value: "low", name: "Low" }, { value: "high", name: "High" }];
+    const seed = (instanceId: string, models: string[]) => {
+      ensureDirs();
+      writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify([{ id: "bot-restart" }]));
+      const path = startupModelCachePath(instanceId)!;
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, JSON.stringify({ default: models[0], options: models.map((id) => ({ id, label: id })), checkedAt: Date.now() - 60_000, build: "0.0.0-older" }));
+      const tokenDirectory = join(antigravityProfileDirectory(instanceId), "antigravity-acp");
+      mkdirSync(tokenDirectory, { recursive: true });
+      writeFileSync(join(tokenDirectory, "acp_token.json"), "{}", { mode: 0o600 });
+    };
+    afterEach(() => rmSync(join(DATA_DIR, "bots.json"), { force: true }));
+
+    it("runs the first turn on the saved list while the list is read again in the background", async () => {
+      const fake = fakeRuntime();
+      seed("antigravity-restart-standin", ["gemini-3.8-flash", "gemini-4-argon"]);
+      instance = await AntigravityDriver.create({
+        instanceId: "antigravity-restart-standin",
+        displayName: "Antigravity",
+        environment: {
+          FAKE_ACP_AUTH_METHOD: "oauth-personal",
+          FAKE_ACP_MODELS: "gemini-3.8-flash,gemini-4-argon",
+          FAKE_ACP_VARIANTS: JSON.stringify({ "gemini-3.8-flash": { id: "thought_level", currentValue: "low", options: levels } }),
+          FAKE_ACP_MODES: "default,yolo",
+          // The background read's thinking-level survey hangs on this model until its budget runs out.
+          FAKE_ACP_HANG_ON_MODEL: "gemini-4-argon",
+        },
+        enabled: true,
+        config: { cli: fake.executable, fullAuto: false },
+      });
+      expect(instance.startupModelRefresh).toBeDefined();
+      let refreshed = false;
+      const refresh = instance.startupModelRefresh!.then(() => { refreshed = true; });
+      recorder = recordEvents(instance.adapter);
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "thread-restart", text: "hello", approvalMode: "ask", model: "gemini-3.8-flash", variant: "high", cwd: fake.directory });
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId, 8_000)).toMatchObject({ ok: true });
+      expect(refreshed).toBe(false);
+      await refresh;
+    }, 40_000);
+
+    it("reads the list and tries once more when the agent refuses a model the stale list still named", async () => {
+      const fake = fakeRuntime();
+      const rpc = join(fake.directory, "rpc.jsonl");
+      seed("antigravity-restart-stale", ["gemini-retired", "gemini-3.8-flash"]);
+      instance = await AntigravityDriver.create({
+        instanceId: "antigravity-restart-stale",
+        displayName: "Antigravity",
+        environment: {
+          FAKE_ACP_AUTH_METHOD: "oauth-personal",
+          FAKE_ACP_MODELS: "gemini-3.8-flash",
+          FAKE_ACP_MODES: "default,yolo",
+          FAKE_ACP_RPC_APPEND_FILE: rpc,
+          FAKE_ACP_DUMP: join(fake.directory, "dump.json"),
+        },
+        enabled: true,
+        config: { cli: fake.executable, fullAuto: false },
+      });
+      recorder = recordEvents(instance.adapter);
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "thread-stale", text: "hello", approvalMode: "ask", model: "gemini-retired", cwd: fake.directory });
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId, 15_000)).toMatchObject({ ok: false });
+      await instance.startupModelRefresh;
+      // The stale id never reached the runtime as its unchecked launch default.
+      expect(JSON.parse(readFileSync(join(fake.directory, "dump.json"), "utf8")).env.AGY_ACP_DEFAULT_MODEL).toBeUndefined();
+      const turnSelects = readFileSync(rpc, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { method: string; cwd: string })
+        .filter((line) => line.method === "session/set_config_option" && realpathSync(line.cwd) === realpathSync(fake.directory));
+      expect(turnSelects).toHaveLength(2);
+      expect(instance.models.options.map((option) => option.id)).not.toContain("gemini-retired");
+      expect(recorder.events.filter((event) => event.type === "turn.started")).toHaveLength(1);
+    }, 40_000);
   });
 
   it("never starts a session on a model this account has not offered", async () => {
