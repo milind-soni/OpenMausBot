@@ -21,7 +21,7 @@ import { procHidepid } from "./hidepid.ts";
 import { DENIED_SYSCALLS, seccompBytes, seccompSupported } from "./seccomp.ts";
 import { RELAY_SOCKET_NAME, TEAM_FOLDER_KEPT, boxUploadsConversation, boxUploadsDir, teamFolderOf, under, bwrapArgs, inBoxSocket, planBox, taskWorkspaceIds, type BoxAudience, type BoxBridge, type BoxPlan, type BoxRequest, type BoxSetup } from "./plan.ts";
 import { openBoxRelay, type BoxRelay } from "./relay.ts";
-import { CACHE_ROOT_SWITCH, toolCacheEnvironment, toolCachesOn } from "./tool-caches.ts";
+import { CACHE_ROOT_SWITCH, ensureToolCacheRoot, toolCacheEnvironment, toolCacheRoot, toolCachesOn } from "./tool-caches.ts";
 
 /** The loopback port inside a box that reaches the egress gate. The harness gate sits at the server's own port. */
 export const BOX_EGRESS_PORT = 3128;
@@ -74,6 +74,8 @@ export interface RunnerOptions {
   broker?: { port: number; mintForProcess(input: { botId?: string | null; threadId?: string | null; grants: Record<string, BrokerGrant> }): { token: string }; revoke(token: string): void } | null;
   /** Point the tools' download caches at the cache folder in the box's HOME (tool-caches.ts); off leaves the environment as is. */
   toolCaches?: boolean;
+  /** Makes and marks a HOME's cache folder (tool-caches.ts ensureToolCacheRoot); a test passes its own. */
+  cacheRoot?: (root: string) => boolean | null;
 }
 
 /** Wraps spawns for one setup (the server's, or a self-check fixture's). */
@@ -83,7 +85,22 @@ export class BoxRunner {
   private readonly lent = new Map<string, readonly string[]>();
   private audiences: BoxAudienceScope | null = null;
 
+  /** Each HOME's cache folder: the server's (true) or the person's own (false), asked once per folder. */
+  private readonly cacheRoots = new Map<string, boolean>();
   constructor(options: RunnerOptions) { this.options = options; }
+
+  /** Whether the tools' caches of a box whose HOME is `home` go into its cache folder: only one the server made. Made on
+   * the first spawn for that HOME, never at start. */
+  private cacheRootOurs(home: string): boolean {
+    const root = toolCacheRoot(home);
+    const known = this.cacheRoots.get(root);
+    if (known !== undefined) return known;
+    const ours = (this.options.cacheRoot ?? ensureToolCacheRoot)(root);
+    if (ours === null) return false;
+    this.cacheRoots.set(root, ours);
+    if (!ours) console.log(`bot box: ${root} was not made by the server, so the tools' caches of that HOME stay where each tool puts them (${CACHE_ROOT_SWITCH})`);
+    return ours;
+  }
 
   /** A Team Cloud's audience rule for every box from now on; null takes it away. */
   scopeAudiences(scope: BoxAudienceScope | null): void { this.audiences = scope; }
@@ -144,7 +161,8 @@ export class BoxRunner {
     const homePrograms = homeProgramDirs(resolve(request.home ?? this.options.setup.home)).filter((dir) => !(env.PATH ?? "").split(":").includes(dir));
     if (homePrograms.length) env.PATH = [...(env.PATH ? [env.PATH] : []), ...homePrograms].join(":");
     // After the allow-list, so a value the person gave for this spawn is the one kept.
-    if (this.options.toolCaches) Object.assign(env, toolCacheEnvironment(request.home ?? this.options.setup.home, env, request.env));
+    const boxHome = request.home ?? this.options.setup.home;
+    if (this.options.toolCaches && this.cacheRootOurs(boxHome)) Object.assign(env, toolCacheEnvironment(boxHome, env, request.env));
     if (plan.net === "isolated") {
       const proxy = `http://127.0.0.1:${this.options.egressPort ?? BOX_EGRESS_PORT}`;
       for (const name of BOX_PROXY_ENV) env[name] = proxy;

@@ -1147,7 +1147,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                     await session.host.once("authenticate", () => request("authenticate", { methodId }, INIT_TIMEOUT));
                     session.authenticated = true;
                   } catch (error) {
-                    if (signIn.asked(error) || support.authFailure !== "continue") throw signIn.asked(error) ?? new Error(support.loginNote);
+                    const failed = signIn.authenticateFailed(error, support.authFailure); if (failed) throw failed;
                   }
                 } else if (support.authFailure === "fail") {
                   throw new Error(support.loginNote);

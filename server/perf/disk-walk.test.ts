@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { allocatedBytes, checkpointFrom, createDiskWalk, nodeWalkFs, totalsJson, type WalkCheckpoint, type WalkFs, type WalkRoot, type WalkStat, type WalkTotals } from "./disk-walk.ts";
+import { allocatedBytes, checkpointFrom, createDiskWalk, MAX_NAME_BYTES, nodeWalkFs, totalsFrom, totalsJson, type WalkCheckpoint, type WalkFs, type WalkRoot, type WalkStat, type WalkTotals } from "./disk-walk.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -214,6 +214,27 @@ describe("disk walk", () => {
     }
   });
 
+  it("reads back no count larger than any disk, and no more bots than its cap (the rest summed in the overflow)", () => {
+    const bots = Array.from({ length: 30 }, (_, index) => [`bot${index}`, { bytes: 10, files: 1 }]);
+    const totals = totalsFrom({ walkedBytes: 9e300, entries: 1e17, categories: { packages: { bytes: 9e300, files: 2 }, temp: { bytes: 1e16, files: 1 } }, bots, botsOverflow: { bytes: 5, files: 1 } }, 20);
+    expect([totals.walkedBytes, totals.entries, totals.categories.packages.bytes, totals.categories.temp.bytes]).toEqual([0, 0, 0, 1e16]);
+    expect(totals.bots.size).toBe(20);
+    expect(totals.botsOverflow).toEqual({ bytes: 105, files: 11 });
+  });
+
+  it("keeps a checkpoint's names within MAX_NAME_BYTES a folder: one with longer names is not resumable from inside it", async () => {
+    const { data, roots } = tree();
+    mkdirSync(join(data, "wide"));
+    for (let index = 0; index < 400; index++) mkdirSync(join(data, "wide", `${"w".repeat(200)}${index}`));
+    const taken: Array<WalkCheckpoint | null> = [];
+    const walk = createDiskWalk(roots, { onBoundary: (take) => { taken.push(take()); } });
+    while (!(await walk.step({ entries: 1, stop: () => false })));
+    for (const one of taken.filter(Boolean)) {
+      for (const frame of one!.frames) expect(frame.names.reduce((sum, name) => sum + Buffer.byteLength(name) + 3, 0)).toBeLessThanOrEqual(MAX_NAME_BYTES);
+    }
+    expect(taken.some((one) => one === null)).toBe(true);
+  });
+
   it("refuses a saved checkpoint naming a folder outside the roots or a name with a separator", () => {
     const { home, roots } = tree();
     const totals = totalsJson(createDiskWalk(roots).totals);
@@ -221,6 +242,10 @@ describe("disk walk", () => {
     expect(checkpointFrom({ totals, doneRoots: [], frames: [{ path: "/etc", names: ["a"] }] }, roots)).toBeNull();
     expect(checkpointFrom({ totals, doneRoots: [], frames: [{ path: home, names: ["../x"] }] }, roots)).toBeNull();
     expect(checkpointFrom({ totals, doneRoots: ["/etc"], frames: [] }, roots)).toBeNull();
+    // Resolved before the check: a path through `..` is outside, or not one this server wrote.
+    expect(checkpointFrom({ totals, doneRoots: [], frames: [{ path: join(home, "..", "..", "..", "etc"), names: [] }] }, roots)).toBeNull();
+    expect(checkpointFrom({ totals, doneRoots: [], frames: [{ path: `${home}/data/../data`, names: [] }] }, roots)).toBeNull();
+    expect(checkpointFrom({ totals, doneRoots: [], frames: [{ path: home, names: Array.from({ length: 1_000 }, (_, index) => `${"n".repeat(100)}${index}`) }] }, roots)).toBeNull();
     expect(checkpointFrom({ totals: { categories: { "acme-merger": { bytes: 1, files: 1 } }, bots: [["Ada's plans", { bytes: 1, files: 1 }]] }, doneRoots: [], frames: [] }, roots)?.totals.bots.size).toBe(0);
   });
 });

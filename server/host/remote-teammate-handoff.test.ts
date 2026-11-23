@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCoordinator, type Coordinator, type CoordinateBotsCall, type CoordinatorHost, type HandoffView } from "../coordinator.ts";
 import type { RemoteResult, RemoteTeammate } from "../remote-teammates.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
-import { createRemoteHandoff, remoteBotId, type RemoteHandoffContext, type RemoteHandoffDeps } from "./remote-teammate-handoff.ts";
+import { createRemoteHandoff, REMOTE_REWORK_MAX, remoteBotId, type RemoteHandoffContext, type RemoteHandoffDeps } from "./remote-teammate-handoff.ts";
 
 const ADA: RemoteTeammate = { id: "6f1c1a52-9d55-4b8e-9d0e-6c1f0b0f2a11", name: "Ada", base: "https://bots.example.test", botId: "ada-bot", key: "bak_testkeytestkeytestkey", createdAt: 1 };
 const REMOTE = remoteBotId(ADA.id);
@@ -355,5 +355,24 @@ describe("remote teammate hand-off: the teammate's turn", () => {
     const log = vi.fn();
     expect(() => createRemoteHandoff({ ...setup().deps, file, log })).not.toThrow();
     expect(log).toHaveBeenCalledWith(expect.stringContaining("ignoring unreadable"));
+  });
+});
+
+describe("remote teammate hand-off: rework", () => {
+  it("stops rework to a teammate on another server after the limit under one request, and counts each request apart", async () => {
+    let clock = 1_000;
+    const s = setup({ now: () => clock });
+    const rework = (round: number) => s.remote.coordinate(call([REMOTE], { rework: true, message: `Fix round ${round}` }), s.context, local);
+    for (let round = 1; round <= REMOTE_REWORK_MAX; round++) expect((await rework(round)).status).toBe(200);
+    const refused = await rework(REMOTE_REWORK_MAX + 1);
+    expect(refused.status).not.toBe(200);
+    expect((refused.body.receipts as Array<{ outcome: string; detail: string }>)[0]).toMatchObject({ outcome: "failed", detail: expect.stringContaining(`past the limit of ${REMOTE_REWORK_MAX}`) });
+    expect(s.coordinator.children("gen-1")).toHaveLength(REMOTE_REWORK_MAX);
+
+    s.coordinator.beginTurn({ id: "gen-2", address: { botId: "chief-id", threadId: "chief-chat" }, brief: "Next", level: "full", origin: { kind: "user", request: "Next" } });
+    expect((await s.remote.coordinate(call([REMOTE], { rework: true, message: "Fix it" }), { ...s.context, generation: "gen-2" }, local)).status).toBe(200);
+
+    clock += 6 * 60 * 60_000 + 1;
+    expect((await rework(REMOTE_REWORK_MAX + 2)).status).toBe(200);
   });
 });

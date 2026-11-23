@@ -31,6 +31,21 @@ describe("computer control", () => {
     expect(control.take("b1").heldSinceMs).toBe(1000);
   });
 
+  it("numbers each hold that starts, by take or lease, and not a repeated take of a held key", () => {
+    const { control } = tracked();
+    expect([control.takeSequence(), control.lastTake("b1")]).toEqual([0, 0]);
+    control.take("b1");
+    control.take("b1");
+    control.release("b1");
+    control.take("b2");
+    control.acquireLease("b1", "lease-a");
+    control.acquireLease("b1", "lease-b");
+    expect([control.takeSequence(), control.lastTake("b1"), control.lastTake("b2")]).toEqual([3, 3, 2]);
+    control.release("b2");
+    control.forgetBot("b2");
+    expect([control.takeSequence(), control.lastTake("b2")]).toEqual([3, 0]);
+  });
+
   it("atomically acquires a workspace lease without exposing its id", () => {
     const { control, changes } = tracked();
     const leaseId = "5b6bbbd2-b88b-4c50-a748-ec87f332662f";

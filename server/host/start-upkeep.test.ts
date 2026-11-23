@@ -20,6 +20,7 @@ describe("start-up upkeep", () => {
       busy: (_botId, threadId) => threadId === "working",
       openDirectHandoff: (threadId) => threadId === "quiet",
       cleanupPartials: () => { calls.push("partials"); return 0; },
+      sweepWorkspaces: () => { calls.push("workspaces"); return []; },
       sweepLogs: (candidates, days) => {
         calls.push(`logs ${days}: ${[...candidates].map((c) => `${c.threadId}${c.busy ? " busy" : ""}${c.openDirectHandoff ? " handoff" : ""}${c.unread ? " unread" : ""}`).join(", ")}`);
         return 0;
@@ -28,11 +29,11 @@ describe("start-up upkeep", () => {
     expect(calls).toEqual([]);
     await vi.advanceTimersByTimeAsync(0);
     const pass = "logs 30: quiet handoff, working busy, handed unread";
-    expect(calls).toEqual(["partials", pass]);
+    expect(calls).toEqual(["partials", pass, "workspaces"]);
     await vi.advanceTimersByTimeAsync(THREAD_LOG_RETENTION_SWEEP_MS - 1);
-    expect(calls).toEqual(["partials", pass]);
+    expect(calls).toEqual(["partials", pass, "workspaces"]);
     await vi.advanceTimersByTimeAsync(1);
-    expect(calls).toEqual(["partials", pass, pass]);
+    expect(calls).toEqual(["partials", pass, "workspaces", pass, "workspaces"]);
   });
 
   it("still sweeps the logs when the partials fail, and sweeps none without a retention", async () => {
@@ -47,6 +48,7 @@ describe("start-up upkeep", () => {
       openDirectHandoff: () => false,
       cleanupPartials: () => { throw new Error("disk gone"); },
       sweepLogs: (_candidates, days) => { swept.push(days); return 0; },
+      sweepWorkspaces: () => [],
     });
     await vi.advanceTimersByTimeAsync(0);
     expect(warn).toHaveBeenCalledWith("attachments: startup partial cleanup failed: disk gone");
@@ -54,6 +56,27 @@ describe("start-up upkeep", () => {
     retention = null;
     await vi.advanceTimersByTimeAsync(THREAD_LOG_RETENTION_SWEEP_MS);
     expect(swept).toEqual([7]);
+  });
+
+  it("sweeps idle task workspaces even without a log retention, and keeps going when the logs' sweep fails", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const seen: string[] = [];
+    startUpkeep({
+      bots: () => [{ id: "bot", tasks: [task("idle", { createdAt: 5, updatedAt: 10, closedBy: { at: 20 } } as Partial<TaskRecord>), task("working")] }],
+      retentionDays: () => 7,
+      busy: (_botId, threadId) => threadId === "working",
+      openDirectHandoff: () => false,
+      cleanupPartials: () => 0,
+      sweepLogs: () => { throw new Error("logs gone"); },
+      sweepWorkspaces: (candidates) => {
+        seen.push(...[...candidates].map((c) => `${c.botId}/${c.threadId} ${c.lastActiveAt}${c.busy ? " busy" : ""}`));
+        return [];
+      },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(warn).toHaveBeenCalledWith("thread event log retention sweep failed: logs gone");
+    expect(seen).toEqual(["bot/idle 20", "bot/working 1 busy"]);
   });
 
   it("starts the cache cap's sweeper, telling it to wait whenever a thread is busy or an engine process lives", () => {

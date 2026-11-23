@@ -41,6 +41,8 @@ const ENTRY_POINTS = [
   "stall-watch.worker.ts",
   // the OMB Cloud Pro home image's entry point
   "cloud-home-start.ts",
+  // a Cloud server's backup runs it in the home before it packs the volume (cloud-backup-stage.ts)
+  "cloud-backup-db-snapshot.ts",
   // the container image's entry point
   "server-launcher.ts",
   // Imported directly by the packaged smoke probes. An explicit root sibling,

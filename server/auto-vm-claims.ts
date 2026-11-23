@@ -18,6 +18,8 @@ export interface AutoVmClaimSlot {
   cause?: string;
   /** The plan's limit that turned the computer away, as one sentence for the bot: said in place of `cause`. */
   limit?: string;
+  /** The claim waited out the computer wait ceiling: what the screen calls hear instead of a start failure. */
+  parked?: string;
   /** The failure took the conversation's automatic pick off this computer. */
   backOnAuto?: boolean;
   /** The last claim failed on the network; the next screen call claims again. */
@@ -76,6 +78,8 @@ export function startAutoVmClaim(table: AutoVmClaimTable, threadId: string, gene
       }
       slot.failed = true;
       slot.failure = failure;
+      const parked = (error as { parkedRefusal?: unknown } | null)?.parkedRefusal;
+      if (typeof parked === "string") slot.parked = parked;
       // A person's No is an answer, not a failure: the screen calls say so, and nothing reports a broken turn.
       if ((error as { declined?: unknown } | null)?.declined !== true) slot.onRejected?.(slot.failure, error);
     },
@@ -99,7 +103,8 @@ export async function reclaimAutoVm(table: AutoVmClaimTable, owner: AutoVmClaimO
 }
 
 /** What every screen call hears for the rest of a turn whose computer could not be claimed. */
-export function lazyClaimFailedText(slot: Pick<AutoVmClaimSlot, "label" | "failure" | "cause" | "limit" | "startsComputer" | "backOnAuto">): string {
+export function lazyClaimFailedText(slot: Pick<AutoVmClaimSlot, "label" | "failure" | "cause" | "limit" | "startsComputer" | "backOnAuto" | "parked">): string {
+  if (slot.parked) return slot.parked;
   const label = slot.label ?? "this computer";
   const why = (slot.cause ?? slot.failure)?.trim().replace(/[\s.]+$/, "");
   if (!slot.startsComputer) {

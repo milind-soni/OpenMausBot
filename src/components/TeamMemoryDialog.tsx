@@ -5,6 +5,7 @@ import { Brain, Check, Loader2, Pin, Plus, Trash2, X } from "lucide-react";
 
 import { api } from "@/state/store";
 import { intlLocale, t } from "@/lib/i18n";
+import { imeComposing } from "@/lib/send-key";
 import type { LocaleKey } from "@/locales";
 import { cn } from "@/lib/cn";
 import { Select } from "./Select";
@@ -72,6 +73,7 @@ export function TeamMemoryDialog({ section, label, onClose }: { section: string;
     dialogRef.current?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        if (imeComposing(event)) return;
         event.preventDefault();
         onClose();
       }
@@ -237,6 +239,7 @@ export function TeamMemoryDialog({ section, label, onClose }: { section: string;
                           disabled={busyId !== null}
                           onBlur={(event) => editDetail(entry, event.target.value)}
                           onKeyDown={(event) => {
+                            if (imeComposing(event.nativeEvent)) return;
                             if (event.key === "Enter") (event.target as HTMLInputElement).blur();
                           }}
                           aria-label={t("teamMemory.entryDetailLabel", { name: entry.name })}
@@ -289,6 +292,7 @@ export function TeamMemoryDialog({ section, label, onClose }: { section: string;
                 value={draft.detail}
                 onChange={(event) => setDraft({ ...draft, detail: event.target.value })}
                 onKeyDown={(event) => {
+                  if (imeComposing(event.nativeEvent)) return;
                   if (event.key === "Enter") add();
                 }}
                 placeholder={t("teamMemory.detailPlaceholder")}

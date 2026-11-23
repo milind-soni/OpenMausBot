@@ -64,37 +64,53 @@ Cost on Fly (measured, T0 build notes): about 5 ms and 3 MB per box, plus one so
 on a desktop). With it on, the box gives each process the tools' own cache variables, so what a bot's tools download
 lands in one folder, `cache` in the box's HOME, instead of all over it:
 
-| Variable | Folder under `<box HOME>/cache` | Was |
-|---|---|---|
-| `npm_config_cache` (npx too) | `npm` | `~/.npm` |
-| `PIP_CACHE_DIR` | `pip` | `~/.cache/pip` |
-| `UV_CACHE_DIR` | `uv` | `~/.cache/uv` |
-| `PLAYWRIGHT_BROWSERS_PATH` | `ms-playwright` | `~/.cache/ms-playwright` |
-| `PUPPETEER_CACHE_DIR` | `puppeteer` | `~/.cache/puppeteer` |
-| `HF_HUB_CACHE`, `HF_XET_CACHE` | `huggingface/hub`, `huggingface/xet` | `~/.cache/huggingface/{hub,xet}` |
-| `BUN_INSTALL_CACHE_DIR` | `bun` | `~/.bun/install/cache` |
-| `COREPACK_HOME` | `corepack` | `~/.cache/node/corepack` |
-| `GOCACHE`, `GOMODCACHE` | `go-build`, `go-mod` | `~/.cache/go-build`, `~/go/pkg/mod` |
+| Variable | Folder under `<box HOME>/cache` | Was | It beats (config files) |
+|---|---|---|---|
+| `npm_config_cache` (npx too) | `npm` | `~/.npm` | `cache=` in `~/.npmrc`, a project's `.npmrc`, the global npmrc |
+| `PIP_CACHE_DIR` | `pip` | `~/.cache/pip` | `cache-dir` in any `pip.conf` (global, user, a venv's) |
+| `UV_CACHE_DIR` | `uv` | `~/.cache/uv` | `cache-dir` in `uv.toml` or a project's `pyproject.toml` `[tool.uv]` |
+| `HF_HUB_CACHE`, `HF_XET_CACHE` | `huggingface/hub`, `huggingface/xet` | `~/.cache/huggingface/{hub,xet}` | none (Hugging Face reads only variables) |
+| `BUN_INSTALL_CACHE_DIR` | `bun` | `~/.bun/install/cache` | not checked against `bunfig.toml` `[install.cache] dir` |
+| `COREPACK_HOME` | `corepack` | `~/.cache/node/corepack` | none |
+| `GOCACHE` | `go-build` | `~/.cache/go-build` | `go env -w GOCACHE=` |
 
 - **Where.** The box's HOME: `/data/cache` on a personal Cloud, `engine-homes/<audience>/cache` on a Team Cloud. So
   the folder is shared exactly as `~/.npm` and `~/.cache` already are (every bot of a personal Cloud; one audience on a
-  Team Cloud, never another member's). It is under the HOME line of the plan, so no new mount is made. The app's own
-  rebuildable files stay in the data folder's `cache/` (`NODE_COMPILE_CACHE`), which the box hides.
-- **The person's value wins.** A cache variable the spawn was handed is kept: one an engine's saved environment or an
-  MCP server's environment passes through `allowEnv`, and one a driver merged in without vouching (Claude's and Codex's
-  instance environment), which goes back after the allow-list with its own value. On a Cloud home the server's own
-  environment carries none of these names (`SERVER_ENV_NAMES`). A cache whose place something else the spawn was handed
-  already decides is left alone: `XDG_CACHE_HOME` (pip, uv, Playwright, corepack, Go's build cache), `HF_HOME`,
-  `GOPATH`, `BUN_INSTALL`. What an engine or a shell sets for its own children (an MCP server's `env` in the engine's
-  config, an `export`) is set on top inside the box, so it wins too.
+  Team Cloud, never another member's). It is under the HOME line of the plan, so no new mount is made: the bubblewrap
+  arguments are the same with the switch on or off (pinned by a test). The app's own rebuildable files stay in the data
+  folder's `cache/` (`NODE_COMPILE_CACHE`), which the box hides.
+- **Only a folder the server made.** On the first spawn for a HOME (never at start), the server makes `cache` there and
+  writes a `CACHEDIR.TAG` (the standard signature, plus a line naming OpenMausBot). A `cache` that is already there
+  without that tag is the person's own: nothing is written in it, and that HOME's tools keep their own places. A link
+  named `cache` is never the server's. The cache cap (below) works only in a tagged folder.
+- **A value in the environment wins; a value in a config file loses.** A cache variable the spawn was handed is kept:
+  one an engine's saved environment or an MCP server's environment passes through `allowEnv`, and one a driver merged in
+  without vouching (Claude's and Codex's instance environment), which goes back after the allow-list with its own value.
+  On a Cloud home the server's own environment carries none of these names (`SERVER_ENV_NAMES`). A cache whose place
+  something else the spawn was handed already decides is left alone: `XDG_CACHE_HOME` (pip, uv, bun, corepack, Go's
+  build cache), `HF_HOME`, `BUN_INSTALL`. What an engine or a shell sets for its own children (an MCP server's `env` in
+  the engine's config, an `export`) is set on top inside the box, so it wins too. But each variable beats the config
+  files in the table's last column, because each tool ranks its environment above them:
+  - what that costs is the place only: the tool downloads into ours what it would have found in the folder its config
+    names;
+  - what can fail: an install that must work offline from a cache folder a config file names (npm with `offline=true`
+    or `--offline`, uv with `offline = true` or `--offline`). It fails as it would with an empty cache. pip and Go's
+    build cache are never needed offline, and Hugging Face and corepack have no config file for their cache.
 - **Left alone on purpose.** `XDG_CACHE_HOME` (Hugging Face keeps its login token under it, and engines write there),
   `HF_HOME` (the token), `CARGO_HOME` (credentials and installed programs), `GRADLE_USER_HOME` (properties that may hold
   keys), `PNPM_HOME`, `UV_TOOL_DIR` and `UV_PYTHON_INSTALL_DIR` (installed programs and the Pythons venvs point into),
   pnpm's store (a project's `node_modules` records it, and `npm_config_store_dir` makes every npm command warn), Yarn's
-  cache (a Berry project may keep it in the repository), Maven (no variable but `MAVEN_OPTS`).
+  cache (a Berry project may keep it in the repository), Maven (no variable but `MAVEN_OPTS`), and:
+  - `PLAYWRIGHT_BROWSERS_PATH`: older `@playwright/mcp` releases (seen in 0.0.41, 0.0.70 and 0.0.75; 0.0.76 and later use
+    `~/.cache/ms-playwright-mcp`) keep the MCP browser's profile (cookies, site sign-ins) in that folder, so moving it
+    would sign the browser out;
+  - `PUPPETEER_CACHE_DIR`: it beats a project's `.puppeteerrc`, so a project keeping Chrome in its own folder would stop
+    finding it;
+  - `GOMODCACHE`: it beats `go env -w GOMODCACHE`, and a project building offline from its module cache would fail.
 - **Nothing is moved or deleted.** The old folders stay; with the switch on, new downloads go to the new folder, and a
-  tool downloads once more what the old folder held (a Playwright browser, a model). A later cleanup may delete the old
-  folders in the table's last column.
+  tool downloads once more what the old folder held (an npx package, a model). Something run offline from the old place
+  (`HF_HUB_OFFLINE=1` with a model there) fails until it is downloaded again. A later cleanup may delete the old folders
+  in the table's third column.
 - **Box off, no change.** A Cloud whose box is off (`OMB_BOT_BOX=0`, or no working bubblewrap) runs its bots unboxed
   with today's environment.
 
