@@ -639,7 +639,7 @@ import { teamAiOwner } from "./host/team-ai-owner.ts"; import { createTeamOwners
 import { createDevsReports } from "./host/devs-reports.ts"; import { createSettingNudges } from "./host/setting-nudges.ts"; import { createPerfHost } from "./perf/perf-host.ts"; import { launchListening, launchServerPart } from "./perf/launch-probe.ts"; import { footprintOwners } from "./host/bot-footprint-owners.ts"; import { engineOwners } from "./engine-owners.ts"; import { startBotMemoryCapHost } from "./host/bot-memory-cap-host.ts"; import { botMemoryCapReport } from "./bot-memory-cap.ts"; import { createPerfDiagnosticsRoutes } from "./routes/perf-diagnostics.ts"; import { bugReportEndpoint, devsReportSender, devsStatusAsker } from "./devs-report-send.ts"; import { captureRecentLog } from "./recent-log.ts"; import { createShareAnswer } from "./host/share-answer.ts";
 import { createCardRequester, linePersonKey } from "./host/thread-person.ts"; import { selfThreadRefusal } from "./host/self-threads.ts"; import { lookedAfterBy } from "./host/looked-after.ts"; import { createActingPeople, HANDED_PEOPLE_FILE, HandedPeople, type HandedRun, keptPrivate, privateHandBack, withPerson } from "./host/acting-person.ts"; import { createTurnCallSignals } from "./host/turn-call-signals.ts";
 import { createThreadRoutes } from "./routes/threads.ts";
-import { createWebhookRoutes } from "./routes/webhooks.ts"; import { createRemoteTeammateRoutes } from "./routes/remote-teammates.ts"; import { RemoteTeammates } from "./remote-teammates.ts"; import { createRemoteHandoff } from "./host/remote-teammate-handoff.ts";
+import { createWebhookRoutes } from "./routes/webhooks.ts"; import { createRemoteTeammateRoutes } from "./routes/remote-teammates.ts"; import { RemoteTeammates } from "./remote-teammates.ts"; import { createRemoteHandoff, isRemoteBotId } from "./host/remote-teammate-handoff.ts";
 import { withScopeHint } from "./connector-scope-hint.ts"; import { accountsByApp, withAccountHint } from "./connector-account-hint.ts";
 import { connectorFileDeps, connectorFileScope, prepareConnectorFiles, withMissingFileHint } from "./connector-files.ts";
 import { createConnectorCards } from "./host/connector-cards.ts";
@@ -9435,8 +9435,10 @@ function teammateReportContext(requestId: string, readerBotId?: string): string 
   const node = coordinator.node(requestId);
   const parent = node?.parentId ? coordinator.node(node.parentId) : undefined;
   const reader = parent && readerBotId ? { ...parent, botId: readerBotId } : parent;
-  if (!node || !reader || roomHandoffProblem(node, reader)) return "[Teammate result withheld or no longer retained]";
-  const bot = store.bot(node.botId)?.name;
+  const remote = node && isRemoteBotId(node.botId);
+  const remoteName = remote ? remoteHandoff.reportName(node, parent, readerBotId) : undefined;
+  if (!node || !reader || (remote ? !remoteName : roomHandoffProblem(node, reader))) return "[Teammate result withheld or no longer retained]";
+  const bot = remote ? remoteName : store.bot(node.botId)?.name;
   return `${reportNote(bot ?? "Teammate")}\n${JSON.stringify({ bot, task: escapeNotes(node.text), status: node.status, result: escapeNotes(node.result) })}`;
 }
 
