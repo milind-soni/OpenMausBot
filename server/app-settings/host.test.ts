@@ -785,4 +785,47 @@ describe("bulk bot settings (botIds)", () => {
     expect(fx.bots[0]!.title).toBe("Old A");
     expect(fx.bots[1]!.title).toBe("Old B");
   });
+
+  it("keeps partially completed Undo retryable while still detecting independent edits before retry", async () => {
+    let cliveBusy = false;
+    const fx = fixture({ patchRefusalFor: (botId) => (cliveBusy && botId === "clive" ? "Clive is busy" : null) });
+    fx.bots[0]!.title = "Old A";
+    fx.bots[1]!.title = "Old B";
+    expect((await fx.set("bots.settings", JSON.stringify({ botIds: "all", title: "Batch" }))).status).toBe(200);
+    expect(fx.botPatches).toEqual([
+      { botId: "kiwi", body: { title: "Batch" } },
+      { botId: "clive", body: { title: "Batch" } },
+    ]);
+
+    cliveBusy = true;
+    expect(await fx.undo()).toEqual({ claimed: true, state: "invalid", error: "Clive is busy", status: 409 });
+    // Kiwi reverted; Clive remains at "Batch" with only Clive queued for retry.
+    expect(fx.bots.map((bot) => bot.title)).toEqual(["Old A", "Batch"]);
+
+    // Independent external edit on Clive before retry still triggers UNDO_STALE.
+    cliveBusy = false;
+    fx.bots[1]!.title = "External B";
+    expect(await fx.undo()).toMatchObject({ claimed: true, state: "invalid", error: UNDO_STALE, stale: true });
+
+    // Once Clive matches the applied state again, retry finishes only Clive without re-patching Kiwi.
+    fx.bots[1]!.title = "Batch";
+    expect(await fx.undo()).toEqual({ claimed: true, state: "undone" });
+    expect(fx.bots.map((bot) => bot.title)).toEqual(["Old A", "Old B"]);
+    expect(fx.botPatches).toEqual([
+      { botId: "kiwi", body: { title: "Batch" } },
+      { botId: "clive", body: { title: "Batch" } },
+      { botId: "kiwi", body: { title: "Old A" } },
+      { botId: "clive", body: { title: "Old B" } },
+    ]);
+
+    // Also verify read()-based bulk Undo (bots.color) refreshes cleanly on partial failure and finishes on retry.
+    const colorFx = fixture({ patchRefusalFor: (botId) => (cliveBusy && botId === "clive" ? "Clive is busy" : null) });
+    expect((await colorFx.set("bots.color", JSON.stringify({ botIds: "all", color: "coral" }))).status).toBe(200);
+    cliveBusy = true;
+    expect(await colorFx.undo()).toEqual({ claimed: true, state: "invalid", error: "Clive is busy", status: 409 });
+    cliveBusy = false;
+    expect(await colorFx.undo()).toEqual({ claimed: true, state: "undone" });
+    expect(colorFx.bots.map((bot) => bot.color)).toEqual(["green", "blue"]);
+    expect(colorFx.botPatches.filter((patch) => patch.body.color === "green")).toHaveLength(1);
+  });
 });

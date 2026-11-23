@@ -267,7 +267,10 @@ export function createAppSettings(deps: AppSettingsDeps) {
       const currentTag = change.entry.undoTag ? change.entry.undoTag(change.before) : change.entry.read();
       if (currentTag !== change.after) return { claimed: true, state: "invalid", error: UNDO_STALE, status: 409, stale: true };
       const refusal = change.before === undefined ? "The earlier value is not one that can be set back." : await change.entry.write(change.before);
-      if (refusal) return { claimed: true, state: "invalid", error: refusal, status: 409 };
+      if (refusal) {
+        if (change.before !== undefined) change.after = change.entry.undoTag ? change.entry.undoTag(change.before) : change.entry.read();
+        return { claimed: true, state: "invalid", error: refusal, status: 409 };
+      }
       undoable.delete(args.requestId);
       store.patchMessage(args.threadId, message.id, { card: { ...current, undone: true } });
       return { claimed: true, state: "undone" };
