@@ -44,7 +44,7 @@ const botFields = {
   description: z.string().max(BOT_PROFILE_LIMITS.description, `must be at most ${BOT_PROFILE_LIMITS.description} characters`).optional(),
   soul: textOrFile.optional(),
   model: z.string().regex(/^[\w.-]+\/\S.*$/, "must be INSTANCE/MODEL, such as claude/claude-sonnet-5-5").optional(),
-  effort: z.enum(["none", "low", "medium", "high", "xhigh", "max"]).optional(),
+  effort: z.enum(["none", "low", "medium", "high", "xhigh", "max", "ultra"]).optional(),
   approval: z.enum(["ask", "edits", "auto", "full"], { error: "must be ask, edits, auto or full (custom is set in the desktop app)" }).optional(),
   computer: z.enum(["auto", "off", "browser", "local", "vm", "cloud"]).optional(),
   cwd: z.string().min(1).optional(),

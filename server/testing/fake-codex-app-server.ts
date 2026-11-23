@@ -615,7 +615,8 @@ process.stdin.on("data", (chunk) => {
         out({ jsonrpc: "2.0", id: msg.id, result: { account, requiresOpenaiAuth: true } });
         break;
       }
-      case "model/list":
+      case "model/list": {
+        const ultra = process.env.FAKE_CODEX_ULTRA === "1";
         if (msg.params?.cursor === "page-2") {
           out({
             jsonrpc: "2.0",
@@ -624,7 +625,8 @@ process.stdin.on("data", (chunk) => {
               data: [
                 { id: "gpt-hidden", displayName: "Hidden", hidden: true, isDefault: false },
                 { id: "gpt-page-two", displayName: "GPT Page Two", hidden: false, isDefault: false,
-                  ...(tiers ? { serviceTiers: FAST_TIERS, defaultServiceTier: "priority" } : {}) },
+                  ...(tiers ? { serviceTiers: FAST_TIERS, defaultServiceTier: "priority" } : {}),
+                  ...(ultra ? { supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"] } : {}) },
               ],
               nextCursor: null,
             },
@@ -640,7 +642,8 @@ process.stdin.on("data", (chunk) => {
                   ? [{ id: "gpt-6-astra", displayName: "GPT-6 Astra", hidden: false, isDefault: true }]
                   : []),
                 { id: "gpt-fake-default", displayName: "GPT Fake Default", hidden: false, isDefault: !hasAstra,
-                  ...(tiers ? { serviceTiers: FAST_TIERS, defaultServiceTier: null } : {}) },
+                  ...(tiers ? { serviceTiers: FAST_TIERS, defaultServiceTier: null } : {}),
+                  ...(ultra ? { supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"] } : {}) },
                 ...(process.env.FAKE_CODEX_LUNA === "1"
                   ? [{ id: "gpt-6-luna", displayName: "GPT-6 Luna", hidden: false, isDefault: false }]
                   : []),
@@ -651,6 +654,7 @@ process.stdin.on("data", (chunk) => {
           });
         }
         break;
+      }
       case "config/read":
         logStartup("config/read");
         if (process.env.FAKE_CODEX_CONFIG_HOLD_FILE && existsSync(process.env.FAKE_CODEX_CONFIG_HOLD_FILE) && !msg.released) {

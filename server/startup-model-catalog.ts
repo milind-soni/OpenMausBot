@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import type { ModelCatalog } from "./contracts.ts";
+import { isEffortLevel, type EffortLevel } from "../shared/wire.ts";
 import { buildStamp } from "./environment.ts";
 import { afterFirstEngineRead } from "./first-engine-read.ts";
 
@@ -55,6 +56,7 @@ function catalogFrom(value: unknown): ModelCatalog | null {
       provider?: unknown;
       contextWindow?: unknown;
       variants?: unknown;
+      efforts?: unknown;
       orgBlocked?: unknown;
       needsCliUpdate?: unknown;
     };
@@ -70,6 +72,12 @@ function catalogFrom(value: unknown): ModelCatalog | null {
         ? { contextWindow: option.contextWindow }
         : {}),
       ...(variants ? { variants } : {}),
+      ...(() => {
+        const efforts = Array.isArray(option.efforts)
+          ? option.efforts.filter((level): level is EffortLevel => typeof level === "string" && isEffortLevel(level) && level !== "none")
+          : [];
+        return efforts.length ? { efforts } : {};
+      })(),
       ...(option.orgBlocked === true ? { orgBlocked: true as const } : {}),
       ...(typeof option.needsCliUpdate === "string" ? { needsCliUpdate: option.needsCliUpdate } : {}),
     });

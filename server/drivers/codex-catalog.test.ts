@@ -140,6 +140,20 @@ describe("readCodexModelCatalog", () => {
     expect(catalog.options.map((option) => option.id)).toEqual(["gpt-fake-default", "gpt-page-two", "gw::local-model"]);
   });
 
+  it("carries each model's advertised reasoning efforts from model/list", async () => {
+    chmodSync(FAKE_CLI, 0o755);
+    const catalog = await readCodexModelCatalog(
+      { HOME: join(tmpdir(), "omb-codex-app-server-ultra"), PATH: process.env.PATH, FAKE_CODEX_ULTRA: "1" },
+      fetch,
+      FAKE_CLI,
+    );
+
+    const efforts = Object.fromEntries(catalog.options.map((option) => [option.id, option.efforts]));
+    expect(efforts["gpt-fake-default"]).toEqual(["low", "medium", "high", "xhigh", "max", "ultra"]);
+    expect(efforts["gpt-page-two"]).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    expect(efforts["gpt-fake-default+priority"]).toBeUndefined();
+  });
+
   it("adds a Fast row after each model that offers Fast and does not already run on it", async () => {
     chmodSync(FAKE_CLI, 0o755);
     const catalog = await readCodexModelCatalog(

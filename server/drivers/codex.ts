@@ -42,6 +42,7 @@ import type {
   TextGenerationOptions,
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
+import { EFFORT_LEVELS, type EffortLevel } from "../../shared/wire.ts";
 import { codexSelectedProviderArgs, codexThreadSelection, decodeCodexSelection, OFFICIAL_CODEX_PROVIDER, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 import { codexBackgroundProviderArgs, codexBackgroundRoute, runCodexBackgroundRoute, runCodexOneShot } from "./codex-background-text.ts";
 import { augmentedPath } from "../env-path.ts";
@@ -249,6 +250,22 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     let disposed = false;
     let planWarning: string | undefined;
     let models = plan ? { default: "", options: [] } : routed ? { default: routed.models[0], options: routed.models.map(id => ({ id, label: id, ...(config.endpoint ? { custom: true } : {}) })) } : STATIC_CODEX_MODELS;
+    /** Fallback when `model/list` does not say: codex-cli ≥0.171.0 accepts "ultra" on many models (issue #7159). */
+    const codexEffortLevels: EffortLevel[] = ["low", "medium", "high", "xhigh", "max", "ultra"];
+    // The CLI's own per-model `supportedReasoningEfforts` wins when it announces them; the union becomes the menu.
+    const syncEffortCapability = (catalog: { options: ReadonlyArray<{ efforts?: readonly EffortLevel[] }> }) => {
+      const union = new Set<EffortLevel>();
+      for (const option of catalog.options) for (const level of option.efforts ?? []) union.add(level);
+      if (!union.size) return;
+      codexEffortLevels.length = 0;
+      codexEffortLevels.push(...EFFORT_LEVELS.filter((level) => union.has(level)));
+    };
+    /** Models that stop below the chosen effort (gpt-6-luna tops out at "max") keep the CLI's own top level. */
+    const supportedEffort = (model: string | null | undefined, effort: EffortLevel): EffortLevel => {
+      const base = model ? codexTierOf(model)?.model ?? model : model;
+      const efforts = base ? models.options.find((option) => option.id === base)?.efforts : undefined;
+      return efforts && !efforts.includes(effort) ? efforts[efforts.length - 1]! : effort;
+    };
     const refreshModels = async (preserveExisting = false) => {
       if (routed) return;
       if (planAuth) {
@@ -269,6 +286,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           if (resolved.options.length) models = resolved; else unconfirmedModelCatalog(models);
         } catch { unconfirmedModelCatalog(models); }
       }
+      syncEffortCapability(models);
       try { writeStartupModelCache(instanceId, models); } catch {}
     };
     // Only ChatGPT's refusal of a model for this account hides it from the account's list; other errors never do.
@@ -286,7 +304,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     } else {
       startupModelRefresh = (await openStartupModelCatalog({
         instanceId,
-        use: (catalog) => { models = catalog; },
+        use: (catalog) => { models = catalog; syncEffortCapability(catalog); },
         current: () => models,
         refresh: async () => {
           if (planAuth) {
@@ -1351,7 +1369,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             ...(turn.guestConfined ? { environments: [] } : {}),
             // Spread, not `effort ?? null`: codex-cli 0.146.0 treats null as absent (the thread keeps
             // its effort), rejects "", and thread/start takes no effort, so a thread keeps its last level.
-            ...(turn.effort ? { effort: turn.effort } : {}), ...(selection.serviceTier ? { serviceTierForTurn: selection.serviceTier } : {}),
+            ...(turn.effort ? { effort: supportedEffort(turn.model ?? selection.model, turn.effort) } : {}), ...(selection.serviceTier ? { serviceTierForTurn: selection.serviceTier } : {}),
           });
         };
         const waitNames = supportsMcpStartup(initialized?.userAgent) ? enabledMcpMounts([...selectedMcp.keys(), ...directMounts], effectiveConfig, turn.toolScope !== undefined) : [];
@@ -1542,7 +1560,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         dataMcp: true, emailMcp: true, deviceMcp: true,
         images: true,
         nativeImageInput: true,
-        effortLevels: ["low", "medium", "high", "xhigh", "max"],
+        effortLevels: codexEffortLevels,
         strictResume: true, nativeCompaction: true,
       },
       sendTurn,

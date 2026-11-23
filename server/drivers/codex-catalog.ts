@@ -5,6 +5,8 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 
 import type { ModelCatalog } from "../contracts.ts";
+import type { EffortLevel } from "../../shared/wire.ts";
+import { isEffortLevel } from "../../shared/wire.ts";
 import { qualifiedModelLabel } from "../contracts.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 import { codexHome } from "./codex-identity.ts";
@@ -78,6 +80,7 @@ interface CodexAppServerModel {
   isDefault?: unknown;
   serviceTiers?: unknown;
   defaultServiceTier?: unknown;
+  supportedReasoningEfforts?: unknown;
 }
 
 const FAST_TIER = /fast/i;
@@ -182,7 +185,11 @@ export function readCodexAppServerModelCatalog(
           if (row.hidden === true || typeof row.id !== "string" || !MODEL_ID.test(row.id) || seen.has(row.id)) continue;
           seen.add(row.id);
           const label = typeof row.displayName === "string" && row.displayName.trim() ? row.displayName : row.id;
-          options.push({ id: row.id, label });
+          // Trust the CLI's own per-model effort list when it announces one (codex-cli 0.171.0 "ultra").
+          const efforts = Array.isArray(row.supportedReasoningEfforts)
+            ? row.supportedReasoningEfforts.filter((level): level is EffortLevel => isEffortLevel(level) && level !== "none")
+            : undefined;
+          options.push({ id: row.id, label, ...(efforts?.length ? { efforts } : {}) });
           const fast = fastTier(row);
           if (fast && !TIERED_ID.test(row.id)) options.push({ id: `${row.id}+${fast.id}`, label: `${label} · ${fast.name}` });
           if (row.isDefault === true) defaultModel = row.id;

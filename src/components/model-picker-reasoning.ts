@@ -7,7 +7,7 @@ import type { LocaleKey } from "@/locales";
 /** The chat engine's variants are thinking levels with these ids; other engines name their own. */
 const CHAT_ENGINE_VARIANTS: Readonly<Record<string, LocaleKey>> = {
   off: "model.effort.off", on: "model.variant.on", none: "model.effort.none", low: "model.effort.low",
-  medium: "model.effort.medium", high: "model.effort.high", xhigh: "model.effort.xhigh", max: "model.effort.max",
+  medium: "model.effort.medium", high: "model.effort.high", xhigh: "model.effort.xhigh", max: "model.effort.max", ultra: "model.effort.ultra",
 };
 
 export const variantLabel = (option: ModelVariantOption, driverKind?: string): string => {

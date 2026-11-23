@@ -4566,8 +4566,21 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
   it("declares the effort levels the app-server accepts", async () => {
     await create();
     expect(instance.adapter.capabilities.effortLevels).toEqual([
-      "low", "medium", "high", "xhigh", "max",
+      "low", "medium", "high", "xhigh", "max", "ultra",
     ]);
+  });
+
+  it("lets model/list's own effort list replace the static one, and keeps a model short of ultra from sending it", async () => {
+    await create({ environment: { FAKE_CODEX_ULTRA: "1" } });
+    expect(instance.adapter.capabilities.effortLevels).toEqual([
+      "low", "medium", "high", "xhigh", "max", "ultra",
+    ]);
+    const dump = join(scratch, "ultra-clamp.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    await instance.adapter.sendTurn({ threadId: "t-ultra-clamp", text: "hi", model: "gpt-page-two", effort: "ultra" });
+    await recorder.until((e) => e.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.calls.find((c: any) => c.method === "turn/start").params.effort).toBe("max");
   });
 
   it("sends effort on turn/start, and omits the key when unset", async () => {

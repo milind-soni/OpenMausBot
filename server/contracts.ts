@@ -524,6 +524,8 @@ export interface ModelCatalog {
     contextWindow?: number;
     /** Discovery hints; the native session revalidates these before each turn. */
     variants?: ModelVariantOption[];
+    /** Reasoning-effort levels the engine advertises for this model, ascending; absent when the CLI does not say. */
+    efforts?: readonly EffortLevel[];
     /** The organization of the signed-in account turned this model off: the engine would answer with another. */
     orgBlocked?: true;
     /** The installed CLI is too old for this model: the version it needs. */

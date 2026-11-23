@@ -45,7 +45,7 @@ export type { AuthPairResponse, AuthSessionResponse, BotCreateResponse, BotsResp
 
 /** Reasoning-effort levels, ascending: a union of what any engine accepts;
  * each driver declares the subset its CLI will take. */
-export const EFFORT_LEVELS = ["none", "low", "medium", "high", "xhigh", "max"] as const;
+export const EFFORT_LEVELS = ["none", "low", "medium", "high", "xhigh", "max", "ultra"] as const;
 export type EffortLevel = (typeof EFFORT_LEVELS)[number];
 
 export function isEffortLevel(value: unknown): value is EffortLevel {
