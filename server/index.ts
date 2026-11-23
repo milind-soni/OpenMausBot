@@ -12267,7 +12267,7 @@ ROUTES.push(createComputerRoutes({
   managedBoatOwners, providerTransitionMessage, botHasActiveTurn, localVmLeaseKey: sharedVm.leaseKey, botComputerControlSnapshot: sharedVm.snapshot,
   computerPreviewBot, computerPreviewSurface, claimTeamComputerLifecycle, claimBotComputerLifecycle,
   claimBoatInventoryRequest, claimManagedBoatMutation, claimManagedVpsMutation, cloudComputerUsed: owner => cloudComputerPower.used(owner), boatRecovery, cloudComputerOwner: botComputerControlKey,
-}));
+  botComputers: { surfacePlan: (bot, threadId) => turnSurfacePlan(bot, undefined, threadId), visibleFor: (auth) => visibleTo(viewerFor(auth)), engineCapabilities: (bot) => registry.get(bot.modelSelection.instanceId)?.adapter.capabilities, cloudHome: Boolean(CLOUD_HOME), thisComputerConnected: () => desktopComputer.connection() !== null } }));
 ROUTES.push(createStatusRoutes({
   store, cfg,
   staticDir: STATIC_DIR,
