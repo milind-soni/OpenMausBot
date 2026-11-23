@@ -32,7 +32,7 @@ vi.mock("@/state/store", async (original) => {
   };
 });
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fx.advanced, setAdvancedMode: vi.fn() }));
-vi.mock("@/lib/analytics", () => ({ analyticsEnabled: () => false, setAnalyticsEnabled: vi.fn(), track: vi.fn() }));
+vi.mock("@/lib/analytics", () => ({ analyticsAvailable: () => true, analyticsEnabled: () => false, setAnalyticsEnabled: vi.fn(), track: vi.fn() }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => null }));
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: {} }) }));
 vi.mock("./EnginesSettings", () => ({ EnginesSettings: marker("engines") }));

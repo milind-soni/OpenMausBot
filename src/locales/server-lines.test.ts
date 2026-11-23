@@ -387,7 +387,7 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["server/routine-requests.ts", "Queue one scheduled run; skip further occurrences until it starts"],
     ["server/routine-requests.ts", "Skip overlapping scheduled occurrences"],
     ["server/routine-requests.ts", "On startup:  …"],
-    ["server/routine-requests.ts", "Also runs once each time OpenMausBot starts"],
+    ["server/routine-requests.ts", "Also runs once each time  …  starts"],
     ["server/routine-requests.ts", "Runs only on its schedule"],
     ["server/webhook-requests.ts", "When another app sends something … ,  …   …"],
     ["server/webhook-requests.ts", "does what it is asked"],

@@ -38,6 +38,7 @@ import type { SidebarMenuItem } from "./SidebarPopoverMenu";
 import { moveMenuItems } from "./AccountMove";
 import { moveLine } from "@/lib/cloud-send";
 import { InitialsAvatar } from "./Avatar";
+import { REPOSITORY_URL } from "../../shared/services";
 
 const state = (patch: Partial<UpdaterState>): UpdaterState => ({ status: "idle", ...patch }) as UpdaterState;
 
@@ -195,13 +196,13 @@ describe("updateNoteworthy", () => {
 });
 
 describe("outward links", () => {
-  it("sends Help Center to the docs the website also links to", () => {
+  it("sends Help Center to the docs in this build's own repository", () => {
     expect(HELP_CENTER_URL).toBe(DOCS_URL);
-    expect(DOCS_URL).toBe("https://github.com/milind-soni/OpenMausBot/tree/main/docs");
+    expect(DOCS_URL).toBe(`${REPOSITORY_URL}/tree/main/docs`);
   });
 
-  it("sends Send Feedback to the Discord community", () => {
-    expect(FEEDBACK_URL).toBe("https://discord.gg/9Wb8MEpXRs");
+  it("sends Send Feedback to this build's own issue tracker", () => {
+    expect(FEEDBACK_URL).toBe(`${REPOSITORY_URL}/issues`);
   });
 });
 

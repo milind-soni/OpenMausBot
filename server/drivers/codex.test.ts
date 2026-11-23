@@ -38,7 +38,7 @@ import { botBox } from "../bot-box/box.ts";
 import { boxEnvironment } from "../bot-box/env.ts";
 import { autoVerdict } from "../auto-approve.ts";
 import { formatQuestionAnswers } from "../../shared/ask-question.ts";
-import { PRODUCT_NAME } from "../../shared/product.ts";
+import { APP_NAME, PRODUCT_NAME } from "../../shared/product.ts";
 
 vi.mock("./codex-release.ts", async (importOriginal) => ({
   ...await importOriginal<typeof import("./codex-release.ts")>(),
@@ -848,7 +848,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       const input = calls.find((c) => c.method === "turn/start")?.params?.input as Array<{ text?: string }> | undefined;
       return input?.[0]?.text;
     };
-    expect(turnText(first)).toBe(`Context from ${PRODUCT_NAME} updated since this conversation started; it replaces any earlier copy:\n\nMemory: likes quiet hours.\n\nfirst`);
+    expect(turnText(first)).toBe(`Context from ${APP_NAME} updated since this conversation started; it replaces any earlier copy:\n\nMemory: likes quiet hours.\n\nfirst`);
     expect(turnText(second)).toBe("second");
     expect(turnText(third)).toContain("Memory: moved to Toronto.");
     expect(turnText(third)).toContain("third");
@@ -1457,7 +1457,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(thread.params.config["shell_environment_policy.exclude"]).toContain("MY_MCP_AUTH");
   });
 
-  it(`reaches a url server through ${PRODUCT_NAME}'s connector on Codex's own login, header values off argv`, async () => {
+  it(`reaches a url server through ${APP_NAME}'s connector on Codex's own login, header values off argv`, async () => {
     await create();
     const dump = join(scratch, "remote-mcp.json");
     process.env.FAKE_CODEX_DUMP = dump;
@@ -1532,7 +1532,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
       const seen = JSON.parse(readFileSync(dump, "utf8"));
       expect(seen.mcpStartup.voluum).toEqual({ status: "ready", tools: ["report", "campaigns"] });
-      expect(strict.initializes).toEqual([{ protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: `${PRODUCT_NAME} tool proxy`, version: "1" } }]);
+      expect(strict.initializes).toEqual([{ protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: `${APP_NAME} tool proxy`, version: "1" } }]);
       expect(seen.argv.join(" ")).not.toContain("tok-voluum");
     });
 
@@ -1567,7 +1567,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
       const seen = JSON.parse(readFileSync(dump, "utf8"));
       expect(seen.mcpStartup.voluum).toEqual({ status: "ready", tools: ["report"] });
-      expect(strict.initializes).toEqual([{ protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: `${PRODUCT_NAME} tool proxy`, version: "1" } }]);
+      expect(strict.initializes).toEqual([{ protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: `${APP_NAME} tool proxy`, version: "1" } }]);
     });
   });
 
@@ -2573,7 +2573,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
   it("reports local ChatGPT sign-out with a warning when remote revocation is unconfirmed", async () => {
     vi.spyOn(ChatGptPlanAuthController.prototype, "models").mockResolvedValue({ default: "gpt-6.1-sol", options: [{ id: "gpt-6.1-sol", label: "GPT-6.1 Sol" }] });
     vi.spyOn(ChatGptPlanAuthController.prototype, "snapshot").mockResolvedValue({ authenticated: false });
-    const message = `Signed out locally, but remote revocation was not confirmed. Disconnect ${PRODUCT_NAME} in ChatGPT Settings → Usage to end access there.`;
+    const message = `Signed out locally, but remote revocation was not confirmed. Disconnect ${APP_NAME} in ChatGPT Settings → Usage to end access there.`;
     vi.spyOn(ChatGptPlanAuthController.prototype, "signOut").mockRejectedValue(Object.assign(new Error(message), { code: "chatgpt_revocation_unconfirmed" }));
     await create({ authMode: "chatgpt-plan" });
     await expect(instance.signOut!()).resolves.toBeUndefined();
@@ -2951,7 +2951,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       if (index > 0) expect(threadCalls[0].method).toBe("thread/resume");
       const updates = calls.filter((call) => call.method === "thread/inject_items");
       expect(updates).toHaveLength(index === 2 || index === 3 ? 1 : 0);
-      if (updates.length) expect(JSON.stringify(updates[0].params)).toContain(system || `No ${PRODUCT_NAME} bot-specific instructions remain.`);
+      if (updates.length) expect(JSON.stringify(updates[0].params)).toContain(system || `No ${APP_NAME} bot-specific instructions remain.`);
       for (const call of calls.filter((call) => call.method === "turn/start")) {
         expect(call.params.input).toEqual([{ type: "text", text: `message-${index}` }]);
       }
@@ -2977,7 +2977,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       expect(calls.find((call: { method: string }) => call.method === "thread/start").params.developerInstructions).toBe("Bot rules.\n\nPrivate native rules.");
       const updates = calls.filter((call: { method: string }) => call.method === "thread/inject_items");
       expect(updates).toHaveLength(index ? 1 : 0);
-      if (index) expect(JSON.stringify(updates[0].params)).toContain(`No ${PRODUCT_NAME} bot-specific instructions remain.\\n\\nPrivate native rules.`);
+      if (index) expect(JSON.stringify(updates[0].params)).toContain(`No ${APP_NAME} bot-specific instructions remain.\\n\\nPrivate native rules.`);
       expect(calls.filter((call: { method: string }) => call.method === "turn/start").at(-1).params.input).toEqual([{ type: "text", text: `message-${index}` }]);
     }
     const nativeLog = readFileSync(join(NATIVE_DIR, `${threadId}.ndjson`), "utf8");
@@ -3205,14 +3205,14 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       requestType: "question",
       tool: "ask_user",
       summary: "Which source should I use?",
-      choices: [`Directly in ${PRODUCT_NAME}`, "The official server in Executor"],
-      questions: [{ question: "Which source should I use?", options: [{ label: `Directly in ${PRODUCT_NAME}` }, { label: "The official server in Executor" }] }],
+      choices: ["Directly in OpenMausBot", "The official server in Executor"],
+      questions: [{ question: "Which source should I use?", options: [{ label: "Directly in OpenMausBot" }, { label: "The official server in Executor" }] }],
     });
     expect(recorder.events.find((e) => e.type === "item.completed" && e.itemType === "assistant_text")).toMatchObject({
-      text: `Which source should I use?\n- Directly in ${PRODUCT_NAME}\n- The official server in Executor`,
+      text: "Which source should I use?\n- Directly in OpenMausBot\n- The official server in Executor",
     });
 
-    const answer = `The user answered your questions.\n\nQ: Which source should I use?\nA: Directly in ${PRODUCT_NAME}`;
+    const answer = "The user answered your questions.\n\nQ: Which source should I use?\nA: Directly in OpenMausBot";
     await expect(instance.adapter.respondToRequest("t-async-question", opened.requestId!, { behavior: "answer", message: answer })).resolves.toBe("answered");
     expect(await recorder.until((e) => e.type === "request.resolved")).toMatchObject({ requestId: opened.requestId, behavior: "answer", source: "user" });
     expect(JSON.parse(readFileSync(dump, "utf8")).calls.find((c: any) => c.method === "turn/steer")?.params?.input).toEqual([{ type: "text", text: answer }]);

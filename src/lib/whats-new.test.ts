@@ -100,10 +100,10 @@ describe("the slides' plans, from the Admin's offer", () => {
 describe("the funnel", () => {
   it("each slide's links carry its own source tag, to the Cloud website or the staging Admin's", () => {
     expect(WHATS_NEW_SOURCES).toEqual({ pro: "app_whats_new_pro", team: "app_whats_new_team" });
-    expect(newCloudUrl()).toBe("https://cloud.openmausbot.com/cloud?src=app_whats_new_pro");
-    expect(startTeamUrl()).toBe("https://cloud.openmausbot.com/pro/buy?plan=team&src=app_whats_new_team");
-    expect(newCloudUrl(true)).toBe("https://omb-cloud-staging.fly.dev/cloud?src=app_whats_new_pro");
-    expect(startTeamUrl(true)).toBe("https://omb-cloud-staging.fly.dev/pro/buy?plan=team&src=app_whats_new_team");
+    expect(newCloudUrl()).toBe("https://cloud.example.test/cloud?src=app_whats_new_pro");
+    expect(startTeamUrl()).toBe("https://cloud.example.test/pro/buy?plan=team&src=app_whats_new_team");
+    expect(newCloudUrl(true)).toBe("https://cloud-staging.invalid/cloud?src=app_whats_new_pro");
+    expect(startTeamUrl(true)).toBe("https://cloud-staging.invalid/pro/buy?plan=team&src=app_whats_new_team");
     for (const tag of Object.values(WHATS_NEW_SOURCES)) expect(tag, "the Admin's tag form").toMatch(/^[a-z0-9_]{1,32}$/);
   });
 

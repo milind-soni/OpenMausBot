@@ -5,7 +5,7 @@ import { expect, it } from "vitest";
 
 import { launchVerificationServer } from "../scripts/control-omb.ts";
 import { startFakePostiz, type FakePostiz } from "./testing/fake-postiz.ts";
-import { PRODUCT_NAME } from "../shared/product.ts";
+import { APP_NAME, PRODUCT_NAME } from "../shared/product.ts";
 
 /** A real server with the fake Claude engine held mid-turn until the gate opens, a stand-in OAuth provider, and Iris's
  * turn that has added the provider's server and called sign_in. */
@@ -75,7 +75,7 @@ it("a bot adds an OAuth server and asks the person to sign in; they sign in on t
   const { url: link } = await api("POST", `${cardPath}/authorize`, { threadId: iris.threadId });
   expect((await api("GET", `${cardPath}/status?threadId=${iris.threadId}`))).toEqual({ connected: false, pending: true, status: "authorizing" });
   const page = await fetch(link);
-  expect(await page.text()).toBe(`Signed in. You can close this tab and return to ${PRODUCT_NAME}.`);
+  expect(await page.text()).toBe(`Signed in. You can close this tab and return to ${APP_NAME}.`);
 
   let resumed: any;
   await expect.poll(() => { resumed = dump(); return JSON.stringify(resumed?.prompt ?? "").includes("the person signed in to postiz"); }, { timeout: 20_000 }).toBe(true);

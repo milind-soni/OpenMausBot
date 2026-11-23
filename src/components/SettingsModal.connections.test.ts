@@ -10,7 +10,7 @@ vi.mock("@/state/store", async (importOriginal) => ({
   api: vi.fn(),
   useStore: () => ({ state: { appSettingsSection: "connections", instances: [], config: fixture.config }, dispatch: vi.fn() }),
 }));
-vi.mock("@/lib/analytics", () => ({ analyticsEnabled: () => false, setAnalyticsEnabled: vi.fn() }));
+vi.mock("@/lib/analytics", () => ({ analyticsAvailable: () => true, analyticsEnabled: () => false, setAnalyticsEnabled: vi.fn() }));
 
 beforeEach(() => {
   fixture.config = undefined;

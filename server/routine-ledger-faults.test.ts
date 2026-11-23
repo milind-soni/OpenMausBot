@@ -11,7 +11,7 @@ import { LEASE_MS, UNRECORDED_START_PASSES } from "./routine-occurrences.ts";
 import { TURN_GONE_MS } from "./routine-run-watch.ts";
 import type { ScheduleSection } from "./routine-schedule-report.ts";
 import { RoutineManager, type RoutineManagerOptions, type RoutineRun } from "./routines.ts";
-import { PRODUCT_NAME } from "../shared/product.ts";
+import { APP_NAME, PRODUCT_NAME } from "../shared/product.ts";
 
 const MINUTE = 60_000, HOUR = 60 * MINUTE, DAY = 24 * HOUR;
 const START = Date.parse("2026-11-16T08:00:00Z");
@@ -140,7 +140,7 @@ describe("a server killed in the middle of a run", () => {
     expect(h.report()).toMatchObject({ oldestUnconfirmed: null, lastConfirmed: { dueAt: START + HOUR, startedAt: START + HOUR, state: "running" } });
     await h.tickAt(START + HOUR + MINUTE);
     expect(h.started).toEqual(["thread-1", "thread-1"]);
-    expect(h.prompts[1]).toContain(`was cut off when ${PRODUCT_NAME} restarted`);
+    expect(h.prompts[1]).toContain(`was cut off when ${APP_NAME} restarted`);
     expect(h.records()).toMatchObject([{ dueAt: START + HOUR, state: "running", attempts: 2, startedAt: START + HOUR }]);
     expect(h.report().due.boot).toEqual({ ...NONE, retried: 1 });
 
@@ -158,7 +158,7 @@ describe("a server killed in the middle of a run", () => {
     h.kill();
     await h.tickAt(START + HOUR + MINUTE);
     h.kill();
-    expect(h.runs()).toMatchObject([{ status: "failed", error: `${PRODUCT_NAME} restarted while this routine was running` }]);
+    expect(h.runs()).toMatchObject([{ status: "failed", error: `${APP_NAME} restarted while this routine was running` }]);
     expect(h.records()).toMatchObject([{ state: "failed", attempts: 2, reason: "failed" }]);
     for (let minute = 2; minute < 60; minute += 5) await h.tickAt(START + HOUR + minute * MINUTE);
     expect(h.started).toEqual(["thread-1", "thread-1"]);

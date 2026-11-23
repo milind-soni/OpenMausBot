@@ -37,8 +37,8 @@ function atLeast(version, minimum) {
  * this is the computer's first launch or its last launch ran a version whose page had already moved any opt-out kept
  * only in the page's storage into the switch. Packaged builds only, never under the smoke tests or CI.
  */
-export function launchAnalyticsAllowed({ choice, firstLaunch, lastVersion, packaged, env }) {
-  if (!PROJECT || !packaged || env.OMB_SMOKE_TEST === "1" || env.CI) return false;
+export function launchAnalyticsAllowed({ choice, firstLaunch, lastVersion, packaged, env, project = PROJECT }) {
+  if (!project || !packaged || env.OMB_SMOKE_TEST === "1" || env.CI) return false;
   if (choice === true) return true;
   if (choice !== null) return false;
   return firstLaunch || atLeast(lastVersion, OPT_OUT_KEPT_SINCE);
@@ -50,7 +50,7 @@ const allowed = (value, list) => (typeof value === "string" && list.includes(val
  * One `desktop_launch` event per stage reached, under a random id made for this launch alone and kept nowhere: it ties
  * the stages of one launch together, never one launch to another, to a page's id or to a person.
  */
-export function createLaunchAnalytics({ fetch, choice, lastVersion, version, platform, packaged, env, now = Date.now, id = randomUUID() }) {
+export function createLaunchAnalytics({ fetch, choice, lastVersion, version, platform, packaged, env, now = Date.now, id = randomUUID(), project = PROJECT }) {
   const startedAt = now();
   const firstLaunch = lastVersion === null;
   const updated = !firstLaunch && lastVersion !== version;
@@ -59,7 +59,7 @@ export function createLaunchAnalytics({ fetch, choice, lastVersion, version, pla
   const stage = (name, { reason, hidden } = {}) => {
     if (!LAUNCH_STAGES.includes(name) || reached.has(name)) return;
     reached.add(name);
-    if (!launchAnalyticsAllowed({ choice: choice(), firstLaunch, lastVersion, packaged, env })) return;
+    if (!launchAnalyticsAllowed({ choice: choice(), firstLaunch, lastVersion, packaged, env, project })) return;
     const why = reason ?? (name === "server_failed" ? serverFailure : undefined);
     const properties = {
       stage: name, ms: Math.max(0, Math.round(now() - startedAt)), first_launch: firstLaunch, updated,
@@ -67,9 +67,9 @@ export function createLaunchAnalytics({ fetch, choice, lastVersion, version, pla
       app_version: version, platform: "desktop", surface: "main", $os: OS[platform] ?? "other", $process_person_profile: false,
     };
     try {
-      void Promise.resolve(fetch(new URL("/i/v0/e/", PROJECT.host), {
+      void Promise.resolve(fetch(new URL("/i/v0/e/", project.host).href, {
         method: "POST", headers: { "content-type": "application/json" }, credentials: "omit", cache: "no-store",
-        body: JSON.stringify({ api_key: PROJECT.token, event: "desktop_launch", distinct_id: id, timestamp: new Date(now()).toISOString(), properties }),
+        body: JSON.stringify({ api_key: project.token, event: "desktop_launch", distinct_id: id, timestamp: new Date(now()).toISOString(), properties }),
         signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
       })).catch(() => {});
     } catch {}

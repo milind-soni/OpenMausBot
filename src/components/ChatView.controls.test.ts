@@ -7,6 +7,8 @@ import { CODEX_USAGE_LIMIT_REACHED, CODEX_USAGE_URL } from "../../shared/codex-u
 import { failedTurnTool } from "../../shared/failed-turn";
 import { PROVIDER_SAFETY_GUIDANCE } from "../../shared/provider-safety";
 import { en } from "@/locales";
+import { PRODUCT_NAME } from "../../shared/product";
+import { THIS_COMPUTER_NOT_READY } from "../../shared/your-computer";
 
 const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
@@ -592,23 +594,23 @@ describe("thread control placement", () => {
     fixture.localMessage = "Screen Recording required";
     window.ogb = { platform: "darwin", permOpenSettings: vi.fn(), relaunch: vi.fn() } as unknown as NonNullable<Window["ogb"]>;
     const screen = renderToStaticMarkup(createElement(ErrorRow, {
-      message: "OpenMausBot can't use this computer yet — embedded host failed: Screen Recording required. Relaunch OpenMausBot after granting any missing macOS permission.",
+      message: `${THIS_COMPUTER_NOT_READY}embedded host failed: Screen Recording required. Relaunch ${PRODUCT_NAME} after granting any missing macOS permission.`,
     }));
     expect(screen).toContain("Open Screen Recording Settings");
-    expect(screen).toContain("Relaunch OpenMausBot");
+    expect(screen).toContain(`Relaunch ${PRODUCT_NAME}`);
     expect(screen).not.toContain("Open Accessibility Settings");
     fixture.localMessage = "Accessibility required";
     const accessibility = renderToStaticMarkup(createElement(ErrorRow, {
-      message: "OpenMausBot can't use this computer yet — Accessibility required",
+      message: `${THIS_COMPUTER_NOT_READY}Accessibility required`,
     }));
     expect(accessibility).toContain("Open Accessibility Settings");
     expect(accessibility).not.toContain("Open Screen Recording Settings");
     expect(renderToStaticMarkup(createElement(ErrorRow, {
-      message: "OpenMausBot can't use this computer yet — Screen Recording required",
+      message: `${THIS_COMPUTER_NOT_READY}Screen Recording required`,
     }))).not.toContain("Open Screen Recording Settings");
     expect(renderToStaticMarkup(createElement(ErrorRow, { message: "Network timeout" }))).not.toContain("Open Screen Recording Settings");
     fixture.localReasonCode = "remote-server";
-    expect(renderToStaticMarkup(createElement(ErrorRow, { message: "OpenMausBot can't use this computer yet — Screen Recording required" }))).not.toContain("Open Screen Recording Settings");
+    expect(renderToStaticMarkup(createElement(ErrorRow, { message: `${THIS_COMPUTER_NOT_READY}Screen Recording required` }))).not.toContain("Open Screen Recording Settings");
     fixture.localReasonCode = "cua-driver-unavailable";
     fixture.platform = "other";
     fixture.localMessage = "";

@@ -2,14 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createLaunchAnalytics, launchAnalyticsAllowed } from "./launch-analytics.mjs";
 
-const ON = { packaged: true, env: {} };
+const PROJECT = { token: "phc_test", host: "https://analytics.example.test" };
+const ON = { packaged: true, env: {}, project: PROJECT };
 
 function launch({ choice = null, lastVersion = null, version = "0.1.170", packaged = true, env = {}, platform = "darwin" } = {}) {
   const sent = [];
   let clock = 1_000;
   const analytics = createLaunchAnalytics({
     fetch: async (url, init) => { sent.push({ url, init, body: JSON.parse(init.body) }); return { ok: true }; },
-    choice: () => choice, lastVersion, version, platform, packaged, env, now: () => clock, id: "launch-id",
+    choice: () => choice, lastVersion, version, platform, packaged, env, now: () => clock, id: "launch-id", project: PROJECT,
   });
   return { analytics, sent, tick: (ms) => { clock += ms; } };
 }
@@ -24,7 +25,7 @@ test("each stage of one launch is sent once, under that launch's own id, with no
   analytics.stage("server_ready");
   analytics.stage("window_shown", { reason: "painted" });
   assert.deepEqual(sent.map(({ body }) => body.properties.stage), ["started", "server_spawned", "server_ready", "window_shown"]);
-  assert.equal(sent[0].url, "https://us.i.posthog.com/i/v0/e/");
+  assert.equal(sent[0].url, "https://analytics.example.test/i/v0/e/");
   const [first, , ready, shown] = sent.map(({ body }) => body);
   assert.equal(first.event, "desktop_launch");
   assert.equal(first.distinct_id, "launch-id");
@@ -72,7 +73,7 @@ test("with no choice kept, only a first launch or one after a version that kept 
 
 test("a send that throws or rejects never reaches the launch", async () => {
   for (const fetch of [() => { throw new Error("offline"); }, async () => { throw new Error("offline"); }]) {
-    const analytics = createLaunchAnalytics({ fetch, choice: () => true, lastVersion: null, version: "1.0.0", platform: "win32", packaged: true, env: {} });
+    const analytics = createLaunchAnalytics({ fetch, choice: () => true, lastVersion: null, version: "1.0.0", platform: "win32", packaged: true, env: {}, project: PROJECT });
     assert.doesNotThrow(() => analytics.stage("started"));
   }
   await new Promise((resolve) => setImmediate(resolve));

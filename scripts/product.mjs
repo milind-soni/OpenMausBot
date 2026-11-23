@@ -1,8 +1,9 @@
 // Writes product.json's app name, app id and update source into electron-builder.yml, and the app name into the web
-// app manifest.
+// app manifest, then regenerates shared/settings-places.ts, whose English names the product.
 //
 //   node scripts/product.mjs           rewrite both
 //   node scripts/product.mjs --check   fail when either does not match product.json
+import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -86,6 +87,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     if (next !== yaml) writeFileSync(BUILDER, next);
     const nextManifest = applyManifest(manifest, product);
     if (nextManifest !== manifest) writeFileSync(MANIFEST, nextManifest);
+    execFileSync(process.execPath, ["--experimental-strip-types", join(ROOT, "scripts", "gen-settings-places.ts")], { stdio: "inherit" });
     console.log(next === yaml && nextManifest === manifest ? "already matches product.json" : "updated from product.json");
   }
 }

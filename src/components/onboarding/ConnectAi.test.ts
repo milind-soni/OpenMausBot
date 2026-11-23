@@ -26,7 +26,8 @@ vi.mock("@/state/store", () => ({
   useStore: () => ({ state: { instances: f.instances, config: f.config }, dispatch: f.dispatch }),
 }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn(), emailGateDone: () => false }));
-vi.mock("@/lib/brand", () => ({ brandStatus: () => ({ source: f.brand }), productName: () => "MausBot" }));
+vi.mock("@/lib/brand", () => ({ brandStatus: () => ({ source: f.brand }), productName: () => "MausBot",
+  cloudOffered: () => true, makersOffers: () => f.brand !== "file" }));
 vi.mock("@/lib/app-links", async (original) => ({ ...await original<typeof import("@/lib/app-links")>(), openExternalLink: async (url: string) => { f.opened.push(url); } }));
 vi.mock("@/components/EngineSetup", async () => {
   const { createElement: h } = await import("react");

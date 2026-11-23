@@ -15,6 +15,7 @@ import { MORNING_WAKE_EARLY_MS } from "./host/brief.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { startBrokerFake, type BrokerFake } from "./testing/broker-fake.ts";
 import { freePortBlock } from "./testing/ports.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const HOST = "omb-t-0f1e2d3c4b5a.fly.dev";
@@ -81,7 +82,7 @@ describe("a new Cloud's first hour", () => {
     mkdirSync(dataDir, { recursive: true });
     broker = await startBrokerFake();
     const markers = join(home, "markers.json");
-    writeFileSync(markers, JSON.stringify({ "OpenMausBot first look": LOOK_REPLY, "inbox is a mess": FIRST_REPLY }));
+    writeFileSync(markers, JSON.stringify({ [`${APP_NAME} first look`]: LOOK_REPLY, "inbox is a mess": FIRST_REPLY }));
     writeFileSync(toolCalls(), "[]");
     const cli = join(home, "fake-claude.mjs");
     writeFileSync(cli, `#!/usr/bin/env node
@@ -190,7 +191,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     expect(tools).not.toContain(SEND);
     expect(tools).not.toContain(DELETE);
     const rows = await messages();
-    expect(rows.some((row) => row.role === "user" && String(row.text).includes("OpenMausBot first look")), "the first look's prompt is never the person's message").toBe(false);
+    expect(rows.some((row) => row.role === "user" && String(row.text).includes(`${APP_NAME} first look`)), "the first look's prompt is never the person's message").toBe(false);
     expect(rows.find((row) => row.id === gmail.id).connector).toMatchObject({ status: "connected", resumed: true });
     const dump = JSON.parse(readFileSync(dumpFile(), "utf8"));
     expect(JSON.stringify(dump.prompt)).toContain("OpenMausBot first look: Sam just connected Gmail.");

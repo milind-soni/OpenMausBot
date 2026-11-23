@@ -52,7 +52,7 @@ const LINE_PREFIXES = ["routines.server.", "chat.notice."];
 
 function englishParams(params: ServerTextParams | undefined): ServerTextParams {
   return Object.fromEntries(Object.entries(params ?? {}).map(([name, value]) =>
-    [name, isReferenceParam(name, value) && Object.hasOwn(en, value) ? en[value as LocaleKey] : value]));
+    [name, isReferenceParam(name, value) && Object.hasOwn(en, value) ? formatProductText(en[value as LocaleKey]) : value]));
 }
 
 /** A routine's stored line (`checkTroubleCode`, a run's `outputCode`, `errorCode`, `attentionCode`) in the reader's

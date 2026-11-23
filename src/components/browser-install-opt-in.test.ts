@@ -11,7 +11,7 @@ const fixture = vi.hoisted(() => {
   return { config: {} as FeatureFlagConfig, browserMcp: true, dispatch: vi.fn() };
 });
 
-vi.mock("@/lib/analytics", () => ({ analyticsEnabled: () => false, setAnalyticsEnabled: vi.fn() }));
+vi.mock("@/lib/analytics", () => ({ analyticsAvailable: () => true, analyticsEnabled: () => false, setAnalyticsEnabled: vi.fn() }));
 
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();

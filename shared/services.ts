@@ -21,7 +21,7 @@ export interface Services {
   announcements: string | null;
   /** URL of the model manifest that refreshes the bundled model lists. */
   modelManifest: string | null;
-  /** Repository the shared team library is read from. */
+  /** The shared team library: its repository's https://github.com/ URL, and the raw root its files are read from. */
   teamLibrary: { repository: string; rawRoot: string } | null;
 }
 

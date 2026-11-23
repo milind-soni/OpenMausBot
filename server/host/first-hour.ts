@@ -18,6 +18,7 @@ import { localDate, validZone } from "./check-plan.ts";
 import { FIRST_HOUR_OFFER_KEY } from "../../shared/person-wait.ts";
 import { firstHourWords, type FirstHourWords } from "./first-hour-words.ts";
 import { anyValue, minutesSaved, type ValueLedger, type ValueTally } from "./value-ledger.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 const SECOND = 1_000;
 const MINUTE = 60 * SECOND;
@@ -43,7 +44,7 @@ const RECAP_AFTER_MS = 20 * HOUR;
 const TICK_MS = 15 * SECOND;
 /** A turn's chat is still busy as the turn ends: the next step is tried again this soon. */
 const SOON_MS = SECOND;
-const APP_NAME: Record<LookApp, string> = { gmail: "Gmail", googlecalendar: "Google Calendar" };
+const LOOK_APP_NAMES: Record<LookApp, string> = { gmail: "Gmail", googlecalendar: "Google Calendar" };
 const ROLE_ADDRESSES = new Set(["admin", "billing", "careers", "contact", "enquiries", "finance", "hello", "help", "hi", "hr", "info", "inquiries", "jobs", "mail",
   "marketing", "me", "no", "noreply", "office", "owner", "sales", "support", "team", "test", "user"]);
 
@@ -144,7 +145,7 @@ export function lookPrompt(input: { apps: readonly LookApp[]; name?: string; lan
   const mail = input.apps.includes("gmail"), calendar = input.apps.includes("googlecalendar");
   const who = input.name ?? "The person";
   return [
-    `${APP_NAME} first look: ${who} just connected ${input.apps.map((app) => APP_NAME[app]).join(" and ")}. Give them their first look now, without being asked again.`,
+    `${APP_NAME} first look: ${who} just connected ${input.apps.map((app) => LOOK_APP_NAMES[app]).join(" and ")}. Give them their first look now, without being asked again.`,
     `Read their ${[mail && "Gmail", calendar && "Google Calendar"].filter(Boolean).join(" and ")}, then write one short, concrete message in ${languageName(input.language)}:`,
     ...(calendar ? ["- This week: their meetings over the next 7 days, one line each (day, time, who), and say which ones overlap."] : []),
     ...(mail ? [
@@ -247,7 +248,7 @@ export function createFirstHour(deps: FirstHourDeps) {
         appsIn(there, true);
         return;
       }
-      const cards = await Promise.all(missing.map(async (slug) => ({ slug, ...(await deps.apps.card(slug).catch(() => ({ label: APP_NAME[slug], description: "" }))) })));
+      const cards = await Promise.all(missing.map(async (slug) => ({ slug, ...(await deps.apps.card(slug).catch(() => ({ label: LOOK_APP_NAMES[slug], description: "" }))) })));
       if (!state || state.offeredAt || deps.threadBusy(place.bot.id, place.threadId)) return;
       const key = `${FIRST_HOUR_OFFER_KEY}${randomUUID()}`;
       say(place.bot, place.threadId, words().connect);

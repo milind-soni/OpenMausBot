@@ -15,7 +15,7 @@ import { BotLogins } from "../bot-logins.ts";
 import { OnePasswordLogins, sdkOnePasswordClient } from "../onepassword.ts";
 import { fakeOnePasswordSdk } from "../testing/fake-onepassword.ts";
 import type { LoginBots } from "../../shared/logins.ts";
-import { PRODUCT_NAME } from "../../shared/product.ts";
+import { APP_NAME, PRODUCT_NAME } from "../../shared/product.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -145,7 +145,7 @@ describe("a secret a card saves to the Vault", () => {
     expect(one.vaultStore.mcpServerKeys("stripe")).toEqual([item]);
   });
 
-  it(`is not another bot's, and a file for one saved for ${PRODUCT_NAME}'s tools only needs its own card`, async () => {
+  it(`is not another bot's, and a file for one saved for ${APP_NAME}'s tools only needs its own card`, async () => {
     const one = fixture();
     one.vaultStore.saveSecret({ name: "Stripe secret key", value: KEY, source: "card", bots: ["ledger"], refOnly: true });
     expect((await one.cards.requestCredential({ ...one.bot, id: "quill", name: "Quill" }, "t9", { label: "Stripe secret key", reason: "r", delivery: "ref" })).status).toBe(201);

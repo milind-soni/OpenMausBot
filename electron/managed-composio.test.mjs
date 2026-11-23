@@ -10,6 +10,12 @@ import {
   registerManagedComposio,
 } from "./managed-composio.mjs";
 
+vi.mock("../product.json", async (importOriginal) => {
+  const real = await importOriginal();
+  const product = { ...real.default, services: { ...real.default.services, composioBroker: null } };
+  return { ...real, ...product, default: product };
+});
+
 const TOKEN = "a".repeat(64);
 
 describe("managed Composio desktop registration", () => {

@@ -21,7 +21,7 @@ vi.mock("@/state/store", async (importOriginal) => ({
 }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: fixture.setAdvancedMode }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
-vi.mock("@/lib/analytics", () => ({ analyticsEnabled: () => false, setAnalyticsEnabled: vi.fn(), track: vi.fn() }));
+vi.mock("@/lib/analytics", () => ({ analyticsAvailable: () => true, analyticsEnabled: () => false, setAnalyticsEnabled: vi.fn(), track: vi.fn() }));
 vi.mock("../DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: { host: { platform: "darwin" } } }), windowFramed: () => false }));
 vi.mock("../SettingsPrimitives", async (importOriginal) => {
   const original = await importOriginal<typeof import("../SettingsPrimitives")>();

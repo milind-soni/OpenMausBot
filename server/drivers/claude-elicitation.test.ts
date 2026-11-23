@@ -58,7 +58,7 @@ describe("claudeElicitations", () => {
     const { elicit, written, events } = harness();
     expect(elicit.frame(ask("e4", { requested_schema: { type: "object", properties: { token: { type: "string" } } } }))).toBe(true);
     expect(written).toEqual([sent("e4", { action: "decline" })]);
-    expect(events).toEqual([{ type: "runtime.notice", message: `github asked you to fill in a field ("Allow access to your repos?"). ${PRODUCT_NAME} can\'t show that form yet, so the request was declined.`,
+    expect(events).toEqual([{ type: "runtime.notice", message: `github asked you to fill in a field ("Allow access to your repos?"). ${PRODUCT_NAME} can't show that form yet, so the request was declined.`,
       text: { key: "chat.notice.elicitationFormDeclinedOneMessage", params: { server: "github", message: "Allow access to your repos?" } } }]);
   });
 
@@ -66,7 +66,7 @@ describe("claudeElicitations", () => {
     const { elicit, written, events } = harness();
     expect(elicit.frame(ask("e4b", { requested_schema: { type: "object", properties: {}, required: ["token"] } }))).toBe(true);
     expect(written).toEqual([sent("e4b", { action: "decline" })]);
-    expect(events).toEqual([{ type: "runtime.notice", message: `github asked you to fill in a field ("Allow access to your repos?"). ${PRODUCT_NAME} can\'t show that form yet, so the request was declined.`,
+    expect(events).toEqual([{ type: "runtime.notice", message: `github asked you to fill in a field ("Allow access to your repos?"). ${PRODUCT_NAME} can't show that form yet, so the request was declined.`,
       text: { key: "chat.notice.elicitationFormDeclinedOneMessage", params: { server: "github", message: "Allow access to your repos?" } } }]);
   });
 

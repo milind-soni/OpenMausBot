@@ -3,7 +3,7 @@
 // English mirrors src/locales/en.json `approval.yourComputer.*` exactly (a test holds them together): the server has no i18n.
 
 /** What a bot's first call on the person's computer names, cleaned for a sentence they read. */
-import { APP_NAME } from "../shared/product.ts";
+import { APP_NAME, PRODUCT_NAME } from "../shared/product.ts";
 export interface YourComputerCall {
   /** The app's everyday name: "Chrome", "Safari", "Keynote". */
   app?: string;
@@ -29,7 +29,7 @@ export type YourComputerKey = keyof typeof YOUR_COMPUTER_WORDS;
 export const YOUR_COMPUTER_TOOL = "use_your_computer";
 
 /** A failed turn's line starts with this when the desktop app's own driver is not ready; the app adds the permission fix. */
-export const THIS_COMPUTER_NOT_READY = `${APP_NAME} can't use this computer yet — `;
+export const THIS_COMPUTER_NOT_READY = `${PRODUCT_NAME} can't use this computer yet — `;
 
 /** What a bot is told when the computer-control helper dies under it: the app restarts the helper by itself. */
 export const COMPUTER_HELPER_STOPPED =

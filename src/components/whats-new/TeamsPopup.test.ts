@@ -59,7 +59,7 @@ describe("the Teams popup", () => {
       const popup = await show(action);
       const link = [...popup.querySelectorAll("button")].find(button => button.textContent === "See Team plans");
       await act(async () => { link!.click(); });
-      expect(opened.at(-1), action.kind).toBe("https://www.openmausbot.com/pricing#teams");
+      expect(opened.at(-1), action.kind).toBe("https://cloud.example.test/pricing#teams");
       expect(onStep, action.kind).toHaveBeenLastCalledWith("see_team_plans");
       await act(async () => root?.unmount()); root = null;
     }

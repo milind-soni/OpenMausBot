@@ -52,6 +52,13 @@ const ph = vi.hoisted(() => {
 });
 vi.mock("posthog-js", () => ph.module());
 
+const build = vi.hoisted(() => ({ hasProject: true }));
+vi.mock("../../shared/services", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../../shared/services")>();
+  const project = { token: "phc_test", host: "https://analytics.test" };
+  return { ...real, SERVICES: { ...real.SERVICES, get analytics() { return build.hasProject ? project : null; } } };
+});
+
 // The suite runs on the node environment, which has no localStorage.
 const store = new Map<string, string>();
 const baseStorage = {
@@ -85,6 +92,19 @@ async function freshAnalytics() {
 }
 
 const OPENED = ["init", "register", "capture app_first_open", "capture app_opened"];
+
+describe("a build with no analytics project", () => {
+  afterEach(() => { build.hasProject = true; });
+
+  it("offers no switch and never loads posthog-js", async () => {
+    build.hasProject = false;
+    const fresh = await freshAnalytics();
+    expect(fresh.analyticsAvailable()).toBe(false);
+    await fresh.initAnalytics();
+    expect(ph.loads).toBe(0);
+    expect(ph.calls).toEqual([]);
+  });
+});
 
 describe("optAction", () => {
   it("initialises on the first opt-in of a session that started off", () => {

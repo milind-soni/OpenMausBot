@@ -79,7 +79,7 @@ const template = (key: string): string | undefined =>
 function composed(key: string, params?: ServerTextParams): string | undefined {
   const line = template(key);
   if (line === undefined) return undefined;
-  const words = params && Object.fromEntries(Object.entries(params).map(([name, value]) => [name, isReferenceParam(name, value) ? template(String(value)) ?? value : value]));
+  const words = params && Object.fromEntries(Object.entries(params).map(([name, value]) => [name, isReferenceParam(name, value) ? composed(String(value)) ?? value : value]));
   return formatProductText(line, words);
 }
 

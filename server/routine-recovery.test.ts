@@ -10,7 +10,7 @@ import {
 } from "./routine-recovery.ts";
 import { RoutineManager, type Routine, type RoutineManagerOptions, type RoutineRun } from "./routines.ts";
 import { claudeLimitError } from "./drivers/claude-limits.ts";
-import { PRODUCT_NAME } from "../shared/product.ts";
+import { APP_NAME, PRODUCT_NAME } from "../shared/product.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -314,7 +314,7 @@ describe("an unattended run whose bot is busy when it starts", () => {
     h.refuse(null);
     await h.advance(2 * SECOND);
     expect(h.started.map((turn) => turn.threadId)).toEqual(["thread-1"]);
-    expect(h.started[0]!.prompt).not.toContain(`${PRODUCT_NAME}: this run's first start`);
+    expect(h.started[0]!.prompt).not.toContain(`${APP_NAME}: this run's first start`);
     h.complete("thread-1");
     expect(h.run(run.id)).toMatchObject({ status: "completed", attention: undefined });
     expect(h.run(run.id).retried).toBeUndefined();
