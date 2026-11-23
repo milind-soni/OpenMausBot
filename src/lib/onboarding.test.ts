@@ -29,6 +29,12 @@ import {
   welcomeFinishedThisLaunch,
 } from "./onboarding";
 
+// These tests run a build that offers an organization portal; this fork's own product.json offers none.
+vi.mock("../../shared/services", async (original) => {
+  const actual = await original<typeof import("../../shared/services")>();
+  return { ...actual, SERVICES: { ...actual.SERVICES, adminPortal: "https://admin.example.test" } };
+});
+
 const done = { completedAt: "2026-09-09T10:00:00.000Z", version: WELCOME_VERSION, reelSeen: false, hintsSeen: [] };
 
 describe("welcomeDue", () => {

@@ -54,7 +54,7 @@ function store(options: Partial<ConstructorParameters<typeof ModelManifestStore>
     dir,
     log,
     advance: (ms: number) => { time += ms; },
-    manifest: new ModelManifestStore({ dataDir: dir, bundled, now: () => time, log, env: {}, ...rest }),
+    manifest: new ModelManifestStore({ dataDir: dir, bundled, now: () => time, log, env: {}, url: "https://manifest.example.test/model-manifest.json", ...rest }),
   };
 }
 

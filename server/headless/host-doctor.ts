@@ -7,10 +7,12 @@ import { arch, cpus, release, totalmem } from "node:os";
 import { dirname, posix, resolve } from "node:path";
 
 import { defaultDataDir, type DataHomes } from "../data-dir.ts";
-import { PRODUCTION_CLOUD_ORIGIN } from "../devs-report-send.ts";
 import { EXIT, flag, usageError } from "./args.ts";
 import type { VerbContext, VerbOutcome } from "./context.ts";
 import { APP_NAME, PRODUCT_NAME } from "../../shared/product.ts";
+
+/** Any well-known HTTPS server answers with its clock; this one is no service of this app's. */
+const CLOCK_ORIGIN = "https://github.com";
 
 export type HostStatus = "ok" | "warn" | "FAIL";
 
@@ -293,7 +295,7 @@ export function systemProbe(): HostProbe {
     async clockOffset() {
       try {
         const before = Date.now();
-        const response = await fetch(PRODUCTION_CLOUD_ORIGIN, { method: "HEAD", redirect: "manual", signal: AbortSignal.timeout(5_000) });
+        const response = await fetch(CLOCK_ORIGIN, { method: "HEAD", redirect: "manual", signal: AbortSignal.timeout(5_000) });
         const after = Date.now();
         const date = Date.parse(response.headers.get("date") ?? "");
         // An HTTP date is whole seconds: the server's clock was somewhere in the second after it.

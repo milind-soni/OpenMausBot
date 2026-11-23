@@ -3,10 +3,12 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ANNOUNCEMENTS_URL, type AnnouncementFeed } from "../../shared/announcements.ts";
+import { type AnnouncementFeed } from "../../shared/announcements.ts";
 import {
   ANNOUNCEMENTS_DISABLE_ENV, ANNOUNCEMENTS_RETRY_MS, ANNOUNCEMENTS_TTL_MS, AnnouncementStore, announcementsCachePath, BUNDLED_ANNOUNCEMENTS,
 } from "./feed.ts";
+
+const TEST_URL = "https://announcements.example.test/announcements/announcements.json";
 
 const NOW = Date.parse("2026-12-01T10:00:00Z");
 const scratch: string[] = [];
@@ -23,7 +25,7 @@ const answer = (body: unknown, init: ResponseInit = { status: 200 }) => new Resp
 function subject(options: { fetch?: typeof fetch; dir?: string; env?: NodeJS.ProcessEnv; bundled?: AnnouncementFeed } = {}) {
   let time = NOW;
   const log = vi.fn();
-  const store = new AnnouncementStore({ dataDir: options.dir ?? dataDir(), bundled: options.bundled ?? bundled, now: () => time, log, env: options.env ?? {}, fetch: options.fetch });
+  const store = new AnnouncementStore({ dataDir: options.dir ?? dataDir(), bundled: options.bundled ?? bundled, now: () => time, log, env: options.env ?? {}, fetch: options.fetch, url: TEST_URL });
   return { store, log, advance: (ms: number) => { time += ms; } };
 }
 
@@ -48,7 +50,7 @@ describe("downloading the file", () => {
     const { store } = subject({ fetch: fetchMock as unknown as typeof fetch, dir });
     expect((await store.cardsForPage()).map((entry) => entry.id)).toEqual(["phone-app"]);
     const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe(ANNOUNCEMENTS_URL);
+    expect(url).toBe(TEST_URL);
     expect(init).toMatchObject({ credentials: "omit", referrerPolicy: "no-referrer", redirect: "error" });
     expect(Object.keys(init!.headers as Record<string, string>).sort()).toEqual(["accept", "user-agent"]);
     expect(url).not.toMatch(/[?#]/);

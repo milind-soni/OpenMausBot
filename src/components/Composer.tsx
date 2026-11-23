@@ -98,6 +98,7 @@ import {
 } from "@/lib/composer-commands";
 import { useSlashSkills } from "@/lib/use-slash-skills";
 import { randomUuid } from "@/lib/random-uuid";
+import { SERVICES } from "../../shared/services";
 
 const supportsAgents = (instances: InstanceInfo[], candidate?: Bot) =>
   Boolean(candidate && instances.find((instance) => instance.instanceId === candidate.modelSelection.instanceId)?.capabilities?.agentsMcp);
@@ -340,7 +341,7 @@ export function Composer({
       : bots
           .filter((member) => member.id !== bot?.id && !member.hidden && !hiddenFromSidebar(member, viewer))
           .map((member) => ({ id: member.id, name: member.name, bot: member }));
-    return mentionChoicesForQuery([...pool, ...teammateChoices(teammates.people), DEVS_CHOICE], mention.query);
+    return mentionChoicesForQuery([...pool, ...teammateChoices(teammates.people), ...(SERVICES.problemReports ? [DEVS_CHOICE] : [])], mention.query);
   }, [mention, dismissedAt, bots, bot?.id, group, members, teammates, viewer]);
   const mentionEveryoneCount = (members ?? []).filter((member) => !member.hidden).length;
   const mentionPickerOpen = candidates.length > 0;

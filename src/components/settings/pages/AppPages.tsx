@@ -6,6 +6,7 @@ import { t } from "@/lib/i18n";
 import { useStoreDispatch } from "@/state/store-select";
 import { AboutDialog } from "../../AboutDialog";
 import { AnalyticsRow } from "../../AnalyticsRow";
+import { analyticsAvailable } from "@/lib/analytics";
 import { ChatWidthRow, FontRow, SidebarToolsLayoutRow } from "../../AppearanceSelectRows";
 import {
   ColorUserBubblesRow, FollowUpRow, LanguageRow, PinnedCirclesRow, ReplayTourRow, RunCardRow, SendKeyRow, ShowThreadsRow,
@@ -135,9 +136,11 @@ export function GeneralPage() {
         <SettingsRows>{window.ogb?.openAtLogin ? <OpenAtLoginRow simple /> : <InertRow title={t("settings.openAtLogin.title")} control={<Switch checked={false} tabIndex={-1} aria-label={t("settings.openAtLogin.title")} />} />}</SettingsRows>
       </SettingsGroup>
     )}
-    <SettingsGroup label={t("settings.general.privacy")} block="privacy">
-      <SettingsRows><AnalyticsRow simple /></SettingsRows>
-    </SettingsGroup>
+    {analyticsAvailable() && (
+      <SettingsGroup label={t("settings.general.privacy")} block="privacy">
+        <SettingsRows><AnalyticsRow simple /></SettingsRows>
+      </SettingsGroup>
+    )}
   </>;
 }
 

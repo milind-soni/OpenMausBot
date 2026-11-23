@@ -1,5 +1,6 @@
 import { ONBOARDING_CLOUD_HINT, WELCOME_VERSION } from "../../electron/onboarding-record.mjs";
 import { freeFallback, rankAis, type AiTestState, type RankableAi } from "../../shared/ai-ranking";
+import { SERVICES } from "../../shared/services";
 
 export interface OnboardingStatus {
   completedAt: string;
@@ -147,13 +148,14 @@ export function welcomeFinishedThisLaunch(): boolean {
   }
 }
 
-export const DEFAULT_ADMIN_ORIGIN = "https://admin.openmausbot.com";
+/** The organization portal a first run offers, from product.json; null: none, so onboarding has no organization row. */
+export const DEFAULT_ADMIN_ORIGIN: string | null = SERVICES.adminPortal;
 
 export function organisationSignIn<Bridge>(
   ogb: { organization?: Bridge; remoteClient?: { active?: boolean } } | undefined,
   options: { hosted: boolean },
 ): Bridge | undefined {
-  if (options.hosted || !ogb || ogb.remoteClient?.active === true) return undefined;
+  if (!DEFAULT_ADMIN_ORIGIN || options.hosted || !ogb || ogb.remoteClient?.active === true) return undefined;
   return ogb.organization;
 }
 

@@ -6,7 +6,7 @@ export interface ManagedComposioCredentials {
 
 export interface ManagedComposioAccess { url: string; token: string }
 
-export declare const DEFAULT_MANAGED_COMPOSIO_BROKER_URL: string;
+export declare const DEFAULT_MANAGED_COMPOSIO_BROKER_URL: string | null;
 export declare function managedComposioBrokerOff(environment?: Record<string, string | undefined>): boolean;
 export declare function ownComposioKey(credentials: ManagedComposioCredentials | null | undefined, environment?: Record<string, string | undefined>): boolean;
 export declare function managedComposioBrokerUrl(configured: string | undefined, shipped: boolean): string;

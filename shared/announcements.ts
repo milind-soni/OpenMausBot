@@ -10,11 +10,14 @@
 // audience key does.
 import { z } from "zod";
 
+import { SERVICES } from "./services.ts";
+
 export const ANNOUNCEMENTS_FILE = "announcements/announcements.json";
 export const ANNOUNCEMENTS_SCHEMA_FILE = "announcements/announcements.schema.json";
-export const ANNOUNCEMENTS_URL = `https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/${ANNOUNCEMENTS_FILE}`;
-/** Pictures: files in the repository's announcements/ folder on main, as raw.githubusercontent.com serves them. */
-export const ANNOUNCEMENT_IMAGE_PREFIX = "https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/announcements/";
+/** The feed, under product.json's announcements base; null when this build reads none. */
+export const ANNOUNCEMENTS_URL: string | null = SERVICES.announcements ? `${SERVICES.announcements.replace(/\/+$/, "")}/${ANNOUNCEMENTS_FILE}` : null;
+/** Pictures: files in the same base's announcements/ folder. */
+export const ANNOUNCEMENT_IMAGE_PREFIX: string | null = SERVICES.announcements ? `${SERVICES.announcements.replace(/\/+$/, "")}/announcements/` : null;
 
 /** An install reads at most this many cards, in file order; CI refuses a longer list. */
 export const MAX_CARDS = 20;
@@ -77,9 +80,9 @@ export function isHttpsUrl(value: string): boolean {
   }
 }
 
-export function isAnnouncementImageUrl(value: string): boolean {
-  if (!isHttpsUrl(value) || !value.startsWith(ANNOUNCEMENT_IMAGE_PREFIX)) return false;
-  const rest = value.slice(ANNOUNCEMENT_IMAGE_PREFIX.length);
+export function isAnnouncementImageUrl(value: string, prefix: string | null = ANNOUNCEMENT_IMAGE_PREFIX): boolean {
+  if (!prefix || !isHttpsUrl(value) || !value.startsWith(prefix)) return false;
+  const rest = value.slice(prefix.length);
   return IMAGE_PATH.test(rest) && !rest.split("/").some((part) => part === "" || part === "." || part === "..");
 }
 
@@ -116,7 +119,7 @@ export type AnnouncementAction = z.infer<typeof actionSchema>;
 
 function imageSchema(objectOf: ObjectOf, strict: boolean) {
   return z.union([
-    objectOf({ url: z.string().max(LIMITS.url).refine(isAnnouncementImageUrl, `a .png, .jpg or .webp file under ${ANNOUNCEMENT_IMAGE_PREFIX}`), alt: text(LIMITS.alt, strict).optional() }),
+    objectOf({ url: z.string().max(LIMITS.url).refine((value) => isAnnouncementImageUrl(value), `a .png, .jpg or .webp file under ${ANNOUNCEMENT_IMAGE_PREFIX ?? "the announcements base"}`), alt: text(LIMITS.alt, strict).optional() }),
     objectOf({ mark: z.enum(ANNOUNCEMENT_MARKS) }),
   ]);
 }

@@ -6,7 +6,9 @@ import { describe, expect, it } from "vitest";
 import { canonicalJson, parsePackageDocument } from "../shared/package-format.ts";
 import { writeShareFolder } from "../shared/share-folder.ts";
 import { fetchGithubTemplate, githubTemplateSource } from "./share-github.ts";
-import { fetchLibraryTeam, TEAM_LIBRARY_RAW_ROOT } from "./team-library.ts";
+import { fetchLibraryTeam } from "./team-library.ts";
+
+const LIBRARY = { repository: "https://github.com/example/teams", rawRoot: "https://raw.githubusercontent.com/example/teams/main" };
 
 const RAW = "https://raw.githubusercontent.com";
 const team = parsePackageDocument(JSON.parse(readFileSync(join(import.meta.dirname, "..", "shared", "package-fixtures", "full-team.v2.json"), "utf8")));
@@ -106,12 +108,12 @@ describe("GitHub template links", () => {
       manifest: "teams/sales-desk/team.mausteam.json", readme: "teams/sales-desk/README.md", members: 3, skills: [], requires: { apps: [] },
       folder: "teams/sales-desk", kind: "department", main: "teams/sales-desk/team.md" }] };
     const fetcher = (async (url: string) => {
-      if (url === `${TEAM_LIBRARY_RAW_ROOT}/catalog.json`) return Response.json(catalog);
-      const path = url.slice(`${TEAM_LIBRARY_RAW_ROOT}/teams/sales-desk/`.length);
-      const body = url.startsWith(`${TEAM_LIBRARY_RAW_ROOT}/teams/sales-desk/`) ? folder[path] : undefined;
+      if (url === `${LIBRARY.rawRoot}/catalog.json`) return Response.json(catalog);
+      const path = url.slice(`${LIBRARY.rawRoot}/teams/sales-desk/`.length);
+      const body = url.startsWith(`${LIBRARY.rawRoot}/teams/sales-desk/`) ? folder[path] : undefined;
       return body === undefined ? new Response("", { status: 404 }) : new Response(typeof body === "string" ? body : new Uint8Array(body));
     }) as typeof fetch;
-    const loaded = await fetchLibraryTeam("sales-desk", fetcher);
+    const loaded = await fetchLibraryTeam("sales-desk", fetcher, LIBRARY);
     expect("package" in loaded && loaded.package.skills?.entries).toHaveLength(3);
   });
 });

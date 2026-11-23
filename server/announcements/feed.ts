@@ -41,6 +41,8 @@ export interface AnnouncementStoreOptions {
   timeoutMs?: number;
   maxBytes?: number;
   log?: (message: string) => void;
+  /** Where to refresh from; left out, product.json's announcements service, and null keeps the bundled copy. */
+  url?: string | null;
 }
 
 const updatedAtMs = (feed: AnnouncementFeed) => Date.parse(feed.updatedAt);
@@ -128,8 +130,13 @@ export class AnnouncementStore {
     }
   }
 
+  private get url(): string | null {
+    return this.options.url !== undefined ? this.options.url : ANNOUNCEMENTS_URL;
+  }
+
   private async fetchAndStore(force: boolean, ttlMs: number): Promise<AnnouncementFeed> {
     this.current();
+    if (!this.url) return this.feed;
     const now = this.now;
     // Expire timestamps from the future after a clock rollback; the cache crosses restarts, so no monotonic clock.
     const within = (sinceMs: number | null, windowMs: number) => sinceMs !== null && now >= sinceMs && now - sinceMs < windowMs;
@@ -167,7 +174,7 @@ export class AnnouncementStore {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.options.timeoutMs ?? ANNOUNCEMENTS_FETCH_TIMEOUT_MS);
     try {
-      const response = await (this.options.fetch ?? fetch)(ANNOUNCEMENTS_URL, {
+      const response = await (this.options.fetch ?? fetch)(this.url!, {
         headers: { accept: "application/json", "user-agent": `${APP_NAME}` },
         // Nothing of the person's goes with it.
         credentials: "omit",

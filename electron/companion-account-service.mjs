@@ -46,11 +46,14 @@ export {
 } from "./companion-account-documents.mjs";
 import { MANAGED_ENDPOINT_PHONES_UNUSED } from "./companion-endpoint-need.mjs";
 import { FRIENDLY_MESSAGES, friendlyCompanionAccountError } from "./companion-account-messages.mjs";
+import product from "../product.json" with { type: "json" };
 export { friendlyCompanionAccountError };
 
 export { managedEndpointNeed, PHONE_UNUSED_RELEASE_MS } from "./companion-endpoint-need.mjs";
 
-export const DEFAULT_COMPANION_CONTROL_PLANE_URL = "https://accounts.openmausbot.com";
+/** The account service a packaged build reaches phones through when they are away from home, from product.json; null: none,
+ * so phones connect only on the same network or Tailscale. */
+export const DEFAULT_COMPANION_CONTROL_PLANE_URL = product.services.accounts;
 
 const DEFAULT_HEALTH_CACHE_MS = 30_000;
 const DEFAULT_AUTO_RETRY_BASE_MS = 10 * 60_000;
@@ -101,7 +104,7 @@ export function resolveCompanionControlPlaneURL({
   if (Object.hasOwn(environment, "OMB_CONTROL_PLANE_URL")) {
     return normalizeControlPlaneURL(environment.OMB_CONTROL_PLANE_URL);
   }
-  return isPackaged ? DEFAULT_COMPANION_CONTROL_PLANE_URL : "";
+  return isPackaged ? DEFAULT_COMPANION_CONTROL_PLANE_URL ?? "" : "";
 }
 
 /** Nothing this service returns may contain an account bearer, installation credential, connector token or Cloudflare resource id. */

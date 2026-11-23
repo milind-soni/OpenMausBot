@@ -1,7 +1,10 @@
+import product from "../product.json" with { type: "json" };
+
 const TOKEN = /^[0-9a-f]{64}$/;
 
-/** OpenMausBot's connected-apps service (cloudflare/composio-broker): the packaged desktop app and a Cloud home use it. */
-export const DEFAULT_MANAGED_COMPOSIO_BROKER_URL = "https://openmausbot-composio.milindsoni201.workers.dev";
+/** The connected-apps service (cloudflare/composio-broker) a shipped build uses, from product.json; null: none, so only a
+ * person's own Composio key connects apps. */
+export const DEFAULT_MANAGED_COMPOSIO_BROKER_URL = product.services.composioBroker;
 
 /** OMB_COMPOSIO_BROKER=off: nothing reaches the managed service, whatever else is set. */
 export function managedComposioBrokerOff(environment = process.env) {
@@ -17,7 +20,7 @@ export function ownComposioKey(credentials, environment = process.env) {
 export function managedComposioBrokerUrl(configured, shipped) {
   if (managedComposioBrokerOff()) return "";
   const explicit = typeof configured === "string" ? configured.trim() : "";
-  return normalizeManagedComposioBrokerUrl(explicit || (shipped ? DEFAULT_MANAGED_COMPOSIO_BROKER_URL : ""));
+  return normalizeManagedComposioBrokerUrl(explicit || (shipped ? DEFAULT_MANAGED_COMPOSIO_BROKER_URL ?? "" : ""));
 }
 
 export function normalizeManagedComposioBrokerUrl(value) {

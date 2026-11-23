@@ -32,6 +32,12 @@ vi.mock("@/state/store", async (original) => ({ ...await original<typeof import(
 import { OrganizationSettings } from "./OrganizationSettings";
 import { CompanyModels } from "./CompanyModels";
 
+// These tests run a build that offers an organization portal; this fork's own product.json offers none.
+vi.mock("../../shared/services", async (original) => {
+  const actual = await original<typeof import("../../shared/services")>();
+  return { ...actual, SERVICES: { ...actual.SERVICES, adminPortal: "https://admin.example.test" } };
+});
+
 type Node = ReactElement<{ children?: ReactNode; disabled?: boolean; value?: string; onChange?: (event: unknown) => void; onSubmit?: (event: unknown) => void; onClick?: () => void }>;
 function nodes(value: ReactNode): Node[] {
   if (!isValidElement(value)) return [];
@@ -113,7 +119,7 @@ describe("optional desktop Organisation settings", () => {
     expect(bridge.begin).not.toHaveBeenCalled();
     const signIn = () => view.nodes.find(node => node.type === "button" && (node.props as { "data-organization-sign-in"?: string })["data-organization-sign-in"] === "")!.props.onClick!();
     signIn(); signIn(); await flush();
-    expect(bridge.begin).toHaveBeenCalledExactlyOnceWith({ portalOrigin: "https://admin.openmausbot.com" });
+    expect(bridge.begin).toHaveBeenCalledExactlyOnceWith({ portalOrigin: "https://admin.example.test" });
     expect(fetch).not.toHaveBeenCalled();
     const progress = render().html;
     expect(progress).toContain("Finish signing in through your browser");

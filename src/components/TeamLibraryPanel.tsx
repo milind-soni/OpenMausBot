@@ -4,7 +4,7 @@ import { addTemplate } from "@/lib/template-add";
 import { templateDetailsOf } from "@/lib/template-details";
 import { orgCardAction, orgPackagePreview, type OrgLibraryListing, type OrgLibraryPackage } from "@/lib/org-library";
 import type { PackageDocument } from "../../shared/package-format";
-import { COMMUNITY_REPOSITORY_URL, type TemplateDetails } from "../../shared/share-card";
+import { type TemplateDetails } from "../../shared/share-card";
 import type { Routine } from "@/lib/routines";
 import { openExternalLink } from "@/lib/app-links";
 import { api, useStore, type Bot, type Group } from "@/state/store";
@@ -254,9 +254,9 @@ export function TeamLibraryPanel({
             {!pending && <p className="mt-1 text-[13px] text-ink-secondary">{t("templates.subtitle")}</p>}
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            {!pending && (
+            {!pending && catalog?.repositoryUrl && (
               <button
-                onClick={() => void openExternalLink(catalog?.repositoryUrl || COMMUNITY_REPOSITORY_URL).catch(() => {})}
+                onClick={() => void openExternalLink(catalog.repositoryUrl).catch(() => {})}
                 className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
                 title={t("templates.openRepository")}
               >

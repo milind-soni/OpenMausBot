@@ -6,6 +6,12 @@ import type { ManagedDesktopBridge } from "../../../electron/managed-desktop.mjs
 import { setLocale } from "@/lib/i18n";
 import type { InstanceInfo } from "@/state/store";
 
+// These tests run a build that offers an organization portal; this fork's own product.json offers none.
+vi.mock("../../../shared/services", async (original) => {
+  const actual = await original<typeof import("../../../shared/services")>();
+  return { ...actual, SERVICES: { ...actual.SERVICES, adminPortal: "https://admin.example.test" } };
+});
+
 const f = vi.hoisted(() => ({
   instances: [] as InstanceInfo[], dispatch: vi.fn(), row: null as null | { bridge: unknown; onOpenSettings: () => void },
   check: (): Promise<object> => Promise.resolve({ ok: true }), checks: [] as string[], fail: false, config: {} as Record<string, unknown>, brand: "default", opened: [] as string[],

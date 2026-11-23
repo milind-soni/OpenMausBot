@@ -10,5 +10,16 @@
     "name": "น้อง Connect",
     "emblem": "bars",
     "badge": false
+  },
+  "services": {
+    "analytics": null,
+    "cloud": null,
+    "accounts": null,
+    "adminPortal": null,
+    "composioBroker": null,
+    "problemReports": null,
+    "announcements": null,
+    "modelManifest": null,
+    "teamLibrary": null
   }
 }

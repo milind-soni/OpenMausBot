@@ -25,6 +25,12 @@ vi.mock("react", async (original) => ({
 }));
 import { OrganisationRow } from "./OrganisationRow";
 
+// These tests run a build that offers an organization portal; this fork's own product.json offers none.
+vi.mock("../../../../shared/services", async (original) => {
+  const actual = await original<typeof import("../../../../shared/services")>();
+  return { ...actual, SERVICES: { ...actual.SERVICES, adminPortal: "https://admin.example.test" } };
+});
+
 type Node = ReactElement<{ children?: ReactNode; disabled?: boolean; onClick?: () => void }>;
 function nodes(value: ReactNode): Node[] {
   if (!isValidElement(value)) return [];
@@ -128,7 +134,7 @@ describe("organisation sign-in row in the welcome flow", () => {
     signIn.props.onClick!();
     signIn.props.onClick!();
     await flush();
-    expect(bridge.begin).toHaveBeenCalledExactlyOnceWith({ portalOrigin: "https://admin.openmausbot.com" });
+    expect(bridge.begin).toHaveBeenCalledExactlyOnceWith({ portalOrigin: "https://admin.example.test" });
 
     let html = render().html;
     expect(html).toContain("Finish in your browser");

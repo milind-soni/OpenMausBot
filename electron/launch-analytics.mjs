@@ -2,10 +2,10 @@
 // far as a page, so main says how far each launch got. It honours the same Usage analytics switch as the pages.
 import { randomUUID } from "node:crypto";
 import { readLastRunVersion } from "./startup-cache-eviction.mjs";
+import product from "../product.json" with { type: "json" };
 
-// The app's own PostHog project; the phc_ token is a write-only public key, the same one the app's pages send with.
-const TOKEN = "phc_m2hP39w8y2gLPvHgDvSXAu6xcZ3agjf4ruL56rGcMZEe";
-const ENDPOINT = "https://us.i.posthog.com/i/v0/e/";
+/** The same analytics project the app's pages send to (product.json services.analytics); null sends nothing. */
+const PROJECT = product.services.analytics;
 const SEND_TIMEOUT_MS = 10_000;
 
 export const LAUNCH_STAGES = Object.freeze([
@@ -38,7 +38,7 @@ function atLeast(version, minimum) {
  * only in the page's storage into the switch. Packaged builds only, never under the smoke tests or CI.
  */
 export function launchAnalyticsAllowed({ choice, firstLaunch, lastVersion, packaged, env }) {
-  if (!packaged || env.OMB_SMOKE_TEST === "1" || env.CI) return false;
+  if (!PROJECT || !packaged || env.OMB_SMOKE_TEST === "1" || env.CI) return false;
   if (choice === true) return true;
   if (choice !== null) return false;
   return firstLaunch || atLeast(lastVersion, OPT_OUT_KEPT_SINCE);
@@ -67,9 +67,9 @@ export function createLaunchAnalytics({ fetch, choice, lastVersion, version, pla
       app_version: version, platform: "desktop", surface: "main", $os: OS[platform] ?? "other", $process_person_profile: false,
     };
     try {
-      void Promise.resolve(fetch(ENDPOINT, {
+      void Promise.resolve(fetch(new URL("/i/v0/e/", PROJECT.host), {
         method: "POST", headers: { "content-type": "application/json" }, credentials: "omit", cache: "no-store",
-        body: JSON.stringify({ api_key: TOKEN, event: "desktop_launch", distinct_id: id, timestamp: new Date(now()).toISOString(), properties }),
+        body: JSON.stringify({ api_key: PROJECT.token, event: "desktop_launch", distinct_id: id, timestamp: new Date(now()).toISOString(), properties }),
         signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
       })).catch(() => {});
     } catch {}

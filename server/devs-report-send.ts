@@ -5,11 +5,12 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { z } from "zod";
 
+import { SERVICES } from "../shared/services.ts";
 import { DEVS_REPORT_LIMITS, withoutContact, type DevsReportPayload } from "./devs-report.ts";
 
 export const BUG_REPORT_PATH = "/api/bug-reports";
-export const PRODUCTION_CLOUD_ORIGIN = "https://cloud.openmausbot.com";
-export const STAGING_CLOUD_ORIGIN = "https://omb-cloud-staging.fly.dev";
+/** What a person is told when this build has nowhere to send a report. */
+export const REPORTS_UNAVAILABLE = "Problem reports are not available in this build, so nothing was sent.";
 const SEND_TIMEOUT_MS = 20_000;
 const ANSWER_MAX_BYTES = 16 * 1024;
 
@@ -21,8 +22,8 @@ export type SendOutcome =
   | { ok: false; retry: false; why: "refused"; detail: string };
 
 /** OMB_BUG_REPORT_URL (an https address, or http on this machine's loopback, for fixtures), else a Cloud home's own
- * Admin origin, else the staging or production Cloud. */
-export function bugReportEndpoint(env: NodeJS.ProcessEnv, cloudOrigin?: string | null): string {
+ * Admin origin, else product.json's problemReports service; null when there is none. */
+export function bugReportEndpoint(env: NodeJS.ProcessEnv, cloudOrigin?: string | null): string | null {
   const explicit = env.OMB_BUG_REPORT_URL?.trim();
   if (explicit) {
     try {
@@ -31,8 +32,8 @@ export function bugReportEndpoint(env: NodeJS.ProcessEnv, cloudOrigin?: string |
       if ((url.protocol === "https:" || loopback) && !url.username && !url.password) return url.href;
     } catch { /* not an address: the default below */ }
   }
-  const origin = cloudOrigin ?? (env.OMB_CLOUD_STAGING === "1" ? STAGING_CLOUD_ORIGIN : PRODUCTION_CLOUD_ORIGIN);
-  return `${origin.replace(/\/+$/, "")}${BUG_REPORT_PATH}`;
+  const origin = cloudOrigin ?? SERVICES.problemReports;
+  return origin ? `${origin.replace(/\/+$/, "")}${BUG_REPORT_PATH}` : null;
 }
 
 async function boundedJson(response: Response): Promise<Record<string, unknown>> {
@@ -72,7 +73,8 @@ async function post(endpoint: string, payload: DevsReportPayload, fetcher: typeo
   }
 }
 
-export const devsReportSender = (endpoint: string, fetcher: typeof fetch = fetch) => (payload: DevsReportPayload) => sendDevsReport(endpoint, payload, fetcher);
+export const devsReportSender = (endpoint: string | null, fetcher: typeof fetch = fetch) => (payload: DevsReportPayload): Promise<SendOutcome> =>
+  endpoint ? sendDevsReport(endpoint, payload, fetcher) : Promise.resolve({ ok: false, retry: false, why: "refused", detail: REPORTS_UNAVAILABLE });
 
 export async function sendDevsReport(endpoint: string, payload: DevsReportPayload, fetcher: typeof fetch = fetch): Promise<SendOutcome> {
   let answer = await post(endpoint, payload, fetcher);
@@ -137,5 +139,6 @@ export async function askReportStatus(endpoint: string, question: ReportStatusQu
   }
 }
 
-export const devsStatusAsker = (reportEndpoint: string, home: ReportStatusHome | null, fetcher: typeof fetch = fetch) =>
-  (question: ReportStatusQuestion) => askReportStatus(bugReportStatusEndpoint(reportEndpoint), question, home, fetcher);
+export const devsStatusAsker = (reportEndpoint: string | null, home: ReportStatusHome | null, fetcher: typeof fetch = fetch) =>
+  (question: ReportStatusQuestion): Promise<ReportStatusAnswer | null> =>
+    reportEndpoint ? askReportStatus(bugReportStatusEndpoint(reportEndpoint), question, home, fetcher) : Promise.resolve(null);

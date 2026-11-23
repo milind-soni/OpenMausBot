@@ -1,11 +1,12 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
-  ANNOUNCEMENT_IMAGE_PREFIX, audienceMatches, compareVersions, isAnnouncementImageUrl, isHttpsUrl, LIMITS, liveCards, localized, MAX_CARDS,
+  audienceMatches, compareVersions, isAnnouncementImageUrl, isHttpsUrl, LIMITS, liveCards, localized, MAX_CARDS,
   parseAnnouncementCard, parseAnnouncementFeed, type AnnouncementFacts,
 } from "./announcements";
 
 const NOW = Date.parse("2026-12-01T10:00:00Z");
+const PREFIX = "https://announcements.example.test/announcements/";
 const example = JSON.parse(readFileSync(new URL("../scripts/testing/fixtures/announcements.example.json", import.meta.url), "utf8")) as { cards: Record<string, unknown>[] };
 const card = (extra: Record<string, unknown> = {}) => ({
   id: "tip-one", kind: "tip", title: "A title", body: "A body.", primary: { label: "Open", action: { open: "api_keys" } }, ends: "2026-12-31T00:00:00Z", ...extra,
@@ -96,9 +97,9 @@ describe("a card", () => {
   });
 
   it("shows a picture only from this repository's announcements folder, and an install drops one it cannot read", () => {
-    expect(isAnnouncementImageUrl(`${ANNOUNCEMENT_IMAGE_PREFIX}images/phone.png`)).toBe(true);
-    for (const bad of [`${ANNOUNCEMENT_IMAGE_PREFIX}../secret.png`, `${ANNOUNCEMENT_IMAGE_PREFIX}images/x.svg`, "https://example.com/x.png",
-      `${ANNOUNCEMENT_IMAGE_PREFIX}images/x.png?track=1`, ANNOUNCEMENT_IMAGE_PREFIX.replace("https", "http") + "x.png"]) expect(isAnnouncementImageUrl(bad), bad).toBe(false);
+    expect(isAnnouncementImageUrl(`${PREFIX}images/phone.png`, PREFIX)).toBe(true);
+    for (const bad of [`${PREFIX}../secret.png`, `${PREFIX}images/x.svg`, "https://example.com/x.png",
+      `${PREFIX}images/x.png?track=1`, PREFIX.replace("https", "http") + "x.png"]) expect(isAnnouncementImageUrl(bad, PREFIX), bad).toBe(false);
     const parsed = parseAnnouncementCard(card({ image: { url: "https://example.com/tracker.png" } }));
     expect(parsed.ok && parsed.card.image).toBeUndefined();
     expect(parseAnnouncementCard(card({ image: { url: "https://example.com/tracker.png" } }), { strict: true }).ok).toBe(false);
