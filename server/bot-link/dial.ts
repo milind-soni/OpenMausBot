@@ -7,6 +7,7 @@
 // or the app says the Cloud is awake (`start`), since any request would start a sleeping Cloud; the app looks every
 // minute and never asks the Cloud itself to find out.
 import { createWriteStream, openAsBlob, rmSync } from "node:fs";
+import { stat } from "node:fs/promises";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
@@ -61,7 +62,11 @@ export function createDialer({ link, fetch: fetchImpl = fetch, log = () => {}, h
     async push(id, way, index, file) {
       const target = cloud();
       let body: Blob;
-      try { body = await openAsBlob(file.path); } catch (error) {
+      try {
+        // Node 24.0 openAsBlob() loses missing-file error codes.
+        await stat(file.path);
+        body = await openAsBlob(file.path);
+      } catch (error) {
         if (typeof error === "object" && error !== null && "code" in error && (error.code === "ENOENT" || error.code === "ENOTDIR")) throw Object.assign(error, { gone: true });
         throw error;
       }
