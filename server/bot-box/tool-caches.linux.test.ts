@@ -42,12 +42,12 @@ describe.skipIf(!available)(`tool caches in a real box (${available ? "bubblewra
 
   it("a personal Cloud's box writes each tool's cache under HOME/cache, and never sees the app's own cache folder", () => {
     const { output, env } = runInBox(home, [
-      'for d in "$npm_config_cache" "$PIP_CACHE_DIR" "$UV_CACHE_DIR" "$PLAYWRIGHT_BROWSERS_PATH" "$HF_HUB_CACHE" "$GOMODCACHE"; do mkdir -p "$d" && printf ok > "$d/probe" || echo "CANNOT-WRITE $d"; done',
+      'for d in "$npm_config_cache" "$PIP_CACHE_DIR" "$UV_CACHE_DIR" "$HF_HUB_CACHE" "$GOCACHE"; do mkdir -p "$d" && printf ok > "$d/probe" || echo "CANNOT-WRITE $d"; done',
       `cat "${join(dataDir, "cache", "node-compile", "entry")}" 2>/dev/null || echo APP-CACHE-HIDDEN`,
     ].join("\n"));
     expect(output).not.toContain("CANNOT-WRITE");
     expect(output).toContain("APP-CACHE-HIDDEN");
-    for (const name of ["npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR", "PLAYWRIGHT_BROWSERS_PATH", "HF_HUB_CACHE", "GOMODCACHE"]) {
+    for (const name of ["npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR", "HF_HUB_CACHE", "GOCACHE"]) {
       expect(env[name]!.startsWith(join(home, "cache"))).toBe(true);
       expect(readFileSync(join(env[name]!, "probe"), "utf8")).toBe("ok");
     }

@@ -68,7 +68,7 @@ describe("storage categories", () => {
       ["Synced/Desktop/a.txt", "synced"], [".local/share/Trash/files/x", "trash"],
       ["lost+found/x", "other"], ["acme-merger/plan.md", "other"], [".local/lib/x", "other"],
       // The tools' cache folder (bot-box/tool-caches.ts): its own folders only; a token or a bot's file there is not a cache.
-      ["cache/npm/_cacache/x", "caches"], ["cache/ms-playwright/chromium-1/chrome", "caches"], ["cache/go-mod/m@v1/f.go", "caches"],
+      ["cache/npm/_cacache/x", "caches"], ["cache/go-build/00/a-d", "caches"], ["cache/ms-playwright/chromium-1/chrome", "other"],
       ["cache/huggingface/hub/models--o--m/x", "caches"], ["cache/huggingface/token", "other"], ["cache/my-notes.md", "other"],
     ];
     for (const [path, expected] of cases) expect([path, category("home", path)]).toEqual([path, expected]);

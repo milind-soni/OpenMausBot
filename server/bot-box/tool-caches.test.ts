@@ -1,11 +1,11 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { BotBox, BoxRunner, BOX_EGRESS_PORT } from "./box.ts";
 import { visibleInBox } from "./plan.ts";
-import { TOOL_CACHES, toolCacheEnvironment, toolCacheRoot, toolCachesOn } from "./tool-caches.ts";
+import { CACHE_TAG, CACHE_TAG_FILE, TOOL_CACHES, ensureToolCacheRoot, hasCacheTag, toolCacheEnvironment, toolCacheRoot, toolCachesOn } from "./tool-caches.ts";
 import { engineInstallRoots } from "../engine-roots.ts";
 import { memberAudience } from "../audience.ts";
 import { audienceHome } from "../engine-homes/layout.ts";
@@ -14,7 +14,9 @@ const bridge = { socat: "/usr/bin/socat", bridgeScript: "/app/dist-server/bot-bo
 const dataDir = "/data/.openmausbot", home = "/data";
 const setup = { dataDir, home, codeRoots: ["/app"], engineRoots: engineInstallRoots(dataDir), bridges: [{ name: "egress", port: BOX_EGRESS_PORT, socket: "/data/.openmausbot/box/egress.sock" }] };
 const turn = { command: "/usr/local/bin/claude", args: ["-p"], cwd: join(dataDir, "task-workspaces", "b1", "t1"), env: { PATH: "/usr/bin", HOME: home, ANTHROPIC_API_KEY: "k" } };
-const runner = (toolCaches?: boolean) => new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup, denyEnv: new Set(), ...(toolCaches === undefined ? {} : { toolCaches }) });
+// The cache folder is made on a real disk only in the BotBox.start tests below; here every HOME's is the server's.
+const runner = (toolCaches?: boolean, cacheRoot: (root: string) => boolean | null = () => true) =>
+  new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup, denyEnv: new Set(), cacheRoot, ...(toolCaches === undefined ? {} : { toolCaches }) });
 const cacheNames = TOOL_CACHES.map((cache) => cache.name);
 
 describe("the switch", () => {
@@ -42,29 +44,60 @@ describe("a box's environment", () => {
     expect(runner(false).wrap(turn).args).toEqual(runner().wrap(turn).args);
   });
 
+  it("off, the cache folder is never looked at or made", () => {
+    const asked: string[] = [];
+    for (const toolCaches of [undefined, false]) runner(toolCaches, (root) => { asked.push(root); return true; }).wrap(turn);
+    expect(asked).toEqual([]);
+  });
+
+  it("the bubblewrap arguments are the same with the switch on or off: no mount is added, a personal or a Team HOME", () => {
+    const member = audienceHome(dataDir, memberAudience("ana@example.com"));
+    for (const request of [turn, { ...turn, home: member, env: { ...turn.env, HOME: member } }]) {
+      const on = runner(true).wrap(request), off = runner(false).wrap(request);
+      expect(on.env.npm_config_cache).toBeDefined();
+      expect(on.args).toEqual(off.args);
+      expect(on.plan).toEqual(off.plan);
+    }
+  });
+
+  it("on, a HOME whose cache folder the server did not make keeps every tool's own place; each folder is asked once", () => {
+    const asked: string[] = [];
+    const theirs = runner(true, (root) => { asked.push(root); return false; });
+    for (let i = 0; i < 3; i++) for (const name of cacheNames) expect(theirs.wrap(turn).env[name], name).toBeUndefined();
+    expect(asked).toEqual([toolCacheRoot(home)]);
+    // A HOME that is not there yet is asked again on the next spawn, not given up on.
+    let ready: boolean | null = null;
+    const later = runner(true, () => ready);
+    expect(later.wrap(turn).env.npm_config_cache).toBeUndefined();
+    ready = true;
+    expect(later.wrap(turn).env.npm_config_cache).toBe(join(toolCacheRoot(home), "npm"));
+  });
+
   it("on, every cache variable names its folder in the box HOME's cache folder", () => {
     const env = runner(true).wrap(turn).env;
     const root = toolCacheRoot(home);
     expect(root).toBe(join(resolve(home), "cache"));
     expect(env).toMatchObject({
       npm_config_cache: join(root, "npm"), PIP_CACHE_DIR: join(root, "pip"), UV_CACHE_DIR: join(root, "uv"),
-      PLAYWRIGHT_BROWSERS_PATH: join(root, "ms-playwright"), PUPPETEER_CACHE_DIR: join(root, "puppeteer"),
       HF_HUB_CACHE: join(root, "huggingface", "hub"), HF_XET_CACHE: join(root, "huggingface", "xet"),
-      BUN_INSTALL_CACHE_DIR: join(root, "bun"), COREPACK_HOME: join(root, "corepack"), GOCACHE: join(root, "go-build"), GOMODCACHE: join(root, "go-mod"),
+      BUN_INSTALL_CACHE_DIR: join(root, "bun"), COREPACK_HOME: join(root, "corepack"), GOCACHE: join(root, "go-build"),
     });
+    expect(Object.keys(env).filter((name) => cacheNames.includes(name)).sort()).toEqual([...cacheNames].sort());
     for (const name of cacheNames) expect(env[name], name).toBeDefined();
     // Nothing that holds a sign-in or installed programs is moved.
-    for (const name of ["XDG_CACHE_HOME", "HF_HOME", "CARGO_HOME", "GRADLE_USER_HOME", "PNPM_HOME", "UV_TOOL_DIR", "UV_PYTHON_INSTALL_DIR", "npm_config_store_dir"]) expect(env[name], name).toBeUndefined();
+    // Nor a browser (a Playwright MCP profile may sit beside its builds; a project's .puppeteerrc names its own), nor Go's
+    // module cache (a project may build offline from it).
+    for (const name of ["XDG_CACHE_HOME", "HF_HOME", "CARGO_HOME", "GRADLE_USER_HOME", "PNPM_HOME", "UV_TOOL_DIR", "UV_PYTHON_INSTALL_DIR", "npm_config_store_dir", "PLAYWRIGHT_BROWSERS_PATH", "PUPPETEER_CACHE_DIR", "GOMODCACHE", "GOPATH"]) expect(env[name], name).toBeUndefined();
     expect(env.HOME).toBe(home);
   });
 
   it("on, the person's own value wins: one the engine's saved settings pass in, npm's in any letter case", () => {
     const env = runner(true).wrap({
-      ...turn, env: { ...turn.env, UV_CACHE_DIR: "/data/my-uv", NPM_CONFIG_CACHE: "/data/my-npm", PLAYWRIGHT_BROWSERS_PATH: "/data/pw" },
-      allowEnv: ["UV_CACHE_DIR", "PLAYWRIGHT_BROWSERS_PATH"],
+      ...turn, env: { ...turn.env, UV_CACHE_DIR: "/data/my-uv", NPM_CONFIG_CACHE: "/data/my-npm", HF_HUB_CACHE: "/data/hf-hub" },
+      allowEnv: ["UV_CACHE_DIR", "HF_HUB_CACHE"],
     }).env;
     expect(env.UV_CACHE_DIR).toBe("/data/my-uv");
-    expect(env.PLAYWRIGHT_BROWSERS_PATH).toBe("/data/pw");
+    expect(env.HF_HUB_CACHE).toBe("/data/hf-hub");
     expect(env.NPM_CONFIG_CACHE).toBe("/data/my-npm");
     expect(env.npm_config_cache).toBeUndefined();
     expect(env.PIP_CACHE_DIR).toBe(join(toolCacheRoot(home), "pip"));
@@ -72,9 +105,8 @@ describe("a box's environment", () => {
 
   it("on, a variable that already decides a cache's place leaves that cache alone", () => {
     const env = runner(true).wrap({ ...turn, env: { ...turn.env, XDG_CACHE_HOME: "/data/xdg", HF_HOME: "/data/hf", GOPATH: "/data/go", BUN_INSTALL: "/data/.bun" }, allowEnv: ["HF_HOME", "GOPATH", "BUN_INSTALL"] }).env;
-    for (const name of ["PIP_CACHE_DIR", "UV_CACHE_DIR", "PLAYWRIGHT_BROWSERS_PATH", "HF_HUB_CACHE", "HF_XET_CACHE", "BUN_INSTALL_CACHE_DIR", "COREPACK_HOME", "GOCACHE", "GOMODCACHE"]) expect(env[name], name).toBeUndefined();
+    for (const name of ["PIP_CACHE_DIR", "UV_CACHE_DIR", "HF_HUB_CACHE", "HF_XET_CACHE", "BUN_INSTALL_CACHE_DIR", "COREPACK_HOME", "GOCACHE"]) expect(env[name], name).toBeUndefined();
     expect(env.npm_config_cache).toBe(join(toolCacheRoot(home), "npm"));
-    expect(env.PUPPETEER_CACHE_DIR).toBe(join(toolCacheRoot(home), "puppeteer"));
   });
 
   it("on, a value the spawn was handed wins even where the allow-list would drop it: an engine's own environment that does not vouch", () => {
@@ -143,11 +175,52 @@ describe.skipIf(process.platform === "win32")("BotBox.start", () => {
   it("reads the switch from the server's environment: a Cloud home with it on adds the variables and says so once", async () => {
     const on = await started({ OMB_CLOUD_ROLE: "home", OMB_CACHE_ROOT: "on" });
     expect(on.wrapped.env.npm_config_cache).toBe(join(on.root, "cache", "npm"));
+    // The folder is made on the first spawn, with the server's mark.
+    expect(readFileSync(join(on.root, "cache", CACHE_TAG_FILE), "utf8")).toBe(CACHE_TAG);
     expect(on.lines).toContain("bot box: tool caches go to the cache folder in each box's HOME (OMB_CACHE_ROOT)");
     for (const env of [{}, { OMB_CLOUD_ROLE: "home" }, { OMB_CACHE_ROOT: "on" }] as Record<string, string>[]) {
       const off = await started(env);
       for (const name of cacheNames) expect(off.wrapped.env[name], `${JSON.stringify(env)} ${name}`).toBeUndefined();
       expect(off.lines.some((line) => line.includes("tool caches"))).toBe(false);
+      expect(existsSync(join(off.root, "cache"))).toBe(false);
     }
+  });
+});
+
+describe("the cache folder the server makes", () => {
+  const dirs: string[] = [];
+  afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+  const scratch = () => { const dir = mkdtempSync(join(tmpdir(), "omb-cache-root-")); dirs.push(dir); return dir; };
+
+  it("is made and marked when HOME has none, and is the server's on every later start", () => {
+    const home = scratch(), root = toolCacheRoot(home);
+    expect(ensureToolCacheRoot(root)).toBe(true);
+    expect(readFileSync(join(root, CACHE_TAG_FILE), "utf8")).toBe(CACHE_TAG);
+    expect(hasCacheTag(root)).toBe(true);
+    expect(ensureToolCacheRoot(root)).toBe(true);
+  });
+
+  it("a cache folder the person made stays theirs: nothing is written in it, even a CACHEDIR.TAG of another tool", () => {
+    const home = scratch(), root = toolCacheRoot(home);
+    mkdirSync(root);
+    writeFileSync(join(root, "notes.md"), "mine");
+    expect(ensureToolCacheRoot(root)).toBe(false);
+    expect(existsSync(join(root, CACHE_TAG_FILE))).toBe(false);
+    writeFileSync(join(root, CACHE_TAG_FILE), "Signature: 8a477f597d28d172789f06886806bc55\n");
+    expect(ensureToolCacheRoot(root)).toBe(false);
+    expect(readFileSync(join(root, "notes.md"), "utf8")).toBe("mine");
+  });
+
+  it("a HOME that is not there yet is neither made nor given up on", () => {
+    const missing = join(scratch(), "not-yet");
+    expect(ensureToolCacheRoot(toolCacheRoot(missing))).toBeNull();
+    expect(existsSync(missing)).toBe(false);
+  });
+
+  it.skipIf(process.platform === "win32")("a link named cache is never the server's, wherever it points", () => {
+    const home = scratch(), elsewhere = join(home, "elsewhere");
+    expect(ensureToolCacheRoot(join(elsewhere))).toBe(true);
+    symlinkSync(elsewhere, toolCacheRoot(home));
+    expect(ensureToolCacheRoot(toolCacheRoot(home))).toBe(false);
   });
 });

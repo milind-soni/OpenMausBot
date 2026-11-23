@@ -1,14 +1,21 @@
 // Tool caches on a Cloud home (docs/bot-box.md, "Tool caches"). With OMB_CACHE_ROOT on, what a bot's tools download again
-// whenever it is missing (npm's and pip's packages, uv's wheels, Playwright's browsers, Hugging Face models, …) goes into
-// one folder, `cache` in the box's HOME, through each tool's own variable, so "never back up, cap, clean" becomes one rule
-// for one folder. The box's HOME is /data on a personal Cloud and the audience's own engine home on a Team Cloud
-// (server/engine-homes), so the folder is shared exactly as ~/.npm and ~/.cache already are, never across audiences.
+// whenever it is missing (npm's and pip's packages, uv's wheels, Hugging Face models, …) goes into one folder, `cache` in
+// the box's HOME, through each tool's own variable, so "never back up, cap, clean" becomes one rule for one folder. The
+// box's HOME is /data on a personal Cloud and the audience's own engine home on a Team Cloud (server/engine-homes), so the
+// folder is shared exactly as ~/.npm and ~/.cache already are, never across audiences.
 //
 // Only pure download caches move. Left alone on purpose: a variable whose folder also holds sign-ins, tokens, settings or
 // installed programs (HF_HOME and XDG_CACHE_HOME, where Hugging Face keeps its login token; CARGO_HOME; GRADLE_USER_HOME;
 // PNPM_HOME; UV_TOOL_DIR and UV_PYTHON_INSTALL_DIR, which venvs and ~/.local/bin point into), and pnpm's store, which a
 // project's node_modules records (pnpm then refuses to install until node_modules is removed) and whose only variable,
-// npm_config_store_dir, makes every npm command warn.
+// npm_config_store_dir, makes every npm command warn. Also left alone: PLAYWRIGHT_BROWSERS_PATH (older Playwright MCP builds
+// keep the browser profile, with its cookies and site sign-ins, in that folder), PUPPETEER_CACHE_DIR (it beats a project's
+// .puppeteerrc, so a project keeping Chrome in its own folder stops finding it) and GOMODCACHE (it beats `go env -w`, and a
+// project building offline from its module cache would fail).
+//
+// The folder is used only when the server made it (ensureToolCacheRoot): it is marked with a CACHEDIR.TAG, and a `cache`
+// folder already in HOME without that mark is the person's own, so for that HOME nothing is routed into it.
+import { lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { cloudRole } from "./detect.ts";
@@ -19,6 +26,11 @@ export const CACHE_ROOT_SWITCH = "OMB_CACHE_ROOT";
 /** The folder in the box's HOME that the tools' caches go to. */
 export const TOOL_CACHE_DIR = "cache";
 
+/** The mark the server leaves in a cache folder it made (https://bford.info/cachedir/): backup tools skip a tagged folder,
+ * and the cache cap (server/cache-sweep) works only in a folder with exactly this text. */
+export const CACHE_TAG_FILE = "CACHEDIR.TAG";
+export const CACHE_TAG = "Signature: 8a477f597d28d172789f06886806bc55\n# Made by OpenMausBot for its bots' tool caches (OMB_CACHE_ROOT). Everything here is downloaded again when missing.\n";
+
 export interface ToolCache {
   /** The tool's own variable. */
   name: string;
@@ -28,24 +40,23 @@ export interface ToolCache {
   yieldsTo: readonly string[];
 }
 
-/** Every cache this moves, each a folder only the tool's own downloads are in. */
+/** Every cache this moves, each a folder only the tool's own downloads are in. A variable here beats the tool's config files
+ * (docs/bot-box.md says which): what that costs is a download again, never a sign-in or a project's own files. */
 export const TOOL_CACHES: readonly ToolCache[] = [
   // npm reads its config from the environment in any letter case; npx keeps its packages in the same cache (_npx).
   { name: "npm_config_cache", folder: "npm", yieldsTo: [] },
   { name: "PIP_CACHE_DIR", folder: "pip", yieldsTo: ["XDG_CACHE_HOME"] },
   // uv's wheels and source builds only; the Pythons and tools it installs stay where venvs and ~/.local/bin find them.
   { name: "UV_CACHE_DIR", folder: "uv", yieldsTo: ["XDG_CACHE_HOME"] },
-  { name: "PLAYWRIGHT_BROWSERS_PATH", folder: "ms-playwright", yieldsTo: ["XDG_CACHE_HOME"] },
-  // Puppeteer's default is ~/.cache/puppeteer whatever XDG_CACHE_HOME says.
-  { name: "PUPPETEER_CACHE_DIR", folder: "puppeteer", yieldsTo: [] },
   // The models and datasets' files only: HF_HOME, which holds the login token, is never set here.
   { name: "HF_HUB_CACHE", folder: "huggingface/hub", yieldsTo: ["HF_HOME", "HUGGINGFACE_HUB_CACHE", "XDG_CACHE_HOME"] },
   { name: "HF_XET_CACHE", folder: "huggingface/xet", yieldsTo: ["HF_HOME", "XDG_CACHE_HOME"] },
-  { name: "BUN_INSTALL_CACHE_DIR", folder: "bun", yieldsTo: ["BUN_INSTALL"] },
+  // bun's default follows BUN_INSTALL, then XDG_CACHE_HOME.
+  { name: "BUN_INSTALL_CACHE_DIR", folder: "bun", yieldsTo: ["BUN_INSTALL", "XDG_CACHE_HOME"] },
   // The package managers' own copies corepack downloads.
   { name: "COREPACK_HOME", folder: "corepack", yieldsTo: ["XDG_CACHE_HOME"] },
+  // Go's build cache only, which Go never needs to build: a missing entry is compiled again.
   { name: "GOCACHE", folder: "go-build", yieldsTo: ["XDG_CACHE_HOME"] },
-  { name: "GOMODCACHE", folder: "go-mod", yieldsTo: ["GOPATH"] },
 ];
 
 const ON = new Set(["1", "on", "true", "yes"]);
@@ -58,6 +69,37 @@ export function toolCachesOn(env: Record<string, string | undefined>): boolean {
 /** The cache folder of a box whose HOME is `home`. */
 export function toolCacheRoot(home: string): string {
   return join(resolve(home), TOOL_CACHE_DIR);
+}
+
+const code = (error: unknown) => (error as NodeJS.ErrnoException)?.code ?? "";
+
+/** Whether `root` is a real folder (not a link) holding the server's own CACHEDIR.TAG. */
+export function hasCacheTag(root: string): boolean {
+  try {
+    if (!lstatSync(root).isDirectory()) return false;
+    const tag = join(root, CACHE_TAG_FILE);
+    return lstatSync(tag).isFile() && readFileSync(tag, "utf8") === CACHE_TAG;
+  } catch {
+    return false;
+  }
+}
+
+/** Makes the cache folder `root` when HOME has none, and marks it. True: the folder is the server's (made now, or marked by
+ * an earlier start). False: a `cache` the server did not make is there, so it is left alone. Null: it could not be made
+ * now (HOME missing): ask again on the next spawn. Never deletes or changes anything already there. */
+export function ensureToolCacheRoot(root: string): boolean | null {
+  try {
+    mkdirSync(root, { mode: 0o755 });
+  } catch (error) {
+    if (code(error) === "EEXIST") return hasCacheTag(root);
+    return null;
+  }
+  try {
+    writeFileSync(join(root, CACHE_TAG_FILE), CACHE_TAG, { flag: "wx", mode: 0o644 });
+    return true;
+  } catch {
+    return hasCacheTag(root);
+  }
 }
 
 const named = (env: Readonly<Record<string, string | undefined>>) =>
