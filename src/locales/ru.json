@@ -7198,6 +7198,8 @@
   "skillBurger.layer.write": "Записать {name}",
   "skillBurger.layer.open": "Открыть {site}",
   "skillBurger.layer.readFrom": "Прочитать из {app}",
+  "skillBurger.layer.onVm": "{step} · на облачном компьютере",
+  "skillBurger.layer.onYourComputer": "{step} · на вашем компьютере",
   "skillBurger.list.title": "Skill Burgers",
   "skillBurger.list.empty": "Добавьте его с карточки, когда бот закончит работу.",
   "skillBurger.list.remove": "Удалить {name}",

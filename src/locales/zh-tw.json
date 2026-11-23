@@ -10233,6 +10233,8 @@
   "skillBurger.layer.write": "寫入 {name}",
   "skillBurger.layer.open": "開啟 {site}",
   "skillBurger.layer.readFrom": "從 {app} 讀取",
+  "skillBurger.layer.onVm": "{step} · 在雲端電腦上",
+  "skillBurger.layer.onYourComputer": "{step} · 在你的電腦上",
   "skillBurger.list.title": "Skill Burgers",
   "skillBurger.list.empty": "機器人完成工作後，從卡片加入。",
   "skillBurger.list.remove": "移除 {name}",

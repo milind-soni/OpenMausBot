@@ -18,6 +18,8 @@ const MASKED = /••••••|«redacted \d+ chars»/;
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const capital = (words: string) => (words ? words[0]!.toUpperCase() + words.slice(1) : words);
 
+const PLACE_WORDS: Partial<Record<BurgerLayer["where"], string>> = { vm: "on the cloud computer", yourComputer: "on the person's own computer", browser: "in the browser" };
+
 /** The line a layer gets: an app's action, "Run git push", "Write notes.md", "Open example.com". */
 export function layerLabel(layer: Pick<BurgerLayer, "kind" | "words" | "app">): string {
   if (layer.kind === "app" && layer.app && BARE_READ.test(layer.words)) return `Read from ${appMeta(layer.app).label}`;
@@ -154,10 +156,11 @@ class Drafter {
 
   private ai(id: string, layer: BurgerLayer, label: string): WorkflowStep {
     const call = layer.args ? redactSecretsInText(JSON.stringify(layer.args)).slice(0, CONTEXT_MAX) : "";
-    const where = layer.kind === "app" && layer.app ? `${appMeta(layer.app).label} ` : "";
+    const where = layer.kind === "app" && layer.app ? `in ${appMeta(layer.app).label}` : PLACE_WORDS[layer.where] ?? "";
+    const desktop = layer.kind === "computer" ? " Look at the screen first: it may not look the same as last time." : "";
     return {
       id, kind: "ai", deterministic: false, label,
-      prompt: `Do this step again: ${label}${where ? ` in ${where.trim()}` : ""}.${call ? ` Last time the call was ${layer.tool} with ${call}` : ""}`.slice(0, 4_000),
+      prompt: `Do this step again: ${label}${where ? ` ${where}` : ""}.${desktop}${call ? ` Last time the call was ${layer.tool} with ${call}` : ""}`.slice(0, 4_000),
     };
   }
 
@@ -184,6 +187,8 @@ class Drafter {
     } else {
       this.steps.push(this.ai(id, layer, label));
     }
+    const step = this.steps[this.steps.length - 1];
+    if (step && step.id === id) step.where = layer.where;
     this.recorded.push({ id, output: parsedOutput(layer), read: layer.read });
   }
 }

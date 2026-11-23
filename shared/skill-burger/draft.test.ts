@@ -14,6 +14,53 @@ const tool = (name: string, input: unknown, extra: Partial<NonNullable<RunMessag
 const multi = (slug: string, args: unknown, output?: unknown) =>
   tool("mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL", { tools: [{ tool_slug: slug, arguments: args }] }, output === undefined ? {} : { output: JSON.stringify(output) });
 
+describe("where each step ran", () => {
+  it("marks apps, the browser, the bot's own commands, the cloud computer and the person's computer", () => {
+    const run = [
+      ask("Archive the report and post it"),
+      multi("GMAIL_SEND_EMAIL", { recipient_email: "priya@example.com", subject: "Report" }),
+      tool("mcp__browser__browser_navigate", { url: "https://example.com/report" }),
+      tool("Bash", { command: "cp report.csv archive/report.csv" }, { summary: "cp report.csv archive/report.csv" }),
+      tool("mcp__agents__vm_exec", { command: "python3 make_report.py" }),
+      tool("mcp__computer__exec", { command: "mkdir -p /home/cua/out" }),
+      tool("mcp__computer__open_url", { url: "https://sheets.example.com/x" }),
+      tool("mcp__localComputer__click", { x: 10, y: 20 }),
+    ];
+    expect(burgerLayers(run).map((layer) => [layer.kind, layer.where])).toEqual([
+      ["app", "app"], ["browser", "browser"], ["shell", "bot"], ["shell", "vm"], ["shell", "vm"], ["browser", "vm"], ["computer", "yourComputer"],
+    ]);
+  });
+
+  it("drops looks at a desktop, and joins its clicks and typing into one step the AI does again", () => {
+    const run = [
+      ask("Fill the form on the cloud computer"),
+      tool("mcp__computer__screenshot", {}),
+      tool("mcp__computer__click", { x: 100, y: 200 }),
+      tool("mcp__computer__type_text", { text: "Acme Ltd" }),
+      tool("mcp__computer__key_press", { key: "Return" }),
+      tool("mcp__computer__screenshot", {}),
+      multi("GMAIL_SEND_EMAIL", { recipient_email: "priya@example.com", subject: "Done" }),
+    ];
+    const layers = burgerLayers(run);
+    expect(layers.map((layer) => [layer.kind, layer.where, layer.words])).toEqual([
+      ["computer", "vm", "click, type text, key press"], ["app", "app", "send email"],
+    ]);
+    expect(layers[0]!.replay).toBe("ai");
+    expect((layers[0]!.args as { actions: unknown[] }).actions).toHaveLength(3);
+    const { workflow } = draftWorkflow(run)!;
+    expect(workflow.steps[0]).toMatchObject({ kind: "ai", where: "vm" });
+    expect((workflow.steps[0] as { prompt: string }).prompt).toContain("on the cloud computer");
+    expect(workflowSchema.safeParse(workflow).success).toBe(true);
+    expect(renderWorkflowSkillMd("fill-form", workflow)).toContain("on the cloud computer");
+  });
+
+  it("saves a cloud computer command to run there again, exactly", () => {
+    const run = [ask("Make the report"), tool("mcp__computer__exec", { command: "python3 make_report.py" }), tool("Bash", { command: "cp out.pdf ~/Reports/" }, { summary: "cp out.pdf ~/Reports/" })];
+    const { workflow } = draftWorkflow(run)!;
+    expect(workflow.steps.map((step) => [step.kind, step.where])).toEqual([["shell", "vm"], ["shell", "bot"]]);
+  });
+});
+
 describe("burger layers", () => {
   it("keeps real steps and drops looking around, tool searches and replaced failures", () => {
     const run = [

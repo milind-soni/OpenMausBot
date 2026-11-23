@@ -7673,6 +7673,8 @@
   "skillBurger.layer.write": "{name} 쓰기",
   "skillBurger.layer.open": "{site} 열기",
   "skillBurger.layer.readFrom": "{app}에서 읽기",
+  "skillBurger.layer.onVm": "{step} · 클라우드 컴퓨터에서",
+  "skillBurger.layer.onYourComputer": "{step} · 내 컴퓨터에서",
   "skillBurger.list.title": "Skill Burgers",
   "skillBurger.list.empty": "봇이 일을 마치면 카드에서 추가하세요.",
   "skillBurger.list.remove": "{name} 제거",

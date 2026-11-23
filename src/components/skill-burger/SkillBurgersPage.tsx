@@ -70,7 +70,7 @@ function BurgerCard({ skill, onRemove }: { skill: SavedWorkflow; onRemove: () =>
               </span>
             )}
             items={[
-              { key: "rename", label: t("skillBurger.menu.rename"), icon: <Pencil size={16} />, onSelect: () => setRenaming(skill.name) },
+              ...(advanced ? [{ key: "rename", label: t("skillBurger.menu.rename"), icon: <Pencil size={16} />, onSelect: () => setRenaming(skill.name) }] : []),
               { key: "delete", label: t("common.delete"), icon: <Trash2 size={16} />, onSelect: onRemove },
             ]}
           />

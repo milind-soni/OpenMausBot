@@ -8,7 +8,9 @@ import { parseRunCommand } from "../run-command.ts";
 import { nameIsCommand } from "../tool-name.ts";
 import { PLAIN_APP_TOOL } from "./apps.ts";
 
-export type LayerKind = "shell" | "app" | "browser" | "file" | "ai";
+export type LayerKind = "shell" | "app" | "browser" | "file" | "computer" | "ai";
+/** Where a step happens: a connected app, the browser, the bot's own computer, a cloud computer (VM), or the person's own computer. */
+export type LayerWhere = "app" | "browser" | "bot" | "vm" | "yourComputer";
 export type LayerStatus = "running" | "done" | "failed";
 
 /** The few message fields a run is read from: the same on the client and the server. */
@@ -34,6 +36,8 @@ export interface BurgerLayer {
   status: LayerStatus;
   /** A read: it fetched something and changed nothing. */
   read: boolean;
+  /** Where it ran, so a replay runs it in the same place. */
+  where: LayerWhere;
   /** Exact replays without AI; `ai` means the recorded call can't be repeated as is. */
   replay: "exact" | "ai";
   /** The parsed call: app arguments, {command, cwd}, {path, content} or {url}. */
@@ -49,7 +53,11 @@ const READ_WORDS = /^(?:batch |bulk )?(?:get|list|fetch|search|read|find|query|l
 const APP_SLUG = /^[A-Z][A-Z0-9]*_[A-Z0-9_]+$/;
 const TWO_WORD_APPS = new Set(["MICROSOFT_TEAMS", "GOOGLE_DRIVE", "GOOGLE_DOCS", "GOOGLE_SHEETS", "GOOGLE_CALENDAR", "ZOHO_MAIL", "ZOHO_CRM"]);
 /** The app's own servers: coordination, computers, memory. Never a layer. */
-const OWN_SERVERS = new Set(["agents", "computer", "localComputer", "phone", "device", "dweb", "ogb", "data", "memory", "permission"]);
+const OWN_SERVERS = new Set(["agents", "phone", "device", "dweb", "ogb", "data", "memory", "permission"]);
+/** A desktop the bot drives: its cloud computer, or the person's own computer. */
+const COMPUTER_SERVERS: Record<string, LayerWhere> = { computer: "vm", localComputer: "yourComputer" };
+/** Looking at a desktop changes nothing: never a layer. */
+const COMPUTER_LOOK = /^(?:screenshot|get_screen_size|exec_status|move|wait|zoom|cursor_position|list_[a-z_]+|read_[a-z_]+|get_[a-z_]+)$/;
 const FILE_WRITE = new Set(["Write", "write_file", "create_file"]);
 const FILE_EDIT = new Set(["Edit", "MultiEdit", "NotebookEdit", "edit", "apply_patch", "str_replace_based_edit_tool"]);
 const BROWSER_OPEN = /(?:^|_)(?:navigate|open|open_url|goto|tab_new)$/;
@@ -87,7 +95,7 @@ function splitName(name: string): { server: string | null; bare: string } {
   return { server, bare: rest.join("__") };
 }
 
-function appLayer(base: Omit<BurgerLayer, "kind" | "app" | "tool" | "words" | "read" | "replay" | "args">, slug: string, args: unknown, clipped: boolean, account?: string): BurgerLayer | null {
+function appLayer(base: Omit<BurgerLayer, "kind" | "app" | "tool" | "words" | "read" | "replay" | "args" | "where">, slug: string, args: unknown, clipped: boolean, account?: string): RawLayer | null {
   if (APP_META_TOOL.test(slug)) return null;
   const { app, words } = slugParts(slug);
   const code = APP_CODE_TOOL.test(slug);
@@ -100,6 +108,22 @@ function appLayer(base: Omit<BurgerLayer, "kind" | "app" | "tool" | "words" | "r
 
 /** The layers one tool message stands for: none, one, or one per app of a multi-app call. */
 export function layersOf(message: RunMessage, live: ReadonlySet<string> = new Set()): BurgerLayer[] {
+  const { server, bare } = splitName(message.tool?.name ?? "");
+  return layersIn(message, live).map((layer) => ({ ...layer, where: layer.where ?? whereOf(layer, server, bare) }));
+}
+
+/** Where a layer ran, when its kind says it: an app, the browser, a VM command, or else the bot's own computer. */
+function whereOf(layer: Omit<BurgerLayer, "where"> & { where?: LayerWhere }, server: string | null, bare: string): LayerWhere {
+  if (layer.kind === "app") return "app";
+  if (layer.kind === "browser" || /browser/i.test(server ?? "") || /^(?:agent_)?browser_/.test(bare)) return "browser";
+  if (bare === "vm_exec") return "vm";
+  if (layer.kind === "ai" && layer.tool.startsWith("COMPOSIO_")) return "app";
+  return "bot";
+}
+
+type RawLayer = Omit<BurgerLayer, "where"> & { where?: LayerWhere };
+
+function layersIn(message: RunMessage, live: ReadonlySet<string>): RawLayer[] {
   const tool = message.tool;
   if (message.kind !== "activity" || !tool?.name) return [];
   const status: LayerStatus = tool.ok === false ? "failed" : tool.ok === undefined && live.has(message.id) ? "running" : "done";
@@ -107,7 +131,30 @@ export function layersOf(message: RunMessage, live: ReadonlySet<string> = new Se
   const input = parse(tool.input);
   const clipped = Boolean(tool.input && CLIPPED.test(tool.input));
   const { server, bare } = splitName(tool.name);
-  if (server && OWN_SERVERS.has(server) && bare !== "vm_exec") return [];
+  const desk = server ? COMPUTER_SERVERS[server] : undefined;
+  if (desk) {
+    if (COMPUTER_LOOK.test(bare)) return [];
+    if (bare === "exec" || bare === "run_command") {
+      const full = text(input?.command);
+      if (!full || !parseRunCommand(full)) return [];
+      return [{ ...base, id: message.id, kind: "shell", where: desk, tool: `${server}.exec`, words: shellLine(full), read: false, replay: clipped ? "ai" : "exact", args: { command: full } }];
+    }
+    const url = text(input?.url);
+    if (bare === "open_url" && url) {
+      let host = url;
+      try { host = new URL(url).host || url; } catch { /* keep the text */ }
+      return [{ ...base, id: message.id, kind: "browser", where: desk, tool: `${server}.open_url`, words: host, read: false, replay: clipped ? "ai" : "exact", args: { url } }];
+    }
+    // Clicks, typing, keys, scrolls and drags on a desktop: done again by the AI, which looks at the screen first.
+    return [{ ...base, id: message.id, kind: "computer", where: desk, tool: `${server}.${bare}`, words: sentence(bare), read: false, replay: "ai", ...(input ? { args: input } : {}) }];
+  }
+  if (bare === "vm_exec") {
+    // A command on the bot's own VM or VPS desktop.
+    const full = text(input?.command);
+    if (!full || !parseRunCommand(full)) return [];
+    return [{ ...base, id: message.id, kind: "shell", where: "vm", tool: "vm_exec", words: shellLine(full), read: false, replay: clipped ? "ai" : "exact", args: { command: full } }];
+  }
+  if (server && OWN_SERVERS.has(server)) return [];
 
   if (bare === MULTI_EXECUTE) {
     const calls = connectorCallsIn(MULTI_EXECUTE, input ?? {});
@@ -181,12 +228,26 @@ function shellLine(command: string): string {
   return line.length > 60 ? `${line.slice(0, 59)}…` : line;
 }
 
-const sameStep = (a: BurgerLayer, b: BurgerLayer) => a.kind === b.kind && a.tool === b.tool && (a.app ?? "") === (b.app ?? "");
+const sameStep = (a: BurgerLayer, b: BurgerLayer) => a.kind === b.kind && a.tool === b.tool && (a.app ?? "") === (b.app ?? "") && a.where === b.where;
+
+/** Desktop actions in a row on one computer are one layer: "click, type text, key press", done again by the AI. */
+function joinDesktop(layers: BurgerLayer[]): BurgerLayer[] {
+  const out: BurgerLayer[] = [];
+  for (const layer of layers) {
+    const last = out[out.length - 1];
+    if (layer.kind === "computer" && last?.kind === "computer" && last.where === layer.where && last.status !== "failed" && layer.status !== "failed") {
+      const actions = [...(Array.isArray(last.args?.actions) ? last.args.actions as unknown[] : [{ tool: last.tool, ...last.args }]), { tool: layer.tool, ...layer.args }];
+      const words = [...new Set([...last.words.split(", "), layer.words])].join(", ");
+      out[out.length - 1] = { ...last, id: layer.id, status: layer.status, words, args: { actions } };
+    } else out.push(layer);
+  }
+  return out;
+}
 
 /** The run since the person's last ask, as layers. */
 export function burgerLayers(messages: readonly RunMessage[], live: ReadonlySet<string> = new Set()): BurgerLayer[] {
   const layers = messages.slice(askIndex(messages) + 1).flatMap((message) => layersOf(message, live));
-  return layers.filter((layer, index) => layer.status !== "failed" || !layers.slice(index + 1).some((later) => later.status !== "failed" && sameStep(layer, later)));
+  return joinDesktop(layers.filter((layer, index) => layer.status !== "failed" || !layers.slice(index + 1).some((later) => later.status !== "failed" && sameStep(layer, later))));
 }
 
 /** A burger shows for a run of two real steps or more. */

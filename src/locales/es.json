@@ -6448,6 +6448,8 @@
   "skillBurger.layer.write": "Escribir {name}",
   "skillBurger.layer.open": "Abrir {site}",
   "skillBurger.layer.readFrom": "Leer de {app}",
+  "skillBurger.layer.onVm": "{step} · en el ordenador en la nube",
+  "skillBurger.layer.onYourComputer": "{step} · en tu ordenador",
   "skillBurger.list.title": "Skill Burgers",
   "skillBurger.list.empty": "Añade uno desde la tarjeta cuando un bot termine un trabajo.",
   "skillBurger.list.remove": "Quitar {name}",

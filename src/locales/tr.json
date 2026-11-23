@@ -5943,6 +5943,8 @@
   "skillBurger.layer.write": "{name} yaz",
   "skillBurger.layer.open": "{site} aç",
   "skillBurger.layer.readFrom": "{app} üzerinden oku",
+  "skillBurger.layer.onVm": "{step} · bulut bilgisayarda",
+  "skillBurger.layer.onYourComputer": "{step} · bilgisayarınızda",
   "skillBurger.list.title": "Skill Burgers",
   "skillBurger.list.empty": "Bir bot işi bitirince karttan ekleyin.",
   "skillBurger.list.remove": "{name} kaldır",

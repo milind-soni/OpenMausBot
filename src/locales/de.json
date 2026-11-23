@@ -4150,6 +4150,8 @@
   "skillBurger.layer.write": "{name} schreiben",
   "skillBurger.layer.open": "{site} öffnen",
   "skillBurger.layer.readFrom": "Aus {app} lesen",
+  "skillBurger.layer.onVm": "{step} · auf dem Cloud-Computer",
+  "skillBurger.layer.onYourComputer": "{step} · auf deinem Computer",
   "skillBurger.list.title": "Skill Burgers",
   "skillBurger.list.empty": "Füge einen über die Karte hinzu, wenn ein Bot eine Aufgabe erledigt hat.",
   "skillBurger.list.remove": "{name} entfernen",

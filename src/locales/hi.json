@@ -3705,6 +3705,8 @@
   "skillBurger.layer.write": "{name} लिखें",
   "skillBurger.layer.open": "{site} खोलें",
   "skillBurger.layer.readFrom": "{app} से पढ़ें",
+  "skillBurger.layer.onVm": "{step} · क्लाउड कंप्यूटर पर",
+  "skillBurger.layer.onYourComputer": "{step} · आपके कंप्यूटर पर",
   "skillBurger.list.title": "Skill Burgers",
   "skillBurger.list.empty": "किसी बॉट का काम पूरा होने पर कार्ड से एक जोड़ें।",
   "skillBurger.list.remove": "{name} हटाएँ",

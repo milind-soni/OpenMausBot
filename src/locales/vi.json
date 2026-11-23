@@ -5943,6 +5943,8 @@
   "skillBurger.layer.write": "Ghi {name}",
   "skillBurger.layer.open": "Mở {site}",
   "skillBurger.layer.readFrom": "Đọc từ {app}",
+  "skillBurger.layer.onVm": "{step} · trên máy tính đám mây",
+  "skillBurger.layer.onYourComputer": "{step} · trên máy tính của bạn",
   "skillBurger.list.title": "Skill Burgers",
   "skillBurger.list.empty": "Thêm từ thẻ sau khi bot làm xong việc.",
   "skillBurger.list.remove": "Xóa {name}",

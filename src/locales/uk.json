@@ -4125,6 +4125,8 @@
   "skillBurger.layer.write": "Записати {name}",
   "skillBurger.layer.open": "Відкрити {site}",
   "skillBurger.layer.readFrom": "Прочитати з {app}",
+  "skillBurger.layer.onVm": "{step} · на хмарному комп’ютері",
+  "skillBurger.layer.onYourComputer": "{step} · на вашому комп’ютері",
   "skillBurger.list.title": "Skill Burgers",
   "skillBurger.list.empty": "Додайте його з картки, коли бот завершить роботу.",
   "skillBurger.list.remove": "Вилучити {name}",

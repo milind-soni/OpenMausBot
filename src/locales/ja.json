@@ -7983,6 +7983,8 @@
   "skillBurger.layer.write": "{name} を書き込む",
   "skillBurger.layer.open": "{site} を開く",
   "skillBurger.layer.readFrom": "{app} から読み取る",
+  "skillBurger.layer.onVm": "{step} · クラウドコンピューター上",
+  "skillBurger.layer.onYourComputer": "{step} · あなたのコンピューター上",
   "skillBurger.list.title": "Skill Burgers",
   "skillBurger.list.empty": "ボットが作業を終えたら、カードから追加できます。",
   "skillBurger.list.remove": "{name} を削除",

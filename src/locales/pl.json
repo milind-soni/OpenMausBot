@@ -7144,6 +7144,8 @@
   "skillBurger.layer.write": "Zapisz {name}",
   "skillBurger.layer.open": "Otwórz {site}",
   "skillBurger.layer.readFrom": "Odczytaj z {app}",
+  "skillBurger.layer.onVm": "{step} · na komputerze w chmurze",
+  "skillBurger.layer.onYourComputer": "{step} · na Twoim komputerze",
   "skillBurger.list.title": "Skill Burgers",
   "skillBurger.list.empty": "Dodaj go z karty, gdy bot skończy zadanie.",
   "skillBurger.list.remove": "Usuń {name}",

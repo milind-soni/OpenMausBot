@@ -28,7 +28,11 @@ const common = {
   timeoutMs: z.number().int().min(1_000).max(600_000).optional(),
   /** Pause for the person before this step. Off unless someone turns it on. */
   check: z.boolean().optional(),
+  /** Where it ran, so a replay runs it in the same place: an app, the browser, the bot's computer, a cloud computer (VM), the person's computer. */
+  where: z.enum(["app", "browser", "bot", "vm", "yourComputer"]).optional(),
 };
+
+const PLACE: Record<string, string> = { vm: "on the cloud computer", yourComputer: "on the person's own computer", browser: "in the browser" };
 
 export const workflowStepSchema = z.discriminatedUnion("kind", [
   z.object({ ...common, kind: z.literal("shell"), run: z.string().min(1).max(20_000), cwd: z.string().max(1_000).optional(), stdin: ref.optional() }).strict(),
@@ -65,7 +69,8 @@ function stepLine(step: WorkflowStep, args: Workflow["args"]): string {
   const used = Object.keys(args).filter((name) => JSON.stringify(step).includes(`"$arg":"${name}"`) || (step.kind === "shell" && step.run.includes(`OMB_ARG_${name.toUpperCase()}`)));
   const detail = used.map((name) => `${args[name]!.label ?? name}: ${name}${args[name]!.default === undefined ? "" : `, default ${JSON.stringify(args[name]!.default)}`}`);
   const what = step.kind === "shell" ? ` \`${step.run.split("\n", 1)[0]!.slice(0, 120)}\`` : step.kind === "app" ? ` (${step.tool})` : "";
-  return `${where}: ${step.label}${what}${detail.length ? ` (${detail.join("; ")})` : ""}${step.kind === "ai" ? " (your judgement)" : ""}`;
+  const place = step.where && PLACE[step.where] && !(step.kind === "browser" && step.where === "browser") ? ` ${PLACE[step.where]}` : "";
+  return `${where}${place}: ${step.label}${what}${detail.length ? ` (${detail.join("; ")})` : ""}${step.kind === "ai" ? " (your judgement)" : ""}`;
 }
 
 /** SKILL.md for a saved burger: the steps in words, so a bot can follow them even where nothing replays workflow.json. */

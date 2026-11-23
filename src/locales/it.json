@@ -11337,6 +11337,8 @@
   "skillBurger.layer.write": "Scrivi {name}",
   "skillBurger.layer.open": "Apri {site}",
   "skillBurger.layer.readFrom": "Leggi da {app}",
+  "skillBurger.layer.onVm": "{step} · sul computer cloud",
+  "skillBurger.layer.onYourComputer": "{step} · sul tuo computer",
   "skillBurger.list.title": "Skill Burgers",
   "skillBurger.list.empty": "Aggiungine uno dalla scheda quando un bot finisce un lavoro.",
   "skillBurger.list.remove": "Rimuovi {name}",
