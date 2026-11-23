@@ -14,7 +14,7 @@ import type { AntigravityRuntime } from "./antigravity-runtime.ts";
 
 export const ANTIGRAVITY_LOGIN_REDIRECT = "https://antigravity.google/oauth-callback";
 
-const LOGIN_TIMEOUT_MS = 5 * 60_000;
+const LOGIN_TIMEOUT_MS = 10 * 60_000;
 const SUBMIT_TIMEOUT_MS = 60_000;
 const EXIT_CONFIRM_MS = 10_000;
 const MAX_LINK_CHARS = 16_384;
