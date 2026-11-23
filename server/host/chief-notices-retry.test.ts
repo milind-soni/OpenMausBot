@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { TRIAL_CREDIT_REFUSED } from "../../shared/trial-credit.ts";
 import "../server-line-packs.ts";
 import { engineFailureMessage } from "../drivers/engine-errors.ts";
-import { FROZE_BROWSING } from "../memory-freeze-restart.ts";
 import { AUTO_RETRY_LEAD, RETRY_BLOCKED } from "../incidents.ts";
+import { FROZE_BROWSING } from "../memory-freeze-restart.ts";
 import type { RoutineFailureFacts } from "../routine-recovery.ts";
 import { createChiefNotices, MEMORY_RETRY_MS, MEMORY_RETRY_TEXT, ROOM_RETRY_TEXT, SERVER_MEMORY_RETRY_TEXT, type ChiefNoticeDeps } from "./chief-notices.ts";
 
@@ -194,15 +194,6 @@ describe("a run stopped to free memory", () => {
     expect(f.told).toHaveLength(1);
   });
 
-  it("never starts again a routine run that the restart after a memory freeze ended", () => {
-    const f = roomFixture();
-    f.store.appendMessage("chief-main", { role: "user", kind: "text", text: "Check the prices page." });
-    f.notices.reportIncident({ kind: "routine-failed", bot: f.chief as never, threadId: "chief-main", detail: `Prices: ${FROZE_BROWSING}`, failure: FROZE_BROWSING });
-    f.settle();
-    expect(f.waiting).toEqual([]);
-    expect(f.continued).toEqual([]);
-  });
-
   it("starts nothing when someone wrote in the thread since, or it runs or waits again", () => {
     const wrote = roomFixture();
     wrote.store.appendMessage("chief-main", { role: "user", kind: "text", text: "Book the train." });
@@ -219,6 +210,15 @@ describe("a run stopped to free memory", () => {
     busy.notices.reportIncident({ kind: "failed", bot: busy.chief as never, threadId: "chief-main", detail: STOPPED });
     busy.settle();
     expect(busy.continued).toEqual([]);
+  });
+
+  it("never starts again a routine run that the restart after a memory freeze ended", () => {
+    const f = roomFixture();
+    f.store.appendMessage("chief-main", { role: "user", kind: "text", text: "Check the prices page." });
+    f.notices.reportIncident({ kind: "routine-failed", bot: f.chief as never, threadId: "chief-main", detail: `Prices: ${FROZE_BROWSING}`, failure: FROZE_BROWSING });
+    f.settle();
+    expect(f.waiting).toEqual([]);
+    expect(f.continued).toEqual([]);
   });
 
   it("on a self-hosted server, starts a teammate's run again by itself too, saying it was this server, and asks no Chief", () => {

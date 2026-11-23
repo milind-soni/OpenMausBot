@@ -1654,6 +1654,19 @@ describe("RoutineManager", () => {
     expect(h.started.map((turn) => turn.threadId)).toEqual(["thread-1"]);
   });
 
+  it("keeps a run that waits on teammates' hand-offs waiting through the restart after a memory freeze", async () => {
+    const h = harness();
+    const routine = h.manager.create({ name: "Prices", prompt: "Check the prices page", botId: "maus-1", schedule: { type: "once", at: new Date(2026, 7, 17, 8, 5).getTime() } });
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+    const asked: string[] = [];
+    h.options.restartCut = (threadId) => { asked.push(threadId); return "Ran out of room, so I closed the browser to keep everything else running."; };
+    h.options.hasPendingDelegations = () => true;
+    const reloaded = new RoutineManager(h.options);
+    expect(asked).toEqual([]);
+    expect(reloaded.listRuns()).toMatchObject([{ routineId: routine.id, status: "waiting", threadId: "thread-1" }]);
+  });
+
   it("migrates optional attachment and timeout metadata without losing legacy records", () => {
     const h = harness();
     h.setBot("busy");

@@ -374,11 +374,11 @@ export class RoutineManager {
     const cut = settleRestored(this.routines, this.runs, this.ledger.restoredThrough, this.now(), (routine, past) => this.advancePastOccurrence(routine, past, past)).map(cloneRun); this.ledger.restoredThrough = null;
     let restarts = 0;
     for (const run of this.runs.filter((candidate) => candidate.status === "running" || candidate.status === "waiting")) {
-      settleAsk(run, undefined, this.now()); const froze = run.threadId ? this.options.restartCut?.(run.threadId, run.startedAt) ?? null : null;
-      if (froze === null && run.threadId && run.target === "bot" && this.options.hasPendingDelegations?.(run.threadId) === true) {
+      const turnRan = run.status === "running"; settleAsk(run, undefined, this.now());
+      if (run.threadId && run.target === "bot" && this.options.hasPendingDelegations?.(run.threadId) === true) {
         this.wait(run, ROUTINE_HANDOFF_WAIT);
         continue;
-      }
+      } const froze = run.threadId && turnRan ? this.options.restartCut?.(run.threadId, run.startedAt) ?? null : null; // A run waiting on hand-offs keeps waiting; one whose turn ran through a memory freeze ends.
       if (froze !== null || !requeueOnce(run, "restarted", ROUTINE_RESTARTED, this.now(), restartRetryAt(this.now(), restarts++, this.ledger.retryAfterBoot(run)))) {
         Object.assign(run, { status: "failed", error: froze ?? ROUTINE_RESTARTED, attention: undefined, finishedAt: this.now() } satisfies Partial<RoutineRun>);
         if (run.target === "room-goal") run.goalStatus = "failed";

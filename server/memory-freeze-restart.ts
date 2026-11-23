@@ -11,9 +11,6 @@ import { readStallRecords, STALL_FILE } from "./perf/stall-watch.ts";
 import type { StallRecord } from "./perf/stall-sample.ts";
 import { toolSurfaceKind } from "../shared/tool-surface.ts";
 
-/** A stall this long before the start still counts: a frozen Cloud records its stall within minutes, and the Admin's
- * restart, or the person's, may come half an hour later. */
-export const FREEZE_LOOKBACK_MS = 60 * 60_000;
 /** Memory available below this, or the memory stall (full avg10, percent) at least this, in a stall record is a freeze for
  * want of memory (relief's critical line on a 2 GB home, and its thrash line). A record that could read neither counts
  * when it gave memory as the reason it took no profile. */
@@ -25,9 +22,10 @@ function outOfMemory(record: StallRecord): boolean {
   return (availableMB ?? Infinity) < FREEZE_AVAILABLE_MB || (memoryFull10 ?? 0) >= FREEZE_STALL_PERCENT;
 }
 
-/** Whether a stall the watch recorded before this start (and within FREEZE_LOOKBACK_MS of it) came with memory run out. */
-export function frozeForMemory(records: readonly StallRecord[], startedAt: number): boolean {
-  return records.some((record) => record.at <= startedAt && startedAt - record.at <= FREEZE_LOOKBACK_MS && outOfMemory(record));
+/** Whether the watch recorded a stall with memory run out between `from` (a cut turn's start) and `to` (this start): a
+ * freeze that turn ran through, not one before it that the server came back from. */
+export function frozeForMemory(records: readonly StallRecord[], from: number, to: number): boolean {
+  return records.some((record) => from <= record.at && record.at <= to && outOfMemory(record));
 }
 
 type Line = { at?: number; tool?: { name?: string } | null };
@@ -41,15 +39,17 @@ export function browsedSince(lines: readonly Line[], since: number): boolean {
 export const FROZE_BROWSING = chatNotice("chat.notice.memoryReclaimedBrowser");
 
 /**
- * What a turn a restart cut off ends with instead of starting again, or null to start it again: null unless this start
- * follows a freeze for want of memory and the turn browsed. The records are read once, at the first ask.
+ * What a turn a restart cut off ends with instead of starting again, or null to start it again: null unless the turn ran
+ * through a freeze for want of memory (one recorded after it started) and browsed, or when its start is unknown. Each
+ * caller (the coordinator, the routines) reads the records once, at its first ask.
  */
 export function restartCutStop(deps: { dataDir: string; lines(threadId: string): readonly Line[]; startedAt?: number; read?: (file: string) => StallRecord[] }) {
-  // This process's own start: a stall this run records later is not one before it.
+  // This process's own start: a stall this run records later is not one the turn ran through.
   const startedAt = deps.startedAt ?? Date.now() - process.uptime() * 1000;
-  let froze: boolean | undefined;
+  let records: StallRecord[] | undefined;
   return (threadId: string, since: number | undefined): string | null => {
-    froze ??= frozeForMemory((deps.read ?? readStallRecords)(join(deps.dataDir, STALL_FILE)), startedAt);
-    return froze && browsedSince(deps.lines(threadId), since ?? 0) ? FROZE_BROWSING : null;
+    if (since === undefined) return null;
+    records ??= (deps.read ?? readStallRecords)(join(deps.dataDir, STALL_FILE));
+    return frozeForMemory(records, since, startedAt) && browsedSince(deps.lines(threadId), since) ? FROZE_BROWSING : null;
   };
 }
