@@ -788,13 +788,15 @@ export function antigravityLaunchArgs(runtime: Pick<AntigravityRuntime, "harness
 
 /** The native CLI (`agy acp`, "Antigravity ACP Server") from 1.5.0 takes a second `session/prompt` during a turn into it:
  * the running prompt answers `end_turn` at once with no usage, and the turn goes on under the new one, which answers at
- * its end with the whole turn's usage, or `cancelled` on session/cancel. Measured on 1.5.15, whose `initialize` does not
- * announce it. While the turn waits on a permission or question answer it rejects the prompt (-32603 "Can't add this
- * prompt"), so a message then queues. agy_acp_server (the pinned runtime, "antigravity-acp") answers a second prompt with
+ * its end with the whole turn's usage, or `cancelled` with that usage on session/cancel; a third prompt takes over from the
+ * second the same way. Measured on 1.5.15, whose `initialize` does not announce it. While the turn waits on a permission or
+ * question answer it rejects the prompt (-32603 "Can't add this prompt"), so a message then queues, including one sent
+ * before the app has shown that question. agy_acp_server (the pinned runtime, "antigravity-acp") answers a second prompt with
  * an error and a second reply instead, so it keeps queueing. */
 export const ANTIGRAVITY_STEER: AcpPromptSteer = {
   kind: "prompt",
   notWhileAsking: true,
+  takeOver: { rejected: (error: any) => error?.code === -32603 && /^Can't add this prompt\b/u.test(String(error?.message ?? "")) },
   supported: (initialized: any) => {
     if (initialized?.agentInfo?.name !== "Antigravity ACP Server") return false;
     const match = /^(\d+)\.(\d+)\./u.exec(runtimeVersion(initialized.agentInfo.version));

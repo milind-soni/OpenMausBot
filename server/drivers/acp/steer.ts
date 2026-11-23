@@ -31,6 +31,9 @@ export interface AcpPromptSteer {
   supported?(initializeResult: unknown): boolean;
   /** The agent rejects a prompt while the turn waits on a permission or question answer, so none is sent then. */
   notWhileAsking?: boolean;
+  /** Antigravity's CLI: taking a prompt in, the agent answers the one that carried the turn, and the new one carries it on, so
+   * a later steer joins it too. A steer is taken once that answer arrives; one the agent rejects (`rejected`) is refused. */
+  takeOver?: { rejected(error: unknown): boolean };
   /** The run a prompt reply ends; replies of one run report their usage once. */
   run?(response: unknown): string | undefined;
   /** A steer reply that only reports its message was taken into the running turn; the turn's own reply is the outcome. */
@@ -140,27 +143,62 @@ export function acpRequestSteering(running: () => boolean, send: (text: string) 
   };
 }
 
-/** `send` carries one `session/prompt` and settles when the agent answers it, at the end of the run. A steer is reported as
- * steered once it is sent: the agent gives no earlier answer. */
-export function acpPromptSteering(running: () => boolean, send: (text: string) => Promise<unknown>): AcpTurnSteering {
+/** How long a steer that takes the turn over waits for the agent to answer the prompt carrying it before it is reported as
+ * possibly taken in. The CLI answers within milliseconds. */
+export const STEER_TAKEOVER_MS = 5_000;
+
+/** `send` carries one `session/prompt` and settles when the agent answers it, at the end of the run. Without `takeOver` a
+ * steer is reported as steered once it is sent: the agent gives no earlier answer. With it, steers go one at a time, each
+ * taken in when the prompt carrying the turn is answered, and the turn waits for every steer the agent took. */
+export function acpPromptSteering(running: () => boolean, send: (text: string) => Promise<unknown>, takeOver?: AcpPromptSteer["takeOver"]): AcpTurnSteering {
   let answered = false;
+  let markAnswered = () => {};
+  // Resolves when the prompt carrying the turn is answered: first the turn's own, then each steer the agent took.
+  let carrier = new Promise<void>((resolve) => { markAnswered = resolve; });
+  let previous: Promise<unknown> = Promise.resolve();
   const pending = new Set<Promise<unknown>>();
+  const track = (reply: Promise<unknown>, refusable: () => boolean) => {
+    const sent = reply.then(
+      (answer) => { steering.replies!.push(answer); },
+      (error) => { if (!(refusable() && takeOver?.rejected(error))) steering.failure ??= error; },
+    ).finally(() => pending.delete(sent));
+    pending.add(sent);
+  };
+  const takenOver = async (guidance: string): Promise<SteerOutcome> => {
+    if (!guidance || (answered && !pending.size) || !running()) return "refused";
+    let decided = false;
+    const reply = send(guidance);
+    track(reply, () => !decided);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const outcome = await Promise.race<SteerOutcome>([
+      carrier.then(() => "steered"),
+      reply.then(() => "steered", (error) => takeOver!.rejected(error) ? "refused" : "indeterminate"),
+      new Promise((resolve) => { timer = setTimeout(() => resolve("indeterminate"), STEER_TAKEOVER_MS); timer.unref?.(); }),
+    ]).finally(() => { decided = true; clearTimeout(timer); });
+    if (outcome !== "refused") carrier = reply.then(() => undefined, () => undefined);
+    return outcome;
+  };
   const steering: AcpTurnSteering = {
     replies: [],
     swallow: () => false,
     async steer(text) {
       const guidance = text.trim();
+      if (takeOver) {
+        const outcome = previous.then(() => takenOver(guidance));
+        previous = outcome;
+        return outcome;
+      }
       if (!guidance || answered || !running()) return "refused";
-      const sent = send(guidance).then(
-        (reply) => { steering.replies!.push(reply); },
-        (error) => { steering.failure ??= error; },
-      ).finally(() => pending.delete(sent));
-      pending.add(sent);
+      track(send(guidance), () => false);
       return "steered";
     },
     promptAnswered() {
       answered = true;
-      return pending.size ? Promise.all(pending).then(() => undefined) : null;
+      markAnswered();
+      if (!pending.size) return null;
+      // A steer taken in while these run carries the turn on, so wait until none is out.
+      const drain = async (): Promise<void> => { while (pending.size) await Promise.all([...pending, previous]); };
+      return drain();
     },
   };
   return steering;
@@ -193,7 +231,7 @@ export function turnSteering(support: AcpSteerSupport, io: AcpSteerIo): AcpTurnS
     const allowed = () => support.supported ? support.supported(io.initializeResult())
       : support.enabled ? support.enabled(io.env)
       : io.initializeResult()?.agentCapabilities?._meta?.[support.capability ?? ""] === true;
-    return acpPromptSteering(() => io.open() && !(support.notWhileAsking && io.asking()) && allowed(), io.prompt);
+    return acpPromptSteering(() => io.open() && !(support.notWhileAsking && io.asking()) && allowed(), io.prompt, support.takeOver);
   }
   return acpTurnSteering(support, () => io.open() && io.commands()?.has(support.command) === true, io.prompt);
 }

@@ -598,13 +598,38 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
     expect(turn.recorder.events.filter((event) => event.turnId === turn.turnId && event.type === "turn.completed")).toHaveLength(1);
   }, 90_000);
 
-  it("stops a steered turn", async () => {
+  it("takes a second message while the first steer carries the turn, which still ends once", async () => {
+    const turn = await steerable("steer-twice");
+    expect(await turn.instance.adapter.steer!(turn.threadId, "Use pytest.")).toBe("steered");
+    // The CLI has answered the turn's own prompt, so the steer's prompt carries the turn now.
+    await turn.recorder.until((event) => event.turnId === turn.turnId && event.type === "item.completed" && event.itemType === "assistant_text");
+    expect(await turn.instance.adapter.steer!(turn.threadId, "And add a README.")).toBe("steered");
+    await vi.waitFor(() => expect(turn.steers()).toBe(2));
+    writeFileSync(turn.gate, "finish");
+    expect(await turn.completed()).toMatchObject({ ok: true });
+    expect(turn.replies().join(" ")).toContain("done; steered: Use pytest. | And add a README.");
+    expect(turn.usage()).toEqual([[10, 5]]);
+    expect(turn.recorder.events.filter((event) => event.turnId === turn.turnId && event.type === "turn.completed")).toHaveLength(1);
+  }, 90_000);
+
+  it("stops a steered turn, recording the usage its cancelled reply reports once", async () => {
     const turn = await steerable("steer-stop");
     expect(await turn.instance.adapter.steer!(turn.threadId, "Use pytest.")).toBe("steered");
     await vi.waitFor(() => expect(turn.steers()).toBe(1));
     await turn.instance.adapter.interruptTurn(turn.threadId);
     expect(await turn.completed()).toMatchObject({ stopReason: "cancelled" });
     expect(turn.replies().join("")).not.toContain("done");
+    expect(turn.usage()).toEqual([[10, 5]]);
+  }, 90_000);
+
+  it("queues a message the CLI rejects because it waits on a permission the app has not shown, and the turn runs on", async () => {
+    const turn = await steerable("steer-rejected", { FAKE_ACP_STEER_FAIL: "asking" });
+    expect(await turn.instance.adapter.steer!(turn.threadId, "Use pytest.")).toBe("refused");
+    writeFileSync(turn.gate, "finish");
+    expect(await turn.completed()).toMatchObject({ ok: true });
+    expect(turn.replies()).toEqual(["working. done"]);
+    expect(turn.usage()).toEqual([[10, 5]]);
+    expect(turn.recorder.events.some((event) => event.turnId === turn.turnId && event.type === "runtime.error")).toBe(false);
   }, 90_000);
 
   it("refuses to steer a runtime that does not name itself as the CLI, so the message queues", async () => {

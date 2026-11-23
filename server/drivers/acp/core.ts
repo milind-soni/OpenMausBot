@@ -1303,7 +1303,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               );
             const harnessFailed = stderrFailureOf(session.host); if (harnessFailed) throw harnessFailed;
             const steersOut = current.steering?.promptAnswered();
-            if (steersOut && !state.stopped) { current.flushAssistantText(); await steersOut; }
+            if (steersOut) { current.flushAssistantText(); await steersOut; } // stopped too: a steer's cancelled reply can carry the usage
             const failure = state.failedChunk?.failure;
             // session/prompt resolving is the acceptance boundary: a rejected or reported-failed prompt leaves no receipt.
             if (pendingSplitReceipt && !failure) commitPromptSplitReceipt(DRIVER_KIND, pendingSplitReceipt, { compacted: state.usageCompacted, last: state.usageLast, peak: state.usagePeak });

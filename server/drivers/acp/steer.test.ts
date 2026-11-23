@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { acpPromptSteering, acpRequestSteering, acpTurnSteering, advertisedCommands, type AcpCommandSteer as AcpSteerSupport } from "./steer.ts";
+import { STEER_TAKEOVER_MS, acpPromptSteering, acpRequestSteering, acpTurnSteering, advertisedCommands, type AcpCommandSteer as AcpSteerSupport } from "./steer.ts";
 
 const support: AcpSteerSupport = {
   command: "steer",
@@ -157,5 +157,68 @@ describe("acpPromptSteering", () => {
     expect(failing.failure).toBeInstanceOf(Error);
     expect(await failing.steer("late")).toBe("refused");
     expect(await acpPromptSteering(() => false, async () => ({})).steer("x")).toBe("refused");
+  });
+
+  describe("taking the turn over", () => {
+    const rejected = (error: unknown) => (error as { code?: unknown }).code === -32603;
+    /** Steers whose sends the test answers by hand, as the CLI answers the prompt that carried the turn. */
+    function takeOver() {
+      const sent: Array<{ text: string; answer: (reply: unknown) => void; fail: (error: unknown) => void }> = [];
+      const steering = acpPromptSteering(() => true, (text) => new Promise((resolve, reject) => {
+        sent.push({ text, answer: resolve, fail: reject });
+      }), { rejected });
+      return { steering, sent };
+    }
+
+    it("takes a steer in once the prompt carrying the turn is answered, then another while that steer carries it", async () => {
+      const { steering, sent } = takeOver();
+      const first = steering.steer("use pytest");
+      await tick();
+      const ended = steering.promptAnswered();
+      expect(await first).toBe("steered");
+      const second = steering.steer("add a README");
+      await tick();
+      sent[0]!.answer({ stopReason: "end_turn" });
+      expect(await second).toBe("steered");
+      sent[1]!.answer({ stopReason: "end_turn", usage: { inputTokens: 1 } });
+      await ended;
+      expect(sent.map((one) => one.text)).toEqual(["use pytest", "add a README"]);
+      expect(steering.replies).toEqual([{ stopReason: "end_turn" }, { stopReason: "end_turn", usage: { inputTokens: 1 } }]);
+      expect(steering.failure).toBeUndefined();
+      expect(await steering.steer("late")).toBe("refused");
+    });
+
+    it("refuses a steer the agent rejects before taking it in, without failing the turn", async () => {
+      const { steering, sent } = takeOver();
+      const outcome = steering.steer("use pytest");
+      await tick();
+      sent[0]!.fail({ code: -32603, message: "Can't add this prompt" });
+      expect(await outcome).toBe("refused");
+      expect(steering.promptAnswered()).toBeNull();
+      expect(steering.failure).toBeUndefined();
+    });
+
+    it("keeps the error of a steer that fails after it was taken in", async () => {
+      const { steering, sent } = takeOver();
+      const outcome = steering.steer("use pytest");
+      await tick();
+      const ended = steering.promptAnswered();
+      expect(await outcome).toBe("steered");
+      sent[0]!.fail({ code: -32603, message: "Can't add this prompt" });
+      await ended;
+      expect(steering.failure).toEqual({ code: -32603, message: "Can't add this prompt" });
+    });
+
+    it("is unsure of a steer when nothing answers in time", async () => {
+      vi.useFakeTimers();
+      try {
+        const { steering } = takeOver();
+        const outcome = steering.steer("use pytest");
+        await vi.advanceTimersByTimeAsync(STEER_TAKEOVER_MS);
+        expect(await outcome).toBe("indeterminate");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });
