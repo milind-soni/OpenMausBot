@@ -11,8 +11,9 @@
 //
 // Files only: both writers make their folder and then write into it, so a folder removed between the two would fail
 // the write. Folders of deleted conversations go with the conversation. A link is never followed or removed.
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { lstat, opendir, unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { setImmediate as yieldNow, setTimeout as sleep } from "node:timers/promises";
 
 export type ToolResultsSweepMode = "off" | "report" | "on";
@@ -23,7 +24,12 @@ export const MAX_AGE_MS = 24 * 60 * 60_000;
 export const CAP_BYTES = 1024 ** 3;
 /** Never under the cap: a result this new may belong to a turn that has just paused. */
 export const MIN_AGE_MS = 60 * 60_000;
-export const FIRST_PASS_MS = 20 * 60_000;
+/** Soon after a start: a home that sleeps by stopping may be up only minutes. */
+export const FIRST_PASS_MS = 3 * 60_000;
+/** A pass that stopped for a turn, a move or a backup is tried again this soon. */
+export const RETRY_MS = 30 * 60_000;
+/** When the last whole pass ended, under the data folder's cache/ (left out of backups). */
+export const STAMP_FILE = join("cache", "tool-results-sweep.json");
 /** While a turn runs nothing is removed: the pass waits this long for a quiet moment, then stops until the next. */
 export const TURN_WAIT_MS = 10 * 60_000;
 const TURN_POLL_MS = 15_000;
@@ -149,25 +155,45 @@ export function sweepLine(result: ToolResultsSweepResult): string {
     + (result.stopped ? " (stopped for a move, a backup or a running turn; the next pass carries on)" : "");
 }
 
-/** Cloud homes only, and only with OMB_TOOL_RESULTS_SWEEP set: a pass FIRST_PASS_MS after start, then every PASS_EVERY_MS. */
-export function startToolResultsSweep(deps: { cloudHome: boolean; env: NodeJS.ProcessEnv; root: string; paused?(): boolean; turnsRunning?(): boolean; log?(line: string): void }): boolean {
+/** Cloud homes only, and only with OMB_TOOL_RESULTS_SWEEP set: a pass when due, at the earliest FIRST_PASS_MS after start. */
+export function startToolResultsSweep(deps: { cloudHome: boolean; env: NodeJS.ProcessEnv; dataDir: string; root: string; paused?(): boolean; turnsRunning?(): boolean; log?(line: string): void }): boolean {
   const mode = toolResultsSweepMode(deps.env);
   if (!deps.cloudHome || mode === "off") return false;
   const log = deps.log ?? ((line: string) => console.log(line));
-  let running = false;
-  const pass = async () => {
-    if (running) return;
-    running = true;
+  const pass = async (): Promise<boolean> => {
     try {
       const result = await sweepToolResults({ root: deps.root, mode, paused: deps.paused, turnsRunning: deps.turnsRunning });
       if (result.files || result.stopped) log(sweepLine(result));
+      return !result.stopped;
     } catch (error) {
       log(`[tool-results] pass failed: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      running = false;
+      return false;
     }
   };
-  setTimeout(() => void pass(), FIRST_PASS_MS).unref();
-  setInterval(() => void pass(), PASS_EVERY_MS).unref();
+  schedulePasses(join(deps.dataDir, STAMP_FILE), PASS_EVERY_MS, pass);
   return true;
+}
+
+/**
+ * Runs `pass` FIRST_PASS_MS after start, or later when the last whole pass (saved in `stamp`) is not yet `every` old,
+ * then every `every`; a pass that stopped early is tried again after RETRY_MS. A stamp from the future (a clock set
+ * back) counts as none, and a home that slept past its time runs one pass on waking, never one per missed interval.
+ */
+export function schedulePasses(stamp: string, every: number, pass: () => Promise<boolean>, now: () => number = Date.now): void {
+  let last: number | null = null;
+  try {
+    const at = (JSON.parse(readFileSync(stamp, "utf8")) as { at?: unknown }).at;
+    if (typeof at === "number" && Number.isFinite(at) && at <= now()) last = at;
+  } catch {}
+  const run = async () => {
+    const whole = await pass();
+    if (whole) {
+      try {
+        mkdirSync(dirname(stamp), { recursive: true, mode: 0o700 });
+        writeFileSync(stamp, JSON.stringify({ at: now() }), { mode: 0o600 });
+      } catch {}
+    }
+    setTimeout(() => void run(), whole ? every : RETRY_MS).unref();
+  };
+  setTimeout(() => void run(), last === null ? FIRST_PASS_MS : Math.max(FIRST_PASS_MS, last + every - now())).unref();
 }

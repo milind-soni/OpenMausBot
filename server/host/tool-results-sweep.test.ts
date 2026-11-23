@@ -1,10 +1,10 @@
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { spillToolResult } from "../tool-result-spill.ts";
-import { MAX_AGE_MS, sweepLine, sweepToolResults, toolResultsSweepMode } from "./tool-results-sweep.ts";
+import { FIRST_PASS_MS, MAX_AGE_MS, schedulePasses, sweepLine, sweepToolResults, toolResultsSweepMode } from "./tool-results-sweep.ts";
 
 const NOW = Date.parse("2026-11-23T12:00:00Z");
 let base: string, root: string;
@@ -70,7 +70,8 @@ describe("the tool results' sweep", () => {
     expect(sweepLine(report)).toContain("would free");
   });
 
-  it("follows no link: a linked folder or a linked file stays, and so does what it points at", async () => {
+  // Windows makes a link only with a privilege CI's runners lack; Cloud homes, where this runs, are Linux.
+  it.skipIf(process.platform === "win32")("follows no link: a linked folder or a linked file stays, and so does what it points at", async () => {
     seed();
     const outside = join(base, "outside");
     const target = put(join(outside, "precious.txt"), 10 * MAX_AGE_MS);
@@ -82,7 +83,7 @@ describe("the tool results' sweep", () => {
     expect(lstatSync(join(root, "thread-link")).isSymbolicLink()).toBe(true);
   });
 
-  it("a root that is a link, or missing, is left alone", async () => {
+  it.skipIf(process.platform === "win32")("a root that is a link, or missing, is left alone", async () => {
     const outside = join(base, "outside");
     const target = put(join(outside, "thread-x", "old.txt"), 10 * MAX_AGE_MS);
     const linked = join(base, "linked-root");
@@ -117,6 +118,29 @@ describe("the tool results' sweep", () => {
     const later = await sweepToolResults({ root, mode: "on", turnsRunning: () => checks++ < 1, turnWaitMs: 60_000, now: () => NOW });
     expect(later.files).toBe(2);
   }, 30_000);
+
+  it("schedules a pass soon after start, or when due by the last whole pass", async () => {
+    vi.useFakeTimers();
+    try {
+      const stamp = join(base, "cache", "stamp.json");
+      let clock = NOW;
+      const passes: number[] = [];
+      schedulePasses(stamp, 6 * 60 * 60_000, async () => (passes.push(clock), true), () => clock);
+      clock += FIRST_PASS_MS;
+      await vi.advanceTimersByTimeAsync(FIRST_PASS_MS);
+      expect(passes).toHaveLength(1);
+      vi.clearAllTimers();
+      clock += 60 * 60_000;
+      schedulePasses(stamp, 6 * 60 * 60_000, async () => (passes.push(clock), true), () => clock);
+      await vi.advanceTimersByTimeAsync(4 * 60 * 60_000);
+      expect(passes).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(passes).toHaveLength(2);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
 
   it("stops for a move or backup", async () => {
     const files = seed();

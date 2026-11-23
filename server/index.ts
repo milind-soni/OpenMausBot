@@ -5390,7 +5390,7 @@ function clearTurnDigestState(threadId: string): void {
   memoryRowsByThread.delete(threadId);
 }
 
-const TOOL_RESULTS_DIR = join(DATA_DIR, "tool-results"); startToolResultsSweep({ cloudHome: CLOUD_HOME !== null, env: process.env, root: TOOL_RESULTS_DIR, paused: () => moveFreeze.frozen() || workspaceMaintenance.active, turnsRunning: () => store.bots.some((bot) => botHasActiveTurn(bot.id)) || store.groups.some(groupIsWorking) || Boolean(routines?.hasActiveRuns()) });
+const TOOL_RESULTS_DIR = join(DATA_DIR, "tool-results"); startToolResultsSweep({ cloudHome: CLOUD_HOME !== null, env: process.env, dataDir: DATA_DIR, root: TOOL_RESULTS_DIR, paused: () => moveFreeze.frozen() || workspaceMaintenance.active, turnsRunning: () => store.bots.some((bot) => botHasActiveTurn(bot.id)) || store.groups.some(groupIsWorking) || Boolean(routines?.hasActiveRuns()) });
 const TOOL_RESULT_SPILL_MAX = 512 * 1024;
 
 const DIGESTS_AFTER_COMPACTION = 2;
