@@ -1,35 +1,52 @@
-// What a deleted conversation or bot leaves in its folders that is nobody's work: the installed dependencies in its
-// conversation folders (task-workspaces/<bot>/<thread>: node_modules and Python venvs, which Files never carries and an
-// install makes again), and the full tool results kept for it (tool-results/<thread>). A build's output (a Rust target
-// folder) is not among them: it can be the program the person asked for, and Files brings it to them. The files the bot
-// made for the person stay: the delete dialogs promise them ("Generated project files are kept"), Files lists every
-// conversation folder that holds a file and brings it to the person's computer, and the bot's other conversations are
-// told where these folders are. Event logs and engine sessions go with the conversation elsewhere (store.ts,
-// delete-leftovers.ts).
+// What a deleted conversation or bot leaves in its folders that is nobody's work: the package installs in its
+// conversation folders (task-workspaces/<bot>/<thread>: a node_modules a package manager made, a Python venv holding
+// only a venv's own folders), which Files never carries and an install makes again, and the full tool results kept for
+// it (tool-results/<thread>). A build's output (a Rust target folder) is not among them: it can be the program the
+// person asked for, and Files brings it to them. The files the bot made for the person stay: the delete dialogs
+// promise them ("Generated project files are kept"), Files lists every conversation folder that holds a file and
+// brings it to the person's computer, and the bot's other conversations are told where these folders are. Event logs
+// and engine sessions go with the conversation elsewhere (store.ts, delete-leftovers.ts).
+//
+// What counts as an install, and nothing else: a node_modules with a package manager's own marker in it and a
+// package.json beside it, that git does not track; a venv (.venv or venv) with a pyvenv.cfg whose top level holds
+// only a venv's own entries. Anything else, or anything that cannot be read, stays, with a line in the log.
 //
 // Safety: a folder is touched only when nothing that remains can use it. Its conversation is no remaining bot's or
-// room's (a room's turns use a member bot's conversation folder under the room's own id), no remaining bot, conversation
-// or room works in it, inside it or in a folder between it and the data folder (a fork keeps working in its source's
-// folder), and neither the saved settings, the routines nor a remaining conversation's messages name a path in it; while
-// any of those cannot be read, it stays. That is checked again just before each move. Nothing is reached
-// through a link: every folder from the data folder down must be a real folder, and a link found while removing is
-// removed as a link. What goes is first moved, in one rename, to <data>/.removing, and only then removed one entry at
-// a time, so a crash leaves either the whole tree in place or a part of it in .removing, which the next start finishes.
-// Nothing runs on the delete's own call: the work is queued, awaited one file at a time and paced, so a tree of
-// hundreds of thousands of files never holds a turn or the event loop. Any failure is logged and keeps what it touched.
+// room's (a room's turns use a member bot's conversation folder under the room's own id); no remaining bot,
+// conversation or room works in it, inside it or in a folder between it and the data folder (a fork keeps working in
+// its source's folder), compared as the file system names it (case-insensitively on macOS and Windows); no link in
+// the bot's other folders leads into it; no process (Linux) works inside it; and neither the saved definitions and
+// instructions nor a remaining conversation's messages name it. While any of those cannot be read, it stays. That is
+// checked again just before each move, and nothing moves while the server is frozen or a backup is under way.
+// Nothing is reached through a link: every folder from the data folder down must be a real folder, and what is moved
+// must be the very folder that was checked (device and inode, before and after the move; a mismatch is moved back).
+// What goes is first moved, in one rename, to <data>/.removing, and only then removed one entry at a time, so a crash
+// leaves either the whole tree in place or a part of it in .removing, which the next start finishes. Nothing runs on
+// the delete's own call: the work is queued, awaited one file at a time and paced, and the transcripts are read in a
+// worker, so a tree of hundreds of thousands of files never holds a turn or the event loop.
 import { randomBytes } from "node:crypto";
-import { chmod, lstat, mkdir, readdir, rename, rmdir, unlink } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, readdir, readlink, realpath, rename, rmdir, unlink } from "node:fs/promises";
 import { lstatSync, readdirSync, realpathSync } from "node:fs";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export const REMOVING_DIR = ".removing";
 const ID = /^[\w-]{1,128}$/;
+const RETIRED = /^\d{1,16}-[0-9a-f]{12}$/;
 const MAX_DEPTH = 8;
 const MAX_SCANNED = 200_000;
+const MAX_LINK_SCAN = 50_000;
+const MAX_HELD_FILE_BYTES = 16 * 1024 ** 2;
+const MAX_GIT_INDEX_BYTES = 64 * 1024 ** 2;
 const YIELD_EVERY = 256;
 const PAUSE_EVERY = 4_096;
 const PAUSE_MS = 20;
 const DRAIN_AFTER_START_MS = 60_000;
+/** A package manager's own record inside a node_modules it made (npm, pnpm, Yarn 1, Yarn 2+). */
+const NODE_MARKERS = [".package-lock.json", ".modules.yaml", ".yarn-integrity", ".yarn-state.yml"];
+/** What a venv made by venv, virtualenv or uv holds at its top level. */
+const VENV_ENTRIES = new Set(["bin", "Scripts", "lib", "lib64", "Lib", "include", "Include", "share", "pyvenv.cfg", ".gitignore", "CACHEDIR.TAG"]);
+/** Folders a link scan of the bot's other folders does not walk into: installs and history. */
+const LINK_SCAN_SKIP = new Set(["node_modules", ".git", ".venv", "venv"]);
 
 type Folder = string | null | undefined;
 type TaskLike = { threadId: string; cwd?: Folder; pinnedCwd?: Folder };
@@ -60,35 +77,129 @@ export function liveFolders(records: LiveRecords): string[] {
 export const hookResultsName = (threadId: string) => threadId.replace(/[^\w.-]/g, "_");
 export const gateResultsName = (threadId: string) => threadId.replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 80) || "thread";
 
+/** Paths compared as the file system compares them: macOS's and Windows' default volumes ignore case. */
+const FOLDS = process.platform === "darwin" || process.platform === "win32";
+const fold = (path: string) => (FOLDS ? path.toLowerCase() : path);
+export const inside = (root: string, path: string) => {
+  const rel = relative(fold(root), fold(path));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+};
+/** `inside` for paths already absolute and normalized (resolve, realpath): a string compare, for the checks that run
+ * over every live folder. */
+const within = (root: string, path: string) => {
+  const a = fold(root), b = fold(path);
+  return a === b || b.startsWith(a.endsWith(sep) ? a : a + sep);
+};
+function real(path: string): string | null {
+  try { return realpathSync.native(path); } catch { return null; }
+}
+function realFolder(path: string): boolean {
+  try { return lstatSync(path).isDirectory(); } catch { return false; }
+}
+
+/** Whether `path` is strictly inside `root`, `root` is inside `dataDir`, every folder from `dataDir` down to `path`
+ * (itself included) is a real folder, not a link, and where `path` really is stays inside where `dataDir` really is. */
+export function plainFolderUnder(dataDir: string, root: string, path: string): boolean {
+  if (!inside(dataDir, root) || !inside(root, path) || fold(resolve(path)) === fold(resolve(root))) return false;
+  let at = resolve(dataDir);
+  for (const part of relative(resolve(dataDir), resolve(path)).split(sep)) {
+    if (!part || part === "..") return false;
+    at = join(at, part);
+    if (!realFolder(at)) return false;
+  }
+  const realData = real(dataDir), realPath = real(path);
+  return Boolean(realData && realPath && inside(realData, realPath));
+}
+
+/** The ways a text may name a conversation folder: its path with either separator, as JSON writes it, and its id. */
+export function folderMentions(botId: string, threadId: string): string[] {
+  return [`task-workspaces/${botId}/${threadId}`, `task-workspaces\\${botId}\\${threadId}`, `task-workspaces\\\\${botId}\\\\${threadId}`];
+}
+
 export interface FolderCleanupDeps {
   dataDir: string;
   records(): LiveRecords;
-  /** Saved settings that may name a path (MCP servers' commands, routines' prompts); a conversation folder they name stays,
-   * and every one stays while this is null (not readable yet). */
+  /** What the server holds in memory that may name a path (its settings, routines, …); null while not readable yet,
+   * and then every folder stays. The saved definitions and instructions on disk are read as well. */
   heldText?(): string | null;
-  /** Remaining conversations whose messages hold this text (message-db.ts threadsReferencing). */
-  threadsReferencing?(fragment: string): readonly string[];
+  /** For each word, the remaining conversations whose messages hold it (transcript-mentions.ts); a rejection keeps. */
+  mentions?(words: readonly string[]): Promise<Map<string, ReadonlySet<string>>>;
+  /** Why nothing may move now (frozen after a move, a backup being made or restored), else null. Asked before each move
+   * and before the start's leftovers are finished. */
+  paused?(): string | null;
+  /** The processes' working folders (Linux /proc/<pid>/cwd), or null where they cannot be read. */
+  processFolders?(): Promise<readonly string[] | null>;
   /** When the start's leftover .removing is finished; false: only on request. Default: a minute after start. */
   drainAfterMs?: number | false;
   pause?(ms: number): Promise<void>;
+  /** For tests: runs between the last check of a tree and its move. */
+  beforeMove?(path: string): void;
   log?(line: string): void;
   warn?(line: string): void;
 }
 
-type Job = { kind: "workspace"; folder: string } | { kind: "results"; threadId: string };
+/** `name`: a folder name under tool-results, which is a thread id for a deleted conversation. */
+type Job = { kind: "workspace"; folder: string } | { kind: "results"; name: string };
 export interface CleanupTotals { folders: number; entries: number; bytes: number; failed: number }
+/** An install found in a conversation folder, with the identity it had when found. */
+export interface FoundTree { path: string; dev: number; ino: number }
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const code = (error: unknown) => (error as NodeJS.ErrnoException | undefined)?.code;
-const inside = (root: string, path: string) => {
-  const rel = relative(root, path);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-};
-function real(path: string): string | null {
-  try { return realpathSync(path); } catch { return null; }
+
+/** The working folders of this machine's processes, from /proc on Linux; null elsewhere or when /proc cannot be read. */
+export async function linuxProcessFolders(): Promise<string[] | null> {
+  if (process.platform !== "linux") return null;
+  let pids: string[];
+  try { pids = (await readdir("/proc")).filter((name) => /^\d+$/.test(name)); } catch { return null; }
+  const folders: string[] = [];
+  for (const pid of pids) {
+    try { folders.push(await readlink(`/proc/${pid}/cwd`)); } catch { /* gone, or another user's */ }
+  }
+  return folders;
 }
-function realFolder(path: string): boolean {
-  try { return lstatSync(path).isDirectory(); } catch { return false; }
+
+/** Whether a git index (v2 or v3) names a file under `rel` (a path from the repository's top, `/`-separated); null when
+ * that cannot be told (v4's compressed names, a split or sparse index, a large or unreadable index). */
+async function gitTracks(indexFile: string, rel: string): Promise<boolean | null> {
+  let data: Buffer;
+  try {
+    const stats = await lstat(indexFile);
+    if (!stats.isFile()) return null;
+    if (stats.size > MAX_GIT_INDEX_BYTES) return null;
+    data = await readFile(indexFile);
+  } catch (error) {
+    return code(error) === "ENOENT" ? false : null;
+  }
+  return indexNames(data, rel);
+}
+
+/** Reads a git index's entries (v2, v3) and its extensions; see gitTracks. */
+export function indexNames(data: Buffer, rel: string): boolean | null {
+  if (data.length < 12 || data.toString("latin1", 0, 4) !== "DIRC") return null;
+  const version = data.readUInt32BE(4);
+  if (version !== 2 && version !== 3) return null;
+  const count = data.readUInt32BE(8);
+  const end = data.length - 20; // the trailing checksum
+  let at = 12, tracked = false;
+  for (let n = 0; n < count; n++) {
+    if (at + 62 > end) return null;
+    const flags = data.readUInt16BE(at + 60);
+    const extended = version === 3 && (flags & 0x4000) !== 0;
+    const nameAt = at + 62 + (extended ? 2 : 0);
+    const nul = data.indexOf(0, nameAt);
+    if (nul < 0 || nul > end) return null;
+    const name = data.toString("utf8", nameAt, nul);
+    if (name === rel || name.startsWith(`${rel}/`)) tracked = true;
+    // An entry is padded with 1 to 8 NULs so its length from its start is a multiple of 8.
+    at += Math.ceil((nameAt - at + (nul - nameAt) + 1) / 8) * 8;
+  }
+  while (at + 8 <= end) {
+    const signature = data.toString("latin1", at, at + 4);
+    if (signature === "link" || signature === "sdir") return null;
+    at += 8 + data.readUInt32BE(at + 4);
+  }
+  return tracked;
 }
 
 export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
@@ -104,57 +215,185 @@ export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
   let active = false;
   let steps = 0;
 
-  /** One step of file work: every so often the event loop gets a turn, and now and then the disk a rest. */
   async function step(): Promise<void> {
     steps++;
     if (steps % PAUSE_EVERY === 0) await pause(PAUSE_MS);
     else if (steps % YIELD_EVERY === 0) await new Promise<void>((done) => setImmediate(done));
   }
 
-  /** Whether every folder from the data folder down to `path` (itself included) is a real folder, not a link. */
-  function plainFolderUnder(root: string, path: string): boolean {
-    if (!inside(dataDir, root) || !inside(root, path) || resolve(path) === resolve(root)) return false;
-    let at = dataDir;
-    for (const part of relative(dataDir, resolve(path)).split(sep)) {
-      at = join(at, part);
-      if (!realFolder(at)) return false;
+  /** One pass's view of what remains, resolved once: the live conversations and where they work, as written and as the
+   * file system names them. Records are read again before each move; a folder's real path only once per pass. */
+  function batchView() {
+    const realOf = new Map<string, string | null>();
+    const resolved = (path: string) => {
+      if (!realOf.has(path)) realOf.set(path, real(path));
+      return realOf.get(path) ?? null;
+    };
+    const now = () => {
+      const records = deps.records();
+      const folders: string[] = [];
+      for (const used of new Set(liveFolders(records))) {
+        folders.push(resolve(used));
+        const found = resolved(used);
+        if (found) folders.push(found);
+      }
+      return { live: liveThreadIds(records), folders };
+    };
+    /** Resolves every live folder off the event loop first, a few at a time, so the checks before each move only read. */
+    const warm = async () => {
+      const pending = [...new Set(liveFolders(deps.records()))].filter((path) => !realOf.has(path));
+      for (let at = 0; at < pending.length; at += 64) {
+        await Promise.all(pending.slice(at, at + 64).map(async (path) => {
+          realOf.set(path, await realpath(path).catch(() => null));
+        }));
+      }
+      if (!realOf.has(dataDir)) realOf.set(dataDir, await realpath(dataDir).catch(() => null));
+    };
+    return { now, resolved, warm, links: new Map<string, Promise<Array<{ from: string; leads: string[] }> | null>>() };
+  }
+  type View = ReturnType<typeof batchView>;
+
+  /** The saved definitions and instructions, which name paths in settings and prose: every JSON file at the top of the
+   * data folder, each bot's SOUL.md and its memory files. Null when one cannot be read. */
+  async function savedText(): Promise<string | null> {
+    const parts: string[] = [];
+    const take = async (path: string) => {
+      const stats = await lstat(path).catch(() => null);
+      if (!stats || !stats.isFile()) return true;
+      if (stats.size > MAX_HELD_FILE_BYTES) return false;
+      try { parts.push(await readFile(path, "utf8")); return true; } catch { return false; }
+    };
+    const names = async (dir: string) => (realFolder(dir) ? readdir(dir).catch(() => [] as string[]) : []);
+    for (const name of await names(dataDir)) if (name.endsWith(".json") && !await take(join(dataDir, name))) return null;
+    for (const bot of await names(join(dataDir, "bots"))) if (!await take(join(dataDir, "bots", bot, "SOUL.md"))) return null;
+    const walk = async (dir: string, depth: number): Promise<boolean> => {
+      for (const name of await names(dir)) {
+        const path = join(dir, name);
+        if (realFolder(path)) { if (depth < 4 && !await walk(path, depth + 1)) return false; }
+        else if (name.endsWith(".md") && !await take(path)) return false;
+      }
+      return true;
+    };
+    for (const workspace of await names(join(dataDir, "workspaces"))) {
+      if (!await take(join(dataDir, "workspaces", workspace, "MEMORY.md"))) return null;
+      if (!await walk(join(dataDir, "workspaces", workspace, "memory"), 0)) return null;
     }
-    const realData = real(dataDir), realPath = real(path);
-    return Boolean(realData && realPath && inside(realData, realPath));
+    return parts.join("\n");
   }
 
-  /** What still uses this conversation folder, or null when nothing that remains can. `deep` also reads the remaining
-   * conversations' messages, a scan of the transcripts kept for the moment just before a move. */
-  function heldBy(folder: string, deep = false): string | null {
+  /** The links in a bot's own folder and its conversation folders, each with where it leads (a relative one resolved
+   * from its folder): read once per pass for each bot; null when they were too many to look through. */
+  async function botLinks(botId: string, view: View): Promise<Array<{ from: string; leads: string[] }> | null> {
+    let scanned = 0;
+    const links: Array<{ from: string; leads: string[] }> = [];
+    const walk = async (dir: string, depth: number): Promise<boolean> => {
+      let entries;
+      try { entries = await readdir(dir, { withFileTypes: true }); } catch { return true; }
+      for (const entry of entries) {
+        if (++scanned > MAX_LINK_SCAN) return false;
+        await step();
+        const path = join(dir, entry.name);
+        if (entry.isSymbolicLink()) {
+          let target: string | null = null;
+          try { target = resolve(dir, await readlink(path)); } catch { /* unreadable: its real path below, if any */ }
+          links.push({ from: path, leads: [target, view.resolved(path)].filter((one): one is string => Boolean(one)) });
+        } else if (entry.isDirectory() && depth < MAX_DEPTH && !LINK_SCAN_SKIP.has(entry.name)) {
+          if (!await walk(path, depth + 1)) return false;
+        }
+      }
+      return true;
+    };
+    const places = [join(dataDir, "workspaces", botId), ...readdirNames(join(tasksRoot, botId)).filter((name) => ID.test(name)).map((name) => join(tasksRoot, botId, name))];
+    for (const place of places) if (realFolder(place) && !await walk(place, 0)) return null;
+    return links;
+  }
+
+  /** Whether a link outside `folder`, in the bot's own folder or its other conversation folders, leads into it; null
+   * when they were too many to look through. */
+  async function linkedInto(botId: string, folder: string, view: View): Promise<boolean | null> {
+    let found = view.links.get(botId);
+    if (!found) view.links.set(botId, found = botLinks(botId, view));
+    const links = await found;
+    if (!links) return null;
+    const own = [folder, view.resolved(folder)].filter((path): path is string => Boolean(path));
+    return links.some((link) => !inside(folder, link.from) && link.leads.some((lead) => own.some((mine) => inside(mine, lead))));
+  }
+
+  /** What in the records still uses this conversation folder, or null: the quick check, made again before each move. */
+  function heldByRecords(folder: string, view: View): string | null {
     const [botId, threadId, ...rest] = relative(tasksRoot, folder).split(sep);
     if (!botId || !threadId || rest.length || !ID.test(botId) || !ID.test(threadId)) return "not a conversation folder";
-    if (!plainFolderUnder(tasksRoot, folder)) return "not a plain folder in task-workspaces";
-    const records = deps.records();
-    if (liveThreadIds(records).has(threadId)) return "its conversation remains";
-    const own = [folder, real(folder)].filter((path): path is string => Boolean(path));
-    const tops = [dataDir, real(dataDir)].filter((path): path is string => Boolean(path));
-    for (const used of new Set(liveFolders(records))) {
-      for (const path of new Set([resolve(used), real(used)].filter((one): one is string => Boolean(one)))) {
-        // In the folder or inside it, or between it and the data folder (which sees it whole).
-        if (own.some((mine) => inside(mine, path) || (inside(path, mine) && tops.some((top) => inside(top, path))))) return `a remaining conversation works in ${path}`;
-      }
+    if (!plainFolderUnder(dataDir, tasksRoot, folder)) return "not a plain folder in task-workspaces";
+    const { live, folders } = view.now();
+    if (live.has(threadId)) return "its conversation remains";
+    const own = [folder, view.resolved(folder)].filter((path): path is string => Boolean(path));
+    const tops = [dataDir, view.resolved(dataDir)].filter((path): path is string => Boolean(path));
+    for (const path of folders) {
+      // In the folder or inside it, or between it and the data folder (which sees it whole).
+      if (own.some((mine) => within(mine, path) || (within(path, mine) && tops.some((top) => within(top, path))))) return `a remaining conversation works in ${path}`;
     }
     const held = deps.heldText ? deps.heldText() : "";
-    if (held === null) return "the saved settings cannot be read yet";
-    const named = [`task-workspaces/${botId}/${threadId}`, `task-workspaces\\${botId}\\${threadId}`, `task-workspaces\\\\${botId}\\\\${threadId}`];
-    if (named.some((fragment) => held.includes(fragment))) return "the saved settings or a routine name a path in it";
-    if (deep && deps.threadsReferencing) {
-      const live = liveThreadIds(records);
-      if (named.some((fragment) => deps.threadsReferencing!(fragment).some((id) => live.has(id)))) return "a remaining conversation names a path in it";
+    if (held === null) return "the settings cannot be read yet";
+    if (folderMentions(botId, threadId).some((fragment) => fold(held).includes(fold(fragment)))) return "the settings or a routine name a path in it";
+    return null;
+  }
+
+  /** Everything that may still use this conversation folder, or null: the records, the saved definitions and
+   * instructions, links from the bot's other folders, processes and the remaining conversations' messages. */
+  async function heldBy(folder: string, view: View, mentioned: ReadonlyMap<string, ReadonlySet<string>> | null): Promise<string | null> {
+    const quick = heldByRecords(folder, view);
+    if (quick) return quick;
+    const [botId, threadId] = relative(tasksRoot, folder).split(sep) as [string, string];
+    const saved = await savedText();
+    if (saved === null) return "the saved definitions cannot be read";
+    if (folderMentions(botId, threadId).some((fragment) => fold(saved).includes(fold(fragment)))) return "the saved definitions or instructions name a path in it";
+    const linked = await linkedInto(botId, folder, view);
+    if (linked === null) return "the bot's other folders hold too many entries to check for links into it";
+    if (linked) return "a link in the bot's other folders leads into it";
+    if (deps.processFolders) {
+      const cwds = await deps.processFolders();
+      const own = [folder, view.resolved(folder)].filter((path): path is string => Boolean(path));
+      if (cwds && cwds.some((cwd) => own.some((mine) => inside(mine, cwd)))) return "a process works in it";
+    }
+    if (deps.mentions) {
+      if (!mentioned) return "the transcripts cannot be read";
+      const live = view.now().live;
+      if ([...(mentioned.get(threadId) ?? [])].some((id) => id !== threadId && live.has(id))) return "a remaining conversation names it";
     }
     return null;
   }
 
-  /** The installed dependencies in a conversation folder, never through a link nor into .git. */
-  async function rebuildable(folder: string): Promise<string[]> {
-    const found: string[] = [];
+  /** Why an install candidate must stay, or null when it is plainly an install a package manager makes again. */
+  async function notAnInstall(path: string, folder: string): Promise<string | null> {
+    const isFile = async (file: string) => (await lstat(file).catch(() => null))?.isFile() === true;
+    const name = path.slice(path.lastIndexOf(sep) + 1);
+    if (name === "node_modules") {
+      let marked = false;
+      for (const marker of NODE_MARKERS) if (await isFile(join(path, marker))) marked = true;
+      if (!marked) return "no package manager's record in it";
+      if (!await isFile(join(dirname(path), "package.json"))) return "no package.json beside it";
+      // A repository that commits its node_modules keeps it.
+      for (let at = dirname(path); inside(folder, at); at = dirname(at)) {
+        const dotGit = await lstat(join(at, ".git")).catch(() => null);
+        if (!dotGit) { if (at === folder) break; continue; }
+        if (!dotGit.isDirectory()) return "inside a git checkout whose index cannot be read";
+        const tracked = await gitTracks(join(at, ".git", "index"), relative(at, path).split(sep).join("/"));
+        if (tracked === null) return "inside a git checkout whose index cannot be read";
+        if (tracked) return "git tracks it";
+        break;
+      }
+      return null;
+    }
+    let entries: string[];
+    try { entries = await readdir(path); } catch { return "cannot be read"; }
+    const other = entries.filter((entry) => !VENV_ENTRIES.has(entry));
+    return other.length ? `holds ${other.slice(0, 3).join(", ")}${other.length > 3 ? ", …" : ""}` : null;
+  }
+
+  /** The installs in a conversation folder, never through a link nor into .git, each with its identity. */
+  async function rebuildable(folder: string, report = (_path: string, _why: string) => {}): Promise<FoundTree[]> {
+    const found: FoundTree[] = [];
     let scanned = 0;
-    const isFile = async (path: string) => (await lstat(path).catch(() => null))?.isFile() === true;
     const walk = async (dir: string, depth: number): Promise<void> => {
       let entries;
       try { entries = await readdir(dir, { withFileTypes: true }); } catch { return; }
@@ -163,25 +402,43 @@ export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
         await step();
         if (!entry.isDirectory() || entry.isSymbolicLink() || entry.name === ".git") continue;
         const path = join(dir, entry.name);
-        if (entry.name === "node_modules") found.push(path);
-        else if ((entry.name === ".venv" || entry.name === "venv") && await isFile(join(path, "pyvenv.cfg"))) found.push(path);
-        else if (depth < MAX_DEPTH) await walk(path, depth + 1);
+        const candidate = entry.name === "node_modules" || ((entry.name === ".venv" || entry.name === "venv") && (await lstat(join(path, "pyvenv.cfg")).catch(() => null))?.isFile() === true);
+        if (candidate) {
+          const why = await notAnInstall(path, folder);
+          const stats = why ? null : await lstat(path).catch(() => null);
+          if (why) report(path, why);
+          else if (stats?.isDirectory()) found.push({ path, dev: stats.dev, ino: stats.ino });
+        } else if (depth < MAX_DEPTH) await walk(path, depth + 1);
       }
     };
     await walk(folder, 0);
     return found;
   }
 
-  /** Moves `path` into .removing in one rename; false (and `path` untouched) when that cannot be done safely. */
-  async function retire(root: string, path: string): Promise<boolean> {
-    if (!plainFolderUnder(root, path)) return false;
+  const sameNode = (a: { dev: number; ino: number }, b: { dev: number; ino: number }) => a.dev === b.dev && a.ino === b.ino;
+
+  /** Moves `tree` into .removing in one rename; false (and the tree untouched) when that cannot be done safely. */
+  async function retire(root: string, tree: FoundTree): Promise<boolean> {
+    const paused = deps.paused?.() ?? null;
+    if (paused) { log(`cleanup: kept ${tree.path} for now: ${paused}`); return false; }
     try {
       await mkdir(removing, { recursive: true, mode: 0o700 });
-      if (!realFolder(removing)) throw new Error(`${REMOVING_DIR} is not a plain folder`);
-      await rename(path, join(removing, `${Date.now()}-${randomBytes(6).toString("hex")}`));
+      if (!plainFolderUnder(dataDir, dataDir, removing)) throw new Error(`${REMOVING_DIR} is not a plain folder`);
+      if (!plainFolderUnder(dataDir, root, tree.path)) throw new Error("not a plain folder in the data folder");
+      const before = lstatSync(tree.path);
+      if (!before.isDirectory() || !sameNode(before, tree)) throw new Error("it changed since it was checked");
+      deps.beforeMove?.(tree.path);
+      const to = join(removing, `${Date.now()}-${randomBytes(6).toString("hex")}`);
+      await rename(tree.path, to);
+      const moved = await lstat(to);
+      if (!sameNode(moved, tree)) {
+        // Something else was moved (a link swapped in on the way): put it back where it was and keep it.
+        await rename(to, tree.path).catch((error: unknown) => warn(`cleanup: could not put back ${to} at ${tree.path}: ${message(error)}`));
+        throw new Error("what was moved is not what was checked; put back");
+      }
       return true;
     } catch (error) {
-      warn(`cleanup: kept ${path}: ${message(error)}`);
+      warn(`cleanup: kept ${tree.path}: ${message(error)}`);
       return false;
     }
   }
@@ -203,9 +460,10 @@ export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
       await drop();
     } catch (error) {
       if (code(error) === "ENOENT") return;
-      // A read-only file (Windows) or a folder without write permission: made writable once, then tried again.
+      // A read-only file (Windows) or a folder without write permission: it and its folder made writable, then again.
       try {
-        await chmod(path, stats.isDirectory() ? 0o700 : 0o600);
+        await chmod(dirname(path), 0o700).catch(() => {});
+        if (!stats.isSymbolicLink()) await chmod(path, stats.isDirectory() ? 0o700 : 0o600).catch(() => {});
         await drop();
       } catch {
         totals.failed++;
@@ -216,32 +474,37 @@ export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
     totals.bytes += stats.isDirectory() ? 0 : stats.size;
   }
 
+  /** Finishes what an earlier pass moved to .removing: only its own entries, and only in a plain .removing. */
   async function drainPending(totals: CleanupTotals): Promise<void> {
-    if (!realFolder(removing)) return;
-    for (const name of await readdir(removing).catch(() => [] as string[])) await remove(join(removing, name), totals);
+    if (!realFolder(removing) || !plainFolderUnder(dataDir, dataDir, removing)) return;
+    const paused = deps.paused?.() ?? null;
+    if (paused) return;
+    for (const name of await readdir(removing).catch(() => [] as string[])) if (RETIRED.test(name)) await remove(join(removing, name), totals);
   }
 
-  async function runJob(job: Job, totals: CleanupTotals): Promise<void> {
+  async function runJob(job: Job, totals: CleanupTotals, view: View, mentioned: () => Promise<ReadonlyMap<string, ReadonlySet<string>> | null>): Promise<void> {
     if (job.kind === "results") {
-      const records = deps.records();
-      const name = job.threadId;
+      const name = job.name;
       // A name another thread's results may also be kept under (the gate cuts names at 80 characters) stays.
-      const shared = [...liveThreadIds(records)].some((id) => hookResultsName(id) === name || gateResultsName(id) === name);
-      if (shared || !ID.test(name)) return;
+      const shared = [...view.now().live].some((id) => hookResultsName(id) === name || gateResultsName(id) === name);
+      if (shared || !ID.test(name) || name === "thread") return;
       const path = join(resultsRoot, name);
-      if (realFolder(path) && await retire(resultsRoot, path)) totals.folders++;
+      const stats = await lstat(path).catch(() => null);
+      if (stats?.isDirectory() && await retire(resultsRoot, { path, dev: stats.dev, ino: stats.ino })) totals.folders++;
       return;
     }
     if (!realFolder(job.folder)) return;
-    const why = heldBy(job.folder);
+    const why = heldByRecords(job.folder, view);
     if (why) return log(`cleanup: kept ${job.folder}: ${why}`);
-    const trees = await rebuildable(job.folder);
-    // Checked again, transcripts too, just before the moves: a conversation may have started working there meanwhile.
-    const late = trees.length ? heldBy(job.folder, true) : null;
+    const trees = await rebuildable(job.folder, (path, reason) => log(`cleanup: kept ${path}: ${reason}`));
+    if (!trees.length) return;
+    const late = await heldBy(job.folder, view, await mentioned());
     if (late) return log(`cleanup: kept ${job.folder}: ${late}`);
-    for (const path of trees) {
-      if (heldBy(job.folder)) return;
-      if (await retire(tasksRoot, path)) totals.folders++;
+    for (const tree of trees) {
+      // Checked again just before each move: a conversation may have started working there meanwhile.
+      const again = heldByRecords(job.folder, view);
+      if (again) return log(`cleanup: kept ${job.folder}: ${again}`);
+      if (await retire(tasksRoot, tree)) totals.folders++;
     }
   }
 
@@ -252,9 +515,19 @@ export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
       const totals: CleanupTotals = { folders: 0, entries: 0, bytes: 0, failed: 0 };
       try {
         while (queued.size) {
-          const [key, job] = queued.entries().next().value as [string, Job];
-          queued.delete(key);
-          try { await runJob(job, totals); } catch (error) { warn(`cleanup: kept ${key}: ${message(error)}`); }
+          const batch = [...queued.entries()];
+          queued.clear();
+          const view = batchView();
+          await view.warm();
+          // The transcripts are read once per batch, for every conversation in it, and only when one has an install.
+          let mentioned: Promise<ReadonlyMap<string, ReadonlySet<string>> | null> | undefined;
+          const ids = batch.flatMap(([, job]) => (job.kind === "workspace" ? [relative(tasksRoot, job.folder).split(sep)[1] ?? ""] : [])).filter((id) => ID.test(id));
+          const read = () => (mentioned ??= deps.mentions
+            ? deps.mentions(ids).then((found) => found, (error: unknown) => { warn(`cleanup: the transcripts could not be read: ${message(error)}`); return null; })
+            : Promise.resolve(new Map()));
+          for (const [key, job] of batch) {
+            try { await runJob(job, totals, view, read); } catch (error) { warn(`cleanup: kept ${key}: ${message(error)}`); }
+          }
         }
         await drainPending(totals);
       } catch (error) {
@@ -263,14 +536,14 @@ export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
         active = false;
       }
       if (totals.folders || totals.entries) {
-        log(`cleanup: removed ${totals.folders} dependency or tool-result folder(s) of deleted conversations, ${totals.entries} entries, ${Math.round(totals.bytes / 1024 / 1024)} MB${totals.failed ? `; ${totals.failed} left for the next pass` : ""}`);
+        log(`cleanup: removed ${totals.folders} install or tool-result folder(s) of deleted conversations, ${totals.entries} entries, ${Math.round(totals.bytes / 1024 / 1024)} MB${totals.failed ? `; ${totals.failed} left for the next pass` : ""}`);
       }
       if (queued.size) kick();
     });
   }
 
   function enqueue(job: Job): void {
-    queued.set(job.kind === "workspace" ? `workspace:${job.folder}` : `results:${job.threadId}`, job);
+    queued.set(job.kind === "workspace" ? `workspace:${job.folder}` : `results:${job.name}`, job);
   }
 
   const children = (dir: string) => (realFolder(dir) ? readdirNames(dir) : []);
@@ -288,7 +561,7 @@ export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
     const bots = children(tasksRoot).filter((id) => ID.test(id));
     for (const threadId of ids) {
       for (const botId of bots) if (realFolder(join(tasksRoot, botId, threadId))) enqueue({ kind: "workspace", folder: join(tasksRoot, botId, threadId) });
-      enqueue({ kind: "results", threadId });
+      enqueue({ kind: "results", name: threadId });
     }
     kick();
   }
@@ -300,11 +573,26 @@ export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
     kick();
   }
 
+  /** Folders the orphan sweep found: conversation folders (their installs go) and tool-results folder names. */
+  function orphans(found: { workspaces?: Iterable<string>; results?: Iterable<string> }): void {
+    for (const folder of found.workspaces ?? []) {
+      const [botId, threadId, ...rest] = relative(tasksRoot, resolve(folder)).split(sep);
+      if (botId && threadId && !rest.length && ID.test(botId) && ID.test(threadId)) enqueue({ kind: "workspace", folder: join(tasksRoot, botId, threadId) });
+    }
+    for (const name of found.results ?? []) if (ID.test(name)) enqueue({ kind: "results", name });
+    kick();
+  }
+
   if (deps.drainAfterMs !== false) setTimeout(kick, deps.drainAfterMs ?? DRAIN_AFTER_START_MS).unref?.();
 
   return {
     conversationsGone,
     botGone,
+    orphans,
+    /** What in the records still uses a conversation folder, or null when nothing there does. */
+    whyKept: (folder: string) => heldByRecords(folder, batchView()),
+    /** Its installs, and through `report` the look-alikes that stay. */
+    rebuildable,
     /** Finishes what an earlier run left in .removing. */
     drain: () => { kick(); return running; },
     /** Resolves once everything queued so far is done. */
