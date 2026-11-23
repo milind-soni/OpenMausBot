@@ -2,9 +2,7 @@
 //
 //   node --experimental-strip-types scripts/migrate-skills-library.ts [--data-dir <dir>]
 //
-// It never writes bots.json and does not read features.skillsLibrary: migrated
-// skills disappear from bots until a boot with the flag on applies the pending
-// assignments. Run it only when the flag is on.
+// The next server boot applies the pending assignments without migrating any other skills.
 import { resolve } from "node:path";
 
 const args = process.argv.slice(2);

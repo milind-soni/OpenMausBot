@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { DATA_DIR, type AppConfig } from "../config.ts";
+import { DATA_DIR } from "../config.ts";
 import { json, readBody } from "../harness/http.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { installLibrarySkill, readLibrarySkillFile, setLibrarySkillEveryBot } from "../skill-library.ts";
@@ -27,7 +27,6 @@ async function serve(botId: string) {
   const store = { bot: (id: string) => (id === botId ? { id } : undefined), bots: [] } as unknown as Store;
   const routes = [createBotSkillsRoutes({
     store,
-    cfg: {} as AppConfig,
     listBotSkills: () => [],
     readBotSkillFile: () => null,
     stagedSkillListing: (staged) => staged,
@@ -110,7 +109,6 @@ describe("removing a skill from one bot", () => {
     } as unknown as Store;
     const routes = [createBotSkillsRoutes({
       store,
-      cfg: { features: { skillsLibrary: true } } as AppConfig,
       listBotSkills: () => [
         { name: brought, origin: "imported" },
         { name: "engine-notes", origin: "native" },
@@ -177,7 +175,6 @@ describe("removing a skill from one bot", () => {
     } as unknown as Store;
     const routes = [createBotSkillsRoutes({
       store,
-      cfg: { features: { skillsLibrary: true } } as AppConfig,
       listBotSkills: () => [],
       readBotSkillFile: () => null,
       stagedSkillListing: (staged) => staged,

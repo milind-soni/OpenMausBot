@@ -30,7 +30,6 @@ export interface SettingsContext {
   organization: boolean;
   environments: boolean;
   installations: boolean;
-  skills: boolean;
 }
 
 export interface SettingsPage {
@@ -129,7 +128,7 @@ export function resolveSettingsTarget(requested: AppSettingsSection, ctx: Settin
 /** A context with every page showing for tests and previews to narrow down. */
 export const fullContext = (over: Partial<SettingsContext> = {}): SettingsContext => ({
   desktop: true, here: true, home: true, cloud: false, team: false, client: false, admin: true, places: false, plan: true,
-  organization: false, environments: true, installations: false, skills: false, ...over,
+  organization: false, environments: true, installations: false, ...over,
 });
 
 /** One row, section or page search can open. `label` beats `labelKey` where the name is not a string of the app's. */
@@ -184,7 +183,7 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "limits", page: "bots", anchor: "limits", labelKey: "settings.simple.more.limits", synonyms: ["group turns", "timeout", "tool time limit", "parallel threads", "concurrency", "keep warm"] },
   { id: "parallel", page: "bots", anchor: "parallel", labelKey: "settings.threads.title", sectionKey: "settings.simple.more.limits", synonyms: ["parallel", "threads", "concurrency"] },
   { id: "group-turns", page: "bots", anchor: "group-turns", labelKey: "settings.roomTurns.title", sectionKey: "settings.simple.more.limits", synonyms: ["group", "turns"] },
-  { id: "skills", page: "bots", anchor: "skills", labelKey: "settings.section.skills", when: (ctx) => ctx.skills, synonyms: ["skills", "library"] },
+  { id: "skills", page: "bots", anchor: "skills", labelKey: "settings.section.skills", when: (ctx) => ctx.admin, synonyms: ["skills", "library"] },
   { id: "early", page: "bots", anchor: "early", labelKey: "settings.bots.early", synonyms: ["experimental", "early", "preview", "write their own skills"] },
   { id: "all-bots", page: "bots", labelKey: "settings.page.bots", topFor: ["all bots"] },
   { id: "browser", page: "desktops", anchor: "browser", labelKey: "settings.experimental.browser", synonyms: ["browser", "profiles", "browser profiles", "open sites", "new browser"] },

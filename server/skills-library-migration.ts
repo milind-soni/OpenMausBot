@@ -164,29 +164,20 @@ export function writePendingAssignments(assignments: Record<string, string[]>, r
   writeFileAtomic(pendingAssignmentsPath(root), `${JSON.stringify(assignments, null, 2)}\n`, { mode: 0o600 });
 }
 
-export function runSkillsLibraryBootSweep(options: {
+export function applyPendingSkillAssignments(options: {
   bots: readonly { id: string; assignedSkills?: string[] }[];
-  patch?: (botId: string, assignedSkills: string[]) => void;
+  patch: (botId: string, assignedSkills: string[]) => void;
   root?: string;
-}): SkillsMigrationReport {
+}): void {
   const root = options.root ?? skillsLibraryRoot();
-  const outcomes: SkillMigrationOutcome[] = [];
-  const assignments: Record<string, string[]> = {};
-  const pending = options.patch ? readPendingAssignments(root) : {};
+  const pending = readPendingAssignments(root);
+  if (!Object.keys(pending).length) return;
   for (const bot of options.bots) {
-    const report = migrateBotSkillsToLibrary(bot.id, root);
-    outcomes.push(...report.outcomes);
     const current = bot.assignedSkills ?? [];
-    const merged = [...new Set([...(pending[bot.id] ?? []), ...(report.assignments[bot.id] ?? []), ...current])].sort();
-    const changed = merged.length !== current.length || merged.some((name, index) => name !== current[index]);
-    if (!changed) continue;
-    if (options.patch) options.patch(bot.id, merged);
-    assignments[bot.id] = merged;
+    const merged = [...new Set([...current, ...(pending[bot.id] ?? [])])];
+    if (merged.length !== current.length) options.patch(bot.id, merged);
   }
-  if (options.patch && (Object.keys(pending).length || Object.keys(readPendingAssignments(root)).length)) {
-    writePendingAssignments({}, root);
-  }
-  return { ranAt: new Date().toISOString(), outcomes, assignments };
+  writePendingAssignments({}, root);
 }
 
 export function botIdsWithSkillState(dataDir: string): string[] {

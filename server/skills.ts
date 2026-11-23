@@ -1303,9 +1303,8 @@ export function enabledSkillFiles(botId: string, names: readonly string[], assig
   return new Map(names.filter((name) => on.has(name)).map((name) => [name, manifest[name] ? join(skillTarget(workspaceDir(botId), name, manifest[name]), "SKILL.md") : librarySkillFilePath(name)] as const));
 }
 
-export function resolveBotSkills(botId: string, assignedLibrary: readonly string[] | undefined): SkillListing[] {
+export function resolveBotSkills(botId: string, assignedLibrary: readonly string[] = []): SkillListing[] {
   const own = listSkills(botId);
-  if (assignedLibrary === undefined) return own; // the library is off: no every-bot skills either
   const ownNames = new Set(own.map((skill) => skill.name));
   return [...own, ...librarySkillsForBot(botId, new Set(assignedLibrary), ownNames)];
 }
@@ -1321,7 +1320,7 @@ export function listBotSkillsWithOrigin(
   const own = listSkills(botId);
   const ownNames = new Set(own.map((skill) => skill.name));
   const assigned = new Set(assignedLibrary ?? []);
-  const skills = resolveBotSkills(botId, assignedLibrary ?? []).map((skill) => ({
+  const skills = resolveBotSkills(botId, assignedLibrary).map((skill) => ({
     ...skill,
     origin: ownNames.has(skill.name) ? ("private" as const) : ("library" as const),
   }));

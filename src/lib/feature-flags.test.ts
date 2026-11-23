@@ -83,11 +83,9 @@ describe("experimental feature flags", () => {
   });
 
   it("offers sharing learned skills only with the skills library, asking by default", () => {
-    expect(shareLearnedSkillsMode(null)).toBe("off");
-    expect(shareLearnedSkillsMode({ features: { shareLearnedSkills: "auto" } })).toBe("off");
-    expect(shareLearnedSkillsMode({ features: { skillsLibrary: true } })).toBe("ask");
-    expect(shareLearnedSkillsMode({ features: { skillsLibrary: true, shareLearnedSkills: "auto" } })).toBe("auto");
-    expect(shareLearnedSkillsMode({ features: { skillsLibrary: true, shareLearnedSkills: "off" } })).toBe("off");
+    expect(shareLearnedSkillsMode(null)).toBe("ask");
+    expect(shareLearnedSkillsMode({ features: { shareLearnedSkills: "auto" } })).toBe("auto");
+    expect(shareLearnedSkillsMode({ features: { shareLearnedSkills: "off" } })).toBe("off");
   });
 });
 

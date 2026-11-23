@@ -388,25 +388,21 @@ it("a signed-in admin can ask the Chief to distribute library skills on a servic
   saved.find((one: any) => one.id === atlas.id).assignedSkills = ["existing"];
   saved.find((one: any) => one.id === elsewhere.id).section = "Research";
   writeRegistry(dataDir, { bots: saved });
-  const cfg = config();
-  const saveConfig = (enabled: boolean) => writeFileSync(join(dataDir, "config.json"),
-    JSON.stringify({ ...cfg, features: { ...cfg.features, skillsLibrary: enabled } }));
-  saveConfig(false);
+  expect(config().features ?? {}).not.toHaveProperty("skillsLibrary");
   const env = { ...verificationServerEnvironment({}, dataDir, Number(new URL(url).port)), OMB_LOOPBACK_TRUST: "service" };
   await restart(env);
 
   const assign = step({ action: "set", id: "bots.skills", value: { botId: atlas.id, skills: ["existing", "notes"] } });
   const global = step({ action: "set", id: "skills.library", value: { name: "notes", everyBot: true } });
-  await start("CHIEF-LIBRARY-OFF", [{ ...global, expectError: true }], 20_000, ownerDevice);
-  expect(results(await finished("CHIEF-LIBRARY-OFF"))[0].text).toContain("skills library is not enabled");
-  await waitForExit(child, { signal: "SIGTERM" });
-  saveConfig(true);
-  await restart(env);
+  expect(await api("GET", "/api/skills-library", undefined, 200, ownerDevice)).toEqual({ skills: [] });
+  await api("POST", "/api/skills-library", { text: "guest input" }, 403, guest);
+  await api("PUT", `/api/bots/${atlas.id}/skills-library`, { skills: [] }, 403, guest);
 
   await start("CHIEF-LIBRARY-MISSING", [{ ...assign, expectError: true }], 20_000, ownerDevice);
   expect(results(await finished("CHIEF-LIBRARY-MISSING"))[0].text).toContain("not in the library");
   for (const name of ["existing", "notes"]) {
-    await api("POST", "/api/skills-library", { text: `---\nname: ${name}\ndescription: Fixture skill.\n---\nUse fixture notes.\n` }, 201, ownerDevice);
+    const imported = await api("POST", "/api/skills-library", { text: `---\nname: ${name}\ndescription: Fixture skill.\n---\nUse fixture notes.\n` }, 201, ownerDevice);
+    expect(imported.skill.enabled).toBe(false);
     await api("PATCH", `/api/skills-library/${name}`, { enabled: true }, 200, ownerDevice);
   }
   await start("CHIEF-LIBRARY-GUEST", [{ ...global, expectError: true }], 20_000, guest);

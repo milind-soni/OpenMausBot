@@ -6,16 +6,12 @@ import { mkdirSync, renameSync } from "node:fs";
 import { z } from "zod";
 
 import { writeFileAtomic } from "./atomic.ts";
-import { DATA_DIR, type AppConfig } from "./config.ts";
+import { DATA_DIR } from "./config.ts";
 import { githubSkillOriginSchema, skillFolderDigest, skillFolderRecordSchema, writeSkillFolder } from "./skill-folder.ts";
 import { entryExistsWithoutFollowing } from "./skill-storage.ts";
 import type { GitHubSkillOrigin } from "../shared/skill-import.ts";
 import { isSkillName, parseSkillMd, SKILL_FILE_MAX_BYTES } from "../shared/skill-md.ts";
 import type { SkillPackageStamp } from "./skills.ts";
-
-export function skillsLibraryEnabled(cfg: AppConfig): boolean {
-  return cfg.features?.skillsLibrary === true;
-}
 
 export interface SkillManifest {
   id: string;

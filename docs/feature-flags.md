@@ -16,13 +16,11 @@ Stop that server (or quit the app if it runs the server), back up the file, merg
 only the keys you want into its existing `features` object, then start it again.
 Keep the other configuration, including engine instances and credentials.
 
-For example, this enables the shared skills library while leaving automatic
-skill review off:
+For example, this asks before sharing learned skills and leaves automatic skill review off:
 
 ```json
 {
   "features": {
-    "skillsLibrary": true,
     "skillReview": false,
     "shareLearnedSkills": "ask"
   }
@@ -52,7 +50,6 @@ text and extra work can increase token usage.
 | `claudeUserSkills` | Off | Claude bots also load the personal skills in `~/.claude/skills`. | Adds skill instructions/files to the engine's available context; does not control Codex native skills. |
 | `smartSetupChoices` | On | Offers model-written setup choices for a new bot when enough information is available. | Background model calls, subject to the bot's engine capabilities and the budget. If that engine has no one-off text call, an eligible configured [helper](memory.md#the-helper-model) may write the choices using its own provider and model. |
 | `autoRecall` | On | Recalls matching memory passages into turns. | Recalled text uses context. Disabling this does not disable memory storage or upkeep; see [Memory](memory.md). |
-| `skillsLibrary` | Off | Enables the shared skills store and its Skills settings. | Enables the library, not automatic conversation review. Skill use follows assignments and permissions. |
 | `roomMemoryCapture` | Off | Lets memory upkeep also read a member bot's room turns. | Extends the material processed by memory upkeep. |
 | `parallelRoomJobs` | On | Runs jobs assigned to several room members side by side, each in its own thread. Set to `false` to run them one at a time in the room's thread. | Allows concurrent engine work rather than sequential jobs. |
 | `acpPlanLines` | Off | Shows an ACP agent's plan as activity lines. | Each emitted line counts as a tool call wherever tool calls are counted; environment override below. |
@@ -60,7 +57,7 @@ text and extra work can increase token usage.
 | `savedSteps` | On | Allows saving and repeating computer tasks from their steps on a supported host. | Currently requires a Mac server. Enabling it does not add host support. |
 | `usbPhoneTakeover` | Off | Shows the server's USB Android phone live in the Screen panel and lets a person take it over from the bots. | Not offered on a Cloud home or a hosted workspace. The first use downloads the scrcpy server (734 KB) from GitHub. |
 
-With `skillsLibrary` on, the every-bot skills a bot was taken off live in
+The every-bot skills a bot was taken off live in
 `<data>/skill-state/<bot id>/library-opt-out.json`. If that file is there but
 can't be read or isn't a list of names, the bot keeps every every-bot skill and
 the server logs it once. Switching a skill off for the bot again writes a good
@@ -92,7 +89,7 @@ own lending rules; this flag is not a universal pause control. See
 | Key | Default | Accepted values and effect |
 | --- | --- | --- |
 | `skillReviewSteps` | `10` | Integer from `3` to `100`: tool steps in a conversation between automatic reviews. Does not turn review on by itself. |
-| `shareLearnedSkills` | `"ask"` when the library is enabled; otherwise effectively `"off"` | `"off"`, `"ask"`, or `"auto"`: whether to share a learned skill through the library. Requires `skillsLibrary`; setting `"auto"` changes the sharing decision, not the skill-review switch. |
+| `shareLearnedSkills` | `"ask"` | `"off"`, `"ask"`, or `"auto"`: whether to share a learned skill through the library. Setting `"auto"` changes the sharing decision, not the skill-review switch. |
 
 ## Environment overrides
 

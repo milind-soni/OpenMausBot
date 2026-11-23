@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { productName } from "@/lib/brand";
-import { skillsLibraryEnabled } from "@/lib/feature-flags";
 import { useStore } from "@/state/store";
 import { useTeamPeople } from "@/state/team-people";
 import { AdminOnly } from "../../AdminOnly";
@@ -157,7 +156,7 @@ export function BotsPage() {
         <div data-settings-block="keep-warm" className="contents"><CacheKeepWarmSettings /></div>
       </SettingsRows>
     </SettingsGroup>}
-    {skillsLibraryEnabled(state.config) && <div data-settings-block="skills"><SkillsSection /></div>}
+    {ctx.admin && <div data-settings-block="skills"><SkillsSection /></div>}
     <div data-settings-block="early"><ExperimentalFeaturesRow /></div>
   </>;
 }

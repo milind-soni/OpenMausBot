@@ -74,7 +74,7 @@ describe("words a person typed", () => {
     })).not.toHaveProperty("error");
     const libraryHost = createSkillsLibraryHost({
       store: { bot: () => mate, messagesFor: () => [{ at: 500 }], taskByThread: () => undefined } as unknown as Store,
-      cfg: { features: { skillsLibrary: true } } as AppConfig,
+      cfg: {} as AppConfig,
       appendSkillRequestCard: () => ({ requestId: "", summary: "" }),
     });
     const engine = { instanceId: "antigravity", driverKind: "antigravityAgent" };

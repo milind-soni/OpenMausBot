@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { useStore, type Bot } from "@/state/store";
 import { useBotEditor } from "./BotEditorContext";
-import { skillAuthoringEnabled, skillsLibraryEnabled } from "@/lib/feature-flags";
+import { skillAuthoringEnabled } from "@/lib/feature-flags";
 import { Switch } from "../SettingsPrimitives";
 import { inputCls } from "./field";
 import { OrgSkillsCard } from "./OrgSkillsCard";
@@ -290,7 +290,6 @@ export function SkillsSection({ bot }: { bot: Bot }) {
   const { request: api } = useBotEditor();
   const { state } = useStore();
   const featureEnabled = skillAuthoringEnabled(state.config);
-  const libraryOn = skillsLibraryEnabled(state.config);
   const {
     skills, staged, loading, working, setWorking, error, setError, reviewing, setReviewing, refresh, toggle, enableReviewed,
     libraryPool, addFromLibrary, setAddFromLibrary, assignmentBusy, addToBot,
@@ -413,62 +412,58 @@ export function SkillsSection({ bot }: { bot: Bot }) {
           {featureEnabled ? t("skills.learned.hintOn") : t("skills.learned.hintOff")}
         </div>
 
-        {libraryOn ? (
-          <div className="mt-3 flex flex-col gap-1.5">
-            {libraryPool.length > 0 ? (
-              <div className="flex items-center gap-2">
-                <Select size="lg" className="flex-1"
-                  aria-label={t("skills.library.addLabel")}
-                  value={addFromLibrary}
-                  disabled={Boolean(working)}
-                  onChange={(e) => setAddFromLibrary(e.target.value)}
-                >
-                  <option value="">{t("skills.library.addPlaceholder")}</option>
-                  {libraryPool.map((skill) => (
-                    <option key={skill.name} value={skill.name}>{skill.name}</option>
-                  ))}
-                </Select>
-                <button
-                  type="button"
-                  disabled={!addFromLibrary || Boolean(working)}
-                  onClick={() => void addToBot()}
-                  className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50"
-                >
-                  {t("common.add")}
-                </button>
-              </div>
-            ) : (
-              <div className="text-[12px] text-ink-secondary">{t("skills.library.allAssigned")}</div>
-            )}
-            <div className="text-[12px] text-ink-secondary">{t("skills.library.manageHint")}</div>
-          </div>
-        ) : (
-          <>
-            <form
-              className="mt-3 flex items-center gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void importSkill();
-              }}
-            >
-              <input
-                className={inputCls}
-                placeholder={t("skills.import.placeholder")}
-                aria-label={t("skills.import.label")}
-                value={source}
-                onChange={(e) => setSource(e.target.value)}
-              />
+        <div className="mt-3 flex flex-col gap-1.5">
+          {libraryPool.length > 0 ? (
+            <div className="flex items-center gap-2">
+              <Select size="lg" className="flex-1"
+                aria-label={t("skills.library.addLabel")}
+                value={addFromLibrary}
+                disabled={Boolean(working)}
+                onChange={(e) => setAddFromLibrary(e.target.value)}
+              >
+                <option value="">{t("skills.library.addPlaceholder")}</option>
+                {libraryPool.map((skill) => (
+                  <option key={skill.name} value={skill.name}>{skill.name}</option>
+                ))}
+              </Select>
               <button
-                type="submit"
-                disabled={importing || !source.trim()}
+                type="button"
+                disabled={!addFromLibrary || Boolean(working)}
+                onClick={() => void addToBot()}
                 className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50"
               >
-                {importing ? t("skills.import.importing") : t("skills.import.button")}
+                {t("common.add")}
               </button>
-            </form>
-            {importMessage && <div className="mt-1 text-[12px] text-ink-secondary">{importMessage}</div>}
-          </>
-        )}
+            </div>
+          ) : (
+            <div className="text-[12px] text-ink-secondary">{t("skills.library.allAssigned")}</div>
+          )}
+          <div className="text-[12px] text-ink-secondary">{t("skills.library.manageHint")}</div>
+        </div>
+
+        <form
+          className="mt-3 flex items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void importSkill();
+          }}
+        >
+          <input
+            className={inputCls}
+            placeholder={t("skills.import.placeholder")}
+            aria-label={t("skills.import.label")}
+            value={source}
+            onChange={(e) => setSource(e.target.value)}
+          />
+          <button
+            type="submit"
+            disabled={importing || !source.trim()}
+            className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50"
+          >
+            {importing ? t("skills.import.importing") : t("skills.import.button")}
+          </button>
+        </form>
+        {importMessage && <div className="mt-1 text-[12px] text-ink-secondary">{importMessage}</div>}
 
         {loading ? (
           <div className="mt-3 text-[12px] text-ink-secondary">{t("skills.loading")}</div>
@@ -485,14 +480,12 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                     className="min-w-0 flex-1 text-left"
                   >
                     <div className="truncate font-mono text-[13px] text-ink">{skill.name}</div>
-                    {(libraryOn || skill.origin === "imported" || inFolder(skill)) && (
-                      <span
-                        className="ml-1.5 rounded bg-control px-1 py-px font-mono text-[10px] uppercase tracking-wide text-ink-secondary"
-                        title={skill.origin === "imported" ? t("skills.origin.importedHint") : skill.origin === "native" ? t("skills.origin.nativeHint") : skill.origin === "project" ? t("skills.origin.projectHint") : undefined}
-                      >
-                        {skill.origin === "imported" ? t("skills.origin.imported") : skill.origin === "native" ? t("skills.origin.native") : skill.origin === "project" ? t("skills.origin.project") : skill.origin === "library" ? t("skills.origin.library") : t("skills.origin.private")}
-                      </span>
-                    )}
+                    <span
+                      className="ml-1.5 rounded bg-control px-1 py-px font-mono text-[10px] uppercase tracking-wide text-ink-secondary"
+                      title={skill.origin === "imported" ? t("skills.origin.importedHint") : skill.origin === "native" ? t("skills.origin.nativeHint") : skill.origin === "project" ? t("skills.origin.projectHint") : undefined}
+                    >
+                      {skill.origin === "imported" ? t("skills.origin.imported") : skill.origin === "native" ? t("skills.origin.native") : skill.origin === "project" ? t("skills.origin.project") : skill.origin === "library" ? t("skills.origin.library") : t("skills.origin.private")}
+                    </span>
                     <div className="mt-0.5 line-clamp-2 text-[12px] text-ink-secondary">{skill.description}</div>
                     <div className="mt-0.5 text-[11px] text-ink-secondary">{t(skill.enabled && skill.listed === false ? "skills.foundWhenNeeded" : "skills.usedWhenRelevant")}</div>
                   </button>

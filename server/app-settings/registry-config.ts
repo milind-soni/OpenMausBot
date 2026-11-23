@@ -112,7 +112,7 @@ export function configEntries(deps: Pick<RegistryDeps, "cfg" | "saveConfig" | "b
     section({
       id: "bots.shareLearnedSkills", label: "Share learned skills", help: "Whether a skill one bot learns goes to the shared library: off, ask you first, or automatically.", where: "early",
       synonyms: ["share skills", "skills library", "learned skills"], value: z.enum(["off", "ask", "auto"]), allowed: "off, ask or auto",
-      current: () => cfg().features?.shareLearnedSkills ?? "off", patch: (shareLearnedSkills) => ({ features: { shareLearnedSkills } }),
+      current: () => cfg().features?.shareLearnedSkills ?? "ask", patch: (shareLearnedSkills) => ({ features: { shareLearnedSkills } }),
     }),
     section({
       id: "threads.eventLogMaxBytes", label: "Thread log size limit", help: "The most bytes each conversation's event log keeps; null keeps up to 256 MiB, the default ceiling.", where: "storage",

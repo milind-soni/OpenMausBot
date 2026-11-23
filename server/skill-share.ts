@@ -19,7 +19,6 @@ import {
   readSkillLibraryIndex,
   retireLibrarySkill,
   skillLibraryEvents,
-  skillsLibraryEnabled,
   skillsLibraryRoot,
   updateLibrarySkill,
 } from "./skill-library.ts";
@@ -30,7 +29,6 @@ import type { SkillShareRecord } from "../shared/skill-request.ts";
 export type ShareLearnedSkillsMode = "off" | "ask" | "auto";
 
 export function shareLearnedSkillsMode(cfg: AppConfig): ShareLearnedSkillsMode {
-  if (!skillsLibraryEnabled(cfg)) return "off";
   return cfg.features?.shareLearnedSkills ?? "ask";
 }
 

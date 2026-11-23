@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { appVersion } from "@/lib/app-links";
 import { pageIsThisComputer } from "@/lib/companion-bridge";
-import { skillsLibraryEnabled, workspacesAvailable } from "@/lib/feature-flags";
+import { workspacesAvailable } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
 export { useSettingsPlace, type PlaceKind, type SettingsPlace } from "./settings-place";
 import { railShown, usePlaces, type RailPlace } from "@/lib/places";
@@ -33,7 +33,6 @@ export function useSettingsContext(): SettingsContext {
     organization: Boolean(ogb?.organization) && !client,
     environments: Boolean(ogb?.environments),
     installations: workspacesAvailable(state.config),
-    skills: skillsLibraryEnabled(state.config),
   };
 }
 

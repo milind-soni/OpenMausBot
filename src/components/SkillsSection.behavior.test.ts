@@ -19,7 +19,7 @@ vi.mock("react", async (original) => ({
   useEffect: () => {},
 }));
 vi.mock("@/hooks/use-modal-dialog", () => ({ useModalDialog: fixture.modal }));
-vi.mock("@/state/store", () => ({ useStore: () => ({ state: { bots: [{ id: "bot", name: "Pepper" }], config: { features: { skillsLibrary: true } } } }) }));
+vi.mock("@/state/store", () => ({ useStore: () => ({ state: { bots: [{ id: "bot", name: "Pepper" }], config: {} } }) }));
 vi.mock("./bot-settings/BotEditorContext", () => ({ useBotEditor: () => ({ request: fixture.request }) }));
 
 import { SkillsSection } from "./SkillsSection";

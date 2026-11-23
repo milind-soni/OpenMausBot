@@ -123,7 +123,7 @@ export const scenarioSchema = z.object({
   /** Gate keys the scenario uses; the runner materializes each as a file. */
   gates: z.array(z.string()).default([]),
   /** Library skills the runner installs before any turn (approved, as a
-   * reviewed import would be), under features.skillsLibrary. */
+   * reviewed import would be). */
   librarySkills: z.array(z.object({ name: z.string(), instructions: z.string() })).default([]),
   bots: z.array(scenarioBotSchema),
   steps: z.array(stepSchema),

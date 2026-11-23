@@ -15,12 +15,12 @@ const buttonsDisabled = () => [...renderToStaticMarkup(createElement(ShareLearne
 
 describe("share learned skills", () => {
   it("cannot be changed, by mouse or keyboard, while skill authoring is off", () => {
-    storeFixture.config = { features: { skillsLibrary: true, skillAuthoring: false } };
+    storeFixture.config = { features: { skillAuthoring: false } };
     expect(buttonsDisabled()).toEqual([true, true, true]);
   });
 
   it("can be changed while skill authoring is on", () => {
-    storeFixture.config = { features: { skillsLibrary: true } };
+    storeFixture.config = {};
     expect(buttonsDisabled()).toEqual([false, false, false]);
   });
 });

@@ -41,17 +41,7 @@ describe("skills library routes through an isolated HTTP fixture", () => {
     await fixture.close();
   });
 
-  it("hides every library route while the flag is off and keeps the per-bot response shape", async () => {
-    expect((await api("GET", "/api/skills-library")).status).toBe(404);
-    expect((await api("PUT", `/api/bots/${botId}/skills-library`, { skills: ["order-audit"] })).status).toBe(404);
-    const legacy = await api("GET", `/api/bots/${botId}/skills`);
-    expect(legacy.status).toBe(200);
-    expect(Object.keys(legacy.body).sort()).toEqual(["skills", "staged"]);
-  });
-
-  it("lists, imports, assigns, and reviews pasted skills once the flag is on", async () => {
-    expect((await api("PATCH", "/api/config", { features: { skillsLibrary: true } })).status).toBe(200);
-
+  it("lists, imports, assigns, and reviews pasted skills with the default configuration", async () => {
     expect(await api("GET", "/api/skills-library")).toMatchObject({ status: 200, body: { skills: [] } });
 
     const imported = await api("POST", "/api/skills-library", { text: SKILL_MD });

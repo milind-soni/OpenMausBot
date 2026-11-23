@@ -122,8 +122,7 @@ it("a move carries the automations, files, memory, fields and skills, and its ch
     importedAt: new Date().toISOString(), warnings: [] } }));
   mkdirSync(join(fx.root, "desktop", ".claude", "skills", "tidy-notes"), { recursive: true });
   writeFileSync(join(fx.root, "desktop", ".claude", "skills", "tidy-notes", "SKILL.md"), skillMd("tidy-notes", "Tidy the notes."));
-  expect((await local("PATCH", "/api/config", { features: { claudeUserSkills: true, skillsLibrary: true } })).status).toBe(200);
-  expect((await onCloud("PATCH", "/api/config", { features: { skillsLibrary: true } })).status).toBe(200);
+  expect((await local("PATCH", "/api/config", { features: { claudeUserSkills: true } })).status).toBe(200);
   expect((await local("POST", "/api/skills-library", { text: skillMd("weekly-digest", "Write the weekly digest.") })).status).toBeLessThan(300);
   expect((await local("PUT", `/api/bots/${nova.id}/skills-library`, { skills: ["weekly-digest"] })).status).toBe(200);
 

@@ -52,7 +52,7 @@ export const SETTINGS_PLACES = [
   {"id":"limits","path":"Settings → You and your bots → Limits","words":["group turns","timeout","tool time limit","parallel threads","concurrency","keep warm"]},
   {"id":"parallel","path":"Settings → You and your bots → Limits → Parallel threads","words":["parallel","threads","concurrency"]},
   {"id":"group-turns","path":"Settings → You and your bots → Limits → Group turns","words":["group","turns"]},
-  {"id":"skills","path":"Settings → You and your bots → Skills","words":["skills","library"],"only":"a place with the skills library on"},
+  {"id":"skills","path":"Settings → You and your bots → Skills","words":["skills","library"]},
   {"id":"early","path":"Settings → You and your bots → Early features","words":["experimental","early","preview","write their own skills"]},
   {"id":"all-bots","path":"Settings → You and your bots","words":["all bots"]},
   {"id":"browser","path":"Settings → Desktops & browser → Built-in browser","words":["browser","profiles","browser profiles","open sites","new browser"]},

@@ -499,9 +499,9 @@ import {
   mergeSkills,
   renderSkillInstructions,
   selectBundledSkills,
-  skillsLibraryEnabled, readSkillLibraryIndex,
+  readSkillLibraryIndex,
 } from "./skill-library.ts";
-import { runSkillsLibraryBootSweep } from "./skills-library-migration.ts";
+import { applyPendingSkillAssignments } from "./skills-library-migration.ts";
 import { installedPlaybookInstructions } from "./installed-playbooks.ts";
 import type { PackageImportDeps } from "./package-import.ts";
 import { createPresetStore } from "./presets.ts"; import { createShareWiring } from "./host/share.ts";
@@ -2852,21 +2852,13 @@ for (const pending of startupCatalogs) {
 }
 const firstHourFresh = Boolean(CLOUD_PERSONAL) && store.needsSeed(); if (CLOUD_TEAM) store.newBotSharing = privateUntilShared; testedAi.seed({ defaultBot: !CLOUD_TEAM, ...(firstHourFresh ? { intro: (bot) => greetingMessage(bot, { name: cfg.profile?.name }, cfg.language) } : {}) }); moveFreeze.hold(() => { if (!CLOUD_TEAM) ensureDefaultBot(store, { dataDir: DATA_DIR }); }, () => {}); if (CLOUD_TEAM) readTeamRolesWith((email) => sessions.list().filter((session) => session.email?.toLowerCase() === email && session.teamRole).sort((a, b) => b.createdAt - a.createdAt)[0]?.teamRole ?? null); if (CLOUD_TEAM) void mausbotOwnChat.claimAll();
 hostedModels?.reconcile(store);
-if (skillsLibraryEnabled(cfg)) {
-  try {
-    const sweep = runSkillsLibraryBootSweep({
-      bots: store.bots,
-      patch: (botId, assignedSkills) => {
-        store.patchBot(botId, { assignedSkills });
-      },
-    });
-    const applied = sweep.outcomes.filter((outcome) => outcome.outcome !== "skipped").length;
-    if (sweep.outcomes.length) {
-      console.log(`[skills-library] boot sweep: ${applied} skill(s) migrated or deduplicated, ${sweep.outcomes.length - applied} skipped`);
-    }
-  } catch (error) {
-    console.error(`[skills-library] boot sweep failed: ${error instanceof Error ? error.message : String(error)}`);
-  }
+try {
+  applyPendingSkillAssignments({
+    bots: store.bots,
+    patch: (botId, assignedSkills) => store.patchBot(botId, { assignedSkills }),
+  });
+} catch (error) {
+  console.error(`[skills-library] could not restore pending assignments: ${error instanceof Error ? error.message : String(error)}`);
 }
 // Reconcile stale bot references before Electron can ACK the journal, so id reuse never attaches a bot to someone else's new account.
 let browserCleanupReferencesReconciled = true;
@@ -11687,7 +11679,6 @@ function configStatus() {
       skillAuthoring: skillAuthoringEnabled(cfg),
       skillReview: cfg.features?.skillReview === true,
       skillReviewSteps: skillReviewSteps(cfg),
-      skillsLibrary: skillsLibraryEnabled(cfg),
       shareLearnedSkills: skillsHost.mode(),
       showToolCalls: showToolCallsEnabled(cfg),
       browser: builtInBrowserEnabled(cfg),
@@ -12071,7 +12062,7 @@ ROUTES.push(createBotLifecycleRoutes({
   store, routines: () => routines, interruptAllDirectThreads, cancelDirectTurnDispatch, revokeInternalCapabilitiesForThread,
   activeGroupTurnForBot, cancelGroupTurnOperations, runningTurnInstance, closeOpenApprovals, deleteBotWithLifecycle, deleteRefusal: (auth, botId) => memberDeleteRefusal(auth, store.bot(botId), Boolean(CLOUD_TEAM)),
 }));
-const skillsRoutes = createBotSkillsRoutes({ store, cfg, listBotSkills, readBotSkillFile, stagedSkillListing }); ROUTES.push(skillsRoutes);
+const skillsRoutes = createBotSkillsRoutes({ store, listBotSkills, readBotSkillFile, stagedSkillListing }); ROUTES.push(skillsRoutes);
 ROUTES.push(createEmailRoutes({ service: emailService }));
 ROUTES.push(phones.routes);
 ROUTES.push(createSkillShareRoutes({ enabled: () => skillsHost.mode() !== "off", botExists: (id) => Boolean(store.bot(id)),
