@@ -8,6 +8,7 @@ import {
   CONVERSATIONAL_STYLE_PROMPT,
   CLOUD_HOME_PLACE,
   CLOUD_ENGINES_HERE,
+  CLOUD_REUSE_INSTALLS,
   cloudHomePrompt,
   userProfileSystemPrompt,
   computerPrompt,
@@ -406,6 +407,14 @@ describe("composioSystemPrompt", () => {
 });
 
 describe("cloudHomePrompt", () => {
+  it("asks bots to reuse what a task already installed or cloned, and never to remove anything", () => {
+    for (const tools of [true, false]) {
+      const text = cloudHomePrompt(tools);
+      expect(text).toContain(CLOUD_REUSE_INSTALLS);
+      expect(CLOUD_REUSE_INSTALLS).not.toMatch(/\b(?:remove|delete|clean)/i);
+    }
+  });
+
   it("says the Cloud is off their network, whatever memory says, and sends ssh through the lent computer", () => {
     const lent = cloudHomePrompt(true, [], [{ name: "ASH-PC", platform: "win32" }]);
     expect(lent).toContain("This Cloud is not on their network");
