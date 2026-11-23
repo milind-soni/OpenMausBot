@@ -132,13 +132,17 @@ are not there. With it on, making it at start reads nothing either; its first ti
 - **Least recently written first.** A folder's age is its newest modification or change time. Access times are not
   used: a backup that reads the whole volume would refresh them. A folder written in the last 30 minutes stays. A
   folder that alone is over its root's cap is left and logged once, and not counted, so it does not empty the others on
-  every pass; a clear removes it.
+  every pass; only a clear or the emergency pass removes it, so the cap does not bound such a folder (a Hugging Face
+  hub with one large model is the likely one). `npm` goes whole: every npx-installed MCP server is downloaded again
+  together.
 - **Never while a bot works.** In a tools root, nothing is deleted while a turn runs, an engine is kept warm, or any
   process of the server's user uses that root: its working folder, program, open files, mapped files or environment name
   a path in it (`in-use.ts`, from `/proc`). Every boxed process carries its HOME's cache variables, so any process a bot
   of that HOME started counts. A process that cannot be read counts as using every root (logged once). This is checked
   before each folder goes. A busy home is tried again on the next tick, 5 minutes later; a pass that finishes waits an
-  hour.
+  hour. The turn and warm-engine check is for the whole Cloud: on a Team Cloud one member's turn holds every root's
+  pass (a process seen in one root holds only that root). This protects running work but is not absolute: a turn that
+  starts while a large folder is being removed may find it half gone, and the tool downloads it again.
 - **Never outside the root.** Every walk and removal goes through open folders (`tree.ts`): the root is opened with
   `O_NOFOLLOW`, and each step names one child of an open folder through `/proc/self/fd/<fd>/<name>`, so the kernel
   resolves it from that open folder, never again by path. A link is never entered (`O_NOFOLLOW`), a folder on another
@@ -147,7 +151,7 @@ are not there. With it on, making it at start reads nothing either; its first ti
   reach where it is. This needs Linux; anywhere else nothing is walked or deleted.
 - **Emergency.** At 95% of the volume used, the tools' folders go, least recently written first, until it is under 90%,
   under the same rule: if a bot is working, nothing is removed, and one line is logged (the Admin's disk auto-grow and
-  its alert cover a full disk). A pass that removed something is not repeated within 30 minutes.
+  its alert cover a full disk). A pass that measured is not repeated within 30 minutes.
 - **On demand.** `clearCaches({ dryRun, scope })` returns the bytes and folders that go, or would in a dry run, and how
   many roots were left because a bot was working. Its admin-scope route is `POST /api/caches/clear`, a dry run unless the
   body says `"dryRun": false`; `GET /api/caches` returns the counters. Both only with the switch on.

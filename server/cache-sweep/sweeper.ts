@@ -1,9 +1,12 @@
 // The cache cap (docs/bot-box.md, "Tool caches: the cap"): behind OMB_CACHE_SWEEP (off), a background sweeper keeps each
 // tools' cache root, and the app's own cache folder, under its cap, removing whole folders, least recently written first
-// (units.ts). Why it cannot lose anything outside a cache, or break a bot's work:
-//   - it deletes only through open folders inside a root (tree.ts), so a link a bot swaps in leads nowhere;
+// (units.ts). What makes it safe:
+//   - it deletes only through open folders inside a root (tree.ts), from a fixed list of whole tool folders, so it can
+//     never reach anything outside the root, whatever a bot swaps in (structural, not a timing guard);
 //   - in a tools root it deletes only while no turn runs, no engine is kept warm, and no live process uses that root
-//     (in-use.ts), so nothing writes or runs from what it removes; a busy home is tried again on the next tick;
+//     (in-use.ts), checked again before each folder; a turn that starts while a large folder is being removed may still
+//     see it half gone (the tool downloads it again), so this protects running work, it does not guarantee it. A busy
+//     home is tried again on the next tick;
 //   - the emergency pass at EMERGENCY_FULL and a clear on request obey the same rule: a busy home is left as it is, with
 //     one log line (the Admin's disk auto-grow and its alert cover a full disk);
 //   - nothing is renamed or put back: a removal that stops part-way leaves what it did not reach, in place.
@@ -94,7 +97,7 @@ const usedShare = (volume: { total: number; free: number }) => (volume.total > 0
 export function createCacheSweeper(deps: CacheSweeperDeps) {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((line: string) => console.log(line));
-  const inUse = deps.inUse ?? ((roots: readonly string[]) => rootsInUse(roots, { unreadable: (pid) => once(`unreadable:${pid}`, `cache sweep: process ${pid} cannot be read, so no tool cache is removed while it runs`) }));
+  const inUse = deps.inUse ?? ((roots: readonly string[]) => rootsInUse(roots, { unreadable: (pid) => once("unreadable", `cache sweep: process ${pid} of this user cannot be read, so no tool cache is removed while such a process runs (said once)`) }));
   const supported = deps.supported ?? (() => anchoredSupported());
   const stateFile = join(deps.dataDir, CACHE_SWEEP_STATE);
   const on = () => cacheSweepOn(deps.env);
@@ -104,12 +107,15 @@ export function createCacheSweeper(deps: CacheSweeperDeps) {
   /** A turn runs or an engine is kept warm (start-upkeep.ts). Until the sweeper is started, the home counts as busy. */
   let globalBusy: () => boolean = () => true;
   let busyLoggedAt: number | null = null;
+  /** When the emergency pass last measured, so a disk that stays full is not walked again every tick. */
+  let emergencyTriedAt: number | null = null;
+  let loading: Promise<State> | null = null;
   const said = new Set<string>();
   const once = (key: string, line: string) => { if (!said.has(key)) { said.add(key); log(line); } };
 
-  const load = async (): Promise<State> => {
-    if (!state) state = parseState(await readFile(stateFile, "utf8").catch(() => ""));
-    return state;
+  const load = (): Promise<State> => {
+    loading ??= readFile(stateFile, "utf8").catch(() => "").then((text) => (state = parseState(text)));
+    return loading;
   };
   const save = async () => {
     if (!state) return;
@@ -210,7 +216,8 @@ export function createCacheSweeper(deps: CacheSweeperDeps) {
     const full = usedShare(volume);
     if (full < EMERGENCY_FULL) return { skipped: "room" };
     const current = await load();
-    if (current.emergency.at !== null && current.emergency.at > now() - EMERGENCY_BACKOFF_MS) return { skipped: "backoff" };
+    const last = Math.max(current.emergency.at ?? -Infinity, emergencyTriedAt ?? -Infinity);
+    if (last > now() - EMERGENCY_BACKOFF_MS) return { skipped: "backoff" };
     const { opened, refused } = await openRoots("tools");
     const result: ClearResult = { dryRun: false, bytes: 0, entries: 0, files: 0, recent: 0, busy: 0, partial: 0, refusedRoots: refused };
     const pacer = new Pacer(deps.pace);
@@ -219,6 +226,7 @@ export function createCacheSweeper(deps: CacheSweeperDeps) {
       for (const { root, folder } of opened) {
         if (await busy(root)) { result.busy += 1; continue; }
         for (const entry of await measured(root, folder, pacer)) queue.push({ root, folder, ...entry });
+        emergencyTriedAt = now();
       }
       result.recent = queue.filter((entry) => recent(entry.tally, now())).length;
       for (const entry of oldestFirst(queue) as typeof queue) {

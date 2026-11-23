@@ -195,6 +195,7 @@ describe.skipIf(process.platform !== "linux")("the cache cap on real folders", (
     put(join(f.tools, "uv", "archive-v0", "env", "lib.py"), 10, 9, f.tools);
     const child = spawn("sleep", ["60"], { cwd: join(f.tools, "uv", "archive-v0", "env"), stdio: "ignore" });
     children.push(child);
+    const exited = new Promise((done) => child.once("exit", done));
     await new Promise((done) => child.once("spawn", done));
     const lines: string[] = [];
     const made = createCacheSweeper({ dataDir: f.dataDir, home: f.home, env: ON, tools: () => true, audienceHomes: () => [], keep: () => [], volume: ROOMY, now: () => NOW, log: (line) => lines.push(line) });
@@ -203,8 +204,9 @@ describe.skipIf(process.platform !== "linux")("the cache cap on real folders", (
     expect(await made.clearCaches({ dryRun: false })).toMatchObject({ entries: 0, busy: 1 });
     expect(existsSync(join(f.tools, "uv", "archive-v0", "env", "lib.py"))).toBe(true);
     child.kill("SIGKILL");
-    await new Promise((done) => child.once("exit", done));
-    expect(await made.clearCaches({ dryRun: false })).toMatchObject({ entries: 1, busy: 0 });
+    await exited;
+    // A process of this user that cannot be read would hold it: the log line names it.
+    expect({ cleared: await made.clearCaches({ dryRun: false }), lines }).toMatchObject({ cleared: { entries: 1, busy: 0 } });
     expect(existsSync(join(f.tools, "uv"))).toBe(false);
   });
 
@@ -222,7 +224,7 @@ describe.skipIf(process.platform !== "linux")("the cache cap on real folders", (
     expect(await sweeper(f, { volume: async () => ({ total: 100, free: 50 }) }).made.emergency()).toEqual({ skipped: "room" });
   });
 
-  it("a Team Cloud: each audience's root has its share of the cap, and one member's working bot never stops another's pass", async () => {
+  it("a Team Cloud: each audience's root has its share of the cap, and a process in one member's root does not hold another's", async () => {
     const f = fixture();
     const ana = join(f.dataDir, "engine-homes", "member-a"), ben = join(f.dataDir, "engine-homes", "member-b");
     const anaRoot = tagged(ana), benRoot = tagged(ben);
@@ -348,11 +350,13 @@ describe.skipIf(process.platform !== "linux")("never outside the root", () => {
       for (let i = 0; i < 200; i++) for (let j = 0; j < 5; j++) put(join(unitPath, `d${i}`, `f${j}`), 1, 30, f.tools);
       const child = spawn(process.execPath, [racer, unitPath, precious], { stdio: ["ignore", "ignore", "ignore", "ipc"] });
       children.push(child);
+      // It ends by itself once the unit is gone, maybe before the kill below.
+      const exited = new Promise((done) => child.once("exit", done));
       await new Promise((done) => child.once("message", done));
       const folder = await opened(f);
       try { await removeUnit(folder, { group: "tools", root: f.tools, name: "uv" }, new Pacer()); } finally { await close(folder); }
       child.kill("SIGKILL");
-      await new Promise((done) => child.once("exit", done));
+      await exited;
       expect(readdirSync(precious), `run ${run}`).toHaveLength(100);
       rmSync(unitPath, { recursive: true, force: true });
     }
