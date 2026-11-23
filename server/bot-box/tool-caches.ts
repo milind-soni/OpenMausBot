@@ -60,15 +60,22 @@ export function toolCacheRoot(home: string): string {
   return join(resolve(home), TOOL_CACHE_DIR);
 }
 
-/** The variables to add to a box's environment `env` (already allow-listed) whose HOME is `home`: each cache's, unless
- * `env` already names it (the person's own value, which passed the box as theirs) or names what decides it. */
-export function toolCacheEnvironment(home: string, env: Readonly<Record<string, string | undefined>>): Record<string, string> {
-  const set = new Set(Object.keys(env).filter((name) => env[name] !== undefined && env[name] !== "").map((name) => name.toLowerCase()));
+const named = (env: Readonly<Record<string, string | undefined>>) =>
+  new Map(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined && entry[1] !== "").map(([name, value]) => [name.toLowerCase(), value]));
+
+/** The variables to add to a box's environment `env` (already allow-listed) whose HOME is `home`. `given` is what the
+ * spawn was handed before the allow-list: on a Cloud home the server's own environment carries none of these names
+ * (cloud-home-start.ts SERVER_ENV_NAMES), so one there is the person's or the engine's for this spawn. A cache whose
+ * variable, or a variable that decides its place, either names is left to them; its own variable that the allow-list
+ * dropped goes back with their value. Every other cache gets its folder in the cache root. */
+export function toolCacheEnvironment(home: string, env: Readonly<Record<string, string | undefined>>, given: Readonly<Record<string, string | undefined>> = {}): Record<string, string> {
+  const kept = named(env), handed = named(given);
   const root = toolCacheRoot(home);
   const added: Record<string, string> = {};
   for (const cache of TOOL_CACHES) {
-    if ([cache.name, ...cache.yieldsTo].some((name) => set.has(name.toLowerCase()))) continue;
-    added[cache.name] = join(root, ...cache.folder.split("/"));
+    const name = cache.name.toLowerCase();
+    if (!kept.has(name) && handed.has(name)) added[cache.name] = handed.get(name)!;
+    else if (![name, ...cache.yieldsTo.map((other) => other.toLowerCase())].some((other) => kept.has(other) || handed.has(other))) added[cache.name] = join(root, ...cache.folder.split("/"));
   }
   return added;
 }

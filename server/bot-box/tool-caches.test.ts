@@ -77,10 +77,16 @@ describe("a box's environment", () => {
     expect(env.PUPPETEER_CACHE_DIR).toBe(join(toolCacheRoot(home), "puppeteer"));
   });
 
-  it("on, a value the box would drop is not the person's: ours is set", () => {
-    // The server's own environment is not a bot's settings; the allow-list drops it, as it does today.
-    const env = runner(true).wrap({ ...turn, env: { ...turn.env, PIP_CACHE_DIR: "/srv/pip" } }).env;
-    expect(env.PIP_CACHE_DIR).toBe(join(toolCacheRoot(home), "pip"));
+  it("on, a value the spawn was handed wins even where the allow-list would drop it: an engine's own environment that does not vouch", () => {
+    // Claude's and Codex's drivers merge the instance's environment into the spawn's without allowEnv; on a Cloud home the
+    // server's own environment never carries these names, so one here is the person's or the engine's.
+    const env = runner(true).wrap({ ...turn, env: { ...turn.env, PIP_CACHE_DIR: "/data/my-pip", HF_HOME: "/data/hf" } }).env;
+    expect(env.PIP_CACHE_DIR).toBe("/data/my-pip");
+    // A parent that decides a cache's place is not passed in, but its cache is left to the tool's default under it.
+    expect(env.HF_HOME).toBeUndefined();
+    expect(env.HF_HUB_CACHE).toBeUndefined();
+    expect(env.HF_XET_CACHE).toBeUndefined();
+    expect(env.UV_CACHE_DIR).toBe(join(toolCacheRoot(home), "uv"));
   });
 
   it("toolCacheEnvironment adds nothing a set name covers and never touches the given environment", () => {
@@ -89,6 +95,8 @@ describe("a box's environment", () => {
     expect(added.npm_config_cache).toBeUndefined();
     expect(given).toEqual({ npm_config_cache: "/x", HOME: home });
     expect(toolCacheEnvironment(home, { npm_config_cache: "" }).npm_config_cache).toBe(join(toolCacheRoot(home), "npm"));
+    expect(toolCacheEnvironment(home, {}, { GOCACHE: "/data/gb" }).GOCACHE).toBe("/data/gb");
+    expect(toolCacheEnvironment(home, { GOCACHE: "/data/kept" }, { GOCACHE: "/data/gb" }).GOCACHE).toBeUndefined();
   });
 });
 

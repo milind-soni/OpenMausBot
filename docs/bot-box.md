@@ -80,9 +80,11 @@ lands in one folder, `cache` in the box's HOME, instead of all over it:
   the folder is shared exactly as `~/.npm` and `~/.cache` already are (every bot of a personal Cloud; one audience on a
   Team Cloud, never another member's). It is under the HOME line of the plan, so no new mount is made. The app's own
   rebuildable files stay in the data folder's `cache/` (`NODE_COMPILE_CACHE`), which the box hides.
-- **The person's value wins.** A variable that reaches the box as the person's (an engine's saved environment, or an
-  MCP server's environment the server starts it with, both through `allowEnv`) is kept, and so is a cache whose place
-  something else already decides: `XDG_CACHE_HOME` (pip, uv, Playwright, corepack, Go's build cache), `HF_HOME`,
+- **The person's value wins.** A cache variable the spawn was handed is kept: one an engine's saved environment or an
+  MCP server's environment passes through `allowEnv`, and one a driver merged in without vouching (Claude's and Codex's
+  instance environment), which goes back after the allow-list with its own value. On a Cloud home the server's own
+  environment carries none of these names (`SERVER_ENV_NAMES`). A cache whose place something else the spawn was handed
+  already decides is left alone: `XDG_CACHE_HOME` (pip, uv, Playwright, corepack, Go's build cache), `HF_HOME`,
   `GOPATH`, `BUN_INSTALL`. What an engine or a shell sets for its own children (an MCP server's `env` in the engine's
   config, an `export`) is set on top inside the box, so it wins too.
 - **Left alone on purpose.** `XDG_CACHE_HOME` (Hugging Face keeps its login token under it, and engines write there),

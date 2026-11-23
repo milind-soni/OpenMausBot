@@ -143,8 +143,8 @@ export class BoxRunner {
     // The server's own PATH leaves out the programs in HOME (program-trust.ts); inside the box they are the bot's own.
     const homePrograms = homeProgramDirs(resolve(request.home ?? this.options.setup.home)).filter((dir) => !(env.PATH ?? "").split(":").includes(dir));
     if (homePrograms.length) env.PATH = [...(env.PATH ? [env.PATH] : []), ...homePrograms].join(":");
-    // After the allow-list, so a value the person gave (through allowEnv) is the one kept.
-    if (this.options.toolCaches) Object.assign(env, toolCacheEnvironment(request.home ?? this.options.setup.home, env));
+    // After the allow-list, so a value the person gave for this spawn is the one kept.
+    if (this.options.toolCaches) Object.assign(env, toolCacheEnvironment(request.home ?? this.options.setup.home, env, request.env));
     if (plan.net === "isolated") {
       const proxy = `http://127.0.0.1:${this.options.egressPort ?? BOX_EGRESS_PORT}`;
       for (const name of BOX_PROXY_ENV) env[name] = proxy;
