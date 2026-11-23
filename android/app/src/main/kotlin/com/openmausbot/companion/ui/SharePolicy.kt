@@ -1,6 +1,7 @@
 package com.openmausbot.companion.ui
 
 import com.openmausbot.companion.core.APIError
+import com.openmausbot.companion.core.AttachmentPolicy
 import com.openmausbot.companion.core.Bot
 import com.openmausbot.companion.core.CompanionClient
 import com.openmausbot.companion.core.CompanionEndpointKind
@@ -75,7 +76,7 @@ object SharePolicy {
     }
 
     fun classifyStream(mime: String?, fileName: String?): StreamKind {
-        val normalized = mime?.lowercase()?.substringBefore(';')?.trim().orEmpty()
+        val normalized = mime?.let { AttachmentPolicy.normalizedMime(it) }.orEmpty()
         if (normalized in IMAGE_MIMES || normalized.startsWith("image/")) return StreamKind.IMAGE
         if (normalized in DOCUMENT_MIMES) return StreamKind.FILE
         val inferred = fileName?.substringAfterLast('.', "")?.lowercase()?.let(::mimeForExtension)
@@ -85,6 +86,8 @@ object SharePolicy {
         if (normalized.startsWith("text/")) return StreamKind.TEXT
         return StreamKind.IGNORE
     }
+
+    fun normalizedMime(value: String): String = AttachmentPolicy.normalizedMime(value)
 
     fun mimeForExtension(extension: String): String? = when (extension.lowercase()) {
         "png" -> "image/png"

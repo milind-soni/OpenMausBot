@@ -351,6 +351,17 @@ class ClientTest {
     }
 
     @Test
+    fun csvMimeAliasIsCanonicalOnTheFileUploadRequest() = runBlocking {
+        server.enqueue(json("""{"path":"/Users/test/files/rows.csv","name":"rows.csv","mime":"text/csv","bytes":8}""", 201))
+
+        client.uploadFile("a,b\n1,2\n".toByteArray(), "rows.csv", "TEXT/COMMA-SEPARATED-VALUES; charset=utf-8")
+
+        val request = server.takeRequest()
+        assertEquals("text/csv", request.getHeader("Content-Type"))
+        assertEquals("/api/files?name=rows.csv", request.path)
+    }
+
+    @Test
     fun sharedSendAndUploadIdsRejectUnsafeValuesBeforeNetworking() = runBlocking {
         assertFailsWith<APIError.BadUrl> {
             client.send("No", MessageDestination.Bot("../config", "task"), "share_1234567890123456")

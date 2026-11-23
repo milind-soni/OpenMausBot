@@ -104,6 +104,25 @@ class ShareItemLoaderTest {
     }
 
     @Test
+    fun aSharedCsvMimeAliasIsStoredWithTheCanonicalUploadMime() {
+        val csv = content("rows.csv", "text/comma-separated-values", "a,b\n1,2\n".toByteArray())
+
+        val items = ShareItemLoader.load(
+            send {
+                type = "text/comma-separated-values"
+                putExtra(Intent.EXTRA_STREAM, csv)
+            },
+            resolver,
+            inboxRoot,
+        )
+
+        val attachment = items.attachments.single()
+        assertEquals(LocalShareAttachment.Kind.FILE, attachment.kind)
+        assertEquals("text/csv", attachment.mime)
+        assertContentEquals("a,b\n1,2\n".toByteArray(), attachment.file.readBytes())
+    }
+
+    @Test
     fun fourItemsAreAcceptedAndAFifthIsRefusedRatherThanDropped() {
         val four = (1..4).map { content("photo$it.png", "image/png", png) }
         val accepted = ShareItemLoader.load(sendMultiple(four), resolver, inboxRoot)

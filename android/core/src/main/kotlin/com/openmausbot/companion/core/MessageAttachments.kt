@@ -67,7 +67,11 @@ object AttachmentPolicy {
 
     /** `type/subtype` only, lowercased — a `; charset=` parameter is not part of the type. */
     fun normalizedMime(value: String): String =
-        value.substringBefore(';').trim().lowercase()
+        when (val mime = value.substringBefore(';').trim().lowercase()) {
+            // Android document providers may report this alias; uploads use the canonical server type.
+            "text/comma-separated-values" -> "text/csv"
+            else -> mime
+        }
 
     fun kindForMime(value: String): PendingMessageAttachment.Kind? {
         val mime = normalizedMime(value)

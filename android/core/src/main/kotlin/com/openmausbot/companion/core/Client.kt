@@ -416,7 +416,7 @@ class CompanionClient(
     suspend fun uploadFile(data: ByteArray, name: String, mime: String, uploadId: String? = null): UploadedFile {
         if (!validUploadId(uploadId)) throw APIError.BadUrl
         val displayName = name.substringAfterLast('/').substringAfterLast('\\').trim()
-        val normalized = mime.lowercase()
+        val normalized = AttachmentPolicy.normalizedMime(mime)
         if (
             displayName.isEmpty() || displayName.toByteArray().size > 255 ||
             !validUploadMime(normalized) || data.size > SHARE_FILE_MAX_BYTES

@@ -95,7 +95,19 @@ class MessageAttachmentsTest {
         )
         assertEquals(PendingMessageAttachment.Kind.IMAGE, AttachmentPolicy.kindForMime(" IMAGE/JPEG "))
         assertEquals(PendingMessageAttachment.Kind.FILE, AttachmentPolicy.kindForMime("application/pdf"))
+        assertNull(AttachmentPolicy.kindForMime("text/html"))
+        assertNull(AttachmentPolicy.kindForMime("application/x-msdownload"))
         assertNull(AttachmentPolicy.kindForMime("application/zip"))
+    }
+
+    @Test
+    fun attachmentPolicyCanonicalisesTheAndroidCsvMimeAlias() {
+        assertEquals("text/csv", AttachmentPolicy.normalizedMime("text/comma-separated-values"))
+        assertEquals("text/csv", AttachmentPolicy.normalizedMime("TEXT/COMMA-SEPARATED-VALUES; charset=utf-8"))
+        assertEquals(PendingMessageAttachment.Kind.FILE, AttachmentPolicy.kindForMime("text/comma-separated-values"))
+        AttachmentPolicy.validate(
+            listOf(PendingMessageAttachment(data = "a,b\n1,2\n".toByteArray(), name = "rows.csv", mime = "text/comma-separated-values", kind = PendingMessageAttachment.Kind.FILE)),
+        )
     }
 
     @Test
@@ -111,6 +123,11 @@ class MessageAttachmentsTest {
                 AttachmentPolicy.validate(listOf(PendingMessageAttachment(data = byteArrayOf(1), name = "archive.zip", mime = "application/zip", kind = PendingMessageAttachment.Kind.FILE)))
             }.message,
         )
+        for ((name, mime) in listOf("payload.csv" to "text/html", "payload.exe" to "application/x-msdownload")) {
+            assertFailsWith<AttachmentPolicyException> {
+                AttachmentPolicy.validate(listOf(PendingMessageAttachment(data = byteArrayOf(1), name = name, mime = mime, kind = PendingMessageAttachment.Kind.FILE)))
+            }
+        }
         assertEquals(
             AttachmentPolicy.INVALID_NAME,
             assertFailsWith<AttachmentPolicyException> {

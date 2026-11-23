@@ -213,7 +213,7 @@ object ShareItemLoader {
         kind: SharePolicy.StreamKind,
     ): LocalShareAttachment {
         val displayName = safeName(nameOf(resolver, uri) ?: "item")
-        val mime = mimeOf(resolver, intent, uri)?.lowercase()?.substringBefore(';')?.trim().orEmpty()
+        val mime = mimeOf(resolver, intent, uri)?.let(SharePolicy::normalizedMime).orEmpty()
         val target = File(inbox, "${UUID.randomUUID()}-$displayName")
         val size = runCatching {
             copyBounded(resolver, uri, target, displayName)

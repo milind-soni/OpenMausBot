@@ -109,6 +109,7 @@ class SharePolicyTest {
         assertEquals(SharePolicy.StreamKind.FILE, SharePolicy.classifyStream("application/pdf", "notes.pdf"))
         assertEquals(SharePolicy.StreamKind.FILE, SharePolicy.classifyStream(null, "plan.docx"))
         assertEquals(SharePolicy.StreamKind.FILE, SharePolicy.classifyStream("text/plain", "notes.txt"))
+        assertEquals(SharePolicy.StreamKind.FILE, SharePolicy.classifyStream("text/comma-separated-values", "rows.csv"))
         assertEquals(SharePolicy.StreamKind.TEXT, SharePolicy.classifyStream("text/html", null))
         assertEquals(SharePolicy.StreamKind.URL, SharePolicy.classifyStream("text/x-uri", null))
         assertEquals(SharePolicy.StreamKind.IGNORE, SharePolicy.classifyStream("application/zip", "a.zip"))
