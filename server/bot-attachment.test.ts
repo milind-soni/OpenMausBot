@@ -178,7 +178,8 @@ describe("saveBotAttachment", () => {
         status: 507,
         message: expect.stringMatching(/storage is full/),
       });
-      const handle = sourceHandles.opened.find((entry) => entry.path === realpathSync(source))?.handle;
+      // The native form: on Windows it expands short (8.3) names as the opener's fs/promises realpath does.
+      const handle = sourceHandles.opened.find((entry) => entry.path === realpathSync.native(source))?.handle;
       expect(handle).toBeDefined();
       expect(handle!.fd).toBe(-1);
     } finally {

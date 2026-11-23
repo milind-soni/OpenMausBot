@@ -81,7 +81,8 @@ async function fixture() {
   mkdirSync(root, { recursive: true });
   const inventory = join(root, "repo-inventory.md");
   writeFileSync(inventory, Buffer.alloc(highWaterMark * 4, 0x61));
-  captured.path = realpathSync(inventory);
+  // The route opens the path fs/promises' realpath gives, which on Windows expands short (8.3) names; realpathSync does not.
+  captured.path = realpathSync.native(inventory);
   const message = store.appendMessage(bot.threadId, {
     role: "bot",
     kind: "text",

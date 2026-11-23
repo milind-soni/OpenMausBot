@@ -2954,7 +2954,9 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
         : codexSandboxSuffix
           ? `No OpenMausBot bot-specific instructions remain.${codexSandboxSuffix}`
           : "";
-      for (const call of threadCalls) expect(call.params.developerInstructions).toBe(expectedDeveloper);
+      // A call naming a permission profile leaves the sandbox to that profile, so it carries no sandbox note; the
+      // legacy-sandbox retry after a refused profile does.
+      for (const call of threadCalls) expect(call.params.developerInstructions).toBe(call.params.permissions ? system ?? "" : expectedDeveloper);
       if (index > 0) expect(threadCalls[0].method).toBe("thread/resume");
       const updates = calls.filter((call) => call.method === "thread/inject_items");
       expect(updates).toHaveLength(index === 2 || index === 3 ? 1 : 0);
