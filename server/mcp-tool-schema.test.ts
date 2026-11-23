@@ -171,6 +171,24 @@ describe("createToolListNormalizer", () => {
 describe("a tool list under a provider's schema profile", () => {
   const small = { name: "search", description: "Find pages.", inputSchema: { type: "object", properties: { query: { type: "string" } } } };
 
+  it("keeps nullable and mixed enum choices usable in Kimi's tools/list", () => {
+    const genre = { enum: ["puzzle", "rpg", null], description: "Choose a genre" };
+    const values = { enum: [1, 2.5, false, null, { name: "one" }, []] };
+    const inputSchema = { type: "object", $defs: { genre }, properties: {
+      genre: { $ref: "#/$defs/genre" }, options: { type: "array", items: values },
+      typed: { type: "string", enum: ["one", null] }, numeric: { enum: [1, 2.5] },
+    } };
+    const result = { tools: [{ name: "game", inputSchema }] };
+    expect(fitToolListResult(result, MOONSHOT)).toMatchObject({ tools: [{ inputSchema: { $defs: { genre: { ...genre, type: ["string", "null"] } }, properties: {
+      genre: { $ref: "#/$defs/genre" },
+      options: { items: { ...values, type: ["number", "boolean", "null", "object", "array"] } },
+      typed: inputSchema.properties.typed, numeric: inputSchema.properties.numeric,
+    } } }] });
+    expect(genre).not.toHaveProperty("type");
+    expect(values).not.toHaveProperty("type");
+    expect(fitToolListResult(result, undefined)).toBe(result);
+  });
+
   it("keeps a tool within the limit as the same object, shortens one over it with a note, and leaves out one that cannot fit", () => {
     const lines: string[] = [];
     const tools = [small, { name: "create_page", description: "Create a page.", inputSchema: createPageSchema() },
