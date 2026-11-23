@@ -9646,6 +9646,7 @@
   "native.role.zoom": "Zoom",
   "native.role.front": "Trazer todas as janelas para a frente",
   "native.context.copyLink": "Copiar link",
+  "native.context.checkSpelling": "Verificar ortografia",
   "native.context.copyImage": "Copiar imagem",
   "native.context.saveImageAs": "Salvar imagem como…",
   "native.context.saveVideoAs": "Salvar vídeo como…",
