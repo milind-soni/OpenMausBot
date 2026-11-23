@@ -1,13 +1,14 @@
 import { FIELD_EDGE } from "./SettingsPrimitives";
 import { useEffect, useSyncExternalStore } from "react";
-import { api, useStore, type ConfigStatus } from "@/state/store";
+import { api, type ConfigStatus } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { createAboutMeDraft } from "./about-me-draft";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 const drafts = new WeakMap<object, ReturnType<typeof createAboutMeDraft>>();
 
 export function EveryBotRules() {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const confirmed = state.config?.everyBotRules;
   let controller = drafts.get(dispatch);
   if (!controller) {

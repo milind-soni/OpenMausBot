@@ -4,12 +4,13 @@ import { productName } from "@/lib/brand";
 import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
-import { api, useStore, type ConfigStatus } from "@/state/store";
+import { api, type ConfigStatus } from "@/state/store";
 import { MoreText, SettingRow, Switch } from "./SettingsPrimitives";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 /** Saves one config change through PATCH /api/config, one at a time, and shows the server's answer or its error. */
 export function useConfigSave() {
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const save = async (patch: Record<string, unknown>) => {
@@ -32,7 +33,7 @@ export function useConfigSave() {
 }
 
 export function BuiltInBrowserRow() {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
   const browser = builtInBrowserEnabled(state.config);
   const desktopBrowser = browserAvailable(state.config);
   const browserInstallable = state.config?.browserEngine?.installable === true;
@@ -72,7 +73,7 @@ export function BuiltInBrowserRow() {
 /** Self-hosted servers only, for the owner: browserEngine.egress.localNetwork lets bots' browsers open this server's
  * own sites and its local network. OpenMausBot's own ports, cloud metadata and link-local addresses stay closed. */
 export function ServerSitesRow() {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
   const owner = useOwnerOrAdmin();
   const on = state.config?.browserEngine?.serverSites;
   const { saving, error, save } = useConfigSave();
@@ -97,7 +98,7 @@ export function ServerSitesRow() {
 
 /** Owner-only unauthenticated SOCKS5 upstream for public destinations. The endpoint is write-only in the UI. */
 export function BrowserProxyRow() {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
   const owner = useOwnerOrAdmin();
   const canEditProxy = state.config?.team ? state.config.browserEngine?.proxyEditable === true : owner === true;
   const configured = state.config?.browserEngine?.proxyConfigured === true;
@@ -133,7 +134,7 @@ export function BrowserProxyRow() {
 
 /** browserEngine.engine: the bots' browsers run on OpenMausBot's own Chrome driver instead of agent-browser. */
 export function NewBrowserSettings() {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
   const on = state.config?.browserEngine?.engine === "chrome";
   const { saving, error, save } = useConfigSave();
 

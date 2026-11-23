@@ -122,9 +122,11 @@ export function memoryFiles(workspace: string, workingFolders: readonly string[]
   };
   add("MEMORY.md", join(workspace, "MEMORY.md"));
   add("memory", join(workspace, "memory"));
-  for (const name of [...listing(join(workspace, "memory"), Infinity)?.names ?? []].sort()) if (name !== "log") add(`memory/${name}`, join(workspace, "memory", name));
-  add("memory/log", join(workspace, "memory", "log"));
-  for (const name of [...listing(join(workspace, "memory", "log"), Infinity)?.names ?? []].sort()) add(`memory/log/${name}`, join(workspace, "memory", "log", name));
+  for (const name of [...listing(join(workspace, "memory"), Infinity)?.names ?? []].sort()) if (name !== "log" && name !== "threads") add(`memory/${name}`, join(workspace, "memory", name));
+  for (const folder of ["log", "threads"]) {
+    add(`memory/${folder}`, join(workspace, "memory", folder));
+    for (const name of [...listing(join(workspace, "memory", folder), Infinity)?.names ?? []].sort()) add(`memory/${folder}/${name}`, join(workspace, "memory", folder, name));
+  }
   const present = (dir: string, wanted: readonly string[], listed = listing(dir, ROOT_ENTRY_CAP)) =>
     listed ? wanted.filter((name) => listed.overflow || listed.names.has(name)) : [];
   const harnessLink = (entry: string, path: string) =>
@@ -175,7 +177,7 @@ export function memoryFiles(workspace: string, workingFolders: readonly string[]
     const top = listedRoots.get(dir);
     for (const name of top ? present(dir, ANCESTOR_FILES, top) : ANCESTOR_FILES) add(join(dir, name), join(dir, name));
   }
-  for (const folder of ["memory", "memory/log"]) if (files[folder]?.startsWith("other:")) delete files[folder];
+  for (const folder of ["memory", "memory/log", "memory/threads"]) if (files[folder]?.startsWith("other:")) delete files[folder];
   // Named as the link in the bot's own folder would name it, so a record from before these links stopped counting still
   // matches; under a name of its own if something else stands there, so neither hides the other.
   for (const [name, target] of skillLinks?.own ?? []) {

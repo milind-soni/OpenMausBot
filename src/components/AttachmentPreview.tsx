@@ -33,11 +33,12 @@ import {
 } from "@/lib/composer-attachments";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { revealBridge, revealHostPath, revealProblemText, REVEALABLE_PATH } from "@/lib/reveal-host-path";
 import { serverErrorText } from "@/lib/server-error";
 import { CopyImageButton } from "./CopyImageButton";
 import { FilePreviewButton } from "./FilePreviewButton";
 import { chipNameAction, SaveIconButton, useHtmlPreview } from "./HtmlFilePreview";
-import { ImageLoading } from "./ImageLoading"; import { openLinkedFolder } from "./RevealOriginalMenu";
+import { ImageLoading } from "./ImageLoading"; import { openLinkedFolder } from "./RevealOriginalMenu"; import { serverFetch } from "@/lib/relay-server";
 
 export interface PreviewImage {
   src: string;
@@ -203,7 +204,7 @@ export function messageImagePreviewUrl(
 
 export async function messageImageOutsideWorkspace(src: string): Promise<boolean> {
   try {
-    const response = await fetch(src, { cache: "no-store" });
+    const response = await serverFetch(src, { cache: "no-store" });
     if (response.ok) {
       await response.body?.cancel();
       return false;
@@ -226,7 +227,7 @@ export async function requestMessageFile(
   signal: AbortSignal,
   options?: { entry?: string; list?: boolean; mediaLink?: boolean },
 ): Promise<Response> {
-  const response = await fetch(`/api/threads/${encodeURIComponent(message.threadId)}/messages/${encodeURIComponent(message.messageId)}/file`, {
+  const response = await serverFetch(`/api/threads/${encodeURIComponent(message.threadId)}/messages/${encodeURIComponent(message.messageId)}/file`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -416,12 +417,6 @@ export function MessageFolderFiles({ folderPath, listing, message }: {
   );
 }
 
-const REVEALABLE_PATH = /^(?:\/(?!\/)|[a-zA-Z]:[\\/])/;
-function revealBridge(): NonNullable<Window["ogb"]>["revealInFolder"] {
-  const ogb = typeof window === "undefined" ? undefined : window.ogb;
-  return ogb?.remoteClient?.active ? undefined : ogb?.revealInFolder;
-}
-
 export function OutsideWorkspaceFile({ filePath }: { filePath: string }) {
   const [problem, setProblem] = useState("");
   const reveal = revealBridge();
@@ -434,13 +429,9 @@ export function OutsideWorkspaceFile({ filePath }: { filePath: string }) {
   }
   const show = async () => {
     setProblem("");
-    try {
-      const result = await reveal(filePath);
-      if (result === "missing") setProblem(t("attach.revealMissing"));
-      else if (result !== "shown") setProblem(t("attach.revealFailed"));
-    } catch {
-      setProblem(t("attach.revealFailed"));
-    }
+    const result = await revealHostPath(filePath);
+    const text = revealProblemText(result);
+    if (text) setProblem(text);
   };
   return (
     <>
@@ -891,12 +882,12 @@ export function MarkdownImagePreview({
   );
 }
 
-export function AttachedFileChip({ file, message, linked = false, compact = false, className }: {
+export function AttachedFileChip({ file, message, linked = false, compact = false, className, note }: {
   file: TranscriptFileAttachment;
   message?: MessageAttachmentContext;
   linked?: boolean;
   compact?: boolean;
-  className?: string;
+  className?: string; note?: string; // note: a quiet word after the name, such as the conversation it came from
 }) {
   const save = useLocalFileSave(file.path, file.name, message);
   const preview = useHtmlPreview(file.path, file.name, message);
@@ -923,7 +914,7 @@ export function AttachedFileChip({ file, message, linked = false, compact = fals
           className="flex min-h-10 min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-left transition-colors hover:bg-raised/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 disabled:cursor-wait disabled:hover:bg-transparent"
         >
           <FileText size={14} className="shrink-0" aria-hidden="true" />
-          <span className="min-w-0 flex-1 truncate text-ink">{file.name}</span>
+          <span className="min-w-0 flex-1 truncate text-ink">{file.name}</span>{note && <span className="min-w-0 max-w-[45%] shrink truncate text-[11px] text-ink-tertiary">{note}</span>}
           {preview.opens ? <Eye size={13} className="shrink-0" /> : save.state === "saving" ? (
             <LoaderCircle size={13} className="shrink-0 animate-spin" />
           ) : save.state === "saved" ? (

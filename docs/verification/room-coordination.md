@@ -135,7 +135,9 @@ rows for every hand-off it checks (a refused call leaves no hand-off row; a
 restart leaves the sender's root resumed once, never rerun).
 
 Outside a room, a conversation has one thread with each recipient, titled
-“@Clive · work”. The first request opens it; every later request from that
+“@Clive · work” until the recipient's model names it from the first request
+(“@Clive · CSV export build”; a new thread the sender did not name gets the
+title alone). The first request opens it; every later request from that
 conversation — a follow-up, a change of plan, rework — goes into it, so the
 recipient has the earlier work in its own history. If the recipient is still
 working there on what the sender handed it before, the request goes into that

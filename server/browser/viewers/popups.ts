@@ -54,10 +54,41 @@ const cssNumber = (value: number) => (Number.isFinite(value) ? value : 0);
 
 const NON_TEXT_INPUTS = JSON.stringify(["button", "checkbox", "color", "file", "hidden", "image", "radio", "range", "reset", "submit"]);
 
+/** The scripts that find a dropdown list under a point and choose one of its options, for an isolated world. */
+export const SELECT_SCRIPTS = {
+  /** The list under a point, kept under `token`: its options, selected index and box, or null. */
+  at: (x: number, y: number, token: string) => `${SELECT_AT}(${cssNumber(x)}, ${cssNumber(y)}, ${JSON.stringify(token)})`,
+  /** Focuses the list and answers the label that names option `index` alone, "" when none does, null when it cannot be chosen. */
+  focusLabel: (token: string, index: number) => `(() => {
+    const select = ${HELD_SELECT}(${JSON.stringify(token)});
+    const option = select && select.options[${Math.trunc(index)}];
+    if (!option || option.disabled || (option.parentElement && option.parentElement.tagName === "OPTGROUP" && option.parentElement.disabled)) return null;
+    select.focus();
+    const label = (option.label || option.text || "").toLowerCase();
+    return label && [...select.options].filter((other) => (other.label || other.text || "").toLowerCase().startsWith(label)).length === 1 ? (option.label || option.text) : "";
+  })()`,
+  selectedIndex: (token: string) => `(() => { const select = ${HELD_SELECT}(${JSON.stringify(token)}); return select ? select.selectedIndex : -1; })()`,
+  /** Sets option `index` with untrusted input and change events. */
+  set: (token: string, index: number) => `(() => {
+    const select = ${HELD_SELECT}(${JSON.stringify(token)});
+    if (!select) return false;
+    if (select.selectedIndex !== ${Math.trunc(index)}) {
+      select.selectedIndex = ${Math.trunc(index)};
+      select.dispatchEvent(new Event("input", { bubbles: true }));
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    return select.selectedIndex === ${Math.trunc(index)};
+  })()`,
+};
+
+/** A list's options as a viewer may draw them, or null. */
+export function selectPopupOf(found: unknown): SelectPopup | null {
+  return found && typeof found === "object" && Array.isArray((found as SelectPopup).options) ? found as SelectPopup : null;
+}
+
 /** The dropdown <select> under a point in the tab's main frame, kept under `token` so the choice lands on that list. */
 export async function selectAt(page: CdpPage, x: number, y: number, token: string): Promise<SelectPopup | null> {
-  const found = await valueInWorld<SelectPopup | null>(page.frames, page.frames.mainFrameId, `${SELECT_AT}(${cssNumber(x)}, ${cssNumber(y)}, ${JSON.stringify(token)})`);
-  return found && Array.isArray(found.options) ? found : null;
+  return selectPopupOf(await valueInWorld<unknown>(page.frames, page.frames.mainFrameId, SELECT_SCRIPTS.at(x, y, token)));
 }
 
 /**
@@ -66,32 +97,21 @@ export async function selectAt(page: CdpPage, x: number, y: number, token: strin
  * untrusted.
  */
 export async function chooseOption(page: CdpPage, token: string, index: number): Promise<boolean> {
-  const main = page.frames.mainFrameId;
-  const at = Math.trunc(index);
-  const label = await valueInWorld<string | null>(page.frames, main, `(() => {
-    const select = ${HELD_SELECT}(${JSON.stringify(token)});
-    const option = select && select.options[${at}];
-    if (!option || option.disabled || (option.parentElement && option.parentElement.tagName === "OPTGROUP" && option.parentElement.disabled)) return null;
-    select.focus();
-    const label = (option.label || option.text || "").toLowerCase();
-    return label && [...select.options].filter((other) => (other.label || other.text || "").toLowerCase().startsWith(label)).length === 1 ? (option.label || option.text) : "";
-  })()`);
-  if (label === null) return false;
+  return chooseWith({
+    value: (script) => valueInWorld<unknown>(page.frames, page.frames.mainFrameId, script),
+    type: (label) => page.keyboard.type(label),
+  }, token, index);
+}
+
+/** The choice of `chooseOption`, through any page that runs a script in an isolated world and types. */
+export async function chooseWith(page: { value(script: string): Promise<unknown>; type(text: string): Promise<unknown> }, token: string, index: number): Promise<boolean> {
+  const label = await page.value(SELECT_SCRIPTS.focusLabel(token, index));
+  if (typeof label !== "string") return false;
   if (label) {
-    await page.keyboard.type(label);
-    const reached = await valueInWorld<number>(page.frames, main, `(() => { const select = ${HELD_SELECT}(${JSON.stringify(token)}); return select ? select.selectedIndex : -1; })()`);
-    if (reached === at) return true;
+    await page.type(label);
+    if (await page.value(SELECT_SCRIPTS.selectedIndex(token)) === Math.trunc(index)) return true;
   }
-  return valueInWorld<boolean>(page.frames, main, `(() => {
-    const select = ${HELD_SELECT}(${JSON.stringify(token)});
-    if (!select) return false;
-    if (select.selectedIndex !== ${at}) {
-      select.selectedIndex = ${at};
-      select.dispatchEvent(new Event("input", { bubbles: true }));
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-    }
-    return select.selectedIndex === ${at};
-  })()`);
+  return await page.value(SELECT_SCRIPTS.set(token, index)) === true;
 }
 
 /** CSS cursor keywords a viewer may show; anything else (an image, say) shows as the default arrow. */

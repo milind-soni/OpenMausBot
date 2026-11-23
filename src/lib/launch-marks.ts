@@ -1,3 +1,4 @@
+import { serverFetch } from "./relay-server";
 // The page's part of the desktop app's launch record: when it first painted, when the sidebar and the open chat were
 // drawn, and how many requests left this computer before then. Marks and counts only, posted once to the local server;
 // a page that cannot post loses the record and nothing else.
@@ -100,7 +101,7 @@ export function startDesktopLaunchMarks(): void {
       now: () => performance.now(), timeOrigin: performance.timeOrigin, origin: location.origin,
       entries: (type) => (type === "longtask" ? longtasks : performance.getEntriesByType(type)) as ReturnType<LaunchMarkDeps["entries"]>,
       later: (run, ms) => { setTimeout(run, ms); },
-      post: (part) => { void fetch("/api/diagnostics/launch", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(part), keepalive: true }).catch(() => {}); },
+      post: (part) => { void serverFetch("/api/diagnostics/launch", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(part), keepalive: true }).catch(() => {}); },
     });
   } catch {}
 }

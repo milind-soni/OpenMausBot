@@ -29,3 +29,12 @@ export function mainThread(tasks: readonly MainThreadCandidate[], selectedId?: s
   );
   return asked?.threadId ?? open.find((task) => task.threadId === selectedId)?.threadId ?? oldestThread(tasks);
 }
+
+/** The conversation whose saves stay in the bot's own memory: the one the person set as main while it is open, else the
+ * oldest, archived or not. Unlike mainThread it does not follow where the person last wrote, so a conversation's notes
+ * keep their scope. */
+export function memoryHomeThread(tasks: readonly MainThreadCandidate[], chosenId?: string): string | undefined {
+  const conversations = tasks.filter((task) => !task.routineRunId);
+  if (chosenId && conversations.some((task) => task.threadId === chosenId && task.archivedAt === undefined)) return chosenId;
+  return conversations.reduce<MainThreadCandidate | undefined>((oldest, task) => (!oldest || task.createdAt < oldest.createdAt ? task : oldest), undefined)?.threadId;
+}

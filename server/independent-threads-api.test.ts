@@ -257,6 +257,8 @@ describe("independent bot tasks through the isolated control surface", () => {
   it.each(["finish", "fail"] as const)("tells a delegating bot that its teammate's approval went unanswered, so the step did not run (turn ends: %s)", async (ending) => {
     const chief = (await tool("create_bot", { name: "Delegating Chief", instance_id: "claude", model: models[0] })).bot;
     const peer = (await tool("create_bot", { name: "Delegated Peer", instance_id: "claude", model: models[1] })).bot;
+    // The Chief stays at the default Full access: a routine run's conversation hands the peer's new work thread no level, as
+    // nobody chose one there, so the peer's own Ask holds.
     expect((await api("PATCH", `/api/bots/${peer.id}`, { approvalMode: "ask" })).status).toBe(200);
     const routine = await api("POST", "/api/routines", {
       name: "Release checks", prompt: "Delegate the release checks to the reviewer.", botId: chief.id, enabled: false,
@@ -427,7 +429,7 @@ describe("independent bot tasks through the isolated control surface", () => {
     await control(["send", "--bot", botId, "--task", threadId, "--text", "REVIEW_MEMORY_OWNER"]);
     const launched = await dump(models[0]);
     const token = launched.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
-    expect((await internal(token, "POST", "/api/internal/memory", { action: "append", text: "A unique saved fact." })).status).toBe(200);
+    expect((await internal(token, "POST", "/api/internal/memory", { action: "append", text: "A unique saved fact.", scope: "everywhere" })).status).toBe(200);
     for (const text of ["", " \n\t "]) {
       expect((await internal(token, "POST", "/api/internal/memory", { action: "replace", oldText: "unique saved fact", text })).status).toBe(400);
       expect((await api("GET", `/api/bots/${botId}/memory`)).body.text).toBe(`- ${memoryDate()} · from chat "${"t".repeat(60)}…" · A unique saved fact.\n`);
@@ -522,8 +524,8 @@ describe("independent bot tasks through the isolated control surface", () => {
     const tokenB = launchedB.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
     expect(tokenA).not.toBe(tokenB);
     const appended = await Promise.all([
-      internal(tokenA, "POST", "/api/internal/memory", { botId, threadId: taskA, action: "append", text: "A remembers apples." }),
-      internal(tokenB, "POST", "/api/internal/memory", { botId, threadId: taskB, action: "append", text: "B remembers berries." }),
+      internal(tokenA, "POST", "/api/internal/memory", { botId, threadId: taskA, action: "append", text: "A remembers apples.", scope: "everywhere" }),
+      internal(tokenB, "POST", "/api/internal/memory", { botId, threadId: taskB, action: "append", text: "B remembers berries.", scope: "everywhere" }),
     ]);
     expect(appended.map((result) => result.status)).toEqual([200, 200]);
     const memory = (await api("GET", `/api/bots/${botId}/memory`)).body.text;

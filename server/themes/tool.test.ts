@@ -1,14 +1,17 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createAppSettings } from "../app-settings/host.ts";
+import { themeGuide } from "../../shared/theme.ts";
+import { pictureKind } from "./store.ts";
 import type { BotRecord } from "../store.ts";
 import { createThemeStore } from "./store.ts";
 import { createThemeTool } from "./tool.ts";
 
 const PNG = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+const JPG = (n: number) => Buffer.from([0xff, 0xd8, 0xff, 0xe0, n]);
 const dirs: string[] = [];
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -25,6 +28,7 @@ function fixture(options: { person?: string | null; guest?: boolean } = {}) {
   const attached = join(attachments, "upload-1.png");
   writeFileSync(attached, PNG);
   writeFileSync(join(attachments, "someone-elses.png"), PNG);
+  const attachedList = [{ path: attached, name: "upload-1.png" }];
   const messages: Array<Record<string, any>> = [];
   const bots = [{ id: "kiwi", name: "Kiwi", color: "green", threadId: "t-kiwi" } as unknown as BotRecord];
   const store = {
@@ -49,13 +53,20 @@ function fixture(options: { person?: string | null; guest?: boolean } = {}) {
     requestCredential: async () => ({ status: 500, body: {} }), connectorThread: () => null, language: () => undefined,
     themes: createThemeTool({
       store: themes, person: () => person, changed: (who, skin) => changed.push({ person: who, ...(skin ? { skin } : {}) }),
-      sources: () => ({ roots: [workspace], attachments: [attached] }),
+      sources: () => ({ roots: [workspace], attachmentsDir: attachments, attachments: attachedList }),
     }),
   });
   const turn = { botId: "kiwi", threadId: "t-kiwi", generation: "gen-1" };
   const call = (body: Record<string, unknown>) => host.handle(body, turn);
   const undo = () => host.undo({ threadId: turn.threadId, requestId: String(messages.filter((m) => m.card?.appSettingRequest).at(-1)!.card.requestId) });
-  return { host, themes, changed, call, undo, messages, workspace, outside, attachments, attached };
+  /** Attaches a file to this conversation as the composer does: stored under an id, listed with the name it came with. */
+  const attach = (bytes: Buffer, name: string, stored = `${attachedList.length}-${name.toLowerCase().replace(/[^a-z0-9.]/g, "")}`) => {
+    const path = join(attachments, stored);
+    writeFileSync(path, bytes);
+    attachedList.push({ path, name });
+    return path;
+  };
+  return { host, themes, changed, call, undo, messages, workspace, outside, attachments, attached, attach, attachedList, dataDir };
 }
 
 const NEON = { name: "Neon", canvas: "#0b1020", accent: "#ff2bd6", css: '[data-look="app"] { animation: glow 4s infinite; } @keyframes glow { to { filter: hue-rotate(40deg); } }' };
@@ -128,8 +139,8 @@ describe("app_settings theme actions", () => {
     expect((await call({ action: "add_theme_asset", id: "neon", path: join(workspace, "..", "outside", "secret.png") })).status).toBeGreaterThanOrEqual(400);
     expect((await call({ action: "add_theme_asset", id: "neon", path: join(attachments, "someone-elses.png") })).status).toBeGreaterThanOrEqual(400);
     expect((await call({ action: "add_theme_asset", id: "neon", path: join(workspace, "notes.png") })).status).toBe(400);
-    expect((await call({ action: "add_theme_asset", id: "missing", path: join(workspace, "Stars Big.png") })).status).toBe(404);
     expect(themes.list("owner").themes[0]!.assets).toEqual(["stars-big.png", "upload-1.png"]);
+    expect((await call({ action: "add_theme_asset", id: "midnight", path: join(workspace, "Stars Big.png") })).status).toBe(400);
   });
 
   it("lists the look changes and goes back by steps, by index and on its own undo, each with a card that has Undo", async () => {
@@ -184,5 +195,82 @@ describe("app_settings theme actions", () => {
     expect(JSON.parse(String((await call({ action: "theme_history" })).body.text)).changes[0]).toMatchObject({ index: 1, what: "back to default", look: "default" });
     expect((await call({ action: "undo_theme" })).status).toBe(200);
     expect(themes.list("owner").active).toBe("neon");
+  });
+
+  it("takes a picture attached on this turn or earlier, by path, stored name or file name, or the latest one with no path", async () => {
+    const { call, themes, workspace, attach, attachedList, messages, changed, undo } = fixture();
+    const earlier = attach(JPG(1), "beach.jpg");
+    attach(Buffer.from("%PDF-1.4"), "notes.pdf");
+
+    // No custom theme worn and no id: one call makes a theme over the person's skin for the file, not worn yet.
+    const first = await call({ action: "add_theme_asset" });
+    expect(first).toMatchObject({ status: 200, body: { text: expect.stringContaining('url("/api/theme-assets/background/beach.jpg")') } });
+    expect(first.body.text).toContain("Made the theme Background (id background)");
+    expect(themes.list("owner")).toEqual({ active: null, themes: [{ id: "background", name: "Background", hasCss: false, assets: ["beach.jpg"] }] });
+    expect(changed).toEqual([]);
+    expect(messages.filter((m) => m.card)).toEqual([]);
+
+    expect(first.body.text, "the reply carries the guide's picture recipe, so no guide read is needed").toContain(`url("/api/theme-assets/background/beach.jpg") center / cover no-repeat; }`);
+    const veil = "color-mix(in srgb, var(--color-app) 62%, transparent)";
+    expect(first.body.text).toContain(`linear-gradient(${veil}, ${veil})`);
+    expect(themeGuide(), "the same veil as the guide's (palette.test.ts holds it readable)").toContain(`linear-gradient(${veil}, ${veil})`);
+    // Asked again with nothing worn, the same unworn theme takes the file: no Background 2.
+    expect((await call({ action: "add_theme_asset", path: "none" })).body.text).toContain("Added to the theme Background (id background)");
+    expect(themes.list("owner").themes.map((theme) => theme.id)).toEqual(["background"]);
+
+    // set_theme wears it, with the card and Undo.
+    const css = '[data-look="chat-backdrop"] { background: url("/api/theme-assets/background/beach.jpg") center / cover; }';
+    expect((await call({ action: "set_theme", id: "background", theme: JSON.stringify({ name: "Background", css }) })).status).toBe(200);
+    expect(themes.list("owner").active).toBe("background");
+    expect(messages.at(-1)!.card.appSettingRequest).toMatchObject({ settingId: "appearance.theme" });
+
+    // Worn: no id means that theme. A bot box shows the upload under another folder: its stored name finds it; so does
+    // the name it was attached under.
+    const boxed = join(workspace, "..", "box-uploads", "kiwi", "t-kiwi", basename(earlier));
+    expect((await call({ action: "add_theme_asset", path: boxed })).body.text).toContain("Added to the theme Background (id background)");
+    const sunset = attach(PNG, "Sunset.PNG");
+    expect((await call({ action: "add_theme_asset", path: "sunset.png" })).body.text).toContain("/background/sunset.png");
+    expect((await call({ action: "add_theme_asset", path: earlier })).status).toBe(200);
+    expect(themes.list("owner").themes[0]!.assets).toEqual(["beach.jpg", "sunset.png"]);
+    expect(attachedList.map((one) => one.path)).toContain(sunset);
+
+    // A second picture under a name the theme already has keeps its own name, so undo to the earlier look still shows
+    // the earlier picture.
+    attach(JPG(2), "beach.jpg");
+    expect((await call({ action: "add_theme_asset" })).body.text).toMatch(/\/background\/beach-[0-9a-f]{6}\.jpg/);
+    expect(themes.read("owner", "background")?.css).toBe(css);
+    expect(await undo()).toEqual({ claimed: true, state: "undone" });
+    expect(themes.list("owner").active).toBeNull();
+  });
+
+  it("opens an attachment only inside the attachment store and only from this conversation", async () => {
+    const { call, themes, outside, attachments, attachedList } = fixture();
+    themes.save("owner", "neon", { name: "Neon" });
+    writeFileSync(join(outside, "secret.png"), PNG);
+    // A tag in the person's own message is text: one naming a file outside the store opens nothing.
+    attachedList.push({ path: join(outside, "secret.png"), name: "secret.png" });
+    expect((await call({ action: "add_theme_asset", id: "neon", path: join(outside, "secret.png") })).status).toBeGreaterThanOrEqual(400);
+    expect((await call({ action: "add_theme_asset", id: "neon", path: "secret.png" })).status).toBeGreaterThanOrEqual(400);
+    writeFileSync(join(attachments, "other-chat.png"), PNG);
+    expect((await call({ action: "add_theme_asset", id: "neon", path: "other-chat.png" })).status).toBeGreaterThanOrEqual(400);
+    // With no path, the newest picture that opens: the forged one is skipped.
+    expect((await call({ action: "add_theme_asset", id: "neon" })).body.text).toContain("/neon/upload-1.png");
+    expect(themes.list("owner").themes[0]!.assets).toEqual(["upload-1.png"]);
+  });
+
+  it("names a HEIC photo and a file over the limit, and never uses an older picture in a HEIC's place", async () => {
+    const { call, themes, workspace, attach } = fixture();
+    const heic = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from("ftypheic"), Buffer.from([0, 0, 0, 0]), Buffer.from("mif1heic"), Buffer.alloc(32)]);
+    const avif = Buffer.concat([Buffer.from([0, 0, 0, 28]), Buffer.from("ftypavif"), Buffer.from([0, 0, 0, 0]), Buffer.from("avifmif1miaf"), Buffer.alloc(32)]);
+    expect([pictureKind(heic), pictureKind(avif), pictureKind(PNG), pictureKind(JPG(1)), pictureKind(Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'/>"))]).toEqual(["heic", "avif", "png", "jpg", "svg"]);
+    attach(heic, "IMG_0042.HEIC", "1-img.bin");
+    expect((await call({ action: "add_theme_asset" })).body.error).toMatch(/^That is a HEIC photo.*sips -s format jpeg/);
+    expect((await call({ action: "add_theme_asset", path: "IMG_0042.HEIC" })).body.error).toMatch(/HEIC/);
+    // Named .avif but HEIC inside: refused by its bytes.
+    writeFileSync(join(workspace, "fake.avif"), heic);
+    expect((await call({ action: "add_theme_asset", path: join(workspace, "fake.avif") })).status).toBe(400);
+    writeFileSync(join(workspace, "huge.png"), Buffer.concat([PNG, Buffer.alloc(10 * 1024 * 1024)]));
+    expect(await call({ action: "add_theme_asset", path: join(workspace, "huge.png") })).toMatchObject({ status: 413, body: { error: expect.stringMatching(/^A theme file may be up to 10 MB\..*sips/) } });
+    expect(themes.list("owner").themes).toEqual([]);
   });
 });

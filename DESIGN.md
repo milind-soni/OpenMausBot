@@ -44,7 +44,9 @@ where they belong instead of adding new places.
   screen; Advanced mode's composer shows the model under its field instead. Anything else goes in the bot panel, a menu or the command palette.
   A button that exists only while the conversation has what it shows (its
   pinned message) is fine: it opens a menu and is gone when there is nothing
-  to show.
+  to show. One exception: **New thread** (a plus, also ⌘T) sits at the end of the
+  header in both modes, because starting a thread is an everyday action people
+  look for at the top.
 - **No count badges and no "needs you" summaries** above the sidebar list or
   in the header. A status mark on the row it belongs to is fine.
 - **Settings for one bot live in its bot panel.** App-wide settings live in
@@ -185,9 +187,18 @@ element's job and never a pixel value:
   in both modes; pinned bots are 95 × 92px tiles with a 60px avatar. Pinned
   pages never join them: a bot's pages are in its bot panel's Library tab.
 - **The sidebar stays open beside a side panel** while the chat keeps 440px:
-  from 1040px with a 320px panel (Simple's bot panel, a room, Simple's inbox,
-  Notifications), from 1280px with a wider one. Narrower, it folds to its
-  avatars.
+  from 1040px with a 320px panel (a room, Simple's inbox, Notifications), from
+  1280px with a wider one. Narrower, it folds to its avatars.
+- **Simple's bot panel never moves the sidebar.** Opening or closing it leaves
+  the sidebar's width and its pinned bots exactly as they were. The chat makes
+  the room; under 920px, where the chat would get less than 320px, the panel
+  floats over the chat's edge instead.
+- **Simple's chat header floats over the transcript** (see [section 8](#8-surfaces-and-depth)):
+  the first message rests just below it at the top of the history, and only its
+  controls take clicks.
+- **The chat header's model pill folds to its AI's mark** while a side panel
+  narrows the chat, in a round button the size of the header's others; its
+  label still names the model.
 - **Group with space before you group with lines.** Add a divider only between
   groups that space alone can't separate. Never a divider under a heading.
 - **No cards inside cards.** If a card needs sections, use spacing and a group
@@ -225,6 +236,11 @@ element's job and never a pixel value:
   composer (`shadow-(--shadow-composer)`, through `ELEVATED_COMPOSER`). The
   lift shows on light grounds only; in Daylight the composer drops its 0.5px
   ring at rest and gets it back on hover and focus.
+- **Simple's chat header has no band.** The transcript runs up to the
+  window's top edge under the floating pill and buttons and fades in, in even
+  steps, over the header's 60px (a mask on the scroller, so any skin's ground
+  shows through). A solid band cut messages off at the header; the floating
+  controls already carry their own lift. Advanced keeps its band.
 - **Borders are 1px `hairline`.** Panes meet on a 0.5px `edge`. An element in
   the page gets a border or a tint, not both, and no shadow. Floating surfaces
   take their surface class, which already balances all three. One exception:
@@ -265,6 +281,11 @@ Motion explains a change. It never decorates.
 - **Use the tokens:** `animate-pop-in` / `pop-out` (menus, 200ms),
   `animate-panel-in` (240ms), `animate-msg-in` (180ms), `animate-fade-in`.
   Movement eases with `cubic-bezier(0.22, 1, 0.36, 1)`; fades use `ease-out`.
+- **Panes keep their width while they move.** A side panel slides in and out
+  over the window's edge at its full width (`animate-panel-beside-in`, 240ms)
+  while the room it takes grows or shrinks, so the chat glides and nothing in
+  the panel rewraps. Words leaving a control fade, drift a few pixels and soften
+  rather than being cut off; they never wrap mid-way.
 - **300ms ceiling.** Only first-run onboarding may run longer.
 - **Nothing scales in from zero.** Things grow from about 96% and fade.
 - **Hover and press transitions are 120ms** on colour and opacity only. Don't
@@ -340,8 +361,9 @@ on. Simple is the default for new installs.
   place in both modes. Advanced may show more rows or more detail.
   One exception: where Advanced already shows something in place (a bot's
   threads as a tree under its row), Simple may offer a shortcut to the same
-  thing there instead of a second copy of it: a menu that opens on a click
-  of a small chevron, never on hover. A second: Advanced mode's composer puts
+  thing there instead of a second copy of it: a menu, or the threads unfolded
+  under the bot's row, that opens on a click of a small chevron, never on
+  hover. A second: Advanced mode's composer puts
   the field on its own line with a footer row under it, and the model and
   effort picker sits in that footer, next to the + menu both modes share.
 - **Switching modes never loses data.**

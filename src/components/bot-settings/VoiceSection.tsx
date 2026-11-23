@@ -1,11 +1,12 @@
 import { requestNotificationPermission } from "@/lib/notify";
 import { t } from "@/lib/i18n";
-import { useStore, type Bot } from "@/state/store";
+import { type Bot } from "@/state/store";
 import { BotLiveVoiceSelect } from "../BotLiveVoiceSelect";
 import { Switch } from "../SettingsPrimitives";
 import { VoiceSettings } from "../VoiceSettings";
 import type { useBotSettingsDerived } from "./useBotSettingsDerived";
 import { useBotEditor } from "./BotEditorContext";
+import { sameFields, useStoreSelector } from "@/state/store-select";
 
 export function VoiceSection({
   bot,
@@ -16,7 +17,7 @@ export function VoiceSection({
 }) {
   const { patch } = derived;
   const { draft } = useBotEditor();
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
   const live = state.config?.live;
   // Fish Audio and ElevenLabs calls speak in their agent's own voice, so only the other providers have a voice to pick.
   // A bot being created has no call voice yet: new-bot defaults don't keep one.

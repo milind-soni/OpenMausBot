@@ -10,7 +10,12 @@ const task = (threadId: string, title: string, openedBy?: unknown) => ({ threadI
 const handoff = { id: "h-42", rootId: "h-1", parentId: "h-1", threadId: "t-ops-new", botId: "bot-ops", status: "queued" } as HandoffView;
 const tasks: Record<string, TaskRecord[]> = {
   "bot-lead": [task("t-lead", "Lead main")],
-  "bot-ops": [task("t-ops-busy", "Weekly report"), task("t-ops-new", "Export CSV", { botId: "bot-lead", name: "Lead", at: 5 })],
+  "bot-ops": [
+    task("t-ops-busy", "Weekly report"),
+    task("t-ops-new", "Export CSV", { botId: "bot-lead", name: "Lead", at: 5 }),
+    { ...task("t-ops-closed", "Closed question"), activity: "waiting-on-you", closedBy: { botId: ops.id, name: ops.name, at: 2 } },
+    { ...task("t-ops-open", "Open question"), activity: "waiting-on-you" },
+  ],
 };
 
 async function listThreads(from: BotRecord) {
@@ -39,6 +44,12 @@ describe("list_threads on a queued handoff", () => {
     const running = rows.find((thread) => thread.threadId === "t-ops-busy");
     expect(running).toMatchObject({ state: "running" });
     expect(running).not.toHaveProperty("waiting");
+  });
+
+  it("reports a closed thread as closed even when its activity still says it waits on the person", async () => {
+    const rows = await listThreads(ops);
+    expect(rows.find((thread) => thread.threadId === "t-ops-closed")).toMatchObject({ state: "closed" });
+    expect(rows.find((thread) => thread.threadId === "t-ops-open")).toMatchObject({ state: "waiting-on-you" });
   });
 });
 

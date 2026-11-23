@@ -1,4 +1,14 @@
-import type { Bot, Group, Message } from "./store";
+import { branchLeafFrom } from "../../shared/conversation-branch";
+import type { AppState, Bot, Group, Message } from "./store";
+
+export function switchBotBranch(state: AppState, botId: string, threadId: string, messageId: string): AppState {
+  const panel = state.forkPanel;
+  if (panel?.kind === "bot" && panel.ownerId === botId && panel.threadId === threadId) {
+    return { ...state, forkPanel: { ...panel, activeLeafId: branchLeafFrom(panel.messages, messageId) } };
+  }
+  return { ...state, bots: state.bots.map((bot) => bot.id === botId && bot.threadId === threadId
+    ? { ...bot, activeLeafId: branchLeafFrom(bot.messages, messageId) } : bot) };
+}
 
 // One branch per transcript array and leaf: every sidebar row, the composer and the chat ask for it on each store
 // change, and an unchanged transcript keeps the same array (so memos keyed on it hold).
@@ -20,6 +30,14 @@ export function visibleMessages(bot: Pick<Bot, "messages" | "activeLeafId">): Me
   path.reverse();
   branches.set(bot.messages, { leafId, path });
   return path;
+}
+
+/** The conversation a snapshot opens on: the one already open when the snapshot still has it, else the one to resume,
+ * else the first bot. */
+export function hydratedSelectedId(selectedId: string, bots: readonly Pick<Bot, "id" | "hidden">[], groups: readonly Pick<Group, "id">[], resumeId: string | undefined): string {
+  const known = (id: string) => bots.some((b) => b.id === id) || groups.some((g) => g.id === id);
+  const resumed = resumeId && (bots.some((b) => b.id === resumeId && !b.hidden) || groups.some((g) => g.id === resumeId)) ? resumeId : "";
+  return selectedId && known(selectedId) ? selectedId : resumed || (bots[0]?.id ?? "");
 }
 
 export function navigatedSince(

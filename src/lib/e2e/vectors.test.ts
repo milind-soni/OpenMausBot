@@ -45,7 +45,7 @@ describe("the shared vectors", () => {
 });
 
 describe("the browser modules", () => {
-  it.each(["bytes.ts", "credentials.ts", "noise.ts"])("%s uses no Node-only API", (name) => {
+  it.each(["bytes.ts", "credentials.ts", "noise.ts", "session.ts", "yamux.ts"])("%s uses no Node-only API", (name) => {
     const source = readFileSync(new URL(name, import.meta.url), "utf8");
     expect(source).not.toMatch(/from "node:|\bBuffer\b|\bprocess\./);
   });

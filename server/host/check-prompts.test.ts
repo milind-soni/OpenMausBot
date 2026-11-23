@@ -27,6 +27,16 @@ describe("what a watch run is told", () => {
     expect(prompt).toContain("Since the last check");
     expect(prompt).not.toContain("JSON");
   });
+
+  it("labels Outlook emails under Outlook records, separate from Gmail", () => {
+    const outlook: EmailHeader = { id: "o1", threadId: "c1", at: 0, from: "Bob <bob@outlook.test>", subject: "Contract", preview: "Please sign", app: "outlook" };
+    const onlyOutlook = watchPrompt({ instructions: "Check mail.", items: { mail: [outlook], prep: [], runs: [] }, dismissedFrom: [] });
+    expect(onlyOutlook).toContain("[Records from Outlook.");
+    expect(onlyOutlook).not.toContain("[Records from Gmail.");
+    const both = watchPrompt({ instructions: "Check mail.", items: { mail: [email, outlook], prep: [], runs: [] }, dismissedFrom: [] });
+    expect(both).toContain("[Records from Gmail.");
+    expect(both).toContain("[Records from Outlook.");
+  });
 });
 
 describe("reading a watch run's answer", () => {

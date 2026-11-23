@@ -1,19 +1,21 @@
-import { useMemo, useState, type DragEvent } from "react";
+import { memo, useMemo, useState, type DragEvent } from "react";
 import { GripVertical, Search, UsersRound } from "lucide-react";
 import { BotAvatar } from "@/components/Avatar";
-import type { Bot } from "@/state/store";
+import type { BotApartFromTurns } from "@/state/apart-from-turns";
 import { MiniMonth } from "./MiniMonth";
 import { t } from "@/lib/i18n";
 
 export const BOT_CALENDAR_DRAG_TYPE = "application/x-openmaus-bot";
 
 export interface CalendarSidebarProps {
-  bots: Bot[];
+  bots: readonly BotApartFromTurns[];
   anchor: number;
   onSelectDate: (at: number) => void;
+  /** Drawn again in a new language. */
+  locale?: string;
 }
 
-export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarProps) {
+export const CalendarSidebar = memo(function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarProps) {
   const [query, setQuery] = useState("");
   const filteredBots = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -23,7 +25,7 @@ export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarP
     );
   }, [bots, query]);
 
-  const beginBotDrag = (event: DragEvent<HTMLDivElement>, bot: Bot) => {
+  const beginBotDrag = (event: DragEvent<HTMLDivElement>, bot: BotApartFromTurns) => {
     event.dataTransfer.effectAllowed = "copy";
     event.dataTransfer.setData(BOT_CALENDAR_DRAG_TYPE, bot.id);
     event.dataTransfer.setData("text/plain", bot.id);
@@ -107,4 +109,4 @@ export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarP
       </section>
     </aside>
   );
-}
+});

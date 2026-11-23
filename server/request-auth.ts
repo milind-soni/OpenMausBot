@@ -340,6 +340,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/team-map$/ },
   // a link into the organisation's Admin: identifiers only, and Admin authorizes its own visitor
   { methods: ["GET"], path: /^\/api\/bots\/[\w-]+\/slack-management$/ },
+  // what a bot made in the conversations this viewer can read, the same rows those conversations' messages show (routes/bot-library.ts)
+  { methods: ["GET"], path: /^\/api\/bots\/[\w-]+\/library$/ },
   { methods: ["GET"], path: /^\/api\/search$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/messages$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/image$/ },
@@ -501,6 +503,10 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   // Slack for Clouds: the Admin calls these with the member's own session, and the handler answers each as that member
   // alone, on a personal Cloud its owner alone (routes/team-slack.ts); off a Cloud they answer 404
   { methods: ["GET"], path: /^\/api\/slack\/team\/bots$/ },
+  // Skill Burgers: the routes check who may change which (a bot's own: its editors; every chat: an admin).
+  { methods: ["GET", "POST"], path: /^\/api\/skill-burgers$/ },
+  { methods: ["GET", "PATCH", "DELETE"], path: /^\/api\/skill-burgers\/[^/]+$/ },
+  { methods: ["POST"], path: /^\/api\/skill-burger-summary$/ },
   { methods: ["POST"], path: /^\/api\/slack\/team\/messages(?:\/[0-9a-f-]{36}\/stop)?$/ },
 ];
 
@@ -624,7 +630,7 @@ function mutatingPublicRoute(method: string, path: string): boolean {
   // Hands out what a Grok Bot wrote about the person, from their Downloads folder.
   if (upper === "GET" && path === "/api/setup-import/grok") return true;
   // Drives a bot's browser: a WebSocket upgrade is a GET, but what it carries is input.
-  if (/^\/api\/bots\/[\w-]+\/browser\/stream$/.test(path)) return true;
+  if (/^\/api\/bots\/[\w-]+\/browser\/(?:stream|desktop)$/.test(path)) return true;
   // Shows the bots' USB phone: a WebSocket upgrade is a GET that a local process could send without an Origin.
   if (/^\/api\/usb-phones\/[^/]+\/stream$/.test(path)) return true;
   if (["GET", "HEAD", "OPTIONS"].includes(upper)) return false;

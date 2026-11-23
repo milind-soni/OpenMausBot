@@ -44,7 +44,7 @@ export const BOT_SECTIONS: Array<{
     "research.title", "connectors.tab.mcp", "botAccess.tools.title", "botAccess.browser.title", "botAccess.recordSteps.title",
     "botAccess.webhooks.title", "botAccess.always.title",
   ] },
-  { id: "model", label: "Model", labelKey: "botSettings.sections.model", icon: Cpu, keywords: ["engine", "model", "provider", "cli", "effort"] },
+  { id: "model", label: "Model", labelKey: "botSettings.sections.model", icon: Cpu, keywords: ["engine", "model", "provider", "cli", "effort", "check before done", "checker", "second opinion"] },
   { id: "permissions", label: "Permissions", labelKey: "botSettings.sections.permissions", icon: ShieldCheck, keywords: ["auto mode", "approve", "auto approve", "review", "routine approvals", "coordination", "chief of staff", "section"] },
   { id: "voice", label: "Voice & alerts", labelKey: "botSettings.sections.voice", icon: Mic, keywords: ["voice", "alerts", "notifications", "speak"] },
   { id: "visibility", label: "Who can see it", labelKey: "botSettings.visibility.title", icon: Eye, keywords: ["visibility", "who can see", "private", "people", "admins", "members", "access", "hide"] },

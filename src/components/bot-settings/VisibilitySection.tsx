@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 
-import { api, useStore, type Bot } from "@/state/store";
+import { api, type Bot } from "@/state/store";
+import { sameJson } from "@/state/same-json";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import type { BotVisibility } from "../../../shared/wire";
 import { useTeamName } from "../bot-access/ShareBotButton";
+import { sameFields, useStoreSelector } from "@/state/store-select";
 
 export type VisibilityMode = "everyone" | "admins" | "people";
 
@@ -50,7 +52,7 @@ const OPTIONS: Array<{ mode: VisibilityMode; key: "botSettings.visibility.everyo
 ];
 
 export function useChoosesVisibility(): boolean {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
   const ownerOrAdmin = useOwnerOrAdmin();
   const teamName = useTeamName();
   return !window.ogb && ownerOrAdmin === true && Boolean(state.config) && !teamName;
@@ -62,8 +64,7 @@ export function visibilityLabel(visibility: BotVisibility | undefined): string {
 }
 
 export function VisibilitySection({ bot }: { bot: Bot }) {
-  const { state } = useStore();
-  const mixed = mixedRooms(bot, state.groups, state.bots);
+  const mixed = useStoreSelector((s) => mixedRooms(bot, s.groups, s.bots), sameJson);
   const saved = formFromVisibility(bot.visibility);
   const [mode, setMode] = useState<VisibilityMode>(saved.mode);
   const [people, setPeople] = useState(saved.people);

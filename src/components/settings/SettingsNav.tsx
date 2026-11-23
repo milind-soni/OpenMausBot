@@ -7,7 +7,7 @@ import { t } from "@/lib/i18n";
 import { productName } from "@/lib/brand";
 import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { SIMPLE_ONLY } from "@/lib/simple-only";
-import { useStore } from "@/state/store";
+import { useStoreSelector } from "@/state/store-select";
 import { InitialsAvatar } from "../Avatar";
 import { PlaceMark } from "../PlacesRail";
 import { profileInitials } from "../SidebarProfileMenu";
@@ -56,11 +56,10 @@ export function YouAvatar({ size }: { size: number }) {
 
 /** The place's one status line under its name: bots on This computer, power on a Cloud. */
 export function usePlaceSubLine(place: SettingsPlace): string {
-  const { state } = useStore();
+  const count = useStoreSelector((state) => (place.kind === "computer" ? state.bots.length : 0));
   const update = useUpdaterState();
   if (update?.status === "downloaded" && place.kind === "computer") return t("sidebar.update.readyShort");
   if (place.kind === "computer") {
-    const count = state.bots.length;
     return count === 0 ? t("settings.place.botsNone") : count === 1 ? t("settings.place.botsOne") : t("settings.place.botsMany", { count });
   }
   return place.kind === "server" ? t("settings.place.running") : t("settings.place.alwaysOn");

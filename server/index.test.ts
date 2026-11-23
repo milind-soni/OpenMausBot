@@ -3570,6 +3570,9 @@ describe("harness HTTP API", () => {
       }
     };
     type ComputerDump = { mcpConfig: { mcpServers: { computer?: { args?: string[] } } } };
+    const loggedEvent = async (threadId: string, type: string) =>
+      ((await api("GET", `/api/threads/${threadId}/events`)).body.entries as Array<{ kind: string; data: any }>)
+        .find((entry) => entry.kind === "runtime" && entry.data.type === type)?.data;
     const promptsOnBoat = () => boatRouteCalls.filter(call => call.method === "POST" && call.path === `/sandboxes/${managedBoatCreateId}/prompt`).length;
     let promptBaseline = 0;
     const promptedOnTeamComputer = async (count: number, botId: string) => {
@@ -3637,17 +3640,16 @@ describe("harness HTTP API", () => {
       expect(siblingMessages.some((message) => (message.tool?.name ?? "").startsWith("Waiting for its turn on this computer"))).toBe(true);
       const stoppedChip = siblingMessages.find((message) => (message.tool?.name ?? "").startsWith("Stopped waiting for the computer after "));
       expect(stoppedChip?.tool?.ok).toBe(true);
-      const siblingEvents = ((await api("GET", `/api/threads/${sibling.threadId}/events`)).body.entries as Array<{ kind: string; data: any }>)
-        .filter((entry) => entry.kind === "runtime").map((entry) => entry.data);
-      expect(siblingEvents.find((event) => event.type === "turn.wait_started")).toMatchObject({
+      await expect.poll(() => loggedEvent(sibling.threadId, "turn.wait_ended"), { timeout: 5_000 }).toMatchObject({
+        holder: { name: "Direct shared" },
+        outcome: "stopped",
+        waitedMs: expect.any(Number),
+      });
+      expect(await loggedEvent(sibling.threadId, "turn.wait_started")).toMatchObject({
         holder: { name: "Direct shared" },
         resource: expect.stringMatching(/^computer:/),
       });
-      expect(siblingEvents.find((event) => event.type === "turn.wait_ended")).toMatchObject({
-        holder: { name: "Direct shared" },
-        outcome: "stopped",
-      });
-      expect(siblingEvents.find((event) => event.type === "turn.wait_ended").waitedMs).toBeGreaterThanOrEqual(0);
+      expect((await loggedEvent(sibling.threadId, "turn.wait_ended")).waitedMs).toBeGreaterThanOrEqual(0);
       expect(claudePrompts().length - promptBaseline, "the sibling ran from the start").toBe(2);
       expect((await api("POST", `/api/bots/${botIds[0]}/tasks/${firstThread}`, {})).status).toBe(200);
       for (const action of ["sleep", "provision"]) {
@@ -3673,13 +3675,11 @@ describe("harness HTTP API", () => {
         (group: { id: string }) => group.id === roomId,
       ).messages;
       expect(roomMessages.some((message) => (message.tool?.name ?? "").startsWith("Waiting for its turn on this computer"))).toBe(true);
-      const roomEvents = ((await api("GET", `/api/threads/${room.threadId}/events`)).body.entries as Array<{ kind: string; data: any }>)
-        .filter((entry) => entry.kind === "runtime").map((entry) => entry.data);
-      expect(roomEvents.find((event) => event.type === "turn.wait_started")).toMatchObject({
-        resource: expect.stringMatching(/^computer:/),
-      });
-      expect(roomEvents.find((event) => event.type === "turn.wait_ended")).toMatchObject({
+      await expect.poll(() => loggedEvent(room.threadId, "turn.wait_ended"), { timeout: 5_000 }).toMatchObject({
         outcome: "acquired",
+      });
+      expect(await loggedEvent(room.threadId, "turn.wait_started")).toMatchObject({
+        resource: expect.stringMatching(/^computer:/),
       });
       expect(promptsOnBoat()).toBe(0);
       expect((await api("POST", `/api/team-computers/${requestId}/sleep`, {})).status).toBe(409);
@@ -9239,7 +9239,7 @@ describe("harness HTTP API", () => {
     await api("PUT", "/api/config", { rooms: { turnTimeoutMinutes: 5 } });
   });
 
-  it("cards asks when Claude's reviewer never started and remembers an exact configured MCP read", async () => {
+  it("cards asks when Claude's reviewer never started and remembers exact non-send MCP tools", async () => {
     // Haiku 4.5: the CLI takes `auto` but runs Manual and asks about everything.
     const bot = (await api("POST", "/api/bots", { name: "Quill" })).body.bot;
     const conns: Socket[] = [];
@@ -9334,9 +9334,25 @@ describe("harness HTTP API", () => {
       const linearWrite = raise("ask-linear-create", "create KAT issue", { team: "KAT" }, "mcp__linear__create_issue");
       await expect.poll(async () => (await messages()).find((m) => m.card?.subtitle === "create KAT issue")?.card?.title).toBe("Approval needed");
       const writeCard = (await messages()).find((m) => m.card?.subtitle === "create KAT issue")!.card!;
-      expect(writeCard.allowKey).toBeUndefined();
+      expect(writeCard.allowKey).toMatch(/^provider-tool:claude:linear:create_issue:/);
       expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: writeCard.requestId, behavior: "deny" })).status).toBe(200);
       await expect(linearWrite).resolves.toMatchObject({ behavior: "deny" });
+
+      const batchTool = "mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL";
+      const firstBatch = raise("ask-batch-1", "read mail batch", { tools: [{ tool_slug: "GMAIL_FETCH_EMAILS", arguments: {} }] }, batchTool);
+      await expect.poll(async () => (await messages()).find(m => m.card?.subtitle === "read mail batch")?.card?.allowKey).toBeTruthy();
+      const batchCard = (await messages()).find(m => m.card?.subtitle === "read mail batch")!.card!;
+      expect((await api("POST", `/api/bots/${bot.id}/always-allow`, { threadId: bot.threadId, allowKey: batchCard.allowKey })).status).toBe(200);
+      expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: batchCard.requestId, behavior: "allow" })).status).toBe(200);
+      await expect(firstBatch).resolves.toMatchObject({ behavior: "allow" });
+      await expect(raise("ask-batch-2", "read mail batch again", {}, batchTool)).resolves.toMatchObject({ behavior: "allow" });
+      expect((await messages()).some(m => m.card?.subtitle === "read mail batch again")).toBe(false);
+      const send = raise("ask-send-after-grant", "send mail still asks", {}, "mcp__composio__GMAIL_SEND_EMAIL");
+      await expect.poll(async () => (await messages()).find(m => m.card?.subtitle === "send mail still asks")?.card).toBeTruthy();
+      const sendCard = (await messages()).find(m => m.card?.subtitle === "send mail still asks")!.card!;
+      expect(sendCard.allowKey).toBeUndefined();
+      expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: sendCard.requestId, behavior: "deny" })).status).toBe(200);
+      await expect(send).resolves.toMatchObject({ behavior: "deny" });
 
       const widen = raise("ask-widen", "ls /", { dangerouslyDisableSandbox: true });
       await expect.poll(async () => (await messages()).find((m) => m.card?.subtitle === "ls /")?.card?.title).toBe("Approval needed");
@@ -12419,8 +12435,14 @@ describe("harness HTTP API", () => {
 
     const saved = await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } });
     expect(saved.status).toBe(200);
-    expect(saved.body.vps).toEqual({ configured: true, sshAlias: "production-vps" });
+    expect(saved.body.vps).toEqual({ configured: true, sshAlias: "production-vps", servers: [] });
     expect(JSON.stringify(saved.body)).not.toContain("privateKey");
+
+    // Named servers are their own list: saving it leaves the default server alone.
+    const named = await api("PUT", "/api/config", { vpsServers: [{ name: "Home lab", sshAlias: "home-lab" }] });
+    expect(named.status, JSON.stringify(named.body)).toBe(200);
+    expect(named.body.vps).toEqual({ configured: true, sshAlias: "production-vps", servers: [{ name: "Home lab", sshAlias: "home-lab" }] });
+    expect((await api("PUT", "/api/config", { vpsServers: [{ name: "Bad", sshAlias: "prod; reboot" }] })).status).toBe(400);
 
     const patched = await api("PATCH", `/api/bots/${bot.id}`, { cloudBackend: "vps" });
     expect(patched.status).toBe(200);
@@ -12455,7 +12477,7 @@ describe("harness HTTP API", () => {
     const memberStream = await openSse(`${BASE}/api/events`, { authorization: `Bearer ${memberToken}` });
     const ownerStream = await openSse(`${BASE}/api/events`);
     try {
-      expect((await asMember("GET", "/api/config")).body.vps).toEqual({ configured: true, sshAlias: "" });
+      expect((await asMember("GET", "/api/config")).body.vps).toEqual({ configured: true, sshAlias: "", servers: [] });
       const listed = (await asMember("GET", "/api/bots?messages=0")).body.bots.find((candidate: any) => candidate.id === bot.id);
       expect(listed).toMatchObject({ id: bot.id, cloudBackend: "vps" });
       expect(listed).not.toHaveProperty("vpsAlias");
@@ -12481,6 +12503,8 @@ describe("harness HTTP API", () => {
     expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
     expect(cleared.body.bot.vpsAlias).toBeUndefined();
     expect((await api("PATCH", "/api/config", { vps: { sshAlias: "" } })).status).toBe(200);
+    const emptied = await api("PUT", "/api/config", { vpsServers: [] });
+    expect(emptied.body.vps.servers).toEqual([]);
   });
 
   it("validates a Composio project key, creates a Session, and keeps externally stored secrets off disk", async () => {
@@ -13415,7 +13439,7 @@ describe("bot memory API", () => {
         body: JSON.stringify({ command: "ls" }),
       });
       expect(exec.status).toBe(409);
-      expect(((await exec.json()) as { error: string }).error).toContain("no Local VM desktop");
+      expect(((await exec.json()) as { error: string }).error).toContain("no Local VM or Self-hosted VPS desktop");
 
       for (let count = 2; count < 10; count += 1) expect((await attach({ path: "song.mp3" })).status).toBe(200);
       const flooded = await attach({ path: "song.mp3" });

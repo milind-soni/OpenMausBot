@@ -3,7 +3,7 @@ import { X } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { productName } from "@/lib/brand";
 import { skillsLibraryEnabled } from "@/lib/feature-flags";
-import { useStore } from "@/state/store";
+import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { useTeamPeople } from "@/state/team-people";
 import { AdminOnly } from "../../AdminOnly";
 import { AutomaticRecoverySettings } from "../../AutomaticRecoverySettings";
@@ -25,6 +25,7 @@ import { McpCallTimeoutSettings } from "../../McpCallTimeoutSettings";
 import { DefaultBotSettings } from "../../NewBotDialog";
 import { PlaceLookRows } from "../../PlaceLookCard";
 import { ProfileFields } from "../../ProfileSettings";
+import { RemoteTeammatesSettings } from "../../RemoteTeammatesSettings";
 import { RoomTurnTimeoutSettings } from "../../RoomTurnTimeoutSettings";
 import { SavedStepsRow } from "../../SavedStepsRow";
 import { Card, SettingRow, SettingsDisclosureRow, SettingsFoldRow, SettingsGroup, SettingsLinkRow, SettingsRows } from "../../SettingsPrimitives";
@@ -66,14 +67,13 @@ function useGroupedNote(): [boolean, () => void] {
 
 export function OverviewPage() {
   const { ctx, place, go } = useSettingsShell();
-  const { state, dispatch } = useStore();
+  const team = useStoreSelector((state) => state.config?.team), dispatch = useStoreDispatch();
+  const engines = useStoreSelector((state) => state.instances.filter((instance) => instance.snapshot.state === "available").length);
   const [note, dismiss] = useGroupedNote();
   const phone = usePhonePlaceState(!ctx.client);
-  const team = state.config?.team;
   const teamOwner = useTeamPeople()?.me?.role === "owner";
   const phoneValue = phone.kind === "paired" || phone.kind === "attention" ? t("settings.glance.phonePaired", { count: phone.count })
     : phone.kind === "none" ? t("settings.glance.notSetUp") : undefined;
-  const engines = state.instances.filter((instance) => instance.snapshot.state === "available").length;
   const apps = useConnectedAppCount();
   return <>
     {note && (
@@ -133,12 +133,12 @@ export function AiPage() {
       {!ctx.advanced && (
         <SettingsGroup block="ai-keys-fold">
           <SettingsRows>
-            <SettingsFoldRow id="ai-other-services" title={t("settings.ai.otherServices")} value={String(count)} open={shown} onToggle={() => setServices(!shown)} />
+            <SettingsFoldRow id="ai-other-services" title={t("settings.ai.otherServices")} subtitle={t("settings.ai.otherServicesLine")} value={String(count)} open={shown} onToggle={() => setServices(!shown)} />
           </SettingsRows>
         </SettingsGroup>
       )}
       {shown && (
-        <SettingsGroup label={ctx.advanced ? t("settings.ai.otherServices") : undefined} block="ai-keys">
+        <SettingsGroup label={ctx.advanced ? t("settings.ai.otherServices") : undefined} description={t("settings.ai.otherServicesLine")} block="ai-keys">
           <KeysPage bare exclude={anchor === "ai-keys" ? [] : ["ai"]} />
         </SettingsGroup>
       )}
@@ -151,8 +151,8 @@ export function AiPage() {
 
 export function BotsPage() {
   const { ctx } = useSettingsShell();
-  const { state } = useStore();
-  const paused = (state.config?.pausedBots?.length ?? 0) > 0;
+  const config = useStoreSelector((state) => state.config);
+  const paused = (config?.pausedBots?.length ?? 0) > 0;
   return <>
     {paused && <SettingsGroup block="awake"><SettingsRows><SettingRow title={t("settings.bots.awakeTitle")} subtitle={t("settings.bots.awakeLine")}><PausedBotsButton /></SettingRow></SettingsRows></SettingsGroup>}
     <SettingsGroup label={t("settings.bots.aboutYou")} block="about-you"
@@ -165,6 +165,7 @@ export function BotsPage() {
     <SettingsGroup label={t("settings.bots.newBots")} block="new-bots">
       <SettingsRows><NewBotEffortRow /><DefaultBotSettings simple /></SettingsRows>
     </SettingsGroup>
+    {!(ctx.team && !ctx.admin) && <AdvancedSection anchor="remote-teammates"><AdminOnly><RemoteTeammatesSettings /></AdminOnly></AdvancedSection>}
     {!(ctx.team && !ctx.admin) && <AdvancedSection anchor="limits" also={["parallel", "group-turns", "tool-time", "keep-warm"]}><SettingsGroup label={t("settings.simple.more.limits")} block="limits">
       <SettingsRows selectWidth={160}>
         <div data-settings-block="group-turns" className="contents"><RoomTurnTimeoutSettings /></div>
@@ -173,7 +174,7 @@ export function BotsPage() {
         <div data-settings-block="keep-warm" className="contents"><CacheKeepWarmSettings /></div>
       </SettingsRows>
     </SettingsGroup></AdvancedSection>}
-    {skillsLibraryEnabled(state.config) && <div data-settings-block="skills"><SkillsSection /></div>}
+    {skillsLibraryEnabled(config) && <div data-settings-block="skills"><SkillsSection /></div>}
     <AdvancedSection anchor="early"><div data-settings-block="early"><ExperimentalFeaturesRow /></div></AdvancedSection>
   </>;
 }

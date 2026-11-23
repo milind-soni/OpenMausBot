@@ -53,7 +53,8 @@ export interface ConfigStatus {
   composio: SavedKey & { mode?: "managed" | "self-hosted" | "unavailable" };
   /** `included`: cloud computers come with Cloud Pro, no key is saved. */
   box: SavedKey & { included?: boolean };
-  vps: { configured: boolean; sshAlias: string };
+  /** `servers`: named servers for the per-bot picker; empty for client sessions, missing from an older server. */
+  vps: { configured: boolean; sshAlias: string; servers?: { name: string; sshAlias: string }[] };
   rooms: { turnTimeoutMinutes: number };
   /** Per-call ceiling (minutes) for a bot's MCP tools. Absent from servers
    * older than the setting; read it with mcpCallTimeoutMinutes(). */
@@ -223,6 +224,13 @@ export interface BrowserEngineSummary {
   myChromeLendable?: true;
   /** browserEngine.engine: "chrome" when the bots' browsers run on OpenMausBot's own Chrome driver. */
   engine?: "agent-browser" | "chrome";
+  /** The desktop app shows the Chrome engine's browsers as panes the person uses directly (browserEngine.surface "pane"). */
+  pane?: true;
+  /** browserEngine.cloudDisplay is on and this server can run it: the panel shows the browser's window as a remote
+   * desktop (GET /api/bots/:id/browser/desktop), and falls back to the picture view when that closes with 4415. */
+  desktopView?: true;
+  /** The person can import a site's sign-in from their own browsers into a bot's (the desktop app, Chrome engine). */
+  cookieImport?: true;
   /** Self-hosted servers only: whether bots' browsers may open this server's own sites and its local network
    * (browserEngine.egress.localNetwork, off by default). Absent on the desktop and on MausBot Cloud. */
   serverSites?: boolean;

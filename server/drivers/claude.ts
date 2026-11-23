@@ -20,7 +20,8 @@ import { claudeAuthFailure, claudeAuthRecovery, claudeOAuthExpired } from "./cla
 import { CLAUDE_MODEL_ID, STATIC_CLAUDE_MODELS, claudeModelExtras, currentEngineCatalog, endpointModelCatalog, withCliVersionGate } from "./claude-model-extras.ts";
 import { claudeOwnMcpOverHttp, withLoopbackNoProxy } from "./own-mcp-http.ts"; import { claudeAgentsMount, claudeToolSearchSetting } from "./claude-tool-search.ts"; import { claudeDisabledNativeSkillRules, unusableBuiltIns } from "./claude-unusable-tools.ts"; import { EMAIL_READ_TOOL_NAMES } from "../../shared/email.ts";
 import { claudeElicitations } from "./claude-elicitation.ts"; import { claudePrestartTools, type ClaudePrestartTools } from "./claude-prestart.ts"; import { spawnContractDiff } from "./claude-spawn-contract.ts"; import { claudeContextUsage, liveContextBreakdown, writeControlFrame } from "./claude-context-usage.ts";
-import { readCostHistory, recordCostState } from "./claude-cost-history.ts";
+import { claudeCostSnapshot, readCostHistory, recordCostState, restoredCostBase, turnCostFromRunningTotal } from "./claude-cost-history.ts";
+export { claudeCostSnapshot, restoredCostBase, turnCostFromRunningTotal, type ClaudeCostSnapshot } from "./claude-cost-history.ts";
 import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
 import { ClaudeLoginController } from "./claude-login-auth.ts";
 
@@ -639,60 +640,6 @@ function firstText(content: unknown): string {
   return Array.isArray(content) ? content.filter((b) => b?.type === "text" && b.text).map((b) => b.text).join("") : "";
 }
 
-/** A turn's cost from total_cost_usd, which is the process's running total (2.1.282): the growth
- * since `previous`, or the whole figure when the start is unknown or the total went down. */
-export function turnCostFromRunningTotal(total: number | null, previous: number | null): number | null {
-  if (total === null) return null;
-  if (previous === null || total < previous) return total;
-  return Number((total - previous).toFixed(10));
-}
-
-/** total_cost_usd and per-model modelUsage [input, cache read, cache write, output] from a
- * `result`; both cover the whole session, including what --resume restored. */
-export interface ClaudeCostSnapshot {
-  total: number;
-  models: Record<string, [number, number, number, number]>;
-}
-
-export function claudeCostSnapshot(total: unknown, modelUsage: unknown): ClaudeCostSnapshot | null {
-  if (typeof total !== "number" || !Number.isFinite(total)) return null;
-  const count = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
-  const models: ClaudeCostSnapshot["models"] = {};
-  if (modelUsage && typeof modelUsage === "object" && !Array.isArray(modelUsage)) {
-    for (const [model, raw] of Object.entries(modelUsage as Record<string, unknown>)) {
-      if (!raw || typeof raw !== "object") continue;
-      const u = raw as Record<string, unknown>;
-      models[model] = [count(u.inputTokens), count(u.cacheReadInputTokens), count(u.cacheCreationInputTokens), count(u.outputTokens)];
-    }
-  }
-  return { total, models };
-}
-
-/** The running total a resumed session carried before this process's first turn. On --resume the
- * CLI (2.1.282) restores cost from an earlier state, not always the latest one seen. */
-export function restoredCostBase(
-  earlier: readonly ClaudeCostSnapshot[],
-  current: ClaudeCostSnapshot,
-  usage: { input: number; cacheRead: number; cacheWrite: number; output: number },
-): number {
-  const turn = [usage.input, usage.cacheRead, usage.cacheWrite, usage.output];
-  const nothing: ClaudeCostSnapshot = { total: 0, models: {} };
-  let exact: number | null = null;
-  let inside = 0;
-  for (const state of [nothing, ...earlier]) {
-    const within = Object.entries(state.models).every(([model, counts]) =>
-      counts.every((n, i) => n <= (current.models[model]?.[i] ?? 0)));
-    if (!within) continue;
-    inside = state.total;
-    const growth = Object.entries(current.models).map(([model, counts]) =>
-      counts.map((n, i) => n - (state.models[model]?.[i] ?? 0)));
-    const isTurn = (counts: number[]) => counts.every((n, i) => n === turn[i]);
-    const summed = turn.map((_, i) => growth.reduce((sum, counts) => sum + counts[i]!, 0));
-    if (growth.some(isTurn) || isTurn(summed)) exact = state.total;
-  }
-  return exact ?? inside;
-}
-
 type ClaudeImage = NonNullable<SendTurnInput["images"]>[number];
 type ClaudeUserContent =
   | { type: "image"; source: { type: "base64"; media_type: ClaudeImage["mime"]; data: string } }
@@ -1081,7 +1028,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (turn.integrations?.localComputer) {
         const local = turn.integrations.localComputer;
         mcpServers.computer = { command: local.command, args: local.args, env: local.env };
-        if (!controlsHost) allowed.push("mcp__computer");
+        // Never pre-allowed: a computer call takes the turn's permission mode, cloud box or host.
       }
       const cwd = turn.cwd ?? homedir(), toolSearch = claudeToolSearchSetting(cwd, turnEnvironment);
       // Pre-allowed, or the CLI's own ListAgents look-alike shadows it.
@@ -1177,8 +1124,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       }
       // Every MCP server without alwaysLoad loads on demand behind ToolSearch (claude-tool-search.ts).
       const own: Record<string, unknown> = { ...authSettings, env: { ...authSettings.env, ENABLE_TOOL_SEARCH: toolSearch, ...(isolated ? CLAUDE_OWN_MEMORY_OFF : {}) } };
-      // Project-only settings still find the personal memory via ancestors when the bot lives under HOME.
-      if (isolated) own.claudeMdExcludes = [join(homedir(), ".claude", "CLAUDE.md")];
+      // Project-only settings still find the personal memory and rules via ancestors when the bot lives under HOME.
+      if (isolated) own.claudeMdExcludes = [join(homedir(), ".claude", "CLAUDE.md"), join(homedir(), ".claude", "rules", "**")];
       if (hooks) own.hooks = claudeHookSettings(HOOK_HELPER_PATH);
       if (turn.guestConfined) own.permissions = GUEST_CLAUDE_PERMISSIONS;
       // Approvals and browser credentials expire at the turn boundary; native background workers and cron jobs must not outlive it.

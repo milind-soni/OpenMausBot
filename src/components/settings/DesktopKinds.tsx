@@ -3,19 +3,20 @@ import { Cloud, Laptop, Server } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { productName } from "@/lib/brand";
 import { computerInventoryRequest } from "@/lib/computer-requests";
-import { useStore } from "@/state/store";
+import { useStoreSelector } from "@/state/store-select";
 import { LocalComputerSection } from "../LocalComputerSection";
 import { SettingRow, SettingsGroup, SettingsLinkRow, SettingsMark, SettingsRows, StatusDot } from "../SettingsPrimitives";
 import { useAccountSummary } from "./account-summary";
 import { useOtherPlaces } from "./settings-context";
 import { SettingsDialog } from "./SettingsDialog";
 import { useSettingsShell } from "./settings-shell";
+import { serverFetch } from "@/lib/relay-server";
 
 type PrivateStatus = { runtime: string | null; daemonUp: boolean; image: boolean; ready: boolean } | null;
 type Kind = "ready" | "setup" | "none" | "attention" | "elsewhere";
 
 const read = async <T,>(which: "status" | "cloud" | "vps"): Promise<T | null> => {
-  const response = await fetch(...computerInventoryRequest(which)).catch(() => null);
+  const response = await serverFetch(...computerInventoryRequest(which)).catch(() => null);
   if (!response?.ok) return null;
   return await response.json().catch(() => null) as T | null;
 };
@@ -60,8 +61,7 @@ function PrivateSetup({ status, onCheck, onClose }: { status: PrivateStatus; onC
 /** Desktops: what each kind is, its state first, and one Set up. */
 export function DesktopKinds() {
   const { ctx, place, go } = useSettingsShell();
-  const { state } = useStore();
-  const cloudHome = state.config?.cloudHome === true;
+  const cloudHome = useStoreSelector((state) => state.config?.cloudHome === true);
   const [local, setLocal] = useState<PrivateStatus>(null);
   const [cloud, setCloud] = useState<{ configured: boolean; available: boolean } | null>(null);
   const [vps, setVps] = useState<{ configured: boolean; available: boolean } | null>(null);

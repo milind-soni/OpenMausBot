@@ -20,12 +20,14 @@ describe("desktop capabilities", () => {
       appleMediaPermissions: false,
       applePrivacySettings: false,
       appleSpeech: false,
+      windowsSpeech: false,
     });
-    expect(nativeDesktopActions("win32")).toEqual(nativeDesktopActions("linux"));
+    expect(nativeDesktopActions("win32")).toEqual({ ...nativeDesktopActions("linux"), windowsSpeech: true });
     expect(nativeDesktopActions("darwin")).toEqual({
       appleMediaPermissions: true,
       applePrivacySettings: true,
       appleSpeech: true,
+      windowsSpeech: false,
     });
   });
 
@@ -127,12 +129,11 @@ describe("desktop capabilities", () => {
     expect(reasonOf("desktop-host-stopped")).toBe("cua-driver-unavailable");
   });
 
-  it.each(["win32", "linux"])("listens through Fish Audio on %s, but not from a server's page", (platform) => {
-    expect(desktopCapabilities({ platform, env: { DISPLAY: ":0" } }).dictation).toEqual({
-      available: true,
-      engine: "fish-audio",
-      onDevice: false,
-    });
+  it.each([
+    ["win32", { available: true, engine: "windows-speech", onDevice: true }],
+    ["linux", { available: true, engine: "fish-audio", onDevice: false }],
+  ])("listens on %s, but not from a server's page", (platform, dictation) => {
+    expect(desktopCapabilities({ platform, env: { DISPLAY: ":0" } }).dictation).toEqual(dictation);
     expect(desktopCapabilities({ platform, remote: true }).dictation).toEqual({
       available: false,
       engine: "none",

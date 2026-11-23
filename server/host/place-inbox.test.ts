@@ -25,6 +25,7 @@ function setup(over: Partial<PlaceInboxDeps> = {}, dataDir = mkdtempSync(join(tm
   let serial = 0;
   const said = new Map<string, Said[]>();
   const cards: OpenCardRow[] = [];
+  const closed = new Set<string>();
   const sent: Notification[] = [];
   const handed = new Map<string, string>();
   const guests = new Map<string, string>();
@@ -37,7 +38,7 @@ function setup(over: Partial<PlaceInboxDeps> = {}, dataDir = mkdtempSync(join(tm
   const store = {
     bot: (id: string) => bots[id],
     botByThread: (threadId: string) => (threadId.startsWith("eli") || threadId === "guest-chat" ? bots.eli : threadId.startsWith("mira") ? bots.mira : undefined),
-    taskByThread: (_botId: string, threadId: string) => (titles[threadId] ? { threadId, title: titles[threadId] } : undefined),
+    taskByThread: (_botId: string, threadId: string) => (titles[threadId] ? { threadId, title: titles[threadId], ...(closed.has(threadId) ? { closedBy: { botId: "eli", name: "Eli", at: 1 } } : {}) } : undefined),
     groupByThread: (threadId: string) => rooms[threadId],
     appendMessage: (threadId: string, line: Omit<Said, "id" | "at">) => {
       const posted = { ...line, id: `m${++serial}`, at: clock };
@@ -64,7 +65,7 @@ function setup(over: Partial<PlaceInboxDeps> = {}, dataDir = mkdtempSync(join(tm
     cards.push(row);
     return row;
   };
-  return { inbox, store, said, cards, sent, handed, guests, bots, listeners, ask, dataDir, tick: (ms: number) => { clock += ms; } };
+  return { inbox, store, said, cards, closed, sent, handed, guests, bots, listeners, ask, dataDir, tick: (ms: number) => { clock += ms; } };
 }
 
 describe("finished work reaches the inbox once", () => {
@@ -183,6 +184,47 @@ describe("the inbox of a place that is no team's", () => {
     f.cards.length = 0;
     expect(f.inbox.count(OWNER)).toBe(0);
     expect(f.inbox.view(OWNER).rows).toEqual([]);
+  });
+
+  it("lists an automation's question once, though the run's Results chat holds a copy of its card", () => {
+    const f = setup();
+    const original = f.ask("eli-launch", "q");
+    f.cards.push({ ...original, threadId: "eli-pricing", id: "copy-q", at: original.at + 1, copyOf: original.id });
+    expect(f.inbox.view(OWNER).rows.map((row) => [row.id, row.origin?.threadId])).toEqual([["card-q", "eli-launch"]]);
+    expect(f.inbox.count(OWNER)).toBe(1);
+  });
+
+  it("keeps the Results chat's copy when the Inbox limit cuts the older original", () => {
+    const f = setup();
+    const original = f.ask("eli-launch", "q", {}, 1);
+    for (let index = 0; index < 200; index++) f.ask("eli-main", `r${index}`, {}, 2 + index);
+    f.cards.push({ ...original, threadId: "eli-pricing", id: "copy-q", at: 1_000, copyOf: original.id });
+    const ids = f.inbox.view(OWNER).rows.map((row) => row.id);
+    expect(ids).toHaveLength(200);
+    expect(ids[0]).toBe("copy-q");
+    expect(ids).not.toContain("card-q");
+    expect(f.inbox.view(OWNER).rows[0]).not.toHaveProperty("copyOf");
+  });
+
+  it("still lists the Results chat's copy when the person can't see the run's own chat", () => {
+    const f = setup({ sees: (_auth, threadId) => threadId !== "eli-launch" });
+    const original = f.ask("eli-launch", "q");
+    f.cards.push({ ...original, threadId: "eli-pricing", id: "copy-q", at: original.at + 1, copyOf: original.id });
+    expect(f.inbox.view(OWNER).rows.map((row) => [row.id, row.origin?.threadId])).toEqual([["copy-q", "eli-pricing"]]);
+  });
+
+  it("leaves a closed Results chat's copied question out of the inbox, and lists it again when the thread reopens", () => {
+    const f = setup({ sees: (_auth, threadId) => threadId !== "eli-launch" });
+    const original = f.ask("eli-launch", "q");
+    f.cards.push({ ...original, threadId: "eli-pricing", id: "copy-q", at: original.at + 1, copyOf: original.id });
+    expect(f.inbox.view(OWNER).rows.map((row) => [row.id, row.origin?.threadId])).toEqual([["copy-q", "eli-pricing"]]);
+    expect(f.inbox.count(OWNER)).toBe(1);
+    f.closed.add("eli-pricing");
+    expect(f.inbox.view(OWNER).rows).toEqual([]);
+    expect(f.inbox.count(OWNER)).toBe(0);
+    f.closed.delete("eli-pricing");
+    expect(f.inbox.view(OWNER).rows.map((row) => [row.id, row.origin?.threadId])).toEqual([["copy-q", "eli-pricing"]]);
+    expect(f.inbox.count(OWNER)).toBe(1);
   });
 
   it("drops a question the person wrote past, unless a running turn still waits on it", () => {

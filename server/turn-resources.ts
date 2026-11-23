@@ -9,6 +9,7 @@ export type TurnOwner = {
 /** Whole-turn claims on app-managed resources (a desktop, a browser session, a phone), so a screenshot and its click see the same desktop. Not a shell sandbox. */
 export class TurnResources {
   private readonly owners = new Map<string, TurnOwner>();
+  private readonly heldSince = new Map<string, number>();
   /** Only turns actually waiting: a lazy claim that failed once and moved on must not block the front. */
   private readonly waiters = new Map<string, TurnOwner[]>();
   private readonly waitStats = new Map<string, { ewmaMs: number; samples: number }>();
@@ -77,12 +78,26 @@ export class TurnResources {
       if (!queue.length) this.waiters.delete(resource);
     }
     this.owners.set(resource, owner);
+    this.heldSince.set(resource, Date.now());
     for (const listener of this.claimListeners) listener(resource, owner);
     return true;
   }
 
   holder(resource: string): TurnOwner | undefined {
     return this.owners.get(resource);
+  }
+
+  holderSince(resource: string): number | undefined {
+    return this.owners.has(resource) ? this.heldSince.get(resource) : undefined;
+  }
+
+  /** Browser seats share this waitlist, so only `computer:` resources count; a turn waits on one computer at a time. */
+  computerWaitOf(owner: TurnOwner): { resource: string; position: number } | undefined {
+    for (const resource of this.waiters.keys()) {
+      const position = resource.startsWith("computer:") ? this.waitPosition(resource, owner) : undefined;
+      if (position) return { resource, position };
+    }
+    return undefined;
   }
 
   owns(resource: string, owner: TurnOwner): boolean {
@@ -97,13 +112,18 @@ export class TurnResources {
       else this.waiters.delete(key);
     }
     for (const [key, current] of this.owners) {
-      if (sameOwner(current, owner)) this.owners.delete(key);
+      if (sameOwner(current, owner)) this.drop(key);
     }
   }
 
   releaseOne(resource: string, owner: TurnOwner): void {
-    if (this.owns(resource, owner)) this.owners.delete(resource);
+    if (this.owns(resource, owner)) this.drop(resource);
     this.stopWaiting(resource, owner);
+  }
+
+  private drop(resource: string): void {
+    this.owners.delete(resource);
+    this.heldSince.delete(resource);
   }
 
   free(resource: string): boolean {

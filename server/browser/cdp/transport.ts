@@ -2,10 +2,15 @@ import type { Readable, Writable } from "node:stream";
 
 /** One CDP connection's bytes: a launched Chrome's pipe, a WebSocket, or the desktop link. */
 export interface CdpTransport {
-  send(message: string): void;
+  /** `meta` travels beside the message, never on the wire. */
+  send(message: string, meta?: SendMeta): void;
   onMessage(listener: (message: string) => void): void;
   onClose(listener: (reason: string) => void): void;
   close(): void;
+}
+
+export interface SendMeta {
+  readOnly?: boolean;
 }
 
 class Listeners {
@@ -128,7 +133,7 @@ export interface SentCommand {
 /** Records every command as it leaves for the browser, below the driver's own guard. */
 export function tracingTransport(inner: CdpTransport, record: (sent: SentCommand) => void): CdpTransport {
   return {
-    send(message) {
+    send(message, meta) {
       try {
         const parsed = JSON.parse(message) as { method?: unknown; sessionId?: unknown; params?: unknown };
         if (typeof parsed.method === "string") {
@@ -139,7 +144,7 @@ export function tracingTransport(inner: CdpTransport, record: (sent: SentCommand
           });
         }
       } catch {}
-      inner.send(message);
+      inner.send(message, meta);
     },
     onMessage: (listener) => inner.onMessage(listener),
     onClose: (listener) => inner.onClose(listener),

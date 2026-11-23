@@ -29,19 +29,25 @@ vi.mock("@/lib/logins", () => ({
 }));
 
 import { LoginForm } from "./LoginForm";
-import { SignInBanner, SignInRequestCard } from "./SignInRequestCard";
+import { isPinnedSignIn, PinnedSignInSlot } from "./PinnedSignInSlot";
+import { SignInBanner, SignInRequestCard, SiteSignInCard } from "./SignInRequestCard";
 import { VaultChoices } from "./VaultChoices";
 
-const card = (signIn: Record<string, unknown> = {}): Message => ({
-  id: "card-1",
+const card = (signIn: Record<string, unknown> = {}, id = "card-1"): Message => ({
+  id,
   role: "bot",
   kind: "signin",
   at: 1,
   text: "Pepper needs you to sign in to example.com.",
   signIn: { url: "https://example.com/login", site: "example.com", place: "browser", reason: "The report is behind a login.", ...signIn } as Message["signIn"],
 });
-const props = (signIn?: Record<string, unknown>) => ({ botId: "pepper", botName: "Pepper", threadId: "thread-1", message: card(signIn) });
-const view = (signIn?: Record<string, unknown>) => renderToStaticMarkup(createElement(SignInRequestCard, props(signIn)));
+const props = (signIn?: Record<string, unknown>, extra?: Record<string, unknown>) => ({ ...extra, botId: "pepper", botName: "Pepper", threadId: "thread-1", message: card(signIn) });
+const view = (signIn?: Record<string, unknown>, extra?: Record<string, unknown>) => renderToStaticMarkup(createElement(SignInRequestCard, props(signIn, extra)));
+const pendingCardClasses = (html: string): string[] => {
+  const match = /data-ask-card="pending"[^>]*class="([^"]*)"/u.exec(html);
+  expect(match).not.toBeNull();
+  return match![1]!.split(/\s+/u);
+};
 
 type Node = ReactElement<{ children?: ReactNode; onClick?: () => void }>;
 const elements = (node: ReactNode): Node[] => {
@@ -51,7 +57,7 @@ const elements = (node: ReactNode): Node[] => {
 };
 const tree = (signIn?: Record<string, unknown>) => {
   let root!: ReactNode;
-  function Capture() { root = SignInRequestCard(props(signIn)); return root; }
+  function Capture() { root = SiteSignInCard(props(signIn)); return root; }
   renderToStaticMarkup(createElement(Capture));
   const top = elements(root);
   return [...top, ...top.flatMap((node) => elements((node.props as { footer?: ReactNode }).footer))];
@@ -78,6 +84,22 @@ describe("SignInRequestCard while it waits", () => {
     for (const label of ["Open", "Done", "Cancel"]) expect(html).toContain(label);
     expect(html).toContain("MausBot never sees it.");
     expect(html).not.toContain("<input");
+  });
+
+  it("stays pinned in view while it waits, like the password and connect cards", () => {
+    const classes = pendingCardClasses(view());
+    expect(classes).toContain("sticky");
+    expect(classes).toContain("z-10");
+    expect(classes).toContain("bg-composer");
+  });
+
+  it("renders in the chat flow, without painting over anything, when its host pins it in a reserved slot", () => {
+    const html = view(undefined, { stays: false });
+    const classes = pendingCardClasses(html);
+    expect(classes).not.toContain("sticky");
+    expect(classes).not.toContain("z-10");
+    expect(classes).toContain("bg-composer");
+    for (const label of ["Open", "Done", "Cancel"]) expect(html).toContain(label);
   });
 
   it.each([
@@ -244,5 +266,43 @@ describe("SignInRequestCard saved logins", () => {
     expect(offered({ place: "vm" })).toBe(false);
     fixture.setters = []; fixture.states = { 2: true };
     expect(offered()).toBe(false);
+  });
+});
+
+describe("PinnedSignInSlot", () => {
+  const slotHtml = (messages: Message[]) => renderToStaticMarkup(createElement(PinnedSignInSlot, {
+    cards: messages.filter(isPinnedSignIn).map((message) => ({ message, botId: "pepper", botName: "Pepper", threadId: "thread-1" })),
+  }));
+
+  it("takes only the sign-in cards that still wait", () => {
+    expect(isPinnedSignIn(card())).toBe(true);
+    for (const state of [{ done: true }, { cancelled: true }, { superseded: true }, { answeredInChat: true }, { stopped: true }]) {
+      expect(isPinnedSignIn(card(state))).toBe(false);
+    }
+    expect(isPinnedSignIn({ ...card(), kind: "text", signIn: undefined })).toBe(false);
+    expect(isPinnedSignIn({ ...card(), signIn: undefined })).toBe(false);
+    expect(isPinnedSignIn(card({ instruction: "Approve the payment" }))).toBe(false);
+  });
+
+  it("renders a waiting card in the reserved slot, in-flow and still answering", () => {
+    const html = slotHtml([card()]);
+    expect(html).toContain("data-pinned-sign-in-slot");
+    expect(html).toContain("Sign in needed");
+    expect(html).toContain("example.com");
+    const classes = pendingCardClasses(html);
+    expect(classes).not.toContain("sticky");
+    expect(classes).not.toContain("z-10");
+    expect(classes).toContain("bg-composer");
+    for (const label of ["Open", "Done", "Cancel"]) expect(html).toContain(label);
+  });
+
+  it("renders nothing when no sign-in card waits", () => {
+    expect(slotHtml([card({ done: true })])).toBe("");
+    expect(slotHtml([])).toBe("");
+  });
+
+  it("stacks two waiting cards", () => {
+    const html = slotHtml([card({}, "card-1"), card({}, "card-2")]);
+    expect(html.match(/data-ask-card="pending"/gu)?.length).toBe(2);
   });
 });

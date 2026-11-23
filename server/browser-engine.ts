@@ -562,6 +562,7 @@ export function browserEngineStatus(options: BrowserLookupOptions = {}): Browser
 }
 
 const PROFILE_CACHE_ARG = `--disk-cache-size=${64 * 1024 * 1024}`;
+export const NO_BACK_FORWARD_CACHE = "--disable-back-forward-cache";
 
 /** agent-browser 0.37 relaunches a running Chrome without a word when a command's launch settings differ, so every
  * command for a session must carry these same ones. Chrome fails every connection through port 0. */
@@ -635,7 +636,8 @@ export function agentBrowserIntegration(input: {
   }
   // The gate goes last, so nothing the launcher sets can route Chrome around it; launcher arguments are kept beside its own.
   if (!input.attach) {
-    const launch = { ...env, ...input.launcher };
+    // Chrome keeps up to six pages a tab left alive for Back, each cross-site one in a renderer process of its own.
+    const launch = { ...env, ...input.launcher, AGENT_BROWSER_ARGS: [input.launcher?.AGENT_BROWSER_ARGS, NO_BACK_FORWARD_CACHE].filter(Boolean).join("\n") };
     // A kept profile's disk cache would otherwise grow to Chrome's default of several hundred megabytes per profile.
     if (env.AGENT_BROWSER_PROFILE) launch.AGENT_BROWSER_ARGS = [launch.AGENT_BROWSER_ARGS, PROFILE_CACHE_ARG].filter(Boolean).join("\n");
     // agent-browser 0.37 adds this itself only where it recognises Docker, and a container platform leaves no such mark.

@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Share } from "lucide-react";
 
 import { t } from "@/lib/i18n";
-import { useStore, type Bot } from "@/state/store";
+import { type Bot } from "@/state/store"; import { sameFields, useStoreSelector } from "@/state/store-select";
 import { saveAccess } from "./access";
 import { ShareBotDialog } from "../lazy-screens";
 import type { AccessChange } from "./ShareBotDialog";
@@ -12,7 +12,7 @@ const TOAST_MS = 6_000;
 
 /** The team's name, or null anywhere but a team. */
 export function useTeamName(): string | null {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
   const team = (state.config as { team?: { name?: unknown } } | null | undefined)?.team;
   return typeof team?.name === "string" && team.name ? team.name : null;
 }

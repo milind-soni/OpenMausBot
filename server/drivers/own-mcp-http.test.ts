@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { SPAWNED_PROXIES } from "../proxy-paths.ts";
 import { mountMcpServer } from "./codex-mcp-mount.ts";
-import { acpOwnMcpOverHttp, claudeOwnMcpOverHttp, loopbackUnproxied, noteAcpMcpHttp, OWN_MCP_HTTP_ENV, ownMcpHttpEnabled, withLoopbackNoProxy } from "./own-mcp-http.ts";
+import { acpOwnMcpTransport, acpSessionMcpServers, claudeOwnMcpOverHttp, loopbackUnproxied, OWN_MCP_HTTP_ENV, ownMcpHttpEnabled, withLoopbackNoProxy } from "./own-mcp-http.ts";
+import type { AcpMcpServer } from "./turn-mcp.ts";
 
 const HARNESS = "http://127.0.0.1:8799";
 const agents = { command: process.execPath, args: [SPAWNED_PROXIES.agents], env: { OMB_HARNESS_URL: HARNESS, OMB_COMMS_TOKEN: "comms", OMB_BOT_ID: "b1", OMB_THREAD_ID: "t1", OMB_AGENTS_DEFER_TOOLS: "1", ELECTRON_RUN_AS_NODE: "1" } };
@@ -93,13 +94,47 @@ describe("Codex's own servers", () => {
 });
 
 describe("an ACP engine", () => {
-  it("gets the URL form once its agent said it takes MCP servers by URL, and not when its servers come from its launcher", () => {
-    expect(acpOwnMcpOverHttp("gemini-test", false, true)).toBe(false);
-    noteAcpMcpHttp("gemini-test", { agentCapabilities: { mcpCapabilities: { http: true, sse: false } } });
-    expect(acpOwnMcpOverHttp("gemini-test", false, true)).toBe(true);
-    expect(acpOwnMcpOverHttp("gemini-test", true, true)).toBe(false);
-    expect(acpOwnMcpOverHttp("gemini-test", false, false)).toBe(false);
-    noteAcpMcpHttp("gemini-test", { agentCapabilities: {} });
-    expect(acpOwnMcpOverHttp("gemini-test", false, true)).toBe(false);
+  it("takes the URL form by its driver's choice, by the setting outside the box, never with OMB_OWN_MCP_HTTP=0 or launcher-owned servers", () => {
+    expect(acpOwnMcpTransport({}, {}, false)).toBe("stdio");
+    expect(acpOwnMcpTransport({}, { [OWN_MCP_HTTP_ENV]: "1" }, false)).toBe("advertised");
+    expect(acpOwnMcpTransport({}, { [OWN_MCP_HTTP_ENV]: "1" }, true)).toBe("stdio");
+    for (const boxed of [false, true]) {
+      expect(acpOwnMcpTransport({ ownMcpOverHttp: "advertised" }, {}, boxed)).toBe("advertised");
+      expect(acpOwnMcpTransport({ ownMcpOverHttp: true }, {}, boxed)).toBe("http");
+      expect(acpOwnMcpTransport({ ownMcpOverHttp: "advertised" }, { [OWN_MCP_HTTP_ENV]: "0" }, boxed)).toBe("stdio");
+      expect(acpOwnMcpTransport({ ownMcpOverHttp: true }, { [OWN_MCP_HTTP_ENV]: "0" }, boxed)).toBe("stdio");
+    }
+    expect(acpOwnMcpTransport({ ownMcpOverHttp: "advertised", mcpServersFromLaunch: true }, {}, false)).toBe("stdio");
+  });
+
+  it("sends a session its own servers by URL only when that session's agent said it takes them, the person's as they were", () => {
+    const pairs = (record: Record<string, string>) => Object.entries(record).map(([name, value]) => ({ name, value }));
+    const harnessServer = (kind: string) => ({ name: kind, command: process.execPath, args: [SPAWNED_PROXIES.harnessMcp, kind],
+      env: pairs({ OMB_HARNESS_URL: HARNESS, [`OMB_MCP_TOKEN_${kind.toUpperCase()}`]: `${kind}-capability` }) });
+    const servers: AcpMcpServer[] = [
+      { name: "agents", command: agents.command, args: agents.args, env: pairs(agents.env) },
+      { name: "browser", command: browser.command, args: browser.args, env: pairs(browser.env) },
+      ...["computer", "data", "email", "device"].map(harnessServer),
+      { name: "phone", command: phone.command, args: phone.args, env: pairs(phone.env) },
+      { name: "ogb", command: ogb.command, args: ogb.args, env: [] },
+      { name: "notes", command: "npx", args: ["notes"], env: [] },
+    ];
+    const http = { agentCapabilities: { mcpCapabilities: { http: true, sse: false } } };
+    expect(acpSessionMcpServers(servers, "advertised", { agentCapabilities: {} })).toBe(servers);
+    expect(acpSessionMcpServers(servers, "advertised", { agentCapabilities: { mcpCapabilities: { http: "yes" } } })).toBe(servers);
+    expect(acpSessionMcpServers(servers, "stdio", http)).toBe(servers);
+    const sent = acpSessionMcpServers(servers, "advertised", http);
+    expect(sent.map((server) => "type" in server ? `${server.name}:${server.url}` : server.name)).toEqual([
+      ...["agents", "browser", "computer", "data", "email", "device"].map((name) => `${name}:${HARNESS}/api/internal/mcp-http/${name}`),
+      "phone", "ogb", "notes"]);
+    expect(sent.slice(6)).toEqual(servers.slice(6));
+    for (const kind of ["computer", "data", "email", "device"]) {
+      expect((sent.find((server) => server.name === kind) as Extract<AcpMcpServer, { type: "http" }>).headers).toEqual([{ name: "authorization", value: `Bearer ${kind}-capability` }]);
+    }
+    const own = sent[1] as Extract<AcpMcpServer, { type: "http" }>;
+    expect(own.headers).toEqual([{ name: "authorization", value: "Bearer browse" }, { name: "x-omb-tool-limit", value: "12" }]);
+    const agentsHeaders = Object.fromEntries((sent[0] as Extract<AcpMcpServer, { type: "http" }>).headers.map(({ name, value }) => [name, value]));
+    expect(agentsHeaders.authorization).toBe("Bearer comms");
+    expect(settings(Object.values(agentsHeaders).find((value) => value !== "Bearer comms")!)).toMatchObject({ OMB_BOT_ID: "b1", OMB_THREAD_ID: "t1" });
   });
 });

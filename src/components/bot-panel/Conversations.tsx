@@ -4,13 +4,14 @@ import { ChevronDown, ChevronUp, Search, SquarePen } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { activeLocale, t } from "@/lib/i18n";
 import { SIDEBAR_INLINE, useMediaQuery } from "@/lib/use-media-query";
-import { api, currentTaskBot, openBotThread, useStore, visibleMessages, type Bot, type Message } from "@/state/store";
+import { api, currentTaskBot, openBotThread, visibleMessages, type Bot, type Message } from "@/state/store";
 import { lastLine } from "../sidebar-preview";
 import { isArchived, orderedThreadList, SidebarThreadRow, stampClock, threadRecency, threadRowActions, useRelativeNow } from "../SidebarThreadRow";
 import { filterTasks } from "../TaskPicker";
 import { useConversationSide } from "../TeamSideSwitch";
 import { tasksOfSide } from "@/state/team-side";
 import { CardLabel, panelActionCls } from "./rows";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 export const CONVERSATIONS_SHOWN = 3;
 const PANEL_ROW_LOOK = "[&_.font-semibold]:font-medium [&_time]:text-[12px] [&_time]:text-ink-tertiary [&_span.bg-accent]:size-2";
@@ -48,6 +49,14 @@ function useRecentMessages(bot: Bot, threads: readonly { threadId: string; updat
   return (threadId) => threadId === bot.threadId ? open : fetched.get(byThread.get(threadId) ?? "");
 }
 
+/** The sidebar's "N more" opens this list with every conversation showing, whether or not the panel is already open. */
+let showAllNext: string | null = null;
+const showAllListeners = new Set<(botId: string) => void>();
+export function showAllConversations(botId: string): void {
+  showAllNext = botId;
+  for (const listener of showAllListeners) listener(botId);
+}
+
 /** Tests only. */
 export function forgetConversationLines(): void {
   fetched.clear();
@@ -55,16 +64,25 @@ export function forgetConversationLines(): void {
 }
 
 export function BotConversations({ bot }: { bot: Bot }) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ instances: s.instances, pendingQueued: s.pendingQueued }), sameFields), dispatch = useStoreDispatch();
   const now = useRelativeNow();
   const phone = !useMediaQuery(SIDEBAR_INLINE, true);
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(() => {
+    const asked = showAllNext === bot.id;
+    if (asked) showAllNext = null;
+    return asked;
+  });
+  useEffect(() => {
+    const listener = (botId: string) => { if (botId !== bot.id) return; showAllNext = null; setExpanded(true); };
+    showAllListeners.add(listener);
+    return () => { showAllListeners.delete(listener); };
+  }, [bot.id]);
   const [showArchived, setShowArchived] = useState(false);
   const actions = useMemo(() => {
-    const { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive } = threadRowActions(bot.id, dispatch);
-    return { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive };
+    const { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive, onMemory } = threadRowActions(bot.id, dispatch);
+    return { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive, onMemory };
   }, [bot.id, dispatch]);
 
   const side = useConversationSide(bot);

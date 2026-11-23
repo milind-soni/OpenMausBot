@@ -38,6 +38,8 @@ export function excludedWorkspaceAuthPath(path: string): boolean {
   if (inSecretFolder(path)) return true;
   if (/^command-allowlist\.json(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;
   if (/^mcp-oauth\.json(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;
+  // Bot API keys saved for teammates on other servers stay on the server they were saved on, like any other credential.
+  if (/^remote-teammates\.json(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;
   // Saved website logins and their key never leave the computer they were saved on, nor does the key sealing webhook secrets.
   if (/^(?:logins\.json\.enc|member-secrets\.json\.enc|logins-key|webhook-key)(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;
   // A Cloud home's connected-apps installation: its connected accounts belong to it, so a copy would share them.
@@ -62,9 +64,10 @@ export function ephemeralWorkspaceTokenPath(path: string): boolean {
   return /^(?:hook-tokens(?:\/|$)|sessions\.json\.open$)/.test(path);
 }
 
-/** Not a consistent snapshot while the engine holds it open (unflushed WAL), and reloadable from its sources. */
-export function liveDataEnginePath(path: string): boolean {
-  return /^bots\/[^/]+\/(?:data\.duckdb(?:\.wal)?$|data-tmp(?:\/|$))/.test(path);
+/** DuckDB's spill folder for a bot's Data tables: scratch space for one query, emptied when the database closes. The
+ * database itself (data.duckdb) goes, taken at rest (workspace-backup-databases.ts). */
+export function dataEngineSpillPath(path: string): boolean {
+  return /^bots\/[^/]+\/data-tmp(?:\/|$)/.test(path);
 }
 
 /** Read the link text, never follow it. A link points at the bot's own skill, or at the same-named skill brought in
