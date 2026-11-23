@@ -34,6 +34,14 @@ export function httpErrorDetail(body: string, limit = 500): string {
 
 export class UnsupportedChatToolsError extends Error {}
 
+export class ChatHttpError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
 /** The provider closed the stream with neither finish_reason nor [DONE]; resending repeats nothing. */
 export class StreamTruncatedError extends ChatProtocolError {}
 

@@ -380,6 +380,7 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
    * MEMORY.md and topic files, adds facts about the person to About me and
    * tidies nightly. On unless explicitly false. */
   memoryUpkeep?: boolean;
+  memoryModel?: { instanceId: string; model: string };
   /** Prompt-cache keep-warm for this bot's Claude threads: true or false overrides the workspace setting; absent follows it. */
   cacheKeepWarm?: boolean;
   checkWork?: import("./check-work.ts").CheckWork;

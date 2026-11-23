@@ -4,6 +4,7 @@ import { t } from "@/lib/i18n";
 import { fetchMemoryJournal, fetchMemoryOverview, markMemoryReviewed, revertMemoryChange, type LendingReview, type MemoryJournalRow } from "@/lib/memory";
 import { ApiError, type Bot } from "@/state/store";
 import { LendingReviewNotice, MemoryJournalList } from "../bot-settings/MemorySection";
+import { MemoryModelSetting } from "../bot-settings/MemoryModelSetting";
 import { Card, SwitchRow } from "./rows";
 import { useStoreDispatch } from "@/state/store-select";
 
@@ -61,6 +62,7 @@ export function MemoryUpkeepCards({ bot, onChanged }: { bot: Bot; onChanged: () 
           color={bot.color}
           onChange={() => dispatch({ type: "updateBot", botId: bot.id, patch: { memoryUpkeep: bot.memoryUpkeep === false } })}
         />
+        {bot.memoryUpkeep !== false && <MemoryModelSetting key={bot.id} bot={bot} />}
       </Card>
       {rows.length > 0 && (
         <Card label={t("memory.changes")}>

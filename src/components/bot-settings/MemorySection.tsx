@@ -1,5 +1,5 @@
 import { FileText, FolderOpen, RotateCcw, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { cn } from "@/lib/cn";
 import {
@@ -40,6 +40,7 @@ import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { inputCls } from "./field";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { useMinuteTick } from "@/lib/minute-tick";
+import { MemoryModelSetting } from "./MemoryModelSetting";
 
 const buttonCls = "rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50";
 const quietButtonCls = "rounded-md px-2 py-1 text-[13px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50";
@@ -355,6 +356,7 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
         onToggle={toggleUpkeep}
         onTidy={() => void tidyNow()}
         rooms={{ enabled: learnFromRooms, saving: roomsSaving, error: roomsError, onToggle: () => void toggleRooms() }}
+        model={bot.memoryUpkeep !== false ? <MemoryModelSetting key={bot.id} bot={bot} active={active} className="mt-3" /> : undefined}
       />}
 
       {editing && (
@@ -484,6 +486,7 @@ export function MemoryUpkeepCard({
   onToggle,
   onTidy,
   rooms,
+  model,
 }: {
   enabled: boolean;
   status: UpkeepStatus | null;
@@ -491,6 +494,7 @@ export function MemoryUpkeepCard({
   onToggle: () => void;
   onTidy: () => void;
   rooms?: { enabled: boolean; saving: boolean; error: string; onToggle: () => void };
+  model?: ReactNode;
 }) {
   return (
     <div className="rounded-xl bg-card p-4">
@@ -501,6 +505,7 @@ export function MemoryUpkeepCard({
         </div>
         <Switch checked={enabled} aria-label={t("memory.upkeep.title")} onClick={onToggle} />
       </div>
+      {model}
       {enabled && rooms && (
         <div className="mt-3 flex items-start justify-between gap-3 border-t border-hairline/40 pt-3">
           <div className="min-w-0">

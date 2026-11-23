@@ -5,14 +5,22 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Bot } from "@/state/store";
 import type { MemoryJournalRow } from "@/lib/memory";
+import type { MemoryModelStatus } from "../../../shared/memory-model";
 
-const fixture = vi.hoisted(() => ({ api: vi.fn(), dispatch: vi.fn(), journal: [] as unknown[], review: undefined as unknown }));
+const fixture = vi.hoisted(() => ({
+  api: vi.fn(), dispatch: vi.fn(), journal: [] as unknown[], review: undefined as unknown,
+  memoryModel: undefined as MemoryModelStatus | undefined,
+}));
 vi.mock("@/state/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/state/store")>()),
   api: (...args: unknown[]) => fixture.api(...args),
-  useStore: () => ({ state: {}, dispatch: fixture.dispatch }),
+  useStore: () => ({
+    state: { instances: [{ instanceId: "openrouter", models: { options: [{ id: "vendor/next", label: "Next model" }] } }] },
+    dispatch: fixture.dispatch,
+  }),
 }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => false, readAdvancedMode: () => false, setAdvancedMode: vi.fn() }));
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
 
 const { MemoryUpkeepCards } = await import("./MemoryUpkeepCards");
 
@@ -34,9 +42,15 @@ beforeEach(() => {
   fixture.dispatch = vi.fn();
   fixture.journal = [];
   fixture.review = undefined;
+  fixture.memoryModel = undefined;
   onChanged.mockClear();
   fixture.api.mockReset();
-  fixture.api.mockImplementation(async (path: string) => {
+  fixture.api.mockImplementation(async (path: string, init?: RequestInit) => {
+    if (path.endsWith("/memory/upkeep")) return { enabled: true, modelSteps: true, memoryModel: fixture.memoryModel };
+    if (path === "/api/bots/scout" && init?.method === "PATCH") {
+      fixture.memoryModel = JSON.parse(String(init.body)).memoryModel ?? { instanceId: "openrouter" };
+      return { ok: true };
+    }
     if (path.includes("/memory/journal?")) return { entries: fixture.journal };
     if (path.endsWith("/memory")) return { index: {}, topics: [], logs: [], ...(fixture.review ? { lendingReview: fixture.review } : {}) };
     return { ok: true };
@@ -55,6 +69,22 @@ it("switches Memory upkeep off and shows no Changes before there are any", async
   expect(host.querySelector("[data-panel-row=memory-changes]")).toBeNull();
   await act(async () => { host.querySelector<HTMLButtonElement>("[data-panel-row=memory-upkeep] button")!.click(); });
   expect(fixture.dispatch).toHaveBeenCalledWith({ type: "updateBot", botId: "scout", patch: { memoryUpkeep: false } });
+});
+
+it("keeps the selected model visible after fallback and saves an independent memory selection", async () => {
+  const selection = { instanceId: "openrouter", model: "vendor/previous" };
+  fixture.memoryModel = { ...selection, last: { ...selection, state: "fallback", used: "vendor/auto" } };
+  await render();
+  const select = host.querySelector<HTMLSelectElement>('[data-panel-row="memory-model"] select')!;
+  expect(select.value).toBe(selection.model);
+  expect(host.querySelector('[data-panel-row="memory-model"] [role="status"]')?.textContent).toContain("used vendor/auto");
+
+  await act(async () => { select.value = "vendor/next"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+  expect(fixture.api).toHaveBeenCalledWith("/api/bots/scout", {
+    method: "PATCH", body: JSON.stringify({ memoryModel: { instanceId: "openrouter", model: "vendor/next" } }),
+  });
+  expect(select.value).toBe("vendor/next");
+  expect(host.querySelector('[data-panel-row="memory-model"] [role="status"]')).toBeNull();
 });
 
 it("undoes an upkeep change from Changes and shows the lending review until it is marked reviewed", async () => {

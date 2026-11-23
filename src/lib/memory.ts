@@ -1,3 +1,4 @@
+import type { MemoryModelStatus } from "../../shared/memory-model";
 import { ApiError, api } from "@/state/store";
 import { intlLocale, t } from "@/lib/i18n";
 import { serverErrorText } from "@/lib/server-error";
@@ -134,6 +135,7 @@ export interface CaptureReport {
 export interface UpkeepStatus {
   enabled: boolean;
   modelSteps: boolean;
+  memoryModel?: MemoryModelStatus;
   lastTidy?: TidyReport;
   lastCapture?: CaptureReport;
 }
