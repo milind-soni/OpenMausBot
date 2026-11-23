@@ -11,8 +11,8 @@
 //
 // Files only: both writers make their folder and then write into it, so a folder removed between the two would fail
 // the write. Folders of deleted conversations go with the conversation. A link is never followed or removed.
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { lstat, opendir, unlink } from "node:fs/promises";
+import { lstatSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { lstat, opendir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { setImmediate as yieldNow, setTimeout as sleep } from "node:timers/promises";
 
@@ -40,7 +40,7 @@ const YIELD_EVERY = 500;
 export function toolResultsSweepMode(env: NodeJS.ProcessEnv): ToolResultsSweepMode {
   const raw = env.OMB_TOOL_RESULTS_SWEEP?.trim().toLowerCase();
   if (raw === "report" || raw === "dry-run") return "report";
-  return raw === "on" || raw === "1" || raw === "true" ? "on" : "off";
+  return raw === "on" ? "on" : "off";
 }
 
 export interface ToolResultsSweepResult {
@@ -91,17 +91,24 @@ export async function sweepToolResults(deps: {
     if (deps.paused?.()) result.stopped = true;
     return !result.stopped;
   };
-  const remove = async (path: string, ino: number): Promise<boolean> => {
+  const remove = async (path: string, dev: number, ino: number): Promise<boolean> => {
     if (!(await quietMoment(deps, deps.turnWaitMs ?? TURN_WAIT_MS))) {
       result.stopped = true;
       return false;
     }
     if (deps.mode !== "on") return true;
-    // The file listed, not one put in its place since.
-    const current = await stat(path);
-    return Boolean(current?.isFile() && current.ino === ino) && unlink(path).then(() => true, () => false);
+    // The file listed and nothing else: the check is by device and inode, so a folder swapped for a link since the
+    // listing reaches a different file and nothing goes. No await between the check and the unlink.
+    try {
+      const current = lstatSync(path);
+      if (!current.isFile() || current.dev !== dev || current.ino !== ino) return false;
+      unlinkSync(path);
+      return true;
+    } catch {
+      return false;
+    }
   };
-  const young: Array<{ path: string; ino: number; size: number; mtimeMs: number }> = [];
+  const young: Array<{ path: string; dev: number; ino: number; size: number; mtimeMs: number }> = [];
   let youngBytes = 0;
   const top = await opendir(deps.root).catch(() => null);
   if (!top) return result;
@@ -121,11 +128,11 @@ export async function sweepToolResults(deps: {
       const stats = await stat(path);
       if (!stats?.isFile()) continue;
       if (now - stats.mtimeMs < MAX_AGE_MS) {
-        young.push({ path, ino: stats.ino, size: stats.size, mtimeMs: stats.mtimeMs });
+        young.push({ path, dev: stats.dev, ino: stats.ino, size: stats.size, mtimeMs: stats.mtimeMs });
         youngBytes += stats.size;
         continue;
       }
-      if (!(await remove(path, stats.ino))) {
+      if (!(await remove(path, stats.dev, stats.ino))) {
         if (result.stopped) break;
         continue;
       }
@@ -137,7 +144,7 @@ export async function sweepToolResults(deps: {
   young.sort((a, b) => a.mtimeMs - b.mtimeMs);
   for (const file of young) {
     if (youngBytes <= cap || now - file.mtimeMs < MIN_AGE_MS) break;
-    if (!(await remove(file.path, file.ino))) {
+    if (!(await remove(file.path, file.dev, file.ino))) {
       if (result.stopped) break;
       continue;
     }
