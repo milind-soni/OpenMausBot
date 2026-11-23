@@ -1,0 +1,24 @@
+# This fork ships the Apache 2.0 edition only. enterprise/ is under the
+# OpenMausBot Enterprise License; an upstream merge must not bring it back.
+name: no-enterprise
+
+on:
+  push:
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: enterprise/ stays out of this fork
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: |
+          if [ -e enterprise ]; then
+            echo "enterprise/ is under the OpenMausBot Enterprise License and must not be in this fork; delete it after the upstream merge."
+            exit 1
+          fi
