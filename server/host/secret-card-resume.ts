@@ -10,9 +10,52 @@ export interface SecretCardResumeDeps {
   isWaitingCard(threadId: string, messageId: string): boolean;
   isDirectBlocked(botId: string, threadId: string): boolean;
   isRoomBlocked(groupId: string, botId: string, threadId: string): boolean;
+  discoverPending?(): Array<{ botId: string; threadId: string }>;
   scheduleDrain?(): void;
   startDirectContinuation(botId: string, threadId: string, text: string): Promise<unknown>;
   startRoomContinuation(groupId: string, botId: string, threadId: string, text: string): Promise<unknown>;
+}
+
+const isUnresumedProvidedSecret = (message: Message): boolean => {
+  const secret = message.secret;
+  return (
+    message.kind === "secret"
+    && secret?.provided === true
+    && !secret.resumed
+    && !secret.superseded
+    && !secret.stopped
+  );
+};
+
+/** Discovers direct and room threads with persisted provided secret cards that still need resumption after restart. */
+export function collectPersistedSecretCardTargets(
+  store: Pick<Store, "bots" | "groups" | "tasks" | "groupTasks" | "activePath">,
+): Array<{ botId: string; threadId: string }> {
+  const seen = new Set<string>();
+  const targets: Array<{ botId: string; threadId: string }> = [];
+  const add = (botId: string, threadId: string) => {
+    const key = `${botId}\0${threadId}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    targets.push({ botId, threadId });
+  };
+  for (const bot of store.bots) {
+    for (const threadId of new Set([bot.threadId, ...store.tasks(bot.id).map((task) => task.threadId)])) {
+      if (store.activePath(threadId).some(isUnresumedProvidedSecret)) add(bot.id, threadId);
+    }
+  }
+  for (const group of store.groups) {
+    const threadIds = new Set([group.threadId, ...(group.dm ? [] : store.groupTasks(group.id).map((task) => task.threadId))]);
+    for (const threadId of threadIds) {
+      for (const message of store.activePath(threadId)) {
+        const sender = message.from?.botId;
+        if (typeof sender === "string" && group.memberIds.includes(sender) && isUnresumedProvidedSecret(message)) {
+          add(sender, threadId);
+        }
+      }
+    }
+  }
+  return targets;
 }
 
 const RETRYABLE_CODES = new Set(["thread_busy", "settling", "thread_limit"]);
@@ -26,21 +69,14 @@ export function roomContinuationNotStartedError(cancelled: boolean, dispatchErro
 export function createSecretCardResumer(deps: SecretCardResumeDeps) {
   const pending = new Set<string>();
   const inFlight = new Set<string>();
+  let seeded = false;
 
   const keyOf = (botId: string, threadId: string) => `${botId}\0${threadId}`;
 
   function unresumedProvided(botId: string, threadId: string, isRoom: boolean): Message[] {
-    return deps.store.activePath(threadId).filter((message) => {
-      const secret = message.secret;
-      return (
-        message.kind === "secret"
-        && secret?.provided === true
-        && !secret.resumed
-        && !secret.superseded
-        && !secret.stopped
-        && (!isRoom || message.from?.botId === botId)
-      );
-    });
+    return deps.store.activePath(threadId).filter(
+      (message) => isUnresumedProvidedSecret(message) && (!isRoom || message.from?.botId === botId),
+    );
   }
 
   function rollback(botId: string, threadId: string, cards: readonly Message[], error: unknown): void {
@@ -106,6 +142,12 @@ export function createSecretCardResumer(deps: SecretCardResumeDeps) {
   }
 
   function drain(): void {
+    if (!seeded) {
+      seeded = true;
+      for (const target of deps.discoverPending?.() ?? []) {
+        pending.add(keyOf(target.botId, target.threadId));
+      }
+    }
     for (const key of Array.from(pending)) {
       const sep = key.indexOf("\0");
       if (sep < 0) {

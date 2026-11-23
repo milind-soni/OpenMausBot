@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { SecretRequestCardData } from "../../shared/wire.ts";
 import type { Message } from "../store.ts";
-import { createSecretCardResumer, roomContinuationNotStartedError } from "./secret-card-resume.ts";
+import { createSecretCardResumer, collectPersistedSecretCardTargets, roomContinuationNotStartedError } from "./secret-card-resume.ts";
 
 function makeCard(id: string, label: string, extra: Partial<SecretRequestCardData> = {}): Message {
   return {
@@ -51,6 +51,7 @@ function makeFixture(options: { group?: { id: string }; directBlocked?: boolean;
     isWaitingCard: (_threadId, messageId) => waitingCards.has(messageId),
     isDirectBlocked: () => directBlocked,
     isRoomBlocked: () => roomBlocked,
+    discoverPending: (options as { discoverPending?: () => Array<{ botId: string; threadId: string }> }).discoverPending,
     scheduleDrain: () => { drainScheduled += 1; },
     startDirectContinuation: async (botId, threadId, text) => {
       startedDirect.push({ botId, threadId, text });
@@ -254,5 +255,61 @@ describe("createSecretCardResumer", () => {
       { botId: "bot-1", threadId: "t-1", text: "update(c-wait:Waiting Key:provided)" },
     ]);
     expect(f.lines[0]!.secret!.resumed).toBe(true);
+  });
+
+  it("discovers persisted deferred cards on first drain after restart and skips stopped or already-resumed ones", () => {
+    const byThread = new Map<string, Message[]>([
+      ["t-main", [makeCard("c-done", "Done", { provided: true, resumed: true }), makeCard("c-direct", "Direct Key", { provided: true })]],
+      ["t-task", [makeCard("c-stopped", "Stopped", { provided: true, stopped: true })]],
+      ["room-t1", [
+        { ...makeCard("c-room", "Room Key", { provided: true }), from: { botId: "bot-2", name: "Two", color: "blue" } } as Message,
+        { ...makeCard("c-nonmember", "Ghost Key", { provided: true }), from: { botId: "bot-99", name: "Ghost", color: "coral" } } as Message,
+      ]],
+    ]);
+    const store = {
+      bots: [{ id: "bot-1", threadId: "t-main" }] as never,
+      groups: [{ id: "room-1", threadId: "room-t1", dm: false, memberIds: ["bot-1", "bot-2"] }] as never,
+      tasks: (botId: string) => (botId === "bot-1" ? [{ threadId: "t-task" }] : []) as never,
+      groupTasks: () => [] as never,
+      activePath: (threadId: string) => byThread.get(threadId) ?? [],
+      patchMessage: (threadId: string, id: string, patch: Partial<Message>) => {
+        const list = byThread.get(threadId) ?? [];
+        const target = list.find((line) => line.id === id);
+        if (target) Object.assign(target, patch);
+        return target ?? null;
+      },
+    };
+    const targets = collectPersistedSecretCardTargets(store);
+    expect(targets).toEqual([
+      { botId: "bot-1", threadId: "t-main" },
+      { botId: "bot-2", threadId: "room-t1" },
+    ]);
+
+    const startedDirect: Array<{ botId: string; threadId: string; text: string }> = [];
+    const startedRoom: Array<{ groupId: string; botId: string; threadId: string; text: string }> = [];
+    let blocked = true;
+    const freshResumer = createSecretCardResumer({
+      store,
+      connectorThread: (botId, threadId) => (threadId === "t-main" && botId === "bot-1"
+        ? { group: undefined }
+        : threadId === "room-t1" && botId === "bot-2"
+          ? { group: { id: "room-1" } }
+          : null),
+      updateText: (messageId, secret, outcome) => `update(${messageId}:${secret.label}:${outcome})`,
+      isWaitingCard: () => false,
+      isDirectBlocked: () => blocked,
+      isRoomBlocked: () => false,
+      discoverPending: () => collectPersistedSecretCardTargets(store),
+      startDirectContinuation: async (botId, threadId, text) => { startedDirect.push({ botId, threadId, text }); },
+      startRoomContinuation: async (groupId, botId, threadId, text) => { startedRoom.push({ groupId, botId, threadId, text }); },
+    });
+
+    freshResumer.drain();
+    expect(startedDirect).toEqual([]);
+    expect(startedRoom).toEqual([{ groupId: "room-1", botId: "bot-2", threadId: "room-t1", text: "update(c-room:Room Key:provided)" }]);
+
+    blocked = false;
+    freshResumer.drain();
+    expect(startedDirect).toEqual([{ botId: "bot-1", threadId: "t-main", text: "update(c-direct:Direct Key:provided)" }]);
   });
 });
