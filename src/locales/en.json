@@ -4310,6 +4310,8 @@
   "keys.vps.serverCpusAria": "{name} CPU cores",
   "keys.vps.unitGb": "GB",
   "keys.vps.unitCores": "cores",
+  "keys.vps.memory": "Memory (GB)",
+  "keys.vps.cpus": "CPU cores",
   "keys.vps.limitsHint": "Memory and cores are the most each bot's desktop on a server may use. Left empty, a named server uses the default server's, and the default uses 4 GB and 2 cores. A running desktop takes a change the next time it starts. Saving checks that the machine has them.",
   "usage.title": "Usage",
   "planUsage.title": "Plan usage",

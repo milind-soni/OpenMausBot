@@ -11,9 +11,8 @@ type VpsStatus = ConfigStatus["vps"];
 export type VpsNamedServer = NonNullable<VpsStatus["servers"]>[number];
 type Range = { min: number; max: number; fallback: number };
 
-/** The server's limits for one desktop (server/container-limits.ts); empty is "not set". */
-const MEMORY_GB: Range = { min: 2, max: 128, fallback: 4 };
-const CPUS: Range = { min: 1, max: 64, fallback: 2 };
+export const MEMORY_GB: Range = { min: 2, max: 128, fallback: 4 };
+export const CPUS: Range = { min: 1, max: 64, fallback: 2 };
 const NO_SERVERS: VpsNamedServer[] = [];
 
 /** One VPS save at a time across every editor: each one sends a whole list, so two at once would undo each other. */
@@ -43,14 +42,14 @@ export function useVpsSave() {
 }
 
 /** Empty is "not set"; anything else must be a whole number in range (null when it is not). */
-function limitValue(text: string, range: Range): number | undefined | null {
+export function limitValue(text: string, range: Range): number | undefined | null {
   if (text.trim() === "") return undefined;
   const n = Number(text);
   return Number.isInteger(n) && n >= range.min && n <= range.max ? n : null;
 }
 const asText = (n: number | undefined) => (n === undefined ? "" : String(n));
 
-function LimitInput({ label, unit, value, onChange, range, placeholder, disabled, onEnter }: {
+export function LimitInput({ label, unit, value, onChange, range, placeholder, disabled, onEnter }: {
   label: string; unit: string; value: string; onChange: (value: string) => void; range: Range; placeholder: number; disabled: boolean; onEnter: () => void;
 }) {
   return (
@@ -151,6 +150,7 @@ export function VpsServerEditor({ alias, onRemoved }: { alias: string; onRemoved
             onChange={(e) => { setError(null); setName(e.target.value); }}
             onKeyDown={(e) => e.key === "Enter" && submit()}
             disabled={busy}
+            data-key-input={isDefault ? "" : undefined}
             aria-label={isDefault ? t("keys.vps.aria") : t("keys.vps.servers.nameOf", { alias })}
             autoComplete="off"
             spellCheck={false}

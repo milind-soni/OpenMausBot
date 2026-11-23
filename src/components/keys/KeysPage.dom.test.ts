@@ -665,6 +665,44 @@ describe("Self-hosted VPS servers", () => {
     expect(field("production-vps CPU cores").value).toBe("8");
   });
 
+  it("changes the default server's alias in place and says what the server answered", async () => {
+    const { VpsConnection } = await import("./VpsServersPanel");
+    setConfig(status({ sshAlias: "production-vps" }));
+    fx.api.mockImplementation(async () => ({ ...status({ sshAlias: "new-vps" }), notice: "production-vps keeps its desktops" }));
+    render(() => createElement(VpsConnection, { key: "vps" }));
+    type(field("Self-hosted VPS SSH config alias"), "new-vps");
+    await answered(() => button(rowFor("production-vps"), "Save").click());
+    expect(lastBody()).toEqual({ vps: { sshAlias: "new-vps", memoryGb: 4, cpus: 2 } });
+    expect(aliases()).toEqual(["new-vps"]);
+    expect(rowFor("new-vps").querySelector("[role=status]")!.textContent).toContain("keeps its desktops");
+  });
+
+  it("adds a server with its own limits after the host refused the ones it would inherit", async () => {
+    const { VpsConnection } = await import("./VpsServersPanel");
+    setConfig(status({ sshAlias: "production-vps", memoryGb: 16 }));
+    fx.api.mockRejectedValueOnce(new Error("spare has about 8 GB of memory. Choose 8 GB or less."));
+    render(() => createElement(VpsConnection, { key: "vps" }));
+    expect(field("Memory (GB)").placeholder).toBe("16");
+    type(field("Server name"), "Spare");
+    type(field("Server SSH config alias"), "spare");
+    await answered(() => button(host, "Add").click());
+    expect(lastBody()).toEqual({ vpsServers: [{ name: "Spare", sshAlias: "spare" }] });
+    expect(host.querySelector("[data-vps-servers] [role=alert]")!.textContent).toContain("Choose 8 GB or less");
+    fx.api.mockImplementation(echo({ sshAlias: "production-vps", memoryGb: 16 }));
+    type(field("Memory (GB)"), "8");
+    await answered(() => button(host, "Add").click());
+    expect(lastBody()).toEqual({ vpsServers: [{ name: "Spare", sshAlias: "spare", memoryGb: 8 }] });
+    expect(aliases()).toEqual(["production-vps", "spare"]);
+    expect(field("Memory (GB)").value).toBe("");
+  });
+
+  it("focuses the default server's alias when a link asks for the VPS row", async () => {
+    setConfig(status({ sshAlias: "production-vps" }));
+    page();
+    flushSync(() => { openKeySettings("vps"); });
+    await vi.waitFor(() => expect(document.activeElement).toBe(field("Self-hosted VPS SSH config alias")));
+  });
+
   it("shows why a named server was refused and keeps what was typed", async () => {
     const { VpsConnection } = await import("./VpsServersPanel");
     fx.api.mockRejectedValue(new Error("vpsServers: each server needs its own SSH alias"));

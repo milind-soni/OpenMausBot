@@ -4,7 +4,7 @@ import { useStoreSelector } from "@/state/store-select";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { KEY_FIELD } from "./KeyRow";
-import { useVpsSave, useVpsSaving, VpsServerEditor, type VpsNamedServer } from "./VpsServerEditor";
+import { CPUS, LimitInput, limitValue, MEMORY_GB, useVpsSave, useVpsSaving, VpsServerEditor, type VpsNamedServer } from "./VpsServerEditor";
 
 const NO_SERVERS: VpsNamedServer[] = [];
 /** Not an alias (an alias starts with a letter or digit), so it never matches a server row. */
@@ -24,7 +24,7 @@ export function VpsConnection() {
         {t("keys.vps.descAfter")}
       </p>
       <p className="text-[12px] leading-4 text-ink-secondary">{t("keys.vps.anyMachine")}</p>
-      {defaultAlias ? <VpsServerEditor key={defaultAlias} alias={defaultAlias} onRemoved={setNotice} /> : <AddDefault onNotice={setNotice} />}
+      {defaultAlias ? <VpsServerEditor alias={defaultAlias} onRemoved={setNotice} /> : <AddDefault onNotice={setNotice} />}
       {notice && <div role="status" className="text-[12px] leading-4 text-ink-secondary">{notice}</div>}
       <VpsServers />
       <p className="text-[12px] leading-4 text-ink-secondary">{t("keys.vps.limitsHint")}</p>
@@ -32,7 +32,7 @@ export function VpsConnection() {
   );
 }
 
-/** No default server yet: its SSH alias, as before limits came in. */
+/** The first server becomes the default: only its SSH alias is asked for. */
 function AddDefault({ onNotice }: { onNotice: (notice: string | null) => void }) {
   const save = useVpsSave();
   const saving = useVpsSaving();
@@ -70,17 +70,24 @@ function AddDefault({ onNotice }: { onNotice: (notice: string | null) => void })
 /** Named servers a bot can be put on from its own settings. Saving the list never moves a bot. */
 function VpsServers() {
   const servers = useStoreSelector((s) => s.config?.vps?.servers ?? NO_SERVERS);
+  const inherited = useStoreSelector((s) => ({ memoryGb: s.config?.vps?.memoryGb ?? MEMORY_GB.fallback, cpus: s.config?.vps?.cpus ?? CPUS.fallback }), (a, b) => a.memoryGb === b.memoryGb && a.cpus === b.cpus);
   const save = useVpsSave();
   const saving = useVpsSaving();
   const [name, setName] = useState("");
   const [alias, setAlias] = useState("");
+  const [memory, setMemory] = useState("");
+  const [cpus, setCpus] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const memoryGb = limitValue(memory, MEMORY_GB);
+  const cpuCount = limitValue(cpus, CPUS);
+  const canAdd = saving === null && Boolean(name.trim()) && Boolean(alias.trim()) && memoryGb !== null && cpuCount !== null;
 
   const add = () => {
-    if (saving !== null || !name.trim() || !alias.trim()) return;
+    if (!canAdd) return;
     setError(null);
-    save({ vpsServers: [...servers, { name: name.trim(), sshAlias: alias.trim() }] }, "")
-      .then(() => { setName(""); setAlias(""); }, (e) => setError(e.message));
+    const server = { name: name.trim(), sshAlias: alias.trim(), ...(memoryGb === undefined ? {} : { memoryGb }), ...(cpuCount === undefined ? {} : { cpus: cpuCount }) };
+    save({ vpsServers: [...servers, server] }, "")
+      .then(() => { setName(""); setAlias(""); setMemory(""); setCpus(""); }, (e) => setError(e.message));
   };
 
   return (
@@ -112,7 +119,9 @@ function VpsServers() {
           spellCheck={false}
           className={cn(KEY_FIELD, "w-auto min-w-[min(100%,10rem)] flex-1 font-mono")}
         />
-        <button type="button" onClick={add} disabled={saving !== null || !name.trim() || !alias.trim()} className="ui-button shrink-0">
+        <LimitInput label={t("keys.vps.memory")} unit={t("keys.vps.unitGb")} value={memory} onChange={(next) => { setError(null); setMemory(next); }} range={MEMORY_GB} placeholder={inherited.memoryGb} disabled={saving !== null} onEnter={add} />
+        <LimitInput label={t("keys.vps.cpus")} unit={t("keys.vps.unitCores")} value={cpus} onChange={(next) => { setError(null); setCpus(next); }} range={CPUS} placeholder={inherited.cpus} disabled={saving !== null} onEnter={add} />
+        <button type="button" onClick={add} disabled={!canAdd} className="ui-button shrink-0">
           {saving === "" ? <Loader2 size={13} className="animate-spin" aria-hidden="true" /> : t("keys.vps.servers.add")}
         </button>
       </div>

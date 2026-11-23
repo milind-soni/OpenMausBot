@@ -4103,6 +4103,8 @@
   "keys.vps.serverCpusAria": "Núcleos de CPU de {name}",
   "keys.vps.unitGb": "GB",
   "keys.vps.unitCores": "núcleos",
+  "keys.vps.memory": "Memória (GB)",
+  "keys.vps.cpus": "Núcleos de CPU",
   "keys.vps.limitsHint": "Memória e núcleos são o máximo que o desktop de cada bot em um servidor pode usar. Vazios, um servidor nomeado usa os do servidor padrão, e o padrão usa 4 GB e 2 núcleos. Um desktop em execução assume a mudança na próxima vez que iniciar. Ao salvar, verificamos se a máquina tem esses recursos.",
   "usage.title": "Uso",
   "planUsage.title": "Uso do plano",
