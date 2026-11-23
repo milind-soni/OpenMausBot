@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { api } from "@/state/api";
+import type { Workflow } from "../../shared/skill-burger/format";
 import type { SavedWorkflow } from "../../shared/skill-burger/saved";
 
 export type { SavedWorkflow };
@@ -106,4 +107,55 @@ export const savedRun = (run: string) => savedRuns.get(run);
 export function rememberSavedRun(run: string, skill: SavedWorkflow | null): void {
   if (skill) savedRuns.set(run, skill);
   else savedRuns.delete(run);
+}
+
+/** A Skill Burger as `botId` would run it by name: its own first, then one used in every chat. */
+export async function fetchRunnable(name: string, botId: string): Promise<{ workflow: Workflow; everyChat: boolean } | null> {
+  try {
+    return await api<{ workflow: Workflow; everyChat: boolean }>(`/api/skill-burgers/${encodeURIComponent(name)}?runner=${encodeURIComponent(botId)}`);
+  } catch {
+    return null;
+  }
+}
+
+/** What Run sends: the burger's own slash command, which the bot runs with its run_workflow tool. */
+export const runCommand = (name: string) => `/${name}`;
+
+/** One tap's "Add the path": the steps the bot did by judgement for a case nobody had saved become that case's steps. */
+export async function addBurgerPath(input: { name: string; everyChat: boolean; runBotId: string; threadId: string; run: string; decide: string; case: string }): Promise<{ skill: SavedWorkflow; undo: string }> {
+  const { name, everyChat, ...rest } = input;
+  const result = await api<{ skill: SavedWorkflow; undo: string }>(`/api/skill-burgers/${encodeURIComponent(name)}/paths`, {
+    method: "POST", body: JSON.stringify({ ...rest, ...(everyChat ? {} : { botId: input.runBotId }) }),
+  });
+  changed();
+  return result;
+}
+
+/** Undo of a change to a burger's steps. */
+export async function undoBurgerEdit(input: { name: string; everyChat: boolean; botId: string; undo: string }): Promise<void> {
+  await api(`/api/skill-burgers/${encodeURIComponent(input.name)}`, { method: "PATCH", body: JSON.stringify({ undo: input.undo, ...(input.everyChat ? {} : { botId: input.botId }) }) });
+  changed();
+}
+
+/** The burger `botId` runs by `name`, read again whenever a burger changes. */
+export function useRunnable(name: string | null, botId: string): { workflow: Workflow; everyChat: boolean } | null {
+  const [found, setFound] = useState<{ key: string; value: { workflow: Workflow; everyChat: boolean } | null } | null>(null);
+  const key = name ? `${botId}:${name}` : "";
+  useEffect(() => {
+    if (!name) return;
+    let current = true;
+    const read = () => { void fetchRunnable(name, botId).then((value) => { if (current) setFound({ key: `${botId}:${name}`, value }); }); };
+    read();
+    window.addEventListener(CHANGED, read);
+    return () => { current = false; window.removeEventListener(CHANGED, read); };
+  }, [name, botId]);
+  return found?.key === key ? found.value : null;
+}
+
+type RunDispatch = (action: { type: "select"; id: string } | { type: "send"; botId: string; text: string; threadId: string }) => void;
+
+/** Run: opens the bot's chat and sends the burger's slash command there, as a person would type it. */
+export function runBurgerIn(dispatch: RunDispatch, bot: { id: string; threadId: string }, name: string): void {
+  dispatch({ type: "select", id: bot.id });
+  dispatch({ type: "send", botId: bot.id, text: runCommand(name), threadId: bot.threadId });
 }

@@ -43,6 +43,7 @@ import type { Store } from "../store.ts";
 import * as tts from "../tts/index.ts";
 import { DEFAULT_DEEPSEEK_VOICE } from "../../shared/deepseek-voice.ts";
 import * as vps from "../vps-computer.ts";
+import { vpsHostLimitProblem } from "../vps-host-limits.ts";
 import { refusalBody, userError, userErrorFields } from "../user-errors.ts";
 import type { ServerErrorBody } from "../../shared/server-text.ts";
 import type { Postiz } from "../postiz/service.ts";
@@ -209,6 +210,11 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       }
       if (changingVoiceProvider && patch.tts?.model === undefined) patch.tts = { ...patch.tts, model: "" };
       if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
+      if (patch.vps !== undefined || patch.vpsServers !== undefined) {
+        providerConfigBusy.set(true);
+        const overHost = await vpsHostLimitProblem(cfg, patch).finally(() => providerConfigBusy.set(false));
+        if (overHost) return json(res, 400, overHost);
+      }
       if (patch.browserProfiles !== undefined && body.expectedBrowserProfiles !== undefined) {
         const current = (cfg.browserProfiles ?? []).map(({ id, name, browser }) => ({ id, name, ...(browser ? { browser } : {}) }));
         if (JSON.stringify(body.expectedBrowserProfiles) !== JSON.stringify(current)) {

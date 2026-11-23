@@ -44,6 +44,7 @@
 //     and <dump>.initialize.json for the initialize params
 //   FAKE_ACP_LAUNCH_COUNT_FILE  process counter incremented at startup
 //   FAKE_ACP_VERSION  what `--version` prints (default "fake-acp 1.0.0"); a CLI the driver checks the shape of needs its own
+//   FAKE_ACP_PROMPT_STDERR  a line written to stderr when a prompt arrives; FAKE_ACP_PROMPT_STDERR_THEN=hang leaves it open
 //   FAKE_ACP_RPC_DUMP  this process's method list, rewritten after every request
 //   FAKE_ACP_RPC_APPEND_FILE  one {"pid","method","cwd"} line appended per request
 //   FAKE_ACP_RPC_FAILURE_FILE  JSON-RPC error for session/prompt; once read the process stays poisoned
@@ -1324,6 +1325,10 @@ function handle(msg: any) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.prompt.json`, JSON.stringify(msg.params?.prompt ?? null, null, 2));
       }
       appendAntigravitySteps(msg.params?.sessionId);
+      if (process.env.FAKE_ACP_PROMPT_STDERR) {
+        process.stderr.write(`${process.env.FAKE_ACP_PROMPT_STDERR}\n`);
+        if (process.env.FAKE_ACP_PROMPT_STDERR_THEN === "hang") return;
+      }
       if (failRpc(msg)) return;
       if (mode === "hermes-steer") {
         hermesPrompt(msg);

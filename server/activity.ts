@@ -141,6 +141,8 @@ const TEAM_ACTION_KEYS: Record<string, string> = {
   show_widget: "activity.tool.team.showWidget",
   skill_manage: "activity.tool.team.skillManage",
   skills_list: "activity.tool.team.skillsList",
+  run_workflow: "activity.tool.team.runWorkflow",
+  workflow_edit: "activity.tool.team.workflowEdit",
   start_thread: "activity.tool.team.startThread",
   burst: "activity.tool.team.burst",
   tool_result_read: "activity.tool.team.toolResultRead",

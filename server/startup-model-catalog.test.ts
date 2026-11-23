@@ -331,4 +331,27 @@ describe("startup model catalogs", () => {
     expect(spawn).toHaveBeenCalled();
     await instance.dispose();
   });
+
+  it("an ACP engine that opts in runs a turn the saved catalog serves without waiting for the refresh", async () => {
+    seedBots();
+    writeStartupModelCache("cursor", CACHED, STALE);
+    const gate = deferredCatalog();
+    const spawn = vi.spyOn(procs, "spawnCli").mockImplementation(() => {
+      throw new Error("spawned");
+    });
+    const driver = createAcpDriver({ ...acpSupport(() => gate.promise), modelListStandsIn: true });
+    const instance = await driver.create({ instanceId: "cursor", displayName: "Cursor", environment: {}, enabled: true, config: driver.defaultConfig() });
+    for (const model of ["cached-model", undefined]) {
+      await expect(instance.adapter.sendTurn({ threadId: `thread-${model ?? "default"}`, text: "hello", model, cwd: DATA_DIR })).rejects.toThrow("spawned");
+    }
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(instance.models).toEqual(CACHED);
+    // A model the saved catalog lacks still waits for the read.
+    const unknown = instance.adapter.sendTurn({ threadId: "thread-unknown", text: "hello", model: "fresh-model", cwd: DATA_DIR });
+    expect(await settledSoon(unknown)).toBe(false);
+    gate.release(FRESH);
+    await expect(unknown).rejects.toThrow("spawned");
+    expect(instance.models).toEqual(FRESH);
+    await instance.dispose();
+  });
 });
