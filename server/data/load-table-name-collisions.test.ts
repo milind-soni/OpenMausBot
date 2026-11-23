@@ -459,13 +459,37 @@ describe("distinct table names within one import", () => {
     expect(ctx.sheet.sheet().sources.find((entry) => entry.name.toLowerCase() === "sales_report_2")).toBeUndefined();
   });
 
-  it("does not replace a displaced suffix from the sheet snapshot taken before listTables", async () => {
+  it("does not replace a displaced suffix from the sheet snapshot taken before listTables while the SQL write is still in flight", async () => {
     const ctx = await unboundView("stale-ownership");
+    const panel: DataContext = { ...ctx, connection: "panel" };
     const file = join(root, "stale-ownership.csv");
     writeFileSync(file, "id,name\n1,Alice\n");
     const loaded = await runDataTool(ctx, "data_load", { source: file, name: "sales_report" });
     expect(loaded.isError, loaded.content[0]?.text).toBeUndefined();
     expect(loaded.structuredContent!.tables).toMatchObject([{ name: "sales_report_2" }]);
+    const before = (await ctx.database.listTables()).map((table) => table.name).sort();
+
+    const sql = "CREATE OR REPLACE TABLE sales_report_2 AS SELECT 'sql' AS origin, 7 AS value";
+    const run = ctx.database.run.bind(ctx.database);
+    let releaseSql!: () => void;
+    const sqlGate = new Promise<void>((resolve) => { releaseSql = resolve; });
+    let markSqlInFlight!: () => void;
+    const sqlInFlight = new Promise<void>((resolve) => { markSqlInFlight = resolve; });
+    let sqlFinished!: ReturnType<typeof runDataTool>;
+    let held = false;
+    ctx.database.run = async (statement, options) => {
+      if (!held && statement === sql) {
+        held = true;
+        markSqlInFlight();
+        await sqlGate;
+        return run(statement, options);
+      }
+      if (statement.startsWith('CREATE OR REPLACE TABLE "sales_report_2"')) {
+        await sqlFinished;
+        return run(statement, options);
+      }
+      return run(statement, options);
+    };
 
     const listTables = ctx.database.listTables.bind(ctx.database);
     let interleaved = false;
@@ -473,19 +497,23 @@ describe("distinct table names within one import", () => {
       const tables = await listTables();
       if (!interleaved) {
         interleaved = true;
-        const replaced = await runDataTool(ctx, "data_sql", { sql: "CREATE OR REPLACE TABLE sales_report_2 AS SELECT 'sql' AS origin, 7 AS value" });
-        expect(replaced.isError, replaced.content[0]?.text).toBeUndefined();
-        expect(ctx.sheet.sheet().sources.find((entry) => entry.name === "sales_report_2")).toBeUndefined();
+        sqlFinished = runDataTool(ctx, "data_sql", { sql });
+        await sqlInFlight;
+        releaseSql();
       }
       return tables;
     };
 
     writeFileSync(file, "id,name\n2,Bob\n");
-    const reloaded = await runDataTool(ctx, "data_load", { source: file, name: "sales_report" });
+    const reloaded = await runDataTool(panel, "data_load", { source: file, name: "sales_report" });
+    const replaced = await sqlFinished;
+    expect(replaced.isError, replaced.content[0]?.text).toBeUndefined();
     expect(reloaded.isError, reloaded.content[0]?.text).toBeUndefined();
-    expect(reloaded.structuredContent!.tables).toMatchObject([{ name: "sales_report_3" }]);
+    expect(interleaved).toBe(true);
     expect((await ctx.database.run("SELECT * FROM sales_report_2", { connection })).rows).toEqual([["sql", 7]]);
+    expect(reloaded.structuredContent!.tables).toMatchObject([{ name: "sales_report_3" }]);
     expect((await ctx.database.run("SELECT * FROM sales_report_3", { connection })).rows).toEqual([["2", "Bob"]]);
+    expect((await listTables()).map((table) => table.name).sort()).toEqual([...before, "sales_report_3"].sort());
     expect(ctx.sheet.sheet().sources.find((entry) => entry.name === "sales_report_2")).toBeUndefined();
     expect(ctx.sheet.sheet().sources.find((entry) => entry.name === "sales_report_3")).toMatchObject({ requested: "sales_report" });
   });

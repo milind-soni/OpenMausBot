@@ -19,6 +19,7 @@ import {
 } from "../../shared/data-surface.ts";
 import { compileToolSchema, schemaProblems } from "../mcp-schema-validator.ts";
 import { tableIdentifierParts } from "./identifiers.ts";
+import { commitReplacingCreate, withReplaceLock } from "./replace-lock.ts";
 import { queryRelation, singleStatement, type Token } from "./sql-statements.ts";
 import type { DataSheetStore } from "./sheet.ts";
 import { DataFailure, type BotDatabase, type ChartCompiler, type ChartRenderer, type DataConnection, type DataExtension, type RunOptions, type RunResult, type VegaLiteValidator } from "./types.ts";
@@ -463,28 +464,6 @@ function catalogNameTaken(error: unknown): boolean {
   return CATALOG_NAME_TAKEN.test(error instanceof Error ? error.message : String(error));
 }
 
-async function forgetReplacedImport(ctx: DataContext, sql: string, target: string): Promise<void> {
-  const { tokens } = singleStatement(sql);
-  const head = tokens.slice(tokens.findIndex((token) => token.text === "CREATE"));
-  if (head[0]?.text !== "CREATE" || head[1]?.text !== "OR" || head[2]?.text !== "REPLACE") return;
-  if (head[3]?.text === "TEMP" || head[3]?.text === "TEMPORARY") return;
-  const name = await localMainTable(ctx, target);
-  if (!name) return;
-  const names = ctx.sheet.sheet().sources.filter((source) => source.name.toLowerCase() === name).map((source) => source.name);
-  for (const sourceName of names) ctx.sheet.removeSource(sourceName);
-}
-
-// DuckDB 1.5 reads catalog.table as main.table when the qualifier is this file's database name.
-async function localMainTable(ctx: DataContext, target: string): Promise<string | null> {
-  const parts = tableIdentifierParts(target);
-  if (!parts || parts.length > 3) return null;
-  const table = parts[parts.length - 1]!.toLowerCase();
-  const qualifier = parts.slice(0, -1).map((part) => part.toLowerCase());
-  if (!qualifier.length || (qualifier.length === 1 && qualifier[0] === "main")) return table;
-  if (qualifier[0] !== String((await ctx.database.run("SELECT current_database()", runOptions(ctx))).rows[0]?.[0] ?? "").toLowerCase()) return null;
-  return qualifier.length === 1 || qualifier[1] === "main" ? table : null;
-}
-
 export interface LoadedTable { name: string; rowCount: number; columns: DataColumn[]; source: string }
 export interface LoadOutput { tables: LoadedTable[]; warnings: string[]; elapsedMs: number }
 
@@ -549,11 +528,13 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
     const requested = nameInEmptyCatalog(base);
     const prior = priorAllocation(plan, requested, sourceTable);
     if (replace && prior && !assigned(prior) && !blocked(prior)) {
-      if (stillOwned(prior, plan, requested, sourceTable)) {
+      const reused = await withReplaceLock(ctx.database, async () => {
+        if (!stillOwned(prior, plan, requested, sourceTable)) return false;
         existing.add(fold(prior));
         await create(prior, relation, plan, options, requested, true);
-        return;
-      }
+        return true;
+      });
+      if (reused) return;
     } else if (requested === stem && !assigned(requested) && !blocked(requested) && (replace || !existing.has(fold(requested)))) {
       existing.add(fold(requested));
       try {
@@ -682,8 +663,7 @@ export async function runSql(ctx: DataContext, input: SqlInput): Promise<SqlOutp
   const limit = Math.min(Math.max(1, Math.trunc(input.limit ?? DATA_LIMITS.sqlRowsDefault)), DATA_LIMITS.sqlRowsMax);
   const kind = gateSql(input.sql, { allowCreate: true });
   if (kind.kind === "create") {
-    await ctx.database.run(input.sql, runOptions(ctx));
-    await forgetReplacedImport(ctx, input.sql, kind.target);
+    await commitReplacingCreate(ctx, input.sql, kind.target, () => ctx.database.run(input.sql, runOptions(ctx)));
     const described = await ctx.database.describe(kind.target, runOptions(ctx));
     const bounded = boundColumns(described.columns, DATA_LIMITS.describeBytesMax);
     return { table: kind.target, columns: bounded.columns, rowCount: described.rowCount, rows: [], truncated: bounded.truncated, elapsedMs: Date.now() - started };
