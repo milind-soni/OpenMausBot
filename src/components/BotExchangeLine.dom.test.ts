@@ -114,10 +114,7 @@ describe("the bot exchange line", () => {
   it.each([
     [{ status: "queued" }, "asking…"],
     [{ status: "needs_input" }, "needs you"],
-    [{ status: "completed", finishedAt: 52_000 }, "42s"],
-    [{ status: "cancelled", outcome: "stopped", finishedAt: 22_000 }, "stopped · 12s"],
-    [{ status: "failed", outcome: "expired", finishedAt: 70_000 }, "ran out of time · 1m"],
-    [{ status: "failed", outcome: "error", finishedAt: 13_000 }, "didn't finish · 3s"],
+    [{ status: "waiting" }, "working…"],
   ] as const)("shows %o as %s", async (record, text) => {
     current = job([root(), handoff(record)]);
     render();
@@ -125,12 +122,34 @@ describe("the bot exchange line", () => {
     expect(line()!.textContent).toBe(`PepperEngineer·${text}`);
   });
 
-  it("goes quiet once the bots are done: one read, nothing held, and a compact row for the finished exchange", async () => {
+  it("goes quiet once the bots are done: one read, nothing held, and no line left", async () => {
     current = job([{ ...root(), status: "completed" }, handoff({ status: "completed", finishedAt: 52_000 })]);
     render({ ...pepper, busy: false });
     await settle();
     expect(reads()).toHaveLength(1);
-    expect(line()!.getAttribute("data-state")).toBe("answered");
+    expect(host.querySelector("[data-bot-exchange-line]")).toBeNull();
+  });
+
+  it.each([
+    [{ status: "completed", finishedAt: 52_000 }],
+    [{ status: "cancelled", outcome: "stopped", finishedAt: 22_000 }],
+    [{ status: "failed", outcome: "expired", finishedAt: 70_000 }],
+    [{ status: "failed", outcome: "error", finishedAt: 13_000 }],
+  ] as const)("drops an exchange from the line once it ends (%o), keeping the open ones", async (record) => {
+    current = job([root(), handoff({ id: "h0", createdAt: 9_000, ...record }), handoff()]);
+    render();
+    await settle();
+    expect(Array.from(host.querySelectorAll("[data-bot-exchange]")).map((chip) => chip.getAttribute("data-bot-exchange"))).toEqual(["h1"]);
+  });
+
+  it("takes a chip off the line when its exchange ends, and the line with it once none is open", async () => {
+    fixture.load.mockResolvedValue({ messages: [], activeLeafId: null });
+    await openExchange();
+    current = job([root(), handoff({ status: "cancelled", outcome: "stopped", finishedAt: 22_000 })], "v2");
+    flushSync(() => stopButton()!.click());
+    await settle();
+    flushSync(() => host.querySelector<HTMLButtonElement>("[data-exchange-back]")!.click());
+    expect(host.querySelector("[data-bot-exchange-line]")).toBeNull();
   });
 
   it("shows nothing when no bot handed anything on", async () => {
@@ -159,13 +178,10 @@ describe("an opened exchange", () => {
   }
 
   it("shows only that exchange's lines of the helper's thread", async () => {
-    current = job([root(), handoff({ status: "completed", finishedAt: 30_000 })]);
     fixture.load.mockResolvedValue({ messages: [line1, ask, reply, later], activeLeafId: "next" });
     await openExchange();
     expect(fixture.load).toHaveBeenCalledWith("work-1");
     expect(shown()).toEqual(["PepperCount the rows", "EngineerThere are 12 rows"]);
-    expect(status()!.textContent).toBe("Engineer answered in 20s");
-    expect(stopButton()).toBeNull();
   });
 
   it("has Stop while the helper works, and shows the stop once the server has it", async () => {
@@ -227,7 +243,7 @@ describe("an opened exchange", () => {
   it("gives each of two hand-offs that ran in turn in the same thread only its own lines", async () => {
     const askB = request("ask-b", "Now the totals", 20_400, "reply", "h2");
     const replyB: Message = { id: "reply-b", role: "bot", kind: "text", text: "The totals add up", at: 25_000, parentId: "ask-b" };
-    current = job([root(), handoff({ status: "completed", finishedAt: 20_100 }), handoff({ id: "h2", createdAt: 20_300 })]);
+    current = job([root(), handoff(), handoff({ id: "h2", status: "queued", createdAt: 20_300 })]);
     fixture.load.mockResolvedValue({ messages: [line1, ask, reply, askB, replyB], activeLeafId: "reply-b" });
     await openOne("h2");
     expect(shown()).toEqual(["PepperNow the totals", "EngineerThe totals add up"]);
@@ -238,7 +254,6 @@ describe("an opened exchange", () => {
   });
 
   it("says so, instead of guessing, when the hand-off's request line is not in the thread", async () => {
-    current = job([root(), handoff({ status: "completed", finishedAt: 30_000 })]);
     fixture.load.mockResolvedValue({ messages: [line1, reply], activeLeafId: "reply" });
     await openExchange();
     expect(shown()).toEqual([]);

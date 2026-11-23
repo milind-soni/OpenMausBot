@@ -1,4 +1,4 @@
-// The bots' exchanges for the person's request: a line over the message box while they work, a compact row once done.
+// The bots' exchanges for the person's request: a line over the message box while they work; an ended one leaves it.
 import { use, useState } from "react";
 import { ArrowLeftRight, Square } from "lucide-react";
 import { BotAvatar, InitialsAvatar } from "./Avatar";
@@ -17,21 +17,15 @@ const took = (entry: BotExchangeEntry, now = Date.now()) =>
   formatDuration(Math.max(1, Math.round(((entry.finishedAt ?? now) - entry.createdAt) / 1_000)) * 1_000);
 
 function lineState(entry: BotExchangeEntry): string {
-  switch (entry.state) {
-    case "asking": return t("chat.botExchange.asking");
-    case "working": return t("chat.botExchange.working");
-    case "needs-you": return t("chat.botExchange.needsYou");
-    case "answered": return took(entry);
-    case "stopped": return `${t("chat.botExchange.stopped")} · ${took(entry)}`;
-    case "expired": return `${t("chat.botExchange.expired")} · ${took(entry)}`;
-    case "failed": return `${t("chat.botExchange.failed")} · ${took(entry)}`;
-  }
+  if (entry.state === "asking") return t("chat.botExchange.asking");
+  return entry.state === "needs-you" ? t("chat.botExchange.needsYou") : t("chat.botExchange.working");
 }
 
 export function BotExchangeLine() {
-  const { exchanges } = use(BotExchangesContext);
+  const { exchanges: all } = use(BotExchangesContext);
   const open = use(OpenExchangeContext);
   const bots = useStoreSelector((state) => state.bots);
+  const exchanges = all.filter((entry) => !exchangeEnded(entry.state));
   if (!open || !exchanges.length) return null;
   const botOf = (id: string | undefined) => id ? bots.find((candidate) => candidate.id === id) : undefined;
   return (
@@ -53,8 +47,8 @@ export function BotExchangeLine() {
               asker: { botId: entry.asker.botId ?? "", name: entry.asker.name, color: asker?.color },
               helper: { botId: entry.helper.botId, name: entry.helper.name, color: helper?.color },
             })}
-            className={cn("pointer-events-auto flex h-8 min-w-0 max-w-full items-center gap-1.5 rounded-full ps-1.5 pe-3 text-[13px] leading-[18px]",
-              ELEVATED_FLOAT, ELEVATED_TINT, exchangeEnded(entry.state) ? "text-ink-secondary" : "text-ink")}
+            className={cn("pointer-events-auto flex h-8 min-w-0 max-w-full items-center gap-1.5 rounded-full ps-1.5 pe-3 text-[13px] leading-[18px] text-ink",
+              ELEVATED_FLOAT, ELEVATED_TINT)}
           >
             <Face bot={asker} name={entry.asker.name} />
             <span dir="auto" className="min-w-0 max-w-[160px] truncate font-medium">{entry.asker.name}</span>
