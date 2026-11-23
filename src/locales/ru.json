@@ -6770,6 +6770,7 @@
   "settings.ai.images": "Изображения",
   "settings.ai.keysLine": "Ключи для поставщиков ИИ и других сервисов.",
   "settings.ai.providers": "Провайдеры",
+  "settings.ai.providersLine": "Подключите локальное приложение агента или настройте поставщика с помощью ключа API.",
   "settings.ai.routing": "Маршрутизация и извлечение",
   "settings.app.about": "О {app}",
   "settings.app.computers": "Ваши компьютеры",
@@ -6905,7 +6906,7 @@
   "settings.ai.notSetUp": "Не настроено",
   "settings.ai.attention": "Требует внимания",
   "settings.ai.otherServices": "Другие сервисы",
-  "settings.ai.otherServicesLine": "Ключи для голосов, компьютеров, приложений и помощников, помимо ваших основных моделей.",
+  "settings.ai.otherServicesLine": "Ключи для моделей, голосов, компьютеров, приложений и помощников.",
   "backup.exportShort": "Защищена паролем. Сохранённые логины не включаются.",
   "backup.importShort": "Верните ботов и разговоры из файла резервной копии.",
   "backup.exportAction": "Экспорт…",
@@ -7179,5 +7180,7 @@
   "sidebar.threads.hideShort": "Скрыть",
   "sidebar.threads.running": "+{count} в работе",
   "sidebar.threads.more": "ещё {count}",
-  "botPanel.library.showAll": "Показать все"
+  "botPanel.library.showAll": "Показать все",
+  "keys.section.ai": "Ключи API моделей",
+  "keys.section.ai.purpose": "Подключите модели, которые MausBot сможет использовать для запуска ваших ботов."
 }

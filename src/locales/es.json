@@ -6017,6 +6017,7 @@
   "settings.ai.images": "Imágenes",
   "settings.ai.keysLine": "Claves para proveedores de IA y otros servicios.",
   "settings.ai.providers": "Proveedores",
+  "settings.ai.providersLine": "Conecta una aplicación de agente local o configura un proveedor con una clave de API.",
   "settings.ai.routing": "Enrutamiento y extracción",
   "settings.app.about": "Acerca de {app}",
   "settings.app.computers": "Tus ordenadores",
@@ -6153,7 +6154,7 @@
   "settings.ai.notSetUp": "Sin configurar",
   "settings.ai.attention": "Requiere atención",
   "settings.ai.otherServices": "Otros servicios",
-  "settings.ai.otherServicesLine": "Claves para voces, equipos, apps y ayudantes, además de tus modelos principales.",
+  "settings.ai.otherServicesLine": "Claves para modelos, voces, ordenadores, aplicaciones y asistentes.",
   "backup.exportShort": "Protegida con contraseña. No incluye los inicios de sesión guardados.",
   "backup.importShort": "Recupera bots y conversaciones desde un archivo de copia.",
   "backup.exportAction": "Exportar…",
@@ -6429,5 +6430,7 @@
   "sidebar.threads.hideShort": "Ocultar",
   "sidebar.threads.running": "+{count} en curso",
   "sidebar.threads.more": "{count} más",
-  "botPanel.library.showAll": "Mostrar todo"
+  "botPanel.library.showAll": "Mostrar todo",
+  "keys.section.ai": "Claves de API de modelos",
+  "keys.section.ai.purpose": "Conecta modelos que MausBot puede usar para ejecutar tus bots."
 }

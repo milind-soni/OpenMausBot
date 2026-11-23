@@ -512,7 +512,7 @@ function SimpleEngines({ rows, isReady, renderEngine, more, accountsOnly = false
       onToggle={() => setOpened(open ? null : instance.instanceId)}>{renderEngine(instance, true)}</ProviderRow>;
   };
   return (
-    <SettingsGroup label={t("settings.ai.providers")} actions={<RefreshEngines />}>
+    <SettingsGroup label={t("settings.ai.providers")} description={t("settings.ai.providersLine")} actions={<RefreshEngines />}>
       <SettingsRows icons>
         {featured.map((instance) => row(instance, false))}
         {gemini && <GeminiProviderRow open={opened === "google-ai-studio"} onToggle={() => setOpened(opened === "google-ai-studio" ? null : "google-ai-studio")} />}

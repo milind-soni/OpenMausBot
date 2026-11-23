@@ -75,7 +75,7 @@ describe("every credential has one home on the keys page", () => {
 
   it("names each section plainly and says what each row is for in one line", () => {
     expect(KEY_SECTIONS.map((section) => t(section.titleKey))).toEqual([
-      "AI providers", "Your own model servers", "Voice and calls", "Computers and browser", "Apps and tools", "Helpers and pictures",
+      "Model API keys", "Your own model servers", "Voice and calls", "Computers and browser", "Apps and tools", "Helpers and pictures",
     ]);
     for (const entry of KEY_CATALOG) {
       const purpose = t(entry.purposeKey);

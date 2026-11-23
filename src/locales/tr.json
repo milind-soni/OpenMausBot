@@ -5509,6 +5509,7 @@
   "settings.ai.images": "Görseller",
   "settings.ai.keysLine": "Yapay zekâ sağlayıcıları ve diğer hizmetler için anahtarlar.",
   "settings.ai.providers": "Sağlayıcılar",
+  "settings.ai.providersLine": "Yerel bir ajan uygulaması bağlayın veya bir sağlayıcıyı API anahtarıyla kurun.",
   "settings.ai.routing": "Yönlendirme ve çıkarma",
   "settings.app.about": "{app} hakkında",
   "settings.app.computers": "Bilgisayarlarınız",
@@ -5645,7 +5646,7 @@
   "settings.ai.notSetUp": "Kurulmadı",
   "settings.ai.attention": "İlgilenmen gerekiyor",
   "settings.ai.otherServices": "Diğer hizmetler",
-  "settings.ai.otherServicesLine": "Ana modellerinizin dışında sesler, bilgisayarlar, uygulamalar ve yardımcılar için anahtarlar.",
+  "settings.ai.otherServicesLine": "Modeller, sesler, bilgisayarlar, uygulamalar ve yardımcılar için anahtarlar.",
   "backup.exportShort": "Parola korumalı. Kayıtlı girişler dahil değildir.",
   "backup.importShort": "Bir yedek dosyasından botları ve sohbetleri geri getir.",
   "backup.exportAction": "Dışa aktar…",
@@ -5924,5 +5925,7 @@
   "sidebar.threads.hideShort": "Gizle",
   "sidebar.threads.running": "+{count} çalışıyor",
   "sidebar.threads.more": "{count} tane daha",
-  "botPanel.library.showAll": "Tümünü göster"
+  "botPanel.library.showAll": "Tümünü göster",
+  "keys.section.ai": "Model API anahtarları",
+  "keys.section.ai.purpose": "MausBot’un botlarınızı çalıştırmak için kullanabileceği modelleri bağlayın."
 }

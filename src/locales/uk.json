@@ -3644,6 +3644,7 @@
   "settings.ai.images": "Зображення",
   "settings.ai.keysLine": "Ключі для постачальників ШІ та інших сервісів.",
   "settings.ai.providers": "Провайдери",
+  "settings.ai.providersLine": "Під’єднайте локальну програму агента або налаштуйте постачальника за допомогою ключа API.",
   "settings.ai.routing": "Маршрутизація та видобування",
   "settings.app.about": "Про {app}",
   "settings.app.computers": "Ваші комп'ютери",
@@ -3781,7 +3782,7 @@
   "settings.ai.notSetUp": "Не налаштовано",
   "settings.ai.attention": "Потребує уваги",
   "settings.ai.otherServices": "Інші сервіси",
-  "settings.ai.otherServicesLine": "Ключі для голосів, комп’ютерів, застосунків і помічників, окрім ваших основних моделей.",
+  "settings.ai.otherServicesLine": "Ключі для моделей, голосів, комп’ютерів, застосунків і помічників.",
   "backup.exportShort": "Захищено паролем. Збережені входи не включаються.",
   "backup.importShort": "Поверніть ботів і розмови з файла резервної копії.",
   "backup.exportAction": "Експорт…",
@@ -4104,5 +4105,7 @@
   "sidebar.threads.hideShort": "Сховати",
   "sidebar.threads.running": "+{count} у роботі",
   "sidebar.threads.more": "ще {count}",
-  "botPanel.library.showAll": "Показати всі"
+  "botPanel.library.showAll": "Показати всі",
+  "keys.section.ai": "Ключі API моделей",
+  "keys.section.ai.purpose": "Під’єднайте моделі, які MausBot може використовувати для запуску ваших ботів."
 }
