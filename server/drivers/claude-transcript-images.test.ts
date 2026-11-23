@@ -124,8 +124,8 @@ test("the transcript is found where Claude Code writes it: a linked working dire
   const longName = transcriptPath(configDir, long, "s1");
   assert.equal(longName, join(configDir, "projects", `${resolvedLong.replace(/[^A-Za-z0-9]/g, "-").slice(0, 200)}-${suffix(resolvedLong)}`, "s1.jsonl"));
   // the CLI's own shape: the cut name, then '-' and a short base-36 hash
-  assert.equal(longName.split("/").at(-2)!.length, 200 + 1 + suffix(resolvedLong).length);
-  assert.match(longName.split("/").at(-2)!, /-[0-9a-z]+$/);
+  assert.equal(basename(dirname(longName)).length, 200 + 1 + suffix(resolvedLong).length);
+  assert.match(basename(dirname(longName)), /-[0-9a-z]+$/);
   // reached through a link, the same folder: the resolution happens inside transcriptPath
   const longLink = join(dirname(long), "link-" + basename(long).slice(0, 40));
   symlinkSync(long, longLink);
