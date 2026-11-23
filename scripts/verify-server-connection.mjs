@@ -2,7 +2,7 @@
 // Run: node scripts/verify-server-connection.mjs
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,6 +19,10 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
   app.setPath("userData", join(output, "user-data"));
   app.setPath("sessionData", join(output, "user-data"));
   app.commandLine.appendSwitch("disable-background-networking");
+  for (const channel of ["desktop-analytics:read", "home:page", "home:updating", "update:offered"]) {
+    ipcMain.on(channel, event => { event.returnValue = false; });
+  }
+  ipcMain.on("desktop-language:read", event => { event.returnValue = "en"; });
   const calls = [];
   let pending;
   let saved = { activeId: "local", environments: [{ id: "cloud", name: "My cloud team", origin: "https://bots.fixture.example" }] };
@@ -26,6 +30,33 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
   let forgetConfirmed = false;
   let shared = { enabled: false, folders: [], terminal: false, computer: false, connected: false };
   let sharingConfirmed = false;
+  const { createServerConnect } = await import("../electron/server-probe.mjs");
+  const connectSheet = createServerConnect({
+    fetch: async () => Response.json({ environmentId: "fixture-cloud", label: "Research team" }),
+    open: (found) => { saved = withEnvironment(saved, { origin: found.origin, name: found.label }, () => "new-cloud"); },
+  });
+  ipcMain.handle("workspaces:probe", (_event, address, code) => connectSheet.probe(address, code));
+  ipcMain.handle("workspaces:add", (_event, choice, address, code) => {
+    assert.equal(choice, "link");
+    calls.push({ kind: "hosted", address, code });
+    return new Promise(resolve => { pending = { resolve: accepted => resolve(accepted ? connectSheet.connect(address, code) : false) }; });
+  });
+  ipcMain.handle("workspaces:places", () => ({ places: [], add: { cloud: false, link: true, address: true } }));
+  const { DESKTOP_NOTICES } = await import("../electron/desktop-prefs.mjs");
+  const { TALK_SHORTCUT_UNAVAILABLE } = await import("../electron/talk-shortcut.mjs");
+  const shellState = {
+    "workspaces:line": null, "workspaces:look": null, "call:active": null,
+    "desktop-notices:state": { seen: DESKTOP_NOTICES, cloud: false },
+    "desktop-profile:system-name": "Fixture",
+    "updates-consent:state": { available: false, due: false },
+    "two-places:state": { suggest: null }, "rail:offer": { available: false, hidden: false },
+    "window:state": { maximized: false }, "window-frame:state": { on: true, restart: false },
+    "open-at-login:state": { available: false, on: false }, "talk-shortcut:state": TALK_SHORTCUT_UNAVAILABLE,
+  };
+  for (const [channel, value] of Object.entries(shellState)) ipcMain.handle(channel, () => value);
+  ipcMain.handle("environments:status", () => []);
+  ipcMain.handle("sharing:servers", () => []);
+  ipcMain.handle("sharing:activity", () => []);
   ipcMain.handle("sharing:state", () => shared);
   ipcMain.handle("sharing:folder", () => ({ id: "fixture-folder", name: "Invoices", path: "/fixture/Invoices", write: false }));
   ipcMain.handle("sharing:save", (_event, id, grant) => {
@@ -75,7 +106,7 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
     session.defaultSession.webRequest.onBeforeRequest((request, callback) => {
       const target = new URL(request.url);
       const allowed = target.host === new URL(url).host || target.origin === serverUrl;
-      if (!allowed) blockedRequests.push(target.origin);
+      if (!allowed) blockedRequests.push({ type: request.resourceType, url: target.origin + target.pathname });
       callback({ cancel: !allowed });
     });
     const open = async (local) => {
@@ -151,41 +182,41 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
 
     win.setSize(780, 800);
     await win.loadURL(`${url}?workspaces=1`);
-    const hostedConnect = button("Connect");
-    const addressLabel = "Server address or pairing link";
-    await until(() => evaluate(`Boolean(${hostedConnect}) && document.body.textContent.includes('My cloud team')`), "hosted workspace settings rendered");
+    const hostedConnect = "document.querySelector('[data-own-server-connect]')";
+    const addressLabel = "Link or address";
+    await until(() => evaluate(`document.querySelector('[data-server-connect]') && document.body.textContent.includes('My cloud team')`), "hosted workspace settings rendered");
     await evaluate("void window.ogb.environments.onOpenSettings(() => { document.body.dataset.settingsRequested = 'yes'; })");
     await evaluate("document.querySelector('[aria-label=\"Switch server: This computer\"]').click()");
     await until(() => evaluate("document.body.dataset.settingsRequested === 'yes'"), "native connect item requested Settings");
     assert.equal(saved.activeId, "local", "opening connection settings did not select a server");
 
+    await evaluate("document.querySelector('[data-server-connect]').click()");
     await fill(addressLabel, "http://unsafe.fixture.example");
-    await evaluate(`${hostedConnect}.click()`);
-    await until(() => evaluate("document.querySelector('[role=alert]')?.textContent === 'Enter the server\\'s address or its pairing link.'"), "invalid workspace input rejected visibly");
+    await until(() => evaluate(`Boolean(document.querySelector('[data-connect-problem]')) && ${hostedConnect}.disabled`), "public HTTP address refused");
     await fill(addressLabel, "other.fixture.example");
-    await fill("Name (optional)", "Research team");
+    await until(() => evaluate(`!${hostedConnect}.disabled`), "hosted server found");
     const beforeHosted = calls.length;
     await evaluate(`(() => { ${hostedConnect}.form.requestSubmit(); ${hostedConnect}.form.requestSubmit(); })()`);
     await until(() => calls.length === beforeHosted + 1, "one hosted submission in flight");
-    assert.deepEqual(calls.at(-1), { kind: "server", link: "other.fixture.example", name: "Research team" });
+    assert.deepEqual(calls.at(-1), { kind: "hosted", address: "other.fixture.example", code: "" });
     pending.resolve(false);
     await until(() => evaluate(`!${hostedConnect}.disabled`), "cancelled hosted confirmation reset");
     assert.equal(saved.environments.length, 1);
     assert.equal(await evaluate(`${input(addressLabel)}.value`), "other.fixture.example");
 
-    await fill(addressLabel, "https://other.fixture.example/pair#code=MNOP-QRST-UVWX");
+    await fill(addressLabel, "https://other.fixture.example/pair#code=7KQ2-M9XD-H4TP");
+    await until(() => evaluate(`!${hostedConnect}.disabled`), "pairing link accepted");
     await evaluate(`${hostedConnect}.click()`);
     await until(() => calls.length === beforeHosted + 2, "hosted retry received");
     pending.resolve(true);
     await until(() => saved.environments.length === 2, "named workspace saved");
+    assert.equal(saved.environments.find(entry => entry.id === "new-cloud")?.name, "Research team");
     // Production navigates away after confirmation. Reload our local preview
     // instead, to inspect the saved list without contacting a public server.
     await win.loadURL(`${url}?workspaces=1`);
-    await until(() => evaluate("document.body.textContent.includes('Research team') && !document.querySelector('input').disabled"), "saved named workspace rendered");
+    await until(() => evaluate("document.body.textContent.includes('Research team')"), "saved named workspace rendered");
     assert.deepEqual(saved.environments.map(({ origin }) => origin), ["https://bots.fixture.example", "https://other.fixture.example"]);
-    assert.equal(JSON.stringify(saved).includes("MNOP"), false, "pairing secret not saved with workspace");
-    await fill(addressLabel, "");
-    await fill("Name (optional)", "");
+    assert.equal(JSON.stringify(saved).includes("7KQ2"), false, "pairing secret not saved with workspace");
     writeFileSync(join(output, "connected-workspaces.png"), (await win.webContents.capturePage()).toPNG());
 
     assert.equal(await evaluate("document.querySelector('[aria-label^=\"Computer access for \"]') === null"), true, "feature-off workspace offers no computer access");
@@ -224,12 +255,12 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
     menuChoice = "workspace-local";
     await evaluate("document.querySelector('[aria-label^=\"Switch server:\"]').click()");
     await until(() => saved.activeId === "local", "native menu switched back to local");
-    await evaluate("document.querySelector('[aria-label=\"Forget Research team\"]').click()");
+    await evaluate("document.querySelector('[aria-label=\"Remove Research team\"]').click()");
     await until(() => calls.at(-1)?.kind === "forget", "forget requested");
     assert.equal(saved.environments.length, 2, "cancel forget retains saved workspace");
-    await until(() => evaluate("!document.querySelector('[aria-label=\"Forget Research team\"]').disabled"), "forget cancellation reset");
+    await until(() => evaluate("!document.querySelector('[aria-label=\"Remove Research team\"]').disabled"), "forget cancellation reset");
     forgetConfirmed = true;
-    await evaluate("document.querySelector('[aria-label=\"Forget Research team\"]').click()");
+    await evaluate("document.querySelector('[aria-label=\"Remove Research team\"]').click()");
     await until(() => evaluate("!document.body.textContent.includes('Research team')"), "confirmed forget removed only selected entry");
     assert.deepEqual(saved.environments.map(({ id }) => id), ["cloud"]);
     assert.equal(saved.activeId, "local");
@@ -242,27 +273,26 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
     // fake-engine server. Opening the page must not require local AI setup.
     win.setSize(1180, 850);
     await win.loadURL(`${url}?app=1&desktop-settings=workspaces&share-computer=cloud`);
-    await until(() => evaluate("document.querySelector('[role=dialog]')?.textContent.includes('Connect to a server')"), "app opens top-level workspace Settings");
+    await until(() => evaluate("Boolean(document.querySelector('[role=dialog] [data-server-connect]'))"), "app opens workspace connection settings");
     assert.equal(await evaluate("location.search.includes('desktop-settings')"), false, "Settings deep link consumed");
     await until(() => evaluate("document.body.textContent.includes('My cloud team')"), "app Settings loaded connections");
     await until(() => evaluate("document.body.textContent.includes('Computer access · My cloud team')"), "post-pair target opens its access controls");
     assert.equal(await evaluate("location.search.includes('share-computer')"), false);
     await evaluate("document.querySelector('[aria-label=\"Close computer access\"]').click()");
-    assert.equal(await evaluate("document.querySelector('[aria-label=\"Server address or pairing link\"]') !== null || [...document.querySelectorAll('label')].some(el => el.textContent.includes('Server address or pairing link'))"), true);
+    assert.equal(await evaluate("Boolean(document.querySelector('[data-server-connect]'))"), true);
     writeFileSync(join(output, "workspace-settings-in-app.png"), (await win.webContents.capturePage()).toPNG());
     await evaluate("window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
     await until(() => evaluate("!document.body.textContent.includes('Connect to a server')"), "Settings closes normally");
     win.webContents.send("workspaces:open-settings");
-    await until(() => evaluate("document.querySelector('[role=dialog]')?.textContent.includes('Connect to a server')"), "native request reopens workspace Settings");
-    await evaluate("(() => { const el = document.querySelector('input[aria-label=\"Search settings\"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, 'appearance'); el.dispatchEvent(new Event('input', { bubbles: true })); })()");
-    await until(() => evaluate("!document.body.textContent.includes('Connect to a server')"), "Settings search changes section");
+    await until(() => evaluate("Boolean(document.querySelector('[role=dialog] [data-server-connect]'))"), "native request reopens workspace Settings");
+    await evaluate("(() => { const el = document.querySelector('input[data-settings-search]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, 'appearance'); el.dispatchEvent(new Event('input', { bubbles: true })); })()");
+    await until(() => evaluate("Boolean(document.querySelector('[data-settings-hit]'))"), "Settings search shows matching destinations");
     win.webContents.send("workspaces:open-settings");
-    await until(() => evaluate("document.body.textContent.includes('Connect to a server') && document.querySelector('input[aria-label=\"Search settings\"]').value === ''"), "native connection request clears Settings search");
+    await until(() => evaluate("document.body.textContent.includes('Connect to a server') && document.querySelector('input[data-settings-search]').value === ''"), "native connection request clears Settings search");
 
     const remote = await open(false);
-    assert.deepEqual(await remote.webContents.executeJavaScript("({ server: typeof window.ogb?.environments, companion: typeof window.ogb?.remoteClient, sharing: typeof window.ogb?.computerSharing, node: typeof window.require, workspaceMethods: Object.keys(window.ogb?.workspaces ?? {}) })"),
-      { server: "undefined", companion: "undefined", sharing: "undefined", node: "undefined", workspaceMethods: ["state", "menu"] });
-    assert.deepEqual(blockedRequests, [], "unexpected external request attempted");
+    assert.deepEqual(await remote.webContents.executeJavaScript("({ server: typeof window.ogb?.environments, companion: typeof window.ogb?.remoteClient, sharing: typeof window.ogb?.computerSharing, node: typeof window.require, workspaceMethods: Object.keys(window.ogb?.workspaces ?? {}).sort() })"),
+      { server: "undefined", companion: "undefined", sharing: "undefined", node: "undefined", workspaceMethods: ["add", "color", "homeOffers", "line", "local", "look", "makeHome", "menu", "onChanged", "onNewLocal", "open", "places", "probe", "recolor", "remove", "rename", "state"] });
     // Exercise Chromium's actual HttpOnly cookie jar and main-process fetch.
     // The server is the isolated fake-engine fixture, never the user's app.
     const opened = await fetch(`${serverUrl}/api/auth/pairing`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ label: "Electron fixture", scopes: ["client"] }) }).then(response => response.json());
@@ -281,8 +311,10 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
       sharing.revoke(nativeEnv);
       assert.equal(sharing.state(nativeEnv.id).enabled, false);
     } finally { sharing.close(); }
-    const receipt = { passed: true, renderer: ["RemoteComputerSection", "ConnectedWorkspacesSettings", "DesktopWorkspaceSwitcher"], preload: "electron/preload.cjs", calls,
-      checks: ["full custom HTTPS link unchanged", "pending submit disabled", "cancel reset", "rejection and retry", "companion six-digit routing", "390px overflow", "remote-safe bridge", "native connect menu item requests Settings", "hosted URL validation", "optional name", "pairing code excluded from saved list", "switch local/cloud", "cancel/confirm forget", "real app Settings deep link", "native Settings event and search reset", "feature-off hides sharing controls and stale deep link", "explicit opt-in enables fixture sharing", "sharing off by default", "read-only folder selection", "cancel/save sharing", "immediate revoke", "post-pair access deep link", "no sharing bridge in remote renderer"],
+    const unexpected = blockedRequests.filter(request => request.type !== "image" || request.url !== "https://www.google.com/s2/favicons");
+    assert.deepEqual(unexpected, [], "unexpected external request attempted");
+    const receipt = { passed: true, blockedIcons: blockedRequests.length, renderer: ["RemoteComputerSection", "ConnectedWorkspacesSettings", "DesktopWorkspaceSwitcher"], preload: "electron/preload.cjs", calls,
+      checks: ["full custom HTTPS link unchanged", "pending submit disabled", "cancel reset", "rejection and retry", "companion six-digit routing", "390px overflow", "remote-safe bridge", "native connect menu item requests Settings", "hosted URL validation", "discovered server name", "pairing code excluded from saved list", "switch local/cloud", "cancel/confirm forget", "real app Settings deep link", "native Settings event and search reset", "feature-off hides sharing controls and stale deep link", "explicit opt-in enables fixture sharing", "sharing off by default", "read-only folder selection", "cancel/save sharing", "immediate revoke", "post-pair access deep link", "no sharing bridge in remote renderer"],
       nativeConnector: "Real HttpOnly pairing cookie → session.defaultSession.fetch → real fixture registration → revoke",
       limitation: "UI IPC replaces native dialogs, workspace persistence and navigation. Native sharing authentication tested against isolated HTTP server; no public DNS/TLS or live screen control tested." };
     writeFileSync(join(output, "receipt.json"), `${JSON.stringify(receipt, null, 2)}\n`);
@@ -302,7 +334,7 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
   for (const dir of ["home", "user-data"]) mkdirSync(join(output, dir));
   const ui = await createServer({
     configFile: false, root, resolve: { alias: { "@": join(root, "src") } },
-    server: { host: "127.0.0.1", port: 0, proxy: { "/api": { target: fixture.info.url } } },
+    server: { host: "127.0.0.1", port: 0, fs: { allow: [root, realpathSync(join(root, "node_modules"))] }, proxy: { "/api": { target: fixture.info.url } } },
     plugins: [react(), tailwindcss(), {
       name: "server-connection-fixture",
       resolveId(id) { if (id === "virtual:server-connection") return `\0${id}`; },
