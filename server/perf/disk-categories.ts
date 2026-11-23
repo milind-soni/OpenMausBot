@@ -66,12 +66,12 @@ const DATA_FOLDERS: Readonly<Record<string, StorageCategory>> = {
   // (themes/store.ts), org-library (org-library.ts), share (share.ts), usage (usage-ledger.ts), decisions and
   // admin-activity (decision-log.ts, admin-activity.ts: the audit log readDecisions reads), prompt-split (drivers/prompt-split.ts),
   // codex-instructions (drivers/codex-instructions.ts), local-vm-stops, skill-switch, hook-tokens (drivers/claude.ts),
-  // claude-user-skills (turn-settings.ts), box (bot-box/boot.ts).
+  // claude-user-skills (turn-settings.ts), box (bot-box/boot.ts), github (github/sign-in.ts).
   providers: "settings", people: "settings", "people-connections": "settings", caddy: "settings", ssh: "settings",
   skills: "settings", "skills-library": "settings", "imported-skills": "settings", "skill-state": "settings", "skill-switch": "settings",
   themes: "settings", "org-library": "settings", share: "settings", usage: "settings", decisions: "settings", "admin-activity": "settings",
   "prompt-split": "settings", "codex-instructions": "settings", "local-vm-stops": "settings", "hook-tokens": "settings",
-  "claude-user-skills": "settings", box: "settings",
+  "claude-user-skills": "settings", box: "settings", github: "settings",
   // engine-homes/layout.ts (a Team Cloud's per-audience engine homes); drivers/pi-session.ts.
   "engine-homes": "engine_state", "pi-sessions": "engine_state",
   // host/team-files.ts (container-computer.ts's vm-home and vm-homes are placed in dataPlacement).

@@ -1,0 +1,1 @@
+{"hosts":{"github.com":[{"state":"success","active":true,"host":"github.com","login":"octo-fixture","tokenSource":"/tmp/x.FIXTURE/config/hosts.yml","scopes":"gist, read:org, repo","gitProtocol":"https"}]}}
