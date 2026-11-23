@@ -113,7 +113,7 @@ export function ThreadMemoryCard({ bot }: { bot: Pick<Bot, "id" | "threadId" | "
     fetchThreadNotes(bot.id, bot.threadId).then((doc) => { if (live) setLoaded({ threadId: bot.threadId, doc }); }).catch(() => {});
     return () => { live = false; };
   }, [bot.id, bot.threadId, bot.busy]);
-  const doc = loaded?.threadId === bot.threadId ? loaded.doc : null;
+  const doc = loaded && loaded.threadId === bot.threadId && typeof loaded.doc?.text === "string" ? loaded.doc : null;
   if (bot.memoryEnabled === false || !doc || !(doc.scoped || doc.text.trim())) return null;
   return (
     <div data-memory-thread-card="" className="rounded-xl bg-card px-0.5 py-3">

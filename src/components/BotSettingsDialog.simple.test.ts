@@ -37,7 +37,7 @@ const fixture = vi.hoisted(() => {
       refresh: (() => Promise.resolve()) as () => Promise<void>,
       putAssignments: (() => Promise.resolve()) as (name: string, remove?: boolean) => Promise<void>,
     },
-    memory: { docs: null as MemoryDoc[] | null, error: false, mine: false, setDoc: (() => {}) as (doc: MemoryDoc) => void, reload: () => Promise.resolve() },
+    memory: { docs: null as MemoryDoc[] | null, thread: null as (MemoryDoc & { scoped: boolean }) | null, error: false, mine: false, setDoc: (() => {}) as (doc: MemoryDoc) => void, reload: () => Promise.resolve() },
     saveMemory: (() => Promise.resolve({ ok: true })) as (...args: unknown[]) => Promise<unknown>,
     openExternal: (() => Promise.resolve()) as (url: string) => Promise<void>,
     derived: {} as Record<string, unknown>,
@@ -264,7 +264,7 @@ beforeEach(() => {
     skills: [], loading: false, working: "", error: "", reviewing: null, toggle: vi.fn(() => Promise.resolve()),
     setWorking: vi.fn(), setError: vi.fn(), refresh: vi.fn(() => Promise.resolve()), putAssignments: vi.fn(() => Promise.resolve()),
   };
-  fixture.memory = { docs: null, error: false, mine: false, setDoc: vi.fn(), reload: vi.fn(() => Promise.resolve()) };
+  fixture.memory = { docs: null, thread: null, error: false, mine: false, setDoc: vi.fn(), reload: vi.fn(() => Promise.resolve()) };
   patch.mockReset();
   onOpen.mockReset();
   onClose.mockReset();
@@ -1013,17 +1013,17 @@ describe("the Library tab", () => {
     expect([...order].sort((a, b) => a - b)).toEqual(order);
   });
 
-  it("values What it remembers by the notes in MEMORY.md, says Off when memory is off, and opens the memory page", () => {
+  it("shows no count on What it remembers, only Nothing yet when it is empty or Off, and opens the memory page", () => {
     expect(rowValue(library(makeBot()), "memory")).toBeUndefined();
     fixture.memory.docs = [memoryDoc("# Notes\n- Likes short replies\n- Uses Resolve\n- Works nights\n")];
     const rendered = library(makeBot());
-    expect(rowValue(rendered, "memory")).toBe("3 notes");
+    expect(rowValue(rendered, "memory")).toBeUndefined();
     click(find(rendered, "data-panel-page", "memory"));
     expect(onOpen).toHaveBeenLastCalledWith("memory");
-    fixture.memory.docs = [memoryDoc("- One thing\n")];
-    expect(rowValue(library(makeBot()), "memory")).toBe("1 note");
     fixture.memory.docs = [memoryDoc("# Empty\n")];
     expect(rowValue(library(makeBot()), "memory")).toBe("Nothing yet");
+    fixture.memory.thread = { ...memoryDoc("- Acme NDA: two years\n"), path: "memory/threads/t1.md", scoped: true };
+    expect(rowValue(library(makeBot()), "memory")).toBeUndefined();
     expect(rowValue(library(makeBot({ memoryEnabled: false })), "memory")).toBe("Off");
   });
 
@@ -1310,43 +1310,29 @@ describe("the drill-in pages", () => {
     expect(ofType(body("routines"), RoutineEditor)!.props).toMatchObject({ lockedBotId: "scout", routine: undefined });
   });
 
-  it("lists what MEMORY.md remembers, forgets one line through the memory file route, and adds one", async () => {
+  it("is MEMORY.md as plain text, with this conversation's notes above it when it keeps them, and nothing else", () => {
     fixture.memory.docs = [memoryDoc("# Notes\n- Likes short replies\n\n- Uses Resolve Studio\n")];
     const rendered = body("memory");
-    expect(rendered.html).toContain("Likes short replies");
-    expect(rendered.html).toContain("Uses Resolve Studio");
-    expect(rendered.html).not.toContain("# Notes");
-    // Memory upkeep is the page's one switch; the rest of advanced Memory stays out.
-    expect(switches(rendered.html)).toBe(1);
-    expect(rendered.html).toContain("Memory upkeep");
-    for (const text of ["Tidy now", "Obsidian", "Daily logs", "Journal"]) expect(rendered.html).not.toContain(text);
-    click(rendered.nodes.filter((node) => node.props.label === "Forget")[0]!);
-    await Promise.resolve();
-    expect(fixture.saveMemory).toHaveBeenLastCalledWith("scout", "MEMORY.md", "# Notes\n\n- Uses Resolve Studio\n", "h1", false);
-    await Promise.resolve();
-    expect(fixture.memory.setDoc).toHaveBeenLastCalledWith(expect.objectContaining({ text: "# Notes\n\n- Uses Resolve Studio\n", hash: "h2" }));
-
-    (find(body("memory"), "data-panel-form", "memory-add").props.onChange as (value: string) => void)("  Prefers the free version ");
-    (find(body("memory"), "data-panel-form", "memory-add").props.onSubmit as () => void)();
-    await Promise.resolve();
-    expect(fixture.saveMemory).toHaveBeenLastCalledWith("scout", "MEMORY.md", "# Notes\n- Likes short replies\n\n- Uses Resolve Studio\n- Prefers the free version\n", "h1", false);
+    expect(rendered.html).toContain("# Notes\n- Likes short replies\n\n- Uses Resolve Studio");
+    expect(rendered.html).toContain('data-memory-scope="everywhere"');
+    expect(rendered.html).not.toContain('data-memory-scope="thread"');
+    expect(switches(rendered.html)).toBe(0);
+    for (const text of ["Memory upkeep", "Tidy now", "Obsidian", "Daily logs", "Journal", "Edit as text", "Full window"]) expect(rendered.html).not.toContain(text);
+    expect(has(rendered, "data-panel-form", "memory-add")).toBe(false);
+    fixture.memory.thread = { ...memoryDoc("- Acme NDA: two years\n"), path: "memory/threads/t1.md", scoped: true };
+    const scoped = body("memory").html;
+    expect(scoped.indexOf("This thread")).toBeGreaterThan(-1);
+    expect(scoped.indexOf("This thread")).toBeLessThan(scoped.indexOf("Everywhere"));
+    expect(scoped).toContain("- Acme NDA: two years");
   });
 
-  it("says when memory is off, empty or unreadable, and re-reads on a conflict", async () => {
+  it("says when memory is off, empty or unreadable", () => {
     expect(body("memory", makeBot({ memoryEnabled: false })).html).toContain("Memory is off for Scout.");
-    expect(has(body("memory", makeBot({ memoryEnabled: false })), "data-panel-form", "memory-add")).toBe(false);
+    expect(body("memory", makeBot({ memoryEnabled: false })).html).not.toContain("textarea");
     fixture.memory.docs = [memoryDoc("")];
-    expect(body("memory").html).toContain("Nothing remembered yet.");
+    expect(body("memory").html).toContain("Nothing remembered here yet. Write anything you want it to know.");
     fixture.memory = { ...fixture.memory, docs: null, error: true };
     expect(body("memory").html).toContain("Couldn&#x27;t read the memory file just now.");
-
-    fixture.memory = { ...fixture.memory, docs: [memoryDoc("- Old\n")], error: false };
-    fixture.saveMemory = vi.fn(() => Promise.resolve({ ok: false, conflict: true, current: "- New\n", currentHash: "h3" }));
-    click(find(body("memory"), "label", "Forget"));
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(fixture.memory.reload).toHaveBeenCalled();
-    expect(body("memory").html).toContain("Scout changed this file while you were editing.");
   });
 
   it("switches skills, removes one, adds one from a link and browses the library or skills.sh", async () => {

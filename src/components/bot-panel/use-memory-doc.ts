@@ -30,7 +30,7 @@ export function useMemoryDoc(bot: Pick<Bot, "id" | "memoryEnabled" | "busy" | "t
 
   const read = async (botId: string, threadId: string, cancelled?: () => boolean) => {
     try {
-      const [docs, thread] = await Promise.all([readDocs(botId, mine), mine ? null : fetchThreadNotes(botId, threadId).catch(() => null)]);
+      const [docs, thread] = await Promise.all([readDocs(botId, mine), mine ? null : fetchThreadNotes(botId, threadId).then((doc) => typeof doc?.text === "string" ? doc : null, () => null)]);
       if (!cancelled?.()) setState({ botId, threadId, docs, thread, error: false });
     } catch {
       if (!cancelled?.()) setState({ botId, threadId, docs: null, thread: null, error: true });
