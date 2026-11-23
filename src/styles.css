@@ -1373,10 +1373,13 @@ body,
 /* iOS Safari keeps its bottom bar in light mode unless the root names a
    scheme. The bar's color is theme-color, copied from --color-app when the
    skin changes. The root itself has to paint the same ground, or the home
-   indicator inset stays the canvas white. */
-html {
-  background-color: var(--color-app);
-  color-scheme: var(--code-color-scheme);
+   indicator inset stays the canvas white. Only on iOS WebKit: elsewhere the
+   scheme stays scoped to code, so native controls keep their styling. */
+@supports (-webkit-touch-callout: none) {
+  html {
+    background-color: var(--color-app);
+    color-scheme: var(--code-color-scheme);
+  }
 }
 
 /* Standalone phone windows can reach behind the notch and home indicator.
