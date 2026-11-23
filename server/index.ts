@@ -13658,7 +13658,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 200, { outstanding });
         }
         if (internalCapability.delegatedThisTurn?.has(id)) {
-          return json(res, 409, { error: `Assignment ${id} was handed out during this turn. Finish your response now so the teammate can work; its result returns to this conversation and resumes you. Do not check or wait for it until a later turn.` });
+          return json(res, 409, { error: `Assignment ${id} was handed out during this turn. Finish your response now so the teammate can work; its result returns to this conversation and resumes you. Do not check or wait for it until a later turn.`, sentThisTurn: true });
         }
         const waitMs = Math.min(Math.max(Number(url.searchParams.get("wait_ms")) || 0, 0), 240_000);
         const deadline = Date.now() + waitMs;
