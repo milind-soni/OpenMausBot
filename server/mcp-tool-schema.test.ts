@@ -171,6 +171,22 @@ describe("createToolListNormalizer", () => {
 describe("a tool list under a provider's schema profile", () => {
   const small = { name: "search", description: "Find pages.", inputSchema: { type: "object", properties: { query: { type: "string" } } } };
 
+  it("preserves a referenced type beside a mixed enum", () => {
+    const inputSchema = { type: "object", $defs: {
+      text: { type: "string" }, integer: { type: "integer" },
+      alias: { $ref: "#/$defs/text" },
+    }, properties: {
+      choice: { $ref: "#/$defs/alias", enum: ["a", null] },
+      count: { $ref: "#/$defs/integer", enum: [1, 2.5, null] },
+      nullable: { enum: ["a", null] },
+    } };
+    const [tool] = fitToolList([{ name: "choose", inputSchema }], MOONSHOT) as Array<{ inputSchema: typeof inputSchema }>;
+    expect(tool!.inputSchema.properties.choice).toEqual(inputSchema.properties.choice);
+    expect(tool!.inputSchema.properties.count).toEqual(inputSchema.properties.count);
+    expect(tool!.inputSchema.properties.nullable).toEqual({ enum: ["a", null], type: ["string", "null"] });
+    expect(inputSchema.properties.nullable).not.toHaveProperty("type");
+  });
+
   it("keeps nullable and mixed enum choices usable in Kimi's tools/list", () => {
     const genre = { enum: ["puzzle", "rpg", null], description: "Choose a genre" };
     const values = { enum: [1, 2.5, false, null, { name: "one" }, []] };

@@ -170,12 +170,25 @@ function valueType(value: unknown): string {
   return typeof value === "object" ? "object" : typeof value;
 }
 
+function hasReferencedType(node: Json, root: Json): boolean {
+  const seen = new Set<Json>();
+  let current = node;
+  while (typeof current.$ref === "string" && !seen.has(current)) {
+    seen.add(current);
+    const target = pointer(root, current.$ref);
+    if (!isObject(target)) return false;
+    if ("type" in target) return true;
+    current = target;
+  }
+  return false;
+}
+
 /** Kimi Code 2.7.2 tries to infer a single type from each untyped enum, even for a nullable field. */
 function withTypedMixedEnums(schema: Json): Json {
   const copy = structuredClone(schema);
   let changed = false;
   walk(copy, 0, (node) => {
-    if ("type" in node || !Array.isArray(node.enum)) return;
+    if ("type" in node || !Array.isArray(node.enum) || hasReferencedType(node, copy)) return;
     const types = new Set(node.enum.map(valueType));
     if (types.has("number")) types.delete("integer");
     if (types.size < 2) return;
