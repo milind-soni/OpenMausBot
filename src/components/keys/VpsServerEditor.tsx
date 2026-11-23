@@ -31,7 +31,6 @@ export function useVpsSaving(): string | null {
 export function useVpsSave() {
   const dispatch = useStoreDispatch();
   return (body: { vps?: { sshAlias: string; memoryGb?: number; cpus?: number }; vpsServers?: VpsNamedServer[] }, key: string): Promise<string | null> => {
-    // The buttons are off while one runs; a stray second call is dropped without words.
     if (savingKey !== null) return Promise.reject(new Error(""));
     setSavingKey(key);
     return api("/api/config", { method: "PUT", body: JSON.stringify(body) })
@@ -92,7 +91,6 @@ export function VpsServerEditor({ alias, onRemoved }: { alias: string; onRemoved
   const savedName = isDefault ? alias : own?.name ?? "";
   const savedMemory = isDefault ? vps?.memoryGb : own?.memoryGb;
   const savedCpus = isDefault ? vps?.cpus : own?.cpus;
-  /** What an empty field means here. */
   const inherited = isDefault
     ? { memoryGb: MEMORY_GB.fallback, cpus: CPUS.fallback }
     : { memoryGb: vps?.memoryGb ?? MEMORY_GB.fallback, cpus: vps?.cpus ?? CPUS.fallback };
@@ -111,7 +109,10 @@ export function VpsServerEditor({ alias, onRemoved }: { alias: string; onRemoved
   const cpuCount = limitValue(cpus, CPUS);
   const label = savedName || alias;
   const valid = Boolean(name.trim()) && memoryGb !== null && cpuCount !== null;
-  const dirty = name.trim() !== savedName || memoryGb !== savedMemory || cpuCount !== savedCpus;
+  // An empty field on the default saves as 4 GB and 2 cores, the values it stands for.
+  const sentMemory = isDefault && memoryGb === undefined ? MEMORY_GB.fallback : memoryGb;
+  const sentCpus = isDefault && cpuCount === undefined ? CPUS.fallback : cpuCount;
+  const dirty = name.trim() !== savedName || sentMemory !== savedMemory || sentCpus !== savedCpus;
   const busy = saving !== null;
 
   const run = (body: Parameters<typeof save>[0]) => {
@@ -126,12 +127,11 @@ export function VpsServerEditor({ alias, onRemoved }: { alias: string; onRemoved
     });
   };
   const submit = () => {
-    if (busy || !valid || !dirty || memoryGb === null || cpuCount === null) return;
+    if (busy || !valid || !dirty || sentMemory === null || sentCpus === null) return;
     const work = isDefault
-      // The default's alias is its name; an empty limit there means 4 GB and 2 cores.
-      ? run({ vps: { sshAlias: name.trim(), memoryGb: memoryGb ?? MEMORY_GB.fallback, cpus: cpuCount ?? CPUS.fallback } })
+      ? run({ vps: { sshAlias: name.trim(), memoryGb: sentMemory, cpus: sentCpus } })
       : run({ vpsServers: named.map((server) => (server.sshAlias === alias ? {
-        name: name.trim(), sshAlias: alias, ...(memoryGb === undefined ? {} : { memoryGb }), ...(cpuCount === undefined ? {} : { cpus: cpuCount }),
+        name: name.trim(), sshAlias: alias, ...(sentMemory === undefined ? {} : { memoryGb: sentMemory }), ...(sentCpus === undefined ? {} : { cpus: sentCpus }),
       } : server)) });
     work.then(setNotice, () => undefined);
   };
