@@ -100,8 +100,8 @@ Remove it with `sudo dnf remove openmausbot`. Updates are downloaded by the app,
 command and opens a terminal for you to run it. Other RPM distributions (RHEL, openSUSE) and image-based Fedora
 editions such as Silverblue are untested; use the AppImage there.
 
-Fedora's GNOME runs only on Wayland (it has no Xorg session to choose), so **This computer** stays unavailable there
-for now, as on Ubuntu's GNOME Wayland (see [Enable local control](#enable-local-control)). Chat, screen preview,
+Recent Fedora releases run GNOME only on Wayland (no Xorg session to choose), so **This computer** stays unavailable
+there for now, as on Ubuntu's GNOME Wayland (see [Enable local control](#enable-local-control)). Chat, screen preview,
 Cloud desktop and Private desktop still work.
 
 ### Arch Linux and EndeavourOS

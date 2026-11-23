@@ -4127,7 +4127,9 @@
       "settings.vault.bitwardenSecrets.token": "9a911b08feb9d2928240dda42c6efa8794ab3457f8b59a7cfb5187e817f948e3",
       "settings.vault.bitwardenSecrets.note": "cb98c043ae54f73b55e675c6791759f93421cc65d2a3080b12d8af988997ef13",
       "settings.vault.bitwardenSecrets.error": "393d6d3cb4d0776647976c6288ff1dac2198db77e9eb2613b6c389bca082694f",
-      "botPanel.library.showAll": "2150d8df37e489573fb8f0f19ef89d2eda2ba4b49b3beb36333e5096a99a6dc0"
+      "botPanel.library.showAll": "2150d8df37e489573fb8f0f19ef89d2eda2ba4b49b3beb36333e5096a99a6dc0",
+      "computer.problem.localWaylandBlockedOther": "350a7ad5cba076518d35be7a83a24eb473f6c8316f5204d05951319266b8e147",
+      "computer.linux.waylandOtherDesktop": "3f2dd5c5c584d38fcd9dd39756a9096087a42af246781c13e41cb89c61c9be45"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -37549,7 +37551,9 @@
       "settings.vault.bitwardenSecrets.error": "393d6d3cb4d0776647976c6288ff1dac2198db77e9eb2613b6c389bca082694f",
       "model.unreadable.failed": "992ebb278264c3cbf937046ef84a1afdd0d5a1bf50da8926187e28f8fd6b1965",
       "model.unreadable.signedOut": "fbb9251c3437926ddce45580e946b751ae1aa8d9e5b689a39b6a51958c06e2d1",
-      "model.unreadable.timedOut": "d15b91980ff8a0db2fb194f82b235e8c1cfca944320281b324e76632eb989898"
+      "model.unreadable.timedOut": "d15b91980ff8a0db2fb194f82b235e8c1cfca944320281b324e76632eb989898",
+      "computer.problem.localWaylandBlockedOther": "350a7ad5cba076518d35be7a83a24eb473f6c8316f5204d05951319266b8e147",
+      "computer.linux.waylandOtherDesktop": "3f2dd5c5c584d38fcd9dd39756a9096087a42af246781c13e41cb89c61c9be45"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
