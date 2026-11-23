@@ -1,6 +1,7 @@
 // The events a bot (or the person, for a bot) can watch: only connected apps that bot may use, each with its event
 // types from the connected-apps service. Apps it may not use are left out entirely, never listed as refused.
 import { botMayWatchApp, type AppEventCatalog, type AppEventType } from "../shared/app-triggers.ts";
+import { accountLimit, type ConnectorScopes } from "../shared/connector-scopes.ts";
 import type { ConnectorToolGrant } from "../shared/wire.ts";
 import type { AppTriggerBroker, BrokerTriggerType } from "./app-trigger-broker.ts";
 
@@ -10,7 +11,7 @@ const MAX_APPS = 10;
 const MAX_EVENTS = 25;
 const DESCRIPTION_MAX = 200;
 
-type Bot = { composio?: boolean; connectorTools?: Record<string, ConnectorToolGrant>; connectorScopes?: { apps: Record<string, "read" | "write"> } };
+type Bot = { composio?: boolean; connectorTools?: Record<string, ConnectorToolGrant>; connectorScopes?: ConnectorScopes };
 type Connected = Record<string, { connected: boolean; accounts: Array<{ id: string; alias?: string; status: string }> }>;
 
 const label = (slug: string) => ({ googlecalendar: "Google Calendar", googlesheets: "Google Sheets", github: "GitHub", hubspot: "HubSpot" } as Record<string, string>)[slug]
@@ -43,8 +44,13 @@ export async function appEventCatalog(input: {
   app?: string;
   search?: string;
 }): Promise<AppEventCatalog> {
+  // Only the active accounts the bot may use, per its Access settings: an app with none of them is not listed.
+  const accounts = (slug: string) => {
+    const limit = accountLimit(input.bot.connectorScopes, slug);
+    return input.connected[slug]!.accounts.filter((account) => /^active$/i.test(account.status) && (!limit || limit.includes(account.id)));
+  };
   const usable = Object.entries(input.connected)
-    .filter(([slug, state]) => state.connected && state.accounts.some((account) => /^active$/i.test(account.status)) && botMayWatchApp(input.bot, slug))
+    .filter(([slug, state]) => state.connected && accounts(slug).length > 0 && botMayWatchApp(input.bot, slug))
     .map(([slug]) => slug)
     .sort();
   const wanted = input.app?.trim().toLowerCase();
@@ -60,7 +66,7 @@ export async function appEventCatalog(input: {
       return {
         app: slug,
         name: label(slug),
-        accounts: input.connected[slug]!.accounts.filter((account) => /^active$/i.test(account.status)).map((account) => ({ id: account.id, ...(account.alias ? { alias: account.alias } : {}) })),
+        accounts: accounts(slug).map((account) => ({ id: account.id, ...(account.alias ? { alias: account.alias } : {}) })),
         events,
         ...(loaded?.error ? { error: loaded.error } : {}),
       };

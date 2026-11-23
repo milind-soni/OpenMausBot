@@ -58,8 +58,8 @@ export function schemaBytes(value: unknown): number {
   return Buffer.byteLength(text) + 5 * (text.match(/[<>&]/g)?.length ?? 0) + 3 * (text.match(/[\u2028\u2029]/g)?.length ?? 0);
 }
 
-const MAP_SLOTS = ["properties", "patternProperties", "dependentSchemas", "$defs", "definitions"] as const;
-const NESTED_SLOTS = ["additionalProperties", "items", "additionalItems", "contains", "propertyNames", "unevaluatedProperties", "unevaluatedItems"] as const;
+const MAP_SLOTS = ["properties", "patternProperties", "dependencies", "dependentSchemas", "$defs", "definitions"] as const;
+const NESTED_SLOTS = ["additionalProperties", "items", "additionalItems", "contains", "propertyNames", "contentSchema", "unevaluatedProperties", "unevaluatedItems"] as const;
 const NESTED_LISTS = ["prefixItems", "items"] as const;
 /** Alternatives describe the same value, so they sit at its depth. */
 const ALTERNATIVE_LISTS = ["anyOf", "oneOf", "allOf"] as const;
@@ -170,6 +170,34 @@ function valueType(value: unknown): string {
   return typeof value === "object" ? "object" : typeof value;
 }
 
+function hasReferencedType(node: Json, root: Json): boolean {
+  const seen = new Set<Json>();
+  let current = node;
+  while (typeof current.$ref === "string" && !seen.has(current)) {
+    seen.add(current);
+    const target = pointer(root, current.$ref);
+    if (!isObject(target)) return false;
+    if ("type" in target) return true;
+    current = target;
+  }
+  return false;
+}
+
+/** Kimi Code 2.7.2 tries to infer a single type from each untyped enum, even for a nullable field. */
+function withTypedMixedEnums(schema: Json): Json {
+  const copy = structuredClone(schema);
+  let changed = false;
+  walk(copy, 0, (node) => {
+    if ("type" in node || !Array.isArray(node.enum) || hasReferencedType(node, copy)) return;
+    const types = new Set(node.enum.map(valueType));
+    if (types.has("number")) types.delete("integer");
+    if (types.size < 2) return;
+    node.type = [...types];
+    changed = true;
+  });
+  return changed ? copy : schema;
+}
+
 function typesOf(node: Json, root: Json, hops = 0): string[] {
   if (hops > 16) return [];
   if (typeof node.type === "string") return [node.type];
@@ -228,7 +256,7 @@ function topLevelOnly(schema: Json, descriptionChars: number): Json {
   return { type: "object", properties, ...(required.length ? { required } : {}), additionalProperties: true };
 }
 
-/** kept: as the server sent it. trimmed: every field and constraint kept, fewer words. loosened: fields deeper in are
+/** kept: every field, constraint and annotation kept. trimmed: every field and constraint kept, fewer words. loosened: fields deeper in are
  * left to the tool's description. minimal: only the top-level fields. dropped: not even those fit. */
 export type SchemaFit =
   | { outcome: "kept"; schema: Json; bytes: number }
@@ -237,12 +265,13 @@ export type SchemaFit =
 
 /** Least loss first, stopping at the first form that fits. */
 export function fitToolSchema(schema: Json, profile: ToolSchemaProfile): SchemaFit {
-  const measured = profile.measureInlined ? inlineRefs(schema) : schema;
-  const from = schemaBytes(measured ?? schema);
-  if (measured && fits(measured, profile)) return { outcome: "kept", schema, bytes: from };
+  const typed = profile.id === "moonshot" ? withTypedMixedEnums(schema) : schema;
+  const measured = profile.measureInlined ? inlineRefs(typed) : typed;
+  const from = schemaBytes(measured ?? typed);
+  if (measured && fits(measured, profile)) return { outcome: "kept", schema: typed, bytes: from };
   const fitted = (outcome: "trimmed" | "loosened" | "minimal", form: Json): SchemaFit => ({ outcome, schema: form, bytes: schemaBytes(form), from });
 
-  const working = structuredClone(measured ?? schema);
+  const working = structuredClone(measured ?? typed);
   if (measured) {
     stripAnnotations(working);
     if (fits(working, profile)) return fitted("trimmed", working);

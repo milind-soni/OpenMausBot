@@ -11,7 +11,8 @@ import { AppDone, AppHeader, AppInfo, AppOpenButton, AppPlaceholder, AppStrip, A
 import { AppFrame, type AppFrameHandle, type AppFrameProblem } from "./AppFrame";
 import type { AppSelection } from "./app-frame-host";
 import { PageCitationButton } from "../CitationUI";
-import { appendDraftAttachments } from "@/lib/drafts";
+import { appendComposerDraft, appendDraftAttachments } from "@/lib/drafts";
+import { returnFocusToComposer } from "../AskCard";
 import { useCanWriteIn } from "@/lib/cloud-guest";
 import { closePage, onPageOpened, openPage, openPageFor } from "@/lib/open-page";
 import { PAGE_HEIGHT, PAGE_PREVIEW_HEIGHT, PageFullScreen, PageNotes, PagePaneContext, PageToolbar, usePagePin, usePagePoint, usePageSave, usePageShare, usePageVersion } from "./PageTools";
@@ -200,6 +201,12 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
     const off = onPageOpened(() => { if (openPageFor(threadId)?.appId !== message.id) setFullScreen(false); });
     return () => { off(); closePage(threadId, message.id); };
   }, [paneOpen, threadId, message.id, rev]);
+  const draft = (text: string) => {
+    appendComposerDraft(`bot:${botId}:${threadId}`, text);
+    if (!pane) { point.stop(); setFullScreen(false); }
+    returnFocusToComposer();
+  };
+  const onDraft = page && !room ? { onDraft: draft } : {};
   const share = usePageShare(threadId, message.id, message.publishedPage);
   const save = usePageSave(threadId, message.id, payload.title);
   const pin = usePagePin({ botId, threadId, messageId: message.id }, payload.title);
@@ -300,6 +307,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
           onTeardownRequested={onTeardownRequested}
           {...(page ? { maxHeight: PAGE_HEIGHT.cap } : {})}
           {...(!room ? { onSelection: setSelection } : {})}
+          {...onDraft}
         />
       ) : (
         <AppPlaceholder height={boxHeight - (titled ? CARD_TITLE_HEIGHT : 0)} loading={slot.live} open={slot.live ? undefined : reloadNow} />
@@ -390,7 +398,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
       )}
       {page && fullScreen && current && (
         <PageFullScreen {...tools} title={payload.title} doc={current} botId={botId} threadId={threadId} handle={wide} close={() => { point.stop(); setFullScreen(false); }} pane={pane}
-          {...(!room ? { onSelection: setSelection } : {})} />
+          {...(!room ? { onSelection: setSelection } : {})} {...onDraft} />
       )}
     </div>
   );

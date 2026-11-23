@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { writeFileAtomic } from "./atomic.ts";
-import { CONTROL_BUSY, CONTROL_HANDED_BACK, CONTROL_REFUSAL_PLAIN, CONTROL_WAITED, controlRefusal, createControlClient } from "./control-client.ts";
+import { CONTROL_HANDED_BACK, CONTROL_REFUSAL_PLAIN, CONTROL_WAITED_HELD, controlRefusal, createControlClient } from "./control-client.ts";
 import { computerPersonAwayText } from "./computer-wait.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 import { freePortBlock } from "./testing/ports.ts";
@@ -215,7 +215,8 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
     await apiOk("POST", `/api/bots/${second.id}/messages`, { text: "Also work slowly.", threadId: secondTask.threadId });
     await busy(second.id, secondTask.threadId);
     const contested = await timed(withAnswer(base, secondTask.threadId, gate(mountedComputer(await dumpFor(second.id)))));
-    expect(contested.value).toEqual({ held: true, helpOpen: false, blockedReason: CONTROL_BUSY });
+    expect(contested.value).toMatchObject({ held: true, helpOpen: false, blockedReason: expect.stringMatching(/^Another thread is using this computer\. This call was not performed\. No screen or app state was checked\. This turn is 1st in line/) });
+    expect(contested.value.blockedReason).not.toContain("Host Screen Bot");
     expect(controlRefusal(contested.value)).not.toBe(CONTROL_REFUSAL_PLAIN);
     expect(contested.ms).toBeGreaterThanOrEqual(CALL_WAIT_MS - 200);
     writeFileSync(finishFile, "finish");
@@ -243,7 +244,7 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
     await new Promise(resolve => setTimeout(resolve, ACT_WITHIN_MS + 200));
     await apiOk("POST", `/api/bots/${holder.bot.id}/interrupt`, { threadId: holder.threadId });
     const freed = await waiting;
-    expect(freed.value).toEqual({ held: true, helpOpen: false, blockedReason: CONTROL_WAITED });
+    expect(freed.value).toEqual({ held: true, helpOpen: false, blockedReason: CONTROL_WAITED_HELD });
     expect(freed.ms).toBeLessThan(CALL_WAIT_MS);
     const next = await timed(gate(waiter.computer));
     expect(next.value).toEqual({ held: false, helpOpen: false });
