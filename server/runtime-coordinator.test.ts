@@ -987,6 +987,70 @@ describe("RuntimeCoordinator: the person stops one hand-off", () => {
   });
 });
 
+describe("RuntimeCoordinator: one stopped hand-off, and the rest of its teammate's work", () => {
+  const holdAll: Script = () => "hold";
+  const asker: RoomAddress = { botId: "tester", threadId: "tester-chat" };
+  /** Like the real host: an aborted teammate turn stops that teammate's whole thread, with no cause of its own. */
+  const hostStopsThreadOnAbort = (w: World, id: string) => {
+    const run = w.host.runs.find(r => r.node.id === id)!;
+    run.signal.addEventListener("abort", () => w.coordinator.stopAwaitingDirect(run.node.threadId), { once: true });
+  };
+
+  it("leaves another request queued in the same teammate thread to run to the end", async () => {
+    const w = world(holdAll);
+    const { node: first } = send(w, chief, "gen-1", undefined, builder, "Build it");
+    const { node: second } = send(w, asker, "gen-2", undefined, builder, "Build the other one");
+    w.coordinator.tick();
+    expect(w.coordinator.node(first.id)?.status).toBe("running");
+    expect(w.coordinator.node(second.id)?.status).toBe("queued");
+    hostStopsThreadOnAbort(w, first.id);
+
+    expect(w.coordinator.stopHandoff(first.id)).toBe("stopped");
+    expect(w.coordinator.node(first.id)?.status).toBe("cancelled");
+    expect(w.coordinator.node(second.id)?.status).not.toBe("cancelled");
+    await flush();
+    w.coordinator.tick();
+    expect(w.coordinator.node(second.id)?.status).toBe("running");
+    await w.host.release(second.id, { ok: true, text: "built the other one" });
+    expect(w.coordinator.node(second.id)).toMatchObject({ status: "completed", result: "built the other one" });
+    expect(w.coordinator.node("gen-2")?.status).not.toBe("cancelled");
+  });
+
+  it("holds only against the request it stopped, never another open request in the same words", () => {
+    const w = world(holdAll);
+    const { node: first } = send(w, chief, "gen-1", undefined, builder, "Build it");
+    begun(w, asker, "gen-2");
+    w.coordinator.tick();
+    expect(w.coordinator.node("gen-1")?.text).toBe(w.coordinator.node("gen-2")?.text);
+    w.coordinator.stopHandoff(first.id);
+    expect(send(w, asker, "gen-2", undefined, { botId: "builder", threadId: "builder-other" }, "Build it").node).toMatchObject({ botId: "builder", status: "queued" });
+  });
+
+  it("holds through that request's own hand-offs, and lets a request the person makes after it through", () => {
+    const w = world(holdAll);
+    const { node: first } = send(w, chief, "gen-1", undefined, builder, "Build it");
+    const { node: t } = send(w, chief, "gen-1", undefined, tester, "Test it");
+    w.coordinator.tick();
+    w.coordinator.stopHandoff(first.id);
+    expect(() => w.coordinator.enqueue(tester, "gen-1", t.id, { botId: "builder", threadId: "builder-other" }, "Build it for the tests", {}))
+      .toThrow("The person stopped this teammate's work on this request.");
+    expect(send(w, { botId: "chief", threadId: "chief-2" }, "gen-3", undefined, builder, "Build it").node).toMatchObject({ botId: "builder" });
+  });
+
+  it("is forgotten after a day", () => {
+    let now = 1_000_000;
+    const host = fakeHost(holdAll);
+    const w: World = { host, coordinator: new RuntimeCoordinator({ dataDir: ":memory:", host, now: () => now, log: () => {} }), logs: [] };
+    const { node: first } = send(w, chief, "gen-1", undefined, builder, "Build it");
+    w.coordinator.tick();
+    w.coordinator.stopHandoff(first.id);
+    now += 24 * 60 * 60_000;
+    expect(() => send(w, chief, "gen-1", undefined, builder, "Build it again", { rework: true })).toThrow(/stopped this teammate's work/);
+    now += 1;
+    expect(send(w, chief, "gen-1", undefined, builder, "Build it again", { rework: true }).node).toMatchObject({ botId: "builder" });
+  });
+});
+
 describe("RuntimeCoordinator: a stop the person made is remembered", () => {
   const tick = () => sleep(2);
 
