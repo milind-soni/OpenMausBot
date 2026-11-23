@@ -81,8 +81,8 @@ export function BotConversations({ bot }: { bot: Bot }) {
   }, [bot.id]);
   const [showArchived, setShowArchived] = useState(false);
   const actions = useMemo(() => {
-    const { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive } = threadRowActions(bot.id, dispatch);
-    return { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive };
+    const { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive, onMemory } = threadRowActions(bot.id, dispatch);
+    return { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive, onMemory };
   }, [bot.id, dispatch]);
 
   const side = useConversationSide(bot);

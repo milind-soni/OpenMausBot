@@ -3820,3 +3820,52 @@ button:disabled.bg-danger {
     transition: none !important;
   }
 }
+
+/* Skill Burger. The fun is in shape and motion: buns with rounder outer corners, three sesame dots, layers that settle
+   in with a soft overshoot (the one place --ease-settle is used), and a single press of the bottom bun when the run is
+   saved. Nothing loops but the running layer's sheen, and reduced motion turns every bit of it off. */
+.skill-burger { --ease-settle: cubic-bezier(0.34, 1.4, 0.64, 1); }
+.burger-sesame {
+  position: absolute;
+  top: 6px;
+  inset-inline-start: 50%;
+  width: 26px;
+  height: 4px;
+  transform: translateX(-50%);
+  background:
+    radial-gradient(circle, color-mix(in srgb, var(--color-ink) 18%, transparent) 1.5px, transparent 2px) 0 50% / 9px 4px repeat-x;
+  pointer-events: none;
+}
+[dir="rtl"] .burger-sesame { transform: translateX(50%); }
+/* A new step slides in: its row opens from nothing so the card grows smoothly (nothing below jumps), the layer drops a
+   little from above out of a soft blur and settles, and its fill glows faintly with the accent before fading to the card. */
+@keyframes burger-drop {
+  0% { opacity: 0; min-height: 0; max-height: 0; transform: translateY(-12px) scale(0.96); filter: blur(4px); }
+  45% { opacity: 1; min-height: 2.25rem; max-height: 3rem; filter: blur(0); }
+  100% { opacity: 1; min-height: 2.25rem; max-height: 3rem; transform: none; filter: none; }
+}
+@keyframes burger-land {
+  from { background-color: color-mix(in srgb, var(--color-accent) 14%, var(--color-card)); }
+  to { background-color: var(--color-card); }
+}
+.burger-layer {
+  overflow: hidden;
+  animation: burger-drop 560ms cubic-bezier(0.22, 1, 0.36, 1) both, burger-land 1100ms ease-out 180ms both;
+}
+@keyframes burger-press {
+  0%, 100% { transform: none; }
+  45% { transform: translateY(-3px); }
+}
+.burger-stacked .burger-bun-bottom { animation: burger-press 240ms cubic-bezier(0.22, 1, 0.36, 1); }
+.burger-stacked .burger-bun-bottom > * { animation: fade-in 200ms ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .burger-layer, .burger-stacked .burger-bun-bottom, .burger-stacked .burger-bun-bottom > * { animation: none; }
+}
+:root[data-reduced-motion="true"] :is(.burger-layer, .burger-stacked .burger-bun-bottom, .burger-stacked .burger-bun-bottom > *) { animation: none; }
+:root[data-reduced-motion="true"] .skill-burger .thinking-sheen { display: none; }
+/* Folding the layers: the list's row collapses to nothing and fades, so the bun below glides up rather than jumping. */
+.burger-fold { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease-out; }
+.burger-fold[data-folded="true"] { grid-template-rows: 0fr; opacity: 0; }
+.burger-fold > ol { overflow: hidden auto; }
+@media (prefers-reduced-motion: reduce) { .burger-fold { transition: none; } }
+:root[data-reduced-motion="true"] .burger-fold { transition: none; }

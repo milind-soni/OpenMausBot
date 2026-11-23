@@ -4,6 +4,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, Message, Task } from "@/state/store";
+import { setAdvancedMode } from "@/lib/interface-mode";
 
 const fixture = vi.hoisted(() => ({
   dispatch: vi.fn(),
@@ -94,7 +95,8 @@ afterEach(() => {
 });
 
 describe("a bot's conversations in its panel", () => {
-  it("offers the public web conversation link alongside the app link and copies its exact address", async () => {
+  it("offers the public web conversation link alongside the app link in Advanced mode, and copies its exact address", async () => {
+    setAdvancedMode(true);
     const writeText = vi.fn(() => Promise.resolve());
     vi.stubGlobal("navigator", { clipboard: { writeText } });
     const previous = fixture.api.getMockImplementation()!;
@@ -108,10 +110,11 @@ describe("a bot's conversations in its panel", () => {
       expect(buttons.some((button) => button.textContent === "Copy link")).toBe(true);
       click(buttons.find((button) => button.textContent === "Copy link (HTTPS)")!);
       expect(writeText).toHaveBeenCalledWith("https://chat.example/?thread=launch&bot=research");
-    } finally { vi.unstubAllGlobals(); }
+    } finally { vi.unstubAllGlobals(); setAdvancedMode(false); }
   });
 
-  it("keeps the app link available when the public-address request fails", async () => {
+  it("keeps the app link available in Advanced mode when the public-address request fails", async () => {
+    setAdvancedMode(true);
     const previous = fixture.api.getMockImplementation()!;
     fixture.api.mockImplementation((path: string) => path === "/api/settings/custom-domain"
       ? Promise.reject(new Error("not permitted")) : previous(path));
@@ -121,6 +124,7 @@ describe("a bot's conversations in its panel", () => {
     const menu = document.querySelector("[data-thread-overlay]")!;
     expect([...menu.querySelectorAll("button")].some((button) => button.textContent === "Copy link")).toBe(true);
     expect(menu.textContent).not.toContain("Copy link (HTTPS)");
+    setAdvancedMode(false);
   });
 
   it("lists three, newest first, with the open one marked, and Show N more opens the rest", () => {
@@ -281,7 +285,7 @@ describe("a bot's conversations in its panel", () => {
       return [...document.querySelector(`[data-thread-overlay][aria-label="Actions for ${title}"]`)!.querySelectorAll("button")];
     };
     const items = menuFor("Translate the launch post");
-    expect(items.map((button) => button.textContent)).toEqual(expect.arrayContaining(["Copy link", "Rename thread", "Pin", "Archive", "Delete thread"]));
+    expect(items.map((button) => button.textContent)).toEqual(["Rename thread", "Memory", "Pin", "Archive", "Delete thread"]);
     click(items.find((button) => button.textContent === "Pin")!);
     expect(fixture.dispatch.mock.calls).toEqual([[{ type: "updateTask", botId: "research", threadId: "launch", patch: { pinned: true } }]]);
     fixture.dispatch.mockReset();

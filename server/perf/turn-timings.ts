@@ -318,6 +318,8 @@ export function createTurnTimings(options: TurnTimingsOptions = {}) {
       return { turns: turns.length, failed: turns.filter((turn) => !turn.ok).length, phases, setup: setupStatsOf(turns), slow, partial: ring.length >= RING_CAP && ring[0]!.endedAt > from };
     },
     day: (windowMs = DAY_HOURS * HOUR) => day.read(windowMs),
+    /** Whether any turn runs now: cheap enough to ask before each file the storage walk reads. */
+    running(): boolean { sweep(now()); return live.size > 0; },
     live(): LiveTurnView[] {
       const at = now();
       sweep(at);

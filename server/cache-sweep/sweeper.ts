@@ -96,6 +96,8 @@ export function createCacheSweeper(deps: CacheSweeperDeps) {
     return state!;
   };
   const save = async () => { if (state) await writeFile(stateFile, JSON.stringify(state)).catch(() => {}); };
+  // Read now, so the storage report has the counters without waiting for a pass.
+  void load();
 
   /** The checked roots, and the units in each. */
   const roots = async (scope: "tools" | "app" | "all") => {
@@ -228,6 +230,8 @@ export function createCacheSweeper(deps: CacheSweeperDeps) {
       return serial(() => clearScope(options.scope ?? "all", dryRun, "cleared on request"));
     },
     /** For the storage report and the admin API: the counters, and the last sweep's numbers. */
+    /** The counters for the storage report, without waiting: null until the state file is read (at start). */
+    counters: (): { cacheCleared: Cleared; emergency: State["emergency"] } | null => (state ? { cacheCleared: state.cleared, emergency: state.emergency } : null),
     /** Only a Cloud home has one: elsewhere the routes answer 404. */
     available: () => cloudRole(deps.env),
     report: async () => {

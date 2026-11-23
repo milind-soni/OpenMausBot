@@ -5,8 +5,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { StorageReport } from "../perf/disk-usage.ts";
 import { requiredScope } from "../request-auth.ts";
 import { CACHES_CLEAR_PATH, CACHES_PATH, createCachesRoutes } from "../routes/caches.ts";
+import { withCacheCounters } from "./host.ts";
 import { GIB, capBytes, cacheSweepOn, parseSize } from "./limits.ts";
 import { createCacheSweeper, mountKeepsAtime, type CacheSweeperDeps } from "./sweeper.ts";
 import { EVICTING_DIR, Pacer, checkRoot, evictingDir, listUnits, removeUnit } from "./units.ts";
@@ -354,6 +356,19 @@ describe("last use where the mount keeps access times", () => {
     expect(await made.sweep()).toMatchObject({ groups: { tools: { removed: 1 } } });
     expect(existsSync(join(f.tools, "pip", "a"))).toBe(true);
     expect(existsSync(join(f.tools, "uv"))).toBe(false);
+  });
+});
+
+describe("the storage report", () => {
+  it("carries the cleared counters once the sweeper has read them, and nothing before or without a report", async () => {
+    const f = fixture();
+    put(join(f.tools, "pip", "a"), 10, 3, f.tools);
+    const { made } = sweeper(f);
+    await made.clearCaches({ dryRun: false });
+    const report = { v: 1, at: 1 } as unknown as StorageReport;
+    expect(withCacheCounters(report, made)).toMatchObject({ at: 1, caches: { cacheCleared: { count: 1, entries: 1, at: NOW }, emergency: { count: 0 } } });
+    expect(withCacheCounters(null, made)).toBeNull();
+    expect(withCacheCounters(report, { counters: () => null })).toBe(report);
   });
 });
 

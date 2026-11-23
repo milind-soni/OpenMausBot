@@ -6,8 +6,15 @@ import { resolve } from "node:path";
 
 import { toolCachesOn } from "../bot-box/tool-caches.ts";
 import { audienceHomes } from "../engine-homes/layout.ts";
+import type { StorageReport } from "../perf/disk-usage.ts";
 import { botEngineSessions } from "../procs.ts";
 import { createCacheSweeper, mountKeepsAtime, volumeOf, type CacheSweeper } from "./sweeper.ts";
+
+/** The storage report with the cache cap's counters, once the sweeper has read them. */
+export function withCacheCounters(report: StorageReport | null, sweeper: Pick<CacheSweeper, "counters">): StorageReport | null {
+  const caches = sweeper.counters();
+  return report && caches ? { ...report, caches } : report;
+}
 
 /** An engine process of a bot's lives (a turn, or one kept warm between turns): the sweeper waits. */
 export const botEnginesLive = (): boolean => botEngineSessions().live.size > 0;
