@@ -10,6 +10,8 @@ import type { MemoryModelStatus } from "../../../shared/memory-model";
 const fixture = vi.hoisted(() => ({
   api: vi.fn(), dispatch: vi.fn(), journal: [] as unknown[], review: undefined as unknown,
   memoryModel: undefined as MemoryModelStatus | undefined,
+  upkeepFailed: false,
+  afterTidy: undefined as MemoryModelStatus | undefined,
 }));
 vi.mock("@/state/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/state/store")>()),
@@ -21,8 +23,12 @@ vi.mock("@/state/store", async (importOriginal) => ({
 }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => false, readAdvancedMode: () => false, setAdvancedMode: vi.fn() }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
+vi.mock("../DesktopCapabilities", () => ({
+  useDesktopCapabilities: () => ({ capabilities: { host: { homeDir: undefined, platform: "other" } } }),
+}));
 
 const { MemoryUpkeepCards } = await import("./MemoryUpkeepCards");
+const { MemorySection } = await import("../bot-settings/MemorySection");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement;
@@ -43,16 +49,28 @@ beforeEach(() => {
   fixture.journal = [];
   fixture.review = undefined;
   fixture.memoryModel = undefined;
+  fixture.upkeepFailed = false;
+  fixture.afterTidy = undefined;
   onChanged.mockClear();
   fixture.api.mockReset();
   fixture.api.mockImplementation(async (path: string, init?: RequestInit) => {
-    if (path.endsWith("/memory/upkeep")) return { enabled: true, modelSteps: true, memoryModel: fixture.memoryModel };
+    const overview = { index: { lines: 0, bytes: 0, maxLines: 200, maxBytes: 24_000, loadedLines: 0, loadedBytes: 0, truncated: false },
+      topics: [], logs: [], ...(fixture.review ? { lendingReview: fixture.review } : {}) };
+    if (path.endsWith("/memory/upkeep")) {
+      if (fixture.upkeepFailed) throw new Error("HTTP 503");
+      return { enabled: true, modelSteps: true, memoryModel: fixture.memoryModel };
+    }
     if (path === "/api/bots/scout" && init?.method === "PATCH") {
       fixture.memoryModel = JSON.parse(String(init.body)).memoryModel ?? { instanceId: "openrouter" };
       return { ok: true };
     }
     if (path.includes("/memory/journal?")) return { entries: fixture.journal };
-    if (path.endsWith("/memory")) return { index: {}, topics: [], logs: [], ...(fixture.review ? { lendingReview: fixture.review } : {}) };
+    if (path.endsWith("/memory")) return overview;
+    if (path.includes("/memory/file?")) return { path: "MEMORY.md", text: "", hash: "h" };
+    if (path.endsWith("/memory/tidy") && init?.method === "POST") {
+      fixture.memoryModel = fixture.afterTidy;
+      return { overview, report: { expired: 0, duplicates: 0, superseded: 0 } };
+    }
     return { ok: true };
   });
   host = document.createElement("div");
@@ -62,6 +80,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   host.remove();
+  vi.useRealTimers();
 });
 
 it("switches Memory upkeep off and shows no Changes before there are any", async () => {
@@ -85,6 +104,40 @@ it("keeps the selected model visible after fallback and saves an independent mem
   });
   expect(select.value).toBe("vendor/next");
   expect(host.querySelector('[data-panel-row="memory-model"] [role="status"]')).toBeNull();
+});
+
+it("does not read upkeep status again as minutes pass while the panel is open", async () => {
+  vi.useFakeTimers();
+  await render();
+  expect(fixture.api.mock.calls.filter(([path]) => path.endsWith("/memory/upkeep"))).toHaveLength(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
+  expect(fixture.api.mock.calls.filter(([path]) => path.endsWith("/memory/upkeep"))).toHaveLength(1);
+});
+
+it("shows a failed status read and lets the person retry", async () => {
+  fixture.upkeepFailed = true;
+  await render();
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("HTTP 503");
+  fixture.upkeepFailed = false;
+  fixture.memoryModel = { instanceId: "openrouter" };
+  const retry = [...host.querySelectorAll("button")].find((button) => /retry|try again/i.test(button.textContent ?? ""));
+  expect(retry).toBeDefined();
+  await act(async () => { retry?.click(); });
+  expect(host.querySelector('[data-panel-row="memory-model"] select')).not.toBeNull();
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+});
+
+it("updates the Advanced Memory model status as soon as Tidy up now completes", async () => {
+  const selection = { instanceId: "openrouter", model: "vendor/previous" };
+  fixture.memoryModel = { ...selection, last: { ...selection, state: "fallback", used: "vendor/auto" } };
+  fixture.afterTidy = { ...selection, last: { ...selection, state: "selected" } };
+  await act(async () => root.render(createElement(MemorySection, { bot, onToggle: vi.fn() })));
+  expect(host.querySelector('[data-panel-row="memory-model"] [role="status"]')?.textContent).toContain("used vendor/auto");
+  expect(fixture.api.mock.calls.filter(([path]) => path.endsWith("/memory/upkeep"))).toHaveLength(1);
+  const button = [...host.querySelectorAll("button")].find((item) => item.textContent === "Tidy up now")!;
+  await act(async () => { button.click(); });
+  expect(host.querySelector('[data-panel-row="memory-model"] [role="status"]')).toBeNull();
+  expect(fixture.api.mock.calls.filter(([path]) => path.endsWith("/memory/upkeep"))).toHaveLength(2);
 });
 
 it("undoes an upkeep change from Changes and shows the lending review until it is marked reviewed", async () => {

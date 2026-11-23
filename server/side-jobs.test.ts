@@ -590,18 +590,20 @@ describe("memory upkeep through the resolver", () => {
   it("persists the actual fallback model in the upkeep status for the configured choice", async () => {
     const { jobs, state } = setup();
     const selection = { instanceId: "openrouter", model: "vendor/memory" };
+    const automatic = "vendor/auto";
     state.bots.set(BOT.id, { ...bot(BOT.id, selection.instanceId), memoryModel: selection });
     const calls = vi.fn(async (prompt: string, options?: TextGenerationOptions) => {
       if (options?.model === selection.model) throw new ChatHttpError(404, "upstream HTTP 404: No endpoints for this model found.");
+      options?.checkModel?.(automatic);
       options?.onUsage?.({ model: "vendor/served" });
       return prompt.includes("CAPTURE step") ? facts : '{"moves": []}';
     });
     const own = state.instances.get(selection.instanceId)!;
-    state.instances.set(selection.instanceId, { ...own, openRouter: true, models: { default: "vendor/auto", options: [] }, generateText: calls });
+    state.instances.set(selection.instanceId, { ...own, openRouter: true, models: { default: automatic, options: [] }, generateText: calls });
     const service = upkeep(jobs);
 
     expect(await service.capture({ botId: BOT.id, threadId: "t1", turns })).toMatchObject({ added: 1 });
-    expect(calls.mock.calls.map(([, options]) => options?.model)).toEqual([selection.model, "vendor/auto"]);
+    expect(calls.mock.calls.map(([, options]) => options?.model)).toEqual([selection.model, undefined]);
     expect(upkeep(jobs).status(BOT.id).memoryModel).toEqual({ ...selection, last: { ...selection, state: "fallback", used: "vendor/served" } });
   });
 

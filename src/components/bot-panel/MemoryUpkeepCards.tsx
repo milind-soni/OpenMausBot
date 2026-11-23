@@ -5,6 +5,7 @@ import { fetchMemoryJournal, fetchMemoryOverview, markMemoryReviewed, revertMemo
 import { ApiError, type Bot } from "@/state/store";
 import { LendingReviewNotice, MemoryJournalList } from "../bot-settings/MemorySection";
 import { MemoryModelSetting } from "../bot-settings/MemoryModelSetting";
+import { useMemoryUpkeepStatus } from "../bot-settings/use-memory-upkeep-status";
 import { Card, SwitchRow } from "./rows";
 import { useStoreDispatch } from "@/state/store-select";
 
@@ -12,6 +13,7 @@ const SHOWN = 5;
 
 export function MemoryUpkeepCards({ bot, onChanged }: { bot: Bot; onChanged: () => Promise<void> }) {
   const dispatch = useStoreDispatch();
+  const upkeep = useMemoryUpkeepStatus(bot, bot.memoryUpkeep !== false);
   const [rows, setRows] = useState<MemoryJournalRow[]>([]);
   const [review, setReview] = useState<{ value: LendingReview; stale: boolean } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -62,7 +64,7 @@ export function MemoryUpkeepCards({ bot, onChanged }: { bot: Bot; onChanged: () 
           color={bot.color}
           onChange={() => dispatch({ type: "updateBot", botId: bot.id, patch: { memoryUpkeep: bot.memoryUpkeep === false } })}
         />
-        {bot.memoryUpkeep !== false && <MemoryModelSetting key={bot.id} bot={bot} />}
+        {bot.memoryUpkeep !== false && <MemoryModelSetting key={bot.id} bot={bot} upkeep={upkeep} />}
       </Card>
       {rows.length > 0 && (
         <Card label={t("memory.changes")}>

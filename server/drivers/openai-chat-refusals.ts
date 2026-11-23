@@ -42,6 +42,14 @@ export class ChatHttpError extends Error {
   }
 }
 
+export class ChatCompletionError extends ChatProtocolError {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
 /** The provider closed the stream with neither finish_reason nor [DONE]; resending repeats nothing. */
 export class StreamTruncatedError extends ChatProtocolError {}
 
@@ -110,7 +118,10 @@ export function completionError(json: ProviderBody, label: string): ChatProtocol
   if (!message) return null;
   const text = `provider returned a ${label}: ${message.slice(0, 200)}`;
   const refusal = toolCallRefusal(json.error);
-  return refusal ? new RejectedToolCallError(text, refusal) : new ChatProtocolError(text);
+  if (refusal) return new RejectedToolCallError(text, refusal);
+  const code = object(json.error)?.code;
+  const status = code === "rate_limit_exceeded" ? 429 : code;
+  return typeof status === "number" ? new ChatCompletionError(status, text) : new ChatProtocolError(text);
 }
 
 /** The data of an SSE `data:` line, or undefined for any other line. llama.cpp before b7200 (seen on b6500) refuses a

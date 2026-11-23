@@ -87,9 +87,10 @@ describe("the OpenRouter memory upkeep model", () => {
   const model = "deepseek/deepseek-v4.1-flash-1017";
   const selection = { instanceId: "openrouter", model };
 
-  async function memory(chat: (body: { model: string }) => Response) {
-    const { bodies } = stubOpenRouter({ freeTier: true, chat });
-    const instance = await openRouterInstance(fixtureKey());
+  async function memory(chat: (body: { model: string }) => Response, catalog?: { modelsReady: Promise<void>; rows: Row[] }) {
+    const { bodies } = stubOpenRouter({ freeTier: true, chat, ...catalog });
+    const instance = await createOpenRouter(fixtureKey());
+    if (!catalog) await instance.startupModelRefresh;
     const runs: MemoryModelRun[] = [];
     const book = vi.fn();
     const assertWithinBudget = vi.fn();
@@ -109,6 +110,57 @@ describe("the OpenRouter memory upkeep model", () => {
 
   const answer = (model: string) => Response.json({ model, choices: [{ message: { content: "remembered" } }],
     usage: { prompt_tokens: 10, completion_tokens: 2 } });
+
+  it("falls back to the live Automatic model when the saved model is refused before the catalog loads", async () => {
+    const models = gate();
+    const refused = gate();
+    const automatic = "google/gemma-4-31b-it:free";
+    const fixture = await memory(({ model: requested }) => {
+      if (requested === model) {
+        refused.release();
+        return Response.json({ error: { code: 404, message: `No endpoints found for ${model}.` } }, { status: 404 });
+      }
+      if (requested === automatic) return answer(automatic);
+      return Response.json({ error: { message: "Insufficient credits for the stale default" } }, { status: 402 });
+    }, { modelsReady: models.ready, rows: CATALOG.filter((row) => row.id !== PREFERRED) });
+    try {
+      const result = fixture.ask().catch((error: unknown) => error);
+      await refused.ready;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      models.release();
+      expect(await result).toBe("remembered");
+      expect(fixture.bodies.map(({ model }) => model)).toEqual([model, automatic]);
+      expect(fixture.runs).toEqual([{ ...selection, state: "fallback", used: automatic }]);
+    } finally {
+      models.release();
+      await fixture.instance.dispose();
+    }
+  });
+
+  it("reports a rate limit in an HTTP 200 error envelope without falling back", async () => {
+    const fixture = await memory(() => Response.json({ error: { code: 429, message: "Rate limit exceeded" } }));
+    try {
+      await expect(fixture.ask()).rejects.toThrow("Rate limit exceeded");
+      expect(fixture.bodies.map(({ model }) => model)).toEqual([model]);
+      expect(fixture.runs).toEqual([{ ...selection, state: "failed", reason: "rateLimit" }]);
+    } finally {
+      await fixture.instance.dispose();
+    }
+  });
+
+  it("stops when the connection's Automatic model is the same unavailable model", async () => {
+    const fixture = await memory(() => Response.json({ error: { code: 404, message: "No endpoints for this model found." } }, { status: 404 }),
+      { modelsReady: Promise.resolve(), rows: CATALOG.filter((row) => row.id === model) });
+    try {
+      await fixture.instance.startupModelRefresh;
+      expect(fixture.instance.models.default).toBe(model);
+      await expect(fixture.ask()).rejects.toThrow("HTTP 404");
+      expect(fixture.bodies.map(({ model }) => model)).toEqual([model]);
+      expect(fixture.runs).toEqual([{ ...selection, state: "failed", reason: "unavailable" }]);
+    } finally {
+      await fixture.instance.dispose();
+    }
+  });
 
   it("books the selected model and falls back once when OpenRouter explicitly has no endpoints for it", async () => {
     let available = true;

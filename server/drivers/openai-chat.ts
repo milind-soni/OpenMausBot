@@ -929,7 +929,6 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     })();
     return { turnId };
   };
-
   return {
     instanceId: input.instanceId,
     driverKind: options.driverKind,
@@ -983,8 +982,10 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         return () => listeners.delete(listener);
       },
     },
-    generateText: async (prompt, { signal, onUsage, model: named } = {}) => {
+    generateText: async (prompt, { signal, onUsage, model: named, checkModel } = {}) => {
       const model = named ?? options.generateModel?.() ?? options.models().default;
+      signal?.throwIfAborted();
+      checkModel?.(model);
       const { text, reasoning, toolCalls } = await complete([{ role: "user", content: prompt }], model, false, signal, undefined, [], onUsage);
       if (toolCalls.length) throw new ChatProtocolError("provider returned tool calls to a text-only helper");
       return text.trim() ? text : reasoning;

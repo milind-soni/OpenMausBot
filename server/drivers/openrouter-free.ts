@@ -5,6 +5,7 @@ import type { ModelCatalog, ProviderInstance } from "../contracts.ts";
 import { checkProviderKey } from "../provider-key-check.ts";
 import { httpStatusOf } from "./engine-errors.ts";
 import { ChatHttpError } from "./openai-chat-refusals.ts";
+import { waitForCatalog } from "./compat-reasoning.ts";
 
 /** Free models that call tools well, best first; when none is listed, the first free tool-capable model wins. */
 export const FREE_MODEL_PREFERENCE: readonly string[] = [
@@ -140,7 +141,10 @@ export function withOpenRouterTurns(instance: ProviderInstance, loading: Promise
     : event));
   if (generate) {
     instance.generateText = async (prompt, options) => {
-      if (!options?.model) await settled();
+      if (!options?.model) {
+        if (options?.checkModel) await waitForCatalog(loading, options.signal ?? AbortSignal.timeout(FIRST_TURN_WAIT_MS));
+        else await settled();
+      }
       return generate(prompt, options);
     };
   }

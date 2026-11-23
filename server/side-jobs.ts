@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { helperModelAllowed } from "../shared/wire.ts";
 import type { MemoryModelFailure, MemoryModelOutcome, MemoryModelRun, MemoryModelSelection, MemoryModelStatus } from "../shared/memory-model.ts";
-import { ChatHttpError } from "./drivers/openai-chat-refusals.ts";
+import { ChatCompletionError, ChatHttpError } from "./drivers/openai-chat-refusals.ts";
 import { openRouterModelUnavailable } from "./drivers/openrouter-free.ts";
 import { backgroundTextSlots, type JobSlots } from "./job-slots.ts";
 import type { ProviderAdapter, ProviderInstance, SmallModelFallback, TextGenerationOptions } from "./contracts.ts";
@@ -109,7 +109,7 @@ const SEEN_SOON: ReadonlySet<SideJob> = new Set(["setup-suggestions"]);
 function memoryModelFailure(error: unknown): MemoryModelFailure {
   if (error instanceof DOMException && error.name === "TimeoutError") return "timeout";
   if (error instanceof Error && "code" in error && error.code === "spend_cap") return "budget";
-  if (error instanceof ChatHttpError) {
+  if (error instanceof ChatHttpError || error instanceof ChatCompletionError) {
     switch (error.status) {
       case 401: return "authentication";
       case 402: return "credits";
@@ -161,12 +161,16 @@ export function createSideJobs(deps: SideJobsDeps): SideJobs {
   /** Every call checks the spend limit: one upkeep pass makes several in a row. */
   const booked = (job: SideJob, bot: SideJobBot, instance: SideJobInstance, call: TextCall, trigger: UsageTrigger, fixed: () => TextGenerationOptions): SideJobText["generateText"] =>
     async (prompt, options) => {
-      deps.assertWithinBudget();
+      const { checkModel, ...generation } = fixed();
+      if (!checkModel) deps.assertWithinBudget();
       const threadId = `${job}-${randomUUID()}`;
-      const generation = fixed();
       return call(prompt, {
         ...options,
         ...generation,
+        ...(checkModel ? { checkModel: (model: string) => {
+          checkModel(model);
+          deps.assertWithinBudget();
+        } } : {}),
         onUsage: (usage) => {
           deps.book({
             botId: bot.id,
@@ -212,20 +216,19 @@ export function createSideJobs(deps: SideJobsDeps): SideJobs {
           report({ state: "failed", reason: memoryModelFailure(error) });
           throw error;
         }
-        const fallback = own.models.default;
-        if (!stillSelected() || !fallback || fallback === selected.model || !allowed(fallback)) {
-          report({ state: "failed", reason: "unavailable" });
-          throw error;
-        }
-        let used = fallback;
+        let used: string | undefined;
         try {
           const answer = await booked("memory", bot, own, call, trigger, () => ({
-            model: fallback, onUsage: (usage) => { used = usage.model; },
+            checkModel: (model) => {
+              if (!stillSelected() || !model || model === selected.model || !allowed(model)) throw error;
+              used = model;
+            },
+            onUsage: (usage) => { used = usage.model; },
           }))(prompt, options);
-          if (!options.signal?.aborted) report({ state: "fallback", used });
+          if (!options.signal?.aborted && used) report({ state: "fallback", used });
           return answer;
         } catch (fallbackError) {
-          if (!options.signal?.aborted) report({ state: "failed", reason: memoryModelFailure(fallbackError) });
+          if (!options.signal?.aborted) report({ state: "failed", reason: fallbackError === error ? "unavailable" : memoryModelFailure(fallbackError) });
           throw fallbackError;
         }
       }

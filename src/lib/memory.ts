@@ -144,8 +144,8 @@ export function noticedCount(report: CaptureReport | undefined): number {
   return report ? report.added + (report.topics ?? 0) : 0;
 }
 
-export function fetchUpkeepStatus(botId: string): Promise<UpkeepStatus> {
-  return api(`/api/bots/${botId}/memory/upkeep`);
+export function fetchUpkeepStatus(botId: string, signal?: AbortSignal): Promise<UpkeepStatus> {
+  return api(`/api/bots/${botId}/memory/upkeep`, { signal });
 }
 
 export interface LendingReview {
