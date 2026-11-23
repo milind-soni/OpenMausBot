@@ -9957,6 +9957,8 @@
   "palette.bots": "机器人",
   "palette.groups": "群组",
   "palette.messages": "消息",
+  "palette.commands": "命令",
+  "palette.toggleTheme": "切换浅色/深色",
   "settings.profile.awayEmails": "我不在时给我发邮件",
   "settings.section.vault": "保险库",
   "settings.simple.group.typing": "语言和输入",
