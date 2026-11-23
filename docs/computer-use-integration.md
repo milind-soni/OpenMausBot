@@ -109,6 +109,33 @@ GNOME/Wayland additionally requires WinRects v8 plus the exact Cua health-report
   and `?Privacy_ScreenCapture`). Expect macOS 15's ~monthly screen-recording
   re-prompt; the `persistent-content-capture` entitlement is Apple-gated and
   not realistically available to us.
+- Computer use has two macOS tiers. **macOS 15 or later** runs the pinned
+  0.45.4 `cua-driver` and SDK: `libcua_driver_sdk.dylib` declares `minos 13.0`
+  in `otool -l`, but the SDK links ScreenCaptureKit strongly and names
+  `SCScreenshotManager` (macOS 14) and `SCRecordingOutput` (macOS 15), so dyld
+  cannot load it below 15. **macOS 12.3 through 14.x** runs the in-tree helper
+  `electron/resources/cua-mac12/`: one Objective-C daemon, built for
+  `*-apple-macos12.3`, with no ScreenCaptureKit and no Swift. It serves
+  `get_window_state` (accessibility tree with `element_token`s plus a
+  screenshot), `click`, `type_text`, `press_key`, `hotkey`, `scroll`, `drag`,
+  window and app lists, `launch_app`, `bring_to_front`, and
+  `check_permissions`; `browser_*` tools and video recording are not part of
+  it, so website work stays on the bot's own browser tools. **Below macOS
+  12.3** `startCua` reports `computer use needs macOS 12.3 or later` and the
+  panel offers no grant repair. `CUA_MIN_MACOS` and `LEGACY_MIN_MACOS` in
+  `electron/cua-min-macos.mjs` are those floors and `macDriverKind()` picks the
+  driver; `scripts/prepare-cua.mjs` still fails the build when a staged CUA
+  file needs more than `CUA_MIN_MACOS`, and skips executing the pinned binary
+  only on legacy macOS. `minos` alone cannot see the CUA failure: when bumping
+  `@trycua/cua-driver`, check `otool -L | grep ScreenCaptureKit` for `(weak)`
+  and the `nm -u` class list.
+- Ship the helper the same way, as a loose executable: `scripts/build-cua-mac12.mjs`
+  compiles both slices, asserts `minos` 12.3 and no `libswift`, ad-hoc signs,
+  and stages it to `dist-native/${arch}/cua-mac12`; electron-builder copies it
+  to `Contents/Resources/cua-mac12/`, outside the ASAR. The release re-signs it
+  with our Team ID alongside `cua-driver` before notarizing. It has no app
+  bundle and no bundle id of its own, so Accessibility and Screen Recording
+  grants attach to OpenMausBot, the identity that spawns it.
 
 ### MCP exposure: the official `cua-driver mcp` proxy (no custom proxy)
 

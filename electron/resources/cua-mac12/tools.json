@@ -1,0 +1,1052 @@
+{
+  "tools": [
+    {
+      "name": "get_screen_size",
+      "description": "Return the main display size in screen points and pixels.",
+      "inputSchema": {
+        "properties": {
+          "session": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_desktop_state",
+      "description": "Capture the whole desktop, frontmost app, and screen size.",
+      "inputSchema": {
+        "properties": {
+          "max_image_dimension": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "screenshot_out_file": {
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "list_windows",
+      "description": "List windows with window_id, pid, app, title, bounds, layer and on-screen state.",
+      "inputSchema": {
+        "properties": {
+          "app": {
+            "type": "string"
+          },
+          "on_screen_only": {
+            "type": "boolean"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "session": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "list_apps",
+      "description": "List running apps with pid, name, bundle id, active and hidden state.",
+      "inputSchema": {
+        "properties": {
+          "session": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "launch_app",
+      "description": "Launch an app by name or bundle id, or open URLs.",
+      "inputSchema": {
+        "properties": {
+          "additional_arguments": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "bundle_id": {
+            "type": "string"
+          },
+          "creates_new_application_instance": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          },
+          "urls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "webkit_inspector_port": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    {
+      "name": "bring_to_front",
+      "description": "Activate an app and optionally raise one of its windows. This takes focus.",
+      "inputSchema": {
+        "properties": {
+          "pid": {
+            "type": "integer"
+          },
+          "session": {
+            "type": "string"
+          },
+          "window_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pid"
+        ]
+      }
+    },
+    {
+      "name": "get_window_state",
+      "description": "Read a window’s accessibility tree and screenshot. Every element line carries an element_token for click, type_text, set_value and hotkey. Prefer tokens over coordinates.",
+      "inputSchema": {
+        "properties": {
+          "capture_mode": {
+            "enum": [
+              "ax",
+              "vision"
+            ],
+            "type": "string"
+          },
+          "display_only": {
+            "type": "boolean"
+          },
+          "full_output": {
+            "type": "boolean"
+          },
+          "include_accessibility_tree": {
+            "type": "boolean"
+          },
+          "include_screenshot": {
+            "type": "boolean"
+          },
+          "max_depth": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_dimension": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_elements": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_image_dimension": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "query": {
+            "type": "string"
+          },
+          "screenshot_format": {
+            "enum": [
+              "png",
+              "jpeg"
+            ],
+            "type": "string"
+          },
+          "screenshot_out_file": {
+            "type": "string"
+          },
+          "screenshot_quality": {
+            "maximum": 95,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "session": {
+            "type": "string"
+          },
+          "since": {
+            "type": "string"
+          },
+          "timeout_ms": {
+            "default": 1000,
+            "maximum": 120000,
+            "minimum": 100,
+            "type": "integer"
+          },
+          "tree_format": {
+            "enum": [
+              "markdown",
+              "elements",
+              "both"
+            ],
+            "type": "string"
+          },
+          "verbose": {
+            "type": "boolean"
+          },
+          "window_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pid",
+          "window_id"
+        ]
+      }
+    },
+    {
+      "name": "get_accessibility_tree",
+      "description": "Read the frontmost app’s accessibility tree.",
+      "inputSchema": {
+        "properties": {
+          "session": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "click",
+      "description": "Click an element token or a screen point. Background by default; foreground only when the person asked.",
+      "inputSchema": {
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "button": {
+            "enum": [
+              "left",
+              "right",
+              "middle"
+            ],
+            "type": "string"
+          },
+          "capture_id": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "debug_image_out": {
+            "type": "string"
+          },
+          "delivery_mode": {
+            "enum": [
+              "background",
+              "foreground"
+            ],
+            "type": "string"
+          },
+          "element_token": {
+            "type": "string"
+          },
+          "from_zoom": {
+            "type": "boolean"
+          },
+          "modifier": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "post_action_wait": {
+            "enum": [
+              "default",
+              "none"
+            ],
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "window",
+              "desktop"
+            ],
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          },
+          "target": {
+            "type": "object"
+          },
+          "window_id": {
+            "type": "integer"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "double_click",
+      "description": "Double-click an element token or a screen point.",
+      "inputSchema": {
+        "properties": {
+          "delivery_mode": {
+            "enum": [
+              "background",
+              "foreground"
+            ],
+            "type": "string"
+          },
+          "element_token": {
+            "type": "string"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "post_action_wait": {
+            "enum": [
+              "default",
+              "none"
+            ],
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          },
+          "window_id": {
+            "type": "integer"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "right_click",
+      "description": "Right-click an element token or a screen point.",
+      "inputSchema": {
+        "properties": {
+          "delivery_mode": {
+            "enum": [
+              "background",
+              "foreground"
+            ],
+            "type": "string"
+          },
+          "element_token": {
+            "type": "string"
+          },
+          "modifier": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "post_action_wait": {
+            "enum": [
+              "default",
+              "none"
+            ],
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          },
+          "window_id": {
+            "type": "integer"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "drag",
+      "description": "Drag from one screen point to another.",
+      "inputSchema": {
+        "properties": {
+          "button": {
+            "enum": [
+              "left",
+              "right",
+              "middle"
+            ],
+            "type": "string"
+          },
+          "delivery_mode": {
+            "enum": [
+              "background",
+              "foreground"
+            ],
+            "type": "string"
+          },
+          "duration_ms": {
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "from_x": {
+            "type": "number"
+          },
+          "from_y": {
+            "type": "number"
+          },
+          "from_zoom": {
+            "type": "boolean"
+          },
+          "modifier": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "post_action_wait": {
+            "enum": [
+              "default",
+              "none"
+            ],
+            "type": "string"
+          },
+          "scope": {
+            "default": "window",
+            "enum": [
+              "window",
+              "desktop"
+            ],
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          },
+          "steps": {
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "target": {
+            "type": "object"
+          },
+          "to_x": {
+            "type": "number"
+          },
+          "to_y": {
+            "type": "number"
+          },
+          "window_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "from_x",
+          "from_y",
+          "to_x",
+          "to_y"
+        ]
+      }
+    },
+    {
+      "name": "scroll",
+      "description": "Scroll up, down, left or right by lines or pages.",
+      "inputSchema": {
+        "properties": {
+          "amount": {
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "by": {
+            "enum": [
+              "line",
+              "page"
+            ],
+            "type": "string"
+          },
+          "delivery_mode": {
+            "enum": [
+              "background",
+              "foreground"
+            ],
+            "type": "string"
+          },
+          "direction": {
+            "enum": [
+              "up",
+              "down",
+              "left",
+              "right"
+            ],
+            "type": "string"
+          },
+          "element_token": {
+            "type": "string"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "post_action_wait": {
+            "enum": [
+              "default",
+              "none"
+            ],
+            "type": "string"
+          },
+          "scope": {
+            "default": "window",
+            "enum": [
+              "window",
+              "desktop"
+            ],
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          },
+          "target": {
+            "type": "object"
+          },
+          "window_id": {
+            "type": "integer"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "direction"
+        ]
+      }
+    },
+    {
+      "name": "type_text",
+      "description": "Type text. With an element_token, focus that element first; otherwise type into the focused app.",
+      "inputSchema": {
+        "properties": {
+          "delay_ms": {
+            "maximum": 200,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "delivery_mode": {
+            "enum": [
+              "background",
+              "foreground"
+            ],
+            "type": "string"
+          },
+          "element_token": {
+            "type": "string"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "post_action_wait": {
+            "enum": [
+              "default",
+              "none"
+            ],
+            "type": "string"
+          },
+          "scope": {
+            "default": "window",
+            "enum": [
+              "window",
+              "desktop"
+            ],
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          },
+          "target": {
+            "type": "object"
+          },
+          "text": {
+            "type": "string"
+          },
+          "window_id": {
+            "type": "integer"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      }
+    },
+    {
+      "name": "press_key",
+      "description": "Press one named key or character with optional modifiers.",
+      "inputSchema": {
+        "properties": {
+          "delivery_mode": {
+            "enum": [
+              "background",
+              "foreground"
+            ],
+            "type": "string"
+          },
+          "element_token": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "modifiers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "post_action_wait": {
+            "enum": [
+              "default",
+              "none"
+            ],
+            "type": "string"
+          },
+          "scope": {
+            "default": "window",
+            "enum": [
+              "window",
+              "desktop"
+            ],
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          },
+          "target": {
+            "type": "object"
+          },
+          "window_id": {
+            "type": "integer"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      }
+    },
+    {
+      "name": "hotkey",
+      "description": "Press a chord such as command+s; the last key is the main key.",
+      "inputSchema": {
+        "properties": {
+          "delivery_mode": {
+            "enum": [
+              "background",
+              "foreground"
+            ],
+            "type": "string"
+          },
+          "element_token": {
+            "type": "string"
+          },
+          "keys": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 2,
+            "type": "array"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "post_action_wait": {
+            "enum": [
+              "default",
+              "none"
+            ],
+            "type": "string"
+          },
+          "scope": {
+            "default": "window",
+            "enum": [
+              "window",
+              "desktop"
+            ],
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          },
+          "target": {
+            "type": "object"
+          },
+          "window_id": {
+            "type": "integer"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "keys"
+        ]
+      }
+    },
+    {
+      "name": "set_value",
+      "description": "Replace the accessibility value of an element token.",
+      "inputSchema": {
+        "properties": {
+          "element_token": {
+            "type": "string"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "post_action_wait": {
+            "enum": [
+              "default",
+              "none"
+            ],
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "window_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "value"
+        ]
+      }
+    },
+    {
+      "name": "move_cursor",
+      "description": "Move the cursor to a screen point.",
+      "inputSchema": {
+        "properties": {
+          "cursor_id": {
+            "type": "string"
+          },
+          "delivery_mode": {
+            "enum": [
+              "background",
+              "foreground"
+            ],
+            "type": "string"
+          },
+          "scope": {
+            "default": "window",
+            "enum": [
+              "window",
+              "desktop"
+            ],
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          },
+          "target": {
+            "type": "object"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ]
+      }
+    },
+    {
+      "name": "get_cursor_position",
+      "description": "Return the cursor position in screen points.",
+      "inputSchema": {
+        "properties": {
+          "session": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "zoom",
+      "description": "Crop a region of a window screenshot.",
+      "inputSchema": {
+        "properties": {
+          "pid": {
+            "type": "integer"
+          },
+          "session": {
+            "type": "string"
+          },
+          "window_id": {
+            "type": "integer"
+          },
+          "x1": {
+            "type": "number"
+          },
+          "x2": {
+            "type": "number"
+          },
+          "y1": {
+            "type": "number"
+          },
+          "y2": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "window_id",
+          "x1",
+          "y1",
+          "x2",
+          "y2"
+        ]
+      }
+    },
+    {
+      "name": "check_permissions",
+      "description": "Report Accessibility and Screen Recording grants.",
+      "inputSchema": {
+        "properties": {
+          "probe_direct_capture": {
+            "type": "boolean"
+          },
+          "prompt": {
+            "default": false,
+            "type": "boolean"
+          },
+          "session": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "start_session",
+      "description": "Session bookkeeping; return the session id/state.",
+      "inputSchema": {
+        "properties": {
+          "capture_scope": {
+            "enum": [
+              "auto",
+              "window",
+              "desktop"
+            ],
+            "type": "string"
+          },
+          "cursor_motion": {
+            "type": "object"
+          },
+          "cursor_theme": {
+            "type": "object"
+          },
+          "session": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "end_session",
+      "description": "Session bookkeeping; return the session id/state.",
+      "inputSchema": {
+        "properties": {
+          "session": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_session_state",
+      "description": "Session bookkeeping; return the session id/state.",
+      "inputSchema": {
+        "properties": {
+          "session": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "escalate_session",
+      "description": "Session bookkeeping; return the session id/state.",
+      "inputSchema": {
+        "properties": {
+          "detail": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "ax_tree_pixel_mismatch",
+              "background_delivery_failed",
+              "foreground_ineffective",
+              "no_window_target",
+              "other"
+            ],
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "reason"
+        ]
+      }
+    },
+    {
+      "name": "get_agent_cursor_state",
+      "description": "Accepted no-op: returns enabled:false.",
+      "inputSchema": {
+        "properties": {
+          "session": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session"
+        ]
+      }
+    },
+    {
+      "name": "set_agent_cursor_enabled",
+      "description": "Accepted no-op: returns enabled:false.",
+      "inputSchema": {
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "session": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "enabled"
+        ]
+      }
+    },
+    {
+      "name": "set_agent_cursor_motion",
+      "description": "Accepted no-op: returns success.",
+      "inputSchema": {
+        "properties": {
+          "arc_flow": {
+            "type": "number"
+          },
+          "arc_size": {
+            "type": "number"
+          },
+          "dwell_after_click_ms": {
+            "type": "number"
+          },
+          "effects": {
+            "type": "object"
+          },
+          "end_handle": {
+            "type": "number"
+          },
+          "glide_duration_ms": {
+            "type": "number"
+          },
+          "idle_hide_ms": {
+            "type": "number"
+          },
+          "session": {
+            "type": "string"
+          },
+          "spring": {
+            "type": "number"
+          },
+          "start_handle": {
+            "type": "number"
+          },
+          "style": {
+            "enum": [
+              "signature_arc",
+              "spring_settle",
+              "magnetic",
+              "comet_swoop",
+              "adaptive",
+              "classic"
+            ],
+            "type": "string"
+          },
+          "timing": {
+            "enum": [
+              "native",
+              "fitts",
+              "fixed",
+              "relaxed",
+              "steady",
+              "calm",
+              "deliberate"
+            ],
+            "type": "string"
+          },
+          "turn_radius": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "session"
+        ]
+      }
+    }
+  ]
+}

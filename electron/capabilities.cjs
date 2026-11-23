@@ -68,11 +68,13 @@ function linuxLocalControlSupport(platform, env, { hyprlandPlugin } = {}) {
   });
 }
 
-/** macOS 12 and older (Darwin before 22): the driver is built for macOS 13 and fails to load, so it is never tried there. */
+/** macOS below 12.3 (Darwin before 21.4): no driver runs there — cua-driver needs 15 and the in-tree helper needs 12.3 — so
+ * it is never tried, and ask_for_computer can say why. */
 function macDriverUnsupported(platform, release) {
-  const darwinMajor = Number(String(release).split(".")[0]);
-  if (platform !== "darwin" || !darwinMajor || darwinMajor >= 22) return null;
-  return { reasonCode: "macos-version-unsupported", reason: "Local desktop control needs macOS 13 Ventura or later." };
+  const [darwinMajor, darwinMinor = 0] = String(release).split(".").map(Number);
+  if (platform !== "darwin" || !darwinMajor) return null;
+  if (darwinMajor > 21 || (darwinMajor === 21 && darwinMinor >= 4)) return null;
+  return { reasonCode: "macos-version-unsupported", reason: "Local desktop control needs macOS 12.3 or later." };
 }
 
 /** Computer control's helper is gone, or the system refused to run it: access denied (os error 5), or Windows Security

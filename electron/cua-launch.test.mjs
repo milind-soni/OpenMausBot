@@ -1,12 +1,17 @@
 import { once } from "node:events";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import os, { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { localComputerReady } from "./capabilities.cjs";
 
 const fixture = vi.hoisted(() => ({ home: "", script: "", socketReady: false, children: [], calls: [], embeddedDelays: [], hosts: [], hostOptions: [], handlers: new Map() }));
-vi.mock("electron", () => ({ app: { isPackaged: false, getPath: () => fixture.home }, ipcMain: { handle: (name, handler) => fixture.handlers.set(name, handler) } }));
+vi.mock("electron", () => ({
+  app: { isPackaged: false, getPath: () => fixture.home, getAppPath: () => process.cwd() },
+  ipcMain: { handle: (name, handler) => fixture.handlers.set(name, handler) },
+  systemPreferences: { isTrustedAccessibilityClient: () => true, getMediaAccessStatus: () => "granted" },
+}));
 vi.mock("@trycua/cua-driver/embedded", () => ({
   EmbeddedCuaDriverHost: class {
     constructor() { this.delay = fixture.embeddedDelays.shift(); fixture.hosts.push(this); }
@@ -102,7 +107,65 @@ afterEach(async () => {
   rmSync(fixture.home, { recursive: true, force: true });
 });
 
-describe.skipIf(process.platform !== "darwin")("async standalone CUA launch (isolated commands)", () => {
+// Darwin 20 is macOS 11, below the helper's 12.3 floor: nothing launches.
+it("skips computer use below macOS 12.3 before launching anything", async () => {
+  const platform = Object.getOwnPropertyDescriptor(process, "platform");
+  const release = vi.spyOn(os, "release").mockReturnValue("20.6.0");
+  try {
+    Object.defineProperty(process, "platform", { ...platform, value: "darwin" });
+    await expect(cua.startCua()).resolves.toEqual({
+      mode: "unavailable",
+      reasonCode: "macos-version-unsupported",
+      reason: "Local desktop control needs macOS 12.3 or later.",
+    });
+    expect(fixture.hosts).toHaveLength(0);
+    expect(fixture.calls).toHaveLength(0);
+  } finally {
+    Object.defineProperty(process, "platform", platform);
+    release.mockRestore();
+  }
+});
+
+// Darwin 21 is macOS 12: the pinned driver cannot load there, so the in-tree helper serves the socket instead.
+it("starts the in-tree helper on macOS 12.3–14 and publishes an embedded descriptor", async () => {
+  const platform = Object.getOwnPropertyDescriptor(process, "platform");
+  const release = vi.spyOn(os, "release").mockReturnValue("21.6.0");
+  const binary = join(fixture.home, "cua-driver-mac12");
+  writeFileSync(binary, `#!/bin/sh
+if [ "$1" = "serve" ]; then
+  while [ $# -gt 0 ]; do
+    if [ "$1" = "--socket" ]; then socket="$2"; fi
+    shift
+  done
+  : > "$socket"
+  exec sleep 30
+fi
+echo '{"accessibility":true,"screen_recording":true}'
+`, { mode: 0o755 });
+  vi.stubEnv("OPENMAUSBOT_CUA_MAC12_BINARY", binary);
+  try {
+    Object.defineProperty(process, "platform", { ...platform, value: "darwin" });
+    const connection = await cua.startCua();
+    const socketPath = join(fixture.home, "cua-mac12.sock");
+    expect(connection).toMatchObject({
+      mode: "embedded",
+      socketPath,
+      mcpCommand: binary,
+      mcpArgs: ["mcp", "--socket", socketPath],
+    });
+    expect(connection.generation).toMatch(/^mac12-/);
+    expect(localComputerReady("darwin", connection)).toBe(true);
+    fixture.script = "console.log(JSON.stringify({ accessibility: true, screen_recording: true }))";
+    await expect(cua.cuaPermissionsStatus()).resolves.toEqual({ available: true, accessibility: true, screen_recording: true });
+    expect(fixture.calls.at(-1)).toMatchObject({ command: binary, args: ["permissions", "status", "--json"] });
+  } finally {
+    Object.defineProperty(process, "platform", platform);
+    release.mockRestore();
+  }
+});
+
+// Darwin 24 is macOS 15: an older Mac stops at the gate before any of these launches.
+describe.skipIf(process.platform !== "darwin" || Number(os.release().split(".")[0]) < 24)("async standalone CUA launch (isolated commands)", () => {
   it("keeps the event loop responsive and publishes the existing descriptor shape", async () => {
     let ticks = 0;
     const timer = setInterval(() => ticks++, 10);
@@ -267,7 +330,7 @@ describe.skipIf(process.platform !== "darwin")("async standalone CUA launch (iso
 
 it("keeps the too-old-macOS reason when the person retries", async () => {
   vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
-  vi.spyOn(os, "release").mockReturnValue("21.6.0");
+  vi.spyOn(os, "release").mockReturnValue("21.3.0");
   try {
     cua.registerCuaIpc();
     const retry = fixture.handlers.get("cua:linux-retry");

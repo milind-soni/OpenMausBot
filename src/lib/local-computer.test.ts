@@ -314,6 +314,15 @@ describe("what the person reads about using this computer", () => {
     expect(reasons[6]).toBe("Bots can use this computer on Omarchy once its Hyprland add-on is installed and turned on. Open Local control for the steps.");
   });
 
+  it("names the macOS version when the Mac is too old, instead of asking for grants", () => {
+    const reason = localComputerDisabledReason({
+      capabilities: { host: host("darwin"), localComputer: { available: false, message: "computer use needs macOS 12.3 or later" } } as DesktopCapabilities,
+      providerSupportsLocal: true,
+    });
+    expect(reason).toBe("Bots can use this computer once it runs macOS 12.3 or later.");
+    expect(reason).not.toMatch(JARGON);
+  });
+
   it("keeps the same plain words in the questions and the place lines the app shows", () => {
     const shown = Object.entries(en as Record<string, string>).filter(([key]) =>
       key.startsWith("approval.yourComputer.") || key.startsWith("computer.problem.local") || key.startsWith("place.view.") || key.startsWith("place.action."));
