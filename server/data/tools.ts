@@ -488,16 +488,17 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
     const stem = tableNameFrom(base);
     const requested = nameInEmptyCatalog(base);
     const assigned = (name: string) => tables.some((table) => table.name === name);
-    const recordedSource = (candidate: string): boolean => {
-      const recorded = priorSources.find((entry) => entry.name === candidate);
-      if (!recorded || recorded.kind !== plan.kind || recorded.source !== plan.source) return false;
-      return !plan.attach || recorded.options?.table === sourceTable;
-    };
+    const recorded = priorSources.filter((entry) =>
+      entry.kind === plan.kind && entry.source === plan.source && (!plan.attach || entry.options?.table === sourceTable));
+    const recordedSource = (candidate: string) => recorded.some((entry) => entry.name === candidate);
+    const requestedReusable = !assigned(requested) && !blocked(requested)
+      && (!existing.has(fold(requested)) || (replace && (requested === stem || recordedSource(requested))));
     const open = (candidate: string, suffixed: boolean) => {
       if (assigned(candidate) || blocked(candidate)) return false;
       if (!existing.has(fold(candidate))) return true;
       if (!replace) return false;
-      return suffixed ? candidate === requested && recordedSource(candidate) : true;
+      if (!suffixed) return true;
+      return recordedSource(candidate) && (candidate === requested || (!requestedReusable && recorded.length === 1));
     };
     let name = stem;
     let suffixed = false;

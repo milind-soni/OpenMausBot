@@ -161,6 +161,28 @@ describe("distinct table names within one import", () => {
     expect(view?.error?.message).toContain("amount");
   });
 
+  it("reloads a file an invalid view displaced into the same suffixed table", async () => {
+    const ctx = await unboundView("view-reload-same-suffix");
+    const file = join(root, "sales-report-reload.csv");
+    writeFileSync(file, "id,name\n1,Alice\n");
+    const loaded = await runDataTool(ctx, "data_load", { source: file, name: "sales_report" });
+    expect(loaded.isError, loaded.content[0]?.text).toBeUndefined();
+    expect(loaded.structuredContent!.tables).toMatchObject([{ name: "sales_report_2" }]);
+    const before = (await ctx.database.listTables()).length;
+
+    writeFileSync(file, "id,name\n2,Bob\n");
+    const reloaded = await runDataTool(ctx, "data_load", { source: file, name: "sales_report", replace: true });
+    expect(reloaded.isError, reloaded.content[0]?.text).toBeUndefined();
+    expect(reloaded.structuredContent!.tables).toMatchObject([{ name: "sales_report_2", rowCount: 1 }]);
+    expect((await ctx.database.run("SELECT * FROM sales_report_2", { connection })).rows).toEqual([["2", "Bob"]]);
+    const tables = await ctx.database.listTables();
+    expect(tables).toHaveLength(before);
+    const view = tables.find((table) => table.name === "sales_report");
+    expect(view?.rowCount).toBeNull();
+    expect(view?.error).toMatchObject({ code: "sql_error" });
+    expect(view?.error?.message).toContain("amount");
+  });
+
   it("keeps a healthy sales_report_2 when an import asks for the unbound view with replace omitted", async () => {
     const ctx = await unboundView("view-suffix-occupied");
     await ctx.database.run("CREATE TABLE sales_report_2 AS SELECT 'kept' AS origin, 99 AS value", { connection });
