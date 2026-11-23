@@ -18,12 +18,13 @@ const CATALOG_PROBE_FOLDER = ["", "providers", "opencode", "discovery"].join(sep
 const turnCalls = (path: string) => jsonLines(path).filter((call) => !String(call.cwd ?? "").endsWith(CATALOG_PROBE_FOLDER));
 
 async function withRecoveryFixture(
-  options: { enabled?: boolean; method?: string; error?: unknown; afterOutput?: boolean; backupFails?: boolean; gated?: boolean; scripted?: boolean; codexBackup?: boolean },
+  options: { enabled?: boolean; quotaSwitch?: boolean; method?: string; error?: unknown; afterOutput?: boolean; backupFails?: boolean; gated?: boolean; scripted?: boolean; codexBackup?: boolean },
   check: (fixture: {
     api: (method: string, path: string, body?: unknown, expectedStatus?: number) => Promise<any>;
     control: (...args: string[]) => Promise<any>;
     calls: () => Array<{ pid: number; method: string }>;
     backupPrompts: () => any[];
+    codexPrompts: () => any[];
     backupReceipt: () => { argv: string[]; prompt: unknown; systemPrompt: string };
     dataDir: string; failureFile: string; gateFile: string; evidence: unknown[]; serverLog: () => string;
   }) => Promise<void>,
@@ -35,6 +36,7 @@ async function withRecoveryFixture(
   const gateFile = join(dataDir, "startup-release");
   const rpcFile = join(dataDir, "primary-rpc.jsonl");
   const backupFile = join(dataDir, "backup-prompts.jsonl");
+  const codexFile = join(dataDir, "codex-prompts.jsonl");
   const evidence: unknown[] = [{ url, options }];
   let server: ChildProcess | undefined;
   const api = async (method: string, path: string, body?: unknown, expectedStatus?: number) => {
@@ -74,6 +76,7 @@ async function withRecoveryFixture(
     config.instances.secondary = { ...config.instances.opencodeGo, displayName: "Second startup fixture" };
     if (options.codexBackup) config.instances.codex = {
       driver: "codex", config: { cli: fileURLToPath(new URL("./testing/fake-codex-app-server.ts", import.meta.url)) },
+      environment: { FAKE_CODEX_STARTUP_LOG: codexFile },
     };
     config.instances.claude.environment = {
       ...config.instances.claude.environment,
@@ -85,7 +88,7 @@ async function withRecoveryFixture(
     const log = openSync(logPath, "a", 0o600);
     server = spawn(process.execPath, ["--experimental-strip-types", fileURLToPath(new URL("./index.ts", import.meta.url))], {
       cwd: fileURLToPath(new URL("..", import.meta.url)),
-      env: verificationServerEnvironment({}, dataDir, Number(new URL(url).port)), stdio: ["ignore", log, log],
+      env: verificationServerEnvironment(options.quotaSwitch === false ? {} : { OMB_QUOTA_SWITCH: "1" }, dataDir, Number(new URL(url).port)), stdio: ["ignore", log, log],
     });
     closeSync(log);
     await expect.poll(async () => {
@@ -106,7 +109,7 @@ async function withRecoveryFixture(
     // model discovery the server runs while it starts.
     writeFileSync(failureFile, JSON.stringify(options.error ?? transient));
     await check({
-      api, control, calls: () => turnCalls(rpcFile), backupPrompts: () => jsonLines(backupFile),
+      api, control, calls: () => turnCalls(rpcFile), backupPrompts: () => jsonLines(backupFile), codexPrompts: () => jsonLines(codexFile).filter(call => call.event === "turn/start"),
       backupReceipt: () => {
         const { argv, prompt, systemPrompt } = JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8"));
         return { argv, prompt, systemPrompt };
@@ -379,6 +382,24 @@ it.each(["workspace", "bot"])("uses the configured %s backup when Claude refuses
     expect(after.tasks.find((task: any) => task.threadId === sibling.threadId).modelSelection).toEqual(backup);
     expect(after.tasks.find((task: any) => task.threadId === threadId))
       .toMatchObject({ modelSelection: healthy, approvalMode: "ask", busy: false });
+  });
+}, 90_000);
+
+it("leaves startup refusal on the original model without quota opt-in, even with backups configured", async () => {
+  await withRecoveryFixture({ quotaSwitch: false, backupFails: true, codexBackup: true }, async ({ api, control, backupPrompts, codexPrompts }) => {
+    const healthy = { instanceId: "codex", model: "gpt-fake-default" };
+    await api("PUT", "/api/config", { automaticRecovery: { enabled: true, backup: healthy } });
+    const { bot } = await control("new-bot", "--name", "Signed out without opt-in");
+    await api("PATCH", `/api/bots/${bot.id}`, { fallback: [healthy] });
+    await api("PATCH", `/api/bots/${bot.id}/tasks/${bot.activeTaskId}`, { modelSelection: backup, approvalMode: "ask" });
+    await control("send", "--bot", bot.id, "--text", "NO_STARTUP_SWITCH_8Y");
+    expect((await control("wait", "--bot", bot.id, "--timeout", "30")).status).toBe("failed");
+    expect(backupPrompts()).toHaveLength(1);
+    expect(codexPrompts()).toHaveLength(0);
+    const after = (await api("GET", "/api/bots")).bots.find((entry: any) => entry.id === bot.id);
+    expect(after.tasks.find((task: any) => task.threadId === bot.activeTaskId).modelSelection).toEqual(backup);
+    const { messages } = await control("messages", "--bot", bot.id, "--limit", "30");
+    expect(messages.some((message: any) => message.tool?.name?.includes("Not logged in"))).toBe(true);
   });
 }, 90_000);
 

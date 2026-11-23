@@ -19,7 +19,7 @@ const jsonLines = (path: string): any[] => existsSync(path)
   ? readFileSync(path, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
 
 async function withQuotaFixture(
-  options: { env?: Record<string, string>; otherSignInOnly?: boolean; action?: "read" | "write" | "unknown"; actionPrompt?: string },
+  options: { env?: NodeJS.ProcessEnv; otherSignInOnly?: boolean; action?: "read" | "write" | "unknown"; actionPrompt?: string },
   check: (fixture: {
     api: (method: string, path: string, body?: unknown) => Promise<any>;
     control: (...args: string[]) => Promise<any>;
@@ -76,7 +76,7 @@ async function withQuotaFixture(
   };
   const candidateRoot = fileURLToPath(new URL("..", import.meta.url));
   const start = async (root = candidateRoot, baseline = false) => {
-    const env = { ...verificationServerEnvironment({}, dataDir, port), ...options.env, ...(baseline ? { OMB_QUOTA_SWITCH: "0" } : {}) };
+    const env = { ...verificationServerEnvironment({}, dataDir, port), OMB_QUOTA_SWITCH: "1", ...options.env, ...(baseline ? { OMB_QUOTA_SWITCH: "0" } : {}) };
     const log = openSync(logPath, "a", 0o600);
     const args = verificationServerArgs(env);
     args[args.length - 1] = join(root, "server", "index.ts");
@@ -185,9 +185,9 @@ it("moves nothing when no backup is chosen, though another AI is set up: it says
   });
 }, 240_000);
 
-it("moves nothing when OMB_QUOTA_SWITCH=0 switches it off", async () => {
-  await withQuotaFixture({ env: { OMB_QUOTA_SWITCH: "0" } }, async ({ api, control, backupPrompts }) => {
-    const { bot, threadId, messages, state } = await meetTheLimit(api, control, "NO_MOVE_WHEN_OFF_2B");
+it.each([undefined, "0"])("does not switch with a configured backup when OMB_QUOTA_SWITCH is %s", async flag => {
+  await withQuotaFixture({ env: { OMB_QUOTA_SWITCH: flag } }, async ({ api, control, backupPrompts }) => {
+    const { bot, threadId, messages, state } = await meetTheLimit(api, control, "NO_MOVE_WHEN_OFF_2B", false, "codex");
     const mine = async () => (await api("GET", "/api/notifications")).notifications.filter((entry: any) => entry.kind === "notice" && entry.botId === bot.id);
     await expect.poll(async () => (await mine()).length, { timeout: 20_000 }).toBe(1);
     expect((await mine())[0].body).toMatch(/, so Out of quota waits.*: no backup you chose can take over\.$/);

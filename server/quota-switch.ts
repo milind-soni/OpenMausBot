@@ -84,10 +84,8 @@ export function turnLimitScope(event: SettledTurn, flags: { limit?: TakeoverScop
     : flags?.limit ?? (event.stopReason !== "tool_error" && classifyError({ text: cause ?? "" }).reason === "quota" ? "engine" : undefined);
 }
 
-/** On unless OMB_QUOTA_SWITCH=0: a limited AI's work carries on by itself with a backup the person chose (the bot's own,
- * then Automatic recovery's); with none usable the bot waits for the reset. Off, only Automatic recovery's backups take over. */
 export function quotaSwitchEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.OMB_QUOTA_SWITCH?.trim() !== "0";
+  return env.OMB_QUOTA_SWITCH?.trim() === "1";
 }
 
 const nameOf = (engine: QuotaSwitchEngine): string => engine.displayName || engine.driverKind;
@@ -234,7 +232,6 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
       const thread = store.projectBotForTask(bot.id, threadId) ?? bot;
       const from = thread.modelSelection;
       if (scope === "engine") limited.add(from.instanceId);
-      // OMB_QUOTA_SWITCH=0: nothing carries on by itself; the person still hears once that the bot waits.
       const { backups, skipped } = enabled() ? deps.takeover?.weighBackups(bot.id, from, scope, approvalModeFor(thread)) ?? { backups: [], skipped: [] } : { backups: [], skipped: [] };
       const resetsAt = scope === "signed-out" ? undefined : flags?.limitResetsAt;
       // A sign-out is told once, first and without a backup's name: what the person must do is sign in again.

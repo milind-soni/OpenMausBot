@@ -132,6 +132,7 @@ export interface VerificationServer {
  * on PATH, and nothing else from the parent shell or this machine's CLIs. */
 export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, dataDir: string, port: number): NodeJS.ProcessEnv {
   const childEnv: NodeJS.ProcessEnv = {};
+  if (parentEnv.OMB_QUOTA_SWITCH === "1") childEnv.OMB_QUOTA_SWITCH = "1";
   const platformKeys = new Set(["SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "TZ"]);
   for (const [key, value] of Object.entries(parentEnv)) {
     const normalized = key.toUpperCase();

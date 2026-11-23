@@ -17,7 +17,7 @@ type Room = { api: (method: string, path: string, body?: unknown) => Promise<any
 /** One room with one member on fake Claude, whose every turn its usage limit refuses, and fake Codex beside it. */
 async function withLimitedRoom(choose: (f: { api: (method: string, path: string, body?: unknown) => Promise<any>; bot: any; codex: { instanceId: string; model: string } }) => Promise<void>,
   check: (f: Room) => Promise<void>) {
-  const fixture = await launchVerificationServer({}, undefined, undefined, undefined, undefined, { scripted: true }, ["codex"]);
+  const fixture = await launchVerificationServer({ OMB_QUOTA_SWITCH: "1" }, undefined, undefined, undefined, undefined, { scripted: true }, ["codex"]);
   const { url, dataDir, logPath } = fixture.info;
   const evidence: unknown[] = [{ url }];
   const cli = (...args: string[]) => runControlOmb([...args, "--url", url]) as Promise<any>;

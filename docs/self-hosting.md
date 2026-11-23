@@ -1490,10 +1490,9 @@ it in plain words. It is a usage limit when its words say so, or when it is a
 a shorter wait is a rate limit to try again after. A reply that only quotes
 such an error among other words stays a reply.
 
-This is on by default. Start the server with `OMB_QUOTA_SWITCH=0` to switch it
-off: then only the backups Automatic recovery names take over, and the
-notification says the bot waits. Any other value, or none, leaves it on. It
-has no setting in `config.json` yet.
+Automatic model switching is off by default. To opt in, launch the server
+with `OMB_QUOTA_SWITCH=1`. This includes switching to an Automatic recovery
+backup after a startup refusal. There is no setting in `config.json`.
 
 ### When an engine is signed out
 
@@ -1505,7 +1504,8 @@ later refused turn still shows that it failed, with no second notice; its
 Chief gets one incident, not one a turn. An account out of credit, which some
 engines stop the same way, is no sign-out.
 
-The backups a turn its AI never started would get carry on meanwhile (the
+When automatic switching is enabled, the backups a turn its AI never started
+would get carry on meanwhile (the
 bot's own backup AIs, or else the app-wide backup while Automatic recovery is
 on), by the same rules as a usage limit (another sign-in to the same AI is fine
 here, since nothing is rotated around a limit): the person's message is sent

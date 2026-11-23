@@ -31,20 +31,18 @@ function engine(instanceId: string, driverKind: string, displayName: string, ove
 describe("quotaSwitchEnabled", () => {
   afterEach(() => rmSync(DATA_DIR, { recursive: true, force: true }));
 
-  it("is on unless OMB_QUOTA_SWITCH=0 switches it off", () => {
-    // On by default: the card is only an offer, and nothing changes until it is answered.
-    expect(quotaSwitchEnabled({})).toBe(true);
-    expect(quotaSwitchEnabled({ OMB_QUOTA_SWITCH: "0" })).toBe(false);
-    expect(quotaSwitchEnabled({ OMB_QUOTA_SWITCH: " 0 " })).toBe(false);
-    for (const other of ["1", "", "false", "off", "no"]) expect(quotaSwitchEnabled({ OMB_QUOTA_SWITCH: other }), JSON.stringify(other)).toBe(true);
+  it("is off by default and requires explicit opt-in", () => {
+    expect(quotaSwitchEnabled({})).toBe(false);
+    for (const flag of ["1", " 1 "]) expect(quotaSwitchEnabled({ OMB_QUOTA_SWITCH: flag })).toBe(true);
+    for (const flag of ["0", " 0 ", "", "false", "off", "no", "true"]) {
+      expect(quotaSwitchEnabled({ OMB_QUOTA_SWITCH: flag }), JSON.stringify(flag)).toBe(false);
+    }
   });
 
-  it("takes nothing from config.json, which has no key for it", () => {
-    // A key the config schema does not know is not a setting: the next save
-    // through that schema may drop it, and the offer would come back unasked.
+  it("does not accept opt-in from config.json", () => {
     mkdirSync(DATA_DIR, { recursive: true });
-    writeFileSync(join(DATA_DIR, "config.json"), JSON.stringify({ quotaSwitch: { enabled: false } }));
-    expect(quotaSwitchEnabled({})).toBe(true);
+    writeFileSync(join(DATA_DIR, "config.json"), JSON.stringify({ quotaSwitch: { enabled: true } }));
+    expect(quotaSwitchEnabled({})).toBe(false);
   });
 });
 
