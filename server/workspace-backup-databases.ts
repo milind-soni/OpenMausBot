@@ -30,19 +30,25 @@ export async function snapshotDatabases(root: string, snapshot: string): Promise
   for (const [name, snapshotName] of Object.entries(SNAPSHOT_DATABASES)) {
     const sourceDb = join(root, name);
     if (!existsSync(sourceDb)) continue;
-    if (lstatSync(sourceDb).isSymbolicLink()) throw new Error(`The ${LABELS[name]} database must not be a symbolic link.`);
-    // Another connection may open this database meanwhile; without a busy timeout the backup fails at once ("database is locked").
-    const db = new DatabaseSync(sourceDb, { readOnly: true, timeout: 5_000 });
-    // Node 26's native backup completion can wait on unrelated event-loop activity after an async scrypt; this pulse keeps it moving.
-    const completionPulse = setInterval(() => {}, 25);
-    // In one step: a backup in steps starts again whenever another connection writes between them, and a writer that keeps
-    // writing would keep it from ever finishing. SQLite reads -1 as every page, but Node 24.22 refuses a rate under 1, so
-    // the step is the largest rate Node takes, more pages than any database here holds.
-    try { await backup(db, join(snapshot, snapshotName), { rate: ONE_STEP }); }
-    finally { clearInterval(completionPulse); db.close(); }
-    const snapshotDb = new DatabaseSync(join(snapshot, snapshotName));
-    try { snapshotDb.exec("PRAGMA journal_mode = DELETE"); } finally { snapshotDb.close(); }
+    await snapshotDatabase(root, name, join(snapshot, snapshotName));
   }
+}
+
+/** One moment of the database `name` in `root`, written to `destination` in DELETE mode. */
+export async function snapshotDatabase(root: string, name: string, destination: string): Promise<void> {
+  const sourceDb = join(root, name);
+  if (lstatSync(sourceDb).isSymbolicLink()) throw new Error(`The ${LABELS[name] ?? name} database must not be a symbolic link.`);
+  // Another connection may open this database meanwhile; without a busy timeout the backup fails at once ("database is locked").
+  const db = new DatabaseSync(sourceDb, { readOnly: true, timeout: 5_000 });
+  // Node 26's native backup completion can wait on unrelated event-loop activity after an async scrypt; this pulse keeps it moving.
+  const completionPulse = setInterval(() => {}, 25);
+  // In one step: a backup in steps starts again whenever another connection writes between them, and a writer that keeps
+  // writing would keep it from ever finishing. SQLite reads -1 as every page, but Node 24.22 refuses a rate under 1, so
+  // the step is the largest rate Node takes, more pages than any database here holds.
+  try { await backup(db, destination, { rate: ONE_STEP }); }
+  finally { clearInterval(completionPulse); db.close(); }
+  const snapshotDb = new DatabaseSync(destination);
+  try { snapshotDb.exec("PRAGMA journal_mode = DELETE"); } finally { snapshotDb.close(); }
 }
 
 /** An older backup's raw WAL goes into its database before the restore installs it, so the restored folder holds one
