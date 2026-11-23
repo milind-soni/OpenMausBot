@@ -3,7 +3,7 @@ import { TeamAudienceLabel } from "./TeamSideSwitch";
 import { useComposerDictation } from "@/lib/use-composer-dictation";
 import { ComposerForkError, useComposerFork } from "./ComposerFork";
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
-import { Mic, Square, X } from "lucide-react";
+import { Mic, Square } from "lucide-react";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { useStoreRef } from "@/state/store-ref"; import { sameDrawnBots } from "@/lib/drawn-bots";
 import { visibleMessages, currentTaskBot, type Bot, type Group, type InstanceInfo, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -36,7 +36,7 @@ import {
   type FailedComposerSend,
 } from "@/lib/drafts";
 import { DEVS_CHOICE, MentionMenu, teammateChoices, type MentionChoice } from "./MentionMenu"; import { useTeammates } from "@/state/team-people"; import { hiddenFromSidebar, useViewerEmail } from "@/lib/default-bot"; import { useMayAct } from "./SharedQueueLine";
-import { SlashCommandMenu } from "./SlashCommandMenu";
+import { SlashCommandMenu } from "./SlashCommandMenu"; import { ComposerFailedSends } from "./ComposerFailedSends";
 import { MentionTextarea } from "./MentionTextarea";
 import { ComposerAttachments, pathForFile } from "./ComposerAttachments";
 import { PointedChips } from "./app/PointedChips"; import { SetupRequestChip, setupRequestPlaceholder } from "./SetupOffer";
@@ -716,34 +716,7 @@ export function Composer({
       )}
       <div className="pointer-events-auto relative w-full">
         {fork.error && <ComposerForkError message={fork.error} onRetry={() => { inputRef.current?.focus(); send(); }} />}
-        {failedSends.map((failed) => (
-          <div
-            key={failed.id}
-            className="mb-2 flex items-center gap-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[13px] text-danger"
-          >
-            <span className="min-w-0 flex-1 truncate">
-              {t("composer.failed.notSent", {
-                text: failed.text.trim() || t("composer.failed.attachment"),
-              })}
-            </span>
-            <button
-              type="button"
-              onClick={() => retryFailedSend(failed)}
-              className="shrink-0 rounded px-2 py-1 font-medium hover:bg-danger/10"
-            >
-              {t("chat.retry")}
-            </button>
-            <button
-              type="button"
-              onClick={() => forgetFailedComposerSend(draftId, failed.id)}
-              aria-label={t("composer.failed.dismissAria")}
-              title={t("composer.failed.dismiss")}
-              className="flex size-5 shrink-0 items-center justify-center rounded hover:bg-danger/10"
-            >
-              <X size={13} strokeWidth={2.5} />
-            </button>
-          </div>
-        ))}
+        <ComposerFailedSends draftId={draftId} failedSends={failedSends} onRetry={retryFailedSend} />
         <SlashCommandMenu listRef={commandListRef} motion={commandMotion} commands={commandCandidates} highlight={highlight}
           onPick={pickCommand} onHighlight={setHighlight} />
         <MentionMenu listRef={mentionListRef} motion={mentionMotion} choices={candidates} highlight={highlight}

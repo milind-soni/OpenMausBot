@@ -512,7 +512,7 @@ describe("pairing", () => {
       expect(JSON.stringify(config)).not.toContain("last4");
       expect(config.opencodeGo).toEqual({ configured: false, providerKeys: [] });
       expect(config.profile).toEqual({ name: "Updated fixture", email: "" });
-      expect(config.vps).toEqual({ configured: true, sshAlias: "", servers: [] });
+      expect(config.vps).toEqual({ configured: true, sshAlias: "", servers: [], memoryGb: 4, cpus: 2 });
       expect(JSON.stringify(config)).not.toContain("fixture-private-lab");
       expect(config.browserProfiles).toEqual([{ id: "fixture", name: "Fixture browser" }]);
     }
@@ -521,7 +521,7 @@ describe("pairing", () => {
       expect(config.savedKeys.openaiLiveKey).toEqual({ configured: true, last4: "b2c3" });
       expect(config.opencodeGo).toEqual({ configured: false, providerKeys: ["VENICE_API_KEY"] });
       expect(config.profile).toEqual({ name: "Updated fixture", email: "updated-private@example.invalid", aboutMe: "" });
-      expect(config.vps).toEqual({ configured: true, sshAlias: "fixture-private-host", servers: [{ name: "Fixture lab", sshAlias: "fixture-private-lab" }] });
+      expect(config.vps).toEqual({ configured: true, sshAlias: "fixture-private-host", servers: [{ name: "Fixture lab", sshAlias: "fixture-private-lab" }], memoryGb: 4, cpus: 2 });
       expect(config.browserProfiles).toEqual([{ id: "fixture", name: "Fixture browser", partitionId: "fixture-private-partition" }]);
     }
     try {

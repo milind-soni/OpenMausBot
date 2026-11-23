@@ -1,11 +1,24 @@
 // A loopback Boat stands in for the provider, for the Cloud's relay and for the sandbox that serves transfer links; every
 // folder is a fresh temporary one.
 import { randomBytes } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync, writeSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+const openedFiles = vi.hoisted(() => [] as { path: string; handle: import("node:fs/promises").FileHandle }[]);
+vi.mock("node:fs/promises", async (original) => {
+  const real = await original<typeof import("node:fs/promises")>();
+  return {
+    ...real,
+    open: async (...args: Parameters<typeof real.open>) => {
+      const handle = await real.open(...args);
+      openedFiles.push({ path: String(args[0]), handle });
+      return handle;
+    },
+  };
+});
 import type { AppConfig } from "./config.ts";
 
 const BOX = "bx_23456789";
@@ -31,6 +44,8 @@ let duringDownload: (() => void) | undefined;
 let midDownload: (() => Promise<void>) | undefined;
 /** Runs when the sandbox gets an upload's first bytes. */
 let onFirstUploadChunk: (() => void) | undefined;
+/** The sandbox refuses an upload before reading any of it. */
+let rejectUpload = false;
 /** Holds the sandbox's answer to a transfer until released. */
 let stall: Promise<void> | undefined;
 /** What the sandbox received for each upload, by path. */
@@ -69,6 +84,12 @@ async function sandbox(req: IncomingMessage, res: ServerResponse, url: URL) {
     return;
   }
   if (verb === "put" && req.method === "PUT") {
+    if (rejectUpload) {
+      res.writeHead(500);
+      res.end();
+      req.destroy();
+      return;
+    }
     let bytes = 0, chunks = 0, head = Buffer.alloc(0), tail = Buffer.alloc(0);
     for await (const part of req) {
       const chunk = part as Buffer;
@@ -129,6 +150,8 @@ beforeEach(() => {
   disk.clear();
   uploads.clear();
   expireLinks = false;
+  rejectUpload = false;
+  openedFiles.length = 0;
   mintAnswer = duringDownload = midDownload = onFirstUploadChunk = stall = undefined;
   root = mkdtempSync(join(tmpdir(), "omb-computer-files-"));
   folder = join(root, "folder");
@@ -136,7 +159,10 @@ beforeEach(() => {
   mkdirSync(folder);
   mkdirSync(outside);
 });
-afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+afterEach(async () => {
+  await Promise.all(openedFiles.splice(0).map((entry) => (entry.handle.fd === -1 ? undefined : entry.handle.close().catch(() => undefined))));
+  rmSync(root, { recursive: true, force: true });
+});
 afterAll(async () => {
   vi.unstubAllEnvs();
   server.closeAllConnections();
@@ -328,6 +354,30 @@ describe("copy_to_computer", () => {
     truncateSync(file, 2 * 1024 * MiB + 1);
     expect(await to("huge.bin", "/tmp/huge.bin")).toEqual({ error: expect.stringMatching(/^huge\.bin is 2\.0 GiB; a copy moves at most 2 GiB\./) });
     expect(calls).toEqual([]);
+  });
+
+  it("closes the source when the upload is refused before its body is read", async () => {
+    const source = join(folder, "notes.txt");
+    writeFileSync(source, "hello cloud\n");
+    rejectUpload = true;
+    openedFiles.length = 0;
+    const result = await to("notes.txt", "work/notes.txt");
+    expect(result).toEqual({ error: "The cloud computer answered 500 to the copy. Try again in a minute." });
+    const handle = openedFiles.find((entry) => entry.path === realpathSync(source))?.handle;
+    expect(handle).toBeDefined();
+    expect(handle!.fd).toBe(-1);
+  });
+
+  it("closes the source when the upload is aborted after reading begins", async () => {
+    const source = join(folder, "stream.bin");
+    writeFileSync(source, Buffer.alloc(256 * 1024, 0x62));
+    const controller = new AbortController();
+    onFirstUploadChunk = () => controller.abort();
+    openedFiles.length = 0;
+    await expect(files.copyToComputer(own, BOX, folder, { from: "stream.bin", path: "work/stream.bin" }, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+    const handle = openedFiles.find((entry) => entry.path === realpathSync(source))?.handle;
+    expect(handle).toBeDefined();
+    expect(handle!.fd).toBe(-1);
   });
 
   it("reads nothing outside the folder, under its secret folder, or that is not a file", async () => {

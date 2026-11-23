@@ -325,6 +325,20 @@ level under another name, not a separate permission setting, applies at once
 like Full access, and covers every model in that Antigravity instance,
 including Gemini.
 
+The native Antigravity CLI (1.5.0 and later) rejects `yolo` and `auto_edit`,
+so it stays in its `default` mode at every level and asks before each action.
+On Auto the app answers those requests itself, never-list commands excepted.
+On Auto-accept edits it answers a request only when it is a plain file edit
+inside the turn's folder: one that names a command, gives no location, or
+reaches outside that folder is asked as usual. A turn fails rather than start
+when the CLI offers no mode or does not confirm `default`.
+
+A computer that already has the pinned runtime keeps it. To move an
+Antigravity account to the native CLI, set its **CLI path** to `antigravity`
+and choose **Install official Antigravity**; to move back, set the CLI path to
+`agy`. New installs get the native CLI when Google's channel can be reached and
+the pinned runtime otherwise.
+
 A new Antigravity bot starts on Auto, the default. Old Antigravity
 `auto` / `autoApprove` settings still behave as Ask and are displayed as Ask;
 they never become unrestricted access on upgrade. Switching back to Ask
@@ -370,6 +384,7 @@ multi-question card renders its structured form on current apps instead.
 | Claude | Native `default` | Native `acceptEdits` | Native `auto` | Native `bypassPermissions` |
 | Cursor | Native default | not offered | Native `--auto-review` | Native `--force` |
 | Antigravity | Native `default` | Native `auto_edit` | Legacy `auto` behaves as Ask; UI Auto selects Full access | Native `yolo` plus automatic approval of remaining tool-permission requests; shown as Auto |
+| Antigravity (native CLI, 1.5.0 and later) | Native `default` | Native `default`; the app answers file edits inside the turn's folder itself | as Antigravity | Native `default`; the app answers every tool-permission request, never-list commands excepted; shown as Auto |
 | Grok Build | Native `default` | Native `acceptEdits` | Native `--permission-mode auto`; availability of Grok's reviewer depends on its feature rollout | Native `bypassPermissions` plus automatic approval of remaining tool-permission requests |
 | OpenCode | Ask | not offered | Ask | Approve individual ACP permission requests, never task questions |
 | Qwen Code | Native `default` | Native `--approval-mode auto-edit` | Native `--approval-mode auto` (Qwen's LLM classifier approves safe actions, blocks risky ones) | `--yolo`, plus automatic approval of remaining ACP permission requests |
@@ -385,6 +400,14 @@ to a different provider while on Custom requires leaving Custom first;
 choose Ask. Switching models within Antigravity keeps the selected level.
 Native modes require a CLI version that supports them; OpenMausBot does not
 silently substitute unrestricted access when a mode is rejected.
+
+On Linux, Codex's sandboxed modes (`Ask`, `Auto`, and `Custom` when configured
+with `workspace-write` or `read-only`) run shell commands in a user namespace
+where root-owned files (such as `/etc/ssh/ssh_config.d/*`) appear owned by
+`nobody` (uid 65534) and network access may be restricted. OpenSSH can reject
+those config files with `Bad owner or permissions on /etc/ssh/...`; use an
+approved escalation or `Full access` (`danger-full-access`) for `ssh` and
+`git`-over-SSH commands.
 
 ### Read-only integration tools
 
