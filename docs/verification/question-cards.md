@@ -75,6 +75,23 @@ Staff, hands Mira work. Expected:
   When a webhook starts Clive's turn, the question is not listed either. The person can still change Clive's
   answer on the card, and Mira gets a new turn with it.
 
+## A line typed in the bot's own chat while its card waits
+
+```sh
+pnpm exec vitest run server/question-card-typed-line.e2e.test.ts
+```
+
+One server of the person's own, no teammate handing work on. Expected:
+
+- With the scripted fake engine, a bot's `ask_user` card waits; a line the person types in that chat answers the card
+  (no steer): the line stays in the chat under the card (`replyToId`), the card reads as answered with the typed words,
+  and the bot's turn goes on with them, marked as typed in the chat instead of picked.
+- With the fake ACP CLI on a question of set options (the shape Antigravity asks with, an engine that takes no message
+  mid-turn), the typed line closes the card without the "isn't one of the choices" note, the turn ends with
+  `session/cancel`, and the line is the next prompt in the same conversation, without waiting for the card to expire.
+
+Stop, a line with a file or image, a reply to another line, rooms and work handed on keep their own paths.
+
 Unit tests for the relay's rules (which thread, which sender, sign-ins, work handed out this turn, an engine that cannot
 take a message mid-turn) are in `server/host/question-routing.test.ts`.
 
