@@ -54,6 +54,9 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // Node 25+ defines localStorage before happy-dom. Without this flag the getter
+    // shadows the DOM storage, so UI tests see an empty or missing store.
+    execArgv: ["--no-experimental-webstorage"],
     include,
     // OMB_VITEST_E2E=host (CI's Windows and macOS shards) leaves the e2e files that run on Linux only.
     exclude: [...configDefaults.exclude, ...(hostE2eOnly() ? portableE2eFiles(root, include) : [])],

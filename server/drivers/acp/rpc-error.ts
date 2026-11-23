@@ -1,7 +1,12 @@
 import { redactSecretsInText } from "../../redact.ts";
 
 /** The vendor's own message and the method we called, before redaction or any attached detail. */
-const resumeRefusal = new WeakMap<object, { message: string; method: string }>();
+const vendorFailures = new WeakMap<object, { message: string; method: string }>();
+
+/** The vendor's own message, without the method and detail acpRpcError adds to what is shown. */
+export function acpVendorMessage(error: unknown): string | undefined {
+  return error && typeof error === "object" ? vendorFailures.get(error)?.message : undefined;
+}
 
 /** Words around the id are case-insensitive. The captured id keeps the vendor's case. */
 const MISSING_SESSION_MESSAGE = /^\s*(?:invalid params:\s*)?session\s+"([^"]+)"\s+not found\b(?:\s*\(session\/(?:load|resume)\))?[\s.]*$/i;
@@ -24,7 +29,7 @@ export function acpRpcError(value: any, method: string): Error {
   const diagnostic = `${detail && detail !== message ? `${message}: ${detail}` : message} (${context})`;
   const shown = redactSecretsInText(diagnostic);
   const error = new Error(shown.slice(0, 1500));
-  resumeRefusal.set(error, { message, method });
+  vendorFailures.set(error, { message, method });
   return Object.assign(error, { code: value?.code, data, acpDiagnostic: shown,
     // -32603 is JSON-RPC's internal error; invalid params, unsupported methods and auth refusals keep the session.
     acpSessionFailure: value?.code === -32603,
@@ -39,7 +44,7 @@ export function acpMissingSession(error: unknown, cursor: string): boolean {
     const fields = data as Record<string, unknown>;
     if (fields.sessionId === cursor && Object.keys(fields).length === 1) return true;
   }
-  const refusal = record ? resumeRefusal.get(record) : undefined;
+  const refusal = record ? vendorFailures.get(record) : undefined;
   if (!refusal || (refusal.method !== "session/load" && refusal.method !== "session/resume")) return false;
   const named = refusal.message.match(MISSING_SESSION_MESSAGE);
   return named?.[1] === cursor;

@@ -386,6 +386,14 @@ choose Ask. Switching models within Antigravity keeps the selected level.
 Native modes require a CLI version that supports them; OpenMausBot does not
 silently substitute unrestricted access when a mode is rejected.
 
+On Linux, Codex's sandboxed modes (`Ask`, `Auto`, and `Custom` when configured
+with `workspace-write` or `read-only`) run shell commands in a user namespace
+where root-owned files (such as `/etc/ssh/ssh_config.d/*`) appear owned by
+`nobody` (uid 65534) and network access may be restricted. OpenSSH can reject
+those config files with `Bad owner or permissions on /etc/ssh/...`; use an
+approved escalation or `Full access` (`danger-full-access`) for `ssh` and
+`git`-over-SSH commands.
+
 ### Read-only integration tools
 
 OpenMausBot's built-in agents MCP server describes its scoped reads with
