@@ -26,7 +26,7 @@ import { botMemoryFiles, createLendingMemory } from "./lending-memory.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
 import { STATUS_REPLY_TIMEOUT_MS } from "./runtime/status-reply.ts"; import { createCoordinator, type ComposedTurn, type CoordinateBotsCall, type Coordinator, type HandoffOpener, type HandoffOptions, type HandoffView, type HostTurnResult } from "./coordinator.ts";
 import { queuedBehindPersonText, turnWaitedOnPerson, UnansweredApprovals } from "./waiting-on-person.ts";
-import { createPersonWaits } from "./host/person-waits.ts"; import { askToolName, closeCard, createAskCards, settleRequestCard, type Closing } from "./host/ask-cards.ts"; import { createQuestionRouting } from "./host/question-routing.ts"; import { workThreadFor } from "./host/work-thread.ts"; import { leaveThreadPost, postToThread, threadWaitsOn, unreadThreadPosts } from "./host/thread-posts.ts"; import { anyCardLive, closedByStop, resumableCards as cardsWaitedOn } from "./host/resumable-cards.ts"; import { createMcpChat } from "./host/mcp-chat.ts"; import { isCardOwnerLive, isMcpSignInCard } from "./host/mcp-sign-in-cards.ts"; import { createConnectCardSettle } from "./host/connect-card-settle.ts";
+import { createPersonWaits } from "./host/person-waits.ts"; import { askToolName, closeCard, createAskCards, settleRequestCard } from "./host/ask-cards.ts"; import { createQuestionRouting } from "./host/question-routing.ts"; import { workThreadFor } from "./host/work-thread.ts"; import { leaveThreadPost, postToThread, threadWaitsOn, unreadThreadPosts } from "./host/thread-posts.ts"; import { anyCardLive, closedByStop, resumableCards as cardsWaitedOn } from "./host/resumable-cards.ts"; import { createMcpChat } from "./host/mcp-chat.ts"; import { isCardOwnerLive, isMcpSignInCard } from "./host/mcp-sign-in-cards.ts"; import { createConnectCardSettle } from "./host/connect-card-settle.ts";
 import { assertRequestTarget, guardedRequestPath, requestConflict, requestNeedsInput } from "./guarded-requests.ts";
 import { botAvatarUrlFromStoredPath } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
@@ -4725,7 +4725,7 @@ onSteeredQueueChange(() => broadcast({ kind: "bot.queued", queues: publicBotQueu
 
 // Keyed by threadId: provider item and request ids are unique only within a thread.
 const toolMessageByItem = new Map<string, string>();
-const askMessageByRequest = new Map<string, string>(), closingRequests = new Map<string, Closing>();
+const askMessageByRequest = new Map<string, string>(), closingRequests = new Map<string, Promise<RequestOutcome>>();
 const unansweredApprovals = new UnansweredApprovals(); const approvalAsk = (botId: string | undefined, threadId: string, turnId: string | undefined): { approvalAsk?: string } => { const asked = botId ? unansweredApprovals.ask(threadId, turnId, store.bot(botId)?.name ?? "A teammate", threadLanguage(threadId)) : undefined; return asked ? { approvalAsk: asked } : {}; };
 // Only native, live permission metadata becomes a remembered grant, never an imported transcript or display summary.
 const pendingCommandRules = new Map<string, { botId: string; candidate: CommandAllowlistCandidate }>();
@@ -6599,7 +6599,7 @@ bus.subscribe((event: RuntimeEvent) => {
           if (event.source === "timeout") unansweredApprovals.record(event.threadId, event.turnId, existing.card.tool, existing.card.subtitle);
           else if (event.source !== "system" && event.source !== "unavailable") unansweredApprovals.answered(event.threadId, event.turnId, existing.card.tool, existing.card.subtitle);
         }
-        settleRequestCard(store, closingRequests, event, messageId);
+        settleRequestCard(store, event, messageId);
         if (event.requestId) askMessageByRequest.delete(`${event.threadId}:${event.requestId}`);
       }
       break;

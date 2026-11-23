@@ -73,38 +73,29 @@ const typedAnswer = (card: OptionCardData, text: string): string => {
 
 type Resolved = Extract<RuntimeEvent, { type: "request.resolved" }>;
 type CardStore = Pick<Store, "messagesFor" | "patchMessage">;
-/** A close on its way to one request: the outcome every send closing it shares, and a decline the engine settled meanwhile. */
-export interface Closing { outcome: Promise<RequestOutcome>; deferred?: Resolved }
 
-/** The card a request settled into. */
 export function resolvedCard(card: OptionCardData, resolved: Resolved): OptionCardData {
   const persistent = isPersistentQuestionCard(card);
   return { ...card, answered: resolved.behavior, dismissed: persistent ? false : resolved.source !== "user", ...(resolved.source === "timeout" && !persistent ? { expired: true } : {}) };
 }
 
-function patchOpenCard(store: CardStore, threadId: string, messageId: string, next: (card: OptionCardData) => OptionCardData | null): void {
-  const card = store.messagesFor(threadId).find((message) => message.id === messageId)?.card;
-  const settled = card && !card.answered ? next(card) : null;
-  if (settled) store.patchMessage(threadId, messageId, { card: settled });
-}
-
-/** Settles a card as its request resolved. A decline that lands while a close is on its way waits for the close's own
- * outcome, which alone tells whether that decline was the close's. */
-export function settleRequestCard(store: CardStore, closing: Map<string, Closing>, resolved: Resolved, messageId: string): void {
-  const inFlight = closing.get(`${resolved.threadId}:${resolved.requestId}`);
-  if (inFlight && resolved.behavior === "deny") inFlight.deferred = resolved;
-  else patchOpenCard(store, resolved.threadId, messageId, (card) => shouldSettleRequestCard(card, resolved.source) ? resolvedCard(card, resolved) : null);
+/** Settles a card as its request resolved, the moment it resolves: a decline a close sent included, which the close's
+ * own outcome then turns into closed without an answer. */
+export function settleRequestCard(store: CardStore, resolved: Resolved, messageId: string): void {
+  const card = store.messagesFor(resolved.threadId).find((message) => message.id === messageId)?.card;
+  if (card && !card.answered && shouldSettleRequestCard(card, resolved.source)) store.patchMessage(resolved.threadId, messageId, { card: resolvedCard(card, resolved) });
 }
 
 /** Declines a question the person moved past without an answer, once per request however many sends close it. An
- * outcome other than `unavailable` means the engine took this decline: the card reads closed without an answer, whatever
- * source the engine reported. Otherwise a tap, an explicit decline, Stop or the turn ending came first, and the card
- * settles as that resolution would have settled it; a decline that never landed leaves the card and the request alone. */
+ * outcome other than `unavailable` means the engine took this decline, so the refusal the card may already show was the
+ * close's: it reads closed without an answer, whatever source the engine reported. Otherwise a tap, an explicit decline,
+ * Stop or the turn ending came first and settled the card as usual; a decline that never landed leaves the card and the
+ * request alone. */
 export function closeCard(input: { store: CardStore; threadId: string; requestId: string; live: ReadonlyMap<string, string>;
-  closing: Map<string, Closing>; decline: () => Promise<RequestOutcome> }): Promise<RequestOutcome> {
+  closing: Map<string, Promise<RequestOutcome>>; decline: () => Promise<RequestOutcome> }): Promise<RequestOutcome> {
   const key = `${input.threadId}:${input.requestId}`;
   const running = input.closing.get(key);
-  if (running) return running.outcome;
+  if (running) return running;
   const messageId = input.live.get(key);
   if (!messageId) return Promise.resolve("unavailable");
   const close = async (): Promise<RequestOutcome> => {
@@ -116,13 +107,16 @@ export function closeCard(input: { store: CardStore; threadId: string; requestId
     } finally {
       input.closing.delete(key);
     }
-    if (outcome !== "unavailable") patchOpenCard(input.store, input.threadId, messageId, (card) => ({ ...card, answered: "unavailable", dismissed: true }));
-    else if (entry.deferred) settleRequestCard(input.store, input.closing, entry.deferred, messageId);
+    const card = input.store.messagesFor(input.threadId).find((message) => message.id === messageId)?.card;
+    if (outcome !== "unavailable" && card && (!card.answered || card.answered === "deny")) {
+      const { answeredBy: _refuser, ...open } = card;
+      input.store.patchMessage(input.threadId, messageId, { card: { ...open, answered: "unavailable", dismissed: true } });
+    }
     return outcome;
   };
-  const entry: Closing = { outcome: Promise.resolve().then(close) };
-  input.closing.set(key, entry);
-  return entry.outcome;
+  const outcome = Promise.resolve().then(close);
+  input.closing.set(key, outcome);
+  return outcome;
 }
 
 /** The reply up to its NEEDS INPUT line; empty when the line is the whole reply. */

@@ -5,7 +5,7 @@ import type { HandoffView } from "../coordinator.ts";
 import type { Notification } from "../notify.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { BotRecord, Message } from "../store.ts";
-import { askToolName, closeCard, createAskCards, settleRequestCard, type AskCardsDeps, type Closing } from "./ask-cards.ts";
+import { askToolName, closeCard, createAskCards, settleRequestCard, type AskCardsDeps } from "./ask-cards.ts";
 
 const AUTH = { kind: "session", scopes: ["client"], session: { id: "s", email: "cleo@acme.test" } } as unknown as RequestAuth;
 const QUESTION = "What wording should the new footer text use?";
@@ -567,10 +567,10 @@ describe("the chip in the conversation that handed the work on", () => {
 
 describe("closing a card the person moved past", () => {
   type Resolved = Extract<RuntimeEvent, { type: "request.resolved" }>;
-  /** Question cards in one chat, the live link of each, and an engine that takes a decline only once released. The
-   * request.resolved handler's own lookup of the link stays here: it finds the card and drops the link, then hands over. */
+  /** Question cards in one chat, the live link of each, and an engine that takes a decline only once released. `resolve`
+   * stands in for the request.resolved handler: it settles the card through the link, then drops the link. */
   const server = () => {
-    const rows: Message[] = [], live = new Map<string, string>(), closing = new Map<string, Closing>(), pending = new Set<string>();
+    const rows: Message[] = [], live = new Map<string, string>(), closing = new Map<string, Promise<RequestOutcome>>(), pending = new Set<string>();
     const store = {
       messagesFor: () => rows,
       patchMessage: (_threadId: string, id: string, patch: Partial<Message>) => {
@@ -590,7 +590,7 @@ describe("closing a card the person moved past", () => {
       pending.delete(requestId);
       const messageId = live.get(`chat:${requestId}`);
       if (!messageId) return;
-      settleRequestCard(store, closing, { type: "request.resolved", eventId: `e-${requestId}`, provider: "claude", createdAt: "0", threadId: "chat", requestId, behavior, source }, messageId);
+      settleRequestCard(store, { type: "request.resolved", eventId: `e-${requestId}`, provider: "claude", createdAt: "0", threadId: "chat", requestId, behavior, source }, messageId);
       live.delete(`chat:${requestId}`);
     };
     let release!: () => void;
@@ -606,7 +606,15 @@ describe("closing a card the person moved past", () => {
     };
     const close = (requestId: string, take: () => Promise<RequestOutcome>) =>
       closeCard({ store, threadId: "chat", requestId, live, closing, decline: take });
-    return { live, closing, declines, ask, card, resolve, release, decline, close };
+    // A newer question closes the older cards no turn waits on and nobody answered, as askedAgain does.
+    const askedAgain = (requestId: string) => {
+      for (const row of rows) {
+        if (row.card?.requestId && row.card.requestId !== requestId && !row.card.answered && !live.has(`chat:${row.card.requestId}`)) {
+          row.card = { ...row.card, answered: "unavailable", dismissed: true };
+        }
+      }
+    };
+    return { live, closing, declines, ask, askedAgain, card, resolve, release, decline, close };
   };
 
   it("reads closed without an answer once the engine took the decline, whatever source the engine reported", async () => {
@@ -632,12 +640,26 @@ describe("closing a card the person moved past", () => {
     expect(s.closing.size).toBe(0);
   });
 
-  it("keeps an explicit refusal that wins while the decline is on its way", async () => {
+  it("keeps an explicit refusal that wins while the decline is on its way, even when a newer question opens meanwhile", async () => {
     const s = server();
     s.ask("req-1");
     const closing = s.close("req-1", s.decline("req-1", { hold: true }));
     await Promise.resolve();
     s.resolve("req-1", "deny", "user");
+    s.ask("req-2");
+    s.askedAgain("req-2");
+    s.release();
+    expect(await closing).toBe("unavailable");
+    expect(s.card("req-1")).toMatchObject({ answered: "deny", dismissed: false });
+  });
+
+  it("takes no second answer for a question refused while the decline is on its way", async () => {
+    const s = server();
+    s.ask("req-1");
+    const closing = s.close("req-1", s.decline("req-1", { hold: true }));
+    await Promise.resolve();
+    s.resolve("req-1", "deny", "user");
+    expect(s.card("req-1"), "settled before the close returns").toMatchObject({ answered: "deny", dismissed: false });
     s.release();
     expect(await closing).toBe("unavailable");
     expect(s.card("req-1")).toMatchObject({ answered: "deny", dismissed: false });
