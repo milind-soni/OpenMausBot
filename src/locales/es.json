@@ -6462,5 +6462,9 @@
   "skillBurger.menu.aria": "Más de {name}",
   "skillBurger.menu.rename": "Cambiar nombre…",
   "skillBurger.card.everyChat": "Todos los chats",
-  "skillBurger.page.empty": "Aquí aparecen los Skill Burgers que hacen tus bots."
+  "skillBurger.page.empty": "Aquí aparecen los Skill Burgers que hacen tus bots.",
+  "chat.notice.savedToThread": "Guardado en este hilo",
+  "memoryPage.thisThread": "Este hilo",
+  "memoryPage.everywhere": "En todas partes",
+  "memoryPage.empty": "Aquí todavía no hay nada guardado. Escribe lo que quieras que sepa."
 }

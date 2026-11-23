@@ -4190,5 +4190,9 @@
   "skillBurger.menu.aria": "Mehr zu {name}",
   "skillBurger.menu.rename": "Umbenennen…",
   "skillBurger.card.everyChat": "Jeder Chat",
-  "skillBurger.page.empty": "Skill Burger deiner Bots erscheinen hier."
+  "skillBurger.page.empty": "Skill Burger deiner Bots erscheinen hier.",
+  "chat.notice.savedToThread": "In diesem Thread gespeichert",
+  "memoryPage.thisThread": "Dieser Thread",
+  "memoryPage.everywhere": "Überall",
+  "memoryPage.empty": "Hier ist noch nichts gespeichert. Schreib alles auf, was er wissen soll."
 }

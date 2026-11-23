@@ -3867,5 +3867,9 @@
   "skillBurger.menu.aria": "Plus pour {name}",
   "skillBurger.menu.rename": "Renommer…",
   "skillBurger.card.everyChat": "Chaque chat",
-  "skillBurger.page.empty": "Les Skill Burgers de vos bots apparaissent ici."
+  "skillBurger.page.empty": "Les Skill Burgers de vos bots apparaissent ici.",
+  "chat.notice.savedToThread": "Enregistré dans ce fil",
+  "memoryPage.thisThread": "Ce fil",
+  "memoryPage.everywhere": "Partout",
+  "memoryPage.empty": "Rien n'est encore retenu ici. Écrivez tout ce que vous voulez qu'il sache."
 }
