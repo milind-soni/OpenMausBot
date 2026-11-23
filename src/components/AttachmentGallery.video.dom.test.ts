@@ -30,7 +30,7 @@ describe("a chat video the player cannot decode", () => {
     expect(host.textContent).not.toContain("25 MB");
     await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Preview trip.mov"]')!.click());
     const video = host.querySelector("video")!;
-    expect(video.getAttribute("src")).toBe(url);
+    expect(video.getAttribute("src")).toBe(`${url}#t=0.001`);
 
     await act(async () => { video.dispatchEvent(new Event("error")); });
     expect(host.querySelector("video")).toBeNull();

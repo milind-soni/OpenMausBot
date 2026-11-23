@@ -240,21 +240,45 @@ export function previewTooLarge(bytes: number): Error {
   return Object.assign(new Error(message), { code: "file_too_large" });
 }
 
+/** A media fragment that makes the browser paint the clip's first frame as its picture before it plays. */
+function firstFrame(source: string): string {
+  return source.includes("#") ? source : `${source}#t=0.001`;
+}
+
+/** The tallest a clip's card grows; a portrait clip is as wide as this height allows, a landscape one up to the chat. */
+const VIDEO_MAX_HEIGHT = 480;
+
 function VideoAttachment({ file, message }: { file: GalleryFile; message: MessageAttachmentContext }) {
   const [preview, setPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [tooLarge, setTooLarge] = useState(false);
+  const [ratio, setRatio] = useState<number | null>(null);
   const request = useRef<AbortController | null>(null);
   const playButton = useRef<HTMLButtonElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const focusWhenLoaded = useRef(false);
   useEffect(() => () => request.current?.abort(), []);
   useEffect(() => {
-    if (preview) videoRef.current?.focus();
+    if (preview && focusWhenLoaded.current) videoRef.current?.focus();
     return () => { if (preview?.startsWith("blob:")) URL.revokeObjectURL(preview); };
   }, [preview]);
+  // A clip loads once its card scrolls into view, so its first frame shows without a click.
+  useEffect(() => {
+    const element = box.current;
+    if (!element || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      void load();
+    }, { rootMargin: "200px" });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
-  const load = async () => {
+  const load = async (focus = false) => {
+    focusWhenLoaded.current = focus;
     if (request.current) return;
     const controller = new AbortController();
     request.current = controller;
@@ -281,12 +305,16 @@ function VideoAttachment({ file, message }: { file: GalleryFile; message: Messag
     setPreview(null);
     setError("");
     setTooLarge(false);
+    setRatio(null);
     requestAnimationFrame(() => playButton.current?.focus());
   };
 
+  const shown = preview && !error ? ratio : null;
   return (
-    <div className="min-w-0 overflow-hidden rounded-xl border border-hairline/40 bg-inset/40">
-      <div className="relative flex aspect-[4/3] items-center justify-center bg-inset">
+    <div className="min-w-0 max-w-full overflow-hidden rounded-xl border border-hairline/40 bg-inset/40"
+      style={shown ? { width: `min(100%, ${Math.round(VIDEO_MAX_HEIGHT * shown)}px)` } : undefined}>
+      <div ref={box} className={cn("relative flex items-center justify-center bg-inset", !shown && "aspect-[4/3]")}
+        style={shown ? { aspectRatio: String(shown) } : undefined}>
         {preview && error ? (
           <div className="flex size-full flex-col items-center justify-center gap-2 p-3 text-center">
             <Film size={24} className="text-ink-tertiary" aria-hidden="true" />
@@ -299,13 +327,17 @@ function VideoAttachment({ file, message }: { file: GalleryFile; message: Messag
         ) : preview ? (
           <video
             ref={videoRef}
-            src={preview}
+            src={firstFrame(preview)}
             tabIndex={0}
             controls
             playsInline
             preload="metadata"
             aria-label={t("attach.previewVideo", { name: file.name })}
-            className="max-h-full max-w-full"
+            className="size-full object-contain"
+            onLoadedMetadata={(event) => {
+              const { videoWidth, videoHeight } = event.currentTarget;
+              setRatio(videoWidth > 0 && videoHeight > 0 ? videoWidth / videoHeight : null);
+            }}
             onError={() => setError(t("attach.videoUnavailable"))}
           />
         ) : (
@@ -313,7 +345,7 @@ function VideoAttachment({ file, message }: { file: GalleryFile; message: Messag
             ref={playButton}
             type="button"
             disabled={loading || tooLarge}
-            onClick={() => void load()}
+            onClick={() => void load(true)}
             aria-label={t("attach.previewVideo", { name: file.name })}
             className={`flex size-full flex-col items-center justify-center gap-2 p-3 text-center text-ink-secondary transition-colors hover:bg-raised/60 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 ${tooLarge ? "disabled:cursor-default" : "disabled:cursor-wait"} disabled:hover:bg-transparent`}
           >
