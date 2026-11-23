@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { readFileSync } from "node:fs";
-import { appPermissionAllowed, appPermissionHandlers, emailDraftUrl, externalLinkUrl, externalWebUrl, remoteClipboardWriteAllowed } from "./app-permissions.mjs";
+import { appPermissionAllowed, appPermissionHandlers, emailDraftUrl, externalLinkUrl, externalWebUrl, obsidianNoteUrl, remoteClipboardWriteAllowed } from "./app-permissions.mjs";
 import { boatClaimMailto } from "../src/lib/boat-offer.ts";
 import { cloudPlanSnapshot, createCloudAccountClient } from "./cloud-account.mjs";
 import { myCloudOrigin, rememberedCloudHome } from "./cloud-home.mjs";
@@ -94,6 +94,43 @@ test("an email link opens only as a draft to one address with a subject and a bo
     assert.throws(() => externalLinkUrl(url), /Only web/, url);
   for (const url of [null, 123, "not a url"])
     assert.throws(() => externalLinkUrl(url), /web address/);
+});
+
+test("an Obsidian link opens only a note in a named vault", () => {
+  for (const [link, opened] of [
+    ["obsidian://open?vault=botbrain&file=agents%2Fchief", "obsidian://open?vault=botbrain&file=agents%2Fchief"],
+    ["OBSIDIAN://open?vault=Bot%20Brain&file=agents%2FChief%20Notes%23Inbox", "obsidian://open?vault=Bot%20Brain&file=agents%2FChief%20Notes%23Inbox"],
+    ["obsidian://open?file=daily%2F2026-11-22.md&vault=botbrain", "obsidian://open?file=daily%2F2026-11-22.md&vault=botbrain"],
+    ["obsidian://open?vault=botbrain&file=C%2B%2B%20notes", "obsidian://open?vault=botbrain&file=C%2B%2B%20notes"],
+    ["obsidian://open?vault=botbrain", "obsidian://open?vault=botbrain"],
+    [" obsidian://open?vault=botbrain&file=agents%2Fbo ", "obsidian://open?vault=botbrain&file=agents%2Fbo"],
+  ]) assert.equal(externalLinkUrl(link), opened, link);
+
+  for (const link of ["obsidian://new?vault=botbrain&file=x&content=hi", "obsidian://search?vault=botbrain&query=x",
+    "obsidian://advanced-uri?vault=botbrain&commandid=editor%3Asave-file", "obsidian://choose-vault", "obsidian:///home/tyler/botbrain/note.md",
+    "obsidian://vault/botbrain/agents/chief", "obsidian://open/?vault=botbrain", "obsidian://open?vault=botbrain#x",
+    "obsidian://user@open?vault=botbrain", "obsidian:"])
+    assert.throws(() => externalLinkUrl(link), /only opens a note/, link);
+  for (const link of ["obsidian://open?path=%2Fhome%2Ftyler%2Fbotbrain", "obsidian://open?vault=botbrain&file=x&paneType=window",
+    "obsidian://open?vault=botbrain&vault=other", "obsidian://open?vault=botbrain&file=a&file=b", "obsidian://open?vault=botbrain&file=a=b",
+    "obsidian://open?vault=botbrain&&file=x", "obsidian://open?vault=botbrain&x-success=https%3A%2F%2Fexample.com"])
+    assert.throws(() => externalLinkUrl(link), /only a vault and a file/, link);
+  for (const link of ["obsidian://open", "obsidian://open?file=agents%2Fchief"])
+    assert.throws(() => externalLinkUrl(link), /names its vault/, link);
+  for (const link of ["obsidian://open?vault=botbrain&file=..%2F..%2F.ssh%2Fid_ed25519", "obsidian://open?vault=botbrain&file=agents%2F..%2F..%2Fx",
+    "obsidian://open?vault=botbrain&file=%2Fetc%2Fpasswd", "obsidian://open?vault=botbrain&file=%5C%5Cserver%5Cshare",
+    "obsidian://open?vault=botbrain&file=C%3A%5CUsers", "obsidian://open?vault=botbrain&file=~%2F.bashrc"])
+    assert.throws(() => externalLinkUrl(link), /inside its vault/, link);
+  for (const link of ["obsidian://open?vault=botbrain&file=", "obsidian://open?vault=%20&file=x", "obsidian://open?vault=botbrain&file=a%0Ab",
+    "obsidian://open?vault=botbrain&file=a%09b", "obsidian://open?vault=botbrain&file=a%0Db", "obsidian://open?vault=botbrain&file=a%7Fb",
+    "obsidian://open?vault=botbrain&file=%E0%A4%A", "obsidian://open?vault=botbrain&file=a+b"])
+    assert.throws(() => externalLinkUrl(link), /invalid/, link);
+  for (const link of ["obsidian://open?vault=botbrain&file=a\tb", "obsidian://open?vault=botbrain&file=a\rb", "obsidian://open?vault=botbrain&file=a\nb",
+    "obsidian://open?vault=bot\nbrain&file=x", "obsidian://op\ten?vault=botbrain", "obsidian://open?vault=botbrain&file=x\n"])
+    assert.throws(() => externalLinkUrl(link), /invalid/, JSON.stringify(link));
+  assert.throws(() => obsidianNoteUrl("https://example.com"), /Only Obsidian links/);
+  for (const link of ["obsidianx://open?vault=botbrain", "x-obsidian://open?vault=botbrain", "zotero://select/items/1", "vscode://file/etc/passwd"])
+    assert.throws(() => externalLinkUrl(link), /Only web/, link);
 });
 
 test("the app's claim to Boat opens exactly as the app drafts it", () => {

@@ -1912,7 +1912,9 @@ starts a walk.
   ends. The last pass is kept in the data folder's
   `cache/storage-report.json`, and the pass under way in
   `cache/storage-progress.json`, saved at most once a minute between two
-  folders of the top four levels. Backups leave both out. A home that sleeps
+  folders of the top four levels. Backups leave both out. Neither is read
+  back when it is over 1 MB, and every count read back is checked to be
+  10 PB at most. A home that sleeps
   by stopping keeps its report and picks the pass up where it left off.
   Node has no per-call I/O priority, and lowering the server's own priority
   would slow everything else, so the budget is the only throttle.

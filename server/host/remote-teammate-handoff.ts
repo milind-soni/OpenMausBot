@@ -33,6 +33,10 @@ const REPLY_CHARS = 20_000;
 const KEEP_MS = 30 * 24 * 60 * 60_000;
 /** The work thread of a hand-off with `thread: "new"` starts with this, after the teammate's address: it never goes on in an earlier conversation. */
 const NEW_THREAD = "new:";
+/** Rework sent to one teammate on another server under one request. Each round is a turn there on its owner's key and
+ * nothing there sees the loop, so a worker here and a checker there that never agree stop after this many. */
+export const REMOTE_REWORK_MAX = 4;
+const REWORK_KEPT_MS = 6 * 60 * 60_000;
 
 const conversationSchema = z.object({ teammate: z.string(), thread: z.string(), at: z.number() });
 const workSchema = z.object({
@@ -78,6 +82,7 @@ export function createRemoteHandoff(deps: RemoteHandoffDeps) {
   const send = deps.send ?? sendToRemote, read = deps.read ?? readRemote;
   const wait = deps.wait ?? ((ms: number, signal: AbortSignal) => delay(ms, undefined, { signal }));
   const now = deps.now ?? Date.now;
+  const reworkSent = new Map<string, { count: number; at: number }>();
   const teammateOf = (botId: string): RemoteTeammate | undefined => (isRemoteBotId(botId) ? deps.teammates.get(botId.slice(REMOTE_PREFIX.length)) : undefined);
   const nameOf = (botId: string) => teammateOf(botId)?.name ?? "Teammate";
 
@@ -135,6 +140,12 @@ export function createRemoteHandoff(deps: RemoteHandoffDeps) {
       const receipt = (outcome: PeerDeliveryReceipt["outcome"], detail: string, more: Partial<PeerDeliveryReceipt> = {}): PeerDeliveryReceipt => ({ botId, botName: teammate.name, outcome, detail: clip(detail, 400), ...more });
       const problem = unsupported(call, context);
       if (problem) { refused.push(problem); receipts.push(receipt("failed", problem)); continue; }
+      const reworkKey = call.rework ? `${coordinator.node(context.parentId ?? context.generation)?.rootId ?? context.address.threadId}\u0000${teammate.id}` : undefined;
+      for (const [key, entry] of reworkSent) if (now() - entry.at > REWORK_KEPT_MS) reworkSent.delete(key);
+      if (reworkKey && (reworkSent.get(reworkKey)?.count ?? 0) >= REMOTE_REWORK_MAX) {
+        const stop = `coordinate_bots was not run: this would be rework number ${REMOTE_REWORK_MAX + 1} sent to ${teammate.name} on another server for the same request, past the limit of ${REMOTE_REWORK_MAX}, so nothing was sent. Stop here: give the person the latest result and say what is still open, with ${teammate.name}'s last reply.`;
+        refused.push(stop); receipts.push(receipt("failed", stop)); continue;
+      }
       const threadId = `${botId}:${call.thread === "new" ? `${NEW_THREAD}${context.generation}:${receipts.length}` : context.address.threadId}`;
       try {
         const { node, duplicate } = coordinator.enqueue(context.address, context.generation, context.parentId, { botId, threadId }, call.message, {
@@ -144,6 +155,7 @@ export function createRemoteHandoff(deps: RemoteHandoffDeps) {
         receipts.push(receipt(duplicate && node.status !== "queued" ? "injected" : "queued",
           duplicate ? `already sent to ${teammate.name} on another server: ${returns}` : `sent to ${teammate.name} on another server; ${returns}.${files}`, { requestId: node.id }));
         if (!duplicate) context.handed(node.id);
+        if (reworkKey && !duplicate) reworkSent.set(reworkKey, { count: (reworkSent.get(reworkKey)?.count ?? 0) + 1, at: now() });
       } catch (error) {
         const said = error instanceof Error ? error.message : String(error);
         refused.push(said);

@@ -7,7 +7,8 @@
 // only when no turn started meanwhile, so a person who writes during a summary is not held up by it (the host may still
 // choose to wait for one when the turn would summarize anyway: server/warm-summary.ts).
 import type { CacheWarmPingResult, IdleCompactResult } from "../contracts.ts";
-import { type KeepWarmContract, runForkedPrompt, runKeepWarmPing } from "./claude-keepwarm.ts";
+import { readCostHistory, type ClaudeCostSnapshot } from "./claude-cost-history.ts";
+import { forkUsage, type KeepWarmContract, runForkedPrompt, runKeepWarmPing } from "./claude-keepwarm.ts";
 import { USAGE_LIMIT } from "./retry.ts";
 
 /** Writing the summary is most of it: thousands of output tokens, 35 to 60 s on Opus for a 160k conversation. */
@@ -23,12 +24,10 @@ export function warmSummaryPrompt(instructions: string): string {
   return line ? `/compact ${line}` : "/compact";
 }
 
-const count = (value: unknown): number => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
-
 /** The fork's session and usage, plus its running cost for the driver's cost history. */
 export type WarmSummaryRun = IdleCompactResult & { costTotal?: number; modelUsage?: unknown };
 
-export function parseWarmSummaryResult(stdout: string, stderr: string, code: number | null, sessionBefore: string): WarmSummaryRun {
+export function parseWarmSummaryResult(stdout: string, stderr: string, code: number | null, sessionBefore: string, earlier: readonly ClaudeCostSnapshot[] = []): WarmSummaryRun {
   let frame: Record<string, unknown> | null = null;
   try {
     const parsed = JSON.parse(stdout.trim());
@@ -47,18 +46,11 @@ export function parseWarmSummaryResult(stdout: string, stderr: string, code: num
   }
   const session = typeof frame.session_id === "string" && frame.session_id.trim() ? frame.session_id : null;
   if (!session) return { ok: false, reason: "the summary did not say which session it wrote" };
-  const usage = (frame.usage ?? {}) as Record<string, unknown>;
-  const models = frame.modelUsage && typeof frame.modelUsage === "object" && !Array.isArray(frame.modelUsage) ? Object.keys(frame.modelUsage) : [];
   return {
     ok: true,
     session,
     sessionBefore,
-    input: count(usage.input_tokens),
-    cacheRead: count(usage.cache_read_input_tokens),
-    cacheWrite: count(usage.cache_creation_input_tokens),
-    output: count(usage.output_tokens),
-    costUsd: typeof frame.total_cost_usd === "number" && Number.isFinite(frame.total_cost_usd) ? frame.total_cost_usd : null,
-    model: models[0] ?? null,
+    ...forkUsage(frame, earlier),
     ...(typeof frame.total_cost_usd === "number" ? { costTotal: frame.total_cost_usd } : {}),
     ...(frame.modelUsage !== undefined ? { modelUsage: frame.modelUsage } : {}),
   };
@@ -67,10 +59,11 @@ export function parseWarmSummaryResult(stdout: string, stderr: string, code: num
 export function runWarmSummary(opts: {
   cli: string; contract: KeepWarmContract; sessionId: string; instructions: string; signal?: AbortSignal; timeoutMs?: number;
 }): Promise<WarmSummaryRun> {
+  const earlier = readCostHistory()[opts.sessionId] ?? [];
   return runForkedPrompt<WarmSummaryRun>({
     cli: opts.cli, contract: opts.contract, sessionId: opts.sessionId, what: "summary", prompt: warmSummaryPrompt(opts.instructions),
     persist: true, timeoutMs: opts.timeoutMs ?? WARM_SUMMARY_TIMEOUT_MS, signal: opts.signal,
-    parse: (stdout, stderr, code) => parseWarmSummaryResult(stdout, stderr, code, opts.sessionId),
+    parse: (stdout, stderr, code) => parseWarmSummaryResult(stdout, stderr, code, opts.sessionId, earlier),
     failed: (reason) => ({ ok: false, reason }),
   });
 }

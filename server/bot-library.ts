@@ -5,6 +5,7 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 import { BOT_LIBRARY_MAX, type BotLibrary, type BotLibraryApp, type BotLibraryFileMessage, type BotLibraryPage } from "../shared/bot-library.ts";
 import { windowsPathDestinations } from "../shared/markdown-windows-paths.ts";
 import { prepared } from "./message-db.ts";
+import { LIBRARY_FILE_REPLY_FILTER } from "./message-db-bot-text-indexes.ts";
 import type { PublishedPageRecord } from "./pages/store.ts";
 
 /** Replies read for file links, newest first; most replies share nothing, so this reads well past the files shown. */
@@ -17,17 +18,18 @@ export interface BotLibraryRows {
 
 const IN_THREADS = "thread_id IN (SELECT value FROM json_each(?))";
 
+export const LIBRARY_FILE_REPLIES_SQL = `
+  SELECT thread_id AS threadId, id AS messageId, at, text, json_extract(json, '$.attachments') AS attachments FROM messages
+  WHERE ${IN_THREADS} AND ${LIBRARY_FILE_REPLY_FILTER}
+  ORDER BY at DESC, rowid LIMIT ?`;
+
 export const messageRows: BotLibraryRows = {
   apps: (threadIds, limit) => prepared(
     `SELECT thread_id AS threadId, id AS messageId, at, json_extract(json, '$.app.title') AS title FROM messages
      WHERE ${IN_THREADS} AND kind = 'app' AND coalesce(json_extract(json, '$.app.doc'), '') <> '' ORDER BY at DESC, rowid LIMIT ?`,
   ).all(JSON.stringify(threadIds), limit) as ReturnType<BotLibraryRows["apps"]>,
-  fileReplies: (threadIds, limit) => prepared(
-    `SELECT thread_id AS threadId, id AS messageId, at, text, json_extract(json, '$.attachments') AS attachments FROM messages
-     WHERE ${IN_THREADS} AND role = 'bot' AND kind = 'text'
-       AND (instr(text, '](') > 0 OR instr(text, ']:') > 0 OR instr(text, '<file:') > 0 OR json_extract(json, '$.attachments') IS NOT NULL)
-     ORDER BY at DESC, rowid LIMIT ?`,
-  ).all(JSON.stringify(threadIds), limit) as ReturnType<BotLibraryRows["fileReplies"]>,
+  fileReplies: (threadIds, limit) =>
+    prepared(LIBRARY_FILE_REPLIES_SQL).all(JSON.stringify(threadIds), limit) as ReturnType<BotLibraryRows["fileReplies"]>,
 };
 
 type MarkdownNode = { type: string; url?: string; identifier?: string; children?: MarkdownNode[] };
