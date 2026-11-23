@@ -96,7 +96,7 @@ export function CallTargetButton({
   const showThreads = useShowThreads();
   const { capabilities, ready: capabilitiesReady } = useDesktopCapabilities();
   const media = useLiveMedia();
-  const liveThreadId = liveCapable && !isNewChatThread(threadId) ? threadId : undefined;
+  const liveThreadId = liveCapable ? threadId : undefined;
   const canLive = liveThreadId !== undefined;
   // Check Live first: startCall also marks the target as on a call.
   const liveRunning = isLiveCallRunning(media.phase);
@@ -183,7 +183,9 @@ export function CallTargetButton({
     setMenuOpen(false);
     if (next === "live" && liveThreadId !== undefined) {
       onStart("live");
-      void startLiveCall({ botId: targetId, threadId: liveThreadId, provider: state.config?.live?.provider });
+      const live = (thread: string) => void startLiveCall({ botId: targetId, threadId: thread, provider: state.config?.live?.provider });
+      if (isNewChatThread(liveThreadId)) dispatch({ type: "makeNewChat", botId: targetId, threadId: liveThreadId, onMade: live });
+      else live(liveThreadId);
       return;
     }
     if (!turnsReady) {

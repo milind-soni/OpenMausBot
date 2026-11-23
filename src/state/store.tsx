@@ -65,7 +65,7 @@ import { useShowThreads } from "@/lib/thread-preferences";
 import { speechOwner, spokenReplyStream } from "@/lib/spoken-reply-stream";
 import { t } from "@/lib/i18n";
 export { formatTime } from "@/lib/clock-time";
-import { createBotPatchQueue, flushWhenLeaving, keepaliveFits, type BotUpdatePatch } from "./bot-patch-queue"; import { createNewTaskOnce } from "./new-task-once"; import { createNewChat, reduceNewChat, type NewChat } from "./new-chat";
+import { createBotPatchQueue, flushWhenLeaving, keepaliveFits, type BotUpdatePatch } from "./bot-patch-queue"; import { createNewTaskOnce } from "./new-task-once"; import { createNewChat, reduceNewChat, type MakeNewChatAction, type NewChat } from "./new-chat";
 import { liveCallFromFrame, nextLiveCallLookup } from "./live-call";
 import { isNoAiRefusal, useChatErrorClear } from "./chat-error";
 import { openLiveEvents, publishLiveFrame, publishMissedFrames, withoutScreenPixels } from "@/lib/live-events";
@@ -641,7 +641,7 @@ export type Action =
     }
   | { type: "deleteGroup"; groupId: string }
   | { type: "newGroupTask"; groupId: string }
-  | ForkPanelAction
+  | ForkPanelAction | MakeNewChatAction
   | { type: "switchGroupTask"; groupId: string; threadId: string }
   | { type: "renameGroupTask"; groupId: string; threadId: string; title: string }
   | { type: "pinGroupTask"; groupId: string; threadId: string; pinned: boolean; title: string }
@@ -1749,7 +1749,7 @@ function reduceApp(state: AppState, action: Action): AppState {
     case "markAllRoutineRunsSeen":
     case "refreshTaskPermissions":
     case "followBotModel":
-    case "loadDataSheet":
+    case "loadDataSheet": case "makeNewChat":
       return state;
     case "dataSheet":
       return {

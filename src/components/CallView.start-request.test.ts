@@ -7,7 +7,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppState } from "@/state/store";
 
-const fixture = vi.hoisted(() => ({ liveCall: null as AppState["liveCall"] }));
+const fixture = vi.hoisted(() => ({ liveCall: null as AppState["liveCall"], dispatch: vi.fn() }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return {
@@ -21,7 +21,7 @@ vi.mock("@/state/store", async (importOriginal) => {
         } as AppState["config"],
         liveCall: fixture.liveCall,
       },
-      dispatch: vi.fn(),
+      dispatch: fixture.dispatch,
     }),
   };
 });
@@ -35,17 +35,19 @@ const { requestCallStart } = await import("@/lib/call-start-request");
 const { callMode, setCallMode } = await import("@/lib/call-mode");
 const { currentCall, endCall, startCall } = await import("@/lib/call");
 const { configureLiveMedia, liveMedia, resetLiveMedia } = await import("@/lib/live-call-media");
+const { newChatThreadId } = await import("@/state/new-chat");
 
 let root: Root;
 let container: HTMLDivElement;
 const onStart = vi.fn();
-const render = () => flushSync(() => root.render(createElement(CallTargetButton, {
-  targetId: "atlas", targetName: "Atlas", threadId: "thread-atlas", voices: ["v"],
+const render = (threadId = "thread-atlas") => flushSync(() => root.render(createElement(CallTargetButton, {
+  targetId: "atlas", targetName: "Atlas", threadId, voices: ["v"],
   requireExplicitVoices: false, liveCapable: true, placement: "composer", fill: "#8057C8", onStart,
 })));
 
 beforeEach(() => {
   fixture.liveCall = null;
+  fixture.dispatch.mockClear();
   window.ogb = { speechStart: vi.fn(), speechStop: vi.fn(async () => {}) } as unknown as NonNullable<Window["ogb"]>;
   configureLiveMedia({ getUserMedia: () => new Promise<MediaStream>(() => {}) });
   container = document.createElement("div");
@@ -78,6 +80,17 @@ describe("a call started from the composer's + menu", () => {
     expect(liveMedia()).toMatchObject({ phase: "starting", botId: "atlas", threadId: "thread-atlas" });
     expect(onStart).toHaveBeenCalledWith("live");
     expect(callMode()).toBe("live");
+  });
+
+  it("goes Live from a blank chat once the conversation it makes exists", () => {
+    render(newChatThreadId("atlas"));
+    flushSync(() => requestCallStart("atlas", "live"));
+    expect(onStart).toHaveBeenCalledWith("live");
+    expect(liveMedia().phase).toBe("idle");
+    expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ type: "makeNewChat", botId: "atlas", threadId: newChatThreadId("atlas") }));
+
+    flushSync(() => fixture.dispatch.mock.calls[0][0].onMade("made"));
+    expect(liveMedia()).toMatchObject({ phase: "starting", botId: "atlas", threadId: "made" });
   });
 
   it("is ignored for another bot, and while this one is already on a call", () => {

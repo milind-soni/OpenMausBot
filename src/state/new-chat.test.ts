@@ -293,4 +293,28 @@ describe("a new conversation opens blank and is made by its first send", () => {
     expect(pepper().threadId).toBe("a");
     expect(state.newChat?.botId).toBe("bot");
   });
+
+  it("makes the conversation for a Live call started in the blank chat and answers with it", async () => {
+    const made = vi.fn();
+    openBlank();
+    flushSync(() => dispatch({ type: "makeNewChat", botId: "bot", threadId: DRAFT, onMade: made }));
+    await vi.waitFor(() => expect(made).toHaveBeenCalledExactlyOnceWith("made"));
+
+    expect(creates).toHaveLength(1);
+    expect(sends).toEqual([]);
+    expect(pepper().threadId).toBe("made");
+    expect(state.newChat).toBeNull();
+  });
+
+  it("makes one conversation for a Live call and a send that start together", async () => {
+    const made = vi.fn();
+    openBlank();
+    flushSync(() => dispatch({ type: "makeNewChat", botId: "bot", threadId: DRAFT, onMade: made }));
+    send("Hello");
+    await vi.waitFor(() => expect(sends).toHaveLength(1));
+
+    expect(creates).toHaveLength(1);
+    expect(made).toHaveBeenCalledExactlyOnceWith("made");
+    expect(sends[0]).toMatchObject({ threadId: "made", text: "Hello" });
+  });
 });
