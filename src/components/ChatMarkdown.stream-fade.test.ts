@@ -72,7 +72,7 @@ describe("a streaming reply's blocks fade in once", () => {
   });
 
   it("fades with opacity only, once, while streaming, and not with reduced motion", () => {
-    const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../styles.css"), "utf8");
+    const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../styles.css"), "utf8").replace(/\r\n/g, "\n");
     const media = css.match(/@media \(prefers-reduced-motion: no-preference\) \{\n {2}\.chat-md\[data-streaming\] > \*,[\s\S]*?\n\}\n/)?.[0];
     expect(media, "the fade sits inside prefers-reduced-motion: no-preference").toBeDefined();
     expect(media).toContain("transition: opacity 600ms ease-out;");
