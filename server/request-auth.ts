@@ -195,7 +195,7 @@ export function isProxied(req: IncomingMessage): boolean {
 /** A paired phone's request. The companion marks everything it forwards and the mark only narrows, so this also
  * covers the standalone companion, which has no desktop token and so never sets `companionDevice`. */
 export function fromPairedDevice(req: IncomingMessage, auth: RequestAuth): boolean {
-  return (auth.kind === "loopback" && auth.companionDevice !== undefined) || req.headers["x-openmausbot-companion"] === "1";
+  return (auth.kind === "loopback" && auth.companionDevice !== undefined) || req.headers?.["x-openmausbot-companion"] === "1";
 }
 
 const LOOPBACK_PEER = /^(?:127\.|::1$|::ffff:127\.)/;
