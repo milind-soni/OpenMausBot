@@ -42,9 +42,10 @@ function bumpToolStep(threadId: string, turnId: string | undefined, itemId: stri
   return (current ?? 0) + 1;
 }
 
-function clearToolSeen(threadId: string): void {
+function clearToolSeen(threadId: string, keepTurnId?: string): void {
+  const keep = keepTurnId === undefined ? undefined : toolSeenKey(threadId, keepTurnId);
   for (const key of toolTurnSeen.keys()) {
-    if (key === threadId || key.startsWith(`${threadId}\0`)) toolTurnSeen.delete(key);
+    if ((key === threadId || key.startsWith(`${threadId}\0`)) && key !== keep) toolTurnSeen.delete(key);
   }
 }
 
@@ -81,7 +82,8 @@ export function noteTurnEvent(event: RuntimeEvent): void {
   const live: TurnLive = sameTurn && current ? current : { turnId, ended: false, status: null, toolSteps: toolTurnSeen.get(toolSeenKey(threadId, turnId))?.size ?? 0 };
   switch (event.type) {
     case "turn.started":
-      clearToolSeen(threadId);
+      // The turn that just ended keeps its counted calls, so a late frame of it does not restart from zero.
+      clearToolSeen(threadId, current?.turnId === turnId ? undefined : current?.turnId);
       return put(threadId, { turnId, ended: false, status: null, toolSteps: 0 });
     case "turn.completed":
     case "cap.exhausted":
