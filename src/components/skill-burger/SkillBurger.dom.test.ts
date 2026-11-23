@@ -87,7 +87,8 @@ it("edits the summary in place: Escape puts it back, Enter keeps it", async () =
 it("folds and closes from the top bun", async () => {
   await render([ask, app("m1", "GOOGLESHEETS_BATCH_GET"), app("m2", "GMAIL_SEND_EMAIL")]);
   await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Hide steps"]')!.click());
-  expect(host.querySelector("ol")?.hidden).toBe(true);
+  expect(host.querySelector(".burger-fold")?.getAttribute("data-folded")).toBe("true");
+  expect(host.querySelector(".burger-fold")?.hasAttribute("inert")).toBe(true);
   await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click());
   expect(burger()).toBeNull();
 });
@@ -101,5 +102,4 @@ it("names what a finished run did on its top bun, keeping the ask until then", a
   await act(async () => { await Promise.resolve(); });
   expect(fixture.api).toHaveBeenCalledWith("/api/skill-burger-summary", { method: "POST", body: JSON.stringify({ botId: "scout", threadId: "t1" }) });
   expect(button("Emails the sales sheet to Priya")).toBeDefined();
-  expect(host.querySelector("[data-burger-layer=app]")?.getAttribute("style")).toContain("--slice");
 });

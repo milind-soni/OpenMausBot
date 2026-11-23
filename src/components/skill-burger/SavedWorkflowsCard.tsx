@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { t } from "@/lib/i18n";
+import { useAdvancedMode } from "@/lib/interface-mode";
 import type { LocaleKey } from "@/locales";
 import { readBurgerWorkflow, removeBurger, restoreBurger, useSavedBurgers, type SavedWorkflow } from "@/lib/skill-burger";
 import { Card, NoteRow, TrashButton } from "../bot-panel/rows";
@@ -42,6 +43,7 @@ export function useBurgerRemoval() {
  * an Undo. */
 export function SavedWorkflowsCard({ botId }: { botId: string }) {
   const { skills: all, error } = useSavedBurgers();
+  const advanced = useAdvancedMode();
   const skills = all?.filter(usedBy(botId)) ?? null;
   const [open, setOpen] = useState<string | null>(null);
   const { removed, problem, remove, undo } = useBurgerRemoval();
@@ -69,7 +71,7 @@ export function SavedWorkflowsCard({ botId }: { botId: string }) {
                   className="min-w-0 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
                 >
                   <span dir="auto" className="line-clamp-2 text-[14px] font-medium leading-[18px] text-ink">{skill.summary}</span>
-                  <span className="mt-px block truncate font-mono text-[11px] text-ink-tertiary">{skill.name}</span>
+                  {advanced && <span className="mt-px block truncate font-mono text-[11px] text-ink-tertiary">{skill.name}</span>}
                 </button>
                 <EveryChatToggle compact skill={skill} />
               </div>

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 
 import { t } from "@/lib/i18n";
+import { useAdvancedMode } from "@/lib/interface-mode";
 import { renameBurger, useSavedBurgers, type SavedWorkflow } from "@/lib/skill-burger";
 import { useStore } from "@/state/store";
 import { BotAvatar } from "../Avatar";
@@ -13,6 +14,7 @@ import { useBurgerRemoval } from "./SavedWorkflowsCard";
 
 function BurgerCard({ skill, onRemove }: { skill: SavedWorkflow; onRemove: () => void }) {
   const { state } = useStore();
+  const advanced = useAdvancedMode();
   const bot = skill.botId ? state.bots.find((candidate) => candidate.id === skill.botId) : undefined;
   const [renaming, setRenaming] = useState<string | null>(null);
   const [problem, setProblem] = useState("");
@@ -53,7 +55,7 @@ function BurgerCard({ skill, onRemove }: { skill: SavedWorkflow; onRemove: () =>
                 className="mt-1 w-full rounded-md border border-hairline/60 bg-app px-1.5 py-0.5 font-mono text-[12px] text-ink outline-none focus:border-accent"
               />
             ) : (
-              <p className="mt-0.5 truncate font-mono text-[12px] text-ink-tertiary">{skill.name}</p>
+              advanced ? <p className="mt-0.5 truncate font-mono text-[12px] text-ink-tertiary">{skill.name}</p> : null
             )}
           </div>
           <SidebarPopoverMenu

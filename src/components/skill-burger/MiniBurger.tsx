@@ -1,22 +1,19 @@
 import type { SavedWorkflow } from "@/lib/skill-burger";
 import { cn } from "@/lib/cn";
-import { LayerIcon, sliceTint } from "./SkillBurger";
+import { LayerIcon } from "./SkillBurger";
 
-const SLICES = 3;
+const SHOWN = 3;
 
-/** A saved Skill Burger in miniature: two buns and its first few steps as thin tinted slices, each with its app's mark. */
+/** A saved Skill Burger at a glance: its first few steps' marks, stacked in small plain tiles. */
 export function MiniBurger({ skill, size = "md" }: { skill: Pick<SavedWorkflow, "layers">; size?: "sm" | "md" }) {
-  const slices = skill.layers.slice(0, SLICES);
-  const width = size === "sm" ? "w-12" : "w-[72px]";
+  const steps = skill.layers.slice(0, SHOWN);
   return (
-    <span aria-hidden="true" className={cn("skill-burger flex shrink-0 flex-col gap-[2px]", width)}>
-      <span className="burger-bun burger-bun-top relative block h-3.5" />
-      {slices.map((layer, index) => (
-        <span key={index} style={sliceTint(layer)} className={cn("burger-layer burger-mini-slice flex items-center justify-center", size === "sm" ? "h-3.5" : "h-[18px]")}>
-          <span className={cn("flex items-center justify-center", size === "sm" ? "scale-[0.7]" : "scale-[0.8]")}><LayerIcon kind={layer.kind} app={layer.app} /></span>
+    <span aria-hidden="true" className={cn("flex shrink-0 flex-col gap-[3px]", size === "sm" ? "w-7" : "w-9")}>
+      {steps.map((layer, index) => (
+        <span key={index} className={cn("flex items-center justify-center rounded-md bg-card shadow-sm", size === "sm" ? "h-5" : "h-7")}>
+          <span className={cn("flex items-center justify-center", size === "sm" ? "scale-[0.75]" : "scale-90")}><LayerIcon kind={layer.kind} app={layer.app} /></span>
         </span>
       ))}
-      <span className="burger-bun burger-bun-bottom block h-2.5" />
     </span>
   );
 }
