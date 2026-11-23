@@ -580,6 +580,8 @@ export interface TextGenerationOptions {
   /** One of this instance's models instead of the driver's quick-call choice: the helper model setting, and the setup
    * card's quick model (side-jobs.ts). */
   model?: string;
+  /** A one-shot call can reject the resolved model before sending the prompt. */
+  checkModel?: (model: string) => void;
   /** How long the caller will wait; drivers with their own process timer use it instead of their default. */
   timeoutMs?: number;
   /** For a bot's own engine whose driver picks a small model of its own. */
@@ -600,6 +602,8 @@ export interface ProviderInstance {
   readonly displayName: string | undefined;
   readonly enabled: boolean;
   readonly models: ModelCatalog;
+  /** An unmanaged OpenRouter connection, where upkeep can name a model from this account's catalog. */
+  readonly openRouter?: true;
   /** True while the catalog is the driver's fixed list or a failed read's leftover, not a list the engine gave. */
   readonly modelsUnconfirmed?: boolean;
   /** Set with modelsUnconfirmed when the engine's last read of its list failed: why, for the picker to say. */

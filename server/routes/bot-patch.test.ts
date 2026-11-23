@@ -8,7 +8,7 @@ import type { ConnectorScopes } from "../../shared/connector-scopes.ts";
 import type { WireBot } from "../../shared/wire.ts";
 import { VPS_BOT_ALIAS_CHANGE_ERROR, VPS_BOT_ALIAS_LIFECYCLE_ERROR, VPS_BOT_ALIAS_RESOURCES_ERROR } from "../cloud-backend.ts";
 import { DATA_DIR, type AppConfig } from "../config.ts";
-import type { ModelSelection } from "../contracts.ts";
+import type { ModelSelection, ProviderInstance } from "../contracts.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { Store, type BotRecord } from "../store.ts";
 import * as vps from "../vps-computer.ts";
@@ -85,6 +85,24 @@ function fixture(extra: Partial<BotPatchRouteDeps> = {}) {
   };
   return { store, bot, activeVpsThreads, privateThreads, patch };
 }
+
+describe("PATCH /api/bots/:id memory model", () => {
+  it("saves a model from the bot's OpenRouter connection and restores Automatic on null", async () => {
+    const memoryModel = { instanceId: "router", model: "vendor/memory" };
+    const provider = { openRouter: true, enabled: true, models: { options: [{ id: memoryModel.model }] } } as ProviderInstance;
+    const { store, bot, patch } = fixture({ registry: { get: () => provider } });
+    const chatModel = { instanceId: "router", model: "vendor/chat" };
+    store.patchBot(bot.id, { modelSelection: chatModel });
+
+    expect((await patch(bot.id, { memoryModel: { ...memoryModel, instanceId: "other" } })).status).toBe(400);
+    expect((await patch(bot.id, { memoryModel: { ...memoryModel, model: "vendor/unknown" } })).status).toBe(400);
+    expect((await patch(bot.id, { memoryModel }, { headers: { "x-openmausbot-companion": "1" } })).status).toBe(403);
+    expect(await patch(bot.id, { memoryModel })).toMatchObject({ status: 200, body: { bot: { modelSelection: chatModel, memoryModel } } });
+    expect(new Store(() => sonnet).bot(bot.id)?.memoryModel).toEqual(memoryModel);
+    expect((await patch(bot.id, { memoryModel: null })).status).toBe(200);
+    expect(new Store(() => sonnet).bot(bot.id)?.memoryModel).toBeUndefined();
+  });
+});
 
 describe("PATCH /api/bots/:id vpsAlias relocation guard", () => {
   it("skips the guard when pinning a bot to the host it already uses", async () => {

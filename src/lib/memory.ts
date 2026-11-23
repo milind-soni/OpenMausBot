@@ -1,3 +1,4 @@
+import type { MemoryModelStatus } from "../../shared/memory-model";
 import { ApiError, api } from "@/state/store";
 import { intlLocale, t } from "@/lib/i18n";
 import { serverErrorText } from "@/lib/server-error";
@@ -161,6 +162,7 @@ export interface CaptureReport {
 export interface UpkeepStatus {
   enabled: boolean;
   modelSteps: boolean;
+  memoryModel?: MemoryModelStatus;
   lastTidy?: TidyReport;
   lastCapture?: CaptureReport;
 }
@@ -169,8 +171,8 @@ export function noticedCount(report: CaptureReport | undefined): number {
   return report ? report.added + (report.topics ?? 0) : 0;
 }
 
-export function fetchUpkeepStatus(botId: string): Promise<UpkeepStatus> {
-  return api(`/api/bots/${botId}/memory/upkeep`);
+export function fetchUpkeepStatus(botId: string, signal?: AbortSignal): Promise<UpkeepStatus> {
+  return api(`/api/bots/${botId}/memory/upkeep`, { signal });
 }
 
 export interface LendingReview {
