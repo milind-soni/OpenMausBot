@@ -58,7 +58,9 @@ export function acpCompactSession(deps: AcpCompactDeps) {
     let end!: (ending: Ending) => void;
     const ended = new Promise<Ending>((resolve) => { end = resolve; });
     let stopRequested = false;
-    const stop = () => { stopRequested = true; end({ kind: "stopped" }); };
+    let interrupt!: (why: "stopped" | "gone" | "timeout") => void;
+    const interrupted = new Promise<"stopped" | "gone" | "timeout">((resolve) => { interrupt = resolve; });
+    const stop = () => { stopRequested = true; interrupt("stopped"); end({ kind: "stopped" }); };
     let finished!: () => void;
     const settled = new Promise<void>((resolve) => { finished = resolve; });
     const entry: ActiveEntry = { stop, interrupt: async () => { stop(); await settled; }, turnId: deps.turnId(), asks: new Map() };
@@ -68,7 +70,7 @@ export function acpCompactSession(deps: AcpCompactDeps) {
     options.signal?.addEventListener("abort", onAbort, { once: true });
     let markGone!: () => void;
     const gone = new Promise<null>((resolve) => { markGone = () => resolve(null); });
-    const exited = () => { markGone(); end({ kind: "failed", reason: "the agent exited during compaction" }); };
+    const exited = () => { markGone(); interrupt("gone"); end({ kind: "failed", reason: "the agent exited during compaction" }); };
     for (const event of ["exit", "close", "error"]) session.child.once(event, exited);
     const counted = { open: false, replied: false, usageReported: false };
     const heard = (params: any) => {
@@ -88,7 +90,7 @@ export function acpCompactSession(deps: AcpCompactDeps) {
       const { check } = before;
       if (stopRequested || options.signal?.aborted) return fail("stopped");
       if (!live() || selectionMoved()) return fail("the conversation moved on before the compaction was sent");
-      timer = setTimeout(() => end({ kind: "timeout" }), timeoutMs());
+      timer = setTimeout(() => { interrupt("timeout"); end({ kind: "timeout" }); }, timeoutMs());
       timer.unref?.();
       counted.open = true;
       const answer = session.acp.request("session/prompt", { sessionId: options.session, prompt: [{ type: "text", text: `/${command}` }] },
@@ -117,7 +119,12 @@ export function acpCompactSession(deps: AcpCompactDeps) {
       if (ending.kind !== "answered") return fail("stopped");
       const { result } = ending;
       const usage = promptTokenUsage(result);
-      const reported = await check?.(result);
+      const reported = await Promise.race([Promise.resolve(check?.(result)).catch(() => undefined), interrupted]);
+      if (reported === "stopped") return fail("stopped");
+      if (reported === "gone" || reported === "timeout") {
+        keep = false;
+        return failSent(reported === "gone" ? "the agent exited during compaction" : "timed out", result);
+      }
       const why = result?.stopReason !== "end_turn" ? `the compaction ended ${String(result?.stopReason ?? "without a stop reason")}`
         : reported ? `the agent reported a failure: ${reported.message}`
           : counted.replied ? `the agent answered /${command} as a message`

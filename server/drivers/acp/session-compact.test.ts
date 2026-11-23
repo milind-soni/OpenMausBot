@@ -154,6 +154,24 @@ describe("an ACP agent's own compaction of a live session", () => {
     }
   });
 
+  it("gives the thread back when the agent's pipes close during the compaction", async () => {
+    const { deps, session, active } = setup(() => { session.child.emit("close", null, "SIGKILL"); });
+    expect(await acpCompactSession(deps)("thread", { session: SESSION })).toMatchObject({ ok: false, reason: "the agent exited during compaction" });
+    expect(active.has("thread")).toBe(false);
+  });
+
+  it("does not let a stuck failure check hold a Stop that comes after the answer", async () => {
+    const { deps, active } = setup(({ heard, reply }) => { heard({ sessionUpdate: "usage_update", used: 950 }); reply(RESULT); });
+    deps.promptOutcome = async () => () => new Promise(() => {});
+    const stop = new AbortController();
+    const compacting = acpCompactSession(deps)("thread", { session: SESSION, signal: stop.signal });
+    await vi.waitFor(() => expect(active.has("thread")).toBe(true));
+    await new Promise((resolve) => setImmediate(resolve));
+    stop.abort();
+    expect(await compacting).toEqual({ ok: false, reason: "stopped" });
+    expect(active.has("thread")).toBe(false);
+  });
+
   it("does not send /compact to a process a signal ended", async () => {
     const { deps, session, acp } = setup(() => {});
     (session.child as unknown as { signalCode: string }).signalCode = "SIGKILL";
