@@ -152,6 +152,19 @@ describe("the bot exchange line", () => {
     expect(host.querySelector("[data-bot-exchange-line]")).toBeNull();
   });
 
+  it("keeps reading while a hand-off that waits for no answer runs after its asker went idle, and drops it when it ends", async () => {
+    current = job([{ ...root(), status: "completed" }, handoff({ reply: "none" })]);
+    let answer: (value: unknown) => void = () => {};
+    fixture.api.mockImplementation(async (path: string) => path.includes("wait=") ? new Promise((resolve) => { answer = resolve; }) : current);
+    render({ ...pepper, busy: false });
+    await settle();
+    expect(line()!.getAttribute("data-state")).toBe("working");
+    expect(reads()[1]![0]).toContain("wait=25000");
+    answer(job([{ ...root(), status: "completed" }, handoff({ reply: "none", status: "completed", finishedAt: 40_000 })], "v2"));
+    await settle();
+    expect(host.querySelector("[data-bot-exchange-line]")).toBeNull();
+  });
+
   it("shows nothing when no bot handed anything on", async () => {
     current = job([root()]);
     render();

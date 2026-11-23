@@ -33,9 +33,9 @@ describe("the exchanges in a job", () => {
     const deeper = node("b", { parentId: "a", botId: "research", botName: "Research", threadId: "work-2", createdAt: 1_200 });
     expect(exchangesOf(job([root, done, deeper], ["b"]), "A teammate")).toEqual([
       { id: "b", asker: { botId: "pessoal", name: "Pessoal" }, helper: { botId: "research", name: "Research" }, threadId: "work-2",
-        state: "needs-you", live: true, createdAt: 1_200 },
+        state: "needs-you", createdAt: 1_200 },
       { id: "a", asker: { botId: "maestro", name: "Maestro" }, helper: { botId: "pessoal", name: "Pessoal" }, threadId: "work",
-        state: "answered", live: false, createdAt: 1_100, finishedAt: 1_900 },
+        state: "answered", createdAt: 1_100, finishedAt: 1_900 },
     ]);
   });
 
@@ -50,10 +50,6 @@ describe("the exchanges in a job", () => {
     expect(entry!.asker).toEqual({ name: "A teammate" });
   });
 
-  it("do not keep the line alive for a notice that waits for no answer", () => {
-    const [entry] = exchangesOf(job([root, node("n", { parentId: "root", botId: "pessoal", reply: "none" })]), "A teammate");
-    expect(entry).toMatchObject({ state: "working", live: false });
-  });
 });
 
 describe("an exchange's lines in the helper's thread", () => {

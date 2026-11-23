@@ -3,7 +3,7 @@ import { createContext, useCallback, useEffect, useMemo, useRef, useState } from
 import { personWrote } from "../../shared/person-wait";
 import { api } from "@/state/api";
 import type { Message } from "@/state/store";
-import { exchangesOf, type BotExchangeEntry, type JobRead } from "./bot-exchanges";
+import { exchangeEnded, exchangesOf, type BotExchangeEntry, type JobRead } from "./bot-exchanges";
 import { t } from "./i18n";
 
 /** The server holds a read at most this long (`JOB_WAIT_MAX_MS`). */
@@ -47,7 +47,7 @@ export function useBotExchanges(threadId: string | undefined, since: number | un
       let failures = 0;
       for (let first = true; !abort.signal.aborted; first = false) {
         const known = latest.current?.key === key ? latest.current.job : null;
-        const open = Boolean(known && exchangesOf(known, "").some((entry) => entry.live));
+        const open = Boolean(known && exchangesOf(known, "").some((entry) => !exchangeEnded(entry.state)));
         const hold = !first && known !== null && (working || open);
         if (!first && !hold && failures === 0) return;
         const path = hold ? `${base}${join}wait=${HOLD_MS}&version=${encodeURIComponent(known!.version)}` : base;

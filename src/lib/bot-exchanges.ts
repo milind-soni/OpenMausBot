@@ -33,8 +33,6 @@ export interface BotExchangeEntry {
   helper: { botId: string; name: string };
   threadId: string;
   state: ExchangeState;
-  /** Still working on an answer someone waits for. */
-  live: boolean;
   createdAt: number;
   finishedAt?: number;
 }
@@ -71,12 +69,12 @@ export function exchangesOf(job: JobRead, teammate: string): BotExchangeEntry[] 
       helper: { botId: node.botId, name: node.botName },
       threadId: node.threadId,
       state,
-      live: !exchangeEnded(state) && node.reply !== "none",
       createdAt: node.createdAt,
       ...(node.finishedAt !== undefined ? { finishedAt: node.finishedAt } : {}),
     });
   }
-  return entries.sort((a, b) => Number(b.live) - Number(a.live) || a.createdAt - b.createdAt);
+  const open = (entry: BotExchangeEntry) => Number(!exchangeEnded(entry.state));
+  return entries.sort((a, b) => open(b) - open(a) || a.createdAt - b.createdAt);
 }
 
 /** A helper-thread line, as far as tying it to one hand-off goes. */

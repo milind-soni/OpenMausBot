@@ -26,7 +26,8 @@ export function ThreadChip({ message, threadId }: { message: Message; threadId?:
   // The helper's main chat is its talk with the person, not with the asker: that still opens there.
   const workThread = bot && ref.threadId !== bot.threadId && (bot.tasks ?? []).some((task) => task.threadId === ref.threadId);
   const exchange = openExchange && !direct && asker && bot && asker.botId !== bot.id && workThread
-    ? { asker, helper: { botId: bot.id, name: bot.name, color: bot.color }, threadId: ref.threadId } : null;
+    ? { asker, helper: { botId: bot.id, name: bot.name, color: bot.color }, threadId: ref.threadId, ...(message.handoff ? { id: message.handoff.id } : {}) }
+    : null;
   const exchangeLabel = bot ? t("chat.handoffExchange.open", { name: bot.name }) : "";
   return (
     <HandoffReply message={message} threadId={threadId}>

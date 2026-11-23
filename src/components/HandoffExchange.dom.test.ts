@@ -190,6 +190,32 @@ describe("a teammate's hand-off line", () => {
     }
   });
 
+  it("reopens each of two jobs one helper did in the same thread with only that job's lines", async () => {
+    const request = (id: string, text: string, at: number, parentId: string | null, assignment: string): Message =>
+      ({ id, role: "bot", kind: "text", text, at, parentId, from: { botId: "maestro", name: "Maestro", color: "blue" }, roomRequest: { id: assignment, phase: "request" } } as Message);
+    const first = request("q1", "Please check the build", 1_000, null, "h1");
+    const firstReply: Message = { id: "r1", role: "bot", kind: "text", text: "Build is green", at: 2_000, parentId: "q1" };
+    const second = request("q2", "Now run the tests", 3_000, "r1", "h2");
+    const secondReply: Message = { id: "r2", role: "bot", kind: "text", text: "Tests pass", at: 4_000, parentId: "q2" };
+    fixture.load.mockResolvedValue({ messages: [first, firstReply, second, secondReply], activeLeafId: "r2" });
+    const done = (id: string) => sent({ id: `sent-${id}`, handoff: { id, state: "done", at: 5_000 } });
+    flushSync(() => root.render(createElement(HandoffExchangeHost, {
+      bot: maestro, children: createElement("main", { "data-chat": "" },
+        createElement(ThreadChip, { message: done("h1"), threadId: "maestro-main" }),
+        createElement(ThreadChip, { message: done("h2"), threadId: "maestro-main" })),
+    })));
+    const reopen = async (index: number) => {
+      flushSync(() => host.querySelectorAll<HTMLButtonElement>("[data-exchange-chip]")[index]!.click());
+      await settle();
+      flushSync(() => {});
+    };
+    await reopen(0);
+    expect(rows()).toEqual(["asker: MaestroPlease check the build", "helper: FerramenteiroBuild is green"]);
+    flushSync(() => host.querySelector<HTMLButtonElement>("[data-exchange-back]")!.click());
+    await reopen(1);
+    expect(rows()).toEqual(["asker: MaestroNow run the tests", "helper: FerramenteiroTests pass"]);
+  });
+
   it("opens the thread as before where no chat column hosts the exchange", () => {
     flushSync(() => root.render(createElement(ThreadChip, { message: sent(), threadId: "maestro-main" })));
     expect(chip().hasAttribute("data-exchange-chip")).toBe(false);
