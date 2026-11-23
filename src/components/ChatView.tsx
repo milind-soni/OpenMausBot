@@ -79,7 +79,7 @@ import { ConnectorCard } from "./ConnectorCard";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { SignInRequestCard } from "./SignInRequestCard";
 import { isPinnedSignIn, NO_PINNED_SIGN_INS, PinnedSignInSlot } from "./PinnedSignInSlot";
-import { ActivityChip, ChatRowsContext, useChatRows, type ChatRows } from "./ChatRows";
+import { ActivityChip, ChatRowsContext, useChatRows, type ChatRows } from "./ChatRows"; import { useMotionBeat } from "./mascot-beat";
 import { AutomationCaption, RoutineRunRow } from "./RoutineRunCard"; import { InboxAnswers, InboxCaption, RelayLabel } from "./InboxLine"; import { InboxCardSlot } from "./inbox/InboxCard";
 import { CallRecordRow } from "./CallRecordRow";
 import { AttachmentGallery, collectMessageFiles, replyAttachmentGroup, splitMessageAttachments } from "./AttachmentGallery";
@@ -812,7 +812,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
   const busy = Boolean(bot.busy);
   const stoppedAt = useStoppedAt(bot.threadId);
   const openedAt = useThreadOpenedAt(bot.threadId);
-  const headerAnimated = busy || (mascotMotion?.kind ?? "none") !== "none";
+  const headerAnimated = useMotionBeat(mascotMotion?.kind, mascotMotion?.nonce ?? 0) || busy;
   const branch = useRef(messages);
   branch.current = messages;
   const onBranch = useCallback((messageId: string) => branch.current.some((m) => m.id === messageId), []);
