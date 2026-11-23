@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { chartRenderer, compileChart, validateVegaLite } from "./deps.ts";
@@ -144,6 +145,38 @@ describe("distinct table names within one import", () => {
     const tables = await ctx.database.listTables();
     expect(tables.find((table) => table.name === "sales_report_2")).toMatchObject({ rowCount: 1 });
     const view = tables.find((table) => table.name === "sales_report");
+    expect(view?.rowCount).toBeNull();
+    expect(view?.error).toMatchObject({ code: "sql_error" });
+    expect(view?.error?.message).toContain("amount");
+  });
+
+  it("keeps a healthy sales_report_3 when one import's tables share a stem and an invalid view sits on the first suffix", async () => {
+    const ctx = await context("sqlite-shared-stem");
+    for (const sql of [
+      "CREATE TABLE sales AS SELECT 1 AS id, 10 AS amount",
+      "CREATE VIEW sales_report_2 AS SELECT id, amount FROM sales",
+      "CREATE OR REPLACE TABLE sales AS SELECT 2 AS id, 20 AS total",
+      "CREATE TABLE sales_report_3 AS SELECT 'kept' AS origin, 99 AS value",
+    ]) {
+      const result = await runDataTool(ctx, "data_sql", { sql });
+      expect(result.isError, result.content[0]?.text).toBeUndefined();
+    }
+    const file = join(root, "sales-reports.sqlite");
+    const source = new DatabaseSync(file);
+    source.exec('CREATE TABLE "sales report" (origin TEXT, value INTEGER)');
+    source.exec(`INSERT INTO "sales report" VALUES ('spaced', 1)`);
+    source.exec('CREATE TABLE "sales-report" (origin TEXT, value INTEGER)');
+    source.exec(`INSERT INTO "sales-report" VALUES ('dashed', 2)`);
+    source.close();
+    const loaded = await runDataTool(ctx, "data_load", { source: file });
+    expect(loaded.isError, loaded.content[0]?.text).toBeUndefined();
+    expect(loaded.structuredContent!.tables).toMatchObject([{ name: "sales_report" }, { name: "sales_report_4" }]);
+    expect((await ctx.database.run("SELECT origin, value FROM sales_report ORDER BY origin", { connection })).rows).toEqual([["spaced", "1"]]);
+    expect((await ctx.database.run("SELECT origin, value FROM sales_report_4 ORDER BY origin", { connection })).rows).toEqual([["dashed", "2"]]);
+    expect((await ctx.database.run("SELECT origin, value FROM sales_report_3", { connection })).rows).toEqual([["kept", 99]]);
+    const tables = await ctx.database.listTables();
+    expect(tables.find((table) => table.name === "sales_report_3")).toMatchObject({ rowCount: 1 });
+    const view = tables.find((table) => table.name === "sales_report_2");
     expect(view?.rowCount).toBeNull();
     expect(view?.error).toMatchObject({ code: "sql_error" });
     expect(view?.error?.message).toContain("amount");

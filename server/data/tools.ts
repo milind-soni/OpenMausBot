@@ -471,9 +471,12 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
   const tables: LoadedTable[] = [];
   const unique = (base: string): string => {
     const stem = tableNameFrom(base);
-    const skipTaken = blocked.has(stem);
     let name = stem;
-    for (let n = 2; tables.some((table) => table.name === name) || ((skipTaken || !replace) && existing.has(name)) || blocked.has(name); n++) name = `${stem.slice(0, 62 - String(n).length)}_${n}`;
+    let avoidExisting = !replace || blocked.has(stem);
+    for (let n = 2; tables.some((table) => table.name === name) || blocked.has(name) || (avoidExisting && existing.has(name)); n++) {
+      if (blocked.has(name)) avoidExisting = true;
+      name = `${stem.slice(0, 62 - String(n).length)}_${n}`;
+    }
     existing.add(name);
     return name;
   };
