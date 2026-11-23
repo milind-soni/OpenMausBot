@@ -111,7 +111,7 @@ afterEach(() => {
 });
 
 describe("the Simple composer in a bot chat", () => {
-  it("is one pill: a round + with three rows, the field, and one round button in the bot's tone", () => {
+  it("is one pill: a round + with four rows, the field, and one round button in the bot's tone", () => {
     render({ bot });
     expect(plus()?.getAttribute("aria-label")).toBe("Add");
     const pill = container.querySelector('[data-tour="composer"]')!.className.split(" ");
@@ -128,11 +128,43 @@ describe("the Simple composer in a bot chat", () => {
     const tone = userBubbleTone("purple");
     expect(fixture.call).toMatchObject({ bot: { id: "atlas" }, placement: "composer", fill: tone.background, ink: tone.ink });
     openPlus();
-    expect([...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.getAttribute("data-menu-key"))).toEqual(["attach", "goal", "teach"]);
-    expect([...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.textContent)).toEqual(["Attach files", "Work until done", "Teach a task"]);
+    expect([...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.getAttribute("data-menu-key"))).toEqual(["attach", "goal", "teach", "place"]);
+    expect([...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.textContent)).toEqual(["Attach files", "Work until done", "Teach a task", "Works onAuto"]);
     const row = menu()!.querySelector("[data-menu-key='attach']")!.className.split(" ");
     expect(row).toEqual(expect.arrayContaining(["h-8", "gap-2", "px-2", "rounded-md", "text-[14px]", "leading-5"]));
     expect(menu()!.className.split(" ")).toEqual(expect.arrayContaining(["popover-surface", "rounded-[12px]", "w-max", "min-w-[200px]", "max-w-[280px]"]));
+  });
+
+  it("offers this chat's computer in the +, and shows a chip while the chat has its own", () => {
+    const sameBot = { ...bot, computer: "vm" as const };
+    render({ bot: sameBot });
+    openPlus();
+    click(item("place"));
+    const rows = [...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.getAttribute("data-menu-key"));
+    expect(rows).toEqual(["back", "place:follow", "place:cloud", "place:vm", "place:local", "place:browser"]);
+    expect(item("place:follow")?.getAttribute("aria-checked")).toBe("true");
+    expect(item("place:follow")?.textContent).toBe("Follow this bot's setting");
+    // A place this chat can't have stays listed, dimmed, with why under it.
+    expect(item("place:browser")?.disabled).toBe(true);
+    expect(item("place:browser")?.textContent).toBe("BrowserNot with this model");
+    click(item("place:follow"));
+    expect(fixture.dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "updateTask" }));
+    expect(container.querySelector('[data-testid="place-chip"]')).toBeNull();
+    openPlus();
+    click(item("place"));
+    click(item("back"));
+    expect(item("attach")).not.toBeNull();
+
+    flushSync(() => root.unmount());
+    root = createRoot(container);
+    render({ bot: { ...sameBot, tasks: [{ threadId: bot.threadId, title: "Chat", createdAt: 1, surface: "browser" }] } });
+    expect(container.querySelector('[data-testid="place-chip"]')?.getAttribute("aria-label")).toBe("Where this conversation works: Browser");
+    openPlus();
+    expect(item("place")?.textContent).toBe("Works onBrowser");
+    click(item("place"));
+    expect(item("place:browser")?.getAttribute("aria-checked")).toBe("true");
+    click(item("place:follow"));
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "updateTask", botId: bot.id, threadId: bot.threadId, patch: { surface: null } });
   });
 
   it("starts a /learn draft from Teach a task, ahead of anything already typed", () => {
