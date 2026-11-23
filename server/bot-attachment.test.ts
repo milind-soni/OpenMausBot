@@ -2,13 +2,29 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+const sourceHandles = vi.hoisted(() => ({
+  record: false,
+  opened: [] as { path: string; handle: import("node:fs/promises").FileHandle }[],
+}));
+vi.mock("node:fs/promises", async (original) => {
+  const real = await original<typeof import("node:fs/promises")>();
+  return {
+    ...real,
+    open: async (...args: Parameters<typeof real.open>) => {
+      const handle = await real.open(...args);
+      if (sourceHandles.record) sourceHandles.opened.push({ path: String(args[0]), handle });
+      return handle;
+    },
+  };
+});
 
 // attachments.ts reads DATA_DIR at import time.
 const DATA_ROOT = mkdtempSync(join(tmpdir(), "omb-bot-attachment-"));
 process.env.OMB_DATA_DIR = join(DATA_ROOT, "data");
 const { attachForTurn, contentUploadId, deliveredCopy, guestWorkspaceToHost, saveBotAttachment } = await import("./bot-attachment.ts");
-const { ATTACHMENTS_DIR, FILE_MAX_BYTES, PREVIEW_MAX_BYTES } = await import("./attachments.ts");
+const { ATTACHMENTS_DIR, ATTACHMENTS_MAX_BYTES, FILE_MAX_BYTES, PREVIEW_MAX_BYTES, __resetAttachmentAccountingForTests } = await import("./attachments.ts");
 
 const WORK = join(DATA_ROOT, "work");
 const VM_HOME = join(DATA_ROOT, "vm-home");
@@ -145,6 +161,35 @@ describe("saveBotAttachment", () => {
     await expect(saveBotAttachment({ path: "nope.pdf", roots: [WORK] })).rejects.toMatchObject({ status: 404 });
     await expect(saveBotAttachment({ path: "  ", roots: [WORK] })).rejects.toMatchObject({ status: 400 });
     expect(existsSync(ATTACHMENTS_DIR)).toBe(true);
+  });
+
+  it("closes the source when the store is full before the file is read", async () => {
+    const source = join(WORK, "quota.pdf");
+    writeFileSync(source, Buffer.alloc(64 * 1024, 7));
+    mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+    const filler = join(ATTACHMENTS_DIR, "quota-filler.bin");
+    writeFileSync(filler, Buffer.alloc(1));
+    truncateSync(filler, ATTACHMENTS_MAX_BYTES);
+    __resetAttachmentAccountingForTests();
+    sourceHandles.record = true;
+    sourceHandles.opened.length = 0;
+    try {
+      await expect(saveBotAttachment({ path: "quota.pdf", roots: [WORK] })).rejects.toMatchObject({
+        status: 507,
+        message: expect.stringMatching(/storage is full/),
+      });
+      // The native form: on Windows it expands short (8.3) names as the opener's fs/promises realpath does.
+      const handle = sourceHandles.opened.find((entry) => entry.path === realpathSync.native(source))?.handle;
+      expect(handle).toBeDefined();
+      expect(handle!.fd).toBe(-1);
+    } finally {
+      sourceHandles.record = false;
+      rmSync(filler, { force: true });
+      __resetAttachmentAccountingForTests();
+      for (const entry of sourceHandles.opened) {
+        if (entry.handle.fd !== -1) await entry.handle.close().catch(() => undefined);
+      }
+    }
   });
 });
 

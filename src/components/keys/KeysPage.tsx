@@ -13,7 +13,8 @@ import { BuiltInReplyWait, LmStudioServer, OtherOpenAiCompatServers } from "../O
 import { OllamaServer } from "../OllamaServer";
 import { KEY_CATALOG, KEY_SECTIONS, keyHidden, keyMatches, savedState, type KeyEntry, type KeyId, type KeySectionId } from "./key-catalog";
 import { finishKeyFocus, useKeyFocus, type KeyFocusRequest } from "./key-focus";
-import { AnthropicEveryClaudeBot, OpenAiCompatUrl, OpenCodeProviderKeys, VpsConnection } from "./KeyPanels";
+import { AnthropicEveryClaudeBot, OpenAiCompatUrl, OpenCodeProviderKeys } from "./KeyPanels";
+import { VpsConnection } from "./VpsServersPanel";
 import { KEY_CONTENT, KEY_ROW, KeyRow, MaskedKey, RowHeading, type KeyStatus } from "./KeyRow";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 

@@ -15,6 +15,7 @@ export const SETTINGS_HOW_TO_OPEN = "Settings opens from the menu under the pers
 
 export const SETTINGS_PLACES = [
   {"id":"page:overview","path":"Settings → (the place's own name, at the top)","words":["overview","place","status","version","domain","address","sidebar"]},
+  {"id":"page:devices","path":"Settings → Devices","words":["devices","my devices","all devices","device map","map","computers","laptops","servers","mac mini","vps","cloud","private network","tailnet","add a device","add device"]},
   {"id":"page:phone","path":"Settings → Phone & devices","words":["phone","pair","pairing","qr","code","iphone","android","mobile","tablet","device","devices","wifi","wi-fi","anywhere","relay","remote","companion","tailscale","connect your phone","get the phone app","pair a device","this server","remote access"]},
   {"id":"page:ai","path":"Settings → AI","words":["ai","models","model providers","providers","engines","api keys","keys","key","claude","codex","openai","anthropic","ollama","lm studio","local model"]},
   {"id":"page:bots","path":"Settings → You and your bots","words":["all bots","bots","about you","about me","profile","new bots","defaults","effort","limits","rules"],"advanced":true},
@@ -30,6 +31,8 @@ export const SETTINGS_PLACES = [
   {"id":"page:app","path":"Settings → This app","words":["this app","updates","update","version","help","about","servers","your computers","environments","diagnostics","logs","tour"]},
   {"id":"page:general","path":"Settings → General","words":["general","language","typing","send","enter","notifications","sounds","startup","login","analytics","privacy","talk"],"advanced":true},
   {"id":"page:appearance","path":"Settings → Appearance","words":["appearance","theme","skin","looks","dark mode","light mode","font","chat width","layout","threads","pins"]},
+  {"id":"add-device","path":"Settings → Devices → Add a device","words":["add a device","add device","new device","add a computer","add a server","add a phone","connect a device"]},
+  {"id":"private-network","path":"Settings → Devices → Private network","words":["tailscale","tailnet","private network","vpn"],"only":"the desktop app, on this computer's own page"},
   {"id":"pair","path":"Settings → Phone & devices → Pair a phone","words":["phone","pair","pairing","qr","iphone","android","this server","pair a device","connect your phone","code","mobile","tablet","companion","get the phone app"]},
   {"id":"paired","path":"Settings → Phone & devices → Paired","words":["devices","remove","revoke","pair again"]},
   {"id":"wifi","path":"Settings → Phone & devices → How your phone reaches this computer → Same Wi-Fi","words":["wifi","wi-fi","lan","local network"],"only":"the desktop app, on this computer's own page"},

@@ -13,12 +13,18 @@ import type {
   SendTurnInput,
 } from "../contracts.ts";
 import { createAcpDriver, type AcpConfig, type AcpSupport } from "./acp/core.ts";
+import { reportedConfigValue } from "./acp/applied-config.ts";
+import { ANTIGRAVITY_HARNESS_FAILURE_LOG } from "./acp/harness-failure.ts";
+import { acpVendorMessage } from "./acp/rpc-error.ts";
+import { classifyError } from "./retry.ts";
 import {
+  antigravityCliSessionMode,
   antigravityClientInfo,
+  antigravityLaunchArgs,
   antigravityProfileAuthenticated,
   antigravityProfileDirectory,
   antigravitySessionSetup,
-  antigravityTokenPath,
+  antigravitySignInPaths,
   authorizationUrlFromLine,
   noteAntigravitySignedIn,
   noteAntigravitySignInRequired,
@@ -33,9 +39,13 @@ import { splitAntigravityThinking } from "./antigravity-models.ts";
 import { AntigravityAuthController } from "./antigravity-auth.ts";
 import {
   antigravityManagedInstallAvailable,
+  isAntigravityNativeAlias,
   installAntigravityRuntime,
   resolveAntigravityRuntime,
+  retirePinnedAntigravityRuntime,
 } from "./antigravity-runtime.ts";
+import { ANTIGRAVITY_NATIVE_CLI } from "./antigravity-cli-install.ts";
+import { acpFileEditWithin } from "./permission-command.ts";
 import { resolveAntigravityReleaseAsset } from "./antigravity-release.ts";
 import { AntigravityProcesses } from "./antigravity-processes.ts";
 import { VERIFICATION_TEMP_KEY, scheduleAntigravityTempSweep } from "./antigravity-temp.ts";
@@ -44,6 +54,9 @@ import { bundledEngineCatalog } from "../model-manifest/bundled.ts";
 import { currentEngineCatalog } from "../model-manifest/manifest.ts";
 
 export const STATIC_ANTIGRAVITY_MODELS: ModelCatalog = bundledEngineCatalog("antigravity");
+/** A live runtime that never answers session/new or session/resume gives up after this, as T3 Code's ACP startup does
+ * (pingdotgg/t3code@2f19cec0793); initialize keeps the core's longer limit, which the Windows runtime's unpack needs. */
+export const ANTIGRAVITY_SESSION_SETUP_TIMEOUT_MS = 90_000;
 
 /** Bots saved before the thinking-level option hold ids like `gemini-3.8-flash-medium` or `gemini-4-neon-high`;
  * the official runtime offers only the base model with that option, so run the base at the saved level. A runtime
@@ -85,21 +98,30 @@ export function antigravityUpdateFilter(): (update: Record<string, any>) => Reco
 }
 
 const SIGN_IN_WORDS = /\bauthenticat|\bunauthenticated\b|\bsign(?:ed)?[ -]?in\b|\blog(?:ged)?[ -]?in\b|\bcredentials?\b/iu;
+const SIGN_IN_ASKED = /\bauthentication required\b|\bunauthenticated\b|\bnot (?:logged|signed)[ -]?in\b|\b(?:sign|log)[ -]?in again\b|\bplease (?:sign|log)[ -]?in\b|\blogin expired\b|\bplease re-?authenticate\b|\bre-?authentication required\b|\binvalid_grant\b|\b(?:credentials?|token) (?:has been |have been |was |were )?revoked\b/iu;
+const UNREACHABLE = /\bnetwork\b|\bunreachable\b|\boffline\b|\bgetaddrinfo\b|\benotfound\b|\beai_again\b/iu;
 
-/** -32000 is ACP's `auth_required`, but an agent may reuse it for other failures; the text must agree. */
+/** -32000 is ACP's `auth_required`, but an agent may reuse it for other failures, a sign-in service it cannot reach
+ * among them. Words that ask for a sign-in decide; words that only mention one do unless the failure is one that passes.
+ * The native CLI answers `authenticate` with -32603 "No browser is available here" when it has no sign-in and no display. */
 export function antigravitySignInError(error: unknown): boolean {
-  const value = error as { code?: unknown; message?: unknown; data?: unknown } | null;
+  const value = error as { code?: unknown; message?: unknown; data?: any } | null;
+  if (value?.code === -32603 && typeof value.message === "string" && value.message.startsWith("No browser is available here")) return true;
   if (value?.code !== -32000) return false;
-  const data = typeof value.data === "string" ? value.data : value.data && typeof value.data === "object" ? JSON.stringify(value.data) : "";
-  return SIGN_IN_WORDS.test(`${typeof value.message === "string" ? value.message : ""} ${data.slice(0, 2_000)}`);
+  const data = value.data;
+  const bounded = (fields: unknown[]) => fields.filter((field): field is string => typeof field === "string").map((field) => field.slice(0, 2_000)).join(" ");
+  const reason = bounded([acpVendorMessage(error) ?? value.message, ...(typeof data === "string" ? [data] : [data?.details, data?.message, data?.reason, data?.error?.message])]);
+  const whole = `${reason} ${bounded([data && typeof data === "object" ? JSON.stringify(data) : undefined])}`;
+  if (SIGN_IN_ASKED.test(whole)) return true;
+  return SIGN_IN_WORDS.test(whole) && !UNREACHABLE.test(reason) && !classifyError({ text: reason }).transient;
 }
 
 const managedAsset = resolveAntigravityReleaseAsset();
 const runtimeProcesses = new AntigravityProcesses();
 /** Every model id an account here has been offered, beside the bundled catalog's. */
 const offeredModels = new Set<string>();
-/** The version of the runtime each instance's turns were last started on, known before it answers initialize. */
-const launchedVersions = new Map<string, string | null>();
+/** The runtime each instance's turns were last started on, known before it answers initialize. */
+const launched = new Map<string, { version: string | null; nativeCli: boolean }>();
 
 const support: AcpSupport = {
   driverKind: "antigravityAgent",
@@ -111,8 +133,9 @@ const support: AcpSupport = {
   loginNote: "Antigravity needs a Google account — choose Sign in with Google in engine setup",
   install: {
     docsUrl: "https://github.com/agentclientprotocol/registry/tree/main/antigravity-acp",
-    ...(managedAsset
-      ? { managed: { label: "Install official Antigravity", downloadBytes: managedAsset.archiveBytes } }
+    ...(antigravityManagedInstallAvailable()
+      // A client from before the native CLI shows this size whatever else is sent: the pinned archive's, or none.
+      ? { managed: { label: "Install official Antigravity", downloadBytes: managedAsset?.archiveBytes ?? 0, ...(ANTIGRAVITY_NATIVE_CLI ? { sizeUnknown: true as const } : {}) } }
       : {}),
   },
   images: true,
@@ -126,6 +149,15 @@ const support: AcpSupport = {
   sessionModelEnv: "AGY_ACP_DEFAULT_MODEL",
   sessionScopedApproval: true,
   resumeMethod: "resume",
+  // The packaged runtime unpacks and loads a ~1 GB Python bundle before it answers initialize (STARTUP_TIMEOUT_MS).
+  coldStartCost: "expensive",
+  // The startup model read is a second runtime process and a thinking-level survey: a saved list stands in for it.
+  modelListStandsIn: true,
+  sessionSetupTimeoutMs: ANTIGRAVITY_SESSION_SETUP_TIMEOUT_MS,
+  stderrFailure: {
+    line: ANTIGRAVITY_HARNESS_FAILURE_LOG,
+    message: "Antigravity's local agent connection failed. Send the message again to continue in a fresh Antigravity process.",
+  },
   clientFileSystem: true,
   clientReadRoots: (turn) => (turn.skillFiles ?? []).map(dirname),
   sanitizeToolPayload: true,
@@ -133,12 +165,12 @@ const support: AcpSupport = {
 
   resolveCommand: async (env, config, instanceId) => {
     const runtime = await resolveAntigravityRuntime(config.cli, env);
-    launchedVersions.set(instanceId, runtime.version);
+    launched.set(instanceId, { version: runtime.version, nativeCli: runtime.harnessPath === null });
     const profile = await prepareAntigravityProfile({ instanceId, runtime, baseEnv: env });
     if (profile.tempDirectory) scheduleAntigravityTempSweep(instanceId);
     return {
       command: runtime.executablePath,
-      args: process.platform === "linux" ? ["--uid="] : [],
+      args: antigravityLaunchArgs(runtime, profile.directory),
       env: profile.environment,
       ro: [join(profile.directory, "omb-skills")],
     };
@@ -166,13 +198,16 @@ const support: AcpSupport = {
   signInRequest: {
     stderrLine: (line) => authorizationUrlFromLine(line) !== null,
     rpcError: antigravitySignInError,
-    required: (instanceId) => noteAntigravitySignInRequired(antigravityTokenPath(instanceId)),
+    required: (instanceId) => antigravitySignInPaths(instanceId).forEach(noteAntigravitySignInRequired),
   },
   processStarted: (child, instanceId) => runtimeProcesses.track(instanceId, child),
   sessionSetupParams: antigravitySessionSetup,
   // One model family's quota is not the account's: Gemini and the models that share another allowance keep running.
   limitFacts: (_text, model) => antigravityLimitFacts(model, [...support.models.options.map((option) => option.id), ...offeredModels]),
-  clientInfo: (instanceId) => antigravityClientInfo(launchedVersions.get(instanceId)),
+  clientInfo: (instanceId) => antigravityClientInfo(launched.get(instanceId)?.version),
+  // In `default` the native CLI asks before every edit; Auto-accept edits answers those, as `auto_edit` did.
+  // Security: only a file edit inside the turn's folder is answered; one that names a command or another place is asked.
+  allowsAlone: (instanceId, turn, toolCall) => launched.get(instanceId)?.nativeCli === true && turn.approvalMode === "edits" && acpFileEditWithin(toolCall, turn.cwd),
   promptOutcome: (instanceId, sessionId) => watchAntigravityPromptOutcome(support.displayName, antigravityProfileDirectory(instanceId), sessionId),
   requireAuthenticationBeforeSpawn: true,
   isAuthenticated: async (env, config, instanceId) => {
@@ -199,11 +234,17 @@ const support: AcpSupport = {
     }
   },
 
-  configureSession: async ({ request, sessionId, config, turn, configOptions }) => {
+  configureSession: async ({ request, sessionId, instanceId, config, turn, configOptions, applied }) => {
+    const nativeCli = launched.get(instanceId)?.nativeCli === true;
     if (!Array.isArray(configOptions) || !configOptions.some(option => option?.id === "mode")) {
+      // The native CLI answers by the turn's level only in `default`; with no mode to confirm, nothing says it is there.
+      if (nativeCli) throw new Error("Antigravity did not report its permission mode.");
       return;
     }
-    const wanted = antigravityPermissionMode(config.fullAuto, turn.approvalMode);
+    const level = antigravityPermissionMode(config.fullAuto, turn.approvalMode);
+    const wanted = nativeCli ? antigravityCliSessionMode(level) : level;
+    // A mode this live session confirmed, and still reports, is not sent again.
+    if (applied?.holds("mode", wanted, reportedConfigValue(configOptions, "mode"))) return;
     const result = await request("session/set_config_option", {
       sessionId,
       configId: "mode",
@@ -212,7 +253,8 @@ const support: AcpSupport = {
     const mode = Array.isArray(result?.configOptions)
       ? result.configOptions.find((option: any) => option?.id === "mode")?.currentValue
       : undefined;
-    if (mode !== wanted) throw new Error(`Antigravity did not apply ${wanted} permission mode.`);
+    if (mode !== wanted) throw (applied?.clear(), new Error(`Antigravity did not apply ${wanted} permission mode.`));
+    applied?.accepted("mode", wanted);
   },
 };
 
@@ -224,9 +266,13 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
     const base = await AcpAntigravityDriver.create(input);
     scheduleAntigravityTempSweep(input.instanceId);
     scheduleAntigravityTempSweep(VERIFICATION_TEMP_KEY);
+    // Once an account here signed in on the native CLI, the pinned runtime it replaced is removed.
+    const retirePinned = () => void retirePinnedAntigravityRuntime().catch(() => []);
+    retirePinned();
     const auth = new AntigravityAuthController(() => {
-      noteAntigravitySignedIn(antigravityTokenPath(input.instanceId));
+      antigravitySignInPaths(input.instanceId).forEach(noteAntigravitySignedIn);
       void base.refreshModels?.();
+      retirePinned();
     });
     let signingOut: Promise<void> = Promise.resolve();
     let installFailure: string | undefined;
@@ -268,7 +314,7 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
             installRuntime: async () => {
               installFailure = undefined;
               try {
-                await installAntigravityRuntime({ validate: validateAntigravityRuntime });
+                await installAntigravityRuntime({ validate: validateAntigravityRuntime, native: isAntigravityNativeAlias(input.config.cli) });
               } catch (error) {
                 installFailure = error instanceof Error ? error.message : String(error);
                 throw error;
@@ -280,7 +326,8 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       startAuthentication: async () => {
         await signingOut;
         const { runtime, profile } = await runtimeAndProfile();
-        await verifyAntigravityBrowserHelper(profile);
+        // The native CLI's `--login` hands its link over itself; only the pinned runtime needs the browser helper.
+        if (runtime.harnessPath !== null) await verifyAntigravityBrowserHelper(profile);
         return auth.start(runtime, profile);
       },
       getAuthentication: async (flowId) => auth.get(flowId),
