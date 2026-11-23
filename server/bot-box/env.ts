@@ -11,7 +11,13 @@ export const BOX_ENV_NAMES: ReadonlySet<string> = new Set([
   "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR", "DISPLAY", "WAYLAND_DISPLAY",
   "AGENT_BROWSER_EXECUTABLE_PATH", "BROWSER", "BASH_MAX_TIMEOUT_MS", "ELECTRON_RUN_AS_NODE", "PYTHONUNBUFFERED", "PYTHONDONTWRITEBYTECODE",
   "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL",
+  // Antigravity's native CLI keeps each profile's Google sign-in in that profile's own file only while this is set
+  // (server/drivers/antigravity-acp.ts sets a fixed value); without it, it waits on an OS keyring the box does not have.
+  "SSH_CONNECTION",
 ]);
+
+/** The one SSH_CONNECTION value a box may see (server/drivers/antigravity-acp.ts starts the native CLI with it). */
+export const BOX_SSH_CONNECTION = "127.0.0.1 0 127.0.0.1 0";
 
 /** OpenMausBot's own variables a boxed process reads: what the harness sets for a bot's engine, its hooks and the MCP
  * proxies it starts. Security: no other `OMB_` name passes, whatever the operator set on the server (an SMTP URL, a
@@ -74,6 +80,8 @@ export function boxEnvironment(
   const kept: Record<string, string> = {};
   for (const [name, value] of Object.entries(env)) {
     if (value === undefined || !boxEnvironmentAllows(name, deny, allow)) continue;
+    // Security: only the fixed value an engine is started with passes, never the server's own SSH session (its addresses).
+    if (name === "SSH_CONNECTION" && value !== BOX_SSH_CONNECTION) continue;
     kept[name] = value;
   }
   return kept;

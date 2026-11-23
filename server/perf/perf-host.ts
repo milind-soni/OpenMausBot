@@ -17,6 +17,7 @@ import type { FailoverWhy } from "./turn-record.ts";
 import { createTurnTimings, type Refusal, type SlowNote, type TurnTimings } from "./turn-timings.ts";
 import { createLaunchTimings, LAUNCH_FILE, type LaunchTimings } from "./launch-timings.ts";
 import { startStallWatch, stallReportLines, type StallWatch } from "./stall-watch.ts";
+import { turnStartsSection } from "./turn-starts.ts";
 
 export const PERF_FILE = "perf-timings.json";
 /** The last storage pass and the one under way: under `cache`, which backups leave behind, since they describe this volume only. */
@@ -170,7 +171,8 @@ export function createPerfHost(deps: PerfHostDeps) {
     },
     /** For the desktop's diagnostics export: every bot's latest turns. */
     text(): string {
-      return stallsFirst(guarded("text", () => perfLines(sources(), timings.recent({ limit: RECENT_IN_REPORT }), "Latest turns, newest last:"), PERF_UNAVAILABLE)).join("\n");
+      return [...stallsFirst(guarded("text", () => perfLines(sources(), timings.recent({ limit: RECENT_IN_REPORT }), "Latest turns, newest last:"), PERF_UNAVAILABLE)),
+        ...guarded("turn-starts", () => turnStartsSection(), [])].join("\n");
     },
     /** The graceful shutdown: no more samples, and the turns since the last save written now. */
     stop() { sampler.stop(); stalls.stop(); watch?.stop(); void disk?.stop(); guarded("save", () => timings.flush(), undefined); if (launches) guarded("launch", () => launches.flush(), undefined); },

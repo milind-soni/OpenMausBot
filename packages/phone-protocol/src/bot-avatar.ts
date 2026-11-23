@@ -4,6 +4,12 @@ export const MASCOT_FACE_COLORS = ["white", "black"] as const;
 export const mascotFaceColorSchema = z.enum(MASCOT_FACE_COLORS);
 export type MascotFaceColor = z.infer<typeof mascotFaceColorSchema>;
 
+/** A custom avatar body tint, stored as lowercase `#rrggbb`. */
+export const mascotBodyColorSchema = z
+  .string()
+  .regex(/^#[0-9a-f]{6}$/i, "must be a #rrggbb hex colour")
+  .transform((value) => value.toLowerCase());
+
 export function mascotFaceInk(value: unknown): string | undefined {
   const color = mascotFaceColorSchema.safeParse(value).data;
   return color === "white" ? "#ffffff" : color === "black" ? "#000000" : undefined;
