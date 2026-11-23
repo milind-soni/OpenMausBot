@@ -468,19 +468,21 @@ async function forgetReplacedImport(ctx: DataContext, sql: string, target: strin
   const head = tokens.slice(tokens.findIndex((token) => token.text === "CREATE"));
   if (head[0]?.text !== "CREATE" || head[1]?.text !== "OR" || head[2]?.text !== "REPLACE") return;
   if (head[3]?.text === "TEMP" || head[3]?.text === "TEMPORARY") return;
-  const parts = tableIdentifierParts(target);
-  if (!parts || parts.length > 3) return;
-  const schema = (parts.length === 1 ? "main" : parts[parts.length - 2]!).toLowerCase();
-  // DuckDB 1.5 reads catalog.table as main.table when the qualifier is this file's database name.
-  if (schema !== "main" && !(parts.length === 2 && schema === await currentCatalog(ctx))) return;
-  const fold = parts[parts.length - 1]!.toLowerCase();
-  const names = ctx.sheet.sheet().sources.filter((source) => source.name.toLowerCase() === fold).map((source) => source.name);
-  for (const name of names) ctx.sheet.removeSource(name);
+  const name = await localMainTable(ctx, target);
+  if (!name) return;
+  const names = ctx.sheet.sheet().sources.filter((source) => source.name.toLowerCase() === name).map((source) => source.name);
+  for (const sourceName of names) ctx.sheet.removeSource(sourceName);
 }
 
-async function currentCatalog(ctx: DataContext): Promise<string> {
-  const listed = await ctx.database.run("SELECT current_database()", runOptions(ctx));
-  return String(listed.rows[0]?.[0] ?? "").toLowerCase();
+// DuckDB 1.5 reads catalog.table as main.table when the qualifier is this file's database name.
+async function localMainTable(ctx: DataContext, target: string): Promise<string | null> {
+  const parts = tableIdentifierParts(target);
+  if (!parts || parts.length > 3) return null;
+  const table = parts[parts.length - 1]!.toLowerCase();
+  const qualifier = parts.slice(0, -1).map((part) => part.toLowerCase());
+  if (!qualifier.length || (qualifier.length === 1 && qualifier[0] === "main")) return table;
+  if (qualifier[0] !== String((await ctx.database.run("SELECT current_database()", runOptions(ctx))).rows[0]?.[0] ?? "").toLowerCase()) return null;
+  return qualifier.length === 1 || qualifier[1] === "main" ? table : null;
 }
 
 export interface LoadedTable { name: string; rowCount: number; columns: DataColumn[]; source: string }

@@ -515,18 +515,28 @@ describe("distinct table names within one import", () => {
   });
 
   it("leaves the import record when data_sql replaces a table in another attached database", async () => {
-    const ctx = await unboundView("other-catalog");
+    const ctx = await context("other-catalog");
+    await ctx.database.run("CREATE TABLE sales_report AS SELECT 'kept' AS origin, 99 AS value", { connection });
     const file = join(root, "other-catalog.csv");
     writeFileSync(file, "id,name\n1,Alice\n");
-    const loaded = await runDataTool(ctx, "data_load", { source: file, name: "sales_report" });
+    const loaded = await runDataTool(ctx, "data_load", { source: file, name: "sales_report", replace: false });
     expect(loaded.isError, loaded.content[0]?.text).toBeUndefined();
     expect(loaded.structuredContent!.tables).toMatchObject([{ name: "sales_report_2" }]);
     const other = join(root, "analytics.duckdb");
     await ctx.database.run(`ATTACH '${other.replaceAll("'", "''")}' AS analytics`, { connection });
-    await runDataTool(ctx, "data_sql", { sql: "CREATE OR REPLACE TABLE analytics.sales_report_2 AS SELECT 'other' AS origin, 8 AS value" });
+    await runDataTool(ctx, "data_sql", { sql: "CREATE OR REPLACE TABLE analytics.sales_report_2 AS SELECT 'alias' AS origin, 8 AS value" });
     expect(ctx.sheet.sheet().sources.find((source) => source.name === "sales_report_2")).toMatchObject({ requested: "sales_report" });
-    expect((await ctx.database.run("SELECT * FROM sales_report_2", { connection })).rows).toEqual([["1", "Alice"]]);
+    expect((await ctx.database.run("SELECT * FROM analytics.main.sales_report_2", { connection })).rows).toEqual([["alias", 8]]);
+    await runDataTool(ctx, "data_sql", { sql: "CREATE OR REPLACE TABLE analytics.main.sales_report_2 AS SELECT 'other' AS origin, 8 AS value" });
     expect((await ctx.database.run("SELECT * FROM analytics.main.sales_report_2", { connection })).rows).toEqual([["other", 8]]);
+
+    writeFileSync(file, "id,name\n2,Bob\n");
+    const reloaded = await runDataTool(ctx, "data_load", { source: file, name: "sales_report" });
+    expect(reloaded.isError, reloaded.content[0]?.text).toBeUndefined();
+    expect((await ctx.database.run("SELECT * FROM sales_report", { connection })).rows).toEqual([["kept", 99]]);
+    expect((await ctx.database.run("SELECT * FROM sales_report_2", { connection })).rows).toEqual([["2", "Bob"]]);
+    expect(ctx.sheet.sheet().sources.find((source) => source.name === "sales_report_2")).toMatchObject({ requested: "sales_report" });
+    expect(reloaded.structuredContent!.tables).toMatchObject([{ name: "sales_report_2" }]);
     await ctx.database.run("DETACH analytics", { connection });
   });
 });
