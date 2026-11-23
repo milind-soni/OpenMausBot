@@ -482,7 +482,7 @@ export function BotThreadList({ bot, selected, drafting, query, pendingQueued, r
   useSnoozeExpiry(tasks);
   const bulk = useBulkSelect();
   const { own: ownTasks, helpers } = bulk.active ? { own: tasks, helpers: [] } : partitionHelperThreads(tasks, bot.threadId, query, projects);
-  const visibleTasks = orderedThreadList(visibleSidebarThreads(ownTasks, bot.threadId, query, projects, showAll || bulk.active, routineRuns));
+  const visibleTasks = orderedThreadList(visibleSidebarThreads(ownTasks, bot.threadId, query, projects, showAll || bulk.active, routineRuns, bot.mainThreadId));
   const visibleProjectIndex = (projectId: string) => visibleTasks.findIndex((task) => task.projectId === projectId);
   const folderRank = (projectId: string) => {
     const index = visibleProjectIndex(projectId);
@@ -512,7 +512,7 @@ export function BotThreadList({ bot, selected, drafting, query, pendingQueued, r
   }), [botId, dispatch]);
   const renderThread = (task: (typeof tasks)[number]) => {
     const thread = currentTaskBot(bot, task.threadId);
-    return <SidebarThreadRow key={task.threadId} task={{ ...task, busy: thread.busy, activity: thread.activity, waitingForTeammates: thread.waitingForTeammates }} ownerId={bot.id} current={selected && !drafting && task.threadId === bot.threadId} folders={projects}
+    return <SidebarThreadRow key={task.threadId} task={{ ...task, busy: thread.busy, activity: thread.activity, waitingForTeammates: thread.waitingForTeammates }} ownerId={bot.id} current={selected && !drafting && task.threadId === bot.threadId} main={task.threadId === bot.mainThreadId} folders={projects}
       activityLabel={task.threadId === bot.threadId ? activityLabel : undefined} now={stampClock(threadRecency(task), now)} locale={locale} {...actions}
       selectMode={bulk.active} checked={selection.has(task.threadId)} onToggleSelect={bulk.toggle} />;
   };
@@ -626,7 +626,7 @@ export function BotThreadList({ bot, selected, drafting, query, pendingQueued, r
       {ungrouped.map(renderThread)}
       <HelperThreadGroup tasks={orderedThreadList(helpers)} renderThread={renderThread} />
       <ThreadListFooter bulk={bulk} rows={shownRows} selected={selection} total={ownTasks.length} canShowAll={!query && !showAll && ownTasks.length > visibleTasks.length} canSelect={tasks.length > 1}
-        onShowAll={() => setShowAll(true)} onShowFewer={showAll && !query && !bulk.active && visibleSidebarThreads(ownTasks, bot.threadId, query, projects, false, routineRuns).length < ownTasks.length ? () => setShowAll(false) : undefined} freshConversation onDelete={(threadIds) => deleteThreadsInBulk({ botId: bot.id }, threadIds, dispatch)}
+        onShowAll={() => setShowAll(true)} onShowFewer={showAll && !query && !bulk.active && visibleSidebarThreads(ownTasks, bot.threadId, query, projects, false, routineRuns, bot.mainThreadId).length < ownTasks.length ? () => setShowAll(false) : undefined} freshConversation onDelete={(threadIds) => deleteThreadsInBulk({ botId: bot.id }, threadIds, dispatch)}
         onRetitle={(threadIds) => retitleThreadsInBulk(bot.id, threadIds)} />
       <LocalComputerAutoWarning
         open={permissionRefresh?.kind === "local-auto"}

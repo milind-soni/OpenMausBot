@@ -90,6 +90,31 @@ describe("a bot's Show all threads", () => {
   });
 });
 
+describe("a bot's main thread", () => {
+  const marked = () => [...host.querySelectorAll("[data-main-thread-mark]")].map((mark) => mark.closest("[data-sidebar-thread-row]")?.getAttribute("data-sidebar-thread-row"));
+
+  it("is marked in the thread list and stays listed when it is older than the short list", async () => {
+    bot.mainThreadId = "loose-0";
+    await mount();
+    expect(marked()).toEqual(["loose-0"]);
+    const mark = host.querySelector("[data-main-thread-mark]")!;
+    expect([mark.getAttribute("role"), mark.getAttribute("aria-label"), mark.textContent]).toEqual(["img", "Main thread", "Main"]);
+    expect(host.textContent).not.toContain("Loose chat 1");
+    await unmount();
+    delete bot.mainThreadId;
+    await mount();
+    expect(marked()).toEqual([]);
+    await unmount();
+  });
+
+  it("is marked on a collapsed bot's row for it", () => {
+    const html = renderToStaticMarkup(createElement(SidebarBotActivity, {
+      bot: { ...bot, mainThreadId: "filed-pinned" }, rowThreadId: bot.threadId, density: "comfortable", pendingQueued: {}, dispatch: vi.fn(),
+    }));
+    expect(html.match(/data-main-thread-mark/g)).toHaveLength(1);
+  });
+});
+
 describe("a collapsed folder", () => {
   it("keeps showing its pinned threads and hides the rest", async () => {
     await mount();

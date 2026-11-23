@@ -18,6 +18,7 @@ import { useContextAction } from "./ContextWarning";
 import { ELEVATED_CONTROL, ELEVATED_HOVER, ELEVATED_OPEN } from "./elevated";
 import { ShortcutHint } from "./ShortcutHint";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
+import { MainThreadMark } from "./SidebarRowMarkers";
 import { orderedThreadList } from "./SidebarThreadRow";
 import { openBotSettings } from "./bot-panel/panel-link";
 import { ShareBotButton, useTeamName } from "./bot-access/ShareBotButton";
@@ -116,6 +117,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
         key: `thread:${task.threadId}`,
       label: localizedTaskTitle(task.title || t("task.newShort")),
         active: task.threadId === bot.threadId,
+        trailing: task.threadId === profile.mainThreadId ? <MainThreadMark /> : undefined,
         onSelect: () => openBotThread(dispatch, profile, task.threadId, showThreads),
       })),
       onSelect: () => {},

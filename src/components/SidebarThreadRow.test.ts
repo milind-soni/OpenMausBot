@@ -57,6 +57,11 @@ describe("sidebar thread visibility", () => {
     expect(visibleSidebarThreads(rows, "8", "", [], true)).toEqual(rows);
   });
 
+  it("keeps the bot's main thread listed when it is older than the six recent rows", () => {
+    expect(visibleSidebarThreads(tasks, "0", "", [], false, [], "9").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5", "9"]);
+    expect(visibleSidebarThreads(tasks, "0").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5"]);
+  });
+
   it("leaves a burst's parts to its card, unless one is open or needs the person", () => {
     const openedBy = { botId: "b", name: "Bot", at: 1, burstId: "run-1" };
     const parts = [{ threadId: "quiet", title: "Quiet", openedBy }, { threadId: "open", title: "Open", openedBy }, { threadId: "asks", title: "Asks", openedBy, unread: true }];

@@ -11548,6 +11548,7 @@
   "sidebar.threads.hideShort": "Hide",
   "sidebar.threads.running": "+{count} running",
   "sidebar.threads.more": "{count} more",
+  "sidebar.threads.main": "Main",
   "skillBurger.aria": "Skill Burger",
   "skillBurger.layers": "Steps",
   "skillBurger.layersOne": "1 step",

@@ -203,6 +203,7 @@ describe("a bot's conversations in its panel", () => {
     const star = row("launch").querySelector('[role="img"][aria-label="Main thread"]');
     expect(star?.getAttribute("title")).toBe("Main thread");
     expect(star?.querySelector("svg")).not.toBeNull();
+    expect(star?.textContent).toBe("Main");
     expect(row("who").querySelector('[aria-label="Main thread"]')).toBeNull();
     render(research({ mainThreadId: "who" }));
     expect(row("who").querySelector('[aria-label="Main thread"]')).not.toBeNull();

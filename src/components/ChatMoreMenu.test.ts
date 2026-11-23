@@ -129,6 +129,7 @@ describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
       ["Untitled chat", false],
       ["Our chat", false],
     ]);
+    expect(threads.submenu!.map((item) => renderToStaticMarkup(createElement("div", null, item.trailing)).includes('aria-label="Main thread"'))).toEqual([false, false, true]);
     threads.submenu![2].onSelect();
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: "pepper", threadId: "main" });
   });

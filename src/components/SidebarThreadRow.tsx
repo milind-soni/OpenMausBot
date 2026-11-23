@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState, type Dispatch, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Archive, ArchiveRestore, BellOff, Brain, Check, ChevronRight, Clock, Clock3, FolderInput, Link2, Link2Off, Loader2, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, Star, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, BellOff, Brain, Check, ChevronRight, Clock, Clock3, FolderInput, Link2, Link2Off, Loader2, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, Trash2 } from "lucide-react";
 import type { Action, AppState, BotProject, Task } from "@/state/store";
 import { api } from "@/state/store";
 import type { RoutineRun } from "@/lib/routines";
@@ -18,7 +18,7 @@ import { threadLinkLabel } from "../../shared/thread-link";
 import { isSnoozed, orderedThreadList } from "../../shared/wire";
 import { Select } from "./Select";
 import { WorkingTimer } from "./WorkingIndicator";
-import { rowSelectedSurface } from "./SidebarRowMarkers";
+import { MainThreadMark, rowSelectedSurface } from "./SidebarRowMarkers";
 import { useHeldText } from "./SidebarWorkingStep";
 import { localizedTaskTitle } from "@/lib/task-title";
 import { useAdvancedMode } from "@/lib/interface-mode";
@@ -130,7 +130,7 @@ export function HelperThreadGroup<T>({ tasks, renderThread }: { tasks: T[]; rend
 }
 
 /** Default list shows each routine's newest run only; older runs stay under "Show all". */
-export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activeId: string, query = "", folders: BotProject[] = [], showAll = false, routineRuns: readonly Pick<RoutineRun, "routineId" | "threadId" | "createdAt">[] = []): T[] {
+export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activeId: string, query = "", folders: BotProject[] = [], showAll = false, routineRuns: readonly Pick<RoutineRun, "routineId" | "threadId" | "createdAt">[] = [], mainId?: string): T[] {
   const needle = query.trim().toLowerCase();
   if (needle) {
     return tasks.filter((task) => task.title.toLowerCase().includes(needle) || folders.some((folder) => folder.id === task.projectId && folder.name.toLowerCase().includes(needle)));
@@ -155,7 +155,7 @@ export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activ
     if (run && newestRun.get(run.routineId) !== run) return demandsAttention(task, activeId);
     return task.closedBy || isSnoozed(task)
       ? demandsAttention(task, activeId)
-      : open++ < 6 || demandsAttention(task, activeId);
+      : open++ < 6 || task.threadId === mainId || demandsAttention(task, activeId);
   });
 }
 
@@ -256,7 +256,7 @@ type ThreadRowProps = {
    * has worked. */
   panel?: boolean;
   preview?: string;
-  /** The bot's main thread ("Set as main thread"), starred like it is in the sidebar's thread list. */
+  /** The bot's main thread ("Set as main thread"). */
   main?: boolean;
 };
 
@@ -346,7 +346,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
   }, [menu]);
   const heading = <span className={cn("flex min-w-0 flex-1 items-baseline gap-1.5", panel && "pe-6")}>
     <span dir="auto" className={cn("min-w-0 flex-1 max-w-max truncate", task.unread && "font-semibold text-ink", (closed || archived || snoozed) && !current && "text-ink-tertiary")}>{displayTitle}</span>
-    {main && <span role="img" className="shrink-0 self-center text-ink-secondary" aria-label={t("sidebar.bot.simple.mainThread")} title={t("sidebar.bot.simple.mainThread")}><Star size={12} aria-hidden="true" /></span>}
+    {main && <MainThreadMark className="self-center" />}
     {byline && (
       <span className="min-w-0 max-w-[45%] shrink truncate font-normal text-ink-tertiary">{byline}</span>
     )}
