@@ -72,6 +72,9 @@ const UPDATE_APP = { error: "update_app" } as const;
 
 const PAIRING_SESSION_PATHS = new Set(["POST /api/pair", "GET /api/health"]);
 
+/** Requests whose body carries a provider key. */
+const KEY_CARRYING = new Set(["PUT /api/config", "POST /api/keys/test"]);
+
 const RELEASE_VERSION = /^[0-9]{1,9}\.[0-9]{1,9}\.[0-9]{1,9}(-[0-9A-Za-z.-]{1,64})?(\+[0-9A-Za-z.-]{1,64})?$/;
 
 /** A token presented inside a session must belong to the device whose psk opened it. */
@@ -435,6 +438,11 @@ export function createProxyHandler(options: ProxyOptions) {
       authenticated: Boolean(device),
     });
     if (denial) return sendJson(res, denial.status, { error: denial.error });
+
+    // A provider key never crosses the LAN in the clear: on the plain listener it must arrive inside an encrypted session.
+    if (!e2e && listener === "lan" && KEY_CARRYING.has(`${method} ${path}`)) {
+      return sendJson(res, 403, { error: "API keys can only be sent over an encrypted connection. Update the app and try again." });
+    }
 
     // Pairing grants the ordinary companion surface, not a computer's browser
     // session; the owner enables this per device, off by default.
