@@ -87,8 +87,8 @@ export interface DeviceSources {
   phoneApps?: readonly PublicPhone[] | null;
   sessions?: { sessions: readonly SignedInDevice[]; current: string | null } | null;
   lent?: readonly LentDevice[] | null;
-  /** The servers bots reach over SSH, by alias. */
-  vps?: readonly string[] | null;
+  /** The servers bots reach over SSH: the SSH alias, and the name the person gave it. */
+  vps?: ReadonlyArray<{ alias: string; name?: string }> | null;
   now?: number;
 }
 
@@ -194,9 +194,9 @@ function fromLent(computer: LentDevice, route: DeviceRoute): Device {
   };
 }
 
-function fromVps(alias: string): Device {
+function fromVps({ alias, name }: { alias: string; name?: string }): Device {
   return {
-    id: `vps:${alias}`, kind: "server", name: alias, status: "unknown", route: "ssh", routes: ["ssh"], sources: [{ type: "vps", id: alias }],
+    id: `vps:${alias}`, kind: "server", name: name?.trim() || alias, status: "unknown", route: "ssh", routes: ["ssh"], sources: [{ type: "vps", id: alias }],
     canRunBots: false, canHostComputer: true, actions: [{ type: "manage", page: "ai", anchor: "ai-keys" }],
   };
 }
@@ -267,7 +267,7 @@ export function buildDevices(sources: DeviceSources): Device[] {
     .filter((session) => session.id !== sources.sessions?.current && !session.token && (here.kind === "computer" || here.kind === "server" || session.scopes.includes("admin")))
     .map((session) => fromSession(session, remote, now));
   const lent = (sources.lent ?? []).filter((computer) => computer.lent).map((computer) => fromLent(computer, here.kind === "computer" || here.kind === "server" ? "paired" : "cloud"));
-  const vps = [...new Set(sources.vps ?? [])].map(fromVps);
+  const vps = (sources.vps ?? []).filter((server, index, all) => server.alias && all.findIndex((other) => other.alias === server.alias) === index).map(fromVps);
   return [self, ...mergeAll([places, lent, phones, apps, signedIn, vps], aliases)];
 }
 

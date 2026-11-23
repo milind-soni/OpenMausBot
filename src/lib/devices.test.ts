@@ -117,9 +117,10 @@ describe("the device list", () => {
     const devices = buildDevices({
       here: { name: "My Cloud", kind: "cloud", desktop: true }, now: NOW,
       lent: [{ id: "l1", name: "Ada's MacBook", platform: "darwin", online: true, lent: true, lastSeenAt: NOW }, { id: "l2", name: "Old", platform: "linux", online: false, lent: false, lastSeenAt: 0 }],
-      vps: ["my-vps", "my-vps"],
+      vps: [{ alias: "my-vps" }, { alias: "my-vps", name: "Again" }, { alias: "gpu", name: "GPU box" }],
     });
-    expect(devices.map((device) => device.id)).toEqual(["here", "lent:l1", "vps:my-vps"]);
+    expect(devices.map((device) => device.id)).toEqual(["here", "lent:l1", "vps:my-vps", "vps:gpu"]);
+    expect(devices[3]!.name).toBe("GPU box");
     expect(devices[1]).toMatchObject({ route: "cloud", canHostComputer: true, canRunBots: false, status: "online" });
     expect(devices[2]).toMatchObject({ kind: "server", route: "ssh", status: "unknown", canHostComputer: true });
   });
