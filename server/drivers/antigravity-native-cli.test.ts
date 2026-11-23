@@ -276,38 +276,41 @@ describe("installing the native CLI from Google's channel", () => {
 });
 
 describe("which CLI an instance that names none runs", () => {
-  it("is the pinned runtime, with the native CLI installed beside it left unused, unless the path asks for the native CLI", async () => {
+  it("is the native CLI when no pinned runtime is installed to go first, and with the default off only for the path that asks for it", async () => {
     const baseDir = folder();
     const one = await release("1.5.7");
     const installed = await installAntigravityRuntime({ baseDir, fetchImpl: serving([one]).fetchImpl, native: true, cliRelease: one.asset });
     for (const cli of ["agy", undefined]) {
-      await expect(resolveAntigravityRuntime(cli, { PATH: "" }, baseDir)).rejects.toThrow();
-      await expect(resolveAntigravityRuntime(cli, { PATH: "" }, baseDir)).rejects.not.toMatchObject({ message: expect.stringContaining("native CLI is not installed") });
+      await expect(resolveAntigravityRuntime(cli, { PATH: "" }, baseDir)).resolves.toEqual(installed);
+      await expect(resolveAntigravityRuntime(cli, { PATH: "" }, baseDir, { nativeByDefault: false })).rejects.toThrow();
+      await expect(resolveAntigravityRuntime(cli, { PATH: "" }, baseDir, { nativeByDefault: false })).rejects.not.toMatchObject({ message: expect.stringContaining("native CLI is not installed") });
     }
-    await expect(resolveAntigravityRuntime("antigravity", { PATH: "" }, baseDir)).resolves.toEqual(installed);
-    await expect(resolveAntigravityRuntime("agy", { PATH: "" }, baseDir, { nativeByDefault: true })).resolves.toEqual(installed);
+    await expect(resolveAntigravityRuntime("antigravity", { PATH: "" }, baseDir, { nativeByDefault: false })).resolves.toEqual(installed);
   });
 
-  it.skipIf(!resolveAntigravityReleaseAsset())("installs only the pinned runtime for a path that names none, and only the native CLI for the path that asks for it", async () => {
+  it.skipIf(!resolveAntigravityReleaseAsset())("installs the native CLI on a new computer, and with the default off only the pinned runtime unless the path asks for the CLI", async () => {
     const pinned = resolveAntigravityReleaseAsset()!;
     const one = await release("1.5.7");
-    const none = serving([one]);
-    await expect(installAntigravityRuntime({ baseDir: folder(), fetchImpl: none.fetchImpl, cliRelease: one.asset })).rejects.toThrow("Google download failed (404).");
-    expect(none.asked).toEqual([pinned.url]);
+    const fresh = serving([one]);
+    await installAntigravityRuntime({ baseDir: folder(), fetchImpl: fresh.fetchImpl, cliRelease: one.asset });
+    expect(fresh.asked).toEqual([one.asset.url]);
+    const off = serving([one]);
+    await expect(installAntigravityRuntime({ baseDir: folder(), fetchImpl: off.fetchImpl, cliRelease: one.asset, nativeByDefault: false })).rejects.toThrow("Google download failed (404).");
+    expect(off.asked).toEqual([pinned.url]);
     const asked = serving([one]);
-    await installAntigravityRuntime({ baseDir: folder(), fetchImpl: asked.fetchImpl, cliRelease: one.asset, native: true });
+    await installAntigravityRuntime({ baseDir: folder(), fetchImpl: asked.fetchImpl, cliRelease: one.asset, native: true, nativeByDefault: false });
     expect(asked.asked).toEqual([one.asset.url]);
   });
 
-  it("updates the native CLI only for a path that asks for it, or where it is the default", async () => {
+  it("updates the native CLI where it is the default, and with the default off only for a path that asks for it", async () => {
     const baseDir = folder();
     const [current, newer] = [await release("1.5.7"), await release("1.5.8")];
     await installAntigravityRuntime({ baseDir, fetchImpl: serving([current]).fetchImpl, cliRelease: current.asset, native: true });
     const latest = async () => newer.asset, at = Date.now() + 100 * 60 * 60 * 1000;
-    expect(await antigravityCliUpdate({ baseDir, now: at, latest, asset: null, configuredClis: ["agy"] })).toBeNull();
-    expect(await antigravityCliUpdate({ baseDir, now: at, latest, asset: null })).toBeNull();
-    expect(await antigravityCliUpdate({ baseDir, now: at, latest, asset: null, configuredClis: ["agy", "antigravity"] })).toBe("1.5.7");
-    expect(await antigravityCliUpdate({ baseDir, now: at, latest, asset: null, nativeByDefault: true })).toBe("1.5.7");
+    expect(await antigravityCliUpdate({ baseDir, now: at, latest, asset: null, configuredClis: ["agy"] })).toBe("1.5.7");
+    expect(await antigravityCliUpdate({ baseDir, now: at, latest, asset: null, configuredClis: ["agy"], nativeByDefault: false })).toBeNull();
+    expect(await antigravityCliUpdate({ baseDir, now: at, latest, asset: null, nativeByDefault: false })).toBeNull();
+    expect(await antigravityCliUpdate({ baseDir, now: at, latest, asset: null, configuredClis: ["agy", "antigravity"], nativeByDefault: false })).toBe("1.5.7");
   });
 
 });

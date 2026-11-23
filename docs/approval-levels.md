@@ -333,11 +333,11 @@ inside the turn's folder: one that names a command, gives no location, or
 reaches outside that folder is asked as usual. A turn fails rather than start
 when the CLI offers no mode or does not confirm `default`.
 
-A computer that already has the pinned runtime keeps it. To move an
-Antigravity account to the native CLI, set its **CLI path** to `antigravity`
-and choose **Install official Antigravity**; to move back, set the CLI path to
-`agy`. An account with no CLI path, or `agy`, runs the pinned runtime even
-when the native CLI is installed. The native CLI signs in through its own
+A new install takes the native CLI; a computer that already has the pinned
+runtime keeps it. To move an Antigravity account to the native CLI, set its
+**CLI path** to `antigravity` and choose **Install official Antigravity**; to
+move back, set the CLI path to `agy`. An account with no CLI path, or `agy`,
+runs the pinned runtime when it is installed, and the native CLI otherwise. The native CLI signs in through its own
 `acp --login`: the link opens Google, and the code or address the page ends on
 is pasted back into the sign-in card. The native CLI keeps one sign-in per
 computer (1.5.14 stores it in a single OS keyring entry, whatever folder it is

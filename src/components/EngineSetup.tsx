@@ -272,9 +272,10 @@ export function EngineWarningNotice({
   );
 }
 
-/** An Antigravity account whose CLI path names Google's native CLI (`antigravity`, or a path to it), not the pinned runtime. */
+/** An Antigravity account on Google's native CLI: the one it runs, or, before that is installed, the one its path names. */
 export function runsAntigravityCli(instance: InstanceInfo): boolean {
-  return instance.driverKind === "antigravityAgent" && /(?:^|[\\/])antigravity(?:\.exe)?$/iu.test(instance.cli?.trim() ?? "");
+  return instance.driverKind === "antigravityAgent"
+    && (instance.snapshot.sharedSignIn === true || /(?:^|[\\/])antigravity(?:\.exe)?$/iu.test(instance.cli?.trim() ?? ""));
 }
 
 function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; signInOnly: boolean }) {

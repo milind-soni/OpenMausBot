@@ -114,13 +114,15 @@ it("names Google on the sign-in card, never another provider", () => {
   expect(host.textContent).not.toContain("Mistral");
 });
 
-it("says on a native CLI account's sign-in card that its sign-in is the one the Antigravity CLI shares, and not on the pinned runtime's", () => {
+it("says on a native CLI account's sign-in card, by its path or by the CLI it runs, that its sign-in is the one the Antigravity CLI shares, and not on the pinned runtime's", () => {
   vi.stubGlobal("ogb", { platform: "linux", remoteClient: { active: false } });
   const store = { state: { config: {} }, dispatch: vi.fn(), refreshInstances: vi.fn(async () => {}), refreshModels: vi.fn(async () => {}) } as unknown as ReturnType<typeof useStore>;
   const render = (instance: InstanceInfo) => flushSync(() => root.render(createElement(BotEditorStore, { value: store, children: createElement(EngineSetup, { instance }) })));
   render({ ...antigravity, cli: "antigravity" });
   expect(host.textContent).toContain("Antigravity CLI keeps one sign-in on this computer");
   expect(host.textContent).not.toContain("has its own Google account");
+  render({ ...antigravity, cli: "agy", snapshot: { ...antigravity.snapshot, sharedSignIn: true } });
+  expect(host.textContent).toContain("Antigravity CLI keeps one sign-in on this computer");
   render({ ...antigravity, cli: "agy" });
   expect(host.textContent).toContain("has its own Google account");
   expect(host.textContent).not.toContain("keeps one sign-in");

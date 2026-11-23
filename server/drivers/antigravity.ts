@@ -254,7 +254,7 @@ const support: AcpSupport = {
       if (runtime.harnessPath === null) {
         // A CLI that could not answer leaves `authenticated` out, which no caller reads as signed out.
         const authenticated = await nativeSignedIn(instanceId, runtime, profile).catch(() => undefined);
-        return { state: "available", version: runtime.version, ...(authenticated === undefined ? {} : { authenticated }) };
+        return { state: "available", version: runtime.version, sharedSignIn: true, ...(authenticated === undefined ? {} : { authenticated }) };
       }
       return {
         state: "available",

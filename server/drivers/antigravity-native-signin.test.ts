@@ -1,6 +1,7 @@
-import { existsSync, mkdtempSync, renameSync, rmSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DATA_DIR, ensureDirs } from "../config.ts";
@@ -18,10 +19,26 @@ const LOGIN_NOTE = "Antigravity needs a Google account";
 const scratch: string[] = [];
 const instances: ProviderInstance[] = [];
 
+const FAKE_ACP = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-acp-cli.ts");
+
 function folder(): string {
   const directory = mkdtempSync(join(tmpdir(), "omb-antigravity-native-"));
   scratch.push(directory);
   return directory;
+}
+
+/** A pinned runtime at a custom path: the ACP server with its harness beside it. */
+function pinnedRuntime(): string {
+  const directory = folder();
+  const executable = join(directory, "agy_acp_server");
+  const harness = join(directory, WINDOWS ? "localharness_external.exe" : "localharness_external");
+  copyFileSync(FAKE_ACP, executable);
+  copyFileSync(FAKE_ACP, harness);
+  if (!WINDOWS) {
+    chmodSync(executable, 0o755);
+    chmodSync(harness, 0o755);
+  }
+  return executable;
 }
 
 afterEach(async () => {
@@ -238,7 +255,7 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
       const instanceId = "antigravity-native-pinned-signout";
       await loginAt(fixture, antigravityProfileDirectory(instanceId), "fixture-code");
       installFakeManagedCli(DATA_DIR);
-      const pinned = await create(instanceId, fixture, {}, "agy");
+      const pinned = await create(instanceId, fixture, {}, pinnedRuntime());
       await pinned.signOut!();
       expect(fixture.methods()).not.toContain("logout");
       expect(await sessionAcceptedAt(fixture, antigravityProfileDirectory(instanceId))).toBe(true);
@@ -258,19 +275,12 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
   });
 
   describe("which CLI an instance starts, with only the native CLI installed", () => {
-    it("starts the native CLI for the path antigravity, and for the path agy asks for the pinned runtime and starts nothing", async () => {
+    it.each(["antigravity", "agy"])("starts the native CLI for the path %s and says its sign-in is shared", async (cli) => {
       installFakeManagedCli(DATA_DIR);
       const asked = nativeFixture(folder());
-      const native = await create("antigravity-policy-native", asked, {}, "antigravity");
-      expect(await native.snapshot()).toMatchObject({ state: "available", version: "1.5.14", authenticated: false });
+      const native = await create(`antigravity-policy-${cli}`, asked, {}, cli);
+      expect(await native.snapshot()).toMatchObject({ state: "available", version: "1.5.14", authenticated: false, sharedSignIn: true });
       expect(asked.methods()).toContain("initialize");
-
-      const none = nativeFixture(folder());
-      const pinned = await create("antigravity-policy-pinned", none, {}, "agy");
-      expect(await pinned.snapshot()).toMatchObject({ state: "unavailable" });
-      const { done } = await turn(pinned, "policy-pinned", none.directory).catch((error: Error) => ({ done: { error: error.message } }));
-      expect(done).not.toMatchObject({ ok: true });
-      expect(none.entries()).toEqual([]);
     }, 120_000);
   });
 

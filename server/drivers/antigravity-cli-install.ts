@@ -21,11 +21,10 @@ import type { AntigravityRuntime } from "./antigravity-runtime.ts";
  * this app installed earlier is left where it is and not started. */
 export const ANTIGRAVITY_NATIVE_CLI = true;
 
-/** Whether a configuration that does not name the native CLI (no path, or `agy`) runs it on `platform`. Off everywhere:
- * the native CLI keeps its sign-in in the OS keyring, and whether that keeps one instance's account apart from
- * another's is not yet shown on any platform. The path `antigravity` always asks for the native CLI. */
+/** Whether a configuration that does not name the native CLI (no path, or `agy`) runs it on `platform` when no pinned
+ * runtime is installed to go first. The path `antigravity` always asks for the native CLI. */
 export function antigravityNativeByDefault(_platform: NodeJS.Platform = process.platform): boolean {
-  return false;
+  return true;
 }
 
 const DOWNLOAD_TIMEOUT_MS = 45 * 60_000;
