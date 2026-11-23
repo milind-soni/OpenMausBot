@@ -14,20 +14,26 @@ import { sameFields, useStoreActions, useStoreDispatch, useStoreSelector } from 
  * (its Instructions field patches on every keystroke), and a read first flushes the patch queue, so following edits
  * there would save, record a history row and read once per keystroke.
  */
+type OverviewSnapshot = {
+  botId: string;
+  overview: BotOverview | null;
+  overviewError: boolean;
+  prompt: PromptPreviewData | null;
+  promptError: boolean;
+};
+const emptyOverview = (botId: string): OverviewSnapshot => ({ botId, overview: null, overviewError: false, prompt: null, promptError: false });
+
 export function useBotOverview(bot: Bot, want: { overview: boolean; prompt: boolean; followEdits?: boolean }) {
   const state = useStoreSelector((s) => ({ routines: s.routines, webhooks: s.webhooks }), sameFields), { flushBotPatches } = useStoreActions();
-  const [overview, setOverview] = useState<BotOverview | null>(null);
-  const [overviewError, setOverviewError] = useState(false);
-  const [prompt, setPrompt] = useState<PromptPreviewData | null>(null);
-  const [promptError, setPromptError] = useState(false);
+  // What was read belongs to the bot it was read for: on the first render after a switch the previous bot's overview or
+  // prompt must not show under the new bot, so anything read for another bot is treated as empty.
+  const [snapshot, setSnapshot] = useState<OverviewSnapshot>(() => emptyOverview(bot.id));
+  const view = snapshot.botId === bot.id ? snapshot : emptyOverview(bot.id);
+  const { overview, overviewError, prompt, promptError } = view;
   const ownerId = useRef(bot.id);
 
   useEffect(() => {
     ownerId.current = bot.id;
-    setOverview(null);
-    setPrompt(null);
-    setOverviewError(false);
-    setPromptError(false);
   }, [bot.id]);
 
   const factsSignature = useMemo(
@@ -85,22 +91,24 @@ export function useBotOverview(bot: Bot, want: { overview: boolean; prompt: bool
         void api(`/api/bots/${bot.id}/overview`)
           .then((data: BotOverview) => {
             if (cancelled || readFor !== ownerId.current) return;
-            setOverview(data);
-            setOverviewError(false);
+            setSnapshot((s) => ({ ...(s.botId === readFor ? s : emptyOverview(readFor)), overview: data, overviewError: false }));
           })
           .catch(() => {
-            if (!cancelled && readFor === ownerId.current) setOverviewError(true);
+            if (!cancelled && readFor === ownerId.current) {
+              setSnapshot((s) => ({ ...(s.botId === readFor ? s : emptyOverview(readFor)), overviewError: true }));
+            }
           });
       }
       if (want.prompt) {
         void api(`/api/bots/${bot.id}/system-prompt`)
           .then((data: PromptPreviewData) => {
             if (cancelled || readFor !== ownerId.current) return;
-            setPrompt(data);
-            setPromptError(false);
+            setSnapshot((s) => ({ ...(s.botId === readFor ? s : emptyOverview(readFor)), prompt: data, promptError: false }));
           })
           .catch(() => {
-            if (!cancelled && readFor === ownerId.current) setPromptError(true);
+            if (!cancelled && readFor === ownerId.current) {
+              setSnapshot((s) => ({ ...(s.botId === readFor ? s : emptyOverview(readFor)), promptError: true }));
+            }
           });
       }
     };

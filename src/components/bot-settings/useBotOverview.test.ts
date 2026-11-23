@@ -87,6 +87,26 @@ describe("reading a bot's overview", () => {
   });
 });
 
+describe("the overview of a bot after a switch", () => {
+  it("never shows the previous bot's overview on the first render under the new bot", async () => {
+    const seen: Array<{ botId: string; overview: unknown }> = [];
+    function OverviewProbe({ of }: { of: Bot }) {
+      const { overview } = useBotOverview(of, { overview: true, prompt: false });
+      seen.push({ botId: of.id, overview });
+      return null;
+    }
+    fixture.api.mockImplementation(async (url: string) => (url.endsWith("/overview") ? { owner: url.split("/")[3] } : {}));
+    flushSync(() => root.render(createElement(OverviewProbe, { of: bot() })));
+    await settle();
+    expect(seen.at(-1)).toEqual({ botId: "scout", overview: { owner: "scout" } });
+    seen.length = 0;
+    flushSync(() => root.render(createElement(OverviewProbe, { of: bot({ id: "other", name: "Other" }) })));
+    expect(seen[0]).toEqual({ botId: "other", overview: null });
+    await settle();
+    expect(seen.at(-1)).toEqual({ botId: "other", overview: { owner: "other" } });
+  });
+});
+
 describe("the history of a bot after a switch", () => {
   it("never shows the previous bot's rows on the first render under the new bot", async () => {
     const { useBotHistory } = await import("./useBotOverview");

@@ -197,6 +197,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
       >
         {simpleView ? (
           <BotPanel
+            key={bot.id}
             bot={bot}
             derived={derived}
             linkedSection={linkedSection}
@@ -284,13 +285,15 @@ export function BotSettingsDialog({ bot, overlay = false }: {
                     )}
                   />
                 </button>
-                {/* Memory stays mounted (hidden when collapsed) so its unsaved draft survives. */}
+                {/* Memory stays mounted (hidden when collapsed) so its unsaved draft survives a collapse. The body is keyed by bot:
+                    a switch remounts it, so no draft, row or request of the previous bot lives on under the new one. The dialog
+                    itself is not remounted, so its slide-in does not replay. */}
                 {id === "memory" ? (
-                  <div hidden={!open} className={sidePanelSectionBodyCls}>
+                  <div key={bot.id} hidden={!open} className={sidePanelSectionBodyCls}>
                     {renderSectionBody("memory")}
                   </div>
                 ) : (
-                  open && <div className={sidePanelSectionBodyCls}>{renderSectionBody(id)}</div>
+                  open && <div key={bot.id} className={sidePanelSectionBodyCls}>{renderSectionBody(id)}</div>
                 )}
               </div>
             );
