@@ -1,5 +1,6 @@
 import { cloudAsleep, onCloudPower } from "../lib/cloud-power";
 import { api, ApiError, retryRequest, snapshotArrays } from "./api"; import { serverFetch } from "@/lib/relay-server";
+import { cancelGroupQueued, steerGroupQueued } from "./group-queue-actions";
 import { capHeldInBackground, loadOlderPage, MESSAGE_PAGE_SIZE, olderThanHeld, reduceOlderMessages, reduceTrimHeldMessages } from "./message-history";
 import { readChatSnapshot } from "./chat-snapshot";
 import { followHeldTails, noteAppPagePatch } from "./held-tails";
@@ -2318,35 +2319,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             });
           break;
         case "cancelGroupQueued":
-          void api(`/api/groups/${action.groupId}/queue/${action.queueId}`, { method: "DELETE" })
-            .then(() => {
-              rawDispatch(action);
-              action.onCancelled?.();
-            })
-            .catch(showError);
+          cancelGroupQueued(action, { dispatch: rawDispatch, notice: wrapped, showError });
           break;
         case "steerGroupQueued":
-          void api(`/api/groups/${action.groupId}/queue/${action.queueId}/steer`, {
-            method: "POST",
-            body: JSON.stringify({ threadId: action.threadId }),
-          })
-            .then((body) => {
-              if (body?.steered === true && Array.isArray(body.messages) && typeof body.threadId === "string") {
-                for (const message of body.messages) {
-                  rawDispatch({ type: "messageAdded", threadId: body.threadId, message });
-                }
-                for (const queueId of body.queueIds ?? []) {
-                  rawDispatch({ type: "consumePendingQueued", threadId: body.threadId, queueId });
-                }
-              } else if (body?.queued === true) {
-                wrapped({ type: "notice", notice: body.blockedBy === "images" ? { kind: "steer-images", botName: null, threadId: body.threadId } : { kind: "note", botName: null, text: t("composer.queued.roomSteerHeld"), threadId: body.threadId } });
-              }
-              action.onSettled?.();
-            })
-            .catch((error) => {
-              showError(error);
-              action.onError?.();
-            });
+          steerGroupQueued(action, { dispatch: rawDispatch, notice: wrapped, showError });
           break;
         case "send": {
           if (quizBeforeSend) persistCard(action.botId, quizBeforeSend.id, { dismissed: true });
