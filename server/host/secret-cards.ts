@@ -60,6 +60,8 @@ export interface SecretCardsDeps {
   phoneSecretSubmissions: PhoneSecretSubmissionRegistry;
   connectorThread(botId: string, threadId: string): { bot: BotRecord; group: GroupRecord | undefined } | null;
   answerCardNode(threadId: string, messageId: string, text: string): boolean;
+  /** Starts or schedules a follow-up turn for saved cards whose waiting node already settled. */
+  resumeSavedSecret?(botId: string, threadId: string): boolean;
   /** A newer card replaced `from`: a turn parked on it waits on `to`. */
   followCard(threadId: string, from: string, to: string): void;
   dataDir: string;
@@ -410,7 +412,9 @@ export function createSecretCards(deps: SecretCardsDeps) {
     const message = secretMessage(botId, threadId, messageId);
     if (!message?.secret) return false;
     if (message.secret.resumed) return true;
-    const resumed = answerCardNode(threadId, messageId, updateText(message.id, message.secret, outcome));
+    const stoppedOrReplaced = Boolean(message.secret.stopped || message.secret.superseded);
+    const resumed = !stoppedOrReplaced
+      && answerCardNode(threadId, messageId, updateText(message.id, message.secret, outcome));
     store.patchMessage(threadId, message.id, {
       secret: {
         ...message.secret,
@@ -419,6 +423,9 @@ export function createSecretCards(deps: SecretCardsDeps) {
         ...(resumed ? { resumed: true, error: undefined } : {}),
       },
     });
+    if (!resumed && !stoppedOrReplaced && outcome === "provided") {
+      deps.resumeSavedSecret?.(botId, threadId);
+    }
     return true;
   }
 

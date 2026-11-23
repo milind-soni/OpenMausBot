@@ -283,6 +283,58 @@ it("T2 parks the root on a credential card and runs it again with the provided l
   expect(f.roots()[0].executions).toBe(2);
 }), hostTimeout(60_000));
 
+it("T2b saves multiple secret cards sequentially after the parked node settles and resumes each one", () => scenario(async (f) => {
+  f.script(f.clive.id,
+    { key: "C1", match: ["First API key"], reply: "T2B-GOT-1" },
+    { key: "C2", match: ["Second API key"], reply: "T2B-GOT-2" },
+    { key: "C3", match: ["Third API key"], reply: "T2B-GOT-3" },
+    {
+      key: "C0",
+      match: ["T2B-JOB"],
+      steps: [
+        { tool: "request_credential", arguments: { label: "First API key", reason: "For service 1.", delivery: "ref" } },
+        { tool: "request_credential", arguments: { label: "Second API key", reason: "For service 2.", delivery: "ref" } },
+        { tool: "request_credential", arguments: { label: "Third API key", reason: "For service 3.", delivery: "ref" } },
+      ],
+      reply: "T2B-ASKED: waiting for all three keys.",
+    });
+  const job = f.clive.activeTaskId;
+  await f.say(f.clive.id, job, "T2B-JOB: ask for three custom keys.");
+  await f.final(job, "T2B-ASKED");
+  await expect.poll(() => f.roots()[0]?.status, { timeout: 15_000 }).toBe("needs_input");
+  const cards = (await f.messages(job)).filter((message: any) => message.kind === "secret");
+  expect(cards).toHaveLength(3);
+  expect(f.roots()[0].cards).toEqual(cards.map((card: any) => card.id));
+
+  const save1 = await f.api("POST", `/api/bots/${f.clive.id}/secret-cards/${cards[0]!.id}/save`, { threadId: job, value: "t2b-val-1" });
+  expect(save1.status, JSON.stringify(save1.body)).toBe(200);
+  expect(save1.body).toEqual({ provided: true, resumed: true });
+  await f.final(job, "T2B-GOT-1");
+  await expect.poll(() => f.roots()[0]?.status, { timeout: 15_000 }).toBe("completed");
+  await expect.poll(async () => (await f.task(f.clive.id, job)).busy, { timeout: 15_000 }).toBe(false);
+
+  const save2 = await f.api("POST", `/api/bots/${f.clive.id}/secret-cards/${cards[1]!.id}/save`, { threadId: job, value: "t2b-val-2" });
+  expect(save2.status, JSON.stringify(save2.body)).toBe(200);
+  expect(save2.body).toEqual({ provided: true, resumed: true });
+  await f.final(job, "T2B-GOT-2");
+  await expect.poll(async () => (await f.task(f.clive.id, job)).busy, { timeout: 15_000 }).toBe(false);
+
+  const save3 = await f.api("POST", `/api/bots/${f.clive.id}/secret-cards/${cards[2]!.id}/save`, { threadId: job, value: "t2b-val-3" });
+  expect(save3.status, JSON.stringify(save3.body)).toBe(200);
+  expect(save3.body).toEqual({ provided: true, resumed: true });
+  await f.final(job, "T2B-GOT-3");
+  await expect.poll(async () => (await f.task(f.clive.id, job)).busy, { timeout: 15_000 }).toBe(false);
+
+  expect(f.turns(f.clive.id).map((record: any) => record.planKey)).toEqual(["C0", "C1", "C2", "C3"]);
+  const afterCards = (await f.messages(job)).filter((message: any) => message.kind === "secret");
+  expect(afterCards.map((card: any) => ({ provided: card.secret.provided, resumed: card.secret.resumed }))).toEqual([
+    { provided: true, resumed: true },
+    { provided: true, resumed: true },
+    { provided: true, resumed: true },
+  ]);
+  for (const key of ["C1", "C2", "C3"]) expect(f.body(f.turn(key))).toMatch(/secret-ref:[0-9a-f]{32}/u);
+}), hostTimeout(60_000));
+
 it("T3 parks the root on connector cards and runs it again once when both connect", async () => {
   const composio = await composioStub();
   try {

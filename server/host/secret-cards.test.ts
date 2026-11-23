@@ -593,3 +593,70 @@ describe("a secret a linked 1Password holds", () => {
     expect(one.lines).toEqual([]);
   });
 });
+
+describe("resuming secret cards after the first parked node", () => {
+  it("falls back to resumeSavedSecret when answerCardNode returns false for a provided card, never when stopped, superseded, or dismissed", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "omb-secret-cards-"));
+    dirs.push(dataDir);
+    const lines: Message[] = [];
+    let ids = 0;
+    const store = {
+      activePath: () => [...lines],
+      messagesFor: () => lines,
+      appendMessage: (_threadId: string, message: Omit<Message, "id" | "at">) => {
+        const full = { id: `m${++ids}`, at: Date.now(), ...message } as Message;
+        lines.push(full);
+        return full;
+      },
+      patchMessage: (_threadId: string, id: string, patch: Partial<Message>) => Object.assign(lines.find((one) => one.id === id)!, patch),
+      botByThread: () => null, groupByThread: () => undefined, onChange: () => () => {},
+    };
+    const bot = { id: "ledger", name: "Ledger" } as BotRecord;
+    const vaultStore = new VaultStore({ dataDir });
+    const nodeAnswers: string[] = [];
+    let nodeLive = true;
+    const fallbackCalls: Array<{ botId: string; threadId: string }> = [];
+    const cards = createSecretCards({
+      store: store as never, cfg: {} as never, vaultStore, vaultReader: () => TEAM_READER,
+      botLogins: { credentialConfig: (config) => ({ ...config, onePassword: { connected: false } }), linkedSecret: async () => null },
+      phoneSecrets: { provide: async () => {}, open: () => {} } as never, phoneSecretSubmissions: { has: () => false } as never,
+      connectorThread: () => ({ bot, group: undefined }),
+      answerCardNode: (_thread, _id, text) => {
+        if (!nodeLive) return false;
+        nodeAnswers.push(text);
+        return true;
+      },
+      resumeSavedSecret: (botId, threadId) => {
+        fallbackCalls.push({ botId, threadId });
+        const target = lines.find((one) => one.secret?.provided && !one.secret.resumed && !one.secret.stopped && !one.secret.superseded);
+        if (!target?.secret) return false;
+        target.secret = { ...target.secret, resumed: true };
+        return true;
+      },
+      followCard: () => {}, dataDir, providerKeysRefused: false, layerFolder: () => dataDir, turnVm: () => undefined,
+    });
+
+    const first = String((await cards.requestCredential(bot, "t1", { label: "Key A", reason: "r", delivery: "ref" })).body.messageId);
+    const second = String((await cards.requestCredential(bot, "t1", { label: "Key B", reason: "r", delivery: "ref" })).body.messageId);
+    const stoppedId = String((await cards.requestCredential(bot, "t1", { label: "Key C", reason: "r", delivery: "ref" })).body.messageId);
+    const dismissedId = String((await cards.requestCredential(bot, "t1", { label: "Key D", reason: "r", delivery: "ref" })).body.messageId);
+
+    expect(cards.saveCustomSecret("ledger", "t1", first, "val-a")).toMatchObject({ status: 200, body: { provided: true, resumed: true } });
+    expect(nodeAnswers).toHaveLength(1);
+    expect(fallbackCalls).toEqual([]);
+
+    nodeLive = false;
+    expect(cards.saveCustomSecret("ledger", "t1", second, "val-b")).toMatchObject({ status: 200, body: { provided: true, resumed: true } });
+    expect(fallbackCalls).toEqual([{ botId: "ledger", threadId: "t1" }]);
+
+    lines.find((one) => one.id === stoppedId)!.secret!.stopped = true;
+    expect(cards.resumeSecretCard("ledger", "t1", stoppedId, "provided")).toBe(true);
+    expect(cards.currentSecretState("ledger", "t1", stoppedId)).toEqual({ provided: true, resumed: false });
+    expect(fallbackCalls).toHaveLength(1);
+
+    expect(cards.resumeSecretCard("ledger", "t1", dismissedId, "dismissed")).toBe(true);
+    expect(lines.find((one) => one.id === dismissedId)!.secret).toMatchObject({ dismissed: true });
+    expect(lines.find((one) => one.id === dismissedId)!.secret!.resumed).toBeUndefined();
+    expect(fallbackCalls).toHaveLength(1);
+  });
+});
