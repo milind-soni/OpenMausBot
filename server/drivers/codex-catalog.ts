@@ -82,15 +82,20 @@ interface CodexAppServerModel {
 
 const FAST_TIER = /fast/i;
 
-/** The model's Fast tier (codex-cli 0.167 lists `{id: "priority", name: "Fast"}`), unless it already runs on it. */
-function fastTier(row: CodexAppServerModel): { id: string; name: string } | null {
-  if (!Array.isArray(row.serviceTiers)) return null;
+/** The model's non-default speed tiers (codex-cli 0.167 lists `{id: "priority", name: "Fast"}`; 0.171 adds
+ * `{id: "ultrafast", name: "Ultrafast"}`), every match: the picker must not drop tiers past the first. */
+function fastTiers(row: CodexAppServerModel): Array<{ id: string; name: string }> {
+  if (!Array.isArray(row.serviceTiers)) return [];
+  const tiers: Array<{ id: string; name: string }> = [];
+  const seen = new Set<string>();
   for (const tier of row.serviceTiers) {
     const id = tier?.id, name = tier?.name;
     if (typeof id !== "string" || typeof name !== "string" || !FAST_TIER.test(name) || !PROVIDER_ID.test(id)) continue;
-    return id === row.defaultServiceTier ? null : { id, name };
+    if (id === row.defaultServiceTier || seen.has(id)) continue;
+    seen.add(id);
+    tiers.push({ id, name });
   }
-  return null;
+  return tiers;
 }
 
 /** The installed Codex CLI's own ChatGPT catalog, every page: it changes more often than our releases. */
@@ -183,8 +188,9 @@ export function readCodexAppServerModelCatalog(
           seen.add(row.id);
           const label = typeof row.displayName === "string" && row.displayName.trim() ? row.displayName : row.id;
           options.push({ id: row.id, label });
-          const fast = fastTier(row);
-          if (fast && !TIERED_ID.test(row.id)) options.push({ id: `${row.id}+${fast.id}`, label: `${label} · ${fast.name}` });
+          if (!TIERED_ID.test(row.id)) {
+            for (const tier of fastTiers(row)) options.push({ id: `${row.id}+${tier.id}`, label: `${label} · ${tier.name}` });
+          }
           if (row.isDefault === true) defaultModel = row.id;
         }
         if (!options.length) {

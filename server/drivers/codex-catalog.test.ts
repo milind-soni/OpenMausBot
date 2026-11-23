@@ -158,6 +158,25 @@ describe("readCodexModelCatalog", () => {
     });
   });
 
+  it("adds an Ultrafast row beside Fast when the model offers both", async () => {
+    chmodSync(FAKE_CLI, 0o755);
+    const catalog = await readCodexModelCatalog(
+      { HOME: join(tmpdir(), "omb-codex-app-server-ultrafast"), PATH: process.env.PATH, FAKE_CODEX_TIERS: "2" },
+      fetch,
+      FAKE_CLI,
+    );
+
+    expect(catalog.options.map((option) => option.id)).toEqual([
+      "gpt-fake-default",
+      "gpt-fake-default+priority",
+      "gpt-fake-default+ultrafast",
+      "gpt-page-two",
+    ]);
+    expect(catalog.options.find((option) => option.id === "gpt-fake-default+ultrafast")?.label).toBe(
+      "GPT Fake Default · Ultrafast",
+    );
+  });
+
   it("appends the configured local model and cached catalog slugs as custom", async () => {
     const home = scratchHome({
       "config.toml": `
