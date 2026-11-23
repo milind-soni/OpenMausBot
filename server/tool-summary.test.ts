@@ -34,6 +34,24 @@ describe("toolDetailPreview", () => {
     expect(toolDetailPreview({ api_key: 1234 })).not.toContain("1234");
     expect(toolDetailPreview(1234n)).toBe("1234");
   });
+  it("keeps a failed call's error readable when the rest of the payload is omitted", () => {
+    // The issue's shape: a deep or wide payload whose error field was elided with the rest.
+    const wide: Record<string, unknown> = { tool_slug: "GOOGLESHEETS_VALUES_GET", index: 0, error: "row must be a list of lists" };
+    wide.response = Object.fromEntries(Array.from({ length: 250 }, (_, i) => [`field_${i}`, "x".repeat(40)]));
+    const preview = toolDetailPreview(wide)!;
+    expect(preview).toContain("row must be a list of lists");
+    expect(JSON.parse(preview).error).toBe("row must be a list of lists");
+    // An error past the depth limit keeps its cause too.
+    const deep: Record<string, unknown> = {};
+    let node: Record<string, unknown> = deep;
+    for (let i = 0; i < 8; i++) { node.child = {}; node = node.child as Record<string, unknown>; }
+    node.error = "connection refused after 30s";
+    expect(toolDetailPreview(deep)!).toContain("connection refused after 30s");
+    // A long error is kept as a redacted prefix, not dropped whole.
+    const long = JSON.parse(toolDetailPreview({ ok: false, error: `${"cause ".repeat(200)}` })!);
+    expect(long.error.length).toBeLessThanOrEqual(500);
+    expect(toolDetailPreview({ ok: false, error: `boom ghp_${"a".repeat(36)}` })).not.toContain("ghp_");
+  });
   it("scrubs structured JSON inside native text results without changing ordinary prose", () => {
     const preview = toolDetailPreview([{ type: "text", text: JSON.stringify({ message: "request completed", password: "tiny", headers: { Cookie: "sid=x" }, env: [{ name: "API_KEY", value: "small" }] }) }]);
     expect(preview).toContain("request completed");
