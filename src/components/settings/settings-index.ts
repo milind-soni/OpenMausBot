@@ -200,6 +200,7 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "about-you", page: "bots", anchor: "about-you", labelKey: "settings.bots.aboutYou", topFor: ["name", "my name", "photo", "avatar", "picture", "profile", "profile picture", "about me"], synonyms: ["rules", "rules for every bot"] },
   { id: "away-emails", page: "bots", anchor: "about-you", labelKey: "settings.profile.awayEmails", sectionKey: "settings.bots.aboutYou", synonyms: ["away", "emails", "email me"] },
   { id: "new-bots", page: "bots", anchor: "new-bots", labelKey: "settings.bots.newBots", synonyms: ["defaults", "effort", "reasoning", "preset", "share as preset"] },
+  { id: "remote-teammates", page: "bots", anchor: "remote-teammates", labelKey: "settings.remoteTeammates.title", advanced: true, when: adminPage, synonyms: ["other servers", "remote", "another server", "bot api key", "teammates"] },
   { id: "limits", page: "bots", anchor: "limits", labelKey: "settings.simple.more.limits", advanced: true, synonyms: ["group turns", "timeout", "tool time limit", "parallel threads", "concurrency", "keep warm"] },
   { id: "parallel", page: "bots", anchor: "parallel", labelKey: "settings.threads.title", sectionKey: "settings.simple.more.limits", advanced: true, synonyms: ["parallel", "threads", "concurrency"] },
   { id: "group-turns", page: "bots", anchor: "group-turns", labelKey: "settings.roomTurns.title", sectionKey: "settings.simple.more.limits", advanced: true, synonyms: ["group", "turns"] },

@@ -58,7 +58,7 @@ a hand edit races the next save.
 | What a bot remembers between tasks | `memory.md` |
 | Timing, cron, time zones, paused and done routines | `routine-schedules.md` |
 | The daily brief, and the checks that run before it | `proactive-routines.md` |
-| Letting an app or a script message one bot | `bot-api.md` |
+| Letting an app or a script message one bot, or a bot on another server | `bot-api.md` |
 | Letting a script drive the whole server | `headless-cli.md` |
 | Which model picks between bots, and whose key decides | `decision-model.md` |
 | How a bot chooses a tool | `tool-selection.md` |

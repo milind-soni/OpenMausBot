@@ -7629,6 +7629,7 @@
   "settings.bots.aboutYouLine": "{place} のボットがあなたをどう呼び、あなたについて何を知っているか。",
   "settings.bots.awakeLine": "プランでは同時に起きていられるボットが限られます。どれにするか選んでください。",
   "settings.bots.awakeTitle": "一部のボットが一時停止中です",
+  "settings.remoteTeammates.title": "他のサーバーのチームメイト",
   "settings.bots.early": "先行機能",
   "settings.bots.intro": "{place} のボットがあなたについて知っていることと、すべてのボットの設定。",
   "settings.bots.newBots": "新しいボット",
