@@ -112,6 +112,19 @@ for (const advanced of [false, true]) {
       expect(saved()).toEqual([{ type: "botsOrdered", botIds: ["charlie", "alpha", "bravo", "delta"] }]);
     });
 
+    it("says only a keyboard move the rows show: Alt+Up past a working bot changes nothing", () => {
+      render([bot("alpha"), bot("bravo"), bot("delta", { busy: true })]);
+      expect(order()).toEqual(["delta", "alpha", "bravo"]);
+      const press = (id: string, key: string) => flushSync(() => document.querySelector(`[data-sidebar-bot-row="${id}"]`)!
+        .dispatchEvent(new KeyboardEvent("keydown", { key, altKey: true, bubbles: true, cancelable: true })));
+      press("alpha", "ArrowUp");
+      expect(saved()).toEqual([]);
+      expect(document.body.textContent).not.toContain("moved to position");
+      press("alpha", "ArrowDown");
+      expect(saved()).toEqual([{ type: "botsOrdered", botIds: ["bravo", "alpha", "delta"] }]);
+      expect(document.body.textContent).toContain("Alpha moved to position 3 of 3");
+    });
+
     it("moves a bot below a waiting one's place among the rows as drawn", () => {
       render([bot("alpha"), bot("bravo", { activity: "waiting-on-you" }), bot("charlie"), bot("delta")]);
       expect(order()).toEqual(["bravo", "alpha", "charlie", "delta"]);

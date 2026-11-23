@@ -24,6 +24,8 @@ type Naming = { kind: "new"; botIds: string[]; name: string } | { kind: "rename"
 /** `lists` hold each list's saved order, `shown` the order drawn (working or waiting bots, `floating`, first). */
 type Arranged = { enabled: boolean; lists: Map<string, string[]>; shown: Map<string, string[]>; floating: Set<string>; bots: Bot[]; taken: string[]; withinList: boolean };
 
+/** A list as the sidebar draws it: working or waiting bots first, each part in its saved order. */
+const drawnOrder = (ids: readonly string[], floating: ReadonlySet<string>) => [...ids.filter((id) => floating.has(id)), ...ids.filter((id) => !floating.has(id))];
 const carries = (event: DragEvent<HTMLElement>) => event.dataTransfer.types.includes(BOT_ROW_DRAG_TYPE);
 const failure = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
@@ -71,12 +73,16 @@ export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onEr
   const startNew = (botIds: string[]) => setNaming({ kind: "new", botIds, name: unusedName(t("sidebar.section.newName"), latest.current.taken) });
   const apply = (botId: string, move: BotMove, keyboard: boolean) => {
     if (move.kind === "group") return startNew(move.botIds);
-    const { lists, bots, floating } = latest.current;
-    if (botListOf(lists, botId) !== move.section) moveBotsToSection(actions.current.dispatch, [botId], move.section);
-    saveBotOrder(actions.current.dispatch, bots, savedPlacement(lists.get(move.section) ?? [], move.order, botId, (id) => floating.has(id)));
+    const { lists, shown, bots, floating } = latest.current;
+    const order = savedPlacement(lists.get(move.section) ?? [], move.order, botId, (id) => floating.has(id)), after = drawnOrder(order, floating);
+    const across = botListOf(lists, botId) !== move.section;
+    // Alt+Up/Down past a bot that floats otherwise changes nothing drawn: no move, so nothing to say.
+    if (keyboard && !across && after.every((id, index) => id === shown.get(move.section)?.[index])) return;
+    if (across) moveBotsToSection(actions.current.dispatch, [botId], move.section);
+    saveBotOrder(actions.current.dispatch, bots, order);
     if (!keyboard) return;
     const name = bots.find((bot) => bot.id === botId)?.name ?? "";
-    actions.current.announce(t("sidebar.section.moved", { name, position: move.order.indexOf(botId) + 1, count: move.order.length }));
+    actions.current.announce(t("sidebar.section.moved", { name, position: after.indexOf(botId) + 1, count: after.length }));
     requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-sidebar-bot-row="${CSS.escape(botId)}"]`)?.focus());
   };
   const allowed = (botId: string, move: BotMove | null): BotMove | null => {
@@ -161,7 +167,7 @@ export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onEr
       const lists = new Map<string, string[]>([["", main.map((bot) => bot.id)]]);
       for (const name of departments) if (name !== NEW_DEPARTMENT) lists.set(name, sectioned.filter((bot) => bot.section === name).map((bot) => bot.id));
       const floating = new Set(floats ? [...main, ...sectioned].filter(floats).map((bot) => bot.id) : []);
-      const drawn = new Map([...lists].map(([name, ids]) => [name, [...ids.filter((id) => floating.has(id)), ...ids.filter((id) => !floating.has(id))]]));
+      const drawn = new Map([...lists].map(([name, ids]) => [name, drawnOrder(ids, floating)]));
       latest.current = { enabled: movable, lists, shown: drawn, floating, bots, taken, withinList };
       const active = movable && dragging !== null && botListOf(lists, dragging) !== undefined ? dragging : null;
       const shown = active ? drop : null;
