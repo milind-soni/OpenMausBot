@@ -25,7 +25,7 @@ import { applyOneShotEnv, runAcpOneShot } from "./background-text.ts"; import ty
 import { acpCapabilities } from "./capabilities.ts"; import { readAcpMediaLinks } from "./media-links.ts";
 import { acpNativeLogMessage } from "./tool-log.ts";
 import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
-import { formatQuietLimit, lastSeenPhrase, LIMIT_WORDS, promptIdleTimeoutMs, type LogSignal } from "./quiet-status.ts"; import { startAcpQuietWatch } from "./quiet-watch.ts"; import { AppliedConfig } from "./applied-config.ts"; import { modelRefused, startupRefresh } from "./startup-refresh.ts";
+import { formatQuietLimit, lastSeenPhrase, LIMIT_WORDS, promptIdleTimeoutMs, type LogSignal } from "./quiet-status.ts"; import { startAcpQuietWatch } from "./quiet-watch.ts"; import { AppliedConfig } from "./applied-config.ts"; import { modelRefused, startupRefresh } from "./startup-refresh.ts"; import { stderrFailureOf, watchStderrFailure, type StderrFailure } from "./harness-failure.ts";
 import { acpMissingSession } from "./rpc-error.ts";
 import { readSessionReport } from "./session-reports.ts";
 import { promptTokenUsage } from "./prompt-usage.ts";
@@ -178,6 +178,8 @@ export interface AcpSupport extends AcpDriverHooks {
   ): Promise<ProviderSnapshot>;
   /** A cold start of this engine takes tens of seconds: where memory allows, its idle process is kept longer (session-idle.ts). */
   coldStartCost?: ColdStartCost;
+  /** Lines on the agent's stderr after which its process cannot run a turn (harness-failure.ts). */
+  stderrFailure?: StderrFailure;
   /** How long session/new and session/resume (or load) may go unanswered on a live process; initialize keeps its own limit. */
   sessionSetupTimeoutMs?: number;
   /** Google Antigravity resumes through session/resume, not session/load. */
@@ -533,7 +535,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         if (running) return running;
         const child = spawnCli(launch.command, argv, { cwd, env, stdio: ["pipe", "pipe", "pipe"], box: { allowEnv: instanceEnvNames(input.environment, env), botThreads: hostKey !== null, ro: launch.ro } }, "bot");
         const host = new AcpHost(child, hostKey, { source: SOURCE, logMessage: nativeLogMessage, unrouted: refuse, promptCompletion: support.promptCompletion });
-        hosts.add(host); signIn.watch(host);
+        hosts.add(host); signIn.watch(host); if (support.stderrFailure) watchStderrFailure(host, support.stderrFailure);
         child.once("close", () => hosts.delete(host));
         child.once("error", () => hosts.delete(host));
         return host;
@@ -1303,6 +1305,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   `${last ? ` (last seen: ${lastSeenPhrase(last)})` : ""}. Send the message again to retry.`;
               },
               );
+            const harnessFailed = stderrFailureOf(session.host); if (harnessFailed) throw harnessFailed;
             const steersOut = current.steering?.promptAnswered();
             if (steersOut && !state.stopped) { current.flushAssistantText(); await steersOut; }
             if (pendingSplitReceipt) {
