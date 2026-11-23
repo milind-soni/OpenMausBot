@@ -274,14 +274,43 @@ describe("the person's own GitHub CLI on This computer", () => {
     expect(text.children).toHaveLength(0);
   });
 
-  it("a sign-in of theirs that no longer works shows as such, and OpenMausBot's own sign-in may then start", async () => {
+  it("a sign-in of theirs that GitHub refuses (401) shows as such, and OpenMausBot's own sign-in may then start", async () => {
     const fake = setup();
     fake.set.personal = "/usr/local/bin/gh";
     fake.set.version = [2, 40, 1];
-    fake.set.personalStatus = { code: 0, stdout: fixture("2.40.1/status-invalid.stdout.txt"), stderr: "" };
-    fake.tools.run = async (_file, args, env) => (args.includes("--json") && env.GH_CONFIG_DIR === undefined ? { code: 1, stdout: "", stderr: "unknown flag: --json" } : fake.set.personalStatus);
+    fake.set.personalStatus = ok(fixture("2.103.3/status-json-invalid.stdout.txt"));
     expect(await fake.signIn.status("owner")).toMatchObject({ state: "invalid", login: "octo-fixture", source: "cli" });
     expect((await fake.signIn.start("owner")).state).toBe("installing");
+  });
+
+  it("when theirs cannot be checked (no network, an old gh's text, an answer it cannot read), Start is refused", async () => {
+    const offline = setup();
+    offline.set.personal = "/usr/local/bin/gh";
+    offline.set.personalStatus = ok(fixture("2.103.3/status-json-offline.stdout.txt"));
+    expect(await offline.signIn.status("owner")).toMatchObject({ state: "signed-in", login: "octo-fixture", source: "cli", checkedAt: null });
+    await expect(offline.signIn.start("owner")).rejects.toMatchObject({ status: 409 });
+
+    const old = setup();
+    old.set.personal = "/usr/local/bin/gh";
+    old.tools.run = async (_file, args) => (args.includes("--json") ? { code: 1, stdout: "", stderr: "unknown flag: --json" } : ok(fixture("2.40.1/status-offline.stdout.txt")));
+    await expect(old.signIn.start("owner")).rejects.toMatchObject({ status: 409 });
+
+    const garbled = setup();
+    garbled.set.personal = "/usr/local/bin/gh";
+    garbled.tools.run = async () => ({ code: 1, stdout: "", stderr: "segmentation fault" });
+    await expect(garbled.signIn.start("owner")).rejects.toMatchObject({ status: 409 });
+    for (const fake of [offline, old, garbled]) expect(fake.children).toHaveLength(0);
+  });
+
+  it("its own sign-in stays signed in, unchecked, when GitHub cannot be reached", async () => {
+    const fake = setup();
+    const child = await showCode(fake);
+    child.approve();
+    await settle();
+    fake.set.ownStatus = ok(fixture("2.103.3/status-json-offline.stdout.txt"));
+    expect(await fake.signIn.status("owner")).toMatchObject({ state: "signed-in", login: "octo-fixture", source: "mausbot", checkedAt: null });
+    fake.set.ownStatus = { code: 1, stdout: "", stderr: "" };
+    expect(await fake.signIn.status("owner", { check: true })).toMatchObject({ state: "signed-in", login: "octo-fixture", checkedAt: null });
   });
 
   it("is never looked at on a Team Cloud", async () => {
@@ -318,6 +347,11 @@ describe("a pasted token, sign out, and whose sign-in is whose", () => {
     for (const log of logs) for (const call of log.mock.calls) expect(JSON.stringify(call)).not.toContain(PASTED);
 
     await expect(fake.signIn.saveToken("owner", "not a token")).rejects.toMatchObject({ status: 400 });
+    // A rate-limited 403 is not a refusal: the saved token stays, shown unchecked.
+    const limited = vi.fn(async () => new Response("{}", { status: 403, headers: { "x-ratelimit-remaining": "0" } })) as unknown as typeof fetch;
+    const later = createGithubSignIn({ dataDir, team: false, tools: fake.tools, vault: fake.vault, now: () => clock, fetchImpl: limited });
+    expect(await later.status("owner")).toMatchObject({ state: "signed-in", source: "token", checkedAt: null });
+    await expect(later.saveToken("owner", PASTED)).rejects.toMatchObject({ status: 502 });
     const refused = setup({ fetchImpl: github(null) });
     await expect(refused.signIn.saveToken("owner", PASTED)).rejects.toMatchObject({ status: 400 });
     expect(refused.vault.saved.size).toBe(0);
@@ -365,5 +399,27 @@ describe("a pasted token, sign out, and whose sign-in is whose", () => {
     expect(fake.calls).toHaveLength(0);
     expect(install).not.toHaveBeenCalled();
     expect(existsSync(join(dataDir, "github"))).toBe(false);
+  });
+});
+
+describe("the accessor for server-side callers", () => {
+  it("answers null until a sign-in is provided, then that sign-in's token, never another person's", async () => {
+    const { githubToken, provideGithubSignIn, reportGithubAuthFailure } = await import("./token.ts");
+    expect(await githubToken()).toBeNull();
+    const fake = setup({ team: true });
+    const child = await showCode(fake, MEMBER);
+    child.approve();
+    await settle();
+    provideGithubSignIn(fake.signIn);
+    try {
+      expect(await githubToken(MEMBER)).toBe(TOKEN);
+      expect(await githubToken(OTHER)).toBeNull();
+      expect(await githubToken()).toBeNull();
+      reportGithubAuthFailure(MEMBER);
+      fake.set.ownStatus = ok(fixture("2.103.3/status-json-invalid.stdout.txt"));
+      expect(await fake.signIn.status(MEMBER)).toMatchObject({ state: "invalid", source: "mausbot" });
+    } finally {
+      provideGithubSignIn(null);
+    }
   });
 });

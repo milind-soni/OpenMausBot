@@ -153,10 +153,11 @@ export function createGithubSignIn(deps: GithubSignInDeps): GithubSignIn {
 
   function known(source: GithubSignInSource, account: GhAccount, fallbackLogin: string | null, orgs?: string[]): Known {
     const login = account.login ?? fallbackLogin;
-    if (account.state === "invalid" || !login) {
+    if (account.state === "invalid" || (!login && account.state === "success")) {
       return { state: "invalid", login, source, reason: source === "cli" ? "GitHub no longer accepts your GitHub CLI's sign-in. Sign in again there with `gh auth login`." : "GitHub no longer accepts this sign-in. Sign in again." };
     }
-    return { state: "signed-in", login, source, scopes: account.scopes, ...(orgs ? { orgs } : {}), checkedAt: account.state === "success" ? now() : null };
+    // Unknown (no network, a timeout, an answer gh could not give): the sign-in is there and stays, just not checked.
+    return { state: "signed-in", login: login ?? "unknown", source, scopes: account.scopes, ...(orgs ? { orgs } : {}), checkedAt: account.state === "success" ? now() : null };
   }
 
   /** What GitHub says of OpenMausBot's own gh sign-in. */
@@ -166,7 +167,8 @@ export function createGithubSignIn(deps: GithubSignInDeps): GithubSignIn {
       const file = await ownGh(audience);
       const env = ownEnv(audience);
       const account = await ghAccount(file, env);
-      if (account === "signed-out" || account === null) return { state: "invalid", login, source: "mausbot", reason: "GitHub CLI's sign-in could not be read. Sign in again." };
+      // The config file is there, so an answer gh could not give is not a refusal: shown as signed in, unchecked.
+      if (account === "signed-out" || account === null) return { state: "signed-in", login: login ?? "unknown", source: "mausbot", scopes: [], checkedAt: null };
       const orgs = withOrgs && account.state === "success" ? await orgsOf(file, env) : of(audience).known?.state === "signed-in" ? (of(audience).known as { orgs?: string[] }).orgs : undefined;
       return known("mausbot", account, login, orgs);
     } catch {
@@ -185,7 +187,8 @@ export function createGithubSignIn(deps: GithubSignInDeps): GithubSignIn {
     } catch {
       return "unreachable";
     }
-    if (response.status === 401 || response.status === 403) return { state: "invalid", login: savedLogin, source: "token", reason: "GitHub no longer accepts this token. Paste a new one." };
+    // Only 401 is GitHub refusing the token; a 403 is also how it answers a rate limit, so it proves nothing.
+    if (response.status === 401) return { state: "invalid", login: savedLogin, source: "token", reason: "GitHub no longer accepts this token. Paste a new one." };
     if (!response.ok) return "unreachable";
     const body = await response.json().catch(() => null) as { login?: unknown } | null;
     const login = typeof body?.login === "string" && /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/u.test(body.login) ? body.login : savedLogin;
@@ -193,12 +196,14 @@ export function createGithubSignIn(deps: GithubSignInDeps): GithubSignIn {
     return { state: "signed-in", login, source: "token", scopes: parseScopes(response.headers.get("x-oauth-scopes")), checkedAt: now() };
   }
 
-  /** The person's own GitHub CLI sign-in on This computer, read and never changed; null when there is none to read. */
-  async function personalAccount(): Promise<Known | null> {
+  /** The person's own GitHub CLI sign-in on This computer, read and never changed: null when they have no gh (or may not
+   * use it here), "signed-out" when it says so, "unreadable" when its answer could not be read. */
+  async function personalAccount(): Promise<Known | "signed-out" | "unreadable" | null> {
     const own = deps.team ? null : deps.tools.personal();
     if (!own) return null;
     const account = await ghAccount(own, personalGhEnv()).catch(() => null);
-    if (!account || account === "signed-out") return null;
+    if (account === "signed-out") return "signed-out";
+    if (account === null) return "unreadable";
     return known("cli", account, null);
   }
 
@@ -253,8 +258,8 @@ export function createGithubSignIn(deps: GithubSignInDeps): GithubSignIn {
     if (!deps.team && deps.tools.personal()) {
       if (options.check === true || state.stale || (state.known?.source !== "cli" && !state.personalNone)) {
         const account = await personalAccount();
-        state.known = account ?? undefined;
-        state.personalNone = account === null;
+        state.known = typeof account === "object" && account !== null ? account : undefined;
+        state.personalNone = state.known === undefined;
         state.stale = false;
       }
       if (state.known?.source === "cli") return state.known;
@@ -324,8 +329,10 @@ export function createGithubSignIn(deps: GithubSignInDeps): GithubSignIn {
     try {
       // Security: the person's own gh keeps its sign-in in the OS credential store, which a gh login touches whatever its
       // folder (gh-cli.ts). While their own sign-in works, OpenMausBot never starts one of its own.
+      // Only a positive answer lets it go ahead: no gh of theirs, theirs signed out, or GitHub refusing theirs (401).
       const theirs = deps.team ? null : await personalAccount();
-      if (theirs?.state === "signed-in") {
+      if (theirs === "unreadable") throw new GithubSignInError(409, "Your own GitHub CLI's sign-in could not be checked, so nothing was changed. Try again.");
+      if (theirs !== null && theirs !== "signed-out" && theirs.state === "signed-in") {
         state.known = theirs;
         throw new GithubSignInError(409, `GitHub is already signed in on this computer as ${theirs.login}, with your own GitHub CLI.`);
       }
@@ -374,7 +381,7 @@ export function createGithubSignIn(deps: GithubSignInDeps): GithubSignIn {
     const token = typeof raw === "string" ? raw.trim() : "";
     if (!/^[A-Za-z0-9_]{20,255}$/u.test(token)) throw new GithubSignInError(400, "Paste a GitHub token: it starts with github_pat_ (fine-grained) or ghp_.");
     const checked = await checkToken(token, null);
-    if (checked === "unreachable") throw new GithubSignInError(502, "GitHub could not be reached to check the token. Try again.");
+    if (checked === "unreachable") throw new GithubSignInError(502, "GitHub could not check the token just now. Try again in a minute.");
     if (checked.state !== "signed-in") throw new GithubSignInError(400, "GitHub did not accept this token. Check it and paste it again.");
     stopAttempt(audience);
     // One source at a time: the pasted token replaces OpenMausBot's own gh sign-in.

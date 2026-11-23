@@ -56,7 +56,9 @@ export function loginFailure(output: string): { outcome: "expired" | "failed"; r
 }
 
 export interface GhAccount {
-  /** success: the token works; invalid: GitHub refused it; unknown: it could not be checked (network, timeout). */
+  /** success: the token works; invalid: GitHub said so (HTTP 401, an expired or rejected token); unknown: anything else,
+   * such as no network. gh reports a network failure with the same `error` state as a refused token, so only GitHub's own
+   * 401 counts as refused. */
   state: "success" | "invalid" | "unknown";
   login: string | null;
   scopes: string[];
@@ -87,23 +89,25 @@ export function parseStatusJson(stdout: string): GhAccount | "signed-out" | null
   if (!Array.isArray(entries)) return null;
   const entry = (entries.find((one) => (one as { active?: unknown })?.active === true) ?? entries[0]) as Record<string, unknown> | undefined;
   if (!entry) return "signed-out";
-  const state = entry.state === "success" ? "success" : entry.state === "timeout" ? "unknown" : "invalid";
   const error = typeof entry.error === "string" ? entry.error.slice(0, 200) : undefined;
+  const refused = (entry.state === "error" && error !== undefined && /\bHTTP 401\b|Bad credentials/u.test(error)) || entry.state === "expired" || entry.state === "refresh_expired";
+  const state = entry.state === "success" ? "success" : refused ? "invalid" : "unknown";
   return { state, login: cleanLogin(entry.login), scopes: parseScopes(entry.scopes), ...(error ? { error } : {}) };
 }
 
 /** `gh auth status --hostname github.com` as text, for a gh without `--json` (before 2.7x). Older releases print it on
- * stdout with exit 0 even for a refused token, newer ones on stderr with exit 1, so both streams are read together. */
+ * stdout with exit 0 even for a refused token, newer ones on stderr with exit 1, so both streams are read together. Its
+ * "Failed to log in" reads the same for a refused token and for no network (fixtures/*-offline), so it is unknown. */
 export function parseStatusText(output: string): GhAccount | "signed-out" | null {
   const text = plain(output);
   if (/not logged in(?:to any GitHub hosts| to any hosts)/iu.test(text)) return "signed-out";
   const ok = /Logged in to github\.com (?:account|as) (\S+)/u.exec(text);
-  const refused = /(?:Failed to log in to github\.com (?:account|as) (\S+)|Token for github\.com account (\S+) [^\n]*has expired|Refresh token for github\.com account (\S+) was rejected)/u.exec(text);
-  const timeout = /Timeout trying to log in to github\.com (?:account|as) (\S+)/u.exec(text);
+  const refused = /(?:Token for github\.com account (\S+) [^\n]*has expired|Refresh token for github\.com account (\S+) was rejected)/u.exec(text);
+  const unchecked = /(?:Failed|Timeout trying) to log in to github\.com (?:account|as) (\S+)/u.exec(text);
   const scopes = parseScopes(/Token scopes: ([^\n]*)/u.exec(text)?.[1]);
   if (ok) return { state: "success", login: cleanLogin(ok[1]), scopes };
-  if (refused) return { state: "invalid", login: cleanLogin(refused[1] ?? refused[2] ?? refused[3]), scopes, error: "GitHub no longer accepts this sign-in." };
-  if (timeout) return { state: "unknown", login: cleanLogin(timeout[1]), scopes };
+  if (refused) return { state: "invalid", login: cleanLogin(refused[1] ?? refused[2]), scopes, error: "GitHub no longer accepts this sign-in." };
+  if (unchecked) return { state: "unknown", login: cleanLogin(unchecked[1]), scopes };
   return null;
 }
 

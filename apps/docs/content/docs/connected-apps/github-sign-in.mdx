@@ -27,7 +27,7 @@ The sign-in does not expire. It works until you revoke it on GitHub or sign out 
 
 ## Where the sign-in is kept
 
-- **MausBot Cloud and self-hosted servers.** Each sign-in has its own private folder in the server's data folder. That folder is never inside a bot's sandbox and is never part of a backup or a move. Bots never see the token: the server uses it for git and GitHub actions on their behalf.
+- **MausBot Cloud and self-hosted servers.** Each sign-in has its own private folder in the server's data folder. Where bots run in their sandbox, as on every MausBot Cloud, that folder is never inside it. The folder is never part of a backup. The server uses the token for git and GitHub actions on the bots' behalf and never hands it to a bot.
 - **Team Cloud.** Each member signs in with their own GitHub account. Nobody can use another member's sign-in.
 - **This computer.** If you already signed in with GitHub CLI yourself (`gh auth login`), MausBot shows **signed in via GitHub CLI** and asks nothing more. MausBot reads that sign-in and never changes it. To sign out of it, run `gh auth logout` in your own terminal.
 

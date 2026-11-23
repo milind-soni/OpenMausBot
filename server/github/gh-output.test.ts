@@ -39,12 +39,18 @@ describe("GitHub CLI's output", () => {
     expect(fixture("2.40.1/login-clipboard-flag.stderr.txt")).toContain("unknown flag: --clipboard");
   });
 
-  it("reads a refused token from the JSON (2.102.0, 2.103.3) and from text on either stream (2.40.1 stdout, 2.103.3 stderr)", () => {
+  it("counts a token as refused only on GitHub's own 401, never on no network", () => {
     for (const version of ["2.102.0", "2.103.3"]) {
       expect(parseStatusJson(fixture(`${version}/status-json-invalid.stdout.txt`))).toEqual({ state: "invalid", login: "octo-fixture", scopes: [], error: "HTTP 401: Bad credentials (https://api.github.com/)" });
-      expect(parseStatusText(fixture(`${version}/status-invalid.stderr.txt`))).toMatchObject({ state: "invalid", login: "octo-fixture" });
     }
-    expect(parseStatusText(fixture("2.40.1/status-invalid.stdout.txt"))).toMatchObject({ state: "invalid", login: "octo-fixture" });
+    // The same `error` state with the network cut (HTTPS_PROXY to a closed port): unknown, not refused.
+    expect(parseStatusJson(fixture("2.103.3/status-json-offline.stdout.txt"))).toMatchObject({ state: "unknown", login: "octo-fixture" });
+    // The text reads the same for both (2.40.1 on stdout, 2.103.3 on stderr), so it is never taken as a refusal.
+    for (const name of ["2.102.0/status-invalid.stderr.txt", "2.103.3/status-invalid.stderr.txt", "2.40.1/status-invalid.stdout.txt", "2.103.3/status-offline.stderr.txt", "2.40.1/status-offline.stdout.txt"]) {
+      expect(parseStatusText(fixture(name)), name).toMatchObject({ state: "unknown", login: "octo-fixture" });
+    }
+    expect(fixture("2.103.3/status-offline.stderr.txt")).toBe(fixture("2.103.3/status-invalid.stderr.txt"));
+    expect(parseStatusText("github.com\n  X Token for github.com account octo-fixture (keyring) has expired\n")).toMatchObject({ state: "invalid", login: "octo-fixture" });
     // 2.40.1 has no --json: its answer is no JSON, so the text is read instead.
     expect(parseStatusJson(fixture("2.40.1/status-json.stderr.txt"))).toBeNull();
   });
