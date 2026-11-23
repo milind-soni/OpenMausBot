@@ -51,7 +51,7 @@ export const TOOL_CACHES: readonly ToolCache[] = [
   // The models and datasets' files only: HF_HOME, which holds the login token, is never set here.
   { name: "HF_HUB_CACHE", folder: "huggingface/hub", yieldsTo: ["HF_HOME", "HUGGINGFACE_HUB_CACHE", "XDG_CACHE_HOME"] },
   { name: "HF_XET_CACHE", folder: "huggingface/xet", yieldsTo: ["HF_HOME", "XDG_CACHE_HOME"] },
-  // bun's default follows BUN_INSTALL, then XDG_CACHE_HOME.
+  // bun's default follows BUN_INSTALL; it may also follow XDG_CACHE_HOME (not checked), so a person's value there wins too.
   { name: "BUN_INSTALL_CACHE_DIR", folder: "bun", yieldsTo: ["BUN_INSTALL", "XDG_CACHE_HOME"] },
   // The package managers' own copies corepack downloads.
   { name: "COREPACK_HOME", folder: "corepack", yieldsTo: ["XDG_CACHE_HOME"] },
