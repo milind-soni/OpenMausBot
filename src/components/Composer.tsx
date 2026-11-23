@@ -71,9 +71,9 @@ import { composerPlaceholder, sendLabels, SIMPLE_COMPOSER, SIMPLE_CONTROL, slotC
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { CallButton } from "./CallView";
 import { GroupCallButton } from "./GroupCallView";
-import { ApprovalChip, GoalToggle } from "./ComposerPlusMenu";
-import { PlaceChip } from "./PlaceChip";
-import { personPin, type Place } from "@/lib/place";
+import { ApprovalChip, ComposerPlusMenu, GoalToggle } from "./ComposerPlusMenu";
+import { PlaceMark } from "./PlaceChip";
+import type { Place } from "@/lib/place";
 import { PhonePlus } from "./PhonePlus";
 import { useThreadApproval } from "./thread-approval";
 import { useTallPill } from "./composer-wrap";
@@ -487,7 +487,7 @@ export function Composer({
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   const modeBot = group ? undefined : bot;
   const pinPlace = (surface: Place | null) => modeBot && dispatch({ type: "updateTask", botId: modeBot.id, threadId: modeBot.threadId, patch: { surface } });
-  const place = modeBot && !remoteClient ? { bot: modeBot, task: composerTask, disabled: Boolean(modeBot.busy), onPin: pinPlace } : undefined;
+  const place = modeBot && !remoteClient && advanced ? { bot: modeBot, task: composerTask, disabled: Boolean(modeBot.busy), onPin: pinPlace } : undefined;
   const { choice: approvalChoice, dialogs: approvalDialogs } = useThreadApproval(modeBot);
   const uploadImage = useCallback((file: File) => uploadDraftImage(draftId, file), [draftId]);
   const pickFiles = async (picked: FileList | readonly File[] | null) => {
@@ -813,11 +813,11 @@ export function Composer({
           />
           {!locked && simpleDock && (
             <div className="flex items-center gap-1 shrink-0">
-              <PhonePlus circle={false} onAttach={() => fileInput.current?.click()} goal={goal} teach={canLearn ? teachTask : undefined} place={place} />
+              <ComposerPlusMenu onAttach={() => fileInput.current?.click()} goal={goal} teach={canLearn ? teachTask : undefined} />
               {/* Simple mode shows a mode's chip only while it is on, so a choice made in the + menu or the bot panel stays in view. */}
               {goal?.on && <GoalToggle {...goal} />}
               {approvalChoice && profile && bot && approvalModeFor(bot) !== approvalModeFor(profile) && <ApprovalChip choice={approvalChoice} />}
-              {place && personPin(composerTask) && <PlaceChip {...place} live={place.disabled} />}
+              {modeBot && <PlaceMark bot={modeBot} task={composerTask} />}
             </div>
           )}
           <MentionTextarea

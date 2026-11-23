@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { AudioLines, Check, ChevronLeft, ChevronRight, GraduationCap, ListChecks, Paperclip, Phone, Plus, Target, X } from "lucide-react";
+import { AudioLines, Check, GraduationCap, ListChecks, Paperclip, Phone, Plus, Target, X } from "lucide-react";
 import { approvalModeFor } from "../../shared/approval-mode";
 import {
   approvalModeOptions,
@@ -233,13 +233,10 @@ export function ComposerPlusMenu({ onAttach, goal, teach, approval, callBotId, e
   );
 }
 
-const ROW = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-[14px] leading-5 text-ink transition-colors hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:outline-none disabled:opacity-50";
-
-/** The composer's own + menu: a short list just above the +, in the app's large menu style. A row with choices of its
- * own opens them in the same list, with a row back. Escape or a click elsewhere closes it and hands focus back to the +. */
+/** The composer's own + menu: a short list just above the +, in the app's large menu style. Escape or a click
+ * elsewhere closes it and hands focus back to the +. */
 function ComposerMenu({ items, renderTrigger }: { items: SidebarMenuItem[]; renderTrigger: (open: boolean) => ReactNode }) {
   const [open, setOpen] = useState(false);
-  const [inside, setInside] = useState<SidebarMenuItem | null>(null);
   const motion = useMenuMotion(open);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -257,9 +254,7 @@ function ComposerMenu({ items, renderTrigger }: { items: SidebarMenuItem[]; rend
     document.addEventListener("pointerdown", outside);
     return () => document.removeEventListener("pointerdown", outside);
   }, [open]);
-  const rows = () => [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]:not(:disabled)') ?? [])];
-  const enter = (item: SidebarMenuItem | null) => { setInside(item); requestAnimationFrame(() => rows()[0]?.focus()); };
-  const shown = inside?.submenu ?? items;
+  const rows = () => [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])];
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -286,7 +281,6 @@ function ComposerMenu({ items, renderTrigger }: { items: SidebarMenuItem[]; rend
         onClick={(event) => {
           const opening = !open;
           setOpen(opening);
-          setInside(null);
           // A keyboard press lands on the first row, as every menu here does.
           if (opening && event.detail === 0) requestAnimationFrame(() => rows()[0]?.focus());
         }}
@@ -307,36 +301,21 @@ function ComposerMenu({ items, renderTrigger }: { items: SidebarMenuItem[]; rend
             motion.className,
           )}
         >
-          {inside && (
-            <button type="button" role="menuitem" data-menu-key="back" aria-label={t("composer.menuBack")} onClick={() => enter(null)} className={cn(ROW, "h-8 font-medium")}>
-              <ChevronLeft size={16} className="shrink-0 text-ink-secondary rtl:-scale-x-100" aria-hidden="true" />
-              <span className="min-w-0 flex-1 truncate">{inside.label}</span>
-            </button>
-          )}
-          {shown.map((item) => (
+          {items.map((item) => (
             <button
               key={item.key}
               type="button"
-              role={inside ? "menuitemradio" : "menuitem"}
-              aria-checked={inside ? Boolean(item.active) : undefined}
-              aria-haspopup={item.submenu ? "menu" : undefined}
+              role="menuitem"
               data-menu-key={item.key}
               disabled={item.disabled}
-              title={item.note}
               onClick={() => {
-                if (item.submenu) return enter(item);
                 close(false);
                 item.onSelect();
               }}
-              className={cn(ROW, inside ? "min-h-8" : "h-8")}
+              className="flex h-8 w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-[14px] leading-5 text-ink transition-colors hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:outline-none disabled:opacity-50"
             >
               <span className={cn("flex size-4 shrink-0 items-center justify-center [&_svg]:size-4", item.active ? "text-accent" : "text-ink-secondary")} aria-hidden="true">{item.icon}</span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate">{item.label}</span>
-                {inside && item.note && <span className="block truncate text-[12px] leading-4 text-ink-secondary">{item.note}</span>}
-              </span>
-              {item.subtitle && <span className="max-w-[45%] shrink-0 truncate text-[13px] text-ink-secondary">{item.subtitle}</span>}
-              {item.submenu && <ChevronRight size={14} className="shrink-0 text-ink-secondary rtl:-scale-x-100" aria-hidden="true" />}
+              <span className="min-w-0 flex-1 truncate">{item.label}</span>
               {item.trailing}
             </button>
           ))}

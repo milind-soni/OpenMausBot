@@ -3065,7 +3065,6 @@
   "devs.report.fixedComing": "Bug report · Fixed in {version}, coming in your next update",
   "devs.report.fixed": "Bug report · Fixed in {version}",
   "devs.report.tryAgain": "Fixed in {version}. Want to try again?",
-  "composer.menuBack": "Back to the + menu",
   "composer.attachFiles": "Attach files",
   "composer.teachTask": "Teach a task",
   "composer.goal.aria": "Finish together",
