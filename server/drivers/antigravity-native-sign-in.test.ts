@@ -67,6 +67,12 @@ describe("which stored sign-in's access token is used", () => {
     expect(await readNativeAccessToken("native", env, NOW, store(null, live("file-access")).value)).toBe("file-access");
   });
 
+  it("is the profile file's alone under SSH, where the CLI keeps its sign-in there and not in the keychain", async () => {
+    const { value, calls } = store(inKeychain(live("keychain-access")), live("file-access"));
+    expect(await readNativeAccessToken("native", { ...env, SSH_CONNECTION: "10.0.0.2 50000 10.0.0.1 22" }, NOW, value)).toBe("file-access");
+    expect(calls).toEqual([]);
+  });
+
   it("is none when every stored token has expired, so a file the CLI stopped writing soon shows nothing", async () => {
     expect(await readNativeAccessToken("native", env, NOW, store(inKeychain(dead("keychain-access")), dead("file-access")).value)).toBeNull();
     expect(await readNativeAccessToken("native", env, NOW, store(null, null).value)).toBeNull();

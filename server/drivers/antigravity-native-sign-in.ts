@@ -52,11 +52,13 @@ export function defaultNativeSignInStore(platform: NodeJS.Platform = process.pla
 }
 
 /** The live access token of the sign-in the CLI run with `env` keeps for this instance: the keychain's while it is live,
- * else the profile file's; null when neither has one. A file the CLI no longer writes is dead within the hour. */
+ * else the profile file's; null when neither has one. A file the CLI no longer writes is dead within the hour. Under SSH
+ * the CLI keeps its sign-in in the profile file and never the keychain (1.5.14), so only the file is read. */
 export async function readNativeAccessToken(instanceId: string, env: NodeJS.ProcessEnv, now: number, store: NativeSignInStore = defaultNativeSignInStore()): Promise<string | null> {
+  const file = async () => nativeAccessToken(await store.readText(antigravityNativeTokenPath({ directory: antigravityProfileDirectory(instanceId) })), now);
+  if (env.SSH_CONNECTION || env.SSH_CLIENT || env.SSH_TTY) return file();
   const item = await store.security?.(["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", KEYCHAIN_ACCOUNT, "-w"], env);
-  return (item?.ok ? nativeAccessToken(item.stdout, now) : null)
-    ?? nativeAccessToken(await store.readText(antigravityNativeTokenPath({ directory: antigravityProfileDirectory(instanceId) })), now);
+  return (item?.ok ? nativeAccessToken(item.stdout, now) : null) ?? file();
 }
 
 function decodeStored(raw: string): string {

@@ -175,6 +175,8 @@ describe("the native CLI's refusal of a session for want of a sign-in", () => {
     expect(antigravityCliRefusedSession({ code: -32000, message: "Authentication required" })).toBe(true);
     expect(antigravityCliRefusedSession({ code: -32000, message: "Sign-in required" })).toBe(true);
     expect(antigravityCliRefusedSession({ code: -32000, message: "Authentication required." })).toBe(true);
+    expect(antigravityCliRefusedSession({ code: -32000, message: "Authentication required (session/new)" })).toBe(true);
+    expect(antigravityCliRefusedSession({ code: -32000, message: "Google Gemini (Antigravity) background Authentication required" })).toBe(true);
     expect(antigravityCliRefusedSession({ code: -32000, message: "Authentication service unavailable" })).toBe(false);
     expect(antigravityCliRefusedSession({ code: -32000, message: "Unable to determine whether authentication is required" })).toBe(false);
     expect(antigravityCliRefusedSession({ code: -32603, message: "Authentication required" })).toBe(false);

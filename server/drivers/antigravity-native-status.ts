@@ -35,7 +35,7 @@ export const SIGN_IN_CACHE_MS = 30_000;
  * required`). Another `-32000`, such as a sign-in service that is down, says nothing about the sign-in. */
 export function antigravityCliRefusedSession(error: unknown): boolean {
   const value = error as { code?: unknown; message?: unknown } | null;
-  return value?.code === -32000 && typeof value.message === "string" && /^\s*(?:authentication|sign[- ]?in|log[- ]?in) (?:is )?required[.!]?\s*$/iu.test(value.message);
+  return value?.code === -32000 && typeof value.message === "string" && /^\s*(?:.*?\bbackground\s+)?(?:authentication|sign[- ]?in|log[- ]?in) (?:is )?required\b/iu.test(value.message);
 }
 
 const advertised = (value: unknown) => value === true || (typeof value === "object" && value !== null && !Array.isArray(value));
