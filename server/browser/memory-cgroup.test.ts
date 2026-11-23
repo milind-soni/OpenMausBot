@@ -2,15 +2,18 @@ import { describe, expect, it } from "vitest";
 
 import { launcherScript } from "./chrome/wrapper.ts";
 import {
-  browserCgroupDir, browserMemoryMax, containInGroup, groupOomKills, ownCgroupDir, prepareBrowserCgroup, setUpBrowserCgroup, spawnInCgroup, type CgroupFs,
+  browserCgroupDir, browserCgroupProblem, browserMemoryMax, containInGroup, defaultBrowserMemoryMax, groupOomKills, ownCgroupDir, prepareBrowserCgroup, setUpBrowserCgroup,
+  spawnInCgroup, type CgroupFs,
 } from "./memory-cgroup.ts";
 
 const MB = 1_048_576;
 
 /** A cgroup tree in memory: files by path, with the writes in order. */
-function tree(files: Record<string, string>, fail: Record<string, string> = {}) {
+function tree(files: Record<string, string>, fail: Record<string, string> = {}, readOnly = false) {
   const writes: string[] = [], made: string[] = [], owned: string[] = [];
   const fs: CgroupFs = {
+    exists: (path) => path in files,
+    writable: () => !readOnly,
     read: (path) => { if (!(path in files)) throw Object.assign(new Error("missing"), { code: "ENOENT" }); return files[path]!; },
     write: (path, data) => { if (fail[path]) throw Object.assign(new Error(fail[path]), { code: fail[path] }); writes.push(`${path} ${data}`); },
     mkdir: (path) => { made.push(path); },
@@ -20,19 +23,19 @@ function tree(files: Record<string, string>, fail: Record<string, string> = {}) 
 }
 
 describe("the bots' browsers' kernel memory limit", () => {
-  it("is 55% of the machine's memory, at least 900 MB and at most 80%, off or a number of MB on request", () => {
-    expect(browserMemoryMax({}, 2048 * MB)).toBe(Math.round(2048 * MB * 0.55));
-    expect(browserMemoryMax({}, 8192 * MB)).toBe(Math.round(8192 * MB * 0.55));
-    expect(browserMemoryMax({}, 1000 * MB)).toBe(800 * MB);
-    expect(browserMemoryMax({}, 1600 * MB)).toBe(900 * MB);
-    expect(browserMemoryMax({ OMB_BROWSER_MEMORY_MAX: "off" }, 2048 * MB)).toBeNull();
-    expect(browserMemoryMax({ OMB_BROWSER_MEMORY_MAX: "0" }, 2048 * MB)).toBeNull();
-    expect(browserMemoryMax({ OMB_BROWSER_MEMORY_MAX: "1500" }, 2048 * MB)).toBe(1500 * MB);
-    expect(browserMemoryMax({ OMB_BROWSER_MEMORY_MAX: "12" }, 2048 * MB)).toBe(256 * MB);
+  it("is off unless turned on; on, it leaves the server, edge and engines 30% of the machine, at least 900 MB", () => {
+    expect(browserMemoryMax({}, 2048 * MB)).toEqual({ on: false });
+    expect(browserMemoryMax({ OMB_BROWSER_MEMORY_MAX: "off" }, 2048 * MB)).toEqual({ on: false });
+    expect(browserMemoryMax({ OMB_BROWSER_MEMORY_MAX: "0" }, 2048 * MB)).toEqual({ on: false });
+    expect(browserMemoryMax({ OMB_BROWSER_MEMORY_MAX: "auto" }, 2048 * MB)).toEqual({ on: true, bytes: 1148 * MB });
+    expect(browserMemoryMax({ OMB_BROWSER_MEMORY_MAX: " AUTO " }, 4096 * MB)).toEqual({ on: true, bytes: Math.round(4096 * MB * 0.7) });
+    expect(browserMemoryMax({ OMB_BROWSER_MEMORY_MAX: "auto" }, 8192 * MB)).toEqual({ on: true, bytes: Math.round(8192 * MB * 0.7) });
+    expect(browserMemoryMax({ OMB_BROWSER_MEMORY_MAX: "1500" }, 2048 * MB)).toEqual({ on: true, bytes: 1500 * MB });
+    expect(browserMemoryMax({ OMB_BROWSER_MEMORY_MAX: "12" }, 2048 * MB)).toEqual({ on: true, bytes: 256 * MB });
     const warned: string[] = [];
-    expect(browserMemoryMax({ OMB_BROWSER_MEMORY_MAX: "lots" }, 2048 * MB, (line) => warned.push(line))).toBe(Math.round(2048 * MB * 0.55));
+    expect(browserMemoryMax({ OMB_BROWSER_MEMORY_MAX: "lots" }, 2048 * MB, (line) => warned.push(line))).toEqual({ on: false });
     expect(warned).toHaveLength(1);
-    expect(browserMemoryMax({}, 0)).toBeNull();
+    expect([defaultBrowserMemoryMax(2048 * MB), defaultBrowserMemoryMax(1024 * MB)]).toEqual([1148 * MB, null]);
   });
 
   it("finds this process's cgroup, and takes only a plain folder under /sys/fs/cgroup as the browsers' one", () => {
@@ -44,7 +47,8 @@ describe("the bots' browsers' kernel memory limit", () => {
   });
 
   it("is set up under the supervisor's cgroup: server and browsers leaves, the limit, and maus may move its own processes between them", () => {
-    const t = tree({ "/sys/fs/cgroup/cgroup.controllers": "cpuset cpu io memory pids", "/sys/fs/cgroup/cgroup.subtree_control": "" });
+    // The machine's root cgroup (no cgroup.type), with processes in it: the memory controller may be turned on for children.
+    const t = tree({ "/sys/fs/cgroup/cgroup.controllers": "cpuset cpu io memory pids", "/sys/fs/cgroup/cgroup.subtree_control": "", "/sys/fs/cgroup/cgroup.procs": "1\n412\n" });
     const setup = setUpBrowserCgroup({ base: "/sys/fs/cgroup", limitBytes: 1126 * MB, ids: { uid: 1000, gid: 1000 }, fs: t.fs });
     expect(setup).toEqual({ ok: true, group: { base: "/sys/fs/cgroup", server: "/sys/fs/cgroup/omb/server", browsers: "/sys/fs/cgroup/omb/browsers", limitBytes: 1126 * MB } });
     expect(t.made).toEqual(["/sys/fs/cgroup/omb", "/sys/fs/cgroup/omb/server", "/sys/fs/cgroup/omb/browsers"]);
@@ -58,32 +62,47 @@ describe("the bots' browsers' kernel memory limit", () => {
     expect(t.owned).toEqual(["/sys/fs/cgroup/omb/cgroup.procs 1000:1000", "/sys/fs/cgroup/omb/server/cgroup.procs 1000:1000", "/sys/fs/cgroup/omb/browsers/cgroup.procs 1000:1000"]);
   });
 
-  it("changes nothing where it can't be set up, and says why", () => {
+  it("changes nothing where it can't be set up, and says why, mostly from reading alone", () => {
+    // A container's own cgroup (it has a cgroup.type) holding its processes: nothing is written at all.
+    const container = tree({ "/sys/fs/cgroup/cgroup.controllers": "cpu memory pids", "/sys/fs/cgroup/cgroup.subtree_control": "", "/sys/fs/cgroup/cgroup.type": "domain\n", "/sys/fs/cgroup/cgroup.procs": "1\n7\n" });
+    expect(setUpBrowserCgroup({ base: "/sys/fs/cgroup", limitBytes: MB, ids: null, fs: container.fs })).toEqual({ ok: false, why: "processes share /sys/fs/cgroup (a container's own cgroup), and none are moved out of it" });
+    expect([container.writes, container.made]).toEqual([[], []]);
+    // The same refused by the kernel where the look could not tell.
     const busy = tree({ "/sys/fs/cgroup/cgroup.controllers": "cpu memory pids", "/sys/fs/cgroup/cgroup.subtree_control": "" }, { "/sys/fs/cgroup/cgroup.subtree_control": "EBUSY" });
-    const container = setUpBrowserCgroup({ base: "/sys/fs/cgroup", limitBytes: MB, ids: null, fs: busy.fs });
-    expect(container).toEqual({ ok: false, why: "processes share /sys/fs/cgroup (a container's own cgroup), and none are moved out of it" });
+    expect(setUpBrowserCgroup({ base: "/sys/fs/cgroup", limitBytes: MB, ids: null, fs: busy.fs })).toEqual({ ok: false, why: "processes share /sys/fs/cgroup (a container's own cgroup), and none are moved out of it" });
     expect(busy.made).toEqual([]);
     const v1 = tree({});
     expect(setUpBrowserCgroup({ base: "/sys/fs/cgroup", limitBytes: MB, ids: null, fs: v1.fs })).toMatchObject({ ok: false, why: expect.stringMatching(/^no cgroup v2 tree at \/sys\/fs\/cgroup/) });
     const noMemory = tree({ "/sys/fs/cgroup/cgroup.controllers": "cpu pids" });
-    expect(setUpBrowserCgroup({ base: "/sys/fs/cgroup", limitBytes: MB, ids: null, fs: noMemory.fs })).toEqual({ ok: false, why: "the memory controller is not offered at /sys/fs/cgroup" });
-    const readOnly = tree({ "/sys/fs/cgroup/cgroup.controllers": "memory", "/sys/fs/cgroup/cgroup.subtree_control": "memory" }, { "/sys/fs/cgroup/omb/cgroup.subtree_control": "EROFS" });
-    expect(setUpBrowserCgroup({ base: "/sys/fs/cgroup", limitBytes: MB, ids: null, fs: readOnly.fs })).toEqual({ ok: false, why: "/sys/fs/cgroup/omb could not be set up (EROFS)" });
+    expect(browserCgroupProblem("/sys/fs/cgroup", noMemory.fs)).toBe("the memory controller is not offered at /sys/fs/cgroup");
+    const readOnly = tree({ "/sys/fs/cgroup/cgroup.controllers": "memory", "/sys/fs/cgroup/cgroup.subtree_control": "" }, {}, true);
+    expect(browserCgroupProblem("/sys/fs/cgroup", readOnly.fs)).toBe("/sys/fs/cgroup is read-only here");
+    const failing = tree({ "/sys/fs/cgroup/cgroup.controllers": "memory", "/sys/fs/cgroup/cgroup.subtree_control": "memory" }, { "/sys/fs/cgroup/omb/cgroup.subtree_control": "EROFS" });
+    expect(setUpBrowserCgroup({ base: "/sys/fs/cgroup", limitBytes: MB, ids: null, fs: failing.fs })).toEqual({ ok: false, why: "/sys/fs/cgroup/omb could not be set up (EROFS)" });
+    // An empty cgroup of its own (a systemd service's leaf moved aside, or a test's): fine.
+    expect(browserCgroupProblem("/sys/fs/cgroup/omb-test", tree({ "/sys/fs/cgroup/omb-test/cgroup.controllers": "memory", "/sys/fs/cgroup/omb-test/cgroup.type": "domain", "/sys/fs/cgroup/omb-test/cgroup.procs": "" }).fs)).toBeNull();
     // Already on (a machine's root cgroup under systemd): not written again.
     const on = tree({ "/sys/fs/cgroup/cgroup.controllers": "memory", "/sys/fs/cgroup/cgroup.subtree_control": "cpu memory" });
     expect(setUpBrowserCgroup({ base: "/sys/fs/cgroup", limitBytes: MB, ids: null, fs: on.fs }).ok).toBe(true);
     expect(on.writes[0]).toBe("/sys/fs/cgroup/omb/cgroup.subtree_control +memory");
   });
 
-  it("logs one line at start: off, not set with the reason, or the limit with how long it took", () => {
+  it("logs one line at start: off with what a look found, writing nothing, or on with the limit and how long it took", () => {
     const clock = { t: 0 };
     const now = () => (clock.t += 0.4);
-    expect(prepareBrowserCgroup({ OMB_BROWSER_MEMORY_MAX: "off" }, 2048 * MB, null).line).toBe("browser memory limit: off (OMB_BROWSER_MEMORY_MAX=off)");
-    expect(prepareBrowserCgroup({}, 2048 * MB, null, { procSelfCgroup: () => "1:name=systemd:/\n", now }).line).toBe("browser memory limit: not set (this process is in no cgroup v2)");
-    const t = tree({ "/sys/fs/cgroup/cgroup.controllers": "memory", "/sys/fs/cgroup/cgroup.subtree_control": "" });
-    const set = prepareBrowserCgroup({}, 2048 * MB, { uid: 1000, gid: 1000 }, { fs: t.fs, procSelfCgroup: () => "0::/\n", now });
+    const root = () => tree({ "/sys/fs/cgroup/cgroup.controllers": "memory", "/sys/fs/cgroup/cgroup.subtree_control": "", "/sys/fs/cgroup/cgroup.procs": "1\n" });
+    const fly = root();
+    expect(prepareBrowserCgroup({}, 2048 * MB, { uid: 1000, gid: 1000 }, { fs: fly.fs, procSelfCgroup: () => "0::/\n", now })).toEqual({ group: null,
+      line: "browser memory limit: off (OMB_BROWSER_MEMORY_MAX=auto turns it on); it could be set here, in /sys/fs/cgroup/omb/browsers, 1148 MB (looked in 0.4 ms)" });
+    expect([fly.writes, fly.made, fly.owned]).toEqual([[], [], []]);
+    const docker = tree({ "/sys/fs/cgroup/cgroup.controllers": "memory", "/sys/fs/cgroup/cgroup.subtree_control": "", "/sys/fs/cgroup/cgroup.type": "domain", "/sys/fs/cgroup/cgroup.procs": "1\n" });
+    expect(prepareBrowserCgroup({}, 4096 * MB, null, { fs: docker.fs, procSelfCgroup: () => "0::/\n", now }).line)
+      .toBe("browser memory limit: off (OMB_BROWSER_MEMORY_MAX=auto turns it on); it could not be set here: processes share /sys/fs/cgroup (a container's own cgroup), and none are moved out of it (looked in 0.4 ms)");
+    expect(prepareBrowserCgroup({}, 2048 * MB, null, { fs: fly.fs, procSelfCgroup: () => "1:name=systemd:/\n", now }).line).toMatch(/it could not be set here: this process is in no cgroup v2/);
+    const on = root();
+    const set = prepareBrowserCgroup({ OMB_BROWSER_MEMORY_MAX: "auto" }, 2048 * MB, { uid: 1000, gid: 1000 }, { fs: on.fs, procSelfCgroup: () => "0::/\n", now });
     expect(set.group?.browsers).toBe("/sys/fs/cgroup/omb/browsers");
-    expect(set.line).toBe("browser memory limit: 1126 MB for the bots' Chrome, in /sys/fs/cgroup/omb/browsers (set up in 0.4 ms)");
+    expect(set.line).toBe("browser memory limit: 1148 MB for the bots' Chrome together, in /sys/fs/cgroup/omb/browsers (set up in 0.4 ms)");
   });
 
   it("starts a child in a leaf by joining it for the spawn, then goes back", () => {

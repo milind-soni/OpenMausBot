@@ -6,7 +6,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -66,7 +65,8 @@ describe.skipIf(!required && !(root && v2))("the browsers' kernel memory limit o
     // cgroup after each spawn, as the supervisor does.
     const own = ownCgroupDir(readFileSync("/proc/self/cgroup", "utf8"))!;
     const base = join("/sys/fs/cgroup", `omb-test-${process.pid}-${Date.now()}`);
-    const work = mkdtempSync(join(tmpdir(), "omb-cgroup-"));
+    // Under /tmp itself: the unprivileged "server" must reach it, and a runner's TMPDIR is its own, mode 0700.
+    const work = mkdtempSync("/tmp/omb-cgroup-");
     chmodSync(work, 0o755);
     let server: ChildProcess | undefined;
     try {
@@ -101,6 +101,10 @@ describe.skipIf(!required && !(root && v2))("the browsers' kernel memory limit o
         "});",
       ].join("\n"));
       chmodSync(serverScript, 0o644);
+      // The supervisor's cost on the start path: joining the leaf for the spawn and going back, beyond the spawn itself.
+      const joinStarted = performance.now();
+      spawnInCgroup(setup.group.server, own, () => undefined);
+      console.log(`joining the server's leaf and going back took ${(performance.now() - joinStarted).toFixed(2)} ms`);
       server = spawnInCgroup(setup.group.server, own, () =>
         spawn(process.execPath, [serverScript], { uid: NOBODY.uid, gid: NOBODY.gid, cwd: work, stdio: ["ignore", "pipe", "inherit"] }));
       const out = lines(server);

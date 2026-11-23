@@ -4,34 +4,42 @@
 // was evicted, and nothing that could act ran any more (Nov 2026). Under a cgroup v2 `memory.max` the kernel reclaims and,
 // at the limit, kills inside the browsers' group alone: the server, the edge and the engines keep their pages.
 //
-// The root supervisor (cloud-home-start.ts) makes `<its cgroup>/omb/{server,browsers}`, puts the server in `server` and
-// gives `maus` the right to move its own processes between the two (cgroup.procs of `omb` and of both leaves). Each Chrome
+// Off unless OMB_BROWSER_MEMORY_MAX turns it on ("auto" or a number of MB): until then the supervisor only looks, without
+// writing anything, and logs whether it could be set here. On, the root supervisor (cloud-home-start.ts) makes
+// `<its cgroup>/omb/{server,browsers}`, puts the server in `server` and gives `maus` the right to move its own processes
+// between the two (cgroup.procs of `omb` and of both leaves). Each Chrome
 // moves itself into `browsers` before it starts: the generated launcher's first line (chrome/wrapper.ts). Anything missing
 // (cgroup v1, a read-only cgroup tree, a container whose own cgroup holds its processes, as Docker's does) leaves things
 // as they were, with one line in the log saying why. Nothing is moved out of a container's cgroup to make room: that would
 // break `docker exec` into it.
-import { chownSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { accessSync, chownSync, constants, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { posix } from "node:path";
 
-/** Read by the root supervisor only: "off" (or 0) for no limit, a number of MB, else the default. */
+/** Read by the root supervisor only: unset or "off" (or 0) for no limit, "auto" for the default size, or a number of MB. */
 export const BROWSER_MEMORY_MAX_ENV = "OMB_BROWSER_MEMORY_MAX";
 /** Handed by the supervisor to the server: the browsers' cgroup folder, which every bot Chrome joins as it starts. */
 export const BROWSER_CGROUP_ENV = "OMB_BROWSER_CGROUP";
 
 const MB = 1_048_576;
-/** The browsers together may use this share of the machine: above the ceiling's hard line (half), so the server's own
- * close comes first while it can run, and below what leaves the server, the edge and an engine their room. */
-export const BROWSER_MEMORY_SHARE = 0.55;
-const FLOOR_BYTES = 900 * MB, SMALLEST_BYTES = 256 * MB, MOST_SHARE = 0.8;
+/** What the browsers together leave the server, the edge and the engines: 30% of the machine, at least 900 MB. */
+const RESERVE_SHARE = 0.3, RESERVE_FLOOR_BYTES = 900 * MB, SMALLEST_BYTES = 256 * MB;
 
-/** The limit for the browsers' group, or null for none: 55% of the memory (at least 900 MB, at most 80%) by default. */
-export function browserMemoryMax(env: NodeJS.ProcessEnv, memoryBytes: number, warn: (line: string) => void = () => undefined): number | null {
-  const raw = env[BROWSER_MEMORY_MAX_ENV]?.trim().toLowerCase();
-  if (raw === "off" || raw === "0") return null;
-  if (raw && /^\d+$/.test(raw)) return Math.max(SMALLEST_BYTES, Number(raw) * MB);
-  if (raw && raw !== "auto") warn(`${BROWSER_MEMORY_MAX_ENV}=${JSON.stringify(env[BROWSER_MEMORY_MAX_ENV])} is not a number of MB, "auto" or "off", so the default is used`);
-  if (!(memoryBytes > 0)) return null;
-  return Math.round(Math.min(memoryBytes * MOST_SHARE, Math.max(FLOOR_BYTES, memoryBytes * BROWSER_MEMORY_SHARE)));
+/** The default limit: the machine's memory less the reserve (1148 MB on 2 GB, 2867 MB on 4 GB, 5734 MB on 8 GB); null on
+ * a machine too small to leave a browser room. One group holds every bot's browser, so this caps them together. */
+export function defaultBrowserMemoryMax(memoryBytes: number): number | null {
+  const limit = Math.round(memoryBytes - Math.max(RESERVE_FLOOR_BYTES, memoryBytes * RESERVE_SHARE));
+  return limit >= 2 * SMALLEST_BYTES ? limit : null;
+}
+
+export type BrowserMemorySetting = { on: false } | { on: true; bytes: number | null };
+
+/** OMB_BROWSER_MEMORY_MAX: off unless "auto" (the default size) or a number of MB. */
+export function browserMemoryMax(env: NodeJS.ProcessEnv, memoryBytes: number, warn: (line: string) => void = () => undefined): BrowserMemorySetting {
+  const raw = env[BROWSER_MEMORY_MAX_ENV]?.trim().toLowerCase() ?? "";
+  if (/^\d+$/.test(raw) && !/^0+$/.test(raw)) return { on: true, bytes: Math.max(SMALLEST_BYTES, Number(raw) * MB) };
+  if (raw === "auto") return { on: true, bytes: memoryBytes > 0 ? defaultBrowserMemoryMax(memoryBytes) : null };
+  if (raw && raw !== "off" && !/^0+$/.test(raw)) warn(`${BROWSER_MEMORY_MAX_ENV}=${JSON.stringify(env[BROWSER_MEMORY_MAX_ENV])} is not "auto", a number of MB or "off", so it stays off`);
+  return { on: false };
 }
 
 /** This process's cgroup folder in the v2 tree, from /proc/self/cgroup's "0::" line; null without one. */
@@ -51,9 +59,14 @@ export interface CgroupFs {
   write(path: string, data: string): void;
   mkdir(path: string): void;
   chown(path: string, uid: number, gid: number): void;
+  exists(path: string): boolean;
+  /** Whether this process may write the file (a read-only mount says no). */
+  writable(path: string): boolean;
 }
 
 const realFs: CgroupFs = {
+  exists: existsSync,
+  writable: (path) => { try { accessSync(path, constants.W_OK); return true; } catch { return false; } },
   read: (path) => readFileSync(path, "utf8"),
   write: (path, data) => writeFileSync(path, data),
   mkdir: (path) => { try { mkdirSync(path); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; } },
@@ -66,12 +79,27 @@ export type BrowserCgroupSetup = { ok: true; group: BrowserCgroup } | { ok: fals
 const code = (error: unknown) => (error as NodeJS.ErrnoException)?.code ?? (error instanceof Error ? error.message : String(error));
 const hasMemory = (list: string) => /(^|\s)memory(\s|$)/.test(list);
 
+/** What stands in the way of the group under `base` (the supervisor's own cgroup), found by reading only; null when
+ * nothing does. A cgroup other than the machine's root one (it has a cgroup.type) that holds processes, as a container's
+ * own does, can't have the memory controller turned on for children without moving them out first, which is not done. */
+export function browserCgroupProblem(base: string, fs: Pick<CgroupFs, "read" | "exists" | "writable"> = realFs): string | null {
+  let controllers: string;
+  try { controllers = fs.read(`${base}/cgroup.controllers`); } catch (error) { return `no cgroup v2 tree at ${base} (${code(error)})`; }
+  if (!hasMemory(controllers)) return `the memory controller is not offered at ${base}`;
+  if (!fs.writable(`${base}/cgroup.subtree_control`)) return `${base} is read-only here`;
+  let enabled = "";
+  try { enabled = fs.read(`${base}/cgroup.subtree_control`); } catch {}
+  let procs = "";
+  try { procs = fs.read(`${base}/cgroup.procs`).trim(); } catch {}
+  if (!hasMemory(enabled) && fs.exists(`${base}/cgroup.type`) && procs) return `processes share ${base} (a container's own cgroup), and none are moved out of it`;
+  return null;
+}
+
 /** Root, once at start, before the server runs: the browsers' group under `base` (the supervisor's own cgroup). */
 export function setUpBrowserCgroup(options: { base: string; limitBytes: number; ids: { uid: number; gid: number } | null; fs?: CgroupFs }): BrowserCgroupSetup {
   const fs = options.fs ?? realFs, { base } = options;
-  let controllers: string;
-  try { controllers = fs.read(`${base}/cgroup.controllers`); } catch (error) { return { ok: false, why: `no cgroup v2 tree at ${base} (${code(error)})` }; }
-  if (!hasMemory(controllers)) return { ok: false, why: `the memory controller is not offered at ${base}` };
+  const problem = browserCgroupProblem(base, fs);
+  if (problem) return { ok: false, why: problem };
   let enabled = "";
   try { enabled = fs.read(`${base}/cgroup.subtree_control`); } catch {}
   if (!hasMemory(enabled)) {
@@ -112,22 +140,28 @@ export function groupOomKills(dir: string, read: (path: string) => string = (pat
   }
 }
 
-/** The supervisor's part: the limit from its environment and the machine's memory, the group set up, and one line for the
- * log either way, with how long it took. */
+/** The supervisor's part, and its one line for the log. Off (the default): it only looks, writing nothing, and says whether
+ * the limit could be set here and how large it would be. On: the group set up, with how long that took. */
 export function prepareBrowserCgroup(env: NodeJS.ProcessEnv, memoryBytes: number, ids: { uid: number; gid: number } | null,
   deps: { fs?: CgroupFs; procSelfCgroup?: () => string; now?: () => number } = {}): { group: BrowserCgroup | null; line: string } {
   const now = deps.now ?? (() => performance.now()), started = now();
   const warnings: string[] = [];
-  const limit = browserMemoryMax(env, memoryBytes, (line) => warnings.push(line));
+  const setting = browserMemoryMax(env, memoryBytes, (line) => warnings.push(line));
   const lead = `browser memory limit${warnings.length ? ` (${warnings.join("; ")})` : ""}`;
-  if (limit === null) return { group: null, line: `${lead}: off (${BROWSER_MEMORY_MAX_ENV}=${env[BROWSER_MEMORY_MAX_ENV] ?? ""})` };
   let own: string | null = null;
   try { own = ownCgroupDir((deps.procSelfCgroup ?? (() => readFileSync("/proc/self/cgroup", "utf8")))()); } catch {}
+  const would = setting.on ? setting.bytes : defaultBrowserMemoryMax(memoryBytes);
+  if (!setting.on) {
+    const problem = own === null ? "this process is in no cgroup v2" : browserCgroupProblem(own, deps.fs ?? realFs);
+    const size = would === null ? "" : `, ${Math.round(would / MB)} MB`;
+    return { group: null, line: `${lead}: off (${BROWSER_MEMORY_MAX_ENV}=auto turns it on); ${problem ? `it could not be set here: ${problem}` : `it could be set here, in ${own}/omb/browsers${size}`} (looked in ${(now() - started).toFixed(1)} ms)` };
+  }
+  if (setting.bytes === null) return { group: null, line: `${lead}: not set (this machine's memory is too small for one)` };
   if (own === null) return { group: null, line: `${lead}: not set (this process is in no cgroup v2)` };
-  const setup = setUpBrowserCgroup({ base: own, limitBytes: limit, ids, ...(deps.fs ? { fs: deps.fs } : {}) });
+  const setup = setUpBrowserCgroup({ base: own, limitBytes: setting.bytes, ids, ...(deps.fs ? { fs: deps.fs } : {}) });
   const took = `${(now() - started).toFixed(1)} ms`;
   return setup.ok
-    ? { group: setup.group, line: `${lead}: ${Math.round(limit / MB)} MB for the bots' Chrome, in ${setup.group.browsers} (set up in ${took})` }
+    ? { group: setup.group, line: `${lead}: ${Math.round(setting.bytes / MB)} MB for the bots' Chrome together, in ${setup.group.browsers} (set up in ${took})` }
     : { group: null, line: `${lead}: not set, ${setup.why} (${took})` };
 }
 

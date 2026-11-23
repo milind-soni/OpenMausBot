@@ -268,7 +268,7 @@ describe("CI concurrency", () => {
     expect(buildRuns.slice(0, 4)).toEqual(["pnpm install --frozen-lockfile", "pnpm typecheck", "pnpm check:electron", "pnpm exec vite build"]);
     // Then the one test that needs root on a real kernel (the browsers' memory limit), which fails rather than skips there.
     expect(buildRuns).toHaveLength(5);
-    expect(buildRuns[4]).toMatch(/sudo env .*OMB_CGROUP_TEST=require .*vitest run server\/browser\/memory-cgroup\.linux\.test\.ts/s);
+    expect(buildRuns[4]).toMatch(/sudo setpriv .*--bounding-set=-sys_admin.*OMB_CGROUP_TEST=require .*vitest run server\/browser\/memory-cgroup\.linux\.test\.ts/s);
     for (const run of ["pnpm typecheck", "pnpm check:electron", "pnpm exec vite build"]) {
       expect((workflow.jobs.static.steps as { run?: string }[]).some((step) => step.run === run), run).toBe(false);
     }
