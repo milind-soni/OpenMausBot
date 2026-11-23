@@ -1,9 +1,11 @@
+import { CirclePlay } from "lucide-react";
 import { useState } from "react";
 
 import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import type { LocaleKey } from "@/locales";
-import { readBurgerWorkflow, removeBurger, restoreBurger, useSavedBurgers, type SavedWorkflow } from "@/lib/skill-burger";
+import { readBurgerWorkflow, removeBurger, restoreBurger, runBurgerIn, useSavedBurgers, type SavedWorkflow } from "@/lib/skill-burger";
+import { useStoreDispatch } from "@/state/store-select";
 import { Card, NoteRow, TrashButton } from "../bot-panel/rows";
 import { EveryChatToggle } from "./EveryChatToggle";
 import { MiniBurger } from "./MiniBurger";
@@ -41,8 +43,9 @@ export function useBurgerRemoval() {
 
 /** The bot panel's Skill Burgers: the ones this bot uses. Open one to see its steps; switch it to every chat; remove it with
  * an Undo. */
-export function SavedWorkflowsCard({ botId }: { botId: string }) {
+export function SavedWorkflowsCard({ botId, threadId }: { botId: string; threadId: string }) {
   const { skills: all, error } = useSavedBurgers();
+  const dispatch = useStoreDispatch();
   const advanced = useAdvancedMode();
   const skills = all?.filter(usedBy(botId)) ?? null;
   const [open, setOpen] = useState<string | null>(null);
@@ -75,6 +78,11 @@ export function SavedWorkflowsCard({ botId }: { botId: string }) {
                 </button>
                 <EveryChatToggle compact skill={skill} />
               </div>
+              <button type="button" data-panel-action={`run-skill-burger:${skill.name}`} onClick={() => runBurgerIn(dispatch, { id: botId, threadId }, skill.name)}
+                aria-label={t("skillBurger.runName", { name: skill.summary })} title={t("skillBurger.run.button")}
+                className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-ink/[0.05] hover:text-ink">
+                <CirclePlay size={14} aria-hidden="true" />
+              </button>
               <TrashButton data-panel-action={`remove-skill-burger:${skill.name}`} label={t("skillBurger.list.remove", { name: skill.name })} onClick={() => void remove(skill)} />
             </div>
             <ol id={listId} hidden={!expanded} aria-label={t("skillBurger.layers")} className="flex flex-col gap-1 px-3.5 pb-3">

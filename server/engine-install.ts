@@ -10,6 +10,7 @@ import { registerStandaloneBinDirs, standaloneAssetFor, standaloneRunEnv } from 
 import { STANDALONE_RELEASES } from "./standalone-releases.ts";
 import { augmentedPath, findCliCandidates, registerPathDir, resetPathCache } from "./env-path.ts";
 import { botBox } from "./bot-box/box.ts";
+import { orderImageEngines } from "./image-engines.ts";
 import { execCli, killCliTree, spawnCli } from "./procs.ts";
 
 const MAX_OUTPUT = 64 * 1024;
@@ -44,10 +45,12 @@ export function npmCopyVersion(pkg: string, baseDir = DATA_DIR): string | null {
   }
 }
 
-/** Called once at boot: engines npm installed here win over any other copy on PATH. A standalone build the app installed
- * goes last instead, so a copy the person installs themselves takes over. */
+/** Called once at boot: engines npm installed here win over any other copy on PATH, except a Cloud image's own copies
+ * with OMB_IMAGE_ENGINES=1 (image-engines.ts). A standalone build the app installed goes last instead, so a copy the
+ * person installs themselves takes over. */
 export function registerEnginesBinDir(baseDir = DATA_DIR, releases: readonly StandaloneRelease[] = STANDALONE_RELEASES): void {
   registerPathDir(enginesBinDir(baseDir));
+  orderImageEngines(baseDir);
   registerStandaloneBinDirs(baseDir, releases);
 }
 
@@ -185,6 +188,7 @@ async function installOnce(pkg: string, options: InstallOptions): Promise<void> 
   await runInstall(pkg, args, env, prefix, timeoutMs);
   const binDir = enginesBinDir(options.baseDir);
   registerPathDir(binDir);
+  orderImageEngines(options.baseDir ?? DATA_DIR);
   resetPathCache();
   if (!options.cli) return;
   const installed = findCliCandidates(options.cli).find((path) => path.startsWith(binDir));
