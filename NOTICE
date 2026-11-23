@@ -124,3 +124,8 @@ Teams' display-name rule. Copyright 2025-2026 Vexa.ai Inc. and the Vexa
 contributors, used under the Apache License, Version 2.0
 (third_party/vexa/LICENSE). The adapted parts were rewritten in our own code;
 no Vexa file is included unmodified.
+
+The welcome screen's brand mascot (src/vendor/mascot3d/, and the app icons,
+build/icon* and public/app-icon*, rendered from it) is the mascot-3d kit,
+"น้อง Connect" from the NT AI website. It bundles three.js r180, Copyright
+2010-2025 three.js authors, used under the MIT License (third_party/three/LICENSE).

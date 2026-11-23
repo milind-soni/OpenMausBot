@@ -1,13 +1,15 @@
-// Writes product.json's app name, app id and update source into electron-builder.yml.
+// Writes product.json's app name, app id and update source into electron-builder.yml, and the app name into the web
+// app manifest.
 //
-//   node scripts/product.mjs           rewrite electron-builder.yml
-//   node scripts/product.mjs --check   fail when it does not match product.json
+//   node scripts/product.mjs           rewrite both
+//   node scripts/product.mjs --check   fail when either does not match product.json
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const BUILDER = join(ROOT, "electron-builder.yml");
+const MANIFEST = join(ROOT, "public", "manifest.webmanifest");
 const APP_NAME = /^[A-Za-z0-9][A-Za-z0-9 .-]{0,48}[A-Za-z0-9]$/;
 const APP_ID = /^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$/;
 const GITHUB_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
@@ -55,19 +57,35 @@ export function checkProduct(yaml, product) {
     .map((key) => `${key} is ${actual[key] ?? "missing"}, product.json says ${expected[key]}`);
 }
 
+/** The web app manifest with product.json's app name; the rest of it is kept as written. */
+export function applyManifest(text, product) {
+  if (checkManifest(text, product).length === 0) return text;
+  const manifest = JSON.parse(text);
+  return JSON.stringify({ ...manifest, name: product.appName, short_name: product.appName }, null, 2) + "\n";
+}
+
+export function checkManifest(text, product) {
+  const manifest = JSON.parse(text);
+  return ["name", "short_name"].filter((key) => manifest[key] !== product.appName)
+    .map((key) => `manifest ${key} is ${manifest[key] ?? "missing"}, product.json says ${product.appName}`);
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const product = readProduct();
   const yaml = readFileSync(BUILDER, "utf8");
+  const manifest = readFileSync(MANIFEST, "utf8");
   if (process.argv.includes("--check")) {
-    const problems = checkProduct(yaml, product);
+    const problems = [...checkProduct(yaml, product), ...checkManifest(manifest, product)];
     if (problems.length) {
-      console.error(`electron-builder.yml does not match product.json (run pnpm product:apply):\n${problems.map((p) => `- ${p}`).join("\n")}`);
+      console.error(`electron-builder.yml or the web app manifest does not match product.json (run pnpm product:apply):\n${problems.map((p) => `- ${p}`).join("\n")}`);
       process.exit(1);
     }
-    console.log("electron-builder.yml matches product.json");
+    console.log("electron-builder.yml and the web app manifest match product.json");
   } else {
     const next = applyProduct(yaml, product);
     if (next !== yaml) writeFileSync(BUILDER, next);
-    console.log(next === yaml ? "electron-builder.yml already matches product.json" : "electron-builder.yml updated from product.json");
+    const nextManifest = applyManifest(manifest, product);
+    if (nextManifest !== manifest) writeFileSync(MANIFEST, nextManifest);
+    console.log(next === yaml && nextManifest === manifest ? "already matches product.json" : "updated from product.json");
   }
 }

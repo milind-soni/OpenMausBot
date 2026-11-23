@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowUp, Check, Plus } from "lucide-react";
-import { BotAvatar, MausAvatar } from "@/components/Avatar";
+import { BrandMascot } from "@/components/BrandMascot";
 import { engineReady } from "@/components/EngineLibrary";
 import { usePrefersReducedMotion } from "@/components/mascot-clock";
 import { brand, productName } from "@/lib/brand";
 import { cn } from "@/lib/cn";
 import { ConnectAiPlaceContext, useConnectAiSteps } from "@/lib/connect-ai-events";
-import { DEFAULT_BOT_NAME, myDefaultBot, useViewerEmail } from "@/lib/default-bot";
 import { activeLocale, t } from "@/lib/i18n";
 import { aiChoices, aiWorks, firstAis, type FirstAiKind } from "@/lib/onboarding";
 import { useStore, type InstanceInfo } from "@/state/store";
@@ -15,7 +14,9 @@ import { ConnectAiDialog } from "./ConnectAi";
 import { PILL, SignInPill, useSignInPill } from "./SignInPill";
 import { aiRuns, useWelcomeAi } from "./welcome-ai";
 
-const MASCOT_SIZE = 72;
+const LOGO_SIZE = 72;
+const MASCOT_WIDTH = 220;
+const MASCOT_HEIGHT = 240;
 const PLACEHOLDER_MS = 700;
 const GRAPHEME_MS = 35;
 
@@ -61,7 +62,6 @@ function DemoComposer({ reduced, onTyping }: { reduced: boolean; onTyping: (typi
 export function MeetScreen({ hosted, onNext }: { hosted: boolean; onNext: () => void }) {
   const { state } = useStore();
   const reduced = usePrefersReducedMotion();
-  const maus = myDefaultBot(state.bots, useViewerEmail());
   // An AI counts once it answered a test message (or cannot be sent one); OpenCode's free model only once picked here.
   const [chosen, setChosen] = useState<string | null>(null);
   const tested = useWelcomeAi(state.instances, !hosted, chosen, "meet");
@@ -100,18 +100,16 @@ export function MeetScreen({ hosted, onNext }: { hosted: boolean; onNext: () => 
   return (
     <ConnectAiPlaceContext.Provider value="meet">
     <div className="relative h-full min-h-[600px] w-full text-center">
-      <h1 id="welcome-title" className="absolute left-1/2 top-[calc(50%-264px)] w-max max-w-[min(560px,calc(100%-32px))] -translate-x-1/2 text-[28px] font-normal leading-[34px] tracking-[-0.02em] text-ink">
+      <h1 id="welcome-title" className="absolute z-10 left-1/2 top-[calc(50%-264px)] w-max max-w-[min(560px,calc(100%-32px))] -translate-x-1/2 text-[28px] font-normal leading-[34px] tracking-[-0.02em] text-ink">
         {t("onboarding.meet.title", { app: productName() })}
       </h1>
-      <span className="absolute left-1/2 top-[calc(50%-75px)] flex -translate-x-1/2 -translate-y-1/2" style={{ width: MASCOT_SIZE, height: MASCOT_SIZE }}>
-        {logo ? (
-          <img src={logo} alt="" width={MASCOT_SIZE} height={MASCOT_SIZE} className="size-full object-contain" />
-        ) : maus ? (
-          <BotAvatar bot={maus} size={MASCOT_SIZE} state={face} animated={!reduced} />
-        ) : (
-          <MausAvatar color="chrome" size={MASCOT_SIZE} state={face} animated={!reduced} label={DEFAULT_BOT_NAME} />
-        )}
-      </span>
+      {logo ? (
+        <span className="absolute left-1/2 top-[calc(50%-75px)] flex -translate-x-1/2 -translate-y-1/2" style={{ width: LOGO_SIZE, height: LOGO_SIZE }}>
+          <img src={logo} alt="" width={LOGO_SIZE} height={LOGO_SIZE} className="size-full object-contain" />
+        </span>
+      ) : (
+        <BrandMascot width={MASCOT_WIDTH} height={MASCOT_HEIGHT} mood={face} className="!absolute left-1/2 top-[calc(50%-264px)] -translate-x-1/2" />
+      )}
       <DemoComposer reduced={reduced} onTyping={setTyping} />
       {hosted && (
         <p className="absolute left-1/2 top-[calc(50%+86px)] w-[420px] max-w-[calc(100%-32px)] -translate-x-1/2 text-[13px] leading-[18px] text-ink-secondary">

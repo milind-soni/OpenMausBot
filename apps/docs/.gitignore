@@ -5,7 +5,7 @@
 /.open-next
 /out
 /build
-/public/app-icon.svg
+/public/app-icon.png
 /public/screenshots
 *.tsbuildinfo
 .DS_Store

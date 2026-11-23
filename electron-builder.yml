@@ -77,6 +77,9 @@ extraResources:
   # Code adapted from T3 Code (MIT): the bots' browser egress gate, the Antigravity runtime, citations.
   - from: third_party/t3-code/LICENSE
     to: licenses/t3-code-LICENSE.txt
+  # three.js (MIT), inside the welcome screen's mascot bundle.
+  - from: third_party/three/LICENSE
+    to: licenses/three-LICENSE.txt
   # The 1Password SDK and its WebAssembly core (MIT; saved logins from
   # 1Password, staged in the duckdb resource tree). Neither npm package
   # carries its license text, so the upstream file travels here.
@@ -214,7 +217,7 @@ linux:
       arch: x64
   # Keep the vector source in the freedesktop scalable icon hierarchy. A
   # lone 1024px PNG is not indexed by GNOME's hicolor theme on Ubuntu 24.04.
-  icon: build/icon.svg
+  icon: build/icon-1024.png
   category: Utility
   executableName: openmausbot
   synopsis: Your own team of AI bots, in a chat app

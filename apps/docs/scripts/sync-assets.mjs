@@ -3,8 +3,8 @@ import { fileURLToPath } from 'node:url';
 
 const screenshotsSource = fileURLToPath(new URL('../../../docs/screenshots/', import.meta.url));
 const screenshotsTarget = fileURLToPath(new URL('../public/screenshots/', import.meta.url));
-const iconSource = fileURLToPath(new URL('../../../public/app-icon.svg', import.meta.url));
-const iconTarget = fileURLToPath(new URL('../public/app-icon.svg', import.meta.url));
+const iconSource = fileURLToPath(new URL('../../../public/app-icon.png', import.meta.url));
+const iconTarget = fileURLToPath(new URL('../public/app-icon.png', import.meta.url));
 
 await mkdir(screenshotsTarget, { recursive: true });
 

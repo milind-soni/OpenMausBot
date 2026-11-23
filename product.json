@@ -2,5 +2,13 @@
   "name": "MausBot",
   "appName": "OpenMausBot",
   "appId": "com.openmausbot.app",
-  "updates": { "owner": "tanlull", "repo": "OpenMausBot" }
+  "updates": {
+    "owner": "tanlull",
+    "repo": "OpenMausBot"
+  },
+  "mascot": {
+    "name": "น้อง Connect",
+    "emblem": "bars",
+    "badge": false
+  }
 }

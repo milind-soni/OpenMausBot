@@ -5,6 +5,12 @@ export const PRODUCT_NAME: string = product.name;
 /** The desktop app's and installers' name. */
 export const APP_NAME: string = product.appName;
 export const APP_ID: string = product.appId;
+/** The brand mascot's look (the mascot-3d kit's brand input), shown on the welcome screen. */
+export const MASCOT_BRAND: { name: string; emblem: "bars" | "logo"; badge: boolean } = {
+  name: product.mascot.name,
+  emblem: product.mascot.emblem === "logo" ? "logo" : "bars",
+  badge: product.mascot.badge === true,
+};
 
 const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 /** The names as regular-expression source, for code that reads back a line this app wrote. */

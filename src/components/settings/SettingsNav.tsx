@@ -43,7 +43,7 @@ export function AppIcon({ size }: { size: number }) {
   // A 0.5 px edge keeps the tile's shape on a dark sheet, where its own black would melt into Midnight's.
   return (
     <span className="relative shrink-0" style={{ width: size, height: size }}>
-      <img src="/app-icon.svg" alt="" width={size} height={size} className="rounded-[6px]" style={{ width: size, height: size }} />
+      <img src="/app-icon.png" alt="" width={size} height={size} className="rounded-[6px]" style={{ width: size, height: size }} />
       <span aria-hidden="true" className="absolute inset-0 rounded-[6px] shadow-[inset_0_0_0_0.5px_var(--settings-edge)]" />
     </span>
   );

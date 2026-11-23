@@ -18,7 +18,8 @@
     "electron/vendor/**",
     "release/**",
     "third_party/**",
-    "electron/resources/**"
+    "electron/resources/**",
+    "src/vendor/**"
   ],
   "overrides": [
     {
