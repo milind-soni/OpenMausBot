@@ -46,6 +46,8 @@ const SERVER_ENV_NAMES = new Set([
   "OMB_CLOUD_EXPORT_ONLY",
   // The orphan sweep's switch (server/host/orphan-sweep.ts): off, report or remove, set per home by the Admin.
   "OMB_ORPHAN_SWEEP", "OMB_ORPHAN_SWEEP_MAX_SHARE",
+  // The idle reclaim's switch (server/host/idle-reclaim.ts): off, report or remove, set per home by the Admin.
+  "OMB_IDLE_RECLAIM",
 ]);
 export function serverEnvironmentAllowed(name: string): boolean {
   return SERVER_ENV_NAMES.has(name) || name.startsWith("LC_");
