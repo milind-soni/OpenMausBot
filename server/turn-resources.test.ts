@@ -142,3 +142,44 @@ describe("wait estimate history", () => {
     expect(leases.waitEstimateMs("computer:vm:other")).toBeUndefined();
   });
 });
+
+describe("what a waiting computer turn can be told", () => {
+  const c = { threadId: "c", generation: "3" };
+
+  it("dates the current holder's claim and forgets it on release", () => {
+    const leases = new TurnResources();
+    expect(leases.holderSince("computer:host")).toBeUndefined();
+    const before = Date.now();
+    leases.claim("computer:host", a);
+    expect(leases.holderSince("computer:host")).toBeGreaterThanOrEqual(before);
+    leases.releaseOne("computer:host", a);
+    expect(leases.holderSince("computer:host")).toBeUndefined();
+    leases.claim("computer:host", b);
+    leases.release(b);
+    expect(leases.holderSince("computer:host")).toBeUndefined();
+  });
+
+  it("finds a turn's computer queue place, never a browser seat's", () => {
+    const leases = new TurnResources();
+    leases.claim("browser:one", a);
+    leases.startWaiting("browser:one", b);
+    expect(leases.computerWaitOf(b)).toBeUndefined();
+    leases.claim("computer:host", a);
+    leases.startWaiting("computer:host", c);
+    leases.startWaiting("computer:host", b);
+    expect(leases.computerWaitOf(b)).toEqual({ resource: "computer:host", position: 2 });
+    leases.stopWaiting("computer:host", b);
+    expect(leases.computerWaitOf(b)).toBeUndefined();
+  });
+
+  it("leaves the second waiter with a place but no holder between turns", () => {
+    const leases = new TurnResources();
+    leases.claim("computer:host", a);
+    leases.startWaiting("computer:host", b);
+    leases.release(a);
+    expect(leases.claim("computer:host", c)).toBe(false);
+    leases.startWaiting("computer:host", c);
+    expect(leases.blocker("computer:host", c)).toBeUndefined();
+    expect(leases.computerWaitOf(c)).toEqual({ resource: "computer:host", position: 2 });
+  });
+});

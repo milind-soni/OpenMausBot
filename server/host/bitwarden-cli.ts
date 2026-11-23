@@ -95,7 +95,11 @@ export interface BwResult { code: number; stdout: string; stderr: string; timedO
 /** One `bw` call: `env` carries every secret (BW_CLIENTID, BW_CLIENTSECRET, BW_PASSWORD, BW_SESSION). */
 export type BwRun = (args: readonly string[], env?: Record<string, string>, timeoutMs?: number) => Promise<BwResult>;
 
-/** Runs the tool with only what it needs: its own settings folder, no prompts, and nothing of the server's environment. */
+/** The only server settings the tool is given besides its own: which certificate authorities to trust, so a self-hosted
+ * Vaultwarden behind a private CA connects. They name files and folders, never secrets. */
+const TRUST_ENV = ["NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR"] as const;
+
+/** Runs the tool with only what it needs: its own settings folder, no prompts, the CA trust settings, and nothing else of the server's environment. */
 export function bitwardenRunner(options: { executable: () => Promise<string>; appDataDir: string }): BwRun {
   return async (args, env = {}, timeoutMs = DEFAULT_CALL_TIMEOUT_MS) => {
     const file = await options.executable();
@@ -103,7 +107,7 @@ export function bitwardenRunner(options: { executable: () => Promise<string>; ap
     return new Promise((resolve) => {
       execFile(file, [...args], {
         env: {
-          PATH: process.env.PATH ?? "", ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+          PATH: process.env.PATH ?? "", ...trustEnv(), ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
           HOME: options.appDataDir, BITWARDENCLI_APPDATA_DIR: options.appDataDir, BW_NOINTERACTION: "true", NODE_OPTIONS: "", ...env,
         },
         timeout: timeoutMs, maxBuffer: OUTPUT_MAX, windowsHide: true, encoding: "utf8",
@@ -114,6 +118,12 @@ export function bitwardenRunner(options: { executable: () => Promise<string>; ap
       });
     });
   };
+}
+
+function trustEnv(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const name of TRUST_ENV) { const value = process.env[name]; if (value) out[name] = value; }
+  return out;
 }
 
 /** Leaves the folder clean when the person disconnects: the tool's own settings and cached vault go with the account. */

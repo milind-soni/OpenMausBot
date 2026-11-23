@@ -198,6 +198,20 @@ describe("startAutoVmClaim", () => {
 describe("lazyClaimFailedText", () => {
   const boat = { label: "the cloud computer", startsComputer: true as const, failure: "Miso's cloud desktop didn't start. This conversation is back on Auto. Send your message again." };
 
+  it("gives a parked claim's own words instead of a start failure, for a team computer parked before its machine was looked up", async () => {
+    const table: AutoVmClaimTable = new Map();
+    const parkedRefusal = "This turn waited 30 minutes for this computer without getting it, so this call was NOT performed. Stop calling the computer tools now; nothing is broken.";
+    const onRejected = vi.fn();
+    table.set("t", { ...boat, owner: { threadId: "t", generation: "g" }, lazy: true, onRejected,
+      claim: async () => { throw Object.assign(new Error("Computer still busy after 30 minutes. Parked — it continues automatically when the computer is free."), { parkedRefusal }); } });
+    startAutoVmClaim(table, "t", "g");
+    await table.get("t")!.begin;
+    const slot = table.get("t")!;
+    expect(slot.failed).toBe(true);
+    expect(lazyClaimFailedText(slot)).toBe(parkedRefusal);
+    expect(onRejected).toHaveBeenCalledTimes(1);
+  });
+
   it("gives the bot the computer's own reason, and says the conversation is back on Auto only when it is", () => {
     expect(lazyClaimFailedText({ ...boat, cause: "the cloud computer could not be created or reached", backOnAuto: true })).toBe(
       "The cloud computer could not be started: the cloud computer could not be created or reached. This call was not performed. " +

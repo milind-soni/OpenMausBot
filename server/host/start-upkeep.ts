@@ -1,8 +1,9 @@
-// The attachments' and the thread logs' upkeep. Both are safe beside requests: an upload in flight keeps its partial
-// and its reservation, and a busy, unread or handed-off thread keeps its log. So the first pass runs once the server
-// answers, not before it listens, and the logs' sweep then runs once a day.
+// The attachments', the thread logs' and the task workspaces' upkeep. All are safe beside requests: an upload in
+// flight keeps its partial and its reservation, and a busy, unread or handed-off thread keeps its log and its
+// workspace. So the first pass runs once the server answers, not before it listens, and the sweeps then run once a day.
 import { cleanupStaleAttachmentPartials } from "../attachments.ts";
 import type { BotRecord } from "../store.ts";
+import { sweepTaskWorkspaceBuildFolders } from "../task-workspace-retention.ts";
 import { sweepThreadEventLogs } from "../thread-retention.ts";
 
 export const THREAD_LOG_RETENTION_SWEEP_MS = 24 * 60 * 60 * 1000;
@@ -14,6 +15,7 @@ export interface StartUpkeepDeps {
   openDirectHandoff: (threadId: string) => boolean;
   cleanupPartials?: () => number;
   sweepLogs?: typeof sweepThreadEventLogs;
+  sweepWorkspaces?: (candidates: Parameters<typeof sweepTaskWorkspaceBuildFolders>[0]) => string[] | Promise<string[]>;
 }
 
 const reason = (error: unknown) => error instanceof Error ? error.message : String(error);
@@ -33,6 +35,40 @@ export function startUpkeep(deps: StartUpkeepDeps): void {
     const swept = (deps.sweepLogs ?? sweepThreadEventLogs)(candidates, retentionDays);
     if (swept > 0) console.log(`[retention] removed event logs for ${swept} idle thread(s) past ${retentionDays} day(s)`);
   };
+  // Read lazily: the removals before a thread's turn take time, and a thread that wakes meanwhile must read busy.
+  function* workspaceCandidates() {
+    for (const bot of deps.bots()) {
+      for (const task of bot.tasks ?? []) {
+        yield {
+          botId: bot.id,
+          threadId: task.threadId,
+          lastActiveAt: Math.max(task.updatedAt ?? task.createdAt ?? 0, task.closedBy?.at ?? 0, task.archivedAt ?? 0),
+          unread: task.unread === true,
+          busy: deps.busy(bot.id, task.threadId),
+          openDirectHandoff: deps.openDirectHandoff(task.threadId),
+        };
+      }
+    }
+  }
+  let sweepingWorkspaces = false;
+  const sweepWorkspacesNow = async () => {
+    if (sweepingWorkspaces) return;
+    sweepingWorkspaces = true;
+    try {
+      const removed = await (deps.sweepWorkspaces ?? ((c) => sweepTaskWorkspaceBuildFolders(c)))(workspaceCandidates());
+      if (removed.length > 0) console.log(`[retention] removed ${removed.length} dependency folder(s) from idle task workspaces`);
+    } finally {
+      sweepingWorkspaces = false;
+    }
+  };
+  const sweepAll = () => {
+    try {
+      sweepLogsNow();
+    } catch (error) {
+      console.warn(`thread event log retention sweep failed: ${reason(error)}`);
+    }
+    sweepWorkspacesNow().catch((error: unknown) => console.warn(`task workspace retention sweep failed: ${reason(error)}`));
+  };
   setImmediate(() => {
     try {
       const reclaimed = (deps.cleanupPartials ?? cleanupStaleAttachmentPartials)();
@@ -40,11 +76,7 @@ export function startUpkeep(deps: StartUpkeepDeps): void {
     } catch (error) {
       console.warn(`attachments: startup partial cleanup failed: ${reason(error)}`);
     }
-    try {
-      sweepLogsNow();
-    } catch (error) {
-      console.warn(`thread event log retention sweep failed: ${reason(error)}`);
-    }
+    sweepAll();
   });
-  setInterval(sweepLogsNow, THREAD_LOG_RETENTION_SWEEP_MS).unref();
+  setInterval(sweepAll, THREAD_LOG_RETENTION_SWEEP_MS).unref();
 }

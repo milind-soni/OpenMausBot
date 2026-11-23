@@ -40,6 +40,8 @@ interface Entry {
 
 export class ComputerControl {
   private entries = new Map<string, Entry>();
+  private holdsStarted = 0;
+  private lastHoldStarted = new Map<string, number>();
   private onChange: (botId: string, snapshot: ControlSnapshot) => void;
   private now: () => number;
   private waits: (ref: ComputerHelpRef) => boolean;
@@ -72,11 +74,26 @@ export class ComputerControl {
     };
   }
 
+  /** Increases each time a hold on any key starts: a call notes it, then asks `lastTake` of whatever keys turn out to matter. */
+  takeSequence(): number {
+    return this.holdsStarted;
+  }
+
+  /** The `takeSequence` at which the latest hold on this key started, 0 for none, so a take and hand-back between two snapshots still shows. */
+  lastTake(botId: string): number {
+    return this.lastHoldStarted.get(botId) ?? 0;
+  }
+
+  private hold(botId: string, entry: Entry | undefined, controlLeaseId: string | null): void {
+    this.entries.set(botId, { heldSinceMs: this.now(), pleas: entry?.pleas ?? [], controlLeaseId });
+    this.lastHoldStarted.set(botId, ++this.holdsStarted);
+  }
+
   /** Idempotent: a second click must not reset `heldSinceMs`. */
   take(botId: string): ControlSnapshot {
     const entry = this.entries.get(botId);
     if (entry?.heldSinceMs != null) return this.snapshot(botId);
-    this.entries.set(botId, { heldSinceMs: this.now(), pleas: entry?.pleas ?? [], controlLeaseId: null });
+    this.hold(botId, entry, null);
     return this.changed(botId);
   }
 
@@ -91,7 +108,7 @@ export class ComputerControl {
       if (owned && options.armed) this.beat(botId, controlLeaseId);
       return { snapshot: this.snapshot(botId), owned, acquired: false };
     }
-    this.entries.set(botId, { heldSinceMs: this.now(), pleas: entry?.pleas ?? [], controlLeaseId });
+    this.hold(botId, entry, controlLeaseId);
     if (options.armed) this.beat(botId, controlLeaseId);
     return { snapshot: this.changed(botId), owned: true, acquired: true };
   }
@@ -169,6 +186,7 @@ export class ComputerControl {
   /** Removes the deleted bot's pleas from every key; holds stay. */
   forgetBot(botId: string): void {
     this.forgetPleas((ref) => ref.botId === botId);
+    this.lastHoldStarted.delete(botId);
   }
 
   /** Removes the pleas of a deleted conversation's sign-in cards from every key, and returns the bots that asked; holds stay. */

@@ -100,6 +100,8 @@ If a provider or restricted Composio project policy prevents another authorizati
 
 The hosted/managed connected-apps broker exposes the same account-aware response shape and account-specific removal routes as the self-hosted project-key mode; it does not send broker or provider credentials to the renderer.
 
+Each bot can be kept to some of those accounts: open the bot's settings, then **Access**, turn on **Limit this bot to specific apps**, and under an app with two or more accounts tick **Accounts this bot may use**. The bot's calls that name another account are refused, its app-event automations can watch only the allowed accounts, and an automation whose account is later taken off the list starts no runs.
+
 ## Permissions the default connection does not ask for
 
 Each app you connect uses the Composio project's authorization for that app. Unless you set up your own, that is the Composio-managed one, which asks the provider only for Composio's default permissions. Some actions need more. In Gmail:
