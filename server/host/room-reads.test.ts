@@ -158,34 +158,56 @@ it("shows a person's mark on a shared chat with no reply before its newest one a
   expect(rooms.taskForPerson(main, adaKey), "marked with only that first reply in it").toEqual({ threadId: "main", unread: true, heldUnread: "m1" });
 });
 
-it("ends each person's mark on a shared chat when a reply is inserted before the message they marked, keeping their lines apart", () => {
-  const dir = mkdtempSync(join(tmpdir(), "room-reads-"));
-  const thread: Array<{ id: string; role: string; kind?: string; at: number }> = [{ id: "m1", role: "user", at: 1 }, { id: "m2", role: "bot", at: 2 }, { id: "m3", role: "user", at: 3 }, { id: "m4", role: "bot", at: 4 }];
+type Line = { id: string; role: string; kind?: string; at: number };
+/** A shared chat whose path order (`path`) and write order (`written`) can differ, as an inserted reply makes them. */
+function sharedChat(path: Line[], written: Line[] = [...path]) {
   const rooms = createPersonRooms({
-    reads: createRoomReads(dir),
-    store: () => ({ activePath: () => thread, messagesFor: () => thread, botByThread: () => ({ id: "scout" }) }),
+    reads: createRoomReads(mkdtempSync(join(tmpdir(), "room-reads-"))),
+    store: () => ({ activePath: () => path, messagesFor: () => written, botByThread: () => ({ id: "scout" }) }),
     shared: (threadId) => threadId === "main",
     wireBot: (id) => ({ id }),
-    newestMessageId: () => thread.at(-1)?.id,
+    newestMessageId: () => path.at(-1)?.id,
     publicGroupState: (room) => room as never,
     broadcast: () => {},
   });
-  const session = (email: string) => ({ kind: "session", session: { id: email, email } }) as never;
+  const insert = (index: number, line: Line) => { path.splice(index, 0, line); written.push(line); };
+  return { rooms, insert };
+}
+const session = (email: string) => ({ kind: "session", session: { id: email, email } }) as never;
+
+it("ends each person's mark on a shared chat when a reply is inserted before the message they marked, keeping their lines apart", () => {
+  const { rooms, insert } = sharedChat([{ id: "m1", role: "user", at: 1 }, { id: "m2", role: "bot", at: 2 }, { id: "m3", role: "user", at: 3 }, { id: "m4", role: "bot", at: 4 }]);
   const ada = session("ada@acme.test"), ben = session("ben@acme.test"), cleo = session("cleo@acme.test");
   const key = (email: string) => personKey({ id: "", email });
   const main = { threadId: "main", unread: false };
   rooms.personMarkThread!(ada, "main", true);
   rooms.personMarkThread!(ben, "main", true);
   rooms.personMarkThread!(cleo, "main", false);
-  thread.splice(2, 0, { id: "late", role: "bot", at: 5 });
-  expect(rooms.personHeldUnread!(ada, "main"), "a reply newer than the marked message, placed before it").toBe(false);
+  insert(2, { id: "late", role: "bot", at: 5 });
+  expect(rooms.personHeldUnread!(ada, "main"), "a reply written after the mark, placed before the marked message").toBe(false);
   expect(rooms.personHeldUnread!(ben, "main")).toBe(false);
   expect(rooms.taskForPerson(main, key("ada@acme.test")), "still unread, read up to where Ada was")
     .toEqual({ threadId: "main", unread: true, lastReadMessageId: "m3" });
   expect(rooms.taskForPerson(main, key("cleo@acme.test")), "Cleo's line is her own").toEqual({ threadId: "main", unread: false, lastReadMessageId: "m4" });
   rooms.personMarkThread!(ada, "main", true);
-  expect(rooms.personHeldUnread!(ada, "main"), "marking again after it holds").toBe(true);
+  expect(rooms.personHeldUnread!(ada, "main"), "marking again right after it holds").toBe(true);
   expect(rooms.personHeldUnread!(ben, "main"), "without bringing back Ben's").toBe(false);
-  thread.splice(3, 0, { id: "trail", role: "bot", kind: "activity", at: 6 });
+  insert(3, { id: "trail", role: "bot", kind: "activity", at: 6 });
   expect(rooms.personHeldUnread!(ada, "main"), "an inserted working line is no reply").toBe(true);
+});
+
+it("ends a mark on a shared chat by when a reply was written, not by its clock", () => {
+  const ada = session("ada@acme.test");
+  const sameTime = sharedChat([{ id: "a", role: "bot", at: 10 }, { id: "b", role: "bot", at: 20 }]);
+  sameTime.rooms.personMarkThread!(ada, "main", true);
+  sameTime.insert(1, { id: "c", role: "bot", at: 20 });
+  expect(sameTime.rooms.personHeldUnread!(ada, "main"), "inserted mid-history in the marked message's millisecond").toBe(false);
+  const clockBack = sharedChat([{ id: "a", role: "bot", at: 10 }, { id: "b", role: "bot", at: 20 }]);
+  clockBack.rooms.personMarkThread!(ada, "main", true);
+  clockBack.insert(2, { id: "c", role: "bot", at: -80 });
+  expect(clockBack.rooms.personHeldUnread!(ada, "main"), "added at the end after the clock went back").toBe(false);
+  const untimed = sharedChat([{ id: "a", role: "bot", at: 10 }, { id: "b", role: "user", at: 20 }]);
+  untimed.rooms.personMarkThread!(ada, "main", true);
+  untimed.insert(0, { id: "old", role: "bot", at: 0 });
+  expect(untimed.rooms.personHeldUnread!(ada, "main"), "any reply written after the mark, even one dated long before").toBe(false);
 });

@@ -28,20 +28,19 @@ export function roomUnreadFor(path: readonly PathMessage[], readUpTo: string | u
   return path.slice(from).some(isReply);
 }
 
-/** The message a mark holds from: the path's newest by time, since a reply inserted mid-history is newer than the line
- * after it; "" for an empty conversation. */
-export function heldFrom(path: readonly PathMessage[]): string {
-  return path.reduce<PathMessage | undefined>((newest, message) => !newest || (message.at ?? 0) >= (newest.at ?? 0) ? message : newest, undefined)?.id ?? "";
+/** The message a mark holds from: of those on the path, the one written last, whatever its clock says; "" for an empty
+ * conversation. `written` is the conversation's messages in the order they were written. */
+export function heldFrom(path: readonly PathMessage[], written: readonly PathMessage[] = path): string {
+  const onPath = new Set(path.map((message) => message.id));
+  return written.findLast((message) => onPath.has(message.id))?.id ?? "";
 }
 
-/** A conversation marked unread with `held` from {@link heldFrom} stays held until a reply newer than it comes, wherever
- * on the path it lands. A message no longer on the path (an edit or a retry moved it) ends the mark. */
-export function stillHeldUnread(path: readonly PathMessage[], held: string | undefined): boolean {
-  if (held === undefined) return false;
-  const index = held === "" ? -1 : path.findIndex((message) => message.id === held), heldAt = path[index]?.at;
-  if (held !== "" && index < 0) return false;
-  const newer = (message: PathMessage, at: number) => heldAt === undefined || message.at === undefined ? at > index : message.at > heldAt || (at > index && message.at === heldAt);
-  return !path.some((message, at) => isReply(message) && newer(message, at));
+/** A conversation marked unread with `held` from {@link heldFrom} stays held until a reply written after it reaches the
+ * path, at any place on it and with any clock. A message no longer on the path (an edit or a retry moved it) ends the mark. */
+export function stillHeldUnread(path: readonly PathMessage[], held: string | undefined, written: readonly PathMessage[] = path): boolean {
+  if (held === undefined || (held !== "" && !path.some((message) => message.id === held))) return false;
+  const order = new Map(written.map((message, index) => [message.id, index])), heldAt = held === "" ? -1 : order.get(held) ?? -1;
+  return !path.some((message) => isReply(message) && (order.get(message.id) ?? Infinity) > heldAt);
 }
 
 /** `alsoForget`: a person's other marks of their own (their bots' order, their notification reads), which go with
@@ -147,7 +146,7 @@ export function createPersonRooms(deps: PersonRoomsDeps) {
   function taskForPerson<T extends { threadId: string; unread?: boolean; lastReadMessageId?: string; heldUnread?: string }>(task: T, person: string): T {
     if (!reads || !deps.shared(task.threadId)) return task;
     const path = deps.store().activePath(task.threadId), readUpTo = reads.readUpTo(threadReadKey(task.threadId), person);
-    const held = reads.readUpTo(threadHoldKey(task.threadId), person), heldUnread = stillHeldUnread(path, held) ? held : undefined;
+    const held = reads.readUpTo(threadHoldKey(task.threadId), person), heldUnread = stillHeldUnread(path, held, deps.store().messagesFor(task.threadId)) ? held : undefined;
     const unread = heldUnread !== undefined || roomUnreadFor(path, readUpTo, task.unread === true, atOf(task.threadId));
     if (unread === (task.unread === true) && readUpTo === task.lastReadMessageId && heldUnread === task.heldUnread) return task;
     const { lastReadMessageId: _shared, heldUnread: _held, ...rest } = task;
@@ -198,7 +197,7 @@ export function createPersonRooms(deps: PersonRoomsDeps) {
         const path = deps.store().activePath(threadId), reply = path.findLastIndex(isReply);
         if (reply > 0) reads.read(key, person, path[reply - 1]!.id);
         else reads.forget(key, person);
-        reads.read(threadHoldKey(threadId), person, heldFrom(path));
+        reads.read(threadHoldKey(threadId), person, heldFrom(path, deps.store().messagesFor(threadId)));
       } else {
         reads.forget(threadHoldKey(threadId), person);
         if (newest) reads.read(key, person, newest);
@@ -211,7 +210,7 @@ export function createPersonRooms(deps: PersonRoomsDeps) {
      * conversation's own mark. */
     personHeldUnread: (auth: RequestAuth, threadId: string): boolean | null => {
       if (auth.kind !== "session" || !deps.shared(threadId)) return null;
-      return stillHeldUnread(deps.store().activePath(threadId), reads.readUpTo(threadHoldKey(threadId), personKey(auth.session)));
+      return stillHeldUnread(deps.store().activePath(threadId), reads.readUpTo(threadHoldKey(threadId), personKey(auth.session)), deps.store().messagesFor(threadId));
     } } : {}),
   };
 }

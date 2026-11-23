@@ -24,6 +24,7 @@ import type { ModelSelection } from "../contracts.ts";
 import type { createApprovalModeSupport } from "../harness-capabilities.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
 import type { hostedModelPolicy } from "../hosted-models.ts";
+import { heldFrom } from "../host/room-reads.ts";
 import { MAX_MCP_SERVERS, mcpServerNameError } from "../mcp-registry.ts";
 import type { MemoryUpkeep } from "../memory-upkeep.ts";
 import { phoneAppsFor } from "../phones/access.ts";
@@ -720,7 +721,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       }
       if (!bot) return json(res, 404, { error: "no such bot" });
       if (typeof body.unread === "boolean") {
-        store.patchTask(bot.id, bot.threadId, { unread: body.unread, heldUnread: body.unread ? store.activePath(bot.threadId).at(-1)?.id ?? "" : undefined });
+        store.patchTask(bot.id, bot.threadId, { unread: body.unread, heldUnread: body.unread ? heldFrom(store.activePath(bot.threadId), store.messagesFor(bot.threadId)) : undefined });
       }
       if (body.applyToAllThreads === true && requestedApprovalMode !== "custom") store.setAllThreadApprovalMode(bot.id, requestedApprovalMode);
       if (body.memoryUpkeep === false || body.memoryEnabled === false) memoryUpkeep.dropBot(bot.id);

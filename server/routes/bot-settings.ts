@@ -177,7 +177,7 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
       const current = requestedTaskBot(m[1], body?.threadId);
       // "seen": the conversation is only on screen. A mark the person made with it open holds against that.
       if (body?.reason === "seen" && (deps.personHeldUnread?.(auth, current.threadId) ??
-        stillHeldUnread(store.activePath(current.threadId), store.taskByThread(current.id, current.threadId)?.heldUnread))) {
+        stillHeldUnread(store.activePath(current.threadId), store.taskByThread(current.id, current.threadId)?.heldUnread, store.messagesFor(current.threadId)))) {
         return json(res, 200, { bot: wireBot(store.bot(current.id)!) });
       }
       sawThread(current.threadId);
