@@ -44,6 +44,8 @@ const SERVER_ENV_NAMES = new Set([
   "OMB_BOT_BOX",
   // An ended Cloud started only for its owner's export: the server runs frozen (server/move-freeze.ts).
   "OMB_CLOUD_EXPORT_ONLY",
+  // The delete-time cleanup's switch (server/host/conversation-folder-cleanup.ts): off unless the Admin sets it on.
+  "OMB_CONVERSATION_FOLDER_CLEANUP",
   // The orphan sweep's switch (server/host/orphan-sweep.ts): off, report or remove, set per home by the Admin.
   "OMB_ORPHAN_SWEEP", "OMB_ORPHAN_SWEEP_MAX_SHARE",
   // The idle reclaim's switch (server/host/idle-reclaim.ts): off, report or remove, set per home by the Admin.

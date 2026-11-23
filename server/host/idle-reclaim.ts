@@ -30,12 +30,14 @@
 // (idleReclaimNote). The numbers go to the log and to idle-reclaim.json, which the storage view can read.
 import { execFile } from "node:child_process";
 import { lstatSync, readFileSync, statSync } from "node:fs";
-import { lstat, readdir, readlink, readFile, statfs } from "node:fs/promises";
+import { lstat, readdir, statfs } from "node:fs/promises";
 import { devNull } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 import { writeFileAtomic } from "../atomic.ts";
-import { inside, type ConversationFolderCleanup, type FoundTree, type LiveRecords } from "./conversation-folder-cleanup.ts";
+import { inside, linuxProcessPaths, type ConversationFolderCleanup, type FoundTree, type LiveRecords } from "./conversation-folder-cleanup.ts";
+
+export { linuxProcessPaths };
 
 export const IDLE_RECLAIM_ENV = "OMB_IDLE_RECLAIM";
 export type IdleReclaimMode = "off" | "report" | "remove";
@@ -103,27 +105,6 @@ export async function volumeOf(path: string): Promise<Volume | null> {
   } catch { return null; }
 }
 const usedShare = (volume: Volume) => (volume.usedBytes + volume.freeBytes > 0 ? volume.usedBytes / (volume.usedBytes + volume.freeBytes) : 0);
-
-/** Every path this machine's processes work in, hold open or have mapped, from /proc; null where that cannot be read. */
-export async function linuxProcessPaths(): Promise<string[] | null> {
-  if (process.platform !== "linux") return null;
-  let pids: string[];
-  try { pids = (await readdir("/proc")).filter((name) => /^\d+$/.test(name)); } catch { return null; }
-  const paths = new Set<string>();
-  for (const pid of pids) {
-    try { paths.add(await readlink(`/proc/${pid}/cwd`)); } catch { /* gone, or another user's */ }
-    for (const fd of await readdir(`/proc/${pid}/fd`).catch(() => [] as string[])) {
-      const target = await readlink(`/proc/${pid}/fd/${fd}`).catch(() => "");
-      if (target.startsWith("/")) paths.add(target.replace(/ \(deleted\)$/, ""));
-    }
-    const maps = await readFile(`/proc/${pid}/maps`, "utf8").catch(() => "");
-    for (const line of maps.split("\n")) {
-      const at = line.indexOf(" /");
-      if (at > 0) paths.add(line.slice(at + 1).replace(/ \(deleted\)$/, ""));
-    }
-  }
-  return [...paths];
-}
 
 /** git in a checkout the bots write: nothing in it may run (no fsmonitor, no global or system config, no prompt). */
 function git(top: string, args: string[]): Promise<{ code: number | null; out: string }> {
@@ -203,6 +184,9 @@ function updateState(dataDir: string, change: (state: State) => void): State {
 
 /** The one line a bot's next turn in a conversation carries after its installs were shed; "" otherwise. Given again only
  * within noteRepeatMs of its first turn (that turn started again), then dropped. */
+/** A folder path the note may show to the bot. */
+const SHOWN_NAME = /^[\w.@+/-]+$/;
+
 export function idleReclaimNote(dataDir: string, threadId: string, now = Date.now()): string {
   try { statSync(join(dataDir, STATE_FILE)); } catch { return ""; }
   if (!ID.test(threadId) || !readState(dataDir).notes[threadId]) return "";
@@ -217,8 +201,11 @@ export function idleReclaimNote(dataDir: string, threadId: string, now = Date.no
     });
   } catch { return ""; }
   if (!note) return "";
-  const shown = note.paths.slice(0, IDLE_RECLAIM.notePaths).map((path) => (path ? path.split(sep).join("/") : "."));
-  const more = note.paths.length > IDLE_RECLAIM.notePaths ? " and more" : "";
+  // A folder's name is shown only when it is plainly a name: a cloned repository names its own folders, and a name is
+  // read by the bot as part of this note.
+  const named = note.paths.map((path) => (path ? path.split(sep).join("/") : ".")).filter((path) => SHOWN_NAME.test(path));
+  const shown = named.slice(0, IDLE_RECLAIM.notePaths);
+  const more = note.paths.length > shown.length ? (shown.length ? " and more" : "some folders") : "";
   return `\n\n[From OpenMausBot, not the person: to free disk space while this conversation was idle, its installed dependencies were removed (${shown.join(", ")}${more}). The project's own files, lockfiles and git history are unchanged. Before you run the project again, reinstall from its lockfile (npm ci, pnpm install, yarn install, bun install, uv sync or pip install -r requirements.txt); do not mention this unless it matters to the person.]`;
 }
 

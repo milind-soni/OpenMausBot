@@ -86,7 +86,7 @@ Two conversations took 21.5 MB on one mount and 33.1 MB in the box layout (`du`,
 | (b2) Hard-linking identical files after the fact (jdupes, rdfind, `hardlink(1)`) | Up to the duplicate share of 11.4 GB | **Unsafe.** Anything that edits a file in place edits it in every project: patch-package, postinstall scripts, `npm rebuild` and native rebuilds, bundler caches writing beside sources. On a Team Cloud, a link shared between two members' private folders lets one member's write change the other's file, and lets them learn that it exists. Disqualified. |
 | (b3) FUSE or overlay dedup layer; btrfs or ZFS dedup | Duplicates, at a high CPU and memory cost | FUSE adds a daemon on every file access of every bot, and a crash takes every project with it. ZFS dedup needs large RAM tables, and neither btrfs nor ZFS is offered for Fly volumes. Out of proportion for a 2-vCPU Cloud. |
 | (c) A per-Cloud install cache keyed by lockfile hash, mounted read-only through an overlay | Duplicates of identical lockfiles | The image's bubblewrap is Debian bookworm's 0.8.0. `--overlay` arrived in 0.11.0 and is unavailable when bwrap is setuid (https://github.com/containers/bubblewrap/blob/main/NEWS.md). The app outside the box would see only the upper folder, not the install. The shared lower copy is produced by a bot's install, including its postinstall scripts, so one conversation could plant code in another's dependencies. Directory renames across layers (npm moves package folders) need overlayfs `redirect_dir`, otherwise EXDEV. Kernel support for unprivileged overlay on Fly's Firecracker guest is not verified. |
-| (d) Not storing them: remove from idle conversations, reinstall on demand | **This is the build** | A separate research pass (not repeated here) found no agent harness that shares installs across conversations; they reinstall per worktree. OpenHands' agent server, whose source was read for this note, sheds the git-ignored folders of stopped conversations under a disk budget. |
+| (d) Not storing them: remove from idle conversations, reinstall on demand | **This is the build** | A separate research pass (not repeated here) found no agent harness that shares installs across conversations; they reinstall per worktree. |
 
 **Cross-bot caches today.**
 - HOME is writable from every box on a personal Cloud. That includes `~/.npm`, `~/.cache/uv`, `~/.bun`, `~/.bashrc`, `~/.npmrc` and `~/.gitconfig`.
@@ -98,8 +98,7 @@ Two conversations took 21.5 MB on one mount and 33.1 MB in the box layout (`du`,
 ## 3. What is built: `server/host/idle-reclaim.ts`
 
 **Model.**
-- OpenHands' agent server: `conversation_storage_disk_budget` in `agent_server/config.py` and `storage/reclaimer.py`, OpenHands/software-agent-sdk at commit 0c0c48810d27583e4f3427ed2c93e0dcb3c1c1ce.
-- Past a fraction of the filesystem it sheds the git-ignored folders of stopped conversations, least recently active first.
+- A disk budget for stopped conversations: past a fraction of the filesystem it sheds the git-ignored folders of stopped conversations, least recently active first.
   - It finds them with `git ls-files --others --ignored --exclude-standard --directory`, with `core.fsmonitor=false`.
   - It skips an ignored folder that holds a checkout, three levels down.
   - It moves through a same-filesystem trash, and a resumed conversation reinstalls.

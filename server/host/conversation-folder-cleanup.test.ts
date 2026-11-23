@@ -2,13 +2,27 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { spillDir } from "../mcp-gate-config.ts";
-import { createConversationFolderCleanup, folderMentions, gateResultsName, hookResultsName, indexNames, plainFolderUnder, REMOVING_DIR, type FolderCleanupDeps, type LiveRecords } from "./conversation-folder-cleanup.ts";
+import { createConversationFolderCleanup, deleteTimeCleanup, folderMentions, gateResultsName, hookResultsName, indexNames, plainFolderUnder, REMOVING_DIR, type FolderCleanupDeps, type LiveRecords } from "./conversation-folder-cleanup.ts";
+
+/** Hooks into the file calls the cleanup makes, to swap a folder for a link at the worst moment. */
+const fsHooks = vi.hoisted(() => ({ renames: 0 } as { renames: number; afterRename?: (n: number, from: string, to: string) => void; beforeReaddir?: (path: string) => void }));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const real = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...real,
+    rename: async (from: string, to: string) => { await real.rename(from, to); fsHooks.renames++; fsHooks.afterRename?.(fsHooks.renames, from, to); },
+    readdir: (async (path: string, options?: unknown) => { fsHooks.beforeReaddir?.(String(path)); return (real.readdir as (path: string, options?: unknown) => Promise<unknown>)(path, options); }) as typeof real.readdir,
+  };
+});
 
 const made: string[] = [];
 afterEach(() => {
+  delete fsHooks.afterRename;
+  delete fsHooks.beforeReaddir;
+  fsHooks.renames = 0;
   for (const dir of made.splice(0)) {
     try { chmodSync(dir, 0o700); } catch {}
     rmSync(dir, { recursive: true, force: true });
@@ -70,7 +84,7 @@ function fixture(over: Partial<FolderCleanupDeps> = {}) {
         put(join(at, "unmarked", "node_modules", "hand-written.js")), // no package manager's record
         put(join(at, "alone", "node_modules", ".package-lock.json")), // no package.json beside it
         put(join(at, "analysis", ".venv", "pyvenv.cfg")),
-        put(join(at, "analysis", ".venv", "my_analysis.py")), // the person's script inside a venv
+        put(join(at, "analysis", ".venv", "my_analysis.py")), // the person's script at a venv's top: kept
       ],
       gone: [join(at, "app", "node_modules"), join(at, "py", ".venv")],
       fill() {
@@ -92,6 +106,17 @@ async function deleteAndWait(f: Fixture, ...threads: string[]) {
   await f.cleanup.idle();
 }
 
+describe("the switch", () => {
+  it("is off unless a Cloud home sets OMB_CONVERSATION_FOLDER_CLEANUP=on", () => {
+    const make = () => "cleanup";
+    expect(deleteTimeCleanup({}, true, make)).toBeUndefined();
+    expect(deleteTimeCleanup({ OMB_CONVERSATION_FOLDER_CLEANUP: "off" }, true, make)).toBeUndefined();
+    expect(deleteTimeCleanup({ OMB_CONVERSATION_FOLDER_CLEANUP: "yes" }, true, make)).toBeUndefined();
+    expect(deleteTimeCleanup({ OMB_CONVERSATION_FOLDER_CLEANUP: "on" }, false, make)).toBeUndefined();
+    expect(deleteTimeCleanup({ OMB_CONVERSATION_FOLDER_CLEANUP: " On " }, true, make)).toBe("cleanup");
+  });
+});
+
 describe("a deleted conversation's folder", () => {
   it("loses its package installs and keeps the person's files, build output and every look-alike", async () => {
     const f = fixture();
@@ -104,6 +129,17 @@ describe("a deleted conversation's folder", () => {
     expect(f.logs.join("\n")).toMatch(/kept .*unmarked.node_modules: no package manager's record/);
     expect(f.logs.join("\n")).toMatch(/kept .*alone.node_modules: no package.json beside it/);
     expect(f.logs.join("\n")).toMatch(/kept .*analysis.\.venv: holds my_analysis\.py/);
+  });
+
+  it("takes a venv whole when only its top level is a venv's own, the person's files deeper inside included", async () => {
+    // An owner decision, stated in the PR: only top-level foreign entries keep a venv.
+    const f = fixture();
+    const venv = join(f.folder("scout", "t1"), "py", ".venv");
+    put(join(venv, "pyvenv.cfg"));
+    put(join(venv, "bin", "my_job.sh"), "the person's script");
+    put(join(venv, "share", "notes", "plan.md"), "the person's notes");
+    await deleteAndWait(f, "t1");
+    expect(existsSync(venv)).toBe(false);
   });
 
   it("loses its full tool results, and keeps a live thread's and the gate's shared fallback folder", async () => {
@@ -358,7 +394,7 @@ describe("paths", () => {
     await deleteAndWait(f, "t1");
     expect(existsSync(join(outsideTree, "left-pad", "index.js"))).toBe(true);
     expect(f.removingEmpty()).toBe(true);
-    expect(f.warnings.join("\n")).toMatch(/what was moved is not what was checked; put back/);
+    expect(f.warnings.join("\n")).toMatch(/it changed since it was checked/);
   });
 
   it("keeps a tree replaced after it was found", async () => {
@@ -377,6 +413,73 @@ describe("paths", () => {
     await deleteAndWait(f, "t1");
     expect(existsSync(join(f.folder("scout", "t1"), "app", "node_modules", "new.js"))).toBe(true);
     expect(f.warnings.join("\n")).toMatch(/it changed since it was checked/);
+  });
+
+  it("never moves a folder whose parent became a link to an outside folder, even when the link goes again", async () => {
+    const f = fixture({
+      beforeMove: (path) => {
+        const parent = dirname(path);
+        renameSync(parent, join(f.sandbox, "moved-away"));
+        symlinkSync(join(f.outside, "app"), parent, "dir");
+      },
+    });
+    f.install(join(f.outside, "app"));
+    const precious = put(join(f.outside, "app", "node_modules", "precious.txt"), "work");
+    f.install(join(f.folder("scout", "t1"), "app"));
+    fsHooks.afterRename = (n) => { if (n === 1) rmSync(join(f.folder("scout", "t1"), "app")); };
+    await deleteAndWait(f, "t1");
+    await f.cleanup.drain();
+    expect(existsSync(precious)).toBe(true);
+  });
+
+  it("keeps what a failed put-back left under a name the drain never takes", async () => {
+    const f = fixture();
+    const tree = f.install(join(f.folder("scout", "t1"), "app"));
+    // Something other than the checked folder arrives (the moved entry replaced), and the way back is gone.
+    fsHooks.afterRename = (n, _from, to) => {
+      if (n !== 1) return;
+      renameSync(to, `${to}-elsewhere`);
+      put(join(to, "precious.txt"), "work");
+      rmSync(dirname(tree), { recursive: true, force: true });
+    };
+    await deleteAndWait(f, "t1");
+    await f.cleanup.drain();
+    const kept = readdirSync(join(f.dataDir, REMOVING_DIR)).filter((name) => !name.endsWith("-elsewhere"));
+    expect(kept).toHaveLength(1);
+    expect(kept[0]).toMatch(/^check-\d+-[0-9a-f]{12}$/);
+    expect(existsSync(join(f.dataDir, REMOVING_DIR, kept[0]!, "precious.txt"))).toBe(true);
+    expect(f.warnings.join("\n")).toMatch(/COULD NOT PUT IT BACK/);
+  });
+
+  it("never walks into a folder swapped for a link while the drain lists it (the Node walk, where GNU rm is not there)", async () => {
+    const f = fixture({ systemRm: async () => null });
+    const precious = put(join(f.outside, "work", "thesis.docx"), "work");
+    f.install(join(f.folder("scout", "t1"), "app"));
+    put(join(f.folder("scout", "t1"), "app", "node_modules", "left-pad", "lib", "a.js"));
+    let swapped = false;
+    fsHooks.beforeReaddir = (path) => {
+      if (!swapped && path.includes(REMOVING_DIR) && path.endsWith(join("left-pad", "lib"))) {
+        swapped = true;
+        renameSync(path, `${path}-x`);
+        symlinkSync(join(f.outside, "work"), path, "dir");
+      }
+    };
+    await deleteAndWait(f, "t1");
+    expect(swapped).toBe(true);
+    expect(existsSync(precious)).toBe(true);
+  });
+
+  it("leaves an entry a process still holds something in, and finishes it once none does", async () => {
+    let held: string[] = [];
+    const f = fixture({ processPaths: async () => held });
+    f.install(join(f.folder("scout", "t1"), "app"));
+    fsHooks.afterRename = (_n, _from, to) => { if (!to.includes("check-")) held = [join(to, "left-pad", "index.js")]; };
+    await deleteAndWait(f, "t1");
+    expect(f.removingEmpty()).toBe(false);
+    expect(f.logs.join("\n")).toMatch(/left .* for now: a process still holds something in it/);
+    held = [];
+    await f.cleanup.drain();
+    expect(f.removingEmpty()).toBe(true);
   });
 
   it("refuses a .removing that is a link, for moves and for finishing an earlier pass", async () => {
@@ -497,7 +600,8 @@ describe("a git index", () => {
 describe("a crash in the middle", () => {
   it("leaves the person's files and a part of the tree in .removing, which the next start finishes", async () => {
     let crash = true;
-    const f = fixture({ pause: async () => { if (crash) throw new Error("power cut"); } });
+    // The Node walk, paced (a Cloud home's GNU rm runs in its own process).
+    const f = fixture({ systemRm: async () => null, pause: async () => { if (crash) throw new Error("power cut"); } });
     const tree = f.work("scout", "t1");
     f.install(join(f.folder("scout", "t1"), "app"));
     for (let i = 0; i < 5_000; i++) put(join(f.folder("scout", "t1"), "app", "node_modules", `p${i % 50}`, `${i}.js`));
@@ -507,7 +611,7 @@ describe("a crash in the middle", () => {
     expect(f.removingEmpty()).toBe(false);
     expect(f.warnings.join("\n")).toMatch(/power cut/);
     crash = false;
-    const restarted = createConversationFolderCleanup({ dataDir: f.dataDir, records: () => ({ bots: [], groups: [] }), drainAfterMs: 0, pause: async () => {}, log: () => {} });
+    const restarted = createConversationFolderCleanup({ dataDir: f.dataDir, records: () => ({ bots: [], groups: [] }), drainAfterMs: 0, pause: async () => {}, log: () => {}, systemRm: async () => null });
     await new Promise((done) => setTimeout(done, 0));
     await restarted.idle();
     expect(f.removingEmpty()).toBe(true);
