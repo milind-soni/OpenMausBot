@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { t } from "@/lib/i18n";
+import { useAdvancedMode } from "@/lib/interface-mode";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { api, type Bot } from "@/state/store";
 import { useStoreSelector } from "@/state/store-select";
@@ -19,8 +20,10 @@ export function MemoryModelSetting({ bot, upkeep, className }: {
   const [error, setError] = useState("");
   const canEdit = useOwnerOrAdmin();
   const models = useStoreSelector((state) => state.instances?.find((instance) => instance.instanceId === setting?.instanceId)?.models.options);
+  // Advanced only: Simple has no picker and no status line for it.
+  const advanced = useAdvancedMode();
 
-  if (!setting && readError === null) return null;
+  if (!advanced || (!setting && readError === null)) return null;
   const showSavedChoice = Boolean(setting?.model && !models?.some((model) => model.id === setting.model));
   const save = async (model: string) => {
     if (!setting) return;
