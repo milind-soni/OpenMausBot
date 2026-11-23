@@ -49,7 +49,7 @@ import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS }
 import { appendNative } from "./native.ts";
 import { answersAlone, permissionLaunchCwd, shellRequest } from "./permission-command.ts";
 import { commandSummary, toolDetailPreview } from "../tool-summary.ts";
-import { codexDeveloperInstructions, syncCodexInstructions } from "./codex-instructions.ts";
+import { codexDeveloperInstructions, codexSandboxNote, syncCodexInstructions } from "./codex-instructions.ts";
 import { volatileContextNote, withContextNote } from "./prompt-split.ts";
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import { CodexDeviceAuthController } from "./codex-device-auth.ts"; import { messageItem } from "../harness/text-items.ts";
@@ -1236,17 +1236,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           ? turn.systemStable
           : null;
         const promptSplit = stableInstructions !== null;
-        const developerInstructions = codexDeveloperInstructions(
-          effectiveConfig,
-          stableInstructions ?? turn.system ?? "",
-        );
-        let approvalParams: CodexApprovalParams;
-        if (approvalMode === "custom") {
-          // Omitting these on a resumed thread would keep the previous named mode.
-          approvalParams = customApprovalParams(effectiveConfig);
-        } else {
-          approvalParams = namedApprovalParams(approvalMode);
-        }
+        // Omitting these on a resumed thread would keep the previous named mode.
+        let approvalParams: CodexApprovalParams = approvalMode === "custom" ? customApprovalParams(effectiveConfig) : namedApprovalParams(approvalMode);
+        const instructionsFor = (params: CodexApprovalParams) => codexDeveloperInstructions(effectiveConfig, stableInstructions ?? turn.system ?? "", turn.guestConfined ? "" : codexSandboxNote(params));
+        // Validate effectiveConfig upfront so invalid native rules fail before thread creation/reuse.
+        instructionsFor(approvalParams);
         // Codex's `never` means "do not ask to escalate", not "grant every requested permission":
         // only Full may synthesize approvals.
         autoAcceptPermissions = approvalMode === "full";
@@ -1262,7 +1256,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           const resumeThread = () => request("thread/resume", {
             ...selectionConfig,
             threadId: cursor,
-            developerInstructions,
+            developerInstructions: instructionsFor(approvalParams),
             model: selection.model,
             ...(selection.modelProvider ? { modelProvider: selection.modelProvider } : {}),
             ...approvalParams.thread,
@@ -1302,7 +1296,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         if (!codexThreadId) {
           const startThread = () => request("thread/start", {
               ...selectionConfig,
-              developerInstructions,
+              developerInstructions: instructionsFor(approvalParams),
               cwd: turn.cwd ?? homedir(),
               model: selection.model,
               ...(selection.modelProvider ? { modelProvider: selection.modelProvider } : {}),
@@ -1327,7 +1321,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const { deliverVolatile, hadVolatile, commitVolatile } = await syncCodexInstructions(
           threadId,
           codexThreadId,
-          developerInstructions,
+          instructionsFor(approvalParams),
           promptSplit ? turn.systemVolatile ?? "" : "",
           resumedNativeThread,
           request,
