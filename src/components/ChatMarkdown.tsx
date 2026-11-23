@@ -14,6 +14,7 @@ import { createMarkdownRenderCache } from "@/lib/markdown-render-cache";
 import { closedFence, mayHoldMath, openFence, splitMarkdownBlocks, splitStreamPieces, type StreamPieces } from "@/lib/markdown-stream-blocks";
 import { drawStreamPieces, type ItemScope, type ParsePiece } from "@/lib/markdown-stream-pieces";
 import { StreamingReplyContext } from "@/state/live-reply";
+import { useStreamFadeIn } from "@/lib/stream-fade-in";
 
 import { parseFenceInfo } from "../lib/code-block";
 import { markdownImageName, markdownImageOpenUrl } from "../lib/markdown-image";
@@ -894,6 +895,7 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
   const { threads, currentBotId } = MAY_LINK_THREAD.test(text) ? use(ThreadRefsContext) : NO_THREAD_REFS;
   const streaming = use(StreamingReplyContext);
   const parts = useMemo(() => markdownParts(text, streaming), [text, streaming]);
+  const fadeIn = useStreamFadeIn(streaming, parts);
   // One answer for the whole text, as a finished message gets: a block alone may hold half of a pair.
   const needsMath = useMemo(() => normalizedSourceHasMath(parts.length === 1 ? parts[0]!.source : parts.map((part) => part.source).join("")), [parts]);
   const [katexReady, setKatexReady] = useState(() => katexPlugin !== null);
@@ -947,7 +949,7 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
   const scope = { message: streaming ? undefined : message, imageOffsets: streaming ? undefined : parts[0]?.imageOffsets, threads, currentBotId, delivered, originals };
   return (
     <MessageScopeContext.Provider value={scope}>
-      <div data-look="bot-text" className="chat-md min-w-0 [&>*+*]:mt-2">
+      <div ref={fadeIn} data-look="bot-text" className="chat-md min-w-0 [&>*+*]:mt-2">
         {parts.map((part, index) => (
           // The whole text's tree puts a line break between its top-level blocks; the parts keep it.
           <Fragment key={index}>{index > 0 && "\n"}{part.fence ? <CodeBlock code={part.fence.code} lang={part.fence.lang} initialWrap={part.fence.wrap} open /> : draw(part)}</Fragment>
