@@ -85,10 +85,11 @@ export function emptyTotals(): WalkTotals {
   };
 }
 
-/** Bytes the entry takes on disk: its allocated blocks where the platform reports them (sparse and tiny files), else its size. */
-export function allocatedBytes(stat: Pick<WalkStat, "size" | "blocks">): number {
+/** Bytes the entry takes on disk: its allocated blocks where the platform reports them (sparse and tiny files), else its
+ * size. Node on Windows reports `blocks` as 0 for every file, so there it is always the size. */
+export function allocatedBytes(stat: Pick<WalkStat, "size" | "blocks">, windows = process.platform === "win32"): number {
   const blocks = stat.blocks;
-  return typeof blocks === "number" && Number.isFinite(blocks) && blocks >= 0 ? blocks * 512 : Math.max(0, stat.size);
+  return !windows && typeof blocks === "number" && Number.isFinite(blocks) && blocks >= 0 ? blocks * 512 : Math.max(0, stat.size);
 }
 
 const BOT_ID = /^[A-Za-z0-9_-]{1,64}$/;
