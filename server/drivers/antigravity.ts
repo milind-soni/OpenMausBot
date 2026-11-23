@@ -136,6 +136,8 @@ const support: AcpSupport = {
   sessionModelEnv: "AGY_ACP_DEFAULT_MODEL",
   sessionScopedApproval: true,
   resumeMethod: "resume",
+  // The packaged runtime unpacks and loads a ~1 GB Python bundle before it answers initialize (STARTUP_TIMEOUT_MS).
+  coldStartCost: "expensive",
   clientFileSystem: true,
   clientReadRoots: (turn) => (turn.skillFiles ?? []).map(dirname),
   sanitizeToolPayload: true,

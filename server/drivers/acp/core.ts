@@ -69,7 +69,7 @@ import { decodeAcpConfig } from "./config-decode.ts";
 import { endTurn, trackAssistantImage, trackAssistantWords, trackThoughtAfterTool, trackRunningTool, trackToolEndShown, type AcpAskFinish, type AcpSession, type AcpTurn } from "./turn-state.ts";
 import { recoveryPromptFor } from "../../resume-recovery.ts";
 import { noticeFailure } from "../../chat-notices.ts";
-import { armIdleClose, engineIdleMs, sessionIdlePolicy, stopIdleClose } from "../session-idle.ts";
+import { armIdleClose, engineIdleMs, sessionIdlePolicy, stopIdleClose, type ColdStartCost } from "../session-idle.ts";
 import { startupFailureRecoverable } from "./startup-recovery.ts";
 import { engineFailure, engineFailureKind } from "../engine-errors.ts";
 import { acpRuntimeFailure, acpStopFailure } from "./failure-words.ts";
@@ -176,6 +176,8 @@ export interface AcpSupport extends AcpDriverHooks {
     config: AcpConfig,
     instanceId: string,
   ): Promise<ProviderSnapshot>;
+  /** A cold start of this engine takes tens of seconds: where memory allows, its idle process is kept longer (session-idle.ts). */
+  coldStartCost?: ColdStartCost;
   /** Google Antigravity resumes through session/resume, not session/load. */
   resumeMethod?: "load" | "resume";
   /** Some agents acknowledge a live load without applying new MCP credentials. */
@@ -394,7 +396,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         }
         return stopped;
       };
-      const sessionIdle = sessionIdlePolicy("ACP");
+      const sessionIdle = sessionIdlePolicy("ACP", process.env, undefined, support.coldStartCost);
 
       const backgroundEnds = new Map<string, Promise<void>>(), endBackground = (threadId: string, session: AcpSession) => support.backgroundWork && !backgroundEnds.has(threadId) && session.child.exitCode === null
         && backgroundEnds.set(threadId, support.backgroundWork.end(session, (m, p, t) => session.host.request(null, m, p, t)).then(async (ended) => { if (ended === false) await endUncancelled(threadId, session); }).finally(() => backgroundEnds.delete(threadId)));
