@@ -80,14 +80,14 @@ describe("a box's environment", () => {
     expect(env).toMatchObject({
       npm_config_cache: join(root, "npm"), PIP_CACHE_DIR: join(root, "pip"), UV_CACHE_DIR: join(root, "uv"),
       HF_HUB_CACHE: join(root, "huggingface", "hub"), HF_XET_CACHE: join(root, "huggingface", "xet"),
-      BUN_INSTALL_CACHE_DIR: join(root, "bun"), COREPACK_HOME: join(root, "corepack"), GOCACHE: join(root, "go-build"),
+      BUN_INSTALL_CACHE_DIR: join(root, "bun"),
     });
     expect(Object.keys(env).filter((name) => cacheNames.includes(name)).sort()).toEqual([...cacheNames].sort());
     for (const name of cacheNames) expect(env[name], name).toBeDefined();
     // Nothing that holds a sign-in or installed programs is moved.
     // Nor a browser (a Playwright MCP profile may sit beside its builds; a project's .puppeteerrc names its own), nor Go's
     // module cache (a project may build offline from it).
-    for (const name of ["XDG_CACHE_HOME", "HF_HOME", "CARGO_HOME", "GRADLE_USER_HOME", "PNPM_HOME", "UV_TOOL_DIR", "UV_PYTHON_INSTALL_DIR", "npm_config_store_dir", "PLAYWRIGHT_BROWSERS_PATH", "PUPPETEER_CACHE_DIR", "GOMODCACHE", "GOPATH"]) expect(env[name], name).toBeUndefined();
+    for (const name of ["XDG_CACHE_HOME", "HF_HOME", "CARGO_HOME", "GRADLE_USER_HOME", "PNPM_HOME", "UV_TOOL_DIR", "UV_PYTHON_INSTALL_DIR", "npm_config_store_dir", "PLAYWRIGHT_BROWSERS_PATH", "PUPPETEER_CACHE_DIR", "GOMODCACHE", "GOPATH", "GOCACHE", "COREPACK_HOME"]) expect(env[name], name).toBeUndefined();
     expect(env.HOME).toBe(home);
   });
 
@@ -105,7 +105,7 @@ describe("a box's environment", () => {
 
   it("on, a variable that already decides a cache's place leaves that cache alone", () => {
     const env = runner(true).wrap({ ...turn, env: { ...turn.env, XDG_CACHE_HOME: "/data/xdg", HF_HOME: "/data/hf", GOPATH: "/data/go", BUN_INSTALL: "/data/.bun" }, allowEnv: ["HF_HOME", "GOPATH", "BUN_INSTALL"] }).env;
-    for (const name of ["PIP_CACHE_DIR", "UV_CACHE_DIR", "HF_HUB_CACHE", "HF_XET_CACHE", "BUN_INSTALL_CACHE_DIR", "COREPACK_HOME", "GOCACHE"]) expect(env[name], name).toBeUndefined();
+    for (const name of ["PIP_CACHE_DIR", "UV_CACHE_DIR", "HF_HUB_CACHE", "HF_XET_CACHE", "BUN_INSTALL_CACHE_DIR"]) expect(env[name], name).toBeUndefined();
     expect(env.npm_config_cache).toBe(join(toolCacheRoot(home), "npm"));
   });
 
@@ -127,8 +127,8 @@ describe("a box's environment", () => {
     expect(added.npm_config_cache).toBeUndefined();
     expect(given).toEqual({ npm_config_cache: "/x", HOME: home });
     expect(toolCacheEnvironment(home, { npm_config_cache: "" }).npm_config_cache).toBe(join(toolCacheRoot(home), "npm"));
-    expect(toolCacheEnvironment(home, {}, { GOCACHE: "/data/gb" }).GOCACHE).toBe("/data/gb");
-    expect(toolCacheEnvironment(home, { GOCACHE: "/data/kept" }, { GOCACHE: "/data/gb" }).GOCACHE).toBeUndefined();
+    expect(toolCacheEnvironment(home, {}, { PIP_CACHE_DIR: "/data/pp" }).PIP_CACHE_DIR).toBe("/data/pp");
+    expect(toolCacheEnvironment(home, { PIP_CACHE_DIR: "/data/kept" }, { PIP_CACHE_DIR: "/data/pp" }).PIP_CACHE_DIR).toBeUndefined();
   });
 });
 
@@ -198,6 +198,13 @@ describe("the cache folder the server makes", () => {
     expect(readFileSync(join(root, CACHE_TAG_FILE), "utf8")).toBe(CACHE_TAG);
     expect(hasCacheTag(root)).toBe(true);
     expect(ensureToolCacheRoot(root)).toBe(true);
+  });
+
+  it("an empty cache folder without the mark (a start that stopped before writing it) is marked and the server's", () => {
+    const home = scratch(), root = toolCacheRoot(home);
+    mkdirSync(root);
+    expect(ensureToolCacheRoot(root)).toBe(true);
+    expect(readFileSync(join(root, CACHE_TAG_FILE), "utf8")).toBe(CACHE_TAG);
   });
 
   it("a cache folder the person made stays theirs: nothing is written in it, even a CACHEDIR.TAG of another tool", () => {
