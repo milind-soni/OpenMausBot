@@ -25,7 +25,6 @@ import type { SessionRegistry } from "../sessions.ts";
 import { sectionKey, type BotRecord, type Store } from "../store.ts";
 import { teamComputerAssignment, teamComputerCreate, teamComputerOwner, type TeamComputerRecord, type TeamComputers } from "../team-computers.ts";
 import * as vps from "../vps-computer.ts";
-import { sshConfigHosts } from "../ssh-config-hosts.ts";
 import { vpsAliasesInPlay } from "../vps-hosts.ts";
 import type { BusyFlag, RemoteComputerProvider } from "./config.ts";
 import { createCloudComputerRecoveryRoutes, type CloudComputerRecoveryRouteDeps } from "./cloud-computer-recovery.ts";
@@ -255,12 +254,6 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
         undefined,
         vpsAliasesInPlay(cfg, store.bots),
       ));
-    }
-    if (method === "GET" && path === "/api/computers/vps/ssh-hosts") {
-      res.setHeader("cache-control", "private, no-store");
-      // Aliases are the server's SSH setup: only an admin sees them, as with the saved alias.
-      if (!auth.scopes.includes("admin")) return json(res, 403, { error: "admin only" });
-      return json(res, 200, { hosts: sshConfigHosts() });
     }
     m = path.match(/^\/api\/computers\/vps\/([\w-]+)\/remove$/);
     if (m && method === "POST") {

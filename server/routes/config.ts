@@ -209,7 +209,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       if (patch.vps !== undefined || patch.vpsServers !== undefined) {
         providerConfigBusy.set(true);
         const overHost = await vpsHostLimitProblem(cfg, patch).finally(() => providerConfigBusy.set(false));
-        if (overHost) return json(res, 400, { error: overHost });
+        if (overHost) return json(res, 400, overHost);
       }
       if (patch.browserProfiles !== undefined && body.expectedBrowserProfiles !== undefined) {
         const current = (cfg.browserProfiles ?? []).map(({ id, name, browser }) => ({ id, name, ...(browser ? { browser } : {}) }));

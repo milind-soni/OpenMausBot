@@ -13,43 +13,56 @@ describe("VPS host limits", () => {
     expect(await vpsHostCapacity("example-host", async () => ({ stdout: "x", stderr: "" }))).toBeNull();
   });
 
-  it("refuses more cores or memory than the machine has, and pins to CPUs it does not have", () => {
+  it("refuses more cores or memory than the machine has, with the words' key and params", () => {
     const host = { cpus: 6, memoryBytes: 3.7 * GIB };
-    expect(hostLimitProblem("example-host", host, { cpus: 6, cpuset: "0-5", memoryGb: 4 })).toBeNull();
-    expect(hostLimitProblem("example-host", host, { cpus: 8 })).toBe("example-host has 6 CPU cores, so 8 cores can't be set");
-    expect(hostLimitProblem("example-host", host, { cpuset: "4-7" })).toBe("example-host has CPUs 0-5, so CPU pinning 4-7 can't be set");
-    expect(hostLimitProblem("example-host", host, { memoryGb: 6 })).toBe("example-host has 3.7 GB of memory, so 6 GB can't be set");
-    expect(hostLimitProblem("example-host", { cpus: 1, memoryBytes: 4 * GIB }, { cpus: 2 })).toBe("example-host has 1 CPU core, so 2 cores can't be set");
+    expect(hostLimitProblem("example-host", host, { cpus: 6, memoryGb: 4 })).toBeNull();
+    expect(hostLimitProblem("example-host", host, { cpus: 8 })).toEqual({
+      error: "example-host has 6 CPU cores in all. Choose 6 or fewer.",
+      errorKey: "serverError.vps.tooManyCores",
+      errorParams: { server: "example-host", cores: 6 },
+    });
+    expect(hostLimitProblem("example-host", host, { memoryGb: 6 })?.error).toBe("example-host has about 4 GB of memory. Choose 4 GB or less.");
   });
 
-  it("checks only the limits a save adds or changes, once per host, and lets an unreachable host through", async () => {
+  it("checks only the limits a save adds or changes, and lets an unreachable host through", async () => {
     const host = vi.fn(async (alias: string) => (alias === "off" ? null : { cpus: 4, memoryBytes: 8 * GIB }));
     const cfg = { vps: { sshAlias: "main", cpus: 2, memoryGb: 4 }, vpsServers: [{ name: "Lab", sshAlias: "lab", cpus: 8, memoryGb: 64 }] };
     expect(await vpsHostLimitProblem(cfg, { vpsServers: cfg.vpsServers }, host)).toBeNull();
     expect(host).not.toHaveBeenCalled();
-    expect(await vpsHostLimitProblem(cfg, { vps: { cpus: 5 } }, host)).toBe("main has 4 CPU cores, so 5 cores can't be set");
-    expect(await vpsHostLimitProblem(cfg, { vps: { memoryGb: 16 } }, host)).toBe("main has 8.0 GB of memory, so 16 GB can't be set");
-    expect(await vpsHostLimitProblem(cfg, { vpsServers: [{ name: "Lab", sshAlias: "lab", cpus: 8, memoryGb: 64, cpuset: "0-1" }] }, host)).toBe("lab has 4 CPU cores, so 8 cores can't be set");
+    expect((await vpsHostLimitProblem(cfg, { vps: { sshAlias: "main", cpus: 5 } }, host))?.error).toBe("main has 4 CPU cores in all. Choose 4 or fewer.");
+    expect((await vpsHostLimitProblem(cfg, { vps: { sshAlias: "main", memoryGb: 16 } }, host))?.error).toBe("main has about 8 GB of memory. Choose 8 GB or less.");
+    expect((await vpsHostLimitProblem(cfg, { vpsServers: [{ name: "Lab", sshAlias: "lab", cpus: 6, memoryGb: 64 }] }, host))?.errorKey).toBe("serverError.vps.tooManyCores");
     expect(await vpsHostLimitProblem(cfg, { vpsServers: [{ name: "Off", sshAlias: "off", cpus: 64, memoryGb: 128 }] }, host)).toBeNull();
-    expect(await vpsHostLimitProblem(cfg, { vps: { cpus: 4, memoryGb: 8, cpuset: "0-3" } }, host)).toBeNull();
-    expect(host).toHaveBeenCalledTimes(5);
+    expect(await vpsHostLimitProblem(cfg, { vps: { sshAlias: "main", cpus: 4, memoryGb: 8 } }, host)).toBeNull();
   });
-});
 
-describe("VPS host limits across servers", () => {
-  const host = async () => ({ cpus: 4, memoryBytes: 16 * GIB });
-  it("does not check the default server when its alias is cleared", async () => {
-    const small = async () => ({ cpus: 1, memoryBytes: 16 * GIB });
+  it("reads the default server's patch the way the save does: an alias left out clears it", async () => {
+    const small = vi.fn(async () => ({ cpus: 1, memoryBytes: 16 * GIB }));
     expect(await vpsHostLimitProblem({ vps: { sshAlias: "main", cpus: 2 } }, { vps: { sshAlias: "" } }, small)).toBeNull();
+    expect(await vpsHostLimitProblem({ vps: { sshAlias: "main", cpus: 2 } }, { vps: { cpus: 4 } }, small)).toBeNull();
+    expect(small).not.toHaveBeenCalled();
   });
-  it("checks a named server that inherits a raised default", async () => {
+
+  it("checks a named server that inherits a raised default, asking every host at once", async () => {
     const cfg = { vps: { sshAlias: "main", cpus: 2 }, vpsServers: [{ name: "Small", sshAlias: "small" }] };
-    const capacity = async (alias: string) => (alias === "small" ? { cpus: 2, memoryBytes: 16 * GIB } : { cpus: 8, memoryBytes: 16 * GIB });
-    expect(await vpsHostLimitProblem(cfg, { vps: { cpus: 4 } }, capacity)).toContain("small has 2 CPU cores");
+    const asked: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const capacity = async (alias: string) => {
+      asked.push(alias);
+      await gate;
+      return alias === "small" ? { cpus: 2, memoryBytes: 16 * GIB } : { cpus: 8, memoryBytes: 16 * GIB };
+    };
+    const checking = vpsHostLimitProblem(cfg, { vps: { sshAlias: "main", cpus: 4 } }, capacity);
+    await Promise.resolve();
+    expect(asked.sort()).toEqual(["main", "small"]);
+    release();
+    expect((await checking)?.error).toContain("small has 2 CPU cores");
   });
-  it("refuses a pin larger than the effective core limit", async () => {
-    const cfg = { vps: { sshAlias: "main", cpus: 2 }, vpsServers: [] };
-    const patch = { vpsServers: [{ name: "Pinned", sshAlias: "pinned", cpuset: "0-3" }] };
-    expect(await vpsHostLimitProblem(cfg, patch, host)).toContain("pins 4 CPUs");
+
+  it("checks a new server against the default's limits it inherits", async () => {
+    const cfg = { vps: { sshAlias: "main", memoryGb: 16 }, vpsServers: [] };
+    const host = async () => ({ cpus: 4, memoryBytes: 8 * GIB });
+    expect((await vpsHostLimitProblem(cfg, { vpsServers: [{ name: "Spare", sshAlias: "spare" }] }, host))?.errorKey).toBe("serverError.vps.tooMuchMemory");
   });
 });

@@ -11212,13 +11212,13 @@ describe("harness HTTP API", () => {
       expect(saved.status, JSON.stringify(saved.body)).toBe(200);
       expect((await api("GET", "/api/config")).body.vps.sshAlias).toBe("rockpi4");
 
-      const replaced = await api("PUT", "/api/config", { vps: { sshAlias: "example-host" } });
+      const replaced = await api("PUT", "/api/config", { vps: { sshAlias: "dietpi" } });
       expect(replaced.status, JSON.stringify(replaced.body)).toBe(200);
-      expect((await api("GET", "/api/config")).body.vps.sshAlias).toBe("example-host");
+      expect((await api("GET", "/api/config")).body.vps.sshAlias).toBe("dietpi");
 
       const cleared = await api("PUT", "/api/config", { vps: { sshAlias: "" } });
       expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
-      expect(cleared.body.notice).toContain("Removed. example-host could not be reached");
+      expect(cleared.body.notice).toContain("Removed. dietpi could not be reached");
       expect((await api("GET", "/api/config")).body.vps.sshAlias).toBe("");
     } finally {
       rmSync(fakeSshUnavailable, { force: true });

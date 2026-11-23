@@ -1,9 +1,11 @@
 import type { AppConfig, VpsServer } from "./config.ts";
-import { cpusetSize } from "./container-limits.ts";
+import { userError, type UserError } from "./user-errors.ts";
+import { normalizeVpsConfig } from "./vps-config.ts";
 import { vpsLimits } from "./vps-hosts.ts";
 import { defaultRunner, vpsDockerArgs, type VpsCommandRunner } from "./vps-computer.ts";
 
 export interface HostCapacity { cpus: number; memoryBytes: number }
+type Limits = { cpus?: number; memoryGb?: number };
 
 const GIB = 1024 ** 3;
 
@@ -18,62 +20,54 @@ export async function vpsHostCapacity(alias: string, runner: VpsCommandRunner = 
   }
 }
 
-function highestCpu(cpuset: string): number {
-  return Math.max(...cpuset.split(",").map((part) => Number(part.split("-").pop())));
-}
-
-/** Words for a limit the machine cannot honour, or null. */
-export function hostLimitProblem(alias: string, host: HostCapacity, limits: { cpus?: number; cpuset?: string; memoryGb?: number }): string | null {
+/** The refusal for a limit the machine cannot honour, or null. */
+export function hostLimitProblem(alias: string, host: HostCapacity, limits: Limits): UserError | null {
   if (limits.cpus !== undefined && limits.cpus > host.cpus) {
-    return `${alias} has ${host.cpus} CPU core${host.cpus === 1 ? "" : "s"}, so ${limits.cpus} cores can't be set`;
-  }
-  if (limits.cpuset && highestCpu(limits.cpuset) >= host.cpus) {
-    return `${alias} has CPUs 0-${host.cpus - 1}, so CPU pinning ${limits.cpuset} can't be set`;
+    return userError("serverError.vps.tooManyCores", { server: alias, cores: host.cpus });
   }
   // A machine sold as 4 GB reports a little less; round before comparing.
-  if (limits.memoryGb !== undefined && limits.memoryGb > Math.round(host.memoryBytes / GIB)) {
-    return `${alias} has ${(host.memoryBytes / GIB).toFixed(1)} GB of memory, so ${limits.memoryGb} GB can't be set`;
+  const memoryGb = Math.round(host.memoryBytes / GIB);
+  if (limits.memoryGb !== undefined && limits.memoryGb > memoryGb) {
+    return userError("serverError.vps.tooMuchMemory", { server: alias, memory: memoryGb });
   }
   return null;
 }
 
-type Patch = { vps?: { sshAlias?: string; cpus?: number; cpuset?: string; memoryGb?: number }; vpsServers?: VpsServer[] };
-type Limits = { cpus?: number; cpuset?: string; memoryGb?: number };
+type Patch = { vps?: unknown; vpsServers?: VpsServer[] };
 
-/** The config as it will be once `patch` is saved: an omitted default alias is kept, an empty one clears it, and an empty pin removes it. */
+/** The config as it will be once `patch` is saved, read the same way the save reads it. */
 function afterPatch(cfg: AppConfig, patch: Patch): AppConfig {
-  if (patch.vps === undefined && patch.vpsServers === undefined) return cfg;
-  const { sshAlias, cpus, memoryGb, cpuset } = patch.vps ?? {};
-  const vps = { ...cfg.vps, ...(sshAlias === undefined ? {} : { sshAlias }), ...(cpus === undefined ? {} : { cpus }), ...(memoryGb === undefined ? {} : { memoryGb }) };
-  if (patch.vps && "cpuset" in patch.vps) delete vps.cpuset;
-  if (cpuset) vps.cpuset = cpuset;
+  let vps = cfg.vps;
+  try {
+    if (patch.vps !== undefined) vps = normalizeVpsConfig(patch.vps, cfg.vps);
+  } catch {
+    // The save refuses it with its own words.
+  }
   return { ...cfg, vps, vpsServers: patch.vpsServers ?? cfg.vpsServers };
 }
 
-const sameLimits = (a: Limits, b: Limits) => a.cpus === b.cpus && a.cpuset === b.cpuset && a.memoryGb === b.memoryGb;
+const sameLimits = (a: Limits, b: Limits) => a.cpus === b.cpus && a.memoryGb === b.memoryGb;
 
-/** Checks each CPU and memory limit this save adds or changes, as each server will effectively have it, against what the machine has. */
-export async function vpsHostLimitProblem(cfg: AppConfig, patch: Patch, capacity: (alias: string) => Promise<HostCapacity | null> = vpsHostCapacity): Promise<string | null> {
+/** Checks each memory and core limit this save adds or changes, as each server will effectively have it, against what
+ * the machine has. Every host that needs a look is asked at once. */
+export async function vpsHostLimitProblem(
+  cfg: AppConfig,
+  patch: Patch,
+  capacity: (alias: string) => Promise<HostCapacity | null> = vpsHostCapacity,
+): Promise<UserError | null> {
   const after = afterPatch(cfg, patch);
   const aliases = new Set<string>();
   if (after.vps?.sshAlias) aliases.add(after.vps.sshAlias);
   for (const server of after.vpsServers ?? []) aliases.add(server.sshAlias);
-  const targets: ({ alias: string } & Limits)[] = [];
-  for (const alias of aliases) {
+  const known = (alias: string) => alias === cfg.vps?.sshAlias || (cfg.vpsServers ?? []).some((server) => server.sshAlias === alias);
+  const targets = [...aliases].flatMap((alias) => {
     const limits = vpsLimits(after, alias);
-    if (limits.cpuset && limits.cpus !== undefined && cpusetSize(limits.cpuset) > limits.cpus) {
-      return `${alias} pins ${cpusetSize(limits.cpuset)} CPUs (${limits.cpuset}), more than its ${limits.cpus} cores`;
-    }
-    const known = alias === cfg.vps?.sshAlias || (cfg.vpsServers ?? []).some((server) => server.sshAlias === alias);
-    const hasLimits = limits.cpus !== undefined || limits.memoryGb !== undefined || Boolean(limits.cpuset);
-    if (hasLimits && !(known && sameLimits(limits, vpsLimits(cfg, alias)))) targets.push({ alias, ...limits });
-  }
-  const hosts = new Map<string, Promise<HostCapacity | null>>();
-  for (const target of targets) {
-    if (!hosts.has(target.alias)) hosts.set(target.alias, capacity(target.alias));
-    const host = await hosts.get(target.alias)!;
-    const problem = host === null ? null : hostLimitProblem(target.alias, host, target);
-    if (problem) return problem;
-  }
-  return null;
+    const hasLimits = limits.cpus !== undefined || limits.memoryGb !== undefined;
+    return hasLimits && !(known(alias) && sameLimits(limits, vpsLimits(cfg, alias))) ? [{ alias, limits }] : [];
+  });
+  const problems = await Promise.all(targets.map(async ({ alias, limits }) => {
+    const host = await capacity(alias);
+    return host === null ? null : hostLimitProblem(alias, host, limits);
+  }));
+  return problems.find((problem) => problem !== null) ?? null;
 }

@@ -20,7 +20,7 @@ import {
   MANAGED_LABEL,
 } from "./container-computer.ts";
 import { desktopCapArgs, dockerSecurityIsHardened, type DockerHardeningConfig } from "./container-isolation.ts";
-import { startWithResources, DEFAULT_DESKTOP_RESOURCES, PIDS_LIMIT, raisePidsLimit, resourceArgs, type DesktopResources } from "./container-limits.ts";
+import { applyResourcesBeforeStart, DEFAULT_DESKTOP_RESOURCES, PIDS_LIMIT, raisePidsLimit, resourceArgs, type DesktopResources } from "./container-limits.ts";
 import { DATA_DIR, isValidSshAlias, vpsResources, vpsSshAlias, type AppConfig } from "./config.ts";
 import { augmentedPath } from "./env-path.ts";
 import { COMMAND_TIMEOUT_KILL_GRACE_MS, defaultRunner, VpsHostUnreachableError, type VpsCommandRunner } from "./vps-command.ts";
@@ -118,7 +118,6 @@ export interface VpsComputerStatus {
   container_name: string;
   container_id: string | null;
   image_id: string | null;
-  /** Set when a start could not apply the saved limits: the desktop runs with its previous ones. */ warning?: string;
 }
 
 export interface ManagedVpsOwner {
@@ -975,7 +974,6 @@ export async function vpsComputerAction(
       const run = (args: string[], timeoutMs = 2 * 60_000) => runner(vpsDockerArgs(alias, args), { timeoutMs });
 
       const containerRef = before.container_id ?? before.container_name;
-      let warning: string | null = null;
       if (action === "provision") {
         if (before.container === "missing") {
           let imageRef = before.image ? before.image_id : null;
@@ -988,14 +986,16 @@ export async function vpsComputerAction(
         } else {
           assertUsableContainer(before);
           if (before.container === "stopped") {
-            warning = await startWithResources(containerRef, vpsResources(cfg), run);
+            await applyResourcesBeforeStart(containerRef, vpsResources(cfg), run);
+            await run(["start", containerRef]);
           }
         }
       } else if (action === "start") {
         if (before.container === "missing") throw Object.assign(new Error("No VPS container exists for this bot"), { status: 409 });
         if (before.container === "running") throw Object.assign(new Error("The VPS container is already running"), { status: 409 });
         assertUsableContainer(before);
-        warning = await startWithResources(containerRef, vpsResources(cfg), run);
+        await applyResourcesBeforeStart(containerRef, vpsResources(cfg), run);
+        await run(["start", containerRef]);
       } else if (action === "remove") {
         // Skips the usability check (remove escapes a broken container); the ownership labels are the only gate.
         if (before.container === "missing") return before;
@@ -1012,7 +1012,7 @@ export async function vpsComputerAction(
         assertUsableContainer(before);
         await run(["stop", containerRef]);
       }
-      return Object.assign(await (action === "stop" ? computeVpsComputerStatus(cfg, botId, runner) : waitForVpsReady(cfg, botId, runner)), warning ? { warning } : {});
+      return await (action === "stop" ? computeVpsComputerStatus(cfg, botId, runner) : waitForVpsReady(cfg, botId, runner));
     } finally {
       invalidateVpsStatus(key);
     }
