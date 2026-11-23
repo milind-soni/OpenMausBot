@@ -114,6 +114,20 @@ describe("a thread's live turn", () => {
     expect(turnLive("t").toolSteps, "a new call of turn-1 is its third").toBe(3);
   });
 
+  it("keeps the turn that started last when a late frame of an earlier turn arrived in between", () => {
+    note({ type: "item.started", itemType: "tool", itemId: "a", title: "Read" } as Partial<RuntimeEvent>);
+    note({ type: "item.started", itemType: "tool", itemId: "b", title: "Bash" } as Partial<RuntimeEvent>);
+    note({ type: "turn.started", turnId: "turn-2" } as Partial<RuntimeEvent>);
+    note({ type: "item.started", itemType: "tool", itemId: "b", title: "Bash", turnId: "turn-2" } as Partial<RuntimeEvent>);
+    note({ type: "item.started", itemType: "tool", itemId: "c", title: "Write", turnId: "turn-2" } as Partial<RuntimeEvent>);
+    expect(turnLive("t")).toMatchObject({ turnId: "turn-2", toolSteps: 2 });
+    note({ type: "item.started", itemType: "tool", itemId: "a", title: "Read", turnId: "turn-1" } as Partial<RuntimeEvent>);
+    expect(turnLive("t")).toMatchObject({ turnId: "turn-1", toolSteps: 2 });
+    note({ type: "turn.started", turnId: "turn-3" } as Partial<RuntimeEvent>);
+    note({ type: "item.started", itemType: "tool", itemId: "b", title: "Bash", turnId: "turn-2" } as Partial<RuntimeEvent>);
+    expect(turnLive("t"), "a late duplicate of turn-2's call b still counts turn-2's two steps").toMatchObject({ turnId: "turn-2", toolSteps: 2 });
+  });
+
   it("counts a late frame of an earlier turn from the steps that turn already had", () => {
     note({ type: "item.started", itemType: "tool", itemId: "a", title: "Read" } as Partial<RuntimeEvent>);
     note({ type: "item.started", itemType: "tool", itemId: "b", title: "Bash" } as Partial<RuntimeEvent>);

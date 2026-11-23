@@ -27,6 +27,8 @@ const threads = new Map<string, TurnLive>();
 const lastFrames = new Map<string, number>();
 const listeners = new Map<string, Set<() => void>>();
 const toolTurnSeen = new Map<string, Set<string>>();
+/** The turn each thread last started. Kept apart from the turn of the last frame, which a late frame of an earlier turn can change. */
+const lastStartedTurn = new Map<string, string>();
 
 function toolSeenKey(threadId: string, turnId: string | undefined): string {
   return turnId ? `${threadId}\0${turnId}` : threadId;
@@ -65,6 +67,7 @@ function put(threadId: string, next: TurnLive): void {
     const dropped = threads.keys().next().value!;
     threads.delete(dropped);
     clearToolSeen(dropped);
+    lastStartedTurn.delete(dropped);
   }
   for (const listener of Array.from(listeners.get(threadId) ?? [])) listener();
 }
@@ -81,10 +84,15 @@ export function noteTurnEvent(event: RuntimeEvent): void {
   const turnId = event.turnId ?? current?.turnId;
   const live: TurnLive = sameTurn && current ? current : { turnId, ended: false, status: null, toolSteps: toolTurnSeen.get(toolSeenKey(threadId, turnId))?.size ?? 0 };
   switch (event.type) {
-    case "turn.started":
-      // The turn that just ended keeps its counted calls, so a late frame of it does not restart from zero.
-      clearToolSeen(threadId, current?.turnId === turnId ? undefined : current?.turnId);
+    case "turn.started": {
+      // The turn that started before this one keeps its counted calls, so a late frame of it does not restart from zero.
+      // Before any turn.started was seen for the thread, the last observed turn is the best guess for the one that ended.
+      const previousStarted = lastStartedTurn.get(threadId) ?? current?.turnId;
+      clearToolSeen(threadId, previousStarted === turnId ? undefined : previousStarted);
+      if (turnId) lastStartedTurn.set(threadId, turnId);
+      else lastStartedTurn.delete(threadId);
       return put(threadId, { turnId, ended: false, status: null, toolSteps: 0 });
+    }
     case "turn.completed":
     case "cap.exhausted":
     case "session.exited":
@@ -159,4 +167,5 @@ export function resetTurnLive(): void {
   threads.clear();
   lastFrames.clear();
   toolTurnSeen.clear();
+  lastStartedTurn.clear();
 }
