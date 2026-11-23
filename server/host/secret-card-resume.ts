@@ -24,6 +24,7 @@ const isUnresumedProvidedSecret = (message: Message): boolean => {
     && !secret.resumed
     && !secret.superseded
     && !secret.stopped
+    && !secret.error
   );
 };
 
@@ -66,6 +67,18 @@ export function roomContinuationNotStartedError(cancelled: boolean, dispatchErro
   return Object.assign(new Error(dispatchError ?? "Room continuation did not start"), retryable ? { code: "thread_busy" } : {});
 }
 
+/** Distinguishes pre-dispatch non-starts from post-acceptance failures so accepted turns are never replayed. */
+export function roomContinuationError(
+  cancelled: boolean,
+  dispatchError: string | undefined,
+  providerAccepted = false,
+): Error & { code?: string; postDispatch?: true } {
+  if (providerAccepted && dispatchError !== undefined) {
+    return Object.assign(new Error(dispatchError), { postDispatch: true as const });
+  }
+  return roomContinuationNotStartedError(cancelled, dispatchError);
+}
+
 export function createSecretCardResumer(deps: SecretCardResumeDeps) {
   const pending = new Set<string>();
   const inFlight = new Set<string>();
@@ -80,18 +93,25 @@ export function createSecretCardResumer(deps: SecretCardResumeDeps) {
   }
 
   function rollback(botId: string, threadId: string, cards: readonly Message[], error: unknown): void {
+    const postDispatch = Boolean((error as { postDispatch?: unknown } | null)?.postDispatch);
     const code = typeof (error as { code?: unknown } | null)?.code === "string"
       ? (error as { code: string }).code
       : "";
-    const retryable = RETRYABLE_CODES.has(code);
+    const retryable = !postDispatch && RETRYABLE_CODES.has(code);
     const reason = error instanceof Error ? error.message : String(error);
     for (const item of cards) {
       const current = deps.store.activePath(threadId).find((candidate) => candidate.id === item.id);
       if (!current?.secret || current.secret.stopped || current.secret.superseded) continue;
-      const { resumed: _dropped, ...rest } = current.secret;
-      deps.store.patchMessage(threadId, current.id, {
-        secret: { ...rest, ...(retryable ? {} : { error: reason }) },
-      });
+      if (postDispatch) {
+        deps.store.patchMessage(threadId, current.id, {
+          secret: { ...current.secret, resumed: true, error: reason },
+        });
+      } else {
+        const { resumed: _dropped, ...rest } = current.secret;
+        deps.store.patchMessage(threadId, current.id, {
+          secret: { ...rest, ...(retryable ? {} : { error: reason }) },
+        });
+      }
     }
     if (retryable && deps.connectorThread(botId, threadId)) {
       pending.add(keyOf(botId, threadId));

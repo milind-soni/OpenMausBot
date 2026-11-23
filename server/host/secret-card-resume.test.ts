@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { SecretRequestCardData } from "../../shared/wire.ts";
 import type { Message } from "../store.ts";
-import { createSecretCardResumer, collectPersistedSecretCardTargets, roomContinuationNotStartedError } from "./secret-card-resume.ts";
+import { collectPersistedSecretCardTargets, createSecretCardResumer, roomContinuationError, roomContinuationNotStartedError } from "./secret-card-resume.ts";
 
 function makeCard(id: string, label: string, extra: Partial<SecretRequestCardData> = {}): Message {
   return {
@@ -311,5 +311,30 @@ describe("createSecretCardResumer", () => {
     blocked = false;
     freshResumer.drain();
     expect(startedDirect).toEqual([{ botId: "bot-1", threadId: "t-main", text: "update(c-direct:Direct Key:provided)" }]);
+  });
+
+  it("keeps resumed:true and never replays after post-dispatch failure or recorded permanent error", async () => {
+    const f = makeFixture({ group: { id: "room-1" } });
+    f.lines.push({ ...makeCard("c-post", "Post Dispatch Key", { provided: true }), from: { botId: "bot-1", name: "One", color: "green" } } as Message);
+    f.setRoomImpl(async () => {
+      throw roomContinuationError(true, "the Local VM died", true);
+    });
+    expect(f.resumer.resume("bot-1", "room-t1")).toBe(true);
+    await vi.waitFor(() => {
+      expect(f.lines[0]!.secret!.error).toBe("the Local VM died");
+    });
+    expect(f.lines[0]!.secret!.resumed).toBe(true);
+    expect(f.drainScheduled()).toBe(0);
+
+    // Even if a pre-dispatch error cleared resumed while setting error, rediscovery must not replay it.
+    const errored = makeCard("c-errored", "Errored Key", { provided: true, error: "no cloud computer" });
+    const targets = collectPersistedSecretCardTargets({
+      bots: [{ id: "bot-1", threadId: "t-err" }] as never,
+      groups: [] as never,
+      tasks: () => [] as never,
+      groupTasks: () => [] as never,
+      activePath: () => [errored],
+    });
+    expect(targets).toEqual([]);
   });
 });
