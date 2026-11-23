@@ -49,7 +49,7 @@ import {
   resolveAntigravityRuntime,
   type AntigravityRuntime,
 } from "./antigravity-runtime.ts";
-import { ANTIGRAVITY_NATIVE_CLI, isAntigravityCliName } from "./antigravity-cli-install.ts";
+import { ANTIGRAVITY_NATIVE_CLI } from "./antigravity-cli-install.ts";
 import { acpFileEditWithin } from "./permission-command.ts";
 import { resolveAntigravityReleaseAsset } from "./antigravity-release.ts";
 import { AntigravityProcesses } from "./antigravity-processes.ts";
@@ -116,7 +116,8 @@ interface LiveInstance {
   login: AntigravityCliLogin;
   stopAll: () => Promise<void>;
   native: () => Promise<boolean>;
-  profile: (runtime: AntigravityRuntime) => Promise<AntigravityProfile>;
+  /** The native CLI this instance runs and its profile; null when it runs none. */
+  ownCli: () => Promise<{ runtime: AntigravityRuntime; profile: AntigravityProfile } | null>;
 }
 const liveInstances = new Map<string, LiveInstance>();
 /** While the native CLI's shared sign-in is being removed, no native process starts: it would hold the old sign-in. */
@@ -349,8 +350,12 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
     let nativeFlow = false;
     liveInstances.set(input.instanceId, {
       login, stopAll: () => base.adapter.stopAll(),
-      native: async () => nativeFlow || antigravityPathRunsNativeCli(input.config.cli, environmentNow()),
-      profile: (runtime) => prepareAntigravityProfile({ instanceId: input.instanceId, runtime, baseEnv: environmentNow() }),
+      native: async () => nativeFlow || (launched.get(input.instanceId)?.nativeCli === true && runtimeProcesses.count(input.instanceId) > 0)
+        || antigravityPathRunsNativeCli(input.config.cli, environmentNow()),
+      ownCli: async () => {
+        const own = await runtimeAndProfile().catch(() => null);
+        return own?.runtime.harnessPath === null ? own : null;
+      },
     });
     /** The native CLI keeps one sign-in for every instance run by it and for the Antigravity CLI in a terminal here
      * (1.5.14: one OS keyring entry, whatever `--gemini-dir` says), so this signs all of them out. Throws, keeping the
@@ -373,8 +378,8 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
         await signOutAntigravityCli(runtime, profile, { onProcess: (child) => runtimeProcesses.track(input.instanceId, child) });
         // Without an OS keyring the CLI keeps each profile's sign-in in that profile's file (1.5.14), so each is removed too.
         for (const [instanceId, live] of affected) {
-          if (instanceId === input.instanceId) continue;
-          await signOutAntigravityCli(runtime, await live.profile(runtime), { onProcess: (child) => runtimeProcesses.track(instanceId, child) }, "native");
+          const own = instanceId === input.instanceId ? null : await live.ownCli();
+          if (own) await signOutAntigravityCli(own.runtime, own.profile, { onProcess: (child) => runtimeProcesses.track(instanceId, child) }, "native");
         }
         nativeSignIn.forgetAll();
       } finally {
@@ -446,7 +451,10 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
         if (!(await login.cancel())) throw new Error("The Antigravity sign-in in progress could not be stopped. Try again.");
         await base.adapter.stopAll();
         // An account set to the native CLI that cannot be started cannot be signed out of it: that must not pass as done.
-        const current = await runtimeAndProfile().catch((error: unknown) => { if (isAntigravityCliName(input.config.cli?.trim() ?? "")) throw error; return null; });
+        const current = await runtimeAndProfile().catch(async (error: unknown) => {
+          if (await antigravityPathRunsNativeCli(input.config.cli, environmentNow())) throw error;
+          return null;
+        });
         if (current?.runtime.harnessPath === null) return await signOutNative(current.runtime, current.profile);
         await removeAntigravitySignIn(input.instanceId);
         if (!runtimeProcesses.count(input.instanceId)) return;

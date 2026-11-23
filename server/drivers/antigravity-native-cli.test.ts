@@ -420,11 +420,11 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
     const directory = folder(), seen = join(directory, "env"), program = join(directory, "antigravity");
     writeFileSync(program, `#!/bin/sh\n/usr/bin/env > ${JSON.stringify(seen)}\necho 1.5.7\n`);
     chmodSync(program, 0o755);
-    await expect(resolveAntigravityRuntime(program, { PATH: "/usr/bin:/bin", ANTHROPIC_API_KEY: "provider-key", OMB_CLOUD_TOKEN: "control-plane", KEEP_ME: "kept" }, folder()))
+    await expect(resolveAntigravityRuntime(program, { PATH: "/usr/bin:/bin", ANTHROPIC_API_KEY: "provider-key", OMB_CLOUD_TOKEN: "control-plane", anthropic_api_key: "lower-provider", xai_api_key: "lower-workspace", KEEP_ME: "kept" }, folder()))
       .resolves.toMatchObject({ harnessPath: null, version: "1.5.7" });
     const env = readFileSync(seen, "utf8");
     expect(env).toContain("KEEP_ME=kept");
-    expect(env).not.toMatch(/provider-key|control-plane/u);
+    expect(env).not.toMatch(/provider-key|control-plane|lower-provider|lower-workspace/u);
   });
 
   it("is not started for its version from a folder the bots can write", async () => {

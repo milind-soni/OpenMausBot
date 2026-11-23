@@ -26,7 +26,7 @@ import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 
 import { execFile } from "node:child_process";
 
-import { DATA_DIR, PROVIDER_CREDENTIAL_ENV, stripWorkspaceCredentialEnv } from "../config.ts";
+import { DATA_DIR, PROVIDER_CREDENTIAL_ENV, WORKSPACE_CREDENTIAL_ENV, stripControlPlaneEnv } from "../config.ts";
 import { outsideBoxOptions } from "../procs.ts";
 import { antigravityRuntimesRoot } from "../engine-roots.ts";
 import { extractZipMember, readZipDirectory } from "../zip-archive.ts";
@@ -177,8 +177,9 @@ const cliVersions = new Map<string, { stamp: string; version: string | null }>()
 /** Security: a program a path names never gets the server's, the workspace's or a provider's credentials. */
 function versionProbeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const probe = { ...env };
-  stripWorkspaceCredentialEnv(probe);
-  for (const key of PROVIDER_CREDENTIAL_ENV) delete probe[key];
+  stripControlPlaneEnv(probe);
+  const credentials = new Set([...WORKSPACE_CREDENTIAL_ENV, ...PROVIDER_CREDENTIAL_ENV].map((key) => key.toUpperCase()));
+  for (const key of Object.keys(probe)) if (credentials.has(key.toUpperCase())) delete probe[key];
   return probe;
 }
 
