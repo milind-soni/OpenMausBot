@@ -42,7 +42,7 @@ import { appsFromCreator } from "./inherited-apps.ts"; import { newBotOwner, sha
 import { ThreadCache, type ThreadState } from "./thread-cache.ts";
 import { lastMessageId, messagesBefore } from "./thread-history.ts";
 import { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
-import { buildTask, threadTitleFrom, UNTITLED_THREAD, type NewThreadLevel } from "./task-record.ts";
+import { buildTask, threadTitleFrom, unreadTargetTask, UNTITLED_THREAD, type NewThreadLevel } from "./task-record.ts";
 import { repairLegacyWorkThreads } from "./legacy-work-threads.ts";
 import { createBotFork, createGroupFork } from "./store-forks.ts";
 import { branchLeafFrom } from "../shared/conversation-branch.ts";
@@ -1485,14 +1485,14 @@ export class Store {
     Object.assign(bot, patch); if (patch.connectorScopes !== undefined) grantScopedApps(bot);
     for (const task of toAsk) Object.assign(task, structuredClone(ASK_NOW));
     const task = this.activeTask(id);
-    if (task) {
-      for (const key of ["resumeCursors", "rewound", "pinnedMessageId", "unread"] as const) {
-        if (Object.prototype.hasOwnProperty.call(patch, key)) {
-          Object.assign(task, { [key]: structuredClone(patch[key]) });
-        }
-      }
-      bot.unread = bot.tasks!.some(taskCountsAsBotUnread);
+    if (task) for (const key of ["resumeCursors", "rewound", "pinnedMessageId"] as const) {
+      if (Object.hasOwn(patch, key)) Object.assign(task, { [key]: structuredClone(patch[key]) });
     }
+    if (Object.hasOwn(patch, "unread") && bot.tasks?.length) {
+      const target = unreadTargetTask(bot, task, patch.unread);
+      if (target) { target.unread = Boolean(patch.unread); if (target.snoozedUntil === 0 && target.unread) target.snoozedUntil = undefined; }
+    }
+    if (bot.tasks?.length) bot.unread = bot.tasks.some(taskCountsAsBotUnread);
     if (wideningToolScope) {
       // New authority goes live only after its durable save succeeds.
       this.saveBots(this.bots.map((candidate) => candidate === bot ? { ...bot, toolScope: nextToolScope } : candidate));
