@@ -8,9 +8,9 @@ import { usageSummary } from "@/lib/chat-usage-summary";
 import {
   copyTranscriptToClipboard,
   downloadMarkdownTranscript,
-  formatTranscriptMarkdown,
   slugifyTranscriptFilename,
 } from "@/lib/export-transcript";
+import { conversationTranscript } from "@/lib/conversation-transcript";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { localizedTaskTitle } from "@/lib/task-title";
@@ -44,7 +44,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
   const hasMessages = messages.length > 0;
   const contextAction = useContextAction();
   const atFreshStart = messages.at(-1)?.compaction?.fresh === true;
-  const transcript = () => formatTranscriptMarkdown({ title: bot.name, messages, botName: bot.name, isGroup: false });
+  const transcript = () => conversationTranscript({ threadId: bot.threadId, hasMore: bot.hasMore, title: bot.name, messages, botName: bot.name, isGroup: false });
   const side = useConversationSide(profile);
   const threads = showThreads ? [] : orderedThreadList((side ? tasksOfSide(profile, side) : profile.tasks ?? []).filter((task) => !task.routineRunId));
   const sharing = shareChoices(profile, profile.tasks?.find((task) => task.threadId === bot.threadId), Boolean(useTeamName()));
@@ -145,7 +145,12 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
       label: t("chat.export.download"),
       icon: <Download size={16} />,
       disabled: !hasMessages,
-      onSelect: () => downloadMarkdownTranscript(slugifyTranscriptFilename(bot.name), transcript()),
+      onSelect: () => {
+        const content = transcript();
+        const save = (markdown: string) => downloadMarkdownTranscript(slugifyTranscriptFilename(bot.name), markdown);
+        if (typeof content === "string") save(content);
+        else void content.then(save).catch((cause) => dispatch({ type: "error", message: cause instanceof Error ? cause.message : String(cause) }));
+      },
     },
     ...(usage ? [{
       key: "usage",

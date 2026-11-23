@@ -160,6 +160,6 @@ export function downloadMarkdownTranscript(filename: string, content: string): v
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-export async function copyTranscriptToClipboard(content: string): Promise<boolean> {
+export async function copyTranscriptToClipboard(content: string | Promise<string>): Promise<boolean> {
   return (await copyText(content)) === "copied";
 }
