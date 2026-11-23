@@ -62,10 +62,19 @@ describe("distinct table names within one import", () => {
     expect(await ctx.database.listTables()).toHaveLength(3);
     expect(ctx.sheet.sheet().sources).toHaveLength(3);
 
+    const stem = result.tables[0]!.name;
+    const suffix = (n: number) => `${stem.slice(0, 62 - String(n).length)}_${n}`;
+    expect(result.tables.map((table) => table.name)).toEqual([stem, suffix(2), suffix(3)]);
+
     const reloaded = await loadData(ctx, { source: folder, name: "t".repeat(length), replace: true });
-    expect(reloaded.tables.map((table) => table.name)).toEqual(result.tables.map((table) => table.name));
+    expect(reloaded.tables.map((table) => table.name)).toEqual([stem, suffix(4), suffix(5)]);
     await expectAllSources(ctx, reloaded.tables);
-    expect(await ctx.database.listTables()).toHaveLength(3);
+    const names = (await ctx.database.listTables()).map((table) => table.name);
+    expect(names).toEqual(expect.arrayContaining([stem, suffix(2), suffix(3), suffix(4), suffix(5)]));
+    expect(names).toHaveLength(5);
+    for (const name of [suffix(2), suffix(3)]) {
+      expect((await ctx.database.run(`SELECT count(*) FROM ${quoteIdentifier(name)}`, { connection })).rows).toEqual([["1"]]);
+    }
   });
 
   it("keeps a pre-existing long name when replacement is disabled", async () => {
@@ -177,6 +186,38 @@ describe("distinct table names within one import", () => {
     const tables = await ctx.database.listTables();
     expect(tables.find((table) => table.name === "sales_report_3")).toMatchObject({ rowCount: 1 });
     const view = tables.find((table) => table.name === "sales_report_2");
+    expect(view?.rowCount).toBeNull();
+    expect(view?.error).toMatchObject({ code: "sql_error" });
+    expect(view?.error?.message).toContain("amount");
+  });
+
+  it("keeps a healthy sales_report_2_2 when the next source collides with the name an invalid view displaced", async () => {
+    const ctx = await context("sqlite-cascade-suffix");
+    for (const sql of [
+      "CREATE TABLE sales AS SELECT 1 AS id, 10 AS amount",
+      "CREATE VIEW sales_report AS SELECT id, amount FROM sales",
+      "CREATE OR REPLACE TABLE sales AS SELECT 2 AS id, 20 AS total",
+      "CREATE TABLE sales_report_2_2 AS SELECT 'kept' AS origin, 99 AS value",
+    ]) {
+      const result = await runDataTool(ctx, "data_sql", { sql });
+      expect(result.isError, result.content[0]?.text).toBeUndefined();
+    }
+    const file = join(root, "sales-cascade.sqlite");
+    const source = new DatabaseSync(file);
+    source.exec("CREATE TABLE sales_report (origin TEXT, value INTEGER)");
+    source.exec("INSERT INTO sales_report VALUES ('first', 1)");
+    source.exec("CREATE TABLE sales_report_2 (origin TEXT, value INTEGER)");
+    source.exec("INSERT INTO sales_report_2 VALUES ('second', 2)");
+    source.close();
+    const loaded = await runDataTool(ctx, "data_load", { source: file });
+    expect(loaded.isError, loaded.content[0]?.text).toBeUndefined();
+    expect(loaded.structuredContent!.tables).toMatchObject([{ name: "sales_report_2" }, { name: "sales_report_2_3" }]);
+    expect((await ctx.database.run("SELECT origin, value FROM sales_report_2", { connection })).rows).toEqual([["first", "1"]]);
+    expect((await ctx.database.run("SELECT origin, value FROM sales_report_2_3", { connection })).rows).toEqual([["second", "2"]]);
+    expect((await ctx.database.run("SELECT origin, value FROM sales_report_2_2", { connection })).rows).toEqual([["kept", 99]]);
+    const tables = await ctx.database.listTables();
+    expect(tables.find((table) => table.name === "sales_report_2_2")).toMatchObject({ rowCount: 1 });
+    const view = tables.find((table) => table.name === "sales_report");
     expect(view?.rowCount).toBeNull();
     expect(view?.error).toMatchObject({ code: "sql_error" });
     expect(view?.error?.message).toContain("amount");

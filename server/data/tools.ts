@@ -466,18 +466,28 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
   const plans = planLoad(input);
   const replace = input.replace !== false;
   const catalog = await ctx.database.listTables();
-  const existing = new Set(catalog.map((table) => table.name.toLowerCase()));
-  const blocked = new Set(catalog.flatMap((table) => (table.rowCount === null ? [table.name.toLowerCase()] : [])));
+  const fold = (name: string) => name.toLowerCase();
+  const existing = new Set(catalog.map((table) => fold(table.name)));
+  const blocked = (name: string) => {
+    const exact = catalog.find((table) => table.name === name);
+    const match = exact ?? catalog.find((table) => fold(table.name) === fold(name));
+    return match?.rowCount === null;
+  };
   const tables: LoadedTable[] = [];
   const unique = (base: string): string => {
     const stem = tableNameFrom(base);
+    const assigned = (name: string) => tables.some((table) => table.name === name);
+    const open = (candidate: string, suffixed: boolean) => {
+      if (assigned(candidate) || blocked(candidate)) return false;
+      return suffixed ? !existing.has(fold(candidate)) : replace || !existing.has(fold(candidate));
+    };
     let name = stem;
-    let avoidExisting = !replace || blocked.has(stem);
-    for (let n = 2; tables.some((table) => table.name === name) || blocked.has(name) || (avoidExisting && existing.has(name)); n++) {
-      if (blocked.has(name)) avoidExisting = true;
+    let suffixed = false;
+    for (let n = 2; !open(name, suffixed); n++) {
+      suffixed = true;
       name = `${stem.slice(0, 62 - String(n).length)}_${n}`;
     }
-    existing.add(name);
+    existing.add(fold(name));
     return name;
   };
   const warnings: string[] = [];
