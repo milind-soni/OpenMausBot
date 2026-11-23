@@ -15148,7 +15148,7 @@ server.listen(PORT, listenHost(server), async () => {
   drainQueuedSends();
   drainQueuedChannelSends();
   void cloudComputerPower.armRunning();
-  startUpkeep({ bots: () => store.bots, retentionDays: () => threadEventLogRetentionDays(cfg), busy: threadBusy, openDirectHandoff: (threadId) => coordinator.activeDirect(threadId) }); startThreadLogSweep({ cloudHome: CLOUD_HOME !== null, env: process.env, dataDir: DATA_DIR, threads: () => knownThreads(store.bots, store.groups, (botId, threadId) => threadBusy(botId, threadId) || coordinator.activeDirect(threadId)), paused: () => moveFreeze.frozen() || workspaceMaintenance.active });
+  startUpkeep({ bots: () => store.bots, retentionDays: () => threadEventLogRetentionDays(cfg), busy: threadBusy, openDirectHandoff: (threadId) => coordinator.activeDirect(threadId) }); startThreadLogSweep({ cloudHome: CLOUD_HOME !== null, env: process.env, dataDir: DATA_DIR, threads: () => knownThreads(store.bots, store.groups, (botId, threadId) => threadBusy(botId, threadId) || coordinator.activeDirect(threadId)), paused: () => moveFreeze.frozen() || workspaceMaintenance.active, turnsRunning: () => store.bots.some((bot) => botHasActiveTurn(bot.id)) || store.groups.some(groupIsWorking) || Boolean(routines?.hasActiveRuns()) });
   if (enginesRead) {
     await enginesRead;
     if (companyShutdown) return;

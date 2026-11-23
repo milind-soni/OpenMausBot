@@ -165,6 +165,18 @@ describe("sweepThreadLogs", () => {
     expect(sweepLine(result)).toContain("would free");
   });
 
+  it("changes nothing while a turn runs, and goes on once none does", async () => {
+    const events = writeEvents("t1", 6_000);
+    age(events, AGE_MS + DAY);
+    const text = readFileSync(events, "utf8");
+    const busy = await sweepThreadLogs({ dataDir, mode: "on", cap: BIG_CAP, threads: threads({ t1: false }), turnsRunning: () => true, turnWaitMs: 0, now: () => NOW });
+    expect(busy.stopped).toBe(true);
+    expect(readFileSync(events, "utf8")).toBe(text);
+    let checks = 0;
+    const later = await sweepThreadLogs({ dataDir, mode: "on", cap: BIG_CAP, threads: threads({ t1: false }), turnsRunning: () => checks++ < 1, turnWaitMs: 60_000, now: () => NOW });
+    expect(later.trimmed).toBe(1);
+  }, 30_000);
+
   it("stops before its next file when a move or backup starts", async () => {
     const events = writeEvents("t1", 6_000);
     age(events, AGE_MS + DAY);

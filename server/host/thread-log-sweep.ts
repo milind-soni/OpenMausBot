@@ -10,12 +10,13 @@
 // events, every session.started line from the part cut away. Only when the folders are still over the cap after
 // that are the logs of conversations idle for a week cut to those session lines (events) or removed (native).
 // Never a log written to in the last day, a conversation with a turn running or handed off, or one this server does
-// not know (a deleted conversation's log is its delete's to remove). Nothing follows a link; every swap re-checks the
-// file just before the rename.
+// not know (a deleted conversation's log is its delete's to remove). Nothing changes while any turn runs. Only plain
+// files inside events/ and native/ are rewritten or removed; nothing follows a link; every swap re-checks the file
+// just before the rename.
 import { lstatSync, renameSync, rmSync, statfsSync } from "node:fs";
 import { open, lstat, readdir, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
-import { setImmediate as yieldNow } from "node:timers/promises";
+import { setImmediate as yieldNow, setTimeout as sleep } from "node:timers/promises";
 
 import { EVENTS_PER_THREAD } from "../activity.ts";
 import { MAX_TAIL_BYTES } from "../thread-events.ts";
@@ -43,6 +44,9 @@ const MAX_CARRY = 16 * 1024 * 1024;
 const SESSION_MARK = Buffer.from('"session.started"');
 const LOG_NAME = /^([\w-]{1,128})\.ndjson$/;
 export const FIRST_PASS_MS = 15 * 60_000;
+/** While a turn runs nothing is changed: the pass waits this long for a quiet moment, then stops until the next. */
+export const TURN_WAIT_MS = 10 * 60_000;
+const TURN_POLL_MS = 15_000;
 export const PASS_EVERY_MS = 6 * 60 * 60_000;
 
 /** OMB_THREAD_LOG_SWEEP: `report` (or `dry-run`) counts and changes nothing; `on` trims; anything else is off. */
@@ -269,7 +273,20 @@ export interface ThreadLogSweepDeps {
   threads(): ReadonlyMap<string, ThreadState>;
   /** A move freeze or a backup under way: the pass stops before its next file. */
   paused?(): boolean;
+  /** Any turn running anywhere on this server: the pass waits up to `turnWaitMs` before each change, then stops. */
+  turnsRunning?(): boolean;
+  turnWaitMs?: number;
   now?(): number;
+}
+
+/** True once nothing is paused and no turn runs; false when paused, or still busy after `waitMs`. */
+export async function quietMoment(deps: { paused?(): boolean; turnsRunning?(): boolean }, waitMs: number): Promise<boolean> {
+  for (let waited = 0; ; waited += TURN_POLL_MS) {
+    if (deps.paused?.()) return false;
+    if (!deps.turnsRunning?.()) return true;
+    if (waited >= waitMs) return false;
+    await sleep(Math.min(TURN_POLL_MS, waitMs - waited), undefined, { ref: false });
+  }
 }
 
 export interface ThreadLogSweepResult {
@@ -297,7 +314,7 @@ export async function sweepThreadLogs(deps: ThreadLogSweepDeps): Promise<ThreadL
   /** What each trim freed (or would): a report counts a later cut of the same log net of it. */
   const freedBy = new Map<LogFile, number>();
   const apply = async (file: LogFile, floor: typeof READ_FLOOR | null): Promise<boolean> => {
-    if (deps.paused?.()) {
+    if (!(await quietMoment(deps, deps.turnWaitMs ?? TURN_WAIT_MS))) {
       result.stopped = true;
       return false;
     }
@@ -351,7 +368,7 @@ export function sweepLine(result: ThreadLogSweepResult): string {
   const verb = result.mode === "report" ? "would free" : "freed";
   return `[thread-logs] ${result.mode}: ${result.files} logs, ${mb(result.before)} against a cap of ${mb(result.cap)}; `
     + `${result.trimmed} trimmed to their newest lines, ${result.cut} cut to their session lines; ${verb} ${mb(freed)}`
-    + (result.stopped ? " (stopped for a move or backup; the next pass carries on)" : "");
+    + (result.stopped ? " (stopped for a move, a backup or a running turn; the next pass carries on)" : "");
 }
 
 export interface StartThreadLogSweepDeps {
@@ -360,6 +377,7 @@ export interface StartThreadLogSweepDeps {
   dataDir: string;
   threads(): ReadonlyMap<string, ThreadState>;
   paused?(): boolean;
+  turnsRunning?(): boolean;
   log?(line: string): void;
 }
 
@@ -374,7 +392,7 @@ export function startThreadLogSweep(deps: StartThreadLogSweepDeps): boolean {
     running = true;
     try {
       const cap = threadLogCap(deps.env, volumeBytes(deps.dataDir));
-      const result = await sweepThreadLogs({ dataDir: deps.dataDir, mode, cap, threads: deps.threads, paused: deps.paused });
+      const result = await sweepThreadLogs({ dataDir: deps.dataDir, mode, cap, threads: deps.threads, paused: deps.paused, turnsRunning: deps.turnsRunning });
       if (result.before !== result.after || result.before > cap || result.stopped) log(sweepLine(result));
     } catch (error) {
       log(`[thread-logs] pass failed: ${error instanceof Error ? error.message : String(error)}`);
