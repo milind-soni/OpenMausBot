@@ -76,12 +76,13 @@ describe("disk walk", () => {
     const { home, data, roots } = tree();
     const outside = mkdtempSync(join(tmpdir(), "disk-walk-outside-"));
     dirs.push(outside);
-    writeFileSync(join(outside, "big"), Buffer.alloc(50_000, 1));
+    writeFileSync(join(outside, "big"), Buffer.alloc(200_000, 1));
+    const before = (await walkAll(roots)).totals.walkedBytes;
     symlinkSync(outside, join(data, "workspaces", "bot1", "linked-folder"));
     symlinkSync(join(outside, "big"), join(home, "linked-file"));
     const { totals } = await walkAll(roots);
     expect(totals.skipped.links).toBe(2);
-    expect(totals.walkedBytes).toBeLessThan(50_000 + 60_000);
+    expect(totals.walkedBytes - before).toBeLessThan(200_000);
     expect(totals.categories.bot_files.files).toBe(3);
   });
 
