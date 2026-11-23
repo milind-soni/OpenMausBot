@@ -334,6 +334,7 @@ export function PageFullScreen(props: PageToolsProps & {
   pane?: HTMLElement | null;
   /** Text the person selected in the page, to cite it: never in a room. */
   onSelection?(selection: AppSelection | null): void;
+  onDraft?(text: string): void;
 }) {
   const { point, close, pane } = props;
   const closer = useRef<HTMLDivElement | null>(null);
@@ -363,7 +364,8 @@ export function PageFullScreen(props: PageToolsProps & {
       <div className={cn("relative min-h-0 flex-1 bg-app", point.pointing && "ring-2 ring-inset ring-accent/60")}>
         <AppFrame doc={props.doc} botId={props.botId} threadId={props.threadId} title={props.title} height={600} handle={props.handle}
           onHeight={() => {}} onProblem={() => {}} onTeardownRequested={close} fill
-          {...(props.onSelection ? { onSelection: props.onSelection } : {})} />
+          {...(props.onSelection ? { onSelection: props.onSelection } : {})}
+          {...(props.onDraft ? { onDraft: props.onDraft } : {})} />
       </div>
     </div>,
     pane ?? document.body,
