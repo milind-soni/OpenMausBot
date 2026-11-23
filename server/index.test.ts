@@ -11212,13 +11212,13 @@ describe("harness HTTP API", () => {
       expect(saved.status, JSON.stringify(saved.body)).toBe(200);
       expect((await api("GET", "/api/config")).body.vps.sshAlias).toBe("rockpi4");
 
-      const replaced = await api("PUT", "/api/config", { vps: { sshAlias: "dietpi" } });
+      const replaced = await api("PUT", "/api/config", { vps: { sshAlias: "example-host" } });
       expect(replaced.status, JSON.stringify(replaced.body)).toBe(200);
-      expect((await api("GET", "/api/config")).body.vps.sshAlias).toBe("dietpi");
+      expect((await api("GET", "/api/config")).body.vps.sshAlias).toBe("example-host");
 
       const cleared = await api("PUT", "/api/config", { vps: { sshAlias: "" } });
       expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
-      expect(cleared.body.notice).toContain("Removed. dietpi could not be reached");
+      expect(cleared.body.notice).toContain("Removed. example-host could not be reached");
       expect((await api("GET", "/api/config")).body.vps.sshAlias).toBe("");
     } finally {
       rmSync(fakeSshUnavailable, { force: true });
@@ -12435,13 +12435,13 @@ describe("harness HTTP API", () => {
 
     const saved = await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } });
     expect(saved.status).toBe(200);
-    expect(saved.body.vps).toEqual({ configured: true, sshAlias: "production-vps", servers: [] });
+    expect(saved.body.vps).toEqual({ configured: true, sshAlias: "production-vps", servers: [], memoryGb: 4, cpus: 2 });
     expect(JSON.stringify(saved.body)).not.toContain("privateKey");
 
     // Named servers are their own list: saving it leaves the default server alone.
     const named = await api("PUT", "/api/config", { vpsServers: [{ name: "Home lab", sshAlias: "home-lab" }] });
     expect(named.status, JSON.stringify(named.body)).toBe(200);
-    expect(named.body.vps).toEqual({ configured: true, sshAlias: "production-vps", servers: [{ name: "Home lab", sshAlias: "home-lab" }] });
+    expect(named.body.vps).toEqual({ configured: true, sshAlias: "production-vps", servers: [{ name: "Home lab", sshAlias: "home-lab" }], memoryGb: 4, cpus: 2 });
     expect((await api("PUT", "/api/config", { vpsServers: [{ name: "Bad", sshAlias: "prod; reboot" }] })).status).toBe(400);
 
     const patched = await api("PATCH", `/api/bots/${bot.id}`, { cloudBackend: "vps" });
@@ -12477,7 +12477,7 @@ describe("harness HTTP API", () => {
     const memberStream = await openSse(`${BASE}/api/events`, { authorization: `Bearer ${memberToken}` });
     const ownerStream = await openSse(`${BASE}/api/events`);
     try {
-      expect((await asMember("GET", "/api/config")).body.vps).toEqual({ configured: true, sshAlias: "", servers: [] });
+      expect((await asMember("GET", "/api/config")).body.vps).toEqual({ configured: true, sshAlias: "", servers: [], memoryGb: 4, cpus: 2 });
       const listed = (await asMember("GET", "/api/bots?messages=0")).body.bots.find((candidate: any) => candidate.id === bot.id);
       expect(listed).toMatchObject({ id: bot.id, cloudBackend: "vps" });
       expect(listed).not.toHaveProperty("vpsAlias");

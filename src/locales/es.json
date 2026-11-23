@@ -2967,7 +2967,6 @@
   "keys.vps.descAfter": " para ver la forma de alias requerida.",
   "keys.vps.anyMachine": "Funciona cualquier equipo Linux con Docker al que llegues por SSH, también un ordenador de tu red de Tailscale: usa su nombre de Tailscale como HostName del alias.",
   "keys.vps.aria": "Alias del SSH config del VPS propio",
-  "keys.vps.removeAlias": "Quitar el alias guardado",
   "usage.title": "Uso",
   "planUsage.title": "Uso del plan",
   "planUsage.subtitle": "Margen restante en cada proveedor con sesión iniciada. Ventanas de 5 horas y semanales, cuando el plan las tiene.",

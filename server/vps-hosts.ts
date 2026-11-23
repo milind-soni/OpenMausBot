@@ -1,5 +1,14 @@
 // Which VPS host a bot's computer lives on: the app-wide SSH alias, or the bot's own.
-import { isValidSshAlias, vpsSshAlias, type AppConfig } from "./config.ts";
+import { isValidSshAlias, vpsSshAlias, type AppConfig, type VpsConfig } from "./config.ts";
+
+/** A named server's own limits, each falling back to the default server's. CPU pinning is per machine, so a named server never inherits the default's. */
+export function vpsLimits(cfg: AppConfig, alias?: string | null): Pick<VpsConfig, "memoryGb" | "cpus" | "cpuset"> {
+  const own = alias ? cfg.vpsServers?.find((server) => server.sshAlias === alias) : undefined;
+  const memoryGb = own?.memoryGb ?? cfg.vps?.memoryGb;
+  const cpus = own?.cpus ?? cfg.vps?.cpus;
+  const cpuset = own ? own.cpuset : cfg.vps?.cpuset;
+  return { ...(memoryGb ? { memoryGb } : {}), ...(cpus ? { cpus } : {}), ...(cpuset ? { cpuset } : {}) };
+}
 
 /** A bot's own SSH alias wins over the default; both are validated the same way. */
 export function vpsSshAliasForBot(cfg: AppConfig, bot: { vpsAlias?: string } | null | undefined): string | null {
@@ -9,7 +18,7 @@ export function vpsSshAliasForBot(cfg: AppConfig, bot: { vpsAlias?: string } | n
 /** A config scoped to one bot's VPS alias, shaped for the vps-computer calls. */
 export function vpsConfigForBot(cfg: AppConfig, bot: { vpsAlias?: string } | null | undefined): AppConfig {
   const sshAlias = vpsSshAliasForBot(cfg, bot);
-  return sshAlias ? { vps: { sshAlias } } : {};
+  return sshAlias ? { vps: { sshAlias, ...vpsLimits(cfg, sshAlias) } } : {};
 }
 
 /** Every alias this installation can hold VPS computers on: the default first, then each bot's own. */

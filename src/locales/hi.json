@@ -1347,7 +1347,6 @@
   "keys.vps.descAfter": " देखें।",
   "keys.vps.anyMachine": "SSH से पहुँचने वाली Docker वाली कोई भी Linux मशीन चलेगी, आपके Tailscale नेटवर्क का कंप्यूटर भी: alias के HostName में उसका Tailscale नाम डालें।",
   "keys.vps.aria": "स्वयं-होस्टेड VPS का SSH config उपनाम",
-  "keys.vps.removeAlias": "सहेजा गया उपनाम हटाएँ",
   "usage.title": "उपयोग",
   "usage.bot.empty": "इस बॉट के लिए अभी तक कोई उपयोग दर्ज नहीं हुआ।",
   "usage.bot.unpriced": "यह प्रदाता कीमत नहीं बताता; टोकन गिने जाते हैं।",

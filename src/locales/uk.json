@@ -1589,7 +1589,6 @@
   "keys.vps.descAfter": " для потрібної форми SSH-аліаса.",
   "keys.vps.anyMachine": "Підійде будь-який комп'ютер на Linux із Docker, доступний через SSH, зокрема комп'ютер у вашій мережі Tailscale: вкажіть його ім'я в Tailscale як HostName псевдоніма.",
   "keys.vps.aria": "Аліас SSH-конфігу власного VPS",
-  "keys.vps.removeAlias": "Прибрати збережений аліас",
   "usage.title": "Використання",
   "usage.bot.empty": "Для цього бота ще не записано використання.",
   "usage.bot.unpriced": "Цей провайдер не повідомляє ціну; токени підраховуються.",
