@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
 import { finished } from "node:stream/promises";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AppDocs } from "./app-docs.ts";
 import { createPageFiles, pageFilePath, PAGE_FILES_PREFIX } from "./page-files.ts";
@@ -13,6 +13,10 @@ const opened = vi.hoisted(() => [] as import("node:fs/promises").FileHandle[]);
 vi.mock("node:fs/promises", async (original) => {
   const real = await original<typeof import("node:fs/promises")>();
   return { ...real, open: async (...args: Parameters<typeof real.open>) => { const handle = await real.open(...args); opened.push(handle); return handle; } };
+});
+
+afterEach(async () => {
+  await Promise.all(opened.splice(0).map((handle) => (handle.fd === -1 ? undefined : handle.close().catch(() => undefined))));
 });
 
 const PARQUET = Buffer.from("PAR1\u0000\u0001\u0002\u0003 rows and columns PAR1", "latin1");
@@ -235,5 +239,17 @@ describe("a folder page's video", () => {
     expect(opened[0]!.fd).toBeGreaterThan(-1);
     res.destroy();
     await expect.poll(() => opened[0]!.fd).toBe(-1);
+  });
+
+  it("closes the file when the response cannot be started", async () => {
+    const { files, folder } = setupVideo();
+    const res = Object.assign(new Writable({ write(_chunk, _encoding, callback) { callback(); } }), {
+      writeHead() { throw new Error("writeHead failed"); },
+    });
+    opened.length = 0;
+    files.serve({ headers: {} } as never, res as never, `${folder}clip.mp4`, "GET");
+    await expect.poll(() => res.destroyed).toBe(true);
+    expect(opened).toHaveLength(1);
+    expect(opened[0]!.fd).toBe(-1);
   });
 });

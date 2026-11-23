@@ -90,6 +90,11 @@ it.each([true, false])("never sends the key to a plain-HTTP host off this comput
   expect(failure.message).toContain("type the model");
   expect(failure.status).toBe(400);
 });
+it("keeps GPT-5.6 Sol as the official Codex default and lists GPT-6.2 Astra and Sol", () => {
+  const models = officialModels(true);
+  expect(models[0]).toBe("gpt-5.6-sol");
+  expect(models).toEqual(expect.arrayContaining(["gpt-6.2-astra", "gpt-6.2-sol"]));
+});
 it.each(["http://127.0.0.1:8317/v1", "http://[::1]:8317/v1"])("still reads a loopback catalog over plain HTTP (%s)", async url => {
   const entry = endpoint(false, url);
   const request = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ data: [{ id: "model-a" }] }));

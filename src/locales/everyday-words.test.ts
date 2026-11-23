@@ -31,6 +31,7 @@ const EVERYDAY_PREFIXES: Record<string, readonly string[]> = {
   "the Settings pages Simple mode shows": ["settings.section.", "settings.group.", "settings.mcpCalls.", "settings.logins."],
   "Settings's pages, its search and Phone & devices": [
     "settings.page.", "settings.scope.", "settings.place.", "settings.glance.", "settings.overview.", "settings.search.", "phone.pair.", "phone.reach.",
+    "devicesPage.",
   ],
   "the Usage page and its traces": ["trace.", "usage.page."],
 };
@@ -94,6 +95,8 @@ const ALLOWED: Record<string, string> = {
   "chat.notice.modelServerStoppedAnswering": "the person's model server at a named host, not the app's internal server",
   "rail.local": "the owner's own name for the ＋ choice that adds a workspace of this computer's own",
   "rail.localNumbered": "a new workspace's first name, which the person may change, in the owner's word for it",
+  "devicesPage.addFlow.computerPaste": "names the Connect to a server choice under the rail's ＋ exactly as it is labelled",
+  "devicesPage.addFlow.serverDesktop": "names the Connect to a server choice under the rail's ＋ exactly as it is labelled",
 };
 
 const prefixes = Object.values(EVERYDAY_PREFIXES).flat();

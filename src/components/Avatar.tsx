@@ -13,12 +13,14 @@ import { CHROME_EYES, CHROME_GRADIENT, MAUS_COLORS, type MausColor, type MausMot
 import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
 import { ACTIVE_STATES } from "./mascot-motion";
 import { MOTION_BEAT_MS } from "./mascot-beat";
-import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, mascotFaceInk, type BotAvatarCrop, type MascotFaceColor } from "../../shared/bot-avatar";
+import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, mascotBodyColorSchema, mascotFaceInk, type BotAvatarCrop, type MascotFaceColor } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, botMascotBody } from "../../shared/mascot-bodies";
 import { isCarvedBody, type BotBodyId } from "../../shared/bot-body";
+import { engineBody } from "../../shared/object-bodies";
 import { useFestivalDress, wornBody } from "@/lib/festival-dress";
 import { t } from "@/lib/i18n";
-import { CarvedAvatar } from "./CarvedAvatar";
+import { CarvedAvatar, vivid } from "./CarvedAvatar";
+import { ObjectAvatar } from "./ObjectAvatar";
 import { steelBodyImage } from "@/lib/steel-body";
 
 export const EYE_SCALE = 1.12;
@@ -59,11 +61,14 @@ function mix(hex: string, toward: string, t: number): string {
     .join("")}`;
 }
 
-const gradientFor = (color: MausColor): [string, string, string] => {
-  if (color === "chrome") return CHROME_GRADIENT;
-  const fill = MAUS_COLORS[color] ?? MAUS_COLORS.green;
+const gradientFor = (color: MausColor, custom?: string): [string, string, string] => {
+  if (!custom && color === "chrome") return CHROME_GRADIENT;
+  const fill = custom ?? MAUS_COLORS[color] ?? MAUS_COLORS.green;
   return [mix(fill, "#ffffff", 0.55), fill, mix(fill, "#000000", 0.42)];
 };
+
+/** A bot's own body colour when it picked one, else undefined. */
+const customFill = (value: unknown): string | undefined => mascotBodyColorSchema.safeParse(value).data;
 
 const roomGradients = new Map<MausColor, [string, string, string]>();
 
@@ -101,6 +106,8 @@ export type MausAvatarProps = {
   bodyId?: BotBodyId;
   gradient?: [string, string, string];
   faceColor?: MascotFaceColor | null;
+  /** A custom `#rrggbb` body colour; it wins over `color` for the body only. */
+  bodyColor?: string | null;
   /** Whose face this is; a decorative mascot has none. */
   kind?: AvatarKind;
 };
@@ -119,6 +126,22 @@ function MausAvatarComponent(props: MausAvatarProps, ref: React.Ref<MausAvatarHa
         motion={motion}
         motionKey={motionKey}
         gaze={gaze}
+        trackPointer={trackPointer}
+        animated={animated}
+        label={label}
+        kind={kind}
+      />
+    );
+  }
+  const definition = engineBody(bodyId);
+  if (definition) {
+    return (
+      <ObjectAvatar
+        definition={definition}
+        fill={customFill(props.bodyColor) ?? vivid(MAUS_COLORS[color] ?? MAUS_COLORS.green)}
+        faceColor={props.faceColor}
+        size={size}
+        state={state}
         trackPointer={trackPointer}
         animated={animated}
         label={label}
@@ -151,12 +174,15 @@ function GradientAvatarComponent(
     bodyId,
     gradient,
     faceColor,
+    bodyColor,
     kind,
   }: MausAvatarProps,
   ref: React.Ref<MausAvatarHandle>,
 ) {
   const silhouette = MASCOT_BODIES[botMascotBody(bodyId)];
-  const chrome = color === "chrome";
+  const custom = customFill(bodyColor);
+  const chrome = color === "chrome" && !custom;
+  const paint = custom ? gradientFor(color, custom) : gradient ?? gradientFor(color);
   const faceInk = mascotFaceInk(faceColor);
   const inner = useRef<CursorAvatarHandle>(null);
   useImperativeHandle(ref, () => ({
@@ -191,7 +217,7 @@ function GradientAvatarComponent(
         expression={expression}
         size={size}
         silhouette={silhouette}
-        gradient={gradient ?? gradientFor(color)}
+        gradient={paint}
         picture={chrome && !faceInk ? steelBodyImage(silhouette.id, size, globalThis.devicePixelRatio ?? 1) : null}
         eyeColor={faceInk ?? (chrome ? CHROME_EYES : undefined)}
         title={label ?? null}
@@ -225,6 +251,7 @@ export type BotAvatarProps = Omit<MausAvatarProps, "color" | "gradient"> & {
     avatarFocusY?: number;
     mascotBody?: BotBodyId | null;
     mascotFaceColor?: MascotFaceColor | null;
+    mascotBodyColor?: string | null;
   };
 };
 
@@ -263,6 +290,7 @@ export function BotAvatar({ bot, size = 44, label, readable = false, ...mascotPr
         {...mascotProps}
         color={bot.color}
         faceColor={bot.mascotFaceColor}
+        bodyColor={bot.mascotBodyColor}
         gradient={readable ? roomAvatarGradient(bot.color) : undefined}
         size={size}
         label={label ?? bot.name}
