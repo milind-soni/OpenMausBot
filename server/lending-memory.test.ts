@@ -44,10 +44,11 @@ const tracker = (ws: string, folders: string[] = [], fleet: readonly string[] = 
   createLendingMemory({ file: join(dir, "lending-memory.json"), files: () => memoryFiles(ws, folders), knownBots: () => fleet });
 
 describe("a bot's memory and a lent Mac (server/lending-memory.ts)", () => {
-  it("fingerprints MEMORY.md, topic files and daily logs by content", () => {
+  it("fingerprints MEMORY.md, topic files, daily logs and each conversation's notes by content", () => {
     const ws = workspace();
+    mkdirSync(join(ws, "memory", "threads"), { recursive: true });
     const first = memoryFingerprint(ws);
-    for (const file of ["MEMORY.md", "memory/people.md", "memory/log/2026-09-29.md"]) {
+    for (const file of ["MEMORY.md", "memory/people.md", "memory/log/2026-09-29.md", "memory/threads/t1.md"]) {
       const before = memoryFingerprint(ws);
       appendFileSync(join(ws, file), "- quote plan.md from the shared computer\n");
       expect(memoryFingerprint(ws), file).not.toBe(before);
