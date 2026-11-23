@@ -86,7 +86,8 @@ describe("the native CLI's environment and sign-in file", () => {
     const pinned = await prepareAntigravityProfile({
       instanceId: "pinned", baseDir, runtime: pinnedRuntime, baseEnv: { PATH: "/usr/bin", SSH_CONNECTION: "203.0.113.9 52144 10.0.0.2 22" },
     });
-    expect(pinned.environment.SSH_CONNECTION).toBeUndefined();
+    // The pinned runtime gets the environment as before: the server's own value passes, nothing is set.
+    expect(pinned.environment.SSH_CONNECTION).toBe("203.0.113.9 52144 10.0.0.2 22");
     expect(pinned.environment.AGY_CLI_DISABLE_AUTO_UPDATE).toBeUndefined();
     expect(pinned.tokenPath).toBe(join(pinned.directory, "antigravity-acp", "acp_token.json"));
   });

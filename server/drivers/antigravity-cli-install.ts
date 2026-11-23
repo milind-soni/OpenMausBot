@@ -20,14 +20,15 @@ import { writeFileAtomic } from "../atomic.ts";
 import type { AntigravityCliReleaseAsset } from "./antigravity-cli-release.ts";
 import type { AntigravityRuntime } from "./antigravity-runtime.ts";
 
-/** The rollback switch: `OMB_ANTIGRAVITY_PINNED_RUNTIME=1` in the server's environment (read at start) runs the pinned
- * 1.4.3 runtime as before the native CLI. */
-export const ANTIGRAVITY_PINNED_RUNTIME_ENV = "OMB_ANTIGRAVITY_PINNED_RUNTIME";
+/** The one switch: `OMB_ANTIGRAVITY_NATIVE_CLI=1` in the server's environment, read at start. */
+export const ANTIGRAVITY_NATIVE_CLI_ENV = "OMB_ANTIGRAVITY_NATIVE_CLI";
 
-/** Whether the native CLI is the runtime. On (the default), it is installed and run everywhere Google's channel has a
- * build, and a computer that has the pinned runtime moves to it. Off, installs and updates use the pinned runtime only,
- * and a CLI this app installed earlier is left where it is and not started. */
-export const ANTIGRAVITY_NATIVE_CLI = process.env[ANTIGRAVITY_PINNED_RUNTIME_ENV] !== "1";
+/** Whether the native CLI is the runtime. Off (the default), everything is as before the CLI: the pinned 1.4.3 runtime
+ * is installed and run, Google's CLI channel is never asked, and a CLI this app installed earlier is left where it is
+ * and not started. On, the CLI is installed and run wherever the channel has a build, a computer that has the pinned
+ * runtime moves to it, and the pinned one is removed once an account there signed in on the CLI. Opt-in because the
+ * CLI's `--login` sign-in has not been run against Google, and every signed-in account signs in again after the move. */
+export const ANTIGRAVITY_NATIVE_CLI = process.env[ANTIGRAVITY_NATIVE_CLI_ENV] === "1";
 
 /** Where the CLI keeps a Google sign-in, under `<profile>/antigravity-acp/`, when it does not use the OS keyring (which
  * it skips while SSH_CONNECTION is set). It never writes the pinned runtime's `acp_token.json`, and stores no OAuth

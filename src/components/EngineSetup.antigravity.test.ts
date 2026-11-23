@@ -61,6 +61,10 @@ it("shows the paste-the-redirect field the whole time the card waits, on the per
   expect(host.querySelector("details")).toBeNull();
   await new Promise((resolve) => setTimeout(resolve, 2_300));
   expect(host.querySelector("[data-redirect-paste] input")).not.toBeNull();
+  // The pinned runtime's sign-in (the default; the native CLI is opt-in) shows no code field, as before it.
+  expect(host.querySelector("[data-code-paste]")).toBeNull();
+  expect(host.textContent).not.toContain("Code from the Antigravity page");
+  expect(host.textContent).toContain("I finished signing in");
 }, 15_000);
 
 it("opens the same Google link again instead of starting another sign-in", async () => {

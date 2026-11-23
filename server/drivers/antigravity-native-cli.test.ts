@@ -27,6 +27,9 @@ import { resolveAntigravityReleaseAsset } from "./antigravity-release.ts";
 import { antigravityCliUpdate, installAntigravityRuntime, resolveAntigravityRuntime, retirePinnedAntigravityRuntime } from "./antigravity-runtime.ts";
 import { AntigravityDriver } from "./antigravity.ts";
 
+// The opt-in, before any module reads it: this file tests the native CLI switched on.
+vi.hoisted(() => { process.env.OMB_ANTIGRAVITY_NATIVE_CLI = "1"; });
+
 const FAKE_ACP = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-acp-cli.ts");
 const WINDOWS = process.platform === "win32";
 const NAME = WINDOWS ? "agy.exe" : "antigravity";

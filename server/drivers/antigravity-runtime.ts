@@ -5,10 +5,10 @@
 //   - apps/server/src/provider/AntigravityInstallation.ts:57, 311-345, 922-966,
 //     985-999 (a CLI needs no harness sibling, the hourly look at the channel,
 //     and keeping an installed CLI that is newer than the channel's).
-// The native CLI is the runtime wherever Google's channel has a build: a computer that has the pinned runtime moves to
-// it through the engine updater, and the pinned one is removed once an account here has signed in on the CLI. The pinned
-// runtime stays as the fallback where the channel has no build or cannot be reached, and behind the rollback switch. A
-// saved `agy` path is never started.
+// By default the pinned runtime, as before. With OMB_ANTIGRAVITY_NATIVE_CLI=1 (ANTIGRAVITY_NATIVE_CLI) the native CLI is
+// the runtime wherever Google's channel has a build: a computer that has the pinned runtime moves to it through the engine
+// updater, and the pinned one is removed once an account here has signed in on the CLI; the pinned runtime stays the
+// fallback where the channel has no build or cannot be reached. A saved `agy` path is never started.
 import { createHash, randomUUID } from "node:crypto";
 import {
   access,
@@ -233,7 +233,7 @@ export async function resolveAntigravityRuntime(
     }
     if (!legacyCli) {
       throw new AntigravitySetupError(
-        "The custom Antigravity ACP executable or its localharness_external sibling is missing. The native CLI from 1.5.0 on, under its name antigravity, needs no sibling.",
+        `The custom Antigravity ACP executable or its localharness_external sibling is missing.${ANTIGRAVITY_NATIVE_CLI ? " The native CLI from 1.5.0 on, under its name antigravity, needs no sibling." : ""}`,
       );
     }
   }
@@ -490,9 +490,9 @@ async function cliSignedInHere(baseDir: string): Promise<boolean> {
   return false;
 }
 
-/** Removes the pinned runtime (about 1 GB on Linux) once the switch to the native CLI has worked here: the CLI is
- * installed and whole, an account signed in on it, and no process runs the pinned runtime. Nothing is removed behind
- * the rollback switch, and rolling back later downloads the pinned runtime again. The folders it removed. */
+/** Removes the pinned runtime (about 1 GB on Linux) once the switch to the native CLI has worked here: the switch is on,
+ * the CLI is installed and whole, an account signed in on it, and no process runs the pinned runtime. Nothing is removed
+ * with the switch off; turning it off later downloads the pinned runtime again. The folders it removed. */
 export async function retirePinnedAntigravityRuntime(options: { baseDir?: string; inUse?: (directory: string) => boolean } = {}): Promise<string[]> {
   if (!ANTIGRAVITY_NATIVE_CLI) return [];
   const baseDir = options.baseDir ?? DATA_DIR;
