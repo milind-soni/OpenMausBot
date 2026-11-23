@@ -285,3 +285,39 @@ it("keeps the selected thread as the main one across an update for a bot nobody 
     await server.close();
   }
 }, 120_000);
+
+it("moves an archived or deleted main thread to the only open one, a thread the bot opened, and keeps it there", async () => {
+  const { fixture, dataDir, api, cli, wire, thread, replied } = await launch();
+  try {
+    const { bot } = await cli("new-bot", "--name", "Keeper");
+    writeFileSync(join(dataDir, "room-plan.json"), JSON.stringify({
+      [bot.id]: { turns: [
+        { steps: [{ tool: "start_thread", arguments: { title: "Side job", message: "Check the side job." } }], reply: "Opened a side job." },
+        { reply: "Side job checked." },
+      ] },
+    }));
+    const first = bot.activeTaskId as string;
+    await cli("send", "--bot", bot.id, "--task", first, "--text", "Open a side job.");
+    const side = await thread(bot.id, "Side job");
+    await replied(bot.id, side.threadId, "Side job checked.");
+    expect(side.openedBy).toMatchObject({ botId: bot.id });
+    const main = async () => (await wire(bot.id)).mainThreadId;
+    const open = async (title: string) => (await api("POST", `/api/bots/${bot.id}/tasks`, { title, approvalMode: "ask" }, 201)).task.threadId as string;
+
+    await api("PATCH", `/api/bots/${bot.id}`, { mainThreadChoice: first });
+    expect(await main()).toBe(first);
+    await api("PATCH", `/api/bots/${bot.id}/tasks/${first}`, { archivedAt: Date.now() });
+    expect(await main(), "the thread the bot opened is the only one open").toBe(side.threadId);
+    await api("PATCH", `/api/bots/${bot.id}/tasks/${first}`, { archivedAt: null });
+    expect(await main(), "reopening the old main thread moves nothing").toBe(side.threadId);
+
+    await api("PATCH", `/api/bots/${bot.id}`, { mainThreadChoice: first });
+    expect(await main()).toBe(first);
+    await api("DELETE", `/api/bots/${bot.id}/tasks/${first}`);
+    expect(await main()).toBe(side.threadId);
+    await open("Later");
+    expect(await main(), "a thread the person opens afterwards moves nothing").toBe(side.threadId);
+  } finally {
+    await fixture.close();
+  }
+}, 120_000);

@@ -80,6 +80,14 @@ describe("the main thread a bot keeps", () => {
     expect(mainThreadToKeep([latest, later, { ...first, archivedAt: 40 }], "first", "latest")).toBe("later");
     expect(mainThreadToKeep([latest, { ...later, openedBy: { botId: "teammate" } }], "first", "later")).toBe("latest");
   });
+
+  it("is the oldest open thread a bot opened once the saved thread is archived or deleted and the person has no other open", () => {
+    const handed = { ...later, openedBy: { botId: "teammate" } };
+    expect(mainThreadToKeep([{ ...latest, openedBy: { botId: "teammate" } }, handed, { ...first, archivedAt: 40 }], "first")).toBe("later");
+    expect(mainThreadToKeep([handed], "first")).toBe("later");
+    expect(mainThreadToKeep([handed, first], "later")).toBeUndefined();
+    expect(mainThreadToKeep([{ ...handed, archivedAt: 41 }, { ...first, archivedAt: 40 }], "first")).toBeUndefined();
+  });
 });
 
 describe("the oldest thread", () => {
