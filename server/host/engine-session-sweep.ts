@@ -8,12 +8,21 @@
 // one from before these logs) is never touched. A deleted conversation's sessions are delete-leftovers.ts's.
 //
 // Never removed: sign-in files, settings, `projects/<folder>/memory/` (only entries named by a whole session id are
-// considered), anything reached through a link, or anything outside each engine's folder. Claude Code's own age sweep
-// (cleanupPeriodDays, 30 days by default) is left as it is: it removes by age alone, live sessions too, so a shorter
-// one would end conversations' sessions that this sweep keeps.
-import { lstat, open, readdir, rm, rmdir, type FileHandle } from "node:fs/promises";
+// considered), anything reached through a link, or anything outside each engine's folder. Nothing is removed while any
+// turn runs. An entry is first renamed, after a check that it is still the one listed (device and inode), into the
+// app's own trash on the same volume (cache/trash, left out of backups), which is emptied at the end of the pass and on
+// the next start after an interrupted one; an entry on another volume stays.
+//
+// Claude Code's own age sweep (cleanupPeriodDays) is made a deliberate 30 days in each of these Claude folders'
+// settings.json, only where the person has not set it. It removes by age alone, live sessions too: a conversation idle
+// longer goes on in a new session started from its chat, with a notice that earlier tool results did not carry over
+// (drivers/claude.ts classifyResumeFailure, resume-recovery.ts). 30 is Claude Code's default, so nothing changes today;
+// it stops a change of that default from changing what a Cloud keeps.
+import { lstat, mkdir, open, readFile, readdir, rename, rm, rmdir, type FileHandle } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { setImmediate as yieldNow } from "node:timers/promises";
+import { setImmediate as yieldNow, setTimeout as sleep } from "node:timers/promises";
+
+import { writeFileAtomic } from "../atomic.ts";
 
 import { plainlyUnder, type EngineSessionFolders } from "./delete-leftovers.ts";
 
@@ -23,6 +32,13 @@ const DAY_MS = 24 * 60 * 60_000;
 /** A session file, or a CLI log, untouched this long. Far past a room's session idle and a warm fork moving a cursor. */
 export const IDLE_MS = 7 * DAY_MS;
 export const FIRST_PASS_MS = 30 * 60_000;
+/** Claude Code's transcript age limit for a Cloud's Claude folders (its default, made deliberate). */
+export const CLAUDE_TRANSCRIPT_DAYS = 30;
+/** While a turn runs nothing is removed: the pass waits this long for a quiet moment, then stops until the next. */
+export const TURN_WAIT_MS = 10 * 60_000;
+const TURN_POLL_MS = 15_000;
+/** The app's own trash, under the data folder's cache (left out of backups and exports). */
+export const TRASH_DIR = join("cache", "trash", "engine-sessions");
 export const PASS_EVERY_MS = DAY_MS;
 const SESSION_ID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const WHOLE_SESSION_ID = new RegExp(`^${SESSION_ID.source}$`, "i");
@@ -175,7 +191,7 @@ export function createLoggedSessions(eventsDir: string) {
   };
 }
 
-interface Found { path: string; mtimeMs: number }
+interface Found { path: string; mtimeMs: number; dev: number; ino: number }
 
 export interface EngineSessionSweepDeps {
   dataDir: string;
@@ -186,11 +202,54 @@ export interface EngineSessionSweepDeps {
   live(): ReadonlySet<string>;
   logged: ReadonlySet<string>;
   paused?(): boolean;
+  /** Any turn running anywhere on this server. */
+  turnsRunning?(): boolean;
+  turnWaitMs?: number;
   now?(): number;
+}
+
+/** True once nothing is paused and no turn runs; false when paused, or still busy after `waitMs`. */
+async function quietMoment(deps: { paused?(): boolean; turnsRunning?(): boolean }, waitMs: number): Promise<boolean> {
+  for (let waited = 0; ; waited += TURN_POLL_MS) {
+    if (deps.paused?.()) return false;
+    if (!deps.turnsRunning?.()) return true;
+    if (waited >= waitMs) return false;
+    await sleep(Math.min(TURN_POLL_MS, waitMs - waited), undefined, { ref: false });
+  }
+}
+
+/** Empties the trash a pass (or an interrupted one) left; the folder itself must be a real one under the data folder. */
+export async function emptyTrash(dataDir: string): Promise<void> {
+  const trash = join(resolve(dataDir), TRASH_DIR);
+  if (!(await realFolder(trash)) || !plainlyUnder(resolve(dataDir), trash)) return;
+  for (const name of await entries(trash)) await rm(join(trash, name), { recursive: true, force: true }).catch(() => {});
+}
+
+/** Claude Code's cleanupPeriodDays in a Claude folder's settings.json: set to CLAUDE_TRANSCRIPT_DAYS where absent. */
+export async function pinClaudeRetention(root: string, write: boolean): Promise<"set" | "kept" | "skipped"> {
+  const file = join(root, "settings.json");
+  const stats = await stat(file);
+  let settings: Record<string, unknown> = {};
+  if (stats) {
+    if (!stats.isFile() || stats.size > 1024 * 1024) return "skipped";
+    try {
+      const parsed: unknown = JSON.parse(await readFile(file, "utf8"));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "skipped";
+      settings = parsed as Record<string, unknown>;
+    } catch {
+      return "skipped";
+    }
+    if (Object.hasOwn(settings, "cleanupPeriodDays")) return "kept";
+  }
+  if (write) writeFileAtomic(file, `${JSON.stringify({ ...settings, cleanupPeriodDays: CLAUDE_TRANSCRIPT_DAYS }, null, 2)}\n`, { mode: 0o600 });
+  return "set";
 }
 
 export interface EngineSessionSweepResult {
   mode: Exclude<EngineSessionSweepMode, "off">;
+  /** Claude folders whose settings.json got cleanupPeriodDays, and those where the person's own value stays. */
+  retentionSet: number;
+  retentionKept: number;
   sessions: number;
   sessionBytes: number;
   cacheFiles: number;
@@ -210,17 +269,23 @@ export async function sweepEngineSessions(deps: EngineSessionSweepDeps): Promise
   const now = deps.now?.() ?? Date.now();
   const write = deps.mode === "on";
   const dataDir = resolve(deps.dataDir);
-  const result: EngineSessionSweepResult = { mode: deps.mode, sessions: 0, sessionBytes: 0, cacheFiles: 0, cacheBytes: 0, kept: 0, stopped: false };
+  const result: EngineSessionSweepResult = { mode: deps.mode, retentionSet: 0, retentionKept: 0, sessions: 0, sessionBytes: 0, cacheFiles: 0, cacheBytes: 0, kept: 0, stopped: false };
   const live = deps.live();
   if (live.size === 0) return { ...result, refused: "no conversation has an engine session, so the records may not have loaded" };
   const dead = new Set([...deps.logged].filter((id) => !live.has(id)));
+  for (const root of deps.folders.claude) {
+    if (!(await reachable(dataDir, root))) continue;
+    const pinned = await pinClaudeRetention(root, write).catch(() => "skipped" as const);
+    if (pinned === "set") result.retentionSet++;
+    else if (pinned === "kept") result.retentionKept++;
+  }
 
   // Every entry named by a session id, under each root, with the session's newest change.
-  const bySession = new Map<string, { entries: Array<{ root: string; path: string }>; newest: number }>();
+  const bySession = new Map<string, { entries: Array<{ root: string; path: string; dev: number; ino: number }>; newest: number }>();
   let liveFound = 0;
   const note = (root: string, found: Found, id: string) => {
     const session = bySession.get(id) ?? { entries: [], newest: 0 };
-    session.entries.push({ root, path: found.path });
+    session.entries.push({ root, path: found.path, dev: found.dev, ino: found.ino });
     session.newest = Math.max(session.newest, found.mtimeMs);
     bySession.set(id, session);
   };
@@ -237,7 +302,7 @@ export async function sweepEngineSessions(deps: EngineSessionSweepDeps): Promise
         if (live.has(id)) liveFound++;
         if (!dead.has(id)) continue;
         const stats = await stat(join(dir, name));
-        if (stats) note(root, { path: join(dir, name), mtimeMs: stats.mtimeMs }, id);
+        if (stats) note(root, { path: join(dir, name), mtimeMs: stats.mtimeMs, dev: stats.dev, ino: stats.ino }, id);
       }
       await yieldNow();
     }
@@ -257,7 +322,7 @@ export async function sweepEngineSessions(deps: EngineSessionSweepDeps): Promise
         const id = idOf(name);
         if (!id) continue;
         if (live.has(id)) liveFound++;
-        if (dead.has(id)) note(root, { path, mtimeMs: stats.mtimeMs }, id);
+        if (dead.has(id)) note(root, { path, mtimeMs: stats.mtimeMs, dev: stats.dev, ino: stats.ino }, id);
       }
       await yieldNow();
     };
@@ -267,22 +332,45 @@ export async function sweepEngineSessions(deps: EngineSessionSweepDeps): Promise
     return { ...result, refused: "none of the conversations' own sessions were found where this looks, so it removed nothing" };
   }
 
-  const stillLive = deps.live();
+  const trash = join(dataDir, TRASH_DIR, String(now));
+  let trashReady = false;
+  let moved = 0;
+  /** Renames an entry into the trash: only the one listed, only on the trash's volume. */
+  const discard = async (root: string, path: string, listed: { dev: number; ino: number }): Promise<boolean> => {
+    if (!trashReady) {
+      await mkdir(trash, { recursive: true, mode: 0o700 });
+      if (!(await realFolder(trash)) || !plainlyUnder(dataDir, trash)) return false;
+      trashReady = true;
+    }
+    const current = await stat(path);
+    const trashStats = await stat(trash);
+    if (!current || current.dev !== listed.dev || current.ino !== listed.ino || !trashStats || trashStats.dev !== current.dev || !plainlyUnder(root, path)) return false;
+    return rename(path, join(trash, `${moved++}`)).then(() => true, () => false);
+  };
   for (const [id, session] of bySession) {
-    if (now - session.newest < IDLE_MS || stillLive.has(id)) {
+    if (now - session.newest < IDLE_MS || deps.live().has(id)) {
       result.kept++;
       continue;
     }
-    if (deps.paused?.()) return { ...result, stopped: true };
+    if (!(await quietMoment(deps, deps.turnWaitMs ?? TURN_WAIT_MS))) {
+      result.stopped = true;
+      break;
+    }
     let bytes = 0;
+    let gone = 0;
     for (const entry of session.entries) {
       if (!plainlyUnder(entry.root, entry.path)) continue;
-      bytes += await measure(entry.path);
-      if (write) await rm(entry.path, { recursive: true, force: true }).catch(() => {});
+      const size = await measure(entry.path);
+      if (write && !(await discard(entry.root, entry.path, entry))) continue;
+      bytes += size;
+      gone++;
     }
+    if (!gone) continue;
     result.sessions++;
     result.sessionBytes += bytes;
   }
+  if (trashReady) await rm(trash, { recursive: true, force: true }).catch(() => {});
+  if (result.stopped) return result;
 
   for (const root of deps.cacheRoots) {
     if (!(await reachable(dataDir, root))) continue;
@@ -303,9 +391,18 @@ export async function sweepEngineSessions(deps: EngineSessionSweepDeps): Promise
           continue;
         }
         if (stats.isFile() && now - stats.mtimeMs >= IDLE_MS && plainlyUnder(root, path)) {
+          if (!(await quietMoment(deps, deps.turnWaitMs ?? TURN_WAIT_MS))) {
+            result.stopped = true;
+            return false;
+          }
+          // A log file in the CLI's own log folder: removed in place, the one listed only.
+          const current = await stat(path);
+          if (write && !(current?.isFile() && current.ino === stats.ino && (await rm(path, { force: true }).then(() => true, () => false)))) {
+            empty = false;
+            continue;
+          }
           result.cacheFiles++;
           result.cacheBytes += stats.size;
-          if (write) await rm(path, { force: true }).catch(() => {});
           continue;
         }
         empty = false;
@@ -324,9 +421,9 @@ const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 export function sweepLine(result: EngineSessionSweepResult): string {
   if (result.refused) return `[engine-sessions] ${result.mode}: ${result.refused}`;
   const verb = result.mode === "report" ? "would free" : "freed";
-  return `[engine-sessions] ${result.mode}: ${result.sessions} ended sessions (${mb(result.sessionBytes)}) and ${result.cacheFiles} CLI log files `
+  return `[engine-sessions] ${result.mode}: Claude transcript age ${CLAUDE_TRANSCRIPT_DAYS} days ${result.mode === "report" ? "would be " : ""}set in ${result.retentionSet} folders (${result.retentionKept} keep their own); ${result.sessions} ended sessions (${mb(result.sessionBytes)}) and ${result.cacheFiles} CLI log files `
     + `(${mb(result.cacheBytes)}); ${verb} ${mb(result.sessionBytes + result.cacheBytes)}; ${result.kept} ended sessions kept until a week idle`
-    + (result.stopped ? " (stopped for a move or backup; the next pass carries on)" : "");
+    + (result.stopped ? " (stopped for a move, a backup or a running turn; the next pass carries on)" : "");
 }
 
 export interface StartEngineSessionSweepDeps {
@@ -337,6 +434,7 @@ export interface StartEngineSessionSweepDeps {
   folders(): EngineSessionFolders;
   environments(): Iterable<Record<string, string | undefined>>;
   paused?(): boolean;
+  turnsRunning?(): boolean;
   log?(line: string): void;
 }
 
@@ -351,11 +449,13 @@ export function startEngineSessionSweep(deps: StartEngineSessionSweepDeps): bool
     if (running) return;
     running = true;
     try {
+      // An interrupted pass's trash first: it is already out of every engine's reach.
+      await emptyTrash(deps.dataDir);
       const result = await sweepEngineSessions({
         dataDir: deps.dataDir, mode, folders: deps.folders(), cacheRoots: claudeCliCacheRoots(deps.environments()),
-        live: () => liveSessions(deps.bots()), logged: await logged(), paused: deps.paused,
+        live: () => liveSessions(deps.bots()), logged: await logged(), paused: deps.paused, turnsRunning: deps.turnsRunning,
       });
-      if (result.refused || result.sessions || result.cacheFiles || result.stopped) log(sweepLine(result));
+      if (result.refused || result.sessions || result.cacheFiles || result.retentionSet || result.stopped) log(sweepLine(result));
     } catch (error) {
       log(`[engine-sessions] pass failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {

@@ -1,11 +1,12 @@
-import { appendFileSync, existsSync, lstatSync, lutimesSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, lutimesSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { engineSessionFolders } from "./delete-leftovers.ts";
 import {
-  IDLE_MS, claudeCliCacheRoots, createLoggedSessions, engineSessionSweepMode, liveSessions, sweepEngineSessions, sweepLine,
+  CLAUDE_TRANSCRIPT_DAYS, IDLE_MS, TRASH_DIR, claudeCliCacheRoots, createLoggedSessions, emptyTrash, engineSessionSweepMode, liveSessions,
+  pinClaudeRetention, sweepEngineSessions, sweepLine,
   type EngineSessionSweepDeps,
 } from "./engine-session-sweep.ts";
 
@@ -143,6 +144,29 @@ describe("sweepEngineSessions", () => {
       expect(existsSync(file), file).toBe(true);
     }
     expect(sweepLine(result)).toContain("freed");
+    // Removed by a rename into the app's trash, which the pass empties.
+    expect(readdirSync(join(dataDir, TRASH_DIR))).toEqual([]);
+    expect(JSON.parse(readFileSync(join(claude, "settings.json"), "utf8"))).toEqual({ cleanupPeriodDays: CLAUDE_TRANSCRIPT_DAYS });
+    expect(result.retentionSet).toBe(1);
+  });
+
+  it("removes nothing while a turn runs, and goes on once none does", async () => {
+    const files = seed();
+    const busy = await sweepEngineSessions(await deps("on", { turnsRunning: () => true, turnWaitMs: 0 }));
+    expect(busy.stopped).toBe(true);
+    for (const file of [...files.ended, files.cacheOld]) expect(existsSync(file)).toBe(true);
+    let checks = 0;
+    const later = await sweepEngineSessions(await deps("on", { turnsRunning: () => checks++ < 1, turnWaitMs: 60_000 }));
+    expect([later.sessions, later.cacheFiles]).toEqual([1, 1]);
+  }, 30_000);
+
+  it("empties a trash an interrupted pass left, and nothing outside it", async () => {
+    const left = put(join(dataDir, TRASH_DIR, "1700000000000", "0", "x.jsonl"));
+    const beside = put(join(dataDir, "cache", "trash", "other", "keep.txt"));
+    await emptyTrash(dataDir);
+    expect(existsSync(left)).toBe(false);
+    expect(existsSync(join(dataDir, TRASH_DIR))).toBe(true);
+    expect(existsSync(beside)).toBe(true);
   });
 
   it("a report frees nothing and counts what removing would", async () => {
@@ -176,6 +200,30 @@ describe("sweepEngineSessions", () => {
     const result = await sweepEngineSessions(await deps("on", { paused: () => true }));
     expect(result.stopped).toBe(true);
     for (const file of files.ended) expect(existsSync(file)).toBe(true);
+  });
+});
+
+describe("Claude Code's own transcript age", () => {
+  it("is set where the person has not set it, kept where they have, and left alone where it cannot be read", async () => {
+    mkdirSync(claude, { recursive: true });
+    expect(await pinClaudeRetention(claude, false)).toBe("set");
+    expect(existsSync(join(claude, "settings.json"))).toBe(false);
+    expect(await pinClaudeRetention(claude, true)).toBe("set");
+    expect(JSON.parse(readFileSync(join(claude, "settings.json"), "utf8"))).toEqual({ cleanupPeriodDays: 30 });
+    writeFileSync(join(claude, "settings.json"), JSON.stringify({ cleanupPeriodDays: 365, model: "x" }));
+    expect(await pinClaudeRetention(claude, true)).toBe("kept");
+    expect(JSON.parse(readFileSync(join(claude, "settings.json"), "utf8"))).toEqual({ cleanupPeriodDays: 365, model: "x" });
+    writeFileSync(join(claude, "settings.json"), JSON.stringify({ theme: "dark" }));
+    expect(await pinClaudeRetention(claude, true)).toBe("set");
+    expect(JSON.parse(readFileSync(join(claude, "settings.json"), "utf8"))).toEqual({ theme: "dark", cleanupPeriodDays: 30 });
+    writeFileSync(join(claude, "settings.json"), "{ not json");
+    expect(await pinClaudeRetention(claude, true)).toBe("skipped");
+    expect(readFileSync(join(claude, "settings.json"), "utf8")).toBe("{ not json");
+    rmSync(join(claude, "settings.json"));
+    const elsewhere = put(join(root, "theirs.json"), "{}");
+    symlinkSync(elsewhere, join(claude, "settings.json"));
+    expect(await pinClaudeRetention(claude, true)).toBe("skipped");
+    expect(readFileSync(elsewhere, "utf8")).toBe("{}");
   });
 });
 

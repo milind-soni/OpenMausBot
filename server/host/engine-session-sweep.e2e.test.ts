@@ -1,8 +1,9 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 
 import { launchVerificationServer, runControlOmb } from "../../scripts/control-omb.ts";
+import { rebuiltSessionNotice } from "../resume-recovery.ts";
 import { engineSessionFolders } from "./delete-leftovers.ts";
 import { createLoggedSessions, liveSessions, sweepEngineSessions } from "./engine-session-sweep.ts";
 
@@ -64,6 +65,39 @@ it("a conversation whose ended engine sessions were pruned still resumes the ses
     const said = JSON.stringify((await api("GET", "/api/bots")).bots.find((b: any) => b.id === bot.id).messages);
     expect(said).toContain("remember the word HERON");
     expect(said).not.toContain("No conversation found");
+  } finally {
+    await fixture.close();
+  }
+}, 120_000);
+
+it("a conversation whose session Claude Code's own 30-day sweep removed goes on from its chat, and says so", async () => {
+  const fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_HOME_FILES: "1", FAKE_CLAUDE_EXIT_AFTER_TURN: "1" });
+  try {
+    const dataDir = fixture.info.dataDir;
+    const claude = join(dataDir, ".claude");
+    mkdirSync(claude, { recursive: true });
+    writeFileSync(join(claude, ".credentials.json"), JSON.stringify({ claudeAiOauth: { accessToken: "fixture-token-not-a-credential" } }));
+    const control = (args: string[]) => runControlOmb([...args, "--url", fixture.info.url]) as Promise<any>;
+    const bots = async () => (await (await fetch(`${fixture.info.url}/api/bots`)).json() as any).bots as any[];
+    const created = await (await fetch(`${fixture.info.url}/api/bots`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Old friend" }) })).json() as any;
+    const bot = created.bot;
+    const turn = async (text: string) => {
+      await control(["send", "--bot", bot.id, "--task", bot.threadId, "--text", text]);
+      expect((await control(["wait", "--bot", bot.id, "--task", bot.threadId, "--timeout", "30"])).status).toBe("settled");
+    };
+    await turn("First: remember the word HERON.");
+    const saved = (JSON.parse(readFileSync(join(dataDir, "bots.json"), "utf8")) as any[]).find((b) => b.id === bot.id);
+    const cursor = Object.values(saved?.resumeCursors ?? {})[0] as string;
+    const project = readdirSync(join(claude, "projects")).find((folder) => existsSync(join(claude, "projects", folder, `${cursor}.jsonl`)))!;
+    // What Claude Code's cleanupPeriodDays sweep does to a session idle past it.
+    rmSync(join(claude, "projects", project, `${cursor}.jsonl`));
+
+    await turn("Back after a long while: what was the word?");
+    const messages = (await bots()).find((b) => b.id === bot.id).messages as any[];
+    const after = messages.slice(messages.findIndex((m) => m.role === "user" && m.text?.includes("Back after a long while")));
+    expect(after.some((m) => m.kind === "activity" && m.tool?.name === `notice: ${rebuiltSessionNotice("Claude Code")}`)).toBe(true);
+    expect(after.some((m) => m.role === "bot" && m.kind === "text" && m.text)).toBe(true);
+    expect(JSON.stringify(messages)).toContain("remember the word HERON");
   } finally {
     await fixture.close();
   }
