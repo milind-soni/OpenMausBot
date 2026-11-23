@@ -12,11 +12,11 @@ export const BOT_TEXT_MESSAGE_INDEXES_SQL = `
 const INDEX_NAMES = [...BOT_TEXT_MESSAGE_INDEXES_SQL.matchAll(/CREATE INDEX IF NOT EXISTS (\w+)/g)].map((match) => match[1]!);
 const CHUNK = 8 << 20;
 
-/** Building one of these indexes on an existing database reads every row of messages, and SQLite reads them a page at a
- * time: on a 2.2 GB database not in the OS cache the build took 8.6 s. One sequential pass over the file first brings it
- * into the cache, and pass and build then took 1.1 s. So when one of these indexes is missing and the file fits easily in
- * memory, read it once before the build. Only the OS cache changes; on any error the build reads the disk as before. */
-export function warmForBotTextIndexes(db: DatabaseSync, file: string, limits = { minBytes: 64 << 20, maxBytes: totalmem() / 2 }): boolean {
+/** Building one of these indexes on an existing database reads every row of messages. On macOS, with a 2.2 GB database
+ * just copied, the build took 8.6 s; after one sequential pass over the file, pass and build took 1.1 s together. So
+ * there, when one of these indexes is missing and the file fits easily in memory, read it once before the build. Only
+ * the OS cache changes, and on any error the build runs as before. Elsewhere it is unmeasured, so maxBytes is 0. */
+export function warmForBotTextIndexes(db: DatabaseSync, file: string, limits = { minBytes: 64 << 20, maxBytes: process.platform === "darwin" ? totalmem() / 2 : 0 }): boolean {
   try {
     const have = new Set((db.prepare("SELECT name FROM sqlite_master WHERE tbl_name = 'messages'").all() as Array<{ name: string }>).map((row) => row.name));
     if (!have.has("messages") || INDEX_NAMES.every((name) => have.has(name))) return false;
