@@ -477,6 +477,13 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
   const priorSources = ctx.sheet.sheet().sources.slice();
   const reserved = new Set<string>();
   const suffixName = (stem: string, n: number) => `${stem.slice(0, 62 - String(n).length)}_${n}`;
+  const fromStem = (name: string, stem: string) => {
+    if (name === stem) return true;
+    const digits = /_(\d+)$/.exec(name)?.[1];
+    if (!digits || String(Number(digits)) !== digits) return false;
+    const n = Number(digits);
+    return n >= 2 && name === suffixName(stem, n);
+  };
   const nameInEmptyCatalog = (base: string): string => {
     const stem = tableNameFrom(base);
     let name = stem;
@@ -484,12 +491,14 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
     reserved.add(fold(name));
     return name;
   };
-  const unique = (base: string, plan: LoadPlan, sourceTable?: string): string => {
+  const unique = (base: string, plan: LoadPlan, sourceTable?: string): { name: string; requested: string } => {
     const stem = tableNameFrom(base);
     const requested = nameInEmptyCatalog(base);
     const assigned = (name: string) => tables.some((table) => table.name === name);
     const recorded = priorSources.filter((entry) =>
-      entry.kind === plan.kind && entry.source === plan.source && (!plan.attach || entry.options?.table === sourceTable));
+      entry.kind === plan.kind && entry.source === plan.source
+      && (!plan.attach || entry.options?.table === sourceTable)
+      && fromStem(entry.name, stem));
     const recordedSource = (candidate: string) => recorded.some((entry) => entry.name === candidate);
     const requestedReusable = !assigned(requested) && !blocked(requested)
       && (!existing.has(fold(requested)) || (replace && (requested === stem || recordedSource(requested))));
@@ -498,7 +507,8 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
       if (!existing.has(fold(candidate))) return true;
       if (!replace) return false;
       if (!suffixed) return true;
-      return recordedSource(candidate) && (candidate === requested || (!requestedReusable && recorded.length === 1));
+      const sameRequest = recorded.length === 1 && recorded[0]!.requested === requested;
+      return recordedSource(candidate) && (candidate === requested || (!requestedReusable && sameRequest));
     };
     let name = stem;
     let suffixed = false;
@@ -507,10 +517,10 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
       name = suffixName(stem, n);
     }
     existing.add(fold(name));
-    return name;
+    return { name, requested };
   };
   const warnings: string[] = [];
-  const create = async (name: string, relation: string, plan: LoadPlan, options: Record<string, string | number | boolean>) => {
+  const create = async (name: string, relation: string, plan: LoadPlan, options: Record<string, string | number | boolean>, requested: string) => {
     const sql = (reader: string) => `CREATE ${replace ? "OR REPLACE " : ""}TABLE ${quoteIdent(name)} AS SELECT * FROM ${reader}`;
     const execute = (statement: string) => ctx.database.run(statement, runOptions(ctx, { extensions: plan.extensions }));
     try {
@@ -527,7 +537,7 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
     }
     const described = await ctx.database.describe(quoteIdent(name), runOptions(ctx));
     const columns = boundColumns(described.columns, DATA_LIMITS.describeBytesMax, 200).columns;
-    ctx.sheet.recordSource({ name, sqlName: quoteIdent(name), kind: plan.kind, source: plan.source, options, rowCount: described.rowCount, columns, loadedAt: new Date().toISOString() });
+    ctx.sheet.recordSource({ name, sqlName: quoteIdent(name), kind: plan.kind, source: plan.source, options, requested, rowCount: described.rowCount, columns, loadedAt: new Date().toISOString() });
     tables.push({ name, rowCount: described.rowCount, columns, source: plan.source });
   };
   const recordedOptions = (plan: LoadPlan): Record<string, string | number | boolean> => ({
@@ -538,7 +548,8 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
   for (const plan of plans) {
     warnings.push(...plan.warnings);
     if (plan.reader) {
-      await create(unique(plan.stem, plan), plan.reader, plan, recordedOptions(plan));
+      const placed = unique(plan.stem, plan);
+      await create(placed.name, plan.reader, plan, recordedOptions(plan), placed.requested);
       continue;
     }
     const attach = plan.attach!;
@@ -564,8 +575,8 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
       for (const entry of chosen) {
         const relation = entry.schema ? `${quoteIdent(alias)}.${quoteIdent(entry.schema)}.${quoteIdent(entry.table)}` : `${quoteIdent(alias)}.${quoteIdent(entry.table)}`;
         const sourceTable = entry.schema ? `${entry.schema}.${entry.table}` : entry.table;
-        const name = unique(chosen.length > 1 ? entry.table : input.name ?? entry.table, plan, sourceTable);
-        await create(name, relation, plan, { ...recordedOptions(plan), table: sourceTable });
+        const placed = unique(chosen.length > 1 ? entry.table : input.name ?? entry.table, plan, sourceTable);
+        await create(placed.name, relation, plan, { ...recordedOptions(plan), table: sourceTable }, placed.requested);
       }
     } finally {
       await ctx.database.run(`DETACH ${quoteIdent(alias)}`, { connection: ctx.connection }).catch(() => {});

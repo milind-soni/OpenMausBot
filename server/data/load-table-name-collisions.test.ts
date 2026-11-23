@@ -271,4 +271,85 @@ describe("distinct table names within one import", () => {
     expect(new Set(result.tables.map((table) => table.name))).toEqual(new Set(["mixed_csv", "mixed_json", "mixed_parquet"]));
     await expectAllSources(ctx, result.tables);
   });
+
+  it("keeps an explicitly named sales_report_2 when a later import asks for the invalid view", async () => {
+    const ctx = await unboundView("explicit-suffix-kept");
+    const file = join(root, "explicit-suffix.csv");
+    writeFileSync(file, "id,name\n1,Alice\n");
+    const named = await runDataTool(ctx, "data_load", { source: file, name: "sales_report_2" });
+    expect(named.isError, named.content[0]?.text).toBeUndefined();
+    expect(named.structuredContent!.tables).toMatchObject([{ name: "sales_report_2" }]);
+
+    writeFileSync(file, "id,name\n2,Bob\n");
+    const displaced = await runDataTool(ctx, "data_load", { source: file, name: "sales_report" });
+    expect(displaced.isError, displaced.content[0]?.text).toBeUndefined();
+    expect(displaced.structuredContent!.tables).toMatchObject([{ name: "sales_report_3" }]);
+    expect((await ctx.database.run("SELECT * FROM sales_report_2", { connection })).rows).toEqual([["1", "Alice"]]);
+    expect((await ctx.database.run("SELECT * FROM sales_report_3", { connection })).rows).toEqual([["2", "Bob"]]);
+    const tables = await ctx.database.listTables();
+    const view = tables.find((table) => table.name === "sales_report");
+    expect(view?.rowCount).toBeNull();
+    expect(view?.error).toMatchObject({ code: "sql_error" });
+    expect(view?.error?.message).toContain("amount");
+    expect(ctx.sheet.sheet().sources.find((source) => source.name === "sales_report_2")).toMatchObject({ requested: "sales_report_2" });
+    expect(ctx.sheet.sheet().sources.find((source) => source.name === "sales_report_3")).toMatchObject({ requested: "sales_report" });
+  });
+
+  it("reloads a mixed folder onto the csv suffix an invalid view displaced", async () => {
+    const ctx = await context("folder-mixed-reload");
+    for (const sql of [
+      "CREATE TABLE sales AS SELECT 1 AS id, 10 AS amount",
+      "CREATE VIEW sales_csv AS SELECT id, amount FROM sales",
+      "CREATE OR REPLACE TABLE sales AS SELECT 2 AS id, 20 AS total",
+    ]) {
+      const result = await runDataTool(ctx, "data_sql", { sql });
+      expect(result.isError, result.content[0]?.text).toBeUndefined();
+    }
+    const sales = join(root, "sales");
+    mkdirSync(sales);
+    writeFileSync(join(sales, "rows.csv"), "origin,value\ncsv,1\n");
+    writeFileSync(join(sales, "rows.json"), JSON.stringify([{ origin: "json", value: 2 }]));
+    const loaded = await loadData(ctx, { source: sales });
+    expect(loaded.tables.map((table) => table.name).sort()).toEqual(["sales_csv_2", "sales_json"]);
+
+    writeFileSync(join(sales, "rows.csv"), "origin,value\ncsv,9\n");
+    const reloaded = await loadData(ctx, { source: sales });
+    expect(reloaded.tables.map((table) => table.name).sort()).toEqual(["sales_csv_2", "sales_json"]);
+    const read = async (name: string) => (await ctx.database.run(`SELECT origin, value FROM ${quoteIdentifier(name)}`, { connection })).rows
+      .map(([origin, value]) => [origin, Number(value)]);
+    expect(await read("sales_csv_2")).toEqual([["csv", 9]]);
+    expect(await read("sales_json")).toEqual([["json", 2]]);
+    const tables = await ctx.database.listTables();
+    expect(tables.map((table) => table.name)).not.toContain("sales_csv_3");
+    expect(tables).toHaveLength(4);
+    const view = tables.find((table) => table.name === "sales_csv");
+    expect(view?.rowCount).toBeNull();
+    expect(view?.error).toMatchObject({ code: "sql_error" });
+    expect(view?.error?.message).toContain("amount");
+    expect(ctx.sheet.sheet().sources.find((source) => source.name === "sales_csv_2")).toMatchObject({ requested: "sales_csv" });
+    expect(ctx.sheet.sheet().sources.find((source) => source.name === "sales_json")).toMatchObject({ requested: "sales_json" });
+  });
+
+  it("does not reuse a displaced suffix whose sheet record has no requested name", async () => {
+    const ctx = await unboundView("view-reload-without-requested");
+    const file = join(root, "sales-report-without-requested.csv");
+    writeFileSync(file, "id,name\n1,Alice\n");
+    const loaded = await runDataTool(ctx, "data_load", { source: file, name: "sales_report" });
+    expect(loaded.isError, loaded.content[0]?.text).toBeUndefined();
+    expect(loaded.structuredContent!.tables).toMatchObject([{ name: "sales_report_2" }]);
+    const prior = ctx.sheet.sheet().sources.find((source) => source.name === "sales_report_2");
+    expect(prior).toBeDefined();
+    const recorded = { ...prior! };
+    delete recorded.requested;
+    ctx.sheet.recordSource(recorded);
+    writeFileSync(file, "id,name\n2,Bob\n");
+    const reloaded = await runDataTool(ctx, "data_load", { source: file, name: "sales_report" });
+    expect(reloaded.isError, reloaded.content[0]?.text).toBeUndefined();
+    expect(reloaded.structuredContent!.tables).toMatchObject([{ name: "sales_report_3" }]);
+    expect((await ctx.database.run("SELECT * FROM sales_report_2", { connection })).rows).toEqual([["1", "Alice"]]);
+    expect((await ctx.database.run("SELECT * FROM sales_report_3", { connection })).rows).toEqual([["2", "Bob"]]);
+    const view = (await ctx.database.listTables()).find((table) => table.name === "sales_report");
+    expect(view?.rowCount).toBeNull();
+    expect(view?.error).toMatchObject({ code: "sql_error" });
+  });
 });
