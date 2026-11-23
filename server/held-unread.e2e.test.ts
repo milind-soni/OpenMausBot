@@ -26,10 +26,16 @@ it("holds a conversation marked unread with it open against being on screen, in 
       await expect.poll(async () => (await reloaded()).unread, { timeout: 30_000 }).toBe(true);
     };
     const mark = async () => {
+      const before = otherWindow.frames.length;
       await api("PATCH", `/api/bots/${botId}`, { unread: true });
-      return (await otherWindow.until((frame) => frame.kind === "bot" && frame.bot?.id === botId &&
-        frame.bot.tasks?.some((task: any) => task.threadId === threadId && task.heldUnread !== undefined), 10_000))
-        .bot.tasks.find((task: any) => task.threadId === threadId);
+      const held = await otherWindow.until((frame) => otherWindow.frames.indexOf(frame) >= before && frame.kind === "bot" && frame.bot?.id === botId &&
+        frame.bot.tasks?.some((task: any) => task.threadId === threadId && task.heldUnread !== undefined), 10_000);
+      const states = otherWindow.frames.slice(before, otherWindow.frames.indexOf(held) + 1)
+        .filter((frame) => frame.kind === "bot" && frame.bot?.id === botId)
+        .map((frame) => frame.bot.tasks?.find((task: any) => task.threadId === threadId))
+        .map((task) => ({ unread: task?.unread === true, held: task?.heldUnread !== undefined }));
+      expect(states, "never told unread without its mark").not.toContainEqual({ unread: true, held: false });
+      return held.bot.tasks.find((task: any) => task.threadId === threadId);
     };
     await answered("Summarize the queue.");
     await api("POST", `/api/bots/${botId}/read`, { threadId });

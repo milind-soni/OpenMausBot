@@ -28,12 +28,20 @@ export function roomUnreadFor(path: readonly PathMessage[], readUpTo: string | u
   return path.slice(from).some(isReply);
 }
 
-/** A conversation marked unread with `held` its newest message ("" for none) stays held until a reply comes after it. A
- * message no longer on the path (an edit or a retry moved it) ends the mark. */
+/** The message a mark holds from: the path's newest by time, since a reply inserted mid-history is newer than the line
+ * after it; "" for an empty conversation. */
+export function heldFrom(path: readonly PathMessage[]): string {
+  return path.reduce<PathMessage | undefined>((newest, message) => !newest || (message.at ?? 0) >= (newest.at ?? 0) ? message : newest, undefined)?.id ?? "";
+}
+
+/** A conversation marked unread with `held` from {@link heldFrom} stays held until a reply newer than it comes, wherever
+ * on the path it lands. A message no longer on the path (an edit or a retry moved it) ends the mark. */
 export function stillHeldUnread(path: readonly PathMessage[], held: string | undefined): boolean {
   if (held === undefined) return false;
-  const at = held === "" ? -1 : path.findIndex((message) => message.id === held);
-  return (held === "" || at >= 0) && !path.slice(at + 1).some(isReply);
+  const index = held === "" ? -1 : path.findIndex((message) => message.id === held), heldAt = path[index]?.at;
+  if (held !== "" && index < 0) return false;
+  const newer = (message: PathMessage, at: number) => heldAt === undefined || message.at === undefined ? at > index : message.at > heldAt || (at > index && message.at === heldAt);
+  return !path.some((message, at) => isReply(message) && newer(message, at));
 }
 
 /** `alsoForget`: a person's other marks of their own (their bots' order, their notification reads), which go with
@@ -190,7 +198,7 @@ export function createPersonRooms(deps: PersonRoomsDeps) {
         const path = deps.store().activePath(threadId), reply = path.findLastIndex(isReply);
         if (reply > 0) reads.read(key, person, path[reply - 1]!.id);
         else reads.forget(key, person);
-        reads.read(threadHoldKey(threadId), person, newest ?? "");
+        reads.read(threadHoldKey(threadId), person, heldFrom(path));
       } else {
         reads.forget(threadHoldKey(threadId), person);
         if (newest) reads.read(key, person, newest);
