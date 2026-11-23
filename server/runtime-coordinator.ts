@@ -465,6 +465,18 @@ export class RuntimeCoordinator implements Coordinator {
     for (const { root, work } of trees) if (root) this.rememberStop(root, work);
   }
 
+  stopHandoff(id: string): "stopped" | "ended" | undefined {
+    this.ready();
+    const n = this.store.get(id);
+    if (!n?.parentId) return undefined;
+    if (isTerminal(n)) return "ended";
+    const root = this.store.get(n.rootId);
+    const work = this.subtree(n).filter(a => !isTerminal(a));
+    this.stopFor(STOPPED_BY_USER, () => this.runtime.cancel(id, STOPPED_BY_USER, "stopped"));
+    if (root) this.rememberStop(root, work);
+    return "stopped";
+  }
+
   /** Runs a stop with its cause. A teammate's turn it ends stops that teammate's thread as well (the host's abort handler
    * calls stopAwaitingDirect with no reason), and that is still this stop: a cut the system made (a waiting line going
    * first, a restart, a deleted conversation) is never remembered as the person's stop. */

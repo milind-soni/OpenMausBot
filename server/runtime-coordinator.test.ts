@@ -920,6 +920,73 @@ describe("RuntimeCoordinator: stops", () => {
   });
 });
 
+describe("RuntimeCoordinator: the person stops one hand-off", () => {
+  const holdAll: Script = () => "hold";
+
+  it("ends that teammate's work and what it handed on, aborts its turn, and leaves its siblings and requester going", async () => {
+    const w = world(holdAll);
+    const { node: b } = send(w, chief, "gen-1", undefined, builder, "Build it");
+    const { node: t } = send(w, chief, "gen-1", undefined, tester, "Test it");
+    w.coordinator.tick();
+    const { node: deeper } = w.coordinator.enqueue(builder, "gen-1", b.id, { botId: "scout", threadId: "scout-work" }, "Find the spec", {});
+    expect(w.coordinator.node(deeper.id)).toMatchObject({ parentId: b.id, botId: "scout" });
+
+    expect(w.coordinator.stopHandoff(b.id)).toBe("stopped");
+    expect(w.coordinator.node(b.id)).toMatchObject({ status: "cancelled", result: "Stopped by user" });
+    expect(w.coordinator.node(deeper.id)?.status).toBe("cancelled");
+    expect(w.host.runs.find(r => r.node.id === b.id)!.signal.aborted).toBe(true);
+    expect(w.coordinator.node(t.id)?.status).toBe("running");
+    expect(w.host.runs.find(r => r.node.id === t.id)!.signal.aborted).toBe(false);
+    expect(w.coordinator.node("gen-1")?.status).toBe("source");
+    await flush();
+    expect(w.host.reports.map(r => r.child.id)).toContain(b.id);
+  });
+
+  it("lets the requester go on with what it has once its other work is back", async () => {
+    const w = world(holdAll);
+    const { node: b } = send(w, chief, "gen-1", undefined, builder, "Build it");
+    w.coordinator.tick();
+    ended(w, "gen-1");
+    expect(w.coordinator.stopHandoff(b.id)).toBe("stopped");
+    await flush();
+    w.coordinator.tick();
+    const resume = w.host.runs.find(r => r.node.id === "gen-1")!;
+    expect(resume.resumed).toBe(true);
+    expect(resume.text).toContain(`report on assignment ${b.id}`);
+  });
+
+  it("stops a hand-off that has not started yet", () => {
+    const w = world(holdAll);
+    const { node: b } = send(w, chief, "gen-1", undefined, builder, "Build it");
+    expect(w.coordinator.stopHandoff(b.id)).toBe("stopped");
+    expect(w.coordinator.node(b.id)?.status).toBe("cancelled");
+    w.coordinator.tick();
+    expect(w.host.runs.filter(r => r.node.id === b.id)).toEqual([]);
+  });
+
+  it("is remembered as the person's stop for that request", () => {
+    const w = world(holdAll);
+    const { node: b } = send(w, chief, "gen-1", undefined, builder, "Build it");
+    w.coordinator.tick();
+    w.coordinator.stopHandoff(b.id);
+    expect(() => send(w, chief, "gen-1", undefined, builder, "Build it after all", { rework: true })).toThrow("The person stopped this teammate's work on this request.");
+    expect(send(w, chief, "gen-1", undefined, tester, "Test it").node).toMatchObject({ botId: "tester", status: "queued" });
+  });
+
+  it("answers ended for work already over, and nothing for a person's own turn or an unknown id", async () => {
+    const w = world();
+    const { node: b } = send(w, chief, "gen-1", undefined, builder, "Build it");
+    w.coordinator.tick();
+    await flush();
+    expect(w.coordinator.node(b.id)?.status).toBe("completed");
+    expect(w.coordinator.stopHandoff(b.id)).toBe("ended");
+    expect(w.coordinator.node(b.id)?.status).toBe("completed");
+    expect(w.coordinator.stopHandoff("gen-1")).toBeUndefined();
+    expect(w.coordinator.node("gen-1")?.status).not.toBe("cancelled");
+    expect(w.coordinator.stopHandoff("as_missing")).toBeUndefined();
+  });
+});
+
 describe("RuntimeCoordinator: a stop the person made is remembered", () => {
   const tick = () => sleep(2);
 
