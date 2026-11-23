@@ -8,7 +8,7 @@ const SESSION = "native-session-1";
 const RESULT = { stopReason: "end_turn", usage: { inputTokens: 900, outputTokens: 50 } };
 
 function setup(answer: (link: { heard: (update: object) => void; reply: (result: unknown) => void }) => void, overrides: Partial<AcpSession> = {}) {
-  const child = Object.assign(new EventEmitter(), { exitCode: null });
+  const child = Object.assign(new EventEmitter(), { exitCode: null, signalCode: null });
   const acp: { onUpdate: ((params: any) => void) | null; request: ReturnType<typeof vi.fn>; send: ReturnType<typeof vi.fn> } = {
     onUpdate: null,
     send: vi.fn(),
@@ -120,26 +120,45 @@ describe("an ACP agent's own compaction of a live session", () => {
   });
 
   it("keeps the usage of an answer that came after its timeout", async () => {
-    vi.stubEnv("FAKE_ACP_COMPACT_TIMEOUT_MS", "20");
+    let answer: ((result: unknown) => void) | undefined;
+    const { deps, acp } = setup(({ reply }) => { answer = reply; });
+    vi.useFakeTimers();
     try {
-      const { deps } = setup(({ reply }) => { setTimeout(() => reply(RESULT), 60); });
-      expect(await acpCompactSession(deps)("thread", { session: SESSION })).toMatchObject({ ok: false, reason: "timed out", usage: { input: 900, output: 50 } });
+      const compacting = acpCompactSession(deps)("thread", { session: SESSION });
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(acp.send).toHaveBeenCalledWith(expect.objectContaining({ method: "session/cancel" }));
+      answer!(RESULT);
+      expect(await compacting).toMatchObject({ ok: false, reason: "timed out", usage: { input: 900, output: 50 } });
     } finally {
-      vi.unstubAllEnvs();
+      vi.useRealTimers();
     }
   });
 
   it("stops waiting for the cancel once the agent exits", async () => {
     const { deps, session, acp } = setup(() => {});
-    const stop = new AbortController();
-    const compacting = acpCompactSession(deps)("thread", { session: SESSION, signal: stop.signal });
-    await vi.waitFor(() => expect(acp.request).toHaveBeenCalled());
-    const started = Date.now();
-    stop.abort();
-    await vi.waitFor(() => expect(acp.send).toHaveBeenCalled());
-    session.child.emit("exit", 1, null);
-    expect(await compacting).toMatchObject({ ok: false, reason: "stopped" });
-    expect(Date.now() - started).toBeLessThan(2_000);
+    vi.useFakeTimers();
+    try {
+      const stop = new AbortController();
+      const compacting = acpCompactSession(deps)("thread", { session: SESSION, signal: stop.signal });
+      await vi.advanceTimersByTimeAsync(0);
+      stop.abort();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(acp.send).toHaveBeenCalled();
+      session.child.emit("exit", null, "SIGKILL");
+      let result: unknown;
+      void compacting.then((value) => { result = value; });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(result).toMatchObject({ ok: false, reason: "stopped" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not send /compact to a process a signal ended", async () => {
+    const { deps, session, acp } = setup(() => {});
+    (session.child as unknown as { signalCode: string }).signalCode = "SIGKILL";
+    expect(await acpCompactSession(deps)("thread", { session: SESSION })).toMatchObject({ ok: false, reason: "no live session holds this conversation" });
+    expect(acp.request).not.toHaveBeenCalled();
   });
 
   it("says so when the agent ignored the cancel and could not be stopped", async () => {

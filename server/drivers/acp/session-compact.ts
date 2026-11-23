@@ -45,7 +45,7 @@ export function acpCompactSession(deps: AcpCompactDeps) {
     if (options.signal?.aborted) return fail("stopped");
     const session = deps.sessions.get(threadId);
     const live = (): boolean => deps.sessions.get(threadId) === session && session !== undefined && !session.dead && !session.closing
-      && session.current === null && session.child.exitCode === null && session.sessionId === options.session;
+      && session.current === null && session.child.exitCode === null && session.child.signalCode === null && session.sessionId === options.session;
     if (!session || !live()) return fail("no live session holds this conversation");
     const command = session.compactCommand;
     if (!command) return fail("this runtime has no in-place compaction");
@@ -69,8 +69,7 @@ export function acpCompactSession(deps: AcpCompactDeps) {
     let markGone!: () => void;
     const gone = new Promise<null>((resolve) => { markGone = () => resolve(null); });
     const exited = () => { markGone(); end({ kind: "failed", reason: "the agent exited during compaction" }); };
-    session.child.once("exit", exited);
-    session.child.once("error", exited);
+    for (const event of ["exit", "close", "error"]) session.child.once(event, exited);
     const counted = { open: false, replied: false, usageReported: false };
     const heard = (params: any) => {
       if (!counted.open || params?._meta?.isReplay === true || params?.sessionId !== options.session) return;
@@ -133,8 +132,7 @@ export function acpCompactSession(deps: AcpCompactDeps) {
     } finally {
       clearTimeout(timer);
       options.signal?.removeEventListener("abort", onAbort);
-      session.child.removeListener("exit", exited);
-      session.child.removeListener("error", exited);
+      for (const event of ["exit", "close", "error"]) session.child.removeListener(event, exited);
       if (session.acp.onUpdate === heard) session.acp.onUpdate = previousHeard;
       if (!keep && deps.sessions.get(threadId) === session && !session.closing) deps.closeSession(threadId, "compact-failed");
       else if (deps.sessions.get(threadId) === session && !session.closing && !session.dead) deps.armIdle(threadId);
