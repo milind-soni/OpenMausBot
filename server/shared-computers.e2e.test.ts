@@ -62,14 +62,33 @@ beforeAll(async () => {
   expect(opened.status).toBe(200);
   pairing = (await api("POST", "/api/auth/pair", { code: opened.body.code })).body;
   expect(pairing.token).toMatch(/^omb_sess_/);
+  const cua = join(fixture.info.dataDir, "cua.mjs");
+  writeFileSync(cua, `
+    import { createInterface } from "node:readline";
+    let clicked = false;
+    createInterface({ input: process.stdin }).on("line", (line) => {
+      const { id, method, params } = JSON.parse(line);
+      if (id === undefined) return;
+      if (params?.name === "click") clicked = true;
+      const result = method === "initialize" ? { protocolVersion: "2024-11-05", capabilities: { tools: {} } }
+        : method === "tools/list" ? { tools: [{ name: "get_window_state" }, { name: "click" }] }
+        : { content: [{ type: "text", text: clicked ? "clicked" : "ready" }] };
+      console.log(JSON.stringify({ jsonrpc: "2.0", id, result }));
+    });
+  `);
   connector = createComputerSharing({
-    file: grantFile, environments: () => [env], cuaConnection: async () => null,
+    file: grantFile, environments: () => [env], cuaConnection: async () => ({ mcpCommand: process.execPath, mcpArgs: [cua] }),
+    hostControl: async () => ({ renew: async () => {}, release: async () => {} }),
+    idleSeconds: () => 60,
     enabled: async () => localSharingEnabled,
     fetch: (url: string, init: RequestInit) => fetch(url, { ...init, headers: { ...init.headers, authorization: `Bearer ${pairing.token}` } }),
   });
   bot = (await api("POST", "/api/bots", { name: "Shared desktop tester" })).body.bot;
   proxy = await agentProxyFor(bot.id, pairing.token, "Inspect the folder shared by my desktop; do not use files on the server.");
   createInterface({ input: proxy.stdout! }).on("line", line => { const msg = JSON.parse(line); waiting.get(msg.id)?.(msg); waiting.delete(msg.id); });
+  const { systemPrompt } = JSON.parse(readFileSync(join(fixture.info.dataDir, "fake-claude-dump.json"), "utf8"));
+  expect(systemPrompt).toContain("first call list_shared_computers");
+  expect(systemPrompt).toContain("requires no select_computer or Screen panel changes");
   await rpc("initialize", { protocolVersion: "2024-11-05" });
 }, 30_000);
 
@@ -146,8 +165,8 @@ it("explicit edits and terminal work; old credentials and other sessions cannot 
   await expect.poll(() => connector.state(env.id).connected, { timeout: 8000 }).toBe(true);
   const before = data(await operation("read_file", { path: "brief.txt" }));
   expect(data(await operation("write_file", { path: "brief.txt", content: "Reviewed", expected_sha256: before.sha256 })).written).toBe(true);
-  expect(readFileSync(join(folder.path, "brief.txt"), "utf8")).toBe("Reviewed");
-  expect(data(await operation("run_command", { command: "echo shared-desktop-ok" })).output).toContain("shared-desktop-ok");
+  expect(data(await operation("read_file", { path: "brief.txt" })).content).toBe("Reviewed");
+  expect(data(await operation("run_command", { command: "echo shared-desktop-ok" }))).toMatchObject({ exitCode: 0, output: expect.stringContaining("shared-desktop-ok") });
   const grant = storedGrant();
   const auth = { authorization: `Bearer ${pairing.token}` };
   expect((await api("POST", `/api/shared-computers/${grant.id}/lease`, {}, auth)).status).toBe(403);
@@ -230,6 +249,22 @@ it("a routine acts for nobody, even one the lender created: it sees and uses no 
   } finally { routine.kill(); }
   evidence.push("fail-closed principal: a routine turn (created by the lender) sees no computers");
 }, 45_000);
+
+it("observes and acts on a shared desktop from the normal conversation", async () => {
+  await connector.save(env, { folders: [], terminal: false, computer: true }, await connector.identity(env));
+  await expect.poll(() => connector.state(env.id).connected, { timeout: 8000 }).toBe(true);
+  const available = await computers();
+  expect(available).toEqual([expect.objectContaining({ id: storedGrant().id, computer: true })]);
+  const computer_id = available[0].id;
+  expect(data(await tool("shared_computer", { computer_id, action: "computer_tools" })).tools)
+    .toContainEqual(expect.objectContaining({ name: "click" }));
+  const state = () => tool("shared_computer", { computer_id, action: "computer_call", tool_name: "get_window_state" });
+  expect((await state()).content[0].text).toBe("ready");
+  const click = await tool("shared_computer", { computer_id, action: "computer_call", tool_name: "click", arguments: { x: 10, y: 10 } });
+  expect(click.isError, JSON.stringify(click)).not.toBe(true);
+  expect((await state()).content[0].text).toBe("clicked");
+  evidence.push("desktop list, observe, click and read-back through the self-hosted conversation; synthetic desktop driver");
+}, 60_000);
 
 it("a bot whose computer is off cannot drive the lent screen, even when screen control is lent", async () => {
   await connector.save(env, { folders: [{ ...folder, write: true }], terminal: true, computer: true }, await connector.identity(env));

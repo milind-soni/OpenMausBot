@@ -270,16 +270,14 @@ const CLOUD_HOME_WORDING: ReadonlyArray<readonly [string, string]> = [
   [" Never silently replace an explicitly requested VM with the host desktop.", ""],
 ];
 
-/** On a Cloud home the person's own computer is never one of the places above: shared_computer reaches it, whatever
- * place the conversation has. Saying it can't be reached there turned a bot away from a PC lent with its screen. */
-function ownComputerSentence(lent: ReadonlyArray<{ name: string; platform: LentPlatform | null }>, place: string | null): string {
+function ownComputerSentence(lent: ReadonlyArray<{ name: string; platform: LentPlatform | null }>): string {
   const { theirs } = theirComputer(lent);
-  return ` ${theirs[0]!.toUpperCase()}${theirs.slice(1)} is reached only through shared_computer, never select_computer: when they ask for something on it, check list_shared_computers, then use shared_computer on it (computer_tools, then computer_call, for its apps and screen), whatever this conversation is pinned to. If list_shared_computers says this conversation can't use it, or that it doesn't lend what you need, say so in one sentence${place ? ` and don't do it on ${place} instead unless they ask` : ""}.`;
+  return ` ${theirs[0]!.toUpperCase()}${theirs.slice(1)} is reached through shared_computer. When asked to work on a shared computer, first call list_shared_computers to find its current computer_id and grants. Use shared_computer with the granted folder_id for relative file paths, run_command for terminal access, and computer_tools then computer_call for desktop work. This path works independently of conversation pins and requires no select_computer or Screen panel changes. If the device or requested grant is unavailable, report what the listing says and wait for the person to name another device before switching.`;
 }
 
 /** How to choose a computer on a turn that may: the same for every such turn, so it can sit in the cached half of the
  * system prompt (computerSelectionPrompt) while a turn says only that it may (SELECTION_HERE). */
-const SELECTION_RULES = " For a screen task, use select_computer with no arguments when you need to see the actual available targets, and pick the requested place from its result; if the user left the place open, use a suitable available target or surface auto instead of asking them to operate the menu. Browser-only work can stay in Browser; when it needs desktop apps or capabilities the current Browser lacks, select an available Local VM without asking the user to switch it manually. Choose before acting, and do not repeat completed actions if the task continues elsewhere. OpenMausBot can start an existing configured computer and highlight the selected target; if the right tools are already mounted, use them directly. On a pending switch, end this turn: the original request resumes automatically with the new tools, and then you must carry out the task. Ask for input only for a genuine blocker (missing setup, a required sign-in, an approval). Never silently replace an explicitly requested VM with the host desktop. If no suitable computer is running but its provider is configured, select_computer can provision one for this computer task; reuse existing resources first, and never provision just for ordinary chat or inspection.";
+const SELECTION_RULES = " For a screen task on a selectable work surface, use select_computer with no arguments when you need to see the actual available targets, and pick the requested place from its result; if the user left the place open, use a suitable available target or surface auto instead of asking them to operate the menu. Browser-only work can stay in Browser; when it needs desktop apps or capabilities the current Browser lacks, select an available Local VM without asking the user to switch it manually. Choose before acting, and do not repeat completed actions if the task continues elsewhere. OpenMausBot can start an existing configured computer and highlight the selected target; if the right tools are already mounted, use them directly. On a pending switch, end this turn: the original request resumes automatically with the new tools, and then you must carry out the task. Ask for input only for a genuine blocker (missing setup, a required sign-in, an approval). Never silently replace an explicitly requested VM with the host desktop. If no suitable computer is running but its provider is configured, select_computer can provision one for this computer task; reuse existing resources first, and never provision just for ordinary chat or inspection.";
 const SELECTION_HERE = " This turn you may choose where to work with select_computer, by your rules for choosing a computer.";
 
 /** The standing half of choosing a computer, for a bot whose turns may choose; SELECTION_HERE says which turns do. */
@@ -290,7 +288,7 @@ export function computerSelectionPrompt(opts: { cloudHome?: boolean } = {}): str
 }
 
 /** Built from what was actually mounted, never from the setting, so the model is only told about tools it can call.
- * `ownComputer`: on a Cloud home, the person's lent computers (newest first) when this turn has the shared-computer tools. */
+ * `ownComputer`: when this turn has the shared-computer tools, known Cloud home computers (newest first) or an empty list for on-demand discovery. */
 export function surfacePrompt(
   mounted: MountedSurfaces,
   opts: { pinned?: Surface | null; note?: string; canSelect?: boolean; selectionRules?: boolean; cloudHome?: boolean; botOpened?: boolean;
@@ -331,10 +329,13 @@ export function surfacePrompt(
   if (computer || mounted.browser) text += CONNECTED_APP_FIRST;
   if (computer || mounted.browser) text += " For online research, use the selected OpenMausBot browser when a search service is unavailable. A failed tool proves only that this attempt failed, not that every browser is unavailable. Inspect the current page after navigation; report a sign-in page, redirect or error as such. A completed model turn is not proof that the user's task succeeded.";
   if (opts.cloudHome) for (const [desktop, cloudHome] of CLOUD_HOME_WORDING) text = text.replace(desktop, cloudHome);
-  if (opts.cloudHome && opts.ownComputer) {
-    // What this turn's places reach, never every screen: their own computer is reachable too, through shared_computer.
+  if (opts.ownComputer) {
     for (const [nowhere, places] of OWN_COMPUTER_WORDING) text = text.replace(nowhere, places);
-    text = text.replace(UNREACHABLE_OWN, `${theirComputer(opts.ownComputer).theirs} is not one of these places`) + ownComputerSentence(opts.ownComputer, computer);
+    text = text.replace(UNREACHABLE_OWN, `${theirComputer(opts.ownComputer).theirs} is not one of these places`)
+      .replace("this computer is the user's host,", "this computer is the server's local desktop,")
+      .replace("If the requested place differs from the mounted one", "For places other than shared computers, if the requested place differs from the mounted one")
+      .replace("If asked for screen work,", "If asked for screen work outside a shared computer,");
+    text = ownComputerSentence(opts.ownComputer) + text;
   }
   if (opts.thisComputer && !opts.cloudHome && !reportBack && mounted.computer !== "local") {
     text += ownFilesSentence(opts.thisComputer, mounted.computer, Boolean(opts.canSelect));
