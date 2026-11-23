@@ -79,6 +79,15 @@ describe("task workspace retention", () => {
     expect(existsSync(join(outside, "node_modules", "keep.js"))).toBe(true);
   });
 
+  it("skips a bot folder that is a link", () => {
+    const outside = join(root, "outside");
+    file(join(outside, "linked", "repo", "node_modules", "keep.js"));
+    symlinkSync(outside, join(root, "linkbot"), "junction");
+
+    expect(sweepTaskWorkspaceBuildFolders([candidate({ botId: "linkbot", threadId: "linked" })], 14, now, root)).toEqual([]);
+    expect(existsSync(join(outside, "linked", "repo", "node_modules", "keep.js"))).toBe(true);
+  });
+
   it("ignores ids that are not plain folder names and threads without a workspace", () => {
     file(join(root, "escape", "node_modules", "keep.js"));
 

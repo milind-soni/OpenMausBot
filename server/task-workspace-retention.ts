@@ -26,6 +26,14 @@ function isRecreatable(parent: string, name: string): boolean {
   return false;
 }
 
+function isRealDirectory(path: string): boolean {
+  try {
+    return lstatSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 function findRecreatable(dir: string, depth: number, found: string[]): void {
   let entries;
   try {
@@ -35,8 +43,10 @@ function findRecreatable(dir: string, depth: number, found: string[]): void {
   }
   for (const entry of entries) {
     if (!entry.isDirectory() || entry.name === ".git") continue;
-    if (isRecreatable(dir, entry.name)) found.push(join(dir, entry.name));
-    else if (depth < MAX_DEPTH) findRecreatable(join(dir, entry.name), depth + 1, found);
+    const path = join(dir, entry.name);
+    if (!isRealDirectory(path)) continue;
+    if (isRecreatable(dir, entry.name)) found.push(path);
+    else if (depth < MAX_DEPTH) findRecreatable(path, depth + 1, found);
   }
 }
 
@@ -53,15 +63,13 @@ export function sweepTaskWorkspaceBuildFolders(
     if (candidate.unread || candidate.busy || candidate.openDirectHandoff) continue;
     if (candidate.lastActiveAt >= cutoff) continue;
     if (!ID.test(candidate.botId) || !ID.test(candidate.threadId)) continue;
-    const workspace = join(root, candidate.botId, candidate.threadId);
-    try {
-      if (!lstatSync(workspace).isDirectory()) continue;
-    } catch {
-      continue;
-    }
+    const botDir = join(root, candidate.botId);
+    const workspace = join(botDir, candidate.threadId);
+    if (!isRealDirectory(botDir) || !isRealDirectory(workspace)) continue;
     const found: string[] = [];
     findRecreatable(workspace, 1, found);
     for (const path of found) {
+      if (!isRealDirectory(path)) continue;
       try {
         rmSync(path, { recursive: true, force: true, maxRetries: 2 });
         removed.push(path);
