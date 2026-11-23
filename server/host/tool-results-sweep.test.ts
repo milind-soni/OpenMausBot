@@ -92,6 +92,32 @@ describe("the tool results' sweep", () => {
     expect((await sweepToolResults({ root: join(base, "missing"), mode: "on", now: () => NOW })).files).toBe(0);
   });
 
+  it("over the cap removes results under a day old too, oldest first, never one under an hour", async () => {
+    const files = seed();
+    const hours = [20, 10, 2].map((h) => put(join(root, "thread-c", `${h}h.json`), h * 60 * 60_000, 3_000));
+    const minutes = put(join(root, "thread-c", "30m.json"), 30 * 60_000, 3_000);
+    // Under a day: newHook 1 KB, newGate 1 KB, 20h, 10h, 2h and 30m at 3 KB each, 14 KB against an 8 KB cap.
+    const result = await sweepToolResults({ root, mode: "on", cap: 8_000, now: () => NOW });
+    expect(result.overCap).toBe(3);
+    for (const file of [files.newHook, hours[0]!, hours[1]!]) expect(existsSync(file), file).toBe(false);
+    for (const file of [hours[2]!, minutes, files.newGate]) expect(existsSync(file), file).toBe(true);
+    const tight = await sweepToolResults({ root, mode: "on", cap: 0, now: () => NOW });
+    expect(tight.overCap).toBe(1);
+    expect(existsSync(hours[2]!)).toBe(false);
+    expect(existsSync(minutes)).toBe(true);
+    expect(existsSync(files.newGate)).toBe(true);
+  });
+
+  it("removes nothing while a turn runs, and goes on once none does", async () => {
+    const files = seed();
+    const busy = await sweepToolResults({ root, mode: "on", turnsRunning: () => true, turnWaitMs: 0, now: () => NOW });
+    expect(busy.stopped).toBe(true);
+    expect(existsSync(files.oldHook)).toBe(true);
+    let checks = 0;
+    const later = await sweepToolResults({ root, mode: "on", turnsRunning: () => checks++ < 1, turnWaitMs: 60_000, now: () => NOW });
+    expect(later.files).toBe(2);
+  }, 30_000);
+
   it("stops for a move or backup", async () => {
     const files = seed();
     const result = await sweepToolResults({ root, mode: "on", paused: () => true, now: () => NOW });
