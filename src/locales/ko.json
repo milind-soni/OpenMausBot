@@ -7678,5 +7678,12 @@
   "skillBurger.list.remove": "{name} 제거",
   "skillBurger.list.removed": "{name}을(를) 제거했습니다.",
   "skillBurger.list.removeFailed": "이 스킬을 제거하지 못했습니다. 다시 시도하세요.",
-  "skillBurger.list.loadFailed": "저장된 스킬을 불러오지 못했습니다."
+  "skillBurger.list.loadFailed": "저장된 스킬을 불러오지 못했습니다.",
+  "skillBurger.everyChat": "모든 채팅에서 사용",
+  "skillBurger.everyChatFailed": "이 Skill Burger를 사용하는 곳을 바꾸지 못했습니다. 다시 시도하세요.",
+  "skillBurger.renameFailed": "이 Skill Burger의 이름을 바꾸지 못했습니다. 다시 시도하세요.",
+  "skillBurger.menu.aria": "{name} 더 보기",
+  "skillBurger.menu.rename": "이름 바꾸기…",
+  "skillBurger.card.everyChat": "모든 채팅",
+  "skillBurger.page.empty": "봇이 만든 Skill Burger가 여기에 표시됩니다."
 }

@@ -4130,5 +4130,12 @@
   "skillBurger.list.remove": "Вилучити {name}",
   "skillBurger.list.removed": "{name} вилучено.",
   "skillBurger.list.removeFailed": "Не вдалося вилучити навичку. Спробуйте ще раз.",
-  "skillBurger.list.loadFailed": "Не вдалося завантажити збережені навички."
+  "skillBurger.list.loadFailed": "Не вдалося завантажити збережені навички.",
+  "skillBurger.everyChat": "Використовувати в кожному чаті",
+  "skillBurger.everyChatFailed": "Не вдалося змінити, де використовується цей Skill Burger. Спробуйте ще раз.",
+  "skillBurger.renameFailed": "Не вдалося перейменувати цей Skill Burger. Спробуйте ще раз.",
+  "skillBurger.menu.aria": "Більше для {name}",
+  "skillBurger.menu.rename": "Перейменувати…",
+  "skillBurger.card.everyChat": "Кожен чат",
+  "skillBurger.page.empty": "Тут з’являються Skill Burger ваших ботів."
 }

@@ -6453,5 +6453,12 @@
   "skillBurger.list.remove": "Quitar {name}",
   "skillBurger.list.removed": "{name} quitada.",
   "skillBurger.list.removeFailed": "No se pudo quitar esta habilidad. Inténtalo de nuevo.",
-  "skillBurger.list.loadFailed": "No se pudieron cargar las habilidades guardadas."
+  "skillBurger.list.loadFailed": "No se pudieron cargar las habilidades guardadas.",
+  "skillBurger.everyChat": "Usar en todos los chats",
+  "skillBurger.everyChatFailed": "No se pudo cambiar dónde se usa este Skill Burger. Inténtalo de nuevo.",
+  "skillBurger.renameFailed": "No se pudo cambiar el nombre de este Skill Burger. Inténtalo de nuevo.",
+  "skillBurger.menu.aria": "Más de {name}",
+  "skillBurger.menu.rename": "Cambiar nombre…",
+  "skillBurger.card.everyChat": "Todos los chats",
+  "skillBurger.page.empty": "Aquí aparecen los Skill Burgers que hacen tus bots."
 }

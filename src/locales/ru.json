@@ -7203,5 +7203,12 @@
   "skillBurger.list.remove": "Удалить {name}",
   "skillBurger.list.removed": "{name} удалён.",
   "skillBurger.list.removeFailed": "Не удалось удалить навык. Попробуйте ещё раз.",
-  "skillBurger.list.loadFailed": "Не удалось загрузить сохранённые навыки."
+  "skillBurger.list.loadFailed": "Не удалось загрузить сохранённые навыки.",
+  "skillBurger.everyChat": "Использовать в каждом чате",
+  "skillBurger.everyChatFailed": "Не удалось изменить, где используется этот Skill Burger. Попробуйте ещё раз.",
+  "skillBurger.renameFailed": "Не удалось переименовать этот Skill Burger. Попробуйте ещё раз.",
+  "skillBurger.menu.aria": "Ещё для {name}",
+  "skillBurger.menu.rename": "Переименовать…",
+  "skillBurger.card.everyChat": "Каждый чат",
+  "skillBurger.page.empty": "Здесь появляются Skill Burger ваших ботов."
 }

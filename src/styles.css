@@ -3870,3 +3870,6 @@ button:disabled.bg-danger {
 }
 :root[data-reduced-motion="true"] :is(.burger-layer, .burger-stacked .burger-bun-bottom, .burger-stacked .burger-bun-bottom > *) { animation: none; }
 :root[data-reduced-motion="true"] .skill-burger .thinking-sheen { display: none; }
+.burger-mini-slice { animation: none; border-radius: 4px; }
+.skill-burger .burger-bun-top:not(:has(*)) { border-radius: 50% 50% 4px 4px / 100% 100% 4px 4px; }
+.skill-burger .burger-bun-bottom:empty { border-radius: 4px 4px 50% 50% / 4px 4px 100% 100%; }

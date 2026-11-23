@@ -7988,5 +7988,12 @@
   "skillBurger.list.remove": "{name} を削除",
   "skillBurger.list.removed": "{name} を削除しました。",
   "skillBurger.list.removeFailed": "このスキルを削除できませんでした。もう一度お試しください。",
-  "skillBurger.list.loadFailed": "保存したスキルを読み込めませんでした。"
+  "skillBurger.list.loadFailed": "保存したスキルを読み込めませんでした。",
+  "skillBurger.everyChat": "すべてのチャットで使う",
+  "skillBurger.everyChatFailed": "この Skill Burger を使う場所を変更できませんでした。もう一度お試しください。",
+  "skillBurger.renameFailed": "この Skill Burger の名前を変更できませんでした。もう一度お試しください。",
+  "skillBurger.menu.aria": "{name} のその他の操作",
+  "skillBurger.menu.rename": "名前を変更…",
+  "skillBurger.card.everyChat": "すべてのチャット",
+  "skillBurger.page.empty": "ボットが作った Skill Burger はここに表示されます。"
 }

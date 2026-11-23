@@ -4155,5 +4155,12 @@
   "skillBurger.list.remove": "{name} entfernen",
   "skillBurger.list.removed": "{name} entfernt.",
   "skillBurger.list.removeFailed": "Dieser Skill konnte nicht entfernt werden. Versuch es noch einmal.",
-  "skillBurger.list.loadFailed": "Gespeicherte Skills konnten nicht geladen werden."
+  "skillBurger.list.loadFailed": "Gespeicherte Skills konnten nicht geladen werden.",
+  "skillBurger.everyChat": "In jedem Chat verwenden",
+  "skillBurger.everyChatFailed": "Konnte nicht ändern, wo dieser Skill Burger verwendet wird. Versuch es noch einmal.",
+  "skillBurger.renameFailed": "Dieser Skill Burger konnte nicht umbenannt werden. Versuch es noch einmal.",
+  "skillBurger.menu.aria": "Mehr zu {name}",
+  "skillBurger.menu.rename": "Umbenennen…",
+  "skillBurger.card.everyChat": "Jeder Chat",
+  "skillBurger.page.empty": "Skill Burger deiner Bots erscheinen hier."
 }

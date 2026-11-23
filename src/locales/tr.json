@@ -5948,5 +5948,12 @@
   "skillBurger.list.remove": "{name} kaldır",
   "skillBurger.list.removed": "{name} kaldırıldı.",
   "skillBurger.list.removeFailed": "Bu beceri kaldırılamadı. Tekrar deneyin.",
-  "skillBurger.list.loadFailed": "Kaydedilen beceriler yüklenemedi."
+  "skillBurger.list.loadFailed": "Kaydedilen beceriler yüklenemedi.",
+  "skillBurger.everyChat": "Her sohbette kullan",
+  "skillBurger.everyChatFailed": "Bu Skill Burger'ın kullanıldığı yer değiştirilemedi. Tekrar deneyin.",
+  "skillBurger.renameFailed": "Bu Skill Burger yeniden adlandırılamadı. Tekrar deneyin.",
+  "skillBurger.menu.aria": "{name} için daha fazla",
+  "skillBurger.menu.rename": "Yeniden adlandır…",
+  "skillBurger.card.everyChat": "Her sohbet",
+  "skillBurger.page.empty": "Botlarınızın yaptığı Skill Burger'lar burada görünür."
 }

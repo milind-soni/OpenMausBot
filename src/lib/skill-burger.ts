@@ -29,11 +29,34 @@ export async function saveBurger(input: { botId: string; threadId: string; summa
   return skill;
 }
 
-/** Undo or remove. `sha256` is the copy to take away: one that changed since is refused. */
-export async function removeBurger(name: string, sha256?: string): Promise<void> {
-  const query = sha256 ? `?sha256=${encodeURIComponent(sha256)}` : "";
-  await api(`/api/skill-burgers/${encodeURIComponent(name)}${query}`, { method: "DELETE" });
+/** Where a saved burger is, as the API takes it: a bot's own burger by its bot, one used in every chat by name alone. */
+const placeQuery = (skill: Pick<SavedWorkflow, "everyChat" | "botId">) => (skill.everyChat || !skill.botId ? "" : `botId=${encodeURIComponent(skill.botId)}`);
+const path = (skill: Pick<SavedWorkflow, "name" | "everyChat" | "botId">, extra = "") => {
+  const query = [placeQuery(skill), extra].filter(Boolean).join("&");
+  return `/api/skill-burgers/${encodeURIComponent(skill.name)}${query ? `?${query}` : ""}`;
+};
+
+/** Undo or remove: takes away the copy with this hash; one that changed since is refused. */
+export async function removeBurger(skill: Pick<SavedWorkflow, "name" | "sha256" | "everyChat" | "botId">): Promise<void> {
+  await api(path(skill, `sha256=${encodeURIComponent(skill.sha256)}`), { method: "DELETE" });
   changed();
+}
+
+/** "Use in every chat": on moves the burger into the shared library for every bot, off moves it back to its bot. */
+export async function setBurgerEveryChat(skill: Pick<SavedWorkflow, "name" | "sha256" | "everyChat" | "botId">, everyChat: boolean): Promise<SavedWorkflow> {
+  const { skill: moved } = await api<{ skill: SavedWorkflow }>(`/api/skill-burgers/${encodeURIComponent(skill.name)}`, {
+    method: "PATCH", body: JSON.stringify({ everyChat, sha256: skill.sha256, ...(skill.everyChat || !skill.botId ? {} : { botId: skill.botId }) }),
+  });
+  changed();
+  return moved;
+}
+
+export async function renameBurger(skill: Pick<SavedWorkflow, "name" | "sha256" | "everyChat" | "botId">, to: string): Promise<SavedWorkflow> {
+  const { skill: renamed } = await api<{ skill: SavedWorkflow }>(`/api/skill-burgers/${encodeURIComponent(skill.name)}`, {
+    method: "PATCH", body: JSON.stringify({ rename: to, sha256: skill.sha256, ...(skill.everyChat || !skill.botId ? {} : { botId: skill.botId }) }),
+  });
+  changed();
+  return renamed;
 }
 
 export function useSavedBurgers(): { skills: SavedWorkflow[] | null; error: boolean; refresh: () => void } {
@@ -53,15 +76,18 @@ export function useSavedBurgers(): { skills: SavedWorkflow[] | null; error: bool
 }
 
 /** The saved workflow itself, read before a removal so its Undo can put it back. */
-export async function readBurgerWorkflow(name: string): Promise<unknown> {
-  const { workflow } = await api<{ workflow: unknown }>(`/api/skill-burgers/${encodeURIComponent(name)}`);
+export async function readBurgerWorkflow(skill: Pick<SavedWorkflow, "name" | "everyChat" | "botId">): Promise<unknown> {
+  const { workflow } = await api<{ workflow: unknown }>(path(skill));
   return workflow;
 }
 
-export async function restoreBurger(name: string, workflow: unknown): Promise<SavedWorkflow> {
-  const { skill } = await api<{ skill: SavedWorkflow }>("/api/skill-burgers", { method: "POST", body: JSON.stringify({ name, workflow }) });
+/** Puts a removed burger back where it was. */
+export async function restoreBurger(skill: Pick<SavedWorkflow, "name" | "everyChat" | "botId">, workflow: unknown): Promise<SavedWorkflow> {
+  const { skill: restored } = await api<{ skill: SavedWorkflow }>("/api/skill-burgers", {
+    method: "POST", body: JSON.stringify({ name: skill.name, workflow, ...(skill.botId ? { botId: skill.botId } : {}), ...(skill.everyChat ? { everyChat: true } : {}) }),
+  });
   changed();
-  return skill;
+  return restored;
 }
 
 /** The top bun's one line for a finished run, from the bot's small text model; null when there is none. */
@@ -72,4 +98,12 @@ export async function fetchBurgerSummary(botId: string, threadId: string): Promi
   } catch {
     return null;
   }
+}
+
+/** Runs saved in this window, by run: a card that comes back (another chat opened, then this one) shows the save. */
+const savedRuns = new Map<string, SavedWorkflow>();
+export const savedRun = (run: string) => savedRuns.get(run);
+export function rememberSavedRun(run: string, skill: SavedWorkflow | null): void {
+  if (skill) savedRuns.set(run, skill);
+  else savedRuns.delete(run);
 }

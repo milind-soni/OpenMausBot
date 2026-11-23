@@ -11342,5 +11342,12 @@
   "skillBurger.list.remove": "Rimuovi {name}",
   "skillBurger.list.removed": "{name} rimossa.",
   "skillBurger.list.removeFailed": "Impossibile rimuovere questa skill. Riprova.",
-  "skillBurger.list.loadFailed": "Impossibile caricare le skill salvate."
+  "skillBurger.list.loadFailed": "Impossibile caricare le skill salvate.",
+  "skillBurger.everyChat": "Usa in ogni chat",
+  "skillBurger.everyChatFailed": "Impossibile cambiare dove si usa questo Skill Burger. Riprova.",
+  "skillBurger.renameFailed": "Impossibile rinominare questo Skill Burger. Riprova.",
+  "skillBurger.menu.aria": "Altro per {name}",
+  "skillBurger.menu.rename": "Rinomina…",
+  "skillBurger.card.everyChat": "Ogni chat",
+  "skillBurger.page.empty": "Qui compaiono gli Skill Burger dei tuoi bot."
 }

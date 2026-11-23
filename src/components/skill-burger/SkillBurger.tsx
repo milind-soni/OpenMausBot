@@ -6,8 +6,9 @@ import type { BurgerLayer } from "../../../shared/skill-burger/layers";
 import { cn } from "@/lib/cn";
 import { MAUS_COLORS } from "@/lib/mascot";
 import { t } from "@/lib/i18n";
-import { burgerStartsFolded, removeBurger, saveBurger, type SavedWorkflow } from "@/lib/skill-burger";
+import { burgerStartsFolded, rememberSavedRun, removeBurger, saveBurger, savedRun, type SavedWorkflow } from "@/lib/skill-burger";
 import { ServiceIcon } from "../ServiceIcon";
+import { EveryChatToggle } from "./EveryChatToggle";
 
 /** One layer's icon: the app's own mark, or a plain icon for a command, a file, a page or the AI. */
 export function LayerIcon({ kind, app }: { kind: BurgerLayer["kind"]; app?: string }) {
@@ -62,7 +63,9 @@ const FIELD = "w-full min-w-0 rounded-md border border-hairline/60 bg-card px-1.
 
 type Saving = { state: "idle" } | { state: "saving" } | { state: "saved"; skill: SavedWorkflow } | { state: "undone" } | { state: "error"; message: string };
 
-export function SkillBurger({ layers, summary: initialSummary, canSave, botId, threadId, onDismiss }: {
+export function SkillBurger({ run, layers, summary: initialSummary, canSave, botId, threadId, onDismiss }: {
+  /** The run this card is for, so a save is remembered when the card comes back. */
+  run: string;
   layers: BurgerLayer[];
   summary: string;
   /** False while the bot still works, or for someone who can't write in this chat. */
@@ -75,7 +78,8 @@ export function SkillBurger({ layers, summary: initialSummary, canSave, botId, t
   /** The person's own words, once they changed them; until then the summary follows the ask. */
   const [own, setOwn] = useState<{ summary: string | null; name: string }>({ summary: null, name: "" });
   const [field, setField] = useState<{ summary: string; name: string } | null>(null);
-  const [saving, setSaving] = useState<Saving>({ state: "idle" });
+  const [saving, setSaving] = useState<Saving>(() => { const skill = savedRun(run); return skill ? { state: "saved", skill } : { state: "idle" }; });
+  useEffect(() => { rememberSavedRun(run, saving.state === "saved" ? saving.skill : null); }, [run, saving]);
   const summaryField = useRef<HTMLInputElement>(null);
   const summary = own.summary ?? initialSummary;
   const name = own.name;
@@ -118,7 +122,7 @@ export function SkillBurger({ layers, summary: initialSummary, canSave, botId, t
   const undo = async () => {
     if (!saved) return;
     try {
-      await removeBurger(saved.name, saved.sha256);
+      await removeBurger(saved);
       setSaving({ state: "undone" });
     } catch (cause) {
       setSaving({ state: "error", message: cause instanceof Error && cause.message ? cause.message : t("skillBurger.undoFailed") });
@@ -174,6 +178,7 @@ export function SkillBurger({ layers, summary: initialSummary, canSave, botId, t
             </button>
           )}
           <span role="status" aria-live="polite" aria-atomic="true" className="sr-only">{count}</span>
+          {saved && <EveryChatToggle compact skill={saved} onMoved={(skill) => setSaving({ state: "saved", skill })} className="mt-1" />}
         </div>
         <button type="button" onClick={() => setFolded((value) => !value)} aria-expanded={!folded} aria-label={toggleLabel} title={toggleLabel} className={ICON_BUTTON}>
           {folded ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronUp size={14} aria-hidden="true" />}

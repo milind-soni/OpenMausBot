@@ -11541,5 +11541,12 @@
   "skillBurger.list.remove": "Remover {name}",
   "skillBurger.list.removed": "{name} removida.",
   "skillBurger.list.removeFailed": "Não foi possível remover esta habilidade. Tente de novo.",
-  "skillBurger.list.loadFailed": "Não foi possível carregar as habilidades salvas."
+  "skillBurger.list.loadFailed": "Não foi possível carregar as habilidades salvas.",
+  "skillBurger.everyChat": "Usar em todos os chats",
+  "skillBurger.everyChatFailed": "Não foi possível mudar onde este Skill Burger é usado. Tente de novo.",
+  "skillBurger.renameFailed": "Não foi possível renomear este Skill Burger. Tente de novo.",
+  "skillBurger.menu.aria": "Mais de {name}",
+  "skillBurger.menu.rename": "Renomear…",
+  "skillBurger.card.everyChat": "Todos os chats",
+  "skillBurger.page.empty": "Os Skill Burgers dos seus bots aparecem aqui."
 }

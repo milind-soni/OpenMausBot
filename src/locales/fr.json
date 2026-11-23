@@ -3858,5 +3858,12 @@
   "skillBurger.list.remove": "Retirer {name}",
   "skillBurger.list.removed": "{name} retirée.",
   "skillBurger.list.removeFailed": "Impossible de retirer cette compétence. Réessayez.",
-  "skillBurger.list.loadFailed": "Impossible de charger les compétences enregistrées."
+  "skillBurger.list.loadFailed": "Impossible de charger les compétences enregistrées.",
+  "skillBurger.everyChat": "Utiliser dans chaque chat",
+  "skillBurger.everyChatFailed": "Impossible de changer où ce Skill Burger est utilisé. Réessayez.",
+  "skillBurger.renameFailed": "Impossible de renommer ce Skill Burger. Réessayez.",
+  "skillBurger.menu.aria": "Plus pour {name}",
+  "skillBurger.menu.rename": "Renommer…",
+  "skillBurger.card.everyChat": "Chaque chat",
+  "skillBurger.page.empty": "Les Skill Burgers de vos bots apparaissent ici."
 }

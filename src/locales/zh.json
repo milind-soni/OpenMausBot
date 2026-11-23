@@ -10139,5 +10139,12 @@
   "skillBurger.list.remove": "移除 {name}",
   "skillBurger.list.removed": "已移除 {name}。",
   "skillBurger.list.removeFailed": "无法移除这个技能，请重试。",
-  "skillBurger.list.loadFailed": "无法加载已保存的技能。"
+  "skillBurger.list.loadFailed": "无法加载已保存的技能。",
+  "skillBurger.everyChat": "在每个聊天中使用",
+  "skillBurger.everyChatFailed": "无法更改这个 Skill Burger 的使用范围，请重试。",
+  "skillBurger.renameFailed": "无法重命名这个 Skill Burger，请重试。",
+  "skillBurger.menu.aria": "{name} 的更多操作",
+  "skillBurger.menu.rename": "重命名…",
+  "skillBurger.card.everyChat": "每个聊天",
+  "skillBurger.page.empty": "机器人制作的 Skill Burger 会显示在这里。"
 }

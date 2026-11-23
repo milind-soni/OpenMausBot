@@ -37,6 +37,7 @@ export function SkillBurgerSlot({ botId, threadId, busy, canWrite, messages, liv
     <div className="flex justify-end px-4 pb-2">
       <SkillBurger
         key={`${transcriptKey}:${run}`}
+        run={`${transcriptKey}:${run}`}
         layers={layers}
         summary={summary.slice(0, 160)}
         canSave={canWrite && !busy}

@@ -7149,5 +7149,12 @@
   "skillBurger.list.remove": "Usuń {name}",
   "skillBurger.list.removed": "Usunięto {name}.",
   "skillBurger.list.removeFailed": "Nie udało się usunąć tej umiejętności. Spróbuj ponownie.",
-  "skillBurger.list.loadFailed": "Nie udało się wczytać zapisanych umiejętności."
+  "skillBurger.list.loadFailed": "Nie udało się wczytać zapisanych umiejętności.",
+  "skillBurger.everyChat": "Używaj w każdym czacie",
+  "skillBurger.everyChatFailed": "Nie udało się zmienić, gdzie używany jest ten Skill Burger. Spróbuj ponownie.",
+  "skillBurger.renameFailed": "Nie udało się zmienić nazwy tego Skill Burger. Spróbuj ponownie.",
+  "skillBurger.menu.aria": "Więcej dla {name}",
+  "skillBurger.menu.rename": "Zmień nazwę…",
+  "skillBurger.card.everyChat": "Każdy czat",
+  "skillBurger.page.empty": "Tu pojawiają się Skill Burgery Twoich botów."
 }

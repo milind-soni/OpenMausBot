@@ -25,6 +25,7 @@ import { inputCls } from "../bot-settings/field";
 import { ConflictNotice } from "../bot-settings/MemorySection";
 import { OrgSkillsCard } from "../bot-settings/OrgSkillsCard";
 import { SavedWorkflowsCard } from "../skill-burger/SavedWorkflowsCard";
+import { isBurgerSource } from "../../../shared/skill-burger/saved";
 import { SkillReviewDialog, skillSwitchOn, useManagedSkills, type ManagedSkill } from "../bot-settings/SkillsSection";
 import { useBotApps, type BotApp } from "../bot-settings/useBotApps";
 import { useChoosesVisibility, VisibilitySection } from "../bot-settings/VisibilitySection";
@@ -421,7 +422,7 @@ export function SkillsPage({ bot }: PageContext) {
   const [importing, setImporting] = useState(false);
   const [imported, setImported] = useState<string[]>([]);
   const libraryOn = skillsLibraryEnabled(state.config);
-  const own = skills.skills.filter((skill) => skill.origin !== "project");
+  const own = skills.skills.filter((skill) => skill.origin !== "project" && !isBurgerSource(skill.source));
   const project = skills.skills.filter((skill) => skill.origin === "project");
 
   const remove = async (skill: ManagedSkill) => {
@@ -466,7 +467,7 @@ export function SkillsPage({ bot }: PageContext) {
 
   return (
     <>
-      <SavedWorkflowsCard />
+      <SavedWorkflowsCard botId={bot.id} />
       <Card>
         {skills.loading ? (
           <NoteRow>{t("skills.loading")}</NoteRow>
