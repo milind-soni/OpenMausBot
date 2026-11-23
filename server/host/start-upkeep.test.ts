@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { TaskRecord } from "../store.ts";
-import { startUpkeep, THREAD_LOG_RETENTION_SWEEP_MS } from "./start-upkeep.ts";
+import { startUpkeep, taskWorkspaceRetentionOn, THREAD_LOG_RETENTION_SWEEP_MS } from "./start-upkeep.ts";
 
 const task = (threadId: string, extra: Partial<TaskRecord> = {}) => ({ threadId, closedBy: { at: 1 }, archivedAt: null, unread: false, ...extra }) as TaskRecord;
 
@@ -11,6 +11,30 @@ afterEach(() => {
 });
 
 describe("start-up upkeep", () => {
+  it("holds the task workspaces' sweep off unless OMB_TASK_WORKSPACE_RETENTION is on", async () => {
+    expect(taskWorkspaceRetentionOn({})).toBe(false);
+    expect(taskWorkspaceRetentionOn({ OMB_TASK_WORKSPACE_RETENTION: "0" })).toBe(false);
+    expect(taskWorkspaceRetentionOn({ OMB_TASK_WORKSPACE_RETENTION: "off" })).toBe(false);
+    expect(taskWorkspaceRetentionOn({ OMB_TASK_WORKSPACE_RETENTION: "remove" })).toBe(false);
+    for (const value of ["1", "on", " TRUE ", "yes"]) expect(taskWorkspaceRetentionOn({ OMB_TASK_WORKSPACE_RETENTION: value })).toBe(true);
+    vi.useFakeTimers();
+    vi.stubEnv("OMB_TASK_WORKSPACE_RETENTION", "");
+    const calls: string[] = [];
+    startUpkeep({
+      bots: () => [{ id: "bot", tasks: [task("idle")] }],
+      retentionDays: () => 30,
+      busy: () => false,
+      openDirectHandoff: () => false,
+      cleanupPartials: () => 0,
+      sweepLogs: () => { calls.push("logs"); return 0; },
+      sweepWorkspaces: () => { calls.push("workspaces"); return []; },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(THREAD_LOG_RETENTION_SWEEP_MS);
+    expect(calls).toEqual(["logs", "logs"]);
+    vi.unstubAllEnvs();
+  });
+
   it("runs its first pass once the server answers, not before, then the logs' sweep once a day", async () => {
     vi.useFakeTimers();
     const calls: string[] = [];
@@ -20,6 +44,7 @@ describe("start-up upkeep", () => {
       busy: (_botId, threadId) => threadId === "working",
       openDirectHandoff: (threadId) => threadId === "quiet",
       cleanupPartials: () => { calls.push("partials"); return 0; },
+      workspaceRetention: () => true,
       sweepWorkspaces: () => { calls.push("workspaces"); return []; },
       sweepLogs: (candidates, days) => {
         calls.push(`logs ${days}: ${[...candidates].map((c) => `${c.threadId}${c.busy ? " busy" : ""}${c.openDirectHandoff ? " handoff" : ""}${c.unread ? " unread" : ""}`).join(", ")}`);
@@ -48,6 +73,7 @@ describe("start-up upkeep", () => {
       openDirectHandoff: () => false,
       cleanupPartials: () => { throw new Error("disk gone"); },
       sweepLogs: (_candidates, days) => { swept.push(days); return 0; },
+      workspaceRetention: () => true,
       sweepWorkspaces: () => [],
     });
     await vi.advanceTimersByTimeAsync(0);
@@ -58,7 +84,7 @@ describe("start-up upkeep", () => {
     expect(swept).toEqual([7]);
   });
 
-  it("sweeps idle task workspaces even without a log retention, and keeps going when the logs' sweep fails", async () => {
+  it("with the switch on, sweeps idle task workspaces even without a log retention, and keeps going when the logs' sweep fails", async () => {
     vi.useFakeTimers();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const seen: string[] = [];
@@ -69,6 +95,7 @@ describe("start-up upkeep", () => {
       openDirectHandoff: () => false,
       cleanupPartials: () => 0,
       sweepLogs: () => { throw new Error("logs gone"); },
+      workspaceRetention: () => true,
       sweepWorkspaces: (candidates) => {
         seen.push(...[...candidates].map((c) => `${c.botId}/${c.threadId} ${c.lastActiveAt}${c.busy ? " busy" : ""}`));
         return [];

@@ -46,8 +46,12 @@ const SERVER_ENV_NAMES = new Set([
   "OMB_CACHE_ROOT",
   // Their cap (server/cache-sweep/limits.ts): the sweeper's switch, off unless the Admin turns it on, and the caps' overrides.
   "OMB_CACHE_SWEEP", "OMB_CACHE_CAP_TOOLS", "OMB_CACHE_CAP_APP",
+  // The image's own engine CLIs before older copies in the data folder (server/image-engines.ts), for one test Cloud first.
+  "OMB_IMAGE_ENGINES",
   // An ended Cloud started only for its owner's export: the server runs frozen (server/move-freeze.ts).
   "OMB_CLOUD_EXPORT_ONLY",
+  // The idle task workspaces' dependency sweep (server/host/start-upkeep.ts), off unless set: the Admin may turn it on.
+  "OMB_TASK_WORKSPACE_RETENTION",
 ]);
 export function serverEnvironmentAllowed(name: string): boolean {
   return SERVER_ENV_NAMES.has(name) || name.startsWith("LC_");

@@ -247,7 +247,9 @@ const HOME_CACHES: Readonly<Record<string, StorageCategory>> = {
 };
 
 /** The tool cache folder's own folders (bot-box/tool-caches.ts TOOL_CACHES), each a download cache; any other name in it
- * (what a bot put in ~/cache before, a token) is `other`. */
+ * (what a bot put in ~/cache before, a token) is `other`. By name only, like `~/.cache/<name>` above: a person's own
+ * `~/cache/npm` in a folder the server did not make (no CACHEDIR.TAG) is labelled a cache too. Only the storage report
+ * reads this; nothing deletes by it (the cache cap checks the mark itself, server/cache-sweep). */
 const TOOL_CACHE_FOLDERS = TOOL_CACHES.map((cache) => cache.folder.split("/"));
 function toolCachePlacement(rest: readonly string[]): Placement {
   if (rest.length === 0) return at("caches", false);

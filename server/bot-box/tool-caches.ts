@@ -11,11 +11,13 @@
 // npm_config_store_dir, makes every npm command warn. Also left alone: PLAYWRIGHT_BROWSERS_PATH (older Playwright MCP builds
 // keep the browser profile, with its cookies and site sign-ins, in that folder), PUPPETEER_CACHE_DIR (it beats a project's
 // .puppeteerrc, so a project keeping Chrome in its own folder stops finding it) and GOMODCACHE (it beats `go env -w`, and a
-// project building offline from its module cache would fail).
+// project building offline from its module cache would fail), COREPACK_HOME (its lastKnownGood.json records which
+// package manager version is active, not only downloads) and GOCACHE (it also holds Go's fuzzing corpus, which
+// `go clean -cache` keeps).
 //
 // The folder is used only when the server made it (ensureToolCacheRoot): it is marked with a CACHEDIR.TAG, and a `cache`
 // folder already in HOME without that mark is the person's own, so for that HOME nothing is routed into it.
-import { lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { cloudRole } from "./detect.ts";
@@ -53,10 +55,6 @@ export const TOOL_CACHES: readonly ToolCache[] = [
   { name: "HF_XET_CACHE", folder: "huggingface/xet", yieldsTo: ["HF_HOME", "XDG_CACHE_HOME"] },
   // bun's default follows BUN_INSTALL; it may also follow XDG_CACHE_HOME (not checked), so a person's value there wins too.
   { name: "BUN_INSTALL_CACHE_DIR", folder: "bun", yieldsTo: ["BUN_INSTALL", "XDG_CACHE_HOME"] },
-  // The package managers' own copies corepack downloads.
-  { name: "COREPACK_HOME", folder: "corepack", yieldsTo: ["XDG_CACHE_HOME"] },
-  // Go's build cache only, which Go never needs to build: a missing entry is compiled again.
-  { name: "GOCACHE", folder: "go-build", yieldsTo: ["XDG_CACHE_HOME"] },
 ];
 
 const ON = new Set(["1", "on", "true", "yes"]);
@@ -84,15 +82,17 @@ export function hasCacheTag(root: string): boolean {
   }
 }
 
-/** Makes the cache folder `root` when HOME has none, and marks it. True: the folder is the server's (made now, or marked by
- * an earlier start). False: a `cache` the server did not make is there, so it is left alone. Null: it could not be made
- * now (HOME missing): ask again on the next spawn. Never deletes or changes anything already there. */
+/** Makes the cache folder `root` when HOME has none, and marks it. True: the folder is the server's (made now, marked by
+ * an earlier start, or an empty folder, which is marked now: a start that made it may have stopped before its mark).
+ * False: a `cache` with something in it and no mark is the person's, so it is left alone. Null: it could not be made
+ * now (HOME missing): ask again on the next spawn. Never deletes or changes anything already in a folder. */
 export function ensureToolCacheRoot(root: string): boolean | null {
   try {
     mkdirSync(root, { mode: 0o755 });
   } catch (error) {
-    if (code(error) === "EEXIST") return hasCacheTag(root);
-    return null;
+    if (code(error) !== "EEXIST") return null;
+    if (hasCacheTag(root)) return true;
+    if (!emptyFolder(root)) return false;
   }
   try {
     writeFileSync(join(root, CACHE_TAG_FILE), CACHE_TAG, { flag: "wx", mode: 0o644 });
@@ -100,6 +100,10 @@ export function ensureToolCacheRoot(root: string): boolean | null {
   } catch {
     return hasCacheTag(root);
   }
+}
+
+function emptyFolder(path: string): boolean {
+  try { return lstatSync(path).isDirectory() && readdirSync(path).length === 0; } catch { return false; }
 }
 
 const named = (env: Readonly<Record<string, string | undefined>>) =>
