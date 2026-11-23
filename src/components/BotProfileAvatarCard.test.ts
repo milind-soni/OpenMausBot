@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import { StoreProvider, type Bot } from "@/state/store";
-import { MASCOT_BODY_IDS, MASCOT_BODIES } from "../../shared/mascot-bodies";
+import { MASCOT_BODY_IDS, MASCOT_BODIES, DEFAULT_MASCOT_BODY } from "../../shared/mascot-bodies";
 import { CARVED_BODIES, DIWALI_BODY_IDS, HALLOWEEN_BODY_IDS } from "../../shared/carved-bodies";
 import { BotProfileAvatarCard } from "./BotProfileAvatarCard";
 
@@ -63,7 +63,7 @@ describe("BotProfileAvatarCard body picker", () => {
   it("marks the current body pressed and the rest unpressed, defaulting to cursor", () => {
     const markup = renderCard(makeBot());
 
-    expect(markup).toContain(`aria-pressed="true" aria-label="Use the ${MASCOT_BODIES.cursor.name} body"`);
+    expect(markup).toContain(`aria-pressed="true" aria-label="Use the ${MASCOT_BODIES[DEFAULT_MASCOT_BODY].name} body"`);
     expect(markup).toContain(`aria-pressed="false" aria-label="Use the ${MASCOT_BODIES.star.name} body"`);
   });
 
@@ -71,7 +71,7 @@ describe("BotProfileAvatarCard body picker", () => {
     const markup = renderCard(makeBot({ mascotBody: "star" }));
 
     expect(markup).toContain(`aria-pressed="true" aria-label="Use the ${MASCOT_BODIES.star.name} body"`);
-    expect(markup).toContain(`aria-pressed="false" aria-label="Use the ${MASCOT_BODIES.cursor.name} body"`);
+    expect(markup).toContain(`aria-pressed="false" aria-label="Use the ${MASCOT_BODIES[DEFAULT_MASCOT_BODY].name} body"`);
   });
 
   it("offers zoom and drag framing for a custom image", () => {
@@ -95,7 +95,7 @@ describe("BotProfileAvatarCard body picker", () => {
     const markup = renderCard(makeBot({ avatarCrop: "circle" }));
 
     expect(markup).not.toContain(">Body<");
-    expect(markup).not.toContain(`aria-label="Use the ${MASCOT_BODIES.cursor.name} body"`);
+    expect(markup).not.toContain(`aria-label="Use the ${MASCOT_BODIES[DEFAULT_MASCOT_BODY].name} body"`);
   });
 
   it("hides the body picker for every flat crop, not just circle", () => {

@@ -7,7 +7,7 @@ import { colorSwatch, MAUS_COLOR_LABEL, MAUS_COLOR_NAMES } from "@/lib/mascot";
 import { bodyName } from "@/lib/mascot-names";
 import type { Bot } from "@/state/store";
 import { BOT_PROFILE_LIMITS } from "../../shared/bot-profile";
-import { MASCOT_BODY_IDS } from "../../shared/mascot-bodies";
+import { MASCOT_BODY_IDS, DEFAULT_MASCOT_BODY } from "../../shared/mascot-bodies";
 import { MausAvatar } from "./Avatar";
 import { AvatarImageGenerator } from "./AvatarImageGenerator";
 import type { AvatarPatch, useAvatarImage } from "./avatar-editing";
@@ -67,12 +67,12 @@ export function MausBotCustomize({ preview, name, nameRef, image, onName, onPatc
             <button
               key={id}
               type="button"
-              aria-pressed={!picture && (preview.mascotBody ?? "cursor") === id}
+              aria-pressed={!picture && (preview.mascotBody ?? DEFAULT_MASCOT_BODY) === id}
               aria-label={bodyName(id)}
               title={bodyName(id)}
               data-mausbot-welcome-body={id}
               onClick={() => shape({ mascotBody: id })}
-              className={cn("flex h-11 items-center justify-center rounded-xl", !picture && (preview.mascotBody ?? "cursor") === id ? "bg-ink/[0.08] ring-[1.5px] ring-inset ring-ink/25" : "hover:bg-ink/[0.05]")}
+              className={cn("flex h-11 items-center justify-center rounded-xl", !picture && (preview.mascotBody ?? DEFAULT_MASCOT_BODY) === id ? "bg-ink/[0.08] ring-[1.5px] ring-inset ring-ink/25" : "hover:bg-ink/[0.05]")}
             >
               <MausAvatar color={preview.color} bodyId={id} size={30} animated={false} trackPointer={false} />
             </button>

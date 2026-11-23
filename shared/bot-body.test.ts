@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { BOT_BODY_IDS, FESTIVAL_IDS, FESTIVALS, botBodyId, botBodySchema, isCarvedBody, isFestival } from "./bot-body.ts";
 import { CARVED_BODY_IDS } from "./carved-bodies.ts";
-import { MASCOT_BODY_IDS } from "./mascot-bodies.ts";
+import { DEFAULT_MASCOT_BODY, MASCOT_BODY_IDS } from "./mascot-bodies.ts";
 import { MAUS_COLOR_NAMES } from "./wire.ts";
 
 describe("bot bodies", () => {
@@ -11,12 +11,19 @@ describe("bot bodies", () => {
     for (const id of BOT_BODY_IDS) expect(botBodySchema.safeParse(id).success).toBe(true);
   });
 
-  it("falls back to the cursor for anything it does not know", () => {
+  it("reads the retired cursor body as the default, stored or imported", () => {
+    expect(MASCOT_BODY_IDS).not.toContain("cursor");
+    expect(botBodyId("cursor")).toBe(DEFAULT_MASCOT_BODY);
+    expect(botBodySchema.parse("cursor")).toBe(DEFAULT_MASCOT_BODY);
+    expect(botBodySchema.safeParse("sphere").success).toBe(false);
+  });
+
+  it("falls back to the default body for anything it does not know", () => {
     expect(botBodyId("pumpkin")).toBe("pumpkin");
     expect(botBodyId("laddu")).toBe("laddu");
     expect(botBodyId("star")).toBe("star");
-    expect(botBodyId("hexagram")).toBe("cursor");
-    expect(botBodyId(undefined)).toBe("cursor");
+    expect(botBodyId("hexagram")).toBe(DEFAULT_MASCOT_BODY);
+    expect(botBodyId(undefined)).toBe(DEFAULT_MASCOT_BODY);
   });
 
   it("tells the festival bodies apart", () => {

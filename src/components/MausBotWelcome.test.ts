@@ -23,8 +23,8 @@ describe("MausBot's first-launch welcome", () => {
   });
 
   it("Add saves the person's changes, pins MausBot and keeps it in the sidebar", () => {
-    expect(welcomePatch(maus, { ...draftOf(maus), name: " Jarvis ", color: "blue", mascotBody: "blob" }, true))
-      .toEqual({ name: "Jarvis", color: "blue", mascotBody: "blob", welcomed: true, sidebarHidden: false, pinned: true });
+    expect(welcomePatch(maus, { ...draftOf(maus), name: " Jarvis ", color: "blue", mascotBody: "circle" }, true))
+      .toEqual({ name: "Jarvis", color: "blue", mascotBody: "circle", welcomed: true, sidebarHidden: false, pinned: true });
   });
 
   it("Add with the panel never opened keeps the chrome-steel defaults", () => {

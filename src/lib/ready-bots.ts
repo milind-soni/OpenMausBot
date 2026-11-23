@@ -2,6 +2,7 @@ import type { BotRoutineTemplate, NewBotDefaults } from "../../shared/new-bot-de
 import type { MascotBodyId } from "../../shared/mascot-bodies";
 import type { MausColor } from "../../shared/wire";
 import { t, tFromServer } from "@/lib/i18n";
+import { DEFAULT_MASCOT_BODY } from "../../shared/mascot-bodies";
 
 export type ReadyBotCategory = "everyday" | "work" | "writing" | "design" | "sales" | "personal";
 
@@ -41,7 +42,7 @@ export const READY_BOTS: ReadyBot[] = [
       "Say plainly when you are unsure or could not check something, and never present a guess as a fact.",
       "When a task will take several steps, say what you are about to do in one line before doing it.",
     ].join("\n"),
-    look: { color: "green", mascotBody: "cursor" },
+    look: { color: "green", mascotBody: DEFAULT_MASCOT_BODY },
     tryAsking: ["Plan my week from this list of to-dos", "Explain this contract clause in plain English", "Draft a polite reply declining this meeting"],
     apps: [],
   },

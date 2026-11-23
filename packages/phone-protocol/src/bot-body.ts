@@ -10,7 +10,10 @@ export const BOT_BODY_IDS = [...MASCOT_BODY_IDS, ...CARVED_BODY_IDS] as const;
 
 export type BotBodyId = (typeof BOT_BODY_IDS)[number];
 
-export const botBodySchema = z.enum(BOT_BODY_IDS);
+/** Bodies that were retired; a stored or imported one is read as the default. */
+const RETIRED_BODY_IDS: readonly string[] = ["cursor"];
+
+export const botBodySchema = z.preprocess((value) => (typeof value === "string" && RETIRED_BODY_IDS.includes(value) ? DEFAULT_MASCOT_BODY : value), z.enum(BOT_BODY_IDS));
 
 /** Runtime-safe read of an untrusted persisted or streamed body id. */
 export function botBodyId(value: unknown): BotBodyId {

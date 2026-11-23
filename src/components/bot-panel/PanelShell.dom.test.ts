@@ -6,6 +6,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, BotSettingsSection } from "@/state/store";
+import { DEFAULT_MASCOT_BODY } from "../../../shared/mascot-bodies";
 
 const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), settingsOpen: false, bots: [] as Bot[], team: null as null | { admin: boolean; me: { email: string } } }));
 vi.mock("@/state/store", async (importOriginal) => {
@@ -404,7 +405,7 @@ describe("one body for every bot", () => {
   };
 
   it("gives this bot's body to every other bot that wears another one", async () => {
-    fixture.bots = [roundBot, { ...bot, id: "ada", mascotBody: "cursor" }, { ...bot, id: "bob" }, { ...bot, id: "cara", mascotBody: "circle" }];
+    fixture.bots = [roundBot, { ...bot, id: "ada", mascotBody: DEFAULT_MASCOT_BODY }, { ...bot, id: "bob" }, { ...bot, id: "cara", mascotBody: "circle" }];
     await openEditor(roundBot);
     expect(everywhere()?.textContent).toBe("Give this body to the other bots (2)");
     click(everywhere());

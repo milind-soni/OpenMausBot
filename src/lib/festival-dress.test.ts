@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { DRESS_UP_KEY, readDressUp, setDressUp, wornBody } from "./festival-dress";
+import { DEFAULT_MASCOT_BODY } from "../../shared/mascot-bodies";
 
 describe("festival dress-up", () => {
   it("leaves bots alone unless dressed", () => {
@@ -16,9 +17,9 @@ describe("festival dress-up", () => {
   });
 
   it("leaves a silver bot in its own body while dressed", () => {
-    expect(wornBody("cursor", "silver", "diwali")).toBe("cursor");
+    expect(wornBody(DEFAULT_MASCOT_BODY, "silver", "diwali")).toBe(DEFAULT_MASCOT_BODY);
     expect(wornBody(undefined, "silver", "halloween")).toBeUndefined();
-    expect(wornBody("cursor", "chrome", "diwali")).toBe("cursor");
+    expect(wornBody(DEFAULT_MASCOT_BODY, "chrome", "diwali")).toBe(DEFAULT_MASCOT_BODY);
   });
 
   it("keeps a body from the same festival the bot already chose, and dresses over any other", () => {

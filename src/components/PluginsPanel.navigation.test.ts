@@ -65,7 +65,7 @@ import { APPS_PREVIEW_COUNT, PluginsPanel, USED_BY_AVATAR_SIZE, botsUsingService
 import { AppTile, AppTileView, type AppTileProps } from "./AppTile";
 import { connectedInventoryCopy } from "@/lib/connector-status";
 import { FACE_BOX } from "./cursor-face-data";
-import { MASCOT_BODIES } from "../../shared/mascot-bodies";
+import { MASCOT_BODIES, DEFAULT_MASCOT_BODY } from "../../shared/mascot-bodies";
 
 const CARDS = 0;
 const CONFIGURED = 3;
@@ -711,7 +711,7 @@ describe("Apps pop-up", () => {
     fixture.instances = [claude];
     fixture.bots = [
       bot("scout"),
-      bot("arrow", { mascotBody: "cursor" }),
+      bot("arrow", { mascotBody: DEFAULT_MASCOT_BODY }),
       bot("photo", { avatarUrl: "/api/attachments/photo.webp", avatarCrop: "square" }),
     ];
     const { nodes: tree } = render();

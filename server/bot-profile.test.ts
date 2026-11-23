@@ -116,7 +116,7 @@ describe("mascotBody", () => {
     expect(parseBotProfilePatch({ mascotBody: "hexagram" } as never, true)).toEqual({
       ok: false,
       error:
-        "mascotBody must be cursor, blob, circle, squircle, capsule, drop, shield, hexagon, diamond, star, " +
+        "mascotBody must be blob, circle, squircle, capsule, drop, shield, hexagon, diamond, star, " +
         "pumpkin, ghost, witch, bat, cat, skull, monster, mummy, vampire, spider, " +
         "rocket, anaar, chakri, sparkler, bomb, laddu, chakli, jalebi, katli, or karanji",
     });

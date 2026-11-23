@@ -25,6 +25,7 @@ import {
 import { writeFileAtomic } from "./atomic.ts";
 import { PUSH_DEVICE_KEY, type PhonePush } from "./phone-push.ts";
 import { PRODUCT_NAME } from "../shared/product.ts";
+import { DEFAULT_MASCOT_BODY } from "../shared/mascot-bodies.ts";
 
 export const PHONE_ACTIVITY_FILE = "push-activity.json";
 export const MAX_ACTIVITY_PHONES = 50;
@@ -59,7 +60,7 @@ const storedSchema = z.object({ version: z.literal(1), phones: z.array(z.object(
 type Stored = z.infer<typeof storedSchema>["phones"][number];
 
 /** The neutral look of a pushed activity for a bot the phone never drew. */
-export const FALLBACK_VISUAL: ActivityVisual = { color: "#7C5CFF", gradient: ["#B9A9FF", "#7C5CFF", "#48369A"], body: "cursor" };
+export const FALLBACK_VISUAL: ActivityVisual = { color: "#7C5CFF", gradient: ["#B9A9FF", "#7C5CFF", "#48369A"], body: DEFAULT_MASCOT_BODY };
 
 interface BotState {
   kind: ActivityKind;

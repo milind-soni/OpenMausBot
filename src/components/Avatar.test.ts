@@ -10,7 +10,7 @@ import {
   type BotAvatarProps,
   type MausAvatarProps,
 } from "./Avatar";
-import { MASCOT_BODIES } from "../../shared/mascot-bodies";
+import { MASCOT_BODIES, DEFAULT_MASCOT_BODY } from "../../shared/mascot-bodies";
 
 const render = (props: Partial<MausAvatarProps>) =>
   renderToStaticMarkup(createElement(MausAvatar, { color: "green", animated: false, ...props }));
@@ -22,7 +22,7 @@ const renderBot = (bot: Partial<BotAvatarProps["bot"]>) =>
 
 describe("MausAvatar body", () => {
   it("wears the cursor when no body is given", () => {
-    expect(render({})).toContain(MASCOT_BODIES.cursor.fit);
+    expect(render({})).toContain(MASCOT_BODIES[DEFAULT_MASCOT_BODY].fit);
   });
 
   it("wears the body it is given", () => {
@@ -34,7 +34,7 @@ describe("MausAvatar body", () => {
     // SAFETY: "hexagram" is deliberately not a MascotBodyId, to exercise the runtime fallback for persisted or streamed
     // data.
     expect(render({ bodyId: "hexagram" as MausAvatarProps["bodyId"] })).toContain(
-      MASCOT_BODIES.cursor.fit,
+      MASCOT_BODIES[DEFAULT_MASCOT_BODY].fit,
     );
   });
 
@@ -49,7 +49,7 @@ describe("MausAvatar body", () => {
 describe("mascot facial feature colors", () => {
   it.each(["white", "black"] as const)("uses %s for both eyes and mouth on every body type", (mascotFaceColor) => {
     const ink = mascotFaceColor === "white" ? "#ffffff" : "#000000";
-    for (const mascotBody of ["cursor", "star", "pumpkin", "vampire"] as const) {
+    for (const mascotBody of [DEFAULT_MASCOT_BODY, "star", "pumpkin", "vampire"] as const) {
       for (const color of ["green", "chrome"] as const) {
         const markup = renderBot({ color, mascotBody, mascotFaceColor });
         expect(markup).toContain(`fill="${ink}"`);

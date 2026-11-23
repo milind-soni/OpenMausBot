@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { CursorAvatar } from "@/components/CursorAvatar";
-import { MASCOT_BODIES } from "../../shared/mascot-bodies";
+import { MASCOT_BODIES, DEFAULT_MASCOT_BODY } from "../../shared/mascot-bodies";
 import { steelBodyImage, type SteelImage } from "./steel-body";
 
 const images: SteelImage[] = [40, 56, 88, 128, 192, 256].map((px) => ({ body: "cursor", px, url: `/steel/cursor-${px}.webp` }));
@@ -24,7 +24,7 @@ describe("MausBot's rendered steel body", () => {
   });
 
   it("draws the picture over the whole avatar frame instead of the body and the face", () => {
-    const svg = (picture?: string) => renderToStaticMarkup(createElement(CursorAvatar, { size: 112, silhouette: MASCOT_BODIES.cursor, picture }));
+    const svg = (picture?: string) => renderToStaticMarkup(createElement(CursorAvatar, { size: 112, silhouette: MASCOT_BODIES[DEFAULT_MASCOT_BODY], picture }));
     const withPicture = svg("/steel/cursor-256.webp");
     expect(withPicture).toContain('<image href="/steel/cursor-256.webp" x="-15" y="-15" width="258.541" height="258.541" preserveAspectRatio="none"');
     expect(withPicture).not.toMatch(/fill="url\(#[^)]+-grad\)"/);

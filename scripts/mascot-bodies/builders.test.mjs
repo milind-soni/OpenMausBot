@@ -3,12 +3,12 @@ import { describe, expect, it } from "vitest";
 import { BODY_DEFS, BODY_IDS } from "./builders.ts";
 
 const EXPECTED_IDS = [
-  "cursor", "blob", "circle", "squircle", "capsule",
+  "blob", "circle", "squircle", "capsule",
   "drop", "shield", "hexagon", "diamond", "star",
 ];
 
 describe("body builders", () => {
-  it("produces the catalog in its persisted order, cursor first", () => {
+  it("produces the catalog in its persisted order, blob first", () => {
     expect(BODY_IDS).toEqual(EXPECTED_IDS);
   });
 
@@ -34,11 +34,5 @@ describe("body builders", () => {
         expect(numbers.length % 6, `${body.id} has a ragged curve`).toBe(0);
       }
     }
-  });
-
-  it("keeps the cursor outline byte-identical to the shipped artwork", () => {
-    const cursor = BODY_DEFS.find(s => s.id === "cursor");
-    expect(cursor.d.startsWith("M0 0 C1.12815992 0.94880479")).toBe(true);
-    expect(cursor.d.trimEnd().endsWith("-21.34867451 -18.24899383 0 0 Z")).toBe(true);
   });
 });
