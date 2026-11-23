@@ -354,7 +354,7 @@ describe("one-time codes and fields", () => {
   it("keeps new-password boxes empty on a sign-in page with two of them, or on a sign-up page under a sign-in path", async () => {
     const twoBoxes = `<form><input name="email" type="email"><input name="new" type="password" autocomplete="new-password"><input name="again" type="password" autocomplete="new-password"></form>`;
     const oneBox = `<form><input name="email" type="email"><input name="new" type="password" autocomplete="new-password"></form>`;
-    for (const [url, html] of [["https://example.com/login", twoBoxes], ["https://example.com/login/signup", oneBox], ["https://example.com/signin/reset-password", oneBox]]) {
+    for (const [url, html] of [["https://example.com/login", twoBoxes], ["https://example.com/login/signup", oneBox], ["https://example.com/signin/reset-password", oneBox], ["https://example.com/login/registration", oneBox]]) {
       const { page, fill } = setup(url, html, [{ host: "example.com", username: "alice@example.com" }], { submit: false });
       const outcome = await fill();
       expect(outcome).toMatchObject({ ok: true, filled: ["username"] });

@@ -176,7 +176,7 @@ const FIND_FIELDS = `((nonce, step) => {
   // Some sign-in forms (TikTok's) mark their only password box new-password.
   const steps = location.pathname.toLowerCase().split("/");
   const signIn = steps.some((step) => ["login", "log-in", "signin", "sign-in"].includes(step)) &&
-    !steps.some((step) => ["signup", "sign-up", "register", "join", "reset", "forgot", "change"].some((word) => step.includes(word)));
+    !steps.some((step) => ["signup", "sign-up", "register", "registration", "join", "reset", "forgot", "change"].some((word) => step.includes(word)));
   const password = passwords.find((el) => tokens(el).includes("current-password")) || passwords[0] ||
     (signIn && fresh.length === 1 ? fresh[0] : null);
   const USER = /user|e-?mail|login|account|identifier|phone|mobile/;
