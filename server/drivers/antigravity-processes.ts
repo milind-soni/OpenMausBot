@@ -31,13 +31,20 @@ export class AntigravityProcesses {
     const gone = await Promise.all(children.map((child) => new Promise<boolean>((resolve) => {
       if (child.exitCode !== null || child.signalCode !== null) return resolve(true);
       let giveUp: ReturnType<typeof setTimeout> | undefined;
+      const finish = (gone: boolean) => {
+        clearTimeout(timer);
+        clearTimeout(giveUp);
+        child.off("close", closed);
+        resolve(gone);
+      };
+      const closed = () => finish(true);
       const timer = setTimeout(() => {
         void killCliTree(child).catch(() => false);
-        giveUp = setTimeout(() => resolve(false), waitMs);
+        giveUp = setTimeout(() => finish(false), waitMs);
         giveUp.unref?.();
       }, waitMs);
       timer.unref?.();
-      child.once("close", () => { clearTimeout(timer); clearTimeout(giveUp); resolve(true); });
+      child.once("close", closed);
     })));
     return gone.every(Boolean);
   }

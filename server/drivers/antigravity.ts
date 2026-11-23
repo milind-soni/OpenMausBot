@@ -249,7 +249,8 @@ const support: AcpSupport = {
   clientInfo: (instanceId) => antigravityClientInfo(launched.get(instanceId)?.version),
   // In `default` the native CLI asks before every edit; Auto-accept edits answers those, as `auto_edit` did.
   // Security: only a file edit inside the turn's folder is answered; one that names a command or another place is asked.
-  allowsAlone: (instanceId, turn, toolCall) => launched.get(instanceId)?.nativeCli === true && turn.approvalMode === "edits" && acpFileEditWithin(toolCall, turn.cwd),
+  allowsAlone: (instanceId, turn, toolCall) => launched.get(instanceId)?.nativeCli === true
+    && (turn.approvalModeNow?.() ?? turn.approvalMode) === "edits" && acpFileEditWithin(toolCall, turn.cwd),
   promptOutcome: (instanceId, sessionId) => watchAntigravityPromptOutcome(support.displayName, antigravityProfileDirectory(instanceId), sessionId),
   requireAuthenticationBeforeSpawn: true,
   // Before a native turn only a refusal the CLI gave recently stops it: otherwise the turn's own session/new is the
@@ -379,13 +380,20 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
           if (!(await runtimeProcesses.stopped(instanceId)) || runtimeProcesses.count(instanceId)) throw new Error("Antigravity is still running and could not be stopped. Try again.");
         }
         nativeSignIn.forgetAll();
-        await signOutAntigravityCli(runtime, profile, { onProcess: (child) => runtimeProcesses.track(input.instanceId, child) });
+        const failures: unknown[] = [];
+        await signOutAntigravityCli(runtime, profile, { onProcess: (child) => runtimeProcesses.track(input.instanceId, child) }).catch((error: unknown) => failures.push(error));
         // Without an OS keyring the CLI keeps each profile's sign-in in that profile's file (1.5.14), so each is removed too.
         for (const [instanceId, live] of affected) {
-          const own = instanceId === input.instanceId ? null : await live.ownCli();
-          if (own) await signOutAntigravityCli(own.runtime, own.profile, { onProcess: (child) => runtimeProcesses.track(instanceId, child) }, "native");
+          if (instanceId === input.instanceId) continue;
+          try {
+            const own = await live.ownCli();
+            if (own) await signOutAntigravityCli(own.runtime, own.profile, { onProcess: (child) => runtimeProcesses.track(instanceId, child) }, "native");
+          } catch (error) {
+            failures.push(error);
+          }
         }
         nativeSignIn.forgetAll();
+        if (failures.length) throw failures[0];
       } finally {
         nativeSigningOut = null;
         done();
@@ -434,7 +442,7 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       startAuthentication: () => alone(async () => {
         await signingOut;
         const { runtime, profile } = await runtimeAndProfile();
-        await login.cancel();
+        if (!(await login.cancel())) throw new Error("The Antigravity sign-in in progress could not be stopped. Try again.");
         auth.cancel();
         nativeFlow = runtime.harnessPath === null;
         if (nativeFlow) return login.start(runtime, profile);
@@ -460,7 +468,10 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
         await removeAntigravitySignIn(input.instanceId);
         if (!runtimeProcesses.count(input.instanceId)) return;
         signingOut = runtimeProcesses.stopped(input.instanceId)
-          .then(() => removeAntigravitySignIn(input.instanceId))
+          .then((gone) => {
+            if (!gone) console.warn("antigravity: a runtime process outlived its kill; its sign-in is removed again, but it may write it back");
+            return removeAntigravitySignIn(input.instanceId);
+          })
           .catch((error) => console.warn(`antigravity: could not finish the sign-out: ${error instanceof Error ? error.message : String(error)}`));
       }),
       dispose: async () => {

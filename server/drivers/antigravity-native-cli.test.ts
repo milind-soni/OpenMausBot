@@ -539,7 +539,7 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
   }, 90_000);
 
   /** One turn at `approvalMode` whose runtime asks about `toolCall`; a card that opens is denied. */
-  async function asked(name: string, approvalMode: "edits" | "full", toolCall: (directory: string) => object) {
+  async function asked(name: string, approvalMode: "edits" | "full", toolCall: (directory: string) => object, approvalNow?: "ask") {
     const fake = cli();
     const answer = join(fake.directory, "answer");
     const instance = await create(`antigravity-cli-${name}`, fake.executable, {
@@ -547,7 +547,7 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
       FAKE_ACP_PERMISSION_TOOL_CALL: JSON.stringify(toolCall(fake.directory)),
     });
     const recorder = recordEvents(instance.adapter);
-    const { turnId } = await instance.adapter.sendTurn({ threadId: name, text: "hello", approvalMode, cwd: fake.directory });
+    const { turnId } = await instance.adapter.sendTurn({ threadId: name, text: "hello", approvalMode, cwd: fake.directory, ...(approvalNow ? { approvalModeNow: () => approvalNow } : {}) });
     const first = await recorder.until((event) => event.turnId === turnId && (event.type === "request.opened" || event.type === "turn.completed"));
     if (first.type === "request.opened") await instance.adapter.respondToRequest(name, (first as { requestId: string }).requestId, { behavior: "deny" });
     await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
@@ -560,6 +560,11 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
       .toEqual({ card: false, commandLine: undefined, answer: "allow-once" });
     expect(await asked("edits-new-folder", "edits", (directory) => ({ kind: "edit", title: "Edit", locations: [{ path: join(directory, "new", "deep", "notes.md") }] })))
       .toMatchObject({ card: false, answer: "allow-once" });
+  }, 90_000);
+
+  it("asks about a file edit on a turn whose level was lowered to Ask after it began", async () => {
+    expect(await asked("edits-lowered", "edits", (directory) => ({ kind: "edit", title: "Edit notes.md", locations: [{ path: join(directory, "notes.md") }] }), "ask"))
+      .toMatchObject({ card: true, answer: "reject" });
   }, 90_000);
 
   it.each([

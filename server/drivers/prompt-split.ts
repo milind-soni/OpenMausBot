@@ -105,7 +105,8 @@ function splitTurn(
   const turnsSinceFull = typeof previous?.turnsSinceFull === "number" ? previous.turnsSinceFull : 0;
   const reAnchor = reAnchorAfterTurns > 0 && previous !== null && turnsSinceFull >= reAnchorAfterTurns;
   if (previous === null || previous.stable !== fingerprints.stable || reAnchor) {
-    return { full: true, note: volatileContextNote(volatile, false), receipt: { ...fingerprints, turnsSinceFull: 0 } };
+    const hadVolatile = previous !== null && previous.volatile !== EMPTY_FINGERPRINT;
+    return { full: true, note: volatileContextNote(volatile, hadVolatile), receipt: { ...fingerprints, turnsSinceFull: 0 } };
   }
   const note = previous.volatile === fingerprints.volatile && !perTurnVolatile
     ? ""

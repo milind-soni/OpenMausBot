@@ -191,3 +191,9 @@ describe("splitSessionNote", () => {
     expect(splitSessionNote("stable rules.", "", null).note).toBe("");
   });
 });
+
+it("tells a session that holds the stable half that the volatile half was cleared when a changed stable half resends it empty", () => {
+  const previous = promptSplitFingerprints("stable one", "the open task");
+  expect(splitSessionNote("stable two", "", previous).note).toContain("have been cleared");
+  expect(splitSessionNote("stable two", "", promptSplitFingerprints("stable one", "")).note).toBe("");
+});

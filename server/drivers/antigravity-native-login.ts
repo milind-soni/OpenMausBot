@@ -30,6 +30,7 @@ const NO_LINK = "Google sign-in did not return a link. Start sign-in again.";
 const BAD_LINK = "Antigravity returned an invalid Google sign-in link.";
 const ALREADY_SENT = "The sign-in code was already sent. Wait for Google to finish.";
 const INACTIVE = "This Google sign-in is no longer active. Start again.";
+const STILL_RUNNING = "The Antigravity sign-in in progress could not be stopped. Try again.";
 
 export function antigravityLoginArgs(profileDirectory: string): string[] {
   return ["acp", "--login", "--gemini-dir", profileDirectory, "--app-data-dir", "antigravity-acp"];
@@ -108,6 +109,7 @@ export class AntigravityCliLogin {
   #flow: LoginFlow | null = null;
   readonly #alive: LoginProcesses;
   #ended: ProviderAuthenticationStatus | null = null;
+  #cancels = 0;
   readonly #hooks: NativeLoginHooks;
   readonly #timing: { startupMs: number; submitMs: number; lifetimeMs: number; exitConfirmMs: number };
 
@@ -127,7 +129,9 @@ export class AntigravityCliLogin {
   }
 
   async start(runtime: AntigravityRuntime, profile: AntigravityProfile): Promise<ProviderAuthenticationStart & { kind: "pasted-code" }> {
-    await this.cancel();
+    const cancels = this.#cancels + 1;
+    if (!(await this.cancel())) throw new Error(STILL_RUNNING);
+    if (this.#cancels !== cancels) throw new Error(CANCELLED);
     const child = spawnCli(
       runtime.executablePath,
       antigravityLoginArgs(profile.directory),
@@ -173,12 +177,13 @@ export class AntigravityCliLogin {
         }),
       ]);
       if (startupTimer) clearTimeout(startupTimer);
+      if (this.#cancels !== cancels) throw new Error(CANCELLED);
       const flow = this.#open(child, exited, link.state);
       return { phase: "waiting", flowId: flow.id, authorizationUrl: link.authorizationUrl, expiresAt: new Date(flow.expiresAt).toISOString(), kind: "pasted-code" };
     } catch (error) {
       if (startupTimer) clearTimeout(startupTimer);
       await killCliTree(child).catch(() => false);
-      throw error;
+      throw this.#cancels !== cancels ? new Error(CANCELLED) : error;
     }
   }
 
@@ -269,6 +274,7 @@ export class AntigravityCliLogin {
 
   /** Ends the sign-in in progress and resolves true once every `--login` process started here is gone. */
   async cancel(): Promise<boolean> {
+    this.#cancels += 1;
     const flow = this.#flow;
     if (flow) {
       this.#end(flow, "cancelled", CANCELLED);

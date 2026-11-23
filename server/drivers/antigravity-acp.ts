@@ -691,8 +691,8 @@ export async function probeAntigravityModels(input: {
     return Math.min(milliseconds, STARTUP_TIMEOUT_MS);
   };
   const client = new AntigravityAcpClient(input.runtime, input.profile, input.cwd ?? input.profile.directory);
-  input.onProcess?.(client.child);
   try {
+    input.onProcess?.(client.child);
     const initialized = await client.initialize(remaining(), deadline);
     // Native CLI 1.5.14 opens the system browser on `authenticate` and waits 300 s for it; its sign-in is `acp --login`.
     if (input.runtime.harnessPath !== null) await client.request("authenticate", { methodId: "oauth-personal" }, remaining());

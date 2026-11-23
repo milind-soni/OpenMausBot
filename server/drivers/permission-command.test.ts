@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished } from "vitest";
 
 import { bindSafetyFloor } from "../safety-floor-gate.ts";
 
@@ -91,7 +91,8 @@ describe("the never-list on an ACP request", () => {
   });
 
   it("takes a request for a file edit only when it is one, inside the folder", () => {
-    const root = process.cwd();
+    const root = mkdtempSync(join(tmpdir(), "omb-edit-within-"));
+    onTestFinished(() => rmSync(root, { recursive: true, force: true }));
     const inside = { kind: "edit", locations: [{ path: `${root}/notes.md` }] };
     expect(acpFileEditWithin(inside, root)).toBe(true);
     expect(acpFileEditWithin(inside, undefined)).toBe(false);

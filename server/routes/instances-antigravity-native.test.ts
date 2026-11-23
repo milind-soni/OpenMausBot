@@ -245,19 +245,24 @@ describe("removing accounts while a ChatGPT account's sign-out waits", () => {
     const { registry, cfg, gates } = await setup();
     const { request, persisted } = await serve(registry, cfg);
     const one = request("DELETE", "/api/instances/chatgpt-1");
-    await gates.get("chatgpt-1")!.entered;
-    const crossed = await request("DELETE", `/api/instances/${second}`);
-    expect(crossed.status).toBe(409);
-    expect(crossed.body.error).toContain("already being updated");
-    expect((await request("PATCH", "/api/instances/keep", { hidden: true })).status).toBe(409);
-    gates.get("chatgpt-1")!.release();
-    expect((await one).status).toBe(200);
-    const two = request("DELETE", `/api/instances/${second}`);
-    const gate = gates.get(second);
-    if (gate) { await gate.entered; gate.release(); }
-    expect((await two).status).toBe(200);
-    expect(Object.keys(cfg.instances!).sort()).toEqual(["keep", ...["chatgpt-2", "antigravity-1"].filter((id) => id !== second)].sort());
-    expect(persisted.at(-1) && Object.keys(persisted.at(-1)!)).not.toContain("chatgpt-1");
+    try {
+      await gates.get("chatgpt-1")!.entered;
+      const crossed = await request("DELETE", `/api/instances/${second}`);
+      expect(crossed.status).toBe(409);
+      expect(crossed.body.error).toContain("already being updated");
+      expect((await request("PATCH", "/api/instances/keep", { hidden: true })).status).toBe(409);
+      gates.get("chatgpt-1")!.release();
+      expect((await one).status).toBe(200);
+      const two = request("DELETE", `/api/instances/${second}`);
+      const gate = gates.get(second);
+      if (gate) { await gate.entered; gate.release(); }
+      expect((await two).status).toBe(200);
+      expect(Object.keys(cfg.instances!).sort()).toEqual(["keep", ...["chatgpt-2", "antigravity-1"].filter((id) => id !== second)].sort());
+      expect(persisted.at(-1) && Object.keys(persisted.at(-1)!)).not.toContain("chatgpt-1");
+    } finally {
+      for (const gate of gates.values()) gate.release();
+      await one.catch(() => {});
+    }
   }, 30_000);
 
   it("reads the config after the lock is taken, so a removal that finished before is not undone", async () => {
@@ -271,7 +276,6 @@ describe("removing accounts while a ChatGPT account's sign-out waits", () => {
     await gates.get("chatgpt-1")!.entered;
     gates.get("chatgpt-1")!.release();
     expect((await next).status).toBe(200);
-    expect(Object.keys(cfg.instances!)).toEqual(expect.not.arrayContaining(["chatgpt-1", "antigravity-1"]));
-    expect(Object.keys(cfg.instances!)).toEqual(expect.arrayContaining(["keep", "chatgpt-2"]));
+    expect(Object.keys(cfg.instances!).sort()).toEqual(["chatgpt-2", "keep"]);
   }, 30_000);
 });

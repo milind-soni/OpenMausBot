@@ -35,7 +35,7 @@ export const SIGN_IN_CACHE_MS = 30_000;
  * required`). Another `-32000`, such as a sign-in service that is down, says nothing about the sign-in. */
 export function antigravityCliRefusedSession(error: unknown): boolean {
   const value = error as { code?: unknown; message?: unknown } | null;
-  return value?.code === -32000 && typeof value.message === "string" && /\b(?:authentication|sign[- ]?in|log[- ]?in) (?:is )?required\b/iu.test(value.message);
+  return value?.code === -32000 && typeof value.message === "string" && /^\s*(?:authentication|sign[- ]?in|log[- ]?in) (?:is )?required[.!]?\s*$/iu.test(value.message);
 }
 
 const advertised = (value: unknown) => value === true || (typeof value === "object" && value !== null && !Array.isArray(value));
@@ -94,7 +94,7 @@ async function logoutAndForget(runtime: AntigravityRuntime, profile: Antigravity
     if (advertised(initialized?.agentCapabilities?.auth?.logout)) await client.request("logout", {}, timing.requestMs ?? REQUEST_MS).catch(() => {});
   });
   for (const file of files === "all" ? [antigravityNativeTokenPath(profile), profile.tokenPath] : [antigravityNativeTokenPath(profile)]) {
-    await rm(file, { force: true, maxRetries: 4, retryDelay: 250 });
+    await rm(file, { force: true, recursive: true, maxRetries: 4, retryDelay: 250 });
   }
 }
 

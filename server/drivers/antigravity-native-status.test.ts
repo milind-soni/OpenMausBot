@@ -174,7 +174,9 @@ describe("the native CLI's refusal of a session for want of a sign-in", () => {
   it("is its own answer, and not another -32000 such as a sign-in service that is down", () => {
     expect(antigravityCliRefusedSession({ code: -32000, message: "Authentication required" })).toBe(true);
     expect(antigravityCliRefusedSession({ code: -32000, message: "Sign-in required" })).toBe(true);
+    expect(antigravityCliRefusedSession({ code: -32000, message: "Authentication required." })).toBe(true);
     expect(antigravityCliRefusedSession({ code: -32000, message: "Authentication service unavailable" })).toBe(false);
+    expect(antigravityCliRefusedSession({ code: -32000, message: "Unable to determine whether authentication is required" })).toBe(false);
     expect(antigravityCliRefusedSession({ code: -32603, message: "Authentication required" })).toBe(false);
     expect(antigravityCliRefusedSession(new Error("Authentication required"))).toBe(false);
   });

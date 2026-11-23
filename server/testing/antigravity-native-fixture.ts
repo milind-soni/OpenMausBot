@@ -19,7 +19,8 @@ export interface NativeFixture {
   methods(): string[];
 }
 
-export const fakeAntigravityScript = () => `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(FAKE_CLI)} "$@"\n`;
+const shellQuoted = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+export const fakeAntigravityScript = () => `#!/bin/sh\nexec ${shellQuoted(process.execPath)} ${shellQuoted(FAKE_CLI)} "$@"\n`;
 
 export function nativeFixture(directory: string): NativeFixture {
   mkdirSync(directory, { recursive: true });
@@ -70,18 +71,23 @@ export function sessionAcceptedAt(fixture: NativeFixture, profileDirectory: stri
     });
     child.stderr.resume();
     let buffer = "";
+    let answered = false;
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
       buffer += chunk;
-      for (const line of buffer.split("\n").filter(Boolean)) {
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines.filter(Boolean)) {
         const message = JSON.parse(line) as { id?: number; error?: unknown };
-        if (message.id === 2) {
+        if (message.id === 2 && !answered) {
+          answered = true;
           child.kill();
           done(message.error === undefined);
         }
       }
     });
     child.once("error", fail);
+    child.once("close", (code) => { if (!answered) fail(new Error(`the CLI exited (${code}) before it answered session/new`)); });
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } })}\n`);
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "session/new", params: { cwd: profileDirectory, mcpServers: [] } })}\n`);
   });
