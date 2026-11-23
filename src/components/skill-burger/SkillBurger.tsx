@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronUp, FileText, Globe, Monitor, Plus, Sparkles, Terminal, X, XCircle } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, FileText, Globe, Monitor, Plus, Signpost, Sparkles, Terminal, X, XCircle } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent } from "react";
 
 import { appMeta, BARE_READ } from "../../../shared/skill-burger/apps";
@@ -16,7 +16,7 @@ export function LayerIcon({ kind, app }: { kind: BurgerLayer["kind"]; app?: stri
     const meta = appMeta(app);
     return <ServiceIcon card={{ logo: meta.logo, domain: meta.domain, label: meta.label }} className="size-4 shrink-0 rounded-[4px] text-[10px]" />;
   }
-  const Icon = kind === "shell" ? Terminal : kind === "file" ? FileText : kind === "browser" ? Globe : kind === "computer" ? Monitor : Sparkles;
+  const Icon = kind === "shell" ? Terminal : kind === "file" ? FileText : kind === "browser" ? Globe : kind === "computer" ? Monitor : kind === "decide" ? Signpost : Sparkles;
   return <Icon size={16} aria-hidden="true" className={cn("shrink-0", kind === "ai" ? "text-accent-text" : "text-ink-secondary")} />;
 }
 
