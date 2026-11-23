@@ -57,6 +57,10 @@ export function createBotFork(bot: BotRecord, source: TaskRecord, path: Message[
   task.outside = source.outside;
   task.botApi = source.botApi;
   if (source.botApiAsOwner) task.botApiAsOwner = true;
+  if (source.surface && source.surfaceSource !== "auto") {
+    task.surface = source.surface;
+    if (source.surfaceSource) task.surfaceSource = source.surfaceSource;
+  }
   task.origin = { threadId: source.threadId, messageId };
   task.lastReadMessageId = messageId;
   registerImportedFork(task, history, messageId, register);

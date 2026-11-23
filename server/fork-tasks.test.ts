@@ -118,6 +118,27 @@ it("preserves an explicit no-folder choice when forking a bot conversation", asy
   expect(store.pinTaskCwd(bot.id, fork.threadId, join(home, "available-folder"))).toBeNull();
 });
 
+it("carries a person's computer for the conversation into its fork, never an Auto pin", async () => {
+  const store = await freshStore();
+  const bot = store.createBot();
+  const other = store.createTask(bot.id, "Sibling", false)!;
+  const anchor = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "Work on the private desktop" });
+  store.patchTask(bot.id, bot.threadId, { surface: "vm", surfaceSource: "user" });
+  const chosen = store.forkTask(bot.id, bot.threadId, anchor.id)!;
+  expect(store.taskByThread(bot.id, chosen.threadId)).toMatchObject({ surface: "vm", surfaceSource: "user" });
+  expect(store.taskByThread(bot.id, other.threadId)?.surface).toBeUndefined();
+  expect(store.bot(bot.id)?.computer).toBeUndefined();
+
+  store.patchTask(bot.id, bot.threadId, { surface: "local", surfaceSource: undefined });
+  expect(store.taskByThread(bot.id, store.forkTask(bot.id, bot.threadId, anchor.id)!.threadId)?.surface).toBe("local");
+
+  store.patchTask(bot.id, bot.threadId, { surface: "cloud", surfaceSource: "auto" });
+  const followsBot = store.taskByThread(bot.id, store.forkTask(bot.id, bot.threadId, anchor.id)!.threadId)!;
+  expect(followsBot.surface).toBeUndefined();
+  expect(followsBot.surfaceSource).toBeUndefined();
+  expect(store.createTask(bot.id, "New", false)?.surface).toBeUndefined();
+});
+
 it("removes copied history when registering the fork fails", async () => {
   const store = await freshStore();
   const bot = store.createBot();
