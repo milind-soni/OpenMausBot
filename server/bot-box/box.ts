@@ -21,6 +21,7 @@ import { procHidepid } from "./hidepid.ts";
 import { DENIED_SYSCALLS, seccompBytes, seccompSupported } from "./seccomp.ts";
 import { RELAY_SOCKET_NAME, TEAM_FOLDER_KEPT, boxUploadsConversation, boxUploadsDir, teamFolderOf, under, bwrapArgs, inBoxSocket, planBox, taskWorkspaceIds, type BoxAudience, type BoxBridge, type BoxPlan, type BoxRequest, type BoxSetup } from "./plan.ts";
 import { openBoxRelay, type BoxRelay } from "./relay.ts";
+import { CACHE_ROOT_SWITCH, toolCacheEnvironment, toolCachesOn } from "./tool-caches.ts";
 
 /** The loopback port inside a box that reaches the egress gate. The harness gate sits at the server's own port. */
 export const BOX_EGRESS_PORT = 3128;
@@ -71,6 +72,8 @@ export interface RunnerOptions {
   seccompFile?: string | null;
   /** The broker to mint per-process tokens with; none leaves keys in the environment. */
   broker?: { port: number; mintForProcess(input: { botId?: string | null; threadId?: string | null; grants: Record<string, BrokerGrant> }): { token: string }; revoke(token: string): void } | null;
+  /** Point the tools' download caches at the cache folder in the box's HOME (tool-caches.ts); off leaves the environment as is. */
+  toolCaches?: boolean;
 }
 
 /** Wraps spawns for one setup (the server's, or a self-check fixture's). */
@@ -140,6 +143,8 @@ export class BoxRunner {
     // The server's own PATH leaves out the programs in HOME (program-trust.ts); inside the box they are the bot's own.
     const homePrograms = homeProgramDirs(resolve(request.home ?? this.options.setup.home)).filter((dir) => !(env.PATH ?? "").split(":").includes(dir));
     if (homePrograms.length) env.PATH = [...(env.PATH ? [env.PATH] : []), ...homePrograms].join(":");
+    // After the allow-list, so a value the person gave (through allowEnv) is the one kept.
+    if (this.options.toolCaches) Object.assign(env, toolCacheEnvironment(request.home ?? this.options.setup.home, env));
     if (plan.net === "isolated") {
       const proxy = `http://127.0.0.1:${this.options.egressPort ?? BOX_EGRESS_PORT}`;
       for (const name of BOX_PROXY_ENV) env[name] = proxy;
@@ -273,11 +278,13 @@ export class BotBox {
       setup: { dataDir: options.dataDir, home: options.home, codeRoots: options.codeRoots ?? defaultCodeRoots(), engineRoots: options.engineRoots ?? engineInstallRoots(options.dataDir), bridges },
       denyEnv: options.denyEnv, seccompFile: this.seccompFile,
       broker: { port: BOX_BROKER_PORT, mintForProcess: this.credentials.mintForProcess, revoke: this.credentials.revoke },
+      toolCaches: toolCachesOn(env),
     });
     this.runner.scopeAudiences(this.audiences);
     distrustHomePrograms(options.home, [options.dataDir], ["workspaces", "task-workspaces", "engine-homes", "team-files"].map((name) => join(options.dataDir, name)));
     resetPathCache();
     log(`bot box: on (bubblewrap, ${this.detection.tools.socat ? "socat" : "node"} bridges, credential broker, seccomp ${this.seccompFile ? "on" : "unsupported here"})`);
+    if (toolCachesOn(env)) log(`bot box: tool caches go to the cache folder in each box's HOME (${CACHE_ROOT_SWITCH})`);
     return this.detection;
   }
 

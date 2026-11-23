@@ -42,6 +42,8 @@ const SERVER_ENV_NAMES = new Set([
   "OMB_CLOUD_LEGACY_ORIGINS",
   // The bot box switch (server/bot-box/detect.ts): the Admin may turn a home's box off for support.
   "OMB_BOT_BOX",
+  // Tool caches into one folder in each bot box's HOME (server/bot-box/tool-caches.ts): off unless the Admin turns it on.
+  "OMB_CACHE_ROOT",
   // An ended Cloud started only for its owner's export: the server runs frozen (server/move-freeze.ts).
   "OMB_CLOUD_EXPORT_ONLY",
 ]);

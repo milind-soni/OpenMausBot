@@ -58,6 +58,44 @@ the same).
 
 Cost on Fly (measured, T0 build notes): about 5 ms and 3 MB per box, plus one socat per bridge.
 
+## Tool caches
+
+`server/bot-box/tool-caches.ts`, behind `OMB_CACHE_ROOT` (default off; `1`/`on` turns it on, only on a Cloud home, never
+on a desktop). With it on, the box gives each process the tools' own cache variables, so what a bot's tools download
+lands in one folder, `cache` in the box's HOME, instead of all over it:
+
+| Variable | Folder under `<box HOME>/cache` | Was |
+|---|---|---|
+| `npm_config_cache` (npx too) | `npm` | `~/.npm` |
+| `PIP_CACHE_DIR` | `pip` | `~/.cache/pip` |
+| `UV_CACHE_DIR` | `uv` | `~/.cache/uv` |
+| `PLAYWRIGHT_BROWSERS_PATH` | `ms-playwright` | `~/.cache/ms-playwright` |
+| `PUPPETEER_CACHE_DIR` | `puppeteer` | `~/.cache/puppeteer` |
+| `HF_HUB_CACHE`, `HF_XET_CACHE` | `huggingface/hub`, `huggingface/xet` | `~/.cache/huggingface/{hub,xet}` |
+| `BUN_INSTALL_CACHE_DIR` | `bun` | `~/.bun/install/cache` |
+| `COREPACK_HOME` | `corepack` | `~/.cache/node/corepack` |
+| `GOCACHE`, `GOMODCACHE` | `go-build`, `go-mod` | `~/.cache/go-build`, `~/go/pkg/mod` |
+
+- **Where.** The box's HOME: `/data/cache` on a personal Cloud, `engine-homes/<audience>/cache` on a Team Cloud. So
+  the folder is shared exactly as `~/.npm` and `~/.cache` already are (every bot of a personal Cloud; one audience on a
+  Team Cloud, never another member's). It is under the HOME line of the plan, so no new mount is made. The app's own
+  rebuildable files stay in the data folder's `cache/` (`NODE_COMPILE_CACHE`), which the box hides.
+- **The person's value wins.** A variable that reaches the box as the person's (an engine's saved environment, or an
+  MCP server's environment the server starts it with, both through `allowEnv`) is kept, and so is a cache whose place
+  something else already decides: `XDG_CACHE_HOME` (pip, uv, Playwright, corepack, Go's build cache), `HF_HOME`,
+  `GOPATH`, `BUN_INSTALL`. What an engine or a shell sets for its own children (an MCP server's `env` in the engine's
+  config, an `export`) is set on top inside the box, so it wins too.
+- **Left alone on purpose.** `XDG_CACHE_HOME` (Hugging Face keeps its login token under it, and engines write there),
+  `HF_HOME` (the token), `CARGO_HOME` (credentials and installed programs), `GRADLE_USER_HOME` (properties that may hold
+  keys), `PNPM_HOME`, `UV_TOOL_DIR` and `UV_PYTHON_INSTALL_DIR` (installed programs and the Pythons venvs point into),
+  pnpm's store (a project's `node_modules` records it, and `npm_config_store_dir` makes every npm command warn), Yarn's
+  cache (a Berry project may keep it in the repository), Maven (no variable but `MAVEN_OPTS`).
+- **Nothing is moved or deleted.** The old folders stay; with the switch on, new downloads go to the new folder, and a
+  tool downloads once more what the old folder held (a Playwright browser, a model). A later cleanup may delete the old
+  folders in the table's last column.
+- **Box off, no change.** A Cloud whose box is off (`OMB_BOT_BOX=0`, or no working bubblewrap) runs its bots unboxed
+  with today's environment.
+
 ## The self-check and the report
 
 At boot, and by hand with `node dist-server/bot-box/box-check.js`, the server runs `box-probe.ts` inside a real box
