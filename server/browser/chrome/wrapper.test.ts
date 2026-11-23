@@ -72,15 +72,16 @@ describe("the launcher agent-browser runs instead of Chrome", () => {
   it("writes a Windows batch file that passes the engine's arguments through %* and escapes %", () => {
     const windowsUa = UA.replace("Macintosh; Intel Mac OS X 10_15_7", "Windows NT 10.0; Win64; x64");
     const script = launcherScript({ chrome: "C:\\Users\\Ada 100%\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe", userAgent: windowsUa, screen: { width: 1536, height: 864 }, timeZone: "UTC" }, "win32");
-    const hide = "powershell -NoProfile -NonInteractive -Command \"$w = Add-Type -MemberDefinition '[DllImport(\"user32.dll\")] public static extern IntPtr GetConsoleWindow(); [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);' -Name W -Namespace M -PassThru; $w::ShowWindow($w::GetConsoleWindow(), 0) | Out-Null\"";
+    const hide = "powershell -NoProfile -NonInteractive -Command \"$p = Add-Type -MemberDefinition '[DllImport(\"kernel32.dll\")] public static extern IntPtr GetConsoleWindow(); [DllImport(\"kernel32.dll\")] public static extern uint GetConsoleProcessList(uint[] ids, uint count); [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);' -Name W -Namespace M -PassThru; $h = $p::GetConsoleWindow(); $n = $p::GetConsoleProcessList([uint32[]]::new(32), 32); if ($h -ne [IntPtr]::Zero -and $n -le 2) { $p::ShowWindow($h, 0) | Out-Null }\"";
     expect(script).toBe([
       "@echo off",
       hide,
       `"C:\\Users\\Ada 100%%\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe" %* "--disable-blink-features=AutomationControlled" "--user-agent=${windowsUa}" "--screen-info={1536x864}"`,
       "",
     ].join("\r\n"));
-    // The hiding line runs before Chrome and carries no percent for cmd.exe to expand.
+    // The hiding line runs before Chrome, names only the right DLLs, and carries no percent for cmd.exe to expand.
     expect(script.split("\r\n")[1]).not.toContain("%");
+    expect(hide).toContain("kernel32.dll");
     expect(launcherPath("C:\\data", "win32")).toMatch(/chrome-launcher\.cmd$/u);
     expect(() => batchQuote("--user-agent=\"quoted\"")).toThrow(/quote/);
     expect(() => batchQuote("two\r\nlines")).toThrow(/line break/);

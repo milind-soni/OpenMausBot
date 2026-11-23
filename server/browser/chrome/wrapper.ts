@@ -66,21 +66,27 @@ export function batchQuote(value: string): string {
   return `"${value.replaceAll("%", "%%")}"`;
 }
 
-/** Hides the console the launcher's cmd.exe owns: agent-browser starts it visible (no CREATE_NO_WINDOW), and the blank
- * window would stay on the desktop while the browser runs. Only this console: ShowWindow on GetConsoleWindow, and
- * PowerShell adds none. Batch files double every percent, and this line holds none. */
-const HIDE_OWN_CONSOLE = "powershell -NoProfile -NonInteractive -Command \"$w = Add-Type -MemberDefinition"
-  + " '[DllImport(\"user32.dll\")] public static extern IntPtr GetConsoleWindow();"
+/** Hides a console only the launcher's cmd.exe owns: when agent-browser has no console of its own, Windows allocates a
+ * fresh one for the batch file (visible, no CREATE_NO_WINDOW), and the blank window would stay on the desktop while the
+ * browser runs. GetConsoleWindow and GetConsoleProcessList live in kernel32.dll; ShowWindow in user32.dll. The process
+ * list of an allocated console names only cmd.exe and this PowerShell (at most 2); a console inherited from a terminal
+ * or from agent-browser itself also holds those owners, so its list is longer and nothing is hidden. PowerShell adds no
+ * console of its own, and this line holds no percent for cmd.exe to expand. Add-Type compiles a little C# on every
+ * start; the alternative (shipping a prebuilt helper) outweighs it here. */
+const HIDE_OWN_CONSOLE = "powershell -NoProfile -NonInteractive -Command \"$p = Add-Type -MemberDefinition"
+  + " '[DllImport(\"kernel32.dll\")] public static extern IntPtr GetConsoleWindow();"
+  + " [DllImport(\"kernel32.dll\")] public static extern uint GetConsoleProcessList(uint[] ids, uint count);"
   + " [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);'"
-  + " -Name W -Namespace M -PassThru; $w::ShowWindow($w::GetConsoleWindow(), 0) | Out-Null\"";
+  + " -Name W -Namespace M -PassThru; $h = $p::GetConsoleWindow(); $n = $p::GetConsoleProcessList([uint32[]]::new(32), 32);"
+  + " if ($h -ne [IntPtr]::Zero -and $n -le 2) { $p::ShowWindow($h, 0) | Out-Null }\"";
 
 export function launcherScript(settings: LauncherSettings, platform: NodeJS.Platform = process.platform): string {
   const flags = launcherFlags(settings, platform);
   if (platform === "win32") {
-    // agent-browser (Rust) runs this .cmd through cmd.exe without CREATE_NO_WINDOW, so the shell's blank console shows on
-    // the desktop and stays there while the browser runs. The launcher hides only the console it owns; Chrome's own
-    // windows, and any terminal the person opened, are untouched. PowerShell is a console app and joins this console, so it
-    // opens no window of its own; `\"` is how Windows PowerShell reads a quote inside a quoted command line.
+    // agent-browser (Rust) runs this .cmd through cmd.exe without CREATE_NO_WINDOW, so a console Windows allocates for
+    // it shows on the desktop and stays there while the browser runs. HIDE_OWN_CONSOLE hides that one only, and leaves
+    // a console the launcher inherited alone; Chrome's own windows are untouched. `\"` is how Windows PowerShell reads a
+    // quote inside a quoted command line.
     return [
       "@echo off",
       HIDE_OWN_CONSOLE,
