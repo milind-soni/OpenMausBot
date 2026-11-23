@@ -31,9 +31,10 @@ const SWITCH_POLL_MS = 15_000;
 
 /** A runtime the app manages itself (Antigravity): it installs each version beside the others and checks it. */
 export interface ManagedRuntime {
-  /** The older version installed when the pinned one is not, else null. */
+  /** The version installed when a newer one is to be installed, else null. */
   older(): Promise<string | null>;
-  install(): Promise<void>;
+  /** Resolves with the version it installed when that is not the pinned one. */
+  install(): Promise<string | void>;
   folder: string;
 }
 
@@ -278,12 +279,14 @@ export function createEngineUpdater(options: EngineUpdaterOptions): EngineUpdate
     const older = await managed.older();
     if (older === null) return { kind: "absent" };
     if (engineBusy(plan)) return { kind: "busy" };
+    let installed: string | void;
     try {
-      await managed.install();
+      installed = await managed.install();
     } catch (error) {
       return { kind: "failed", from: older, to: plan.pin.target, reason: error instanceof Error ? error.message : String(error) };
     }
-    return { kind: "updated", from: older, to: plan.pin.target };
+    const to = installed ?? plan.pin.target;
+    return to === older ? { kind: "failed", from: older, to, reason: "the install left the same version in place" } : { kind: "updated", from: older, to };
   }
 
   const updateOne = (plan: EnginePlan): Promise<Outcome> => {
