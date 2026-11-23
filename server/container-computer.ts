@@ -53,7 +53,7 @@ export const BASE_IMAGE = `${BASE_IMAGE_REPOSITORY}@${BASE_IMAGE_DIGEST}`;
 // localhost/ is explicit: Podman prepends it to unqualified build tags and may then resolve the name on Docker Hub.
 // Image and container labels, not this mutable tag, decide compatibility.
 export const IMAGE_REPOSITORY = "localhost/openmausbot/cua-local-vm";
-export const IMAGE_LAYER_VERSION = "9";
+export const IMAGE_LAYER_VERSION = "10";
 export const IMAGE_LAYER_LABEL = "com.openmausbot.image-layer";
 export const IMAGE = `${IMAGE_REPOSITORY}:driver-${CUA_DRIVER_VERSION}-v${IMAGE_LAYER_VERSION}`;
 export const CONTAINER = "openmausbot-computer";
@@ -183,7 +183,7 @@ ${workspacePreparationDockerfile(VM_WORKSPACE_GUEST)}
 # A bot's own desktop: a 200 ms (not 800) watch for windows an action opens still sees Firefox popups; no cursor glide; plain logs; Chrome's own sandbox off, since it needs namespaces this hardened container (capabilities dropped, runtime seccomp) refuses and Chrome exits with code 21; the container is the isolation boundary here. --grant existing-profile lets the bot attach the browser tools to Chromium it opened on this desktop; without it every attach is refused with browser_consent_required.
 RUN printf '%s\\n' \\
       '#!/bin/sh' \\
-      '/usr/local/bin/prepare-openmausbot-workspace.sh' \\
+      '/usr/local/bin/prepare-openmausbot-workspace.sh || exit $?' \\
       'attempt=0' \\
       'until DISPLAY=:1 xset q >/dev/null 2>&1; do' \\
       '  attempt=$((attempt + 1))' \\

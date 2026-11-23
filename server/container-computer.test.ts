@@ -1030,9 +1030,11 @@ describe("Cua integration", () => {
     expect(dockerfile).toContain("prepare-openmausbot-workspace.sh");
     expect(dockerfile).toContain('if ! chmod 0700 "$workspace"');
     expect(dockerfile).toContain('test -r "$directory" && test -w "$directory" && test -x "$directory"');
-    expect(dockerfile).toContain('migrate_profile "$HOME/.config/google-chrome" google-chrome');
-    expect(dockerfile).toContain('migrate_profile "$HOME/.config/chromium" chromium');
-    expect(dockerfile).toContain('migrate_profile "$HOME/.mozilla" mozilla');
+    expect(dockerfile).toContain('migrate_home "$HOME/.config/google-chrome" "$profiles/google-chrome"');
+    expect(dockerfile).toContain('migrate_home "$HOME/.config/chromium" "$profiles/chromium"');
+    expect(dockerfile).toContain('migrate_home "$HOME/.mozilla" "$profiles/mozilla"');
+    expect(dockerfile).toContain('migrate_home "$HOME/.local" "$apps/local"');
+    expect(dockerfile).toContain("/usr/local/bin/prepare-openmausbot-workspace.sh || exit $?");
     expect(dockerfile).toContain("SingletonLock");
     expect(dockerfile).toContain(`${IMAGE_LAYER_LABEL}="${IMAGE_LAYER_VERSION}"`);
     expect(dockerfile).toContain("did not become ready within 45 seconds");
@@ -1046,7 +1048,7 @@ describe("Cua integration", () => {
     expect(dockerfile).toContain("6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2");
     expect(dockerfile).toContain("/usr/local/share/licenses/noto-cjk/OFL.txt");
     expect(dockerfile).toContain("fc-cache -f");
-    expect(IMAGE_LAYER_VERSION).toBe("9");
+    expect(IMAGE_LAYER_VERSION).toBe("10");
   });
 
   it("starts the driver's Chrome without its own sandbox inside the hardened container", () => {

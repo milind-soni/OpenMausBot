@@ -1,6 +1,6 @@
 // The Local VM's website sign-ins live in browser profiles. These run the image's real start-up script and the real rescue
 // against a fake home, workspace and container runtime, so "sign-ins survive replacing the desktop" is checked, not assumed.
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,6 +39,68 @@ function prepareScript(dir: string, workspace: string): string {
 }
 
 const runPrepare = (script: string, home: string) => execFileSync("/bin/sh", [script], { env: { PATH: process.env.PATH, HOME: home } });
+
+const homeMigrations = [
+  {
+    label: "~/.config/google-chrome",
+    base: "google-chrome",
+    parent: (home: string) => join(home, ".config"),
+    homePath: (home: string) => join(home, ".config", "google-chrome"),
+    workspacePath: (workspace: string) => join(workspace, ".browser-profiles", "google-chrome"),
+  },
+  {
+    label: "~/.config/chromium",
+    base: "chromium",
+    parent: (home: string) => join(home, ".config"),
+    homePath: (home: string) => join(home, ".config", "chromium"),
+    workspacePath: (workspace: string) => join(workspace, ".browser-profiles", "chromium"),
+  },
+  {
+    label: "~/.mozilla",
+    base: ".mozilla",
+    parent: (home: string) => home,
+    homePath: (home: string) => join(home, ".mozilla"),
+    workspacePath: (workspace: string) => join(workspace, ".browser-profiles", "mozilla"),
+  },
+  {
+    label: "~/.local",
+    base: ".local",
+    parent: (home: string) => home,
+    homePath: (home: string) => join(home, ".local"),
+    workspacePath: (workspace: string) => join(workspace, ".desktop-apps", "local"),
+  },
+] as const;
+
+const recoveryDirectories = (parent: string, base: string) => readdirSync(parent)
+  .filter((name) => name.startsWith(`unmerged-${base}-`))
+  .sort();
+
+const runPrepared = (script: string, home: string, path = process.env.PATH) => {
+  const result = spawnSync("/bin/sh", [script], { encoding: "utf8", env: { PATH: path, HOME: home } });
+  expect(result.status, result.stderr).toBe(0);
+  return result.stderr;
+};
+
+function seedInterrupted(homePath: string, workspacePath: string) {
+  mkdirSync(join(homePath, "nested"), { recursive: true });
+  mkdirSync(join(homePath, "empty-dir"), { recursive: true });
+  mkdirSync(join(homePath, "Local Storage"), { recursive: true });
+  writeFileSync(join(homePath, "same.txt"), "same-bytes");
+  writeFileSync(join(homePath, "nested", ".only-home"), "dotfile");
+  writeFileSync(join(homePath, "Local Storage", "level.txt"), "spaced");
+  writeFileSync(join(homePath, "..kept"), "dots");
+  mkdirSync(workspacePath, { recursive: true });
+  writeFileSync(join(workspacePath, "same.txt"), "same-bytes");
+  writeFileSync(join(workspacePath, "only-workspace.txt"), "workspace");
+}
+
+function fakeCommand(dir: string, name: string, body: string): string {
+  const bin = join(dir, "bin");
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, name), body);
+  chmodSync(join(bin, name), 0o755);
+  return `${bin}:${process.env.PATH}`;
+}
 
 describe.skipIf(process.platform === "win32")("the image's start-up script keeps Firefox's profile in the workspace", () => {
   it("moves a first-run Firefox profile into the workspace and points ~/.mozilla at it", () => {
@@ -121,6 +183,246 @@ describe.skipIf(process.platform === "win32")("the image's start-up script keeps
     runPrepare(script, home);
     for (const [lock] of locks) expect(() => lstatSync(lock)).toThrow();
     expect(existsSync(join(firefox, ".parentlock"))).toBe(false);
+  });
+
+  // An interrupted copy leaves the workspace non-empty and incomplete. The next start has to merge
+  // the missing entries and only then replace the home directory.
+  it.each(homeMigrations)("merges an interrupted copy of $label and keeps entries that were only at home", (migration) => {
+    const dir = scratch();
+    const home = join(dir, "home");
+    const workspace = join(dir, "workspace");
+    mkdirSync(home);
+    mkdirSync(workspace);
+    const homePath = migration.homePath(home);
+    const workspacePath = migration.workspacePath(workspace);
+    seedInterrupted(homePath, workspacePath);
+    const script = prepareScript(dir, workspace);
+    const stderr = runPrepared(script, home);
+    expect(lstatSync(homePath).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(homePath)).toBe(workspacePath);
+    expect(readFileSync(join(workspacePath, "same.txt"), "utf8")).toBe("same-bytes");
+    expect(readFileSync(join(workspacePath, "nested", ".only-home"), "utf8")).toBe("dotfile");
+    expect(readFileSync(join(workspacePath, "Local Storage", "level.txt"), "utf8")).toBe("spaced");
+    expect(readFileSync(join(workspacePath, "..kept"), "utf8")).toBe("dots");
+    expect(readFileSync(join(workspacePath, "only-workspace.txt"), "utf8")).toBe("workspace");
+    expect(lstatSync(join(workspacePath, "empty-dir")).isDirectory()).toBe(true);
+    expect(lstatSync(join(workspacePath, "empty-dir")).isSymbolicLink()).toBe(false);
+    expect(readdirSync(join(workspacePath, "empty-dir"))).toEqual([]);
+    expect(recoveryDirectories(migration.parent(home), migration.base)).toEqual([]);
+    expect(stderr).not.toContain("preserved");
+  });
+
+  it.each(homeMigrations)("keeps a truncated $label file and the original tree, then leaves that recovery alone on the next start", (migration) => {
+    const dir = scratch();
+    const home = join(dir, "home");
+    const workspace = join(dir, "workspace");
+    mkdirSync(home);
+    mkdirSync(workspace);
+    const homePath = migration.homePath(home);
+    const workspacePath = migration.workspacePath(workspace);
+    mkdirSync(join(homePath, "nested"), { recursive: true });
+    writeFileSync(join(homePath, "cookies.sqlite"), "complete-secret");
+    writeFileSync(join(homePath, "nested", ".only-home"), "dotfile");
+    mkdirSync(workspacePath, { recursive: true });
+    writeFileSync(join(workspacePath, "cookies.sqlite"), "partial");
+    const script = prepareScript(dir, workspace);
+    const stderr = runPrepared(script, home);
+    expect(readFileSync(join(workspacePath, "cookies.sqlite"), "utf8")).toBe("partial");
+    expect(readFileSync(join(workspacePath, "nested", ".only-home"), "utf8")).toBe("dotfile");
+    const names = recoveryDirectories(migration.parent(home), migration.base);
+    expect(names).toHaveLength(1);
+    const held = join(migration.parent(home), names[0]!);
+    expect(lstatSync(held).mode & 0o777).toBe(0o700);
+    expect(readFileSync(join(held, migration.base, "cookies.sqlite"), "utf8")).toBe("complete-secret");
+    expect(readFileSync(join(held, migration.base, "nested", ".only-home"), "utf8")).toBe("dotfile");
+    expect(stderr).toContain(`preserved ${homePath} at ${join(held, migration.base)}`);
+    expect(stderr).toContain("container writable layer");
+    expect(stderr).toContain("disappears when the container is replaced");
+    const linkIno = lstatSync(homePath).ino;
+    runPrepared(script, home);
+    expect(lstatSync(homePath).ino).toBe(linkIno);
+    expect(readlinkSync(homePath)).toBe(workspacePath);
+    expect(recoveryDirectories(migration.parent(home), migration.base)).toEqual(names);
+    expect(readFileSync(join(held, migration.base, "cookies.sqlite"), "utf8")).toBe("complete-secret");
+    expect(readFileSync(join(workspacePath, "cookies.sqlite"), "utf8")).toBe("partial");
+  });
+
+  it.each(homeMigrations)("does not replace an already-correct $label link", (migration) => {
+    const dir = scratch();
+    const home = join(dir, "home");
+    const workspace = join(dir, "workspace");
+    mkdirSync(migration.parent(home), { recursive: true });
+    mkdirSync(workspace);
+    const homePath = migration.homePath(home);
+    symlinkSync(migration.workspacePath(workspace), homePath);
+    const linkIno = lstatSync(homePath).ino;
+    runPrepared(prepareScript(dir, workspace), home);
+    expect(lstatSync(homePath).ino).toBe(linkIno);
+    expect(readlinkSync(homePath)).toBe(migration.workspacePath(workspace));
+  });
+
+  it("preserves a top-level regular file instead of copying it into the workspace directory", () => {
+    const dir = scratch();
+    const home = join(dir, "home");
+    const workspace = join(dir, "workspace");
+    mkdirSync(home);
+    mkdirSync(workspace);
+    writeFileSync(join(home, ".local"), "not-a-directory");
+    runPrepared(prepareScript(dir, workspace), home);
+    const [name] = recoveryDirectories(home, ".local");
+    expect(name).toBeTruthy();
+    expect(readFileSync(join(home, name!, ".local"), "utf8")).toBe("not-a-directory");
+    expect(readlinkSync(join(home, ".local"))).toBe(join(workspace, ".desktop-apps", "local"));
+    expect(readdirSync(join(workspace, ".desktop-apps", "local"))).toEqual([]);
+  });
+
+  it("moves a dangling home symlink aside as a symlink", () => {
+    const dir = scratch();
+    const home = join(dir, "home");
+    const workspace = join(dir, "workspace");
+    mkdirSync(home);
+    mkdirSync(workspace);
+    const missing = join(dir, "missing-target");
+    symlinkSync(missing, join(home, ".mozilla"));
+    runPrepared(prepareScript(dir, workspace), home);
+    const [name] = recoveryDirectories(home, ".mozilla");
+    expect(lstatSync(join(home, name!, ".mozilla")).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(join(home, name!, ".mozilla"))).toBe(missing);
+    expect(readlinkSync(join(home, ".mozilla"))).toBe(join(workspace, ".browser-profiles", "mozilla"));
+  });
+
+  it("does not follow a destination symlink out of the workspace", () => {
+    const dir = scratch();
+    const home = join(dir, "home");
+    const workspace = join(dir, "workspace");
+    const outside = join(dir, "outside");
+    mkdirSync(join(home, ".local", "share"), { recursive: true });
+    mkdirSync(outside);
+    chmodSync(outside, 0o755);
+    const outsideMode = lstatSync(outside).mode;
+    const local = join(workspace, ".desktop-apps", "local");
+    mkdirSync(local, { recursive: true });
+    symlinkSync(outside, join(local, "share"));
+    writeFileSync(join(home, ".local", "share", "secret.txt"), "leak");
+    writeFileSync(join(home, ".local", "kept.txt"), "kept");
+    runPrepared(prepareScript(dir, workspace), home);
+    expect(readdirSync(outside)).toEqual([]);
+    expect(lstatSync(outside).mode).toBe(outsideMode);
+    expect(readFileSync(join(local, "kept.txt"), "utf8")).toBe("kept");
+    expect(readlinkSync(join(local, "share"))).toBe(outside);
+    const [name] = recoveryDirectories(home, ".local");
+    expect(readFileSync(join(home, name!, ".local", "share", "secret.txt"), "utf8")).toBe("leak");
+
+    const redirected = scratch();
+    const redirectedHome = join(redirected, "home");
+    const redirectedWorkspace = join(redirected, "workspace");
+    const redirectedOutside = join(redirected, "outside");
+    mkdirSync(join(redirectedHome, ".mozilla"), { recursive: true });
+    mkdirSync(join(redirectedWorkspace, ".browser-profiles"), { recursive: true });
+    mkdirSync(redirectedOutside);
+    chmodSync(redirectedOutside, 0o755);
+    const redirectedMode = lstatSync(redirectedOutside).mode;
+    symlinkSync(redirectedOutside, join(redirectedWorkspace, ".browser-profiles", "mozilla"));
+    writeFileSync(join(redirectedHome, ".mozilla", "cookies.sqlite"), "secret");
+    const result = spawnSync("/bin/sh", [prepareScript(redirected, redirectedWorkspace)], {
+      encoding: "utf8",
+      env: { PATH: process.env.PATH, HOME: redirectedHome },
+    });
+    expect(result.status).not.toBe(0);
+    expect(readdirSync(redirectedOutside)).toEqual([]);
+    expect(lstatSync(redirectedOutside).mode).toBe(redirectedMode);
+    expect(lstatSync(join(redirectedHome, ".mozilla")).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(redirectedHome, ".mozilla", "cookies.sqlite"), "utf8")).toBe("secret");
+  });
+
+  it("preserves the home tree when comparison fails", () => {
+    const dir = scratch();
+    const home = join(dir, "home");
+    const workspace = join(dir, "workspace");
+    const local = join(workspace, ".desktop-apps", "local");
+    mkdirSync(join(home, ".local"), { recursive: true });
+    mkdirSync(local, { recursive: true });
+    writeFileSync(join(home, ".local", "cookies.sqlite"), "same-bytes");
+    writeFileSync(join(local, "cookies.sqlite"), "same-bytes");
+    const path = fakeCommand(dir, "cmp", "#!/bin/sh\nexit 2\n");
+    const stderr = runPrepared(prepareScript(dir, workspace), home, path);
+    const [name] = recoveryDirectories(home, ".local");
+    expect(readFileSync(join(home, name!, ".local", "cookies.sqlite"), "utf8")).toBe("same-bytes");
+    expect(readFileSync(join(local, "cookies.sqlite"), "utf8")).toBe("same-bytes");
+    expect(readlinkSync(join(home, ".local"))).toBe(local);
+    expect(stderr).toContain("container writable layer");
+  });
+
+  it("leaves the home entry in place when the recovery rename fails", () => {
+    const dir = scratch();
+    const home = join(dir, "home");
+    const workspace = join(dir, "workspace");
+    const local = join(workspace, ".desktop-apps", "local");
+    mkdirSync(join(home, ".local"), { recursive: true });
+    mkdirSync(local, { recursive: true });
+    writeFileSync(join(home, ".local", "cookies.sqlite"), "complete");
+    writeFileSync(join(home, ".local", "extra.txt"), "only-home");
+    writeFileSync(join(local, "cookies.sqlite"), "partial");
+    const path = fakeCommand(dir, "mv", "#!/bin/sh\nexit 1\n");
+    const result = spawnSync("/bin/sh", [prepareScript(dir, workspace)], {
+      encoding: "utf8",
+      env: { PATH: path, HOME: home },
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("leaving it in place");
+    expect(lstatSync(join(home, ".local")).isDirectory()).toBe(true);
+    expect(lstatSync(join(home, ".local")).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(home, ".local", "cookies.sqlite"), "utf8")).toBe("complete");
+    expect(readFileSync(join(home, ".local", "extra.txt"), "utf8")).toBe("only-home");
+    expect(readFileSync(join(local, "cookies.sqlite"), "utf8")).toBe("partial");
+    expect(readFileSync(join(local, "extra.txt"), "utf8")).toBe("only-home");
+  });
+
+  it("treats symlink targets that differ only by a trailing newline as different", () => {
+    const dir = scratch();
+    const home = join(dir, "home");
+    const workspace = join(dir, "workspace");
+    const local = join(workspace, ".desktop-apps", "local");
+    mkdirSync(join(home, ".local"), { recursive: true });
+    mkdirSync(local, { recursive: true });
+    symlinkSync("foo\n", join(home, ".local", "link"));
+    symlinkSync("foo", join(local, "link"));
+    runPrepared(prepareScript(dir, workspace), home);
+    expect(readlinkSync(join(local, "link"))).toBe("foo");
+    const [name] = recoveryDirectories(home, ".local");
+    expect(readlinkSync(join(home, name!, ".local", "link"))).toBe("foo\n");
+
+    const same = scratch();
+    const sameHome = join(same, "home");
+    const sameWorkspace = join(same, "workspace");
+    const sameLocal = join(sameWorkspace, ".desktop-apps", "local");
+    mkdirSync(join(sameHome, ".local"), { recursive: true });
+    mkdirSync(sameLocal, { recursive: true });
+    symlinkSync("foo\n", join(sameHome, ".local", "link"));
+    symlinkSync("foo\n", join(sameLocal, "link"));
+    runPrepared(prepareScript(same, sameWorkspace), sameHome);
+    expect(recoveryDirectories(sameHome, ".local")).toEqual([]);
+    expect(readlinkSync(join(sameLocal, "link"))).toBe("foo\n");
+    expect(lstatSync(join(sameHome, ".local")).isSymbolicLink()).toBe(true);
+  });
+
+  it("stops the driver wrapper when workspace preparation fails", () => {
+    const dir = scratch();
+    const prepare = join(dir, "prepare-fail.sh");
+    writeFileSync(prepare, "#!/bin/sh\nexit 7\n");
+    chmodSync(prepare, 0o755);
+    const dockerfile = managedImageDockerfile();
+    const marker = "> /usr/local/bin/start-openmausbot-cua-driver.sh";
+    const end = dockerfile.indexOf(marker);
+    const start = dockerfile.lastIndexOf("RUN printf", end);
+    expect(start).toBeGreaterThan(-1);
+    const wrapper = join(dir, "wrapper.sh");
+    const printf = dockerfile.slice(start + "RUN ".length, end)
+      .replaceAll("/usr/local/bin/prepare-openmausbot-workspace.sh", prepare);
+    execFileSync("/bin/sh", ["-c", `${printf} > '${wrapper}'`]);
+    const result = spawnSync("/bin/sh", [wrapper], { encoding: "utf8", timeout: 3000 });
+    expect(result.status).toBe(7);
+    expect(result.stderr ?? "").not.toContain("did not become ready");
   });
 });
 
