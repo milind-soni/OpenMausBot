@@ -11,7 +11,8 @@ export interface AcpDriverHooks {
    * the agent reads itself, for an agent whose own file tool returns media as raw bytes (Antigravity). */
   mediaLinks?: boolean;
   /** An agent that asks for a sign-in no turn can give. Its turns fail at once with `loginNote`, its process is closed
-   * and `required` is told, instead of the turn waiting on a sign-in nobody sees. */
+   * and `required` is told, instead of the turn waiting on a sign-in nobody sees. Only these say the account is signed
+   * out: any other `authenticate` failure fails the turn as an ordinary startup error. */
   signInRequest?: {
     /** Whether a whole stderr line announces the request. */
     stderrLine(line: string): boolean;
@@ -106,5 +107,13 @@ export class SignInRequests {
     if (!this.#support.signInRequest?.rpcError(error)) return null;
     this.#support.signInRequest.required(this.#instanceId);
     return this.#error();
+  }
+
+  authenticateFailed(error: unknown, authFailure: "fail" | "fail-request" | "continue"): Error | null {
+    const asked = this.asked(error);
+    if (asked) return asked;
+    if (authFailure === "continue") return null;
+    if (!this.#support.signInRequest) return new Error(this.#support.loginNote);
+    return error instanceof Error ? error : new Error(String(error));
   }
 }
