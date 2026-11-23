@@ -47,6 +47,8 @@ import { initialState, reducer } from "@/state/store";
 import { BOTS_SECTION_ID, CHANNELS_SECTION_ID, PINNED_SECTION_ID, UNREAD_SECTION_ID, userSectionId } from "@/lib/sidebar-layout";
 import { SIDEBAR_COLLAPSED_SECTIONS_KEY, SIDEBAR_DENSITY_KEY, SIDEBAR_SECTION_ORDER_KEY, SIDEBAR_WIDTH_KEY, SIMPLE_SIDEBAR_SECTION_ORDER_KEY, SIMPLE_SIDEBAR_WIDTH_KEY, setSidebarDensity } from "@/lib/sidebar-preferences";
 import { Sidebar, TeamMenuItems } from "./Sidebar";
+import { BOT_ROW_DRAG_TYPE } from "@/lib/sidebar-bot-drop";
+import type { BotRowDrag } from "./SidebarBotDrag";
 const drawSidebar = (Sidebar as unknown as { type: (props: import("react").ComponentProps<typeof Sidebar>) => import("react").ReactNode }).type;
 import { PinnedBotRoster } from "./PinnedCircleThreads";
 import { SidebarFooter } from "./SidebarFooter";
@@ -459,6 +461,60 @@ describe("the sidebar's Unread section", () => {
     expect(sectionOrder(tree)).toContain(userSectionId("Work"));
     const rows = tree.filter((node) => (node.props.bot as Bot | undefined) !== undefined);
     expect(rows.map((row) => [(row.props.bot as Bot).id, row.props.botDrag !== undefined])).toEqual([["cora", false], ["dodo", false], ["bea", false], ["atlas", true]]);
+  });
+
+  const rowOf = (tree: ReactElement<Props>[], id: string) => tree.find((node) => (node.props.bot as Bot | undefined)?.id === id)!.props as { botDrag: BotRowDrag };
+  const sectionZone = (tree: ReactElement<Props>[], id: string) => tree.find((node) => node.props["data-sidebar-section-id"] === id)!.props as unknown as Record<"onDragOver" | "onDrop", (event: unknown) => void>;
+  const dragEvent = (types: string[] = []) => ({
+    preventDefault: vi.fn(), stopPropagation: () => {}, clientY: 0, dataTransfer: { types, setData: () => {}, getData: () => "" },
+    currentTarget: { querySelectorAll: () => [], getBoundingClientRect: () => ({ top: 0, height: 40 }) },
+  });
+
+  it.each([["cora", -1], ["atlas", 1]] as const)("moves %s past the row it is shown next to with Alt+arrow, not past one Unread is listing", (id, direction) => {
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    vi.stubGlobal("fetch", () => new Promise(() => {}));
+    fixture.state = { ...fixture.state, bots: [bot("atlas"), bot("bea", { unread: true }), bot("cora"), bot("dodo", { section: "Work" })] };
+    let tree = render().tree;
+    expect(listedBots(tree)).toEqual(["bea", "atlas", "cora", "dodo"]);
+
+    rowOf(tree, id).botDrag.step(id, direction);
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "botsOrdered", botIds: ["cora", "atlas"] });
+    fixture.state = reducer(fixture.state, { type: "botsOrdered", botIds: ["cora", "atlas"] });
+    tree = render().tree;
+    expect(listedBots(tree)).toEqual(["bea", "cora", "atlas", "dodo"]);
+    expect(fixture.state.bots.map((candidate) => candidate.id)).toEqual(["cora", "bea", "atlas", "dodo"]);
+  });
+
+  it("offers the main list to a bot dragged out of its department while every bot of that list is unread", () => {
+    fixture.state = { ...fixture.state, bots: [bot("atlas", { unread: true }), bot("bea", { unread: true }), bot("dodo", { section: "Work" })] };
+    let tree = render().tree;
+    expect(sectionOrder(tree)).toEqual([UNREAD_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
+
+    rowOf(tree, "dodo").botDrag.row("dodo").onDragStart(dragEvent() as never);
+    tree = render().tree;
+    expect(sectionOrder(tree)).toEqual([UNREAD_SECTION_ID, BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
+    expect(tree.some((node) => node.props["data-bot-drop-slot"] === "")).toBe(true);
+
+    sectionZone(tree, BOTS_SECTION_ID).onDrop(dragEvent([BOT_ROW_DRAG_TYPE]));
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "updateBot", botId: "dodo", patch: { section: "" } });
+  });
+
+  it("takes no dragged section and shows no line for one, since it has no place in the order", () => {
+    withUnread();
+    const lines = (tree: ReactElement<Props>[]) => tree.filter((node) => node.props.className === "mx-2 h-0.5 rounded-full bg-accent").length;
+    let tree = render().tree;
+    headers(tree).find((header) => header.props.name === "Work")!.props.onDragStart!(dragEvent() as never);
+    tree = render().tree;
+
+    const overBots = dragEvent();
+    sectionZone(tree, BOTS_SECTION_ID).onDragOver(overBots);
+    expect(overBots.preventDefault).toHaveBeenCalled();
+    expect(lines(render().tree)).toBe(1);
+
+    const overUnread = dragEvent();
+    sectionZone(tree, UNREAD_SECTION_ID).onDragOver(overUnread);
+    expect(overUnread.preventDefault).not.toHaveBeenCalled();
+    expect(lines(render().tree)).toBe(0);
   });
 
   it("leaves pinned bots and the Chief where they are, and sits under Advanced's Pinned heading", () => {

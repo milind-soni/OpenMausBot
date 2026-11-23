@@ -21,6 +21,8 @@ import {
   sidebarSectionLabel,
   simpleOrderedSections,
   simpleSidebarSections,
+  sectionsInUse,
+  sidebarBotRows,
   unreadBotsApart,
   userSectionId,
   userSectionName,
@@ -372,6 +374,25 @@ describe("the unread section", () => {
   it("moves nothing while it is off", () => {
     const parts = { sectionChiefs: [], sectionedBots: [], unsectionedBots: [{ id: "a", unread: true }] };
     expect(unreadBotsApart(parts, false)).toEqual({ ...parts, unreadBots: [] });
+  });
+
+  it("arranges the saved order of the rows left in place, whatever is shown first or listed as unread", () => {
+    const unread = (id: string) => ({ id, unread: true });
+    const saved = { pinnedBots: [read("p1"), read("p2")], sectionChiefs: [unread("lead")], sectionedBots: [read("w1"), unread("w2"), read("w3")], unsectionedBots: [read("a"), unread("u"), read("b")] };
+    const rows = sidebarBotRows(saved, (bot) => ["b", "w3", "p2"].includes(bot.id));
+    const ids = (bots: { id: string }[]) => bots.map((bot) => bot.id);
+    expect([ids(rows.pinnedBots), ids(rows.unsectionedBots), ids(rows.sectionedBots)]).toEqual([["p2", "p1"], ["b", "a"], ["w3", "w1"]]);
+    expect(ids(rows.unreadBots).sort()).toEqual(["lead", "u", "w2"]);
+    expect(ids(rows.filed)).toEqual(["w3", "w1", "w2", "lead"]);
+    expect([ids(rows.inPlace.unsectionedBots), ids(rows.inPlace.sectionedBots)]).toEqual([["a", "b"], ["w1", "w3"]]);
+
+    const searching = sidebarBotRows(saved, () => false, false);
+    expect(searching.unreadBots).toEqual([]);
+    expect(ids(searching.inPlace.unsectionedBots)).toEqual(["a", "u", "b"]);
+  });
+
+  it("lists a department that only a shown bot or room names, after the given ones and once", () => {
+    expect(sectionsInUse(["Work"], [{ section: "Ops" }, { section: "Work" }, { section: "Ops" }, {}, { section: null }])).toEqual(["Work", "Ops"]);
   });
 
   it("goes under the pinned bots when they lead the list, at the top otherwise, and nowhere with nothing unread", () => {

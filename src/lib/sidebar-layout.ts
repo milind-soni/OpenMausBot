@@ -154,6 +154,13 @@ export function activeBotsFirst<T>(parts: { pinnedBots: T[]; sectionedBots: T[];
   return { pinnedBots: first(parts.pinnedBots), sectionedBots: first(parts.sectionedBots), unsectionedBots: first(parts.unsectionedBots) };
 }
 
+/** The departments to list: the given ones, then any other that a bot or a room shown here is filed under. */
+export function sectionsInUse(names: readonly string[], filed: ReadonlyArray<{ section?: string | null }>): string[] {
+  const result = [...names];
+  for (const { section } of filed) if (section && !result.includes(section)) result.push(section);
+  return result;
+}
+
 type UnreadListBot = {
   unread?: boolean;
   tasks?: ReadonlyArray<{ unread?: boolean; routineRunId?: string; archivedAt?: number; updatedAt?: number; createdAt?: number }> | null;
@@ -174,6 +181,19 @@ export function unreadBotsApart<T extends UnreadListBot>(parts: { sectionChiefs:
   const unreadBots = [...parts.unsectionedBots, ...parts.sectionChiefs, ...parts.sectionedBots].filter(botShowsUnread)
     .map((bot) => ({ bot, since: unreadSince(bot) })).sort((a, b) => b.since - a.since).map(({ bot }) => bot);
   return { unreadBots, sectionChiefs: read(parts.sectionChiefs), sectionedBots: read(parts.sectionedBots), unsectionedBots: read(parts.unsectionedBots) };
+}
+
+/** The rows of the bot list as shown, busy bots first and unread ones in a list of their own, with `filed`, every
+ * shown bot that belongs to a department. `inPlace` is the saved order of the rows left where they belong: what a drag
+ * or Alt+Up/Down arranges, so neither stores the shown order nor counts a row that Unread is listing. */
+export function sidebarBotRows<T extends UnreadListBot>(saved: { pinnedBots: T[]; sectionChiefs: T[]; sectionedBots: T[]; unsectionedBots: T[] }, busy: (bot: T) => boolean, unreadApart = true) {
+  const ordered = { ...saved, ...activeBotsFirst(saved, busy) };
+  return {
+    pinnedBots: ordered.pinnedBots,
+    filed: [...ordered.sectionedBots, ...ordered.sectionChiefs],
+    ...unreadBotsApart(ordered, unreadApart),
+    inPlace: unreadBotsApart(saved, unreadApart),
+  };
 }
 
 /** Unread sits under the pinned bots when they lead the list and above everything else otherwise. */
