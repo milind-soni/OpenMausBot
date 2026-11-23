@@ -457,6 +457,40 @@ export function planLoad(input: LoadInput): LoadPlan[] {
 }
 
 const DATABASE_TABLES_MAX = 25;
+const CATALOG_NAME_TAKEN = /^Catalog Error: (?:(?:Table|View) with name ".*" already exists!|Existing object .+ is of type \w+, trying to replace with type \w+)/;
+
+function catalogNameTaken(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return CATALOG_NAME_TAKEN.test(message);
+}
+
+function replacedMainTable(sql: string, target: string): { name: string; quoted: boolean } | undefined {
+  const { tokens } = singleStatement(sql);
+  const at = tokens.findIndex((token) => token.text === "CREATE");
+  if (at < 0) return undefined;
+  const head = tokens.slice(at);
+  let modifier = 1;
+  if (head[modifier]?.text !== "OR" || head[modifier + 1]?.text !== "REPLACE") return undefined;
+  modifier += 2;
+  if (head[modifier]?.text === "TEMP" || head[modifier]?.text === "TEMPORARY") return undefined;
+  const parts = tableIdentifierParts(target);
+  if (!parts || parts.length > 2) return undefined;
+  if (parts.length === 2 && parts[0]!.toLowerCase() !== "main") return undefined;
+  const name = parts[parts.length - 1]!;
+  const dot = target.lastIndexOf(".");
+  const part = (dot === -1 ? target : target.slice(dot + 1)).trim();
+  return { name, quoted: part.startsWith('"') };
+}
+
+function forgetReplacedImport(ctx: DataContext, sql: string, target: string): void {
+  const replaced = replacedMainTable(sql, target);
+  if (!replaced) return;
+  const fold = replaced.name.toLowerCase();
+  const names = ctx.sheet.sheet().sources
+    .filter((source) => (replaced.quoted ? source.name === replaced.name : source.name.toLowerCase() === fold))
+    .map((source) => source.name);
+  for (const name of names) ctx.sheet.removeSource(name);
+}
 
 export interface LoadedTable { name: string; rowCount: number; columns: DataColumn[]; source: string }
 export interface LoadOutput { tables: LoadedTable[]; warnings: string[]; elapsedMs: number }
@@ -465,6 +499,7 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
   const started = Date.now();
   const plans = planLoad(input);
   const replace = input.replace !== false;
+  const priorSources = ctx.sheet.sheet().sources.slice();
   const catalog = await ctx.database.listTables();
   const fold = (name: string) => name.toLowerCase();
   const existing = new Set(catalog.map((table) => fold(table.name)));
@@ -474,16 +509,8 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
     return match?.rowCount === null;
   };
   const tables: LoadedTable[] = [];
-  const priorSources = ctx.sheet.sheet().sources.slice();
   const reserved = new Set<string>();
   const suffixName = (stem: string, n: number) => `${stem.slice(0, 62 - String(n).length)}_${n}`;
-  const fromStem = (name: string, stem: string) => {
-    if (name === stem) return true;
-    const digits = /_(\d+)$/.exec(name)?.[1];
-    if (!digits || String(Number(digits)) !== digits) return false;
-    const n = Number(digits);
-    return n >= 2 && name === suffixName(stem, n);
-  };
   const nameInEmptyCatalog = (base: string): string => {
     const stem = tableNameFrom(base);
     let name = stem;
@@ -491,37 +518,19 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
     reserved.add(fold(name));
     return name;
   };
-  const unique = (base: string, plan: LoadPlan, sourceTable?: string): { name: string; requested: string } => {
-    const stem = tableNameFrom(base);
-    const requested = nameInEmptyCatalog(base);
-    const assigned = (name: string) => tables.some((table) => table.name === name);
-    const recorded = priorSources.filter((entry) =>
-      entry.kind === plan.kind && entry.source === plan.source
-      && (!plan.attach || entry.options?.table === sourceTable)
-      && fromStem(entry.name, stem));
-    const recordedSource = (candidate: string) => recorded.some((entry) => entry.name === candidate);
-    const requestedReusable = !assigned(requested) && !blocked(requested)
-      && (!existing.has(fold(requested)) || (replace && (requested === stem || recordedSource(requested))));
-    const open = (candidate: string, suffixed: boolean) => {
-      if (assigned(candidate) || blocked(candidate)) return false;
-      if (!existing.has(fold(candidate))) return true;
-      if (!replace) return false;
-      if (!suffixed) return true;
-      const sameRequest = recorded.length === 1 && recorded[0]!.requested === requested;
-      return recordedSource(candidate) && (candidate === requested || (!requestedReusable && sameRequest));
-    };
-    let name = stem;
-    let suffixed = false;
-    for (let n = 2; !open(name, suffixed); n++) {
-      suffixed = true;
-      name = suffixName(stem, n);
+  const assigned = (name: string) => tables.some((table) => fold(table.name) === fold(name));
+  const taken = (name: string) => assigned(name) || blocked(name) || existing.has(fold(name));
+  const attachedTable = (options?: Record<string, string | number | boolean>) => (typeof options?.table === "string" ? options.table : undefined);
+  const priorAllocation = (plan: LoadPlan, requested: string, sourceTable?: string): string | undefined => {
+    let found: string | undefined;
+    for (const entry of priorSources) {
+      if (entry.kind === plan.kind && entry.source === plan.source && attachedTable(entry.options) === sourceTable && entry.requested === requested) found = entry.name;
     }
-    existing.add(fold(name));
-    return { name, requested };
+    return found;
   };
   const warnings: string[] = [];
-  const create = async (name: string, relation: string, plan: LoadPlan, options: Record<string, string | number | boolean>, requested: string) => {
-    const sql = (reader: string) => `CREATE ${replace ? "OR REPLACE " : ""}TABLE ${quoteIdent(name)} AS SELECT * FROM ${reader}`;
+  const create = async (name: string, relation: string, plan: LoadPlan, options: Record<string, string | number | boolean>, requested: string, orReplace: boolean) => {
+    const sql = (reader: string) => `CREATE ${orReplace ? "OR REPLACE " : ""}TABLE ${quoteIdent(name)} AS SELECT * FROM ${reader}`;
     const execute = (statement: string) => ctx.database.run(statement, runOptions(ctx, { extensions: plan.extensions }));
     try {
       await execute(sql(relation));
@@ -540,6 +549,36 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
     ctx.sheet.recordSource({ name, sqlName: quoteIdent(name), kind: plan.kind, source: plan.source, options, requested, rowCount: described.rowCount, columns, loadedAt: new Date().toISOString() });
     tables.push({ name, rowCount: described.rowCount, columns, source: plan.source });
   };
+  const place = async (base: string, relation: string, plan: LoadPlan, options: Record<string, string | number | boolean>, sourceTable?: string) => {
+    const stem = tableNameFrom(base);
+    const requested = nameInEmptyCatalog(base);
+    const prior = priorAllocation(plan, requested, sourceTable);
+    if (replace && prior && !assigned(prior) && !blocked(prior)) {
+      existing.add(fold(prior));
+      await create(prior, relation, plan, options, requested, true);
+      return;
+    }
+    if (!assigned(requested) && !blocked(requested) && (replace || !existing.has(fold(requested)))) {
+      existing.add(fold(requested));
+      try {
+        await create(requested, relation, plan, options, requested, replace);
+        return;
+      } catch (error) {
+        if (replace || !catalogNameTaken(error)) throw error;
+      }
+    }
+    for (let n = 2; ; n++) {
+      const name = suffixName(stem, n);
+      if (taken(name)) continue;
+      existing.add(fold(name));
+      try {
+        await create(name, relation, plan, options, requested, false);
+        return;
+      } catch (error) {
+        if (!catalogNameTaken(error)) throw error;
+      }
+    }
+  };
   const recordedOptions = (plan: LoadPlan): Record<string, string | number | boolean> => ({
     ...(input.sheet ? { sheet: input.sheet } : {}),
     ...(plan.attach?.table ? { table: plan.attach.table } : {}),
@@ -548,8 +587,7 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
   for (const plan of plans) {
     warnings.push(...plan.warnings);
     if (plan.reader) {
-      const placed = unique(plan.stem, plan);
-      await create(placed.name, plan.reader, plan, recordedOptions(plan), placed.requested);
+      await place(plan.stem, plan.reader, plan, recordedOptions(plan));
       continue;
     }
     const attach = plan.attach!;
@@ -575,8 +613,7 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
       for (const entry of chosen) {
         const relation = entry.schema ? `${quoteIdent(alias)}.${quoteIdent(entry.schema)}.${quoteIdent(entry.table)}` : `${quoteIdent(alias)}.${quoteIdent(entry.table)}`;
         const sourceTable = entry.schema ? `${entry.schema}.${entry.table}` : entry.table;
-        const placed = unique(chosen.length > 1 ? entry.table : input.name ?? entry.table, plan, sourceTable);
-        await create(placed.name, relation, plan, { ...recordedOptions(plan), table: sourceTable }, placed.requested);
+        await place(chosen.length > 1 ? entry.table : input.name ?? entry.table, relation, plan, { ...recordedOptions(plan), table: sourceTable }, sourceTable);
       }
     } finally {
       await ctx.database.run(`DETACH ${quoteIdent(alias)}`, { connection: ctx.connection }).catch(() => {});
@@ -650,6 +687,7 @@ export async function runSql(ctx: DataContext, input: SqlInput): Promise<SqlOutp
   const kind = gateSql(input.sql, { allowCreate: true });
   if (kind.kind === "create") {
     await ctx.database.run(input.sql, runOptions(ctx));
+    forgetReplacedImport(ctx, input.sql, kind.target);
     const described = await ctx.database.describe(kind.target, runOptions(ctx));
     const bounded = boundColumns(described.columns, DATA_LIMITS.describeBytesMax);
     return { table: kind.target, columns: bounded.columns, rowCount: described.rowCount, rows: [], truncated: bounded.truncated, elapsedMs: Date.now() - started };

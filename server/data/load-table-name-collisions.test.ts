@@ -352,4 +352,76 @@ describe("distinct table names within one import", () => {
     expect(view?.rowCount).toBeNull();
     expect(view?.error).toMatchObject({ code: "sql_error" });
   });
+
+  it("reloads the displaced name twice more without minting further tables", async () => {
+    const ctx = await unboundView("explicit-suffix-repeat");
+    const file = join(root, "explicit-suffix-repeat.csv");
+    writeFileSync(file, "id,name\n1,Alice\n");
+    const named = await runDataTool(ctx, "data_load", { source: file, name: "sales_report_2" });
+    expect(named.isError, named.content[0]?.text).toBeUndefined();
+    const displaced = await runDataTool(ctx, "data_load", { source: file, name: "sales_report" });
+    expect(displaced.isError, displaced.content[0]?.text).toBeUndefined();
+    expect(displaced.structuredContent!.tables).toMatchObject([{ name: "sales_report_3" }]);
+    const before = (await ctx.database.listTables()).length;
+
+    writeFileSync(file, "id,name\n3,Cara\n");
+    const again = await runDataTool(ctx, "data_load", { source: file, name: "sales_report", replace: true });
+    expect(again.isError, again.content[0]?.text).toBeUndefined();
+    writeFileSync(file, "id,name\n4,Dora\n");
+    const third = await runDataTool(ctx, "data_load", { source: file, name: "sales_report", replace: true });
+    expect(third.isError, third.content[0]?.text).toBeUndefined();
+
+    expect(third.structuredContent!.tables).toMatchObject([{ name: "sales_report_3", rowCount: 1 }]);
+    expect((await ctx.database.run("SELECT * FROM sales_report_2", { connection })).rows).toEqual([["1", "Alice"]]);
+    expect((await ctx.database.run("SELECT * FROM sales_report_3", { connection })).rows).toEqual([["4", "Dora"]]);
+    const tables = await ctx.database.listTables();
+    expect(tables).toHaveLength(before);
+    expect(tables.map((table) => table.name)).not.toContain("sales_report_4");
+    expect(tables.map((table) => table.name)).not.toContain("sales_report_5");
+    const view = tables.find((table) => table.name === "sales_report");
+    expect(view?.rowCount).toBeNull();
+    expect(view?.error).toMatchObject({ code: "sql_error" });
+  });
+
+  it("keeps a table data_sql created over a displaced suffix when the csv reloads", async () => {
+    const ctx = await unboundView("sql-replaces-suffix");
+    const file = join(root, "sales-report-sql-replace.csv");
+    writeFileSync(file, "id,name\n1,Alice\n");
+    const loaded = await runDataTool(ctx, "data_load", { source: file, name: "sales_report" });
+    expect(loaded.isError, loaded.content[0]?.text).toBeUndefined();
+    expect(loaded.structuredContent!.tables).toMatchObject([{ name: "sales_report_2" }]);
+    const replaced = await runDataTool(ctx, "data_sql", { sql: "CREATE OR REPLACE TABLE sales_report_2 AS SELECT 'sql' AS origin, 7 AS value" });
+    expect(replaced.isError, replaced.content[0]?.text).toBeUndefined();
+    expect(ctx.sheet.sheet().sources.find((source) => source.name === "sales_report_2")).toBeUndefined();
+
+    writeFileSync(file, "id,name\n2,Bob\n");
+    const reloaded = await runDataTool(ctx, "data_load", { source: file, name: "sales_report" });
+    expect(reloaded.isError, reloaded.content[0]?.text).toBeUndefined();
+    expect(reloaded.structuredContent!.tables).toMatchObject([{ name: "sales_report_3" }]);
+    expect((await ctx.database.run("SELECT * FROM sales_report_2", { connection })).rows).toEqual([["sql", 7]]);
+    expect((await ctx.database.run("SELECT * FROM sales_report_3", { connection })).rows).toEqual([["2", "Bob"]]);
+    const view = (await ctx.database.listTables()).find((table) => table.name === "sales_report");
+    expect(view?.rowCount).toBeNull();
+    expect(view?.error).toMatchObject({ code: "sql_error" });
+  });
+
+  it("gives two concurrent loads of one blocked name distinct tables", async () => {
+    const ctx = await unboundView("concurrent-blocked-name");
+    const ada = join(root, "concurrent-ada.csv");
+    const bea = join(root, "concurrent-bea.csv");
+    writeFileSync(ada, "id,name\n1,Ada\n");
+    writeFileSync(bea, "id,name\n2,Bea\n");
+    const [left, right] = await Promise.all([
+      loadData(ctx, { source: ada, name: "sales_report" }),
+      loadData(ctx, { source: bea, name: "sales_report" }),
+    ]);
+    const names = [left.tables[0]!.name, right.tables[0]!.name].sort();
+    expect(names).toEqual(["sales_report_2", "sales_report_3"]);
+    const read = async (name: string) => (await ctx.database.run(`SELECT id, name FROM ${quoteIdentifier(name)}`, { connection })).rows;
+    expect([await read(names[0]!), await read(names[1]!)].sort((a, b) => String(a[0]?.[1]).localeCompare(String(b[0]?.[1]))))
+      .toEqual([[["1", "Ada"]], [["2", "Bea"]]]);
+    const view = (await ctx.database.listTables()).find((table) => table.name === "sales_report");
+    expect(view?.rowCount).toBeNull();
+    expect(view?.error).toMatchObject({ code: "sql_error" });
+  });
 });

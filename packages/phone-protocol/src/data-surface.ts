@@ -96,7 +96,7 @@ export interface DataSource {
   kind: "csv" | "parquet" | "json" | "xlsx" | "folder" | "url" | "postgres" | "mysql" | "sqlite" | "gsheet" | "connector" | "sql";
   /** The path, URL or connection the table came from, with credentials removed. */
   source: string;
-  /** Name this load asked for. A table moved off a blocked name is reused only when a later load asks for this again. */
+  /** Name this load asked for. The next load of this source, kind and attached table reuses the table stored for this name. */
   requested?: string;
   options?: Record<string, string | number | boolean>;
   rowCount: number;
