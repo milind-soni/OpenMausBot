@@ -8,7 +8,7 @@ import type { InstanceConfigMap } from "./contracts.ts";
 import { resolveClaudeConfigDir } from "./drivers/claude.ts";
 import { codexHome } from "./drivers/codex-identity.ts";
 import { codexHasCredits } from "./codex-credits.ts";
-import { antigravityPlanUsage, antigravityRunsNativeCli } from "./drivers/antigravity-usage-limits.ts";
+import { antigravityNativePlanUsage, antigravityPlanUsage, antigravityRunsNativeCli } from "./drivers/antigravity-usage-limits.ts";
 import { harnessHome, sealedFixture } from "./env-path.ts";
 
 export type PlanDriver = "claude" | "codex" | "grok" | "opencode" | "antigravity";
@@ -72,6 +72,7 @@ export interface PlanAccount {
   configDir?: string;
   /** No usage reading: a ChatGPT plan signed in through OpenMausBot has no CLI login on disk, and a Claude instance whose config sets `usageMeter: false` keeps its login unread (a refused turn still fails over). */
   noUsage?: true;
+  antigravityNative?: true;
 }
 
 export interface PlanCredential {
@@ -157,8 +158,8 @@ export function planAccountsFromInstances(instances: InstanceConfigMap): PlanAcc
       driver,
       environment: { ...entry.environment },
       ...(configDir ? { configDir } : {}),
-      // Reading ~/.codex/auth.json for a ChatGPT-plan provider would report (and hold it on) another account's limit; so would a left-over Antigravity token file under the native CLI, which keeps its sign-in elsewhere.
-      ...(config?.authMode === "chatgpt-plan" || (driver === "claude" && config?.usageMeter === false) || (driver === "antigravity" && antigravityRunsNativeCli(config?.cli)) ? { noUsage: true as const } : {}),
+      // Reading ~/.codex/auth.json for a ChatGPT-plan provider would report (and hold it on) another account's limit.
+      ...(config?.authMode === "chatgpt-plan" || (driver === "claude" && config?.usageMeter === false) ? { noUsage: true as const } : driver === "antigravity" && antigravityRunsNativeCli(config?.cli) ? { antigravityNative: true as const } : {}),
     });
   }
   return accounts;
@@ -328,12 +329,7 @@ function closedWindow(): PlanWindow {
 
 function openWindow(usedPercent: number, resetsAt: string | null): PlanWindow {
   const used = clampPercent(usedPercent);
-  return {
-    available: true,
-    usedPercent: used,
-    remainingPercent: clampPercent(100 - used),
-    resetsAt,
-  };
+  return { available: true, usedPercent: used, remainingPercent: clampPercent(100 - used), resetsAt };
 }
 
 function extraLine(label: string, window: PlanWindow): PlanExtra {
@@ -704,7 +700,7 @@ function planUsageCacheKey(accounts: PlanAccount[]): string {
       .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
       .map(([name, value]) => `${name}=${value}`)
       .join("\n");
-    return [account.id, account.driver, account.name, account.configDir ?? "", environment, account.noUsage ? "no-usage" : "usage"].join("\u0000");
+    return [account.id, account.driver, account.name, account.configDir ?? "", environment, account.noUsage ? "no-usage" : "usage", account.antigravityNative ? "native" : ""].join("\u0000");
   }).join("\n");
 }
 
@@ -916,7 +912,7 @@ function okRow(account: PlanAccount, windows: PlanWindows): PlanProviderRow {
 
 async function fetchProvider(account: PlanAccount, deps: PlanUsageDeps): Promise<PlanProviderRow | null> { // null: OpenCode, in every fleet, with no key of its own
   let credential: PlanCredential;
-  if (account.driver === "antigravity") { const windows = await antigravityPlanUsage(account.id, deps); return windows && okRow(account, windows); } // null: no sign-in, or Google gave nothing
+  if (account.driver === "antigravity") { const windows = await (account.antigravityNative ? antigravityNativePlanUsage(account.id, account.environment, deps) : antigravityPlanUsage(account.id, deps)); return windows && okRow(account, windows); } // null: no sign-in, or Google gave nothing
   try {
     credential = await deps.credentials.read(account);
   } catch {
