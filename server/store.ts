@@ -153,7 +153,7 @@ export function titleFromLlm(raw: string): string | null {
 export interface BotRecord extends Omit<WireBot, "avatarUrl" | "tasks"> {
   tasks?: TaskRecord[];
   avatarUrl?: string;
-  resumeCursors: Record<string, unknown>; /** Set on a stand-in: the place this bot lives in, and its id there. */ home?: { place: string; placeName: string; botId: string; /** What that place is, as the sidebar's rows say it. */ kind?: "computer" | "cloud"; /** It cannot be reached now: the link is off or its place is unlinked ("off"), or its place no longer has it ("missing"). */ gone?: "off" | "missing" }; mainThreadChoice?: string; // mainThreadChoice ("Set as main thread") is host-only; clients get mainThreadId.
+  resumeCursors: Record<string, unknown>; /** Set on a stand-in: the place this bot lives in, and its id there. */ home?: { place: string; placeName: string; botId: string; /** What that place is, as the sidebar's rows say it. */ kind?: "computer" | "cloud"; /** It cannot be reached now: the link is off or its place is unlinked ("off"), or its place no longer has it ("missing"). */ gone?: "off" | "missing" }; mainThreadChoice?: string; mainThreadKept?: string; // Host-only; clients get mainThreadId. mainThreadChoice is the person's "Set as main thread"; mainThreadKept is the one saved for them so it stays put, and no memory follows it.
   /** Elevation journal: Full/Custom runs as Ask until Electron confirms the prepared reply; a marker surviving a restart is revoked on load. */
   approvalGrant?: {
     requestId: string;
@@ -170,7 +170,7 @@ export interface BotRecord extends Omit<WireBot, "avatarUrl" | "tasks"> {
   assignedSkills?: string[];
 }
 
-export type BotWirePrivateKeys = "resumeCursors" | "home" | "mainThreadChoice" | "tasks" | "avatarUrl" | "approvalGrant" | "lastProfileRequestId" | "lastTeamSetupReceipt" | "packageBase" | "assignedSkills";
+export type BotWirePrivateKeys = "resumeCursors" | "home" | "mainThreadChoice" | "mainThreadKept" | "tasks" | "avatarUrl" | "approvalGrant" | "lastProfileRequestId" | "lastTeamSetupReceipt" | "packageBase" | "assignedSkills";
 export type BotWireProjection = Pick<BotRecord, Exclude<keyof BotRecord, BotWirePrivateKeys>>;
 export type BotWireProjectionIsExact = AssertExact<Omit<WireBot, "avatarUrl" | "tasks">, BotWireProjection> & AssertSameKeys<Omit<WireBot, "avatarUrl" | "tasks">, BotWireProjection>;
 export const botWireProjectionIsExact: BotWireProjectionIsExact = true;
@@ -1459,7 +1459,7 @@ export class Store {
     for (const g of rooms) this.emit({ type: "group", groupId: g.id });
     return true;
   }
-  /** A bot's saved main thread, after saving the one `keep` names for it: no save of its own, it goes with the bot's next one. */ keepMainThread(id: string, keep: (chosen?: string) => string | undefined): string | undefined { const bot = this.own(id), next = bot && keep(bot.mainThreadChoice); if (!bot || !next) return this.bot(id)?.mainThreadChoice; this.registry.changedInPlace({ kind: "bot", id }); return bot.mainThreadChoice = next; }
+  /** A bot's saved main thread, after saving the one `keep` names for it: no save of its own, it goes with the bot's next one. */ keepMainThread(id: string, keep: (chosen?: string) => string | undefined): string | undefined { const bot = this.own(id), next = bot && keep(bot.mainThreadKept ?? bot.mainThreadChoice); if (!bot || !next) { const saved = this.bot(id); return saved?.mainThreadKept ?? saved?.mainThreadChoice; } this.registry.changedInPlace({ kind: "bot", id }); return bot.mainThreadKept = next; }
   patchBot(id: string, patch: Partial<BotRecord>): BotRecord | null {
     const bot = this.own(id);
     if (!bot) return null; patch = reshowWhenMoved(bot, patch);
