@@ -8,11 +8,8 @@ import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb, verificationServerEnvironment } from "../scripts/control-omb.ts";
 import { waitForExit } from "./testing/cleanup.ts";
-import { openSse } from "./testing/sse.ts";
 
 const POLL = { timeout: 30_000, interval: 100 };
-const NOTE = "The person typed this in the chat";
-/** Every decision the server recorded: a card closed by a typed line is none. */
 /** The verdicts recorded for one request; showing its card is not one. */
 const verdicts = (dataDir: string, requestId: string): string[] => (existsSync(join(dataDir, "decisions"))
   ? readdirSync(join(dataDir, "decisions")).flatMap((file) => readFileSync(join(dataDir, "decisions", file), "utf8").split("\n").filter(Boolean)) : [])
@@ -33,11 +30,10 @@ function client(url: string) {
   return { api, messages, openCard, control };
 }
 
-it("in the bot's own chat, a line typed while its ask_user card waits answers the card, only the engine reads the note, and a retry changes nothing", async () => {
+it("in the bot's own chat, a line typed while its ask_user card waits answers the card with exactly those words, and a retry changes nothing", async () => {
   const fixture = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true });
   const { url, dataDir } = fixture.info;
   const { api, messages, openCard, control } = client(url);
-  const events = await openSse(`${url}/api/events`, { origin: url });
   try {
     const { bot } = await control("new-bot", "--name", "Asker");
     const threadId = bot.activeTaskId as string;
@@ -58,19 +54,18 @@ it("in the bot's own chat, a line typed while its ask_user card waits answers th
 
     await expect.poll(async () => (await messages(threadId)).some((row) => row.role === "bot" && row.text === "Q: answered"), POLL).toBe(true);
     expect((await messages(threadId)).find((row) => row.id === card.id)?.card).toMatchObject({ answered: "answer", answeredText: "what time is it?" });
-    // The engine's side of the call, outside the transcript: the scripted turn's record of its ask_user step.
-    const asked = readFileSync(join(dataDir, "room-plan.json.evidence.jsonl"), "utf8");
-    expect(asked).toContain(`${NOTE} instead of picking an option. Reply to it, and ask again if you still need an answer.] what time is it?`);
+    // The engine's side of the call: what the scripted turn's ask_user step got back.
+    const steps = readFileSync(join(dataDir, "room-plan.json.evidence.jsonl"), "utf8").split("\n").filter(Boolean)
+      .map((line) => JSON.parse(line) as { planKey?: string; evidence?: Array<{ step?: { tool?: string }; response?: { result?: { content?: Array<{ text?: string }> } } }> })
+      .filter((row) => row.planKey === "Q").flatMap((row) => row.evidence ?? []).filter((frame) => frame.step?.tool === "ask_user");
+    expect(steps.map((frame) => frame.response?.result?.content?.[0]?.text), "the engine reads the words the chat shows").toEqual(["what time is it?"]);
 
     const again = await api("POST", `/api/bots/${bot.id}/messages`, send);
     expect(again).toMatchObject({ status: 202, body: { message: { id: typed.body.message.id } } });
     expect((await api("POST", `/api/bots/${bot.id}/messages`, { ...send, text: "something else" })).status).toBe(409);
     const rows = await messages(threadId);
     expect(rows.filter((row) => row.role === "user" && row.text === "what time is it?")).toHaveLength(1);
-    expect(JSON.stringify(rows)).not.toContain(NOTE);
-    expect(JSON.stringify(events.frames), "no frame any client got carries the note").not.toContain(NOTE);
   } finally {
-    events.close();
     await fixture.close();
   }
 }, 120_000);
@@ -161,7 +156,7 @@ it("in the bot's own chat, a line typed while Claude's own question of several p
     const typed = await api("POST", `/api/bots/${bot.id}/messages`, { text: "what time is it?", threadId, sendId: randomUUID() });
     expect(typed).toMatchObject({ status: 202, body: { steered: true } });
     await expect.poll(() => replies.split("\n").filter(Boolean).map((line) => JSON.parse(line)).find((reply) => reply.id === requestId), POLL)
-      .toMatchObject({ behavior: "deny", message: expect.stringContaining("typed in the chat") });
+      .toMatchObject({ behavior: "deny" });
     await expect.poll(() => existsSync(steerLog) ? readFileSync(steerLog, "utf8") : "", POLL).toContain("what time is it?");
     expect((await messages(threadId)).find((row) => row.id === card.id)?.card, "closed without an answer, not denied").toMatchObject({ answered: "unavailable", dismissed: true });
     expect(verdicts(fixture.info.dataDir, requestId)).toEqual([]);
