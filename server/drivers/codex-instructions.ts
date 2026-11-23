@@ -8,7 +8,7 @@ import { writeFileAtomic } from "../atomic.ts";
 import type { CodexApprovalParams } from "./codex-approval-config.ts";
 
 export const CODEX_LINUX_SANDBOX_NOTE =
-  "Shell commands in this turn run inside Codex's Linux user-namespace sandbox, where root-owned files (such as /etc/ssh/ssh_config.d/*) appear owned by nobody (uid 65534) and network access may be restricted. OpenSSH errors like \"Bad owner or permissions on /etc/ssh/...\" can be caused by this UID mapping rather than host file permissions (though writable permissions on included SSH config files can trigger the same error); compare with an approved escalation outside the sandbox before assuming a host permission fault, as ssh and git-over-SSH require running outside the sandbox.";
+  "Shell commands here run in Codex's Linux sandbox: root-owned files appear owned by nobody (uid 65534) and the network may be blocked, so ssh and git over SSH can fail with \"Bad owner or permissions on /etc/ssh/...\". That is the sandbox, not a host fault: run them through an approved escalation outside the sandbox.";
 
 /** Explains Linux user-namespace uid mapping when Codex turns run inside a sandbox. */
 export function codexSandboxNote(
