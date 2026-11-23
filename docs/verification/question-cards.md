@@ -98,9 +98,13 @@ One server of the person's own, no teammate handing work on, exactly one questio
   it the same way, the waiting tool gets a plain decline, and the line is steered into the turn.
 
 Two or more question cards live in the chat, Stop, a line with a file or image, a reply to another line, rooms and work
-handed on keep their own paths. A card reads closed only once the engine took the decline: if the close is refused, or
-the engine did not take it, the card stays open and can still be tapped, and the line is sent as before. Two tries of
-one send that arrive together close or answer one card, even when another opens before the line is written.
+handed on keep their own paths. A card reads closed only when the engine settles its request with the close's own
+decline: if the close is refused, or the engine did not take it, the card stays open and can still be tapped, and the
+line is sent as before. A tap, Stop or the turn ending that wins while the decline is on its way settles the card as it
+always does, and no request outlives its turn (unit tests in `server/host/ask-cards.test.ts`: no shipped fake engine
+waits while taking a decline, so this race is not reachable over HTTP). Two tries of one send that arrive together close
+or answer one card, even when another opens before the line is written. That holds for 60 seconds after the first try
+took effect: a send whose line was never written, tried again after that, may close or answer the card open then.
 
 Unit tests for the relay's rules (which thread, which sender, sign-ins, work handed out this turn, an engine that cannot
 take a message mid-turn) are in `server/host/question-routing.test.ts`.
