@@ -6,6 +6,7 @@ import type { Routine } from "@/lib/routines";
 import type { MemoryDoc } from "@/lib/memory";
 import type { Bot, BotSettingsSection, InstanceInfo } from "@/state/store";
 import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN } from "../../shared/bot-avatar";
+import { EVERYDAY_BODY_IDS } from "../../shared/bot-body";
 import type { ManagedSkill } from "./bot-settings/SkillsSection";
 import type { McpServerSummary } from "@/lib/mcp-servers";
 import type { BotApps } from "./bot-settings/useBotApps";
@@ -149,6 +150,7 @@ const { SignedInSites } = await import("./SignedInSites");
 const { AvatarImageGenerator } = await import("./AvatarImageGenerator");
 const { AvatarFraming } = await import("./avatar-editing");
 const { MascotFaceColorPicker } = await import("./MascotFaceColorPicker");
+const { MascotBodyColorSwatch } = await import("./MascotBodyColorSwatch");
 const { Switch } = await import("./SettingsPrimitives");
 const { OrgSkillsCard } = await import("./bot-settings/OrgSkillsCard");
 const { PackageProvenance } = await import("./bot-settings/PackageProvenance");
@@ -510,10 +512,10 @@ describe("the hero", () => {
 describe("the avatar editor", () => {
   const editor = (bot: Bot) => capture(() => AvatarEditorCard({ bot, activeState: "idle", onPatch: patch, onClose }));
 
-  it("shows the ten bodies and twelve colors, with the festival bodies and the faces behind More looks", () => {
+  it("shows the shapes and objects and twelve colors, with the festival bodies and the faces behind More looks", () => {
     const bot = makeBot();
     const rendered = editor(bot);
-    expect(rendered.html.match(/aria-label="Use the \w+ body"/g)).toHaveLength(10);
+    expect(rendered.html.match(/aria-label="Use the [\w ]+ body"/g)).toHaveLength(EVERYDAY_BODY_IDS.length);
     expect(rendered.html.match(/aria-label="Use \w+ mascot color"/g)).toHaveLength(12);
     expect(rendered.html).not.toContain(">Halloween<");
     expect(rendered.html).not.toContain(">Diwali<");
@@ -536,7 +538,7 @@ describe("the avatar editor", () => {
     click(more);
     const open = editor(bot);
     expect(find(open, "data-avatar-more").props["aria-expanded"]).toBe(true);
-    expect(open.html.match(/aria-label="Use the [\w ]+ body"/g)).toHaveLength(30);
+    expect(open.html.match(/aria-label="Use the [\w ]+ body"/g)).toHaveLength(EVERYDAY_BODY_IDS.length + 20);
     expect(open.html).toContain(">Halloween<");
     expect(open.html).toContain(">Diwali<");
     click(find(open, "aria-label", "Use the Pumpkin body"));
@@ -568,7 +570,28 @@ describe("the avatar editor", () => {
 
   it("resets the mascot as the Advanced card does", () => {
     click(find(editor(makeBot()), "data-avatar-reset"));
-    expect(patch).toHaveBeenLastCalledWith({ avatarCrop: "mascot", color: "green", mascotExpression: null, mascotBody: "cursor", mascotFaceColor: null });
+    expect(patch).toHaveBeenLastCalledWith({ avatarCrop: "mascot", color: "green", mascotExpression: null, mascotBody: "cursor", mascotFaceColor: null, mascotBodyColor: null });
+  });
+
+  it("picks a custom body color after the swatches, and a named swatch clears it", () => {
+    const plain = ofType(editor(makeBot()), MascotBodyColorSwatch)!.props as Parameters<typeof MascotBodyColorSwatch>[0];
+    const unset = capture(() => MascotBodyColorSwatch(plain));
+    const ring = find(unset, "data-avatar-body-color");
+    expect(ring.props["aria-pressed"]).toBe(false);
+    expect(ring.props["aria-label"]).toBe("Pick a custom body color");
+    const input = find(unset, "type", "color");
+    expect(input.props.value).toBe("#009957");
+    (input.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "#12AB9F" } });
+    expect(patch).toHaveBeenLastCalledWith({ mascotBodyColor: "#12ab9f" });
+
+    fresh();
+    const tinted = editor(makeBot({ mascotBodyColor: "#12ab9f" }));
+    expect(find(tinted, "aria-label", "Use green mascot color").props["aria-pressed"]).toBe(false);
+    const set = capture(() => MascotBodyColorSwatch(ofType(tinted, MascotBodyColorSwatch)!.props as Parameters<typeof MascotBodyColorSwatch>[0]));
+    expect(find(set, "data-avatar-body-color").props["aria-pressed"]).toBe(true);
+    expect(find(set, "type", "color").props.value).toBe("#12ab9f");
+    click(find(tinted, "aria-label", "Use green mascot color"));
+    expect(patch).toHaveBeenLastCalledWith({ color: "green", mascotBodyColor: null });
   });
 
   it("edits facial feature color without changing body color or expression", () => {
