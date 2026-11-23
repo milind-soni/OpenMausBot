@@ -79,7 +79,7 @@ import { ConnectorCard } from "./ConnectorCard";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { SignInRequestCard } from "./SignInRequestCard";
 import { isPinnedSignIn, NO_PINNED_SIGN_INS, PinnedSignInSlot } from "./PinnedSignInSlot";
-import { ActivityChip, ChatRowsContext, useChatRows, type ChatRows } from "./ChatRows";
+import { ActivityChip, ChatRowsContext, useChatRows, type ChatRows } from "./ChatRows"; import { useMotionBeat } from "./mascot-beat";
 import { AutomationCaption, RoutineRunRow } from "./RoutineRunCard"; import { InboxAnswers, InboxCaption, RelayLabel } from "./InboxLine"; import { InboxCardSlot } from "./inbox/InboxCard";
 import { CallRecordRow } from "./CallRecordRow";
 import { AttachmentGallery, collectMessageFiles, replyAttachmentGroup, splitMessageAttachments } from "./AttachmentGallery";
@@ -812,7 +812,9 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
   const busy = Boolean(bot.busy);
   const stoppedAt = useStoppedAt(bot.threadId);
   const openedAt = useThreadOpenedAt(bot.threadId);
-  const headerAnimated = busy || (mascotMotion?.kind ?? "none") !== "none";
+  // A beat the store still holds after it played is no beat: the face neither keeps moving nor replays it when a turn starts.
+  const headerBeat = useMotionBeat(mascotMotion?.kind, mascotMotion?.nonce ?? 0), headerMotion = (headerBeat && mascotMotion?.kind) || "none";
+  const headerAnimated = headerBeat || busy;
   const branch = useRef(messages);
   branch.current = messages;
   const onBranch = useCallback((messageId: string) => branch.current.some((m) => m.id === messageId), []);
@@ -935,7 +937,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
           {simpleHead ? (
             <ChatHeadPill
               bot={bot}
-              avatar={{ state: stateForBot({ ...bot, messages }), motion: mascotMotion?.kind ?? "none", motionKey: mascotMotion?.nonce ?? 0, animated: headerAnimated }}
+              avatar={{ state: stateForBot({ ...bot, messages }), motion: headerMotion, motionKey: mascotMotion?.nonce ?? 0, animated: headerAnimated }}
               privacy={privateChat ? { kind: "private" } : ownHelper ? { kind: "ownHelper" } : sharedChat && team ? { kind: "shared", team: team.name, onlyPeopleAdded: bot.onlyPeopleAdded, sharedWith: currentTask?.sharedWith?.name } : null}
               onToggle={() => dispatch({ type: "toggleSettings", open: !state.settingsOpen })}
             />
@@ -952,7 +954,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
                   bot={bot}
                   state={stateForBot({ ...bot, messages })}
                   size={24}
-                  motion={mascotMotion?.kind ?? "none"}
+                  motion={headerMotion}
                   motionKey={mascotMotion?.nonce ?? 0}
                   animated={headerAnimated}
                 />
@@ -986,7 +988,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
               className={cn("group flex h-9 min-w-0 items-center gap-2.5 rounded-full py-0.5 pl-2 pr-3.5 text-ink", ELEVATED_FLOAT, ELEVATED_HOVER)}
             >
               <BotAvatar bot={bot} state={stateForBot({ ...bot, messages })} size={24}
-                motion={mascotMotion?.kind ?? "none"} motionKey={mascotMotion?.nonce ?? 0} animated={headerAnimated} />
+                motion={headerMotion} motionKey={mascotMotion?.nonce ?? 0} animated={headerAnimated} />
               <span className="min-w-0 truncate text-[14px] font-medium text-ink">{bot.name}</span>
               {chiefOfStaffBadge(bot)}
               <ChevronRight size={14} aria-hidden="true" className="-ml-2.5 w-0 shrink-0 text-ink-secondary opacity-0 transition-[width,margin,opacity] duration-150 group-hover:ml-0 group-hover:w-3.5 group-hover:opacity-100 group-focus-visible:ml-0 group-focus-visible:w-3.5 group-focus-visible:opacity-100" />

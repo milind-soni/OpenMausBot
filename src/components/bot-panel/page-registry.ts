@@ -41,7 +41,7 @@ export const PAGES: Record<PageId, PageMeta> = {
   approvals: { title: "botPanel.page.approvals", home: "details" },
   routines: { title: "botSettings.simple.routines", home: "details" },
   apps: { title: "botPanel.appsRow", home: "details", intro: "botPanel.apps.intro" },
-  memory: { title: "botPanel.memoryRow", home: "library", intro: "botPanel.memory.intro" },
+  memory: { title: "botPanel.memoryRow", home: "library" },
   skills: { title: "botSettings.simple.skills", home: "library", intro: "botSettings.simple.skillsHint" },
   browser: { title: "settings.sites.title", home: "computer" },
   folder: { title: "computer.files.folder", home: "library", intro: "botPanel.folder.intro" },

@@ -43,7 +43,7 @@ export function createInternalThreadRoutes(deps: {
       }
       const rows: ThreadRow[] = [];
       const stateOf = (bot: BotRecord, task: TaskRecord) => {
-        if (task.activity === "waiting-on-you" || coordinator.awaitingAnswer(task.threadId)) return "waiting-on-you" as const;
+        if ((!task.closedBy && task.activity === "waiting-on-you") || coordinator.awaitingAnswer(task.threadId)) return "waiting-on-you" as const;
         if (deps.threadBusy(bot.id, task.threadId)) return "running" as const;
         if (coordinator.parkedDirect(task.threadId)) return "waiting-on-you" as const;
         if (deps.queuedThreadPosition(bot.id, task.threadId) !== null) return "queued" as const;

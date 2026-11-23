@@ -15,6 +15,7 @@ import { enginesBinDir, enginesPrefix, npmCopyVersion, npmLatestVersion, npmModu
 import { EngineInUse, npmCommandNames, removeNpmCopy, sweepNpmLeftovers, updateNpmEngineStaged, type StagedNpmUpdate } from "./engine-npm-update.ts";
 import { installStandaloneEngine, standaloneAssetFor, standaloneCurrentVersion, standaloneEngineDir, type StandaloneInstallOptions } from "./engine-standalone.ts";
 import { ENGINE_VERSIONS, LATEST, type EngineVersionPin } from "./engine-versions.ts";
+import { imageCopyTooOld, orderImageEngines, runningImageVersion } from "./image-engines.ts";
 import { liveCliCommands } from "./procs.ts";
 import { isNewerVersion } from "./update-check.ts";
 
@@ -31,9 +32,10 @@ const SWITCH_POLL_MS = 15_000;
 
 /** A runtime the app manages itself (Antigravity): it installs each version beside the others and checks it. */
 export interface ManagedRuntime {
-  /** The older version installed when the pinned one is not, else null. */
+  /** The version installed when a newer one is to be installed, else null. */
   older(): Promise<string | null>;
-  install(): Promise<void>;
+  /** Resolves with the version it installed when that is not the pinned one. */
+  install(): Promise<string | void>;
   folder: string;
 }
 
@@ -74,6 +76,11 @@ export interface UpdateSteps {
   standaloneVersion(release: StandaloneRelease, baseDir: string): string | null;
   installStandalone(release: StandaloneRelease, options: StandaloneInstallOptions): Promise<unknown>;
   handshake(command: string, args: readonly string[], env: NodeJS.ProcessEnv): Promise<string | null>;
+  /** The version of the Cloud image's own copy of an npm package when that copy is the one that runs, with
+   * OMB_IMAGE_ENGINES=1 (image-engines.ts); else null. */
+  imageVersion(pkg: string, baseDir: string): string | null;
+  /** After an npm copy changed: whether the image's copies or the data folder's go first on PATH. */
+  orderPath(baseDir: string): void;
 }
 
 const STEPS: UpdateSteps = {
@@ -85,6 +92,8 @@ const STEPS: UpdateSteps = {
   standaloneVersion: standaloneCurrentVersion,
   installStandalone: installStandaloneEngine,
   handshake: acpHandshake,
+  imageVersion: (pkg, baseDir) => runningImageVersion(pkg, baseDir),
+  orderPath: (baseDir) => { orderImageEngines(baseDir); },
 };
 
 export interface EngineUpdaterOptions {
@@ -254,6 +263,10 @@ export function createEngineUpdater(options: EngineUpdaterOptions): EngineUpdate
   async function updateNpm(plan: EnginePlan, pkg: string): Promise<Outcome> {
     const current = steps.npmVersion(pkg, baseDir);
     if (current === null) return { kind: "absent" };
+    // The image's copy runs instead of one here no newer than it: nothing to download, unless the driver needs a newer
+    // one than the image carries, or a saved CLI path runs this copy.
+    const image = steps.imageVersion(pkg, baseDir);
+    if (image !== null && !isNewerVersion(current, image) && !imageCopyTooOld(plan.pin, image) && !configuredInto(pkg)) return { kind: "current" };
     if (engineBusy(plan)) return { kind: "busy" };
     let target = plan.pin.target;
     if (target === LATEST) {
@@ -271,6 +284,7 @@ export function createEngineUpdater(options: EngineUpdaterOptions): EngineUpdate
       if (aborted.busy || error instanceof EngineInUse) return { kind: "waiting" };
       return { kind: "failed", from: current, to: target, reason: error instanceof Error ? error.message : String(error) };
     }
+    steps.orderPath(baseDir);
     return { kind: "updated", from: current, to: target };
   }
 
@@ -278,12 +292,14 @@ export function createEngineUpdater(options: EngineUpdaterOptions): EngineUpdate
     const older = await managed.older();
     if (older === null) return { kind: "absent" };
     if (engineBusy(plan)) return { kind: "busy" };
+    let installed: string | void;
     try {
-      await managed.install();
+      installed = await managed.install();
     } catch (error) {
       return { kind: "failed", from: older, to: plan.pin.target, reason: error instanceof Error ? error.message : String(error) };
     }
-    return { kind: "updated", from: older, to: plan.pin.target };
+    const to = installed ?? plan.pin.target;
+    return to === older ? { kind: "failed", from: older, to, reason: "the install left the same version in place" } : { kind: "updated", from: older, to };
   }
 
   const updateOne = (plan: EnginePlan): Promise<Outcome> => {

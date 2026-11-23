@@ -88,6 +88,13 @@ export function registerPathDir(dir: string): void {
   resetPathCache();
 }
 
+export function unregisterPathDir(dir: string): void {
+  const at = registeredDirs.indexOf(dir);
+  if (at === -1) return;
+  registeredDirs.splice(at, 1);
+  resetPathCache();
+}
+
 // App-installed standalone builds go last: a copy the person installs themselves, anywhere, takes over.
 const fallbackDirs: string[] = [];
 

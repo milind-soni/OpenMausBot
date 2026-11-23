@@ -648,6 +648,8 @@ describe("agents-proxy MCP surface", () => {
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -1571,7 +1573,7 @@ describe("agents-proxy MCP surface", () => {
 
   it("session_search lists memory-file hits by file, ahead of conversation hits, and forwards the scope", async () => {
     const list = await rpc("tools/list");
-    expect(list.result.tools.find((t: { name: string }) => t.name === "session_search").inputSchema.properties.scope.enum).toEqual(["all", "conversations", "memory", "team"]);
+    expect(list.result.tools.find((t: { name: string }) => t.name === "session_search").inputSchema.properties.scope.enum).toEqual(["all", "conversations", "memory", "team", "threads"]);
     sessionSearchResponse = {
       hits: [{ threadId: "thread-old", messageId: "m-audit", at: Date.UTC(2026, 8, 1), role: "bot", snippet: "the [audit] found three [broken] [links]", task: "Site audit", current: false }],
       memoryHits: [

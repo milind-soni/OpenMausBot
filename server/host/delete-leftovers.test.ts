@@ -147,6 +147,17 @@ describe("a deleted conversation's uploads", () => {
     deleteThreads("t1");
     expect([existsSync(dirname(mine)), existsSync(others)]).toEqual([false, true]);
   });
+
+  it("take the conversation's own notes, and leave the bot's memory and its other conversations' notes", () => {
+    const { dataDir, bots, deleteThreads } = fixture();
+    bots.push({ id: "counsel", tasks: [{ threadId: "t1" }, { threadId: "t2" }] });
+    const memory = join(dataDir, "workspaces", "counsel");
+    const mine = put(join(memory, "memory", "threads", "t1.md"));
+    const others = put(join(memory, "memory", "threads", "t2.md"));
+    const index = put(join(memory, "MEMORY.md"));
+    deleteThreads("t1");
+    expect([existsSync(mine), existsSync(others), existsSync(index)]).toEqual([false, true, true]);
+  });
 });
 
 describe("a deleted conversation's engine sessions", () => {

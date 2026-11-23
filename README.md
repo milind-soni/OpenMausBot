@@ -274,6 +274,7 @@ expressions · screenshots of the bot's work folded into the transcript.
 | **Cua Driver** | Native computer use on your own machine |
 | **ElevenLabs · Fish Audio** | Hosted voices for bots that talk back |
 | **GitHub Sponsors** | One-time and monthly project support |
+| **Open Bot Avatar** ([github.com/DominikScholz/open-bot-avatar](https://github.com/DominikScholz/open-bot-avatar)) | The avatar engine and many of the bot avatars, by Dominik Scholz |
 
 ## How it works
 
@@ -550,6 +551,11 @@ in [LICENSING.md](LICENSING.md).
 Packaged Cua Driver components retain their upstream MIT, SIL OFL 1.1, MPL-2.0, and other dependency terms;
 the corresponding notices, license texts, source locations, and SBOM are in
 [`third_party/cua-driver/`](third_party/cua-driver/) and ship beside the native runtime.
+
+The bot avatar engine and avatar designs come from
+[Open Bot Avatar](https://github.com/DominikScholz/open-bot-avatar), Copyright (c) 2026 Dominik Scholz,
+used under the MIT License; its license and our changes are in
+[`packages/phone-protocol/src/open-bot-avatar/`](packages/phone-protocol/src/open-bot-avatar/).
 
 OpenMausBot is an independent, open-source project inspired by Grok Bot. It is
 not affiliated with, endorsed by, or associated with xAI; "Grok" is a trademark

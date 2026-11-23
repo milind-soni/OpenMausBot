@@ -100,6 +100,48 @@ test("the whole command parses into the arguments apt-get would receive", { skip
   assert.deepEqual(printed.split("\n").filter(Boolean), ["install", "-y", file]);
 });
 
+test("the rpm command picks a dependency-resolving package manager and passes only the file", { skip: posixShell }, () => {
+  const file = "/home/o'brien/.cache/openmausbot-updater/pending/OpenMausBot-0.1.44-x86_64.rpm";
+  const command = packageInstallCommand("rpm", file);
+
+  // Fake package managers on PATH announce themselves and print their arguments; a bare rpm would resolve
+  // nothing, so the fallback branch must never run here.
+  const bins = [];
+  const fakeBin = (present) => {
+    const bin = mkdtempSync(join(tmpdir(), "omb-rpm-pm-"));
+    bins.push(bin);
+    for (const name of present) {
+      writeFileSync(
+        join(bin, name),
+        `#!/bin/sh\necho "PM-\${0##*/}"\nfor a in "$@"; do printf '%s\\n' "$a"; done\n`,
+        { mode: 0o755 },
+      );
+    }
+    // sudo becomes a pass-through printer of what it would run as root.
+    writeFileSync(join(bin, "sudo"), "#!/bin/sh\nprintf '%s\\n' sudo\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done\nexec \"$@\"\n", { mode: 0o755 });
+    return bin;
+  };
+
+  const run = (bin) =>
+    execFileSync("/bin/sh", ["-c", command], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+    }).split("\n").filter(Boolean);
+
+  try {
+    // Fedora: dnf first, resolving dependencies, with the file as its only operand.
+    let out = run(fakeBin(["dnf", "rpm"]));
+    assert.deepEqual(out.slice(0, 3), ["sudo", "sh", "-c"]);
+    assert.deepEqual(out.slice(-5), ["PM-dnf", "install", "--nogpgcheck", "-y", file]);
+
+    // openSUSE: no dnf, no yum, so zypper is picked, again with dependency resolution.
+    out = run(fakeBin(["zypper", "rpm"]));
+    assert.deepEqual(out.slice(-7), ["PM-zypper", "--non-interactive", "--no-refresh", "install", "--allow-unsigned-rpm", "-f", file]);
+  } finally {
+    for (const bin of bins) rmSync(bin, { recursive: true, force: true });
+  }
+});
+
 test("the package marker decides the install path", () => {
   const marker = (declared) => (file) => (file.endsWith("package-type") ? declared : null);
 
