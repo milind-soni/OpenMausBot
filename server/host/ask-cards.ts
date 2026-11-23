@@ -24,6 +24,8 @@ import { settledWaitingChip } from "../waiting-on-person.ts";
 const OPEN_QUESTION = "needs-input-";
 const DAY_MS = 24 * 60 * 60_000;
 const NEEDS_INPUT_LINE = /^needs input:/i;
+const TYPED_IN_CHAT = "[The person typed this in the chat instead of picking an option. Reply to it, and ask again if you still need an answer.]";
+const hasAttachment = (text: string): boolean => text.includes("<attached-image") || text.includes("<attached-file");
 
 export interface AskCardsDeps {
   store: Pick<Store, "bot" | "messagesFor" | "activePath" | "appendMessage" | "patchMessage" | "taskByThread" | "patchTask" | "group"
@@ -41,7 +43,7 @@ export interface AskCardsDeps {
   /** The parked node's next turn carries the person's answer. */
   answerNode(id: string, text: string): boolean;
   /** Answers a card as a tap on it would, with the same checks on who may answer, through an inbox copy too. */
-  answerCard(input: { auth: RequestAuth; threadId: string; requestId: string; behavior: "answer"; message: string }): Promise<{ ok: true } | { ok: false; status: number; error: string }>;
+  answerCard(input: { auth: RequestAuth; threadId: string; requestId: string; behavior: "answer" | "deny"; message?: string }): Promise<{ ok: true } | { ok: false; status: number; error: string }>;
   /** The conversation a card in `threadId` was asked in: an inbox copy's original. */
   answeredIn(threadId: string, requestId: string): string;
   now?: () => number;
@@ -299,24 +301,36 @@ export function createAskCards(deps: AskCardsDeps) {
     return true;
   }
 
-  /** A person's line answers an inbox copy it replies to, or, in work a teammate handed on, the question card the bot's
-   * turn waits on, as a tap would; null leaves the line to be sent (steered or queued) as usual. */
+  /** A person's line answers an inbox copy it replies to, or the question card the bot's turn waits on, as a tap would.
+   * In the bot's own chat a card that takes no words closes instead, and the line goes on as the next message. Null
+   * leaves the line to be sent (steered or queued) as usual. */
   async function typed(auth: RequestAuth, threadId: string, text: string, target: Message | undefined,
     line: { sendId?: string; sender?: Message["sender"] }): Promise<{ status: number; message?: Message; error?: string } | null> {
     if (store.groupByThread(threadId) || isStopCommand(text)) return null;
     const delegator = delegatorOf(threadId);
     const handedOn = Boolean(delegator && delegator.threadId !== threadId);
+    const waiting = store.messagesFor(threadId).findLast((message) => !message.inbox && liveCardKind(message.card) === "question"
+      && deps.live(threadId, message.card!.requestId!));
+    const ownChat = !handedOn && !hasAttachment(text) && Boolean(waiting) && (!target || target.id === waiting!.id);
+    if (ownChat && !answerableInWords(waiting!.card)) {
+      await deps.answerCard({ auth, threadId, requestId: waiting!.card!.requestId!, behavior: "deny" });
+      return null;
+    }
     const asked = target
       ? answerableInWords(target.card) ? target : undefined
-      : handedOn ? store.messagesFor(threadId).findLast((message) => answerableInWords(message.card) && deps.live(threadId, message.card!.requestId!)) : undefined;
+      : ownChat ? waiting
+        : handedOn ? store.messagesFor(threadId).findLast((message) => answerableInWords(message.card) && deps.live(threadId, message.card!.requestId!)) : undefined;
     if (!asked?.card?.requestId) return null;
     const requestId = asked.card.requestId;
     const origin = deps.answeredIn(threadId, requestId);
-    if (origin === threadId && !(handedOn && deps.live(threadId, requestId))) return null;
+    if (origin === threadId && !((handedOn || ownChat) && deps.live(threadId, requestId))) return null;
     const again = line.sendId ? store.messagesFor(threadId).find((message) => message.sendId === line.sendId) : undefined;
     if (again) return { status: 202, message: again };
-    const answered = await deps.answerCard({ auth, threadId, requestId, behavior: "answer", message: typedAnswer(asked.card, text) });
+    const inChat = ownChat && origin === threadId;
+    const answered = await deps.answerCard({ auth, threadId, requestId, behavior: "answer", message: typedAnswer(asked.card, inChat ? `${TYPED_IN_CHAT} ${text}` : text) });
     if (!answered.ok) return { status: answered.status, error: answered.error };
+    const settled = inChat ? store.messagesFor(threadId).find((message) => message.id === asked.id)?.card : undefined;
+    if (settled) store.patchMessage(threadId, asked.id, { card: { ...settled, answeredText: text } });
     const posted = store.appendMessage(threadId, { role: "user", kind: "text", text, replyToId: asked.id,
       ...(line.sendId ? { sendId: line.sendId } : {}), ...(line.sender ? { sender: line.sender } : {}) });
     return { status: 202, message: posted };

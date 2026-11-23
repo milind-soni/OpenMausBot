@@ -42,7 +42,7 @@ function world(options: { inboxThread?: string; live?: string[]; privateThreads?
   const nodes = new Map<string, HandoffView>();
   const answered: Array<{ id: string; text: string }> = [];
   const notified: Notification[] = [];
-  const answers: Array<{ threadId: string; requestId: string; message: string }> = [];
+  const answers: Array<{ threadId: string; requestId: string; message?: string; behavior?: "deny" }> = [];
   let refuse: { status: number; error: string } | null = null;
   const deps: AskCardsDeps = {
     store: store as unknown as AskCardsDeps["store"],
@@ -54,7 +54,7 @@ function world(options: { inboxThread?: string; live?: string[]; privateThreads?
     live: (_threadId, requestId) => (options.live ?? []).includes(requestId),
     answerCard: vi.fn(async (input) => {
       if (refuse) return { ok: false as const, ...refuse };
-      answers.push({ threadId: input.threadId, requestId: input.requestId, message: input.message });
+      answers.push({ threadId: input.threadId, requestId: input.requestId, ...(input.behavior === "deny" ? { behavior: "deny" as const } : { message: input.message }) });
       return { ok: true as const };
     }),
     answeredIn: (threadId, requestId) => (threadId === "inbox" && requestId.startsWith("req") ? "work" : threadId),
@@ -346,12 +346,38 @@ describe("a typed line answers a question card", () => {
     expect(fixed.answers).toEqual([]);
   });
 
-  it("leaves a line in a chat no teammate handed on to be steered or queued, even while its question card waits", async () => {
+  it("answers the card its turn waits on in the bot's own chat, telling the bot the words were typed, not picked", async () => {
     const w = world({ live: ["req-1"] });
     const asked = question(w, "chat");
-    expect(await w.cards.typed(AUTH, "chat", "Take the second one", undefined, {})).toBeNull();
-    expect(await w.cards.typed(AUTH, "chat", "Take the second one", asked, {})).toBeNull();
-    expect(w.answers).toEqual([]);
+    const result = await w.cards.typed(AUTH, "chat", "What time is it?", undefined, { sendId: "send-3" });
+    expect(w.answers).toEqual([{ threadId: "chat", requestId: "req-1",
+      message: "[The person typed this in the chat instead of picking an option. Reply to it, and ask again if you still need an answer.] What time is it?" }]);
+    expect(w.rows("chat").find((row) => row.id === asked.id)?.card?.answeredText).toBe("What time is it?");
+    expect(result).toMatchObject({ status: 202, message: { role: "user", text: "What time is it?", replyToId: asked.id, sendId: "send-3" } });
+  });
+
+  it("closes a card that takes no words in the bot's own chat and leaves the line to be sent as the next message", async () => {
+    for (const card of [{ fixedOptions: true }, { questionRequest: { version: 1 as const, questions: [{ question: "A?", options: [{ label: "x" }] }, { question: "B?", options: [{ label: "y" }] }] } }]) {
+      const w = world({ live: ["req-1"] });
+      question(w, "chat", card);
+      expect(await w.cards.typed(AUTH, "chat", "Something else first", undefined, {})).toBeNull();
+      expect(w.answers).toEqual([{ threadId: "chat", requestId: "req-1", behavior: "deny" }]);
+      expect(w.rows("chat").filter((row) => row.role === "user")).toEqual([]);
+    }
+  });
+
+  it("leaves a line in the bot's own chat to the usual send when no turn waits on its card, it is Stop, it replies to another line or carries a file", async () => {
+    const idle = world();
+    question(idle, "chat");
+    expect(await idle.cards.typed(AUTH, "chat", "Take the second one", undefined, {})).toBeNull();
+    const busy = world({ live: ["req-1"] });
+    question(busy, "chat");
+    const other = busy.say("chat", "I checked.");
+    expect(await busy.cards.typed(AUTH, "chat", "stop", undefined, {})).toBeNull();
+    expect(await busy.cards.typed(AUTH, "chat", "Thanks", other, {})).toBeNull();
+    expect(await busy.cards.typed(AUTH, "chat", 'Look <attached-image path="a.png" />', undefined, {})).toBeNull();
+    expect(idle.answers).toEqual([]);
+    expect(busy.answers).toEqual([]);
   });
 
   it("passes on why an answer was refused, and writes no line", async () => {
