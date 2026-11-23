@@ -131,6 +131,24 @@ describe("distinct table names within one import", () => {
     expect(view?.error?.message).toContain("amount");
   });
 
+  it("keeps a healthy sales_report_2 when an import asks for the unbound view with replace omitted", async () => {
+    const ctx = await unboundView("view-suffix-occupied");
+    await ctx.database.run("CREATE TABLE sales_report_2 AS SELECT 'kept' AS origin, 99 AS value", { connection });
+    const file = join(root, "sales-report-occupied.csv");
+    writeFileSync(file, "id,name\n1,Alice\n");
+    const loaded = await runDataTool(ctx, "data_load", { source: file, name: "sales_report" });
+    expect(loaded.isError, loaded.content[0]?.text).toBeUndefined();
+    expect(loaded.structuredContent!.tables).toMatchObject([{ name: "sales_report_3" }]);
+    expect((await ctx.database.run("SELECT * FROM sales_report_3", { connection })).rows).toEqual([["1", "Alice"]]);
+    expect((await ctx.database.run("SELECT * FROM sales_report_2", { connection })).rows).toEqual([["kept", 99]]);
+    const tables = await ctx.database.listTables();
+    expect(tables.find((table) => table.name === "sales_report_2")).toMatchObject({ rowCount: 1 });
+    const view = tables.find((table) => table.name === "sales_report");
+    expect(view?.rowCount).toBeNull();
+    expect(view?.error).toMatchObject({ code: "sql_error" });
+    expect(view?.error?.message).toContain("amount");
+  });
+
   it("keeps the usual names when the file-family suffixes fit", async () => {
     const ctx = await context("short-prefix");
     const result = await loadData(ctx, { source: folder, name: "mixed" });
