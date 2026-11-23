@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { botShowsUnread } from "@/lib/bot-unread";
+import { nextUnreadHold, unreadSinceByBot, type UnreadHold } from "@/lib/sidebar-layout";
 
 import { EFFECTS } from "./CursorAvatar";
 
@@ -26,4 +27,17 @@ export function useUnreadNotice(unread: boolean): boolean {
 export function useBotUnread(bot: Parameters<typeof botShowsUnread>[0]): { unread: boolean; noticing: boolean } {
   const unread = botShowsUnread(bot);
   return { unread, noticing: useUnreadNotice(unread) };
+}
+
+function sameTimes(a: ReadonlyMap<string, number>, b: ReadonlyMap<string, number>): boolean {
+  return a.size === b.size && [...a].every(([id, since]) => b.get(id) === since);
+}
+
+/** The bot Unread keeps listed while its chat, `openId`, is the open one. It lasts for the session only. */
+export function useUnreadHold(openId: string | null, bots: Parameters<typeof unreadSinceByBot>[0]): UnreadHold | null {
+  const unread = unreadSinceByBot(bots);
+  const [seen, setSeen] = useState<{ unread: ReadonlyMap<string, number>; held: UnreadHold | null }>({ unread, held: null });
+  const held = nextUnreadHold(seen.held, openId, seen.unread);
+  if (held !== seen.held || !sameTimes(unread, seen.unread)) setSeen({ unread, held });
+  return held;
 }

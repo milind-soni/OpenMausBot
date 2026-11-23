@@ -23,7 +23,9 @@ import {
   simpleSidebarSections,
   sectionsInUse,
   sidebarBotRows,
+  nextUnreadHold,
   unreadBotsApart,
+  unreadSinceByBot,
   userSectionId,
   userSectionName,
   withPrimaryTile,
@@ -389,6 +391,47 @@ describe("the unread section", () => {
     const searching = sidebarBotRows(saved, () => false, false);
     expect(searching.unreadBots).toEqual([]);
     expect(ids(searching.inPlace.unsectionedBots)).toEqual(["a", "u", "b"]);
+  });
+
+  it("keeps the bot opened from Unread listed there, in its place, until another chat is open", () => {
+    const bots = [{ id: "a", unread: true, messages: [{ at: 30 }] }, { id: "b", unread: true, messages: [{ at: 20 }] }, { id: "c", unread: true, messages: [{ at: 10 }] }];
+    const before = unreadSinceByBot(bots);
+    expect([...before]).toEqual([["a", 30], ["b", 20], ["c", 10]]);
+
+    const opened = bots.map((bot) => (bot.id === "b" ? { ...bot, unread: false, messages: [{ at: 20 }, { at: 99 }] } : bot));
+    const held = nextUnreadHold(null, "b", before);
+    expect(held).toEqual({ id: "b", since: 20 });
+    const parts = { sectionChiefs: [], sectionedBots: [], unsectionedBots: opened };
+    const apart = unreadBotsApart(parts, true, held);
+    expect(apart.unreadBots.map((bot) => bot.id)).toEqual(["a", "b", "c"]);
+    expect(apart.unsectionedBots).toEqual([]);
+    expect(unreadBotsApart(parts).unreadBots.map((bot) => bot.id)).toEqual(["a", "c"]);
+
+    const after = unreadSinceByBot(opened);
+    expect(nextUnreadHold(held, "b", after)).toBe(held);
+    expect(nextUnreadHold(held, "a", after)).toEqual({ id: "a", since: 30 });
+    expect(nextUnreadHold(held, "room", after)).toBeNull();
+    expect(nextUnreadHold(held, null, after)).toBeNull();
+    expect(nextUnreadHold(null, "b", after)).toBeNull();
+  });
+
+  it("lists a held bot by the normal rule again once it is marked unread or a new message arrives", () => {
+    const held = { id: "b", since: 20 };
+    const bots = (b: { unread: boolean; at: number }) => [{ id: "a", unread: true, messages: [{ at: 30 }] }, { id: "b", unread: b.unread, messages: [{ at: b.at }] }];
+    const listed = (b: { unread: boolean; at: number }) => unreadBotsApart({ sectionChiefs: [], sectionedBots: [], unsectionedBots: bots(b) }, true, held).unreadBots.map((bot) => bot.id);
+    expect(listed({ unread: false, at: 20 })).toEqual(["a", "b"]);
+    expect(listed({ unread: true, at: 20 })).toEqual(["a", "b"]);
+    expect(listed({ unread: true, at: 40 })).toEqual(["b", "a"]);
+    expect(nextUnreadHold(held, "b", unreadSinceByBot(bots({ unread: true, at: 40 })))).toEqual({ id: "b", since: 40 });
+  });
+
+  it("leaves a held row out of what a drag or Alt+Up/Down arranges", () => {
+    const saved = { pinnedBots: [], sectionChiefs: [], sectionedBots: [read("w1"), read("w2")], unsectionedBots: [read("a"), read("u"), read("b")] };
+    const rows = sidebarBotRows(saved, () => false, true, { id: "u", since: 5 });
+    const ids = (bots: { id: string }[]) => bots.map((bot) => bot.id);
+    expect(ids(rows.unreadBots)).toEqual(["u"]);
+    expect([ids(rows.unsectionedBots), ids(rows.inPlace.unsectionedBots), ids(rows.inPlace.sectionedBots)]).toEqual([["a", "b"], ["a", "b"], ["w1", "w2"]]);
+    expect(ids(sidebarBotRows(saved, () => false, false, { id: "u", since: 5 }).inPlace.unsectionedBots)).toEqual(["a", "u", "b"]);
   });
 
   it("lists a department that only a shown bot or room names, after the given ones and once", () => {

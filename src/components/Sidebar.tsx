@@ -86,7 +86,7 @@ import { PHONE_TOP_BUTTON, SIMPLE_CORNER_BUTTON, SIMPLE_ROW_FOCUS, SIMPLE_TOP_BU
 import { isSidebarToggle } from "@/lib/keyboard-shortcuts";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { useBotUnread } from "./unread-notice";
+import { useBotUnread, useUnreadHold } from "./unread-notice";
 import { attentionHasRunningWork, attentionJumpAction, attentionUnpinAction, crossBotAttentionThreads, crossBotPinnedThreads, runningRoutineRun, SidebarBotActivity, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
 import { SidebarNoBots, SidebarTileGrid } from "./SidebarTiles";
 import { BotContextMenu } from "./SidebarBotMenu";
@@ -1101,10 +1101,10 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const saved = simpleDesk ? withPrimaryTile(parts, myDefaultBot(state.bots, viewerEmail)?.id) : { ...parts, primary: null };
   // Shown order only: drag and Alt+Up/Down work on the saved order of the rows left in place, never on this one.
   const { primary, unsectionedChief } = saved;
-  const { pinnedBots, filed, unreadBots, sectionChiefs, sectionedBots, unsectionedBots, inPlace } = sidebarBotRows(saved, (bot) => {
+  const { pinnedBots, filed, unreadBots, unreadCount, sectionChiefs, sectionedBots, unsectionedBots, inPlace } = sidebarBotRows(saved, (bot) => {
     const { waiting, working } = sidebarBotStatus(bot, state.pendingQueued);
     return waiting || working;
-  }, !q);
+  }, !q, useUnreadHold(state.activeView === "chat" ? state.selectedId : null, sideLists.bots));
   const { botChats, sectionedRooms, unsectionedRooms } = partitionSidebarGroups(visibleGroups);
 
   const sectionNames = sectionsInUse([...(state.sections ?? []).filter((name) => !q || name.toLowerCase().includes(q.toLowerCase())), ...botDrag.pending], [...filed, ...sectionedRooms]);
@@ -1434,7 +1434,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
                     collapsed={collapsed}
                     attention={attention}
                     onToggle={layoutInteractive ? () => toggleSection(id) : undefined}
-                    {...layout.header(id)} {...(id === UNREAD_SECTION_ID && { count: unreadBots.length, reorderable: false })} naming={drops.naming(sectionName)} dropInto={drops.into(sectionName)}
+                    {...layout.header(id)} {...(id === UNREAD_SECTION_ID && { ...(unreadCount > 0 && { count: unreadCount }), reorderable: false })} naming={drops.naming(sectionName)} dropInto={drops.into(sectionName)}
                     onDelete={!simple && !remoteClient && sectionName ? () => setDeletingTeam(sectionName) : undefined} onShare={!simple && !remoteClient && sectionName ? () => setShareTeam(sectionName) : undefined}
                   />
                 )}
