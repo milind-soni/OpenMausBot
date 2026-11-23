@@ -25,7 +25,7 @@ const thread: RunMessage[] = [
   call("m2", "GMAIL_SEND_EMAIL", { recipient_email: "priya@example.com", subject: "Invoice" }),
 ];
 
-async function serve(extra: Partial<SkillBurgerRouteDeps> = {}) {
+async function serve(extra: Partial<SkillBurgerRouteDeps> = {}, scopes: readonly string[] = ["admin"]) {
   const root = mkdtempSync(join(tmpdir(), "burger-routes-"));
   const bot = `route-burger-${Math.random().toString(36).slice(2, 10)}`;
   const routes = [createSkillBurgerRoutes({
@@ -38,7 +38,7 @@ async function serve(extra: Partial<SkillBurgerRouteDeps> = {}) {
   })];
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
-    const auth = { kind: "loopback", scopes: ["admin"] } as unknown as RequestAuth;
+    const auth = { kind: scopes.includes("admin") ? "loopback" : "session", scopes } as unknown as RequestAuth;
     if (!await dispatchRoutes(routes, { req, res, url, path: url.pathname, method: req.method ?? "GET", auth, json, readBody })) json(res, 404, {});
   });
   servers.push(server);
@@ -94,4 +94,25 @@ it("names a finished run with the bot's small text model, and says nothing when 
   expect(prompts[0]).toContain("Request: Send the invoice to priya@example.com");
   const plain = await serve();
   expect((await plain.api("/api/skill-burger-summary", send("POST", { botId: plain.bot, threadId: "t1" }))).body).toEqual({ summary: null });
+});
+
+
+it("lets a Team member save and remove a burger on a bot they can edit, and keeps every chat an admin's", async () => {
+  let access: "none" | "view" | "chat" | "edit" = "edit";
+  const { api, bot } = await serve({ levelOf: () => access }, ["client"]);
+  const saved = await api("/api/skill-burgers", send("POST", { botId: bot, threadId: "t1", summary: "Send the invoice" }));
+  expect(saved.status).toBe(201);
+  const name = saved.body.skill.name as string;
+  const shared = await api(`/api/skill-burgers/${name}`, send("PATCH", { everyChat: true, botId: bot }));
+  expect(shared.status).toBe(403);
+  expect(shared.body.error).toMatch(/Only an admin/);
+  access = "chat";
+  expect((await api("/api/skill-burgers", send("POST", { botId: bot, threadId: "t1" }))).status).toBe(403);
+  expect((await api(`/api/skill-burgers/${name}?botId=${bot}`, { method: "DELETE" })).status).toBe(403);
+  expect((await names(api)).map(([found]: [string]) => found)).toContain(name);
+  access = "none";
+  expect(await names(api)).toEqual([]);
+  expect((await api(`/api/skill-burgers/${name}?botId=${bot}`)).status).toBe(404);
+  access = "edit";
+  expect((await api(`/api/skill-burgers/${name}?botId=${bot}`, { method: "DELETE" })).status).toBe(200);
 });

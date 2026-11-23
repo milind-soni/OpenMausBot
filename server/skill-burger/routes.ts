@@ -24,8 +24,14 @@ export interface SkillBurgerRouteDeps {
   botIds(): readonly string[];
   /** One line from the bot's small text model, or null when none answers. */
   summarize?(botId: string, prompt: string): Promise<string | null | undefined>;
+  /** What this person may do with a bot: a Team Cloud member edits a bot's own burgers only where they can edit the bot. */
+  levelOf?(auth: RequestAuth, botId: string): "none" | "view" | "chat" | "edit";
   root?: string;
 }
+
+/** A burger used in every chat belongs to the whole place: only an admin turns that on, renames or removes one. */
+export const EVERY_CHAT_ADMIN_ONLY = "Only an admin of this installation can change this.";
+const NOT_YOURS = "Only people who can edit this bot can change its Skill Burgers.";
 
 const id = z.string().min(1).max(100);
 const summaryBody = z.object({ botId: id, threadId: z.string().min(1).max(200) }).strict();
@@ -41,6 +47,11 @@ const patchBody = z.union([
 
 export function createSkillBurgerRoutes(deps: SkillBurgerRouteDeps): RouteHandler {
   const placeOf = (botId: string | null | undefined): BurgerPlace => (botId ? { botId } : { everyChat: true });
+  const admin = (auth: RequestAuth) => auth.scopes.includes("admin");
+  const level = (auth: RequestAuth, botId: string) => (admin(auth) ? "edit" : deps.levelOf?.(auth, botId) ?? "none");
+  /** Null when this person may change the burger at `botId` (a bot's own) or in every chat (no botId); else the refusal. */
+  const refusal = (auth: RequestAuth, botId: string | null | undefined): string | null =>
+    botId ? (level(auth, botId) === "edit" ? null : NOT_YOURS) : admin(auth) ? null : EVERY_CHAT_ADMIN_ONLY;
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
     if (path === SKILL_BURGER_SUMMARY_PATH) {
       if (method !== "POST") return json(res, 405, { error: "Use POST." });
@@ -58,7 +69,10 @@ export function createSkillBurgerRoutes(deps: SkillBurgerRouteDeps): RouteHandle
     if (path !== SKILL_BURGERS_PATH && !path.startsWith(`${SKILL_BURGERS_PATH}/`)) return PASS;
     const botIds = deps.botIds();
     if (path === SKILL_BURGERS_PATH) {
-      if (method === "GET") return json(res, 200, { skills: listWorkflowSkills(botIds, deps.root) });
+      if (method === "GET") {
+        const visible = admin(auth) ? botIds : botIds.filter((botId) => level(auth, botId) !== "none");
+        return json(res, 200, { skills: listWorkflowSkills(visible, deps.root) });
+      }
       if (method !== "POST") return json(res, 405, { error: "Use GET or POST." });
       const body = saveBody.safeParse(await readBody(req));
       if (!body.success) return json(res, 400, { error: "Send botId and threadId." });
@@ -66,10 +80,14 @@ export function createSkillBurgerRoutes(deps: SkillBurgerRouteDeps): RouteHandle
       if ("workflow" in body.data) {
         const { workflow, name, botId, everyChat } = body.data;
         if (!everyChat && (!botId || !botIds.includes(botId))) return json(res, 404, { error: "No such bot." });
+        const refused = refusal(auth, everyChat ? null : botId);
+        if (refused) return json(res, 403, { error: refused });
         saved = saveWorkflowSkill({ workflow, name, place: everyChat ? { everyChat: true } : { botId: botId! }, origin: botId, botIds, root: deps.root });
       } else {
         const { botId, threadId, summary, name } = body.data;
         if (!deps.owns(botId, threadId) || !deps.sees(auth, threadId)) return json(res, 404, { error: "No such conversation." });
+        const refused = refusal(auth, botId);
+        if (refused) return json(res, 403, { error: refused });
         const draft = draftWorkflow(deps.messages(threadId), { summary });
         if (!draft) return json(res, 422, { error: "This run has nothing to save yet." });
         saved = saveWorkflowSkill({ workflow: draft.workflow, name, place: { botId }, botIds, root: deps.root });
@@ -80,12 +98,17 @@ export function createSkillBurgerRoutes(deps: SkillBurgerRouteDeps): RouteHandle
     const name = decodeURIComponent(path.slice(SKILL_BURGERS_PATH.length + 1));
     const stale = () => json(res, 409, { error: "This Skill Burger changed since. Reload and try again." });
     if (method === "GET") {
-      const found = readWorkflowSkill(placeOf(url.searchParams.get("botId")), name, deps.root);
+      const at = url.searchParams.get("botId");
+      if (at && level(auth, at) === "none") return json(res, 404, { error: "No such skill." });
+      const found = readWorkflowSkill(placeOf(at), name, deps.root);
       return found ? json(res, 200, found) : json(res, 404, { error: "No such skill." });
     }
     if (method === "PATCH") {
       const body = patchBody.safeParse(await readBody(req));
       if (!body.success) return json(res, 400, { error: "Send everyChat or rename." });
+      // Moving a burger in or out of every chat, or renaming one there, is the place's call; renaming a bot's own is its editor's.
+      const refused = "everyChat" in body.data ? (admin(auth) ? null : EVERY_CHAT_ADMIN_ONLY) : refusal(auth, body.data.botId);
+      if (refused) return json(res, 403, { error: refused });
       const result = "everyChat" in body.data
         ? setWorkflowEveryChat({ name, everyChat: body.data.everyChat, botId: body.data.botId, sha256: body.data.sha256, root: deps.root })
         : renameWorkflowSkill({ place: placeOf(body.data.botId), name, to: body.data.rename, botIds, sha256: body.data.sha256, root: deps.root });
@@ -94,6 +117,8 @@ export function createSkillBurgerRoutes(deps: SkillBurgerRouteDeps): RouteHandle
       return json(res, 200, { skill: result });
     }
     if (method === "DELETE") {
+      const refused = refusal(auth, url.searchParams.get("botId"));
+      if (refused) return json(res, 403, { error: refused });
       const removed = removeWorkflowSkill(placeOf(url.searchParams.get("botId")), name, url.searchParams.get("sha256") ?? undefined, deps.root);
       if ("stale" in removed) return stale();
       if ("error" in removed) return json(res, 500, { error: removed.error });
