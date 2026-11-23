@@ -42,6 +42,9 @@ const SERVER_ENV_NAMES = new Set([
   "OMB_CLOUD_LEGACY_ORIGINS",
   // The bot box switch (server/bot-box/detect.ts): the Admin may turn a home's box off for support.
   "OMB_BOT_BOX",
+  // Antigravity on Google's native CLI is opt-in per server (server/drivers/antigravity-cli-install.ts): the Admin or a
+  // test home sets it, and without the name here a Cloud home could never turn it on.
+  "OMB_ANTIGRAVITY_NATIVE_CLI",
   // The image's own engine CLIs before older copies in the data folder (server/image-engines.ts), for one test Cloud first.
   "OMB_IMAGE_ENGINES",
   // An ended Cloud started only for its owner's export: the server runs frozen (server/move-freeze.ts).
