@@ -967,7 +967,7 @@ export class Store {
     return task;
   }
 
-  forkGroupTask(groupId: string, sourceThreadId: string, messageId: string): GroupTaskRecord | null {
+  forkGroupTask(groupId: string, sourceThreadId: string, messageId: string | undefined): GroupTaskRecord | null {
     const group = this.group(groupId);
     const source = this.groupTaskByThread(groupId, sourceThreadId);
     if (!group || !source) return null;
@@ -2153,7 +2153,7 @@ export class Store {
     return task;
   }
 
-  forkTask(botId: string, sourceThreadId: string, messageId: string): TaskRecord | null {
+  forkTask(botId: string, sourceThreadId: string, messageId: string | undefined): TaskRecord | null {
     const bot = this.own(botId);
     const source = this.taskByThread(botId, sourceThreadId);
     if (!bot || !source) return null;

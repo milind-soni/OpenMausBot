@@ -15,7 +15,7 @@ export interface ForkPanelState {
 }
 
 export type ForkPanelAction =
-  | { type: "forkMessage"; kind: "bot" | "group"; ownerId: string; threadId: string; messageId: string }
+  | { type: "forkMessage"; kind: "bot" | "group"; ownerId: string; threadId: string; messageId?: string; onSettled?: () => void }
   | { type: "openForkPanel"; kind: "bot" | "group"; ownerId: string; threadId: string; loadId?: string }
   | { type: "forkPanelLoaded"; threadId: string; loadId: string; messages: Message[]; activeLeafId: string | null }
   | { type: "forkPanelLoadFailed"; threadId: string; loadId: string }
@@ -96,14 +96,15 @@ export function runForkEffect(action: ForkEffect, dispatch: (action: Action) => 
   rawDispatch: (action: Action) => void, showError: (error: unknown) => void): void {
   if (action.type === "forkMessage") {
     const owner = action.kind === "bot" ? "bots" : "groups";
+    const body = action.messageId === undefined ? { latest: true } : { messageId: action.messageId };
     void api<{ bot?: BotAnnouncement; group?: Partial<Group> & { id: string }; task: { threadId: string } }>(
       `/api/${owner}/${action.ownerId}/tasks/${action.threadId}/forks`,
-      { method: "POST", body: JSON.stringify({ messageId: action.messageId }) },
+      { method: "POST", body: JSON.stringify(body) },
     ).then((result) => {
       if (result.bot) dispatch({ type: "botPatched", bot: result.bot });
       if (result.group) dispatch({ type: "groupPatched", group: result.group });
       dispatch({ type: "openForkPanel", kind: action.kind, ownerId: action.ownerId, threadId: result.task.threadId });
-    }).catch(showError);
+    }).catch(showError).finally(action.onSettled);
     return;
   }
   const owner = action.kind === "bot" ? "bots" : "groups";

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot } from "@/state/store";
 import { restoreComposerDraft } from "@/lib/drafts";
 
+const dispatch = vi.hoisted(() => vi.fn());
 const ENGINE = "claude-3f0c2b1e-9d1a-4c55-8a51-0a3a6f1e2b7c";
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
@@ -14,7 +15,7 @@ vi.mock("@/state/store", async (importOriginal) => {
     state: { ...original.initialState, bots: [bot], instances: [{
       instanceId: ENGINE, driverKind: "claudeAgent", displayName: "Claude", capabilities: { agentsMcp: true },
     }] },
-    dispatch: vi.fn(),
+    dispatch,
   }) };
 });
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
@@ -41,6 +42,7 @@ describe("the / menu in the composer", () => {
   let container: HTMLDivElement;
 
   beforeEach(() => {
+    dispatch.mockClear();
     vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
     vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
     restoreComposerDraft(draftId, { text: "", attachments: [] });
@@ -70,7 +72,26 @@ describe("the / menu in the composer", () => {
 
   it("offers the built-in commands and skills at the start of a message", () => {
     fill("/");
-    expect(labels()).toEqual(["/goal", "/learn", "/setup", "/burst", "/standup"]);
+    expect(labels()).toEqual(["/goal", "/learn", "/setup", "/burst", "/fork", "/standup"]);
+  });
+
+  it("submits a complete /fork as a fork action instead of a message", () => {
+    const input = fill("/fork");
+    flushSync(() => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      type: "forkMessage", kind: "bot", ownerId: bot.id, threadId: bot.threadId,
+    }));
+    expect(input.value).toBe("");
+  });
+
+  it("completes /fo with Tab and forks on submission", () => {
+    const input = fill("/fo");
+    flushSync(() => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true })));
+    expect(input.value.trim()).toBe("/fork");
+    expect(dispatch).not.toHaveBeenCalled();
+    flushSync(() => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "forkMessage" }));
   });
 
   it("offers only skills after a space later in the message, and puts the pick in place", () => {

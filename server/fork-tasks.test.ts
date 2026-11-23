@@ -74,6 +74,23 @@ it("forks a room conversation into a normal room task", async () => {
   expect(store.groupTaskByThread(room.id, fork!.threadId)).toBeTruthy();
 });
 
+it("uses the newest text on the selected branch for a fork without an explicit message", async () => {
+  const store = await freshStore();
+  const bot = store.createBot();
+  const { threadId } = store.createTask(bot.id)!;
+  expect(store.forkTask(bot.id, threadId, undefined)).toBeNull();
+  const question = store.appendMessage(threadId, { role: "user", kind: "text", text: "First question" });
+  const reply = store.appendMessage(threadId, { role: "bot", kind: "text", text: "First answer" });
+  const followUp = store.appendMessage(threadId, { role: "user", kind: "text", text: "Follow up on the first answer" });
+  const activity = store.appendMessage(threadId, { role: "bot", kind: "activity" });
+  store.appendMessage(threadId, { role: "bot", kind: "text", text: "Another branch", parentId: question.id });
+  expect(store.setActiveLeaf(threadId, reply.id)).toBe(activity.id);
+
+  const fork = store.forkTask(bot.id, threadId, undefined);
+  expect(fork?.origin).toEqual({ threadId, messageId: followUp.id });
+  expect(store.activePath(fork!.threadId).map((message) => message.id)).toEqual([question.id, reply.id, followUp.id]);
+});
+
 it("keeps a background room fork unread when the shown conversation is read", async () => {
   const store = await freshStore();
   const room = store.createGroup("Review", [store.createBot().id]);
