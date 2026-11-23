@@ -2192,8 +2192,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const wrapped: React.Dispatch<Action> = (action) => {
       store.flushFrames(); if (["select", "newTask", "switchTask", "newGroupTask", "switchGroupTask", "showChat", "showRoutines", "showTeamMap", "showFiles", "showWebPanel", "showPublishedApps", "showSkillBurgers", "showTeamFiles", "showAnnouncements"].includes(action.type)) selectionRevision.current++;
       // Pin before any await or optimistic state change.
-      action = pinBotThreadAction(action, stateRef.current.bots); if (runNewChat(action)) return;
-      holdMarkedUnread(action, stateRef.current);
+      action = pinBotThreadAction(action, stateRef.current.bots); holdMarkedUnread(action, stateRef.current);
+      if (runNewChat(action)) return;
       if (action.type === "taskSwitched") action = { ...action, bot: withTaskWrites(action.bot) as Bot };
       if (action.type === "botPatched") action = { ...action, bot: withTaskWrites(action.bot) };
       if (action.type === "openForkPanel" && !action.loadId) action = { ...action, loadId: randomUuid() };

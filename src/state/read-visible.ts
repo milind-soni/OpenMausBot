@@ -10,16 +10,31 @@ const sendRead: SendRead = (path, threadId) => {
 /** Conversations the person marked unread while looking at them, with their newest message then (unknown until the
  * server next announces them). Being on screen reads none of them again until a newer message arrives. */
 const markedUnread = new Map<string, number | undefined>();
-const RESUMES_READING: ReadonlySet<Action["type"]> = new Set(["select", "openDataResult", "switchTask", "newTask", "send"]);
+const OPENS_A_CONVERSATION: ReadonlySet<Action["type"]> = new Set(["select", "openDataResult", "switchTask", "newTask", "send"]);
 
-/** "Mark as unread" on the open conversation holds until the person opens a conversation again, this one included, or
- * writes in one. */
+function shownBotThread(state: AppState): string | undefined {
+  if (state.activeView !== "chat" || (state.newChat && state.newChat.botId === state.selectedId)) return undefined;
+  const bot = state.bots.find((candidate) => candidate.id === state.selectedId);
+  return bot?.switchingTo ?? bot?.threadId;
+}
+
+/** "Mark as unread" on the open conversation holds while the person stays on it. It ends when they open a conversation,
+ * this one included, write in one, or act from anywhere else in the app. */
 export function holdMarkedUnread(action: Action, state: AppState): void {
-  if (RESUMES_READING.has(action.type)) return markedUnread.clear();
-  if (action.type !== "markUnread" || action.botId !== state.selectedId || state.activeView !== "chat") return;
+  const shown = shownBotThread(state);
+  if (OPENS_A_CONVERSATION.has(action.type) || !shown || !markedUnread.has(shown)) markedUnread.clear();
+  if (action.type !== "markUnread" || action.botId !== state.selectedId || !shown) return;
   const bot = state.bots.find((candidate) => candidate.id === action.botId);
-  const shown = bot?.switchingTo ?? bot?.threadId;
-  if (shown) markedUnread.set(shown, bot?.tasks?.find((task) => task.threadId === shown)?.updatedAt);
+  markedUnread.set(shown, bot?.tasks?.find((task) => task.threadId === shown)?.updatedAt);
+}
+
+/** Whether the shown conversation is still held unread: marked by the person, and nothing newer has arrived in it. */
+export function shownChatHeldUnread(state: AppState): boolean {
+  const shown = shownBotThread(state);
+  if (!shown || !markedUnread.has(shown)) return false;
+  const marked = markedUnread.get(shown);
+  const newest = state.bots.find((candidate) => candidate.id === state.selectedId)?.tasks?.find((task) => task.threadId === shown)?.updatedAt;
+  return marked === undefined || newest === undefined || newest <= marked;
 }
 
 function visibleThreadIds(state: AppState, kind: "bot" | "group", ownerId: string, shown?: string): string[] {

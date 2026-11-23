@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { holdMarkedUnread, markVisibleBotThreadsRead, markVisibleGroupThreadsRead } from "./read-visible";
+import { describe, expect, it, vi } from "vitest";
+import { holdMarkedUnread, markVisibleBotThreadsRead, markVisibleGroupThreadsRead, shownChatHeldUnread } from "./read-visible";
 import type { Action, AppState, BotAnnouncement, Group } from "./store";
 
 it("marks both visible bot threads read while leaving a hidden task unread", () => {
@@ -98,5 +98,60 @@ describe("a conversation marked unread while it is open", () => {
     const state = { ...open(), activeView: "routines" } as unknown as AppState;
     mark(state);
     expect(seen(open(), announced()).read).toEqual(["main"]);
+  });
+
+  it("stays unread through what the person does without leaving it", () => {
+    const state = open();
+    mark(state);
+    act({ type: "toggleSidebar" }, state);
+    act({ type: "markUnread", botId: "other" }, state);
+    expect(seen(state, announced()).read).toEqual([]);
+    expect(shownChatHeldUnread(state)).toBe(true);
+    act({ type: "select", id: "bot" }, state);
+  });
+
+  it.each([
+    ["Files", { activeView: "files" }],
+    ["Routines", { activeView: "routines" }],
+    ["a blank new conversation", { newChat: { session: 1, botId: "bot", held: [] } }],
+  ])("is read as before once the person comes back from %s", (_where, away) => {
+    const state = open();
+    mark(state);
+    act({ type: "showChat" }, { ...state, ...away } as unknown as AppState);
+    expect(shownChatHeldUnread(state)).toBe(false);
+    expect(seen(state, announced())).toEqual({ read: ["main"], unread: false, thread: false });
+  });
+
+  it("is held for the window getting focus back only until a newer message is in it", () => {
+    const state = open();
+    expect(shownChatHeldUnread(state)).toBe(false);
+    mark(state);
+    expect(shownChatHeldUnread(state)).toBe(true);
+    expect(shownChatHeldUnread(open(11))).toBe(false);
+    expect(shownChatHeldUnread({ ...state, activeView: "files" } as unknown as AppState)).toBe(false);
+    act({ type: "select", id: "bot" }, state);
+    expect(shownChatHeldUnread(state)).toBe(false);
+  });
+
+  // The hold lives in this page's memory and the server keeps one unread flag per conversation: nothing below is held.
+  describe("known limits", () => {
+    it("is forgotten by a reloaded page, which reads the conversation at its next announcement", async () => {
+      const state = open();
+      mark(state);
+      vi.resetModules();
+      const reloaded = await import("./read-visible");
+      const read: string[] = [];
+      reloaded.markVisibleBotThreadsRead(state, announced(), true, (_path, threadId) => read.push(threadId));
+      expect(read).toEqual(["main"]);
+      act({ type: "select", id: "bot" }, state);
+    });
+
+    it("is cleared when another window that shows the conversation reads it", () => {
+      const state = open();
+      mark(state);
+      const readElsewhere = { id: "bot", unread: false, tasks: [{ threadId: "main", unread: false, updatedAt: 10 }] } as unknown as BotAnnouncement;
+      expect(seen(state, readElsewhere)).toEqual({ read: [], unread: false, thread: false });
+      act({ type: "select", id: "bot" }, state);
+    });
   });
 });
