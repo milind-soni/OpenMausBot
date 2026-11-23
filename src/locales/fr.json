@@ -3867,5 +3867,16 @@
   "skillBurger.menu.aria": "Plus pour {name}",
   "skillBurger.menu.rename": "Renommer…",
   "skillBurger.card.everyChat": "Chaque chat",
-  "skillBurger.page.empty": "Les Skill Burgers de vos bots apparaissent ici."
+  "skillBurger.page.empty": "Les Skill Burgers de vos bots apparaissent ici.",
+  "engineSetup.pasteCodeHint": "Connectez-vous sur la page ouverte par Google. Collez ensuite ici le code affiché, ou l'adresse complète de la page sur laquelle vous arrivez.",
+  "engineSetup.pasteCodeLabel": "Code de connexion ou adresse de la page",
+  "engineSetup.pasteCodePlaceholder": "Code, ou https://antigravity.google/oauth-callback?…",
+  "engineSetup.sendCode": "Envoyer le code",
+  "engines.antigravity.runtime": "S'exécute sur",
+  "engines.antigravity.runtimeCustom": "Chemin personnalisé",
+  "engineSetup.nativeSharedSignIn": "L'Antigravity CLI de Google conserve une seule connexion sur cet ordinateur : tous ses comptes et l'Antigravity CLI dans un terminal utilisent le même compte Google, et se déconnecter ici les déconnecte tous. C'est une limite de l'Antigravity CLI.",
+  "engineSetup.managedDescCli": "{app} installe l'Antigravity CLI de Google. Installez-la ici et connectez-vous avec Google ; cette liste de modèles sera ensuite actualisée depuis votre compte.",
+  "accounts.signOutAntigravityShared": "L'Antigravity CLI de Google conserve une seule connexion sur cet ordinateur : tous ses comptes et l'Antigravity CLI dans un terminal sont aussi déconnectés, et leurs tâches en cours s'arrêtent. Les bots qui les utilisent devront se reconnecter avant leur prochaine tâche.",
+  "engines.antigravity.runtimeCli": "Antigravity CLI",
+  "engines.antigravity.runtimePinned": "agy runtime"
 }

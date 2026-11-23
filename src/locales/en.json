@@ -6242,7 +6242,7 @@
   "engineSetup.chatgpt.description": "Use your ChatGPT plan for eligible AI requests in {app}. This is separate from MausBot Cloud and from paying with an API key.",
   "engineSetup.chatgpt.start": "Continue with ChatGPT",
   "engineSetup.antigravity.addAccount": "Add Google account",
-  "engineSetup.antigravity.emailUnavailable": "Signed in with Google · account email unavailable",
+  "engineSetup.antigravity.signedInGoogle": "Signed in with Google",
   "engineSetup.chatgpt.modelsAfterSignIn": "Available models appear after you connect your ChatGPT plan.",
   "engineSetup.chatgpt.starting": "Opening ChatGPT sign-in…",
   "engineSetup.chatgpt.security": "Sign in on OpenAI's page and choose whether to share plan usage. Your password stays with OpenAI; credentials stay on this computer.",

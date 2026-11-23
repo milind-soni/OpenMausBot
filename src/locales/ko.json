@@ -5207,7 +5207,7 @@
   "engineSetup.chatgpt.description": "{app}의 해당 AI 요청에 ChatGPT 요금제를 써요. MausBot Cloud나 API 결제와는 별개예요.",
   "engineSetup.chatgpt.start": "ChatGPT로 계속",
   "engineSetup.antigravity.addAccount": "Google 계정 추가",
-  "engineSetup.antigravity.emailUnavailable": "Google로 로그인됨 · 계정 이메일을 알 수 없음",
+  "engineSetup.antigravity.signedInGoogle": "Google로 로그인됨",
   "engineSetup.chatgpt.modelsAfterSignIn": "ChatGPT 요금제를 연결하면 사용 가능한 모델이 나타나요.",
   "engineSetup.chatgpt.starting": "ChatGPT 로그인 여는 중…",
   "engineSetup.chatgpt.security": "OpenAI 페이지에서 로그인하고 요금제 사용량을 공유할지 고르세요. 비밀번호는 OpenAI에만 남고, 자격 증명은 이 컴퓨터에 남아요.",
@@ -7687,5 +7687,16 @@
   "skillBurger.menu.aria": "{name} 더 보기",
   "skillBurger.menu.rename": "이름 바꾸기…",
   "skillBurger.card.everyChat": "모든 채팅",
-  "skillBurger.page.empty": "봇이 만든 Skill Burger가 여기에 표시됩니다."
+  "skillBurger.page.empty": "봇이 만든 Skill Burger가 여기에 표시됩니다.",
+  "engineSetup.pasteCodeHint": "Google이 여는 페이지에서 로그인하세요. 그런 다음 표시된 코드나 마지막으로 도착한 페이지의 전체 주소를 여기에 붙여 넣으세요.",
+  "engineSetup.pasteCodeLabel": "로그인 코드 또는 페이지 주소",
+  "engineSetup.pasteCodePlaceholder": "코드 또는 https://antigravity.google/oauth-callback?…",
+  "engineSetup.sendCode": "코드 보내기",
+  "engines.antigravity.runtime": "실행 방식",
+  "engines.antigravity.runtimeCustom": "사용자 지정 경로",
+  "engineSetup.nativeSharedSignIn": "Google의 Antigravity CLI는 이 컴퓨터에 로그인을 하나만 보관해요. 이 컴퓨터의 모든 계정과 터미널의 Antigravity CLI가 같은 Google 계정을 쓰고, 여기서 로그아웃하면 모두 로그아웃돼요. Antigravity CLI의 제한이에요.",
+  "engineSetup.managedDescCli": "{app}은 Google의 Antigravity CLI를 설치해요. 여기서 설치하고 Google로 로그인하면 이 모델 목록이 내 계정 기준으로 새로고침돼요.",
+  "accounts.signOutAntigravityShared": "Google의 Antigravity CLI는 이 컴퓨터에 로그인을 하나만 보관해요. 이 컴퓨터의 모든 계정과 터미널의 Antigravity CLI도 로그아웃되고, 진행 중인 작업은 멈춰요. 이를 쓰는 봇은 다음 작업 전에 다시 로그인해야 해요.",
+  "engines.antigravity.runtimeCli": "Antigravity CLI",
+  "engines.antigravity.runtimePinned": "agy runtime"
 }

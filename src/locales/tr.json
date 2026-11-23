@@ -3824,7 +3824,7 @@
   "engineSetup.device.description": "ChatGPT hesabınızı Codex'e bağlayın. Oturum açmayı kendi tarayıcınızda tamamlayın; terminal veya şifre paylaşımı gerekmez.",
   "engineSetup.chatgpt.start": "ChatGPT ile devam et",
   "engineSetup.antigravity.addAccount": "Google hesabı ekle",
-  "engineSetup.antigravity.emailUnavailable": "Google ile giriş yapıldı · hesap e-postası kullanılamıyor",
+  "engineSetup.antigravity.signedInGoogle": "Google ile giriş yapıldı",
   "engineSetup.chatgpt.modelsAfterSignIn": "Kullanılabilir modeller, ChatGPT planınızı bağladıktan sonra görünür.",
   "engineSetup.chatgpt.starting": "ChatGPT oturum açma sayfası açılıyor…",
   "engineSetup.chatgpt.security": "OpenAI sayfasında oturum açın ve plan kullanımını paylaşıp paylaşmayacağınızı seçin. Şifreniz OpenAI'de kalır; kimlik bilgileri bu bilgisayarda kalır.",
@@ -5957,5 +5957,16 @@
   "skillBurger.menu.aria": "{name} için daha fazla",
   "skillBurger.menu.rename": "Yeniden adlandır…",
   "skillBurger.card.everyChat": "Her sohbet",
-  "skillBurger.page.empty": "Botlarınızın yaptığı Skill Burger'lar burada görünür."
+  "skillBurger.page.empty": "Botlarınızın yaptığı Skill Burger'lar burada görünür.",
+  "engineSetup.pasteCodeHint": "Google'ın açtığı sayfada giriş yapın. Ardından gösterilen kodu veya vardığınız sayfanın tam adresini buraya yapıştırın.",
+  "engineSetup.pasteCodeLabel": "Giriş kodu veya sayfa adresi",
+  "engineSetup.pasteCodePlaceholder": "Kod veya https://antigravity.google/oauth-callback?…",
+  "engineSetup.sendCode": "Kodu gönder",
+  "engines.antigravity.runtime": "Çalıştığı yer",
+  "engines.antigravity.runtimeCustom": "Özel yol",
+  "engineSetup.nativeSharedSignIn": "Google'ın Antigravity CLI'ı bu bilgisayarda tek bir oturum tutar: buradaki tüm hesaplar ve terminaldeki Antigravity CLI aynı Google hesabını kullanır, burada çıkış yapmak hepsinden çıkış yapar. Bu, Antigravity CLI'ın bir sınırlamasıdır.",
+  "engineSetup.managedDescCli": "{app}, Google'ın Antigravity CLI'ını kurar. Buradan kurun ve Google ile giriş yapın; ardından bu model listesi hesabınızdan yenilenir.",
+  "accounts.signOutAntigravityShared": "Google'ın Antigravity CLI'ı bu bilgisayarda tek bir oturum tutar: buradaki tüm hesaplardan ve terminaldeki Antigravity CLI'dan da çıkış yapılır, devam eden görevleri durur. Bunları kullanan botların bir sonraki görevden önce yeniden giriş yapması gerekir.",
+  "engines.antigravity.runtimeCli": "Antigravity CLI",
+  "engines.antigravity.runtimePinned": "agy runtime"
 }

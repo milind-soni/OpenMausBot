@@ -4445,7 +4445,7 @@
   "engineSetup.device.description": "Conecta tu cuenta de ChatGPT a Codex. Completa el inicio de sesión en tu propio navegador; sin terminal y sin compartir contraseñas.",
   "engineSetup.chatgpt.start": "Continuar con ChatGPT",
   "engineSetup.antigravity.addAccount": "Añadir cuenta de Google",
-  "engineSetup.antigravity.emailUnavailable": "Sesión iniciada con Google · email de la cuenta no disponible",
+  "engineSetup.antigravity.signedInGoogle": "Sesión iniciada con Google",
   "engineSetup.chatgpt.modelsAfterSignIn": "Los modelos disponibles aparecen después de conectar tu plan de ChatGPT.",
   "engineSetup.chatgpt.starting": "Abriendo el inicio de sesión de ChatGPT…",
   "engineSetup.chatgpt.security": "Inicia sesión en la página de OpenAI y elige si quieres compartir el uso del plan. Tu contraseña se queda en OpenAI; las credenciales se quedan en este equipo.",
@@ -6462,5 +6462,16 @@
   "skillBurger.menu.aria": "Más de {name}",
   "skillBurger.menu.rename": "Cambiar nombre…",
   "skillBurger.card.everyChat": "Todos los chats",
-  "skillBurger.page.empty": "Aquí aparecen los Skill Burgers que hacen tus bots."
+  "skillBurger.page.empty": "Aquí aparecen los Skill Burgers que hacen tus bots.",
+  "engineSetup.pasteCodeHint": "Inicia sesión en la página que abre Google. Después pega aquí el código que muestra o la dirección completa de la página en la que terminas.",
+  "engineSetup.pasteCodeLabel": "Código de inicio de sesión o dirección de la página",
+  "engineSetup.pasteCodePlaceholder": "Código, o https://antigravity.google/oauth-callback?…",
+  "engineSetup.sendCode": "Enviar código",
+  "engines.antigravity.runtime": "Se ejecuta en",
+  "engines.antigravity.runtimeCustom": "Ruta personalizada",
+  "engineSetup.nativeSharedSignIn": "La Antigravity CLI de Google guarda un único inicio de sesión en este equipo: todas sus cuentas y la Antigravity CLI en una terminal usan la misma cuenta de Google, y cerrar sesión aquí las cierra todas. Es una limitación de la Antigravity CLI.",
+  "engineSetup.managedDescCli": "{app} instala la Antigravity CLI de Google. Instálala aquí e inicia sesión con Google; después esta lista de modelos se actualizará desde tu cuenta.",
+  "accounts.signOutAntigravityShared": "La Antigravity CLI de Google guarda un único inicio de sesión en este equipo: también se cierra la sesión de todas sus cuentas y de la Antigravity CLI en una terminal, y se detienen sus tareas en curso. Los bots que las usan necesitan volver a iniciar sesión antes de su próxima tarea.",
+  "engines.antigravity.runtimeCli": "Antigravity CLI",
+  "engines.antigravity.runtimePinned": "agy runtime"
 }

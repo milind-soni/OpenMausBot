@@ -5621,7 +5621,7 @@
   "engineSetup.chatgpt.description": "在 {app} 中使用你的 ChatGPT 方案處理符合資格的 AI 請求。這與 MausBot Cloud 以及使用 API 金鑰付費是分開的。",
   "engineSetup.chatgpt.start": "使用 ChatGPT 繼續",
   "engineSetup.antigravity.addAccount": "新增 Google 帳號",
-  "engineSetup.antigravity.emailUnavailable": "已使用 Google 登入 · 無法取得帳號電子郵件",
+  "engineSetup.antigravity.signedInGoogle": "已使用 Google 登入",
   "engineSetup.chatgpt.modelsAfterSignIn": "連線你的 ChatGPT 方案後，就會顯示可用的模型。",
   "engineSetup.chatgpt.starting": "正在開啟 ChatGPT 登入…",
   "engineSetup.chatgpt.security": "請在 OpenAI 的頁面登入，並選擇是否分享方案用量。你的密碼只會留在 OpenAI；憑證則留在這台電腦上。",
@@ -10247,5 +10247,16 @@
   "skillBurger.menu.aria": "{name} 的更多操作",
   "skillBurger.menu.rename": "重新命名…",
   "skillBurger.card.everyChat": "每個聊天",
-  "skillBurger.page.empty": "機器人製作的 Skill Burger 會顯示在這裡。"
+  "skillBurger.page.empty": "機器人製作的 Skill Burger 會顯示在這裡。",
+  "engineSetup.pasteCodeHint": "在 Google 開啟的頁面登入，再把頁面顯示的代碼，或最後停留頁面的完整網址，貼到這裡。",
+  "engineSetup.pasteCodeLabel": "登入代碼或頁面網址",
+  "engineSetup.pasteCodePlaceholder": "代碼，或 https://antigravity.google/oauth-callback?…",
+  "engineSetup.sendCode": "傳送代碼",
+  "engines.antigravity.runtime": "執行方式",
+  "engines.antigravity.runtimeCustom": "自訂路徑",
+  "engineSetup.nativeSharedSignIn": "Google 的 Antigravity CLI 在這台電腦上只保留一個登入：這台電腦上的每個帳號，以及終端機裡的 Antigravity CLI，都使用同一個 Google 帳號；在這裡登出會一併登出全部。這是 Antigravity CLI 的限制。",
+  "engineSetup.managedDescCli": "{app} 會安裝 Google 的 Antigravity CLI。在這裡安裝並使用 Google 登入後，這份模型清單會依你的帳戶重新整理。",
+  "accounts.signOutAntigravityShared": "Google 的 Antigravity CLI 在這台電腦上只保留一個登入：這台電腦上的每個帳號，以及終端機裡的 Antigravity CLI 也會一併登出，進行中的工作會停止。使用它們的 Bot 需要重新登入，才能執行下一個工作。",
+  "engines.antigravity.runtimeCli": "Antigravity CLI",
+  "engines.antigravity.runtimePinned": "agy runtime"
 }

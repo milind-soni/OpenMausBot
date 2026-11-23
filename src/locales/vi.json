@@ -3824,7 +3824,7 @@
   "engineSetup.device.description": "Kết nối tài khoản ChatGPT của bạn với Codex. Hoàn tất đăng nhập trong trình duyệt của riêng bạn; không cần chia sẻ terminal hay mật khẩu.",
   "engineSetup.chatgpt.start": "Tiếp tục với ChatGPT",
   "engineSetup.antigravity.addAccount": "Thêm tài khoản Google",
-  "engineSetup.antigravity.emailUnavailable": "Đã đăng nhập bằng Google · không thể lấy email tài khoản",
+  "engineSetup.antigravity.signedInGoogle": "Đã đăng nhập bằng Google",
   "engineSetup.chatgpt.modelsAfterSignIn": "Các mô hình khả dụng sẽ xuất hiện sau khi bạn kết nối gói ChatGPT của mình.",
   "engineSetup.chatgpt.starting": "Đang mở trang đăng nhập ChatGPT…",
   "engineSetup.chatgpt.security": "Đăng nhập trên trang của OpenAI và chọn có chia sẻ mức sử dụng gói hay không. Mật khẩu của bạn luôn được lưu tại OpenAI; thông tin xác thực lưu trên máy tính này.",
@@ -5957,5 +5957,16 @@
   "skillBurger.menu.aria": "Thêm cho {name}",
   "skillBurger.menu.rename": "Đổi tên…",
   "skillBurger.card.everyChat": "Mọi cuộc trò chuyện",
-  "skillBurger.page.empty": "Skill Burger do bot của bạn tạo sẽ hiện ở đây."
+  "skillBurger.page.empty": "Skill Burger do bot của bạn tạo sẽ hiện ở đây.",
+  "engineSetup.pasteCodeHint": "Đăng nhập trên trang Google mở ra. Sau đó dán mã được hiển thị, hoặc địa chỉ đầy đủ của trang bạn đến cuối cùng, vào đây.",
+  "engineSetup.pasteCodeLabel": "Mã đăng nhập hoặc địa chỉ trang",
+  "engineSetup.pasteCodePlaceholder": "Mã, hoặc https://antigravity.google/oauth-callback?…",
+  "engineSetup.sendCode": "Gửi mã",
+  "engines.antigravity.runtime": "Chạy trên",
+  "engines.antigravity.runtimeCustom": "Đường dẫn tùy chỉnh",
+  "engineSetup.nativeSharedSignIn": "Antigravity CLI của Google chỉ giữ một lần đăng nhập trên máy tính này: mọi tài khoản trên máy và Antigravity CLI trong terminal đều dùng cùng một tài khoản Google, và đăng xuất ở đây sẽ đăng xuất tất cả. Đây là giới hạn của Antigravity CLI.",
+  "engineSetup.managedDescCli": "{app} cài đặt Antigravity CLI của Google. Hãy cài đặt tại đây và đăng nhập bằng Google; sau đó danh sách mô hình này sẽ được làm mới từ tài khoản của bạn.",
+  "accounts.signOutAntigravityShared": "Antigravity CLI của Google chỉ giữ một lần đăng nhập trên máy tính này: mọi tài khoản trên máy và Antigravity CLI trong terminal cũng bị đăng xuất, và các tác vụ đang chạy sẽ dừng. Các bot dùng chúng cần đăng nhập lại trước tác vụ tiếp theo.",
+  "engines.antigravity.runtimeCli": "Antigravity CLI",
+  "engines.antigravity.runtimePinned": "agy runtime"
 }

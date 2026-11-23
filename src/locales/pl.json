@@ -4792,7 +4792,7 @@
   "engineSetup.device.description": "Połącz swoje konto ChatGPT z Codex. Dokończ logowanie we własnej przeglądarce; nie potrzebujesz terminala ani udostępniania hasła.",
   "engineSetup.chatgpt.start": "Kontynuuj przez ChatGPT",
   "engineSetup.antigravity.addAccount": "Dodaj konto Google",
-  "engineSetup.antigravity.emailUnavailable": "Zalogowano przez Google · e-mail konta niedostępny",
+  "engineSetup.antigravity.signedInGoogle": "Zalogowano przez Google",
   "engineSetup.chatgpt.modelsAfterSignIn": "Dostępne modele pojawią się po połączeniu planu ChatGPT.",
   "engineSetup.chatgpt.starting": "Otwieranie logowania ChatGPT…",
   "engineSetup.chatgpt.security": "Zaloguj się na stronie OpenAI i wybierz, czy udostępniać wykorzystanie planu. Twoje hasło pozostaje w OpenAI; dane logowania pozostają na tym komputerze.",
@@ -7158,5 +7158,16 @@
   "skillBurger.menu.aria": "Więcej dla {name}",
   "skillBurger.menu.rename": "Zmień nazwę…",
   "skillBurger.card.everyChat": "Każdy czat",
-  "skillBurger.page.empty": "Tu pojawiają się Skill Burgery Twoich botów."
+  "skillBurger.page.empty": "Tu pojawiają się Skill Burgery Twoich botów.",
+  "engineSetup.pasteCodeHint": "Zaloguj się na stronie, którą otworzy Google. Potem wklej tutaj pokazany kod albo pełny adres strony, na której skończysz.",
+  "engineSetup.pasteCodeLabel": "Kod logowania lub adres strony",
+  "engineSetup.pasteCodePlaceholder": "Kod albo https://antigravity.google/oauth-callback?…",
+  "engineSetup.sendCode": "Wyślij kod",
+  "engines.antigravity.runtime": "Działa na",
+  "engines.antigravity.runtimeCustom": "Własna ścieżka",
+  "engineSetup.nativeSharedSignIn": "Antigravity CLI od Google przechowuje jedno logowanie na tym komputerze: wszystkie konta na nim i Antigravity CLI w terminalu używają tego samego konta Google, a wylogowanie tutaj wylogowuje je wszystkie. To ograniczenie Antigravity CLI.",
+  "engineSetup.managedDescCli": "{app} instaluje Antigravity CLI od Google. Zainstaluj ją tutaj i zaloguj się przez Google; potem ta lista modeli odświeży się z Twojego konta.",
+  "accounts.signOutAntigravityShared": "Antigravity CLI od Google przechowuje jedno logowanie na tym komputerze: wylogowane zostaną też wszystkie konta na nim i Antigravity CLI w terminalu, a ich trwające zadania się zatrzymają. Boty, które z nich korzystają, będą potrzebować ponownego logowania przed następnym zadaniem.",
+  "engines.antigravity.runtimeCli": "Antigravity CLI",
+  "engines.antigravity.runtimePinned": "agy runtime"
 }

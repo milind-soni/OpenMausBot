@@ -5642,7 +5642,7 @@
   "engineSetup.chatgpt.description": "让 {app} 中符合条件的 AI 请求使用你的 ChatGPT 方案。这与 MausBot Cloud 无关，也和通过 API 密钥付费无关。",
   "engineSetup.chatgpt.start": "使用 ChatGPT 继续",
   "engineSetup.antigravity.addAccount": "添加 Google 账户",
-  "engineSetup.antigravity.emailUnavailable": "已通过 Google 登录 · 无法获取账户邮箱",
+  "engineSetup.antigravity.signedInGoogle": "已通过 Google 登录",
   "engineSetup.chatgpt.modelsAfterSignIn": "连接你的 ChatGPT 方案后，就会显示可用的模型。",
   "engineSetup.chatgpt.starting": "正在打开 ChatGPT 登录…",
   "engineSetup.chatgpt.security": "在 OpenAI 的页面上登录，并选择是否共享方案用量。你的密码只保存在 OpenAI 那里；登录凭证只保留在这台电脑上。",

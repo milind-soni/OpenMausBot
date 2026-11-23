@@ -4841,7 +4841,7 @@
   "engineSetup.device.description": "Подключите учётную запись ChatGPT к Codex. Завершите вход в своём браузере — без терминала и без передачи пароля.",
   "engineSetup.chatgpt.start": "Продолжить с ChatGPT",
   "engineSetup.antigravity.addAccount": "Добавить учётную запись Google",
-  "engineSetup.antigravity.emailUnavailable": "Выполнен вход через Google · адрес почты учётной записи недоступен",
+  "engineSetup.antigravity.signedInGoogle": "Выполнен вход через Google",
   "engineSetup.chatgpt.modelsAfterSignIn": "Доступные модели появятся, когда вы подключите план ChatGPT.",
   "engineSetup.chatgpt.starting": "Открытие входа в ChatGPT…",
   "engineSetup.chatgpt.security": "Войдите на странице OpenAI и выберите, передавать ли данные об использовании плана. Ваш пароль остаётся у OpenAI; учётные данные остаются на этом компьютере.",
@@ -7212,5 +7212,16 @@
   "skillBurger.menu.aria": "Ещё для {name}",
   "skillBurger.menu.rename": "Переименовать…",
   "skillBurger.card.everyChat": "Каждый чат",
-  "skillBurger.page.empty": "Здесь появляются Skill Burger ваших ботов."
+  "skillBurger.page.empty": "Здесь появляются Skill Burger ваших ботов.",
+  "engineSetup.pasteCodeHint": "Войдите на странице, которую откроет Google. Затем вставьте сюда показанный код или полный адрес страницы, на которой окажетесь.",
+  "engineSetup.pasteCodeLabel": "Код входа или адрес страницы",
+  "engineSetup.pasteCodePlaceholder": "Код или https://antigravity.google/oauth-callback?…",
+  "engineSetup.sendCode": "Отправить код",
+  "engines.antigravity.runtime": "Работает на",
+  "engines.antigravity.runtimeCustom": "Свой путь",
+  "engineSetup.nativeSharedSignIn": "Antigravity CLI от Google хранит один вход на этом компьютере: все аккаунты на нём и Antigravity CLI в терминале используют один и тот же аккаунт Google, а выход здесь выполняет выход везде. Это ограничение Antigravity CLI.",
+  "engineSetup.managedDescCli": "{app} устанавливает Antigravity CLI от Google. Установите её здесь и войдите через Google; после этого список моделей обновится из вашего аккаунта.",
+  "accounts.signOutAntigravityShared": "Antigravity CLI от Google хранит один вход на этом компьютере: из всех аккаунтов на нём и из Antigravity CLI в терминале тоже будет выполнен выход, а их текущие задачи остановятся. Ботам, которые их используют, понадобится снова войти перед следующей задачей.",
+  "engines.antigravity.runtimeCli": "Antigravity CLI",
+  "engines.antigravity.runtimePinned": "agy runtime"
 }

@@ -5422,7 +5422,7 @@
   "engineSetup.chatgpt.description": "{app} の対象となる AI リクエストに、ご自身の ChatGPT のプランを使います。MausBot Cloud とも、API キーでの支払いとも別です。",
   "engineSetup.chatgpt.start": "ChatGPT で続ける",
   "engineSetup.antigravity.addAccount": "Google アカウントを追加",
-  "engineSetup.antigravity.emailUnavailable": "Google でサインイン済み · アカウントのメールアドレスを取得できません",
+  "engineSetup.antigravity.signedInGoogle": "Google でサインイン済み",
   "engineSetup.chatgpt.modelsAfterSignIn": "ChatGPT プランを接続すると、利用可能なモデルが表示されます。",
   "engineSetup.chatgpt.starting": "ChatGPT サインインを開いています…",
   "engineSetup.chatgpt.security": "OpenAI のページでサインインし、プランの利用状況を共有するか選んでください。パスワードは OpenAI に留まり、認証情報はこのコンピューターに保存されます。",
@@ -7997,5 +7997,16 @@
   "skillBurger.menu.aria": "{name} のその他の操作",
   "skillBurger.menu.rename": "名前を変更…",
   "skillBurger.card.everyChat": "すべてのチャット",
-  "skillBurger.page.empty": "ボットが作った Skill Burger はここに表示されます。"
+  "skillBurger.page.empty": "ボットが作った Skill Burger はここに表示されます。",
+  "engineSetup.pasteCodeHint": "Google が開くページでサインインしてください。表示されたコード、または最後に開いたページのアドレス全体をここに貼り付けます。",
+  "engineSetup.pasteCodeLabel": "サインインコードまたはページのアドレス",
+  "engineSetup.pasteCodePlaceholder": "コード、または https://antigravity.google/oauth-callback?…",
+  "engineSetup.sendCode": "コードを送信",
+  "engines.antigravity.runtime": "実行環境",
+  "engines.antigravity.runtimeCustom": "カスタムパス",
+  "engineSetup.nativeSharedSignIn": "Google の Antigravity CLI は、このコンピュータでサインインを 1 つだけ保持します。ここにあるすべてのアカウントとターミナルの Antigravity CLI は同じ Google アカウントを使い、ここでサインアウトするとすべてサインアウトされます。これは Antigravity CLI の制限です。",
+  "engineSetup.managedDescCli": "{app} は Google の Antigravity CLI をインストールします。ここでインストールして Google でサインインすると、このモデル一覧があなたのアカウントから更新されます。",
+  "accounts.signOutAntigravityShared": "Google の Antigravity CLI は、このコンピュータでサインインを 1 つだけ保持します。ここにあるすべてのアカウントとターミナルの Antigravity CLI もサインアウトされ、実行中のタスクは停止します。それらを使うボットは、次のタスクの前に再度サインインが必要です。",
+  "engines.antigravity.runtimeCli": "Antigravity CLI",
+  "engines.antigravity.runtimePinned": "agy runtime"
 }
