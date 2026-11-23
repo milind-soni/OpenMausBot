@@ -85,8 +85,8 @@ One server of the person's own, no teammate handing work on, exactly one questio
 
 - With the scripted fake engine, a bot's `ask_user` card waits; a line the person types in that chat answers the card
   (no steer): the line stays in the chat under the card (`replyToId`), the card reads as answered with the typed words,
-  and the bot's turn goes on with them. Only the engine reads the note that the words were typed, not picked
-  (`room-plan.json.evidence.jsonl`); no message row and no event on `/api/events` carries it.
+  and the bot's turn goes on with them. The engine reads exactly those words as the card's answer
+  (`room-plan.json.evidence.jsonl`), as if they were typed in the card's own text field.
 - The same POST sent again (same `sendId`, same text) returns 202 with the first line and touches no card; the same
   `sendId` with other words is refused with 409, as a normal send is.
 - With the fake ACP CLI on a question of set options (the shape Antigravity asks with, an engine that takes no message
@@ -95,11 +95,12 @@ One server of the person's own, no teammate handing work on, exactly one questio
   The card reads "Closed without an answer" (`answered: "unavailable"`, `dismissed: true`), not "Denied", and the
   decision log under `decisions/` records no verdict for it.
 - With the fake Claude CLI holding a turn, Claude's own `AskUserQuestion` of two questions waits; the typed line closes
-  it the same way, the waiting tool gets a decline saying the person typed in the chat, and the line is steered into
-  the turn.
+  it the same way, the waiting tool gets a plain decline, and the line is steered into the turn.
 
 Two or more question cards live in the chat, Stop, a line with a file or image, a reply to another line, rooms and work
-handed on keep their own paths. If the close is refused, the card stays as it is and the line is sent as before.
+handed on keep their own paths. A card reads closed only once the engine took the decline: if the close is refused, or
+the engine did not take it, the card stays open and can still be tapped, and the line is sent as before. Two tries of
+one send that arrive together close or answer one card, even when another opens before the line is written.
 
 Unit tests for the relay's rules (which thread, which sender, sign-ins, work handed out this turn, an engine that cannot
 take a message mid-turn) are in `server/host/question-routing.test.ts`.
