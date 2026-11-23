@@ -30,6 +30,9 @@ vi.mock("@/state/store-select", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store-select")>(),
   useStoreSelector: (select: (state: unknown) => unknown) => select({ bots: [maestro, helper] }),
 }));
+vi.mock("@/state/api", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/state/api")>(), api: async () => ({ since: 0, version: "v1", nodes: [], needsInput: [] }),
+}));
 vi.mock("@/state/message-history", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/message-history")>(), loadFullThread: fixture.load,
 }));

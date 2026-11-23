@@ -1,7 +1,8 @@
 // A teammate's hand-off, read in place of the asker's chat: the two bots' exchange, live, with no message box.
-import { createContext, Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
+import { createContext, Fragment, use, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { ArrowLeftRight, ChevronLeft } from "lucide-react";
 import { BotAvatar, InitialsAvatar } from "./Avatar";
+import { BotExchangeStatus } from "./BotExchangeLine";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { DaySeparator } from "./DaySeparator";
 import { ClusterLabel } from "./RoomClusterLabel";
@@ -9,11 +10,13 @@ import { ChatBackdrop, GlassBar, GlassScrollFrame } from "./GlassScrollFrame";
 import { ELEVATED_FLOAT, ELEVATED_HOVER, ELEVATED_TINT } from "./elevated";
 import { joinedCorners, SIMPLE_BOT_BUBBLE, SIMPLE_BUBBLE_MAX, SIMPLE_STACKED, SIMPLE_USER_BUBBLE } from "./chat-bubble";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
+import { exchangeWindow, inWindow, type ExchangeWindow } from "@/lib/bot-exchanges";
 import { cn } from "@/lib/cn";
 import { conversationRows, handoffTranscript, LOADING_TRANSCRIPT, type ConversationRow, type ConversationSpeaker } from "@/lib/handoff-conversation";
 import { intlLocale, t } from "@/lib/i18n";
 import { listenLiveFrames } from "@/lib/live-events";
 import { localDay } from "@/lib/transcript-derivations";
+import { BotExchangesContext, latestPersonTurn, useBotExchanges } from "@/lib/use-bot-exchanges";
 import { loadFullThread } from "@/state/message-history";
 import type { Bot, Message } from "@/state/store";
 import { useStoreSelector } from "@/state/store-select";
@@ -25,6 +28,9 @@ export interface HandoffExchange {
   helper: Named;
   /** The helper's work thread the hand-off went to. */
   threadId: string;
+  /** The hand-off, when the view is for one exchange: its lines are those in `window`, and it can be stopped. */
+  id?: string;
+  window?: ExchangeWindow;
 }
 
 /** Opens a hand-off's exchange in place of the chat it is in. Null where no chat column hosts one (a room, the side
@@ -39,11 +45,17 @@ export function HandoffExchangeHost({ bot, children }: { bot: Bot; children: Rea
   if (open && open.chat !== chat) setOpen(null);
   const openExchange = useCallback((exchange: HandoffExchange) => setOpen({ chat, exchange }), [chat]);
   const exchange = open?.chat === chat ? open.exchange : null;
-  if (exchange) return <HandoffExchangeView key={exchange.threadId} exchange={exchange} onBack={() => setOpen(null)} />;
-  return <OpenExchangeContext value={openExchange}>{children}</OpenExchangeContext>;
+  const since = useMemo(() => latestPersonTurn(bot.messages), [bot.messages]);
+  const exchanges = useBotExchanges(bot.threadId, since, Boolean(bot.busy || bot.waitingForTeammates));
+  return (
+    <BotExchangesContext value={exchanges}>
+      {exchange ? <HandoffExchangeView key={exchange.id ?? exchange.threadId} exchange={exchange} onBack={() => setOpen(null)} />
+        : <OpenExchangeContext value={openExchange}>{children}</OpenExchangeContext>}
+    </BotExchangesContext>
+  );
 }
 
-export function HandoffExchangeView({ exchange: { asker, helper, threadId }, onBack }: { exchange: HandoffExchange; onBack: () => void }) {
+export function HandoffExchangeView({ exchange: { asker, helper, threadId, id, window: opened }, onBack }: { exchange: HandoffExchange; onBack: () => void }) {
   const [transcript, dispatch] = useReducer(handoffTranscript, LOADING_TRANSCRIPT);
   const [load, setLoad] = useState(0);
   const reload = () => {
@@ -73,9 +85,11 @@ export function HandoffExchangeView({ exchange: { asker, helper, threadId }, onB
     onMissedFrames: reload,
   }), [threadId]);
 
+  const entry = use(BotExchangesContext).exchanges.find((candidate) => candidate.id === id);
+  const slice = entry ? exchangeWindow(entry) : opened;
   const you = t("chat.you");
-  const rows = useMemo(() => conversationRows(transcript, asker, helper, you),
-    [transcript, asker.botId, asker.name, asker.color, helper.botId, helper.name, helper.color, you]);
+  const rows = useMemo(() => conversationRows(transcript, asker, helper, you).filter((row) => !slice || inWindow(row.at, slice)),
+    [transcript, asker.botId, asker.name, asker.color, helper.botId, helper.name, helper.color, you, slice?.from, slice?.to]);
   // The newest line stays in sight as lines come in, unless the person scrolled up to read.
   const listRef = useRef<HTMLDivElement>(null);
   const atEnd = useRef(true);
@@ -186,6 +200,7 @@ export function HandoffExchangeView({ exchange: { asker, helper, threadId }, onB
             )}
           </div>
         </div>
+        {id && <GlassBar edge="bottom" fade={!remoteClient} className="z-[25]"><BotExchangeStatus id={id} /></GlassBar>}
       </GlassScrollFrame>
     </main>
   );

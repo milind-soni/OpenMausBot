@@ -95,6 +95,7 @@ import { CitationSelectionToolbar, SentCitations } from "./CitationUI";
 import { SpeakButton, speakReady } from "./SpeakButton";
 import { CallOverlay } from "./CallView";
 import { LiveCallBar } from "./LiveCallBar";
+import { BotExchangeLine } from "./BotExchangeLine";
 import { LiveCallChip } from "./LiveCallPill";
 import { effectivePlace, type EffectivePlace } from "@/lib/place";
 import { cn } from "@/lib/cn";
@@ -1171,6 +1172,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
           <JumpToLatestButton onClick={jumpToLatest} className="pointer-events-auto bottom-2" />
         </div>
       )}
+      <BotExchangeLine />
       <LiveCallBar bot={bot} />
       {canWrite === false ? (
         <NewConversationInstead bot={bot} onNew={() => dispatch({ type: "newTask", botId: bot.id })} />
