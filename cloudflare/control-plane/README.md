@@ -319,6 +319,43 @@ tokens. D1 stores, per row, the installation id, the token, its SHA-256, the
 platform, the purpose, the environment and timestamps (`migrations/0008`, `0017`,
 `0018`).
 
+**Cloud homes** (`src/push-cloud-homes.ts`; the design in `docs/phone-push.md`,
+"Cloud homes"). A MausBot Cloud home has no installation credential; the Admin
+that runs it checks the home's own signature and relays its calls here, keyed
+by the home's machine id:
+
+- `POST /v1/cloud-homes/<machine id>/push/register`, `unregister`, `send` and
+  `activity` take exactly the installation routes' bodies, schemas, answers and
+  limits (50 tokens, 120 registrations, 600 sends and 60 per token an hour,
+  each per machine), and send through the same path to APNs and FCM. A send
+  reaches only a token registered under the same machine id (`404
+  push_device_unknown` otherwise), never an installation's.
+- `POST /v1/cloud-homes/<machine id>/push/forget` deletes every token and rate
+  window of that machine: the Admin calls it when it retires or deletes the
+  Cloud. `204`, also when there was nothing.
+- The machine id is in the path, `[A-Za-z0-9][A-Za-z0-9_-]{2,127}`, never in
+  the body; a body that carries one is `400 invalid_request`.
+- Authentication is `Authorization: Bearer <CLOUD_HOME_PUSH_SECRET>`, the one
+  secret the Admin and this Worker share (or `CLOUD_HOME_PUSH_SECRET_PREVIOUS`
+  during a rotation), compared in constant time as SHA-256 digests. Neither set
+  (or under 32 characters): `503 push_unavailable`; anything else: `401
+  unauthorized`. An installation credential is not accepted here, nor this
+  secret on the installation routes.
+- Because that secret can name any machine id, the machine routes also share
+  a fleet-wide window: 20,000 sends and 6,000 registrations an hour across every
+  machine (`CLOUD_HOME_FLEET_SEND_LIMIT`, `CLOUD_HOME_FLEET_REGISTER_LIMIT`), so
+  a leaked secret stays bounded. Rotate it by setting the current value as
+  `CLOUD_HOME_PUSH_SECRET_PREVIOUS`, a new one as `CLOUD_HOME_PUSH_SECRET`, the
+  new one in the Admin (`OMB_CLOUD_PUSH_RELAY_SECRET`), then deleting
+  `CLOUD_HOME_PUSH_SECRET_PREVIOUS`.
+- D1: `machine_push_devices` (the shape of `installation_push_devices`, with
+  `machine_id` and no foreign key) and `machine_push_rate_limits` (the fleet's
+  row has machine id `*`), `migrations/0019`. A token APNs or FCM calls dead is
+  deleted from both tables.
+- `test/fixtures/cloud-home-push.json` lists bodies these routes accept and
+  refuse and the home's request signature; the Admin holds the same file byte
+  for byte and checks its forwarded bodies against it.
+
 **Secrets the maintainer sets** (all with `wrangler secret put <NAME>
 --config wrangler.jsonc`; none belongs in `vars`, this file, or CI output):
 
@@ -329,11 +366,13 @@ platform, the purpose, the environment and timestamps (`migrations/0008`, `0017`
 | `APNS_PRIVATE_KEY` | The whole `.p8` file, PEM, e.g. `wrangler secret put APNS_PRIVATE_KEY < AuthKey_XXXXXXXXXX.p8`. Escaped `\n` newlines are accepted too. |
 | `APNS_BUNDLE_ID` | The iOS app's bundle id, which is the APNs topic. |
 | `APNS_ENVIRONMENTS` | Optional. `production` (default), `sandbox`, or `production,sandbox` to also accept development builds' tokens. |
+| `CLOUD_HOME_PUSH_SECRET` | Optional. A random value of at least 32 characters, the same as the Admin's `OMB_CLOUD_PUSH_RELAY_SECRET`: the Admin's key to the Cloud homes' routes. Unset: those routes answer `503 push_unavailable`. |
+| `CLOUD_HOME_PUSH_SECRET_PREVIOUS` | Optional, during a rotation only: the value before `CLOUD_HOME_PUSH_SECRET`. Delete it once the Admin has the new one. |
 | `FCM_SERVICE_ACCOUNT` | The whole service-account JSON file of the Firebase project (Project settings → Service accounts → Generate new private key), e.g. `wrangler secret put FCM_SERVICE_ACCOUNT < service-account.json`. Only `project_id`, `client_email` and `private_key` are read. |
 
 They are deliberately not in `secrets.required`: the Worker is complete
 without them, with phone push off, until the keys exist. Apply
-`migrations/0008`, `0017` and `0018` before deploying the Worker that uses them. For
+`migrations/0008`, `0017`, `0018` and `0019` before deploying the Worker that uses them. For
 a local trial with `wrangler dev`, `.dev.vars` is read only for declared
 names, so add these names to `secrets.required` in a local, uncommitted copy
 of the config.

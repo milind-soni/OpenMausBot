@@ -96,3 +96,28 @@ describe("migration 0018", () => {
     ).bind("f".repeat(64), "ab".repeat(32)).run()).rejects.toThrow();
   });
 });
+
+describe("migration 0019", () => {
+  it("adds the Cloud homes' push tables beside the installations' and leaves those as they were", async () => {
+    expect(migrationIndex("0019_")).toBeGreaterThan(migrationIndex("0018_"));
+    expect(await schemaNames(env.DB, "machine_push_%")).toEqual([
+      { type: "index", name: "machine_push_devices_token_idx" },
+      { type: "index", name: "machine_push_rate_limits_updated_idx" },
+      { type: "table", name: "machine_push_devices" },
+      { type: "table", name: "machine_push_rate_limits" },
+    ]);
+    expect(await schemaNames(env.DB, "installation_push_devices%")).toEqual([
+      { type: "index", name: "installation_push_devices_token_idx" },
+      { type: "table", name: "installation_push_devices" },
+    ]);
+    // No foreign key to installations: a machine id is the Admin's, not an installation's.
+    await env.DB.prepare(
+      `INSERT INTO machine_push_devices (machine_id, token_hash, platform, token, environment, purpose, created_at, updated_at)
+       VALUES ('cm_1', ?, 'apns', ?, 'production', 'alert', 1, 1)`,
+    ).bind("e".repeat(64), "ab".repeat(32)).run();
+    await expect(env.DB.prepare(
+      `INSERT INTO machine_push_devices (machine_id, token_hash, platform, token, environment, purpose, created_at, updated_at)
+       VALUES ('cm_1', ?, 'apns', ?, 'production', 'chat', 1, 1)`,
+    ).bind("f".repeat(64), "ab".repeat(32)).run()).rejects.toThrow();
+  });
+});
