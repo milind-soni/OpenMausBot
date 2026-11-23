@@ -44,6 +44,8 @@ const SERVER_ENV_NAMES = new Set([
   "OMB_BOT_BOX",
   // An ended Cloud started only for its owner's export: the server runs frozen (server/move-freeze.ts).
   "OMB_CLOUD_EXPORT_ONLY",
+  // The full tool results' day-old sweep (server/host/tool-results-sweep.ts), off unless the Admin sets it.
+  "OMB_TOOL_RESULTS_SWEEP",
 ]);
 export function serverEnvironmentAllowed(name: string): boolean {
   return SERVER_ENV_NAMES.has(name) || name.startsWith("LC_");

@@ -9,7 +9,7 @@ import { existsSync, realpathSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { rm as removeDirectory } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { ToolResults, TOOL_RESULT_MAX_CHARS } from "./tool-results.ts";
+import { ToolResults, TOOL_RESULT_MAX_CHARS } from "./tool-results.ts"; import { startToolResultsSweep } from "./host/tool-results-sweep.ts";
 import { basename, join } from "node:path";
 import { authorizeExternalRuntime, externalRuntimeIsActive, type ExternalRuntimeGrant } from "./external-runtime.ts";
 import { z } from "zod";
@@ -5390,7 +5390,7 @@ function clearTurnDigestState(threadId: string): void {
   memoryRowsByThread.delete(threadId);
 }
 
-const TOOL_RESULTS_DIR = join(DATA_DIR, "tool-results");
+const TOOL_RESULTS_DIR = join(DATA_DIR, "tool-results"); startToolResultsSweep({ cloudHome: CLOUD_HOME !== null, env: process.env, root: TOOL_RESULTS_DIR, paused: () => moveFreeze.frozen() || workspaceMaintenance.active });
 const TOOL_RESULT_SPILL_MAX = 512 * 1024;
 
 const DIGESTS_AFTER_COMPACTION = 2;
