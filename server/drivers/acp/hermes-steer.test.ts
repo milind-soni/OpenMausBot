@@ -10,7 +10,6 @@ import type { AnyProviderDriver, ProviderInstance } from "../../contracts.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
 import { publishedMessages } from "../../harness/text-items.testkit.ts";
-import { AntigravityDriver } from "../antigravity.ts";
 import { ClineAgentDriver } from "./cline.ts";
 import { CommandCodeAgentDriver } from "./command-code.ts";
 import { CopilotAgentDriver } from "./copilot.ts";
@@ -196,7 +195,7 @@ describe("other ACP engines", () => {
   // Each runs against an agent that offers /steer: an engine whose own support is unproven still never steers.
   it.each([
     GeminiAgentDriver, KimiAgentDriver, DroidAgentDriver, CursorAgentDriver, QwenAgentDriver, ClineAgentDriver,
-    CopilotAgentDriver, CommandCodeAgentDriver, KiroAgentDriver, CustomAcpDriver, DeepSeekAgentDriver, AntigravityDriver,
+    CopilotAgentDriver, CommandCodeAgentDriver, KiroAgentDriver, CustomAcpDriver, DeepSeekAgentDriver,
   ] as AnyProviderDriver[])("$driverKind does not steer", async (driver) => {
     await start(driver);
     expect(instance!.adapter.capabilities.queueing).toBeUndefined();

@@ -13,6 +13,7 @@ import { antigravityRuntimesRoot } from "../engine-roots.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { recordEvents } from "../testing/events.ts";
 import {
+  ANTIGRAVITY_STEER,
   antigravityCliSessionMode,
   antigravityLaunchArgs,
   isValidAntigravityInitializeResult,
@@ -396,6 +397,15 @@ describe("starting the native CLI", () => {
     expect(isValidAntigravityInitializeResult(initialized("Antigravity ACP Server"), "1.5.8", true)).toBe(false);
   });
 
+  it("steers only the CLI, from 1.5.0 on, by the name and version its initialize reports", () => {
+    const steers = (name: string, version: unknown) => ANTIGRAVITY_STEER.supported!({ agentInfo: { name, version } });
+    expect(["1.5.0", "1.5.15", "1.6.0", "2.0.1"].map((version) => steers("Antigravity ACP Server", version))).toEqual([true, true, true, true]);
+    expect(["1.4.9", "0.9.0", "", undefined, "latest"].map((version) => steers("Antigravity ACP Server", version))).toEqual([false, false, false, false, false]);
+    expect(steers("antigravity-acp", "1.5.2")).toBe(false);
+    expect(steers("antigravity-acp", "agy_acp_server_1.5.2")).toBe(false);
+    expect(ANTIGRAVITY_STEER.supported!(undefined)).toBe(false);
+  });
+
   it("stays in default where the pinned runtime would be in yolo or auto_edit", () => {
     expect(["yolo", "auto_edit", "default", "plan"].map(antigravityCliSessionMode)).toEqual(["default", "default", "default", "plan"]);
   });
@@ -555,6 +565,72 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
     expect(first.text).toBe(`${RULES}${MEMORY}\n\nhello`);
     expect(rest).toEqual([]);
     expect(thread.setups()).toEqual([expect.not.objectContaining({ meta: expect.anything() })]);
+  }, 90_000);
+
+  /** A turn on a CLI that steers as 1.5.15 does, held after "working. " until its gate file exists. */
+  async function steerable(name: string, environment: Record<string, string> = {}) {
+    const fake = cli();
+    const gate = join(fake.directory, "finish.gate"), rpc = join(fake.directory, "rpc.jsonl");
+    const instance = await create(`antigravity-cli-${name}`, fake.executable, {
+      FAKE_ACP_MODES: "default,plan", FAKE_ACP_MODE: "antigravity-steer", FAKE_ACP_AGENT_VERSION: "1.5.15",
+      FAKE_ACP_GATE_FILE: gate, FAKE_ACP_RPC_APPEND_FILE: rpc, ...environment,
+    });
+    const recorder = recordEvents(instance.adapter);
+    const { turnId } = await instance.adapter.sendTurn({ threadId: name, text: "Build the report.", approvalMode: "full", cwd: fake.directory });
+    await recorder.until((event) => event.turnId === turnId && event.type === "content.delta" && event.delta.includes("working"));
+    const steers = () => existsSync(rpc) ? readFileSync(rpc, "utf8").split("\n").filter((line) => line.includes("session/prompt.steer")).length : 0;
+    const completed = () => recorder.until((event) => event.turnId === turnId && event.type === "turn.completed");
+    const replies = () => recorder.events.flatMap((event) => event.turnId === turnId && event.type === "item.completed" && event.itemType === "assistant_text" ? [event.text] : []);
+    const usage = () => recorder.events.flatMap((event) => event.turnId === turnId && event.type === "thread.token-usage.updated" ? [[event.input, event.output]] : []);
+    return { instance, gate, steers, completed, replies, usage, threadId: name, turnId, recorder };
+  }
+
+  it("takes a message into the running turn, which ends once, with the steer's reply and its usage", async () => {
+    const turn = await steerable("steer");
+    expect(turn.instance.adapter.capabilities.queueing).toBe(true);
+    expect(await turn.instance.adapter.steer!(turn.threadId, "  Use pytest.  ")).toBe("steered");
+    await vi.waitFor(() => expect(turn.steers()).toBe(1));
+    writeFileSync(turn.gate, "finish");
+    expect(await turn.completed()).toMatchObject({ ok: true });
+    // The reply so far is closed when the CLI answers the turn's own prompt at the steer; the rest follows it.
+    expect(turn.replies()).toEqual(["working.", "done; steered: Use pytest."]);
+    expect(turn.usage()).toEqual([[10, 5]]);
+    expect(turn.recorder.events.filter((event) => event.turnId === turn.turnId && event.type === "turn.completed")).toHaveLength(1);
+  }, 90_000);
+
+  it("stops a steered turn", async () => {
+    const turn = await steerable("steer-stop");
+    expect(await turn.instance.adapter.steer!(turn.threadId, "Use pytest.")).toBe("steered");
+    await vi.waitFor(() => expect(turn.steers()).toBe(1));
+    await turn.instance.adapter.interruptTurn(turn.threadId);
+    expect(await turn.completed()).toMatchObject({ stopReason: "cancelled" });
+    expect(turn.replies().join("")).not.toContain("done");
+  }, 90_000);
+
+  it("refuses to steer a runtime that does not name itself as the CLI, so the message queues", async () => {
+    const turn = await steerable("steer-pinned", { FAKE_ACP_AGENT_NAME: "antigravity-acp" });
+    expect(await turn.instance.adapter.steer!(turn.threadId, "Use pytest.")).toBe("refused");
+    writeFileSync(turn.gate, "finish");
+    expect(await turn.completed()).toMatchObject({ ok: true });
+    expect(turn.steers()).toBe(0);
+  }, 90_000);
+
+  it("queues a message sent while the turn waits on an approval, which the CLI would reject", async () => {
+    const fake = cli();
+    const rpc = join(fake.directory, "rpc.jsonl");
+    const instance = await create("antigravity-cli-steer-asking", fake.executable, {
+      FAKE_ACP_MODES: "default,plan", FAKE_ACP_MODE: "permission", FAKE_ACP_AGENT_VERSION: "1.5.15", FAKE_ACP_RPC_APPEND_FILE: rpc,
+      FAKE_ACP_PERMISSION_ANSWER: join(fake.directory, "answer"),
+      FAKE_ACP_PERMISSION_TOOL_CALL: JSON.stringify({ kind: "execute", rawInput: { command: "echo hi" }, title: "echo hi" }),
+    });
+    const recorder = recordEvents(instance.adapter);
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "steer-asking", text: "hello", approvalMode: "edits", cwd: fake.directory });
+    const opened = await recorder.until((event) => event.turnId === turnId && event.type === "request.opened") as { requestId: string };
+    const prompts = () => readFileSync(rpc, "utf8").trim().split("\n").filter((line) => JSON.parse(line).method === "session/prompt").length;
+    expect(await instance.adapter.steer!("steer-asking", "Use pytest.")).toBe("refused");
+    await instance.adapter.respondToRequest("steer-asking", opened.requestId, { behavior: "deny" });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+    expect(prompts()).toBe(1);
   }, 90_000);
 
   /** One turn at `approvalMode` whose runtime asks about `toolCall`; a card that opens is denied. */

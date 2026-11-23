@@ -40,6 +40,7 @@ import type { ChildProcess } from "node:child_process";
 import type { AntigravityRuntime } from "./antigravity-runtime.ts";
 import { ANTIGRAVITY_CLI_TOKEN_FILE } from "./antigravity-cli-install.ts";
 import { acpVariantOption, surveyModelVariants } from "./acp/config-options.ts";
+import type { AcpPromptSteer } from "./acp/steer.ts";
 import { StderrTail, exitDetail } from "./acp/exit-report.ts";
 import {
   VERIFICATION_TEMP_KEY,
@@ -784,6 +785,22 @@ export function antigravityLaunchArgs(runtime: Pick<AntigravityRuntime, "harness
   if (runtime.harnessPath === null) return ["acp", "--gemini-dir", profileDirectory, "--app-data-dir", "antigravity-acp"];
   return platform === "linux" ? ["--uid="] : [];
 }
+
+/** The native CLI (`agy acp`, "Antigravity ACP Server") from 1.5.0 takes a second `session/prompt` during a turn into it:
+ * the running prompt answers `end_turn` at once with no usage, and the turn goes on under the new one, which answers at
+ * its end with the whole turn's usage, or `cancelled` on session/cancel. Measured on 1.5.15, whose `initialize` does not
+ * announce it. While the turn waits on a permission or question answer it rejects the prompt (-32603 "Can't add this
+ * prompt"), so a message then queues. agy_acp_server (the pinned runtime, "antigravity-acp") answers a second prompt with
+ * an error and a second reply instead, so it keeps queueing. */
+export const ANTIGRAVITY_STEER: AcpPromptSteer = {
+  kind: "prompt",
+  notWhileAsking: true,
+  supported: (initialized: any) => {
+    if (initialized?.agentInfo?.name !== "Antigravity ACP Server") return false;
+    const match = /^(\d+)\.(\d+)\./u.exec(runtimeVersion(initialized.agentInfo.version));
+    return match !== null && (Number(match[1]) > 1 || (Number(match[1]) === 1 && Number(match[2]) >= 5));
+  },
+};
 
 /** The agy CLI rejects the pinned runtime's `yolo` and `auto_edit`. It stays in `default`, where it asks before acting
  * and the app answers by the turn's own approval level. */

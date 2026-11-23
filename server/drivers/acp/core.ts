@@ -1032,7 +1032,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           flushAssistantText,
           receiveModelVariants,
           steering: support.steer && turnSteering(support.steer, {
-            open: () => state.promptSent && !state.settled && !state.stopped && !session.closing,
+            open: () => state.promptSent && !state.settled && !state.stopped && !session.closing, asking: () => asks.size > 0,
             commands: () => session.commands,
             initializeResult: () => session.initResult, env,
             prompt: (text) => request("session/prompt", { sessionId: session.sessionId, prompt: [{ type: "text", text }] }, undefined, undefined, promptIdleTimeoutMs()),

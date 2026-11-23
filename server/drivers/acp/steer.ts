@@ -1,6 +1,6 @@
 // ACP has no steer method, so each agent takes a message into its running turn its own way: a slash command it
 // advertises (`available_commands_update`, Hermes), an extension request (`_session/steering`, OpenCode 2.3.0), or a
-// second session/prompt (Devin, 3000.13.4).
+// second session/prompt (Devin, 3000.13.4; Antigravity's native CLI, 1.5).
 import type { SteerOutcome } from "../../contracts.ts";
 
 /** How an agent takes a person's message into its running turn. */
@@ -27,6 +27,10 @@ export interface AcpPromptSteer {
   capability?: string;
   /** For an agent that does not announce the capability: whether this process's environment opts in. */
   enabled?(env: Record<string, string | undefined>): boolean;
+  /** For an agent that steers by release rather than by a capability: whether this process's `initialize` result names one. */
+  supported?(initializeResult: unknown): boolean;
+  /** The agent rejects a prompt while the turn waits on a permission or question answer, so none is sent then. */
+  notWhileAsking?: boolean;
   /** The run a prompt reply ends; replies of one run report their usage once. */
   run?(response: unknown): string | undefined;
   /** A steer reply that only reports its message was taken into the running turn; the turn's own reply is the outcome. */
@@ -171,6 +175,8 @@ export function turnAnswers(support: AcpSteerSupport | undefined, result: any, r
 export interface AcpSteerIo {
   /** The turn's own prompt is out, nothing stopped it, and the session is live. */
   open(): boolean;
+  /** The turn waits on a permission or question answer from the person. */
+  asking(): boolean;
   commands(): ReadonlySet<string> | undefined;
   initializeResult(): any;
   env: Record<string, string | undefined>;
@@ -184,7 +190,10 @@ export function turnSteering(support: AcpSteerSupport, io: AcpSteerIo): AcpTurnS
       (text) => io.extension(support.method, text));
   }
   if ("kind" in support && support.kind === "prompt") {
-    return acpPromptSteering(() => io.open() && (support.enabled ? support.enabled(io.env) : io.initializeResult()?.agentCapabilities?._meta?.[support.capability ?? ""] === true), io.prompt);
+    const allowed = () => support.supported ? support.supported(io.initializeResult())
+      : support.enabled ? support.enabled(io.env)
+      : io.initializeResult()?.agentCapabilities?._meta?.[support.capability ?? ""] === true;
+    return acpPromptSteering(() => io.open() && !(support.notWhileAsking && io.asking()) && allowed(), io.prompt);
   }
   return acpTurnSteering(support, () => io.open() && io.commands()?.has(support.command) === true, io.prompt);
 }

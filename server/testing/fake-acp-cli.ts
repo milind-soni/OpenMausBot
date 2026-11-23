@@ -116,6 +116,8 @@
 //   FAKE_ACP_MODE=grok-steer  Grok's second `session/prompt` with `[ui] follow_up_behavior = "steer"` in GROK_HOME/config.toml: a prompt
 //     during a running one is injected into it and answers {stopReason:"cancelled", _meta:{completionKind:"removedFromQueue"}}
 //     at once; the running prompt then ends with end_turn and every steer it took.
+//   FAKE_ACP_MODE=antigravity-steer  Antigravity's native CLI: a prompt during a running one is taken into it, the running
+//     prompt answers {stopReason:"end_turn"} at once with no usage, and the new one carries the turn and ends it with the usage.
 //   FAKE_ACP_STEERING=off  the two steer modes above report no steering capability.
 //   FAKE_ACP_MODE=grok-complete  grok 1.0.41's `_x.ai/session/prompt_complete`: a prompt says "answered", then sends the
 //     notification {sessionId, promptId: the prompt's _meta.promptId, stopReason: FAKE_ACP_COMPLETE_STOP (end_turn),
@@ -898,6 +900,13 @@ function gatedPrompt(msg: any) {
     result(msg.id, { stopReason: "cancelled", _meta: { completionKind: "removedFromQueue" } });
     return;
   }
+  if (gatedTurn && mode === "antigravity-steer") {
+    recordMethod("session/prompt.steer");
+    gatedTurn.steers.push(text);
+    for (const id of gatedTurn.pending) result(id, { stopReason: "end_turn" });
+    gatedTurn.pending = [msg.id];
+    return;
+  }
   if (gatedTurn && mode === "devin-steer") {
     recordMethod("session/prompt.steer");
     gatedTurn.steers.push(text);
@@ -1376,7 +1385,7 @@ function handle(msg: any) {
         hermesPrompt(msg);
         return;
       }
-      if (mode === "opencode-steer" || mode === "devin-steer" || mode === "grok-steer") {
+      if (mode === "opencode-steer" || mode === "devin-steer" || mode === "grok-steer" || mode === "antigravity-steer") {
         gatedPrompt(msg);
         return;
       }
