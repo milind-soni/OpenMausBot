@@ -1,6 +1,6 @@
 // Every SQL string built here quotes its literals and identifiers; every result is bounded by rows and bytes before it leaves.
 import { existsSync, mkdirSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import type { ValidateFunction } from "ajv";
@@ -386,6 +386,8 @@ export function stripCredentials(source: string): string {
   }
 }
 
+const sourceIdentity = (source: string) => createHash("sha256").update(source).digest("hex");
+
 export function tableNameFrom(stem: string): string {
   let name = stem.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 63);
   if (!name) name = "data";
@@ -470,6 +472,7 @@ export interface LoadOutput { tables: LoadedTable[]; warnings: string[]; elapsed
 export async function loadData(ctx: DataContext, input: LoadInput): Promise<LoadOutput> {
   const started = Date.now();
   const plans = planLoad(input);
+  const identity = sourceIdentity(input.source);
   const replace = input.replace !== false;
   const priorSources = ctx.sheet.sheet().sources.slice();
   const catalog = await ctx.database.listTables();
@@ -494,7 +497,8 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
   const taken = (name: string) => assigned(name) || blocked(name) || existing.has(fold(name));
   const attachedTable = (options?: Record<string, string | number | boolean>) => (typeof options?.table === "string" ? options.table : undefined);
   const sameAllocation = (entry: DataSource, plan: LoadPlan, requested: string, sourceTable?: string) =>
-    entry.kind === plan.kind && entry.source === plan.source && attachedTable(entry.options) === sourceTable && entry.requested === requested;
+    entry.kind === plan.kind && entry.identity === identity && attachedTable(entry.options) === sourceTable && entry.requested === requested;
+  const suffixHeldByOther = (name: string) => priorSources.some((entry) => entry.requested === name && fold(entry.name) !== fold(name) && entry.identity !== undefined && entry.identity !== identity);
   const priorAllocation = (plan: LoadPlan, requested: string, sourceTable?: string): string | undefined => {
     let found: string | undefined;
     for (const entry of priorSources) if (sameAllocation(entry, plan, requested, sourceTable)) found = entry.name;
@@ -520,7 +524,7 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
     }
     const described = await ctx.database.describe(quoteIdent(name), runOptions(ctx));
     const columns = boundColumns(described.columns, DATA_LIMITS.describeBytesMax, 200).columns;
-    ctx.sheet.recordSource({ name, sqlName: quoteIdent(name), kind: plan.kind, source: plan.source, options, requested, rowCount: described.rowCount, columns, loadedAt: new Date().toISOString() });
+    ctx.sheet.recordSource({ name, sqlName: quoteIdent(name), kind: plan.kind, source: plan.source, identity, options, requested, rowCount: described.rowCount, columns, loadedAt: new Date().toISOString() });
     tables.push({ name, rowCount: described.rowCount, columns, source: plan.source });
   };
   const place = async (base: string, relation: string, plan: LoadPlan, options: Record<string, string | number | boolean>, sourceTable?: string) => {
@@ -535,7 +539,7 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
         return true;
       });
       if (reused) return;
-    } else if (requested === stem && !assigned(requested) && !blocked(requested) && (replace || !existing.has(fold(requested)))) {
+    } else if (requested === stem && !suffixHeldByOther(requested) && !assigned(requested) && !blocked(requested) && (replace || !existing.has(fold(requested)))) {
       existing.add(fold(requested));
       try {
         await create(requested, relation, plan, options, requested, replace);

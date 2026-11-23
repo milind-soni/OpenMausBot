@@ -1,5 +1,7 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -7,8 +9,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { chartRenderer, compileChart, validateVegaLite } from "./deps.ts";
 import { createDataEngine, quoteIdentifier } from "./engine.ts";
-import { DataSheetStore } from "./sheet.ts";
-import { loadData, runDataTool, type DataContext } from "./tools.ts";
+import { DataSheetStore, SHEET_FILE } from "./sheet.ts";
+import { loadData, runDataTool, stripCredentials, type DataContext } from "./tools.ts";
 
 const root = mkdtempSync(join(tmpdir(), "omb-load-name-collisions-"));
 const folder = join(root, "mixed");
@@ -567,4 +569,93 @@ describe("distinct table names within one import", () => {
     expect(reloaded.structuredContent!.tables).toMatchObject([{ name: "sales_report_2" }]);
     await ctx.database.run("DETACH analytics", { connection });
   });
+
+  it("does not reuse a displaced suffix whose sheet record has no source identity", async () => {
+    const ctx = await unboundView("view-reload-without-identity");
+    const file = join(root, "sales-report-without-identity.csv");
+    writeFileSync(file, "id,name\n1,Alice\n");
+    const loaded = await runDataTool(ctx, "data_load", { source: file, name: "sales_report" });
+    expect(loaded.isError, loaded.content[0]?.text).toBeUndefined();
+    expect(loaded.structuredContent!.tables).toMatchObject([{ name: "sales_report_2" }]);
+    const prior = ctx.sheet.sheet().sources.find((source) => source.name === "sales_report_2");
+    expect(prior?.identity).toMatch(/^[a-f0-9]{64}$/);
+    const recorded = { ...prior! };
+    delete recorded.identity;
+    ctx.sheet.recordSource(recorded);
+    writeFileSync(file, "id,name\n2,Bob\n");
+    const reloaded = await runDataTool(ctx, "data_load", { source: file, name: "sales_report" });
+    expect(reloaded.isError, reloaded.content[0]?.text).toBeUndefined();
+    expect(reloaded.structuredContent!.tables).toMatchObject([{ name: "sales_report_3" }]);
+    expect((await ctx.database.run("SELECT * FROM sales_report_2", { connection })).rows).toEqual([["1", "Alice"]]);
+    expect((await ctx.database.run("SELECT * FROM sales_report_3", { connection })).rows).toEqual([["2", "Bob"]]);
+    const view = (await ctx.database.listTables()).find((table) => table.name === "sales_report");
+    expect(view?.rowCount).toBeNull();
+    expect(view?.error).toMatchObject({ code: "sql_error" });
+  });
+
+  it("keeps January when another report URL differs only by a redacted object_key", async () => {
+    const bodies = new Map([["january", "month\njanuary\n"], ["february", "month\nfebruary\n"]]);
+    const server = createServer((request, response) => {
+      const key = new URL(request.url ?? "/", "http://127.0.0.1").searchParams.get("object_key") ?? "";
+      const body = bodies.get(key);
+      if (body === undefined) { response.writeHead(404).end(); return; }
+      response.writeHead(200, { "content-type": "text/csv", "content-length": Buffer.byteLength(body) });
+      response.end(request.method === "HEAD" ? undefined : body);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as { port: number }).port;
+    const botId = "distinct-object-key";
+    const ctx = await context(botId);
+    const january = `http://127.0.0.1:${port}/report.csv?object_key=january&token=super-secret-token`;
+    const february = `http://127.0.0.1:${port}/report.csv?object_key=february&token=other-secret-token`;
+    const read = async (name: string) => {
+      const tables = await ctx.database.listTables();
+      if (!tables.some((table) => table.name === name)) return null;
+      return (await ctx.database.run(`SELECT month FROM ${quoteIdentifier(name)}`, { connection })).rows;
+    };
+    try {
+      await ctx.database.run("CREATE TABLE report AS SELECT 'kept' AS month", { connection });
+      expect(stripCredentials(january)).toBe(stripCredentials(february));
+      const first = await loadData(ctx, { source: january, replace: false });
+      expect(first.tables.map((table) => table.name)).toEqual(["report_2"]);
+      const second = await loadData(ctx, { source: february });
+      expect({
+        placed: second.tables.map((table) => table.name),
+        report: await read("report"),
+        report_2: await read("report_2"),
+        report_3: await read("report_3"),
+      }).toEqual({
+        placed: ["report_3"],
+        report: [["kept"]],
+        report_2: [["january"]],
+        report_3: [["february"]],
+      });
+
+      bodies.set("january", "month\njanuary-reloaded\n");
+      const reloaded = await loadData(ctx, { source: january });
+      expect(reloaded.tables.map((table) => table.name)).toEqual(["report_2"]);
+      expect(await read("report")).toEqual([["kept"]]);
+      expect(await read("report_2")).toEqual([["january-reloaded"]]);
+      expect(await read("report_3")).toEqual([["february"]]);
+      expect((await ctx.database.listTables()).map((table) => table.name)).not.toContain("report_4");
+
+      const sources = ctx.sheet.sheet().sources;
+      const januarySource = sources.find((source) => source.name === "report_2");
+      const februarySource = sources.find((source) => source.name === "report_3");
+      expect(januarySource?.source).toBe(februarySource?.source);
+      expect(januarySource?.source).toContain("object_key=***");
+      expect(januarySource?.source).toContain("token=***");
+      expect(januarySource?.identity).toBe(createHash("sha256").update(january).digest("hex"));
+      expect(februarySource?.identity).toBe(createHash("sha256").update(february).digest("hex"));
+      expect(januarySource?.identity).not.toBe(februarySource?.identity);
+      const stored = readFileSync(join(root, "sheets", botId, SHEET_FILE), "utf8");
+      expect(stored).not.toContain("super-secret-token");
+      expect(stored).not.toContain("other-secret-token");
+      expect(stored).not.toContain("object_key=january");
+      expect(stored).not.toContain("object_key=february");
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 90_000);
 });

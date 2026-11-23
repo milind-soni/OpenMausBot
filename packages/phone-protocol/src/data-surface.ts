@@ -96,7 +96,9 @@ export interface DataSource {
   kind: "csv" | "parquet" | "json" | "xlsx" | "folder" | "url" | "postgres" | "mysql" | "sqlite" | "gsheet" | "connector" | "sql";
   /** The path, URL or connection the table came from, with credentials removed. */
   source: string;
-  /** Name this load asked for. The next load of this source, kind and attached table reuses the table stored for this name. */
+  /** SHA-256 hex of the exact source string. A later load reuses this table when this, the kind, the attached table and `requested` all match. Older records omit it and are not reused. */
+  identity?: string;
+  /** Name this load asked for. */
   requested?: string;
   options?: Record<string, string | number | boolean>;
   rowCount: number;
