@@ -3,6 +3,11 @@
 import type { SecretRequestCardData } from "../../shared/wire.ts";
 import type { Message, Store } from "../store.ts";
 
+export interface RoomContinuationOptions {
+  requestMessageId?: string;
+  onLateError?: (error: unknown) => void;
+}
+
 export interface SecretCardResumeDeps {
   store: Pick<Store, "activePath" | "patchMessage">;
   connectorThread(botId: string, threadId: string): { group: { id: string } | undefined } | null;
@@ -13,7 +18,20 @@ export interface SecretCardResumeDeps {
   discoverPending?(): Array<{ botId: string; threadId: string }>;
   scheduleDrain?(): void;
   startDirectContinuation(botId: string, threadId: string, text: string): Promise<unknown>;
-  startRoomContinuation(groupId: string, botId: string, threadId: string, text: string): Promise<unknown>;
+  startRoomContinuation(groupId: string, botId: string, threadId: string, text: string, options?: RoomContinuationOptions): Promise<unknown>;
+}
+
+/** Original person request line preceding the earliest resumed card so room Stop keeps its requester lock. */
+export function roomRequestMessageIdForCards(path: readonly Message[], cards: readonly Message[]): string | undefined {
+  const cardIds = new Set(cards.map((card) => card.id));
+  const earliest = path.findIndex((message) => cardIds.has(message.id));
+  if (earliest <= 0) return undefined;
+  for (let index = earliest - 1; index >= 0; index -= 1) {
+    const message = path[index]!;
+    if (message.role !== "user" || message.aside) continue;
+    return message.kind === "text" && !message.peerAsk && !message.relayed && !message.via ? message.id : undefined;
+  }
+  return undefined;
 }
 
 const isUnresumedProvidedSecret = (message: Message): boolean => {
@@ -141,20 +159,27 @@ export function createSecretCardResumer(deps: SecretCardResumeDeps) {
     if (cards.length === allProvided.length) pending.delete(key);
     else pending.add(key);
     inFlight.add(key);
+    const requestMessageId = isRoom ? roomRequestMessageIdForCards(deps.store.activePath(threadId), cards) : undefined;
     const combinedText = cards.map((message) => deps.updateText(message.id, message.secret!, "provided")).join("\n\n");
     for (const message of cards) {
       deps.store.patchMessage(threadId, message.id, {
         secret: { ...message.secret!, resumed: true, error: undefined },
       });
     }
+    let rolledBack = false;
+    const fail = (error: unknown) => {
+      if (rolledBack) return;
+      rolledBack = true;
+      rollback(botId, threadId, cards, error);
+    };
     try {
       const run = isRoom
-        ? deps.startRoomContinuation(groupId, botId, threadId, combinedText)
+        ? deps.startRoomContinuation(groupId, botId, threadId, combinedText, { requestMessageId, onLateError: fail })
         : deps.startDirectContinuation(botId, threadId, combinedText);
-      void Promise.resolve(run).catch((error: unknown) => rollback(botId, threadId, cards, error));
+      void Promise.resolve(run).catch(fail);
       return true;
     } catch (error) {
-      rollback(botId, threadId, cards, error);
+      fail(error);
       return false;
     } finally {
       inFlight.delete(key);

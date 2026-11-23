@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { SecretRequestCardData } from "../../shared/wire.ts";
 import type { Message } from "../store.ts";
-import { collectPersistedSecretCardTargets, createSecretCardResumer, roomContinuationError, roomContinuationNotStartedError } from "./secret-card-resume.ts";
+import { collectPersistedSecretCardTargets, createSecretCardResumer, roomContinuationError, roomContinuationNotStartedError, roomRequestMessageIdForCards, type RoomContinuationOptions } from "./secret-card-resume.ts";
 
 function makeCard(id: string, label: string, extra: Partial<SecretRequestCardData> = {}): Message {
   return {
@@ -31,8 +31,9 @@ function makeFixture(options: { group?: { id: string }; directBlocked?: boolean;
   const waitingCards = new Set(options.waitingCards ?? []);
   const startedDirect: Array<{ botId: string; threadId: string; text: string }> = [];
   const startedRoom: Array<{ groupId: string; botId: string; threadId: string; text: string }> = [];
+  const startedRoomOptions: Array<RoomContinuationOptions | undefined> = [];
   let directImpl: ((botId: string, threadId: string, text: string) => Promise<unknown>) | undefined;
-  let roomImpl: ((groupId: string, botId: string, threadId: string, text: string) => Promise<unknown>) | undefined;
+  let roomImpl: ((groupId: string, botId: string, threadId: string, text: string, options?: RoomContinuationOptions) => Promise<unknown>) | undefined;
   let drainScheduled = 0;
 
   const store = {
@@ -57,9 +58,10 @@ function makeFixture(options: { group?: { id: string }; directBlocked?: boolean;
       startedDirect.push({ botId, threadId, text });
       if (directImpl) return directImpl(botId, threadId, text);
     },
-    startRoomContinuation: async (groupId, botId, threadId, text) => {
+    startRoomContinuation: async (groupId, botId, threadId, text, roomOptions) => {
       startedRoom.push({ groupId, botId, threadId, text });
-      if (roomImpl) return roomImpl(groupId, botId, threadId, text);
+      startedRoomOptions.push(roomOptions);
+      if (roomImpl) return roomImpl(groupId, botId, threadId, text, roomOptions);
     },
   });
 
@@ -69,11 +71,12 @@ function makeFixture(options: { group?: { id: string }; directBlocked?: boolean;
     waitingCards,
     startedDirect,
     startedRoom,
+    startedRoomOptions,
     drainScheduled: () => drainScheduled,
     setDirectBlocked: (value: boolean) => { directBlocked = value; },
     setRoomBlocked: (value: boolean) => { roomBlocked = value; },
     setDirectImpl: (fn: ((botId: string, threadId: string, text: string) => Promise<unknown>) | undefined) => { directImpl = fn; },
-    setRoomImpl: (fn: ((groupId: string, botId: string, threadId: string, text: string) => Promise<unknown>) | undefined) => { roomImpl = fn; },
+    setRoomImpl: (fn: ((groupId: string, botId: string, threadId: string, text: string, roomOptions?: RoomContinuationOptions) => Promise<unknown>) | undefined) => { roomImpl = fn; },
   };
 }
 
@@ -336,5 +339,43 @@ describe("createSecretCardResumer", () => {
       activePath: () => [errored],
     });
     expect(targets).toEqual([]);
+  });
+
+  it("finds the preceding person request id for room cards without crossing into non-person asks", () => {
+    const req = { id: "u-ask", at: 90, role: "user", kind: "text", text: "Check mail" } as Message;
+    const aside = { id: "u-aside", at: 95, role: "user", kind: "text", text: "fyi", aside: true } as Message;
+    const card1 = { ...makeCard("c-1", "Key One", { provided: true }), from: { botId: "bot-1", name: "One", color: "green" } } as Message;
+    const card2 = { ...makeCard("c-2", "Key Two", { provided: true }), from: { botId: "bot-1", name: "One", color: "green" } } as Message;
+    expect(roomRequestMessageIdForCards([req, aside, card1, card2], [card2])).toBe("u-ask");
+    expect(roomRequestMessageIdForCards([req, { id: "u-peer", at: 96, role: "user", kind: "text", text: "peer", peerAsk: { botId: "b0" } } as Message, card1], [card1])).toBeUndefined();
+    expect(roomRequestMessageIdForCards([card1], [card1])).toBeUndefined();
+  });
+
+  it("passes requestMessageId and handles abandoned late-rejection callbacks idempotently", async () => {
+    const f = makeFixture({ group: { id: "room-1" } });
+    const req = { id: "u-room-ask", at: 90, role: "user", kind: "text", text: "Check inbox" } as Message;
+    const card = { ...makeCard("c-late", "Late Reject Key", { provided: true }), from: { botId: "bot-1", name: "One", color: "green" } } as Message;
+    f.lines.push(req, card);
+    expect(f.resumer.resume("bot-1", "room-t1")).toBe(true);
+    expect(f.startedRoomOptions[0]?.requestMessageId).toBe("u-room-ask");
+
+    const onLateError = f.startedRoomOptions[0]!.onLateError!;
+    onLateError(roomContinuationError(false, "provider busy", false));
+    expect(card.secret!.resumed).toBeUndefined();
+    expect(card.secret!.error).toBeUndefined();
+    expect(f.drainScheduled()).toBe(1);
+
+    // A second late callback is a no-op once rolled back.
+    onLateError(new Error("duplicate failure"));
+    expect(card.secret!.error).toBeUndefined();
+
+    // Wait for scheduled drain, fail post-dispatch via late callback: resumed stays true with error recorded.
+    const fPost = makeFixture({ group: { id: "room-1" } });
+    const postCard = { ...makeCard("c-post-late", "Post Late Key", { provided: true }), from: { botId: "bot-1", name: "One", color: "green" } } as Message;
+    fPost.lines.push(req, postCard);
+    expect(fPost.resumer.resume("bot-1", "room-t1")).toBe(true);
+    fPost.startedRoomOptions[0]!.onLateError!(roomContinuationError(true, "aborted after reply", true));
+    expect(postCard.secret!.resumed).toBe(true);
+    expect(postCard.secret!.error).toBe("aborted after reply");
   });
 });
