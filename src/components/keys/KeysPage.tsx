@@ -127,9 +127,7 @@ function landOn(page: HTMLElement | null, request: KeyFocusRequest, section: Key
   return true;
 }
 
-/** `bare`: inside AI's Other services, every section is a fold row in one card; `exclude`: sections listed elsewhere
- * (AI providers are AI's own Providers list), unless a search or a link asks for a key in one. */
-export function KeysPage({ bare = false, exclude = [] }: { bare?: boolean; exclude?: KeySectionId[] } = {}) {
+export function KeysPage({ bare = false }: { bare?: boolean } = {}) {
   const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<ReadonlySet<KeySectionId>>(() => new Set(
@@ -156,8 +154,7 @@ export function KeysPage({ bare = false, exclude = [] }: { bare?: boolean; exclu
   }, [focus]);
 
   const rows = KEY_CATALOG.filter((entry) => keyMatches(entry, q, state.config) && !keyHidden(entry.id, state.config));
-  const asked = focus ? KEY_CATALOG.find((entry) => entry.id === focus.row)?.section : undefined;
-  const sections = KEY_SECTIONS.filter((section) => !exclude.includes(section.id) || section.id === asked).flatMap((section) => {
+  const sections = KEY_SECTIONS.flatMap((section) => {
     const own = rows.filter((entry) => entry.section === section.id);
     return own.length > 0 ? [{ id: section.id, rows: own }] : [];
   });

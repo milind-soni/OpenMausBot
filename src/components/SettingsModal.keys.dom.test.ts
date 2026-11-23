@@ -94,6 +94,26 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("finding model API keys in AI settings", () => {
+  it.each([false, true])("shows the same model keys from Settings and the model picker (Advanced: %s)", (advanced) => {
+    fx.advanced = advanced;
+    fx.section = "overview";
+    flushSync(() => root.render(createElement(SettingsModal)));
+    flushSync(() => document.querySelector<HTMLButtonElement>('[data-settings-page="ai"]')!.click());
+    if (!advanced) {
+      flushSync(() => document.querySelector<HTMLButtonElement>('[data-settings-disclosure="ai-other-services"] button')!.click());
+    }
+    const modelKeys = () => document.querySelector('[data-settings-block="ai-keys"] [data-keys-section="ai"]');
+    expect(modelKeys()).not.toBeNull();
+    expect(modelKeys()!.closest("[hidden]")).toBeNull();
+
+    fx.section = "connections";
+    flushSync(publish);
+    expect(modelKeys()).not.toBeNull();
+    expect(modelKeys()!.closest("[hidden]")).toBeNull();
+  });
+});
+
 describe("searching Settings for a key", () => {
   it.each([false, true])("lists it by name and section and lands on its row, focused (Advanced: %s)", async (advanced) => {
     fx.advanced = advanced;
@@ -114,7 +134,7 @@ describe("searching Settings for a key", () => {
   it("names the OpenAI key twice: once for models, once for live calls", () => {
     flushSync(() => root.render(createElement(SettingsModal)));
     type("openai");
-    expect(result("openai")!.textContent).toMatch(/^OpenAI API key.*AI › AI providers$/);
+    expect(result("openai")!.textContent).toMatch(/^OpenAI API key.*AI › Model API keys$/);
     expect(result("liveCalls")!.textContent).toMatch(/^OpenAI key.*AI › Voice and calls$/);
   });
 

@@ -123,7 +123,7 @@ export function AiPage() {
   const [services, setServices] = useState(ctx.advanced || anchor === "ai-keys");
   // A key asked for by search or a link opens Other services whatever the fold says.
   const shown = ctx.advanced || services || anchor === "ai-keys";
-  const count = KEY_SECTIONS.filter((section) => section.id !== "ai").length;
+  const count = KEY_SECTIONS.length;
   return <>
     <AdminOnly>
       <div data-settings-block="providers" className="flex scroll-mt-4 flex-col gap-6">
@@ -138,7 +138,7 @@ export function AiPage() {
       )}
       {shown && (
         <SettingsGroup label={ctx.advanced ? t("settings.ai.otherServices") : undefined} description={t("settings.ai.otherServicesLine")} block="ai-keys">
-          <KeysPage bare exclude={anchor === "ai-keys" ? [] : ["ai"]} />
+          <KeysPage bare />
         </SettingsGroup>
       )}
       <AdvancedSection anchor="backup-model"><SettingsGroup label={t("settings.ai.backupModel")} block="backup-model"><AutomaticRecoverySettings /></SettingsGroup></AdvancedSection>

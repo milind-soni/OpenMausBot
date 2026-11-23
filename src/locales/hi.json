@@ -3208,6 +3208,7 @@
   "settings.ai.images": "इमेज",
   "settings.ai.keysLine": "AI प्रदाताओं और दूसरी सेवाओं की कुंजियाँ।",
   "settings.ai.providers": "प्रोवाइडर",
+  "settings.ai.providersLine": "कोई स्थानीय एजेंट ऐप जोड़ें या API कुंजी से किसी प्रदाता को सेट अप करें।",
   "settings.ai.routing": "रूटिंग और निकालना",
   "settings.app.about": "{app} के बारे में",
   "settings.app.computers": "आपके कंप्यूटर",
@@ -3346,7 +3347,7 @@
   "settings.ai.notSetUp": "सेट अप नहीं",
   "settings.ai.attention": "ध्यान चाहिए",
   "settings.ai.otherServices": "दूसरी सेवाएँ",
-  "settings.ai.otherServicesLine": "आपके मुख्य मॉडलों के अलावा आवाज़ों, कंप्यूटरों, ऐप्स और सहायकों के लिए कुंजियाँ।",
+  "settings.ai.otherServicesLine": "मॉडल, आवाज़, कंप्यूटर, ऐप और सहायक सुविधाओं की कुंजियाँ।",
   "backup.exportShort": "पासवर्ड से सुरक्षित। सेव किए गए लॉगिन शामिल नहीं हैं।",
   "backup.importShort": "बैकअप फ़ाइल से बॉट और बातचीत वापस लाएँ।",
   "backup.exportAction": "एक्सपोर्ट करें…",
@@ -3684,5 +3685,7 @@
   "sidebar.threads.hideShort": "छिपाएँ",
   "sidebar.threads.running": "+{count} चल रहे",
   "sidebar.threads.more": "{count} और",
-  "botPanel.library.showAll": "सभी दिखाएँ"
+  "botPanel.library.showAll": "सभी दिखाएँ",
+  "keys.section.ai": "मॉडल की API कुंजियाँ",
+  "keys.section.ai.purpose": "ऐसे मॉडल जोड़ें जिनसे MausBot आपके बॉट चला सके।"
 }

@@ -5509,6 +5509,7 @@
   "settings.ai.images": "Hình ảnh",
   "settings.ai.keysLine": "Khóa cho nhà cung cấp AI và các dịch vụ khác.",
   "settings.ai.providers": "Nhà cung cấp",
+  "settings.ai.providersLine": "Kết nối ứng dụng tác nhân trên máy hoặc thiết lập nhà cung cấp bằng khóa API.",
   "settings.ai.routing": "Định tuyến và trích xuất",
   "settings.app.about": "Giới thiệu về {app}",
   "settings.app.computers": "Máy tính của bạn",
@@ -5645,7 +5646,7 @@
   "settings.ai.notSetUp": "Chưa thiết lập",
   "settings.ai.attention": "Cần chú ý",
   "settings.ai.otherServices": "Dịch vụ khác",
-  "settings.ai.otherServicesLine": "Khóa cho giọng nói, máy tính, ứng dụng và trợ lý, ngoài các mô hình chính của bạn.",
+  "settings.ai.otherServicesLine": "Khóa cho mô hình, giọng nói, máy tính, ứng dụng và trợ lý.",
   "backup.exportShort": "Có mật khẩu bảo vệ. Không gồm các đăng nhập đã lưu.",
   "backup.importShort": "Khôi phục bot và cuộc trò chuyện từ tệp sao lưu.",
   "backup.exportAction": "Xuất…",
@@ -5924,5 +5925,7 @@
   "sidebar.threads.hideShort": "Ẩn",
   "sidebar.threads.running": "+{count} đang chạy",
   "sidebar.threads.more": "thêm {count}",
-  "botPanel.library.showAll": "Hiển thị tất cả"
+  "botPanel.library.showAll": "Hiển thị tất cả",
+  "keys.section.ai": "Khóa API cho mô hình",
+  "keys.section.ai.purpose": "Kết nối các mô hình để MausBot dùng khi chạy bot của bạn."
 }

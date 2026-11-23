@@ -93,11 +93,11 @@ afterEach(() => {
 });
 
 describe("the keys page", () => {
-  it("groups the keys into plain sections, AI providers open first", () => {
+  it("groups the keys into plain sections, with model API keys open first", () => {
     page();
     expect([...host.querySelectorAll<HTMLElement>("[data-keys-section]")].map((element) => element.dataset.keysSection))
       .toEqual(["ai", "servers", "voice", "computers", "apps", "helpers"]);
-    expect(section("ai").textContent).toContain("AI providers");
+    expect(section("ai").textContent).toContain("Model API keys");
     expect(expanded("ai")).toBe("true");
     expect(expanded("voice")).toBe("false");
     expect(rowsShown()).toContain("openai");
