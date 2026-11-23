@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readBotActivity } from "../activity.ts";
 import { readThreadEvents } from "../thread-events.ts";
 import {
-  AGE_MS, CUT_AFTER_MS, FIRST_PASS_MS, QUIET_MS, READ_FLOOR, knownThreads, listLogs, parseBytes, schedulePasses, sweepLine,
+  AGE_MS, CUT_AFTER_MS, FIRST_PASS_MS, QUIET_MS, READ_FLOOR, STAMP_FILE, knownThreads, listLogs, parseBytes, schedulePasses, startThreadLogSweep, sweepLine,
   sweepThreadLogs, threadLogCap, threadLogCutEnabled, threadLogSweepMode, trimLog, type ThreadState,
 } from "./thread-log-sweep.ts";
 
@@ -73,10 +73,10 @@ describe("the conversation logs' switch and cap", () => {
       expect(passes).toEqual([NOW + FIRST_PASS_MS]);
       expect(JSON.parse(readFileSync(stamp, "utf8")).at).toBe(NOW + FIRST_PASS_MS);
       vi.clearAllTimers();
-      // A restart an hour later waits for the rest of the six hours, not three minutes.
+      // A restart an hour later reads the stamp at its first timer and waits for the rest of the six hours.
       clock = NOW + FIRST_PASS_MS + 60 * 60_000;
       schedulePasses(stamp, 6 * 60 * 60_000, async () => (passes.push(clock), true), () => clock);
-      await vi.advanceTimersByTimeAsync(4 * 60 * 60_000);
+      await vi.advanceTimersByTimeAsync(FIRST_PASS_MS + 4 * 60 * 60_000);
       expect(passes).toHaveLength(1);
       await vi.advanceTimersByTimeAsync(60 * 60_000);
       expect(passes).toHaveLength(2);
@@ -86,6 +86,22 @@ describe("the conversation logs' switch and cap", () => {
       schedulePasses(stamp, 6 * 60 * 60_000, async () => (passes.push(clock), true), () => clock);
       await vi.advanceTimersByTimeAsync(FIRST_PASS_MS);
       expect(passes).toHaveLength(3);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it("a frozen home's pass reads nothing and writes no stamp", async () => {
+    vi.useFakeTimers();
+    try {
+      const events = writeEvents("t1", 6_000);
+      age(events, AGE_MS + DAY);
+      let asked = 0;
+      expect(startThreadLogSweep({ cloudHome: true, env: { OMB_THREAD_LOG_SWEEP: "on" }, dataDir, threads: () => (asked++, new Map()), paused: () => true, log: () => {} })).toBe(true);
+      await vi.advanceTimersByTimeAsync(FIRST_PASS_MS);
+      expect(asked).toBe(0);
+      expect(existsSync(join(dataDir, STAMP_FILE))).toBe(false);
     } finally {
       vi.clearAllTimers();
       vi.useRealTimers();
@@ -257,6 +273,23 @@ describe("what a sweep never reaches", () => {
     expect(await trimLog(listed!, READ_FLOOR, true)).toBe(0);
     expect(readFileSync(events, "utf8")).toContain('"late":true');
     expect(readFileSync(events, "utf8").split("\n").filter(Boolean)).toHaveLength(6_001);
+  });
+
+  it("keeps every session line from the part it cuts away", async () => {
+    const sessions = Array.from({ length: 1_500 }, (_, i) => i * 2 + 1);
+    const events = writeEvents("t1", 6_000, sessions);
+    age(events, AGE_MS + DAY);
+    await sweepThreadLogs({ dataDir, mode: "on", cap: BIG_CAP, threads: threads({ t1: false }), now: () => NOW });
+    expect(sessionIds(events)).toHaveLength(1_500);
+  });
+
+  it("keeps a log while the bus has its lines queued or an append under way", async () => {
+    const events = writeEvents("t1", 6_000);
+    age(events, AGE_MS + DAY);
+    const text = readFileSync(events, "utf8");
+    const result = await sweepThreadLogs({ dataDir, mode: "on", cap: BIG_CAP, threads: threads({ t1: false }), logQuiet: () => false, now: () => NOW });
+    expect(result.trimmed).toBe(0);
+    expect(readFileSync(events, "utf8")).toBe(text);
   });
 
   it("keeps a log when a turn starts while its trim was copied", async () => {

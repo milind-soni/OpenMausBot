@@ -37,13 +37,12 @@ export const CUT_AFTER_MS = 7 * DAY_MS;
 export const MIN_TRIM_BYTES = 1024 * 1024;
 export const MIN_CAP_BYTES = 2 * GIB;
 export const CAP_SHARE = 0.03;
-const SESSION_LINES_MAX = 1_000;
-const SESSION_BYTES_MAX = 1024 * 1024;
 const CHUNK = 1024 * 1024;
 const MAX_CARRY = 16 * 1024 * 1024;
 const SESSION_MARK = Buffer.from('"session.started"');
 const LOG_NAME = /^([\w-]{1,128})\.ndjson$/;
-/** Soon after a start: a home that sleeps by stopping may be up only minutes. */
+/** Soon after a start (a home that sleeps by stopping may be up only minutes); the tool results' and the engine
+ * sessions' sweeps start at 5 and 7 minutes, so the three do not start at once. */
 export const FIRST_PASS_MS = 3 * 60_000;
 /** A pass that stopped for a turn, a move or a backup is tried again this soon. */
 export const RETRY_MS = 30 * 60_000;
@@ -179,10 +178,9 @@ async function tailStart(handle: FileHandle, size: number, floor: { lines: numbe
   return size <= floor.bytes ? 0 : best;
 }
 
-/** The session.started lines of [0, end), newest kept when there are more than the bound. */
+/** Every session.started line of [0, end): delete leftovers needs each one to find a deleted conversation's sessions. */
 async function sessionLines(handle: FileHandle, end: number): Promise<Buffer[]> {
   const kept: Buffer[] = [];
-  let keptBytes = 0;
   let carry = Buffer.alloc(0);
   const take = (line: Buffer) => {
     if (!line.includes(SESSION_MARK)) return;
@@ -193,8 +191,6 @@ async function sessionLines(handle: FileHandle, end: number): Promise<Buffer[]> 
       return;
     }
     kept.push(Buffer.concat([line, Buffer.from("\n")]));
-    keptBytes += line.length + 1;
-    while (kept.length > SESSION_LINES_MAX || keptBytes > SESSION_BYTES_MAX) keptBytes -= kept.shift()!.length;
   };
   for (let position = 0; position < end; position += CHUNK) {
     const chunk = await readAt(handle, position, Math.min(CHUNK, end - position));
@@ -299,6 +295,8 @@ export interface ThreadLogSweepDeps {
   /** Any turn running anywhere on this server: the pass waits up to `turnWaitMs` before each change, then stops. */
   turnsRunning?(): boolean;
   turnWaitMs?: number;
+  /** The event bus has nothing queued or being written for this conversation's log (bus.ts logQuiet). */
+  logQuiet?(threadId: string): boolean;
   now?(): number;
 }
 
@@ -347,7 +345,7 @@ export async function sweepThreadLogs(deps: ThreadLogSweepDeps): Promise<ThreadL
     // A log trimmed in this pass is listed again, so its cut sees what the trim left.
     const target = earlier && write ? await relisted(file) : file;
     if (!target) return true;
-    const freed = (await trimLog(target, floor, write, () => !deps.paused?.() && !deps.turnsRunning?.())) - (write ? 0 : earlier);
+    const freed = (await trimLog(target, floor, write, () => !deps.paused?.() && !deps.turnsRunning?.() && deps.logQuiet?.(file.threadId) !== false)) - (write ? 0 : earlier);
     if (freed > 0) {
       result.after -= freed;
       freedBy.set(file, earlier + freed);
@@ -402,6 +400,7 @@ export interface StartThreadLogSweepDeps {
   threads(): ReadonlyMap<string, ThreadState>;
   paused?(): boolean;
   turnsRunning?(): boolean;
+  logQuiet?(threadId: string): boolean;
   log?(line: string): void;
 }
 
@@ -411,9 +410,11 @@ export function startThreadLogSweep(deps: StartThreadLogSweepDeps): boolean {
   if (!deps.cloudHome || mode === "off") return false;
   const log = deps.log ?? ((line: string) => console.log(line));
   const pass = async (): Promise<boolean> => {
+    // A frozen or backing-up home: no read, no change, and no stamp, so the pass is tried again soon.
+    if (deps.paused?.()) return false;
     try {
       const cap = threadLogCap(deps.env, volumeBytes(deps.dataDir));
-      const result = await sweepThreadLogs({ dataDir: deps.dataDir, mode, cap, cut: threadLogCutEnabled(deps.env), threads: deps.threads, paused: deps.paused, turnsRunning: deps.turnsRunning });
+      const result = await sweepThreadLogs({ dataDir: deps.dataDir, mode, cap, cut: threadLogCutEnabled(deps.env), threads: deps.threads, paused: deps.paused, turnsRunning: deps.turnsRunning, logQuiet: deps.logQuiet });
       if (result.before !== result.after || result.before > cap || result.stopped) log(sweepLine(result));
       return !result.stopped;
     } catch (error) {
@@ -431,11 +432,6 @@ export function startThreadLogSweep(deps: StartThreadLogSweepDeps): boolean {
  * back) counts as none, and a home that slept past its time runs one pass on waking, never one per missed interval.
  */
 export function schedulePasses(stamp: string, every: number, pass: () => Promise<boolean>, now: () => number = Date.now): void {
-  let last: number | null = null;
-  try {
-    const at = (JSON.parse(readFileSync(stamp, "utf8")) as { at?: unknown }).at;
-    if (typeof at === "number" && Number.isFinite(at) && at <= now()) last = at;
-  } catch {}
   const run = async () => {
     const whole = await pass();
     if (whole) {
@@ -446,5 +442,16 @@ export function schedulePasses(stamp: string, every: number, pass: () => Promise
     }
     setTimeout(() => void run(), whole ? every : RETRY_MS).unref();
   };
-  setTimeout(() => void run(), last === null ? FIRST_PASS_MS : Math.max(FIRST_PASS_MS, last + every - now())).unref();
+  // The stamp is read in the first timer, never while the server is still starting.
+  const first = () => {
+    let last: number | null = null;
+    try {
+      const at = (JSON.parse(readFileSync(stamp, "utf8")) as { at?: unknown }).at;
+      if (typeof at === "number" && Number.isFinite(at) && at <= now()) last = at;
+    } catch {}
+    const wait = last === null ? 0 : last + every - now();
+    if (wait > 0) setTimeout(() => void run(), wait).unref();
+    else void run();
+  };
+  setTimeout(first, FIRST_PASS_MS).unref();
 }
