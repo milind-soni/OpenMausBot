@@ -42,6 +42,20 @@ async function context(botId: string): Promise<DataContext> {
   };
 }
 
+async function writeOrigin(ctx: DataContext, origin: string, value: number): Promise<void> {
+  if (origin === "csv") {
+    writeFileSync(join(folder, "first.csv"), `origin,value\ncsv,${value}\n`);
+    return;
+  }
+  if (origin === "json") {
+    writeFileSync(join(folder, "second.json"), JSON.stringify([{ origin: "json", value }]));
+    return;
+  }
+  const file = join(folder, "third.parquet");
+  await rm(file, { force: true });
+  await ctx.database.run(`COPY (SELECT 'parquet' AS origin, ${value} AS value) TO '${file.replaceAll("'", "''")}' (FORMAT PARQUET)`, { connection });
+}
+
 async function expectAllSources(ctx: DataContext, tables: Array<{ name: string }>) {
   expect(new Set(tables.map((table) => table.name)).size).toBe(3);
   const rows = [];
@@ -66,14 +80,20 @@ describe("distinct table names within one import", () => {
     const suffix = (n: number) => `${stem.slice(0, 62 - String(n).length)}_${n}`;
     expect(result.tables.map((table) => table.name)).toEqual([stem, suffix(2), suffix(3)]);
 
-    const reloaded = await loadData(ctx, { source: folder, name: "t".repeat(length), replace: true });
-    expect(reloaded.tables.map((table) => table.name)).toEqual([stem, suffix(4), suffix(5)]);
-    await expectAllSources(ctx, reloaded.tables);
-    const names = (await ctx.database.listTables()).map((table) => table.name);
-    expect(names).toEqual(expect.arrayContaining([stem, suffix(2), suffix(3), suffix(4), suffix(5)]));
-    expect(names).toHaveLength(5);
-    for (const name of [suffix(2), suffix(3)]) {
-      expect((await ctx.database.run(`SELECT count(*) FROM ${quoteIdentifier(name)}`, { connection })).rows).toEqual([["1"]]);
+    const placed = suffix(2);
+    const before = await ctx.database.run(`SELECT origin, value FROM ${quoteIdentifier(placed)}`, { connection });
+    const origin = String(before.rows[0]?.[0]);
+    expect(["csv", "json", "parquet"]).toContain(origin);
+    const updated = 9;
+    await writeOrigin(ctx, origin, updated);
+    try {
+      const reloaded = await loadData(ctx, { source: folder, name: "t".repeat(length), replace: true });
+      expect(reloaded.tables.map((table) => table.name)).toEqual([stem, suffix(2), suffix(3)]);
+      expect(await ctx.database.listTables()).toHaveLength(3);
+      const fresh = await ctx.database.run(`SELECT origin, value FROM ${quoteIdentifier(placed)}`, { connection });
+      expect(fresh.rows.map(([name, value]) => [name, Number(value)])).toEqual([[origin, updated]]);
+    } finally {
+      await writeOrigin(ctx, origin, origin === "csv" ? 1 : origin === "json" ? 2 : 3);
     }
   });
 
