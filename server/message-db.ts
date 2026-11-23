@@ -8,6 +8,7 @@ import { peerProvenanceAuthor, type WorkOrigin } from "./peer-provenance.ts";
 import type { ResolvedSender, SteerQueueReason } from "../shared/wire.ts";
 import type { Message } from "./store.ts";
 import type { UsageTrigger } from "./usage-ledger.ts";
+import { BOT_TEXT_MESSAGE_INDEXES_SQL } from "./message-db-bot-text-indexes.ts";
 import { ensureMemoryIndex } from "./message-db-memory-index.ts";
 import { cjkSearchText, cjkTokenParts, ensureSearchIndex, ftsPhrase, hasCjk, withoutSearchMarks } from "./cjk-search.ts";
 import { attentionSelect } from "./message-db-attention.ts";
@@ -62,7 +63,7 @@ function open(): DatabaseSync {
     -- The primary key has no time column, so newest-per-thread reads need this index.
     CREATE INDEX IF NOT EXISTS messages_thread_at ON messages(thread_id, at);
     -- Partial, so no other query's plan can move onto them: only a statement that repeats the WHERE may use one.
-    CREATE INDEX IF NOT EXISTS messages_thread_bot_text ON messages(thread_id, at) WHERE kind = 'text' AND role = 'bot' AND text IS NOT NULL;
+    ${BOT_TEXT_MESSAGE_INDEXES_SQL}
     CREATE INDEX IF NOT EXISTS messages_thread_order ON messages(thread_id, ${ORDERING_AT}) WHERE ${ORDERING_ROW};
     CREATE INDEX IF NOT EXISTS messages_work_at ON messages(kind, at) WHERE ${WORK_KINDS};
     CREATE INDEX IF NOT EXISTS messages_cards_at ON messages(kind, at) WHERE ${CARD_KINDS};

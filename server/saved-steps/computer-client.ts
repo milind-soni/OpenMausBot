@@ -1,5 +1,5 @@
-import { computerPersonAwayText } from "../computer-wait.ts";
-import { CONTROL_BUSY, CONTROL_HANDED_BACK, CONTROL_REFUSAL_PLAIN, CONTROL_TURN_ENDED, CONTROL_UNCONFIRMED, CONTROL_WAITED } from "../control-client.ts";
+import { computerPersonAwayText, isComputerParkedRefusal } from "../computer-wait.ts";
+import { CONTROL_BUSY, CONTROL_BUSY_OPENING, CONTROL_CALL_LATE, CONTROL_HANDED_BACK, CONTROL_NOT_READY_OPENING, CONTROL_REFUSAL_PLAIN, CONTROL_TURN_ENDED, CONTROL_UNCONFIRMED, CONTROL_WAITED, CONTROL_WAITED_HELD } from "../control-client.ts";
 import { ChatMcpClient } from "../drivers/chat-mcp-tools.ts";
 import type { CallOutcome, ComputerCaller } from "./resolve.ts";
 
@@ -11,9 +11,10 @@ export type LocalComputerSpec = { command: string; args: string[]; env: Record<s
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
-const GATE_REFUSALS: ReadonlySet<string> = new Set([CONTROL_REFUSAL_PLAIN, CONTROL_HANDED_BACK, CONTROL_WAITED, CONTROL_BUSY, CONTROL_UNCONFIRMED, CONTROL_TURN_ENDED]);
+const GATE_REFUSALS: ReadonlySet<string> = new Set([CONTROL_REFUSAL_PLAIN, CONTROL_HANDED_BACK, CONTROL_WAITED, CONTROL_WAITED_HELD, CONTROL_CALL_LATE, CONTROL_BUSY, CONTROL_UNCONFIRMED, CONTROL_TURN_ENDED]);
 const PERSON_AWAY = computerPersonAwayText(60_000).replace(/ for over [\s\S]*$/u, " for over ");
-const gateRefusal = (text: string) => GATE_REFUSALS.has(text) || text.startsWith(PERSON_AWAY);
+const GATE_OPENINGS = [PERSON_AWAY, CONTROL_BUSY_OPENING, CONTROL_NOT_READY_OPENING];
+const gateRefusal = (text: string) => GATE_REFUSALS.has(text) || GATE_OPENINGS.some((opening) => text.startsWith(opening)) || isComputerParkedRefusal(text);
 
 function errorOutcome(content: unknown[]): CallOutcome {
   const text = content.flatMap((item) => (isRecord(item) && item.type === "text" && typeof item.text === "string" ? [item.text] : [])).join(" ").trim();
