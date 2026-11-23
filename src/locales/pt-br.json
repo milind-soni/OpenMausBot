@@ -7939,7 +7939,7 @@
   "botPanel.library.pages": "Páginas",
   "botPanel.library.apps": "Apps",
   "botPanel.library.files": "Arquivos",
-  "botPanel.library.scope": "Desta conversa",
+  "botPanel.library.showAll": "Mostrar tudo",
   "botPanel.thisConversation": "Nesta conversa",
   "botPanel.advanced.title": "Mais no modo avançado",
   "botPanel.advanced.hint": "Enviar em seu nome e o acesso a apps ficam lá.",
@@ -11512,5 +11512,10 @@
   "chat.handoffExchange.back": "Voltar",
   "chat.handoffExchange.loading": "Carregando a conversa…",
   "chat.handoffExchange.failed": "Não foi possível carregar a conversa.",
-  "chat.handoffExchange.empty": "Nenhuma mensagem ainda."
+  "chat.handoffExchange.empty": "Nenhuma mensagem ainda.",
+  "sidebar.threads.hidden": "Conversa oculta",
+  "sidebar.threads.hide": "Ocultar {title}",
+  "sidebar.threads.hideShort": "Ocultar",
+  "sidebar.threads.running": "+{count} em andamento",
+  "sidebar.threads.more": "mais {count}"
 }

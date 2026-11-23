@@ -227,9 +227,10 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       if (!mod) return;
       const bots = shortcutBots(state.bots.filter((b) => !b.hidden), shownBotIds(document.querySelector("[data-sidebar-root]")));
       const step = e.shiftKey ? botCycleStep(e) : null;
-      if (e.key.toLowerCase() === "n" && !e.altKey) {
+      const newThreadKey = e.key.toLowerCase() === "t" && !e.shiftKey && !e.altKey;
+      if ((e.key.toLowerCase() === "n" || newThreadKey) && !e.altKey) {
         e.preventDefault();
-        if (e.shiftKey) {
+        if (e.shiftKey || newThreadKey) {
           const selected = state.bots.find((bot) => bot.id === state.selectedId && !bot.hidden);
           if (!e.repeat && selected && selected.yourAccess !== "view") dispatch({ type: "newTask", botId: selected.id });
         } else {
@@ -394,7 +395,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           the window's rail: its top corners and its bottom-left corner are round, and it runs to the window's right and
           bottom edges. */}
       <div data-window-card={framed ? "" : undefined}
-        className={framed ? "relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-t-xl rounded-bl-xl bg-app" : "contents"}>
+        data-look={framed ? "window" : undefined} className={framed ? "relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-t-[12px] rounded-bl-[12px] bg-app" : "contents"}>
       {framed && strips}
       <div className={framed ? "relative flex min-h-0 flex-1 overflow-x-clip" : "contents"}>
       {!calendarFocus && <Sidebar

@@ -89,7 +89,7 @@ import { ScreenFrame } from "./ScreenFrame";
 import { CompactionChip, DigestChip } from "./DigestChip";
 import { RenameTitle } from "./RenameTitle"; import { ChatHeadRole, chiefOfStaffBadge } from "./BotRole";
 import { BotActivityPicker } from "./TaskPicker"; import { ChatHeadPill } from "./ChatHeadPill"; import { HeaderShare } from "./bot-access/HeaderShare"; import { ThreadPresenceFaces } from "./TeamPresence"; import { useStoreRef } from "@/state/store-ref"; import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { sameDrawnBots } from "@/lib/drawn-bots"; import { ChatActivityControls, chatActivityMessages, useChatActivity } from "./ChatActivity";
-import { ELEVATED_FLOAT, ELEVATED_HOVER } from "./elevated";
+import { ELEVATED_FLOAT, ELEVATED_HOVER } from "./elevated"; import { NewThreadHeaderButton } from "./NewThreadHeaderButton";
 import { ModelPicker } from "./ModelPicker"; import { useFailedTurnFix } from "./FailedTurnFix";
 import { ChatHeaderMenu, ChatMoreMenu } from "./ChatMoreMenu"; import { TeamOwnHelperHeader, TeamPrivateFirstLine, TeamPrivateHeader, TeamSharedHeader } from "./TeamPrivateChatsLine"; import { ownChatStarted } from "@/state/team-chats"; import { isNewChatThread } from "@/state/new-chat";
 import { useChatFindRequests, useChatFindShortcut } from "@/lib/chat-find";
@@ -112,7 +112,7 @@ import { ReplyBlocks } from "./ReplyBlocks";
 import { webhookMessageView } from "@/lib/webhook-message";
 import { splitTranscriptAttachments } from "@/lib/composer-attachments";
 import { useComposerDockPad } from "@/lib/composer-dock";
-import { GlassBar, GlassScrollFrame } from "./GlassScrollFrame";
+import { ChatBackdrop, GlassBar, GlassScrollFrame } from "./GlassScrollFrame";
 import { PagePaneContext } from "./app/PageTools";
 import { useTranscriptViewport } from "@/hooks/use-transcript-viewport"; import { staysInView } from "../../shared/person-wait";
 import { useUnreadDivider } from "@/hooks/use-unread-divider";
@@ -930,10 +930,10 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
   return (
     <ThreadLinkContext value={threadLink}>
     <main data-look="chat" className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
-      <CallOverlay bot={bot} />
+      <ChatBackdrop /><CallOverlay bot={bot} />
       <GlassScrollFrame className="flex-1 [--glass-tint:var(--color-app)]">
       {/* z-[25]: above the room set-up card (z-20), below the CallOverlay (z-30). */}
-      <GlassBar edge="top" fade={!remoteClient} className="z-[25]">
+      <GlassBar edge="top" fade={!remoteClient} data-chathead-float={simpleHead ? "" : undefined} className="z-[25]">
       <div
         {...headerDragProps} data-look="chat-header"
         className={cn(
@@ -1057,7 +1057,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
           >
             <Monitor size={16} />{busy && place === "browser" && <span aria-hidden="true" className="absolute right-1 top-1 size-1.5 animate-pulse rounded-full bg-success" data-testid="computer-button-live" />}
           </button>}
-          <HeaderShare bot={bot} />{phoneMenu ? <ChatMoreMenu bot={bot} phoneHeader /> : (advanced || remoteClient) && <ChatHeaderMenu key={`menu:${bot.threadId}`} bot={bot} />}
+          <HeaderShare bot={bot} />{!inForkPanel && <NewThreadHeaderButton botId={bot.id} />}{phoneMenu ? <ChatMoreMenu bot={bot} phoneHeader /> : (advanced || remoteClient) && <ChatHeaderMenu key={`menu:${bot.threadId}`} bot={bot} />}
         </div>
         </div>
       </div>
@@ -1079,7 +1079,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
 
       <div
         ref={scrollRef}
-        className="glass-scroller h-full overflow-x-hidden overflow-y-auto overscroll-y-contain px-4 [overflow-anchor:none]"
+        className="glass-scroller h-full overflow-x-hidden overflow-y-auto overscroll-y-contain px-4 [overflow-anchor:none]" data-top-fade={simpleHead ? "" : undefined}
         // Simple mode's composer sits on plain canvas, so a row scrolled into view stops clear of it.
         style={advanced ? undefined : { scrollPaddingBottom: composerDock.pad }}
         {...scrollHandlers}
