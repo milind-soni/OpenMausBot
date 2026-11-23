@@ -78,7 +78,7 @@ export function noteTurnEvent(event: RuntimeEvent): void {
   const current = threads.get(threadId);
   const sameTurn = current && (!event.turnId || event.turnId === current.turnId);
   const turnId = event.turnId ?? current?.turnId;
-  const live: TurnLive = sameTurn && current ? current : { turnId, ended: false, status: null, toolSteps: 0 };
+  const live: TurnLive = sameTurn && current ? current : { turnId, ended: false, status: null, toolSteps: toolTurnSeen.get(toolSeenKey(threadId, turnId))?.size ?? 0 };
   switch (event.type) {
     case "turn.started":
       clearToolSeen(threadId);

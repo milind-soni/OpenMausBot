@@ -100,6 +100,18 @@ describe("a thread's live turn", () => {
     expect(turnLive("t").toolSteps).toBe(1);
   });
 
+  it("counts a late frame of an earlier turn from the steps that turn already had", () => {
+    note({ type: "item.started", itemType: "tool", itemId: "a", title: "Read" } as Partial<RuntimeEvent>);
+    note({ type: "item.started", itemType: "tool", itemId: "b", title: "Bash" } as Partial<RuntimeEvent>);
+    expect(turnLive("t").toolSteps).toBe(2);
+    note({ type: "item.started", itemType: "tool", itemId: "c", title: "Write", turnId: "turn-2" } as Partial<RuntimeEvent>);
+    expect(turnLive("t")).toMatchObject({ turnId: "turn-2", toolSteps: 1 });
+    note({ type: "item.started", itemType: "tool", itemId: "a", title: "Read", turnId: "turn-1" } as Partial<RuntimeEvent>);
+    expect(turnLive("t"), "a call already counted for turn-1 is not counted again, and turn-1 keeps its two").toMatchObject({ turnId: "turn-1", toolSteps: 2 });
+    note({ type: "item.started", itemType: "tool", itemId: "d", title: "Edit", turnId: "turn-1" } as Partial<RuntimeEvent>);
+    expect(turnLive("t").toolSteps, "a new call of turn-1 is its third").toBe(3);
+  });
+
   it("carries what a call works on, how it is doing and its last output, and changes only when one of them does", () => {
     note({ type: "item.started", itemType: "tool", itemId: "c", title: "Bash" } as Partial<RuntimeEvent>);
     note({ type: "turn.progress", activity: "command", itemId: "c", target: "scrape.py", detail: "python3 scrape.py" } as Partial<RuntimeEvent>);
