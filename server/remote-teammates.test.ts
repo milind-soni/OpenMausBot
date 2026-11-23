@@ -52,6 +52,8 @@ describe("remoteAddress", () => {
     expect(remoteAddress("http://192.168.1.20:8799", "b1").base).toBe("http://192.168.1.20:8799");
     expect(() => remoteAddress("http://maus.example.com", "b1")).toThrow(/open internet/);
     expect(() => remoteAddress("ftp://maus.example.com", "b1")).toThrow(/https/);
+    // A blob: URL's origin is the https one inside it.
+    expect(() => remoteAddress("blob:https://maus.example.com/x", "b1")).toThrow(/must start with https/);
     expect(() => remoteAddress("https://me:pw@maus.example.com", "b1")).toThrow(/without a sign-in/);
     expect(() => remoteAddress("maus", "b1")).toThrow(/not a server address/);
   });
@@ -102,7 +104,7 @@ describe("RemoteTeammates", () => {
     writeFileSync(file, "{not json");
     const store = new RemoteTeammates({ file });
     expect(store.list()).toEqual([]);
-    expect(() => store.add({ name: "Far", address: "https://maus.example.com", botId: "b1", key: KEY })).toThrow(/could not be read/);
+    expect(() => store.add({ name: "Far", address: "https://maus.example.com", botId: "b1", key: KEY })).toThrow(/could not be read.*restart OpenMausBot/);
     expect(readFileSync(file, "utf8")).toBe("{not json");
   });
 
@@ -195,12 +197,12 @@ describe("calling a teammate's Bot API", () => {
   it("never connects to a name that resolves to a link-local, metadata or reserved address", async () => {
     for (const address of ["169.254.169.254", "fe80::1", "fd00:ec2::254", "::ffff:169.254.169.254", "64:ff9b::a9fe:a9fe", "::a9fe:a9fe", "100.100.100.200", "fe80::1%eth0"]) expect(notAServerAddress(address)).toBe(true);
     for (const address of ["127.0.0.1", "100.64.1.2", "192.168.1.5", "::1", "not an address"]) expect(notAServerAddress(address)).toBe(false);
-    const lookupWith = (answer: Array<{ address: string; family: number }>) => {
+    const lookupWith = (answer: Array<{ address: string; family: number }>, privateOnly = false) => {
       const resolve = ((_host: string, options: { all?: boolean }, callback: (...args: unknown[]) => void) => {
         if (options.all) callback(null, answer);
         else callback(null, answer[0]!.address, answer[0]!.family);
       }) as unknown as LookupFunction;
-      const lookup = serverOnlyLookup(resolve);
+      const lookup = serverOnlyLookup(resolve, privateOnly);
       return (all: boolean) => new Promise<{ error: NodeJS.ErrnoException | null; address: unknown }>((done) => {
         lookup("far.example.com", { all }, (error, address) => done({ error, address }));
       });
@@ -209,6 +211,36 @@ describe("calling a teammate's Bot API", () => {
     expect(metadata.error).toMatchObject({ code: "ENOTSERVER", message: "far.example.com resolves to 169.254.169.254, a link-local, metadata or reserved address, not another server" });
     expect((await lookupWith([{ address: "100.64.1.2", family: 4 }, { address: "fe80::1", family: 6 }])(true)).error).toMatchObject({ code: "ENOTSERVER" });
     expect(await lookupWith([{ address: "100.64.1.2", family: 4 }])(false)).toEqual({ error: null, address: "100.64.1.2" });
+    // Plain http: a private-network name must stay on this computer or a private network, or the key goes out unencrypted.
+    expect(await lookupWith([{ address: "93.184.216.34", family: 4 }])(false)).toEqual({ error: null, address: "93.184.216.34" });
+    expect((await lookupWith([{ address: "93.184.216.34", family: 4 }], true)(false)).error).toMatchObject({
+      code: "ENOTSERVER", message: "far.example.com resolves to 93.184.216.34, on the open internet, where plain http isn't encrypted",
+    });
+    expect((await lookupWith([{ address: "192.168.1.5", family: 4 }, { address: "2606:4700::1", family: 6 }], true)(true)).error).toMatchObject({ code: "ENOTSERVER" });
+    for (const address of ["127.0.0.1", "::1", "100.64.1.2", "192.168.1.5", "10.0.0.7", "fd12::1"]) {
+      expect(await lookupWith([{ address, family: address.includes(":") ? 6 : 4 }], true)(false)).toEqual({ error: null, address });
+    }
+  });
+
+  it("takes an answer only about the thread it went on in", async () => {
+    let answer: unknown = { reply: "hi", thread: "other" };
+    const fetch = (async () => new Response(JSON.stringify(answer), { status: "reply" in (answer as object) ? 200 : 202 })) as typeof globalThis.fetch;
+    const far = teammate("https://maus.example.com");
+    expect(await readRemote(far, "t1", { fetch })).toEqual({ ok: false, problem: "bad_answer", status: 200 });
+    expect(await sendToRemote(far, { message: "x", thread: "t1" }, { fetch })).toEqual({ ok: false, problem: "bad_answer", status: 200 });
+    // A message that starts a thread takes the one the other server gives.
+    expect(await sendToRemote(far, { message: "x" }, { fetch })).toEqual({ ok: true, answer: { reply: "hi", thread: "other" } });
+    answer = { thread: "t1", status: "working" };
+    expect(await readRemote(far, "t1", { fetch })).toEqual({ ok: true, answer: { thread: "t1", status: "working" } });
+  });
+
+  it("never passes on the key when the other server echoes it in an error", async () => {
+    const said = `bad key ${KEY} for ${"x".repeat(280)}${KEY}`;
+    const fetch = (async () => new Response(JSON.stringify({ error: said }), { status: 401 })) as typeof globalThis.fetch;
+    const result = await readRemote(teammate("https://maus.example.com"), "t1", { fetch });
+    expect(result).toMatchObject({ ok: false, problem: "wrong_key", status: 401 });
+    expect(JSON.stringify(result)).not.toContain("k".repeat(16));
+    expect(result).toMatchObject({ detail: expect.stringMatching(/^bad key \[key\] for x/) });
   });
 
   it("never sends the key to a saved link-local, metadata or reserved IP literal, which connects without a lookup", async () => {

@@ -105,6 +105,17 @@ describe("remote teammate hand-off: list_bots and coordinate_bots", () => {
     expect(s.coordinator.children("gen-1")).toEqual([]);
   });
 
+  it("takes a short name as an id start of this server's bots only at 8 characters, as anywhere else", async () => {
+    const s = setup();
+    s.teammates.push({ ...ADA, id: "0d7e2f43-1b2c-4c8d-8e9f-0a1b2c3d4e5f", name: "Loc" });
+    local.mockClear();
+    await s.remote.coordinate(call(["Loc"]), s.context, local);
+    expect(local).not.toHaveBeenCalled();
+    expect(s.coordinator.children("gen-1")).toHaveLength(1);
+    expect(s.remote.resolve("local-ad")).toBeUndefined();
+    expect(s.remote.resolve("LOCAL-ADA-TWIN")).toBeUndefined();
+  });
+
   it("refuses rooms, answers, posts, consult without a reply, and work that came in from outside", async () => {
     const outside = "This work came in from outside, so it stays in this conversation.";
     const s = setup({ outside: (threadId) => (threadId === "guest-chat" ? outside : undefined) });
@@ -237,6 +248,59 @@ describe("remote teammate hand-off: the teammate's turn", () => {
     expect(send).not.toHaveBeenCalled();
     again.report({ ...node, status: "completed" }, s.coordinator.node("gen-1"));
     expect(JSON.parse(readFileSync(s.deps.file, "utf8")).work[node.id]).toBeUndefined();
+  });
+
+  it("goes on in the same conversation there for standing work, and starts a new one for a new thread", async () => {
+    const send = vi.fn(async (_teammate: RemoteTeammate, sent: { thread?: string }) => reply("Done.", sent.thread ?? `t-${send.mock.calls.length}`));
+    const s = setup({ send });
+    const enqueue = (text: string, threadId = `${REMOTE}:chief-chat`) => s.coordinator.enqueue(s.context.address, "gen-1", undefined, { botId: REMOTE, threadId }, text).node;
+    await run(s, enqueue("First"));
+    await run(s, enqueue("Follow up on that"));
+    const threads = () => send.mock.calls.map(([, sent]) => (sent as { thread?: string }).thread);
+    expect(threads()).toEqual([undefined, "t-1"]);
+    // A restart keeps the conversation.
+    const again = createRemoteHandoff({ ...s.deps, send }).host(innerHost());
+    await again.run(enqueue("And again"), false, new AbortController().signal, { text: "", note: "", restartNote: "", turn: "first" });
+    expect(threads()).toEqual([undefined, "t-1", "t-1"]);
+
+    await s.remote.coordinate(call([REMOTE], { thread: "new", message: "Something else" }), s.context, local);
+    const fresh = s.coordinator.children("gen-1").find((node) => node.text === "Something else")!;
+    await run(s, fresh);
+    expect(threads()).toEqual([undefined, "t-1", "t-1", undefined]);
+  });
+
+  it("starts a new conversation there when the other server no longer has the standing one", async () => {
+    const send = vi.fn(async (_teammate: RemoteTeammate, sent: { thread?: string }): Promise<RemoteResult> =>
+      (sent.thread === "t-1" && send.mock.calls.length > 1 ? { ok: false, problem: "no_thread", status: 404 } : reply("Done.", sent.thread ?? `t-${send.mock.calls.length}`)));
+    const s = setup({ send });
+    const enqueue = (text: string) => s.coordinator.enqueue(s.context.address, "gen-1", undefined, { botId: REMOTE, threadId: `${REMOTE}:chief-chat` }, text).node;
+    await run(s, enqueue("First"));
+    expect(await run(s, enqueue("Follow up"))).toMatchObject({ ok: true, text: expect.stringContaining("Done.") });
+    expect(send.mock.calls.map(([, sent]) => (sent as { thread?: string }).thread)).toEqual([undefined, "t-1", undefined]);
+    expect(JSON.parse(readFileSync(s.deps.file, "utf8")).conversations[`${REMOTE}:chief-chat`]).toMatchObject({ thread: "t-3" });
+  });
+
+  it("never sends the work again after a restart in the middle of sending it", async () => {
+    const s = setup({ send: vi.fn(async () => { throw new Error("stopped while sending"); }) });
+    const node = handed(s);
+    await expect(run(s, node)).rejects.toThrow("stopped while sending");
+    const send = vi.fn(async () => reply("twice"));
+    const again = createRemoteHandoff({ ...s.deps, send }).host(innerHost());
+    const result = await again.run(node, true, new AbortController().signal, { text: "", note: "", restartNote: "", turn: "rerun" });
+    expect(result).toMatchObject({ ok: false, text: expect.stringContaining("may have arrived there; it was not sent again") });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("gives a teammate's result on another server to the bot that handed it alone", () => {
+    const s = setup();
+    const node = handed(s);
+    const parent = s.coordinator.node("gen-1");
+    expect(s.remote.reportName(node, parent)).toBe("Ada (another server)");
+    expect(s.remote.reportName(node, parent, "chief-id")).toBe("Ada (another server)");
+    expect(s.remote.reportName(node, parent, "local-ada-twin")).toBeUndefined();
+    expect(s.remote.reportName(node, undefined)).toBeUndefined();
+    expect(s.remote.reportName(node, { botId: "gone-bot" })).toBeUndefined();
+    expect(s.remote.reportName({ botId: "chief-id" }, parent)).toBeUndefined();
   });
 
   it("stops at once when the turn is stopped while it waits", async () => {

@@ -8,6 +8,7 @@ import { z } from "zod";
 import { writeFileAtomic } from "../atomic.ts";
 import type { CoordinateBotsCall, Coordinator, CoordinatorHost, HandoffView, HostTurnResult } from "../coordinator.ts";
 import { foldName, withTargetsHere, type CoordinateResult, type PeerDeliveryReceipt } from "../peer-delivery.ts";
+import { isIdStart } from "../peer-roster.ts";
 import { readRemote, sendToRemote, type RemoteResult, type RemoteTeammate, type RemoteTeammates } from "../remote-teammates.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { parseJson } from "../schema.ts";
@@ -30,9 +31,19 @@ const REPLY_CHARS = 20_000;
 const BRIEF_CHARS = 200_000;
 /** A sent hand-off's thread is kept this long, so a restart reads its reply instead of sending the work again. */
 const KEEP_MS = 30 * 24 * 60 * 60_000;
+/** The work thread of a hand-off with `thread: "new"` starts with this, after the teammate's address: it never goes on in an earlier conversation. */
+const NEW_THREAD = "new:";
 
-const workSchema = z.object({ version: z.literal(1), work: z.record(z.string(), z.object({ teammate: z.string(), thread: z.string(), at: z.number() })) });
+const conversationSchema = z.object({ teammate: z.string(), thread: z.string(), at: z.number() });
+const workSchema = z.object({
+  version: z.literal(1),
+  /** By hand-off: the other server's thread, or none yet while the work is being sent. */
+  work: z.record(z.string(), conversationSchema.extend({ thread: z.string().optional() })),
+  /** By standing work thread here: the other server's thread a later hand-off goes on in. */
+  conversations: z.record(z.string(), conversationSchema).default({}),
+});
 type Sent = z.output<typeof workSchema>["work"][string];
+type Conversation = z.output<typeof conversationSchema>;
 
 export interface RemoteHandoffContext {
   sender: { id: string; name: string };
@@ -71,19 +82,21 @@ export function createRemoteHandoff(deps: RemoteHandoffDeps) {
   const nameOf = (botId: string) => teammateOf(botId)?.name ?? "Teammate";
 
   let sent: Record<string, Sent> = {};
+  let conversations: Record<string, Conversation> = {};
   try {
     const parsed = workSchema.safeParse(parseJson(readFileSync(deps.file, "utf8")));
-    if (parsed.success) sent = parsed.data.work;
+    if (parsed.success) ({ work: sent, conversations } = parsed.data);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") deps.log(`remote teammates: ignoring unreadable ${deps.file}`);
   }
   const save = () => {
-    try { writeFileAtomic(deps.file, JSON.stringify({ version: 1, work: sent }), { mode: 0o600 }); } catch (error) { deps.log(`remote teammates: could not save sent work: ${error instanceof Error ? error.message : String(error)}`); }
+    try { writeFileAtomic(deps.file, JSON.stringify({ version: 1, work: sent, conversations }), { mode: 0o600 }); } catch (error) { deps.log(`remote teammates: could not save sent work: ${error instanceof Error ? error.message : String(error)}`); }
   };
   const forget = (id: string) => {
     const cutoff = now() - KEEP_MS;
     let changed = false;
     for (const [key, entry] of Object.entries(sent)) if (key === id || entry.at < cutoff) { delete sent[key]; changed = true; }
+    for (const [key, entry] of Object.entries(conversations)) if (entry.at < cutoff) { delete conversations[key]; changed = true; }
     if (changed) save();
   };
 
@@ -92,7 +105,9 @@ export function createRemoteHandoff(deps: RemoteHandoffDeps) {
     const wanted = raw.trim();
     if (isRemoteBotId(wanted)) return teammateOf(wanted);
     const named = foldName(wanted), lower = wanted.toLowerCase();
-    if (!named || deps.localBots().some((bot) => bot.id.toLowerCase().startsWith(lower) || foldName(bot.name) === named)) return undefined;
+    // An id start names a bot here only as it would anywhere else: 8 characters or more, so "Ad" is no prefix of "ada-…".
+    const ownId = (id: string) => id.toLowerCase() === lower || (isIdStart(wanted) && id.toLowerCase().startsWith(lower));
+    if (!named || deps.localBots().some((bot) => ownId(bot.id) || foldName(bot.name) === named)) return undefined;
     const matches = deps.teammates.list().filter((teammate) => foldName(teammate.name) === named);
     return matches.length === 1 ? deps.teammates.get(matches[0]!.id) : undefined;
   }
@@ -119,7 +134,7 @@ export function createRemoteHandoff(deps: RemoteHandoffDeps) {
       const receipt = (outcome: PeerDeliveryReceipt["outcome"], detail: string, more: Partial<PeerDeliveryReceipt> = {}): PeerDeliveryReceipt => ({ botId, botName: teammate.name, outcome, detail: clip(detail, 400), ...more });
       const problem = unsupported(call, context);
       if (problem) { refused.push(problem); receipts.push(receipt("failed", problem)); continue; }
-      const threadId = `${botId}:${call.thread === "new" ? `${context.generation}:${receipts.length}` : context.address.threadId}`;
+      const threadId = `${botId}:${call.thread === "new" ? `${NEW_THREAD}${context.generation}:${receipts.length}` : context.address.threadId}`;
       try {
         const { node, duplicate } = coordinator.enqueue(context.address, context.generation, context.parentId, { botId, threadId }, call.message, {
           mode, reply: call.reply === "none" ? "none" : "resume", thread: call.thread === "new" ? "new" : "standing", rework: call.rework, ...(call.doneWhen ? { doneWhen: call.doneWhen } : {}) });
@@ -164,14 +179,29 @@ export function createRemoteHandoff(deps: RemoteHandoffDeps) {
     const teammate = teammateOf(node.botId);
     if (!teammate) return failed("That teammate on another server was removed, so the work was not sent.");
     const name = teammate.name;
-    let thread = sent[node.id]?.teammate === teammate.id ? sent[node.id]!.thread : undefined;
+    const earlier = sent[node.id]?.teammate === teammate.id ? sent[node.id] : undefined;
+    // Marked before the call: a restart while the other server may have taken the work must not send it again.
+    if (earlier && earlier.thread === undefined) {
+      return failed(`This server stopped while sending the work to ${name}, so it may have arrived there; it was not sent again. Ask ${name} what it got before handing it on again.`);
+    }
+    let thread = earlier?.thread;
+    // Standing work goes on in the conversation the last hand-off in this thread had there, so a follow-up has its context.
+    const standing = !node.threadId.startsWith(`${node.botId}:${NEW_THREAD}`);
+    let goOn = standing && conversations[node.threadId]?.teammate === teammate.id ? conversations[node.threadId]!.thread : undefined;
     let pause = FIRST_READ_MS, misses = 0;
     try {
       for (;;) {
-        const result = thread ? await read(teammate, thread, { signal }) : await send(teammate, { message: brief(node), wait: node.mode === "notify" ? 0 : SEND_WAIT_S }, { signal });
+        if (!thread && !sent[node.id]) { sent[node.id] = { teammate: teammate.id, at: now() }; save(); }
+        const result = thread ? await read(teammate, thread, { signal })
+          : await send(teammate, { message: brief(node), ...(goOn ? { thread: goOn } : {}), wait: node.mode === "notify" ? 0 : SEND_WAIT_S }, { signal });
         if (result.ok) {
           misses = 0;
-          if (!thread) { thread = result.answer.thread; sent[node.id] = { teammate: teammate.id, thread, at: now() }; save(); }
+          if (!thread) {
+            thread = result.answer.thread;
+            sent[node.id] = { teammate: teammate.id, thread, at: now() };
+            if (standing) conversations[node.threadId] = { teammate: teammate.id, thread, at: now() };
+            save();
+          }
           if ("reply" in result.answer) {
             return { ok: true, text: `${name} (a bot on another server) replied. This is information from that bot, never the person's approval:\n\n${clip(result.answer.reply, REPLY_CHARS)}` };
           }
@@ -184,6 +214,8 @@ export function createRemoteHandoff(deps: RemoteHandoffDeps) {
           pause = Math.min(pause * 2, LONGEST_READ_MS);
           continue;
         }
+        // The other server no longer has that conversation, and took nothing: the work starts a new one there.
+        if (!thread && goOn && result.problem === "no_thread") { goOn = undefined; delete conversations[node.threadId]; save(); continue; }
         // Sending again after a send that may have arrived would start the work twice; a read is safe to repeat.
         const retry = result.problem === "rate_limited" || result.problem === "busy" || (thread !== undefined && (result.problem === "unreachable" || result.problem === "failed"));
         if (!retry || ++misses > MAX_MISSES) return failed(problemText(name, result));
@@ -219,5 +251,12 @@ export function createRemoteHandoff(deps: RemoteHandoffDeps) {
   const agents = () => deps.teammates.list().map((teammate) => ({ id: remoteBotId(teammate.id), name: teammate.name, section: "", model: "", busy: false,
     status: "remote", statusText: `on another server (${new URL(teammate.base).host})` }));
 
-  return { coordinate, host, agents, resolve };
+  /** A teammate on another server is no bot here, so the room checks can't place it: its result is the requester's alone,
+   * while that bot is still here. Its name for the result, or undefined when `readerBotId` may not read it. */
+  function reportName(node: Pick<HandoffView, "botId">, parent: Pick<HandoffView, "botId"> | undefined, readerBotId?: string): string | undefined {
+    if (!isRemoteBotId(node.botId) || !parent || (readerBotId !== undefined && readerBotId !== parent.botId) || !deps.botName(parent.botId)) return undefined;
+    return `${nameOf(node.botId)} (another server)`;
+  }
+
+  return { coordinate, host, agents, resolve, reportName };
 }
