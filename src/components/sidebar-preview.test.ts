@@ -39,6 +39,16 @@ describe("sidebar previews", () => {
     expect(botPreview(bot, [message({ text: "Earlier reply" }), message({ role: "user", text: "Tidy my inbox" }), step("Bash")], [], false)).not.toBe("Earlier reply");
   });
 
+  it("quotes a wait's note in Simple mode after a step that went fine, but not a person's line written the same way", () => {
+    const note = message({ role: "user", text: "[Wait finished: report] Summarize.", automated: true } as Partial<Message>);
+    expect(botPreview(bot, [note], [], false)).toBe("Following up on the wait: report");
+    expect(botPreview(bot, [note, step("Read")], [], false)).toBe("Following up on the wait: report");
+    expect(botPreview(bot, [message({ text: "Earlier reply" }), note, step("Read")], [], false)).toBe("Following up on the wait: report");
+    const typed = message({ role: "user", text: "[Wait finished: report] Summarize." });
+    expect(botPreview(bot, [message({ text: "Earlier reply" }), typed, step("Read")], [], false)).not.toBe("Earlier reply");
+    expect(botPreview(bot, [message({ text: "Earlier reply" }), typed, step("Read")], [], false)).not.toBe("Following up on the wait: report");
+  });
+
   it("keeps a failed step's error line and a recovery or notice line as they are", () => {
     const failed = [message({ role: "user", text: "Tidy my inbox" }), message({ text: "On it." }), message({ kind: "activity", tool: { name: "error: Gmail is not connected", ok: false } } as Partial<Message>)];
     expect(botPreview(bot, failed, [], false)).toContain("Gmail is not connected");
