@@ -83,7 +83,11 @@ it("uses the newest text on the selected branch for a fork without an explicit m
   const reply = store.appendMessage(threadId, { role: "bot", kind: "text", text: "First answer" });
   const followUp = store.appendMessage(threadId, { role: "user", kind: "text", text: "Follow up on the first answer" });
   const activity = store.appendMessage(threadId, { role: "bot", kind: "activity" });
-  store.appendMessage(threadId, { role: "bot", kind: "text", text: "Another branch", parentId: question.id });
+  const otherBranch = store.appendMessage(threadId, { role: "bot", kind: "text", text: "Another branch", parentId: question.id });
+  const pinned = store.forkTask(bot.id, threadId, undefined, activity.id);
+  expect(pinned?.origin).toEqual({ threadId, messageId: followUp.id });
+  expect(store.activeLeaf(threadId)).toBe(otherBranch.id);
+  expect(store.forkTask(bot.id, threadId, undefined, "unknown-branch")).toBeNull();
   expect(store.setActiveLeaf(threadId, reply.id)).toBe(activity.id);
 
   const fork = store.forkTask(bot.id, threadId, undefined);

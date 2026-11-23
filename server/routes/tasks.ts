@@ -169,12 +169,12 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
     if (m && method === "POST") {
       const bot = store.bot(m[1]);
       if (!bot || !store.taskByThread(bot.id, m[2])) return json(res, 404, { error: "no such conversation" });
-      const fork = parseForkRequest(await readBody(req));
+      const fork = parseForkRequest(await readBody(req), true);
       if (!fork) return json(res, 400, { error: "Provide a string messageId or set latest to true" });
       const notYours = cloudThreadRefusal(auth, m[2]);
       if (notYours) return json(res, 403, { error: notYours });
       if (threadBusy(bot.id, m[2])) return json(res, 409, FORK_BUSY);
-      const task = store.forkTask(bot.id, m[2], fork.messageId);
+      const task = store.forkTask(bot.id, m[2], fork.messageId, fork.branchLeafId);
       if (!task) return json(res, 404, fork.messageId === undefined ? FORK_NO_TEXT : { error: "no such completed message in this conversation" });
       if (auth.kind === "session") threadStarters.set(task.threadId, actorKey(auth));
       return json(res, 201, { bot: publicBot(store.bot(bot.id)!), task: wireTask(task, store.bot(bot.id)!.modelSelection) } satisfies TaskResponse);

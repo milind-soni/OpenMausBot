@@ -60,6 +60,22 @@ it("forks bot and room conversations through the public API and keeps a fork aft
     const imageMessage = (await messages(sourceThreadId)).find((message) => message.role === "user" && message.text?.includes("dot.png"))!;
     const imageFork = await api("POST", `/api/bots/${bot.id}/tasks/${sourceThreadId}/forks`, { messageId: imageMessage.id });
     expect(imageFork.status).toBe(201);
+    expect((await api("POST", `/api/bots/${bot.id}/messages/${anchor.id}/edit`, {
+      text: "Alternate release plan", threadId: sourceThreadId,
+    })).status).toBe(202);
+    await expect.poll(async () => (await messages(sourceThreadId)).some((message) =>
+      message.role === "user" && message.text === "Alternate release plan"), { timeout: 20_000 }).toBe(true);
+    await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).body.bots.find((candidate: any) => candidate.id === bot.id)?.busy, { timeout: 20_000 }).toBe(false);
+    // Keep the server on the alternate version, as when /active-branch is still in flight.
+    expect(await api("POST", botForkPath, { latest: true, branchLeafId: latest.id })).toMatchObject({
+      status: 201, body: { task: { origin: { threadId: sourceThreadId, messageId: latest.id } } },
+    });
+    const unpinned = await api("POST", botForkPath, { latest: true });
+    expect(unpinned.status).toBe(201);
+    expect(unpinned.body.task.origin.messageId).not.toBe(latest.id);
+    expect(await api("POST", botForkPath, { latest: true, branchLeafId: "missing" })).toMatchObject({
+      status: 404, body: { errorKey: "serverError.forkNoText" },
+    });
     expect((await api("DELETE", `/api/bots/${bot.id}/tasks/${sourceThreadId}`)).status).toBe(200);
     expect((await messages(forkThreadId)).some((message) => message.id === anchor.id)).toBe(true);
     const inheritedImage = await fetch(url + `/api/threads/${imageFork.body.task.threadId}/messages/${imageMessage.id}/file`, {
