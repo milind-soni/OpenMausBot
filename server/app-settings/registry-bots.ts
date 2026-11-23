@@ -283,6 +283,24 @@ export function botEntries(deps: Pick<RegistryDeps, "bots" | "engines" | "patchB
       effect: (one, value) => ({ change: `${one.name}: ${otherChanges(value)}` }),
       bulkEffect: (bots, value) => `${capitalize(otherChanges(value))} for ${formatBots(bots)}`,
       was: (one, value) => ({ botId: one.id, ...Object.fromEntries(Object.keys(value).filter((field) => field !== "botId" && field !== "botIds").map((field) => [field, OTHER[field as OtherField].was(one)])) }),
+      undoTag: (before) => {
+        const items = isRestore(before)
+          ? before.restore
+          : before && typeof before === "object" && "botId" in before
+            ? [before as Record<string, unknown>]
+            : [];
+        return JSON.stringify(items.map((item) => {
+          const one = bot(String(item.botId));
+          if (!one) return [item.botId, null];
+          return [
+            item.botId,
+            Object.keys(item)
+              .filter((field) => field in OTHER)
+              .sort()
+              .map((field) => [field, OTHER[field as OtherField].was(one)]),
+          ];
+        }));
+      },
       patch: (_one, { botId: _id, computer, ...rest }) => ({ ...rest, ...(computer ? { computer: computer === "auto" ? null : computer } : {}) }),
     }),
   ];

@@ -754,4 +754,35 @@ describe("bulk bot settings (botIds)", () => {
     expect(archived.status).toBe(200);
     expect(fx.cards()[0]!.card.subtitle).toBe("Archive 2 bots (Clive, Plum): they leave the sidebar and keep their chats; Clive stops being Chief of Staff");
   });
+
+  it("releases the write reservation when all batch patchBot calls refuse", async () => {
+    const fx = fixture({ patchRefusal: "busy" });
+    for (let i = 0; i < WRITE_BUDGET + 2; i += 1) {
+      expect((await fx.set("bots.color", JSON.stringify({ botIds: "all", color: "coral" }))).status).toBe(409);
+    }
+    for (let i = 0; i < WRITE_BUDGET; i += 1) {
+      expect((await fx.set("rooms.turnTimeoutMinutes", 10 + i)).status).toBe(200);
+    }
+    expect((await fx.set("rooms.turnTimeoutMinutes", 99)).status).toBe(429);
+  });
+
+  it("detects stale targeted fields in bots.settings Undo without blocking when unrelated fields change", async () => {
+    const fx = fixture();
+    fx.bots[0]!.title = "Old A";
+    fx.bots[1]!.title = "Old B";
+    expect((await fx.set("bots.settings", JSON.stringify({ botIds: "all", title: "Batch" }))).status).toBe(200);
+    // Changing an unrelated field keeps Undo valid.
+    fx.bots[0]!.color = "teal";
+    // Modifying one targeted field must trigger UNDO_STALE instead of clobbering "New B".
+    fx.bots[1]!.title = "New B";
+    expect(await fx.undo()).toMatchObject({ claimed: true, state: "invalid", error: UNDO_STALE, stale: true });
+    expect(fx.bots[0]!.title).toBe("Batch");
+    expect(fx.bots[1]!.title).toBe("New B");
+
+    // Restoring targeted field back to applied state lets Undo succeed cleanly even with the unrelated color edit.
+    fx.bots[1]!.title = "Batch";
+    expect(await fx.undo()).toEqual({ claimed: true, state: "undone" });
+    expect(fx.bots[0]!.title).toBe("Old A");
+    expect(fx.bots[1]!.title).toBe("Old B");
+  });
 });
