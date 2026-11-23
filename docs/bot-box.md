@@ -98,6 +98,49 @@ lands in one folder, `cache` in the box's HOME, instead of all over it:
 - **Box off, no change.** A Cloud whose box is off (`OMB_BOT_BOX=0`, or no working bubblewrap) runs its bots unboxed
   with today's environment.
 
+### Tool caches: the cap
+
+`server/cache-sweep/`, behind `OMB_CACHE_SWEEP`. It is off by default; `1`/`on` turns it on, and only on a Cloud
+home. With it off, nothing is ever deleted: the sweep does not start, and `clearCaches` only counts.
+
+- **Caps.** Two root groups each get one cap: the tools' cache folders together (`<HOME>/cache` and every Team Cloud
+  audience's `engine-homes/<audience>/cache`), and the app's own `<data folder>/cache`.
+  - The cap is the smaller of 10 GB and 15% of the volume (`limits.ts`).
+  - On a 10 GB Cloud that is 1.5 GB, enough for a browser and a few projects' packages. A large disk's caches stop at
+    10 GB, so they never crowd out the work.
+  - Overrides: `OMB_CACHE_CAP_TOOLS` and `OMB_CACHE_CAP_APP`, in bytes or as `4G`, `512M`.
+- **What goes, and in what unit.** Only folders it knows, one whole entry at a time:
+  - npm: its store `_cacache` whole, and each npx install `_npx/<hash>` on its own;
+  - Playwright: each browser build (`chromium-1140`);
+  - Hugging Face's hub: each repository (`models--org--name`);
+  - every other tool in the table above: its whole folder;
+  - Node's compile cache: each version's folder, except the running server's own.
+  
+  Anything else in a root is measured and reported (`unknown`), never removed. That includes what a bot or a person
+  put in `/data/cache` before Step 6, `huggingface/token`, and any app folder not on the list.
+- **Least recently used first.** An entry's last use is its newest modification time, or its newest access time when
+  the mount keeps access times. That is checked in `/proc/self/mountinfo`: not `noatime`; `relatime` keeps them to
+  the day. No tool's own index is read.
+- **Never half an entry, never one in use.** Each entry is walked again just before it goes. One with anything
+  changed in the last 30 minutes stays, since a download or an install may be writing it. The entry is renamed to
+  `.omb-evicting-*` in its root first, and the next pass finishes any such leftover.
+- **Only inside the roots.**
+  - A root is used only if it is exactly the expected `cache` folder and a real folder, and is neither HOME nor the
+    data folder nor anything holding them.
+  - Nothing follows a link: an entry that is a link, or sits under one, is refused.
+  - Go's read-only module cache is made writable folder by folder, never through a link.
+- **When it runs.** At most hourly, skipping a pass while any thread is busy. It walks with `fs/promises` and a budget
+  per tick (it yields every 200 entries and pauses after 5,000). A pass cut short resumes from its last measurement
+  (`<data folder>/cache-sweep.json`).
+- **Emergency.** The disk is checked every 5 minutes. At 95% full or more, every known tool cache entry not changed in
+  the last 30 minutes goes. That pass is logged and counted (`cacheCleared`, and `emergency` with bytes and time), and
+  is not repeated within 30 minutes.
+- **On demand.** `clearCaches({ dryRun, scope })` returns the bytes and entries that go, or would go in a dry run. Its
+  admin-scope route is `POST /api/caches/clear`, which is a dry run unless the body says `"dryRun": false`, and answers
+  409 for a real clear with the switch off. `GET /api/caches` returns the counters.
+- **Not touched.** The scattered caches from before Step 6 (`~/.npm`, `~/.cache/*`, `~/go/pkg/mod`, …) are left for a
+  separate cleanup.
+
 ## The self-check and the report
 
 At boot, and by hand with `node dist-server/bot-box/box-check.js`, the server runs `box-probe.ts` inside a real box

@@ -44,6 +44,8 @@ const SERVER_ENV_NAMES = new Set([
   "OMB_BOT_BOX",
   // Tool caches into one folder in each bot box's HOME (server/bot-box/tool-caches.ts): off unless the Admin turns it on.
   "OMB_CACHE_ROOT",
+  // Their cap (server/cache-sweep/limits.ts): the sweeper's switch, off unless the Admin turns it on, and the caps' overrides.
+  "OMB_CACHE_SWEEP", "OMB_CACHE_CAP_TOOLS", "OMB_CACHE_CAP_APP",
   // An ended Cloud started only for its owner's export: the server runs frozen (server/move-freeze.ts).
   "OMB_CLOUD_EXPORT_ONLY",
 ]);

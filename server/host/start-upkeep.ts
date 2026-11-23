@@ -1,6 +1,7 @@
 // The attachments' and the thread logs' upkeep. Both are safe beside requests: an upload in flight keeps its partial
 // and its reservation, and a busy, unread or handed-off thread keeps its log. So the first pass runs once the server
-// answers, not before it listens, and the logs' sweep then runs once a day.
+// answers, not before it listens, and the logs' sweep then runs once a day. The cache cap's sweeper (cache-sweep/) starts
+// here too, and skips a pass while any thread is busy.
 import { cleanupStaleAttachmentPartials } from "../attachments.ts";
 import type { BotRecord } from "../store.ts";
 import { sweepThreadEventLogs } from "../thread-retention.ts";
@@ -13,6 +14,7 @@ export interface StartUpkeepDeps {
   busy: (botId: string, threadId: string) => boolean;
   openDirectHandoff: (threadId: string) => boolean;
   cleanupPartials?: () => number;
+  caches?: { start(busy: () => boolean): void };
   sweepLogs?: typeof sweepThreadEventLogs;
 }
 
@@ -47,4 +49,5 @@ export function startUpkeep(deps: StartUpkeepDeps): void {
     }
   });
   setInterval(sweepLogsNow, THREAD_LOG_RETENTION_SWEEP_MS).unref();
+  deps.caches?.start(() => deps.bots().some((bot) => (bot.tasks ?? []).some((task) => deps.busy(bot.id, task.threadId))));
 }

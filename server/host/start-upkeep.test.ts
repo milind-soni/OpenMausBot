@@ -55,4 +55,17 @@ describe("start-up upkeep", () => {
     await vi.advanceTimersByTimeAsync(THREAD_LOG_RETENTION_SWEEP_MS);
     expect(swept).toEqual([7]);
   });
+
+  it("starts the cache cap's sweeper, telling it a turn runs whenever any thread is busy", () => {
+    vi.useFakeTimers();
+    let working = "";
+    let busy: (() => boolean) | null = null;
+    startUpkeep({
+      bots: () => [{ id: "bot", tasks: [task("a"), task("b")] }], retentionDays: () => null, busy: (_botId, threadId) => threadId === working,
+      openDirectHandoff: () => false, cleanupPartials: () => 0, caches: { start: (given) => { busy = given; } },
+    });
+    expect(busy!()).toBe(false);
+    working = "b";
+    expect(busy!()).toBe(true);
+  });
 });
