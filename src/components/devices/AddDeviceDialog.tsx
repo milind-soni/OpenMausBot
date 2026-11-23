@@ -34,7 +34,7 @@ function CommandRow({ label, command }: { label: string; command: string }) {
   return (
     <div className="flex flex-col gap-1">
       <span className="text-[12px] leading-4 text-ink-secondary">{label}</span>
-      <div className="flex min-w-0 items-center gap-2 rounded-lg bg-inset px-3 py-2">
+      <div className="flex min-w-0 items-center gap-2 rounded-lg bg-ink/[0.05] px-3 py-2">
         <code data-server-command="" className="min-w-0 flex-1 select-text break-all font-mono text-[12px] leading-4 text-ink">{command}</code>
         <button type="button" onClick={copy} className="shrink-0 cursor-pointer text-[12px] font-medium leading-4 text-accent-text hover:underline">
           {t(state === "copied" ? "connect.copied" : "connect.copy")}
@@ -101,7 +101,15 @@ export function PairCodePanel({ kind, address, onConnected }: { kind: "phone" | 
     if (!offer || connected) return;
     const timer = window.setInterval(() => {
       setNow(Date.now());
-      void api<{ sessions?: Array<{ id: string; label: string; person?: string }> }>("/api/auth/sessions", { background: true }).then((body) => {
+      void Promise.all([
+        api<{ sessions?: Array<{ id: string; label: string; person?: string }> }>("/api/auth/sessions", { background: true }),
+        api<{ pairings?: Array<{ id: string }> }>("/api/auth/pairing", { background: true }),
+      ]).then(([body, codes]) => {
+        // Another device signing in meanwhile is not this one: while this code is still open, every session is known.
+        if ((codes.pairings ?? []).some((pairing) => pairing.id === offer.id)) {
+          known.current = new Set([...(known.current ?? []), ...(body.sessions ?? []).map((one) => one.id)]);
+          return;
+        }
         const fresh = (body.sessions ?? []).find((one) => known.current && !known.current.has(one.id));
         if (!fresh) return;
         open.current = null;
@@ -145,7 +153,7 @@ export function PairCodePanel({ kind, address, onConnected }: { kind: "phone" | 
         {kind === "phone" ? t("phone.code.installAndScan", { app: productName() }) : t("devicesPage.addFlow.computerPaste", { app: productName() })}
       </p>
       {kind === "computer" && link && (
-        <div className="flex min-w-0 items-center gap-2 rounded-lg bg-inset px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2 rounded-lg bg-ink/[0.05] px-3 py-2">
           <code data-pair-link="" className="min-w-0 flex-1 select-text break-all font-mono text-[12px] leading-4 text-ink">{link.link}</code>
           <button type="button" onClick={copy} data-copy-link="" className="shrink-0 cursor-pointer text-[12px] font-medium leading-4 text-accent-text hover:underline">
             {t(copied === "copied" ? "remote.serverPairing.copied" : copied === "failed" ? "common.copyFailed" : "remote.serverPairing.copyLink")}
@@ -175,11 +183,11 @@ function Option({ kind, icon, title, line, onChoose }: { kind: AddKind; icon: Re
   );
 }
 
-function NetworkStep({ network, action }: { network: PrivateNetwork; action: NetworkAction | null }) {
+function NetworkStep({ network, action, waiting }: { network: PrivateNetwork; action: NetworkAction | null; waiting: boolean }) {
   return (
-    <div data-add-network={network.state} className="flex flex-col items-start gap-3 rounded-xl bg-menu px-4 py-3 shadow-[inset_0_0_0_0.5px_var(--settings-edge)]">
+    <div data-add-network={waiting ? "waiting" : network.state} className="flex flex-col items-start gap-3 rounded-xl bg-menu px-4 py-3 shadow-[inset_0_0_0_0.5px_var(--settings-edge)]">
       <span className="text-[13px] font-medium leading-[18px] text-ink">{t("devicesPage.addFlow.networkFirst")}</span>
-      <span className="text-[13px] leading-[18px] text-ink-secondary">{networkLine(network)}</span>
+      <span className="text-[13px] leading-[18px] text-ink-secondary">{waiting ? t("devices.computers.waiting", { app: productName() }) : networkLine(network)}</span>
       {action && (action.href
         ? <a href={action.href} target="_blank" rel="noreferrer" className="ui-button" data-network-action="">{action.label}</a>
         : <button type="button" className="ui-button" data-network-action="" disabled={action.busy} onClick={action.run}>{action.label}</button>)}
@@ -192,7 +200,7 @@ function NetworkStep({ network, action }: { network: PrivateNetwork; action: Net
  * phone; a computer gets a link over the private network; a server gets the one line to run there and Connect to a
  * server for the link it prints; a Cloud opens Get a Cloud.
  */
-export function AddDeviceDialog({ here, cloud, network, networkAction, tailnetAddress, places, onClose, onPairPhone, onConnectServer, onGetCloud, onConnected, start = null }: {
+export function AddDeviceDialog({ here, cloud, network, networkAction, tailnetAddress, places, onClose, onPairPhone, onConnectServer, onGetCloud, onConnected, onCheck, checking = false, start = null }: {
   /** This computer's own page in the desktop app. */
   here: boolean;
   network: PrivateNetwork | null;
@@ -208,6 +216,9 @@ export function AddDeviceDialog({ here, cloud, network, networkAction, tailnetAd
   onConnectServer: (() => void) | null;
   onGetCloud: (() => void) | null;
   onConnected: () => void;
+  /** Ask Tailscale again: while the private network is on but its address does not answer yet. */
+  onCheck?: () => void;
+  checking?: boolean;
   start?: AddKind | null;
 }) {
   const [kind, setKind] = useState<AddKind | null>(start);
@@ -219,7 +230,10 @@ export function AddDeviceDialog({ here, cloud, network, networkAction, tailnetAd
   };
   const back = kind && !start ? <button type="button" onClick={() => setKind(null)} className="inline-flex cursor-pointer items-center gap-1 self-start text-[13px] leading-[18px] text-ink-secondary hover:text-ink">
     <ChevronLeft size={14} aria-hidden="true" />{t("rail.back")}</button> : null;
-  const networkReady = network?.state === "ready" && network.shared && Boolean(tailnetAddress);
+  const shared = network?.state === "ready" && network.shared;
+  const networkReady = shared && Boolean(tailnetAddress);
+  // On and shared, but nothing answers at the address yet: the step is to check again, never Add a computer again.
+  const stepAction: NetworkAction | null = shared && !tailnetAddress ? (onCheck ? { label: t("remote.checkAgain"), run: onCheck, busy: checking } : null) : networkAction;
   const newServer = places.find((place) => !placesBefore.has(place.id))?.name ?? null;
   const title = kind === "computer" ? t("devicesPage.add.computer") : kind === "server" ? t("devicesPage.add.server") : kind === "phone" ? t("devicesPage.add.phone") : t("devicesPage.add");
   return (
@@ -232,11 +246,11 @@ export function AddDeviceDialog({ here, cloud, network, networkAction, tailnetAd
           <Option kind="server" icon={<Server size={16} />} title={t("devicesPage.add.server")} line={t("devicesPage.add.serverLine")} onChoose={choose} />
           {onGetCloud && <Option kind="cloud" icon={<Cloud size={16} />} title={t("devicesPage.add.cloud")} line={t("devicesPage.add.cloudLine")} onChoose={choose} />}
         </>}
-        {kind === "phone" && <PairCodePanel kind="phone" address={null} onConnected={onConnected} />}
+        {kind === "phone" && !here && <PairCodePanel kind="phone" address={null} onConnected={onConnected} />}
         {kind === "computer" && (cloud
           ? <p className="text-[13px] leading-[18px] text-ink-secondary">{t("devicesPage.addFlow.computerCloud", { app: productName() })}</p>
           : here && !networkReady
-          ? network && <NetworkStep network={network} action={networkAction} />
+          ? network && <NetworkStep network={network} action={stepAction} waiting={Boolean(shared && !tailnetAddress)} />
           : <>
             <p className="text-[13px] leading-[18px] text-ink-secondary">{t(here ? "devicesPage.addFlow.computerNeeds" : "devicesPage.addFlow.computerInstall", { app: productName() })}</p>
             <PairCodePanel kind="computer" address={tailnetAddress} onConnected={onConnected} />

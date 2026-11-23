@@ -60,14 +60,17 @@ export function DevicesPage() {
   const blocked = config?.managedPolicy?.remoteAccess === false ? t("policy.managedBy", { organization: config.managedPolicy.organizationName }) : null;
   const network = ctx.here ? privateNetwork(companion, problem) : null;
 
-  // The only Tailscale check this page runs: the one behind Your other computers, which reads Tailscale's status and,
-  // once it is ready, lets this computer's other computers open it. It runs on a click, never on load or in a poll.
+  // The Tailscale checks Phone & devices already has, on a click only, never on load or in a poll: with its route off,
+  // Your other computers' switch (it checks, then lets this computer's other computers open it); with it on, Check
+  // again, which asks Tailscale again; ready but not shared, the switch alone.
   const check = useCallback(async () => {
     asked.current = Date.now();
-    const next = await c.act((bridge) => bridge.setTailscaleComputers?.(true) ?? bridge.refreshTailscale());
+    const route = companion?.routes?.tailscale;
+    const ask = route?.on && (!route.name || route.computers || problem) ? "refresh" : "share";
+    const next = await c.act((bridge) => (ask === "refresh" ? bridge.refreshTailscale() : bridge.setTailscaleComputers?.(true) ?? bridge.refreshTailscale()));
     if (next) setProblem(next.tailscaleProblem ?? null);
     refresh();
-  }, [c, refresh]);
+  }, [c, refresh, companion, problem]);
 
   useEffect(() => {
     if (!problem) return;
@@ -138,7 +141,7 @@ export function DevicesPage() {
     {adding !== false && (
       <AddDeviceDialog here={ctx.here} cloud={ctx.cloud} network={network} networkAction={networkAction} tailnetAddress={companion?.tailnetShare?.origin ?? null} places={places} start={adding}
         onClose={() => { setAdding(false); refresh(); }} onConnected={refresh}
-        onPairPhone={ctx.here && c.state ? () => { setAdding(false); setPairingPhone(true); } : null}
+        onPairPhone={ctx.here ? () => { setAdding(false); setPairingPhone(true); } : null} onCheck={() => void check()} checking={c.busy}
         onConnectServer={workspaces?.add ? () => setSheet({ address: "", locked: false, title: t("connect.title") }) : null}
         onGetCloud={workspaces?.add ? () => { setAdding(false); dispatch({ type: "toggleAppSettings", open: false }); void workspaces.add?.("cloud"); } : null} />
     )}

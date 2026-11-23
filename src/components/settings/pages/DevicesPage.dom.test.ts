@@ -21,6 +21,7 @@ let root: Root;
 let companion: CompanionState;
 let session: unknown;
 let sessions: Array<{ id: string; label: string; scopes: string[]; lastSeenAt: number }>;
+let openCodes: string[];
 let requests: string[];
 let bridge: Record<string, ReturnType<typeof vi.fn>>;
 let environments: Record<string, ReturnType<typeof vi.fn>>;
@@ -60,6 +61,7 @@ beforeEach(() => {
   requests = [];
   session = { kind: "loopback", trust: "owner" };
   sessions = [];
+  openCodes = ["p1"];
   companion = {
     enabled: true, keepAwake: false, port: 8810, pairing: null,
     devices: [
@@ -76,6 +78,7 @@ beforeEach(() => {
     if (path === "/api/auth/session") return Response.json(session);
     if (path === "/api/auth/sessions") return Response.json({ sessions, current: null });
     if (path === "/api/auth/pairing" && init?.method === "POST") return Response.json({ id: "p1", code: "7KQ2-M9XD-H4TP", expiresAt: NOW + 600_000, url: null, hint: null });
+    if (path === "/api/auth/pairing") return Response.json({ pairings: openCodes.map((id) => ({ id })) });
     if (path === "/api/phones") return Response.json({ phones: [] });
     if (path === "/api/config") return Response.json({ membership: { authority: "local", pairingCodes: true } });
     return Response.json({ error: "no route" }, { status: 404 });
@@ -167,11 +170,18 @@ describe("the Devices page", () => {
     expect(requests).toContain("POST /api/auth/pairing");
     expect($("[data-pair-link]")?.textContent).toBe("http://ada.tail1.ts.net:8799/pair#code=7KQ2-M9XD-H4TP");
     expect($("[data-pair-state]")?.getAttribute("data-pair-state")).toBe("waiting");
-    sessions = [{ id: "s-new", label: "Studio Mac mini", scopes: ["admin", "client"], lastSeenAt: NOW }];
+    sessions = [{ id: "s-other", label: "Chrome on Windows", scopes: ["admin", "client"], lastSeenAt: NOW }];
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 2_300)); });
+    await settle();
+    expect($("[data-pair-state]")?.getAttribute("data-pair-state")).toBe("waiting");
+    sessions = [...sessions, { id: "s-new", label: "Studio Mac mini", scopes: ["admin", "client"], lastSeenAt: NOW }];
+    openCodes = [];
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 2_300)); });
     await settle();
     expect($("[data-pair-state]")?.textContent).toBe("Studio Mac mini is connected");
-  }, 10_000);
+    await click("[data-dialog-title] button");
+    expect(requests).not.toContain("DELETE /api/auth/pairing/p1");
+  }, 15_000);
 
   it("cancels a code nobody used when the dialog closes", async () => {
     await render();
@@ -180,6 +190,34 @@ describe("the Devices page", () => {
     await click("[data-add-kind=computer]");
     await click("[data-dialog-title] button");
     expect(requests).toContain("DELETE /api/auth/pairing/p1");
+  });
+
+  it("asks Tailscale again, rather than sharing again, once its route is on", async () => {
+    companion = { ...companion, routes: { ...companion.routes!, tailscale: { on: true, since: NOW, name: null, computers: true } } };
+    await render();
+    expect($("[data-network-state]")?.getAttribute("data-network-state")).toBe("magicdns");
+    await click("[data-network-action]");
+    expect(bridge.refreshTailscale).toHaveBeenCalled();
+    expect(bridge.setTailscaleComputers).not.toHaveBeenCalled();
+  });
+
+  it("says the private network is still starting, with Check again, when it is on but nothing answers yet", async () => {
+    companion = { ...companion, routes: { ...companion.routes!, tailscale: { on: true, since: NOW, name: "ada.tail1.ts.net", computers: true } }, tailnetShare: { on: true, origin: null, https: false, problem: "not-listening" } };
+    await render();
+    await click("[data-add-device]");
+    await click("[data-add-kind=computer]");
+    expect($("[data-add-network]")?.getAttribute("data-add-network")).toBe("waiting");
+    expect($("[data-add-network] [data-network-action]")?.textContent).toBe("Check again");
+    expect(requests).not.toContain("POST /api/auth/pairing");
+  });
+
+  it("pairs a phone on This computer only through Pair a phone, never a server code", async () => {
+    await render();
+    await click("[data-add-device]");
+    await click("[data-add-kind=phone]");
+    expect($("[data-pair-dialog]")).not.toBeNull();
+    expect($("[data-pair-panel]")).toBeNull();
+    expect(requests).not.toContain("POST /api/auth/pairing");
   });
 
   it("asks for the private network first when Add a computer comes before it", async () => {
@@ -200,6 +238,8 @@ describe("the Devices page", () => {
     expect($("[data-pair-blocked]")).not.toBeNull();
     expect(requests.filter((request) => request.startsWith("POST"))).toEqual([]);
     expect(requests).not.toContain("GET /api/auth/sessions");
+    expect(requests).not.toContain("GET /api/phones");
+    expect(document.querySelector("[data-device-action=remove]")).toBeNull();
   });
 
   it("gives a new server one line to run, the sign-in included", async () => {

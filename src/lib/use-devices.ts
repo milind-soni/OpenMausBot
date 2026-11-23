@@ -50,7 +50,8 @@ export function useDevices({ here, client, name, kind }: { here: boolean; client
       environments?.status?.().then((next) => { if (alive.current) setStatuses(next); }),
       (here ? window.ogb?.computerSharing?.servers?.() : undefined)?.then((next) => { if (alive.current) setLending(next); }),
       bridge?.state().then((next) => { if (alive.current) setCompanion(next); }),
-      api<{ phones?: PublicPhone[] }>("/api/phones", { background: true }).then((body) => { if (alive.current) setPhoneApps(body.phones ?? []); }),
+      // Phone apps and signed-in devices are admin routes: anyone else is never asked for them (a refusal every few seconds).
+      admin ? api<{ phones?: PublicPhone[] }>("/api/phones", { background: true }).then((body) => { if (alive.current) setPhoneApps(body.phones ?? []); }) : undefined,
       admin ? api<{ sessions?: SignedInDevice[]; current?: string | null }>("/api/auth/sessions", { background: true })
         .then((body) => { if (alive.current) setSessions({ sessions: Array.isArray(body.sessions) ? body.sessions : [], current: typeof body.current === "string" ? body.current : null }); }) : undefined,
       // A 404 is a place that lends no computers (the family is off for this request).

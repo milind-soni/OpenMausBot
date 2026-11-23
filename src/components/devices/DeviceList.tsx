@@ -95,7 +95,7 @@ function DeviceRow({ device, selected, onSelect, onAction, now }: { device: Devi
       <div className="flex min-h-14 items-center gap-3 px-4 py-2">
         <span className="relative flex size-8 shrink-0 items-center justify-center text-ink-secondary">
           <Icon size={16} aria-hidden="true" />
-          {dot && <span aria-hidden="true" className={cn("absolute bottom-1 right-1 size-2 rounded-full", dot)} />}
+          {dot && <span aria-hidden="true" className={cn("absolute bottom-1 end-1 size-2 rounded-full", dot)} />}
         </span>
         <button type="button" aria-expanded={selected} onClick={() => onSelect(selected ? null : device.id)}
           className="flex min-w-0 flex-1 cursor-pointer flex-col text-start focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
