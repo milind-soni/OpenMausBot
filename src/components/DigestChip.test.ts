@@ -54,7 +54,7 @@ describe("DigestChip", () => {
       id: "context", role: "bot", kind: "compaction", at: 1,
       compaction: { summary: "Latest correction: <script>bad()</script> x < -5", firstKeptId: "", foldedThroughId: "old", tokensBefore: 1, by: "person" },
     } }));
-    expect(html).toContain("<details");
+    expect(html).toContain('aria-expanded="false"');
     expect(html).toContain("Earlier context summarized");
     expect(html).toContain("Your full conversation is still here");
     expect(html).toContain("&lt;script&gt;");
@@ -68,7 +68,7 @@ describe("DigestChip", () => {
     expect(html).toContain('role="separator"');
     expect(html).toContain("Fresh start");
     expect(html).toContain("Messages above this line");
-    expect(html).not.toContain("<details");
+    expect(html).not.toContain("aria-expanded");
   });
   it("says one tool call and one file in the singular", () => {
     const one = { ...message.digest!, tools: [], toolsDropped: 0, toolCalls: 1, files: { changed: ["a.ts"], added: [], deleted: [] } };

@@ -54,3 +54,16 @@ it("shows no hint on a Start fresh divider or when the chat can't start a new on
   expect(render(engine)).toBeNull();
   expect(host.querySelector("[data-testid=engine-compaction-chip]")).not.toBeNull();
 });
+
+it("toggles the disclosure and keeps the collapsed text out of the accessibility tree", () => {
+  render(summary);
+  const button = host.querySelector<HTMLButtonElement>("[aria-controls]")!;
+  const body = document.getElementById(button.getAttribute("aria-controls")!)!;
+  for (const expanded of [true, false]) {
+    flushSync(() => button.click());
+    expect(button.getAttribute("aria-expanded")).toBe(String(expanded));
+    expect(body.hasAttribute("inert")).toBe(!expanded);
+    expect(body.getAttribute("aria-hidden")).toBe(expanded ? null : "true");
+    expect(body.classList.contains(expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]")).toBe(true);
+  }
+});

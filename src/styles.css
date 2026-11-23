@@ -3958,3 +3958,9 @@ button:disabled.bg-danger {
   top: 50%;
   transform: translateY(-50%);
 }
+
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduced-motion="true"]) .compaction-motion {
+    transition: grid-template-rows 200ms ease-in-out, opacity 200ms ease-in-out, rotate 200ms ease-in-out;
+  }
+}

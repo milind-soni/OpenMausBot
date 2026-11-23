@@ -1,7 +1,8 @@
-import { useState } from "react";
-import { ClipboardList } from "lucide-react";
+import { useId, useState } from "react";
+import { ChevronRight, ClipboardList } from "lucide-react";
 
 import { ACTION_ICON } from "./MessageActions";
+import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { formatDuration } from "@/lib/usage-trace";
@@ -54,6 +55,8 @@ export function DigestChip({ message, inline = false }: { message: Message; inli
 const COMPACTION_CHIP = "max-w-[600px] rounded-xl border border-hairline/40 bg-panel px-3 py-2 text-[12px] text-ink-secondary";
 
 export function CompactionChip({ message, onNewChat }: { message: Message; onNewChat?: () => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const bodyId = useId();
   if (message.compaction?.fresh) {
     return (
       <div role="separator" data-testid="fresh-start-divider" className="flex w-full items-center gap-3 py-1 text-[12px] text-ink-secondary">
@@ -65,11 +68,20 @@ export function CompactionChip({ message, onNewChat }: { message: Message; onNew
   }
   const excerpts = message.compaction?.summary.startsWith(EXCERPT_SUMMARY_HEADER);
   const chip = message.compaction ? (
-    <details className={COMPACTION_CHIP} data-testid="compaction-chip">
-      <summary className="cursor-pointer font-medium">{t(excerpts ? "chat.compactionExcerptTitle" : "chat.compactionTitle")}</summary>
-      <p className="mt-2">{t(excerpts ? "chat.compactionExcerptHint" : "chat.compactionHint")}</p>
-      <p className="mt-2 whitespace-pre-wrap break-words">{message.compaction.summary}</p>
-    </details>
+    <div className={COMPACTION_CHIP} data-testid="compaction-chip">
+      <button type="button" onClick={() => setExpanded(value => !value)} aria-controls={bodyId} aria-expanded={expanded}
+        className="flex w-full cursor-pointer items-center gap-1 text-start font-medium focus-visible:outline-focus">
+        <ChevronRight size={12} aria-hidden="true" className={cn("compaction-motion shrink-0", expanded && "rotate-90")} />
+        {t(excerpts ? "chat.compactionExcerptTitle" : "chat.compactionTitle")}
+      </button>
+      <div id={bodyId} inert={!expanded} aria-hidden={!expanded || undefined}
+        className={cn("compaction-motion grid", expanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0")}>
+        <div className="min-h-0 min-w-0 overflow-clip">
+          <p className="mt-2">{t(excerpts ? "chat.compactionExcerptHint" : "chat.compactionHint")}</p>
+          <p className="mt-2 whitespace-pre-wrap break-words">{message.compaction.summary}</p>
+        </div>
+      </div>
+    </div>
   ) : message.engineCompaction ? (
     <div className={COMPACTION_CHIP} data-testid="engine-compaction-chip">
       <p className="font-medium">{t("chat.engineCompactionTitle")}</p>
