@@ -6,6 +6,7 @@ import {
   BOTS_SECTION_ID,
   CHANNELS_SECTION_ID,
   PINNED_SECTION_ID,
+  UNREAD_SECTION_ID,
   mergeSectionOrder,
   moveSection,
   orderedSidebarSections,
@@ -20,9 +21,11 @@ import {
   sidebarSectionLabel,
   simpleOrderedSections,
   simpleSidebarSections,
+  unreadBotsApart,
   userSectionId,
   userSectionName,
   withPrimaryTile,
+  withUnreadSection,
 } from "./sidebar-layout";
 
 describe("sidebar virtual sections", () => {
@@ -332,5 +335,50 @@ describe("active bots first", () => {
     expect(parts.unsectionedBots).toEqual(["a", "b", "c"]);
     expect(parts.pinnedBots).toEqual(["p1", "p2", "p3"]);
     expect(parts.sectionedBots).toEqual(["w1", "h1", "w2"]);
+  });
+});
+
+describe("the unread section", () => {
+  const read = (id: string) => ({ id, unread: false });
+  const thread = (unread: boolean, updatedAt?: number, extra: { routineRunId?: string; archivedAt?: number } = {}) => ({ unread, updatedAt, createdAt: 1, ...extra });
+
+  it("takes unread bots out of their lists, newest unread conversation first, and leaves the lists otherwise as they were", () => {
+    const parts = {
+      sectionChiefs: [{ id: "lead", unread: true, tasks: [thread(true, 50), thread(false, 90)] }],
+      sectionedBots: [read("w1"), { id: "w2", unread: true, tasks: [thread(true, 70), thread(true, 10)] }],
+      unsectionedBots: [{ id: "a", unread: true, messages: [{ at: 5 }, { at: 60 }] }, read("b"), { id: "c", unread: true }],
+    };
+    const apart = unreadBotsApart(parts);
+    expect(apart.unreadBots.map((bot) => bot.id)).toEqual(["w2", "a", "lead", "c"]);
+    expect(apart.sectionChiefs).toEqual([]);
+    expect(apart.sectionedBots.map((bot) => bot.id)).toEqual(["w1"]);
+    expect(apart.unsectionedBots.map((bot) => bot.id)).toEqual(["b"]);
+    expect(parts.unsectionedBots).toHaveLength(3);
+  });
+
+  it("counts a bot unread exactly as its row's dot does: a routine run or an archived conversation does not", () => {
+    const parts = {
+      sectionChiefs: [],
+      sectionedBots: [],
+      unsectionedBots: [
+        { id: "run", unread: true, tasks: [thread(true, 9, { routineRunId: "r" })] },
+        { id: "old", unread: true, tasks: [thread(true, 9, { archivedAt: 3 })] },
+        { id: "flag", unread: true, tasks: [thread(false, 9)] },
+      ],
+    };
+    expect(unreadBotsApart(parts).unreadBots).toEqual([]);
+  });
+
+  it("moves nothing while it is off", () => {
+    const parts = { sectionChiefs: [], sectionedBots: [], unsectionedBots: [{ id: "a", unread: true }] };
+    expect(unreadBotsApart(parts, false)).toEqual({ ...parts, unreadBots: [] });
+  });
+
+  it("goes under the pinned bots when they lead the list, at the top otherwise, and nowhere with nothing unread", () => {
+    expect(withUnreadSection([PINNED_SECTION_ID, BOTS_SECTION_ID], true)).toEqual([PINNED_SECTION_ID, UNREAD_SECTION_ID, BOTS_SECTION_ID]);
+    expect(withUnreadSection([BOTS_SECTION_ID, PINNED_SECTION_ID], true)).toEqual([UNREAD_SECTION_ID, BOTS_SECTION_ID, PINNED_SECTION_ID]);
+    expect(withUnreadSection([], true)).toEqual([UNREAD_SECTION_ID]);
+    expect(withUnreadSection([BOTS_SECTION_ID], false)).toEqual([BOTS_SECTION_ID]);
+    expect(sidebarSectionLabel(UNREAD_SECTION_ID)).toBe("Unread");
   });
 });

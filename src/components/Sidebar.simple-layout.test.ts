@@ -43,8 +43,8 @@ vi.mock("@/state/store", async (importOriginal) => {
   return { ...original, useStore: () => ({ state: fixture.state, dispatch: fixture.dispatch }) };
 });
 
-import { initialState } from "@/state/store";
-import { BOTS_SECTION_ID, CHANNELS_SECTION_ID, PINNED_SECTION_ID, userSectionId } from "@/lib/sidebar-layout";
+import { initialState, reducer } from "@/state/store";
+import { BOTS_SECTION_ID, CHANNELS_SECTION_ID, PINNED_SECTION_ID, UNREAD_SECTION_ID, userSectionId } from "@/lib/sidebar-layout";
 import { SIDEBAR_COLLAPSED_SECTIONS_KEY, SIDEBAR_DENSITY_KEY, SIDEBAR_SECTION_ORDER_KEY, SIDEBAR_WIDTH_KEY, SIMPLE_SIDEBAR_SECTION_ORDER_KEY, SIMPLE_SIDEBAR_WIDTH_KEY, setSidebarDensity } from "@/lib/sidebar-preferences";
 import { Sidebar, TeamMenuItems } from "./Sidebar";
 const drawSidebar = (Sidebar as unknown as { type: (props: import("react").ComponentProps<typeof Sidebar>) => import("react").ReactNode }).type;
@@ -401,5 +401,105 @@ describe("Simple-mode sidebar layout", () => {
     search();
     expect(opened).toHaveBeenCalledOnce();
     expect(render(true).tree.some((node) => node.type === SimpleRailFooter)).toBe(true);
+  });
+});
+
+describe("the sidebar's Unread section", () => {
+  const unreadHeader = (tree: ReactElement<Props>[]) => headers(tree).find((header) => header.props.name === "Unread");
+  const thread = (id: string, updatedAt: number, unread = true) => ({ threadId: `${id}-thread`, title: id, createdAt: 1, updatedAt, unread });
+  const withUnread = () => {
+    fixture.state = { ...fixture.state, bots: [
+      bot("atlas"),
+      bot("bea", { unread: true, tasks: [thread("bea", 20)] }),
+      bot("cora", { unread: true, tasks: [thread("cora", 40)] }),
+      bot("dodo", { section: "Work", unread: true, tasks: [thread("dodo", 30)] }),
+      bot("eve", { section: "Work" }),
+    ] };
+  };
+
+  it("is absent while every bot is read", () => {
+    const { tree } = render();
+    expect(sectionOrder(tree)).not.toContain(UNREAD_SECTION_ID);
+    expect(unreadHeader(tree)).toBeUndefined();
+  });
+
+  it("gathers the unread bots of the main list and of departments above the rest, newest first, with their count", () => {
+    withUnread();
+    const { tree } = render();
+    expect(sectionOrder(tree)).toEqual([UNREAD_SECTION_ID, BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
+    expect(listedBots(tree)).toEqual(["cora", "dodo", "bea", "atlas", "eve"]);
+    expect(unreadHeader(tree)!.props).toMatchObject({ count: 3, reorderable: false, line: true });
+    expect(headers(tree).map((header) => [header.props.name, "count" in header.props])).toEqual([["Unread", true], ["Bots", false], ["Group chats", false], ["Work", false]]);
+  });
+
+  it("sends a bot back to its own place once it is opened, and brings it back when it is marked unread", () => {
+    withUnread();
+    fixture.state = reducer(fixture.state, { type: "select", id: "dodo" });
+    let tree = render().tree;
+    expect(listedBots(tree)).toEqual(["cora", "bea", "atlas", "dodo", "eve"]);
+    expect(unreadHeader(tree)!.props.count).toBe(2);
+
+    fixture.state = reducer(reducer(fixture.state, { type: "select", id: "cora" }), { type: "select", id: "bea" });
+    tree = render().tree;
+    expect(sectionOrder(tree)).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
+    expect(listedBots(tree)).toEqual(["atlas", "bea", "cora", "dodo", "eve"]);
+
+    fixture.state = { ...fixture.state, bots: fixture.state.bots.map((candidate) => (candidate.id === "eve" ? { ...candidate, tasks: undefined } : candidate)) };
+    fixture.state = reducer(fixture.state, { type: "markUnread", botId: "eve" });
+    tree = render().tree;
+    expect(sectionOrder(tree)[0]).toBe(UNREAD_SECTION_ID);
+    expect(listedBots(tree)).toEqual(["eve", "atlas", "bea", "cora", "dodo"]);
+    expect(unreadHeader(tree)!.props.count).toBe(1);
+  });
+
+  it("keeps a department whose bots are all unread, and takes no drag on its own rows", () => {
+    withUnread();
+    fixture.state = { ...fixture.state, sections: [], bots: fixture.state.bots.filter((candidate) => candidate.id !== "eve") };
+    const { tree } = render();
+    expect(sectionOrder(tree)).toContain(userSectionId("Work"));
+    const rows = tree.filter((node) => (node.props.bot as Bot | undefined) !== undefined);
+    expect(rows.map((row) => [(row.props.bot as Bot).id, row.props.botDrag !== undefined])).toEqual([["cora", false], ["dodo", false], ["bea", false], ["atlas", true]]);
+  });
+
+  it("leaves pinned bots and the Chief where they are, and sits under Advanced's Pinned heading", () => {
+    fixture.state = { ...fixture.state, bots: [
+      bot("chief", { chiefOfStaff: true, unread: true }), bot("atlas", { pinned: true, unread: true }), bot("bea", { unread: true }), bot("cora"),
+    ] };
+    let tree = render().tree;
+    const grid = tree.find((node) => node.type === SidebarTileGrid)!.props as Parameters<typeof SidebarTileGrid>[0];
+    expect([grid.primary?.id, ...grid.pinned.map((candidate) => candidate.id)]).toEqual(["chief", "atlas"]);
+    expect(sectionOrder(tree).slice(0, 2)).toEqual([UNREAD_SECTION_ID, BOTS_SECTION_ID]);
+    expect(listedBots(tree)).toEqual(["bea", "cora"]);
+
+    fixture.advanced = true;
+    tree = render().tree;
+    expect(sectionOrder(tree).slice(0, 2)).toEqual([PINNED_SECTION_ID, UNREAD_SECTION_ID]);
+    expect(listedBots(tree)).toEqual(["chief", "bea", "cora"]);
+    expect(unreadHeader(tree)!.props).toMatchObject({ count: 1, reorderable: false, line: false });
+  });
+
+  it("stays at the top whatever order the sections were dragged into", () => {
+    withUnread();
+    fixture.storage.set(SIMPLE_SIDEBAR_SECTION_ORDER_KEY, JSON.stringify([userSectionId("Work"), CHANNELS_SECTION_ID, BOTS_SECTION_ID]));
+    expect(sectionOrder(render().tree)).toEqual([UNREAD_SECTION_ID, userSectionId("Work"), CHANNELS_SECTION_ID, BOTS_SECTION_ID]);
+  });
+
+  it("gives way to a search, which lists every match in its own place", () => {
+    withUnread();
+    (render().tree.find((node) => node.type === SidebarSearchToggle)!.props as Parameters<typeof SidebarSearchToggle>[0]).onToggle();
+    (render().tree.find((node) => node.type === SidebarSearchPill)!.props as Parameters<typeof SidebarSearchPill>[0]).onQuery("o");
+    const { tree } = render();
+    expect(sectionOrder(tree)).not.toContain(UNREAD_SECTION_ID);
+    expect(listedBots(tree)).toEqual(["cora", "dodo"]);
+  });
+
+  it("leads the rail as a group of its own, with no heading", () => {
+    withUnread();
+    setSidebarDensity("icons");
+    const { tree } = render();
+    expect(sectionOrder(tree)).toEqual([UNREAD_SECTION_ID, BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
+    expect(listedBots(tree)).toEqual(["cora", "dodo", "bea", "atlas", "eve"]);
+    expect(headers(tree)).toEqual([]);
+    expect(tree.filter((node) => node.type === SidebarRailSeparator)).toHaveLength(3);
   });
 });

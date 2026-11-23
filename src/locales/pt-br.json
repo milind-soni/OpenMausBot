@@ -2082,6 +2082,7 @@
   "sidebar.preview.signedOut": "{name} está sem login",
   "sidebar.preview.you": "Você: {text}",
   "sidebar.section.pinned": "Fixados",
+  "sidebar.section.unread": "Não lidas",
   "sidebar.section.channels": "Chats em grupo",
   "sidebar.section.botChats": "Conversas dos bots",
   "sidebar.section.bots": "Bots",

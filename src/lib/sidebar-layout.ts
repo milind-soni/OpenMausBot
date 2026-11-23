@@ -4,8 +4,10 @@ import { t } from "./i18n";
 import type { LocaleKey } from "@/locales";
 import type { DefaultBotFields } from "../../shared/default-bot";
 import { hiddenFromSidebar, someoneElsesDefaultBot } from "./default-bot";
+import { botShowsUnread } from "./bot-unread";
 
 export const PINNED_SECTION_ID = "builtin:pinned";
+export const UNREAD_SECTION_ID = "builtin:unread";
 export const CHANNELS_SECTION_ID = "builtin:channels";
 export const BOT_CHATS_SECTION_ID = "builtin:bot-chats";
 export const BOTS_SECTION_ID = "builtin:bots";
@@ -59,6 +61,7 @@ export function userSectionName(id: SidebarSectionId): string | null {
 
 export function sidebarSectionLabel(id: SidebarSectionId): string {
   if (id === PINNED_SECTION_ID) return "Pinned";
+  if (id === UNREAD_SECTION_ID) return "Unread";
   if (id === CHANNELS_SECTION_ID) return "Group chats";
   if (id === BOT_CHATS_SECTION_ID) return "Bot threads";
   if (id === BOTS_SECTION_ID) return "Bots";
@@ -149,6 +152,34 @@ export function activeBotsFirst<T>(parts: { pinnedBots: T[]; sectionedBots: T[];
     return [...bots.filter((_, index) => flags[index]), ...bots.filter((_, index) => !flags[index])];
   };
   return { pinnedBots: first(parts.pinnedBots), sectionedBots: first(parts.sectionedBots), unsectionedBots: first(parts.unsectionedBots) };
+}
+
+type UnreadListBot = {
+  unread?: boolean;
+  tasks?: ReadonlyArray<{ unread?: boolean; routineRunId?: string; archivedAt?: number; updatedAt?: number; createdAt?: number }> | null;
+  messages?: ReadonlyArray<{ at: number }>;
+};
+
+function unreadSince(bot: UnreadListBot): number {
+  const threads = (bot.tasks ?? []).filter((task) => task.unread && !task.routineRunId && task.archivedAt === undefined);
+  if (threads.length === 0) return bot.messages?.at(-1)?.at ?? 0;
+  return Math.max(...threads.map((task) => task.updatedAt ?? task.createdAt ?? 0));
+}
+
+/** Bots showing unread leave their department or the main list for one list of their own, newest first, and go back
+ * once read. Pinned bots and the main Chief keep their place above it. Only how the list is shown changes. */
+export function unreadBotsApart<T extends UnreadListBot>(parts: { sectionChiefs: T[]; sectionedBots: T[]; unsectionedBots: T[] }, enabled = true) {
+  if (!enabled) return { ...parts, unreadBots: [] as T[] };
+  const read = (bots: T[]) => bots.filter((bot) => !botShowsUnread(bot));
+  const unreadBots = [...parts.unsectionedBots, ...parts.sectionChiefs, ...parts.sectionedBots].filter(botShowsUnread)
+    .map((bot) => ({ bot, since: unreadSince(bot) })).sort((a, b) => b.since - a.since).map(({ bot }) => bot);
+  return { unreadBots, sectionChiefs: read(parts.sectionChiefs), sectionedBots: read(parts.sectionedBots), unsectionedBots: read(parts.unsectionedBots) };
+}
+
+/** Unread sits under the pinned bots when they lead the list and above everything else otherwise. */
+export function withUnreadSection(ids: SidebarSectionId[], shown: boolean): SidebarSectionId[] {
+  if (!shown) return ids;
+  return ids[0] === PINNED_SECTION_ID ? [PINNED_SECTION_ID, UNREAD_SECTION_ID, ...ids.slice(1)] : [UNREAD_SECTION_ID, ...ids];
 }
 
 export function partitionSidebarGroups<T extends SidebarGroup>(groups: T[]) {

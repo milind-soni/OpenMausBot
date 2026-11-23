@@ -2250,6 +2250,7 @@
   "sidebar.preview.signedOut": "{name} non ha effettuato l'accesso",
   "sidebar.preview.you": "Tu: {text}",
   "sidebar.section.pinned": "Fissati",
+  "sidebar.section.unread": "Non letti",
   "sidebar.section.channels": "Chat di gruppo",
   "sidebar.section.botChats": "Thread dei bot",
   "sidebar.section.bots": "Bot",

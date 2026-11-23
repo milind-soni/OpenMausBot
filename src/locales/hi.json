@@ -623,6 +623,7 @@
   "sidebar.preview.signedOut": "{name} में साइन इन नहीं है",
   "sidebar.preview.you": "आप: {text}",
   "sidebar.section.pinned": "पिन किए गए",
+  "sidebar.section.unread": "अपठित",
   "sidebar.section.botChats": "बॉट के थ्रेड",
   "sidebar.section.bots": "बॉट",
   "sidebar.section.moved": "{name} को {count} में से स्थान {position} पर ले जाया गया",

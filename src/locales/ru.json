@@ -1692,6 +1692,7 @@
   "sidebar.preview.signedOut": "{name} не выполнен вход",
   "sidebar.preview.you": "Вы: {text}",
   "sidebar.section.pinned": "Закреплённые",
+  "sidebar.section.unread": "Непрочитанные",
   "sidebar.section.channels": "Групповые чаты",
   "sidebar.section.botChats": "Потоки ботов",
   "sidebar.section.bots": "Боты",
