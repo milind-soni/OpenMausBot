@@ -28,6 +28,7 @@ const INITIALIZE_WINDOW_MS = 20_000;
 const INITIALIZE_CAP_MS = 60_000;
 const REQUEST_MS = 30_000;
 const SESSION_CLOSE_MS = 5_000;
+/** How long a signed-out answer stands, so a sign-in made at a terminal shows. */
 export const SIGN_IN_CACHE_MS = 30_000;
 
 /** The native CLI's own answer to a session it will not start without a sign-in (1.5.14: `-32000 Authentication
@@ -117,8 +118,9 @@ interface Entry {
   runtime: string;
 }
 
-/** What the CLI last said about each instance, kept for `ttlMs`. A read that began before `forget` never writes back
- * after it, so a sign-out cannot be undone by a check that started earlier. */
+/** What the CLI last said about each instance. Signed out is kept for `ttlMs`; signed in stands until `forget`, since
+ * asking starts a whole CLI that opens a conversation with Google (1.5.14). A read that began before `forget` never
+ * writes back after it, so a sign-out cannot be undone by a check that started earlier. */
 export class NativeSignInCache {
   readonly #entries = new Map<string, Entry>();
   readonly #generations = new Map<string, number>();
@@ -128,7 +130,7 @@ export class NativeSignInCache {
 
   constructor(options: { ttlMs?: number; now?: () => number } = {}) {
     this.#ttlMs = options.ttlMs ?? SIGN_IN_CACHE_MS;
-    this.#now = options.now ?? Date.now;
+    this.#now = options.now ?? (() => Date.now());
   }
 
   #generation(instanceId: string): number {
@@ -138,12 +140,22 @@ export class NativeSignInCache {
   #fresh(instanceId: string, runtime: string): Entry | undefined {
     const known = this.#entries.get(instanceId);
     const age = known ? this.#now() - known.at : -1;
-    return known && known.generation === this.#generation(instanceId) && known.runtime === runtime && age >= 0 && age < this.#ttlMs ? known : undefined;
+    const standing = known?.state === "in" || (age >= 0 && age < this.#ttlMs);
+    return known && known.generation === this.#generation(instanceId) && known.runtime === runtime && standing ? known : undefined;
   }
 
   /** What the CLI last said, while it still stands; undefined when it has to be asked. */
   known(instanceId: string, runtime: string): NativeSignIn | undefined {
     return this.#fresh(instanceId, runtime)?.state;
+  }
+
+  /** Keeps what another request to the CLI learned, such as a session it accepted, unless `forget` came after `seen` was
+   * made. */
+  seen(instanceId: string, runtime: string): (state: NativeSignIn) => void {
+    const generation = this.#generation(instanceId);
+    return (state) => {
+      if (this.#generation(instanceId) === generation) this.#entries.set(instanceId, { state, at: this.#now(), generation, runtime });
+    };
   }
 
   /** `runtime` names the executable and version asked, so a switch of runtime is a new question. A failed read is not kept. */
@@ -153,10 +165,8 @@ export class NativeSignInCache {
     if (known) return known.state;
     const running = this.#reading.get(instanceId);
     if (running && running.generation === generation && running.runtime === runtime) return running.read;
-    const current = { generation, runtime, read: read().then((state) => {
-      if (this.#generation(instanceId) === generation) this.#entries.set(instanceId, { state, at: this.#now(), generation, runtime });
-      return state;
-    }) };
+    const keep = this.seen(instanceId, runtime);
+    const current = { generation, runtime, read: read().then((state) => { keep(state); return state; }) };
     this.#reading.set(instanceId, current);
     const clear = () => { if (this.#reading.get(instanceId) === current) this.#reading.delete(instanceId); };
     current.read.then(clear, clear);

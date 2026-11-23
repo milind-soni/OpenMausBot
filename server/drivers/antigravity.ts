@@ -134,17 +134,18 @@ const tracked = (instanceId: string) => (child: ChildProcess) => trackNative(ins
 
 const nativeRuntimeKey = (runtime: AntigravityRuntime) => `${runtime.executablePath}\0${runtime.version}`;
 
-/** Whether the native CLI accepts a session for this instance, kept for a short while. Throws when the CLI could not say:
- * that is not "signed out". */
+/** Whether the native CLI accepts a session for this instance, as last learned. Throws when the CLI could not say: that
+ * is not "signed out". */
 async function nativeSignedIn(instanceId: string, runtime: AntigravityRuntime, profile: AntigravityProfile): Promise<boolean> {
   await nativeSignOutDone();
   return await nativeSignIn.state(instanceId, nativeRuntimeKey(runtime), () => antigravityCliSignIn(runtime, profile, { onProcess: tracked(instanceId) })) === "in";
 }
 
-/** Model discovery's failure as the shared catalog classifies it: a refused session is "signedOut", a slow CLI "timedOut". */
-function nativeDiscoveryError(instanceId: string, error: unknown): unknown {
+/** Model discovery's failure as the shared catalog classifies it: a refused session is "signedOut", a slow CLI "timedOut".
+ * A refusal is every native instance's, since they share one sign-in. */
+function nativeDiscoveryError(error: unknown): unknown {
   if (antigravityCliRefusedSession(error)) {
-    nativeSignIn.forget(instanceId);
+    nativeSignIn.forgetAll();
     const refusal = error as { code: unknown; message: unknown };
     return new AcpDiscoveryRpcError(refusal.code, typeof refusal.message === "string" ? refusal.message : "");
   }
@@ -202,12 +203,14 @@ const support: AcpSupport = {
     const profile = await prepareAntigravityProfile({ instanceId, runtime, baseEnv: env });
     const native = runtime.harnessPath === null;
     if (!native && !(await antigravityProfileAuthenticated(profile))) throw new Error(support.loginNote);
+    const accepted = native ? nativeSignIn.seen(instanceId, nativeRuntimeKey(runtime)) : undefined;
     const catalog = await probeAntigravityModels({
       runtime,
       profile,
       fallbackDefault: currentEngineCatalog("antigravity").default,
       ...(native ? { onProcess: tracked(instanceId) } : {}),
-    }).catch((error: unknown) => { throw native ? nativeDiscoveryError(instanceId, error) : error; });
+    }).catch((error: unknown) => { throw native ? nativeDiscoveryError(error) : error; });
+    accepted?.("in");
     for (const option of catalog.options) offeredModels.add(option.id);
     return catalog;
   },
@@ -224,7 +227,11 @@ const support: AcpSupport = {
   signInRequest: {
     stderrLine: (line) => authorizationUrlFromLine(line) !== null,
     rpcError: (error, instanceId) => launched.get(instanceId)?.nativeCli === true ? antigravityCliRefusedSession(error) : antigravitySignInError(error),
-    required: (instanceId) => { nativeSignIn.forget(instanceId); noteAntigravitySignInRequired(antigravityTokenPath(instanceId)); },
+    required: (instanceId) => {
+      if (launched.get(instanceId)?.nativeCli === true) nativeSignIn.forgetAll();
+      else nativeSignIn.forget(instanceId);
+      noteAntigravitySignInRequired(antigravityTokenPath(instanceId));
+    },
   },
   processStarted: (child, instanceId) => launched.get(instanceId)?.nativeCli === true ? trackNative(instanceId, child) : runtimeProcesses.track(instanceId, child),
   sessionSetupParams: antigravitySessionSetup,

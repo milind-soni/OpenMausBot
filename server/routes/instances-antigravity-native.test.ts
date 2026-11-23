@@ -1,17 +1,17 @@
 // The native Antigravity CLI through the server's own instance routes, with a real registry and driver and a fake CLI
 // on disk: the sign-in, the status, a turn, the check and the sign-out the app offers, and removing the account.
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "../config.ts";
 import type { InstanceConfigMap } from "../contracts.ts";
 import { antigravityProfileDirectory } from "../drivers/antigravity-acp.ts";
 import { AntigravityDriver } from "../drivers/antigravity.ts";
-import { ProviderRegistry } from "../harness/registry.ts";
+import { ENGINE_LIST_REUSE_MS, ProviderRegistry } from "../harness/registry.ts";
 import { json, readBody } from "../harness/http.ts";
 import { ProviderAuthSessions } from "../provider-auth-sessions.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
@@ -27,6 +27,7 @@ const scratch: string[] = [];
 const registries: ProviderRegistry[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(servers.splice(0).map((server) => new Promise((done) => server.close(done))));
   for (const registry of registries.splice(0)) await registry.disposeAll();
   while (scratch.length) await removeTempDir(scratch.pop()!);
@@ -140,6 +141,40 @@ describe.skipIf(WINDOWS)("the native Antigravity CLI through the instance routes
     expect((await call("GET", "/api/instances")).instances.find((entry: any) => entry.instanceId === "antigravity").snapshot.authenticated).toBe(false);
     expect(await call("POST", "/api/instances/antigravity/check", {})).toEqual({ ok: true });
   }, 120_000);
+
+  it("starts the CLI once for a signed-in account however often the engine list is read, until a turn is refused", async () => {
+    const keyring = folder();
+    const { fixture, cfg, registry } = await nativeSetup([], { FAKE_AGY_KEYRING: keyring, FAKE_AGY_KEYRING_SHARED: "1" });
+    await loginAt(fixture, antigravityProfileDirectory("antigravity"), "fixture-code", { FAKE_AGY_KEYRING: keyring, FAKE_AGY_KEYRING_SHARED: "1" });
+    let clock = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => clock);
+    const { call } = await serve(registry, cfg, {
+      describeInstances: () => registry.describe({ reuse: { ms: ENGINE_LIST_REUSE_MS, changed: () => {} } }),
+    });
+    const listed = async (path = "/api/instances") => (await call("GET", path)).instances.find((entry: any) => entry.instanceId === "antigravity").snapshot;
+    const instance = registry.get("antigravity")!;
+    await instance.refreshModels!();
+    const started = () => fixture.methods().filter((method) => method === "initialize").length;
+    expect(await listed()).toMatchObject({ authenticated: true });
+    const settled = started();
+
+    // An open window reads the list on every focus, at most every 30 s, and setup screens ask for a fresh one.
+    for (let step = 1; step <= 40; step += 1) {
+      clock += 30_000;
+      expect(await listed(step % 5 === 0 ? "/api/instances?fresh=1" : "/api/instances")).toMatchObject({ authenticated: true });
+      expect(await instance.snapshot()).toMatchObject({ authenticated: true });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(started()).toBe(settled);
+
+    // The sign-in is removed outside the app: the next turn is refused, and the status says so.
+    rmSync(join(keyring, "shared"));
+    const recorder = recordEvents(instance.adapter);
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "refused", text: "hello", approvalMode: "ask", cwd: fixture.directory });
+    expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId, 30_000)).toMatchObject({ ok: false, stopReason: "auth_required" });
+    recorder.stop();
+    expect(await listed("/api/instances?fresh=1")).toMatchObject({ authenticated: false });
+  }, 180_000);
 
   it("removes an added account and its profile without signing the CLI's shared sign-in out", async () => {
     const { fixture, cfg, registry } = await nativeSetup(["antigravity-added"]);

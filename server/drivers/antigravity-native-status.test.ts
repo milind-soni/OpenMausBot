@@ -90,17 +90,38 @@ describe("what was last read", () => {
     return { read: async () => { const next = states[Math.min(calls++, states.length - 1)]!; if (next instanceof Error) throw next; return next; }, calls: () => calls };
   };
 
-  it("is asked of the CLI once for a read that is still fresh, and again after its time", async () => {
+  it("keeps a signed-out answer for its time, and a signed-in one until forget", async () => {
     let now = 1_000;
     const cache = new NativeSignInCache({ ttlMs: 30_000, now: () => now });
-    const source = answers("out", "in");
+    const source = answers("out", "in", "out");
     expect(await cache.state("a", runtime, source.read)).toBe("out");
     now += 29_999;
     expect(await cache.state("a", runtime, source.read)).toBe("out");
     expect(source.calls()).toBe(1);
     now += 1;
     expect(await cache.state("a", runtime, source.read)).toBe("in");
+    now += 24 * 60 * 60_000;
+    expect(await cache.state("a", runtime, source.read)).toBe("in");
+    expect(cache.known("a", runtime)).toBe("in");
     expect(source.calls()).toBe(2);
+    cache.forget("a");
+    expect(cache.known("a", runtime)).toBeUndefined();
+    expect(await cache.state("a", runtime, source.read)).toBe("out");
+    expect(source.calls()).toBe(3);
+  });
+
+  it("keeps what another request learned, unless forget came after that request began", async () => {
+    const cache = new NativeSignInCache();
+    cache.seen("a", runtime)("in");
+    expect(await cache.state("a", runtime, async () => { throw new Error("must be kept"); })).toBe("in");
+    const late = cache.seen("b", runtime);
+    cache.forget("b");
+    late("in");
+    expect(cache.known("b", runtime)).toBeUndefined();
+    const stale = cache.seen("a", runtime);
+    cache.forgetAll();
+    stale("in");
+    expect(cache.known("a", runtime)).toBeUndefined();
   });
 
   it("is kept for each instance apart", async () => {
