@@ -72,6 +72,7 @@ import { optionsCardRow } from "./OptionsCardRow";
 import { MessageBoundary } from "./MessageBoundary";
 import { RichMessageRow, UserLineNote, richRowKind } from "./RichMessageRow"; import { SetupOffer } from "./SetupOffer"; import { SavedStepsChip } from "./SavedStepsChip";
 import { Composer } from "./Composer";
+import { PlanUsageBand } from "./PlanUsageBand";
 import { ChatErrorBanner, ChatNotice } from "./ChatErrorBanner";
 import { ThreadContextWarning } from "./ContextWarning";
 import { UsageAlert, useLimitResetContinue, usePastLimitNotice } from "./EngineUsage";
@@ -1196,6 +1197,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
         </div>
       )}
       <LiveCallBar bot={bot} />
+      <PlanUsageBand instanceId={bot.modelSelection.instanceId} />
       {canWrite === false ? (
         <NewConversationInstead bot={bot} onNew={() => dispatch({ type: "newTask", botId: bot.id })} />
       ) : (

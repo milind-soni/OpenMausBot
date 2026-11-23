@@ -7,14 +7,14 @@ import { Card, SIMPLE_CARD, SettingsEmptyRow, SettingsGroup, SettingsLook, Setti
 import { UsageSummaryCard } from "./CloudUsageMeter";
 import { formatPlanSpend, type PlanSpend } from "@/lib/plan-spend";
 
-interface PlanWindow {
+export interface PlanWindow {
   available: boolean;
   remainingPercent: number | null;
   usedPercent: number | null;
   resetsAt: string | null;
 }
 
-interface PlanExtra {
+export interface PlanExtra {
   label: string;
   remainingPercent: number;
   usedPercent: number;
@@ -22,12 +22,12 @@ interface PlanExtra {
   spend?: PlanSpend;
 }
 
-interface PlanModelUsage {
+export interface PlanModelUsage {
   name: string;
   windows: PlanExtra[];
 }
 
-interface PlanProvider {
+export interface PlanProvider {
   id: string;
   name: string;
   driver: string;
@@ -40,12 +40,12 @@ interface PlanProvider {
   models?: PlanModelUsage[];
 }
 
-interface PlanUsageReport {
+export interface PlanUsageReport {
   fetchedAt: string;
   providers: PlanProvider[];
 }
 
-function formatResetDistance(resetsAt: string | null, now: number): string | null {
+export function formatResetDistance(resetsAt: string | null, now: number): string | null {
   if (!resetsAt) return null;
   const at = Date.parse(resetsAt);
   if (!Number.isFinite(at) || at <= now) return null;
@@ -151,7 +151,7 @@ function WindowRow({
   );
 }
 
-function usePlanUsage() {
+export function usePlanUsage() {
   const [report, setReport] = useState<PlanUsageReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
