@@ -1,7 +1,9 @@
-// Removes re-creatable dependency and build folders (node_modules, Python virtualenvs, Cargo target) from the task
-// workspaces of long-idle threads. A conversation's own files, clones and outputs stay; only what an install or a
-// build puts back is removed, and never in a busy, unread or handed-off thread.
-import { existsSync, lstatSync, readdirSync, rmSync } from "node:fs";
+// Removes re-creatable dependency folders (node_modules, Python virtualenvs) from the task workspaces of long-idle
+// threads. A conversation's own files, clones and outputs stay; only what an install puts back is removed, and never in
+// a busy, unread or handed-off thread. Only folders folder sync never carries to the person's computer, so no copy of
+// theirs changes. Removal is asynchronous: gigabytes of them must not stall the server's replies.
+import { existsSync, lstatSync, readdirSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { TASK_WORKSPACES_DIR } from "./workspace.ts";
 
@@ -22,7 +24,6 @@ export interface TaskWorkspaceRetentionCandidate {
 function isRecreatable(parent: string, name: string): boolean {
   if (name === "node_modules") return true;
   if (name === ".venv" || name === "venv") return existsSync(join(parent, name, "pyvenv.cfg"));
-  if (name === "target") return existsSync(join(parent, "Cargo.toml"));
   return false;
 }
 
@@ -50,13 +51,13 @@ function findRecreatable(dir: string, depth: number, found: string[]): void {
   }
 }
 
-/** Returns the folders it removed. */
-export function sweepTaskWorkspaceBuildFolders(
+/** Returns the folders it removed. Each candidate is read when its turn comes, so a thread that wakes mid-sweep is kept. */
+export async function sweepTaskWorkspaceBuildFolders(
   candidates: Iterable<TaskWorkspaceRetentionCandidate>,
   idleDays: number = TASK_WORKSPACE_IDLE_DAYS,
   now: number = Date.now(),
   root: string = TASK_WORKSPACES_DIR,
-): string[] {
+): Promise<string[]> {
   const cutoff = now - idleDays * DAY_MS;
   const removed: string[] = [];
   for (const candidate of candidates) {
@@ -71,7 +72,7 @@ export function sweepTaskWorkspaceBuildFolders(
     for (const path of found) {
       if (!isRealDirectory(path)) continue;
       try {
-        rmSync(path, { recursive: true, force: true, maxRetries: 2 });
+        await rm(path, { recursive: true, force: true, maxRetries: 2 });
         removed.push(path);
       } catch (error) {
         console.warn(`[retention] could not remove ${path}: ${(error as Error).message}`);

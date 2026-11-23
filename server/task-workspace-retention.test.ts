@@ -35,26 +35,27 @@ function workspace(threadId: string) {
 }
 
 describe("task workspace retention", () => {
-  it("removes dependency and build folders of a long-idle thread and keeps its own files", () => {
+  it("removes dependency folders of a long-idle thread and keeps its own files and build output", async () => {
     const dir = workspace("old");
 
-    const removed = sweepTaskWorkspaceBuildFolders([candidate({ threadId: "old" })], 14, now, root);
+    const removed = await sweepTaskWorkspaceBuildFolders([candidate({ threadId: "old" })], 14, now, root);
 
-    expect(removed.sort()).toEqual([join(dir, "py", ".venv"), join(dir, "repo", "node_modules"), join(dir, "rust", "target")].sort());
-    for (const kept of ["notes.md", "repo/package.json", "repo/src/index.ts", "rust/Cargo.toml"]) expect(existsSync(join(dir, kept)), kept).toBe(true);
+    expect(removed.sort()).toEqual([join(dir, "py", ".venv"), join(dir, "repo", "node_modules")].sort());
+    // Build output syncs to the person's computer, so it stays.
+    for (const kept of ["notes.md", "repo/package.json", "repo/src/index.ts", "rust/Cargo.toml", "rust/target/debug/app"]) expect(existsSync(join(dir, kept)), kept).toBe(true);
   });
 
-  it("keeps folders that only share a name with build output", () => {
+  it("keeps folders that only share a name with a dependency folder", async () => {
     const dir = join(root, "bot", "lookalikes");
     file(join(dir, "docs", "target", "page.md"));
     file(join(dir, "venv", "readme.md"));
 
-    expect(sweepTaskWorkspaceBuildFolders([candidate({ threadId: "lookalikes" })], 14, now, root)).toEqual([]);
+    expect(await sweepTaskWorkspaceBuildFolders([candidate({ threadId: "lookalikes" })], 14, now, root)).toEqual([]);
     expect(existsSync(join(dir, "docs", "target", "page.md"))).toBe(true);
     expect(existsSync(join(dir, "venv", "readme.md"))).toBe(true);
   });
 
-  it("never touches a recent, busy, unread or handed-off thread", () => {
+  it("never touches a recent, busy, unread or handed-off thread", async () => {
     const cases = [
       candidate({ threadId: "recent", lastActiveAt: now - 13 * DAY_MS }),
       candidate({ threadId: "exact", lastActiveAt: now - 14 * DAY_MS }),
@@ -64,34 +65,34 @@ describe("task workspace retention", () => {
     ];
     for (const each of cases) workspace(each.threadId);
 
-    expect(sweepTaskWorkspaceBuildFolders(cases, 14, now, root)).toEqual([]);
+    expect(await sweepTaskWorkspaceBuildFolders(cases, 14, now, root)).toEqual([]);
     for (const each of cases) expect(existsSync(join(root, "bot", each.threadId, "repo", "node_modules"))).toBe(true);
   });
 
-  it("does not follow a link out of the workspace", () => {
+  it("does not follow a link out of the workspace", async () => {
     const outside = join(root, "outside");
     file(join(outside, "node_modules", "keep.js"));
     const dir = join(root, "bot", "linked");
     mkdirSync(dir, { recursive: true });
     symlinkSync(outside, join(dir, "elsewhere"), "junction");
 
-    expect(sweepTaskWorkspaceBuildFolders([candidate({ threadId: "linked" })], 14, now, root)).toEqual([]);
+    expect(await sweepTaskWorkspaceBuildFolders([candidate({ threadId: "linked" })], 14, now, root)).toEqual([]);
     expect(existsSync(join(outside, "node_modules", "keep.js"))).toBe(true);
   });
 
-  it("skips a bot folder that is a link", () => {
+  it("skips a bot folder that is a link", async () => {
     const outside = join(root, "outside");
     file(join(outside, "linked", "repo", "node_modules", "keep.js"));
     symlinkSync(outside, join(root, "linkbot"), "junction");
 
-    expect(sweepTaskWorkspaceBuildFolders([candidate({ botId: "linkbot", threadId: "linked" })], 14, now, root)).toEqual([]);
+    expect(await sweepTaskWorkspaceBuildFolders([candidate({ botId: "linkbot", threadId: "linked" })], 14, now, root)).toEqual([]);
     expect(existsSync(join(outside, "linked", "repo", "node_modules", "keep.js"))).toBe(true);
   });
 
-  it("ignores ids that are not plain folder names and threads without a workspace", () => {
+  it("ignores ids that are not plain folder names and threads without a workspace", async () => {
     file(join(root, "escape", "node_modules", "keep.js"));
 
-    expect(sweepTaskWorkspaceBuildFolders([
+    expect(await sweepTaskWorkspaceBuildFolders([
       candidate({ botId: "..", threadId: "escape" }),
       candidate({ threadId: "never-created" }),
     ], 14, now, root)).toEqual([]);

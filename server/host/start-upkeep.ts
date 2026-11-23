@@ -15,7 +15,7 @@ export interface StartUpkeepDeps {
   openDirectHandoff: (threadId: string) => boolean;
   cleanupPartials?: () => number;
   sweepLogs?: typeof sweepThreadEventLogs;
-  sweepWorkspaces?: (candidates: Parameters<typeof sweepTaskWorkspaceBuildFolders>[0]) => string[];
+  sweepWorkspaces?: (candidates: Parameters<typeof sweepTaskWorkspaceBuildFolders>[0]) => string[] | Promise<string[]>;
 }
 
 const reason = (error: unknown) => error instanceof Error ? error.message : String(error);
@@ -35,17 +35,31 @@ export function startUpkeep(deps: StartUpkeepDeps): void {
     const swept = (deps.sweepLogs ?? sweepThreadEventLogs)(candidates, retentionDays);
     if (swept > 0) console.log(`[retention] removed event logs for ${swept} idle thread(s) past ${retentionDays} day(s)`);
   };
-  const sweepWorkspacesNow = () => {
-    const candidates = deps.bots().flatMap((bot) => (bot.tasks ?? []).map((task) => ({
-      botId: bot.id,
-      threadId: task.threadId,
-      lastActiveAt: Math.max(task.updatedAt ?? task.createdAt ?? 0, task.closedBy?.at ?? 0, task.archivedAt ?? 0),
-      unread: task.unread === true,
-      busy: deps.busy(bot.id, task.threadId),
-      openDirectHandoff: deps.openDirectHandoff(task.threadId),
-    })));
-    const removed = (deps.sweepWorkspaces ?? ((c) => sweepTaskWorkspaceBuildFolders(c)))(candidates);
-    if (removed.length > 0) console.log(`[retention] removed ${removed.length} dependency or build folder(s) from idle task workspaces`);
+  // Read lazily: the removals before a thread's turn take time, and a thread that wakes meanwhile must read busy.
+  function* workspaceCandidates() {
+    for (const bot of deps.bots()) {
+      for (const task of bot.tasks ?? []) {
+        yield {
+          botId: bot.id,
+          threadId: task.threadId,
+          lastActiveAt: Math.max(task.updatedAt ?? task.createdAt ?? 0, task.closedBy?.at ?? 0, task.archivedAt ?? 0),
+          unread: task.unread === true,
+          busy: deps.busy(bot.id, task.threadId),
+          openDirectHandoff: deps.openDirectHandoff(task.threadId),
+        };
+      }
+    }
+  }
+  let sweepingWorkspaces = false;
+  const sweepWorkspacesNow = async () => {
+    if (sweepingWorkspaces) return;
+    sweepingWorkspaces = true;
+    try {
+      const removed = await (deps.sweepWorkspaces ?? ((c) => sweepTaskWorkspaceBuildFolders(c)))(workspaceCandidates());
+      if (removed.length > 0) console.log(`[retention] removed ${removed.length} dependency folder(s) from idle task workspaces`);
+    } finally {
+      sweepingWorkspaces = false;
+    }
   };
   const sweepAll = () => {
     try {
@@ -53,11 +67,7 @@ export function startUpkeep(deps: StartUpkeepDeps): void {
     } catch (error) {
       console.warn(`thread event log retention sweep failed: ${reason(error)}`);
     }
-    try {
-      sweepWorkspacesNow();
-    } catch (error) {
-      console.warn(`task workspace retention sweep failed: ${reason(error)}`);
-    }
+    sweepWorkspacesNow().catch((error: unknown) => console.warn(`task workspace retention sweep failed: ${reason(error)}`));
   };
   setImmediate(() => {
     try {
