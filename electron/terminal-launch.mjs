@@ -22,6 +22,18 @@ function launch(executable, args, options, run = execFile) {
   });
 }
 
+async function hasDefaultTerminal(run) {
+  try {
+    return await new Promise((resolve) => {
+      run("xdg-terminal-exec", ["--print-id"], { timeout: 2000 }, (error, id) => {
+        resolve(!error && Boolean(id.trim()));
+      });
+    });
+  } catch {
+    return false;
+  }
+}
+
 /** Installer text is deliberately not accepted, so renderer-controlled input never becomes a process argument. */
 export async function openBlankTerminal(platform = process.platform, run = execFile) {
   if (platform === "darwin") {
@@ -43,6 +55,7 @@ export async function openBlankTerminal(platform = process.platform, run = execF
     );
   }
   if (platform === "linux") {
+    if (await hasDefaultTerminal(run) && await launch("xdg-terminal-exec", [], undefined, run)) return true;
     for (const terminal of ["x-terminal-emulator", "gnome-terminal", "konsole", "xterm"]) {
       if (await launch(terminal, [], undefined, run)) return true;
     }

@@ -33,10 +33,9 @@ async function main() {
     writeFileSync(staged, "x");
     const expected = packageInstallCommand("deb", staged);
 
-    // openBlankTerminal tries x-terminal-emulator first on Linux, resolved through PATH.
     const receipt = join(workspace, "launched");
-    const terminal = join(workspace, "x-terminal-emulator");
-    writeFileSync(terminal, `#!/bin/sh\necho "$@" > ${JSON.stringify(receipt)}\n`);
+    const terminal = join(workspace, "xdg-terminal-exec");
+    writeFileSync(terminal, `#!/bin/sh\nif [ "$1" = "--print-id" ]; then echo fixture.desktop; exit 0; fi\necho "$@" > ${JSON.stringify(receipt)}\n`);
     chmodSync(terminal, 0o755);
 
     clipboard.writeText("something else entirely");

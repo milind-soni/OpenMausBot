@@ -3,9 +3,14 @@ import { describe, expect, it } from "vitest";
 
 import { openBlankTerminal } from "./terminal-launch.mjs";
 
-function launcher(outcomes) {
+function launcher(outcomes, defaultTerminal = "fixture.desktop") {
   const calls = [];
-  const run = (executable, args, options) => {
+  const run = (executable, args, options, callback) => {
+    if (callback) {
+      expect([executable, args]).toEqual(["xdg-terminal-exec", ["--print-id"]]);
+      callback(defaultTerminal ? null : new Error("No default terminal"), defaultTerminal);
+      return;
+    }
     calls.push({ executable, args, options });
     const child = new EventEmitter();
     child.unref = () => {};
@@ -45,18 +50,30 @@ describe("blank terminal launcher", () => {
     ]);
   });
 
+  it("opens the configured Linux terminal without a command", async () => {
+    const fake = launcher(["spawn"]);
+    await expect(openBlankTerminal("linux", fake.run)).resolves.toBe(true);
+    expect(fake.calls).toEqual([{ executable: "xdg-terminal-exec", args: [], options: undefined }]);
+  });
+
   it("tries the next Linux terminal after an asynchronous launch error", async () => {
     const fake = launcher(["throw", "spawn"]);
     await expect(openBlankTerminal("linux", fake.run)).resolves.toBe(true);
     expect(fake.calls.map((call) => call.executable)).toEqual([
+      "xdg-terminal-exec",
       "x-terminal-emulator",
-      "gnome-terminal",
     ]);
     expect(fake.calls.every((call) => call.args.length === 0)).toBe(true);
   });
 
+  it("falls back when the desktop launcher has no configured terminal", async () => {
+    const fake = launcher(["spawn"], "");
+    await expect(openBlankTerminal("linux", fake.run)).resolves.toBe(true);
+    expect(fake.calls).toEqual([{ executable: "x-terminal-emulator", args: [], options: undefined }]);
+  });
+
   it("returns false when no Linux terminal launches", async () => {
-    const fake = launcher(["throw", "throw", "throw", "throw"]);
+    const fake = launcher(["throw", "throw", "throw", "throw", "throw"]);
     await expect(openBlankTerminal("linux", fake.run)).resolves.toBe(false);
   });
 

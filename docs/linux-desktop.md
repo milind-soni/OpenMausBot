@@ -106,15 +106,15 @@ Arch-based distributions are not an official target. The release AppImage runs t
 `.pacman` package yourself.
 
 #### Native pacman package
-Releases and CI do not build this package and nothing tests it. Removing it cleans up the launcher and browser
-profile; whether a pacman upgrade re-applies the install steps has not been verified. Build it from source:
+Build the native package from source. On an Arch build host, install the compatibility library used by the bundled FPM packaging tool:
 
 ```sh
+sudo pacman -S --needed libxcrypt-compat
 pnpm package:arch
 sudo pacman -U release/OpenMausBot-<version>-x64.pacman
 ```
 
-Replace `<version>` with the built version (for example, `0.1.149`). Then launch `openmausbot` from the application launcher or command line.
+Replace `<version>` with the built version (for example, `0.1.149`). Open **OpenMausBot** in the application launcher or run `openmausbot` in a terminal. On Omarchy the main window fits a narrow Hyprland tile and **Open terminal** uses your configured terminal.
 
 #### Portable AppImage
 A minimal Arch install lacks the FUSE helper and some desktop libraries the AppImage needs, so install them first:
@@ -294,7 +294,7 @@ Cua's Hyprland plugin turned on. The plugin gives bots two seats of their own in
 keyboard. Every other Wayland desktop (GNOME, KDE, Sway, or Hyprland without the plugin) keeps the safety gate above.
 Support is experimental, like the plugin itself, which Omarchy leaves off by default and outside its normal installer.
 
-1. Install and start the AppImage as in [Arch Linux and EndeavourOS](#arch-linux-and-endeavouros-appimage).
+1. Install and start the AppImage as in [Arch Linux and EndeavourOS](#arch-linux-and-endeavouros).
 2. Install Omarchy's Cua packages, `cua-driver-bin` and `cua-hyprland-plugin`, and turn the plugin on as
    [Cua's Omarchy guide](https://cua.ai/docs/cua-sdk/guides/omarchy) describes. In Omarchy's Lua configuration that is
    `hl.config({plugin = {cua = {enabled = true}}})`; in a legacy configuration, `plugin:cua:enabled = true`. Then run
@@ -396,4 +396,4 @@ package is built with the static runtime.
 If it prints `No suitable fusermount binary found on the $PATH` or `Cannot mount AppImage, please check your FUSE
 setup`, install the distribution's FUSE 3 package (`fuse3` on Ubuntu, Debian and Arch). If it then names a missing
 `lib*.so` file, install the desktop libraries listed under
-[Arch Linux and EndeavourOS](#arch-linux-and-endeavouros-appimage), or your distribution's packages for them.
+[Arch Linux and EndeavourOS](#arch-linux-and-endeavouros), or your distribution's packages for them.

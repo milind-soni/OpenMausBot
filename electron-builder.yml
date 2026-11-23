@@ -267,7 +267,11 @@ rpm:
 
 pacman:
   packageCategory: utils
-  fpm: ["--depends", "fuse3", "--depends", "gtk3", "--depends", "nss", "--depends", "alsa-lib", "--depends", "libcups", "--depends", "mesa"]
+  depends: [gtk3, nss, alsa-lib, libcups, mesa, libnotify, libsecret, libappindicator-gtk3, xdg-utils]
+  fpm:
+    - --after-upgrade
+    - build/linux-after-install.sh
+    - build/arch-openmausbot=/usr/bin/openmausbot
   afterInstall: build/linux-after-install.sh
   afterRemove: build/linux-after-remove.sh
 

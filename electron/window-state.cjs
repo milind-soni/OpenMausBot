@@ -1,5 +1,14 @@
+const { isHyprlandSession } = require("./cua-hyprland.cjs");
+
 const DEFAULT_BOUNDS = Object.freeze({ width: 1040, height: 760 });
-const MIN_BOUNDS = Object.freeze({ width: 840, height: 620 });
+const TILE_MIN_BOUNDS = Object.freeze({ width: 390, height: 480 });
+const DESKTOP_MIN_BOUNDS = Object.freeze({ width: 840, height: 620 });
+
+function minimumWindowBounds(platform, env) {
+  return platform === "linux" && isHyprlandSession(env) ? TILE_MIN_BOUNDS : DESKTOP_MIN_BOUNDS;
+}
+
+const MIN_BOUNDS = minimumWindowBounds(process.platform, process.env);
 
 const integer = (value) => Number.isFinite(value) && Number.isInteger(value);
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
@@ -37,7 +46,7 @@ function validWorkAreas(workAreas) {
 }
 
 /** workAreas must put the primary display first. */
-function resolveWindowState(state, workAreas, defaults = DEFAULT_BOUNDS) {
+function resolveWindowState(state, workAreas, defaults = DEFAULT_BOUNDS, minimum = MIN_BOUNDS) {
   const areas = validWorkAreas(workAreas);
   const primary = areas[0];
   const defaultBounds = {
@@ -57,8 +66,8 @@ function resolveWindowState(state, workAreas, defaults = DEFAULT_BOUNDS) {
     }
   }
 
-  const minWidth = Math.min(MIN_BOUNDS.width, target.width);
-  const minHeight = Math.min(MIN_BOUNDS.height, target.height);
+  const minWidth = Math.min(minimum.width, target.width);
+  const minHeight = Math.min(minimum.height, target.height);
   const width = clamp(parsed.bounds.width, minWidth, target.width);
   const height = clamp(parsed.bounds.height, minHeight, target.height);
   if (bestArea === 0) {
@@ -91,6 +100,7 @@ function normalizeUnreadCount(value) {
 module.exports = {
   DEFAULT_BOUNDS,
   MIN_BOUNDS,
+  minimumWindowBounds,
   normalizeUnreadCount,
   parseWindowState,
   resolveWindowState,

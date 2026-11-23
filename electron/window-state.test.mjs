@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 
 const require = createRequire(import.meta.url);
-const { normalizeUnreadCount, parseWindowState, resolveWindowState } = require("./window-state.cjs");
+const { minimumWindowBounds, normalizeUnreadCount, parseWindowState, resolveWindowState } = require("./window-state.cjs");
 
 const primary = { x: 0, y: 0, width: 1920, height: 1080 };
 const left = { x: -1600, y: 0, width: 1600, height: 900 };
@@ -37,6 +37,15 @@ describe("desktop window state", () => {
       bounds: { width: 1040, height: 760 },
       maximized: false,
     });
+  });
+
+  it("reopens a narrow Hyprland tile at its saved size", () => {
+    const env = { XDG_CURRENT_DESKTOP: "Hyprland", HYPRLAND_INSTANCE_SIGNATURE: "fixture" };
+    const minimum = minimumWindowBounds("linux", env);
+    const bounds = { x: 20, y: 20, width: 480, height: 540 };
+    expect(resolveWindowState({ bounds }, [primary], undefined, minimum).bounds).toEqual(bounds);
+    expect(minimumWindowBounds("linux", {})).toEqual({ width: 840, height: 620 });
+    expect(minimumWindowBounds("win32", env)).toEqual({ width: 840, height: 620 });
   });
 
   it("bounds native unread counts", () => {
