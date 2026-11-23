@@ -7472,7 +7472,7 @@ async function beginTurn(
     const onDispatchError = opts?.onDispatchError;
     opts = {
       ...opts,
-      runOn: continuingRoutine.runOn,
+      runOn: continuingRoutine.runOn, automationRunId: continuingRoutine.id,
       automationSource: continuingRoutine.triggerSource ?? (continuingRoutine.manual ? "manual" : "schedule"),
       onDispatchError: (message) => {
         routines?.failThread(threadId, message, { cause: "refused" });
@@ -8242,12 +8242,11 @@ async function beginTurn(
         kind: computerKind,
         vmPrivate: localVmMode(cfg) === "per-bot",
       });
-      const coordinationNode = opts?.coordination ? coordinator.node(opts.coordination.id) : undefined;
+      const coordinationNode = opts?.coordination ? coordinator.node(opts.coordination.id) : undefined, accountRefusal = appTriggers.turnRefusal(threadId, opts?.automationRunId);
       if (opts?.coordination && (!coordinationNode || coordinationNode.status !== "running" || roomHandoffProblem(coordinationNode,
         coordinationNode.parentId ? coordinator.node(coordinationNode.parentId) : undefined))) {
         throw new DirectTurnSetupCancelled("Coordination access changed before dispatch");
-      }
-      const accountRefusal = appTriggers.turnRefusal(threadId, opts?.automationRunId); if (accountRefusal) throw new DirectTurnSetupCancelled(accountRefusal);
+      } else if (accountRefusal) throw new DirectTurnSetupCancelled(accountRefusal);
       // The tool bridge is decided here: the folder the turn is launched in is known, and the prompt is not built yet.
       applyAgentsBridge(threadId, integrations, cfg, bot, turnEngine(instance, providerConfigs(), registry.lastSnapshot(instance.instanceId), cwd));
       const confined = proactive.fence.confines(threadId), apiFenced = botApiThread(threadId); if (confined || apiFenced) for (const key of Object.keys(integrations) as Array<keyof typeof integrations>) if (!(apiFenced ? BOT_API_TOOLS : READ_AND_DRAFT_TOOLS).has(key)) delete integrations[key];
