@@ -33,12 +33,13 @@ describe("automationNote", () => {
   it("reads a wait's follow-up as the app's line, not the person's", () => {
     const text = followUpLine("the report", "Read /tmp/report.txt\nand say what changed.");
     expect(text).toBe("[Wait finished: the report] Read /tmp/report.txt\nand say what changed.");
-    expect(automationNote(line(text))).toEqual({ wait: "the report", instructions: "Read /tmp/report.txt\nand say what changed." });
+    expect(automationNote(line(text), knownWaits([waitCard("the report", "Read /tmp/report.txt\nand say what changed.")]))).toEqual({ wait: "the report", instructions: "Read /tmp/report.txt\nand say what changed." });
   });
 
   it("keeps the app's second-start line out of the instructions and names what cut the first start off", () => {
-    expect(automationNote(line(followUpLine("the build", "Ship it.", "restarted")))).toEqual({ wait: "the build", instructions: "Ship it.", resumed: "restart" });
-    expect(automationNote(line(followUpLine("the build", "Ship it.", "stalled")))).toEqual({ wait: "the build", instructions: "Ship it.", resumed: "interrupted" });
+    const waits = knownWaits([waitCard("the build", "Ship it.")]);
+    expect(automationNote(line(followUpLine("the build", "Ship it.", "restarted")), waits)).toEqual({ wait: "the build", instructions: "Ship it.", resumed: "restart" });
+    expect(automationNote(line(followUpLine("the build", "Ship it.", "stalled")), waits)).toEqual({ wait: "the build", instructions: "Ship it.", resumed: "interrupted" });
   });
 
   it("reads a second start that only carries the app's line", () => {
@@ -68,7 +69,15 @@ describe("automationNote", () => {
     expect(automationNote(line(text), knownWaits([card]))).toEqual({ wait: "release [QA] aprovada", instructions: "Publish [the] notes." });
     expect(automationNote(line(text), knownWaits([waitCard("release [QA", "Something else."), card]))?.wait).toBe("release [QA] aprovada");
     expect(lastLine({} as Bot, [card, line(text)], [], false)).toBe("Following up on the wait: release [QA] aprovada");
-    expect(automationNote(line(text))?.wait).toBe("release [QA");
+  });
+
+  it("names no wait, and keeps the whole line, when no loaded card confirms where the name ends", () => {
+    const text = followUpLine("release [QA] aprovada", "Publish [the] notes.");
+    for (const waits of [[], knownWaits([waitCard("other", "Publish [the] notes.")])]) {
+      expect(automationNote(line(text), waits)).toEqual({ unnamed: true, instructions: text });
+      expect(automationNote(line(followUpLine("release [QA] aprovada", "Publish [the] notes.", "restarted")), waits)).toEqual({ unnamed: true, instructions: text, resumed: "restart" });
+    }
+    expect(lastLine({} as Bot, [line(text)], [], false)).toBe("Following up on a wait");
   });
 
   it("picks the wait whose card matches the whole line, not the longest name that starts it", () => {
@@ -94,6 +103,20 @@ describe("automationNote", () => {
     expect(automationNote(line(followUpLine("build", "prod] Check logs", "restarted")), waits)).toEqual({ unnamed: true, instructions: text, resumed: "restart" });
   });
 
+  it("names no wait when the line's own card is not loaded, even if another wait's card matches it", () => {
+    const short = waitCard("build", "prod] Check logs"), long = waitCard("build] prod", "Check logs");
+    const text = followUpLine("build", "prod] Check logs"), resumed = followUpLine("build", "prod] Check logs", "restarted");
+    for (const [waitId, other] of [["build", long], ["build] prod", short]] as const) {
+      expect(automationNote(line(text, { waitId }), knownWaits([other]))).toEqual({ unnamed: true, instructions: text });
+      expect(automationNote(line(resumed, { waitId }), knownWaits([other]))).toEqual({ unnamed: true, instructions: text, resumed: "restart" });
+      expect(automationNote(line(text, { waitId }), [])).toEqual({ unnamed: true, instructions: text });
+      expect(lastLine({} as Bot, [other, line(text, { waitId })], [], false)).toBe("Following up on a wait");
+      expect(lastLine({} as Bot, [other, line(resumed, { waitId })], [], false)).toBe("Following up on a wait");
+    }
+    setLocale("pt-br");
+    expect(automationNoteTitle(automationNote(line(text, { waitId: "build" }), knownWaits([long]))!)).toBe("Continuação de uma espera");
+  });
+
   it("sends again the line a reply answers, and offers for editing only what the person typed", () => {
     const asked = typed("Tell me when the report is ready", { id: "asked" });
     const wait = line(followUpLine("the report", "Say it is ready."), { id: "wait" });
@@ -106,16 +129,16 @@ describe("automationNote", () => {
   });
 
   it("is no bubble of the person's, no line they wrote, and previews in the app's words", () => {
-    const wait = line(followUpLine("the report", "Say it is ready."), { id: "wait" });
+    const wait = line(followUpLine("the report", "Say it is ready."), { id: "wait" }), card = waitCard("the report", "Say it is ready.");
     const asked = line("Tell me when the report is ready", { id: "asked" });
     const answer = { id: "answer", role: "bot", kind: "text", at: 3, text: "It is ready." } as Message;
     expect(bubbleGroup(asked, "bot")).toBe("user");
     expect(bubbleGroup(wait, "bot")).toBeNull();
     expect(firstUnreadMessageId([asked, wait, answer])).toBe("wait");
     expect(unreadContextMessage([asked, wait, answer], "answer")?.id).toBe("asked");
-    expect(lastLine({} as Bot, [asked, wait], [], false)).toBe("Following up on the wait: the report");
+    expect(lastLine({} as Bot, [card, asked, wait], [], false)).toBe("Following up on the wait: the report");
     setLocale("pt-br");
-    expect(automationNoteTitle(automationNote(wait)!)).toBe("Continuação da espera: the report");
+    expect(automationNoteTitle(automationNote(wait, knownWaits([card]))!)).toBe("Continuação da espera: the report");
     expect(automationNoteTitle(automationNote(line(continueNote("restarted")))!)).toBe("Retomada depois que o OpenMausBot reiniciou");
   });
 });
