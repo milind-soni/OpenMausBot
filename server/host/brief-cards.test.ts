@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import englishCatalog from "../../src/locales/en.json" with { type: "json" };
 import type { WidgetText, WidgetTextParam } from "../../shared/widget-text.ts";
 import { parseWidgetInput } from "../../shared/widget.ts";
-import { WATCH_FAILURE } from "./brief.ts";
+import { WATCH_FAILURE_WORDS } from "./brief.ts";
 import { briefCard, prepCard, reminderCard, type BriefFacts } from "./brief-cards.ts";
 
 const english = englishCatalog as Record<string, string>;
@@ -62,6 +62,6 @@ describe("the brief's cards", () => {
   });
 
   it("word a watch's failure as the catalog does", () => {
-    for (const [key, words] of Object.entries(WATCH_FAILURE)) expect(english[key]).toBe(words);
+    for (const [key, words] of Object.entries(WATCH_FAILURE_WORDS)) expect(english[key]).toBe(words);
   });
 });

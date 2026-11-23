@@ -8,6 +8,8 @@ import { test } from "node:test";
 
 import { bringableBots, installTeamMove, teamMoveConfirmWords } from "./team-move-main.mjs";
 import nativeText from "./native-text.cjs";
+import product from "../product.json" with { type: "json" };
+const APP = product.name;
 
 const HOME = "https://home.example.test", TEAM = "https://acme.example.test", OTHER = "https://other.example.test";
 const state = { status: "connected", teams: [
@@ -120,7 +122,7 @@ test("keeps the last bot on My Cloud, and leaves out what already left", () => {
 
 test("its confirm says what the page's confirm says, word for word", () => {
   const en = JSON.parse(readFileSync(new URL("../src/locales/en.json", import.meta.url), "utf8"));
-  const fill = (key) => en[key].replaceAll("{bot}", "Atlas").replaceAll("{team}", "Acme");
+  const fill = (key) => en[key].replaceAll("{bot}", "Atlas").replaceAll("{team}", "Acme").replaceAll("{app}", APP);
   const words = teamMoveConfirmWords({ bot: "Atlas", team: "Acme" });
   assert.equal(words.message, fill("teamMove.title"));
   assert.equal(words.buttons[0], fill("teamMove.confirm"));

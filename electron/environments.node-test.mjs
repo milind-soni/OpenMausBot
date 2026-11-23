@@ -3,6 +3,8 @@ import { test } from "node:test";
 import { createRequire } from "node:module";
 
 import { parseServerInput } from "./server-address.mjs";
+import product from "../product.json" with { type: "json" };
+const APP = product.name;
 
 const require = createRequire(import.meta.url);
 const env = require("./environments.cjs");
@@ -186,8 +188,8 @@ test("the places line names this computer's bots briefly, says nothing when its 
 
 test("native window identity distinguishes hosted HTML, companion data, and the local workspace", () => {
   const state = { environments: [{ id: "old", name: "Old team", origin: "https://old.example" }], activeId: "old" };
-  assert.equal(env.workspaceWindowTitle(state), "OpenMausBot — Hosted: Old team (old.example)");
-  assert.equal(env.workspaceWindowTitle(state, { serverName: "Office", endpoint: "https://c-office.openmausbot.com" }), "OpenMausBot — Connected to: Office (c-office.openmausbot.com)");
+  assert.equal(env.workspaceWindowTitle(state), `${APP} — Hosted: Old team (old.example)`);
+  assert.equal(env.workspaceWindowTitle(state, { serverName: "Office", endpoint: "https://c-office.openmausbot.com" }), `${APP} — Connected to: Office (c-office.openmausbot.com)`);
   assert.equal(env.workspaceWindowTitle(env.withActive(state, "local")), "OpenMausBot");
 });
 
@@ -382,7 +384,7 @@ test("once My Cloud is home the switcher lists whole places only: My Cloud first
   assert.equal(env.otherPlaces({ ...state, environments: state.environments.filter((entry) => entry.id !== "o") }, home), 0, "My Cloud alone: no switcher");
   assert.equal(env.workspaceWindowTitle(state, null, home), "OpenMausBot — My Cloud", "with another place besides, the window names the one it shows");
   assert.equal(env.workspaceWindowTitle({ ...state, environments: state.environments.filter((entry) => entry.id !== "o") }, null, home), "OpenMausBot", "the window onto home alone is simply the app");
-  assert.equal(env.workspaceWindowTitle({ ...state, activeId: "o" }, null, home), "OpenMausBot — Hosted: Office (office.example.test)");
+  assert.equal(env.workspaceWindowTitle({ ...state, activeId: "o" }, null, home), `${APP} — Hosted: Office (office.example.test)`);
 });
 
 const TEAM = "https://omb-u-acme.fly.dev";

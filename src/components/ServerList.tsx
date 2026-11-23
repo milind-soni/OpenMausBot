@@ -34,7 +34,7 @@ export function updateCommand(install: ServerInstall | null, version: string): s
 function UpdateNote({ name, status, appVersion, onHide }: { name: string; status: ServerStatus; appVersion: string; onHide: () => void }) {
   const { state, copy } = useCopyFeedback(updateCommand(status.install, appVersion));
   return <div data-server-behind className="mt-2 flex items-center gap-2 rounded-lg bg-inset px-3 py-2 text-[12px] text-ink">
-    <span className="min-w-0 flex-1">{t("servers.behind", { name, server: status.version ?? "", app: appVersion })}</span>
+    <span className="min-w-0 flex-1">{t("servers.behind", { name, server: status.version ?? "", version: appVersion })}</span>
     <button type="button" onClick={copy} className="shrink-0 font-medium text-accent-text hover:underline">{t(state === "copied" ? "servers.copied" : "servers.behind.copy")}</button>
     <button type="button" onClick={onHide} aria-label={t("servers.behind.hide")} className="shrink-0 text-ink-secondary hover:text-ink"><X size={13} /></button>
   </div>;

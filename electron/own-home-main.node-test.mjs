@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { handSaved, installOwnHome, openServerSession, OWNER_KNOWN_MS, OWNER_RETRY_MS, parseChoice } from "./own-home-main.mjs";
+import product from "../product.json" with { type: "json" };
+const APP = product.name;
 
 const ID = "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f";
 const garage = { id: "g", kind: "remote", name: "Garage server", origin: "https://garage.example.test" };
@@ -87,7 +89,7 @@ test("starting asks the server once more, and keeps this computer's bots here wh
   const cases = [
     [{ own: false }, "Garage server has other people on it, so your bots stay here."],
     [{ signedIn: false }, "This app isn't signed in to Garage server."],
-    [{ own: true, move: false }, "Update OpenMausBot on Garage server first"],
+    [{ own: true, move: false }, `Update ${APP} on Garage server first`],
   ];
   for (const [answer, words] of cases) {
     const { own } = install({ answers: { [garage.origin]: answer } });

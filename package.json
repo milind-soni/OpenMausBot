@@ -26,6 +26,8 @@
     "lint": "oxlint --deny-warnings .",
     "check:contrast": "node scripts/check-skin-contrast.mjs",
     "i18n:check": "node scripts/generate-locale.mjs --check",
+    "product:apply": "node scripts/product.mjs",
+    "product:check": "node scripts/product.mjs --check",
     "dev": "vite",
     "docs:dev": "pnpm --filter @openmausbot/docs dev",
     "docs:build": "pnpm --filter @openmausbot/docs build",

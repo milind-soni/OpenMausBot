@@ -1,0 +1,28 @@
+# Checks that keep this fork apart from upstream: no enterprise/ folder (it is
+# under the OpenMausBot Enterprise License) and installer names, app id and
+# update source that match product.json.
+name: fork-guards
+
+on:
+  push:
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: enterprise/ stays out, installer matches product.json
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: enterprise/ stays out of this fork
+        run: |
+          if [ -e enterprise ]; then
+            echo "enterprise/ is under the OpenMausBot Enterprise License and must not be in this fork; delete it after the upstream merge."
+            exit 1
+          fi
+      - name: electron-builder.yml matches product.json
+        run: node scripts/product.mjs --check

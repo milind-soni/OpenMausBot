@@ -5,6 +5,7 @@ import type { Routine, RoutineRun } from "@/lib/routines";
 import { RoutineList } from "./RoutineList";
 import { latestRoutineRun, routineNextLabel } from "@/lib/routine-display";
 import { setLocale } from "@/lib/i18n";
+import { PRODUCT_NAME } from "@/lib/brand";
 
 const routine: Routine = {
   id: "brief", name: "Morning brief", prompt: "Report progress", target: "bot", botId: "scout", runOn: "maus", enabled: true,
@@ -67,10 +68,10 @@ describe("routine list", () => {
     setLocale("en");
   });
   it("says a coded run result in the app language, and the run's own words otherwise", () => {
-    const waiting = { ...run, output: undefined, attention: "Starting again shortly after OpenMausBot restarted while it ran", attentionCode: "routines.server.retryAfterRestart" } as RoutineRun;
-    expect(list({ runs: [waiting] })).toContain("Starting again shortly after OpenMausBot restarted while it ran");
+    const waiting = { ...run, output: undefined, attention: `Starting again shortly after ${PRODUCT_NAME} restarted while it ran`, attentionCode: "routines.server.retryAfterRestart" } as RoutineRun;
+    expect(list({ runs: [waiting] })).toContain(`Starting again shortly after ${PRODUCT_NAME} restarted while it ran`);
     setLocale("pt-br");
-    expect(list({ runs: [waiting] })).toContain("Vai começar novamente em instantes: o OpenMausBot reiniciou durante a execução");
+    expect(list({ runs: [waiting] })).toContain(`Vai começar novamente em instantes: o ${PRODUCT_NAME} reiniciou durante a execução`);
     expect(list()).toContain("Brief prepared.");
     setLocale("en");
   });

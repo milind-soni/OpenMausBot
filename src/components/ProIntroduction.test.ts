@@ -13,6 +13,7 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
 vi.mock("@/state/store", () => ({ useStore: () => ({ dispatch: f.dispatch }),
   CLOUD_LINK_SETTINGS: { type: "toggleAppSettings", open: true, section: "cloudAccount", cloudLink: true } }));
 import { ProSettingsCard, proOfferAvailable } from "./ProIntroduction";
+import { PRODUCT_NAME } from "@/lib/brand";
 
 const PLANS = [{ tier: "starter", label: "Starter", amount: 1500, trialDays: 7 }, { tier: "pro", label: "Pro", amount: 4900, trialDays: 7 }];
 const TRIAL: CloudOffer = { plans: PLANS, recommended: "pro", creditUsd: 5, refundDays: 14 };
@@ -50,7 +51,7 @@ const press = (label: string, Component = ProSettingsCard) => {
 it("for someone who may buy: what Cloud does, the Admin's lowest price and money-back; Start free trial and Compare plans both open the sheet, never the website", async () => {
   const html = await card(signedOut);
   for (const text of ["MausBot Cloud", "Keeps your bots and routines running 24/7, even when this computer is off.", "MausBot Cloud plans from $15/month + tax.",
-    "14-day money-back on every plan.", "OpenMausBot on this computer stays free and open source.", "Compare plans", "Start free trial", "Sign in to your Cloud plan"]) expect(html).toContain(text);
+    "14-day money-back on every plan.", `${PRODUCT_NAME} on this computer stays free and open source.`, "Compare plans", "Start free trial", "Sign in to your Cloud plan"]) expect(html).toContain(text);
   for (const gone of ["OMB", "$89", "launch price", "New features first", "Get Pro", "OpenMausBot Pro", "OpenMausBot Cloud"]) expect(html).not.toContain(gone);
   press("Start free trial");
   expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "app_settings" });

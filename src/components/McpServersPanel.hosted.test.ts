@@ -27,6 +27,7 @@ vi.mock("./bot-panel/panel-link", () => ({ openBotSettings: fixture.openBotSetti
 
 import { openExternalLink } from "@/lib/app-links";
 import { McpServersPanel } from "./McpServersPanel";
+import { PRODUCT_NAME } from "@/lib/brand";
 
 interface Listing { name: string; type: "http"; url: string; headerKeys: string[]; enabled: boolean; auth: "signed-in" | "needs-sign-in"; managedBy?: string }
 const listing = (app: HostedApp, extra: Partial<Listing> = {}): Listing => ({ name: app.id, type: "http", url: app.url, headerKeys: [], enabled: false, auth: "needs-sign-in", ...extra });
@@ -318,7 +319,7 @@ describe("the Agentcard tile", () => {
     expect(tile.querySelector("img")).toBeNull();
     expect(tile.querySelector("svg")).not.toBeNull();
     expect(tile.textContent).toContain("Shop and pay from your own Agentcard account.");
-    expect(tile.textContent).toContain("OpenMausBot stores no card details");
+    expect(tile.textContent).toContain(`${PRODUCT_NAME} stores no card details`);
   });
 });
 

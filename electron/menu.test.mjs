@@ -125,7 +125,7 @@ describe("buildApplicationMenu", () => {
     expect(template[0].submenu.find((entry) => entry.accelerator === "CmdOrCtrl+,").label).toBe("Configurações…");
     expect(template[0].submenu.at(-1)).toEqual({ role: "quit", label: "Sair do app OpenMausBot" });
     expect(template.map((entry) => entry.label)).toEqual(["OpenMausBot", "Arquivo", "Editar", "Servidor", "Visualizar", "Janela"]);
-    for (const platform of ["win32", "linux"]) expect(build(platform, { t })[0].submenu[0].label).toBe("Sair do OpenMausBot");
+    for (const platform of ["win32", "linux"]) expect(build(platform, { t })[0].submenu[0].label).toBe("Sair");
   });
 
   // Electron 43.7.9 lib/browser/api/menu-item-roles.ts: each role menu's default items, in order.

@@ -1,0 +1,6 @@
+{
+  "name": "MausBot",
+  "appName": "OpenMausBot",
+  "appId": "com.openmausbot.app",
+  "updates": { "owner": "tanlull", "repo": "OpenMausBot" }
+}

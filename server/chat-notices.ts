@@ -1,12 +1,12 @@
 import { failedTurnTool, type FailedTurnTool } from "../shared/failed-turn.ts";
-import { formatServerText, isReferenceParam, type ServerText, type ServerTextParams } from "../shared/server-text.ts";
+import { formatProductText, isReferenceParam, type ServerText, type ServerTextParams } from "../shared/server-text.ts";
 import { redactParams } from "../shared/redact.ts";
 import { DRIVER_NOTICE } from "./drivers/driver-notices.ts";
 
 /** The client translates by key and falls back to this English, which the row keeps for phones, exports and older clients. */
 export const CHAT_NOTICE = {
   ...DRIVER_NOTICE,
-  "chat.notice.restartInterrupted": "turn interrupted — OpenMausBot restarted",
+  "chat.notice.restartInterrupted": "turn interrupted — {app} restarted",
   "chat.notice.resumingAfterRestart": "Resuming after a restart",
   "chat.notice.cutOffByRestart": "{name} was cut off by a restart; resuming",
   "chat.notice.stalled": "no activity for {minutes} minutes — the turn was stopped",
@@ -142,12 +142,12 @@ export const CHAT_NOTICE = {
   "chat.notice.waitBotGone": "Stopped waiting for {label}: {botName} no longer exists.",
   "chat.notice.waitExpiredOne": "Stopped waiting for {label} after {hours} hour.",
   "chat.notice.waitExpiredMany": "Stopped waiting for {label} after {hours} hours.",
-  "chat.notice.computerDesktopOnly": "Only the OpenMausBot app on this computer can let a bot use it. Open the app here, or let the bot work in its own browser or on a cloud desktop instead.",
-  "chat.notice.computerPermissionsThenRestart": "OpenMausBot can't use this computer yet — make sure OpenMausBot has the permissions it asks for, then restart it",
-  "chat.notice.computerNotReadyDetail": "OpenMausBot can't use this computer yet — {reason}",
+  "chat.notice.computerDesktopOnly": "Only the {app} app on this computer can let a bot use it. Open the app here, or let the bot work in its own browser or on a cloud desktop instead.",
+  "chat.notice.computerPermissionsThenRestart": "{app} can't use this computer yet — make sure {app} has the permissions it asks for, then restart it",
+  "chat.notice.computerNotReadyDetail": "{app} can't use this computer yet — {reason}",
   "chat.notice.computerToolsDidNotStart": "The tools for this computer did not start this time ({why}). Send your message again in a moment.",
   "chat.notice.computerToolsStillNotStarting": "The tools for this computer are still not starting.",
-  "chat.notice.computerNotReadyMacPermission": "OpenMausBot can't use this computer yet — {reason}. Relaunch OpenMausBot after granting the missing macOS permission.",
+  "chat.notice.computerNotReadyMacPermission": "{app} can't use this computer yet — {reason}. Relaunch {app} after granting the missing macOS permission.",
   "chat.notice.computerSystemUnsupported": "bots can't use this computer on this system — choose another place for this bot to work",
   "chat.notice.computerAiUnsupported": "this bot's AI can't use this computer — pick another AI for this bot, or choose another place for it to work",
   "chat.notice.memoryReclaimedBrowser": "Ran out of room, so I closed the browser to keep everything else running.",
@@ -164,7 +164,7 @@ export type ChatNoticeKey = keyof typeof CHAT_NOTICE;
 export function chatNotice(key: ChatNoticeKey, params?: ServerTextParams): string {
   const words = params && Object.fromEntries(Object.entries(params).map(([name, value]) =>
     [name, isReferenceParam(name, value) && Object.hasOwn(CHAT_NOTICE, value) ? CHAT_NOTICE[value as ChatNoticeKey] : value]));
-  return formatServerText(CHAT_NOTICE[key], words);
+  return formatProductText(CHAT_NOTICE[key], words);
 }
 
 export function noticeLine<Key extends ChatNoticeKey, Params extends ServerTextParams = ServerTextParams>(key: Key, params?: Params) {

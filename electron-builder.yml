@@ -15,7 +15,7 @@ protocols:
 # stranded on its installed version.
 publish:
   - provider: github
-    owner: milind-soni
+    owner: tanlull
     repo: OpenMausBot
 
 directories:
@@ -48,6 +48,7 @@ files:
   - src/locales/*.json
   - "!src/locales/source-hashes.json"
   - package.json
+  - product.json
 
 asar: true
 

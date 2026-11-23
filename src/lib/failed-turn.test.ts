@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Bot, InstanceInfo } from "@/state/store";
+import { PRODUCT_NAME } from "@/lib/brand";
 
 vi.hoisted(() => vi.stubGlobal("window", {}));
 const { activityPreview, botEngine, failedTurnCause, signedOutEngine } = await import("./failed-turn");
@@ -95,7 +96,7 @@ describe("a failed turn the server words as a notice", () => {
   it("previews in the person's language with its code, and in English without one", () => {
     setLocale("pt-br");
     try {
-      expect(activityPreview(restarted, undefined)).toBe("Sessão interrompida: o OpenMausBot reiniciou.");
+      expect(activityPreview(restarted, undefined)).toBe(`Sessão interrompida: o ${PRODUCT_NAME} reiniciou.`);
       expect(activityPreview({ name: restarted.name, ok: false }, undefined)).toBe("turn interrupted — OpenMausBot restarted");
     } finally {
       setLocale("en");

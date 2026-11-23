@@ -95,7 +95,7 @@ export function tFromServer(key: string | undefined, fallback: string | undefine
 export function tFromServer(key: string | undefined, fallback: string | undefined, params?: Record<string, string | number>): string | undefined {
   if (!key || !Object.hasOwn(en, key)) return fallback;
   const template = activePack[key as LocaleKey] ?? en[key as LocaleKey];
-  const unfilled = [...template.matchAll(/\{(\w+)\}/g)].some(([, name]) => !params || !Object.hasOwn(params, name!));
+  const unfilled = [...template.matchAll(/\{(\w+)\}/g)].some(([, name]) => name !== "app" && (!params || !Object.hasOwn(params, name!)));
   return unfilled ? fallback : t(key as LocaleKey, params);
 }
 

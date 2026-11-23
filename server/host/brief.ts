@@ -1,4 +1,4 @@
-import type { ServerText } from "../../shared/server-text.ts";
+import { formatProductText, type ServerText } from "../../shared/server-text.ts";
 // The main agent's brief: one server-built card a day in a fixed chat of the proactive bot's, edited in place, rendered
 // with no AI from what the checks found and what the watch run sorted. It exists only once it has something for the person, opens
 // on the first open of the day and after three hours away, and tells the person once per update. Presence, the brief's home and its rows live in brief.json,
@@ -137,10 +137,13 @@ export interface PresenceAnswer {
   open?: { botId: string; threadId: string };
 }
 
-export const WATCH_FAILURE = {
+/** The catalog's English for a watch that failed; WATCH_FAILURE is what a run stores. */
+export const WATCH_FAILURE_WORDS = {
   "brief.row.watchUnreadable": "The watch's answer could not be read, so nothing was posted. Its emails and meetings wait for the next check.",
-  "brief.row.watchRestarted": "OpenMausBot restarted before this run's answer was read; its emails and meetings wait for the next check.",
+  "brief.row.watchRestarted": "{app} restarted before this run's answer was read; its emails and meetings wait for the next check.",
 } as const;
+export const WATCH_FAILURE = Object.fromEntries(Object.entries(WATCH_FAILURE_WORDS).map(([key, words]) => [key, formatProductText(words)])) as
+  Record<keyof typeof WATCH_FAILURE_WORDS, string>;
 const watchFailureWords = (note: string): { note?: WidgetText } => {
   const key = (Object.keys(WATCH_FAILURE) as Array<keyof typeof WATCH_FAILURE>)
     .find((one) => WATCH_FAILURE[one] === note || (note.endsWith("…") && WATCH_FAILURE[one].startsWith(note.slice(0, -1))));

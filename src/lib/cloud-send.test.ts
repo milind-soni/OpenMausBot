@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import en from "@/locales/en.json";
 import ptBr from "@/locales/pt-br.json";
 import { botMoveLine, countedList, filterBots, ipcErrorText, moveLine, moveQuietUntil } from "./cloud-send";
+import { PRODUCT_NAME } from "@/lib/brand";
 
 beforeEach(() => { setLocale("en"); });
 afterEach(() => { setLocale("en"); });
@@ -93,7 +94,7 @@ describe("the one-time move's line", () => {
     expect(moveLine({ phase: "wait", waitingFor: "", waitingWhat: "sign-in", place }, "local")?.text).toBe("Moving your bots to Garage server… waiting for a sign-in to finish");
     expect(moveLine({ phase: "wait", waitingFor: "", place }, "local")?.text).toBe("Moving your bots to Garage server… waiting for your bots to finish");
     expect(moveLine({ phase: "finishing", place }, "local")?.text).toBe("Moving to Garage server… almost done");
-    expect(moveLine({ phase: "copy", updating: true, place }, "local")?.text).toBe("Update OpenMausBot on Garage server. Your bots move there once it's updated.");
+    expect(moveLine({ phase: "copy", updating: true, place }, "local")?.text).toBe(`Update ${PRODUCT_NAME} on Garage server. Your bots move there once it's updated.`);
     expect(moveLine({ phase: "copy", failing: { error: "Garage server has other people on it now, so your bots can't move there." }, place }, "local"))
       .toMatchObject({ kind: "failed", text: "Your bots couldn't move to Garage server yet: Garage server has other people on it now, so your bots can't move there.", retry: true, place });
     expect(moveLine({ phase: "finishing", failing: { error: null }, place }, "local")).toMatchObject({ kind: "failed", text: "Your bots couldn't move to Garage server yet.", retry: true });

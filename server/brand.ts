@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 
+import { APP_NAME, PRODUCT_NAME } from "../shared/product.ts";
 import { DATA_DIR } from "./config.ts";
 import { featureEnabled, type FeatureId } from "./features.ts";
 
@@ -38,9 +39,8 @@ export const brandSchema = z
 
 export type Brand = z.infer<typeof brandSchema>;
 
-export const DEFAULT_BRAND: Brand = { name: "OpenMausBot" };
-/** The product's name wherever a person reads it. OpenMausBot names only the open-source project and its repository. */
-export const PRODUCT_NAME = "MausBot";
+export const DEFAULT_BRAND: Brand = { name: APP_NAME };
+export { PRODUCT_NAME };
 
 export interface BrandStatus {
   brand: Brand;
@@ -86,7 +86,7 @@ export function describeBrand(status: BrandStatus): string {
   return `brand: default${status.notice ? ` (${status.notice})` : ""}`;
 }
 
-/** The name a person reads: an applied brand file's own name, else MausBot. `DEFAULT_BRAND.name` stays the project's name. */
+/** The name a person reads: an applied brand file's own name, else PRODUCT_NAME. */
 export function productName(status: BrandStatus = loadBrand()): string {
   return status.source === "file" ? status.brand.name : PRODUCT_NAME;
 }

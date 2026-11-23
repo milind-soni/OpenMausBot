@@ -1,7 +1,7 @@
 import { en, type LocaleKey } from "@/locales";
 import { activeLocale, intlLocale, t, tFromServer } from "@/lib/i18n";
 import type { Message } from "@/state/store";
-import { formatServerText, isReferenceParam, type ServerTextParams } from "../../shared/server-text";
+import { formatProductText, isReferenceParam, type ServerTextParams } from "../../shared/server-text";
 
 type NoticeTool = Pick<NonNullable<Message["tool"]>, "nameCode" | "nameParams">;
 
@@ -60,7 +60,7 @@ function englishParams(params: ServerTextParams | undefined): ServerTextParams {
  * line's English: a later line the server wrote without a code is shown as written. */
 export function routineLineText(code: string | undefined, english: string, params?: ServerTextParams): string {
   if (!code || !LINE_PREFIXES.some((prefix) => code.startsWith(prefix)) || !Object.hasOwn(en, code) || activeLocale() === "en") return english;
-  if (formatServerText(en[code as LocaleKey], englishParams(params)) !== english) return english;
+  if (formatProductText(en[code as LocaleKey], englishParams(params)) !== english) return english;
   try {
     return tFromServer(code, english, wordedParams(params));
   } catch {
