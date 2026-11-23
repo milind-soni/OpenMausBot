@@ -5,6 +5,7 @@ import type { LiveFishRelayCommand, LiveFishRelayEvent, LiveFishSessionToken } f
 import type { LiveSocket } from "./live-call-controller.ts";
 import { liveInstructions, LiveSessionError, type LiveBot, type LiveEndpoint, type LiveHistoryMessage } from "./live-call.ts";
 import type { LiveConfig } from "./live-config.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const FISH_BASE = "https://api.fish.audio";
 const CREATE_TIMEOUT_MS = 20_000;
@@ -18,7 +19,7 @@ const HISTORY_TOTAL_CHARS = 6_000;
 export const FISH_DELEGATE_TOOL = "delegate";
 /** What a "fish" call reports as its voice: the voice is set on the Fish agent, not per call. */
 export const FISH_AGENT_VOICE = "agent";
-export const FISH_UPDATE_PREFIX = "[OpenMausBot]";
+export const FISH_UPDATE_PREFIX = `[${APP_NAME}]`;
 const MAX_QUEUED_COMMANDS = 50;
 export const RELAY_POLL_MS = 15_000;
 

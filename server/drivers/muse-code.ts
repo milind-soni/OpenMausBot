@@ -27,10 +27,11 @@ import { parseProtocolAskQuestions, questionAnswersById, type ProtocolAskQuestio
 import type { EffortLevel } from "../../shared/wire.ts";
 import { promptHalves, readPromptSplitReceipt, splitSessionPrompt, writePromptSplitReceipt, type PromptSplitReceipt } from "./prompt-split.ts";
 import { turnStdioMcpServers } from "./turn-mcp.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 const DRIVER_KIND = "museCode";
 const PROVIDER_ID = "meta";
-const CLIENT_INFO = { name: "openmausbot", title: "OpenMausBot", version: "1" };
+const CLIENT_INFO = { name: "openmausbot", title: `${APP_NAME}`, version: "1" };
 const MUSE_CONTEXT_WINDOW = 1_048_576;
 const RE_ANCHOR_TURNS = 8;
 const STARTUP_TIMEOUT_MS = 30_000;
@@ -572,7 +573,7 @@ export const MuseCodeDriver: ProviderDriver<MuseConfig> = {
       attach(state, host);
       if (servers.length && !host.grantedMcp) {
         emit({ type: "runtime.notice", threadId: state.threadId, turnId,
-          message: "This Muse Code cannot take OpenMausBot's tools (browser, teammates, apps). Update Muse Code to use them." });
+          message: `This Muse Code cannot take ${APP_NAME}'s tools (browser, teammates, apps). Update Muse Code to use them.` });
       }
       const config = servers.length && host.grantedMcp ? { config: { mcpServers } } : {};
       const resumeId = cursor ?? state.sessionId;

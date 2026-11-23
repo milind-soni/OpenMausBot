@@ -16,6 +16,7 @@ import { boxMemory, heapSizeArgs } from "./box-memory.ts";
 import { clearRecordsFromOtherMachines } from "./data-dir-lease.ts";
 import { OOM_SCORE, protectInit, protectSupervisor, spawnWithOomScore } from "./oom-score.ts";
 import { restartLine, restartPolicy } from "./restart.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 const SERVICE_USER = "maus";
 const SECRETS_FD = 3;
@@ -214,7 +215,7 @@ export function holdVolume(home: string, lock: VolumeLock = flockVolume): void {
     return;
   }
   closeSync(fd);
-  if (result.status === VOLUME_HELD) throw new Error("Another MausBot home is already running on this volume. No data was changed.");
+  if (result.status === VOLUME_HELD) throw new Error(`Another ${PRODUCT_NAME} home is already running on this volume. No data was changed.`);
   const why = result.error?.message ?? (String(result.stderr ?? "").trim().split("\n")[0] || `exit ${result.status}`);
   throw new Error(`This home could not lock its volume (${why}), so it will not start: another home might be using it. No data was changed.`);
 }

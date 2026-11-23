@@ -70,6 +70,7 @@ import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
 import { appMountFor, gateServer, mcpStdioServer } from "../mcp-gate-config.ts"; import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
 import { CALL_TOOL, DESCRIBE_TOOL, SEARCH_TOOL, directoryCallTarget } from "../mcp-directory.ts"; import { codexCommandOutput, codexPatchProgress } from "./tool-progress.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 export { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 
@@ -102,7 +103,7 @@ const PROXY_LITERAL_ENV = ["NODE_USE_ENV_PROXY", "NO_PROXY", "no_proxy"];
 const SHELL_ESSENTIALS = new Set(["PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TERM", "LANG", "TZ"]);
 
 const DENY_TIMEOUT_NOTE =
-  "OpenMausBot: nobody answered this permission request in time. Skip this action and finish what you can without it.";
+  `${APP_NAME}: nobody answered this permission request in time. Skip this action and finish what you can without it.`;
 
 const renamedMcpServers = new Set<string>();
 function noteRenamedMcpServer(name: string, mountName: string): void {
@@ -668,7 +669,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       const settle = async (ok: boolean, stopReason: string | null) => {
         if (state.settled) return;
         state.settled = true; authBridge?.close();
-        for (const finish of Array.from(asks.values())) finish("deny", "OpenMausBot: the turn ended", "system");
+        for (const finish of Array.from(asks.values())) finish("deny", `${APP_NAME}: the turn ended`, "system");
         for (const p of rpcPending.values()) p.reject(new Error("turn settled"));
         rpcPending.clear();
         const complete = () => {
@@ -1171,7 +1172,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
 
       try {
         const initialized = reused ? reused.carried.initialized : await request("initialize", {
-          clientInfo: { name: "openmausbot", title: "OpenMausBot", version: serverVersion() },
+          clientInfo: { name: "openmausbot", title: `${APP_NAME}`, version: serverVersion() },
           // Named permission profiles are an experimental app-server field in Codex 0.151.
           capabilities: { experimentalApi: true },
         });

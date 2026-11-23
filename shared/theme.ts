@@ -4,6 +4,7 @@
 import { z } from "zod";
 
 import { SKIN_IDS } from "./app-settings.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 /** Where a theme's files are served, same origin, behind the server's sign-in: `<prefix><themeId>/<file>`. */
 export const THEME_ASSET_PREFIX = "/api/theme-assets/";
@@ -248,7 +249,7 @@ const SHORTCUT = "Cmd+Option+Shift+R on a Mac, Ctrl+Alt+Shift+R elsewhere";
 /** What a bot needs to restyle the app; app_settings `theme` returns it. */
 export function themeGuide(): string {
   return [
-    "A theme restyles MausBot's desktop app and web app for the person who asked, in every window they have open. Phones keep their own look.",
+    `A theme restyles ${PRODUCT_NAME}'s desktop app and web app for the person who asked, in every window they have open. Phones keep their own look.`,
     "",
     "Colours first. `canvas` (hex) is the base background and `accent` (hex) the highlight; the app derives its surfaces, lines and text from them.",
     "`skin` picks the built-in skin underneath, so anything the theme leaves out comes from it. `colors` sets single roles; `light` and `dark` hold canvas, accent and colors used only in that mode. With both `light` and `dark`, and `skin` left out or set to \"system\", \"daylight\" or \"midnight\", the person's Light or dark choice in Settings picks the mode; otherwise `skin` or a top-level `canvas` fixes it.",

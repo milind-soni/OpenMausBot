@@ -14,6 +14,7 @@
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
+import { APP_NAME } from "../../../shared/product.ts";
 
 /** Installs the Linux libraries Chrome needs (as root, once). */
 export const LIBRARIES_COMMAND = "sudo openmausbot browser install --with-deps";
@@ -47,7 +48,7 @@ export function appArmorProfile(executable: string): string {
   if (!isAbsolute(executable) || /[\s*?[\]{}"'\\^]/.test(executable) || !executable.startsWith("/opt/")) {
     throw new Error(`The browser's AppArmor exemption is only for a root-owned path under /opt, not ${executable}.`);
   }
-  return `# Written for OpenMausBot: lets its Chrome use its sandbox.
+  return `# Written for ${APP_NAME}: lets its Chrome use its sandbox.
 abi <abi/4.0>,
 include <tunables/global>
 
@@ -97,7 +98,7 @@ export class BrowserHostError extends Error {
     super(kind === "sandbox"
       ? `This host blocks the sandbox the browser runs in (AppArmor on Ubuntu 23.10+). An administrator can allow it for one root-owned copy of Chrome, following ${SANDBOX_STEPS_URL}, then try again.`
       : kind === "container"
-      ? "Chrome's sandbox can't start in this container. The operator can set OMB_BROWSER_SANDBOX=0 to run the browser without it and rely on the container's isolation, then restart OpenMausBot."
+      ? `Chrome's sandbox can't start in this container. The operator can set OMB_BROWSER_SANDBOX=0 to run the browser without it and rely on the container's isolation, then restart ${APP_NAME}.`
       : `This host is missing libraries the browser needs (${libraries.join(", ")}). Run \`${LIBRARIES_COMMAND}\` on the host to install them, then try again.`);
     this.name = "BrowserHostError";
     this.kind = kind;

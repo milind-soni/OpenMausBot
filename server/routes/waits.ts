@@ -8,6 +8,7 @@ import type { json as sendJson } from "../harness/http.ts";
 import { expandHome } from "../wait-probes.ts";
 import { WAIT_WAKE_MS, waitList, type NewWaitCondition, type WaitManager } from "../waits.ts";
 import { PASS } from "./table.ts";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 const WAITS = "/api/internal/waits";
 const CANCEL = "/api/internal/waits/cancel";
@@ -17,10 +18,10 @@ export const WAIT_MESSAGES = {
   room: "Waits are made in a one-to-one chat with the person, not in a room.",
   notPerson: "A wait needs the person's own request in this chat or a verified continuation of its completed wait. Scheduled routines and outside events cannot set one. Work handed on by a bot needs the person's original request and can only create a wait.",
   handedStop: "Work handed to you by a bot can set one wait but not stop one: it ends on its own, or the person stops it.",
-  serverHost: "File and program waits look at the computer MausBot runs on, and here that is a server, not the computer you work on. Use url_contains, url_missing or bot_idle.",
+  serverHost: `File and program waits look at the computer ${PRODUCT_NAME} runs on, and here that is a server, not the computer you work on. Use url_contains, url_missing or bot_idle.`,
   guest: "File and program waits are only for the owner of this computer. Use url_contains, url_missing or bot_idle.",
   guestFollowUp: "Guests can be told when something happens, but can't set a follow-up. Make the wait without follow_up.",
-  otherComputer: "You work on another computer this turn (a private desktop or a cloud desktop), and file and program waits look at the one MausBot runs on. Use url_contains, url_missing or bot_idle.",
+  otherComputer: `You work on another computer this turn (a private desktop or a cloud desktop), and file and program waits look at the one ${PRODUCT_NAME} runs on. Use url_contains, url_missing or bot_idle.`,
   noPeer: "No bot you can reach goes by that name. Use a name or id from list_bots.",
   self: "You cannot wait for yourself to finish. Tell the person yourself when you are done.",
   noWait: "None of your waits in this chat has that id. Use list_waits.",

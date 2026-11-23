@@ -4,6 +4,7 @@ import { sniffRaster, type DecodedGeneratedImage } from "./generated-image.ts";
 import { McpHttpError, McpRpcError, RemoteMcpClient } from "./mcp-http.ts";
 import { withMcpSignIn, type McpOAuthManager } from "./mcp-oauth.ts";
 import { isRemoteMcpServer, parseStoredMcpServer } from "./mcp-registry.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const HIGGSFIELD_MCP_ORIGIN = "https://mcp.higgsfield.ai";
 const HIGGSFIELD_MCP_PATH = "/mcp";
@@ -229,7 +230,7 @@ export async function generateHiggsfieldImage(request: HiggsfieldImageRequest, o
     if (!spec) throw signInAgain();
     const client = new RemoteMcpClient(spec, { fetch: fetchImpl });
     try {
-      await client.initialize("OpenMausBot", signal);
+      await client.initialize(`${APP_NAME}`, signal);
       return client;
     } catch (error) {
       await client.close().catch(() => {});

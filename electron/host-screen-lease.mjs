@@ -3,9 +3,11 @@
 // says its real reason, because a bot told "a person is using it" waits for a person who is not there.
 
 /** The server did not answer the check, or answered something that is not "busy": nobody is using the computer. */
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 export function screenCheckFailedText(detail) {
-  return `OpenMausBot on this computer could not check whether its screen is free (${detail}), so this call was not performed. ` +
-    "This is not a person using the computer. Try again in a few seconds; if it keeps happening, tell the person to quit and reopen OpenMausBot on that computer.";
+  return `${APP_NAME} on this computer could not check whether its screen is free (${detail}), so this call was not performed. ` +
+    `This is not a person using the computer. Try again in a few seconds; if it keeps happening, tell the person to quit and reopen ${APP_NAME} on that computer.`;
 }
 
 async function refusal(response) {

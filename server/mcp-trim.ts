@@ -1,3 +1,4 @@
+import { APP_NAME } from "../shared/product.ts";
 export const DEFAULT_RESULT_BUDGET = 8_000;
 /** The gate's own read-only query over a held result (mcp-shape.ts); named here so the banner and the tool never drift apart. */
 export const QUERY_TOOL_NAME = "query_result";
@@ -87,7 +88,7 @@ export function truncationBanner(input: {
 }): string {
   const size = `${fmt(input.keptChars)} of ${fmt(input.originalChars)} chars`;
   if (input.held) return heldBanner(input, size);
-  if (input.short) return `⚠️ TRUNCATED by OpenMausBot: kept ${size}; the rest was NOT shown. Narrow the call or page.`;
+  if (input.short) return `⚠️ TRUNCATED by ${APP_NAME}: kept ${size}; the rest was NOT shown. Narrow the call or page.`;
   const counts = input.dropped
     .filter((d) => d.kept < d.total)
     .map((d) => `${d.key || "items"} ${fmt(d.kept)} of ${fmt(d.total)}`)
@@ -102,7 +103,7 @@ export function truncationBanner(input: {
   const where = input.spillHint && input.spillPath
     ? ` The whole result is at ${JSON.stringify(input.spillPath)}; reading it costs as much as not trimming, so narrow the call first.`
     : "";
-  return `⚠️ TRUNCATED by OpenMausBot: ${what} The rest was NOT shown. ${next}${where}`;
+  return `⚠️ TRUNCATED by ${APP_NAME}: ${what} The rest was NOT shown. ${next}${where}`;
 }
 
 /** The result lives on; the model fetches the rest by query, so the note never suggests a file or a narrower call. */
@@ -118,14 +119,14 @@ function heldBanner(
   const kept = input.structural && counts ? `kept ${counts} (${size})` : `kept ${size}`;
   const call = `${QUERY_TOOL_NAME} {"result":"${held.handle}","query":"<JMESPath>"}`;
   if (held.queried) {
-    if (input.footer) return `⚠️ TRUNCATED by OpenMausBot: ${kept} of your query on "${held.handle}"; narrow it (see above).`;
-    if (input.short) return `⚠️ TRUNCATED by OpenMausBot: ${kept} of your query on "${held.handle}"; the rest was NOT shown. Narrow the query.`;
-    return `⚠️ TRUNCATED by OpenMausBot: your query on "${held.handle}" returned ${fmt(input.originalChars)} chars; ${kept}. The rest was NOT shown. Narrow the query: pick fewer fields with {a: a, b: b}, slice with [0:20], or filter with [?cond]. The result is ${held.shape}.`;
+    if (input.footer) return `⚠️ TRUNCATED by ${APP_NAME}: ${kept} of your query on "${held.handle}"; narrow it (see above).`;
+    if (input.short) return `⚠️ TRUNCATED by ${APP_NAME}: ${kept} of your query on "${held.handle}"; the rest was NOT shown. Narrow the query.`;
+    return `⚠️ TRUNCATED by ${APP_NAME}: your query on "${held.handle}" returned ${fmt(input.originalChars)} chars; ${kept}. The rest was NOT shown. Narrow the query: pick fewer fields with {a: a, b: b}, slice with [0:20], or filter with [?cond]. The result is ${held.shape}.`;
   }
-  if (input.footer) return `⚠️ SHAPED by OpenMausBot: ${kept}; the rest is held as "${held.handle}" for ${QUERY_TOOL_NAME} (see the note above).`;
-  if (input.short) return `⚠️ SHAPED by OpenMausBot: ${kept}; the rest is held as "${held.handle}": call ${call} for exactly what you need.`;
+  if (input.footer) return `⚠️ SHAPED by ${APP_NAME}: ${kept}; the rest is held as "${held.handle}" for ${QUERY_TOOL_NAME} (see the note above).`;
+  if (input.short) return `⚠️ SHAPED by ${APP_NAME}: ${kept}; the rest is held as "${held.handle}": call ${call} for exactly what you need.`;
   const example = held.example ? ` e.g. ${held.example} or length(@).` : "";
-  return `⚠️ SHAPED by OpenMausBot: result was ${fmt(input.originalChars)} chars; ${kept}. The whole result is held as "${held.handle}" (${held.shape}). For the rest call ${call} and select only the fields and rows you need,${example} Big answers are cut too; never ask for the whole thing.`;
+  return `⚠️ SHAPED by ${APP_NAME}: result was ${fmt(input.originalChars)} chars; ${kept}. The whole result is held as "${held.handle}" (${held.shape}). For the rest call ${call} and select only the fields and rows you need,${example} Big answers are cut too; never ask for the whole thing.`;
 }
 
 function wrap(body: string, banner: string, footer = banner): string {

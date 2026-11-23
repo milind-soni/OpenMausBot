@@ -17,6 +17,8 @@ import { driverFailure } from "./cua-failure.mjs";
 import { createHelperRestarts, followLinuxConnection } from "./cua-restart.mjs";
 import { watchDriver } from "./cua-watch.mjs";
 import { missingPermissions } from "./lent-screen-failures.mjs";
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 
 const { localOnly } = localOriginModule;
 
@@ -187,7 +189,7 @@ export function resolveEmbeddedDriverBinary(binary) {
   if (process.platform !== "win32" || !app.isPackaged || process.env.CUA_DRIVER_PATH ||
       binary !== path.join(process.resourcesPath, "cua-driver.exe")) return binary;
   const background = path.join(process.resourcesPath, "cua-driver-background.exe");
-  if (!fs.existsSync(background)) throw new Error("Packaged background CUA driver is missing; reinstall OpenMausBot");
+  if (!fs.existsSync(background)) throw new Error(`Packaged background CUA driver is missing; reinstall ${APP_NAME}`);
   return background;
 }
 
@@ -278,7 +280,7 @@ async function startEmbedded(binary, signal) {
         !permissionStatus.accessibility && "Accessibility",
         !permissionStatus.screenRecording && "Screen Recording",
       ].filter(Boolean).join(" and ");
-      throw new Error(`${missing || "macOS permissions"} required; grant access in System Settings and restart OpenMausBot`);
+      throw new Error(`${missing || "macOS permissions"} required; grant access in System Settings and restart ${APP_NAME}`);
     }
   }
   // The native SDK owns the child lifecycle but exposes no windowsHide option.

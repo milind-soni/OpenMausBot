@@ -14,6 +14,7 @@ import { serverLine } from "../server-lines.ts";
 import { retriesTeammateThread, type RoutineFailureFacts } from "../routine-recovery.ts";
 import { queueSteeredMessage } from "../steer-queue.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 type PeerAsk = NonNullable<Message["peerAsk"]>;
 
@@ -65,14 +66,14 @@ export interface ChiefNoticeDeps {
 export const MEMORY_RETRY_MS = 30_000;
 /** The chats a Chief's line for the problems it was not started for names; its count covers the rest. */
 export const FOLDED_LISTED = 5;
-export const MEMORY_RETRY_TEXT = "[OpenMausBot started this again by itself, once: the last run was stopped to free memory on this Cloud. "
+export const MEMORY_RETRY_TEXT = `[${APP_NAME} started this again by itself, once: the last run was stopped to free memory on this Cloud. `
   + "Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]";
 
-export const SERVER_MEMORY_RETRY_TEXT = "[OpenMausBot started this again by itself, once: the last run was stopped to free memory on this server. "
+export const SERVER_MEMORY_RETRY_TEXT = `[${APP_NAME} started this again by itself, once: the last run was stopped to free memory on this server. `
   + "Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]";
 
 /** A run the server had no room to start is the server's shortage: it starts again by itself, and no AI is asked about it. */
-export const ROOM_RETRY_TEXT = "[OpenMausBot started this again by itself, once: the last run could not start because this server had no room for another program. "
+export const ROOM_RETRY_TEXT = `[${APP_NAME} started this again by itself, once: the last run could not start because this server had no room for another program. `
   + "Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]";
 
 export function createChiefNotices(deps: ChiefNoticeDeps) {

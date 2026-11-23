@@ -4,6 +4,7 @@ import { BlockList, isIP } from "node:net";
 import { z } from "zod";
 
 import { addressClass, listed, ownAddresses, type AddressClass } from "../../../electron/egress-addresses.mjs";
+import { APP_NAME } from "../../../shared/product.ts";
 
 export { addressClass, ownAddresses, type AddressClass };
 
@@ -15,7 +16,7 @@ export type Refusal = "omb" | "this-computer" | "local-network" | "link-local" |
 
 /** How a refusal reads in the page-health line. */
 export const REFUSAL_TEXT: Record<Refusal, string> = {
-  omb: "OpenMausBot's own service",
+  omb: `${APP_NAME}'s own service`,
   "this-computer": "a service on this computer that no bot started",
   "local-network": "the local network",
   "link-local": "a link-local address",

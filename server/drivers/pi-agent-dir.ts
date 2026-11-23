@@ -12,6 +12,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { writeFileAtomic } from "../atomic.ts";
 import { DATA_DIR } from "../config.ts";
 import { engineHomes } from "../engine-homes/engine-homes.ts";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 /** settings.json entries that choose a model and how Pi reaches it (pi-coding-agent 1.6.0 SettingsManager). Never its
  * packages, extensions, skills or prompts. */
@@ -120,7 +121,7 @@ export function ownPiAgentDir(env: Record<string, string | undefined>, instanceI
   try {
     mkdirSync(own, { recursive: true, mode: 0o700 });
     if (!linked(join(person, "auth.json"), join(own, "auth.json"))) {
-      note(own, "could not link your Pi login into MausBot's Pi folder, so turns use your own ~/.pi/agent");
+      note(own, `could not link your Pi login into ${PRODUCT_NAME}'s Pi folder, so turns use your own ~/.pi/agent`);
       return null;
     }
     // A download cache only: Pi fetches fd and rg again when it cannot be linked.
@@ -130,7 +131,7 @@ export function ownPiAgentDir(env: Record<string, string | undefined>, instanceI
     seeded(own, "models.json", models);
     seeded(own, "settings.json", settingsText(join(person, "settings.json")));
   } catch (error) {
-    note(own, `could not make MausBot's Pi folder, so turns use your own ~/.pi/agent: ${(error as Error).message}`);
+    note(own, `could not make ${PRODUCT_NAME}'s Pi folder, so turns use your own ~/.pi/agent: ${(error as Error).message}`);
     return null;
   }
   return own;

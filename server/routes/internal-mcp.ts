@@ -19,6 +19,7 @@ import { isRemoteMcpServer, parseMcpServerMutation, parseStoredMcpServer, type S
 import { serverLine, type ServerLineKey } from "../server-lines.ts";
 import type { BotRecord } from "../store.ts";
 import { PASS, type RouteHandler } from "./table.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 const PATH = "/api/internal/mcp-servers";
 const ACTIONS = ["list", "add", "update", "enable", "disable", "restart", "test", "sign_in", "sign_out", "remove"] as const;
@@ -351,7 +352,7 @@ function signIn(deps: Deps, name: string, server: StoredMcpServer, owner: Return
   const card = deps.requestSignIn(name, server);
   if ("error" in card) return card;
   say(deps, { action: "sign_in", name }, ["server.mcp.askedSignIn", { name }]);
-  return { status: 202, text: `A Sign in card for ${name} is now visible to the person. End this turn and wait; OpenMausBot resumes you when they finish.` };
+  return { status: 202, text: `A Sign in card for ${name} is now visible to the person. End this turn and wait; ${APP_NAME} resumes you when they finish.` };
 }
 
 async function signOut(deps: Deps, name: string, server: StoredMcpServer): Promise<Outcome> {

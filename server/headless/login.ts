@@ -8,6 +8,7 @@ import { BOT_SHELL_HINT, BOT_SHELL_REFUSAL } from "./bot-shell.ts";
 import { loadMcp, namedServer } from "./client.ts";
 import type { VerbContext, VerbOutcome } from "./context.ts";
 import type { SavedServer, SavedServers } from "./saved-servers.ts";
+import { APP_NAME, PRODUCT_NAME } from "../../shared/product.ts";
 
 type Rec = Record<string, any>;
 
@@ -55,8 +56,8 @@ async function serverToSignInTo(ctx: VerbContext): Promise<string> {
   try {
     return await mcp.probeBaseUrls(DISCOVERY_PORTS.map((port) => `http://127.0.0.1:${port}`));
   } catch {
-    throw new HeadlessError("MausBot is not running on this computer", EXIT.unreachable,
-      "open the MausBot app, or name a server: openmausbot login https://maus.example.com (an OpenMausBot account for --tunnel is openmausbot account login)");
+    throw new HeadlessError(`${PRODUCT_NAME} is not running on this computer`, EXIT.unreachable,
+      `open the ${PRODUCT_NAME} app, or name a server: openmausbot login https://maus.example.com (an ${APP_NAME} account for --tunnel is openmausbot account login)`);
   }
 }
 
@@ -80,14 +81,14 @@ async function signInWithCard(ctx: VerbContext, origin: string, label: string, s
   const verifierHash = createHash("sha256").update(verifier).digest("base64url");
   const started = await call(origin, "/api/auth/cli-login", { method: "POST", body: JSON.stringify({ label, scope, verifierHash }) }, ctx.signal);
   if (started.status === 404) {
-    throw new HeadlessError("this server does not take openmausbot login yet", EXIT.failed, "update MausBot there, or use openmausbot connect URL --code CODE --out FILE");
+    throw new HeadlessError("this server does not take openmausbot login yet", EXIT.failed, `update ${PRODUCT_NAME} there, or use openmausbot connect URL --code CODE --out FILE`);
   }
   if (started.status !== 201 || typeof started.body.id !== "string") {
     throw new HeadlessError(`the server would not start a sign-in: ${started.body.error ?? started.status}`, started.status === 403 ? EXIT.notAllowed : EXIT.failed);
   }
   const code = String(started.body.code);
   if (desktopApp(environment) && LOOPBACK.test(origin)) {
-    ctx.io.err(`MausBot is asking you to allow this terminal. Check the code in the app matches, then press Allow:\n\n    ${code}\n`);
+    ctx.io.err(`${PRODUCT_NAME} is asking you to allow this terminal. Check the code in the app matches, then press Allow:\n\n    ${code}\n`);
   } else {
     const opened = await ctx.openBrowser(`${origin}/`);
     ctx.io.err(`${opened ? "Opened" : "Open"} ${origin}/ in your browser. Sign in there if it asks, check the code matches, then press Allow:\n\n    ${code}\n`);
@@ -103,11 +104,11 @@ async function signInWithCard(ctx: VerbContext, origin: string, label: string, s
     const polled = await call(origin, `/api/auth/cli-login/${encodeURIComponent(started.body.id)}`, { method: "POST", body: JSON.stringify({ verifier }) }, ctx.signal);
     if (polled.status === 202) continue;
     if (polled.status === 200 && typeof polled.body.token === "string") return polled.body;
-    if (polled.body.state === "denied") throw new HeadlessError("the sign-in was denied in MausBot", EXIT.notAllowed);
+    if (polled.body.state === "denied") throw new HeadlessError(`the sign-in was denied in ${PRODUCT_NAME}`, EXIT.notAllowed);
     throw new HeadlessError(`the sign-in did not finish: ${polled.body.error ?? polled.status}`, polled.status === 403 ? EXIT.notAllowed : EXIT.failed,
       "run openmausbot login again");
   }
-  throw new HeadlessError("nobody allowed the sign-in within ten minutes", EXIT.failed, "run openmausbot login again, then press Allow in MausBot");
+  throw new HeadlessError("nobody allowed the sign-in within ten minutes", EXIT.failed, `run openmausbot login again, then press Allow in ${PRODUCT_NAME}`);
 }
 
 export async function loginVerb(ctx: VerbContext): Promise<VerbOutcome> {
@@ -116,7 +117,7 @@ export async function loginVerb(ctx: VerbContext): Promise<VerbOutcome> {
   const origin = await serverToSignInTo(ctx);
   const described = await call(origin, "/.well-known/openmausbot/environment", {}, ctx.signal).catch(() => null);
   if (described?.status !== 200 || typeof described.body.environmentId !== "string") {
-    throw new HeadlessError(`no MausBot server answers at ${origin}`, EXIT.unreachable, "check the address, and that MausBot is running there");
+    throw new HeadlessError(`no ${PRODUCT_NAME} server answers at ${origin}`, EXIT.unreachable, `check the address, and that ${PRODUCT_NAME} is running there`);
   }
   const environment = described.body;
   const name = flag(ctx.flags, "name")?.trim() || defaultServerName(origin);
@@ -148,7 +149,7 @@ export async function logoutVerb(ctx: VerbContext): Promise<VerbOutcome> {
   if (!name || !server) {
     if (ctx.positionals[0]) throw new HeadlessError(`no saved server named "${name}"`, EXIT.notFound, "openmausbot servers lists them");
     return { result: { ok: true, signedOut: null }, exitCode: EXIT.done,
-      human: ["You are not signed in to any server. (To release a --tunnel address and sign this machine out of its OpenMausBot account: openmausbot account logout.)"] };
+      human: [`You are not signed in to any server. (To release a --tunnel address and sign this machine out of its ${APP_NAME} account: openmausbot account logout.)`] };
   }
   const token = saved.token(name);
   const ended = token

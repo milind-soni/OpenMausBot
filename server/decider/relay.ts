@@ -4,8 +4,9 @@ import { jevRequestBody } from "./jev.ts";
 import { INBOX_DISMISSED_MAX, INBOX_EMAIL_KEYS, INBOX_TRIAGE_INSTRUCTIONS, INBOX_TRIAGE_OPTIONS, INBOX_TRIAGE_STATE_KEYS } from "./inbox-triage.ts";
 import { ROOM_ROUTING_INSTRUCTIONS, ROOM_ROUTING_STATE_KEYS } from "./room-routing.ts";
 import type { DeciderQuestion, DeciderSeam } from "./types.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
-export const KEY_CHECK_STATE = { purpose: "OpenMausBot is checking that a decision-model key works." };
+export const KEY_CHECK_STATE = { purpose: `${APP_NAME} is checking that a decision-model key works.` };
 export const KEY_CHECK_QUESTION = "Is this a connection check?";
 
 /** Measured in UTF-8 bytes. */

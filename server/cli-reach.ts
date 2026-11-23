@@ -2,6 +2,7 @@
 // (or the saved setup); the link always uses the first one in ROUTE_ORDER.
 import { allowedServerOrigin, isLoopbackHost } from "../electron/server-address.mjs";
 import { reachableAddresses, type ReachableAddresses } from "./lan-address.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 export type Route = "public-url" | "domain" | "tunnel" | "tailscale" | "lan";
 
@@ -62,7 +63,7 @@ const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: "2-dig
 const NOTE: Record<Route, string> = {
   "public-url": "",
   domain: "",
-  tunnel: "MausBot web address",
+  tunnel: `${PRODUCT_NAME} web address`,
   tailscale: "your tailnet",
   lan: "this network only, not encrypted",
 };
@@ -86,7 +87,7 @@ export function noRouteLines(port: number, prefix: string): string[] {
     `  ${prefix} serve --domain maus.example.com  we get the certificate (ports 80, 443)`,
     `  ${prefix} serve --tailscale                your tailnet (needs Tailscale)`,
     `  ${prefix} serve --lan                      this network only, not encrypted`,
-    `  ${prefix} serve --tunnel                   a free MausBot web address; sign in first: ${prefix} login`,
+    `  ${prefix} serve --tunnel                   a free ${PRODUCT_NAME} web address; sign in first: ${prefix} login`,
     `Sign in from a browser on this machine with the link from: ${prefix} pair`,
   ];
 }

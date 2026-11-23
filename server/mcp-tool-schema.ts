@@ -1,6 +1,7 @@
 // Strict providers (OpenAI, xAI, Bedrock, Kimi…) refuse a tool schema whose root is not a plain `type: "object"`, failing
 // the whole turn; cua-driver 0.22.1 ships such a root on browser_prepare. Servers still validate calls against their own.
 import { fitToolSchema, type ToolSchemaProfile } from "./tool-schema-profile.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 type JsonObject = Record<string, unknown>;
 
@@ -98,7 +99,7 @@ function toolName(tool: JsonObject): string {
 
 /** The note a shortened tool carries, so the model fills in what its schema no longer spells out. */
 export function shortenedToolNote(provider: string): string {
-  return `(OpenMausBot shortened this tool's parameters to fit ${provider}'s size limit for one tool: give any field it no longer lists `
+  return `(${APP_NAME} shortened this tool's parameters to fit ${provider}'s size limit for one tool: give any field it no longer lists `
     + "as this description says. The tool still checks every call against its full schema.)";
 }
 

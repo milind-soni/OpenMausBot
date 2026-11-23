@@ -3,6 +3,7 @@
 // links, fetched from raw.githubusercontent.com with no redirects, no token, a timeout and byte caps, and only the files
 // the manifest names (shared/share-folder.ts decides which paths those may be).
 import { namedFolderFiles, readShareFolder, SHARE_FOLDER_MAX_BYTES, type ShareFolder, type ShareFolderFiles } from "../shared/share-folder.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 type Fetcher = typeof fetch;
 const RAW = "https://raw.githubusercontent.com";
@@ -38,9 +39,9 @@ export function githubTemplateSource(input: string): GithubTemplateSource {
   try {
     parts = url.pathname.split("/").filter(Boolean).map((part) => decodeURIComponent(part));
   } catch {
-    throw new GithubTemplateError("That GitHub link isn't one MausBot can read.");
+    throw new GithubTemplateError(`That GitHub link isn't one ${PRODUCT_NAME} can read.`);
   }
-  if (!parts.every(safeSegment)) throw new GithubTemplateError("That GitHub link isn't one MausBot can read.");
+  if (!parts.every(safeSegment)) throw new GithubTemplateError(`That GitHub link isn't one ${PRODUCT_NAME} can read.`);
   const fileSource = (owner: string, repo: string, ref: string, path: string[]): GithubTemplateSource => {
     const name = path.at(-1)!;
     const folder = path.slice(0, -1);

@@ -14,6 +14,8 @@ import { asleepAnswer, BACKGROUND_HEADERS, openSleepingCloud, SIGNED_IN_MS } fro
 import nativeText from "./native-text.cjs";
 import { createPairWait, nameNotFound } from "./home-pairing.mjs";
 import { awayIn, parseJournal, sameCloud } from "./one-home.mjs";
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 
 export { nameNotFound, NETWORK_HINT_MS, PAIR_FLOOR_MS, PAIR_LIMIT_MS, PAIR_RETRY_MS } from "./home-pairing.mjs";
 
@@ -440,7 +442,7 @@ export function createHomeWindow(deps) {
   async function redeem(origin, grant) {
     try {
       const response = await cookieFetch(`${origin}/api/auth/pair`, { method: "POST", credentials: "include", redirect: "error", cache: "no-store", signal: AbortSignal.timeout(15_000),
-        headers: { "content-type": "application/json", origin }, body: JSON.stringify({ code: grant.code, cookie: true, label: "OpenMausBot app" }) });
+        headers: { "content-type": "application/json", origin }, body: JSON.stringify({ code: grant.code, cookie: true, label: `${APP_NAME} app` }) });
       await response.body?.cancel?.().catch(() => {});
       return response.ok;
     } catch { return false; }

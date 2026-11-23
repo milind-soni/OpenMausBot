@@ -7,6 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { isLayerId, layerAudience } from "./audience.ts";
 import { CLOUD_NOBODY_KEY, CLOUD_OUTSIDE_KEY } from "./cloud-sharing.ts";
 import { routineHome } from "./routine-home.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 const PERSON = /^p_[\w-]{22}$/;
 const MARKERS: ReadonlySet<string> = new Set([CLOUD_NOBODY_KEY, CLOUD_OUTSIDE_KEY]);
@@ -184,4 +185,4 @@ export function stripTeamPrivate(snapshot: { messages: string; runtime: string }
   });
 }
 
-export const TEAM_PRIVATE_NOTE = "Members' private chats are theirs alone and are not in this export: their conversations, what bots remember from them, their own MausBot and their About you stay out.";
+export const TEAM_PRIVATE_NOTE = `Members' private chats are theirs alone and are not in this export: their conversations, what bots remember from them, their own ${PRODUCT_NAME} and their About you stay out.`;

@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { EXIT, flag, HeadlessError, usageError, type Flags } from "./args.ts";
 import { BOT_SHELL_HINT } from "./bot-shell.ts";
 import type { SavedServers } from "./saved-servers.ts";
+import { APP_NAME, APP_NAME_PATTERN } from "../../shared/product.ts";
 
 type McpModule = typeof import("../../scripts/mcp-server.ts");
 export type ToolCaller = McpModule["handleToolCall"];
@@ -94,7 +95,7 @@ export async function openClient(flags: Flags, deps: ClientDeps, mutating: boole
     baseUrl = `http://127.0.0.1:${port}`;
   } else {
     if (mutating && deps.requireExplicitForMutations) {
-      throw usageError("mutating commands require an explicit OpenMausBot instance", "start `control-omb launch`, then pass its URL with --url");
+      throw usageError(`mutating commands require an explicit ${APP_NAME} instance`, "start `control-omb launch`, then pass its URL with --url");
     }
     if (token) {
       throw usageError("a token needs a named server, so it is never sent while looking for one",
@@ -103,7 +104,7 @@ export async function openClient(flags: Flags, deps: ClientDeps, mutating: boole
     try {
       baseUrl = await mcp.probeBaseUrls(DISCOVERY_PORTS.map((port) => `http://127.0.0.1:${port}`));
     } catch {
-      throw new HeadlessError(`no OpenMausBot server answered on 127.0.0.1 ports ${DISCOVERY_PORTS.join(", ")}`, EXIT.unreachable,
+      throw new HeadlessError(`no ${APP_NAME} server answered on 127.0.0.1 ports ${DISCOVERY_PORTS.join(", ")}`, EXIT.unreachable,
         "start one with `openmausbot serve`, or name one with --url or OPENMAUSBOT_URL");
     }
   }
@@ -145,7 +146,7 @@ export async function openClient(flags: Flags, deps: ClientDeps, mutating: boole
 }
 
 export function serverWords(message: string): string {
-  const body = /^OpenMausBot API error \(\d+\): ([\s\S]*)$/.exec(message)?.[1];
+  const body = new RegExp(`^${APP_NAME_PATTERN} API error \\(\\d+\\): ([\\s\\S]*)$`).exec(message)?.[1];
   if (body === undefined) return message;
   try {
     const said = (JSON.parse(body) as { error?: unknown }).error;
@@ -191,11 +192,11 @@ export async function explain(error: unknown, baseUrl?: string, context: Refusal
     return new HeadlessError(message, EXIT.notFound, "openmausbot bots and openmausbot channels list the ids");
   }
   if (status === 409) return new HeadlessError(message, EXIT.conflict, "it is busy: stop it first (openmausbot stop BOT), or try again when it finishes");
-  if (/cannot report a conversation's job/.test(message)) return new HeadlessError(message, EXIT.unreachable, "update OpenMausBot on the server");
+  if (/cannot report a conversation's job/.test(message)) return new HeadlessError(message, EXIT.unreachable, `update ${APP_NAME} on the server`);
   const cause = (error as { cause?: { code?: unknown } })?.cause?.code;
   if ((error instanceof TypeError && /fetch failed/i.test(message)) || cause === "ECONNREFUSED" || cause === "ENOTFOUND"
     || (error instanceof Error && (error.name === "TimeoutError" || /timed out|aborted due to timeout/i.test(message)))) {
-    return new HeadlessError(`cannot reach OpenMausBot${baseUrl ? ` at ${baseUrl}` : ""}`, EXIT.unreachable,
+    return new HeadlessError(`cannot reach ${APP_NAME}${baseUrl ? ` at ${baseUrl}` : ""}`, EXIT.unreachable,
       "check the server is running and the address is right (openmausbot doctor)");
   }
   if (error instanceof Error && error.name === "AbortError") return new HeadlessError("stopped", EXIT.interrupted);
@@ -209,7 +210,7 @@ export async function readJob(client: HeadlessClient, threadId: string, query: R
     const status = (error as { status?: number }).status;
     const message = error instanceof Error ? error.message : String(error);
     if (status === 404 && !/no such conversation/.test(message)) {
-      throw new HeadlessError("this OpenMausBot server cannot report a conversation's job", EXIT.unreachable, "update OpenMausBot on the server");
+      throw new HeadlessError(`this ${APP_NAME} server cannot report a conversation's job`, EXIT.unreachable, `update ${APP_NAME} on the server`);
     }
     throw error;
   }

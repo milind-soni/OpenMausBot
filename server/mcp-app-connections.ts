@@ -11,6 +11,7 @@ import { UI_EXTENSION, withUiExtension } from "./mcp-app-observer.ts";
 import { MAX_REMOTE_MCP_BYTES, McpHttpError, McpRpcError, REMOTE_MCP_STARTUP_MS, RemoteMcpClient } from "./mcp-http.ts";
 import { probeEnvironment, type McpProbeOptions } from "./mcp-probe.ts";
 import { killCliTree, spawnCli } from "./procs.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 export const APP_CONNECTION_IDLE_MS = 5 * 60_000;
 export const APP_CONNECTIONS_MAX = 6;
@@ -121,7 +122,7 @@ class StdioAppClient implements AppClient {
   }
 
   async initialize(signal: AbortSignal, extension: boolean): Promise<void> {
-    const params = { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "OpenMausBot", version: "1" } };
+    const params = { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: `${APP_NAME}`, version: "1" } };
     let result: unknown;
     if (extension) {
       try {
@@ -159,7 +160,7 @@ class RemoteAppClient implements AppClient {
   get extensions(): "ok" | "refused" | undefined { return this.client.extensions; }
 
   async initialize(signal: AbortSignal, extension: boolean): Promise<void> {
-    const result = await this.client.initialize("OpenMausBot", signal, extension ? { extensions: { [APP_EXTENSION_KEY]: UI_EXTENSION } } : {});
+    const result = await this.client.initialize(`${APP_NAME}`, signal, extension ? { extensions: { [APP_EXTENSION_KEY]: UI_EXTENSION } } : {});
     this.serverInfo = isRecord(result) && isRecord(result.serverInfo) ? result.serverInfo : undefined;
   }
 

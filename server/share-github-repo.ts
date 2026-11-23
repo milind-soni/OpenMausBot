@@ -12,6 +12,7 @@ import type { TemplateRepoPublish } from "../shared/share-card.ts";
 import { toolData } from "./connected-reads.ts";
 import { parseMcpResponse } from "./connector-tools-list.ts";
 import { GithubTemplateError } from "./share-github.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 export const GITHUB_TOOLS = {
   repository: "GITHUB_GET_A_REPOSITORY",
@@ -228,7 +229,7 @@ export async function publishToRepo(connection: Extract<GithubConnection, { ok: 
   }
   const madeTree = text(await session.call(GITHUB_TOOLS.tree, { owner, repo, base_tree: baseTree, tree }), "sha");
   if (!madeTree) throw new GithubTemplateError("GitHub's answer for the folder had no id.", 502);
-  const message = `Add the ${input.name} template from MausBot`;
+  const message = `Add the ${input.name} template from ${PRODUCT_NAME}`;
   const commit = text(await session.call(GITHUB_TOOLS.commit, { owner, repo, message, tree: madeTree, parents: [headSha] }), "sha");
   if (!commit) throw new GithubTemplateError("GitHub's answer for the commit had no id.", 502);
   const link = (branch: string) => `https://github.com/${owner}/${repo}/tree/${encodeURIComponent(branch)}/${dir}`;
@@ -242,7 +243,7 @@ export async function publishToRepo(connection: Extract<GithubConnection, { ok: 
   if (made === session.missing) throw new GithubTemplateError("The new branch couldn't be made.", 502);
   const pull = await session.call(GITHUB_TOOLS.pullRequest, {
     owner, repo, title: message, head: branch, base,
-    body: "A template made in MausBot: its instructions, skills and their scripts, and pictures. No chats, memory, keys or connections.",
+    body: `A template made in ${PRODUCT_NAME}: its instructions, skills and their scripts, and pictures. No chats, memory, keys or connections.`,
   });
   const url = inRepository(field(pull, "html_url"), owner, repo);
   if (!url) throw new GithubTemplateError("GitHub's answer for the pull request had no link.", 502);

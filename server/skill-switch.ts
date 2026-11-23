@@ -4,6 +4,7 @@ import { redactSecretsInText } from "./redact.ts";
 import { serverLine, type ServerLineKey } from "./server-lines.ts";
 import { STAGED_GIST_MAX } from "./skills.ts";
 import type { SkillSwitchAction } from "../shared/skill-request.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 /** own: in this bot's own skills; imported: brought in from this computer for every bot, switched per bot;
  * fixed: shared from the team library or the engine's own, which only the person changes. */
@@ -49,7 +50,7 @@ export function skillSwitchTarget(
   if (action === "enable" && skill.enabled) return { error: `skill "${name}" is already on` };
   if (action === "disable" && !skill.enabled) return { error: `skill "${name}" is already off` };
   if (skill.text === null) {
-    return { error: `skill "${name}" changed outside OpenMausBot and can't be shown for review; the person can fix it in the bot's Skills settings` };
+    return { error: `skill "${name}" changed outside ${APP_NAME} and can't be shown for review; the person can fix it in the bot's Skills settings` };
   }
   const preview = redactSecretsInText(skill.text);
   return {

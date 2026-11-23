@@ -1,5 +1,6 @@
 import type { PageFile } from "./bundle.ts";
 import { pagesAuthHeaders, type PagesAccess } from "./access.ts";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 export interface PageUsage { pages: number; limit: number }
 export type PagesFailure = {
@@ -28,7 +29,7 @@ interface Minted {
   plan?: string;
 }
 
-export const SIGN_IN_MESSAGE = "Publishing a page needs a MausBot account. Sign in to MausBot in the app's Settings, then ask again.";
+export const SIGN_IN_MESSAGE = `Publishing a page needs a MausBot account. Sign in to ${PRODUCT_NAME} in the app's Settings, then ask again.`;
 const UNAVAILABLE = "Publishing isn't available right now. Try again in a few minutes.";
 const NOT_TURNED_ON = "Publishing pages isn't turned on for this account yet.";
 /** A server with no desktop app to sign in through and no Cloud home (`openmausbot serve`): no Settings sign-in can help. */
@@ -81,7 +82,7 @@ export function createPagesClient(options: { access: () => PagesAccess | null; n
       return fail("unavailable", UNAVAILABLE);
     }
     const answer = await readJson(response);
-    if (response.status === 401) return fail("sign_in", access.kind === "desktop" ? "Your MausBot sign-in has ended. Sign in to MausBot again in the app's Settings, then ask again." : UNAVAILABLE);
+    if (response.status === 401) return fail("sign_in", access.kind === "desktop" ? `Your ${PRODUCT_NAME} sign-in has ended. Sign in to ${PRODUCT_NAME} again in the app's Settings, then ask again.` : UNAVAILABLE);
     if (response.status === 402) {
       const usage = usageOf(answer.usage);
       return fail("limit", said(answer, "This account's pages are used up."), { ...(usage ? { usage } : {}), upgrade: answer.upgrade === true,

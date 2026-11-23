@@ -3,6 +3,7 @@
 // any other fix (run.ts); a live one means the server is running, and no fix runs beside it.
 import { describeDataDirLease, type DataDirLeaseHolder } from "../../data-dir-lease.ts";
 import type { DoctorCheck } from "../types.ts";
+import { APP_NAME } from "../../../shared/product.ts";
 
 export function leaseCheck(describe: (dataDir: string) => DataDirLeaseHolder = describeDataDirLease): DoctorCheck {
   return {
@@ -23,10 +24,10 @@ export function leaseCheck(describe: (dataDir: string) => DataDirLeaseHolder = d
         case "other-machine":
           return { status: "problem", detail: holder,
             summary: `The lease names a process on another machine or container (${holder.host}, process ${holder.pid}).`,
-            instruction: `If no OpenMausBot runs there on this folder, stop this server and delete ${holder.path}; it starts again without it.` };
+            instruction: `If no ${APP_NAME} runs there on this folder, stop this server and delete ${holder.path}; it starts again without it.` };
         default:
           return { status: "problem", detail: holder, summary: "The lease record cannot be read.",
-            instruction: `If no OpenMausBot is running on this folder, delete ${holder.path} and start the server again.` };
+            instruction: `If no ${APP_NAME} is running on this folder, delete ${holder.path} and start the server again.` };
       }
     },
   };

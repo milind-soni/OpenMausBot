@@ -24,6 +24,7 @@ import {
 } from "../shared/phone-push.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { PUSH_DEVICE_KEY, type PhonePush } from "./phone-push.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 export const PHONE_ACTIVITY_FILE = "push-activity.json";
 export const MAX_ACTIVITY_PHONES = 50;
@@ -96,7 +97,7 @@ function headlineFor(template: string, name: string): string {
 
 function clipName(name: string): string {
   const points = [...name.replace(/[\p{Cc}\u2028\u2029]/gu, " ").trim()];
-  return (points.length > PUSH_NAME_MAX ? `${points.slice(0, PUSH_NAME_MAX - 1).join("")}…` : points.join("")) || "MausBot";
+  return (points.length > PUSH_NAME_MAX ? `${points.slice(0, PUSH_NAME_MAX - 1).join("")}…` : points.join("")) || `${PRODUCT_NAME}`;
 }
 
 export class PhoneActivity {

@@ -8,6 +8,7 @@
 
 import { toolkitOf } from "../shared/connector-scopes.ts";
 import { annotateFailedCall } from "./connector-scope-hint.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 /** GitHub's wording when the connected account's app installation cannot reach what the call asks for. */
 const ACCOUNT_ERROR = /not accessible by integration/i;
@@ -54,7 +55,7 @@ export function accountHint(slugs: readonly string[], accounts: ConnectedAccount
   if (known.length < 2) return "";
   const app = appName(toolkit);
   const names = known.map((account) => account.alias?.trim() || account.id).join(", ");
-  return `OpenMausBot note: ${app} refused this because the connected account the call used cannot reach it. `
+  return `${APP_NAME} note: ${app} refused this because the connected account the call used cannot reach it. `
     + `That is about that account, not about a lack of access to ${app}: ${app} has ${known.length} connected accounts (${names}). `
     + `Name another one in the call's account field (an alias or an id) and try it once, `
     + `before telling the person you have no access to ${app}.`;

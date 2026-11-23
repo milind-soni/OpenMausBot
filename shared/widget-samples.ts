@@ -2,6 +2,7 @@
 // writes them, using every node type between them. Tests, the phone fixtures
 // and the verification recipe all read these.
 
+import { APP_NAME, PRODUCT_NAME } from "../shared/product.ts";
 const prRow = (number: number, title: string, detail: string, status: string, color: string) => ({
   type: "ListViewItem",
   gap: 3,
@@ -178,7 +179,7 @@ export const WIDGET_SAMPLES: Record<string, unknown> = {
     children: [
       { type: "ListViewItem", onClickAction: { type: "open_url", payload: { url: "https://developers.openai.com/api/docs/guides/chatkit-widgets" } }, children: [{ type: "Icon", name: "globe" }, { type: "Col", flex: 1, children: [{ type: "Text", value: "ChatKit widgets guide", weight: "medium" }, { type: "Caption", value: "developers.openai.com" }] }, { type: "Icon", name: "external-link", color: "tertiary" }] },
       { type: "ListViewItem", onClickAction: { type: "open_url", payload: { url: "https://widgets.chatkit.studio/gallery" } }, children: [{ type: "Icon", name: "globe" }, { type: "Col", flex: 1, children: [{ type: "Text", value: "Widget Builder gallery", weight: "medium" }, { type: "Caption", value: "widgets.chatkit.studio" }] }, { type: "Icon", name: "external-link", color: "tertiary" }] },
-      { type: "ListViewItem", children: [{ type: "Icon", name: "document" }, { type: "Col", flex: 1, children: [{ type: "Text", value: "shared/wire.ts", weight: "medium" }, { type: "Caption", value: "OpenMausBot · this computer" }] }] },
+      { type: "ListViewItem", children: [{ type: "Icon", name: "document" }, { type: "Col", flex: 1, children: [{ type: "Text", value: "shared/wire.ts", weight: "medium" }, { type: "Caption", value: `${APP_NAME} · this computer` }] }] },
     ],
   },
 
@@ -193,7 +194,7 @@ export const WIDGET_SAMPLES: Record<string, unknown> = {
       { type: "Text", value: "Body text with a longer line that wraps onto a second line when the card is narrow.", maxLines: 2 },
       { type: "Caption", value: "A caption in secondary ink", size: "sm" },
       { type: "Box", padding: 4, radius: "lg", background: "surface-secondary", children: [{ type: "Text", value: "Inside a box", weight: "semibold" }, { type: "Caption", value: "with padding and a surface" }] },
-      { type: "Image", src: "https://mausbot.com/og.png", alt: "MausBot", aspectRatio: "16/9", radius: "lg", frame: true },
+      { type: "Image", src: "https://mausbot.com/og.png", alt: `${PRODUCT_NAME}`, aspectRatio: "16/9", radius: "lg", frame: true },
       { type: "Transition", children: [{ type: "Text", value: "A transition wraps one child." }] },
       {
         type: "Form",

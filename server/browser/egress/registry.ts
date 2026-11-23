@@ -11,6 +11,7 @@ import { opensFromHome } from "./home-sites.ts";
 import { ListenerOwnership } from "./ownership.ts";
 import { allowList, parseSocks5Proxy, REFUSAL_TEXT, refusalFor, type BrowserEgressConfig, type EgressHost, type EgressRules, type Refusal } from "./policy.ts";
 import { opensReddit, REDDIT_REFUSAL, refusesReddit } from "./reddit.ts";
+import { APP_NAME } from "../../../shared/product.ts";
 
 /** The server (and its fallbacks), webhooks, the desktop client relay, the companion, its control page and its
  * private origin, the Vite dev server and the Local VM's noVNC. */
@@ -105,7 +106,7 @@ interface Blocked { target: string; reason: Refusal }
 export const awayNotice = (device: string) => `The person's ${device} is away, so sites that turn away data centres, such as Instagram, YouTube and Google sign-in, load from My Cloud's own connection for now and may refuse. They open through the ${device} again once it is back.`;
 
 /** What the bot reads once when those sites load from My Cloud's own connection because no computer shares one. */
-export const UNSHARED_NOTICE = `Sites that turn away data centres, such as Instagram, YouTube and Google sign-in, load from My Cloud's own connection and may refuse it with an error page or "too many requests". If one does and the person needs it, tell them these sites open through their own computer's internet connection while OpenMausBot is open on it, signed in to MausBot Cloud.`;
+export const UNSHARED_NOTICE = `Sites that turn away data centres, such as Instagram, YouTube and Google sign-in, load from My Cloud's own connection and may refuse it with an error page or "too many requests". If one does and the person needs it, tell them these sites open through their own computer's internet connection while ${APP_NAME} is open on it, signed in to MausBot Cloud.`;
 
 /** One gate per running browser session, so a Chrome keeps the port it launched with; released once that browser has
  * ended, and opened again on the same port where it is still free. */

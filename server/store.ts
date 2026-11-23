@@ -47,6 +47,7 @@ import { repairLegacyWorkThreads } from "./legacy-work-threads.ts";
 import { createBotFork, createGroupFork } from "./store-forks.ts";
 import { createThreadBotIndex } from "./thread-bot-index.ts";
 import { activeGroupTask, groupTaskByThread, groupTasks, migrateGroupTaskRead, mirrorActiveGroupTask, refreshGroupUnread, setGroupTaskRead, syncGroupReadPatch } from "./group-task-state.ts";
+import { APP_NAME } from "../shared/product.ts";
 export { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
 export { threadTitleFrom, UNTITLED_THREAD } from "./task-record.ts";
 export type {
@@ -896,7 +897,7 @@ export class Store {
       detail: string;
       finishedAt: number;
     } | null,
-    fallbackDetail = "OpenMausBot restarted before this goal finished.",
+    fallbackDetail = `${APP_NAME} restarted before this goal finished.`,
     fallbackFinishedAt = Date.now(),
   ): number {
     const ownedThreadIds = new Set<string>(this.bots.flatMap((bot) => (bot.tasks ?? []).map((task) => task.threadId)));

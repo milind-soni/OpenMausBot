@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { EXIT, flag, usageError } from "./args.ts";
 import type { HeadlessClient } from "./client.ts";
 import type { VerbContext, VerbOutcome } from "./context.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 type Rec = Record<string, any>;
 
@@ -60,7 +61,7 @@ async function installEngine(client: HeadlessClient, instanceId: string): Promis
     method: "POST", headers: { "content-type": "application/json" }, body: "{}", stream: true, signal: AbortSignal.timeout(INSTALL_TIMEOUT_MS),
   });
   const text = await response.text();
-  if (!response.ok) throw Object.assign(new Error(`OpenMausBot API error (${response.status}): ${text || response.statusText}`), { status: response.status });
+  if (!response.ok) throw Object.assign(new Error(`${APP_NAME} API error (${response.status}): ${text || response.statusText}`), { status: response.status });
   let body: Rec = {};
   try { body = JSON.parse(text) as Rec; } catch { }
   return (body.instances as Rec[] | undefined)?.find((instance) => instance.instanceId === instanceId)?.snapshot?.state;

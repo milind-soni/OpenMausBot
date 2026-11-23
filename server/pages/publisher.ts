@@ -4,6 +4,7 @@ import { PageBundleError, pageSignature, pageSource, readPageBundle, skippedNote
 import { liveFiles } from "./live.ts";
 import type { PagesCall, PagesClient, PagesFailure, PageUsage } from "./client.ts";
 import type { PublishedPagesStore } from "./store.ts";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 /** What a publish or unpublish comes to: the sentence for the bot (or the person's card), and whether it failed. */
 export interface PageOutcome { status: number; text: string; card?: PublishedPageCard }
@@ -171,7 +172,7 @@ export function createPagePublisher(deps: {
       `Page id ${result.pageId}. This account now has ${usageWords(result.usage)}.`,
       "A card with the link, Copy link and Unpublish is in the chat. Publishing the same file or folder again updates this same link.",
       ...(live ? ["It is live: when a file in its folder changes, it is published again by itself (at most once a minute) and open copies reload."] : []),
-      ...(result.badge ? ["Free pages carry a small “Made with MausBot” badge."] : []),
+      ...(result.badge ? [`Free pages carry a small “Made with ${PRODUCT_NAME}” badge.`] : []),
       skippedNote(bundle.skipped),
     ];
     return { status: 200, text: lines.filter(Boolean).join("\n"), card };

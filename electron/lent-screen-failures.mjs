@@ -2,6 +2,8 @@
 // the bot through the server and this computer's lending activity, so they name no path.
 import capabilitiesModule from "./capabilities.cjs";
 import nativeText from "./native-text.cjs";
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 
 const { driverBlocked } = capabilitiesModule;
 
@@ -11,7 +13,7 @@ export const SCREEN_LOCKED =
 export function helperMissing(platform = process.platform, t = nativeText.englishText.t) {
   return platform === "win32"
     ? t("native.screen.windowsHelperBlocked")
-    : "Computer control could not start on this computer: its helper, cua-driver, is missing or blocked. Reinstall OpenMausBot, then restart it.";
+    : `Computer control could not start on this computer: its helper, cua-driver, is missing or blocked. Reinstall ${APP_NAME}, then restart it.`;
 }
 
 /** `reason` is the desktop's own cua start-up failure, which never crosses to the server as written. */
@@ -19,9 +21,9 @@ export function cuaUnavailable(reason, platform = process.platform, t = nativeTe
   const why = String(reason ?? "");
   if (driverBlocked(why)) return helperMissing(platform, t);
   if (/Accessibility|Screen Recording|permission/i.test(why)) {
-    return "Computer control needs permission on this computer: allow Accessibility and Screen Recording for OpenMausBot in System Settings → Privacy & Security, then restart OpenMausBot.";
+    return `Computer control needs permission on this computer: allow Accessibility and Screen Recording for ${APP_NAME} in System Settings → Privacy & Security, then restart ${APP_NAME}.`;
   }
-  return "Computer control is not running on this computer. Open OpenMausBot on it, check that computer control is on in Settings, then try again.";
+  return `Computer control is not running on this computer. Open ${APP_NAME} on it, check that computer control is on in Settings, then try again.`;
 }
 
 const PANES = Object.freeze(["accessibility", "screen"]);

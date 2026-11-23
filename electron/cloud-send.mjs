@@ -21,6 +21,8 @@ import { createMoveKinds, mergeRoutines } from "./cloud-send-kinds.mjs";
 import { botsOnCloud } from "./cloud-logins.mjs";
 import { moveCheck, patientSession, rowIdChunks, unanswered } from "./cloud-send-check.mjs";
 import nativeText from "./native-text.cjs";
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 
 const LOCAL_ROUTE = /^\/api\/(?:cloud-send|cloud-send\?move=1|cloud-send\/manifest|cloud-send\/chats|cloud-send\/chats\?attachments=1|cloud-send\/kind\?key=[\w%.-]{1,300}|cloud-send\/memory|cloud-send\/memory\?bot=[\w-]{1,128}|cloud-send\/files|cloud-send\/files\?path=[\w%.()~!*'-]{1,12000}&offset=\d{1,16}&length=\d{1,9}|cloud-send\/chats\/rows\?thread=[\w-]{1,200}&after=\d{1,16}&id=[\w%.-]{0,600}|cloud-send\/chats\/ids\?thread=[\w-]{1,200}&from=\d{1,9}|cloud-send\/chats\/attachment\/[A-Za-z0-9-]{1,80}\.[A-Za-z0-9]{1,10}|cloud-connections|connectors\/connected|config|bots\?messages=0|bots\/[\w-]{1,128}\/(?:skills|skills\/[a-z0-9-]{1,64}|memory|memory\/file\?path=[\w%.-]{1,200})|attachments\/[A-Za-z0-9-]{1,80}\.(?:png|jpg|gif|webp))$/u;
 /** One request's chats: a few conversations' rows, well under My Cloud's body limit. */
@@ -256,7 +258,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
   async function localJson(route, options) {
     if (!allowed(route)) throw new CloudSendError("invalid", "Unsupported local request.");
     const response = await local(chosenOnly(route), options);
-    if (!response.ok) throw new CloudSendError("local", "OpenMausBot on this computer did not answer. Try again in a moment.");
+    if (!response.ok) throw new CloudSendError("local", `${APP_NAME} on this computer did not answer. Try again in a moment.`);
     return response.json();
   }
   async function localBytes(route) {
@@ -364,7 +366,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
   async function sendTo(origin, job, { keys, force, reason }) {
     const result = { ...emptyResult(), ...(reason === "move" ? movedResult() : {}) };
     const mine = parseSendSummary(await localJson(reason === "move" ? scoped("/api/cloud-send?move=1") : "/api/cloud-send"));
-    if (!mine) throw new CloudSendError("local", "OpenMausBot on this computer did not answer. Try again in a moment.");
+    if (!mine) throw new CloudSendError("local", `${APP_NAME} on this computer did not answer. Try again in a moment.`);
     const withChats = !keys && CHAT_REASONS.has(reason);
     const latest = await sendItems(origin, mine, result, { keys, force, job, withChats });
     const outcome = { at: now(), reason, result };

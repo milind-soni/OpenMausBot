@@ -3,6 +3,7 @@
 import type { BackendRequest, BackendResult, DeciderBackend, DeciderQuestion, OpenRouterApi } from "./types.ts";
 import { keySafeUrl } from "../provider-key-check.ts";
 import { jevRequestBody, parseJevResponse, questionsFit, refusal } from "./jev.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 export const OPENROUTER_DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
 export const OPENROUTER_DEFAULT_MODEL = "typesafe/jev-1.13";
@@ -138,7 +139,7 @@ async function decide(request: BackendRequest): Promise<BackendResult> {
         authorization: `Bearer ${request.key}`,
         "content-type": "application/json",
         accept: "application/json",
-        "x-openrouter-title": "OpenMausBot",
+        "x-openrouter-title": `${APP_NAME}`,
       },
       body: JSON.stringify(decisions
         ? openrouterDecisionsBody(request.state, request.questions, asked)

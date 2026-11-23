@@ -41,6 +41,7 @@ import { sanitizeInput } from "./routine-input.ts";
 import { applyCheckResult, codedLine, keptRunOutput, routineLine, runLineFields, type RoutineLine, type RoutineLineCodes, type RoutineTroubleCode } from "./routine-lines.ts";
 import { checkHold, CHECK_BOOT_HOLD_MS, type CheckHold } from "./routine-check-pacing.ts";
 import { resolveRoutineResultsThread, routineRunDefinition, type ResultsThreadAllocation } from "./routine-run-definition.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 export type { RoutineContextAttachment, RoutineIntervalWindow, RoutineRunStatus, RoutineRunTrigger };
 export { intervalHasRestrictions } from "./routine-intervals.ts";
@@ -306,7 +307,7 @@ export interface RoutineManagerOptions {
 
 const WAKE_HORIZON_MS = 60 * 60_000;
 
-export const ROUTINE_RESTARTED = "OpenMausBot restarted while this routine was running";
+export const ROUTINE_RESTARTED = `${APP_NAME} restarted while this routine was running`;
 const MAX_RUNS = 2_000;
 const earliest = (...times: Array<number | null>): number | null => times.reduce<number | null>((first, at) => at === null ? first : first === null ? at : Math.min(first, at), null);
 function cloneRoutine(routine: Routine): Routine {

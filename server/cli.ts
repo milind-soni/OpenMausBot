@@ -67,6 +67,7 @@ import {
   type TunnelAccount,
   type TunnelRecovery,
 } from "./tunnel.ts";
+import { APP_NAME, PRODUCT_NAME } from "../shared/product.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -344,7 +345,7 @@ async function showPhonePairing(options: CliOptions, origin: string | undefined,
   if (options.relay) return showRelayPairing({ tty: process.stdout.isTTY === true, status: async () => (await api(options.port, "/api/auth/pairing")).body?.relay, mint: () => mintPairing(options.port, { client: true, label: options.label ?? (options.phone === "android" ? "Android" : "iPhone / iPad"), phone: options.phone ?? "ios" }), log, prefix: cliPrefix() });
   const ready = !!origin && await verifyPhoneEndpoint(options.port, origin);
   if (!ready) {
-    log("Phone access is not reachable yet. OpenMausBot is ready on this computer; no phone pairing code was created.");
+    log(`Phone access is not reachable yet. ${APP_NAME} is ready on this computer; no phone pairing code was created.`);
     log(`Check the HTTPS connection, then run ${cliCommand("pair")} again with the same --data-dir and --port.`);
     return false;
   }
@@ -371,7 +372,7 @@ async function mintPairing(port: number, options: { label?: string; client?: boo
 /** Never asks anything: the running server's own address (its routes) goes in the link. */
 export async function runPair(options: CliOptions): Promise<number> {
   if (!(await serverUp(options.port))) {
-    console.error(`No MausBot server is running here. Start it: ${cliCommand("serve")}${options.port !== 8799 ? ` (or name its port: --port ${options.port})` : ""}`);
+    console.error(`No ${PRODUCT_NAME} server is running here. Start it: ${cliCommand("serve")}${options.port !== 8799 ? ` (or name its port: --port ${options.port})` : ""}`);
     return 1;
   }
   const advertised = await api(options.port, "/api/auth/pairing").catch(() => ({ status: 0, body: {} as any }));
@@ -386,7 +387,7 @@ export async function runPair(options: CliOptions): Promise<number> {
 
 export async function runSessions(options: CliOptions): Promise<number> {
   if (!(await serverUp(options.port))) {
-    console.error(`no OpenMausBot server on http://127.0.0.1:${options.port}`);
+    console.error(`no ${APP_NAME} server on http://127.0.0.1:${options.port}`);
     return 1;
   }
   if (options.revoke) {
@@ -427,9 +428,9 @@ export async function runSessions(options: CliOptions): Promise<number> {
 export async function runStatus(options: CliOptions, io: CliIo = defaultIo()): Promise<number> {
   const body: any = await fetch(`http://127.0.0.1:${options.port}/.well-known/openmausbot/environment`).then((r) => r.json()).catch(() => null);
   if (body && options.json) io.log(JSON.stringify(body, null, 2));
-  if (!body) io.error(`No MausBot server is running here. Start it: ${cliCommand("serve")}`);
+  if (!body) io.error(`No ${PRODUCT_NAME} server is running here. Start it: ${cliCommand("serve")}`);
   if (body && !options.json) {
-    io.log(`Server "${body.label}"   running · MausBot ${body.version} on ${body.platform}\n  Local        127.0.0.1:${options.port}`);
+    io.log(`Server "${body.label}"   running · ${PRODUCT_NAME} ${body.version} on ${body.platform}\n  Local        127.0.0.1:${options.port}`);
     const address = await api(options.port, "/api/auth/pairing").then((r) => (typeof r.body?.publicUrl === "string" ? r.body.publicUrl as string : null)).catch(() => null);
     if (!address || isLoopbackHost(new URL(address).hostname)) io.log(`  Address      none: reachable from this machine only. Ways in: ${cliCommand("serve --help")}`);
     else for (const line of reachLines(address.startsWith("http:") ? "lan" : "public-url", address, options.port, cliPrefix(), address.startsWith("http:") ? undefined : await checkReach(options.port, address))) io.log(`  ${line.replace(/^Reach   /, "Address     ")}`);
@@ -437,8 +438,8 @@ export async function runStatus(options: CliOptions, io: CliIo = defaultIo()): P
     if (Array.isArray(sessions?.body?.sessions)) io.log(`Paired   ${sessions.body.sessions.length} device${sessions.body.sessions.length === 1 ? "" : "s"}   ${cliCommand("devices")}`);
   }
   const account = options.json ? null : describeTunnelAccount(createTunnelAccount({ dataDir: options.dataDir, version: reportableServerVersion() }).credentials.read());
-  if (!options.json && fleetCredential()) io.log(`MausBot web address: managed by the fleet (${FLEET_CREDENTIAL_ENV} is set)`);
-  else if (account?.address) io.log(`MausBot web address: ${account.address} (signed in as ${account.email ?? "?"}; serve it with ${cliCommand("serve --tunnel")})`);
+  if (!options.json && fleetCredential()) io.log(`${PRODUCT_NAME} web address: managed by the fleet (${FLEET_CREDENTIAL_ENV} is set)`);
+  else if (account?.address) io.log(`${PRODUCT_NAME} web address: ${account.address} (signed in as ${account.email ?? "?"}; serve it with ${cliCommand("serve --tunnel")})`);
   return body ? 0 : 1;
 }
 
@@ -520,7 +521,7 @@ export async function runLogin(options: CliOptions, io: CliIo = defaultIo()): Pr
   }
   const existing = describeTunnelAccount(account.credentials.read());
   if (existing.address) io.log(`already signed in as ${existing.email ?? "?"} (${existing.address}); signing in again refreshes it`);
-  const email = (options.email ?? (await io.ask("Email for your OpenMausBot account: "))).trim();
+  const email = (options.email ?? (await io.ask(`Email for your ${APP_NAME} account: `))).trim();
   if (!email) {
     io.error(`an email address is needed: ${cliCommand("login --email you@example.com")}`);
     return 1;
@@ -819,12 +820,12 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
       await new Promise((r) => setTimeout(r, 250));
     }
     if (exited !== null) {
-      if (exited !== 0) log(`OpenMausBot could not start.${logPath ? ` Details: ${logPath}` : " See the output above."}`);
+      if (exited !== 0) log(`${APP_NAME} could not start.${logPath ? ` Details: ${logPath}` : " See the output above."}`);
       return exited;
     }
     if (stopping) return await childExit;
     if (!(await serverUp(options.port, child.pid))) {
-      console.error(`OpenMausBot did not become ready within a minute.${logPath ? ` Details: ${logPath}` : " See its output above."}`);
+      console.error(`${APP_NAME} did not become ready within a minute.${logPath ? ` Details: ${logPath}` : " See its output above."}`);
       await stop();
       return 1;
     }
@@ -860,7 +861,7 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
     const route: Route | null = plan ? "tunnel" : options.domain ? "domain" : tailscaleShare ? "tailscale" : publicUrl ? "public-url" : env.OMB_LAN === "1" ? "lan" : null;
     const origin = route === "lan" ? lanUrl(options.port, env) : publicUrl ?? null;
     log("");
-    log(`MausBot ${serverVersion()} · server "${described?.body?.label ?? options.label ?? "this machine"}"`);
+    log(`${PRODUCT_NAME} ${serverVersion()} · server "${described?.body?.label ?? options.label ?? "this machine"}"`);
     if (options.guided) {
       log("Your bots and conversations are saved automatically.");
       log(`Details if you need help: ${logPath}`);

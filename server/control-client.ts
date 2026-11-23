@@ -2,6 +2,7 @@
 // took control", whose text is reserved for the harness saying a person holds the computer.
 
 /** Under the 60 seconds an engine may give one tool call (Codex's default), with room for the action itself. */
+import { APP_NAME } from "../shared/product.ts";
 export const CONTROL_WAIT_MS = 45_000;
 /** A call that waited longer is not performed: a late action could outlive a call the engine already retried, and happen twice. */
 export const CONTROL_ACT_WITHIN_MS = 5_000;
@@ -26,7 +27,7 @@ export const CONTROL_BUSY =
   "Another thread is using this computer. This call was not performed. This turn gets the computer as soon as it is free: " +
   `to keep waiting, take a screenshot (each computer call waits up to ${WAIT_WORDS}) instead of ending your turn.`;
 export const CONTROL_UNCONFIRMED =
-  "OpenMausBot could not confirm that this computer is free, so this call was NOT performed and nothing happened on the screen. " +
+  `${APP_NAME} could not confirm that this computer is free, so this call was NOT performed and nothing happened on the screen. ` +
   "Retry in a few seconds.";
 /** The gate no longer accepts this call's turn capability (401: the turn settled, or its computer was switched or taken back), so no retry can succeed. */
 export const CONTROL_TURN_ENDED =

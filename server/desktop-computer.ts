@@ -6,6 +6,7 @@ import { userErrorThrown } from "./user-errors.ts";
 // computer, even with the app's own record of its driver in reach. A Mac shared with My Cloud goes through lending, not here.
 import { THIS_COMPUTER_NOT_READY } from "../shared/your-computer.ts";
 import { cuaUnavailableReason, decodeCuaConnection, type LocalComputerConnection } from "./local-computer.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 export const DESKTOP_COMPUTER_GRANT = "openmausbot:local-computer";
 
@@ -53,12 +54,12 @@ export const desktopComputer = createDesktopComputer();
 /** Why a turn cannot use this computer, in words for the person and the bot alike. */
 export function thisComputerNotReady(desktop: DesktopComputer = desktopComputer, platform: NodeJS.Platform = process.platform): string {
   if (!desktop.granted()) {
-    return "Only the OpenMausBot app on this computer can let a bot use it. Open the app here, or let the bot work in its own browser or on a cloud desktop instead.";
+    return `Only the ${APP_NAME} app on this computer can let a bot use it. Open the app here, or let the bot work in its own browser or on a cloud desktop instead.`;
   }
   const reason = desktop.unavailableReason();
-  if (!reason) return `${THIS_COMPUTER_NOT_READY}make sure OpenMausBot has the permissions it asks for, then restart it`;
+  if (!reason) return `${THIS_COMPUTER_NOT_READY}make sure ${APP_NAME} has the permissions it asks for, then restart it`;
   const permission = platform === "darwin" && /(?:Screen Recording|Accessibility).*required/i.test(reason);
-  return `${THIS_COMPUTER_NOT_READY}${reason}${permission ? ". Relaunch OpenMausBot after granting the missing macOS permission." : ""}`;
+  return `${THIS_COMPUTER_NOT_READY}${reason}${permission ? `. Relaunch ${APP_NAME} after granting the missing macOS permission.` : ""}`;
 }
 
 export function thisComputerNotReadyError(desktop: DesktopComputer = desktopComputer, platform: NodeJS.Platform = process.platform): Error {

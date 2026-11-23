@@ -15,6 +15,7 @@ import {
   yourComputerText,
   type YourComputerCall,
 } from "../shared/your-computer.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 export interface YourComputerBus {
   store: Store;
@@ -22,7 +23,7 @@ export interface YourComputerBus {
 }
 
 export const YOUR_COMPUTER_WAITING =
-  "OpenMausBot is asking the person whether you may use their own computer, and they have not answered yet, so this call was NOT performed and nothing happened on their screen. Do not ask them again in chat: the question is already in front of them. To keep waiting, take a screenshot (each call waits up to 45 seconds); meanwhile you may work on anything that does not need their computer.";
+  `${APP_NAME} is asking the person whether you may use their own computer, and they have not answered yet, so this call was NOT performed and nothing happened on their screen. Do not ask them again in chat: the question is already in front of them. To keep waiting, take a screenshot (each call waits up to 45 seconds); meanwhile you may work on anything that does not need their computer.`;
 
 /** The claim fails with this, so the turn is told why without a failed-turn row: the person chose, nothing broke. */
 export const YOUR_COMPUTER_DECLINED =

@@ -4,6 +4,7 @@ import { listConfigBackups, restoreConfigBackup } from "./config-backup.ts";
 import { defaultDataDir, type DataHomes } from "./data-dir.ts";
 import { parseStoredConfig } from "./config.ts";
 import { parseJson } from "./schema.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 export const CONFIG_USAGE = `openmausbot config backups [--data-dir DIR] [--json]
 openmausbot config restore NAME [--data-dir DIR] [--dry-run] [--json]
@@ -18,7 +19,7 @@ restore   put a copy back, by name or "latest"; the file it replaces is kept,
           so the restore can be undone. Stop the server first if it is
           running, so nothing it holds in memory is written over the copy.
 
---data-dir DIR  the OpenMausBot data folder (default ~/.openmausbot)
+--data-dir DIR  the ${APP_NAME} data folder (default ~/.openmausbot)
 --dry-run        say what a restore would do, and change nothing
 --json           print the result as JSON`;
 

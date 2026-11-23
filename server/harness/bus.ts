@@ -11,9 +11,10 @@ import { newId, type ProviderAdapter, type ProviderInstance, type RuntimeEvent, 
 import { LiveSteps } from "./live-steps.ts";
 import { ProgressGate } from "./progress-gate.ts";
 import { TextItems } from "./text-items.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 const INCOMPLETE_LOG_MESSAGE =
-  "Canonical event history is incomplete: OpenMausBot could not write one or more events to disk. Live updates will continue.";
+  `Canonical event history is incomplete: ${APP_NAME} could not write one or more events to disk. Live updates will continue.`;
 
 const DELTA_MERGE_MS = 50;
 

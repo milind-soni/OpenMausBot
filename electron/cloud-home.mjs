@@ -1,6 +1,8 @@
 // A pairing code lives in main-process memory for one navigation: never persisted, never sent to a renderer, only in a link's hash.
 import environments from "./environments.cjs";
 import nativeText from "./native-text.cjs";
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 
 const { englishText } = nativeText;
 
@@ -266,7 +268,7 @@ export async function signInCloudSession({ origin, mine, pair, fetch: fetchImpl 
     if (grant?.origin !== origin || typeof grant.code !== "string") return false;
     const response = await fetchImpl(`${origin}/api/auth/pair`, {
       method: "POST", credentials: "include", redirect: "error", cache: "no-store", signal: AbortSignal.timeout(15_000),
-      headers: { "content-type": "application/json", origin }, body: JSON.stringify({ code: grant.code, cookie: true, label: "OpenMausBot app (lending)" }),
+      headers: { "content-type": "application/json", origin }, body: JSON.stringify({ code: grant.code, cookie: true, label: `${APP_NAME} app (lending)` }),
     });
     return response.ok;
   } catch { return false; }

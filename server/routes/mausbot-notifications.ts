@@ -6,6 +6,7 @@ import type { json as sendJson } from "../harness/http.ts";
 import { listUnread, markRead, type NotificationsHost } from "../mausbot-notifications.ts";
 import { markNotificationLogRead, recentNotificationLog } from "../message-db.ts";
 import { PASS } from "./table.ts";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 export interface MausBotNotificationsContext {
   method: string;
@@ -40,6 +41,6 @@ export function createMausBotNotificationRoutes(deps: LiveNotificationsDeps | No
       result = markRead(host, ctx.botId, body && typeof body === "object" ? (body as Record<string, unknown>).ids : undefined);
     }
     if (result.ok) return void ctx.json(ctx.res, 200, { text: result.text });
-    return void ctx.json(ctx.res, result.error.startsWith("Only MausBot") ? 403 : 400, { error: result.error });
+    return void ctx.json(ctx.res, result.error.startsWith(`Only ${PRODUCT_NAME}`) ? 403 : 400, { error: result.error });
   };
 }

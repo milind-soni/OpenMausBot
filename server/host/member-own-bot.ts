@@ -2,6 +2,7 @@
 // stops, then it is deleted the app's own way.
 import type { RoutineManager } from "../routines.ts";
 import type { BotRecord, Store } from "../store.ts";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 export interface MemberOwnBotDeps {
   store(): Pick<Store, "bot" | "patchBot">;
@@ -45,7 +46,7 @@ export function createMemberOwnBot(deps: MemberOwnBotDeps) {
       store.patchBot(botId, { defaultBot: undefined, sidebarHidden: undefined });
       const result = await deps.deleteBot(botId).catch((error: unknown) => ({ status: 500, body: { error: error instanceof Error ? error.message : String(error) } }));
       if (result.status < 400) return true;
-      console.warn(`team member left: could not delete their MausBot ${botId}: ${result.body.error ?? result.status}`);
+      console.warn(`team member left: could not delete their ${PRODUCT_NAME} ${botId}: ${result.body.error ?? result.status}`);
       if (store.bot(botId)) store.patchBot(botId, { defaultBot: bot.defaultBot, sidebarHidden: bot.sidebarHidden });
       return false;
     },

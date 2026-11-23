@@ -1,6 +1,7 @@
 import type { NotificationLogEntry, NotifyKind } from "../shared/notification.ts";
 import { holdsMausBotTools } from "./chief-level.ts";
 import type { BotRecord } from "./store.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 export interface NotificationsHost {
   bot(id: string): BotRecord | null;
@@ -56,7 +57,7 @@ export type NotificationsResult = { ok: true; text: string } | { ok: false; erro
 /** The feed is the personal install's alone. */
 function refusal(host: NotificationsHost, botId: string): string | null {
   const bot = host.bot(botId);
-  if (!holdsMausBotTools(bot)) return "Only MausBot reads notifications in chat.";
+  if (!holdsMausBotTools(bot)) return `Only ${PRODUCT_NAME} reads notifications in chat.`;
   return bot.defaultBot?.person || host.team() ? "Where several people share this workspace, notifications are read in the app; I cannot go through them for you." : null;
 }
 

@@ -16,6 +16,7 @@ import { askOnTerminal, openInBrowser, terminalPresent } from "./prompt.ts";
 import { SavedServers, type SecurityRunner } from "./saved-servers.ts";
 import { teamApplyVerb, teamExportVerb } from "./team-apply.ts";
 import { tokenVerb } from "./token.ts";
+import { APP_NAME, PRODUCT_NAME } from "../../shared/product.ts";
 
 const T = "TARGET is a bot or room by name or id, or --bot ID, --channel ID, --thread ID; --task ID picks one of its conversations.";
 
@@ -35,7 +36,7 @@ openmausbot doctor --data [--fix] [--data-dir DIR]
   copied to DIR/doctor-backups/<time>/ first. Anything else is reported with what to do.
   Exit 0 fine (after --fix: fine now), 8 a problem is left.`,
   login: `openmausbot login [SERVER] [--scope chat] [--name NAME]
-  Sign this terminal in, once. On this computer MausBot shows a card with a short code: check it matches the one printed
+  Sign this terminal in, once. On this computer ${PRODUCT_NAME} shows a card with a short code: check it matches the one printed
   here and press Allow. For a Cloud or a server elsewhere (openmausbot login https://maus.example.com) your browser opens
   the same card. The sign-in lasts 30 days and renews while you use it; it is kept in the macOS Keychain (elsewhere in a
   file only you can read) and never printed. --scope chat signs in for chat only. Every command then uses this server.
@@ -56,7 +57,7 @@ openmausbot bots stop (BOT… | --team NAME | --all) [--dry-run] [--yes]
   the team itself, so bots added to it later are paused too. stop stops their work now and pauses nothing.`,
   "bots list": "openmausbot bots list\n  Your bots and what each is doing (the same as openmausbot bots).",
   "bots get": "openmausbot bots get BOT\n  One bot: its team, state, computer, model, approvals and conversations.",
-  "bots delete": "openmausbot bots delete (BOT… | --team NAME | --all) [--dry-run] [--yes]\n  Delete bots with their conversations. It prints the list and asks first; MausBot itself and a busy bot are refused.",
+  "bots delete": `openmausbot bots delete (BOT… | --team NAME | --all) [--dry-run] [--yes]\n  Delete bots with their conversations. It prints the list and asks first; ${PRODUCT_NAME} itself and a busy bot are refused.`,
   "bots pause": "openmausbot bots pause (BOT… | --team NAME | --all) [--dry-run]\n  Pause bots: their work stops and nothing new starts, across restarts, until bots resume.",
   "bots resume": "openmausbot bots resume (BOT… | --team NAME | --all) [--dry-run]\n  Resume paused bots.",
   "bots stop": "openmausbot bots stop (BOT… | --team NAME | --all) [--dry-run] [--yes]\n  The same as openmausbot stop.",
@@ -136,7 +137,7 @@ openmausbot computers sleep BOT            put it to sleep; it wakes when the bo
   terminal, openmausbot login is simpler. On a server you started with openmausbot serve the code is made for you;
   for the desktop app or a server elsewhere, get one from Settings → Phone & devices.
   Then use it: --url URL --token-file FILE (or OPENMAUSBOT_URL and OPENMAUSBOT_TOKEN).`,
-  mcp: "openmausbot mcp\n  Serve the OpenMausBot MCP tools on stdin and stdout, for an agent (docs/mcp-server.md).",
+  mcp: `openmausbot mcp\n  Serve the ${APP_NAME} MCP tools on stdin and stdout, for an agent (docs/mcp-server.md).`,
   token: "openmausbot token create NAME --out FILE … | token list | token revoke ID   (see help token create)",
   "token create": `openmausbot token create NAME --out FILE [--scope client|admin] [--expires 90d] [--force]
   An access token for CI and scripts, saved to FILE (only you can read it) and never printed.

@@ -7,6 +7,7 @@ import { toolkitName } from "./activity.ts";
 import type { McpAuthState } from "./mcp-oauth.ts";
 import { isRemoteMcpServer, parseStoredMcpServer } from "./mcp-registry.ts";
 import { stayedConnectors, stayedWhyText } from "./cloud-connections-stayed.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const COMPOSIO_TTL_MS = 20_000;
 const SLUG = /^[a-z0-9_][a-z0-9_-]{0,80}$/u;
@@ -68,7 +69,7 @@ export function createConnectionPrompt(sources: ConnectionPromptSources, origin:
     const apps = connected(granted.filter((slug) => SLUG.test(slug))).filter(([, on]) => !on).map(([slug]) => toolkitName(slug.toUpperCase()));
     const from = sources.movedFrom?.() ?? null;
     return [
-      from ? ` You moved to My Cloud from the person's computer ${from}, with everything in OpenMausBot. What lives outside OpenMausBot stayed on ${from}: its other folders and files, passkeys, the person's own browser sessions and apps, Local VM disks and model servers on its home network. When a task needs one, use ${from} if it is lent to My Cloud and online; otherwise say in plain words that it stayed there.` : "",
+      from ? ` You moved to My Cloud from the person's computer ${from}, with everything in ${APP_NAME}. What lives outside ${APP_NAME} stayed on ${from}: its other folders and files, passkeys, the person's own browser sessions and apps, Local VM disks and model servers on its home network. When a task needs one, use ${from} if it is lent to My Cloud and online; otherwise say in plain words that it stayed there.` : "",
       toConnect.length ? ` Not connected on My Cloud yet: ${toConnect.join("; ")}. When a task needs one, say in plain words that it needs the person once on My Cloud and give its link; do not try another way.` : "",
       apps.length ? ` Assigned to this bot but not connected on My Cloud yet: ${apps.join(", ")}. When a task needs one, call COMPOSIO_MANAGE_CONNECTIONS for it, which shows the person a card to connect it, and end the turn.` : "",
       ...(lent

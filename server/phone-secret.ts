@@ -4,6 +4,7 @@ import { isCredentialTargetId, isProviderCredentialTarget } from "../shared/cred
 import type { CipherSuite } from "@hpke/core";
 
 import { PHONE_SECRET_INFO, PHONE_SECRET_MAX_BYTES, PHONE_SECRET_PROTOCOL_VERSION } from "../shared/phone-secret-envelope.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 export { PHONE_SECRET_INFO, PHONE_SECRET_MAX_BYTES, PHONE_SECRET_PROTOCOL_VERSION };
 
@@ -136,11 +137,11 @@ export function assertPhoneSecretRequestMatches(
 ): void {
   // Phone entry hands a key to the desktop's settings; the 1Password token goes to Logins, which a phone cannot reach.
   if (expected.target === "onePasswordToken") {
-    throw new PhoneSecretError("Paste the 1Password token in OpenMausBot on your computer, or in My Cloud: a phone cannot save it yet.", 409);
+    throw new PhoneSecretError(`Paste the 1Password token in ${APP_NAME} on your computer, or in My Cloud: a phone cannot save it yet.`, 409);
   }
   // An AI provider key lives in the server's settings, which only the computer's own app writes.
   if (isCredentialTargetId(expected.target) && isProviderCredentialTarget(expected.target)) {
-    throw new PhoneSecretError("Paste this key in OpenMausBot on your computer, or in My Cloud: a phone cannot save it yet.", 409);
+    throw new PhoneSecretError(`Paste this key in ${APP_NAME} on your computer, or in My Cloud: a phone cannot save it yet.`, 409);
   }
   if (
     context.deviceId !== authenticatedDeviceId ||
@@ -389,14 +390,14 @@ export class PhoneSecretBridge {
     if (!this.identity) {
       throw new PhoneSecretError(
         this.desktopManaged
-          ? "Secure phone entry is not ready on this computer. Reopen OpenMausBot and try again."
+          ? `Secure phone entry is not ready on this computer. Reopen ${APP_NAME} and try again.`
           : "This server cannot take secrets from a phone. Enter it on the web or on your computer instead.",
         503,
       );
     }
     const identity = await this.identity.catch(() => {
       throw new PhoneSecretError(
-        "Secure phone entry is not ready on this computer. Reopen OpenMausBot and try again.",
+        `Secure phone entry is not ready on this computer. Reopen ${APP_NAME} and try again.`,
         503,
       );
     });

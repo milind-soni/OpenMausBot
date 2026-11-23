@@ -2,6 +2,7 @@
 // saying what it does. A window that can't apply one (a browser has no desktop bridge) refuses it.
 import { PLACE_SWATCHES, TALK_KEYS } from "../../shared/app-settings.ts";
 import { personOnly, type SettingEntry, type WindowPref } from "./registry.ts";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 const turn = (on: boolean, yes: string, no: string) => (on ? yes : no);
 
@@ -40,20 +41,20 @@ export function windowEntries(windowPref: WindowPref): SettingEntry[] {
       "Show a system notification when a bot finishes or needs you", "Stop system notifications from bots"),
     flag("general.notificationFeed", "Notification feed", "Keep a feed of what bots did in the notifications panel.", "notifications", ["feed", "notification feed", "inbox"],
       "Keep a feed of bot updates", "Turn off the feed of bot updates"),
-    flag("general.analytics", "Usage analytics", "Send anonymous usage data to MausBot (PostHog) to improve the app.", "analytics", ["analytics", "telemetry", "privacy", "tracking"],
-      "Send anonymous usage data from this app to MausBot's analytics (PostHog), off this computer", "Stop sending usage analytics"),
-    flag("general.openAtLogin", "Open at login", "Start MausBot when you log in to this computer (desktop app).", "startup", ["startup", "launch", "login", "open at login"],
-      "Open MausBot when you log in", "Don't open MausBot at login"),
-    windowPref("general.talkShortcut", "Talk shortcut", "A key held anywhere on this Mac to talk to MausBot (desktop app).", "talk", ["talk", "voice", "dictation", "microphone", "hotkey"],
+    flag("general.analytics", "Usage analytics", `Send anonymous usage data to ${PRODUCT_NAME} (PostHog) to improve the app.`, "analytics", ["analytics", "telemetry", "privacy", "tracking"],
+      `Send anonymous usage data from this app to ${PRODUCT_NAME}'s analytics (PostHog), off this computer`, "Stop sending usage analytics"),
+    flag("general.openAtLogin", "Open at login", `Start ${PRODUCT_NAME} when you log in to this computer (desktop app).`, "startup", ["startup", "launch", "login", "open at login"],
+      `Open ${PRODUCT_NAME} when you log in`, `Don't open ${PRODUCT_NAME} at login`),
+    windowPref("general.talkShortcut", "Talk shortcut", `A key held anywhere on this Mac to talk to ${PRODUCT_NAME} (desktop app).`, "talk", ["talk", "voice", "dictation", "microphone", "hotkey"],
       `{"enabled":true|false,"key":${TALK_KEYS.map((key) => `"${key}"`).join(" | ")}}`, {
-        says: ({ enabled, key }: { enabled: boolean; key: string }) => (enabled ? `Hold ${key.replaceAll("-", "+")} anywhere to talk to MausBot` : "Turn off the talk shortcut"),
+        says: ({ enabled, key }: { enabled: boolean; key: string }) => (enabled ? `Hold ${key.replaceAll("-", "+")} anywhere to talk to ${PRODUCT_NAME}` : "Turn off the talk shortcut"),
       }),
-    flag("account.productEmails", "Product update emails", "MausBot emails you product updates.", "emails", ["emails", "newsletter", "product updates", "email updates"],
-      "Get MausBot product update emails (your email address is sent to MausBot)", "Stop MausBot product update emails"),
+    flag("account.productEmails", "Product update emails", `${PRODUCT_NAME} emails you product updates.`, "emails", ["emails", "newsletter", "product updates", "email updates"],
+      `Get ${PRODUCT_NAME} product update emails (your email address is sent to ${PRODUCT_NAME})`, `Stop ${PRODUCT_NAME} product update emails`),
     wayIn("remote.wifi", "Same Wi-Fi", "Paired phones reach this computer on the same Wi-Fi network.", "wifi", ["wifi", "wi-fi", "lan", "local network", "remote access"],
       "Let your paired phones reach this computer on the same Wi-Fi"),
-    wayIn("remote.relay", "Reach from anywhere", "Paired phones reach this computer from anywhere through MausBot's relay (needs a MausBot sign-in).", "relay", ["relay", "anywhere", "away", "remote access"],
-      "Let your paired phones reach this computer from anywhere, through MausBot's relay"),
+    wayIn("remote.relay", "Reach from anywhere", `Paired phones reach this computer from anywhere through ${PRODUCT_NAME}'s relay (needs a ${PRODUCT_NAME} sign-in).`, "relay", ["relay", "anywhere", "away", "remote access"],
+      `Let your paired phones reach this computer from anywhere, through ${PRODUCT_NAME}'s relay`),
     wayIn("remote.tailscale", "Tailscale", "Paired devices reach this computer over your Tailscale network (Tailscale must be installed and signed in).", "tailscale", ["tailscale", "tailnet", "remote access"],
       "Let your devices reach this computer over Tailscale"),
     flag("remote.keepAwake", "Keep awake", "Keep this computer awake while a way in is on, so paired phones can reach it.", "keep-awake", ["sleep", "awake", "overnight"],

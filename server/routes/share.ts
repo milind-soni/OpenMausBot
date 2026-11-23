@@ -19,6 +19,7 @@ import { zipFolder } from "../share-zip.ts";
 import type { BotRecord, GroupRecord } from "../store.ts";
 import { parseTeamManifest } from "../team-manifest.ts";
 import { PASS, type RouteHandler } from "./table.ts";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 export interface ShareRouteDeps {
   host: ShareHost;
@@ -352,7 +353,7 @@ export function createShareToolRoute(deps: Omit<ShareRouteDeps, "bots"> & { bots
         const card = await host.publish(record.id);
         if (!record.cards.some((each) => each.threadId === ctx.threadId)) shown(ctx, card);
         if (card.status === "published") return reply(200, `Published. The link anyone can import from is ${card.link} and the pull request for review is ${card.prUrl}.`);
-        if (card.fallback) return reply(409, `Publishing isn't available here (${card.fallback === "sign_in" ? "this app isn't signed in to MausBot" : "the community service isn't offered here"}). The card offers Save folder… and the community repository's upload page instead; tell the person.`);
+        if (card.fallback) return reply(409, `Publishing isn't available here (${card.fallback === "sign_in" ? `this app isn't signed in to ${PRODUCT_NAME}` : "the community service isn't offered here"}). The card offers Save folder… and the community repository's upload page instead; tell the person.`);
         return reply(502, card.error ?? "Publishing failed. Try again shortly.");
       }
       if (body.action === "import") {

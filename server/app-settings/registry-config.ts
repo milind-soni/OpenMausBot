@@ -11,6 +11,7 @@ import { botsTowardLimit } from "../../shared/bot-limit.ts";
 import { parseSocks5Proxy } from "../browser/egress/policy.ts";
 import { CONFIG_PATCH_FIELDS as F, MAX_THREAD_EVENT_LOG_BYTES, MIN_THREAD_EVENT_LOG_BYTES } from "../config.ts";
 import { display, withoutKeys, type RegistryDeps, type SettingEntry, type Where, type WritableSpec } from "./registry.ts";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 /** Security: what a bot or card reads of a section never carries a key, token, secret or password field. */
 const visible = (value: unknown): unknown => (value && typeof value === "object" && !Array.isArray(value)
@@ -139,7 +140,7 @@ export function configEntries(deps: Pick<RegistryDeps, "cfg" | "saveConfig" | "b
       says: (proxy) => (proxy ? "Send bots' browsers to public sites through the SOCKS5 proxy you named" : "Send bots' browsers to public sites directly, with no proxy"),
     }),
     section({
-      id: "desktops.browserEngine", label: "Browser engine", help: "What runs bots' browsers: agent-browser (the default) or MausBot's own Chrome driver (early).", where: "browser",
+      id: "desktops.browserEngine", label: "Browser engine", help: `What runs bots' browsers: agent-browser (the default) or ${PRODUCT_NAME}'s own Chrome driver (early).`, where: "browser",
       synonyms: ["browser engine", "chrome", "new browser", "agent-browser"], value: z.enum(["agent-browser", "chrome"]), allowed: "agent-browser or chrome",
       current: () => cfg().browserEngine?.engine ?? "agent-browser", patch: (engine) => ({ browserEngine: { engine } }),
     }),

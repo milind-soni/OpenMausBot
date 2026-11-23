@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import { enginesBinDir, installNpmEngine } from "./engine-install.ts";
 import { findCliCandidates } from "./env-path.ts";
 import { describeSpawnFailure, execCli } from "./procs.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 type ExecCli = (
   cli: string,
@@ -116,6 +117,6 @@ export async function updateClaudeCli(
     if (!version) throw new Error("Claude returned an empty version");
     return { version };
   } catch {
-    throw new Error("Claude finished updating, but OpenMausBot could not verify the installed version. Refresh Engines to check it.");
+    throw new Error(`Claude finished updating, but ${APP_NAME} could not verify the installed version. Refresh Engines to check it.`);
   }
 }

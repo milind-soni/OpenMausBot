@@ -1,12 +1,13 @@
 import { win32 } from "node:path";
 import { splitCliString } from "../env-path.ts";
 import type { ProviderSnapshot } from "../contracts.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 /** Shown on an engine whose custom command starts it inside WSL: it chats, but OpenMausBot's tool servers are Windows
  * programs on Windows' loopback, which the engine inside WSL can neither start nor reach. */
 export const WSL_ENGINE_WARNING = {
   title: "This engine runs inside WSL",
-  message: "Its command starts it inside WSL, so it can chat but can't use OpenMausBot's tools (team, browser, computer, data and the rest). Install the engine on Windows itself and set its CLI path to that install to get them.",
+  message: `Its command starts it inside WSL, so it can chat but can't use ${APP_NAME}'s tools (team, browser, computer, data and the rest). Install the engine on Windows itself and set its CLI path to that install to get them.`,
 } as const;
 
 /** Whether a custom CLI command starts the engine through WSL on Windows: wsl.exe, or the bash.exe in System32 that

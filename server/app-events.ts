@@ -4,6 +4,7 @@ import type { AppTrigger, AppTriggerFilter } from "../shared/app-triggers.ts";
 import { filtersAtSource } from "../shared/app-triggers.ts";
 import { AUTHORITY, appEventWho, fromNote } from "./provenance-label.ts";
 import { defuse as defused } from "./records-block.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 /** Event data in one run, as for a webhook delivery; and how many events one run takes before another starts. */
 export const MAX_EVENT_CHARS = 48_000;
@@ -54,14 +55,14 @@ export function eventBlock(trigger: Pick<AppTrigger, "appName" | "eventName" | "
   let text: string;
   try { text = JSON.stringify(event.data, null, 2) ?? "{}"; } catch { text = String(event.data); }
   const room = MAX_EVENT_CHARS - 400;
-  if (text.length > room) text = `${text.slice(0, room)}\n\n[Event truncated by OpenMausBot]`;
+  if (text.length > room) text = `${text.slice(0, room)}\n\n[Event truncated by ${APP_NAME}]`;
   const header = [
     `App: ${trigger.appName}${trigger.accountLabel ? ` (${trigger.accountLabel})` : ""}`,
     `Event: ${trigger.eventName}`,
     `Received: ${new Date(event.receivedAt).toISOString()}`,
     `Event ID: ${event.id.slice(0, 200)}`,
   ].join("   ");
-  const test = event.test ? "\nTEST EVENT, started from OpenMausBot: nothing really happened. Do not reply to, send or change anything; say what you would do." : "";
+  const test = event.test ? `\nTEST EVENT, started from ${APP_NAME}: nothing really happened. Do not reply to, send or change anything; say what you would do.` : "";
   return [fromNote(appEventWho(trigger.appName, trigger.eventName), "event", AUTHORITY.info), BLOCK_OPEN, `${defused(header)}${test}`, "", defused(text), BLOCK_CLOSE].join("\n");
 }
 

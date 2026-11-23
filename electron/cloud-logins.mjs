@@ -4,6 +4,8 @@
 // The secret leaves this computer's server only over Electron's private utility-process port (server/login-handoff.ts)
 // and is answered only to the process it was asked of; nothing here keeps or logs it.
 import { randomUUID } from "node:crypto";
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 
 const REQUEST = "openmausbot:login-handoff";
 const RESULT = "openmausbot:login-handoff-result";
@@ -23,14 +25,14 @@ export function createLoginHandoffClient({ timeoutMs = 10_000, randomId = random
   };
   return {
     request(proc, what) {
-      if (!proc) return Promise.reject(new Error("OpenMausBot on this computer is not running. Try again in a moment."));
+      if (!proc) return Promise.reject(new Error(`${APP_NAME} on this computer is not running. Try again in a moment.`));
       const requestId = randomId();
       return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => settle(requestId, () => reject(new Error("OpenMausBot on this computer did not answer. Try again."))), timeoutMs);
+        const timer = setTimeout(() => settle(requestId, () => reject(new Error(`${APP_NAME} on this computer did not answer. Try again.`))), timeoutMs);
         timer.unref?.();
         pending.set(requestId, { proc, resolve, reject, timer });
         try { proc.postMessage({ type: REQUEST, requestId, what }); }
-        catch { settle(requestId, () => reject(new Error("OpenMausBot on this computer could not be asked. Try again."))); }
+        catch { settle(requestId, () => reject(new Error(`${APP_NAME} on this computer could not be asked. Try again.`))); }
       });
     },
     /** True for a handoff answer, kept or ignored; never logs or throws with what it carried. */
@@ -40,7 +42,7 @@ export function createLoginHandoffClient({ timeoutMs = 10_000, randomId = random
       if (!waiting || waiting.proc !== proc) return true;
       settle(message.requestId, ({ resolve, reject }) => {
         if (message.ok === true && [message.onePassword, message.login, message.secret, message.connection, message.share, message.release, message.secrets].some(record)) resolve(message);
-        else reject(new Error(sentence(message.error) ?? "OpenMausBot on this computer could not read that login."));
+        else reject(new Error(sentence(message.error) ?? `${APP_NAME} on this computer could not read that login.`));
       });
       return true;
     },

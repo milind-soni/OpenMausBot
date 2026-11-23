@@ -10,6 +10,7 @@ import type { ModelCatalog } from "../contracts.ts";
 import { parseVersionTriple, versionAtLeast, type VersionTriple } from "../drivers/acp/version-probe.ts";
 import { BUNDLED_MODEL_MANIFEST, bundledEngineCatalog, engineCatalogFrom } from "./bundled.ts";
 import { parseModelManifest, type ManifestEngine, type ManifestPrice, type ModelManifestData } from "./schema.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 export const MODEL_MANIFEST_URL = "https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/server/model-manifest/model-manifest.json";
 export const MANIFEST_DISABLE_ENV = "OMB_DISABLE_MODEL_MANIFEST_FETCH";
@@ -168,7 +169,7 @@ export class ModelManifestStore {
     const timer = setTimeout(() => controller.abort(), this.options.timeoutMs ?? MANIFEST_FETCH_TIMEOUT_MS);
     try {
       const response = await (this.options.fetch ?? fetch)(MODEL_MANIFEST_URL, {
-        headers: { accept: "application/json", "user-agent": "OpenMausBot" },
+        headers: { accept: "application/json", "user-agent": `${APP_NAME}` },
         // raw.githubusercontent.com answers directly; anywhere else is not the file we meant to read.
         redirect: "error",
         signal: controller.signal,

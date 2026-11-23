@@ -45,6 +45,7 @@ import type { SessionRegistry } from "../sessions.ts";
 import type { Store } from "../store.ts";
 import type { BusyFlag, ConfigStatus } from "./config.ts";
 import { PASS, type RouteHandler } from "./table.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 export interface InstanceRouteDeps {
   store: Pick<Store, "bots" | "tasks">;
@@ -356,7 +357,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         }
         if (action === "install") {
           const installed = await registry.installRuntime(instanceId);
-          if (!installed) return json(res, 404, { error: "Installing this engine from Settings is not available on this server. Use the install command on the machine running OpenMausBot." });
+          if (!installed) return json(res, 404, { error: `Installing this engine from Settings is not available on this server. Use the install command on the machine running ${APP_NAME}.` });
           const usingAppCopy = installed !== true && await useAppCopy(instanceId, installed.useCli);
           return json(res, 200, { instances: await describeInstances(), ...(usingAppCopy ? { usingAppCopy: true } : {}) });
         }
@@ -369,7 +370,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
             if (instance.authenticationMethod === "browser") {
               return json(res, 403, { error: `This sign-in happens in a browser on the computer running ${productName()}. Open ${productName()} there to sign in.` });
             }
-            return json(res, 403, { error: "Continue with ChatGPT on the computer running OpenMausBot. Hosted Pro sign-in requires OpenAI's hosted-app approval." });
+            return json(res, 403, { error: `Continue with ChatGPT on the computer running ${APP_NAME}. Hosted Pro sign-in requires OpenAI's hosted-app approval.` });
           }
           const started = await providerAuthSessions.start(instance, owner);
           if (started.phase === "succeeded") registry.forgetSnapshots();

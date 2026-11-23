@@ -19,6 +19,7 @@ import { ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, liveDataEngineP
 import { omittedAsTeamPrivate, routinesWithoutTeamPrivate, stripTeamPrivate, TEAM_PRIVATE_NOTE, teamPrivateAttachments, teamPrivateThreads, withoutTeamPrivate } from "./workspace-backup-team-private.ts";
 import { flushLaterSaves } from "./save-batch.ts";
 import type { WorkspaceBackupClientState, WorkspaceBackupPrivateMetadata, WorkspaceBackupSummary, WorkspaceLeftBehind } from "../shared/workspace-backup.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 export type { WorkspaceBackupSummary, WorkspaceBackupPrivateMetadata } from "../shared/workspace-backup.ts";
 export const MAX_WORKSPACE_BACKUP_BYTES = 10 * 1024 ** 3;
@@ -628,7 +629,7 @@ export async function stageWorkspaceBackup(dataDir: string, archivePath: string,
     const versions = [manifest.summary.appVersion, options.currentAppVersion ?? ""].map((version) => /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(version)?.slice(1).map(Number));
     if (versions[0] && versions[1]) {
       for (let i = 0; i < 3; i++) {
-        if (versions[0][i] > versions[1][i]) throw new Error("This backup was made by a newer OpenMausBot version. Update the app before restoring it.");
+        if (versions[0][i] > versions[1][i]) throw new Error(`This backup was made by a newer ${APP_NAME} version. Update the app before restoring it.`);
         if (versions[0][i] < versions[1][i]) break;
       }
     }

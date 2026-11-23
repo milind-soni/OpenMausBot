@@ -144,7 +144,7 @@ export function lookPrompt(input: { apps: readonly LookApp[]; name?: string; lan
   const mail = input.apps.includes("gmail"), calendar = input.apps.includes("googlecalendar");
   const who = input.name ?? "The person";
   return [
-    `OpenMausBot first look: ${who} just connected ${input.apps.map((app) => APP_NAME[app]).join(" and ")}. Give them their first look now, without being asked again.`,
+    `${APP_NAME} first look: ${who} just connected ${input.apps.map((app) => APP_NAME[app]).join(" and ")}. Give them their first look now, without being asked again.`,
     `Read their ${[mail && "Gmail", calendar && "Google Calendar"].filter(Boolean).join(" and ")}, then write one short, concrete message in ${languageName(input.language)}:`,
     ...(calendar ? ["- This week: their meetings over the next 7 days, one line each (day, time, who), and say which ones overlap."] : []),
     ...(mail ? [

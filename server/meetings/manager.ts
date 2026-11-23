@@ -11,6 +11,7 @@ import { writeFileAtomic } from "../atomic.ts";
 import { recordsBlock, recordsText } from "../records-block.ts";
 import type { MeetingComputer, MeetingEngine, MeetingEvent, SpeechGrant } from "./engine.ts";
 import type { HeardWord, SpeechSource } from "./speech.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 export interface MeetingRecord {
   id: string;
@@ -387,7 +388,7 @@ export function createMeetings(deps: MeetingDeps) {
       for (const record of records.values()) {
         if (record.phase === "ended" || !before.has(record.id)) continue;
         if (record.boxId) follow(record);
-        else end(record, "join_failed", "OpenMausBot restarted before the meeting started.");
+        else end(record, "join_failed", `${APP_NAME} restarted before the meeting started.`);
       }
     },
     close(): void { closed = true; },

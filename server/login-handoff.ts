@@ -7,6 +7,7 @@ import { loginFingerprints, VERIFY_NONCE } from "./cloud-send-verify.ts";
 import type { VaultStore } from "./vault-store.ts";
 import { ONE_PASSWORD_MALFORMED, ONE_PASSWORD_REFUSED } from "./onepassword.ts";
 import type { TotpKey } from "./totp.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 export const LOGIN_HANDOFF_REQUEST = "openmausbot:login-handoff";
 export const LOGIN_HANDOFF_RESULT = "openmausbot:login-handoff-result";
@@ -62,7 +63,7 @@ const DIGEST = /^[0-9a-f]{64}$/u;
 
 export function totpAddress(key: TotpKey): string {
   const query = new URLSearchParams({ secret: key.secret, algorithm: key.algorithm, digits: String(key.digits), period: String(key.period) });
-  return `otpauth://totp/OpenMausBot?${query}`;
+  return `otpauth://totp/${encodeURIComponent(APP_NAME)}?${query}`;
 }
 
 /** What main may ask: a connection's fingerprints are asked only on its behalf, by a check of the credentials. */

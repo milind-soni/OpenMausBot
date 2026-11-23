@@ -6,6 +6,8 @@ import { randomUUID } from "node:crypto";
 
 import { createTeamMove, parseTeamMoves } from "./team-move.mjs";
 import { QUEUE_POLL_MS, switchOn } from "./one-home.mjs";
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 
 export const MY_CLOUD = Object.freeze({ id: "my-cloud", name: "My Cloud" });
 const ID = /^[\w-]{1,128}$/u;
@@ -60,7 +62,7 @@ export function createBotMove({ journal, local, send, session, lease = null, rea
     const scope = async () => {
       if (token) return token;
       const asked = await local.call("POST", "/api/cloud-send/scope", { v: 1, bots: ids() });
-      if (!asked.ok || typeof asked.body?.scope !== "string") throw Object.assign(new Error("OpenMausBot on this computer did not answer."), { status: asked.status });
+      if (!asked.ok || typeof asked.body?.scope !== "string") throw Object.assign(new Error(`${APP_NAME} on this computer did not answer.`), { status: asked.status });
       token = asked.body.scope;
       return token;
     };
@@ -85,7 +87,7 @@ export function createBotMove({ journal, local, send, session, lease = null, rea
       /** Only bots a move would carry go: an untouched one has nothing to carry, and stays here. */
       async prepare() {
         const listed = await local.call("GET", `/api/cloud-send?move=1&scope=${await scope()}`);
-        if (!listed.ok) throw Object.assign(new Error("OpenMausBot on this computer did not answer."), { status: listed.status });
+        if (!listed.ok) throw Object.assign(new Error(`${APP_NAME} on this computer did not answer.`), { status: listed.status });
         const carried = new Set(list(listed.body?.items).filter((item) => item?.kind === "bot").map((item) => item.id));
         const bots = list(current().bots).filter((bot) => carried.has(bot.id));
         if (!bots.length) throw Object.assign(new Error("These bots have nothing to move yet."), { final: true });

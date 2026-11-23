@@ -5,6 +5,7 @@ import { EMAIL_INSTRUCTIONS } from "./email/instructions.ts";
 import { PHONE_INSTRUCTIONS, PHONE_RECOVERY } from "./phones/instructions.ts";
 import { HARNESS_PROXY_TIMEOUT_MS, HARNESS_PROXY_TIMEOUTS_MS } from "./harness-budget.ts";
 import { capToolListResult } from "./tool-count-limit.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 export const MAX_INPUT_BYTES = 1_048_576;
 export const MAX_OUTPUT_BYTES = 16_777_216;
@@ -29,10 +30,10 @@ export function parseHarnessMcpKind(value: unknown): HarnessMcpKind | null {
 function unansweredText(error: unknown, name: string, timeoutMs: number): string {
   const code = (error as { cause?: { code?: unknown } } | null)?.cause?.code;
   const call = `this ${name.toLowerCase()} call`;
-  if (code === "ECONNREFUSED") return `OpenMausBot is restarting, so ${call} did not reach it and did not run. Wait a few seconds, then make it again.`;
-  if (code === "ECONNRESET" || code === "UND_ERR_SOCKET") return `OpenMausBot restarted while ${call} was running, so it may or may not have taken effect. Check its result before repeating it.`;
+  if (code === "ECONNREFUSED") return `${APP_NAME} is restarting, so ${call} did not reach it and did not run. Wait a few seconds, then make it again.`;
+  if (code === "ECONNRESET" || code === "UND_ERR_SOCKET") return `${APP_NAME} restarted while ${call} was running, so it may or may not have taken effect. Check its result before repeating it.`;
   if ((error as { name?: unknown } | null)?.name === "TimeoutError") {
-    return `OpenMausBot did not answer ${call} within ${timeoutMs / 1_000} seconds. It may still be running, or it may already have taken effect. Do not repeat it until its result is checked.`;
+    return `${APP_NAME} did not answer ${call} within ${timeoutMs / 1_000} seconds. It may still be running, or it may already have taken effect. Do not repeat it until its result is checked.`;
   }
   return error instanceof Error && !/fetch failed|abort|timeout|terminated/i.test(error.message)
     ? error.message : `${name} connection was interrupted. Do not repeat the action until its state is checked.`;
@@ -83,7 +84,7 @@ export async function harnessMcpRequest(
   try {
     const url = new URL(connection.url);
     if (!connection.token || url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
-      throw new Error(`${name} connection is not configured. Start a new bot turn from OpenMausBot.`);
+      throw new Error(`${name} connection is not configured. Start a new bot turn from ${APP_NAME}.`);
     }
     const body = JSON.stringify({ method: message.method, params: message.params ?? {} });
     if (Buffer.byteLength(body) > MAX_INPUT_BYTES) throw new Error(`${name} request exceeded the size limit.`);

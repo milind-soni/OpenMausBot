@@ -24,6 +24,7 @@ import {
   CLOUD_COMPUTER_RESTORING, CLOUD_COMPUTER_STILL_RESTORING, CLOUD_COMPUTER_TEAM_NOT_RESPONDING, CLOUD_COMPUTER_UNREACHABLE, cloudComputerSetAsideNotice, recoveryUnderWay,
   type CloudComputerPersonLine, type CloudComputerRecovery, type CloudComputerRecoveryState,
 } from "../shared/cloud-computer-recovery.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 const HOUR_MS = 60 * 60_000;
 const DAY_MS = 24 * HOUR_MS;
@@ -130,18 +131,18 @@ type SetAsideResult = "set-aside" | "deleted" | "deleting" | "capped" | "held" |
  * the next start makes a new one. `kept`: it was left the bot's, and `why` says so for the turn: a passing failure. */
 export type WakeTimeoutOutcome = { kind: "answers" | "replaced" | "gone" } | { kind: "kept"; why: string };
 
-const LATER = "MausBot keeps trying in the background; trying again later is fine";
+const LATER = `${PRODUCT_NAME} keeps trying in the background; trying again later is fine`;
 const kept = (why: string): WakeTimeoutOutcome => ({ kind: "kept", why });
 const silentWhy = (restarted: boolean) =>
   `the cloud computer is still not answering${restarted ? ", even after a restart" : ""}. ${LATER}`;
 const KEPT_WHY: Record<Exclude<SetAsideResult, "set-aside" | "deleted" | "deleting">, string> = {
   capped: `the cloud computer is still not answering after a restart, and this bot already got a new computer recently (at most once an hour and three times a day), so the old one was left as it is. ${LATER}`,
   held: `the cloud computer is still not answering after a restart, and it could not be set aside by itself right now (someone is using it, or this installation already replaced a computer in the last hour), so it was left as it is. ${LATER}`,
-  "no-room": `the cloud computer is still not answering after a restart, and the plan has no room for a new computer beside it, so MausBot kept it, stopped and with its files. ${LATER}`,
-  "stop-refused": `the cloud computer is still not answering after a restart; MausBot asked to set it aside, but the provider would not stop it, so nothing else was changed. ${LATER}`,
-  "rename-failed": `the cloud computer is still not answering after a restart; MausBot stopped it to set it aside but could not, so it stays this bot's computer with its files and wakes again on its next use. ${LATER}`,
-  "create-failed": `the cloud computer is still not answering after a restart, and MausBot could not make a new one beside it, so the old one stays this bot's computer, stopped and with its files; it wakes again on its next use. ${LATER}`,
-  lost: `the cloud computer is still not answering after a restart; MausBot set it aside, with its files, but could not make a new one or give the old one back, so the person finds it in Settings → Desktops & browser → Desktops. ${LATER}`,
+  "no-room": `the cloud computer is still not answering after a restart, and the plan has no room for a new computer beside it, so ${PRODUCT_NAME} kept it, stopped and with its files. ${LATER}`,
+  "stop-refused": `the cloud computer is still not answering after a restart; ${PRODUCT_NAME} asked to set it aside, but the provider would not stop it, so nothing else was changed. ${LATER}`,
+  "rename-failed": `the cloud computer is still not answering after a restart; ${PRODUCT_NAME} stopped it to set it aside but could not, so it stays this bot's computer with its files and wakes again on its next use. ${LATER}`,
+  "create-failed": `the cloud computer is still not answering after a restart, and ${PRODUCT_NAME} could not make a new one beside it, so the old one stays this bot's computer, stopped and with its files; it wakes again on its next use. ${LATER}`,
+  lost: `the cloud computer is still not answering after a restart; ${PRODUCT_NAME} set it aside, with its files, but could not make a new one or give the old one back, so the person finds it in Settings → Desktops & browser → Desktops. ${LATER}`,
   failed: `the cloud computer is still not answering, and replacing it failed: the old computer's deletion was not confirmed. ${LATER}`,
 };
 
@@ -587,7 +588,7 @@ export function createBoatRecovery(deps: BoatRecoveryDeps) {
     if (seen.identity.state === "error") {
       const outcome = await dead(owner, seen.identity);
       if (outcome === "set-aside" || outcome === "deleted" || outcome === "deleting") return { kind: "replaced" };
-      return kept(outcome === "kept" ? silentWhy(false) : `the provider reports the cloud computer broken, and MausBot left it as it is for now${outcome === "waiting" ? ", until the provider has said so for half an hour" : ""}. ${LATER}`);
+      return kept(outcome === "kept" ? silentWhy(false) : `the provider reports the cloud computer broken, and ${PRODUCT_NAME} left it as it is for now${outcome === "waiting" ? ", until the provider has said so for half an hour" : ""}. ${LATER}`);
     }
     if ((await probe(cfg, boxId)) === true) { clear(owner, boxId); return { kind: "answers" }; }
     if (personBusy(owner, boxId) || deps.usedByOther?.(owner, boxId, ctx.turn) === true) {
@@ -656,7 +657,7 @@ export function createBoatRecovery(deps: BoatRecoveryDeps) {
     }
     const outcome = await lane(owner, () => dead(owner, broken));
     if (outcome === "capped") {
-      throw Object.assign(new Error("it stopped working within an hour of being replaced, and MausBot replaces it at most once an hour; Replace computer in the computer panel tries once more"), { status: 409 });
+      throw Object.assign(new Error(`it stopped working within an hour of being replaced, and ${PRODUCT_NAME} replaces it at most once an hour; Replace computer in the computer panel tries once more`), { status: 409 });
     }
     if (outcome === "kept") throw Object.assign(new Error(CLOUD_COMPUTER_NOT_RESPONDING), { status: 409 });
     if (outcome === "waiting") throw Object.assign(new Error(CLOUD_COMPUTER_DEAD_WAITING), { status: 409 });
@@ -742,7 +743,7 @@ export function createBoatRecovery(deps: BoatRecoveryDeps) {
       if (cloudFailureOf(error).limit?.reason !== "at_once") return undefined;
       const held = entries.filter((entry) => entry.setAside && !entry.undone && entry.setAside.until > now());
       if (!held.length) return undefined;
-      return `The plan's cloud computers are all in use, ${held.length === 1 ? "one of them by an old computer" : "some of them by old computers"} MausBot set aside, with their files, `
+      return `The plan's cloud computers are all in use, ${held.length === 1 ? "one of them by an old computer" : "some of them by old computers"} ${PRODUCT_NAME} set aside, with their files, `
         + `until ${dateOf(Math.min(...held.map((entry) => entry.setAside!.until)))}. The person can delete ${held.length === 1 ? "it" : "them"} in Settings → Desktops & browser → Desktops to free the place. `
         + "Do not retry computer work in this turn; tell the person.";
     },

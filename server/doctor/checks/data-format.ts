@@ -2,6 +2,7 @@
 // that wrote it, or the copy from before that update.
 import { DATA_FORMAT, DataFormatError, readDataFormat } from "../../data-format.ts";
 import type { DoctorCheck } from "../types.ts";
+import { APP_NAME } from "../../../shared/product.ts";
 
 export function dataFormatCheck(format: { reads: number; writes: number } = DATA_FORMAT): DoctorCheck {
   return {
@@ -20,8 +21,8 @@ export function dataFormatCheck(format: { reads: number; writes: number } = DATA
       if (!marker) return { status: "ok", summary: "No marker: the data is in format 1." };
       if (marker.format > format.reads) {
         return { status: "problem", blocking: true,
-          summary: `The data was written by a newer OpenMausBot (${marker.writtenBy}) in format ${marker.format}; this version (${ctx.version}) reads up to format ${format.reads}.`,
-          instruction: `Install OpenMausBot ${marker.writtenBy} or newer, or put back the copy of the data taken before that update (./update.sh --rollback). Nothing was changed.` };
+          summary: `The data was written by a newer ${APP_NAME} (${marker.writtenBy}) in format ${marker.format}; this version (${ctx.version}) reads up to format ${format.reads}.`,
+          instruction: `Install ${APP_NAME} ${marker.writtenBy} or newer, or put back the copy of the data taken before that update (./update.sh --rollback). Nothing was changed.` };
       }
       return { status: "ok", summary: `Format ${marker.format}, which this version reads.` };
     },

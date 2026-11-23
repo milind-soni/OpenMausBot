@@ -16,6 +16,7 @@ import { ProviderRegistry } from "./harness/registry.ts";
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { defaultSetupIo, SetupCancelled, type SetupIo } from "./cli-prompts.ts";
 import { API_ENDPOINTS, fetchSetupModels, normalizeApiUrl, verifySetupCompletion } from "./cli-api-setup.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 type Inspection = { snapshot: ProviderSnapshot; models: ModelCatalog };
 interface SetupDependencies {
@@ -160,7 +161,7 @@ async function connectNative(
   io.log("Connecting your account…");
   io.log(choice.key
     ? "Your API key goes only to this engine. Usage is billed to your API account."
-    : "Sign-in stays with your provider. Its account limits apply; OpenMausBot never asks for your password.");
+    : `Sign-in stays with your provider. Its account limits apply; ${APP_NAME} never asks for your password.`);
   if (choice.note) io.log(choice.note);
   let state = await deps.inspect(id, entry);
   if (state.snapshot.state !== "available") {
@@ -190,7 +191,7 @@ async function connectNative(
     }
     state = await deps.inspect(id, entry);
     if (state.snapshot.state !== "available" || !state.snapshot.authenticated) {
-      throw new Error("Sign-in was not confirmed. Your OpenMausBot settings are unchanged; complete provider sign-in and try again.");
+      throw new Error(`Sign-in was not confirmed. Your ${APP_NAME} settings are unchanged; complete provider sign-in and try again.`);
     }
   } else {
     io.log("Existing sign-in found — you do not need to sign in again.");
@@ -214,7 +215,7 @@ export async function runSetup(
     const runtime = instanceConfigs(cfg);
     const existing = Object.entries(runtime).filter(([id, entry]) =>
       !!cfg.instances?.[id] && (NATIVE_DRIVERS.has(entry.driver) || entry.driver === "openai-compat") && entry.enabled !== false);
-    io.log("\nWelcome to OpenMausBot\n");
+    io.log(`\nWelcome to ${APP_NAME}\n`);
     io.log("Let's connect your AI. Choose a provider, then a model.");
     io.log("Existing bots and conversations stay untouched. Ctrl-C cancels.");
     io.log("You can add integrations and change settings later.\n");
@@ -324,7 +325,7 @@ export async function runSetup(
     return true;
   } catch (error) {
     if (!(error instanceof SetupCancelled)) throw error;
-    io.log("\nSetup cancelled. No OpenMausBot settings were changed. Provider sign-ins or installs already completed are kept.");
+    io.log(`\nSetup cancelled. No ${APP_NAME} settings were changed. Provider sign-ins or installs already completed are kept.`);
     return false;
   } finally {
     lease.release();

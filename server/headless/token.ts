@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import { EXIT, flag, HeadlessError, oneOf, parseDuration, usageError } from "./args.ts";
 import { writeTokenFile } from "./connect.ts";
 import type { VerbContext, VerbOutcome } from "./context.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 type Rec = Record<string, any>;
 
@@ -35,7 +36,7 @@ async function create(ctx: VerbContext): Promise<VerbOutcome> {
   if (session.token !== true) {
     // A server from before tokens opened an ordinary session that renews itself: end it rather than hand it out.
     if (typeof session.id === "string") await client.json(`/api/auth/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" }).catch(() => undefined);
-    throw new HeadlessError("this OpenMausBot server cannot make access tokens", EXIT.unreachable, "update OpenMausBot on the server, or use openmausbot connect");
+    throw new HeadlessError(`this ${APP_NAME} server cannot make access tokens`, EXIT.unreachable, `update ${APP_NAME} on the server, or use openmausbot connect`);
   }
   writeTokenFile(out, paired.token, ctx.flags.force === true);
   return {

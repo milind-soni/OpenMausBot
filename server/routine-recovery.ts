@@ -16,6 +16,7 @@ import type { Routine, RoutineRun } from "./routines.ts";
 import { codedLine, fittedLine, type RoutineLine, type RoutineLineKey } from "./routine-lines.ts";
 import { hostTimeZone } from "./turn-clock.ts";
 import { classifyContinuable } from "./turn-continuation.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 export type RoutineOwnerCause = "signed_out" | "credits" | "usage_limit" | "setup";
 
@@ -86,7 +87,7 @@ const RETRY_WHY: Record<Exclude<RoutineRetryCause, "usage_limit" | "restarted">,
   failed: "routines.server.part.failed",
 };
 const FIRST_START: Record<RoutineRetryCause, string> = {
-  stalled: "stopped when its AI stalled", restarted: "was cut off when OpenMausBot restarted", rate_limited: "was stopped by a rate limit",
+  stalled: "stopped when its AI stalled", restarted: `was cut off when ${APP_NAME} restarted`, rate_limited: "was stopped by a rate limit",
   provider: "failed on a temporary AI error", usage_limit: "was refused by the AI's usage limit", failed: "failed",
 };
 
@@ -169,14 +170,14 @@ export function requeueOnce(run: RoutineRun, cause: RoutineRetryCause, failure: 
 
 /** The second start's own line, so a run that already did part of its work does not do it twice. */
 export function retryNote(cause: RoutineRetryCause): string {
-  return `[OpenMausBot: this run's first start ${FIRST_START[cause]} before it finished. If it already did part of the work, ` +
+  return `[${APP_NAME}: this run's first start ${FIRST_START[cause]} before it finished. If it already did part of the work, ` +
     "check what it did (files, messages sent, anything started) so nothing is done twice; then finish the routine.]";
 }
 
 /** The second start's whole message when the first start's is already in the conversation: the routine's instructions,
  * attachments and previous-run excerpt are read from there and not sent, and paid for, a second time. */
 export function continueNote(cause: RoutineRetryCause): string {
-  return `[OpenMausBot: this run's first start ${FIRST_START[cause]} before it finished. The routine's instructions are in the message above ` +
+  return `[${APP_NAME}: this run's first start ${FIRST_START[cause]} before it finished. The routine's instructions are in the message above ` +
     "and are not repeated here. Check what the first start already did (files, messages sent, anything started) so nothing is done twice; then finish the routine.]";
 }
 

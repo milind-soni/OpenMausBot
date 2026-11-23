@@ -4,6 +4,7 @@ import { EXIT, flag, HeadlessError, usageError } from "./args.ts";
 import { explain, type HeadlessClient } from "./client.ts";
 import type { VerbContext, VerbOutcome } from "./context.ts";
 import { shortId } from "./output.ts";
+import { APP_NAME, PRODUCT_NAME } from "../../shared/product.ts";
 
 type Rec = Record<string, any>;
 
@@ -109,7 +110,7 @@ export async function statusVerb(ctx: VerbContext): Promise<VerbOutcome> {
       pausedKnown: held !== null, counts, bots: rows },
     exitCode: EXIT.done,
     human: [
-      `${environment.label ?? "MausBot"}${environment.version ? ` · MausBot ${environment.version}` : ""} · ${client.baseUrl} · ${who}`,
+      `${environment.label ?? `${PRODUCT_NAME}`}${environment.version ? ` · ${PRODUCT_NAME} ${environment.version}` : ""} · ${client.baseUrl} · ${who}`,
       "",
       ...(rows.length
         ? table([["BOT", "STATE", "COMPUTER", "TEAM", "ID"], ...rows.map((row) => [row.name, row.state, row.computer, row.team ?? "—", shortId(row.id)])])
@@ -166,7 +167,7 @@ const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ?
 async function deleteBots(ctx: VerbContext, client: HeadlessClient, selection: Selection): Promise<VerbOutcome> {
   const kept = selection.bots.filter((bot) => bot.defaultBot);
   const targets = selection.bots.filter((bot) => !bot.defaultBot);
-  const keptLines = kept.map((bot) => `  (${bot.name} is kept: the MausBot bot is never deleted)`);
+  const keptLines = kept.map((bot) => `  (${bot.name} is kept: the ${PRODUCT_NAME} bot is never deleted)`);
   if (!targets.length) throw new HeadlessError(`${kept.map((bot) => bot.name).join(", ")} is never deleted`, EXIT.conflict, "it can be hidden in Settings → General instead");
   const stop = await confirmPlan(ctx, client, { doing: `Delete ${plural(targets.length, "bot")}`, note: "with their conversations and files", lines: [...targets.map(botLine), ...keptLines],
     result: { action: "delete", bots: targets.map((bot) => ({ id: bot.id, name: bot.name, team: bot.section ?? null })) } });
@@ -314,7 +315,7 @@ async function computerChange(client: HeadlessClient, botId: string, action: "pr
     method: "POST", headers: { "content-type": "application/json" }, body: "{}", stream: true,
   });
   const text = await response.text();
-  if (!response.ok) throw Object.assign(new Error(`OpenMausBot API error (${response.status}): ${text}`), { status: response.status });
+  if (!response.ok) throw Object.assign(new Error(`${APP_NAME} API error (${response.status}): ${text}`), { status: response.status });
   try {
     return JSON.parse(text) as Rec;
   } catch {

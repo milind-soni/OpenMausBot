@@ -14,6 +14,7 @@ import { z } from "zod";
 import { AUTH_CONFIG_ID } from "../shared/connector-availability.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 export const DEFAULT_BACKEND_ORIGIN = "https://backend.composio.dev";
 
@@ -246,7 +247,7 @@ export function noAuthConfigReason(toolkit: string): string {
 }
 
 function toolRouterOffReason(toolkit: string, id: string, said: string): string {
-  return `OpenMausBot could not turn on Tool Router for your ${toolkit} auth config ${id}, which Composio needs before it `
+  return `${APP_NAME} could not turn on Tool Router for your ${toolkit} auth config ${id}, which Composio needs before it `
     + `uses it. Check that your Composio project key may edit auth configs. Composio said: ${said}`;
 }
 
@@ -261,14 +262,14 @@ async function checkAuthConfigPick(apiKey: string, toolkit: string, id: string):
     signal: AbortSignal.timeout(15_000),
   });
   if (res.status === 400 || res.status === 404) {
-    throw inputError(`Composio has no auth config ${id} in the project OpenMausBot uses. Copy the id from Auth Configs in that Composio project.`);
+    throw inputError(`Composio has no auth config ${id} in the project ${APP_NAME} uses. Copy the id from Auth Configs in that Composio project.`);
   }
   if (!res.ok) throw new Error(await responseError(res, `Composio auth config: HTTP ${res.status}`));
   const item = authConfigItemSchema.parse(await res.json());
   const owner = item.toolkit?.slug ? canonicalToolkitSlug(item.toolkit.slug) : toolkit;
   if (owner !== toolkit) throw inputError(`Auth config ${id} is for ${owner}, not ${toolkit}.`);
   if (item.is_composio_managed === true) {
-    throw inputError(`Auth config ${id} is Composio's own sign-in for ${toolkit}, which OpenMausBot already uses, so no auth_config_id is needed.`);
+    throw inputError(`Auth config ${id} is Composio's own sign-in for ${toolkit}, which ${APP_NAME} already uses, so no auth_config_id is needed.`);
   }
   if (!usableConfig(item)) throw inputError(`Auth config ${id} for ${toolkit} is disabled. Enable it in your Composio project, then connect again.`);
 }

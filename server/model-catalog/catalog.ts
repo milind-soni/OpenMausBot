@@ -39,6 +39,7 @@ import {
   type CatalogProviders,
   type ModelCatalogDocument,
 } from "./trim.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 export const MODELS_DEV_URL = "https://models.dev/api.json";
 export const CATALOG_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -264,7 +265,7 @@ export class ModelCatalogStore {
     const timer = setTimeout(() => controller.abort(), this.options.timeoutMs ?? CATALOG_FETCH_TIMEOUT_MS);
     try {
       const response = await (this.options.fetch ?? fetch)(MODELS_DEV_URL, {
-        headers: { accept: "application/json", "user-agent": "OpenMausBot", ...(etag ? { "if-none-match": etag } : {}) },
+        headers: { accept: "application/json", "user-agent": `${APP_NAME}`, ...(etag ? { "if-none-match": etag } : {}) },
         // The catalog comes from models.dev only.
         redirect: "error",
         signal: controller.signal,

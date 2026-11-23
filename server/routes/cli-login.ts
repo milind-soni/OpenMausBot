@@ -11,6 +11,7 @@ import { json, readBody } from "../harness/http.ts";
 import { fromBrowser, isLoopbackHost, isProxied, ownerOrAdmin, requestSource } from "../request-auth.ts";
 import { PAIRING_CODE_ALPHABET, type PublicSession, type SessionRegistry } from "../sessions.ts";
 import { PASS, type RouteHandler } from "./table.ts";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 export const CLI_LOGIN_TTL_MS = 10 * 60_000;
 /** How long an allowed session waits for its terminal to collect it before it is revoked unused. */
@@ -99,7 +100,7 @@ export function createCliLogin(deps: CliLoginDeps) {
     const source = requestSource(req);
     const open = waiting();
     if (open.length >= MAX_WAITING || open.filter((request) => request.source === source).length >= MAX_WAITING_PER_SOURCE) {
-      return void json(res, 429, { error: "too many terminal sign-ins are waiting: allow or deny them in MausBot, or wait ten minutes" });
+      return void json(res, 429, { error: `too many terminal sign-ins are waiting: allow or deny them in ${PRODUCT_NAME}, or wait ten minutes` });
     }
     const at = now();
     const request: CliLoginRequest = {
@@ -133,7 +134,7 @@ export function createCliLogin(deps: CliLoginDeps) {
     if (request.state === "allowed") {
       return void json(res, 200, { state: "allowed", token: request.token, session: request.session, environment: deps.environment() });
     }
-    json(res, 403, { state: request.state, error: request.state === "denied" ? "the sign-in was denied in MausBot" : request.error ?? "the sign-in could not be completed" });
+    json(res, 403, { state: request.state, error: request.state === "denied" ? `the sign-in was denied in ${PRODUCT_NAME}` : request.error ?? "the sign-in could not be completed" });
   }
 
   /** Before the auth gate: asking and polling, which carry no session. Anything else under the path passes through. */

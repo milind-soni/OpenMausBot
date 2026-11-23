@@ -7,6 +7,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { browserDaemonFile, browserProfilesRoot, closeBrowserSession, runningBrowserSessionNames } from "./browser-engine.ts";
 import { orphanedBrowsers, stopBrowserProcesses } from "./browser-processes.ts";
 import { browserRuntimeEnv } from "./browser-runtime.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const BOT_ID = /^[A-Za-z0-9_-]{1,120}$/;
 const PROFILE_ID = /^[a-z0-9_-]{1,40}$/;
@@ -113,7 +114,7 @@ function unavailableJournalError(error: Error): Error & { status: number } {
 export function requireBrowserCleanupAcknowledged(ok: boolean, target: string): void {
   if (ok) return;
   const error = Object.assign(new Error(
-    `${target} was removed, but OpenMausBot could not confirm its local browser data was erased. `
+    `${target} was removed, but ${APP_NAME} could not confirm its local browser data was erased. `
     + "Restart the desktop app before reusing it; cleanup will retry automatically.",
   ), { status: 503 });
   throw error;

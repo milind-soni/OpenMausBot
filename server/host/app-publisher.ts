@@ -13,6 +13,7 @@ import { canonicalRoots, containedBy, readContained } from "../pages/bundle.ts";
 import { inSecretFolder, SECRET_FILE_REFUSAL } from "../secret-folder.ts";
 import { HostingRefusal, megabytes, OWN_NETLIFY, type HostedApp, type HostingAllowance, type IncludedHosting } from "./included-hosting.ts";
 import { findNetlifySites, readSite, SITE_FILE } from "./netlify-sites.ts";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 /** Must match `SECRET_NAMES`, `SKIPPED_FOLDERS` and `SKIPPED_FILES` in skills/publish-to-netlify/deploy.mjs. */
 const SECRET_NAMES = [
@@ -297,7 +298,7 @@ export function createAppPublisher(deps: AppPublisherDeps) {
         const app = await hosting.app(key);
         const existing = await readSite(join(project, SITE_FILE), deps.env);
         const outcome = await settle(app, project, { ...input, path: folder }, existing, false);
-        return { status: 200, body: { ok: true, title: app.title, ...outcome, ...(app.state === "taken_down" ? { message: "This app was taken down by MausBot. Its link no longer works." } : {}), ...included } };
+        return { status: 200, body: { ok: true, title: app.title, ...outcome, ...(app.state === "taken_down" ? { message: `This app was taken down by ${PRODUCT_NAME}. Its link no longer works.` } : {}), ...included } };
       } catch (error) {
         return refused(error);
       }

@@ -4,6 +4,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileAtomic } from "./atomic.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 /**
  * `writes`: the format this version leaves the data folder in. `reads`: the newest format it can read, which may be
@@ -56,7 +57,7 @@ export function readDataFormat(dataDir: string, writes: number = DATA_FORMAT.wri
     console.warn(`[data-format] ${file} cannot be read; taking the data as format 1, the only format any version has written.`);
     return null;
   }
-  throw new DataFormatError(`OpenMausBot startup failed: ${file} cannot be read, so this version cannot tell whether it understands the data in ${dataDir}. Nothing was changed. Restore that file from a backup, or the whole folder from the copy taken before the last update.`);
+  throw new DataFormatError(`${APP_NAME} startup failed: ${file} cannot be read, so this version cannot tell whether it understands the data in ${dataDir}. Nothing was changed. Restore that file from a backup, or the whole folder from the copy taken before the last update.`);
 }
 
 /** Throws, having changed nothing, when a newer version left the data in a format `reads` does not cover. */
@@ -67,8 +68,8 @@ export function checkDataFormat(dataDir: string, version: string, reads: number 
 
 function newerData(dataDir: string, version: string, marker: DataFormatMarker): DataFormatError {
   return new DataFormatError(
-    `OpenMausBot startup failed: the data in ${dataDir} was written by a newer OpenMausBot (${marker.writtenBy}), in a format this version (${version}) cannot read. Nothing was changed. `
-    + `Install OpenMausBot ${marker.writtenBy} or newer, or put back the copy of the data taken before that update.`,
+    `${APP_NAME} startup failed: the data in ${dataDir} was written by a newer ${APP_NAME} (${marker.writtenBy}), in a format this version (${version}) cannot read. Nothing was changed. `
+    + `Install ${APP_NAME} ${marker.writtenBy} or newer, or put back the copy of the data taken before that update.`,
   );
 }
 

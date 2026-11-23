@@ -10,6 +10,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { DATA_DIR } from "../config.ts";
 import { engineHomes } from "../engine-homes/engine-homes.ts";
 import { codexHome } from "./codex-identity.ts";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 /** Made in the person's home first, so a turn shares them from its first run. */
 const SHARED_FOLDERS = ["worktrees", "skills", "plugins", "cache", "logs", "mcp-oauth-locks"];
@@ -101,7 +102,7 @@ export function linkSharedCodexHome(sharedHome: string | null, mausHome: string,
     for (const name of SHARED_FOLDERS) mkdirSync(join(shared, name), { recursive: true, mode: 0o700 });
     names = readdirSync(shared);
   } catch (error) {
-    note(shared, `could not share your Codex home with MausBot's: ${(error as Error).message}`);
+    note(shared, `could not share your Codex home with ${PRODUCT_NAME}'s: ${(error as Error).message}`);
     return false;
   }
   const kept: string[] = [];
@@ -110,10 +111,10 @@ export function linkSharedCodexHome(sharedHome: string | null, mausHome: string,
     try {
       if (!linkEntry(join(shared, name), join(own, name), name)) kept.push(name);
     } catch (error) {
-      note(join(own, name), `could not link ${JSON.stringify(name)} of your Codex home into MausBot's: ${(error as Error).message}`);
+      note(join(own, name), `could not link ${JSON.stringify(name)} of your Codex home into ${PRODUCT_NAME}'s: ${(error as Error).message}`);
     }
   }
-  if (kept.length) note(own, `MausBot's Codex home keeps its own ${kept.join(", ")} from earlier turns; the rest of your Codex home is shared`);
+  if (kept.length) note(own, `${PRODUCT_NAME}'s Codex home keeps its own ${kept.join(", ")} from earlier turns; the rest of your Codex home is shared`);
   return login === "own" || personLogin(shared, own);
 }
 
@@ -150,7 +151,7 @@ export function keepChatsOutOfCodexHistory(env: Record<string, string | undefine
   try {
     if (!linkSharedCodexHome(person, home, "person")) return;
   } catch (error) {
-    note(home, `could not make MausBot's Codex home, so this turn uses yours: ${(error as Error).message}`);
+    note(home, `could not make ${PRODUCT_NAME}'s Codex home, so this turn uses yours: ${(error as Error).message}`);
     return;
   }
   env.CODEX_HOME = home;

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { RESERVED_MCP_NAMES, slugMcpName } from "../shared/mcp-name.ts";
 import type { McpServerSpec, RemoteMcpSpec, StdioMcpSpec } from "./contracts.ts";
 import { MCP_RESTART_ENV } from "./mcp-app-catalog.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 export { importedMcpServerName } from "../shared/mcp-name.ts";
 
@@ -171,8 +172,8 @@ function environmentEntryError(name: string, value: string): string | null {
   if (!ENV_NAME.test(name)) return `Environment variable “${name}” is not valid.`;
   if (isReservedMcpEnvEntry(name, value)) {
     return name === "ELECTRON_RUN_AS_NODE"
-      ? `Environment variable “${name}” is reserved by OpenMausBot; a custom server may set it to “1” only.`
-      : `Environment variable “${name}” is reserved by OpenMausBot.`;
+      ? `Environment variable “${name}” is reserved by ${APP_NAME}; a custom server may set it to “1” only.`
+      : `Environment variable “${name}” is reserved by ${APP_NAME}.`;
   }
   return null;
 }
@@ -287,7 +288,7 @@ export function mcpServerNameError(name: string): string | null {
   if (!MCP_NAME.test(name)) {
     return "Use 1–32 lowercase letters, numbers, underscores, or hyphens, starting with a letter.";
   }
-  if (RESERVED_MCP_NAMES.has(name)) return "That name is reserved by OpenMausBot.";
+  if (RESERVED_MCP_NAMES.has(name)) return `That name is reserved by ${APP_NAME}.`;
   return null;
 }
 

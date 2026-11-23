@@ -5,6 +5,7 @@ import { openrouterEndpoint } from "../decider/openrouter.ts";
 import { isLoopback } from "../provider-key-check.ts";
 import { EXTRACT_PATH, parseExtractResponse, parseExtractValues } from "./contract.ts";
 import type { ExtractBackendRequest, ExtractBackendResult, FieldSchema, FieldSpec } from "./types.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 /** A chat model that follows a JSON schema; the decider's own OpenRouter model is used instead when it is a chat model. */
 export const OPENROUTER_EXTRACT_MODEL = "google/gemini-2.5-flash";
@@ -104,7 +105,7 @@ export function openrouterExtractBody(request: Pick<ExtractBackendRequest, "fiel
 export async function extractWithOpenRouter(request: ExtractBackendRequest): Promise<ExtractBackendResult> {
   const url = openrouterEndpoint(request.baseUrl);
   if (!url) return { ok: false, reason: "misconfigured" };
-  const answered = await post(request, url, { "x-openrouter-title": "OpenMausBot" }, openrouterExtractBody(request));
+  const answered = await post(request, url, { "x-openrouter-title": `${APP_NAME}` }, openrouterExtractBody(request));
   if (!answered.ok || !("body" in answered)) return answered as ExtractBackendResult;
   const body = answered.body;
   try {

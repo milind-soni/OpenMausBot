@@ -2,6 +2,7 @@
 // it renders files and fixed argument lists as steps, and never builds a shell command string.
 import { posix } from "node:path";
 import { FEATURES_ENV, type FeatureId } from "./features.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const { join } = posix;
 
@@ -51,7 +52,7 @@ export function agentUnit(spec: { node: string; script: string; operator: string
   return [
     "# Written by `openmausbot fleet init`. The operator workspace creates and manages workspaces through this.",
     "[Unit]",
-    "Description=OpenMausBot fleet agent",
+    `Description=${APP_NAME} fleet agent`,
     "After=network-online.target",
     "Wants=network-online.target",
     "",
@@ -149,7 +150,7 @@ export function templateUnit(spec: { node: string; script: string; layout?: Flee
   return [
     "# Written by `openmausbot fleet init`. One unit for every workspace: %i is the slug.",
     "[Unit]",
-    "Description=OpenMausBot workspace %i",
+    `Description=${APP_NAME} workspace %i`,
     "After=network-online.target openmausbot-fence.service",
     "Wants=network-online.target",
     "Requires=openmausbot-fence.service",
@@ -184,7 +185,7 @@ export function fenceUnit(layout = fleetLayout()): string {
   return [
     "# Written by `openmausbot fleet init`: keeps each workspace's loopback ports to its own user.",
     "[Unit]",
-    "Description=OpenMausBot per-workspace loopback fence",
+    `Description=${APP_NAME} per-workspace loopback fence`,
     "",
     "[Service]",
     "Type=oneshot",

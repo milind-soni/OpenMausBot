@@ -1,5 +1,6 @@
 import type { RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 export const CUSTOM_DOMAIN_PATH = "/api/settings/custom-domain";
 
@@ -19,7 +20,7 @@ export function createCustomDomainRoutes(deps: {
     res.setHeader?.("cache-control", "no-store");
     if (method === "GET") return json(res, 200, deps.status());
     if (method !== "POST" && method !== "DELETE") return PASS;
-    if (deps.desktopManaged) return json(res, 409, { error: "Custom domains are configured on a self-hosted OpenMausBot server, not the desktop companion." });
+    if (deps.desktopManaged) return json(res, 409, { error: `Custom domains are configured on a self-hosted ${APP_NAME} server, not the desktop companion.` });
     if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) {
       return json(res, 415, { error: "content-type must be application/json" });
     }

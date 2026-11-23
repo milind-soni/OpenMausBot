@@ -184,7 +184,7 @@ if (linuxSoftwareRendering) app.disableHardwareAcceleration();
 if (process.platform === "linux") { app.setDesktopName("com.openmausbot.app.desktop"); disableWaylandColorManager(app.commandLine); }
 
 if (!app.requestSingleInstanceLock()) {
-  console.log("[desktop] OpenMausBot is already running — focusing that window");
+  console.log(`[desktop] ${APP_NAME} is already running — focusing that window`);
   process.exit(0);
 }
 
@@ -455,6 +455,8 @@ import { autoStartCompanion } from "./companion-autostart.mjs";
 import { createPhoneLinkRoutes } from "./phone-link-routes.mjs"; import { reachableForKeepAwake } from "./keep-awake.mjs";
 import { createRoutineWakeHold, rememberRoutineWake, routineWakeSettings } from "./routine-wake.mjs";
 import { CREDENTIAL_PATCH, credentialSaveError } from "./credential-patch.mjs";
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 
 /** Second wall after preload's reduced bridge: computer-controlling IPC answers only the local server's UI.
  * Declared before any handler registration (temporal dead zone). */
@@ -1042,7 +1044,7 @@ async function runCompanyBackup(kind, input, scheduled = null) {
     const status = await localBackupStatus(proc);
     if (status.pendingRestore) {
       publishCompanyBackupState({ busy: false, pendingRestore: true });
-      throw new Error("Restart OpenMausBot to finish the pending restore before starting another backup operation.");
+      throw new Error(`Restart ${APP_NAME} to finish the pending restore before starting another backup operation.`);
     }
     if (status.busy) throw companyBackupDeferred();
     const transfers = createCompanyBackups({
@@ -1251,7 +1253,7 @@ function notifyDesktopViewer(open) {
 }
 
 function openDesktopViewer(owner, rawUrl, rawTitle, contextId) {
-  if (!owner || owner.isDestroyed()) throw new Error("The OpenMausBot window is unavailable");
+  if (!owner || owner.isDestroyed()) throw new Error(`The ${APP_NAME} window is unavailable`);
   const url = desktopViewerUrl(rawUrl);
   const titleCandidate = Object.prototype.toString.call(rawTitle) === "[object String]" ? rawTitle.trim() : "";
   const title = titleCandidate ? titleCandidate.slice(0, 80) : nativeT("native.viewer.fallbackTitle");
@@ -1351,7 +1353,7 @@ function openDesktopViewer(owner, rawUrl, rawTitle, contextId) {
 }
 
 function ensureDesktopWorkspace(owner) {
-  if (!owner || owner.isDestroyed()) throw new Error("The OpenMausBot window is unavailable");
+  if (!owner || owner.isDestroyed()) throw new Error(`The ${APP_NAME} window is unavailable`);
   if (desktopWorkspaceManager) {
     if (desktopWorkspaceOwner !== owner) {
       throw new Error("The two-desktop view belongs to another app window");

@@ -23,13 +23,15 @@ import {
   speechHelperBinary,
   speechHelperBundle,
 } from "./build-speech-helper.mjs";
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(__dirname, "resources", "speech-helper.swift");
 const INFO = path.join(__dirname, "resources", "speech-helper-Info.plist");
 // A signed app bundle must never be rewritten: lazy compilation would break its seal.
 const BUNDLE = app.isPackaged
-  ? path.join(process.resourcesPath, "OpenMausBot Speech.app")
+  ? path.join(process.resourcesPath, `${APP_NAME} Speech.app`)
   : speechHelperBundle;
 const BIN = app.isPackaged
   ? path.join(BUNDLE, "Contents", "MacOS", "speech-helper")

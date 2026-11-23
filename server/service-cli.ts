@@ -9,6 +9,7 @@ import {
 } from "./service-unit.ts";
 import { defaultSentinelOut, outRefusal } from "./sentinel/paths.ts";
 import { cliCommand } from "./cli-invocation.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 export interface ServiceInstallInput {
   action: "install" | "uninstall";
@@ -141,7 +142,7 @@ function runSentinelService(input: ServiceInstallInput, platform: NodeJS.Platfor
     // command line as one argument, with its own quotes escaped
     const command = sentinelCommand({ ...input, out }).map((arg) => `\\"${arg}\\"`).join(" ");
     io.error("services are written for Linux (systemd) and macOS (launchd); on Windows, use Task Scheduler to run Sentinel every two minutes:");
-    io.error(`  schtasks /Create /SC MINUTE /MO 2 /TN "OpenMausBot Sentinel" /TR "${command}"`);
+    io.error(`  schtasks /Create /SC MINUTE /MO 2 /TN "${APP_NAME} Sentinel" /TR "${command}"`);
     return 1;
   }
   if (input.action === "uninstall") {

@@ -13,6 +13,7 @@ import { LEARNED_LINE } from "./profile-learned.ts";
 import { openSetupOffer, type SetupRequestStore } from "./setup-request.ts";
 import type { SideJobText } from "./side-jobs.ts";
 import type { BotRecord, Message, Store } from "./store.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 export interface SuggestionFacts {
   /** As typed; absent when it is blank or the server picked it (isPickedBotName). */
@@ -70,7 +71,7 @@ export function setupSuggestionPrompt(facts: SuggestionFacts): string {
     `Write every option in ${language}, even if the facts below are in another language. Keep app names as they are.`,
   ];
   return [
-    "You write the answer options for the first message of a new bot in OpenMausBot, an app where people get everyday help from AI helpers called bots.",
+    `You write the answer options for the first message of a new bot in ${APP_NAME}, an app where people get everyday help from AI helpers called bots.`,
     "",
     'The person has just made the bot described below. Its first message asks "What should I help you with first?" and lists your 5 options. Tapping one makes the bot set itself up for that job straight away, so each option is a job the person hands to the bot, in their own words.',
     "",

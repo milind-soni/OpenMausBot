@@ -10,6 +10,8 @@
 // `target`: the owner session on My Cloud, `{ call(method, route, body?) }` answering `{ ok, status, body }`.
 
 import nativeText from "./native-text.cjs";
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const sentence = (value) => (typeof value === "string" && value.trim() ? value.trim().slice(0, 300) : null);
@@ -63,7 +65,7 @@ export function parseConnections(value) {
 /** This computer's connections, by name only, and the computer they are on. */
 export async function collectConnections(local) {
   const listed = parseConnections(await local.json("/api/cloud-connections").catch(() => null));
-  if (!listed) throw new ConnectionMoveError("local", "OpenMausBot on this computer did not list its apps and keys. Try again in a moment.");
+  if (!listed) throw new ConnectionMoveError("local", `${APP_NAME} on this computer did not list its apps and keys. Try again in a moment.`);
   return { computer: listed.computer, connections: listed.connections };
 }
 

@@ -1,4 +1,5 @@
 import { HEADLESS_VERBS } from "./headless/args.ts";
+import { APP_NAME, PRODUCT_NAME } from "../shared/product.ts";
 
 export { HEADLESS_VERBS as HEADLESS_VERB_NAMES };
 
@@ -11,7 +12,7 @@ export function routeCli(argv: readonly string[]): { headless: boolean; argv: st
 }
 
 export const HEADLESS_USAGE = `Drive a running workspace (scripts, CI, other agents):
-  openmausbot login [SERVER]            sign this terminal in once: MausBot shows a card to allow it (logout, whoami, use NAME, servers)
+  openmausbot login [SERVER]            sign this terminal in once: ${PRODUCT_NAME} shows a card to allow it (logout, whoami, use NAME, servers)
   openmausbot status                    every bot at a glance: working, waiting on you, paused, failed or idle, and its computer
   openmausbot bots delete|pause|resume|stop (BOT… | --team T | --all)   act on bots; delete asks first (--yes, --dry-run)
   openmausbot stop (BOT… | --team T | --all)   stop their work now, without pausing
@@ -76,7 +77,7 @@ pair    a new pairing code for the running server, with its link and QR
         (--phone: chat and approvals only; --ttl keeps it open up to 24h,
         still single use)
 devices lists paired devices; "devices revoke ID" signs one out
-account login signs this machine in to an OpenMausBot account (an emailed
+account login signs this machine in to an ${APP_NAME} account (an emailed
         code) and reserves its public address for --tunnel; with --relay it
         reserves none, for serve --relay. account logout releases that
         address and signs out. account status: the running server, the
@@ -121,7 +122,7 @@ Ways in (pick one; --lan can join any):
              open ports 80 and 443.
 
 --relay      phones only, and it can join any of the above except --tunnel:
-             the MausBot phone app pairs by QR through MausBot Relay,
+             the ${PRODUCT_NAME} phone app pairs by QR through MausBot Relay,
              end-to-end encrypted, with no address, open port or VPN. Run
              \`openmausbot account login --relay\` once on this machine first. Not on a
              machine with a tunnel address: the relay stays off there.

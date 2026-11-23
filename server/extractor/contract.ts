@@ -3,6 +3,7 @@
 // included token, and an answer that breaks one is malformed: a value is never taken on trust.
 import type { ExtractedValues, ExtractImage, ExtractInput, ExtractSeam, FieldSchema, FieldSpec, FieldType, FieldValue } from "./types.ts";
 import { FIELD_TYPES } from "./types.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 export const EXTRACT_PATH = "/v1/extract";
 export const EXTRACT_LIMITS = {
@@ -24,7 +25,7 @@ const SEAMS: ReadonlySet<string> = new Set<ExtractSeam>(["inboxTriage", "botExtr
 
 export const EXTRACT_KEY_CHECK = {
   fields: { ok: { type: "boolean", description: "Is this a connection check?" } } satisfies FieldSchema,
-  input: { text: "OpenMausBot is checking that an extraction-model key works." },
+  input: { text: `${APP_NAME} is checking that an extraction-model key works.` },
 };
 
 /** The proactive inbox reads these from one email, and the relay takes inbox triage only with exactly these. */

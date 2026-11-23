@@ -14,6 +14,8 @@ import { watchFolder } from "./cloud-sync-scan.mjs";
 import { RECHECK_MS, copiedLent, folderKey as pathKey, lentReport, planLentCopies, reconcileLent, sameFolderOn } from "./lent-folders.mjs";
 import { applyStaged } from "./lent-staged.mjs";
 import { lentGit } from "./lent-git.mjs";
+import productJson from "../product.json" with { type: "json" };
+const { name: PRODUCT_NAME } = productJson;
 
 const FULL_PASS_MS = 5 * 60_000;
 const LONG_POLL_MS = 60_000;
@@ -63,7 +65,7 @@ export function createCloudFilesService({
 }) {
   let settings = readSettings(settingsFile);
   const state = openSyncState(stateFile);
-  const outputsDir = path.join(documentsDir, "MausBot");
+  const outputsDir = path.join(documentsDir, `${PRODUCT_NAME}`);
   let closed = false, interval = null, poller = null, cursor = 0, chain = Promise.resolve(), pending = null;
   let status = { phase: "unavailable", lastSyncedAt: null, disk: null, shared: [], outputs: { enabled: true, dir: outputsDir, folders: 0, problem: null } };
   const results = new Map();

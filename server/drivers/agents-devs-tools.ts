@@ -2,6 +2,7 @@
 // the bot answering it writes the summary that goes with it.
 import type { ToolCallContext, ToolCallResult } from "./agents-call.ts";
 import type { Json } from "./agents-client.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 export const DEVS_TOOL_NAMES: ReadonlySet<string> = new Set(["report_bug"]);
 export const DEVS_REPORT_PATH = "/api/internal/devs/report";
@@ -19,7 +20,7 @@ export const DEVS_TOOL_DEFINITIONS = [
   {
     name: "report_bug",
     description:
-      "Send the person's bug report to the MausBot team (OpenMausBot's developers) with the app's diagnostics. Only for a message that tags @devs, once. No passwords, keys, tokens or file contents.",
+      `Send the person's bug report to the MausBot team (${APP_NAME}'s developers) with the app's diagnostics. Only for a message that tags @devs, once. No passwords, keys, tokens or file contents.`,
     inputSchema: {
       type: "object",
       additionalProperties: false,

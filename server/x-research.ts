@@ -8,6 +8,7 @@
 // fields differently, so rows are read through short alias lists.
 import { parseXIncludedUsage, type XIncludedUsage } from "../shared/x-connector.ts";
 import type { ServiceCredential } from "./included-services.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 /** Posts one call may return. Fifty compact posts stay under the agents
  * server's result cap. */
@@ -52,7 +53,7 @@ export const X_MESSAGES = {
   badKey: "Sign in to MausBot Cloud again in Settings to use X research.",
   ownBadKey: "treg rejected your key. Check it in Settings → AI → Other services.",
   /** A Cloud home's relay token is the Admin's to replace; the person has no sign-in to redo there. */
-  homeBadKey: "X research isn't connected on this Cloud right now. It comes with your plan, so there is nothing to sign in to: try again later, and tell MausBot support if it keeps happening.",
+  homeBadKey: `X research isn't connected on this Cloud right now. It comes with your plan, so there is nothing to sign in to: try again later, and tell ${PRODUCT_NAME} support if it keeps happening.`,
   noPlan: "X research comes with MausBot Cloud plans, and this account's plan isn't active.",
   rateLimited: "X research is busy right now. Try again in a moment.",
   badRequest: "That X research request was refused. Check the query, handle or post link.",

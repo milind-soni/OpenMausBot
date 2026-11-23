@@ -2,6 +2,7 @@
 // filtering cannot run (no env var, malformed, oversized) the bridge relays the list untouched.
 import { CONNECTOR_SLUG_PATTERN, CONNECTOR_TOOL_NAME_PATTERN, type ConnectorToolGrant } from "../shared/wire.ts";
 import { APP_SANDBOX_SERVICE, APP_SANDBOX_TOOLS, serviceSlugFor, serviceSlugForCandidates } from "./connector-verdict.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 export const CONNECTOR_ALLOWED_TOOLS_ENV = "OMB_CONNECTOR_ALLOWED_TOOLS";
 
@@ -131,13 +132,13 @@ export function filterToolsListFrame(
 
 const AUTH_CONFIG_PARAMETER = {
   type: "string",
-  description: "Optional, read by OpenMausBot: the id (ac_…) of an auth config in the person's own Composio project to "
+  description: `Optional, read by ${APP_NAME}: the id (ac_…) of an auth config in the person's own Composio project to `
     + "connect the one listed toolkit with. Leave it out to use their most recently created enabled config for it.",
 };
 
 const FIND_PARAMETER = {
   type: "string",
-  description: "Read by OpenMausBot, instead of toolkits: what the app is for, in plain words (\"something for spreadsheets\"). "
+  description: `Read by ${APP_NAME}, instead of toolkits: what the app is for, in plain words ("something for spreadsheets"). `
     + "Searches every app that can be connected and lists their slugs. Use it when you are not sure of an app's exact slug.",
 };
 

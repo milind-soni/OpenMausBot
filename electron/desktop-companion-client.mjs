@@ -6,6 +6,8 @@ import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
 import path from "node:path";
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 
 export const DESKTOP_COMPANION_FIELD = "desktopCompanionRemote";
 const DEVICE_TOKEN = /^omb_[A-Za-z0-9_-]{43}$/;
@@ -135,7 +137,7 @@ export async function pairDesktopCompanion({
 }) {
   const endpoint = normalizeDesktopCompanionEndpoint(rawEndpoint);
   if (!endpoint) {
-    throw new Error("Enter the OpenMausBot HTTPS companion address or full Tailscale name ending in .ts.net");
+    throw new Error(`Enter the ${APP_NAME} HTTPS companion address or full Tailscale name ending in .ts.net`);
   }
   const code = String(rawCode ?? "").trim();
   if (!PAIRING_CODE.test(code)) throw new Error("Enter the six-digit code shown on the other computer");

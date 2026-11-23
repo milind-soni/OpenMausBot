@@ -1,4 +1,5 @@
 const { desktopViewerUrl, sameDesktopViewerOrigin } = require("./desktop-viewer.cjs");
+const { appName: APP_NAME } = require("../product.json");
 
 const MAX_WORKSPACE_VIEWS = 2;
 const CONTEXT_ID = /^[A-Za-z0-9:_-]{1,120}$/;
@@ -64,7 +65,7 @@ function normalizeDesktopWorkspaceBounds(rawBounds, contentSize) {
 }
 
 function createDesktopWorkspaceManager({ owner, createView, notify, partitionPrefix }) {
-  if (!owner || owner.isDestroyed?.()) throw new Error("The OpenMausBot window is unavailable");
+  if (!owner || owner.isDestroyed?.()) throw new Error(`The ${APP_NAME} window is unavailable`);
   if (createView?.constructor !== Function) throw new Error("The desktop workspace viewer is unavailable");
   const emit = notify?.constructor === Function ? notify : () => {};
   const entries = new Map();

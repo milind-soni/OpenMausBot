@@ -1,9 +1,10 @@
 // What an older desktop's Copy this computer and Bring newer chats ask for: the move to My Cloud carries everything by
 // itself, so each of their steps is answered with the one thing to do.
 import type { ServerResponse } from "node:http";
+import { APP_NAME } from "../shared/product.ts";
 
 export const CLOUD_MOVE_PREFIX = "/api/cloud-move";
-export const COPY_REFUSAL = "Update OpenMausBot to bring your bots here by itself.";
+export const COPY_REFUSAL = `Update ${APP_NAME} to bring your bots here by itself.`;
 
 export function createCloudMoveRoutes() {
   return (res: ServerResponse, path: string): boolean => {

@@ -15,6 +15,7 @@ import { PHONE_JOB_TIMEOUT_MS, PHONE_SEND_TIMEOUT_MS, type PhoneJobs } from "./j
 import type { PhoneRecord, PhoneRegistry } from "./registry.ts";
 import { phoneRpc, type PhoneRefusal, type PhoneTarget, type PhoneToolsList } from "./rpc.ts";
 import { PHONE_TOOLS, type PhoneToolResult } from "./tools.ts";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 type TurnCapability = { botId: string; threadId: string; generation: string };
 
@@ -136,7 +137,7 @@ export function createPhoneHost(deps: PhoneHostDeps): PhoneHost {
           };
           const outcome = await jobs.request(phone.key, name, args, {
             active, timeoutMs: isOutboundTool(name) ? PHONE_SEND_TIMEOUT_MS : PHONE_JOB_TIMEOUT_MS,
-            offlineText: `${phone.name} is offline. Open the MausBot app on it.`, online: () => registry.online(phone.key),
+            offlineText: `${phone.name} is offline. Open the ${PRODUCT_NAME} app on it.`, online: () => registry.online(phone.key),
           });
           if (outcome.ok) registry.used(phone.key);
           return outcome;

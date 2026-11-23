@@ -3,6 +3,7 @@
 // The sandbox leaves every list, restore and fork at once, a delete can never be cancelled, and Boat retries the purge
 // itself, so `blocked` is not a failure: it says what the background erase waits for.
 
+import { APP_NAME } from "../shared/product.ts";
 const OPERATION_ID = /^bdop_[a-f0-9]{32}$/;
 const STATUSES = new Set(["pending", "processing", "blocked", "completed"]);
 
@@ -51,6 +52,6 @@ export const keptForNewerSnapshots = (operation: BoatDeletionOperation) =>
 export function deletionBlockedError(boxId: string, kept: boolean): Error & { status: number } {
   return Object.assign(new Error(kept
     ? `boat.dev deleted cloud computer ${boxId} but is keeping its stored data, because a fork or named snapshot made from it still uses that data. To erase the data, delete those in boat.dev.`
-    : `boat.dev accepted the deletion of cloud computer ${boxId}, but says it is blocked without a reason OpenMausBot knows. boat.dev keeps retrying on its own; if ${boxId} is still listed in boat.dev later, delete it there.`,
+    : `boat.dev accepted the deletion of cloud computer ${boxId}, but says it is blocked without a reason ${APP_NAME} knows. boat.dev keeps retrying on its own; if ${boxId} is still listed in boat.dev later, delete it there.`,
   ), { status: 409 });
 }

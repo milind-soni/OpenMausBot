@@ -19,6 +19,8 @@ import { LINK_ASLEEP, linkPath } from "./device-link-protocol.mjs";
 import { shareableDrive } from "./shared-drives.mjs";
 import nativeText from "./native-text.cjs";
 import { actingBot } from "./lending-indicator.mjs";
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 
 const uuid = value => typeof value === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
 const DATA_VOLUME = "/System/Volumes/Data";
@@ -406,7 +408,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
       bytes += chunk.length; if (bytes > 4_000_000) throw new Error("Server response exceeded limit");
       chunks.push(Buffer.from(chunk));
     }
-    let json; try { json = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw new Error("This server does not support computer sharing. Update its OpenMausBot installation."); }
+    let json; try { json = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw new Error(`This server does not support computer sharing. Update its ${APP_NAME} installation.`); }
     if (!response.ok) throw Object.assign(new Error(response.status === 401 || response.status === 403 ? "Pair this desktop again before sharing computer access." : `Server request failed (${response.status}). Update the server if needed.`), { status: response.status });
     return json;
   };

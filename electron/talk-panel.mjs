@@ -1,5 +1,7 @@
 import nativeText from "./native-text.cjs";
 import { fileURLToPath } from "node:url";
+import productJson from "../product.json" with { type: "json" };
+const { name: PRODUCT_NAME } = productJson;
 
 export const TALK_PANEL = Object.freeze({ width: 400, margin: 24, minHeight: 56, maxHeight: 240, fadeMs: 180 });
 const MASCOT_PX = 28;
@@ -9,10 +11,10 @@ const LIGHT = "color-scheme:light;--panel:#f7f7f7f5;--border:#0000001a;--ink:#0d
 
 export const TALK_LABELS = Object.freeze({
   listening: "Listening…",
-  sending: "Sending to MausBot…",
-  thinking: "MausBot is thinking…",
-  reply: "MausBot",
-  "needs-you": "MausBot needs you · Open chat",
+  sending: `Sending to ${PRODUCT_NAME}…`,
+  thinking: `${PRODUCT_NAME} is thinking…`,
+  reply: `${PRODUCT_NAME}`,
+  "needs-you": `${PRODUCT_NAME} needs you · Open chat`,
   "still-working": "Still working · Open chat",
   error: "",
 });
@@ -53,7 +55,7 @@ export function replyPreview(text, limit = 400) {
 
 export function talkPanelHtml(iconBase64) {
   const labels = JSON.stringify(TALK_LABELS);
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>MausBot</title><style>
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>${PRODUCT_NAME}</title><style>
 :root{color-scheme:dark light}
 body{color-scheme:dark;--panel:#111111f5;--border:#ffffff16;--ink:#fcfcfc;--ink2:#fcfcfcbf;--accent:#1084fe;--warning:#ff9800;--danger:#ff5667;--hover:#ffffff14}
 body.light{${LIGHT}}

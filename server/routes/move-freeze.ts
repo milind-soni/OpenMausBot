@@ -7,6 +7,7 @@ import { z } from "zod";
 import { type MoveFreeze, phoneMovedRefusal } from "../move-freeze.ts";
 import type { MoveWait } from "../move-waits.ts";
 import { PASS, type RouteHandler } from "./table.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 export interface MoveFreezeRouteDeps {
   freeze: MoveFreeze;
@@ -32,7 +33,7 @@ export function createMoveFreezeRoutes({ freeze, busy, restart, automationsOff, 
       return json(res, 410, { error: phoneMovedRefusal(place, platform), code: "home_moved", ...(place ? { place } : {}) });
     }
     if (path === "/api/move/forget") {
-      if (auth.kind !== "loopback") return json(res, 403, { error: "Only OpenMausBot on this computer can do this." });
+      if (auth.kind !== "loopback") return json(res, 403, { error: `Only ${APP_NAME} on this computer can do this.` });
       if (method !== "POST") return json(res, 405, { error: "method not allowed" });
       if (!freeze.forget()) return json(res, 409, { error: "Only a computer whose bots moved to My Cloud deletes its copy." });
       json(res, 200, { forgot: true });
@@ -40,7 +41,7 @@ export function createMoveFreezeRoutes({ freeze, busy, restart, automationsOff, 
       return;
     }
     if (path === "/api/move/freeze") {
-      if (auth.kind !== "loopback") return json(res, 403, { error: "Only OpenMausBot on this computer can do this." });
+      if (auth.kind !== "loopback") return json(res, 403, { error: `Only ${APP_NAME} on this computer can do this.` });
       if (method === "GET") {
         const who = busy();
         const cloud = freeze.cloud(), place = freeze.place();

@@ -15,6 +15,7 @@ import { writeFileAtomic } from "../atomic.ts";
 import { startDueTimer, type DueTimer } from "../due-timer.ts";
 import { workOriginSchema, type WorkOrigin } from "../peer-provenance.ts";
 import { wallClockLabel } from "./check-back-time.ts";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 export const CHECK_BACK_FILE = "check-backs.json";
 export const NOTE_MAX = 1_000;
@@ -64,7 +65,7 @@ export interface CheckBackDeps {
 
 export function checkBackPrompt(record: CheckBackRecord, startAt: number): string {
   const late = startAt - record.dueAt > LATE_MS
-    ? ` It was due at ${new Date(record.dueAt).toISOString()}; this computer was asleep or MausBot was not running, so it runs now, once, late.`
+    ? ` It was due at ${new Date(record.dueAt).toISOString()}; this computer was asleep or ${PRODUCT_NAME} was not running, so it runs now, once, late.`
     : "";
   const condition = record.condition ? ` Only if this holds: ${record.condition}. If it does not, end with one short line saying nothing was needed.` : "";
   return `[Check back: at ${new Date(record.createdAt).toISOString()} you set this to come back now (${wallClockLabel(record.dueAt, record.zone)}, ${record.zone}). What to check: ${record.note}${condition}${late} Check it now and carry on the work here; tell the person what you found in a sentence or two. Use check_back again only if it still needs a later look.]`;
@@ -225,7 +226,7 @@ export function createCheckBacks(deps: CheckBackDeps) {
       if (!recovered) {
         recovered = true;
         const cut = records.filter((record) => record.startingAt !== undefined);
-        for (const record of cut) close(record, lineOf(record, "failed", { why: "MausBot stopped while it was starting this; it was not started again." }));
+        for (const record of cut) close(record, lineOf(record, "failed", { why: `${PRODUCT_NAME} stopped while it was starting this; it was not started again.` }));
       }
       if (timer) return;
       timer = startDueTimer({

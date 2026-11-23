@@ -16,6 +16,7 @@ import {
   capAnswerEcho, formatQuestionAnswers, MAX_QUESTIONS, parseChoices, parseProtocolAskQuestions, pickedOptionLabels, questionAnswersById,
   repeatsQuestionText,
 } from "../../../shared/ask-question.ts";
+import { APP_NAME } from "../../../shared/product.ts";
 
 /** Cursor keeps two model namespaces: `cursor-agent models` and `--model` use flat slugs (`auto`,
  * `gpt-5.3-codex`), while the ACP session advertises parameterised ids (`default[]`,
@@ -337,7 +338,7 @@ export const CURSOR_SIGN_IN: DeviceSignIn = {
   homeDir: ".cursor",
   loginArgs: ["login"],
   env: { NO_OPEN_BROWSER: "1" },
-  install: "Install Cursor's CLI (https://cursor.com/docs/cli/installation) for the user running OpenMausBot, then try again.",
+  install: `Install Cursor's CLI (https://cursor.com/docs/cli/installation) for the user running ${APP_NAME}, then try again.`,
   failure: cursorLoginFailure,
   status: { args: ["status", "--format", "json"], read: readCursorStatus },
 };

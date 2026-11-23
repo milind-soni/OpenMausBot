@@ -5,6 +5,7 @@ import { CODEX_USAGE_LIMIT_REACHED } from "../../shared/codex-usage-limit.ts";
 import type { ServerText } from "../../shared/server-text.ts";
 import { noticeFailure } from "../chat-notices.ts";
 import { plainRecord } from "./codex-app-approval.ts";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 /** How a Codex turn reaches OpenAI: OpenMausBot's ChatGPT plan, Codex's own sign-in, or any other provider. */
 export type CodexRoute = "plan" | "own" | "other";
@@ -20,7 +21,7 @@ export function codexNotSignedIn(): string {
  * with "Try again at 5:23 PM." or "…or try again at Oct 17th, 2026 5:23 PM.", in its local time. */
 export function codexLimitMessage(said: string, timeZone = hostTimeZone()): string {
   const resets = /\btry again at ([^.]+)/i.exec(said)?.[1]?.trim();
-  return `${CODEX_USAGE_LIMIT_REACHED} This is OpenAI's limit, not your MausBot plan. ${resets
+  return `${CODEX_USAGE_LIMIT_REACHED} This is OpenAI's limit, not your ${PRODUCT_NAME} plan. ${resets
     ? `It resets at ${resets} (${timeZone}). Until then, manage your Codex usage in ChatGPT or switch this bot to another AI.`
     : "Manage your Codex usage in ChatGPT, or switch this bot to another AI until it resets."}`;
 }

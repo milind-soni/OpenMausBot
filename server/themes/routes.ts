@@ -6,6 +6,7 @@ import { THEME_ID, THEME_LIMITS, themeExportSchema, themeFileSchema, type ThemeH
 import type { RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "../routes/table.ts";
 import { isRefusal, type ThemeStore } from "./store.ts";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 const THEME_PATH = /^\/api\/themes\/([a-z0-9][a-z0-9-]{0,47})(\/duplicate|\/export)?$/;
 const ASSET_PATH = /^\/api\/theme-assets\/([a-z0-9][a-z0-9-]{0,47})\/([a-z0-9][a-z0-9._-]{0,99})$/;
@@ -80,7 +81,7 @@ export function createThemeRoutes(deps: ThemeRoutesDeps): RouteHandler {
     }
     if (path === "/api/themes/import" && method === "POST") {
       const parsed = themeExportSchema.safeParse(await readBody(req, IMPORT_LIMIT));
-      if (!parsed.success) return json(res, 400, { error: "This is not a MausBot theme file." });
+      if (!parsed.success) return json(res, 400, { error: `This is not a ${PRODUCT_NAME} theme file.` });
       const imported = store.importTheme(person, parsed.data);
       return isRefusal(imported) ? json(res, 400, { error: imported.refusal }) : json(res, 200, imported);
     }

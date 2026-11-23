@@ -10,6 +10,7 @@ import { DATA_DIR } from "./config.ts";
 import type { RoutineRunOn } from "./routines.ts";
 import { parseJson, schemaIssue, type JsonValue } from "./schema.ts";
 import { AUTHORITY, fromNote, fromNoteWith, webhookWho } from "./provenance-label.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 export type WebhookTriggerInput = z.input<typeof triggerInputSchema>;
 export type WebhookVerificationSample = z.output<typeof verificationSampleSchema>;
@@ -321,7 +322,7 @@ function serializePayload(payload: JsonValue): string {
     }
   }
   if (text.length <= MAX_EVENT_CHARS) return text;
-  return `${text.slice(0, MAX_EVENT_CHARS)}\n\n[Payload truncated by OpenMausBot]`;
+  return `${text.slice(0, MAX_EVENT_CHARS)}\n\n[Payload truncated by ${APP_NAME}]`;
 }
 
 function previewPayload(payload: JsonValue): string {
@@ -661,7 +662,7 @@ export class WebhookManager {
       payload,
       contentType: "application/json",
       eventName,
-      userAgent: "OpenMausBot webhook tester",
+      userAgent: `${APP_NAME} webhook tester`,
       deliveryId: `test-${randomUUID()}`,
     }, true);
   }

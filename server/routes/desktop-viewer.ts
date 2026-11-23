@@ -6,6 +6,7 @@ import type { Duplex } from "node:stream";
 import { isSameOrigin, type RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { createUpgrades, type Upgrades } from "./upgrades.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 const ROUTE = /^\/api\/desktop-viewer\/(local\/(?:shared|bot-[a-f0-9]{64}|pool-\d+)|vps\/[\w-]+)(\/websockify)?$/;
 const HANDSHAKE_MS = 10_000;
@@ -94,7 +95,7 @@ export function createDesktopViewer(deps: {
     catch (error) {
       const status = error && typeof error === "object" && "status" in error ? error.status : 502;
       return json(res, typeof status === "number" && status >= 400 && status < 600 ? status : 502,
-        { error: "The desktop is not available. Open it again from OpenMausBot." });
+        { error: `The desktop is not available. Open it again from ${APP_NAME}.` });
     }
     // Inspection may outlive a closed tab or the handshake deadline.
     if (res.destroyed || upgrade?.socket.destroyed) return;

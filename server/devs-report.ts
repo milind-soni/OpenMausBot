@@ -4,6 +4,7 @@
 import { withoutCitationMarkers } from "../src/lib/citations.ts";
 import { isSecretName, mask, redactSecretsInText } from "./redact.ts";
 import { clip, oneLine } from "./host/text-clip.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 /** The endpoint's limits, and ours inside them. The endpoint takes 10,000 description characters, 40 for appVersion and
  * platform, 262,144 for diagnostics and a 600 KB body. */
@@ -141,7 +142,7 @@ function describe(input: DevsReportInput, redact: (text: string) => string): str
 
 function diagnose(input: DevsReportInput, redact: (text: string) => string): string {
   const lines = [
-    "OpenMausBot @devs report", `Sent: ${iso(input.now)}`, `App version: ${input.appVersion}`, `Runs on: ${input.runsOn}`,
+    `${APP_NAME} @devs report`, `Sent: ${iso(input.now)}`, `App version: ${input.appVersion}`, `Runs on: ${input.runsOn}`,
     `OS: ${input.os}`, `Node: ${input.node}`, `Server uptime: ${duration(input.uptimeSeconds)}`,
     ...(input.language ? [`Language: ${input.language}`] : []), `Install: ${input.installId}`,
     "", "## Conversation", `Conversation: ${input.threadId}`, `Message: ${input.messageId}`, ...(input.groupId ? [`Group chat: ${input.groupId}`] : []),

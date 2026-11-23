@@ -9,6 +9,7 @@ import { HELD_SECRET_MASK } from "../redact.ts";
 import { EmailError, LASTING_SENDING_FAULTS, openGuard, pinned, sendingError, sendMessage, SendingError, testMailbox, testSending, type EmailGuard, type SendingFault } from "./client.ts";
 import { discoverMailServers, liveDiscoverDeps, smtpBeside, type DiscoverDeps, type MailCandidates } from "./discover.ts";
 import { EmailStore, MAX_EMAIL_ACCOUNTS, parseEmailAccount, type EmailAccount, type EmailServer } from "./store.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 const ADDRESS = /^[^\s@<>()",;:]{1,200}@[a-z0-9-]+(?:\.[a-z0-9-]+)+$/iu;
 const HOST = /^[a-z0-9.-]{1,253}$/iu;
@@ -286,7 +287,7 @@ export function createEmailService(deps: EmailServiceDeps) {
       const problem = sendingProblem(account);
       if (problem) return { ok: false, error: problem };
       try {
-        await live.send(account, guard, { to: [account.address], subject: "OpenMausBot test", text: `This message is a test from OpenMausBot: sending from ${account.address} works.` });
+        await live.send(account, guard, { to: [account.address], subject: `${APP_NAME} test`, text: `This message is a test from ${APP_NAME}: sending from ${account.address} works.` });
         return { ok: true };
       } catch (error) {
         if (error instanceof SendingError && LASTING_SENDING_FAULTS.has(error.fault)) store.markSendingProblem(account, error.message);

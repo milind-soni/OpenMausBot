@@ -1,6 +1,7 @@
 import { botOwner, nameFromEmail } from "../shared/bot-owner.ts";
 import { canManage, hasAuthority, inChargeOfEvery, peerName, renderRoster, reachablePeers, type RosterMember, type TeamPrompt } from "./peer-roster.ts"; import { chiefLevel } from "./chief-level.ts";
 import type { TaskRecord } from "./store.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 export type ChiefTeamMember = RosterMember;
 
@@ -85,7 +86,7 @@ export function chiefOfStaffPrompt(
     canDelegate ? SPECIALISTS : "",
     canDelegate && isChief ? EVERYONE_ON_THE_MAP : "",
     canDelegate && isChief
-      ? "Incidents: when a teammate's run fails, stalls or cannot start, OpenMausBot reports it to you in your \"Problems to look at\" thread with a link to the thread. Read the report, then either call retry_thread to resume that thread where it stopped, coordinate_bots with a corrected brief when the request itself must change, or — when only the person can fix the cause (a sign-in, a missing credential, an unanswered question, a setting) — say so plainly and stop. Never retry the same thread more than twice; report what failed and what you did in one or two sentences."
+      ? `Incidents: when a teammate's run fails, stalls or cannot start, ${APP_NAME} reports it to you in your "Problems to look at" thread with a link to the thread. Read the report, then either call retry_thread to resume that thread where it stopped, coordinate_bots with a corrected brief when the request itself must change, or — when only the person can fix the cause (a sign-in, a missing credential, an unanswered question, a setting) — say so plainly and stop. Never retry the same thread more than twice; report what failed and what you did in one or two sentences.`
       : "",
     delegation,
     canDelegate ? "Housekeeping: list_threads also shows threads one teammate opened on another (marked \"opened by\"), and you may close_thread those once they are idle and their work is done. Threads the person started are theirs: never close them." : "",

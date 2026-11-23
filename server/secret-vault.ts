@@ -13,6 +13,7 @@ import { vaultPointer } from "./vault/mcp-keys.ts";
 import { secretForms } from "./vault-store.ts";
 import { HELD_SECRET_MASK } from "./redact.ts";
 import { inSecretFolder, SECRET_FOLDER } from "./secret-folder.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 export { inSecretFolder, SECRET_FOLDER, SECRET_VALUE_MAX_BYTES };
 /** From saving: room for a resume queued behind other work and the tool call after it, short enough that a ref the bot
@@ -69,12 +70,12 @@ function refText(ref: string, reason: "unknown" | "used" | "expired" | "owner"):
     case "owner":
       return `${ref} was given to another bot or conversation. Ask the person here with request_credential.`;
     default:
-      return `${ref} is not a secretRef OpenMausBot holds: it is mistyped, or OpenMausBot restarted before it was used. Ask again with request_credential.`;
+      return `${ref} is not a secretRef ${APP_NAME} holds: it is mistyped, or ${APP_NAME} restarted before it was used. Ask again with request_credential.`;
   }
 }
 
 export const NOT_A_REF_TEXT =
-  "That is a secret file for your own commands, not a secretRef: it is deleted after 24 hours, and OpenMausBot's tools take only a secretRef. Ask again with request_credential and delivery ref.";
+  `That is a secret file for your own commands, not a secretRef: it is deleted after 24 hours, and ${APP_NAME}'s tools take only a secretRef. Ask again with request_credential and delivery ref.`;
 
 export class SecretVault {
   private readonly refs = new Map<string, RefEntry>();

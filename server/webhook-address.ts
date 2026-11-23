@@ -4,6 +4,7 @@
 import { canManage, type RosterMember } from "./peer-roster.ts"; import { chiefLevel } from "./chief-level.ts";
 import { webhookCredential } from "./webhook-ingress.ts";
 import type { WebhookManager } from "./webhooks.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 export interface AddressAsk {
   from: RosterMember;
@@ -30,7 +31,7 @@ export function webhookAddress(webhooks: Pick<WebhookManager, "currentSecret">, 
   const current = webhooks.currentSecret(id, true);
   if (!current) return null;
   if (!current.secret) {
-    return { unavailable: "This automation's address was made before OpenMausBot kept addresses, and an app already sends to it, so it can't be shown again. Ask the person to use Copy address on the automation's card, or Replace address there for a new one." };
+    return { unavailable: `This automation's address was made before ${APP_NAME} kept addresses, and an app already sends to it, so it can't be shown again. Ask the person to use Copy address on the automation's card, or Replace address there for a new one.` };
   }
   const credential = webhookCredential(baseUrl, current.webhook.endpointId, current.secret);
   const local = LOOPBACK.test(credential.endpointUrl) ? " This address is on this computer, so only apps running on it can reach it." : "";

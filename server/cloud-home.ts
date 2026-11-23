@@ -13,6 +13,7 @@ import { hostedWorkspaceConfigured } from "./hosted-workspace.ts";
 import { parseMemberClaim, teamMemberEmail, teamRoleScopes, type CloudTeam } from "./cloud-team.ts";
 import { isLoopbackHost } from "./request-auth.ts";
 import { formatPairingCode, type SessionRegistry } from "./sessions.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 /** Any of these switches the server into Cloud home mode; then all are required. */
 export const CLOUD_HOME_KEYS = ["OMB_CLOUD_ROLE", "OMB_CLOUD_MACHINE_ID", "OMB_CLOUD_ADMIN_URL", "OMB_CLOUD_BOOTSTRAP_SECRET"] as const;
@@ -132,7 +133,7 @@ export { cloudHomeOffersPlace } from "../shared/cloud-home.ts";
 
 /** In the person's words; a turn's error shows 160 characters, so each fits. */
 export function cloudHomePlaceRefusal(place: Surface): string | undefined {
-  if (place === "local") return "This computer isn't a place in the Cloud. Set Works on to Auto, Cloud desktop or Browser; your own computer is reached while OpenMausBot is open on it.";
+  if (place === "local") return `This computer isn't a place in the Cloud. Set Works on to Auto, Cloud desktop or Browser; your own computer is reached while ${APP_NAME} is open on it.`;
   if (place === "vm") return "Cloud bots can't use a private desktop. Set Works on to Auto, Cloud desktop or Browser.";
   return undefined;
 }

@@ -22,6 +22,7 @@ import { DISK_WARN_PERCENT, type CloudComputerDisk } from "../shared/cloud-compu
 import { isolatedRemoteCommand, runCommand } from "./boat.ts";
 import { COMMAND_WALL, trackedProcesses } from "./boat-command.ts";
 import type { AppConfig } from "./config.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 export const DISK = {
   cleanAtPercent: DISK_WARN_PERCENT,
@@ -415,8 +416,8 @@ export function removedText(removed: DiskRemoved): string {
     const largest = [...removed.items].sort((a, b) => b.kb - a.kb).slice(0, DISK.removedShown).map((item) => `${JSON.stringify(item.name)} ${sized(item.kb)}`);
     parts.push(`${some(removed.items.length, "old item", "old items")} in /tmp: ${listed(largest, removed.items.length)}`);
   }
-  if (!parts.length) return "MausBot cleared its caches and found nothing else it could safely remove.";
-  return `MausBot removed ${parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0]}.`;
+  if (!parts.length) return `${PRODUCT_NAME} cleared its caches and found nothing else it could safely remove.`;
+  return `${PRODUCT_NAME} removed ${parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0]}.`;
 }
 
 const ago = (ms: number): string => (ms < 90 * 60_000 ? `${Math.max(1, Math.round(ms / 60_000))} min` : `${Math.round(ms / 3_600_000)} h`);
@@ -429,13 +430,13 @@ export function diskNotice(facts: DiskFacts, now: number): string | null {
     line = `Disk note: this cloud computer's disk was ${facts.capacity.before}% full; ${removedText(facts.capacity)}${facts.capacity.after !== null ? ` Now ${facts.capacity.after}%.` : ""}`;
   } else if (cleanup && !facts.cleanupTold && cleanup.after !== null) {
     const freed = cleanup.freedKb !== null && cleanup.freedKb >= 1024 ? ` (${sized(cleanup.freedKb)} freed)` : "";
-    line = `Disk note: this cloud computer's disk was ${cleanup.before}% full; MausBot cleared caches${freed}, now ${cleanup.after}%.`;
+    line = `Disk note: this cloud computer's disk was ${cleanup.before}% full; ${PRODUCT_NAME} cleared caches${freed}, now ${cleanup.after}%.`;
   } else if (percent < DISK.cleanAtPercent) {
     return null;
   } else if (facts.cleaning === "now") {
-    line = `Disk note: this cloud computer's disk is ${percent}% full; MausBot is freeing space now, which can take a few minutes.`;
+    line = `Disk note: this cloud computer's disk is ${percent}% full; ${PRODUCT_NAME} is freeing space now, which can take a few minutes.`;
   } else if (facts.cleaning === "soon") {
-    line = `Disk note: this cloud computer's disk is ${percent}% full; MausBot frees space once no command is running on it.`;
+    line = `Disk note: this cloud computer's disk is ${percent}% full; ${PRODUCT_NAME} frees space once no command is running on it.`;
   } else if (cleanup && now - cleanup.at < DISK.cleanAgainUnhelpedMs) {
     line = `Disk note: this cloud computer's disk is ${percent}% full; its caches were cleared ${ago(now - cleanup.at)} ago.`;
   } else {

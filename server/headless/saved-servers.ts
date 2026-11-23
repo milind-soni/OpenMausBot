@@ -7,6 +7,7 @@ import { join } from "node:path";
 
 import { HeadlessError, EXIT } from "./args.ts";
 import { inBotShell } from "./bot-shell.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 export interface SavedServer {
   url: string;
@@ -151,7 +152,7 @@ export class SavedServers {
 
   private putToken(name: string, token: string): SavedServer["store"] {
     if (this.platform === "darwin") {
-      const added = this.security(["-i"], `add-generic-password -U -s ${quoted(KEYCHAIN_SERVICE)} -a ${quoted(name)} -l ${quoted(`OpenMausBot CLI: ${name}`)} -w ${quoted(token)}\n`);
+      const added = this.security(["-i"], `add-generic-password -U -s ${quoted(KEYCHAIN_SERVICE)} -a ${quoted(name)} -l ${quoted(`${APP_NAME} CLI: ${name}`)} -w ${quoted(token)}\n`);
       if (added.status === 0) return "keychain";
     }
     if (!this.dir) throw new HeadlessError("no home folder to keep the sign-in in", EXIT.failed, "set HOME");

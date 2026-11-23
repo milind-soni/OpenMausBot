@@ -1,4 +1,5 @@
 // The exit code a server uses to ask its launcher for a fresh start (after a restore commits).
+import { APP_NAME } from "../shared/product.ts";
 export const RESTART_EXIT_CODE = 75;
 /** The exit code a server uses after an error it could not survive (server/crash-guard.ts): it logged why and closed
  * cleanly, and its launcher starts it again after a pause. */
@@ -46,5 +47,5 @@ export function restartPolicy(now: () => number = Date.now) {
 
 /** What a launcher says before starting the server again. */
 export const restartLine = (code: number | null, delayMs: number): string => code === RESTART_EXIT_CODE
-  ? "OpenMausBot is starting again to finish installing a copy from the desktop app…"
-  : `OpenMausBot stopped unexpectedly (${code ?? "killed"}); starting it again in ${Math.round(delayMs / 1000)} s…`;
+  ? `${APP_NAME} is starting again to finish installing a copy from the desktop app…`
+  : `${APP_NAME} stopped unexpectedly (${code ?? "killed"}); starting it again in ${Math.round(delayMs / 1000)} s…`;

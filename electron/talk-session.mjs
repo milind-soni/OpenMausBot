@@ -1,18 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { TalkServerError } from "./talk-server.mjs";
+import productJson from "../product.json" with { type: "json" };
+const { name: PRODUCT_NAME } = productJson;
 
 export const TALK_TIMING = Object.freeze({ replyHideMs: 12_000, noticeHideMs: 4_000, stillWorkingMs: 120_000, hoverRecheckMs: 500, maxListenMs: 60_000 });
 
 export const TALK_TEXT = Object.freeze({
-  busy: "Voice is in use in MausBot",
-  serverDown: "Open MausBot to talk",
-  starting: "MausBot is still starting. Try again in a moment.",
-  noMausbot: "Set up MausBot first, then try again.",
-  moved: "MausBot lives on My Cloud now — talk to it there",
+  busy: `Voice is in use in ${PRODUCT_NAME}`,
+  serverDown: `Open ${PRODUCT_NAME} to talk`,
+  starting: `${PRODUCT_NAME} is still starting. Try again in a moment.`,
+  noMausbot: `Set up ${PRODUCT_NAME} first, then try again.`,
+  moved: `${PRODUCT_NAME} lives on My Cloud now — talk to it there`,
   permission: "Talking needs Microphone + Speech Recognition access — System Settings → Privacy & Security.",
   dictationOff: "Turn on Dictation in System Settings → Keyboard, then try again.",
   unavailable: "Talking couldn't start. Try again.",
-  failed: "MausBot couldn't take that · Open chat",
+  failed: `${PRODUCT_NAME} couldn't take that · Open chat`,
 });
 
 const SPEECH_PROBLEMS = new Map([

@@ -3,12 +3,14 @@ import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 
 const electronDir = path.dirname(fileURLToPath(import.meta.url));
 const projectDir = path.dirname(electronDir);
 const resourcesDir = path.join(electronDir, "resources");
 
-export const speechHelperBundle = path.join(resourcesDir, "OpenMausBot Speech.app");
+export const speechHelperBundle = path.join(resourcesDir, `${APP_NAME} Speech.app`);
 export const speechHelperBinary = path.join(speechHelperBundle, "Contents", "MacOS", "speech-helper");
 
 export function buildSpeechHelper() {

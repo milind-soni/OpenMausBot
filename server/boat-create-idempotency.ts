@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const FILE = join(DATA_DIR, "box-create-requests.json");
 const LOCK_FILE = join(DATA_DIR, "box-create-requests.lock");
@@ -79,7 +80,7 @@ function recoveryStateError(detail: string, cause?: unknown): Error & { status: 
   return Object.assign(
     new Error(
       `Cloud computer creation is paused because its recovery state is ${detail}. `
-      + "Check boat.dev for an unnamed Boat before repairing OpenMausBot's local state.",
+      + `Check boat.dev for an unnamed Boat before repairing ${APP_NAME}'s local state.`,
     ),
     { status: 503, cause },
   );
@@ -311,7 +312,7 @@ function acquireJournalLock(): JournalLockOwner {
       const reaped = current !== null && !processIsAlive(current.pid) && reapDeadLock(current);
       // Every retry path is bounded: an adversarially changing lock can vanish or be replaced between steps.
       if (performance.now() >= deadline) {
-        throw recoveryStateError("locked by another OpenMausBot process");
+        throw recoveryStateError(`locked by another ${APP_NAME} process`);
       }
       if (reaped) continue;
       Atomics.wait(lockWait, 0, 0, LOCK_RETRY_MS);

@@ -1,5 +1,6 @@
 // Meeting notes: a bot joins an online meeting as a guest on its cloud computer, transcribes it and writes notes.
 
+import { PRODUCT_NAME } from "../shared/product.ts";
 export type MeetingPlatform = "meet" | "teams" | "jitsi";
 
 export const MEETING_PLATFORM_NAMES: Record<MeetingPlatform, string> = { meet: "Google Meet", teams: "Microsoft Teams", jitsi: "Jitsi Meet" };
@@ -67,12 +68,12 @@ export function findMeetingLink(text: string | undefined): string | null {
 }
 
 /** The name the bot shows in the meeting. */
-export const meetingDisplayName = (botName: string): string => `${botName.trim().slice(0, 40) || "MausBot"} (notes)`;
+export const meetingDisplayName = (botName: string): string => `${botName.trim().slice(0, 40) || `${PRODUCT_NAME}`} (notes)`;
 
 /** Posted in the meeting chat the moment the bot is let in, before anything is captured. Not configurable. */
 export function consentLine(botName: string, personName: string | undefined): string {
   const forWhom = personName?.trim() ? `for ${personName.trim().slice(0, 60)}` : "for the person who invited me";
-  return `Hi, I'm ${meetingDisplayName(botName)} from MausBot, taking notes ${forWhom}. Ask me with @notes. Type "@notes stop" and I'll leave.`;
+  return `Hi, I'm ${meetingDisplayName(botName)} from ${PRODUCT_NAME}, taking notes ${forWhom}. Ask me with @notes. Type "@notes stop" and I'll leave.`;
 }
 
 export const MEETING_MAX_MS = 4 * 60 * 60_000;

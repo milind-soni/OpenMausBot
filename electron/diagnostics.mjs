@@ -1,6 +1,8 @@
 // The bundle is pasted into public issues: the collector never reads secrets, and everything is scrubbed again here.
 import fs from "node:fs";
 import path from "node:path";
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 
 // Mirrors WORKSPACE_CREDENTIAL_ENV in server/credential-env.ts; a test asserts the two lists never drift apart.
 export const CREDENTIAL_ENV_NAMES = [
@@ -281,7 +283,7 @@ export function buildDiagnosticsReport({
   now = new Date().toISOString(),
 } = {}) {
   const lines = [];
-  lines.push("OpenMausBot diagnostics");
+  lines.push(`${APP_NAME} diagnostics`);
   lines.push(`Generated: ${now}`);
   lines.push("");
   lines.push("## App");

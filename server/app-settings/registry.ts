@@ -21,6 +21,7 @@ import { botEntries } from "./registry-bots.ts";
 import { configEntries } from "./registry-config.ts";
 import { pictureEntries } from "./registry-pictures.ts";
 import { windowEntries } from "./registry-window.ts";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 /** Where the person changes it by hand: a real place in the app, which the bot names as placePath gives it. */
 export type Where = SettingsPlaceId;
@@ -235,7 +236,7 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
   ];
 
   const provider = (id: string, label: string, synonyms: string[], current: () => string | undefined, patch: (text: string) => Record<string, unknown>): SettingEntry => writable({
-    id, label, help: `${label}: the address MausBot sends requests to. Empty uses the provider's own.`, where: "keys", synonyms: [...synonyms, "url", "base url", "endpoint", "address", "proxy"],
+    id, label, help: `${label}: the address ${PRODUCT_NAME} sends requests to. Empty uses the provider's own.`, where: "keys", synonyms: [...synonyms, "url", "base url", "endpoint", "address", "proxy"],
     value: url, allowed: "an http(s) address, or empty to clear", current: () => current() ?? "", write: config(patch),
   });
   const providers: SettingEntry[] = [
@@ -323,7 +324,7 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
       ["keep here", "move to cloud", "move back", "bring back"], () => "managed in Settings"),
     ownerOnly("appearance.sidebarPicture", "Sidebar picture", "The picture at the top of the sidebar; it is a file the person picks or removes.", "sidebar-picture",
       ["wallpaper", "background", "banner", "sidebar image", "picture"], () => "managed in Settings"),
-    ownerOnly("account.organization", "Organization", "Joining or leaving a company's managed MausBot; it signs in through the company's portal.", "organization",
+    ownerOnly("account.organization", "Organization", `Joining or leaving a company's managed ${PRODUCT_NAME}; it signs in through the company's portal.`, "organization",
       ["organization", "organisation", "company", "managed"], () => "managed in Settings"),
     ownerOnly("people.signIn", "Who may sign in", "On a self-hosted server, the emails or @domains that may sign in, as admins or members. A change could lock someone out, or hand every setting to someone new.",
       "members", ["people", "members", "invite", "roles", "admins", "sign in access"], () => "managed in Settings"),

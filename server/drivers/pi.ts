@@ -54,6 +54,7 @@ import { noticeFailure } from "../chat-notices.ts";
 
 import { decodePiFrame, PiRpcChunks, piLineReader, piNativeLogMessage, readPiPromptImages } from "./pi-rpc.ts";
 import { PiRunUsage, type PiUsage, type TurnUsage } from "./pi-usage.ts";
+import { APP_NAME } from "../../shared/product.ts";
 export { decodePiFrame, PiRpcChunks, piLineReader } from "./pi-rpc.ts";
 
 const DRIVER_KIND = "piAgent";
@@ -855,7 +856,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           ready = receipt.ok === true && JSON.stringify(receipt.toolScope) === JSON.stringify(toolScope);
         } catch { /* Missing or malformed readiness is never a grant. */ }
         if (!ready) {
-          const message = "Pi tool selection enforcement is unavailable. Update Pi and check the OpenMausBot extension before retrying.";
+          const message = `Pi tool selection enforcement is unavailable. Update Pi and check the ${APP_NAME} extension before retrying.`;
           emit({ ...base(threadId, turnId), type: "runtime.error", message });
           settle(false);
           throw new Error(message);

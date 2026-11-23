@@ -31,6 +31,7 @@ import {
 } from "../shared/phone-push.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { conversationLanguage, serverLine, type ServerLineKey } from "./server-lines.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 export const PHONE_PUSH_FILE = "push-devices.json";
 export const PHONE_PUSH_ENV = "OMB_PHONE_PUSH";
@@ -151,7 +152,7 @@ function pushableOf(value: unknown): PushableNotification | null {
  * relay takes. Reads the kind, the ids and the names; the title is the server's own line for that kind, from names. */
 export function phonePushNotification(notification: PushableNotification, room?: { id: string; name: string }): PhonePushNotification | null {
   if (!isPushKind(notification.kind) || !PUSH_ID.test(notification.botId) || !PUSH_ID.test(notification.threadId)) return null;
-  const botName = clip(notification.botName, PUSH_NAME_MAX) || "MausBot";
+  const botName = clip(notification.botName, PUSH_NAME_MAX) || `${PRODUCT_NAME}`;
   const roomName = room && PUSH_ID.test(room.id) ? clip(room.name, PUSH_NAME_MAX) : "";
   const language = conversationLanguage(notification.threadId);
   const who = roomName ? serverLine(language, "server.notify.inRoom", { bot: botName, room: roomName }) : botName;

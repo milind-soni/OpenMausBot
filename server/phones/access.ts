@@ -4,6 +4,7 @@ import { noticeSummary } from "../chat-notices.ts";
 import { PHONE_SLUG, ALL_PHONE_APPS, isPhoneToolName, isPhoneWrite, phoneToolCapability, type PhoneApps, type PhoneCapability, type PhonePlatform } from "../../shared/phone-apps.ts";
 import { connectorScopeRefusalText } from "../connector-verdict.ts";
 import { PHONE_PROMPT, PHONE_WITHHELD_PROMPT, type PHONE_PLACE_PROMPT } from "./instructions.ts";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 export interface PhoneBot {
   id: string;
@@ -47,7 +48,7 @@ export function phoneAccess(bot: PhoneBot, allowed: Readonly<Partial<Record<Phon
   if (!allowed[cap]) {
     return {
       ok: false,
-      text: `${bot.name} can't use ${Cap} on this phone: it is not allowed in the MausBot app on the phone.`,
+      text: `${bot.name} can't use ${Cap} on this phone: it is not allowed in the ${PRODUCT_NAME} app on the phone.`,
       rows: [{ tool: name, ...noticeSummary(`chat.notice.phone.denied.${cap}`), decision: "auto-denied", rule: `phone:${cap}:not-allowed-on-phone` }],
     };
   }

@@ -5,6 +5,7 @@ import type { ComputerHelpRef } from "../../shared/wire.ts";
 import type { HandoffView } from "../coordinator.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
 import type { Surface } from "../surface.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 export interface SignInSettleDeps {
   store: Pick<Store, "activePath" | "bot" | "patchMessage">;
@@ -30,7 +31,7 @@ export type SignInSettled = { status: number; body: Record<string, unknown> };
 
 /** The line that resumes work handed on when the person answered its sign-in in the chat instead of pressing Done. */
 export function signInChatPrompt(site: string, line: string): string {
-  return `OpenMausBot sign-in update: instead of pressing Done on the sign-in to ${site}, the person wrote in the chat: ${JSON.stringify(line.slice(0, 400))}. Check you are signed in, then continue the task that paused for it. Never ask them for a password or a one-time code in chat.`;
+  return `${APP_NAME} sign-in update: instead of pressing Done on the sign-in to ${site}, the person wrote in the chat: ${JSON.stringify(line.slice(0, 400))}. Check you are signed in, then continue the task that paused for it. Never ask them for a password or a one-time code in chat.`;
 }
 
 export function createSignInSettle(deps: SignInSettleDeps) {

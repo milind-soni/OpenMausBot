@@ -1,6 +1,8 @@
 import nativeText from "./native-text.cjs";
 import { screenFixLabel, screenLine } from "./screen-words.mjs";
 import { dotIcons } from "./color-dot.mjs";
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 
 /** The device word the person knows this computer by. */
 export const deviceWord = (platform = process.platform) => platform === "darwin" ? "Mac" : platform === "win32" ? "PC" : "computer";
@@ -78,7 +80,7 @@ export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPa
     const { line, title, screen, pending, problems = [], acting = [] } = indicatorText(view, device, t);
     const fix = screen ? screenFixLabel(view.screen, t) : null;
     const said = [...acting.map(bot => bot.label), ...line ? [line] : []].join(". ");
-    tray.setToolTip(`OpenMausBot: ${said}${pending ? `. ${pending}` : ""}${screen ? `. ${screen}` : ""}${problems.length ? `. ${problems.join(". ")}` : ""}`);
+    tray.setToolTip(`${APP_NAME}: ${said}${pending ? `. ${pending}` : ""}${screen ? `. ${screen}` : ""}${problems.length ? `. ${problems.join(". ")}` : ""}`);
     // Electron shows a tray title beside the icon on macOS only.
     tray.setTitle?.(title);
     tray.setContextMenu(Menu.buildFromTemplate([

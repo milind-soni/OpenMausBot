@@ -6,6 +6,7 @@ import { writeFileAtomic } from "../../atomic.ts";
 import { DATA_DIR } from "../../config.ts";
 import type { ProviderInstance } from "../../contracts.ts";
 import { declareOpenCodeModels } from "./opencode-typed-model.ts";
+import { APP_NAME } from "../../../shared/product.ts";
 
 export interface LiveModelList {
   /** OpenCode's id for the provider. */
@@ -84,7 +85,7 @@ export function markOpenCodeCatalogRefreshed(instanceId: string, at: number): vo
 
 async function readListing(list: LiveModelList, key: string, fetcher: typeof fetch): Promise<string[]> {
   const response = await fetcher(list.url, {
-    headers: { accept: "application/json", authorization: `Bearer ${key}`, "user-agent": "OpenMausBot" },
+    headers: { accept: "application/json", authorization: `Bearer ${key}`, "user-agent": `${APP_NAME}` },
     redirect: "error",
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });

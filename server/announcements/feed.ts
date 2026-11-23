@@ -11,6 +11,7 @@ import bundledFeedJson from "../../announcements/announcements.json" with { type
 import { ANNOUNCEMENTS_URL, liveCards, parseAnnouncementFeed, type AnnouncementCard, type AnnouncementFeed } from "../../shared/announcements.ts";
 import { writeFileAtomic } from "../atomic.ts";
 import { DATA_DIR } from "../config.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 /** "1" stops the download and every remote card on this server's pages, the bundled ones included. */
 export const ANNOUNCEMENTS_DISABLE_ENV = "OMB_DISABLE_ANNOUNCEMENTS";
@@ -167,7 +168,7 @@ export class AnnouncementStore {
     const timer = setTimeout(() => controller.abort(), this.options.timeoutMs ?? ANNOUNCEMENTS_FETCH_TIMEOUT_MS);
     try {
       const response = await (this.options.fetch ?? fetch)(ANNOUNCEMENTS_URL, {
-        headers: { accept: "application/json", "user-agent": "OpenMausBot" },
+        headers: { accept: "application/json", "user-agent": `${APP_NAME}` },
         // Nothing of the person's goes with it.
         credentials: "omit",
         referrerPolicy: "no-referrer",

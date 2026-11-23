@@ -11,6 +11,7 @@ import { quoteInNote } from "../peer-provenance.ts";
 import { RepeatDetector, callKey, toolItemKey } from "../repeat-detector.ts";
 import { RepeatStreak, failureDigest } from "../repeat-streak.ts";
 import { COMMAND_SUMMARY_MAX, previewIsPartial } from "../tool-summary.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 const COUNT_MIN = 2;
 const COUNT_MAX = 1000;
@@ -147,7 +148,7 @@ function quoted(call: CountedCall): string {
 
 /** Opened as `[OpenMausBot …]`, which model-written text cannot open, and never carrying what the command printed. */
 function loopNote(call: string, streak: number): string {
-  return `[OpenMausBot: this exact call has failed the same way ${streak} times in a row: ${call}. Change approach, or stop and report what is blocking.]`;
+  return `[${APP_NAME}: this exact call has failed the same way ${streak} times in a row: ${call}. Change approach, or stop and report what is blocking.]`;
 }
 
 function loopCause(call: string, streak: number): string {

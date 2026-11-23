@@ -8,6 +8,7 @@ import { findCliCandidates } from "../env-path.ts";
 import { captureCliTree, killCliTree } from "../procs.ts";
 import { appendNative } from "./native.ts";
 import { armIdleClose, engineIdleMs, sessionIdlePolicy, stopIdleClose } from "./session-idle.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 /** Codex 0.160.1 lists a table's entries (its plugins, its MCP servers) in a different order from one `config/read` to the
  * next, so tables are compared with their keys in order. */
@@ -125,7 +126,7 @@ export class CodexConnection {
   /** No turn is running: a request from the app-server is refused, and only the token total is kept. */
   private unattended(message: any): void {
     if (message?.id !== undefined && message.method) {
-      this.write({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "No OpenMausBot turn is running on this thread." } });
+      this.write({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: `No ${APP_NAME} turn is running on this thread.` } });
       return;
     }
     const total = message?.method === "thread/tokenUsage/updated" && message.params?.threadId === this.nativeThreadId

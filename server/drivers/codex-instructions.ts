@@ -5,6 +5,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DATA_DIR } from "../config.ts";
 import { writeFileAtomic } from "../atomic.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 
@@ -45,7 +46,7 @@ export function codexDeveloperInstructions(config: unknown, botInstructions: str
   }
   // Native rules go last, keeping their precedence over the bot's.
   return configured
-    ? `${botInstructions || "No OpenMausBot bot-specific instructions remain."}\n\n${configured}`
+    ? `${botInstructions || `No ${APP_NAME} bot-specific instructions remain.`}\n\n${configured}`
     : botInstructions;
 }
 
@@ -80,8 +81,8 @@ export async function syncCodexInstructions(
           role: "developer",
           content: [{
             type: "input_text",
-            text: "The following replaces the previous developer instruction block supplied by OpenMausBot, including its native configured rules and bot-specific instructions. Other Codex instructions and permissions still apply.\n\n"
-              + (instructions || "No OpenMausBot bot-specific instructions remain."),
+            text: `The following replaces the previous developer instruction block supplied by ${APP_NAME}, including its native configured rules and bot-specific instructions. Other Codex instructions and permissions still apply.\n\n`
+              + (instructions || `No ${APP_NAME} bot-specific instructions remain.`),
           }],
         }],
       });

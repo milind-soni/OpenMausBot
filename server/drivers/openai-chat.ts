@@ -37,6 +37,7 @@ import { classifyContinuable, writeTurnHandoff } from "../turn-continuation.ts";
 import { KEY_REJECTED_REASON, keyRejected, noteKeyAccepted, noteKeyRejected, rejectsKey } from "../key-rejections.ts";
 import { FETCH_LIMIT_MS, fetchPastLimit, prepareChatModel } from "./openai-chat-fetch.ts";
 import { announcesAction } from "./chat-announcement.ts";
+import { APP_NAME } from "../../shared/product.ts";
 export interface OpenAIChatMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string | ChatContentPart[] | null;
@@ -187,10 +188,10 @@ function replayDelivered(
   return { content, matched: found.map(({ record }) => record), volatile };
 }
 
-const CORRECTIVE_ROUND = "[OpenMausBot: a tool call in this turn failed (its result is marked ok:false). Re-run the failed operations with corrected inputs where possible, check the results, then give your final answer. Do not report results you did not get.]";
+const CORRECTIVE_ROUND = `[${APP_NAME}: a tool call in this turn failed (its result is marked ok:false). Re-run the failed operations with corrected inputs where possible, check the results, then give your final answer. Do not report results you did not get.]`;
 const NUDGE_ANNOUNCED_ACTION = "You said what you would do next but called no tool. Use your tools for only the remaining work, or reply with verified results if nothing is left to do. Never repeat an operation that succeeded, was denied, or may already have taken effect; inspect its state instead. Do not retry a destructive operation.";
 
-const UNREADABLE_CALL = "[OpenMausBot: your last tool call could not be read, so nothing ran. Call the tool again using only the tools you were given, with valid JSON arguments.]";
+const UNREADABLE_CALL = `[${APP_NAME}: your last tool call could not be read, so nothing ran. Call the tool again using only the tools you were given, with valid JSON arguments.]`;
 const LOCAL_CORRECTIVE_ROUNDS = 2;
 
 const TEXT_ONLY_ATTACHMENT_NOTE = "[The person attached image(s), but this model cannot see images. Say so if the request depends on them.]";

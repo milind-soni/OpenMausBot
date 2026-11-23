@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { createUpdaterCoordinator } from "./updater-coordinator.mjs";
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 
 export function deferred() {
   let resolve;
@@ -39,7 +41,7 @@ export async function found(h, { manual = false, version = "2.0.0" } = {}) {
   await h.coordinator.check(manual);
 }
 
-export async function downloadInto(h, files = ["/tmp/OpenMausBot-2.0.0-amd64.deb"]) {
+export async function downloadInto(h, files = [`/tmp/${APP_NAME}-2.0.0-amd64.deb`]) {
   h.updater.downloadUpdate = () => {
     h.updater.emit("update-downloaded", { version: "2.0.0" });
     return Promise.resolve(files);

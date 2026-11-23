@@ -1,5 +1,7 @@
 import { UPDATE_TEXT, updateErrorCode, updateErrorMessage, updateErrorNeedsPerson } from "./update-errors.mjs";
 import { detailFields, updateWords } from "./update-words.mjs";
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 
 const said = (error) => {
   const code = updateErrorCode(error);
@@ -89,7 +91,7 @@ export function createUpdaterCoordinator(
       setState({
         status: "error",
         retryable: false,
-        message: `${updateErrorMessage(error)} Quit and reopen OpenMausBot before trying the update again.`,
+        message: `${updateErrorMessage(error)} Quit and reopen ${APP_NAME} before trying the update again.`,
         ...said(error),
       });
       return;

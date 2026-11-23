@@ -15,6 +15,7 @@ import type { EmailAccount } from "./email/store.ts";
 import type { McpOAuthRecord } from "./mcp-oauth-store.ts";
 import type { McpAuthState } from "./mcp-oauth.ts";
 import { isRemoteMcpServer, parseStoredMcpServer, type StoredMcpServer } from "./mcp-registry.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 export type ConnectionKind = "mcp" | "key" | "composio" | "email";
 
@@ -225,7 +226,7 @@ export function answerConnection(id: string, sources: HandoffSources):
   }
   if (id === "composio") {
     const apiKey = cfg.composio?.apiKey?.trim(), userId = cfg.composio?.userId;
-    return apiKey && userId ? { ok: true, connection: { composio: { apiKey, userId } } } : { ok: false, error: "Connected apps here use OpenMausBot's service." };
+    return apiKey && userId ? { ok: true, connection: { composio: { apiKey, userId } } } : { ok: false, error: `Connected apps here use ${APP_NAME}'s service.` };
   }
   if (id === "email") {
     const accounts = sources.email?.() ?? [];

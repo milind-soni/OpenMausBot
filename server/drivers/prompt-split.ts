@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { DATA_DIR } from "../config.ts";
 import { writeFileAtomic } from "../atomic.ts";
 import type { SendTurnInput } from "../contracts.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 export interface PromptHalves {
   stable: string | null;
@@ -23,10 +24,10 @@ export function promptHalves(
 }
 
 export const VOLATILE_CONTEXT_NOTE_PREFIX =
-  "Context from OpenMausBot updated since this conversation started; it replaces any earlier copy:";
+  `Context from ${APP_NAME} updated since this conversation started; it replaces any earlier copy:`;
 
 export const VOLATILE_CONTEXT_CLEARED_NOTE =
-  "The OpenMausBot context notes from earlier in this conversation have been cleared; the standing instructions still apply.";
+  `The ${APP_NAME} context notes from earlier in this conversation have been cleared; the standing instructions still apply.`;
 
 export function volatileContextNote(volatile: string, hadVolatile: boolean): string {
   const text = volatile.trim();

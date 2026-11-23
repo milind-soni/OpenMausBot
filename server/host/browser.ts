@@ -55,6 +55,7 @@ import type { FillLoginDeps } from "../login-fill.ts";
 import { AGENTS_NODE_FLAG, SPAWNED_PROXIES } from "../proxy-paths.ts";
 import type { Store } from "../store.ts";
 import type { TurnOwner, TurnResources } from "../turn-resources.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 export interface BrowserHostDeps {
   cfg: AppConfig;
@@ -581,7 +582,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         return true;
       }
       const ok = await clearBrowserSessionState(engine.binaryPath, name, { encryptionKey: browserEngineEncryptionKey() });
-      if (!ok) console.warn(`browser cleanup: could not clear saved state for session ${name}; restart OpenMausBot to retry this profile's cleanup. Do not use state clear --all: it erases other profiles too.`);
+      if (!ok) console.warn(`browser cleanup: could not clear saved state for session ${name}; restart ${APP_NAME} to retry this profile's cleanup. Do not use state clear --all: it erases other profiles too.`);
       return ok;
     };
     const results = await Promise.all([eraseChromeBrowser(request), ...session ? [erased(session)] : []]);

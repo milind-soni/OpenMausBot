@@ -1,5 +1,6 @@
 // A remote's session credential is the HttpOnly cookie /pair set, held by Chromium's cookie jar, never by this file.
 const { englishText } = require("./native-text.cjs");
+const { appName: APP_NAME } = require("../product.json");
 
 const LOCAL_ID = "local";
 const MAX_NAME = 60;
@@ -47,10 +48,10 @@ function workspaceSummary(state) {
 function workspaceWindowTitle(state, companion, homeOrigin = null, t = englishText.t) {
   if (companion) return t("native.title.connected", { server: companion.serverName, host: new URL(companion.endpoint).host });
   const active = activeEnvironment(state);
-  if (listedPlace(active)) return `OpenMausBot — ${active.name}`;
+  if (listedPlace(active)) return `${APP_NAME} — ${active.name}`;
   if (active && active.kind !== "local" && active.origin !== homeOrigin) return t("native.title.hosted", { name: active.name, host: new URL(active.origin).host });
-  if (active && homeOrigin && active.origin === homeOrigin && otherPlaces(state, homeOrigin) > 0) return `OpenMausBot — ${active.name}`;
-  return "OpenMausBot";
+  if (active && homeOrigin && active.origin === homeOrigin && otherPlaces(state, homeOrigin) > 0) return `${APP_NAME} — ${active.name}`;
+  return `${APP_NAME}`;
 }
 
 /** Switching is a main-process action; a cloud page must not navigate itself onto the local bridge. */
