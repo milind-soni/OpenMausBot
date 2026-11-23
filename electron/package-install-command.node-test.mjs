@@ -106,8 +106,10 @@ test("the rpm command picks a dependency-resolving package manager and passes on
 
   // Fake package managers on PATH announce themselves and print their arguments; a bare rpm would resolve
   // nothing, so the fallback branch must never run here.
+  const bins = [];
   const fakeBin = (present) => {
     const bin = mkdtempSync(join(tmpdir(), "omb-rpm-pm-"));
+    bins.push(bin);
     for (const name of present) {
       writeFileSync(
         join(bin, name),
@@ -136,10 +138,9 @@ test("the rpm command picks a dependency-resolving package manager and passes on
     out = run(fakeBin(["zypper", "rpm"]));
     assert.deepEqual(out.slice(-7), ["PM-zypper", "--non-interactive", "--no-refresh", "install", "--allow-unsigned-rpm", "-f", file]);
   } finally {
-    rmSync(join(tmpdir(), "omb-rpm-pm-"), { recursive: true, force: true });
+    for (const bin of bins) rmSync(bin, { recursive: true, force: true });
   }
 });
-
 
 test("the package marker decides the install path", () => {
   const marker = (declared) => (file) => (file.endsWith("package-type") ? declared : null);

@@ -26,7 +26,7 @@ const BUILDERS = {
   // apt-get, never `dpkg -i`: only apt-get resolves dependencies, and Ubuntu satisfies ours through virtual Provides.
   deb: (file) => `sudo apt-get install -y ${file}`,
   // dnf (then yum, zypper), never bare `rpm -Uvh`: rpm installs nothing when a dependency is missing and leaves
-  // the package out of the package manager's own database, so the next update conflicts. Same pick order as
+  // the package out of the package manager's own database, so the next update conflicts. The same commands as
   // electron-updater's RpmUpdater; the file rides as $0 so the quoted path survives the inner shell too.
   rpm: (file) =>
     `sudo sh -c 'if command -v dnf >/dev/null 2>&1; then exec dnf install --nogpgcheck -y "$0"; ` +
