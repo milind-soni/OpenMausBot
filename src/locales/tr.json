@@ -5522,6 +5522,7 @@
   "settings.bots.aboutYouLine": "{place} üzerindeki botların size nasıl seslendiği ve sizin hakkınızda ne bildiği.",
   "settings.bots.awakeLine": "Planınız aynı anda yalnızca birkaç botu uyanık tutar. Hangilerini seçin.",
   "settings.bots.awakeTitle": "Bazı botlar duraklatıldı",
+  "settings.remoteTeammates.title": "Diğer sunuculardaki ekip arkadaşları",
   "settings.bots.early": "Erken özellikler",
   "settings.bots.intro": "{place} üzerindeki botların sizin hakkınızda bildikleri ve hepsi için ayarlar.",
   "settings.bots.newBots": "Yeni botlar",
@@ -5957,5 +5958,9 @@
   "skillBurger.menu.aria": "{name} için daha fazla",
   "skillBurger.menu.rename": "Yeniden adlandır…",
   "skillBurger.card.everyChat": "Her sohbet",
-  "skillBurger.page.empty": "Botlarınızın yaptığı Skill Burger'lar burada görünür."
+  "skillBurger.page.empty": "Botlarınızın yaptığı Skill Burger'lar burada görünür.",
+  "chat.notice.savedToThread": "Bu konuşmaya kaydedildi",
+  "memoryPage.thisThread": "Bu konuşma",
+  "memoryPage.everywhere": "Her yerde",
+  "memoryPage.empty": "Burada henüz hatırlanan bir şey yok. Bilmesini istediğin her şeyi yaz."
 }

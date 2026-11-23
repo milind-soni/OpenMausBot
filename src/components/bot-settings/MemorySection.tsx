@@ -40,6 +40,7 @@ import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { inputCls } from "./field";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { useMinuteTick } from "@/lib/minute-tick";
+import { ThreadMemoryCard } from "../bot-panel/MemoryText";
 
 const buttonCls = "rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50";
 const quietButtonCls = "rounded-md px-2 py-1 text-[13px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50";
@@ -324,6 +325,8 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
           </div>
         )}
       </div>
+
+      <ThreadMemoryCard bot={bot} />
 
       {lendingReview && (
         <LendingReviewNotice

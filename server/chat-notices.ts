@@ -7,6 +7,7 @@ import { DRIVER_NOTICE } from "./drivers/driver-notices.ts";
 export const CHAT_NOTICE = {
   ...DRIVER_NOTICE,
   "chat.notice.restartInterrupted": "turn interrupted — OpenMausBot restarted",
+  "chat.notice.savedToThread": "Saved to this thread",
   "chat.notice.resumingAfterRestart": "Resuming after a restart",
   "chat.notice.cutOffByRestart": "{name} was cut off by a restart; resuming",
   "chat.notice.stalled": "no activity for {minutes} minutes — the turn was stopped",
