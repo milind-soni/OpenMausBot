@@ -1,5 +1,5 @@
 // Leftovers already on disk from conversations deleted before their cleanup existed: tool results
-// (tool-results/<thread>), event logs (events/ and native/<thread>.ndjson) and the dependency and build trees of
+// (tool-results/<thread>), event logs (events/ and native/<thread>.ndjson) and the installed dependencies of
 // conversation folders (task-workspaces/<bot>/<thread>) whose conversation is gone. Behind OMB_ORPHAN_SWEEP, off unless
 // set: "report" counts what it would remove and the bytes, and changes nothing; "remove" also removes it. A pass runs ten
 // minutes after start and then once a day, and its numbers go to the log and to orphan-sweep.json.
@@ -7,8 +7,9 @@
 // Conservative: anything not positively an orphan stays. A conversation is gone only when neither the bots' and rooms'
 // records nor the transcripts name it; if either cannot be read, or no conversation is registered at all, nothing is
 // done. An orphan goes only once it is a week old by its own time and the sweep has known it for a week, so files a
-// restore or a merge brings before their records stay. The person's files in an orphaned conversation folder stay (the
-// delete dialogs promise them; Files still shows them): only its rebuildable trees go, through the same checks as a
+// restore or a merge brings before their records stay. No pass runs while the server is frozen after a move or a backup
+// is being made or restored. The person's files in an orphaned conversation folder stay (the
+// delete dialogs promise them; Files still shows them): only its node_modules and venvs go, through the same checks as a
 // delete (conversation-folder-cleanup.ts). Event logs go file by file after the same check again; nothing follows a link.
 import { lstat, readdir, unlink } from "node:fs/promises";
 import { readFileSync } from "node:fs";
@@ -56,6 +57,8 @@ export interface OrphanSweepDeps {
   dataDir: string;
   mode(): OrphanSweepMode;
   records(): LiveRecords;
+  /** Why the workspace must not be changed now (frozen after a move, a backup being made or restored), else null. */
+  paused?(): string | null;
   /** Every conversation the transcripts hold; throws when they cannot be read. */
   storedThreadIds(): ReadonlySet<string>;
   cleanup: Pick<ConversationFolderCleanup, "orphans" | "whyKept" | "rebuildable" | "idle">;
@@ -95,6 +98,8 @@ export async function sweepOrphans(deps: OrphanSweepDeps): Promise<OrphanReport>
     else if (steps % YIELD_EVERY === 0) await new Promise<void>((done) => setImmediate(done));
   };
   if (mode === "off") return empty(now, mode, "off");
+  const paused = deps.paused?.() ?? null;
+  if (paused) return empty(now, mode, paused);
 
   const records = deps.records();
   const registered = liveThreadIds(records);
@@ -188,7 +193,9 @@ export async function sweepOrphans(deps: OrphanSweepDeps): Promise<OrphanReport>
     }
   }
 
-  if (mode === "remove") {
+  const pausedNow = deps.paused?.() ?? null;
+  if (mode === "remove" && pausedNow) report.skipped = pausedNow;
+  else if (mode === "remove") {
     for (const { path, id } of logs) {
       // Checked again just before: a conversation may have come back meanwhile (a merge from another computer).
       if (liveThreadIds(deps.records()).has(id)) continue;

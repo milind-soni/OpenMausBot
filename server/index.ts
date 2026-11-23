@@ -15148,7 +15148,7 @@ server.listen(PORT, listenHost(server), async () => {
   drainQueuedSends();
   drainQueuedChannelSends();
   void cloudComputerPower.armRunning();
-  startUpkeep({ bots: () => store.bots, retentionDays: () => threadEventLogRetentionDays(cfg), busy: threadBusy, openDirectHandoff: (threadId) => coordinator.activeDirect(threadId) }); startOrphanSweep({ dataDir: DATA_DIR, mode: () => orphanSweepMode(), records: () => store, storedThreadIds: () => new Set(threadHeads().keys()), cleanup: folderCleanup });
+  startUpkeep({ bots: () => store.bots, retentionDays: () => threadEventLogRetentionDays(cfg), busy: threadBusy, openDirectHandoff: (threadId) => coordinator.activeDirect(threadId) }); startOrphanSweep({ dataDir: DATA_DIR, mode: () => orphanSweepMode(), paused: () => (moveFreeze.frozen() ? "frozen after a move" : workspaceMaintenance.active ? "a backup is being made or restored" : null), records: () => store, storedThreadIds: () => new Set(threadHeads().keys()), cleanup: folderCleanup });
   if (enginesRead) {
     await enginesRead;
     if (companyShutdown) return;

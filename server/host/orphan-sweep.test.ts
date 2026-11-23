@@ -169,6 +169,34 @@ describe("failing closed", () => {
     expect(Object.values(present(empty.files)).every(Boolean)).toBe(true);
   });
 
+  it("does nothing while the workspace must not change (frozen after a move, a backup under way)", async () => {
+    let paused: string | null = null;
+    const f = fixture({ paused: () => paused });
+    f.setMode("remove");
+    await f.sweep();
+    f.later(8);
+    paused = "frozen after a move";
+    expect((await f.sweep()).skipped).toBe("frozen after a move");
+    paused = "a backup is being made or restored";
+    expect((await f.sweep()).skipped).toBe("a backup is being made or restored");
+    expect(Object.values(present(f.files)).every(Boolean)).toBe(true);
+    paused = null;
+    await f.sweep();
+    expect(existsSync(f.files.orphanDeps)).toBe(false);
+  });
+
+  it("treats an archived bot's conversations as live", async () => {
+    const f = fixture();
+    f.bots.push({ id: "archived", hidden: true, tasks: [{ threadId: "kept-thread" }] } as LiveRecords["bots"][number]);
+    const deps = put(join(f.dataDir, "task-workspaces", "archived", "kept-thread", "node_modules", "a.js"));
+    age(join(f.dataDir, "task-workspaces", "archived"), 30);
+    f.setMode("remove");
+    await f.sweep();
+    f.later(8);
+    await f.sweep();
+    expect(existsSync(deps)).toBe(true);
+  });
+
   it("never follows a link out of the data folder", async () => {
     const f = fixture();
     const victims = [put(join(f.outside, "results", "r.txt")), put(join(f.outside, "log.ndjson")), put(join(f.outside, "bot", "t9", "node_modules", "a.js"))];
