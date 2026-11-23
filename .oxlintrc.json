@@ -18,6 +18,7 @@
     "electron/vendor/**",
     "release/**",
     "third_party/**",
+    "packages/phone-protocol/src/open-bot-avatar/**",
     "electron/resources/**"
   ],
   "overrides": [
