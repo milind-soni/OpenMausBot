@@ -6,6 +6,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fromMarkdown } from "mdast-util-from-markdown";
 
 import { htmlFallbackText } from "../../shared/app.ts";
 import { parseWidgetInput, widgetToText } from "../../shared/widget.ts";
@@ -162,6 +163,45 @@ function checkReportFiles(out: string, result: { files: Array<{ link: string; en
 }
 
 describe("export", () => {
+  it.each(["```js\nconst answer = 42;", "~~~js\nconst answer = 42;"])("exports a follow-up after an unfinished code block: %s", async (text) => {
+    const previous = messages[LEAD]!;
+    messages[LEAD] = [
+      { id: "partial", role: "bot", kind: "text", text },
+      { id: "follow-up", role: "user", kind: "text", text: "Please use Python instead." },
+    ];
+    try {
+      const out = mkdtempSync(join(dir, "unfinished-code-"));
+      const { code } = await run(["export", "--thread", LEAD, "--out", out, "--json"]);
+      expect(code).toBe(0);
+      const nodes = fromMarkdown(readFileSync(join(out, "transcripts/conversation-lead-thr.md"), "utf8")).children;
+      expect(nodes.filter((node) => node.type === "code").map((node) => node.value)).toEqual(["const answer = 42;"]);
+      expect(nodes.some((node) => node.type === "paragraph" && node.children.some((child) => child.type === "text" && child.value === "Please use Python instead."))).toBe(true);
+    } finally {
+      messages[LEAD] = previous;
+    }
+  });
+
+  it("keeps later messages readable when the transcript limit cuts a complete code block", async () => {
+    const previous = messages[LEAD]!;
+    const text = `\`\`\`text\n${"a line of output\n".repeat(4_000)}\`\`\``;
+    messages[LEAD] = [
+      { id: "large-reply", role: "bot", kind: "text", text },
+      { id: "follow-up", role: "user", kind: "text", text: "Summarize this output." },
+    ];
+    try {
+      const out = mkdtempSync(join(dir, "truncated-code-"));
+      const { code } = await run(["export", "--thread", LEAD, "--out", out, "--json"]);
+      expect(code).toBe(0);
+      const saved = JSON.parse(readFileSync(join(out, "transcripts/conversation-lead-thr.json"), "utf8")) as { messages: Array<{ text: string }> };
+      expect(saved.messages[0]!.text).toBe(`${text.slice(0, 50_000)}…`);
+      const nodes = fromMarkdown(readFileSync(join(out, "transcripts/conversation-lead-thr.md"), "utf8")).children;
+      expect(nodes.find((node) => node.type === "code")?.value).toBe(fromMarkdown(saved.messages[0]!.text).children.find((node) => node.type === "code")?.value);
+      expect(nodes.at(-1)).toMatchObject({ type: "paragraph", children: [{ type: "text", value: "Summarize this output." }] });
+    } finally {
+      messages[LEAD] = previous;
+    }
+  });
+
   it("keeps same-named linked report folders and their relative assets separate", async () => {
     const out = join(dir, "report-folders");
     const { code, result } = await exportReports(out);
