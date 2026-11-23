@@ -113,7 +113,7 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
       const win = new BrowserWindow({
         show: false, width: 720, height: 650,
         webPreferences: {
-          preload: join(root, "electron/preload.cjs"), contextIsolation: true,
+          preload: join(root, "electron/preload.cjs"), contextIsolation: true, backgroundThrottling: false,
           sandbox: true, nodeIntegration: false,
           additionalArguments: [`--omb-local-origin=${local ? new URL(url).origin : "https://remote-fixture.invalid"}`],
         },
@@ -124,12 +124,22 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
     };
     const win = await open(true);
     const evaluate = (code) => win.webContents.executeJavaScript(code);
+    win.showInactive();
+    const screenshot = async (name) => {
+      await evaluate(`(async () => {
+        const dialog = document.querySelector('[data-look="settings"]');
+        const animations = dialog?.getAnimations().filter(animation => animation.playState === 'running') ?? [];
+        await Promise.allSettled(animations.map(animation => animation.finished));
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      })()`);
+      writeFileSync(join(output, name), (await win.webContents.capturePage()).toPNG());
+    };
     const until = async (check, description) => {
       for (let attempt = 0; attempt < 300; attempt++) {
         if (await check()) return;
         await new Promise((resolve) => setTimeout(resolve, 30));
       }
-      writeFileSync(join(output, "failure.png"), (await win.webContents.capturePage()).toPNG());
+      await screenshot("failure.png");
       console.error(await evaluate("document.body.innerText"));
       throw new Error(`Timed out: ${description}`);
     };
@@ -163,7 +173,7 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
     await until(() => calls.length === 3, "server retry received");
     pending.resolve();
     await until(() => evaluate(`!${connect}.disabled && !document.querySelector('[role=alert]')`), "successful response reset");
-    writeFileSync(join(output, "server-form.png"), (await win.webContents.capturePage()).toPNG());
+    await screenshot("server-form.png");
 
     await selectMode("companion");
     await until(() => evaluate(`Boolean(${input("Companion address")})`), "companion form rendered");
@@ -178,7 +188,7 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
     await selectMode("server");
     await until(() => evaluate(`Boolean(${connect})`), "server mode restored");
     assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth"), true, "narrow layout overflow");
-    writeFileSync(join(output, "server-form-narrow.png"), (await win.webContents.capturePage()).toPNG());
+    await screenshot("server-form-narrow.png");
 
     win.setSize(780, 800);
     await win.loadURL(`${url}?workspaces=1`);
@@ -217,14 +227,14 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
     await until(() => evaluate("document.body.textContent.includes('Research team')"), "saved named workspace rendered");
     assert.deepEqual(saved.environments.map(({ origin }) => origin), ["https://bots.fixture.example", "https://other.fixture.example"]);
     assert.equal(JSON.stringify(saved).includes("7KQ2"), false, "pairing secret not saved with workspace");
-    writeFileSync(join(output, "connected-workspaces.png"), (await win.webContents.capturePage()).toPNG());
+    await screenshot("connected-workspaces.png");
 
     assert.equal(await evaluate("document.querySelector('[aria-label^=\"Computer access for \"]') === null"), true, "feature-off workspace offers no computer access");
     await win.loadURL(`${url}?workspaces=1&share-computer=cloud`);
     await until(() => evaluate("document.body.textContent.includes('My cloud team')"), "feature-off saved workspace rendered");
     assert.equal(await evaluate("document.body.textContent.includes('Computer access · My cloud team')"), false, "stale sharing deep link cannot bypass disabled feature");
     assert.equal(await evaluate(`${button("Choose folder")} === undefined`), true);
-    writeFileSync(join(output, "computer-sharing-disabled.png"), (await win.webContents.capturePage()).toPNG());
+    await screenshot("computer-sharing-disabled.png");
     // Explicitly opt this disposable server in for the unfinished feature's
     // existing enabled-path regression coverage. Shipped defaults stay off.
     const enabled = await session.defaultSession.fetch(`${serverUrl}/api/config`, { method: "PATCH", headers: { "content-type": "application/json", origin: serverUrl }, body: JSON.stringify({ features: { sharedComputers: true } }) });
@@ -245,7 +255,7 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
     await until(() => evaluate(`!${button("Share selected access")}.disabled`), "cancel sharing reset");
     await evaluate(`${button("Share selected access")}.click()`);
     await until(() => evaluate("document.body.textContent.includes('Sharing while this desktop is open')"), "saved sharing status rendered");
-    writeFileSync(join(output, "computer-access.png"), (await win.webContents.capturePage()).toPNG());
+    await screenshot("computer-access.png");
     await evaluate(`${button("Stop sharing")}.click()`);
     await until(() => evaluate("document.body.textContent.includes('Not shared')"), "stop sharing applies immediately");
     await evaluate("document.querySelector('[aria-label=\"Close computer access\"]').click()");
@@ -267,7 +277,7 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
     win.setSize(390, 800);
     await until(() => evaluate("innerWidth === 390"), "narrow workspace viewport");
     assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth"), true, "workspace narrow layout overflow");
-    writeFileSync(join(output, "connected-workspaces-narrow.png"), (await win.webContents.capturePage()).toPNG());
+    await screenshot("connected-workspaces-narrow.png");
 
     // Real app shell, Settings navigation and onboarding against a disposable
     // fake-engine server. Opening the page must not require local AI setup.
@@ -280,7 +290,8 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
     assert.equal(await evaluate("location.search.includes('share-computer')"), false);
     await evaluate("document.querySelector('[aria-label=\"Close computer access\"]').click()");
     assert.equal(await evaluate("Boolean(document.querySelector('[data-server-connect]'))"), true);
-    writeFileSync(join(output, "workspace-settings-in-app.png"), (await win.webContents.capturePage()).toPNG());
+    await evaluate("document.querySelector('[data-server-connect]').scrollIntoView({ block: 'center', behavior: 'instant' })");
+    await screenshot("workspace-settings-in-app.png");
     await evaluate("window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
     await until(() => evaluate("!document.body.textContent.includes('Connect to a server')"), "Settings closes normally");
     win.webContents.send("workspaces:open-settings");

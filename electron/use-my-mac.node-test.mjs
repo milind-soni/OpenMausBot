@@ -288,12 +288,13 @@ test("lends Chrome only in a grant that says so, and tells only a Cloud that tak
   await old.sharing.saveCloud(env, { chrome: true, folders: [] });
   await until(() => old.home.connects.length === 1, "the connect");
   assert.equal("chrome" in old.home.connects[0], false, "a Cloud that does not know Chrome is not sent it");
-  const { home, sockets, sharing } = await fixture(t, { chrome: true });
+  const { dir, home, sockets, sharing } = await fixture(t, { chrome: true });
   await sharing.saveCloud(env, { chrome: true, folders: [] });
   await until(() => sockets.open().length === 1 && sharing.cloudState(env).chromeLink === "on", "the device link to open");
   assert.equal(home.connects[0].chrome, true);
   assert.equal(sharing.cloudState(env).chrome, true);
-  await sharing.saveCloud(env, { folders: [{ id: randomUUID(), path: tmpdir(), write: false }], screen: false });
+  const folder = await mkdtemp(path.join(dir, "shared-"));
+  await sharing.saveCloud(env, { folders: [{ id: randomUUID(), path: folder, write: false }], screen: false });
   await until(() => home.connects.length === 2, "the second connect");
   assert.equal(home.connects[1].chrome, false);
   assert.equal(sharing.cloudState(env).chrome, false);
