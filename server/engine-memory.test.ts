@@ -706,6 +706,17 @@ describe("bots' browsers", () => {
     expect(h.memory.stopForBrowser("elsewhere")).toBe(false);
   });
 
+  it("on an engine that carries two conversations, says the browser was closed only to the one whose browser it was", async () => {
+    const h = host();
+    browsers(h, []);
+    h.memory.turnStarted("a"); const shared = h.spawn("a");
+    h.memory.turnStarted("b"); h.memory.attach(shared as unknown as ChildProcess, "b");
+    expect(h.memory.stopForBrowser("a")).toBe(true);
+    await settle();
+    expect(h.memory.stopText("a")).toBe(memoryStopText(true));
+    expect(h.memory.stopText("b")).toBe(memoryStopText(false));
+  });
+
   it("calls memory short only under relief's floor, not counting swap", () => {
     const h = host();
     h.state.swapFree = 4 * GB;
@@ -713,6 +724,9 @@ describe("bots' browsers", () => {
     expect(h.memory.memoryShort()).toBe(false);
     h.state.available = 400 * MB;
     expect(h.memory.memoryShort()).toBe(true);
+    // Twice the floor: when the browser ceiling looks again sooner.
+    h.state.available = 800 * MB;
+    expect([h.memory.memoryShort(), h.memory.memoryShort(2)]).toEqual([false, true]);
   });
 });
 
