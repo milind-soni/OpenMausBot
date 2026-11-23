@@ -424,4 +424,69 @@ describe("distinct table names within one import", () => {
     expect(view?.rowCount).toBeNull();
     expect(view?.error).toMatchObject({ code: "sql_error" });
   });
+
+  it("does not replace a healthy sales_report_2 when two sqlite tables share its stem", async () => {
+    const ctx = await context("sqlite-shared-stem-keeps-suffix");
+    await ctx.database.run("CREATE TABLE sales_report_2 AS SELECT 'kept' AS origin, 99 AS value", { connection });
+    const file = join(root, "sales-shared-stem-keeps.sqlite");
+    const source = new DatabaseSync(file);
+    source.exec('CREATE TABLE "sales report" (origin TEXT, value INTEGER)');
+    source.exec(`INSERT INTO "sales report" VALUES ('spaced', 1)`);
+    source.exec('CREATE TABLE "sales-report" (origin TEXT, value INTEGER)');
+    source.exec(`INSERT INTO "sales-report" VALUES ('dashed', 2)`);
+    source.close();
+    const loaded = await runDataTool(ctx, "data_load", { source: file });
+    expect(loaded.isError, loaded.content[0]?.text).toBeUndefined();
+    expect(loaded.structuredContent!.tables).toMatchObject([{ name: "sales_report" }, { name: "sales_report_3" }]);
+    expect((await ctx.database.run("SELECT origin, value FROM sales_report ORDER BY origin", { connection })).rows).toEqual([["spaced", "1"]]);
+    expect((await ctx.database.run("SELECT origin, value FROM sales_report_3 ORDER BY origin", { connection })).rows).toEqual([["dashed", "2"]]);
+    expect((await ctx.database.run("SELECT origin, value FROM sales_report_2", { connection })).rows).toEqual([["kept", 99]]);
+    expect(ctx.sheet.sheet().sources.find((entry) => entry.name === "sales_report_2")).toBeUndefined();
+  });
+
+  it.each([
+    ["quoted uppercase", `CREATE OR REPLACE TABLE "SALES_REPORT_2" AS SELECT 'quoted' AS origin, 7 AS value`],
+    ["three-part qualified", "CREATE OR REPLACE TABLE data.main.sales_report_2 AS SELECT 'qualified' AS origin, 7 AS value"],
+  ])("clears the import record when data_sql replaces it with a %s name", async (label, sql) => {
+    const ctx = await unboundView(`forget-${label.replaceAll(" ", "-")}`);
+    const file = join(root, `forget-${label.replaceAll(" ", "-")}.csv`);
+    writeFileSync(file, "id,name\n1,Alice\n");
+    const loaded = await runDataTool(ctx, "data_load", { source: file, name: "sales_report" });
+    expect(loaded.isError, loaded.content[0]?.text).toBeUndefined();
+    expect(loaded.structuredContent!.tables).toMatchObject([{ name: "sales_report_2" }]);
+    const replaced = await runDataTool(ctx, "data_sql", { sql });
+    expect(replaced.isError, replaced.content[0]?.text).toBeUndefined();
+    expect(ctx.sheet.sheet().sources.find((entry) => entry.name.toLowerCase() === "sales_report_2")).toBeUndefined();
+  });
+
+  it("does not replace a displaced suffix from the sheet snapshot taken before listTables", async () => {
+    const ctx = await unboundView("stale-ownership");
+    const file = join(root, "stale-ownership.csv");
+    writeFileSync(file, "id,name\n1,Alice\n");
+    const loaded = await runDataTool(ctx, "data_load", { source: file, name: "sales_report" });
+    expect(loaded.isError, loaded.content[0]?.text).toBeUndefined();
+    expect(loaded.structuredContent!.tables).toMatchObject([{ name: "sales_report_2" }]);
+
+    const listTables = ctx.database.listTables.bind(ctx.database);
+    let interleaved = false;
+    ctx.database.listTables = async () => {
+      const tables = await listTables();
+      if (!interleaved) {
+        interleaved = true;
+        const replaced = await runDataTool(ctx, "data_sql", { sql: "CREATE OR REPLACE TABLE sales_report_2 AS SELECT 'sql' AS origin, 7 AS value" });
+        expect(replaced.isError, replaced.content[0]?.text).toBeUndefined();
+        expect(ctx.sheet.sheet().sources.find((entry) => entry.name === "sales_report_2")).toBeUndefined();
+      }
+      return tables;
+    };
+
+    writeFileSync(file, "id,name\n2,Bob\n");
+    const reloaded = await runDataTool(ctx, "data_load", { source: file, name: "sales_report" });
+    expect(reloaded.isError, reloaded.content[0]?.text).toBeUndefined();
+    expect(reloaded.structuredContent!.tables).toMatchObject([{ name: "sales_report_3" }]);
+    expect((await ctx.database.run("SELECT * FROM sales_report_2", { connection })).rows).toEqual([["sql", 7]]);
+    expect((await ctx.database.run("SELECT * FROM sales_report_3", { connection })).rows).toEqual([["2", "Bob"]]);
+    expect(ctx.sheet.sheet().sources.find((entry) => entry.name === "sales_report_2")).toBeUndefined();
+    expect(ctx.sheet.sheet().sources.find((entry) => entry.name === "sales_report_3")).toMatchObject({ requested: "sales_report" });
+  });
 });

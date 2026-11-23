@@ -463,25 +463,17 @@ function catalogNameTaken(error: unknown): boolean {
   return CATALOG_NAME_TAKEN.test(error instanceof Error ? error.message : String(error));
 }
 
-function replacedMainTable(sql: string, target: string): { name: string; quoted: boolean } | undefined {
+function forgetReplacedImport(ctx: DataContext, sql: string, target: string): void {
   const { tokens } = singleStatement(sql);
   const head = tokens.slice(tokens.findIndex((token) => token.text === "CREATE"));
-  let modifier = 1;
-  if (head[0]?.text !== "CREATE" || head[modifier]?.text !== "OR" || head[modifier + 1]?.text !== "REPLACE") return undefined;
-  modifier += 2;
-  if (head[modifier]?.text === "TEMP" || head[modifier]?.text === "TEMPORARY") return undefined;
+  if (head[0]?.text !== "CREATE" || head[1]?.text !== "OR" || head[2]?.text !== "REPLACE") return;
+  if (head[3]?.text === "TEMP" || head[3]?.text === "TEMPORARY") return;
   const parts = tableIdentifierParts(target);
-  if (!parts || parts.length > 2 || (parts.length === 2 && parts[0]!.toLowerCase() !== "main")) return undefined;
-  const name = parts[parts.length - 1]!;
-  const dot = target.lastIndexOf(".");
-  return { name, quoted: (dot === -1 ? target : target.slice(dot + 1)).trim().startsWith('"') };
-}
-
-function forgetReplacedImport(ctx: DataContext, sql: string, target: string): void {
-  const replaced = replacedMainTable(sql, target);
-  if (!replaced) return;
-  const fold = replaced.name.toLowerCase();
-  const names = ctx.sheet.sheet().sources.filter((source) => replaced.quoted ? source.name === replaced.name : source.name.toLowerCase() === fold).map((source) => source.name);
+  if (!parts || parts.length > 3) return;
+  const schema = parts.length === 1 ? "main" : parts[parts.length - 2]!;
+  if (schema.toLowerCase() !== "main") return;
+  const fold = parts[parts.length - 1]!.toLowerCase();
+  const names = ctx.sheet.sheet().sources.filter((source) => source.name.toLowerCase() === fold).map((source) => source.name);
   for (const name of names) ctx.sheet.removeSource(name);
 }
 
@@ -514,13 +506,15 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
   const assigned = (name: string) => tables.some((table) => fold(table.name) === fold(name));
   const taken = (name: string) => assigned(name) || blocked(name) || existing.has(fold(name));
   const attachedTable = (options?: Record<string, string | number | boolean>) => (typeof options?.table === "string" ? options.table : undefined);
+  const sameAllocation = (entry: DataSource, plan: LoadPlan, requested: string, sourceTable?: string) =>
+    entry.kind === plan.kind && entry.source === plan.source && attachedTable(entry.options) === sourceTable && entry.requested === requested;
   const priorAllocation = (plan: LoadPlan, requested: string, sourceTable?: string): string | undefined => {
     let found: string | undefined;
-    for (const entry of priorSources) {
-      if (entry.kind === plan.kind && entry.source === plan.source && attachedTable(entry.options) === sourceTable && entry.requested === requested) found = entry.name;
-    }
+    for (const entry of priorSources) if (sameAllocation(entry, plan, requested, sourceTable)) found = entry.name;
     return found;
   };
+  const stillOwned = (name: string, plan: LoadPlan, requested: string, sourceTable?: string) =>
+    ctx.sheet.sheet().sources.some((entry) => entry.name === name && sameAllocation(entry, plan, requested, sourceTable));
   const warnings: string[] = [];
   const create = async (name: string, relation: string, plan: LoadPlan, options: Record<string, string | number | boolean>, requested: string, orReplace: boolean) => {
     const sql = (reader: string) => `CREATE ${orReplace ? "OR REPLACE " : ""}TABLE ${quoteIdent(name)} AS SELECT * FROM ${reader}`;
@@ -547,11 +541,12 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
     const requested = nameInEmptyCatalog(base);
     const prior = priorAllocation(plan, requested, sourceTable);
     if (replace && prior && !assigned(prior) && !blocked(prior)) {
-      existing.add(fold(prior));
-      await create(prior, relation, plan, options, requested, true);
-      return;
-    }
-    if (!assigned(requested) && !blocked(requested) && (replace || !existing.has(fold(requested)))) {
+      if (stillOwned(prior, plan, requested, sourceTable)) {
+        existing.add(fold(prior));
+        await create(prior, relation, plan, options, requested, true);
+        return;
+      }
+    } else if (requested === stem && !assigned(requested) && !blocked(requested) && (replace || !existing.has(fold(requested)))) {
       existing.add(fold(requested));
       try {
         await create(requested, relation, plan, options, requested, replace);
