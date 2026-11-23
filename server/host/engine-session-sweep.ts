@@ -14,7 +14,7 @@
 // the next start after an interrupted one; an entry on another volume stays.
 //
 // Claude Code's own age sweep (cleanupPeriodDays) is made a deliberate 30 days in each of these Claude folders'
-// settings.json, only where the person has not set it. It removes by age alone, live sessions too: a conversation idle
+// existing settings.json, only where the person has not set it. It removes by age alone, live sessions too: a conversation idle
 // longer goes on in a new session started from its chat, with a notice that earlier tool results did not carry over
 // (drivers/claude.ts classifyResumeFailure, resume-recovery.ts). 30 is Claude Code's default, so nothing changes today;
 // it stops a change of that default from changing what a Cloud keeps.
@@ -32,8 +32,9 @@ export type EngineSessionSweepMode = "off" | "report" | "on";
 const DAY_MS = 24 * 60 * 60_000;
 /** A session file, or a CLI log, untouched this long. Far past a room's session idle and a warm fork moving a cursor. */
 export const IDLE_MS = 7 * DAY_MS;
-/** Soon after a start: a home that sleeps by stopping may be up only minutes. */
-export const FIRST_PASS_MS = 3 * 60_000;
+/** Soon after a start (a home that sleeps by stopping may be up only minutes), after the logs' sweep (3 minutes) and
+ * the tool results' (5), so the three do not start at once. */
+export const FIRST_PASS_MS = 7 * 60_000;
 /** A pass that stopped for a turn, a move or a backup is tried again this soon. */
 export const RETRY_MS = 30 * 60_000;
 /** When the last whole pass ended, under the data folder's cache/ (left out of backups): a restart, which reads the
@@ -242,23 +243,36 @@ export async function emptyTrash(dataDir: string): Promise<void> {
   for (const name of await entries(trash)) await rm(join(trash, name), { recursive: true, force: true }).catch(() => {});
 }
 
-/** Claude Code's cleanupPeriodDays in a Claude folder's settings.json: set to CLAUDE_TRANSCRIPT_DAYS where absent. */
-export async function pinClaudeRetention(root: string, write: boolean): Promise<"set" | "kept" | "skipped"> {
+/**
+ * Claude Code's cleanupPeriodDays in a Claude folder's existing settings.json: added as CLAUDE_TRANSCRIPT_DAYS where the
+ * file does not set it, keeping the file's mode, indentation and line endings. A folder without the file is left
+ * without one ("absent"): Claude Code's default there is the same 30 days, so creating it would change nothing.
+ */
+export async function pinClaudeRetention(root: string, write: boolean, mayWrite: () => boolean = () => true): Promise<"set" | "kept" | "skipped" | "absent"> {
   const file = join(root, "settings.json");
   const stats = await stat(file);
-  let settings: Record<string, unknown> = {};
-  if (stats) {
-    if (!stats.isFile() || stats.size > 1024 * 1024) return "skipped";
-    try {
-      const parsed: unknown = JSON.parse(await readFile(file, "utf8"));
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "skipped";
-      settings = parsed as Record<string, unknown>;
-    } catch {
-      return "skipped";
-    }
-    if (Object.hasOwn(settings, "cleanupPeriodDays")) return "kept";
+  if (!stats) return "absent";
+  if (!stats.isFile() || stats.size > 1024 * 1024) return "skipped";
+  let text: string;
+  let settings: Record<string, unknown>;
+  try {
+    text = await readFile(file, "utf8");
+    const parsed: unknown = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "skipped";
+    settings = parsed as Record<string, unknown>;
+  } catch {
+    return "skipped";
   }
-  if (write) writeFileAtomic(file, `${JSON.stringify({ ...settings, cleanupPeriodDays: CLAUDE_TRANSCRIPT_DAYS }, null, 2)}\n`, { mode: 0o600 });
+  if (Object.hasOwn(settings, "cleanupPeriodDays")) return "kept";
+  if (!write) return "set";
+  // The file's own layout: the indent of its first key (none when it is one line), its line ending, its last newline.
+  const multiline = /\n\s*\S/.test(text.trim());
+  const indent = multiline ? (/^\{\r?\n([ \t]+)"/.exec(text)?.[1] ?? 2) : undefined;
+  let next = JSON.stringify({ ...settings, cleanupPeriodDays: CLAUDE_TRANSCRIPT_DAYS }, null, indent);
+  if (text.includes("\r\n")) next = next.replace(/\n/g, "\r\n");
+  if (/\r?\n$/.test(text)) next += text.endsWith("\r\n") ? "\r\n" : "\n";
+  if (!mayWrite()) return "skipped";
+  writeFileAtomic(file, next, { mode: stats.mode & 0o777 });
   return "set";
 }
 
@@ -292,7 +306,9 @@ export async function sweepEngineSessions(deps: EngineSessionSweepDeps): Promise
   const dead = new Set([...deps.logged].filter((id) => !live.has(id)));
   for (const root of deps.folders.claude) {
     if (!(await reachable(dataDir, root))) continue;
-    const pinned = await pinClaudeRetention(root, write).catch(() => "skipped" as const);
+    if (write && !(await quietMoment(deps, deps.turnWaitMs ?? TURN_WAIT_MS))) return { ...result, stopped: true };
+    // The write itself only in a quiet moment, checked with no await before it.
+    const pinned = await pinClaudeRetention(root, write, () => !deps.paused?.() && !deps.turnsRunning?.()).catch(() => "skipped" as const);
     if (pinned === "set") result.retentionSet++;
     else if (pinned === "kept") result.retentionKept++;
   }
@@ -476,6 +492,34 @@ export interface StartEngineSessionSweepDeps {
   log?(line: string): void;
 }
 
+export interface EngineSessionPassDeps {
+  dataDir: string;
+  mode: Exclude<EngineSessionSweepMode, "off">;
+  folders(): EngineSessionFolders;
+  cacheRoots(): readonly string[];
+  live(): ReadonlySet<string>;
+  logged(): Promise<Set<string>>;
+  paused?(): boolean;
+  turnsRunning?(): boolean;
+  turnWaitMs?: number;
+  now?(): number;
+}
+
+/**
+ * One pass, or null when it did nothing: during a move freeze or a backup, or while turns kept running. Nothing is
+ * read or written before that check; then, in `on` mode only, an interrupted pass's trash is emptied (it is already
+ * out of every engine's reach) and the sweep runs.
+ */
+export async function engineSessionPass(deps: EngineSessionPassDeps): Promise<EngineSessionSweepResult | null> {
+  if (deps.paused?.()) return null;
+  if (!(await quietMoment(deps, deps.turnWaitMs ?? TURN_WAIT_MS))) return null;
+  if (deps.mode === "on") await emptyTrash(deps.dataDir);
+  return sweepEngineSessions({
+    dataDir: deps.dataDir, mode: deps.mode, folders: deps.folders(), cacheRoots: deps.cacheRoots(), live: deps.live,
+    logged: await deps.logged(), paused: deps.paused, turnsRunning: deps.turnsRunning, turnWaitMs: deps.turnWaitMs, now: deps.now,
+  });
+}
+
 /** Cloud homes only, and only with OMB_ENGINE_SESSION_SWEEP set: a pass when due, at the earliest FIRST_PASS_MS after start. */
 export function startEngineSessionSweep(deps: StartEngineSessionSweepDeps): boolean {
   const mode = engineSessionSweepMode(deps.env);
@@ -484,12 +528,11 @@ export function startEngineSessionSweep(deps: StartEngineSessionSweepDeps): bool
   const logged = createLoggedSessions(join(resolve(deps.dataDir), "events"));
   const pass = async (): Promise<boolean> => {
     try {
-      // An interrupted pass's trash first: it is already out of every engine's reach.
-      await emptyTrash(deps.dataDir);
-      const result = await sweepEngineSessions({
-        dataDir: deps.dataDir, mode, folders: deps.folders(), cacheRoots: claudeCliCacheRoots(deps.environments()),
-        live: () => liveSessions(deps.bots()), logged: await logged(), paused: deps.paused, turnsRunning: deps.turnsRunning,
+      const result = await engineSessionPass({
+        dataDir: deps.dataDir, mode, folders: deps.folders, cacheRoots: () => claudeCliCacheRoots(deps.environments()),
+        live: () => liveSessions(deps.bots()), logged, paused: deps.paused, turnsRunning: deps.turnsRunning,
       });
+      if (!result) return false;
       if (result.refused || result.sessions || result.cacheFiles || result.retentionSet || result.stopped) log(sweepLine(result));
       return !result.stopped;
     } catch (error) {
@@ -507,11 +550,6 @@ export function startEngineSessionSweep(deps: StartEngineSessionSweepDeps): bool
  * back) counts as none, and a home that slept past its time runs one pass on waking, never one per missed interval.
  */
 export function schedulePasses(stamp: string, every: number, pass: () => Promise<boolean>, now: () => number = Date.now): void {
-  let last: number | null = null;
-  try {
-    const at = (JSON.parse(readFileSync(stamp, "utf8")) as { at?: unknown }).at;
-    if (typeof at === "number" && Number.isFinite(at) && at <= now()) last = at;
-  } catch {}
   const run = async () => {
     const whole = await pass();
     if (whole) {
@@ -522,5 +560,16 @@ export function schedulePasses(stamp: string, every: number, pass: () => Promise
     }
     setTimeout(() => void run(), whole ? every : RETRY_MS).unref();
   };
-  setTimeout(() => void run(), last === null ? FIRST_PASS_MS : Math.max(FIRST_PASS_MS, last + every - now())).unref();
+  // The stamp is read in the first timer, never while the server is still starting.
+  const first = () => {
+    let last: number | null = null;
+    try {
+      const at = (JSON.parse(readFileSync(stamp, "utf8")) as { at?: unknown }).at;
+      if (typeof at === "number" && Number.isFinite(at) && at <= now()) last = at;
+    } catch {}
+    const wait = last === null ? 0 : last + every - now();
+    if (wait > 0) setTimeout(() => void run(), wait).unref();
+    else void run();
+  };
+  setTimeout(first, FIRST_PASS_MS).unref();
 }
