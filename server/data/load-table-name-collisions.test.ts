@@ -489,4 +489,44 @@ describe("distinct table names within one import", () => {
     expect(ctx.sheet.sheet().sources.find((entry) => entry.name === "sales_report_2")).toBeUndefined();
     expect(ctx.sheet.sheet().sources.find((entry) => entry.name === "sales_report_3")).toMatchObject({ requested: "sales_report" });
   });
+
+  it.each([
+    ["the database alias", "CREATE OR REPLACE TABLE data.sales_report_2 AS SELECT 'sql' AS origin, 7 AS value"],
+    ["an uppercase database alias", "CREATE OR REPLACE TABLE DATA.sales_report_2 AS SELECT 'sql' AS origin, 7 AS value"],
+    ["a quoted database alias", `CREATE OR REPLACE TABLE "DATA"."sales_report_2" AS SELECT 'sql' AS origin, 7 AS value`],
+  ])("clears the import record when data_sql replaces the displaced suffix through %s", async (label, sql) => {
+    const slug = label.replaceAll(" ", "-");
+    const ctx = await unboundView(`catalog-${slug}`);
+    const file = join(root, `catalog-${slug}.csv`);
+    writeFileSync(file, "id,name\n1,Alice\n");
+    const loaded = await runDataTool(ctx, "data_load", { source: file, name: "sales_report" });
+    expect(loaded.isError, loaded.content[0]?.text).toBeUndefined();
+    expect(loaded.structuredContent!.tables).toMatchObject([{ name: "sales_report_2" }]);
+    await runDataTool(ctx, "data_sql", { sql });
+    expect((await ctx.database.run("SELECT * FROM sales_report_2", { connection })).rows).toEqual([["sql", 7]]);
+    expect(ctx.sheet.sheet().sources.find((source) => source.name.toLowerCase() === "sales_report_2")).toBeUndefined();
+
+    writeFileSync(file, "id,name\n2,Bob\n");
+    const reloaded = await runDataTool(ctx, "data_load", { source: file, name: "sales_report" });
+    expect(reloaded.isError, reloaded.content[0]?.text).toBeUndefined();
+    expect(reloaded.structuredContent!.tables).toMatchObject([{ name: "sales_report_3" }]);
+    expect((await ctx.database.run("SELECT * FROM sales_report_2", { connection })).rows).toEqual([["sql", 7]]);
+    expect((await ctx.database.run("SELECT * FROM sales_report_3", { connection })).rows).toEqual([["2", "Bob"]]);
+  });
+
+  it("leaves the import record when data_sql replaces a table in another attached database", async () => {
+    const ctx = await unboundView("other-catalog");
+    const file = join(root, "other-catalog.csv");
+    writeFileSync(file, "id,name\n1,Alice\n");
+    const loaded = await runDataTool(ctx, "data_load", { source: file, name: "sales_report" });
+    expect(loaded.isError, loaded.content[0]?.text).toBeUndefined();
+    expect(loaded.structuredContent!.tables).toMatchObject([{ name: "sales_report_2" }]);
+    const other = join(root, "analytics.duckdb");
+    await ctx.database.run(`ATTACH '${other.replaceAll("'", "''")}' AS analytics`, { connection });
+    await runDataTool(ctx, "data_sql", { sql: "CREATE OR REPLACE TABLE analytics.sales_report_2 AS SELECT 'other' AS origin, 8 AS value" });
+    expect(ctx.sheet.sheet().sources.find((source) => source.name === "sales_report_2")).toMatchObject({ requested: "sales_report" });
+    expect((await ctx.database.run("SELECT * FROM sales_report_2", { connection })).rows).toEqual([["1", "Alice"]]);
+    expect((await ctx.database.run("SELECT * FROM analytics.main.sales_report_2", { connection })).rows).toEqual([["other", 8]]);
+    await ctx.database.run("DETACH analytics", { connection });
+  });
 });

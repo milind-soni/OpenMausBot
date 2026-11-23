@@ -463,18 +463,24 @@ function catalogNameTaken(error: unknown): boolean {
   return CATALOG_NAME_TAKEN.test(error instanceof Error ? error.message : String(error));
 }
 
-function forgetReplacedImport(ctx: DataContext, sql: string, target: string): void {
+async function forgetReplacedImport(ctx: DataContext, sql: string, target: string): Promise<void> {
   const { tokens } = singleStatement(sql);
   const head = tokens.slice(tokens.findIndex((token) => token.text === "CREATE"));
   if (head[0]?.text !== "CREATE" || head[1]?.text !== "OR" || head[2]?.text !== "REPLACE") return;
   if (head[3]?.text === "TEMP" || head[3]?.text === "TEMPORARY") return;
   const parts = tableIdentifierParts(target);
   if (!parts || parts.length > 3) return;
-  const schema = parts.length === 1 ? "main" : parts[parts.length - 2]!;
-  if (schema.toLowerCase() !== "main") return;
+  const schema = (parts.length === 1 ? "main" : parts[parts.length - 2]!).toLowerCase();
+  // DuckDB 1.5 reads catalog.table as main.table when the qualifier is this file's database name.
+  if (schema !== "main" && !(parts.length === 2 && schema === await currentCatalog(ctx))) return;
   const fold = parts[parts.length - 1]!.toLowerCase();
   const names = ctx.sheet.sheet().sources.filter((source) => source.name.toLowerCase() === fold).map((source) => source.name);
   for (const name of names) ctx.sheet.removeSource(name);
+}
+
+async function currentCatalog(ctx: DataContext): Promise<string> {
+  const listed = await ctx.database.run("SELECT current_database()", runOptions(ctx));
+  return String(listed.rows[0]?.[0] ?? "").toLowerCase();
 }
 
 export interface LoadedTable { name: string; rowCount: number; columns: DataColumn[]; source: string }
@@ -675,7 +681,7 @@ export async function runSql(ctx: DataContext, input: SqlInput): Promise<SqlOutp
   const kind = gateSql(input.sql, { allowCreate: true });
   if (kind.kind === "create") {
     await ctx.database.run(input.sql, runOptions(ctx));
-    forgetReplacedImport(ctx, input.sql, kind.target);
+    await forgetReplacedImport(ctx, input.sql, kind.target);
     const described = await ctx.database.describe(kind.target, runOptions(ctx));
     const bounded = boundColumns(described.columns, DATA_LIMITS.describeBytesMax);
     return { table: kind.target, columns: bounded.columns, rowCount: described.rowCount, rows: [], truncated: bounded.truncated, elapsedMs: Date.now() - started };
