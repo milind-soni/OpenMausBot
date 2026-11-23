@@ -63,3 +63,13 @@ export async function restoreBurger(name: string, workflow: unknown): Promise<Sa
   changed();
   return skill;
 }
+
+/** The top bun's one line for a finished run, from the bot's small text model; null when there is none. */
+export async function fetchBurgerSummary(botId: string, threadId: string): Promise<string | null> {
+  try {
+    const { summary } = await api<{ summary: string | null }>("/api/skill-burger-summary", { method: "POST", body: JSON.stringify({ botId, threadId }) });
+    return typeof summary === "string" && summary ? summary : null;
+  } catch {
+    return null;
+  }
+}

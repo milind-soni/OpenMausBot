@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type CSSProperties, type FocusEvent, type 
 import { appMeta, BARE_READ } from "../../../shared/skill-burger/apps";
 import type { BurgerLayer } from "../../../shared/skill-burger/layers";
 import { cn } from "@/lib/cn";
+import { MAUS_COLORS } from "@/lib/mascot";
 import { t } from "@/lib/i18n";
 import { burgerStartsFolded, removeBurger, saveBurger, type SavedWorkflow } from "@/lib/skill-burger";
 import { ServiceIcon } from "../ServiceIcon";
@@ -27,6 +28,19 @@ export function layerLine(layer: Pick<BurgerLayer, "kind" | "words" | "app">): s
   if (layer.kind === "browser") return t("skillBurger.layer.open", { site: layer.words });
   if (layer.kind === "app" && layer.app && BARE_READ.test(layer.words)) return t("skillBurger.layer.readFrom", { app: appMeta(layer.app).label });
   return capital(layer.words);
+}
+
+/** The app colours a slice is tinted with, from the bots' own palette; a command, a file or a page stays plain. */
+const APP_SLICE: Record<string, keyof typeof MAUS_COLORS> = {
+  googlesheets: "green", airtable: "green", gmail: "red", youtube: "red", googlecalendar: "blue", googledocs: "blue", googledrive: "yellow",
+  outlook: "blue", microsoftteams: "blue", linear: "blue", jira: "blue", trello: "blue", zoom: "blue", salesforce: "cyan", discord: "blue",
+  slack: "pink", hubspot: "orange", posthog: "orange", figma: "coral", asana: "coral", stripe: "blue", dropbox: "blue", twitter: "silver", reddit: "coral",
+};
+
+/** A slice's tint: its app's colour, violet for an AI step, none for the rest. */
+export function sliceTint(layer: Pick<BurgerLayer, "kind" | "app">): CSSProperties | undefined {
+  const color = layer.kind === "ai" ? MAUS_COLORS.purple : layer.kind === "app" && layer.app && APP_SLICE[layer.app] ? MAUS_COLORS[APP_SLICE[layer.app]!] : null;
+  return color ? ({ "--slice": color } as CSSProperties) : undefined;
 }
 
 const SHEEN_PERIOD_MS = 2000;
@@ -117,9 +131,9 @@ export function SkillBurger({ layers, summary: initialSummary, canSave, botId, t
     <section
       aria-label={t("skillBurger.aria")}
       data-skill-burger={saved ? "saved" : live ? "live" : "done"}
-      className={cn("skill-burger pointer-events-auto flex w-[21rem] max-w-full flex-col gap-[3px] text-ink", saved && "burger-stacked")}
+      className={cn("skill-burger pointer-events-auto flex w-[21rem] max-w-full flex-col gap-[2px] text-ink", saved && "burger-stacked")}
     >
-      <div className="burger-bun burger-bun-top relative flex items-start gap-1.5 rounded-t-[18px] rounded-b-[8px] bg-raised px-3 pb-2 pt-3.5 shadow-sm">
+      <div className="burger-bun burger-bun-top relative flex items-center gap-1 px-3.5 pb-2.5 pt-[18px]">
         <span aria-hidden="true" className="burger-sesame" />
         <div className="flex min-w-0 flex-1 flex-col">
           {field ? (
@@ -153,15 +167,13 @@ export function SkillBurger({ layers, summary: initialSummary, canSave, botId, t
               dir="auto"
               onClick={startEdit}
               disabled={Boolean(saved)}
-              title={saved ? undefined : t("skillBurger.editSummary")}
-              className="min-w-0 truncate rounded-md text-start text-[13px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-accent/60 enabled:hover:text-ink-secondary"
+              title={saved ? summary : t("skillBurger.editSummary")}
+              className="min-w-0 line-clamp-2 rounded-md text-start text-[13px] font-medium leading-[18px] outline-none focus-visible:ring-2 focus-visible:ring-accent/60 enabled:hover:text-ink-secondary"
             >
               {summary}
             </button>
           )}
-          <span role="status" aria-live="polite" aria-atomic="true" className="truncate text-[12px] text-ink-secondary">
-            {saved ? t("skillBurger.savedAs", { name: saved.name }) : count}
-          </span>
+          <span role="status" aria-live="polite" aria-atomic="true" className="sr-only">{count}</span>
         </div>
         <button type="button" onClick={() => setFolded((value) => !value)} aria-expanded={!folded} aria-label={toggleLabel} title={toggleLabel} className={ICON_BUTTON}>
           {folded ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronUp size={14} aria-hidden="true" />}
@@ -171,7 +183,7 @@ export function SkillBurger({ layers, summary: initialSummary, canSave, botId, t
         </button>
       </div>
 
-      <ol aria-label={t("skillBurger.layers")} hidden={folded} className="burger-layers flex max-h-60 flex-col gap-[3px] overflow-y-auto">
+      <ol aria-label={t("skillBurger.layers")} hidden={folded} className="burger-layers flex max-h-56 flex-col gap-[2px] overflow-y-auto">
         {layers.map((layer) => {
           const line = layerLine(layer);
           return (
@@ -179,25 +191,23 @@ export function SkillBurger({ layers, summary: initialSummary, canSave, botId, t
               key={layer.id}
               data-burger-layer={layer.kind}
               data-status={layer.status}
-              className={cn(
-                "burger-layer flex min-h-9 min-w-0 items-center gap-2.5 rounded-[8px] bg-card px-3 text-[13px] shadow-sm",
-                layer.status === "failed" && "text-danger",
-              )}
+              style={sliceTint(layer)}
+              className={cn("burger-layer flex min-h-8 min-w-0 items-center gap-2.5 px-3.5 text-[13px]", layer.status === "failed" && "text-danger")}
             >
               <LayerIcon kind={layer.kind} app={layer.app} />
               {layer.status === "running" ? <Cooking text={line} /> : (
-                <span className={cn("min-w-0 flex-1 truncate", layer.kind === "ai" && "text-ink-secondary")} title={line}>{line}</span>
+                <span className="min-w-0 flex-1 truncate" title={line}>{line}</span>
               )}
-              {layer.kind === "ai" && <span className="ms-auto shrink-0 text-[11px] text-ink-tertiary">{t("skillBurger.aiTag")}</span>}
+              {layer.kind === "ai" && <span className="ms-auto shrink-0 text-[11px] text-ink-secondary">{t("skillBurger.aiTag")}</span>}
               {layer.status === "failed" && <XCircle size={14} aria-label={t("skillBurger.failed")} className="ms-auto shrink-0" />}
             </li>
           );
         })}
       </ol>
 
-      <div className="burger-bun burger-bun-bottom flex min-h-10 items-center rounded-b-[18px] rounded-t-[8px] bg-raised shadow-sm">
+      <div className="burger-bun burger-bun-bottom flex min-h-10 items-center">
         {saved ? (
-          <div className="flex w-full items-center gap-2 px-3 text-[13px]">
+          <div className="flex w-full items-center gap-2 px-3.5 text-[13px]">
             <Check size={14} aria-hidden="true" className="shrink-0 text-success" />
             <span className="min-w-0 flex-1 truncate">{t("skillBurger.saved")}</span>
             <button type="button" onClick={() => void undo()} className="shrink-0 rounded-md px-1.5 py-0.5 font-medium text-accent-text outline-none hover:bg-ink/[0.06] focus-visible:ring-2 focus-visible:ring-accent/60">
@@ -210,7 +220,7 @@ export function SkillBurger({ layers, summary: initialSummary, canSave, botId, t
             onClick={() => void save()}
             disabled={!canSave || live || saving.state === "saving"}
             title={live ? t("skillBurger.waitForRun") : undefined}
-            className="flex h-10 w-full items-center justify-center gap-1.5 rounded-b-[18px] rounded-t-[8px] text-[13px] font-medium text-accent-text outline-none transition-colors hover:bg-ink/[0.05] focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-default disabled:text-ink-tertiary disabled:hover:bg-transparent motion-reduce:transition-none"
+            className="burger-bun-bottom-button flex h-10 w-full items-center justify-center gap-1.5 text-[13px] font-medium text-accent-text outline-none transition-colors hover:bg-ink/[0.05] focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-default disabled:text-ink-tertiary disabled:hover:bg-transparent motion-reduce:transition-none"
           >
             {saving.state === "saving" ? t("skillBurger.saving") : <><Plus size={14} aria-hidden="true" />{t("skillBurger.add")}</>}
           </button>

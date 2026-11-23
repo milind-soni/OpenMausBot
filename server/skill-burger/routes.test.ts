@@ -76,3 +76,24 @@ it("refuses a conversation the person can't see or that isn't the bot's, and a r
   expect((await api("", post({ botId: "scout", threadId: "t4" }))).status).toBe(422);
   expect((await api("", post({ name: "x", workflow: { version: 1 } }))).status).toBe(422);
 });
+
+it("names a finished run with the bot's small text model, and says nothing when there is none", async () => {
+  const root = mkdtempSync(join(tmpdir(), "burger-summary-"));
+  const prompts: string[] = [];
+  const routes = [createSkillBurgerRoutes({
+    messages: () => thread, owns: () => true, sees: () => true, root,
+    summarize: async (_botId, prompt) => { prompts.push(prompt); return "\"Sends the invoice to Priya.\""; },
+  })];
+  const server = createServer(async (req, res) => {
+    const url = new URL(req.url ?? "/", "http://localhost");
+    if (!await dispatchRoutes(routes, { req, res, url, path: url.pathname, method: req.method ?? "GET", auth: {} as RequestAuth, json, readBody })) json(res, 404, {});
+  });
+  servers.push(server);
+  await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
+  const res = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/skill-burger-summary`, post({ botId: "scout", threadId: "t1" }));
+  expect(await res.json()).toEqual({ summary: "Sends the invoice to Priya" });
+  expect(prompts[0]).toContain("Request: Send the invoice to priya@example.com");
+  const port = (server.address() as AddressInfo).port;
+  routes[0] = createSkillBurgerRoutes({ messages: () => thread, owns: () => true, sees: () => true, root });
+  expect(await (await fetch(`http://127.0.0.1:${port}/api/skill-burger-summary`, post({ botId: "scout", threadId: "t1" }))).json()).toEqual({ summary: null });
+});

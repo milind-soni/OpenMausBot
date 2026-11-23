@@ -5,12 +5,14 @@ import { z } from "zod";
 
 import { draftWorkflow } from "../../shared/skill-burger/draft.ts";
 import type { Workflow } from "../../shared/skill-burger/format.ts";
-import type { RunMessage } from "../../shared/skill-burger/layers.ts";
+import { askOf, burgerLayers, BURGER_MIN_LAYERS, type RunMessage } from "../../shared/skill-burger/layers.ts";
+import { cleanSummary, summaryPrompt } from "../../shared/skill-burger/summary.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "../routes/table.ts";
 import { listWorkflowSkills, readWorkflowSkill, removeWorkflowSkill, saveWorkflowSkill } from "./store.ts";
 
 export const SKILL_BURGERS_PATH = "/api/skill-burgers";
+export const SKILL_BURGER_SUMMARY_PATH = "/api/skill-burger-summary";
 
 export interface SkillBurgerRouteDeps {
   /** The conversation's messages on its active branch. */
@@ -20,8 +22,12 @@ export interface SkillBurgerRouteDeps {
   sees(auth: RequestAuth, threadId: string): boolean;
   /** Called after a save or removal, so open windows refresh their lists. */
   changed?(): void;
+  /** One line from the bot's small text model, or null when none answers. */
+  summarize?(botId: string, prompt: string): Promise<string | null | undefined>;
   root?: string;
 }
+
+const summaryBody = z.object({ botId: z.string().min(1).max(100), threadId: z.string().min(1).max(200) }).strict();
 
 const saveBody = z.union([
   z.object({ botId: z.string().min(1).max(100), threadId: z.string().min(1).max(200), summary: z.string().max(160).optional(), name: z.string().max(64).optional() }).strict(),
@@ -31,6 +37,19 @@ const saveBody = z.union([
 
 export function createSkillBurgerRoutes(deps: SkillBurgerRouteDeps): RouteHandler {
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
+    if (path === SKILL_BURGER_SUMMARY_PATH) {
+      if (method !== "POST") return json(res, 405, { error: "Use POST." });
+      const body = summaryBody.safeParse(await readBody(req));
+      if (!body.success) return json(res, 400, { error: "Send botId and threadId." });
+      const { botId, threadId } = body.data;
+      if (!deps.owns(botId, threadId) || !deps.sees(auth, threadId)) return json(res, 404, { error: "No such conversation." });
+      const messages = deps.messages(threadId);
+      const layers = burgerLayers(messages).filter((layer) => layer.status === "done");
+      const ask = askOf(messages);
+      if (layers.length < BURGER_MIN_LAYERS || !ask || !deps.summarize) return json(res, 200, { summary: null });
+      const reply = await deps.summarize(botId, summaryPrompt(ask, layers)).catch(() => null);
+      return json(res, 200, { summary: cleanSummary(reply) });
+    }
     if (path !== SKILL_BURGERS_PATH && !path.startsWith(`${SKILL_BURGERS_PATH}/`)) return PASS;
     if (path === SKILL_BURGERS_PATH) {
       if (method === "GET") return json(res, 200, { skills: listWorkflowSkills(deps.root) });

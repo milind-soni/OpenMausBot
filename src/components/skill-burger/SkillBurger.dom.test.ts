@@ -50,20 +50,20 @@ it("shows only for a run of two real steps, one layer each, with the ask on top"
     ["Send email", "running"],
   ]);
   expect(host.textContent).toContain("Email the sales sheet to Priya");
-  expect(button("Add skill")?.disabled).toBe(true);
+  expect(button("Add Skill Burger")?.disabled).toBe(true);
 });
 
 it("saves in one click, then Undo takes back the exact copy", async () => {
   fixture.api.mockImplementation(async (_path: string, init?: { method?: string }) => (init?.method === "POST" ? { skill: saved } : { removed: true }));
   await render([ask, app("m1", "GOOGLESHEETS_BATCH_GET"), app("m2", "GMAIL_SEND_EMAIL")]);
-  await act(async () => button("Add skill")!.click());
+  await act(async () => button("Add Skill Burger")!.click());
   expect(fixture.api).toHaveBeenCalledWith("/api/skill-burgers", { method: "POST", body: JSON.stringify({ botId: "scout", threadId: "t1", summary: "Email the sales sheet to Priya" }) });
   expect(burger()?.dataset.skillBurger).toBe("saved");
-  expect(host.textContent).toContain("In your skills");
+  expect(host.textContent).toContain("Skill Burger saved");
   await act(async () => button("Undo")!.click());
   expect(fixture.api).toHaveBeenLastCalledWith(`/api/skill-burgers/${saved.name}?sha256=${saved.sha256}`, { method: "DELETE" });
   expect(host.textContent).toContain("Removed from your skills.");
-  expect(button("Add skill")).toBeDefined();
+  expect(button("Add Skill Burger")).toBeDefined();
 });
 
 it("edits the summary in place: Escape puts it back, Enter keeps it", async () => {
@@ -90,4 +90,16 @@ it("folds and closes from the top bun", async () => {
   expect(host.querySelector("ol")?.hidden).toBe(true);
   await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click());
   expect(burger()).toBeNull();
+});
+
+it("names what a finished run did on its top bun, keeping the ask until then", async () => {
+  fixture.api.mockImplementation(async (path: string) => (path === "/api/skill-burger-summary" ? { summary: "Emails the sales sheet to Priya" } : {}));
+  await render([ask, app("m1", "GOOGLESHEETS_BATCH_GET"), app("m2", "GMAIL_SEND_EMAIL", true)], ["m2"], true);
+  expect(button("Email the sales sheet to Priya")).toBeDefined();
+  expect(fixture.api).not.toHaveBeenCalled();
+  await render([ask, app("m1", "GOOGLESHEETS_BATCH_GET"), app("m2", "GMAIL_SEND_EMAIL")]);
+  await act(async () => { await Promise.resolve(); });
+  expect(fixture.api).toHaveBeenCalledWith("/api/skill-burger-summary", { method: "POST", body: JSON.stringify({ botId: "scout", threadId: "t1" }) });
+  expect(button("Emails the sales sheet to Priya")).toBeDefined();
+  expect(host.querySelector("[data-burger-layer=app]")?.getAttribute("style")).toContain("--slice");
 });

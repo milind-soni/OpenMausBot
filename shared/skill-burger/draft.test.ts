@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { draftWorkflow, layerLabel } from "./draft.ts";
 import { renderWorkflowSkillMd, workflowSchema, workflowSkillName } from "./format.ts";
 import { burgerLayers, type RunMessage } from "./layers.ts";
+import { cleanSummary, summaryPrompt } from "./summary.ts";
 
 let n = 0;
 const ask = (text: string): RunMessage => ({ id: `u${++n}`, role: "user", kind: "text", text });
@@ -136,5 +137,22 @@ describe("draftWorkflow", () => {
     expect(md).toContain(`name: ${name}`);
     expect(md).toContain("tags: workflow");
     expect(md).toContain("2. Gmail: Send email (GMAIL_SEND_EMAIL) (recipient email: recipient, default \"priya@example.com\")");
+  });
+});
+
+describe("the top bun's line", () => {
+  it("asks for one line in the request's language, from the steps", () => {
+    const prompt = summaryPrompt("Mail the sheet to Priya", burgerLayers([ask("x"), multi("GOOGLESHEETS_BATCH_GET", {}), multi("GMAIL_SEND_EMAIL", {})]));
+    expect(prompt).toContain("Request: Mail the sheet to Priya");
+    expect(prompt).toContain("1. Google Sheets: Read from Google Sheets");
+    expect(prompt).toContain("2. Gmail: Send email");
+  });
+
+  it("keeps one clean line of the model's reply", () => {
+    expect(cleanSummary('"Emails the sales sheet to Priya."\nMore text')).toBe("Emails the sales sheet to Priya");
+    expect(cleanSummary("Summary: Archives the logs")).toBe("Archives the logs");
+    expect(cleanSummary("  ")).toBeNull();
+    expect(cleanSummary(undefined)).toBeNull();
+    expect(cleanSummary("x".repeat(200))!.length).toBe(90);
   });
 });
