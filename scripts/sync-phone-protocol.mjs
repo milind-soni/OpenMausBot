@@ -12,6 +12,8 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PACKAGE = "packages/phone-protocol";
+/** The vendored avatar engine's browser mount: the phone has no DOM. */
+const DOM_ONLY = `${PACKAGE}/src/open-bot-avatar/dom/`;
 
 /** Where each copied file comes from, by its path under the output directory. */
 export function syncedFiles(ref, root = ROOT) {
@@ -19,7 +21,7 @@ export function syncedFiles(ref, root = ROOT) {
   const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" });
   const commit = git("rev-parse", "--verify", `${ref}^{commit}`).trim();
   const source = git("ls-tree", "-r", "--name-only", "-z", commit, "--", `${PACKAGE}/src`).split("\0")
-    .filter((path) => path.endsWith(".ts") && !path.endsWith(".test.ts"));
+    .filter((path) => path && !path.endsWith(".test.ts") && !path.startsWith(DOM_ONLY));
   const files = new Map([
     ["package.json", `${PACKAGE}/package.json`],
     ...source.map((path) => [path.slice(PACKAGE.length + 1), path]),
