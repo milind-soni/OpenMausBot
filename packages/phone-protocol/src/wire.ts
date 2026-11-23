@@ -521,9 +521,6 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   /** A user line a routine, webhook, room coordination or another bot's
    * message started a turn with: the person did not write it. */
   automated?: boolean;
-  /** On a wait follow-up's line: that wait's id, so the chat names it when
-   * two waits write the same words. */
-  waitId?: string;
   /** Which person sent this user message, when the workspace has more than
    * one. Absent reads as the profile name. */
   sender?: ResolvedSender;
@@ -608,10 +605,17 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
 export const movesThreadToTop = (message: Pick<WireMessage, "role" | "kind" | "peerAsk" | "turnId" | "turnTerminal">): boolean =>
   message.role === "user" ? !message.peerAsk : message.kind === "text" && (message.turnTerminal === true || !message.turnId);
 
-/** Pinned first, then newest; ties keep their order, since sort is stable. */
 export function orderedThreadList<T extends { pinned?: boolean; lastThreadOrderAt?: number; createdAt?: number }>(tasks: readonly T[]): T[] {
-  const recency = (task: T) => task.lastThreadOrderAt ?? task.createdAt ?? 0;
-  return [...tasks].sort((a, b) => Number(b.pinned === true) - Number(a.pinned === true) || recency(b) - recency(a));
+  return tasks
+    .map((task, index) => ({ task, index }))
+    .sort((a, b) => {
+      const pin = Number(b.task.pinned === true) - Number(a.task.pinned === true);
+      if (pin) return pin;
+      const recency = (b.task.lastThreadOrderAt ?? b.task.createdAt ?? 0) - (a.task.lastThreadOrderAt ?? a.task.createdAt ?? 0);
+      if (recency) return recency;
+      return a.index - b.index;
+    })
+    .map((entry) => entry.task);
 }
 
 /** 0 is the "until new activity" sentinel. The event stream never drops an expired snooze, so check the clock too. */
