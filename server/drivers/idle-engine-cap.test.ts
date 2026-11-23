@@ -73,7 +73,7 @@ it("keeps the two most recently used of five idle engines across Claude and Code
   const codex = codexWarmSessions<null>(`cap-codex-${randomUUID()}`);
   const codexThreads = [randomUUID(), randomUUID()];
   const kept = codexThreads.map((threadId) => {
-    const session = { connection: codexProcess(), contract: "{}", nativeThreadId: `native-${threadId}`, configDigest: "config", cwd: "/work", carried: null };
+    const session = { connection: codexProcess(), contract: "{}", nativeThreadId: `native-${threadId}`, configDigest: "config", cwd: "/work", identity: { cli: "codex", env: {}, ownLogin: false }, provider: null, model: null, carried: null };
     expect(codex.keep(threadId, session)).toBe(true);
     return session;
   });

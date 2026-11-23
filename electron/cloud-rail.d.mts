@@ -50,6 +50,8 @@ export interface RailPlace {
   removable?: true;
   /** A server connected by hand: Remove from list forgets it on this computer (this app signs out of it there). */
   forget?: true;
+  /** A server connected by hand: its menu offers Rename, a name kept on this computer only. */
+  renames?: true;
   /** A server of the person's own, theirs alone by its own word, that this computer's bots may move to: its menu offers
    * Make … my home. */
   makeHome?: true;

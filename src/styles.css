@@ -118,6 +118,7 @@
 
 @theme {
   --animate-panel-in: panel-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+  --animate-panel-beside-in: panel-beside-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-sheet-in: sheet-in 0.26s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-workspace-in: workspace-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-pop-in: pop-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
@@ -1668,6 +1669,53 @@ body {
 }
 :root[data-reduced-motion="true"] [data-sidebar-bot-row] { transition: none; }
 
+/* The chat header's model pill folds to its AI's mark while a side panel narrows the chat (ModelPickerTrigger).
+   The pill glides over the panel's own 240ms on the motion curve: its padding and the mark's gap close, and the rest
+   rides a grid column from 1fr to 0fr, so no width is measured and the first paint lands folded or open with no jump.
+   The words never wrap (nowrap) and are never cut hard: they fade, drift 4px toward the mark and soften as the column
+   closes, the name first and the bars and chevron a beat later; opening, they wait for the column to start widening.
+   A transition takes its timing from the state it goes to, so each state below carries the timing that reaches it. */
+[data-model-pill] {
+  transition-property: color, background-color, padding;
+  transition-duration: 120ms, 120ms, 240ms;
+  transition-timing-function: ease-out, ease-out, cubic-bezier(0.22, 1, 0.36, 1);
+}
+[data-model-pill][data-folded] { padding-inline: 0; }
+[data-model-pill] [data-model-pill-mark] { transition: margin 240ms cubic-bezier(0.22, 1, 0.36, 1); }
+[data-model-pill][data-folded] [data-model-pill-mark] { margin-inline-end: 0; }
+[data-model-pill] [data-model-pill-rest] {
+  grid-template-columns: 1fr;
+  transition: grid-template-columns 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+[data-model-pill][data-folded] [data-model-pill-rest] { grid-template-columns: 0fr; }
+/* Folding, the column's closing edge fades instead of cutting the words off. */
+[data-model-pill][data-folded] [data-model-pill-rest] > * { mask-image: linear-gradient(to right, #000 calc(100% - 12px), transparent); }
+[dir="rtl"] [data-model-pill][data-folded] [data-model-pill-rest] > * { mask-image: linear-gradient(to left, #000 calc(100% - 12px), transparent); }
+[data-model-pill] [data-model-pill-words],
+[data-model-pill] [data-model-pill-tail] {
+  transition-property: opacity, translate, filter;
+  transition-duration: 180ms, 200ms, 180ms;
+  transition-timing-function: ease-out, cubic-bezier(0.22, 1, 0.36, 1), ease-out;
+  transition-delay: 70ms;
+}
+[data-model-pill] [data-model-pill-tail] { transition-delay: 110ms; }
+[data-model-pill][data-folded] [data-model-pill-words],
+[data-model-pill][data-folded] [data-model-pill-tail] {
+  opacity: 0;
+  translate: -4px 0;
+  filter: blur(2px);
+  transition-duration: 140ms, 200ms, 140ms;
+  transition-delay: 0ms;
+}
+[data-model-pill][data-folded] [data-model-pill-tail] { transition-delay: 40ms; }
+[dir="rtl"] [data-model-pill][data-folded] [data-model-pill-words],
+[dir="rtl"] [data-model-pill][data-folded] [data-model-pill-tail] { translate: 4px 0; }
+@media (prefers-reduced-motion: reduce) {
+  [data-model-pill], [data-model-pill] * { transition: none !important; }
+}
+:root[data-reduced-motion="true"] [data-model-pill],
+:root[data-reduced-motion="true"] [data-model-pill] * { transition: none !important; }
+
 /* Liquid glass: the surface for centred pop-ups (Settings, Apps, Triggers).
    Every value is derived from the active skin's own tokens, so each of the
    ten skins gets a glass of its own colour and no skin block changes. The
@@ -2019,6 +2067,26 @@ body {
   backdrop-filter: none;
   mask-image: none;
 }
+/* Simple mode's chat header has no band at all: the transcript runs up to the window's top edge under the floating pill
+   and buttons, and the scroller itself fades it in, in even steps, over the --top-fade just above the bar's bottom
+   edge, where the first row rests at the top of the history. A mask, not a fill, so whatever ground the skin paints
+   (Aurora's field included) shows through. A taller bar (find, a notice) keeps what lies above that stretch hidden.
+   Only the bar's controls take the pointer; between them, a click reaches the transcript. */
+.glass-bar[data-chathead-float]::before {
+  content: none;
+}
+.glass-scroller[data-top-fade] {
+  --top-fade: 60px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--glass-top, 0px) - var(--top-fade)), #000 var(--glass-top, 0px));
+  mask-image: linear-gradient(to bottom, transparent calc(var(--glass-top, 0px) - var(--top-fade)), #000 var(--glass-top, 0px));
+}
+[data-chathead-float] {
+  pointer-events: none;
+}
+[data-chathead-float] > :not([data-look="chat-header"]),
+[data-chathead-float] :is([data-chathead-identity], [data-chathead-controls]) > * {
+  pointer-events: auto;
+}
 /* The colour of the place on screen (PlaceTint), faint, from the very top of the sidebar to just below its head, under
    everything there: the head's words and controls stay on what is still almost the plain panel. Dark skins take a
    little more of it to show at all. Reduced transparency: a thin solid line at the top instead; forced colours: none. */
@@ -2199,6 +2267,10 @@ body {
 @keyframes panel-in {
   from { transform: translateX(28px); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
+}
+/* A side panel's room grows from nothing as it slides in over the window's edge (bot-panel/side-panel.ts). */
+@keyframes panel-beside-in {
+  from { margin-inline-end: calc(-1 * var(--side-panel-w)); opacity: 0; }
 }
 @keyframes sheet-in {
   from { transform: translateY(32px); opacity: 0; }
@@ -2518,6 +2590,7 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
 :root[data-reduced-motion="true"] .animate-spot-in,
 :root[data-reduced-motion="true"] .animate-pop-in,
 :root[data-reduced-motion="true"] .animate-pop-out,
+:root[data-reduced-motion="true"] .md\:animate-panel-beside-in,
 :root[data-reduced-motion="true"] .step-open,
 :root[data-reduced-motion="true"] .check-in,
 :root[data-reduced-motion="true"] .progress-fill,
@@ -3735,4 +3808,15 @@ button:disabled.bg-danger {
 @keyframes chat-run-log-reveal {
   from { opacity: 0; transform: translateX(-0.375rem); }
   to { opacity: 1; transform: translateX(0); }
+}
+
+/* The chat backdrop (GlassScrollFrame's ChatBackdrop) is a theme's to paint and animate; with reduced motion asked for,
+   whatever a theme animates there stands still, whether or not its CSS says so. */
+@media (prefers-reduced-motion: reduce) {
+  [data-look="chat-backdrop"],
+  [data-look="chat-backdrop"]::before,
+  [data-look="chat-backdrop"]::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }

@@ -154,7 +154,7 @@ describe("the Simple header", () => {
       expect(identity.replace(pill[0], "").replace(/<span role="status"[^>]*>[^<]*<\/span>/, "")).not.toMatch(/<(button|a|span)[\s>]/);
       expect(pill[1]).toContain(">Pepper</span>");
       expect(pill[1]).toContain('data-chathead-elsewhere="true"');
-      expect(pill[0].match(/class="([^"]*)"/)![1]!.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "bg-composer", "ring-[0.5px]", "shadow-(--shadow-float)", "py-[7.5px]", "pr-[13.5px]"]));
+      expect(pill[0].match(/class="([^"]*)"/)![1]!.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "bg-composer", "ring-[0.5px]", "shadow-(--shadow-float)", "py-[5.5px]", "pl-[5.5px]", "pr-[13.5px]"]));
       // Away from the bot's main conversation, the pill names the one on screen.
       expect(pill[1]).toContain("data-chathead-conversation");
       for (const gone of ["data-chathead-role", "data-background-activity", "data-chathead-back", 'data-testid="chat-more"']) {
@@ -314,13 +314,19 @@ describe("glass header", () => {
 
   it("fades the transcript into the canvas under the header in both modes", () => {
     const bar = (markup: string) => markup.match(/<div data-glass-bar="top"[^>]*>/)?.[0] ?? "";
-    expect(bar(renderToStaticMarkup(createElement(ChatView, { bot })))).toContain('data-glass-fade=""');
+    const advanced = renderToStaticMarkup(createElement(ChatView, { bot }));
+    expect(bar(advanced)).toContain('data-glass-fade=""');
+    // Advanced keeps its band: no floating header, no mask on the transcript.
+    expect(bar(advanced)).not.toContain("data-chathead-float");
+    expect(advanced).not.toContain("data-top-fade");
     fixture.advanced = false;
     try {
       const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
       expect(bar(markup)).toContain('data-glass-fade=""');
       expect(bar(markup)).not.toContain("before:hidden");
-      expect(markup).toMatch(/class="glass-scroller [^"]*" style="scroll-padding-bottom:calc\(/);
+      // Simple has no band: its controls float, and the transcript runs to the top edge under them and fades in.
+      expect(bar(markup)).toContain('data-chathead-float=""');
+      expect(markup).toMatch(/class="glass-scroller [^"]*" data-top-fade="" style="scroll-padding-bottom:calc\(/);
     } finally {
       fixture.advanced = true;
     }

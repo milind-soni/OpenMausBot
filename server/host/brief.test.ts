@@ -155,6 +155,19 @@ describe("the brief", () => {
     expect(JSON.stringify(today.widget!.root)).not.toContain(ENGLISH_BRIEF.intro);
   });
 
+  it("gives the newest card, an earlier day's until today's is posted", async () => {
+    const s = setup({ needsYou: [{ kind: "signed-out", id: "x", at: 0, instanceId: "claude", botIds: [] }] });
+    expect(s.brief.latestCard()).toBeUndefined();
+    await s.brief.active("desktop", "UTC");
+    const first = s.card()!.id;
+    expect(s.brief.latestCard()).toEqual({ threadId: s.thread(), messageId: first });
+    s.advance(24 * 60 * MINUTE);
+    expect(s.brief.latestCard()).toEqual({ threadId: s.thread(), messageId: first });
+    await s.brief.active("desktop");
+    expect(s.card()!.id).not.toBe(first);
+    expect(s.brief.latestCard()).toEqual({ threadId: s.thread(), messageId: s.card()!.id });
+  });
+
   it("speaks the language set in Settings, dates included", async () => {
     const s = setup({ language: "pt-BR", needsYou: [{ kind: "signed-out", id: "x", at: 0, instanceId: "claude", botIds: [] }] });
     await s.brief.active("desktop", "UTC");

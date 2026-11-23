@@ -349,6 +349,7 @@ export async function launchVerificationServer(
       } } : {}),
       ...(extraProviders.includes("codex") ? { codex: {
         driver: "codex", displayName: "Verification Codex", config: { cli: fileURLToPath(new URL("../server/testing/fake-codex-app-server.ts", import.meta.url)) },
+        environment: Object.fromEntries(Object.entries(parentEnv).filter(([key, value]) => key.startsWith("FAKE_CODEX_") && value)),
       } } : {}),
       ...(extraProviders.includes("cline") ? { cline: {
         driver: "clineAgent", displayName: "Verification Cline",

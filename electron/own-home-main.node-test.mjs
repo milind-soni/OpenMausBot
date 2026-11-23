@@ -223,3 +223,33 @@ test("after an own-home move is done, an app update does not send the old worksp
   assert.deepEqual(files(), []);
   second.close();
 });
+
+test("once home is on a server that was then removed from the list, this computer's own copy opens again and the choice is let go", async () => {
+  const choice = memory({ v: 1, id: "g", origin: garage.origin, environmentId: ID, name: "Garage server", at: 1 });
+  const cloud = { origin: garage.origin, account: `own:${ID}`, machine: garage.origin, name: "Garage server" };
+  const journal = memory({ v: 1, phase: "done", cloud, doneAt: 1_000, version: "0.1.151", lent: true, told: true });
+  let frozen = true, saved = [garage];
+  const asked = [], lines = [];
+  const localRequest = async (route, init) => {
+    asked.push(`${init?.method ?? "GET"} ${route}`);
+    if (route === "/api/move/freeze" && init?.method === "DELETE") { frozen = false; return Response.json({ frozen: false }); }
+    if (route === "/api/move/freeze") return Response.json({ frozen });
+    return Response.json({ v: 1 });
+  };
+  const fetch = async (url) => { asked.push(`server ${new URL(url).pathname}`); return Response.json({ error: "forbidden" }, { status: 403 }); };
+  const own = installOwnHome({
+    localRequest, fetch, environments: () => saved, handoff: async () => ({}), journal, choice, sendState: memory(), cloudJournal: () => null,
+    version: "0.1.151", log: (line) => lines.push(line), now: () => 5_000_000,
+  });
+  await own.kick();
+  assert.equal(frozen, true, "a server still on the list keeps home, whether or not it answers");
+  assert.equal(own.origin(), garage.origin);
+  saved = [];
+  await own.kick();
+  assert.equal(frozen, false, lines.join("\n"));
+  assert.equal(own.journal().phase, "back");
+  assert.equal(own.origin(), null);
+  assert.equal(own.chosen(), null, "nothing still points at the removed server");
+  assert.deepEqual(asked.filter((line) => line.startsWith("server ")), [], "nothing is asked of a server this app signed out of");
+  own.close();
+});

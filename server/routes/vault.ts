@@ -9,7 +9,7 @@ import { isJson, parseBots, type LoginRouteDeps } from "./logins.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface VaultRouteDeps {
-  logins: Pick<LoginRouteDeps, "list" | "botExists" | "onePassword" | "bitwarden">;
+  logins: Pick<LoginRouteDeps, "list" | "botExists" | "onePassword" | "bitwarden" | "bitwardenSecrets">;
   secrets: Pick<VaultStore, "listSecrets" | "saveSecret" | "receiveSecret" | "updateSecret" | "removeSecret">;
   /** A linked password manager's secrets, listed beside the saved ones and changed only in the manager. */
   linked?: () => LinkedSecret[];
@@ -50,10 +50,14 @@ export function createVaultRoutes(deps: VaultRouteDeps): RouteHandler {
     const readable = (id: string) => deps.secrets.listSecrets(reader).some((secret) => secret.id === id);
     if (path === "/api/vault") {
       if (method !== "GET") return json(res, 405, { error: "method not allowed" });
-      const bitwarden = deps.logins.bitwarden;
-      if (!reader.team) return json(res, 200, { logins: [], secrets: deps.secrets.listSecrets(reader), onePassword: { connected: false }, ...(bitwarden ? { bitwarden: { connected: false } } : {}) });
-      return json(res, 200, { logins: [...deps.logins.list(), ...deps.logins.onePassword.list(), ...(bitwarden?.list() ?? [])], secrets: [...deps.secrets.listSecrets(reader), ...(deps.linked?.() ?? [])],
-        onePassword: deps.logins.onePassword.status(), ...(bitwarden ? { bitwarden: bitwarden.status() } : {}) });
+      const { bitwarden, bitwardenSecrets } = deps.logins;
+      if (!reader.team) {
+        return json(res, 200, { logins: [], secrets: deps.secrets.listSecrets(reader), onePassword: { connected: false }, ...(bitwarden ? { bitwarden: { connected: false } } : {}),
+          ...(bitwardenSecrets ? { bitwardenSecrets: { connected: false } } : {}) });
+      }
+      return json(res, 200, { logins: [...deps.logins.list(), ...deps.logins.onePassword.list(), ...(bitwarden?.list() ?? []), ...(bitwardenSecrets?.list() ?? [])],
+        secrets: [...deps.secrets.listSecrets(reader), ...(deps.linked?.() ?? [])], onePassword: deps.logins.onePassword.status(),
+        ...(bitwarden ? { bitwarden: bitwarden.status() } : {}), ...(bitwardenSecrets ? { bitwardenSecrets: bitwardenSecrets.status() } : {}) });
     }
     if (path !== SECRETS && !path.startsWith(`${SECRETS}/`)) return json(res, 404, { error: "not found" });
     if (!reader.team && method !== "DELETE") return json(res, 403, { error: "Only an admin can add or change a secret in the Vault." });

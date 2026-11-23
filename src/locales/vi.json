@@ -5918,5 +5918,11 @@
   "imageGen.higgsfield.help": "{app} tạo ảnh bằng tài khoản Higgsfield mà bạn đăng nhập trong Plugin. Mỗi ảnh tốn tín dụng của tài khoản đó.",
   "imageGen.higgsfield.open": "Mở Plugin",
   "inbox.settled.title": "Đã xong",
-  "inbox.settled.read": "Đã đọc"
+  "inbox.settled.read": "Đã đọc",
+  "sidebar.threads.hidden": "Đã ẩn luồng",
+  "sidebar.threads.hide": "Ẩn {title}",
+  "sidebar.threads.hideShort": "Ẩn",
+  "sidebar.threads.running": "+{count} đang chạy",
+  "sidebar.threads.more": "thêm {count}",
+  "botPanel.library.showAll": "Hiển thị tất cả"
 }

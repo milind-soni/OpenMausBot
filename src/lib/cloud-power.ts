@@ -1,3 +1,4 @@
+import { serverFetch } from "./relay-server";
 // A Cloud home on a plan that sleeps tells its pages it is going to sleep (a `power` frame on the event stream, or an
 // "asleep" answer). From then on the page sends nothing in the background: any request reaching the Cloud would wake it.
 // The next thing the person does (a click, a key, the window regaining focus) wakes it again, which takes about a second.
@@ -34,7 +35,7 @@ function set(next: boolean) {
  * "asleep". */
 export function markCloudAwake(): void {
   if (!asleep) return;
-  void fetch(WAKE_PATH).catch(() => {});
+  void serverFetch(WAKE_PATH).catch(() => {});
   detach?.();
   detach = null;
   set(false);

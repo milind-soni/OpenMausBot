@@ -102,6 +102,13 @@ that matters to that bot — provisioning, status checks, previews, screenshots,
 computer tools, and deletion cleanup. The Settings inventory spans every server in play and tags each
 computer with the alias that holds it.
 
+To pick servers from a list instead of typing aliases, add them under **Named servers** below the default alias
+(Settings → AI → Other services → Self-hosted VPS): a name you choose plus its SSH config alias. Each saved VPS bot
+then gets a server picker in Bot settings → Computer → Where … works: the default server, every named server, or
+**Other SSH alias…** for one that is not on the list, then **Save**. The list is stored as `vpsServers` in `config.json`
+(`[{ "name": "Home lab", "sshAlias": "home-lab" }]`); saving or removing an entry never moves a bot, and the
+picker writes the same `vpsAlias` field. Only owner and admin sessions see the list.
+
 A bot cannot be moved to another server while its computer still lives on the old one, and the default alias
 cannot change while any computer it manages still exists: remove the computer first from Settings → Local VM →
 Self-hosted VPS computers (or by hand: `docker -H ssh://old-server rm -f openmausbot-vps-<bot>-<hash>`). A server

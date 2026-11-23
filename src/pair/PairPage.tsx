@@ -19,6 +19,7 @@ import { pairedDestination } from "../lib/phone-pairing";
 import { t } from "../lib/i18n";
 import { formatPairingCode, PAIRING_INPUT_PROBLEM_KEY, readPairingInput } from "../../shared/pairing-code";
 import { isPrivateHost } from "../../shared/private-host";
+import { serverFetch } from "../lib/relay-server";
 
 const input = "mt-1 w-full rounded-md border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink outline-none focus:border-accent-border";
 const button = "mt-5 w-full rounded-md bg-accent px-4 py-2 text-[14px] font-medium text-accent-ink disabled:opacity-50";
@@ -110,7 +111,7 @@ export function PairPage({ initialCode, initialEmail = null, reason }: { initial
   }, []);
 
   useEffect(() => {
-    void fetch("/.well-known/openmausbot/environment")
+    void serverFetch("/.well-known/openmausbot/environment")
       .then((r) => (r.ok ? r.json() : null))
       .then((d: EnvironmentDescriptor | null) => {
         setEnvironment(d);

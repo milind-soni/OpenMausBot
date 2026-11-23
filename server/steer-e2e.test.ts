@@ -993,7 +993,7 @@ posixOnly("mid-turn steering e2e", () => {
     try {
       expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "start the room" })).status).toBe(202);
       await waitFor(async () => (await getGroup())?.busyBotId === created.id, "the room turn to start");
-      await waitFor(async () => (await getGroup())?.messages.some((m: any) => m.kind === "activity"), "the room tool chip");
+      await waitFor(async () => (await getGroup())?.messages.some((m: any) => m.kind === "activity" && m.tool?.name === "Bash"), "the room tool chip");
 
       const attachments = join(home, ".openmausbot", "attachments");
       mkdirSync(attachments, { recursive: true });

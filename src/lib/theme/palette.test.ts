@@ -20,3 +20,17 @@ it("gives an accent a readable text tone and ink", () => {
   expect(palette["accent-ink"]).toBe("#111111");
   expect(accentPalette("#5b21b6", "dark", "#0b1020")["accent-ink"]).toBe("#ffffff");
 });
+
+describe("the guide's picture background", () => {
+  it("lays enough of the canvas over a picture that main text stays at 4.5:1 over a black or white pixel, light and dark", async () => {
+    const { themeGuide } = await import("../../../shared/theme");
+    const veil = Number(/color-mix\(in srgb, var\(--color-app\) (\d+)%, transparent\)/.exec(themeGuide())![1]) / 100;
+    // The default light and dark skins' ground and main text (src/styles.css, daylight and midnight).
+    for (const [app, ink] of [["#fcfcfc", "#1c1c1c"], ["#121212", "#f5f5f5"]] as const) {
+      for (const pixel of [[0, 0, 0], [255, 255, 255]] as const) {
+        const seen = parseHex(app).map((channel, index) => veil * channel + (1 - veil) * pixel[index]!) as [number, number, number];
+        expect(contrast(parseHex(ink), seen), `${ink} on ${app} over ${pixel}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+});

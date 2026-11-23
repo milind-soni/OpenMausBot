@@ -1,5 +1,5 @@
 import nativeText from "./native-text.cjs";
-import { screenFixLabel, screenLine } from "./screen-words.mjs";
+import { namedDevice, screenFixLabel, screenLine } from "./screen-words.mjs";
 import { dotIcons } from "./color-dot.mjs";
 
 /** The device word the person knows this computer by. */
@@ -78,6 +78,7 @@ export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPa
     const { line, title, screen, pending, problems = [], acting = [] } = indicatorText(view, device, t);
     const fix = screen ? screenFixLabel(view.screen, t) : null;
     const said = [...acting.map(bot => bot.label), ...line ? [line] : []].join(". ");
+    const typing = view.typing && !view.pauseError ? t("native.lendTray.typing", { device: namedDevice(device, t) }) : null;
     tray.setToolTip(`OpenMausBot: ${said}${pending ? `. ${pending}` : ""}${screen ? `. ${screen}` : ""}${problems.length ? `. ${problems.join(". ")}` : ""}`);
     // Electron shows a tray title beside the icon on macOS only.
     tray.setTitle?.(title);
@@ -89,6 +90,7 @@ export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPa
       ...problems.map(problem => ({ label: problem, enabled: false })),
       ...screen ? [{ label: screen, enabled: false }] : [],
       ...fix ? [{ label: fix, click: () => onStartScreen() }] : [],
+      ...typing ? [{ label: typing, enabled: false }] : [],
       { type: "separator" },
       ...view.pauseError ? [{ label: t("native.lendTray.retryPause"), click: () => onPause() }] : [],
       view.paused ? { label: t("native.lendTray.resume"), click: () => onResume() } : { label: t("native.lendTray.pause"), click: () => onPause() },
@@ -100,9 +102,9 @@ export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPa
     ]));
   };
   return {
-    update({ clouds = [], using = [], bots = [], paused = false, pauseError, terminal = false, terminalSwitch = true, screen = null, waiting = [], problems = [] }) {
+    update({ clouds = [], using = [], bots = [], paused = false, pauseError, terminal = false, terminalSwitch = true, screen = null, waiting = [], problems = [], typing = false }) {
       const next = { clouds: [...clouds], using: paused ? [] : [...using], bots: paused ? [] : bots.map(({ name, color, cloud }) => ({ name, color, cloud })), waiting: paused ? [] : [...waiting], problems: paused ? [] : problems.map(({ name, why }) => ({ name, why })), paused: paused === true, ...pauseError ? { pauseError } : {},
-        terminal: terminal === true, terminalSwitch: terminalSwitch !== false,
+        terminal: terminal === true, terminalSwitch: terminalSwitch !== false, typing: !paused && typing === true,
         screen: screen ? { ready: screen.ready === true, reason: screen.reason ?? null, fix: screen.fix ?? null, ...(screen.message ? { message: screen.message } : {}) } : null };
       if (shown && JSON.stringify(next) === JSON.stringify(shown)) return;
       shown = next;
