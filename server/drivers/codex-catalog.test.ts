@@ -71,6 +71,15 @@ describe("readCodexModelCatalog", () => {
     );
   });
 
+  it("lists GPT-6.2 Astra and Sol first when the static cloud fallback is used", async () => {
+    const catalog = await readCodexModelCatalog({ HOME: join(tmpdir(), "omb-codex-missing-home") });
+    expect(catalog.options.slice(0, 2)).toEqual([
+      { id: "gpt-6.2-astra", label: "GPT-6.2 Astra (availability unverified)" },
+      { id: "gpt-6.2-sol", label: "GPT-6.2 Sol (availability unverified)" },
+    ]);
+    expect(catalog.default).toBe("gpt-5.6-sol");
+  });
+
   it("uses every visible page from the installed Codex app-server catalog", async () => {
     chmodSync(FAKE_CLI, 0o755);
     const catalog = await readCodexModelCatalog(

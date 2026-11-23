@@ -12,9 +12,14 @@ const VIDEO = `${CLOUD}/api/threads/t1/messages/m1/file?media=${"a".repeat(43)}`
 const editFlags = { canUndo: false, canRedo: false, canCut: false, canCopy: false, canPaste: false, canSelectAll: true };
 const base = { mediaType: "none", srcURL: "", hasImageContents: false, linkURL: "", isEditable: false, misspelledWord: "", dictionarySuggestions: [], selectionText: "", x: 12, y: 34, editFlags, pageURL: `${CLOUD}/` };
 
-function harness() {
+function harness(platform = "darwin") {
   const calls = [];
+  let spellcheckEnabled = true;
   const webContents = {
+    session: {
+      isSpellCheckerEnabled: () => spellcheckEnabled,
+      setSpellCheckerEnabled: (enabled) => { spellcheckEnabled = enabled; },
+    },
     copyImageAt: (x, y) => calls.push(["copyImageAt", x, y]),
     downloadURL: (url) => calls.push(["downloadURL", url]),
     reload: () => calls.push(["reload"]),
@@ -23,7 +28,7 @@ function harness() {
   };
   const clipboard = { writeText: (text) => calls.push(["writeText", text]), availableFormats: () => [], readImage: () => ({ isEmpty: () => true }) };
   const downloads = { start: (contents, url, mode) => { assert.equal(contents, webContents); calls.push(["download", url, mode]); return true; } };
-  const menu = (params) => contextMenuTemplate({ ...base, ...params }, { webContents, clipboard, downloads });
+  const menu = (params) => contextMenuTemplate({ ...base, ...params }, { webContents, clipboard, downloads, platform });
   return { calls, menu };
 }
 
@@ -106,6 +111,21 @@ test("a plain spot answers with Copy, Select All and Reload", () => {
   click(items, "Reload");
   assert.deepEqual(calls, [["reload"]]);
 });
+
+for (const platform of ["win32", "linux"]) {
+  test(`the ${platform} editable menu can turn session spellchecking off and back on`, () => {
+    const { menu } = harness(platform);
+    const spellcheck = () => menu({ isEditable: true }).find((item) => item.label === "Check Spelling");
+
+    assert.equal(spellcheck().type, "checkbox");
+    assert.equal(spellcheck().checked, true);
+    spellcheck().click();
+    assert.equal(spellcheck().checked, false);
+    spellcheck().click();
+    assert.equal(spellcheck().checked, true);
+    assert.equal(menu({ selectionText: "words" }).some((item) => item.label === "Check Spelling"), false);
+  });
+}
 
 function scratch() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omb-context-menu-"));

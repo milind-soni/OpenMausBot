@@ -1,14 +1,18 @@
-/** Every body a bot can wear: the gradient catalog plus the festival bodies. */
+/** Every body a bot can wear: the gradient catalog, the festival bodies and the object avatars. */
 
 import { z } from "zod";
 
 import { DEFAULT_MASCOT_BODY, MASCOT_BODY_IDS } from "./mascot-bodies.ts";
 import { CARVED_BODY_IDS, DIWALI_BODY_IDS, HALLOWEEN_BODY_IDS, type CarvedBodyId } from "./carved-bodies.ts";
+import { OBJECT_BODY_IDS, type ObjectBodyId } from "./object-bodies.ts";
 import type { MausColor } from "./wire.ts";
 
-export const BOT_BODY_IDS = [...MASCOT_BODY_IDS, ...CARVED_BODY_IDS] as const;
+export const BOT_BODY_IDS = [...MASCOT_BODY_IDS, ...CARVED_BODY_IDS, ...OBJECT_BODY_IDS] as const;
 
 export type BotBodyId = (typeof BOT_BODY_IDS)[number];
+
+/** The bodies a look picker always offers, in its order: the shapes, then the objects. */
+export const EVERYDAY_BODY_IDS = [...MASCOT_BODY_IDS, ...OBJECT_BODY_IDS] as const;
 
 export const botBodySchema = z.enum(BOT_BODY_IDS);
 
@@ -19,6 +23,10 @@ export function botBodyId(value: unknown): BotBodyId {
 
 export function isCarvedBody(value: unknown): value is CarvedBodyId {
   return (CARVED_BODY_IDS as readonly unknown[]).includes(value);
+}
+
+export function isObjectBody(value: unknown): value is ObjectBodyId {
+  return (OBJECT_BODY_IDS as readonly unknown[]).includes(value);
 }
 
 export type CostumeColor = Exclude<MausColor, "silver" | "chrome">;

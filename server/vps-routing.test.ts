@@ -16,7 +16,7 @@ import {
   MANAGED_LABEL,
 } from "./container-computer.ts";
 import { VPS_CONTAINER_LABEL, VPS_IMAGE, VPS_MANAGED_LABEL, VPS_VIEWER_LABEL, vpsContainerName } from "./vps-computer.ts";
-import { CONTROL_BUSY, CONTROL_REFUSAL_PLAIN, controlRefusal, createControlClient } from "./control-client.ts";
+import { CONTROL_REFUSAL_PLAIN, controlRefusal, createControlClient } from "./control-client.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import type { RoutineSchedule } from "../shared/routines.ts";
 import { workerPort } from "./testing/worker-port.ts";
@@ -703,7 +703,7 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
         expect(await gate(checkMount)).toEqual({ held: false, helpOpen: false });
         const started = Date.now();
         const contended = await gate(refillMount);
-        expect(contended).toEqual({ held: true, helpOpen: false, blockedReason: CONTROL_BUSY });
+        expect(contended).toMatchObject({ held: true, helpOpen: false, blockedReason: expect.stringMatching(/^Another thread is using this computer\. This call was not performed\. No screen or app state was checked\. This turn is 1st in line/) });
         expect(controlRefusal(contended)).not.toBe(CONTROL_REFUSAL_PLAIN);
         expect(Date.now() - started).toBeGreaterThanOrEqual(CALL_WAIT_MS - 200);
         // The chip may add a queue position and an estimate; the holder it names is what is under test.

@@ -661,3 +661,27 @@ describe("a vm_exec command that names this computer's own paths", () => {
     expect(failedOnHostPath("ls /Users/ana/Desktop", failed, "linux")).toBe(false);
   });
 });
+
+describe("a thread's own computer", () => {
+  const turn = (worksOn: "cloud" | "vm" | "local" | "browser" | "off" | undefined, task?: { surface?: "cloud" | "vm" | "local" | "browser"; surfaceSource?: "user" | "auto" }) =>
+    resolveSurface({ destination: worksOn, pinnedSurface: chosenPin(task), browserOn: true });
+
+  it("runs on the thread's choice over the bot's, and on the bot's once cleared", () => {
+    expect(turn("cloud", { surface: "vm", surfaceSource: "user" })).toMatchObject({ computer: "vm", pinned: "vm" });
+    expect(turn("vm", { surface: "local", surfaceSource: "user" })).toMatchObject({ computer: "local", pinned: "local" });
+    expect(turn(undefined, { surface: "cloud", surfaceSource: "user" })).toMatchObject({ computer: "cloud", pinned: "cloud" });
+    expect(turn("cloud", {})).toMatchObject({ computer: "cloud", pinned: null });
+    expect(turn(undefined, {})).toMatchObject({ computer: undefined, pinned: null });
+  });
+
+  it("takes an Auto pin for no choice of the person's, and lets the bot's Off beat any choice", () => {
+    expect(turn("vm", { surface: "local", surfaceSource: "auto" })).toMatchObject({ computer: "vm", pinned: null });
+    expect(turn("off", { surface: "vm", surfaceSource: "user" })).toMatchObject({ computer: "off", browser: false, pinned: null });
+  });
+
+  it("does not swap in another place when the thread's choice can't be had", () => {
+    const plan = resolveSurface({ destination: "local", pinnedSurface: "browser", browserOn: false });
+    expect(plan).toMatchObject({ computer: "off", browser: false, pinned: "browser" });
+    expect(plan.note).toMatch(/No computer is mounted instead/);
+  });
+});
