@@ -25,7 +25,7 @@ import { applyOneShotEnv, runAcpOneShot } from "./background-text.ts"; import ty
 import { acpCapabilities } from "./capabilities.ts"; import { readAcpMediaLinks } from "./media-links.ts";
 import { acpNativeLogMessage } from "./tool-log.ts";
 import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
-import { formatQuietLimit, lastSeenPhrase, LIMIT_WORDS, promptIdleTimeoutMs, type LogSignal } from "./quiet-status.ts"; import { startAcpQuietWatch } from "./quiet-watch.ts";
+import { formatQuietLimit, lastSeenPhrase, LIMIT_WORDS, promptIdleTimeoutMs, type LogSignal } from "./quiet-status.ts"; import { startAcpQuietWatch } from "./quiet-watch.ts"; import { AppliedConfig } from "./applied-config.ts";
 import { acpMissingSession } from "./rpc-error.ts";
 import { readSessionReport } from "./session-reports.ts";
 import { promptTokenUsage } from "./prompt-usage.ts";
@@ -259,6 +259,7 @@ export interface AcpSupport extends AcpDriverHooks {
     /** Last model acknowledged by session/new/load/set_model, preserved for pooled turns. */
     currentModelId?: string;
     /** The session's effort, and where a live change to it is recorded. */ currentEffort?: EffortLevel; effortApplied?(effort: EffortLevel | undefined): void;
+    /** What this live session last confirmed per config option; absent for a one-shot session. */ applied?: AppliedConfig;
     /** session/new's or session/load's `configOptions`, verbatim. */
     configOptions: Array<{ id?: unknown; currentValue?: unknown }>;
     /** Tell the person the session runs another model than the one picked. */
@@ -686,6 +687,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           const current = session.current;
           if (support.modelVariants && p.update?.sessionUpdate === "config_option_update") {
             if (current && !current.state.settled && session.sessionId && p.sessionId === session.sessionId) current.receiveModelVariants(p.update);
+            else session.appliedConfig.clear(); // a change between turns is not read: the next turn sends its values again
             return;
           }
           if (current && ["agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update", "plan"].includes(p.update?.sessionUpdate)) {
@@ -794,7 +796,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           set initResult(result: any) { host.initResult = result; },
           get authenticated() { return host.authenticated; },
           set authenticated(done: boolean) { host.authenticated = done; },
-          idleTimer: null,
+          idleTimer: null, appliedConfig: new AppliedConfig(),
           closing: false,
           dead: false,
           get stderr() { return host.stderrTail.text; },
@@ -979,7 +981,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           state: () => session.sessionConfigResult, store: (result) => { session.sessionConfigResult = result; },
           report: (model, variants) => emit({ ...base(threadId, turnId), type: "session.model-variants", model, variants }),
         });
-        const receiveModelVariants = (result: any, replace = false) => modelControls.receive(result, replace);
+        const receiveModelVariants = (result: any, replace = false) => { if (replace) session.appliedConfig.clear(); modelControls.receive(result, replace); };
         const requestedVariantOption = () => modelControls.variant(variant);
 
         const flushAssistantText = () => {
@@ -1188,14 +1190,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 if (pick.notice) emit({ ...base(threadId, turnId), type: "runtime.notice", message: pick.notice, text: pick.noticeText });
                 ({ turn: cliTurn, variant, reportedModel } = pick);
                 current.turn = cliTurn;
-                selectedModel = await modelControls.select(request, sessionId, INIT_TIMEOUT);
+                selectedModel = await modelControls.select((m, p, t, r) => (session.appliedConfig.clear(), request(m, p, t, r)), sessionId, INIT_TIMEOUT);
               }
 
               if (support.configureSession) {
                 approvalUnconfirmed = support.sessionScopedApproval === true;
                 await support.configureSession({
                   request: async (method, params, timeoutMs) => {
-                    const result = await request(method, params, timeoutMs ?? SESSION_CONFIG_TIMEOUT);
+                    const result = await request(method, params, timeoutMs ?? SESSION_CONFIG_TIMEOUT).catch((error) => { session.appliedConfig.clear(); throw error; });
                     if (method === "session/set_model" && params && typeof params === "object" && "modelId" in params && typeof params.modelId === "string") {
                       session.sessionConfigResult = { ...session.sessionConfigResult, models: { ...session.sessionConfigResult?.models, currentModelId: params.modelId } };
                     }
@@ -1209,7 +1211,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   sessionModels: Array.isArray(session.sessionConfigResult?.models?.availableModels)
                     ? session.sessionConfigResult.models.availableModels
                     : [],
-                  currentModelId: session.sessionConfigResult?.models?.currentModelId, currentEffort: session.effort, effortApplied: (effort) => { session.effort = effort; },
+                  currentModelId: session.sessionConfigResult?.models?.currentModelId, currentEffort: session.effort, effortApplied: (effort) => { session.effort = effort; }, applied: session.appliedConfig,
                   configOptions: Array.isArray(session.sessionConfigResult?.configOptions)
                     ? session.sessionConfigResult.configOptions
                     : [],
@@ -1223,17 +1225,12 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 // initialize's currentModelId is the CLI default, not this turn's model.
                 if (!selectedModel && cliTurn.model) selectedModel = cliTurn.model;
               }
-              if (variant !== undefined) {
-                const option = requestedVariantOption();
-                await request(
-                  "session/set_config_option",
-                  { sessionId, configId: option.configId, value: variant },
-                  SESSION_CONFIG_TIMEOUT,
-                  receiveModelVariants,
-                );
-                if (requestedVariantOption().currentValue !== variant) {
-                  throw new Error(`${support.displayName} did not apply variant ${variant}`);
-                }
+              const option = variant === undefined ? null : requestedVariantOption();
+              if (option && variant !== undefined && !session.appliedConfig.holds(option.configId, variant, option.currentValue)) {
+                await request("session/set_config_option", { sessionId, configId: option.configId, value: variant }, SESSION_CONFIG_TIMEOUT, receiveModelVariants)
+                  .catch((error) => { session.appliedConfig.clear(); throw error; });
+                if (requestedVariantOption().currentValue !== variant) throw (session.appliedConfig.clear(), new Error(`${support.displayName} did not apply variant ${variant}`));
+                session.appliedConfig.accepted(option.configId, variant);
               }
             } catch (error) {
               // session.started is the only place the resume cursor is recorded.

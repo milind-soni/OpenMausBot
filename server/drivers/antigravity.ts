@@ -13,6 +13,7 @@ import type {
   SendTurnInput,
 } from "../contracts.ts";
 import { createAcpDriver, type AcpConfig, type AcpSupport } from "./acp/core.ts";
+import { reportedConfigValue } from "./acp/applied-config.ts";
 import { acpVendorMessage } from "./acp/rpc-error.ts";
 import { classifyError } from "./retry.ts";
 import {
@@ -208,11 +209,13 @@ const support: AcpSupport = {
     }
   },
 
-  configureSession: async ({ request, sessionId, config, turn, configOptions }) => {
+  configureSession: async ({ request, sessionId, config, turn, configOptions, applied }) => {
     if (!Array.isArray(configOptions) || !configOptions.some(option => option?.id === "mode")) {
       return;
     }
     const wanted = antigravityPermissionMode(config.fullAuto, turn.approvalMode);
+    // A mode this live session confirmed, and still reports, is not sent again.
+    if (applied?.holds("mode", wanted, reportedConfigValue(configOptions, "mode"))) return;
     const result = await request("session/set_config_option", {
       sessionId,
       configId: "mode",
@@ -221,7 +224,8 @@ const support: AcpSupport = {
     const mode = Array.isArray(result?.configOptions)
       ? result.configOptions.find((option: any) => option?.id === "mode")?.currentValue
       : undefined;
-    if (mode !== wanted) throw new Error(`Antigravity did not apply ${wanted} permission mode.`);
+    if (mode !== wanted) throw (applied?.clear(), new Error(`Antigravity did not apply ${wanted} permission mode.`));
+    applied?.accepted("mode", wanted);
   },
 };
 

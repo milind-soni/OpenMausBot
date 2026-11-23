@@ -1163,6 +1163,54 @@ describe("Antigravity driver over shared ACP", () => {
     ]);
   });
 
+  it("sends an unchanged permission mode and thinking level once per live session, and a change at once", async () => {
+    ensureDirs();
+    const fake = fakeRuntime();
+    const dump = join(fake.directory, "dump.json");
+    const instanceId = "antigravity-config-once";
+    const tokenDirectory = join(antigravityProfileDirectory(instanceId), "antigravity-acp");
+    mkdirSync(tokenDirectory, { recursive: true });
+    writeFileSync(join(tokenDirectory, "acp_token.json"), "{}", { mode: 0o600 });
+    const levels = [{ value: "low", name: "Low" }, { value: "high", name: "High" }];
+    instance = await AntigravityDriver.create({
+      instanceId,
+      displayName: "Antigravity",
+      environment: {
+        FAKE_ACP_AUTH_METHOD: "oauth-personal",
+        FAKE_ACP_MODELS: "gemini-3.8-flash",
+        FAKE_ACP_VARIANTS: JSON.stringify({ "gemini-3.8-flash": { id: "thought_level", currentValue: "low", options: levels } }),
+        FAKE_ACP_MODES: "default,yolo,auto_edit",
+        FAKE_ACP_DUMP: dump,
+      },
+      enabled: true,
+      config: { cli: fake.executable, fullAuto: false },
+    });
+    await instance.startupModelRefresh;
+    recorder = recordEvents(instance.adapter);
+    const configCalls = () => (JSON.parse(readFileSync(`${dump}.config.json`, "utf8")) as Array<{ params: { configId: string; value: string } }>)
+      .map((call) => [call.params.configId, call.params.value]);
+    const run = async (approvalMode: "ask" | "full", variant: string, extra: { sessionReset?: true } = {}) => {
+      const { turnId } = await instance!.adapter.sendTurn({
+        threadId: "thread-config-once", text: "hello", approvalMode, model: "gemini-3.8-flash", variant, cwd: fake.directory,
+        resumeCursor: "fake-acp-session", ...extra,
+      });
+      expect(await recorder!.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok: true });
+    };
+    await run("ask", "high");
+    await run("ask", "high");
+    await run("ask", "high");
+    expect(configCalls()).toEqual([["mode", "default"], ["thought_level", "high"]]);
+    await run("full", "high");
+    await run("full", "low");
+    await run("full", "low");
+    expect(configCalls()).toEqual([["mode", "default"], ["thought_level", "high"], ["mode", "yolo"], ["thought_level", "low"]]);
+    // A reset session (here in a new process, whose record starts empty) confirms nothing yet: both are sent again.
+    await run("full", "low", { sessionReset: true });
+    expect(configCalls()).toEqual([["mode", "yolo"], ["thought_level", "low"]]);
+    await run("full", "low");
+    expect(configCalls()).toEqual([["mode", "yolo"], ["thought_level", "low"]]);
+  });
+
   it("never starts a session on a model this account has not offered", async () => {
     ensureDirs();
     const fake = fakeRuntime();
