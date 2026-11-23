@@ -66,17 +66,13 @@ const toChief = async (label = "Next") => {
   await tick(CHIEF_GUARD_MS);
 };
 const saved = () => f.api.mock.calls.filter(([path, init]) => path === "/api/config" && init?.method === "PUT").map(([, init]) => JSON.parse(init.body));
-const memoryStorage = () => {
-  const values = new Map<string, string>();
-  return { getItem: (k: string) => values.get(k) ?? null, setItem: (k: string, v: string) => void values.set(k, String(v)), removeItem: (k: string) => void values.delete(k), clear: () => values.clear() };
-};
 
 beforeEach(() => {
   vi.useFakeTimers();
   HTMLElement.prototype.animate = vi.fn(() => ({ onfinish: null, oncancel: null, cancel() {} }) as unknown as Animation);
   setLocale("en");
-  vi.stubGlobal("localStorage", memoryStorage());
-  vi.stubGlobal("sessionStorage", memoryStorage());
+  localStorage.clear();
+  sessionStorage.clear();
   f.dispatch.mockReset();
   f.landed.mockReset();
   f.onDone.mockReset();

@@ -16,6 +16,10 @@ import { acpRpcError } from "./rpc-error.ts";
 /** How long a prompt the agent's own notification ended still waits for its session/prompt reply, which carries the
  * prompt's token usage and, in recorded traffic, follows the notification at once. */
 const REPLY_AFTER_END_MS = 2_000;
+/** A prompt's silence is timed in slices this long, and a slice that ends this much past its time was the computer asleep.
+ * Adapted from pingdotgg/t3code@990f31cac25, MIT License, Copyright (c) 2026 T3 Tools Inc. (full text in
+ * third_party/t3-code/LICENSE); modified: the prompt-inactivity loop's slices become this request's idle timer. */
+export const IDLE_SLICE_MS = 60_000, HOST_SLEEP_TOLERANCE_MS = 10_000;
 /** A stderr line longer than this is not the short line a refused thread start writes. */
 const STDERR_LINE_CHARS = 4096;
 
@@ -269,17 +273,27 @@ export class AcpHost {
         timer.unref?.();
       }
       let idleTimer: ReturnType<typeof setTimeout> | null = null;
+      // The silence is counted in slices: a slice that ends well past its time means the computer slept (timers fire late
+      // on wake on macOS and Windows, and pause while the clock jumps on Linux), and sleep is not the agent's silence.
       const armIdle = () => {
         if (!(idleMs && idleMs > 0)) return;
         if (idleTimer) clearTimeout(idleTimer);
-        idleTimer = setTimeout(() => {
-          if (link?.inbound?.busy()) { armIdle(); return; }
-          this.#pending.delete(id);
-          const error = new Error((typeof idleMessage === "function" ? idleMessage() : idleMessage) ?? `${method} stopped responding`);
-          Object.assign(error, { acpPromptStall: true });
-          reject(error);
-        }, idleMs);
-        idleTimer.unref?.();
+        let left = idleMs;
+        const slice = () => {
+          const step = Math.min(left, IDLE_SLICE_MS), startedAt = Date.now();
+          idleTimer = setTimeout(() => {
+            if (Date.now() - startedAt > step + HOST_SLEEP_TOLERANCE_MS) left = idleMs;
+            else left -= step;
+            if (left > 0) return slice();
+            if (link?.inbound?.busy()) { armIdle(); return; }
+            this.#pending.delete(id);
+            const error = new Error((typeof idleMessage === "function" ? idleMessage() : idleMessage) ?? `${method} stopped responding`);
+            Object.assign(error, { acpPromptStall: true });
+            reject(error);
+          }, step);
+          idleTimer.unref?.();
+        };
+        slice();
       };
       armIdle();
       this.#pending.set(id, {
