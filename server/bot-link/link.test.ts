@@ -1,7 +1,7 @@
 // Two places, each with a real coordinator over its own data folder, joined by the real routes and the real dialer over
 // HTTP on this machine: "the computer" asks, "the Cloud" answers. Only the engines are fake.
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -48,6 +48,7 @@ function place(label: string, bots: Bot[], version?: number) {
   const runs: Array<{ botId: string; threadId: string; text: string; resumed: boolean; requester: string; origin: unknown }> = [];
   const sent: Array<{ recipient: string; threadId: string; roomId?: string }> = [];
   const results: Array<{ thread: string; name: string; status: string; result: string }> = [];
+  const resultListeners = new Set<() => void>();
   const requests: string[] = [];
   const issued = new Map<string, string>();
   /** The attachment store and the hand-off file ledger, as handoff-files.ts keeps them. */
@@ -102,7 +103,7 @@ function place(label: string, bots: Bot[], version?: number) {
       openThread: (bot, title, opener, brief) => { const id = `${bot.id}-work-${++openedCount}`; threads.add(id); opened.push({ threadId: id, title, from: opener.name, brief }); return id; },
       hasThread: (_botId, threadId) => threads.has(threadId), personName: () => "Sam",
       sentRow: (input) => { sent.push({ recipient: input.recipient.name, threadId: input.threadId, ...(input.roomId ? { roomId: input.roomId } : {}) }); },
-      resultRow: (parent, child, name) => { results.push({ thread: parent.threadId, name, status: child.status, result: child.result }); },
+      resultRow: (parent, child, name) => { results.push({ thread: parent.threadId, name, status: child.status, result: child.result }); for (const listener of resultListeners) listener(); },
       kick: () => { queueMicrotask(() => { try { coordinator.tick(); } catch { /* closed */ } }); },
       revoke: (sessionId) => { for (const [token, id] of issued) if (id === sessionId) issued.delete(token); },
       now: () => Date.now() + skew,
@@ -181,6 +182,12 @@ function place(label: string, bots: Bot[], version?: number) {
 
   const api = {
     dir, bots, runs, sent, results, requests, opened, boot, listen, unplug, shutdown, handOff, keep, ledger,
+    nextResult(): Promise<void> {
+      return new Promise((resolve) => {
+        const listener = () => { resultListeners.delete(listener); resolve(); };
+        resultListeners.add(listener);
+      });
+    },
     failOnce: (match: RegExp, status = 500) => { failing.push({ match, status }); },
     /** What an assignment here carries one way: who it is from and each file's name and words. */
     carries: (id: string, way: "sent" | "returned") => { const batch = ledger.get(`${id}:${way}`); return batch ? { from: batch.from.name, files: batch.files.map((file) => [file.name, readFileSync(file.path, "utf8")]) } : undefined; },
@@ -744,6 +751,23 @@ describe("the link between a computer and its Cloud", () => {
     expect(cloud.carries(receipts[0]!.requestId!, "returned")).toEqual({ from: "Writer", files: [["draft.md", "# Summary"]] });
     expect(cloud.spooled()).toEqual([]);
     expect(computer.spooled()).toEqual([]);
+  });
+
+  it("returns a completed report when its local attachment was removed before upload", async () => {
+    const { computer, cloud } = await two();
+    computer.engine(async (node) => {
+      computer.attach(node.id, "report.txt", "Attachment contents");
+      const attachment = computer.ledger.get(`${node.id}:returned`)!.files[0]!;
+      rmSync(attachment.path);
+      return { ok: true, text: "Completed report" };
+    });
+    const arrived = cloud.nextResult();
+    const { receipts } = await cloud.handOff("cloud-analyst", call(["Writer"], "Prepare the report"));
+    await arrived;
+    expect(cloud.results).toHaveLength(1);
+    expect(cloud.results[0]).toMatchObject({ status: "completed", result: "Completed report\n\n(The files it attached could not be sent across.)" });
+    expect(cloud.carries(receipts[0]!.requestId!, "returned")).toBeUndefined();
+    expect(cloud.requests.filter((request) => request === "GET /api/bot-link/file?probe")).toHaveLength(1);
   });
 
   it("files wait for a computer that is off, and a file the working side will not take ends the hand-off with the reason", async () => {
