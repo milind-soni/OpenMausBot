@@ -6,7 +6,11 @@ import { resolve } from "node:path";
 
 import { toolCachesOn } from "../bot-box/tool-caches.ts";
 import { audienceHomes } from "../engine-homes/layout.ts";
+import { botEngineSessions } from "../procs.ts";
 import { createCacheSweeper, mountKeepsAtime, volumeOf, type CacheSweeper } from "./sweeper.ts";
+
+/** An engine process of a bot's lives (a turn, or one kept warm between turns): the sweeper waits. */
+export const botEnginesLive = (): boolean => botEngineSessions().live.size > 0;
 
 export function createCacheSweepHost(dataDir: string, env: Record<string, string | undefined> = process.env, home: string = homedir()): CacheSweeper {
   return createCacheSweeper({

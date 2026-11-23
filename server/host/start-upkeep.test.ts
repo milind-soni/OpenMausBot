@@ -56,16 +56,19 @@ describe("start-up upkeep", () => {
     expect(swept).toEqual([7]);
   });
 
-  it("starts the cache cap's sweeper, telling it a turn runs whenever any thread is busy", () => {
+  it("starts the cache cap's sweeper, telling it to wait whenever a thread is busy or an engine process lives", () => {
     vi.useFakeTimers();
-    let working = "";
+    let working = "", warm = false;
     let busy: (() => boolean) | null = null;
     startUpkeep({
       bots: () => [{ id: "bot", tasks: [task("a"), task("b")] }], retentionDays: () => null, busy: (_botId, threadId) => threadId === working,
-      openDirectHandoff: () => false, cleanupPartials: () => 0, caches: { start: (given) => { busy = given; } },
+      openDirectHandoff: () => false, cleanupPartials: () => 0, caches: { start: (given) => { busy = given; } }, enginesLive: () => warm,
     });
     expect(busy!()).toBe(false);
     working = "b";
+    expect(busy!()).toBe(true);
+    working = "";
+    warm = true;
     expect(busy!()).toBe(true);
   });
 });

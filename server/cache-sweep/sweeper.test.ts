@@ -1,6 +1,6 @@
 // The cache cap on fixtures that live only under each test's own temporary folder: the fake HOME, the data folder and
 // every "outside" target too. Nothing here reads the real HOME or the environment.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,7 +9,7 @@ import { requiredScope } from "../request-auth.ts";
 import { CACHES_CLEAR_PATH, CACHES_PATH, createCachesRoutes } from "../routes/caches.ts";
 import { GIB, capBytes, cacheSweepOn, parseSize } from "./limits.ts";
 import { createCacheSweeper, mountKeepsAtime, type CacheSweeperDeps } from "./sweeper.ts";
-import { EVICTING_PREFIX, checkRoot, listUnits } from "./units.ts";
+import { EVICTING_DIR, Pacer, checkRoot, evictingDir, listUnits, removeUnit } from "./units.ts";
 
 const DAY = 24 * 60 * 60_000;
 // Ahead of the files' change times (which a test cannot set), so only the modification times set here decide.
@@ -92,7 +92,7 @@ describe("the sweep", () => {
     expect(existsSync(join(f.tools, "uv", "wheels-v5", "c"))).toBe(true);
     // A split folder itself, and the rename-aside folders, never remain as debris.
     expect(existsSync(join(f.tools, "npm"))).toBe(true);
-    expect(readdirSync(f.tools).filter((name) => name.startsWith(EVICTING_PREFIX))).toEqual([]);
+    expect(readdirSync(join(f.dataDir, EVICTING_DIR))).toEqual([]);
     expect((await made.report()).cacheCleared).toMatchObject({ count: 1, entries: 3 });
   });
 
@@ -289,15 +289,71 @@ describe.skipIf(process.platform === "win32")("nothing outside the roots, ever",
     expect(await checkRoot(odd, [odd, join(odd, ".openmausbot")])).toEqual({ refused: "it is or holds HOME or the data folder" });
   });
 
-  it("finishes an entry an interrupted removal renamed aside, and only that", async () => {
+  it("finishes what an interrupted removal moved into the data folder's evicting folder; a name in a root is not ours", async () => {
     const f = fixture();
-    put(join(f.tools, `${EVICTING_PREFIX}abc`, "half"), 10, 30, f.tools);
-    put(join(f.tools, ".omb-other", "keep"), 10, 30, f.tools);
+    put(join(f.dataDir, EVICTING_DIR, "abc", "half"), 10, 30, f.dataDir);
+    put(join(f.tools, ".omb-cache-evicting", "keep"), 10, 30, f.tools);
     await sweeper(f).made.clearCaches({ dryRun: false });
-    expect(existsSync(join(f.tools, `${EVICTING_PREFIX}abc`))).toBe(false);
-    expect(existsSync(join(f.tools, ".omb-other", "keep"))).toBe(true);
+    expect(existsSync(join(f.dataDir, EVICTING_DIR, "abc"))).toBe(false);
+    expect(existsSync(join(f.tools, ".omb-cache-evicting", "keep"))).toBe(true);
     const { units } = await listUnits("tools", f.tools);
-    expect(units.map((unit) => unit.name)).toEqual([".omb-other"]);
+    expect(units.map((unit) => `${unit.name} ${unit.removable}`)).toEqual([".omb-cache-evicting false"]);
+  });
+
+  it("an evicting folder that is a link is refused, and nothing is removed", async () => {
+    const f = fixture();
+    put(join(f.root, "outside", "precious.txt"), 10, 30, f.root);
+    symlinkSync(join(f.root, "outside"), join(f.dataDir, EVICTING_DIR));
+    expect(await evictingDir(f.dataDir)).toBeNull();
+    put(join(f.tools, "pip", "a"), 10, 30, f.tools);
+    expect(await sweeper(f).made.clearCaches({ dryRun: false })).toMatchObject({ entries: 0 });
+    expect(existsSync(join(f.tools, "pip", "a"))).toBe(true);
+    expect(existsSync(join(f.root, "outside", "precious.txt"))).toBe(true);
+  });
+
+  // A bot can write in its tools root while the sweeper walks an entry: it swaps a folder above the entry for a link to a
+  // folder of the data folder (another member's engine home), hoping the removal follows it.
+  it("a folder swapped for a link while the entry is walked: refused, and the folder the link names is untouched", async () => {
+    const f = fixture();
+    const victim = join(f.dataDir, "engine-homes", "member-0000000000000000");
+    put(join(victim, "abcd", "transcript.jsonl"), 10, 30, f.dataDir);
+    for (let i = 0; i < 20; i++) put(join(f.tools, "npm", "_npx", "abcd", `f${i}`), 1, 30, f.tools);
+    // The sweeper hands removeUnit a checked root's real path (macOS' temporary folder is behind a link).
+    const units = (await listUnits("tools", realpathSync(f.tools))).units.filter((unit) => unit.name === "npm/_npx/abcd");
+    expect(units).toHaveLength(1);
+    let swapped = false;
+    const pacer = new Pacer({ entries: 1_000_000, yieldEvery: 1, pauseMs: 0 });
+    const step = pacer.step.bind(pacer);
+    pacer.step = async () => {
+      if (!swapped) {
+        swapped = true;
+        const { renameSync } = await import("node:fs");
+        renameSync(join(f.tools, "npm", "_npx"), join(f.tools, "npm", "_npx-real"));
+        // The link names a folder holding an entry of the same name, as the attack needs.
+        symlinkSync(victim, join(f.tools, "npm", "_npx"));
+      }
+      return step();
+    };
+    const removal = await removeUnit(units[0]!, { now: NOW, atime: false, trash: await evictingDir(f.dataDir), pacer });
+    expect(removal).toMatchObject({ removed: false, reason: "changed" });
+    expect(existsSync(join(victim, "abcd", "transcript.jsonl"))).toBe(true);
+    expect(readdirSync(join(f.dataDir, EVICTING_DIR))).toEqual([]);
+  });
+});
+
+describe("last use where the mount keeps access times", () => {
+  it("a file read recently keeps its entry, though older by modification; a folder's own access time does not count", async () => {
+    const f = fixture();
+    put(join(f.tools, "pip", "a"), 100, 20, f.tools);
+    put(join(f.tools, "uv", "b"), 100, 10, f.tools);
+    // pip's file was read a day ago; uv's folder was listed a day ago, its file not read since it was written.
+    const read = new Date(NOW - DAY);
+    utimesSync(join(f.tools, "pip", "a"), read, new Date(NOW - 20 * DAY));
+    utimesSync(join(f.tools, "uv"), read, new Date(NOW - 10 * DAY));
+    const { made } = sweeper(f, { atimeKept: async () => true, env: { ...ON, OMB_CACHE_CAP_TOOLS: `${150 * KB}` } });
+    expect(await made.sweep()).toMatchObject({ groups: { tools: { removed: 1 } } });
+    expect(existsSync(join(f.tools, "pip", "a"))).toBe(true);
+    expect(existsSync(join(f.tools, "uv"))).toBe(false);
   });
 });
 
@@ -311,6 +367,13 @@ describe("the admin API", () => {
     });
     return sent[0];
   };
+
+  it("is not there off a Cloud home", async () => {
+    const f = fixture();
+    const desktop = sweeper(f, { env: {} }).made;
+    expect(await call(desktop, "GET", CACHES_PATH)).toMatchObject({ status: 404 });
+    expect(await call(desktop, "POST", CACHES_CLEAR_PATH, {})).toMatchObject({ status: 404 });
+  });
 
   it("needs the admin scope for both paths", () => {
     expect(requiredScope("GET", CACHES_PATH)).toBe("admin");

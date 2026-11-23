@@ -7,8 +7,9 @@
 import { readFile, statfs, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { cloudRole } from "../bot-box/detect.ts";
 import { APP_CAP_ENV, EMERGENCY_BACKOFF_MS, EMERGENCY_FULL, PRESSURE_EVERY_MS, SWEEP_EVERY_MS, TOOL_CAP_ENV, capBytes, cacheSweepOn } from "./limits.ts";
-import { Pacer, checkRoot, expectedRoots, finishLeftovers, listUnits, measure, removeUnit, type CacheGroup, type Measure, type Pace, type Unit } from "./units.ts";
+import { Pacer, checkRoot, evictingDir, expectedRoots, finishLeftovers, listUnits, measure, removeUnit, type CacheGroup, type Measure, type Pace, type Unit } from "./units.ts";
 
 export const CACHE_SWEEP_STATE = "cache-sweep.json";
 /** A measurement a restarted sweep may reuse for ordering (never for deciding a removal: removeUnit walks again). */
@@ -96,10 +97,10 @@ export function createCacheSweeper(deps: CacheSweeperDeps) {
   };
   const save = async () => { if (state) await writeFile(stateFile, JSON.stringify(state)).catch(() => {}); };
 
-  /** The checked roots, and the units and leftovers in each. */
+  /** The checked roots, and the units in each. */
   const roots = async (scope: "tools" | "app" | "all") => {
     const refused: Array<{ path: string; reason: string }> = [];
-    const found: Array<{ group: CacheGroup; real: string; units: Unit[]; leftovers: string[] }> = [];
+    const found: Array<{ group: CacheGroup; real: string; units: Unit[] }> = [];
     const keep = deps.keep();
     for (const root of expectedRoots({ home: deps.home, dataDir: deps.dataDir, audienceHomes: deps.audienceHomes(), tools: deps.tools })) {
       if (scope !== "all" && root.group !== scope) continue;
@@ -129,10 +130,11 @@ export function createCacheSweeper(deps: CacheSweeperDeps) {
     const { found, refused } = await roots(scope);
     const result: ClearResult = { dryRun, bytes: 0, entries: 0, files: 0, recent: 0, kept: 0, refusedRoots: refused };
     const pacer = new Pacer(deps.pace);
+    const trash = dryRun ? null : await evictingDir(deps.dataDir);
+    if (trash) await finishLeftovers(trash);
     for (const root of found) {
-      if (!dryRun) await finishLeftovers(root.real, root.leftovers);
       for (const unit of root.units) {
-        const removal = await removeUnit(unit, { now: now(), atime: await atimeFor(root.real), pacer, dryRun });
+        const removal = await removeUnit(unit, { now: now(), atime: await atimeFor(root.real), trash, pacer, dryRun });
         if (removal.removed) { result.bytes += removal.measure.bytes; result.files += removal.measure.files; result.entries += 1; }
         else if (removal.reason === "recent") result.recent += 1;
         else if (removal.reason !== "gone") result.kept += 1;
@@ -155,8 +157,9 @@ export function createCacheSweeper(deps: CacheSweeperDeps) {
     const pacer = new Pacer(deps.pace);
     const volume = await deps.volume(deps.dataDir);
     const sizes = new Map<string, Measure>();
+    const trash = await evictingDir(deps.dataDir);
+    if (trash) await finishLeftovers(trash);
     for (const root of found) {
-      await finishLeftovers(root.real, root.leftovers);
       for (const unit of root.units) {
         const key = join(root.real, unit.name);
         const known = current.measured[key];
@@ -178,7 +181,7 @@ export function createCacheSweeper(deps: CacheSweeperDeps) {
       for (const entry of units.filter((candidate) => candidate.unit.removable).sort((a, b) => a.size.used - b.size.used)) {
         if (bytes <= cap) break;
         if (busy()) break;
-        const removal = await removeUnit(entry.unit, { now: now(), atime: await atimeFor(entry.root), pacer });
+        const removal = await removeUnit(entry.unit, { now: now(), atime: await atimeFor(entry.root), trash, pacer });
         if (!removal.removed) continue;
         bytes -= Math.max(entry.size.bytes, removal.measure.bytes);
         summary.removed += 1;
@@ -225,6 +228,8 @@ export function createCacheSweeper(deps: CacheSweeperDeps) {
       return serial(() => clearScope(options.scope ?? "all", dryRun, "cleared on request"));
     },
     /** For the storage report and the admin API: the counters, and the last sweep's numbers. */
+    /** Only a Cloud home has one: elsewhere the routes answer 404. */
+    available: () => cloudRole(deps.env),
     report: async () => {
       const current = await load();
       return { on: on(), tools: deps.tools, cacheCleared: current.cleared, emergency: current.emergency, lastSweep: current.lastSweep };

@@ -1,5 +1,5 @@
 // What the cache sweeper may remove, and how: only folders it knows inside the cache roots Step 6 made, one whole entry
-// at a time. Security invariants, each with a test (units.test.ts):
+// at a time. Security invariants, each with a test (sweeper.test.ts):
 //   - every path comes from the arguments (no HOME or environment read here);
 //   - a root is used only when it is exactly the expected `cache` folder, a real folder (no link anywhere on its path past
 //     its parent), and neither HOME nor the data folder nor anything holding them;
@@ -8,10 +8,14 @@
 //   - no link is followed: the walk uses lstat, a unit that is a link or sits under one is refused, and the chmod before
 //     a retry touches only real folders;
 //   - a unit is walked again just before it goes, and one with anything changed in the last RECENT_MS stays (an install or
-//     a download may be writing it); it is renamed to a reserved name in its root first, so a crash leaves a whole entry or
-//     a leftover the next sweep finishes, never half an entry.
+//     a download may be writing it);
+//   - a bot can write in a tools root while a unit is walked (it is in its box), so the removal is checked again after
+//     the walk: the unit's folder and every folder above it are the same ones (device and inode) the check began with,
+//     then it is renamed into the data folder's EVICTING_DIR, which no box has, and that is checked to be the unit's own
+//     inode, else it is put back and refused; only there is it deleted, so a link a bot swaps in mid-way leads nowhere
+//     and a crash leaves a whole entry or a leftover the next sweep finishes, never half an entry.
 import { randomBytes } from "node:crypto";
-import { chmod, lstat, opendir, readdir, realpath, rename, rm } from "node:fs/promises";
+import { chmod, lstat, mkdir, opendir, readdir, realpath, rename, rm } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 
 import { under } from "../bot-box/plan.ts";
@@ -22,8 +26,9 @@ export type CacheGroup = "tools" | "app";
 
 /** The app's own cache folder in the data folder, which the bot box hides. */
 export const APP_CACHE_DIR = "cache";
-/** Where a unit waits between its rename and its removal; a sweep removes any it finds first. */
-export const EVICTING_PREFIX = ".omb-evicting-";
+/** The data folder's folder where a unit waits between its rename and its removal, out of every box's reach (the box
+ * hides the data folder); a sweep first removes whatever is left there. */
+export const EVICTING_DIR = ".omb-cache-evicting";
 
 /** Folders whose children are the units: a folder named here is never removed whole. Each child the test accepts is a
  * unit (or, when it is itself named here, split again); any other child stays. Every other known folder is one unit. */
@@ -97,11 +102,11 @@ async function children(path: string): Promise<string[]> {
 }
 
 /** The units in one root. `keep`: paths that are never units (the running server's own compile cache folder). */
-export async function listUnits(group: CacheGroup, root: string, keep: readonly string[] = []): Promise<{ units: Unit[]; leftovers: string[] }> {
+export async function listUnits(group: CacheGroup, root: string, keep: readonly string[] = []): Promise<{ units: Unit[] }> {
   const splits = group === "tools" ? TOOL_SPLITS : APP_SPLITS;
   const known = group === "tools" ? TOOL_CACHES.map((cache) => cache.folder) : [...APP_FOLDERS];
   const kept = new Set(await Promise.all(keep.map(async (path) => await realOrNull(path) ?? resolve(path))));
-  const units: Unit[] = [], leftovers: string[] = [];
+  const units: Unit[] = [];
   const add = (name: string, removable: boolean) => { if (!kept.has(unitPath({ root, name }))) units.push({ group, root, name, removable }); };
   const split = async (name: string): Promise<void> => {
     const accept = splits[name]!;
@@ -117,11 +122,8 @@ export async function listUnits(group: CacheGroup, root: string, keep: readonly 
   }
   // Anything else at the top of the root, and inside a folder that only holds known ones (huggingface/), is not ours.
   const tops = new Set(known.map((folder) => folder.split("/")[0]!));
-  for (const name of await children(root)) {
-    if (name.startsWith(EVICTING_PREFIX)) leftovers.push(join(root, name));
-    else if (!tops.has(name)) add(name, false);
-  }
-  return { units, leftovers };
+  for (const name of await children(root)) if (!tops.has(name)) add(name, false);
+  return { units };
 }
 
 export interface Pace { entries: number; yieldEvery: number; pauseMs: number }
@@ -157,7 +159,8 @@ export async function measure(path: string, atime: boolean, pacer: Pacer = new P
     result.bytes += typeof stat.blocks === "number" && stat.blocks > 0 ? Number(stat.blocks) * 512 : Number(stat.size);
     result.files += 1;
     result.newest = Math.max(result.newest, Number(stat.mtimeMs), Number(stat.ctimeMs));
-    result.used = Math.max(result.used, Number(stat.mtimeMs), atime ? Number(stat.atimeMs) : 0);
+    // A folder's access time moves whenever it is listed, by this walk too: only files' say a tool read them.
+    result.used = Math.max(result.used, Number(stat.mtimeMs), atime && !stat.isDirectory() ? Number(stat.atimeMs) : 0);
   };
   let top;
   try { top = await lstat(path); } catch { return { ...result, link: true }; }
@@ -203,39 +206,75 @@ async function removeTree(path: string): Promise<void> {
   }
 }
 
-/** Finishes what an earlier sweep renamed aside. Only names with EVICTING_PREFIX directly in a checked root. */
-export async function finishLeftovers(root: string, leftovers: readonly string[]): Promise<number> {
+/** The data folder's EVICTING_DIR, made when missing; null when it is not a real folder there (then nothing is removed). */
+export async function evictingDir(dataDir: string): Promise<string | null> {
+  const dir = join(resolve(dataDir), EVICTING_DIR);
+  await mkdir(dir, { mode: 0o700 }).catch(() => {});
+  const stat = await lstat(dir).catch(() => null);
+  const parent = await realOrNull(resolve(dataDir));
+  return stat?.isDirectory() && !stat.isSymbolicLink() && parent && await realOrNull(dir) === join(parent, EVICTING_DIR) ? dir : null;
+}
+
+/** Finishes what an earlier sweep moved into `trash` (evictingDir) and could not delete. */
+export async function finishLeftovers(trash: string): Promise<number> {
   let done = 0;
-  for (const path of leftovers) {
-    if (dirname(path) !== root || !basename(path).startsWith(EVICTING_PREFIX)) continue;
-    await removeTree(path).then(() => { done += 1; }, () => {});
-  }
+  for (const name of await children(trash)) await removeTree(join(trash, name)).then(() => { done += 1; }, () => {});
   return done;
 }
 
-export type Removal = { removed: true; measure: Measure } | { removed: false; reason: "unknown" | "link" | "outside" | "recent" | "gone" | "failed"; measure?: Measure };
+export type Removal = { removed: true; measure: Measure } | { removed: false; reason: "unknown" | "link" | "outside" | "recent" | "gone" | "failed" | "changed"; measure?: Measure };
 
-/** Removes one unit, or says why not. Walks it again first: what was measured an hour ago does not decide. */
-export async function removeUnit(unit: Unit, options: { now: number; atime: boolean; pacer?: Pacer; dryRun?: boolean }): Promise<Removal> {
+interface Identity { dev: number; ino: number }
+const identity = async (path: string): Promise<Identity | null> => {
+  const stat = await lstat(path).catch(() => null);
+  return stat && !stat.isSymbolicLink() ? { dev: Number(stat.dev), ino: Number(stat.ino) } : null;
+};
+const same = (a: Identity | null, b: Identity | null) => a !== null && b !== null && a.dev === b.dev && a.ino === b.ino;
+
+/** The unit's folder and each folder up to its root, by identity; null when any is a link or not where its path says. */
+async function chain(root: string, path: string): Promise<Identity[] | null> {
+  const ids: Identity[] = [];
+  for (let at = path; ; at = dirname(at)) {
+    const id = await identity(at);
+    if (!id) return null;
+    ids.push(id);
+    if (at === root) break;
+    if (dirname(at) === at) return null;
+  }
+  return await realOrNull(dirname(path)) === dirname(path) ? ids : null;
+}
+
+/** Removes one unit, or says why not. Walks it again first: what was measured an hour ago does not decide. `trash`: the
+ * data folder's evictingDir, required for a real removal. */
+export async function removeUnit(unit: Unit, options: { now: number; atime: boolean; trash: string | null; pacer?: Pacer; dryRun?: boolean }): Promise<Removal> {
   if (!unit.removable) return { removed: false, reason: "unknown" };
   const path = unitPath(unit);
   const rel = relative(unit.root, path);
   if (!rel || rel.startsWith("..") || rel.split(sep).includes("..")) return { removed: false, reason: "outside" };
+  const top = await lstat(path).catch(() => null);
+  if (!top) return { removed: false, reason: "gone" };
+  if (top.isSymbolicLink()) return { removed: false, reason: "link" };
   // Every folder between the root and the unit is real: a link there would take the removal elsewhere.
-  if (await realOrNull(dirname(path)) !== dirname(path)) return { removed: false, reason: "outside" };
-  const stat = await lstat(path).catch(() => null);
-  if (!stat) return { removed: false, reason: "gone" };
-  if (stat.isSymbolicLink()) return { removed: false, reason: "link" };
+  const before = await chain(unit.root, path);
+  if (!before) return { removed: false, reason: "outside" };
   const fresh = await measure(path, options.atime, options.pacer);
   if (fresh.link) return { removed: false, reason: "link" };
   if (fresh.newest > options.now - RECENT_MS) return { removed: false, reason: "recent", measure: fresh };
   if (options.dryRun) return { removed: true, measure: fresh };
-  const aside = join(unit.root, `${EVICTING_PREFIX}${randomBytes(6).toString("hex")}`);
+  if (!options.trash) return { removed: false, reason: "failed", measure: fresh };
+  // The walk took time, and a bot may have swapped a folder on the way for a link meanwhile.
+  const after = await chain(unit.root, path);
+  if (!after || after.length !== before.length || after.some((id, index) => !same(id, before[index]!))) return { removed: false, reason: "changed", measure: fresh };
+  const aside = join(options.trash, randomBytes(8).toString("hex"));
   try {
     await rename(path, aside);
   } catch (error) {
-    if (code(error) === "ENOENT") return { removed: false, reason: "gone" };
-    return { removed: false, reason: "failed", measure: fresh };
+    return { removed: false, reason: code(error) === "ENOENT" ? "gone" : "failed", measure: fresh };
+  }
+  // What moved is the unit itself, or it goes back where it came from, untouched.
+  if (!same(await identity(aside), before[0]!)) {
+    await rename(aside, path).catch(() => {});
+    return { removed: false, reason: "changed", measure: fresh };
   }
   try { await removeTree(aside); } catch { /* the next sweep finishes it (finishLeftovers) */ }
   return { removed: true, measure: fresh };

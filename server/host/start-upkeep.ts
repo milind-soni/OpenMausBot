@@ -15,6 +15,7 @@ export interface StartUpkeepDeps {
   openDirectHandoff: (threadId: string) => boolean;
   cleanupPartials?: () => number;
   caches?: { start(busy: () => boolean): void };
+  enginesLive?: () => boolean;
   sweepLogs?: typeof sweepThreadEventLogs;
 }
 
@@ -49,5 +50,7 @@ export function startUpkeep(deps: StartUpkeepDeps): void {
     }
   });
   setInterval(sweepLogsNow, THREAD_LOG_RETENTION_SWEEP_MS).unref();
-  deps.caches?.start(() => deps.bots().some((bot) => (bot.tasks ?? []).some((task) => deps.busy(bot.id, task.threadId))));
+  // Busy: a turn runs, or an engine process lives on between turns (a kept-warm engine, the MCP servers it started), which
+  // may run a program out of a cache entry.
+  deps.caches?.start(() => (deps.enginesLive?.() ?? false) || deps.bots().some((bot) => (bot.tasks ?? []).some((task) => deps.busy(bot.id, task.threadId))));
 }
