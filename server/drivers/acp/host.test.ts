@@ -1,7 +1,7 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AcpHost, type AcpInbound } from "./host.ts";
 
@@ -87,5 +87,26 @@ describe("one ACP process for several threads", () => {
     h.say({ jsonrpc: "2.0", method: "session/update", params: { update: {} } });
     await flush();
     expect(h.heard.get("only")).toHaveLength(2);
+  });
+});
+
+describe("a prompt's silence timer across a sleep", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("does not count the time the computer slept as the agent's silence", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const h = hostWith(null);
+    const link = h.link("a", "s-a");
+    let failure: Error | null = null;
+    void link.request("session/prompt", { sessionId: "s-a" }, undefined, undefined, 5 * 60_000).catch((error: Error) => { failure = error; });
+    await vi.advanceTimersByTimeAsync(4 * 60_000);
+    // Asleep for half an hour: the wall clock moves on, the timer does not fire until the computer wakes.
+    vi.setSystemTime(Date.now() + 30 * 60_000);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(failure).toBeNull();
+    await vi.advanceTimersByTimeAsync(4 * 60_000);
+    expect(failure).toBeNull();
+    await vi.advanceTimersByTimeAsync(60_000 + 1);
+    expect(failure).toMatchObject({ acpPromptStall: true });
   });
 });
