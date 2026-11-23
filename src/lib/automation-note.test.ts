@@ -79,6 +79,21 @@ describe("automationNote", () => {
     expect(automationNote(line(followUpLine("build", "prod] Check logs and notify.", "restarted")), waits)).toMatchObject({ wait: "build", instructions: "prod] Check logs and notify.", resumed: "restart" });
   });
 
+  it("follows the wait the server recorded when two waits write the same line, and names neither when an older line has no id", () => {
+    const short = waitCard("build", "prod] Check logs"), long = waitCard("build] prod", "Check logs");
+    const waits = knownWaits([short, long]);
+    const text = followUpLine("build", "prod] Check logs");
+    expect(followUpLine("build] prod", "Check logs")).toBe(text);
+    expect(automationNote(line(text, { waitId: "build" }), waits)).toEqual({ wait: "build", instructions: "prod] Check logs" });
+    expect(automationNote(line(text, { waitId: "build] prod" }), waits)).toEqual({ wait: "build] prod", instructions: "Check logs" });
+    expect(automationNote(line(followUpLine("build", "prod] Check logs", "restarted"), { waitId: "build" }), waits)).toMatchObject({ wait: "build", instructions: "prod] Check logs", resumed: "restart" });
+    const unnamed = automationNote(line(text), waits)!;
+    expect(unnamed).toEqual({ unnamed: true, instructions: text });
+    expect(automationNoteTitle(unnamed)).toBe("Following up on a wait");
+    expect(lastLine({} as Bot, [short, long, line(text)], [], false)).toBe("Following up on a wait");
+    expect(automationNote(line(followUpLine("build", "prod] Check logs", "restarted")), waits)).toEqual({ unnamed: true, instructions: text, resumed: "restart" });
+  });
+
   it("sends again the line a reply answers, and offers for editing only what the person typed", () => {
     const asked = typed("Tell me when the report is ready", { id: "asked" });
     const wait = line(followUpLine("the report", "Say it is ready."), { id: "wait" });

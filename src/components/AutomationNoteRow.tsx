@@ -38,7 +38,7 @@ export function AutomationNoteRow({ message, note }: { message: Message; note: A
                 </button>
               )}
             </div>
-            {note.wait !== undefined && resumed && <p className="mt-0.5 text-[12px] leading-4 text-ink-tertiary">{resumed}</p>}
+            {(note.wait !== undefined || note.unnamed) && resumed && <p className="mt-0.5 text-[12px] leading-4 text-ink-tertiary">{resumed}</p>}
           </div>
         </div>
         {note.instructions && (

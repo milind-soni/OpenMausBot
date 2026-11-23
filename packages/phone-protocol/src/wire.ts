@@ -520,7 +520,7 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   relayed?: boolean;
   /** A user line a routine, webhook, room coordination or another bot's
    * message started a turn with: the person did not write it. */
-  automated?: boolean;
+  automated?: boolean; /** On a wait follow-up's line: that wait's id, so the chat names it when two waits write the same words. */ waitId?: string;
   /** Which person sent this user message, when the workspace has more than
    * one. Absent reads as the profile name. */
   sender?: ResolvedSender;

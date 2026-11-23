@@ -2699,6 +2699,7 @@
   "chat.showFull": "Show full message",
   "chat.showLess": "Show less",
   "chat.automationNote.followUp": "Following up on the wait: {label}",
+  "chat.automationNote.followUpUnnamed": "Following up on a wait",
   "chat.automationNote.show": "Show instructions",
   "chat.automationNote.hide": "Hide instructions",
   "chat.automationNote.resumedAfterRestart": "Picked up again after OpenMausBot restarted",

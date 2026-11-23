@@ -2513,6 +2513,7 @@
   "chat.showFull": "Ver a mensagem inteira",
   "chat.showLess": "Mostrar menos",
   "chat.automationNote.followUp": "Continuação da espera: {label}",
+  "chat.automationNote.followUpUnnamed": "Continuação de uma espera",
   "chat.automationNote.show": "Mostrar instruções",
   "chat.automationNote.hide": "Ocultar instruções",
   "chat.automationNote.resumedAfterRestart": "Retomada depois que o OpenMausBot reiniciou",

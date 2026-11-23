@@ -49,6 +49,13 @@ describe("sidebar previews", () => {
     expect(botPreview(bot, [message({ text: "Earlier reply" }), typed, step("Read")], [], false)).not.toBe("Following up on the wait: report");
   });
 
+  it("shows a wait's note in a group chat as the line it is, a step after it included", () => {
+    const note = message({ role: "user", text: "[Wait finished: report] Summarize.", automated: true } as Partial<Message>);
+    const group = (messages: Message[]) => ({ id: "g", name: "Team", memberIds: ["ada"], messages }) as unknown as Group;
+    expect(groupPreview(group([note]), [bot], [], false)).toBe("You: [Wait finished: report] Summarize.");
+    expect(groupPreview(group([note, step("Read")]), [bot], [], false)).toBe("You: [Wait finished: report] Summarize.");
+  });
+
   it("keeps a failed step's error line and a recovery or notice line as they are", () => {
     const failed = [message({ role: "user", text: "Tidy my inbox" }), message({ text: "On it." }), message({ kind: "activity", tool: { name: "error: Gmail is not connected", ok: false } } as Partial<Message>)];
     expect(botPreview(bot, failed, [], false)).toContain("Gmail is not connected");
