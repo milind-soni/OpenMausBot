@@ -127,7 +127,7 @@ describe("installing the native CLI from Google's channel", () => {
       .rejects.toThrow("redirected away from Google's release folder");
     await expect(installAntigravityRuntime({ baseDir, fetchImpl: serving([]).fetchImpl, native: true, cliRelease: one.asset })).rejects.toThrow("Google download failed (404).");
     await expect(installAntigravityRuntime({ baseDir, native: true, cliRelease: null })).rejects.toThrow("Could not find a native Antigravity CLI release.");
-    await expect(resolveAntigravityRuntime("antigravity", { PATH: "" }, baseDir)).rejects.toThrow(/native CLI is not installed.*set the CLI path back to agy/u);
+    await expect(resolveAntigravityRuntime("antigravity", { PATH: "" }, baseDir)).rejects.toThrow(/Antigravity CLI is not installed yet.*choose agy runtime under Runs on/u);
     const root = join(antigravityRuntimesRoot(baseDir), `${process.platform}-${process.arch}`);
     expect(existsSync(join(root, "active.json"))).toBe(false);
     expect(readdirSync(join(root, "versions"))).toEqual([]);
@@ -283,7 +283,7 @@ describe("which CLI an instance that names none runs", () => {
     for (const cli of ["agy", undefined]) {
       await expect(resolveAntigravityRuntime(cli, { PATH: "" }, baseDir)).resolves.toEqual(installed);
       await expect(resolveAntigravityRuntime(cli, { PATH: "" }, baseDir, { nativeByDefault: false })).rejects.toThrow();
-      await expect(resolveAntigravityRuntime(cli, { PATH: "" }, baseDir, { nativeByDefault: false })).rejects.not.toMatchObject({ message: expect.stringContaining("native CLI is not installed") });
+      await expect(resolveAntigravityRuntime(cli, { PATH: "" }, baseDir, { nativeByDefault: false })).rejects.not.toMatchObject({ message: expect.stringContaining("Antigravity CLI is not installed") });
     }
     await expect(resolveAntigravityRuntime("antigravity", { PATH: "" }, baseDir, { nativeByDefault: false })).resolves.toEqual(installed);
     for (const pinned of ["agy_acp_server", "AGY_ACP_SERVER"]) {

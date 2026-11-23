@@ -352,7 +352,7 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
 
     it("fails, rather than pass as done, when an account set to the native CLI cannot start it", async () => {
       const instance = await create("antigravity-native-missing-cli", nativeFixture(folder()), {}, "antigravity");
-      await expect(instance.signOut!()).rejects.toThrow(/native CLI is not installed/u);
+      await expect(instance.signOut!()).rejects.toThrow(/Antigravity CLI is not installed/u);
       const agy = await create("antigravity-native-agy-missing-cli", nativeFixture(folder()), { PATH: "/usr/bin:/bin" }, "agy");
       await expect(agy.signOut!()).rejects.toThrow();
       const gone = nativeFixture(folder());

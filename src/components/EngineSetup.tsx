@@ -279,6 +279,11 @@ export function runsAntigravityCli(instance: InstanceInfo): boolean {
   return /(?:^|[\\/])antigravity(?:\.exe)?$/iu.test(instance.cli?.trim() ?? "");
 }
 
+/** A path that does not ask for the pinned runtime alone takes the Antigravity CLI when the app installs one. */
+function installsAntigravityCli(instance: InstanceInfo): boolean {
+  return instance.driverKind === "antigravityAgent" && !/^agy_acp_server$/iu.test(instance.cli?.trim() ?? "");
+}
+
 function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; signInOnly: boolean }) {
   const { state, refreshInstances, refreshModels } = useStore();
   const signInStarted = useSignInStarted(instance.instanceId);
@@ -634,7 +639,7 @@ export function EngineSetup({
       : install?.server
         ? t("engineSetup.serverInstallDesc")
       : install?.managed
-        ? t("engineSetup.managedDesc")
+        ? t(installsAntigravityCli(instance) ? "engineSetup.managedDescCli" : "engineSetup.managedDesc")
       : signInCommand
         ? t("engineSetup.installDescSignIn")
         : t("engineSetup.installDesc"));

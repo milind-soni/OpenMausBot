@@ -3378,6 +3378,7 @@
   "engineSetup.nativeSharedSignIn": "Google 的 Antigravity CLI 在这台电脑上只保存一个登录：用它的每个账户，以及终端里的 Antigravity CLI，都共用同一个 Google 账户；在这里退出，它们会一起退出。这是 Antigravity CLI 的限制。",
   "engineSetup.terminalSignIn": "请在终端里完成账户登录。之后重新打开此菜单，我们会再检查一次。",
   "engineSetup.injectDesc": "安装一次该智能体，之后就能用本地模型运行——不需要云端登录。",
+  "engineSetup.managedDescCli": "{app} 会安装 Google 官方的 Antigravity CLI。在这里安装并用 Google 登录后，这个模型列表会从你的账户刷新。",
   "engineSetup.managedDesc": "{app} 会安装自己校验过的 Antigravity 运行时。它独立于 Antigravity 应用和 agy CLI；在这里安装并用 Google 登录后，这个模型列表会从你的账户刷新。",
   "engineSetup.installDesc": "安装一次命令行应用。就绪后模型就会出现在这里。",
   "engineSetup.installDescSignIn": "安装一次命令行应用。就绪后模型就会出现在这里；之后可能还需要登录。",
