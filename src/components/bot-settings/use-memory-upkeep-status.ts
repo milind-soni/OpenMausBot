@@ -4,7 +4,8 @@ import { fetchUpkeepStatus, type UpkeepStatus } from "@/lib/memory";
 import type { Bot } from "@/state/store";
 
 export function useMemoryUpkeepStatus(bot: Pick<Bot, "id" | "modelSelection">, active: boolean) {
-  const { id, modelSelection: { instanceId } } = bot;
+  const { id } = bot;
+  const instanceId = active ? bot.modelSelection.instanceId : undefined;
   const [status, setStatus] = useState<UpkeepStatus | null>(null);
   const [readError, setReadError] = useState<string | null>(null);
   const request = useRef<AbortController | null>(null);
