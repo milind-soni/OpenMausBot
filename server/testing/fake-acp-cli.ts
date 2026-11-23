@@ -38,6 +38,7 @@
 //       FAKE_ACP_LATE_UPDATE=1: a tool_call_update of the finished prompt arrives 50 ms after its answer)
 //   FAKE_ACP_GROK_NATIVE_MCP  _x.ai/mcp/list reports these comma-separated native servers after the session's accepted ones
 //   FAKE_ACP_MCP_TRANSPORTS  remote MCP transports advertised in initialize, e.g. "http,sse"
+//   FAKE_ACP_CAPABILITIES_META  JSON initialize advertises as agentCapabilities._meta
 //   FAKE_ACP_MCP_HOLD=1  every session connects its MCP servers at once and keeps the stdio ones running, as Grok does
 //   FAKE_ACP_PERMISSION_OPTIONS  JSON options override in permission mode
 //   FAKE_ACP_DUMP  path for {argv, env}; with FAKE_ACP_MODES or FAKE_ACP_MODELS also <dump>.prompts.jsonl
@@ -1018,6 +1019,7 @@ function handle(msg: any) {
       }
       const authMethods = mode === "no-auth" ? [] : [{ id: process.env.FAKE_ACP_AUTH_METHOD ?? "cached_token" }];
       const agentName = process.env.FAKE_ACP_AGENT_NAME;
+      const capabilityMeta = process.env.FAKE_ACP_CAPABILITIES_META;
       const acceptsImages = process.env.FAKE_ACP_IMAGE_CAPABILITY === "1";
       const mcpTransports = (process.env.FAKE_ACP_MCP_TRANSPORTS ?? "").split(",").map((entry) => entry.trim()).filter(Boolean);
       const closesSessions = ["1", "error"].includes(process.env.FAKE_ACP_SESSION_CLOSE ?? "");
@@ -1031,9 +1033,10 @@ function handle(msg: any) {
         agentInfo: agentName
           ? { name: agentName, version: process.env.FAKE_ACP_AGENT_VERSION ?? "test" }
           : undefined,
-        agentCapabilities: agentName || acceptsImages || mcpTransports.length || closesSessions || deletesSessions || mode === "devin-steer"
+        agentCapabilities: agentName || acceptsImages || mcpTransports.length || closesSessions || deletesSessions || mode === "devin-steer" || capabilityMeta
           ? {
               ...(mode === "devin-steer" && process.env.FAKE_ACP_STEERING !== "off" ? { _meta: { "cognition.ai/midTurnPrompts": true } } : {}),
+              ...(capabilityMeta ? { _meta: JSON.parse(capabilityMeta) } : {}),
               ...(agentName ? { loadSession: true, sessionCapabilities: { resume: true }, auth: { logout: true } } : {}),
               ...(closesSessions || deletesSessions
                 ? { sessionCapabilities: { ...(closesSessions ? { close: {} } : {}), ...(deletesSessions ? { delete: {} } : {}),

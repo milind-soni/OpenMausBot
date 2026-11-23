@@ -16,6 +16,7 @@ import {
   antigravityBrowserHelperProblem,
   antigravityProfileAuthenticated,
   antigravitySessionSetup,
+  antigravityTakesSystemPrompt,
   antigravityTokenPath,
   linuxCaBundle,
   prepareAntigravityProfile,
@@ -215,6 +216,13 @@ describe("the session setup for releases that write a workflow skill file", () =
     expect(antigravitySessionSetup({ agentInfo: { version } })).toEqual({});
   });
 
+  it("carries the system prompt beside the tools it turns off", () => {
+    expect(antigravitySessionSetup({ agentInfo: { version: "1.5.14" } }, "Rules.")).toEqual({ _meta: { antigravity: { systemPrompt: { append: "Rules." } } } });
+    expect(antigravitySessionSetup({ agentInfo: { version: "1.4.3" } }, "")).toEqual({
+      _meta: { antigravity: { disabledTools: ["run_workflow"], systemPrompt: { append: "" } } },
+    });
+  });
+
   it("rides the turn's session/new on the pinned release and not on another", async () => {
     ensureDirs();
     for (const [version, meta] of [["1.4.3", { antigravity: { disabledTools: ["run_workflow"] } }], ["1.1.1", undefined]] as const) {
@@ -407,5 +415,14 @@ describe("the runtime's launch environment", () => {
       writeFileSync(script, "not a program\n");
       expect(await antigravityBrowserHelperProblem(profile.environment, script)).toBe("it could not be started");
     }, 60_000);
+  });
+});
+
+describe("a CLI that takes the system prompt in its session", () => {
+  it("is one whose initialize advertises appending to it", () => {
+    expect(antigravityTakesSystemPrompt({ agentCapabilities: { _meta: { antigravity: { tier: true, systemPrompt: { append: true } } } } })).toBe(true);
+    for (const capabilities of [undefined, {}, { _meta: { antigravity: { tier: true } } }, { _meta: { antigravity: { systemPrompt: { append: "yes" } } } }]) {
+      expect(antigravityTakesSystemPrompt({ agentCapabilities: capabilities })).toBe(false);
+    }
   });
 });

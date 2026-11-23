@@ -25,8 +25,12 @@ export interface AcpDriverHooks {
   skipsAuthenticate?(instanceId: string): boolean;
   /** Every agent process the driver starts for turns and background text. */
   processStarted?(child: ChildProcess, instanceId: string): void;
-  /** Extra session/new, session/load and session/resume parameters, from the agent's initialize answer. */
-  sessionSetupParams?(initializeResult: unknown): Record<string, unknown>;
+  /** Extra session/new, session/load and session/resume parameters, from the agent's initialize answer. `system` is the
+   * session's system prompt when sessionSystemPrompt holds. */
+  sessionSetupParams?(initializeResult: unknown, system?: string): Record<string, unknown>;
+  /** Whether this instance's agent takes the system prompt through sessionSetupParams instead of in the prompt text, where
+   * it would read words of it as the person's commands. A changed system prompt then loads the live session again. */
+  sessionSystemPrompt?(initializeResult: unknown, instanceId: string): boolean;
   /** The `clientInfo` of initialize, for an agent that reads it; the app's own name when unset or undefined. */
   clientInfo?(instanceId: string): { name: string; version: string } | undefined;
   /** Whether the driver answers this permission request with "allow" itself, with no card: for an agent that asks

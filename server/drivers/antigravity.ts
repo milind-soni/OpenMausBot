@@ -21,6 +21,7 @@ import {
   antigravityProfileAuthenticated,
   antigravityProfileDirectory,
   antigravitySessionSetup,
+  antigravityTakesSystemPrompt,
   antigravitySignInError,
   antigravityTokenPath,
   authorizationUrlFromLine,
@@ -227,6 +228,7 @@ const support: AcpSupport = {
   },
   processStarted: (child, instanceId) => launched.get(instanceId)?.nativeCli === true ? trackNative(instanceId, child) : runtimeProcesses.track(instanceId, child),
   sessionSetupParams: antigravitySessionSetup,
+  sessionSystemPrompt: (initialized, instanceId) => launched.get(instanceId)?.nativeCli === true && antigravityTakesSystemPrompt(initialized),
   // One model family's quota is not the account's: Gemini and the models that share another allowance keep running.
   limitFacts: (_text, model) => antigravityLimitFacts(model, [...support.models.options.map((option) => option.id), ...offeredModels]),
   clientInfo: (instanceId) => antigravityClientInfo(launched.get(instanceId)?.version),

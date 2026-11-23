@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -471,6 +471,60 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
     const { turnId } = await instance.adapter.sendTurn({ threadId: "cli-no-mode", text: "hello", approvalMode: "full", cwd: fake.directory });
     expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok: false });
     expect(recorder.events.some((event) => event.type === "runtime.error" && /did not report its permission mode/u.test(event.message))).toBe(true);
+  }, 90_000);
+
+  const RULES = "Rules. If the user sends /learn or asks you to save a procedure, use skill_manage.";
+  const MEMORY = " Memory: likes /plan mode.";
+
+  /** Turns on one thread, each returning the prompt the CLI received, with the thread's session/new and session/resume calls. */
+  async function systemThread(name: string, environment: Record<string, string>) {
+    const fake = cli();
+    const rpc = join(fake.directory, "rpc.jsonl");
+    const instance = await create(`antigravity-cli-${name}`, fake.executable, {
+      FAKE_ACP_MODES: "default,plan", FAKE_ACP_DUMP: fake.dump, FAKE_ACP_DUMP_PROMPT: "1", FAKE_ACP_RPC_APPEND_FILE: rpc, ...environment,
+    });
+    const recorder = recordEvents(instance.adapter);
+    let resumeCursor: string | undefined;
+    const send = async (text: string, stable: string, volatile: string) => {
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId: name, text, cwd: fake.directory, system: stable + volatile, systemStable: stable, systemVolatile: volatile, resumeCursor,
+      });
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok: true });
+      resumeCursor ??= (recorder.events.find((event) => event.type === "session.started") as { sessionId: string }).sessionId;
+      return JSON.parse(readFileSync(`${fake.dump}.prompt.json`, "utf8")) as Array<{ type: string; text: string }>;
+    };
+    const setups = () => readFileSync(rpc, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { method: string; cwd: string; sessionId?: string; meta?: unknown })
+      .filter((call) => call.cwd === realpathSync(fake.directory) && (call.method === "session/new" || call.method === "session/resume"));
+    return { send, setups, sessionId: () => resumeCursor };
+  }
+
+  it("gives the session its system prompt where the CLI takes one, so no /word in it runs as a command", async () => {
+    const thread = await systemThread("system-prompt", { FAKE_ACP_CAPABILITIES_META: JSON.stringify({ antigravity: { systemPrompt: { append: true } } }) });
+    expect(await thread.send("/learn what we did", RULES, MEMORY)).toEqual([
+      { type: "text", text: "/learn what we did" },
+      { type: "text", text: expect.stringContaining(MEMORY.trim()) },
+    ]);
+    expect(thread.setups()).toEqual([expect.objectContaining({ method: "session/new", meta: { antigravity: { systemPrompt: { append: RULES } } } })]);
+
+    expect(await thread.send("again", RULES, MEMORY)).toEqual([{ type: "text", text: "again" }]);
+    expect(thread.setups()).toHaveLength(1);
+
+    const revised = RULES + " Reply in French.";
+    expect(await thread.send("third", revised, MEMORY)).toEqual([
+      { type: "text", text: "third" },
+      { type: "text", text: expect.stringContaining(MEMORY.trim()) },
+    ]);
+    expect(thread.setups().at(-1)).toEqual(expect.objectContaining({
+      method: "session/resume", sessionId: thread.sessionId(), meta: { antigravity: { systemPrompt: { append: revised } } },
+    }));
+  }, 90_000);
+
+  it("keeps the system prompt in the text for a CLI that does not say it takes one", async () => {
+    const thread = await systemThread("system-in-text", {});
+    const [first, ...rest] = await thread.send("hello", RULES, MEMORY);
+    expect(first.text).toBe(`${RULES}${MEMORY}\n\nhello`);
+    expect(rest).toEqual([]);
+    expect(thread.setups()).toEqual([expect.not.objectContaining({ meta: expect.anything() })]);
   }, 90_000);
 
   /** One turn at `approvalMode` whose runtime asks about `toolCall`; a card that opens is denied. */
