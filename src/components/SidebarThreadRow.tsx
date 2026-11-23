@@ -277,11 +277,15 @@ const sameFields = <T extends object>(a: T, b: T): boolean => {
 const sameThreadRow = ({ task: previousTask, ...previous }: ThreadRowProps, { task, ...next }: ThreadRowProps): boolean =>
   sameFields(previousTask, task) && sameFields(previous, next);
 
+function SetMainThreadItem({ main, onPick }: { main: boolean; onPick: () => void }) {
+  if (useOwnerOrAdmin() !== true || window.ogb?.remoteClient?.active === true) return null;
+  return <button type="button" disabled={main} title={main ? t("sidebar.bot.simple.isMainThread") : undefined} onClick={onPick} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40"><Star size={16} />{t("sidebar.bot.simple.setMainThread")}</button>;
+}
+
 export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, current, folders, onSelect, onRename, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSetMain, onSnooze, onLink, onRefreshPermissions, onMemory, activityLabel: liveActivity, now, selectMode = false, checked = false, onToggleSelect, panel = false, preview, main = false }: ThreadRowProps) {
   const activityLabel = useHeldText(liveActivity);
   // Simple mode's menu keeps what a person needs for a conversation; Advanced adds the rest.
   const advanced = useAdvancedMode();
-  const admin = useOwnerOrAdmin();
   const [menu, setMenu] = useState<{ left: number; top: number } | null>(null);
   const [webLink, setWebLink] = useState<string | null>(null);
   useEffect(() => {
@@ -418,7 +422,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
         </Select>
       </label>}
       {onPin && <button type="button" onClick={() => { setMenu(null); onPin(task, task.pinned !== true); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover">{task.pinned === true ? <PinOff size={16} /> : <Pin size={16} />}{task.pinned === true ? t("sidebar.bot.unpin") : t("sidebar.bot.pin")}</button>}
-      {onSetMain && admin === true && window.ogb?.remoteClient?.active !== true && !task.routineRunId && !task.private && !archived && <button type="button" disabled={main} title={main ? t("sidebar.bot.simple.isMainThread") : undefined} onClick={() => { setMenu(null); onSetMain(task); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40"><Star size={16} />{t("sidebar.bot.simple.setMainThread")}</button>}
+      {onSetMain && !task.routineRunId && !task.private && !archived && <SetMainThreadItem main={main} onPick={() => { setMenu(null); onSetMain(task); }} />}
       {advanced && onLink && task.link && <button type="button" onClick={() => { setMenu(null); onLink(task, null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Link2Off size={16} />{t("task.removeLink")}</button>}
       {onArchive && <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); onArchive(task, isArchived(task) ? null : Date.now()); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40">{archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}{archived ? t("task.unarchive") : t("task.archive")}</button>}
       {advanced && onSnooze && <div className="px-2 pt-1">
