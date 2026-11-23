@@ -67,7 +67,7 @@ export function batchQuote(value: string): string {
 }
 
 /** Hides the console the launcher's cmd.exe owns: agent-browser starts it visible (no CREATE_NO_WINDOW), and the blank
- * window would stay on the desktop while the browser runs (#6916). Only this console: ShowWindow on GetConsoleWindow, and
+ * window would stay on the desktop while the browser runs. Only this console: ShowWindow on GetConsoleWindow, and
  * PowerShell adds none. Batch files double every percent, and this line holds none. */
 const HIDE_OWN_CONSOLE = "powershell -NoProfile -NonInteractive -Command \"$w = Add-Type -MemberDefinition"
   + " '[DllImport(\"user32.dll\")] public static extern IntPtr GetConsoleWindow();"
@@ -78,7 +78,7 @@ export function launcherScript(settings: LauncherSettings, platform: NodeJS.Plat
   const flags = launcherFlags(settings, platform);
   if (platform === "win32") {
     // agent-browser (Rust) runs this .cmd through cmd.exe without CREATE_NO_WINDOW, so the shell's blank console shows on
-    // the desktop and stays there while the browser runs (#6916). The launcher hides only the console it owns; Chrome's own
+    // the desktop and stays there while the browser runs. The launcher hides only the console it owns; Chrome's own
     // windows, and any terminal the person opened, are untouched. PowerShell is a console app and joins this console, so it
     // opens no window of its own; `\"` is how Windows PowerShell reads a quote inside a quoted command line.
     return [

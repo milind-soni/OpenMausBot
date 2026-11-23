@@ -79,7 +79,7 @@ describe("the launcher agent-browser runs instead of Chrome", () => {
       `"C:\\Users\\Ada 100%%\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe" %* "--disable-blink-features=AutomationControlled" "--user-agent=${windowsUa}" "--screen-info={1536x864}"`,
       "",
     ].join("\r\n"));
-    // The hiding line runs before Chrome and carries no percent for cmd.exe to expand (#6916).
+    // The hiding line runs before Chrome and carries no percent for cmd.exe to expand.
     expect(script.split("\r\n")[1]).not.toContain("%");
     expect(launcherPath("C:\\data", "win32")).toMatch(/chrome-launcher\.cmd$/u);
     expect(() => batchQuote("--user-agent=\"quoted\"")).toThrow(/quote/);
