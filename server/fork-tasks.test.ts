@@ -74,6 +74,27 @@ it("forks a room conversation into a normal room task", async () => {
   expect(store.groupTaskByThread(room.id, fork!.threadId)).toBeTruthy();
 });
 
+it("uses the newest text on the selected branch for a fork without an explicit message", async () => {
+  const store = await freshStore();
+  const bot = store.createBot();
+  const { threadId } = store.createTask(bot.id)!;
+  expect(store.forkTask(bot.id, threadId, undefined)).toBeNull();
+  const question = store.appendMessage(threadId, { role: "user", kind: "text", text: "First question" });
+  const reply = store.appendMessage(threadId, { role: "bot", kind: "text", text: "First answer" });
+  const followUp = store.appendMessage(threadId, { role: "user", kind: "text", text: "Follow up on the first answer" });
+  const activity = store.appendMessage(threadId, { role: "bot", kind: "activity" });
+  const otherBranch = store.appendMessage(threadId, { role: "bot", kind: "text", text: "Another branch", parentId: question.id });
+  const pinned = store.forkTask(bot.id, threadId, undefined, activity.id);
+  expect(pinned?.origin).toEqual({ threadId, messageId: followUp.id });
+  expect(store.activeLeaf(threadId)).toBe(otherBranch.id);
+  expect(store.forkTask(bot.id, threadId, undefined, "unknown-branch")).toBeNull();
+  expect(store.setActiveLeaf(threadId, reply.id)).toBe(activity.id);
+
+  const fork = store.forkTask(bot.id, threadId, undefined);
+  expect(fork?.origin).toEqual({ threadId, messageId: followUp.id });
+  expect(store.activePath(fork!.threadId).map((message) => message.id)).toEqual([question.id, reply.id, followUp.id]);
+});
+
 it("keeps a background room fork unread when the shown conversation is read", async () => {
   const store = await freshStore();
   const room = store.createGroup("Review", [store.createBot().id]);
@@ -116,6 +137,27 @@ it("preserves an explicit no-folder choice when forking a bot conversation", asy
   expect(fork.cwd).toBeNull();
   expect(store.taskByThread(bot.id, fork.threadId)?.cwd).toBeNull();
   expect(store.pinTaskCwd(bot.id, fork.threadId, join(home, "available-folder"))).toBeNull();
+});
+
+it("carries a person's computer for the conversation into its fork, never an Auto pin", async () => {
+  const store = await freshStore();
+  const bot = store.createBot();
+  const other = store.createTask(bot.id, "Sibling", false)!;
+  const anchor = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "Work on the private desktop" });
+  store.patchTask(bot.id, bot.threadId, { surface: "vm", surfaceSource: "user" });
+  const chosen = store.forkTask(bot.id, bot.threadId, anchor.id)!;
+  expect(store.taskByThread(bot.id, chosen.threadId)).toMatchObject({ surface: "vm", surfaceSource: "user" });
+  expect(store.taskByThread(bot.id, other.threadId)?.surface).toBeUndefined();
+  expect(store.bot(bot.id)?.computer).toBeUndefined();
+
+  store.patchTask(bot.id, bot.threadId, { surface: "local", surfaceSource: undefined });
+  expect(store.taskByThread(bot.id, store.forkTask(bot.id, bot.threadId, anchor.id)!.threadId)?.surface).toBe("local");
+
+  store.patchTask(bot.id, bot.threadId, { surface: "cloud", surfaceSource: "auto" });
+  const followsBot = store.taskByThread(bot.id, store.forkTask(bot.id, bot.threadId, anchor.id)!.threadId)!;
+  expect(followsBot.surface).toBeUndefined();
+  expect(followsBot.surfaceSource).toBeUndefined();
+  expect(store.createTask(bot.id, "New", false)?.surface).toBeUndefined();
 });
 
 it("removes copied history when registering the fork fails", async () => {

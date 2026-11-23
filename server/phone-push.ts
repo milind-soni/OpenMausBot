@@ -1,7 +1,8 @@
 // Closed-app phone alerts. A paired phone registers its APNs or FCM device token here; when an approval, a question, a
 // sign-in request or a finished reply would reach a phone that holds no live event stream, this asks the push relay in
-// the hosted control plane to wake it, with the installation credential this server already has. The push is
-// content-free: kind, a title from names alone, opaque ids. Off unless `features.phonePush` (or OMB_PHONE_PUSH=1).
+// the hosted control plane to wake it, with the installation credential this server already has; a Cloud home, which has
+// none, asks its Admin to relay instead (phone-push-admin.ts). The push is content-free: kind, a title from names alone,
+// opaque ids. Off unless `features.phonePush` (or OMB_PHONE_PUSH=1).
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
@@ -30,6 +31,7 @@ import {
   type PushKind,
 } from "../shared/phone-push.ts";
 import { writeFileAtomic } from "./atomic.ts";
+import { cloudHomePushAccess, cloudHomePushRequest, type CloudHomePushAccess } from "./phone-push-admin.ts";
 import { conversationLanguage, serverLine, type ServerLineKey } from "./server-lines.ts";
 
 export const PHONE_PUSH_FILE = "push-devices.json";
@@ -89,10 +91,12 @@ const storedDevice = z.object({
 const storedFile = z.object({ version: z.literal(1), devices: z.array(storedDevice).max(MAX_PUSH_DEVICES) });
 type StoredDevice = z.infer<typeof storedDevice>;
 
-export interface PhonePushAccess {
+export interface InstallationPushAccess {
   controlPlane: string;
   credential: string;
 }
+/** The control plane with an installation credential, or (a Cloud home) its Admin with its bootstrap secret. */
+export type PhonePushAccess = InstallationPushAccess | CloudHomePushAccess;
 
 export type PushOutcome = "sent" | "dropped" | "stale" | "live" | "gone" | "failed" | "retry" | "paused";
 
@@ -409,18 +413,17 @@ export class PhonePush {
   }
 
   /** One POST to the relay; null when it could not be reached. The credential travels only in the Authorization header,
-   * to the control plane's own origin, and is never logged. */
+   * to the control plane's own origin, and is never logged. A Cloud home's goes to its Admin, signed with its bootstrap
+   * secret, which never leaves this process: the same body, the same answers. */
   private async relay(path: string, body: unknown): Promise<RelayAnswer | null> {
     const access = this.options.access();
     if (!access) return null;
+    const request = "credential" in access
+      ? { url: `${access.controlPlane}${path}`, init: { method: "POST", headers: { authorization: `Bearer ${access.credential}`, "content-type": "application/json" }, body: JSON.stringify(body) } }
+      : cloudHomePushRequest(access, path, body, this.now());
+    if (!request) return null;
     try {
-      const response = await this.fetchImpl(`${access.controlPlane}${path}`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${access.credential}`, "content-type": "application/json" },
-        body: JSON.stringify(body),
-        redirect: "error",
-        signal: AbortSignal.timeout(RELAY_TIMEOUT_MS),
-      });
+      const response = await this.fetchImpl(request.url, { ...request.init, redirect: "error", signal: AbortSignal.timeout(RELAY_TIMEOUT_MS) });
       const payload = await response.json().catch(() => null) as { error?: unknown } | null;
       const retryAfter = Number(response.headers.get("retry-after"));
       return {
@@ -436,7 +439,7 @@ export class PhonePush {
 }
 
 /** A validated access pair, or null. */
-export function phonePushAccess(controlPlane: unknown, credential: unknown): PhonePushAccess | null {
+export function phonePushAccess(controlPlane: unknown, credential: unknown): InstallationPushAccess | null {
   const origin = typeof controlPlane === "string" ? normalizeControlPlaneURL(controlPlane) : "";
   if (!origin || typeof credential !== "string" || !INSTALLATION_CREDENTIAL.test(credential)) return null;
   return { controlPlane: origin, credential };
@@ -444,15 +447,18 @@ export function phonePushAccess(controlPlane: unknown, credential: unknown): Pho
 
 /** Where this server's control-plane access comes from, first match wins: the desktop app's private message (its
  * credential lives in the OS store this process cannot read), OMB_PUSH_CREDENTIAL, a fleet's
- * OMB_INSTALLATION_CREDENTIAL, `openmausbot login`'s tunnel-account.json. OMB_CONTROL_PLANE_URL overrides the origin. */
+ * OMB_INSTALLATION_CREDENTIAL, `openmausbot login`'s tunnel-account.json. OMB_CONTROL_PLANE_URL overrides the origin.
+ * Last, a Cloud home (server/cloud-home.ts) with none of those: its Admin relays, signed with its bootstrap secret. */
 export class PhonePushAccessSource {
-  private desktop: PhonePushAccess | null | undefined;
+  private desktop: InstallationPushAccess | null | undefined;
   private readonly env: NodeJS.ProcessEnv;
   private readonly options: { tunnelFile: string; defaultControlPlane: string };
+  private readonly cloudHome: CloudHomePushAccess | null;
 
-  constructor(options: { env?: NodeJS.ProcessEnv; tunnelFile: string; defaultControlPlane: string }) {
+  constructor(options: { env?: NodeJS.ProcessEnv; tunnelFile: string; defaultControlPlane: string; cloudHome?: { adminOrigin: string; machineId: string; bootstrapSecret: string } | null }) {
     this.env = options.env ?? process.env;
     this.options = options;
+    this.cloudHome = cloudHomePushAccess(options.cloudHome);
   }
 
   /** The desktop app's message: true when it was one. */
@@ -478,9 +484,9 @@ export class PhonePushAccessSource {
     try {
       document = JSON.parse(readFileSync(this.options.tunnelFile, "utf8"));
     } catch {
-      return null;
+      return this.cloudHome;
     }
     const credential = document && typeof document === "object" ? (document as Record<string, unknown>)[COMPANION_INSTALLATION_CREDENTIAL_FIELD] : undefined;
-    return phonePushAccess(this.controlPlane(), credential);
+    return phonePushAccess(this.controlPlane(), credential) ?? this.cloudHome;
   }
 }

@@ -392,6 +392,111 @@ describe("surface pin provenance against the real server", () => {
     await stop();
   });
 
+  // Linux needs a separately validated native runtime descriptor for this computer (see the test above).
+  it.skipIf(process.platform === "linux")("runs two threads of one bot on two computers at once, and keeps each choice to its own thread", async () => {
+    // The app's driver record is there from the server's start, so this computer is ready before the first turn.
+    mkdirSync(dirname(cuaDescriptor), { recursive: true });
+    writeFileSync(cuaDescriptor, JSON.stringify({
+      mode: "embedded", status: "ready", socketPath: join(home, "cua.sock"),
+      mcpCommand: "/fixture/cua-driver", mcpArgs: ["mcp"], mcpEnv: {},
+    }), { mode: 0o600 });
+    await start();
+    const { bot } = await apiOk("POST", "/api/bots", { name: "Two Places Bot" });
+    const { bot: neighbour } = await apiOk("POST", "/api/bots", { name: "Neighbour Bot" });
+    for (const id of [bot.id, neighbour.id]) await apiOk("PATCH", `/api/bots/${id}`, { computer: "vm" });
+    const [mine, sibling] = (await Promise.all([
+      apiOk("POST", `/api/bots/${bot.id}/tasks`, {}),
+      apiOk("POST", `/api/bots/${bot.id}/tasks`, {}),
+    ])).map(({ task }) => task);
+    const { task: theirs } = await apiOk("POST", `/api/bots/${neighbour.id}/tasks`, {});
+    await apiOk("PATCH", `/api/bots/${bot.id}/tasks/${mine.threadId}`, { surface: "local" });
+    expect((await apiOk("GET", `/api/bots/${bot.id}/computer?threadId=${mine.threadId}`)).surface).toBe("local");
+    expect((await apiOk("GET", `/api/bots/${bot.id}/computer?threadId=${sibling.threadId}`)).surface).toBe("vm");
+    const onVm = (sent: any) => mountedComputer(sent)?.args.some((arg: string) => arg.includes("container-mcp")) === true;
+    const turnIn = async (botId: string, threadId: string, text: string) => {
+      rmSync(dumpFile, { force: true });
+      await apiOk("POST", `/api/bots/${botId}/messages`, { text, threadId });
+      const sent = await until(dump, (candidate) => JSON.stringify(candidate.prompt).includes(text));
+      await busy(botId, threadId);
+      return sent;
+    };
+    try {
+      resetTurn();
+      const here = await turnIn(bot.id, mine.threadId, "Pinned thread: work on this computer.");
+      expect(here.systemPrompt).toContain("You can act on the user's computer");
+      expect(mountedComputer(here).env.OMB_CUA_COMMAND).toBe("/fixture/cua-driver");
+      expect(onVm(here)).toBe(false);
+
+      const there = await turnIn(bot.id, sibling.threadId, "Sibling thread: work where the bot works.");
+      expect(onVm(there)).toBe(true);
+      expect(mountedComputer(there).env.OMB_CUA_COMMAND).toBeUndefined();
+      expect(there.systemPrompt).not.toContain("You can act on the user's computer");
+      // Both turns of the one bot are running at once, each on its own computer.
+      expect((await threadState(bot.id, mine.threadId)).busy).toBe(true);
+      expect((await threadState(bot.id, sibling.threadId)).busy).toBe(true);
+      writeFileSync(finishFile, "finish");
+      await idle(bot.id, mine.threadId);
+      await idle(bot.id, sibling.threadId);
+
+      rmSync(finishFile, { force: true });
+      const neighbours = await turnIn(neighbour.id, theirs.threadId, "Neighbour: work where you work.");
+      expect(onVm(neighbours)).toBe(true);
+      expect(mountedComputer(neighbours).env.OMB_CUA_COMMAND).toBeUndefined();
+      writeFileSync(finishFile, "finish");
+      await idle(neighbour.id, theirs.threadId);
+    } finally {
+      rmSync(cuaDescriptor, { force: true });
+    }
+    expect(savedTask(bot.id, mine.threadId)).toMatchObject({ surface: "local", surfaceSource: "user" });
+    expect(savedTask(bot.id, sibling.threadId)).not.toHaveProperty("surface");
+    expect(savedTask(neighbour.id, theirs.threadId)).not.toHaveProperty("surface");
+    expect((readRegistry(data).bots as any[]).find((saved: any) => saved.id === bot.id).computer).toBe("vm");
+
+    const { messages } = await apiOk("GET", `/api/threads/${mine.threadId}/messages?limit=30`);
+    const reply = messages.findLast((message: any) => message.role === "bot" && message.kind === "text");
+    const { task: forked } = await apiOk("POST", `/api/bots/${bot.id}/tasks/${mine.threadId}/forks`, { messageId: reply.id });
+    expect(savedTask(bot.id, forked.threadId)).toMatchObject({ surface: "local", surfaceSource: "user" });
+    const { task: fresh } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, {});
+    expect(savedTask(bot.id, fresh.threadId)).not.toHaveProperty("surface");
+
+    await apiOk("PATCH", `/api/bots/${bot.id}/tasks/${mine.threadId}`, { surface: null });
+    expect((await apiOk("GET", `/api/bots/${bot.id}/computer?threadId=${mine.threadId}`)).surface).toBe("vm");
+    for (const id of [bot.id, neighbour.id]) await apiOk("DELETE", `/api/bots/${id}`);
+    await stop();
+  }, 60_000);
+
+  it.skipIf(process.platform === "linux")("never puts a thread chosen for the Local VM on this computer when the VM can't be had", async () => {
+    mkdirSync(dirname(cuaDescriptor), { recursive: true });
+    writeFileSync(cuaDescriptor, JSON.stringify({
+      mode: "embedded", status: "ready", socketPath: join(home, "cua.sock"),
+      mcpCommand: "/fixture/cua-driver", mcpArgs: ["mcp"], mcpEnv: {},
+    }), { mode: 0o600 });
+    await start();
+    try {
+      const { bot } = await apiOk("POST", "/api/bots", { name: "Isolated Bot" });
+      await apiOk("PATCH", `/api/bots/${bot.id}`, { computer: "local" });
+      const { task } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, {});
+      await apiOk("PATCH", `/api/bots/${bot.id}/tasks/${task.threadId}`, { surface: "vm" });
+      resetTurn();
+      vmState({ failed: true });
+      await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Use the private desktop.", threadId: task.threadId });
+      const lastRow = async () => {
+        const { messages } = await apiOk("GET", `/api/threads/${task.threadId}/messages?limit=30`);
+        return String(messages.filter((message: any) => message.kind !== "digest").at(-1)?.tool?.name ?? "");
+      };
+      await until(() => lastRow(), (row) => row.startsWith("error:"));
+      await idle(bot.id, task.threadId);
+      // Refused before any engine started: no tools at all, so none on this computer.
+      expect(existsSync(dumpFile)).toBe(false);
+      expect(await lastRow()).toMatch(/Clear this conversation's place/);
+      expect(savedTask(bot.id, task.threadId)).toMatchObject({ surface: "vm", surfaceSource: "user" });
+      await apiOk("DELETE", `/api/bots/${bot.id}`);
+    } finally {
+      rmSync(cuaDescriptor, { force: true });
+    }
+    await stop();
+  }, 60_000);
+
   it("clears a select_computer pin to a cloud computer that fails, and keeps a person's pin", async () => {
     await start();
     const { bot } = await apiOk("POST", "/api/bots", { name: "Failed place bot" });

@@ -20,8 +20,8 @@ import {
   MANAGED_LABEL,
 } from "./container-computer.ts";
 import { desktopCapArgs, dockerSecurityIsHardened, type DockerHardeningConfig } from "./container-isolation.ts";
-import { PIDS_LIMIT, raisePidsLimit } from "./container-limits.ts";
-import { DATA_DIR, isValidSshAlias, vpsSshAlias, type AppConfig } from "./config.ts";
+import { applyResourcesBeforeStart, DEFAULT_DESKTOP_RESOURCES, PIDS_LIMIT, raisePidsLimit, resourceArgs, type DesktopResources } from "./container-limits.ts";
+import { DATA_DIR, isValidSshAlias, vpsResources, vpsSshAlias, type AppConfig } from "./config.ts";
 import { augmentedPath } from "./env-path.ts";
 import { COMMAND_TIMEOUT_KILL_GRACE_MS, defaultRunner, VpsHostUnreachableError, type VpsCommandRunner } from "./vps-command.ts";
 export { defaultRunner, VpsHostUnreachableError, type VpsCommandOptions, type VpsCommandRunner } from "./vps-command.ts";
@@ -65,7 +65,7 @@ const lifecycleLocks = new Map<string, Promise<void>>();
 /** The app config reloads in place: across awaits it could inspect one host and mutate another. */
 function snapshotVpsConfig(cfg: AppConfig): AppConfig {
   const sshAlias = vpsSshAlias(cfg);
-  return sshAlias ? { vps: { sshAlias } } : {};
+  return sshAlias ? { vps: { ...cfg.vps, sshAlias } } : {};
 }
 
 export function vpsLifecycleBusy(): boolean {
@@ -73,7 +73,7 @@ export function vpsLifecycleBusy(): boolean {
 }
 const LOCK_ACQUIRE_TIMEOUT_MS = 5_000;
 const STATUS_CACHE_TTL_MS = 10_000;
-const statusCache = new Map<string, { status: VpsComputerStatus; expiresAt: number }>();
+const statusCache = new Map<string, { status: VpsComputerStatus; expiresAt: number }>(); /** The last inspection of a bot's VPS computer, however old, and when it ran: never a new one. */ export function lastVpsStatus(cfg: AppConfig, botId: string): { status: VpsComputerStatus; at: number } | null { const key = vpsLockKey(snapshotVpsConfig(cfg), botId), hit = key ? statusCache.get(key) : undefined; return hit ? { status: hit.status, at: hit.expiresAt - STATUS_CACHE_TTL_MS } : null; }
 const pendingStatuses = new Map<string, Promise<VpsComputerStatus>>();
 const pendingProvisions = new Map<string, Promise<VpsComputerStatus>>();
 const SCREENSHOT_BUDGET_MS = 45_000;
@@ -722,6 +722,7 @@ export function vpsContainerRunArgs(
   containerName: string,
   imageRef = VPS_IMAGE,
   viewerSecret = randomBytes(18).toString("base64url"),
+  resources: DesktopResources = DEFAULT_DESKTOP_RESOURCES,
 ): string[] {
   if (!CONTAINER_NAME.test(containerName) || (imageRef !== VPS_IMAGE && !IMAGE_ID.test(imageRef))) {
     throw new Error("invalid managed VPS container or image reference");
@@ -748,12 +749,7 @@ export function vpsContainerRunArgs(
     `${BASE_IMAGE_LABEL}=${BASE_IMAGE_DIGEST}`,
     "--label",
     `${IMAGE_LAYER_LABEL}=${IMAGE_LAYER_VERSION}`,
-    "--memory",
-    "4g",
-    "--memory-swap",
-    "4g",
-    "--cpus",
-    "2",
+    ...resourceArgs(resources, { swap: true }),
     "--pids-limit", String(PIDS_LIMIT),
     "--network",
     "bridge",
@@ -986,15 +982,19 @@ export async function vpsComputerAction(
             imageRef = (await computeVpsComputerStatus(cfg, botId, runner)).image_id;
           }
           if (!imageRef) throw Object.assign(new Error("The prepared VPS image could not be identified"), { status: 409 });
-          await run(vpsContainerRunArgs(before.container_name, imageRef));
+          await run(vpsContainerRunArgs(before.container_name, imageRef, undefined, vpsResources(cfg)));
         } else {
           assertUsableContainer(before);
-          if (before.container === "stopped") await run(["start", containerRef]);
+          if (before.container === "stopped") {
+            await applyResourcesBeforeStart(containerRef, vpsResources(cfg), run);
+            await run(["start", containerRef]);
+          }
         }
       } else if (action === "start") {
         if (before.container === "missing") throw Object.assign(new Error("No VPS container exists for this bot"), { status: 409 });
         if (before.container === "running") throw Object.assign(new Error("The VPS container is already running"), { status: 409 });
         assertUsableContainer(before);
+        await applyResourcesBeforeStart(containerRef, vpsResources(cfg), run);
         await run(["start", containerRef]);
       } else if (action === "remove") {
         // Skips the usability check (remove escapes a broken container); the ownership labels are the only gate.

@@ -12,11 +12,12 @@ export interface ForkPanelState {
   loading: boolean;
   loadId: string;
   loadFailed: boolean;
+  focusComposer?: boolean;
 }
 
 export type ForkPanelAction =
-  | { type: "forkMessage"; kind: "bot" | "group"; ownerId: string; threadId: string; messageId: string }
-  | { type: "openForkPanel"; kind: "bot" | "group"; ownerId: string; threadId: string; loadId?: string }
+  | { type: "forkMessage"; kind: "bot" | "group"; ownerId: string; threadId: string; messageId?: string; branchLeafId?: string; onSuccess?: () => void; onError?: (message: string) => void }
+  | { type: "openForkPanel"; kind: "bot" | "group"; ownerId: string; threadId: string; loadId?: string; focusComposer?: boolean }
   | { type: "forkPanelLoaded"; threadId: string; loadId: string; messages: Message[]; activeLeafId: string | null }
   | { type: "forkPanelLoadFailed"; threadId: string; loadId: string }
   | { type: "forkPanelMessage"; threadId: string; message: Message; patch?: true }
@@ -29,7 +30,7 @@ export function reduceForkPanel(state: AppState, action: ForkPanelAction): AppSt
     case "openForkPanel":
       return { ...state, settingsOpen: false, computerOpen: false, inspectorOpen: false, activityOpen: false,
         forkPanel: { kind: action.kind, ownerId: action.ownerId, threadId: action.threadId, messages: [], activeLeafId: null,
-          loading: true, loadId: action.loadId ?? "", loadFailed: false } };
+          loading: true, loadId: action.loadId ?? "", loadFailed: false, focusComposer: action.focusComposer } };
     case "forkPanelLoaded": {
       const panel = state.forkPanel;
       if (panel?.threadId !== action.threadId || panel.loadId !== action.loadId) return state;
@@ -96,14 +97,21 @@ export function runForkEffect(action: ForkEffect, dispatch: (action: Action) => 
   rawDispatch: (action: Action) => void, showError: (error: unknown) => void): void {
   if (action.type === "forkMessage") {
     const owner = action.kind === "bot" ? "bots" : "groups";
+    const latest = action.messageId === undefined;
+    // The visible branch may still be waiting for its separate active-branch request.
+    const body = latest ? { latest: true, branchLeafId: action.branchLeafId } : { messageId: action.messageId };
     void api<{ bot?: BotAnnouncement; group?: Partial<Group> & { id: string }; task: { threadId: string } }>(
       `/api/${owner}/${action.ownerId}/tasks/${action.threadId}/forks`,
-      { method: "POST", body: JSON.stringify({ messageId: action.messageId }) },
+      { method: "POST", body: JSON.stringify(body) },
     ).then((result) => {
       if (result.bot) dispatch({ type: "botPatched", bot: result.bot });
       if (result.group) dispatch({ type: "groupPatched", group: result.group });
-      dispatch({ type: "openForkPanel", kind: action.kind, ownerId: action.ownerId, threadId: result.task.threadId });
-    }).catch(showError);
+      dispatch({ type: "openForkPanel", kind: action.kind, ownerId: action.ownerId, threadId: result.task.threadId, focusComposer: latest });
+      action.onSuccess?.();
+    }).catch((error) => {
+      if (action.onError) action.onError(error instanceof Error ? error.message : String(error));
+      else showError(error);
+    });
     return;
   }
   const owner = action.kind === "bot" ? "bots" : "groups";

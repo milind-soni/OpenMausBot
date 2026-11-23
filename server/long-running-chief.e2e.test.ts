@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 
 import { launchVerificationServer, runControlOmb, verificationServerArgs, verificationServerEnvironment } from "../scripts/control-omb.ts";
-import { CONTROL_WAITED } from "./control-client.ts";
+import { CONTROL_WAITED_HELD } from "./control-client.ts";
 import { CONSENT_RULE } from "./peer-provenance.ts";
 import { waitForExit } from "./testing/cleanup.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
@@ -550,7 +550,7 @@ it("tells a teammate the person's job is its task, and a routine's handoff is no
   await f.final(april, "APRIL-FINAL");
 
   const [waited, acted] = f.turn("KS").screen;
-  expect(waited.state).toEqual({ held: true, helpOpen: false, blockedReason: CONTROL_WAITED });
+  expect(waited.state).toEqual({ held: true, helpOpen: false, blockedReason: CONTROL_WAITED_HELD });
   expect(waited.ms).toBeGreaterThanOrEqual(1_000);
   expect(acted.state).toEqual({ held: false, helpOpen: false });
   expect(f.turn("MS").screen.map((call: any) => call.state)).toEqual([{ held: false, helpOpen: false }]);

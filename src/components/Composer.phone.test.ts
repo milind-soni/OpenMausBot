@@ -97,6 +97,8 @@ describe("the phone composer", () => {
     expect(plus()).not.toBeNull();
     expect(fixture.call).toMatchObject({ placement: "composer", inverse: true });
     expect(fixture.call?.fill).toBeUndefined();
+    openPlus();
+    expect([...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.getAttribute("data-menu-key"))).not.toContain("place");
   });
 
   it("moves Advanced mode's row of buttons into the +", () => {
