@@ -12,6 +12,7 @@ import { avatarMarks, type AvatarKind } from "@/lib/avatar-marks";
 import { CHROME_EYES, CHROME_GRADIENT, MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
 import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
 import { ACTIVE_STATES } from "./mascot-motion";
+import { MOTION_BEAT_MS } from "./mascot-beat";
 import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, mascotBodyColorSchema, mascotFaceInk, type BotAvatarCrop, type MascotFaceColor } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, botMascotBody } from "../../shared/mascot-bodies";
 import { isCarvedBody, type BotBodyId } from "../../shared/bot-body";
@@ -46,8 +47,6 @@ const MOTION_FACE: MotionFaces = {
   surprise: { state: "surprised", blink: true },
   failure: { state: "sad" },
 };
-
-const MOTION_FACE_MS = 1400;
 
 function mix(hex: string, toward: string, t: number): string {
   const a = Number.parseInt(hex.slice(1), 16);
@@ -194,14 +193,15 @@ function GradientAvatarComponent(
 
   const [motionState, setMotionState] = useState<MausState | null>(null);
   useEffect(() => {
-    if (motion === "none" || animated === false) return;
+    // A beat's face ends with it: a caller that stops animating mid-beat leaves the bot's own state, not the beat's.
+    if (motion === "none" || animated === false) return setMotionState(null);
     const beat = MOTION_FACE[motion];
     if (!beat) return;
     if (beat.blink) inner.current?.blink();
     if (beat.spin) inner.current?.spin(beat.spin);
     if (!beat.state) return;
     setMotionState(beat.state);
-    const timer = setTimeout(() => setMotionState(null), MOTION_FACE_MS);
+    const timer = setTimeout(() => setMotionState(null), MOTION_BEAT_MS);
     return () => clearTimeout(timer);
   }, [motion, motionKey, animated]);
 
