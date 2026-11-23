@@ -127,7 +127,7 @@ export type StoreChange =
   | { type: "message.patch"; threadId: string; message: Message }
   | { type: "thread"; threadId: string; activeLeafId: string }
   | { type: "thread.deleted"; threadId: string }
-  | { type: "bot"; botId: string; /** Only this thread of the bot changed, besides the bot's own fields. */ threadId?: string }
+  | { type: "bot"; botId: string; /** Only this thread of the bot changed, besides the bot's own fields. */ threadId?: string; closedByChanged?: true }
   | { type: "bot.deleted"; botId: string }
   /** The fleet or the rooms were reordered as a whole; the broadcast carries every id in its new place. */
   | { type: "bots.order" } | { type: "groups.order" }
@@ -2192,7 +2192,7 @@ export class Store {
       if (closedBy) task.closedBy = structuredClone(closedBy);
       else delete task.closedBy;
     });
-    this.emit({ type: "bot", botId });
+    this.emit({ type: "bot", botId, threadId, closedByChanged: true });
     return task;
   }
 
