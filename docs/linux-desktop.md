@@ -240,9 +240,9 @@ user's physical pointer; approved click and typing actions still target the requ
 mouse remains under their control.
 
 On GNOME Wayland, **This computer** remains unavailable and an older persisted opt-in is reset to off with private
-file permissions. Sign out and choose **Ubuntu on Xorg** from the login-screen session menu, or continue using Chat,
-preview-only capture, Cloud, or Local VM. On desktops that aren't Ubuntu the app names no Ubuntu session: it says to
-choose an Xorg session if the sign-in screen offers one, and otherwise (Fedora, for example) to use a cloud desktop.
+file permissions. On Ubuntu, sign out and choose **Ubuntu on Xorg** from the login-screen session menu. On desktops
+that aren't Ubuntu, choose an Xorg session if the sign-in screen offers one; if it offers none (Fedora, for example),
+use a cloud desktop. Either way you can keep using Chat, preview-only capture, Cloud, or Local VM.
 Wayland re-enablement requires its own real-seat evidence and will not be controlled by an environment override.
 
 Upstream release assets are mutable, so the build uses an explicit reviewed digest as its trust anchor (the release's
