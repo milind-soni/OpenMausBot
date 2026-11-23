@@ -78,6 +78,8 @@ it("reports every run into the bot's main thread while fresh executions, approva
     expect(promoted.routineRunId).toBeUndefined();
     expect(promoted.unread).toBe(true);
     const live = completed[0].threadId as string;
+    expect((await currentBot()).mainThreadId, "writing in another thread leaves the main one alone").toBe(originalThread);
+    await api("PATCH", `/api/bots/${bot.id}`, { mainThreadChoice: live });
     expect((await currentBot()).mainThreadId).toBe(live);
     const { task: chosenTask } = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Chosen reports" }, 201);
     const dedicated = chosenTask.threadId as string;
@@ -149,7 +151,7 @@ it("reports every run into the bot's main thread while fresh executions, approva
   }
 }, 90_000);
 
-it("reports a routine made in a chat into that chat once the person writes there, not the bot's first thread or a new results thread", async () => {
+it("reports a routine made in a chat into the bot's main thread, which writing in that chat does not move, not a new results thread", async () => {
   const fixture = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true });
   const evidence: unknown[] = [{ fixture: fixture.info }];
   const planPath = join(fixture.info.dataDir, "room-plan.json");
@@ -186,21 +188,21 @@ it("reports a routine made in a chat into that chat once the person writes there
     expect(definition.sourceThreadId).toBe(chat);
 
     const { run } = await api("POST", `/api/routines/${routineId}/run`, undefined, 201);
-    expect(run.resultsThreadId).toBe(chat);
+    expect(run.resultsThreadId).toBe(first);
     await expect.poll(async () => (await api("GET", "/api/routines")).runs.find((candidate: any) => candidate.id === run.id)?.status, { timeout: 20_000 }).toBe("completed");
     const finished = (await api("GET", "/api/routines")).runs.find((candidate: any) => candidate.id === run.id);
-    // The chat that made it keeps its one trigger card, and the run's reply lands there as the bot's own line.
-    expect((await messages(chat)).some((message) => message.routineRun?.runId === run.id)).toBe(false);
-    await expect.poll(async () => (await messages(chat)).filter((message) => message.automation?.runId === run.id).map((message) => message.text), { timeout: 15_000 })
+    // The chat that made it keeps its one trigger card, and the run's reply lands in the main thread as the bot's own line.
+    expect((await messages(first)).some((message) => message.routineRun?.runId === run.id)).toBe(false);
+    await expect.poll(async () => (await messages(first)).filter((message) => message.automation?.runId === run.id).map((message) => message.text), { timeout: 15_000 })
       .toEqual(["Fresh chat report"]);
     expect((await messages(chat)).filter((message) => message.card?.routineRequest?.resultId === routineId)).toHaveLength(1);
-    expect((await messages(first)).some((message) => message.kind === "routine.run" || message.automation)).toBe(false);
+    expect((await messages(chat)).some((message) => message.kind === "routine.run" || message.automation)).toBe(false);
     const saved = (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id);
     expect(saved.tasks.filter((candidate: any) => !candidate.routineRunId).map((candidate: any) => candidate.threadId).sort())
       .toEqual([first, chat].sort());
-    expect(saved.tasks.find((candidate: any) => candidate.threadId === chat).unread).toBe(true);
+    expect(saved.mainThreadId).toBe(first);
     expect(saved.tasks.find((candidate: any) => candidate.threadId === finished.threadId)).toMatchObject({ routineRunId: run.id });
-    evidence.push({ run: finished, bot: saved, main: await messages(chat) });
+    evidence.push({ run: finished, bot: saved, main: await messages(first) });
   } finally {
     const evidencePath = `${fixture.info.logPath}.chat-results.json`;
     writeFileSync(evidencePath, JSON.stringify(evidence, null, 2));
@@ -262,7 +264,7 @@ async function resultsFixture() {
   return { api, control, messages, savedBot, destination, routine, report, restart, close };
 }
 
-it("reports into the conversation the person is in, the one a bot with hidden threads opens, after they used threads", async () => {
+it("reports into the bot's main thread, its first conversation, whichever one the person wrote in last or left selected", async () => {
   const f = await resultsFixture();
   try {
     const { bot } = await f.control("new-bot", "--name", "Hidden threads");
@@ -270,24 +272,23 @@ it("reports into the conversation the person is in, the one a bot with hidden th
     const { task } = await f.api("POST", `/api/bots/${bot.id}/tasks`, { title: "Later chat" }, 201);
     const live = task.threadId as string;
     const routine = await f.routine(bot.id);
-    expect(await f.report(routine)).toBe(live);
+    expect(await f.report(routine)).toBe(oldest);
     await f.control("send", "--bot", bot.id, "--task", live, "--text", "Good morning.");
     expect((await f.control("wait", "--bot", bot.id, "--task", live, "--timeout", "20")).status).toBe("settled");
-    await f.api("POST", `/api/bots/${bot.id}/tasks/${oldest}?messages=0`);
-    expect(await f.report(routine)).toBe(live);
-    expect((await f.messages(live)).filter((message) => message.automation)).toHaveLength(2);
-    expect((await f.messages(oldest)).some((message) => message.automation)).toBe(false);
+    await f.api("POST", `/api/bots/${bot.id}/tasks/${live}?messages=0`);
+    expect(await f.report(routine)).toBe(oldest);
+    expect((await f.messages(oldest)).filter((message) => message.automation)).toHaveLength(2);
+    expect((await f.messages(live)).some((message) => message.automation)).toBe(false);
     const saved = await f.savedBot(bot.id);
-    expect(saved.threadId).toBe(oldest);
-    expect(saved.tasks.find((candidate: any) => candidate.threadId === live).unread).toBe(true);
-    expect(saved.mainThreadId).toBe(live);
+    expect(saved.threadId).toBe(live);
+    expect(saved.mainThreadId).toBe(oldest);
     expect(await f.destination(routine)).toBeUndefined();
   } finally {
     await f.close();
   }
 }, 90_000);
 
-it("after the upgrade, reports into and opens the conversation the person last wrote in before it, not the one left selected", async () => {
+it("after the upgrade, still reports into and opens the bot's first conversation, whichever one the person last wrote in before it", async () => {
   const f = await resultsFixture();
   try {
     const { bot } = await f.control("new-bot", "--name", "Upgraded");
@@ -309,8 +310,8 @@ it("after the upgrade, reports into and opens the conversation the person last w
     });
     const saved = await f.savedBot(bot.id);
     expect(saved.threadId).toBe(oldest);
-    expect(saved.mainThreadId).toBe(theirs);
-    expect(await f.report(routine)).toBe(theirs);
+    expect(saved.mainThreadId).toBe(oldest);
+    expect(await f.report(routine)).toBe(oldest);
   } finally {
     await f.close();
   }
@@ -334,7 +335,8 @@ it("clears the oldest thread v0.1.98 to v0.1.107 saved as a routine's destinatio
       file.routines.find((candidate: any) => candidate.id === tidiedRoutine).resultsThreadId = archived;
     });
     expect(await f.destination(routine)).toBeUndefined();
-    expect(await f.report(routine)).toBe(task.threadId);
+    expect(task.threadId).not.toBe(oldest);
+    expect(await f.report(routine)).toBe(oldest);
     expect(await f.destination(tidiedRoutine)).toBeUndefined();
     expect(await f.report(tidiedRoutine)).toBe(kept.threadId);
     expect((await f.api("PATCH", `/api/routines/${routine}`, { resultsThreadId: oldest })).routine.resultsThreadId).toBe(oldest);

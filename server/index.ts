@@ -8544,7 +8544,7 @@ function routineSourceOwner(run: Pick<RoutineRun, "botId" | "sourceThreadId" | "
 
 function mainThreadTasks(botId: string) { const tasks = store.tasks(botId), own = store.bot(botId)?.defaultBot?.person ? [...tasks].sort((a, b) => a.createdAt - b.createdAt)[0]?.threadId : undefined; return CLOUD_TEAM ? tasks.filter((task) => (teamHost.audienceOf(task.threadId) === "team" && !conversationShares.fromSlack(task.threadId)) || task.threadId === own) : CLOUD_HOME ? tasks.filter((task) => !cloudGuestOpened(task.threadId) && !personalSlackMessages?.channelThread(task.threadId)) : tasks; }
 function botMainThread(botId: string): string | undefined {
-  return mainThread(mainThreadTasks(botId), store.bot(botId)?.threadId, store.bot(botId)?.mainThreadChoice);
+  return mainThread(mainThreadTasks(botId), store.bot(botId)?.mainThreadChoice);
 } const threadScoped = createThreadScope({ tasks: mainThreadTasks, chosen: (botId) => store.bot(botId)?.mainThreadChoice, room: (threadId) => Boolean(store.groupByThread(threadId)), routineRun: (threadId) => Boolean(routines?.runForThread(threadId)), team: Boolean(CLOUD_TEAM) }), threadSaveLines = createThreadSaveLines({ bus, append: (threadId, tool) => void store.appendMessage(threadId, { role: "bot", kind: "activity", tool }) });
 
 function routineSourceThread(run: RoutineRun): string | null {
