@@ -16,7 +16,7 @@ import {
 
 export const MEMORY_INDEX = "MEMORY.md";
 
-export type MemoryDocKind = "index" | "topic" | "log";
+export type MemoryDocKind = "index" | "topic" | "log" | "thread";
 
 export interface MemoryDocRef {
   path: string;
@@ -44,12 +44,19 @@ export class MemoryStoreError extends Error {
 }
 
 const BOT_ID = /^[\w-]{1,128}$/;
+const THREAD_NOTES = /^([\w-]{1,128})\.md$/;
+export const THREAD_NOTES_DIR = "threads";
 
 function pathError(path: string): MemoryStoreError {
   return new MemoryStoreError("path", 400, `not a memory file: ${JSON.stringify(path)} — use MEMORY.md, memory/<topic>.md or memory/log/<day>.md`);
 }
 
-/** An allowlist of three shapes, not a sanitiser: anything else would be an arbitrary file read. */
+/** One conversation's notes: loaded only into that conversation, never listed, indexed or journaled with the bot's memory. */
+export function threadNotesPath(threadId: string): string {
+  return `memory/${THREAD_NOTES_DIR}/${threadId}.md`;
+}
+
+/** An allowlist of four shapes, not a sanitiser: anything else would be an arbitrary file read. */
 export function parseMemoryPath(path: string): MemoryDocRef {
   if (typeof path !== "string" || !path) throw pathError(path);
   if (path === MEMORY_INDEX) return { path, kind: "index", name: MEMORY_INDEX };
@@ -59,6 +66,9 @@ export function parseMemoryPath(path: string): MemoryDocRef {
   }
   if (parts.length === 3 && parts[0] === "memory" && parts[1] === "log" && isMemoryTopicName(parts[2])) {
     return { path, kind: "log", name: parts[2] };
+  }
+  if (parts.length === 3 && parts[0] === "memory" && parts[1] === THREAD_NOTES_DIR && THREAD_NOTES.test(parts[2]!)) {
+    return { path, kind: "thread", name: parts[2]! };
   }
   throw pathError(path);
 }
@@ -70,6 +80,7 @@ function assertBotId(botId: string): void {
 function relativeSegments(ref: MemoryDocRef): string[] {
   if (ref.kind === "index") return [MEMORY_INDEX];
   if (ref.kind === "topic") return ["memory", ref.name];
+  if (ref.kind === "thread") return ["memory", THREAD_NOTES_DIR, ref.name];
   return ["memory", "log", ref.name];
 }
 
@@ -230,7 +241,7 @@ export function writeMemoryDoc(
 ): MemoryWriteResult {
   const ref = parseMemoryPath(path);
   ensureWorkspace(botId);
-  if (ref.kind === "log") mkdirSync(join(workspaceDir(botId), "memory", "log"), { recursive: true, mode: 0o700 });
+  if (ref.kind === "log" || ref.kind === "thread") mkdirSync(join(workspaceDir(botId), ...relativeSegments(ref).slice(0, -1)), { recursive: true, mode: 0o700 });
   const absolute = resolveMemoryPath(botId, path);
   const after = redactSecretsInText(text);
   const bytes = Buffer.byteLength(after, "utf8");

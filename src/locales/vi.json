@@ -5522,6 +5522,7 @@
   "settings.bots.aboutYouLine": "Bot trên {place} gọi bạn là gì và biết gì về bạn.",
   "settings.bots.awakeLine": "Gói của bạn chỉ giữ vài bot thức cùng lúc. Hãy chọn những bot nào.",
   "settings.bots.awakeTitle": "Một số bot đang tạm dừng",
+  "settings.remoteTeammates.title": "Đồng đội trên máy chủ khác",
   "settings.bots.early": "Tính năng thử sớm",
   "settings.bots.intro": "Những gì bot trên {place} biết về bạn, và cài đặt cho tất cả.",
   "settings.bots.newBots": "Bot mới",
@@ -5957,5 +5958,9 @@
   "skillBurger.menu.aria": "Thêm cho {name}",
   "skillBurger.menu.rename": "Đổi tên…",
   "skillBurger.card.everyChat": "Mọi cuộc trò chuyện",
-  "skillBurger.page.empty": "Skill Burger do bot của bạn tạo sẽ hiện ở đây."
+  "skillBurger.page.empty": "Skill Burger do bot của bạn tạo sẽ hiện ở đây.",
+  "chat.notice.savedToThread": "Đã lưu vào luồng này",
+  "memoryPage.thisThread": "Luồng này",
+  "memoryPage.everywhere": "Mọi nơi",
+  "memoryPage.empty": "Chưa có gì được ghi nhớ ở đây. Hãy viết bất cứ điều gì bạn muốn nó biết."
 }
