@@ -197,7 +197,7 @@ export const CLOUD_ENGINES_HERE = " The AIs bots run on (Claude, Codex, Cursor a
   + " When an AI's Google sign-in ends on a 127.0.0.1 or localhost page that can't be reached, that is the expected last step, not a failed sign-in: tell them to copy that page's full address and paste it in the \"Paste its address here\" field on the AI's card, then press Send redirect.";
 
 /** My Cloud's disk is its owner's: what a task already has in its folder is used again, not fetched a second time. */
-export const CLOUD_REUSE_INSTALLS = " Reuse what is already installed or cloned in your working folder instead of installing or cloning it again, unless the person asks for a fresh copy.";
+export const CLOUD_REUSE_INSTALLS = " Reuse, and update if needed, what is already installed or cloned in your working folder instead of installing or cloning it again, unless the person asks for a fresh copy.";
 
 /** `asks`: the person's own Cloud, whose bots ask them to turn on what their computer doesn't give now (ask_for_computer). */
 export function cloudHomePrompt(sharedComputerTools: boolean, synced: ReadonlyArray<{ computerName: string; pcPath: string; cloudPath: string }> = [],
