@@ -5,6 +5,7 @@ export const CREDENTIAL_PATCH = {
   anthropicApiKey: (value, options) => ({ anthropic: { key: value, ...(options?.everyClaudeBot === false ? { everyClaudeBot: false } : {}) } }),
   openrouterApiKey: (value) => ({ openrouter: { key: value } }),
   mistralApiKey: (value) => ({ mistral: { key: value } }),
+  minimaxApiKey: (value) => ({ minimax: { key: value } }),
   cerebrasApiKey: (value) => ({ cerebras: { key: value } }),
   groqApiKey: (value) => ({ groq: { key: value } }),
   greenferenceApiKey: (value) => ({ greenference: { key: value } }),

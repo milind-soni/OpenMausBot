@@ -7,7 +7,7 @@ import { keyEntry, type KeyId } from "./key-catalog";
 import { saveKey } from "./key-save";
 
 const SLOTS: Array<[KeyId, string]> = [
-  ["openai", "openaiApiKey"], ["anthropic", "anthropicApiKey"], ["openrouter", "openrouterApiKey"], ["mistral", "mistralApiKey"], ["cerebras", "cerebrasApiKey"],
+  ["openai", "openaiApiKey"], ["anthropic", "anthropicApiKey"], ["openrouter", "openrouterApiKey"], ["mistral", "mistralApiKey"], ["minimax", "minimaxApiKey"], ["cerebras", "cerebrasApiKey"],
   ["groq", "groqApiKey"], ["greenference", "greenferenceApiKey"], ["modelgo", "modelgoApiKey"], ["meta", "metaApiKey"], ["deepseek", "deepseekApiKey"], ["openaiCompat", "openaiCompatApiKey"],
 ];
 
