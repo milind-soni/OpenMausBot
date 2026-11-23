@@ -19,7 +19,9 @@ const PAGE_BYTES = 4096;
 /** What one engine and its MCP servers take until one has been measured here: `opencode acp` 1.19.3 measured 361 MB on a
  * Cloud home before its first prompt and 623 MB with six stdio MCP servers, and about 466 MB while working. */
 export const ENGINE_DEFAULT_BYTES = 700 * MB;
-const ENGINE_MIN_BYTES = 300 * MB, ENGINE_MAX_BYTES = 1500 * MB;
+const ENGINE_MIN_BYTES = 300 * MB;
+/** The most admission plans for one engine, however large the ones measured here. */
+export const ENGINE_MAX_BYTES = 1500 * MB;
 /** One more session in a running shared process: OpenCode 1.19.3 grew about 110 MB a session with three stdio MCP
  * servers after a prompt; more MCP servers cost more. */
 export const SESSION_BYTES = 200 * MB;

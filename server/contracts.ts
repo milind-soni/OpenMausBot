@@ -431,10 +431,12 @@ export interface EngineInstall {
   /** The vendor's npm package, for an engine whose `command` is its own installer script: Settings installs it on the
    * server when npm is there, while a terminal keeps the vendor's command. */
   npmPackage?: string;
-  /** The app downloads and verifies a pinned provider runtime itself. */
+  /** The app downloads and verifies a provider runtime itself. `downloadBytes` is a number for every client; with
+   * `sizeUnknown` it is not the size of what will be downloaded, and a client shows no size. */
   managed?: {
     label: string;
     downloadBytes: number;
+    sizeUnknown?: true;
   };
   /** The engine needs a key saved in the app rather than a terminal step. */
   settings?: "connections";
@@ -502,6 +504,8 @@ export interface ProviderAuthenticationStart {
   expiresAt: string | null;
   /** A short-lived code to enter only at the provider's authorization URL. */
   userCode?: string;
+  /** The provider's page shows a code after the sign-in, which the person pastes back (Antigravity's native CLI). */
+  pasteCode?: boolean;
 }
 
 export interface ProviderAuthenticationStatus extends Omit<ProviderAuthenticationStart, "phase"> {
@@ -580,6 +584,8 @@ export interface TextGenerationOptions {
   /** One of this instance's models instead of the driver's quick-call choice: the helper model setting, and the setup
    * card's quick model (side-jobs.ts). */
   model?: string;
+  /** A one-shot call can reject the resolved model before sending the prompt. */
+  checkModel?: (model: string) => void;
   /** How long the caller will wait; drivers with their own process timer use it instead of their default. */
   timeoutMs?: number;
   /** For a bot's own engine whose driver picks a small model of its own. */
@@ -600,6 +606,8 @@ export interface ProviderInstance {
   readonly displayName: string | undefined;
   readonly enabled: boolean;
   readonly models: ModelCatalog;
+  /** An unmanaged OpenRouter connection, where upkeep can name a model from this account's catalog. */
+  readonly openRouter?: true;
   /** True while the catalog is the driver's fixed list or a failed read's leftover, not a list the engine gave. */
   readonly modelsUnconfirmed?: boolean;
   /** Set with modelsUnconfirmed when the engine's last read of its list failed: why, for the picker to say. */

@@ -4,6 +4,8 @@ import { createHash } from "node:crypto";
 import type { ModelCatalog, ProviderInstance } from "../contracts.ts";
 import { checkProviderKey } from "../provider-key-check.ts";
 import { httpStatusOf } from "./engine-errors.ts";
+import { ChatHttpError } from "./openai-chat-refusals.ts";
+import { waitForCatalog } from "./compat-reasoning.ts";
 
 /** Free models that call tools well, best first; when none is listed, the first free tool-capable model wins. */
 export const FREE_MODEL_PREFERENCE: readonly string[] = [
@@ -105,6 +107,14 @@ export function openRouterFailure(text: string, model: string): string | null {
   return null;
 }
 
+export function openRouterModelUnavailable(error: unknown, model: string): boolean {
+  if (!(error instanceof ChatHttpError) || ![400, 404].includes(error.status)) return false;
+  if (/ \((?:model_not_found|model_unavailable)\)$/.test(error.message)) return true;
+  const detail = error.message.replace(/^upstream HTTP 404: /, "").replace(/\.$/, "").toLowerCase();
+  return error.status === 404 && (detail === "no endpoints for this model found" ||
+    detail === `no endpoints found for ${model.toLowerCase()}`);
+}
+
 /** A turn or helper call without a chosen model waits briefly for `loading` (the key's tier and the catalog), so it
  * runs on the free default; OpenRouter's refusals reach the chat in plain words. */
 export function withOpenRouterTurns(instance: ProviderInstance, loading: Promise<unknown>): ProviderInstance {
@@ -131,9 +141,12 @@ export function withOpenRouterTurns(instance: ProviderInstance, loading: Promise
     : event));
   if (generate) {
     instance.generateText = async (prompt, options) => {
-      if (!options?.model) await settled();
+      if (!options?.model) {
+        if (options?.checkModel) await waitForCatalog(loading, options.signal ?? AbortSignal.timeout(FIRST_TURN_WAIT_MS));
+        else await settled();
+      }
       return generate(prompt, options);
     };
   }
-  return Object.assign(instance, { startupModelRefresh: loading.then(() => {}) });
+  return Object.assign(instance, { openRouter: true as const, startupModelRefresh: loading.then(() => {}) });
 }

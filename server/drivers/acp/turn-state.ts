@@ -5,7 +5,7 @@ import type { spawnCli } from "../../procs.ts";
 import { noticeFailure } from "../../chat-notices.ts";
 import { errorReplyFailure, type ErrorReplyFailure } from "../engine-errors.ts";
 import type { AcpConfig } from "./core.ts";
-import type { AcpHost, AcpLink } from "./host.ts";
+import type { AcpHost, AcpLink } from "./host.ts"; import type { AppliedConfig } from "./applied-config.ts";
 import type { AcpTurnSteering } from "./steer.ts";
 
 export type AcpAskFinish = (
@@ -61,6 +61,8 @@ export interface AcpSession {
   initResult: any;
   authenticated: boolean;
   idleTimer: ReturnType<typeof setTimeout> | null;
+  /** The config option values this live session confirmed, so an unchanged one is not sent again. */
+  appliedConfig: AppliedConfig;
   closing: boolean;
   /** Set when a shared process's session closes through `session/close`: true once the agent confirms it. */
   closeConfirmed?: Promise<boolean>;

@@ -37,3 +37,13 @@ export interface BotComputersPayload {
   now: number;
   rows: BotComputerRow[];
 }
+
+/** A VPS server's device id, as `vps.serverId` and the Devices page carry it. */
+export function vpsServerId(alias: string): string {
+  return `vps:${alias}`;
+}
+
+/** The SSH alias in a `vps:<alias>` server id; null for any other id, a `vps:<alias>/<container>` computer id included. */
+export function vpsAliasOfServerId(id: string): string | null {
+  return /^vps:([A-Za-z0-9][A-Za-z0-9_.-]{0,127})$/.exec(id)?.[1] ?? null;
+}

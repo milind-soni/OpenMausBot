@@ -5,6 +5,9 @@
 //   - apps/server/src/provider/antigravityUsageLimits.ts (the endpoints and
 //     their order, the request's client line, the summary and per-model
 //     quota readers, the untouched-bucket reset rule, and the access cache).
+//   - apps/server/src/provider/antigravityUsageLimits.ts:43-51, 331-392 at
+//     38067630229 (the native CLI's sign-in file, read only while its access
+//     token is fresh, since it stores no OAuth client to refresh it with).
 // Only the personal Google sign-in is read, the account fingerprint is left out, and every failure is no row at all.
 //
 // Security: the access token lives in this module's memory and in request headers only. It is never logged, written or
@@ -12,9 +15,11 @@
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 
+import { ANTIGRAVITY_NATIVE_CLI } from "./antigravity-cli-install.ts";
+
 import type { PlanExtra, PlanFetch, PlanModelUsage, PlanWindow, PlanWindows } from "../plan-usage.ts";
-import { antigravityTokenPath } from "./antigravity-acp.ts";
-import { refreshAntigravityAccess } from "./antigravity-account.ts";
+import { antigravityCliTokenPath, antigravityTokenPath } from "./antigravity-acp.ts";
+import { antigravityCliAccessToken, refreshAntigravityAccess } from "./antigravity-account.ts";
 import { antigravityQuotaFamily } from "./antigravity-turn-outcome.ts";
 
 /** Whether Antigravity accounts are asked for their limits at all. Off, they have no row in the usage report. */
@@ -226,10 +231,13 @@ interface StoredSignIn {
   project_id?: string;
 }
 
-async function storedSignIn(tokenPath: string): Promise<{ signIn: StoredSignIn; fingerprint: string } | null> {
+async function storedSignIn(tokenPath: string, now: number): Promise<{ signIn: StoredSignIn; fingerprint: string } | { cliAccess: string } | null> {
   const info = await stat(tokenPath);
   if (!info.isFile() || info.size > TOKEN_FILE_MAX_BYTES) return null;
-  const fields = record(JSON.parse(await readFile(tokenPath, "utf8")));
+  const parsed = JSON.parse(await readFile(tokenPath, "utf8"));
+  const cli = antigravityCliAccessToken(parsed, now);
+  if (cli) return { cliAccess: cli.accessToken };
+  const fields = record(parsed);
   if (!fields || !["client_id", "client_secret", "refresh_token"].every((key) => typeof fields[key] === "string" && fields[key])) return null;
   const signIn: StoredSignIn = {
     client_id: fields.client_id as string, client_secret: fields.client_secret as string, refresh_token: fields.refresh_token as string,
@@ -277,15 +285,17 @@ const refreshHolds = new Map<string, { fingerprint: string; until: number }>();
 /** The windows Google reports for the sign-in stored at `tokenPath`; empty when it reports none. Throws on any failure.
  * Every request shares `signal`, the one deadline of the whole read. */
 export async function readAntigravityUsageWindows(tokenPath: string, deps: AntigravityUsageDeps, signal: AbortSignal = AbortSignal.timeout(deps.timeoutMs ?? READ_DEADLINE_MS)): Promise<AntigravityUsageWindow[]> {
-  const stored = await storedSignIn(tokenPath).catch(() => null);
+  const now = deps.now ?? Date.now;
+  const stored = await storedSignIn(tokenPath, now()).catch(() => null);
   if (!stored) {
     cachedAccess.delete(tokenPath);
     return [];
   }
-  const now = deps.now ?? Date.now;
-  const { signIn, fingerprint } = stored;
-  let cached = cachedAccess.get(tokenPath);
-  if (cached?.fingerprint !== fingerprint || cached.expiresAt <= now() + 60_000) {
+  // The native CLI's token is used as it is: the CLI refreshes it while it runs.
+  const signIn: StoredSignIn | null = "cliAccess" in stored ? null : stored.signIn;
+  let cached = "cliAccess" in stored ? { fingerprint: "", accessToken: stored.cliAccess, expiresAt: Infinity } : cachedAccess.get(tokenPath);
+  if (signIn && "fingerprint" in stored && (cached?.fingerprint !== stored.fingerprint || cached.expiresAt <= now() + 60_000)) {
+    const { fingerprint } = stored;
     cachedAccess.delete(tokenPath);
     const held = refreshHolds.get(tokenPath);
     if (held?.fingerprint === fingerprint && now() < held.until) throw new Error("held");
@@ -306,9 +316,9 @@ export async function readAntigravityUsageWindows(tokenPath: string, deps: Antig
     if (cachedAccess.size >= 128) cachedAccess.delete(cachedAccess.keys().next().value!);
     cachedAccess.set(tokenPath, cached);
   }
-  const { accessToken } = cached;
+  const { accessToken } = cached!;
   const headers = { Authorization: `Bearer ${accessToken}`, "User-Agent": antigravityUserAgent(process.platform, process.arch), "content-type": "application/json" };
-  const body = JSON.stringify(signIn.project_id ? { project: signIn.project_id } : {});
+  const body = JSON.stringify(signIn?.project_id ? { project: signIn.project_id } : {});
   // Merge endpoints because quota groups differ; the metered host's reading of a bucket wins.
   const fetchWindows = async (operation: string, parse: (response: unknown, requestedAt: number) => AntigravityUsageWindow[]) => {
     const responses = await Promise.all(PERSONAL_ENDPOINTS.map(async (endpoint) => {
@@ -333,10 +343,14 @@ export async function readAntigravityUsageWindows(tokenPath: string, deps: Antig
 export async function antigravityPlanUsage(
   instanceId: string,
   deps: AntigravityUsageDeps,
-  tokenPath = antigravityTokenPath(instanceId),
+  tokenPath?: string,
   enabled = ANTIGRAVITY_USAGE_LIMITS,
 ): Promise<PlanWindows | null> {
   if (!enabled) return null;
+  // The sign-in of the runtime in use: the native CLI's while it runs, else the pinned runtime's.
+  tokenPath ??= ANTIGRAVITY_NATIVE_CLI && await stat(antigravityCliTokenPath(instanceId)).then((info) => info.size > 0, () => false)
+    ? antigravityCliTokenPath(instanceId)
+    : antigravityTokenPath(instanceId);
   try {
     // One deadline for the refresh, the summary and the fallback together.
     const windows = await readAntigravityUsageWindows(tokenPath, deps, AbortSignal.timeout(deps.timeoutMs ?? READ_DEADLINE_MS));
