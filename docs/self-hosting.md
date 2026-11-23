@@ -232,7 +232,7 @@ uncomment `privileged`, `cgroup`, the `/var/lib/docker` mount and the `docker`
 volume, then:
 
 ```sh
-docker compose up -d
+docker compose up -d --wait
 docker compose exec omb docker info            # Server Version: 27.x
 docker compose exec omb openmausbot pair       # a code, and a sign-in link
 ```
