@@ -28,6 +28,12 @@ describe("workThreadFor", () => {
     expect(fromLiaison("opened-by-liaison", false)?.threadId).toBe("opened-by-liaison");
   });
 
+  it("keeps a thread the sender opened after it was archived, so a follow-up or rework there reopens it", () => {
+    const archived = { ...store, taskByThread: () => task("finished-new", { botId: "liaison", name: "Liaison", threadId: "liaison-chat", at: 0 }, { archivedAt: 9, closedBy: { botId: "liaison", name: "Liaison", at: 9 } }) };
+    expect(workThreadFor(archived, { botId: "bugfixer", botName: "Bugfixer", fromBotId: "liaison", fromThreadId: "liaison-chat", thread: "finished-new",
+      notice: false, answering: undefined, also: () => true, reach: () => true })?.threadId).toBe("finished-new");
+  });
+
   it("lets a one-way notice answer the thread that handed the sender work, and refuses new work there", () => {
     expect(fromLiaison("run-1", true)?.threadId).toBe("run-1");
     expect(() => fromLiaison("run-1", false)).toThrow(/handed you work: answer it there with reply "none"/);
