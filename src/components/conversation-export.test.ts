@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Bot, Group, Message } from "@/state/store";
+import type { AppState, Bot, Group, Message } from "@/state/store";
 import type { SidebarMenuItem } from "./SidebarPopoverMenu";
 
 const fixture = vi.hoisted(() => {
@@ -37,20 +37,45 @@ vi.mock("./SidebarPopoverMenu", () => ({ SidebarPopoverMenu: ({ items }: { items
 
 const { ChatMoreMenu } = await import("./ChatMoreMenu");
 const { RoomMoreMenu } = await import("./RoomMoreMenu");
+const { initialState, reducer } = await import("@/state/store");
 
 const history = (count: number): Message[] => Array.from({ length: count }, (_, i) => ({
   id: `m-${i}`, parentId: i ? `m-${i - 1}` : null, at: 1_790_000_000_000 + i,
   role: i % 2 ? "bot" : "user", kind: "text", text: `Conversation message ${i.toString().padStart(3, "0")}`,
 }));
 
-function action(kind: "bot" | "room", key: "copy" | "download", messages: Message[], hasMore: boolean, identity?: { threadId: string; name: string }) {
+function owners(messages: Message[], hasMore: boolean, identity?: { threadId: string; name: string }) {
   const bot: Bot = { id: "bot", threadId: identity?.threadId ?? "shown-thread", name: identity?.name ?? "Export bot", title: "", description: "", color: "blue",
     notifications: true, unread: false, busy: false, modelSelection: { instanceId: "fixture", model: "fixture" },
     messages, hasMore, activeLeafId: fixture.leaf };
   const room: Group = { id: "room", threadId: identity?.threadId ?? "shown-thread", name: identity?.name ?? "Export room", memberIds: [],
     defaultResponder: { kind: "mentions" }, bulletin: "", unread: false, createdAt: 1, messages, hasMore };
-  renderToStaticMarkup(kind === "bot" ? createElement(ChatMoreMenu, { bot }) : createElement(RoomMoreMenu, { group: room }));
+  return { bot, room };
+}
+
+function actionForState(kind: "bot" | "room", key: "copy" | "download", state: AppState) {
+  renderToStaticMarkup(kind === "bot" ? createElement(ChatMoreMenu, { bot: state.bots[0]! }) : createElement(RoomMoreMenu, { group: state.groups[0]! }));
   return fixture.items.find((item) => item.key === key)!;
+}
+
+function heldState(kind: "bot" | "room", messages = fixture.messages.slice(-80), hasMore = true, identity?: { threadId: string; name: string }): AppState {
+  const { bot, room } = owners(messages, hasMore, identity);
+  return { ...initialState, bots: kind === "bot" ? [bot] : [], groups: kind === "room" ? [room] : [], selectedId: kind };
+}
+
+function action(kind: "bot" | "room", key: "copy" | "download", messages: Message[], hasMore: boolean, identity?: { threadId: string; name: string }) {
+  return actionForState(kind, key, heldState(kind, messages, hasMore, identity));
+}
+
+function send(state: AppState, kind: "bot" | "room", text: string, sendId: string): AppState {
+  return reducer(state, kind === "bot" ? { type: "send", botId: "bot", text, sendId }
+    : { type: "sendGroup", groupId: "room", text, sendId });
+}
+
+async function selectedOutput(operation: "copy" | "download"): Promise<string> {
+  const output = operation === "copy" ? fixture.writeText : fixture.download;
+  await vi.waitFor(() => expect(output).toHaveBeenCalledOnce());
+  return output.mock.calls[0]![operation === "copy" ? 0 : 1] as string;
 }
 
 beforeEach(() => {
@@ -120,11 +145,12 @@ describe("copying and downloading a paged conversation", () => {
       });
     }
 
-    it(`exports only the selected branch after loading all ${kind} pages`, async () => {
+    it(`keeps the ${kind} branch-selection contract after loading all pages`, async () => {
       fixture.messages.push({ id: "other-branch", parentId: "m-100", role: "bot", kind: "text", text: "Unselected branch", at: 1_790_000_000_999 });
       const markdown = await exported(kind, "copy", fixture.messages.slice(-80), true);
       expect(markdown.match(/Conversation message \d{3}/g)).toHaveLength(270);
-      expect(markdown).not.toContain("Unselected branch");
+      if (kind === "bot") expect(markdown).not.toContain("Unselected branch");
+      else expect(markdown).toContain("Unselected branch");
     });
 
     it(`keeps screen-capture placeholders in earlier ${kind} pages`, async () => {
@@ -144,4 +170,136 @@ describe("copying and downloading a paged conversation", () => {
       expect(fixture.writeText).not.toHaveBeenCalled();
     });
   }
+});
+
+describe("exporting the conversation state visible when the menu was clicked", () => {
+  for (const kind of ["bot", "room"] as const) {
+    it(`keeps an unconfirmed optimistic ${kind} send while filling earlier pages`, async () => {
+      const state = send(heldState(kind), kind, "Visible pending question", "pending-send");
+      vi.stubGlobal("window", {});
+      actionForState(kind, "copy", state).onSelect();
+      const markdown = await selectedOutput("copy");
+      expect(markdown).toContain("Conversation message 000");
+      expect(markdown.match(/Visible pending question/g)).toHaveLength(1);
+    });
+
+    it(`keeps the held ${kind} streamed text over an older history-page copy`, async () => {
+      const state = reducer(heldState(kind), { type: "messagePatched", threadId: "shown-thread",
+        message: { ...fixture.messages.at(-1)!, text: "Visible streamed answer" } });
+      vi.stubGlobal("window", {});
+      actionForState(kind, "download", state).onSelect();
+      const markdown = await selectedOutput("download");
+      expect(markdown).toContain("Visible streamed answer");
+      expect(markdown).not.toContain("Conversation message 269");
+      expect(markdown).toContain("Conversation message 000");
+    });
+
+    it(`reconciles a confirmed ${kind} send by its optimistic identity without duplicating it`, async () => {
+      const state = send(heldState(kind), kind, "Confirmed question", "confirmed-send");
+      fixture.messages.push({ id: "server-send", sendId: "confirmed-send", parentId: kind === "bot" ? "m-269" : null,
+        role: "user", kind: "text", text: "Confirmed question", at: 1_790_000_001_000 });
+      fixture.leaf = "server-send";
+      vi.stubGlobal("window", {});
+      actionForState(kind, "copy", state).onSelect();
+      const markdown = await selectedOutput("copy");
+      expect(markdown.match(/Confirmed question/g)).toHaveLength(1);
+      expect(markdown).toContain("Conversation message 000");
+      expect(markdown).toContain("Conversation message 269");
+    });
+
+    it(`retains the clicked ${kind} snapshot when the stream advances during the read`, async () => {
+      const page = Promise.withResolvers<{ messages: Message[]; hasMore: boolean; activeLeafId: string }>();
+      fixture.api.mockReturnValueOnce(page.promise);
+      const clicked = reducer(heldState(kind), { type: "messagePatched", threadId: "shown-thread",
+        message: { ...fixture.messages.at(-1)!, text: "Text visible at click" } });
+      vi.stubGlobal("window", {});
+      actionForState(kind, "copy", clicked).onSelect();
+      const laterMessage = { ...fixture.messages.at(-1)!, text: "Text that arrived later" };
+      const later = reducer(clicked, { type: "messagePatched", threadId: "shown-thread", message: laterMessage });
+      actionForState(kind, "copy", later);
+      fixture.messages[269] = laterMessage;
+      page.resolve({ messages: fixture.messages.slice(-200), hasMore: true, activeLeafId: fixture.leaf });
+      const markdown = await selectedOutput("copy");
+      expect(markdown).toContain("Text visible at click");
+      expect(markdown).not.toContain("Text that arrived later");
+    });
+  }
+
+  it("keeps the locally selected bot branch while its separate POST is still outstanding", async () => {
+    fixture.messages.push({ id: "alternate", parentId: "m-200", role: "user", kind: "text", text: "Selected alternate question", at: 1_790_000_001_000 },
+      { id: "alternate-answer", parentId: "alternate", role: "bot", kind: "text", text: "Selected alternate answer", at: 1_790_000_001_001 });
+    const state = reducer(heldState("bot"), { type: "switchBranch", botId: "bot", threadId: "shown-thread", messageId: "alternate" });
+    expect(state.bots[0]!.activeLeafId).toBe("alternate-answer");
+    vi.stubGlobal("window", {});
+    actionForState("bot", "download", state).onSelect();
+    const markdown = await selectedOutput("download");
+    expect(markdown).toContain("Conversation message 000");
+    expect(markdown).toContain("Selected alternate question");
+    expect(markdown).toContain("Selected alternate answer");
+    expect(markdown).not.toContain("Conversation message 269");
+  });
+
+  it("remaps the selected optimistic leaf without admitting a later server reply", async () => {
+    const state = send(heldState("bot"), "bot", "Question at click", "clicked-send");
+    fixture.messages.push({ id: "server-send", sendId: "clicked-send", parentId: "m-269", role: "user", kind: "text", text: "Question at click", at: 1_790_000_001_000 },
+      { id: "later-answer", parentId: "server-send", role: "bot", kind: "text", text: "Reply not yet visible at click", at: 1_790_000_001_001 });
+    fixture.leaf = "later-answer";
+    vi.stubGlobal("window", {});
+    actionForState("bot", "copy", state).onSelect();
+    const markdown = await selectedOutput("copy");
+    expect(markdown.match(/Question at click/g)).toHaveLength(1);
+    expect(markdown).toContain("Conversation message 000");
+    expect(markdown).not.toContain("Reply not yet visible at click");
+  });
+
+  it("reconnects a held parent chain when an earlier optimistic send was confirmed", async () => {
+    const first = send(heldState("bot"), "bot", "Unconfirmed first message", "first-send");
+    const state = send(first, "bot", "Pending second message", "second-send");
+    fixture.messages.push({ id: "server-first", sendId: "first-send", parentId: "m-269", role: "user", kind: "text",
+      text: "Canonical first message", at: 1_790_000_001_000 });
+    fixture.leaf = "server-first";
+    vi.stubGlobal("window", {});
+    actionForState("bot", "copy", state).onSelect();
+    const markdown = await selectedOutput("copy");
+    expect(markdown).toContain("Conversation message 000");
+    expect(markdown).toContain("Canonical first message");
+    expect(markdown).toContain("Pending second message");
+    expect(markdown).not.toContain("Unconfirmed first message");
+    expect(state.bots[0]!.messages.at(-1)!.parentId).toBe("optimistic-first-send");
+  });
+
+  it("does not merge distinct persisted room rows merely because their sendIds match", async () => {
+    const state = reducer(heldState("room"), { type: "messageAdded", threadId: "shown-thread", message: {
+      id: "held-record", sendId: "shared-send-id", role: "user", kind: "text", text: "Visible persisted row", at: 1_790_000_001_000,
+    } });
+    fixture.messages.push({ id: "other-record", sendId: "shared-send-id", role: "user", kind: "text", text: "Another persisted row", at: 1_790_000_001_001 });
+    vi.stubGlobal("window", {});
+    actionForState("room", "copy", state).onSelect();
+    const markdown = await selectedOutput("copy");
+    expect(markdown).toContain("Visible persisted row");
+    expect(markdown).toContain("Another persisted row");
+    expect(markdown).toContain("Conversation message 000");
+  });
+
+  for (const leaf of [null, undefined]) {
+    it(`preserves an explicit ${String(leaf)} bot leaf instead of adopting the server selection`, async () => {
+      fixture.messages.push({ id: "other-branch", parentId: "m-100", role: "bot", kind: "text", text: "Also visible without a selected leaf", at: 1_790_000_001_000 });
+      const state = heldState("bot");
+      state.bots[0] = { ...state.bots[0]!, activeLeafId: leaf };
+      vi.stubGlobal("window", {});
+      actionForState("bot", "copy", state).onSelect();
+      const markdown = await selectedOutput("copy");
+      expect(markdown).toContain("Also visible without a selected leaf");
+      expect(markdown.match(/Conversation message \d{3}/g)).toHaveLength(270);
+    });
+  }
+
+  it("fails a missing selected leaf instead of exporting every server branch", async () => {
+    const state = heldState("bot");
+    state.bots[0] = { ...state.bots[0]!, activeLeafId: "unavailable-selected-leaf" };
+    vi.stubGlobal("window", {});
+    actionForState("bot", "download", state).onSelect();
+    await vi.waitFor(() => expect(fixture.dispatch).toHaveBeenCalledWith({ type: "error", message: "The selected conversation branch is no longer available" }));
+    expect(fixture.download).not.toHaveBeenCalled();
+  });
 });

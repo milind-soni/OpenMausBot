@@ -44,7 +44,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
   const hasMessages = messages.length > 0;
   const contextAction = useContextAction();
   const atFreshStart = messages.at(-1)?.compaction?.fresh === true;
-  const transcript = () => conversationTranscript({ threadId: bot.threadId, hasMore: bot.hasMore, title: bot.name, messages, botName: bot.name, isGroup: false });
+  const transcript = () => conversationTranscript({ threadId: bot.threadId, hasMore: bot.hasMore, activeLeafId: bot.activeLeafId, title: bot.name, messages, botName: bot.name, isGroup: false });
   const side = useConversationSide(profile);
   const threads = showThreads ? [] : orderedThreadList((side ? tasksOfSide(profile, side) : profile.tasks ?? []).filter((task) => !task.routineRunId));
   const sharing = shareChoices(profile, profile.tasks?.find((task) => task.threadId === bot.threadId), Boolean(useTeamName()));
