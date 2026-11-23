@@ -26,7 +26,7 @@ import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 
 import { execFile } from "node:child_process";
 
-import { DATA_DIR } from "../config.ts";
+import { DATA_DIR, PROVIDER_CREDENTIAL_ENV, stripWorkspaceCredentialEnv } from "../config.ts";
 import { outsideBoxOptions } from "../procs.ts";
 import { antigravityRuntimesRoot } from "../engine-roots.ts";
 import { extractZipMember, readZipDirectory } from "../zip-archive.ts";
@@ -174,6 +174,14 @@ function pathCandidates(binary: string, env: NodeJS.ProcessEnv): string[] {
 
 const cliVersions = new Map<string, { stamp: string; version: string | null }>();
 
+/** Security: a program a path names never gets the server's, the workspace's or a provider's credentials. */
+function versionProbeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const probe = { ...env };
+  stripWorkspaceCredentialEnv(probe);
+  for (const key of PROVIDER_CREDENTIAL_ENV) delete probe[key];
+  return probe;
+}
+
 /** The version a custom `antigravity` executable reports, when it is 1.5.0 or newer: only those serve ACP themselves. */
 async function nativeCliVersion(executablePath: string, env: NodeJS.ProcessEnv): Promise<string | null> {
   const info = await stat(executablePath);
@@ -181,7 +189,7 @@ async function nativeCliVersion(executablePath: string, env: NodeJS.ProcessEnv):
   const known = cliVersions.get(executablePath);
   if (known?.stamp === stamp) return known.version;
   // Security: the probe runs outside the bot box, so the program-trust rule decides whether it may run at all.
-  const options = outsideBoxOptions(executablePath, { env, timeout: CLI_VERSION_PROBE_MS, killSignal: "SIGKILL" as const, maxBuffer: 64 * 1024, windowsHide: true, encoding: "utf8" as const });
+  const options = outsideBoxOptions(executablePath, { env: versionProbeEnv(env), timeout: CLI_VERSION_PROBE_MS, killSignal: "SIGKILL" as const, maxBuffer: 64 * 1024, windowsHide: true, encoding: "utf8" as const });
   const output = await new Promise<string>((done) => {
     execFile(executablePath, ["--version"], options, (error, stdout, stderr) => done(error ? "" : `${stdout}\n${stderr}`));
   });
@@ -215,13 +223,15 @@ export function isAntigravityPinnedAlias(cli: string | undefined): boolean {
   return /^agy_acp_server$/iu.test(cli?.trim() ?? "");
 }
 
+const LEGACY_AGY = /(?:^|[\\/])agy(?:\.(?:cmd|bat|exe|ps1))?$/iu;
+
 /** Whether an instance with this CLI path runs the native CLI, or would once installed, told from files alone: unlike
  * resolving it, this starts no program. */
 export async function antigravityPathRunsNativeCli(cli: string | undefined, env: NodeJS.ProcessEnv, baseDir = DATA_DIR): Promise<boolean> {
   const override = cli?.trim();
   if (isAntigravityNativeAlias(override)) return true;
   if (isAntigravityPinnedAlias(override)) return false;
-  if (override && override !== "agy") {
+  if (override && override !== "agy" && !LEGACY_AGY.test(override)) {
     for (const candidate of pathCandidates(override, env)) {
       const executablePath = resolve(candidate);
       if (!(await executableFile(executablePath))) continue;
@@ -243,7 +253,7 @@ export async function resolveAntigravityRuntime(
   const override = binaryPath?.trim();
   const pinnedOnly = isAntigravityPinnedAlias(override);
   const nativeDefault = !pinnedOnly && (options.nativeByDefault ?? antigravityNativeByDefault());
-  const legacyCli = override !== undefined && /(?:^|[\\/])agy(?:\.(?:cmd|bat|exe|ps1))?$/iu.test(override);
+  const legacyCli = override !== undefined && LEGACY_AGY.test(override);
   const native = isAntigravityNativeAlias(override);
   if (override && override !== "agy" && !native && !pinnedOnly) {
     for (const candidate of pathCandidates(override, env)) {

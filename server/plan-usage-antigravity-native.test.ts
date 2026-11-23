@@ -45,7 +45,7 @@ describe("an Antigravity account's limits when it runs the native CLI", () => {
     ["Antigravity.exe", true],
     ["/opt/tools/antigravity", true],
     ["agy", true],
-    ["/usr/local/bin/agy", false],
+    ["/usr/local/bin/agy", true],
     ["/opt/tools/agy_acp_server.par", false],
     ["agy_acp_server", false],
     [undefined, true],
@@ -59,13 +59,14 @@ describe("an Antigravity account's limits when it runs the native CLI", () => {
     installFakeManagedCli(DATA_DIR);
     for (const cli of [undefined, "agy"]) await expect(antigravityRunsNativeCli(cli, { PATH: "" })).resolves.toBe(true);
     await expect(antigravityRunsNativeCli("agy_acp_server", { PATH: "" })).resolves.toBe(false);
+    await expect(antigravityRunsNativeCli("/usr/local/bin/agy", { PATH: "" })).resolves.toBe(true);
   });
 
   it.skipIf(process.platform === "win32")("is told from files alone, starting no program: an antigravity beside a pinned harness is pinned", async () => {
     const folder = mkdtempSync(join(tmpdir(), "omb-usage-native-"));
     try {
       const ran = join(folder, "ran");
-      const program = `#!/bin/sh\ntouch ${JSON.stringify(ran)}\necho 1.5.14\n`;
+      const program = `#!/bin/sh\n/usr/bin/touch ${JSON.stringify(ran)}\necho 1.5.14\n`;
       writeFileSync(join(folder, "antigravity"), program, { mode: 0o755 });
       await expect(antigravityRunsNativeCli(join(folder, "antigravity"), { PATH: "" })).resolves.toBe(true);
       writeFileSync(join(folder, "localharness_external"), program, { mode: 0o755 });

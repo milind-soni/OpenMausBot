@@ -245,6 +245,24 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
       expect(existsSync(credentials(agy))).toBe(false);
     }, 120_000);
 
+    it("leaves the pinned sign-in of an account that ran the native CLI and was moved back to the pinned runtime", async () => {
+      const fixture = nativeFixture(folder());
+      const [moved, native] = ["antigravity-native-moved-back", "antigravity-native-moved-other"];
+      const before = await create(moved, fixture);
+      await loginAt(fixture, antigravityProfileDirectory(moved), "fixture-code");
+      expect((await turn(before, "moved-native", fixture.directory)).done).toMatchObject({ ok: true });
+      await before.dispose();
+      instances.splice(instances.indexOf(before), 1);
+      await create(moved, fixture, {}, pinnedRuntime());
+      const token = antigravityTokenPath(moved);
+      mkdirSync(dirname(token), { recursive: true });
+      writeFileSync(token, "{}", { mode: 0o600 });
+      const signingOut = await create(native, fixture);
+      await loginAt(fixture, antigravityProfileDirectory(native), "fixture-code");
+      await signingOut.signOut!();
+      expect(existsSync(token)).toBe(true);
+    }, 120_000);
+
     it("leaves the sign-in of an account whose program is called antigravity but runs the pinned runtime beside its harness", async () => {
       const fixture = nativeFixture(folder());
       const [pinned, native] = ["antigravity-native-named-pinned", "antigravity-native-named-native"];

@@ -86,21 +86,23 @@ export async function antigravityCliSignIn(
   });
 }
 
-/** Asks the CLI to forget its sign-in, then removes the file store it may have used. A refused `logout` is not final:
- * the sign-out is judged by a new session afterwards. */
-async function logoutAndForget(runtime: AntigravityRuntime, profile: AntigravityProfile, timing: NativeProbeTiming): Promise<void> {
+/** Asks the CLI to forget its sign-in, then removes the file store it may have used, and with `files: "all"` the pinned
+ * runtime's token file too. A refused `logout` is not final: the sign-out is judged by a new session afterwards. */
+async function logoutAndForget(runtime: AntigravityRuntime, profile: AntigravityProfile, timing: NativeProbeTiming, files: NativeSignOutFiles): Promise<void> {
   await withCli(runtime, profile, { ...timing, waitForExit: true }, async (client) => {
     const initialized = await client.initialize(timing.initializeMs ?? INITIALIZE_WINDOW_MS, Date.now() + (timing.capMs ?? INITIALIZE_CAP_MS));
     if (advertised(initialized?.agentCapabilities?.auth?.logout)) await client.request("logout", {}, timing.requestMs ?? REQUEST_MS).catch(() => {});
   });
-  for (const file of [antigravityNativeTokenPath(profile), profile.tokenPath]) {
+  for (const file of files === "all" ? [antigravityNativeTokenPath(profile), profile.tokenPath] : [antigravityNativeTokenPath(profile)]) {
     await rm(file, { force: true, maxRetries: 4, retryDelay: 250 });
   }
 }
 
 /** Signs the profile out through the CLI and confirms with a new process that it no longer accepts a session. */
-export async function signOutAntigravityCli(runtime: AntigravityRuntime, profile: AntigravityProfile, timing: NativeProbeTiming = {}): Promise<void> {
-  await logoutAndForget(runtime, profile, timing);
+export type NativeSignOutFiles = "all" | "native";
+
+export async function signOutAntigravityCli(runtime: AntigravityRuntime, profile: AntigravityProfile, timing: NativeProbeTiming = {}, files: NativeSignOutFiles = "all"): Promise<void> {
+  await logoutAndForget(runtime, profile, timing, files);
   let state: NativeSignIn | "unknown";
   try {
     state = await antigravityCliSignIn(runtime, profile, { ...timing, waitForExit: true });

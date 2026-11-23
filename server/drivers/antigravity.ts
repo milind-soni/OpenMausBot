@@ -349,8 +349,7 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
     let nativeFlow = false;
     liveInstances.set(input.instanceId, {
       login, stopAll: () => base.adapter.stopAll(),
-      native: async () => nativeFlow || launched.get(input.instanceId)?.nativeCli === true
-        || antigravityPathRunsNativeCli(input.config.cli, environmentNow()),
+      native: async () => nativeFlow || antigravityPathRunsNativeCli(input.config.cli, environmentNow()),
       profile: (runtime) => prepareAntigravityProfile({ instanceId: input.instanceId, runtime, baseEnv: environmentNow() }),
     });
     /** The native CLI keeps one sign-in for every instance run by it and for the Antigravity CLI in a terminal here
@@ -375,7 +374,7 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
         // Without an OS keyring the CLI keeps each profile's sign-in in that profile's file (1.5.14), so each is removed too.
         for (const [instanceId, live] of affected) {
           if (instanceId === input.instanceId) continue;
-          await signOutAntigravityCli(runtime, await live.profile(runtime), { onProcess: (child) => runtimeProcesses.track(instanceId, child) });
+          await signOutAntigravityCli(runtime, await live.profile(runtime), { onProcess: (child) => runtimeProcesses.track(instanceId, child) }, "native");
         }
         nativeSignIn.forgetAll();
       } finally {

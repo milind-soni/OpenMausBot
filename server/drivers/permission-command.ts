@@ -118,8 +118,12 @@ export function acpFileEditWithin(toolCall: { kind?: unknown; rawInput?: unknown
 }
 
 function fileOrNothing(path: string): boolean {
-  const info = statSync(path, { throwIfNoEntry: false });
-  return info === undefined || info.isFile();
+  try {
+    const info = statSync(path, { throwIfNoEntry: false });
+    return info === undefined || info.isFile();
+  } catch {
+    return false;
+  }
 }
 
 /** An ACP permission request's exact operation, for the driver's own session allow; null for a generic title with no input. */

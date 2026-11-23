@@ -416,6 +416,17 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
     expect(existsSync(started)).toBe(false);
   });
 
+  it("is asked its version without the server's, the workspace's or a provider's credentials", async () => {
+    const directory = folder(), seen = join(directory, "env"), program = join(directory, "antigravity");
+    writeFileSync(program, `#!/bin/sh\n/usr/bin/env > ${JSON.stringify(seen)}\necho 1.5.7\n`);
+    chmodSync(program, 0o755);
+    await expect(resolveAntigravityRuntime(program, { PATH: "/usr/bin:/bin", ANTHROPIC_API_KEY: "provider-key", OMB_CLOUD_TOKEN: "control-plane", KEEP_ME: "kept" }, folder()))
+      .resolves.toMatchObject({ harnessPath: null, version: "1.5.7" });
+    const env = readFileSync(seen, "utf8");
+    expect(env).toContain("KEEP_ME=kept");
+    expect(env).not.toMatch(/provider-key|control-plane/u);
+  });
+
   it("is not started for its version from a folder the bots can write", async () => {
     const directory = folder(), started = join(directory, "started"), program = join(directory, "antigravity");
     writeFileSync(program, `#!/bin/sh\ntouch ${JSON.stringify(started)}\necho 1.5.7\n`);

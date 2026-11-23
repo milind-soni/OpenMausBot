@@ -53,3 +53,23 @@ it("drops the version from a mounted card once the engine is on one without an u
   await act(async () => setUpdated(undefined));
   expect(container.textContent).toBe("plain");
 });
+
+it("names each version once when one engine has two cards on two versions", async () => {
+  async function cardsFor(): Promise<string> {
+    function Cards() {
+      return createElement("span", null,
+        useUpdatedOnce({ driverKind: "antigravityAgent", autoUpdated: { version: "1.5.8", at: 1 } }) ?? "plain",
+        " ",
+        useUpdatedOnce({ driverKind: "antigravityAgent", autoUpdated: { version: "1.4.3", at: 1 } }) ?? "plain");
+    }
+    await act(async () => root?.unmount());
+    container?.remove();
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => root!.render(createElement(Cards)));
+    return container.textContent ?? "";
+  }
+  expect(await cardsFor()).toBe("1.5.8 1.4.3");
+  expect(await cardsFor()).toBe("plain plain");
+});
