@@ -255,8 +255,8 @@ export function pruneRoomHolds(group: Pick<GroupRecord, "memberIds" | "holds" | 
   }
 }
 
-function taskCountsAsBotUnread(task: { unread?: boolean; routineRunId?: string }): boolean {
-  return Boolean(task.unread) && !task.routineRunId;
+function taskCountsAsBotUnread(task: { unread?: boolean; routineRunId?: string; archivedAt?: number }): boolean {
+  return Boolean(task.unread) && !task.routineRunId && task.archivedAt === undefined;
 }
 
 export class Store {

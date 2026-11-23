@@ -1063,7 +1063,7 @@ function reduceApp(state: AppState, action: Action): AppState {
           "switch",
         ),
         action.id,
-        (b) => ({ ...b, unread: Boolean(b.tasks?.some((task) => task.threadId !== b.threadId && task.unread)), tasks: b.tasks?.map((task) => task.threadId === b.threadId ? { ...task, unread: false } : task) }),
+        (b) => ({ ...b, unread: Boolean(b.tasks?.some((task) => task.threadId !== b.threadId && task.unread && !task.routineRunId && task.archivedAt === undefined)), tasks: b.tasks?.map((task) => task.threadId === b.threadId ? { ...task, unread: false } : task) }),
       );
     }
     case "answerCard": {
@@ -1715,7 +1715,7 @@ function reduceApp(state: AppState, action: Action): AppState {
         switched = { ...switched, unreadDivider: openedUnreadDivider(switched, opened.threadId, threadOpensUnread(opened), visibleMessages(opened), threadReadCursor(opened), opened.hasMore) };
         // The snapshot predates the switch's own announcement and must not put the unread dot back.
         if (switched.activeView === "chat") switched = updateBot(switched, opened.id, (bot) => ({ ...bot,
-          unread: Boolean(bot.tasks?.some((task) => task.threadId !== bot.threadId && task.unread)),
+          unread: Boolean(bot.tasks?.some((task) => task.threadId !== bot.threadId && task.unread && !task.routineRunId && task.archivedAt === undefined)),
           tasks: bot.tasks?.map((task) => task.threadId === bot.threadId ? { ...task, unread: false } : task) }));
       }
       return reconcileModelVariantSessions(reconcileSnapshotQueues(switched, [action.bot]));
