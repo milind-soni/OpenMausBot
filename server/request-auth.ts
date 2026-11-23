@@ -503,6 +503,10 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   // Slack for Clouds: the Admin calls these with the member's own session, and the handler answers each as that member
   // alone, on a personal Cloud its owner alone (routes/team-slack.ts); off a Cloud they answer 404
   { methods: ["GET"], path: /^\/api\/slack\/team\/bots$/ },
+  // Skill Burgers: the routes check who may change which (a bot's own: its editors; every chat: an admin).
+  { methods: ["GET", "POST"], path: /^\/api\/skill-burgers$/ },
+  { methods: ["GET", "PATCH", "DELETE"], path: /^\/api\/skill-burgers\/[^/]+$/ },
+  { methods: ["POST"], path: /^\/api\/skill-burger-summary$/ },
   { methods: ["POST"], path: /^\/api\/slack\/team\/messages(?:\/[0-9a-f-]{36}\/stop)?$/ },
 ];
 
