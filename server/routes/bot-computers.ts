@@ -1,6 +1,6 @@
 // Polled every few seconds by a devices map, so it reads only what this server already holds: the bots, the
 // config, and the last answers other code got. It never looks at a computer, a provider, Docker, SSH or a screen.
-import type { BotComputerKind, BotComputerRow, BotComputersPayload, BotComputerState } from "../../shared/bot-computers.ts";
+import { vpsServerId, type BotComputerKind, type BotComputerRow, type BotComputersPayload, type BotComputerState } from "../../shared/bot-computers.ts";
 import { boatIdOf, deadBoatOf } from "../boat.ts";
 import { boatHealth } from "../boat-health.ts";
 import { mapComputerState, type ComputerFrames } from "../computer-frames.ts";
@@ -104,7 +104,7 @@ export function botComputerRows(deps: BotComputersRouteDeps, visible: ReturnType
       return {
         kind, computerId: `vps:${alias}/${container}`, name: cfg.vpsServers?.find((server) => server.sshAlias === alias)?.name ?? null,
         state: last ? containerState(last.status) : "unknown", stateAt: last?.at ?? null,
-        vps: { serverId: `vps:${alias}`, alias, container },
+        vps: { serverId: vpsServerId(alias), alias, container },
       };
     }
     if (kind === "vm") {

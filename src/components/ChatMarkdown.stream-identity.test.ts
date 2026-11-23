@@ -175,13 +175,16 @@ describe("a streamed reply drawn block by block and piece by piece", () => {
     hosts.forEach((host) => host.remove());
   });
 
+  /** A reply's page without its streaming mark, which only gates the fade-in. */
+  const page = (host: HTMLDivElement) => host.innerHTML.replace(' data-streaming=""', "");
+
   /** The cut where drawing `text` in parts first differs from drawing it whole, or null. */
   const firstDifference = (text: string, cuts: number[]): string | null => {
     for (const cut of cuts) {
       const prefix = text.slice(0, cut);
       draw(streamed, prefix, true, false);
       draw(whole, prefix, true, true);
-      const [parts, all] = [hosts[0]!.innerHTML, hosts[1]!.innerHTML];
+      const [parts, all] = [page(hosts[0]!), page(hosts[1]!)];
       if (parts === all) continue;
       let at = 0;
       while (parts[at] === all[at]) at++;
@@ -195,7 +198,7 @@ describe("a streamed reply drawn block by block and piece by piece", () => {
     expect(firstDifference(text, Array.from({ length: text.length }, (_, index) => index + 1))).toBeNull();
     if (OPEN_AT_THE_END.includes(name)) return;
     draw(whole, text, false, true);
-    expect(hosts[0]!.innerHTML, "the finished reply").toBe(hosts[1]!.innerHTML);
+    expect(page(hosts[0]!), "the finished reply").toBe(page(hosts[1]!));
   });
 
   it("random documents: every sampled prefix draws as the whole text does", () => {
