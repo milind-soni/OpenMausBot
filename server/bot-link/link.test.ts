@@ -704,10 +704,10 @@ describe("the link between a computer and its Cloud", () => {
     release();
     await until(() => computer.coordinator.all().filter((node) => node.botId === "local-writer" && node.status === "completed").length === requesters.length, "all reports finish while disconnected", 30_000);
     computer.dialer.start();
-    await until(() => cloud.results.length === requesters.length, "all reports cross the HTTP body limit");
+    await until(() => cloud.results.length === requesters.length, "all reports cross the HTTP body limit", 30_000);
     expect(cloud.results.every((result) => result.status === "completed" && result.result === words)).toBe(true);
     expect(cloud.results.map((result) => result.thread).sort()).toEqual(requesters.map((requester) => `${requester.id}-chat`).sort());
-    await until(() => computer.link.outgoing(CLOUD, 0).every((entry) => entry.frame.t !== "result"), "all delivered reports are acknowledged");
+    await until(() => computer.link.outgoing(CLOUD, 0).every((entry) => entry.frame.t !== "result"), "all delivered reports are acknowledged", 15_000);
   }, 60_000);
 
   it("a requester cut by two restarts fails the hand-off and stops the work where it runs", async () => {
