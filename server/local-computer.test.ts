@@ -147,6 +147,23 @@ describe("local computer descriptor", () => {
     expect(cuaUnavailableReason({ mode: "unavailable", reason, mcpCommand: "/fixture/driver" }, "darwin")).toBeNull();
   });
 
+  it("accepts the macOS 12.3–14 helper's descriptor", () => {
+    const connection = {
+      mode: "embedded",
+      socketPath: "/tmp/cua.sock",
+      mcpCommand: "/tmp/cua-driver-mac12",
+      mcpArgs: ["mcp", "--socket", "/tmp/cua.sock"],
+      mcpEnv: {},
+    };
+    expect(decodeCuaConnection(connection, { platform: "darwin" })).toMatchObject({
+      command: "/tmp/cua-driver-mac12",
+      args: ["mcp", "--socket", "/tmp/cua.sock"],
+      env: {},
+      platform: "darwin",
+      scope: "local-computer",
+    });
+  });
+
   it("reads only the record it is pointed at, never a guessed home folder", () => {
     expect(readCuaConnection({ platform: "darwin" })).toBeNull();
     expect(readCuaConnection({ platform: "darwin", userData: "" })).toBeNull();

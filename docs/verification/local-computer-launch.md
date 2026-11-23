@@ -44,12 +44,44 @@ The Electron subprocess ratchet permits only the pre-existing cached boot-ID
 read and Linux private-group lookup. Those synchronous ownership checks remain
 outside this narrow change; the active macOS launch/status calls are asynchronous.
 
-A Mac older than macOS 15 never reaches those launches: `startCua` publishes
-"computer use needs macOS 15 or later" before it loads the SDK, which a test in
-that file pins, and the launch checks skip there. `node scripts/prepare-cua.mjs`
-reads `minos` of every staged native file with `otool -l` and fails when one needs
-a newer macOS than `CUA_MIN_MACOS`; it cannot run on a Mac where that driver
-cannot load, because it starts the driver to read its version.
+A Mac below macOS 12.3 never reaches those launches: `startCua` publishes
+"computer use needs macOS 12.3 or later" before it loads anything, which a test
+in that file pins. macOS 12.3–14.x does not take the CUA path at all: it starts
+the in-tree helper, which a second test in that file also pins against a fake
+binary. `node scripts/prepare-cua.mjs` reads `minos` of every staged native file
+with `otool -l` and fails when one needs a newer macOS than `CUA_MIN_MACOS`; on
+legacy macOS it skips starting the driver for its version, so a macOS 12
+machine can still stage assets it will never execute.
+
+## macOS 12.3–14 helper
+
+`pnpm test:cua:mac12` builds `electron/resources/cua-mac12/cua-driver-mac12`
+(both slices, asserting `minos` 12.3, no `libswift`, and the universal arch
+list), then runs the protocol smoke: the daemon serves a temporary socket, the
+stdio proxy speaks MCP over it, and it asserts `initialize`, the tool list, a
+positive `get_screen_size`, at least one running app, and both permission
+booleans. It sends no input and captures nothing.
+
+Manual acceptance on the Mac, using a throwaway conversation and a disposable
+user data directory:
+
+1. `pnpm build:cua:mac12 && pnpm dev:desktop -- --user-data-dir=/tmp/omb-mac12-test`
+2. In **This computer**, grant Accessibility and Screen Recording to the running
+   app (OpenMausBot in a packaged build, Electron under `dev:desktop`) and click
+   Retry. Expected: the computer is ready, with no macOS 13/15 message.
+3. Ask: "Take a screenshot, then type 'hello macos 12' into TextEdit."
+   Expected: the screenshot shows the desktop, the text appears in TextEdit, and
+   `check_permissions` reports both true. `type_text` answering "typed" is not
+   proof: read the text area's `value` back in a follow-up `get_window_state`.
+   If background keystrokes do not land, retry with `delivery_mode:"foreground"`
+   or `set_value` on the text area token.
+4. Ask: "Click the red close button of the TextEdit window." Expected: the
+   window closes and the tool reports `method:"ax"` or `method:"mouse"`
+   truthfully.
+5. Ask: "List the open windows and bring TextEdit to the front." Expected:
+   `list_windows` includes TextEdit and `bring_to_front` activates it.
+6. Ask a website task. Expected: the bot's own browser tools, no `browser_*`
+   tool from this computer, and no fake success.
 
 Reference: OpenClaw's [macOS host coordinator](https://github.com/openclaw/openclaw/blob/7e1b9a63cf64fa5e77b92a7f77e8fccba7b61812/apps/macos/Sources/OpenClaw/CuaDriverHostCoordinator.swift)
 keeps the daemon owned by the desktop host, and its

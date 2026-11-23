@@ -44,6 +44,8 @@ files:
   - "!electron/resources/recorder-helper.swift"
   - "!electron/resources/recorder-helper-Info.plist"
   - "!electron/resources/OpenMausBot Recorder.app/**"
+  # The macOS 12.3–14 helper ships signed outside ASAR from dist-native/${arch}.
+  - "!electron/resources/cua-mac12/**"
   - "!**/node_modules/**"
   - src/locales/*.json
   - "!src/locales/source-hashes.json"
@@ -124,6 +126,9 @@ mac:
       to: cua-driver
     - from: dist-native/${arch}/cua-sdk
       to: cua-sdk
+    # macOS 12.3–14 computer use: an Objective-C helper built for 12.3, loose like cua-driver.
+    - from: dist-native/${arch}/cua-mac12
+      to: cua-mac12
     - from: dist-native/cloudflared/darwin-${arch}/cloudflared
       to: cloudflared/cloudflared
     - from: dist-native/browser/darwin-${arch}

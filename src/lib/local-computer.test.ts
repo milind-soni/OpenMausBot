@@ -316,10 +316,10 @@ describe("what the person reads about using this computer", () => {
 
   it("names the macOS version when the Mac is too old, instead of asking for grants", () => {
     const reason = localComputerDisabledReason({
-      capabilities: { host: host("darwin"), localComputer: { available: false, message: "computer use needs macOS 15 or later" } } as DesktopCapabilities,
+      capabilities: { host: host("darwin"), localComputer: { available: false, message: "computer use needs macOS 12.3 or later" } } as DesktopCapabilities,
       providerSupportsLocal: true,
     });
-    expect(reason).toBe("Bots can use this computer once it runs macOS 15 or later.");
+    expect(reason).toBe("Bots can use this computer once it runs macOS 12.3 or later.");
     expect(reason).not.toMatch(JARGON);
   });
 

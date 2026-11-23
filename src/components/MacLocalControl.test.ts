@@ -40,10 +40,10 @@ describe("Mac local computer status", () => {
   });
 
   it("names the macOS version a too-old Mac needs and offers no permission repair", () => {
-    fixture.localComputer = { available: false, message: "computer use needs macOS 15 or later" } as DesktopCapabilities["localComputer"];
+    fixture.localComputer = { available: false, message: "computer use needs macOS 12.3 or later" } as DesktopCapabilities["localComputer"];
     const markup = renderToStaticMarkup(createElement(MacLocalControl));
     expect(markup).toContain("This Mac needs a newer macOS");
-    expect(markup).toContain("Bots can use this computer once it runs macOS 15 or later.");
+    expect(markup).toContain("Bots can use this computer once it runs macOS 12.3 or later.");
     expect(markup).toContain("Driver detail");
     expect(markup).not.toContain("Open System Settings");
     expect(markup).not.toContain(">Retry</button>");

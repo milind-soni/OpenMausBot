@@ -1,8 +1,8 @@
 // Packaged: an embedded cua-driver daemon, so macOS TCC grants attribute to OpenMausBot; dev attaches to CuaDriver.app.
 // Agents use the stdio MCP proxy, which executes nothing; the host-owned daemon does.
 
-import { app, ipcMain } from "electron";
-import { execFile } from "node:child_process";
+import { app, ipcMain, systemPreferences } from "electron";
+import { execFile, spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { promisify } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
@@ -14,7 +14,7 @@ import { pathToFileURL } from "node:url";
 import localOriginModule from "./local-origin.cjs";
 import { createLocalComputerGrant } from "./local-computer-grant.mjs";
 import { driverFailure } from "./cua-failure.mjs";
-import { CUA_MIN_MACOS } from "./cua-min-macos.mjs";
+import { LEGACY_MIN_MACOS, macDriverKind } from "./cua-min-macos.mjs";
 import { createHelperRestarts, followLinuxConnection } from "./cua-restart.mjs";
 import { watchDriver } from "./cua-watch.mjs";
 import { missingPermissions } from "./lent-screen-failures.mjs";
@@ -53,6 +53,9 @@ const WIN_INSTALLED_DRIVERS = [
 ];
 let embeddedHost = null;
 let embeddedGeneration = null;
+/** macOS 12.3–14: the in-tree Objective-C helper this process spawned, its socket, and its id. */
+let legacyHost = null;
+let legacyGeneration = 0;
 let startupAbort = null;
 /** On Windows a start that failed for a reason that passes (a slow first start while the system scans the new helper)
  * is tried again by itself after these waits; a blocked or missing helper is not. */
@@ -318,9 +321,125 @@ async function startEmbedded(binary, signal) {
   }
 }
 
-// os.release() is the Darwin version: macOS 11 to 15 are Darwin 20 to 24, so the major minus 9; macOS 26 is Darwin 25.
-function macOSTooOld() {
-  return process.platform === "darwin" && Number(os.release().split(".")[0]) - 9 < CUA_MIN_MACOS;
+function legacyDriverBinary() {
+  return process.env.OPENMAUSBOT_CUA_MAC12_BINARY || (app.isPackaged
+    ? path.join(process.resourcesPath, "cua-mac12", "cua-driver-mac12")
+    : path.join(app.getAppPath(), "electron", "resources", "cua-mac12", "cua-driver-mac12"));
+}
+
+function legacyToolsPath() {
+  return process.env.OPENMAUSBOT_CUA_MAC12_TOOLS || (app.isPackaged
+    ? path.join(process.resourcesPath, "cua-mac12", "tools.json")
+    : path.join(app.getAppPath(), "electron", "resources", "cua-mac12", "tools.json"));
+}
+
+/** True when the child is gone, waiting at most `ms`. Leaves no timer behind. */
+function exitWithin(child, ms) {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      child.off("exit", onExit);
+      resolve(false);
+    }, ms);
+    const onExit = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    child.once("exit", onExit);
+  });
+}
+
+async function stopLegacyHost(host) {
+  if (!host) return;
+  const { child, socketPath } = host;
+  if (child.exitCode === null && child.signalCode === null) {
+    child.kill("SIGTERM");
+    if (!(await exitWithin(child, 2_000))) {
+      child.kill("SIGKILL");
+      await exitWithin(child, 500);
+    }
+  }
+  fs.rmSync(socketPath, { force: true });
+}
+
+/** macOS 12.3–14 has no upstream driver, so this app's own helper serves the computer tools. This process spawns it, so
+ * the grants attach to OpenMausBot, the same as the packaged cua-driver. Its lifeline is fd 3: closing it, which happens
+ * when this app exits, tells the helper to exit. */
+async function startLegacyMac(signal) {
+  const binary = legacyDriverBinary();
+  if (!fs.existsSync(binary)) {
+    return persistAndNotify({ mode: "unavailable", reason: "cua-driver-mac12 binary not found" });
+  }
+  const accessibility = systemPreferences.isTrustedAccessibilityClient(false);
+  const screenRecording = systemPreferences.getMediaAccessStatus("screen") === "granted";
+  if (!accessibility || !screenRecording) {
+    const missing = [!accessibility && "Accessibility", !screenRecording && "Screen Recording"].filter(Boolean).join(" and ");
+    return persistAndNotify({ mode: "unavailable", reason: `${missing} required` });
+  }
+  if (signal.aborted) return;
+  let socketPath = path.join(app.getPath("userData"), "cua-mac12.sock");
+  // sockaddr_un.sun_path is 104 bytes on macOS.
+  if (Buffer.byteLength(socketPath) > 100) {
+    socketPath = path.join(app.getPath("temp"), `cua-mac12-${process.pid}.sock`);
+  }
+  const previous = legacyHost;
+  legacyHost = null;
+  await stopLegacyHost(previous);
+  fs.rmSync(socketPath, { force: true });
+
+  const child = spawn(
+    binary,
+    ["serve", "--socket", socketPath, "--tools", legacyToolsPath(), "--lifeline", "3"],
+    { stdio: ["ignore", "ignore", "pipe", "pipe"], env: { ...process.env } },
+  );
+  let stderrTail = "";
+  child.stderr?.setEncoding("utf8");
+  child.stderr?.on("data", (chunk) => {
+    stderrTail = (stderrTail + chunk).slice(-8_192);
+  });
+  const kill = () => child.kill("SIGKILL");
+  signal.addEventListener("abort", kill, { once: true });
+  if (signal.aborted) kill();
+
+  const deadline = Date.now() + 5_000;
+  while (!fs.existsSync(socketPath)) {
+    if (Date.now() >= deadline || signal.aborted ||
+        child.exitCode !== null || child.signalCode !== null) break;
+    await delay(50);
+  }
+  const failed = () => {
+    child.kill("SIGKILL");
+    fs.rmSync(socketPath, { force: true });
+  };
+  if (signal.aborted) return failed();
+  if (!fs.existsSync(socketPath) || child.exitCode !== null || child.signalCode !== null) {
+    failed();
+    return persistAndNotify({
+      mode: "unavailable",
+      reason: `cua-driver-mac12 failed: ${stderrTail.trim()}`,
+    });
+  }
+  try {
+    signal.throwIfAborted();
+  } catch (error) {
+    failed();
+    throw error;
+  }
+  legacyHost = { child, socketPath, generation: `mac12-${++legacyGeneration}` };
+  helperRestarts.started();
+  child.once("exit", () => {
+    if (legacyHost?.child !== child) return;
+    legacyHost = null;
+    helperRestarts.exited("cua-driver-mac12 exited");
+  });
+  return persistAndNotify({
+    mode: "embedded",
+    socketPath,
+    mcpCommand: binary,
+    mcpArgs: ["mcp", "--socket", socketPath],
+    mcpEnv: { ...CUA_ENV },
+    generation: legacyHost.generation,
+  });
 }
 
 export async function startCua({ attempt = 0 } = {}) {
@@ -333,9 +452,14 @@ export async function startCua({ attempt = 0 } = {}) {
   startupAbort?.abort();
   startupAbort = new AbortController();
   const { signal } = startupAbort;
-  if (macOSTooOld()) {
-    return persistAndNotify({ mode: "unavailable", reason: `computer use needs macOS ${CUA_MIN_MACOS} or later` });
+  const kind = process.platform === "darwin" ? macDriverKind() : null;
+  if (kind === "unsupported") {
+    return persistAndNotify({
+      mode: "unavailable",
+      reason: `computer use needs macOS ${LEGACY_MIN_MACOS} or later`,
+    });
   }
+  if (kind === "legacy") return startLegacyMac(signal);
   const binary = resolveDriverBinary();
   if (!binary) {
     return persistAndNotify({
@@ -418,6 +542,8 @@ function watchMacDriver(connection) {
   driverWatch?.stop();
   driverWatch = null;
   if (process.platform !== "darwin" || (connection.mode !== "embedded" && connection.mode !== "standalone")) return;
+  // The legacy helper's child exit is the watch; it owns that socket and nothing else probes it.
+  if (legacyHost?.socketPath === connection.socketPath) return;
   const host = connection.mode === "embedded" ? embeddedHost : null;
   driverWatch = watchDriver({ alive: () => socketAlive(connection.socketPath), restart: () => {
     if (host) {
@@ -432,8 +558,9 @@ function watchMacDriver(connection) {
 }
 
 export async function cuaPermissionsStatus() {
-  const binary = resolveDriverBinary();
-  if (!binary) return { available: false };
+  const legacy = process.platform === "darwin" && macDriverKind() === "legacy";
+  const binary = legacy ? legacyDriverBinary() : resolveDriverBinary();
+  if (!binary || (legacy && !fs.existsSync(binary))) return { available: false };
   const out = await execFileAsync(binary, ["permissions", "status", "--json"], {
     encoding: "utf8",
     timeout: 5000,
@@ -465,6 +592,9 @@ export async function stopCua() {
     }
     return;
   }
+  const legacy = legacyHost;
+  legacyHost = null;
+  await stopLegacyHost(legacy);
   const host = embeddedHost;
   embeddedHost = null;
   embeddedGeneration = null;
