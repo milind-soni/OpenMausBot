@@ -8491,6 +8491,7 @@
   "brief.card.join": "Join",
   "brief.card.open": "Open",
   "brief.card.openGmail": "Open in Gmail",
+  "brief.card.openOutlook": "Open in Outlook",
   "brief.card.openPage": "Open page",
   "brief.card.draftReply": "Draft a reply to {who}",
   "brief.card.dismissEmail": "Dismiss {who}'s email",
