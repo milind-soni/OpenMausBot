@@ -148,11 +148,13 @@ describe("the state file", () => {
 
 describe("which roots a live process uses (/proc)", () => {
   /** A folder shaped like /proc: one process per entry, with its links, maps and environment. */
-  function proc(processes: Record<string, { cwd?: string; exe?: string; fds?: string[]; maps?: string; environ?: Record<string, string> }>) {
+  function proc(processes: Record<string, { parent?: number; cwd?: string; exe?: string; fds?: string[]; maps?: string; environ?: Record<string, string> }>) {
     const dir = scratch("omb-proc-");
     for (const [pid, info] of Object.entries(processes)) {
       const at = join(dir, pid);
       mkdirSync(join(at, "fd"), { recursive: true });
+      // The name may hold spaces and parentheses; the parent is the field after the last one.
+      writeFileSync(join(at, "stat"), `${pid} (a (b) c) S ${info.parent ?? 1} ${pid} 0 0 -1`);
       symlinkSync(info.cwd ?? "/", join(at, "cwd"));
       symlinkSync(info.exe ?? "/usr/bin/node", join(at, "exe"));
       symlinkSync("/", join(at, "root"));
@@ -173,18 +175,22 @@ describe("which roots a live process uses (/proc)", () => {
       ["environ", { environ: { npm_config_cache: `${personal}/npm`, HOME: "/data" } }],
       ["PATH", { environ: { PATH: `/usr/bin:${personal}/uv/archive-v0/abc/bin` } }],
     ];
-    for (const [name, info] of cases) expect([...await rootsInUse([personal, member], { proc: proc({ 100: info }), self: 1, uid: null })], name).toEqual([personal]);
+    for (const [name, info] of cases) expect([...await rootsInUse([personal, member], { proc: proc({ 100: info }), self: 1 })], name).toEqual([personal]);
   });
 
-  it.skipIf(process.platform === "win32")("not: a process elsewhere, a folder whose name only starts the same, the server itself, another user's", async () => {
+  it.skipIf(process.platform === "win32")("not: a process elsewhere, a folder whose name only starts the same, the server itself, one the server did not start", async () => {
     const dir = proc({
       100: { cwd: "/data/projects/site", environ: { HOME: "/data", PATH: "/usr/bin" } },
       101: { cwd: "/data/cache-old/x", environ: { X: "/data/cachefile" } },
       102: { cwd: `${personal}/npm` },
+      103: { parent: 50, cwd: `${member}/uv` },
     });
-    expect([...await rootsInUse([personal, member], { proc: dir, self: 102, uid: null })]).toEqual([]);
-    expect([...await rootsInUse([personal], { proc: dir, self: 1, uid: -1 })]).toEqual([]);
-    expect([...await rootsInUse([personal, member], { proc: dir, self: 1, uid: null })]).toEqual([personal]);
+    expect([...await rootsInUse([personal, member], { proc: dir, self: 102 })]).toEqual([]);
+    expect([...await rootsInUse([personal, member], { proc: dir, self: 1 })]).toEqual([personal]);
+    // A grandchild (a box's process, or what a bot started inside it) counts.
+    const tree = proc({ 200: { parent: 1 }, 201: { parent: 200 }, 202: { parent: 201, cwd: `${member}/pip` } });
+    expect([...await rootsInUse([member], { proc: tree, self: 1 })]).toEqual([member]);
+    expect([...await rootsInUse([member], { proc: tree, self: 7 })]).toEqual([]);
   });
 
   it("no /proc to read: every root counts as used", async () => {

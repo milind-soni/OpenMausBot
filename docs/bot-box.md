@@ -136,9 +136,11 @@ are not there. With it on, making it at start reads nothing either; its first ti
   hub with one large model is the likely one). `npm` goes whole: every npx-installed MCP server is downloaded again
   together.
 - **Never while a bot works.** In a tools root, nothing is deleted while a turn runs, an engine is kept warm, or any
-  process of the server's user uses that root: its working folder, program, open files, mapped files or environment name
-  a path in it (`in-use.ts`, from `/proc`). Every boxed process carries its HOME's cache variables, so any process a bot
-  of that HOME started counts. A process that cannot be read counts as using every root (logged once). This is checked
+  process the server started (directly or inside a box) uses that root: its working folder, program, open files, mapped
+  files or environment name a path in it (`in-use.ts`, from `/proc`). Every bot process is one of the server's
+  descendants (`--unshare-pid` and `--die-with-parent` keep even a bot's daemon in its box's tree), and every boxed
+  process carries its HOME's cache variables, so any process a bot of that HOME started counts. A descendant that cannot
+  be read counts as using every root (logged once); a process the server did not start is not looked at. This is checked
   before each folder goes. A busy home is tried again on the next tick, 5 minutes later; a pass that finishes waits an
   hour. The turn and warm-engine check is for the whole Cloud: on a Team Cloud one member's turn holds every root's
   pass (a process seen in one root holds only that root). This protects running work but is not absolute: a turn that

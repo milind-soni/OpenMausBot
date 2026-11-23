@@ -98,7 +98,7 @@ export function createCacheSweeper(deps: CacheSweeperDeps) {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((line: string) => console.log(line));
   const inUse = deps.inUse ?? ((roots: readonly string[]) => rootsInUse(roots, {
-    unreadable: (pid) => once("unreadable", `cache sweep: process ${pid} of this user cannot be read, so no tool cache is removed while such a process runs (said once)`),
+    unreadable: (pid) => once("unreadable", `cache sweep: process ${pid}, which the server started, cannot be read, so no tool cache is removed while such a process runs (said once)`),
     using: (pid, root) => once(`using:${root}`, `cache sweep: process ${pid} uses ${root}, so nothing there is removed while a process does (said once)`),
   }));
   const supported = deps.supported ?? (() => anchoredSupported());
