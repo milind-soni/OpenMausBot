@@ -41,7 +41,7 @@ export function BoatOfferCard({ onDone }: { onDone: (action: BoatOfferAction) =>
   return <NoticeCard titleId="boat-offer-title" notice="boat-offer" icon={Gift} title={t("boatOffer.title")} onDismiss={() => onDone("close")}>
     <BoatOfferWords />
     <div className="mt-3 flex flex-col gap-2">
-      <LinkButton url={BOAT_OFFER.url} label={t("boatOffer.get")} className={cn(PRIMARY_BUTTON, "w-full")} onOpened={() => onDone("get_boat")} />
+      <LinkButton url={BOAT_OFFER.url} label={t("boatOffer.get")} showUrlOnError className={cn(PRIMARY_BUTTON, "w-full")} onOpened={() => onDone("get_boat")} />
       <ClaimButton className="w-full" onOpened={() => onDone("claim")} />
       <NotNowButton onClick={() => onDone("not_now")} />
     </div>
@@ -59,7 +59,7 @@ export function BoatOfferPanel() {
         <p className="text-[13px] leading-[18px] text-ink-secondary">{t("boatOffer.body")}</p>
         <p data-boat-offer-yourself className="mt-1 text-[12px] leading-4 text-ink-secondary">{t("boatOffer.yourself")}</p>
       </div>
-      <LinkButton url={BOAT_OFFER.url} label={t("boatOffer.get")} className="ui-button ui-button-md shrink-0 rounded-full" onOpened={() => reportBoatOffer("get_boat", "settings")} />
+      <LinkButton url={BOAT_OFFER.url} label={t("boatOffer.get")} showUrlOnError className="ui-button ui-button-md shrink-0 rounded-full" onOpened={() => reportBoatOffer("get_boat", "settings")} />
     </div>
     <div className="flex items-center justify-end">
       <ClaimButton onOpened={() => reportBoatOffer("claim", "settings")} />
