@@ -67,6 +67,8 @@ export async function sweepTaskWorkspaceBuildFolders(
     const botDir = join(root, candidate.botId);
     const workspace = join(botDir, candidate.threadId);
     if (!isRealDirectory(botDir) || !isRealDirectory(workspace)) continue;
+    // One workspace's walk per turn of the event loop, even where nothing is removed.
+    await new Promise((resolve) => setImmediate(resolve));
     const found: string[] = [];
     findRecreatable(workspace, 1, found);
     for (const path of found) {
