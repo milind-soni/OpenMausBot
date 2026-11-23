@@ -470,6 +470,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
     // Session allows the driver keeps when the agent offered no `allow_always`: exact operations per
     // thread, for the native session's life. A generic title with no input is never remembered.
       const sessionAllows = new Map<string, Set<string>>();
+      /** Native sessions whose saved history the agent can no longer send (a reported `acpSessionBroken`): never resumed. */
+      const brokenSessions = new Set<string>();
 
       const emit = (event: RuntimeEvent) => {
         for (const listener of listeners) listener(event);
@@ -1112,7 +1114,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               const selectionParams = narrowsNativeTools(turn.toolScope)
                 ? support.toolScopeSessionParams!(turn, init, mcpServers.length > 0, { config: turnConfig, env, cwd }) : {};
               let loaded = false;
-              if (cursor && (!support.closeBeforeLiveLoad || liveSessionId !== cursor || await request("session/close", { sessionId: cursor }, 30_000).then(() => { session.sessionId = session.sessionKey = null; return true; }, () => false))) {
+              if (cursor && !brokenSessions.has(cursor) && (!support.closeBeforeLiveLoad || liveSessionId !== cursor || await request("session/close", { sessionId: cursor }, 30_000).then(() => { session.sessionId = session.sessionKey = null; return true; }, () => false))) {
                 try {
                   await loadUntilReplayQuiet({
                     link: session.acp, sessionId: cursor, quietMs: support.loadReplayQuietMs?.(turn), replayed: () => session.sessionConfigResult ?? {},
@@ -1396,6 +1398,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 ...((e as any)?.acpUsageLimit === true || (code === "quota_or_region_restriction" && LIMIT_WORDS.test(message)) ? modelControls.usageLimit((model) => support.limitFacts?.(message, model) ?? { limit: "engine" as const }) : {}), // waited out, or the engine gave up: another AI can carry on
               });
               // Never replay an accepted prompt (it may have run tools); evict before listeners start the next turn.
+              if ((e as any)?.acpSessionBroken === true && session.sessionId) brokenSessions.add(session.sessionId);
               if (signIn.is(e)) closeSession(threadId, "sign-in-required"); else if (!needsAuth && !accountError && ((e as any)?.acpPromptStall === true || (e as any)?.acpUsageLimit === true || (e as any)?.acpSessionFailure === true
                   || code === "upstream_outage") && session.child.exitCode === null && !session.closing) {
                 closeSession(threadId, (e as any)?.acpPromptStall === true ? "prompt-stall" : "rpc-failure");
