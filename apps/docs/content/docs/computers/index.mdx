@@ -32,3 +32,47 @@ In the built-in browser (and in My Chrome) a bot can also sign in with a login y
 <Callout type="warn" title="Preview is not permission">
   Starting a screen preview does not grant the bot control. Local input requires a separate opt-in and remains subject to the computer-use safety boundary.
 </Callout>
+
+## See all your devices
+
+**Settings → Devices** draws every device connected to the place you have open, on one small map. The place is at the top. Every other device hangs off a line named for how it connects:
+
+- **Same network**: a phone on the same Wi-Fi.
+- **Private network**: anything that reaches this computer over Tailscale. It is drawn as a group of its own, with Tailscale's state.
+- **Through MausBot**: a phone using the relay.
+- **MausBot Cloud**: your Cloud, or devices signed in to it.
+- **Internet**: a server of your own at a public address.
+- **Signed in**: a browser or device paired with a code.
+- **SSH**: a server your bots work on.
+
+Each device shows whether it is online, when it was last seen, or the one thing it needs: **Update it**, **Pair it again** or **Can't reach it**. Choose a device to see its details and the actions that already exist for it:
+
+- Switch to it.
+- Try now.
+- Pair again.
+- Copy its address.
+- Copy the update command for that install.
+- Remove it.
+- Manage it on its own settings page.
+
+**Add a device** takes each kind into the flow it already has:
+
+- **Phone** opens Pair a phone.
+- **Computer** makes a pairing link over your private network. It shows the link and code, and says when the other computer has connected. A Cloud's page says to sign in on the other computer instead.
+- **Your own server** gives you one line to run on that machine. `npx openmausbot account login && npx openmausbot serve --tunnel` makes it reachable from anywhere; `npx openmausbot serve --tailscale` keeps it on your private network. Then **Paste the link it shows**.
+- **Cloud** opens Get a Cloud.
+
+### Private network (Tailscale)
+
+MausBot only asks Tailscale about this computer when you press **Set up** or **Check again**. After that, it checks again each time you come back to the window. Each state has one next step:
+
+| Map says | Next step |
+|---|---|
+| Not set up | **Set up**: checks Tailscale and lets your other computers on it connect here |
+| Not installed | **Get Tailscale** for your system, then sign in |
+| Signed out, Not running | Open Tailscale and sign in, then **Check again** |
+| Waiting for approval | Approve this computer in the Tailscale admin console, then **Check again** |
+| Needs MagicDNS | Turn on MagicDNS in Tailscale, then **Check again** |
+| On | **Add a computer** |
+
+MausBot never installs Tailscale, signs you in, or changes your tailnet.
