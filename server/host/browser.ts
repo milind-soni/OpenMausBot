@@ -42,7 +42,7 @@ import type { HostKind } from "../browser/chrome/flags.ts";
 import { browserEngineKind, browserPaneWanted, cloudDisplayWanted, type BrowserEngineKind } from "../browser/config.ts";
 import { parseSocks5Proxy } from "../browser/egress/policy.ts";
 import { ChromeEngine, chromeTarget, LiveRouter, profileKey, RuntimeRouter } from "../browser/engines.ts";
-import { CEILING_TICK_MS, ceilingLines, createBrowserCeiling } from "../browser/memory-ceiling.ts";
+import { CEILING_FAST_TICK_MS, CEILING_TICK_MS, ceilingLines, createBrowserCeiling } from "../browser/memory-ceiling.ts";
 import { browserProcessTree } from "../browser-processes.ts";
 import { pssBytes } from "../bot-memory-cap.ts";
 import { boxMemory } from "../box-memory.ts";
@@ -92,7 +92,7 @@ export interface BrowserHostDeps {
   lentChrome?: { route(): ChromeRoute | null; lender(): ChromeLender | null };
   /** The engine memory guard, told which browsers each thread's turn starts or holds. */
   /** `selfHosted`: turns wait for room on this server, under its pids limit, and so do its bots' browsers. */
-  engineMemory?: { useBrowsers(browsers: EngineBrowsers): void; selfHosted?(): boolean; roomFactor?(): number; reclaimIdle?(): Promise<boolean> };
+  engineMemory?: { useBrowsers(browsers: EngineBrowsers): void; selfHosted?(): boolean; roomFactor?(): number; reclaimIdle?(): Promise<boolean>; memoryShort?(): boolean; stopForBrowser?(threadId: string): boolean };
   /** Whose browser a conversation's turns use on a Team Cloud: the member's, the group chat's or the team's. Every
    * browser is the bot's own without it. */
   audienceOf?(threadId: string): Audience;
@@ -293,22 +293,27 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     running: (session) => browserRunning(session, usedBrowserSessions.get(session)),
     inUse: (session) => !turnResources.free(`browser:${session}`) || agentBrowserRuntime.working(session) });
   let gateTimer: ReturnType<typeof setInterval> | undefined;
-  let ceilingTimer: ReturnType<typeof setInterval> | undefined;
+  let ceilingTimer: ReturnType<typeof setTimeout> | undefined;
+  let ceilingStopped = false;
+  // Every 15 s, and every 3 s while a browser is over its soft line: a browser can take a small home's memory in minutes.
+  const ceilingLook = (large: boolean) => {
+    if (ceilingStopped || !browserCeiling) return;
+    ceilingTimer = setTimeout(() => void browserCeiling.tick().then(ceilingLook, () => ceilingLook(false)), large ? CEILING_FAST_TICK_MS : CEILING_TICK_MS);
+    ceilingTimer.unref?.();
+  };
   const browserSweep = {
     start() {
       gateTimer = setInterval(() => void releaseGates().catch(() => undefined), 60_000);
       gateTimer.unref?.();
-      if (browserCeiling) {
-        ceilingTimer = setInterval(() => void browserCeiling.tick().catch(() => undefined), CEILING_TICK_MS);
-        ceilingTimer.unref?.();
-      }
+      ceilingLook(false);
       agentBrowserSweep.start();
       chromeEngine.start({ inUse: browserEngineKind(cfg) === "chrome", prepare: builtInBrowserEnabled(cfg) });
       return browserSweep;
     },
     closeAll: () => {
       clearInterval(gateTimer);
-      clearInterval(ceilingTimer);
+      ceilingStopped = true;
+      clearTimeout(ceilingTimer);
       doors?.close();
       doorUrls.clear();
       leftovers.clear();
@@ -321,7 +326,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     browsers: async () => (await Promise.all(browserOwners().map(async ({ pid, session }) => {
       const spec = usedBrowserSessions.get(session);
       const tree = spec ? await browserProcessTree(spec.command, pid, session) : null;
-      return tree ? [{ session, pids: [...tree.members.keys()] }] : [];
+      return tree ? [{ session, pids: [...tree.members.keys()], daemon: tree.daemon }] : [];
     }))).flat(),
     pss: (pid) => pssBytes(pid),
     quiet: (session) => !agentBrowserRuntime.working(session),
@@ -340,6 +345,18 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         attached: Boolean(chromeTarget(session, spec)) || attachesToChrome(spec.env), watched: spare === null && !working, turnRunning: false,
         savesSignIns: spare?.savesSignIns ?? spec.env.AGENT_BROWSER_RESTORE_SAVE === "auto" };
       return reclaimable(candidate, false) && browserRuntime.closeUnused(session, spec);
+    },
+    memoryShort: () => deps.engineMemory?.memoryShort?.() ?? false,
+    // The holder's turn is stopped first, so its line says the browser was closed; Chrome's memory then comes back at once,
+    // and the daemon closes once no turn holds it (closeForMemory).
+    forceClose: async ({ session, pids, daemon }) => {
+      const spec = usedBrowserSessions.get(session);
+      if (!spec || chromeTarget(session, spec) || attachesToChrome(spec.env)) return false;
+      const holder = turnResources.holder(`browser:${session}`);
+      const ending = holder !== undefined && deps.engineMemory?.stopForBrowser?.(holder.threadId) === true;
+      for (const pid of pids) if (pid !== daemon) try { process.kill(pid, "SIGKILL"); } catch {}
+      if (!ending) void closeForMemory(session, spec);
+      return true;
     },
   }) : null;
   function inRunningSession(session: string, args: string[]): Promise<Record<string, unknown> | null> {
