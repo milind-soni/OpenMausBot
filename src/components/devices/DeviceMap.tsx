@@ -5,7 +5,7 @@ import { t } from "@/lib/i18n";
 import { groupByRoute, type Device, type DeviceRoute, type PrivateNetwork } from "@/lib/devices";
 import { DOT, KIND_ICON, kindLabel, networkShort, routeLabel, statusText } from "./device-words";
 
-const NODE = "group/node relative flex w-40 min-w-0 cursor-pointer flex-col items-start gap-1 rounded-xl bg-menu px-3 py-2 text-start transition-colors hover:bg-ink/[0.06] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus motion-safe:animate-fade-in @max-[480px]/map:w-full @max-[480px]/map:flex-row @max-[480px]/map:items-center @max-[480px]/map:gap-3";
+const NODE = "relative flex w-48 min-w-0 cursor-pointer items-center gap-3 rounded-xl bg-menu px-3 py-2 text-start transition-colors hover:bg-ink/[0.06] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus motion-safe:animate-fade-in @max-[480px]/map:w-full";
 
 /** One device on the map: its mark with a status dot, its name and one line. Choosing it opens its row below. */
 export function DeviceNode({ device, selected, onSelect, now }: { device: Device; selected: boolean; onSelect: (id: string) => void; now: number }) {
@@ -46,18 +46,27 @@ export function HereNode({ device, mark, selected, onSelect }: { device: Device;
 
 /** A route's branch off the trunk: its name where the line meets it, then its devices. Dashed while none is online. */
 function Branch({ route, last, quiet, label, aside, children, boxed }: { route: DeviceRoute; last: boolean; quiet: boolean; label: ReactNode; aside?: ReactNode; children: ReactNode; boxed?: boolean }) {
+  // The stub meets the group's first row: the private network's header, or a plain group's devices (its name sits
+  // beside them when the map is wide, above them when it is narrow).
+  const stub = boxed ? "top-6" : "top-2 @min-[560px]/map:top-6";
   return (
-    <li data-device-route={route} className="relative ps-6">
-      <span aria-hidden="true" className={cn("absolute start-0 top-0 w-0 border-s border-hairline", last ? "h-5" : "h-full", quiet && "border-dashed")} />
-      <span aria-hidden="true" className={cn("absolute start-0 top-5 w-5 border-t border-hairline", quiet && "border-dashed")} />
-      <div className={cn("flex flex-col gap-2 pb-4", boxed && "rounded-xl border border-dashed border-hairline px-3 py-3")}
-        data-private-network={boxed ? "" : undefined}>
-        <div className="flex min-h-6 flex-wrap items-center justify-between gap-x-3 gap-y-1">
-          <span className="text-[12px] font-medium leading-4 text-ink-secondary">{label}</span>
-          {aside}
+    <li data-device-route={route} className="relative pb-3 ps-6">
+      <span aria-hidden="true" className={cn("absolute start-0 top-0 w-0 border-s border-hairline", last ? (boxed ? "h-6" : "h-2 @min-[560px]/map:h-6") : "h-full", quiet && "border-dashed")} />
+      <span aria-hidden="true" className={cn("absolute start-0 w-5 border-t border-hairline", stub, quiet && "border-dashed")} />
+      {boxed ? (
+        <div className="flex flex-col gap-2 rounded-xl border border-dashed border-hairline px-3 py-3" data-private-network="">
+          <div className="flex min-h-6 flex-wrap items-center justify-between gap-x-3 gap-y-1">
+            <span className="text-[12px] font-medium leading-4 text-ink-secondary">{label}</span>
+            {aside}
+          </div>
+          {children}
         </div>
-        {children}
-      </div>
+      ) : (
+        <div className="flex flex-col gap-2 @min-[560px]/map:flex-row @min-[560px]/map:items-start">
+          <span className="text-[12px] font-medium leading-4 text-ink-secondary @min-[560px]/map:mt-4 @min-[560px]/map:w-28 @min-[560px]/map:shrink-0">{label}</span>
+          {children}
+        </div>
+      )}
     </li>
   );
 }
@@ -120,7 +129,7 @@ export function DeviceMap({ devices, network, networkAction, selected, onSelect,
           })}
         </ul>
       )}
-      {alone && <p data-devices-empty="" className="ms-4 border-s border-dashed border-hairline ps-6 pb-1 pt-2 text-[13px] leading-[18px] text-ink-secondary">{t("devicesPage.empty")}</p>}
+      {alone && <p data-devices-empty="" className="ps-4 pt-1 text-[13px] leading-[18px] text-ink-secondary">{t("devicesPage.empty")}</p>}
     </div>
   );
 }

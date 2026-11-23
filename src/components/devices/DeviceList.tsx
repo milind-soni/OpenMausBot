@@ -1,4 +1,3 @@
-import { useEffect, useRef } from "react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { lastSeen } from "@/lib/pairing-time";
@@ -33,23 +32,60 @@ function Detail({ label, children }: { label: string; children: React.ReactNode 
   );
 }
 
+function ActionButton({ device, action, quiet, onAction }: { device: Device; action: DeviceAction; quiet: boolean; onAction: (device: Device, action: DeviceAction) => void }) {
+  return (
+    <button type="button" data-device-action={action.type} data-danger={action.type === "remove" ? "" : undefined} onClick={() => onAction(device, action)}
+      aria-label={`${actionLabel(action, device)}: ${device.name}`}
+      className={quiet ? "settings-quiet shrink-0 cursor-pointer" : "ui-button shrink-0"}>{actionLabel(action, device)}</button>
+  );
+}
+const actionKey = (action: DeviceAction) => `${action.type}:${"source" in action ? action.source.id : ""}`;
+
+/** What a device is, how it connects and what bots can do with it, then its other actions. */
+export function DeviceDetails({ device, actions, onAction, now }: { device: Device; actions: readonly DeviceAction[]; onAction: (device: Device, action: DeviceAction) => void; now: number }) {
+  return <>
+    <dl className="flex flex-col gap-1.5">
+      <Detail label={t("devicesPage.detail.kind")}>{kindLabel(device.kind)}</Detail>
+      {!device.here && <Detail label={t("devicesPage.detail.reaches")}>{device.routes.map(routeLabel).join(", ")}</Detail>}
+      {device.address && <Detail label={t("devicesPage.detail.address")}><span className="select-text font-mono text-[12px]">{device.address}</span></Detail>}
+      {device.version && <Detail label={t("devicesPage.detail.version")}>{device.version}</Detail>}
+      {device.lastSeen && device.status !== "online" && <Detail label={t("devicesPage.detail.lastSeen")}>{lastSeen(device.lastSeen, now)}</Detail>}
+      <Detail label={t("devicesPage.detail.bots")}>
+        {device.canRunBots ? t("devicesPage.detail.runsBots") : device.canHostComputer ? t("devicesPage.detail.hostsComputer") : t("devicesPage.detail.reachesBots")}
+        {device.usesThisComputer && <span className="block">{t("servers.share.on", { name: device.name })}</span>}
+      </Detail>
+    </dl>
+    {actions.length > 0 && <div className="flex flex-wrap items-center gap-x-4 gap-y-2">{actions.map((action) => <ActionButton key={actionKey(action)} device={device} action={action} quiet onAction={onAction} />)}</div>}
+  </>;
+}
+
+/** A device chosen on the map: its line, its one button and its details, right under the map. */
+export function DeviceCard({ device, onAction, onClose, now = Date.now() }: { device: Device; onAction: (device: Device, action: DeviceAction) => void; onClose: () => void; now?: number }) {
+  const Icon = KIND_ICON[device.kind];
+  const primary = primaryOf(device);
+  return (
+    <section data-device-card={device.id} aria-label={device.name} className="flex flex-col gap-3 rounded-xl bg-menu px-4 py-3 shadow-[inset_0_0_0_0.5px_var(--settings-edge)] motion-safe:animate-fade-in">
+      <div className="flex items-center gap-3">
+        <Icon size={16} aria-hidden="true" className="shrink-0 text-ink-secondary" />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate text-[14px] font-medium leading-5 text-ink">{device.name}</span>
+          <span className={cn("truncate text-[13px] leading-[18px]", device.status === "attention" ? "text-warning" : "text-ink-secondary")}>{statusText(device, now)}</span>
+        </div>
+        {primary && <ActionButton device={device} action={primary} quiet={false} onAction={onAction} />}
+        <button type="button" onClick={onClose} className="settings-quiet shrink-0 cursor-pointer">{t("common.close")}</button>
+      </div>
+      <div className="flex flex-col gap-3 ps-7"><DeviceDetails device={device} actions={device.actions.filter((action) => action !== primary)} onAction={onAction} now={now} /></div>
+    </section>
+  );
+}
+
 function DeviceRow({ device, selected, onSelect, onAction, now }: { device: Device; selected: boolean; onSelect: (id: string | null) => void; onAction: (device: Device, action: DeviceAction) => void; now: number }) {
-  const row = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (selected) row.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
-  }, [selected]);
   const Icon = KIND_ICON[device.kind];
   const dot = DOT[device.status];
   const primary = primaryOf(device);
   const rest = device.actions.filter((action) => action !== primary);
-  const button = (action: DeviceAction, quiet: boolean) => (
-    <button key={`${action.type}:${"source" in action ? action.source.id : ""}`} type="button" data-device-action={action.type}
-      data-danger={action.type === "remove" ? "" : undefined} onClick={() => onAction(device, action)}
-      aria-label={`${actionLabel(action, device)}: ${device.name}`}
-      className={quiet ? "settings-quiet shrink-0 cursor-pointer" : "ui-button shrink-0"}>{actionLabel(action, device)}</button>
-  );
   return (
-    <div ref={row} data-device-row={device.id} data-selected={selected ? "" : undefined} className={cn("flex flex-col scroll-mt-4", selected && "bg-ink/[0.04]")}>
+    <div data-device-row={device.id} data-selected={selected ? "" : undefined} className={cn("flex flex-col scroll-mt-4", selected && "bg-ink/[0.04]")}>
       <div className="flex min-h-14 items-center gap-3 px-4 py-2">
         <span className="relative flex size-8 shrink-0 items-center justify-center text-ink-secondary">
           <Icon size={16} aria-hidden="true" />
@@ -62,21 +98,11 @@ function DeviceRow({ device, selected, onSelect, onAction, now }: { device: Devi
             {statusText(device, now)}{device.here ? "" : ` · ${routeLabel(device.route)}`}
           </span>
         </button>
-        {primary && button(primary, false)}
+        {primary && <ActionButton device={device} action={primary} quiet={false} onAction={onAction} />}
       </div>
       {selected && (
         <div className="flex flex-col gap-3 pb-3 pe-4 ps-[60px]" data-device-details="">
-          <dl className="flex flex-col gap-1.5">
-            <Detail label={t("devicesPage.detail.kind")}>{kindLabel(device.kind)}</Detail>
-            {!device.here && <Detail label={t("devicesPage.detail.reaches")}>{device.routes.map(routeLabel).join(", ")}</Detail>}
-            {device.address && <Detail label={t("devicesPage.detail.address")}><span className="select-text font-mono text-[12px]">{device.address}</span></Detail>}
-            {device.version && <Detail label={t("devicesPage.detail.version")}>{device.version}</Detail>}
-            {device.lastSeen && device.status !== "online" && <Detail label={t("devicesPage.detail.lastSeen")}>{lastSeen(device.lastSeen, now)}</Detail>}
-            <Detail label={t("devicesPage.detail.bots")}>
-              {device.canRunBots ? t("devicesPage.detail.runsBots") : device.canHostComputer ? t("devicesPage.detail.hostsComputer") : t("devicesPage.detail.reachesBots")}
-            </Detail>
-          </dl>
-          {rest.length > 0 && <div className="flex flex-wrap items-center gap-x-4 gap-y-2">{rest.map((action) => button(action, true))}</div>}
+          <DeviceDetails device={device} actions={rest} onAction={onAction} now={now} />
         </div>
       )}
     </div>

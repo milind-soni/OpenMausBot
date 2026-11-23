@@ -33,7 +33,8 @@ export function statusText(device: Device, now = Date.now()): string {
   if (device.status === "online") return t("devicesPage.status.online");
   if (device.status === "offline") return device.lastSeen ? t("devicesPage.status.seen", { when: lastSeen(device.lastSeen, now) }) : t("devicesPage.status.offline");
   if (device.route === "ssh") return t("devicesPage.status.ssh");
-  return device.kind === "cloud" ? t("servers.managed") : t("devicesPage.status.unknown");
+  if (device.kind === "cloud") return device.home ? `${t("servers.homeTag")} · ${t("servers.managed")}` : t("servers.managed");
+  return device.home ? t("servers.homeTag") : t("devicesPage.status.unknown");
 }
 
 /** The dot's colour by status; none while nothing says how it is. */

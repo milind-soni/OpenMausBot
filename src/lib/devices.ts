@@ -51,6 +51,10 @@ export interface Device {
   /** Bots can work on it: this desktop, a computer lent to this place, a server bots reach over SSH. */
   canHostComputer: boolean;
   here?: true;
+  /** The place the bots live: My Cloud, or a server the person made their home. */
+  home?: true;
+  /** This desktop lets that place's bots use it (Share this computer is on). */
+  usesThisComputer?: boolean;
   actions: DeviceAction[];
 }
 
@@ -83,6 +87,8 @@ export interface DeviceSources {
   /** This app's saved places: only on This computer's own page, where they are the app's own connections. */
   places?: SavedPlaces | null;
   statuses?: readonly ServerStatus[] | null;
+  /** The saved places this desktop lets use it, as `computerSharing.servers()` says. */
+  lending?: ReadonlyArray<{ id: string; enabled: boolean }> | null;
   companion?: Pick<CompanionState, "devices" | "connectedDeviceIds" | "routes"> | null;
   phoneApps?: readonly PublicPhone[] | null;
   sessions?: { sessions: readonly SignedInDevice[]; current: string | null } | null;
@@ -135,7 +141,7 @@ function placeState(status: ServerStatus | undefined): Pick<Device, "status" | "
   return { status: "unknown" };
 }
 
-function fromPlace(entry: SavedPlace, status: ServerStatus | undefined): Device {
+function fromPlace(entry: SavedPlace, status: ServerStatus | undefined, lends: boolean): Device {
   const hand = byHand(entry);
   const state = hand ? placeState(status) : { status: "unknown" as const };
   const route = placeRoute(entry);
@@ -148,9 +154,10 @@ function fromPlace(entry: SavedPlace, status: ServerStatus | undefined): Device 
   }
   if (!entry.home) actions.push({ type: "remove", source: { type: "place", id: entry.id } });
   return {
-    id: `place:${entry.id}`, kind: entry.home || entry.cloud ? "cloud" : "server", name: entry.name, ...state, route, routes: [route],
+    id: `place:${entry.id}`, kind: entry.home || entry.cloud ? "cloud" : MINI_LABEL.test(entry.name) ? "desktop" : "server", name: entry.name, ...state, route, routes: [route],
     ...(hand && status?.version ? { version: status.version } : {}), ...(hand && entry.origin ? { address: entry.origin } : {}),
-    sources: [{ type: "place", id: entry.id }], canRunBots: true, canHostComputer: false, actions,
+    sources: [{ type: "place", id: entry.id }], canRunBots: true, canHostComputer: false, ...(entry.home ? { home: true as const } : {}),
+    ...(lends ? { usesThisComputer: true } : {}), actions,
   };
 }
 
@@ -201,7 +208,8 @@ function fromVps({ alias, name }: { alias: string; name?: string }): Device {
   };
 }
 
-const STATUS_RANK: Record<DeviceStatus, number> = { online: 3, attention: 2, offline: 1, unknown: 0 };
+/** Joined sources keep the one that needs the person first, then the one that is online. */
+const STATUS_RANK: Record<DeviceStatus, number> = { attention: 4, online: 3, offline: 1, unknown: 0 };
 const isComputer = (kind: DeviceKind) => kind !== "phone";
 
 /** One machine two sources both list: the first keeps its id and kind; routes, sources and actions join. */
@@ -253,7 +261,7 @@ export function buildDevices(sources: DeviceSources): Device[] {
   const places = (sources.places?.environments ?? [])
     .filter((entry) => entry.kind !== "local" && entry.id !== "local" && entry.id !== sources.places?.activeId)
     .map((entry) => {
-      const device = fromPlace(entry, statuses.find((status) => status.id === entry.id));
+      const device = fromPlace(entry, statuses.find((status) => status.id === entry.id), (sources.lending ?? []).some((lent) => lent.id === entry.id && lent.enabled));
       const host = entry.origin && byHand(entry) ? hostKey(entry.origin) : null;
       if (host) aliases.set(device.id, [host]);
       return device;

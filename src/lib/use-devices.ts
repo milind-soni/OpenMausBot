@@ -31,6 +31,7 @@ export function useDevices({ here, client, name, kind }: { here: boolean; client
   const vpsConfig = useStoreSelector((state) => state.config?.vps);
   const [places, setPlaces] = useState<Places | null>(null);
   const [statuses, setStatuses] = useState<ServerStatus[]>([]);
+  const [lending, setLending] = useState<DeviceSources["lending"]>(null);
   const [companion, setCompanion] = useState<CompanionState | null>(null);
   const [phoneApps, setPhoneApps] = useState<PublicPhone[] | null>(null);
   const [sessions, setSessions] = useState<DeviceSources["sessions"]>(null);
@@ -47,6 +48,7 @@ export function useDevices({ here, client, name, kind }: { here: boolean; client
     await Promise.allSettled([
       environments?.state().then((next) => { if (alive.current) setPlaces(next); }),
       environments?.status?.().then((next) => { if (alive.current) setStatuses(next); }),
+      (here ? window.ogb?.computerSharing?.servers?.() : undefined)?.then((next) => { if (alive.current) setLending(next); }),
       bridge?.state().then((next) => { if (alive.current) setCompanion(next); }),
       api<{ phones?: PublicPhone[] }>("/api/phones", { background: true }).then((body) => { if (alive.current) setPhoneApps(body.phones ?? []); }),
       admin ? api<{ sessions?: SignedInDevice[]; current?: string | null }>("/api/auth/sessions", { background: true })
@@ -74,8 +76,8 @@ export function useDevices({ here, client, name, kind }: { here: boolean; client
 
   const devices = useMemo(() => buildDevices({
     here: { name, kind, version: desktopAppVersion(), desktop: typeof window !== "undefined" && Boolean(window.ogb) },
-    places, statuses, companion, phoneApps, sessions, lent, vps,
-  }), [name, kind, places, statuses, companion, phoneApps, sessions, lent, vps]);
+    places, statuses, lending, companion, phoneApps, sessions, lent, vps,
+  }), [name, kind, places, statuses, lending, companion, phoneApps, sessions, lent, vps]);
 
   return { devices, companion, loaded: answered, refresh: () => void read() };
 }

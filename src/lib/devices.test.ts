@@ -33,10 +33,12 @@ describe("the device list", () => {
         { id: "lan", kind: "remote", name: "Old PC", origin: "http://192.168.1.40:8799" },
       ]),
       statuses: [status("mini", { behind: true, version: "0.1.170", install: "global" }), status("vps", { state: "cantReach" }), status("lan", { state: "signedOut" })],
+      lending: [{ id: "mini", enabled: true }, { id: "lan", enabled: false }],
     });
     expect(devices.map((device) => device.id)).toEqual(["here", "place:home", "place:mini", "place:vps", "place:lan"]);
     const [, home, mini, vps, lan] = devices;
-    expect(home).toMatchObject({ kind: "cloud", route: "cloud", status: "unknown", canRunBots: true });
+    expect(home).toMatchObject({ kind: "cloud", route: "cloud", status: "unknown", canRunBots: true, home: true });
+    expect(devices.filter((device) => device.usesThisComputer).map((device) => device.id)).toEqual(["place:mini"]);
     expect(home!.address).toBeUndefined();
     expect(home!.actions.map((action) => action.type)).toEqual(["switch"]);
     expect(mini).toMatchObject({ kind: "server", route: "tailscale", status: "attention", note: "update", version: "0.1.170", address: "http://studio-mini.tail1234.ts.net:8799" });
@@ -83,6 +85,13 @@ describe("the device list", () => {
     });
     expect(devices.map((device) => device.id)).toEqual(["here", "place:mini"]);
     expect(devices[1]).toMatchObject({ status: "online", routes: ["tailscale"], sources: [{ type: "place", id: "mini" }, { type: "session", id: "s1" }] });
+    expect(devices[1]!.note).toBeUndefined();
+    const behind = build({
+      places: places([{ id: "mini", kind: "remote", name: "Studio Mac mini", origin: "http://studio-mini.tail1234.ts.net:8799" }]),
+      statuses: [status("mini", { behind: true })],
+      sessions: { current: null, sessions: [{ id: "s1", label: "Studio Mac mini", scopes: ["admin"], lastSeenAt: NOW }] },
+    });
+    expect(behind[1]).toMatchObject({ kind: "desktop", status: "attention", note: "update" });
   });
 
   it("keeps two sessions with one label apart, and never joins a phone to a computer", () => {

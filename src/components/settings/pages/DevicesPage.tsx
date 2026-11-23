@@ -9,7 +9,7 @@ import type { CompanionState } from "@/lib/companion-types";
 import { api } from "@/state/api";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { AddDeviceDialog, type AddKind } from "../../devices/AddDeviceDialog";
-import { DeviceList } from "../../devices/DeviceList";
+import { DeviceCard, DeviceList } from "../../devices/DeviceList";
 import { DeviceMap, HereNode, type NetworkAction } from "../../devices/DeviceMap";
 import { networkLine } from "../../devices/device-words";
 import { PairDeviceDialog } from "../../PhoneDevicesSection";
@@ -50,7 +50,7 @@ export function DevicesPage() {
   const config = useStoreSelector((state) => state.config);
   const { devices, companion, loaded, refresh } = useDevices({ here: ctx.here, client: ctx.client, name: place.name, kind: place.kind });
   const c = usePhoneSetupController(config?.profile?.email);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<{ id: string; from: "map" | "list" } | null>(null);
   const [adding, setAdding] = useState<AddKind | null | false>(false);
   const [pairingPhone, setPairingPhone] = useState(false);
   const [sheet, setSheet] = useState<Sheet>(null);
@@ -98,7 +98,7 @@ export function DevicesPage() {
           else if (source.type === "phone") await c.act((bridge) => bridge.revoke(source.id));
           else if (source.type === "phone-app") await api(phoneRemovePath(source.id), { method: "DELETE" });
           else if (source.type === "session") await api(`/api/auth/sessions/${encodeURIComponent(source.id)}`, { method: "DELETE" });
-          if (selected === device.id) setSelected(null);
+          if (selected?.id === device.id) setSelected(null);
           break;
         }
       }
@@ -112,10 +112,13 @@ export function DevicesPage() {
   const workspaces = ctx.here ? window.ogb?.workspaces : undefined;
   const mark = place.kind === "computer" ? <Laptop size={20} aria-hidden="true" /> : <PlaceBadge place={place} size={24} />;
   const others = devices.length > 1;
+  const pick = (id: string) => setSelected((now) => (now?.id === id && now.from === "map" ? null : { id, from: "map" }));
+  const chosen = selected?.from === "map" ? devices.find((device) => device.id === selected.id) : undefined;
 
   return <>
-    <DeviceMap devices={devices} network={network} networkAction={networkAction} selected={selected} onSelect={(id) => setSelected((now) => (now === id ? null : id))}
-      onAdd={() => setAdding(null)} here={<HereNode device={here} mark={mark} selected={selected === here.id} onSelect={(id) => setSelected((now) => (now === id ? null : id))} />} />
+    <DeviceMap devices={devices} network={network} networkAction={networkAction} selected={selected?.from === "map" ? selected.id : null} onSelect={pick}
+      onAdd={() => setAdding(null)} here={<HereNode device={here} mark={mark} selected={chosen?.id === here.id} onSelect={pick} />} />
+    {chosen && <DeviceCard device={chosen} onAction={(device, action) => void act(device, action)} onClose={() => setSelected(null)} />}
     {failure && <p role="alert" className="px-4 text-[12px] leading-4 text-danger">{failure}</p>}
     {network && (
       <SettingsGroup label={t("devicesPage.network.title")} block="network">
@@ -131,7 +134,7 @@ export function DevicesPage() {
         </SettingsRows>
       </SettingsGroup>
     )}
-    {loaded && others && <DeviceList devices={devices} selected={selected} onSelect={setSelected} onAction={(device, action) => void act(device, action)} />}
+    {loaded && others && <DeviceList devices={devices} selected={selected?.from === "list" ? selected.id : null} onSelect={(id) => setSelected(id ? { id, from: "list" } : null)} onAction={(device, action) => void act(device, action)} />}
     {adding !== false && (
       <AddDeviceDialog here={ctx.here} cloud={ctx.cloud} network={network} networkAction={networkAction} tailnetAddress={companion?.tailnetShare?.origin ?? null} places={places} start={adding}
         onClose={() => { setAdding(false); refresh(); }} onConnected={refresh}
