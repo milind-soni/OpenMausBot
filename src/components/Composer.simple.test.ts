@@ -141,6 +141,7 @@ describe("the Simple composer in a bot chat", () => {
     openPlus();
     click(item("place"));
     const rows = [...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.getAttribute("data-menu-key"));
+    expect(item("back")?.getAttribute("aria-label")).toBe("Back to the + menu");
     expect(rows).toEqual(["back", "place:follow", "place:cloud", "place:vm", "place:local", "place:browser"]);
     expect(item("place:follow")?.getAttribute("aria-checked")).toBe("true");
     expect(item("place:follow")?.textContent).toBe("Follow this bot's settingCurrently Private desktop");

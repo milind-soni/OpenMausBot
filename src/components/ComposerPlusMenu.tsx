@@ -308,7 +308,7 @@ function ComposerMenu({ items, renderTrigger }: { items: SidebarMenuItem[]; rend
           )}
         >
           {inside && (
-            <button type="button" role="menuitem" data-menu-key="back" onClick={() => enter(null)} className={cn(ROW, "h-8 font-medium")}>
+            <button type="button" role="menuitem" data-menu-key="back" aria-label={t("composer.menuBack")} onClick={() => enter(null)} className={cn(ROW, "h-8 font-medium")}>
               <ChevronLeft size={16} className="shrink-0 text-ink-secondary rtl:-scale-x-100" aria-hidden="true" />
               <span className="min-w-0 flex-1 truncate">{inside.label}</span>
             </button>

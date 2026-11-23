@@ -465,6 +465,38 @@ describe("surface pin provenance against the real server", () => {
     await stop();
   }, 60_000);
 
+  it.skipIf(process.platform === "linux")("never puts a thread chosen for the Local VM on this computer when the VM can't be had", async () => {
+    mkdirSync(dirname(cuaDescriptor), { recursive: true });
+    writeFileSync(cuaDescriptor, JSON.stringify({
+      mode: "embedded", status: "ready", socketPath: join(home, "cua.sock"),
+      mcpCommand: "/fixture/cua-driver", mcpArgs: ["mcp"], mcpEnv: {},
+    }), { mode: 0o600 });
+    await start();
+    try {
+      const { bot } = await apiOk("POST", "/api/bots", { name: "Isolated Bot" });
+      await apiOk("PATCH", `/api/bots/${bot.id}`, { computer: "local" });
+      const { task } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, {});
+      await apiOk("PATCH", `/api/bots/${bot.id}/tasks/${task.threadId}`, { surface: "vm" });
+      resetTurn();
+      vmState({ failed: true });
+      await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Use the private desktop.", threadId: task.threadId });
+      const lastRow = async () => {
+        const { messages } = await apiOk("GET", `/api/threads/${task.threadId}/messages?limit=30`);
+        return String(messages.filter((message: any) => message.kind !== "digest").at(-1)?.tool?.name ?? "");
+      };
+      await until(() => lastRow(), (row) => row.startsWith("error:"));
+      await idle(bot.id, task.threadId);
+      // Refused before any engine started: no tools at all, so none on this computer.
+      expect(existsSync(dumpFile)).toBe(false);
+      expect(await lastRow()).toMatch(/Clear this conversation's place/);
+      expect(savedTask(bot.id, task.threadId)).toMatchObject({ surface: "vm", surfaceSource: "user" });
+      await apiOk("DELETE", `/api/bots/${bot.id}`);
+    } finally {
+      rmSync(cuaDescriptor, { force: true });
+    }
+    await stop();
+  }, 60_000);
+
   it("clears a select_computer pin to a cloud computer that fails, and keeps a person's pin", async () => {
     await start();
     const { bot } = await apiOk("POST", "/api/bots", { name: "Failed place bot" });
