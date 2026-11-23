@@ -1309,6 +1309,42 @@ describe("Antigravity driver over shared ACP", () => {
     expect(await run()).toMatch(/: no process, .*no prompt, total \d+ ms, ended auth_required$/u);
   });
 
+  it("ends a stale-model turn at once when the person stops it while the model list is read", async () => {
+    ensureDirs();
+    writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify([{ id: "bot-restart" }]));
+    try {
+      const fake = fakeRuntime();
+      const instanceId = "antigravity-restart-stale-stop";
+      const path = startupModelCachePath(instanceId)!;
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, JSON.stringify({ default: "gemini-retired", options: [{ id: "gemini-retired", label: "Retired" }, { id: "gemini-3.8-flash", label: "Flash" }], checkedAt: Date.now() - 60_000, build: "0.0.0-older" }));
+      const tokenDirectory = join(antigravityProfileDirectory(instanceId), "antigravity-acp");
+      mkdirSync(tokenDirectory, { recursive: true });
+      writeFileSync(join(tokenDirectory, "acp_token.json"), "{}", { mode: 0o600 });
+      const levels = [{ value: "low", name: "Low" }, { value: "high", name: "High" }];
+      instance = await AntigravityDriver.create({
+        instanceId, displayName: "Antigravity", enabled: true, config: { cli: fake.executable, fullAuto: false },
+        environment: {
+          FAKE_ACP_AUTH_METHOD: "oauth-personal", FAKE_ACP_MODELS: "gemini-3.8-flash,gemini-4-argon", FAKE_ACP_MODES: "default,yolo",
+          FAKE_ACP_VARIANTS: JSON.stringify({ "gemini-4-argon": { id: "thought_level", currentValue: "low", options: levels } }),
+          // The read's survey hangs here until its budget runs out, so the turn is still waiting when it is stopped.
+          FAKE_ACP_HANG_ON_MODEL: "gemini-4-argon",
+        },
+      });
+      recorder = recordEvents(instance.adapter);
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "thread-stale-stop", text: "hello", approvalMode: "ask", model: "gemini-retired", cwd: fake.directory });
+      await vi.waitFor(() => expect(instance!.adapter.hasSession("thread-stale-stop")).toBe(true));
+      // Refused once, now waiting for the read.
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      await instance.adapter.interruptTurn("thread-stale-stop");
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId, 2_000)).toMatchObject({ ok: true, stopReason: "cancelled" });
+      await instance.startupModelRefresh;
+      expect(recorder.events.filter((event) => event.type === "turn.completed" && event.turnId === turnId)).toHaveLength(1);
+    } finally {
+      rmSync(join(DATA_DIR, "bots.json"), { force: true });
+    }
+  }, 40_000);
+
   it("never starts a session on a model this account has not offered", async () => {
     ensureDirs();
     const fake = fakeRuntime();

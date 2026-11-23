@@ -304,7 +304,7 @@ describe("startup model catalogs", () => {
     }
   });
 
-  it("an ACP engine serves a saved catalog and lets a turn for a model it lacks wait for the refresh", async () => {
+  it("an ACP engine serves a saved catalog and lets the turn wait for the refresh", async () => {
     seedBots();
     writeStartupModelCache("cursor", CACHED, STALE);
     const gate = deferredCatalog();
@@ -322,7 +322,7 @@ describe("startup model catalogs", () => {
     expect(await settledSoon(creating)).toBe(true);
     const instance = await creating;
     expect(instance.models).toEqual(CACHED);
-    const turn = instance.adapter.sendTurn({ threadId: "thread-1", text: "hello", model: "fresh-model", cwd: DATA_DIR });
+    const turn = instance.adapter.sendTurn({ threadId: "thread-1", text: "hello", cwd: DATA_DIR });
     expect(await settledSoon(turn)).toBe(false);
     expect(spawn).not.toHaveBeenCalled();
     gate.release(FRESH);
@@ -332,22 +332,25 @@ describe("startup model catalogs", () => {
     await instance.dispose();
   });
 
-  it("an ACP engine runs a turn the saved catalog serves without waiting for the refresh", async () => {
+  it("an ACP engine that opts in runs a turn the saved catalog serves without waiting for the refresh", async () => {
     seedBots();
     writeStartupModelCache("cursor", CACHED, STALE);
     const gate = deferredCatalog();
     const spawn = vi.spyOn(procs, "spawnCli").mockImplementation(() => {
       throw new Error("spawned");
     });
-    const driver = createAcpDriver(acpSupport(() => gate.promise));
+    const driver = createAcpDriver({ ...acpSupport(() => gate.promise), modelListStandsIn: true });
     const instance = await driver.create({ instanceId: "cursor", displayName: "Cursor", environment: {}, enabled: true, config: driver.defaultConfig() });
     for (const model of ["cached-model", undefined]) {
       await expect(instance.adapter.sendTurn({ threadId: `thread-${model ?? "default"}`, text: "hello", model, cwd: DATA_DIR })).rejects.toThrow("spawned");
     }
     expect(spawn).toHaveBeenCalledTimes(2);
     expect(instance.models).toEqual(CACHED);
+    // A model the saved catalog lacks still waits for the read.
+    const unknown = instance.adapter.sendTurn({ threadId: "thread-unknown", text: "hello", model: "fresh-model", cwd: DATA_DIR });
+    expect(await settledSoon(unknown)).toBe(false);
     gate.release(FRESH);
-    await instance.startupModelRefresh;
+    await expect(unknown).rejects.toThrow("spawned");
     expect(instance.models).toEqual(FRESH);
     await instance.dispose();
   });

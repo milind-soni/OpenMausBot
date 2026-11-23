@@ -25,7 +25,7 @@ import { applyOneShotEnv, runAcpOneShot } from "./background-text.ts"; import ty
 import { acpCapabilities } from "./capabilities.ts"; import { readAcpMediaLinks } from "./media-links.ts";
 import { acpNativeLogMessage } from "./tool-log.ts";
 import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
-import { formatQuietLimit, lastSeenPhrase, LIMIT_WORDS, promptIdleTimeoutMs, type LogSignal } from "./quiet-status.ts"; import { startAcpQuietWatch } from "./quiet-watch.ts"; import { AppliedConfig } from "./applied-config.ts"; import { modelRefused, startupRefresh } from "./startup-refresh.ts"; import { stderrFailureOf, watchStderrFailure, type StderrFailure } from "./harness-failure.ts"; import { timed, turnStartClock, type TurnStartClock } from "../../perf/turn-starts.ts";
+import { formatQuietLimit, lastSeenPhrase, LIMIT_WORDS, promptIdleTimeoutMs, type LogSignal } from "./quiet-status.ts"; import { startAcpQuietWatch } from "./quiet-watch.ts"; import { AppliedConfig } from "./applied-config.ts"; import { modelRefused, roomForReadBeside, startupRefresh } from "./startup-refresh.ts"; import { stderrFailureOf, watchStderrFailure, type StderrFailure } from "./harness-failure.ts"; import { timed, turnStartClock, type TurnStartClock } from "../../perf/turn-starts.ts";
 import { acpMissingSession } from "./rpc-error.ts";
 import { readSessionReport } from "./session-reports.ts";
 import { promptTokenUsage } from "./prompt-usage.ts";
@@ -178,6 +178,8 @@ export interface AcpSupport extends AcpDriverHooks {
   ): Promise<ProviderSnapshot>;
   /** A cold start of this engine takes tens of seconds: where memory allows, its idle process is kept longer (session-idle.ts). */
   coldStartCost?: ColdStartCost;
+  /** A turn the saved model list serves goes ahead while the startup read runs (startup-refresh.ts). */
+  modelListStandsIn?: boolean;
   /** Lines on the agent's stderr after which its process cannot run a turn (harness-failure.ts). */
   stderrFailure?: StderrFailure;
   /** How long session/new and session/resume (or load) may go unanswered on a live process; initialize keeps its own limit. */
@@ -368,7 +370,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       } else if (support.resolveModelsOnCreate !== false) {
         await refreshModels();
       }
-      const startup = startupRefresh({ pending: startupModelRefresh, saved: () => startupSaved, catalog: () => catalog.models, normalize: support.normalizeSessionSelection });
+      const startup = startupRefresh({ enabled: support.modelListStandsIn === true, room: roomForReadBeside, pending: startupModelRefresh, saved: () => startupSaved, catalog: () => catalog.models, normalize: support.normalizeSessionSelection });
       const deviceSignIn = support.deviceSignIn ? new DeviceAuthController(support.deviceSignIn, { cli: config.cli, environment: () => childEnv(), onAuthenticated: refreshModels }) : null;
       const browserSignIn = support.browserSignIn ? new AcpBrowserAuth(support.browserSignIn, { cli: config.cli, environment: () => childEnv(), onAuthenticated: refreshModels }) : null;
       const listeners = new Set<RuntimeEventListener>();
@@ -953,7 +955,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         }
         const pooled = sessions.get(threadId);
         let session: AcpSession;
-        if (pooled && !pooled.dead && !pooled.closing && pooled.contractKey === contractKey
+        if (pooled && !pooled.dead && !pooled.closing && pooled.contractKey === contractKey && !stderrFailureOf(pooled.host)
             && (!support.restartOnMcpChange || pooled.sessionKey === sessionKey)) {
           stopIdleClose(`${instanceId}\0${threadId}`, pooled.idleTimer); // busy again: no longer idle
           pooled.idleTimer = null;
@@ -1366,8 +1368,15 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             if (!state.settled && !state.cancelling) {
               const untouched = retryOf === undefined && !state.producedItem && !state.text && !current.runningTools.size && !asks.size && !state.stopped && !session.closing;
               if (untouched && standIn && !state.promptSent && modelRefused(e)) { // the saved list was stale: read it, then once more
-                acknowledge(); state.settled = true; session.current = null; active.delete(threadId); current.stopQuietWatch?.(); closeSession(threadId, "stale-models");
-                return void startup.done().then(() => sendTurn({ ...turn, startupRecovery: undefined }, turnId)).catch((failure) => {
+                acknowledge(); state.settled = true; session.current = null; current.stopQuietWatch?.(); closeSession(threadId, "stale-models");
+                let stopped = false; // a Stop while the list is read ends the turn at once, and it is not tried again
+                const stopWaiting = () => { if (stopped) return; stopped = true; active.delete(threadId); emit({ ...base(threadId, turnId), type: "turn.completed", ok: true, stopReason: "cancelled", cost: null }); };
+                active.set(threadId, { stop: stopWaiting, interrupt: stopWaiting, turnId, asks: new Map() });
+                return void startup.done().then(() => {
+                  if (stopped) return;
+                  if (active.get(threadId)?.turnId === turnId) active.delete(threadId);
+                  return sendTurn({ ...turn, startupRecovery: undefined }, turnId);
+                }).catch((failure) => {
                   emit({ ...base(threadId, turnId), type: "runtime.error", message: failure instanceof Error ? failure.message : String(failure) });
                   emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "rpc_error", cost: null });
                 });

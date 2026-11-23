@@ -142,6 +142,8 @@ const support: AcpSupport = {
   resumeMethod: "resume",
   // The packaged runtime unpacks and loads a ~1 GB Python bundle before it answers initialize (STARTUP_TIMEOUT_MS).
   coldStartCost: "expensive",
+  // The startup model read is a second runtime process and a thinking-level survey: a saved list stands in for it.
+  modelListStandsIn: true,
   sessionSetupTimeoutMs: ANTIGRAVITY_SESSION_SETUP_TIMEOUT_MS,
   stderrFailure: {
     line: ANTIGRAVITY_HARNESS_FAILURE_LOG,

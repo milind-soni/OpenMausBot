@@ -8,7 +8,13 @@
 // when the saved list is old or from another build, but only a turn the saved list cannot serve waits for it; a turn
 // that went ahead on the saved list never seeds the launch's default model from it, and a model the agent refuses then
 // waits for the read and is tried once more.
+import { boxMemory } from "../../box-memory.ts";
 import type { ModelCatalog, SendTurnInput } from "../../contracts.ts";
+import { engineMemory } from "../../engine-memory.ts";
+import { roomBesideIdle } from "../session-idle.ts";
+
+/** No memory gate (the desktop), or the room holds one more of the largest engines beside what runs now. */
+export const roomForReadBeside = (): boolean => !engineMemory.enabled || roomBesideIdle(engineMemory.roomFactor(), boxMemory().bytes);
 
 export interface StartupRefresh {
   /** The read is still under way and the saved list stands in for it: this turn does not wait. */
@@ -19,6 +25,11 @@ export interface StartupRefresh {
 }
 
 export function startupRefresh(input: {
+  /** The engine opts in (AcpSupport.modelListStandsIn): others keep waiting as before. */
+  enabled: boolean;
+  /** The read starts an engine process of its own that admission does not count: only stand in where that cannot crowd
+   * the turn's own (no memory gate, or room for one more of the largest engines). */
+  room: () => boolean;
   pending: Promise<void> | null;
   /** A saved list was put in place when the engine opened. */
   saved: () => boolean;
@@ -31,7 +42,7 @@ export function startupRefresh(input: {
     get pending() { return pending; },
     done: () => done,
     standsIn: (turn) => {
-      if (!pending || !input.saved()) return false;
+      if (!input.enabled || !pending || !input.saved() || !input.room()) return false;
       if (!turn.model) return true;
       const catalog = input.catalog();
       const ids = catalog.options.map((option) => option.id);
