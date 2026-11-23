@@ -432,7 +432,12 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (!threadId) return { text: "close_thread needs the thread_id from list_threads or start_thread.", isError: true };
     const r = await api(`/api/internal/threads/${encodeURIComponent(threadId)}/close`, { method: "POST", body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID }) });
     if (r.error) return { text: `Couldn't close that thread: ${String(r.error)}`, isError: true };
-    return { text: `Closed #${String(r.title)}${r.botName ? ` on @${String(r.botName)}` : ""}. It stays in the person's sidebar, idle, with a note that you closed it.` };
+    const thread = `#${String(r.title)}${r.botName ? ` on @${String(r.botName)}` : ""}`;
+    if (r.alreadyClosed === true) {
+      const by = typeof r.closedBy === "string" && r.closedBy ? ` by @${r.closedBy}` : "";
+      return { text: `${thread} was already closed${by}, so nothing changed. ${r.archived === true ? "It is archived: it is no longer in the person's sidebar." : "It stays in the person's sidebar, idle."}` };
+    }
+    return { text: `Closed ${thread}. ${r.archived === true ? "It was archived already, so it stays out of the person's sidebar, with a note that you closed it." : "It stays in the person's sidebar, idle, with a note that you closed it."}` };
   }
   if (name === "start_thread") {
     const title = String(args.title ?? "").trim();

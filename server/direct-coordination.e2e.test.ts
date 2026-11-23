@@ -460,9 +460,10 @@ it("lets the opener list and close a thread \"new\" opened after it was archived
   await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Find the finished engineering thread and close it.");
   expect((await f.wait()).status).toBe("settled");
   const [listed, closed] = f.evidence().at(-1).evidence.filter((entry: any) => entry.step).map((entry: any) => entry.response.result);
-  expect(listed.content[0].text).toContain(child.threadId);
+  const { title } = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks.find((task: any) => task.threadId === child.threadId);
+  expect(listed.content[0].text).toContain(`- #${title} (on @Engineering lead, closed, archived: no longer in the person's sidebar) [thread id: ${child.threadId}]`);
   expect(closed.isError).toBeFalsy();
-  expect(closed.content[0].text).toContain("Closed #");
+  expect(closed.content[0].text).toBe(`#${title} on @Engineering lead was already closed by @Clive, so nothing changed. It is archived: it is no longer in the person's sidebar.`);
 }), 60_000);
 
 it("keeps a thread \"new\" opened open when a person wrote in it before its result came back", () => fixture(async f => {
