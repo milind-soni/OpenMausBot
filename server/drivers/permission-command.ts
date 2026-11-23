@@ -1,4 +1,4 @@
-import { lstatSync, realpathSync } from "node:fs";
+import { lstatSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import { safetyFloorClears } from "../safety-floor-gate.ts";
@@ -99,7 +99,7 @@ function realTarget(path: string): string | undefined {
 }
 
 /** Whether an ACP permission request is only a file edit inside `root`: its kind is `edit`, it names no command, and
- * every location it gives is an absolute path that stays inside `root` once links are resolved. A request that gives
+ * every location it gives is an absolute path to a file inside `root` that goes through no link. A request that gives
  * no location cannot be placed, so it is not one. */
 export function acpFileEditWithin(toolCall: { kind?: unknown; rawInput?: unknown; locations?: unknown }, root: string | undefined): boolean {
   if (toolCall.kind !== "edit" || !root || acpCarriesCommand(toolCall.rawInput)) return false;
@@ -110,9 +110,19 @@ export function acpFileEditWithin(toolCall: { kind?: unknown; rawInput?: unknown
     // A `..` after a link climbs from the link's target, not from where the path's text says: such a path is asked.
     if (typeof path !== "string" || !isAbsolute(path) || path.includes("\0") || path.split(/[\\/]/u).includes("..")) return false;
     const target = realTarget(path);
-    const inside = target === undefined ? "" : relative(realRoot, target);
-    return inside !== "" && !inside.startsWith("..") && !isAbsolute(inside);
+    if (target === undefined || isDirectory(target)) return false;
+    const inside = relative(realRoot, target);
+    const written = [relative(resolve(root), resolve(path)), relative(realRoot, resolve(path))];
+    return inside !== "" && !inside.startsWith("..") && !isAbsolute(inside) && written.includes(inside);
   });
+}
+
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 /** An ACP permission request's exact operation, for the driver's own session allow; null for a generic title with no input. */

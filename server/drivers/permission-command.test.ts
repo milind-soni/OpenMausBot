@@ -104,7 +104,7 @@ describe("the never-list on an ACP request", () => {
     expect(acpFileEditWithin({ kind: "edit", locations: [{}] }, root)).toBe(false);
   });
 
-  it.skipIf(process.platform === "win32")("asks for a path that climbs out of a link inside the folder, or goes through a link it cannot follow", () => {
+  it.skipIf(process.platform === "win32")("asks for a folder, and for a path that goes through any link, one that climbs out of the folder or one it cannot follow", () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "omb-edit-root-")));
     const outside = realpathSync(mkdtempSync(join(tmpdir(), "omb-edit-outside-")));
     try {
@@ -118,6 +118,13 @@ describe("the never-list on an ACP request", () => {
       expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/new-folder/x` }] }, root)).toBe(true);
       writeFileSync(join(root, "file.txt"), "");
       expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/file.txt/x` }] }, root)).toBe(false);
+      expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/file.txt` }] }, root)).toBe(true);
+      mkdirSync(join(root, "sub"));
+      expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/sub` }] }, root)).toBe(false);
+      symlinkSync(join(root, "file.txt"), join(root, "alias"));
+      expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/alias` }] }, root)).toBe(false);
+      symlinkSync(join(root, "sub"), join(root, "inner"));
+      expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/inner/x` }] }, root)).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
       rmSync(outside, { recursive: true, force: true });

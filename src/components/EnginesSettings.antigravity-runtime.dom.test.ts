@@ -50,15 +50,18 @@ it.each([
   ["the pinned runtime it runs", google({ snapshot: { state: "available", authenticated: true, version: "1.4.3" } }), "pinned"],
   ["the path that asks for the pinned runtime", google({ cli: "agy_acp_server", snapshot: { state: "unavailable" } }), "pinned"],
   ["a path of the person's own", google({ cli: "/opt/agy/agy_acp_server.par", snapshot: { state: "available", version: "1.4.3" } }), "custom"],
+  ["a native CLI at a path of the person's own", google({ cli: "/opt/tools/antigravity", snapshot: { state: "available", authenticated: true, sharedSignIn: true } }), "custom"],
 ])("shows what an Antigravity account runs, from %s", async (_from, instance, shown) => {
   const select = await show(instance);
   expect(select?.value).toBe(shown);
 });
 
-it.each([["pinned", "agy_acp_server"], ["cli", "antigravity"]])("saves the path for %s when it is chosen", async (choice, path) => {
-  const select = await show(choice === "pinned"
-    ? google({ cli: "antigravity", snapshot: { state: "available", authenticated: true, sharedSignIn: true } })
-    : google({ snapshot: { state: "available", authenticated: true, version: "1.4.3" } }));
+it.each([
+  ["pinned", "agy_acp_server", google({ cli: "antigravity", snapshot: { state: "available", authenticated: true, sharedSignIn: true } })],
+  ["cli", "antigravity", google({ snapshot: { state: "available", authenticated: true, version: "1.4.3" } })],
+  ["cli", "antigravity", google({ cli: "/opt/tools/antigravity", snapshot: { state: "available", authenticated: true, sharedSignIn: true } })],
+])("saves the path for %s when it is chosen", async (choice, path, instance) => {
+  const select = await show(instance);
   await act(async () => {
     select!.value = choice;
     select!.dispatchEvent(new Event("change", { bubbles: true }));

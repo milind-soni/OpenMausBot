@@ -1,5 +1,3 @@
-// Where a turn's system prompt goes: into the prompt text, split into a stable half sent once per session and notes
-// for the volatile half, or into the session itself for an agent that takes it there.
 import { createHash } from "node:crypto";
 import type { SendTurnInput } from "../../contracts.ts";
 import { promptHalves, readPromptSplitReceipt, splitSessionNote, splitSessionPrompt, type PromptSplitReceipt } from "../prompt-split.ts";

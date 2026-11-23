@@ -1,4 +1,10 @@
+import { rmSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { DATA_DIR } from "./config.ts";
+import { antigravityRuntimesRoot } from "./engine-roots.ts";
+import { installFakeManagedCli } from "./testing/antigravity-native-fixture.ts";
 
 const NOW = Date.parse("2026-10-19T10:00:00Z");
 const HOUR = 3_600_000;
@@ -26,6 +32,7 @@ const accountOf = (cli?: string) => planAccountsFromInstances({ antigravity: { d
 const fiveHourUsed = (report: Awaited<ReturnType<typeof loadPlanUsage>>) => report.providers.map((provider) => [provider.id, provider.fiveHour.usedPercent]);
 
 afterEach(() => {
+  rmSync(join(antigravityRuntimesRoot(DATA_DIR), `${process.platform}-${process.arch}`), { recursive: true, force: true });
   clearPlanUsageCache();
   vi.mocked(antigravityPlanUsage).mockClear();
   vi.mocked(antigravityNativePlanUsage).mockClear();
@@ -40,10 +47,16 @@ describe("an Antigravity account's limits when it runs the native CLI", () => {
     ["/usr/local/bin/agy", false],
     ["/opt/tools/agy_acp_server.par", false],
     [undefined, false],
-  ])("is told from the CLI path %s", (cli, native) => {
-    expect(antigravityRunsNativeCli(cli)).toBe(native);
-    expect(accountOf(cli)[0]!.antigravityNative === true).toBe(native);
+  ])("is told from the CLI path %s while nothing is installed", async (cli, native) => {
+    await expect(antigravityRunsNativeCli(cli, { PATH: "" })).resolves.toBe(native);
+    expect(accountOf(cli)[0]!.antigravityCli).toBe(cli);
     expect(accountOf(cli)[0]!.noUsage).toBeUndefined();
+  });
+
+  it("is told from the CLI it runs: no path or agy on a computer with only the native CLI", async () => {
+    installFakeManagedCli(DATA_DIR);
+    for (const cli of [undefined, "agy"]) await expect(antigravityRunsNativeCli(cli, { PATH: "" })).resolves.toBe(true);
+    await expect(antigravityRunsNativeCli("agy_acp_server", { PATH: "" })).resolves.toBe(false);
   });
 
   it("are read from the native CLI's own sign-in, not the pinned token file a switch from a pinned account leaves", async () => {

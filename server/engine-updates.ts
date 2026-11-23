@@ -112,6 +112,8 @@ interface EngineState {
   failures?: number;
   retryAt?: number;
   updatedTo?: string;
+  /** Every version a pass moved this engine's channels to, `updatedTo` last. */
+  updatedVersions?: string[];
   updatedAt?: number;
 }
 
@@ -122,14 +124,17 @@ interface UpdaterState {
 
 type Outcome =
   | { kind: "absent" | "current" | "busy" | "waiting" }
-  | { kind: "updated"; from: string; to: string; busyAfter?: true }
-  | { kind: "failed"; from: string; to: string; reason: string; updated?: { from: string; to: string }; busyAfter?: true };
+  | { kind: "updated"; from: string; to: string; moves?: Move[]; busyAfter?: true }
+  | { kind: "failed"; from: string; to: string; reason: string; moves?: Move[]; busyAfter?: true };
+
+type Move = { from: string; to: string };
 
 export interface EngineUpdater {
   /** One pass over every engine now; resolves when it has finished. */
   check(): Promise<void>;
-  /** `autoUpdated` for an engine updated in the last week, for its row in Settings. */
-  shown(driverKind: string): { autoUpdated?: { version: string; at: number } };
+  /** `autoUpdated` for an engine updated in the last week, for its row in Settings: the version it runs, when a pass moved
+   * more than one of its channels. */
+  shown(driverKind: string, running?: string | null): { autoUpdated?: { version: string; at: number } };
   /** The earliest time a pass is due. */
   dueAt(): number;
   start(): DueTimer;
@@ -292,27 +297,28 @@ export function createEngineUpdater(options: EngineUpdaterOptions): EngineUpdate
    * another channel from updating. */
   async function updateManaged(plan: EnginePlan, managed: ManagedRuntime): Promise<Outcome> {
     const tried: string[] = [];
-    let updated: Extract<Outcome, { kind: "updated" }> | undefined;
+    const moves: Move[] = [];
     let failed: Extract<Outcome, { kind: "failed" }> | undefined;
     let busyAfter = false;
     for (;;) {
       const found = await managed.older(tried);
       if (found === null) break;
       if (engineBusy(plan)) {
-        if (!updated && !failed) return { kind: "busy" };
+        if (!moves.length && !failed) return { kind: "busy" };
         busyAfter = true;
         break;
       }
       const { version: older, channel } = typeof found === "string" ? { version: found, channel: undefined } : found;
       const outcome = await installManaged(plan, managed, older, channel);
-      if (outcome.kind === "updated") updated = outcome;
+      if (outcome.kind === "updated") moves.push({ from: outcome.from, to: outcome.to });
       else if (outcome.kind === "failed") failed ??= outcome;
       if (channel === undefined || tried.includes(channel)) break;
       tried.push(channel);
     }
     const busy = busyAfter ? { busyAfter: true as const } : {};
-    if (failed) return { ...failed, ...(updated ? { updated: { from: updated.from, to: updated.to } } : {}), ...busy };
-    return updated ? { ...updated, ...busy } : { kind: "absent" };
+    if (failed) return { ...failed, ...(moves.length ? { moves } : {}), ...busy };
+    const last = moves.at(-1);
+    return last ? { kind: "updated", ...last, moves, ...busy } : { kind: "absent" };
   }
 
   const updateOne = (plan: EnginePlan): Promise<Outcome> => {
@@ -341,23 +347,20 @@ export function createEngineUpdater(options: EngineUpdaterOptions): EngineUpdate
         outcome = { kind: "failed", from: "?", to: plan.pin.target, reason: error instanceof Error ? error.message : String(error) };
       }
       if (outcome.kind === "busy" || outcome.kind === "waiting" || ("busyAfter" in outcome && outcome.busyAfter)) waiting = true;
+      const moves = outcome.kind === "updated" ? outcome.moves ?? [{ from: outcome.from, to: outcome.to }] : outcome.kind === "failed" ? outcome.moves ?? [] : [];
+      for (const move of moves) log(`Engine update: ${plan.name} ${move.from} → ${move.to}`);
+      const moved = moves.length ? { updatedTo: moves.at(-1)!.to, updatedVersions: moves.map((move) => move.to), updatedAt: now() } : {};
+      if (moves.length) changed = true;
       if (outcome.kind === "updated") {
-        state.engines[plan.driverKind] = { updatedTo: outcome.to, updatedAt: now() };
-        log(`Engine update: ${plan.name} ${outcome.from} → ${outcome.to}`);
-        changed = true;
+        state.engines[plan.driverKind] = moved;
       } else if (outcome.kind === "failed") {
         const failures = (engine.failures ?? 0) + 1;
-        const moved = outcome.updated ? { updatedTo: outcome.updated.to, updatedAt: now() } : {};
-        if (outcome.updated) {
-          log(`Engine update: ${plan.name} ${outcome.updated.from} → ${outcome.updated.to}`);
-          changed = true;
-        }
         // A channel the pass did not reach for a turn is due in minutes, not on the failed channel's backoff.
         const retryAt = now() + (outcome.busyAfter ? ENGINE_UPDATE_BUSY_RETRY_MS : retryDelay(plan, outcome.from, failures));
         state.engines[plan.driverKind] = { ...engine, ...moved, failures, retryAt };
         log(`Engine update: ${plan.name} stays on ${outcome.from}; ${outcome.to} could not be installed (${outcome.reason.split("\n")[0]}). Trying again later.`);
       } else if (engine.failures) {
-        state.engines[plan.driverKind] = { updatedTo: engine.updatedTo, updatedAt: engine.updatedAt };
+        state.engines[plan.driverKind] = { updatedTo: engine.updatedTo, updatedVersions: engine.updatedVersions, updatedAt: engine.updatedAt };
       }
     }
     passed = true;
@@ -383,11 +386,12 @@ export function createEngineUpdater(options: EngineUpdaterOptions): EngineUpdate
   return {
     check,
     dueAt,
-    shown(driverKind) {
+    shown(driverKind, running) {
       const engine = state.engines[driverKind];
-      return engine?.updatedTo && engine.updatedAt !== undefined && now() - engine.updatedAt < SHOW_UPDATED_MS
-        ? { autoUpdated: { version: engine.updatedTo, at: engine.updatedAt } }
-        : {};
+      if (!engine?.updatedTo || engine.updatedAt === undefined || now() - engine.updatedAt >= SHOW_UPDATED_MS) return {};
+      const versions = engine.updatedVersions ?? [engine.updatedTo];
+      const version = running ? versions.find((one) => one === running) : engine.updatedTo;
+      return version ? { autoUpdated: { version, at: engine.updatedAt } } : {};
     },
     start() {
       return startDueTimer({

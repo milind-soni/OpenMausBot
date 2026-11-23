@@ -227,12 +227,12 @@ export async function resolveAntigravityRuntime(
   const nativeDefault = !pinnedOnly && (options.nativeByDefault ?? antigravityNativeByDefault());
   const legacyCli = override !== undefined && /(?:^|[\\/])agy(?:\.(?:cmd|bat|exe|ps1))?$/iu.test(override);
   const native = isAntigravityNativeAlias(override);
-  if (override && override !== "agy" && !native) {
+  if (override && override !== "agy" && !native && !pinnedOnly) {
     for (const candidate of pathCandidates(override, env)) {
       const found = await externalRuntime(candidate, "override", env);
       if (found) return found;
     }
-    if (!legacyCli && !pinnedOnly) {
+    if (!legacyCli) {
       throw new AntigravitySetupError(
         "The custom Antigravity ACP executable or its localharness_external sibling is missing. The native CLI from 1.5.0 on, under its name antigravity, needs no sibling.",
       );
@@ -443,7 +443,8 @@ async function installOnce(options: AntigravityInstallOptions): Promise<Antigrav
 }
 
 export function installAntigravityRuntime(options: AntigravityInstallOptions = {}): Promise<AntigravityRuntime> {
-  const key = `${runtimeRoot(options.baseDir)}\0${options.asset !== undefined ? "pinned" : options.native ? "native" : "default"}`;
+  const channel = options.asset !== undefined ? "pinned" : options.native ? "native" : options.nativeByDefault === false ? "pinned-only" : "default";
+  const key = `${runtimeRoot(options.baseDir)}\0${channel}`;
   const existing = installs.get(key);
   if (existing) return existing;
   const running = installOnce(options).finally(() => installs.delete(key));

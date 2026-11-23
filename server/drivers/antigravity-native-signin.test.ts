@@ -162,6 +162,18 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
     expect(fixture.methods()).not.toContain("authenticate");
   }, 120_000);
 
+  it("reads a background session the CLI refuses as a sign-out, so the status stops saying signed in", async () => {
+    const fixture = nativeFixture(folder());
+    const instanceId = "antigravity-native-background-refused";
+    const instance = await create(instanceId, fixture);
+    await loginAt(fixture, antigravityProfileDirectory(instanceId), "fixture-code");
+    expect(await instance.snapshot()).toMatchObject({ authenticated: true });
+    rmSync(credentials(instanceId), { force: true });
+    expect(await instance.snapshot()).toMatchObject({ authenticated: true });
+    await expect(instance.generateMemoryText!("hello")).rejects.toThrow(LOGIN_NOTE);
+    expect(await instance.snapshot()).toMatchObject({ authenticated: false });
+  }, 120_000);
+
   describe("a CLI that cannot say", () => {
     it("is not read as signed out: the status leaves the answer out and a turn or check fails as an ordinary error", async () => {
       const fixture = nativeFixture(folder());
@@ -207,6 +219,31 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
       await instance.signOut!();
       expect(fixture.methods()).toContain("logout");
       expect(existsSync(credentials(instanceId))).toBe(false);
+    }, 120_000);
+
+    it("signs out every native account when the CLI keeps each profile's sign-in in its own file", async () => {
+      const fixture = nativeFixture(folder());
+      const [one, two] = ["antigravity-native-file-one", "antigravity-native-file-two"];
+      const first = await create(one, fixture);
+      const second = await create(two, fixture);
+      for (const instanceId of [one, two]) await loginAt(fixture, antigravityProfileDirectory(instanceId), "fixture-code");
+      expect(await second.snapshot()).toMatchObject({ authenticated: true });
+      await first.signOut!();
+      expect(existsSync(credentials(one))).toBe(false);
+      expect(existsSync(credentials(two))).toBe(false);
+      expect(await second.snapshot()).toMatchObject({ authenticated: false });
+    }, 120_000);
+
+    it("stops a sign-in in progress on an account whose path names no CLI but signs in through the native one", async () => {
+      installFakeManagedCli(DATA_DIR);
+      const fixture = nativeFixture(folder());
+      const signingIn = await create("antigravity-native-agy-login", fixture, {}, "agy");
+      const started = await signingIn.startAuthentication!();
+      expect(started).toMatchObject({ phase: "waiting", kind: "pasted-code" });
+      const other = await create("antigravity-native-agy-other", fixture);
+      await loginAt(fixture, antigravityProfileDirectory("antigravity-native-agy-other"), "fixture-code");
+      await other.signOut!();
+      expect(await signingIn.getAuthentication!(started.flowId!)).not.toMatchObject({ phase: "waiting" });
     }, 120_000);
 
     it.each([["answers logout and keeps the sign-in", "ignore"], ["refuses logout", "refuse"]])("fails, with the account kept, when the CLI %s in its keyring", async (_name, logout) => {

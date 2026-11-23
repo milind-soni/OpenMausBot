@@ -382,10 +382,11 @@ type AntigravityRuntime = keyof typeof ANTIGRAVITY_RUNTIME_PATHS | "custom";
 /** What an Antigravity account runs, or for one with no runtime yet, what its install takes: a new install the CLI. */
 function antigravityRuntimeOf(instance: InstanceInfo): AntigravityRuntime {
   const cli = instance.cli?.trim() ?? "";
+  if (cli === ANTIGRAVITY_RUNTIME_PATHS.cli) return "cli";
+  if (/^agy_acp_server(?:\.par|\.exe)?$/iu.test(cli)) return "pinned";
+  if (cli !== "" && cli !== "agy") return "custom";
   if (runsAntigravityCli(instance)) return "cli";
-  const automatic = cli === "" || cli === "agy";
-  if (automatic) return instance.snapshot.state === "available" ? "pinned" : "cli";
-  return /^agy_acp_server(?:\.par|\.exe)?$/iu.test(cli) ? "pinned" : "custom";
+  return instance.snapshot.state === "available" ? "pinned" : "cli";
 }
 
 function AntigravityRuntimeChoice({ instance }: { instance: InstanceInfo }) {
@@ -405,12 +406,11 @@ function AntigravityRuntimeChoice({ instance }: { instance: InstanceInfo }) {
   return <div data-antigravity-runtime={current} className="mb-3">
     <label className="flex items-center gap-3 text-[13px] text-ink">
       <span className="shrink-0">{t("engines.antigravity.runtime")}</span>
-      <Select className="min-w-0 flex-1" value={current} disabled={saving} onChange={(event) => choose(event.target.value as AntigravityRuntime)}>
+      <Select className="min-w-0 flex-1" value={current} disabled={saving} aria-busy={saving} onChange={(event) => choose(event.target.value as AntigravityRuntime)}>
         <option value="cli">{t("engines.antigravity.runtimeCli")}</option>
         <option value="pinned">{t("engines.antigravity.runtimePinned")}</option>
         {current === "custom" && <option value="custom" disabled>{t("engines.antigravity.runtimeCustom")}</option>}
       </Select>
-      {saving && <Loader2 size={13} className="shrink-0 animate-spin text-ink-secondary" />}
     </label>
     {error && <p role="alert" className="mt-1 text-[12px] text-danger">{error}</p>}
   </div>;

@@ -386,7 +386,7 @@ describe("a runtime with more than one release channel", () => {
     return { engines, lines, done: () => removeTempDir(scratch) };
   };
 
-  it("installs from the channel whose copy is older, then looks for another channel's update in the same pass", async () => {
+  it("installs from the channel whose copy is older, then looks for another channel's update in the same pass, and says each to the instances that run it", async () => {
     const asked: Array<string | undefined> = [];
     const run = setup([{ version: "1.5.7", channel: "native" }, { version: "1.1.1", channel: "pinned" }, null], async (channel) => {
       asked.push(channel);
@@ -395,8 +395,11 @@ describe("a runtime with more than one release channel", () => {
     try {
       await run.engines.check();
       expect(asked).toEqual(["native", "pinned"]);
-      expect(run.lines).toEqual(["Engine update: Managed 1.1.1 → 1.4.3"]);
+      expect(run.lines).toEqual(["Engine update: Managed 1.5.7 → 1.5.8", "Engine update: Managed 1.1.1 → 1.4.3"]);
       expect(run.engines.shown("managedEngine").autoUpdated?.version).toBe("1.4.3");
+      expect(run.engines.shown("managedEngine", "1.5.8").autoUpdated?.version).toBe("1.5.8");
+      expect(run.engines.shown("managedEngine", "1.4.3").autoUpdated?.version).toBe("1.4.3");
+      expect(run.engines.shown("managedEngine", "1.4.2")).toEqual({});
     } finally {
       await run.done();
     }
