@@ -81,16 +81,25 @@ Staff, hands Mira work. Expected:
 pnpm exec vitest run server/question-card-typed-line.e2e.test.ts
 ```
 
-One server of the person's own, no teammate handing work on. Expected:
+One server of the person's own, no teammate handing work on, exactly one question card live in that chat. Expected:
 
 - With the scripted fake engine, a bot's `ask_user` card waits; a line the person types in that chat answers the card
   (no steer): the line stays in the chat under the card (`replyToId`), the card reads as answered with the typed words,
-  and the bot's turn goes on with them, marked as typed in the chat instead of picked.
+  and the bot's turn goes on with them. Only the engine reads the note that the words were typed, not picked
+  (`room-plan.json.evidence.jsonl`); no message row and no event on `/api/events` carries it.
+- The same POST sent again (same `sendId`, same text) returns 202 with the first line and touches no card; the same
+  `sendId` with other words is refused with 409, as a normal send is.
 - With the fake ACP CLI on a question of set options (the shape Antigravity asks with, an engine that takes no message
   mid-turn), the typed line closes the card without the "isn't one of the choices" note, the turn ends with
   `session/cancel`, and the line is the next prompt in the same conversation, without waiting for the card to expire.
+  The card reads "Closed without an answer" (`answered: "unavailable"`, `dismissed: true`), not "Denied", and the
+  decision log under `decisions/` records no verdict for it.
+- With the fake Claude CLI holding a turn, Claude's own `AskUserQuestion` of two questions waits; the typed line closes
+  it the same way, the waiting tool gets a decline saying the person typed in the chat, and the line is steered into
+  the turn.
 
-Stop, a line with a file or image, a reply to another line, rooms and work handed on keep their own paths.
+Two or more question cards live in the chat, Stop, a line with a file or image, a reply to another line, rooms and work
+handed on keep their own paths. If the close is refused, the card stays as it is and the line is sent as before.
 
 Unit tests for the relay's rules (which thread, which sender, sign-ins, work handed out this turn, an engine that cannot
 take a message mid-turn) are in `server/host/question-routing.test.ts`.
