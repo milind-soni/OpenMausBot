@@ -16,6 +16,7 @@ import { findSettings, personOnly, type SettingEntry, type WritableEntry } from 
 
 export const TOOL = "app_settings";
 export const WRITE_BUDGET = 10;
+export const SETTINGS_OWNER_REQUIRED = "Settings change only in the owner's own conversation. This turn was not started by the owner here, so nothing changed; you may still read settings.";
 const THEME_ACTIONS: readonly string[] = ["theme", "set_theme", "add_theme_asset", "theme_history", "undo_theme"];
 const FIND_LIMIT = 8;
 const NOT_SET = "not set";
@@ -65,6 +66,7 @@ export interface AppSettingsDeps {
   entries: readonly SettingEntry[];
   /** Non-null when the turn is the owner's own (phones.turnOwner); null on a Team Cloud or hosted workspace. */
   turnOwner(turn: Turn): string | null;
+  manage?(turn: Turn, bot: BotRecord, settingId: string, value: unknown): string | null;
   guestDriven(threadId: string): boolean;
   /** The turn answers a routine, webhook or other automation, owner-written ones included: no lasting move onto this computer. */
   automated?(turn: Turn): boolean;
@@ -127,7 +129,9 @@ export function createAppSettings(deps: AppSettingsDeps) {
     const bot = store.bot(turn.botId);
     if (!bot) return refuse(404, "This bot no longer exists.");
     if (entry.tier === "owner-only") return refuse(403, personOnly(entry.label, entry.where));
-    if (deps.guestDriven(turn.threadId) || deps.turnOwner(turn) === null) return refuse(403, "Settings change only in the owner's own conversation. This turn was not started by the owner here, so nothing changed; you may still read settings.");
+    if (deps.guestDriven(turn.threadId) || ((entry.tier === "secret" || !deps.manage) && deps.turnOwner(turn) === null)) {
+      return refuse(403, SETTINGS_OWNER_REQUIRED);
+    }
     if (entry.tier === "secret") {
       if (body.value !== undefined) return refuse(400, `Never send a key or token as a value. Call set on ${entry.id} with no value: a secure card asks the user for it, and you never see it.`);
       const budget = spendWrite(turn);
@@ -139,6 +143,8 @@ export function createAppSettings(deps: AppSettingsDeps) {
     }
     const parsed = parseValue(entry, body.value);
     if (!parsed.success) return refuse(400, `${entry.label} takes ${entry.allowed}. ${parsed.error.issues.map((issue) => issue.message).join("; ")}`);
+    const managementRefusal = deps.manage?.(turn, bot, entry.id, parsed.data);
+    if (managementRefusal) return refuse(403, managementRefusal);
     if (entry.id === "bots.settings" && (parsed.data as { computer?: unknown }).computer === "local" && deps.automated?.(turn)) {
       return refuse(403, `A routine or automation can't keep a bot on this computer. Nothing changed: say in one line that the person can choose This computer under “Where ${bot.name} works” in Bot's screen, or ask you in their own chat.`);
     }

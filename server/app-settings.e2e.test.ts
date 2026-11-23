@@ -44,16 +44,28 @@ const results = (turn: any) => turn.evidence.filter((entry: any) => entry.step).
 const idle = () => expect.poll(async () => (await api("GET", "/api/bots")).bots.every((one: any) => !one.busy), { timeout: 20_000 }).toBe(true);
 
 /** Scripts the turn whose text carries `key`, then sends that text to the bot as the owner. */
-const start = async (key: string, steps: unknown[], timeoutMs = 20_000) => {
+const start = async (key: string, steps: unknown[], timeoutMs = 20_000, token?: string) => {
   plans[bot.id]!.script.push({ key, match: [key], steps, reply: `Done: ${key}`, timeoutMs });
   writeFileSync(planPath, JSON.stringify(plans));
-  await api("POST", `/api/bots/${bot.id}/messages`, { threadId: bot.threadId, text: `${key}: please change my settings.` }, 202);
+  await api("POST", `/api/bots/${bot.id}/messages`, { threadId: bot.threadId, text: `${key}: please change my settings.` }, 202, token);
 };
 const finished = async (key: string) => {
   let turn: any;
   await expect.poll(() => (turn = providerTurns().find((candidate) => candidate.planKey === key)) !== undefined, { timeout: 30_000 }).toBe(true);
   await idle();
   return turn;
+};
+
+const restart = async (env: NodeJS.ProcessEnv) => {
+  const log = openSync(fixture.info.logPath, "a", 0o600);
+  child = spawn(process.execPath, verificationServerArgs(env), { cwd: join(import.meta.dirname, ".."), env, stdio: ["ignore", log, log] });
+  closeSync(log);
+  for (const deadline = Date.now() + 20_000; ;) {
+    if (child.exitCode !== null) throw new Error(`restarted server exited; see ${fixture.info.logPath}`);
+    try { if ((await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(1000) })).ok) break; } catch {}
+    if (Date.now() > deadline) throw new Error(`restarted server did not start; see ${fixture.info.logPath}`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
 };
 
 beforeAll(async () => {
@@ -73,15 +85,7 @@ beforeAll(async () => {
   for (const task of setter.tasks) { task.approvalMode = "full"; task.autoApprove = false; }
   writeRegistry(dataDir, { bots: saved });
   const env = verificationServerEnvironment({}, dataDir, Number(new URL(url).port));
-  const log = openSync(fixture.info.logPath, "a", 0o600);
-  child = spawn(process.execPath, verificationServerArgs(env), { cwd: join(import.meta.dirname, ".."), env, stdio: ["ignore", log, log] });
-  closeSync(log);
-  for (const deadline = Date.now() + 20_000; ;) {
-    if (child.exitCode !== null) throw new Error(`restarted server exited; see ${fixture.info.logPath}`);
-    try { if ((await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(1000) })).ok) break; } catch {}
-    if (Date.now() > deadline) throw new Error(`restarted server did not start; see ${fixture.info.logPath}`);
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
+  await restart(env);
   expect((await api("GET", "/api/bots")).bots.find((one: any) => one.id === bot.id).approvalMode).toBe("full");
 
   // The owner's paired phone: an admin session, which saves a provider key as Settings does.
@@ -369,3 +373,54 @@ it("a webhook's run may read a setting but not change it", async () => {
   expect(refused).toMatchObject({ isError: true, text: expect.stringMatching(/^Settings change only in the owner's own conversation\./) });
   expect(config().rooms?.turnTimeoutMinutes).toBe(value);
 }, 60_000);
+
+
+it("a signed-in admin can ask the Chief to distribute library skills on a service-trust host", async () => {
+  const atlas = (await api("POST", "/api/bots", { name: "Atlas" }, 201)).bot;
+  const elsewhere = (await api("POST", "/api/bots", { name: "Another department" }, 201)).bot;
+  const guestPair = await api("POST", "/api/auth/pairing", { label: "Guest", scopes: ["client"] });
+  const guest = (await api("POST", "/api/auth/pair", { code: guestPair.code })).token;
+  await waitForExit(child, { signal: "SIGTERM" });
+  const saved = readRegistry(dataDir).bots;
+  const chief = saved.find((one: any) => one.id === bot.id);
+  chief.chiefOfStaff = true;
+  chief.managedSections = ["Research"];
+  saved.find((one: any) => one.id === atlas.id).assignedSkills = ["existing"];
+  saved.find((one: any) => one.id === elsewhere.id).section = "Research";
+  writeRegistry(dataDir, { bots: saved });
+  const cfg = config();
+  const saveConfig = (enabled: boolean) => writeFileSync(join(dataDir, "config.json"),
+    JSON.stringify({ ...cfg, features: { ...cfg.features, skillsLibrary: enabled } }));
+  saveConfig(false);
+  const env = { ...verificationServerEnvironment({}, dataDir, Number(new URL(url).port)), OMB_LOOPBACK_TRUST: "service" };
+  await restart(env);
+
+  const assign = step({ action: "set", id: "bots.skills", value: { botId: atlas.id, skills: ["existing", "notes"] } });
+  const global = step({ action: "set", id: "skills.library", value: { name: "notes", everyBot: true } });
+  await start("CHIEF-LIBRARY-OFF", [{ ...global, expectError: true }], 20_000, ownerDevice);
+  expect(results(await finished("CHIEF-LIBRARY-OFF"))[0].text).toContain("skills library is not enabled");
+  await waitForExit(child, { signal: "SIGTERM" });
+  saveConfig(true);
+  await restart(env);
+
+  await start("CHIEF-LIBRARY-MISSING", [{ ...assign, expectError: true }], 20_000, ownerDevice);
+  expect(results(await finished("CHIEF-LIBRARY-MISSING"))[0].text).toContain("not in the library");
+  for (const name of ["existing", "notes"]) {
+    await api("POST", "/api/skills-library", { text: `---\nname: ${name}\ndescription: Fixture skill.\n---\nUse fixture notes.\n` }, 201, ownerDevice);
+    await api("PATCH", `/api/skills-library/${name}`, { enabled: true }, 200, ownerDevice);
+  }
+  await start("CHIEF-LIBRARY-GUEST", [{ ...global, expectError: true }], 20_000, guest);
+  expect(results(await finished("CHIEF-LIBRARY-GUEST"))[0].text).toContain("owner's own conversation");
+
+  await start("CHIEF-LIBRARY-OK", [assign, global,
+    step({ action: "set", id: "rooms.turnTimeoutMinutes", value: 52 }),
+    step({ action: "set", id: "keys.xaiApiKey" }, true),
+    step({ action: "set", id: "vault.logins", value: "fixture" }, true),
+  ], 20_000, ownerDevice);
+  expect(results(await finished("CHIEF-LIBRARY-OK")).map((result: any) => result.isError)).toEqual([false, false, false, true, true]);
+  expect(config().rooms.turnTimeoutMinutes).toBe(52);
+  const atlasSaved = readRegistry(dataDir).bots.find((one: any) => one.id === atlas.id);
+  expect(atlasSaved.assignedSkills).toEqual(["existing", "notes"]);
+  const { skills } = await api("GET", "/api/skills-library", undefined, 200, ownerDevice);
+  expect(skills.find((skill: any) => skill.name === "notes")).toMatchObject({ enabled: true, everyBot: true });
+}, 90_000);
