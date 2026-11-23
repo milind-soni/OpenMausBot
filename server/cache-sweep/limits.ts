@@ -1,28 +1,34 @@
 // The cache cap's numbers and switches, in one place (docs/bot-box.md, "Tool caches"). The cap is the smaller of 10 GB and
-// 15% of the volume, per root group (the tools' cache folders together, and the app's own cache folder): 15% leaves a
-// small Cloud (10 GB) 1.5 GB of caches, enough for a browser and a few projects' packages, and 10 GB keeps a large disk's
-// caches from crowding out the work it was bought for. Everything in these folders is downloaded or computed again.
+// 15% of the volume, per root group (the tools' cache folders, split evenly between a Team Cloud's audiences, and the
+// app's own cache folder): 15% leaves a small Cloud (10 GB) 1.5 GB of caches, enough for a few projects' packages, and
+// 10 GB keeps a large disk's caches from crowding out the work it was bought for. Everything in these folders is
+// downloaded or computed again.
 import { cloudRole } from "../bot-box/detect.ts";
 
 export const GIB = 1024 ** 3;
 /** The cap: the smaller of this and CAP_SHARE of the volume. */
 export const CAP_MAX_BYTES = 10 * GIB;
 export const CAP_SHARE = 0.15;
-/** At this share of the volume used, the tools' cache folders are emptied before anything else fails. */
+/** At this share of the volume used, the tools' caches are removed, least recently written first, until it is under
+ * EMERGENCY_TARGET, but only while no bot process is alive (sweeper.ts). */
 export const EMERGENCY_FULL = 0.95;
-/** An entry changed this recently may be a download or an install in progress: no pass removes it. */
+export const EMERGENCY_TARGET = 0.9;
+/** An entry changed this recently may be a download or an install that just finished: no pass removes it. */
 export const RECENT_MS = 30 * 60_000;
-/** A full sweep (measure, then remove the least recently used over the cap) at most this often. */
+/** A full sweep (measure, then remove the least recently written over the cap) at most this often. */
 export const SWEEP_EVERY_MS = 60 * 60_000;
-/** How often the disk is looked at for the emergency pass, and how long after one the next may run. */
-export const PRESSURE_EVERY_MS = 5 * 60_000;
+/** The sweeper's tick: it looks at the disk for the emergency pass, and runs a sweep that is due, or that a busy home put
+ * off, so a busy home is tried again within minutes, not an hour. */
+export const TICK_EVERY_MS = 5 * 60_000;
+/** After an emergency pass removed something, the next waits this long. */
 export const EMERGENCY_BACKOFF_MS = 30 * 60_000;
 /** Work per tick, then a pause, so the event loop and the disk stay free for turns. */
 export const TICK_ENTRIES = 5_000;
 export const YIELD_EVERY = 200;
 export const TICK_PAUSE_MS = 1_000;
 
-/** The switch: 1, on, true or yes on a Cloud home lets the sweeper and clearCaches delete; off, nothing is ever deleted. */
+/** The switch: 1, on, true or yes on a Cloud home starts the sweeper and the admin routes; off, nothing is read, started or
+ * deleted, and the routes are not there. */
 export const CACHE_SWEEP_SWITCH = "OMB_CACHE_SWEEP";
 /** Cap overrides, in bytes or with a K, M, G or T suffix (powers of 1024). */
 export const TOOL_CAP_ENV = "OMB_CACHE_CAP_TOOLS";

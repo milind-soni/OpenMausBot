@@ -1,39 +1,36 @@
-// The cache cap on fixtures that live only under each test's own temporary folder: the fake HOME, the data folder and
-// every "outside" target too. Nothing here reads the real HOME or the environment.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+// The cache cap's rules that hold on every system: the switch, the numbers, the state file, which processes count as
+// using a root, and that nothing is ever walked or deleted off Linux. What it deletes, and that it never leaves a root,
+// is in sweeper.linux.test.ts and tree.linux.test.ts. Every path lives under each test's own temporary folder.
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { CACHE_TAG, CACHE_TAG_FILE, TOOL_CACHES, toolCacheRoot } from "../bot-box/tool-caches.ts";
 import type { StorageReport } from "../perf/disk-usage.ts";
 import { requiredScope } from "../request-auth.ts";
 import { CACHES_CLEAR_PATH, CACHES_PATH, createCachesRoutes } from "../routes/caches.ts";
+import { PASS } from "../routes/table.ts";
 import { withCacheCounters } from "./host.ts";
+import { rootsInUse } from "./in-use.ts";
 import { GIB, capBytes, cacheSweepOn, parseSize } from "./limits.ts";
-import { createCacheSweeper, mountKeepsAtime, type CacheSweeperDeps } from "./sweeper.ts";
-import { EVICTING_DIR, Pacer, checkRoot, evictingDir, listUnits, removeUnit } from "./units.ts";
+import { CACHE_SWEEP_STATE, CacheSweepOff, createCacheSweeper, parseState, type CacheSweeperDeps } from "./sweeper.ts";
+import { anchoredSupported } from "./tree.ts";
+import { TOOL_UNITS, expectedRoots } from "./units.ts";
 
-const DAY = 24 * 60 * 60_000;
-// Ahead of the files' change times (which a test cannot set), so only the modification times set here decide.
-const NOW = Date.now() + 30 * DAY;
-const KB = 1024;
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+const scratch = (prefix = "omb-cache-sweep-") => { const dir = mkdtempSync(join(tmpdir(), prefix)); dirs.push(dir); return dir; };
 
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), "omb-cache-sweep-"));
-  dirs.push(root);
+  const root = scratch();
   const home = join(root, "home"), dataDir = join(home, ".openmausbot");
   mkdirSync(dataDir, { recursive: true });
-  return { root, home, dataDir, tools: join(home, "cache"), app: join(dataDir, "cache") };
-}
-
-/** A file of `kb` KB whose folder chain up to `stop` is aged `daysOld` days before NOW. */
-function put(path: string, kb: number, daysOld: number, stop: string): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, Buffer.alloc(kb * KB, 1));
-  const at = new Date(NOW - daysOld * DAY);
-  for (let p = path; p.startsWith(stop) && p !== stop; p = dirname(p)) utimesSync(p, at, at);
+  const tools = toolCacheRoot(home);
+  mkdirSync(join(tools, "pip"), { recursive: true });
+  writeFileSync(join(tools, CACHE_TAG_FILE), CACHE_TAG);
+  writeFileSync(join(tools, "pip", "wheel"), "x".repeat(10_000));
+  return { root, home, dataDir, tools };
 }
 
 const ON = { OMB_CLOUD_ROLE: "home", OMB_CACHE_SWEEP: "on" };
@@ -41,8 +38,8 @@ const ON = { OMB_CLOUD_ROLE: "home", OMB_CACHE_SWEEP: "on" };
 function sweeper(f: ReturnType<typeof fixture>, overrides: Partial<CacheSweeperDeps> = {}) {
   const lines: string[] = [];
   const made = createCacheSweeper({
-    dataDir: f.dataDir, home: f.home, env: ON, tools: true, audienceHomes: () => [], keep: () => [],
-    atimeKept: async () => false, volume: async () => ({ total: 100 * GIB, free: 50 * GIB }), now: () => NOW,
+    dataDir: f.dataDir, home: f.home, env: ON, tools: () => true, audienceHomes: () => [], keep: () => [],
+    volume: async () => ({ total: 100 * GIB, free: 1 * GIB }), inUse: async () => new Set(),
     pace: { entries: 1_000_000, yieldEvery: 50, pauseMs: 0 }, log: (line) => lines.push(line), ...overrides,
   });
   return { made, lines };
@@ -66,328 +63,154 @@ describe("limits", () => {
     expect(cacheSweepOn(ON)).toBe(true);
     expect(cacheSweepOn({ OMB_CLOUD_ROLE: "team", OMB_CACHE_SWEEP: "1" })).toBe(true);
   });
-
-  it("reads whether the mount keeps access times from mountinfo: noatime does not, relatime does, off Linux no", async () => {
-    const info = (options: string) => async () => `22 1 0:1 / / rw - ext4 /dev/a rw\n33 22 0:2 / /data ${options} - ext4 /dev/b rw\n`;
-    expect(await mountKeepsAtime("/data/cache", info("rw,noatime"))).toBe(false);
-    expect(await mountKeepsAtime("/data/cache", info("rw,relatime"))).toBe(true);
-    expect(await mountKeepsAtime("/database", info("rw,noatime"))).toBe(true);
-    expect(await mountKeepsAtime("/data", async () => { throw new Error("no /proc"); })).toBe(false);
-  });
 });
 
-describe("the sweep", () => {
-  it("keeps each root under its cap, removing the least recently used whole entries first", async () => {
-    const f = fixture();
-    put(join(f.tools, "pip", "http-v2", "a"), 300, 9, f.tools);
-    put(join(f.tools, "npm", "_npx", "aaaa", "node_modules", "x.js"), 200, 7, f.tools);
-    put(join(f.tools, "npm", "_cacache", "content-v2", "b"), 200, 5, f.tools);
-    put(join(f.tools, "uv", "wheels-v5", "c"), 200, 2, f.tools);
-    const { made } = sweeper(f, { env: { ...ON, OMB_CACHE_CAP_TOOLS: `${260 * KB}` } });
-    const result = await made.sweep();
-    expect(result).toMatchObject({ groups: { tools: { cap: 260 * KB, removed: 3 } } });
-    if ("groups" in result) expect(result.groups.tools!.bytes).toBeLessThanOrEqual(260 * KB);
-    // Oldest first: pip (9 days), then the npx install (7), then npm's store (5); uv (2 days) stays.
-    expect(existsSync(join(f.tools, "pip"))).toBe(false);
-    expect(existsSync(join(f.tools, "npm", "_npx", "aaaa"))).toBe(false);
-    expect(existsSync(join(f.tools, "npm", "_cacache"))).toBe(false);
-    expect(existsSync(join(f.tools, "uv", "wheels-v5", "c"))).toBe(true);
-    // A split folder itself, and the rename-aside folders, never remain as debris.
-    expect(existsSync(join(f.tools, "npm"))).toBe(true);
-    expect(readdirSync(join(f.dataDir, EVICTING_DIR))).toEqual([]);
-    expect((await made.report()).cacheCleared).toMatchObject({ count: 1, entries: 3 });
+describe("what may ever be removed", () => {
+  it("only whole tool folders the box routes a tool to, by fixed name, and never a browser's", () => {
+    const routed = new Set(TOOL_CACHES.map((cache) => cache.folder));
+    for (const name of TOOL_UNITS) expect(routed.has(name), name).toBe(true);
+    for (const name of TOOL_UNITS) expect(name).not.toMatch(/playwright|puppeteer|chrom|browser|mcp/i);
+    expect(TOOL_UNITS).not.toContain("go-mod");
   });
 
-  it("under the cap, removes nothing", async () => {
-    const f = fixture();
-    put(join(f.tools, "pip", "a"), 100, 9, f.tools);
-    expect(await sweeper(f).made.sweep()).toMatchObject({ groups: { tools: { removed: 0 } } });
-    expect(existsSync(join(f.tools, "pip", "a"))).toBe(true);
+  it("the tools' roots only while their folders are in use (the switch and a live box); the app's own always", () => {
+    const input = { home: "/data", dataDir: "/data/.openmausbot", audienceHomes: ["/data/.openmausbot/engine-homes/member-a"] };
+    expect(expectedRoots({ ...input, tools: false }).map((root) => root.group)).toEqual(["app"]);
+    expect(expectedRoots({ ...input, tools: true }).filter((root) => root.group === "tools")).toHaveLength(2);
   });
 
-  it("never removes an entry changed in the last 30 minutes, though it is over the cap: a download in progress", async () => {
-    const f = fixture();
-    put(join(f.tools, "ms-playwright", "chromium-1140", "chrome"), 400, 20, f.tools);
-    // The oldest folder, with one file just written into it.
-    put(join(f.tools, "ms-playwright", "chromium-1140", "partial.zip"), 10, 1 / (24 * 60), f.tools);
-    put(join(f.tools, "ms-playwright", "ffmpeg-1010", "ffmpeg"), 100, 3, f.tools);
-    const { made } = sweeper(f, { env: { ...ON, OMB_CACHE_CAP_TOOLS: "1" } });
-    await made.sweep();
-    expect(existsSync(join(f.tools, "ms-playwright", "chromium-1140", "chrome"))).toBe(true);
-    expect(existsSync(join(f.tools, "ms-playwright", "chromium-1140", "partial.zip"))).toBe(true);
-    expect(existsSync(join(f.tools, "ms-playwright", "ffmpeg-1010"))).toBe(false);
+  it("off Linux nothing is walked or deleted", () => {
+    expect(anchoredSupported("linux")).toBe(true);
+    for (const platform of ["darwin", "win32", "freebsd"] as const) expect(anchoredSupported(platform)).toBe(false);
   });
 
-  it("removes only names it knows: anything else in a root is measured and left", async () => {
+  it("where it cannot delete by open folders, every pass and every clear removes nothing", async () => {
     const f = fixture();
-    put(join(f.tools, "my-notes", "plan.md"), 50, 30, f.tools);
-    put(join(f.tools, "huggingface", "token"), 1, 30, f.tools);
-    put(join(f.tools, "huggingface", "hub", "models--org--m", "blobs", "x"), 50, 30, f.tools);
-    put(join(f.tools, "huggingface", "hub", ".locks", "models--org--m", "l"), 1, 30, f.tools);
-    put(join(f.app, "pre-update", "state.db"), 50, 30, f.app);
-    put(join(f.app, "node-compile", "v22.1.0-x64-aaaa-1000", "e"), 50, 30, f.app);
-    put(join(f.app, "node-compile", "v24.18.0-x64-bbbb-1000", "e"), 50, 30, f.app);
-    const { made } = sweeper(f, { env: { ...ON, OMB_CACHE_CAP_TOOLS: "1", OMB_CACHE_CAP_APP: "1" }, keep: () => [join(f.app, "node-compile", "v24.18.0-x64-bbbb-1000")] });
-    const result = await made.sweep();
-    expect(existsSync(join(f.tools, "my-notes", "plan.md"))).toBe(true);
-    expect(existsSync(join(f.tools, "huggingface", "token"))).toBe(true);
-    expect(existsSync(join(f.tools, "huggingface", "hub", ".locks"))).toBe(true);
-    expect(existsSync(join(f.tools, "huggingface", "hub", "models--org--m"))).toBe(false);
-    expect(existsSync(join(f.app, "pre-update", "state.db"))).toBe(true);
-    expect(existsSync(join(f.app, "node-compile", "v22.1.0-x64-aaaa-1000"))).toBe(false);
-    // The running server's own compile cache folder.
-    expect(existsSync(join(f.app, "node-compile", "v24.18.0-x64-bbbb-1000", "e"))).toBe(true);
-    expect(result).toMatchObject({ groups: { tools: { unknown: 1 }, app: { unknown: 1 } } });
-  });
-
-  it("with Step 6 off, no tool cache folder is ours: only the app's own is swept", async () => {
-    const f = fixture();
-    put(join(f.tools, "pip", "a"), 100, 30, f.tools);
-    put(join(f.app, "node-compile", "old", "e"), 100, 30, f.app);
-    await sweeper(f, { tools: false, env: { ...ON, OMB_CACHE_CAP_TOOLS: "1", OMB_CACHE_CAP_APP: "1" } }).made.sweep();
-    expect(existsSync(join(f.tools, "pip", "a"))).toBe(true);
-    expect(existsSync(join(f.app, "node-compile", "old"))).toBe(false);
-  });
-
-  it("switch off: nothing is ever deleted, by the sweep, the emergency pass or a clear", async () => {
-    const f = fixture();
-    put(join(f.tools, "pip", "a"), 100, 30, f.tools);
-    const { made } = sweeper(f, { env: { OMB_CLOUD_ROLE: "home", OMB_CACHE_CAP_TOOLS: "1" }, volume: async () => ({ total: 100, free: 1 }) });
-    expect(await made.sweep()).toEqual({ skipped: "off" });
-    expect(await made.emergency()).toEqual({ skipped: "off" });
-    await expect(made.clearCaches({ dryRun: false })).rejects.toThrow(/off/);
-    expect((await made.clearCaches()).entries).toBe(1);
-    expect(existsSync(join(f.tools, "pip", "a"))).toBe(true);
+    const { made, lines } = sweeper(f, { supported: () => false });
     made.start(() => false);
     made.stop();
-  });
-
-  it("skips while a turn runs, and resumes the measurement where it stopped", async () => {
-    const f = fixture();
-    for (const name of ["pip", "uv", "bun", "go-build"]) put(join(f.tools, name, "x"), 100, 10, f.tools);
-    const { made } = sweeper(f, { env: { ...ON, OMB_CACHE_CAP_TOOLS: "1" } });
-    expect(await made.sweep(() => true)).toEqual({ skipped: "busy" });
-    let calls = 0;
-    // Busy from the third look (the first is the pass's own): one unit is measured and kept in the state file, then it stops.
-    expect(await made.sweep(() => ++calls > 2)).toEqual({ skipped: "busy" });
-    const state = JSON.parse(readFileSync(join(f.dataDir, "cache-sweep.json"), "utf8")) as { measured: Record<string, unknown> };
-    expect(Object.keys(state.measured)).toHaveLength(1);
-    // A new sweeper (a restart) goes on from there and finishes.
-    const again = sweeper(f, { env: { ...ON, OMB_CACHE_CAP_TOOLS: "1" } }).made;
-    expect(await again.sweep()).toMatchObject({ groups: { tools: { removed: 4 } } });
-  });
-
-  it("does not hold the event loop: other callbacks run while it walks", async () => {
-    const f = fixture();
-    for (let i = 0; i < 400; i++) put(join(f.tools, "pip", "http-v2", `f${i}`), 1, 10, f.tools);
-    let ticks = 0;
-    const timer = setInterval(() => { ticks += 1; }, 0);
-    await sweeper(f, { pace: { entries: 100, yieldEvery: 10, pauseMs: 1 } }).made.sweep();
-    clearInterval(timer);
-    expect(ticks).toBeGreaterThan(0);
+    expect(await made.sweep()).toEqual({ skipped: "unsupported" });
+    expect(await made.emergency()).toEqual({ skipped: "unsupported" });
+    expect(await made.clearCaches({ dryRun: false })).toMatchObject({ entries: 0, unsupported: true });
+    expect(readFileSync(join(f.tools, "pip", "wheel"), "utf8")).toHaveLength(10_000);
+    expect(lines.filter((line) => line.includes("needs Linux"))).toHaveLength(1);
   });
 });
 
-describe("the emergency pass", () => {
-  it("at 95% full empties the tools' cache folders (all but what is in use), counts it, and leaves the app's own", async () => {
+describe("switch off: nothing at all", () => {
+  it("making it reads nothing; off, start reads nothing, starts no timer, and a real clear is refused", async () => {
     const f = fixture();
-    put(join(f.tools, "pip", "a"), 100, 1, f.tools);
-    put(join(f.tools, "npm", "_cacache", "b"), 100, 1, f.tools);
-    put(join(f.tools, "uv", "now"), 10, 1 / (24 * 60), f.tools);
-    put(join(f.app, "node-compile", "old", "e"), 100, 30, f.app);
-    let free = 4 * GIB;
-    const { made, lines } = sweeper(f, { volume: async () => ({ total: 100 * GIB, free }) });
-    const result = await made.emergency();
-    expect(result).toMatchObject({ entries: 2, recent: 1 });
-    expect(existsSync(join(f.tools, "pip"))).toBe(false);
-    expect(existsSync(join(f.tools, "npm", "_cacache"))).toBe(false);
-    expect(existsSync(join(f.tools, "uv", "now"))).toBe(true);
-    expect(existsSync(join(f.app, "node-compile", "old"))).toBe(true);
-    expect(lines.some((line) => line.includes("96% full"))).toBe(true);
-    const report = await made.report();
-    expect(report.emergency).toMatchObject({ count: 1, at: NOW });
-    expect(report.cacheCleared).toMatchObject({ count: 1, entries: 2, reason: "emergency: volume full", at: NOW });
-    expect(report.cacheCleared.bytes).toBeGreaterThanOrEqual(200 * KB);
-    // Still full: no second walk until the back-off has passed. With room, nothing.
-    expect(await made.emergency()).toEqual({ skipped: "backoff" });
-    free = 50 * GIB;
-    expect(await sweeper(f, { volume: async () => ({ total: 100 * GIB, free }) }).made.emergency()).toEqual({ skipped: "room" });
-  });
-});
-
-describe("clearCaches", () => {
-  it("a dry run says what would go and deletes nothing; a real one removes exactly that", async () => {
-    const f = fixture();
-    put(join(f.tools, "pip", "a"), 100, 3, f.tools);
-    put(join(f.tools, "go-mod", "m", "f"), 100, 3, f.tools);
-    put(join(f.app, "node-compile", "old", "e"), 50, 3, f.app);
-    const { made } = sweeper(f);
-    const dry = await made.clearCaches();
-    expect(dry).toMatchObject({ dryRun: true, entries: 3, files: expect.any(Number), recent: 0 });
-    expect(dry.bytes).toBeGreaterThanOrEqual(250 * KB);
-    expect(existsSync(join(f.tools, "pip", "a"))).toBe(true);
-    expect((await made.report()).cacheCleared.count).toBe(0);
-    const tools = await made.clearCaches({ dryRun: false, scope: "tools" });
-    expect(tools).toMatchObject({ dryRun: false, entries: 2 });
-    expect(existsSync(join(f.tools, "pip"))).toBe(false);
-    expect(existsSync(join(f.app, "node-compile", "old"))).toBe(true);
+    writeFileSync(join(f.dataDir, CACHE_SWEEP_STATE), JSON.stringify({ cleared: { count: 7 } }));
+    const off = sweeper(f, { env: { OMB_CLOUD_ROLE: "home" } });
+    off.made.start(() => false);
+    expect(off.lines).toEqual([]);
+    expect(off.made.counters()).toBeNull();
+    expect(await off.made.sweep()).toEqual({ skipped: "off" });
+    expect(await off.made.emergency()).toEqual({ skipped: "off" });
+    await expect(off.made.clearCaches({ dryRun: false })).rejects.toBeInstanceOf(CacheSweepOff);
+    expect(existsSync(join(f.tools, "pip", "wheel"))).toBe(true);
+    // On, making it still reads nothing: the counters come once it is started (after the server answers).
+    const on = sweeper(f);
+    await new Promise((done) => setImmediate(done));
+    expect(on.made.counters()).toBeNull();
+    on.made.start(() => true);
+    on.made.stop();
+    await on.made.report();
+    expect(on.made.counters()).toMatchObject({ cacheCleared: { count: 7 } });
   });
 
-  it.skipIf(process.platform === "win32")("removes Go's read-only module cache", async () => {
-    const f = fixture();
-    put(join(f.tools, "go-mod", "example.com", "m@v1", "f.go"), 1, 3, f.tools);
-    const { chmodSync } = await import("node:fs");
-    chmodSync(join(f.tools, "go-mod", "example.com", "m@v1"), 0o555);
-    chmodSync(join(f.tools, "go-mod", "example.com"), 0o555);
-    expect(await sweeper(f).made.clearCaches({ dryRun: false })).toMatchObject({ entries: 1 });
-    expect(existsSync(join(f.tools, "go-mod"))).toBe(false);
-  });
-});
-
-// Links: Windows makes them only with a privilege, and the sweeper runs only on a Linux Cloud home.
-describe.skipIf(process.platform === "win32")("nothing outside the roots, ever", () => {
-  it("a unit that is a link to a folder outside is refused, and the folder outside is untouched", async () => {
-    const f = fixture();
-    put(join(f.root, "outside", "precious.txt"), 10, 30, f.root);
-    mkdirSync(f.tools, { recursive: true });
-    symlinkSync(join(f.root, "outside"), join(f.tools, "pip"));
-    const result = await sweeper(f).made.clearCaches({ dryRun: false });
-    expect(result).toMatchObject({ entries: 0, kept: 1 });
-    expect(existsSync(join(f.root, "outside", "precious.txt"))).toBe(true);
-  });
-
-  it("a link between the root and a unit (npm/_npx -> outside) is refused", async () => {
-    const f = fixture();
-    put(join(f.root, "outside", "abcd", "precious.txt"), 10, 30, f.root);
-    mkdirSync(join(f.tools, "npm"), { recursive: true });
-    symlinkSync(join(f.root, "outside"), join(f.tools, "npm", "_npx"));
-    await sweeper(f).made.clearCaches({ dryRun: false });
-    expect(existsSync(join(f.root, "outside", "abcd", "precious.txt"))).toBe(true);
-  });
-
-  it("a link inside an entry is removed as a link, never followed", async () => {
-    const f = fixture();
-    put(join(f.root, "outside", "precious.txt"), 10, 30, f.root);
-    put(join(f.tools, "uv", "x"), 10, 30, f.tools);
-    symlinkSync(join(f.root, "outside"), join(f.tools, "uv", "link"));
-    expect(await sweeper(f).made.clearCaches({ dryRun: false })).toMatchObject({ entries: 1 });
-    expect(existsSync(join(f.tools, "uv"))).toBe(false);
-    expect(existsSync(join(f.root, "outside", "precious.txt"))).toBe(true);
-  });
-
-  it("a root that is a link, HOME itself, or holding the data folder is refused", async () => {
-    const f = fixture();
-    put(join(f.root, "elsewhere", "pip", "precious"), 10, 30, f.root);
-    symlinkSync(join(f.root, "elsewhere"), f.tools);
-    const { made, lines } = sweeper(f);
-    const result = await made.clearCaches({ dryRun: false, scope: "tools" });
-    expect(result.refusedRoots).toEqual([{ path: f.tools, reason: "a link" }]);
-    expect(existsSync(join(f.root, "elsewhere", "pip", "precious"))).toBe(true);
-    expect(lines.some((line) => line.includes("a link"))).toBe(true);
-    expect(await checkRoot(f.home, [f.home, f.dataDir])).toEqual({ refused: "not a cache folder" });
-    // A HOME named "cache": its own folder is the root's path only if something went wrong; refused.
-    const odd = join(f.root, "cache");
-    mkdirSync(join(odd, ".openmausbot"), { recursive: true });
-    expect(await checkRoot(odd, [odd, join(odd, ".openmausbot")])).toEqual({ refused: "it is or holds HOME or the data folder" });
-  });
-
-  it("finishes what an interrupted removal moved into the data folder's evicting folder; a name in a root is not ours", async () => {
-    const f = fixture();
-    put(join(f.dataDir, EVICTING_DIR, "abc", "half"), 10, 30, f.dataDir);
-    put(join(f.tools, ".omb-cache-evicting", "keep"), 10, 30, f.tools);
-    await sweeper(f).made.clearCaches({ dryRun: false });
-    expect(existsSync(join(f.dataDir, EVICTING_DIR, "abc"))).toBe(false);
-    expect(existsSync(join(f.tools, ".omb-cache-evicting", "keep"))).toBe(true);
-    const { units } = await listUnits("tools", f.tools);
-    expect(units.map((unit) => `${unit.name} ${unit.removable}`)).toEqual([".omb-cache-evicting false"]);
-  });
-
-  it("an evicting folder that is a link is refused, and nothing is removed", async () => {
-    const f = fixture();
-    put(join(f.root, "outside", "precious.txt"), 10, 30, f.root);
-    symlinkSync(join(f.root, "outside"), join(f.dataDir, EVICTING_DIR));
-    expect(await evictingDir(f.dataDir)).toBeNull();
-    put(join(f.tools, "pip", "a"), 10, 30, f.tools);
-    expect(await sweeper(f).made.clearCaches({ dryRun: false })).toMatchObject({ entries: 0 });
-    expect(existsSync(join(f.tools, "pip", "a"))).toBe(true);
-    expect(existsSync(join(f.root, "outside", "precious.txt"))).toBe(true);
-  });
-
-  // A bot can write in its tools root while the sweeper walks an entry: it swaps a folder above the entry for a link to a
-  // folder of the data folder (another member's engine home), hoping the removal follows it.
-  it("a folder swapped for a link while the entry is walked: refused, and the folder the link names is untouched", async () => {
-    const f = fixture();
-    const victim = join(f.dataDir, "engine-homes", "member-0000000000000000");
-    put(join(victim, "abcd", "transcript.jsonl"), 10, 30, f.dataDir);
-    for (let i = 0; i < 20; i++) put(join(f.tools, "npm", "_npx", "abcd", `f${i}`), 1, 30, f.tools);
-    // The sweeper hands removeUnit a checked root's real path (macOS' temporary folder is behind a link).
-    const units = (await listUnits("tools", realpathSync(f.tools))).units.filter((unit) => unit.name === "npm/_npx/abcd");
-    expect(units).toHaveLength(1);
-    let swapped = false;
-    const pacer = new Pacer({ entries: 1_000_000, yieldEvery: 1, pauseMs: 0 });
-    const step = pacer.step.bind(pacer);
-    pacer.step = async () => {
-      if (!swapped) {
-        swapped = true;
-        const { renameSync } = await import("node:fs");
-        renameSync(join(f.tools, "npm", "_npx"), join(f.tools, "npm", "_npx-real"));
-        // The link names a folder holding an entry of the same name, as the attack needs.
-        symlinkSync(victim, join(f.tools, "npm", "_npx"));
-      }
-      return step();
-    };
-    const removal = await removeUnit(units[0]!, { now: NOW, atime: false, trash: await evictingDir(f.dataDir), pacer });
-    expect(removal).toMatchObject({ removed: false, reason: "changed" });
-    expect(existsSync(join(victim, "abcd", "transcript.jsonl"))).toBe(true);
-    expect(readdirSync(join(f.dataDir, EVICTING_DIR))).toEqual([]);
-  });
-});
-
-describe("last use where the mount keeps access times", () => {
-  it("a file read recently keeps its entry, though older by modification; a folder's own access time does not count", async () => {
-    const f = fixture();
-    put(join(f.tools, "pip", "a"), 100, 20, f.tools);
-    put(join(f.tools, "uv", "b"), 100, 10, f.tools);
-    // pip's file was read a day ago; uv's folder was listed a day ago, its file not read since it was written.
-    const read = new Date(NOW - DAY);
-    utimesSync(join(f.tools, "pip", "a"), read, new Date(NOW - 20 * DAY));
-    utimesSync(join(f.tools, "uv"), read, new Date(NOW - 10 * DAY));
-    const { made } = sweeper(f, { atimeKept: async () => true, env: { ...ON, OMB_CACHE_CAP_TOOLS: `${150 * KB}` } });
-    expect(await made.sweep()).toMatchObject({ groups: { tools: { removed: 1 } } });
-    expect(existsSync(join(f.tools, "pip", "a"))).toBe(true);
-    expect(existsSync(join(f.tools, "uv"))).toBe(false);
-  });
-});
-
-describe("the storage report", () => {
-  it("carries the cleared counters once the sweeper has read them, and nothing before or without a report", async () => {
-    const f = fixture();
-    put(join(f.tools, "pip", "a"), 10, 3, f.tools);
-    const { made } = sweeper(f);
-    await made.clearCaches({ dryRun: false });
+  it("the storage report is unchanged until the counters are read", () => {
     const report = { v: 1, at: 1 } as unknown as StorageReport;
-    expect(withCacheCounters(report, made)).toMatchObject({ at: 1, caches: { cacheCleared: { count: 1, entries: 1, at: NOW }, emergency: { count: 0 } } });
-    expect(withCacheCounters(null, made)).toBeNull();
     expect(withCacheCounters(report, { counters: () => null })).toBe(report);
+    expect(withCacheCounters(null, { counters: () => ({ cacheCleared: { count: 1, bytes: 2, entries: 1, at: 3, reason: "r" }, emergency: { count: 0, bytes: 0, at: null } }) })).toBeNull();
+    expect(withCacheCounters(report, { counters: () => ({ cacheCleared: { count: 1, bytes: 2, entries: 1, at: 3, reason: "r" }, emergency: { count: 0, bytes: 0, at: null } }) })).toMatchObject({ caches: { cacheCleared: { count: 1 } } });
+  });
+});
+
+describe("the state file", () => {
+  it("any shape reads as counters, never an error", () => {
+    for (const text of ['{"measured":null}', '{"cleared":null}', "[1,2]", "null", '{"emergency":{"at":"x"}}', "not json", "", '{"lastSweep":{"at":"x"}}', '{"cleared":{"count":-1,"bytes":"9"}}']) {
+      const state = parseState(text);
+      expect(state.cleared).toEqual({ count: 0, bytes: 0, entries: 0, at: null, reason: null });
+      expect(state.emergency.at).toBeNull();
+      expect(state.lastSweep).toBeNull();
+    }
+    expect(parseState('{"cleared":{"count":2,"bytes":5,"entries":1,"at":9,"reason":"r"},"lastSweep":{"at":4,"roots":{}}}')).toMatchObject({ cleared: { count: 2, bytes: 5, at: 9, reason: "r" }, lastSweep: { at: 4 } });
+  });
+
+  it("a broken state file does not stop a pass or the report", async () => {
+    const f = fixture();
+    writeFileSync(join(f.dataDir, CACHE_SWEEP_STATE), '{"measured":null,"cleared":null}');
+    const { made } = sweeper(f, { supported: () => false });
+    expect(await made.report()).toMatchObject({ on: true, cacheCleared: { count: 0 } });
+  });
+});
+
+describe("which roots a live process uses (/proc)", () => {
+  /** A folder shaped like /proc: one process per entry, with its links, maps and environment. */
+  function proc(processes: Record<string, { cwd?: string; exe?: string; fds?: string[]; maps?: string; environ?: Record<string, string> }>) {
+    const dir = scratch("omb-proc-");
+    for (const [pid, info] of Object.entries(processes)) {
+      const at = join(dir, pid);
+      mkdirSync(join(at, "fd"), { recursive: true });
+      symlinkSync(info.cwd ?? "/", join(at, "cwd"));
+      symlinkSync(info.exe ?? "/usr/bin/node", join(at, "exe"));
+      symlinkSync("/", join(at, "root"));
+      (info.fds ?? []).forEach((target, fd) => symlinkSync(target, join(at, "fd", String(fd))));
+      writeFileSync(join(at, "maps"), info.maps ?? "");
+      writeFileSync(join(at, "environ"), Object.entries(info.environ ?? {}).map(([name, value]) => `${name}=${value}`).join("\0"));
+    }
+    return dir;
+  }
+  const personal = "/data/cache", member = "/data/.openmausbot/engine-homes/member-a/cache";
+
+  it.skipIf(process.platform === "win32")("a process whose working folder, program, open file, mapped file or environment names a path in a root uses it", async () => {
+    const cases: Array<[string, Parameters<typeof proc>[0][string]]> = [
+      ["cwd", { cwd: `${personal}/uv/archive-v0/abc` }],
+      ["exe", { exe: `${personal}/npm/_npx/1a2b/node_modules/.bin/server` }],
+      ["fd", { fds: ["/dev/null", `${personal}/pip/http-v2/x`] }],
+      ["maps", { maps: `7f00-7f01 r-xp 0 00:1 2 ${personal}/uv/archive-v0/abc/lib.so (deleted)\n` }],
+      ["environ", { environ: { npm_config_cache: `${personal}/npm`, HOME: "/data" } }],
+      ["PATH", { environ: { PATH: `/usr/bin:${personal}/uv/archive-v0/abc/bin` } }],
+    ];
+    for (const [name, info] of cases) expect([...await rootsInUse([personal, member], { proc: proc({ 100: info }), self: 1, uid: null })], name).toEqual([personal]);
+  });
+
+  it.skipIf(process.platform === "win32")("not: a process elsewhere, a folder whose name only starts the same, the server itself, another user's", async () => {
+    const dir = proc({
+      100: { cwd: "/data/projects/site", environ: { HOME: "/data", PATH: "/usr/bin" } },
+      101: { cwd: "/data/cache-old/x", environ: { X: "/data/cachefile" } },
+      102: { cwd: `${personal}/npm` },
+    });
+    expect([...await rootsInUse([personal, member], { proc: dir, self: 102, uid: null })]).toEqual([]);
+    expect([...await rootsInUse([personal], { proc: dir, self: 1, uid: -1 })]).toEqual([]);
+    expect([...await rootsInUse([personal, member], { proc: dir, self: 1, uid: null })]).toEqual([personal]);
+  });
+
+  it("no /proc to read: every root counts as used", async () => {
+    expect([...await rootsInUse([personal], { proc: join(scratch(), "missing") })]).toEqual([personal]);
   });
 });
 
 describe("the admin API", () => {
-  const call = async (made: ReturnType<typeof sweeper>["made"], method: string, path: string, body?: unknown) => {
+  const call = async (made: Parameters<typeof createCachesRoutes>[0], method: string, path: string, body?: unknown) => {
     const sent: Array<{ status: number; body: unknown }> = [];
-    await createCachesRoutes(made)({
+    const answer = await createCachesRoutes(made)({
       req: {} as never, res: { setHeader() {} } as never, url: new URL(`http://127.0.0.1${path}`), path, method, auth: {} as never,
       json: ((_res: unknown, status: number, payload: unknown) => { sent.push({ status, body: payload }); }) as never,
       readBody: (async () => { if (body instanceof Error) throw body; return body; }) as never,
     });
-    return sent[0];
+    return answer === PASS ? "pass" : sent[0];
   };
 
-  it("is not there off a Cloud home", async () => {
+  it("is not there with the switch off, or off a Cloud home: the routes pass, as if absent", async () => {
     const f = fixture();
-    const desktop = sweeper(f, { env: {} }).made;
-    expect(await call(desktop, "GET", CACHES_PATH)).toMatchObject({ status: 404 });
-    expect(await call(desktop, "POST", CACHES_CLEAR_PATH, {})).toMatchObject({ status: 404 });
+    for (const env of [{}, { OMB_CLOUD_ROLE: "home" }, { OMB_CACHE_SWEEP: "on" }]) {
+      const made = sweeper(f, { env }).made;
+      expect(await call(made, "GET", CACHES_PATH)).toBe("pass");
+      expect(await call(made, "POST", CACHES_CLEAR_PATH, { dryRun: false })).toBe("pass");
+    }
+    expect(existsSync(join(f.tools, "pip", "wheel"))).toBe(true);
   });
 
   it("needs the admin scope for both paths", () => {
@@ -395,18 +218,13 @@ describe("the admin API", () => {
     expect(requiredScope("POST", CACHES_CLEAR_PATH)).toBe("admin");
   });
 
-  it("POST is a dry run unless the body says dryRun false; a broken body is a dry run; off refuses a real clear", async () => {
-    const f = fixture();
-    put(join(f.tools, "pip", "a"), 10, 3, f.tools);
-    const { made } = sweeper(f);
-    expect(await call(made, "POST", CACHES_CLEAR_PATH, {})).toMatchObject({ status: 200, body: { dryRun: true, entries: 1 } });
-    expect(await call(made, "POST", CACHES_CLEAR_PATH, new Error("bad json"))).toMatchObject({ status: 200, body: { dryRun: true } });
-    expect(existsSync(join(f.tools, "pip", "a"))).toBe(true);
-    const off = sweeper(f, { env: { OMB_CLOUD_ROLE: "home" } }).made;
-    expect(await call(off, "POST", CACHES_CLEAR_PATH, { dryRun: false })).toMatchObject({ status: 409 });
-    expect(existsSync(join(f.tools, "pip", "a"))).toBe(true);
-    expect(await call(made, "POST", CACHES_CLEAR_PATH, { dryRun: false, scope: "tools" })).toMatchObject({ status: 200, body: { dryRun: false, entries: 1 } });
-    expect(existsSync(join(f.tools, "pip"))).toBe(false);
-    expect(await call(made, "GET", CACHES_PATH)).toMatchObject({ status: 200, body: { on: true, cacheCleared: { count: 1 } } });
+  it("POST is a dry run unless the body says dryRun false, and a broken body is a dry run", async () => {
+    const asked: Array<{ dryRun?: boolean; scope?: string }> = [];
+    const fake = { available: () => true, report: async () => ({}) as never, clearCaches: async (options: { dryRun?: boolean; scope?: "tools" | "app" | "all" } = {}) => { asked.push(options); return { dryRun: options.dryRun !== false } as never; } };
+    await call(fake, "POST", CACHES_CLEAR_PATH, {});
+    await call(fake, "POST", CACHES_CLEAR_PATH, new Error("bad json"));
+    await call(fake, "POST", CACHES_CLEAR_PATH, { dryRun: "false", scope: "nope" });
+    await call(fake, "POST", CACHES_CLEAR_PATH, { dryRun: false, scope: "tools" });
+    expect(asked).toEqual([{ dryRun: true, scope: "all" }, { dryRun: true, scope: "all" }, { dryRun: true, scope: "all" }, { dryRun: false, scope: "tools" }]);
   });
 });
