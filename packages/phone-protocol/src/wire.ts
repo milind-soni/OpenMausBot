@@ -285,7 +285,7 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   mascotExpression?: MausExpression | null;
   mascotBody?: BotBodyId | null;
   /** Overrides both eyes and mouth. Absent or null preserves the body's default inks. */
-  mascotFaceColor?: MascotFaceColor | null;
+  mascotFaceColor?: MascotFaceColor | null; /** Lowercase `#rrggbb` tint for the avatar body only. Absent or null uses `color`. */ mascotBodyColor?: string | null;
   /** App-owned attachment served as this bot's custom profile image;
    * always present on the wire, null when the bot has none. */
   avatarUrl: string | null;
