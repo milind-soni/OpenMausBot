@@ -3372,6 +3372,7 @@
   "settings.bots.aboutYouLine": "Comment les bots de {place} vous appellent et ce qu'ils savent de vous.",
   "settings.bots.awakeLine": "Votre forfait garde quelques bots éveillés à la fois. Choisissez lesquels.",
   "settings.bots.awakeTitle": "Certains bots sont en pause",
+  "settings.remoteTeammates.title": "Coéquipiers sur d'autres serveurs",
   "settings.bots.early": "Fonctions en avant-première",
   "settings.bots.intro": "Ce que les bots de {place} savent de vous, et les réglages pour tous.",
   "settings.bots.newBots": "Nouveaux bots",

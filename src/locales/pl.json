@@ -6721,6 +6721,7 @@
   "settings.bots.aboutYouLine": "Jak boty w {place} Cię nazywają i co o Tobie wiedzą.",
   "settings.bots.awakeLine": "Twój plan utrzymuje aktywne tylko kilka botów naraz. Wybierz które.",
   "settings.bots.awakeTitle": "Niektóre boty są wstrzymane",
+  "settings.remoteTeammates.title": "Członkowie zespołu na innych serwerach",
   "settings.bots.early": "Wczesne funkcje",
   "settings.bots.intro": "Co boty w {place} wiedzą o Tobie, i ustawienia dla wszystkich.",
   "settings.bots.newBots": "Nowe boty",

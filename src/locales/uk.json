@@ -3659,6 +3659,7 @@
   "settings.bots.aboutYouLine": "Як боти на {place} вас називають і що про вас знають.",
   "settings.bots.awakeLine": "Ваш план тримає активними лише кількох ботів одночасно. Виберіть яких.",
   "settings.bots.awakeTitle": "Деякі боти призупинені",
+  "settings.remoteTeammates.title": "Учасники команди на інших серверах",
   "settings.bots.early": "Ранні функції",
   "settings.bots.intro": "Що боти на {place} знають про вас, і налаштування для всіх ботів.",
   "settings.bots.newBots": "Нові боти",
