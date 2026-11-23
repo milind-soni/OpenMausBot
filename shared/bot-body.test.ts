@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { BOT_BODY_IDS, FESTIVAL_IDS, FESTIVALS, botBodyId, botBodySchema, isCarvedBody, isFestival } from "./bot-body.ts";
+import { BOT_BODY_IDS, FESTIVAL_IDS, FESTIVALS, botBodyId, botBodySchema, isCarvedBody, isFestival, isObjectBody } from "./bot-body.ts";
 import { CARVED_BODY_IDS } from "./carved-bodies.ts";
 import { MASCOT_BODY_IDS } from "./mascot-bodies.ts";
+import { OBJECT_BODY_IDS } from "./object-bodies.ts";
 import { MAUS_COLOR_NAMES } from "./wire.ts";
 
 describe("bot bodies", () => {
-  it("accepts every gradient body and every festival body", () => {
-    expect(BOT_BODY_IDS).toEqual([...MASCOT_BODY_IDS, ...CARVED_BODY_IDS]);
+  it("accepts every gradient body, every festival body and every object body", () => {
+    expect(BOT_BODY_IDS).toEqual([...MASCOT_BODY_IDS, ...CARVED_BODY_IDS, ...OBJECT_BODY_IDS]);
+    expect(new Set(BOT_BODY_IDS).size).toBe(BOT_BODY_IDS.length);
     for (const id of BOT_BODY_IDS) expect(botBodySchema.safeParse(id).success).toBe(true);
   });
 
@@ -24,6 +26,9 @@ describe("bot bodies", () => {
     expect(isCarvedBody("jalebi")).toBe(true);
     expect(isCarvedBody("cursor")).toBe(false);
     expect(isCarvedBody(null)).toBe(false);
+    expect(isCarvedBody("obj-ghost")).toBe(false);
+    expect(isObjectBody("obj-ghost")).toBe(true);
+    expect(isObjectBody("ghost")).toBe(false);
   });
 
   it("splits the festival bodies between the festivals, one pack each", () => {
