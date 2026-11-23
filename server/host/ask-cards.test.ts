@@ -4,7 +4,7 @@ import type { HandoffView } from "../coordinator.ts";
 import type { Notification } from "../notify.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { BotRecord, Message } from "../store.ts";
-import { askToolName, createAskCards, withoutTypedNote, type AskCardsDeps } from "./ask-cards.ts";
+import { askToolName, closeCard, createAskCards, type AskCardsDeps } from "./ask-cards.ts";
 
 const AUTH = { kind: "session", scopes: ["client"], session: { id: "s", email: "cleo@acme.test" } } as unknown as RequestAuth;
 const QUESTION = "What wording should the new footer text use?";
@@ -44,10 +44,11 @@ function world(options: { inboxThread?: string; live?: string[]; privateThreads?
   const nodes = new Map<string, HandoffView>();
   const answered: Array<{ id: string; text: string }> = [];
   const notified: Notification[] = [];
-  const answers: Array<{ threadId: string; requestId: string; message?: string; engineMessage?: string; behavior?: "close" }> = [];
+  const answers: Array<{ threadId: string; requestId: string; message?: string; behavior?: "close" }> = [];
   const live = new Set(options.live ?? []);
   const written: unknown[] = [];
   let refuse: { status: number; error: string } | null = null;
+  let afterAnswer: (() => void) | null = null;
   const deps: AskCardsDeps = {
     store: store as unknown as AskCardsDeps["store"],
     node: (id) => nodes.get(id),
@@ -59,8 +60,9 @@ function world(options: { inboxThread?: string; live?: string[]; privateThreads?
     answerCard: vi.fn(async (input) => {
       if (refuse) return { ok: false as const, ...refuse };
       answers.push({ threadId: input.threadId, requestId: input.requestId, ...(input.behavior === "close" ? { behavior: "close" as const }
-        : { message: input.message, ...(input.engineMessage ? { engineMessage: input.engineMessage } : {}) }) });
+        : { message: input.message }) });
       live.delete(input.requestId);
+      afterAnswer?.();
       return { ok: true as const };
     }),
     answeredIn: (threadId, requestId) => (threadId === "inbox" && requestId.startsWith("req") ? "work" : threadId),
@@ -84,7 +86,7 @@ function world(options: { inboxThread?: string; live?: string[]; privateThreads?
   nodes.set("root", { id: "root", rootId: "root", threadId: "inbox", botId: "scout" } as HandoffView);
   const say = (threadId: string, text: string) => store.appendMessage(threadId, { role: "bot", kind: "text", text });
   return { cards, store, rows, notified, answers, answered, node, say, deps, written, open: (requestId: string) => live.add(requestId),
-    refuse: (value: typeof refuse) => { refuse = value; } };
+    refuse: (value: typeof refuse) => { refuse = value; }, afterAnswer: (value: typeof afterAnswer) => { afterAnswer = value; } };
 }
 
 describe("a teammate's NEEDS INPUT question", () => {
@@ -353,29 +355,19 @@ describe("a typed line answers a question card", () => {
     expect(fixed.answers).toEqual([]);
   });
 
-  const NOTE = "[The person typed this in the chat instead of picking an option. Reply to it, and ask again if you still need an answer.]";
-
-  it("answers the card its turn waits on in the bot's own chat, telling only the engine the words were typed, not picked", async () => {
+  it("answers the card its turn waits on in the bot's own chat with exactly the person's words", async () => {
     const w = world({ live: ["req-1"] });
     const asked = question(w, "chat");
     const result = await w.cards.typed(AUTH, "chat", "What time is it?", undefined, { sendId: "send-3" });
-    expect(w.answers).toEqual([{ threadId: "chat", requestId: "req-1", message: "What time is it?", engineMessage: `${NOTE} What time is it?` }]);
+    expect(w.answers).toEqual([{ threadId: "chat", requestId: "req-1", message: "What time is it?" }]);
     expect(result).toMatchObject({ status: 202, message: { role: "user", text: "What time is it?", replyToId: asked.id, sendId: "send-3" } });
-    expect(JSON.stringify(w.written), "nothing the conversation writes carries the note").not.toContain("The person typed this");
-    expect(JSON.stringify(w.rows("chat"))).not.toContain("The person typed this");
   });
 
-  it("files the note under a structured question's text for the engine, and the plain words for the card", async () => {
+  it("files a structured question's answer under its text, as an answer typed on the card would be", async () => {
     const w = world({ live: ["req-1"] });
     question(w, "chat", { questionRequest: { version: 1, questions: [{ question: "Should I?", options: [{ label: "Yes" }, { label: "No" }] }] } });
     await w.cards.typed(AUTH, "chat", "Not yet", undefined, {});
-    expect(w.answers).toEqual([{ threadId: "chat", requestId: "req-1", message: "The user answered your questions.\n\nQ: Should I?\nA: Not yet",
-      engineMessage: `The user answered your questions.\n\nQ: Should I?\nA: ${NOTE} Not yet` }]);
-  });
-
-  it("keeps the note out of a tool's output that repeats the answer back", () => {
-    expect(withoutTypedNote(`The user answered your questions.\n\nQ: Should I?\nA: ${NOTE} Not yet`)).toBe("The user answered your questions.\n\nQ: Should I?\nA: Not yet");
-    expect(withoutTypedNote("ok")).toBe("ok");
+    expect(w.answers).toEqual([{ threadId: "chat", requestId: "req-1", message: "The user answered your questions.\n\nQ: Should I?\nA: Not yet" }]);
   });
 
   it("closes a card that takes no words in the bot's own chat and leaves the line to be sent as the next message", async () => {
@@ -419,6 +411,29 @@ describe("a typed line answers a question card", () => {
     const [one, two] = await Promise.all([1, 2].map(() => w.cards.typed(AUTH, "chat", "What time is it?", undefined, { sendId: "send-5" })));
     expect(two?.message?.id).toBe(one?.message?.id);
     expect(w.answers).toHaveLength(1);
+  });
+
+  it("closes one card when the same send arrives twice at once and a new card opens before its line is written", async () => {
+    const w = world({ live: ["req-1"] });
+    question(w, "chat", { fixedOptions: true });
+    w.afterAnswer(() => {
+      w.afterAnswer(null);
+      question(w, "chat", { requestId: "req-2", fixedOptions: true });
+      w.open("req-2");
+    });
+    const tries = await Promise.all([1, 2].map(() => w.cards.typed(AUTH, "chat", "Something else first", undefined, { sendId: "send-6" })));
+    expect(tries).toEqual([null, null]);
+    expect(w.answers.map((answer) => answer.requestId)).toEqual(["req-1"]);
+  });
+
+  it("lets a send whose close was refused try again", async () => {
+    const w = world({ live: ["req-1"] });
+    question(w, "chat", { fixedOptions: true });
+    w.refuse({ status: 409, error: "The request is no longer open." });
+    expect(await w.cards.typed(AUTH, "chat", "Something else first", undefined, { sendId: "send-7" })).toBeNull();
+    w.refuse(null);
+    expect(await w.cards.typed(AUTH, "chat", "Something else first", undefined, { sendId: "send-7" })).toBeNull();
+    expect(w.answers).toEqual([{ threadId: "chat", requestId: "req-1", behavior: "close" }]);
   });
 
   it("leaves a line in the bot's own chat to the usual send while two question cards wait there", async () => {
@@ -546,6 +561,44 @@ describe("the chip in the conversation that handed the work on", () => {
     desk.cards.showWaitingOnCardChip("inbox", { kind: "password", messageId: "c1", label: "API key" }, asker);
     desk.cards.showWaitingOnCardChip("work", { kind: "question", messageId: "c2", label: "Which?" }, asker);
     expect(desk.rows("inbox")).toEqual([]);
+  });
+});
+
+describe("closing a card the person moved past", () => {
+  const setup = () => {
+    const card = { id: "m1", at: 1, role: "bot", kind: "options", card: { requestId: "req-1", requestType: "question", options: [], fixedOptions: true } } as unknown as Message;
+    const patches: Array<Partial<Message>> = [];
+    const live = new Map([["chat:req-1", "m1"]]);
+    const store = { patchMessage: (_threadId: string, _id: string, patch: Partial<Message>) => { patches.push(patch); return { ...card, ...patch }; } };
+    return { card, patches, live, close: (decline: () => Promise<"rejected" | "unavailable">) =>
+      closeCard({ threadId: "chat", requestId: "req-1", card, live, store: store as never, decline }) };
+  };
+
+  it("reads closed without an answer once the engine took the decline, and is no longer live while it was on its way", async () => {
+    const w = setup();
+    let liveWhileDeclining = true;
+    expect(await w.close(async () => { liveWhileDeclining = w.live.has("chat:req-1"); return "rejected"; })).toBe("rejected");
+    expect(liveWhileDeclining, "the engine settling the request leaves the card to this close").toBe(false);
+    expect(w.patches).toEqual([{ card: { ...w.card.card, answered: "unavailable", dismissed: true } }]);
+    expect(w.live.has("chat:req-1")).toBe(false);
+  });
+
+  it("stays open and live for a tap when the engine did not take the decline, or delivering it failed", async () => {
+    for (const decline of [async () => "unavailable" as const, async (): Promise<"rejected"> => { throw new Error("broker gone"); }]) {
+      const w = setup();
+      expect(await w.close(decline)).toBe("unavailable");
+      expect(w.patches).toEqual([]);
+      expect(w.live.get("chat:req-1")).toBe("m1");
+    }
+  });
+
+  it("delivers nothing for a card no turn waits on", async () => {
+    const w = setup();
+    w.live.clear();
+    const decline = vi.fn(async () => "rejected" as const);
+    expect(await w.close(decline)).toBe("unavailable");
+    expect(decline).not.toHaveBeenCalled();
+    expect(w.patches).toEqual([]);
   });
 });
 
