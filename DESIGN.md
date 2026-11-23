@@ -286,7 +286,8 @@ Motion explains a change. It never decorates.
   while the room it takes grows or shrinks, so the chat glides and nothing in
   the panel rewraps. Words leaving a control fade, drift a few pixels and soften
   rather than being cut off; they never wrap mid-way.
-- **300ms ceiling.** Only first-run onboarding may run longer.
+- **300ms ceiling.** Only first-run onboarding and a streaming reply's blocks
+  fading in (600ms, `ease-out`, once per block) may run longer.
 - **Nothing scales in from zero.** Things grow from about 96% and fade.
 - **Hover and press transitions are 120ms** on colour and opacity only. Don't
   animate layout. One exception: buttons (`.ui-button`, `.ui-icon-button`)
