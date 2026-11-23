@@ -25,7 +25,6 @@ import { commandSummary, toolDetailPreview } from "../tool-summary.ts";
 
 import type {
   DriverCreateInput,
-  EffortLevel,
   ModelCatalog,
   ProviderDriver,
   ProviderInstance,
@@ -35,7 +34,8 @@ import type {
   SendTurnInput,
   SteerOutcome,
 } from "../contracts.ts";
-import { EFFORT_LEVELS } from "../../shared/wire.ts";
+import { PI_EFFORT_LEVELS } from "./pi-effort.ts";
+export { piThinkingLevel } from "./pi-effort.ts";
 import { newEventId, newId } from "../contracts.ts";
 import { ASK_USER_TOOL, MAX_QUESTION_TEXT, parseAskQuestions, parseChoices, questionAnswersByQuestion } from "../../shared/ask-question.ts";
 import {
@@ -72,12 +72,6 @@ const PI_SESSION_SLOW_MS = 20_000;
 /** pi answered success:false: an explicit refusal from a live runtime, not a transport failure. */
 class PiRpcRefusalError extends Error {}
 
-/** pi rejects an unsupported level and the turn keeps the engine default; it tops out at "max". */
-const PI_EFFORT_LEVELS: readonly EffortLevel[] = ["none", "low", "medium", "high", "xhigh", "max"];
-
-export function piThinkingLevel(effort: EffortLevel): (typeof EFFORT_LEVELS)[number] | "off" {
-  return effort === "none" ? "off" : effort;
-}
 
 interface PiModelEntry {
   provider: string;
@@ -974,7 +968,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           images: true,
           nativeImageInput: true,
           // pi rejects an unsupported level and the turn keeps the engine default.
-          // pi has no "ultra" thinking level: keep the shared union out of the menu (issue #7159).
+          // pi has no "ultra" thinking level: keep the shared union out of the menu.
           effortLevels: PI_EFFORT_LEVELS,
           queueing: true, askTool: { kind: "native", name: "ask_user" },
         },

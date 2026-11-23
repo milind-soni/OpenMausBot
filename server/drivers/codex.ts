@@ -42,7 +42,7 @@ import type {
   TextGenerationOptions,
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
-import { EFFORT_LEVELS, type EffortLevel } from "../../shared/wire.ts";
+import { codexEffortTracker } from "./codex-effort.ts";
 import { codexSelectedProviderArgs, codexThreadSelection, decodeCodexSelection, OFFICIAL_CODEX_PROVIDER, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 import { codexBackgroundProviderArgs, codexBackgroundRoute, runCodexBackgroundRoute, runCodexOneShot } from "./codex-background-text.ts";
 import { augmentedPath } from "../env-path.ts";
@@ -250,22 +250,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     let disposed = false;
     let planWarning: string | undefined;
     let models = plan ? { default: "", options: [] } : routed ? { default: routed.models[0], options: routed.models.map(id => ({ id, label: id, ...(config.endpoint ? { custom: true } : {}) })) } : STATIC_CODEX_MODELS;
-    /** Fallback when `model/list` does not say: codex-cli ≥0.171.0 accepts "ultra" on many models (issue #7159). */
-    const codexEffortLevels: EffortLevel[] = ["low", "medium", "high", "xhigh", "max", "ultra"];
-    // The CLI's own per-model `supportedReasoningEfforts` wins when it announces them; the union becomes the menu.
-    const syncEffortCapability = (catalog: { options: ReadonlyArray<{ efforts?: readonly EffortLevel[] }> }) => {
-      const union = new Set<EffortLevel>();
-      for (const option of catalog.options) for (const level of option.efforts ?? []) union.add(level);
-      if (!union.size) return;
-      codexEffortLevels.length = 0;
-      codexEffortLevels.push(...EFFORT_LEVELS.filter((level) => union.has(level)));
-    };
-    /** Models that stop below the chosen effort (gpt-6-luna tops out at "max") keep the CLI's own top level. */
-    const supportedEffort = (model: string | null | undefined, effort: EffortLevel): EffortLevel => {
-      const base = model ? codexTierOf(model)?.model ?? model : model;
-      const efforts = base ? models.options.find((option) => option.id === base)?.efforts : undefined;
-      return efforts && !efforts.includes(effort) ? efforts[efforts.length - 1]! : effort;
-    };
+    const { codexEffortLevels, syncEffortCapability, supportedEffort } = codexEffortTracker(() => models);
     const refreshModels = async (preserveExisting = false) => {
       if (routed) return;
       if (planAuth) {
