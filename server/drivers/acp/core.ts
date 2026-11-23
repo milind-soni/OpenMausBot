@@ -25,10 +25,7 @@ import { applyOneShotEnv, runAcpOneShot } from "./background-text.ts"; import ty
 import { acpCapabilities } from "./capabilities.ts"; import { readAcpMediaLinks } from "./media-links.ts";
 import { acpNativeLogMessage } from "./tool-log.ts";
 import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
-import {
-  classifyQuiet, describeQuiet, formatQuietLimit, quietNoticeText, lastSeenPhrase, LIMIT_WORDS, LogTail, promptIdleTimeoutMs, quietKey, quietNoticeMs, quietTickMs, quietVerdict, sampleProcessTree,
-  type LogSignal, type ProcessSample, type QuietState,
-} from "./quiet-status.ts";
+import { formatQuietLimit, lastSeenPhrase, LIMIT_WORDS, promptIdleTimeoutMs, type LogSignal } from "./quiet-status.ts"; import { startAcpQuietWatch } from "./quiet-watch.ts";
 import { acpMissingSession } from "./rpc-error.ts";
 import { readSessionReport } from "./session-reports.ts";
 import { promptTokenUsage } from "./prompt-usage.ts";
@@ -481,79 +478,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         createdAt: new Date().toISOString(),
       });
 
-      const startQuietWatch = (threadId: string, session: AcpSession, current: AcpTurn) => {
-        const noticeAfterMs = quietNoticeMs();
-        const tickMs = quietTickMs();
-        const { sessionId } = session;
-        const logPath = support.statusLog && sessionId ? support.statusLog.path(session.env, sessionId) : null;
-        const tail = logPath ? new LogTail(logPath) : null;
-        tail?.read();
-        let logged: { signal: LogSignal; at: number } | null = null;
-        let context: { tokens: number; threshold: number } | null = null;
-        let previous: ProcessSample | null = null;
-        let previousAt = 0;
-        let shownKey: string | null = null;
-        let noSignsSince: number | null = null;
-        let notices = 0;
-        let probing = false;
-        let state: QuietState | null = null;
-        const promptStartedAt = Date.now();
-        let readAt = promptStartedAt;
-        const tick = async () => {
-          if (probing || current.state.settled || session.current !== current) return;
-          const now = Date.now();
-          for (const line of tail?.read() ?? []) {
-            if (!support.statusLog!.shared) session.acp.touch();
-            const signal = support.statusLog!.parse(line, sessionId!);
-            if (signal?.kind === "context") context = { tokens: signal.tokens, threshold: signal.threshold };
-            // A shared row was written some time after the last read; date it then, so a reply since clears it.
-            else if (signal) logged = { signal, at: support.statusLog!.shared ? readAt : now };
-          }
-          readAt = now;
-          const quietMs = now - Math.max(promptStartedAt, session.acp.lastInboundAt);
-          if (quietMs < noticeAfterMs || current.asks.size || current.runningTools.size) {
-            if (quietMs < noticeAfterMs && (!support.statusLog?.shared || session.acp.lastInboundAt > (logged?.at ?? 0))) logged = null;
-            previous = null;
-            shownKey = null;
-            noSignsSince = null;
-            state = null;
-            return;
-          }
-          // Qwen's SDK retries on its own for about a minute before the next logged attempt.
-          if (logged?.signal.kind === "retry"
-              && now - logged.at > (logged.signal.delayMs ?? 60_000) + 120_000) logged = null;
-          probing = true;
-          const sample = session.child.pid ? await sampleProcessTree(session.child.pid) : { cpuMs: null, connections: null };
-          probing = false;
-          if (current.state.settled || session.current !== current) return;
-          let next = classifyQuiet({
-            logged: logged?.signal ?? null, context, sample, previous, sinceMs: previous ? now - previousAt : 0,
-          });
-          const first = previous === null;
-          previous = sample;
-          previousAt = now;
-          if (first && next.kind === "unknown") return;
-          // An SDK sleeping between retries holds no socket and burns no CPU (Qwen against a 429ing endpoint); waiting out a
-          // usage limit, or no sign of life for minutes, ends the turn now rather than after the full silence guard.
-          const verdict = quietVerdict({ next, logged, noSignsSince, now, quietMs, name: support.displayName, stuckAfterMs: ACP_STUCK_AFTER_MS });
-          next = verdict.next; noSignsSince = verdict.noSignsSince;
-          if (verdict.stop) return void session.acp.failAll(verdict.stop);
-          state = next;
-          const key = quietKey(next);
-          if (key === shownKey || notices >= 12) return;
-          shownKey = key;
-          notices += 1;
-          emit({
-            ...base(threadId, current.turnId),
-            type: "runtime.notice",
-            message: describeQuiet(support.displayName, next, quietMs, promptIdleTimeoutMs()), text: quietNoticeText(support.displayName, next, quietMs),
-          });
-        };
-        const timer = setInterval(() => { void tick(); }, tickMs);
-        timer.unref?.();
-        current.stopQuietWatch = () => clearInterval(timer);
-        return { lastState: () => state };
-      };
+      const startQuietWatch = (threadId: string, session: AcpSession, current: AcpTurn) => startAcpQuietWatch({ support, session, current, stuckAfterMs: ACP_STUCK_AFTER_MS,
+        notice: (message, text) => emit({ ...base(threadId, current.turnId), type: "runtime.notice", message, text }) });
 
       const settle = (threadId: string, session: AcpSession, ok: boolean, stopReason: string | null) => {
         const current = session.current;
