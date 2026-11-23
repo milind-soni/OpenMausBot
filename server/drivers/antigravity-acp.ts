@@ -34,6 +34,7 @@ import { delimiter, isAbsolute, join, resolve } from "node:path";
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
 import { writeFileAtomic } from "../atomic.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
+import { BOX_SSH_CONNECTION } from "../bot-box/env.ts";
 import type { BoxRelay } from "../bot-box/relay.ts";
 import type { ModelCatalog } from "../contracts.ts";
 import type { ChildProcess } from "node:child_process";
@@ -189,7 +190,7 @@ export function authorizationUrlFromLine(line: string): string | null {
   }
 }
 
-export const ANTIGRAVITY_SSH_CONNECTION = "127.0.0.1 0 127.0.0.1 0";
+export const ANTIGRAVITY_SSH_CONNECTION = BOX_SSH_CONNECTION;
 
 export function antigravityProfileDirectory(instanceId: string, baseDir = DATA_DIR): string {
   return join(baseDir, "providers", "antigravity", createHash("sha256").update(instanceId).digest("hex"));

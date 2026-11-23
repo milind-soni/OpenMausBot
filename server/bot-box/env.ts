@@ -16,6 +16,9 @@ export const BOX_ENV_NAMES: ReadonlySet<string> = new Set([
   "SSH_CONNECTION",
 ]);
 
+/** The one SSH_CONNECTION value a box may see (server/drivers/antigravity-acp.ts starts the native CLI with it). */
+export const BOX_SSH_CONNECTION = "127.0.0.1 0 127.0.0.1 0";
+
 /** OpenMausBot's own variables a boxed process reads: what the harness sets for a bot's engine, its hooks and the MCP
  * proxies it starts. Security: no other `OMB_` name passes, whatever the operator set on the server (an SMTP URL, a
  * token); env.test.ts lists every `OMB_` name the server knows, so a new one needs a decision. */
@@ -77,6 +80,8 @@ export function boxEnvironment(
   const kept: Record<string, string> = {};
   for (const [name, value] of Object.entries(env)) {
     if (value === undefined || !boxEnvironmentAllows(name, deny, allow)) continue;
+    // Security: only the fixed value an engine is started with passes, never the server's own SSH session (its addresses).
+    if (name === "SSH_CONNECTION" && value !== BOX_SSH_CONNECTION) continue;
     kept[name] = value;
   }
   return kept;

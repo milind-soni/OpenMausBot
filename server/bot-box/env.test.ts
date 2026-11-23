@@ -118,6 +118,8 @@ describe("the box's environment allow-list", () => {
   it("keeps what Antigravity's native CLI is started with: no self-update, and the SSH_CONNECTION that keeps its sign-in in the profile", () => {
     for (const name of ["AGY_CLI_DISABLE_AUTO_UPDATE", "SSH_CONNECTION"]) expect(boxEnvironmentAllows(name), name).toBe(true);
     expect(boxEnvironment({ SSH_CONNECTION: "127.0.0.1 0 127.0.0.1 0", AGY_CLI_DISABLE_AUTO_UPDATE: "1" })).toEqual({ SSH_CONNECTION: "127.0.0.1 0 127.0.0.1 0", AGY_CLI_DISABLE_AUTO_UPDATE: "1" });
+    // A server started over SSH: its own session's addresses never reach a box.
+    expect(boxEnvironment({ SSH_CONNECTION: "203.0.113.7 51234 10.0.0.5 22", PATH: "/usr/bin" })).toEqual({ PATH: "/usr/bin" });
   });
 
   it("keeps the keys one spawn vouches for, under any name, past the allow-list and the deny, never past the never-list or OMB_", () => {
