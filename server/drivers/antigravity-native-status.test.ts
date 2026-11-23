@@ -8,6 +8,7 @@ import { loginAt, nativeFixture, type NativeFixture } from "../testing/antigravi
 import { prepareAntigravityProfile, type AntigravityProfile } from "./antigravity-acp.ts";
 import { NativeSignInCache, antigravityCliRefusedSession, antigravityCliSignIn, antigravityNativeTokenPath, signOutAntigravityCli } from "./antigravity-native-status.ts";
 import type { AntigravityRuntime } from "./antigravity-runtime.ts";
+import { acpRpcError } from "./acp/rpc-error.ts";
 
 const WINDOWS = process.platform === "win32";
 const scratch: string[] = [];
@@ -175,7 +176,9 @@ describe("the native CLI's refusal of a session for want of a sign-in", () => {
     expect(antigravityCliRefusedSession({ code: -32000, message: "Authentication required" })).toBe(true);
     expect(antigravityCliRefusedSession({ code: -32000, message: "Sign-in required" })).toBe(true);
     expect(antigravityCliRefusedSession({ code: -32000, message: "Authentication required." })).toBe(true);
-    expect(antigravityCliRefusedSession({ code: -32000, message: "Authentication required (session/new)" })).toBe(true);
+    expect(antigravityCliRefusedSession(acpRpcError({ code: -32000, message: "Authentication required" }, "session/new"))).toBe(true);
+    expect(antigravityCliRefusedSession(acpRpcError({ code: -32000, message: "Authentication required check failed" }, "session/new"))).toBe(false);
+    expect(antigravityCliRefusedSession({ code: -32000, message: "Authentication required check failed" })).toBe(false);
     expect(antigravityCliRefusedSession({ code: -32000, message: "Google Gemini (Antigravity) background Authentication required" })).toBe(true);
     expect(antigravityCliRefusedSession({ code: -32000, message: "Authentication service unavailable" })).toBe(false);
     expect(antigravityCliRefusedSession({ code: -32000, message: "Unable to determine whether authentication is required" })).toBe(false);

@@ -13,6 +13,7 @@ import {
   type AntigravityProfile,
 } from "./antigravity-acp.ts";
 import type { AntigravityRuntime } from "./antigravity-runtime.ts";
+import { acpVendorMessage } from "./acp/rpc-error.ts";
 
 export type NativeSignIn = "in" | "out";
 
@@ -35,7 +36,8 @@ export const SIGN_IN_CACHE_MS = 30_000;
  * required`). Another `-32000`, such as a sign-in service that is down, says nothing about the sign-in. */
 export function antigravityCliRefusedSession(error: unknown): boolean {
   const value = error as { code?: unknown; message?: unknown } | null;
-  return value?.code === -32000 && typeof value.message === "string" && /^\s*(?:.*?\bbackground\s+)?(?:authentication|sign[- ]?in|log[- ]?in) (?:is )?required\b/iu.test(value.message);
+  const message = acpVendorMessage(error) ?? value?.message;
+  return value?.code === -32000 && typeof message === "string" && /^\s*(?:.*?\bbackground\s+)?(?:authentication|sign[- ]?in|log[- ]?in) (?:is )?required[.!]?\s*$/iu.test(message);
 }
 
 const advertised = (value: unknown) => value === true || (typeof value === "object" && value !== null && !Array.isArray(value));
