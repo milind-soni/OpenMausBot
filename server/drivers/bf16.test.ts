@@ -1,4 +1,7 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server, type ServerResponse } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderInstance } from "../contracts.ts";
 import { recordEvents } from "../testing/events.ts";
@@ -99,6 +102,7 @@ describe("bf16.ai provider", () => {
     models = {
       data: [
         { id: "deepseek/deepseek-v4.1-flash-uncensored", name: "DeepSeek V4.1 Flash (Uncensored)", context_window: 1048576, supports_tools: true, supports_vision: true },
+        { id: "zai-org/glm-5.3-uncensored", name: "GLM-5.3 Flagship (Uncensored)", context_window: 1048576, supports_tools: true, supports_vision: false },
         { id: "bf16/auto", bf16: { family: "router" } },
         { id: "deprecated/model", supports_tools: true, bf16: { status: "deprecated" } },
         { id: "no-tools/model", supports_tools: false },
@@ -106,8 +110,43 @@ describe("bf16.ai provider", () => {
     };
     const instance = await create({ url: base });
     await instance.refreshModels?.();
-    expect(instance.models.options.map(o => o.id)).toEqual(["deepseek/deepseek-v4.1-flash-uncensored", "bf16/auto"]);
+    expect(instance.models.options.map(o => o.id)).toEqual([
+      "deepseek/deepseek-v4.1-flash-uncensored",
+      "zai-org/glm-5.3-uncensored",
+      "bf16/auto",
+    ]);
     expect(instance.models.default).toBe("deepseek/deepseek-v4.1-flash-uncensored");
+
+    const pixelPng = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jBv0AAAAASUVORK5CYII=",
+      "base64",
+    );
+    const dir = mkdtempSync(join(tmpdir(), "bf16-vision-"));
+    const imagePath = join(dir, "pixel.png");
+    writeFileSync(imagePath, pixelPng);
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({
+        threadId: "vision-auto", model: "bf16/auto", text: "Inspect",
+        images: [{ path: imagePath, mime: "image/png", bytes: pixelPng.length }],
+      });
+      expect(await recorder.until(e => e.type === "turn.completed")).toMatchObject({ ok: true });
+      const autoReq = requests.find(r => r.body?.model === "bf16/auto");
+      const autoUser = autoReq?.body?.messages.find(m => m.role === "user");
+      expect(Array.isArray(autoUser?.content)).toBe(true);
+
+      await instance.adapter.sendTurn({
+        threadId: "vision-text-only", model: "zai-org/glm-5.3-uncensored", text: "Inspect",
+        images: [{ path: imagePath, mime: "image/png", bytes: pixelPng.length }],
+      });
+      expect(await recorder.until(e => e.type === "turn.completed" && e.threadId === "vision-text-only")).toMatchObject({ ok: true });
+      const textOnlyReq = requests.find(r => r.body?.model === "zai-org/glm-5.3-uncensored");
+      const textOnlyUser = textOnlyReq?.body?.messages.find(m => m.role === "user");
+      expect(typeof textOnlyUser?.content).toBe("string");
+    } finally {
+      recorder.stop();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("streams a chat completion turn with Bearer authorization", async () => {

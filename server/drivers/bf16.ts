@@ -114,7 +114,14 @@ export const Bf16Driver: ProviderDriver<Bf16Config> = {
           const model = parsed.data;
           const contextWindow = model.context_window ?? model.context_length;
           options.push({ id: model.id, label: modelLabel(model), ...(contextWindow ? { contextWindow } : {}) });
-          if (model.supports_vision || model.bf16?.supports_vision || model.input_modalities?.includes("image")) {
+          const hasVisionField =
+            model.supports_vision !== undefined ||
+            model.bf16?.supports_vision !== undefined ||
+            model.input_modalities !== undefined;
+          const supportsVision = hasVisionField
+            ? Boolean(model.supports_vision || model.bf16?.supports_vision || model.input_modalities?.includes("image"))
+            : DEFAULT_IMAGE_MODELS.includes(model.id);
+          if (supportsVision) {
             images.add(model.id);
           }
         }
