@@ -68,7 +68,8 @@ const TRIGGER_FIELDS_SCHEMA = {
     type: "string",
     minLength: 1,
     maxLength: 20_000,
-    description: "Complete steps for each run, which does NOT see this conversation, in the person's plain words (\"draft a reply\"), never \"event data\", \"payload\", \"webhook\" or \"trigger\". Put judgement here, e.g. \"if it is not about an order, stop\".",
+    description:
+      "Complete steps for each run, which does NOT see this conversation, in the person's plain words (\"draft a reply\"), never \"event data\", \"payload\", \"webhook\" or \"trigger\". Put judgement here, e.g. \"if it is not about an order, stop\". At most 20000 characters.",
   },
   schedule: { ...ROUTINE_SCHEDULE_SCHEMA, description: `when=schedule: ${ROUTINE_SCHEDULE_SCHEMA.description}` },
   webhook_event_types: {
@@ -177,14 +178,14 @@ const TOOL_DEFINITIONS = [
     inputSchema: { type: "object", additionalProperties: false, properties: {
       group_id: { type: "string", description: "Another room, from list_room_targets." },
       bot_ids: { type: "array", items: { type: "string", description: "A teammate's name, preferred, or its id from list_bots; an id's first 8 characters or more work too." }, minItems: 1, maxItems: 4, uniqueItems: true },
-      message: { type: "string", minLength: 1, maxLength: MESSAGE_MAX, description: "The question or task; separate calls for different responsibilities." },
-      reason: { type: "string", maxLength: 200, description: "Optional one line for the person on why (shown as a chip)." },
+      message: { type: "string", minLength: 1, maxLength: MESSAGE_MAX, description: `The question or task; separate calls for different responsibilities. At most ${MESSAGE_MAX} characters.` },
+      reason: { type: "string", maxLength: 200, description: "Optional one line for the person on why (shown as a chip). At most 200 characters." },
       rework: { type: "boolean", description: "True only to resend finished or failed work: a fix, a re-check or a retry." },
       thread: { type: "string", description: "standing (default), new (its own history and run), or a threadId from your receipts or list_threads." },
       title: { type: "string", maxLength: 80, description: "With thread \"new\": its short sidebar name." }, in_my_folder: { type: "boolean", description: "Default true." },
       reply: { type: "string", enum: ["resume", "none"], description: "none: a one-way notice; nothing comes back." },
       consult: { type: "boolean", description: "True for a question answered from what they know, acting on nothing." },
-      done_when: { type: "string", maxLength: 1000, description: "What must be true to count as done; the teammate is held to it." },
+      done_when: { type: "string", maxLength: 1000, description: "What must be true to count as done; the teammate is held to it. At most 1000 characters." },
       answers: { type: "string", description: "Only to answer a teammate's question: the assignment id its note names; message is the answer." },
       files: { type: "array", items: { type: "string" }, maxItems: 5, description: "Paths as for attach_file, 100 MB together: copied into each teammate's inbox. Files a teammate attaches with attach_file come back with its result." },
     }, required: ["bot_ids", "message"] },
@@ -531,7 +532,7 @@ const TOOL_DEFINITIONS = [
       additionalProperties: false,
       properties: {
         action: { type: "string", enum: ["append", "replace", "remove", "supersede", "forget", "prefer"] },
-        text: { type: "string", minLength: 1, maxLength: 1000, description: "Non-blank new text for append, replace, supersede, or prefer: the fact itself, without a date or bullet. Omit for remove and forget; use remove to delete a passage." },
+        text: { type: "string", minLength: 1, maxLength: 1000, description: "Non-blank new text for append, replace, supersede, or prefer: the fact itself, without a date or bullet. Omit for remove and forget; use remove to delete a passage. At most 1000 characters." },
         old_text: { type: "string", minLength: 1, description: "Exact unique existing passage for replace, supersede, or remove; for forget, words naming it. Omit for append." },
         until: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$", description: "Optional, for append or supersede: YYYY-MM-DD, the last day a temporary fact holds (an exam this weekend, a trip next week). After that day the entry is hidden from your memory." },
         scope: { type: "string", enum: ["thread", "everywhere"] },
@@ -713,7 +714,7 @@ const TOOL_DEFINITIONS = [
       properties: {
         kind: { type: "string", enum: ["person", "place", "decision", "term"], description: "What kind of entry this is." },
         name: { type: "string", maxLength: 120, description: "Short title or name." },
-        detail: { type: "string", maxLength: 600, description: "The fact, decision or result, with its context and brief rationale." },
+        detail: { type: "string", maxLength: 600, description: "The fact, decision or result, with its context and brief rationale. At most 600 characters." },
         aliases: { type: "array", maxItems: 8, items: { type: "string", maxLength: 120 }, description: "Other names or abbreviations." },
         key: { type: "string", maxLength: 240, description: "Stable project/fact key (tapa/colour). Reuse for corrections, even if the name changes." },
       },

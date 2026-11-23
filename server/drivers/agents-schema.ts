@@ -7,8 +7,7 @@ import type { Json } from "./agents-client.ts";
  * free-form object keeps `additionalProperties: true`: Moonshot reads a bare `{"type":"object"}` as endless recursion. */
 export const ENFORCED_KEYWORDS = ["minLength", "maxLength", "minimum", "maximum", "minItems", "maxItems", "uniqueItems", "pattern"] as const;
 
-/** A cap at least this generous is left out: no sensible value comes near it, and a call past it is refused in words. */
-const GENEROUS_MAX_LENGTH = 200;
+/** A count of items at least this generous is left out: no sensible call comes near it, and a call past it is refused in words. */
 const GENEROUS_MAX_ITEMS = 32;
 const PROBLEMS_SHOWN = 4;
 
@@ -28,7 +27,7 @@ function leftOut(keyword: string, value: unknown, node: Json, words: string): bo
   if (stated(value, words)) return true;
   if (keyword === "minLength" || keyword === "minItems") return value <= 1;
   if (keyword === "minimum") return node.type === "integer" && value <= 1;
-  if (keyword === "maxLength") return value >= GENEROUS_MAX_LENGTH;
+  if (keyword === "maxLength") return stated(value, words);
   if (keyword === "maxItems") return value >= GENEROUS_MAX_ITEMS;
   return false;
 }

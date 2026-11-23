@@ -93,6 +93,31 @@ describe("the advertised agents tool schemas", () => {
     }
   });
 
+  it("state in the words every length bound the advertised schema leaves out", () => {
+    // A dropped maxLength the words never say is a bound the model must guess: exactly the repeated
+    // "was not run: … takes at most N characters" failures this catalog is built to avoid.
+    const stated = (value: number, words: string): boolean =>
+      [...new Set([String(value), value.toLocaleString("en-US")])].some((form) => words.includes(form));
+    const problems: string[] = [];
+    const walk = (tool: { name: string; description: string; inputSchema: Record<string, unknown> }, full: unknown, ad: unknown, where: string): void => {
+      if (typeof full !== "object" || full === null || typeof ad !== "object" || ad === null) return;
+      const f = full as Record<string, unknown>;
+      const a = ad as Record<string, unknown>;
+      if (typeof f.maxLength === "number" && f.maxLength >= 200 && !Object.hasOwn(a, "maxLength")
+        && !stated(f.maxLength, `${typeof f.description === "string" ? f.description : ""} ${tool.description}`)) {
+        problems.push(`${tool.name}${where}.maxLength ${f.maxLength} is neither advertised nor stated`);
+      }
+      if (typeof f.properties === "object" && f.properties !== null) {
+        for (const [name, child] of Object.entries(f.properties as Record<string, unknown>)) {
+          walk(tool, child, (typeof a.properties === "object" && a.properties !== null ? (a.properties as Record<string, unknown>)[name] : undefined), `${where}.properties.${name}`);
+        }
+      }
+      if (typeof f.items === "object" && f.items !== null) walk(tool, f.items, a.items, `${where}.items`);
+    };
+    for (const tool of LISTED) walk(tool, fullInputSchema(tool.name), tool.inputSchema, "");
+    expect(problems, problems.join("; ")).toEqual([]);
+  });
+
   it("keep a bound the model needs and drop one it reads from the words or never comes near", () => {
     const coordinate = LISTED.find((tool) => tool.name === "coordinate_bots")!.inputSchema.properties as Record<string, Json>;
     expect(coordinate.title).toMatchObject({ maxLength: 80 });
