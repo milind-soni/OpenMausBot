@@ -97,7 +97,10 @@ const usedShare = (volume: { total: number; free: number }) => (volume.total > 0
 export function createCacheSweeper(deps: CacheSweeperDeps) {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((line: string) => console.log(line));
-  const inUse = deps.inUse ?? ((roots: readonly string[]) => rootsInUse(roots, { unreadable: (pid) => once("unreadable", `cache sweep: process ${pid} of this user cannot be read, so no tool cache is removed while such a process runs (said once)`) }));
+  const inUse = deps.inUse ?? ((roots: readonly string[]) => rootsInUse(roots, {
+    unreadable: (pid) => once("unreadable", `cache sweep: process ${pid} of this user cannot be read, so no tool cache is removed while such a process runs (said once)`),
+    using: (pid, root) => once(`using:${root}`, `cache sweep: process ${pid} uses ${root}, so nothing there is removed while a process does (said once)`),
+  }));
   const supported = deps.supported ?? (() => anchoredSupported());
   const stateFile = join(deps.dataDir, CACHE_SWEEP_STATE);
   const on = () => cacheSweepOn(deps.env);

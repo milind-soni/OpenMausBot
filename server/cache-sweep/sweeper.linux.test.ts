@@ -1,12 +1,13 @@
 // The cache cap on real folders, where it can delete: Linux (a Cloud home, CI's Linux runner). Elsewhere it skips, as the
 // sweeper itself deletes nothing there. Every path, the "outside" ones too, lives under each test's own temporary folder.
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { CACHE_TAG, CACHE_TAG_FILE, toolCacheRoot } from "../bot-box/tool-caches.ts";
+import { rootsInUse } from "./in-use.ts";
 import { GIB } from "./limits.ts";
 import { createCacheSweeper, type CacheSweeperDeps } from "./sweeper.ts";
 import { Pacer, close } from "./tree.ts";
@@ -49,6 +50,7 @@ function put(path: string, kb: number, daysOld: number, stop: string): void {
 }
 
 const ON = { OMB_CLOUD_ROLE: "home", OMB_CACHE_SWEEP: "on" };
+const cmdline = (pid: number) => { try { return readFileSync(`/proc/${pid}/cmdline`, "utf8").replaceAll("\0", " ").slice(0, 200); } catch { return "?"; } };
 const ROOMY = async () => ({ total: 100 * GIB, free: 50 * GIB });
 
 function sweeper(f: ReturnType<typeof fixture>, overrides: Partial<CacheSweeperDeps> & { busy?: () => boolean } = {}) {
@@ -205,8 +207,10 @@ describe.skipIf(process.platform !== "linux")("the cache cap on real folders", (
     expect(existsSync(join(f.tools, "uv", "archive-v0", "env", "lib.py"))).toBe(true);
     child.kill("SIGKILL");
     await exited;
-    // A process of this user that cannot be read would hold it: the log line names it.
-    expect({ cleared: await made.clearCaches({ dryRun: false }), lines }).toMatchObject({ cleared: { entries: 1, busy: 0 } });
+    // A process of this user that cannot be read, or another one in the root, would hold it: the message names it.
+    const holders: string[] = [];
+    await rootsInUse([f.tools], { unreadable: (pid) => holders.push(`unreadable ${pid} ${cmdline(pid)}`), using: (pid) => holders.push(`using ${pid} ${cmdline(pid)}`) });
+    expect(await made.clearCaches({ dryRun: false }), [...holders, ...lines].join("\n")).toMatchObject({ entries: 1, busy: 0 });
     expect(existsSync(join(f.tools, "uv"))).toBe(false);
   });
 
