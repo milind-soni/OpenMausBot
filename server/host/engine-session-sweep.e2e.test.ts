@@ -9,7 +9,8 @@ import { createLoggedSessions, liveSessions, sweepEngineSessions } from "./engin
 
 const ENDED = "00000000-0000-4000-8000-00000000e7d0";
 
-it("a conversation whose ended engine sessions were pruned still resumes the session it is on", async () => {
+// Cloud homes, where this runs, are Linux.
+it.skipIf(process.platform === "win32")("a conversation whose ended engine sessions were pruned still resumes the session it is on", async () => {
   // The fake CLI keeps projects/<folder>/<session>.jsonl as Claude Code does and refuses --resume without it; each turn's
   // engine exits once it answers, so the next turn relaunches with --resume.
   const fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_HOME_FILES: "1", FAKE_CLAUDE_EXIT_AFTER_TURN: "1" });
@@ -70,7 +71,7 @@ it("a conversation whose ended engine sessions were pruned still resumes the ses
   }
 }, 120_000);
 
-it("a conversation whose session Claude Code's own 30-day sweep removed goes on from its chat, and says so", async () => {
+it.skipIf(process.platform === "win32")("a conversation whose session Claude Code's own 30-day sweep removed goes on from its chat, and says so", async () => {
   const fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_HOME_FILES: "1", FAKE_CLAUDE_EXIT_AFTER_TURN: "1" });
   try {
     const dataDir = fixture.info.dataDir;

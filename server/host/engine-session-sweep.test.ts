@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, lstatSync, lutimesSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { engineSessionFolders } from "./delete-leftovers.ts";
@@ -112,7 +112,7 @@ describe("the engine sessions' switch and inputs", () => {
   });
 
   it("finds the CLI's log folder through XDG_CACHE_HOME or HOME, never a relative one", () => {
-    expect(claudeCliCacheRoots([{ HOME: "/data" }, { HOME: "/data", XDG_CACHE_HOME: "/data/x" }, { HOME: "rel" }, {}])).toEqual(["/data/.cache/claude-cli-nodejs", "/data/x/claude-cli-nodejs"]);
+    expect(claudeCliCacheRoots([{ HOME: "/data" }, { HOME: "/data", XDG_CACHE_HOME: "/data/x" }, { HOME: "rel" }, {}])).toEqual([join(resolve("/data"), ".cache", "claude-cli-nodejs"), join(resolve("/data/x"), "claude-cli-nodejs")]);
   });
 
   it("reads the logs' session lines on from where it stopped, and again from the start after a rewrite", async () => {
@@ -220,6 +220,7 @@ describe("Claude Code's own transcript age", () => {
     expect(await pinClaudeRetention(claude, true)).toBe("skipped");
     expect(readFileSync(join(claude, "settings.json"), "utf8")).toBe("{ not json");
     rmSync(join(claude, "settings.json"));
+    if (process.platform === "win32") return;
     const elsewhere = put(join(root, "theirs.json"), "{}");
     symlinkSync(elsewhere, join(claude, "settings.json"));
     expect(await pinClaudeRetention(claude, true)).toBe("skipped");
@@ -228,7 +229,8 @@ describe("Claude Code's own transcript age", () => {
 });
 
 describe("what the engine sessions' sweep never reaches", () => {
-  it("follows no link: a linked project folder, a linked session, a linked engine folder", async () => {
+  // Windows makes a link only with a privilege CI's runners lack; Cloud homes, where this runs, are Linux.
+  it.skipIf(process.platform === "win32")("follows no link: a linked project folder, a linked session, a linked engine folder", async () => {
     seed();
     const outside = join(root, "outside");
     const target = put(join(outside, "project", `${ENDED}.jsonl`));
@@ -257,7 +259,7 @@ describe("what the engine sessions' sweep never reaches", () => {
     expect(existsSync(join(claude, "projects"))).toBe(true);
   });
 
-  it("an engine folder inside the data folder reached through a link is skipped", async () => {
+  it.skipIf(process.platform === "win32")("an engine folder inside the data folder reached through a link is skipped", async () => {
     seed();
     const real = join(root, "elsewhere");
     mkdirSync(join(dataDir, "providers", "codex-own", "h2"), { recursive: true });

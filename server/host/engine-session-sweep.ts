@@ -19,7 +19,8 @@
 // (drivers/claude.ts classifyResumeFailure, resume-recovery.ts). 30 is Claude Code's default, so nothing changes today;
 // it stops a change of that default from changing what a Cloud keeps.
 import { lstat, mkdir, open, readFile, readdir, rename, rm, rmdir, type FileHandle } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { setImmediate as yieldNow, setTimeout as sleep } from "node:timers/promises";
 
 import { writeFileAtomic } from "../atomic.ts";
@@ -31,7 +32,13 @@ export type EngineSessionSweepMode = "off" | "report" | "on";
 const DAY_MS = 24 * 60 * 60_000;
 /** A session file, or a CLI log, untouched this long. Far past a room's session idle and a warm fork moving a cursor. */
 export const IDLE_MS = 7 * DAY_MS;
-export const FIRST_PASS_MS = 30 * 60_000;
+/** Soon after a start: a home that sleeps by stopping may be up only minutes. */
+export const FIRST_PASS_MS = 3 * 60_000;
+/** A pass that stopped for a turn, a move or a backup is tried again this soon. */
+export const RETRY_MS = 30 * 60_000;
+/** When the last whole pass ended, under the data folder's cache/ (left out of backups): a restart, which reads the
+ * events logs again from their start, does not also bring the next pass forward. */
+export const STAMP_FILE = join("cache", "engine-session-sweep.json");
 /** Claude Code's transcript age limit for a Cloud's Claude folders (its default, made deliberate). */
 export const CLAUDE_TRANSCRIPT_DAYS = 30;
 /** While a turn runs nothing is removed: the pass waits this long for a quiet moment, then stops until the next. */
@@ -421,7 +428,7 @@ const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 export function sweepLine(result: EngineSessionSweepResult): string {
   if (result.refused) return `[engine-sessions] ${result.mode}: ${result.refused}`;
   const verb = result.mode === "report" ? "would free" : "freed";
-  return `[engine-sessions] ${result.mode}: Claude transcript age ${CLAUDE_TRANSCRIPT_DAYS} days ${result.mode === "report" ? "would be " : ""}set in ${result.retentionSet} folders (${result.retentionKept} keep their own); ${result.sessions} ended sessions (${mb(result.sessionBytes)}) and ${result.cacheFiles} CLI log files `
+  return `[engine-sessions] ${result.mode}: Claude transcript age ${CLAUDE_TRANSCRIPT_DAYS} days ${result.mode === "report" ? "would be " : ""}set in ${result.retentionSet} folders (already set in ${result.retentionKept}); ${result.sessions} ended sessions (${mb(result.sessionBytes)}) and ${result.cacheFiles} CLI log files `
     + `(${mb(result.cacheBytes)}); ${verb} ${mb(result.sessionBytes + result.cacheBytes)}; ${result.kept} ended sessions kept until a week idle`
     + (result.stopped ? " (stopped for a move, a backup or a running turn; the next pass carries on)" : "");
 }
@@ -438,16 +445,13 @@ export interface StartEngineSessionSweepDeps {
   log?(line: string): void;
 }
 
-/** Cloud homes only, and only with OMB_ENGINE_SESSION_SWEEP set: a pass FIRST_PASS_MS after start, then daily. */
+/** Cloud homes only, and only with OMB_ENGINE_SESSION_SWEEP set: a pass when due, at the earliest FIRST_PASS_MS after start. */
 export function startEngineSessionSweep(deps: StartEngineSessionSweepDeps): boolean {
   const mode = engineSessionSweepMode(deps.env);
   if (!deps.cloudHome || mode === "off") return false;
   const log = deps.log ?? ((line: string) => console.log(line));
   const logged = createLoggedSessions(join(resolve(deps.dataDir), "events"));
-  let running = false;
-  const pass = async () => {
-    if (running) return;
-    running = true;
+  const pass = async (): Promise<boolean> => {
     try {
       // An interrupted pass's trash first: it is already out of every engine's reach.
       await emptyTrash(deps.dataDir);
@@ -456,13 +460,36 @@ export function startEngineSessionSweep(deps: StartEngineSessionSweepDeps): bool
         live: () => liveSessions(deps.bots()), logged: await logged(), paused: deps.paused, turnsRunning: deps.turnsRunning,
       });
       if (result.refused || result.sessions || result.cacheFiles || result.retentionSet || result.stopped) log(sweepLine(result));
+      return !result.stopped;
     } catch (error) {
       log(`[engine-sessions] pass failed: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      running = false;
+      return false;
     }
   };
-  setTimeout(() => void pass(), FIRST_PASS_MS).unref();
-  setInterval(() => void pass(), PASS_EVERY_MS).unref();
+  schedulePasses(join(deps.dataDir, STAMP_FILE), PASS_EVERY_MS, pass);
   return true;
+}
+
+/**
+ * Runs `pass` FIRST_PASS_MS after start, or later when the last whole pass (saved in `stamp`) is not yet `every` old,
+ * then every `every`; a pass that stopped early is tried again after RETRY_MS. A stamp from the future (a clock set
+ * back) counts as none, and a home that slept past its time runs one pass on waking, never one per missed interval.
+ */
+export function schedulePasses(stamp: string, every: number, pass: () => Promise<boolean>, now: () => number = Date.now): void {
+  let last: number | null = null;
+  try {
+    const at = (JSON.parse(readFileSync(stamp, "utf8")) as { at?: unknown }).at;
+    if (typeof at === "number" && Number.isFinite(at) && at <= now()) last = at;
+  } catch {}
+  const run = async () => {
+    const whole = await pass();
+    if (whole) {
+      try {
+        mkdirSync(dirname(stamp), { recursive: true, mode: 0o700 });
+        writeFileSync(stamp, JSON.stringify({ at: now() }), { mode: 0o600 });
+      } catch {}
+    }
+    setTimeout(() => void run(), whole ? every : RETRY_MS).unref();
+  };
+  setTimeout(() => void run(), last === null ? FIRST_PASS_MS : Math.max(FIRST_PASS_MS, last + every - now())).unref();
 }
