@@ -50,7 +50,7 @@ import {
 import type { Routine, RoutineInput, RoutineRun, RoutineRunStatusFilter } from "@/lib/routines";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { duplicateBotProfile, restrictedCopyRequest } from "@/lib/bot-duplicate";
-import { markVisibleBotThreadsRead, markVisibleGroupThreadsRead } from "./read-visible";
+import { holdMarkedUnread, markVisibleBotThreadsRead, markVisibleGroupThreadsRead } from "./read-visible";
 import { applyWindowPref } from "@/lib/window-prefs"; import { applyThemeFrame } from "@/lib/theme/runtime"; import { appCatalogAnnounced } from "@/lib/app-catalog-signal";
 import { placeUnreadDivider, threadOpensUnread, threadReadCursor, unreadDividerFor, type UnreadDivider } from "@/lib/unread-divider";
 import type { ComputerStart } from "@/lib/computer-start";
@@ -2193,6 +2193,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       store.flushFrames(); if (["select", "newTask", "switchTask", "newGroupTask", "switchGroupTask", "showChat", "showRoutines", "showTeamMap", "showFiles", "showWebPanel", "showPublishedApps", "showSkillBurgers", "showTeamFiles", "showAnnouncements"].includes(action.type)) selectionRevision.current++;
       // Pin before any await or optimistic state change.
       action = pinBotThreadAction(action, stateRef.current.bots); if (runNewChat(action)) return;
+      holdMarkedUnread(action, stateRef.current);
       if (action.type === "taskSwitched") action = { ...action, bot: withTaskWrites(action.bot) as Bot };
       if (action.type === "botPatched") action = { ...action, bot: withTaskWrites(action.bot) };
       if (action.type === "openForkPanel" && !action.loadId) action = { ...action, loadId: randomUuid() };
@@ -2556,9 +2557,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             .finally(() => rawDispatch({ type: "botDeletionPending", botId: action.botId, on: false }));
           break;
         case "markUnread":
-          api(`/api/bots/${action.botId}`, { method: "PATCH", body: JSON.stringify({ unread: true }) }).catch(
-            () => {},
-          );
+          api(`/api/bots/${action.botId}`, { method: "PATCH", body: JSON.stringify({ unread: true }) }).catch(() => {});
           break;
         case "openDataResult":
         case "select": {
