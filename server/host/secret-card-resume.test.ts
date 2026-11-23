@@ -233,4 +233,26 @@ describe("createSecretCardResumer", () => {
     expect(permanent.code).toBeUndefined();
     expect(roomContinuationNotStartedError(true, undefined).code).toBe("thread_busy");
   });
+
+  it("keeps (botId, threadId) pending when one provided card starts while another card is still waiting", () => {
+    const f = makeFixture({ waitingCards: ["c-wait"] });
+    f.lines.push(
+      makeCard("c-wait", "Waiting Key", { provided: true }),
+      makeCard("c-ready", "Ready Key", { provided: true }),
+    );
+    expect(f.resumer.resume("bot-1", "t-1")).toBe(true);
+    expect(f.startedDirect).toEqual([
+      { botId: "bot-1", threadId: "t-1", text: "update(c-ready:Ready Key:provided)" },
+    ]);
+    expect(f.lines[0]!.secret!.resumed).toBeUndefined();
+    expect(f.lines[1]!.secret!.resumed).toBe(true);
+
+    f.waitingCards.clear();
+    f.resumer.drain();
+    expect(f.startedDirect).toEqual([
+      { botId: "bot-1", threadId: "t-1", text: "update(c-ready:Ready Key:provided)" },
+      { botId: "bot-1", threadId: "t-1", text: "update(c-wait:Waiting Key:provided)" },
+    ]);
+    expect(f.lines[0]!.secret!.resumed).toBe(true);
+  });
 });

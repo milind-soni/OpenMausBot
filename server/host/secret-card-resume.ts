@@ -82,7 +82,8 @@ export function createSecretCardResumer(deps: SecretCardResumeDeps) {
       pending.add(key);
       return false;
     }
-    pending.delete(key);
+    if (cards.length === allProvided.length) pending.delete(key);
+    else pending.add(key);
     inFlight.add(key);
     const combinedText = cards.map((message) => deps.updateText(message.id, message.secret!, "provided")).join("\n\n");
     for (const message of cards) {
