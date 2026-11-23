@@ -17,6 +17,9 @@ import { toolFailureMessage } from "./drivers/tool-failure.ts";
 import { createCloudSignedRoutes } from "./routes/cloud-signed.ts";
 import { SessionRegistry } from "./sessions.ts";
 import { Store } from "./store.ts";
+import { chatNotice } from "./chat-notices.ts";
+
+const RESTART_NOTICE = chatNotice("chat.notice.restartInterrupted");
 
 const START = 1_800_000_000_000;
 const secret = "S".repeat(43);
@@ -148,7 +151,7 @@ describe("the failure code a Cloud home reports", () => {
   it("names the failures the server writes itself, and a trial credit's refusal", () => {
     const w = world();
     w.fail("no activity for 20 minutes — the turn was stopped");
-    w.fail("turn interrupted — OpenMausBot restarted");
+    w.fail(RESTART_NOTICE);
     w.fail("this thread could not start — the engine is not installed");
     w.fail("queued message could not start — the engine is not installed");
     w.fail(TRIAL_CREDIT_REFUSED.used_up);
@@ -182,12 +185,12 @@ describe("the failure code a Cloud home reports", () => {
 describe("the ledger", () => {
   it("dedupes by kind, code and engine, and a cursor reads only what changed since", () => {
     const w = world();
-    for (let i = 0; i < 3; i++) { w.fail("turn interrupted — OpenMausBot restarted"); w.advance(60_000); }
+    for (let i = 0; i < 3; i++) { w.fail(RESTART_NOTICE); w.advance(60_000); }
     const first = w.health.report(null);
     expect(first.incidents).toEqual([expect.objectContaining({ code: "restart", count: 3, firstAt: START, lastAt: START + 120_000, botId: w.bot.id, threadId: w.bot.threadId })]);
     expect(w.health.report(first.cursor).incidents).toEqual([]);
     w.fail("this thread could not start — no engine");
-    w.fail("turn interrupted — OpenMausBot restarted");
+    w.fail(RESTART_NOTICE);
     const next = w.health.report(first.cursor);
     expect(next.incidents.map(({ code, count }) => ({ code, count }))).toEqual([{ code: "could_not_start", count: 1 }, { code: "restart", count: 4 }]);
     // Another boot's cursor, or one from the future, reads from the start.
@@ -201,7 +204,7 @@ describe("the ledger", () => {
     const ledger = createCloudHealthLedger({ now: () => clock });
     for (let i = 0; i <= HEALTH_BUCKET_CAP; i++) {
       ledger.noteEvent({ eventId: "e", provider: `engine${i}`, threadId: `thread-${i}`, createdAt: "", type: "turn.started" });
-      ledger.noteMessage(`thread-${i}`, { at: clock, tool: failedTurnTool("turn interrupted — OpenMausBot restarted") });
+      ledger.noteMessage(`thread-${i}`, { at: clock, tool: failedTurnTool(RESTART_NOTICE) });
       clock += 1000;
     }
     const read = ledger.read(null);
@@ -213,7 +216,7 @@ describe("the ledger", () => {
   it("rates turns over 15 minutes and a day", () => {
     const w = world();
     for (let i = 0; i < 4; i++) w.emit(w.bot.threadId, { type: "turn.started" });
-    w.fail("turn interrupted — OpenMausBot restarted");
+    w.fail(RESTART_NOTICE);
     w.advance(20 * 60_000);
     w.emit(w.bot.threadId, { type: "turn.started" });
     w.fail("no activity for 20 minutes — the turn was stopped");
@@ -333,7 +336,7 @@ function routes(w: ReturnType<typeof world>) {
 describe("GET /api/cloud/health", () => {
   it("answers the Admin's signed read with the report", async () => {
     const w = world();
-    w.fail("turn interrupted — OpenMausBot restarted");
+    w.fail(RESTART_NOTICE);
     const { sign, send } = routes(w);
     const target = `${CLOUD_HEALTH_PATH}?after=0`;
     const answer = await send("GET", target, sign(target));
