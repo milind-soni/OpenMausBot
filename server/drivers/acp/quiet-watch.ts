@@ -5,6 +5,7 @@ import {
   type LogSignal, type ProcessSample, type QuietState,
 } from "./quiet-status.ts";
 import type { ServerText } from "../../../shared/server-text.ts";
+import { HOST_SLEEP_TOLERANCE_MS } from "./host.ts";
 import type { AcpSupport } from "./core.ts";
 import type { AcpSession, AcpTurn } from "./turn-state.ts";
 
@@ -32,10 +33,13 @@ export function startAcpQuietWatch(input: {
   let probing = false;
   let state: QuietState | null = null;
   const promptStartedAt = Date.now();
-  let readAt = promptStartedAt;
+  let readAt = promptStartedAt, tickedAt = promptStartedAt, wokeAt = 0;
   const tick = async () => {
-    if (probing || current.state.settled || session.current !== current) return;
     const now = Date.now();
+    // A tick this late means the computer slept: that time is not the agent's silence (pingdotgg/t3code@990f31cac25).
+    if (now - tickedAt > tickMs + HOST_SLEEP_TOLERANCE_MS) { wokeAt = now; previous = null; noSignsSince = null; }
+    tickedAt = now;
+    if (probing || current.state.settled || session.current !== current) return;
     for (const line of tail?.read() ?? []) {
       if (!support.statusLog!.shared) session.acp.touch();
       const signal = support.statusLog!.parse(line, sessionId!);
@@ -44,7 +48,7 @@ export function startAcpQuietWatch(input: {
       else if (signal) logged = { signal, at: support.statusLog!.shared ? readAt : now };
     }
     readAt = now;
-    const quietMs = now - Math.max(promptStartedAt, session.acp.lastInboundAt);
+    const quietMs = now - Math.max(promptStartedAt, session.acp.lastInboundAt, wokeAt);
     if (quietMs < noticeAfterMs || current.asks.size || current.runningTools.size) {
       if (quietMs < noticeAfterMs && (!support.statusLog?.shared || session.acp.lastInboundAt > (logged?.at ?? 0))) logged = null;
       previous = null;
