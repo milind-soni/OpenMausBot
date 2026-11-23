@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { spillToolResult } from "../tool-result-spill.ts";
-import { FIRST_PASS_MS, MAX_AGE_MS, schedulePasses, sweepLine, sweepToolResults, toolResultsSweepMode } from "./tool-results-sweep.ts";
+import { FIRST_PASS_MS, MAX_AGE_MS, STAMP_FILE, schedulePasses, startToolResultsSweep, sweepLine, sweepToolResults, toolResultsSweepMode } from "./tool-results-sweep.ts";
 
 const NOW = Date.parse("2026-11-23T12:00:00Z");
 let base: string, root: string;
@@ -93,20 +93,20 @@ describe("the tool results' sweep", () => {
     expect((await sweepToolResults({ root: join(base, "missing"), mode: "on", now: () => NOW })).files).toBe(0);
   });
 
-  it("over the cap removes results under a day old too, oldest first, never one under an hour", async () => {
+  it("over the cap removes the hook's outputs under a day old too, oldest first, never one under an hour, never a gate's result", async () => {
     const files = seed();
-    const hours = [20, 10, 2].map((h) => put(join(root, "thread-c", `${h}h.json`), h * 60 * 60_000, 3_000));
-    const minutes = put(join(root, "thread-c", "30m.json"), 30 * 60_000, 3_000);
-    // Under a day: newHook 1 KB, newGate 1 KB, 20h, 10h, 2h and 30m at 3 KB each, 14 KB against an 8 KB cap.
+    const hook = (h: string) => join(root, "thread-c", `${h.repeat(64)}.txt`);
+    const hours = ([["c", 20], ["d", 10], ["e", 2]] as const).map(([name, h]) => put(hook(name), h * 60 * 60_000, 3_000));
+    const minutes = put(hook("f"), 30 * 60_000, 3_000);
+    const gate = put(join(root, "thread-c", "1700000000002-42-2-search.json"), 20 * 60 * 60_000, 3_000);
+    // Under a day: newHook and newGate 1 KB each, four hook outputs and one gate result at 3 KB, 17 KB against 8 KB.
     const result = await sweepToolResults({ root, mode: "on", cap: 8_000, now: () => NOW });
-    expect(result.overCap).toBe(3);
-    for (const file of [files.newHook, hours[0]!, hours[1]!]) expect(existsSync(file), file).toBe(false);
-    for (const file of [hours[2]!, minutes, files.newGate]) expect(existsSync(file), file).toBe(true);
+    expect(result.overCap).toBe(4);
+    for (const file of [files.newHook, ...hours]) expect(existsSync(file), file).toBe(false);
+    for (const file of [minutes, gate, files.newGate]) expect(existsSync(file), file).toBe(true);
     const tight = await sweepToolResults({ root, mode: "on", cap: 0, now: () => NOW });
-    expect(tight.overCap).toBe(1);
-    expect(existsSync(hours[2]!)).toBe(false);
-    expect(existsSync(minutes)).toBe(true);
-    expect(existsSync(files.newGate)).toBe(true);
+    expect(tight.overCap).toBe(0);
+    for (const file of [minutes, gate, files.newGate]) expect(existsSync(file), file).toBe(true);
   });
 
   it("removes nothing while a turn runs, and goes on once none does", async () => {
@@ -131,11 +131,27 @@ describe("the tool results' sweep", () => {
       expect(passes).toHaveLength(1);
       vi.clearAllTimers();
       clock += 60 * 60_000;
+      // Read at the first timer, the stamp says five hours are left.
       schedulePasses(stamp, 6 * 60 * 60_000, async () => (passes.push(clock), true), () => clock);
-      await vi.advanceTimersByTimeAsync(4 * 60 * 60_000);
+      await vi.advanceTimersByTimeAsync(FIRST_PASS_MS + 4 * 60 * 60_000);
       expect(passes).toHaveLength(1);
       await vi.advanceTimersByTimeAsync(60 * 60_000);
       expect(passes).toHaveLength(2);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it("a frozen home's pass removes nothing and writes no stamp", async () => {
+    vi.useFakeTimers();
+    try {
+      const files = seed();
+      const dataDir = join(base, "data");
+      expect(startToolResultsSweep({ cloudHome: true, env: { OMB_TOOL_RESULTS_SWEEP: "on" }, dataDir, root, paused: () => true, log: () => {} })).toBe(true);
+      await vi.advanceTimersByTimeAsync(FIRST_PASS_MS);
+      expect(existsSync(files.oldHook)).toBe(true);
+      expect(existsSync(join(dataDir, STAMP_FILE))).toBe(false);
     } finally {
       vi.clearAllTimers();
       vi.useRealTimers();

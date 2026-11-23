@@ -6,7 +6,8 @@
 // <hash>.txt; nothing reads those back (a row keeps only `fullResult: true`). So the same one-day rule, run for every
 // conversation, removes nothing a turn or the person still reads.
 //
-// Size first, age as the tie-breaker: past CAP_BYTES what is left goes oldest first, down to results an hour old.
+// Size first, age as the tie-breaker: past CAP_BYTES the hook's outputs (nothing reads them back) go oldest first, down
+// to an hour old. The gate's saved results keep the day: a model may be told to read one later the same day.
 // Nothing is removed while any turn runs.
 //
 // Files only: both writers make their folder and then write into it, so a folder removed between the two would fail
@@ -20,12 +21,15 @@ export type ToolResultsSweepMode = "off" | "report" | "on";
 
 /** The MCP gate's own age for its saved results (mcp-gate.ts SPILL_MAX_AGE_MS). */
 export const MAX_AGE_MS = 24 * 60 * 60_000;
-/** Past this, results younger than a day go too, oldest first. */
+/** Past this, the hook's outputs younger than a day go too, oldest first. */
 export const CAP_BYTES = 1024 ** 3;
 /** Never under the cap: a result this new may belong to a turn that has just paused. */
 export const MIN_AGE_MS = 60 * 60_000;
-/** Soon after a start: a home that sleeps by stopping may be up only minutes. */
-export const FIRST_PASS_MS = 3 * 60_000;
+/** The engine hook's full tool output (tool-result-spill.ts): a sha256 of its key, then .txt. */
+const HOOK_OUTPUT = /^[0-9a-f]{64}\.txt$/;
+/** Soon after a start (a home that sleeps by stopping may be up only minutes), after the logs' sweep (3 minutes) and
+ * before the engine sessions' (7), so the three do not start at once. */
+export const FIRST_PASS_MS = 5 * 60_000;
 /** A pass that stopped for a turn, a move or a backup is tried again this soon. */
 export const RETRY_MS = 30 * 60_000;
 /** When the last whole pass ended, under the data folder's cache/ (left out of backups). */
@@ -128,7 +132,7 @@ export async function sweepToolResults(deps: {
       const stats = await stat(path);
       if (!stats?.isFile()) continue;
       if (now - stats.mtimeMs < MAX_AGE_MS) {
-        young.push({ path, dev: stats.dev, ino: stats.ino, size: stats.size, mtimeMs: stats.mtimeMs });
+        if (HOOK_OUTPUT.test(entry.name)) young.push({ path, dev: stats.dev, ino: stats.ino, size: stats.size, mtimeMs: stats.mtimeMs });
         youngBytes += stats.size;
         continue;
       }
@@ -168,6 +172,8 @@ export function startToolResultsSweep(deps: { cloudHome: boolean; env: NodeJS.Pr
   if (!deps.cloudHome || mode === "off") return false;
   const log = deps.log ?? ((line: string) => console.log(line));
   const pass = async (): Promise<boolean> => {
+    // A frozen or backing-up home: no read, no change, and no stamp, so the pass is tried again soon.
+    if (deps.paused?.()) return false;
     try {
       const result = await sweepToolResults({ root: deps.root, mode, paused: deps.paused, turnsRunning: deps.turnsRunning });
       if (result.files || result.stopped) log(sweepLine(result));
@@ -187,11 +193,6 @@ export function startToolResultsSweep(deps: { cloudHome: boolean; env: NodeJS.Pr
  * back) counts as none, and a home that slept past its time runs one pass on waking, never one per missed interval.
  */
 export function schedulePasses(stamp: string, every: number, pass: () => Promise<boolean>, now: () => number = Date.now): void {
-  let last: number | null = null;
-  try {
-    const at = (JSON.parse(readFileSync(stamp, "utf8")) as { at?: unknown }).at;
-    if (typeof at === "number" && Number.isFinite(at) && at <= now()) last = at;
-  } catch {}
   const run = async () => {
     const whole = await pass();
     if (whole) {
@@ -202,5 +203,16 @@ export function schedulePasses(stamp: string, every: number, pass: () => Promise
     }
     setTimeout(() => void run(), whole ? every : RETRY_MS).unref();
   };
-  setTimeout(() => void run(), last === null ? FIRST_PASS_MS : Math.max(FIRST_PASS_MS, last + every - now())).unref();
+  // The stamp is read in the first timer, never while the server is still starting.
+  const first = () => {
+    let last: number | null = null;
+    try {
+      const at = (JSON.parse(readFileSync(stamp, "utf8")) as { at?: unknown }).at;
+      if (typeof at === "number" && Number.isFinite(at) && at <= now()) last = at;
+    } catch {}
+    const wait = last === null ? 0 : last + every - now();
+    if (wait > 0) setTimeout(() => void run(), wait).unref();
+    else void run();
+  };
+  setTimeout(first, FIRST_PASS_MS).unref();
 }
