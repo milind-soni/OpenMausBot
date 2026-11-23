@@ -180,6 +180,17 @@ describe("sweepEngineSessions", () => {
     expect(sweepLine(report)).toContain("would free");
   });
 
+  it("keeps a session whose folder looks old but has a file written to lately", async () => {
+    const files = seed();
+    const deep = join(claude, "projects", "-home-work", ENDED, "tool-results", "r.txt");
+    writeFileSync(deep, "rewritten");
+    utimesSync(join(claude, "projects", "-home-work", ENDED, "tool-results"), new Date(NOW - 10 * DAY), new Date(NOW - 10 * DAY));
+    utimesSync(join(claude, "projects", "-home-work", ENDED), new Date(NOW - 10 * DAY), new Date(NOW - 10 * DAY));
+    const result = await sweepEngineSessions(await deps("on", { now: () => Date.now() + 60_000 }));
+    expect(result.sessions).toBe(0);
+    for (const file of files.ended) expect(existsSync(file)).toBe(true);
+  });
+
   it("keeps a session that became a conversation's again while the pass ran", async () => {
     const files = seed();
     let reads = 0;

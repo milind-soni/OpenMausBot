@@ -65,7 +65,7 @@ const MEASURE_ENTRIES = 50_000;
 export function engineSessionSweepMode(env: NodeJS.ProcessEnv): EngineSessionSweepMode {
   const raw = env.OMB_ENGINE_SESSION_SWEEP?.trim().toLowerCase();
   if (raw === "report" || raw === "dry-run") return "report";
-  return raw === "on" || raw === "1" || raw === "true" ? "on" : "off";
+  return raw === "on" ? "on" : "off";
 }
 
 type Cursors = Record<string, unknown> | undefined;
@@ -115,19 +115,29 @@ async function realFolder(path: string): Promise<boolean> {
   return (await stat(path))?.isDirectory() === true;
 }
 
-/** Bytes under `path`, links counted as themselves and never followed; a tree past the budget counts what was seen. */
-async function measure(path: string): Promise<number> {
+/** Bytes under `path` and the newest change of anything in it (a directory's mtime misses a write to a file in it),
+ * links counted as themselves and never followed; `whole` is false when the tree was past the budget or unreadable. */
+async function measure(path: string): Promise<{ bytes: number; newest: number; whole: boolean }> {
   let bytes = 0;
+  let newest = 0;
   let seen = 0;
+  let whole = true;
   const walk = async (at: string) => {
-    if (++seen > MEASURE_ENTRIES) return;
+    if (++seen > MEASURE_ENTRIES) {
+      whole = false;
+      return;
+    }
     const stats = await stat(at);
-    if (!stats) return;
+    if (!stats) {
+      whole = false;
+      return;
+    }
     bytes += stats.size;
+    newest = Math.max(newest, stats.mtimeMs);
     if (stats.isDirectory()) for (const name of await entries(at)) await walk(join(at, name));
   };
   await walk(path);
-  return bytes;
+  return { bytes, newest, whole };
 }
 
 /**
@@ -352,6 +362,11 @@ export async function sweepEngineSessions(deps: EngineSessionSweepDeps): Promise
     const current = await stat(path);
     const trashStats = await stat(trash);
     if (!current || current.dev !== listed.dev || current.ino !== listed.ino || !trashStats || trashStats.dev !== current.dev || !plainlyUnder(root, path)) return false;
+    // A turn, a move or a backup that began during the checks above: nothing more goes in this pass.
+    if (deps.paused?.() || deps.turnsRunning?.()) {
+      result.stopped = true;
+      return false;
+    }
     return rename(path, join(trash, `${moved++}`)).then(() => true, () => false);
   };
   for (const [id, session] of bySession) {
@@ -363,18 +378,34 @@ export async function sweepEngineSessions(deps: EngineSessionSweepDeps): Promise
       result.stopped = true;
       break;
     }
+    // Every entry, all the way down, a week idle and readable, or the whole session stays.
+    const sizes: number[] = [];
+    let fresh = false;
+    for (const entry of session.entries) {
+      const measured = await measure(entry.path);
+      if (!measured.whole || now - measured.newest < IDLE_MS) fresh = true;
+      sizes.push(measured.bytes);
+    }
+    if (fresh) {
+      result.kept++;
+      continue;
+    }
     let bytes = 0;
     let gone = 0;
-    for (const entry of session.entries) {
+    for (const [index, entry] of session.entries.entries()) {
       if (!plainlyUnder(entry.root, entry.path)) continue;
-      const size = await measure(entry.path);
-      if (write && !(await discard(entry.root, entry.path, entry))) continue;
-      bytes += size;
+      if (write && !(await discard(entry.root, entry.path, entry))) {
+        if (result.stopped) break;
+        continue;
+      }
+      bytes += sizes[index]!;
       gone++;
     }
-    if (!gone) continue;
-    result.sessions++;
-    result.sessionBytes += bytes;
+    if (gone) {
+      result.sessions++;
+      result.sessionBytes += bytes;
+    }
+    if (result.stopped) break;
   }
   if (trashReady) await rm(trash, { recursive: true, force: true }).catch(() => {});
   if (result.stopped) return result;
