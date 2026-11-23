@@ -26,6 +26,10 @@ const DAY_MS = 24 * 60 * 60_000;
 const NEEDS_INPUT_LINE = /^needs input:/i;
 const TYPED_IN_CHAT = "[The person typed this in the chat instead of picking an option. Reply to it, and ask again if you still need an answer.]";
 const hasAttachment = (text: string): boolean => text.includes("<attached-image") || text.includes("<attached-file");
+/** Only the engine reads the typed-line note: a tool's output that repeats the answer back shows the person's words alone. */
+const CLOSED_BY_TYPING = "The person typed in the chat instead of picking an option; their line comes next.";
+export const withoutTypedNote = (text: string): string => text.replaceAll(`${TYPED_IN_CHAT} `, "");
+type Typed = { status: number; message?: Message; error?: string } | null;
 
 export interface AskCardsDeps {
   store: Pick<Store, "bot" | "messagesFor" | "activePath" | "appendMessage" | "patchMessage" | "taskByThread" | "patchTask" | "group"
@@ -43,7 +47,7 @@ export interface AskCardsDeps {
   /** The parked node's next turn carries the person's answer. */
   answerNode(id: string, text: string): boolean;
   /** Answers a card as a tap on it would, with the same checks on who may answer, through an inbox copy too. */
-  answerCard(input: { auth: RequestAuth; threadId: string; requestId: string; behavior: "answer" | "deny"; message?: string }): Promise<{ ok: true } | { ok: false; status: number; error: string }>;
+  answerCard(input: { auth: RequestAuth; threadId: string; requestId: string; behavior: "answer" | "close"; message?: string; engineMessage?: string }): Promise<{ ok: true } | { ok: false; status: number; error: string }>;
   /** The conversation a card in `threadId` was asked in: an inbox copy's original. */
   answeredIn(threadId: string, requestId: string): string;
   now?: () => number;
@@ -302,35 +306,55 @@ export function createAskCards(deps: AskCardsDeps) {
   }
 
   /** A person's line answers an inbox copy it replies to, or the question card the bot's turn waits on, as a tap would.
-   * In the bot's own chat a card that takes no words closes instead, and the line goes on as the next message. Null
-   * leaves the line to be sent (steered or queued) as usual. */
-  async function typed(auth: RequestAuth, threadId: string, text: string, target: Message | undefined,
-    line: { sendId?: string; sender?: Message["sender"] }): Promise<{ status: number; message?: Message; error?: string } | null> {
+   * In the bot's own chat that is the one question card a turn waits on there, and one that takes no words closes
+   * instead, the line going on as the next message. Null leaves the line to be sent (steered or queued) as usual. Tries
+   * of one send run one after another. */
+  const typing = new Map<string, Promise<Typed>>();
+  function typed(auth: RequestAuth, threadId: string, text: string, target: Message | undefined,
+    line: { sendId?: string; sender?: Message["sender"] }): Promise<Typed> {
+    if (!line.sendId) return typedOnce(auth, threadId, text, target, line);
+    const key = `${threadId}:${line.sendId}`;
+    const run = (typing.get(key) ?? Promise.resolve(null)).catch(() => null).then(() => typedOnce(auth, threadId, text, target, line));
+    typing.set(key, run);
+    void run.catch(() => null).finally(() => { if (typing.get(key) === run) typing.delete(key); });
+    return run;
+  }
+
+  async function typedOnce(auth: RequestAuth, threadId: string, text: string, target: Message | undefined,
+    line: { sendId?: string; sender?: Message["sender"] }): Promise<Typed> {
     if (store.groupByThread(threadId) || isStopCommand(text)) return null;
+    const thread = store.messagesFor(threadId);
+    // A send tried again touches no card: the same line that answered one is its receipt; anything else goes on to the
+    // usual send, which matches the line it wrote or refuses other words under the same id.
+    const again = line.sendId ? thread.find((message) => message.sendId === line.sendId) : undefined;
+    if (again) {
+      const answeredCard = again.text === text && (!target || target.id === again.replyToId)
+        && thread.some((message) => message.id === again.replyToId && message.card?.requestId);
+      return answeredCard ? { status: 202, message: again } : null;
+    }
     const delegator = delegatorOf(threadId);
     const handedOn = Boolean(delegator && delegator.threadId !== threadId);
-    const waiting = store.messagesFor(threadId).findLast((message) => !message.inbox && liveCardKind(message.card) === "question"
-      && deps.live(threadId, message.card!.requestId!));
-    const ownChat = !handedOn && !hasAttachment(text) && Boolean(waiting) && (!target || target.id === waiting!.id);
-    if (ownChat && !answerableInWords(waiting!.card)) {
-      await deps.answerCard({ auth, threadId, requestId: waiting!.card!.requestId!, behavior: "deny" });
+    const waiting = thread.filter((message) => !message.inbox && liveCardKind(message.card) === "question" && deps.live(threadId, message.card!.requestId!));
+    const only = waiting.length === 1 ? waiting[0]! : undefined;
+    const ownChat = !handedOn && !hasAttachment(text) && Boolean(only) && (!target || target.id === only!.id);
+    if (ownChat && !answerableInWords(only!.card)) {
+      const closed = await deps.answerCard({ auth, threadId, requestId: only!.card!.requestId!, behavior: "close", engineMessage: CLOSED_BY_TYPING });
+      // Refused (the session ended, the person may not answer it, it is no longer open): the card stays as it is and the
+      // line is sent as before, steered into the waiting turn or queued behind it.
+      if (!closed.ok) return null;
       return null;
     }
     const asked = target
       ? answerableInWords(target.card) ? target : undefined
-      : ownChat ? waiting
-        : handedOn ? store.messagesFor(threadId).findLast((message) => answerableInWords(message.card) && deps.live(threadId, message.card!.requestId!)) : undefined;
+      : ownChat ? only
+        : handedOn ? thread.findLast((message) => answerableInWords(message.card) && deps.live(threadId, message.card!.requestId!)) : undefined;
     if (!asked?.card?.requestId) return null;
     const requestId = asked.card.requestId;
     const origin = deps.answeredIn(threadId, requestId);
     if (origin === threadId && !((handedOn || ownChat) && deps.live(threadId, requestId))) return null;
-    const again = line.sendId ? store.messagesFor(threadId).find((message) => message.sendId === line.sendId) : undefined;
-    if (again) return { status: 202, message: again };
-    const inChat = ownChat && origin === threadId;
-    const answered = await deps.answerCard({ auth, threadId, requestId, behavior: "answer", message: typedAnswer(asked.card, inChat ? `${TYPED_IN_CHAT} ${text}` : text) });
+    const note = ownChat && origin === threadId ? { engineMessage: typedAnswer(asked.card, `${TYPED_IN_CHAT} ${text}`) } : {};
+    const answered = await deps.answerCard({ auth, threadId, requestId, behavior: "answer", message: typedAnswer(asked.card, text), ...note });
     if (!answered.ok) return { status: answered.status, error: answered.error };
-    const settled = inChat ? store.messagesFor(threadId).find((message) => message.id === asked.id)?.card : undefined;
-    if (settled) store.patchMessage(threadId, asked.id, { card: { ...settled, answeredText: text } });
     const posted = store.appendMessage(threadId, { role: "user", kind: "text", text, replyToId: asked.id,
       ...(line.sendId ? { sendId: line.sendId } : {}), ...(line.sender ? { sender: line.sender } : {}) });
     return { status: 202, message: posted };

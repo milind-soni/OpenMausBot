@@ -4544,6 +4544,22 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     conn.end();
   });
 
+  it("delivers a closed question's decline to the waiting tool, and never allows one", async () => {
+    await create("hang");
+    await instance.adapter.sendTurn({ threadId: "t-question-close", text: "go" });
+    await recorder.until((e) => e.type === "session.started");
+
+    const conn = await connectSocket(permissionSocketPath("t-question-close"));
+    const reply = answerQueue(conn)();
+    conn.write(JSON.stringify({ t: "ask", kind: "question", id: "q-close", tool: "AskUserQuestion", input: { questions: [{ question: "Which?", options: [{ label: "A" }] }] } }) + "\n");
+    await recorder.until((e) => e.type === "request.opened" && e.requestId === "q-close");
+
+    await expect(instance.adapter.respondToRequest("t-question-close", "q-close", { behavior: "allow" })).resolves.toBe("unavailable");
+    await expect(instance.adapter.respondToRequest("t-question-close", "q-close", { behavior: "deny", message: "typed instead" })).resolves.toBe("rejected");
+    await expect(reply).resolves.toMatchObject({ id: "q-close", behavior: "deny", message: "typed instead" });
+    conn.end();
+  });
+
   it("drops a late question on an already-closed broker with an answer, not a deny (#211)", async () => {
     await create("hang");
     await instance.adapter.sendTurn({ threadId: "t-question-late", text: "go" });

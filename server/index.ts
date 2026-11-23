@@ -26,7 +26,7 @@ import { botMemoryFiles, createLendingMemory } from "./lending-memory.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
 import { STATUS_REPLY_TIMEOUT_MS } from "./runtime/status-reply.ts"; import { createCoordinator, type ComposedTurn, type CoordinateBotsCall, type Coordinator, type HandoffOpener, type HandoffOptions, type HandoffView, type HostTurnResult } from "./coordinator.ts";
 import { queuedBehindPersonText, turnWaitedOnPerson, UnansweredApprovals } from "./waiting-on-person.ts";
-import { createPersonWaits } from "./host/person-waits.ts"; import { askToolName, createAskCards } from "./host/ask-cards.ts"; import { createQuestionRouting } from "./host/question-routing.ts"; import { workThreadFor } from "./host/work-thread.ts"; import { leaveThreadPost, postToThread, threadWaitsOn, unreadThreadPosts } from "./host/thread-posts.ts"; import { anyCardLive, closedByStop, resumableCards as cardsWaitedOn } from "./host/resumable-cards.ts"; import { createMcpChat } from "./host/mcp-chat.ts"; import { isCardOwnerLive, isMcpSignInCard } from "./host/mcp-sign-in-cards.ts"; import { createConnectCardSettle } from "./host/connect-card-settle.ts";
+import { createPersonWaits } from "./host/person-waits.ts"; import { askToolName, createAskCards, withoutTypedNote } from "./host/ask-cards.ts"; import { createQuestionRouting } from "./host/question-routing.ts"; import { workThreadFor } from "./host/work-thread.ts"; import { leaveThreadPost, postToThread, threadWaitsOn, unreadThreadPosts } from "./host/thread-posts.ts"; import { anyCardLive, closedByStop, resumableCards as cardsWaitedOn } from "./host/resumable-cards.ts"; import { createMcpChat } from "./host/mcp-chat.ts"; import { isCardOwnerLive, isMcpSignInCard } from "./host/mcp-sign-in-cards.ts"; import { createConnectCardSettle } from "./host/connect-card-settle.ts";
 import { assertRequestTarget, guardedRequestPath, requestConflict, requestNeedsInput } from "./guarded-requests.ts";
 import { botAvatarUrlFromStoredPath } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
@@ -4743,11 +4743,11 @@ async function answerRequest(
   threadId: string,
   instanceId: string,
   requestId: string,
-  behavior: "allow" | "deny" | "answer",
+  behavior: "allow" | "deny" | "answer" | "close",
   message?: string,
   decidedFor?: { id: string; name: string },
   always?: boolean,
-  rememberCommand?: boolean,
+  rememberCommand?: boolean, engineMessage = message,
 ): Promise<RequestOutcome> {
   // Snapshot the card BEFORE delivering: delivery synchronously consumes the askMessageByRequest entry.
   const thread = store.messagesFor(threadId);
@@ -4757,13 +4757,14 @@ async function answerRequest(
     : thread.find((m) => m.card?.requestId === requestId);
   const card = cardMessage?.card;
   const remembered = rememberCommand ? pendingCommandRules.get(`${threadId}:${requestId}`) : undefined;
-  // The live turn owns this question, as it owns Stop and steer.
+  // The live turn owns this question, as it owns Stop and steer. A card closed without an answer says so before the engine's decline settles it, and records no denial.
   const instance = runningTurnEngines.get(threadId) ?? registry.get(instanceId);
+  if (behavior === "close" && card) store.patchMessage(threadId, cardMessage!.id, { card: { ...card, answered: "unavailable", dismissed: true } });
   let outcome: RequestOutcome = "unavailable";
   if (instance) {
     try {
       // Only a card that offered "Allow for this session" can keep one: never a guest's turn, a sandbox widening or the person's own computer.
-      outcome = await instance.adapter.respondToRequest(threadId, requestId, { behavior, message, always: always && behavior === "allow" && card?.allowSession === true });
+      outcome = await instance.adapter.respondToRequest(threadId, requestId, { behavior: behavior === "close" ? "deny" : behavior, message: engineMessage, always: always && behavior === "allow" && card?.allowSession === true });
     } catch {
       outcome = "unavailable";
     }
@@ -4780,12 +4781,10 @@ async function answerRequest(
   }
   if (outcome === "answered" && behavior === "answer" && message && cardMessage) {
     const settled = store.messagesFor(threadId).find((m) => m.id === cardMessage.id)?.card;
-    if (settled) {
-      store.patchMessage(threadId, cardMessage.id, { card: { ...settled, answeredText: message } });
-    }
+    if (settled) store.patchMessage(threadId, cardMessage.id, { card: { ...settled, answeredText: message } });
   }
   // Record only verdicts that reached the engine; a question's answer is not a decision.
-  if (outcome !== "unavailable" && behavior !== "answer") {
+  if (outcome !== "unavailable" && behavior !== "answer" && behavior !== "close") {
     appendDecision(DATA_DIR, {
       threadId,
       requestId,
@@ -4823,17 +4822,18 @@ async function respondToCard(input: {
   auth: RequestAuth;
   threadId: string;
   requestId: string;
-  behavior: "allow" | "deny" | "answer";
+  behavior: "allow" | "deny" | "answer" | "close";
   message?: string;
+  /** What the engine reads instead of `message`; the card and every copy of it keep `message`. */ engineMessage?: string;
   callId?: string;
   via?: DecisionVia;
 }): Promise<CardRespondResult> {
-  const { auth, requestId, behavior, message, callId, via } = input, threadId = automationReports.answeredIn(teamMessages.inbox.answeredIn(input.threadId, requestId), requestId);
+  const { auth, requestId, behavior, message, engineMessage, callId, via } = input, threadId = automationReports.answeredIn(teamMessages.inbox.answeredIn(input.threadId, requestId), requestId);
   // A call outlives the request that started it: the session must still be valid.
   if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
     return { ok: false, status: 401, error: "The session that started this call has ended." };
   }
-  const refusal = cardAnswerRefusal(auth, input.threadId, requestId, behavior) ?? cardAnswerRefusal(auth, threadId, requestId, behavior);
+  const decline = behavior === "close" ? "deny" : behavior, refusal = cardAnswerRefusal(auth, input.threadId, requestId, decline) ?? cardAnswerRefusal(auth, threadId, requestId, decline);
   if (refusal) return { ok: false, status: 403, error: refusal };
   const bot = store.botByThread(threadId);
   if (!bot) return { ok: false, status: 404, error: "The chat is gone." };
@@ -4845,7 +4845,7 @@ async function respondToCard(input: {
   await answeringCardAs(auth, threadId, requestId, async () => {
     const outcome = await answerRequest(
       threadId, botForThread(bot.id, threadId)?.modelSelection.instanceId ?? "", requestId, behavior, message,
-      { id: bot.id, name: bot.name },
+      { id: bot.id, name: bot.name }, undefined, undefined, engineMessage,
     );
     if (outcome === "unavailable" && isPersistentQuestionCard(card) && behavior === "answer" && cardMessage) {
       const answer = message?.trim() ?? "";
@@ -6409,7 +6409,7 @@ bus.subscribe((event: RuntimeEvent) => {
           const existing = store.messagesFor(event.threadId).find((m) => m.id === messageId)?.tool;
           toolName = existing?.name ?? "tool";
           store.patchMessage(event.threadId, messageId, {
-            tool: { ...existing, name: toolName, ok: event.ok, output: event.output === undefined ? undefined : scrubHeldSecrets(event.output), ...mcpToolProblem(toolName, event.ok, event.output, Object.keys(cfg.mcpServers ?? {}), threadLanguage(event.threadId)) },
+            tool: { ...existing, name: toolName, ok: event.ok, output: event.output === undefined ? undefined : scrubHeldSecrets(withoutTypedNote(event.output)), ...mcpToolProblem(toolName, event.ok, event.output, Object.keys(cfg.mcpServers ?? {}), threadLanguage(event.threadId)) },
           }); void connectionHealth.toolStep({ threadId: event.threadId, generation: activeInternalGenerationByThread.get(event.threadId), tool: toolName, ok: event.ok, output: event.output }).catch(() => {});
           toolMessageByItem.delete(itemKey);
         }

@@ -571,7 +571,7 @@ export async function createPermissionBroker(opts: {
     answer(askId: string, behavior: AskBehavior, message?: string, always?: boolean): boolean {
       const p = pending.get(askId);
       if (!p) return false;
-      if (p.ask.kind === "question" ? behavior !== "answer" : behavior === "answer") return false;
+      if (p.ask.kind === "question" ? behavior === "allow" : behavior === "answer") return false;
       p.finish(behavior, message, "user", always && behavior === "allow");
       return true;
     },
