@@ -461,6 +461,22 @@ describe("surfacePrompt", () => {
     expect(surfacePrompt({ computer: "vm", browser: false }, { canSelect: true, lentToServer: [], thisComputer }))
       .toBe(surfacePrompt({ computer: "vm", browser: false }, { canSelect: true, thisComputer }));
   });
+
+  // #6754: on a VPS with a lent PC and no place chosen, "select_computer is the way to connect them" sent a bot asked for
+  // desktop apps to a Local VM that was never set up, and This computer (the VPS) was offered for the person's files.
+  it("with a lent computer and no place set, says to use it for desktop apps, and offers This computer only where the app runs", () => {
+    const lent = [{ name: "OFFICE-PC", platform: "win32" as const }];
+    const vps = { bot: "Ada", platform: "linux" as const, desktopApp: false };
+    const none = surfacePrompt({ computer: null, browser: true }, { canSelect: true, lentToServer: lent, thisComputer: vps });
+    expect(none).toContain("No other computer is set for this conversation: for desktop apps, use their PC (OFFICE-PC) through shared_computer, and don't select a Local VM or another place for it unless they ask.");
+    expect(none).not.toContain("switch it to This computer");
+    expect(surfacePrompt({ computer: null, browser: true }, { canSelect: true, lentToServer: lent, thisComputer: { ...vps, desktopApp: true } })).toContain("switch it to This computer");
+    // A place chosen or pinned: the person picked it, so only the existing lines speak.
+    expect(surfacePrompt({ computer: "vm", browser: false }, { canSelect: true, lentToServer: lent })).not.toContain("No other computer is set");
+    expect(surfacePrompt({ computer: null, browser: true }, { pinned: "browser", lentToServer: lent })).not.toContain("No other computer is set");
+    // Nothing lent: unchanged.
+    expect(surfacePrompt({ computer: null, browser: true }, { canSelect: true, lentToServer: [] })).not.toContain("No other computer is set");
+  });
 });
 
 describe("surface parsing", () => {
