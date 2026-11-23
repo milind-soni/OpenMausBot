@@ -1,8 +1,8 @@
 // Deleting a conversation or a bot removes what it kept on disk outside its transcript: the files uploaded to the
 // conversation, its box uploads folder, the session files the engines wrote for it, and for a bot its checkpoints and
 // the memory layers kept beside its own folder. A conversation's own folder (task-workspaces/<bot>/<thread>) holds
-// files the bot made for the person, and stays when the conversation or the bot is deleted: only its dependency and
-// build trees, and the conversation's full tool results, go (conversation-folder-cleanup.ts).
+// files the bot made for the person, and stays when the conversation or the bot is deleted: on a Cloud home only its
+// package installs, and the conversation's full tool results, go (conversation-folder-cleanup.ts).
 //
 // Security: a file goes only when it is provably the deleted conversation's or bot's. An upload another conversation,
 // a picture or a routine still names stays; an engine session a remaining conversation still resumes stays. Nothing is

@@ -124,7 +124,7 @@ describe("deleting through the store", () => {
     expect(existsSync(upload)).toBe(false);
   });
 
-  it("takes a deleted conversation's dependency trees and tool results, never while a fork still works in its folder", async () => {
+  it("takes a deleted conversation's installs and tool results, never while a fork still works in its folder", async () => {
     const store = new Store(selection);
     const folders = createConversationFolderCleanup({ dataDir: DATA_DIR, records: () => store, drainAfterMs: false, pause: async () => {}, log: () => {} });
     const { bot, task, leftovers } = fixture({ store, folders });
@@ -134,6 +134,8 @@ describe("deleting through the store", () => {
     const fork = store.forkTask(bot.id, task.threadId, said.id)!;
     const made = put(join(own, "site", "index.html"));
     const deps = put(join(own, "site", "node_modules", "react", "index.js"));
+    put(join(own, "site", "node_modules", ".package-lock.json"));
+    put(join(own, "site", "package.json"));
     const results = put(join(DATA_DIR, "tool-results", task.threadId, "r.txt"));
     expect(store.deleteTask(bot.id, task.threadId)).not.toBeNull();
     leftovers.flush();
@@ -147,12 +149,14 @@ describe("deleting through the store", () => {
     expect(existsSync(made)).toBe(true);
   });
 
-  it("takes a deleted bot's conversation folders' dependency trees and keeps their files", async () => {
+  it("takes a deleted bot's conversation folders' installs and keeps their files", async () => {
     const store = new Store(selection);
     const folders = createConversationFolderCleanup({ dataDir: DATA_DIR, records: () => store, drainAfterMs: false, pause: async () => {}, log: () => {} });
     const { bot, task, leftovers } = fixture({ store, folders });
     const made = put(join(DATA_DIR, "task-workspaces", bot.id, task.threadId, "result.txt"));
     const deps = put(join(DATA_DIR, "task-workspaces", bot.id, "deleted-earlier", "node_modules", "x.js"));
+    put(join(DATA_DIR, "task-workspaces", bot.id, "deleted-earlier", "node_modules", ".modules.yaml"));
+    put(join(DATA_DIR, "task-workspaces", bot.id, "deleted-earlier", "package.json"));
     expect(store.deleteBot(bot.id)).toBe(true);
     leftovers.flush();
     await folders.idle();

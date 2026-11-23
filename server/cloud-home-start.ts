@@ -45,7 +45,7 @@ const SERVER_ENV_NAMES = new Set([
   // An ended Cloud started only for its owner's export: the server runs frozen (server/move-freeze.ts).
   "OMB_CLOUD_EXPORT_ONLY",
   // The orphan sweep's switch (server/host/orphan-sweep.ts): off, report or remove, set per home by the Admin.
-  "OMB_ORPHAN_SWEEP",
+  "OMB_ORPHAN_SWEEP", "OMB_ORPHAN_SWEEP_MAX_SHARE",
 ]);
 export function serverEnvironmentAllowed(name: string): boolean {
   return SERVER_ENV_NAMES.has(name) || name.startsWith("LC_");
