@@ -37,6 +37,8 @@ export function createPersonWaits(deps: PersonWaitsDeps) {
 
   /** What this conversation rests on: a card older than the Needs you window has been left, and no longer asks. */
   const restsOn = (threadId: string): PersonWait | undefined => {
+    const owner = store.botByThread(threadId);
+    if (owner && store.taskByThread(owner.id, threadId)?.closedBy) return undefined;
     const wait = restingOnPerson(store.activePath(threadId), Boolean(store.groupByThread(threadId)));
     return wait && now() - wait.at < NEEDS_YOU_WINDOW_MS ? wait : undefined;
   };
@@ -111,6 +113,9 @@ export function createPersonWaits(deps: PersonWaitsDeps) {
       withCards.delete(change.threadId);
       resting.delete(change.threadId);
     } else if (change.type === "bot") {
+      if (change.closedByChanged && change.threadId && withCards.has(change.threadId)) {
+        refresh(change.threadId);
+      }
       for (const [threadId, wait] of resting) if (store.taskByThread(change.botId, threadId)) show(threadId, wait);
     }
   });

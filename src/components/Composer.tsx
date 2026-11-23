@@ -1,6 +1,7 @@
 import { directMessageSent, roomMessageSent } from "@/lib/product-events";
 import { TeamAudienceLabel } from "./TeamSideSwitch";
 import { useComposerDictation } from "@/lib/use-composer-dictation";
+import { ComposerForkError, useComposerFork } from "./ComposerFork";
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { Mic, Square, X } from "lucide-react";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { useStoreRef } from "@/state/store-ref"; import { sameDrawnBots } from "@/lib/drawn-bots";
@@ -175,6 +176,7 @@ export function Composer({
     draftId,
     !group && bot && !state.config?.team ? `bot:${bot.id}` : undefined,
   );
+  const forkOwnerId = singleRow || group?.dm || !threadId ? undefined : group?.id ?? bot?.id;
   const attachmentPending = useDraftAttachmentPending(draftId);
   const failedSends = useFailedComposerSends(draftId); const picks = mentionPicksFor(draftId);
   const [channelMode, setChannelMode] = useComposerChannelMode(draftId);
@@ -230,6 +232,8 @@ export function Composer({
     [text, editText, editAttachments],
   );
   const { recording, ready: micReady, speechError, toggle: toggleMic, stop: stopDictation } = useComposerDictation({ draftId, text, onText: editText });
+  const fork = useComposerFork({ ownerId: forkOwnerId, kind: group ? "group" : "bot", threadId,
+    branchLeafId: group ? undefined : bot?.activeLeafId ?? undefined, draftId, text, editText, stopDictation });
   const micShown = !locked && !busy && micReady;
   const [caret, setCaret] = useState(0);
   const shellRef = useRef<HTMLDivElement>(null);
@@ -329,9 +333,10 @@ export function Composer({
       label: "/setup",
       description: t("composer.command.setupDesc"),
     }, { kind: "command", id: "burst", label: "/burst", description: t("composer.command.burstDesc") });
-    available.push(...skillSlashCommands(slashSkills));
+    if (builtIns && forkOwnerId) available.push({ kind: "command", id: "fork", label: "/fork", description: t("composer.command.forkDesc") });
+    available.push(...skillSlashCommands(slashSkills).filter((command) => !(builtIns && forkOwnerId && command.id === "fork")));
     return available.filter((command) => slashCommandMatches(command, slash.query));
-  }, [slash, dismissedSlashAt, group, bot, canLearn, state.instances, locale, slashSkills]);
+  }, [slash, dismissedSlashAt, group, bot, canLearn, state.instances, locale, slashSkills, forkOwnerId]);
   const commandPickerOpen = commandCandidates.length > 0;
 
   const mention = mentionQueryAt(text, caret); const teammates = useTeammates(); const viewer = useViewerEmail();
@@ -524,7 +529,8 @@ export function Composer({
   // A one-to-one bot at work: Enter does the chosen follow-up and Ctrl/⌘ with it the other one. Rooms keep their own queue.
   const followUpFor = (alternate: boolean) => resolveFollowUp({ running: busy && !group && Boolean(bot), alternate, preferred: followUpDefault, canSteer }) ?? undefined;
   const steersNow = group ? canSteer : followUpFor(false) === "steer";
-  const sendNames = sendLabels({ simple: !advanced, busy, canSteer: steersNow, name: busyName, sendLabel });
+  const sendNames = fork.command ? { label: t("composer.command.forkDesc"), title: t("composer.command.forkDesc") }
+    : sendLabels({ simple: !advanced, busy, canSteer: steersNow, name: busyName, sendLabel });
   const retryFailedSend = (failed: FailedComposerSend) => {
     const failedMode = failed.channelMode ?? "chat";
     if (failed.requestText.includes("<attached-image ") && !imageTargetsSupport(failed.requestText, failedMode)) {
@@ -557,6 +563,11 @@ export function Composer({
   };
   const send = (followUp: FollowUp | undefined = followUpFor(false)) => {
     if (locked || attachmentPending) return;
+    if (fork.command) {
+      setDismissedSlashAt(slash?.start ?? 0);
+      fork.submit();
+      return;
+    }
     if (
       attachments.some((attachment) => attachment.kind === "image") &&
       !imageTargetsSupport(effectiveText, effectiveChannelMode)
@@ -704,6 +715,7 @@ export function Composer({
         </div>
       )}
       <div className="pointer-events-auto relative w-full">
+        {fork.error && <ComposerForkError message={fork.error} onRetry={() => { inputRef.current?.focus(); send(); }} />}
         {failedSends.map((failed) => (
           <div
             key={failed.id}
@@ -843,7 +855,8 @@ export function Composer({
           onKeyDown={(e) => {
             // An input method's confirming Enter and arrows pick its own candidates, not a mention or command.
             if (imeComposing(e.nativeEvent)) return;
-            if (commandPickerOpen) {
+            const submitsFork = fork.command && commandCandidates[highlight]?.id === "fork" && sendsMessage(e.nativeEvent, sendKey);
+            if (commandPickerOpen && !submitsFork) {
               if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                 e.preventDefault();
                 const delta = e.key === "ArrowDown" ? 1 : -1;
@@ -976,9 +989,9 @@ export function Composer({
         {callShown && bot && !group && <CallButton bot={bot} placement="composer" fill={advanced || singleRow ? undefined : slot.fill} ink={slot.ink} inverse={singleRow} modeMenu={!stacked} />}
         {callShown && group && !advanced && <GroupCallButton group={group} members={members ?? []} placement="composer" fill={slot.fill} ink={slot.ink} />}
         {hasContent && !locked && (
-          <ComposerSendButton compact={simpleDock} waits={busy && !steersNow} label={sendNames.label} title={sendNames.title} look={slot.button}
+          <ComposerSendButton compact={simpleDock} waits={!fork.command && busy && !steersNow} label={sendNames.label} title={sendNames.title} look={slot.button}
             disabled={attachmentPending} onSend={(alternate) => send(followUpFor(alternate))} onChoose={send}
-            menu={followUpFor(false) && { choices: followUpChoices(followUpDefault, canSteer), name: busyName, sendKey: sendLabel, alternateKey: alternateSendLabel(sendKey) }} />
+            menu={!fork.command && followUpFor(false) ? { choices: followUpChoices(followUpDefault, canSteer), name: busyName, sendKey: sendLabel, alternateKey: alternateSendLabel(sendKey) } : undefined} />
           )}
           </div>
         </div>
