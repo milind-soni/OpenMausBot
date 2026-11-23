@@ -504,6 +504,8 @@ export interface ProviderAuthenticationStart {
   expiresAt: string | null;
   /** A short-lived code to enter only at the provider's authorization URL. */
   userCode?: string;
+  /** The provider's page shows a code after the sign-in, which the person pastes back (Antigravity's native CLI). */
+  pasteCode?: boolean;
 }
 
 export interface ProviderAuthenticationStatus extends Omit<ProviderAuthenticationStart, "phase"> {

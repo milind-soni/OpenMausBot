@@ -1,40 +1,46 @@
 ---
 title: Google Gemini (Antigravity)
-description: Install Google's official ACP runtime and use your Google subscription in MausBot.
+description: Install Google's official Antigravity CLI and use your Google subscription in MausBot.
 icon: Sparkles
 ---
 
 This is how you use a Google AI subscription (free, Google AI Pro or Google AI Ultra) in MausBot. On June 18, 2026 Google moved personal Gemini accounts from Gemini CLI to Antigravity, so the engine is listed as **Google Gemini (Antigravity)**. The models your plan includes appear after you sign in.
 
-MausBot connects to Google Antigravity through Google's official Agent Client Protocol server. It does not ask for your Google password or copy a login from another app.
+MausBot runs Google's own Antigravity CLI (version 1.5 or later) through its Agent Client Protocol server (`agy acp`). It does not ask for your Google password or copy a login from another app.
 
 ## Set up
 
 1. Choose a **Google Gemini (Antigravity)** model in the model picker.
-2. Select **Install official Antigravity**. The download comes from `dl.google.com` and MausBot verifies its pinned size and SHA-256 before installing it.
-3. Select **Sign in with Google** and finish in your browser.
-4. Return to MausBot, open the model picker, and select **Refresh**. The account's available models appear after discovery completes.
+2. Select **Install official Antigravity**. MausBot asks Google's update channel which release is current for your computer, downloads it from Google's own storage, and checks it against the SHA-512 the channel names before installing it.
+3. Select **Sign in with Google** and sign in in your browser. Google's Antigravity page then shows a code.
+4. Copy that code, paste it into the **Code from the Antigravity page** field on the card, and select **Send code**. The account's available models appear once the sign-in finishes.
 
-The runtime download is large because Google ships the ACP server and its local computer harness together. MausBot stores it in its own data directory; it does not modify a system installation.
+The CLI is one program, about 220 MB on a Mac and 275 MB on Linux. MausBot keeps it in its own data folder, read-only, and does not change a system installation.
 
-## After upgrading from the older agy integration
+## Updates
 
-Version 0.1.51 switched from the community `agy` CLI to Google's official ACP runtime. An existing Antigravity app or `agy` login does not sign this separate runtime in. Complete **Install official Antigravity** and **Sign in with Google** in the model picker, then refresh and choose a model available to that account.
+MausBot updates the CLI itself: it looks at Google's update channel at most once an hour, installs a newer release while no bot is working, and removes the release it replaced. The CLI's own self-update is turned off, so a release only changes through MausBot. A conversation that is running keeps its release until it next starts.
 
-Saved legacy `agy` paths, including Windows `.cmd` shims, now resolve to the official runtime. Genuine custom ACP executable paths are still respected. The migration does not copy credentials from another app, remove the old CLI, or change which Google account you authorize.
+## Moving from the older runtime
 
-The Google sign-in belongs to the engine instance, not the runtime version, so ordinary app updates do not require signing in again. Cold starts can be slow, particularly on Windows; setup and model discovery allow up to 90 seconds. If Google expires or revokes the saved session, sign in again when prompted.
+Before the native CLI, MausBot ran Google's packaged ACP server 1.4.3 (about 1 GB on Linux). A computer or Cloud that has it moves to the native CLI by itself, through the engine updater, a few minutes after MausBot starts.
+
+The native CLI keeps its Google sign-in in a different file from the older runtime, so **each Antigravity account signs in with Google once more** after the move. The account card shows **Sign in with Google** until then. The older runtime is removed from disk once an account on that computer has signed in on the CLI.
 
 ## Multiple Google accounts
 
-Create another Antigravity engine instance for another account. Each instance has a separate private `GEMINI_HOME`, token, settings file, and model catalog. Signing one instance in never replaces another instance's account.
+Create another Antigravity engine instance for another account. Each instance has its own private profile folder, sign-in file, settings and model catalog. MausBot starts the CLI so that it keeps each sign-in in that instance's own folder instead of one shared system keychain entry, so signing one instance in never replaces another instance's account.
 
-## Remote servers
+## Remote servers and Clouds
 
-When the MausBot server and browser are on different computers, Google's final redirect points to the server's loopback address and may show a page that cannot load locally. Expand **Signing in from another computer?**, copy the complete redirect URL from the browser address bar, and paste it into MausBot. The server accepts only the loopback port and OAuth state created by that exact in-progress sign-in.
+The sign-in needs no connection back to the computer that runs MausBot: the code from the Antigravity page works from any browser, including for a MausBot Cloud. MausBot accepts only the code, or the full address of that Antigravity page, for the sign-in in progress.
 
 ## Permissions and tools
 
-Antigravity uses the same MausBot approval cards as other ACP engines. Connected apps, custom MCP servers, the browser, computers, and teammate tools are mounted only for the active session; MausBot no longer edits the user's global Gemini MCP configuration.
+Antigravity uses the same MausBot approval cards as other ACP engines. Connected apps, custom MCP servers, the browser, computers, and teammate tools are mounted only for the active session; MausBot does not edit the user's global Gemini MCP configuration.
 
-The normal mode asks before protected actions. Full access maps to Antigravity's native `yolo` mode, but native questions still wait for a person instead of being guessed automatically.
+The CLI always runs in its `default` mode, where it asks before acting, and MausBot answers by the bot's approval level: Full access shows no approval cards (commands on the never-list excepted), and Auto-accept edits answers plain file edits inside the bot's folder and still asks about commands.
+
+## Rolling back
+
+Self-hosted servers can go back to the older 1.4.3 runtime by starting MausBot with `OMB_ANTIGRAVITY_PINNED_RUNTIME=1`. If the older runtime was already removed, **Install official Antigravity** downloads it again (about 340 MB on Linux), and accounts use the sign-in they had on it, if it is still there.

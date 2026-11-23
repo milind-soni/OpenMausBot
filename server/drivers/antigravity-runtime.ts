@@ -5,7 +5,10 @@
 //   - apps/server/src/provider/AntigravityInstallation.ts:57, 311-345, 922-966,
 //     985-999 (a CLI needs no harness sibling, the hourly look at the channel,
 //     and keeping an installed CLI that is newer than the channel's).
-// The pinned runtime stays first for a computer that already has it, and a saved `agy` path is never started.
+// The native CLI is the runtime wherever Google's channel has a build: a computer that has the pinned runtime moves to
+// it through the engine updater, and the pinned one is removed once an account here has signed in on the CLI. The pinned
+// runtime stays as the fallback where the channel has no build or cannot be reached, and behind the rollback switch. A
+// saved `agy` path is never started.
 import { createHash, randomUUID } from "node:crypto";
 import {
   access,
@@ -27,7 +30,7 @@ import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { execFile } from "node:child_process";
 
 import { DATA_DIR } from "../config.ts";
-import { outsideBoxOptions } from "../procs.ts";
+import { liveCliCommands, outsideBoxOptions } from "../procs.ts";
 import { antigravityRuntimesRoot } from "../engine-roots.ts";
 import { extractZipMember, readZipDirectory } from "../zip-archive.ts";
 import { augmentedPath } from "../env-path.ts";
@@ -36,7 +39,14 @@ import {
   type AntigravityReleaseAsset,
 } from "./antigravity-release.ts";
 import { parseVersionTriple, versionAtLeast } from "./acp/version-probe.ts";
-import { ANTIGRAVITY_NATIVE_CLI, activeAntigravityCli, installAntigravityCli, isAntigravityCliName } from "./antigravity-cli-install.ts";
+import {
+  ANTIGRAVITY_CLI_TOKEN_FILE,
+  ANTIGRAVITY_NATIVE_CLI,
+  activeAntigravityCli,
+  installAntigravityCli,
+  isAntigravityCliName,
+  pruneAntigravityCliReleases,
+} from "./antigravity-cli-install.ts";
 import { antigravityCliTarget, latestAntigravityCliRelease, type AntigravityCliReleaseAsset } from "./antigravity-cli-release.ts";
 
 const FREE_SPACE_MARGIN = 256 * 1024 * 1024;
@@ -229,16 +239,16 @@ export async function resolveAntigravityRuntime(
   }
 
   const installedCli = ANTIGRAVITY_NATIVE_CLI ? await activeAntigravityCli(runtimeRoot(baseDir)) : null;
+  if (installedCli) return installedCli;
   if (native) {
-    if (installedCli) return installedCli;
     throw new AntigravitySetupError("Antigravity's native CLI is not installed. Install the official Google runtime to continue, or set the CLI path back to agy.");
   }
+  // Until the CLI is installed, a computer that has the pinned runtime keeps running it.
   const asset = resolveAntigravityReleaseAsset();
   if (asset) {
     const managed = await completedRelease(join(runtimeRoot(baseDir), "versions", asset.sha256), asset);
     if (managed) return managed;
   }
-  if (installedCli) return installedCli;
   const names = executableNames();
   for (const candidate of pathCandidates(names.executable, env)) {
     const found = await externalRuntime(candidate, "path");
@@ -279,15 +289,13 @@ async function extractPinnedArchive(
   if (seen.size !== 2) throw new Error("The archive is missing an expected file.");
 }
 
-/** A computer the app already put a pinned runtime on keeps it: only a new install, one that already runs the native
- * CLI, or a CLI path that asks for it takes the CLI. Null when the pinned runtime is the one to install: the CLI's own
- * failure is thrown unless this is a new install the pinned runtime can stand in for. */
+/** Every install takes the native CLI, including on a computer that has the pinned runtime. Null when the pinned
+ * runtime is the one to install or keep: the CLI's own failure is thrown unless the pinned runtime can stand in (no
+ * CLI here yet, and Google publishes the pinned runtime for this platform). */
 async function installNativeCli(options: AntigravityInstallOptions, root: string): Promise<AntigravityRuntime | null> {
   if (!ANTIGRAVITY_NATIVE_CLI || options.asset !== undefined) return null;
   const pinned = resolveAntigravityReleaseAsset();
   const active = await activeAntigravityCli(root);
-  if (!options.native && !active && pinned
-    && ((await completedRelease(join(root, "versions", pinned.sha256), pinned)) || (await antigravityOlderRuntime(options.baseDir, pinned)) !== null)) return null;
   try {
     const release = options.cliRelease !== undefined ? options.cliRelease : await latestAntigravityCliRelease({ fetchImpl: options.fetchImpl });
     if (!release) throw new Error("Could not find a native Antigravity CLI release. Check the network connection and try again.");
@@ -295,10 +303,12 @@ async function installNativeCli(options: AntigravityInstallOptions, root: string
       await options.validate?.(active, active.version);
       return active;
     }
-    return await installAntigravityCli(release, { root, fetchImpl: options.fetchImpl, validate: options.validate, retry: retryOnWindowsFileLock });
+    const installed = await installAntigravityCli(release, { root, fetchImpl: options.fetchImpl, validate: options.validate, retry: retryOnWindowsFileLock });
+    await pruneAntigravityCliReleases(root, runningFrom).catch(() => []);
+    return installed;
   } catch (error) {
     if (options.native || !pinned || active) throw error;
-    console.warn(`antigravity: the native CLI could not be installed (${error instanceof Error ? error.message : String(error)}); installing the pinned runtime instead`);
+    console.warn(`antigravity: the native CLI could not be installed (${error instanceof Error ? error.message : String(error)}); using the pinned runtime instead`);
     return null;
   }
 }
@@ -436,29 +446,77 @@ export function installAntigravityRuntime(options: AntigravityInstallOptions = {
 
 let channelAnswer: { at: number; version: string } | undefined;
 
-/** The native CLI's version when an account here runs it and Google's channel has a newer one. An account runs it
- * when its CLI path asks for it, or when no pinned runtime is installed to go first. The channel's answer is kept for
+/** The version installed here when the engine updater has something to install: a newer native CLI on Google's
+ * channel, or, on a computer that still runs the pinned runtime, the move to the CLI. The channel's answer is kept for
  * an hour, so an update found while the engine is busy is still there on the next look; a channel that did not answer
  * is asked again. */
 export async function antigravityCliUpdate(options: {
   baseDir?: string; now?: number; latest?: () => Promise<AntigravityCliReleaseAsset | null>; asset?: AntigravityReleaseAsset | null;
-  /** Every engine's configured CLI path. */
-  configuredClis?: readonly string[];
 } = {}): Promise<string | null> {
   if (!ANTIGRAVITY_NATIVE_CLI) return null;
   const root = runtimeRoot(options.baseDir);
   const active = await activeAntigravityCli(root);
-  if (!active?.version) return null;
   const pinned = options.asset === undefined ? resolveAntigravityReleaseAsset() : options.asset;
-  const pinnedFirst = pinned ? (await completedRelease(join(root, "versions", pinned.sha256), pinned)) !== null : false;
-  if (pinnedFirst && !(options.configuredClis ?? []).some(isAntigravityNativeAlias)) return null;
+  const current = active?.version
+    ?? (pinned && (await completedRelease(join(root, "versions", pinned.sha256), pinned)) ? pinned.version : null)
+    ?? await antigravityOlderRuntime(options.baseDir, pinned);
+  if (!current) return null;
   const now = options.now ?? Date.now();
   if (channelAnswer === undefined || now - channelAnswer.at >= UPDATE_CHECK_INTERVAL_MS || now < channelAnswer.at) {
     const latest = await (options.latest ?? latestAntigravityCliRelease)();
     if (!latest) return null;
     channelAnswer = { at: now, version: latest.version };
   }
-  return isNewer(channelAnswer.version, active.version) ? active.version : null;
+  if (!active) return current;
+  return active.version && isNewer(channelAnswer.version, active.version) ? active.version : null;
+}
+
+/** Whether a process this server started runs a program from `directory`. */
+function runningFrom(directory: string): boolean {
+  const root = resolve(directory);
+  for (const line of liveCliCommands()) {
+    if (line.some((part) => typeof part === "string" && resolve(part).startsWith(root))) return true;
+  }
+  return false;
+}
+
+/** Whether an account here holds a sign-in the native CLI wrote: proof the CLI signs in on this computer. */
+async function cliSignedInHere(baseDir: string): Promise<boolean> {
+  const profiles = join(baseDir, "providers", "antigravity");
+  for (const name of await readdir(profiles).catch(() => [] as string[])) {
+    const info = await stat(join(profiles, name, "antigravity-acp", ANTIGRAVITY_CLI_TOKEN_FILE)).catch(() => null);
+    if (info?.isFile() && info.size > 0) return true;
+  }
+  return false;
+}
+
+/** Removes the pinned runtime (about 1 GB on Linux) once the switch to the native CLI has worked here: the CLI is
+ * installed and whole, an account signed in on it, and no process runs the pinned runtime. Nothing is removed behind
+ * the rollback switch, and rolling back later downloads the pinned runtime again. The folders it removed. */
+export async function retirePinnedAntigravityRuntime(options: { baseDir?: string; inUse?: (directory: string) => boolean } = {}): Promise<string[]> {
+  if (!ANTIGRAVITY_NATIVE_CLI) return [];
+  const baseDir = options.baseDir ?? DATA_DIR;
+  const root = runtimeRoot(baseDir);
+  if (!(await activeAntigravityCli(root)) || !(await cliSignedInHere(baseDir))) return [];
+  const versions = join(root, "versions");
+  const removed: string[] = [];
+  for (const name of await readdir(versions).catch(() => [] as string[])) {
+    const directory = join(versions, name);
+    let record: Partial<InstallRecord> | null = null;
+    try {
+      record = JSON.parse(await readFile(join(directory, INSTALL_RECORD), "utf8")) as Partial<InstallRecord>;
+    } catch {}
+    // Only a pinned runtime: its record names its harness and its folder is its SHA-256.
+    if (!record || record.sha256 !== name || !record.harness || (options.inUse ?? runningFrom)(directory)) continue;
+    try {
+      await retryOnWindowsFileLock(() => rm(directory, { recursive: true, force: true }));
+      removed.push(name);
+      console.warn(`antigravity: removed the pinned ${record.version ?? ""} runtime now that the native CLI runs here`);
+    } catch (error) {
+      console.warn(`antigravity: could not remove the pinned runtime (${error instanceof Error ? error.message : String(error)})`);
+    }
+  }
+  return removed;
 }
 
 /** The newest runtime the app installed here, when it is not the pinned one; null when the pinned one is installed or none is. */

@@ -8,6 +8,12 @@ vi.mock("./antigravity-release.ts", async (importOriginal) => ({
   resolveAntigravityReleaseAsset: () => null,
 }));
 
+// Nor a native CLI build: no channel target for this platform.
+vi.mock("./antigravity-cli-release.ts", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./antigravity-cli-release.ts")>(),
+  antigravityCliTarget: () => null,
+}));
+
 const { resolveAntigravityRuntime } = await import("./antigravity-runtime.ts");
 
 describe("Antigravity on a platform Google publishes no runtime for", () => {

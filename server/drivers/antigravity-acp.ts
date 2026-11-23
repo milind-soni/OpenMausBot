@@ -16,7 +16,11 @@
 //   - apps/server/src/provider/antigravityAuthSupport.ts:467-477,
 //     apps/server/src/provider/acp/AntigravityAcpSupport.ts:186-193 and
 //     apps/server/src/provider/AntigravityInstallation.ts:501-503 at
-//     b732621b51 (the native CLI's launch, its session mode and its name).
+//     b732621b51 (the native CLI's launch, its session mode and its name);
+//   - apps/server/src/provider/antigravityAuthSupport.ts:167-177, 222-244,
+//     575-644 at 38067630229 (the native CLI's environment: no self-update and
+//     the SSH_CONNECTION value that keeps each profile's sign-in in its own
+//     file; the `--login` link and the code pasted back).
 // The temp folder stays one per instance, the redirect can go through a relay into a boxed runtime, and startup waits
 // while a Windows unpack is still growing.
 import { execFile } from "node:child_process";
@@ -34,6 +38,7 @@ import type { BoxRelay } from "../bot-box/relay.ts";
 import type { ModelCatalog } from "../contracts.ts";
 import type { ChildProcess } from "node:child_process";
 import type { AntigravityRuntime } from "./antigravity-runtime.ts";
+import { ANTIGRAVITY_CLI_TOKEN_FILE } from "./antigravity-cli-install.ts";
 import { acpVariantOption, surveyModelVariants } from "./acp/config-options.ts";
 import { StderrTail, exitDetail } from "./acp/exit-report.ts";
 import {
@@ -82,6 +87,8 @@ const REMOVED_ENVIRONMENT_KEYS = new Set([
   "AGY_ACP_DEFAULT_MODEL",
   "GEMINI_HOME",
   "AGY_ACP_FORCE_FILE_STORAGE",
+  "AGY_CLI_DISABLE_AUTO_UPDATE",
+  "SSH_CONNECTION",
   "ANTIGRAVITY_HARNESS_PATH",
   "BROWSER",
   "PYTHONUNBUFFERED",
@@ -184,6 +191,8 @@ export function authorizationUrlFromLine(line: string): string | null {
   }
 }
 
+export const ANTIGRAVITY_SSH_CONNECTION = "127.0.0.1 0 127.0.0.1 0";
+
 export function antigravityProfileDirectory(instanceId: string, baseDir = DATA_DIR): string {
   return join(baseDir, "providers", "antigravity", createHash("sha256").update(instanceId).digest("hex"));
 }
@@ -197,13 +206,24 @@ export async function removeAntigravityProfile(instanceId: string, baseDir = DAT
     });
 }
 
+/** The pinned runtime's sign-in. */
 export function antigravityTokenPath(instanceId: string, baseDir = DATA_DIR): string {
   return join(antigravityProfileDirectory(instanceId, baseDir), "antigravity-acp", "acp_token.json");
 }
 
-/** Signing out forgets only this account's stored Google sign-in; its profile stays for the next sign-in. */
+/** The native CLI's sign-in. */
+export function antigravityCliTokenPath(instanceId: string, baseDir = DATA_DIR): string {
+  return join(antigravityProfileDirectory(instanceId, baseDir), "antigravity-acp", ANTIGRAVITY_CLI_TOKEN_FILE);
+}
+
+/** Both runtimes' sign-in files. The pinned runtime's stays when an account moves to the CLI, so a rollback finds it. */
+export function antigravitySignInPaths(instanceId: string, baseDir = DATA_DIR): string[] {
+  return [antigravityCliTokenPath(instanceId, baseDir), antigravityTokenPath(instanceId, baseDir)];
+}
+
+/** Signing out forgets only this account's stored Google sign-ins, both runtimes'; its profile stays for the next one. */
 export async function removeAntigravitySignIn(instanceId: string, baseDir = DATA_DIR): Promise<void> {
-  await rm(antigravityTokenPath(instanceId, baseDir), { force: true, maxRetries: 4, retryDelay: 250 });
+  for (const path of antigravitySignInPaths(instanceId, baseDir)) await rm(path, { force: true, maxRetries: 4, retryDelay: 250 });
 }
 
 /** The runtime asked for a Google sign-in although a token file is stored (a revoked or ineligible account). */
@@ -269,11 +289,21 @@ export async function prepareAntigravityProfile(input: {
   }
   stripWorkspaceCredentialEnv(environment);
   const caBundle = (input.platform ?? process.platform) === "linux" ? linuxCaBundle(input.baseEnv ?? process.env) : undefined;
+  const nativeCli = input.runtime.harnessPath === null;
   Object.assign(environment, {
     ...(caBundle ? { SSL_CERT_FILE: caBundle } : {}),
     GEMINI_HOME: directory,
     AGY_ACP_FORCE_FILE_STORAGE: "1",
-    ...(input.runtime.harnessPath === null ? {} : { ANTIGRAVITY_HARNESS_PATH: input.runtime.harnessPath }),
+    ...(nativeCli
+      ? {
+          // Updates come only through this app's updater; the release folder is read-only besides.
+          AGY_CLI_DISABLE_AUTO_UPDATE: "1",
+          // The CLI ignores AGY_ACP_FORCE_FILE_STORAGE and keeps every profile's Google sign-in in one OS keyring entry
+          // unless it believes it runs over SSH: then it uses the profile's own file. A fixed value, so no address of
+          // the host reaches the box.
+          SSH_CONNECTION: ANTIGRAVITY_SSH_CONNECTION,
+        }
+      : { ANTIGRAVITY_HARNESS_PATH: input.runtime.harnessPath! }),
     BROWSER: browserCommand,
     PYTHONUNBUFFERED: "1",
     ELECTRON_RUN_AS_NODE: "1",
@@ -288,7 +318,7 @@ export async function prepareAntigravityProfile(input: {
   }
   return {
     directory,
-    tokenPath: join(acpDirectory, "acp_token.json"),
+    tokenPath: join(acpDirectory, nativeCli ? ANTIGRAVITY_CLI_TOKEN_FILE : "acp_token.json"),
     environment,
     ...(tempDirectory ? { tempDirectory } : {}),
   };
@@ -550,7 +580,12 @@ export class AntigravityAcpClient {
   }
 }
 
-export function parseAntigravityAuthorizationUrl(authorizationUrl: string): {
+/** Where `agy acp --login` sends Google; the page shows a code the person pastes back. */
+export const ANTIGRAVITY_CODE_REDIRECT_URI = "https://antigravity.google/oauth-callback";
+
+/** `loopback`: the pinned runtime's link, which redirects to its listener on 127.0.0.1. `code`: the native CLI's
+ * `--login` link, which redirects to Google's Antigravity page that shows a code. */
+export function parseAntigravityAuthorizationUrl(authorizationUrl: string, kind: "loopback" | "code" = "loopback"): {
   authorizationUrl: string;
   redirectUri: string;
   state: string;
@@ -563,20 +598,36 @@ export function parseAntigravityAuthorizationUrl(authorizationUrl: string): {
   const redirectUri = url.searchParams.get("redirect_uri");
   if (
     url.origin !== "https://accounts.google.com" ||
-    url.pathname !== "/o/oauth2/v2/auth" ||
+    url.pathname !== (kind === "loopback" ? "/o/oauth2/v2/auth" : "/o/oauth2/auth") ||
     url.username || url.password || url.hash ||
     url.searchParams.getAll("state").length !== 1 ||
     url.searchParams.getAll("redirect_uri").length !== 1 ||
     url.searchParams.getAll("response_type").length !== 1 ||
     url.searchParams.get("response_type") !== "code" ||
     !state || state.length > 512 || /\s/u.test(state) ||
-    !redirectUri || !/^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}\/$/u.test(redirectUri)
+    !redirectUri || (kind === "loopback" ? !/^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}\/$/u.test(redirectUri) : redirectUri !== ANTIGRAVITY_CODE_REDIRECT_URI)
   ) throw new Error("Antigravity returned an invalid Google sign-in URL.");
+  if (kind === "code") return { authorizationUrl, redirectUri, state };
   const redirect = new URL(redirectUri);
   if (Number(redirect.port) < 1024 || Number(redirect.port) > 65535) {
     throw new Error("Antigravity returned an invalid Google sign-in URL.");
   }
   return { authorizationUrl, redirectUri, state };
+}
+
+/** What `agy acp --login` reads after its link: the code the Antigravity page shows, or that page's URL, which must answer
+ * this sign-in. Undefined for anything else, including any line break. */
+export function antigravityLoginResponse(pending: { redirectUri: string; state: string }, response: string): string | undefined {
+  const value = response.trim();
+  if (/^[\w./~-]{1,2048}$/u.test(value)) return value;
+  if (value.length > 16_384 || /\s/u.test(value)) return undefined;
+  const url = URL.parse(value);
+  if (
+    url === null || `${url.origin}${url.pathname}` !== pending.redirectUri || url.username || url.password ||
+    url.searchParams.getAll("state").length !== 1 || url.searchParams.get("state") !== pending.state ||
+    url.searchParams.getAll("code").length !== 1 || !url.searchParams.get("code")
+  ) return undefined;
+  return value;
 }
 
 export function validateAntigravityCallbackUrl(

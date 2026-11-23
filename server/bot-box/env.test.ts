@@ -9,7 +9,7 @@ import { BOX_ENV_NAMES, BOX_ENV_NEVER, BOX_ENV_OMB_NAMES, BOX_ENV_OMB_PREFIXES, 
 const SERVER_ONLY_OMB: ReadonlySet<string> = new Set([
   "OMB_ACP_LIMIT_QUIET_MS", "OMB_ACP_NO_SIGNS_STOP_MS", "OMB_ACP_PLAN_LINES", "OMB_ACP_QUIET_NOTICE_MS",
   "OMB_ACP_QUIET_TICK_MS", "OMB_ACP_SESSION_IDLE_", "OMB_ACP_SHARED_RECYCLE_MS", "OMB_ADMIN_", "OMB_ADMIN_MEMBERSHIP",
-  "OMB_ADMIN_URL", "OMB_ADMIN_WORKSPACE", "OMB_AGENT_BROWSER_PATH", "OMB_AI_CHECKS", "OMB_ANTHROPIC_API_KEY",
+  "OMB_ADMIN_URL", "OMB_ADMIN_WORKSPACE", "OMB_AGENT_BROWSER_PATH", "OMB_AI_CHECKS", "OMB_ANTHROPIC_API_KEY", "OMB_ANTIGRAVITY_PINNED_RUNTIME",
   "OMB_ANTHROPIC_API_URL", "OMB_APP_VERSION", "OMB_ATTACHMENTS_MAX_BYTES", "OMB_AZURE_OPENAI_LIVE_DEPLOYMENT",
   "OMB_AZURE_OPENAI_LIVE_ENDPOINT", "OMB_BACKGROUND_TEXT_MAX", "OMB_BENCH", "OMB_BOAT_API", "OMB_BOTS_FULL_SAVE", "OMB_BOTS_SAVE_CHECK", "OMB_BOT_BOX", "OMB_BOT_MEMORY_MAX_MB", "OMB_BOX_CANARY", "OMB_BRAND_FILE",
   "OMB_BROWSER_CONNECTION", "OMB_BROWSER_HOLD_IDLE_MS", "OMB_BROWSER_IDLE_HANDOVER_MS", "OMB_BROWSER_LANG", "OMB_BROWSER_LEGACY_SHELL",
@@ -113,6 +113,11 @@ describe("the box's environment allow-list", () => {
 
   it("keeps what Antigravity's runtime is started with: its harness, its file storage switch and the browser hook", () => {
     for (const name of ["ANTIGRAVITY_HARNESS_PATH", "AGY_ACP_FORCE_FILE_STORAGE", "BROWSER", "GEMINI_HOME"]) expect(boxEnvironmentAllows(name), name).toBe(true);
+  });
+
+  it("keeps what Antigravity's native CLI is started with: no self-update, and the SSH_CONNECTION that keeps its sign-in in the profile", () => {
+    for (const name of ["AGY_CLI_DISABLE_AUTO_UPDATE", "SSH_CONNECTION"]) expect(boxEnvironmentAllows(name), name).toBe(true);
+    expect(boxEnvironment({ SSH_CONNECTION: "127.0.0.1 0 127.0.0.1 0", AGY_CLI_DISABLE_AUTO_UPDATE: "1" })).toEqual({ SSH_CONNECTION: "127.0.0.1 0 127.0.0.1 0", AGY_CLI_DISABLE_AUTO_UPDATE: "1" });
   });
 
   it("keeps the keys one spawn vouches for, under any name, past the allow-list and the deny, never past the never-list or OMB_", () => {

@@ -11,6 +11,9 @@ export const BOX_ENV_NAMES: ReadonlySet<string> = new Set([
   "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR", "DISPLAY", "WAYLAND_DISPLAY",
   "AGENT_BROWSER_EXECUTABLE_PATH", "BROWSER", "BASH_MAX_TIMEOUT_MS", "ELECTRON_RUN_AS_NODE", "PYTHONUNBUFFERED", "PYTHONDONTWRITEBYTECODE",
   "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL",
+  // Antigravity's native CLI keeps each profile's Google sign-in in that profile's own file only while this is set
+  // (server/drivers/antigravity-acp.ts sets a fixed value); without it, it waits on an OS keyring the box does not have.
+  "SSH_CONNECTION",
 ]);
 
 /** OpenMausBot's own variables a boxed process reads: what the harness sets for a bot's engine, its hooks and the MCP

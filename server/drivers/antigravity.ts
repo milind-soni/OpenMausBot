@@ -24,7 +24,7 @@ import {
   antigravityProfileAuthenticated,
   antigravityProfileDirectory,
   antigravitySessionSetup,
-  antigravityTokenPath,
+  antigravitySignInPaths,
   authorizationUrlFromLine,
   noteAntigravitySignedIn,
   noteAntigravitySignInRequired,
@@ -42,6 +42,7 @@ import {
   isAntigravityNativeAlias,
   installAntigravityRuntime,
   resolveAntigravityRuntime,
+  retirePinnedAntigravityRuntime,
 } from "./antigravity-runtime.ts";
 import { ANTIGRAVITY_NATIVE_CLI } from "./antigravity-cli-install.ts";
 import { acpFileEditWithin } from "./permission-command.ts";
@@ -101,9 +102,11 @@ const SIGN_IN_ASKED = /\bauthentication required\b|\bunauthenticated\b|\bnot (?:
 const UNREACHABLE = /\bnetwork\b|\bunreachable\b|\boffline\b|\bgetaddrinfo\b|\benotfound\b|\beai_again\b/iu;
 
 /** -32000 is ACP's `auth_required`, but an agent may reuse it for other failures, a sign-in service it cannot reach
- * among them. Words that ask for a sign-in decide; words that only mention one do unless the failure is one that passes. */
+ * among them. Words that ask for a sign-in decide; words that only mention one do unless the failure is one that passes.
+ * The native CLI answers `authenticate` with -32603 "No browser is available here" when it has no sign-in and no display. */
 export function antigravitySignInError(error: unknown): boolean {
   const value = error as { code?: unknown; message?: unknown; data?: any } | null;
+  if (value?.code === -32603 && typeof value.message === "string" && value.message.startsWith("No browser is available here")) return true;
   if (value?.code !== -32000) return false;
   const data = value.data;
   const bounded = (fields: unknown[]) => fields.filter((field): field is string => typeof field === "string").map((field) => field.slice(0, 2_000)).join(" ");
@@ -195,7 +198,7 @@ const support: AcpSupport = {
   signInRequest: {
     stderrLine: (line) => authorizationUrlFromLine(line) !== null,
     rpcError: antigravitySignInError,
-    required: (instanceId) => noteAntigravitySignInRequired(antigravityTokenPath(instanceId)),
+    required: (instanceId) => antigravitySignInPaths(instanceId).forEach(noteAntigravitySignInRequired),
   },
   processStarted: (child, instanceId) => runtimeProcesses.track(instanceId, child),
   sessionSetupParams: antigravitySessionSetup,
@@ -263,9 +266,13 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
     const base = await AcpAntigravityDriver.create(input);
     scheduleAntigravityTempSweep(input.instanceId);
     scheduleAntigravityTempSweep(VERIFICATION_TEMP_KEY);
+    // Once an account here signed in on the native CLI, the pinned runtime it replaced is removed.
+    const retirePinned = () => void retirePinnedAntigravityRuntime().catch(() => []);
+    retirePinned();
     const auth = new AntigravityAuthController(() => {
-      noteAntigravitySignedIn(antigravityTokenPath(input.instanceId));
+      antigravitySignInPaths(input.instanceId).forEach(noteAntigravitySignedIn);
       void base.refreshModels?.();
+      retirePinned();
     });
     let signingOut: Promise<void> = Promise.resolve();
     let installFailure: string | undefined;
@@ -319,7 +326,8 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       startAuthentication: async () => {
         await signingOut;
         const { runtime, profile } = await runtimeAndProfile();
-        await verifyAntigravityBrowserHelper(profile);
+        // The native CLI's `--login` hands its link over itself; only the pinned runtime needs the browser helper.
+        if (runtime.harnessPath !== null) await verifyAntigravityBrowserHelper(profile);
         return auth.start(runtime, profile);
       },
       getAuthentication: async (flowId) => auth.get(flowId),

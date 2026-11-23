@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +14,7 @@ import { removeTempDir } from "../testing/cleanup.ts";
 import { recordEvents } from "../testing/events.ts";
 import {
   antigravityCliSessionMode,
+  antigravityCliTokenPath,
   antigravityLaunchArgs,
   antigravityTokenPath,
   isValidAntigravityInitializeResult,
@@ -23,7 +24,7 @@ import {
 import { activeAntigravityCli, isAntigravityCliName } from "./antigravity-cli-install.ts";
 import type { AntigravityCliReleaseAsset } from "./antigravity-cli-release.ts";
 import { resolveAntigravityReleaseAsset } from "./antigravity-release.ts";
-import { antigravityCliUpdate, installAntigravityRuntime, resolveAntigravityRuntime } from "./antigravity-runtime.ts";
+import { antigravityCliUpdate, installAntigravityRuntime, resolveAntigravityRuntime, retirePinnedAntigravityRuntime } from "./antigravity-runtime.ts";
 import { AntigravityDriver } from "./antigravity.ts";
 
 const FAKE_ACP = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-acp-cli.ts");
@@ -103,14 +104,20 @@ describe("installing the native CLI from Google's channel", () => {
     expect(validate).toHaveBeenCalledTimes(2);
   });
 
-  it("moves to a newer release and keeps the old one beside it, and never moves back to an older one", async () => {
+  it("moves to a newer release, removes the one it replaced, and never moves back to an older one", async () => {
     const baseDir = folder();
     const [older, newer] = [await release("1.5.6"), await release("1.5.8")];
     const { fetchImpl, asked } = serving([older, newer]);
     const first = await installAntigravityRuntime({ baseDir, fetchImpl, cliRelease: older.asset, native: true });
     const second = await installAntigravityRuntime({ baseDir, fetchImpl, cliRelease: newer.asset });
     expect(second.version).toBe("1.5.8");
-    expect(existsSync(first.executablePath)).toBe(true);
+    // Pruned once the newer one is active and nothing runs the older one (T3 Code 68ea2220c12).
+    expect(existsSync(dirname(first.executablePath))).toBe(false);
+    if (!WINDOWS) {
+      // Published releases are read-only.
+      expect(statSync(dirname(second.executablePath)).mode & 0o777).toBe(0o555);
+      expect(statSync(second.executablePath).mode & 0o777).toBe(0o555);
+    }
     await expect(resolveAntigravityRuntime("antigravity", { PATH: "" }, baseDir)).resolves.toMatchObject({ version: "1.5.8" });
     expect((await installAntigravityRuntime({ baseDir, fetchImpl, cliRelease: older.asset })).version).toBe("1.5.8");
     expect(asked).toEqual([older.asset.url, newer.asset.url]);
@@ -153,7 +160,7 @@ describe("installing the native CLI from Google's channel", () => {
       .rejects.toThrow("The Antigravity archive must contain one regular executable.");
   });
 
-  it("keeps the pinned runtime on a computer that already has one of its releases", async () => {
+  it("moves a computer that has one of the pinned runtime's releases to the native CLI", async () => {
     const pinned = resolveAntigravityReleaseAsset();
     if (!pinned) return;
     const baseDir = folder();
@@ -163,9 +170,12 @@ describe("installing the native CLI from Google's channel", () => {
     writeFileSync(join(directory, ".install-complete.json"), JSON.stringify({ sha256: earlier, version: "1.1.1" }));
     const one = await release("1.5.7");
     const { fetchImpl, asked } = serving([one]);
-    await expect(installAntigravityRuntime({ baseDir, fetchImpl, cliRelease: one.asset })).rejects.toThrow();
-    expect(asked).toEqual([pinned.url]);
-    expect(await antigravityCliUpdate({ baseDir, now: 1, latest: async () => one.asset })).toBeNull();
+    // The updater offers the move while the pinned release is what is installed.
+    expect(await antigravityCliUpdate({ baseDir, now: 1, latest: async () => one.asset })).toBe("1.1.1");
+    await expect(installAntigravityRuntime({ baseDir, fetchImpl, cliRelease: one.asset })).resolves.toMatchObject({ harnessPath: null, version: "1.5.7" });
+    expect(asked).toEqual([one.asset.url]);
+    await expect(resolveAntigravityRuntime("agy", { PATH: "" }, baseDir)).resolves.toMatchObject({ harnessPath: null, version: "1.5.7" });
+    expect(await antigravityCliUpdate({ baseDir, now: 2, latest: async () => one.asset })).toBeNull();
   });
 
   it("falls back to the pinned runtime when a new install cannot get the native CLI", async () => {
@@ -177,7 +187,7 @@ describe("installing the native CLI from Google's channel", () => {
     const { fetchImpl, asked } = serving([]);
     await expect(installAntigravityRuntime({ baseDir, fetchImpl, cliRelease: one.asset })).rejects.toThrow("Google download failed (404).");
     expect(asked).toEqual([one.asset.url, pinned.url]);
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("installing the pinned runtime instead"));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("using the pinned runtime instead"));
     warn.mockRestore();
   });
 
@@ -200,7 +210,7 @@ describe("installing the native CLI from Google's channel", () => {
     expect(await antigravityCliUpdate({ baseDir: folder(), now: start + 4 * hour, latest, asset: null })).toBeNull();
   });
 
-  it.skipIf(!resolveAntigravityReleaseAsset() || WINDOWS)("updates the CLI of an account that moved to it from the pinned runtime, and leaves a computer still on the pinned runtime alone", async () => {
+  it.skipIf(!resolveAntigravityReleaseAsset() || WINDOWS)("runs and updates the CLI where the pinned runtime is also installed, and removes the pinned one once an account signed in on the CLI", async () => {
     const pinned = resolveAntigravityReleaseAsset()!;
     const baseDir = folder();
     const [current, newer] = [await release("1.5.7"), await release("1.5.8")];
@@ -214,13 +224,24 @@ describe("installing the native CLI from Google's channel", () => {
       chmodSync(join(directory, file.name), 0o755);
     }
     writeFileSync(join(directory, ".install-complete.json"), JSON.stringify({ sha256: pinned.sha256, version: pinned.version, executable: pinned.executable, harness: pinned.harness }));
-    await expect(resolveAntigravityRuntime("agy", { PATH: "" }, baseDir)).resolves.toMatchObject({ version: pinned.version });
+    await expect(resolveAntigravityRuntime("agy", { PATH: "" }, baseDir)).resolves.toMatchObject({ version: "1.5.7" });
+    await expect(resolveAntigravityRuntime(undefined, { PATH: "" }, baseDir)).resolves.toMatchObject({ version: "1.5.7" });
     await expect(resolveAntigravityRuntime("antigravity", { PATH: "" }, baseDir)).resolves.toMatchObject({ version: "1.5.7" });
     const latest = async () => newer.asset, at = Date.now() + 100 * 60 * 60 * 1000;
-    expect(await antigravityCliUpdate({ baseDir, now: at, latest, configuredClis: ["agy", "claude"] })).toBeNull();
-    expect(await antigravityCliUpdate({ baseDir, now: at, latest, configuredClis: ["agy", "antigravity"] })).toBe("1.5.7");
-    expect(await antigravityCliUpdate({ baseDir, now: at, latest, configuredClis: [" Antigravity.exe "] })).toBe("1.5.7");
-    expect(await antigravityCliUpdate({ baseDir, now: at, latest, configuredClis: ["/opt/tools/antigravity"] })).toBeNull();
+    expect(await antigravityCliUpdate({ baseDir, now: at, latest })).toBe("1.5.7");
+    // Kept until an account here has signed in on the CLI, and while a process still runs it.
+    expect(await retirePinnedAntigravityRuntime({ baseDir, inUse: () => false })).toEqual([]);
+    const cliToken = antigravityCliTokenPath("moved", baseDir), pinnedToken = antigravityTokenPath("moved", baseDir);
+    mkdirSync(dirname(cliToken), { recursive: true });
+    writeFileSync(cliToken, "{}");
+    writeFileSync(pinnedToken, "{}");
+    expect(await retirePinnedAntigravityRuntime({ baseDir, inUse: () => true })).toEqual([]);
+    expect(existsSync(directory)).toBe(true);
+    expect(await retirePinnedAntigravityRuntime({ baseDir, inUse: () => false })).toEqual([pinned.sha256]);
+    expect(existsSync(directory)).toBe(false);
+    // The pinned runtime's sign-in stays for a rollback.
+    expect(existsSync(pinnedToken)).toBe(true);
+    await expect(resolveAntigravityRuntime("agy", { PATH: "" }, baseDir)).resolves.toMatchObject({ version: "1.5.7" });
   });
 
   it("installs a release again when its folder is there but its files are damaged, and clears staging folders an old install left", async () => {
@@ -232,7 +253,10 @@ describe("installing the native CLI from Google's channel", () => {
     const stale = join(versions, ".install-stale"), recent = join(versions, ".install-recent");
     for (const path of [stale, recent]) mkdirSync(path);
     utimesSync(stale, new Date(Date.now() - 2 * 60 * 60_000), new Date(Date.now() - 2 * 60 * 60_000));
+    // Opened up first: a release is published read-only.
+    const open = () => { if (!WINDOWS) { chmodSync(dirname(installed.executablePath), 0o755); if (existsSync(installed.executablePath)) chmodSync(installed.executablePath, 0o755); } };
     for (const damage of [() => rmSync(installed.executablePath), () => rmSync(join(dirname(installed.executablePath), ".install-complete.json")), () => writeFileSync(installed.executablePath, "cut short")]) {
+      open();
       damage();
       await expect(resolveAntigravityRuntime("antigravity", { PATH: "" }, baseDir)).rejects.toThrow(/not installed/u);
       await expect(installAntigravityRuntime({ baseDir, fetchImpl, cliRelease: one.asset, native: true })).resolves.toEqual(installed);
@@ -317,7 +341,8 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
 
   async function create(instanceId: string, executable: string, environment: Record<string, string>) {
     ensureDirs();
-    const token = antigravityTokenPath(instanceId);
+    // The CLI's own sign-in file: the pinned runtime's acp_token.json does not sign in the CLI.
+    const token = antigravityCliTokenPath(instanceId);
     mkdirSync(dirname(token), { recursive: true });
     writeFileSync(token, "{}", { mode: 0o600 });
     const instance = await AntigravityDriver.create({

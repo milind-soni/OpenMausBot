@@ -113,3 +113,30 @@ it("names Google on the sign-in card, never another provider", () => {
   expect(host.textContent).toContain("Sign in with Google");
   expect(host.textContent).not.toContain("Mistral");
 });
+
+// Antigravity's native CLI signs in with `--login`: Google's Antigravity page shows a code to paste back, and there is no
+// redirect to paste and nothing to finish by itself.
+it("asks for the code the Antigravity page shows when the sign-in is the native CLI's, and sends it", async () => {
+  vi.stubGlobal("ogb", { platform: "linux", openExternal: vi.fn(async () => {}), remoteClient: { active: false } });
+  const fetched = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => String(input).includes("/auth/status")
+    ? auth({ phase: "waiting", flowId: "flow-1", authorizationUrl: null })
+    : auth({ phase: "waiting", flowId: "flow-1", authorizationUrl: "https://accounts.google.com/o/oauth2/auth?state=s", pasteCode: true }));
+  vi.stubGlobal("fetch", fetched);
+  const store = { state: { config: { cloudHome: true } }, dispatch: vi.fn(), refreshInstances: vi.fn(async () => {}), refreshModels: vi.fn(async () => {}) } as unknown as ReturnType<typeof useStore>;
+  flushSync(() => root.render(createElement(BotEditorStore, { value: store, children: createElement(EngineSetup, { instance: antigravity }) })));
+  [...host.querySelectorAll("button")].find((b) => /Sign in with Google/.test(b.textContent ?? ""))!.click();
+  await vi.waitFor(() => expect(host.querySelector("[data-code-paste]")).not.toBeNull());
+  expect(host.querySelector("[data-redirect-paste]")).toBeNull();
+  expect(host.textContent).not.toContain("I finished signing in");
+  expect(host.textContent).not.toContain("Google opens a page that won’t load");
+  expect(host.querySelector("[data-code-paste] p")?.textContent).toBe("After you sign in, Google shows a code on the Antigravity page. Copy it and paste it here.");
+  const field = host.querySelector<HTMLInputElement>("[data-code-paste] input")!;
+  const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+  flushSync(() => { setValue.call(field, "4/0Ab-code"); field.dispatchEvent(new Event("input", { bubbles: true })); });
+  const send = [...host.querySelectorAll("button")].find((b) => b.textContent === "Send code")!;
+  await vi.waitFor(() => expect(send.disabled).toBe(false));
+  send.click();
+  await vi.waitFor(() => expect(fetched.mock.calls.some(([url]) => String(url).includes("/auth/complete"))).toBe(true));
+  const [, init] = fetched.mock.calls.find(([url]) => String(url).includes("/auth/complete"))!;
+  expect(JSON.parse(String(init?.body))).toEqual({ flowId: "flow-1", callbackUrl: "4/0Ab-code" });
+});

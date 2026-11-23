@@ -7,19 +7,32 @@
 //     275-309, 532-721, 861-920 (the size limits, the CLI's names, the install
 //     record with no harness, the active-release pointer, the checksum-verified
 //     download, the one-file archive rule, and publishing a release).
+//   - apps/server/src/provider/AntigravityInstallation.ts:321-353, 821-839 at
+//     38067630229 (read-only release folders, and pruning releases that are
+//     neither active nor in use).
 // Release withdrawal is left out, and the archive is read in process instead of by the system's tar.
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { access, chmod, copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, statfs, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { writeFileAtomic } from "../atomic.ts";
 import type { AntigravityCliReleaseAsset } from "./antigravity-cli-release.ts";
 import type { AntigravityRuntime } from "./antigravity-runtime.ts";
 
-/** Whether the native CLI's channel is used at all. Off, installs and updates use the pinned runtime only, and a CLI
- * this app installed earlier is left where it is and not started. */
-export const ANTIGRAVITY_NATIVE_CLI = true;
+/** The rollback switch: `OMB_ANTIGRAVITY_PINNED_RUNTIME=1` in the server's environment (read at start) runs the pinned
+ * 1.4.3 runtime as before the native CLI. */
+export const ANTIGRAVITY_PINNED_RUNTIME_ENV = "OMB_ANTIGRAVITY_PINNED_RUNTIME";
+
+/** Whether the native CLI is the runtime. On (the default), it is installed and run everywhere Google's channel has a
+ * build, and a computer that has the pinned runtime moves to it. Off, installs and updates use the pinned runtime only,
+ * and a CLI this app installed earlier is left where it is and not started. */
+export const ANTIGRAVITY_NATIVE_CLI = process.env[ANTIGRAVITY_PINNED_RUNTIME_ENV] !== "1";
+
+/** Where the CLI keeps a Google sign-in, under `<profile>/antigravity-acp/`, when it does not use the OS keyring (which
+ * it skips while SSH_CONNECTION is set). It never writes the pinned runtime's `acp_token.json`, and stores no OAuth
+ * client, so this app cannot refresh it. */
+export const ANTIGRAVITY_CLI_TOKEN_FILE = "antigravity-oauth-token";
 
 const DOWNLOAD_TIMEOUT_MS = 45 * 60_000;
 const MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024;
@@ -93,6 +106,43 @@ export async function installedAntigravityCli(root: string, releaseId: string, p
 export async function activeAntigravityCli(root: string, platform: NodeJS.Platform = process.platform): Promise<AntigravityRuntime | null> {
   const active = await readRecord<{ releaseId?: unknown }>(join(root, ACTIVE_RELEASE));
   return typeof active?.releaseId === "string" ? installedAntigravityCli(root, active.releaseId, platform) : null;
+}
+
+/** A published release is read-only, so neither the CLI nor anything it starts can change it: only this app's updater
+ * replaces it. */
+async function sealRelease(directory: string, executable: string, platform: NodeJS.Platform): Promise<void> {
+  if (platform === "win32") return;
+  await chmod(join(directory, executable), 0o555);
+  await chmod(join(directory, RELEASE_RECORD), 0o444);
+  await chmod(directory, 0o555);
+}
+
+/** Removes a release folder, sealed or not. */
+export async function removeAntigravityRelease(directory: string): Promise<void> {
+  if (process.platform !== "win32") await chmod(directory, 0o700).catch(() => {});
+  await rm(directory, { recursive: true, force: true, maxRetries: 4, retryDelay: 250 });
+}
+
+/** Removes every CLI release under `root` except the active one and those a live process runs from. Best effort: a
+ * release that cannot be removed now is tried again after the next install. */
+export async function pruneAntigravityCliReleases(root: string, inUse: (directory: string) => boolean): Promise<string[]> {
+  const active = await readRecord<{ releaseId?: unknown }>(join(root, ACTIVE_RELEASE));
+  const versions = join(root, "versions");
+  const removed: string[] = [];
+  for (const name of await readdir(versions).catch(() => [] as string[])) {
+    if (name === active?.releaseId || !RELEASE_ID.test(name)) continue;
+    const directory = resolve(versions, name);
+    const record = await readRecord<Partial<CliRecord>>(join(directory, RELEASE_RECORD));
+    // Only CLI releases: a pinned runtime's record names its harness.
+    if (!record || record.harness !== null || inUse(directory)) continue;
+    try {
+      await removeAntigravityRelease(directory);
+      removed.push(name);
+    } catch (error) {
+      console.warn(`antigravity: could not remove an older CLI release (${error instanceof Error ? error.message : String(error)})`);
+    }
+  }
+  return removed;
 }
 
 function activate(root: string, releaseId: string): void {
@@ -176,12 +226,14 @@ export async function installAntigravityCli(asset: AntigravityCliReleaseAsset, o
   await sweepStaleStaging(versions);
   if (await installedAntigravityCli(options.root, releaseId, platform)) {
     const existing = await finish();
+    // A release installed before releases were sealed, or opened up since, is sealed again.
+    await sealRelease(destination, cliExecutableName(platform), platform).catch(() => {});
     await options.validate?.(existing, asset.version);
     activate(options.root, releaseId);
     return existing;
   }
   // What is left of a release whose files were damaged or removed: it is installed again.
-  await rm(destination, { recursive: true, force: true, maxRetries: 4, retryDelay: 250 });
+  await removeAntigravityRelease(destination);
   try {
     const disk = await statfs(versions, { bigint: true });
     const required = BigInt(MAX_DOWNLOAD_BYTES + MAX_EXECUTABLE_BYTES + FREE_SPACE_MARGIN);
@@ -210,6 +262,8 @@ export async function installAntigravityCli(asset: AntigravityCliReleaseAsset, o
     await writeFile(join(runtimeDirectory, RELEASE_RECORD), `${JSON.stringify(record)}\n`, { flag: "wx", mode: 0o600 });
     try {
       await (options.retry ?? ((step) => step()))(() => rename(runtimeDirectory, destination));
+      // After the move: moving a folder to another parent needs write access to the folder itself.
+      await sealRelease(destination, asset.executable.name, platform);
     } catch (error) {
       // Another installation may have published the same release first.
       if (!(await installedAntigravityCli(options.root, releaseId, platform))) throw error;

@@ -495,6 +495,8 @@ it("tells Cloud bots that a sign-in ending on an unreachable 127.0.0.1 page is f
   for (const text of [cloudHomePrompt(true), cloudHomePrompt(false), cloudHomePrompt(true, [], [{ name: "ASH-PC", platform: "win32" }], true)]) {
     expect(text).toContain("ends on a 127.0.0.1 or localhost page that can't be reached, that is the expected last step, not a failed sign-in");
     expect(text).toContain("paste it in the \"Paste its address here\" field on the AI's card");
+    // Antigravity's native CLI signs in with a code its Google page shows instead.
+    expect(text).toContain("paste the code in the \"Code from the Antigravity page\" field on the AI's card, then press Send code");
   }
 });
 
