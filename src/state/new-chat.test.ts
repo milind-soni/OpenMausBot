@@ -326,6 +326,19 @@ describe("a new conversation opens blank and is made by its first send", () => {
     await vi.waitFor(() => expect(made).toHaveBeenCalledExactlyOnceWith("made"));
   });
 
+  it("never answers a Live call when the settings picked in the blank chat cannot be saved", async () => {
+    patchAnswer = Promise.resolve(json({ error: "not saved" }, 500));
+    const made = vi.fn();
+    const failed = vi.fn();
+    openBlank();
+    flushSync(() => dispatch({ type: "updateTask", botId: "bot", threadId: DRAFT, patch: { approvalMode: "ask" } }));
+    flushSync(() => dispatch({ type: "makeNewChat", botId: "bot", threadId: DRAFT, onMade: made, onError: failed }));
+    await vi.waitFor(() => expect(failed).toHaveBeenCalledOnce());
+    await settle();
+    expect(taskPatches).toEqual(["/api/bots/bot/tasks/made"]);
+    expect(made).not.toHaveBeenCalled();
+  });
+
   it("tells a Live call from a blank chat that is no longer open that no conversation is coming", () => {
     const made = vi.fn();
     const failed = vi.fn();
