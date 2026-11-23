@@ -21,10 +21,18 @@ function publish(next: KeyFocusRequest | null) {
  * uses the key): its section opens, the row scrolls into view, its field takes focus and the row lights up briefly.
  * With no key it opens the page at its first section. */
 export function openKeySettings(id?: KeyId, purpose?: KeyId): typeof OPEN_KEYS {
-  nonce += 1;
-  publish(id ? { id, row: purpose ?? id, nonce } : { nonce });
+  requestKeyFocus(id, purpose);
   return OPEN_KEYS;
 }
+
+/** Asks the keys page for a row without opening Settings: for a caller that navigates to AI itself, with {@link KEYS_ANCHOR_FOR_FOCUS}. */
+export function requestKeyFocus(id?: KeyId, purpose?: KeyId): void {
+  nonce += 1;
+  publish(id ? { id, row: purpose ?? id, nonce } : { nonce });
+}
+
+/** The AI page anchor that opens Other services for a requested row without scrolling to its top block or listing AI providers first. */
+export const KEYS_ANCHOR_FOR_FOCUS = "keys-focus";
 
 export function finishKeyFocus(request: KeyFocusRequest) {
   if (latest?.nonce === request.nonce) publish(null);
