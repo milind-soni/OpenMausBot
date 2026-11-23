@@ -129,6 +129,19 @@ describe("a bot's main thread", () => {
     delete bot.mainThreadId;
   });
 
+  it("leaves its folder where the folder's other threads put it", async () => {
+    const folders = () => [...host.querySelectorAll("[data-sidebar-folder-row]")].map((row) => row.getAttribute("data-sidebar-folder-row"));
+    const before = { projects: bot.projects, tasks: bot.tasks };
+    bot.projects = [...bot.projects!, { id: "later", name: "Later" }];
+    bot.tasks = [...bot.tasks!, { threadId: "later-pinned", title: "Later pinned", createdAt: 2_000, projectId: "later", pinned: true }];
+    bot.mainThreadId = "later-pinned";
+    await mount();
+    expect(folders()).toEqual(["folder", "later"]);
+    await unmount();
+    Object.assign(bot, before);
+    delete bot.mainThreadId;
+  });
+
   it("is marked on a collapsed bot's row for it", () => {
     const html = renderToStaticMarkup(createElement(SidebarBotActivity, {
       bot: { ...bot, mainThreadId: "filed-pinned" }, rowThreadId: bot.threadId, density: "comfortable", pendingQueued: {}, dispatch: vi.fn(),

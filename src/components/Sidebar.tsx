@@ -483,7 +483,7 @@ export function BotThreadList({ bot, selected, drafting, query, pendingQueued, r
   const bulk = useBulkSelect();
   const { own: ownTasks, helpers } = bulk.active ? { own: tasks, helpers: [] } : partitionHelperThreads(tasks, bot.threadId, query, projects, bot.mainThreadId);
   const visibleTasks = orderedThreadList(visibleSidebarThreads(ownTasks, bot.threadId, query, projects, showAll || bulk.active, routineRuns, bot.mainThreadId)), mainTask = visibleTasks.find((task) => task.threadId === bot.mainThreadId);
-  const visibleProjectIndex = (projectId: string) => visibleTasks.findIndex((task) => task.projectId === projectId);
+  const visibleProjectIndex = (projectId: string) => visibleTasks.findIndex((task) => task !== mainTask && task.projectId === projectId);
   const folderRank = (projectId: string) => {
     const index = visibleProjectIndex(projectId);
     return index < 0 ? Number.POSITIVE_INFINITY : index;
