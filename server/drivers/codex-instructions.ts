@@ -5,6 +5,26 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DATA_DIR } from "../config.ts";
 import { writeFileAtomic } from "../atomic.ts";
+import type { CodexApprovalParams } from "./codex-approval-config.ts";
+
+export const CODEX_LINUX_SANDBOX_NOTE =
+  "Shell commands in this turn run inside Codex's Linux user-namespace sandbox, where root-owned files (such as /etc/ssh/ssh_config.d/*) appear owned by nobody (uid 65534) and network access may be restricted. OpenSSH errors like \"Bad owner or permissions on /etc/ssh/...\" can be caused by this UID mapping rather than host file permissions (though writable permissions on included SSH config files can trigger the same error); compare with an approved escalation outside the sandbox before assuming a host permission fault, as ssh and git-over-SSH require running outside the sandbox.";
+
+/** Explains Linux user-namespace uid mapping when Codex turns run inside a sandbox. */
+export function codexSandboxNote(
+  params: Pick<CodexApprovalParams, "thread" | "turn">,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform !== "linux") return "";
+  const sandboxPolicy = (params.turn.sandboxPolicy as { type?: unknown } | undefined)?.type;
+  if (typeof sandboxPolicy === "string") {
+    return sandboxPolicy === "dangerFullAccess" ? "" : CODEX_LINUX_SANDBOX_NOTE;
+  }
+  if (typeof params.thread.permissions === "string") return "";
+  const threadSandbox = params.thread.sandbox;
+  if (typeof threadSandbox !== "string" || threadSandbox === "danger-full-access") return "";
+  return CODEX_LINUX_SANDBOX_NOTE;
+}
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 
@@ -35,7 +55,7 @@ function parseReceipt(raw: string | undefined): CodexInstructionReceipt | null {
 }
 
 /** Preserve native configured rules when overriding Codex's developer slot. */
-export function codexDeveloperInstructions(config: unknown, botInstructions: string): string {
+export function codexDeveloperInstructions(config: unknown, botInstructions: string, sandboxNote = ""): string {
   if (!config || typeof config !== "object" || Array.isArray(config)) {
     throw new Error("Codex returned no effective configuration; cannot safely update bot instructions.");
   }
@@ -44,8 +64,9 @@ export function codexDeveloperInstructions(config: unknown, botInstructions: str
     throw new Error("Codex returned invalid developer instructions; cannot safely update bot instructions.");
   }
   // Native rules go last, keeping their precedence over the bot's.
-  return configured
-    ? `${botInstructions || "No OpenMausBot bot-specific instructions remain."}\n\n${configured}`
+  const trailing = [sandboxNote, configured].filter((part): part is string => Boolean(part)).join("\n\n");
+  return trailing
+    ? `${botInstructions || "No OpenMausBot bot-specific instructions remain."}\n\n${trailing}`
     : botInstructions;
 }
 
