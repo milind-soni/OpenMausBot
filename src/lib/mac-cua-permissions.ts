@@ -15,7 +15,7 @@ export function missingMacCuaPermissions(reason: unknown): MacCuaPermission[] {
 /** The macOS version computer control stopped for, when its persisted reason is the startCua gate. */
 export function macOSRequirement(reason: unknown): number | null {
   if (typeof reason !== "string" || reason.length > 2_000) return null;
-  const version = /computer use needs macOS ([\d.]+) or later/.exec(reason)?.[1];
+  const version = /needs macOS ([\d.]+) or later/.exec(reason)?.[1];
   return version ? Number(version) : null;
 }
 

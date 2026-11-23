@@ -14,7 +14,7 @@ import { pathToFileURL } from "node:url";
 import localOriginModule from "./local-origin.cjs";
 import { createLocalComputerGrant } from "./local-computer-grant.mjs";
 import { driverFailure } from "./cua-failure.mjs";
-import { LEGACY_MIN_MACOS, macDriverKind } from "./cua-min-macos.mjs";
+import { macDriverKind } from "./cua-min-macos.mjs";
 import { createHelperRestarts, followLinuxConnection } from "./cua-restart.mjs";
 import { watchDriver } from "./cua-watch.mjs";
 import { missingPermissions } from "./lent-screen-failures.mjs";
@@ -452,14 +452,7 @@ export async function startCua({ attempt = 0 } = {}) {
   startupAbort?.abort();
   startupAbort = new AbortController();
   const { signal } = startupAbort;
-  const kind = process.platform === "darwin" ? macDriverKind() : null;
-  if (kind === "unsupported") {
-    return persistAndNotify({
-      mode: "unavailable",
-      reason: `computer use needs macOS ${LEGACY_MIN_MACOS} or later`,
-    });
-  }
-  if (kind === "legacy") return startLegacyMac(signal);
+  if (process.platform === "darwin" && macDriverKind() === "legacy") return startLegacyMac(signal);
   const binary = resolveDriverBinary();
   if (!binary) {
     return persistAndNotify({

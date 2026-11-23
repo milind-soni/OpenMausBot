@@ -113,7 +113,11 @@ it("skips computer use below macOS 12.3 before launching anything", async () => 
   const release = vi.spyOn(os, "release").mockReturnValue("20.6.0");
   try {
     Object.defineProperty(process, "platform", { ...platform, value: "darwin" });
-    await expect(cua.startCua()).resolves.toEqual({ mode: "unavailable", reason: "computer use needs macOS 12.3 or later" });
+    await expect(cua.startCua()).resolves.toEqual({
+      mode: "unavailable",
+      reasonCode: "macos-version-unsupported",
+      reason: "Local desktop control needs macOS 12.3 or later.",
+    });
     expect(fixture.hosts).toHaveLength(0);
     expect(fixture.calls).toHaveLength(0);
   } finally {
@@ -326,7 +330,7 @@ describe.skipIf(process.platform !== "darwin" || Number(os.release().split(".")[
 
 it("keeps the too-old-macOS reason when the person retries", async () => {
   vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
-  vi.spyOn(os, "release").mockReturnValue("21.6.0");
+  vi.spyOn(os, "release").mockReturnValue("21.3.0");
   try {
     cua.registerCuaIpc();
     const retry = fixture.handlers.get("cua:linux-retry");
