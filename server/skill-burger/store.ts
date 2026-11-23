@@ -7,7 +7,7 @@ import { join } from "node:path";
 
 import { burgerBotOf, burgerSource, isBurgerSource, type SavedWorkflow } from "../../shared/skill-burger/saved.ts";
 import { isSkillName } from "../../shared/skill-md.ts";
-import { WORKFLOW_FILE, WORKFLOW_MAX_BYTES, WORKFLOW_TAG, renderWorkflowSkillMd, workflowSchema, workflowSkillName, type Workflow } from "../../shared/skill-burger/format.ts";
+import { caseOf, WORKFLOW_FILE, WORKFLOW_MAX_BYTES, WORKFLOW_TAG, renderWorkflowSkillMd, workflowSchema, workflowSkillName, type Workflow } from "../../shared/skill-burger/format.ts";
 import {
   installLibrarySkill, librarySkillDirectory, librarySkillFilePath, librarySkillOptOuts, listLibrarySkills, readSkillLibraryIndex,
   retireLibrarySkill, setLibrarySkillEveryBot, skillsLibraryRoot,
@@ -54,7 +54,7 @@ function readAt(place: BurgerPlace, name: string, root: string): { workflow: Wor
 
 const listed = (name: string, workflow: Workflow, sha256: string, savedAt: string, everyChat: boolean, botId: string | undefined): SavedWorkflow => ({
   name, summary: workflow.summary, sha256, savedAt, everyChat, ...(botId ? { botId } : {}),
-  layers: workflow.steps.map((step) => ({ kind: step.kind, label: step.label, ...(step.kind === "app" ? { app: step.app } : {}) })),
+  layers: workflow.steps.map((step) => { const on = caseOf(step); return { id: step.id, kind: step.kind, label: step.label, ...(step.kind === "app" ? { app: step.app } : {}), ...(step.kind === "decide" ? { cases: step.cases } : {}), ...(on ? { on } : {}) }; }),
   args: Object.keys(workflow.args),
 });
 
@@ -172,6 +172,30 @@ export function setWorkflowEveryChat(input: { name: string; everyChat: boolean; 
   return moved;
 }
 
+/** The burger a bot runs by this name: its own first, then one used in every chat. */
+export function findWorkflowSkill(botId: string, name: string, root: string = skillsLibraryRoot()): { place: BurgerPlace; workflow: Workflow; sha256: string } | null {
+  for (const place of [{ botId }, { everyChat: true as const }] satisfies BurgerPlace[]) {
+    const found = readAt(place, name, root);
+    if (found) return { place, workflow: found.workflow, sha256: found.sha256 };
+  }
+  return null;
+}
+
+/** Puts a changed workflow in place of the copy with `sha256`, under the same name; the old copy comes back if the new
+ * one can't be written. */
+export function replaceWorkflowSkill(input: { place: BurgerPlace; name: string; workflow: unknown; sha256: string; root?: string }): SavedWorkflow | Failure | { stale: true } {
+  const root = input.root ?? skillsLibraryRoot();
+  const checked = workflowSchema.safeParse(input.workflow);
+  if (!checked.success) return { error: checked.error.issues.map((issue) => issue.message).join("; ").slice(0, 300) };
+  const found = readAt(input.place, input.name, root);
+  if (!found || found.sha256 !== input.sha256) return { stale: true };
+  const gone = erase(input.place, input.name, found.sha256, root);
+  if (!("removed" in gone)) return "error" in gone ? gone : { stale: true };
+  const written = write(input.place, input.name, checked.data, found.botId, root);
+  if ("error" in written) write(input.place, input.name, found.workflow, found.botId, root);
+  return written;
+}
+
 /** Rename: the same burger under a new name in the same place, with its SKILL.md written for that name. */
 export function renameWorkflowSkill(input: { place: BurgerPlace; name: string; to: string; botIds: readonly string[]; sha256?: string; root?: string }): SavedWorkflow | Failure | { stale: true } {
   const root = input.root ?? skillsLibraryRoot();
@@ -203,6 +227,6 @@ export function workflowSkillsPrompt(botId: string, root: string = skillsLibrary
     lines.push(line);
   }
   return lines.length
-    ? `\n\nSaved workflows (runs the person saved as skills for every chat; when one fits the task, read its SKILL.md and do its steps with the values in its workflow.json):\n${lines.join("\n")}`
+    ? `\n\nSaved workflows (runs the person saved as skills for every chat; when one fits the task, run it with the run_workflow tool; read its SKILL.md for what it does):\n${lines.join("\n")}`
     : "";
 }

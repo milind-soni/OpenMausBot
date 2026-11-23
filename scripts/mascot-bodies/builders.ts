@@ -256,7 +256,7 @@ export const BODY_DEFS: BodyDef[] = [
   { id: "diamond", name: "Diamond", d: buildPolygon(196, 196, 4, 0.12), viewBox: [0, 0, 200, 200] },
   // A face-fit constraint, not taste: at the classic 0.42 the notches pinch the
   // star to a 50-unit inscribed circle, and the smallest face clamps every body.
-  { id: "star", name: "Star", d: buildStar(196, 196, 5, 0.55), viewBox: [0, 0, 200, 200] },
+  { id: "star", name: "Star", d: buildStar(196, 196, 5, 0.62), viewBox: [0, 0, 200, 200] },
 ]
 
 export const BODY_IDS: string[] = BODY_DEFS.map(s => s.id)

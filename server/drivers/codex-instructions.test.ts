@@ -3,7 +3,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { DATA_DIR } from "../config.ts";
-import { codexDeveloperInstructions, syncCodexInstructions } from "./codex-instructions.ts";
+import { CODEX_LINUX_SANDBOX_NOTE, codexDeveloperInstructions, codexSandboxNote, syncCodexInstructions } from "./codex-instructions.ts";
+import { customApprovalParams, namedApprovalParams } from "./codex-approval-config.ts";
 
 const receiptPath = (key: string, nativeThreadId: string) =>
   join(DATA_DIR, "codex-instructions", `${createHash("sha256").update(JSON.stringify([key, nativeThreadId])).digest("hex")}.sha256`);
@@ -15,6 +16,40 @@ describe("Codex effective developer instructions", () => {
     expect(codexDeveloperInstructions(config, "")).toBe("No OpenMausBot bot-specific instructions remain.\n\nNative rules.");
     expect(codexDeveloperInstructions({}, "Bot rules.")).toBe("Bot rules.");
     expect(codexDeveloperInstructions({ developer_instructions: null }, "")).toBe("");
+  });
+
+  it("appends a sandbox note after bot instructions and before native rules without altering 2-arg output", () => {
+    const config = { developer_instructions: "Native rules." };
+    expect(codexDeveloperInstructions(config, "Bot rules.", CODEX_LINUX_SANDBOX_NOTE)).toBe(
+      `Bot rules.\n\n${CODEX_LINUX_SANDBOX_NOTE}\n\nNative rules.`,
+    );
+    expect(codexDeveloperInstructions(config, "", CODEX_LINUX_SANDBOX_NOTE)).toBe(
+      `No OpenMausBot bot-specific instructions remain.\n\n${CODEX_LINUX_SANDBOX_NOTE}\n\nNative rules.`,
+    );
+    expect(codexDeveloperInstructions({}, "", CODEX_LINUX_SANDBOX_NOTE)).toBe(
+      `No OpenMausBot bot-specific instructions remain.\n\n${CODEX_LINUX_SANDBOX_NOTE}`,
+    );
+    expect(codexDeveloperInstructions({}, "Bot rules.", "")).toBe("Bot rules.");
+  });
+
+  it("explains Linux sandbox UID mapping only for sandboxed Linux turns", () => {
+    for (const mode of ["ask", "auto", "edits"] as const) {
+      const note = codexSandboxNote(namedApprovalParams(mode), "linux");
+      expect(note).toBe(CODEX_LINUX_SANDBOX_NOTE);
+      expect(note).toContain("/etc/ssh/");
+      expect(note).toContain("nobody");
+    }
+    expect(codexSandboxNote(namedApprovalParams("full"), "linux")).toBe("");
+    expect(codexSandboxNote(namedApprovalParams("ask"), "darwin")).toBe("");
+    expect(codexSandboxNote(namedApprovalParams("auto"), "win32")).toBe("");
+
+    expect(codexSandboxNote(customApprovalParams({ sandbox_mode: "workspace-write" }), "linux")).toBe(CODEX_LINUX_SANDBOX_NOTE);
+    expect(codexSandboxNote(customApprovalParams({ sandbox_mode: "read-only" }), "linux")).toBe(CODEX_LINUX_SANDBOX_NOTE);
+    expect(codexSandboxNote(customApprovalParams({ sandbox_mode: "danger-full-access" }), "linux")).toBe("");
+    // Active `permissions` profiles hide the effective sandbox from OpenMausBot, so never guess from inactive fallback config or add a stale thread.sandbox override.
+    expect(codexSandboxNote(customApprovalParams({ default_permissions: "restricted", sandbox_mode: "workspace-write" }), "linux")).toBe("");
+    expect(codexSandboxNote(customApprovalParams({ default_permissions: "unrestricted" }), "linux")).toBe("");
+    expect(codexSandboxNote({ thread: { sandbox: "danger-full-access" }, turn: { sandboxPolicy: { type: "workspaceWrite" } } }, "linux")).toBe(CODEX_LINUX_SANDBOX_NOTE);
   });
 
   it.each([undefined, null, [], { developer_instructions: 42 }])("rejects unknown native configuration: %j", (config) => {

@@ -9,7 +9,6 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { cloudPairingSignature, cloudRequestSignature } from "./cloud-home.ts";
-import { CONTROL_BUSY } from "./control-client.ts";
 import { BROWSER_HANDED_OVER, browserBusyText } from "./host/browser-seats.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
@@ -354,7 +353,7 @@ describe.each(["desktop", "team"] as const)("two threads of a bot on the team's 
     for (let attempt = 0; attempt < 40 && first.body.result?.isError; attempt++) first = await screenshot(threads[0]!);
     expect(first.body.result.isError, JSON.stringify(first.body)).toBeFalsy();
     const second = await screenshot(threads[1]!);
-    expect(second.body.result).toEqual({ isError: true, content: [{ type: "text", text: CONTROL_BUSY }] });
+    expect(second.body.result).toEqual({ isError: true, content: [{ type: "text", text: expect.stringMatching(/^Another thread is using this computer\. This call was not performed\. No screen or app state was checked\. This turn is 1st in line/) }] });
     expect((await rows(f, threads[1]!)).find((name) => name.startsWith("Waiting for its turn on this computer")), "the person sees why").toContain("Scout is running");
     expect((await busyThreads(f, botId)).sort()).toEqual([...threads].sort());
 

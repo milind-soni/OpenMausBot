@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CONTROL_BUSY, CONTROL_HANDED_BACK, CONTROL_TURN_ENDED, CONTROL_WAIT_MS, CONTROL_WAITED, controlRefusal, type ControlState } from "../control-client.ts";
-import { computerPersonAwayText } from "../computer-wait.ts";
+import { CONTROL_BUSY, CONTROL_CALL_LATE, CONTROL_HANDED_BACK, CONTROL_NOT_READY, CONTROL_TURN_ENDED, CONTROL_WAIT_MS, CONTROL_WAITED_HELD, controlRefusal, type ControlState } from "../control-client.ts";
+import { computerBusyText, computerParkedRefusal, computerPersonAwayText, computerQueuedText } from "../computer-wait.ts";
 import { ChatMcpClient } from "../drivers/chat-mcp-tools.ts";
 import { createGateInterceptor } from "../mcp-bridge.ts";
 import { callOutcome, openComputerCaller, STEP_TIMEOUT_MS } from "./computer-client.ts";
@@ -114,17 +114,23 @@ describe("callOutcome", () => {
     ["the person handed it back mid-call", { held: true, helpOpen: false, blockedReason: CONTROL_HANDED_BACK }, {}],
     ["the person has had it too long", { held: true, helpOpen: false, blockedReason: computerPersonAwayText(30 * 60_000) }, {}],
     ["the turn that had it has ended", { held: true, helpOpen: false, blockedReason: CONTROL_TURN_ENDED }, {}],
+    ["another thread holds it, with its queue place", { held: true, helpOpen: false, blockedReason: computerBusyText({ position: 2, heldForMs: 60_000, estimateMs: 90_000 }) }, {}],
+    ["it is queued between turns", { held: true, helpOpen: false, blockedReason: computerQueuedText({ position: 2 }) }, {}],
+    ["it is not ready yet", { held: true, helpOpen: false, blockedReason: CONTROL_NOT_READY }, {}],
+    ["this turn now has it after waiting", { held: true, helpOpen: false, blockedReason: CONTROL_WAITED_HELD }, {}],
+    ["the turn parked waiting for it", { held: true, helpOpen: false, blockedReason: computerParkedRefusal(30 * 60_000) }, {}],
   ])("fails a call the control gate refuses because %s, marked as the gate's", async (_case, state, timing) => {
     let refused = "";
     const gate = createGateInterceptor({ check: async () => state, forward: () => { throw new Error("forwarded"); }, refuse: (line) => { refused = line; }, ...timing });
     await gate(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "click", arguments: {} } }));
-    const text = state.held ? controlRefusal(state) : CONTROL_WAITED;
+    const text = state.held ? controlRefusal(state) : CONTROL_CALL_LATE;
     expect(callOutcome(JSON.parse(refused).result)).toEqual({ ok: false, error: text.slice(0, 300), gate: true });
   });
 
   it.each([
     ["the driver's own error", { content: [{ type: "text", text: "AXPress was not performed" }], isError: true }],
     ["a driver error that quotes part of a gate text", { content: [{ type: "text", text: "A person has taken control" }], isError: true }],
+    ["a driver error that opens like the parked answer", { content: [{ type: "text", text: "This turn waited 5 seconds for the application window to appear." }], isError: true }],
     ["the driver's refusal", { content: [], structuredContent: { refusal: { code: "x", message: CONTROL_BUSY } } }],
   ])("never marks %s as the gate's", (_case, result) => {
     const outcome = callOutcome(result);

@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { errorResponse } from "./http";
 import { FCM_TTL } from "./push-fcm";
-import { sendToRegistered, type PlannedDelivery } from "./push";
+import { sendToRegistered, type DeviceRow, type PlannedDelivery, type PushConfig } from "./push";
 
 /** The phone app's Live Activity, as expo-widgets (SDK 58) registers it: its name, and its ActivityAttributes type. */
 export const LIVE_ACTIVITY_NAME = "BotActivity";
@@ -28,7 +28,7 @@ function oneLine(max: number) {
   });
 }
 
-const activitySchema = z.strictObject({
+export const activitySchema = z.strictObject({
   v: z.literal(1),
   token: z.string().regex(TOKEN),
   event: z.enum(["start", "update", "end"]),
@@ -134,17 +134,20 @@ export function activityFcmPayload(request: ActivitySendRequest, now: number) {
   };
 }
 
+/** A Live Activity start, update or end on iPhone, or Android's ongoing notification. */
+export async function planActivity(body: ActivitySendRequest, row: DeviceRow, config: PushConfig, now: number): Promise<PlannedDelivery | Response> {
+  if (row.platform === "fcm") {
+    if (!config.fcm) return errorResponse(503, "push_unavailable");
+    return { kind: "fcm", config: config.fcm, payload: activityFcmPayload(body, now) };
+  }
+  // A start goes to the push-to-start token only, an update or an end to that activity's own token only.
+  const wanted = body.event === "start" ? "activity-start" : "activity";
+  if (row.purpose !== wanted) return errorResponse(404, "push_device_unknown");
+  if (!config.apns) return errorResponse(503, "push_unavailable");
+  const priority = body.event === "start" ? 10 : 5;
+  return { kind: "apns", config: config.apns, pushType: "liveactivity", priority, expiresInSeconds: ACTIVITY_EXPIRATION_SECONDS, payload: liveActivityPayload(body, now) };
+}
+
 export async function sendActivityPush(request: Request, env: Env, pushFetch: typeof fetch, requestId: string): Promise<Response> {
-  return sendToRegistered(request, env, pushFetch, requestId, activitySchema, async (body, row, config, now): Promise<PlannedDelivery | Response> => {
-    if (row.platform === "fcm") {
-      if (!config.fcm) return errorResponse(503, "push_unavailable");
-      return { kind: "fcm", config: config.fcm, payload: activityFcmPayload(body, now) };
-    }
-    // A start goes to the push-to-start token only, an update or an end to that activity's own token only.
-    const wanted = body.event === "start" ? "activity-start" : "activity";
-    if (row.purpose !== wanted) return errorResponse(404, "push_device_unknown");
-    if (!config.apns) return errorResponse(503, "push_unavailable");
-    const priority = body.event === "start" ? 10 : 5;
-    return { kind: "apns", config: config.apns, pushType: "liveactivity", priority, expiresInSeconds: ACTIVITY_EXPIRATION_SECONDS, payload: liveActivityPayload(body, now) };
-  });
+  return sendToRegistered(request, env, pushFetch, requestId, activitySchema, planActivity);
 }

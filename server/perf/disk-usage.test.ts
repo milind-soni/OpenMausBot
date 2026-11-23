@@ -7,9 +7,9 @@ import { requiredScope, serviceAllowed } from "../request-auth.ts";
 import { createPerfDiagnosticsRoutes, STORAGE_PATH } from "../routes/perf-diagnostics.ts";
 import type { RouteContext } from "../routes/table.ts";
 import { STORAGE_CATEGORIES } from "./disk-categories.ts";
-import { MAX_BOTS, nodeWalkFs, type WalkFs } from "./disk-walk.ts";
+import { MAX_BOTS, nodeWalkFs, SAVED_FILE_MAX_BYTES, type WalkFs } from "./disk-walk.ts";
 import { cloudStorage, createPerfHost } from "./perf-host.ts";
-import { createDiskUsage, readSavedPass, readSavedProgress, STORAGE_HEALTH_MAX_BYTES, storageHealth, type DiskUsageOptions, type StorageReport } from "./disk-usage.ts";
+import { createDiskUsage, readSavedPass, readSavedProgress, savedFileText, STORAGE_HEALTH_MAX_BYTES, storageHealth, type DiskUsageOptions, type StorageReport } from "./disk-usage.ts";
 
 const START = 1_800_000_000_000;
 const dirs: string[] = [];
@@ -185,6 +185,36 @@ describe("storage sampler", () => {
     await again.stop();
   });
 
+  it("reports a negative unwalkedBytes when the walk counted more than the volume says is used", async () => {
+    const w = usage({ statfs: async () => ({ blocks: 1_000_000, bsize: 4096, bavail: 999_999, bfree: 999_999 }) });
+    w.advance(60_000);
+    await untilDone(w);
+    const report = w.disk.report();
+    expect(report.walkedBytes).toBeGreaterThan(4096);
+    expect(report.unwalkedBytes).toBe(4096 - report.walkedBytes!);
+    expect(report.unwalkedBytes).toBeLessThan(0);
+  });
+
+  it("never reads a saved file larger than 1 MB, and reads back at most 100 bots from a saved pass", () => {
+    const folder = mkdtempSync(join(tmpdir(), "disk-usage-forged-"));
+    dirs.push(folder);
+    const file = join(folder, "storage-report.json"), progressFile = join(folder, "storage-progress.json");
+    const bots = (length: number) => Array.from({ length }, (_, index) => [`bot${index}`, { bytes: 1, files: 1 }]);
+    const forged = JSON.stringify({ v: 1, at: START, tookMs: 1, volume: null, totals: { walkedBytes: 9e300, bots: bots(40_000) } });
+    expect(forged.length).toBeGreaterThan(SAVED_FILE_MAX_BYTES);
+    writeFileSync(file, forged);
+    writeFileSync(progressFile, JSON.stringify({ v: 1, startedAt: START, waitedMs: 0, savedAt: START, checkpoint: { totals: { bots: bots(40_000) }, doneRoots: [], frames: [] } }));
+    expect(savedFileText(file)).toBeNull();
+    expect(savedFileText(progressFile)).toBeNull();
+    const disk = createDiskUsage({ roots: [{ path: folder, scope: "home" }], volume: folder, timer: false, file, progressFile, now: () => START, firstPassAfterMs: 0 });
+    expect(disk.report()).toMatchObject({ at: null, running: false });
+    const small = readSavedPass(JSON.stringify({ v: 1, at: START, tookMs: 1, volume: null, totals: { walkedBytes: 9e300, bots: bots(3_000) } }))!;
+    expect(small.totals.bots.size).toBe(100);
+    expect(small.totals.botsOverflow).toEqual({ bytes: 2_900, files: 2_900 });
+    expect(small.totals.walkedBytes).toBe(0);
+    expect(readSavedPass(JSON.stringify({ v: 1, at: 9e300, totals: {} }))).toBeNull();
+  });
+
   it("reads back a saved pass field by field: a name that is not a category, a known-shaped id or an allowed name is dropped", () => {
     const saved = readSavedPass(JSON.stringify({ v: 1, at: START, tookMs: 5, volume: { totalBytes: 10, freeBytes: "x", usedBytes: -1 }, totals: {
       categories: { conversations: { bytes: 5, files: 1 }, "acme-merger": { bytes: 9, files: 9 } }, bots: [["bot-known", { bytes: 3, files: 1 }], ["Ada's plans", { bytes: 1, files: 1 }]],
@@ -203,6 +233,9 @@ describe("storage sampler", () => {
     const stopping: WalkFs = { opendir: nodeWalkFs.opendir, lstat: async (path) => { if (path.endsWith("messages.db")) void w!.disk.stop(); return nodeWalkFs.lstat(path); } };
     w = usage({ fs: stopping });
     w.advance(60_000);
+    w.advance(2_000);
+    await w.disk.tick();
+    expect(w.disk.report()).toMatchObject({ at: null, running: false, failed: false });
     for (let index = 0; index < 50; index++) { w.advance(2_000); await w.disk.tick(); }
     expect(w.disk.report()).toMatchObject({ at: null, running: false, failed: false });
   });
