@@ -4138,7 +4138,9 @@
       "engines.antigravity.runtimeCustom": "260f308a01fb58a69bc468f0206fee15d68b41581aeb4f73013195badd4030c6",
       "engineSetup.nativeSharedSignIn": "702cebd1e2f607473866521fa81f65c8d9bf45b736c65de0392138619a6a8232",
       "engineSetup.managedDescCli": "26db0ff7d1026bb0e1ad5b6040f337da7e45ea678ac7e52af5a883ecb5ab36ee",
-      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b"
+      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b",
+      "engineSetup.installAntigravityCli": "e6af9add2c7616ad233b60b352ad21d81ab05b79f810b12dffe283214dae7e3f",
+      "engineSetup.installClassicRuntime": "b88c07c8fbde9cc716764e5bab502cd94d2e16d727f86776e8039f6c9ff2b285"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -10577,7 +10579,9 @@
       "engines.antigravity.runtimeCustom": "260f308a01fb58a69bc468f0206fee15d68b41581aeb4f73013195badd4030c6",
       "engineSetup.nativeSharedSignIn": "702cebd1e2f607473866521fa81f65c8d9bf45b736c65de0392138619a6a8232",
       "engineSetup.managedDescCli": "26db0ff7d1026bb0e1ad5b6040f337da7e45ea678ac7e52af5a883ecb5ab36ee",
-      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b"
+      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b",
+      "engineSetup.installAntigravityCli": "e6af9add2c7616ad233b60b352ad21d81ab05b79f810b12dffe283214dae7e3f",
+      "engineSetup.installClassicRuntime": "b88c07c8fbde9cc716764e5bab502cd94d2e16d727f86776e8039f6c9ff2b285"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -14419,7 +14423,9 @@
       "engines.antigravity.runtimeCustom": "260f308a01fb58a69bc468f0206fee15d68b41581aeb4f73013195badd4030c6",
       "engineSetup.nativeSharedSignIn": "702cebd1e2f607473866521fa81f65c8d9bf45b736c65de0392138619a6a8232",
       "engineSetup.managedDescCli": "26db0ff7d1026bb0e1ad5b6040f337da7e45ea678ac7e52af5a883ecb5ab36ee",
-      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b"
+      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b",
+      "engineSetup.installAntigravityCli": "e6af9add2c7616ad233b60b352ad21d81ab05b79f810b12dffe283214dae7e3f",
+      "engineSetup.installClassicRuntime": "b88c07c8fbde9cc716764e5bab502cd94d2e16d727f86776e8039f6c9ff2b285"
     },
     "hi": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -18113,7 +18119,9 @@
       "engines.antigravity.runtimeCustom": "260f308a01fb58a69bc468f0206fee15d68b41581aeb4f73013195badd4030c6",
       "engineSetup.nativeSharedSignIn": "702cebd1e2f607473866521fa81f65c8d9bf45b736c65de0392138619a6a8232",
       "engineSetup.managedDescCli": "26db0ff7d1026bb0e1ad5b6040f337da7e45ea678ac7e52af5a883ecb5ab36ee",
-      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b"
+      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b",
+      "engineSetup.installAntigravityCli": "e6af9add2c7616ad233b60b352ad21d81ab05b79f810b12dffe283214dae7e3f",
+      "engineSetup.installClassicRuntime": "b88c07c8fbde9cc716764e5bab502cd94d2e16d727f86776e8039f6c9ff2b285"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -26087,7 +26095,9 @@
       "engines.antigravity.runtimeCustom": "260f308a01fb58a69bc468f0206fee15d68b41581aeb4f73013195badd4030c6",
       "engineSetup.nativeSharedSignIn": "702cebd1e2f607473866521fa81f65c8d9bf45b736c65de0392138619a6a8232",
       "engineSetup.managedDescCli": "26db0ff7d1026bb0e1ad5b6040f337da7e45ea678ac7e52af5a883ecb5ab36ee",
-      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b"
+      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b",
+      "engineSetup.installAntigravityCli": "e6af9add2c7616ad233b60b352ad21d81ab05b79f810b12dffe283214dae7e3f",
+      "engineSetup.installClassicRuntime": "b88c07c8fbde9cc716764e5bab502cd94d2e16d727f86776e8039f6c9ff2b285"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -37614,7 +37624,9 @@
       "engines.antigravity.runtimeCustom": "260f308a01fb58a69bc468f0206fee15d68b41581aeb4f73013195badd4030c6",
       "engineSetup.nativeSharedSignIn": "702cebd1e2f607473866521fa81f65c8d9bf45b736c65de0392138619a6a8232",
       "engineSetup.managedDescCli": "26db0ff7d1026bb0e1ad5b6040f337da7e45ea678ac7e52af5a883ecb5ab36ee",
-      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b"
+      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b",
+      "engineSetup.installAntigravityCli": "e6af9add2c7616ad233b60b352ad21d81ab05b79f810b12dffe283214dae7e3f",
+      "engineSetup.installClassicRuntime": "b88c07c8fbde9cc716764e5bab502cd94d2e16d727f86776e8039f6c9ff2b285"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -47739,7 +47751,9 @@
       "engines.antigravity.runtimeCustom": "260f308a01fb58a69bc468f0206fee15d68b41581aeb4f73013195badd4030c6",
       "engineSetup.nativeSharedSignIn": "702cebd1e2f607473866521fa81f65c8d9bf45b736c65de0392138619a6a8232",
       "engineSetup.managedDescCli": "26db0ff7d1026bb0e1ad5b6040f337da7e45ea678ac7e52af5a883ecb5ab36ee",
-      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b"
+      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b",
+      "engineSetup.installAntigravityCli": "e6af9add2c7616ad233b60b352ad21d81ab05b79f810b12dffe283214dae7e3f",
+      "engineSetup.installClassicRuntime": "b88c07c8fbde9cc716764e5bab502cd94d2e16d727f86776e8039f6c9ff2b285"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -57963,7 +57977,9 @@
       "engines.antigravity.runtimeCustom": "260f308a01fb58a69bc468f0206fee15d68b41581aeb4f73013195badd4030c6",
       "engineSetup.nativeSharedSignIn": "702cebd1e2f607473866521fa81f65c8d9bf45b736c65de0392138619a6a8232",
       "engineSetup.managedDescCli": "26db0ff7d1026bb0e1ad5b6040f337da7e45ea678ac7e52af5a883ecb5ab36ee",
-      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b"
+      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b",
+      "engineSetup.installAntigravityCli": "e6af9add2c7616ad233b60b352ad21d81ab05b79f810b12dffe283214dae7e3f",
+      "engineSetup.installClassicRuntime": "b88c07c8fbde9cc716764e5bab502cd94d2e16d727f86776e8039f6c9ff2b285"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -62077,7 +62093,9 @@
       "engines.antigravity.runtimeCustom": "260f308a01fb58a69bc468f0206fee15d68b41581aeb4f73013195badd4030c6",
       "engineSetup.nativeSharedSignIn": "702cebd1e2f607473866521fa81f65c8d9bf45b736c65de0392138619a6a8232",
       "engineSetup.managedDescCli": "26db0ff7d1026bb0e1ad5b6040f337da7e45ea678ac7e52af5a883ecb5ab36ee",
-      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b"
+      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b",
+      "engineSetup.installAntigravityCli": "e6af9add2c7616ad233b60b352ad21d81ab05b79f810b12dffe283214dae7e3f",
+      "engineSetup.installClassicRuntime": "b88c07c8fbde9cc716764e5bab502cd94d2e16d727f86776e8039f6c9ff2b285"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -68011,7 +68029,9 @@
       "engines.antigravity.runtimeCustom": "260f308a01fb58a69bc468f0206fee15d68b41581aeb4f73013195badd4030c6",
       "engineSetup.nativeSharedSignIn": "702cebd1e2f607473866521fa81f65c8d9bf45b736c65de0392138619a6a8232",
       "engineSetup.managedDescCli": "26db0ff7d1026bb0e1ad5b6040f337da7e45ea678ac7e52af5a883ecb5ab36ee",
-      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b"
+      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b",
+      "engineSetup.installAntigravityCli": "e6af9add2c7616ad233b60b352ad21d81ab05b79f810b12dffe283214dae7e3f",
+      "engineSetup.installClassicRuntime": "b88c07c8fbde9cc716764e5bab502cd94d2e16d727f86776e8039f6c9ff2b285"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -73945,7 +73965,9 @@
       "engines.antigravity.runtimeCustom": "260f308a01fb58a69bc468f0206fee15d68b41581aeb4f73013195badd4030c6",
       "engineSetup.nativeSharedSignIn": "702cebd1e2f607473866521fa81f65c8d9bf45b736c65de0392138619a6a8232",
       "engineSetup.managedDescCli": "26db0ff7d1026bb0e1ad5b6040f337da7e45ea678ac7e52af5a883ecb5ab36ee",
-      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b"
+      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b",
+      "engineSetup.installAntigravityCli": "e6af9add2c7616ad233b60b352ad21d81ab05b79f810b12dffe283214dae7e3f",
+      "engineSetup.installClassicRuntime": "b88c07c8fbde9cc716764e5bab502cd94d2e16d727f86776e8039f6c9ff2b285"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -81080,7 +81102,9 @@
       "engines.antigravity.runtimeCustom": "260f308a01fb58a69bc468f0206fee15d68b41581aeb4f73013195badd4030c6",
       "engineSetup.nativeSharedSignIn": "702cebd1e2f607473866521fa81f65c8d9bf45b736c65de0392138619a6a8232",
       "engineSetup.managedDescCli": "26db0ff7d1026bb0e1ad5b6040f337da7e45ea678ac7e52af5a883ecb5ab36ee",
-      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b"
+      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b",
+      "engineSetup.installAntigravityCli": "e6af9add2c7616ad233b60b352ad21d81ab05b79f810b12dffe283214dae7e3f",
+      "engineSetup.installClassicRuntime": "b88c07c8fbde9cc716764e5bab502cd94d2e16d727f86776e8039f6c9ff2b285"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -88269,7 +88293,9 @@
       "engines.antigravity.runtimeCustom": "260f308a01fb58a69bc468f0206fee15d68b41581aeb4f73013195badd4030c6",
       "engineSetup.nativeSharedSignIn": "702cebd1e2f607473866521fa81f65c8d9bf45b736c65de0392138619a6a8232",
       "engineSetup.managedDescCli": "26db0ff7d1026bb0e1ad5b6040f337da7e45ea678ac7e52af5a883ecb5ab36ee",
-      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b"
+      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b",
+      "engineSetup.installAntigravityCli": "e6af9add2c7616ad233b60b352ad21d81ab05b79f810b12dffe283214dae7e3f",
+      "engineSetup.installClassicRuntime": "b88c07c8fbde9cc716764e5bab502cd94d2e16d727f86776e8039f6c9ff2b285"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -99597,7 +99623,9 @@
       "engines.antigravity.runtimeCustom": "260f308a01fb58a69bc468f0206fee15d68b41581aeb4f73013195badd4030c6",
       "engineSetup.nativeSharedSignIn": "702cebd1e2f607473866521fa81f65c8d9bf45b736c65de0392138619a6a8232",
       "engineSetup.managedDescCli": "26db0ff7d1026bb0e1ad5b6040f337da7e45ea678ac7e52af5a883ecb5ab36ee",
-      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b"
+      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b",
+      "engineSetup.installAntigravityCli": "e6af9add2c7616ad233b60b352ad21d81ab05b79f810b12dffe283214dae7e3f",
+      "engineSetup.installClassicRuntime": "b88c07c8fbde9cc716764e5bab502cd94d2e16d727f86776e8039f6c9ff2b285"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -107261,7 +107289,9 @@
       "engines.antigravity.runtimeCustom": "260f308a01fb58a69bc468f0206fee15d68b41581aeb4f73013195badd4030c6",
       "engineSetup.nativeSharedSignIn": "702cebd1e2f607473866521fa81f65c8d9bf45b736c65de0392138619a6a8232",
       "engineSetup.managedDescCli": "26db0ff7d1026bb0e1ad5b6040f337da7e45ea678ac7e52af5a883ecb5ab36ee",
-      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b"
+      "accounts.signOutAntigravityShared": "a98901483efe15273b5c36d5685fc70122f18de5132edbbb6c3ae2fb1d8e5e7b",
+      "engineSetup.installAntigravityCli": "e6af9add2c7616ad233b60b352ad21d81ab05b79f810b12dffe283214dae7e3f",
+      "engineSetup.installClassicRuntime": "b88c07c8fbde9cc716764e5bab502cd94d2e16d727f86776e8039f6c9ff2b285"
     }
   }
 }

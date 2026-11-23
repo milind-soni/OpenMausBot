@@ -174,6 +174,8 @@ function pathCandidates(binary: string, env: NodeJS.ProcessEnv): string[] {
 
 const cliVersions = new Map<string, { stamp: string; version: string | null }>();
 
+const CLI_NOT_INSTALLED = "The Google Antigravity CLI is not installed yet. Install it here, or choose Classic runtime under Runs on.";
+
 /** Security: a program a path names never gets the server's, the workspace's or a provider's credentials. */
 function versionProbeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const probe = { ...env };
@@ -271,7 +273,7 @@ export async function resolveAntigravityRuntime(
   const installedCli = ANTIGRAVITY_NATIVE_CLI && (native || nativeDefault) ? await activeAntigravityCli(runtimeRoot(baseDir)) : null;
   if (native) {
     if (installedCli) return installedCli;
-    throw new AntigravitySetupError("The Google Antigravity CLI is not installed yet. Install it here, or choose Classic runtime under Runs on.");
+    throw new AntigravitySetupError(CLI_NOT_INSTALLED);
   }
   const asset = resolveAntigravityReleaseAsset();
   if (asset) {
@@ -292,6 +294,7 @@ export async function resolveAntigravityRuntime(
   if (!asset && !nativeDefault) {
     throw new AntigravitySetupError(`Google does not publish the pinned Antigravity runtime for ${process.platform}-${process.arch}. Set the CLI path to antigravity to use Google's native CLI.`);
   }
+  if (ANTIGRAVITY_NATIVE_CLI && nativeDefault) throw new AntigravitySetupError(CLI_NOT_INSTALLED);
   throw new AntigravitySetupError(legacyCli
     ? "Antigravity now uses Google's official runtime. Choose Install official Antigravity, then Sign in with Google. Your previous agy login is not copied."
     : "Antigravity is not installed. Install the official Google runtime to continue.");

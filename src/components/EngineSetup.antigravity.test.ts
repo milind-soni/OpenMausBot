@@ -128,7 +128,7 @@ it("says on the sign-in card of an account that runs the native CLI, whatever it
   expect(host.textContent).not.toContain("keeps one sign-in");
 });
 
-it("describes the install as Google's Antigravity CLI, unless the path asks for the pinned runtime alone", () => {
+it("describes and labels the install as Google's Antigravity CLI, unless the path asks for the pinned runtime alone", () => {
   vi.stubGlobal("ogb", { platform: "linux", remoteClient: { active: false } });
   const store = { state: { config: {} }, dispatch: vi.fn(), refreshInstances: vi.fn(async () => {}), refreshModels: vi.fn(async () => {}) } as unknown as ReturnType<typeof useStore>;
   const missing = { state: "unavailable" as const, reason: "The Antigravity CLI is not installed yet." };
@@ -136,10 +136,12 @@ it("describes the install as Google's Antigravity CLI, unless the path asks for 
   for (const cli of [undefined, "agy", "antigravity"]) {
     render(cli);
     expect(host.textContent).toContain("installs Google's Antigravity CLI");
+    expect(host.textContent).toContain("Install Google Antigravity CLI");
     expect(host.textContent).not.toContain("separate from the Antigravity app and agy CLI");
   }
   render("agy_acp_server");
   expect(host.textContent).toContain("separate from the Antigravity app and agy CLI");
+  expect(host.textContent).toContain("Install Classic runtime");
 });
 
 // The native CLI's sign-in ends on a page that shows a code, not on a redirect to this computer.

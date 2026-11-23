@@ -8008,5 +8008,7 @@
   "engineSetup.managedDescCli": "{app} は Google の Antigravity CLI をインストールします。ここでインストールして Google でサインインすると、このモデル一覧があなたのアカウントから更新されます。",
   "accounts.signOutAntigravityShared": "Google の Antigravity CLI は、このコンピュータでサインインを 1 つだけ保持します。ここにあるすべてのアカウントとターミナルの Antigravity CLI もサインアウトされ、実行中のタスクは停止します。それらを使うボットは、次のタスクの前に再度サインインが必要です。",
   "engines.antigravity.runtimeCli": "Google Antigravity CLI",
-  "engines.antigravity.runtimePinned": "Classic runtime"
+  "engines.antigravity.runtimePinned": "Classic runtime",
+  "engineSetup.installAntigravityCli": "Google Antigravity CLI をインストール",
+  "engineSetup.installClassicRuntime": "Classic runtime をインストール"
 }

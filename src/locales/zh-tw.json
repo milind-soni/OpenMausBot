@@ -10258,5 +10258,7 @@
   "engineSetup.managedDescCli": "{app} 會安裝 Google 的 Antigravity CLI。在這裡安裝並使用 Google 登入後，這份模型清單會依你的帳戶重新整理。",
   "accounts.signOutAntigravityShared": "Google 的 Antigravity CLI 在這台電腦上只保留一個登入：這台電腦上的每個帳號，以及終端機裡的 Antigravity CLI 也會一併登出，進行中的工作會停止。使用它們的 Bot 需要重新登入，才能執行下一個工作。",
   "engines.antigravity.runtimeCli": "Google Antigravity CLI",
-  "engines.antigravity.runtimePinned": "Classic runtime"
+  "engines.antigravity.runtimePinned": "Classic runtime",
+  "engineSetup.installAntigravityCli": "安裝 Google Antigravity CLI",
+  "engineSetup.installClassicRuntime": "安裝 Classic runtime"
 }

@@ -6473,5 +6473,7 @@
   "engineSetup.managedDescCli": "{app} instala la Antigravity CLI de Google. Instálala aquí e inicia sesión con Google; después esta lista de modelos se actualizará desde tu cuenta.",
   "accounts.signOutAntigravityShared": "La Antigravity CLI de Google guarda un único inicio de sesión en este equipo: también se cierra la sesión de todas sus cuentas y de la Antigravity CLI en una terminal, y se detienen sus tareas en curso. Los bots que las usan necesitan volver a iniciar sesión antes de su próxima tarea.",
   "engines.antigravity.runtimeCli": "Google Antigravity CLI",
-  "engines.antigravity.runtimePinned": "Classic runtime"
+  "engines.antigravity.runtimePinned": "Classic runtime",
+  "engineSetup.installAntigravityCli": "Instalar Google Antigravity CLI",
+  "engineSetup.installClassicRuntime": "Instalar Classic runtime"
 }

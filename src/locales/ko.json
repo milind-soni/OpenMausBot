@@ -7698,5 +7698,7 @@
   "engineSetup.managedDescCli": "{app}은 Google의 Antigravity CLI를 설치해요. 여기서 설치하고 Google로 로그인하면 이 모델 목록이 내 계정 기준으로 새로고침돼요.",
   "accounts.signOutAntigravityShared": "Google의 Antigravity CLI는 이 컴퓨터에 로그인을 하나만 보관해요. 이 컴퓨터의 모든 계정과 터미널의 Antigravity CLI도 로그아웃되고, 진행 중인 작업은 멈춰요. 이를 쓰는 봇은 다음 작업 전에 다시 로그인해야 해요.",
   "engines.antigravity.runtimeCli": "Google Antigravity CLI",
-  "engines.antigravity.runtimePinned": "Classic runtime"
+  "engines.antigravity.runtimePinned": "Classic runtime",
+  "engineSetup.installAntigravityCli": "Google Antigravity CLI 설치",
+  "engineSetup.installClassicRuntime": "Classic runtime 설치"
 }

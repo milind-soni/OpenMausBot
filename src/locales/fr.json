@@ -3878,5 +3878,7 @@
   "engineSetup.managedDescCli": "{app} installe l'Antigravity CLI de Google. Installez-la ici et connectez-vous avec Google ; cette liste de modèles sera ensuite actualisée depuis votre compte.",
   "accounts.signOutAntigravityShared": "L'Antigravity CLI de Google conserve une seule connexion sur cet ordinateur : tous ses comptes et l'Antigravity CLI dans un terminal sont aussi déconnectés, et leurs tâches en cours s'arrêtent. Les bots qui les utilisent devront se reconnecter avant leur prochaine tâche.",
   "engines.antigravity.runtimeCli": "Google Antigravity CLI",
-  "engines.antigravity.runtimePinned": "Classic runtime"
+  "engines.antigravity.runtimePinned": "Classic runtime",
+  "engineSetup.installAntigravityCli": "Installer Google Antigravity CLI",
+  "engineSetup.installClassicRuntime": "Installer Classic runtime"
 }

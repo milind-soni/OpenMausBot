@@ -5968,5 +5968,7 @@
   "engineSetup.managedDescCli": "{app} cài đặt Antigravity CLI của Google. Hãy cài đặt tại đây và đăng nhập bằng Google; sau đó danh sách mô hình này sẽ được làm mới từ tài khoản của bạn.",
   "accounts.signOutAntigravityShared": "Antigravity CLI của Google chỉ giữ một lần đăng nhập trên máy tính này: mọi tài khoản trên máy và Antigravity CLI trong terminal cũng bị đăng xuất, và các tác vụ đang chạy sẽ dừng. Các bot dùng chúng cần đăng nhập lại trước tác vụ tiếp theo.",
   "engines.antigravity.runtimeCli": "Google Antigravity CLI",
-  "engines.antigravity.runtimePinned": "Classic runtime"
+  "engines.antigravity.runtimePinned": "Classic runtime",
+  "engineSetup.installAntigravityCli": "Cài đặt Google Antigravity CLI",
+  "engineSetup.installClassicRuntime": "Cài đặt Classic runtime"
 }

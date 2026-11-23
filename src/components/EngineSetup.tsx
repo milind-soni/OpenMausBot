@@ -383,7 +383,9 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
           className="flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-[13px] font-semibold text-white hover:brightness-110 disabled:cursor-wait disabled:opacity-70"
         >
           {busy === "install" ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-          {busy === "install" ? t("engineSetup.installing") : managed.label}
+          {busy === "install" ? t("engineSetup.installing") : instance.driverKind === "antigravityAgent"
+            ? t(installsAntigravityCli(instance) ? "engineSetup.installAntigravityCli" : "engineSetup.installClassicRuntime")
+            : managed.label}
         </button>
         {!managed.sizeUnknown && <p className="mt-1.5 text-center text-[11px] text-ink-tertiary">
           {t("engineSetup.downloadNote", { mb: Math.ceil(managed.downloadBytes / 1024 / 1024) })}
