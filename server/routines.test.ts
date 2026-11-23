@@ -1635,6 +1635,25 @@ describe("RoutineManager", () => {
     expect(new RoutineManager(h.options).listRuns()).toHaveLength(1);
   });
 
+  it("fails a run the restart after a memory freeze cut, with the given line, instead of starting it again", async () => {
+    const h = harness();
+    const routine = h.manager.create({ name: "Prices", prompt: "Check the prices page", botId: "maus-1", schedule: { type: "once", at: new Date(2026, 7, 17, 8, 5).getTime() } });
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+    const line = "Ran out of room, so I closed the browser to keep everything else running.";
+    const asked: Array<[string, string]> = [];
+    h.options.restartCut = (threadId, startedAt) => { asked.push([threadId, typeof startedAt]); return line; };
+    h.options.onRunFailed = (run) => h.failed.push(run);
+    const reloaded = new RoutineManager(h.options);
+    expect(asked).toEqual([["thread-1", "number"]]);
+    expect(reloaded.listRuns()).toMatchObject([{ routineId: routine.id, status: "failed", threadId: "thread-1", error: line }]);
+    expect(reloaded.listRuns()[0]!.retried).toBeUndefined();
+    expect(h.failed).toMatchObject([{ status: "failed", error: line }]);
+    h.setNow(routine.nextRunAt! + 60_000);
+    await reloaded.tick();
+    expect(h.started.map((turn) => turn.threadId)).toEqual(["thread-1"]);
+  });
+
   it("migrates optional attachment and timeout metadata without losing legacy records", () => {
     const h = harness();
     h.setBot("busy");
