@@ -249,6 +249,16 @@ describe("safe tier", () => {
     expect(bots.map((bot) => bot.section)).toEqual(["Sales", undefined]);
   });
 
+  it("does not claim to delete empty departments when clearing groups", async () => {
+    const { set, cards } = fixture();
+    expect((await set("bots.groups", {})).status).toBe(200);
+    const cardCount = cards().length;
+    const result = await set("bots.groups", {});
+    expect(result.status).toBe(400);
+    expect(result.body.error).toContain("does not delete departments");
+    expect(cards()).toHaveLength(cardCount);
+  });
+
   it("pins and unpins bots from the full list sent, refuses an unknown id, and Undo restores the earlier pins", async () => {
     const { host, set, bots, cards, turn } = fixture();
     const pins = () => bots.filter((bot) => bot.pinned).map((bot) => bot.id);
