@@ -30,8 +30,19 @@ export function conversationTranscript({ threadId, hasMore, activeLeafId, ...opt
       const parentId = message.parentId ? aliases.get(message.parentId) : undefined;
       return [message.id, parentId ? { ...message, parentId } : message] as const;
     }));
-    const loaded = new Set(thread.messages.map((message) => message.id));
-    const messages = [...thread.messages.map((message) => held.get(message.id) ?? message),
+    const persisted = new Set(options.messages.filter((message) => !message.sendId || message.id !== optimisticMessageId(message.sendId)).map((message) => message.id));
+    let boundary = thread.messages.findLastIndex((message) => persisted.has(message.id));
+    if (boundary < 0) {
+      // An optimistic-only branch can still point at a parent already known at the click.
+      const parent = options.messages[0]?.parentId;
+      if (parent && !aliases.has(parent)) boundary = thread.messages.findIndex((message) => message.id === parent);
+    }
+    if (boundary < 0) throw new Error("The conversation history at export time is no longer available");
+    // A later confirmation may replace its optimistic row, but cannot extend the history boundary.
+    const confirmedIds = new Set(aliases.values());
+    const history = thread.messages.filter((message, index) => index <= boundary || confirmedIds.has(message.id));
+    const loaded = new Set(history.map((message) => message.id));
+    const messages = [...history.map((message) => held.get(message.id) ?? message),
       ...[...held.values()].filter((message) => !loaded.has(message.id))];
     const leaf = activeLeafId ? aliases.get(activeLeafId) ?? activeLeafId : activeLeafId;
     if (leaf && !messages.some((message) => message.id === leaf)) {

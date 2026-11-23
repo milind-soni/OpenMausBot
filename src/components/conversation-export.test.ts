@@ -173,6 +173,62 @@ describe("copying and downloading a paged conversation", () => {
 });
 
 describe("exporting the conversation state visible when the menu was clicked", () => {
+  for (const { kind, leaf } of [{ kind: "room", leaf: undefined }, { kind: "bot", leaf: null }, { kind: "bot", leaf: undefined }] as const) {
+    for (const operation of ["copy", "download"] as const) {
+      it(`${operation} excludes a new ${kind} row with ${String(leaf)} leaf while history loads`, async () => {
+        const page = Promise.withResolvers<{ messages: Message[]; hasMore: boolean; activeLeafId: string }>();
+        fixture.api.mockReturnValueOnce(page.promise);
+        const clicked = heldState(kind);
+        if (kind === "bot") clicked.bots[0] = { ...clicked.bots[0]!, activeLeafId: leaf };
+        vi.stubGlobal("window", {});
+        actionForState(kind, operation, clicked).onSelect();
+        // Storage order, rather than a sender's clock, determines which rows arrived later.
+        fixture.messages.push({ id: "late-row", role: "user", kind: "text", text: "Arrived after export click", at: 1 });
+        page.resolve({ messages: fixture.messages.slice(-200), hasMore: true, activeLeafId: "late-row" });
+        const markdown = await selectedOutput(operation);
+        expect(markdown.match(/Conversation message \d{3}/g)).toHaveLength(270);
+        expect(markdown).not.toContain("Arrived after export click");
+      });
+    }
+  }
+
+  it("does not extend a room's history boundary when its optimistic send is confirmed later", async () => {
+    const page = Promise.withResolvers<{ messages: Message[]; hasMore: boolean; activeLeafId: string }>();
+    fixture.api.mockReturnValueOnce(page.promise);
+    const clicked = send(heldState("room"), "room", "Pending at click", "pending-room-send");
+    vi.stubGlobal("window", {});
+    actionForState("room", "copy", clicked).onSelect();
+    fixture.messages.push({ id: "unrelated-late-row", role: "user", kind: "text", text: "Unrelated later message", at: 1 },
+      { id: "confirmed-room-row", sendId: "pending-room-send", role: "user", kind: "text", text: "Pending at click", at: 2 });
+    page.resolve({ messages: fixture.messages.slice(-200), hasMore: true, activeLeafId: "confirmed-room-row" });
+    const markdown = await selectedOutput("copy");
+    expect(markdown.match(/Pending at click/g)).toHaveLength(1);
+    expect(markdown).toContain("Conversation message 000");
+    expect(markdown).not.toContain("Unrelated later message");
+  });
+
+  it("uses an optimistic bot row's already-persisted parent as its history boundary", async () => {
+    const clicked = send(heldState("bot"), "bot", "Pending child", "child-send");
+    clicked.bots[0] = { ...clicked.bots[0]!, messages: clicked.bots[0]!.messages.slice(-1) };
+    vi.stubGlobal("window", {});
+    actionForState("bot", "copy", clicked).onSelect();
+    const markdown = await selectedOutput("copy");
+    expect(markdown).toContain("Conversation message 000");
+    expect(markdown).toContain("Conversation message 269");
+    expect(markdown).toContain("Pending child");
+  });
+
+  it("does not export an unbounded room history when no clicked row or parent survives", async () => {
+    const clicked = send(heldState("room"), "room", "Only pending row", "unanchored-send");
+    clicked.groups[0] = { ...clicked.groups[0]!, messages: clicked.groups[0]!.messages.slice(-1) };
+    vi.stubGlobal("window", {});
+    actionForState("room", "download", clicked).onSelect();
+    await vi.waitFor(() => expect(fixture.dispatch).toHaveBeenCalledWith({
+      type: "error", message: "The conversation history at export time is no longer available",
+    }));
+    expect(fixture.download).not.toHaveBeenCalled();
+  });
+
   for (const kind of ["bot", "room"] as const) {
     it(`keeps an unconfirmed optimistic ${kind} send while filling earlier pages`, async () => {
       const state = send(heldState(kind), kind, "Visible pending question", "pending-send");
@@ -272,7 +328,7 @@ describe("exporting the conversation state visible when the menu was clicked", (
     const state = reducer(heldState("room"), { type: "messageAdded", threadId: "shown-thread", message: {
       id: "held-record", sendId: "shared-send-id", role: "user", kind: "text", text: "Visible persisted row", at: 1_790_000_001_000,
     } });
-    fixture.messages.push({ id: "other-record", sendId: "shared-send-id", role: "user", kind: "text", text: "Another persisted row", at: 1_790_000_001_001 });
+    fixture.messages.splice(100, 0, { id: "other-record", sendId: "shared-send-id", role: "user", kind: "text", text: "Another persisted row", at: 1_790_000_000_099 });
     vi.stubGlobal("window", {});
     actionForState("room", "copy", state).onSelect();
     const markdown = await selectedOutput("copy");
