@@ -70,7 +70,7 @@ describe("what may ever be removed", () => {
     const routed = new Set(TOOL_CACHES.map((cache) => cache.folder));
     for (const name of TOOL_UNITS) expect(routed.has(name), name).toBe(true);
     for (const name of TOOL_UNITS) expect(name).not.toMatch(/playwright|puppeteer|chrom|browser|mcp/i);
-    expect(TOOL_UNITS).not.toContain("go-mod");
+    for (const name of ["go-mod", "go-build", "corepack"]) expect(TOOL_UNITS).not.toContain(name);
   });
 
   it("the tools' roots only while their folders are in use (the switch and a live box); the app's own always", () => {
@@ -101,22 +101,28 @@ describe("switch off: nothing at all", () => {
   it("making it reads nothing; off, start reads nothing, starts no timer, and a real clear is refused", async () => {
     const f = fixture();
     writeFileSync(join(f.dataDir, CACHE_SWEEP_STATE), JSON.stringify({ cleared: { count: 7 } }));
-    const off = sweeper(f, { env: { OMB_CLOUD_ROLE: "home" } });
+    const reads: string[] = [];
+    const readText = async (path: string) => { reads.push(path); return readFileSync(path, "utf8"); };
+    const off = sweeper(f, { env: { OMB_CLOUD_ROLE: "home" }, readText });
     off.made.start(() => false);
+    await new Promise((done) => setImmediate(done));
+    expect(reads).toEqual([]);
     expect(off.lines).toEqual([]);
     expect(off.made.counters()).toBeNull();
     expect(await off.made.sweep()).toEqual({ skipped: "off" });
     expect(await off.made.emergency()).toEqual({ skipped: "off" });
     await expect(off.made.clearCaches({ dryRun: false })).rejects.toBeInstanceOf(CacheSweepOff);
     expect(existsSync(join(f.tools, "pip", "wheel"))).toBe(true);
-    // On, making it still reads nothing: the counters come once it is started (after the server answers).
-    const on = sweeper(f);
+    // On, making it still reads nothing: the counters come once it is started (after the server answers), read once.
+    const on = sweeper(f, { readText });
     await new Promise((done) => setImmediate(done));
+    expect(reads).toEqual([]);
     expect(on.made.counters()).toBeNull();
     on.made.start(() => true);
     on.made.stop();
     await on.made.report();
     expect(on.made.counters()).toMatchObject({ cacheCleared: { count: 7 } });
+    expect(reads).toEqual([join(f.dataDir, CACHE_SWEEP_STATE)]);
   });
 
   it("the storage report is unchanged until the counters are read", () => {

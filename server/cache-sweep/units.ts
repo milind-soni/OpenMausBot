@@ -10,7 +10,7 @@ import { basename, join, resolve } from "node:path";
 
 import { under } from "../bot-box/plan.ts";
 import { CACHE_TAG, CACHE_TAG_FILE, toolCacheRoot } from "../bot-box/tool-caches.ts";
-import { close, measureChild, names, openFolder, openPath, readPlainFile, removeChild, type Folder, type Pacer, type Tally } from "./tree.ts";
+import { close, measureChild, names, openFolder, openPath, readPlainFile, removeChild, removeLeftovers, type Folder, type Pacer, type Tally } from "./tree.ts";
 
 export type CacheGroup = "tools" | "app";
 
@@ -20,7 +20,7 @@ export const APP_CACHE_DIR = "cache";
 /** The tools' units: whole folders, by fixed name. Each is a folder bot-box/tool-caches.ts routes a tool's cache to; a
  * tool keeps its own index and cross-references inside it (npm's content store, uv's archive links), so it goes whole or
  * not at all. Not here, ever: a browser's folder, and any name not on this list. */
-export const TOOL_UNITS: readonly string[] = ["npm", "pip", "uv", "huggingface/hub", "huggingface/xet", "bun", "corepack", "go-build"];
+export const TOOL_UNITS: readonly string[] = ["npm", "pip", "uv", "huggingface/hub", "huggingface/xet", "bun"];
 
 /** The app's: Node's compile cache, one folder per Node version and build (cloud-home-start.ts NODE_COMPILE_CACHE). The
  * box hides the data folder, so no bot writes here. */
@@ -95,6 +95,18 @@ export async function measureUnit(folder: Folder, unit: Unit, pacer: Pacer): Pro
   const found = await parentOf(folder, unit);
   if (!found) return null;
   try { return await measureChild(found.parent, found.name, pacer); } finally { if (found.parent !== folder) await close(found.parent); }
+}
+
+/** Finishes what an earlier removal left (tree.ts TRASH_PREFIX) in the folders that hold a root's units. The caller
+ * decides whether it may, as for removeUnit. */
+export async function finishLeftovers(root: Root, folder: Folder, pacer: Pacer): Promise<number> {
+  let done = 0;
+  for (const parts of root.group === "tools" ? [[], ["huggingface"]] : [[APP_COMPILE_DIR]]) {
+    const parent = parts.length ? await openPath(folder, parts) : folder;
+    if (!parent) continue;
+    try { done += await removeLeftovers(parent, pacer); } finally { if (parent !== folder) await close(parent); }
+  }
+  return done;
 }
 
 /** Deletes a unit inside its open root and never outside it (tree.ts). The caller decides whether it may. */

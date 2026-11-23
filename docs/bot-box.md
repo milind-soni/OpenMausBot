@@ -127,15 +127,15 @@ are not there. With it on, making it at start reads nothing either; its first ti
   `OMB_CACHE_CAP_TOOLS` and `OMB_CACHE_CAP_APP`, in bytes or as `4G`, `512M`.
 - **Which folders.** Only a tools root the server made (its `CACHEDIR.TAG`, above), and only while the tools' switch is
   on and the bot box is live. In it, only these whole folders, by fixed name: `npm`, `pip`, `uv`, `huggingface/hub`,
-  `huggingface/xet`, `bun`, `corepack`, `go-build`. Nothing else in a root is counted, listed or touched: not a
+  `huggingface/xet`, `bun`. Nothing else in a root is counted, listed or touched: not a
   person's own folder, not `huggingface/token`, and no browser's folder ever (a Playwright MCP profile holds cookies and
   sign-ins). In the app's own folder: each old `node-compile/<version>`, never the running server's.
 - **Least recently written first.** A folder's age is its newest modification or change time. Access times are not
   used: a backup that reads the whole volume would refresh them. A folder written in the last 30 minutes stays. A
   folder that alone is over its root's cap is left and logged once, and not counted, so it does not empty the others on
   every pass; only a clear or the emergency pass removes it, so the cap does not bound such a folder (a Hugging Face
-  hub with one large model is the likely one). `npm` goes whole: every npx-installed MCP server is downloaded again
-  together.
+  hub with one large model is the likely one). `npm` goes whole: every npx-installed MCP server goes with it, and npx
+  fetches each again the next time it starts it.
 - **Never while a bot works.** In a tools root, nothing is deleted while a turn runs, an engine is kept warm, or any
   process the server started (directly or inside a box) uses that root: its working folder, program, open files, mapped
   files or environment name a path in it (`in-use.ts`, from `/proc`). Every bot process is one of the server's
@@ -144,14 +144,20 @@ are not there. With it on, making it at start reads nothing either; its first ti
   be read counts as using every root (logged once); a process the server did not start is not looked at. This is checked
   before each folder goes. A busy home is tried again on the next tick, 5 minutes later; a pass that finishes waits an
   hour. The turn and warm-engine check is for the whole Cloud: on a Team Cloud one member's turn holds every root's
-  pass (a process seen in one root holds only that root). This protects running work but is not absolute: a turn that
-  starts while a large folder is being removed may find it half gone, and the tool downloads it again.
+  pass (a process seen in one root holds only that root). Any long-lived bot process holds the cap for its root for as
+  long as it runs: a dev server or a watcher a bot left running, an MCP server an engine keeps open. Nothing there is
+  removed until it ends. A folder about to go is first renamed inside its own parent (below), so a tool that starts
+  meanwhile finds it missing, not half there. What each tool then does with a missing cache folder is its own behaviour:
+  npm, pip, uv and bun are expected to fetch again what they need; this was not tested for each.
 - **Never outside the root.** Every walk and removal goes through open folders (`tree.ts`): the root is opened with
   `O_NOFOLLOW`, and each step names one child of an open folder through `/proc/self/fd/<fd>/<name>`, so the kernel
   resolves it from that open folder, never again by path. A link is never entered (`O_NOFOLLOW`), a folder on another
   filesystem is never entered, and `unlink`/`rmdir` act on the link itself. A folder above that a bot swaps for a link
-  changes nothing. Nothing is renamed, moved aside or put back: a removal that stops part-way leaves what it did not
-  reach where it is. This needs Linux; anywhere else nothing is walked or deleted.
+  changes nothing. A folder about to go is renamed to `.omb-trash-<random>` in the same open parent (never moved
+  elsewhere, never put back), then emptied and removed; whatever a removal that stopped part-way left under that name,
+  the next pass in that root finishes the same way (a link there is removed as a link). A walk goes at most 128 folders
+  deep, so a bot's endlessly nested folders cannot use up the server's open files or memory; what lies deeper stays.
+  This needs Linux; anywhere else nothing is walked or deleted.
 - **Emergency.** At 95% of the volume used, the tools' folders go, least recently written first, until it is under 90%,
   under the same rule: if a bot is working, nothing is removed, and one line is logged (the Admin's disk auto-grow and
   its alert cover a full disk). A pass that measured is not repeated within 30 minutes.

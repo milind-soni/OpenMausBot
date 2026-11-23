@@ -44,6 +44,19 @@ async function removeUv(root: string) {
 }
 
 describe.skipIf(process.platform !== "linux")("a swap between the walk's look and its act", () => {
+  it("the unit swapped for a link just before it is renamed: only the link is renamed and removed", async () => {
+    const { root, precious } = scene();
+    after.lstat = (path) => {
+      if (!path.endsWith("/uv")) return;
+      after.lstat = null;
+      renameSync(path, `${path}-real`);
+      symlinkSync(precious, path);
+    };
+    expect(await removeUv(root)).toMatchObject({ partial: true });
+    expect(readdirSync(root).sort()).toEqual(["uv-real"]);
+    expect(readdirSync(precious)).toHaveLength(6);
+  });
+
   it("a folder swapped for a link after it was looked at is not entered: the folder the link names keeps everything", async () => {
     const { root, precious } = scene();
     after.lstat = (path) => {
@@ -74,8 +87,10 @@ describe.skipIf(process.platform !== "linux")("a swap between the walk's look an
     after.lstat = (path) => {
       if (!path.endsWith("/f0")) return;
       after.lstat = null;
-      renameSync(join(root, "uv"), join(root, "uv-moved"));
-      symlinkSync(precious, join(root, "uv"));
+      // It was renamed on its way out: the swap names that.
+      const trash = readdirSync(root).find((name) => name.startsWith(".omb-trash-"))!;
+      renameSync(join(root, trash), join(root, "uv-moved"));
+      symlinkSync(precious, join(root, trash));
     };
     expect(await removeUv(root)).toMatchObject({ partial: true });
     expect(readdirSync(join(root, "uv-moved"))).toEqual([]);

@@ -256,12 +256,55 @@ describe.skipIf(process.platform !== "linux")("the cache cap on real folders", (
 
   it("a read-only tree is removed, made writable through its own folders", async () => {
     const f = fixture();
-    put(join(f.tools, "go-build", "00", "a-d"), 10, 9, f.tools);
-    chmodSync(join(f.tools, "go-build", "00", "a-d"), 0o444);
-    chmodSync(join(f.tools, "go-build", "00"), 0o555);
-    chmodSync(join(f.tools, "go-build"), 0o555);
+    put(join(f.tools, "uv", "archive-v0", "a"), 10, 9, f.tools);
+    chmodSync(join(f.tools, "uv", "archive-v0", "a"), 0o444);
+    chmodSync(join(f.tools, "uv", "archive-v0"), 0o555);
+    chmodSync(join(f.tools, "uv"), 0o555);
     expect(await sweeper(f).made.clearCaches({ dryRun: false })).toMatchObject({ entries: 1, partial: 0 });
-    expect(existsSync(join(f.tools, "go-build"))).toBe(false);
+    expect(readdirSync(f.tools)).toEqual([CACHE_TAG_FILE]);
+  });
+
+  it("a folder goes out of sight first: renamed in its own root, never put back; what a stopped removal left is finished next time", async () => {
+    const f = fixture();
+    put(join(f.tools, ".omb-trash-0a0b0c", "uv", "x"), 10, 9, f.tools);
+    put(join(f.tools, "huggingface", ".omb-trash-0d0e0f", "models--o--m", "x"), 10, 9, f.tools);
+    const outside = join(f.root, "outside");
+    put(join(outside, "keep"), 1, 9, f.root);
+    symlinkSync(outside, join(f.tools, ".omb-trash-1a1b1c"));
+    put(join(f.tools, "pip", "a"), 10, 9, f.tools);
+    expect(await sweeper(f).made.clearCaches({ dryRun: false })).toMatchObject({ entries: 1, partial: 0 });
+    expect(readdirSync(f.tools).sort()).toEqual([CACHE_TAG_FILE, "huggingface"]);
+    expect(readdirSync(join(f.tools, "huggingface"))).toEqual([]);
+    expect(existsSync(join(outside, "keep"))).toBe(true);
+  });
+
+  it("folders nested far deeper than any tool's are not followed to the end: the walk stops at 128 and says so", async () => {
+    const f = fixture();
+    const chain = (levels: number) => join(f.tools, "uv", ...Array.from({ length: levels }, () => "d"));
+    mkdirSync(chain(200), { recursive: true });
+    writeFileSync(join(chain(200), "bottom"), "x");
+    const { made } = sweeper(f);
+    expect(await made.clearCaches({ dryRun: false })).toMatchObject({ entries: 1, partial: 1 });
+    // What lies past the limit stays, under the renamed folder, and only that.
+    const left = readdirSync(f.tools).filter((name) => name.startsWith(".omb-trash-"));
+    expect(left).toHaveLength(1);
+    expect(existsSync(join(f.tools, "uv"))).toBe(false);
+    // A shallower tree goes whole.
+    mkdirSync(chain(100), { recursive: true });
+    writeFileSync(join(chain(100), "bottom"), "x");
+    expect(await made.clearCaches({ dryRun: false })).toMatchObject({ entries: 1, partial: 0 });
+  });
+
+  it("a time in the state file later than now (a clock set back) does not hold off a pass", async () => {
+    const f = fixture();
+    put(join(f.tools, "pip", "a"), 100, 9, f.tools);
+    put(join(f.tools, "uv", "a"), 100, 2, f.tools);
+    writeFileSync(join(f.dataDir, "cache-sweep.json"), JSON.stringify({ lastSweep: { at: NOW + DAY, roots: {} }, emergency: { count: 1, bytes: 1, at: NOW + DAY } }));
+    const { made } = sweeper(f, { ...withCap("150K"), volume: async () => ({ total: 100 * GIB, free: 50 * GIB }) });
+    await made.tick();
+    expect(existsSync(join(f.tools, "pip"))).toBe(false);
+    const full = sweeper(f, { volume: async () => ({ total: 100, free: 1 }) }).made;
+    expect(await full.emergency()).not.toEqual({ skipped: "backoff" });
   });
 
   it("a state file of any shape: every pass still runs, and it is replaced whole", async () => {
@@ -333,13 +376,19 @@ describe.skipIf(process.platform !== "linux")("never outside the root", () => {
     const precious = join(f.root, "precious");
     for (let j = 0; j < 100; j++) put(join(precious, `p${j}`), 1, 30, f.root);
     const racer = join(f.root, "racer.mjs");
-    // The racer swaps each d<i> for a link to `precious` and back, as fast as it can, until the unit is gone.
+    // The racer swaps each d<i> for a link to `precious` and back, as fast as it can, in the unit or the name it was
+    // renamed to on its way out, until neither is there.
     writeFileSync(racer, `
-      import { renameSync, symlinkSync, unlinkSync, existsSync } from "node:fs";
+      import { readdirSync, renameSync, symlinkSync, unlinkSync, existsSync } from "node:fs";
       import { join } from "node:path";
-      const [unit, precious] = process.argv.slice(2);
+      const [root, name, precious] = process.argv.slice(2);
+      const target = () => {
+        if (existsSync(join(root, name))) return join(root, name);
+        const trash = readdirSync(root).find((entry) => entry.startsWith(".omb-trash-"));
+        return trash ? join(root, trash) : null;
+      };
       process.send?.("ready");
-      while (existsSync(unit)) {
+      for (let unit = target(); unit; unit = target()) {
         for (let i = 0; i < 200; i++) {
           const d = join(unit, "d" + i);
           try { renameSync(d, d + ".r"); } catch { continue; }
@@ -352,7 +401,7 @@ describe.skipIf(process.platform !== "linux")("never outside the root", () => {
     for (let run = 0; run < 20; run++) {
       const unitPath = join(f.tools, "uv");
       for (let i = 0; i < 200; i++) for (let j = 0; j < 5; j++) put(join(unitPath, `d${i}`, `f${j}`), 1, 30, f.tools);
-      const child = spawn(process.execPath, [racer, unitPath, precious], { stdio: ["ignore", "ignore", "ignore", "ipc"] });
+      const child = spawn(process.execPath, [racer, f.tools, "uv", precious], { stdio: ["ignore", "ignore", "ignore", "ipc"] });
       children.push(child);
       // It ends by itself once the unit is gone, maybe before the kill below.
       const exited = new Promise((done) => child.once("exit", done));
@@ -362,7 +411,7 @@ describe.skipIf(process.platform !== "linux")("never outside the root", () => {
       child.kill("SIGKILL");
       await exited;
       expect(readdirSync(precious), `run ${run}`).toHaveLength(100);
-      rmSync(unitPath, { recursive: true, force: true });
+      for (const name of readdirSync(f.tools)) if (name === "uv" || name.startsWith(".omb-trash-")) rmSync(join(f.tools, name), { recursive: true, force: true });
     }
   }, 120_000);
 });

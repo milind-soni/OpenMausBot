@@ -7,10 +7,15 @@
 //   - a folder on another filesystem (a different device) is never entered or removed;
 //   - lstat, unlink and rmdir act on the last name itself and never follow it: a link swapped in is removed as a link,
 //     or left; a folder's permissions are changed through its own open handle (fchmod).
+//   - a folder about to go is first renamed, inside the same open parent, to a TRASH_PREFIX name, so a tool that starts
+//     meanwhile finds it gone rather than half there; it is never put back, and a later pass finishes any leftover;
+//   - a walk goes at most MAX_DEPTH folders deep (each level holds one open folder), so a bot's endlessly nested folders
+//     cannot use up the server's open files or memory: what lies deeper is left, and the walk says it was partial.
 // So the sweeper can delete only what is inside the folder it opened, which a bot that writes there could delete itself.
 // Needs Linux's /proc/self/fd: anywhere else nothing is walked or deleted (anchoredSupported).
+import { randomBytes } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, open, readdir, rmdir, unlink, type FileHandle } from "node:fs/promises";
+import { lstat, open, readdir, rename, rmdir, unlink, type FileHandle } from "node:fs/promises";
 
 import { RECENT_MS, TICK_ENTRIES, TICK_PAUSE_MS, YIELD_EVERY } from "./limits.ts";
 
@@ -20,6 +25,10 @@ export function anchoredSupported(platform: NodeJS.Platform = process.platform):
 }
 
 const FOLDER_FLAGS = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
+/** How deep a walk goes. A tool's cache is a few levels deep (npx's node_modules perhaps 20); deeper is left. */
+export const MAX_DEPTH = 128;
+/** What a folder being removed is renamed to first, in its own parent. */
+export const TRASH_PREFIX = ".omb-trash-";
 
 export interface Folder {
   handle: FileHandle;
@@ -126,7 +135,8 @@ const note = (tally: Tally, stat: Stat) => {
 
 /** Walks the open `folder` (sizes, files, last write); with `remove`, deletes everything inside it as it goes, leaving
  * the folder itself. A child folder is entered only through its own open handle, on the same filesystem. */
-export async function walk(folder: Folder, options: { remove: boolean; pacer: Pacer }, tally: Tally = emptyTally()): Promise<Tally> {
+export async function walk(folder: Folder, options: { remove: boolean; pacer: Pacer }, tally: Tally = emptyTally(), depth = 0): Promise<Tally> {
+  if (depth >= MAX_DEPTH) { tally.partial = true; return tally; }
   if (options.remove) {
     // A folder without write permission (a read-only tree) cannot be emptied: made writable through its own handle.
     const own = await folder.handle.stat().catch(() => null);
@@ -141,7 +151,7 @@ export async function walk(folder: Folder, options: { remove: boolean; pacer: Pa
       const child = await openChild(folder, name);
       if (!child) { tally.partial = true; continue; }
       note(tally, stat);
-      try { await walk(child, options, tally); } finally { await close(child); }
+      try { await walk(child, options, tally, depth + 1); } finally { await close(child); }
       if (options.remove) await rmdir(at(folder, name)).catch(() => { tally.partial = true; });
       continue;
     }
@@ -165,15 +175,41 @@ export async function measureChild(parent: Folder, name: string, pacer: Pacer): 
   }
 }
 
-/** Deletes `name` inside the open `parent` and everything in it, never leaving it. Returns what it walked; `partial`
- * when anything stayed. */
+/** Deletes the folder `name` inside the open `parent` and everything in it, never leaving it: renamed first to a
+ * TRASH_PREFIX name in the same parent, then emptied and removed. Null when `name` is not a folder there (missing, a
+ * link, a file). Returns what it walked; `partial` when anything stayed (a later pass finishes it, removeLeftovers). */
 export async function removeChild(parent: Folder, name: string, pacer: Pacer): Promise<Tally | null> {
-  const child = await openChild(parent, name);
-  if (!child) return null;
+  if (!plainName(name) || name.startsWith(TRASH_PREFIX)) return null;
+  const stat = await lstat(at(parent, name)).catch(() => null);
+  if (!stat?.isDirectory() || Number(stat.dev) !== parent.dev) return null;
+  const trash = `${TRASH_PREFIX}${randomBytes(6).toString("hex")}`;
+  try { await rename(at(parent, name), at(parent, trash)); } catch { return null; }
+  return removeTrash(parent, trash, pacer);
+}
+
+/** Removes a TRASH_PREFIX entry of the open `parent`: a folder through its own open handle; anything else (a link a bot
+ * swapped in before the rename) as itself, never followed. */
+async function removeTrash(parent: Folder, trash: string, pacer: Pacer): Promise<Tally> {
+  const child = await openChild(parent, trash);
+  if (!child) {
+    await unlink(at(parent, trash)).catch(() => {});
+    return { ...emptyTally(), partial: true };
+  }
   let tally: Tally;
   try { tally = await walk(child, { remove: true, pacer }); } finally { await close(child); }
-  await rmdir(at(parent, name)).catch(() => { tally.partial = true; });
+  await rmdir(at(parent, trash)).catch(() => { tally.partial = true; });
   return tally;
+}
+
+/** Finishes the TRASH_PREFIX entries an earlier removal left in the open `parent`. */
+export async function removeLeftovers(parent: Folder, pacer: Pacer): Promise<number> {
+  let done = 0;
+  for (const name of await names(parent)) {
+    if (!name.startsWith(TRASH_PREFIX)) continue;
+    const tally = await removeTrash(parent, name, pacer);
+    if (!tally.partial) done += 1;
+  }
+  return done;
 }
 
 /** Changed in the last RECENT_MS: a download or an install may still be finishing it. */

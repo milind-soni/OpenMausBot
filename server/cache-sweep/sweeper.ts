@@ -9,7 +9,8 @@
 //     home is tried again on the next tick;
 //   - the emergency pass at EMERGENCY_FULL and a clear on request obey the same rule: a busy home is left as it is, with
 //     one log line (the Admin's disk auto-grow and its alert cover a full disk);
-//   - nothing is renamed or put back: a removal that stops part-way leaves what it did not reach, in place.
+//   - a folder about to go is renamed first, inside its own open parent, and never put back (tree.ts): a later pass
+//     finishes what a removal that stopped part-way left.
 // With the switch off nothing is read, started or deleted: no state file read, no timer, no routes.
 import { readFile, rename, statfs, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -17,7 +18,7 @@ import { join } from "node:path";
 import { APP_CAP_ENV, EMERGENCY_BACKOFF_MS, EMERGENCY_FULL, EMERGENCY_TARGET, SWEEP_EVERY_MS, TICK_EVERY_MS, TOOL_CAP_ENV, capBytes, cacheSweepOn } from "./limits.ts";
 import { rootsInUse } from "./in-use.ts";
 import { Pacer, anchoredSupported, close, recent, type Folder, type Pace, type Tally } from "./tree.ts";
-import { expectedRoots, listUnits, measureUnit, openRoot, removeUnit, type CacheGroup, type Root, type Unit } from "./units.ts";
+import { expectedRoots, finishLeftovers, listUnits, measureUnit, openRoot, removeUnit, type CacheGroup, type Root, type Unit } from "./units.ts";
 
 export const CACHE_SWEEP_STATE = "cache-sweep.json";
 
@@ -37,6 +38,8 @@ export interface CacheSweeperDeps {
   /** Whether this system can delete by open folders (tree.ts); only Linux. */
   supported?: () => boolean;
   now?: () => number;
+  /** Reads the state file (a test counts the reads). */
+  readText?: (path: string) => Promise<string>;
   pace?: Pace;
   log?: (line: string) => void;
 }
@@ -114,10 +117,12 @@ export function createCacheSweeper(deps: CacheSweeperDeps) {
   let emergencyTriedAt: number | null = null;
   let loading: Promise<State> | null = null;
   const said = new Set<string>();
+  /** A time from the state file, or null when it is later than now (a clock that went back must not hold a pass off). */
+  const past = (at: number | null) => (at !== null && at <= now() ? at : null);
   const once = (key: string, line: string) => { if (!said.has(key)) { said.add(key); log(line); } };
 
   const load = (): Promise<State> => {
-    loading ??= readFile(stateFile, "utf8").catch(() => "").then((text) => (state = parseState(text)));
+    loading ??= (deps.readText ?? ((path: string) => readFile(path, "utf8")))(stateFile).catch(() => "").then((text) => (state = parseState(text)));
     return loading;
   };
   const save = async () => {
@@ -180,6 +185,7 @@ export function createCacheSweeper(deps: CacheSweeperDeps) {
         const summary: RootSummary = { group: root.group, bytes: 0, cap, removed: 0, freed: 0, tooBig: [], busy: false };
         roots[root.path] = summary;
         if (await busy(root)) { summary.busy = anyBusy = true; continue; }
+        await finishLeftovers(root, folder, pacer);
         const entries = await measured(root, folder, pacer);
         const fits = entries.filter((entry) => {
           if (entry.tally.bytes <= cap) return true;
@@ -219,7 +225,7 @@ export function createCacheSweeper(deps: CacheSweeperDeps) {
     const full = usedShare(volume);
     if (full < EMERGENCY_FULL) return { skipped: "room" };
     const current = await load();
-    const last = Math.max(current.emergency.at ?? -Infinity, emergencyTriedAt ?? -Infinity);
+    const last = Math.max(past(current.emergency.at) ?? -Infinity, emergencyTriedAt ?? -Infinity);
     if (last > now() - EMERGENCY_BACKOFF_MS) return { skipped: "backoff" };
     const { opened, refused } = await openRoots("tools");
     const result: ClearResult = { dryRun: false, bytes: 0, entries: 0, files: 0, recent: 0, busy: 0, partial: 0, refusedRoots: refused };
@@ -228,6 +234,7 @@ export function createCacheSweeper(deps: CacheSweeperDeps) {
       const queue: Array<{ root: Root; folder: Folder; unit: Unit; tally: Tally }> = [];
       for (const { root, folder } of opened) {
         if (await busy(root)) { result.busy += 1; continue; }
+        await finishLeftovers(root, folder, pacer);
         for (const entry of await measured(root, folder, pacer)) queue.push({ root, folder, ...entry });
         emergencyTriedAt = now();
       }
@@ -264,6 +271,7 @@ export function createCacheSweeper(deps: CacheSweeperDeps) {
     try {
       for (const { root, folder } of opened) {
         if (!dryRun && await busy(root)) { result.busy += 1; continue; }
+        if (!dryRun) await finishLeftovers(root, folder, pacer);
         for (const { unit, tally } of await measured(root, folder, pacer)) {
           if (recent(tally, now())) { result.recent += 1; continue; }
           if (!dryRun && await busy(root)) { result.busy += 1; break; }
@@ -294,7 +302,7 @@ export function createCacheSweeper(deps: CacheSweeperDeps) {
   /** The tick: the emergency pass, then a sweep that is due (hourly) or that a busy home put off. */
   const tick = async () => {
     await emergency();
-    const last = (await load()).lastSweep?.at ?? null;
+    const last = past((await load()).lastSweep?.at ?? null);
     if (last === null || last <= now() - SWEEP_EVERY_MS) await sweep();
   };
 
