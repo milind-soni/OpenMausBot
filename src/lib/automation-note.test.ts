@@ -71,6 +71,14 @@ describe("automationNote", () => {
     expect(automationNote(line(text))?.wait).toBe("release [QA");
   });
 
+  it("picks the wait whose card matches the whole line, not the longest name that starts it", () => {
+    const build = waitCard("build", "prod] Check logs and notify."), prod = waitCard("build] prod", "Check logs");
+    const waits = knownWaits([build, prod]);
+    expect(automationNote(line(followUpLine("build", "prod] Check logs and notify.")), waits)).toEqual({ wait: "build", instructions: "prod] Check logs and notify." });
+    expect(automationNote(line(followUpLine("build] prod", "Check logs")), waits)).toEqual({ wait: "build] prod", instructions: "Check logs" });
+    expect(automationNote(line(followUpLine("build", "prod] Check logs and notify.", "restarted")), waits)).toMatchObject({ wait: "build", instructions: "prod] Check logs and notify.", resumed: "restart" });
+  });
+
   it("sends again the line a reply answers, and offers for editing only what the person typed", () => {
     const asked = typed("Tell me when the report is ready", { id: "asked" });
     const wait = line(followUpLine("the report", "Say it is ready."), { id: "wait" });

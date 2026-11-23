@@ -26,10 +26,13 @@ export function knownWaits(messages: readonly Pick<Message, "card">[]): KnownWai
 }
 
 // A label may itself hold "] ", where the text alone cannot tell it from the instructions: the wait's card can.
+// The card that matches the whole line, second-start part aside, wins over one whose name and instructions only start it.
 function waitLabel(text: string, waits: readonly KnownWait[]): string | undefined {
   if (!text.startsWith(PREFIX)) return undefined;
+  const body = text.slice(0, SECOND_START.exec(text)?.index ?? text.length).trim();
   const named = waits.filter((wait) => text.startsWith(`${PREFIX}${wait.label}] `)).sort((a, b) => b.label.length - a.label.length);
-  return (named.find((wait) => text.startsWith(`${PREFIX}${wait.label}] ${wait.followUp}`)) ?? named[0])?.label ?? WAIT_FINISHED.exec(text)?.[1];
+  const said = (wait: KnownWait) => `${PREFIX}${wait.label}] ${wait.followUp}`;
+  return (named.find((wait) => body === said(wait).trim()) ?? named.find((wait) => body.startsWith(said(wait))) ?? named[0])?.label ?? WAIT_FINISHED.exec(text)?.[1];
 }
 
 /** Only a line the server marked as started by an automation: the same words typed by a person stay theirs. */
