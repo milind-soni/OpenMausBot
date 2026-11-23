@@ -43,8 +43,8 @@
 //   their own config listed and blanked the same way.
 // - does not trust safe.directory from anywhere but git's own default: a repository owned by another user is refused by git
 //   and answered "unknown".
-// Any git error, timeout (one deadline across every call, default 30 s), unreadable repository or unexpected output is
-// "unknown", which is never disposable.
+// Any git error, timeout (one deadline across every call, default 30 s), unreadable repository, unexpected output or a git
+// older than 2.36 (which would ignore GIT_CONFIG_COUNT, so the driver blanking) is "unknown", which is never disposable.
 import { spawn } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -137,6 +137,12 @@ export function remoteIsOffDisk(url: string): boolean {
   // scp-like: a colon before the first slash.
   const colon = url.indexOf(":");
   return colon > 0 && (url.indexOf("/") === -1 || colon < url.indexOf("/"));
+}
+
+/** `git version` output names 2.36 or later. */
+export function gitIsRecentEnough(version: string): boolean {
+  const match = /git version (\d+)\.(\d+)/.exec(version);
+  return Boolean(match) && (Number(match![1]) > 2 || (Number(match![1]) === 2 && Number(match![2]) >= 36));
 }
 
 /** Two locations are the same folder: git prints C:/x/y on Windows where Node has C:\x\y, and Windows ignores case. */
@@ -304,6 +310,8 @@ export async function workingCopyState(folder: string, options: WorkingCopyOptio
       return { state: "not-a-repo" };
     }
     const { run, overrides } = runner(options);
+    // Older git ignores GIT_CONFIG_COUNT (so the driver blanking) and lacks `worktree list -z`.
+    if (!gitIsRecentEnough((await run(root, ["version"])).stdout)) return { state: "unknown", detail: "git is older than 2.36" };
     return await judge(run, overrides, root, 0, new Set());
   } catch (error) {
     return { state: "unknown", detail: error instanceof Error ? error.message : String(error) };

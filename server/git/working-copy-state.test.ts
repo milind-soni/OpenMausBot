@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  driverOverrides, gitEnvironment, isDisposable, remoteIsOffDisk, samePath, workingCopyState, type WorkKind, type WorkingCopyState,
+  driverOverrides, gitEnvironment, gitIsRecentEnough, isDisposable, remoteIsOffDisk, samePath, workingCopyState, type WorkKind, type WorkingCopyState,
 } from "./working-copy-state.ts";
 
 const made: string[] = [];
@@ -411,6 +411,11 @@ describe("working-copy-state helpers", () => {
   it("counts only remotes off this disk", () => {
     for (const url of ["https://github.com/a/b.git", "http://host/x", "ssh://git@host/x", "git://host/x", "git@github.com:a/b.git", "host:path/x"]) expect(remoteIsOffDisk(url), url).toBe(true);
     for (const url of ["/srv/repo.git", "../repo", "file:///srv/repo.git", "C:\\repos\\x", "c:/repos/x", "ext::sh -c touch% /tmp/x", "./a:b/c", "fd::17"]) expect(remoteIsOffDisk(url), url).toBe(false);
+  });
+
+  it("asks for git 2.36 or later", () => {
+    for (const version of ["git version 2.36.0", "git version 2.50.1 (Apple Git-155)", "git version 2.45.1.windows.1", "git version 3.0.0"]) expect(gitIsRecentEnough(version), version).toBe(true);
+    for (const version of ["git version 2.35.9", "git version 2.30.2", "git version 1.9.5", "", "garbage"]) expect(gitIsRecentEnough(version), version).toBe(false);
   });
 
   it("compares git's paths with Node's, on Windows too", () => {
