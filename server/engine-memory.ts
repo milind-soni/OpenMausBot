@@ -56,7 +56,7 @@ export const ENGINE_PROCESS_KINDS: ReadonlySet<string> = new Set(["claudeAgent",
   "droidAgent", "cursorAgent", "qwenAgent", "hermesAgent", "clineAgent", "copilotAgent", "commandCodeAgent", "kiroAgent", "devinAgent", "customAcp", "piAgent", "ompAgent", "mistralVibeAgent", "antigravityAgent"]);
 
 /** Chat-runtime engines (openai-chat.ts) have no process of their own, but each turn starts its MCP servers, each a Node process. */
-export const CHAT_RUNTIME_KINDS: ReadonlySet<string> = new Set(["openai-compat", "cerebras", "greenference", "grok", "groq", "meta", "minimax", "mistral", "modelgo"]);
+export const CHAT_RUNTIME_KINDS: ReadonlySet<string> = new Set(["openai-compat", "cerebras", "greenference", "bf16", "grok", "groq", "meta", "minimax", "mistral", "modelgo"]);
 
 export interface HostMemory {
   totalBytes: number; availableBytes: number; swapFreeBytes: number; oomKills: number | null; fullStall10: number | null;

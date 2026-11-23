@@ -19,7 +19,7 @@ export const KEY_SECTIONS: ReadonlyArray<{ id: KeySectionId; titleKey: LocaleKey
   { id: "helpers", titleKey: "keys.section.helpers", purposeKey: "keys.section.helpers.purpose" },
 ];
 
-export type TestableProvider = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "greenference" | "modelgo" | "meta" | "treg";
+export type TestableProvider = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "greenference" | "bf16" | "modelgo" | "meta" | "treg";
 
 export type DesktopSlot = Parameters<NonNullable<NonNullable<Window["ogb"]>["setCredential"]>>[0];
 export type DesktopSlotOptions = NonNullable<Parameters<NonNullable<NonNullable<Window["ogb"]>["setCredential"]>>[2]>;
@@ -47,7 +47,7 @@ export interface KeyTarget {
 }
 
 export type KeyId =
-  | "openai" | "anthropic" | "xai" | "openrouter" | "mistral" | "cerebras" | "groq" | "greenference" | "modelgo" | "meta" | "deepseek" | "opencodeGo" | "opencodeProviders"
+  | "openai" | "anthropic" | "xai" | "openrouter" | "mistral" | "cerebras" | "groq" | "greenference" | "bf16" | "modelgo" | "meta" | "deepseek" | "opencodeGo" | "opencodeProviders"
   | "ollama" | "lmStudio" | "openaiCompat" | "liveCalls" | "liveKey" | "elevenlabs" | "fishAudio" | "geminiTts" | "box" | "vps" | "onePassword" | "composio" | "treg" | "postiz"
   | "jev" | "openrouterHelper" | "workersAi" | "customDecider" | "imageOpenai" | "imageGemini" | "imageCustom";
 
@@ -74,7 +74,7 @@ function flag(saved: SavedKey | undefined): SavedState {
   return { configured: saved?.configured === true, ...(saved?.configured && saved.last4 ? { last4: saved.last4 } : {}) };
 }
 
-type TopLevelKey = "openai" | "openrouter" | "xai" | "mistral" | "cerebras" | "groq" | "greenference" | "modelgo" | "meta" | "deepseek" | "treg";
+type TopLevelKey = "openai" | "openrouter" | "xai" | "mistral" | "cerebras" | "groq" | "greenference" | "bf16" | "modelgo" | "meta" | "deepseek" | "treg";
 
 function providerKey(name: TopLevelKey, rest: Omit<KeyTarget, "patch" | "saved">): KeyTarget {
   return { patch: (value) => ({ [name]: { key: value } }), saved: (config) => flag(config[name]), ...rest };
@@ -110,6 +110,9 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
   { id: "greenference", section: "ai", labelKey: "keys.greenference.label", purposeKey: "keys.purpose.greenference", name: "Greenference", env: ["OMB_GREENFERENCE_API_KEY"],
     words: ["greenference", "green", "open models"], mark: provider("greenference"), kind: "key",
     target: providerKey("greenference", { slot: "greenferenceApiKey", placeholder: "…", placeholderKey: "keys.greenference.placeholder", href: "https://greenference.com/dashboard/tokens", test: "greenference", analytics: "greenference" }) },
+  { id: "bf16", section: "ai", labelKey: "keys.bf16.label", purposeKey: "keys.purpose.bf16", name: "bf16.ai", env: ["OMB_BF16_API_KEY"],
+    words: ["bf16", "bf16.ai", "uncensored", "open models"], mark: provider("bf16"), kind: "key",
+    target: providerKey("bf16", { slot: "bf16ApiKey", placeholder: "sk-bf16-v1-…", placeholderKey: "keys.bf16.placeholder", href: "https://bf16.ai/dashboard/keys", test: "bf16", analytics: "bf16" }) },
   { id: "modelgo", section: "ai", labelKey: "keys.modelgo.label", purposeKey: "keys.purpose.modelgo", name: "ModelGo", env: ["OMB_MODELGO_API_KEY"],
     words: ["modelgo", "model go", "one key", "sponsor"], mark: provider("modelgo"), kind: "key",
     target: providerKey("modelgo", { slot: "modelgoApiKey", placeholder: "…", placeholderKey: "keys.modelgo.placeholder", href: MODELGO_URL, test: "modelgo", analytics: "modelgo", noteKey: "keys.modelgo.note",
@@ -285,7 +288,7 @@ export function looksLikeOtherKey(entry: KeyEntry, value: string): KeyEntry | nu
 
 const INSTANCE_KEYS: Readonly<Record<string, KeyId>> = {
   openai: "openai", claudeApi: "anthropic", xaiApi: "xai", grok: "xai", openrouter: "openrouter", mistral: "mistral", cerebras: "cerebras",
-  groq: "groq", greenference: "greenference", modelgo: "modelgo", meta: "meta", deepseek: "deepseek", opencodeGo: "opencodeGo", openaiCompat: "openaiCompat",
+  groq: "groq", greenference: "greenference", bf16: "bf16", modelgo: "modelgo", meta: "meta", deepseek: "deepseek", opencodeGo: "opencodeGo", openaiCompat: "openaiCompat",
 };
 
 export function keyForInstance(instanceId: string | undefined): KeyId | undefined {

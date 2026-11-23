@@ -3,7 +3,7 @@ import type { ConfigStatus } from "@/state/config-status";
 // A setting left out here is wiped from state.config whenever a config frame lands.
 export type ConfigStatusFrame = Pick<
   ConfigStatus,
-  "awakeLimit" | "pausedBots" | "pausedByPerson" | "heldBots" | "xai" | "mistral" | "cerebras" | "groq" | "greenference" | "modelgo" | "meta" | "deepseek" | "xResearch" | "treg" | "postiz" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "mcp" | "threads" | "automaticRecovery" | "cacheKeepWarm" | "localVm" | "opencodeGo" | "tts" | "decider" | "helpers" | "imageGen" | "live" | "savedKeys" | "profile" | "everyBotRules" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy" | "cloudHome" | "team" | "workspaceBanner" | "toolGroups"
+  "awakeLimit" | "pausedBots" | "pausedByPerson" | "heldBots" | "xai" | "mistral" | "cerebras" | "groq" | "greenference" | "bf16" | "modelgo" | "meta" | "deepseek" | "xResearch" | "treg" | "postiz" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "mcp" | "threads" | "automaticRecovery" | "cacheKeepWarm" | "localVm" | "opencodeGo" | "tts" | "decider" | "helpers" | "imageGen" | "live" | "savedKeys" | "profile" | "everyBotRules" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy" | "cloudHome" | "team" | "workspaceBanner" | "toolGroups"
 >;
 
 /** What the server says about the place itself. Its frames carry them as GET /api/config does, one left out meaning
@@ -24,7 +24,7 @@ export function configStatusFromFrame(frame: ConfigStatusFrame, held?: ConfigSta
     xai: frame.xai,
     mistral: frame.mistral,
     cerebras: frame.cerebras,
-    groq: frame.groq, greenference: frame.greenference, modelgo: frame.modelgo, deepseek: frame.deepseek,
+    groq: frame.groq, greenference: frame.greenference, bf16: frame.bf16, modelgo: frame.modelgo, deepseek: frame.deepseek,
     meta: frame.meta, xResearch: frame.xResearch, treg: frame.treg, postiz: frame.postiz,
     anthropic: frame.anthropic,
     openai: frame.openai,

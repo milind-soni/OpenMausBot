@@ -305,6 +305,7 @@
               "cerebrasApiKey",
               "groqApiKey",
               "greenferenceApiKey",
+              "bf16ApiKey",
               "modelgoApiKey",
               "metaApiKey",
               "deepseekApiKey",

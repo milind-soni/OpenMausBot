@@ -26,6 +26,7 @@ import { MistralDriver } from "./mistral.ts";
 import { CerebrasDriver } from "./cerebras.ts";
 import { GroqDriver } from "./groq.ts";
 import { GreenferenceDriver } from "./greenference.ts";
+import { Bf16Driver } from "./bf16.ts";
 import { ModelgoDriver } from "./modelgo.ts";
 import { MetaDriver } from "./meta.ts";
 import { MuseCodeDriver } from "./muse-code.ts";
@@ -59,6 +60,7 @@ export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   CerebrasDriver,
   GroqDriver,
   GreenferenceDriver,
+  Bf16Driver,
   ModelgoDriver,
   MetaDriver,
   MuseCodeDriver,

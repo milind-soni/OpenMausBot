@@ -1,14 +1,14 @@
 // OpenRouter's catalog is public, so /key proves the key there; elsewhere /models proves only catalog access. Keys go only over TLS (or loopback).
 import { isIP } from "node:net";
 
-export type ProviderKeyKind = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "greenference" | "modelgo" | "meta";
+export type ProviderKeyKind = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "greenference" | "bf16" | "modelgo" | "meta";
 
 export type ProviderKeyVerdict =
   /** `freeTier`: OpenRouter's /key says the account never bought credit, so paid models refuse it. */
   | { ok: true; check: "authentication" | "models"; models: string[]; freeTier?: boolean }
   | { ok: false; reason: "rejected" | "unreachable" | "unexpected"; status?: number };
 
-export const PROVIDER_KEY_KINDS: readonly ProviderKeyKind[] = ["anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "modelgo", "meta"];
+export const PROVIDER_KEY_KINDS: readonly ProviderKeyKind[] = ["anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "bf16", "modelgo", "meta"];
 
 /** What a paired phone may write per provider: a key, never a URL (`openaiCompat` carries one, so it is absent). */
 const PHONE_KEY_FIELDS: Readonly<Record<string, Readonly<Record<string, "string" | "boolean">>>> = {
@@ -37,6 +37,7 @@ const DEFAULT_URLS: Record<ProviderKeyKind, string> = {
   cerebras: "https://api.cerebras.ai/v1",
   groq: "https://api.groq.com/openai/v1",
   greenference: "https://llm.eu.greenference.com/v1",
+  bf16: "https://api.bf16.ai/v1",
   modelgo: "https://api.modelgo.ai/v1",
   meta: "https://api.meta.ai/v1",
 };

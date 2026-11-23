@@ -203,6 +203,14 @@ describe("provider key check", () => {
       .toEqual({ ok: true, check: "models", models: ["greenference/glm-5.3-flash"] });
     const refused: typeof fetch = async () => Response.json({ error: { code: "authentication", message: "invalid or expired token" } }, { status: 401 });
     expect(await checkProviderKey({ provider: "greenference", key: "bad-key" }, refused)).toEqual({ ok: false, reason: "rejected", status: 401 });
+    const bf16: typeof fetch = async (input, init) => {
+      expect(String(input)).toBe("https://api.bf16.ai/v1/models");
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer sk-bf16-v1-fixture");
+      return Response.json({ object: "list", data: [{ id: "deepseek/deepseek-v4.1-flash-uncensored" }] });
+    };
+    expect(await checkProviderKey({ provider: "bf16", key: "sk-bf16-v1-fixture" }, bf16))
+      .toEqual({ ok: true, check: "models", models: ["deepseek/deepseek-v4.1-flash-uncensored"] });
+    expect(await checkProviderKey({ provider: "bf16", key: "bad-key" }, refused)).toEqual({ ok: false, reason: "rejected", status: 401 });
   });
 
   it("checks Meta at its preset endpoint without claiming chat authentication", async () => {

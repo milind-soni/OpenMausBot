@@ -143,7 +143,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       if (pairedDevice && !isPhoneKeyPatch(body)) {
         return json(res, 403, { error: "From a phone, only API keys can be changed. Change other settings on your computer." });
       }
-      if (hostedModels && ["instances", "anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "modelgo", "meta", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
+      if (hostedModels && ["instances", "anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "bf16", "modelgo", "meta", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
       const patch = parseConfigPatchForPerson(body);
       if (deps.cloudTeam && patch.browserEngine?.egress?.proxy !== undefined && !(auth.kind === "session" && auth.session.teamRole === "owner")) {
         return json(res, 403, { error: "Only the Team Cloud owner can configure the browser proxy." });
@@ -587,6 +587,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
           if (persisted.cerebras?.key !== undefined) persisted.cerebras.key = "";
           if (persisted.groq?.key !== undefined) persisted.groq.key = "";
           if (persisted.greenference?.key !== undefined) persisted.greenference.key = "";
+          if (persisted.bf16?.key !== undefined) persisted.bf16.key = "";
           if (persisted.modelgo?.key !== undefined) persisted.modelgo.key = "";
           if (persisted.meta?.key !== undefined) persisted.meta.key = "";
           if (persisted.deepseek?.key !== undefined) persisted.deepseek.key = "";
