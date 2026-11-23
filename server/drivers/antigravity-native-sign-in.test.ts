@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { PlanFetch } from "../plan-usage.ts";
 import { antigravityProfileDirectory } from "./antigravity-acp.ts";
-import { nativeAccessToken, readNativeSignIn, type NativeSignInStore } from "./antigravity-native-sign-in.ts";
+import { defaultNativeSignInStore, nativeAccessToken, readNativeSignIn, type NativeSignInStore } from "./antigravity-native-sign-in.ts";
 import { antigravityNativePlanUsage } from "./antigravity-usage-limits.ts";
 
 const NOW = Date.parse("2026-11-23T04:40:00Z");
@@ -65,6 +65,11 @@ describe("where the native CLI's sign-in is read", () => {
     const { value, readText } = store({ defaultKeychain: true });
     expect(await readNativeSignIn("native", env, value)).toBeNull();
     expect(readText).not.toHaveBeenCalled();
+  });
+
+  it("never asks a keychain off macOS", () => {
+    expect(defaultNativeSignInStore("linux").security).toBeNull();
+    expect(defaultNativeSignInStore("win32").security).toBeNull();
   });
 
   it("is the profile's file when the CLI's HOME has no keychain, or the machine none it uses", async () => {
