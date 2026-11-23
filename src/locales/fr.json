@@ -3991,5 +3991,7 @@
   "chat.botExchange.stopping": "Arrêt…",
   "chat.botExchange.notYours": "Seule la personne qui a demandé peut l’arrêter.",
   "chat.botExchange.gone": "Cet échange ne peut pas être arrêté d’ici.",
-  "chat.botExchange.stopFailed": "Impossible d’arrêter. Vérifiez votre connexion et réessayez."
+  "chat.botExchange.stopFailed": "Impossible d’arrêter. Vérifiez votre connexion et réessayez.",
+  "chat.botExchange.waiting": "{helper} n’a pas encore commencé. Il attend son tour.",
+  "chat.botExchange.unknown": "Impossible de savoir quels messages de la conversation de {helper} appartiennent à cet échange : aucun n’est affiché."
 }

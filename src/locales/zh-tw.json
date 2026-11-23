@@ -10397,5 +10397,7 @@
   "chat.botExchange.stopping": "正在停止…",
   "chat.botExchange.notYours": "只有提出請求的人可以停止。",
   "chat.botExchange.gone": "無法在這裡停止此交流。",
-  "chat.botExchange.stopFailed": "無法停止。請檢查網路連線後再試一次。"
+  "chat.botExchange.stopFailed": "無法停止。請檢查網路連線後再試一次。",
+  "chat.botExchange.waiting": "{helper} 還沒開始，正在排隊等候。",
+  "chat.botExchange.unknown": "無法確定與 {helper} 的對話中哪些訊息屬於這次交流，因此不顯示。"
 }

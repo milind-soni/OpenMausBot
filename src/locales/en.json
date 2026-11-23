@@ -11694,6 +11694,8 @@
   "chat.botExchange.notYours": "Only the person who asked can stop this.",
   "chat.botExchange.gone": "This exchange can't be stopped from here.",
   "chat.botExchange.stopFailed": "Couldn't stop it. Check that you're online and try again.",
+  "chat.botExchange.waiting": "{helper} hasn't started on this yet. It's waiting its turn.",
+  "chat.botExchange.unknown": "It isn't clear which lines of {helper}'s conversation belong to this exchange, so none are shown.",
   "sidebar.threads.hidden": "Thread hidden",
   "sidebar.threads.hide": "Hide {title}",
   "sidebar.threads.hideShort": "Hide",

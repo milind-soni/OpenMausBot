@@ -6586,5 +6586,7 @@
   "chat.botExchange.stopping": "Deteniendo…",
   "chat.botExchange.notYours": "Solo quien lo pidió puede detenerlo.",
   "chat.botExchange.gone": "Este intercambio no se puede detener desde aquí.",
-  "chat.botExchange.stopFailed": "No se pudo detener. Comprueba tu conexión e inténtalo de nuevo."
+  "chat.botExchange.stopFailed": "No se pudo detener. Comprueba tu conexión e inténtalo de nuevo.",
+  "chat.botExchange.waiting": "{helper} aún no ha empezado con esto. Está esperando su turno.",
+  "chat.botExchange.unknown": "No está claro qué mensajes de la conversación de {helper} pertenecen a este intercambio, así que no se muestra ninguno."
 }

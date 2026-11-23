@@ -8121,5 +8121,7 @@
   "chat.botExchange.stopping": "停止しています…",
   "chat.botExchange.notYours": "停止できるのは依頼した人だけです。",
   "chat.botExchange.gone": "このやり取りはここからは停止できません。",
-  "chat.botExchange.stopFailed": "停止できませんでした。接続を確認してもう一度お試しください。"
+  "chat.botExchange.stopFailed": "停止できませんでした。接続を確認してもう一度お試しください。",
+  "chat.botExchange.waiting": "{helper} はまだ着手していません。順番を待っています。",
+  "chat.botExchange.unknown": "{helper} の会話のどのメッセージがこのやり取りのものか判別できないため、表示していません。"
 }

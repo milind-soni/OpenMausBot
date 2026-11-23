@@ -11475,5 +11475,7 @@
   "chat.botExchange.stopping": "Arresto…",
   "chat.botExchange.notYours": "Solo chi l’ha chiesto può fermarlo.",
   "chat.botExchange.gone": "Questo scambio non si può fermare da qui.",
-  "chat.botExchange.stopFailed": "Impossibile fermarlo. Controlla la connessione e riprova."
+  "chat.botExchange.stopFailed": "Impossibile fermarlo. Controlla la connessione e riprova.",
+  "chat.botExchange.waiting": "{helper} non ha ancora iniziato. Sta aspettando il suo turno.",
+  "chat.botExchange.unknown": "Non è chiaro quali messaggi della conversazione di {helper} appartengano a questo scambio, quindi non ne viene mostrato nessuno."
 }

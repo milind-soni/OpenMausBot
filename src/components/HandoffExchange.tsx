@@ -10,7 +10,7 @@ import { ChatBackdrop, GlassBar, GlassScrollFrame } from "./GlassScrollFrame";
 import { ELEVATED_FLOAT, ELEVATED_HOVER, ELEVATED_TINT } from "./elevated";
 import { joinedCorners, SIMPLE_BOT_BUBBLE, SIMPLE_BUBBLE_MAX, SIMPLE_STACKED, SIMPLE_USER_BUBBLE } from "./chat-bubble";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
-import { exchangeWindow, inWindow, type ExchangeWindow } from "@/lib/bot-exchanges";
+import { exchangeLines } from "@/lib/bot-exchanges";
 import { cn } from "@/lib/cn";
 import { conversationRows, handoffTranscript, LOADING_TRANSCRIPT, type ConversationRow, type ConversationSpeaker } from "@/lib/handoff-conversation";
 import { intlLocale, t } from "@/lib/i18n";
@@ -18,6 +18,7 @@ import { listenLiveFrames } from "@/lib/live-events";
 import { localDay } from "@/lib/transcript-derivations";
 import { BotExchangesContext, latestPersonTurn, useBotExchanges } from "@/lib/use-bot-exchanges";
 import { loadFullThread } from "@/state/message-history";
+import { visibleMessages } from "@/state/snapshot-navigation";
 import type { Bot, Message } from "@/state/store";
 import { useStoreSelector } from "@/state/store-select";
 
@@ -28,9 +29,8 @@ export interface HandoffExchange {
   helper: Named;
   /** The helper's work thread the hand-off went to. */
   threadId: string;
-  /** The hand-off, when the view is for one exchange: its lines are those in `window`, and it can be stopped. */
+  /** The hand-off, when the view is for one exchange: only its own lines show, and it can be stopped. */
   id?: string;
-  window?: ExchangeWindow;
 }
 
 /** Opens a hand-off's exchange in place of the chat it is in. Null where no chat column hosts one (a room, the side
@@ -55,7 +55,7 @@ export function HandoffExchangeHost({ bot, children }: { bot: Bot; children: Rea
   );
 }
 
-export function HandoffExchangeView({ exchange: { asker, helper, threadId, id, window: opened }, onBack }: { exchange: HandoffExchange; onBack: () => void }) {
+export function HandoffExchangeView({ exchange: { asker, helper, threadId, id }, onBack }: { exchange: HandoffExchange; onBack: () => void }) {
   const [transcript, dispatch] = useReducer(handoffTranscript, LOADING_TRANSCRIPT);
   const [load, setLoad] = useState(0);
   const reload = () => {
@@ -86,10 +86,14 @@ export function HandoffExchangeView({ exchange: { asker, helper, threadId, id, w
   }), [threadId]);
 
   const entry = use(BotExchangesContext).exchanges.find((candidate) => candidate.id === id);
-  const slice = entry ? exchangeWindow(entry) : opened;
+  const lines = useMemo(() => id === undefined ? null
+    : exchangeLines(visibleMessages(transcript), { id, state: entry?.state ?? "working", finishedAt: entry?.finishedAt }),
+  [transcript, id, entry?.state, entry?.finishedAt]);
   const you = t("chat.you");
-  const rows = useMemo(() => conversationRows(transcript, asker, helper, you).filter((row) => !slice || inWindow(row.at, slice)),
-    [transcript, asker.botId, asker.name, asker.color, helper.botId, helper.name, helper.color, you, slice?.from, slice?.to]);
+  const rows = useMemo(() => {
+    const all = conversationRows(transcript, asker, helper, you);
+    return !lines ? all : lines.kind === "lines" ? all.filter((row) => lines.ids.has(row.id)) : [];
+  }, [transcript, asker.botId, asker.name, asker.color, helper.botId, helper.name, helper.color, you, lines]);
   // The newest line stays in sight as lines come in, unless the person scrolled up to read.
   const listRef = useRef<HTMLDivElement>(null);
   const atEnd = useRef(true);
@@ -185,9 +189,12 @@ export function HandoffExchangeView({ exchange: { asker, helper, threadId, id, w
               );
             })}
             {!rows.length && (
-              <p className="py-6 text-center text-[13px] text-ink-secondary">
+              <p data-exchange-note className="py-6 text-center text-[13px] text-ink-secondary">
                 {transcript.loading ? t("chat.handoffExchange.loading")
-                  : transcript.failed ? t("chat.handoffExchange.failed") : t("chat.handoffExchange.empty")}
+                  : transcript.failed ? t("chat.handoffExchange.failed")
+                  : lines?.kind === "waiting" ? t("chat.botExchange.waiting", { helper: helper.name })
+                  : lines?.kind === "unknown" ? t("chat.botExchange.unknown", { helper: helper.name })
+                  : t("chat.handoffExchange.empty")}
               </p>
             )}
             {transcript.failed && (

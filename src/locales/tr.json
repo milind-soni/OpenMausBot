@@ -6081,5 +6081,7 @@
   "chat.botExchange.stopping": "Durduruluyor…",
   "chat.botExchange.notYours": "Bunu yalnızca isteyen kişi durdurabilir.",
   "chat.botExchange.gone": "Bu konuşma buradan durdurulamaz.",
-  "chat.botExchange.stopFailed": "Durdurulamadı. Bağlantını kontrol edip tekrar dene."
+  "chat.botExchange.stopFailed": "Durdurulamadı. Bağlantını kontrol edip tekrar dene.",
+  "chat.botExchange.waiting": "{helper} buna henüz başlamadı. Sırasını bekliyor.",
+  "chat.botExchange.unknown": "{helper} ile konuşmadaki hangi mesajların bu alışverişe ait olduğu belli değil, bu yüzden hiçbiri gösterilmiyor."
 }

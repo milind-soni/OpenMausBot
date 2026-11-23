@@ -73,6 +73,7 @@ export function useBotExchanges(threadId: string | undefined, since: number | un
 }
 
 const pause = (ms: number, signal: AbortSignal) => new Promise<void>((resolve) => {
-  const timer = setTimeout(resolve, ms);
-  signal.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
+  const stop = () => { clearTimeout(timer); resolve(); };
+  const timer = setTimeout(() => { signal.removeEventListener("abort", stop); resolve(); }, ms);
+  signal.addEventListener("abort", stop, { once: true });
 });

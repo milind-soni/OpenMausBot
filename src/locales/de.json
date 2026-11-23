@@ -4237,6 +4237,8 @@
   "chat.botExchange.notYours": "Nur die Person, die gefragt hat, kann das stoppen.",
   "chat.botExchange.gone": "Dieser Austausch kann hier nicht gestoppt werden.",
   "chat.botExchange.stopFailed": "Stoppen nicht möglich. Prüfe deine Verbindung und versuche es erneut.",
+  "chat.botExchange.waiting": "{helper} hat damit noch nicht angefangen. Es wartet, bis es an der Reihe ist.",
+  "chat.botExchange.unknown": "Es ist nicht klar, welche Nachrichten aus der Unterhaltung von {helper} zu diesem Austausch gehören, daher wird keine angezeigt.",
   "keys.vps.servers.title": "Benannte Server",
   "keys.vps.servers.hint": "Füge weitere Server mit Namen hinzu. Jeder Bot kann dann in seinen eigenen Computer-Einstellungen einen davon wählen; der Alias oben bleibt der Standard.",
   "keys.vps.servers.name": "Servername",

@@ -142,11 +142,21 @@ describe("the bot exchange line", () => {
 });
 
 describe("an opened exchange", () => {
+  // The server writes a hand-off's request into the helper's thread as Pepper's line, tagged with the assignment.
+  const request = (id: string, text: string, at: number, parentId: string, exchange: string): Message =>
+    ({ id, role: "bot", kind: "text", text, at, parentId, from: { botId: "pepper", name: "Pepper", color: "blue" }, roomRequest: { id: exchange, phase: "request" } } as Message);
   const line1: Message = { id: "old", role: "bot", kind: "text", text: "An earlier request's answer", at: 8_000, parentId: null };
-  const ask: Message = { id: "ask", role: "user", kind: "text", text: "Count the rows", at: 9_500, parentId: "old", peerAsk: { botId: "pepper", name: "Pepper" } };
+  const ask = request("ask", "Count the rows", 10_100, "old", "h1");
   const reply: Message = { id: "reply", role: "bot", kind: "text", text: "There are 12 rows", at: 20_000, parentId: "ask" };
-  const later: Message = { id: "next", role: "user", kind: "text", text: "Now the totals", at: 31_000, parentId: "reply", peerAsk: { botId: "pepper", name: "Pepper" } };
+  const later = request("next", "Now the totals", 31_000, "reply", "h0");
   const shown = () => Array.from(host.querySelectorAll("[data-side]")).map((row) => row.textContent);
+  const note = () => host.querySelector("[data-exchange-note]")?.textContent;
+  async function openOne(id: string) {
+    render();
+    await settle();
+    flushSync(() => host.querySelector<HTMLButtonElement>(`[data-bot-exchange="${id}"]`)!.click());
+    await settle();
+  }
 
   it("shows only that exchange's lines of the helper's thread", async () => {
     current = job([root(), handoff({ status: "completed", finishedAt: 30_000 })]);
@@ -196,5 +206,42 @@ describe("an opened exchange", () => {
     await settle();
     expect(host.querySelector("[role=alert]")!.textContent).toBe(text);
     expect(stopButton()!.disabled).toBe(false);
+  });
+
+  it("keeps two hand-offs to the same thread apart: the one waiting its turn shows none of the running one's lines", async () => {
+    // B was handed out 300 ms after A's latest line: a window by time alone would take that line as B's.
+    const queued = handoff({ id: "h2", status: "queued", createdAt: 20_300 });
+    current = job([root(), handoff(), queued]);
+    fixture.load.mockResolvedValue({ messages: [line1, ask, reply], activeLeafId: "reply" });
+    await openOne("h2");
+    expect(shown()).toEqual([]);
+    expect(note()).toBe("Engineer hasn't started on this yet. It's waiting its turn.");
+    expect(status()!.textContent).toContain("Pepper is asking Engineer…");
+    expect(stopButton()).not.toBeNull();
+    flushSync(() => host.querySelector<HTMLButtonElement>("[data-exchange-back]")!.click());
+    flushSync(() => host.querySelector<HTMLButtonElement>('[data-bot-exchange="h1"]')!.click());
+    await settle();
+    expect(shown()).toEqual(["PepperCount the rows", "EngineerThere are 12 rows"]);
+  });
+
+  it("gives each of two hand-offs that ran in turn in the same thread only its own lines", async () => {
+    const askB = request("ask-b", "Now the totals", 20_400, "reply", "h2");
+    const replyB: Message = { id: "reply-b", role: "bot", kind: "text", text: "The totals add up", at: 25_000, parentId: "ask-b" };
+    current = job([root(), handoff({ status: "completed", finishedAt: 20_100 }), handoff({ id: "h2", createdAt: 20_300 })]);
+    fixture.load.mockResolvedValue({ messages: [line1, ask, reply, askB, replyB], activeLeafId: "reply-b" });
+    await openOne("h2");
+    expect(shown()).toEqual(["PepperNow the totals", "EngineerThe totals add up"]);
+    flushSync(() => host.querySelector<HTMLButtonElement>("[data-exchange-back]")!.click());
+    flushSync(() => host.querySelector<HTMLButtonElement>('[data-bot-exchange="h1"]')!.click());
+    await settle();
+    expect(shown()).toEqual(["PepperCount the rows", "EngineerThere are 12 rows"]);
+  });
+
+  it("says so, instead of guessing, when the hand-off's request line is not in the thread", async () => {
+    current = job([root(), handoff({ status: "completed", finishedAt: 30_000 })]);
+    fixture.load.mockResolvedValue({ messages: [line1, reply], activeLeafId: "reply" });
+    await openExchange();
+    expect(shown()).toEqual([]);
+    expect(note()).toBe("It isn't clear which lines of Engineer's conversation belong to this exchange, so none are shown.");
   });
 });

@@ -6081,5 +6081,7 @@
   "chat.botExchange.stopping": "Đang dừng…",
   "chat.botExchange.notYours": "Chỉ người đã yêu cầu mới có thể dừng việc này.",
   "chat.botExchange.gone": "Không thể dừng cuộc trao đổi này từ đây.",
-  "chat.botExchange.stopFailed": "Không thể dừng. Hãy kiểm tra kết nối rồi thử lại."
+  "chat.botExchange.stopFailed": "Không thể dừng. Hãy kiểm tra kết nối rồi thử lại.",
+  "chat.botExchange.waiting": "{helper} chưa bắt đầu việc này. Đang chờ đến lượt.",
+  "chat.botExchange.unknown": "Không rõ tin nhắn nào trong cuộc trò chuyện của {helper} thuộc lần trao đổi này, nên không hiển thị tin nào."
 }

@@ -3843,5 +3843,7 @@
   "chat.botExchange.stopping": "रोका जा रहा है…",
   "chat.botExchange.notYours": "इसे सिर्फ़ पूछने वाला व्यक्ति रोक सकता है।",
   "chat.botExchange.gone": "इस बातचीत को यहाँ से रोका नहीं जा सकता।",
-  "chat.botExchange.stopFailed": "रोका नहीं जा सका। अपना कनेक्शन जाँचें और फिर से कोशिश करें।"
+  "chat.botExchange.stopFailed": "रोका नहीं जा सका। अपना कनेक्शन जाँचें और फिर से कोशिश करें।",
+  "chat.botExchange.waiting": "{helper} ने अभी यह शुरू नहीं किया है। अपनी बारी का इंतज़ार कर रहा है।",
+  "chat.botExchange.unknown": "यह साफ़ नहीं है कि {helper} की बातचीत के कौन-से संदेश इस आदान-प्रदान के हैं, इसलिए कोई नहीं दिखाया गया।"
 }

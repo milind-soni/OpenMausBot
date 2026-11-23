@@ -7282,5 +7282,7 @@
   "chat.botExchange.stopping": "Zatrzymywanie…",
   "chat.botExchange.notYours": "Zatrzymać może tylko osoba, która prosiła.",
   "chat.botExchange.gone": "Tej wymiany nie można zatrzymać stąd.",
-  "chat.botExchange.stopFailed": "Nie udało się zatrzymać. Sprawdź połączenie i spróbuj ponownie."
+  "chat.botExchange.stopFailed": "Nie udało się zatrzymać. Sprawdź połączenie i spróbuj ponownie.",
+  "chat.botExchange.waiting": "{helper} jeszcze nie zaczął. Czeka na swoją kolej.",
+  "chat.botExchange.unknown": "Nie wiadomo, które wiadomości z rozmowy z {helper} należą do tej wymiany, więc żadna nie jest pokazana."
 }

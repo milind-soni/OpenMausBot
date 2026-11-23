@@ -7811,5 +7811,7 @@
   "chat.botExchange.stopping": "중지하는 중…",
   "chat.botExchange.notYours": "요청한 사람만 중지할 수 있어요.",
   "chat.botExchange.gone": "이 대화는 여기서 중지할 수 없어요.",
-  "chat.botExchange.stopFailed": "중지하지 못했어요. 연결을 확인하고 다시 시도하세요."
+  "chat.botExchange.stopFailed": "중지하지 못했어요. 연결을 확인하고 다시 시도하세요.",
+  "chat.botExchange.waiting": "{helper}이(가) 아직 시작하지 않았어요. 차례를 기다리는 중이에요.",
+  "chat.botExchange.unknown": "{helper}의 대화 중 어떤 메시지가 이 교환에 속하는지 알 수 없어 아무것도 표시하지 않아요."
 }

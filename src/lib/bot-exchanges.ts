@@ -79,14 +79,24 @@ export function exchangesOf(job: JobRead, teammate: string): BotExchangeEntry[] 
   return entries.sort((a, b) => Number(b.live) - Number(a.live) || a.createdAt - b.createdAt);
 }
 
-/** The asker's request can be stamped a moment before the hand-off's record in the helper's thread. */
-const REQUEST_LEAD_MS = 1_000;
+/** A helper-thread line, as far as tying it to one hand-off goes. */
+type Line = { id: string; role: string; at: number; steered?: boolean; roomRequest?: { id: string; phase: "request" | "result" } };
 
-/** Where one exchange sits in the helper's thread, which can hold several. */
-export interface ExchangeWindow { from: number; to?: number }
+/** An exchange's lines in the helper's thread, which can hold several: `waiting`, its turn has not started, so no line
+ * is its own yet; `unknown`, its request line is not in the thread, so no line can be tied to it. */
+export type ExchangeLines = { kind: "lines"; ids: ReadonlySet<string> } | { kind: "waiting" } | { kind: "unknown" };
 
-export const exchangeWindow = (entry: Pick<BotExchangeEntry, "createdAt" | "finishedAt">): ExchangeWindow =>
-  ({ from: entry.createdAt - REQUEST_LEAD_MS, ...(entry.finishedAt !== undefined ? { to: entry.finishedAt } : {}) });
-
-export const inWindow = (at: number, window: ExchangeWindow): boolean =>
-  at >= window.from && (window.to === undefined || at <= window.to);
+/** The server writes one request line per hand-off when its turn starts (`roomRequest.id` is the assignment) and runs
+ * one turn per thread at a time, so the hand-off's lines run from that line to the next turn's start. A line handed
+ * into the running turn (`steered`) is part of it. */
+export function exchangeLines(path: readonly Line[], exchange: Pick<BotExchangeEntry, "id" | "state" | "finishedAt">): ExchangeLines {
+  const start = path.findIndex((line) => line.roomRequest?.phase === "request" && line.roomRequest.id === exchange.id);
+  if (start < 0) return exchange.state === "asking" ? { kind: "waiting" } : { kind: "unknown" };
+  const ids = new Set([path[start]!.id]);
+  for (const line of path.slice(start + 1)) {
+    if (line.roomRequest?.phase === "request" || (line.role === "user" && !line.steered)) break;
+    if (exchange.finishedAt !== undefined && line.at > exchange.finishedAt) break;
+    ids.add(line.id);
+  }
+  return { kind: "lines", ids };
+}

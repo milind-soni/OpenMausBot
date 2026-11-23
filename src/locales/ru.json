@@ -7336,5 +7336,7 @@
   "chat.botExchange.stopping": "Остановка…",
   "chat.botExchange.notYours": "Остановить может только тот, кто просил.",
   "chat.botExchange.gone": "Этот обмен нельзя остановить отсюда.",
-  "chat.botExchange.stopFailed": "Не удалось остановить. Проверьте подключение и попробуйте снова."
+  "chat.botExchange.stopFailed": "Не удалось остановить. Проверьте подключение и попробуйте снова.",
+  "chat.botExchange.waiting": "{helper} ещё не начал. Ждёт своей очереди.",
+  "chat.botExchange.unknown": "Непонятно, какие сообщения из разговора с {helper} относятся к этому обмену, поэтому ни одно не показано."
 }

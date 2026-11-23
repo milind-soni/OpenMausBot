@@ -4,7 +4,7 @@ import { ArrowLeftRight, Square } from "lucide-react";
 import { BotAvatar, InitialsAvatar } from "./Avatar";
 import { ELEVATED_FLOAT, ELEVATED_TINT } from "./elevated";
 import { OpenExchangeContext } from "./HandoffExchange";
-import { exchangeEnded, exchangeWindow, type BotExchangeEntry } from "@/lib/bot-exchanges";
+import { exchangeEnded, type BotExchangeEntry } from "@/lib/bot-exchanges";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { BotExchangesContext } from "@/lib/use-bot-exchanges";
@@ -49,7 +49,7 @@ export function BotExchangeLine() {
             aria-label={`${label} · ${state}`}
             title={`${entry.asker.name} ⇄ ${entry.helper.name} · ${state}`}
             onClick={() => open({
-              id: entry.id, threadId: entry.threadId, window: exchangeWindow(entry),
+              id: entry.id, threadId: entry.threadId,
               asker: { botId: entry.asker.botId ?? "", name: entry.asker.name, color: asker?.color },
               helper: { botId: entry.helper.botId, name: entry.helper.name, color: helper?.color },
             })}

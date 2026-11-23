@@ -11694,6 +11694,8 @@
   "chat.botExchange.notYours": "Só quem pediu pode parar isto.",
   "chat.botExchange.gone": "Esta conversa não pode ser parada daqui.",
   "chat.botExchange.stopFailed": "Não foi possível parar. Confira se você está on-line e tente novamente.",
+  "chat.botExchange.waiting": "{helper} ainda não começou isto. Está esperando a vez.",
+  "chat.botExchange.unknown": "Não dá para saber quais mensagens da conversa de {helper} são desta troca, por isso nenhuma aparece.",
   "sidebar.threads.hidden": "Conversa oculta",
   "sidebar.threads.hide": "Ocultar {title}",
   "sidebar.threads.hideShort": "Ocultar",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { exchangesOf, exchangeState, exchangeWindow, inWindow, type JobNodeRead, type JobRead } from "./bot-exchanges";
+import { exchangeLines, exchangesOf, exchangeState, type JobNodeRead, type JobRead } from "./bot-exchanges";
 
 const node = (id: string, extra: Partial<JobNodeRead> = {}): JobNodeRead => ({
   id, botId: "maestro", botName: "Maestro", threadId: "chat", status: "running", reply: "required", createdAt: 1_000, ...extra,
@@ -57,12 +57,35 @@ describe("the exchanges in a job", () => {
 });
 
 describe("an exchange's lines in the helper's thread", () => {
-  it("start just before the hand-off and end when it ended", () => {
-    const window = exchangeWindow({ createdAt: 10_000, finishedAt: 20_000 });
-    expect([8_999, 9_000, 15_000, 20_000, 20_001].map((at) => inWindow(at, window))).toEqual([false, true, true, true, false]);
+  const asked = (id: string, at: number, exchange: string) => ({ id, role: "bot", at, roomRequest: { id: exchange, phase: "request" as const } });
+  const said = (id: string, at: number, extra = {}) => ({ id, role: "bot", at, ...extra });
+  // A was asked and answered; B, asked 300 ms after A's answer, ran next in the same thread.
+  const thread = [said("old", 1_000), asked("a-ask", 2_000, "A"), said("a-reply", 9_700), asked("b-ask", 10_200, "B"), said("b-reply", 15_000)];
+  const ids = (lines: ReturnType<typeof exchangeLines>) => lines.kind === "lines" ? [...lines.ids] : lines.kind;
+
+  it("run from the hand-off's own request line to the next turn's start, whatever the clocks say", () => {
+    expect(ids(exchangeLines(thread, { id: "A", state: "answered", finishedAt: 9_800 }))).toEqual(["a-ask", "a-reply"]);
+    expect(ids(exchangeLines(thread, { id: "B", state: "working" }))).toEqual(["b-ask", "b-reply"]);
   });
 
-  it("run on while it is open", () => {
-    expect(inWindow(90_000, exchangeWindow({ createdAt: 10_000 }))).toBe(true);
+  it("are none while the hand-off waits its turn behind another in the same thread", () => {
+    const running = thread.slice(0, 3);
+    expect(ids(exchangeLines(running, { id: "B", state: "asking" }))).toBe("waiting");
+    expect(ids(exchangeLines(running, { id: "A", state: "working" }))).toEqual(["a-ask", "a-reply"]);
+  });
+
+  it("keep a message handed into the running turn, and stop at one that starts another", () => {
+    const steered = { id: "aside", role: "user", at: 3_000, steered: true };
+    const person = { id: "person", role: "user", at: 9_900 };
+    expect(ids(exchangeLines([...thread.slice(0, 2), steered, said("a-reply", 9_700), person, said("p-reply", 9_950)], { id: "A", state: "working" })))
+      .toEqual(["a-ask", "aside", "a-reply"]);
+  });
+
+  it("end when the hand-off ended", () => {
+    expect(ids(exchangeLines([...thread.slice(0, 3), said("digest", 9_900)], { id: "A", state: "answered", finishedAt: 9_800 }))).toEqual(["a-ask", "a-reply"]);
+  });
+
+  it("are not guessed when the request line is not in the thread", () => {
+    expect(ids(exchangeLines(thread, { id: "C", state: "answered", finishedAt: 20_000 }))).toBe("unknown");
   });
 });
