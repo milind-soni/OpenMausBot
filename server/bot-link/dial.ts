@@ -7,6 +7,7 @@
 // or the app says the Cloud is awake (`start`), since any request would start a sleeping Cloud; the app looks every
 // minute and never asks the Cloud itself to find out.
 import { createWriteStream, openAsBlob, rmSync } from "node:fs";
+import { stat } from "node:fs/promises";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
@@ -34,7 +35,7 @@ export interface DialerOptions {
 export function createDialer({ link, fetch: fetchImpl = fetch, log = () => {}, holdMs = HOLD_MS, firstRetryMs = FIRST_RETRY_MS, level = PROTOCOL_LEVEL }: DialerOptions) {
   let running = false, stopped = true, asleep = false, needsPairing = false;
   let session = "", ack = 0, fresh = true, retryMs = firstRetryMs;
-  let held: AbortController | null = null;
+  let active: AbortController | null = null, held: AbortController | null = null;
   let wakeUp: (() => void) | null = null;
   const pause = (ms: number) => new Promise<void>((resolve) => {
     const timer = setTimeout(() => { wakeUp = null; resolve(); }, ms);
@@ -60,8 +61,17 @@ export function createDialer({ link, fetch: fetchImpl = fetch, log = () => {}, h
     },
     async push(id, way, index, file) {
       const target = cloud();
+      let body: Blob;
+      try {
+        // Node 24.0 openAsBlob() loses missing-file error codes.
+        await stat(file.path);
+        body = await openAsBlob(file.path);
+      } catch (error) {
+        if (typeof error === "object" && error !== null && "code" in error && (error.code === "ENOENT" || error.code === "ENOTDIR")) throw Object.assign(error, { gone: true });
+        throw error;
+      }
       const response = await fetchImpl(fileUrl(target.origin, id, way, index, file.name), { method: "PUT", redirect: "error", signal: AbortSignal.timeout(FILE_MS),
-        headers: { ...target.headers, "content-type": "application/octet-stream" }, body: await openAsBlob(file.path) });
+        headers: { ...target.headers, "content-type": "application/octet-stream" }, body });
       if (!response.ok) throw await refusedFile(response);
       await response.body?.cancel();
     },
@@ -89,53 +99,57 @@ export function createDialer({ link, fetch: fetchImpl = fetch, log = () => {}, h
     if (fresh) link.sessionStarted(peer);
     const sending = link.outgoing(peer, 0);
     const controller = new AbortController();
+    active = controller;
     const timeout = setTimeout(() => controller.abort(), holdMs + 15_000);
     timeout.unref?.();
     const wait = sending.length > 0 || fresh ? 0 : holdMs;
     if (wait > 0) held = controller;
-    let response: Response;
     try {
-      response = await fetchImpl(`${target.origin}${SYNC_PATH}`, {
+      const response = await fetchImpl(`${target.origin}${SYNC_PATH}`, {
         method: "POST", redirect: "error", cache: "no-store", signal: controller.signal,
         headers: { "content-type": "application/json", accept: "application/json", authorization: `Bearer ${target.token}`, origin: target.origin, [LEVEL_HEADER]: String(level),
           ...(carriesWork(sending) ? {} : { [BACKGROUND_HEADER]: "1" }) },
         body: JSON.stringify({ fresh, ack, frames: sending.map((entry) => entry.frame), wait }),
       });
+      controller.signal.throwIfAborted();
+      if (response.status === 503 && response.headers.get(POWER_HEADER) === "asleep") {
+        await response.body?.cancel();
+        asleep = true; fresh = true;
+        link.setSleeps(true);
+        link.setOnline(peer, false);
+        return;
+      }
+      if (response.status === 401 || response.status === 403) {
+        await response.body?.cancel();
+        needsPairing = true;
+        link.setOnline(peer, false);
+        return;
+      }
+      if (!response.ok) { await response.body?.cancel(); throw new Error(`the Cloud answered ${response.status}`); }
+      const data: unknown = await response.json();
+      controller.signal.throwIfAborted();
+      const answer = syncAnswer.safeParse(data);
+      if (!answer.success) throw new Error("the Cloud's answer did not parse");
+      link.outgoing(peer, sending.at(-1)?.seq ?? 0);
+      if (answer.data.session !== session) {
+        const restarted = session !== "";
+        session = answer.data.session; ack = 0;
+        if (restarted && !fresh) { fresh = true; return; }
+      }
+      fresh = false; retryMs = firstRetryMs;
+      link.setOnline(peer, true);
+      link.setLevel(peer, levelOf(response.headers.get(LEVEL_HEADER)));
+      const news = answer.data.frames.filter((entry) => entry.seq > ack);
+      link.receive(peer, news.map((entry) => entry.frame));
+      ack = Math.max(ack, ...news.map((entry) => entry.seq));
     } catch (error) {
       if (held === controller && controller.signal.aborted && !stopped && !asleep && link.hasOutgoing(peer)) return;
       throw error;
     } finally {
       clearTimeout(timeout);
+      if (active === controller) active = null;
       if (held === controller) held = null;
     }
-    if (response.status === 503 && response.headers.get(POWER_HEADER) === "asleep") {
-      await response.body?.cancel();
-      asleep = true; fresh = true;
-      link.setSleeps(true);
-      link.setOnline(peer, false);
-      return;
-    }
-    if (response.status === 401 || response.status === 403) {
-      await response.body?.cancel();
-      needsPairing = true;
-      link.setOnline(peer, false);
-      return;
-    }
-    if (!response.ok) { await response.body?.cancel(); throw new Error(`the Cloud answered ${response.status}`); }
-    const answer = syncAnswer.safeParse(await response.json());
-    if (!answer.success) throw new Error("the Cloud's answer did not parse");
-    link.outgoing(peer, sending.at(-1)?.seq ?? 0);
-    if (answer.data.session !== session) {
-      const restarted = session !== "";
-      session = answer.data.session; ack = 0;
-      if (restarted && !fresh) { fresh = true; return; }
-    }
-    fresh = false; retryMs = firstRetryMs;
-    link.setOnline(peer, true);
-    link.setLevel(peer, levelOf(response.headers.get(LEVEL_HEADER)));
-    const news = answer.data.frames.filter((entry) => entry.seq > ack);
-    link.receive(peer, news.map((entry) => entry.frame));
-    ack = Math.max(ack, ...news.map((entry) => entry.seq));
   }
 
   async function loop(): Promise<void> {
@@ -179,12 +193,12 @@ export function createDialer({ link, fetch: fetchImpl = fetch, log = () => {}, h
       void loop();
     },
     /** The app says the Cloud sleeps now: nothing asks it until there is work for it or it is awake again. */
-    sleep(): void { if (!stopped) { link.setSleeps(true); asleep = true; fresh = true; const peer = link.cloudPeer(); if (peer) link.setOnline(peer, false); held?.abort(); } },
+    sleep(): void { if (!stopped) { link.setSleeps(true); asleep = true; fresh = true; const peer = link.cloudPeer(); if (peer) link.setOnline(peer, false); active?.abort(); } },
     /** Stops asking. `bye`: the link was turned off here, so the Cloud is told once, unless it sleeps. True when it knows. */
     async stop({ bye: tell = false }: { bye?: boolean } = {}): Promise<boolean> {
       const target = link.dial(), sleeping = asleep;
       stopped = true;
-      held?.abort();
+      active?.abort();
       wakeUp?.();
       return tell && target !== null && !sleeping ? bye(target) : false;
     },
@@ -195,6 +209,6 @@ export function createDialer({ link, fetch: fetchImpl = fetch, log = () => {}, h
       if (told.length) link.forgetEnded(told);
     },
     state: () => ({ running: !stopped, asleep, needsPairing }),
-    close(): void { stopped = true; held?.abort(); wakeUp?.(); stopListening(); stopWanted(); link.setTransfer(null); },
+    close(): void { stopped = true; active?.abort(); wakeUp?.(); stopListening(); stopWanted(); link.setTransfer(null); },
   };
 }
