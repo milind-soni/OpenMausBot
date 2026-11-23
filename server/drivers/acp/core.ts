@@ -25,7 +25,7 @@ import { applyOneShotEnv, runAcpOneShot } from "./background-text.ts"; import ty
 import { acpCapabilities } from "./capabilities.ts"; import { readAcpMediaLinks } from "./media-links.ts";
 import { acpNativeLogMessage } from "./tool-log.ts";
 import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
-import { formatQuietLimit, lastSeenPhrase, LIMIT_WORDS, promptIdleTimeoutMs, type LogSignal } from "./quiet-status.ts"; import { startAcpQuietWatch } from "./quiet-watch.ts"; import { AppliedConfig } from "./applied-config.ts"; import { modelRefused, startupRefresh } from "./startup-refresh.ts"; import { stderrFailureOf, watchStderrFailure, type StderrFailure } from "./harness-failure.ts";
+import { formatQuietLimit, lastSeenPhrase, LIMIT_WORDS, promptIdleTimeoutMs, type LogSignal } from "./quiet-status.ts"; import { startAcpQuietWatch } from "./quiet-watch.ts"; import { AppliedConfig } from "./applied-config.ts"; import { modelRefused, startupRefresh } from "./startup-refresh.ts"; import { stderrFailureOf, watchStderrFailure, type StderrFailure } from "./harness-failure.ts"; import { timed, turnStartClock, type TurnStartClock } from "../../perf/turn-starts.ts";
 import { acpMissingSession } from "./rpc-error.ts";
 import { readSessionReport } from "./session-reports.ts";
 import { promptTokenUsage } from "./prompt-usage.ts";
@@ -475,7 +475,11 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       /** Native sessions whose saved history the agent can no longer send (a reported `acpSessionBroken`): never resumed. */
       const brokenSessions = new Set<string>();
 
+      /** Each turn's start timings, by turn id, until its turn.completed writes the line (perf/turn-starts.ts). */
+      const clocks = new Map<string, TurnStartClock>();
+      const finishClock = (turnId: string | undefined, outcome: string) => { const clock = turnId ? clocks.get(turnId) : undefined; if (clock) { clocks.delete(turnId!); clock.finish(outcome, Date.now()); } };
       const emit = (event: RuntimeEvent) => {
+        if (event.type === "turn.completed") finishClock(event.turnId, event.stopReason ?? (event.ok ? "end_turn" : "failed"));
         for (const listener of listeners) listener(event);
       };
 
@@ -700,7 +704,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             return;
           }
           if (current && ["agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update", "plan"].includes(p.update?.sessionUpdate)) {
-            current.state.startupActivity = true; if (current.state.promptSent) current.acknowledge();
+            current.state.startupActivity = true; if (current.state.promptSent) { current.acknowledge(); clocks.get(current.turnId)?.firstUpdate(Date.now()); }
           }
           if (!current || !current.state.promptSent) return void (!current && support.backgroundWork?.wakes(p.update, Date.now() - (session.settledAt ?? 0)) && endBackground(threadId, session));
           const u = filterUpdate ? filterUpdate(p.update ?? {}) : p.update ?? {};
@@ -848,8 +852,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       const sendTurn = async (turn: SendTurnInput, retryOf?: string) => {
         requireRunning();
         // A saved list that offers this turn's model stands in while the startup read runs (startup-refresh.ts).
-        const standIn = startup.standsIn(turn);
+        const standIn = startup.standsIn(turn), startedAt = Date.now();
         if (startupModelRefresh && !standIn) await startupModelRefresh;
+        const modelsWaitedMs = Date.now() - startedAt;
         await backgroundEnds.get(turn.threadId); requireRunning();
         const parsedScope = parseToolScope(turn.toolScope);
         if (!parsedScope.ok) throw new Error(parsedScope.error);
@@ -867,6 +872,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           throw new Error("local computer control requires interactive provider approvals");
         }
         const turnId = retryOf ?? newId();
+        const clock = (retryOf !== undefined ? clocks.get(turnId) : undefined) ?? turnStartClock(DRIVER_KIND, startedAt);
+        if (clocks.has(turnId)) clock.retried(); else clocks.set(turnId, clock);
+        clock.waited("models", modelsWaitedMs);
         const cwd = turn.cwd ?? turnConfig.workspace ?? homedir();
         const env = childEnv(turnConfig);
         if (
@@ -934,7 +942,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const launchSession = () => {
           const opened = openSession(threadId, launch, [...(launch.args ?? []), ...spawnArgs], launchEnv, cwd, contractKey, hostKey);
           opened.launchModel = launchModel; opened.effort = cliTurn.effort;
-          launchedThisTurn = true;
+          launchedThisTurn = true; if (opened.host.opened === 1) clock.spawned(Date.now());
           return opened;
         };
         const sessionKey = JSON.stringify([mcpServers, turn.toolScope ?? null, inheritedScopeFingerprint]);
@@ -956,7 +964,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             else closeSession(threadId, "contract");
           }
           const joining = sharedHost(hostKey, threadId, cwd);
+          const admittingAt = Date.now();
           await turn.engineAdmission?.(joining ? "session" : "process", joining?.child.pid);
+          clock.waited("room", Date.now() - admittingAt);
           requireRunning();
           if (active.has(threadId)) throw new Error("a turn is already running on this thread");
           session = launchSession();
@@ -971,7 +981,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           idleMs?: number,
           idleMessage?: string | (() => string),
         ): Promise<any> =>
-          signIn.refused(session.host) ?? session.acp.request(method, params, timeoutMs, receive, idleMs, idleMessage);
+          timed(clock, method, signIn.refused(session.host) ?? session.acp.request(method, params, timeoutMs, receive, idleMs, idleMessage));
 
         const state: AcpTurn["state"] = { settled: false, promptSent: false, text: "", textMessageId: null, producedItem: false, repliedText: false, startupActivity: false, stopped: false, toolsSinceShown: false, thoughtSinceTool: false, usagePeak: null, usageLast: null, usageCompacted: false, cancelling: false };
         let acknowledge = () => {};
@@ -1289,7 +1299,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               throw new Error(`${support.displayName} changed variant before the prompt`);
             } const promptOutcome = await support.promptOutcome?.(instanceId, sessionId);
             if (state.settled || state.stopped || session.closing) throw new Error("turn stopped");
-            state.promptSent = true;
+            state.promptSent = true; clock.promptSent(Date.now());
             if (!support.promptUnreachedModel) acknowledge();
             const promptIdleMs = promptIdleTimeoutMs();
             const quiet = startQuietWatch(threadId, session, current);
@@ -1384,7 +1394,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 if (current.interruptTimer) clearTimeout(current.interruptTimer);
                 active.delete(threadId);
                 if (stopped && !state.stopped) {
-                  rejectStartup(new TurnNotStartedError(turnId, message));
+                  finishClock(turnId, "not-started"); rejectStartup(new TurnNotStartedError(turnId, message));
                   return;
                 }
                 acknowledge();
@@ -1544,7 +1554,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             closeSession(threadId, "dispose");
             settle(threadId, session, true, "cancelled");
           }
-          listeners.clear();
+          listeners.clear(); clocks.clear();
           // Engines lead sessions of their own, so nothing stops them once this server exits.
           await stopEngineTrees([...disposingSessions.map(([, session]) => session.child), ...[...retiring.values()].flatMap((children) => [...children]), ...leaving]);
         },

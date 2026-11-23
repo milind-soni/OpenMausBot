@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DATA_DIR, ensureDirs } from "../config.ts";
 import { startupModelCachePath } from "../startup-model-catalog.ts";
+import { recentTurnStarts } from "../perf/turn-starts.ts";
 import { TurnNotStartedError, type ProviderInstance } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
@@ -1282,6 +1283,30 @@ describe("Antigravity driver over shared ACP", () => {
       expect(instance.models.options.map((option) => option.id)).not.toContain("gemini-retired");
       expect(recorder.events.filter((event) => event.type === "turn.started")).toHaveLength(1);
     }, 40_000);
+  });
+
+  it("writes one start-timing line per turn: a cold one, a warm one, and one refused for sign-in", async () => {
+    ensureDirs();
+    const fake = fakeRuntime();
+    const instanceId = "antigravity-turn-starts";
+    const tokenDirectory = join(antigravityProfileDirectory(instanceId), "antigravity-acp");
+    mkdirSync(tokenDirectory, { recursive: true });
+    writeFileSync(join(tokenDirectory, "acp_token.json"), "{}", { mode: 0o600 });
+    instance = await AntigravityDriver.create({
+      instanceId, displayName: "Antigravity", enabled: true, config: { cli: fake.executable, fullAuto: false },
+      environment: { FAKE_ACP_AUTH_METHOD: "oauth-personal", FAKE_ACP_MODELS: "gemini-3.8-flash", FAKE_ACP_MODES: "default,yolo" },
+    });
+    await instance.startupModelRefresh;
+    recorder = recordEvents(instance.adapter);
+    const run = async () => {
+      const { turnId } = await instance!.adapter.sendTurn({ threadId: "thread-starts", text: "hello", approvalMode: "ask", model: "gemini-3.8-flash", cwd: fake.directory, resumeCursor: "fake-acp-session" });
+      await recorder!.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      return recentTurnStarts().at(-1)!;
+    };
+    expect(await run()).toMatch(/^\[perf\] engine turn antigravityAgent: new process, models waited \d+ ms, spawn to initialize \d+ ms, authenticate \d+ ms, session (?:new|resume) \d+ ms, config 1 call \d+ ms, prompt to first update \d+ ms, total \d+ ms, ended end_turn$/u);
+    expect(await run()).toMatch(/^\[perf\] engine turn antigravityAgent: kept process, models waited \d+ ms, session live, config 0 calls 0 ms, prompt to first update \d+ ms, total \d+ ms, ended end_turn$/u);
+    rmSync(join(tokenDirectory, "acp_token.json"));
+    expect(await run()).toMatch(/: no process, .*no prompt, total \d+ ms, ended auth_required$/u);
   });
 
   it("never starts a session on a model this account has not offered", async () => {
