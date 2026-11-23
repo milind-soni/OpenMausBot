@@ -919,8 +919,6 @@
   "settings.search": "Поиск",
   "settings.searchAria": "Поиск по настройкам",
   "settings.close": "Закрыть настройки",
-  "settings.license.expiring": "Срок действия корпоративной лицензии этой установки истекает {date} (осталось {days} дн.). Продлите ключ, чтобы сохранить корпоративные функции.",
-  "settings.license.grace": "Срок действия корпоративной лицензии этой установки истёк {date}. Корпоративные функции продолжают работать до {graceEnd}; продлите ключ до этого срока.",
   "settings.noMatch": "По запросу «{query}» ничего не найдено",
   "settings.section.general": "Общие",
   "settings.section.organization": "Организация",

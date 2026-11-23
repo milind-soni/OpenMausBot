@@ -6,6 +6,7 @@ export { signInFromEnv };
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
+import { editionConfigSchema, type FeatureId } from "./features.ts";
 import type { ImageGenerationConfig } from "../shared/image-generation.ts";
 import { imageGenConfigSchema, imageGenPatchSchema, keepKeysOutOfImageModels, type ImageGenCredentialPatch } from "./image-generation-config.ts";
 import { botAvatarUrlSchema } from "../shared/bot-avatar.ts";
@@ -333,14 +334,14 @@ const appConfigSchema = z.object({
   openai: z.object({ key: optionalText }).optional(),
   /** OpenRouter key, for the `openrouter` instance only. */
   openrouter: z.object({ key: optionalText }).optional(),
-  /** Workspace monthly spend limit; enforced only with the `budgets` entitlement. */
+  /** Workspace monthly spend limit; enforced only with the `budgets` feature. */
   budgets: z
     .object({
       monthlyUsd: z.number().min(0).max(1_000_000).optional(),
       warnAtPercent: z.number().int().min(1).max(100).optional(),
     })
     .optional(), /** Caps on a day's and a month's usage, for the server and for each bot; none by default (usage-caps.ts). */ usageCaps: usageCapsSchema.optional(),
-  /** Operator sell prices per million tokens by model id, `driver/model` or `default`; read only with the `billing` entitlement. */
+  /** Operator sell prices per million tokens by model id, `driver/model` or `default`; read only with the `billing` feature. */
   billing: z
     .object({
       currency: z.string().regex(/^[A-Z]{3}$/).optional(),
@@ -410,6 +411,8 @@ const appConfigSchema = z.object({
   safetyFloor: z.object({ enabled: z.boolean().optional() }).strict().optional(), // off by default: safetyFloorEnabled in server/safety-floor-gate.ts
   localVm: localVmConfigSchema.optional(),
   features: featureConfigSchema.optional(),
+  /** Optional capabilities for this server (features.ts); APP_FEATURES wins when set. */
+  edition: editionConfigSchema.optional(),
   onboarding: onboardingConfigSchema.optional(),
   browserEngine: browserEngineConfigSchema.optional(),
   browserProfiles: browserProfilesSchema.optional(),
@@ -427,7 +430,7 @@ const storedAppConfigSchema = appConfigSchema.extend(helperStoredShape).extend({
       .optional(),
   }).optional(),
 });
-const appConfigPatchSchema = appConfigSchema.omit({ instances: true, mcpServers: true, cliStartup: true, customDomain: true })
+const appConfigPatchSchema = appConfigSchema.omit({ instances: true, mcpServers: true, cliStartup: true, customDomain: true, edition: true })
   .extend({ threads: threadsPatchSchema.optional(), newBots: newBotsPatchSchema.optional(), imageGen: imageGenPatchSchema.optional() }); export const CONFIG_PATCH_FIELDS = appConfigPatchSchema.shape;
 const jsonObjectSchema = z.record(z.string(), z.json());
 
@@ -484,6 +487,7 @@ export interface AppConfig extends HelperConfig {
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean; roomCompactAt?: number; roomSessions?: boolean; replayToolHistory?: boolean };
   memory?: { captureQuietMs?: number; tidyHour?: number };
   localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number; idleTimeoutMinutes?: number; preserveInstalledApps?: boolean; memoryGb?: number; cpus?: number };
+  edition?: { features?: FeatureId[] };
   features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; smartSetupChoices?: boolean; autoRecall?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; parallelRoomJobs?: boolean; acpPlanLines?: boolean; agentsToolBridge?: boolean; savedSteps?: boolean; usbPhoneTakeover?: boolean; cloudComputerAutoReplace?: boolean; phonePush?: boolean };
   onboarding?: { completedAt?: string; version?: number; reelSeen?: boolean; hintsSeen?: string[]; firstTurnAt?: string };
   browserProfiles?: BrowserProfile[];

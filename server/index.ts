@@ -513,7 +513,8 @@ import {
 } from "./turn-dispatch-guard.ts";
 import { createGracefulShutdown } from "./graceful-shutdown.ts";
 import { acquireDataDirLeaseForProcess, releaseOnceAtExit } from "./data-dir-lease.ts"; import { markEngineRunClean, startEngineRecords } from "./engine-records.ts";
-import { createWorkspaceAccess, describeEdition, editionForSettings, editionStatus, entitled, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, licenseWarning, sharedWorkspaceFullAccessConfigured, loadEnterpriseLayer, workspaceMembership, type WorkspaceAccess } from "./enterprise.ts";
+import { configureFeatures, describeFeatures, editionStatus, featureEnabled, FEATURES_ENV } from "./features.ts";
+import { createWorkspaceAccess, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, sharedWorkspaceFullAccessConfigured, workspaceMembership, type WorkspaceAccess } from "./hosted-workspace.ts";
 import { environmentDescriptor, loadEnvironmentId, OWNER_LENDING, serverVersion } from "./environment.ts"; import { dataFormatAtStart } from "./data-format.ts"; import { doctorAtStart } from "./doctor/start.ts";
 import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.ts";
 import { createWorkspaceBackupRoutes, isWorkspaceBackupSessionControl } from "./workspace-backup-http.ts";
@@ -744,7 +745,7 @@ const HOSTED_WORKSPACE = hostedWorkspaceConfigured();
 let workspaceAccess: WorkspaceAccess | null = null;
 const DESKTOP_MANAGED = process.env.OMB_DESKTOP_PARENT === "1";
 const SHARED_WORKSPACE_FULL_ACCESS = sharedWorkspaceFullAccessConfigured();
-const sharedWorkspaceFullAccessEnabled = () => SHARED_WORKSPACE_FULL_ACCESS && Boolean(workspaceAccess) && entitled("admin");
+const sharedWorkspaceFullAccessEnabled = () => SHARED_WORKSPACE_FULL_ACCESS && Boolean(workspaceAccess) && featureEnabled("admin");
 const HOSTED_FULL_ACCESS_REFUSAL = "On a shared company workspace Full access comes only from the operator's dedicated policy";
 if (HOSTED_WORKSPACE) setDefaultApprovalMode("ask");
 // On a shared workspace loopback is a service, not the owner: every bot's shell is a loopback caller too.
@@ -1336,7 +1337,7 @@ function adminAuditRows(
 }
 
 function operatorPrices(): PriceList | null {
-  return entitled("billing") && cfg.billing?.prices && Object.keys(cfg.billing.prices).length ? cfg.billing.prices : null;
+  return featureEnabled("billing") && cfg.billing?.prices && Object.keys(cfg.billing.prices).length ? cfg.billing.prices : null;
 }
 
 const attributeUsage = createUsageAttribution({ section: (botId) => store.bot(botId)?.section, threadTrigger: (threadId) => turnTriggers.get(threadId), routineWriter: (id) => { const key = cloudRoutineAuthors?.writer(id); return key ? teamOwners.people?.list().find((one) => personKey({ id: "", email: one.email }) === key)?.email : undefined; } }); const usageCapGate = createUsageCapGate({ dataDir: DATA_DIR, caps: () => cfg.usageCaps, botName: (botId) => store.bot(botId)?.name, language: () => appLanguage(), log: (line) => console.log(line), notice: (aboutBotId, title, body) => { const bot = store.bot(aboutBotId ?? "") ?? store.bots[0]; if (bot) broadcast({ kind: "notify", notification: logNotification(buildSpendNotification({ id: bot.id, name: bot.name }, bot.threadId, { title, body })) }, { adminOnly: true }); } }); const threadStanding = (botId: string, threadId: string): ThreadStanding => { const owner = directRequestOwners.get(threadId); return { unattended: isUnattended(botId, threadId), automation: owner?.automation, origin: owner?.origin?.kind }; }; const routineTriggerOf = (threadId: string) => { const run = activeRoutineRunForThread(threadId); return run ? run.triggerSource ?? (run.manual ? "manual" : "schedule") : undefined; }; function bookTurnUsage(row: Omit<UsageRow, "at" | "costSource">, tokensReported = true, notificationThreadId = row.threadId): void {
@@ -11622,7 +11623,7 @@ function configStatus() {
     openai: keyStatus(cfg.openai?.key),
     openrouter: keyStatus(cfg.openrouter?.key),
     fleet: { available: fleetAvailable(fleetSocketPath()) }, toolGroups: availableToolGroups({ meetings: boat.boatConfigured(cfg), data: dataEngine.installed(), images: imageGenerationReady(cfg), email: emailHost.available() }),
-    edition: editionForSettings(editionStatus()),
+    edition: editionStatus(),
     budgets: {
       ...(cfg.budgets?.monthlyUsd !== undefined ? { monthlyUsd: cfg.budgets.monthlyUsd } : {}),
       ...(cfg.budgets?.warnAtPercent !== undefined ? { warnAtPercent: cfg.budgets.warnAtPercent } : {}),
@@ -11974,7 +11975,7 @@ let restartRequested = false;
 const cloudMoveRoutes = createCloudMoveRoutes();
 
 // `workspaceAccess` is assigned at boot, after this line: read it per request.
-ROUTES.push(createHostedSlackRoutes({ bot: (id) => store.bot(id), hostedReady: () => Boolean(workspaceAccess) && entitled("admin") })); ROUTES.push(createStopLineRoutes());
+ROUTES.push(createHostedSlackRoutes({ bot: (id) => store.bot(id), hostedReady: () => Boolean(workspaceAccess) && featureEnabled("admin") })); ROUTES.push(createStopLineRoutes());
 const orgInstallStatuses = () => orgLibrary?.installStatuses() ?? new Map();
 ROUTES.push(createBotPresetRoutes({ presets: presetStore, orgStatuses: orgInstallStatuses })); ROUTES.push(createBotHoldRoutes({ holds: botHolds, named: (kind, id) => (kind === "bot" ? store.bot(id)?.name ?? null : store.sections.includes(id.trim()) ? id.trim() : null), stop: async (botIds) => { let stopped = 0; for (const botId of botIds) { for (const { threadId } of store.tasks(botId)) if (threadBusy(botId, threadId) || coordinator.activeDirect(threadId)) { await stopThreadForPerson(botId, threadId); stopped++; } for (const group of store.groups) if (roomThreadIds(group).some((threadId) => groupSpeakers.get(threadId)?.botId === botId)) { await interruptHeldMember(group.id, botId); stopped++; } } return stopped; }, audit: (entry, auth, req) => { if (!DESKTOP_MANAGED && adminActivityRecording()) appendAdminAction(DATA_DIR, { category: "bot", action: `${entry.kind}.${entry.paused ? "pause" : "resume"}`, target: { kind: entry.kind, id: entry.id, name: entry.name }, actor: adminActorFor(auth, req) }); }, bots: () => store.bots.map((bot) => bot.id) })); const cliLogin = createCliLogin({ sessions, refusal: () => (HOSTED_WORKSPACE ? "Sign in through the workspace portal." : null), loopbackRefusal: () => (LOOPBACK.trust === "service" ? "on this shared server a program here may not ask to sign in: run openmausbot login on your own computer" : null), environment: () => environmentDescriptor({ environmentId: ENVIRONMENT_ID, ...TEAM_LABEL, desktopManaged: DESKTOP_MANAGED, emailSignIn: !CLOUD_HOME && emailSignIn.enabled(), sharedComputers: lendingEnabled(), cloudHome: Boolean(CLOUD_HOME), cloudTeam: CLOUD_TEAM !== null, ownHome: ownHome.takesMove() }), changed: () => broadcast({ kind: "cli-login" }, { adminOnly: true }), ...(CLOUD_TEAM ? { opened: (session) => teamHost.met(session) } : {}) }); ROUTES.push(cliLogin.routes); ROUTES.push(createWorkspaceBannerRoutes({ changed: () => broadcast({ kind: "config", ...configStatus() }) })); ROUTES.unshift(createUsageCapRoutes({ view: () => usageCapGate.view(), botExists: (botId) => Boolean(store.bot(botId)), save: (usageCaps) => { saveConfig({ usageCaps }); Object.assign(cfg, loadConfig()); } })); const starterAwakeRoutes = createStarterAwakeRoutes({ awake: starterAwake }); ROUTES.push(starterAwakeRoutes);
 ROUTES.push(createSharedComputerRoutes({ enabled: (auth) => lendingEnabled() || (ownerLends() && ownHome.owner(auth)), computers: sharedComputers, sessionLive: (id) => sessions.isLive(id), environmentId: ENVIRONMENT_ID,
@@ -12450,7 +12451,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (method === "GET" && path === "/api/health/hosted") {
       res.setHeader("cache-control", "no-store");
       const hosted = hostedWorkspaceConfiguration();
-      if (!hosted?.portalMembership || !workspaceAccess || !entitled("admin")) {
+      if (!hosted?.portalMembership || !workspaceAccess || !featureEnabled("admin")) {
         return json(res, 503, { error: "Hosted workspace readiness is unavailable." });
       }
       res.setHeader(HOSTED_CONTRACT_HEADER, String(HOSTED_CONTRACT_VERSION));
@@ -15102,10 +15103,10 @@ upgrades.attach(server, handleRequest);
 
 moveFreeze.hold(() => calendarCalls.start(), () => calendarCalls.stop());
 
-// Resolve the edition before accepting requests so /api/edition is never a guess.
-console.log(describeEdition(await loadEnterpriseLayer()));
-const startupLicenseWarning = licenseWarning(editionStatus());
-if (startupLicenseWarning) console.warn(startupLicenseWarning);
+// Resolve features before accepting requests so /api/edition is never a guess.
+const features = configureFeatures(process.env, cfg.edition?.features);
+console.log(describeFeatures(features));
+if (features.unknown.length) console.warn(`${FEATURES_ENV}: ignoring unknown feature ids: ${features.unknown.join(", ")}`);
 console.log(LOOPBACK.trust === "service"
   ? `local requests: service trust (${LOOPBACK.reason}); without a session, loopback may use only health, the Slack worker's guarded routes and bot capability routes`
   : `local requests: owner trust (${LOOPBACK.reason})`);

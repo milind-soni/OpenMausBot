@@ -36,7 +36,7 @@ import { standaloneAssetFor, standaloneEngineDir } from "../../engine-standalone
 import { cloudHomeConfigured } from "../../cloud-home.ts";
 import { DATA_DIR, OPENCODE_PROVIDER_ENV } from "../../config.ts";
 import * as quietStatus from "./quiet-status.ts";
-import { hostedWorkspaceConfigured } from "../../enterprise.ts";
+import { hostedWorkspaceConfigured } from "../../hosted-workspace.ts";
 import { TASK_WORKSPACES_DIR, workspaceDir } from "../../workspace.ts";
 import type { ModelCatalog, ProviderInstance, SendTurnInput } from "../../contracts.ts";
 

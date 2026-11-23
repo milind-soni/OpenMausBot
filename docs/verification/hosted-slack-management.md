@@ -15,8 +15,8 @@ member who opens agent settings gets the same link as an admin; every other
 method on the path stays admin-only and unrouted. It returns
 `{available:true, managementUrl}` only when the agent exists and the runtime
 has complete hosted configuration (an https Admin origin and a valid workspace
-slug), portal membership, the workspace access hook, and a live `admin`
-entitlement. Hidden or missing agents return 404. A local install and a
+slug), portal membership, the workspace access hook, and the `admin`
+feature. Hidden or missing agents return 404. A local install and a
 local-membership workspace return `{available:false}`, not an error, and the
 Slack section is then absent from the settings rail. The URL is built from
 configuration and the stored agent id, never from request input, and carries
@@ -26,7 +26,7 @@ its own visitors.
 Run these disposable fixtures:
 
 ```sh
-pnpm exec vitest run server/hosted-slack.test.ts server/routes/hosted-slack.test.ts server/request-auth.test.ts server/hosted-access.test.ts
+pnpm exec vitest run server/hosted-slack.test.ts server/routes/hosted-slack.test.ts server/request-auth.test.ts
 pnpm exec vitest run src/components/bot-settings/SlackSection.test.ts
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/slack-management-ui.e2e.test.ts
 pnpm typecheck

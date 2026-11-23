@@ -2623,7 +2623,7 @@ describe("live config frames", () => {
   it("preserves edition, budgets and billing through configStatusFromFrame", () => {
     const frame: ConfigStatusFrame = {
       ...baseFrame,
-      edition: { edition: "enterprise", features: ["budgets", "billing"] },
+      edition: { edition: "oss", features: ["budgets", "billing"] },
       budgets: { monthlyUsd: 10, warnAtPercent: 80 },
       billing: { currency: "USD", prices: { default: { inputPerMillion: 1, outputPerMillion: 2 } } },
     };
@@ -2668,13 +2668,13 @@ describe("live config frames", () => {
   it("keeps edition, budgets and billing in state.config after a config SSE frame lands", () => {
     const frame: ConfigStatusFrame = {
       ...baseFrame,
-      edition: { edition: "enterprise", features: ["budgets", "billing"] },
+      edition: { edition: "oss", features: ["budgets", "billing"] },
       budgets: { monthlyUsd: 10, warnAtPercent: 80 },
       billing: { currency: "USD" },
     };
     const state = reducer(initialState, { type: "configStatus", config: configStatusFromFrame(frame) });
     expect(state.config).toMatchObject({
-      edition: { edition: "enterprise", features: ["budgets", "billing"] },
+      edition: { edition: "oss", features: ["budgets", "billing"] },
       budgets: { monthlyUsd: 10, warnAtPercent: 80 },
       billing: { currency: "USD" },
     });

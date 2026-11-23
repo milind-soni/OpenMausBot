@@ -840,8 +840,6 @@
   "settings.search": "Buscar",
   "settings.searchAria": "Buscar en los ajustes",
   "settings.close": "Cerrar los ajustes",
-  "settings.license.expiring": "La licencia empresarial de esta instalación caduca el {date} (quedan {days} día(s)). Renueva la clave para conservar las funciones empresariales.",
-  "settings.license.grace": "La licencia empresarial de esta instalación caducó el {date}. Las funciones empresariales siguen funcionando hasta el {graceEnd}; renueva la clave antes de esa fecha.",
   "settings.noMatch": "Nada coincide con «{query}»",
   "settings.section.general": "General",
   "settings.section.organization": "Organización",

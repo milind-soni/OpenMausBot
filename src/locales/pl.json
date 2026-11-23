@@ -913,8 +913,6 @@
   "settings.search": "Szukaj",
   "settings.searchAria": "Szukaj w ustawieniach",
   "settings.close": "Zamknij ustawienia",
-  "settings.license.expiring": "Licencja korporacyjna tej instalacji wygasa {date} (pozostało dni: {days}). Odnów klucz, aby zachować funkcje korporacyjne.",
-  "settings.license.grace": "Licencja korporacyjna tej instalacji wygasła {date}. Funkcje korporacyjne działają do {graceEnd}; odnów klucz przed tym terminem.",
   "settings.noMatch": "Brak wyników dla „{query}”",
   "settings.section.general": "Ogólne",
   "settings.section.organization": "Organizacja",

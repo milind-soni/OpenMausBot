@@ -8,6 +8,7 @@ import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 
+import { FEATURES_ENV, type FeatureId } from "../server/features.ts";
 import { EXIT, HeadlessError } from "../server/headless/args.ts";
 import { runHeadlessCommand } from "../server/headless/main.ts";
 import type { handleToolCall, request } from "./mcp-server.ts";
@@ -291,9 +292,8 @@ export async function launchVerificationServer(
   signal?: AbortSignal,
   localVm?: { binDir: string; host: string; sshKey: string; staticDir: string },
   browser?: { binaryPath: string; executablePath: string },
-  /** A stand-in enterprise layer (the folder shape core loads) and the key
-   * it should accept, so a recipe can prove entitled behaviour offline. */
-  enterprise?: { dir: string; licenseKey: string },
+  /** Optional features to turn on in the child (APP_FEATURES). */
+  features?: readonly FeatureId[],
   room?: { scripted: boolean },
   /** Optional repository-owned fake providers for multi-engine setup checks. */
   extraProviders: Array<"codex" | "cline" | "copilot" | "customAcp" | "opencode" | "kimi"> = [],
@@ -386,7 +386,7 @@ export async function launchVerificationServer(
     CONTAINER_SSHKEY: localVm.sshKey,
     OMB_STATIC_DIR: localVm.staticDir,
   });
-  if (enterprise) Object.assign(childEnv, { OMB_ENTERPRISE_DIR: enterprise.dir, OMB_LICENSE_KEY: enterprise.licenseKey });
+  if (features?.length) childEnv[FEATURES_ENV] = features.join(",");
   if (browser) Object.assign(childEnv, {
     OMB_AGENT_BROWSER_PATH: browser.binaryPath,
     AGENT_BROWSER_EXECUTABLE_PATH: browser.executablePath,

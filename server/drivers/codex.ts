@@ -17,7 +17,7 @@ import { codexConfigMcp, codexConfigRunsServer, codexMcpDisableArgs, mountedMcpS
 
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
 import { laterStartup, openStartupModelCatalog, unconfirmedModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
-import { hostedWorkspaceConfigured } from "../enterprise.ts";
+import { hostedWorkspaceConfigured } from "../hosted-workspace.ts";
 import { cloudHomeConfigured } from "../cloud-home.ts";
 import { serverVersion } from "../environment.ts";
 import { ChatGptPlanAuthController } from "./chatgpt-plan-auth.ts";

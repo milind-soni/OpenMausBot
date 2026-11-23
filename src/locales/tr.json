@@ -624,8 +624,6 @@
   "settings.search": "Ara",
   "settings.searchAria": "Ayarlarda ara",
   "settings.close": "Ayarları kapat",
-  "settings.license.expiring": "Bu kurulumun kurumsal lisansı {date} tarihinde sona eriyor ({days} gün kaldı). Kurumsal özellikleri korumak için anahtarı yenileyin.",
-  "settings.license.grace": "Bu kurulumun kurumsal lisansının süresi {date} tarihinde doldu. Kurumsal özellikler {graceEnd} tarihine kadar çalışmaya devam eder; anahtarı bu tarihten önce yenileyin.",
   "settings.noMatch": "“{query}” ile eşleşen hiçbir şey bulunamadı",
   "settings.section.general": "Genel",
   "settings.section.organization": "Organizasyon",

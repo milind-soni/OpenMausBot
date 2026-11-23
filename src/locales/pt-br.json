@@ -1212,8 +1212,6 @@
   "settings.search": "Buscar",
   "settings.searchAria": "Buscar nas configurações",
   "settings.close": "Fechar as configurações",
-  "settings.license.expiring": "A licença empresarial desta instalação expira em {date} (dias restantes: {days}). Renove a chave para manter os recursos empresariais.",
-  "settings.license.grace": "A licença empresarial desta instalação expirou em {date}. Os recursos empresariais continuam funcionando até {graceEnd}; renove a chave antes disso.",
   "settings.noMatch": "Nenhum resultado para “{query}”",
   "settings.section.general": "Geral",
   "settings.section.organization": "Organização",

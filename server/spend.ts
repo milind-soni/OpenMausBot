@@ -1,10 +1,10 @@
-// The licensed monthly spend cap: enforced only with the `budgets` entitlement. It reads its total from the cap engine
+// The workspace monthly spend cap: enforced only with the `budgets` feature. It reads its total from the cap engine
 // (usage-caps.ts) and adds its own warning threshold, admin notifications and a stop on every kind of turn.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { SPEND_LIMIT_REFUSAL } from "../shared/setting-fixes.ts";
 import type { AppConfig } from "./config.ts";
-import { entitled } from "./enterprise.ts";
+import { featureEnabled, type FeatureId } from "./features.ts";
 import { CAP_WARN_PERCENT, measure, monthKeyOf, noteUsage, periodEnd, resetUsageTotalsForTests, usageTotals } from "./usage-caps.ts";
 
 export interface SpendState {
@@ -30,10 +30,10 @@ export function spendState(
   cfg: Pick<AppConfig, "budgets">,
   dataDir: string,
   now = new Date(),
-  isEntitled: (feature: string) => boolean = entitled,
+  isEnabled: (feature: FeatureId) => boolean = featureEnabled,
 ): SpendState | null {
   const monthlyUsd = cfg.budgets?.monthlyUsd;
-  if (!isEntitled("budgets") || typeof monthlyUsd !== "number" || !Number.isFinite(monthlyUsd) || monthlyUsd <= 0) return null;
+  if (!isEnabled("budgets") || typeof monthlyUsd !== "number" || !Number.isFinite(monthlyUsd) || monthlyUsd <= 0) return null;
   const spentUsd = monthToDateSpend(dataDir, now);
   const warnAtPercent = cfg.budgets?.warnAtPercent ?? DEFAULT_WARN_AT_PERCENT;
   const { percent, warn, reached } = measure(monthlyUsd, spentUsd, warnAtPercent);
@@ -48,9 +48,9 @@ export function assertWithinBudget(
   cfg: Pick<AppConfig, "budgets">,
   dataDir: string,
   now = new Date(),
-  isEntitled: (feature: string) => boolean = entitled,
+  isEnabled: (feature: FeatureId) => boolean = featureEnabled,
 ): void {
-  const state = spendState(cfg, dataDir, now, isEntitled);
+  const state = spendState(cfg, dataDir, now, isEnabled);
   if (!state?.exceeded) return;
   throw Object.assign(
     new Error(`${SPEND_LIMIT_REFUSAL} of $${usd(state.monthlyUsd)} — an admin can raise it under Settings → Spending`),

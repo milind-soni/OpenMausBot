@@ -15,7 +15,7 @@ function config(features: string[], extra: Partial<ConfigStatus> = {}): ConfigSt
   return {
     composio: { configured: false }, box: { configured: false }, vps: { configured: false, sshAlias: "" },
     rooms: { turnTimeoutMinutes: 30 }, localVm: { mode: "shared", maxInstances: 1 },
-    edition: { edition: features.length ? "enterprise" : "oss", features },
+    edition: { edition: "oss", features },
     ...extra,
   } as ConfigStatus;
 }

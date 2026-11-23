@@ -96,8 +96,8 @@ describe("rendered files", () => {
 
   it("writes the environment, the first config and the sign-in edits the server reads live", () => {
     const workspace: FleetWorkspace = { slug: "acme", host: "acme.agentada.cc", port: 8810, webhookPort: 8811, status: "running", createdAt: "" };
-    expect(instanceEnv({ workspace, dataDir: "/var/lib/openmausbot/acme/.openmausbot", licenseKey: "omb1.k" })).toBe(
-      "OMB_DATA_DIR=/var/lib/openmausbot/acme/.openmausbot\nOMB_PORT=8810\nOMB_WEBHOOK_PORT=8811\nOMB_PUBLIC_URL=https://acme.agentada.cc\nOMB_LICENSE_KEY=omb1.k\n",
+    expect(instanceEnv({ workspace, dataDir: "/var/lib/openmausbot/acme/.openmausbot", features: ["admin", "budgets"] })).toBe(
+      "OMB_DATA_DIR=/var/lib/openmausbot/acme/.openmausbot\nOMB_PORT=8810\nOMB_WEBHOOK_PORT=8811\nOMB_PUBLIC_URL=https://acme.agentada.cc\nAPP_FEATURES=admin,budgets\n",
     );
     expect(JSON.parse(initialConfig({ admins: ["ada@example.test"], members: ["@acme.test"], anthropicKey: "sk-ant-x", monthlyCapUsd: 50 }))).toEqual({
       signIn: { admins: ["ada@example.test"], members: ["@acme.test"] }, anthropic: { key: "sk-ant-x" }, budgets: { monthlyUsd: 50 },
@@ -138,7 +138,7 @@ describe("plans", () => {
 
   it("creates a workspace as its own account with private data, a fenced port, a unit and a site", () => {
     const registry = emptyRegistry("agentada.cc");
-    const plan = createPlan({ registry, slug: "acme", seed: { admins: ["ada@example.test"], members: [] }, licenseKey: "omb1.k", memoryMax: "1G", now, layout });
+    const plan = createPlan({ registry, slug: "acme", seed: { admins: ["ada@example.test"], members: [] }, features: ["admin", "budgets"], memoryMax: "1G", now, layout });
     expect(plan.workspace).toEqual({ slug: "acme", host: "acme.agentada.cc", port: 8810, webhookPort: 8811, status: "running", createdAt: now.toISOString() });
     expect(plan.registry.nextPort).toBe(8820);
     const checkpoints = plan.steps.flatMap((step) => step.kind === "write" && step.path === layout.registryFile ? [JSON.parse(step.content)] : []);

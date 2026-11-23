@@ -15,7 +15,7 @@ function config(features: string[], fleet: boolean): ConfigStatus {
   return {
     composio: { configured: false }, box: { configured: false }, vps: { configured: false, sshAlias: "" },
     rooms: { turnTimeoutMinutes: 30 }, localVm: { mode: "shared", maxInstances: 1 },
-    edition: { edition: features.length ? "enterprise" : "oss", features }, fleet: { available: fleet },
+    edition: { edition: "oss", features }, fleet: { available: fleet },
   } as ConfigStatus;
 }
 

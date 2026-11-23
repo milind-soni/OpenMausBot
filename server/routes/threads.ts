@@ -13,7 +13,7 @@ import { memberBot, memberGroup, type Viewer, type VisibleSet } from "../bot-vis
 import type { ComputerControl } from "../computer-control.ts";
 import { speakerOf, type PersonName } from "../replies.ts";
 import type { Coordinator } from "../coordinator.ts";
-import type { WorkspaceAccess } from "../enterprise.ts";
+import type { WorkspaceAccess } from "../hosted-workspace.ts";
 import type { GroupUsageReader } from "../group-thread-usage.ts";
 import { readMessage, searchMessagesAsync } from "../message-db.ts";
 import { cappedMediaRange, MessageMediaLinks, STREAMABLE_MEDIA_MIMES } from "../message-media-links.ts";

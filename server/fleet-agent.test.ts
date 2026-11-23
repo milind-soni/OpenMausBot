@@ -60,7 +60,7 @@ describe.skipIf(process.platform === "win32")("fleet agent over its socket", () 
 
   async function boot(m: ReturnType<typeof machine>) {
     const logs: string[] = [];
-    const server = await startFleetAgent({ socketPath, node: "/usr/bin/node", script: "/usr/lib/node_modules/openmausbot/cli.js", root: m.root, deps: m.deps, auditFile: join(m.root, "audit.jsonl"), licenseKey: "omb1.k", now: () => new Date("2026-09-10T12:00:00Z") }, { log: (line) => logs.push(line) });
+    const server = await startFleetAgent({ socketPath, node: "/usr/bin/node", script: "/usr/lib/node_modules/openmausbot/cli.js", root: m.root, deps: m.deps, auditFile: join(m.root, "audit.jsonl"), features: ["admin", "budgets"], now: () => new Date("2026-09-10T12:00:00Z") }, { log: (line) => logs.push(line) });
     stop = () => new Promise((resolve) => server.close(() => resolve()));
     return logs;
   }
@@ -104,7 +104,7 @@ describe.skipIf(process.platform === "win32")("fleet agent over its socket", () 
     expect(created).toMatchObject({ status: 200, body: { ok: true, log: [expect.stringContaining("https://acme.agentada.cc is ready")] } });
     expect(m.calls).toContain("useradd --system --create-home --home-dir " + join(root, "var/lib/openmausbot/acme") + " --shell /usr/sbin/nologin --user-group omb-acme");
     expect(JSON.parse(m.files.get(join(root, "var/lib/openmausbot/acme/.openmausbot/config.json"))!)).toMatchObject({ anthropic: { key: "sk-ant-fixture", url: "https://admin.example.test/api/gateway/acme/anthropic" }, budgets: { monthlyUsd: 40 } });
-    expect(m.files.get(join(root, "etc/openmausbot/instances/acme.env"))).toContain("OMB_LICENSE_KEY=omb1.k");
+    expect(m.files.get(join(root, "etc/openmausbot/instances/acme.env"))).toContain("APP_FEATURES=admin,budgets");
     expect(m.files.get(join(root, "etc/openmausbot/instances/acme.env"))).toContain("OMB_ADMIN_URL=https://admin.example.test");
     expect(m.files.get(join(root, "etc/openmausbot/instances/acme.env"))).toContain("OMB_ADMIN_WORKSPACE=acme");
 

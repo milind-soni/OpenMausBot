@@ -3,6 +3,7 @@
 import { appendFileSync, chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { dirname } from "node:path";
+import type { FeatureId } from "./features.ts";
 import { defaultFleetDeps, executePlan, loadRegistry, markProvisioningFailed, planFleetAction, type FleetDeps, type FleetInput } from "./fleet-cli.ts";
 import { assertSlug, fleetLayout, fleetUser, openRouterModelIds, workspaceDataDir, type FleetLayout, type FleetWorkspace } from "./fleet.ts";
 
@@ -12,7 +13,7 @@ export interface FleetAgentOptions {
   group?: string;
   node: string;
   script: string;
-  licenseKey?: string;
+  features?: readonly FeatureId[];
   root?: string;
   deps?: FleetDeps;
   auditFile?: string;
@@ -80,7 +81,7 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
   const auditFile = options.auditFile ?? layout.auditFile;
   const base = (): FleetInput => ({
     action: "list", admins: [], members: [], dryRun: false, yes: false, keepData: false,
-    node: options.node, script: options.script, root: options.root, ...(options.licenseKey ? { licenseKey: options.licenseKey } : {}),
+    node: options.node, script: options.script, root: options.root, ...(options.features?.length ? { features: options.features } : {}),
   });
 
   const audit = (entry: Record<string, unknown>) => {

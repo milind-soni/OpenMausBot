@@ -6,7 +6,7 @@ import { DATA_DIR, EVENTS_DIR, NATIVE_DIR, instanceConfigs, type AppConfig } fro
 import { boundRetentionDays, decisionsCsv, readDecisionRange, readDecisions, type DecisionRow } from "../decision-log.ts";
 import { doctorSummary } from "../doctor/start.ts";
 import { flushNativeLog } from "../drivers/native.ts";
-import { editionForMembers, editionStatus, entitled } from "../enterprise.ts";
+import { editionStatus, featureEnabled } from "../features.ts";
 import { reportableServerVersion } from "../environment.ts";
 import { fleetAvailable, fleetRequest, fleetSocketPath } from "../fleet-client.ts";
 import { noteKeyAccepted, noteKeyRejected } from "../key-rejections.ts";
@@ -84,10 +84,10 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
       }
       return json(res, 202, { installing: true });
     }
-    // Admin scope plus the `admin` entitlement; the socket's own permissions decide whether this workspace may drive the agent.
+    // Admin scope plus the `admin` feature; the socket's own permissions decide whether this workspace may drive the agent.
     const fleetRoute = /^\/api\/fleet(?:\/(workspaces(?:\/([a-z0-9-]+)(?:\/(users|suspend|resume))?)?|upgrade))?$/.exec(path);
     if (fleetRoute) {
-      if (!entitled("admin")) return json(res, 403, { error: "Workspaces need an enterprise licence with the admin feature." });
+      if (!featureEnabled("admin")) return json(res, 403, { error: "Workspaces need the admin feature (APP_FEATURES)." });
       const socket = fleetSocketPath();
       if (!fleetAvailable(socket)) return json(res, 404, { error: "No fleet agent on this server. Run `openmausbot fleet init --domain … --operator <this user>` as root." });
       const [, resource, slug, sub] = fleetRoute;
@@ -108,9 +108,7 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
     }
 
     if (method === "GET" && path === "/api/edition") {
-      // A member learns what is entitled; when the key lapses is for admins.
-      const status = editionStatus();
-      return json(res, 200, auth.scopes.includes("admin") ? status : editionForMembers(status));
+      return json(res, 200, editionStatus());
     }
     if (method === "GET" && path === "/api/brand") {
       return json(res, 200, loadBrand());

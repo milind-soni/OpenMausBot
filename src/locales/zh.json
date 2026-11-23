@@ -1267,8 +1267,6 @@
   "settings.search": "搜索",
   "settings.searchAria": "搜索设置",
   "settings.close": "关闭设置",
-  "settings.license.expiring": "此安装的企业版授权将于 {date} 到期（还剩 {days} 天）。请续订密钥以继续使用企业功能。",
-  "settings.license.grace": "此安装的企业版授权已于 {date} 到期。企业功能会继续可用至 {graceEnd}，请在此前续订密钥。",
   "settings.noMatch": "没有与「{query}」匹配的内容",
   "settings.section.general": "通用",
   "settings.section.organization": "组织",

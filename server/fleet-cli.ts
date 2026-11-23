@@ -3,6 +3,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, rmSync } from "node:fs";
 import { posix } from "node:path";
 import { writeFileAtomic } from "./atomic.ts";
+import type { FeatureId } from "./features.ts";
 import { unstableInstallWarning } from "./service-unit.ts";
 import {
   applySignIn,
@@ -48,7 +49,7 @@ export interface FleetInput {
   openrouterDefault?: boolean;
   portalUrl?: string;
   cap?: number;
-  licenseKey?: string;
+  features?: readonly FeatureId[];
   memory?: string;
   dryRun: boolean;
   yes: boolean;
@@ -333,7 +334,7 @@ export function planFleetAction(input: FleetInput, deps: FleetDeps): FleetStep[]
         registry,
         slug: input.slug,
         seed: { admins: input.admins, members: input.members, ...(anthropicKey ? { anthropicKey } : {}), ...(input.anthropicUrl ? { anthropicUrl: input.anthropicUrl } : {}), ...(input.portalUrl ? { portalUrl: input.portalUrl } : {}), ...(input.cap !== undefined ? { monthlyCapUsd: input.cap } : {}), ...(brandJson ? { brandJson } : {}), openrouterKey: input.openrouterKey, openrouterUrl: input.openrouterUrl, openrouterModels: input.openrouterModels, openrouterDefault: input.openrouterDefault },
-        ...(input.licenseKey ? { licenseKey: input.licenseKey } : {}),
+        ...(input.features?.length ? { features: input.features } : {}),
         ...(input.memory ? { memoryMax: input.memory } : {}),
         layout,
       }).steps;

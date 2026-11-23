@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { writeFileAtomic } from "./atomic.ts";
 import { cloudHomeConfigured } from "./cloud-home.ts";
-import { hostedWorkspaceConfiguration } from "./enterprise.ts";
+import { hostedWorkspaceConfiguration } from "./hosted-workspace.ts";
 import type { InstanceConfigMap, ModelSelection, ProviderInstance } from "./contracts.ts";
 import type { Store } from "./store.ts";
 

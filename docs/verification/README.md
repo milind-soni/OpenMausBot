@@ -104,7 +104,6 @@ Use only mapped, tested commands:
 - [Organization library: the desktop channel](desktop-library.md)
 - [Fleet: many workspaces on one server](fleet.md)
 - [Workspaces screen and the fleet agent](workspaces.md)
-- [Hosted workspace sign-in and revocation](hosted-workspaces.md)
 - [Shared-workspace trust: loopback, card answerers, decision log](shared-workspace-trust.md)
 - [Shared-workspace governance: bot visibility and admin activity](shared-workspace-governance.md)
 - [Who can see, chat with and change each team bot](team-bot-access.md)
@@ -112,7 +111,6 @@ Use only mapped, tested commands:
 - [Bounded built-in tool results](tool-results.md)
 - [Memory: recall, upkeep and the tidy-up](memory-layer.md)
 - [Spend cap and sell prices](spend-cap.md)
-- [Enterprise layer loading and license expiry](enterprise-license.md)
 
 `control-omb ui` ([Chat UI, driven headlessly](chat-ui.md)) drives the real
 renderer in a headless Chrome by accessible name, so composer sends, transcript

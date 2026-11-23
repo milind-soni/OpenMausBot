@@ -127,8 +127,8 @@ An operator who explicitly authorizes Full access in a dedicated company
 workspace can provision `OMB_SHARED_WORKSPACE_FULL_ACCESS=1` at server startup.
 It is active only with a fully validated HTTPS `OMB_ADMIN_URL`,
 `OMB_PUBLIC_URL`, workspace slug `OMB_ADMIN_WORKSPACE`,
-`OMB_ADMIN_MEMBERSHIP=portal`, a loaded hosted-access hook and a live `admin`
-entitlement. `OMB_DESKTOP_PARENT=1` disallows it. HTTP settings cannot toggle it.
+`OMB_ADMIN_MEMBERSHIP=portal`, a registered hosted-access adapter and the `admin`
+feature. `OMB_DESKTOP_PARENT=1` disallows it. HTTP settings cannot toggle it.
 
 Only while that policy is active does authenticated health advertise
 `capabilities.sharedWorkspaceFullAccess: 1`. A trusted loopback caller may then
@@ -150,11 +150,12 @@ shared task.
 Run the operator-policy and Full/Ask workflow checks:
 
 ```sh
-pnpm exec vitest run server/enterprise.test.ts server/hosted-access.test.ts server/full-access-workflows.e2e.test.ts server/store.test.ts
+pnpm exec vitest run server/hosted-workspace.test.ts server/full-access-workflows.e2e.test.ts server/store.test.ts
 ```
 
-The hosted-access tests exercise the real hosted authorization route with an
-isolated portal/license fixture. The Full workflow exercises exact Full/Ask
+This fork ships no hosted sign-in adapter, so the hosted authorization route
+is not exercised here; `server/hosted-workspace.test.ts` covers the operator
+policy that gates it. The Full workflow exercises exact Full/Ask
 guarded sends, bot creation, delegated continuations, and restart while awaiting
 a teammate, using only fake providers. Neither contacts a real portal or model.
 

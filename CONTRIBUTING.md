@@ -359,11 +359,10 @@ out of its commits and screenshots.
 
 - No DCO sign-off is required. Submit only code you wrote or have the right
   to contribute under the applicable project license.
-- Changes under `enterprise/` (source-available, see [LICENSING.md](LICENSING.md))
-  need the [CLA](CLA.md), signed once by commenting on the pull request
-  when the bot asks. Changes outside `enterprise/` do not require a CLA.
-- `enterprise/`, the cloud seam and the licensing files have code owners; a
-  maintainer review is required there.
+- This fork is Apache 2.0 only and carries no `enterprise/` folder (see
+  [LICENSING.md](LICENSING.md)); no CLA is required.
+- The cloud seam and the licensing files have code owners; a maintainer
+  review is required there.
 
 ## CI, in one glance
 

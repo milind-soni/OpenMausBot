@@ -5,7 +5,7 @@
 - A root agent on a Unix socket only the operator's user may open, planning
   and running fleet operations, writing an audit line per action.
 - Operator-server routes under `/api/fleet` that forward to the agent, admin
-  scope plus the `admin` entitlement, 404 without an agent.
+  scope plus the `admin` feature, 404 without an agent.
 - Settings → Installations: list with state and this month's cost, create, users,
   suspend, resume, delete (with keep-data), upgrade all.
 

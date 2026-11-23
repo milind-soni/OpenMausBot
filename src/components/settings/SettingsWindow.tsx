@@ -9,7 +9,6 @@ import { setAdvancedMode } from "@/lib/interface-mode";
 import { api, type ConfigStatus } from "@/state/store";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { useIsTopLayer } from "../Layer";
-import { LicenseExpiryBanner } from "../LicenseExpiryBanner";
 import { shortcutLabel } from "../ShortcutHint";
 import { SettingsLook } from "../SettingsPrimitives";
 import { SettingsPageBody } from "./pages/SettingsPageBody";
@@ -192,7 +191,6 @@ export function SettingsWindow() {
                     <div className={cn("flex max-w-[640px] flex-col", narrow && "max-w-none")}>
                       <SettingsPageHeader page={page} ctx={ctx} place={place} narrow={narrow} missing={missing} />
                       <div key={target.page} data-settings-page-body={target.page} className={cn("flex flex-col gap-6", narrow && "px-4")}>
-                        <LicenseExpiryBanner config={config} />
                         {page.owner === "place" && config === null
                           ? unreachable ? <SettingsUnreachable place={place.name} onRetry={() => void api<ConfigStatus>("/api/config").then((config) => dispatch({ type: "configStatus", config })).catch(() => {})} />
                             : <><SettingsSkeletonCard place={place.name} /><SettingsSkeletonCard place={place.name} /></>

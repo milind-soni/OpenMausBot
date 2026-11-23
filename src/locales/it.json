@@ -907,8 +907,6 @@
   "settings.search": "Cerca",
   "settings.searchAria": "Cerca nelle impostazioni",
   "settings.close": "Chiudi impostazioni",
-  "settings.license.expiring": "La licenza enterprise di questa installazione scade il {date} ({days} giorni rimasti). Rinnova la chiave per mantenere le funzioni enterprise.",
-  "settings.license.grace": "La licenza enterprise di questa installazione è scaduta il {date}. Le funzioni enterprise restano attive fino al {graceEnd}; rinnova la chiave prima di allora.",
   "settings.noMatch": "Niente corrisponde a «{query}»",
   "settings.section.general": "Generale",
   "settings.section.organization": "Organizzazione",

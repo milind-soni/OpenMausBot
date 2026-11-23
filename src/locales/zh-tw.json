@@ -1150,8 +1150,6 @@
   "settings.search": "搜尋",
   "settings.searchAria": "搜尋設定",
   "settings.close": "關閉設定",
-  "settings.license.expiring": "此安裝實例的企業授權將於 {date} 到期（剩餘 {days} 天）。請更新授權金鑰以繼續使用企業功能。",
-  "settings.license.grace": "此安裝實例的企業授權已於 {date} 到期。企業功能會持續運作到 {graceEnd}，請在此之前更新授權金鑰。",
   "settings.noMatch": "沒有符合「{query}」的項目",
   "settings.section.general": "一般",
   "settings.section.organization": "組織",

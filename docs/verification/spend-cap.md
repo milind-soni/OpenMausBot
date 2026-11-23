@@ -18,11 +18,11 @@
   do not spend tokens and still run at the cap.
 - Price turns from the operator's list (`driver/model`, then model, then
   `default`) into a billable column in `/api/usage` and its CSV.
-- Do nothing at all without the `budgets` / `billing` entitlements.
+- Do nothing at all without the `budgets` / `billing` features.
 
 ## User path
 
-Settings → Usage → **Monthly spend limit** and **Sell prices** (enterprise).
+Settings → Usage → **Monthly spend limit** and **Sell prices** (with `APP_FEATURES=budgets,billing`).
 The History card shows a billable column once prices exist; the composer's
 send is refused with the limit message once the cap is reached.
 
@@ -32,9 +32,9 @@ send is refused with the limit message once the cap is reached.
 pnpm exec vitest run --no-file-parallelism server/spend-cap-api.test.ts
 ```
 
-The test writes a stand-in enterprise layer (the folder shape core loads,
-granting `budgets` and `billing`) and launches the `control-omb` fixture with
-it through `launchVerificationServer(..., { dir, licenseKey })`. It sets a
+The test launches the `control-omb` fixture with `budgets` and `billing` on
+through `launchVerificationServer(..., ["budgets", "billing"])`, which sets
+`APP_FEATURES` in the child. It sets a
 $0.015 cap and a default price list, sends two turns that the fake engine
 books at $0.01 each, and checks the third is refused with 409 `spend_cap`,
 that `/api/usage` reports the cap exceeded, warned, and priced, that the CSV
@@ -46,9 +46,9 @@ It prints the fixture's server log path and removes its temporary homes.
 The memory regression also proves that one helper reaching the cap blocks
 the next step in that same upkeep pass, and that raising the cap resumes it.
 
-For the same by hand, launch a fixture with `OMB_ENTERPRISE_DIR` pointing at a
-folder whose `server/index.js` exports such a `register()`, and
-`OMB_LICENSE_KEY` set to any value, then use the normal chat-turn commands.
+For the same by hand, call `launchVerificationServer` with that feature list
+from a script (the `launch` command passes only `FAKE_CLAUDE_*` variables to
+the child), then use the normal chat-turn commands.
 
 ## Unit regressions
 
@@ -57,10 +57,10 @@ pnpm exec vitest run server/spend.test.ts server/model-prices.test.ts server/pri
 ```
 
 These cover price precedence and cached-input pricing, month-to-date sums
-with the short cache and the just-booked note, inert behaviour without an
-entitlement or a cap, the warning threshold, the 409 shape, the saver
+with the short cache and the just-booked note, inert behaviour without the
+feature or a cap, the warning threshold, the 409 shape, the saver
 persisting `anthropic`, `budgets` and `billing`, the cards rendering only
-with their entitlements, the billable column in summaries and CSV, estimated
+with their features, the billable column in summaries and CSV, estimated
 costs counting against the cap, the list-price table (every entry sourced and
 dated, unknown models unpriced, the operator's per-model price winning), and
 the once-a-month notices surviving a restart.

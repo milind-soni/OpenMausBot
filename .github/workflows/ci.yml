@@ -435,10 +435,9 @@ jobs:
   foss:
     needs: static
     if: contains(needs.static.outputs.jobs, '"foss"')
-    # LICENSING.md promises that deleting enterprise/ leaves a working
-    # open-source edition. Prove it on runtime changes: typecheck, the edition
-    # tests, and a boot that reports "oss" even with a key set.
-    name: open-source edition builds without enterprise/
+    # Optional features come only from APP_FEATURES or config.json: prove a
+    # boot with none on and a boot that turns on what APP_FEATURES names.
+    name: feature registry boots with and without APP_FEATURES
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -449,20 +448,24 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Delete the enterprise folder
-        run: rm -rf enterprise
       - run: pnpm typecheck
-      - run: pnpm exec vitest run server/enterprise.test.ts server/brand.test.ts
-      - name: The server boots and reports the open-source edition
+      - run: pnpm exec vitest run server/features.test.ts server/hosted-workspace.test.ts server/brand.test.ts
+      - name: The server reports no features, then the ones APP_FEATURES names
         run: |
           mkdir -p /tmp/omb-foss/home
           HOME=/tmp/omb-foss/home OMB_DATA_DIR=/tmp/omb-foss/data OMB_PORT=18797 OMB_WEBHOOK_PORT=18796 \
-            OMB_BROWSER_CONNECTION=/tmp/omb-foss/browser-connection.json OMB_LICENSE_KEY=omb1.not.real \
+            OMB_BROWSER_CONNECTION=/tmp/omb-foss/browser-connection.json \
             node --experimental-strip-types server/index.ts > /tmp/omb-foss/server.log 2>&1 &
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:18797/api/health >/dev/null && break; sleep 1; done
           curl -sf http://127.0.0.1:18797/api/edition | tee /tmp/omb-foss/edition.json; echo
-          grep -q '"edition":"oss"' /tmp/omb-foss/edition.json
-          grep -q 'no enterprise layer exists' /tmp/omb-foss/edition.json
+          grep -q '"features":\[\]' /tmp/omb-foss/edition.json
+          kill %1; wait %1 || true
+          HOME=/tmp/omb-foss/home OMB_DATA_DIR=/tmp/omb-foss/data OMB_PORT=18797 OMB_WEBHOOK_PORT=18796 \
+            OMB_BROWSER_CONNECTION=/tmp/omb-foss/browser-connection.json APP_FEATURES=billing,admin \
+            node --experimental-strip-types server/index.ts > /tmp/omb-foss/server-features.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:18797/api/health >/dev/null && break; sleep 1; done
+          curl -sf http://127.0.0.1:18797/api/edition | tee /tmp/omb-foss/edition-features.json; echo
+          grep -q '"features":\["admin","billing"\]' /tmp/omb-foss/edition-features.json
           kill %1; wait %1 || true
 
   control-plane:

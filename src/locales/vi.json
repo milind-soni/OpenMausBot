@@ -624,8 +624,6 @@
   "settings.search": "Tìm kiếm",
   "settings.searchAria": "Tìm kiếm cài đặt",
   "settings.close": "Đóng cài đặt",
-  "settings.license.expiring": "Giấy phép doanh nghiệp của bản cài đặt này sẽ hết hạn vào {date} (còn {days} ngày). Hãy gia hạn khóa để duy trì các tính năng doanh nghiệp.",
-  "settings.license.grace": "Giấy phép doanh nghiệp của bản cài đặt này đã hết hạn vào {date}. Các tính năng doanh nghiệp tiếp tục hoạt động cho đến {graceEnd}; hãy gia hạn khóa trước thời điểm đó.",
   "settings.noMatch": "Không có kết quả nào khớp với “{query}”",
   "settings.section.general": "Chung",
   "settings.section.organization": "Tổ chức",

@@ -131,8 +131,8 @@ The API, for the owner:
 
 ## With the licensed monthly spend limit
 
-The licensed edition's **Monthly spend limit** (`budgets.monthlyUsd`, the
-`budgets` entitlement) is unchanged: it stops every kind of turn, has its own
+The **Monthly spend limit** (`budgets.monthlyUsd`, the
+`budgets` feature) is unchanged: it stops every kind of turn, has its own
 warning level, and notifies admins at the warning and at the limit. Both read
 the same totals from the same engine (`server/usage-caps.ts`). When both are
 set, each applies on its own, and whichever is reached first stops the work

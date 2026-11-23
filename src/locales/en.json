@@ -1290,8 +1290,6 @@
   "settings.search": "Search",
   "settings.searchAria": "Search settings",
   "settings.close": "Close settings",
-  "settings.license.expiring": "This installation's enterprise license expires on {date} ({days} day(s) left). Renew the key to keep enterprise features.",
-  "settings.license.grace": "This installation's enterprise license expired on {date}. Enterprise features keep working until {graceEnd}; renew the key before then.",
   "settings.noMatch": "Nothing matches “{query}”",
   "settings.section.general": "General",
   "settings.section.organization": "Organization",

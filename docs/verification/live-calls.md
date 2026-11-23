@@ -116,8 +116,6 @@ without the admin scope `live.provider`, never `azureEndpoint` or
 `azureDeployment`. `server/live-access.test.ts` runs each caller above through
 the sign-in gate and the limit. `server/live-azure-access.e2e.test.ts` does it on
 the full server with a made-up key and its `fetch` stubbed.
-`server/hosted-access.test.ts` does it for a shared workspace, with no key saved,
-so a caller who gets through stops at the setup prompt.
 
 ## A custom endpoint as the Live provider
 

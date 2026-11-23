@@ -973,8 +973,6 @@
   "settings.search": "검색",
   "settings.searchAria": "설정 검색",
   "settings.close": "설정 닫기",
-  "settings.license.expiring": "이 설치의 엔터프라이즈 라이선스가 {date}에 만료돼요({days}일 남음). 엔터프라이즈 기능을 계속 쓰려면 키를 갱신하세요.",
-  "settings.license.grace": "이 설치의 엔터프라이즈 라이선스가 {date}에 만료됐어요. 엔터프라이즈 기능은 {graceEnd}까지 계속 작동하니 그 전에 키를 갱신하세요.",
   "settings.noMatch": "“{query}”와(과) 일치하는 항목이 없어요",
   "settings.section.general": "일반",
   "settings.section.organization": "조직",

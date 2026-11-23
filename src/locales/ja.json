@@ -1028,8 +1028,6 @@
   "settings.search": "検索",
   "settings.searchAria": "設定を検索",
   "settings.close": "設定を閉じる",
-  "settings.license.expiring": "このインストール環境のエンタープライズライセンスは {date} に期限が切れます（残り {days} 日）。エンタープライズ機能を継続するにはキーを更新してください。",
-  "settings.license.grace": "このインストール環境のエンタープライズライセンスは {date} に期限が切れました。エンタープライズ機能は {graceEnd} まで使えます。それまでにキーを更新してください。",
   "settings.noMatch": "「{query}」に一致するものはありません",
   "settings.section.general": "一般",
   "settings.section.organization": "組織",
