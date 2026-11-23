@@ -103,7 +103,7 @@ function ConnectGrokBot({ url, stopped, names, error, busy, onConnect, onUse }: 
   );
 }
 
-function BringBack({ connect, local, look, found, reply, error, onReply, onFile, onFound }: {
+function BringBack({ connect, local, look, found, reply, error, onReply, onFiles, onFound }: {
   connect: ReactNode;
   local: boolean;
   look: GrokLook;
@@ -111,7 +111,7 @@ function BringBack({ connect, local, look, found, reply, error, onReply, onFile,
   reply: string;
   error: string;
   onReply: (reply: string) => void;
-  onFile: (file: File | undefined) => void;
+  onFiles: (files: readonly File[]) => void;
   onFound: () => void;
 }) {
   const picker = useRef<HTMLInputElement>(null);
@@ -145,7 +145,7 @@ function BringBack({ connect, local, look, found, reply, error, onReply, onFile,
         {error && <p role="alert" className="text-[13px] leading-relaxed text-danger">{error}</p>}
         <div>
           <button type="button" onClick={() => picker.current?.click()} className={cn(SECONDARY, "inline-flex items-center gap-2")}><FileUp size={15} />{t("grokMove.chooseFile")}</button>
-          <input ref={picker} type="file" accept=".json,.md,.txt,application/json,text/plain,text/markdown" className="hidden" onChange={(event) => { onFile(event.target.files?.[0]); event.target.value = ""; }} />
+          <input ref={picker} type="file" multiple accept=".json,.md,.txt,application/json,text/plain,text/markdown" className="hidden" onChange={(event) => { onFiles(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
         </div>
       </section>
     </>
@@ -239,11 +239,23 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
     }
   };
 
-  const readFile = useRef<(file: File | undefined) => void>(() => {});
-  readFile.current = (file) => {
-    if (!file) return;
-    if (file.size > GROK_EXPORT_MAX_CHARS) return setError(t("grokMove.error.tooLarge"));
-    void file.text().then((text) => show(() => parseGrokExport(text)));
+  /** Several files are the parts of one split export, joined by Bot as the link joins them. One part that can't be read stops
+   * them all, so a Bot never comes over with a part missing. */
+  const readFiles = useRef<(files: readonly File[]) => void>(() => {});
+  readFiles.current = (files) => {
+    if (!files.length) return;
+    const refusal = (file: string, reason: string) => (files.length > 1 ? t("grokMove.refused", { file, reason }) : reason);
+    const tooLarge = files.find((file) => file.size > GROK_EXPORT_MAX_CHARS);
+    if (tooLarge) return setError(refusal(tooLarge.name, t("grokMove.error.tooLarge")));
+    const read = (file: File, order: number) => file.text().then(
+      (text) => ({ name: file.name, modifiedAt: order, text }),
+      (cause: unknown) => { throw new Error(refusal(file.name, grokErrorText(cause))); },
+    );
+    void Promise.all(files.map(read)).then((parts) => show(() => {
+      const { bots, refused: [first] } = foundExports(parts);
+      if (first) throw new Error(refusal(first.file, first.error));
+      return bots;
+    }), (cause: unknown) => setError(grokErrorText(cause)));
   };
   // The chat box behind this dialog attaches any file dropped on the window, and one Send would hand a private export to its
   // model. So nothing behind the dialog sees a drag, on any step, and only the first step reads what was dropped.
@@ -254,7 +266,7 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
     };
     const drop = (event: DragEvent) => {
       hold(event);
-      if (onStart) readFile.current(event.dataTransfer?.files[0]);
+      if (onStart) readFiles.current(Array.from(event.dataTransfer?.files ?? []));
     };
     const listeners = [["dragenter", hold], ["dragover", hold], ["dragleave", hold], ["drop", drop]] as const;
     for (const [type, listener] of listeners) window.addEventListener(type, listener, true);
@@ -327,7 +339,7 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
             </>
           ) : (
             <BringBack local={local} look={look} found={found} reply={reply} error={error} onReply={setReply}
-              onFile={(file) => readFile.current(file)} onFound={() => void show(() => found.bots)}
+              onFiles={(files) => readFiles.current(files)} onFound={() => void show(() => found.bots)}
               connect={local && connector.available && (
                 <ConnectGrokBot url={connector.connectorUrl} stopped={connector.stopped} names={arrived.map((bot) => bot.name)} error={connectFailed} busy={connecting}
                   onConnect={() => void connect()} onUse={() => void show(() => arrived, true)} />

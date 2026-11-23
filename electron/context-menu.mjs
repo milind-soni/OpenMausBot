@@ -170,7 +170,7 @@ function mediaItems(params, { webContents, downloads, t }) {
 }
 
 /** The window's right-click menu, built from Electron's context-menu params: never empty, so right-click always answers. */
-export function contextMenuTemplate(params, { webContents, clipboard, downloads, t = nativeText.englishText.t }) {
+export function contextMenuTemplate(params, { webContents, clipboard, downloads, platform = process.platform, t = nativeText.englishText.t }) {
   const sections = [];
   if (params.misspelledWord) {
     sections.push((params.dictionarySuggestions ?? []).slice(0, 5).map((suggestion) => ({
@@ -196,6 +196,16 @@ export function contextMenuTemplate(params, { webContents, clipboard, downloads,
       { type: "separator" },
       { label: t("native.role.reload"), click: () => webContents.reload() },
     ]);
+  }
+  if (params.isEditable && (platform === "win32" || platform === "linux")) {
+    const { session } = webContents;
+    const checked = session.isSpellCheckerEnabled();
+    sections.push([{
+      label: t("native.context.checkSpelling"),
+      type: "checkbox",
+      checked,
+      click: () => session.setSpellCheckerEnabled(!checked),
+    }]);
   }
   return sections.filter((section) => section.length > 0).flatMap((section, index) => index === 0 ? section : [{ type: "separator" }, ...section]);
 }

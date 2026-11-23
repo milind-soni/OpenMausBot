@@ -341,6 +341,28 @@ describe("one-time codes and fields", () => {
     expect(page.field("input[name=new]").value).toBe("");
   });
 
+  it("takes a sign-in page's only password box even when it is marked new-password, as TikTok's is", async () => {
+    const { page, fill } = setup("https://www.tiktok.com/login/phone-or-email/email", `<form><input type="text" placeholder="Email or username" autocomplete="webauthn" name="username"><input type="password" placeholder="Password" autocomplete="new-password"></form>`,
+      [{ host: "tiktok.com", username: "alice@example.com" }]);
+    page.answer = () => ({ navigate: DASHBOARD });
+    const outcome = await fill();
+    expect(outcome).toMatchObject({ ok: true, filled: ["username", "password"] });
+    expect(page.typed).toEqual(["alice@example.com", PASSWORD]);
+    expect(page.pressed).toEqual(["Enter"]);
+  });
+
+  it("keeps new-password boxes empty on a sign-in page with two of them, or on a sign-up page under a sign-in path", async () => {
+    const twoBoxes = `<form><input name="email" type="email"><input name="new" type="password" autocomplete="new-password"><input name="again" type="password" autocomplete="new-password"></form>`;
+    const oneBox = `<form><input name="email" type="email"><input name="new" type="password" autocomplete="new-password"></form>`;
+    for (const [url, html] of [["https://example.com/login", twoBoxes], ["https://example.com/login/signup", oneBox], ["https://example.com/signin/reset-password", oneBox], ["https://example.com/login/registration", oneBox], ["https://example.com/login/%72egistration", oneBox], ["https://example.com/login/%E0%A4%A", oneBox]]) {
+      const { page, fill } = setup(url, html, [{ host: "example.com", username: "alice@example.com" }], { submit: false });
+      const outcome = await fill();
+      expect(outcome).toMatchObject({ ok: true, filled: ["username"] });
+      expect(page.field("input[name=new]").value).toBe("");
+      page.close();
+    }
+  });
+
   it("asks which login when a site has several, and fills the one named", async () => {
     const saved = [{ host: "example.com", username: "alice", password: "fake-alice-pw" }, { host: "example.com", username: "bob", password: "fake-bob-pw" }];
     const { page, fill } = setup("https://example.com/login", LOGIN_FORM, saved, { submit: false });
