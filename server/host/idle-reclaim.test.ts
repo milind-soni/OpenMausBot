@@ -214,7 +214,10 @@ describe("idle reclaim policy", () => {
     for (const path of [join(f.folder("older"), "c", "package.json"), join(f.folder("older"), "c"), f.folder("older")]) utimesSync(path, monthAgo, monthAgo);
     f.fill(0.95);
     f.deps.openPaths = async () => [join(used, "dep", "build", "addon.node")];
-    await reclaimIdle(f.deps);
+    const report = await reclaimIdle(f.deps);
+    expect(report.keptBecause["no lockfile or manifest beside it to reinstall from"]).toBe(1);
+    expect(report.keptBecause["a process uses it"]).toBe(1);
+    expect(Object.keys(report.keptBecause).join("\n")).not.toContain(f.dataDir);
     expect(existsSync(noLock)).toBe(true);
     expect(existsSync(used)).toBe(true);
     expect(existsSync(fresh)).toBe(true);
@@ -257,7 +260,7 @@ describe("idle reclaim policy", () => {
     expect(report.conversations.kept).toBeGreaterThanOrEqual(1);
   });
 
-  it.skipIf(!hasGit)("inside a git checkout, sheds only what git ignores and never a folder holding a checkout", async () => {
+  it.skipIf(!hasGit || process.platform === "win32")("inside a git checkout, sheds only what git ignores and never a folder holding a checkout", async () => {
     const f = fixture();
     const repo = join(f.folder("older"), "repo");
     const ignored = f.npmProject(join(repo, "web"), 10);
@@ -277,6 +280,35 @@ describe("idle reclaim policy", () => {
     expect(existsSync(join(f.folder("older"), "fsmonitor-ran"))).toBe(false);
     expect(f.logs.join("\n")).toMatch(/git does not ignore it/);
     expect(f.logs.join("\n")).toMatch(/a git checkout is inside it/);
+  });
+
+  it.skipIf(!hasGit || process.platform === "win32")("keeps an ignored venv that holds a file git tracks", async () => {
+    const f = fixture();
+    const repo = join(f.folder("older"), "repo");
+    const venv = join(repo, ".venv");
+    put(join(venv, "pyvenv.cfg"), "home = /usr/bin");
+    put(join(venv, "bin", "activate"), "# edited by hand");
+    put(join(repo, "requirements.txt"), "six");
+    put(join(repo, ".gitignore"), ".venv/\n");
+    execFileSync("git", ["init", "-q", repo]);
+    execFileSync("git", ["-C", repo, "add", "-f", ".venv/bin/activate"]);
+    age(f.dataDir, 30);
+    f.fill(0.95);
+    await reclaimIdle(f.deps);
+    expect(existsSync(venv)).toBe(true);
+    expect(f.logs.join("\n")).toMatch(/git does not ignore it/);
+  });
+
+  it("after a pass with nothing to shed, waits before looking again unless the volume fills further", async () => {
+    const f = fixture();
+    f.npmProject(f.folder("lunch"));
+    age(f.dataDir, 30);
+    f.fill(0.9);
+    const first = await reclaimIdle(f.deps);
+    expect(first.folders).toBe(0);
+    expect((await reclaimIdle(f.deps)).skipped).toMatch(/nothing to shed; waiting/);
+    f.fill(0.96);
+    expect((await reclaimIdle(f.deps)).skipped).toBeUndefined();
   });
 
   it("sheds a conversation's pnpm store with its node_modules, and keeps it while another node_modules stays", async () => {
@@ -354,7 +386,9 @@ describe("a conversation that wakes, and the note", () => {
     expect(note).toMatch(/^\n\n\[From OpenMausBot, not the person: to free disk space/);
     expect(note).toMatch(/[ab]\/node_modules/);
     expect(note).toMatch(/npm ci/);
-    // Once.
+    // Again only while that turn may be started again, then never.
+    expect(idleReclaimNote(f.dataDir, "older")).toBe(note);
+    expect(idleReclaimNote(f.dataDir, "older", Date.now() + IDLE_RECLAIM.noteRepeatMs + 60_000)).toBe("");
     expect(idleReclaimNote(f.dataDir, "older")).toBe("");
     expect(idleReclaimNote(f.dataDir, "old")).toBe("");
   });
@@ -369,7 +403,7 @@ describe("a conversation that wakes, and the note", () => {
     expect(idleReclaimNote(f.dataDir, "older")).not.toBe("");
     f.fill(0.95);
     await reclaimIdle(f.deps);
-    expect(idleReclaimNote(f.dataDir, "older")).toBe("");
+    expect(idleReclaimNote(f.dataDir, "older", Date.now() + IDLE_RECLAIM.noteRepeatMs + 60_000)).toBe("");
     expect(idleReclaimNote(f.dataDir, "old")).not.toBe("");
   });
 });

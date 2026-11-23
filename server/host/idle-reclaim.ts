@@ -52,6 +52,13 @@ export const IDLE_RECLAIM = {
   /** Conversations waiting for their note; the oldest go past it. */
   maxNotes: 2_000,
   notePaths: 5,
+  /** A note is given again for this long after its first turn, so a turn started again (a recovery) still carries it. */
+  noteRepeatMs: 10 * 60 * 1000,
+  /** A pass in "remove" that found nothing to shed waits this long, unless the volume fills by quietRise meanwhile. */
+  quietMs: 6 * 60 * 60 * 1000,
+  quietRise: 0.05,
+  /** Kinds of reasons a report counts. */
+  maxReasons: 20,
 } as const;
 const STATE_FILE = "idle-reclaim.json";
 const ID = /^[\w-]{1,128}$/;
@@ -118,17 +125,28 @@ export async function linuxProcessPaths(): Promise<string[] | null> {
   return [...paths];
 }
 
-/** Whether git ignores `rel` (a folder, relative to the checkout `top`): null when git cannot tell. The checkout is the
- * bots', so nothing in it may run: no fsmonitor, no global or system config, no prompt. */
-export function gitIgnores(top: string, rel: string): Promise<boolean | null> {
+/** git in a checkout the bots write: nothing in it may run (no fsmonitor, no global or system config, no prompt). */
+function git(top: string, args: string[]): Promise<{ code: number | null; out: string }> {
   return new Promise((done) => {
     const env: NodeJS.ProcessEnv = { PATH: process.env.PATH ?? "/usr/bin:/bin", LANG: "C", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: devNull, GIT_TERMINAL_PROMPT: "0" };
-    execFile("git", ["-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false", "--no-optional-locks", "-C", top, "check-ignore", "-q", "--", `${rel.split(sep).join("/")}/`],
-      { env, timeout: 15_000, windowsHide: true }, (error) => {
-        if (!error) return done(true);
-        done((error as { code?: unknown }).code === 1 ? false : null);
+    execFile("git", ["-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false", "--no-optional-locks", "-C", top, ...args],
+      { env, timeout: 15_000, windowsHide: true, maxBuffer: 1024 * 1024 }, (error, stdout) => {
+        const code = error ? (typeof (error as { code?: unknown }).code === "number" ? (error as { code: number }).code : null) : 0;
+        done({ code, out: String(stdout ?? "") });
       });
   });
+}
+
+/** Whether git ignores the folder `rel` (relative to the checkout `top`) and tracks nothing inside it: null when git
+ * cannot tell. A force-added file inside an ignored folder is tracked, and keeps it. */
+export async function gitIgnores(top: string, rel: string): Promise<boolean | null> {
+  const path = `${rel.split(sep).join("/")}/`;
+  const ignored = await git(top, ["check-ignore", "-q", "--", path]);
+  if (ignored.code === 1) return false;
+  if (ignored.code !== 0) return null;
+  const tracked = await git(top, ["ls-files", "-z", "--cached", "--", path]);
+  if (tracked.code !== 0) return null;
+  return tracked.out.length === 0;
 }
 
 export interface IdleReclaimReport {
@@ -141,6 +159,8 @@ export interface IdleReclaimReport {
   usedAfter: number | null;
   /** Conversation folders idle long enough, those something was shed from (or would be), and those kept whole. */
   conversations: { idle: number; shed: number; kept: number; woke: number };
+  /** Why folders stayed, by kind of reason (paths left out), at most IDLE_RECLAIM.maxReasons kinds. */
+  keptBecause: Record<string, number>;
   folders: number;
   /** "remove": what the volume gained; "report": what the installs hold, each file once. */
   bytes: number;
@@ -149,8 +169,8 @@ export interface IdleReclaimReport {
   /** "report" ran out of its reading budget. */
   partial: boolean;
 }
-export interface IdleNote { at: number; paths: string[] }
-interface State { reclaiming: boolean; notes: Record<string, IdleNote>; totals: { passes: number; folders: number; conversations: number; freedBytes: number }; last?: IdleReclaimReport }
+export interface IdleNote { at: number; paths: string[]; givenAt?: number }
+interface State { reclaiming: boolean; quietUntil?: number; quietAtUsed?: number; notes: Record<string, IdleNote>; totals: { passes: number; folders: number; conversations: number; freedBytes: number }; last?: IdleReclaimReport }
 const fresh = (): State => ({ reclaiming: false, notes: {}, totals: { passes: 0, folders: 0, conversations: 0, freedBytes: 0 } });
 
 /** The saved state, field by field; anything unreadable starts again from nothing. */
@@ -159,8 +179,11 @@ function readState(dataDir: string): State {
     const read = JSON.parse(readFileSync(join(dataDir, STATE_FILE), "utf8")) as Partial<State>;
     const state = fresh();
     state.reclaiming = read.reclaiming === true;
+    if (typeof read.quietUntil === "number" && typeof read.quietAtUsed === "number") { state.quietUntil = read.quietUntil; state.quietAtUsed = read.quietAtUsed; }
     for (const [id, note] of Object.entries(read.notes ?? {})) {
-      if (ID.test(id) && note && typeof note.at === "number" && Array.isArray(note.paths)) state.notes[id] = { at: note.at, paths: note.paths.filter((one) => typeof one === "string").slice(0, IDLE_RECLAIM.notePaths + 1) };
+      if (ID.test(id) && note && typeof note.at === "number" && Array.isArray(note.paths)) {
+        state.notes[id] = { at: note.at, paths: note.paths.filter((one) => typeof one === "string").slice(0, IDLE_RECLAIM.notePaths + 1), ...(typeof note.givenAt === "number" ? { givenAt: note.givenAt } : {}) };
+      }
     }
     const totals = read.totals ?? state.totals;
     for (const key of Object.keys(state.totals) as Array<keyof State["totals"]>) if (typeof totals[key] === "number" && Number.isFinite(totals[key]) && totals[key] >= 0) state.totals[key] = totals[key];
@@ -178,12 +201,21 @@ function updateState(dataDir: string, change: (state: State) => void): State {
   return state;
 }
 
-/** The one line a bot's next turn in a conversation carries after its installs were shed, once; "" otherwise. */
-export function idleReclaimNote(dataDir: string, threadId: string): string {
+/** The one line a bot's next turn in a conversation carries after its installs were shed; "" otherwise. Given again only
+ * within noteRepeatMs of its first turn (that turn started again), then dropped. */
+export function idleReclaimNote(dataDir: string, threadId: string, now = Date.now()): string {
   try { statSync(join(dataDir, STATE_FILE)); } catch { return ""; }
   if (!ID.test(threadId) || !readState(dataDir).notes[threadId]) return "";
   let note: IdleNote | undefined;
-  try { updateState(dataDir, (state) => { note = state.notes[threadId]; delete state.notes[threadId]; }); } catch { return ""; }
+  try {
+    updateState(dataDir, (state) => {
+      const found = state.notes[threadId];
+      if (!found) return;
+      if (found.givenAt !== undefined && now - found.givenAt > IDLE_RECLAIM.noteRepeatMs) { delete state.notes[threadId]; return; }
+      note = found;
+      found.givenAt ??= now;
+    });
+  } catch { return ""; }
   if (!note) return "";
   const shown = note.paths.slice(0, IDLE_RECLAIM.notePaths).map((path) => (path ? path.split(sep).join("/") : "."));
   const more = note.paths.length > IDLE_RECLAIM.notePaths ? " and more" : "";
@@ -208,7 +240,7 @@ export interface IdleReclaimDeps {
   handedOff(threadId: string): boolean;
   /** Why nothing may change now (frozen after a move, a backup being made or restored), else null. */
   paused?(): string | null;
-  cleanup: Pick<ConversationFolderCleanup, "idleInstalls" | "retireIdle" | "drain">;
+  cleanup: Pick<ConversationFolderCleanup, "idlePass" | "idleInstalls" | "retireIdle" | "drain">;
   volume?(path: string): Promise<Volume | null>;
   /** linuxProcessPaths by default: null keeps everything. */
   openPaths?(): Promise<readonly string[] | null>;
@@ -224,7 +256,7 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(2)} GB`;
 const pct = (share: number | null) => (share === null ? "?" : `${Math.round(share * 100)}%`);
 const empty = (at: number, mode: IdleReclaimMode, skipped?: string, usedBefore: number | null = null): IdleReclaimReport => ({
-  at, mode, ...(skipped ? { skipped } : {}), usedBefore, usedAfter: usedBefore, conversations: { idle: 0, shed: 0, kept: 0, woke: 0 }, folders: 0, bytes: 0, reachedTarget: false, partial: false,
+  at, mode, ...(skipped ? { skipped } : {}), usedBefore, usedAfter: usedBefore, conversations: { idle: 0, shed: 0, kept: 0, woke: 0 }, keptBecause: {}, folders: 0, bytes: 0, reachedTarget: false, partial: false,
 });
 
 export function describeIdleReclaim(report: IdleReclaimReport): string {
@@ -264,7 +296,10 @@ export async function reclaimIdle(deps: IdleReclaimDeps): Promise<IdleReclaimRep
     } catch (error) { warn(`idle reclaim: could not save its notes: ${message(error)}`); }
     return report;
   };
-  if (!over) return save(empty(now, mode, `below its budget (${pct(usedBefore)} used, starts at ${pct(IDLE_RECLAIM.startUsed)})`, usedBefore), false);
+  if (!over) return save(empty(now, mode, `below its budget (${pct(usedBefore)} used, starts at ${pct(IDLE_RECLAIM.startUsed)})`, usedBefore), false, (saved) => { delete saved.quietUntil; delete saved.quietAtUsed; });
+  if (mode === "remove" && state.quietUntil !== undefined && now < state.quietUntil && usedBefore < (state.quietAtUsed ?? 0) + IDLE_RECLAIM.quietRise) {
+    return empty(now, mode, "the last pass found nothing to shed; waiting", usedBefore);
+  }
 
   const total = before.usedBytes + before.freeBytes;
   const target = IDLE_RECLAIM.stopUsed * total;
@@ -296,6 +331,12 @@ export async function reclaimIdle(deps: IdleReclaimDeps): Promise<IdleReclaimRep
     else if (steps % YIELD_EVERY === 0) await new Promise<void>((done) => setImmediate(done));
   };
   const seen = new Set<string>();
+  const windows = process.platform === "win32";
+  const because = (why: string) => {
+    // Never a name from the disk: a path is cut off, and what a look-alike holds is not said.
+    const kind = why.startsWith("holds ") ? "holds other entries" : why.replace(/ (?:in|at|into) (?:\/|[A-Za-z]:[\\/]).*$/, "").slice(0, 80);
+    if (kind in report.keptBecause || Object.keys(report.keptBecause).length < IDLE_RECLAIM.maxReasons) report.keptBecause[kind] = (report.keptBecause[kind] ?? 0) + 1;
+  };
   /** Bytes under `path`, each hard-linked file once in the pass (a pnpm store and the node_modules linking into it). */
   const measure = async (path: string): Promise<number> => {
     await step();
@@ -303,9 +344,9 @@ export async function reclaimIdle(deps: IdleReclaimDeps): Promise<IdleReclaimRep
     if (!stats) return 0;
     if (!stats.isDirectory()) {
       if (stats.nlink > 1) { const key = `${stats.dev}:${stats.ino}`; if (seen.has(key)) return 0; seen.add(key); }
-      return stats.blocks * 512;
+      return windows ? stats.size : stats.blocks * 512;
     }
-    let bytes = stats.blocks * 512;
+    let bytes = windows ? 0 : stats.blocks * 512;
     for (const name of await readdir(path).catch(() => [] as string[])) bytes += await measure(join(path, name));
     return bytes;
   };
@@ -339,8 +380,9 @@ export async function reclaimIdle(deps: IdleReclaimDeps): Promise<IdleReclaimRep
     return null;
   };
 
-  let freedSoFar = 0, reclaiming = true;
+  let freedSoFar = 0, reclaiming = true, deferred = 0;
   const notes: Record<string, IdleNote> = {};
+  const pass = await deps.cleanup.idlePass(candidates.map((candidate) => candidate.threadId));
   try {
     for (const candidate of candidates) {
       const { botId, threadId, folder } = candidate;
@@ -354,15 +396,16 @@ export async function reclaimIdle(deps: IdleReclaimDeps): Promise<IdleReclaimRep
         if ((lastActivity(deps.records()).get(threadId) ?? Infinity) > candidate.since) return "it has a new message";
         return null;
       };
-      if (still() || mtime(folder) > cutoff) continue;
+      if (still()) { deferred++; continue; }
+      if (mtime(folder) > cutoff) continue;
       report.conversations.idle++;
       const keptNodeModules: string[] = [];
-      const { trees, kept } = await deps.cleanup.idleInstalls(folder, threadId, (path) => { if (path.endsWith(`${sep}node_modules`)) keptNodeModules.push(path); });
-      if (kept) { (deps.log ?? console.log)(`idle reclaim: kept ${folder}: ${kept}`); report.conversations.kept++; continue; }
+      const { trees, kept } = await deps.cleanup.idleInstalls(folder, threadId, pass, (path, why) => { because(why); if (path.endsWith(`${sep}node_modules`)) keptNodeModules.push(path); });
+      if (kept) { (deps.log ?? console.log)(`idle reclaim: kept ${folder}: ${kept}`); because(kept); report.conversations.kept++; continue; }
       const going: FoundTree[] = [];
       for (const tree of trees) {
         const why = await extraHold(folder, tree);
-        if (why) { (deps.log ?? console.log)(`idle reclaim: kept ${tree.path}: ${why}`); if (tree.path.endsWith(`${sep}node_modules`)) keptNodeModules.push(tree.path); }
+        if (why) { (deps.log ?? console.log)(`idle reclaim: kept ${tree.path}: ${why}`); because(why); if (tree.path.endsWith(`${sep}node_modules`)) keptNodeModules.push(tree.path); }
         else going.push(tree);
       }
       // The folder's pnpm store goes only with every node_modules of the folder, which are hard links into it.
@@ -389,7 +432,7 @@ export async function reclaimIdle(deps: IdleReclaimDeps): Promise<IdleReclaimRep
       }
       const moved: string[] = [];
       for (const tree of going) {
-        const why = await deps.cleanup.retireIdle(folder, threadId, tree, still);
+        const why = await deps.cleanup.retireIdle(folder, threadId, tree, pass, still);
         if (why) {
           if (why !== "it could not be moved safely") report.conversations.woke++;
           (deps.log ?? console.log)(`idle reclaim: kept ${tree.path}: ${why}`);
@@ -423,6 +466,9 @@ export async function reclaimIdle(deps: IdleReclaimDeps): Promise<IdleReclaimRep
   }
   return save(report, reclaiming, (saved) => {
     if (mode !== "remove") return;
+    // Waiting only when nothing could go, not when a conversation was busy for now.
+    if (report.folders === 0 && reclaiming && !deferred && !report.conversations.woke) { saved.quietUntil = now + IDLE_RECLAIM.quietMs; saved.quietAtUsed = usedBefore; }
+    else { delete saved.quietUntil; delete saved.quietAtUsed; }
     saved.totals.folders += report.folders;
     saved.totals.conversations += report.conversations.shed;
     saved.totals.freedBytes += report.bytes;

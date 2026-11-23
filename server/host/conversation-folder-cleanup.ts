@@ -144,6 +144,12 @@ export interface FolderCleanupDeps {
 
 /** `name`: a folder name under tool-results, which is a thread id for a deleted conversation. */
 type Job = { kind: "workspace"; folder: string } | { kind: "results"; name: string };
+/** What one idle reclaim pass reads once (createConversationFolderCleanup's idlePass). */
+export interface IdlePass {
+  /** Opaque outside this module. */
+  readonly view: unknown;
+  mentioned(): Promise<ReadonlyMap<string, ReadonlySet<string>> | null>;
+}
 export interface CleanupTotals { folders: number; entries: number; bytes: number; failed: number }
 /** An install found in a conversation folder, with the identity it had when found. */
 export interface FoundTree { path: string; dev: number; ino: number }
@@ -253,7 +259,7 @@ export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
       }
       if (!realOf.has(dataDir)) realOf.set(dataDir, await realpath(dataDir).catch(() => null));
     };
-    return { now, resolved, warm, links: new Map<string, Promise<Array<{ from: string; leads: string[] }> | null>>() };
+    return { now, resolved, warm, links: new Map<string, Promise<Array<{ from: string; leads: string[] }> | null>>(), saved: null as Promise<string | null> | null };
   }
   type View = ReturnType<typeof batchView>;
 
@@ -351,7 +357,8 @@ export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
     const quick = heldByRecords(folder, view, ownThread);
     if (quick) return quick;
     const [botId, threadId] = relative(tasksRoot, folder).split(sep) as [string, string];
-    const saved = await savedText();
+    // Read once per view: a batch of deletes, or an idle reclaim's pass.
+    const saved = await (view.saved ??= savedText());
     if (saved === null) return "the saved definitions cannot be read";
     if (folderMentions(botId, threadId).some((fragment) => fold(saved).includes(fold(fragment)))) return "the saved definitions or instructions name a path in it";
     const linked = await linkedInto(botId, folder, view);
@@ -595,26 +602,36 @@ export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
   /** An idle conversation's own folder (host/idle-reclaim.ts): its installs, after every check above except that its
    * own conversation remains; `kept` says why none may go. Links from the bot's other folders, processes, the saved
    * definitions and the other conversations' messages are checked as for a deleted one. */
-  async function idleInstalls(folder: string, threadId: string, report?: (path: string, why: string) => void): Promise<{ trees: FoundTree[]; kept: string | null }> {
-    const view = batchView();
-    await view.warm();
+  async function idleInstalls(folder: string, threadId: string, pass: IdlePass, report?: (path: string, why: string) => void): Promise<{ trees: FoundTree[]; kept: string | null }> {
+    const view = pass.view as View;
     const quick = heldByRecords(folder, view, threadId);
     if (quick) return { trees: [], kept: quick };
     const trees = await rebuildable(folder, report);
     if (!trees.length) return { trees, kept: null };
-    let mentioned: ReadonlyMap<string, ReadonlySet<string>> | null = new Map();
-    if (deps.mentions) {
-      try { mentioned = await deps.mentions([threadId]); } catch (error) { warn(`cleanup: the transcripts could not be read: ${message(error)}`); mentioned = null; }
-    }
-    const late = await heldBy(folder, view, mentioned, threadId);
+    const late = await heldBy(folder, view, await pass.mentioned(), threadId);
     return late ? { trees: [], kept: late } : { trees, kept: null };
+  }
+
+  /** One idle reclaim pass's view, read once: the live folders resolved, the bots' links, the saved definitions, and
+   * which conversations' messages name each of `threadIds` (one read of the transcripts). */
+  async function idlePass(threadIds: readonly string[]): Promise<IdlePass> {
+    const view = batchView();
+    await view.warm();
+    let mentioned: Promise<ReadonlyMap<string, ReadonlySet<string>> | null> | undefined;
+    const ids = threadIds.filter((id) => ID.test(id));
+    return {
+      view,
+      mentioned: () => (mentioned ??= deps.mentions && ids.length
+        ? deps.mentions(ids).then((found) => found, (error: unknown) => { warn(`cleanup: the transcripts could not be read: ${message(error)}`); return null; })
+        : Promise.resolve(new Map())),
+    };
   }
 
   /** Moves one tree of an idle conversation's folder into .removing, after the records' check again and `still()`
    * (null while the conversation is still idle), both just before the rename. */
-  async function retireIdle(folder: string, threadId: string, tree: FoundTree, still: () => string | null): Promise<string | null> {
+  async function retireIdle(folder: string, threadId: string, tree: FoundTree, pass: IdlePass, still: () => string | null): Promise<string | null> {
     if (!inside(folder, tree.path) || fold(resolve(folder)) === fold(resolve(tree.path))) return "not inside that conversation's folder";
-    const why = heldByRecords(folder, batchView(), threadId) ?? still();
+    const why = heldByRecords(folder, pass.view as View, threadId) ?? still();
     if (why) return why;
     return (await retire(tasksRoot, tree)) ? null : "it could not be moved safely";
   }
@@ -623,6 +640,7 @@ export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
     conversationsGone,
     botGone,
     orphans,
+    idlePass,
     idleInstalls,
     retireIdle,
     /** What in the records still uses a conversation folder, or null when nothing there does. */
