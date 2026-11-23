@@ -9844,6 +9844,7 @@
   "settings.bots.aboutYouLine": "{place} 上的機器人怎麼稱呼你，以及對你的了解。",
   "settings.bots.awakeLine": "你的方案一次只讓少數機器人保持喚醒。選擇哪些。",
   "settings.bots.awakeTitle": "部分機器人已暫停",
+  "settings.remoteTeammates.title": "其他伺服器上的隊友",
   "settings.bots.early": "搶先體驗功能",
   "settings.bots.intro": "{place} 上的機器人對你的了解，以及所有機器人的設定。",
   "settings.bots.newBots": "新機器人",

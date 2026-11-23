@@ -8137,6 +8137,7 @@
   "settings.bots.aboutYouLine": "{place} 上的机器人怎么称呼你，以及对你的了解。",
   "settings.bots.awakeLine": "你的方案一次只让少数机器人保持唤醒。选择哪些。",
   "settings.bots.awakeTitle": "部分机器人已暂停",
+  "settings.remoteTeammates.title": "其他服务器上的队友",
   "settings.bots.early": "抢先体验功能",
   "settings.bots.intro": "{place} 上的机器人对你的了解，以及所有机器人的设置。",
   "settings.bots.newBots": "新机器人",
