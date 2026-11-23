@@ -15,3 +15,7 @@ it("accepts the path antigravity for an Antigravity account before the app insta
   installFakeManagedCli(DATA_DIR);
   await expect(testCliBinary("antigravity", AntigravityDriver)).resolves.toEqual({ ok: true, version: "1.5.14" });
 });
+
+it("accepts the path that asks for the pinned runtime for an Antigravity account before the app installs it", async () => {
+  await expect(testCliBinary("agy_acp_server", AntigravityDriver)).resolves.toEqual({ ok: true });
+});

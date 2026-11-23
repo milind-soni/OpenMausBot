@@ -209,6 +209,12 @@ export function isAntigravityNativeAlias(cli: string | undefined): boolean {
   return ANTIGRAVITY_NATIVE_CLI && !/[\\/]/u.test(name) && isAntigravityCliName(name);
 }
 
+/** Whether the engine's CLI path asks for the pinned runtime this app installs and never the native CLI: the bare name
+ * of the runtime's own executable. */
+export function isAntigravityPinnedAlias(cli: string | undefined): boolean {
+  return /^agy_acp_server(?:\.par|\.exe)?$/iu.test(cli?.trim() ?? "");
+}
+
 /** Legacy `agy` commands (saved absolute paths, Windows shims) migrate without editing user config. */
 export async function resolveAntigravityRuntime(
   binaryPath?: string,
@@ -216,8 +222,9 @@ export async function resolveAntigravityRuntime(
   baseDir = DATA_DIR,
   options: { nativeByDefault?: boolean } = {},
 ): Promise<AntigravityRuntime> {
-  const nativeDefault = options.nativeByDefault ?? antigravityNativeByDefault();
   const override = binaryPath?.trim();
+  const pinnedOnly = isAntigravityPinnedAlias(override);
+  const nativeDefault = !pinnedOnly && (options.nativeByDefault ?? antigravityNativeByDefault());
   const legacyCli = override !== undefined && /(?:^|[\\/])agy(?:\.(?:cmd|bat|exe|ps1))?$/iu.test(override);
   const native = isAntigravityNativeAlias(override);
   if (override && override !== "agy" && !native) {
@@ -225,7 +232,7 @@ export async function resolveAntigravityRuntime(
       const found = await externalRuntime(candidate, "override", env);
       if (found) return found;
     }
-    if (!legacyCli) {
+    if (!legacyCli && !pinnedOnly) {
       throw new AntigravitySetupError(
         "The custom Antigravity ACP executable or its localharness_external sibling is missing. The native CLI from 1.5.0 on, under its name antigravity, needs no sibling.",
       );

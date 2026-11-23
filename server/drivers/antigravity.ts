@@ -42,6 +42,7 @@ import { AcpDiscoveryRpcError, AcpDiscoveryTimeoutError } from "./acp/custom-mod
 import {
   antigravityManagedInstallAvailable,
   isAntigravityNativeAlias,
+  isAntigravityPinnedAlias,
   installAntigravityRuntime,
   resolveAntigravityRuntime,
   type AntigravityRuntime,
@@ -385,7 +386,11 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
             installRuntime: async () => {
               installFailure = undefined;
               try {
-                await installAntigravityRuntime({ validate: validateAntigravityRuntime, native: isAntigravityNativeAlias(input.config.cli) });
+                await installAntigravityRuntime({
+                  validate: validateAntigravityRuntime,
+                  native: isAntigravityNativeAlias(input.config.cli),
+                  ...(isAntigravityPinnedAlias(input.config.cli) ? { nativeByDefault: false } : {}),
+                });
               } catch (error) {
                 installFailure = error instanceof Error ? error.message : String(error);
                 throw error;
