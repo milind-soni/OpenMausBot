@@ -104,6 +104,10 @@ export interface BrowserCeilingDeps {
   /** Closes the browser now whatever holds it: the turn holding it ends with the line that the browser was closed for
    * memory, and its Chrome's processes are stopped at once. False when it could not. */
   forceClose?(browser: CeilingBrowser, usedBytes: number): Promise<boolean>;
+  /** The kernel's count of processes it killed at the browsers' memory limit (memory-cgroup.ts); null where there is none. */
+  kernelKills?(): number | null;
+  /** Puts this browser's Chrome under the browsers' memory limit where it is not yet (one started outside the launcher). */
+  contain?(browser: CeilingBrowser): void;
   log?(line: string): void;
   now?(): number;
 }
@@ -125,6 +129,9 @@ export function createBrowserCeiling(deps: BrowserCeilingDeps) {
   const notes = new Map<string, string>();
   const acted = new Map<string, number>();
   let running = false;
+  /** Each browser as the last look found it, and the kernel's kill count then. */
+  let seen = new Map<string, { browser: CeilingBrowser; used: number }>();
+  let kills: number | null = null;
 
   function size(browser: CeilingBrowser): number | null {
     let total = 0, read = 0;
@@ -152,9 +159,10 @@ export function createBrowserCeiling(deps: BrowserCeilingDeps) {
   }
 
   /** Whether the browser is over its soft line. `short`: memory available is under relief's floor. */
-  async function check(browser: CeilingBrowser, short: boolean): Promise<boolean> {
+  async function check(browser: CeilingBrowser, short: boolean, looked: Map<string, { browser: CeilingBrowser; used: number }>): Promise<boolean> {
     const used = short && deps.quickSize ? deps.quickSize(browser.pids) : size(browser);
     const { session } = browser;
+    if (used !== null) looked.set(session, { browser, used });
     if (used === null || used < deps.lines.softBytes) return false;
     const at = now();
     // Ahead of the minute between actions: a refused close must not keep a growing browser from this for a minute.
@@ -165,6 +173,25 @@ export function createBrowserCeiling(deps: BrowserCeilingDeps) {
     }
     await act(browser, used, at);
     return true;
+  }
+
+  /** The kernel killed at the browsers' limit since the last look: the browser that lost processes since (the largest, if
+   * several did) is closed, and the turn that held it ends with the line that the browser was closed for memory. */
+  async function afterKernelKill(browsers: readonly CeilingBrowser[]): Promise<void> {
+    const found = new Map(browsers.map((browser) => [browser.session, browser]));
+    let hit: { browser: CeilingBrowser; used: number } | null = null;
+    for (const before of seen.values()) {
+      const pids = new Set(found.get(before.browser.session)?.pids ?? []);
+      const lost = before.browser.pids.some((pid) => pid !== before.browser.daemon && !pids.has(pid));
+      if (lost && (!hit || before.used > hit.used)) hit = before;
+    }
+    if (!hit || !deps.forceClose) return;
+    const { session } = hit.browser;
+    const current = found.get(session) ?? { session, pids: [], ...(hit.browser.daemon === undefined ? {} : { daemon: hit.browser.daemon }) };
+    if (await deps.forceClose(current, hit.used).catch(() => false)) {
+      acted.set(session, now());
+      log(`browser ${session}: the kernel stopped part of it at the browsers' memory limit (${mb(hit.used)} MB at the last look); closed it, with the turn that held it, if any`);
+    }
   }
 
   async function act(browser: CeilingBrowser, used: number, at: number): Promise<void> {
@@ -191,8 +218,16 @@ export function createBrowserCeiling(deps: BrowserCeilingDeps) {
         const browsers = await deps.browsers();
         const live = new Set(browsers.map((browser) => browser.session));
         for (const session of acted.keys()) if (!live.has(session)) acted.delete(session);
+        const killed = deps.kernelKills?.() ?? null;
+        if (killed !== null && kills !== null && killed > kills) await afterKernelKill(browsers).catch(() => undefined);
+        kills = killed ?? kills;
         const short = deps.memoryShort?.() ?? false;
-        for (const browser of browsers) if (await check(browser, short).catch(() => false)) large = true;
+        const looked = new Map<string, { browser: CeilingBrowser; used: number }>();
+        for (const browser of browsers) {
+          try { deps.contain?.(browser); } catch {}
+          if (await check(browser, short, looked).catch(() => false)) large = true;
+        }
+        seen = looked;
       } finally { running = false; }
       return large && (deps.memoryShort?.(2) ?? false);
     },

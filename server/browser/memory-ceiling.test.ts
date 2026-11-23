@@ -199,4 +199,32 @@ describe("a bot browser's memory ceiling", () => {
     expect(killed).toEqual(["11 SIGKILL"]);
     expect(count).toBe(1);
   });
+
+  it("after the kernel kills at the browsers' limit, closes the browser that lost processes, with the turn that held it", async () => {
+    let kills = 0;
+    const contained: string[] = [];
+    const sizes: Record<number, number> = { 10: 30 * MB, 11: 200 * MB, 12: 400 * MB };
+    const forced: string[] = [];
+    const ceiling = createBrowserCeiling({
+      lines: { softBytes: 700 * MB, hardBytes: 1000 * MB },
+      browsers: async () => [{ session: "bot-a", pids: Object.keys(sizes).map(Number), daemon: 10 }, { session: "bot-b", pids: [20, 21], daemon: 20 }],
+      pss: (pid) => sizes[pid] ?? (pid >= 20 ? 100 * MB : null),
+      quiet: () => false, tabs: async () => [], closeTab: async () => false, close: async () => false,
+      forceClose: async (browser, used) => { forced.push(`${browser.session} [${browser.pids.join(",")}] ${Math.round(used / MB)} MB`); return true; },
+      kernelKills: () => kills,
+      contain: (browser) => contained.push(browser.session),
+      log: () => {},
+    });
+    await ceiling.tick();
+    expect(forced).toEqual([]);
+    expect(contained).toEqual(["bot-a", "bot-b"]);
+    // The kernel killed bot-a's largest renderer at the group's limit.
+    delete sizes[12];
+    kills = 1;
+    await ceiling.tick();
+    expect(forced).toEqual(["bot-a [10,11] 630 MB"]);
+    // No new kill: nothing more is closed.
+    await ceiling.tick();
+    expect(forced).toHaveLength(1);
+  });
 });
