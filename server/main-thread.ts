@@ -31,14 +31,16 @@ export function mainThread(tasks: readonly MainThreadCandidate[], chosenId?: str
 }
 
 /** The thread to save as a bot's choice so its main thread stays put: nothing while the saved one is open. A bot that
- * never had one keeps the open thread a person last wrote in, where it reported until now; one whose saved thread was
- * archived or deleted moves to the oldest open conversation a person started, and reopening the old one moves nothing. */
-export function mainThreadToKeep(tasks: readonly MainThreadCandidate[], chosenId?: string): string | undefined {
-  if (chosenId && tasks.some((task) => task.threadId === chosenId && open(task))) return undefined;
-  const asked = chosenId ? undefined : tasks.filter(open).reduce<MainThreadCandidate | undefined>(
+ * never had one keeps the thread it showed until now: the open one a person last wrote in, else the selected one, else
+ * the oldest open one. One whose saved thread was archived or deleted moves to the oldest open conversation a person
+ * started, and reopening the old one moves nothing. */
+export function mainThreadToKeep(tasks: readonly MainThreadCandidate[], chosenId?: string, selectedId?: string): string | undefined {
+  if (chosenId) return tasks.some((task) => task.threadId === chosenId && open(task)) ? undefined : oldestThread(tasks.filter((task) => !task.openedBy && open(task)));
+  const live = tasks.filter(open);
+  const asked = live.reduce<MainThreadCandidate | undefined>(
     (latest, task) => ((task.askedAt ?? -1) > (latest?.askedAt ?? -1) ? task : latest), undefined,
   );
-  return asked?.threadId ?? oldestThread(tasks.filter((task) => !task.openedBy && open(task)));
+  return asked?.threadId ?? live.find((task) => task.threadId === selectedId)?.threadId ?? oldestThread(live);
 }
 
 /** The conversation whose saves stay in the bot's own memory: the one the person set as main while it is open, else the

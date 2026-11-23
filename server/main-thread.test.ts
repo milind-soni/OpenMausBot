@@ -55,10 +55,19 @@ describe("the main thread a bot keeps", () => {
     expect(mainThreadToKeep([latest, { ...later, askedAt: 30, routineRunId: "run" }, first])).toBe("first");
   });
 
-  it("is the oldest open conversation a person started when nobody wrote anywhere, and nothing when there is none", () => {
-    expect(mainThreadToKeep([latest, later, { ...first, openedBy: { botId: "teammate" } }])).toBe("later");
-    expect(mainThreadToKeep([{ ...first, openedBy: { botId: "teammate" } }])).toBeUndefined();
-    expect(mainThreadToKeep([{ ...first, archivedAt: 2 }])).toBeUndefined();
+  it("is, where nobody wrote, the open thread that was selected, as it was before a main thread was kept", () => {
+    expect(mainThreadToKeep([latest, later, first], undefined, "later")).toBe("later");
+    expect(mainThreadToKeep([latest, later, { ...first, openedBy: { botId: "teammate" } }], undefined, "first")).toBe("first");
+    expect(mainThreadToKeep([latest, { ...later, askedAt: 30 }, first], undefined, "latest")).toBe("later");
+    expect(mainThreadToKeep([latest, { ...later, archivedAt: 5 }, first], undefined, "later")).toBe("first");
+    expect(mainThreadToKeep([latest, { ...later, routineRunId: "run" }, first], undefined, "later")).toBe("first");
+    expect(mainThreadToKeep([latest, later, first], undefined, "deleted")).toBe("first");
+  });
+
+  it("is the oldest open thread when nobody wrote and none is selected, whoever opened it, and nothing when none is open", () => {
+    expect(mainThreadToKeep([latest, later, { ...first, openedBy: { botId: "teammate" } }])).toBe("first");
+    expect(mainThreadToKeep([latest, { ...first, routineRunId: "run" }])).toBe("latest");
+    expect(mainThreadToKeep([{ ...first, archivedAt: 2 }], undefined, "first")).toBeUndefined();
   });
 
   it("changes nothing while the saved thread is open", () => {
@@ -68,6 +77,8 @@ describe("the main thread a bot keeps", () => {
   it("is the oldest open conversation a person started once the saved thread is archived or deleted, wherever they last wrote", () => {
     expect(mainThreadToKeep([latest, { ...later, askedAt: 30 }, { ...first, archivedAt: 40 }], "first")).toBe("later");
     expect(mainThreadToKeep([{ ...latest, askedAt: 50 }, later], "first")).toBe("later");
+    expect(mainThreadToKeep([latest, later, { ...first, archivedAt: 40 }], "first", "latest")).toBe("later");
+    expect(mainThreadToKeep([latest, { ...later, openedBy: { botId: "teammate" } }], "first", "later")).toBe("latest");
   });
 });
 

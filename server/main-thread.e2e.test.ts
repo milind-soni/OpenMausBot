@@ -247,3 +247,41 @@ it("keeps the main thread an install already had across an update, then moves it
     await server.close();
   }
 }, 180_000);
+
+it("keeps the selected thread as the main one across an update for a bot nobody wrote to", async () => {
+  const server = await launchRestartableServer();
+  const api = async (method: string, path: string, body?: unknown, status = 200) => {
+    const response = await fetch(`${server.url}${path}`, {
+      method, headers: { "content-type": "application/json", origin: server.url },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const value = await response.json() as any;
+    expect(response.status, `${method} ${path}: ${JSON.stringify(value)}`).toBe(status);
+    return value;
+  };
+  try {
+    const { bot } = await runControlOmb(["new-bot", "--name", "Quiet", "--url", server.url]) as any;
+    const first = bot.activeTaskId as string;
+    const main = async () => (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id).mainThreadId;
+    const saved = () => readRegistry(server.dataDir).bots.find((candidate: any) => candidate.id === bot.id);
+    const second = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Second", approvalMode: "ask" }, 201)).task.threadId as string;
+
+    // What an install saved before a main thread was kept: no choice, the second thread selected, nothing written anywhere.
+    await server.stop();
+    const file = join(server.dataDir, "bots.json");
+    writeFileSync(file, JSON.stringify((JSON.parse(readFileSync(file, "utf8")) as any[]).map(({ mainThreadChoice: _choice, ...rest }) => rest)));
+    expect(saved()).toMatchObject({ threadId: second });
+    expect(saved().tasks.some((task: any) => task.askedAt !== undefined)).toBe(false);
+    await server.start();
+    expect(await main(), "the selected thread, as before the update").toBe(second);
+    await api("POST", `/api/bots/${bot.id}/tasks/${first}`);
+    expect((await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id).threadId).toBe(first);
+    expect(await main(), "selecting another thread moves nothing").toBe(second);
+    await server.stop();
+    expect(saved().mainThreadChoice).toBe(second);
+    await server.start();
+    expect(await main()).toBe(second);
+  } finally {
+    await server.close();
+  }
+}, 120_000);
