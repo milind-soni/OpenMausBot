@@ -12,7 +12,6 @@ import { readAdvancedMode, setAdvancedMode } from "./interface-mode";
 import { finishedNotificationsEnabled, notificationFeedEnabled, notificationSoundsEnabled, setFinishedNotifications, setNotificationFeed, setNotificationSounds } from "./notification-preferences";
 import { requestNotificationPermission } from "./notify";
 import { choosePlaceColor } from "./place-look";
-import { setShowRunCard, showRunCard } from "./run-card-preferences";
 import { readSendKey, setSendKey } from "./send-key";
 import { loadPinnedCircles, loadSidebarToolsLayout, loadUniversalPins, setPinnedCircles, setSidebarToolsLayout, setUniversalPins } from "./sidebar-preferences";
 import { applySkinChoice, readSkinChoice } from "./skins";
@@ -45,7 +44,6 @@ const PREFS: { [I in WindowPrefId]: Pref<I> } = {
   "general.sendKey": { read: () => readSendKey(), write: (key) => setSendKey(key) },
   "general.notificationSounds": { read: () => notificationSoundsEnabled(), write: (on) => setNotificationSounds(on) },
   "appearance.userBubbles": { read: () => readColorUserBubbles(), write: (on) => setColorUserBubbles(on) },
-  "appearance.runCard": { read: () => showRunCard(), write: (on) => setShowRunCard(on) },
   "appearance.showThreads": { read: () => showThreads(), write: (on) => setShowThreads(on) },
   "appearance.toolsLayout": { read: () => loadSidebarToolsLayout(), write: (layout) => setSidebarToolsLayout(layout) },
   "appearance.pinnedCircles": { read: () => loadPinnedCircles(), write: (on) => setPinnedCircles(on) },
