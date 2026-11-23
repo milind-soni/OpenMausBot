@@ -8,7 +8,7 @@ import { peerProvenanceAuthor, type WorkOrigin } from "./peer-provenance.ts";
 import type { ResolvedSender, SteerQueueReason } from "../shared/wire.ts";
 import type { Message } from "./store.ts";
 import type { UsageTrigger } from "./usage-ledger.ts";
-import { BOT_TEXT_MESSAGE_INDEXES_SQL } from "./message-db-bot-text-indexes.ts";
+import { BOT_TEXT_MESSAGE_INDEXES_SQL, warmForBotTextIndexes } from "./message-db-bot-text-indexes.ts";
 import { ensureMemoryIndex } from "./message-db-memory-index.ts";
 import { cjkSearchText, cjkTokenParts, ensureSearchIndex, ftsPhrase, hasCjk, withoutSearchMarks } from "./cjk-search.ts";
 import { attentionSelect } from "./message-db-attention.ts";
@@ -46,8 +46,8 @@ function open(): DatabaseSync {
     chmodSync(file, 0o600);
   } catch {}
   const db = new DatabaseSync(file);
-  db.exec("PRAGMA journal_mode = WAL");
-  db.exec("PRAGMA synchronous = NORMAL");
+  db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL");
+  warmForBotTextIndexes(db, file);
   db.exec(`
     CREATE TABLE IF NOT EXISTS messages (
       thread_id TEXT NOT NULL,
