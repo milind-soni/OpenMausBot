@@ -6595,6 +6595,7 @@
   "settings.bots.aboutYouLine": "Come ti chiamano i bot su {place} e cosa sanno di te.",
   "settings.bots.awakeLine": "Il tuo piano tiene svegli pochi bot alla volta. Scegli quali.",
   "settings.bots.awakeTitle": "Alcuni bot sono in pausa",
+  "settings.remoteTeammates.title": "Compagni di squadra su altri server",
   "settings.bots.early": "Funzioni in anteprima",
   "settings.bots.intro": "Cosa sanno di te i bot su {place}, e le impostazioni per tutti.",
   "settings.bots.newBots": "Nuovi bot",
