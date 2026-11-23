@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import { writeFileAtomic } from "./atomic.ts";
+import { foldName } from "./peer-delivery.ts";
 import { mentionedBots } from "./store.ts";
 
 const FILE = "places-elsewhere.json";
@@ -31,7 +32,6 @@ export type Explained = { where: string } | { hint: string } | null;
 export const ONE_PLACE = "Bots work together only within one place, so a bot on another computer or server can't be reached from here. "
   + "To bring them together, the person can make one place their bots' home: in the app, right-click their own server's icon on the left of the app and choose \"Make … my home\".";
 
-const fold = (value: string) => value.replace(/^@/u, "").replace(/[-_]+/gu, " ").replace(/\s+/gu, " ").trim().toLowerCase();
 
 /** How the person brings these two places' bots together, told to a bot (to offer it) or to the person: on the place that
  * can be home (a server of theirs, or My Cloud) with the one tap the app offers for it, or by hand when neither place is
@@ -66,8 +66,8 @@ export function livesElsewhere(bot: string, place: Place, self: Elsewhere["self"
 /** The bots of the person's other places that `text` @mentions, none named like a bot here. */
 function mentionsOf(known: Elsewhere, text: string, here: ReadonlyArray<{ name: string }>): Array<{ bot: string; place: Place }> {
   if (!text.includes("@")) return [];
-  const local = new Set(here.map((bot) => fold(bot.name)));
-  const names = known.places.flatMap((place) => place.bots.filter((bot) => !local.has(fold(bot))).map((bot) => ({ name: bot, place })));
+  const local = new Set(here.map((bot) => foldName(bot.name)));
+  const names = known.places.flatMap((place) => place.bots.filter((bot) => !local.has(foldName(bot))).map((bot) => ({ name: bot, place })));
   return mentionedBots(text, names).map(({ name: bot, place }) => ({ bot, place }));
 }
 
@@ -84,10 +84,10 @@ export function createPlacesElsewhere({ dataDir, now = Date.now }: { dataDir: st
   };
   /** The place another of the person's places names `bot` in, with the name it has there. */
   const where = (bot: string): { bot: string; place: Place } | null => {
-    const wanted = fold(bot);
+    const wanted = foldName(bot);
     if (!wanted) return null;
     for (const place of read()?.places ?? []) {
-      const found = place.bots.find((candidate) => fold(candidate) === wanted);
+      const found = place.bots.find((candidate) => foldName(candidate) === wanted);
       if (found) return { bot: found, place };
     }
     return null;

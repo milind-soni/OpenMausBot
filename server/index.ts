@@ -639,7 +639,7 @@ import { teamAiOwner } from "./host/team-ai-owner.ts"; import { createTeamOwners
 import { createDevsReports } from "./host/devs-reports.ts"; import { createSettingNudges } from "./host/setting-nudges.ts"; import { createPerfHost } from "./perf/perf-host.ts"; import { launchListening, launchServerPart } from "./perf/launch-probe.ts"; import { footprintOwners } from "./host/bot-footprint-owners.ts"; import { engineOwners } from "./engine-owners.ts"; import { startBotMemoryCapHost } from "./host/bot-memory-cap-host.ts"; import { botMemoryCapReport } from "./bot-memory-cap.ts"; import { createPerfDiagnosticsRoutes } from "./routes/perf-diagnostics.ts"; import { bugReportEndpoint, devsReportSender, devsStatusAsker } from "./devs-report-send.ts"; import { captureRecentLog } from "./recent-log.ts"; import { createShareAnswer } from "./host/share-answer.ts";
 import { createCardRequester, linePersonKey } from "./host/thread-person.ts"; import { selfThreadRefusal } from "./host/self-threads.ts"; import { lookedAfterBy } from "./host/looked-after.ts"; import { createActingPeople, HANDED_PEOPLE_FILE, HandedPeople, type HandedRun, keptPrivate, privateHandBack, withPerson } from "./host/acting-person.ts"; import { createTurnCallSignals } from "./host/turn-call-signals.ts";
 import { createThreadRoutes } from "./routes/threads.ts";
-import { createWebhookRoutes } from "./routes/webhooks.ts"; import { createRemoteTeammateRoutes } from "./routes/remote-teammates.ts"; import { RemoteTeammates } from "./remote-teammates.ts";
+import { createWebhookRoutes } from "./routes/webhooks.ts"; import { createRemoteTeammateRoutes } from "./routes/remote-teammates.ts"; import { RemoteTeammates } from "./remote-teammates.ts"; import { createRemoteHandoff, isRemoteBotId } from "./host/remote-teammate-handoff.ts";
 import { withScopeHint } from "./connector-scope-hint.ts"; import { accountsByApp, withAccountHint } from "./connector-account-hint.ts";
 import { connectorFileDeps, connectorFileScope, prepareConnectorFiles, withMissingFileHint } from "./connector-files.ts";
 import { createConnectorCards } from "./host/connector-cards.ts";
@@ -3839,7 +3839,7 @@ const questionRouting = createQuestionRouting({ store, handedInUnproven, active:
   answerLive: async (threadId, requestId, text) => await answerRequest(threadId, botForThread(store.botByThread(threadId)?.id ?? "", threadId)?.modelSelection.instanceId ?? "", requestId, "answer", text) === "answered", settleSignIns: (node) => signInSettle.answeredElsewhere(node),
   keptPrivate: (node, requester) => keptPrivate({ child: teamHost.privateTo(node.threadId), parent: teamHost.privateTo(requester.threadId) }),
   steer: async (threadId, text) => canSteerThread(threadId) && (await steerThread(threadId, text)) !== "refused", mayReach: outsideLineage.mayReach });
-const reworkCap = createReworkCap(); const handoffFiles = createHandoffFiles({ dataDir: DATA_DIR, attachmentsDir: ATTACHMENTS_DIR, botName: (id) => store.bot(id)?.name, node: (id) => coordinator.node(id), children: (id) => coordinator.children(id), discard: deleteAttachment, threadsReferencing, changes: (listener) => store.onChange(listener), log: (line) => console.error(line),
+const reworkCap = createReworkCap(); const remoteTeammates = new RemoteTeammates(); const remoteHandoff = createRemoteHandoff({ teammates: remoteTeammates, coordinator: () => coordinator, localBots: () => store.bots, botName: (id) => store.bot(id)?.name, outside: (threadId) => (outsideLineage.outsideDrivenThread(threadId) || outsideLineage.cloudGuestDriven(threadId) ? OUTSIDE_STAYS_HERE : undefined), file: join(DATA_DIR, "remote-teammate-work.json"), log: (line) => console.error(line) }); const handoffFiles = createHandoffFiles({ dataDir: DATA_DIR, attachmentsDir: ATTACHMENTS_DIR, botName: (id) => store.bot(id)?.name, node: (id) => coordinator.node(id), children: (id) => coordinator.children(id), discard: deleteAttachment, threadsReferencing, changes: (listener) => store.onChange(listener), log: (line) => console.error(line),
   worksInOwnFolder: (botId, threadId) => turnsRunInOwnFolder(botId, threadId, store.taskByThread(botId, threadId)?.cwd, store.bot(botId)?.cwd, Boolean(store.groupByThread(threadId))), vmHome: (botId) => localVmMode(cfg) === "per-bot" ? perBotLocalVmTarget(botId).workspaceDir : null, withheld: (child, parent) => Boolean(roomHandoffProblem(child, parent)) || keptPrivate({ child: teamHost.privateTo(child.threadId), parent: teamHost.privateTo(parent.threadId) }) });
 const titleHandedThread = createHandedThreadTitle({ store, gate: threadTitleGate, generate: generateThreadTitle }); const botLink = createBotLinkHost({ roomLine: (threadId, key, params) => serverLine(threadLanguage(threadId), key, params), roomWindow: (threadId, reader) => roomTranscript.window(threadId, userNameFor(threadId), undefined, reader), roomOpener: (botId, threadId) => handoffOpener({ botId, threadId }, threadId), roomChanged: (groupId) => { const room = store.group(groupId); if (room) broadcast({ kind: "group", group: publicGroupState(room) }); }, roomFollow: followRoomMentions<GroupTurnOperation>({ members: (groupId) => (store.group(groupId)?.memberIds ?? []).map((id) => store.bot(id)).filter((bot): bot is BotRecord => Boolean(bot)), mentioned: (text, members) => roomResponders(text, members, { kind: "mentions" }), begin: beginGroupTurnOperation, finish: finishGroupTurnOperation, queue: groupQueues, wait: waitForChatRoomMember, run: (groupId, threadId, botId, hop, spoken, operation) => runGroupMemberTurn(groupId, threadId, botId, hop, spoken, undefined, undefined, () => operation.cancelled, undefined, undefined, undefined, undefined, operation) }), dataDir: DATA_DIR, environmentId: ENVIRONMENT_ID, store, coordinator: () => coordinator, kick: () => handoffTicks.kick(), level: (bot) => approvalModeForTurn(bot, true, bot.threadId), titleHanded: titleHandedThread, refusal: botMoveRefusal, language: (threadId) => threadLanguage(threadId), personName: personNameIn, sessions, power: () => cloudPower, files: handoffFiles, storeFile: (path, name, root) => saveBotAttachment({ path, name, roots: [root], byContent: true }), log: (line) => console.error(line), local: (auth) => auth.kind === "loopback" && auth.trust !== "service" && !CLOUD_HOME && !HOSTED_WORKSPACE, owner: (auth) => !sharedMembership() && !HOSTED_WORKSPACE && (ownHome.owner(auth) || (CLOUD_PERSONAL && cloudOwnerSession(auth))) }); ROUTES.push(botLink.routes); const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoordinator({
   dataDir: DATA_DIR,
@@ -3849,7 +3849,7 @@ const titleHandedThread = createHandedThreadTitle({ store, gate: threadTitleGate
     standingThreadOf: botId => botMainThread(botId) ?? store.bot(botId)?.threadId,
     botOfThread: threadId => store.botByThread(threadId)?.id,
   },
-  host: botLink.link.host({ holdReason: (node) => queuedStatus(node), statusReply: (requester, prompt, signal) => sideJobs.text("status-reply", requester)?.generateText(prompt, { signal, timeoutMs: STATUS_REPLY_TIMEOUT_MS }) ?? Promise.resolve(undefined),
+  host: remoteHandoff.host(botLink.link.host({ holdReason: (node) => queuedStatus(node), statusReply: (requester, prompt, signal) => sideJobs.text("status-reply", requester)?.generateText(prompt, { signal, timeoutMs: STATUS_REPLY_TIMEOUT_MS }) ?? Promise.resolve(undefined),
     validate: (node, parent) => node.mode === "notify" && node.status !== "queued" ? undefined
       : !node.parentId && node.groupId ? roomRootProblem(node)
       : roomHandoffProblem(node, parent),
@@ -4035,7 +4035,7 @@ const titleHandedThread = createHandedThreadTitle({ store, gate: threadTitleGate
     },
     shareAnswer: createShareAnswer({ askedFrom: (node) => (node.parentId ? coordinator.node(node.parentId)?.threadId : undefined), audienceOf: teamHost.audienceOf, pinned: (botId, threadId) => store.taskByThread(botId, threadId)?.cwd, botFolder: (botId) => store.bot(botId)?.cwd, privateFolders: TASK_WORKSPACES_DIR }),
     joined: (node) => { store.appendMessage(node.threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${serverLine(threadLanguage(node.threadId), "server.teammates.sameRequest")}`, ok: true } }); },
-  }),
+  })),
 });
 threadsAwaitingTeammates = () => new Set([...coordinator.awaitingTeammateThreads(), ...checkWork.threads()]);
 const groupUsageReader = new GroupUsageReader(DATA_DIR); const chiefRooms = createChiefRooms({ store, updateRoom: updateChannel, published: (group) => broadcast({ kind: "group", group: publicGroupState(group) }) });
@@ -9396,7 +9396,7 @@ const webhookIngressStatus = () => ({
   baseUrl: webhookIngress?.baseUrl ?? `http://127.0.0.1:${WEBHOOK_PORT}`,
   ...(webhookIngressError ? { error: webhookIngressError } : {}),
 });
-ROUTES.push(createTeamFilesRoutes({ files: teamFilesHost.files, actor: (auth) => auth.kind === "session" && auth.session.email ? { person: personKey(auth.session), admin: auth.scopes.includes("admin") } : null, personName: (person) => teamHost.personName(person), botName: (botId) => store.bot(botId)?.name })); ROUTES.push(createWebhookRoutes({ webhooks, ingress: webhookIngressStatus, visible: (auth) => visibleTo(viewerFor(auth)) }), botApi.routes, createRemoteTeammateRoutes({ teammates: new RemoteTeammates() }));
+ROUTES.push(createTeamFilesRoutes({ files: teamFilesHost.files, actor: (auth) => auth.kind === "session" && auth.session.email ? { person: personKey(auth.session), admin: auth.scopes.includes("admin") } : null, personName: (person) => teamHost.personName(person), botName: (botId) => store.bot(botId)?.name })); ROUTES.push(createWebhookRoutes({ webhooks, ingress: webhookIngressStatus, visible: (auth) => visibleTo(viewerFor(auth)) }), botApi.routes, createRemoteTeammateRoutes({ teammates: remoteTeammates }));
 
 const RUNTIME_KEEP_MS = 30 * 24 * 60 * 60_000;
 let runtimePrunedAt = 0;
@@ -9447,8 +9447,8 @@ function teammateReportContext(requestId: string, readerBotId?: string): string 
   const node = coordinator.node(requestId);
   const parent = node?.parentId ? coordinator.node(node.parentId) : undefined;
   const reader = parent && readerBotId ? { ...parent, botId: readerBotId } : parent;
-  if (!node || !reader || roomHandoffProblem(node, reader)) return "[Teammate result withheld or no longer retained]";
-  const bot = store.bot(node.botId)?.name;
+  const bot = node && (isRemoteBotId(node.botId) ? remoteHandoff.reportName(node, parent, readerBotId) : store.bot(node.botId)?.name);
+  if (!node || !reader || (isRemoteBotId(node.botId) ? !bot : roomHandoffProblem(node, reader))) return "[Teammate result withheld or no longer retained]";
   return `${reportNote(bot ?? "Teammate")}\n${JSON.stringify({ bot, task: escapeNotes(node.text), status: node.status, result: escapeNotes(node.result) })}`;
 }
 
@@ -13038,7 +13038,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               description: b.description || undefined,
             };
           });
-        return json(res, 200, { bots: [...bots, ...botLink.link.agents()] });
+        return json(res, 200, { bots: [...bots, ...botLink.link.agents(), ...remoteHandoff.agents()] });
       }
       if (await dispatchRoutes([createInternalThreadRoutes({
         store, coordinator, from: internalSender, fromThreadId: internalCapability.threadId,
@@ -13638,7 +13638,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const message = coordinateResultMessage(reply, answeredOnly);
         return { status: sent ? 200 : 409, body: { receipts, ...(sent ? { message: lead ? `${lead} ${message}` : message } : { error: refused.join("; "), ...(refusalsOnlyInstructions(refused, receipts) ? { instructionOnly: true } : {}) }),
           ...(EXTERNAL && sent ? { rootId: generation } : {}) } };
-      }, coordinateBots = (call: CoordinateBotsCall) => botLink.link.coordinate(call, { sender: internalSender, address: { groupId: store.groupByThread(internalCapability.threadId)?.id, threadId: internalCapability.threadId, botId: internalSender.id }, generation: internalCapability.generation, parentId: internalCapability.roomHandoffId, external: EXTERNAL, handed: delegatedThisTurn, problem: linkSourceProblem(internalSender.id, internalCapability.threadId) }, coordinateHere);
+      }, handoffContext = { sender: internalSender, address: { groupId: store.groupByThread(internalCapability.threadId)?.id, threadId: internalCapability.threadId, botId: internalSender.id }, generation: internalCapability.generation, parentId: internalCapability.roomHandoffId, external: EXTERNAL, handed: delegatedThisTurn, problem: linkSourceProblem(internalSender.id, internalCapability.threadId) }, coordinateBots = (call: CoordinateBotsCall) => remoteHandoff.coordinate(call, handoffContext, (rest) => botLink.link.coordinate(rest, handoffContext, coordinateHere));
       if (method === "GET" && path === "/api/internal/assignment-status") {
         const id = url.searchParams.get("id")?.trim() ?? "";
         const fromThreadId = internalCapability.threadId;
