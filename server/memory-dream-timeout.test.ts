@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, watch } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,7 +38,8 @@ it("lets a Claude dream outlive the helper's default minute, but still stops it 
     const timer = realTimeout(() => reject(new Error("Claude background CLI never started")), 10_000);
     ready = () => { realClearTimeout(timer); resolve(); };
   });
-  const watcher = watch(scratch, () => { if (existsSync(dump)) ready(); });
+  // macOS fs.watch (FSEvents) can drop a change made just after the watcher is created, so this polls instead.
+  const polling = setInterval(() => { if (existsSync(dump)) ready(); }, 10);
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   let settled = false;
   const dream = loop.dream(bot.id).then((report) => { settled = true; return report; });
@@ -52,7 +53,7 @@ it("lets a Claude dream outlive the helper's default minute, but still stops it 
     await vi.advanceTimersByTimeAsync(1_000);
     expect(await dream).toMatchObject({ conversations: 2, note: "The dream did not answer in time." });
   } finally {
-    watcher.close();
+    clearInterval(polling);
     await vi.advanceTimersByTimeAsync(180_000);
     await dream;
     vi.useRealTimers();
