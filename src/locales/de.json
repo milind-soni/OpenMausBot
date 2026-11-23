@@ -1469,7 +1469,6 @@
   "keys.vps.descAfter": " für die benötigte Alias-Form an.",
   "keys.vps.anyMachine": "Jeder Linux-Rechner mit Docker, den du per SSH erreichst, funktioniert, auch ein Computer in deinem Tailscale-Netzwerk: Trag seinen Tailscale-Namen als HostName des Alias ein.",
   "keys.vps.aria": "SSH-Config-Alias des selbst gehosteten VPS",
-  "keys.vps.removeAlias": "Gespeicherten Alias entfernen",
   "usage.title": "Nutzung",
   "usage.bot.empty": "Für diesen Bot wurde noch keine Nutzung erfasst.",
   "usage.bot.unpriced": "Dieser Anbieter meldet keinen Preis; Tokens werden gezählt.",

@@ -2621,7 +2621,6 @@
   "keys.vps.descAfter": " để biết định dạng bí danh SSH bắt buộc.",
   "keys.vps.anyMachine": "Mọi máy Linux có Docker mà bạn truy cập được qua SSH đều dùng được, kể cả máy trong mạng Tailscale của bạn: dùng tên Tailscale của máy làm HostName cho alias.",
   "keys.vps.aria": "Bí danh cấu hình SSH của VPS tự quản trị",
-  "keys.vps.removeAlias": "Xóa bí danh đã lưu",
   "usage.title": "Mức sử dụng",
   "planUsage.title": "Mức sử dụng gói",
   "planUsage.subtitle": "Hạn mức còn lại trên mỗi nhà cung cấp đã đăng nhập. Khung thời gian 5 giờ và hàng tuần, nếu gói đó có áp dụng.",
