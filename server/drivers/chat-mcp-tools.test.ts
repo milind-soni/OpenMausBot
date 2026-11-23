@@ -201,7 +201,8 @@ describe("Chat MCP session", () => {
     const session = await f.mount();
     expect(session.definitions).toEqual([{ type: "function", function: { name: "audit_write", description: "Fixture write", parameters: schema } }]);
     expect(f.read().calls.map((call) => call.method)).not.toContain("tools/call");
-    expect(() => session.validate("audit_write", { value: 42 })).toThrow("input schema");
+    expect(() => session.validate("audit_write", { value: 42 })).toThrow(`Tool arguments do not match the advertised input schema: audit_write: value: must be string.`);
+    expect(() => session.validate("audit_write", 7)).toThrow(`Tool arguments do not match the advertised input schema: audit_write: arguments must be an object.`);
     await expect(session.execute("not_registered", {}, f.controller.signal)).rejects.toThrow("not advertised");
     expect(f.read().calls.map((call) => call.method)).not.toContain("tools/call");
     await expect(session.execute("audit_write", { value: "receipt" }, f.controller.signal)).resolves.toEqual({ text: "recorded:receipt", ok: true });
