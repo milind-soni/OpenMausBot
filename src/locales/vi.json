@@ -5958,5 +5958,9 @@
   "skillBurger.menu.aria": "Thêm cho {name}",
   "skillBurger.menu.rename": "Đổi tên…",
   "skillBurger.card.everyChat": "Mọi cuộc trò chuyện",
-  "skillBurger.page.empty": "Skill Burger do bot của bạn tạo sẽ hiện ở đây."
+  "skillBurger.page.empty": "Skill Burger do bot của bạn tạo sẽ hiện ở đây.",
+  "chat.notice.savedToThread": "Đã lưu vào luồng này",
+  "memoryPage.thisThread": "Luồng này",
+  "memoryPage.everywhere": "Mọi nơi",
+  "memoryPage.empty": "Chưa có gì được ghi nhớ ở đây. Hãy viết bất cứ điều gì bạn muốn nó biết."
 }

@@ -58,23 +58,41 @@ afterEach(() => {
 
 const settle = () => act(async () => { for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setTimeout(resolve, 0)); });
 
-it("on a Team Cloud shows what the bot remembers about the person, from their own notes, and lets them forget it", async () => {
-  await act(async () => root.render(createElement(MemoryPage, { bot, derived: {} as never })));
-  await settle();
-  expect(host.textContent).toContain("Ada's favourite fruit is durian");
-  expect(host.textContent).not.toContain("Couldn't read the memory file");
-  expect(calls.every(([, path]) => path.includes("/memory/mine") || path.includes("/memory/team")), "never the bot's own notes file").toBe(true);
-  const forget = host.querySelector<HTMLButtonElement>("[data-memory-note] button")!;
-  await act(async () => forget.click());
-  await settle();
-  expect(files["memory/food.md"]).toBe("");
-  expect(host.textContent).not.toContain("durian");
+const field = (scope: string) => host.querySelector<HTMLTextAreaElement>(`[data-memory-scope="${scope}"] textarea`);
+
+it("on a Team Cloud shows the person's own notes, topics included, as text they can change", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    await act(async () => root.render(createElement(MemoryPage, { bot, derived: {} as never })));
+    await settle();
+    expect(field("memory/food.md")?.value).toBe("- Ada's favourite fruit is durian\n");
+    expect(host.textContent).toContain("food");
+    expect(host.textContent).not.toContain("Couldn't read the memory file");
+    expect(calls.every(([, path]) => path.includes("/memory/mine") || path.includes("/memory/team")), "never the bot's own notes file").toBe(true);
+    await act(() => {
+      const element = field("memory/food.md")!;
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(element, "");
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => { vi.advanceTimersByTime(1_000); });
+    await settle();
+    expect(files["memory/food.md"]).toBe("");
+    expect(calls).toContainEqual(["PUT", "/api/bots/scout/memory/mine/file"]);
+    expect(calls.some(([, path]) => path.includes("/memory/thread/"))).toBe(false);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
-it("counts those notes on the Library tab", async () => {
+it("shows no count on the Library tab, only whether it remembers anything", async () => {
   await act(async () => root.render(createElement(LibraryTab, { bot, onOpen: () => {} })));
   await settle();
-  expect(host.querySelector('[data-panel-page="memory"]')?.textContent).toContain("1 note");
+  expect(host.querySelector('[data-panel-page="memory"]')?.textContent).toBe("What it remembers");
+  files["memory/food.md"] = "";
+  files["MEMORY.md"] = "";
+  await act(async () => root.render(createElement(LibraryTab, { bot: { ...bot, threadId: "t2" }, onOpen: () => {} })));
+  await settle();
+  expect(host.querySelector('[data-panel-page="memory"]')?.textContent).toContain("Nothing yet");
 });
 
 it("lists the lines the person saved to the team's memory beside their own notes, and takes one out through the team route", async () => {

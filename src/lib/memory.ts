@@ -91,6 +91,33 @@ export async function saveMemoryDoc(botId: string, path: string, text: string, e
   return { ok: true, doc: { path: saved.path, text: saved.text, hash: saved.hash, exists: saved.exists }, overview: saved.overview };
 }
 
+/** One conversation's own notes; `scoped` when the bot saves that conversation's matters there rather than in MEMORY.md. */
+export interface ThreadNotesDoc extends MemoryDoc {
+  scoped: boolean;
+}
+
+export type TextSaveResult<D extends MemoryDoc> = { ok: true; doc: D } | { ok: false; conflict: true; current: string; currentHash: string };
+
+const threadNotesRoute = (botId: string, threadId: string) => `/api/bots/${encodeURIComponent(botId)}/memory/thread/${encodeURIComponent(threadId)}`;
+
+export function fetchThreadNotes(botId: string, threadId: string): Promise<ThreadNotesDoc> {
+  return api(threadNotesRoute(botId, threadId));
+}
+
+export async function saveThreadNotes(botId: string, threadId: string, text: string, expectedHash: string | undefined): Promise<TextSaveResult<ThreadNotesDoc>> {
+  const response = await serverFetch(threadNotesRoute(botId, threadId), {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text, expectedHash }),
+  });
+  const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  if (response.status === 409 && typeof body.current === "string" && typeof body.currentHash === "string") {
+    return { ok: false, conflict: true, current: body.current, currentHash: body.currentHash };
+  }
+  if (!response.ok) throw new ApiError(serverErrorText(body, typeof body.error === "string" ? body.error : `${response.status} ${response.statusText}`), response.status);
+  return { ok: true, doc: body as unknown as ThreadNotesDoc };
+}
+
 export function deleteMemoryDoc(botId: string, path: string, mine = false): Promise<{ overview: MemoryOverview }> {
   return api(`${memoryRoute(botId, mine)}/file?path=${encodeURIComponent(path)}`, { method: "DELETE" });
 }

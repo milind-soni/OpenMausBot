@@ -54,11 +54,9 @@ export function LibraryTab({ bot, onOpen }: { bot: Bot; onOpen: (page: SimplePag
     if (phone) dispatch({ type: "toggleSettings", open: false });
   };
   const skillsOn = skills.skills.filter(skillSwitchOn).length;
-  const notes = memory.docs ? panelMemoryNotes(memory.docs).length : null;
+  const remembers = memory.docs ? panelMemoryNotes(memory.docs).length > 0 || Boolean(memory.thread?.text.trim()) : null;
   const memoryValue = bot.memoryEnabled === false ? t("botPanel.memory.off")
-    : notes === null ? (memory.error ? t("botPanel.memory.nothingYet") : undefined)
-    : notes === 0 ? t("botPanel.memory.nothingYet")
-    : notes === 1 ? t("botPanel.memory.note") : t("botPanel.memory.notes", { count: notes });
+    : remembers === false || (remembers === null && memory.error) ? t("botPanel.memory.nothingYet") : undefined;
   const keeps = (
     <Card anchor="keeps">
       <NavRow data-panel-page="memory" icon={Brain} title={t("botPanel.memoryRow")} value={memoryValue} onClick={() => onOpen("memory")} />
