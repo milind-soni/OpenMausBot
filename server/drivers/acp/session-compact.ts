@@ -10,7 +10,7 @@ const REPLY_UPDATES = new Set(["agent_message_chunk", "agent_thought_chunk", "to
 
 interface ActiveEntry {
   stop: () => void;
-  interrupt: () => void;
+  interrupt: () => void | Promise<void>;
   turnId: string;
   asks: Map<string, AcpAskFinish>;
 }
@@ -66,7 +66,9 @@ export function acpCompactSession(deps: AcpCompactDeps) {
     deps.holdIdle(threadId, session);
     const onAbort = () => stop();
     options.signal?.addEventListener("abort", onAbort, { once: true });
-    const exited = () => end({ kind: "failed", reason: "the agent exited during compaction" });
+    let markGone!: () => void;
+    const gone = new Promise<null>((resolve) => { markGone = () => resolve(null); });
+    const exited = () => { markGone(); end({ kind: "failed", reason: "the agent exited during compaction" }); };
     session.child.once("exit", exited);
     session.child.once("error", exited);
     const counted = { open: false, replied: false, usageReported: false };
@@ -93,20 +95,25 @@ export function acpCompactSession(deps: AcpCompactDeps) {
       const answer = session.acp.request("session/prompt", { sessionId: options.session, prompt: [{ type: "text", text: `/${command}` }] },
         undefined, () => { counted.open = false; });
       answer.then((result) => end({ kind: "answered", result }), (error: Error) => end({ kind: "failed", reason: `compaction failed: ${error.message}` }));
+      const failSent = (reason: string, result?: unknown): EngineCompactResult => {
+        const reported = promptTokenUsage(result);
+        return { ok: false, reason, ...(reported ? { usage: { input: reported.input, output: reported.output, cachedInput: reported.cachedInput ?? 0 }, model: session.lastModel ?? null } : {}),
+          ...(counted.replied ? { sessionChanged: true as const } : {}) };
+      };
       let ending = await ended;
       if (ending.kind === "stopped" || ending.kind === "timeout") {
-        const after = await answerAfterCancel(session, options.session, answer);
+        const after = await answerAfterCancel(session, options.session, answer, gone);
         const cancelled = after?.stopReason === "cancelled";
         if (ending.kind === "stopped" && after !== null && !cancelled) ending = { kind: "answered", result: after };
         else {
-          keep = ending.kind === "stopped" && cancelled;
-          if (after === null && !await deps.endUncancelled(threadId, session)) return fail("the agent could not be stopped");
-          return fail(ending.kind === "stopped" ? "stopped" : "timed out");
+          keep = ending.kind === "stopped" && cancelled && !counted.replied;
+          if (after === null && !await deps.endUncancelled(threadId, session)) return failSent("the agent could not be stopped");
+          return failSent(ending.kind === "stopped" ? "stopped" : "timed out", after);
         }
       }
       if (ending.kind === "failed") {
         keep = false;
-        return fail(ending.reason);
+        return failSent(ending.reason);
       }
       if (ending.kind !== "answered") return fail("stopped");
       const { result } = ending;
@@ -119,8 +126,7 @@ export function acpCompactSession(deps: AcpCompactDeps) {
               : null;
       if (why) {
         keep = false;
-        return { ok: false, reason: why, ...(usage ? { usage: { input: usage.input, output: usage.output, cachedInput: usage.cachedInput ?? 0 }, model: session.lastModel ?? null } : {}),
-          ...(counted.replied ? { sessionChanged: true as const } : {}) };
+        return failSent(why, result);
       }
       deletePromptSplitReceipt(deps.driverKind, JSON.stringify([threadId, options.session]));
       return { ok: true, usage: { input: usage!.input, output: usage!.output, cachedInput: usage!.cachedInput ?? 0 }, model: session.lastModel ?? null };
@@ -138,11 +144,11 @@ export function acpCompactSession(deps: AcpCompactDeps) {
   };
 }
 
-async function answerAfterCancel(session: AcpSession, sessionId: string, answer: Promise<any>): Promise<any> {
+async function answerAfterCancel(session: AcpSession, sessionId: string, answer: Promise<any>, gone: Promise<null>): Promise<any> {
   session.acp.send({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId } });
   let timer: ReturnType<typeof setTimeout> | undefined;
   const grace = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), CANCEL_GRACE_MS); timer.unref?.(); });
-  const outcome = await Promise.race([answer.then((result) => result, () => null), grace]);
+  const outcome = await Promise.race([answer.then((result) => result, () => null), grace, gone]);
   clearTimeout(timer);
   return outcome;
 }

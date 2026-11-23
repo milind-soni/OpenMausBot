@@ -286,8 +286,6 @@ export function verificationServerArgs(childEnv: NodeJS.ProcessEnv): string[] {
   ];
 }
 
-/** The fake native Antigravity CLI as a program named `antigravity` in the fixture's data folder, signed in through the
- * keyring folder its environment names. */
 function signedInFakeAntigravity(dataDir: string): string {
   const executable = join(dataDir, "fake-antigravity", "antigravity");
   mkdirSync(dirname(executable), { recursive: true });

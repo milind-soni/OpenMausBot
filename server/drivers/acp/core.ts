@@ -380,7 +380,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       };
       interface Turn {
         stop: () => void;
-        interrupt: () => void;
+        interrupt: () => void | Promise<void>;
         turnId: string;
         asks: Map<string, AcpAskFinish>;
       }

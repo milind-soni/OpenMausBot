@@ -29,7 +29,6 @@ afterEach(async () => {
   while (scratch.length) await removeTempDir(scratch.pop()!);
 });
 
-/** A signed-in native CLI account with one thread, its turns and the compactions asked of it. */
 async function thread(name: string, env: Record<string, string> = {}) {
   ensureDirs();
   const fixture: NativeFixture = nativeFixture(folder());

@@ -100,7 +100,7 @@ describe("an ACP agent's own compaction of a live session", () => {
     const { deps, active } = setup(({ reply }) => { answer = reply; });
     const compacting = acpCompactSession(deps)("thread", { session: SESSION });
     await vi.waitFor(() => expect(answer).toBeDefined());
-    const interrupted = active.get("thread")!.interrupt() as unknown as Promise<void>;
+    const interrupted = Promise.resolve(active.get("thread")!.interrupt());
     let returned = false;
     void interrupted.then(() => { returned = true; });
     await new Promise((resolve) => setImmediate(resolve));
@@ -109,6 +109,37 @@ describe("an ACP agent's own compaction of a live session", () => {
     await interrupted;
     expect(active.has("thread")).toBe(false);
     expect(await compacting).toEqual({ ok: false, reason: "stopped" });
+  });
+
+  it("marks the session changed when the agent replied and then failed", async () => {
+    const { deps, session } = setup(({ heard }) => {
+      heard({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Nothing to compact" } });
+      session.child.emit("error", new Error("pipe closed"));
+    });
+    expect(await acpCompactSession(deps)("thread", { session: SESSION })).toMatchObject({ ok: false, sessionChanged: true });
+  });
+
+  it("keeps the usage of an answer that came after its timeout", async () => {
+    vi.stubEnv("FAKE_ACP_COMPACT_TIMEOUT_MS", "20");
+    try {
+      const { deps } = setup(({ reply }) => { setTimeout(() => reply(RESULT), 60); });
+      expect(await acpCompactSession(deps)("thread", { session: SESSION })).toMatchObject({ ok: false, reason: "timed out", usage: { input: 900, output: 50 } });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("stops waiting for the cancel once the agent exits", async () => {
+    const { deps, session, acp } = setup(() => {});
+    const stop = new AbortController();
+    const compacting = acpCompactSession(deps)("thread", { session: SESSION, signal: stop.signal });
+    await vi.waitFor(() => expect(acp.request).toHaveBeenCalled());
+    const started = Date.now();
+    stop.abort();
+    await vi.waitFor(() => expect(acp.send).toHaveBeenCalled());
+    session.child.emit("exit", 1, null);
+    expect(await compacting).toMatchObject({ ok: false, reason: "stopped" });
+    expect(Date.now() - started).toBeLessThan(2_000);
   });
 
   it("says so when the agent ignored the cancel and could not be stopped", async () => {
