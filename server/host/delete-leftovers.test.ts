@@ -22,7 +22,7 @@ function put(path: string, text = "x"): string {
   return path;
 }
 
-type Task = { threadId: string; resumeCursors?: Record<string, unknown> };
+type Task = { threadId: string; resumeCursors?: Record<string, unknown>; cwd?: string };
 type Bot = { id: string; threadId?: string; resumeCursors?: Record<string, unknown>; tasks?: Task[] };
 
 function fixture(over: Partial<DeleteLeftoversDeps> = {}) {
@@ -289,6 +289,22 @@ describe("a deleted bot", () => {
     deleteBot("scout");
     expect([existsSync(checkpoint), existsSync(layer)]).toEqual([true, true]);
     expect(existsSync(join(dataDir, "workspaces", `scout--member-${MEMBER}`))).toBe(false);
+  });
+});
+
+describe("the conversation folders' cleanup", () => {
+  it("is handed the deleted conversations, the folders they worked in and the deleted bots, and a failure there stays inside it", () => {
+    const calls: unknown[] = [];
+    const { bots, deleteThreads, deleteBot, warnings, say } = fixture({ folders: {
+      conversationsGone: (ids, workedIn) => { calls.push(["threads", [...ids], [...(workedIn ?? [])]]); throw new Error("busy disk"); },
+      botGone: (botId) => { calls.push(["bot", botId]); },
+    } });
+    bots.push({ id: "scout", tasks: [{ threadId: "t1", cwd: "/data/task-workspaces/scout/t0" }, { threadId: "t2" }] });
+    say("t1", upload(1));
+    deleteThreads("t1");
+    deleteBot("scout");
+    expect(calls).toEqual([["threads", ["t1"], ["/data/task-workspaces/scout/t0"]], ["threads", ["t2"], []], ["bot", "scout"]]);
+    expect(warnings.filter((line) => line.includes("busy disk"))).toHaveLength(2);
   });
 });
 
