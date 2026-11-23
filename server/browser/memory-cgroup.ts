@@ -24,8 +24,10 @@ const MB = 1_048_576;
 /** What the browsers together leave the server, the edge and the engines: 30% of the machine, at least 900 MB. */
 const RESERVE_SHARE = 0.3, RESERVE_FLOOR_BYTES = 900 * MB, SMALLEST_BYTES = 256 * MB;
 
-/** The default limit: the machine's memory less the reserve (1148 MB on 2 GB, 2867 MB on 4 GB, 5734 MB on 8 GB); null on
- * a machine too small to leave a browser room. One group holds every bot's browser, so this caps them together. */
+/** The default limit: the machine's memory as the kernel reports it, less the reserve. A 2 GB Cloud reports about 1970 MB,
+ * so about 1070 MB there, above one browser's hard line (985 MB), so the server's own close usually comes first; about
+ * 2.8 GB on 4 GB and 5.6 GB on 8 GB. Null on a machine too small to leave a browser room. One group holds every bot's
+ * browser, so this caps them together. */
 export function defaultBrowserMemoryMax(memoryBytes: number): number | null {
   const limit = Math.round(memoryBytes - Math.max(RESERVE_FLOOR_BYTES, memoryBytes * RESERVE_SHARE));
   return limit >= 2 * SMALLEST_BYTES ? limit : null;

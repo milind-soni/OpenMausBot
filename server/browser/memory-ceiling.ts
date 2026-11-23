@@ -18,6 +18,9 @@ export const CEILING_FAST_TICK_MS = 3_000;
 const PAGE_BYTES = 4096;
 /** A browser's tabs are closed at most this often, and a refused close is logged at most this often. */
 const ACT_EVERY_MS = 60_000;
+/** A process lost since the last look smaller than this was not the kernel's victim at the browsers' limit: Chrome swaps
+ * small renderers on every navigation. */
+const VICTIM_MIN_BYTES = 50 * MB;
 
 export interface CeilingLines { softBytes: number; hardBytes: number }
 
@@ -123,24 +126,30 @@ export function tabsClosedNote(usedBytes: number, closed: readonly CeilingTab[])
   return `This browser was using ${mb(usedBytes)} MB of this computer's memory, so its other tabs were closed to keep everything else running: ${closed.map(page).join("; ")}. Open one again if you still need it. Earlier @eN refs are gone: take a new snapshot before acting.`;
 }
 
+type Seen = { browser: CeilingBrowser; used: number; each: Map<number, number> };
+
 export function createBrowserCeiling(deps: BrowserCeilingDeps) {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((line: string) => console.warn(line));
   const notes = new Map<string, string>();
   const acted = new Map<string, number>();
   let running = false;
-  /** Each browser as the last look found it, and the kernel's kill count then. */
-  let seen = new Map<string, { browser: CeilingBrowser; used: number }>();
-  let kills: number | null = null;
+  /** Each browser as the last look found it, with each process's size, and the kernel's kill count then. */
+  let seen = new Map<string, Seen>();
+  let kills: number | null = null, unexplained = false;
 
-  function size(browser: CeilingBrowser): number | null {
-    let total = 0, read = 0;
+  /** A browser's size and each of its processes'. With memory short, from statm (quickSize), which takes no lock. */
+  function measure(browser: CeilingBrowser, short: boolean): { used: number | null; each: Map<number, number> } {
+    const each = new Map<number, number>();
+    const quick = short && deps.quickSize ? deps.quickSize : null;
     for (const pid of browser.pids) {
-      const bytes = deps.pss(pid);
-      if (bytes === null) continue;
-      total += bytes; read += 1;
+      const bytes = quick ? quick([pid]) : deps.pss(pid);
+      if (bytes !== null) each.set(pid, bytes);
     }
-    return read ? total : null;
+    let used: number | null = null;
+    if (quick) used = quick(browser.pids);
+    else if (each.size) used = [...each.values()].reduce((sum, bytes) => sum + bytes, 0);
+    return { used, each };
   }
 
   async function closeBackgroundTabs(session: string, used: number): Promise<boolean> {
@@ -159,10 +168,10 @@ export function createBrowserCeiling(deps: BrowserCeilingDeps) {
   }
 
   /** Whether the browser is over its soft line. `short`: memory available is under relief's floor. */
-  async function check(browser: CeilingBrowser, short: boolean, looked: Map<string, { browser: CeilingBrowser; used: number }>): Promise<boolean> {
-    const used = short && deps.quickSize ? deps.quickSize(browser.pids) : size(browser);
+  async function check(browser: CeilingBrowser, short: boolean, looked: Map<string, Seen>): Promise<boolean> {
+    const { used, each } = measure(browser, short);
     const { session } = browser;
-    if (used !== null) looked.set(session, { browser, used });
+    if (used !== null) looked.set(session, { browser, used, each });
     if (used === null || used < deps.lines.softBytes) return false;
     const at = now();
     // Ahead of the minute between actions: a refused close must not keep a growing browser from this for a minute.
@@ -175,23 +184,28 @@ export function createBrowserCeiling(deps: BrowserCeilingDeps) {
     return true;
   }
 
-  /** The kernel killed at the browsers' limit since the last look: the browser that lost processes since (the largest, if
-   * several did) is closed, and the turn that held it ends with the line that the browser was closed for memory. */
-  async function afterKernelKill(browsers: readonly CeilingBrowser[]): Promise<void> {
+  /** The kernel killed at the browsers' limit since the last look. Its victim is about the largest process in the group, and
+   * Chrome loses small renderers all the time (a navigation, a closed tab): the browser whose largest lost process was the
+   * largest is closed, and the turn that held it ends with the line that the browser was closed for memory. Nothing is
+   * closed when no process lost since was large enough to be the victim; the next look tries again. */
+  async function afterKernelKill(browsers: readonly CeilingBrowser[]): Promise<boolean> {
     const found = new Map(browsers.map((browser) => [browser.session, browser]));
-    let hit: { browser: CeilingBrowser; used: number } | null = null;
+    let hit: Seen | null = null, victim = 0;
     for (const before of seen.values()) {
       const pids = new Set(found.get(before.browser.session)?.pids ?? []);
-      const lost = before.browser.pids.some((pid) => pid !== before.browser.daemon && !pids.has(pid));
-      if (lost && (!hit || before.used > hit.used)) hit = before;
+      for (const [pid, bytes] of before.each) {
+        if (pid === before.browser.daemon || pids.has(pid) || bytes <= victim) continue;
+        hit = before; victim = bytes;
+      }
     }
-    if (!hit || !deps.forceClose) return;
+    if (!hit || victim < VICTIM_MIN_BYTES || !deps.forceClose) return false;
     const { session } = hit.browser;
     const current = found.get(session) ?? { session, pids: [], ...(hit.browser.daemon === undefined ? {} : { daemon: hit.browser.daemon }) };
     if (await deps.forceClose(current, hit.used).catch(() => false)) {
       acted.set(session, now());
-      log(`browser ${session}: the kernel stopped part of it at the browsers' memory limit (${mb(hit.used)} MB at the last look); closed it, with the turn that held it, if any`);
+      log(`browser ${session}: the kernel stopped a ${mb(victim)} MB process of it at the browsers' memory limit (${mb(hit.used)} MB at the last look); closed it, with the turn that held it, if any`);
     }
+    return true;
   }
 
   async function act(browser: CeilingBrowser, used: number, at: number): Promise<void> {
@@ -219,15 +233,17 @@ export function createBrowserCeiling(deps: BrowserCeilingDeps) {
         const live = new Set(browsers.map((browser) => browser.session));
         for (const session of acted.keys()) if (!live.has(session)) acted.delete(session);
         const killed = deps.kernelKills?.() ?? null;
-        if (killed !== null && kills !== null && killed > kills) await afterKernelKill(browsers).catch(() => undefined);
-        kills = killed ?? kills;
+        // A kill no lost process explains yet (its victim not reaped at this look) is looked for once more, then let go.
+        if (killed !== null && kills !== null && killed > kills && !await afterKernelKill(browsers).catch(() => false) && !unexplained) unexplained = true;
+        else { kills = killed ?? kills; unexplained = false; }
         const short = deps.memoryShort?.() ?? false;
-        const looked = new Map<string, { browser: CeilingBrowser; used: number }>();
+        const looked = new Map<string, Seen>();
         for (const browser of browsers) {
           try { deps.contain?.(browser); } catch {}
           if (await check(browser, short, looked).catch(() => false)) large = true;
         }
-        seen = looked;
+        // The look before the kill is kept while one is unexplained: its sizes are what the victim is found by.
+        if (!unexplained) seen = looked;
       } finally { running = false; }
       return large && (deps.memoryShort?.(2) ?? false);
     },

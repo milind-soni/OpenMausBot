@@ -36,6 +36,8 @@ describe("the bots' browsers' kernel memory limit", () => {
     expect(browserMemoryMax({ OMB_BROWSER_MEMORY_MAX: "lots" }, 2048 * MB, (line) => warned.push(line))).toEqual({ on: false });
     expect(warned).toHaveLength(1);
     expect([defaultBrowserMemoryMax(2048 * MB), defaultBrowserMemoryMax(1024 * MB)]).toEqual([1148 * MB, null]);
+    // What a 2 GB Cloud reports: about 1970 MB.
+    expect(defaultBrowserMemoryMax(1970 * MB)).toBe(1070 * MB);
   });
 
   it("finds this process's cgroup, and takes only a plain folder under /sys/fs/cgroup as the browsers' one", () => {
