@@ -1,5 +1,6 @@
 import { useEffect, useRef, type RefObject } from "react";
 import type { AppState, Bot, InstanceInfo, ModelSelection } from "@/state/store";
+import { offeredEffortLevels } from "../../shared/wire";
 import type { ModelVariantOption } from "../../shared/runtime-events";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
@@ -30,7 +31,7 @@ export function variantChoices(state: Pick<AppState, "instances" | "modelVariant
 export function offersReasoning(state: Pick<AppState, "instances" | "modelVariantSessions">, instance: InstanceInfo, next: ModelSelection, threadId: string | undefined): boolean {
   return instance.capabilities?.modelVariants
     ? Boolean(variantChoices(state, next, threadId))
-    : Boolean(instance.capabilities?.effortLevels?.length);
+    : Boolean(offeredEffortLevels(instance, next.model).length);
 }
 
 /**

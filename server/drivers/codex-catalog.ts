@@ -4,7 +4,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 
-import type { ModelCatalog } from "../contracts.ts";
+import type { EffortLevel, ModelCatalog } from "../contracts.ts";
+import { EFFORT_LEVELS, isEffortLevel } from "../../shared/wire.ts";
 import { qualifiedModelLabel } from "../contracts.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 import { codexHome } from "./codex-identity.ts";
@@ -78,9 +79,24 @@ interface CodexAppServerModel {
   isDefault?: unknown;
   serviceTiers?: unknown;
   defaultServiceTier?: unknown;
+  supportedReasoningEfforts?: unknown;
 }
 
 const FAST_TIER = /fast/i;
+
+/** Parse per-model `supportedReasoningEfforts` (`string[]` or `{ reasoningEffort: string }[]`) in canonical ascending order. */
+function supportedEffortLevels(row: CodexAppServerModel): readonly EffortLevel[] | undefined {
+  if (!Array.isArray(row.supportedReasoningEfforts)) return undefined;
+  const present = new Set<EffortLevel>();
+  for (const item of row.supportedReasoningEfforts) {
+    const raw = typeof item === "string" ? item
+      : item && typeof item === "object"
+        ? (item as { reasoningEffort?: unknown; effort?: unknown }).reasoningEffort ?? (item as { effort?: unknown }).effort
+        : undefined;
+    if (isEffortLevel(raw)) present.add(raw);
+  }
+  return EFFORT_LEVELS.filter((level) => present.has(level));
+}
 
 /** The model's Fast tier (codex-cli 0.167 lists `{id: "priority", name: "Fast"}`), unless it already runs on it. */
 function fastTier(row: CodexAppServerModel): { id: string; name: string } | null {
@@ -182,9 +198,11 @@ export function readCodexAppServerModelCatalog(
           if (row.hidden === true || typeof row.id !== "string" || !MODEL_ID.test(row.id) || seen.has(row.id)) continue;
           seen.add(row.id);
           const label = typeof row.displayName === "string" && row.displayName.trim() ? row.displayName : row.id;
-          options.push({ id: row.id, label });
+          const effortLevels = supportedEffortLevels(row);
+          const meta = effortLevels !== undefined ? { effortLevels } : {};
+          options.push({ id: row.id, label, ...meta });
           const fast = fastTier(row);
-          if (fast && !TIERED_ID.test(row.id)) options.push({ id: `${row.id}+${fast.id}`, label: `${label} · ${fast.name}` });
+          if (fast && !TIERED_ID.test(row.id)) options.push({ id: `${row.id}+${fast.id}`, label: `${label} · ${fast.name}`, ...meta });
           if (row.isDefault === true) defaultModel = row.id;
         }
         if (!options.length) {
@@ -421,9 +439,9 @@ async function catalogAround(
   if (listingProvider) official = { default: encodeCodexSelection(listingProvider, official.default), options: [] };
   const known = new Map(main.providers.map((provider) => [provider.id, provider]));
   const named = collectCatalogNames(home);
-  const extras: Array<{ provider: string; model: string }> = [];
+  const extras: Array<{ provider: string; model: string; effortLevels?: readonly EffortLevel[] }> = [];
 
-  const remember = (provider: string | undefined, model: string | undefined) => {
+  const remember = (provider: string | undefined, model: string | undefined, effortLevels?: readonly EffortLevel[]) => {
     if (!provider || !model) return;
     if (!PROVIDER_ID.test(provider) || !MODEL_ID.test(model)) return;
     // A local provider may serve an official slug: keep its row provider-qualified.
@@ -431,11 +449,11 @@ async function catalogAround(
       provider === OFFICIAL_CODEX_PROVIDER &&
       official.options.some((option) => option.id === model)
     ) return;
-    extras.push({ provider, model });
+    extras.push({ provider, model, ...(effortLevels !== undefined ? { effortLevels } : {}) });
   };
 
+  if (listingProvider) for (const option of listed) remember(listingProvider, option.id, option.effortLevels);
   remember(main.modelProvider, main.model);
-  if (listingProvider) for (const option of listed) remember(listingProvider, option.id);
 
   for (const file of listDir(home)) {
     if (!file.endsWith(".config.toml")) continue;
@@ -469,6 +487,7 @@ async function catalogAround(
       id,
       label: niceLabel(extra.model, extra.provider, known, named),
       custom: true,
+      ...(extra.effortLevels !== undefined ? { effortLevels: extra.effortLevels } : {}),
     });
   }
 

@@ -35,8 +35,8 @@ import type {
   SendTurnInput,
   SteerOutcome,
 } from "../contracts.ts";
-import { EFFORT_LEVELS } from "../../shared/wire.ts";
 import { newEventId, newId } from "../contracts.ts";
+export const PI_EFFORT_LEVELS = ["none", "low", "medium", "high", "xhigh", "max"] as const;
 import { ASK_USER_TOOL, MAX_QUESTION_TEXT, parseAskQuestions, parseChoices, questionAnswersByQuestion } from "../../shared/ask-question.ts";
 import {
   decodeInjectId,
@@ -72,8 +72,8 @@ const PI_SESSION_SLOW_MS = 20_000;
 /** pi answered success:false: an explicit refusal from a live runtime, not a transport failure. */
 class PiRpcRefusalError extends Error {}
 
-export function piThinkingLevel(effort: EffortLevel): (typeof EFFORT_LEVELS)[number] | "off" {
-  return effort === "none" ? "off" : effort;
+export function piThinkingLevel(effort: EffortLevel): (typeof PI_EFFORT_LEVELS)[number] | "off" {
+  return effort === "none" ? "off" : effort === "ultra" ? "max" : effort;
 }
 
 interface PiModelEntry {
@@ -971,7 +971,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           images: true,
           nativeImageInput: true,
           // pi rejects an unsupported level and the turn keeps the engine default.
-          effortLevels: EFFORT_LEVELS,
+          effortLevels: PI_EFFORT_LEVELS,
           queueing: true, askTool: { kind: "native", name: "ask_user" },
         },
         sendTurn,

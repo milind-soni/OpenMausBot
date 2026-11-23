@@ -158,6 +158,69 @@ describe("readCodexModelCatalog", () => {
     });
   });
 
+  it("reads per-model supportedReasoningEfforts so only supporting models advertise ultra", async () => {
+    chmodSync(FAKE_CLI, 0o755);
+    const catalog = await readCodexModelCatalog(
+      { HOME: join(tmpdir(), "omb-codex-app-server-efforts"), PATH: process.env.PATH, FAKE_CODEX_TIERS: "1", FAKE_CODEX_EFFORTS: "1" },
+      fetch,
+      FAKE_CLI,
+    );
+
+    expect(catalog).toEqual({
+      default: "gpt-fake-default",
+      options: [
+        {
+          id: "gpt-fake-default",
+          label: "GPT Fake Default",
+          effortLevels: ["low", "medium", "high", "xhigh", "max", "ultra"],
+        },
+        {
+          id: "gpt-fake-default+priority",
+          label: "GPT Fake Default · Fast",
+          effortLevels: ["low", "medium", "high", "xhigh", "max", "ultra"],
+        },
+        {
+          id: "gpt-page-two",
+          label: "GPT Page Two",
+          effortLevels: ["low", "medium", "high", "xhigh", "max"],
+        },
+      ],
+    });
+  });
+
+  it("preserves CLI-listed effortLevels when model_catalog_json also matches the configured model", async () => {
+    chmodSync(FAKE_CLI, 0o755);
+    const home = scratchHome({
+      "config.toml": `
+model_provider = "omlx"
+model = "gpt-fake-default"
+model_catalog_json = "omlx-catalog.json"
+
+[model_providers.omlx]
+name = "oMLX"
+`,
+      "omlx-catalog.json": JSON.stringify({ models: [{ slug: "gpt-fake-default" }] }),
+    });
+    const catalog = await readCodexModelCatalog(
+      { HOME: home, PATH: process.env.PATH, FAKE_CODEX_EFFORTS: "1" },
+      fetch,
+      FAKE_CLI,
+    );
+
+    expect(catalog.options).toContainEqual({
+      id: encodeCodexSelection("omlx", "gpt-fake-default"),
+      label: "gpt-fake-default (oMLX)",
+      custom: true,
+      effortLevels: ["low", "medium", "high", "xhigh", "max", "ultra"],
+    });
+    expect(catalog.options).toContainEqual({
+      id: encodeCodexSelection("omlx", "gpt-page-two"),
+      label: "gpt-page-two (oMLX)",
+      custom: true,
+      effortLevels: ["low", "medium", "high", "xhigh", "max"],
+    });
+  });
+
   it("appends the configured local model and cached catalog slugs as custom", async () => {
     const home = scratchHome({
       "config.toml": `
