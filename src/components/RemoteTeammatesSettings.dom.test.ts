@@ -9,13 +9,19 @@ const fixture = vi.hoisted(() => ({
   calls: [] as Array<{ path: string; method: string; body?: Record<string, string> }>,
   check: { ok: true } as Record<string, unknown>,
   addError: null as string | null,
+  listError: null as string | null,
+  addGate: null as Promise<void> | null,
 }));
 vi.mock("@/state/store", () => ({
   api: async (path: string, init: { method?: string; body?: string } = {}) => {
     const method = init.method ?? "GET";
     fixture.calls.push({ path, method, ...(init.body ? { body: JSON.parse(init.body) } : {}) });
-    if (path === "/api/remote-teammates" && method === "GET") return { teammates: fixture.teammates };
+    if (path === "/api/remote-teammates" && method === "GET") {
+      if (fixture.listError) throw new Error(fixture.listError);
+      return { teammates: fixture.teammates };
+    }
     if (path === "/api/remote-teammates" && method === "POST") {
+      await fixture.addGate;
       if (fixture.addError) throw new Error(fixture.addError);
       const body = JSON.parse(init.body!);
       return { teammate: { id: "22222222-2222-4222-8222-222222222222", name: body.name, base: body.address, botId: body.botId, createdAt: "2026-11-23T00:00:00.000Z" } };
@@ -31,7 +37,7 @@ const SAVED: Teammate = { id: "11111111-1111-4111-8111-111111111111", name: "Sal
 let container: HTMLDivElement, root: Root;
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  Object.assign(fixture, { teammates: [], calls: [], check: { ok: true }, addError: null });
+  Object.assign(fixture, { teammates: [], calls: [], check: { ok: true }, addError: null, listError: null, addGate: null });
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
@@ -113,4 +119,43 @@ it("removes a teammate only after asking, and drops the note that it was added",
   expect(fixture.calls.at(-1)).toEqual({ path: "/api/remote-teammates/22222222-2222-4222-8222-222222222222", method: "DELETE" });
   expect(container.textContent).not.toContain("Sales desk");
   expect(container.textContent).toContain("No teammates on other servers yet.");
+});
+
+it("loads the list again on Try again after it could not be read", async () => {
+  fixture.listError = "server unreachable";
+  await render();
+  expect(container.querySelector('[role="alert"]')!.textContent).toBe("server unreachable");
+  expect(button("Add")).toBeUndefined();
+  fixture.listError = null;
+  fixture.teammates = [SAVED];
+  await click("Try again");
+  expect(fixture.calls.filter((call) => call.method === "GET")).toHaveLength(2);
+  expect(container.querySelector('[role="alert"]')).toBeNull();
+  expect(container.textContent).toContain("sales-bot · https://bots.example.com");
+  expect(button("Add")).toBeTruthy();
+});
+
+it("keeps the form open while a teammate is being added, so its answer can't close a newer draft", async () => {
+  let release!: () => void;
+  fixture.addGate = new Promise((done) => { release = done; });
+  await render();
+  await click("Add");
+  await input("Name", "Sales desk");
+  await input("Address", "https://bots.example.com");
+  await input("Bot API key", "bak_fixture_key_0123456789");
+  await click("Add teammate");
+  expect(button("Close")!.disabled).toBe(true);
+  await act(async () => { release(); await fixture.addGate; });
+  expect(container.textContent).toContain("Sales desk was added.");
+  expect(button("Add")!.disabled).toBe(false);
+  // After a refused add, Close works again.
+  fixture.addError = "that bot is already a teammate";
+  await click("Add");
+  await input("Name", "Sales desk");
+  await input("Address", "https://bots.example.com");
+  await input("Bot API key", "bak_fixture_key_0123456789");
+  await click("Add teammate");
+  expect(button("Close")!.disabled).toBe(false);
+  await click("Close");
+  expect(container.querySelector('input[aria-label="Name"]')).toBeNull();
 });

@@ -33,9 +33,9 @@ const failure = (cause: unknown) => (cause instanceof Error && cause.message ? c
 
 interface Draft { name: string; address: string; botId: string; key: string }
 
-function AddTeammateForm({ onAdded }: { onAdded: (teammate: RemoteTeammate) => void }) {
+/** `saving` is the card's: the form can't be closed while an add is on its way, or its answer would close a newer draft. */
+function AddTeammateForm({ onAdded, saving, setSaving }: { onAdded: (teammate: RemoteTeammate) => void; saving: boolean; setSaving: (saving: boolean) => void }) {
   const [draft, setDraft] = useState<Draft>({ name: "", address: "", botId: "", key: "" });
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const field = (key: keyof Draft) => ({
     value: draft[key],
@@ -155,6 +155,9 @@ export function RemoteTeammatesSettings() {
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  /** Each Try again after a failed load reads the list once more. */
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -162,13 +165,18 @@ export function RemoteTeammatesSettings() {
       .then((loaded) => { if (!controller.signal.aborted) setTeammates(loaded.teammates); })
       .catch((cause: unknown) => { if (!controller.signal.aborted) setError(failure(cause)); });
     return () => controller.abort();
-  }, []);
+  }, [attempt]);
 
   return (
     <SettingsGroup label={t("settings.remoteTeammates.title")} block="remote-teammates">
       <SettingsRows>
         {!teammates && !error && <SettingsSkeletonRows />}
-        {error && <SettingsEmptyRow><span role="alert" className="text-danger">{error}</span></SettingsEmptyRow>}
+        {error && <SettingsEmptyRow>
+          <span className="flex items-center justify-between gap-3">
+            <span role="alert" className="text-danger">{error}</span>
+            <button type="button" className="ui-button" onClick={() => { setError(null); setAttempt((count) => count + 1); }}>{t("common.tryAgain")}</button>
+          </span>
+        </SettingsEmptyRow>}
         {teammates?.length === 0 && <SettingsEmptyRow>{t("settings.remoteTeammates.empty")}</SettingsEmptyRow>}
         {teammates?.map((teammate) => (
           <TeammateRow key={teammate.id} teammate={teammate}
@@ -177,11 +185,11 @@ export function RemoteTeammatesSettings() {
         {teammates && <>
           <SettingRow title={t("settings.remoteTeammates.add")} subtitle={t("settings.remoteTeammates.line")}
             message={!open && notice ? <span role="status">{notice}</span> : undefined}>
-            <button type="button" className="ui-button" aria-expanded={open} onClick={() => { setOpen(!open); setNotice(null); }}>
+            <button type="button" className="ui-button" aria-expanded={open} disabled={saving} onClick={() => { setOpen(!open); setNotice(null); }}>
               {t(open ? "common.close" : "settings.remoteTeammates.addButton")}
             </button>
           </SettingRow>
-          {open && <AddTeammateForm onAdded={(teammate) => {
+          {open && <AddTeammateForm saving={saving} setSaving={setSaving} onAdded={(teammate) => {
             setTeammates((current) => [...(current ?? []), teammate]);
             setOpen(false);
             setNotice(t("settings.remoteTeammates.added", { name: teammate.name }));
