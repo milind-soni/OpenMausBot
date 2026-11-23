@@ -227,7 +227,7 @@ describe("remote teammate hand-off: the teammate's turn", () => {
     await expect(run(s, node)).rejects.toThrow("stop here");
     const kept = JSON.parse(readFileSync(s.deps.file, "utf8"));
     expect(kept.work[node.id]).toMatchObject({ teammate: ADA.id, thread: "t-1" });
-    expect(statSync(s.deps.file).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(s.deps.file).mode & 0o777).toBe(0o600);
 
     const send = vi.fn(async () => reply("never"));
     const read = vi.fn(async () => reply("Read after the restart."));
