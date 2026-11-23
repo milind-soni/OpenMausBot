@@ -70,7 +70,10 @@ it("in the bot's own chat, a line typed while its ask_user card waits answers th
   }
 }, 120_000);
 
-it("in the bot's own chat, a line typed while an ACP card of set options waits closes it without an error, and runs as the next turn", async () => {
+it.each([
+  ["asks again", {}],
+  ["answers without asking", { FAKE_ACP_QUESTION_ONCE: "1" }],
+])("in the bot's own chat, a line typed while an ACP card of set options waits closes it without an error, and runs as the next turn, which %s", async (_next, nextTurn) => {
   const fixture = await launchVerificationServer();
   const { dataDir, url, logPath } = fixture.info;
   const { api, messages, openCard, control } = client(url);
@@ -86,7 +89,7 @@ it("in the bot's own chat, a line typed while an ACP card of set options waits c
       driver: "opencodeGo", displayName: "Set options fixture",
       config: { cli: fileURLToPath(new URL("./testing/fake-acp-cli.ts", import.meta.url)) },
       environment: { FAKE_ACP_MODE: "question", FAKE_ACP_HOLD_ON_CANCELLED: "1", FAKE_ACP_MODELS: "fixture/question",
-        FAKE_ACP_DUMP: dump, FAKE_ACP_DUMP_PROMPT: "1", FAKE_ACP_RPC_APPEND_FILE: rpcFile },
+        FAKE_ACP_DUMP: dump, FAKE_ACP_DUMP_PROMPT: "1", FAKE_ACP_RPC_APPEND_FILE: rpcFile, ...nextTurn },
     };
     writeFileSync(configPath, JSON.stringify(config));
     const log = openSync(logPath, "a", 0o600);
@@ -114,8 +117,9 @@ it("in the bot's own chat, a line typed while an ACP card of set options waits c
     expect(typed.status).toBe(202);
     await expect.poll(() => prompted().includes("what time is it?"), POLL).toBe(true);
     expect(calls()).toContain("session/cancel");
+    await expect.poll(async () => (await messages(threadId)).find((row) => row.id === card.id)?.card, POLL)
+      .toMatchObject({ answered: "unavailable", dismissed: true });
     const rows = await messages(threadId);
-    expect(rows.find((row) => row.id === card.id)?.card, "closed without an answer, not denied").toMatchObject({ answered: "unavailable", dismissed: true });
     expect(JSON.stringify(rows)).not.toContain("isn't one of the choices");
     expect(verdicts(dataDir, card.card!.requestId!)).toEqual([]);
     expect((await api("POST", `/api/bots/${bot.id}/messages`, send)).status).toBe(202);

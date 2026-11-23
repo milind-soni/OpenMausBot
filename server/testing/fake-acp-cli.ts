@@ -12,7 +12,7 @@
 //   FAKE_ACP_MODE  happy (default) | image | empty-reply | reasoning-only | exit-early | fail-after-text | crash-in-prompt
 //     | abort-in-prompt (a sign-in link, then a TCMalloc CHECK line on stderr, then exit 134 as bubblewrap reports SIGABRT) | hang
 //     | hang-initialize | unkeyed-tool | finished-tools (tool_call frames that arrive already completed or failed, one updated again)
-//     | no-auth | auth-required | permission | question
+//     | no-auth | auth-required | permission | question (FAKE_ACP_QUESTION_ONCE: only the first prompt asks; later ones answer)
 //     | ask-question (a mid-prompt vendor question: FAKE_ACP_ASK_METHOD, default cursor/ask_question, params
 //       FAKE_ACP_ASK_PARAMS; the client's reply is written to FAKE_ACP_ASK_ANSWER. FAKE_ACP_ASK_TIMING=with-result
 //       settles the turn with the card open; after-result asks between turns)
@@ -128,6 +128,7 @@ import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 
 const mode = process.env.FAKE_ACP_MODE ?? "happy";
+let askedQuestion = false;
 
 if (process.env.FAKE_ACP_START_FAILURE) {
   writeSync(2, `${process.env.FAKE_ACP_START_FAILURE}\n`);
@@ -1861,7 +1862,8 @@ function handle(msg: any) {
         })();
         return;
       }
-      if (mode === "question") {
+      if (mode === "question" && !(process.env.FAKE_ACP_QUESTION_ONCE && askedQuestion)) {
+        askedQuestion = true;
         pendingPermissionId = 9002;
         onPermissionAnswered = () => {
           // FAKE_ACP_HOLD_ON_CANCELLED: a cancelled question holds the prompt until session/cancel, as Antigravity does.

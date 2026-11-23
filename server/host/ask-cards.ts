@@ -4,7 +4,7 @@
 // the person's inbox, which has the card itself. At Full access a teammate's question goes to its requester instead: its
 // card says who decides and what was picked, and blocks nothing. A card whose work ended, or that a newer question
 // replaced, closes, so nothing stale waits on the person.
-import { formatQuestionAnswers, isPersistentQuestionCard } from "../../shared/ask-question.ts";
+import { formatQuestionAnswers, isPersistentQuestionCard, shouldSettleRequestCard } from "../../shared/ask-question.ts";
 import { liveCardKind } from "../../shared/live-approval.ts";
 import { allowsTool, type ToolIdentity } from "../../shared/tool-scope.ts";
 import type { PersonWait } from "../../shared/person-wait.ts";
@@ -71,25 +71,58 @@ const typedAnswer = (card: OptionCardData, text: string): string => {
   return questions ? formatQuestionAnswers(questions, [[text]]) : text;
 };
 
-/** Declines a question the person moved past without an answer. While the decline is on its way the request is marked
- * closing, so the engine settling it with that decline reads closed without an answer; a tap, Stop or the turn ending
- * first settles it as they always do. A decline that did not land leaves the card and the request as they were. */
-export async function closeCard(input: { key: string; live: ReadonlyMap<string, string>; closing: Set<string>;
-  decline: () => Promise<RequestOutcome> }): Promise<RequestOutcome> {
-  if (!input.live.has(input.key)) return "unavailable";
-  input.closing.add(input.key);
-  try {
-    return await input.decline().catch((): RequestOutcome => "unavailable");
-  } finally {
-    input.closing.delete(input.key);
-  }
-}
+type Resolved = Extract<RuntimeEvent, { type: "request.resolved" }>;
+type CardStore = Pick<Store, "messagesFor" | "patchMessage">;
+/** A close on its way to one request: the outcome every send closing it shares, and a decline the engine settled meanwhile. */
+export interface Closing { outcome: Promise<RequestOutcome>; deferred?: Resolved }
 
-/** The card a request settled into: closed without an answer when the decline was a close's own. */
-export function resolvedCard(card: OptionCardData, resolved: Extract<RuntimeEvent, { type: "request.resolved" }>, closing: ReadonlySet<string>): OptionCardData {
-  if (resolved.behavior === "deny" && closing.has(`${resolved.threadId}:${resolved.requestId}`)) return { ...card, answered: "unavailable", dismissed: true };
+/** The card a request settled into. */
+export function resolvedCard(card: OptionCardData, resolved: Resolved): OptionCardData {
   const persistent = isPersistentQuestionCard(card);
   return { ...card, answered: resolved.behavior, dismissed: persistent ? false : resolved.source !== "user", ...(resolved.source === "timeout" && !persistent ? { expired: true } : {}) };
+}
+
+function patchOpenCard(store: CardStore, threadId: string, messageId: string, next: (card: OptionCardData) => OptionCardData | null): void {
+  const card = store.messagesFor(threadId).find((message) => message.id === messageId)?.card;
+  const settled = card && !card.answered ? next(card) : null;
+  if (settled) store.patchMessage(threadId, messageId, { card: settled });
+}
+
+/** Settles a card as its request resolved. A decline that lands while a close is on its way waits for the close's own
+ * outcome, which alone tells whether that decline was the close's. */
+export function settleRequestCard(store: CardStore, closing: Map<string, Closing>, resolved: Resolved, messageId: string): void {
+  const inFlight = closing.get(`${resolved.threadId}:${resolved.requestId}`);
+  if (inFlight && resolved.behavior === "deny") inFlight.deferred = resolved;
+  else patchOpenCard(store, resolved.threadId, messageId, (card) => shouldSettleRequestCard(card, resolved.source) ? resolvedCard(card, resolved) : null);
+}
+
+/** Declines a question the person moved past without an answer, once per request however many sends close it. An
+ * outcome other than `unavailable` means the engine took this decline: the card reads closed without an answer, whatever
+ * source the engine reported. Otherwise a tap, an explicit decline, Stop or the turn ending came first, and the card
+ * settles as that resolution would have settled it; a decline that never landed leaves the card and the request alone. */
+export function closeCard(input: { store: CardStore; threadId: string; requestId: string; live: ReadonlyMap<string, string>;
+  closing: Map<string, Closing>; decline: () => Promise<RequestOutcome> }): Promise<RequestOutcome> {
+  const key = `${input.threadId}:${input.requestId}`;
+  const running = input.closing.get(key);
+  if (running) return running.outcome;
+  const messageId = input.live.get(key);
+  if (!messageId) return Promise.resolve("unavailable");
+  const close = async (): Promise<RequestOutcome> => {
+    let outcome: RequestOutcome;
+    try {
+      outcome = await input.decline();
+    } catch {
+      outcome = "unavailable";
+    } finally {
+      input.closing.delete(key);
+    }
+    if (outcome !== "unavailable") patchOpenCard(input.store, input.threadId, messageId, (card) => ({ ...card, answered: "unavailable", dismissed: true }));
+    else if (entry.deferred) settleRequestCard(input.store, input.closing, entry.deferred, messageId);
+    return outcome;
+  };
+  const entry: Closing = { outcome: Promise.resolve().then(close) };
+  input.closing.set(key, entry);
+  return entry.outcome;
 }
 
 /** The reply up to its NEEDS INPUT line; empty when the line is the whole reply. */
