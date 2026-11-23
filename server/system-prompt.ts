@@ -194,7 +194,8 @@ export { syncedFolders } from "./cloud-sync-store.ts";
 export const CLOUD_ENGINES_HERE = " The AIs bots run on (Claude, Codex, Cursor and the rest) run here, on My Cloud, not on their computer or their cloud computer."
   + " If one needs installing or signing in, tell them to choose it in the model picker: its card does that here, with a sign-in link they open on any device."
   + " Never tell them to run an AI's install or sign-in command on their own computer, and never run one on their cloud computer yourself: neither signs in the AIs here."
-  + " When an AI's Google sign-in ends on a 127.0.0.1 or localhost page that can't be reached, that is the expected last step, not a failed sign-in: tell them to copy that page's full address and paste it in the \"Paste its address here\" field on the AI's card, then press Send redirect.";
+  + " When an AI's Google sign-in ends on a 127.0.0.1 or localhost page that can't be reached, that is the expected last step, not a failed sign-in: tell them to copy that page's full address and paste it in the \"Paste its address here\" field on the AI's card, then press Send redirect."
+  + " When Google's Antigravity page shows a code after the sign-in, that is the last step too: tell them to paste the code in the \"Code from the Antigravity page\" field on the AI's card, then press Send code.";
 
 /** `asks`: the person's own Cloud, whose bots ask them to turn on what their computer doesn't give now (ask_for_computer). */
 export function cloudHomePrompt(sharedComputerTools: boolean, synced: ReadonlyArray<{ computerName: string; pcPath: string; cloudPath: string }> = [],

@@ -4,8 +4,9 @@ import { readFile, stat } from "node:fs/promises";
 type Identity = { email: string; method: "login" } | undefined;
 const identities = new Map<string, { fingerprint: string; expires: number; result: Promise<Identity> }>();
 
-/** The official ACP file stores refresh credentials, not the account email.
- * Resolve display identity through Google only; never expose or rewrite tokens. */
+/** The pinned runtime's file stores refresh credentials, not the account email; the native CLI's stores an access token
+ * and no OAuth client, so it is read only while that token is fresh (the CLI refreshes it itself). Resolve display
+ * identity through Google only; never expose or rewrite tokens. */
 export async function antigravityAccount(tokenPath: string): Promise<Identity> {
   try {
     const info = await stat(tokenPath);
@@ -15,9 +16,10 @@ export async function antigravityAccount(tokenPath: string): Promise<Identity> {
     const cached = identities.get(tokenPath);
     if (cached?.fingerprint === fingerprint && cached.expires > Date.now()) return cached.result;
     const credentials = JSON.parse(raw);
-    if (!credentials || !["client_id", "client_secret", "refresh_token"].every((key) => typeof credentials[key] === "string" && credentials[key].length > 0)) return undefined;
+    const cliAccess = antigravityCliAccessToken(credentials);
+    if (!cliAccess && (!credentials || !["client_id", "client_secret", "refresh_token"].every((key) => typeof credentials[key] === "string" && credentials[key].length > 0))) return undefined;
     const entry = { fingerprint, expires: Date.now() + 60_000, result: Promise.resolve<Identity>(undefined) };
-    entry.result = lookup(credentials).then((account) => {
+    entry.result = lookup(cliAccess ? { accessToken: cliAccess.accessToken } : credentials).then((account) => {
       if (account) entry.expires = Date.now() + 60 * 60_000;
       return account;
     });
@@ -31,6 +33,15 @@ export async function antigravityAccount(tokenPath: string): Promise<Identity> {
 }
 
 export interface AntigravityStoredSignIn { client_id: string; client_secret: string; refresh_token: string }
+
+/** The access token in the native CLI's sign-in file (`{"token":{"access_token","expiry",…}}`) while it has more than a
+ * minute left; null for any other file or a stale token. */
+export function antigravityCliAccessToken(file: unknown, now = Date.now()): { accessToken: string; expiresAt: number } | null {
+  const token = (file as { token?: { access_token?: unknown; expiry?: unknown } } | null)?.token;
+  if (!token || typeof token.access_token !== "string" || !token.access_token || typeof token.expiry !== "string") return null;
+  const expiresAt = Date.parse(token.expiry);
+  return Number.isFinite(expiresAt) && expiresAt > now + 60_000 ? { accessToken: token.access_token, expiresAt } : null;
+}
 type AccessFetch = (url: string, init: { method?: "POST"; headers?: Record<string, string>; body?: string | URLSearchParams; redirect: "error" | "manual"; signal: AbortSignal }) => Promise<Pick<Response, "ok" | "json">>;
 
 /** A short-lived access token for the stored sign-in, from Google only. The token stays in memory: it is never logged,
@@ -52,10 +63,10 @@ export async function refreshAntigravityAccess(
   return { accessToken: token.access_token, expiresInSeconds: typeof token.expires_in === "number" && token.expires_in > 0 ? token.expires_in : null };
 }
 
-async function lookup(credentials: AntigravityStoredSignIn): Promise<Identity> {
+async function lookup(credentials: AntigravityStoredSignIn | { accessToken: string }): Promise<Identity> {
   try {
     const signal = AbortSignal.timeout(3_000);
-    const access = await refreshAntigravityAccess(credentials, signal);
+    const access = "accessToken" in credentials ? credentials : await refreshAntigravityAccess(credentials, signal);
     if (!access) return undefined;
     const identity = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
       headers: { Authorization: `Bearer ${access.accessToken}` }, redirect: "error", signal,

@@ -3833,7 +3833,6 @@
   "keys.vps.descAfter": "。",
   "keys.vps.anyMachine": "任何可通过 SSH 访问、装有 Docker 的 Linux 机器都可以，包括你 Tailscale 网络中的电脑：把它的 Tailscale 名称填为别名的 HostName。",
   "keys.vps.aria": "自建 VPS 的 SSH config 别名",
-  "keys.vps.removeAlias": "移除已保存的别名",
   "usage.title": "用量",
   "planUsage.title": "方案用量",
   "planUsage.subtitle": "每个已登录提供方的剩余额度；若该方案有 5 小时和每周时间窗，也会显示。",
