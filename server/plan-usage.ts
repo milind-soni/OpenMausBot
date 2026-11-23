@@ -8,9 +8,8 @@ import type { InstanceConfigMap } from "./contracts.ts";
 import { resolveClaudeConfigDir } from "./drivers/claude.ts";
 import { codexHome } from "./drivers/codex-identity.ts";
 import { codexHasCredits } from "./codex-credits.ts";
-import { antigravityPlanUsage } from "./drivers/antigravity-usage-limits.ts";
+import { antigravityPlanUsage } from "./drivers/antigravity-usage-limits.ts"; import { createProxyFetch } from "./drivers/antigravity-proxy.ts";
 import { harnessHome, sealedFixture } from "./env-path.ts";
-
 export type PlanDriver = "claude" | "codex" | "grok" | "opencode" | "antigravity";
 
 export interface PlanWindow {
@@ -96,7 +95,7 @@ export type PlanFetch = (
 ) => Promise<PlanResponse>;
 
 export interface PlanUsageDeps {
-  fetch: PlanFetch;
+  fetch: PlanFetch; fetchForAccount?: (account: PlanAccount) => PlanFetch;
   credentials: CredentialReader;
   now?: () => number;
   timeoutMs?: number;
@@ -313,7 +312,7 @@ export async function loadPlanUsage(input: {
     if (input.accounts.every((account) => cachedReport!.accounts.has(planUsageCacheKey([account])))) return { ...cachedReport.report, providers: cachedReport.report.providers.filter((row) => input.accounts.some((account) => account.id === row.id)) };
   }
   const report = await fetchPlanUsage(input.accounts, {
-    fetch: input.fetch ?? ((url, init) => globalThis.fetch(url, init)),
+    fetch: input.fetch ?? ((url, init) => globalThis.fetch(url, init)), ...(input.fetch ? {} : { fetchForAccount: (account: PlanAccount) => createProxyFetch<PlanFetch>(account.environment) }),
     credentials: input.credentials ?? defaultCredentialReader(input.env),
     now: () => now,
     timeoutMs: input.timeoutMs,
@@ -916,18 +915,19 @@ function okRow(account: PlanAccount, windows: PlanWindows): PlanProviderRow {
 
 async function fetchProvider(account: PlanAccount, deps: PlanUsageDeps): Promise<PlanProviderRow | null> { // null: OpenCode, in every fleet, with no key of its own
   let credential: PlanCredential;
-  if (account.driver === "antigravity") { const windows = await antigravityPlanUsage(account.id, deps); return windows && okRow(account, windows); } // null: no sign-in, or Google gave nothing
+  const accountDeps = deps.fetchForAccount ? { ...deps, fetch: deps.fetchForAccount(account) } : deps;
+  if (account.driver === "antigravity") { const windows = await antigravityPlanUsage(account.id, accountDeps); return windows && okRow(account, windows); } // null: no sign-in, or Google gave nothing
   try {
-    credential = await deps.credentials.read(account);
+    credential = await accountDeps.credentials.read(account);
   } catch {
     return account.driver === "opencode" ? null : errorRow(account, signInAgain(account.driver));
   }
   if (credential.expired || !credential.token) return account.driver === "opencode" && !credential.expired ? null : errorRow(account, signInAgain(account.driver));
   try {
-    if (account.driver === "claude") return await fetchClaude(account, credential.token, deps);
-    if (account.driver === "codex") return await fetchCodex(account, credential.token, credential.accountId, deps);
-    if (account.driver === "opencode") return await fetchOpenCode(account, credential.token, deps);
-    return await fetchGrok(account, credential.token, deps);
+    if (account.driver === "claude") return await fetchClaude(account, credential.token, accountDeps);
+    if (account.driver === "codex") return await fetchCodex(account, credential.token, credential.accountId, accountDeps);
+    if (account.driver === "opencode") return await fetchOpenCode(account, credential.token, accountDeps);
+    return await fetchGrok(account, credential.token, accountDeps);
   } catch {
     return errorRow(account, couldNotReach(account.driver));
   }
