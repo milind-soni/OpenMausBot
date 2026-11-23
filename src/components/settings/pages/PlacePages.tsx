@@ -35,7 +35,7 @@ import { SkillsSection } from "../../SkillsSection";
 import { ThreadConcurrencySettings } from "../../ThreadConcurrencySettings";
 import { usePhonePlaceState } from "../phone-status";
 import { KeysPage } from "../../keys/KeysPage";
-import { KEYS_ANCHOR_FOR_FOCUS } from "../../keys/key-focus";
+import { KEYS_ANCHOR_FOR_FOCUS, useKeyFocus } from "../../keys/key-focus";
 import { BrowserProfilesRow, ExperimentalFeaturesRow, NewBotEffortRow } from "../../AppSettingsRows";
 import { ServerUpdateRow } from "../../ServerUpdateRow";
 import { versionLine } from "../settings-context";
@@ -124,7 +124,8 @@ export function AiPage() {
   // Simple ends after Providers: Other services is one closed fold row, so the page fits one window.
   const asksForKeys = anchor === "ai-keys" || anchor === KEYS_ANCHOR_FOR_FOCUS;
   const [services, setServices] = useState(ctx.advanced || asksForKeys);
-  useEffect(() => { if (asksForKeys) setServices(true); }, [asksForKeys]);
+  const keyFocus = useKeyFocus();
+  useEffect(() => { if (asksForKeys || keyFocus) setServices(true); }, [asksForKeys, keyFocus]);
   const shown = ctx.advanced || services;
   const count = KEY_SECTIONS.filter((section) => section.id !== "ai").length;
   return <>

@@ -52,4 +52,9 @@ describe("VPS host limits across servers", () => {
     const patch = { vpsServers: [{ name: "Pinned", sshAlias: "pinned", cpuset: "0-3" }] };
     expect(await vpsHostLimitProblem(cfg, patch, host)).toContain("pins 4 CPUs");
   });
+  it("compares a pin against the default core limit when none is set", async () => {
+    const patch = { vps: { sshAlias: "main" }, vpsServers: [{ name: "Pinned", sshAlias: "pinned", cpuset: "0-3" }] };
+    expect(await vpsHostLimitProblem({ vps: {}, vpsServers: [] }, patch, host)).toBe("pinned pins 4 CPUs (0-3), more than its 2 cores");
+    expect(await vpsHostLimitProblem({ vps: {}, vpsServers: [] }, { vpsServers: [{ name: "Pinned", sshAlias: "pinned", cpus: 4, cpuset: "0-3" }] }, host)).toBeNull();
+  });
 });

@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, parse, sep } from "node:path";
 
 import { isValidSshAlias } from "./vps-config.ts";
 
@@ -41,8 +41,9 @@ const segmentMatcher = (segment: string) =>
 function includeTargets(pattern: string, sshDir: string, files: SshConfigFiles): string[] {
   const expanded = pattern.startsWith("~/") ? join(homedir(), pattern.slice(2)) : pattern;
   const path = isAbsolute(expanded) ? expanded : join(sshDir, expanded);
-  let paths = [path.startsWith("/") ? "/" : ""];
-  for (const segment of path.split("/").filter(Boolean)) {
+  const { root } = parse(path);
+  let paths = [root];
+  for (const segment of path.slice(root.length).split(sep === "\\" ? /[\\/]/ : "/").filter(Boolean)) {
     const next: string[] = [];
     for (const parent of paths) {
       if (!wildcard(segment)) next.push(join(parent, segment));

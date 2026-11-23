@@ -1,5 +1,5 @@
 import type { AppConfig, VpsServer } from "./config.ts";
-import { cpusetSize } from "./container-limits.ts";
+import { cpusetSize, DEFAULT_DESKTOP_RESOURCES } from "./container-limits.ts";
 import { vpsLimits } from "./vps-hosts.ts";
 import { defaultRunner, vpsDockerArgs, type VpsCommandRunner } from "./vps-computer.ts";
 
@@ -61,8 +61,9 @@ export async function vpsHostLimitProblem(cfg: AppConfig, patch: Patch, capacity
   const targets: ({ alias: string } & Limits)[] = [];
   for (const alias of aliases) {
     const limits = vpsLimits(after, alias);
-    if (limits.cpuset && limits.cpus !== undefined && cpusetSize(limits.cpuset) > limits.cpus) {
-      return `${alias} pins ${cpusetSize(limits.cpuset)} CPUs (${limits.cpuset}), more than its ${limits.cpus} cores`;
+    const effectiveCpus = limits.cpus ?? DEFAULT_DESKTOP_RESOURCES.cpus;
+    if (limits.cpuset && cpusetSize(limits.cpuset) > effectiveCpus) {
+      return `${alias} pins ${cpusetSize(limits.cpuset)} CPUs (${limits.cpuset}), more than its ${effectiveCpus} cores`;
     }
     const known = alias === cfg.vps?.sshAlias || (cfg.vpsServers ?? []).some((server) => server.sshAlias === alias);
     const hasLimits = limits.cpus !== undefined || limits.memoryGb !== undefined || Boolean(limits.cpuset);
