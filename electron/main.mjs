@@ -41,9 +41,7 @@ import { createActivityWindow } from "./lending-activity-window.mjs";
 import { missingPermissions } from "./lent-screen-failures.mjs";
 import { createScreenControl } from "./screen-control.mjs"; import { createAskPrompt } from "./ask-prompt.mjs";
 let startupScreen = null;
-let desktopTray = null;
-// Linux: an icon in the top bar to open or quit. The window never hides into it: not every desktop shows the icon.
-let linuxTray = null;
+let desktopTray = null, linuxTray = null; // Linux: an Open/Quit icon the window never hides into, since not every desktop shows it.
 import { collisionFreeDownloadPath, defaultSaveName, openFolder, openHtmlCopy, openLogsFolder, revealDownloadWhenDone, revealInFolder, withSavableFile } from "./save-file.mjs";
 import { desktopViewerPermissionAllowed } from "./desktop-viewer-permissions.mjs";
 import { appPermissionHandlers, externalLinkUrl } from "./app-permissions.mjs";
@@ -1482,9 +1480,7 @@ const lendingActivity = createActivityWindow({ BrowserWindow, icon: APP_ICON, ba
 let lendingTray = null;
 function lendingIndicator() {
   lendingTray ??= createLendingIndicator({
-    // On Linux the lending indicator borrows the one tray icon: a second one would be a GtkStatusIcon nobody sees.
-    Tray: linuxTray ? class { constructor() { return linuxTray.borrow(); } } : Tray,
-    Menu, nativeImage, Notification, iconPath: APP_ICON, t: nativeT, onPause: () => sharingController().pause(), onActivity: () => lendingActivity.show(),
+    Tray: linuxTray?.Borrowed ?? Tray, Menu, nativeImage, Notification, iconPath: APP_ICON, t: nativeT, onPause: () => sharingController().pause(), onActivity: () => lendingActivity.show(),
     onResume: () => void sharingController().resume()?.catch(error => slog(`lending resume: ${error?.message ?? error}`)), onStartScreen: () => void screenControl.start(),
     onTerminal: on => void lendingDialogs.lendTerminal(on, () => sharingController().lendTerminal(on)).catch(error => slog(`lending terminal: ${error?.message ?? error}`)), onQuit: process.platform === "win32" || linuxTray ? () => app.quit() : null,
   });
@@ -2797,8 +2793,7 @@ app.whenReady().then(async () => { launchRecord.mark("ready");
   });
   if (process.platform === "win32" || process.platform === "linux") {
     try {
-      const tray = createSystemTray({
-        Tray, Menu, nativeImage, iconPath: APP_ICON, t: nativeT,
+      const tray = createSystemTray({ Tray, Menu, nativeImage, iconPath: APP_ICON, t: nativeT,
         getWindow: () => startupScreen?.window ?? mainWindow ?? (openWindowForLink?.(), mainWindow),
         onQuit: () => app.quit(),
       });

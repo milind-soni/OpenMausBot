@@ -258,7 +258,7 @@ test("on Linux the lending indicator borrows the one tray icon and hands Open an
   const tray = createSystemTray({ ...fakes, Tray, getWindow: () => win, onQuit: () => {} });
   const labels = () => made[0].menu.filter(item => item.label).map(item => item.label);
   const openQuit = labels();
-  const lending = createLendingIndicator({ ...fakes, Tray: class { constructor() { return tray.borrow(); } },
+  const lending = createLendingIndicator({ ...fakes, Tray: tray.Borrowed,
     onPause: () => {}, onResume: () => {}, onActivity: () => {}, device: "PC" });
   win.on("show", () => opened.push("show"));
 

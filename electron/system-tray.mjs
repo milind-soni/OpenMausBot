@@ -54,6 +54,8 @@ export function createSystemTray({ Tray, Menu, nativeImage, iconPath, getWindow,
         },
       };
     },
+    /** A Tray class for the lending indicator: constructing one borrows this icon instead of making a second. */
+    get Borrowed() { const owner = this; return class { constructor() { return owner.borrow(); } }; },
     destroy() { if (!tray.isDestroyed()) tray.destroy(); },
   };
 }
