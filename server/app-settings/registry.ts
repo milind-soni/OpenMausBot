@@ -34,6 +34,13 @@ interface Base {
   /** What a person or bot sees. Never a secret: a key reads as set or not set. */
   read(): string;
 }
+export interface BatchWriteResult {
+  refusal?: string;
+  change: string;
+  before: unknown;
+  skipped?: Array<{ botId: string; name: string; reason: string }>;
+}
+
 /** `value` checks what the bot sends at the boundary. `current`, read just before the write, is what Undo writes back to
  * put things as they were (typed as `write` takes it); undefined when the earlier state can't be set back. `describe` is
  * for a change that does not read as before → after: the one line its applied card shows, or why a bot may not make it. */
@@ -46,7 +53,10 @@ interface Writable {
   fromFile?: true;
   current(value: unknown): unknown;
   write(value: unknown): Promise<string | null>;
+  writeBatch?(value: unknown): Promise<BatchWriteResult>;
   describe?(value: unknown): { change: string } | { refusal: string };
+  /** Optional snapshot key of targeted live fields for Undo staleness checks when `read()` returns constant text. */
+  undoTag?(before: unknown): string;
 }
 interface Secret {
   tier: "secret";
@@ -94,8 +104,8 @@ const KEY_WHERE: Partial<Record<CredentialTargetId, Where>> = {
   onePasswordToken: "vault",
 };
 
-export type WritableSpec = Omit<Base, "read"> & Omit<Writable, "tier" | "current" | "write" | "describe"> & {
-  read?(): string; current(value: never): unknown; write(value: never): Promise<string | null>; describe?(value: never): { change: string } | { refusal: string };
+export type WritableSpec = Omit<Base, "read"> & Omit<Writable, "tier" | "current" | "write" | "describe" | "writeBatch" | "undoTag"> & {
+  read?(): string; current(value: never): unknown; write(value: never): Promise<string | null>; writeBatch?(value: never): Promise<BatchWriteResult>; describe?(value: never): { change: string } | { refusal: string }; undoTag?(before: unknown): string;
 };
 /** `line` says what the new value does on the applied card; `refusal` names a value only the person sets, in Settings. */
 export type WindowPref = (id: WindowPrefId, label: string, help: string, where: Where, synonyms: string[], allowed: string,
@@ -141,7 +151,7 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
   const names = (ids: readonly string[]) => ids.map((id) => deps.bots().find((bot) => bot.id === id)?.name ?? id).join(", ");
   const writable = (spec: WritableSpec): SettingEntry => ({
     ...spec, tier: "safe", read: spec.read ?? (() => display((spec.current as () => unknown)())), current: spec.current as Writable["current"],
-    write: spec.write as Writable["write"], ...(spec.describe ? { describe: spec.describe as Writable["describe"] } : {}),
+    write: spec.write as Writable["write"], ...(spec.writeBatch ? { writeBatch: spec.writeBatch as Writable["writeBatch"] } : {}), ...(spec.describe ? { describe: spec.describe as Writable["describe"] } : {}), ...(spec.undoTag ? { undoTag: spec.undoTag } : {}),
   });
   const config = <V,>(patch: (value: V) => Record<string, unknown>) => (value: V) => deps.saveConfig(patch(value));
   const windowPref: WindowPref = (id, label, help, where, synonyms, allowed, line) => writable({

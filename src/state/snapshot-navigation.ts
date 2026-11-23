@@ -1,4 +1,14 @@
-import type { Bot, Group, Message } from "./store";
+import { branchLeafFrom } from "../../shared/conversation-branch";
+import type { AppState, Bot, Group, Message } from "./store";
+
+export function switchBotBranch(state: AppState, botId: string, threadId: string, messageId: string): AppState {
+  const panel = state.forkPanel;
+  if (panel?.kind === "bot" && panel.ownerId === botId && panel.threadId === threadId) {
+    return { ...state, forkPanel: { ...panel, activeLeafId: branchLeafFrom(panel.messages, messageId) } };
+  }
+  return { ...state, bots: state.bots.map((bot) => bot.id === botId && bot.threadId === threadId
+    ? { ...bot, activeLeafId: branchLeafFrom(bot.messages, messageId) } : bot) };
+}
 
 // One branch per transcript array and leaf: every sidebar row, the composer and the chat ask for it on each store
 // change, and an unchanged transcript keeps the same array (so memos keyed on it hold).

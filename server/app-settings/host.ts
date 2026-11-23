@@ -103,15 +103,39 @@ export function createAppSettings(deps: AppSettingsDeps) {
     if (writes.size > 200) writes.delete(writes.keys().next().value!);
     return null;
   };
+  const releaseWrite = (turn: Turn): void => {
+    const spent = writes.get(turn.generation) ?? 0;
+    if (spent <= 1) writes.delete(turn.generation);
+    else writes.set(turn.generation, spent - 1);
+  };
+
+  const isBatchValue = (value: unknown): value is { botIds: unknown } =>
+    Boolean(value && typeof value === "object" && "botIds" in value && (value as { botIds?: unknown }).botIds !== undefined);
 
   /** Applies the change, posts its applied card with Undo, and logs it in the decision log. */
   async function apply(turn: Turn, bot: BotRecord, entry: WritableEntry, value: unknown, change?: string) {
-    const before = await entry.current(value);
-    const was = entry.read();
-    const refusal = await entry.write(value);
-    if (refusal) return refuse(409, refusal);
-    const after = entry.read();
-    const shown: Shown = change === undefined ? { before: was, after } : { after: change };
+    let before: unknown;
+    let was = "";
+    let shownChange = change;
+    let skipped: Array<{ botId: string; name: string; reason: string }> = [];
+    if (entry.writeBatch && isBatchValue(value)) {
+      const batch = await entry.writeBatch(value);
+      if (batch.refusal) {
+        releaseWrite(turn);
+        return refuse(409, batch.refusal);
+      }
+      before = batch.before;
+      shownChange = batch.change;
+      skipped = batch.skipped ?? [];
+    } else {
+      before = await entry.current(value);
+      was = entry.read();
+      const refusal = await entry.write(value);
+      if (refusal) return refuse(409, refusal);
+    }
+    const afterRead = entry.read();
+    const after = entry.undoTag ? entry.undoTag(before) : afterRead;
+    const shown: Shown = shownChange === undefined ? { before: was, after: afterRead } : { after: shownChange };
     const requestId = randomUUID();
     const language = deps.language(turn.threadId);
     const notSet = (value: string) => value || serverLine(language, "server.appSettings.notSet");
@@ -123,8 +147,11 @@ export function createAppSettings(deps: AppSettingsDeps) {
     });
     undoable.set(requestId, { entry, before, after });
     appendDecision(deps.dataDir, { threadId: turn.threadId, requestId, botId: turn.botId, botName: bot.name, tool: TOOL, summary: `${entry.id}: ${said(shown)}`, decision: "auto-approved", source: "app-settings" });
-    const done = change === undefined ? `Changed ${entry.label} from ${text(was)} to ${text(after)}.` : `Done: ${change}. ${entry.label} now: ${text(after)}.`;
-    return reply(200, { text: `${done} The user can undo it from the card in the conversation.` });
+    const done = shownChange === undefined ? `Changed ${entry.label} from ${text(was)} to ${text(afterRead)}.` : `Done: ${shownChange}. ${entry.label} now: ${text(afterRead)}.`;
+    const skippedNote = skipped.length
+      ? ` Skipped ${skipped.length} ${skipped.length === 1 ? "bot" : "bots"}: ${skipped.map((item) => `${item.name} (${item.reason})`).join("; ")}${skipped.at(-1)!.reason.endsWith(".") ? "" : "."}`
+      : "";
+    return reply(200, { text: `${done}${skippedNote} The user can undo it from the card in the conversation.` });
   }
 
   async function set(turn: Turn, body: Record<string, unknown>) {
@@ -237,9 +264,13 @@ export function createAppSettings(deps: AppSettingsDeps) {
       if (current.undone) return { claimed: true, state: "already_undone" };
       const change = undoable.get(args.requestId);
       if (!change || current.answered !== "allow") return { claimed: true, state: "invalid", error: "This change can't be undone here.", status: 409 };
-      if (change.entry.read() !== change.after) return { claimed: true, state: "invalid", error: UNDO_STALE, status: 409, stale: true };
+      const currentTag = change.entry.undoTag ? change.entry.undoTag(change.before) : change.entry.read();
+      if (currentTag !== change.after) return { claimed: true, state: "invalid", error: UNDO_STALE, status: 409, stale: true };
       const refusal = change.before === undefined ? "The earlier value is not one that can be set back." : await change.entry.write(change.before);
-      if (refusal) return { claimed: true, state: "invalid", error: refusal, status: 409 };
+      if (refusal) {
+        if (change.before !== undefined) change.after = change.entry.undoTag ? change.entry.undoTag(change.before) : change.entry.read();
+        return { claimed: true, state: "invalid", error: refusal, status: 409 };
+      }
       undoable.delete(args.requestId);
       store.patchMessage(args.threadId, message.id, { card: { ...current, undone: true } });
       return { claimed: true, state: "undone" };

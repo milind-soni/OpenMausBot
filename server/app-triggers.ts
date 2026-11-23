@@ -59,6 +59,8 @@ export interface AppTriggerManagerOptions {
   service: () => { available: true } | { available: false; reason: "self-hosted" | "unavailable" | "off" };
   connectedApps: () => Promise<ConnectedApps>;
   botState: (botId: string) => "ready" | "busy" | "missing";
+  /** The account ids of an app a bot may use, from its Access settings; undefined when it may use every account. */
+  accountLimit?: (botId: string, app: string) => string[] | undefined;
   runs: {
     enqueue(input: { webhookId: string; webhookName: string; prompt: string; botId: string; runOn: RoutineRunOn; deliveryId: string; receivedAt: number; eventSource: "app"; sameConversation?: boolean }): { id: string };
     merge(triggerId: string, eventId: string, sameConversation: boolean, merge: (prompt: string) => string | null): { id: string } | null;
@@ -163,6 +165,9 @@ export interface AppTriggerPatch {
 
 const utcDay = (at: number) => new Date(at).toISOString().slice(0, 10);
 const active = (status: string) => /^active$/i.test(status);
+const ACCOUNT_NOT_ALLOWED = "Its bot may no longer use this account. Allow it again under the bot's Access settings, or make the automation for an account the bot may use.";
+const QUEUED_RUN_REFUSED = "Its bot may no longer use this account, so this event's run did not start";
+const names = (accounts: Array<{ id: string; alias?: string }>) => accounts.map((account) => account.alias ?? account.id).join(", ");
 
 function cleanFilter(filter: AppTriggerFilter | null | undefined): AppTriggerFilter | undefined {
   if (!filter) return undefined;
@@ -272,7 +277,7 @@ export class AppTriggerManager {
     const type = await this.remote(() => this.options.broker.triggerType(input.event.trim()));
     if (!type) throw new AppTriggerError(`${input.event} is not an event OpenMausBot can watch. Call trigger_info action=events to see the events this app offers.`, 404);
     if (type.toolkit !== app) throw new AppTriggerError(`${type.slug} is a ${appLabel(type.toolkit)} event, not ${appLabel(app)}.`);
-    const account = await this.resolveAccount(app, input.account);
+    const account = await this.resolveAccount(input.botId, app, input.account);
     const filter = cleanFilter(input.filter);
     const config = triggerConfig(type, input.config ?? {}, filter);
     const now = this.now();
@@ -410,6 +415,7 @@ export class AppTriggerManager {
       const entry = this.deleted.find((candidate) => candidate.trigger.id === id && candidate.at >= this.now() - RESTORE_WINDOW_MS);
       if (!entry || this.triggers.some((trigger) => trigger.id === id)) return null;
       if (this.options.botState(entry.trigger.botId) === "missing") throw new AppTriggerError("The assigned bot no longer exists.", 410);
+      if (!this.botMayUse(entry.trigger.botId, entry.trigger.app, entry.trigger.accountId)) throw new AppTriggerError(ACCOUNT_NOT_ALLOWED, 403);
       const trigger: StoredTrigger = { ...structuredClone(entry.trigger), remote: { state: "pending" }, updatedAt: this.now() };
       try { await this.bind(trigger); await this.applyEnabled(trigger.remote.triggerId, trigger.enabled); }
       catch (error) { this.markRemoteFailure(trigger, error); }
@@ -422,10 +428,17 @@ export class AppTriggerManager {
     });
   }
 
+  /** Why a queued run of this automation may not start now, checked as it starts: its bot lost the account since the event came in. */
+  runRefusal(id: string): string | null {
+    const trigger = this.triggers.find((candidate) => candidate.id === id);
+    return trigger && !this.botMayUse(trigger.botId, trigger.app, trigger.accountId) ? QUEUED_RUN_REFUSED : null;
+  }
+
   /** A test event marked as one, sent through the service's real queue when the automation has its copy there. */
   async runNow(id: string): Promise<{ via: "service" | "here"; runId?: string } | null> {
     const trigger = this.triggers.find((candidate) => candidate.id === id);
     if (!trigger) return null;
+    if (!this.botMayUse(trigger.botId, trigger.app, trigger.accountId)) throw new AppTriggerError(ACCOUNT_NOT_ALLOWED, 403);
     const data = { omb_test: true, note: "A test run started from OpenMausBot." };
     if (trigger.remote.triggerId && trigger.remote.state === "active" && this.options.service().available) {
       try {
@@ -518,6 +531,10 @@ export class AppTriggerManager {
       }
       if (this.options.botState(trigger.botId) === "missing") {
         this.record(trigger, event, "rejected", { reason: "its bot was deleted" });
+        continue;
+      }
+      if (!this.botMayUse(trigger.botId, trigger.app, trigger.accountId)) {
+        this.record(trigger, event, "rejected", { reason: "its bot may no longer use this account" });
         continue;
       }
       if (!matchesFilter(trigger.app, trigger.filter, data)) {
@@ -637,6 +654,8 @@ export class AppTriggerManager {
   private async reconcileOne(trigger: StoredTrigger, bindings: Map<string, BrokerInventory["triggers"][number]>, accounts: ConnectedApps | null): Promise<void> {
     // Its bot is gone: paused here, so Composio stops sending what no one would run.
     if (trigger.enabled && this.options.botState(trigger.botId) === "missing") trigger.enabled = false;
+    const allowed = this.botMayUse(trigger.botId, trigger.app, trigger.accountId);
+    if (!allowed) this.options.runs.cancelQueued(trigger.id, QUEUED_RUN_REFUSED);
     const account = accounts?.[trigger.app]?.accounts.find((candidate) => candidate.id === trigger.accountId);
     if (accounts && (!account || !active(account.status))) {
       if (trigger.problem?.kind !== "reconnect") trigger.problem = { kind: "reconnect", at: this.now() };
@@ -651,7 +670,9 @@ export class AppTriggerManager {
       return;
     }
     trigger.remote = { triggerId: binding.triggerId, state: "active", syncedAt: this.now() };
-    if (trigger.problem?.kind === "error") delete trigger.problem;
+    // Kept, not re-stamped, while the account stays off the bot's list, so each pass does not announce it again.
+    if (trigger.problem?.kind === "error" && (allowed || trigger.problem.text !== ACCOUNT_NOT_ALLOWED)) delete trigger.problem;
+    if (!allowed && !trigger.problem) trigger.problem = { kind: "error", text: ACCOUNT_NOT_ALLOWED, at: this.now() };
   }
 
   /** The service's drop counts never reset; today's share is what grew since the UTC day began. */
@@ -675,7 +696,11 @@ export class AppTriggerManager {
     trigger.skipped = { ...current, [reason]: current[reason] + 1 };
   }
 
-  private async resolveAccount(app: string, wanted: string | undefined): Promise<{ id: string; alias?: string }> {
+  private botMayUse(botId: string, app: string, accountId: string): boolean {
+    return this.options.accountLimit?.(botId, app)?.includes(accountId) ?? true;
+  }
+
+  private async resolveAccount(botId: string, app: string, wanted: string | undefined): Promise<{ id: string; alias?: string }> {
     let apps: ConnectedApps;
     try {
       apps = await this.options.connectedApps();
@@ -685,16 +710,22 @@ export class AppTriggerManager {
     const accounts = (apps[app]?.accounts ?? []).filter((account) => active(account.status));
     const label = appLabel(app);
     if (!accounts.length) throw new AppTriggerError(`${label} is not connected. Ask the person to connect ${label} first (COMPOSIO_MANAGE_CONNECTIONS shows them a card for it), then create the automation.`, 409);
+    const allowed = accounts.filter((account) => this.botMayUse(botId, app, account.id));
+    const refusal = () => new AppTriggerError(allowed.length
+      ? `This bot may use only ${names(allowed)} in ${label}. Watch one of those, or ask the person to allow another account under the bot's Access settings.`
+      : `This bot may use none of the connected ${label} accounts. Ask the person to allow one under the bot's Access settings.`, 403);
     if (wanted?.trim()) {
       const key = wanted.trim().toLowerCase();
       const match = accounts.find((account) => account.id === wanted.trim() || account.alias?.toLowerCase() === key);
-      if (!match) throw new AppTriggerError(`No connected ${label} account is called ${wanted}. The accounts are: ${accounts.map((account) => account.alias ?? account.id).join(", ")}.`);
+      if (!match) throw allowed.length < accounts.length ? refusal() : new AppTriggerError(`No connected ${label} account is called ${wanted}. The accounts are: ${names(accounts)}.`);
+      if (!allowed.includes(match)) throw refusal();
       return match;
     }
-    if (accounts.length > 1) {
-      throw new AppTriggerError(`The person has ${accounts.length} ${label} accounts (${accounts.map((account) => account.alias ?? account.id).join(", ")}). Ask which one, then pass account.`);
+    if (!allowed.length) throw refusal();
+    if (allowed.length > 1) {
+      throw new AppTriggerError(`${allowed.length === accounts.length ? "The person has" : "This bot may use"} ${allowed.length} ${label} accounts (${names(allowed)}). Ask which one, then pass account.`);
     }
-    return accounts[0]!;
+    return allowed[0]!;
   }
 
   private async bind(trigger: StoredTrigger): Promise<void> {
@@ -730,7 +761,7 @@ export class AppTriggerManager {
   }
 
   private wantsEnabled(triggerId: string): boolean {
-    return this.triggers.some((trigger) => trigger.remote.triggerId === triggerId && trigger.enabled);
+    return this.triggers.some((trigger) => trigger.remote.triggerId === triggerId && trigger.enabled && this.botMayUse(trigger.botId, trigger.app, trigger.accountId));
   }
 
   private markRemoteFailure(trigger: StoredTrigger, error: unknown): void {

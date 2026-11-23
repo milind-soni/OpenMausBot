@@ -55,10 +55,18 @@ const CLOUD_SETS = AIMS.map(aim => buildClouds(LOOK_AROUND, MOUTH_STROKE, aim))
  * placement. */
 const ALL_CLOUDS = CLOUD_SETS.flat()
 
-/** The scale cap. 1.0 reproduces the proportions the expressions were drawn at. */
+/** The cursor's scale cap. 1.0 reproduces the proportions the expressions were drawn at. */
 const CAP = 1
 
+/** Every other body wears the largest face it holds, up to this cap... */
+const ROOMY_CAP = 1.5
+
+/** ...at this share of the largest, so the face keeps calm room around it instead of
+ * grazing the outline when it looks to an edge. */
+const ROOM = 0.9
+
 function solveBody(def: BodyDef): Solved {
+  const cap = def.id === DEFAULT_ID ? CAP : ROOMY_CAP
   // `def.viewBox` is advisory and wrong for two bodies; bounds come from the outline.
   const polylines = flatten(def.d)
   const fit = fitTransform(boundsOf(polylines))
@@ -71,7 +79,7 @@ function solveBody(def: BodyDef): Solved {
   let best: Anchor = {
     x: circle.x,
     y: circle.y,
-    scale: maxScaleAt(ALL_CLOUDS, sdf, circle.x, circle.y, CAP),
+    scale: maxScaleAt(ALL_CLOUDS, sdf, circle.x, circle.y, cap),
   }
   let step = Math.max(circle.radius, 12)
   for (let level = 0; level < 8; level++) {
@@ -80,7 +88,7 @@ function solveBody(def: BodyDef): Solved {
         if (!dx && !dy) continue
         const x = best.x + dx * step
         const y = best.y + dy * step
-        const scale = maxScaleAt(ALL_CLOUDS, sdf, x, y, CAP)
+        const scale = maxScaleAt(ALL_CLOUDS, sdf, x, y, cap)
         if (scale > best.scale + 1e-4) best = { x, y, scale }
       }
     }
@@ -196,10 +204,8 @@ function emit(bodies: Baked[]): string {
  * \`scripts/gen-mascot-bodies.ts\`, which solves each face placement against the real
  * expression geometry and verifies that nothing clips.
  *
- * Every body carries the same face at the same size: the generator clamps the whole
- * catalog to the smallest face any one body can hold, so the mascot reads as one
- * character in different bodies rather than ten different mascots. Roomier bodies simply
- * end up with more margin around the face.
+ * The cursor keeps the face it shipped with. Every other body wears the largest face it
+ * holds with room to spare, never smaller than the cursor's, so the face leads the shape.
  *
  * The fields match \`CursorSilhouette\` exactly, so a body can be handed to the renderer
  * with no adapter in between.
@@ -441,23 +447,20 @@ function main(): void {
   }
   console.log("")
 
-  const shared = solved.reduce((min, s) => Math.min(min, s.scale), Infinity)
-  if (shared < cursor.scale) {
-    const tighter = solved
-      .filter(s => s.scale < cursor.scale)
-      .map(s => `${s.def.id} (${s.scale})`)
-      .join(", ")
+  const scaleOf = (body: Solved) =>
+    body === cursor ? cursor.scale : Math.floor(body.scale * ROOM * 1000) / 1000
+  const tighter = solved.filter(s => scaleOf(s) < cursor.scale)
+  if (tighter.length > 0) {
     throw new Error(
-      `the shared face scale ${shared} is below ${DEFAULT_ID}'s own ${cursor.scale}: ` +
-        `${tighter} cannot hold the shipped face, so clamping the catalog would shrink ` +
-        `the mascot everyone already has. Widen those outlines rather than lowering the floor.`
+      `${tighter.map(s => `${s.def.id} (${scaleOf(s)})`).join(", ")} cannot hold a face as big ` +
+        `as ${DEFAULT_ID}'s ${cursor.scale}. Widen those outlines rather than lowering the floor.`
     )
   }
 
   const baked: Baked[] = []
   const clipped: string[] = []
   for (const body of solved) {
-    const anchor = anchorAt(body.sdf, body.seed, shared)
+    const anchor = anchorAt(body.sdf, body.seed, scaleOf(body))
     const clipping = clippingAt(body.sdf, anchor)
     clipping.forEach((expressions, i) => {
       if (expressions.length === 0) return
@@ -481,7 +484,6 @@ function main(): void {
     })
   }
 
-  console.log(`shared face scale ${shared} (${DEFAULT_ID}'s own floor is ${cursor.scale})`)
   console.log(`${"body".padEnd(width)}  ${"scale".padStart(6)}  ${"clearance".padStart(9)}`)
   for (const body of baked) {
     const scale = body.anchor.scale.toFixed(3).padStart(6)
