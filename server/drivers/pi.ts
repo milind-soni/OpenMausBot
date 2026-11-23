@@ -53,7 +53,7 @@ import { piAgentDir, readPiDefaultModel, withOwnPiAgentDir } from "./pi-agent-di
 import { noticeFailure } from "../chat-notices.ts";
 
 import { decodePiFrame, PiRpcChunks, piLineReader, piNativeLogMessage, readPiPromptImages } from "./pi-rpc.ts";
-import { PiRunUsage, type PiUsage, type TurnUsage } from "./pi-usage.ts";
+import { piMessageUsage, PiRunUsage, type PiUsage, type TurnUsage } from "./pi-usage.ts";
 export { decodePiFrame, PiRpcChunks, piLineReader } from "./pi-rpc.ts";
 
 const DRIVER_KIND = "piAgent";
@@ -80,6 +80,7 @@ interface PiModelEntry {
   provider: string;
   id: string;
   name?: string;
+  contextWindow?: number;
 }
 
 interface PiModelsResponse {
@@ -92,11 +93,15 @@ interface PiModelsResponse {
 function piCatalogFromFrame(frame: unknown, fallbackDefault: string): ModelCatalog | null {
   const res = frame as PiModelsResponse;
   if (res?.type !== "response" || res.command !== "get_available_models" || !res.success) return null;
-  const options: Array<{ id: string; label: string; custom: true; provider: string }> = [];
+  const options: Array<{ id: string; label: string; custom: true; provider: string; contextWindow?: number }> = [];
   for (const m of res.data?.models ?? []) {
     if (!m?.provider || !m?.id) continue;
     const id = `${m.provider}/${m.id}`;
-    options.push({ id, label: m.name ?? m.id, custom: true, provider: m.provider });
+    const contextWindow = m.contextWindow;
+    options.push({
+      id, label: m.name ?? m.id, custom: true, provider: m.provider,
+      ...(typeof contextWindow === "number" && Number.isFinite(contextWindow) && contextWindow > 0 ? { contextWindow } : {}),
+    });
   }
   return { default: fallbackDefault || (options[0]?.id ?? ""), options };
 }
@@ -710,9 +715,23 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             if (evt.type.endsWith("compaction_end") && typeof (evt as { result?: { summary?: unknown } }).result?.summary === "string" && /\S/.test((evt as { result: { summary: string } }).result.summary) && !(evt as { aborted?: boolean }).aborted && !(evt as { errorMessage?: string }).errorMessage) { flushAssistantText(); emit({ ...base(threadId, turnId), type: "context.compacted" }); }
             return;
           }
-          case "message_end":
-            if (evt.message?.role === "assistant") runUsage.add(evt.message.usage);
+          case "message_end": {
+            if (evt.message?.role !== "assistant") return;
+            runUsage.add(evt.message.usage);
+            const call = piMessageUsage(evt.message.usage);
+            if (!call) return;
+            const contextWindow = models.options.find((option) => option.id === turn.model)?.contextWindow;
+            emit({
+              ...base(threadId, turnId),
+              type: "thread.token-usage.updated",
+              input: call.input,
+              output: call.output,
+              ...(call.cachedInput === undefined ? {} : { cachedInput: call.cachedInput }),
+              contextTokens: call.contextTokens,
+              ...(typeof contextWindow === "number" && contextWindow > 0 ? { contextWindow } : {}),
+            });
             return;
+          }
           case "turn_end":
           {
             // A killed child can still flush one buffered frame after the turn settled.
