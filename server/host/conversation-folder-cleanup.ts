@@ -75,7 +75,8 @@ export interface FolderCleanupDeps {
   warn?(line: string): void;
 }
 
-type Job = { kind: "workspace"; folder: string } | { kind: "results"; threadId: string };
+/** `name`: a folder name under tool-results, which is a thread id for a deleted conversation. */
+type Job = { kind: "workspace"; folder: string } | { kind: "results"; name: string };
 export interface CleanupTotals { folders: number; entries: number; bytes: number; failed: number }
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -224,7 +225,7 @@ export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
   async function runJob(job: Job, totals: CleanupTotals): Promise<void> {
     if (job.kind === "results") {
       const records = deps.records();
-      const name = job.threadId;
+      const name = job.name;
       // A name another thread's results may also be kept under (the gate cuts names at 80 characters) stays.
       const shared = [...liveThreadIds(records)].some((id) => hookResultsName(id) === name || gateResultsName(id) === name);
       if (shared || !ID.test(name)) return;
@@ -270,7 +271,7 @@ export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
   }
 
   function enqueue(job: Job): void {
-    queued.set(job.kind === "workspace" ? `workspace:${job.folder}` : `results:${job.threadId}`, job);
+    queued.set(job.kind === "workspace" ? `workspace:${job.folder}` : `results:${job.name}`, job);
   }
 
   const children = (dir: string) => (realFolder(dir) ? readdirNames(dir) : []);
@@ -288,7 +289,7 @@ export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
     const bots = children(tasksRoot).filter((id) => ID.test(id));
     for (const threadId of ids) {
       for (const botId of bots) if (realFolder(join(tasksRoot, botId, threadId))) enqueue({ kind: "workspace", folder: join(tasksRoot, botId, threadId) });
-      enqueue({ kind: "results", threadId });
+      enqueue({ kind: "results", name: threadId });
     }
     kick();
   }
@@ -302,9 +303,21 @@ export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
 
   if (deps.drainAfterMs !== false) setTimeout(kick, deps.drainAfterMs ?? DRAIN_AFTER_START_MS).unref?.();
 
+  /** Folders the orphan sweep found: conversation folders (their rebuildable trees go) and tool-results folder names. */
+  function orphans(found: { workspaces?: Iterable<string>; results?: Iterable<string> }): void {
+    for (const folder of found.workspaces ?? []) enqueue({ kind: "workspace", folder: resolve(folder) });
+    for (const name of found.results ?? []) enqueue({ kind: "results", name });
+    kick();
+  }
+
   return {
     conversationsGone,
     botGone,
+    orphans,
+    /** What still uses a conversation folder, or null when nothing that remains can. */
+    whyKept: heldBy,
+    /** Its dependency and build trees. */
+    rebuildable,
     /** Finishes what an earlier run left in .removing. */
     drain: () => { kick(); return running; },
     /** Resolves once everything queued so far is done. */
