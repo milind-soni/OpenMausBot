@@ -258,7 +258,7 @@ server still does, as above). The desktop wants 4 GB of memory, so a board with
 The image starts as root, runs `dockerd`, then runs the server as the
 unprivileged `maus` user. If `dockerd` cannot start (no `privileged`, no
 volume), it logs why and starts the server anyway: everything but the Local VM
-works, and the setup screen reports no container runtime.
+works, and the setup screen reports `Start docker first`.
 
 A privileged container has the host's full access, so use this on a machine you
 control, and use the regular image where the Local VM is not needed. On Unraid
