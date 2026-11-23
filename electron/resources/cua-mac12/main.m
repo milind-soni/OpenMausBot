@@ -78,6 +78,17 @@ static void CUAServeConnection(int connection) {
   }
 }
 
+/** One MCP client per thread: a client that stops reading (a turn that ended mid-call, a proxy left open) must not stop
+ * every later client from being answered. */
+static void *CUAClientThread(void *argument) {
+  int connection = (int)(intptr_t)argument;
+  @autoreleasepool {
+    CUAServeConnection(connection);
+  }
+  close(connection);
+  return NULL;
+}
+
 static void *CUALifelineThread(void *argument) {
   int descriptor = (int)(intptr_t)argument;
   char buffer[256];
@@ -142,8 +153,13 @@ static int CUAServe(const char *socketPath, const char *toolsPath, int lifeline)
       if (errno == EINTR) continue;
       break;
     }
-    CUAServeConnection(connection);
-    close(connection);
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, CUAClientThread, (void *)(intptr_t)connection) == 0) {
+      pthread_detach(thread);
+    } else {
+      CUAServeConnection(connection);
+      close(connection);
+    }
   }
   CUACleanupSocket();
   close(listener);

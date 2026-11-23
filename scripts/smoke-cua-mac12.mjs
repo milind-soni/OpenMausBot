@@ -110,9 +110,24 @@ async function run() {
     fail("check_permissions did not return both booleans");
   }
 
+  // A turn's proxy can outlive its turn: a second client must still be answered while the first sits idle.
+  const second = start(binary, ["mcp", "--socket", socketPath], ["pipe", "pipe", "pipe"]);
+  proxy.push(second);
+  let secondAnswered = false;
+  let secondPending = "";
+  second.stdout.setEncoding("utf8");
+  second.stdout.on("data", (chunk) => {
+    secondPending = parseLines(secondPending + chunk, (line) => {
+      if (line.includes('"id":11')) secondAnswered = true;
+    });
+  });
+  second.stdin.write(frame(11, "initialize", { protocolVersion: "2025-03-26" }));
+  await waitFor(() => secondAnswered, "a second client to be answered while the first is connected")
+    .catch(() => fail("a second MCP client was not answered while the first stayed connected"));
+
   console.log(`cua-driver-mac12: ${result(1).serverInfo.name}, ${names.size} tools, ${apps.length} apps, ` +
     `screen ${screen.width}x${screen.height}, accessibility=${permissions.accessibility}, ` +
-    `screen_recording=${permissions.screen_recording}`);
+    `screen_recording=${permissions.screen_recording}, concurrent clients ok`);
 }
 
 let failure = null;

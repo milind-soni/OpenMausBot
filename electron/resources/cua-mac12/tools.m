@@ -1,4 +1,5 @@
 #import "cua-mac12.h"
+#import <pthread.h>
 
 @implementation CUAContent
 @end
@@ -61,6 +62,10 @@ NSString *CUAJSONString(id value) {
   NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
   return text ?: @"null";
 }
+
+/// The AX token table and input event order are process-global: one tool call runs at a time, however many MCP clients
+/// are attached.
+static pthread_mutex_t gCallLock = PTHREAD_MUTEX_INITIALIZER;
 
 static NSArray<NSDictionary *> *gTools = @[];
 static NSString *gSession = nil;
@@ -134,6 +139,7 @@ static CUAResult *CUAToolSetAgentCursorMotion(NSDictionary *args) {
 NSDictionary *CUAHandleCall(NSString *name, NSDictionary *arguments) {
   NSDictionary *args = [arguments isKindOfClass:[NSDictionary class]] ? arguments : @{};
   CUAResult *result = nil;
+  pthread_mutex_lock(&gCallLock);
   @try {
     if ([name isEqualToString:@"get_screen_size"]) result = CUAToolGetScreenSize(args);
     else if ([name isEqualToString:@"get_desktop_state"]) result = CUAToolGetDesktopState(args);
@@ -167,5 +173,7 @@ NSDictionary *CUAHandleCall(NSString *name, NSDictionary *arguments) {
   } @catch (NSException *exception) {
     result = [CUAResult errorText:[NSString stringWithFormat:@"%@ failed: %@", name, exception.reason ?: exception.name]];
   }
-  return [result payload];
+  NSDictionary *payload = [result payload];
+  pthread_mutex_unlock(&gCallLock);
+  return payload;
 }
