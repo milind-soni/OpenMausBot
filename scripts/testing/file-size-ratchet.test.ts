@@ -40,7 +40,6 @@ const LINES: Record<string, number> = {
   "server/plan-usage.ts": 1042,
   "server/container-computer.ts": 1158,
   "src/components/ModelPicker.tsx": 1039,
-  "src/components/Composer.tsx": 1007,
   "src/components/PhoneSetupFlow.tsx": 1088,
   "server/cli.ts": 1053,
   "src/components/AttachmentPreview.tsx": 1025,
