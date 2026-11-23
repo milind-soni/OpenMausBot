@@ -7222,6 +7222,6 @@
   "engineSetup.nativeSharedSignIn": "Antigravity CLI от Google хранит один вход на этом компьютере: все аккаунты на нём и Antigravity CLI в терминале используют один и тот же аккаунт Google, а выход здесь выполняет выход везде. Это ограничение Antigravity CLI.",
   "engineSetup.managedDescCli": "{app} устанавливает Antigravity CLI от Google. Установите её здесь и войдите через Google; после этого список моделей обновится из вашего аккаунта.",
   "accounts.signOutAntigravityShared": "Antigravity CLI от Google хранит один вход на этом компьютере: из всех аккаунтов на нём и из Antigravity CLI в терминале тоже будет выполнен выход, а их текущие задачи остановятся. Ботам, которые их используют, понадобится снова войти перед следующей задачей.",
-  "engines.antigravity.runtimeCli": "Antigravity CLI",
-  "engines.antigravity.runtimePinned": "agy runtime"
+  "engines.antigravity.runtimeCli": "Google Antigravity CLI",
+  "engines.antigravity.runtimePinned": "Classic runtime"
 }

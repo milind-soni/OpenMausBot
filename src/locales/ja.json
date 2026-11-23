@@ -8007,6 +8007,6 @@
   "engineSetup.nativeSharedSignIn": "Google の Antigravity CLI は、このコンピュータでサインインを 1 つだけ保持します。ここにあるすべてのアカウントとターミナルの Antigravity CLI は同じ Google アカウントを使い、ここでサインアウトするとすべてサインアウトされます。これは Antigravity CLI の制限です。",
   "engineSetup.managedDescCli": "{app} は Google の Antigravity CLI をインストールします。ここでインストールして Google でサインインすると、このモデル一覧があなたのアカウントから更新されます。",
   "accounts.signOutAntigravityShared": "Google の Antigravity CLI は、このコンピュータでサインインを 1 つだけ保持します。ここにあるすべてのアカウントとターミナルの Antigravity CLI もサインアウトされ、実行中のタスクは停止します。それらを使うボットは、次のタスクの前に再度サインインが必要です。",
-  "engines.antigravity.runtimeCli": "Antigravity CLI",
-  "engines.antigravity.runtimePinned": "agy runtime"
+  "engines.antigravity.runtimeCli": "Google Antigravity CLI",
+  "engines.antigravity.runtimePinned": "Classic runtime"
 }

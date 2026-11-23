@@ -271,7 +271,7 @@ export async function resolveAntigravityRuntime(
   const installedCli = ANTIGRAVITY_NATIVE_CLI && (native || nativeDefault) ? await activeAntigravityCli(runtimeRoot(baseDir)) : null;
   if (native) {
     if (installedCli) return installedCli;
-    throw new AntigravitySetupError("The Antigravity CLI is not installed yet. Install it here, or choose agy runtime under Runs on.");
+    throw new AntigravitySetupError("The Google Antigravity CLI is not installed yet. Install it here, or choose Classic runtime under Runs on.");
   }
   const asset = resolveAntigravityReleaseAsset();
   if (asset) {

@@ -11560,6 +11560,6 @@
   "engineSetup.nativeSharedSignIn": "A Antigravity CLI do Google mantém um único login neste computador: todas as contas nele e a Antigravity CLI no terminal usam a mesma conta do Google, e sair aqui desconecta todas. Essa é uma limitação da Antigravity CLI.",
   "engineSetup.managedDescCli": "O app {app} instala a Antigravity CLI do Google. Instale aqui e entre com o Google; depois esta lista de modelos será atualizada a partir da sua conta.",
   "accounts.signOutAntigravityShared": "A Antigravity CLI do Google mantém um único login neste computador: todas as contas nele e a Antigravity CLI no terminal também são desconectadas, e as tarefas em andamento param. Os bots que as usam precisam entrar de novo antes da próxima tarefa.",
-  "engines.antigravity.runtimeCli": "Antigravity CLI",
-  "engines.antigravity.runtimePinned": "agy runtime"
+  "engines.antigravity.runtimeCli": "Google Antigravity CLI",
+  "engines.antigravity.runtimePinned": "Classic runtime"
 }

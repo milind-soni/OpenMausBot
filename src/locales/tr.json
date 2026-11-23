@@ -5967,6 +5967,6 @@
   "engineSetup.nativeSharedSignIn": "Google'ın Antigravity CLI'ı bu bilgisayarda tek bir oturum tutar: buradaki tüm hesaplar ve terminaldeki Antigravity CLI aynı Google hesabını kullanır, burada çıkış yapmak hepsinden çıkış yapar. Bu, Antigravity CLI'ın bir sınırlamasıdır.",
   "engineSetup.managedDescCli": "{app}, Google'ın Antigravity CLI'ını kurar. Buradan kurun ve Google ile giriş yapın; ardından bu model listesi hesabınızdan yenilenir.",
   "accounts.signOutAntigravityShared": "Google'ın Antigravity CLI'ı bu bilgisayarda tek bir oturum tutar: buradaki tüm hesaplardan ve terminaldeki Antigravity CLI'dan da çıkış yapılır, devam eden görevleri durur. Bunları kullanan botların bir sonraki görevden önce yeniden giriş yapması gerekir.",
-  "engines.antigravity.runtimeCli": "Antigravity CLI",
-  "engines.antigravity.runtimePinned": "agy runtime"
+  "engines.antigravity.runtimeCli": "Google Antigravity CLI",
+  "engines.antigravity.runtimePinned": "Classic runtime"
 }
