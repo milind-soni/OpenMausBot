@@ -1,5 +1,5 @@
 import {
-  Archive, ArrowLeftRight, Bot, Coins, CreditCard, LockKeyhole, Monitor, Palette, Server, SlidersHorizontal, Smartphone, Sparkles, Users,
+  Archive, ArrowLeftRight, Bot, Coins, CreditCard, HardDrive, LockKeyhole, Monitor, Palette, Server, SlidersHorizontal, Smartphone, Sparkles, Users,
   type LucideIcon,
 } from "lucide-react";
 import type { LocaleKey } from "@/locales";
@@ -32,6 +32,8 @@ export interface SettingsContext {
   installations: boolean;
   skills: boolean;
   advanced: boolean;
+  /** this place's server answers with a storage report (a Cloud home), read only by an owner or admin */
+  storage?: boolean;
 }
 
 export interface SettingsPage {
@@ -69,6 +71,8 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     synonyms: ["spending", "usage", "cost", "costs", "tokens", "money", "runs", "export csv"] },
   { id: "transfer", owner: "place", labelKey: "settings.page.importExport", icon: ArrowLeftRight, when: adminPage,
     synonyms: ["import", "export", "backup", "backups", "restore", "grok", "grok bot", "move from", "bring"] },
+  { id: "storage", owner: "place", labelKey: "settings.page.storage", icon: HardDrive, when: (ctx) => ctx.storage === true && adminPage(ctx),
+    synonyms: ["storage", "disk", "disk space", "space", "full", "free space", "volume", "what uses space", "cache", "downloads"] },
   { id: "data", owner: "place", labelKey: "settings.page.data", icon: Archive, when: advancedOnly(adminPage),
     synonyms: ["data", "storage", "attachments", "activity", "audit"] },
   { id: "people", owner: "place", labelKey: "settings.section.people", icon: Users,
