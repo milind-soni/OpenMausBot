@@ -1167,11 +1167,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
 
       <div ref={composerDockRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] chat-column-dock">
       <SkillBurgerSlot botId={bot.id} threadId={bot.threadId} busy={Boolean(bot.busy)} canWrite={mayWrite} messages={messages} liveTools={liveTools} transcriptKey={transcriptKey} />
-      {showJumpToLatest && (
-        <div className="relative">
-          <JumpToLatestButton onClick={jumpToLatest} className="pointer-events-auto bottom-2" />
-        </div>
-      )}
+      {showJumpToLatest && <div className="relative"><JumpToLatestButton onClick={jumpToLatest} className="pointer-events-auto bottom-2" /></div>}
       <BotExchangeLine />
       <LiveCallBar bot={bot} />
       {canWrite === false ? (
