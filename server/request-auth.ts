@@ -506,6 +506,7 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   // Skill Burgers: the routes check who may change which (a bot's own: its editors; every chat: an admin).
   { methods: ["GET", "POST"], path: /^\/api\/skill-burgers$/ },
   { methods: ["GET", "PATCH", "DELETE"], path: /^\/api\/skill-burgers\/[^/]+$/ },
+  { methods: ["POST"], path: /^\/api\/skill-burgers\/[^/]+\/paths$/ },
   { methods: ["POST"], path: /^\/api\/skill-burger-summary$/ },
   { methods: ["POST"], path: /^\/api\/slack\/team\/messages(?:\/[0-9a-f-]{36}\/stop)?$/ },
 ];
@@ -521,12 +522,12 @@ export function requiredScope(method: string, path: string, features: { sharedCo
 
 /** A client may change how a bot looks, never what it may do. */
 const CLIENT_BOT_PATCH_FIELDS = new Set([
-  "unread", "pinned", "pinnedMessageId", "color", "mascotExpression", "mascotBody", "mascotFaceColor",
+  "unread", "pinned", "pinnedMessageId", "color", "mascotExpression", "mascotBody", "mascotFaceColor", "mascotBodyColor",
   "avatarUrl", "avatarCrop", "avatarZoom", "avatarFocusX", "avatarFocusY", "sidebarHidden", "welcomed",
 ]);
 /** How a bot looks to everyone who sees it. */
 const SHARED_LOOK_FIELDS = new Set([
-  "color", "mascotExpression", "mascotBody", "mascotFaceColor", "avatarUrl", "avatarCrop", "avatarZoom", "avatarFocusX", "avatarFocusY",
+  "color", "mascotExpression", "mascotBody", "mascotFaceColor", "mascotBodyColor", "avatarUrl", "avatarCrop", "avatarZoom", "avatarFocusX", "avatarFocusY",
 ]);
 /** `ownMausBot`: the session's own MausBot on a Team Cloud, which its member may also rename. `teamMember`: a Team Cloud
  * member's session, which changes no other bot's look. */

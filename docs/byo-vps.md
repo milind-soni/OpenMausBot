@@ -201,6 +201,15 @@ policies, including the legacy `no` policy. OpenMausBot does not reset those set
 container to enforce its defaults. Restart behavior follows the chosen Docker policy; for example,
 `always` can wake a slept container after a Docker daemon restart.
 
+Memory (2–128 GiB) and CPU cores (1–64) are set in Settings under **Self-hosted VPS**, for the default server and,
+separately, for each named server. The default server uses 4 GiB and 2 cores until you change them; a named server
+that leaves memory or cores empty uses the default server's.
+
+A new container takes the limits at once. A stopped one takes them when it next starts. A running container keeps
+its limits until it stops; the next start applies the current ones, so recreating it is not needed. When you save a
+limit, OpenMausBot asks the VPS's Docker engine for its CPU count and memory over SSH and refuses cores or memory the
+machine does not have. A host that does not answer does not hold the save up.
+
 - **Provision** (choosing **Cloud** for the bot, or the panel's button): builds the pinned Cua image on the
   VPS if needed, creates the container if missing, starts it if stopped, and waits until the desktop answers.
 - **Start** only wakes an existing stopped container; it never creates one.

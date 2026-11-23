@@ -14,6 +14,7 @@ import {
 } from "./endpoints";
 import { registerPushDevice, sendPush, unregisterPushDevice } from "./push";
 import { sendActivityPush } from "./push-activity";
+import { CLOUD_HOME_PUSH_ROUTE, routeCloudHomePush } from "./push-cloud-homes";
 import { issueRelayToken, relayAdoption } from "./relay";
 import { releaseTunnels, tunnelReleaseHealth } from "./tunnel-release";
 import { capacityHealth, reportEndpointAccountProblems, scanTunnelCapacity } from "./tunnel-capacity";
@@ -150,6 +151,12 @@ async function route(
   }
   if (request.method === "POST" && url.pathname === "/v1/installations/self/push/activity") {
     return sendActivityPush(request, env, pushFetch, requestId);
+  }
+
+  // A Cloud home's push calls, relayed by the Admin (push-cloud-homes.ts): its shared secret, not an installation.
+  const cloudHome = url.pathname.match(CLOUD_HOME_PUSH_ROUTE);
+  if (cloudHome) {
+    return routeCloudHomePush(request, env, pushFetch, requestId, cloudHome[1]!, cloudHome[2]!);
   }
 
   const rotate = url.pathname.match(ROTATE_ROUTE);

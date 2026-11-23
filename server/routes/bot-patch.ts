@@ -6,6 +6,7 @@ import { isBotLiveVoice } from "../../shared/live-call.ts";
 import { normalizeOutboundPolicy } from "../../shared/outbound.ts";
 import { normalizePhoneApps } from "../../shared/phone-apps.ts";
 import { parseToolScope, toolScopeWidens } from "../../shared/tool-scope.ts";
+import type { MemoryModelSelection } from "../../shared/memory-model.ts";
 import { parseToolsOff, TOOL_GROUPS } from "../../shared/tool-groups.ts";
 import { isMausColor, MAUS_COLOR_NAMES, type BotUpdateResponse, type WireBot, type WireGroup } from "../../shared/wire.ts";
 import { dropRemovedGrants, MAX_ALWAYS_ALLOW } from "../always-allow.ts";
@@ -373,6 +374,16 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (typeof body.memoryUpkeep !== "boolean") return json(res, 400, { error: "memoryUpkeep must be true or false" });
         patch.memoryUpkeep = body.memoryUpkeep;
       }
+      let memoryModel: MemoryModelSelection | undefined;
+      if (body.memoryModel !== undefined) {
+        const parsed = z.object({
+          instanceId: z.string().min(1).max(200),
+          model: z.string().min(1).max(500).regex(/^[A-Za-z0-9][\x21-\x7e]*$/),
+        }).strict().nullable().safeParse(body.memoryModel);
+        if (!parsed.success) return json(res, 400, { error: "memoryModel must name a connection and model, or be null for Automatic" });
+        memoryModel = parsed.data ?? undefined;
+        patch.memoryModel = memoryModel;
+      }
       // true/false overrides the workspace, null follows it.
       if (body.cacheKeepWarm !== undefined) {
         if (body.cacheKeepWarm !== null && typeof body.cacheKeepWarm !== "boolean") return json(res, 400, { error: "cacheKeepWarm must be true, false or null" });
@@ -661,6 +672,15 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         sectionKey(existingBot?.section) !== sectionKey(section);
       let bot: BotRecord | null;
       const freshBrowserBot = store.bot(m[1]);
+      if (memoryModel && freshBrowserBot) {
+        const { instanceId, model } = memoryModel;
+        const instance = registry.get(instanceId);
+        if (instanceId !== (normalizedSelection ?? freshBrowserBot.modelSelection).instanceId || !instance?.openRouter ||
+            !instance.enabled || !instance.models.options.some((option) => option.id === model) ||
+            hostedModels?.allows({ instanceId, model }) === false) {
+          return json(res, 400, { error: "Choose a model from this bot's current OpenRouter connection." });
+        }
+      }
       // Rechecked: the awaits above can yield after the first memory check.
       if (freshBrowserBot && body.memoryEnabled !== undefined &&
           body.memoryEnabled !== (freshBrowserBot.memoryEnabled !== false) &&

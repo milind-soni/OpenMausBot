@@ -171,6 +171,7 @@ describe("Claude account HTTP API", () => {
     const instance = result.body.instances.find((row: any) => row.instanceId === result.body.instanceId);
     expect(instance.models.options.length).toBeGreaterThan(1);
     expect(instance.models.options.every((option: any) => option.custom)).toBe(true);
+    if (engine === "codex") expect(instance.models.options.map((option: any) => option.id)).toEqual(expect.arrayContaining(["gpt-6.2-astra", "gpt-6.2-sol"]));
     expect(saved().instances[result.body.instanceId].environment).not.toHaveProperty("ANTHROPIC_MODEL");
   });
 
