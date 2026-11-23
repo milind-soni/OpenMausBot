@@ -167,11 +167,13 @@ describe("disk walk", () => {
   });
 
   it("measures allocated blocks where the platform has them, a sparse file's included, else the size", () => {
-    expect(allocatedBytes({ size: 10, blocks: 8 })).toBe(4096);
-    expect(allocatedBytes({ size: 10_000_000, blocks: 8 })).toBe(4096);
-    expect(allocatedBytes({ size: 2_147_483_648, blocks: 0 })).toBe(0);
-    expect(allocatedBytes({ size: 0, blocks: 0 })).toBe(0);
+    expect(allocatedBytes({ size: 10, blocks: 8 }, false)).toBe(4096);
+    expect(allocatedBytes({ size: 10_000_000, blocks: 8 }, false)).toBe(4096);
+    expect(allocatedBytes({ size: 2_147_483_648, blocks: 0 }, false)).toBe(0);
+    expect(allocatedBytes({ size: 0, blocks: 0 }, false)).toBe(0);
     expect(allocatedBytes({ size: 10 })).toBe(10);
+    expect(allocatedBytes({ size: 10, blocks: 8 }, false)).toBe(4096);
+    expect(allocatedBytes({ size: 10, blocks: 0 }, true)).toBe(10);
   });
 
   it.skipIf(process.platform === "win32")("counts a sparse file by what it takes on disk", async () => {
