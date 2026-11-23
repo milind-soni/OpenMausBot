@@ -176,7 +176,7 @@ const READS: Record<string, number> = {
   "src/components/conversation-share/ConversationShareDialogs.tsx": 1,
   "src/components/data/DataPanel.tsx": 1,
   "src/components/data/InlineDataChart.tsx": 1,
-  "src/components/keys/KeyPanels.tsx": 4,
+  "src/components/keys/KeyPanels.tsx": 3,
   "src/components/keys/KeyRow.tsx": 2,
   "src/components/keys/KeysLink.tsx": 1,
   "src/components/onboarding/ChiefIntro.tsx": 1,

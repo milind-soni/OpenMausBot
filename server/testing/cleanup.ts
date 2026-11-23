@@ -1,6 +1,7 @@
 // Teardown primitives for suites that spawn a real process against a throwaway home.
 import type { ChildProcess } from "node:child_process";
-import { rmSync } from "node:fs";
+import { chmodSync, readdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
 
 export interface WaitForExitOptions {
   /** Sent immediately. Omit for a child the caller has already signalled. */
@@ -53,10 +54,19 @@ export async function removeTempDir(dir: string): Promise<void> {
       return;
     } catch (error) {
       lastError = error;
+      // A read-only folder inside (a published engine release) blocks removal of what it holds.
+      if ((error as NodeJS.ErrnoException).code === "EACCES" && process.platform !== "win32") openFolders(dir);
       await new Promise((r) => setTimeout(r, 100));
     }
   }
   console.warn(
     `test cleanup could not remove ${dir}: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
   );
+}
+
+function openFolders(dir: string): void {
+  try {
+    chmodSync(dir, 0o700);
+    for (const entry of readdirSync(dir, { withFileTypes: true })) if (entry.isDirectory()) openFolders(join(dir, entry.name));
+  } catch {}
 }

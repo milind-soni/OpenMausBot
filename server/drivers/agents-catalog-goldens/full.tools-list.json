@@ -366,6 +366,86 @@
       }
     },
     {
+      "name": "run_workflow",
+      "description": "Run a saved Skill Burger exactly, without redoing it by hand: when the person writes /<its-name> or asks for what one does. Fill args from their request. It hands back only steps that need your judgement; do them, then call again with resume and response.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "args": {
+            "type": "object",
+            "description": "By arg name; omitted ones keep their saved defaults."
+          },
+          "resume": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "A paused run's token."
+          },
+          "response": {
+            "type": "string",
+            "description": "With resume: your output, the case you chose, or a note of what you did."
+          }
+        }
+      }
+    },
+    {
+      "name": "workflow_edit",
+      "description": "Change a saved Skill Burger's steps when the person asks (\"if it's support, make a Linear issue\"). Applies at once with an Undo.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "add_case",
+              "remove_case",
+              "set_when",
+              "undo"
+            ]
+          },
+          "decide": {
+            "description": "add_case: {\"id\"} of a decide step, or a new fork {\"after\",\"label\",\"prompt\",\"input\":{\"$step\"}}. remove_case: its id."
+          },
+          "case": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "steps": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "object"
+            },
+            "description": "add_case: steps shaped like the saved ones in workflow.json."
+          },
+          "step": {
+            "type": "string",
+            "description": "set_when: a step id."
+          },
+          "when": {
+            "description": "set_when: {\"$step\",\"path\",\"op\":\"exists|eq|ne|gt|lt\",\"value\"} or null."
+          },
+          "undo": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "name",
+          "action"
+        ]
+      }
+    },
+    {
       "name": "start_thread",
       "description": "Open a separate job on yourself: one conversation with its own history and its own run, shown to the person as a row under you, without switching the person's selected conversation. Use it only when the user requests independent jobs (for example one review per pull request, \"review each pull request\" — one thread per pull request) instead of doing them inside this conversation, or a second opinion from another model (model_selection from list_models, report_back true). The title becomes the row's name, so make it short and specific, and write it as #Title when you mention it to the person; give complete instructions, since the run will not see this conversation. You can open at most five per turn; a self-opened job cannot open more jobs. This is not a teammate handoff: use coordinate_bots for teammates (thread \"new\" opens a fresh thread on them) and their automatic replies. If a call is refused, do not retry it: say what you still wanted opened.",
       "inputSchema": {

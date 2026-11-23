@@ -129,3 +129,9 @@ Teams' display-name rule. Copyright 2025-2026 Vexa.ai Inc. and the Vexa
 contributors, used under the Apache License, Version 2.0
 (third_party/vexa/LICENSE). The adapted parts were rewritten in our own code;
 no Vexa file is included unmodified.
+
+The object avatars bots can wear include the engine and avatar definitions of
+Open Bot Avatar 0.3.0, with the changes its vendored README lists,
+https://github.com/DominikScholz/open-bot-avatar, Copyright (c) 2026 Dominik
+Scholz, used under the MIT License
+(packages/phone-protocol/src/open-bot-avatar/LICENSE).
