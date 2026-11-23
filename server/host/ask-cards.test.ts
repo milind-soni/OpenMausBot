@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { shouldSettleRequestCard } from "../../shared/ask-question.ts";
+import type { OptionCardData } from "../../shared/wire.ts";
+import type { RequestOutcome, RuntimeEvent } from "../contracts.ts";
 import type { HandoffView } from "../coordinator.ts";
 import type { Notification } from "../notify.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { BotRecord, Message } from "../store.ts";
-import { askToolName, closeCard, createAskCards, type AskCardsDeps } from "./ask-cards.ts";
+import { askToolName, closeCard, createAskCards, resolvedCard, type AskCardsDeps } from "./ask-cards.ts";
 
 const AUTH = { kind: "session", scopes: ["client"], session: { id: "s", email: "cleo@acme.test" } } as unknown as RequestAuth;
 const QUESTION = "What wording should the new footer text use?";
@@ -565,40 +568,91 @@ describe("the chip in the conversation that handed the work on", () => {
 });
 
 describe("closing a card the person moved past", () => {
-  const setup = () => {
-    const card = { id: "m1", at: 1, role: "bot", kind: "options", card: { requestId: "req-1", requestType: "question", options: [], fixedOptions: true } } as unknown as Message;
-    const patches: Array<Partial<Message>> = [];
-    const live = new Map([["chat:req-1", "m1"]]);
-    const store = { patchMessage: (_threadId: string, _id: string, patch: Partial<Message>) => { patches.push(patch); return { ...card, ...patch }; } };
-    return { card, patches, live, close: (decline: () => Promise<"rejected" | "unavailable">) =>
-      closeCard({ threadId: "chat", requestId: "req-1", card, live, store: store as never, decline }) };
+  type Resolved = Extract<RuntimeEvent, { type: "request.resolved" }>;
+  /** The server's side: question cards by request, the live link of each, and what the engine settling one writes. */
+  const server = () => {
+    const cards = new Map<string, OptionCardData>(), live = new Map<string, string>(), closing = new Set<string>();
+    const ask = (requestId: string) => { cards.set(requestId, { title: "Which?", subtitle: "Which?", requestId, requestType: "question", options: [], fixedOptions: true }); live.set(`chat:${requestId}`, requestId); };
+    // As the request.resolved handler: a live request's card settles, and the request is no longer live.
+    const settle = (requestId: string, behavior: Resolved["behavior"], source: Resolved["source"] = "user") => {
+      if (!live.has(`chat:${requestId}`)) return;
+      const card = cards.get(requestId)!;
+      if (shouldSettleRequestCard(card, source)) cards.set(requestId, resolvedCard(card, { type: "request.resolved", threadId: "chat", requestId, behavior, source } as Resolved, closing));
+      live.delete(`chat:${requestId}`);
+    };
+    // As Stop or the turn ending: a question card stays for a late answer, and its request is no longer live.
+    const turnEnds = () => live.clear();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const close = (requestId: string, decline: () => Promise<RequestOutcome>) => closeCard({ key: `chat:${requestId}`, live, closing, decline });
+    // An engine that takes a decline only once released, and settles the request then unless something already did.
+    const slowDecline = (requestId: string) => async (): Promise<RequestOutcome> => {
+      await held;
+      if (!live.has(`chat:${requestId}`)) return "unavailable";
+      settle(requestId, "deny");
+      return "rejected";
+    };
+    return { cards, live, closing, ask, settle, turnEnds, release, close, slowDecline };
   };
 
-  it("reads closed without an answer once the engine took the decline, and is no longer live while it was on its way", async () => {
-    const w = setup();
-    let liveWhileDeclining = true;
-    expect(await w.close(async () => { liveWhileDeclining = w.live.has("chat:req-1"); return "rejected"; })).toBe("rejected");
-    expect(liveWhileDeclining, "the engine settling the request leaves the card to this close").toBe(false);
-    expect(w.patches).toEqual([{ card: { ...w.card.card, answered: "unavailable", dismissed: true } }]);
-    expect(w.live.has("chat:req-1")).toBe(false);
+  it("reads closed without an answer once the engine took the decline, and records it as no answer", async () => {
+    const s = server();
+    s.ask("req-1");
+    expect(await s.close("req-1", async () => { s.settle("req-1", "deny"); return "rejected"; })).toBe("rejected");
+    expect(s.cards.get("req-1")).toMatchObject({ answered: "unavailable", dismissed: true });
+    expect([...s.live.keys()]).toEqual([]);
+    expect(s.closing.size).toBe(0);
+  });
+
+  it("keeps a tap that wins while the decline is on its way, and leaves no dead request live for the next card", async () => {
+    const s = server();
+    s.ask("req-1");
+    const closing = s.close("req-1", s.slowDecline("req-1"));
+    expect(s.live.has("chat:req-1"), "a tap still finds the card's request").toBe(true);
+    s.settle("req-1", "answer");
+    s.release();
+    expect(await closing).toBe("unavailable");
+    expect(s.cards.get("req-1")).toMatchObject({ answered: "answer", dismissed: false });
+    expect([...s.live.keys()]).toEqual([]);
+    s.ask("req-2");
+    expect([...s.live.keys()], "the next card is the only one waiting").toEqual(["chat:req-2"]);
+    expect(await s.close("req-2", async () => { s.settle("req-2", "deny"); return "rejected"; })).toBe("rejected");
+    expect(s.cards.get("req-2")).toMatchObject({ answered: "unavailable", dismissed: true });
+  });
+
+  it("leaves no dead request live when Stop or the turn ending beats the decline", async () => {
+    const s = server();
+    s.ask("req-1");
+    const closing = s.close("req-1", s.slowDecline("req-1"));
+    s.turnEnds();
+    s.release();
+    expect(await closing).toBe("unavailable");
+    expect(s.cards.get("req-1")?.answered, "open for a late answer, as after any Stop").toBeUndefined();
+    expect([...s.live.keys()]).toEqual([]);
+    s.ask("req-2");
+    expect([...s.live.keys()]).toEqual(["chat:req-2"]);
+    s.settle("req-2", "deny", "system");
+    expect(s.cards.get("req-2")?.answered, "a decline that is not a close's own settles as before").toBeUndefined();
   });
 
   it("stays open and live for a tap when the engine did not take the decline, or delivering it failed", async () => {
     for (const decline of [async () => "unavailable" as const, async (): Promise<"rejected"> => { throw new Error("broker gone"); }]) {
-      const w = setup();
-      expect(await w.close(decline)).toBe("unavailable");
-      expect(w.patches).toEqual([]);
-      expect(w.live.get("chat:req-1")).toBe("m1");
+      const s = server();
+      s.ask("req-1");
+      expect(await s.close("req-1", decline)).toBe("unavailable");
+      expect(s.cards.get("req-1")?.answered).toBeUndefined();
+      expect(s.live.get("chat:req-1")).toBe("req-1");
+      expect(s.closing.size).toBe(0);
+      s.settle("req-1", "answer");
+      expect(s.cards.get("req-1")).toMatchObject({ answered: "answer" });
     }
   });
 
   it("delivers nothing for a card no turn waits on", async () => {
-    const w = setup();
-    w.live.clear();
+    const s = server();
     const decline = vi.fn(async () => "rejected" as const);
-    expect(await w.close(decline)).toBe("unavailable");
+    expect(await s.close("req-1", decline)).toBe("unavailable");
     expect(decline).not.toHaveBeenCalled();
-    expect(w.patches).toEqual([]);
   });
 });
 

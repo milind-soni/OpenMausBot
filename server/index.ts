@@ -26,7 +26,7 @@ import { botMemoryFiles, createLendingMemory } from "./lending-memory.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
 import { STATUS_REPLY_TIMEOUT_MS } from "./runtime/status-reply.ts"; import { createCoordinator, type ComposedTurn, type CoordinateBotsCall, type Coordinator, type HandoffOpener, type HandoffOptions, type HandoffView, type HostTurnResult } from "./coordinator.ts";
 import { queuedBehindPersonText, turnWaitedOnPerson, UnansweredApprovals } from "./waiting-on-person.ts";
-import { createPersonWaits } from "./host/person-waits.ts"; import { askToolName, closeCard, createAskCards } from "./host/ask-cards.ts"; import { createQuestionRouting } from "./host/question-routing.ts"; import { workThreadFor } from "./host/work-thread.ts"; import { leaveThreadPost, postToThread, threadWaitsOn, unreadThreadPosts } from "./host/thread-posts.ts"; import { anyCardLive, closedByStop, resumableCards as cardsWaitedOn } from "./host/resumable-cards.ts"; import { createMcpChat } from "./host/mcp-chat.ts"; import { isCardOwnerLive, isMcpSignInCard } from "./host/mcp-sign-in-cards.ts"; import { createConnectCardSettle } from "./host/connect-card-settle.ts";
+import { createPersonWaits } from "./host/person-waits.ts"; import { askToolName, closeCard, createAskCards, resolvedCard } from "./host/ask-cards.ts"; import { createQuestionRouting } from "./host/question-routing.ts"; import { workThreadFor } from "./host/work-thread.ts"; import { leaveThreadPost, postToThread, threadWaitsOn, unreadThreadPosts } from "./host/thread-posts.ts"; import { anyCardLive, closedByStop, resumableCards as cardsWaitedOn } from "./host/resumable-cards.ts"; import { createMcpChat } from "./host/mcp-chat.ts"; import { isCardOwnerLive, isMcpSignInCard } from "./host/mcp-sign-in-cards.ts"; import { createConnectCardSettle } from "./host/connect-card-settle.ts";
 import { assertRequestTarget, guardedRequestPath, requestConflict, requestNeedsInput } from "./guarded-requests.ts";
 import { botAvatarUrlFromStoredPath } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
@@ -4725,7 +4725,7 @@ onSteeredQueueChange(() => broadcast({ kind: "bot.queued", queues: publicBotQueu
 
 // Keyed by threadId: provider item and request ids are unique only within a thread.
 const toolMessageByItem = new Map<string, string>();
-const askMessageByRequest = new Map<string, string>();
+const askMessageByRequest = new Map<string, string>(), closingRequests = new Set<string>();
 const unansweredApprovals = new UnansweredApprovals(); const approvalAsk = (botId: string | undefined, threadId: string, turnId: string | undefined): { approvalAsk?: string } => { const asked = botId ? unansweredApprovals.ask(threadId, turnId, store.bot(botId)?.name ?? "A teammate", threadLanguage(threadId)) : undefined; return asked ? { approvalAsk: asked } : {}; };
 // Only native, live permission metadata becomes a remembered grant, never an imported transcript or display summary.
 const pendingCommandRules = new Map<string, { botId: string; candidate: CommandAllowlistCandidate }>();
@@ -4759,7 +4759,7 @@ async function answerRequest(
   const remembered = rememberCommand ? pendingCommandRules.get(`${threadId}:${requestId}`) : undefined;
   // The live turn owns this question, as it owns Stop and steer. A card closed without an answer records no denial.
   const instance = runningTurnEngines.get(threadId) ?? registry.get(instanceId);
-  if (behavior === "close") return closeCard({ threadId, requestId, card: cardMessage, live: askMessageByRequest, store,
+  if (behavior === "close") return closeCard({ key: `${threadId}:${requestId}`, live: askMessageByRequest, closing: closingRequests,
     decline: async () => instance ? instance.adapter.respondToRequest(threadId, requestId, { behavior: "deny" }) : "unavailable" });
   let outcome: RequestOutcome = "unavailable";
   if (instance) {
@@ -6601,14 +6601,7 @@ bus.subscribe((event: RuntimeEvent) => {
             else if (event.source !== "system" && event.source !== "unavailable") unansweredApprovals.answered(event.threadId, event.turnId, existing.card.tool, existing.card.subtitle);
           }
           if (shouldSettleRequestCard(existing.card, event.source)) {
-            store.patchMessage(event.threadId, messageId, {
-              card: {
-                ...existing.card,
-                answered: event.behavior,
-                dismissed: isPersistentQuestionCard(existing.card) ? false : event.source !== "user",
-                ...(event.source === "timeout" && !isPersistentQuestionCard(existing.card) ? { expired: true } : {}),
-              },
-            });
+            store.patchMessage(event.threadId, messageId, { card: resolvedCard(existing.card, event, closingRequests) });
           }
         }
         if (event.requestId) askMessageByRequest.delete(`${event.threadId}:${event.requestId}`);

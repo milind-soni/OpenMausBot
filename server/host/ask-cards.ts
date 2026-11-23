@@ -71,18 +71,25 @@ const typedAnswer = (card: OptionCardData, text: string): string => {
   return questions ? formatQuestionAnswers(questions, [[text]]) : text;
 };
 
-/** Closes a question card the person moved past without an answer, once the engine takes the decline. While it is on
- * its way the card is not live, so the engine settling the request leaves the card alone; one that did not land leaves
- * the card open and live, for a tap. */
-export async function closeCard(input: { threadId: string; requestId: string; card: Message | undefined; live: Map<string, string>;
-  store: Pick<Store, "patchMessage">; decline: () => Promise<RequestOutcome> }): Promise<RequestOutcome> {
-  const key = `${input.threadId}:${input.requestId}`, messageId = input.live.get(key);
-  if (!messageId || !input.card?.card) return "unavailable";
-  input.live.delete(key);
-  const outcome = await input.decline().catch((): RequestOutcome => "unavailable");
-  if (outcome === "unavailable") input.live.set(key, messageId);
-  else input.store.patchMessage(input.threadId, input.card.id, { card: { ...input.card.card, answered: "unavailable", dismissed: true } });
-  return outcome;
+/** Declines a question the person moved past without an answer. While the decline is on its way the request is marked
+ * closing, so the engine settling it with that decline reads closed without an answer; a tap, Stop or the turn ending
+ * first settles it as they always do. A decline that did not land leaves the card and the request as they were. */
+export async function closeCard(input: { key: string; live: ReadonlyMap<string, string>; closing: Set<string>;
+  decline: () => Promise<RequestOutcome> }): Promise<RequestOutcome> {
+  if (!input.live.has(input.key)) return "unavailable";
+  input.closing.add(input.key);
+  try {
+    return await input.decline().catch((): RequestOutcome => "unavailable");
+  } finally {
+    input.closing.delete(input.key);
+  }
+}
+
+/** The card a request settled into: closed without an answer when the decline was a close's own. */
+export function resolvedCard(card: OptionCardData, resolved: Extract<RuntimeEvent, { type: "request.resolved" }>, closing: ReadonlySet<string>): OptionCardData {
+  if (resolved.behavior === "deny" && closing.has(`${resolved.threadId}:${resolved.requestId}`)) return { ...card, answered: "unavailable", dismissed: true };
+  const persistent = isPersistentQuestionCard(card);
+  return { ...card, answered: resolved.behavior, dismissed: persistent ? false : resolved.source !== "user", ...(resolved.source === "timeout" && !persistent ? { expired: true } : {}) };
 }
 
 /** The reply up to its NEEDS INPUT line; empty when the line is the whole reply. */
