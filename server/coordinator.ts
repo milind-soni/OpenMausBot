@@ -263,6 +263,13 @@ export interface CoordinatorOptions {
   wrote?: () => void;
 }
 
+/** The outcome clause for the same-turn "finish your response" answer about an assignment this turn handed out, from its
+ * reply mode — the same wording the coordinate_bots receipt gives. */
+export const sameTurnReturns = (reply: Reply | undefined): string =>
+  reply === "none" ? "nothing comes back from it"
+  : reply === "poll" ? "read its result with assignment_status"
+  : "its result returns to this conversation and resumes you";
+
 export function createCoordinator(options: CoordinatorOptions): Coordinator {
   return new RuntimeCoordinator(options);
 }
