@@ -6002,6 +6002,9 @@
   "skills.loading": "Загрузка…",
   "skills.empty": "Установленных навыков пока нет.",
   "memory.title": "Память",
+  "memoryPage.thisThread": "Эта ветка",
+  "memoryPage.everywhere": "Везде",
+  "memoryPage.empty": "Здесь пока ничего не запомнено. Напишите всё, что он должен знать.",
   "memory.enable": "Разрешить боту использовать память",
   "memory.enableHelp": "В выключенном состоянии отключаются запросы к памяти, воспоминания, нативные инструменты памяти, обслуживание и автоматические журналы хода работы. Существующие файлы остаются доступны для просмотра.",
   "memory.notesHelp": "Заметки, которые бот ведёт между задачами. Это обычные markdown-файлы в папке на этом компьютере — их можно открыть в любом редакторе или в Obsidian.",
@@ -7213,5 +7216,6 @@
   "skillBurger.menu.aria": "Ещё для {name}",
   "skillBurger.menu.rename": "Переименовать…",
   "skillBurger.card.everyChat": "Каждый чат",
-  "skillBurger.page.empty": "Здесь появляются Skill Burger ваших ботов."
+  "skillBurger.page.empty": "Здесь появляются Skill Burger ваших ботов.",
+  "chat.notice.savedToThread": "Сохранено в этой ветке"
 }
