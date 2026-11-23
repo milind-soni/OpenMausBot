@@ -333,7 +333,7 @@ describe("resolveRequestAuth", () => {
     for (const overrides of forged) expect(check("POST", "/api/bots/b/read", overrides).auth).toBeNull();
     expect(check("POST", "/api/bots/b/read", {}, "").auth).toBeNull();
     for (const [method, path] of [
-      ["PUT", "/api/config"], ["POST", "/api/auth/pairing"],
+      ["PATCH", "/api/config"], ["POST", "/api/auth/pairing"],
       ["POST", "/api/internal/anything"], ["GET", "/api/auth/sessions"],
       ["POST", "/api/not-yet-supported"],
     ]) expect(check(method, path).auth, path).toBeNull();

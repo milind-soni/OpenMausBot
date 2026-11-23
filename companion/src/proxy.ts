@@ -58,6 +58,9 @@ export interface ProxyOptions {
   e2eDescriptor?: (deviceId: string | null) => E2EDescriptor | null;
   /** A phone paired through an encrypted session keyed by the pairing token: the session is now that device's. */
   e2ePaired?: (context: E2EContext, deviceId: string) => void;
+  /** The desktop app's own key save (encrypted store first). When set, a phone's `PUT /api/config` goes here and
+   * never to the harness, which would keep the key only in its config file. */
+  saveProviderKey?: (patch: unknown) => Promise<{ status: number; body: unknown }>;
 }
 
 /** Which listener a request reached. Only `lan` (port 8810, plain HTTP) refuses a device that has gone end-to-end;
@@ -496,6 +499,15 @@ export function createProxyHandler(options: ProxyOptions) {
     // checks, never sent to the harness.
     if (method === "GET" && path === "/api/companion/endpoints") {
       return sendJson(res, 200, endpointsFor(device?.id ?? null));
+    }
+
+    const { saveProviderKey } = options;
+    if (device && saveProviderKey && method === "PUT" && path === "/api/config") {
+      readJson(req, 8 * 1024).then(
+        (body) => saveProviderKey(body).then((reply) => sendJson(res, reply.status, scrub(reply.body))),
+        (error: Error) => sendJson(res, 400, { error: error.message }),
+      ).catch(() => sendJson(res, 502, { error: "the key could not be saved on this computer" }));
+      return;
     }
 
     const mutationToken = device ? options.mutationToken?.() : undefined;
