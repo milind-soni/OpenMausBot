@@ -1459,7 +1459,7 @@ export class Store {
     for (const g of rooms) this.emit({ type: "group", groupId: g.id });
     return true;
   }
-
+  /** A bot's saved main thread, after saving the one `keep` names for it: no save of its own, it goes with the bot's next one. */ keepMainThread(id: string, keep: (chosen?: string) => string | undefined): string | undefined { const bot = this.own(id), next = bot && keep(bot.mainThreadChoice); if (!bot || !next) return this.bot(id)?.mainThreadChoice; this.registry.changedInPlace({ kind: "bot", id }); return bot.mainThreadChoice = next; }
   patchBot(id: string, patch: Partial<BotRecord>): BotRecord | null {
     const bot = this.own(id);
     if (!bot) return null; patch = reshowWhenMoved(bot, patch);

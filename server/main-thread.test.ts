@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { mainThread, oldestThread, wasOldestThread } from "./main-thread.ts";
+import { mainThread, mainThreadToKeep, oldestThread, wasOldestThread } from "./main-thread.ts";
 
 const first = { threadId: "first", createdAt: 1 };
 const later = { threadId: "later", createdAt: 2 };
@@ -43,6 +43,31 @@ describe("a bot's main thread", () => {
     expect(mainThread([{ ...latest, archivedAt: 9 }, { ...later, archivedAt: 8 }])).toBe("later");
     expect(mainThread([{ ...first, routineRunId: "run" }])).toBeUndefined();
     expect(mainThread([])).toBeUndefined();
+  });
+});
+
+describe("the main thread a bot keeps", () => {
+  const tasks = [{ ...latest, askedAt: 10 }, { ...later, askedAt: 30 }, { ...first, askedAt: 20 }];
+
+  it("is, for a bot with none saved, the open thread a person last wrote in", () => {
+    expect(mainThreadToKeep(tasks)).toBe("later");
+    expect(mainThreadToKeep([latest, { ...later, askedAt: 30, archivedAt: 31 }, { ...first, askedAt: 20 }])).toBe("first");
+    expect(mainThreadToKeep([latest, { ...later, askedAt: 30, routineRunId: "run" }, first])).toBe("first");
+  });
+
+  it("is the oldest open conversation a person started when nobody wrote anywhere, and nothing when there is none", () => {
+    expect(mainThreadToKeep([latest, later, { ...first, openedBy: { botId: "teammate" } }])).toBe("later");
+    expect(mainThreadToKeep([{ ...first, openedBy: { botId: "teammate" } }])).toBeUndefined();
+    expect(mainThreadToKeep([{ ...first, archivedAt: 2 }])).toBeUndefined();
+  });
+
+  it("changes nothing while the saved thread is open", () => {
+    expect(mainThreadToKeep(tasks, "latest")).toBeUndefined();
+  });
+
+  it("is the oldest open conversation a person started once the saved thread is archived or deleted, wherever they last wrote", () => {
+    expect(mainThreadToKeep([latest, { ...later, askedAt: 30 }, { ...first, archivedAt: 40 }], "first")).toBe("later");
+    expect(mainThreadToKeep([{ ...latest, askedAt: 50 }, later], "first")).toBe("later");
   });
 });
 

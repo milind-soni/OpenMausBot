@@ -3,6 +3,7 @@ interface MainThreadCandidate {
   createdAt: number;
   archivedAt?: number;
   routineRunId?: string;
+  askedAt?: number;
   /** Set when a bot opened the thread: a hand-off, a burst lane, its own side job. */
   openedBy?: object;
 }
@@ -20,13 +21,24 @@ export function wasOldestThread(tasks: readonly MainThreadCandidate[], threadId:
   return saved !== undefined && !tasks.some((task) => !task.routineRunId && task.archivedAt === undefined && task.createdAt < saved.createdAt);
 }
 
-/** A bot's main thread, where it opens to with threads hidden and where its routines and briefs report: the one the
- * person chose (while it is open), else the oldest open conversation a person started, else the oldest open one. Writing
- * in another thread never moves it. */
+const open = (task: MainThreadCandidate) => !task.routineRunId && task.archivedAt === undefined;
+
+/** A bot's main thread, where it opens to with threads hidden and where its routines and briefs report: the one saved as
+ * its choice (while it is open), else the oldest open conversation a person started, else the oldest open one. */
 export function mainThread(tasks: readonly MainThreadCandidate[], chosenId?: string): string | undefined {
-  const chosen = chosenId ? tasks.find((task) => task.threadId === chosenId) : undefined;
-  if (chosen && !chosen.routineRunId && chosen.archivedAt === undefined) return chosen.threadId;
-  return oldestThread(tasks.filter((task) => !task.openedBy && task.archivedAt === undefined)) ?? oldestThread(tasks);
+  if (chosenId && tasks.some((task) => task.threadId === chosenId && open(task))) return chosenId;
+  return oldestThread(tasks.filter((task) => !task.openedBy && open(task))) ?? oldestThread(tasks);
+}
+
+/** The thread to save as a bot's choice so its main thread stays put: nothing while the saved one is open. A bot that
+ * never had one keeps the open thread a person last wrote in, where it reported until now; one whose saved thread was
+ * archived or deleted moves to the oldest open conversation a person started, and reopening the old one moves nothing. */
+export function mainThreadToKeep(tasks: readonly MainThreadCandidate[], chosenId?: string): string | undefined {
+  if (chosenId && tasks.some((task) => task.threadId === chosenId && open(task))) return undefined;
+  const asked = chosenId ? undefined : tasks.filter(open).reduce<MainThreadCandidate | undefined>(
+    (latest, task) => ((task.askedAt ?? -1) > (latest?.askedAt ?? -1) ? task : latest), undefined,
+  );
+  return asked?.threadId ?? oldestThread(tasks.filter((task) => !task.openedBy && open(task)));
 }
 
 /** The conversation whose saves stay in the bot's own memory: the one the person set as main while it is open, else the

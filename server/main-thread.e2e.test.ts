@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { readRegistry } from "./testing/registry.ts";
+import { launchRestartableServer } from "./testing/restartable-server.ts";
 
 async function launch() {
   const fixture = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true });
@@ -186,3 +187,63 @@ it("marks a job's review answer and a webhook post unread where they land", asyn
     await fixture.close();
   }
 }, 120_000);
+
+it("keeps the main thread an install already had across an update, then moves it only when the person does or archives it", async () => {
+  const server = await launchRestartableServer();
+  const api = async (method: string, path: string, body?: unknown, status = 200) => {
+    const response = await fetch(`${server.url}${path}`, {
+      method, headers: { "content-type": "application/json", origin: server.url },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const value = await response.json() as any;
+    expect(response.status, `${method} ${path}: ${JSON.stringify(value)}`).toBe(status);
+    return value;
+  };
+  const cli = (...args: string[]) => runControlOmb([...args, "--url", server.url]) as Promise<any>;
+  try {
+    const { bot } = await cli("new-bot", "--name", "Keeper");
+    const first = bot.activeTaskId as string;
+    const main = async () => (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id).mainThreadId;
+    const open = async (title: string) => (await api("POST", `/api/bots/${bot.id}/tasks`, { title, approvalMode: "ask" }, 201)).task.threadId as string;
+    const write = async (threadId: string) => {
+      await cli("send", "--bot", bot.id, "--task", threadId, "--text", "Note this.");
+      await expect.poll(async () => ((await api("GET", `/api/threads/${threadId}/messages?limit=50`)).messages as any[]).some((message) => message.role !== "user"), { timeout: 20_000 }).toBe(true);
+      await expect.poll(async () => (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id).busy, { timeout: 20_000 }).toBe(false);
+    };
+    const saved = () => readRegistry(server.dataDir).bots.find((candidate: any) => candidate.id === bot.id);
+    const second = await open("Second");
+    const third = await open("Third");
+    await write(second);
+
+    // What an install saved before a main thread was kept: threads stamped where the person wrote, and no choice.
+    await server.stop();
+    const file = join(server.dataDir, "bots.json");
+    writeFileSync(file, JSON.stringify((JSON.parse(readFileSync(file, "utf8")) as any[]).map(({ mainThreadChoice: _choice, ...rest }) => rest)));
+    expect(saved().tasks.find((task: any) => task.threadId === second).askedAt).toEqual(expect.any(Number));
+    await server.start();
+    expect(await main(), "the thread the person last wrote in, as before the update").toBe(second);
+    await write(third);
+    expect(await main()).toBe(second);
+    await server.stop();
+    expect(saved().mainThreadChoice).toBe(second);
+    await server.start();
+    expect(await main()).toBe(second);
+
+    await api("PATCH", `/api/bots/${bot.id}/tasks/${second}`, { archivedAt: Date.now() });
+    expect(await main(), "the oldest open conversation the person started takes over").toBe(first);
+    await api("PATCH", `/api/bots/${bot.id}/tasks/${second}`, { archivedAt: null });
+    await write(second);
+    expect(await main(), "reopening the old main thread moves nothing").toBe(first);
+
+    await api("PATCH", `/api/bots/${bot.id}`, { mainThreadChoice: third });
+    expect(await main()).toBe(third);
+    await api("PATCH", `/api/bots/${bot.id}/tasks/${third}`, { archivedAt: Date.now() });
+    expect(await main()).toBe(first);
+    await api("PATCH", `/api/bots/${bot.id}/tasks/${third}`, { archivedAt: null });
+    expect(await main()).toBe(first);
+    await api("DELETE", `/api/bots/${bot.id}/tasks/${first}`);
+    expect(await main(), "deleting it moves it once more").toBe(second);
+  } finally {
+    await server.close();
+  }
+}, 180_000);
