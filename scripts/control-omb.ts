@@ -15,6 +15,7 @@ import { launchUi, runControlOmbUi } from "./testing/control-omb-ui.ts";
 import { removeTempDir, waitForExit } from "../server/testing/cleanup.ts";
 import { hostTimeout } from "../server/testing/host-timeout.ts";
 import { freePortBlock } from "../server/testing/ports.ts";
+import { fakeAntigravityScript } from "../server/testing/antigravity-native-fixture.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 /** Outside the bot name pool, so no suite can plan a bot that collides with the
@@ -286,6 +287,17 @@ export function verificationServerArgs(childEnv: NodeJS.ProcessEnv): string[] {
 }
 
 /** Start one foreground-owned, fake-engine server with no access to user data. */
+/** The fake native Antigravity CLI as a program named `antigravity` in the fixture's data folder, signed in through the
+ * keyring folder its environment names. */
+function signedInFakeAntigravity(dataDir: string): string {
+  const executable = join(dataDir, "fake-antigravity", "antigravity");
+  mkdirSync(dirname(executable), { recursive: true });
+  writeFileSync(executable, fakeAntigravityScript(), { mode: 0o755 });
+  mkdirSync(join(dataDir, "fake-antigravity-keyring"), { recursive: true });
+  writeFileSync(join(dataDir, "fake-antigravity-keyring", "shared"), "{}\n", { mode: 0o600 });
+  return executable;
+}
+
 export async function launchVerificationServer(
   parentEnv: NodeJS.ProcessEnv = process.env,
   signal?: AbortSignal,
@@ -296,7 +308,7 @@ export async function launchVerificationServer(
   enterprise?: { dir: string; licenseKey: string },
   room?: { scripted: boolean },
   /** Optional repository-owned fake providers for multi-engine setup checks. */
-  extraProviders: Array<"codex" | "cline" | "copilot" | "customAcp" | "opencode" | "kimi" | "grok"> = [],
+  extraProviders: Array<"codex" | "cline" | "copilot" | "customAcp" | "opencode" | "kimi" | "grok" | "antigravity"> = [],
   /** Programmatic tests only: an owned loopback Boat provider, never a live account. */
   boatFixtureApi?: string,
   /** Programmatic web UI qualification against the fixture's static server. */
@@ -350,6 +362,11 @@ export async function launchVerificationServer(
       ...(extraProviders.includes("codex") ? { codex: {
         driver: "codex", displayName: "Verification Codex", config: { cli: fileURLToPath(new URL("../server/testing/fake-codex-app-server.ts", import.meta.url)) },
         environment: Object.fromEntries(Object.entries(parentEnv).filter(([key, value]) => key.startsWith("FAKE_CODEX_") && value)),
+      } } : {}),
+      ...(extraProviders.includes("antigravity") ? { antigravity: {
+        driver: "antigravityAgent", displayName: "Verification Antigravity", config: { cli: signedInFakeAntigravity(dataDir), fullAuto: false },
+        environment: { FAKE_AGY_LOG: join(dataDir, "fake-antigravity.log"), FAKE_AGY_KEYRING: join(dataDir, "fake-antigravity-keyring"), FAKE_AGY_KEYRING_SHARED: "1",
+          ...Object.fromEntries(Object.entries(parentEnv).filter(([key, value]) => key.startsWith("FAKE_AGY_") && value)) },
       } } : {}),
       ...(extraProviders.includes("cline") ? { cline: {
         driver: "clineAgent", displayName: "Verification Cline",

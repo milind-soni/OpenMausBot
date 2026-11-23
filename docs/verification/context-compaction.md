@@ -21,10 +21,24 @@ tokens and no cost (a fallback, not an estimate), and the context
 reading from before it is dropped (the meter shows nothing until the next turn
 reports one). With `context.compactAt` set, Compact now on Codex folds instead.
 
+Google's native Antigravity CLI (1.3.5 on) has no compaction OpenMausBot is told
+of, so the fold below still times its sessions, but Compact now asks it first:
+`/compact` as the only block of a prompt to the live session the last turn left
+(never a process started for it), in place, as for Codex, when that session
+advertised `/compact` and the next message would carry on it. The CLI counts
+as having compacted only when the prompt ends `end_turn` with usage and a
+`usage_update`, and nothing it streamed was a reply: 1.5.14 answers a
+`/compact` on a session with nothing to compact as an ordinary message, and
+that falls back to the fold, its usage booked. After a compaction the fold, as
+long as the next turn carries on that session, measures only the history after
+the last message the session had received, so a conversation that had just
+passed the fold point is not folded on its next message. The pinned runtime
+(`agy_acp_server`) and every other ACP agent fold.
+
 OpenMausBot's own fold (below) is what compacts in every other case:
 
 - an engine with no compaction of its own that OpenMausBot is told of (the API
-  models, Pi, Muse Code, ACP agents);
+  models, Pi, Muse Code, ACP agents, the native Antigravity CLI);
 - a session its engine left uncompacted: the last measured prompt is within
   10,000 tokens or 5% (whichever is closer) of the model's window, or of
   `OMB_CLAUDE_AUTOCOMPACT` when that is lower (190,000 by default). Claude Code
@@ -36,10 +50,12 @@ OpenMausBot's own fold (below) is what compacts in every other case:
   engine, as it did before engines were left to compact themselves;
 - Compact now when the engine cannot run its own (no session open or parked,
   a Claude Code too old to fork, a Codex whose app-server was closed, whose
-  next message would not carry on its thread, or with `context.compactAt` set).
+  next message would not carry on its thread, or with `context.compactAt` set;
+  a native Antigravity CLI in the same cases, or one that did not compact).
 
 ```sh
-pnpm exec vitest run server/host/conversation-compaction.test.ts server/context-compaction.e2e.test.ts
+pnpm exec vitest run server/host/conversation-compaction.test.ts server/context-compaction.e2e.test.ts \
+  server/drivers/antigravity-compact.test.ts server/drivers/acp/session-compact.test.ts
 ```
 
 ## OpenMausBot's fold

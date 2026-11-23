@@ -32,6 +32,9 @@ export interface AcpDriverHooks {
   /** Whether this instance's agent takes the system prompt through sessionSetupParams instead of in the prompt text, where
    * it would read words of it as the person's commands. A changed system prompt then loads the live session again. */
   sessionSystemPrompt?(initializeResult: unknown, instanceId: string): boolean;
+  /** The adapter offers `compactSession`: the agent's own compaction of a live session, by the slash command its launch
+   * named (`resolveCommand`'s `compactCommand`). A session whose launch named none is not compacted. */
+  inPlaceCompaction?: true;
   /** The `clientInfo` of initialize, for an agent that reads it; the app's own name when unset or undefined. */
   clientInfo?(instanceId: string): { name: string; version: string } | undefined;
   /** Whether the driver answers this permission request with "allow" itself, with no card: for an agent that asks

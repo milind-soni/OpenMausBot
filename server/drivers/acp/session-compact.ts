@@ -1,0 +1,140 @@
+import type { EngineCompactResult } from "../../contracts.ts";
+import { deletePromptSplitReceipt } from "../prompt-split.ts";
+import { promptTokenUsage } from "./prompt-usage.ts";
+import type { AcpAskFinish, AcpSession } from "./turn-state.ts";
+
+const DEFAULT_TIMEOUT_MS = 300_000;
+const CANCEL_GRACE_MS = 5_000;
+const timeoutMs = (): number => Number(process.env.FAKE_ACP_COMPACT_TIMEOUT_MS) > 0 ? Number(process.env.FAKE_ACP_COMPACT_TIMEOUT_MS) : DEFAULT_TIMEOUT_MS;
+const REPLY_UPDATES = new Set(["agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update", "plan"]);
+
+interface ActiveEntry {
+  stop: () => void;
+  interrupt: () => void;
+  turnId: string;
+  asks: Map<string, AcpAskFinish>;
+}
+
+export interface AcpCompactDeps {
+  driverKind: string;
+  instanceId: string;
+  sessions: Map<string, AcpSession>;
+  active: Map<string, ActiveEntry>;
+  turnId: () => string;
+  refusal: () => string | null;
+  promptOutcome?: (instanceId: string, sessionId: string) => Promise<(result: unknown) => Promise<Error | undefined>>;
+  closeSession: (threadId: string, why: string) => void;
+  endUncancelled: (threadId: string, session: AcpSession) => Promise<boolean>;
+  holdIdle: (threadId: string, session: AcpSession) => void;
+  armIdle: (threadId: string) => void;
+}
+
+type Ending = { kind: "answered"; result: any } | { kind: "failed"; reason: string } | { kind: "stopped" } | { kind: "timeout" };
+
+/** The agent's own compaction of a thread's session, in place, by the slash command the process advertised when it was
+ * launched (Antigravity CLI 1.5.14: `/compact` as a prompt's only block answers `end_turn` with the summary call's usage
+ * after one `usage_update` and no reply; on a session with nothing to compact it is sent to the model as a message, and
+ * answers with a reply). Nothing here starts a process or loads a session: only the live session the last turn left,
+ * still on `session`, takes it. */
+export function acpCompactSession(deps: AcpCompactDeps) {
+  return async (threadId: string, options: { session: string; selectionNow?: () => { instanceId: string; model: string | null } | undefined; signal?: AbortSignal }): Promise<EngineCompactResult> => {
+    const fail = (reason: string): EngineCompactResult => ({ ok: false, reason });
+    const refusal = deps.refusal();
+    if (refusal) return fail(refusal);
+    if (deps.active.has(threadId)) return fail("a turn is running on this thread");
+    if (options.signal?.aborted) return fail("stopped");
+    const session = deps.sessions.get(threadId);
+    const live = (): boolean => deps.sessions.get(threadId) === session && session !== undefined && !session.dead && !session.closing
+      && session.current === null && session.child.exitCode === null && session.sessionId === options.session;
+    if (!session || !live()) return fail("no live session holds this conversation");
+    const command = session.compactCommand;
+    if (!command) return fail("this runtime has no in-place compaction");
+    if (session.commandsSession !== options.session || !session.commands?.has(command)) return fail(`the session does not offer /${command}`);
+    const selectionMoved = (): boolean => {
+      const now = options.selectionNow?.();
+      return options.selectionNow !== undefined && now?.instanceId !== deps.instanceId;
+    };
+
+    let end!: (ending: Ending) => void;
+    const ended = new Promise<Ending>((resolve) => { end = resolve; });
+    let stopRequested = false;
+    const stop = () => { stopRequested = true; end({ kind: "stopped" }); };
+    const entry: ActiveEntry = { stop, interrupt: stop, turnId: deps.turnId(), asks: new Map() };
+    deps.active.set(threadId, entry);
+    deps.holdIdle(threadId, session);
+    const onAbort = () => stop();
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    const exited = () => end({ kind: "failed", reason: "the agent exited during compaction" });
+    session.child.once("exit", exited);
+    session.child.once("error", exited);
+    const counted = { open: false, replied: false, usageReported: false };
+    const heard = (params: any) => {
+      if (!counted.open || params?._meta?.isReplay === true || params?.sessionId !== options.session) return;
+      const kind = params?.update?.sessionUpdate;
+      if (REPLY_UPDATES.has(kind)) counted.replied = true;
+      else if (kind === "usage_update") counted.usageReported = true;
+    };
+    const previousHeard = session.acp.onUpdate;
+    session.acp.onUpdate = heard;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let keep = true;
+    try {
+      const checked = deps.promptOutcome ? deps.promptOutcome(deps.instanceId, options.session).catch(() => undefined) : Promise.resolve(undefined);
+      const before = await Promise.race([checked.then((check) => ({ kind: "checked" as const, check })), ended]);
+      if (before.kind !== "checked") return before.kind === "failed" ? (keep = false, fail(before.reason)) : fail("stopped");
+      const { check } = before;
+      if (stopRequested || options.signal?.aborted) return fail("stopped");
+      if (!live() || selectionMoved()) return fail("the conversation moved on before the compaction was sent");
+      timer = setTimeout(() => end({ kind: "timeout" }), timeoutMs());
+      timer.unref?.();
+      counted.open = true;
+      const answer = session.acp.request("session/prompt", { sessionId: options.session, prompt: [{ type: "text", text: `/${command}` }] },
+        undefined, () => { counted.open = false; });
+      answer.then((result) => end({ kind: "answered", result }), (error: Error) => end({ kind: "failed", reason: `compaction failed: ${error.message}` }));
+      const ending = await ended;
+      if (ending.kind === "stopped" || ending.kind === "timeout") {
+        const confirmed = await answeredAfterCancel(session, options.session, answer);
+        if (ending.kind === "stopped" && confirmed) return fail("stopped");
+        keep = false;
+        if (!confirmed && !await deps.endUncancelled(threadId, session)) return fail("the agent could not be stopped");
+        return fail(ending.kind === "stopped" ? "stopped" : "timed out");
+      }
+      if (ending.kind === "failed") {
+        keep = false;
+        return fail(ending.reason);
+      }
+      const { result } = ending;
+      const usage = promptTokenUsage(result);
+      const reported = await check?.(result);
+      const why = result?.stopReason !== "end_turn" ? `the compaction ended ${String(result?.stopReason ?? "without a stop reason")}`
+        : reported ? `the agent reported a failure: ${reported.message}`
+          : counted.replied ? `the agent answered /${command} as a message`
+            : !usage || !counted.usageReported ? "the agent reported no compaction"
+              : null;
+      if (why) {
+        keep = false;
+        return { ok: false, reason: why, ...(usage ? { usage: { input: usage.input, output: usage.output, cachedInput: usage.cachedInput ?? 0 }, model: session.lastModel ?? null } : {}) };
+      }
+      deletePromptSplitReceipt(deps.driverKind, JSON.stringify([threadId, options.session]));
+      return { ok: true, usage: { input: usage!.input, output: usage!.output, cachedInput: usage!.cachedInput ?? 0 }, model: session.lastModel ?? null };
+    } finally {
+      clearTimeout(timer);
+      options.signal?.removeEventListener("abort", onAbort);
+      session.child.removeListener("exit", exited);
+      session.child.removeListener("error", exited);
+      if (session.acp.onUpdate === heard) session.acp.onUpdate = previousHeard;
+      if (deps.active.get(threadId) === entry) deps.active.delete(threadId);
+      if (!keep && deps.sessions.get(threadId) === session && !session.closing) deps.closeSession(threadId, "compact-failed");
+      else if (deps.sessions.get(threadId) === session && !session.closing && !session.dead) deps.armIdle(threadId);
+    }
+  };
+}
+
+async function answeredAfterCancel(session: AcpSession, sessionId: string, answer: Promise<any>): Promise<boolean> {
+  session.acp.send({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId } });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const grace = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), CANCEL_GRACE_MS); timer.unref?.(); });
+  const outcome = await Promise.race([answer.then((result) => result, () => null), grace]);
+  clearTimeout(timer);
+  return outcome !== null;
+}

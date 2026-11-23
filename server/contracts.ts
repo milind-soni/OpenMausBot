@@ -377,7 +377,7 @@ export type IdleCompactResult =
 
 export type EngineCompactResult =
   | { ok: true; usage: { input: number; output: number; cachedInput: number } | null; model: string | null }
-  | { ok: false; reason: string };
+  | { ok: false; reason: string; usage?: { input: number; output: number; cachedInput: number }; model?: string | null };
 
 export type SteerOutcome = "steered" | "refused" | "indeterminate";
 

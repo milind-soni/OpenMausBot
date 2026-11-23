@@ -222,8 +222,10 @@ const support: AcpSupport = {
       args: antigravityLaunchArgs(runtime, profile.directory),
       env: profile.environment,
       ro: [join(profile.directory, "omb-skills")],
+      ...(runtime.harnessPath === null ? { compactCommand: "compact" } : {}),
     };
   },
+  inPlaceCompaction: true,
 
   resolveModels: async (env, config, instanceId) => {
     const runtime = await resolveAntigravityRuntime(config.cli, env);
