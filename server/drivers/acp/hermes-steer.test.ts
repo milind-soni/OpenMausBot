@@ -22,7 +22,6 @@ import { GeminiAgentDriver } from "./gemini.ts";
 import { HermesAgentDriver, hermesSteerAnswer } from "./hermes.ts";
 import { KimiAgentDriver } from "./kimi.ts";
 import { KiroAgentDriver } from "./kiro.ts";
-import { QwenAgentDriver } from "./qwen.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "../../testing/fake-acp-cli.ts");
 
@@ -195,7 +194,7 @@ describe("Hermes's answers to /steer", () => {
 describe("other ACP engines", () => {
   // Each runs against an agent that offers /steer: an engine whose own support is unproven still never steers.
   it.each([
-    GeminiAgentDriver, KimiAgentDriver, DroidAgentDriver, CursorAgentDriver, QwenAgentDriver, ClineAgentDriver,
+    GeminiAgentDriver, KimiAgentDriver, DroidAgentDriver, CursorAgentDriver, ClineAgentDriver,
     CopilotAgentDriver, CommandCodeAgentDriver, KiroAgentDriver, CustomAcpDriver, DeepSeekAgentDriver, AntigravityDriver,
   ] as AnyProviderDriver[])("$driverKind does not steer", async (driver) => {
     await start(driver);

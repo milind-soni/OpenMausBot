@@ -29,6 +29,7 @@ posixOnly("mid-turn steering e2e", () => {
   let lateSteerDump: string;
   let codexSteerGate: string;
   let hermesGate: string;
+  let qwenGate: string;
 
   const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
     const res = await fetch(`${BASE}${path}`, {
@@ -83,6 +84,9 @@ posixOnly("mid-turn steering e2e", () => {
     lateSteerDump = join(home, "late-steer-dump.json");
     codexSteerGate = join(home, "codex-steer-refused.gate");
     hermesGate = join(home, "finish-hermes-turn.gate");
+    qwenGate = join(home, "finish-qwen-turn.gate");
+    mkdirSync(join(home, ".qwen"), { recursive: true });
+    writeFileSync(join(home, ".qwen", "settings.json"), JSON.stringify({ modelProviders: { openai: [{ id: "qwen-fixture" }] } }));
     writeFileSync(codexSteerGate, "refuse live steers until the queue test clears this gate");
     writeFileSync(
       join(home, ".openmausbot", "config.json"),
@@ -115,6 +119,12 @@ posixOnly("mid-turn steering e2e", () => {
           hermes: {
             driver: "hermesAgent",
             environment: { FAKE_ACP_MODE: "hermes-steer", FAKE_ACP_GATE_FILE: hermesGate, OPENMAUSBOT_PROBE_LOCAL_INJECT: "0" },
+            config: { cli: FAKE_ACP, fullAuto: true },
+          },
+          qwen: {
+            driver: "qwenAgent",
+            environment: { FAKE_ACP_MODE: "qwen-steer", FAKE_ACP_MODELS: "qwen-fixture(openai)", FAKE_ACP_AGENT_NAME: "qwen-code", FAKE_ACP_AGENT_VERSION: "1.0.0-preview.2",
+              FAKE_ACP_GATE_FILE: qwenGate, OPENMAUSBOT_PROBE_LOCAL_INJECT: "0" },
             config: { cli: FAKE_ACP, fullAuto: true },
           },
           // codex parks its turn on an unanswered question; turn/steer folds new input into that live turn without ending it.
@@ -696,6 +706,43 @@ posixOnly("mid-turn steering e2e", () => {
     expect(texts[3]).toMatch(/^bot:working\. done; steered: [\s\S]*and also this/);
     expect(texts).toHaveLength(4);
     expect(JSON.stringify(bot.messages)).not.toContain("Steer queued");
+    expect(bot.messages.find((m: any) => m.text === "and also this").steered).toBe(true);
+  }, 40_000);
+
+  it("a message during a Qwen turn is steered in as a second prompt Qwen never answers, and the next message runs as its own turn", async () => {
+    rmSync(qwenGate, { force: true });
+    const created = (await api("POST", "/api/bots")).body.bot;
+    const qwen = (await api("GET", "/api/instances")).body.instances.find((i: any) => i.instanceId === "qwen");
+    expect(qwen.capabilities.queueing).toBe(true);
+    await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "qwen", model: qwen.models.default } });
+
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "first" })).status).toBe(202);
+    const nativeRows = () => {
+      try {
+        return readFileSync(join(home, ".openmausbot", "native", `${created.threadId}.ndjson`), "utf8")
+          .trim().split("\n").map((line) => JSON.parse(line));
+      } catch {
+        return [];
+      }
+    };
+    await waitFor(async () => nativeRows().some((row) => row.dir === "in" && row.msg?.params?.update?.content?.text === "working. "), "Qwen to work on the turn");
+    let second: Awaited<ReturnType<typeof api>>;
+    try {
+      second = await api("POST", `/api/bots/${created.id}/messages`, { text: "and also this" });
+      await waitFor(async () => nativeRows().some((row) => row.dir === "out" && row.msg?.method === "session/prompt" && JSON.stringify(row.msg.params.prompt).includes("and also this")), "the steer prompt");
+    } finally {
+      writeFileSync(qwenGate, "finish");
+    }
+    expect(second.status).toBe(202);
+    expect(second.body.steered).toBe(true);
+
+    await waitFor(async () => (await getBot(created.id)).busy === false, "the steered Qwen turn to settle");
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "next" })).status).toBe(202);
+    await waitFor(async () => (await getBot(created.id)).messages.filter((m: any) => m.kind === "text" && m.role === "bot").length === 2, "the next Qwen turn");
+    await waitFor(async () => (await getBot(created.id)).busy === false, "the next Qwen turn to settle");
+    const bot = await getBot(created.id);
+    const texts = bot.messages.filter((m: any) => m.kind === "text").map((m: any) => `${m.role}:${m.role === "bot" ? withoutTurnClock(m.text) : m.text}`);
+    expect(texts.slice(1)).toEqual(["user:first", "user:and also this", "bot:working. done; steered: and also this", "user:next", "bot:working. done"]);
     expect(bot.messages.find((m: any) => m.text === "and also this").steered).toBe(true);
   }, 40_000);
 

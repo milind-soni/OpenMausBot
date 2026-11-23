@@ -39,8 +39,14 @@ await import(${JSON.stringify(fake)});
     method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ cli }),
   });
   assert.equal(configured.status, 200, await configured.text());
+  const refreshed = await fetch(`${url}/api/instances/qwen/refresh-models`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: "{}",
+  });
+  assert.equal(refreshed.status, 200, await refreshed.text());
   const catalog = await control(["models"]) as { instances: Array<{ instanceId: string; models: typeof expected }> };
-  assert.deepEqual(catalog.instances.find((instance) => instance.instanceId === "qwen")?.models, expected);
+  const actual = catalog.instances.find((instance) => instance.instanceId === "qwen")?.models;
+  assert.equal(actual?.default, expected.default);
+  assert.deepEqual(actual?.options.filter((model) => expected.options.some(({ id }) => id === model.id)), expected.options);
   for (const [name, model, rejects] of [
     ["Other provider", "same(anthropic)", false],
     ["Other endpoint", expected.options[1].id, false],

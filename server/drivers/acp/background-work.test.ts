@@ -27,40 +27,40 @@ describe("close-ends background work", () => {
     const work = closeEndsBackgroundWork();
     const calls: string[] = [];
     const session = { sessionId: "s1" as string | null, cwd: "/w", initResult: capable };
-    await work.end(session, async (method: string, params: any) => { calls.push(`${method} ${params.sessionId}`); return {}; });
+    await work.end("thread", session, async (method: string, params: any) => { calls.push(`${method} ${params.sessionId}`); return {}; });
     expect(calls).toEqual(["session/close s1"]);
     expect(session.sessionId).toBeNull();
-    expect(work.resumeCursor(undefined, null, session)).toBe("s1");
-    expect(work.resumeCursor("other", null, session)).toBe("other");
-    expect(work.resumeCursor(undefined, "live", session)).toBeNull();
-    expect(work.resumeCursor(undefined, null, {})).toBeNull();
+    expect(work.resumeCursor("thread", undefined, null, session)).toBe("s1");
+    expect(work.resumeCursor("thread", "other", null, session)).toBe("other");
+    expect(work.resumeCursor("thread", undefined, "live", session)).toBeNull();
+    expect(work.resumeCursor("thread", undefined, null, {})).toBeNull();
   });
 
   it("reports it could not end the work when the agent cannot close sessions, and keeps the session when the close fails", async () => {
     const work = closeEndsBackgroundWork();
     const calls: string[] = [];
     const noClose = { sessionId: "s1" as string | null, cwd: "/w", initResult: { agentCapabilities: { sessionCapabilities: {} } } };
-    expect(await work.end(noClose, async (method: string) => { calls.push(method); return {}; })).toBe(false);
+    expect(await work.end("thread", noClose, async (method: string) => { calls.push(method); return {}; })).toBe(false);
     expect(calls).toEqual([]);
     expect(noClose.sessionId).toBe("s1");
 
     const failing = { sessionId: "s2" as string | null, cwd: "/w", initResult: capable };
-    expect(await work.end(failing, async () => { throw new Error("busy"); })).toBe(false);
+    expect(await work.end("thread", failing, async () => { throw new Error("busy"); })).toBe(false);
     expect(failing.sessionId).toBe("s2");
-    expect(work.resumeCursor(undefined, null, failing)).toBeNull();
+    expect(work.resumeCursor("thread", undefined, null, failing)).toBeNull();
   });
 
   it("retries a failed close once, and reports when the work could not be ended", async () => {
     const work = closeEndsBackgroundWork();
     let attempts = 0;
     const flaky = { sessionId: "s3" as string | null, cwd: "/w", initResult: capable };
-    expect(await work.end(flaky, async () => { if (++attempts === 1) throw new Error("busy"); return {}; })).toBe(true);
+    expect(await work.end("thread", flaky, async () => { if (++attempts === 1) throw new Error("busy"); return {}; })).toBe(true);
     expect(attempts).toBe(2);
     expect(flaky.sessionId).toBeNull();
 
     let tries = 0;
     const stuck = { sessionId: "s4" as string | null, cwd: "/w", initResult: capable };
-    expect(await work.end(stuck, async () => { tries++; throw new Error("busy"); })).toBe(false);
+    expect(await work.end("thread", stuck, async () => { tries++; throw new Error("busy"); })).toBe(false);
     expect(tries).toBe(2);
   });
 });

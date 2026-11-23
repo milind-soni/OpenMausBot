@@ -4,11 +4,12 @@ The Qwen picker reads configured chat routes from the server user's
 `.qwen/settings.json`. It preserves protocol and endpoint identity; no endpoint,
 credential, or environment-key name is exposed in the public model catalog.
 
-OMB uses Qwen's native ACP model selector and requires the CLI to confirm the
-selected route before sending the prompt. It does not pass a bare `-m` argument,
-which would retain the saved provider. This requires a Qwen Code version that
-supports `session/set_config_option` for `model`. Unsupported versions fail before
-prompting; update Qwen Code using its official installer and refresh models.
+The picker also includes signed-in account models from `qwen --list-models`.
+Catalog refresh runs this command, which may contact Qwen. For a native account
+model, OpenMausBot sets `QWEN_MODEL` when launching the ACP process. Selecting
+another account model starts a fresh process and attempts to load the same
+conversation cursor. For a configured route, OpenMausBot uses the ACP model
+selector and requires the CLI to confirm the route before sending the prompt.
 
 Offline verification (no provider login or paid calls):
 
@@ -43,6 +44,10 @@ with six successful roster calls, three history searches, one process id, one
 agents bearer, and three HTTP 401 checks after the turns settled. The
 alternate-provider, alternate-endpoint, and rejected-switch checks also passed.
 No live provider or user workspace was used.
+
+On 2026-11-20, the configured-route fixture passed again on Windows. The ACP
+catalog tests also exercised signed-in model discovery and loading the existing
+cursor after changing the account model with the fake CLI.
 
 Route identity follows Qwen Code's
 [ACP model utility](https://github.com/QwenLM/qwen-code/blob/main/packages/cli/src/utils/acpModelUtils.ts)

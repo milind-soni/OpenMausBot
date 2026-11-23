@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -126,6 +126,49 @@ describe("QwenAgentDriver catalog", () => {
     }
   });
 
+  it("lists the models a Qwen Code without --list-models advertises beside the configured routes", async () => {
+    const home = scratchSettings({ modelProviders: { openai: [{ id: "configured-qwen" }] } });
+    const instance = await QwenAgentDriver.create({ instanceId: "qwen-native", displayName: "Qwen", enabled: true,
+      environment: { ...homeEnv(home), FAKE_ACP_MODELS: "qfmodel,configured-qwen(openai)", FAKE_ACP_MODELS_LIST: "none" },
+      config: { cli: FAKE_CLI, fullAuto: false } });
+    try {
+      expect(instance.models.default).toBe("configured-qwen(openai)");
+      expect(instance.models.options.map((option) => option.id)).toEqual(["configured-qwen(openai)", "qfmodel"]);
+    } finally {
+      await instance.dispose();
+    }
+  });
+
+  it("lists every account model and launches a process per model with QWEN_MODEL", async () => {
+    const home = scratchSettings({ modelProviders: { openai: [{ id: "qfmodel" }] } });
+    const dump = join(home, "dump.json");
+    const launches = join(home, "launches");
+    const instance = await QwenAgentDriver.create({ instanceId: "qwen-list", displayName: "Qwen", enabled: true,
+      environment: { ...homeEnv(home), FAKE_ACP_MODELS: "qfmodel,qmodel_38max,qfmodel(openai)", FAKE_ACP_MODELS_LIST: "qwen",
+        FAKE_ACP_DUMP: dump, FAKE_ACP_LAUNCH_COUNT_FILE: launches },
+      config: { cli: FAKE_CLI, fullAuto: false } });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      expect(instance.models.options).toEqual([
+        { id: "qfmodel(openai)", label: "qfmodel", custom: true, provider: "openai" },
+        { id: "qfmodel", label: "QFMODEL" }, { id: "qmodel_38max", label: "QMODEL_38MAX" },
+      ]);
+      rmSync(launches, { force: true });
+      for (const model of ["qfmodel", "qmodel_38max"]) {
+        const { turnId } = await instance.adapter.sendTurn({ threadId: "qwen-thread", text: "hi", approvalMode: "ask", model, cwd: home });
+        expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok: true });
+        expect(JSON.parse(readFileSync(dump, "utf8")).env.QWEN_MODEL).toBe(model);
+      }
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "qwen-thread", text: "hi", approvalMode: "ask", model: "qfmodel(openai)", cwd: home });
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok: true });
+      expect(recorder.events).toContainEqual(expect.objectContaining({ type: "session.started", turnId, model: "qfmodel(openai)" }));
+      expect(JSON.parse(readFileSync(dump, "utf8")).env.QWEN_MODEL).toBeUndefined();
+      expect(Number(readFileSync(launches, "utf8"))).toBe(3);
+    } finally {
+      await instance.dispose();
+    }
+  });
+
   it("keeps live local inject discovery and removes its duplicate plain model id", async () => {
     const previousFetch = globalThis.fetch;
     globalThis.fetch = (async (url: string | URL) => {
@@ -191,9 +234,11 @@ describe("Qwen route selection", () => {
     expect(() => resolveQwenTurnModel("same", homeEnv(home))).toThrow("multiple providers");
   });
 
-  it("rejects unknown selections and routes whose public identities collide", () => {
+  it("rejects unknown routes and routes whose public identities collide, and passes Qwen's own models through", () => {
     const empty = scratchSettings({});
-    expect(() => resolveQwenTurnModel("deleted", homeEnv(empty))).toThrow("no longer configured");
+    expect(() => resolveQwenTurnModel("deleted(openai)", homeEnv(empty))).toThrow("no longer configured");
+    expect(() => resolveQwenTurnModel("qwen-route:v1:abc", homeEnv(empty))).toThrow("no longer configured");
+    expect(resolveQwenTurnModel("qfmodel", homeEnv(empty))).toBe("qfmodel");
     const colliding = scratchSettings({ modelProviders: { openai: [
       { id: "same", baseUrl: "https://proxy.example/v1?key=one" },
       { id: "same", baseUrl: "https://proxy.example/v1?key=two" },
