@@ -15,8 +15,6 @@ export function windowEntries(windowPref: WindowPref): SettingEntry[] {
   return [
     flag("appearance.userBubbles", "Coloured messages", "Your own messages take the bot's colour.", "bubbles", ["bubbles", "message color", "my messages"],
       "Colour your messages with each bot's colour", "Show your messages in plain grey"),
-    flag("appearance.runCard", "This run card", "Show the card that follows a bot's run while it works.", "tool-calls", ["this run", "run card", "progress"],
-      "Show the card that follows each run", "Hide the card that follows each run"),
     flag("appearance.showThreads", "Threads in the sidebar", "List each bot's conversations under it in the sidebar.", "layout", ["threads", "conversations", "sidebar"],
       "List each bot's threads in the sidebar", "Hide threads from the sidebar"),
     windowPref("appearance.toolsLayout", "Sidebar tools layout", "How the sidebar shows its tools: rows, or a toolbar of icons.", "layout", ["tools layout", "toolbar", "rows"], "rows or toolbar",
