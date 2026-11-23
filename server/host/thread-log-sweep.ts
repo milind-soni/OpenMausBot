@@ -58,14 +58,14 @@ export const PASS_EVERY_MS = 6 * 60 * 60_000;
 export function threadLogSweepMode(env: NodeJS.ProcessEnv): ThreadLogSweepMode {
   const raw = env.OMB_THREAD_LOG_SWEEP?.trim().toLowerCase();
   if (raw === "report" || raw === "dry-run") return "report";
-  return raw === "on" || raw === "1" || raw === "true" ? "on" : "off";
+  return raw === "on" ? "on" : "off";
 }
 
 /** OMB_THREAD_LOG_CUT: over the cap, also cut week-idle logs to their session lines (events) or remove them (native).
  * Off by default: it is the one step that empties the Inspector and Activity rows of those conversations. */
 export function threadLogCutEnabled(env: NodeJS.ProcessEnv): boolean {
   const raw = env.OMB_THREAD_LOG_CUT?.trim().toLowerCase();
-  return raw === "1" || raw === "on" || raw === "true";
+  return raw === "1" || raw === "on";
 }
 
 /** Bytes, or a number with K, M or G (powers of 1024); null for anything else. */
@@ -224,9 +224,9 @@ const unchanged = (file: LogFile): boolean => {
 /**
  * Keeps `floor` of the log's newest lines (none when null) and, for events, its session.started lines from the part
  * cut away. Returns the bytes freed, or would free when `write` is false. A file that changed since it was listed, or
- * whose kept part is empty and `floor` is not null, is left as it is.
+ * whose kept part is empty and `floor` is not null, is left as it is, and so is one when `mayChange` says no at the swap.
  */
-export async function trimLog(file: LogFile, floor: { lines: number; bytes: number } | null, write: boolean): Promise<number> {
+export async function trimLog(file: LogFile, floor: { lines: number; bytes: number } | null, write: boolean, mayChange: () => boolean = () => true): Promise<number> {
   let handle: FileHandle;
   try {
     handle = await open(file.path, "r");
@@ -255,7 +255,7 @@ export async function trimLog(file: LogFile, floor: { lines: number; bytes: numb
     if (!write) return freed;
     if (keptBytes === 0) {
       await closeSource();
-      if (!unchanged(file)) return 0;
+      if (!mayChange() || !unchanged(file)) return 0;
       rmSync(file.path, { force: true });
       return freed;
     }
@@ -274,8 +274,8 @@ export async function trimLog(file: LogFile, floor: { lines: number; bytes: numb
       await target.close();
     }
     await closeSource();
-    // No await from here to the rename: an append that landed while the copy ran is noticed, and the log kept.
-    if (!unchanged(file)) return 0;
+    // No await from here to the rename: an append, a turn or a pause that came while the copy ran keeps the log.
+    if (!mayChange() || !unchanged(file)) return 0;
     renameSync(staging, file.path);
     swapped = true;
     return freed;
@@ -347,7 +347,7 @@ export async function sweepThreadLogs(deps: ThreadLogSweepDeps): Promise<ThreadL
     // A log trimmed in this pass is listed again, so its cut sees what the trim left.
     const target = earlier && write ? await relisted(file) : file;
     if (!target) return true;
-    const freed = (await trimLog(target, floor, write)) - (write ? 0 : earlier);
+    const freed = (await trimLog(target, floor, write, () => !deps.paused?.() && !deps.turnsRunning?.())) - (write ? 0 : earlier);
     if (freed > 0) {
       result.after -= freed;
       freedBy.set(file, earlier + freed);

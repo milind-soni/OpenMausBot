@@ -259,6 +259,16 @@ describe("what a sweep never reaches", () => {
     expect(readFileSync(events, "utf8").split("\n").filter(Boolean)).toHaveLength(6_001);
   });
 
+  it("keeps a log when a turn starts while its trim was copied", async () => {
+    const events = writeEvents("t1", 6_000, [1]);
+    age(events, AGE_MS + DAY);
+    const text = readFileSync(events, "utf8");
+    const [listed] = await listLogs(dataDir);
+    expect(await trimLog(listed!, READ_FLOOR, true, () => false)).toBe(0);
+    expect(readFileSync(events, "utf8")).toBe(text);
+    expect(existsSync(`${events}.sweep`)).toBe(false);
+  });
+
   it("never trims a log whose newest line alone is past the floor's bytes", async () => {
     const file = join(dataDir, "events", "huge.ndjson");
     writeFileSync(file, `${"a".repeat(100)}\n${"b".repeat(READ_FLOOR.bytes + 10)}\n`);
