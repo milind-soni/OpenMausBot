@@ -244,12 +244,14 @@ in order:
 1. Apply the control plane's migration `0019_cloud_home_push.sql`.
 2. Set the control plane's `CLOUD_HOME_PUSH_SECRET` (random, 32 characters or
    more) and deploy it.
-3. Set the same value as the Admin's `OMB_CLOUD_PUSH_RELAY_SECRET`, and
-   `OMB_CLOUD_PUSH_RELAY_URL` to the control plane's origin; restart the Admin.
-4. Ship an Admin image and a Cloud home image with this code.
-5. Turn phone push on in one test Cloud's home (`features.phonePush: true` in
-   its `config.json`, or `OMB_PHONE_PUSH=1`), then `OMB_CLOUD_PHONE_PUSH` on in
-   the Admin's Cloud operations → Switches.
+3. Ship an Admin image with the relay, then set the same value as the Admin's
+   `OMB_CLOUD_PUSH_RELAY_SECRET`, and `OMB_CLOUD_PUSH_RELAY_URL` to the control
+   plane's origin, and restart the Admin.
+4. Ship a Cloud home image with this code.
+5. Turn phone push on in one test Cloud's home: `features.phonePush: true` in
+   its `config.json` (its owner's `PUT /api/config`; an `OMB_PHONE_PUSH` set by
+   hand in a home's environment is rewritten by the Admin at its next update),
+   then `OMB_CLOUD_PHONE_PUSH` on in the Admin's Cloud operations → Switches.
 6. Run "Test plan on real devices" against that Cloud, then widen.
 
 ## Always-on and the grace period

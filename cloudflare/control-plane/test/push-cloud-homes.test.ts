@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { createAuth } from "../src/auth";
 import { readConfig } from "../src/config";
 import { createWorker } from "../src/index";
-import { PUSH_DEVICE_SEND_LIMIT, PUSH_REGISTER_LIMIT } from "../src/push";
+import { PUSH_DEVICE_LIMIT, PUSH_DEVICE_SEND_LIMIT, PUSH_REGISTER_LIMIT } from "../src/push";
 import { CLOUD_HOME_FLEET_SEND_LIMIT, FLEET_ID } from "../src/push-cloud-homes";
 import fixture from "./fixtures/cloud-home-push.json";
 
@@ -185,6 +185,17 @@ describe("phone push for Cloud homes (the Admin's machine routes)", () => {
       .bind(CLOUD_HOME_FLEET_SEND_LIMIT, now, FLEET_ID).run();
     expect((await home(worker, testEnv, OTHER, "send", alert(TOKEN_B))).status).toBe(429);
     expect(await count("SELECT COUNT(*) AS n FROM machine_push_rate_limits WHERE machine_id = ? AND action = 'push_send'", OTHER)).toBe(0);
+  });
+
+  it("keeps at most 50 tokens a machine, as for an installation", async () => {
+    const worker = createWorker(fetch, fakeApns().fetch);
+    const testEnv = await pushEnv();
+    const token = (index: number) => index.toString(16).padStart(2, "0").repeat(32);
+    for (let index = 0; index < PUSH_DEVICE_LIMIT; index += 1) expect((await home(worker, testEnv, MACHINE, "register", registration(token(index)))).status).toBe(200);
+    const full = await home(worker, testEnv, MACHINE, "register", registration(token(99)));
+    expect(full.status).toBe(409);
+    expect(await full.json()).toEqual({ error: "push_device_limit" });
+    expect((await home(worker, testEnv, OTHER, "register", registration(token(99)))).status).toBe(200);
   });
 
   it("forgets every token of a machine the Admin deleted, and only that machine's", async () => {

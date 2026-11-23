@@ -89,7 +89,8 @@ function signedByHome(call: AdminCall, action: string): boolean {
 
 describe("the shared contract with the Admin", () => {
   it("is the fixture both repositories hold, byte for byte", () => {
-    expect(createHash("sha256").update(readFileSync(FIXTURE_FILE)).digest("hex")).toBe(FIXTURE_SHA256);
+    // As LF text, so a Windows checkout with CRLF line ends hashes the same.
+    expect(createHash("sha256").update(readFileSync(FIXTURE_FILE, "utf8").replace(/\r\n/g, "\n")).digest("hex")).toBe(FIXTURE_SHA256);
   });
 
   it("signs exactly as the fixture's vector says the Admin checks", () => {
