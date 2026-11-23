@@ -376,9 +376,7 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   /** Record a screenshot and a short note of each browser action, kept with
    * the conversation. Off unless true. */
   recordBrowserSteps?: boolean;
-  /** Memory upkeep: the harness captures facts from finished chats into
-   * MEMORY.md and topic files, adds facts about the person to About me and
-   * tidies nightly. On unless explicitly false. */
+  /** Capture facts from finished chats into memory and About me, and tidy nightly. On unless false. */
   memoryUpkeep?: boolean;
   /** The model memory upkeep uses on this bot's OpenRouter connection; absent uses the connection's automatic pick. */
   memoryModel?: { instanceId: string; model: string };
