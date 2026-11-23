@@ -43,7 +43,7 @@ const SERVER_ENV_NAMES = new Set([
   // The bot box switch (server/bot-box/detect.ts): the Admin may turn a home's box off for support.
   "OMB_BOT_BOX",
   // The conversation logs' cap and age limit (server/host/thread-log-sweep.ts), off unless the Admin sets it.
-  "OMB_THREAD_LOG_SWEEP", "OMB_THREAD_LOG_CAP",
+  "OMB_THREAD_LOG_SWEEP", "OMB_THREAD_LOG_CAP", "OMB_THREAD_LOG_CUT",
   // An ended Cloud started only for its owner's export: the server runs frozen (server/move-freeze.ts).
   "OMB_CLOUD_EXPORT_ONLY",
 ]);

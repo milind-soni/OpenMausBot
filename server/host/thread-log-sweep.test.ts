@@ -1,13 +1,13 @@
 import { appendFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readBotActivity } from "../activity.ts";
 import { readThreadEvents } from "../thread-events.ts";
 import {
-  AGE_MS, CUT_AFTER_MS, QUIET_MS, READ_FLOOR, knownThreads, listLogs, parseBytes, sweepLine, sweepThreadLogs, threadLogCap,
-  threadLogSweepMode, trimLog, type ThreadState,
+  AGE_MS, CUT_AFTER_MS, FIRST_PASS_MS, QUIET_MS, READ_FLOOR, knownThreads, listLogs, parseBytes, schedulePasses, sweepLine,
+  sweepThreadLogs, threadLogCap, threadLogCutEnabled, threadLogSweepMode, trimLog, type ThreadState,
 } from "./thread-log-sweep.ts";
 
 const NOW = Date.parse("2026-11-23T12:00:00Z");
@@ -51,6 +51,47 @@ const sessionIds = (file: string) => readFileSync(file, "utf8").split("\n").filt
 const BIG_CAP = 1024 ** 4;
 
 describe("the conversation logs' switch and cap", () => {
+  it("never cuts unless OMB_THREAD_LOG_CUT is set", async () => {
+    expect(threadLogCutEnabled({})).toBe(false);
+    expect(threadLogCutEnabled({ OMB_THREAD_LOG_CUT: "1" })).toBe(true);
+    const small = writeEvents("small", 100);
+    age(small, AGE_MS + DAY);
+    const result = await sweepThreadLogs({ dataDir, mode: "on", cap: 1, threads: threads({ small: false }), now: () => NOW });
+    expect(result.cut).toBe(0);
+    expect(existsSync(small)).toBe(true);
+  });
+
+  it("schedules a pass soon after start, or when due by the last whole pass, and saves each whole one", async () => {
+    vi.useFakeTimers();
+    try {
+      const stamp = join(dataDir, "cache", "stamp.json");
+      let clock = NOW;
+      const passes: number[] = [];
+      schedulePasses(stamp, 6 * 60 * 60_000, async () => (passes.push(clock), true), () => clock);
+      clock += FIRST_PASS_MS;
+      await vi.advanceTimersByTimeAsync(FIRST_PASS_MS);
+      expect(passes).toEqual([NOW + FIRST_PASS_MS]);
+      expect(JSON.parse(readFileSync(stamp, "utf8")).at).toBe(NOW + FIRST_PASS_MS);
+      vi.clearAllTimers();
+      // A restart an hour later waits for the rest of the six hours, not three minutes.
+      clock = NOW + FIRST_PASS_MS + 60 * 60_000;
+      schedulePasses(stamp, 6 * 60 * 60_000, async () => (passes.push(clock), true), () => clock);
+      await vi.advanceTimersByTimeAsync(4 * 60 * 60_000);
+      expect(passes).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(passes).toHaveLength(2);
+      vi.clearAllTimers();
+      // A stamp from the future counts as none.
+      writeFileSync(stamp, JSON.stringify({ at: clock + 10 * DAY }));
+      schedulePasses(stamp, 6 * 60 * 60_000, async () => (passes.push(clock), true), () => clock);
+      await vi.advanceTimersByTimeAsync(FIRST_PASS_MS);
+      expect(passes).toHaveLength(3);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
   it("is off unless set, and counts only in report", () => {
     expect(threadLogSweepMode({})).toBe("off");
     expect(threadLogSweepMode({ OMB_THREAD_LOG_SWEEP: "maybe" })).toBe("off");
@@ -101,7 +142,7 @@ describe("sweepThreadLogs", () => {
     expect(activity()).toEqual(seen.activity);
     expect(sessionIds(events)).toEqual(["00000000-0000-4000-8000-000000000003", "00000000-0000-4000-8000-000000002500", "00000000-0000-4000-8000-000000005990"]);
     expect(statSync(events).mtimeMs).toBe(NOW - AGE_MS - DAY);
-    expect(statSync(events).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(events).mode & 0o777).toBe(0o600);
     expect(existsSync(`${events}.sweep`)).toBe(false);
     expect(sweepLine(result)).toContain("2 trimmed");
   });
@@ -114,7 +155,7 @@ describe("sweepThreadLogs", () => {
     for (const file of [busy, unknown, small]) age(file, AGE_MS + DAY);
     age(recent, QUIET_MS - 60_000);
     const before = [busy, recent, unknown, small].map((file) => readFileSync(file, "utf8"));
-    const result = await sweepThreadLogs({ dataDir, mode: "on", cap: 1, threads: threads({ busy: true, recent: false, small: false }), now: () => NOW });
+    const result = await sweepThreadLogs({ dataDir, mode: "on", cap: 1, cut: true, threads: threads({ busy: true, recent: false, small: false }), now: () => NOW });
     expect([busy, recent, unknown].map((file) => readFileSync(file, "utf8"))).toEqual(before.slice(0, 3));
     // Over the cap, the small idle log is cut to its session lines (it has none) only once idle a week; it is.
     expect(existsSync(small)).toBe(false);
@@ -132,7 +173,7 @@ describe("sweepThreadLogs", () => {
     age(fresh, QUIET_MS + 60_000);
     const listed = await listLogs(dataDir);
     const total = listed.reduce((sum, file) => sum + file.size, 0);
-    const deps = { dataDir, cap: Math.floor(total * 0.1), threads: threads({ old: false, older: false, week: false, fresh: false }), now: () => NOW };
+    const deps = { dataDir, cap: Math.floor(total * 0.1), cut: true, threads: threads({ old: false, older: false, week: false, fresh: false }), now: () => NOW };
 
     const report = await sweepThreadLogs({ ...deps, mode: "report" });
     expect(statSync(old).size).toBe(listed.find((file) => file.path === old)!.size);
@@ -158,7 +199,7 @@ describe("sweepThreadLogs", () => {
     age(native, AGE_MS + DAY);
     const before = [events, native].map((file) => ({ text: readFileSync(file, "utf8"), mtime: statSync(file).mtimeMs, ino: statSync(file).ino }));
     const sessionLine = readFileSync(events, "utf8").split("\n").find((line) => line.includes('"session.started"'))!;
-    const result = await sweepThreadLogs({ dataDir, mode: "report", cap: 1, threads: threads({ t1: false }), now: () => NOW });
+    const result = await sweepThreadLogs({ dataDir, mode: "report", cap: 1, cut: true, threads: threads({ t1: false }), now: () => NOW });
     expect([result.trimmed, result.cut]).toEqual([2, 2]);
     expect(result.after).toBe(sessionLine.length + 1);
     expect([events, native].map((file) => ({ text: readFileSync(file, "utf8"), mtime: statSync(file).mtimeMs, ino: statSync(file).ino }))).toEqual(before);
@@ -188,7 +229,8 @@ describe("sweepThreadLogs", () => {
 });
 
 describe("what a sweep never reaches", () => {
-  it("follows no link: a linked log, a linked folder, or a name that is not a conversation's", async () => {
+  // Windows makes a link only with a privilege CI's runners lack; Cloud homes, where this runs, are Linux.
+  it.skipIf(process.platform === "win32")("follows no link: a linked log, a linked folder, or a name that is not a conversation's", async () => {
     const outside = mkdtempSync(join(tmpdir(), "thread-log-outside-"));
     try {
       const target = join(outside, "victim.ndjson");

@@ -5,7 +5,8 @@ import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../../scripts/control-omb.ts";
 import { AGE_MS, sweepThreadLogs } from "./thread-log-sweep.ts";
 
-it("a conversation whose logs were trimmed and cut still resumes its engine session and keeps its transcript", async () => {
+// Cloud homes, where this runs, are Linux; Windows refuses a rename over a log the server may hold open.
+it.skipIf(process.platform === "win32")("a conversation whose logs were trimmed and cut still resumes its engine session and keeps its transcript", async () => {
   // Each turn's engine exits once it answers, so the next turn relaunches it with --resume.
   const fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_EXIT_AFTER_TURN: "1" });
   try {
@@ -36,7 +37,7 @@ it("a conversation whose logs were trimmed and cut still resumes its engine sess
     for (const file of [events, native]) utimesSync(file, then, then);
     const before = statSync(events).size + statSync(native).size;
 
-    const result = await sweepThreadLogs({ dataDir: fixture.info.dataDir, mode: "on", cap: 1, threads: () => new Map([[bot.threadId, { busy: false }]]) });
+    const result = await sweepThreadLogs({ dataDir: fixture.info.dataDir, mode: "on", cap: 1, cut: true, threads: () => new Map([[bot.threadId, { busy: false }]]) });
     expect(result.trimmed).toBe(2);
     expect(result.cut).toBe(2);
     expect(existsSync(native)).toBe(false);

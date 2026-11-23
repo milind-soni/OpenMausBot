@@ -13,9 +13,9 @@
 // not know (a deleted conversation's log is its delete's to remove). Nothing changes while any turn runs. Only plain
 // files inside events/ and native/ are rewritten or removed; nothing follows a link; every swap re-checks the file
 // just before the rename.
-import { lstatSync, renameSync, rmSync, statfsSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, renameSync, rmSync, statfsSync, writeFileSync } from "node:fs";
 import { open, lstat, readdir, type FileHandle } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { setImmediate as yieldNow, setTimeout as sleep } from "node:timers/promises";
 
 import { EVENTS_PER_THREAD } from "../activity.ts";
@@ -43,7 +43,12 @@ const CHUNK = 1024 * 1024;
 const MAX_CARRY = 16 * 1024 * 1024;
 const SESSION_MARK = Buffer.from('"session.started"');
 const LOG_NAME = /^([\w-]{1,128})\.ndjson$/;
-export const FIRST_PASS_MS = 15 * 60_000;
+/** Soon after a start: a home that sleeps by stopping may be up only minutes. */
+export const FIRST_PASS_MS = 3 * 60_000;
+/** A pass that stopped for a turn, a move or a backup is tried again this soon. */
+export const RETRY_MS = 30 * 60_000;
+/** When the last whole pass ended, under cache/ (left out of backups): a restart does not reset the schedule. */
+export const STAMP_FILE = join("cache", "thread-log-sweep.json");
 /** While a turn runs nothing is changed: the pass waits this long for a quiet moment, then stops until the next. */
 export const TURN_WAIT_MS = 10 * 60_000;
 const TURN_POLL_MS = 15_000;
@@ -54,6 +59,13 @@ export function threadLogSweepMode(env: NodeJS.ProcessEnv): ThreadLogSweepMode {
   const raw = env.OMB_THREAD_LOG_SWEEP?.trim().toLowerCase();
   if (raw === "report" || raw === "dry-run") return "report";
   return raw === "on" || raw === "1" || raw === "true" ? "on" : "off";
+}
+
+/** OMB_THREAD_LOG_CUT: over the cap, also cut week-idle logs to their session lines (events) or remove them (native).
+ * Off by default: it is the one step that empties the Inspector and Activity rows of those conversations. */
+export function threadLogCutEnabled(env: NodeJS.ProcessEnv): boolean {
+  const raw = env.OMB_THREAD_LOG_CUT?.trim().toLowerCase();
+  return raw === "1" || raw === "on" || raw === "true";
 }
 
 /** Bytes, or a number with K, M or G (powers of 1024); null for anything else. */
@@ -223,6 +235,13 @@ export async function trimLog(file: LogFile, floor: { lines: number; bytes: numb
   }
   const staging = `${file.path}.sweep`;
   let swapped = false;
+  let closed = false;
+  // Closed before the swap: Windows refuses to rename over, or remove, a file still open.
+  const closeSource = async () => {
+    if (closed) return;
+    closed = true;
+    await handle.close().catch(() => {});
+  };
   try {
     const stats = await handle.stat();
     if (!stats.isFile() || stats.ino !== file.ino || stats.size !== file.size) return 0;
@@ -235,6 +254,7 @@ export async function trimLog(file: LogFile, floor: { lines: number; bytes: numb
     if (freed <= 0) return 0;
     if (!write) return freed;
     if (keptBytes === 0) {
+      await closeSource();
       if (!unchanged(file)) return 0;
       rmSync(file.path, { force: true });
       return freed;
@@ -253,6 +273,7 @@ export async function trimLog(file: LogFile, floor: { lines: number; bytes: numb
     } finally {
       await target.close();
     }
+    await closeSource();
     // No await from here to the rename: an append that landed while the copy ran is noticed, and the log kept.
     if (!unchanged(file)) return 0;
     renameSync(staging, file.path);
@@ -261,7 +282,7 @@ export async function trimLog(file: LogFile, floor: { lines: number; bytes: numb
   } catch {
     return 0;
   } finally {
-    await handle.close().catch(() => {});
+    await closeSource();
     if (!swapped) rmSync(staging, { force: true });
   }
 }
@@ -270,6 +291,8 @@ export interface ThreadLogSweepDeps {
   dataDir: string;
   mode: Exclude<ThreadLogSweepMode, "off">;
   cap: number;
+  /** Over the cap after trimming, cut week-idle logs too (OMB_THREAD_LOG_CUT). */
+  cut?: boolean;
   threads(): ReadonlyMap<string, ThreadState>;
   /** A move freeze or a backup under way: the pass stops before its next file. */
   paused?(): boolean;
@@ -344,6 +367,7 @@ export async function sweepThreadLogs(deps: ThreadLogSweepDeps): Promise<ThreadL
     if (freedBy.has(file) || file.size < MIN_TRIM_BYTES) continue;
     if (!(await apply(file, READ_FLOOR))) return result;
   }
+  if (!deps.cut) return result;
   for (const file of candidates) {
     if (result.after <= deps.cap) return result;
     if (now - file.mtimeMs < CUT_AFTER_MS) continue;
@@ -381,26 +405,46 @@ export interface StartThreadLogSweepDeps {
   log?(line: string): void;
 }
 
-/** Cloud homes only, and only with OMB_THREAD_LOG_SWEEP set: a pass FIRST_PASS_MS after start, then every PASS_EVERY_MS. */
+/** Cloud homes only, and only with OMB_THREAD_LOG_SWEEP set: a pass when due, at the earliest FIRST_PASS_MS after start. */
 export function startThreadLogSweep(deps: StartThreadLogSweepDeps): boolean {
   const mode = threadLogSweepMode(deps.env);
   if (!deps.cloudHome || mode === "off") return false;
   const log = deps.log ?? ((line: string) => console.log(line));
-  let running = false;
-  const pass = async () => {
-    if (running) return;
-    running = true;
+  const pass = async (): Promise<boolean> => {
     try {
       const cap = threadLogCap(deps.env, volumeBytes(deps.dataDir));
-      const result = await sweepThreadLogs({ dataDir: deps.dataDir, mode, cap, threads: deps.threads, paused: deps.paused, turnsRunning: deps.turnsRunning });
+      const result = await sweepThreadLogs({ dataDir: deps.dataDir, mode, cap, cut: threadLogCutEnabled(deps.env), threads: deps.threads, paused: deps.paused, turnsRunning: deps.turnsRunning });
       if (result.before !== result.after || result.before > cap || result.stopped) log(sweepLine(result));
+      return !result.stopped;
     } catch (error) {
       log(`[thread-logs] pass failed: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      running = false;
+      return false;
     }
   };
-  setTimeout(() => void pass(), FIRST_PASS_MS).unref();
-  setInterval(() => void pass(), PASS_EVERY_MS).unref();
+  schedulePasses(join(deps.dataDir, STAMP_FILE), PASS_EVERY_MS, pass);
   return true;
+}
+
+/**
+ * Runs `pass` FIRST_PASS_MS after start, or later when the last whole pass (saved in `stamp`) is not yet `every` old,
+ * then every `every`; a pass that stopped early is tried again after RETRY_MS. A stamp from the future (a clock set
+ * back) counts as none, and a home that slept past its time runs one pass on waking, never one per missed interval.
+ */
+export function schedulePasses(stamp: string, every: number, pass: () => Promise<boolean>, now: () => number = Date.now): void {
+  let last: number | null = null;
+  try {
+    const at = (JSON.parse(readFileSync(stamp, "utf8")) as { at?: unknown }).at;
+    if (typeof at === "number" && Number.isFinite(at) && at <= now()) last = at;
+  } catch {}
+  const run = async () => {
+    const whole = await pass();
+    if (whole) {
+      try {
+        mkdirSync(dirname(stamp), { recursive: true, mode: 0o700 });
+        writeFileSync(stamp, JSON.stringify({ at: now() }), { mode: 0o600 });
+      } catch {}
+    }
+    setTimeout(() => void run(), whole ? every : RETRY_MS).unref();
+  };
+  setTimeout(() => void run(), last === null ? FIRST_PASS_MS : Math.max(FIRST_PASS_MS, last + every - now())).unref();
 }
