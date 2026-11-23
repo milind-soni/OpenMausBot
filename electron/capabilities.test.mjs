@@ -219,6 +219,29 @@ describe("desktop capabilities", () => {
     });
   });
 
+  it("keeps Fedora's GNOME Wayland blocked and points it to a cloud desktop, not Ubuntu on Xorg", () => {
+    const wayland = { XDG_SESSION_TYPE: "wayland", WAYLAND_DISPLAY: "wayland-0" };
+    const fedora = linuxLocalControlSupport("linux", { ...wayland, XDG_CURRENT_DESKTOP: "GNOME", XDG_SESSION_DESKTOP: "gnome" });
+    expect(fedora).toMatchObject({ available: false, session: "wayland", reasonCode: "linux-wayland-seat-safety-blocked" });
+    expect(fedora.message).not.toMatch(/Ubuntu/);
+    expect(fedora.message).toMatch(/Fedora, use a cloud desktop/);
+    const ubuntu = linuxLocalControlSupport("linux", { ...wayland, XDG_CURRENT_DESKTOP: "ubuntu:GNOME" });
+    expect(ubuntu.message).toBe(
+      "Local control is not available on Wayland yet. Sign out and choose Ubuntu on Xorg to use This computer.",
+    );
+
+    const blocked = { mode: "unavailable", reasonCode: "linux-wayland-seat-safety-blocked" };
+    const capabilitiesFor = (env, remote = false) =>
+      desktopCapabilities({ platform: "linux", env: { ...wayland, ...env }, localConnection: blocked, remote }).localComputer;
+    expect(capabilitiesFor({ XDG_CURRENT_DESKTOP: "GNOME" }).ubuntuDesktop).toBe(false);
+    expect(capabilitiesFor({ XDG_CURRENT_DESKTOP: "ubuntu:GNOME" }).ubuntuDesktop).toBe(true);
+    expect(capabilitiesFor({ XDG_CURRENT_DESKTOP: "GNOME" }, true).ubuntuDesktop).toBeUndefined();
+    expect(capabilitiesFor({}).ubuntuDesktop).toBeUndefined();
+    expect(linuxLocalControlSupport("linux", wayland).message).toMatch(/Ubuntu on Xorg/);
+    expect(desktopCapabilities({ platform: "linux", env: { XDG_SESSION_TYPE: "x11", DISPLAY: ":0" } }).localComputer)
+      .not.toHaveProperty("ubuntuDesktop");
+  });
+
   describe("Omarchy (Hyprland) detection matrix", () => {
     const hyprland = {
       XDG_SESSION_TYPE: "wayland",
