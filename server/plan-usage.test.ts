@@ -9,6 +9,7 @@ import {
   loadPlanUsage,
   parseClaudeUsage,
   parseCodexUsage,
+  parseCommandCodeUsage,
   parseGrokUsage,
   parseOpenCodeUsage,
   planAccountsFromInstances,
@@ -283,6 +284,50 @@ describe("an OpenCode Go allowance", () => {
     expect(parseOpenCodeUsage({}).plan).toBeNull();
     expect(parseOpenCodeUsage({ usage: {} }).fiveHour.available).toBe(false);
     expect(parseOpenCodeUsage({ usage: { rolling: { status: "ok", percent: "5" } } }).fiveHour.available).toBe(false);
+  });
+});
+
+describe("Command Code's rolling windows", () => {
+  const resets = 1_800_000_000_000;
+  const body = {
+    credits: { monthlyCredits: 50.6, purchasedCredits: 0, freeCredits: 0 },
+    windowLimits: {
+      limited: true,
+      exceeded: null,
+      fiveHour: { used: 0.85, cap: 14, exceeded: false, resetAt: resets },
+      weekly: { used: 1.63, cap: 35, exceeded: false, resetAt: resets + 604_800_000 },
+    },
+  };
+
+  it("turns credits used into a percent and keeps each reset", () => {
+    const parsed = parseCommandCodeUsage(body);
+    expect(parsed.fiveHour).toMatchObject({
+      available: true,
+      usedPercent: expect.closeTo(6.07, 2),
+      remainingPercent: expect.closeTo(93.93, 2),
+      resetsAt: new Date(resets).toISOString(),
+    });
+    expect(parsed.weekly.usedPercent).toBeCloseTo(4.66, 2);
+    expect(parsed.plan).toBeNull();
+    expect(parsed.extra).toEqual([]);
+    expect(parsed.models).toEqual([]);
+  });
+
+  it("shows an exceeded window as full and ignores a window with no cap", () => {
+    const parsed = parseCommandCodeUsage({
+      windowLimits: {
+        fiveHour: { used: 14, cap: 14, exceeded: true, resetAt: resets },
+        weekly: { used: 2, cap: 0 },
+      },
+    });
+    expect(parsed.fiveHour).toMatchObject({ available: true, usedPercent: 100, remainingPercent: 0 });
+    expect(parsed.weekly.available).toBe(false);
+  });
+
+  it("says nothing it was not given", () => {
+    expect(parseCommandCodeUsage({}).fiveHour.available).toBe(false);
+    expect(parseCommandCodeUsage({ windowLimits: { fiveHour: { used: "1", cap: 14 } } }).fiveHour.available).toBe(false);
+    expect(parseCommandCodeUsage({ windowLimits: { fiveHour: { used: 40, cap: 14 } } }).fiveHour.usedPercent).toBe(100);
   });
 });
 
@@ -629,6 +674,78 @@ describe("plan usage fetcher", () => {
       credentials,
     });
     expect(refused.providers[0]).toMatchObject({ ok: false, error: "OpenCode refused the saved credentials" });
+  });
+
+  it("reads a Command Code login from auth.json and keeps the key out of the row", async () => {
+    const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse({
+      credits: { monthlyCredits: 50.6 },
+      windowLimits: {
+        fiveHour: { used: 7, cap: 14, exceeded: false, resetAt: NOW },
+        weekly: { used: 3.5, cap: 35, resetAt: NOW + 86_400_000 },
+      },
+    }));
+    const report = await fetchPlanUsage([{ id: "cc", name: "Command Code", driver: "commandCode", environment: {} }], {
+      fetch: fetchImpl,
+      now: () => NOW,
+      credentials: fileCredentialReader({
+        now: () => NOW,
+        env: { HOME: tmpdir() },
+        readText: (path) => path.replaceAll("\\", "/").endsWith("/.commandcode/auth.json") ? JSON.stringify({ apiKey: SECRET }) : null,
+      }),
+    });
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe("https://api.commandcode.ai/alpha/billing/credits");
+    expect(fetchImpl.mock.calls[0]?.[1].headers.Authorization).toBe(`Bearer ${SECRET}`);
+    expect(report.providers[0]).toMatchObject({
+      id: "cc",
+      driver: "commandCode",
+      ok: true,
+      error: null,
+      fiveHour: { available: true, usedPercent: 50 },
+      weekly: { available: true, usedPercent: 10 },
+    });
+    expect(JSON.stringify(report)).not.toContain(SECRET);
+  });
+
+  it("takes COMMAND_CODE_API_KEY before the stored login", async () => {
+    const envToken = "command-code-env-fixture-key";
+    const reads: string[] = [];
+    const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse({ credits: {}, windowLimits: { fiveHour: { used: 1, cap: 14 } } }));
+    await fetchPlanUsage([{ id: "cc", name: "Command Code", driver: "commandCode", environment: { COMMAND_CODE_API_KEY: envToken } }], {
+      fetch: fetchImpl,
+      now: () => NOW,
+      credentials: fileCredentialReader({
+        now: () => NOW,
+        env: {},
+        readText: (path) => {
+          reads.push(path);
+          return JSON.stringify({ apiKey: SECRET });
+        },
+      }),
+    });
+    expect(fetchImpl.mock.calls[0]?.[1].headers.Authorization).toBe(`Bearer ${envToken}`);
+    expect(reads).toEqual([]);
+  });
+
+  it("names a refused Command Code key and keeps a credits-only row", async () => {
+    const refused = await fetchPlanUsage([{ id: "cc", name: "Command Code", driver: "commandCode", environment: {} }], {
+      fetch: async () => jsonResponse({}, 401),
+      now: () => NOW,
+      credentials: { read: () => ({ token: SECRET, accountId: null, expired: false }) },
+    });
+    expect(refused.providers[0]).toMatchObject({ ok: false, error: "Sign in again in Command Code" });
+
+    const payg = await fetchPlanUsage([{ id: "cc", name: "Command Code", driver: "commandCode", environment: {} }], {
+      fetch: async () => jsonResponse({ credits: { monthlyCredits: 5 } }),
+      now: () => NOW,
+      credentials: { read: () => ({ token: SECRET, accountId: null, expired: false }) },
+    });
+    expect(payg.providers[0]).toMatchObject({ ok: true, fiveHour: { available: false }, weekly: { available: false } });
+  });
+
+  it("lists a Command Code instance as a plan account", () => {
+    expect(planAccountsFromInstances({ cc: { driver: "commandCodeAgent" } })).toEqual([
+      { id: "cc", name: "Command Code", driver: "commandCode", environment: {} },
+    ]);
   });
 
   it("reads no usage for a ChatGPT-plan provider, whose sign-in is not the shared Codex login", async () => {

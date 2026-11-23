@@ -64,7 +64,7 @@ function holdGone(row: PlanProviderRow, limit: EngineLimit, held: number | undef
   return windows.every((line) => line === null || (line.resetsAt !== null && Math.abs(line.resetsAt - held) > SAME_RESET_MS));
 }
 
-const PRODUCT_NAMES: Record<string, string> = { claudeAgent: "Claude", codex: "Codex", grokAgent: "Grok", opencodeGo: "OpenCode", antigravityAgent: "Antigravity" };
+const PRODUCT_NAMES: Record<string, string> = { claudeAgent: "Claude", codex: "Codex", grokAgent: "Grok", opencodeGo: "OpenCode", antigravityAgent: "Antigravity", commandCodeAgent: "Command Code" };
 
 /** "Claude", "Codex", or the name the person gave that engine. */
 export function engineLabel(engine: string, instance?: { displayName?: string; driverKind: string }): string {

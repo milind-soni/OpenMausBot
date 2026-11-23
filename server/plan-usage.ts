@@ -8,10 +8,11 @@ import type { InstanceConfigMap } from "./contracts.ts";
 import { resolveClaudeConfigDir } from "./drivers/claude.ts";
 import { codexHome } from "./drivers/codex-identity.ts";
 import { codexHasCredits } from "./codex-credits.ts";
+import { commandCodeAuthFile } from "./drivers/acp/command-code.ts";
 import { antigravityPlanUsage } from "./drivers/antigravity-usage-limits.ts";
 import { harnessHome, sealedFixture } from "./env-path.ts";
 
-export type PlanDriver = "claude" | "codex" | "grok" | "opencode" | "antigravity";
+export type PlanDriver = "claude" | "codex" | "grok" | "opencode" | "antigravity" | "commandCode";
 
 export interface PlanWindow {
   available: boolean;
@@ -126,6 +127,8 @@ const GROK_BILLING_URL = "https://cli-chat-proxy.grok.com/v1/billing";
 const GROK_SETTINGS_URL = "https://cli-chat-proxy.grok.com/v1/settings";
 // OpenCode Go's own allowance: the rolling window, the weekly one and the month's, as the CLI reads them.
 const OPENCODE_GO_USAGE_URL = "https://opencode.ai/zen/go/v1/usage";
+// The CLI's own billing surface (undocumented `/alpha` routes), the one behind `command-code`'s `/usage`.
+const COMMAND_CODE_CREDITS_URL = "https://api.commandcode.ai/alpha/billing/credits";
 
 const FIVE_HOUR_MIN_SECONDS = 3 * 3600;
 const FIVE_HOUR_MAX_SECONDS = 8 * 3600;
@@ -134,7 +137,7 @@ const WEEK_MAX_SECONDS = 9 * 86400;
 const MONTH_MIN_SECONDS = 27 * 86400;
 const MONTH_MAX_SECONDS = 32 * 86400;
 
-const DRIVER_OF: Record<string, PlanDriver> = { claudeAgent: "claude", codex: "codex", grokAgent: "grok", opencodeGo: "opencode", antigravityAgent: "antigravity" };
+const DRIVER_OF: Record<string, PlanDriver> = { claudeAgent: "claude", codex: "codex", grokAgent: "grok", opencodeGo: "opencode", antigravityAgent: "antigravity", commandCodeAgent: "commandCode" };
 
 const PRODUCT_NAME: Record<PlanDriver, string> = {
   claude: "Claude",
@@ -142,6 +145,7 @@ const PRODUCT_NAME: Record<PlanDriver, string> = {
   grok: "Grok",
   opencode: "OpenCode",
   antigravity: "Antigravity",
+  commandCode: "Command Code",
 };
 
 export function planAccountsFromInstances(instances: InstanceConfigMap): PlanAccount[] {
@@ -246,6 +250,25 @@ export function parseOpenCodeUsage(body: unknown): PlanWindows {
   };
 }
 
+/** Command Code's two rolling windows, as `command-code`'s own `/usage` shows them: credits used against a cap. */
+export function parseCommandCodeUsage(body: unknown): PlanWindows {
+  const limits = asRecord(asRecord(body)?.windowLimits);
+  return {
+    plan: null,
+    fiveHour: readCommandCodeWindow(limits?.fiveHour),
+    weekly: readCommandCodeWindow(limits?.weekly),
+    extra: [],
+    models: [],
+  };
+}
+
+function readCommandCodeWindow(value: unknown): PlanWindow {
+  const window = asRecord(value);
+  const used = finiteNumber(window?.used), cap = finiteNumber(window?.cap);
+  if (used === null || cap === null || cap <= 0) return closedWindow();
+  return openWindow(window?.exceeded === true ? 100 : clampPercent((used / cap) * 100), isoOrNull(window?.resetAt));
+}
+
 /** One meter of Go's allowance: `percent` is what it has used, and `resetsAt` comes as an ISO stamp. */
 function openCodeMeter(value: unknown): PlanWindow | null {
   const record = asRecord(value);
@@ -264,9 +287,24 @@ export function fileCredentialReader(source: CredentialSource): CredentialReader
       if (account.driver === "claude") return readClaudeCredential(account, merged, source, at);
       if (account.driver === "codex") return readCodexCredential(merged, source.readText, at);
       if (account.driver === "opencode") return readOpenCodeCredential(merged, source.readText, at);
+      if (account.driver === "commandCode") return readCommandCodeCredential(merged, source.readText);
       return readGrokCredential(merged, source.readText, at);
     },
   };
+}
+
+function readCommandCodeCredential(env: NodeJS.ProcessEnv, readText: (path: string) => string | null): PlanCredential {
+  const key = env.COMMAND_CODE_API_KEY?.trim();
+  if (key) return { token: key, accountId: null, expired: false };
+  const text = readText(commandCodeAuthFile(env));
+  if (!text) return missingCredential();
+  try {
+    const stored = JSON.parse(text) as { apiKey?: unknown } | null;
+    const storedKey = typeof stored?.apiKey === "string" ? stored.apiKey.trim() : "";
+    return storedKey ? { token: storedKey, accountId: null, expired: false } : missingCredential();
+  } catch {
+    return missingCredential();
+  }
 }
 
 export function defaultCredentialReader(env: NodeJS.ProcessEnv = process.env): CredentialReader {
@@ -927,6 +965,7 @@ async function fetchProvider(account: PlanAccount, deps: PlanUsageDeps): Promise
     if (account.driver === "claude") return await fetchClaude(account, credential.token, deps);
     if (account.driver === "codex") return await fetchCodex(account, credential.token, credential.accountId, deps);
     if (account.driver === "opencode") return await fetchOpenCode(account, credential.token, deps);
+    if (account.driver === "commandCode") return await fetchCommandCode(account, credential.token, deps);
     return await fetchGrok(account, credential.token, deps);
   } catch {
     return errorRow(account, couldNotReach(account.driver));
@@ -1039,4 +1078,15 @@ async function fetchOpenCode(account: PlanAccount, token: string, deps: PlanUsag
   const windows = parseOpenCodeUsage(result.body);
   // A 200 with no meter at all is not an allowance: it is an answer this row cannot read.
   return windows.plan ? okRow(account, windows) : errorRow(account, unexpectedUsage("opencode"));
+}
+
+/** Command Code's billing windows, read with `COMMAND_CODE_API_KEY` or the login `cmd login` saved. */
+async function fetchCommandCode(account: PlanAccount, token: string, deps: PlanUsageDeps): Promise<PlanProviderRow> {
+  const result = await fetchJson(deps.fetch, COMMAND_CODE_CREDITS_URL, { Authorization: `Bearer ${token}`, Accept: "application/json" }, deps.timeoutMs ?? PROVIDER_TIMEOUT_MS);
+  if (authRejected(result.status)) return errorRow(account, signInAgain("commandCode"));
+  const root = asRecord(result.body);
+  if (!result.ok || root === null) return errorRow(account, result.status === 0 || result.status >= 500 ? couldNotReach("commandCode") : unexpectedUsage("commandCode"));
+  // A pay-as-you-go account answers with credits and no windows: that is a working row with nothing to meter.
+  if (!asRecord(root.credits) && !asRecord(root.windowLimits)) return errorRow(account, unexpectedUsage("commandCode"));
+  return okRow(account, parseCommandCodeUsage(root));
 }

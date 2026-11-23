@@ -36,7 +36,7 @@ export interface EngineLimitInstance {
   enabled: boolean;
 }
 
-const REPORTING_DRIVERS: ReadonlySet<string> = new Set(["claudeAgent", "codex", "grokAgent", "opencodeGo", "antigravityAgent"]);
+const REPORTING_DRIVERS: ReadonlySet<string> = new Set(["claudeAgent", "codex", "grokAgent", "opencodeGo", "antigravityAgent", "commandCodeAgent"]);
 const ANTIGRAVITY = "antigravityAgent";
 const UNSUPPORTED_WHY = "This AI does not report usage limits to this app.";
 const NO_WINDOWS_WHY = "The account answered but reported no usage windows.";
