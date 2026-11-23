@@ -1465,7 +1465,7 @@ const browserCleanup: BrowserCleanupCoordinator = new BrowserCleanupCoordinator(
     return true;
   },
 });
-const phoneSecrets = new PhoneSecretBridge(postDesktopPrivateMessage, undefined, undefined, DESKTOP_MANAGED); const phonePushAccess = new PhonePushAccessSource({ tunnelFile: join(DATA_DIR, TUNNEL_CREDENTIALS_FILE), defaultControlPlane: DEFAULT_COMPANION_CONTROL_PLANE_URL });
+const phoneSecrets = new PhoneSecretBridge(postDesktopPrivateMessage, undefined, undefined, DESKTOP_MANAGED); const phonePushAccess = new PhonePushAccessSource({ tunnelFile: join(DATA_DIR, TUNNEL_CREDENTIALS_FILE), defaultControlPlane: DEFAULT_COMPANION_CONTROL_PLANE_URL, cloudHome: CLOUD_HOME });
 utilityParentPort?.on("message", (event) => {
   const message = event?.data;
   try {

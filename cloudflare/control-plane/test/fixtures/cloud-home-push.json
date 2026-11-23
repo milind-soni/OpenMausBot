@@ -1,0 +1,360 @@
+{
+  "about": "Shared by OpenMausBot (cloudflare/control-plane/test/fixtures/cloud-home-push.json) and the Admin (tests/fixtures/cloud-home-push.json), byte for byte: the bodies a Cloud home's push routes accept and refuse at the Admin and at the control plane's machine routes, and the home's request signature. Change both copies together.",
+  "signature": {
+    "secret": "home-bootstrap-secret-0123456789abcdefghijklmnopq",
+    "machineId": "cm_fixture",
+    "action": "send",
+    "timestamp": "1700000000",
+    "nonce": "nonce-0123456789abcdef",
+    "body": "{\"v\":1,\"token\":\"a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1\",\"collapseId\":\"openmaus.th_1.7\",\"notification\":{\"kind\":\"approval\",\"title\":\"Scout in Launch needs approval\",\"botId\":\"bot_1\",\"botName\":\"Scout\",\"threadId\":\"th_1\",\"roomId\":\"grp_1\",\"roomName\":\"Launch\"}}",
+    "expected": "EZygRqHh-KpmISJhENeyTC12RticqJ9V8jZ_lcQ7XB4"
+  },
+  "accept": {
+    "register": [
+      {
+        "v": 1,
+        "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "environment": "production"
+      },
+      {
+        "v": 1,
+        "platform": "apns",
+        "purpose": "activity",
+        "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+        "environment": "sandbox"
+      },
+      {
+        "v": 1,
+        "platform": "fcm",
+        "token": "fcm-instance_1:APA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91b"
+      }
+    ],
+    "unregister": [
+      {
+        "v": 1,
+        "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
+      },
+      {
+        "v": 1,
+        "platform": "fcm",
+        "token": "fcm-instance_1:APA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91bAPA91b"
+      }
+    ],
+    "send": [
+      {
+        "v": 1,
+        "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "pairing": "pair_tag_01",
+        "collapseId": "openmaus.th_1.7",
+        "notification": {
+          "kind": "approval",
+          "title": "Scout in Launch needs approval",
+          "botId": "bot_1",
+          "botName": "Scout",
+          "threadId": "th_1",
+          "roomId": "grp_1",
+          "roomName": "Launch"
+        }
+      },
+      {
+        "v": 1,
+        "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "notification": {
+          "kind": "done",
+          "title": "Scout finished",
+          "botId": "bot_1",
+          "botName": "Scout",
+          "threadId": "th_1"
+        }
+      }
+    ],
+    "activity": [
+      {
+        "v": 1,
+        "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+        "event": "update",
+        "activity": {
+          "version": 1,
+          "ask": "approval",
+          "status": "Needs your approval",
+          "waiting": 1,
+          "botId": "bot_1",
+          "botName": "Scout",
+          "kind": "needsYou",
+          "headline": "Scout needs you",
+          "since": 1700000000000,
+          "link": "openmausbot://chat/th_1",
+          "color": "#5b8def",
+          "gradient": [
+            "#5b8def",
+            "#9b6bff"
+          ],
+          "body": "maus"
+        }
+      },
+      {
+        "v": 1,
+        "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+        "event": "end",
+        "activity": {
+          "botId": "bot_1",
+          "botName": "Scout",
+          "kind": "working",
+          "headline": "Scout is working",
+          "since": 1700000000000,
+          "link": "openmausbot://chat/th_1",
+          "color": "#5b8def",
+          "gradient": [
+            "#5b8def"
+          ],
+          "body": "maus"
+        }
+      }
+    ]
+  },
+  "refuse": {
+    "register": [
+      {
+        "why": "a name beside the token",
+        "body": {
+          "v": 1,
+          "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "environment": "production",
+          "name": "Ada's iPhone"
+        }
+      },
+      {
+        "why": "a machine id in the body",
+        "body": {
+          "v": 1,
+          "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "environment": "production",
+          "machineId": "cm_other"
+        }
+      },
+      {
+        "why": "an upper-case APNs token",
+        "body": {
+          "v": 1,
+          "token": "A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1",
+          "environment": "production"
+        }
+      }
+    ],
+    "unregister": [
+      {
+        "why": "a message",
+        "body": {
+          "v": 1,
+          "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "message": "bye"
+        }
+      }
+    ],
+    "send": [
+      {
+        "why": "message text in the notification",
+        "body": {
+          "v": 1,
+          "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "notification": {
+            "kind": "approval",
+            "title": "Scout in Launch needs approval",
+            "botId": "bot_1",
+            "botName": "Scout",
+            "threadId": "th_1",
+            "roomId": "grp_1",
+            "roomName": "Launch",
+            "body": "Delete every file in the repo?"
+          }
+        }
+      },
+      {
+        "why": "a message beside the notification",
+        "body": {
+          "v": 1,
+          "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "message": "Delete every file in the repo?",
+          "notification": {
+            "kind": "approval",
+            "title": "Scout in Launch needs approval",
+            "botId": "bot_1",
+            "botName": "Scout",
+            "threadId": "th_1",
+            "roomId": "grp_1",
+            "roomName": "Launch"
+          }
+        }
+      },
+      {
+        "why": "a text field",
+        "body": {
+          "v": 1,
+          "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "text": "hello",
+          "notification": {
+            "kind": "approval",
+            "title": "Scout in Launch needs approval",
+            "botId": "bot_1",
+            "botName": "Scout",
+            "threadId": "th_1",
+            "roomId": "grp_1",
+            "roomName": "Launch"
+          }
+        }
+      },
+      {
+        "why": "a machine id in the body",
+        "body": {
+          "v": 1,
+          "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "machineId": "cm_other",
+          "notification": {
+            "kind": "approval",
+            "title": "Scout in Launch needs approval",
+            "botId": "bot_1",
+            "botName": "Scout",
+            "threadId": "th_1",
+            "roomId": "grp_1",
+            "roomName": "Launch"
+          }
+        }
+      },
+      {
+        "why": "a title over two lines",
+        "body": {
+          "v": 1,
+          "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "notification": {
+            "kind": "approval",
+            "title": "Scout needs approval\nrm -rf /",
+            "botId": "bot_1",
+            "botName": "Scout",
+            "threadId": "th_1",
+            "roomId": "grp_1",
+            "roomName": "Launch"
+          }
+        }
+      },
+      {
+        "why": "a title over 200 characters",
+        "body": {
+          "v": 1,
+          "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "notification": {
+            "kind": "approval",
+            "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "botId": "bot_1",
+            "botName": "Scout",
+            "threadId": "th_1",
+            "roomId": "grp_1",
+            "roomName": "Launch"
+          }
+        }
+      },
+      {
+        "why": "another wire version",
+        "body": {
+          "v": 2,
+          "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "notification": {
+            "kind": "approval",
+            "title": "Scout in Launch needs approval",
+            "botId": "bot_1",
+            "botName": "Scout",
+            "threadId": "th_1",
+            "roomId": "grp_1",
+            "roomName": "Launch"
+          }
+        }
+      }
+    ],
+    "activity": [
+      {
+        "why": "an alert on an update",
+        "body": {
+          "v": 1,
+          "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+          "event": "update",
+          "alert": true,
+          "activity": {
+            "version": 1,
+            "ask": "approval",
+            "status": "Needs your approval",
+            "waiting": 1,
+            "botId": "bot_1",
+            "botName": "Scout",
+            "kind": "needsYou",
+            "headline": "Scout needs you",
+            "since": 1700000000000,
+            "link": "openmausbot://chat/th_1",
+            "color": "#5b8def",
+            "gradient": [
+              "#5b8def",
+              "#9b6bff"
+            ],
+            "body": "maus"
+          }
+        }
+      },
+      {
+        "why": "a line of text in the activity",
+        "body": {
+          "v": 1,
+          "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+          "event": "update",
+          "activity": {
+            "version": 1,
+            "ask": "approval",
+            "status": "Needs your approval",
+            "waiting": 1,
+            "botId": "bot_1",
+            "botName": "Scout",
+            "kind": "needsYou",
+            "headline": "Scout needs you",
+            "since": 1700000000000,
+            "link": "openmausbot://chat/th_1",
+            "color": "#5b8def",
+            "gradient": [
+              "#5b8def",
+              "#9b6bff"
+            ],
+            "body": "maus",
+            "line": "Running rm -rf /"
+          }
+        }
+      },
+      {
+        "why": "an answer in the activity",
+        "body": {
+          "v": 1,
+          "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+          "event": "update",
+          "activity": {
+            "version": 1,
+            "ask": "approval",
+            "status": "Needs your approval",
+            "waiting": 1,
+            "botId": "bot_1",
+            "botName": "Scout",
+            "kind": "needsYou",
+            "headline": "Scout needs you",
+            "since": 1700000000000,
+            "link": "openmausbot://chat/th_1",
+            "color": "#5b8def",
+            "gradient": [
+              "#5b8def",
+              "#9b6bff"
+            ],
+            "body": "maus",
+            "answers": [
+              {
+                "label": "Allow"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+}
