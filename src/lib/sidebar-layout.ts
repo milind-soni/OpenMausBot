@@ -168,8 +168,8 @@ type UnreadListBot = {
   messages?: ReadonlyArray<{ at: number }>;
 };
 
-/** The bot kept in Unread after it was opened from there, with the time it was listed by. */
-export type UnreadHold = { id: string; since: number };
+/** The bot kept in Unread after it was opened from there, with the time it was listed by and the conversation open then. */
+export type UnreadHold = { id: string; since: number; chat?: string };
 
 function unreadSince(bot: UnreadListBot): number {
   const threads = (bot.tasks ?? []).filter((task) => task.unread && !task.routineRunId && task.archivedAt === undefined);
@@ -182,13 +182,15 @@ export function unreadSinceByBot(bots: readonly UnreadListBot[]): Map<string, nu
   return new Map(bots.filter(botShowsUnread).map((bot) => [bot.id, unreadSince(bot)]));
 }
 
-/** A bot that showed unread when its chat was opened, or while it is open, stays in Unread where it was until another
- * chat or view is open, so a chat opened by mistake can be marked unread again without looking for its row. */
-export function nextUnreadHold(held: UnreadHold | null, openId: string | null, unreadBefore: ReadonlyMap<string, number>): UnreadHold | null {
+/** A bot that showed unread when its conversation `chat` was opened, or while it is open, stays in Unread where it was
+ * until another conversation or view is open, so one opened by mistake can be marked unread again without looking for its
+ * row. Another conversation of the same bot, or a blank new one, ends it too. */
+export function nextUnreadHold(held: UnreadHold | null, openId: string | null, unreadBefore: ReadonlyMap<string, number>, chat?: string): UnreadHold | null {
   if (openId === null) return null;
+  const same = held?.id === openId && held.chat === chat;
   const since = unreadBefore.get(openId);
-  if (since !== undefined) return held?.id === openId && held.since === since ? held : { id: openId, since };
-  return held?.id === openId ? held : null;
+  if (since !== undefined) return same && held.since === since ? held : { id: openId, since, chat };
+  return same ? held : null;
 }
 
 /** Bots showing unread leave their department or the main list for one list of their own, newest first, and go back

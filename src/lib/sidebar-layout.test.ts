@@ -425,6 +425,21 @@ describe("the unread section", () => {
     expect(nextUnreadHold(held, "b", unreadSinceByBot(bots({ unread: true, at: 40 })))).toEqual({ id: "b", since: 40 });
   });
 
+  it("ends the hold when another conversation of the same bot is open, and holds the bot again from one that was unread", () => {
+    const none = new Map<string, number>();
+    const held = nextUnreadHold(null, "b", new Map([["b", 20]]), "first");
+    expect(held).toEqual({ id: "b", since: 20, chat: "first" });
+    expect(nextUnreadHold(held, "b", none, "first")).toBe(held);
+    expect(nextUnreadHold(held, "b", none, "second")).toBeNull();
+    expect(nextUnreadHold(held, "b", none, "new-chat-b")).toBeNull();
+
+    const stillUnread = new Map([["b", 50]]);
+    const second = nextUnreadHold(held, "b", stillUnread, "second");
+    expect(second).toEqual({ id: "b", since: 50, chat: "second" });
+    expect(nextUnreadHold(second, "b", none, "second")).toBe(second);
+    expect(nextUnreadHold(second, "b", none, "first")).toBeNull();
+  });
+
   it("leaves a held row out of what a drag or Alt+Up/Down arranges", () => {
     const saved = { pinnedBots: [], sectionChiefs: [], sectionedBots: [read("w1"), read("w2")], unsectionedBots: [read("a"), read("u"), read("b")] };
     const rows = sidebarBotRows(saved, () => false, true, { id: "u", since: 5 });

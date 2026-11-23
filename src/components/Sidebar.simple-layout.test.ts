@@ -464,6 +464,29 @@ describe("the sidebar's Unread section", () => {
     expect(listedBots(tree)).toEqual(["atlas", "bea", "cora", "dodo", "eve"]);
   });
 
+  it("sends the bot opened from it back to its own place once another conversation with that bot is open", () => {
+    const openDodo = () => {
+      withUnread();
+      render();
+      fixture.state = reducer(fixture.state, { type: "select", id: "dodo" });
+      expect(listedBots(render().tree)).toEqual(["cora", "dodo", "bea", "atlas", "eve"]);
+    };
+    openDodo();
+    fixture.state = reducer(fixture.state, { type: "newTask", botId: "dodo" });
+    expect(fixture.state.newChat?.botId).toBe("dodo");
+    let tree = render().tree;
+    expect(listedBots(tree)).toEqual(["cora", "bea", "atlas", "dodo", "eve"]);
+    expect(unreadHeader(tree)!.props.count).toBe(2);
+
+    openDodo();
+    fixture.state = { ...fixture.state, bots: fixture.state.bots.map((candidate) => (candidate.id === "dodo" ? { ...candidate, tasks: [...candidate.tasks!, { ...thread("dodo", 5, false), threadId: "dodo-other" }] } : candidate)) };
+    expect(listedBots(render().tree)).toEqual(["cora", "dodo", "bea", "atlas", "eve"]);
+    fixture.state = reducer(fixture.state, { type: "switchTask", botId: "dodo", threadId: "dodo-other" });
+    tree = render().tree;
+    expect(listedBots(tree)).toEqual(["cora", "bea", "atlas", "dodo", "eve"]);
+    expect(unreadHeader(tree)!.props.count).toBe(2);
+  });
+
   it("keeps a held bot listed when it is marked unread or gets a new message, by the normal rule", () => {
     withUnread();
     render();
