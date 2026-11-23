@@ -178,6 +178,8 @@ export interface AcpSupport extends AcpDriverHooks {
   ): Promise<ProviderSnapshot>;
   /** A cold start of this engine takes tens of seconds: where memory allows, its idle process is kept longer (session-idle.ts). */
   coldStartCost?: ColdStartCost;
+  /** How long session/new and session/resume (or load) may go unanswered on a live process; initialize keeps its own limit. */
+  sessionSetupTimeoutMs?: number;
   /** Google Antigravity resumes through session/resume, not session/load. */
   resumeMethod?: "load" | "resume";
   /** Some agents acknowledge a live load without applying new MCP credentials. */
@@ -1117,7 +1119,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                     send: (receive) => request(
                       support.resumeMethod === "resume" ? "session/resume" : "session/load",
                       { sessionId: cursor, cwd, mcpServers: support.mcpServersFromLaunch ? [] : acpSessionMcpServers(mcpServers, ownMcp, init), ...selectionParams, ...support.sessionSetupParams?.(init) },
-                      LOAD_SESSION_TIMEOUT, receive),
+                      support.sessionSetupTimeoutMs ?? LOAD_SESSION_TIMEOUT, receive),
                     receive: (result) => {
                       if (result) {
                         loaded = true;
@@ -1159,7 +1161,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 promptTurn = { ...turn, text: recovery.text };
                 rebuiltFromReplay = recovery.replayed;
               }
-              await request("session/new", { cwd, mcpServers: support.mcpServersFromLaunch ? [] : acpSessionMcpServers(mcpServers, ownMcp, init), ...selectionParams, ...support.sessionSetupParams?.(init) }, NEW_SESSION_TIMEOUT, (result) => {
+              await request("session/new", { cwd, mcpServers: support.mcpServersFromLaunch ? [] : acpSessionMcpServers(mcpServers, ownMcp, init), ...selectionParams, ...support.sessionSetupParams?.(init) }, support.sessionSetupTimeoutMs ?? NEW_SESSION_TIMEOUT, (result) => {
                 session.sessionId = typeof result?.sessionId === "string" ? result.sessionId : null;
                 session.sessionKey = sessionKey;
                 receiveModelVariants(result, true);

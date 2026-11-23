@@ -47,6 +47,9 @@ import { bundledEngineCatalog } from "../model-manifest/bundled.ts";
 import { currentEngineCatalog } from "../model-manifest/manifest.ts";
 
 export const STATIC_ANTIGRAVITY_MODELS: ModelCatalog = bundledEngineCatalog("antigravity");
+/** A live runtime that never answers session/new or session/resume gives up after this, as T3 Code's ACP startup does
+ * (pingdotgg/t3code@2f19cec0793); initialize keeps the core's longer limit, which the Windows runtime's unpack needs. */
+export const ANTIGRAVITY_SESSION_SETUP_TIMEOUT_MS = 90_000;
 
 /** Bots saved before the thinking-level option hold ids like `gemini-3.8-flash-medium` or `gemini-4-neon-high`;
  * the official runtime offers only the base model with that option, so run the base at the saved level. A runtime
@@ -138,6 +141,7 @@ const support: AcpSupport = {
   resumeMethod: "resume",
   // The packaged runtime unpacks and loads a ~1 GB Python bundle before it answers initialize (STARTUP_TIMEOUT_MS).
   coldStartCost: "expensive",
+  sessionSetupTimeoutMs: ANTIGRAVITY_SESSION_SETUP_TIMEOUT_MS,
   clientFileSystem: true,
   clientReadRoots: (turn) => (turn.skillFiles ?? []).map(dirname),
   sanitizeToolPayload: true,
