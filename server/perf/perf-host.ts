@@ -19,6 +19,8 @@ import { createLaunchTimings, LAUNCH_FILE, type LaunchTimings } from "./launch-t
 import { startStallWatch, stallReportLines, type StallWatch } from "./stall-watch.ts";
 
 export const PERF_FILE = "perf-timings.json";
+/** The last storage pass: under `cache`, which backups and moves leave behind, since it describes this volume only. */
+export const STORAGE_FILE = join("cache", "storage-report.json");
 /** One line per kind of slow event at most this often; the ones held back are counted on the next. */
 export const LOG_EVERY_MS = 60_000;
 const RECENT_IN_REPORT = 10;
@@ -128,7 +130,7 @@ export function createPerfHost(deps: PerfHostDeps) {
   /** Stall records right under the heading: a @devs report keeps only the first lines of this part. */
   const stallsFirst = (lines: string[]) => { const stalls = caught(); return lines[0]?.startsWith("## ") ? [lines[0], ...stalls, ...lines.slice(1)] : [...stalls, ...lines]; };
   const disk: DiskUsage | null = deps.disk ?? (deps.storage ? createDiskUsage({ roots: [{ path: deps.storage.home, scope: "home" }, { path: deps.dataDir, scope: "data" }], volume: deps.storage.home,
-    busy: () => timings.running(), knownBot: deps.storage.knownBot, now }) : null);
+    busy: () => timings.running(), knownBot: deps.storage.knownBot, file: join(deps.dataDir, STORAGE_FILE), now }) : null);
   if (deps.timer !== false) disk?.start();
   if (deps.timer !== false && linux) guarded("limits", () => (deps.log ?? ((line: string) => console.warn(line)))(processes.startLine()), undefined);
 

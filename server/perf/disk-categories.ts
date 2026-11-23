@@ -73,8 +73,8 @@ const DATA_FOLDERS: Readonly<Record<string, StorageCategory>> = {
   "claude-user-skills": "settings", box: "settings",
   // engine-homes/layout.ts (a Team Cloud's per-audience engine homes); drivers/pi-session.ts.
   "engine-homes": "engine_state", "pi-sessions": "engine_state",
-  // host/team-files.ts; container-computer.ts VM_WORKSPACE_DIR and its per-computer homes.
-  "team-files": "bot_files", "vm-home": "bot_files", "vm-homes": "bot_files",
+  // host/team-files.ts (container-computer.ts's vm-home and vm-homes are placed in dataPlacement).
+  "team-files": "bot_files",
   // attachments.ts, attachment-originals.ts, box-uploads (attachments.ts), host/browser.ts, tool-results
   // (mcp-gate-config.ts), meetings/manager.ts.
   attachments: "attachments", "attachment-originals": "attachments", "box-uploads": "attachments", "browser-uploads": "attachments",
@@ -86,11 +86,14 @@ const DATA_FOLDERS: Readonly<Record<string, StorageCategory>> = {
   // cli.ts and service-unit.ts (service logs), browser-evidence.ts (each browser step's screenshot), decider/log.ts,
   // engine-records.ts (what each server run started).
   logs: "logs", evidence: "logs", "decider-log": "logs", "engine-runs": "logs",
-  // Made again on first use: phone-screen/scrcpy-server-file.ts downloads scrcpy; service-cli.ts installs the app copy.
-  scrcpy: "engine_clis", app: "engine_clis",
+  // Made again on first use: phone-screen/scrcpy-server-file.ts downloads scrcpy; service-cli.ts installs the app copy;
+  // tunnel.ts prepares cloudflared in dist-native again when it is missing.
+  scrcpy: "engine_clis", app: "engine_clis", "dist-native": "engine_clis",
+  // excludedWorkspaceAuthPath (workspace-backup-policy.ts): login profiles of older browser engines.
+  "chrome-profile": "browser_profiles", ".agent-browser": "browser_profiles",
   "duckdb-extensions": "caches", cache: "caches", ".cache": "caches",
   // cloud-send-files.ts and the MCP configs; tunnel.ts TUNNEL_RUNTIME_DIR.
-  tmp: "temp", ".tmp": "temp", "tunnel-runtime": "temp", "dist-native": "temp",
+  tmp: "temp", ".tmp": "temp", "tunnel-runtime": "temp",
 };
 
 /** `tools/<name>` in the data folder. */
@@ -106,20 +109,25 @@ const DATA_FILES: Readonly<Record<string, StorageCategory>> = {
 };
 const CONVERSATION_DB = /^(?:messages|runtime|bursts)\.db(?:-wal|-shm|-journal)?$/;
 
-/** Folders Chrome makes again by itself inside a profile (`<profile>/Default/<name>` or `<profile>/<name>`). */
+/** Folders Chrome downloads or computes again by itself inside a profile (`<profile>/Default/<name>` or `<profile>/<name>`). */
 const CHROME_CACHES: ReadonlySet<string> = new Set([
   "Cache", "Code Cache", "GPUCache", "DawnCache", "DawnGraphiteCache", "DawnWebGPUCache", "GraphiteDawnCache", "GrShaderCache", "ShaderCache",
-  "Service Worker", "component_crx_cache", "extensions_crx_cache", "optimization_guide_model_store", "Crashpad", "BrowserMetrics",
-  "Safe Browsing", "OnDeviceHeadSuggestModel", "screen_ai", "segmentation_platform", "Download Service", "blob_storage",
+  "component_crx_cache", "extensions_crx_cache", "optimization_guide_model_store", "Crashpad", "BrowserMetrics", "Safe Browsing",
+  "OnDeviceHeadSuggestModel", "screen_ai",
 ]);
+/** `Service Worker/<name>`: only the fetched copies; the registrations beside them are the site's state. */
+const SERVICE_WORKER_CACHES: ReadonlySet<string> = new Set(["CacheStorage", "ScriptCache"]);
 
 /** A browser profile folder `<root>/<profile>/…`, `rest` being what is under the profile. */
 function profilePlacement(rest: readonly string[]): Placement {
-  const first = rest[0], second = rest[1];
+  const [first, second, third] = rest;
   if (first === undefined) return at("browser_profiles", false);
   if (CHROME_CACHES.has(first)) return at("browser_cache");
   if (second === undefined) return at("browser_profiles", false);
-  return CHROME_CACHES.has(second) ? at("browser_cache") : at("browser_profiles", rest.length >= 2);
+  if (CHROME_CACHES.has(second)) return at("browser_cache");
+  if (second !== "Service Worker") return at("browser_profiles");
+  if (third === undefined) return at("browser_profiles", false);
+  return at(SERVICE_WORKER_CACHES.has(third) ? "browser_cache" : "browser_profiles");
 }
 
 /** `browser/<name>/…` (browser/chrome/profile.ts browserRoot). */
@@ -127,9 +135,9 @@ function browserPlacement(rest: readonly string[]): Placement {
   const [first] = rest;
   if (first === undefined) return at("browser_profiles", false);
   if (first === "profiles") return rest.length < 2 ? at("browser_profiles", false) : profilePlacement(rest.slice(2));
-  // The bot's downloads (browser/service.ts downloadDir) are files it fetched for its work.
-  if (first === "downloads") return at("attachments");
-  // temp profiles (swept), screenshots, displays, panes, identity: made again when a browser starts.
+  // The bot's downloads (browser/service.ts downloadDir) and the screenshots it took (#saveScreenshot) are its work.
+  if (first === "downloads" || first === "screenshots") return at("attachments");
+  // temp profiles (swept), displays, panes, identity: made again when a browser starts.
   return rest.length === 1 && first === "workspace-id" ? at("browser_profiles") : at("browser_cache");
 }
 
@@ -151,6 +159,9 @@ function dataPlacement(segments: readonly string[], directory: boolean): Placeme
     return { category: "bot_files", final: first !== "bots" || segments.length >= 3, ...(botId ? { botId } : {}) };
   }
   if (first === "browser") return browserPlacement(segments.slice(1));
+  // excludedWorkspaceAuthPath: a container computer's browser logins.
+  if ((first === "vm-home" && second === ".browser-profiles") || (first === "vm-homes" && third === ".browser-profiles")) return at("browser_profiles");
+  if (first === "vm-home" || first === "vm-homes") return { category: "bot_files", final: segments.length >= (first === "vm-home" ? 2 : 3) };
   // browser-engine.ts browserProfilesRoot: agent-browser's own profiles.
   if (first === "agent-browser-profiles") return segments.length < 2 ? at("browser_profiles", false) : profilePlacement(segments.slice(2));
   if (first === "tools") {
@@ -183,14 +194,14 @@ function dataPlacement(segments: readonly string[], directory: boolean): Placeme
 
 /** HOME, first level: engine homes (engine-homes/layout.ts ENGINE_FOLDERS and the drivers), sign-ins and dotfiles. */
 const HOME_FOLDERS: Readonly<Record<string, StorageCategory>> = {
-  ".claude": "engine_state", ".codex": "engine_state", ".grok": "engine_state", ".kimi-code": "engine_state", ".dsh": "engine_state",
+  ".claude": "engine_state", ".codex": "engine_state", ".kimi-code": "engine_state", ".dsh": "engine_state",
   ".hermes": "engine_state", ".qwen": "engine_state", ".factory": "engine_state", ".pi": "engine_state", ".gemini": "engine_state",
   ".copilot": "engine_state", ".cline": "engine_state", ".cursor": "engine_state", ".opencode": "engine_state", ".mmx": "engine_state",
   ".config": "settings", ".ssh": "settings", ".gnupg": "settings",
   // cloud-home-start.ts edgeCertificateStorage: the edge's TLS certificates.
   ".omb-edge": "settings",
-  ".npm": "packages", ".pnpm-store": "packages", ".yarn": "packages", ".bun": "packages", ".cargo": "packages", ".rustup": "packages",
-  go: "packages", ".m2": "packages", ".gradle": "packages", ".nvm": "packages", ".deno": "packages",
+  // npm's and pnpm's own cache and store folders: nothing but downloaded packages.
+  ".npm": "packages", ".pnpm-store": "packages",
   // cloud-sync-paths.ts syncRoot: the person's synced folders.
   Synced: "synced",
 };
@@ -201,6 +212,11 @@ const HOME_FILES: Readonly<Record<string, StorageCategory>> = {
   ".omb-cloud-home.json": "settings", ".bashrc": "settings", ".profile": "settings", ".bash_logout": "settings", ".gitconfig": "settings",
   ".npmrc": "settings",
 };
+/** Download caches inside tool folders that also hold what people installed or wrote: only these subfolders are packages. */
+const HOME_PACKAGE_CACHES: ReadonlyArray<readonly [string, string, string?]> = [
+  [".cargo", "registry"], [".cargo", "git"], ["go", "pkg", "mod"], [".m2", "repository"], [".gradle", "caches"], [".bun", "install", "cache"], [".yarn", "berry", "cache"],
+];
+
 /** `~/.cache/<name>`: browser engines, package stores, the rest caches. */
 const HOME_CACHES: Readonly<Record<string, StorageCategory>> = {
   "ms-playwright": "browser_engines", puppeteer: "browser_engines",
@@ -219,7 +235,6 @@ function homePlacement(segments: readonly string[], directory: boolean): Placeme
   if (first === ".cache") return second === undefined ? at("caches", false) : at(HOME_CACHES[second] ?? "caches");
   if (first === ".local") {
     if (second === undefined) return at("other", false);
-    if (second === "bin") return at("engine_clis");
     if (second !== "share" && second !== "state") return at("other");
     if (third === undefined) return at("other", false);
     // The Claude native installer keeps each version under ~/.local/share/claude (env-path.ts).
@@ -231,6 +246,13 @@ function homePlacement(segments: readonly string[], directory: boolean): Placeme
   }
   // browser-engine.ts browserSessionsDirectory: agent-browser's saved sessions (sign-ins); its own browsers under it.
   if (first === ".agent-browser") return second === undefined ? at("browser_profiles", false) : at(second === "browsers" ? "browser_engines" : "browser_profiles");
+  // The Grok installer puts its binary in ~/.grok/bin (Dockerfile); the rest of ~/.grok is its sign-in and sessions.
+  if (first === ".grok") return second === undefined ? at("engine_state", false) : at(second === "bin" ? "engine_clis" : "engine_state");
+  for (const cache of HOME_PACKAGE_CACHES) {
+    if (cache[0] !== first) continue;
+    if (segments.length < cache.length) return at("other", false);
+    return at(cache.every((part, index) => segments[index] === part) ? "packages" : "other");
+  }
   const known = HOME_FOLDERS[first];
   if (known) return at(known);
   return OTHER_NAMES.has(first) ? { category: "other", otherName: first, final: true } : at("other");

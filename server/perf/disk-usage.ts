@@ -3,10 +3,12 @@
 // every TICK_MS, nothing while a turn runs, one pass soon after boot and then one every PASS_EVERY_MS. Node gives no
 // per-call I/O priority and re-nicing would slow the whole server, so the budget is the only throttle. Privacy invariant:
 // sizes, counts, fixed category names, ids of bots the store knows and names from OTHER_NAMES; never a file's contents.
+import { mkdirSync, readFileSync } from "node:fs";
 import { statfs } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 
+import { writeFileAtomic } from "../atomic.ts";
 import { OTHER_NAMES, STORAGE_CATEGORIES, type StorageCategory, type StorageClass } from "./disk-categories.ts";
 import { createDiskWalk, type DiskWalk, type Tally, type WalkFs, type WalkRoot, type WalkSkipped, type WalkTotals } from "./disk-walk.ts";
 
@@ -51,7 +53,7 @@ export interface StorageReport {
   failed: boolean;
 }
 
-interface Completed { at: number; tookMs: number; totals: WalkTotals; volume: VolumeBytes | null }
+export interface CompletedPass { at: number; tookMs: number; totals: WalkTotals; volume: VolumeBytes | null }
 
 export interface DiskUsageOptions {
   roots: readonly WalkRoot[];
@@ -73,6 +75,46 @@ export interface DiskUsageOptions {
   passEveryMs?: number;
   firstPassAfterMs?: number;
   maxDepth?: number;
+  /** Where the last completed pass is kept, so a restart (a home that sleeps by stopping) still has it. */
+  file?: string;
+}
+
+/** Bots kept in the saved pass: the report shows ten, and a bot the store learns of later is rare. */
+const SAVED_BOTS = 100;
+
+const count = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0);
+const tallyOf = (value: unknown): Tally => ({ bytes: count((value as Tally | null)?.bytes), files: count((value as Tally | null)?.files) });
+
+function savedText(completed: CompletedPass): string {
+  const bots = [...completed.totals.bots].sort(([, a], [, b]) => b.bytes - a.bytes);
+  const overflow = bots.slice(SAVED_BOTS).reduce((rest, [, tally]) => ({ bytes: rest.bytes + tally.bytes, files: rest.files + tally.files }), { ...completed.totals.botsOverflow });
+  return JSON.stringify({ v: STORAGE_REPORT_VERSION, at: completed.at, tookMs: completed.tookMs, volume: completed.volume, totals: {
+    ...completed.totals, bots: bots.slice(0, SAVED_BOTS), botsOverflow: overflow, otherNamed: [...completed.totals.otherNamed] } });
+}
+
+/** A saved pass, every field checked: a name that is not a category, a bot id or an allowed other name is dropped. */
+export function readSavedPass(text: string): CompletedPass | null {
+  let saved: Record<string, unknown>;
+  try { saved = JSON.parse(text) as Record<string, unknown>; } catch { return null; }
+  if (!saved || saved.v !== STORAGE_REPORT_VERSION || !count(saved.at)) return null;
+  const totals = (saved.totals ?? {}) as Record<string, unknown>;
+  const categories = (totals.categories ?? {}) as Record<string, unknown>;
+  const pairs = (value: unknown, keep: (name: string) => boolean) =>
+    new Map((Array.isArray(value) ? value : []).flatMap((pair) => (Array.isArray(pair) && typeof pair[0] === "string" && keep(pair[0]) ? [[pair[0], tallyOf(pair[1])] as const] : [])));
+  const volume = saved.volume as Record<string, unknown> | null;
+  const skipped = (totals.skipped ?? {}) as Record<string, unknown>;
+  const unlisted = (totals.otherUnlisted ?? {}) as Record<string, unknown>;
+  return {
+    at: count(saved.at), tookMs: count(saved.tookMs),
+    volume: volume && typeof volume === "object" ? { totalBytes: count(volume.totalBytes), freeBytes: count(volume.freeBytes), usedBytes: count(volume.usedBytes) } : null,
+    totals: {
+      categories: Object.fromEntries((Object.keys(STORAGE_CATEGORIES) as StorageCategory[]).map((name) => [name, tallyOf(categories[name])])) as WalkTotals["categories"],
+      bots: pairs(totals.bots, (id) => ID.test(id)), botsOverflow: tallyOf(totals.botsOverflow),
+      otherNamed: pairs(totals.otherNamed, (name) => OTHER_NAMES.has(name)), otherUnlisted: { ...tallyOf(unlisted), entries: count(unlisted.entries) },
+      skipped: { unreadable: count(skipped.unreadable), otherDevice: count(skipped.otherDevice), tooDeep: count(skipped.tooDeep), vanished: count(skipped.vanished), links: count(skipped.links) },
+      walkedBytes: count(totals.walkedBytes), entries: count(totals.entries), linksCapped: totals.linksCapped === true,
+    },
+  };
 }
 
 export function createDiskUsage(options: DiskUsageOptions) {
@@ -88,9 +130,16 @@ export function createDiskUsage(options: DiskUsageOptions) {
       return { totalBytes: stats.blocks * stats.bsize, freeBytes: stats.bavail * stats.bsize, usedBytes: (stats.blocks - stats.bfree) * stats.bsize };
     } catch { return null; }
   };
-  let dueAt = now() + (options.firstPassAfterMs ?? FIRST_PASS_AFTER_MS);
+  let last: CompletedPass | null = null;
+  if (options.file) { try { last = readSavedPass(readFileSync(options.file, "utf8")); } catch {} }
+  const firstAt = now() + (options.firstPassAfterMs ?? FIRST_PASS_AFTER_MS);
+  let dueAt = last && last.at <= now() ? Math.max(firstAt, last.at + everyMs) : firstAt;
   let walk: DiskWalk | null = null, pass: { startedAt: number; waitedMs: number; lastTickAt: number } | null = null;
-  let last: Completed | null = null, failed = false, ticking = false, stopped = false;
+  let failed = false, ticking = false, stopped = false;
+  const save = (completed: CompletedPass) => {
+    if (!options.file) return;
+    try { mkdirSync(dirname(options.file), { recursive: true, mode: 0o700 }); writeFileAtomic(options.file, savedText(completed), { mode: 0o600 }); } catch {}
+  };
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   const schedule = () => {
@@ -111,16 +160,17 @@ export function createDiskUsage(options: DiskUsageOptions) {
         walk = createDiskWalk(roots, { ...(options.fs ? { fs: options.fs } : {}), ...(options.maxDepth ? { maxDepth: options.maxDepth } : {}) });
         pass = { startedAt: at, waitedMs: 0, lastTickAt: at };
       }
-      const current = pass!;
+      const current = pass!, walking = walk;
       if (busy()) { current.waitedMs += at - current.lastTickAt; current.lastTickAt = at; return; }
       current.lastTickAt = at;
       const started = monotonic();
-      const ended = await walk.step({ entries, stop: () => monotonic() - started >= budgetMs || busy() });
-      if (ended) {
-        last = { at: now(), tookMs: now() - current.startedAt, totals: walk.totals, volume: await readVolume() };
+      const ended = await walking.step({ entries, stop: () => stopped || monotonic() - started >= budgetMs || busy() });
+      if (ended && !stopped) {
+        last = { at: now(), tookMs: now() - current.startedAt, totals: walking.totals, volume: await readVolume() };
         failed = false;
         walk = null; pass = null;
         dueAt = now() + everyMs;
+        save(last);
       }
     } catch {
       await walk?.close().catch(() => {});

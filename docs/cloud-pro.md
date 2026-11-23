@@ -1900,7 +1900,9 @@ starts a walk.
   `progress.waitedS` is how long the current pass has waited for turns, so a
   home that is never idle shows as one whose pass does not finish. The first
   pass starts 10 minutes after boot, and the next one 6 hours after each pass
-  ends. Node has no per-call I/O priority, and lowering the server's own
+  ends. The last pass is kept in the data folder's `cache/storage-report.json`,
+  which backups and moves leave behind, so a home that sleeps by stopping
+  still reports it after a restart and waits until it is due again. Node has no per-call I/O priority, and lowering the server's own
   priority would slow everything else, so the budget is the only throttle.
 
 The owner's own session can read the same report at

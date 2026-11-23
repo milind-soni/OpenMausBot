@@ -8,7 +8,7 @@ import { createPerfDiagnosticsRoutes, STORAGE_PATH } from "../routes/perf-diagno
 import type { RouteContext } from "../routes/table.ts";
 import { STORAGE_CATEGORIES } from "./disk-categories.ts";
 import { MAX_BOTS, nodeWalkFs, type WalkFs } from "./disk-walk.ts";
-import { createDiskUsage, STORAGE_HEALTH_MAX_BYTES, storageHealth, type DiskUsageOptions, type StorageReport } from "./disk-usage.ts";
+import { createDiskUsage, readSavedPass, STORAGE_HEALTH_MAX_BYTES, storageHealth, type DiskUsageOptions, type StorageReport } from "./disk-usage.ts";
 
 const START = 1_800_000_000_000;
 const dirs: string[] = [];
@@ -162,6 +162,48 @@ describe("storage sampler", () => {
     w.advance(2_000);
     await w.disk.tick();
     expect(w.disk.running()).toBe(false);
+  });
+
+  it("keeps the last pass across a restart and waits until it is due again", async () => {
+    const file = join(mkdtempSync(join(tmpdir(), "disk-usage-saved-")), "cache", "storage-report.json");
+    dirs.push(join(file, "..", ".."));
+    const w = usage({ file });
+    w.advance(60_000);
+    await untilDone(w);
+    const before = w.disk.report();
+    let clock = before.at! + 60_000;
+    const again = createDiskUsage({ roots: [{ path: w.home, scope: "home" }], volume: w.home, timer: false, file, now: () => clock, knownBot: (id) => id === "bot-known",
+      firstPassAfterMs: 60_000, passEveryMs: 3_600_000 });
+    expect({ ...again.report(), ageS: before.ageS }).toEqual({ ...before, ageS: before.ageS });
+    clock += 120_000;
+    await again.tick();
+    expect(again.report().at).toBe(before.at);
+    clock = before.at! + 3_600_000;
+    await again.tick();
+    expect(again.running() || again.report().at! > before.at!).toBe(true);
+    await again.stop();
+  });
+
+  it("reads back a saved pass field by field: a name that is not a category, a known-shaped id or an allowed name is dropped", () => {
+    const saved = readSavedPass(JSON.stringify({ v: 1, at: START, tookMs: 5, volume: { totalBytes: 10, freeBytes: "x", usedBytes: -1 }, totals: {
+      categories: { conversations: { bytes: 5, files: 1 }, "acme-merger": { bytes: 9, files: 9 } }, bots: [["bot-known", { bytes: 3, files: 1 }], ["Ada's plans", { bytes: 1, files: 1 }]],
+      otherNamed: [["lost+found", { bytes: 1, files: 0 }], ["acme-merger", { bytes: 1, files: 1 }]], walkedBytes: 7, entries: 2 } }))!;
+    expect(saved.volume).toEqual({ totalBytes: 10, freeBytes: 0, usedBytes: 0 });
+    expect(saved.totals.categories.conversations).toEqual({ bytes: 5, files: 1 });
+    expect(Object.keys(saved.totals.categories)).not.toContain("acme-merger");
+    expect([...saved.totals.bots.keys()]).toEqual(["bot-known"]);
+    expect([...saved.totals.otherNamed.keys()]).toEqual(["lost+found"]);
+    expect(readSavedPass("{")).toBeNull();
+    expect(readSavedPass(JSON.stringify({ v: 2, at: START }))).toBeNull();
+  });
+
+  it("never records a pass cut short by stop as complete", async () => {
+    let w: ReturnType<typeof usage> | null = null;
+    const stopping: WalkFs = { opendir: nodeWalkFs.opendir, lstat: async (path) => { if (path.endsWith("messages.db")) void w!.disk.stop(); return nodeWalkFs.lstat(path); } };
+    w = usage({ fs: stopping });
+    w.advance(60_000);
+    for (let index = 0; index < 50; index++) { w.advance(2_000); await w.disk.tick(); }
+    expect(w.disk.report()).toMatchObject({ at: null, running: false, failed: false });
   });
 
   it("walks a data folder that is HOME itself once", async () => {
