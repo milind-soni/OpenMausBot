@@ -25,6 +25,7 @@ function setup(over: Partial<PlaceInboxDeps> = {}, dataDir = mkdtempSync(join(tm
   let serial = 0;
   const said = new Map<string, Said[]>();
   const cards: OpenCardRow[] = [];
+  const closed = new Set<string>();
   const sent: Notification[] = [];
   const handed = new Map<string, string>();
   const guests = new Map<string, string>();
@@ -37,7 +38,7 @@ function setup(over: Partial<PlaceInboxDeps> = {}, dataDir = mkdtempSync(join(tm
   const store = {
     bot: (id: string) => bots[id],
     botByThread: (threadId: string) => (threadId.startsWith("eli") || threadId === "guest-chat" ? bots.eli : threadId.startsWith("mira") ? bots.mira : undefined),
-    taskByThread: (_botId: string, threadId: string) => (titles[threadId] ? { threadId, title: titles[threadId] } : undefined),
+    taskByThread: (_botId: string, threadId: string) => (titles[threadId] ? { threadId, title: titles[threadId], ...(closed.has(threadId) ? { closedBy: { botId: "eli", name: "Eli", at: 1 } } : {}) } : undefined),
     groupByThread: (threadId: string) => rooms[threadId],
     appendMessage: (threadId: string, line: Omit<Said, "id" | "at">) => {
       const posted = { ...line, id: `m${++serial}`, at: clock };
@@ -64,7 +65,7 @@ function setup(over: Partial<PlaceInboxDeps> = {}, dataDir = mkdtempSync(join(tm
     cards.push(row);
     return row;
   };
-  return { inbox, store, said, cards, sent, handed, guests, bots, listeners, ask, dataDir, tick: (ms: number) => { clock += ms; } };
+  return { inbox, store, said, cards, closed, sent, handed, guests, bots, listeners, ask, dataDir, tick: (ms: number) => { clock += ms; } };
 }
 
 describe("finished work reaches the inbox once", () => {
@@ -210,6 +211,20 @@ describe("the inbox of a place that is no team's", () => {
     const original = f.ask("eli-launch", "q");
     f.cards.push({ ...original, threadId: "eli-pricing", id: "copy-q", at: original.at + 1, copyOf: original.id });
     expect(f.inbox.view(OWNER).rows.map((row) => [row.id, row.origin?.threadId])).toEqual([["copy-q", "eli-pricing"]]);
+  });
+
+  it("leaves a closed Results chat's copied question out of the inbox, and lists it again when the thread reopens", () => {
+    const f = setup({ sees: (_auth, threadId) => threadId !== "eli-launch" });
+    const original = f.ask("eli-launch", "q");
+    f.cards.push({ ...original, threadId: "eli-pricing", id: "copy-q", at: original.at + 1, copyOf: original.id });
+    expect(f.inbox.view(OWNER).rows.map((row) => [row.id, row.origin?.threadId])).toEqual([["copy-q", "eli-pricing"]]);
+    expect(f.inbox.count(OWNER)).toBe(1);
+    f.closed.add("eli-pricing");
+    expect(f.inbox.view(OWNER).rows).toEqual([]);
+    expect(f.inbox.count(OWNER)).toBe(0);
+    f.closed.delete("eli-pricing");
+    expect(f.inbox.view(OWNER).rows.map((row) => [row.id, row.origin?.threadId])).toEqual([["copy-q", "eli-pricing"]]);
+    expect(f.inbox.count(OWNER)).toBe(1);
   });
 
   it("drops a question the person wrote past, unless a running turn still waits on it", () => {

@@ -1,6 +1,9 @@
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { collectBotLibrary, replyFileLinks } from "./bot-library.ts";
-import { deleteThread, importThread } from "./message-db.ts";
+import { collectBotLibrary, LIBRARY_FILE_REPLIES_SQL, messageRows, replyFileLinks } from "./bot-library.ts";
+import { DATA_DIR } from "./config.ts";
+import { closeMessageDb, deleteThread, importThread, prepared, updateMessage } from "./message-db.ts";
 import type { PublishedPageRecord } from "./pages/store.ts";
 import type { Message } from "./store.ts";
 
@@ -55,6 +58,34 @@ describe("collectBotLibrary", () => {
 
   it("answers nothing for no conversations", () => {
     expect(collectBotLibrary({ botId: "scout", threadIds: [], pages: [record("ffffffffffffffffffff", 1, [["x", "y"]])] })).toEqual({ pages: [], apps: [], files: [] });
+  });
+});
+
+describe("Library file replies", () => {
+  it("indexes existing replies on reopen and picks up a file attached to an older reply", () => {
+    const attachment = { kind: "file" as const, path: "/work/out.csv", mime: "text/csv", name: "out.csv" };
+    const draft = reply("draft", 20, "The report is ready.");
+    importThread("file-index-a", [reply("link", 10, "[plan](./plan.md)"), draft], draft.id);
+    importThread("file-index-b", [reply("attached", 10, "", { text: undefined, attachments: [attachment] })], "attached");
+    importThread("file-index-private", [reply("private", 30, "[notes](./notes.md)")], "private");
+
+    closeMessageDb();
+    const previous = new DatabaseSync(join(DATA_DIR, "messages.db"));
+    try {
+      previous.exec("DROP INDEX IF EXISTS messages_library_file_replies");
+    } finally {
+      previous.close();
+    }
+
+    const threadIds = ["file-index-a", "file-index-b"];
+    const plan = prepared(`EXPLAIN QUERY PLAN ${LIBRARY_FILE_REPLIES_SQL}`).all(JSON.stringify(threadIds), 600);
+    expect(plan.map((row) => row.detail).join("\n")).toContain("USING INDEX messages_library_file_replies");
+    expect(messageRows.fileReplies(threadIds, 600).map((row) => row.messageId)).toEqual(["link", "attached"]);
+
+    updateMessage("file-index-a", { ...draft, attachments: [attachment] });
+    expect(messageRows.fileReplies(threadIds, 2).map((row) => row.messageId)).toEqual(["draft", "link"]);
+    deleteThread("file-index-a");
+    expect(messageRows.fileReplies(threadIds, 600).map((row) => row.messageId)).toEqual(["attached"]);
   });
 });
 

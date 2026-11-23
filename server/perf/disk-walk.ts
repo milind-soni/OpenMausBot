@@ -2,9 +2,9 @@
 // steps, one file-system call in flight at a time, lstat only (never a link followed, never a file opened), and never
 // past the root's filesystem. Memory: the open levels (at most MAX_DEPTH), the per-bot tallies (at most MAX_BOTS), the
 // hard links seen (at most MAX_LINKS inode numbers) and, for going on after a restart, the names already counted in
-// the open folders of the top RESUME_DEPTH levels (at most MAX_NAMES each).
+// the open folders of the top RESUME_DEPTH levels (at most MAX_NAMES names and MAX_NAME_BYTES each).
 import { lstat, opendir } from "node:fs/promises";
-import { join, sep } from "node:path";
+import { join, resolve, sep } from "node:path";
 
 import { OTHER_NAMES, placeChild, STORAGE_CATEGORIES, type Placement, type StorageCategory, type StorageScope } from "./disk-categories.ts";
 
@@ -65,11 +65,18 @@ export const MAX_BOTS = 5_000;
 export const MAX_LINKS = 500_000;
 export const RESUME_DEPTH = 4;
 export const MAX_NAMES = 5_000;
+/** The names one open folder keeps for a checkpoint, in all: a saved pass stays under SAVED_FILE_MAX_BYTES. */
+export const MAX_NAME_BYTES = 64 * 1024;
+/** A saved pass or report larger than this is never read: it is not one this server wrote. */
+export const SAVED_FILE_MAX_BYTES = 1024 * 1024;
+/** No byte or file count read back is larger than this (10 PB, the Admin's own bound); a larger one reads as 0. */
+export const MAX_COUNT = 1e16;
 
 interface Frame {
   path: string; segments: string[]; placement: Placement; scope: StorageScope; dev: number; dir: WalkDir | null;
-  /** Names counted directly in it so far, for a checkpoint; null past MAX_NAMES or below the top levels. */
+  /** Names counted directly in it so far, for a checkpoint; null past MAX_NAMES or MAX_NAME_BYTES, or below the top levels. */
   names: string[] | null;
+  nameBytes: number;
   /** Names a resumed pass counted before the restart. */
   skip: ReadonlySet<string> | null;
 }
@@ -93,7 +100,8 @@ export function allocatedBytes(stat: Pick<WalkStat, "size" | "blocks">, windows 
 }
 
 const BOT_ID = /^[A-Za-z0-9_-]{1,64}$/;
-const count = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0);
+/** A count read back from a saved file: a finite number from 0 to MAX_COUNT, else 0. */
+export const count = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= MAX_COUNT ? value : 0);
 const tallyOf = (value: unknown): Tally => ({ bytes: count((value as Tally | null)?.bytes), files: count((value as Tally | null)?.files) });
 
 /** Totals as JSON values (maps as pairs). */
@@ -103,18 +111,28 @@ export function totalsJson(totals: WalkTotals): Record<string, unknown> {
     otherUnlisted: { ...totals.otherUnlisted }, skipped: { ...totals.skipped } };
 }
 
-/** Totals read back field by field: a name that is not a category, a bot-id-shaped id or an allowed other name is dropped. */
-export function totalsFrom(value: unknown): WalkTotals {
+/** Totals read back field by field: a name that is not a category, a bot-id-shaped id or an allowed other name is dropped,
+ * and bots past `maxBots` are added to the overflow. */
+export function totalsFrom(value: unknown, maxBots = MAX_BOTS): WalkTotals {
   const totals = (value ?? {}) as Record<string, unknown>;
   const categories = (totals.categories ?? {}) as Record<string, unknown>;
-  const pairs = (list: unknown, keep: (name: string) => boolean) =>
-    new Map((Array.isArray(list) ? list : []).flatMap((pair) => (Array.isArray(pair) && typeof pair[0] === "string" && keep(pair[0]) ? [[pair[0], tallyOf(pair[1])] as const] : [])));
+  const overflow = tallyOf(totals.botsOverflow);
+  const pairs = (list: unknown, keep: (name: string) => boolean, cap: number) => {
+    const kept = new Map<string, Tally>();
+    for (const pair of Array.isArray(list) ? list : []) {
+      if (!Array.isArray(pair) || typeof pair[0] !== "string" || !keep(pair[0]) || kept.has(pair[0])) continue;
+      const tally = tallyOf(pair[1]);
+      if (kept.size < cap) kept.set(pair[0], tally);
+      else { overflow.bytes += tally.bytes; overflow.files += tally.files; }
+    }
+    return kept;
+  };
   const skipped = (totals.skipped ?? {}) as Record<string, unknown>;
   const unlisted = (totals.otherUnlisted ?? {}) as Record<string, unknown>;
   return {
     categories: Object.fromEntries((Object.keys(STORAGE_CATEGORIES) as StorageCategory[]).map((name) => [name, tallyOf(categories[name])])) as WalkTotals["categories"],
-    bots: pairs(totals.bots, (id) => BOT_ID.test(id)), botsOverflow: tallyOf(totals.botsOverflow),
-    otherNamed: pairs(totals.otherNamed, (name) => OTHER_NAMES.has(name)), otherUnlisted: { ...tallyOf(unlisted), entries: count(unlisted.entries) },
+    bots: pairs(totals.bots, (id) => BOT_ID.test(id), maxBots), botsOverflow: overflow,
+    otherNamed: pairs(totals.otherNamed, (name) => OTHER_NAMES.has(name), OTHER_NAMES.size), otherUnlisted: { ...tallyOf(unlisted), entries: count(unlisted.entries) },
     skipped: { unreadable: count(skipped.unreadable), otherDevice: count(skipped.otherDevice), tooDeep: count(skipped.tooDeep), vanished: count(skipped.vanished), links: count(skipped.links) },
     walkedBytes: count(totals.walkedBytes), entries: count(totals.entries), linksCapped: totals.linksCapped === true,
     linksUncheckedBytes: count(totals.linksUncheckedBytes), resumes: count(totals.resumes),
@@ -127,11 +145,14 @@ const NAME = (name: unknown): name is string => typeof name === "string" && name
 export function checkpointFrom(value: unknown, roots: readonly WalkRoot[]): WalkCheckpoint | null {
   const saved = value as { totals?: unknown; doneRoots?: unknown; frames?: unknown } | null;
   if (!saved || typeof saved !== "object" || !Array.isArray(saved.frames) || !Array.isArray(saved.doneRoots)) return null;
-  const inRoots = (path: unknown): path is string => typeof path === "string" && roots.some((root) => path === root.path || path.startsWith(root.path + sep));
+  // Resolved before the check: `<root>/../etc` is not under the root, and a path that resolves elsewhere is not one this server wrote.
+  const inRoots = (path: unknown): path is string => typeof path === "string" && resolve(path) === path
+    && roots.some((root) => path === root.path || path.startsWith(root.path + sep));
   if (saved.frames.length > RESUME_DEPTH + 1 || !saved.doneRoots.every((path) => roots.some((root) => root.path === path))) return null;
   const frames: WalkCheckpoint["frames"] = [];
   for (const frame of saved.frames as Array<{ path?: unknown; names?: unknown }>) {
-    if (!inRoots(frame?.path) || !Array.isArray(frame.names) || frame.names.length > MAX_NAMES || !frame.names.every(NAME)) return null;
+    if (!inRoots(frame?.path) || !Array.isArray(frame.names) || frame.names.length > MAX_NAMES || !frame.names.every(NAME)
+      || frame.names.reduce((sum, name) => sum + Buffer.byteLength(name) + 3, 0) > MAX_NAME_BYTES) return null;
     frames.push({ path: frame.path, names: [...frame.names] });
   }
   return { totals: totalsFrom(saved.totals), doneRoots: [...saved.doneRoots as string[]], frames };
@@ -184,11 +205,13 @@ export function createDiskWalk(roots: readonly WalkRoot[], options: DiskWalkOpti
   const counted = (frame: Frame, name: string) => {
     if (!frame.names) return;
     frame.names.push(name);
-    if (frame.names.length > MAX_NAMES) frame.names = null;
+    frame.nameBytes += Buffer.byteLength(name) + 3;
+    if (frame.names.length > MAX_NAMES || frame.nameBytes > MAX_NAME_BYTES) frame.names = null;
   };
   const newFrame = (path: string, segments: string[], placement: Placement, scope: StorageScope, dev: number): Frame => {
     const skip = resumed.get(path) ?? null;
-    return { path, segments, placement, scope, dev, dir: null, names: segments.length < RESUME_DEPTH ? [...skip ?? []] : null, skip };
+    const names = segments.length < RESUME_DEPTH ? [...skip ?? []] : null;
+    return { path, segments, placement, scope, dev, dir: null, names, nameBytes: (names ?? []).reduce((sum, name) => sum + Buffer.byteLength(name) + 3, 0), skip };
   };
   const checkpoint = (): WalkCheckpoint | null => {
     if (!stack.every((frame) => frame.names !== null)) return null;
