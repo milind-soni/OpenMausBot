@@ -42,5 +42,6 @@ export function syncBrowserChrome(doc: Document = document): void {
   } catch {
     return;
   }
-  applyThemeColor(surface, doc);
+  // A real head appends any Node; the narrow type is what the tests can fake.
+  applyThemeColor(surface, doc as unknown as ThemeColorDocument);
 }
