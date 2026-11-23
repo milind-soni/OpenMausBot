@@ -632,6 +632,7 @@ export type Action =
       replyToId?: string;
       threadId?: string;
       mode?: "chat" | "goal"; mentions?: string[]; pointed?: import("../../shared/app-frame/point").PointedElement[];
+      followUp?: import("../../shared/follow-up").FollowUp;
       onError?: () => void;
     }
   | {
@@ -2633,6 +2634,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   queueId: body.queueId,
                   text: action.text,
                 });
+                // The chosen "Sending while a bot works" applies in rooms too: hand the fresh queue head
+                // to the running turn. A driver that cannot steer keeps the queue and says so.
+                if (action.followUp === "steer") {
+                  wrapped({
+                    type: "steerGroupQueued",
+                    groupId: action.groupId,
+                    threadId: body.threadId,
+                    queueId: body.queueId,
+                    onSettled: () => {},
+                  });
+                }
               }
             })
             .catch((error) => {

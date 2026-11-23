@@ -3040,6 +3040,33 @@ describe("restoring the open conversation", () => {
       expect(seen.notice).toMatchObject({ kind: "note", text: expect.stringContaining("Nothing was stopped"), threadId: "room-thread" });
     });
 
+    it("a room send with the steer follow-up hands its fresh queue head to the running turn", async () => {
+      const { stream } = await boot();
+      stream.send(hello());
+      await settle();
+      const steered: string[] = [];
+      vi.stubGlobal("fetch", (path: string) => {
+        const clean = path.replace(/\?since=[^&]*$/, "");
+        if (clean === "/api/groups/room-1/messages") {
+          return Promise.resolve(new Response(JSON.stringify({ ok: true, queued: true, threadId: "room-thread", queueId: "q-fresh" })));
+        }
+        if (clean === "/api/groups/room-1/queue/q-fresh/steer") {
+          steered.push(clean);
+          return Promise.resolve(new Response(JSON.stringify({ ok: true, steered: true, threadId: "room-thread", messages: [], queueIds: ["q-fresh"] })));
+        }
+        return Promise.resolve(new Response(JSON.stringify({})));
+      });
+
+      flushSync(() => dispatch({ type: "sendGroup", groupId: "room-1", text: "join in", sendId: "s-steer", followUp: "steer" }));
+      await settle();
+      expect(steered).toEqual(["/api/groups/room-1/queue/q-fresh/steer"]);
+
+      steered.length = 0;
+      flushSync(() => dispatch({ type: "sendGroup", groupId: "room-1", text: "just queue it", sendId: "s-queue", followUp: "queue" }));
+      await settle();
+      expect(steered).toEqual([]);
+    });
+
     it("a Steer send that stays queued because of pictures says why", async () => {
       const { stream } = await boot();
       stream.send(hello());
