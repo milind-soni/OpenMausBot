@@ -61,3 +61,15 @@ it("shows a draft file in one row with a remove button", () => {
   expect(html).toContain("lucide-file-text");
   expect(html).not.toMatch(/>FILE<|4 KB|aria-label="Download/);
 });
+
+it("shows pasted text as a compact attachment with both actions", () => {
+  const html = renderToStaticMarkup(createElement(ComposerAttachments, {
+    items: [{ kind: "paste", id: "text", text: "<!doctype html>", size: 15, lines: 1 }],
+    onAdd: noop, onRemove: noop, onChangeCitation: noop, onDisplayInChatBox: noop,
+    notice: null, onNotice: noop, uploadImage: async () => null,
+  }));
+  expect(html).toContain("self-end");
+  expect(html).toContain("starting:opacity-0");
+  expect(html.match(/<button\b/g)).toHaveLength(2);
+  expect(html).not.toMatch(/<pre\b|doctype html/);
+});

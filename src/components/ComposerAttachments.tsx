@@ -53,7 +53,7 @@ export function ComposerAttachments({
   const animate = !reducedMotion();
   const pending = animate ? leaving.filter(item => !liveIds.has(item.id)) : [];
   const removed = animate ? previous.current.live.filter(item =>
-    (item.kind === "image" || item.kind === "file") && !liveIds.has(item.id)) : [];
+    item.kind !== "citation" && !liveIds.has(item.id)) : [];
   const exitingIds = new Set([...pending, ...removed].map(item => item.id));
   const before = new Map<string | undefined, Attachment[]>();
   let anchor: string | undefined;
@@ -170,30 +170,6 @@ export function ComposerAttachments({
                 onRemove={() => onRemove(a.id)}
                 solid
               />
-            ) : a.kind === "paste" ? (
-              <PastedTextChip
-                key={a.id}
-                title={a.text.slice(0, 4000)}
-                onRemove={() => onRemove(a.id)}
-              >
-                <div className="relative h-[76px] overflow-hidden">
-                  <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-[1.45] text-ink-secondary">
-                    {a.text.slice(0, 400)}
-                  </pre>
-                  <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-b from-transparent to-raised" />
-                </div>
-                <div className="mt-1 text-[11px] text-ink-tertiary">{pasteSummaryText(a)}</div>
-                <button
-                  type="button"
-                  onClick={() => onDisplayInChatBox(a)}
-                  className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-accent/25 bg-accent/5 px-2 py-1.5 text-[11px] font-medium text-accent-text transition-colors hover:border-accent/50 interaction:bg-raised/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/60"
-                  aria-label={t("composer.chip.displayLabel")}
-                  title={t("composer.chip.display")}
-                >
-                  <MessageSquareText size={12} aria-hidden="true" />
-                  <span>{t("composer.chip.display")}</span>
-                </button>
-              </PastedTextChip>
             ) : a.kind === "image" ? (
               <div key={a.id} inert={!liveIds.has(a.id)} aria-hidden={!liveIds.has(a.id) || undefined}
                 className={cn("group relative aspect-square w-16 max-w-full rounded-lg md:w-20", attachmentFade(liveIds.has(a.id)))}>
@@ -234,14 +210,28 @@ export function ComposerAttachments({
             ) : (
               <div key={a.id} inert={!liveIds.has(a.id)} aria-hidden={!liveIds.has(a.id) || undefined}
                 className={cn("flex min-h-[42px] max-w-full items-center gap-2 self-end rounded-xl border border-hairline/25 px-2.5 text-[12px] text-ink-secondary", attachmentFade(liveIds.has(a.id)))}>
-                <FileText size={14} className="shrink-0" aria-hidden="true" />
-                <span dir="auto" title={a.name} className="min-w-0 truncate text-ink">{a.name}</span>
+                {a.kind === "paste" ? (
+                  <>
+                    <ClipboardPaste size={14} className="shrink-0" aria-hidden="true" />
+                    <span className="min-w-0 truncate text-ink">{t("composer.chip.pasted")} · {pasteSummaryText(a)}</span>
+                    <button type="button" onClick={() => onDisplayInChatBox(a)}
+                      aria-label={t("composer.chip.displayLabel")} title={t("composer.chip.display")}
+                      className={attachmentActionClass}>
+                      <MessageSquareText size={14} aria-hidden="true" />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <FileText size={14} className="shrink-0" aria-hidden="true" />
+                    <span dir="auto" title={a.name} className="min-w-0 truncate text-ink">{a.name}</span>
+                  </>
+                )}
                 <button
                   type="button"
                   onClick={() => onRemove(a.id)}
-                  aria-label={t("composer.chip.removeFile")}
-                  title={t("composer.chip.removeFile")}
-                  className="flex size-7 shrink-0 items-center justify-center rounded-lg interaction:bg-raised/50 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                  aria-label={t(a.kind === "paste" ? "composer.chip.removePasted" : "composer.chip.removeFile")}
+                  title={t(a.kind === "paste" ? "composer.chip.removePasted" : "composer.chip.removeFile")}
+                  className={attachmentActionClass}
                 >
                   <X size={13} aria-hidden="true" />
                 </button>
@@ -260,38 +250,5 @@ function attachmentFade(visible: boolean) {
     visible ? "opacity-100 starting:opacity-0" : "opacity-0 pointer-events-none");
 }
 
-function PastedTextChip({
-  children,
-  title,
-  onRemove,
-}: {
-  children: React.ReactNode;
-  title: string;
-  onRemove: () => void;
-}) {
-  return (
-    <div
-      title={title}
-      className={cn(
-        "group relative w-[172px] rounded-xl border border-hairline/40 bg-raised px-2.5 py-2",
-        "transition-colors hover:border-hairline",
-      )}
-    >
-      {children}
-      <div className="mt-1 flex items-center gap-1">
-        <ClipboardPaste size={11} className="text-ink-tertiary" />
-        <span className="rounded border border-hairline/60 px-1 py-px text-[10px] font-medium tracking-wide text-ink-secondary">
-          {t("composer.chip.pasted")}
-        </span>
-      </div>
-      {/* Not `hidden`: that would take the only way to remove a chip out of the keyboard's reach. */}
-      <button
-        onClick={onRemove}
-        aria-label={t("composer.chip.removePasted")}
-        className="absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full border border-hairline/60 bg-panel text-ink-secondary opacity-0 transition-opacity hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 touch:opacity-100"
-      >
-        <X size={11} />
-      </button>
-    </div>
-  );
-}
+
+const attachmentActionClass = "flex size-7 shrink-0 items-center justify-center rounded-lg interaction:bg-raised/50 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus";
