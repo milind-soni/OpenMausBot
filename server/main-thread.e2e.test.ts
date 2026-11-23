@@ -428,3 +428,56 @@ it("shows the main thread the person chose in an older version, not the one save
     await server.close();
   }
 }, 180_000);
+
+it("drops the thread saved for a bot once an older version chooses another, so clearing that choice does not bring it back", async () => {
+  const server = await launchRestartableServer();
+  const api = async (method: string, path: string, body?: unknown, status = 200) => {
+    const response = await fetch(`${server.url}${path}`, {
+      method, headers: { "content-type": "application/json", origin: server.url },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const value = await response.json() as any;
+    expect(response.status, `${method} ${path}: ${JSON.stringify(value)}`).toBe(status);
+    return value;
+  };
+  const cli = (...args: string[]) => runControlOmb([...args, "--url", server.url]) as Promise<any>;
+  try {
+    const { bot } = await cli("new-bot", "--name", "Switcher");
+    const chosen = bot.activeTaskId as string;
+    const main = async () => (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id).mainThreadId;
+    const saved = () => readRegistry(server.dataDir).bots.find((candidate: any) => candidate.id === bot.id);
+    const file = join(server.dataDir, "bots.json");
+    const rewrite = (change: (record: any) => any) => writeFileSync(file, JSON.stringify((JSON.parse(readFileSync(file, "utf8")) as any[]).map(change)));
+    const writeIn = async (threadId: string) => {
+      await cli("send", "--bot", bot.id, "--task", threadId, "--text", "Note this.");
+      await expect.poll(async () => ((await api("GET", `/api/threads/${threadId}/messages?limit=50`)).messages as any[]).some((message) => message.role !== "user"), { timeout: 20_000 }).toBe(true);
+      await expect.poll(async () => (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id).busy, { timeout: 20_000 }).toBe(false);
+    };
+    const kept = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Kept", approvalMode: "ask" }, 201)).task.threadId as string;
+    const later = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Later", approvalMode: "ask" }, 201)).task.threadId as string;
+    await writeIn(kept);
+
+    await server.stop();
+    rewrite(({ mainThreadChoice: _choice, mainThreadKept: _kept, ...rest }) => rest);
+    await server.start();
+    expect(await main()).toBe(kept);
+    await api("POST", `/api/bots/${bot.id}/tasks/${chosen}`);
+    await server.stop();
+    expect(saved().mainThreadKept).toEqual({ id: kept });
+
+    // An older version knows only mainThreadChoice: the person picks another thread there.
+    rewrite((record) => ({ ...record, mainThreadChoice: chosen }));
+    await server.start();
+    expect(await main(), "the person's later choice").toBe(chosen);
+    await writeIn(later);
+    await server.stop();
+    expect(saved().mainThreadKept, "the thread kept under no choice is gone from disk").toBeUndefined();
+
+    // The older version again, clearing the choice.
+    rewrite(({ mainThreadChoice: _choice, ...rest }) => rest);
+    await server.start();
+    expect(await main(), "what a bot with no choice shows: the conversation the person last wrote in").toBe(later);
+  } finally {
+    await server.close();
+  }
+}, 180_000);
