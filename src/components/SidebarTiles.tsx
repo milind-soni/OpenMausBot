@@ -85,7 +85,7 @@ export const SidebarBotTile = memo(function SidebarBotTile({ primary = false, dr
           bot={bot}
           state={stateForBot({ ...bot, messages: visible })}
           size={60}
-          motion={mascotMotion?.kind ?? "none"}
+          motion={(beat && mascotMotion?.kind) || "none"}
           motionKey={mascotMotion?.nonce ?? 0}
           animated={beat || working || noticing}
         />

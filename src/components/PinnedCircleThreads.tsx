@@ -226,7 +226,7 @@ export const PinnedBotCircle = memo(function PinnedBotCircle({
               bot={bot}
               state={stateForBot({ ...bot, messages: visible })}
               size={64}
-              motion={mascotMotion?.kind ?? "none"}
+              motion={(beat && mascotMotion?.kind) || "none"}
               motionKey={mascotMotion?.nonce ?? 0}
               animated={beat || working || noticing}
             />

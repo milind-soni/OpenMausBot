@@ -736,7 +736,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
           bot={bot}
           state={stateForBot({ ...bot, messages: visible })}
           size={simpleRow ? avatarSize + 6 : avatarSize}
-          motion={mascotMotion?.kind ?? "none"}
+          motion={(beat && mascotMotion?.kind) || "none"}
           motionKey={mascotMotion?.nonce ?? 0}
           animated={beat || working || noticing}
         />
