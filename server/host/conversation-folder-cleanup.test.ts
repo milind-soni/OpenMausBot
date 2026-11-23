@@ -53,20 +53,19 @@ function fixture(over: Partial<FolderCleanupDeps> = {}) {
         put(join(at, "tool", "Cargo.toml")),
         put(join(at, "tool", "src", "main.rs")),
         put(join(at, "venv-lookalike", "venv", "notes.txt")), // no pyvenv.cfg: not a venv
-        put(join(at, "target", "output.csv")), // no Cargo.toml beside it: not a build folder
+        put(join(at, "target", "output.csv")),
+        put(join(at, "tool", "target", "release", "tool")), // a build's output can be the deliverable: kept
         put(join(at, "repo", ".git", "node_modules", "HEAD")), // never walked into .git
       ],
       gone: [
         join(at, "app", "node_modules"),
         join(at, "py", ".venv"),
-        join(at, "tool", "target"),
       ],
       fill() {
         put(join(at, "app", "node_modules", "left-pad", "index.js"));
         put(join(at, "app", "node_modules", ".bin", "x"));
         put(join(at, "py", ".venv", "pyvenv.cfg"));
         put(join(at, "py", ".venv", "lib", "site.py"));
-        put(join(at, "tool", "target", "debug", "tool"));
         return this;
       },
     };
@@ -84,7 +83,7 @@ describe("a deleted conversation's folder", () => {
     for (const path of tree.gone) expect(existsSync(path), path).toBe(false);
     for (const path of tree.kept) expect(existsSync(path), path).toBe(true);
     expect(f.removingEmpty()).toBe(true);
-    expect(f.logs.join("\n")).toMatch(/removed 3 dependency, build or tool-result folder/);
+    expect(f.logs.join("\n")).toMatch(/removed 2 dependency or tool-result folder/);
   });
 
   it("loses its full tool results", async () => {
@@ -137,6 +136,26 @@ describe("a folder something remaining still uses", () => {
     }
   });
 
+  it("stays whole while a remaining conversation's messages name a path in it, and not for a deleted one's", async () => {
+    const said = new Map<string, string>([["t2", "run it from /data/task-workspaces/scout/t1/app"], ["gone", "task-workspaces/scout/t3"]]);
+    const f = fixture({ threadsReferencing: (fragment) => [...said].filter(([, text]) => text.includes(fragment)).map(([id]) => id) });
+    f.bots.push({ id: "scout", tasks: [{ threadId: "t2" }] });
+    const named = f.work("scout", "t1").fill(), unnamed = f.work("scout", "t3").fill();
+    f.cleanup.conversationsGone(["t1", "t3"]);
+    await f.cleanup.idle();
+    for (const path of named.gone) expect(existsSync(path)).toBe(true);
+    for (const path of unnamed.gone) expect(existsSync(path)).toBe(false);
+    expect(f.logs.join("\n")).toMatch(/a remaining conversation names a path in it/);
+  });
+
+  it("stays whole while the saved settings or routines cannot be read", async () => {
+    const f = fixture({ heldText: () => null });
+    const tree = f.work("scout", "t1").fill();
+    f.cleanup.conversationsGone(["t1"]);
+    await f.cleanup.idle();
+    for (const path of tree.gone) expect(existsSync(path)).toBe(true);
+  });
+
   it("stays whole while the saved settings name a path in it", async () => {
     const f = fixture({ heldText: () => JSON.stringify({ tool: { command: "/data/task-workspaces/scout/t1/app/node_modules/.bin/x" } }) });
     const tree = f.work("scout", "t1").fill();
@@ -163,7 +182,7 @@ describe("a folder something remaining still uses", () => {
 });
 
 describe("a deleted bot", () => {
-  it("loses the rebuildable trees of every conversation folder it leaves, and keeps one a remaining conversation uses", async () => {
+  it("loses the installed dependencies of every conversation folder it leaves, and keeps one a remaining conversation uses", async () => {
     const f = fixture();
     const now = f.work("scout", "t1").fill(), before = f.work("scout", "old").fill(), room = f.work("scout", "room1").fill();
     f.groups.push({ id: "g1", threadId: "room1" });

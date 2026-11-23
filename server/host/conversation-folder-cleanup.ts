@@ -1,6 +1,7 @@
-// What a deleted conversation or bot leaves in its folders that is nobody's work: the dependency and build trees in its
-// conversation folders (task-workspaces/<bot>/<thread>: node_modules, a Python venv, a Rust target folder), which an
-// install or a build makes again, and the full tool results kept for it (tool-results/<thread>). The files the bot
+// What a deleted conversation or bot leaves in its folders that is nobody's work: the installed dependencies in its
+// conversation folders (task-workspaces/<bot>/<thread>: node_modules and Python venvs, which Files never carries and an
+// install makes again), and the full tool results kept for it (tool-results/<thread>). A build's output (a Rust target
+// folder) is not among them: it can be the program the person asked for, and Files brings it to them. The files the bot
 // made for the person stay: the delete dialogs promise them ("Generated project files are kept"), Files lists every
 // conversation folder that holds a file and brings it to the person's computer, and the bot's other conversations are
 // told where these folders are. Event logs and engine sessions go with the conversation elsewhere (store.ts,
@@ -9,7 +10,8 @@
 // Safety: a folder is touched only when nothing that remains can use it. Its conversation is no remaining bot's or
 // room's (a room's turns use a member bot's conversation folder under the room's own id), no remaining bot, conversation
 // or room works in it, inside it or in a folder between it and the data folder (a fork keeps working in its source's
-// folder), and the saved settings name no path in it. That is checked again just before each move. Nothing is reached
+// folder), and neither the saved settings, the routines nor a remaining conversation's messages name a path in it; while
+// any of those cannot be read, it stays. That is checked again just before each move. Nothing is reached
 // through a link: every folder from the data folder down must be a real folder, and a link found while removing is
 // removed as a link. What goes is first moved, in one rename, to <data>/.removing, and only then removed one entry at
 // a time, so a crash leaves either the whole tree in place or a part of it in .removing, which the next start finishes.
@@ -61,8 +63,11 @@ export const gateResultsName = (threadId: string) => threadId.replace(/[^A-Za-z0
 export interface FolderCleanupDeps {
   dataDir: string;
   records(): LiveRecords;
-  /** Saved settings that may name a path (MCP servers' commands and arguments); a conversation folder they name stays. */
-  heldText?(): string;
+  /** Saved settings that may name a path (MCP servers' commands, routines' prompts); a conversation folder they name stays,
+   * and every one stays while this is null (not readable yet). */
+  heldText?(): string | null;
+  /** Remaining conversations whose messages hold this text (message-db.ts threadsReferencing). */
+  threadsReferencing?(fragment: string): readonly string[];
   /** When the start's leftover .removing is finished; false: only on request. Default: a minute after start. */
   drainAfterMs?: number | false;
   pause?(ms: number): Promise<void>;
@@ -118,8 +123,9 @@ export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
     return Boolean(realData && realPath && inside(realData, realPath));
   }
 
-  /** What still uses this conversation folder, or null when nothing that remains can. */
-  function heldBy(folder: string): string | null {
+  /** What still uses this conversation folder, or null when nothing that remains can. `deep` also reads the remaining
+   * conversations' messages, a scan of the transcripts kept for the moment just before a move. */
+  function heldBy(folder: string, deep = false): string | null {
     const [botId, threadId, ...rest] = relative(tasksRoot, folder).split(sep);
     if (!botId || !threadId || rest.length || !ID.test(botId) || !ID.test(threadId)) return "not a conversation folder";
     if (!plainFolderUnder(tasksRoot, folder)) return "not a plain folder in task-workspaces";
@@ -133,13 +139,18 @@ export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
         if (own.some((mine) => inside(mine, path) || (inside(path, mine) && tops.some((top) => inside(top, path))))) return `a remaining conversation works in ${path}`;
       }
     }
-    const held = deps.heldText?.() ?? "";
+    const held = deps.heldText ? deps.heldText() : "";
+    if (held === null) return "the saved settings cannot be read yet";
     const named = [`task-workspaces/${botId}/${threadId}`, `task-workspaces\\${botId}\\${threadId}`, `task-workspaces\\\\${botId}\\\\${threadId}`];
-    if (named.some((fragment) => held.includes(fragment))) return "the saved settings name a path in it";
+    if (named.some((fragment) => held.includes(fragment))) return "the saved settings or a routine name a path in it";
+    if (deep && deps.threadsReferencing) {
+      const live = liveThreadIds(records);
+      if (named.some((fragment) => deps.threadsReferencing!(fragment).some((id) => live.has(id)))) return "a remaining conversation names a path in it";
+    }
     return null;
   }
 
-  /** The dependency and build trees in a conversation folder, never through a link nor into .git. */
+  /** The installed dependencies in a conversation folder, never through a link nor into .git. */
   async function rebuildable(folder: string): Promise<string[]> {
     const found: string[] = [];
     let scanned = 0;
@@ -154,7 +165,6 @@ export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
         const path = join(dir, entry.name);
         if (entry.name === "node_modules") found.push(path);
         else if ((entry.name === ".venv" || entry.name === "venv") && await isFile(join(path, "pyvenv.cfg"))) found.push(path);
-        else if (entry.name === "target" && await isFile(join(dir, "Cargo.toml"))) found.push(path);
         else if (depth < MAX_DEPTH) await walk(path, depth + 1);
       }
     };
@@ -225,8 +235,11 @@ export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
     if (!realFolder(job.folder)) return;
     const why = heldBy(job.folder);
     if (why) return log(`cleanup: kept ${job.folder}: ${why}`);
-    for (const path of await rebuildable(job.folder)) {
-      // Checked again just before each move: a conversation may have started working there meanwhile.
+    const trees = await rebuildable(job.folder);
+    // Checked again, transcripts too, just before the moves: a conversation may have started working there meanwhile.
+    const late = trees.length ? heldBy(job.folder, true) : null;
+    if (late) return log(`cleanup: kept ${job.folder}: ${late}`);
+    for (const path of trees) {
       if (heldBy(job.folder)) return;
       if (await retire(tasksRoot, path)) totals.folders++;
     }
@@ -250,7 +263,7 @@ export function createConversationFolderCleanup(deps: FolderCleanupDeps) {
         active = false;
       }
       if (totals.folders || totals.entries) {
-        log(`cleanup: removed ${totals.folders} dependency, build or tool-result folder(s) of deleted conversations, ${totals.entries} entries, ${Math.round(totals.bytes / 1024 / 1024)} MB${totals.failed ? `; ${totals.failed} left for the next pass` : ""}`);
+        log(`cleanup: removed ${totals.folders} dependency or tool-result folder(s) of deleted conversations, ${totals.entries} entries, ${Math.round(totals.bytes / 1024 / 1024)} MB${totals.failed ? `; ${totals.failed} left for the next pass` : ""}`);
       }
       if (queued.size) kick();
     });
