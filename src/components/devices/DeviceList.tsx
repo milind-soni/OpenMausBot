@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { lastSeen } from "@/lib/pairing-time";
@@ -15,7 +16,10 @@ function actionLabel(action: DeviceAction, device: Device): string {
     case "copy-address": return t("servers.copyAddress");
     case "copy-update": return t("devicesPage.action.copyUpdate");
     case "manage": return t("devicesPage.action.manage");
-    case "remove": return device.sources.length > 1 && action.source.type === "phone-app" ? t("devicesPage.action.removeApps") : t("remote.devices.removeShort");
+    case "remove":
+      if (device.sources.length > 1 && action.source.type === "phone-app") return t("devicesPage.action.removeApps");
+      if (device.sources.length > 1 && action.source.type === "session") return t("devicesPage.action.signOut");
+      return t("remote.devices.removeShort");
   }
 }
 
@@ -63,8 +67,10 @@ export function DeviceDetails({ device, actions, onAction, now }: { device: Devi
 export function DeviceCard({ device, onAction, onClose, now = Date.now() }: { device: Device; onAction: (device: Device, action: DeviceAction) => void; onClose: () => void; now?: number }) {
   const Icon = KIND_ICON[device.kind];
   const primary = primaryOf(device);
+  const card = useRef<HTMLElement>(null);
+  useEffect(() => { card.current?.scrollIntoView?.({ block: "nearest" }); }, [device.id]);
   return (
-    <section data-device-card={device.id} aria-label={device.name} className="flex flex-col gap-3 rounded-xl bg-menu px-4 py-3 shadow-[inset_0_0_0_0.5px_var(--settings-edge)] motion-safe:animate-fade-in">
+    <section ref={card} data-device-card={device.id} aria-label={device.name} className="flex flex-col gap-3 rounded-xl bg-menu px-4 py-3 shadow-[inset_0_0_0_0.5px_var(--settings-edge)] motion-safe:animate-fade-in">
       <div className="flex items-center gap-3">
         <Icon size={16} aria-hidden="true" className="shrink-0 text-ink-secondary" />
         <div className="flex min-w-0 flex-1 flex-col">

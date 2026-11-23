@@ -3312,6 +3312,7 @@
   "devicesPage.action.copyUpdate": "अपडेट कमांड कॉपी करें",
   "devicesPage.action.manage": "प्रबंधित करें",
   "devicesPage.action.removeApps": "इसके ऐप हटाएँ",
+  "devicesPage.action.signOut": "साइन आउट करें",
   "devicesPage.network.title": "निजी नेटवर्क",
   "devicesPage.network.setUp": "सेट अप करें",
   "devicesPage.network.share": "अपने कंप्यूटरों को आने दें",

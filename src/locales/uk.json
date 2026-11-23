@@ -3747,6 +3747,7 @@
   "devicesPage.action.copyUpdate": "Копіювати команду оновлення",
   "devicesPage.action.manage": "Керувати",
   "devicesPage.action.removeApps": "Видалити його застосунки",
+  "devicesPage.action.signOut": "Відключити",
   "devicesPage.network.title": "Приватна мережа",
   "devicesPage.network.setUp": "Налаштувати",
   "devicesPage.network.share": "Впустити ваші комп’ютери",

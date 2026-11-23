@@ -9930,6 +9930,7 @@
   "devicesPage.action.copyUpdate": "複製更新指令",
   "devicesPage.action.manage": "管理",
   "devicesPage.action.removeApps": "移除它的應用程式",
+  "devicesPage.action.signOut": "將其登出",
   "devicesPage.network.title": "私人網路",
   "devicesPage.network.setUp": "設定",
   "devicesPage.network.share": "讓你的電腦加入",

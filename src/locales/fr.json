@@ -3461,6 +3461,7 @@
   "devicesPage.action.copyUpdate": "Copier la commande de mise à jour",
   "devicesPage.action.manage": "Gérer",
   "devicesPage.action.removeApps": "Retirer ses apps",
+  "devicesPage.action.signOut": "Le déconnecter",
   "devicesPage.network.title": "Réseau privé",
   "devicesPage.network.setUp": "Configurer",
   "devicesPage.network.share": "Laisser entrer vos ordinateurs",

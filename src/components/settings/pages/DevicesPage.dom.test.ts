@@ -24,7 +24,7 @@ let sessions: Array<{ id: string; label: string; scopes: string[]; lastSeenAt: n
 let requests: string[];
 let bridge: Record<string, ReturnType<typeof vi.fn>>;
 let environments: Record<string, ReturnType<typeof vi.fn>>;
-let go: ReturnType<typeof vi.fn>;
+let go: ReturnType<typeof vi.fn<SettingsShell["go"]>>;
 
 const reply = async () => companion;
 function install(tailscaleProblem?: CompanionState["tailscaleProblem"]) {
@@ -83,7 +83,7 @@ beforeEach(() => {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  go = vi.fn();
+  go = vi.fn<SettingsShell["go"]>();
 });
 
 afterEach(() => {

@@ -3724,6 +3724,7 @@
   "devicesPage.action.copyUpdate": "Update-Befehl kopieren",
   "devicesPage.action.manage": "Verwalten",
   "devicesPage.action.removeApps": "Seine Apps entfernen",
+  "devicesPage.action.signOut": "Abmelden",
   "devicesPage.network.title": "Privates Netzwerk",
   "devicesPage.network.setUp": "Einrichten",
   "devicesPage.network.share": "Deine Computer hereinlassen",

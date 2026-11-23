@@ -6117,6 +6117,7 @@
   "devicesPage.action.copyUpdate": "Copiar comando de actualización",
   "devicesPage.action.manage": "Gestionar",
   "devicesPage.action.removeApps": "Quitar sus apps",
+  "devicesPage.action.signOut": "Cerrar su sesión",
   "devicesPage.network.title": "Red privada",
   "devicesPage.network.setUp": "Configurar",
   "devicesPage.network.share": "Deja entrar a tus ordenadores",

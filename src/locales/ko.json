@@ -7390,6 +7390,7 @@
   "devicesPage.action.copyUpdate": "업데이트 명령 복사",
   "devicesPage.action.manage": "관리",
   "devicesPage.action.removeApps": "앱 제거",
+  "devicesPage.action.signOut": "로그아웃시키기",
   "devicesPage.network.title": "사설 네트워크",
   "devicesPage.network.setUp": "설정",
   "devicesPage.network.share": "내 컴퓨터 접속 허용",

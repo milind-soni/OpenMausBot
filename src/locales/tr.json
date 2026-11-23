@@ -5609,6 +5609,7 @@
   "devicesPage.action.copyUpdate": "Güncelleme komutunu kopyala",
   "devicesPage.action.manage": "Yönet",
   "devicesPage.action.removeApps": "Uygulamalarını kaldır",
+  "devicesPage.action.signOut": "Oturumu kapat",
   "devicesPage.network.title": "Özel ağ",
   "devicesPage.network.setUp": "Kur",
   "devicesPage.network.share": "Bilgisayarlarınıza izin ver",

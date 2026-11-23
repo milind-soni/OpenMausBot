@@ -10901,6 +10901,7 @@
   "devicesPage.action.copyUpdate": "Copia il comando di aggiornamento",
   "devicesPage.action.manage": "Gestisci",
   "devicesPage.action.removeApps": "Rimuovi le sue app",
+  "devicesPage.action.signOut": "Disconnetti",
   "devicesPage.network.title": "Rete privata",
   "devicesPage.network.setUp": "Configura",
   "devicesPage.network.share": "Fai entrare i tuoi computer",

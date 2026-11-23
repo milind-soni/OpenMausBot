@@ -6872,6 +6872,7 @@
   "devicesPage.action.copyUpdate": "Скопировать команду обновления",
   "devicesPage.action.manage": "Управлять",
   "devicesPage.action.removeApps": "Удалить его приложения",
+  "devicesPage.action.signOut": "Отключить",
   "devicesPage.network.title": "Частная сеть",
   "devicesPage.network.setUp": "Настроить",
   "devicesPage.network.share": "Впустить ваши компьютеры",

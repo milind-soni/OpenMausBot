@@ -11013,6 +11013,7 @@
   "devicesPage.action.copyUpdate": "Copy update command",
   "devicesPage.action.manage": "Manage",
   "devicesPage.action.removeApps": "Remove its apps",
+  "devicesPage.action.signOut": "Sign it out",
   "devicesPage.network.title": "Private network",
   "devicesPage.network.setUp": "Set up",
   "devicesPage.network.share": "Let your computers in",

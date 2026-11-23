@@ -7717,6 +7717,7 @@
   "devicesPage.action.copyUpdate": "アップデートコマンドをコピー",
   "devicesPage.action.manage": "管理",
   "devicesPage.action.removeApps": "アプリを削除",
+  "devicesPage.action.signOut": "サインアウトさせる",
   "devicesPage.network.title": "プライベートネットワーク",
   "devicesPage.network.setUp": "設定する",
   "devicesPage.network.share": "コンピューターの接続を許可",

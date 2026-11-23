@@ -8246,6 +8246,7 @@
   "devicesPage.action.copyUpdate": "复制更新命令",
   "devicesPage.action.manage": "管理",
   "devicesPage.action.removeApps": "移除它的应用",
+  "devicesPage.action.signOut": "将其退出登录",
   "devicesPage.network.title": "私有网络",
   "devicesPage.network.setUp": "设置",
   "devicesPage.network.share": "让你的电脑接入",

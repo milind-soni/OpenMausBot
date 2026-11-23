@@ -5609,6 +5609,7 @@
   "devicesPage.action.copyUpdate": "Sao chép lệnh cập nhật",
   "devicesPage.action.manage": "Quản lý",
   "devicesPage.action.removeApps": "Gỡ các ứng dụng của nó",
+  "devicesPage.action.signOut": "Đăng xuất thiết bị",
   "devicesPage.network.title": "Mạng riêng",
   "devicesPage.network.setUp": "Thiết lập",
   "devicesPage.network.share": "Cho các máy tính của bạn vào",

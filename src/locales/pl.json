@@ -6811,6 +6811,7 @@
   "devicesPage.action.copyUpdate": "Kopiuj polecenie aktualizacji",
   "devicesPage.action.manage": "Zarządzaj",
   "devicesPage.action.removeApps": "Usuń jego aplikacje",
+  "devicesPage.action.signOut": "Wyloguj",
   "devicesPage.network.title": "Sieć prywatna",
   "devicesPage.network.setUp": "Skonfiguruj",
   "devicesPage.network.share": "Wpuść swoje komputery",
