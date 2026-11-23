@@ -38,6 +38,15 @@ type Phase = "listening" | "sending" | "working" | "speaking";
  * composer's own button: two buttons answering it would start two calls. */
 export type CallButtonPlacement = "header" | "composer" | "panel";
 
+/** Each bot's Live start from a blank chat, kept outside the button: making the conversation changes the chat's thread,
+ * which remounts the composer and the button inside it. */
+const liveStarts = new Map<string, { request: number; waiting: number }>();
+function liveStartOf(botId: string): { request: number; waiting: number } {
+  let pending = liveStarts.get(botId);
+  if (!pending) liveStarts.set(botId, (pending = { request: 0, waiting: 0 }));
+  return pending;
+}
+
 /** `fill` (Simple composer): a round button in that colour with its glyph in `ink`, and no chevron; the + menu picks the
  * call mode. */
 /** `inverse` (phone composer): a round ink-coloured button with an app-coloured glyph: white on Midnight, dark on Meadow. */
@@ -180,23 +189,22 @@ export function CallTargetButton({
 
   // A Live call from a blank chat starts once its conversation is made and its held settings are saved; a later start
   // or a Turns call cancels it, and pressing Live again meanwhile waits for that same start.
-  const liveRequest = useRef(0);
-  const waitingLive = useRef(0);
-  useEffect(() => { if (onCall) liveRequest.current++; }, [onCall]);
+  useEffect(() => { if (onCall) liveStartOf(targetId).request++; }, [onCall, targetId]);
   const start = (next: CallMode) => {
     setHelpOpen(false);
     setMenuOpen(false);
-    if (next === "live" && waitingLive.current && waitingLive.current === liveRequest.current) return;
-    const request = ++liveRequest.current;
+    const pending = liveStartOf(targetId);
+    if (next === "live" && pending.waiting && pending.waiting === pending.request) return;
+    const request = ++pending.request;
     if (next === "live" && liveThreadId !== undefined) {
       onStart("live");
       const live = (thread: string) => {
-        if (waitingLive.current === request) waitingLive.current = 0;
-        if (liveRequest.current === request) void startLiveCall({ botId: targetId, threadId: thread, provider: state.config?.live?.provider });
+        if (pending.waiting === request) pending.waiting = 0;
+        if (pending.request === request) void startLiveCall({ botId: targetId, threadId: thread, provider: state.config?.live?.provider });
       };
       if (isNewChatThread(liveThreadId)) {
-        waitingLive.current = request;
-        const failed = () => { if (waitingLive.current === request) waitingLive.current = 0; };
+        pending.waiting = request;
+        const failed = () => { if (pending.waiting === request) pending.waiting = 0; };
         dispatch({ type: "makeNewChat", botId: targetId, threadId: liveThreadId, onMade: live, onError: failed });
       } else live(liveThreadId);
       return;

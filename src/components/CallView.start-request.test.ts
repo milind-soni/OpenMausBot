@@ -44,6 +44,10 @@ const render = (threadId = "thread-atlas") => flushSync(() => root.render(create
   targetId: "atlas", targetName: "Atlas", threadId, voices: ["v"],
   requireExplicitVoices: false, liveCapable: true, placement: "composer", fill: "#8057C8", onStart,
 })));
+const remount = () => {
+  flushSync(() => root.unmount());
+  root = createRoot(container);
+};
 
 beforeEach(() => {
   fixture.liveCall = null;
@@ -117,6 +121,32 @@ describe("a call started from the composer's + menu", () => {
   it("never goes Live from a blank chat after a Turns call started and hung up while the conversation was being made", () => {
     render(newChatThreadId("atlas"));
     flushSync(() => requestCallStart("atlas", "live"));
+    flushSync(() => requestCallStart("atlas", "turns"));
+    expect(currentCall()).toBe("atlas");
+    flushSync(() => endCall("atlas"));
+
+    flushSync(() => fixture.dispatch.mock.calls[0][0].onMade("made"));
+    expect(liveMedia().phase).toBe("idle");
+  });
+
+  it("waits for the blank chat's Live start when the made conversation remounts the button before Live is pressed again", () => {
+    render(newChatThreadId("atlas"));
+    flushSync(() => requestCallStart("atlas", "live"));
+    remount();
+    render("made");
+    flushSync(() => requestCallStart("atlas", "live"));
+    expect(liveMedia().phase).toBe("idle");
+    expect(fixture.dispatch).toHaveBeenCalledOnce();
+
+    flushSync(() => fixture.dispatch.mock.calls[0][0].onMade("made"));
+    expect(liveMedia()).toMatchObject({ phase: "starting", botId: "atlas", threadId: "made" });
+  });
+
+  it("never goes Live from a blank chat after a Turns call started on the remounted button", () => {
+    render(newChatThreadId("atlas"));
+    flushSync(() => requestCallStart("atlas", "live"));
+    remount();
+    render("made");
     flushSync(() => requestCallStart("atlas", "turns"));
     expect(currentCall()).toBe("atlas");
     flushSync(() => endCall("atlas"));
