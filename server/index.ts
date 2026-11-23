@@ -7472,7 +7472,7 @@ async function beginTurn(
     const onDispatchError = opts?.onDispatchError;
     opts = {
       ...opts,
-      runOn: continuingRoutine.runOn,
+      runOn: continuingRoutine.runOn, automationRunId: continuingRoutine.id,
       automationSource: continuingRoutine.triggerSource ?? (continuingRoutine.manual ? "manual" : "schedule"),
       onDispatchError: (message) => {
         routines?.failThread(threadId, message, { cause: "refused" });
@@ -8242,11 +8242,11 @@ async function beginTurn(
         kind: computerKind,
         vmPrivate: localVmMode(cfg) === "per-bot",
       });
-      const coordinationNode = opts?.coordination ? coordinator.node(opts.coordination.id) : undefined;
+      const coordinationNode = opts?.coordination ? coordinator.node(opts.coordination.id) : undefined, accountRefusal = appTriggers.turnRefusal(threadId, opts?.automationRunId);
       if (opts?.coordination && (!coordinationNode || coordinationNode.status !== "running" || roomHandoffProblem(coordinationNode,
         coordinationNode.parentId ? coordinator.node(coordinationNode.parentId) : undefined))) {
         throw new DirectTurnSetupCancelled("Coordination access changed before dispatch");
-      }
+      } else if (accountRefusal) throw new DirectTurnSetupCancelled(accountRefusal);
       // The tool bridge is decided here: the folder the turn is launched in is known, and the prompt is not built yet.
       applyAgentsBridge(threadId, integrations, cfg, bot, turnEngine(instance, providerConfigs(), registry.lastSnapshot(instance.instanceId), cwd));
       const confined = proactive.fence.confines(threadId), apiFenced = botApiThread(threadId); if (confined || apiFenced) for (const key of Object.keys(integrations) as Array<keyof typeof integrations>) if (!(apiFenced ? BOT_API_TOOLS : READ_AND_DRAFT_TOOLS).has(key)) delete integrations[key];
@@ -8676,7 +8676,7 @@ routines = new RoutineManager({
   skipStartupRuns: (startedFromSleep = Boolean(CLOUD_HOME) && wokeFromSleep(DATA_DIR)), prepareRun: (run, signal) => runComputers.prepare(run, signal), preparing: RUN_COMPUTER_LINES.waking, // a Cloud home waking from a sleep it was stopped for
   hasPendingDelegations: runtimeWorkPending, refusedHandoff: takeRefusedRun, handedOffWorkLive: (threadId) => coordinator.outstandingFor(threadId).length > 0,
   routineTurn: (threadId) => directRequestOwners.get(threadId)?.automation !== undefined, personTurn: (threadId) => directRequestOwners.get(threadId)?.origin?.kind === "user", home: { machine: CLOUD_HOME?.machineId, cloud: CLOUD_HOME !== null }, turnLive: (run) => runTurnLive(run, (threadId) => ({ busy: threadBusy(run.botId, threadId), settling: settlingTurns.has(threadId), queued: queuedThreadPosition(run.botId, threadId) !== null, pending: runtimeWorkPending(threadId), parked: store.taskByThread(run.botId, threadId)?.activity === "parked.computer" })),
-  botState: unattendedDispatchState, pausedText: (botId, run) => botHolds.text(botId, threadLanguage(store.bot(botId)?.threadId ?? "")) ?? (run ? starterRoutineWake?.refusal(run) ?? null : null), /* the Starter limit only as the owner's options say: a routine wakes its bot (host/starter-routine-wake.ts) */ held: (botId) => botHolds.held(botId), capSkip: (botId, routineId) => usageCapGate.routineSkip(botId, routineId), capText: (botId, trigger) => usageCapGate.runText(botId, trigger, threadLanguage(store.bot(botId)?.threadId ?? "")),
+  botState: unattendedDispatchState, pausedText: (botId, run) => botHolds.text(botId, threadLanguage(store.bot(botId)?.threadId ?? "")) ?? (run ? starterRoutineWake?.refusal(run) ?? appTriggers.runRefusal(run) : null), /* the Starter limit only as the owner's options say: a routine wakes its bot (host/starter-routine-wake.ts) */ held: (botId) => botHolds.held(botId), capSkip: (botId, routineId) => usageCapGate.routineSkip(botId, routineId), capText: (botId, trigger) => usageCapGate.runText(botId, trigger, threadLanguage(store.bot(botId)?.threadId ?? "")),
   goalState: (groupId, coordinatorBotId) => {
     if (!groupId) return unattendedDispatchState(coordinatorBotId);
     const group = store.group(groupId);
