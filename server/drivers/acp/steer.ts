@@ -157,25 +157,29 @@ export function acpPromptSteering(running: () => boolean, send: (text: string) =
   let carrier = new Promise<void>((resolve) => { markAnswered = resolve; });
   let previous: Promise<unknown> = Promise.resolve();
   const pending = new Set<Promise<unknown>>();
-  const track = (reply: Promise<unknown>, refusable: () => boolean) => {
+  const track = (reply: Promise<unknown>, refusable: () => boolean, onRefused?: () => void) => {
     const sent = reply.then(
       (answer) => { steering.replies!.push(answer); },
-      (error) => { if (!(refusable() && takeOver?.rejected(error))) steering.failure ??= error; },
+      (error) => { if (refusable() && takeOver?.rejected(error)) onRefused?.(); else steering.failure ??= error; },
     ).finally(() => pending.delete(sent));
     pending.add(sent);
   };
   const takenOver = async (guidance: string): Promise<SteerOutcome> => {
     if (!guidance || (answered && !pending.size) || !running()) return "refused";
-    let decided = false;
+    // The steer owns the turn only once the agent answers the prompt that carried it; until then a rejection is a
+    // refusal, also one that comes after this steer was reported as indeterminate.
+    let accepted = false, refused = false;
     const reply = send(guidance);
-    track(reply, () => !decided);
+    const owner = carrier;
+    void owner.then(() => { if (!refused) accepted = true; });
+    track(reply, () => !accepted, () => { refused = true; });
+    carrier = owner.then(() => refused ? undefined : reply.then(() => undefined, () => undefined));
     let timer: ReturnType<typeof setTimeout> | undefined;
     const outcome = await Promise.race<SteerOutcome>([
-      carrier.then(() => "steered"),
-      reply.then(() => "steered", (error) => takeOver!.rejected(error) ? "refused" : "indeterminate"),
+      owner.then(() => refused ? new Promise<never>(() => {}) : "steered"),
+      reply.then(() => "steered", (error) => refused ? "refused" : takeOver!.rejected(error) ? "refused" : "indeterminate"),
       new Promise((resolve) => { timer = setTimeout(() => resolve("indeterminate"), STEER_TAKEOVER_MS); timer.unref?.(); }),
-    ]).finally(() => { decided = true; clearTimeout(timer); });
-    if (outcome !== "refused") carrier = reply.then(() => undefined, () => undefined);
+    ]).finally(() => clearTimeout(timer));
     return outcome;
   };
   const steering: AcpTurnSteering = {

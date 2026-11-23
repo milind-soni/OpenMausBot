@@ -209,6 +209,32 @@ describe("acpPromptSteering", () => {
       expect(steering.failure).toEqual({ code: -32603, message: "Can't add this prompt" });
     });
 
+    it("leaves the turn with its own prompt when a steer it was unsure of is rejected late, and judges the next steer by that prompt", async () => {
+      vi.useFakeTimers();
+      try {
+        const { steering, sent } = takeOver();
+        const first = steering.steer("use pytest");
+        await vi.advanceTimersByTimeAsync(STEER_TAKEOVER_MS);
+        expect(await first).toBe("indeterminate");
+        sent[0]!.fail({ code: -32603, message: "Can't add this prompt" });
+        await vi.advanceTimersByTimeAsync(0);
+        const second = steering.steer("add a README");
+        await vi.advanceTimersByTimeAsync(0);
+        sent[1]!.fail({ code: -32603, message: "Can't add this prompt" });
+        expect(await second).toBe("refused");
+        const third = steering.steer("and a license");
+        await vi.advanceTimersByTimeAsync(0);
+        expect(steering.promptAnswered()).not.toBeNull();
+        expect(await third).toBe("steered");
+        sent[2]!.answer({ stopReason: "end_turn" });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(steering.failure).toBeUndefined();
+        expect(steering.replies).toEqual([{ stopReason: "end_turn" }]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("is unsure of a steer when nothing answers in time", async () => {
       vi.useFakeTimers();
       try {
