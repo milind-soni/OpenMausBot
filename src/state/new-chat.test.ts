@@ -39,6 +39,7 @@ let sends: Array<{ threadId?: string; text: string }>;
 let taskPatches: string[];
 let createAnswer: Promise<Response> | null;
 let switchAnswer: Promise<Response> | null;
+let patchAnswer: Promise<Response> | null;
 
 const send = (text: string, extra: Partial<Extract<Action, { type: "send" }>> = {}) =>
   flushSync(() => dispatch({ type: "send", botId: "bot", threadId: DRAFT, text, sendId: `send-${text}`, ...extra }));
@@ -50,6 +51,7 @@ beforeEach(async () => {
   taskPatches = [];
   createAnswer = null;
   switchAnswer = null;
+  patchAnswer = null;
   const stored = new Map<string, string>();
   vi.stubGlobal("localStorage", {
     getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => { stored.set(key, String(value)); },
@@ -67,7 +69,10 @@ beforeEach(async () => {
       sends.push(body);
       return json({ threadId: body.threadId, message: { ...line(body.sendId), sendId: body.sendId } });
     }
-    if (/^\/api\/bots\/bot\/tasks\/[^/]+$/.test(path) && init?.method === "PATCH") taskPatches.push(path);
+    if (/^\/api\/bots\/bot\/tasks\/[^/]+$/.test(path) && init?.method === "PATCH") {
+      taskPatches.push(path);
+      if (patchAnswer) return patchAnswer;
+    }
     if (path === "/api/bots/bot/tasks/a") return json({ bot: bot("a", ["a"]) });
     if (path.startsWith("/api/bots/bot/tasks/b")) return switchAnswer ?? json({ bot: bot("b", ["a", "b"]) });
     if (path === "/api/instances") return json({ instances: [] });
@@ -304,6 +309,21 @@ describe("a new conversation opens blank and is made by its first send", () => {
     expect(sends).toEqual([]);
     expect(pepper().threadId).toBe("made");
     expect(state.newChat).toBeNull();
+  });
+
+  it("answers a Live call only after the settings picked in the blank chat are saved", async () => {
+    let saved!: (response: Response) => void;
+    patchAnswer = new Promise((resolve) => { saved = resolve; });
+    const made = vi.fn();
+    openBlank();
+    flushSync(() => dispatch({ type: "updateTask", botId: "bot", threadId: DRAFT, patch: { approvalMode: "ask" } }));
+    flushSync(() => dispatch({ type: "makeNewChat", botId: "bot", threadId: DRAFT, onMade: made }));
+    await vi.waitFor(() => expect(taskPatches).toEqual(["/api/bots/bot/tasks/made"]));
+    await settle();
+    expect(made).not.toHaveBeenCalled();
+
+    saved(json({ bot: bot("made", ["a", "made"]) }));
+    await vi.waitFor(() => expect(made).toHaveBeenCalledExactlyOnceWith("made"));
   });
 
   it("makes one conversation for a Live call and a send that start together", async () => {

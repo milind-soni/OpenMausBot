@@ -93,6 +93,17 @@ describe("a call started from the composer's + menu", () => {
     expect(liveMedia()).toMatchObject({ phase: "starting", botId: "atlas", threadId: "made" });
   });
 
+  it("never goes Live from a blank chat after a Turns call started and hung up while the conversation was being made", () => {
+    render(newChatThreadId("atlas"));
+    flushSync(() => requestCallStart("atlas", "live"));
+    flushSync(() => requestCallStart("atlas", "turns"));
+    expect(currentCall()).toBe("atlas");
+    flushSync(() => endCall("atlas"));
+
+    flushSync(() => fixture.dispatch.mock.calls[0][0].onMade("made"));
+    expect(liveMedia().phase).toBe("idle");
+  });
+
   it("is ignored for another bot, and while this one is already on a call", () => {
     flushSync(() => requestCallStart("juniper", "turns"));
     expect(currentCall()).toBeNull();

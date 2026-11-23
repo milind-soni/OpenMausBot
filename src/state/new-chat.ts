@@ -53,6 +53,8 @@ type Effects = {
   create: (botId: string, projectId: string | undefined) => Promise<{ bot: Bot }>;
   navigated: (botId: string) => void;
   showError: (error: unknown) => void;
+  /** Settles once the conversation's held settings (approval mode, model) are saved, as a send waits for them. */
+  settled: (botId: string, threadId: string) => Promise<unknown>;
 };
 
 /** The store's effects for the blank chat, answering true for an action they took. While a bot's blank chat is open, a
@@ -86,7 +88,8 @@ export function createNewChat(effects: Effects) {
     if (!intoBlank && !("threadId" in action && isNewChatThread(action.threadId))) return false;
     const conversationFor = (botId: string) => open?.botId === botId ? making.get(open.session) ?? make(open) : null;
     if (action.type === "makeNewChat") {
-      conversationFor(action.botId)?.then(action.onMade, effects.showError);
+      conversationFor(action.botId)?.then((threadId) => effects.settled(action.botId, threadId).then(() => action.onMade(threadId)))
+        .catch(effects.showError);
       return true;
     }
     if (action.type !== "send") {
