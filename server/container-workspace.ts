@@ -127,6 +127,53 @@ export function workspacePreparationDockerfile(workspace: string): string {
       '  [ -n "$_id" ] || return 1' \
       '  printf "%s\\n" "$_id"' \
       '}' \
+      'physical_dir() {' \
+      '  _physical=$(cd -P -- "$1" && pwd -P) || return 1' \
+      '  [ -n "$_physical" ] || return 1' \
+      '  printf "%s\\n" "$_physical"' \
+      '}' \
+      'directory_has_inode() {' \
+      '  _needle=$1' \
+      '  _dir=$2' \
+      '  while :; do' \
+      '    _here=$(device_inode "$_dir") || return 2' \
+      '    if [ "$_here" = "$_needle" ]; then' \
+      '      return 0' \
+      '    fi' \
+      '    _parent=$(dirname "$_dir")' \
+      '    if [ "$_parent" = "$_dir" ]; then' \
+      '      return 1' \
+      '    fi' \
+      '    _above=$(device_inode "$_parent") || return 2' \
+      '    if [ "$_above" = "$_here" ]; then' \
+      '      return 1' \
+      '    fi' \
+      '    _dir="$_parent"' \
+      '  done' \
+      '}' \
+      'trees_overlap() {' \
+      '  _left=$(physical_dir "$1") || return 2' \
+      '  _right=$(physical_dir "$2") || return 2' \
+      '  _left_id=$(device_inode "$_left") || return 2' \
+      '  _right_id=$(device_inode "$_right") || return 2' \
+      '  _seen=0' \
+      '  directory_has_inode "$_right_id" "$_left" || _seen=$?' \
+      '  if [ "$_seen" -eq 0 ]; then' \
+      '    return 0' \
+      '  fi' \
+      '  if [ "$_seen" -ne 1 ]; then' \
+      '    return 2' \
+      '  fi' \
+      '  _seen=0' \
+      '  directory_has_inode "$_left_id" "$_right" || _seen=$?' \
+      '  if [ "$_seen" -eq 0 ]; then' \
+      '    return 0' \
+      '  fi' \
+      '  if [ "$_seen" -ne 1 ]; then' \
+      '    return 2' \
+      '  fi' \
+      '  return 1' \
+      '}' \
       'migrate_home() {' \
       '  source=$1' \
       '  target=$2' \
@@ -158,6 +205,16 @@ export function workspacePreparationDockerfile(workspace: string): string {
       '  }' \
       '  if [ "$source_id" = "$target_id" ]; then' \
       '    printf "%s\\n" "openmausbot: $source and $target resolve to the same directory; leaving it in place" >&2' \
+      '    return 1' \
+      '  fi' \
+      '  _overlap=0' \
+      '  trees_overlap "$source" "$target" || _overlap=$?' \
+      '  if [ "$_overlap" -eq 0 ]; then' \
+      '    printf "%s\\n" "openmausbot: $source and $target are nested (one directory is inside the other); leaving it in place" >&2' \
+      '    return 1' \
+      '  fi' \
+      '  if [ "$_overlap" -ne 1 ]; then' \
+      '    printf "%s\\n" "openmausbot: could not resolve $source and $target; leaving it in place" >&2' \
       '    return 1' \
       '  fi' \
       '  if merge_entry "$source" "$target"; then' \

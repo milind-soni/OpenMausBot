@@ -94,6 +94,29 @@ function seedInterrupted(homePath: string, workspacePath: string) {
   writeFileSync(join(workspacePath, "only-workspace.txt"), "workspace");
 }
 
+function bindMountsAvailable(): boolean {
+  if (process.platform !== "linux") return false;
+  const probe = mkdtempSync(join(tmpdir(), "omb-bind-probe-"));
+  const from = join(probe, "from");
+  const onto = join(probe, "onto");
+  try {
+    mkdirSync(from);
+    mkdirSync(onto);
+    writeFileSync(join(from, "marker"), "mounted");
+    const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+    const result = spawnSync("unshare", [
+      "--user", "--map-root-user", "--mount",
+      "/bin/sh", "-c",
+      `mount --bind ${quote(from)} ${quote(onto)} && cat ${quote(join(onto, "marker"))}`,
+    ], { encoding: "utf8", timeout: 5000 });
+    return result.status === 0 && result.stdout.trim() === "mounted";
+  } catch {
+    return false;
+  } finally {
+    rmSync(probe, { recursive: true, force: true });
+  }
+}
+
 function fakeCommand(dir: string, name: string, body: string): string {
   const bin = join(dir, "bin");
   mkdirSync(bin, { recursive: true });
@@ -446,6 +469,64 @@ describe.skipIf(process.platform === "win32")("the image's start-up script keeps
     expect(recoveryDirectories(profiles, "chromium")).toEqual([]);
   });
 
+  it("does not delete a profile nested inside its workspace copy", () => {
+    const dir = scratch();
+    const home = join(dir, "home");
+    const workspace = join(dir, "workspace");
+    const target = join(workspace, ".browser-profiles", "google-chrome");
+    mkdirSync(home);
+    mkdirSync(target, { recursive: true });
+    symlinkSync(target, join(home, ".config"));
+    const cookies = join(target, "google-chrome", "google-chrome", "Cookies");
+    mkdirSync(join(target, "google-chrome", "google-chrome"), { recursive: true });
+    writeFileSync(cookies, "nested-bytes");
+    const source = join(home, ".config", "google-chrome");
+    const result = spawnSync("/bin/sh", [prepareScript(dir, workspace)], {
+      encoding: "utf8",
+      env: { PATH: process.env.PATH, HOME: home },
+    });
+    expect(result.status, result.stderr).not.toBe(0);
+    expect(result.stderr).toContain("one directory is inside the other");
+    expect(result.stderr).toContain(source);
+    expect(result.stderr).toContain(target);
+    expect(readFileSync(cookies, "utf8")).toBe("nested-bytes");
+    expect(existsSync(join(target, "google-chrome", "Cookies"))).toBe(false);
+    expect(lstatSync(source).isSymbolicLink()).toBe(false);
+    expect(lstatSync(source).isDirectory()).toBe(true);
+    expect(lstatSync(target).isSymbolicLink()).toBe(false);
+    expect(lstatSync(join(home, ".config")).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(join(home, ".config"))).toBe(target);
+    expect(recoveryDirectories(join(workspace, ".browser-profiles"), "google-chrome")).toEqual([]);
+  });
+
+  it("does not delete a profile when the workspace copy sits inside it", () => {
+    const dir = scratch();
+    const home = join(dir, "home");
+    const profileParent = join(dir, "profile-parent");
+    const source = join(profileParent, "google-chrome");
+    const workspace = join(source, "workspace");
+    const target = join(workspace, ".browser-profiles", "google-chrome");
+    mkdirSync(home);
+    mkdirSync(target, { recursive: true });
+    symlinkSync(profileParent, join(home, ".config"));
+    writeFileSync(join(source, "Cookies"), "outer-bytes");
+    const result = spawnSync("/bin/sh", [prepareScript(dir, workspace)], {
+      encoding: "utf8",
+      env: { PATH: process.env.PATH, HOME: home },
+    });
+    expect(result.status, result.stderr).not.toBe(0);
+    expect(result.stderr).toContain("one directory is inside the other");
+    expect(result.stderr).toContain(join(home, ".config", "google-chrome"));
+    expect(result.stderr).toContain(target);
+    expect(readFileSync(join(source, "Cookies"), "utf8")).toBe("outer-bytes");
+    expect(lstatSync(source).isSymbolicLink()).toBe(false);
+    expect(lstatSync(source).isDirectory()).toBe(true);
+    expect(lstatSync(target).isSymbolicLink()).toBe(false);
+    expect(lstatSync(target).isDirectory()).toBe(true);
+    expect(readlinkSync(join(home, ".config"))).toBe(profileParent);
+    expect(recoveryDirectories(profileParent, "google-chrome")).toEqual([]);
+  });
+
   const sameDirectoryAliases = [
     {
       label: "~/.local",
@@ -458,8 +539,7 @@ describe.skipIf(process.platform === "win32")("the image's start-up script keeps
       workspaceParts: [".browser-profiles", "mozilla"] as const,
     },
   ];
-  const bindMounts = process.platform === "linux"
-    && spawnSync("unshare", ["--user", "--map-root-user", "--mount", "true"], { encoding: "utf8", timeout: 5000 }).status === 0;
+  const bindMounts = bindMountsAvailable();
 
   it.skipIf(!bindMounts).each(sameDirectoryAliases)(
     "does not delete $label when an aliased path resolves it to the workspace directory",
