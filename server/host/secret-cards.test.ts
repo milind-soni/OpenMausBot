@@ -15,6 +15,7 @@ import { BotLogins } from "../bot-logins.ts";
 import { OnePasswordLogins, sdkOnePasswordClient } from "../onepassword.ts";
 import { fakeOnePasswordSdk } from "../testing/fake-onepassword.ts";
 import type { LoginBots } from "../../shared/logins.ts";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -86,19 +87,19 @@ describe("the card a bot asks for a key or secret with", () => {
     expect((await cards.requestCredential(bot, "ledger-main", { credentialId: "xaiApiKey" })).status).toBe(201);
     expect((await cards.requestCredential(bot, "ledger-main", { label: "Stripe-Testschlüssel", reason: "Für Testzahlungen.", delivery: "file" })).status).toBe(201);
     expect(lines.map((line) => line.text)).toEqual([
-      "Gib xAI API key sicher in OpenMausBot auf deinem Telefon oder Computer ein. Es wird nie in den Chat übernommen.",
-      "Gib Stripe-Testschlüssel sicher in OpenMausBot auf deinem Telefon oder Computer ein. Es wird nie in den Chat übernommen.",
+      `Gib xAI API key sicher in ${PRODUCT_NAME} auf deinem Telefon oder Computer ein. Es wird nie in den Chat übernommen.`,
+      `Gib Stripe-Testschlüssel sicher in ${PRODUCT_NAME} auf deinem Telefon oder Computer ein. Es wird nie in den Chat übernommen.`,
     ]);
     expect(lines[0]!.secret!.description).toBe("Used by the built-in Grok provider. Ledger kann es verwenden, aber nie auslesen.");
     expect(lines[1]!.secret!.description)
-      .toBe("Für Testzahlungen. Die Befehle von Ledger können es 24 Stunden lang aus einer privaten Datei lesen; es wird nie in den Chat übernommen. OpenMausBot bewahrt es sicher auf, damit Ledger es wieder nutzen kann, ohne dich erneut zu fragen.");
+      .toBe(`Für Testzahlungen. Die Befehle von Ledger können es 24 Stunden lang aus einer privaten Datei lesen; es wird nie in den Chat übernommen. ${PRODUCT_NAME} bewahrt es sicher auf, damit Ledger es wieder nutzen kann, ohne dich erneut zu fragen.`);
   });
 
   it("asks in English where no language is known", async () => {
     const { cards, lines, bot } = fixture();
     await cards.requestCredential(bot, "ledger-main", { label: "Notion token", reason: "For Notion's MCP server.", delivery: "ref" });
-    expect(lines[0]!.text).toBe("Securely provide the Notion token from OpenMausBot on your phone or computer. It is never added to chat.");
-    expect(lines[0]!.secret!.description).toBe("For Notion's MCP server. Ledger gets a one-use reference for OpenMausBot's own tools and never sees it. OpenMausBot keeps it safely, so Ledger can use it again without asking you.");
+    expect(lines[0]!.text).toBe(`Securely provide the Notion token from ${PRODUCT_NAME} on your phone or computer. It is never added to chat.`);
+    expect(lines[0]!.secret!.description).toBe(`For Notion's MCP server. Ledger gets a one-use reference for ${PRODUCT_NAME}'s own tools and never sees it. ${PRODUCT_NAME} keeps it safely, so Ledger can use it again without asking you.`);
   });
 });
 
@@ -144,12 +145,12 @@ describe("a secret a card saves to the Vault", () => {
     expect(one.vaultStore.mcpServerKeys("stripe")).toEqual([item]);
   });
 
-  it("is not another bot's, and a file for one saved for OpenMausBot's tools only needs its own card", async () => {
+  it(`is not another bot's, and a file for one saved for ${PRODUCT_NAME}'s tools only needs its own card`, async () => {
     const one = fixture();
     one.vaultStore.saveSecret({ name: "Stripe secret key", value: KEY, source: "card", bots: ["ledger"], refOnly: true });
     expect((await one.cards.requestCredential({ ...one.bot, id: "quill", name: "Quill" }, "t9", { label: "Stripe secret key", reason: "r", delivery: "ref" })).status).toBe(201);
     expect(await ask(one, "t1", { delivery: "file" })).toMatchObject({ status: 201, body: { savedAs: "ref" } });
-    const savedAsRef = "Stripe secret key is already saved, but only for OpenMausBot's own tools. Ledger needs it as a file for its commands, so enter it again here.";
+    const savedAsRef = `Stripe secret key is already saved, but only for ${PRODUCT_NAME}'s own tools. Ledger needs it as a file for its commands, so enter it again here.`;
     expect(one.lines.at(-1)!.secret!.description).toContain(savedAsRef);
     expect(one.lines[0]!.secret!.description).not.toContain(savedAsRef);
   });

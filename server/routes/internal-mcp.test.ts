@@ -20,6 +20,7 @@ import type { BotRecord } from "../store.ts";
 import { McpRequestService } from "../host/mcp-requests.ts";
 import { applyMcpChange, createInternalMcpRoutes, otherBotsGiven, showMcpActivity, type InternalMcpDeps } from "./internal-mcp.ts";
 import { PASS, type RouteContext } from "./table.ts";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 const BOT = "kiwi";
 const THREAD = "thread-1";
@@ -446,9 +447,9 @@ describe("internal mcp_server route, Full access", () => {
     expect(testElsewhere).toHaveBeenCalledWith("notes", expect.objectContaining({ command: "npx", runsOn: MAC }), "cloud-home", expect.any(AbortSignal));
     expect(probe).not.toHaveBeenCalled();
 
-    testElsewhere.mockResolvedValueOnce({ status: 409, error: "notes runs on your Mac (Ada's Mac), which is offline right now: OpenMausBot on it is closed, or the Mac is asleep or off." });
+    testElsewhere.mockResolvedValueOnce({ status: 409, error: `notes runs on your Mac (Ada's Mac), which is offline right now: ${PRODUCT_NAME} on it is closed, or the Mac is asleep or off.` });
     const offline = await post({ action: "test", name: "notes" });
-    expect(offline.body.text).toBe("MCP server notes: Not tested: notes runs on your Mac (Ada's Mac), which is offline right now: OpenMausBot on it is closed, or the Mac is asleep or off.");
+    expect(offline.body.text).toBe(`MCP server notes: Not tested: notes runs on your Mac (Ada's Mac), which is offline right now: ${PRODUCT_NAME} on it is closed, or the Mac is asleep or off.`);
     expect(offline.body.text).not.toContain("Could not reach");
   });
 
@@ -1002,7 +1003,7 @@ describe("internal mcp_server route, below Full access", () => {
     for (const full of [true, false]) {
       const { post, signIns, lines, decided } = fixture({ full, servers: { linear } });
       expect(await post({ action: "sign_in", name: "linear" })).toEqual({ status: 202, body: {
-        text: "A Sign in card for linear is now visible to the person. End this turn and wait; OpenMausBot resumes you when they finish.",
+        text: `A Sign in card for linear is now visible to the person. End this turn and wait; ${PRODUCT_NAME} resumes you when they finish.`,
       } });
       expect(signIns).toEqual([{ name: "linear", url: linear.url }]);
       expect(lines).toEqual(["Asked to sign in to MCP server linear"]);
@@ -1053,7 +1054,7 @@ describe("internal mcp_server route, below Full access", () => {
   });
 });
 
-describe("a card answered after OpenMausBot restarts", () => {
+describe(`a card answered after ${PRODUCT_NAME} restarts`, () => {
   it("Turn on applies and resumes the bot with the test result", async () => {
     const probe = probeWith({ ok: true, tools: [{ name: "list_issues" }] });
     const { post, respond, restart, stored, card, answers } = fixture({ full: false, servers: { linear: { ...linear, enabled: false } } });
@@ -1097,8 +1098,8 @@ describe("a card answered after OpenMausBot restarts", () => {
     await respond("allow");
     expect(stored("notes")).toMatchObject({ args: ["-y", "notes-mcp"], env: { NOTES_TOKEN: "saved-token" } });
     expect(probe).not.toHaveBeenCalled();
-    expect(card()).toMatchObject({ expired: true, held: "OpenMausBot restarted, so this request expired.", mcpRequest: { result: { state: "expired" } } });
-    expect(answers[0]).toContain("OpenMausBot restarted, so this request expired. Ask again if you still need it.");
+    expect(card()).toMatchObject({ expired: true, held: `${PRODUCT_NAME} restarted, so this request expired.`, mcpRequest: { result: { state: "expired" } } });
+    expect(answers[0]).toContain(`${PRODUCT_NAME} restarted, so this request expired. Ask again if you still need it.`);
     for (const sent of [fresh, "sk-live-9", "fresh-token", "saved-token"]) expect(JSON.stringify(chat), sent).not.toContain(sent);
   });
 

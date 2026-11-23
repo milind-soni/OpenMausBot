@@ -16,6 +16,7 @@ import { cloudHomeChildEnvironments, spawnWithSecrets } from "./cloud-home-start
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 import { freePortBlock } from "./testing/ports.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const HOST = "omb-t-5ec2e7f1a0b9.fly.dev";
@@ -48,7 +49,7 @@ async function api(method: string, path: string, body?: unknown) {
 }
 
 async function pairOwner(): Promise<string> {
-  const body = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300 });
+  const body = JSON.stringify({ label: `${PRODUCT_NAME} app (Cloud)`, ttlSeconds: 300 });
   const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
   const response = await fetch(`${base}/api/cloud/pairing`, { method: "POST", headers: {
     host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https", "content-type": "application/json",
@@ -163,7 +164,7 @@ it("keeps a file secret and a ref secret out of every record, and the bot uses e
   expect(askedFile).toEqual({ isError: false, text: expect.stringMatching(/^A secure card for Stripe secret key is now in this conversation/u) });
   const fileCard = (await cards()).at(-1);
   expect(fileCard.secret).toMatchObject({ target: "customSecret", label: "Stripe secret key", placeholder: "sk_test_…", helpUrl: "", delivery: "file", reason: "To create test charges." });
-  expect(fileCard.secret.description).toBe("To create test charges. Ledger's commands can read it from a private file for 24 hours; it is never added to chat. OpenMausBot keeps it safely, so Ledger can use it again without asking you.");
+  expect(fileCard.secret.description).toBe(`To create test charges. Ledger's commands can read it from a private file for 24 hours; it is never added to chat. ${PRODUCT_NAME} keeps it safely, so Ledger can use it again without asking you.`);
   expect(await save(fileCard.id, "")).toMatchObject({ status: 400 });
   expect(await save(fileCard.id, FILE_CANARY)).toMatchObject({ status: 200, body: { provided: true } });
   expect(await save(fileCard.id, FILE_CANARY)).toMatchObject({ status: 409, body: { error: "this secret was already saved" } });
@@ -180,7 +181,7 @@ it("keeps a file secret and a ref secret out of every record, and the bot uses e
   // A one-use secretRef for mcp_server.
   await tools.call("request_credential", { label: "Notion key", reason: "For Notion's MCP server.", delivery: "ref" });
   const refCard = (await cards()).at(-1);
-  expect(refCard.secret.description).toBe("For Notion's MCP server. Ledger gets a one-use reference for OpenMausBot's own tools and never sees it. OpenMausBot keeps it safely, so Ledger can use it again without asking you.");
+  expect(refCard.secret.description).toBe(`For Notion's MCP server. Ledger gets a one-use reference for ${PRODUCT_NAME}'s own tools and never sees it. ${PRODUCT_NAME} keeps it safely, so Ledger can use it again without asking you.`);
   expect(await save(refCard.id, REF_CANARY)).toMatchObject({ status: 200, body: { provided: true } });
   const refText = (await tools.call("request_credential", { label: "Notion key", reason: "For Notion's MCP server.", delivery: "ref" })).text;
   const ref = /secret-ref:[0-9a-f]{32}/u.exec(refText)?.[0];

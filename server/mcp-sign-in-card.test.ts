@@ -21,6 +21,7 @@ import { createInternalMcpRoutes, type InternalMcpDeps } from "./routes/internal
 import type { RouteContext } from "./routes/table.ts";
 import type { Scope, SessionRecord } from "./sessions.ts";
 import { startFakePostiz, type FakePostiz } from "./testing/fake-postiz.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 const SIGN_IN_PAGE = "https://postiz.example";
 const OLIVE = personKey({ id: "", email: "olive@acme.test" });
@@ -167,10 +168,10 @@ describe("the Sign in card", () => {
     const f = await setup();
     const posted = await f.signIn();
     expect(posted.status).toBe(202);
-    expect(posted.body.text).toBe("A Sign in card for linear is now visible to the person. End this turn and wait; OpenMausBot resumes you when they finish.");
+    expect(posted.body.text).toBe(`A Sign in card for linear is now visible to the person. End this turn and wait; ${PRODUCT_NAME} resumes you when they finish.`);
     expect(posted.card).toMatchObject({
       role: "bot", kind: "connector",
-      text: "Linear's MCP server needs a sign-in. Open this conversation in OpenMausBot to sign in.",
+      text: `Linear's MCP server needs a sign-in. Open this conversation in ${PRODUCT_NAME} to sign in.`,
       connector: {
         source: "mcp", slug: "linear", label: "Linear", status: "required",
         description: `Kiwi added Linear's MCP server (${new URL(f.url).host}). Sign in so Kiwi can use it.`,

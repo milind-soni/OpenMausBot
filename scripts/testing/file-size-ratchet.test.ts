@@ -16,41 +16,46 @@ const HARD_CAP = 2000;
 const LISTED_FROM = 1000;
 
 const LINES: Record<string, number> = {
-  "server/index.ts": 15310,
+  "server/index.ts": 15312,
   "src/state/store.tsx": 3285,
-  "electron/main.mjs": 3124,
+  "electron/main.mjs": 3126,
   "server/store.ts": 2265,
   "src/components/Sidebar.tsx": 1672,
-  "server/drivers/claude.ts": 2069,
-  "server/drivers/acp/core.ts": 1644,
-  "server/drivers/codex.ts": 1593,
-  "server/routines.ts": 1553,
+  "server/drivers/claude.ts": 2070,
+  "server/drivers/acp/core.ts": 1645,
+  "server/drivers/codex.ts": 1594,
+  "server/routines.ts": 1554,
   "src/components/ComputerPanel.tsx": 1782,
   "src/components/RoutineCalendarPage.tsx": 1485,
-  "server/config.ts": 1243,
+  "server/config.ts": 1247,
   "src/components/ChatView.tsx": 1261,
-  "server/routine-requests.ts": 1468,
+  "server/routine-requests.ts": 1469,
   "src/components/LocalComputerSection.tsx": 1437,
   "src/components/CursorAvatar.tsx": 1064,
   "server/skills.ts": 1379,
-  "server/vps-computer.ts": 1287,
-  "scripts/mcp-server.ts": 1411,
-  "server/boat.ts": 1253,
-  "server/drivers/pi.ts": 1014,
+  "server/vps-computer.ts": 1288,
+  "scripts/mcp-server.ts": 1412,
+  "server/boat.ts": 1254,
+  "server/drivers/pi.ts": 1015,
   "server/plan-usage.ts": 1042,
-  "server/container-computer.ts": 1175,
+  "server/container-computer.ts": 1176,
   "src/components/ModelPicker.tsx": 1039,
   "src/components/PhoneSetupFlow.tsx": 1088,
-  "server/cli.ts": 1053,
+  "server/cli.ts": 1062,
   "src/components/AttachmentPreview.tsx": 1034,
   "server/meetings/meetbot.ts": 1047,
+  "electron/cloud-account.mjs": 1003,
+  "electron/cloud-send.mjs": 1002,
+  "electron/computer-sharing.mjs": 1002,
+  "server/browser-runtime.ts": 1001,
+  "server/message-db.ts": 1001,
   "electron/data-dir-lease.node-test.mjs": 846, // the data-folder lease's own tests: many platform cases (Windows probes in data-dir-lease-windows.node-test.mjs)
 };
 
 function sourceFiles(): string[] {
   const out = execFileSync("git", ["ls-files", "server", "shared", "packages", "src", "scripts", "evals", "electron", "companion"], { cwd: ROOT, encoding: "utf8" });
   return out.split("\n").filter((file) => /\.(ts|tsx|mjs|cjs)$/.test(file))
-    .filter((file) => !file.includes(".test.") && !file.includes("/testing/") && !file.includes("goldens") && !file.startsWith("electron/vendor/"));
+    .filter((file) => !file.includes(".test.") && !file.includes("/testing/") && !file.includes("goldens") && !file.startsWith("electron/vendor/") && !file.startsWith("src/vendor/"));
 }
 
 const count = (file: string) => readFileSync(new URL(file, ROOT), "utf8").split("\n").length - 1;

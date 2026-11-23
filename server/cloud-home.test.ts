@@ -448,7 +448,7 @@ it("refuses a fallback CA setting the edge's config would read as more", () => {
 
 // `caddy validate` on the real template with what the launcher writes. Needs a Caddy: OMB_CADDY_BIN or one on the PATH (the
 // image's own 2.10.2 runs the same check at build, in the Dockerfile). Skipped when there is none.
-const caddyBin = process.env.OMB_CADDY_BIN || (spawnSync("caddy", ["version"], { stdio: "ignore" }).status === 0 ? "caddy" : "");
+const caddyBin = process.env.OMB_CADDY_BIN || spawnSync("sh", ["-c", "command -v caddy"], { encoding: "utf8" }).stdout.trim();
 it.skipIf(!caddyBin)("renders a Caddyfile.tls that Caddy accepts, with Let's Encrypt alone unless the setting is there", () => {
   const dir = directory();
   for (const file of ["Caddyfile.tls", "edge-routes.caddy"]) copyFileSync(join(import.meta.dirname, "../deploy/fly", file), join(dir, file));
