@@ -399,6 +399,44 @@ describe("data_describe saved results", () => {
     expect(sheet.sheet()).not.toHaveProperty("tables");
   });
 
+  it("keeps a catalog error beside healthy counts and omits a diagnostic past the byte budget", async () => {
+    const { ctx, database } = context();
+    await showCard(ctx, { kind: "table", sql: "SELECT * FROM other_data", title: "Other" });
+    const error = { code: "sql_error" as const, message: 'Binder Error: Referenced column "amount" not found in FROM clause!' };
+    database.listTables = async () => {
+      database.calls.push({ method: "listTables" });
+      return [
+        { name: "other_data", rowCount: 1, columns: [{ name: "id", type: "INTEGER" }] },
+        { name: "empty_data", rowCount: 0, columns: [{ name: "id", type: "INTEGER" }] },
+        { name: "sales_report", sqlName: "sales_report", rowCount: null, columns: [{ name: "id", type: "INTEGER" }, { name: "amount", type: "INTEGER" }], error },
+      ];
+    };
+    const read = await runDataTool(ctx, "data_describe", {});
+    expect(read.isError).toBeUndefined();
+    expect(read.structuredContent).toMatchObject({
+      card: { id: "c_1", title: "Other", kind: "table" },
+      tables: [
+        { name: "other_data", rowCount: 1 },
+        { name: "empty_data", rowCount: 0 },
+        { name: "sales_report", sqlName: "sales_report", rowCount: null, error },
+      ],
+    });
+
+    const huge = { code: "sql_error" as const, message: `Binder Error: ${"x".repeat(DATA_LIMITS.describeBytesMax)}` };
+    database.listTables = async () => {
+      database.calls.push({ method: "listTables" });
+      return [
+        { name: "other_data", rowCount: 1, columns: [] },
+        { name: "sales_report", rowCount: null, columns: [], error: huge },
+      ];
+    };
+    const bounded = await runDataTool(ctx, "data_describe", {});
+    expect(bounded.isError).toBeUndefined();
+    expect(bounded.structuredContent).toMatchObject({ truncated: true, tables: [{ name: "other_data", rowCount: 1 }] });
+    expect(bounded.content[0]!.text).not.toContain(huge.message);
+    expect(Buffer.byteLength(bounded.content[0]!.text)).toBeLessThanOrEqual(DATA_LIMITS.describeBytesMax);
+  });
+
   it("handles empty state and refuses unknown or conflicting targets without leaking input", async () => {
     const { ctx, database } = context();
     expect((await runDataTool(ctx, "data_describe", {})).structuredContent).toMatchObject({ card: null, cards: [], tables: [] });

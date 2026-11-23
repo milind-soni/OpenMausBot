@@ -465,12 +465,14 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
   const started = Date.now();
   const plans = planLoad(input);
   const replace = input.replace !== false;
-  const existing = new Set((await ctx.database.listTables()).map((table) => table.name.toLowerCase()));
+  const catalog = await ctx.database.listTables();
+  const existing = new Set(catalog.map((table) => table.name.toLowerCase()));
+  const blocked = new Set(catalog.flatMap((table) => (table.rowCount === null ? [table.name.toLowerCase()] : [])));
   const tables: LoadedTable[] = [];
   const unique = (base: string): string => {
     const stem = tableNameFrom(base);
     let name = stem;
-    for (let n = 2; tables.some((table) => table.name === name) || (!replace && existing.has(name)); n++) name = `${stem.slice(0, 62 - String(n).length)}_${n}`;
+    for (let n = 2; tables.some((table) => table.name === name) || (!replace && existing.has(name)) || blocked.has(name); n++) name = `${stem.slice(0, 62 - String(n).length)}_${n}`;
     existing.add(name);
     return name;
   };
@@ -566,7 +568,7 @@ async function describeSavedResult(ctx: DataContext, id?: string): Promise<Recor
   if (id && !selected) throw fail("card_not_found", `No card ${id} on the sheet.`);
   const summary = ({ id, title, kind, status, rowCount, updatedAt, by }: DataCard) => ({ id, title, kind, status, rowCount, updatedAt, by });
   const card: Record<string, unknown> | null = selected ? summary(selected) : null;
-  const result = { card, cards: [] as ReturnType<typeof summary>[], tables: [] as Array<{ name: string; sqlName?: string; rowCount: number }>, truncated: false, omitted: [] as string[] };
+  const result = { card, cards: [] as ReturnType<typeof summary>[], tables: [] as Array<{ name: string; sqlName?: string; rowCount: number | null; error?: DataError }>, truncated: false, omitted: [] as string[] };
   const fits = () => Buffer.byteLength(JSON.stringify(result)) <= DATA_LIMITS.describeBytesMax;
   if (selected && card) {
     // Never hand the model partial SQL/specs that it could accidentally save over the original.
@@ -580,8 +582,8 @@ async function describeSavedResult(ctx: DataContext, id?: string): Promise<Recor
     result.cards.push(summary(entry));
     if (!fits()) { result.cards.pop(); result.truncated = true; break; }
   }
-  for (const { name, sqlName, rowCount } of await ctx.database.listTables()) {
-    result.tables.push({ name, ...(sqlName ? { sqlName } : {}), rowCount });
+  for (const { name, sqlName, rowCount, error } of await ctx.database.listTables()) {
+    result.tables.push({ name, ...(sqlName ? { sqlName } : {}), rowCount, ...(error ? { error } : {}) });
     if (!fits()) { result.tables.pop(); result.truncated = true; break; }
   }
   return result;

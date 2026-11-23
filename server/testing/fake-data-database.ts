@@ -1,7 +1,7 @@
 // A BotDatabase for tests: answers the Data tools' SQL without DuckDB, records every call, and scripts the next answer.
 import { writeFileSync } from "node:fs";
 
-import type { DataColumn, DataColumnStats, DataHistogram, DataPage } from "../../shared/data-surface.ts";
+import type { DataColumn, DataColumnStats, DataHistogram, DataPage, DataTable } from "../../shared/data-surface.ts";
 import { DataFailure, type BotDatabase, type DataConnection, type DescribeResult, type MaterialiseResult, type RunOptions, type RunResult } from "../data/types.ts";
 
 type Rows = RunResult["rows"];
@@ -142,7 +142,7 @@ export class FakeDataDatabase implements BotDatabase {
     return { table, column, bins: [{ label: "1", count: 1 }, { label: "2", count: 2 }] };
   }
 
-  async listTables(): Promise<Array<{ name: string; sqlName?: string; rowCount: number; columns: DataColumn[] }>> {
+  async listTables(): Promise<DataTable[]> {
     this.calls.push({ method: "listTables" });
     return [...this.tables.entries()].map(([name, table]) => ({
       name,

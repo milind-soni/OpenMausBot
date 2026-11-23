@@ -74,14 +74,19 @@ export interface DataColumn {
   sample?: string[];
 }
 
-/** One entry of the bot's table catalog, as GET /data reports it from DuckDB. */
-export interface DataTable {
+/** One entry of the bot's table catalog, as GET /data reports it from DuckDB.
+ * A numeric `rowCount` is a successful count, including zero. `rowCount: null`
+ * keeps the entry when its own count cannot bind; `error` is that failure and
+ * is present only then. */
+export type DataTable = {
   name: string;
   /** A quoted identifier ready to paste into SQL; `name` remains the identity. */
   sqlName?: string;
-  rowCount: number;
   columns: DataColumn[];
-}
+} & (
+  | { rowCount: number; error?: undefined }
+  | { rowCount: null; error: DataError }
+);
 
 /** A table the bot loaded, as the Sources strip and `data_load` report it. */
 export interface DataSource {

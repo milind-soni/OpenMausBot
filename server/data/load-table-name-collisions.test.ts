@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chartRenderer, compileChart, validateVegaLite } from "./deps.ts";
 import { createDataEngine, quoteIdentifier } from "./engine.ts";
 import { DataSheetStore } from "./sheet.ts";
-import { loadData, type DataContext } from "./tools.ts";
+import { loadData, runDataTool, type DataContext } from "./tools.ts";
 
 const root = mkdtempSync(join(tmpdir(), "omb-load-name-collisions-"));
 const folder = join(root, "mixed");
@@ -85,6 +85,50 @@ describe("distinct table names within one import", () => {
     expect(await ctx.database.listTables()).toHaveLength(1);
     const rows = await ctx.database.run("SELECT origin, value FROM imported", { connection });
     expect(rows.rows.map(([origin, value]) => [origin, Number(value)])).toEqual([["csv", 1]]);
+  });
+
+  const invalidView = [
+    "CREATE TABLE sales AS SELECT 1 AS id, 10 AS amount",
+    "CREATE VIEW sales_report AS SELECT id, amount FROM sales",
+    "CREATE TABLE other_data AS SELECT 5 AS id",
+    "CREATE OR REPLACE TABLE sales AS SELECT 2 AS id, 20 AS total",
+  ];
+
+  async function unboundView(botId: string): Promise<DataContext> {
+    const ctx = await context(botId);
+    for (const sql of invalidView) {
+      const result = await runDataTool(ctx, "data_sql", { sql });
+      expect(result.isError, result.content[0]?.text).toBeUndefined();
+    }
+    return ctx;
+  }
+
+  it("loads an unrelated csv while a view is unbound", async () => {
+    const ctx = await unboundView("unrelated-csv");
+    const file = join(root, "customers.csv");
+    writeFileSync(file, "id,name\n1,Alice\n");
+    const loaded = await runDataTool(ctx, "data_load", { source: file });
+    expect(loaded.isError, loaded.content[0]?.text).toBeUndefined();
+    expect(loaded.structuredContent!.tables).toMatchObject([{ name: "customers", rowCount: 1 }]);
+    expect((await ctx.database.run("SELECT * FROM customers", { connection })).rows).toEqual([["1", "Alice"]]);
+    expect(ctx.sheet.sheet().sources.map((source) => source.name)).toContain("customers");
+  });
+
+  it.each([
+    ["replace false", { replace: false }],
+    ["replace omitted", {}],
+  ] as const)("keeps the unbound view when an import asks for its name and %s", async (label, options) => {
+    const ctx = await unboundView(`view-collision-${label.replaceAll(" ", "-")}`);
+    const file = join(root, `sales-report-${label.replaceAll(" ", "-")}.csv`);
+    writeFileSync(file, "id,name\n1,Alice\n");
+    const loaded = await runDataTool(ctx, "data_load", { source: file, name: "sales_report", ...options });
+    expect(loaded.isError, loaded.content[0]?.text).toBeUndefined();
+    expect(loaded.structuredContent!.tables).toMatchObject([{ name: "sales_report_2" }]);
+    expect((await ctx.database.run("SELECT * FROM sales_report_2", { connection })).rows).toEqual([["1", "Alice"]]);
+    const view = (await ctx.database.listTables()).find((table) => table.name === "sales_report");
+    expect(view?.rowCount).toBeNull();
+    expect(view?.error).toMatchObject({ code: "sql_error" });
+    expect(view?.error?.message).toContain("amount");
   });
 
   it("keeps the usual names when the file-family suffixes fit", async () => {

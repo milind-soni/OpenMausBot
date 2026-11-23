@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import type * as DuckDB from "@duckdb/node-api";
 
-import { DATA_LIMITS, DATA_RESULTS_SCHEMA } from "../../shared/data-surface.ts";
+import { DATA_LIMITS, DATA_RESULTS_SCHEMA, type DataTable } from "../../shared/data-surface.ts";
 import { botFolder as defaultBotFolder } from "../bot-folder.ts";
 import { boxCpus } from "../box-cpus.ts";
 import { boxMemory } from "../box-memory.ts";
@@ -203,6 +203,11 @@ function failureFrom(error: unknown, sql: string, interrupted: InterruptCause | 
   const line = parseLine(message);
   if (missingTableName(message)) return new DataFailure({ code: "table_not_found", message, sql, line });
   return new DataFailure({ code: "sql_error", message, sql, line });
+}
+
+/** DuckDB's own binding diagnostic. Other native failures also become `sql_error`. */
+function bindingFailure(error: unknown): error is DataFailure {
+  return error instanceof DataFailure && error.error.code === "sql_error" && error.error.message.startsWith("Binder Error:");
 }
 
 export class Lane {
@@ -673,7 +678,33 @@ FROM ${from} AS omb_source, omb_range WHERE ${finite} GROUP BY bin ORDER BY bin`
     });
   }
 
-  async listTables(): Promise<Array<{ name: string; sqlName?: string; rowCount: number; columns: DataColumn[] }>> {
+  private async counts(entries: CatalogEntry[], reserved: Set<string>): Promise<number[]> {
+    const countSql = `SELECT ${entries.map((entry) => `(SELECT count(*) FROM ${this.qualified(entry, reserved)})`).join(", ")}`;
+    const counted = await this.statement("panel", countSql, {}, (open, conn) => this.read(open, conn, countSql));
+    const row = counted.rows[0] ?? [];
+    return entries.map((_, index) => toCount(row[index] ?? 0));
+  }
+
+  private async countsIsolatingViews(entries: CatalogEntry[], reserved: Set<string>): Promise<Array<number | DataFailure["error"]>> {
+    const tables = entries.filter((entry) => entry.type.toUpperCase() !== "VIEW");
+    const tableCounts = tables.length ? await this.counts(tables, reserved) : [];
+    const byKey = new Map<string, number | DataFailure["error"]>();
+    tables.forEach((entry, index) => byKey.set(`${entry.schema}\u0000${entry.name}`, tableCounts[index]!));
+    for (const view of entries) {
+      if (view.type.toUpperCase() !== "VIEW") continue;
+      const key = `${view.schema}\u0000${view.name}`;
+      try {
+        const [count] = await this.counts([view], reserved);
+        byKey.set(key, count!);
+      } catch (error) {
+        if (!bindingFailure(error)) throw error;
+        byKey.set(key, error.error);
+      }
+    }
+    return entries.map((entry) => byKey.get(`${entry.schema}\u0000${entry.name}`)!);
+  }
+
+  async listTables(): Promise<DataTable[]> {
     const entries = (await this.catalog()).filter((entry) => entry.schema !== DATA_RESULTS_SCHEMA);
     if (!entries.length) return [];
     const open = await this.open();
@@ -686,17 +717,22 @@ FROM ${from} AS omb_source, omb_range WHERE ${finite} GROUP BY bin ORDER BY bin`
       list.push({ name: String(row[2]), type: String(row[3]) });
       columnsByTable.set(key, list);
     }
-    const countSql = `SELECT ${entries.map((entry) => `(SELECT count(*) FROM ${this.qualified(entry, open.reserved)})`).join(", ")}`;
-    const counts = await this.statement("panel", countSql, {}, (o, conn) => this.read(o, conn, countSql));
-    const countRow = counts.rows[0] ?? [];
-    return entries.map((entry, i) => {
+    let counted: Array<number | DataFailure["error"]>;
+    try {
+      counted = await this.counts(entries, open.reserved);
+    } catch (error) {
+      if (!bindingFailure(error) || !entries.some((entry) => entry.type.toUpperCase() === "VIEW")) throw error;
+      counted = await this.countsIsolatingViews(entries, open.reserved);
+    }
+    return entries.map((entry, index) => {
       const qualified = this.qualified(entry, open.reserved);
-      return {
+      const row = {
         name: this.displayName(entry),
         sqlName: entry.schema === "main" ? qualified.slice("main.".length) : qualified,
-        rowCount: toCount(countRow[i] ?? 0),
         columns: columnsByTable.get(`${entry.schema}\u0000${entry.name}`) ?? [],
       };
+      const count = counted[index]!;
+      return typeof count === "number" ? { ...row, rowCount: count } : { ...row, rowCount: null, error: count };
     });
   }
 
