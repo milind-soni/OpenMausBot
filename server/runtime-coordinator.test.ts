@@ -1049,6 +1049,32 @@ describe("RuntimeCoordinator: one stopped hand-off, and the rest of its teammate
     now += 1;
     expect(send(w, chief, "gen-1", undefined, builder, "Build it again", { rework: true }).node).toMatchObject({ botId: "builder" });
   });
+
+  const routineRun = (w: World, generation: string, runId: string) => w.coordinator.beginTurn({ id: generation, address: chief, brief: "Nightly export",
+    level: "ask", opener: { requester: { kind: "routine_run", runId, botId: "chief", threadId: "chief-chat" }, origin: { kind: "routine", source: "routine", ref: "nightly" } } });
+
+  it("holds for a routine run, which has no person's words: that run does not hand the teammate the work again", () => {
+    const w = world(holdAll);
+    routineRun(w, "gen-run", "run-1");
+    const { node } = w.coordinator.enqueue(chief, "gen-run", undefined, builder, "Export", {});
+    w.coordinator.tick();
+    expect(w.coordinator.stopHandoff(node.id)).toBe("stopped");
+    expect(() => w.coordinator.enqueue(chief, "gen-run", undefined, builder, "Export", { rework: true }))
+      .toThrow("The person stopped this teammate's work on this request.");
+    expect(() => w.coordinator.enqueue(chief, "gen-run", undefined, { botId: "builder", threadId: "builder-other" }, "Export it another way", {}))
+      .toThrow("The person stopped this teammate's work on this request.");
+  });
+
+  it("lets the routine's next run hand the same teammate work", () => {
+    const w = world(holdAll);
+    routineRun(w, "gen-run", "run-1");
+    const { node } = w.coordinator.enqueue(chief, "gen-run", undefined, builder, "Export", {});
+    w.coordinator.tick();
+    w.coordinator.stopHandoff(node.id);
+    w.coordinator.endTurn("gen-run", { ok: true, text: "" });
+    routineRun(w, "gen-run-2", "run-2");
+    expect(w.coordinator.enqueue(chief, "gen-run-2", undefined, builder, "Export", {}).node).toMatchObject({ botId: "builder", status: "queued" });
+  });
 });
 
 describe("RuntimeCoordinator: a stop the person made is remembered", () => {

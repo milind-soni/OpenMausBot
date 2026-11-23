@@ -495,20 +495,23 @@ export class RuntimeCoordinator implements Coordinator {
 
   /** The person's stop, remembered (scoped to that request): the bots whose work on it the stop ended don't take the same
    * request from another bot again, unless the person asked again after the stop. In memory only, for a day. A `scoped`
-   * stop holds for that one request's tree only, never for another request in the same words. */
+   * stop holds for that one request's tree only, never for another request in the same words, and needs no person's words:
+   * a routine run's tree is held the same way. */
   private rememberStop(root: Assignment, work: readonly Assignment[], scoped = false): void {
     const request = requestKey(root);
     const bots = new Set(work.filter(a => this.store.get(a.id)?.status === "cancelled").map(a => a.assignee.botId));
     const at = this.now();
     while (this.stops.length && at - this.stops[0]!.at > STOP_MEMORY_MS) this.stops.shift();
-    if (request && bots.size) this.stops.push({ at, request, bots, ...(scoped ? { rootId: root.id } : {}) });
+    if (!bots.size) return;
+    if (scoped) this.stops.push({ at, request, bots, rootId: root.id });
+    else if (request) this.stops.push({ at, request, bots });
   }
 
   /** Work for `root`'s request was stopped for `botId`, and this request is not one the person made after that stop. */
   private stoppedFor(root: Assignment, botId: string): boolean {
     const request = requestKey(root);
-    return request !== "" && this.stops.some(stop => stop.bots.has(botId) && this.now() - stop.at <= STOP_MEMORY_MS
-      && (stop.rootId !== undefined ? stop.rootId === root.id : stop.request === request && root.createdAt <= stop.at));
+    return this.stops.some(stop => stop.bots.has(botId) && this.now() - stop.at <= STOP_MEMORY_MS
+      && (stop.rootId !== undefined ? stop.rootId === root.id : request !== "" && stop.request === request && root.createdAt <= stop.at));
   }
 
   activeDirect(threadId: string): boolean {
