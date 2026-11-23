@@ -347,13 +347,17 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
         return (await antigravityCliSignIn(runtime, profile, { onProcess: (child) => trackNative(input.instanceId, child) })) === "in";
       },
     }, {}, alive);
+    const runtimeAndProfileUnlessNativeFails = () => runtimeAndProfile().catch(async (error: unknown) => {
+      if (await antigravityPathRunsNativeCli(input.config.cli, environmentNow())) throw error;
+      return null;
+    });
     let nativeFlow = false;
     liveInstances.set(input.instanceId, {
       login, stopAll: () => base.adapter.stopAll(),
       native: async () => nativeFlow || (launched.get(input.instanceId)?.nativeCli === true && runtimeProcesses.count(input.instanceId) > 0)
         || antigravityPathRunsNativeCli(input.config.cli, environmentNow()),
       ownCli: async () => {
-        const own = await runtimeAndProfile().catch(() => null);
+        const own = await runtimeAndProfileUnlessNativeFails();
         return own?.runtime.harnessPath === null ? own : null;
       },
     });
@@ -451,10 +455,7 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
         if (!(await login.cancel())) throw new Error("The Antigravity sign-in in progress could not be stopped. Try again.");
         await base.adapter.stopAll();
         // An account set to the native CLI that cannot be started cannot be signed out of it: that must not pass as done.
-        const current = await runtimeAndProfile().catch(async (error: unknown) => {
-          if (await antigravityPathRunsNativeCli(input.config.cli, environmentNow())) throw error;
-          return null;
-        });
+        const current = await runtimeAndProfileUnlessNativeFails();
         if (current?.runtime.harnessPath === null) return await signOutNative(current.runtime, current.profile);
         await removeAntigravitySignIn(input.instanceId);
         if (!runtimeProcesses.count(input.instanceId)) return;
