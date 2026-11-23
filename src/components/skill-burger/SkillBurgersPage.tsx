@@ -8,7 +8,6 @@ import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { BotAvatar } from "../Avatar";
 import { SidebarPopoverMenu } from "../SidebarPopoverMenu";
 import { TOOL_PAGE_TITLE, ToolPage, ToolPageHeader } from "../ToolPageShell";
-import { EveryChatToggle } from "./EveryChatToggle";
 import { MiniBurger } from "./MiniBurger";
 import { useBurgerRemoval } from "./SavedWorkflowsCard";
 
@@ -84,7 +83,6 @@ function BurgerCard({ skill, onRemove }: { skill: SavedWorkflow; onRemove: () =>
           <span aria-hidden="true">·</span>
           <span className="shrink-0">{skill.layers.length === 1 ? t("skillBurger.layersOne") : t("skillBurger.layersMany", { count: skill.layers.length })}</span>
         </p>
-        <EveryChatToggle skill={skill} className="mt-auto" />
         {problem && <p role="alert" className="text-[12px] text-danger">{problem}</p>}
       </div>
     </li>
