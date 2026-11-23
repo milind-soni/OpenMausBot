@@ -4,7 +4,7 @@ import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { renameBurger, useSavedBurgers, type SavedWorkflow } from "@/lib/skill-burger";
-import { useStore } from "@/state/store";
+import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { BotAvatar } from "../Avatar";
 import { SidebarPopoverMenu } from "../SidebarPopoverMenu";
 import { TOOL_PAGE_TITLE, ToolPage, ToolPageHeader } from "../ToolPageShell";
@@ -13,9 +13,8 @@ import { MiniBurger } from "./MiniBurger";
 import { useBurgerRemoval } from "./SavedWorkflowsCard";
 
 function BurgerCard({ skill, onRemove }: { skill: SavedWorkflow; onRemove: () => void }) {
-  const { state } = useStore();
   const advanced = useAdvancedMode();
-  const bot = skill.botId ? state.bots.find((candidate) => candidate.id === skill.botId) : undefined;
+  const bot = useStoreSelector((state) => (skill.botId ? state.bots.find((candidate) => candidate.id === skill.botId) : undefined));
   const [renaming, setRenaming] = useState<string | null>(null);
   const [problem, setProblem] = useState("");
   const field = useRef<HTMLInputElement>(null);
@@ -94,7 +93,7 @@ function BurgerCard({ skill, onRemove }: { skill: SavedWorkflow; onRemove: () =>
 
 /** Every Skill Burger the person's bots made: each bot's own, and the ones used in every chat. */
 export function SkillBurgersPage() {
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   const { skills, error, refresh } = useSavedBurgers();
   const { removed, problem, remove, undo } = useBurgerRemoval();
   const back = useRef<HTMLButtonElement>(null);
