@@ -161,6 +161,16 @@ describe("remote teammate hand-off: the teammate's turn", () => {
     expect(sent.wait).toBe(50);
   });
 
+  it("keeps the whole brief within the Bot API's message limit", async () => {
+    const send = vi.fn(async () => reply("ok"));
+    const s = setup({ send });
+    const node = handed(s);
+    await run(s, { ...node, text: "x".repeat(25_000) });
+    const [, sent] = send.mock.calls[0]! as unknown as [RemoteTeammate, { message: string }];
+    expect(sent.message.length).toBeLessThanOrEqual(20_000);
+    expect(sent.message).toContain("Chief, a bot on another OpenMausBot server");
+  });
+
   it("never sends a secret the brief carries to the other server", async () => {
     const send = vi.fn(async () => reply("ok"));
     const s = setup({ send });
@@ -322,6 +332,19 @@ describe("remote teammate hand-off: the teammate's turn", () => {
     expect(s.inner.validate).toHaveBeenCalledWith(own, undefined);
     expect(await run(s, own)).toEqual({ ok: true, text: "local done" });
     expect(s.host.levelOf({ botId: REMOTE, threadId: "x" })).toEqual({ level: "full" });
+  });
+
+  it("sends nothing when the mark that stops a second send cannot be saved", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "remote-handoff-"));
+    dirs.push(dir);
+    const blocker = join(dir, "not-a-folder");
+    writeFileSync(blocker, "");
+    const send = vi.fn(async () => reply("sent anyway"));
+    const s = setup({ send, file: join(blocker, "remote-teammate-work.json") });
+    const node = handed(s);
+    const result = await run(s, node);
+    expect(result).toMatchObject({ ok: false, text: expect.stringContaining("was not sent") });
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("ignores an unreadable record of sent work instead of failing to start", () => {

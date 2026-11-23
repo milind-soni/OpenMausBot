@@ -6,6 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 
 import { writeFileAtomic } from "../atomic.ts";
+import { BOT_API_MAX_MESSAGE_CHARS } from "../bot-api.ts";
 import type { CoordinateBotsCall, Coordinator, CoordinatorHost, HandoffView, HostTurnResult } from "../coordinator.ts";
 import { foldName, withTargetsHere, type CoordinateResult, type PeerDeliveryReceipt } from "../peer-delivery.ts";
 import { isIdStart } from "../peer-roster.ts";
@@ -28,7 +29,6 @@ const LONGEST_RETRY_MS = 300_000;
 const MAX_MISSES = 5;
 const SEND_WAIT_S = 50;
 const REPLY_CHARS = 20_000;
-const BRIEF_CHARS = 200_000;
 /** A sent hand-off's thread is kept this long, so a restart reads its reply instead of sending the work again. */
 const KEEP_MS = 30 * 24 * 60 * 60_000;
 /** The work thread of a hand-off with `thread: "new"` starts with this, after the teammate's address: it never goes on in an earlier conversation. */
@@ -89,8 +89,9 @@ export function createRemoteHandoff(deps: RemoteHandoffDeps) {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") deps.log(`remote teammates: ignoring unreadable ${deps.file}`);
   }
-  const save = () => {
-    try { writeFileAtomic(deps.file, JSON.stringify({ version: 1, work: sent, conversations }), { mode: 0o600 }); } catch (error) { deps.log(`remote teammates: could not save sent work: ${error instanceof Error ? error.message : String(error)}`); }
+  /** False when the record could not be written; the file on disk then still holds the last record that was. */
+  const save = (): boolean => {
+    try { writeFileAtomic(deps.file, JSON.stringify({ version: 1, work: sent, conversations }), { mode: 0o600 }); return true; } catch (error) { deps.log(`remote teammates: could not save sent work: ${error instanceof Error ? error.message : String(error)}`); return false; }
   };
   const forget = (id: string) => {
     const cutoff = now() - KEEP_MS;
@@ -158,7 +159,7 @@ export function createRemoteHandoff(deps: RemoteHandoffDeps) {
     const from = (parent && deps.botName(parent.botId)) || "A bot";
     const doneWhen = deps.coordinator().status(node.id)?.assignment?.doneWhen;
     const asks = node.mode === "consult" ? "asks you this question; answer it and act on nothing" : node.mode === "notify" ? "lets you know this; no reply goes back" : "hands you this work; your reply goes back to it";
-    return clip(redactSecretsInText(`${from}, a bot on another OpenMausBot server, ${asks}:\n\n${node.text}${doneWhen ? `\n\nDone when: ${doneWhen}` : ""}`), BRIEF_CHARS);
+    return clip(redactSecretsInText(`${from}, a bot on another OpenMausBot server, ${asks}:\n\n${node.text}${doneWhen ? `\n\nDone when: ${doneWhen}` : ""}`), BOT_API_MAX_MESSAGE_CHARS);
   }
 
   const failed = (text: string): HostTurnResult => ({ ok: false, text, failure: { text } });
@@ -191,7 +192,10 @@ export function createRemoteHandoff(deps: RemoteHandoffDeps) {
     let pause = FIRST_READ_MS, misses = 0;
     try {
       for (;;) {
-        if (!thread && !sent[node.id]) { sent[node.id] = { teammate: teammate.id, at: now() }; save(); }
+        if (!thread && !sent[node.id]) {
+          sent[node.id] = { teammate: teammate.id, at: now() };
+          if (!save()) { delete sent[node.id]; return failed(`This server could not record the hand-off before sending it to ${name}, so the work was not sent.`); }
+        }
         const result = thread ? await read(teammate, thread, { signal })
           : await send(teammate, { message: brief(node), ...(goOn ? { thread: goOn } : {}), wait: node.mode === "notify" ? 0 : SEND_WAIT_S }, { signal });
         if (result.ok) {
