@@ -244,12 +244,18 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
   const readFiles = useRef<(files: readonly File[]) => void>(() => {});
   readFiles.current = (files) => {
     if (!files.length) return;
-    if (files.some((file) => file.size > GROK_EXPORT_MAX_CHARS)) return setError(t("grokMove.error.tooLarge"));
-    void Promise.all(files.map(async (file, order) => ({ name: file.name, modifiedAt: order, text: await file.text() }))).then((parts) => show(() => {
+    const refusal = (file: string, reason: string) => (files.length > 1 ? t("grokMove.refused", { file, reason }) : reason);
+    const tooLarge = files.find((file) => file.size > GROK_EXPORT_MAX_CHARS);
+    if (tooLarge) return setError(refusal(tooLarge.name, t("grokMove.error.tooLarge")));
+    const read = (file: File, order: number) => file.text().then(
+      (text) => ({ name: file.name, modifiedAt: order, text }),
+      (cause: unknown) => { throw new Error(refusal(file.name, grokErrorText(cause))); },
+    );
+    void Promise.all(files.map(read)).then((parts) => show(() => {
       const { bots, refused: [first] } = foundExports(parts);
-      if (first) throw new Error(parts.length > 1 ? t("grokMove.refused", { file: first.file, reason: first.error }) : first.error);
+      if (first) throw new Error(refusal(first.file, first.error));
       return bots;
-    }));
+    }), (cause: unknown) => setError(grokErrorText(cause)));
   };
   // The chat box behind this dialog attaches any file dropped on the window, and one Send would hand a private export to its
   // model. So nothing behind the dialog sees a drag, on any step, and only the first step reads what was dropped.

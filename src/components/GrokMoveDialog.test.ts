@@ -8,7 +8,7 @@ vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f
 vi.mock("@/lib/analytics", () => ({ track: f.track }));
 
 import { setLocale } from "@/lib/i18n";
-import { GROK_EXPORT_FORMAT, GROK_EXPORT_PROMPT } from "../../shared/grok-import";
+import { GROK_EXPORT_FORMAT, GROK_EXPORT_MAX_CHARS, GROK_EXPORT_PROMPT } from "../../shared/grok-import";
 import { ComposerAttachments } from "./ComposerAttachments";
 import { GROK_BOT_MARK_PATH } from "./GrokBotMark";
 import { GrokMoveDialog } from "./GrokMoveDialog";
@@ -481,6 +481,29 @@ describe("a file dragged over the dialog, with the chat box behind it", () => {
     await drag("drop", [fileOf(PARTS[0]!, "part-1.json"), fileOf("{\"format\": \"grok-bot-export\", \"bots\": [", "part-2.json")]);
     expect(step()).toBe("start");
     expect(host.querySelector('[role="alert"]')?.textContent).toMatch(/^part-2\.json: /);
+  });
+
+  it("names the part that is too large, and brings none of them", async () => {
+    await render(true);
+    await tick();
+    const big = fileOf(PARTS[1]!, "part-2.json");
+    Object.defineProperty(big, "size", { value: GROK_EXPORT_MAX_CHARS + 1 });
+    const files = [fileOf(PARTS[0]!, "part-1.json"), big];
+    await drag("drop", files);
+    expect(step()).toBe("start");
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe("part-2.json: That's larger than 4 MB. Ask your Bot to split it into several messages.");
+    for (const file of files) expect(file.text).not.toHaveBeenCalled();
+  });
+
+  it("says which part could not be opened when reading it fails, and brings none of them", async () => {
+    await render(true);
+    await tick();
+    const gone = fileOf(PARTS[1]!, "part-2.json");
+    vi.mocked(gone.text).mockRejectedValue(new DOMException("The file could not be read.", "NotReadableError"));
+    await drag("drop", [fileOf(PARTS[0]!, "part-1.json"), gone]);
+    await tick();
+    expect(step()).toBe("start");
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe("part-2.json: The file could not be read.");
   });
 
   it("hands drags back to the chat box once it closes", async () => {
