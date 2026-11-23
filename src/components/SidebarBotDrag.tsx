@@ -157,8 +157,10 @@ export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onEr
       const movable = enabled && mayMove;
       const lists = new Map<string, string[]>([["", main.map((bot) => bot.id)]]);
       for (const name of departments) if (name !== NEW_DEPARTMENT) lists.set(name, sectioned.filter((bot) => bot.section === name).map((bot) => bot.id));
+      const listOf = new Map<string, string>();
+      for (const [list, ids] of lists) for (const id of ids) listOf.set(id, list);
       latest.current = { enabled: movable, lists, bots, taken, withinList };
-      const active = movable && dragging !== null && botListOf(lists, dragging) !== undefined ? dragging : null;
+      const active = movable && dragging !== null && listOf.has(dragging) ? dragging : null;
       const shown = active ? drop : null;
       const mainIds = lists.get("")!.filter((id) => id !== active);
       const listFor = (sectionId: string) => (sectionId === BOTS_SECTION_ID ? "" : userSectionName(sectionId));
@@ -173,7 +175,7 @@ export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onEr
       };
       return {
         row: (botId: string): { botDrag?: BotRowDrag; botDrop?: BotDropPlace | null; botDragging?: boolean } => {
-          if (!movable || botListOf(lists, botId) === undefined) return {};
+          if (!movable || !listOf.has(botId)) return {};
           const place = shown?.kind === "row" && shown.botId === botId ? shown.place
             : shown?.kind === "end" && shown.list === "" && botId === mainIds.at(-1) ? "after" : null;
           return { botDrag: controller.current!, botDrop: place, botDragging: active === botId };
@@ -185,7 +187,7 @@ export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onEr
             const list = listFor(sectionId);
             const dragged = moving.current.botId;
             if (!dragged || list === null || !lists.has(list)) return show(null);
-            if (withinList && list !== botListOf(lists, dragged)) return show(null);
+            if (withinList && list !== listOf.get(dragged)) return show(null);
             event.preventDefault();
             event.dataTransfer.dropEffect = "move";
             const target = zoneDrop(event, list);
@@ -198,7 +200,7 @@ export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onEr
             finish(list !== null && lists.has(list) ? zoneDrop(event, list) : null);
           },
         }),
-        slot: active !== null && mainIds.length === 0 && botListOf(lists, active) !== ""
+        slot: active !== null && mainIds.length === 0 && listOf.get(active) !== ""
           ? <div data-bot-drop-slot="" className={cn("mx-2 flex h-10 items-center justify-center rounded-[8px] border border-dashed text-[13px] leading-[18px]",
             shown?.kind === "end" && shown.list === "" ? "border-accent bg-accent/10 text-ink" : "border-ink/20 text-ink-secondary")}>{t("sidebar.section.removeFromDepartment")}</div>
           : null,
