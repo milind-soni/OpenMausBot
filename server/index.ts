@@ -9435,10 +9435,8 @@ function teammateReportContext(requestId: string, readerBotId?: string): string 
   const node = coordinator.node(requestId);
   const parent = node?.parentId ? coordinator.node(node.parentId) : undefined;
   const reader = parent && readerBotId ? { ...parent, botId: readerBotId } : parent;
-  const remote = node && isRemoteBotId(node.botId);
-  const remoteName = remote ? remoteHandoff.reportName(node, parent, readerBotId) : undefined;
-  if (!node || !reader || (remote ? !remoteName : roomHandoffProblem(node, reader))) return "[Teammate result withheld or no longer retained]";
-  const bot = remote ? remoteName : store.bot(node.botId)?.name;
+  const bot = node && (isRemoteBotId(node.botId) ? remoteHandoff.reportName(node, parent, readerBotId) : store.bot(node.botId)?.name);
+  if (!node || !reader || (isRemoteBotId(node.botId) ? !bot : roomHandoffProblem(node, reader))) return "[Teammate result withheld or no longer retained]";
   return `${reportNote(bot ?? "Teammate")}\n${JSON.stringify({ bot, task: escapeNotes(node.text), status: node.status, result: escapeNotes(node.result) })}`;
 }
 
