@@ -460,35 +460,28 @@ const DATABASE_TABLES_MAX = 25;
 const CATALOG_NAME_TAKEN = /^Catalog Error: (?:(?:Table|View) with name ".*" already exists!|Existing object .+ is of type \w+, trying to replace with type \w+)/;
 
 function catalogNameTaken(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return CATALOG_NAME_TAKEN.test(message);
+  return CATALOG_NAME_TAKEN.test(error instanceof Error ? error.message : String(error));
 }
 
 function replacedMainTable(sql: string, target: string): { name: string; quoted: boolean } | undefined {
   const { tokens } = singleStatement(sql);
-  const at = tokens.findIndex((token) => token.text === "CREATE");
-  if (at < 0) return undefined;
-  const head = tokens.slice(at);
+  const head = tokens.slice(tokens.findIndex((token) => token.text === "CREATE"));
   let modifier = 1;
-  if (head[modifier]?.text !== "OR" || head[modifier + 1]?.text !== "REPLACE") return undefined;
+  if (head[0]?.text !== "CREATE" || head[modifier]?.text !== "OR" || head[modifier + 1]?.text !== "REPLACE") return undefined;
   modifier += 2;
   if (head[modifier]?.text === "TEMP" || head[modifier]?.text === "TEMPORARY") return undefined;
   const parts = tableIdentifierParts(target);
-  if (!parts || parts.length > 2) return undefined;
-  if (parts.length === 2 && parts[0]!.toLowerCase() !== "main") return undefined;
+  if (!parts || parts.length > 2 || (parts.length === 2 && parts[0]!.toLowerCase() !== "main")) return undefined;
   const name = parts[parts.length - 1]!;
   const dot = target.lastIndexOf(".");
-  const part = (dot === -1 ? target : target.slice(dot + 1)).trim();
-  return { name, quoted: part.startsWith('"') };
+  return { name, quoted: (dot === -1 ? target : target.slice(dot + 1)).trim().startsWith('"') };
 }
 
 function forgetReplacedImport(ctx: DataContext, sql: string, target: string): void {
   const replaced = replacedMainTable(sql, target);
   if (!replaced) return;
   const fold = replaced.name.toLowerCase();
-  const names = ctx.sheet.sheet().sources
-    .filter((source) => (replaced.quoted ? source.name === replaced.name : source.name.toLowerCase() === fold))
-    .map((source) => source.name);
+  const names = ctx.sheet.sheet().sources.filter((source) => replaced.quoted ? source.name === replaced.name : source.name.toLowerCase() === fold).map((source) => source.name);
   for (const name of names) ctx.sheet.removeSource(name);
 }
 
