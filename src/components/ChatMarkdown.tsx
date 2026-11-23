@@ -14,7 +14,6 @@ import { createMarkdownRenderCache } from "@/lib/markdown-render-cache";
 import { closedFence, mayHoldMath, openFence, splitMarkdownBlocks, splitStreamPieces, type StreamPieces } from "@/lib/markdown-stream-blocks";
 import { drawStreamPieces, type ItemScope, type ParsePiece } from "@/lib/markdown-stream-pieces";
 import { StreamingReplyContext } from "@/state/live-reply";
-import { useStreamFadeIn } from "@/lib/stream-fade-in";
 
 import { parseFenceInfo } from "../lib/code-block";
 import { markdownImageName, markdownImageOpenUrl } from "../lib/markdown-image";
@@ -290,7 +289,7 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
         {t("chat.mermaid.failed", { error })}
       </p>
     )}
-    {markup && <div className="overflow-x-auto p-3 [&_svg]:!max-w-full" dangerouslySetInnerHTML={markup} />}
+    {markup && <div data-stream-fade className="overflow-x-auto p-3 [&_svg]:!max-w-full" dangerouslySetInnerHTML={markup} />}
     {(showSource || !svg || error) && (
       <pre className={cn("overflow-x-auto text-[13px]", simple ? "px-3 py-2 leading-5 text-ink-secondary" : "p-3 leading-relaxed text-ink")}>{code}</pre>
     )}
@@ -660,7 +659,12 @@ const MessageScopeContext = createContext<MessageScope>({ threads: [] });
 /** The source of the block still being written, whose last fence may be open; null for finished text. */
 const StreamSourceContext = createContext<string | null>(null);
 
-function MarkdownCode({ node, children }: BlockProps) {
+/** A fence still being written, drawn without parsing in the place its parsed `pre` takes, so it stays the same block. */
+type OpenFence = NonNullable<MarkdownPart["fence"]>;
+const OPEN_FENCE_KEY = "pre-0";
+
+function MarkdownCode({ node, children, fence }: BlockProps & { fence?: OpenFence }) {
+  if (fence) return <CodeBlock code={fence.code} lang={fence.lang} initialWrap={fence.wrap} open />;
   const streamSource = use(StreamSourceContext);
   const position = (node as { position?: { start: { offset?: number }; end: { offset?: number } } } | undefined)?.position;
   const open = streamSource !== null && !closedFence(streamSource, position?.start.offset, position?.end.offset);
@@ -895,7 +899,6 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
   const { threads, currentBotId } = MAY_LINK_THREAD.test(text) ? use(ThreadRefsContext) : NO_THREAD_REFS;
   const streaming = use(StreamingReplyContext);
   const parts = useMemo(() => markdownParts(text, streaming), [text, streaming]);
-  const fadeIn = useStreamFadeIn(streaming, parts);
   // One answer for the whole text, as a finished message gets: a block alone may hold half of a pair.
   const needsMath = useMemo(() => normalizedSourceHasMath(parts.length === 1 ? parts[0]!.source : parts.map((part) => part.source).join("")), [parts]);
   const [katexReady, setKatexReady] = useState(() => katexPlugin !== null);
@@ -932,16 +935,17 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
   };
   const piece: ParsePiece = (source, cacheKey, loose) => parse(source, cacheKey, loose);
   const itemScope: ItemScope = (nodes, index, open) => <StreamSourceContext key={index} value={open}>{nodes}</StreamSourceContext>;
+  // A block keeps one tree shape from its first words to its end, so its elements stay the same ones on the page.
   const draw = ({ text: partText, source, finished, pieces, repair }: MarkdownPart): ReactNode => {
     if (finished) {
-      return parse(source, partText, false, () => {
+      return <StreamSourceContext value={null}>{parse(source, partText, false, () => {
         const split = splitStreamPieces(partText);
         const joined = split && drawStreamPieces(split, false, piece, itemScope);
         return joined ? <>{joined}</> : null;
-      });
+      })}</StreamSourceContext>;
     }
     const joined = pieces && drawStreamPieces(pieces, true, piece, itemScope);
-    if (joined) return joined;
+    if (joined) return <StreamSourceContext value={null}><>{joined}</></StreamSourceContext>;
     const whole = pieces ? normalizeMarkdown(partText, repair).source : source;
     return <StreamSourceContext value={whole}>{parse(whole, null)}</StreamSourceContext>;
   };
@@ -949,10 +953,10 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
   const scope = { message: streaming ? undefined : message, imageOffsets: streaming ? undefined : parts[0]?.imageOffsets, threads, currentBotId, delivered, originals };
   return (
     <MessageScopeContext.Provider value={scope}>
-      <div ref={fadeIn} data-look="bot-text" className="chat-md min-w-0 [&>*+*]:mt-2">
+      <div data-look="bot-text" data-streaming={streaming ? "" : undefined} className="chat-md min-w-0 [&>*+*]:mt-2">
         {parts.map((part, index) => (
           // The whole text's tree puts a line break between its top-level blocks; the parts keep it.
-          <Fragment key={index}>{index > 0 && "\n"}{part.fence ? <CodeBlock code={part.fence.code} lang={part.fence.lang} initialWrap={part.fence.wrap} open /> : draw(part)}</Fragment>
+          <Fragment key={index}>{index > 0 && "\n"}{part.fence ? <StreamSourceContext value={part.text}><>{[<MarkdownCode key={OPEN_FENCE_KEY} fence={part.fence} />]}</></StreamSourceContext> : draw(part)}</Fragment>
         ))}
       </div>
     </MessageScopeContext.Provider>

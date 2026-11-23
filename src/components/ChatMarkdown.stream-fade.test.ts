@@ -1,38 +1,38 @@
 // @vitest-environment happy-dom
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { setLocale } from "../lib/i18n";
 import { StreamingReplyContext } from "@/state/live-reply";
-
-vi.mock("@/lib/interface-mode", async (importOriginal) => ({
-  ...await importOriginal<typeof import("@/lib/interface-mode")>(),
-  useAdvancedMode: () => true,
-  readAdvancedMode: () => true,
-}));
 
 const { ChatMarkdown } = await import("./ChatMarkdown");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-describe("a streaming reply fades in what arrives", () => {
+// The fade is CSS: a block fades in when it is first put on the page while the reply streams. So each block must be put
+// on the page once, and stay the same element as it grows and finishes, or a shown block would blink.
+describe("a streaming reply's blocks fade in once", () => {
   let host: HTMLDivElement;
   let root: Root;
-  let faded: string[];
-  let reduced: boolean;
+  let shown: Set<Element>;
   const draw = (text: string, streaming = true) =>
     act(() => root.render(createElement(StreamingReplyContext, { value: streaming }, createElement(ChatMarkdown, { text }))));
-  const take = () => faded.splice(0);
+  const markdown = () => host.querySelector(".chat-md")!;
+  /** What this draw put on the page that was not there before: top-level blocks, list items, table rows, code blocks. */
+  const added = (text: string) => {
+    draw(text);
+    const now = [...markdown().querySelectorAll(":scope > *, li, tr, .chat-code-block")];
+    const fresh = now.filter((element) => !shown.has(element)).map((element) => `${element.tagName.toLowerCase()}:${(element.textContent ?? "").trim().slice(0, 12)}`);
+    shown = new Set(now);
+    return fresh;
+  };
 
   beforeEach(() => {
     setLocale("en");
-    faded = [];
-    reduced = false;
-    vi.spyOn(HTMLElement.prototype, "animate").mockImplementation(function (this: HTMLElement) {
-      faded.push(`${this.tagName.toLowerCase()}:${this.textContent}`);
-      return {} as Animation;
-    });
-    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({ matches: reduced && query.includes("reduce") }) as MediaQueryList);
+    shown = new Set();
     host = document.createElement("div");
     document.body.append(host);
     root = createRoot(host);
@@ -40,58 +40,44 @@ describe("a streaming reply fades in what arrives", () => {
   afterEach(() => {
     act(() => root.unmount());
     host.remove();
-    vi.restoreAllMocks();
   });
 
-  it("fades each new block in once, as it arrives", () => {
-    draw("First paragraph ");
-    expect(take(), "the reply's first draw fades in as one").toEqual(["div:First paragraph"]);
-    draw("First paragraph grows ");
-    expect(take(), "words added to a shown block do not play it again").toEqual([]);
-    draw("First paragraph grows\n\nSecond ");
-    expect(take(), "the first block, now finished and drawn anew, does not play again").toEqual(["p:Second"]);
+  it("marks the reply as streaming only while it streams", () => {
+    draw("Here is the plan");
+    expect(markdown().hasAttribute("data-streaming")).toBe(true);
+    draw("Here is the plan.", false);
+    expect(markdown().hasAttribute("data-streaming"), "a finished reply never plays the fade").toBe(false);
   });
 
-  it("fades a list in item by item and a table row by row", () => {
-    draw("Steps:\n\n");
-    expect(take()).toEqual(["div:Steps:"]);
-    draw("Steps:\n\n- one\n");
-    expect(take()).toEqual(["li:one"]);
-    draw("Steps:\n\n- one\n- two\n");
-    expect(take()).toEqual(["li:two"]);
-    draw("Steps:\n\n- one\n- two\n\n| a | b |\n|---|---|\n| 1 | 2 |\n");
-    expect(take().filter((each) => each.startsWith("tr:"))).toEqual(["tr:ab", "tr:12"]);
+  it("keeps a paragraph the same element as words arrive and as it finishes", () => {
+    expect(added("First ")).toEqual(["p:First"]);
+    expect(added("First grows ")).toEqual([]);
+    expect(added("First grows\n\nSecond ")).toEqual(["p:Second"]);
+    expect(added("First grows\n\nSecond part\n\nThird")).toEqual(["p:Third"]);
   });
 
-  it("fades a new block in before the footnotes, not the footnotes again", () => {
-    draw("A claim.[^1]\n\n[^1]: The source.\n");
-    take();
-    draw("A claim.[^1]\n\nMore detail.\n\n[^1]: The source.\n");
-    expect(take()).toEqual(["p:More detail."]);
+  it("keeps a list and a table when they finish", () => {
+    expect(added("Lead:\n\n- one\n")).toEqual(["p:Lead:", "ul:one", "li:one"]);
+    expect(added("Lead:\n\n- one\n- two\n")).toEqual(["li:two"]);
+    expect(added("Lead:\n\n- one\n- two\n\n| a | b |\n|---|---|\n| 1 | 2 |\n")).toEqual(["div:ab12", "tr:ab", "tr:12"]);
+    expect(added("Lead:\n\n- one\n- two\n\n| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n")).toEqual(["tr:34"]);
+    expect(added("Lead:\n\n- one\n- two\n\n| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n\nAfter")).toEqual(["p:After"]);
   });
 
-  it("fades a reply opened mid-stream in once as a whole, not block by block", () => {
-    draw("One.\n\nTwo.\n\n- three\n- four\n");
-    expect(take().map((each) => each.split(":")[0]), "one fade for the reply, none for its blocks").toEqual(["div"]);
+  it("keeps a code block when its fence closes", () => {
+    expect(added("Code:\n\n```js\nconst a = 1;\n")).toEqual(["p:Code:", "div:const a = 1;"]);
+    expect(added("Code:\n\n```js\nconst a = 1;\nconst b = 2;\n")).toEqual([]);
+    expect(added("Code:\n\n```js\nconst a = 1;\nconst b = 2;\n```\n"), "the closing fence keeps the block").toEqual([]);
+    expect(added("Code:\n\n```js\nconst a = 1;\nconst b = 2;\n```\n\nAfter ")).toEqual(["p:After"]);
   });
 
-  it("leaves a finished reply, and anyone who asks for less motion, without a fade", () => {
-    draw("A saved reply.\n\nWith two blocks.", false);
-    expect(take()).toEqual([]);
-    reduced = true;
-    act(() => root.unmount());
-    root = createRoot(host);
-    draw("Streaming for someone who asked for less motion ");
-    expect(take()).toEqual([]);
-  });
-
-  it("leaves the reply still when the app is set to less motion, whatever the system asks", () => {
-    document.documentElement.dataset.reducedMotion = "true";
-    try {
-      draw("Streaming with the app set to less motion ");
-      expect(take()).toEqual([]);
-    } finally {
-      delete document.documentElement.dataset.reducedMotion;
-    }
+  it("fades with opacity only, once, while streaming, and not with reduced motion", () => {
+    const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../styles.css"), "utf8");
+    const media = css.match(/@media \(prefers-reduced-motion: no-preference\) \{\n {2}\.chat-md\[data-streaming\] > \*,[\s\S]*?\n\}\n/)?.[0];
+    expect(media, "the fade sits inside prefers-reduced-motion: no-preference").toBeDefined();
+    expect(media).toContain("transition: opacity 600ms ease-out;");
+    expect(media).toMatch(/@starting-style \{\s*\.chat-md\[data-streaming\] > \*,\s*\.chat-md\[data-streaming\] \[data-stream-fade\] \{\s*opacity: 0;\s*\}\s*\}/);
+    expect(media, "no keyframes: nothing runs after a block is in").not.toMatch(/animation|@keyframes|infinite/);
+    expect(css.match(/\.chat-md\[data-streaming\]/g)?.length, "the rule exists only in this block").toBe(4);
   });
 });
