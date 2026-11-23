@@ -110,19 +110,16 @@ export function acpFileEditWithin(toolCall: { kind?: unknown; rawInput?: unknown
     // A `..` after a link climbs from the link's target, not from where the path's text says: such a path is asked.
     if (typeof path !== "string" || !isAbsolute(path) || path.includes("\0") || path.split(/[\\/]/u).includes("..")) return false;
     const target = realTarget(path);
-    if (target === undefined || isDirectory(target)) return false;
+    if (target === undefined || !fileOrNothing(target)) return false;
     const inside = relative(realRoot, target);
     const written = [relative(resolve(root), resolve(path)), relative(realRoot, resolve(path))];
     return inside !== "" && !inside.startsWith("..") && !isAbsolute(inside) && written.includes(inside);
   });
 }
 
-function isDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
+function fileOrNothing(path: string): boolean {
+  const info = statSync(path, { throwIfNoEntry: false });
+  return info === undefined || info.isFile();
 }
 
 /** An ACP permission request's exact operation, for the driver's own session allow; null for a generic title with no input. */

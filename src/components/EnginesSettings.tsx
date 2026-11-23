@@ -382,8 +382,8 @@ type AntigravityRuntime = keyof typeof ANTIGRAVITY_RUNTIME_PATHS | "custom";
 /** What an Antigravity account runs, or for one with no runtime yet, what its install takes: a new install the CLI. */
 function antigravityRuntimeOf(instance: InstanceInfo): AntigravityRuntime {
   const cli = instance.cli?.trim() ?? "";
-  if (cli === ANTIGRAVITY_RUNTIME_PATHS.cli) return "cli";
-  if (/^agy_acp_server(?:\.par|\.exe)?$/iu.test(cli)) return "pinned";
+  if (/^antigravity(?:\.exe)?$/iu.test(cli)) return "cli";
+  if (/^agy_acp_server$/iu.test(cli)) return "pinned";
   if (cli !== "" && cli !== "agy") return "custom";
   if (runsAntigravityCli(instance)) return "cli";
   return instance.snapshot.state === "available" ? "pinned" : "cli";

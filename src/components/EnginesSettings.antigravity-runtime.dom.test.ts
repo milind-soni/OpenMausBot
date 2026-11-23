@@ -46,6 +46,7 @@ async function show(instance: InstanceInfo) {
 it.each([
   ["the CLI it runs", google({ cli: "agy", snapshot: { state: "available", authenticated: true, sharedSignIn: true } }), "cli"],
   ["the path antigravity", google({ cli: "antigravity", snapshot: { state: "unavailable" } }), "cli"],
+  ["the path Antigravity.exe", google({ cli: "Antigravity.exe", snapshot: { state: "unavailable" } }), "cli"],
   ["a new install with nothing yet", google({ snapshot: { state: "unavailable" } }), "cli"],
   ["the pinned runtime it runs", google({ snapshot: { state: "available", authenticated: true, version: "1.4.3" } }), "pinned"],
   ["the path that asks for the pinned runtime", google({ cli: "agy_acp_server", snapshot: { state: "unavailable" } }), "pinned"],

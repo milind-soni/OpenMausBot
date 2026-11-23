@@ -286,7 +286,7 @@ describe("which CLI an instance that names none runs", () => {
       await expect(resolveAntigravityRuntime(cli, { PATH: "" }, baseDir, { nativeByDefault: false })).rejects.not.toMatchObject({ message: expect.stringContaining("native CLI is not installed") });
     }
     await expect(resolveAntigravityRuntime("antigravity", { PATH: "" }, baseDir, { nativeByDefault: false })).resolves.toEqual(installed);
-    for (const pinned of ["agy_acp_server", "agy_acp_server.par", "AGY_ACP_SERVER.exe"]) {
+    for (const pinned of ["agy_acp_server", "AGY_ACP_SERVER"]) {
       await expect(resolveAntigravityRuntime(pinned, { PATH: "" }, baseDir)).rejects.not.toMatchObject({ message: expect.stringContaining("custom Antigravity ACP executable") });
       await expect(resolveAntigravityRuntime(pinned, { PATH: "" }, baseDir)).rejects.toThrow();
     }

@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, existsSync, mkdtempSync, renameSync, rmSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,7 +11,7 @@ import { ProviderAuthSessions } from "../provider-auth-sessions.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { installFakeManagedCli, loginAt, nativeFixture, sessionAcceptedAt, type NativeFixture } from "../testing/antigravity-native-fixture.ts";
 import { recordEvents } from "../testing/events.ts";
-import { antigravityProfileDirectory } from "./antigravity-acp.ts";
+import { antigravityProfileDirectory, antigravityTokenPath } from "./antigravity-acp.ts";
 import { AntigravityDriver } from "./antigravity.ts";
 
 const WINDOWS = process.platform === "win32";
@@ -28,9 +28,9 @@ function folder(): string {
 }
 
 /** A pinned runtime at a custom path: the ACP server with its harness beside it. */
-function pinnedRuntime(): string {
+function pinnedRuntime(name = "agy_acp_server"): string {
   const directory = folder();
-  const executable = join(directory, "agy_acp_server");
+  const executable = join(directory, name);
   const harness = join(directory, WINDOWS ? "localharness_external.exe" : "localharness_external");
   copyFileSync(FAKE_ACP, executable);
   copyFileSync(FAKE_ACP, harness);
@@ -232,6 +232,30 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
       expect(existsSync(credentials(one))).toBe(false);
       expect(existsSync(credentials(two))).toBe(false);
       expect(await second.snapshot()).toMatchObject({ authenticated: false });
+    }, 120_000);
+
+    it("signs out an account on agy that runs the native CLI, though it has neither started nor signed in since the app started", async () => {
+      installFakeManagedCli(DATA_DIR);
+      const fixture = nativeFixture(folder());
+      const [agy, other] = ["antigravity-native-agy-idle", "antigravity-native-agy-signs-out"];
+      await create(agy, fixture, {}, "agy");
+      const signingOut = await create(other, fixture);
+      for (const instanceId of [agy, other]) await loginAt(fixture, antigravityProfileDirectory(instanceId), "fixture-code");
+      await signingOut.signOut!();
+      expect(existsSync(credentials(agy))).toBe(false);
+    }, 120_000);
+
+    it("leaves the sign-in of an account whose program is called antigravity but runs the pinned runtime beside its harness", async () => {
+      const fixture = nativeFixture(folder());
+      const [pinned, native] = ["antigravity-native-named-pinned", "antigravity-native-named-native"];
+      await create(pinned, fixture, {}, pinnedRuntime("antigravity"));
+      const token = antigravityTokenPath(pinned);
+      mkdirSync(dirname(token), { recursive: true });
+      writeFileSync(token, "{}", { mode: 0o600 });
+      const signingOut = await create(native, fixture);
+      await loginAt(fixture, antigravityProfileDirectory(native), "fixture-code");
+      await signingOut.signOut!();
+      expect(existsSync(token)).toBe(true);
     }, 120_000);
 
     it("stops a sign-in in progress on an account whose path names no CLI but signs in through the native one", async () => {

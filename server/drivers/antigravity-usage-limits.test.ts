@@ -399,8 +399,8 @@ describe("the Antigravity row of the usage report", () => {
 
   it("joins the report beside the other engines, and is left out when it cannot be read", async () => {
     const instanceId = "antigravity-usage-row";
-    const accounts = planAccountsFromInstances({ [instanceId]: { driver: "antigravityAgent", displayName: "", enabled: true, config: {}, environment: {} } } as never);
-    expect(accounts).toEqual([{ id: instanceId, name: "Antigravity", driver: "antigravity", environment: {} }]);
+    const accounts = planAccountsFromInstances({ [instanceId]: { driver: "antigravityAgent", displayName: "", enabled: true, config: { cli: "agy_acp_server" }, environment: {} } } as never);
+    expect(accounts).toEqual([{ id: instanceId, name: "Antigravity", driver: "antigravity", environment: {}, antigravityCli: "agy_acp_server" }]);
     const { deps } = fixture();
     const credentials = { read: () => { throw new Error("the report's own credential reader is not used for Antigravity"); } };
     expect((await fetchPlanUsage(accounts, { ...deps, credentials })).providers).toEqual([]);

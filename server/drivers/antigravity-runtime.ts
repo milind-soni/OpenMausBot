@@ -209,10 +209,28 @@ export function isAntigravityNativeAlias(cli: string | undefined): boolean {
   return ANTIGRAVITY_NATIVE_CLI && !/[\\/]/u.test(name) && isAntigravityCliName(name);
 }
 
-/** Whether the engine's CLI path asks for the pinned runtime this app installs and never the native CLI: the bare name
- * of the runtime's own executable. */
+/** Whether the engine's CLI path asks for the pinned runtime this app installs and never the native CLI: the runtime's
+ * name with no extension, which names no program on PATH. */
 export function isAntigravityPinnedAlias(cli: string | undefined): boolean {
-  return /^agy_acp_server(?:\.par|\.exe)?$/iu.test(cli?.trim() ?? "");
+  return /^agy_acp_server$/iu.test(cli?.trim() ?? "");
+}
+
+/** Whether an instance with this CLI path runs the native CLI, or would once installed, told from files alone: unlike
+ * resolving it, this starts no program. */
+export async function antigravityPathRunsNativeCli(cli: string | undefined, env: NodeJS.ProcessEnv, baseDir = DATA_DIR): Promise<boolean> {
+  const override = cli?.trim();
+  if (isAntigravityNativeAlias(override)) return true;
+  if (isAntigravityPinnedAlias(override)) return false;
+  if (override && override !== "agy") {
+    for (const candidate of pathCandidates(override, env)) {
+      const executablePath = resolve(candidate);
+      if (!(await executableFile(executablePath))) continue;
+      return isAntigravityCliName(executablePath) && !(await executableFile(join(dirname(executablePath), executableNames().harness)));
+    }
+    return isAntigravityCliName(override);
+  }
+  const runtime = await resolveAntigravityRuntime(override, env, baseDir).catch(() => null);
+  return runtime ? runtime.harnessPath === null : antigravityNativeByDefault();
 }
 
 /** Legacy `agy` commands (saved absolute paths, Windows shims) migrate without editing user config. */
@@ -251,7 +269,7 @@ export async function resolveAntigravityRuntime(
   }
   if (installedCli) return installedCli;
   const names = executableNames();
-  for (const candidate of pathCandidates(names.executable, env)) {
+  for (const candidate of pinnedOnly ? [] : pathCandidates(names.executable, env)) {
     const found = await externalRuntime(candidate, "path");
     if (found) return found;
   }

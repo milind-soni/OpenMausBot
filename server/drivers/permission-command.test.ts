@@ -121,6 +121,7 @@ describe("the never-list on an ACP request", () => {
       expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/file.txt` }] }, root)).toBe(true);
       mkdirSync(join(root, "sub"));
       expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/sub` }] }, root)).toBe(false);
+      expect(acpFileEditWithin({ kind: "edit", locations: [{ path: "/dev/null" }] }, "/dev")).toBe(false);
       symlinkSync(join(root, "file.txt"), join(root, "alias"));
       expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/alias` }] }, root)).toBe(false);
       symlinkSync(join(root, "sub"), join(root, "inner"));

@@ -44,6 +44,7 @@ import {
   antigravityManagedInstallAvailable,
   isAntigravityNativeAlias,
   isAntigravityPinnedAlias,
+  antigravityPathRunsNativeCli,
   installAntigravityRuntime,
   resolveAntigravityRuntime,
   type AntigravityRuntime,
@@ -111,12 +112,13 @@ const launched = new Map<string, { version: string | null; nativeCli: boolean }>
 const nativeSignIn = new NativeSignInCache();
 const loginProcesses = new Map<string, LoginProcesses>();
 /** Every live instance's sign-in and turns: a native sign-out ends those on the native CLI, which share its one sign-in. */
-const liveInstances = new Map<string, {
+interface LiveInstance {
   login: AntigravityCliLogin;
   stopAll: () => Promise<void>;
-  native: () => boolean;
+  native: () => Promise<boolean>;
   profile: (runtime: AntigravityRuntime) => Promise<AntigravityProfile>;
-}>();
+}
+const liveInstances = new Map<string, LiveInstance>();
 /** While the native CLI's shared sign-in is being removed, no native process starts: it would hold the old sign-in. */
 let nativeSigningOut: Promise<void> | null = null;
 const nativeSignOutDone = async () => { while (nativeSigningOut) await nativeSigningOut.catch(() => {}); };
@@ -339,16 +341,16 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
         void base.refreshModels?.();
       },
       confirm: async () => {
+        await nativeSignOutDone();
         const { runtime, profile } = await runtimeAndProfile();
-        return (await antigravityCliSignIn(runtime, profile)) === "in";
+        return (await antigravityCliSignIn(runtime, profile, { onProcess: (child) => trackNative(input.instanceId, child) })) === "in";
       },
     }, {}, alive);
     let nativeFlow = false;
-    // The runtime it last started on or signs in with, else what its CLI path names: a binary called antigravity beside a
-    // harness is pinned.
     liveInstances.set(input.instanceId, {
       login, stopAll: () => base.adapter.stopAll(),
-      native: () => launched.get(input.instanceId)?.nativeCli ?? (nativeFlow || isAntigravityCliName(input.config.cli?.trim() ?? "")),
+      native: async () => nativeFlow || launched.get(input.instanceId)?.nativeCli === true
+        || antigravityPathRunsNativeCli(input.config.cli, environmentNow()),
       profile: (runtime) => prepareAntigravityProfile({ instanceId: input.instanceId, runtime, baseEnv: environmentNow() }),
     });
     /** The native CLI keeps one sign-in for every instance run by it and for the Antigravity CLI in a terminal here
@@ -358,7 +360,8 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       let done!: () => void;
       nativeSigningOut = new Promise<void>((resolveDone) => { done = resolveDone; });
       try {
-        const affected = [...liveInstances].filter(([instanceId, live]) => live.native() || instanceId === input.instanceId);
+        const affected: Array<[string, LiveInstance]> = [];
+        for (const entry of liveInstances) if (entry[0] === input.instanceId || await entry[1].native()) affected.push(entry);
         for (const [, live] of liveInstances) {
           if (!(await live.login.cancel())) throw new Error("An Antigravity sign-in in progress could not be stopped. Try again.");
         }

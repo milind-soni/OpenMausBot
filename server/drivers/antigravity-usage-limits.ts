@@ -16,7 +16,6 @@ import type { PlanExtra, PlanFetch, PlanModelUsage, PlanWindow, PlanWindows } fr
 import { antigravityTokenPath } from "./antigravity-acp.ts";
 import { refreshAntigravityAccess } from "./antigravity-account.ts";
 import { antigravityQuotaFamily } from "./antigravity-turn-outcome.ts";
-import { isAntigravityCliName } from "./antigravity-cli-install.ts";
 import { readNativeAccessToken } from "./antigravity-native-sign-in.ts";
 
 /** Whether Antigravity accounts are asked for their limits at all. Off, they have no row in the usage report. */
@@ -25,8 +24,8 @@ export const ANTIGRAVITY_USAGE_LIMITS = true;
 /** Whether an instance with this CLI path runs the native CLI, or would once installed. Its limits come from the sign-in
  * that CLI keeps: a token file left from the pinned runtime must not stand for its account. */
 export async function antigravityRunsNativeCli(cli: string | undefined, env: NodeJS.ProcessEnv): Promise<boolean> {
-  const { resolveAntigravityRuntime } = await import("./antigravity-runtime.ts");
-  return resolveAntigravityRuntime(cli, env).then((runtime) => runtime.harnessPath === null, () => isAntigravityCliName(cli?.trim() ?? ""));
+  const { antigravityPathRunsNativeCli } = await import("./antigravity-runtime.ts");
+  return antigravityPathRunsNativeCli(cli, env);
 }
 
 export function antigravityUserAgent(platform: NodeJS.Platform, architecture: string): string {
