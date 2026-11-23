@@ -9,7 +9,7 @@ const THREAD_PREFIX = "new-chat-";
 export const newChatThreadId = (botId: string) => `${THREAD_PREFIX}${botId}`;
 export const isNewChatThread = (threadId: unknown): threadId is string => typeof threadId === "string" && threadId.startsWith(THREAD_PREFIX);
 
-const LEAVING = new Set<Action["type"]>(["select", "switchTask", "taskSwitched", "newGroupTask", "switchGroupTask", "showRoutines", "showTeamMap", "showFiles", "showWebPanel", "showPublishedApps", "showTeamFiles", "showAnnouncements"]);
+const LEAVING = new Set<Action["type"]>(["select", "switchTask", "taskSwitched", "newGroupTask", "switchGroupTask", "showRoutines", "showTeamMap", "showFiles", "showWebPanel", "showPublishedApps", "showSkillBurgers", "showTeamFiles", "showAnnouncements"]);
 
 /** The reducer's first step: `done` when the action belongs to the blank chat alone and the rest of the reducer must not
  * see it. */
