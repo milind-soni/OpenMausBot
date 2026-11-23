@@ -163,6 +163,19 @@ describe("a conversation marked unread while it is open", () => {
       expect(see(heldBy()).reasons).toEqual(["main:open"]);
     });
 
+    it("ends only for the conversation the person opens, never for a marked one shown beside it", async () => {
+      const both = () => ({ id: "bot", unread: true, tasks: [{ threadId: "main", unread: true, updatedAt: 10, heldUnread: "m1" },
+        { threadId: "fork", unread: true, updatedAt: 10, heldUnread: "f1" }] }) as unknown as BotAnnouncement;
+      const state = { ...showing(both()), forkPanel: { kind: "bot", ownerId: "bot", threadId: "fork" } } as unknown as AppState;
+      const { page, see } = await reloadedPage(state);
+      page.holdMarkedUnread({ type: "select", id: "bot" } as Action, state);
+      expect(see(both())).toEqual({ reasons: ["main:open"], unread: true });
+      page.holdMarkedUnread({ type: "switchTask", botId: "bot", threadId: "fork" } as Action, state);
+      const mainRead = both();
+      mainRead.tasks![0] = { threadId: "main", unread: false, updatedAt: 10 } as never;
+      expect(see(mainRead).reasons).toEqual(["main:open", "fork:open"]);
+    });
+
     it("is read as only seen once the server says a newer reply ended it", async () => {
       const after = { id: "bot", unread: true, tasks: [{ threadId: "main", unread: true, updatedAt: 11 }] } as unknown as BotAnnouncement;
       const state = showing(after);

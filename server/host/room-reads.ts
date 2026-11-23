@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import type { WireGroup } from "../../shared/wire.ts";
 import { writeFileAtomic } from "../atomic.ts";
+import { isReply } from "../held-unread.ts";
 import { personKey } from "../person-key.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { GroupRecord } from "../store.ts";
@@ -13,8 +14,6 @@ const fileSchema = z.object({ version: z.literal(1), reads: z.record(z.string(),
 
 type PathMessage = { id: string; role: string; kind?: string; at?: number };
 
-const NOT_A_REPLY = new Set(["activity", "screen", "digest", "compaction"]);
-const isReply = (message: PathMessage) => message.role === "bot" && !NOT_A_REPLY.has(message.kind ?? "text");
 
 /** Unread for a person: a bot replied after where they read up to; with no line yet, the room's own mark. A line no
  * longer on the path (an edit or a retry moved it) reads up to the last message at or before it; `atOf` gives its time. */
@@ -140,8 +139,8 @@ export function createPersonRooms(deps: PersonRoomsDeps) {
   function taskForPerson<T extends { threadId: string; unread?: boolean; lastReadMessageId?: string; heldUnread?: string }>(task: T, person: string): T {
     if (!reads || !deps.shared(task.threadId)) return task;
     const path = deps.store().activePath(task.threadId), readUpTo = reads.readUpTo(threadReadKey(task.threadId), person);
-    const unread = roomUnreadFor(path, readUpTo, task.unread === true, atOf(task.threadId));
-    const held = reads.readUpTo(threadHoldKey(task.threadId), person), heldUnread = unread && stillHeldUnread(path, held) ? held : undefined;
+    const held = reads.readUpTo(threadHoldKey(task.threadId), person), heldUnread = stillHeldUnread(path, held) ? held : undefined;
+    const unread = heldUnread !== undefined || roomUnreadFor(path, readUpTo, task.unread === true, atOf(task.threadId));
     if (unread === (task.unread === true) && readUpTo === task.lastReadMessageId && heldUnread === task.heldUnread) return task;
     const { lastReadMessageId: _shared, heldUnread: _held, ...rest } = task;
     return { ...rest, unread, ...(readUpTo ? { lastReadMessageId: readUpTo } : {}), ...(heldUnread !== undefined ? { heldUnread } : {}) } as T;

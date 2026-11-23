@@ -59,3 +59,50 @@ it("holds a conversation marked unread with it open against being on screen, in 
     await fixture.close();
   }
 }, 120_000);
+
+it("ends the mark, in every window, when a routine reports into the conversation, so being on screen reads it again", async () => {
+  const fixture = await launchVerificationServer();
+  const { url } = fixture.info;
+  const otherWindow = await openSse(`${url}/api/events`, { origin: url });
+  const api = async (method: string, path: string, body?: unknown, status = 200) => {
+    const response = await fetch(url + path, {
+      method, headers: { "content-type": "application/json", origin: url },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const value = await response.json() as any;
+    expect(response.status, `${method} ${path}: ${JSON.stringify(value)}`).toBe(status);
+    return value;
+  };
+  try {
+    const { bot: created } = await runControlOmb(["new-bot", "--name", "Reports", "--url", url]) as any;
+    const botId = created.id as string;
+    const threadId = (await api("GET", "/api/bots")).bots.find((bot: any) => bot.id === botId).threadId as string;
+    const reloaded = async () => ((await api("GET", "/api/bots")).bots.find((bot: any) => bot.id === botId)).tasks
+      .find((task: any) => task.threadId === threadId) as { unread?: boolean; heldUnread?: string };
+    const told = (held: boolean, after: number) => otherWindow.until((frame) => otherWindow.frames.indexOf(frame) >= after && frame.kind === "bot" && frame.bot?.id === botId &&
+      frame.bot.tasks?.some((task: any) => task.threadId === threadId && task.unread === true && (task.heldUnread !== undefined) === held), 15_000);
+    const { routine } = await api("POST", "/api/routines", {
+      name: "Morning report", prompt: "Report this run's state.", botId, enabled: false,
+      schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 },
+    }, 201);
+
+    const beforeMark = otherWindow.frames.length;
+    await api("PATCH", `/api/bots/${botId}`, { unread: true });
+    await told(true, beforeMark);
+    await api("POST", `/api/bots/${botId}/read`, { threadId, reason: "seen" });
+    expect(await reloaded(), "held before the report").toMatchObject({ unread: true, heldUnread: expect.any(String) });
+
+    const beforeReport = otherWindow.frames.length;
+    const { run } = await api("POST", `/api/routines/${routine.id}/run`, undefined, 201);
+    await expect.poll(async () => (await api("GET", "/api/routines")).runs.find((one: any) => one.id === run.id)?.report?.state,
+      { timeout: 30_000 }).toBe("posted");
+    await told(false, beforeReport);
+    expect(await reloaded(), "a reloaded page reads the same").toMatchObject({ unread: true });
+    expect(await reloaded()).not.toHaveProperty("heldUnread");
+    await api("POST", `/api/bots/${botId}/read`, { threadId, reason: "seen" });
+    expect(await reloaded(), "the report on screen is read").toMatchObject({ unread: false });
+  } finally {
+    otherWindow.close();
+    await fixture.close();
+  }
+}, 120_000);

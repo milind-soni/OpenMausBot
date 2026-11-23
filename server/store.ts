@@ -47,6 +47,7 @@ import { repairLegacyWorkThreads } from "./legacy-work-threads.ts";
 import { createBotFork, createGroupFork } from "./store-forks.ts";
 import { branchLeafFrom } from "../shared/conversation-branch.ts";
 import { createThreadBotIndex } from "./thread-bot-index.ts";
+import { endHeldUnread } from "./held-unread.ts";
 import { activeGroupTask, groupTaskByThread, groupTasks, migrateGroupTaskRead, mirrorActiveGroupTask, refreshGroupUnread, setGroupTaskRead, syncGroupReadPatch } from "./group-task-state.ts";
 export { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
 export { threadTitleFrom, UNTITLED_THREAD } from "./task-record.ts";
@@ -1145,7 +1146,7 @@ export class Store {
       }
     }
     this.noteThreadActivity(threadId, full.at, movesThreadToTop(full), full.turnCompletedAt ?? full.at);
-    this.emit({ type: "message", threadId, message: full });
+    this.emit({ type: "message", threadId, message: full }); endHeldUnread(this, threadId, full);
     if (full.role === "user" && full.kind === "text") this.dismissOnboardingCard(threadId);
     return full;
   }
@@ -1165,7 +1166,7 @@ export class Store {
       }
     }
     this.noteThreadActivity(threadId, full.at, movesThreadToTop(full), full.turnCompletedAt ?? full.at);
-    this.emit({ type: "message", threadId, message: full });
+    this.emit({ type: "message", threadId, message: full }); endHeldUnread(this, threadId, full);
     // After the insert, so no client ever sees two siblings claiming the same parent.
     for (const child of children) this.patchMessage(threadId, child.id, { parentId: full.id });
     return full;

@@ -23,12 +23,22 @@ function shownBotThread(state: AppState): string | undefined {
   return bot?.switchingTo ?? bot?.threadId;
 }
 
+/** The conversation an action puts on screen or writes in, which the person chose; never one merely shown beside it. */
+function openedBotThread(action: Action, state: AppState): string | undefined {
+  if ((action.type === "switchTask" || action.type === "send") && action.threadId) return action.threadId;
+  const botId = action.type === "select" ? action.id : action.type === "openDataResult" || action.type === "send" ? action.botId : undefined;
+  const bot = botId === undefined ? undefined : state.bots.find((candidate) => candidate.id === botId);
+  return bot?.switchingTo ?? bot?.threadId;
+}
+
 /** "Mark as unread" on the open conversation holds while the person stays on it. It ends when they open a conversation,
- * this one included, write in one, or act from anywhere else in the app. */
+ * this one included, write in one, or act from anywhere else in the app. The server's own mark ends only for the
+ * conversation they open or write in. */
 export function holdMarkedUnread(action: Action, state: AppState): void {
   const shown = shownBotThread(state), leaves = OPENS_A_CONVERSATION.has(action.type) || !shown;
   if (leaves || !markedUnread.has(shown)) markedUnread.clear();
-  if (leaves) for (const task of state.bots.flatMap((bot) => bot.tasks ?? [])) if (task.heldUnread !== undefined) reopened.add(task.threadId);
+  const opened = OPENS_A_CONVERSATION.has(action.type) ? openedBotThread(action, state) : undefined;
+  if (opened && state.bots.some((bot) => bot.tasks?.some((task) => task.threadId === opened && task.heldUnread !== undefined))) reopened.add(opened);
   if (action.type !== "markUnread" || action.botId !== state.selectedId || !shown) return;
   const bot = state.bots.find((candidate) => candidate.id === action.botId);
   markedUnread.set(shown, bot?.tasks?.find((task) => task.threadId === shown)?.updatedAt);

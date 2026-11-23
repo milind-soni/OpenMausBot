@@ -132,3 +132,28 @@ it("forgets a person's other marks of their own with their read lines", () => {
   reads.forgetPerson("p_ada");
   expect(forgotten, "even with no read line of theirs").toEqual(["p_ada"]);
 });
+
+it("shows a person's mark on a shared chat with no reply before its newest one as unread, until a reply follows", () => {
+  const dir = mkdtempSync(join(tmpdir(), "room-reads-"));
+  const thread: Array<{ id: string; role: string }> = [];
+  const rooms = createPersonRooms({
+    reads: createRoomReads(dir),
+    store: () => ({ activePath: () => thread, messagesFor: () => thread, botByThread: () => ({ id: "scout" }) }),
+    shared: (threadId) => threadId === "main",
+    wireBot: (id) => ({ id }),
+    newestMessageId: () => thread.at(-1)?.id,
+    publicGroupState: (room) => room as never,
+    broadcast: () => {},
+  });
+  const ada = { kind: "session", session: { id: "s1", email: "ada@acme.test" } } as never;
+  const adaKey = personKey({ id: "", email: "ada@acme.test" }), cleoKey = personKey({ id: "", email: "cleo@acme.test" });
+  const main = { threadId: "main", unread: false };
+  rooms.personMarkThread!(ada, "main", true);
+  expect(rooms.taskForPerson(main, adaKey), "an empty chat").toEqual({ threadId: "main", unread: true, heldUnread: "" });
+  expect(rooms.taskForPerson(main, cleoKey).unread, "nobody else's").toBe(false);
+  thread.push({ id: "m1", role: "bot" });
+  expect(rooms.taskForPerson(main, adaKey), "its first reply ends the mark, and with nothing read yet the chat's own mark shows")
+    .toEqual({ threadId: "main", unread: false });
+  rooms.personMarkThread!(ada, "main", true);
+  expect(rooms.taskForPerson(main, adaKey), "marked with only that first reply in it").toEqual({ threadId: "main", unread: true, heldUnread: "m1" });
+});
