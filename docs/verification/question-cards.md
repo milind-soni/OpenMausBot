@@ -98,11 +98,14 @@ One server of the person's own, no teammate handing work on, exactly one questio
   it the same way, the waiting tool gets a plain decline, and the line is steered into the turn.
 
 Two or more question cards live in the chat, Stop, a line with a file or image, a reply to another line, rooms and work
-handed on keep their own paths. A card reads closed only when the engine settles its request with the close's own
-decline: if the close is refused, or the engine did not take it, the card stays open and can still be tapped, and the
-line is sent as before. A tap, Stop or the turn ending that wins while the decline is on its way settles the card as it
-always does, and no request outlives its turn (unit tests in `server/host/ask-cards.test.ts`: no shipped fake engine
-waits while taking a decline, so this race is not reachable over HTTP). Two tries of one send that arrive together close
+handed on keep their own paths. A card reads closed only when the engine took the close's own decline, which is what
+the delivery returns, whatever source the engine reports for it: with the ACP fake set to ask only once
+(`FAKE_ACP_QUESTION_ONCE=1`), the next turn answers without a new card and the first card still reads closed. If the
+close is refused, or the engine did not take it, the card stays open and can still be tapped, and the line is sent as
+before. Sends that close the same request share one decline. A tap, an explicit decline, Stop or the turn ending that
+wins while the decline is on its way settles the card as it always does, and no request outlives its turn (unit tests
+in `server/host/ask-cards.test.ts`: the default fakes settle a decline as soon as they take it, so these races need an
+engine held mid-delivery, which only the unit tests provide). Two tries of one send that arrive together close
 or answer one card, even when another opens before the line is written. That holds for 60 seconds after the first try
 took effect: a send whose line was never written, tried again after that, may close or answer the card open then.
 
