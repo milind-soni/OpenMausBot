@@ -96,6 +96,29 @@ describe("a conversation resting on the person", () => {
     expect(waits.waiting().map((wait) => wait.kind)).toEqual(["sign-in"]);
   });
 
+  it("drops a closed thread's copied question from the inbox wait, and the same card waits again when it reopens", () => {
+    const { store, waits, known, bot, thread, task } = fixture();
+    const asked = store.appendMessage(thread, {
+      role: "bot", kind: "options", text: "Which?",
+      card: { title: "Which?", subtitle: "", options: [], requestId: "r1", requestType: "question" },
+      automation: {
+        routineId: "routine-1", runId: "run-1", name: "Weekly report", trigger: "schedule",
+        executionThreadId: "exec-1", scheduledFor: 1, needsYou: true, copyOf: "original-card",
+      },
+    });
+    expect(waits.waiting().map((wait) => wait.messageId)).toContain(asked.id);
+    expect(task()).toMatchObject({ activity: "waiting-on-you", busy: false });
+    store.setTaskClosedBy(bot.id, thread, { botId: bot.id, name: bot.name, at: Date.now() });
+    expect(waits.waiting().map((wait) => wait.messageId)).not.toContain(asked.id);
+    expect(task()).toMatchObject({ activity: "idle", busy: false });
+    known.add(thread);
+    waits.boot();
+    expect(waits.waiting().map((wait) => wait.messageId)).not.toContain(asked.id);
+    expect(task()).toMatchObject({ activity: "idle", busy: false });
+    store.setTaskClosedBy(bot.id, thread, null);
+    expect(waits.waiting().map((wait) => wait.messageId)).toContain(asked.id);
+  });
+
   it("shows a card asked in a room on the room's thread", () => {
     const { store, bot } = fixture();
     const room = store.createGroup("Launch", [bot.id]);

@@ -12,7 +12,7 @@ const SHARED_VM_RESOURCE = `computer:vm:${SHARED_LOCAL_VM_TARGET.key}`;
 const SHARED_VM_VIEWER = viewerTargetId(SHARED_LOCAL_VM_TARGET);
 
 export interface SharedVmControlDeps {
-  control: Pick<ComputerControl, "snapshot" | "release" | "releaseLease" | "ownsLease" | "heldBy" | "beat" | "forgetBot">;
+  control: Pick<ComputerControl, "snapshot" | "takeSequence" | "lastTake" | "release" | "releaseLease" | "ownsLease" | "heldBy" | "beat" | "forgetBot">;
   store: { readonly bots: BotRecord[]; bot(id: string): BotRecord | null; tasks(botId: string): ReadonlyArray<{ threadId: string; surface?: string }> };
   /** The Local VM mode; null in a Cloud home, which has no Local VM. */
   mode(): "shared" | "per-bot" | "pool" | null;
@@ -79,11 +79,12 @@ export function createSharedVmControl(deps: SharedVmControlDeps) {
 
   /** A hold taken without a conversation pauses every conversation of the bot, as a hold on its own key does; a turn still
    * on the shared VM waits for its hold whatever its bot is set to now. */
-  const snapshot = (botId: string, threadId?: string): ControlSnapshot => {
+  const threadKeys = (botId: string, threadId?: string): string[] => {
     const bot = threadId ? deps.botForThread(botId, threadId) : store.bot(botId);
     const mounted = threadId && sharedDesk() && deps.turnVmTargets.get(threadId)?.key === SHARED_LOCAL_VM_TARGET.key ? [SHARED_VM_CONTROL_KEY] : [];
-    return merged([...new Set([botId, ...(bot ? [keyFor(bot, threadId), keyFor(bot)] : []), ...mounted])]);
+    return [...new Set([botId, ...(bot ? [keyFor(bot, threadId), keyFor(bot)] : []), ...mounted])];
   };
+  const snapshot = (botId: string, threadId?: string): ControlSnapshot => merged(threadKeys(botId, threadId));
 
   /** What a bot's panels and the bot list are told: the first of its keys held, else the first pleading, else its own. */
   const botSnapshot = (botId: string): ControlSnapshot => {
@@ -99,6 +100,7 @@ export function createSharedVmControl(deps: SharedVmControlDeps) {
     : sharedKey(key) ? store.bots.filter(bot => botKeys(bot).includes(key)).map(bot => bot.id) : [key];
 
   const personHolds = (resource: string): boolean => resource === SHARED_VM_RESOURCE && control.snapshot(SHARED_VM_CONTROL_KEY).held;
+  const personLastTake = (resource: string): number => resource === SHARED_VM_RESOURCE ? control.lastTake(SHARED_VM_CONTROL_KEY) : 0;
 
   /** The hold this lease owns: the key a take resolved may differ now, as places, pins and team turns change. */
   const leaseHolder = (bot: BotRecord, threadId: string | undefined, lease: string): string => {
@@ -118,6 +120,9 @@ export function createSharedVmControl(deps: SharedVmControlDeps) {
       return sharedDesk() && !teamKey(bot, threadId) && (place === undefined || place === "vm") ? SHARED_VM_CONTROL_KEY : null;
     },
     snapshot,
+    takeSequence: (): number => control.takeSequence(),
+    /** The latest hold started on any key `snapshot` reads for this conversation, as a `takeSequence`. */
+    lastTake: (botId: string, threadId?: string): number => Math.max(0, ...threadKeys(botId, threadId).map(key => control.lastTake(key))),
     membersOf,
     botSnapshot,
     /** A snapshot carrying the bot's sign-in plea as this viewer may see it: an answer never hides a plea the bot's frames
@@ -138,6 +143,8 @@ export function createSharedVmControl(deps: SharedVmControlDeps) {
     },
     /** True while a person holds the shared VM this turn resource names. */
     personHolds,
+    /** The latest hold a person started on the shared VM this turn resource names, as a `takeSequence`. */
+    personLastTake,
     sharedKey,
     signInKey: (bot: BotRecord, threadId: string, place: Surface): string => place === "browser" ? bot.id : keyFor(bot, threadId),
     keyMovesWhileHeld: (before: BotRecord, after: BotRecord): boolean =>
