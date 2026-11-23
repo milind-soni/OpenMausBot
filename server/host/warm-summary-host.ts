@@ -155,6 +155,11 @@ export function createWarmSummaryHost(deps: WarmSummaryHostDeps) {
     const result = await deps.instance(instanceId)!.adapter.compactSession!(threadId, { botId, session, model: check.model, selectionNow: check.selectionNow, signal });
     if (!result.ok) {
       if (result.usage) deps.bookEngineCompact(target, { ok: true, usage: result.usage, model: result.model ?? check.model });
+      const task = store.taskByThread(botId, threadId);
+      if (result.sessionChanged && task?.resumeCursors[instanceId] === session) {
+        const { [instanceId]: _dropped, ...resumeCursors } = task.resumeCursors;
+        store.patchTask(botId, threadId, { resumeCursors });
+      }
       deps.log?.(`compact now ${threadId}: not by the engine (${result.reason})`);
       return "skipped";
     }

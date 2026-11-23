@@ -286,7 +286,6 @@ export function verificationServerArgs(childEnv: NodeJS.ProcessEnv): string[] {
   ];
 }
 
-/** Start one foreground-owned, fake-engine server with no access to user data. */
 /** The fake native Antigravity CLI as a program named `antigravity` in the fixture's data folder, signed in through the
  * keyring folder its environment names. */
 function signedInFakeAntigravity(dataDir: string): string {
@@ -298,6 +297,7 @@ function signedInFakeAntigravity(dataDir: string): string {
   return executable;
 }
 
+/** Start one foreground-owned, fake-engine server with no access to user data. */
 export async function launchVerificationServer(
   parentEnv: NodeJS.ProcessEnv = process.env,
   signal?: AbortSignal,
@@ -365,8 +365,8 @@ export async function launchVerificationServer(
       } } : {}),
       ...(extraProviders.includes("antigravity") ? { antigravity: {
         driver: "antigravityAgent", displayName: "Verification Antigravity", config: { cli: signedInFakeAntigravity(dataDir), fullAuto: false },
-        environment: { FAKE_AGY_LOG: join(dataDir, "fake-antigravity.log"), FAKE_AGY_KEYRING: join(dataDir, "fake-antigravity-keyring"), FAKE_AGY_KEYRING_SHARED: "1",
-          ...Object.fromEntries(Object.entries(parentEnv).filter(([key, value]) => key.startsWith("FAKE_AGY_") && value)) },
+        environment: { ...Object.fromEntries(Object.entries(parentEnv).filter(([key, value]) => key.startsWith("FAKE_AGY_") && value)),
+          FAKE_AGY_LOG: join(dataDir, "fake-antigravity.log"), FAKE_AGY_KEYRING: join(dataDir, "fake-antigravity-keyring"), FAKE_AGY_KEYRING_SHARED: "1" },
       } } : {}),
       ...(extraProviders.includes("cline") ? { cline: {
         driver: "clineAgent", displayName: "Verification Cline",

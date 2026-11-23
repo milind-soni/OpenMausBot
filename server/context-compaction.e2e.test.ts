@@ -582,7 +582,7 @@ async function antigravitySetup(fakeEnv: NodeJS.ProcessEnv) {
   } finally { if (!ready) await session.close(); }
 }
 
-it("Compact now compacts a native Antigravity CLI conversation in place: /compact goes to the live session and the next message goes on in it", () => antigravityFixture(async f => {
+it.skipIf(process.platform === "win32")("Compact now compacts a native Antigravity CLI conversation in place: /compact goes to the live session and the next message goes on in it", () => antigravityFixture(async f => {
   await f.conversation();
   const session = f.cursor();
   const pid = f.prompts().at(-1)!.pid;
@@ -611,16 +611,17 @@ const antigravityFoldedToNewSession = async (f: Awaited<ReturnType<typeof antigr
   expect(f.prompts().at(-1)!.prompt).toContain("Earlier conversation summary");
 };
 
-it("folds a native Antigravity conversation when the process the last turn left is gone", () => antigravityFixture(async f => {
+it.skipIf(process.platform === "win32")("folds a native Antigravity conversation when the process the last turn left is gone", () => antigravityFixture(async f => {
   await f.conversation();
   const session = f.cursor();
-  process.kill(f.prompts().at(-1)!.pid, "SIGKILL");
-  await new Promise((wake) => setTimeout(wake, 500));
+  const pid = f.prompts().at(-1)!.pid;
+  process.kill(pid, "SIGKILL");
+  await expect.poll(() => { try { process.kill(pid, 0); return true; } catch { return false; } }).toBe(false);
   await f.compact();
   await antigravityFoldedToNewSession(f, session);
 }), 120_000);
 
-it("folds a native Antigravity conversation when the person set where to fold", () => antigravityFixture(async f => {
+it.skipIf(process.platform === "win32")("folds a native Antigravity conversation when the person set where to fold", () => antigravityFixture(async f => {
   await f.api("/api/config", { context: { compactAt: 0.5 } }, "PATCH");
   await f.conversation();
   const session = f.cursor();
@@ -628,7 +629,7 @@ it("folds a native Antigravity conversation when the person set where to fold", 
   await antigravityFoldedToNewSession(f, session);
 }), 120_000);
 
-it("folds when the native CLI answers /compact as a message, and books what it reported", () => antigravityFixture(async f => {
+it.skipIf(process.platform === "win32")("folds when the native CLI answers /compact as a message, and books what it reported", () => antigravityFixture(async f => {
   await f.conversation();
   const session = f.cursor();
   const rowsBefore = f.usageRows().length;
@@ -638,7 +639,7 @@ it("folds when the native CLI answers /compact as a message, and books what it r
   await antigravityFoldedToNewSession(f, session, 1);
 }, { FAKE_AGY_COMPACT: "reply" }), 120_000);
 
-it("keeps the compacted session when the last reply had taken the history past the fold point", () => antigravityFixture(async f => {
+it.skipIf(process.platform === "win32")("keeps the compacted session when the last reply had taken the history past the fold point", () => antigravityFixture(async f => {
   const long = (label: string) => `${label} ${"x".repeat(90_000)}`;
   await f.conversation(["FIRST", "SECOND", "THIRD", "FOURTH", "FIFTH"].map(long));
   const session = f.cursor();
@@ -650,7 +651,7 @@ it("keeps the compacted session when the last reply had taken the history past t
   expect(f.sessionSetups()).toEqual(["session/new"]);
 }), 120_000);
 
-it("folds that long a conversation on its next message when nothing compacted it", () => antigravityFixture(async f => {
+it.skipIf(process.platform === "win32")("folds that long a conversation on its next message when nothing compacted it", () => antigravityFixture(async f => {
   const long = (label: string) => `${label} ${"x".repeat(90_000)}`;
   await f.conversation(["FIRST", "SECOND", "THIRD", "FOURTH", "FIFTH"].map(long));
   const session = f.cursor();

@@ -7,7 +7,6 @@ import type { AcpSession } from "./turn-state.ts";
 const SESSION = "native-session-1";
 const RESULT = { stopReason: "end_turn", usage: { inputTokens: 900, outputTokens: 50 } };
 
-/** A live session whose agent answers `/compact` by `answer`, which may report updates around its reply. */
 function setup(answer: (link: { heard: (update: object) => void; reply: (result: unknown) => void }) => void, overrides: Partial<AcpSession> = {}) {
   const child = Object.assign(new EventEmitter(), { exitCode: null });
   const acp: { onUpdate: ((params: any) => void) | null; request: ReturnType<typeof vi.fn>; send: ReturnType<typeof vi.fn> } = {
@@ -83,6 +82,33 @@ describe("an ACP agent's own compaction of a live session", () => {
     const { deps, acp } = setup(({ reply }) => reply(RESULT), { compactCommand: undefined });
     expect(await acpCompactSession(deps)("thread", { session: SESSION })).toMatchObject({ ok: false, reason: "this runtime has no in-place compaction" });
     expect(acp.request).not.toHaveBeenCalled();
+  });
+
+  it("takes a compaction the agent finished as Stop reached it as done", async () => {
+    let answer: (() => void) | undefined;
+    const { deps } = setup(({ heard, reply }) => { answer = () => { heard({ sessionUpdate: "usage_update", used: 950 }); reply(RESULT); }; });
+    const stop = new AbortController();
+    const compacting = acpCompactSession(deps)("thread", { session: SESSION, signal: stop.signal });
+    await vi.waitFor(() => expect(answer).toBeDefined());
+    stop.abort();
+    answer!();
+    expect(await compacting).toMatchObject({ ok: true, usage: { input: 900, output: 50 } });
+  });
+
+  it("lets a Stop's interrupt return only once the session is given back", async () => {
+    let answer: ((result: unknown) => void) | undefined;
+    const { deps, active } = setup(({ reply }) => { answer = reply; });
+    const compacting = acpCompactSession(deps)("thread", { session: SESSION });
+    await vi.waitFor(() => expect(answer).toBeDefined());
+    const interrupted = active.get("thread")!.interrupt() as unknown as Promise<void>;
+    let returned = false;
+    void interrupted.then(() => { returned = true; });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(returned).toBe(false);
+    answer!({ stopReason: "cancelled" });
+    await interrupted;
+    expect(active.has("thread")).toBe(false);
+    expect(await compacting).toEqual({ ok: false, reason: "stopped" });
   });
 
   it("says so when the agent ignored the cancel and could not be stopped", async () => {

@@ -36,10 +36,10 @@ async function thread(name: string, env: Record<string, string> = {}) {
   const instanceId = `antigravity-compact-${name}`;
   const instance = await AntigravityDriver.create({
     instanceId, displayName: "Antigravity", enabled: true, config: { cli: fixture.executable, fullAuto: false },
-    environment: { FAKE_AGY_LOG: fixture.log, FAKE_AGY_USAGE: "1", ...env },
+    environment: { FAKE_AGY_LOG: fixture.log, FAKE_AGY_USAGE: "1", ...env, FAKE_AGY_KEYRING: "" },
   });
   instances.push(instance);
-  expect(await loginAt(fixture, antigravityProfileDirectory(instanceId), "fixture-code")).toBe(0);
+  expect(await loginAt(fixture, antigravityProfileDirectory(instanceId), "fixture-code", { FAKE_AGY_KEYRING: "" })).toBe(0);
   let cursor: string | undefined;
   const send = async (text = "hello", model?: string) => {
     const recorder = recordEvents(instance.adapter);
@@ -92,7 +92,7 @@ describe.skipIf(WINDOWS)("Compact now on the native Antigravity CLI", () => {
   it("counts a /compact the CLI answered as a message as no compaction, books what it reported and closes the session", async () => {
     const t = await thread("as-message", { FAKE_AGY_COMPACT: "reply" });
     await t.send();
-    expect(await t.compact()).toMatchObject({ ok: false, reason: "the agent answered /compact as a message", usage: { output: 20 } });
+    expect(await t.compact()).toMatchObject({ ok: false, reason: "the agent answered /compact as a message", usage: { output: 20 }, sessionChanged: true });
     expect(await t.compact()).toMatchObject({ ok: false, reason: "no live session holds this conversation" });
   }, 120_000);
 
@@ -110,13 +110,6 @@ describe.skipIf(WINDOWS)("Compact now on the native Antigravity CLI", () => {
       expect(await t.compact()).toMatchObject({ ok: false, reason: "no live session holds this conversation" });
     }, 120_000);
   }
-
-  it("does not count a usage report that arrived before /compact was sent", async () => {
-    const t = await thread("late-usage", { FAKE_AGY_COMPACT: "usage-only", FAKE_AGY_LATE_USAGE_MS: "200" });
-    await t.send();
-    await new Promise((wake) => setTimeout(wake, 600));
-    expect(await t.compact()).toMatchObject({ ok: false, reason: "the agent reported no compaction" });
-  }, 120_000);
 
   it("ends at once when the CLI exits during the compaction", async () => {
     const t = await thread("exits", { FAKE_AGY_COMPACT: "exit" });

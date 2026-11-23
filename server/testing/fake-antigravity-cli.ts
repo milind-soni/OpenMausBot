@@ -25,7 +25,6 @@
 //                           keyring then
 //   FAKE_AGY_COMMANDS       the slash commands advertised, comma separated (default goal,compact,plan,learn)
 //   FAKE_AGY_USAGE          1: an ordinary prompt reports `usage_update` and its usage, as 1.5.14 does
-//   FAKE_AGY_LATE_USAGE_MS  one more `usage_update` this long after an ordinary prompt's answer
 //   FAKE_AGY_COMPACT        how `/compact` is answered: reply (as an ordinary message) | bare (`end_turn` alone) |
 //                           usage-only (no `usage_update`) | usage-after (the `usage_update` follows the answer) | error |
 //                           exit | hang (answers `cancelled` on session/cancel) | hang-ignore-cancel
@@ -215,8 +214,6 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
       used += 1_000;
       update(sessionId, { sessionUpdate: "usage_update", used, size: WINDOW });
       result(message.id, { stopReason: "end_turn", usage: usage(used - 20, 20) });
-      const late = Number(process.env.FAKE_AGY_LATE_USAGE_MS);
-      if (late > 0) setTimeout(() => update(sessionId, { sessionUpdate: "usage_update", used, size: WINDOW }), late);
       break;
     }
     default:

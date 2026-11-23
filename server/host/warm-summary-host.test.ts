@@ -441,6 +441,15 @@ describe("Compact now", () => {
     expect(f.appended).toEqual([]);
   });
 
+  it("lets no turn carry on a session that took the request as a message", async () => {
+    const f = setup({}, { inPlace: async () => ({ ok: false, reason: "answered as a message", sessionChanged: true }) });
+    await expect(f.host.compactNow(target, new AbortController().signal, check())).resolves.toBe("skipped");
+    expect(f.task.resumeCursors.claude).toBeUndefined();
+    const kept = setup({}, { inPlace: async () => ({ ok: false, reason: "no kept process" }) });
+    await kept.host.compactNow(target, new AbortController().signal, check());
+    expect(kept.task.resumeCursors.claude).toBe("live-session");
+  });
+
   it("never asks the engine when the next turn would not carry on this session", async () => {
     const f = setup({}, { inPlace: async () => ok() });
     await expect(f.host.compactNow(target, new AbortController().signal, check({ resumes: () => false }))).resolves.toBe("skipped");
