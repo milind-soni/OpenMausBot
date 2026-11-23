@@ -6783,6 +6783,7 @@
   "settings.bots.aboutYouLine": "Как боты на {place} вас называют и что о вас знают.",
   "settings.bots.awakeLine": "Ваш тариф держит активными лишь несколько ботов одновременно. Выберите каких.",
   "settings.bots.awakeTitle": "Некоторые боты приостановлены",
+  "settings.remoteTeammates.title": "Участники команды на других серверах",
   "settings.bots.early": "Ранние функции",
   "settings.bots.intro": "Что боты на {place} знают о вас, и настройки для всех ботов.",
   "settings.bots.newBots": "Новые боты",
