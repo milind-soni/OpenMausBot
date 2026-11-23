@@ -50,7 +50,7 @@ import {
 import type { Routine, RoutineInput, RoutineRun, RoutineRunStatusFilter } from "@/lib/routines";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { duplicateBotProfile, restrictedCopyRequest } from "@/lib/bot-duplicate";
-import { holdMarkedUnread, markVisibleBotThreadsRead, markVisibleGroupThreadsRead } from "./read-visible";
+import { holdMarkedUnread, markVisibleBotThreadsRead, markVisibleGroupThreadsRead, type ReadReason } from "./read-visible";
 import { applyWindowPref } from "@/lib/window-prefs"; import { applyThemeFrame } from "@/lib/theme/runtime"; import { appCatalogAnnounced } from "@/lib/app-catalog-signal";
 import { placeUnreadDivider, threadOpensUnread, threadReadCursor, unreadDividerFor, type UnreadDivider } from "@/lib/unread-divider";
 import type { ComputerStart } from "@/lib/computer-start";
@@ -216,7 +216,7 @@ export interface ModelSelection {
   variant?: string;
 }
 
-export interface Task extends Pick<WireTask, "private" | "shared" | "sharedWith" | "setupRequest" | "inbox" | "openAsks" | "askedBy" | "handoff"> {
+export interface Task extends Pick<WireTask, "heldUnread" | "private" | "shared" | "sharedWith" | "setupRequest" | "inbox" | "openAsks" | "askedBy" | "handoff"> {
   waitingForTeammates?: boolean; sharedChat?: true;
   threadId: string;
   origin?: import("../../shared/wire").ForkOrigin;
@@ -3024,12 +3024,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     // One read per conversation at a time, covering its newest message (the task's updatedAt). An unread frame meanwhile
     // with a newer message asks for exactly one more once it finishes; one re-announcing what the read covers does not.
-    const readsInFlight = new Map<string, { covers: number; again: boolean }>();
-    const sendRead = (botId: string, threadId: string | undefined, key: string, covers: number): void => {
-      readsInFlight.set(key, { covers, again: false });
-      void serverFetch(`/api/bots/${botId}/read`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId }) }).catch(() => {}).finally(() => {
+    const readsInFlight = new Map<string, { covers: number; again: boolean; reason: ReadReason }>();
+    const sendRead = (botId: string, threadId: string | undefined, key: string, covers: number, reason: ReadReason): void => {
+      readsInFlight.set(key, { covers, again: false, reason });
+      void serverFetch(`/api/bots/${botId}/read`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId, reason }) }).catch(() => {}).finally(() => {
         const open = readsInFlight.get(key); readsInFlight.delete(key);
-        if (open?.again && alive) sendRead(botId, threadId, key, open.covers);
+        if (open?.again && alive) sendRead(botId, threadId, key, open.covers, open.reason);
       });
     };
     const stopFrames = store.handleFrames((frame) => { handleFrame(frame); stateRef.current = store.getState(); });
@@ -3082,10 +3082,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "bot": {
           const bot = frame.bot as BotAnnouncement, serverUnread = bot.unread;
-          markVisibleBotThreadsRead(stateRef.current, bot, document.hasFocus(), (_path, threadId, newest) => {
+          markVisibleBotThreadsRead(stateRef.current, bot, document.hasFocus(), (_path, threadId, newest, reason) => {
             const read = `${bot.id}:${threadId}`, open = readsInFlight.get(read);
-            if (!open) sendRead(bot.id, threadId, read, newest);
-            else if (newest > open.covers) readsInFlight.set(read, { covers: newest, again: true });
+            if (!open) sendRead(bot.id, threadId, read, newest, reason);
+            else if (newest > open.covers || reason !== open.reason) readsInFlight.set(read, { covers: Math.max(newest, open.covers), again: true, reason });
           });
           if (frame.tasksPartial && serverUnread && !bot.unread) bot.unread = unreadBeyondFrame(stateRef.current.bots.find((known) => known.id === bot.id), bot);
           rawDispatch({ type: "botPatched", bot: withTaskWrites({ ...bot, ...botPatchQueue.overlayFor(bot.id) }), ...(frame.tasksPartial ? { tasksPartial: true as const } : {}) });

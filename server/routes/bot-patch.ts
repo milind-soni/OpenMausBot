@@ -717,6 +717,9 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         bot = store.patchBot(m[1], patch);
       }
       if (!bot) return json(res, 404, { error: "no such bot" });
+      if (typeof body.unread === "boolean") {
+        store.patchTask(bot.id, bot.threadId, { unread: body.unread, heldUnread: body.unread ? store.activePath(bot.threadId).at(-1)?.id ?? "" : undefined });
+      }
       if (body.applyToAllThreads === true && requestedApprovalMode !== "custom") store.setAllThreadApprovalMode(bot.id, requestedApprovalMode);
       if (body.memoryUpkeep === false || body.memoryEnabled === false) memoryUpkeep.dropBot(bot.id);
       if (body.cacheKeepWarm !== undefined) cacheKeepWarm.refresh();

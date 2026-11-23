@@ -2,14 +2,19 @@ import { botShowsUnread } from "@/lib/bot-unread";
 import type { Action, AppState, BotAnnouncement, Group } from "./store";
 import { serverFetch } from "@/lib/relay-server";
 
-type SendRead = (path: string, threadId: string, updatedAt: number) => void;
-const sendRead: SendRead = (path, threadId) => {
-  void serverFetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId }) }).catch(() => {});
+/** "seen": only on screen, which a conversation the person marked unread with it open holds against; "open": the person
+ * opened it again, which ends that mark. */
+export type ReadReason = "seen" | "open";
+type SendRead = (path: string, threadId: string, updatedAt: number, reason: ReadReason) => void;
+const sendRead: SendRead = (path, threadId, _updatedAt, reason) => {
+  void serverFetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId, reason }) }).catch(() => {});
 };
 
-/** Conversations the person marked unread while looking at them, with their newest message then (unknown until the
- * server next announces them). Being on screen reads none of them again until a newer message arrives. */
+/** Conversations the person marked unread in this page while looking at them, with their newest message then (unknown
+ * until the server next announces them), until the server's own mark (`heldUnread`) reaches the page. */
 const markedUnread = new Map<string, number | undefined>();
+/** Conversations the server holds unread that the person opened again here, read once their mark is next announced. */
+const reopened = new Set<string>();
 const OPENS_A_CONVERSATION: ReadonlySet<Action["type"]> = new Set(["select", "openDataResult", "switchTask", "newTask", "send"]);
 
 function shownBotThread(state: AppState): string | undefined {
@@ -21,19 +26,26 @@ function shownBotThread(state: AppState): string | undefined {
 /** "Mark as unread" on the open conversation holds while the person stays on it. It ends when they open a conversation,
  * this one included, write in one, or act from anywhere else in the app. */
 export function holdMarkedUnread(action: Action, state: AppState): void {
-  const shown = shownBotThread(state);
-  if (OPENS_A_CONVERSATION.has(action.type) || !shown || !markedUnread.has(shown)) markedUnread.clear();
+  const shown = shownBotThread(state), leaves = OPENS_A_CONVERSATION.has(action.type) || !shown;
+  if (leaves || !markedUnread.has(shown)) markedUnread.clear();
+  if (leaves) for (const task of state.bots.flatMap((bot) => bot.tasks ?? [])) if (task.heldUnread !== undefined) reopened.add(task.threadId);
   if (action.type !== "markUnread" || action.botId !== state.selectedId || !shown) return;
   const bot = state.bots.find((candidate) => candidate.id === action.botId);
   markedUnread.set(shown, bot?.tasks?.find((task) => task.threadId === shown)?.updatedAt);
+  reopened.delete(shown);
 }
+
+const serverHolds = (task: { threadId: string; heldUnread?: string } | undefined) =>
+  task?.heldUnread !== undefined && !reopened.has(task.threadId);
 
 /** Whether the shown conversation is still held unread: marked by the person, and nothing newer has arrived in it. */
 export function shownChatHeldUnread(state: AppState): boolean {
   const shown = shownBotThread(state);
-  if (!shown || !markedUnread.has(shown)) return false;
-  const marked = markedUnread.get(shown);
-  const newest = state.bots.find((candidate) => candidate.id === state.selectedId)?.tasks?.find((task) => task.threadId === shown)?.updatedAt;
+  if (!shown) return false;
+  const task = state.bots.find((candidate) => candidate.id === state.selectedId)?.tasks?.find((candidate) => candidate.threadId === shown);
+  if (serverHolds(task)) return true;
+  if (!markedUnread.has(shown)) return false;
+  const marked = markedUnread.get(shown), newest = task?.updatedAt;
   return marked === undefined || newest === undefined || newest <= marked;
 }
 
@@ -51,7 +63,12 @@ export function markVisibleBotThreadsRead(state: AppState, bot: BotAnnouncement,
   let held = false;
   for (const threadId of visibleThreads) {
     const task = bot.tasks?.find((candidate) => candidate.threadId === threadId);
+    if (task && task.heldUnread === undefined) reopened.delete(threadId);
     if (!task?.unread && (bot.tasks || !bot.unread)) continue;
+    if (serverHolds(task)) {
+      held = true;
+      continue;
+    }
     if (markedUnread.has(threadId)) {
       const newest = task?.updatedAt ?? 0, marked = markedUnread.get(threadId) ?? newest;
       if (newest <= marked) {
@@ -62,7 +79,7 @@ export function markVisibleBotThreadsRead(state: AppState, bot: BotAnnouncement,
       markedUnread.delete(threadId);
     }
     if (task) task.unread = false;
-    post(`/api/bots/${bot.id}/read`, threadId, task?.updatedAt ?? 0);
+    post(`/api/bots/${bot.id}/read`, threadId, task?.updatedAt ?? 0, task?.heldUnread !== undefined ? "open" : "seen");
   }
   if (bot.tasks) bot.unread = botShowsUnread(bot);
   else if (!held) bot.unread = false;
@@ -77,7 +94,7 @@ export function markVisibleGroupThreadsRead(state: AppState, group: Partial<Grou
     const task = group.tasks?.find((candidate) => candidate.threadId === threadId);
     if (!task?.unread && (group.tasks || !group.unread)) continue;
     if (task) task.unread = false;
-    post(`/api/groups/${group.id}/read`, threadId, task?.updatedAt ?? 0);
+    post(`/api/groups/${group.id}/read`, threadId, task?.updatedAt ?? 0, "seen");
   }
   group.unread = group.tasks ? group.tasks.some((task) => task.unread) : false;
 }

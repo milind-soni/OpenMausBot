@@ -133,25 +133,51 @@ describe("a conversation marked unread while it is open", () => {
     expect(shownChatHeldUnread(state)).toBe(false);
   });
 
-  // The hold lives in this page's memory and the server keeps one unread flag per conversation: nothing below is held.
-  describe("known limits", () => {
-    it("is forgotten by a reloaded page, which reads the conversation at its next announcement", async () => {
-      const state = open();
-      mark(state);
+  describe("held by the server", () => {
+    const heldBy = (updatedAt = 10) => ({ id: "bot", unread: true, tasks: [{ threadId: "main", unread: true, updatedAt, heldUnread: "m1" }] }) as unknown as BotAnnouncement;
+    const reloadedPage = async (state: AppState) => {
       vi.resetModules();
-      const reloaded = await import("./read-visible");
-      const read: string[] = [];
-      reloaded.markVisibleBotThreadsRead(state, announced(), true, (_path, threadId) => read.push(threadId));
-      expect(read).toEqual(["main"]);
-      act({ type: "select", id: "bot" }, state);
+      const page = await import("./read-visible");
+      const reasons: string[] = [];
+      const see = (bot: BotAnnouncement) => {
+        page.markVisibleBotThreadsRead(state, bot, true, (_path, threadId, _updatedAt, reason) => reasons.push(`${threadId}:${reason}`));
+        return { reasons: [...reasons], unread: bot.unread };
+      };
+      return { page, see };
+    };
+    const showing = (bot: BotAnnouncement) => ({ ...open(), bots: [{ id: "bot", threadId: "main", tasks: bot.tasks }] }) as unknown as AppState;
+
+    it("survives a reloaded page and reaches another window that shows the conversation", async () => {
+      const state = showing(heldBy());
+      const { page, see } = await reloadedPage(state);
+      expect(see(heldBy())).toEqual({ reasons: [], unread: true });
+      expect(see(heldBy())).toEqual({ reasons: [], unread: true });
+      expect(page.shownChatHeldUnread(state), "getting focus back does not read it").toBe(true);
     });
 
-    it("is cleared when another window that shows the conversation reads it", () => {
-      const state = open();
-      mark(state);
-      const readElsewhere = { id: "bot", unread: false, tasks: [{ threadId: "main", unread: false, updatedAt: 10 }] } as unknown as BotAnnouncement;
-      expect(seen(state, readElsewhere)).toEqual({ read: [], unread: false, thread: false });
-      act({ type: "select", id: "bot" }, state);
+    it("is read once the person opens it again in that page, saying so to the server", async () => {
+      const state = showing(heldBy());
+      const { page, see } = await reloadedPage(state);
+      page.holdMarkedUnread({ type: "select", id: "bot" } as Action, state);
+      expect(page.shownChatHeldUnread(state)).toBe(false);
+      expect(see(heldBy()).reasons).toEqual(["main:open"]);
+    });
+
+    it("is read as only seen once the server says a newer reply ended it", async () => {
+      const after = { id: "bot", unread: true, tasks: [{ threadId: "main", unread: true, updatedAt: 11 }] } as unknown as BotAnnouncement;
+      const state = showing(after);
+      const { page, see } = await reloadedPage(state);
+      expect(page.shownChatHeldUnread(state)).toBe(false);
+      expect(see(after)).toEqual({ reasons: ["main:seen"], unread: false });
+    });
+
+    it("is held again when marked again after being opened", async () => {
+      const state = showing(heldBy());
+      const { page, see } = await reloadedPage(state);
+      page.holdMarkedUnread({ type: "select", id: "bot" } as Action, state);
+      page.holdMarkedUnread({ type: "markUnread", botId: "bot" } as Action, state);
+      expect(see(heldBy()).reasons).toEqual([]);
+      page.holdMarkedUnread({ type: "select", id: "bot" } as Action, state);
     });
   });
 });

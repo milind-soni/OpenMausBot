@@ -5,7 +5,7 @@ import { expect, it } from "vitest";
 
 import type { WireGroup } from "../../shared/wire.ts";
 import { personKey } from "../person-key.ts";
-import { createPersonRooms, createRoomReads, roomUnreadFor } from "./room-reads.ts";
+import { createPersonRooms, createRoomReads, roomUnreadFor, stillHeldUnread } from "./room-reads.ts";
 
 const path = [{ id: "m1", role: "user" }, { id: "m2", role: "bot" }, { id: "m3", role: "user" }];
 
@@ -19,6 +19,16 @@ it("counts only a bot's replies, not its tool or status lines", () => {
   const working = [{ id: "m1", role: "user", kind: "text" }, { id: "m2", role: "bot", kind: "activity" }, { id: "m3", role: "bot", kind: "screen" }];
   expect(roomUnreadFor(working, "m1", true)).toBe(false);
   expect(roomUnreadFor([...working, { id: "m4", role: "bot", kind: "text" }], "m1", false)).toBe(true);
+});
+
+it("holds a conversation marked unread with it open until a reply follows the message newest then", () => {
+  expect(stillHeldUnread(path, "m3")).toBe(true);
+  expect(stillHeldUnread([...path, { id: "m4", role: "bot", kind: "activity" }], "m3"), "a tool line is no reply").toBe(true);
+  expect(stillHeldUnread([...path, { id: "m4", role: "bot" }], "m3")).toBe(false);
+  expect(stillHeldUnread(path, undefined), "never marked").toBe(false);
+  expect(stillHeldUnread(path, "edited away"), "its message left the path").toBe(false);
+  expect(stillHeldUnread([], ""), "marked with no message yet").toBe(true);
+  expect(stillHeldUnread(path, ""), "a reply came after an empty conversation was marked").toBe(false);
 });
 
 it("reads a line no longer on the path as read up to the last message at or before it", () => {
@@ -101,7 +111,16 @@ it("reads a bot's shared chat per person, leaves a private chat's one mark alone
   expect(rooms.taskForPerson(main, cleoKey).unread).toBe(true);
   expect(frames, "told to Ada's streams alone").toEqual([{ person: adaKey }]);
   expect(rooms.personMarkThread!(ada, "main", true)).toBe(true);
-  expect(rooms.taskForPerson(main, adaKey)).toEqual({ threadId: "main", unread: true, lastReadMessageId: "m3" });
+  expect(rooms.taskForPerson(main, adaKey)).toEqual({ threadId: "main", unread: true, lastReadMessageId: "m3", heldUnread: "m4" });
+  expect(rooms.personHeldUnread!(ada, "main"), "held for Ada while nothing newer came").toBe(true);
+  expect(rooms.taskForPerson(main, cleoKey), "Cleo's copy carries no mark of Ada's").not.toHaveProperty("heldUnread");
+  thread.push({ id: "m5", role: "bot" });
+  expect(rooms.personHeldUnread!(ada, "main"), "a newer reply ends it").toBe(false);
+  expect(rooms.taskForPerson(main, adaKey)).not.toHaveProperty("heldUnread");
+  thread.pop();
+  expect(rooms.personMarkThread!(ada, "main", false)).toBe(true);
+  expect(rooms.personHeldUnread!(ada, "main"), "reading it ends it").toBe(false);
+  expect(rooms.personHeldUnread!(ada, "mine"), "a private chat keeps the conversation's own mark").toBeNull();
   const own = { threadId: "mine", unread: true, lastReadMessageId: "m2" };
   expect(rooms.personMarkThread!(ada, "mine", false), "a private chat keeps its one mark").toBe(false);
   expect(rooms.taskForPerson(own, adaKey)).toBe(own);
