@@ -96,6 +96,19 @@ const DESCRIPTION: Record<Place, "computer.dest.cloudDesc" | "computer.dest.vmDe
   cloud: "computer.dest.cloudDesc", vm: "computer.dest.vmDesc", local: "computer.dest.localDesc", browser: "computer.dest.browserDesc",
 };
 
+/** Simple mode's read-only mark for a conversation that works somewhere other than its bot: the place is chosen in
+ * Advanced mode, so here it only shows, beside the +. Nothing when the conversation follows its bot. */
+export function PlaceMark({ bot, task }: { bot: Pick<Bot, "computer">; task?: Pick<Task, "surface" | "surfaceAuto"> | null }) {
+  const pin = personPin(task);
+  if (!pin || bot.computer === "off" || pin === bot.computer) return null;
+  const label = t("place.chipAria", { place: t(placeLabelKey(pin)) });
+  return (
+    <span role="img" aria-label={label} title={label} data-testid="place-mark" className="flex size-7 shrink-0 items-center justify-center text-accent">
+      <PlaceIcon place={pin} size={16} className="opacity-80" aria-hidden="true" />
+    </span>
+  );
+}
+
 export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
   bot: Bot;
   task?: Pick<Task, "surface" | "surfaceAuto"> | null;

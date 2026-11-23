@@ -73,7 +73,7 @@ export function vpsLifecycleBusy(): boolean {
 }
 const LOCK_ACQUIRE_TIMEOUT_MS = 5_000;
 const STATUS_CACHE_TTL_MS = 10_000;
-const statusCache = new Map<string, { status: VpsComputerStatus; expiresAt: number }>();
+const statusCache = new Map<string, { status: VpsComputerStatus; expiresAt: number }>(); /** The last inspection of a bot's VPS computer, however old, and when it ran: never a new one. */ export function lastVpsStatus(cfg: AppConfig, botId: string): { status: VpsComputerStatus; at: number } | null { const key = vpsLockKey(snapshotVpsConfig(cfg), botId), hit = key ? statusCache.get(key) : undefined; return hit ? { status: hit.status, at: hit.expiresAt - STATUS_CACHE_TTL_MS } : null; }
 const pendingStatuses = new Map<string, Promise<VpsComputerStatus>>();
 const pendingProvisions = new Map<string, Promise<VpsComputerStatus>>();
 const SCREENSHOT_BUDGET_MS = 45_000;

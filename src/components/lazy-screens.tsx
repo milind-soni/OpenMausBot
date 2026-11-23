@@ -92,6 +92,7 @@ export const TriggersPage = pureScreen(lazyScreen("TriggersPage", async () => (a
 export const SettingsModal = pureScreen(lazyScreen("SettingsModal", async () => (await import("./SettingsModal")).SettingsModal));
 export const TeamMapPage = lazyScreen("TeamMapPage", async () => (await import("./TeamMapPage")).TeamMapPage);
 export const PublishedAppsPage = lazyScreen("PublishedAppsPage", async () => (await import("./published-apps/PublishedAppsPage")).PublishedAppsPage);
+export const SkillBurgersPage = lazyScreen("SkillBurgersPage", async () => (await import("./skill-burger/SkillBurgersPage")).SkillBurgersPage);
 export const AnnouncementsPage = lazyScreen("AnnouncementsPage", async () => (await import("./announcements/AnnouncementsPage")).AnnouncementsPage);
 export const InboxPanel = lazyScreen("InboxPanel", async () => (await import("./inbox/InboxPanel")).InboxPanel);
 export const TeamDialog = lazyScreen("TeamDialog", async () => (await import("./TeamDialog")).TeamDialog);
@@ -114,7 +115,7 @@ export const TeamFilesPage = lazyScreen("TeamFilesPage", async () => (await impo
 // Most opened first: a Cloud page fetches these in this order.
 const SCREENS = [
   SettingsModal, BotSettingsDialog, PluginsPanel, ComputerPanel, TriggersPage, ActivityPanel, FilesView, InspectorPanel, KeyboardShortcutsModal,
-  LocalVmWorkspace, NewBotDialog, RemoteAgentSettingsPanel, RemoteDesktopPanel, RoomPanel, TeamMapPage, PublishedAppsPage, InboxPanel,
+  LocalVmWorkspace, NewBotDialog, RemoteAgentSettingsPanel, RemoteDesktopPanel, RoomPanel, TeamMapPage, PublishedAppsPage, SkillBurgersPage, InboxPanel,
   TeamSettingsDialog, TeamDialog, VoiceSetupDialog, TraceDialog, ShareBotDialog, CommandAllowlistDialog,
 ];
 

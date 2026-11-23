@@ -14,6 +14,7 @@ import type { ProviderSnapshot, RuntimeEvent } from "./contracts.ts";
 import { createCloudSpeed, type CloudSpeed } from "./cloud-speed.ts";
 import { doctorSummary } from "./doctor/start.ts";
 import { classifyError } from "./drivers/retry.ts";
+import { storageHealth, type StorageReport } from "./perf/disk-usage.ts";
 import type { PerfHealth } from "./perf/perf-report.ts";
 import type { RoutineHealth } from "./routine-health.ts";
 import type { ScheduleSection } from "./routine-schedule-report.ts";
@@ -254,6 +255,8 @@ export interface CloudHealthDeps {
   /** Turn phase timings, usage-limit holds, process buckets and event-loop lag: at most PERF_HEALTH_MAX_BYTES. A throw
    * reads as null: the Admin restarts a home whose health read fails, so this optional part never fails it. */
   perf?: () => PerfHealth | null;
+  /** What fills the volume (perf/disk-usage.ts), at most STORAGE_HEALTH_MAX_BYTES; the field is left out on a throw or null. */
+  storage?: () => StorageReport | null;
   log?: (line: string) => void;
   now?: () => number;
 }
@@ -288,12 +291,17 @@ export function createCloudHealth(deps: CloudHealthDeps) {
   deps.bus.subscribe((event) => { ledger.noteEvent(event); speed.noteEvent(event); });
   const connectors = backgroundLookup(deps.connectors, CONNECTORS_TTL_MS, now);
   const version = match(VERSION, deps.version) ?? "unknown", image = match(IMAGE, deps.image);
-  let perfWarnedAt = -Infinity;
+  const warnedAt = new Map<string, number>();
+  const leftOut = (part: string, error: unknown) => {
+    if (now() - (warnedAt.get(part) ?? -Infinity) < 60_000) return;
+    warnedAt.set(part, now());
+    (deps.log ?? console.warn)(`cloud health: ${part} left out: ${error instanceof Error ? error.name : "error"}`);
+  };
   const perf = () => {
-    try { return deps.perf?.() ?? null; } catch (error) {
-      if (now() - perfWarnedAt >= 60_000) { perfWarnedAt = now(); (deps.log ?? console.warn)(`cloud health: perf left out: ${error instanceof Error ? error.name : "error"}`); }
-      return null;
-    }
+    try { return deps.perf?.() ?? null; } catch (error) { leftOut("perf", error); return null; }
+  };
+  const storage = (): { storage?: StorageReport } => {
+    try { const report = deps.storage?.(); return report ? { storage: storageHealth(report) } : {}; } catch (error) { leftOut("storage", error); return {}; }
   };
 
   const engines = () => {
@@ -323,7 +331,7 @@ export function createCloudHealth(deps: CloudHealthDeps) {
         engines: engines(), connectors: connectorState(),
         browser: { available: browser.available, installing: browser.installing, interrupted: browser.interrupted },
         box: boxSummary(deps.box?.()),
-        firstHour: first?.firstHour ?? null, value: first?.value ?? null, room: deps.room?.() ?? null, speed: speed.report(), perf: perf(),
+        firstHour: first?.firstHour ?? null, value: first?.value ?? null, room: deps.room?.() ?? null, speed: speed.report(), perf: perf(), ...storage(),
         // The data checks of this version's first start: check ids and counts (server/doctor/start.ts).
         doctor: doctorHealth(),
         system: { ...memory, rssBytes: process.memoryUsage.rss(), load1: loadavg()[0] ?? 0, cpus: availableParallelism(), disk: diskBytes(deps.dataDir), eventLogWritable: writable(deps.eventsDir) },

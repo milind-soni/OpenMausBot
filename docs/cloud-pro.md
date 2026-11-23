@@ -1859,6 +1859,70 @@ run in place of the missed occurrence, which gets no record; and occurrences
 that fall while a routine is held (its owner left) are not recorded, because a
 held routine is off.
 
+**`storage`** says what fills the volume (`server/perf/disk-usage.ts`), from
+the last full pass of a slow walk over HOME (the volume) and the data folder
+inside it. It sits beside `perf` with its own budget of 4 KB, and the field is
+left out where nothing is measured or its read fails; the health read never
+starts a walk.
+
+```json
+"storage": { "v": 1, "at": 1790000000000, "ageS": 300, "tookS": 1500, "running": false, "progress": null,
+  "volume": { "totalBytes": 84000000000, "freeBytes": 3400000000, "usedBytes": 80600000000 },
+  "walkedBytes": 80100000000, "unwalkedBytes": 500000000,
+  "categories": [{ "name": "engine_state", "class": "precious", "bytes": 41000000000, "files": 210000 },
+    { "name": "bot_files", "class": "work", "bytes": 22000000000, "files": 90000 }],
+  "bots": [{ "id": "<uuid>", "bytes": 20000000000, "files": 80000 }], "botsRest": { "bytes": 2000000000, "files": 10000, "count": 3 },
+  "other": { "named": [{ "name": "lost+found", "bytes": 16384, "files": 0 }], "unlisted": { "bytes": 1200000, "files": 40, "entries": 2 } },
+  "skipped": { "unreadable": 0, "otherDevice": 0, "tooDeep": 0, "vanished": 12, "links": 340 },
+  "linksCapped": false, "linksUncheckedBytes": 0, "resumes": 1, "failed": false }
+```
+
+- **Categories** are fixed names, each with its class (`server/perf/disk-categories.ts`):
+  `precious` (only this home holds it: `conversations`, `settings`,
+  `engine_state`, `browser_profiles`), `work` (what bots and people made or
+  may still read: `bot_files`, `attachments`, `synced`, `backups`, `trash`,
+  `logs`, `other`) or `rebuildable` (made again when missing:
+  `browser_cache`, `browser_engines`, `engine_clis`, `packages`, `caches`,
+  `temp`). Only a name the code lists is ever rebuildable; anything unknown
+  is `other`. A `node_modules` folder inside a bot's or person's folder
+  counts as `packages`. Bytes are allocated blocks, so a sparse file counts
+  what it takes on disk.
+- **Hard links** count once, checked by inode for up to 500,000 linked
+  files. Past that, `linksCapped` is true and `linksUncheckedBytes` is the
+  most that may be counted twice.
+- **`bots`** are the ten bots with the most bytes in `workspaces/`,
+  `task-workspaces/` and `bots/`, by id, and only bots the store knows. Every
+  other bot folder is summed in `botsRest`.
+- **`other`** names a first-level folder only from a fixed list of names our
+  code or the filesystem makes (`lost+found` and a few shell history files).
+  Anything else is summed in `unlisted` with no name, so a person's folder
+  name never leaves the home.
+- **`unwalkedBytes`** is the space the volume reports used minus what the
+  walk counted. It is positive for what the walk cannot see, such as deleted
+  files a process still holds open and filesystem metadata. It is negative
+  when the walk counted too much, which only happens past the hard-link check
+  or in a pass resumed after a restart (`resumes`).
+- **The cost.** A pass reads names and sizes only (lstat): it never opens a
+  file, never follows a link and never leaves the volume's filesystem. Each
+  tick, every 2 seconds, reads at most 2,000 entries or 25 ms. No tick starts
+  while a turn runs, and a tick stops at its next entry once one starts.
+  `progress.waitedS` is how long the current pass has waited for turns, so a
+  home that is never idle shows as one whose pass does not finish. The first
+  pass starts 2 minutes after boot, and the next one 6 hours after each pass
+  ends. The last pass is kept in the data folder's
+  `cache/storage-report.json`, and the pass under way in
+  `cache/storage-progress.json`, saved at most once a minute between two
+  folders of the top four levels. Backups leave both out. Neither is read
+  back when it is over 1 MB, and every count read back is checked to be
+  10 PB at most. A home that sleeps
+  by stopping keeps its report and picks the pass up where it left off.
+  Node has no per-call I/O priority, and lowering the server's own priority
+  would slow everything else, so the budget is the only throttle.
+
+The owner's own session can read the same report at
+`GET /api/diagnostics/storage` (admin scope; `{ "storage": null }` on
+anything but a Cloud home).
+
 **What it never carries:** a failure's words, a bot's name, a thread's title,
 a prompt, a URL, an email address, a token, or an engine's account
 (`ProviderSnapshot.account`). Only fixed codes, counts, times, versions, engine

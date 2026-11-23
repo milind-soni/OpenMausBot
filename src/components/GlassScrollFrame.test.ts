@@ -132,7 +132,7 @@ describe("the scroll fade", () => {
 });
 
 describe("a fading bar", () => {
-  const css = readFileSync("src/styles.css", "utf8");
+  const css = readFileSync("src/styles.css", "utf8").replace(/\r\n/g, "\n");
   const rule = (selector: string) => css.match(new RegExp(`(?:^|\\n)${selector.replace(/[[\]().:"]/g, "\\$&")} \\{[^}]*\\}`))?.[0] ?? "";
 
   it("marks itself, and a plain bar stays glass", () => {
@@ -152,7 +152,7 @@ describe("a fading bar", () => {
 });
 
 describe("Simple mode's floating chat header", () => {
-  const css = readFileSync("src/styles.css", "utf8");
+  const css = readFileSync("src/styles.css", "utf8").replace(/\r\n/g, "\n");
   const rule = (selector: string) => css.match(new RegExp(`(?:^|\\n)${selector.replace(/[[\]().:"]/g, "\\$&")} \\{[^}]*\\}`))?.[0] ?? "";
 
   it("draws no band, and the transcript fades in linearly over the 60px above the bar's bottom edge", () => {

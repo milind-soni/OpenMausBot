@@ -326,8 +326,9 @@ function lineSpan(text: string, index: number, length: number): { start: number;
   return { start, end: newline === -1 ? text.length : newline };
 }
 
-/** No await between reading the file and replacing it; shell writes by an engine or editor are not serialized. */
-export function updateMemory(botId: string, update: MemoryUpdate, opts: MemoryUpdateOptions = {}): MemoryUpdateResult {
+export type MemoryEdit = { ok: true; next: string; entry?: string } | { ok: false; error: string; code: "invalid" | "conflict" };
+
+function memoryUpdateProblem(update: MemoryUpdate): Extract<MemoryEdit, { ok: false }> | null {
   const needsText = update.action !== "remove";
   const needsOld = update.action !== "append";
   if (!["append", "replace", "remove", "supersede"].includes(update.action)
@@ -343,12 +344,15 @@ export function updateMemory(botId: string, update: MemoryUpdate, opts: MemoryUp
   if (update.until !== undefined && (!isMemoryDate(update.until) || (update.action !== "append" && update.action !== "supersede"))) {
     return { ok: false, code: "invalid", error: "until is a YYYY-MM-DD date, the last day the fact holds, and goes with append or supersede." };
   }
+  return null;
+}
+
+/** What one memory_update makes of a notes file's text, before any budget or write. */
+export function editMemoryText(current: string, update: MemoryUpdate, opts: MemoryUpdateOptions = {}): MemoryEdit {
+  const problem = memoryUpdateProblem(update);
+  if (problem) return problem;
   const entryOpts: MemoryUpdateOptions = update.until ? { ...opts, until: update.until } : opts;
   const text = update.text === undefined ? undefined : redactSecretsInText(update.text);
-  const dir = ensureWorkspace(botId);
-  // Not readMemoryFile's fallback: a failed read must never become an overwrite of old notes.
-  const raw = readMemoryText(join(dir, "MEMORY.md"));
-  const current = isMemorySeed(raw) ? "" : raw;
   const today = memoryDate(opts.now);
   const appendEntry = (base: string, entry: string) => `${base}${base && !base.endsWith("\n") ? "\n" : ""}${entry}\n`;
   let next: string;
@@ -395,6 +399,20 @@ export function updateMemory(botId: string, update: MemoryUpdate, opts: MemoryUp
       next = replaceLine(entry);
     }
   }
+  return { ok: true, next, ...(entry !== undefined ? { entry } : {}) };
+}
+
+/** No await between reading the file and replacing it; shell writes by an engine or editor are not serialized. */
+export function updateMemory(botId: string, update: MemoryUpdate, opts: MemoryUpdateOptions = {}): MemoryUpdateResult {
+  const problem = memoryUpdateProblem(update);
+  if (problem) return problem;
+  const dir = ensureWorkspace(botId);
+  // Not readMemoryFile's fallback: a failed read must never become an overwrite of old notes.
+  const raw = readMemoryText(join(dir, "MEMORY.md"));
+  const edit = editMemoryText(isMemorySeed(raw) ? "" : raw, update, opts);
+  if (!edit.ok) return edit;
+  const { next, entry } = edit;
+  const today = memoryDate(opts.now);
   const room = makeRoom(next, today, entry);
   // Archive first, with no await before MEMORY.md: a line never leaves MEMORY.md before it is in the archive.
   if (room.moved.length) appendMemoryArchive(botId, room.moved.map((moved) => moved.replace(/^.*/, `$&${SEP}moved ${today}`)));

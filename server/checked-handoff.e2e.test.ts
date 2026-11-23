@@ -104,19 +104,20 @@ it("says which other provider's AI a checker would start on only when asked: nul
   }
 }, 120_000);
 
-it("stops a worker and a checker that never agree: rework past four to the same checker under one request is refused", () => fixture(async (f) => {
-  const send = (rework: boolean, expectError = false) => ({ arguments: { bot_ids: [f.checker.id], message: "Check result.md against chapter.md and request.md.", rework }, ...(expectError ? { expectError } : {}) });
+it("keeps sending rework to the same checker under one request: no round limit, the worker decides when to stop", () => fixture(async (f) => {
+  const send = (rework: boolean) => ({ arguments: { bot_ids: [f.checker.id], message: "Check result.md against chapter.md and request.md.", rework } });
   f.plan = {
     [f.worker.id]: { turns: [
       { steps: [send(false)], reply: "Being checked." },
-      ...Array.from({ length: 4 }, () => ({ steps: [send(true)], reply: "Fixed and sent back." })),
-      { steps: [send(true, true)], reply: "Still open after the last round." },
+      ...Array.from({ length: 6 }, () => ({ steps: [send(true)], reply: "Fixed and sent back." })),
+      { reply: "Still open after six rounds." },
     ] },
     [f.checker.id]: { reply: "issues: 1\n1. Line 1: dusk should be dawn." },
   };
   await f.send(f.plan, "Improve the dialogue and have it checked.");
-  await expect.poll(() => f.turns(f.worker.id).length, { timeout: 60_000 }).toBe(6);
-  const last = f.turns(f.worker.id)[5].evidence.find((entry: any) => entry.step?.arguments?.rework);
-  expect(JSON.stringify(last.response)).toContain("past the limit of 4, so nothing was sent. Stop here");
-  expect(f.turns(f.checker.id)).toHaveLength(5);
+  await expect.poll(() => f.turns(f.worker.id).length, { timeout: 60_000 }).toBe(8);
+  const reworks = f.turns(f.worker.id).flatMap((turn: any) => turn.evidence.filter((entry: any) => entry.step?.arguments?.rework));
+  expect(reworks).toHaveLength(6);
+  for (const entry of reworks) expect(entry.response.result?.isError, JSON.stringify(entry.response)).toBeFalsy();
+  expect(f.turns(f.checker.id)).toHaveLength(7);
 }), 120_000);

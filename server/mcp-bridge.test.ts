@@ -1,7 +1,7 @@
 // Unit level: the 45 s e2e wait is too slow for the suite, and what matters is the decision table, not the constant.
 import { describe, expect, it, vi } from "vitest";
 
-import { CONTROL_REFUSAL_PLAIN, CONTROL_UNCONFIRMED, CONTROL_WAITED, type ControlState } from "./control-client.ts";
+import { CONTROL_CALL_LATE, CONTROL_REFUSAL_PLAIN, CONTROL_UNCONFIRMED, type ControlState } from "./control-client.ts";
 import {
   completeFor,
   createChildCalls,
@@ -296,7 +296,9 @@ describe("createGateInterceptor", () => {
       checks.shift()!(free);
       await Promise.all([held, queued]);
       expect(forwarded).toEqual([frame("tools/call", 1)]);
-      expect(refused.map((line) => [JSON.parse(line).id, refusalText(line)])).toEqual([[2, CONTROL_WAITED], [3, CONTROL_WAITED]]);
+      expect(refused.map((line) => [JSON.parse(line).id, refusalText(line)])).toEqual([[2, CONTROL_CALL_LATE], [3, CONTROL_CALL_LATE]]);
+      // Queued behind the previous call says nothing about the computer: no wait for it, no held seat, no instant next call.
+      expect(CONTROL_CALL_LATE).not.toMatch(/computer is free|had to wait for it|now has this computer|goes through at once/);
     } finally {
       vi.useRealTimers();
     }

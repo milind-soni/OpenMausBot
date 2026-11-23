@@ -135,6 +135,31 @@ describe("the Simple composer in a bot chat", () => {
     expect(menu()!.className.split(" ")).toEqual(expect.arrayContaining(["popover-surface", "rounded-[12px]", "w-max", "min-w-[200px]", "max-w-[280px]"]));
   });
 
+  it("has no place picker, and only marks a conversation an Advanced choice put somewhere other than its bot", () => {
+    const onVm = { ...bot, computer: "vm" as const };
+    const chat = (surface?: "cloud" | "vm", surfaceAuto?: true) => ({ ...onVm, tasks: [{ threadId: bot.threadId, title: "Chat", createdAt: 1, surface, surfaceAuto }] });
+    render({ bot: chat() });
+    expect(container.querySelector('[data-testid="place-chip"]')).toBeNull();
+    expect(container.querySelector('[data-testid="place-mark"]')).toBeNull();
+    openPlus();
+    expect([...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.getAttribute("data-menu-key"))).toEqual(["attach", "goal", "teach"]);
+    expect(document.body.textContent).not.toContain("Works on");
+
+    for (const [shown, marked] of [[chat("cloud"), true], [chat("vm"), false], [chat("cloud", true), false]] as const) {
+      flushSync(() => root.unmount());
+      root = createRoot(container);
+      render({ bot: shown });
+      const mark = container.querySelector<HTMLElement>('[data-testid="place-mark"]');
+      expect(Boolean(mark), JSON.stringify(shown.tasks)).toBe(marked);
+      expect(container.querySelector('[data-testid="place-chip"]')).toBeNull();
+      if (!mark) continue;
+      expect(mark.getAttribute("aria-label")).toBe("Where this conversation works: Cloud desktop");
+      expect(mark.closest("button")).toBeNull();
+      expect(mark.querySelector("button, [role=menu], [tabindex]")).toBeNull();
+    }
+    expect(fixture.dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "updateTask" }));
+  });
+
   it("starts a /learn draft from Teach a task, ahead of anything already typed", () => {
     restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "how I file expenses", attachments: [] });
     render({ bot });

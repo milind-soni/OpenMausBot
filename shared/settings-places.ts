@@ -52,6 +52,7 @@ export const SETTINGS_PLACES = [
   {"id":"about-you","path":"Settings → You and your bots → About you","words":["name","my name","photo","avatar","picture","profile","profile picture","about me","rules","rules for every bot"],"advanced":true},
   {"id":"away-emails","path":"Settings → You and your bots → About you → Email me when I'm away","words":["away","emails","email me"],"advanced":true},
   {"id":"new-bots","path":"Settings → You and your bots → New bots","words":["defaults","effort","reasoning","preset","share as preset"],"advanced":true},
+  {"id":"remote-teammates","path":"Settings → You and your bots → Teammates on other servers","words":["other servers","remote","another server","bot api key","teammates"],"advanced":true},
   {"id":"limits","path":"Settings → You and your bots → Limits","words":["group turns","timeout","tool time limit","parallel threads","concurrency","keep warm"],"advanced":true},
   {"id":"parallel","path":"Settings → You and your bots → Limits → Parallel threads","words":["parallel","threads","concurrency"],"advanced":true},
   {"id":"group-turns","path":"Settings → You and your bots → Limits → Group turns","words":["group","turns"],"advanced":true},

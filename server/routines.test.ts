@@ -4184,6 +4184,19 @@ describe("turning a schedule back on, and a deleted bot's schedules", () => {
   });
 });
 
+describe("an app-event run its automation refuses as it starts", () => {
+  it("does not start a queued app-event run its automation now refuses, and tells the hook which run it is", async () => {
+    const h = harness();
+    const refused = "Its bot may no longer use this account, so this event's run did not start";
+    h.options.pausedText = (_botId, run) => (run?.eventSource === "app" && run.webhookId === "trigger-1" ? refused : null);
+    h.manager.enqueueWebhook({ webhookId: "trigger-1", webhookName: "Sales mail", prompt: "Draft a reply.", botId: "maus-1", runOn: "maus", deliveryId: "msg_1", receivedAt: Date.now(), eventSource: "app" });
+    h.manager.enqueueWebhook({ webhookId: "trigger-2", webhookName: "Support mail", prompt: "Draft a reply.", botId: "maus-1", runOn: "maus", deliveryId: "msg_2", receivedAt: Date.now(), eventSource: "app" });
+    await h.manager.tick();
+    expect(h.started).toHaveLength(1);
+    expect(h.manager.listRuns().map((run) => [run.webhookId, run.status, run.error])).toEqual(expect.arrayContaining([["trigger-1", "failed", refused], ["trigger-2", "running", undefined]]));
+  });
+});
+
 describe("a reached usage cap", () => {
   const start = Date.parse("2026-09-13T08:00:00Z"), HOUR = 3_600_000, DAY = 24 * HOUR;
   const line = (count: number) => ({ text: count === 1 ? "Skipped: the cap is reached" : `Skipped ${count} runs: the cap is reached`, codes: {} });
