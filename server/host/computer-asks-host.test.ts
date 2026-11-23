@@ -19,15 +19,13 @@ function fixture({ computer = "on" as string, refusal = null as string | null, a
     groupByThread: () => room,
   };
   const lending = { lendingNow: vi.fn(() => [] as Array<{ id: string; name: string; computer: boolean; terminal: boolean }>), known: () => [{ platform: "win32" as const }], changed: () => {}, askTool: null as string | null };
-  const continued: unknown[] = [];
   const state = { busy: false };
   const host = createComputerAsksHost({
     store: store as never, notify: () => {}, lending: lending as never, principal: "cloud-home",
     threadBusy: () => state.busy, queued: () => false,
-    continueRequest: async (...args) => { continued.push(args); },
     refusal: () => refusal, request: () => ({ messageId: "u1", generations: new Set(["g1"]) }), active: () => active,
   });
-  return { host, lines, lending, continued, state };
+  return { host, lines, lending, state };
 }
 
 describe("ask_for_computer on the person's own Cloud", () => {
@@ -60,7 +58,7 @@ describe("ask_for_computer on the person's own Cloud", () => {
     expect(await f.host.call(turn, { need: "screen", why: "Open Excel" })).toEqual({ status: 200, body: { state: "ready", text: expect.stringContaining("computer_id pc-1") } });
   });
 
-  it("carries the request on once the computer is on, only when the conversation is free and nobody wrote since", async () => {
+  it("keeps the settled request interrupted when the requested computer becomes available", async () => {
     const f = fixture();
     const call = f.host.call(turn, { need: "screen", why: "Open Excel" });
     await vi.advanceTimersByTimeAsync(40_000);
@@ -69,10 +67,10 @@ describe("ask_for_computer on the person's own Cloud", () => {
     f.state.busy = true;
     f.lending.lendingNow.mockReturnValue([{ id: "pc-1", name: "PC", computer: true, terminal: false }]);
     f.host.asks.lendingChanged();
-    expect(f.continued).toEqual([]);
+    expect(f.lines.some(line => line.tool?.name.includes("Replay was blocked"))).toBe(false);
     f.state.busy = false;
     await vi.advanceTimersByTimeAsync(5_000);
-    expect(f.continued).toEqual([["scout", expect.stringContaining("Carry on with their request"), { threadId: "t1", cardContinuation: true, requestMessageId: "u1" }]]);
+    expect(f.lines.filter(line => line.tool?.name.includes("Replay was blocked"))).toHaveLength(1);
   });
 
   it("leaves the request alone when the person wrote since", async () => {
@@ -84,6 +82,6 @@ describe("ask_for_computer on the person's own Cloud", () => {
     f.lending.lendingNow.mockReturnValue([{ id: "pc-1", name: "PC", computer: true, terminal: false }]);
     f.host.asks.lendingChanged();
     await vi.advanceTimersByTimeAsync(10_000);
-    expect(f.continued).toEqual([]);
+    expect(f.lines.some(line => line.tool?.name.includes("Replay was blocked"))).toBe(false);
   });
 });

@@ -1,7 +1,9 @@
 // On the person's own Cloud: the asks its bots raise for their computer, read against what
-// lends now, the ask_for_computer call itself, and a request that goes on by itself once the computer is on.
+// lends now and the ask_for_computer call itself.
 import type { ServerResponse } from "node:http";
 
+import { REPLAY_BLOCKED } from "../replay-guard.ts";
+import { failedTurnTool } from "../../shared/failed-turn.ts";
 import { ComputerAsks } from "../computer-asks.ts";
 import type { json as sendJson } from "../harness/http.ts";
 import { PASS } from "../routes/table.ts";
@@ -20,7 +22,6 @@ export interface ComputerAsksHostDeps {
   principal: string;
   threadBusy(botId: string, threadId: string): boolean;
   queued(botId: string, threadId: string): boolean;
-  continueRequest(botId: string, text: string, opts: { threadId: string; cardContinuation: true; requestMessageId: string }): Promise<unknown>;
   /** Why this turn can't use the person's computer, in the words the bot says; null when it can. */
   refusal(turn: Turn): string | null;
   request(threadId: string): { messageId?: string; generations: ReadonlySet<string>; stopped?: boolean } | undefined;
@@ -35,14 +36,12 @@ export function createComputerAsksHost(deps: ComputerAsksHostDeps) {
     notify: deps.notify,
     online: () => deps.lending.lendingNow(deps.principal),
     known: () => deps.lending.known(deps.principal),
-    carryOn: ({ botId, threadId, requestMessageId }, text) => {
+    carryOn: ({ botId, threadId, requestMessageId }) => {
       if (!store.taskByThread(botId, threadId)) return true;
       if (deps.threadBusy(botId, threadId) || deps.queued(botId, threadId)) return false;
       // Someone wrote since the bot asked: they lead now.
       if (store.activePath(threadId).findLast((message) => message.role === "user" && message.kind === "text")?.id !== requestMessageId) return true;
-      void deps.continueRequest(botId, text, { threadId, cardContinuation: true, requestMessageId }).catch((error: unknown) => {
-        console.warn(`computer asks: the request could not go on: ${error instanceof Error ? error.message : String(error)}`);
-      });
+      store.appendMessage(threadId, { role: "bot", kind: "activity", tool: failedTurnTool(REPLAY_BLOCKED) });
       return true;
     },
   });

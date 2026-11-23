@@ -423,64 +423,27 @@ it.each(["Stop", "new message"])("does not recover a superseded turn after %s", 
   });
 }, 90_000);
 
-it("carries an OpenCode bot at its usage limit on with the bot's own backup, and its next message stays there", async () => {
-  await withRecoveryFixture({ enabled: false, method: "session/prompt", error: { code: -32603, message: "Free usage limit reached" } },
-    async ({ api, control, calls, backupPrompts, serverLog, evidence }) => {
-      const { bot } = await control("new-bot", "--name", "Researcher");
-      const threadId = bot.activeTaskId;
-      await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: primary, fallback: [backup] });
-      const send = (text: string) => control("send", "--bot", bot.id, "--task", threadId, "--text", text);
-      const wait = () => control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30");
-      const prompts = () => calls().filter((call) => call.method === "session/prompt").length;
-      const messages = async () => (await api("GET", `/api/threads/${threadId}/messages?limit=100`)).messages as any[];
-
-      await send("FIND_REEF_PAPERS_9W");
-      await wait();
-      await expect.poll(async () => (await messages()).some((message) => message.role === "bot" && message.kind === "text" && message.text === "hello from fake claude"),
-        { timeout: 20_000, message: "the backup answers the refused message" }).toBe(true);
-      expect((await wait()).status).toBe("settled");
-      expect(prompts(), "OpenCode refused it once").toBe(1);
-      expect(backupPrompts(), "the backup answered the same message").toHaveLength(1);
-      expect(JSON.stringify(backupPrompts()[0])).toContain("FIND_REEF_PAPERS_9W");
-      expect((await messages()).filter((message) => message.tool?.name?.startsWith("notice: continuing on"))).toHaveLength(1);
-      const task = (await api("GET", "/api/bots")).bots.find((entry: any) => entry.id === bot.id).tasks.find((entry: any) => entry.threadId === threadId);
-      expect(task.modelSelection).toEqual(backup);
-
-      await send("try again");
-      expect((await wait()).status).toBe("settled");
-      expect(prompts(), "the next message goes straight to the backup").toBe(1);
-      expect(backupPrompts()).toHaveLength(2);
-      const rows = await messages();
-      const followUp = rows.findLastIndex((message) => message.role === "user" && message.text === "try again");
-      expect(rows.slice(followUp + 1).filter((message) => message.role === "bot" && message.kind === "text"), "the backup answers the follow-up too")
-        .toEqual([expect.objectContaining({ text: "hello from fake claude", turnSucceeded: true })]);
-      expect(serverLog()).not.toContain("switch-refused");
-      evidence.push({ messages: await messages() });
-    });
-}, 90_000);
-
-it("moves an OpenCode bot whose refused turn had already run a tool to its own backup without sending the message again", async () => {
-  await withRecoveryFixture({ enabled: false, method: "session/prompt", afterOutput: true, error: { code: -32603, message: "Free usage limit reached" } },
+it.each([
+  { afterOutput: false, text: "FIND_REEF_PAPERS_9W" },
+  { afterOutput: true, text: "FILE_THE_TICKET_3K" },
+])("fails closed on an opaque OpenCode quota refusal (tool output: $afterOutput)", async ({ afterOutput, text }) => {
+  await withRecoveryFixture({ enabled: false, method: "session/prompt", afterOutput, error: { code: -32603, message: "Free usage limit reached" } },
     async ({ api, control, calls, backupPrompts, evidence }) => {
       const { bot } = await control("new-bot", "--name", "Researcher");
       const threadId = bot.activeTaskId;
       await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: primary, fallback: [backup] });
-      const send = (text: string) => control("send", "--bot", bot.id, "--task", threadId, "--text", text);
-      const wait = () => control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30");
       const messages = async () => (await api("GET", `/api/threads/${threadId}/messages?limit=100`)).messages as any[];
-      const task = async () => (await api("GET", "/api/bots")).bots.find((entry: any) => entry.id === bot.id).tasks.find((entry: any) => entry.threadId === threadId);
 
-      await send("FILE_THE_TICKET_3K");
-      await wait();
-      await expect.poll(async () => (await task()).modelSelection, { timeout: 20_000, message: "the conversation moves to the backup" }).toEqual(backup);
-      expect((await messages()).filter((message) => message.tool?.nameCode === "chat.notice.backupAlreadyRan")).toHaveLength(1);
-      expect(backupPrompts(), "what already ran is not sent again").toHaveLength(0);
-      expect((await messages()).filter((message) => message.role === "user" && message.text === "FILE_THE_TICKET_3K")).toHaveLength(1);
+      await control("send", "--bot", bot.id, "--task", threadId, "--text", text);
+      await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30");
+      await expect.poll(async () => (await messages()).some(message => message.tool?.name?.includes("Replay was blocked"))).toBe(true);
 
-      await send("what is left");
-      expect((await wait()).status).toBe("settled");
-      expect(calls().filter((call) => call.method === "session/prompt")).toHaveLength(1);
-      expect(backupPrompts()).toHaveLength(1);
-      evidence.push({ messages: await messages() });
+      const task = (await api("GET", "/api/bots")).bots.find((entry: any) => entry.id === bot.id).tasks.find((entry: any) => entry.threadId === threadId);
+      expect(task.modelSelection).toEqual(primary);
+      expect(calls().filter(call => call.method === "session/prompt")).toHaveLength(1);
+      expect(backupPrompts()).toHaveLength(0);
+      const rows = await messages();
+      expect(rows.filter(message => message.role === "user" && message.text === text)).toHaveLength(1);
+      evidence.push({ messages: rows });
     });
 }, 90_000);

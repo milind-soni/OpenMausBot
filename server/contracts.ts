@@ -1,3 +1,4 @@
+import type { ReplayRef } from "./replay-guard.ts";
 // Ported from upstream's provider contracts with Promises for Effect and listeners for Stream; shapes and names are kept.
 
 import type { ApprovalMode } from "../shared/approval-mode.ts";
@@ -124,6 +125,7 @@ export type RequestOutcome = "allowed-once" | "rejected" | "answered" | "unavail
 // Sessions start implicitly on the first turn; resumeCursor carries the provider-native continuation (e.g. a Claude session id).
 export interface SendTurnInput {
   threadId: ThreadId;
+  replayAttempt?: ReplayRef;
   /** Drivers namespace process-level resources (broker socket, CLI session) by botId too: threadIds may coincide across bots. */
   botId?: string;
   text: string;
@@ -189,7 +191,7 @@ export interface SendTurnInput {
       scope?: "local-computer";
     };
     /** Loopback URL and turn-scoped bearer for the engine's hook helper; hooks observe and inject context, never decide state. */
-    hooks?: { url: string; token: string };
+    hooks?: { url: string; token: string; replayGuard?: true };
     /** Peer-agent MCP proxy (list_bots / coordinate_bots); the harness owns turns, permissions and recursion limits. */
     agents?: { command: string; args: string[]; env: Record<string, string> };
     /** Physical Android phone tools over authorized USB debugging. */

@@ -77,27 +77,24 @@ it.each([false, true])("recovers the same conversation after an ACP internal err
 
     writeFileSync(failureFile, JSON.stringify({ code: -32603, message: "Internal error", data: { details: "OpenCode service failure" } }));
     await send(failedText);
-    // OpenMausBot retries the failed run once by itself, on a replacement process that loads the same session; the fake
-    // still refuses, so that retry fails too.
+    // A generic ACP error cannot prove the prompt stopped before any action.
     const failures = async () => (await messages()).filter((message) => message.tool?.ok === false && /OpenCode service failure/.test(message.tool.name));
-    await expect.poll(async () => (await failures()).length, { timeout: 20_000 }).toBe(2);
+    await expect.poll(async () => (await failures()).length, { timeout: 20_000 }).toBe(1);
     await expect.poll(async () => (await task()).busy, { timeout: 20_000 }).toBe(false);
-    expect((await messages()).filter((message) => message.role === "user" && message.text?.startsWith(AUTO_RETRY_LEAD))).toHaveLength(1);
-    expect(prompts()).toHaveLength(3);
+    expect((await messages()).filter((message) => message.role === "user" && message.text?.startsWith(AUTO_RETRY_LEAD))).toHaveLength(0);
+    expect(prompts()).toHaveLength(2);
     expect(prompts()[1].pid).toBe(firstProcess);
-    const retryProcess = prompts()[2].pid;
-    expect(retryProcess).not.toBe(firstProcess);
-    expect(calls().filter((call) => call.pid === retryProcess).map((call) => call.method)).toContain("session/load");
-    expect(calls().filter((call) => call.method === "session/prompt.error")).toHaveLength(2);
+    expect(calls().filter((call) => call.method === "session/prompt.error")).toHaveLength(1);
     evidence.push({ failedTask: await task(), promptCallsBeforeRetry: prompts() });
 
-    // The fake keeps the error cached in its process even after removal.
-    // Only a replacement process can answer this explicit next user message.
+    // The next explicit send loads the saved session on a replacement process.
     rmSync(failureFile);
     await send(retryText);
     expect((await wait()).status).toBe("settled");
-    expect(prompts()).toHaveLength(4);
-    expect([firstProcess, retryProcess]).not.toContain(prompts()[3].pid);
+    expect(prompts()).toHaveLength(3);
+    const replacement = prompts()[2].pid;
+    expect(replacement).not.toBe(firstProcess);
+    expect(calls().filter((call) => call.pid === replacement).map((call) => call.method)).toContain("session/load");
     const prompt = JSON.stringify(JSON.parse(readFileSync(`${dumpFile}.prompt.json`, "utf8")));
     expect(prompt.split(retryText).length - 1).toBe(1);
     expect(prompt).not.toContain(firstText);

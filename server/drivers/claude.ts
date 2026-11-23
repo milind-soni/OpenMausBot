@@ -798,6 +798,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         updateRequired?: boolean;
         limit?: ClaudeLimit | null;
         limitReached?: boolean;
+        replayRefusal?: "quota" | "auth_required";
         explained?: boolean;
         stopRequested?: boolean;
         /** Steer uuids no model call has taken in yet. Without --replay-user-messages the CLI never
@@ -1126,7 +1127,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const own: Record<string, unknown> = { ...authSettings, env: { ...authSettings.env, ENABLE_TOOL_SEARCH: toolSearch, ...(isolated ? CLAUDE_OWN_MEMORY_OFF : {}) } };
       // Project-only settings still find the personal memory and rules via ancestors when the bot lives under HOME.
       if (isolated) own.claudeMdExcludes = [join(homedir(), ".claude", "CLAUDE.md"), join(homedir(), ".claude", "rules", "**")];
-      if (hooks) own.hooks = claudeHookSettings(HOOK_HELPER_PATH);
+      if (hooks) own.hooks = claudeHookSettings(HOOK_HELPER_PATH, process.platform, hooks.replayGuard);
       if (turn.guestConfined) own.permissions = GUEST_CLAUDE_PERMISSIONS;
       // Approvals and browser credentials expire at the turn boundary; native background workers and cron jobs must not outlive it.
       env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = env.CLAUDE_CODE_DISABLE_CRON = "1";
@@ -1360,7 +1361,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         else if (session.teamToolsFailed) closeSession(threadId, "team tools did not connect");
         const cost = turnCostFromRunningTotal(total, session.costTotal ?? null);
         if (total !== null) session.costTotal = total;
-        emit({ ...base(threadId, t.turnId), type: "turn.completed", ok, stopReason, cost, ...(usage ? { usage } : {}) });
+        emit({ ...base(threadId, t.turnId), type: "turn.completed", ok, stopReason, cost, ...(!ok && !t.answered && !t.sawStreamDelta && stopReason === t.replayRefusal ? { replayNoDispatch: true as const } : {}), ...(usage ? { usage } : {}) });
         if (session.child.exitCode === null && !session.closing) armIdle(threadId);
       };
       const settleResult = (result: NativeTurnResult) => settle(result.ok, result.stopReason, result.cost, result.usage);
@@ -1464,6 +1465,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             const text = firstText(msg.content);
             const swap = modelSwapNotice(session, threadId, session.turn?.input.model, o, models);
             if (swap) emit({ ...base(threadId, currentTurnId()), type: "runtime.notice", message: swap });
+            if (session.turn && msg.model === "<synthetic>" && o.is_api_error_message === true && o.error === "authentication_failed") {
+              session.turn.replayRefusal = "auth_required";
+            }
             // Signed out, the CLI answers with an api-error frame whose only content is "run /login".
             if (claudeAuthFailure(o, text)) {
               if (session.turn) session.turn.authFailed = session.turn.explained = true;
@@ -1473,6 +1477,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             if (claudeUsageLimit(o, text, Boolean(session.turn?.limit))) {
               reachLimit(o, text);
               break;
+            }
+            if (typeof msg.model === "string" && msg.model !== "<synthetic>" && !o.error && !o.is_api_error_message) {
+              emit({ ...base(threadId, currentTurnId()), type: "turn.serving-model", model: msg.model });
             }
             if (claudeVersionTooOld(o, text)) {
               if (session.turn) session.turn.updateRequired = session.turn.explained = true;
@@ -1543,6 +1550,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               session.resumeRefusal = claudeResultError(o);
               closeSession(threadId, "resume refused");
               break;
+            }
+            if (session.turn && o.is_error === true && o.terminal_reason === "api_error" && o.api_error === "usage_limit_reached") {
+              session.turn.replayRefusal = "quota";
             }
             if (o.is_error === true && !session.turn?.authFailed && (session.turn?.limit ||
                 o.api_error === "usage_limit_reached" || USAGE_LIMIT.test(String(o.result ?? "")))) reachLimit(o, o.result);
@@ -1669,9 +1679,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           const retry = retryState.get(threadId) ?? { attempt: 0, cancelled: false };
           const message = `claude exited ${code} before result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}`;
           const verdict = classifyError({ exitCode: code, stderr: message });
+          const quotaStop = session.turn.limitReached === true || verdict.reason === "quota" || verdict.reason === "rate_limited";
+          const unverifiedDispatch = Boolean(turn.replayAttempt && session.turn.awaitingInit !== true);
           const endedBeforeTurn = session.turn.awaitingInit === true || (refusedAutocompact && !session.turn.sawStreamDelta && session.turn.answered !== true);
           if (!retry.cancelled && !stoppedForRoom(threadId, session.child.pid) && mayResendTurn({ endedBeforeTurn, exitCode: code, transient: verdict.transient,
-            streamed: session.turn.sawStreamDelta, answered: session.turn.answered === true, attempt: retry.attempt })) {
+            streamed: session.turn.sawStreamDelta, answered: session.turn.answered === true, attempt: retry.attempt, quotaStop, unverifiedDispatch })) {
             // `active` stays: an interrupt during the backoff reaches stop() and cancels the retry.
             const failedBroker = session.broker;
             session.broker = undefined;
@@ -1721,7 +1733,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             promptSubmitted: session.sawInit,
             producedOutput: session.turn.sawStreamDelta,
           });
-          if (mayReplay(resumeFailure) && !retry.cancelled) {
+          if (!quotaStop && !unverifiedDispatch && mayReplay(resumeFailure) && !retry.cancelled) {
             // Without this line a refused --resume looks like an ordinary new session in the logs.
             console.error(`claude (${instanceId}): could not resume session ${sessionId} for thread ${threadId}, starting a new one: ${redactSecretsInText(session.resumeRefusal ?? message)}`);
             const recovery = recoveryPromptFor({

@@ -1,3 +1,4 @@
+import { REPLAY_BLOCKED, type ReplayRef } from "../replay-guard.ts";
 import { approvalModeFor } from "../../shared/approval-mode.ts";
 import { recoveryCapabilityError } from "../automatic-recovery.ts";
 import type { InstanceConfigMap } from "../contracts.ts";
@@ -24,6 +25,7 @@ export interface PeerTurnOpts<Outcome> {
   compactOnly?: boolean;
   /** This bot-to-bot turn is already the one resend on the backup AI. */
   peerLimitResent?: boolean;
+  replay?: ReplayRef;
 }
 
 /** A bot-to-bot turn (a relayed ask or a teammate's assignment) that may go to the bot's backup AI once. */
@@ -77,6 +79,7 @@ export interface PeerLimitResendDeps<Opts, Outcome> {
   settle(generation: string, outcome: Outcome): void;
   /** Lets go of the failed attempt's hand-off: the resend owns its result. */
   release(generation: string): void;
+  guardReplay?(turn: PeerTurn<Opts>): ReplayRef | undefined;
   startTurn(botId: string, text: string, opts: Opts): Promise<unknown>;
 }
 
@@ -188,6 +191,9 @@ export function createPeerLimitResend<Opts extends PeerTurnOpts<Outcome>, Outcom
       if (refusal || !checked.ok) return giveUp(refusal);
       try {
         deps.assertWithinBudget();
+        const replay = deps.guardReplay?.(turn);
+        if (deps.guardReplay && !replay) return giveUp(REPLAY_BLOCKED);
+        turn.opts = { ...turn.opts, replay };
         store.switchTaskModel(turn.botId, threadId, checked.selection, false, false, { ...deps.hostedModels?.resetTask(from, checked.selection), rewound: true });
       } catch (error) {
         return giveUp(error instanceof Error ? error.message : String(error));

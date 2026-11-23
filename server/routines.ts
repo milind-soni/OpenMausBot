@@ -1,3 +1,4 @@
+import { REPLAY_BLOCKED } from "./replay-guard.ts";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -235,6 +236,7 @@ export interface RoutineChecks {
 }
 
 export interface RoutineManagerOptions {
+  replayEvidence?(run: RoutineRun): boolean;
   file?: string;
   now?: () => number;
   /** Every payload must be `{ kind, … }`: the server numbers and replays frames by it. */
@@ -379,6 +381,12 @@ export class RoutineManager {
         this.wait(run, ROUTINE_HANDOFF_WAIT);
         continue;
       } const froze = run.threadId && turnRan ? this.options.restartCut?.(run.threadId, run.startedAt) ?? null : null; // A run waiting on hand-offs keeps waiting; one whose turn ran through a memory freeze ends.
+      if (this.options.replayEvidence && !this.options.replayEvidence(run)) {
+        Object.assign(run, { status: "failed", error: REPLAY_BLOCKED, attention: undefined, finishedAt: this.now() } satisfies Partial<RoutineRun>);
+        if (run.target === "room-goal") run.goalStatus = "failed";
+        cut.push(cloneRun(run));
+        continue;
+      }
       if (froze !== null || !requeueOnce(run, "restarted", ROUTINE_RESTARTED, this.now(), restartRetryAt(this.now(), restarts++, this.ledger.retryAfterBoot(run)))) {
         Object.assign(run, { status: "failed", error: froze ?? ROUTINE_RESTARTED, attention: undefined, finishedAt: this.now() } satisfies Partial<RoutineRun>);
         if (run.target === "room-goal") run.goalStatus = "failed";
@@ -1142,6 +1150,10 @@ export class RoutineManager {
         const paused = run.target === "room-goal" ? null : this.options.pausedText?.(run.botId, run);
         if (!this.ledger.ready(run)) continue; if (this.ledger.startedElsewhere(run)) { const line = codedLine("error", "routines.server.duplicate"); Object.assign(run, line.codes); void this.cancelRun(run.id, line.text); continue; }
         if (paused) { if (triggerSource !== "manual" && this.options.held?.(run.botId)) void this.cancelRun(run.id, paused); else this.failRun(run, paused); continue; } const startedBy = run.byPerson ? "manual" : triggerSource, capped = this.options.capText?.(run.botId, startedBy); if (capped) { if (startedBy === "manual") this.failRun(run, capped); else void this.cancelRun(run.id, capped); continue; } const gated = triggerSource === "manual" ? false : this.gate.hold(run); if (gated === true) { if (this.options.preparing && run.attention !== this.options.preparing) { run.attention = this.options.preparing; this.emitRun(run); } continue; } if (gated) { const again = wakeRetry(run, gated, definition, this.now()); if (again === true) { this.saveLater(); this.emitRun(run); } else this.failRun(run, again); continue; }
+        if (run.retried && this.options.replayEvidence && !this.options.replayEvidence(run)) {
+          this.failRun(run, REPLAY_BLOCKED);
+          continue;
+        }
         const startedAt = this.now();
         const suffix = ` · ${new Date(startedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
         const title = `${run.routineName.slice(0, 80 - suffix.length).trimEnd()}${suffix}`;
@@ -1322,7 +1334,8 @@ export class RoutineManager {
     this.failureFacts.delete(run.id);
     if (this.closing) return;
     const held = facts.limit !== undefined || facts.limitResetsAt !== undefined ? facts.limit ?? "engine" : facts.stopReason === "auth_required" ? "signed-out" : undefined, backupReady = held !== undefined && this.options.limitBackup?.(run.botId, held) === true;
-    const recovery = recoverRun(run, failure, { ...facts, ...(backupReady ? { backupReady } : {}), nextScheduled: nextScheduledRun(run, this.routines) }, this.now(), this.ownerNotices);
+    const recovery = recoverRun(run, failure, { ...facts, ...(backupReady ? { backupReady } : {}), nextScheduled: nextScheduledRun(run, this.routines) }, this.now(), this.ownerNotices,
+      () => this.options.replayEvidence?.(run) !== false);
     if (!recovery.queued) this.failRun(Object.assign(run, { partial: (facts.partial && Boolean(run.output)) || undefined }), recovery.error, "failed", recovery.alert);
     else {
       this.saveLater();

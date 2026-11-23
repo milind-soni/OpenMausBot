@@ -1,6 +1,6 @@
-export type FakeHookEvent = "PostToolUse" | "PostToolUseFailure" | "PreCompact" | "SessionStart" | "Stop";
+export type FakeHookEvent = "PreToolUse" | "PostToolUse" | "PostToolUseFailure" | "PreCompact" | "SessionStart" | "Stop";
 
-const MATCHED_FIELD: Record<FakeHookEvent, string | null> = { PostToolUse: "tool_name", PostToolUseFailure: "tool_name", PreCompact: "trigger", SessionStart: "source", Stop: null };
+const MATCHED_FIELD: Record<FakeHookEvent, string | null> = { PreToolUse: "tool_name", PostToolUse: "tool_name", PostToolUseFailure: "tool_name", PreCompact: "trigger", SessionStart: "source", Stop: null };
 
 /** Whether a settings hook's `matcher` selects an event, as the Claude Code hooks reference describes it: an event with no
  * matcher field ignores it; "", "*" or none match all; a matcher of only letters, digits, `_`, `-`, spaces, `,` and `|` is

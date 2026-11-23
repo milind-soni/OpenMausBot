@@ -1,3 +1,4 @@
+import { REPLAY_BLOCKED, type ReplayRef } from "./replay-guard.ts";
 import { type ServerText } from "../shared/server-text.ts";
 // Security invariants: only an "answer" may name an engine (a decline, or typed words matching no option, is "Not now"),
 // so a bot's own shell with decline-only service trust can never switch the engine or resend the person's message.
@@ -29,6 +30,7 @@ export interface QuotaSwitchEngine {
 
 export interface QuotaRequest {
   generations: ReadonlySet<string>;
+  replay?: ReplayRef;
   messageId?: string;
   turnId: string | null;
   stopped?: boolean;
@@ -52,7 +54,8 @@ export interface QuotaSwitchDeps {
   busy: (botId: string, threadId: string) => boolean;
   request: (threadId: string) => QuotaRequest | undefined;
   /** A line spoken on a Live call is resent as spoken, so its words stay out of the log. */
-  resend: (botId: string, threadId: string, message: Message, replyTo: Message | undefined, spoken: { via?: "call"; callId?: string }) => Promise<unknown>;
+  guardReplay?: (botId: string, threadId: string, ref: ReplayRef | undefined, site: "direct-quota" | "quota-card") => ReplayRef | undefined;
+  resend: (botId: string, threadId: string, message: Message, replyTo: Message | undefined, spoken: { via?: "call"; callId?: string }, replay?: ReplayRef) => Promise<unknown>;
   enabled?: () => boolean;
   after?: (ms: number, run: () => void) => { cancel(): void };
 }
@@ -76,6 +79,7 @@ const ENDED: ReadonlySet<string> = new Set(["completed", "failed", "cancelled"])
 /** Why a failed turn stopped, when it was its AI's usage limit or a sign-out. A tool call's failure names the tool,
  * never the engine's own limit, whatever its words. */
 export function turnLimitScope(event: SettledTurn, flags: { limit?: TakeoverScope } | undefined, cause: string | undefined): TakeoverScope | undefined {
+  if (event.stopReason === "tool_error") return undefined;
   return signedOutStop(event.stopReason, cause) ? "signed-out"
     : flags?.limit ?? (event.stopReason !== "tool_error" && classifyError({ text: cause ?? "" }).reason === "quota" ? "engine" : undefined);
 }
@@ -178,6 +182,13 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
     if (weighed && !weighed.backups.some((backup) => sameModel(backup, selection))) return { why: weighed.skipped.find((left) => sameModel(left.selection, selection))?.why ?? "not-configured" };
     const checked = deps.gate(bot, selection);
     if (!checked.ok) return { why: "switch-refused", detail: checked.error };
+    let replay: ReplayRef | undefined;
+    if (deps.guardReplay) {
+      const held = heldBy(botId, threadId, rootOf(threadId, request));
+      if (held || deps.request(threadId) !== request || !resendable(store, threadId, request.messageId)) return { why: "conversation-changed" };
+      replay = deps.guardReplay(botId, threadId, request.replay, "direct-quota");
+      if (!replay) return { why: "switch-refused", detail: REPLAY_BLOCKED };
+    }
     try {
       store.switchTaskModel(botId, threadId, checked.selection, false, false, deps.reset?.(bot.modelSelection, checked.selection));
     } catch (error) {
@@ -199,7 +210,7 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
     } else {
       notice(threadId, `continuing on ${name} ${why}`, true, false, { key: scope === "signed-out" ? "chat.notice.backupContinuingSignedOut" : "chat.notice.backupContinuingLimit", params: { name, engine: nameOf(current) } });
       try {
-        await deps.resend(botId, threadId, original, original.replyToId ? store.messagesFor(threadId).find((message) => message.id === original.replyToId) : undefined, spokenLineFields(original.via, original.callId));
+        await deps.resend(botId, threadId, original, original.replyToId ? store.messagesFor(threadId).find((message) => message.id === original.replyToId) : undefined, spokenLineFields(original.via, original.callId), replay);
       } catch (error) {
         if (store.taskByThread(botId, threadId)) notice(threadId, `could not continue on ${name}: ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}`, false, false, { key: "chat.notice.backupCouldNotContinue", params: { name, error: (error instanceof Error ? error.message : String(error)).slice(0, 200) } });
       }
@@ -258,6 +269,10 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
             return null;
           }
           skipped.push({ selection, ...why });
+          if (why.detail === REPLAY_BLOCKED) {
+            notice(threadId, REPLAY_BLOCKED, false);
+            break;
+          }
         }
       } finally {
         building.delete(build);
@@ -329,9 +344,16 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
     if (selection === "probe-timed-out") return refuse(`${chosen.name} did not answer in time — nothing switched. Try again in a moment.`);
     if (typeof selection === "string") return refuse(`${chosen.name} is no longer available — nothing switched.`);
     const already = bot.modelSelection.instanceId === selection.instanceId;
+    const checked = already ? { ok: true as const, selection } : deps.gate(bot, selection);
+    if (!checked.ok) return refuse(`could not switch to ${chosen.name} — ${checked.error}`);
+    let replay: ReplayRef | undefined;
+    if (deps.guardReplay) {
+      const ref = card.quotaSwitch!.replay;
+      if (heldBy(botId, threadId, card.quotaSwitch!.rootId) || !resendable(store, threadId, card.quotaSwitch!.messageId)) return refuse(REPLAY_BLOCKED, closed);
+      replay = deps.guardReplay(botId, threadId, ref, "quota-card");
+      if (!replay) return refuse(REPLAY_BLOCKED, closed);
+    }
     if (!already) {
-      const checked = deps.gate(bot, selection);
-      if (!checked.ok) return refuse(`could not switch to ${chosen.name} — ${checked.error}`);
       try {
         store.switchTaskModel(botId, threadId, checked.selection, false, false, deps.reset?.(bot.modelSelection, checked.selection));
       } catch {
@@ -352,7 +374,7 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
     } else {
       notice(threadId, `continuing on ${chosen.name} after hitting quota`, true);
       try {
-        await deps.resend(botId, threadId, original, original.replyToId ? store.messagesFor(threadId).find((message) => message.id === original.replyToId) : undefined, spokenLineFields(original.via, original.callId));
+        await deps.resend(botId, threadId, original, original.replyToId ? store.messagesFor(threadId).find((message) => message.id === original.replyToId) : undefined, spokenLineFields(original.via, original.callId), replay);
       } catch (error) {
         if (store.taskByThread(botId, threadId)) {
           notice(threadId, `could not continue on ${chosen.name} — ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}`, false);

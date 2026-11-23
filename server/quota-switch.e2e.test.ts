@@ -1,3 +1,4 @@
+import { readReplayAudit } from "./testing/replay-audit.ts";
 // The fake CLI plays the frames Claude Code 2.1.295 sent past its weekly limit.
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, writeFileSync } from "node:fs";
@@ -18,13 +19,14 @@ const jsonLines = (path: string): any[] => existsSync(path)
   ? readFileSync(path, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
 
 async function withQuotaFixture(
-  options: { env?: Record<string, string>; otherSignInOnly?: boolean },
+  options: { env?: Record<string, string>; otherSignInOnly?: boolean; action?: "read" | "write" | "unknown"; actionPrompt?: string },
   check: (fixture: {
     api: (method: string, path: string, body?: unknown) => Promise<any>;
     control: (...args: string[]) => Promise<any>;
     respond: (threadId: string, body: unknown) => Promise<{ status: number; body: any }>;
     backupPrompts: () => any[];
     dataDir: string;
+    restartBaseline: (root: string) => Promise<void>;
   }) => Promise<void>,
 ) {
   const port = await freePortBlock([0, 1]);
@@ -39,7 +41,9 @@ async function withQuotaFixture(
     ({ driver: "claudeAgent", displayName, config: { cli: FAKE_CLI }, environment });
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
     instances: {
-      claude: engine(LIMITED, { FAKE_CLAUDE_MODE: "usage-limit" }),
+      claude: engine(LIMITED, { FAKE_CLAUDE_MODE: "usage-limit", ...(options.action ? {
+        FAKE_CLAUDE_HOOKS: "1", FAKE_CLAUDE_REPLAY_ACTION: options.action, FAKE_CLAUDE_REPLAY_ACTION_PROMPT: options.actionPrompt ?? "CHECK_THE_SYNTHETIC_ACTION", FAKE_CLAUDE_REPLAY_ACTION_LOG: join(dataDir, "actions.txt"),
+      } : {}) }),
       ...(options.otherSignInOnly
         ? { backup: engine(OTHER_SIGN_IN, { FAKE_CLAUDE_MODE: "happy", FAKE_CLAUDE_PROMPTS: backupFile, FAKE_CLAUDE_TOOL_CALLS: "[]" }) }
         : { codex: { driver: "codex", config: { cli: FAKE_CODEX }, environment: { FAKE_CODEX_DUMP: backupFile } } }),
@@ -70,16 +74,30 @@ async function withQuotaFixture(
     evidence.push({ respond: body, answer });
     return answer;
   };
-  try {
-    const env = { ...verificationServerEnvironment({}, dataDir, port), ...options.env };
+  const candidateRoot = fileURLToPath(new URL("..", import.meta.url));
+  const start = async (root = candidateRoot, baseline = false) => {
+    const env = { ...verificationServerEnvironment({}, dataDir, port), ...options.env, ...(baseline ? { OMB_QUOTA_SWITCH: "0" } : {}) };
     const log = openSync(logPath, "a", 0o600);
-    server = spawn(process.execPath, verificationServerArgs(env), {
-      cwd: fileURLToPath(new URL("..", import.meta.url)), env, stdio: ["ignore", log, log],
-    });
+    const args = verificationServerArgs(env);
+    args[args.length - 1] = join(root, "server", "index.ts");
+    server = spawn(process.execPath, args, { cwd: root, env, stdio: ["ignore", log, log] });
     closeSync(log);
     await expect.poll(async () => {
       try { return (await fetch(url + "/api/health", { signal: AbortSignal.timeout(1_000) })).ok; } catch { return false; }
     }, { timeout: 90_000 }).toBe(true);
+  };
+  const restartBaseline = async (root: string) => {
+    await waitForExit(server, { signal: "SIGTERM" });
+    await start(root, true);
+  };
+  try {
+    await start();
+    if (options.action) {
+      const { bots } = await api("GET", "/api/bots") as { bots: { id: string; chiefOfStaff?: boolean }[] };
+      for (const bot of bots.filter(entry => entry.chiefOfStaff)) {
+        await api("PATCH", `/api/bots/${bot.id}`, { chiefOfStaff: false });
+      }
+    }
     if (!options.otherSignInOnly) {
       await expect.poll(async () => {
         const { instances } = await api("GET", "/api/instances") as { instances: any[] };
@@ -91,9 +109,9 @@ async function withQuotaFixture(
       if (options.otherSignInOnly) return jsonLines(backupFile);
       try { return (JSON.parse(readFileSync(backupFile, "utf8")).calls as any[]).filter((call) => call.method === "turn/start"); } catch { return []; }
     };
-    await check({ api, control, respond, backupPrompts: sent, dataDir });
+    await check({ api, control, respond, backupPrompts: sent, dataDir, restartBaseline });
   } finally {
-    evidence.push({ backupPrompts: existsSync(backupFile) ? readFileSync(backupFile, "utf8").slice(0, 20_000) : null, roots: readHandoffs(dataDir) });
+    evidence.push({ audit: readReplayAudit(dataDir), backupPrompts: existsSync(backupFile) ? readFileSync(backupFile, "utf8").slice(0, 20_000) : null, roots: readHandoffs(dataDir) });
     const evidencePath = `${logPath}.quota-switch.json`;
     writeFileSync(evidencePath, JSON.stringify(evidence, null, 2));
     await waitForExit(server, { signal: "SIGTERM" });
@@ -176,5 +194,52 @@ it("moves nothing when OMB_QUOTA_SWITCH=0 switches it off", async () => {
     expect((await messages()).filter((message) => message.role === "user")).toHaveLength(1);
     expect((await state()).tasks.find((task: any) => task.threadId === threadId).modelSelection?.instanceId ?? "claude").toBe("claude");
     expect(backupPrompts()).toHaveLength(0);
+  });
+}, 240_000);
+
+
+it.each(["read", "write", "unknown"] as const)("gates a quota stop after a synthetic %s action", async (action) => {
+  await withQuotaFixture({ action }, async ({ api, control, backupPrompts, dataDir }) => {
+    const { threadId, messages } = await meetTheLimit(api, control, "CHECK_THE_SYNTHETIC_ACTION", false, "codex");
+    await expect.poll(async () => (await messages()).some(row => row.tool?.name?.includes("Replay was blocked"))).toBe(true);
+    expect(backupPrompts()).toHaveLength(0);
+    const audit = readReplayAudit(dataDir);
+    expect(audit.attempts).toContainEqual(expect.objectContaining({ thread: threadId, outcome: "interrupted", servingModel: "claude-fixture-served" }));
+    expect(audit.attempts.filter(row => row.thread === threadId)).toHaveLength(1);
+    expect(audit.actions).toContainEqual(expect.objectContaining({ kind: action === "read" ? "read" : "effect", status: action === "unknown" ? "unknown" : "confirmed" }));
+    if (action !== "unknown") expect(JSON.stringify(await messages())).toContain("fixture-result-preserved");
+    expect(readFileSync(join(dataDir, "actions.txt"), "utf8").trim()).toBe(action);
+  });
+}, 240_000);
+
+
+it("blocks a submitted hookless Claude quota attempt despite a configured backup", async () => {
+  await withQuotaFixture({ env: { OMB_HOOKS: "0" } }, async ({ api, control, backupPrompts, dataDir }) => {
+    const { threadId, messages } = await meetTheLimit(api, control, "HOOKLESS_QUOTA_REQUEST", false, "codex");
+    await expect.poll(async () => (await messages()).some(row => row.tool?.name?.includes("Replay was blocked"))).toBe(true);
+    expect(backupPrompts()).toHaveLength(0);
+    expect(readReplayAudit(dataDir).attempts.filter(row => row.thread === threadId)).toEqual([
+      expect.objectContaining({ outcome: "interrupted", evidence: "uncertain" }),
+    ]);
+  });
+}, 240_000);
+
+const baselineRoot = process.env.OMB_REPLAY_BASELINE_ROOT;
+it.skipIf(!baselineRoot)("12 pinned baseline boots with recovery off and preserves quarantined blocked work without replay", async () => {
+  await withQuotaFixture({ action: "write", actionPrompt: "VERIFY_QUARANTINED_SYNTHETIC_WORK" }, async ({ api, control, backupPrompts, dataDir, restartBaseline }) => {
+    const { bot, threadId, messages } = await meetTheLimit(api, control, "VERIFY_QUARANTINED_SYNTHETIC_WORK", false, "codex");
+    await expect.poll(async () => (await messages()).some(row => row.tool?.name?.includes("Replay was blocked"))).toBe(true);
+    const blocked = readReplayAudit(dataDir);
+    expect(blocked.attempts).toContainEqual(expect.objectContaining({ thread: threadId, outcome: "interrupted" }));
+    await api("PATCH", `/api/bots/${bot.id}`, { fallback: [] });
+    await api("PUT", "/api/config", { automaticRecovery: { enabled: false } });
+    await restartBaseline(baselineRoot!);
+    expect((await api("GET", "/api/config")).automaticRecovery).toEqual({ enabled: false });
+    expect((await api("GET", "/api/bots")).bots.find((entry: { id: string }) => entry.id === bot.id)?.fallback ?? []).toEqual([]);
+    expect(JSON.stringify(await messages())).toContain("fixture-result-preserved");
+    expect((await messages()).some(row => row.tool?.name?.includes("Replay was blocked"))).toBe(true);
+    expect(readReplayAudit(dataDir)).toEqual(blocked);
+    expect(backupPrompts()).toHaveLength(0);
+    expect(readFileSync(join(dataDir, "actions.txt"), "utf8").trim()).toBe("write");
   });
 }, 240_000);

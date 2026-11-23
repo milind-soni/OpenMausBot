@@ -22,6 +22,8 @@ export interface SavedStepsDeps {
   stopped(threadId: string): boolean;
   generation(threadId: string): string | undefined;
   patchMessage(threadId: string, messageId: string, patch: Partial<Message>): void;
+  reserveAction?: DispatchDeps["reserveAction"];
+  guardReplay?: DispatchDeps["guardReplay"];
   withholdHandoff: DispatchDeps["withholdHandoff"];
   contextChanged: DispatchDeps["contextChanged"];
   folder?: (botId: string) => string;
@@ -87,6 +89,8 @@ export function createSavedSteps(deps: SavedStepsDeps): SavedSteps {
     stopped: deps.stopped,
     openCaller: openComputerCaller,
     taint,
+    reserveAction: deps.reserveAction,
+    guardReplay: deps.guardReplay,
     withholdHandoff: deps.withholdHandoff,
     contextChanged: deps.contextChanged,
   });

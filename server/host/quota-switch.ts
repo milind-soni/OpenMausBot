@@ -1,3 +1,4 @@
+import type { ReplayRef } from "../replay-guard.ts";
 import type { ResolvedSender } from "../../shared/wire.ts";
 import type { InstanceConfigMap } from "../contracts.ts";
 import type { DataContext } from "../data-context.ts";
@@ -8,7 +9,7 @@ import type { BotRecord, Message } from "../store.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
 import { resolveYourComputerAsk } from "../your-computer-consent.ts";
 
-export interface QuotaSwitchHostDeps extends Pick<QuotaSwitchDeps, "store" | "coordinator" | "turnStops" | "takeover"> {
+export interface QuotaSwitchHostDeps extends Pick<QuotaSwitchDeps, "store" | "coordinator" | "turnStops" | "takeover" | "guardReplay"> {
   registry: Pick<ProviderRegistry, "instances" | "access">;
   hostedModels: ReturnType<typeof hostedModelPolicy>;
   providerConfigs(): InstanceConfigMap;
@@ -20,6 +21,7 @@ export interface QuotaSwitchHostDeps extends Pick<QuotaSwitchDeps, "store" | "co
   directRequestOwners: { get(threadId: string): QuotaRequest | undefined };
   /** Other cards the harness raises and settles itself: true when it was one. */
   ownCards?(requestId: string, behavior: "allow" | "deny" | "answer"): boolean;
+  replayDirect?(botId: string, threadId: string, original: Message, replyTo: Message | undefined, replay: ReplayRef): Promise<unknown>;
   startOrQueueDirectMessage(
     botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string, sender?: ResolvedSender,
     trigger?: UsageTrigger, via?: "call", callId?: string, dataContext?: DataContext,
@@ -38,9 +40,9 @@ export function createQuotaSwitchHost(deps: QuotaSwitchHostDeps) {
     refusal: policyModelRefusal,
     gate: (thread, selection) => checkedTaskModelSwitch(thread, selection, false, false, true),
     reset: (from, to) => hostedModels?.resetTask(from, to),
-    busy: threadBusy,
+    busy: threadBusy, guardReplay: deps.guardReplay,
     request: threadId => directRequestOwners.get(threadId),
-    resend: (botId, threadId, message, replyTo, spoken) => startOrQueueDirectMessage(botId, threadId, message.text ?? "", replyTo, undefined, message.sender, undefined, spoken.via, spoken.callId, message.dataContext),
+    resend: (botId, threadId, message, replyTo, spoken, replay) => replay && deps.replayDirect ? deps.replayDirect(botId, threadId, message, replyTo, replay) : startOrQueueDirectMessage(botId, threadId, message.text ?? "", replyTo, undefined, message.sender, undefined, spoken.via, spoken.callId, message.dataContext),
   });
 
   /** Settles a card the harness raised itself (a use-your-computer ask or a quota-switch offer); undefined for any other card. */

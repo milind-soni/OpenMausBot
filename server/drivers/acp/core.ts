@@ -1349,7 +1349,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "rpc_error", cost: null });
                 });
               }
-              if (untouched && retryUnderToolLimit(e, { key: toolLimitKey, model: resolvedModel, engine: DRIVER_KIND, retry: () => {
+              if (untouched && !state.promptSent && retryUnderToolLimit(e, { key: toolLimitKey, model: resolvedModel, engine: DRIVER_KIND, retry: () => {
                 acknowledge(); state.settled = true; session.current = null; active.delete(threadId); current.stopQuietWatch?.();
                 return sendTurn({ ...turn, startupRecovery: undefined, sessionReset: undefined, resumeCursor: session.sessionId ?? turn.resumeCursor }, turnId);
               }, failed: (error) => { acknowledge(); emit({ ...base(threadId, turnId), type: "runtime.error", message: error instanceof Error ? error.message : String(error) });

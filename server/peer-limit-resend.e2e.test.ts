@@ -1,3 +1,4 @@
+import { readReplayAudit } from "./testing/replay-audit.ts";
 // A teammate's hand-off whose AI meets its usage limit before doing anything goes once to the bot's backup AI.
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, existsSync, openSync, readFileSync, writeFileSync } from "node:fs";
@@ -88,7 +89,7 @@ async function withHandoffFixture(helperPlan: Record<string, unknown>, check: (f
     };
     await check({ api, control, dataDir, codexTurns, turns: () => jsonLines(`${planPath}.evidence.jsonl`), chief, specialist, brief, evidence });
   } finally {
-    evidence.push({ nodes: readHandoffs(dataDir), turns: jsonLines(`${planPath}.evidence.jsonl`) });
+    evidence.push({ audit: readReplayAudit(dataDir), nodes: readHandoffs(dataDir), turns: jsonLines(`${planPath}.evidence.jsonl`) });
     writeFileSync(`${logPath}.peer-limit-resend.json`, JSON.stringify(evidence, null, 2));
     await waitForExit(server, { signal: "SIGTERM" });
     await fixture.close();

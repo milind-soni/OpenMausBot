@@ -1,3 +1,4 @@
+import { REPLAY_BLOCKED, type ReplayRef } from "../replay-guard.ts";
 import { failedTurnTool } from "../../shared/failed-turn.ts";
 import { admit } from "../admission.ts";
 import { engineMemory, memoryStopped } from "../engine-memory.ts";
@@ -24,8 +25,9 @@ export interface ChiefNoticeDeps {
   threadBusy(botId: string, threadId: string): boolean;
   botAtThreadCapacity(botId: string): boolean;
   groupTurnActive(botId: string): boolean;
-  startTurn(botId: string, text: string, opts: { threadId: string; unattended?: boolean; peerAsk: PeerAsk }): Promise<unknown>;
+  startTurn(botId: string, text: string, opts: { threadId: string; unattended?: boolean; peerAsk: PeerAsk; replay?: ReplayRef }): Promise<unknown>;
   /** The thread's last run has ended but is still shutting down. */
+  guardReplay?(botId: string, threadId: string): ReplayRef | undefined;
   threadSettling?(threadId: string): boolean;
   /** The thread waits for a free slot and starts on its own. */
   threadQueued?(botId: string, threadId: string): boolean;
@@ -124,12 +126,14 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
   async function retryThread(input: { chief: BotRecord; bot: BotRecord; threadId: string; unattended: boolean; note?: string; automatic?: true }): Promise<void> {
     const refused = retryRefusal(input.bot.id, input.threadId);
     if (refused) throw new Error(refused);
+    const replay = deps.guardReplay?.(input.bot.id, input.threadId);
+    if (deps.guardReplay && !replay) throw new Error(REPLAY_BLOCKED);
     const chief = peerName(input.chief.name);
     const lead = input.automatic
       ? `${AUTO_RETRY_LEAD}, once, before telling ${chief}, your Chief of Staff, that this thread's last run failed.`
       : `${RETRY_LEAD}${chief}, your Chief of Staff, after this thread's last run stopped.${input.note ? ` Note from ${chief}: ${quoteInNote(input.note, 300)}` : ""}`;
     await deps.startTurn(input.bot.id, `${lead} Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]`,
-      { threadId: input.threadId, unattended: input.unattended, peerAsk: { botId: input.chief.id, name: input.chief.name, ...(input.unattended ? { unattended: true } : {}) } });
+      { threadId: input.threadId, unattended: input.unattended, replay, peerAsk: { botId: input.chief.id, name: input.chief.name, ...(input.unattended ? { unattended: true } : {}) } });
   }
 
   /** A notice about this thread may go to `chief`: its asks are the Chief's person's, never another person's private chat. */

@@ -16,6 +16,7 @@ import type { Routine, RoutineRun } from "./routines.ts";
 import { codedLine, fittedLine, type RoutineLine, type RoutineLineKey } from "./routine-lines.ts";
 import { hostTimeZone } from "./turn-clock.ts";
 import { classifyContinuable } from "./turn-continuation.ts";
+import { REPLAY_BLOCKED } from "./replay-guard.ts";
 
 export type RoutineOwnerCause = "signed_out" | "credits" | "usage_limit" | "setup";
 
@@ -214,10 +215,17 @@ function firstNotice(notices: RoutineOwnerNotice[], botId: string, cause: Routin
 }
 
 /** What a failed attempt becomes. A queued run is changed in place; a failing one is the caller's to fail with `error`. */
-export function recoverRun(run: RoutineRun, failure: string, facts: RoutineFailureFacts, now: number, notices: RoutineOwnerNotice[]): RoutineRecovery {
+export function recoverRun(run: RoutineRun, failure: string, facts: RoutineFailureFacts, now: number, notices: RoutineOwnerNotice[], canReplay = () => true): RoutineRecovery {
   const verdict: RoutineFailureClass = run.target === "bot" ? classifyRoutineFailure(failure, facts) : { kind: "final" };
   const again = run.retried ? codedLine("error", "routines.server.failedAfterRetry", { failure }) : fittedLine("error", failure, facts.text);
+  let blocked = false;
+  const retry = (cause: RoutineRetryCause, at?: number) => {
+    if (run.retried) return false;
+    if (!canReplay()) { blocked = true; return false; }
+    return requeueOnce(run, cause, failure, now, at);
+  };
   const failed = (line: RoutineLine, alert?: RoutineAlert | null): RoutineRecovery => {
+    if (blocked) line = fittedLine("error", `${line.text} ${REPLAY_BLOCKED}`, undefined);
     Object.assign(run, line.codes);
     return { queued: false, error: line.text, ...(alert === undefined ? {} : { alert }) };
   };
@@ -238,14 +246,14 @@ export function recoverRun(run: RoutineRun, failure: string, facts: RoutineFailu
     delete run.error;
     return { queued: true };
   }
-  if (verdict.kind === "retry") return requeueOnce(run, verdict.cause, failure, now) ? { queued: true } : failed(again);
+  if (verdict.kind === "retry") return retry(verdict.cause) ? { queued: true } : failed(again);
   if (verdict.kind === "final") return failed(again);
-  if (verdict.cause === "usage_limit" && facts.backupReady && requeueOnce(run, "usage_limit", failure, now, now + ROUTINE_RETRY_MS)) {
+  if (verdict.cause === "usage_limit" && facts.backupReady && retry("usage_limit", now + ROUTINE_RETRY_MS)) {
     attend(run, codedLine("attention", "routines.server.backupAi"));
     return { queued: true };
   }
   // A signed-out AI's run starts again on the backup the person chose; its start there says once that it needs signing in.
-  if (verdict.cause === "signed_out" && facts.backupReady && requeueOnce(run, "failed", failure, now, now + ROUTINE_RETRY_MS)) {
+  if (verdict.cause === "signed_out" && facts.backupReady && retry("failed", now + ROUTINE_RETRY_MS)) {
     attend(run, codedLine("attention", "routines.server.backupSignedOut"));
     return { queued: true };
   }
@@ -253,7 +261,7 @@ export function recoverRun(run: RoutineRun, failure: string, facts: RoutineFailu
   const reset = verdict.resetsAt;
   // A recurring routine's next scheduled run, due within one interval after the reset, does the same work: no start at the reset.
   const nextCovers = reset !== undefined && facts.nextScheduled !== undefined && facts.nextScheduled.at <= reset + facts.nextScheduled.interval;
-  if (reset && !nextCovers && reset > now && reset - now <= LIMIT_WAIT_MS && requeueOnce(run, "usage_limit", failure, now, reset + AFTER_RESET_MS)) {
+  if (reset && !nextCovers && reset > now && reset - now <= LIMIT_WAIT_MS && retry("usage_limit", reset + AFTER_RESET_MS)) {
     return { queued: true, ...(first ? { alert: { detail: `This bot's AI reached its usage limit. This run starts again at ${when(reset + AFTER_RESET_MS)}.` } } : {}) };
   }
   run.ownerCause = verdict.cause;

@@ -707,6 +707,7 @@ export interface OptionCardData extends WaitCardField, ComputerAskField, AccessR
 /** Kept on the card so the offer survives a restart. `engines` follow the card's options; `messageId` is the
  * message to resend, `rootId` the failed request's job-runtime root. */
 export interface QuotaSwitchCardData {
+  replay?: { logicalTaskId: string; generation: string };
   engines: Array<{ instanceId: string; name: string }>;
   messageId?: string;
   rootId?: string;

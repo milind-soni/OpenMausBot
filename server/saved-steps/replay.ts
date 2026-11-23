@@ -1,3 +1,4 @@
+import { REPLAY_BLOCKED } from "../replay-guard.ts";
 import { newId, type RuntimeEvent } from "../contracts.ts";
 import { resolveStepSoon, type CallOutcome, type ComputerCaller, type Patience } from "./resolve.ts";
 import { stepLabel, type Recipe, type RecipeStep } from "./rules.ts";
@@ -34,7 +35,7 @@ function approvalSummary(step: RecipeStep, label: string): string {
 export async function runSteps(
   recipe: Recipe,
   turn: ReplayTurn,
-  deps: { caller: ComputerCaller; approval: StepApproval; publish(event: RuntimeEvent): void; signal: AbortSignal; patience?: Patience },
+  deps: { caller: ComputerCaller; approval: StepApproval; publish(event: RuntimeEvent): void; reserveAction?(id: string, tool: string, input: unknown): boolean; signal: AbortSignal; patience?: Patience },
 ): Promise<ReplayOutcome> {
   const { caller, approval, publish, signal, patience } = deps;
   const total = recipe.steps.length;
@@ -55,6 +56,7 @@ export async function runSteps(
     if (signal.aborted) return STOPPED;
     if (!allowed) return { kind: "declined", tool: step.tool, label };
     const itemId = newId();
+    if (deps.reserveAction && !deps.reserveAction(itemId, tool, target.args)) return failed({ ok: false, error: REPLAY_BLOCKED });
     publish({ ...base(itemId), type: "item.started", itemType: "tool", title: tool, input: summary });
     const result = await caller.call(step.tool, target.args, signal);
     publish({ ...base(itemId), type: "item.completed", itemType: "tool", ok: result.ok, output: result.ok ? "done" : result.error });

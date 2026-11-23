@@ -16,7 +16,10 @@ const done = (out?: string) => {
   process.stdout.write(out, () => process.exit(0));
 };
 process.stdout.on("error", () => process.exit(0));
-const fuse = setTimeout(() => done(), budgetMs);
+let failClosed = process.argv.includes("--require-reservation");
+const denial = JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: "OpenMausBot could not reserve the action for this turn." } });
+const fail = () => done(failClosed ? denial : undefined);
+const fuse = setTimeout(fail, budgetMs);
 fuse.unref();
 
 function readStdin(): Promise<string> {
@@ -26,7 +29,7 @@ function readStdin(): Promise<string> {
     process.stdin.setEncoding("utf8");
     process.stdin.on("data", (chunk: string) => {
       bytes += Buffer.byteLength(chunk);
-      if (bytes > MAX_INPUT_BYTES) return done();
+      if (bytes > MAX_INPUT_BYTES) return fail();
       data += chunk;
     });
     process.stdin.on("end", () => resolve(data));
@@ -39,20 +42,21 @@ async function main(): Promise<void> {
   let payload: Record<string, unknown>;
   try {
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return done();
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return fail();
     payload = parsed as Record<string, unknown>;
   } catch {
-    return done();
+    return fail();
   }
   const event = typeof payload.hook_event_name === "string" ? payload.hook_event_name : "";
-  if (!event || !/^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(url) || !tokenFile) return done();
+  failClosed ||= event === "PreToolUse";
+  if (!event || !/^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(url) || !tokenFile) return fail();
   let token = "";
   try {
     token = readFileSync(tokenFile, "utf8").trim();
   } catch {
-    return done();
+    return fail();
   }
-  if (!token) return done();
+  if (!token) return fail();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(200, budgetMs - 300));
   try {
@@ -63,8 +67,9 @@ async function main(): Promise<void> {
       redirect: "error",
       signal: controller.signal,
     });
-    if (!response.ok) return done();
-    const body = (await response.json().catch(() => null)) as { hookSpecificOutput?: unknown; context?: unknown } | null;
+    if (!response.ok) return fail();
+    const body = (await response.json().catch(() => null)) as { approved?: unknown; hookSpecificOutput?: unknown; context?: unknown } | null;
+    if (failClosed && body?.approved !== true) return fail();
     if (body && typeof body === "object" && body.hookSpecificOutput && typeof body.hookSpecificOutput === "object") {
       return done(JSON.stringify({ hookSpecificOutput: body.hookSpecificOutput }));
     }
@@ -74,7 +79,7 @@ async function main(): Promise<void> {
     }
     return done();
   } catch {
-    return done();
+    return fail();
   } finally {
     clearTimeout(timer);
   }

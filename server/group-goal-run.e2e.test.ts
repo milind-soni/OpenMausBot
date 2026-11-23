@@ -170,8 +170,6 @@ beforeAll(async () => {
             "Scheduled analysis returned to the coordinator.",
           ]),
           FAKE_CLAUDE_REPLY_STATE: join(home, "stop-scoped-worker-replies.txt"),
-          FAKE_CLAUDE_TRANSIENTS: "1",
-          FAKE_CLAUDE_STATE: join(home, "stop-scoped-worker-launches.txt"),
         },
         config: { cli: FAKE_CLAUDE },
       },

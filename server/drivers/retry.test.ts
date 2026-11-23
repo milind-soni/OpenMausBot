@@ -157,6 +157,12 @@ describe("mayResendTurn", () => {
     expect(mayResendTurn(failed)).toBe(true);
   });
 
+  it("never resends quota exits or an unverified submitted attempt, even without visible output", () => {
+    expect(mayResendTurn({ ...failed, quotaStop: true, endedBeforeTurn: true })).toBe(false);
+    expect(mayResendTurn({ ...failed, quotaStop: true })).toBe(false);
+    expect(mayResendTurn({ ...failed, unverifiedDispatch: true })).toBe(false);
+  });
+
   it("never resends once a model call answered or text streamed", () => {
     expect(mayResendTurn({ ...failed, answered: true })).toBe(false);
     expect(mayResendTurn({ ...failed, streamed: true })).toBe(false);

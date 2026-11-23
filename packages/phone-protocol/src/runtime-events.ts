@@ -47,6 +47,7 @@ export type RuntimeEvent = RuntimeEventBase &
         /** the turn's `custom` MCP servers the engine reported could not connect */
         mcpFailed?: string[];
       }
+    | { type: "turn.serving-model"; model: string }
     | { type: "session.model-variants"; model: string; variants: ModelVariantState }
     | { type: "session.exited"; reason?: string }
     | { type: "turn.started" }
@@ -61,6 +62,8 @@ export type RuntimeEvent = RuntimeEventBase &
     | {
         type: "turn.completed";
         ok: boolean;
+        /** Driver-confirmed refusal before work. Replay also requires guarded tools and an empty action ledger. */
+        replayNoDispatch?: true;
         stopReason?: string | null;
         cost?: number | null;
         denials?: string[];

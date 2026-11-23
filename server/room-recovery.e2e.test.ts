@@ -5,10 +5,11 @@ import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb, verificationServerEnvironment } from "../scripts/control-omb.ts";
 import { handleToolCall, request } from "../scripts/mcp-server.ts";
+import { REPLAY_BLOCKED } from "./replay-guard.ts";
 import { waitForExit } from "./testing/cleanup.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
 
-it("boots, starts an interrupted routine once more, and reports it back to its source room", async () => {
+it("reports an interrupted legacy routine to its source room when dispatch evidence is missing", async () => {
   const fixture = await launchVerificationServer();
   const { url, dataDir, logPath } = fixture.info;
   let restarted: ChildProcess | undefined;
@@ -46,12 +47,11 @@ it("boots, starts an interrupted routine once more, and reports it back to its s
       return fetch(url + "/api/health").then(r => r.ok).catch(() => false);
     }, { timeout: 10_000, interval: 150 }).toBe(true);
     const runs = async () => (await request("/api/routines", {}, url) as any).runs as any[];
-    expect((await runs())[0]).toMatchObject({ status: "queued", retried: "restarted" });
-    await expect.poll(async () => (await runs())[0]?.status, { timeout: 30_000 }).toBe("completed");
-    expect(await runs()).toMatchObject([{ id: "interrupted-room-run", retried: "restarted" }]);
+    expect(await runs()).toMatchObject([{ id: "interrupted-room-run", status: "failed", error: REPLAY_BLOCKED }]);
+    expect((await runs())[0].retried).toBeUndefined();
     const { messages } = await request(`/api/threads/${channel.activeTaskId}/messages`, {}, url) as any;
     expect(messages.filter((m: any) => m.routineRun?.runId === "interrupted-room-run"))
-      .toMatchObject([{ routineRun: { status: "completed" } }]);
+      .toMatchObject([{ routineRun: { status: "failed" } }]);
     const { groups } = await request("/api/bots", {}, url) as any;
     expect(groups.find((g: any) => g.id === channel.id).working).toBe(false);
     // Store catches subscriber exceptions, so a healthy server alone does not prove recovery broadcasts were safe.
@@ -62,7 +62,7 @@ it("boots, starts an interrupted routine once more, and reports it back to its s
   }
 }, 60_000);
 
-it("keeps a routine waiting through a restart, reruns its cut teammate once, and completes it", async () => {
+it("keeps a routine waiting through a restart and reports its unproven teammate attempt", async () => {
   const fixture = await launchVerificationServer();
   const { url, dataDir, logPath } = fixture.info;
   let restarted: ChildProcess | undefined;
@@ -98,18 +98,18 @@ it("keeps a routine waiting through a restart, reruns its cut teammate once, and
     expect(existsSync(join(dataDir, "room-handoffs.json.migrated"))).toBe(true);
     expect(await run()).toMatchObject({ status: "waiting" });
     expect((await run()).error).toBeUndefined();
-    await expect.poll(() => nodes().find((n: any) => n.id === "cut-work")?.status, { timeout: 20_000 }).toBe("completed");
-    expect(nodes().find((n: any) => n.id === "cut-work")).toMatchObject({ restarts: 1, executions: 1, result: expect.stringContaining("hello from fake claude") });
+    await expect.poll(() => nodes().find((n: any) => n.id === "cut-work")?.status, { timeout: 20_000 }).toBe("failed");
+    expect(nodes().find((n: any) => n.id === "cut-work")?.result).toContain(REPLAY_BLOCKED);
     const mates = (await request(`/api/threads/${mate.activeTaskId}/messages`, {}, url) as any).messages as any[];
-    expect(mates.filter((m) => m.tool?.name === "Resuming after a restart")).toHaveLength(1);
-    await expect.poll(async () => (await run())?.status, { timeout: 30_000 }).toBe("completed");
-    expect((await run()).output).toContain("hello from fake claude");
-    await expect.poll(() => nodes().find((n: any) => n.id === "cut-root")?.status, { timeout: 15_000 }).toBe("completed");
+    expect(mates.filter((m: any) => m.turnId)).toHaveLength(0);
+    await expect.poll(async () => (await run())?.status, { timeout: 15_000 }).toBe("failed");
+    expect(await run()).toMatchObject({ error: REPLAY_BLOCKED });
+    await expect.poll(() => nodes().find((n: any) => n.id === "cut-root")?.status, { timeout: 15_000 }).toBe("failed");
     const chiefs = (await request(`/api/threads/${chief.activeTaskId}/messages`, {}, url) as any).messages as any[];
-    expect(chiefs.some((m) => m.tool?.name === "Mira was cut off by a restart; resuming")).toBe(true);
-    expect(chiefs.some((m) => m.tool?.name === "Mira replied")).toBe(true);
-    expect(chiefs.some((m) => String(m.tool?.name ?? "").startsWith("Resumed with Mira results after a restart"))).toBe(true);
-    expect(nodes().map((n: any) => [n.id, n.status, n.executions])).toEqual([["cut-root", "completed", 2], ["cut-work", "completed", 1]]);
+    expect(chiefs.find((message) => message.roomRequest?.id === "cut-work")).toMatchObject({
+      roomRequest: { phase: "result" },
+      tool: { name: expect.stringContaining("Replay was blocked"), ok: false },
+    });
   } finally {
     await waitForExit(restarted, { signal: "SIGTERM" });
     await fixture.close();

@@ -68,26 +68,24 @@ async function withLimitedRoom(choose: (f: { api: (method: string, path: string,
   }
 }
 
-/** The refused turn is answered once by the backup, the room says which AI took over, and the member's next turn starts
- * on the backup with no refused turn first. The member's own model stays as it was. */
 async function carriesOn({ api, send, messages, claudeTurns, usage, bot }: Room) {
-  await send("How did October close?");
+  await send("How did October close?", "failed");
   expect(claudeTurns()).toHaveLength(1);
-  let rows = await messages();
-  expect(rows.filter((row) => row.role === "bot" && row.kind === "text" && row.text === BACKUP_REPLY)).toHaveLength(1);
-  expect(rows.find((row) => row.role === "bot" && row.kind === "text" && row.text === BACKUP_REPLY)?.from?.botId).toBe(bot.id);
-  expect(rows.filter((row) => row.kind === "activity" && /^recovery: .*took over\.$/.test(row.tool?.name ?? ""))).toHaveLength(1);
-  expect(rows.filter((row) => row.role === "user")).toHaveLength(1);
+  const failed = await messages();
+  expect(failed.filter((row) => row.role === "bot" && row.kind === "text" && row.text === BACKUP_REPLY)).toHaveLength(0);
+  expect(failed.filter((row) => row.role === "user")).toHaveLength(1);
 
   await send("And November so far?");
   expect(claudeTurns(), "the limit is known, so the next turn starts on the backup").toHaveLength(1);
-  rows = await messages();
-  expect(rows.filter((row) => row.role === "bot" && row.kind === "text" && row.text === BACKUP_REPLY)).toHaveLength(2);
+  const rows = await messages();
+  const reply = rows.filter((row) => row.role === "bot" && row.kind === "text" && row.text === BACKUP_REPLY);
+  expect(reply).toHaveLength(1);
+  expect(reply[0]?.from?.botId).toBe(bot.id);
   expect((await api("GET", "/api/bots")).bots.find((entry: any) => entry.id === bot.id).modelSelection.instanceId).toBe("claude");
-  await expect.poll(() => usage().filter((row) => row.instanceId === "codex").length, { timeout: 15_000, message: "each backup turn is booked to the backup" }).toBe(2);
+  await expect.poll(() => usage().filter((row) => row.instanceId === "codex").length, { timeout: 15_000 }).toBe(1);
 }
 
-it("carries a room member at its usage limit on with that bot's own backup", async () => {
+it("uses a room member’s backup for the next request without replaying a refused turn", async () => {
   await withLimitedRoom(async ({ api, bot, codex }) => {
     await api("PATCH", `/api/bots/${bot.id}`, { fallback: [codex] });
   }, carriesOn);

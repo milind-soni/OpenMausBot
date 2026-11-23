@@ -1030,6 +1030,22 @@ const playTurn = (prompt: JsonValue, late = false) => {
   const resumedError = process.env.FAKE_CLAUDE_RESUMED_API_ERROR === "1" && argv.includes("--resume") && !resumedErrorPlayed;
   if (resumedError) resumedErrorPlayed = true;
   if (mode === "usage-limit" || limited !== null) {
+    const action = process.env.FAKE_CLAUDE_REPLAY_ACTION;
+    const actionLog = process.env.FAKE_CLAUDE_REPLAY_ACTION_LOG;
+    const actionPrompt = process.env.FAKE_CLAUDE_REPLAY_ACTION_PROMPT;
+    if (action && actionLog && actionPrompt && promptText(prompt).includes(actionPrompt)) {
+      const id = `tool-replay-${process.pid}-${++toolUseCount}`;
+      const name = action === "read" ? "Read" : "Write";
+      const input = { file_path: "synthetic-only.txt" };
+      const printed = runHooks("PreToolUse", { tool_name: name, tool_input: input, tool_use_id: id });
+      if (!printed || JSON.parse(printed).hookSpecificOutput?.permissionDecision !== "deny") {
+        appendFileSync(actionLog, action + "\n");
+        out({ type: "assistant", message: { model: "claude-fixture-served", content: [{ type: "tool_use", id, name, input }] } });
+        if (action !== "unknown") {
+          out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, is_error: false, content: "fixture-result-preserved" }] } });
+        }
+      }
+    }
     // captured from 2.1.295 for an account past its weekly limit
     const text = process.env.FAKE_CLAUDE_API_ERROR ?? "You've hit your weekly limit \u00b7 resets Oct 12 at 2:30pm (Asia/Calcutta)";
     out({
@@ -1061,7 +1077,9 @@ const playTurn = (prompt: JsonValue, late = false) => {
       out({ type: "assistant", message: { content: [{ type: "text", text }], ...(usage ? { usage } : {}) } });
       out({ type: "result", is_error: false, stop_reason: "end_turn", usage: { input_tokens: 10, output_tokens: 5 } });
     }).catch(error => {
-      out({ type: "result", is_error: true, result: String(error), stop_reason: "error" });
+      const result = String(error);
+      const quota = /hit your weekly limit/i.test(result);
+      out({ type: "result", is_error: true, result, stop_reason: "error", ...(quota ? { terminal_reason: "api_error", api_error: "usage_limit_reached" } : {}) });
     }).finally(() => { turnRunning = false; finishIfDone(); });
     return;
   }

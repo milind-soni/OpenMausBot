@@ -18,10 +18,10 @@ afterAll(async () => {
   await removeTempDir(dir);
 });
 
-function run(stdin: string, env: Record<string, string>): Promise<{ code: number | null; stdout: string; stderr: string; ms: number }> {
+function run(stdin: string, env: Record<string, string>, args: string[] = []): Promise<{ code: number | null; stdout: string; stderr: string; ms: number }> {
   return new Promise((resolve) => {
     const started = Date.now();
-    const child = spawn(process.execPath, [HELPER], { env: { ...process.env, ...env }, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [HELPER, ...args], { env: { ...process.env, ...env }, stdio: ["pipe", "pipe", "pipe"] });
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     let stdout = "";
@@ -139,4 +139,25 @@ describe("omb-hook helper: SessionStart context", () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toBe("");
   }, 15_000);
+});
+
+
+it("denies native dispatch if the pre-tool hook receives no durable reservation", async () => {
+  const url = await listen((_req, res) => res.end(JSON.stringify({ ok: true })));
+  const env = { OMB_HOOK_URL: url, OMB_HOOK_TOKEN_FILE: tokenFile };
+  for (const input of [JSON.stringify({ hook_event_name: "PreToolUse" }), "malformed"]) {
+    const result = await run(input, env, ["--require-reservation"]);
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout).hookSpecificOutput).toMatchObject({ hookEventName: "PreToolUse", permissionDecision: "deny" });
+  }
+});
+
+
+it("discards permissive hook output without approved true", async () => {
+  const url = await listen((_req, res) => res.end(JSON.stringify({
+    hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow" },
+  })));
+  const result = await run(JSON.stringify({ hook_event_name: "PreToolUse" }),
+    { OMB_HOOK_URL: url, OMB_HOOK_TOKEN_FILE: tokenFile }, ["--require-reservation"]);
+  expect(JSON.parse(result.stdout).hookSpecificOutput.permissionDecision).toBe("deny");
 });

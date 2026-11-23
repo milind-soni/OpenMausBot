@@ -3,11 +3,13 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { closeSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import { afterEach, expect, it } from "vitest";
 
 import { launchVerificationServer, runControlOmb, verificationServerArgs, verificationServerEnvironment, type VerificationServer } from "../scripts/control-omb.ts";
 import { waitForExit } from "./testing/cleanup.ts";
+import { REPLAY_BLOCKED } from "./replay-guard.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 import { openSse, type SseRecorder } from "./testing/sse.ts";
@@ -99,38 +101,22 @@ it("never starts a routine again that the turn watchdog stopped as stalled: it f
   expect((await s.prompts(threadId)).filter((text) => text.includes(ROUTINE_HEADER))).toHaveLength(1);
 }, hostTimeout(120_000));
 
-it("starts a routine that crashed again once, and it completes in the same conversation", async () => {
+it("does not resend a routine whose engine accepted the prompt and crashed before its result", async () => {
   const s = await server();
-  s.engine("exit-early");
+  const requests = join(s.dataDir, "claude-requests.ndjson");
+  s.engine("exit-early", { FAKE_CLAUDE_PROMPTS: requests });
   const { id } = await s.runNow((await s.routine()).id);
-  await expect.poll(async () => (await s.run(id))?.retried, { timeout: hostTimeout(30_000) }).toBe("failed");
-  const { threadId } = await s.run(id);
-  expect(await s.run(id)).toMatchObject({ status: "queued" });
-  s.engine("happy");
-
-  await expect.poll(async () => (await s.run(id))?.status, { timeout: hostTimeout(60_000) }).toBe("completed");
-  expect(await s.run(id)).toMatchObject({ retried: "failed", threadId });
-  const second = JSON.stringify(JSON.parse(readFileSync(s.dump, "utf8")).prompt);
-  expect(second).toContain("this run's first start failed before it finished");
-  expect(second).toContain("The routine's instructions are in the message above and are not repeated here.");
-  // The crashed start left no session to resume, so the conversation is replayed: the instructions arrive once, not twice.
-  expect(second.split("Summarise my inbox.")).toHaveLength(2);
-  expect((await s.prompts(threadId)).filter((text) => text.includes(ROUTINE_HEADER))).toHaveLength(1);
-  expect(s.notified().filter((notification) => notification.kind === "routine-failed")).toEqual([]);
-}, hostTimeout(120_000));
-
-it("fails a routine that crashes again on its retry, says so, and never retries it a second time", async () => {
-  const s = await server();
-  s.engine("exit-early");
-  const { id } = await s.runNow((await s.routine()).id);
-  await expect.poll(async () => (await s.run(id))?.status, { timeout: hostTimeout(90_000) }).toBe("failed");
+  await expect.poll(async () => (await s.run(id))?.status, { timeout: hostTimeout(30_000) }).toBe("failed");
   const failed = await s.run(id);
-  expect(failed).toMatchObject({ retried: "failed", error: expect.stringMatching(/^Failed after one automatic retry: /) });
+  expect(failed.error).toContain("simulated crash before result");
+  expect(failed.error).toContain(REPLAY_BLOCKED);
+  expect(failed.retried).toBeUndefined();
+  expect(readFileSync(requests, "utf8").trim().split("\n")).toHaveLength(1);
   await expect.poll(() => s.notified().filter((notification) => notification.kind === "routine-failed"), { timeout: hostTimeout(15_000) })
-    .toEqual([expect.objectContaining({ title: "Inbox bot's routine failed", body: `Inbox brief: ${failed.error}` })]);
+    .toEqual([expect.objectContaining({ title: "Inbox bot's routine failed", body: expect.stringContaining("Replay was blocked") })]);
   expect((await s.prompts(failed.threadId)).filter((text) => text.includes(ROUTINE_HEADER))).toHaveLength(1);
   expect(await s.runs()).toHaveLength(1);
-}, hostTimeout(150_000));
+}, hostTimeout(120_000));
 
 it("starts a routine whose tool server is dead once, not twice: one request to the AI, and the run row says why it failed", async () => {
   const s = await server();
@@ -151,26 +137,45 @@ it("starts a routine whose tool server is dead once, not twice: one request to t
   s.engine("api-error", { FAKE_CLAUDE_PROMPTS: requests });
   const passing = await s.runNow((await s.routine("Calendar check")).id);
   await expect.poll(async () => (await s.run(passing.id))?.status, { timeout: hostTimeout(90_000) }).toBe("failed");
-  expect(await s.run(passing.id)).toMatchObject({ retried: "provider" });
-  expect(sent()).toBe(3);
+  expect(await s.run(passing.id)).toMatchObject({ error: expect.stringContaining(REPLAY_BLOCKED) });
+  expect((await s.run(passing.id)).retried).toBeUndefined();
+  expect(sent()).toBe(2);
 }, hostTimeout(180_000));
 
-it("picks a run that a restart cut off up again once on the next start, and never runs it twice", async () => {
+it.each(["preparing", "submitted"] as const)("recovers an interrupted Claude routine according to its persisted %s state", async (stage) => {
   const s = await server();
   // Exiting slowly, as taskkill does on Windows, the engine ends its turn while the server is still shutting down.
   s.engine("hang", { FAKE_CLAUDE_EXIT_DELAY_MS: "1500" });
   const { id } = await s.runNow((await s.routine()).id);
   await expect.poll(async () => (await s.run(id))?.status, { timeout: hostTimeout(15_000) }).toBe("running");
   const { threadId } = await s.run(id);
+  await s.engineHas();
 
   await waitForExit(fixture!.child, { signal: "SIGTERM" });
   expect(JSON.parse(readFileSync(join(s.dataDir, "routines.json"), "utf8")).runs).toMatchObject([{ id, status: "running" }]);
+  if (stage === "preparing") {
+    // Synthesize the durable snapshot just before provider submission using the real run's scope.
+    const ledger = new DatabaseSync(join(s.dataDir, "replay-safety.db"));
+    try {
+      expect(ledger.prepare(`UPDATE replay_attempts SET evidence='preparing',outcome='pending',execution=NULL,providerTurnId=NULL
+        WHERE id=? AND evidence='submitted' AND outcome='pending'`).run(`routine:${id}`).changes).toBe(1);
+    } finally {
+      ledger.close();
+    }
+  }
   s.engine("happy");
   const log = openSync(s.logPath, "a", 0o600);
   const env = verificationServerEnvironment({}, s.dataDir, Number(new URL(s.url).port));
   restarted = spawn(process.execPath, verificationServerArgs(env), { cwd: process.cwd(), env, stdio: ["ignore", log, log] });
   closeSync(log);
 
+  if (stage === "submitted") {
+    await expect.poll(async () => (await s.run(id))?.status, { timeout: hostTimeout(20_000) }).toBe("failed");
+    expect(await s.run(id)).toMatchObject({ threadId, error: REPLAY_BLOCKED });
+    expect((await s.run(id)).retried).toBeUndefined();
+    expect((await s.prompts(threadId)).filter((text) => text.includes(ROUTINE_HEADER))).toHaveLength(1);
+    return;
+  }
   await expect.poll(async () => (await s.run(id))?.retried, { timeout: hostTimeout(20_000) }).toBe("restarted");
   await expect.poll(async () => (await s.run(id))?.status, { timeout: hostTimeout(60_000) }).toBe("completed");
   expect(await s.runs()).toMatchObject([{ id, threadId, retried: "restarted", status: "completed" }]);
@@ -185,7 +190,7 @@ it("picks a run that a restart cut off up again once on the next start, and neve
   expect(roots.map((node) => node.status)).toEqual(["cancelled", "completed"]);
 }, hostTimeout(120_000));
 
-it("keeps an ACP engine's run that a graceful shutdown cut off, and starts it once more on the next start", async () => {
+it("blocks restart of an interrupted ACP routine when its submission has no refusal receipt", async () => {
   fixture = await launchVerificationServer({}, undefined, undefined, undefined, undefined, undefined, ["cline"]);
   const { url, dataDir, logPath } = fixture.info;
   const configPath = join(dataDir, "config.json");
@@ -221,8 +226,9 @@ it("keeps an ACP engine's run that a graceful shutdown cut off, and starts it on
   expect(JSON.parse(readFileSync(join(dataDir, "routines.json"), "utf8")).runs).toMatchObject([{ id: run.id, status: "running" }]);
   acpMode("happy");
   await restart();
-  await expect.poll(async () => (await read())?.status, { timeout: hostTimeout(60_000) }).toBe("completed");
-  expect(await read()).toMatchObject({ retried: "restarted" });
+  await expect.poll(async () => (await read())?.status, { timeout: hostTimeout(30_000) }).toBe("failed");
+  expect(await read()).toMatchObject({ error: REPLAY_BLOCKED });
+  expect((await read()).retried).toBeUndefined();
 }, hostTimeout(120_000));
 
 it("waits for the conversation it joins to be free instead of failing, then runs there", async () => {

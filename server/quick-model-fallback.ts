@@ -43,6 +43,7 @@ export function retriedTurnEvent(turn: RetriedTurn, event: RuntimeEvent): Runtim
 }
 
 interface Armed extends RetriedTurn {
+  retryScheduled?: boolean;
   engine: Engine;
   input: SendTurnInput;
   quick: QuickRoute;
@@ -52,6 +53,7 @@ interface Armed extends RetriedTurn {
 }
 
 export interface QuickModelFallbackDeps {
+  guardReplay?(input: SendTurnInput, instanceId: string, model: string): boolean;
   file: string;
   publish: (event: RuntimeEvent) => void;
   /** The person stopped this thread's request. */
@@ -123,8 +125,9 @@ export class QuickModelFallback {
     }
     if (armed.phase === "refused") {
       if (event.turnId !== armed.turnId) return false;
+      if (event.type === "turn.completed" && armed.retryScheduled) return true;
       armed.held.push(event);
-      if (event.type === "turn.completed") this.retry(armed, event.stopReason === "interrupted");
+      if (event.type === "turn.completed") this.retry(armed, event.stopReason === "interrupted" || event.stopReason === "tool_error");
       return true;
     }
     if (event.turnId === armed.turnId) return true;
@@ -150,20 +153,22 @@ export class QuickModelFallback {
   }
 
   private retry(armed: Armed, interrupted: boolean): void {
+    if (armed.retryScheduled) return;
+    armed.retryScheduled = true;
     const { threadId } = armed.input;
     if (interrupted || this.deps.stopped(threadId)) return this.giveUp(armed);
-    this.remember(armed.engine.instanceId, armed.quick.model);
-    console.warn(`quick model ${armed.quick.model} refused on ${armed.engine.instanceId}: ${threadId} runs again on ${armed.quick.own.model}`);
-    armed.phase = "retrying";
-    try {
-      armed.quick.onFallback();
-    } catch (error) {
-      console.warn(`quick model note left on ${threadId}: ${error instanceof Error ? error.message : String(error)}`);
-    }
     const { model, effort, variant } = armed.quick.own;
-    // After the adapter that emitted the refusal has finished settling the quick turn.
     setImmediate(() => {
       if (this.armed.get(threadId) !== armed) return;
+      if (this.deps.stopped(threadId) || (this.deps.guardReplay && !this.deps.guardReplay(armed.input, armed.engine.instanceId, model))) return this.giveUp(armed);
+      this.remember(armed.engine.instanceId, armed.quick.model);
+      console.warn(`quick model ${armed.quick.model} refused on ${armed.engine.instanceId}: ${threadId} runs again on ${model}`);
+      armed.phase = "retrying";
+      try {
+        armed.quick.onFallback();
+      } catch (error) {
+        console.warn(`quick model note left on ${threadId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
       armed.engine.adapter.sendTurn({ ...armed.input, model, effort, variant }).then((sent) => {
         armed.retryTurnId ??= sent.turnId;
         if (this.deps.stopped(threadId)) void armed.engine.adapter.interruptTurn(threadId).catch(() => {});

@@ -1,3 +1,4 @@
+import { REPLAY_BLOCKED } from "../replay-guard.ts";
 import { allowsTool } from "../../shared/tool-scope.ts";
 import { newId, type ProviderAdapter, type ProviderInstance, type RuntimeEvent, type SendTurnInput, type TurnStartResult } from "../contracts.ts";
 import { createChatToolApproval } from "../drivers/chat-tool-approval.ts";
@@ -20,6 +21,8 @@ export interface ReplayRequest {
   placePicked: boolean;
 }
 export interface DispatchDeps {
+  reserveAction?(threadId: string, id: string, tool: string, input: unknown): boolean;
+  guardReplay?(input: SendTurnInput, instanceId: string): boolean;
   recipes: Pick<RecipeStore, "find" | "forget">;
   enabled(): boolean;
   publish(event: RuntimeEvent): void;
@@ -212,7 +215,7 @@ export class SavedStepsDispatch {
       return { kind: "failed", done: 0, total: run.recipe.steps.length, tool: first!.tool, label: stepLabel(first!), error: errorText(error) };
     }
     try {
-      return await runSteps(run.recipe, this.turn(run), { caller, approval, publish: this.deps.publish, signal });
+      return await runSteps(run.recipe, this.turn(run), { caller, approval, publish: this.deps.publish, reserveAction: this.deps.reserveAction?.bind(undefined, run.threadId), signal });
     } catch (error) {
       return signal.aborted ? STOPPED : { kind: "error", message: errorText(error) };
     } finally {
@@ -223,6 +226,7 @@ export class SavedStepsDispatch {
   private async fallBack(run: Run, failed: Failed, input: SendTurnInput, start: Start): Promise<void> {
     if (!failed.gate) this.forget(run);
     if (run.controller.signal.aborted || this.deps.stopped(run.threadId)) return this.end(run, STOPPED);
+    if (this.deps.guardReplay && !this.deps.guardReplay(input, run.engine.instanceId)) return this.end(run, { kind: "error", message: REPLAY_BLOCKED });
     this.deps.engines.set(run.threadId, run.engine);
     const note = fallbackNote(failed);
     const noted = (text: string) => `${text}\n\n${note}`;
