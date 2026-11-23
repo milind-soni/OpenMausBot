@@ -1001,6 +1001,7 @@ const playTurn = (prompt: JsonValue, late = false) => {
       }
       if (process.env.FAKE_CLAUDE_ANSWERED_FAILS) {
         out({ type: "assistant", session_id: sessionId, message: { content: [{ type: "tool_use", id: "toolu_spent", name: "Read", input: { file_path: "notes.md" } }] } });
+        out({ type: "user", session_id: sessionId, message: { content: [{ type: "tool_result", tool_use_id: "toolu_spent", is_error: false, content: "synthetic read result" }] } });
       }
       // an MCP server's question still open when the launch fails
       if (process.env.FAKE_CLAUDE_ELICIT) out({ type: "control_request", request_id: "elicit-1", request: { subtype: "elicitation", ...JSON.parse(process.env.FAKE_CLAUDE_ELICIT) } });

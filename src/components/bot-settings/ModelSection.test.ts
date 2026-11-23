@@ -6,10 +6,11 @@ import type { Bot, InstanceInfo } from "@/state/store";
 
 const instances = vi.hoisted(() => [] as InstanceInfo[]);
 const recovery = vi.hoisted(() => ({ enabled: true }));
+const quota = vi.hoisted(() => ({ enabled: true }));
 vi.mock("@/state/store-select", async (importOriginal) => (await import("@/testing/plain-store-select")).plainStoreSelect(await importOriginal()));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
-  return { ...original, useStore: () => ({ state: { ...original.initialState, instances, config: { automaticRecovery: recovery } }, dispatch: vi.fn() }) };
+  return { ...original, useStore: () => ({ state: { ...original.initialState, instances, config: { automaticRecovery: recovery, quotaSwitchEnabled: quota.enabled } }, dispatch: vi.fn() }) };
 });
 
 vi.mock("../ModelPicker", () => ({
@@ -30,6 +31,19 @@ const bot = (fallback: Bot["fallback"]) => ({ id: "bot-1", modelSelection: { ins
 
 describe("a bot's backup models", () => {
   instances.splice(0, instances.length, engine("primary", "Primary", ["p"]), engine("codex", "Codex", ["gpt-a", "gpt-b"]));
+
+  it("keeps saved backups visible and disables editing when switching is off", () => {
+    quota.enabled = false;
+    try {
+      const markup = renderToStaticMarkup(createElement(FallbackChain, { bot: bot([{ instanceId: "codex", model: "gpt-a" }]), onChange: vi.fn() }));
+      expect(markup).toContain("Automatic model switching is off. Saved backups will not be used.");
+      expect(markup).toContain("GPT-A");
+      expect(markup.match(/<select[^>]*disabled/g)).toHaveLength(2);
+      expect(markup.match(/<button[^>]*aria-label="Remove Codex from the fallback list"[^>]*>/)?.[0]).toContain("disabled");
+    } finally {
+      quota.enabled = true;
+    }
+  });
 
   it("lets each backup choose any model its engine offers, not only the default", () => {
     const markup = renderToStaticMarkup(createElement(FallbackChain, { bot: bot([{ instanceId: "codex", model: "gpt-a" }]), onChange: vi.fn() }));
@@ -54,11 +68,11 @@ describe("a bot's backup models", () => {
     instances.pop();
   });
 
-  it("says the list works on its own, with Automatic recovery off as well as on", () => {
+  it("describes per-bot backups when server switching is on, regardless of workspace recovery", () => {
     for (const enabled of [true, false]) {
       recovery.enabled = enabled;
       const markup = renderToStaticMarkup(createElement(FallbackChain, { bot: bot([{ instanceId: "codex", model: "gpt-a" }]), onChange: vi.fn() }));
-      expect(markup).toContain("Used in order, with no other setting, when this bot&#x27;s AI is at its usage limit or the provider proves a request never started.");
+      expect(markup).toContain("Used in order when automatic switching is enabled and this bot&#x27;s AI is at its usage limit or the provider proves a request never started.");
       expect(markup).not.toMatch(/Automatic recovery|inactive/);
     }
     recovery.enabled = true;

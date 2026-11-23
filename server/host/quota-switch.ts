@@ -9,7 +9,7 @@ import type { BotRecord, Message } from "../store.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
 import { resolveYourComputerAsk } from "../your-computer-consent.ts";
 
-export interface QuotaSwitchHostDeps extends Pick<QuotaSwitchDeps, "store" | "coordinator" | "turnStops" | "takeover" | "guardReplay"> {
+export interface QuotaSwitchHostDeps extends Pick<QuotaSwitchDeps, "store" | "coordinator" | "turnStops" | "takeover" | "guardReplay" | "enabled"> {
   registry: Pick<ProviderRegistry, "instances" | "access">;
   hostedModels: ReturnType<typeof hostedModelPolicy>;
   providerConfigs(): InstanceConfigMap;
@@ -40,7 +40,7 @@ export function createQuotaSwitchHost(deps: QuotaSwitchHostDeps) {
     refusal: policyModelRefusal,
     gate: (thread, selection) => checkedTaskModelSwitch(thread, selection, false, false, true),
     reset: (from, to) => hostedModels?.resetTask(from, to),
-    busy: threadBusy, guardReplay: deps.guardReplay,
+    busy: threadBusy, guardReplay: deps.guardReplay, enabled: deps.enabled,
     request: threadId => directRequestOwners.get(threadId),
     resend: (botId, threadId, message, replyTo, spoken, replay) => replay && deps.replayDirect ? deps.replayDirect(botId, threadId, message, replyTo, replay) : startOrQueueDirectMessage(botId, threadId, message.text ?? "", replyTo, undefined, message.sender, undefined, spoken.via, spoken.callId, message.dataContext),
   });

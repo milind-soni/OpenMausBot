@@ -72,7 +72,7 @@ async function withLimitFixture(setup: { recovery?: unknown; secondClaude?: bool
         "--experimental-strip-types", "--import", new URL("./testing/limit-clock-hooks.mjs", import.meta.url).href, fileURLToPath(new URL("./index.ts", import.meta.url)),
       ], {
         cwd: fileURLToPath(new URL("..", import.meta.url)),
-        env: { ...verificationServerEnvironment({}, dataDir, Number(new URL(url).port)), OMB_TEST_LIMIT_CLOCK: "1", OMB_TEST_PLAN_USAGE_FILE: usageFile },
+        env: { ...verificationServerEnvironment({ OMB_QUOTA_SWITCH: "1" }, dataDir, Number(new URL(url).port)), OMB_TEST_LIMIT_CLOCK: "1", OMB_TEST_PLAN_USAGE_FILE: usageFile },
         stdio: ["ignore", log, log],
       });
       closeSync(log);

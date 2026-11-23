@@ -780,6 +780,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       sawInit: boolean;
       /** why the CLI refused `--resume` with an error result instead of exiting, for the log line */
       resumeRefusal?: string;
+      resumeSessionMissing?: boolean;
       /** the mode `init` reports: the CLI accepts `--permission-mode auto` for any model but runs
        * "default" silently where auto is unavailable (Haiku 4.5, Sonnet 4.5, an org that disabled it) */
       nativePermissionMode: string | null;
@@ -1548,6 +1549,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             // conversation found with session ID …") and stays up; end it so its close rebuilds once.
             if (o.is_error === true && sessionId && !session.sawInit && session.turn && !session.turn.settled) {
               session.resumeRefusal = claudeResultError(o);
+              session.resumeSessionMissing = o.num_turns === 0
+                && session.resumeRefusal === `No conversation found with session ID: ${sessionId}`;
               closeSession(threadId, "resume refused");
               break;
             }
@@ -1680,7 +1683,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           const message = `claude exited ${code} before result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}`;
           const verdict = classifyError({ exitCode: code, stderr: message });
           const quotaStop = session.turn.limitReached === true || verdict.reason === "quota" || verdict.reason === "rate_limited";
-          const unverifiedDispatch = Boolean(turn.replayAttempt && session.turn.awaitingInit !== true);
+          const trackedTurnStarted = Boolean(turn.replayAttempt && session.sawInit);
+          const unverifiedDispatch = trackedTurnStarted || Boolean(turn.replayAttempt && session.turn.awaitingInit !== true);
+          // A fresh --resume can reject the cursor before init. Only a confirmed
+          // missing session can bypass the conservative exit guard on a tracked turn.
+          const confirmedResumeRefusal = session.resumeSessionMissing === true && !session.sawInit
+            && session.turn.answered !== true && !session.turn.sawStreamDelta;
           const endedBeforeTurn = session.turn.awaitingInit === true || (refusedAutocompact && !session.turn.sawStreamDelta && session.turn.answered !== true);
           if (!retry.cancelled && !stoppedForRoom(threadId, session.child.pid) && mayResendTurn({ endedBeforeTurn, exitCode: code, transient: verdict.transient,
             streamed: session.turn.sawStreamDelta, answered: session.turn.answered === true, attempt: retry.attempt, quotaStop, unverifiedDispatch })) {
@@ -1733,7 +1741,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             promptSubmitted: session.sawInit,
             producedOutput: session.turn.sawStreamDelta,
           });
-          if (!quotaStop && !unverifiedDispatch && mayReplay(resumeFailure) && !retry.cancelled) {
+          if (!quotaStop && !trackedTurnStarted && (!unverifiedDispatch || confirmedResumeRefusal) && mayReplay(resumeFailure) && !retry.cancelled) {
             // Without this line a refused --resume looks like an ordinary new session in the logs.
             console.error(`claude (${instanceId}): could not resume session ${sessionId} for thread ${threadId}, starting a new one: ${redactSecretsInText(session.resumeRefusal ?? message)}`);
             const recovery = recoveryPromptFor({

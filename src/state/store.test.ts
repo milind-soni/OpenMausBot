@@ -2607,6 +2607,10 @@ describe("live config frames", () => {
     expect(configStatusFromFrame({ ...baseFrame, automaticRecovery: { enabled: false } }).automaticRecovery).toEqual({ enabled: false });
   });
 
+  it.each([false, true])("keeps quota switching status %s through live config refreshes", quotaSwitchEnabled => {
+    expect(configStatusFromFrame({ ...baseFrame, quotaSwitchEnabled }).quotaSwitchEnabled).toBe(quotaSwitchEnabled);
+  });
+
   it("keeps a Team Cloud's team through live config refreshes, so its people stay in the @ list", () => {
     const team = { id: "team-acme", name: "Acme", cloudPage: "https://cloud.example.test/cloud" };
     expect(configStatusFromFrame({ ...baseFrame, team }).team).toEqual(team);

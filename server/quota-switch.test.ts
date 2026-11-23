@@ -2,7 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { DATA_DIR } from "./config.ts";
+import { DATA_DIR, loadConfig, saveConfig } from "./config.ts";
 import type { ModelSelection, ProviderAdapter, ProviderSnapshot } from "./contracts.ts";
 import { createCoordinator, type Coordinator, type HostTurnResult } from "./coordinator.ts";
 import { PROBE_TIMEOUT_MS } from "./engine-install.ts";
@@ -39,10 +39,23 @@ describe("quotaSwitchEnabled", () => {
     }
   });
 
-  it("does not accept opt-in from config.json", () => {
+  it("loads the persisted opt-in, preserves it when saving unrelated settings, and honors environment overrides", () => {
     mkdirSync(DATA_DIR, { recursive: true });
-    writeFileSync(join(DATA_DIR, "config.json"), JSON.stringify({ quotaSwitch: { enabled: true } }));
-    expect(quotaSwitchEnabled({})).toBe(false);
+    writeFileSync(join(DATA_DIR, "config.json"), JSON.stringify({ quotaSwitch: true }));
+    saveConfig({ language: "en" });
+    const { quotaSwitch } = loadConfig();
+    expect(quotaSwitchEnabled({}, quotaSwitch)).toBe(true);
+    expect(quotaSwitchEnabled({ OMB_QUOTA_SWITCH: "0" }, quotaSwitch)).toBe(false);
+    expect(quotaSwitchEnabled({ OMB_QUOTA_SWITCH: "typo" }, quotaSwitch)).toBe(false);
+    expect(quotaSwitchEnabled({ OMB_QUOTA_SWITCH: "1" }, false)).toBe(true);
+  });
+
+  it("ignores a malformed file opt-in without discarding other configuration", () => {
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(join(DATA_DIR, "config.json"), JSON.stringify({ quotaSwitch: "true", language: "en" }));
+    const config = loadConfig();
+    expect(config.language).toBe("en");
+    expect(quotaSwitchEnabled({}, config.quotaSwitch)).toBe(false);
   });
 });
 

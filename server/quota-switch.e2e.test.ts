@@ -19,13 +19,14 @@ const jsonLines = (path: string): any[] => existsSync(path)
   ? readFileSync(path, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
 
 async function withQuotaFixture(
-  options: { env?: NodeJS.ProcessEnv; otherSignInOnly?: boolean; action?: "read" | "write" | "unknown"; actionPrompt?: string },
+  options: { env?: NodeJS.ProcessEnv; persistedOptIn?: boolean; otherSignInOnly?: boolean; action?: "read" | "write" | "unknown"; actionPrompt?: string },
   check: (fixture: {
     api: (method: string, path: string, body?: unknown) => Promise<any>;
     control: (...args: string[]) => Promise<any>;
     respond: (threadId: string, body: unknown) => Promise<{ status: number; body: any }>;
     backupPrompts: () => any[];
     dataDir: string;
+    restart: () => Promise<void>;
     restartBaseline: (root: string) => Promise<void>;
   }) => Promise<void>,
 ) {
@@ -40,6 +41,7 @@ async function withQuotaFixture(
   const engine = (displayName: string, environment: Record<string, string>) =>
     ({ driver: "claudeAgent", displayName, config: { cli: FAKE_CLI }, environment });
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
+    ...(options.persistedOptIn ? { quotaSwitch: true } : {}),
     instances: {
       claude: engine(LIMITED, { FAKE_CLAUDE_MODE: "usage-limit", ...(options.action ? {
         FAKE_CLAUDE_HOOKS: "1", FAKE_CLAUDE_REPLAY_ACTION: options.action, FAKE_CLAUDE_REPLAY_ACTION_PROMPT: options.actionPrompt ?? "CHECK_THE_SYNTHETIC_ACTION", FAKE_CLAUDE_REPLAY_ACTION_LOG: join(dataDir, "actions.txt"),
@@ -76,7 +78,7 @@ async function withQuotaFixture(
   };
   const candidateRoot = fileURLToPath(new URL("..", import.meta.url));
   const start = async (root = candidateRoot, baseline = false) => {
-    const env = { ...verificationServerEnvironment({}, dataDir, port), OMB_QUOTA_SWITCH: "1", ...options.env, ...(baseline ? { OMB_QUOTA_SWITCH: "0" } : {}) };
+    const env = { ...verificationServerEnvironment({}, dataDir, port), ...(options.persistedOptIn ? {} : { OMB_QUOTA_SWITCH: "1" }), ...options.env, ...(baseline ? { OMB_QUOTA_SWITCH: "0" } : {}) };
     const log = openSync(logPath, "a", 0o600);
     const args = verificationServerArgs(env);
     args[args.length - 1] = join(root, "server", "index.ts");
@@ -85,6 +87,10 @@ async function withQuotaFixture(
     await expect.poll(async () => {
       try { return (await fetch(url + "/api/health", { signal: AbortSignal.timeout(1_000) })).ok; } catch { return false; }
     }, { timeout: 90_000 }).toBe(true);
+  };
+  const restart = async () => {
+    await waitForExit(server, { signal: "SIGTERM" });
+    await start();
   };
   const restartBaseline = async (root: string) => {
     await waitForExit(server, { signal: "SIGTERM" });
@@ -109,7 +115,7 @@ async function withQuotaFixture(
       if (options.otherSignInOnly) return jsonLines(backupFile);
       try { return (JSON.parse(readFileSync(backupFile, "utf8")).calls as any[]).filter((call) => call.method === "turn/start"); } catch { return []; }
     };
-    await check({ api, control, respond, backupPrompts: sent, dataDir, restartBaseline });
+    await check({ api, control, respond, backupPrompts: sent, dataDir, restart, restartBaseline });
   } finally {
     evidence.push({ audit: readReplayAudit(dataDir), backupPrompts: existsSync(backupFile) ? readFileSync(backupFile, "utf8").slice(0, 20_000) : null, roots: readHandoffs(dataDir) });
     const evidencePath = `${logPath}.quota-switch.json`;
@@ -138,8 +144,13 @@ async function meetTheLimit(api: (method: string, path: string, body?: unknown) 
   return { bot, threadId, messages, state };
 }
 
-it("carries the request on with the backup the person chose: the exact message there once, the bot's own AI left as it was", async () => {
-  await withQuotaFixture({}, async ({ api, control, backupPrompts }) => {
+it.each([false, true])("carries on with the chosen backup once and keeps the bot's AI (persisted opt-in: %s)", async persistedOptIn => {
+  await withQuotaFixture({ persistedOptIn }, async ({ api, control, backupPrompts, restart }) => {
+    expect((await api("GET", "/api/config")).quotaSwitchEnabled).toBe(true);
+    if (persistedOptIn) {
+      await restart();
+      expect((await api("GET", "/api/config")).quotaSwitchEnabled).toBe(true);
+    }
     const text = "SUMMARISE_THE_QUARTER_4K";
     const { bot, threadId, messages, state } = await meetTheLimit(api, control, text, true, "codex");
     const { task: sibling } = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Sibling keeps its engine" });
@@ -186,7 +197,8 @@ it("moves nothing when no backup is chosen, though another AI is set up: it says
 }, 240_000);
 
 it.each([undefined, "0"])("does not switch with a configured backup when OMB_QUOTA_SWITCH is %s", async flag => {
-  await withQuotaFixture({ env: { OMB_QUOTA_SWITCH: flag } }, async ({ api, control, backupPrompts }) => {
+  await withQuotaFixture({ persistedOptIn: flag === "0", env: { OMB_QUOTA_SWITCH: flag } }, async ({ api, control, backupPrompts }) => {
+    expect((await api("GET", "/api/config")).quotaSwitchEnabled).toBe(false);
     const { bot, threadId, messages, state } = await meetTheLimit(api, control, "NO_MOVE_WHEN_OFF_2B", false, "codex");
     const mine = async () => (await api("GET", "/api/notifications")).notifications.filter((entry: any) => entry.kind === "notice" && entry.botId === bot.id);
     await expect.poll(async () => (await mine()).length, { timeout: 20_000 }).toBe(1);

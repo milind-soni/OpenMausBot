@@ -7,7 +7,7 @@ import { Switch } from "./SettingsPrimitives";
 
 const fixture = vi.hoisted(() => ({
   values: [] as unknown[], index: 0,
-  config: {} as Pick<ConfigStatus, "automaticRecovery">,
+  config: {} as Pick<ConfigStatus, "automaticRecovery" | "quotaSwitchEnabled">,
   instances: [] as InstanceInfo[],
   api: vi.fn(), dispatch: vi.fn(),
 }));
@@ -70,7 +70,7 @@ describe("AutomaticRecoverySettings", () => {
     expect(view.engine).toBeUndefined();
     expect(view.model).toBeUndefined();
     expect(view.save).toBeUndefined();
-    expect(view.html).toContain("If a provider fails before it starts, try a backup once.");
+    expect(view.html).toContain("Try a backup once when a provider proves the request never started.");
     expect(view.html).toContain("Learn more");
     expect(view.html).not.toContain("Channels are not included");
     expect(view.html).toContain('aria-describedby="automatic-recovery-help"');
@@ -83,7 +83,16 @@ describe("AutomaticRecoverySettings", () => {
     expect(more).toContain("Only this thread switches; bot defaults stay unchanged.");
     expect(more).toContain("Permissions stay unchanged; some provider switches need confirmation.");
     expect(more).toContain("can incur charges from its provider");
-    expect(more).toContain("Bots with backups of their own (Model → Backup models for this bot) use those instead, whether or not this is on.");
+    expect(more).toContain("When automatic switching is enabled, a bot’s own backups take priority over the installation backup.");
+  });
+
+  it("labels and disables saved backup settings when switching is off", () => {
+    fixture.config = { quotaSwitchEnabled: false, automaticRecovery: { enabled: true, backup: { instanceId: "backup", model: "m" } } };
+    const view = render();
+    expect(view.html).toContain("Automatic model switching is off. Saved backups will not be used.");
+    expect(view.toggle.props.disabled).toBe(true);
+    expect(view.html.match(/<select[^>]*disabled/g)).toHaveLength(2);
+    expect(fixture.api).not.toHaveBeenCalled();
   });
 
   it("saves as soon as a ready backup is chosen, keeps the draft through broadcasts and a failed save, and saves once at a time", async () => {

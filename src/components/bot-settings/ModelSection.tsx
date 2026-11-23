@@ -76,7 +76,7 @@ function KeepWarmRow({ bot, workspaceOn, onChange }: { bot: Bot; workspaceOn: bo
 }
 
 export function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback: Bot["fallback"]) => void }) {
-  const state = useStoreSelector((s) => ({ instances: s.instances }), sameFields);
+  const state = useStoreSelector((s) => ({ instances: s.instances, switchingOff: s.config?.quotaSwitchEnabled === false }), sameFields);
   const chain = bot.fallback ?? [];
   // Backups may share an account with the main AI or each other, never a model.
   const taken = (instanceId: string, model: string, except?: number) =>
@@ -116,7 +116,7 @@ export function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback
     <div className="rounded-xl bg-card p-4">
       <div className="text-[15px] font-medium text-ink">{t("model.fallback.title")}</div>
       <div className="mt-0.5 text-[13px] text-ink-secondary">
-        {t("model.fallback.uses")}
+        {t(state.switchingOff ? "settings.recovery.switchingOff" : "model.fallback.enabledUses")}
       </div>
       {chain.length > 0 && (
         <ol className="mt-3 flex flex-col gap-1">
@@ -126,6 +126,7 @@ export function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback
               <span className="min-w-0 flex-1 truncate text-ink">{nameOf(entry.instanceId)}</span>
               <Select size="sm" className="max-w-[45%] shrink-0" value={entry.model}
                 aria-label={t("model.fallback.model", { name: nameOf(entry.instanceId) })}
+                disabled={state.switchingOff}
                 onChange={(event) => onChange(chain.map((candidate, at) => at === index ? { ...candidate, model: event.target.value } : candidate))}>
                 {modelsOf(entry, index).map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
               </Select>
@@ -133,6 +134,7 @@ export function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback
                 type="button"
                 onClick={() => onChange(chain.filter((_, at) => at !== index))}
                 aria-label={t("model.fallback.remove", { name: nameOf(entry.instanceId) })}
+                disabled={state.switchingOff}
                 className="shrink-0 rounded p-0.5 text-ink-secondary hover:text-ink"
               >
                 <X size={13} />
@@ -147,7 +149,7 @@ export function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback
             value=""
             onChange={(event) => add(event.target.value)}
             aria-label={t("model.fallback.add")}
-            disabled={available.length === 0}
+            disabled={state.switchingOff || available.length === 0}
           >
             <option value="">{available.length === 0 ? t("model.fallback.none") : t("model.fallback.addOption")}</option>
             {available.map((instance) => (

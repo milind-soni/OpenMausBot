@@ -84,8 +84,9 @@ export function turnLimitScope(event: SettledTurn, flags: { limit?: TakeoverScop
     : flags?.limit ?? (event.stopReason !== "tool_error" && classifyError({ text: cause ?? "" }).reason === "quota" ? "engine" : undefined);
 }
 
-export function quotaSwitchEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.OMB_QUOTA_SWITCH?.trim() === "1";
+export function quotaSwitchEnabled(env: NodeJS.ProcessEnv = process.env, persisted?: boolean): boolean {
+  const override = env.OMB_QUOTA_SWITCH;
+  return override === undefined ? persisted === true : override.trim() === "1";
 }
 
 const nameOf = (engine: QuotaSwitchEngine): string => engine.displayName || engine.driverKind;

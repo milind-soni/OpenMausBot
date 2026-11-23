@@ -4057,6 +4057,27 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(readFileSync(state, "utf8")).toBe("1");
   }, 20_000);
 
+  it("does not replay a tracked fresh process that initialized and ran a tool before exiting", async () => {
+    const launches = join(scratch, "launches-tracked-tool");
+    process.env.FAKE_CLAUDE_TRANSIENTS = "1";
+    process.env.FAKE_CLAUDE_ANSWERED_FAILS = "1";
+    process.env.FAKE_CLAUDE_STATE = launches;
+    process.env.FAKE_CLAUDE_RETRY_SCALE = "0.001";
+    await create();
+    const { turnId } = await instance.adapter.sendTurn({
+      threadId: "t-tracked-tool", text: "read fixture", resumeCursor: "fixture-cursor",
+      replayAttempt: { logicalTaskId: "fixture-task", generation: "1" },
+    });
+
+    await recorder.until(e => e.type === "turn.completed" && e.turnId === turnId);
+    expect(recorder.events).toContainEqual(expect.objectContaining({
+      type: "item.completed", itemType: "tool", turnId,
+    }));
+    expect(recorder.events.filter(e => e.type === "turn.retrying")).toEqual([]);
+    expect(recorder.events.filter(e => e.type === "turn.completed")).toMatchObject([{ ok: false, stopReason: "exit_before_result" }]);
+    expect(readFileSync(launches, "utf8")).toBe("1");
+  }, 20_000);
+
   it("stops retrying at the attempt cap and settles the turn as failed", async () => {
     process.env.FAKE_CLAUDE_TRANSIENTS = "9";
     process.env.FAKE_CLAUDE_STATE = join(scratch, "launches-cap");

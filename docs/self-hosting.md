@@ -1490,9 +1490,12 @@ it in plain words. It is a usage limit when its words say so, or when it is a
 a shorter wait is a rate limit to try again after. A reply that only quotes
 such an error among other words stays a reply.
 
-Automatic model switching is off by default. To opt in, launch the server
-with `OMB_QUOTA_SWITCH=1`. This includes switching to an Automatic recovery
-backup after a startup refusal. There is no setting in `config.json`.
+Automatic model switching is off by default. To enable it across app launches
+and restarts, set the top-level `"quotaSwitch": true` in `config.json`. The
+server reads this at startup. An explicit `OMB_QUOTA_SWITCH=1` enables switching
+for that process and `OMB_QUOTA_SWITCH=0` disables it, overriding the file.
+This also controls switching to an Automatic recovery backup after a startup
+refusal. Settings shows whether switching is available.
 
 ### When an engine is signed out
 
