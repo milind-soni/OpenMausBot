@@ -325,6 +325,20 @@ describe("export", () => {
     expect(safeName("console.md")).toBe("console.md");
   });
 
+  it.each([".pdf", ".xlsx"])("keeps %s when shortening a long exported file name", (extension) => {
+    const name = safeName(`${"annual-report-".repeat(12)}${extension}`);
+    expect(name.endsWith(extension)).toBe(true);
+    expect(Buffer.byteLength(name)).toBeLessThanOrEqual(120);
+  });
+
+  it("shortens multilingual names on complete characters while keeping their extension", () => {
+    const name = safeName(`${"季度报告📊".repeat(12)}.xlsx`);
+    expect(name.endsWith(".xlsx")).toBe(true);
+    expect(Buffer.byteLength(name)).toBeLessThanOrEqual(120);
+    expect(Buffer.from(name).toString("utf8")).toBe(name);
+    expect(name).not.toContain("�");
+  });
+
   it.each(["widget", "app"])("keeps %s fallback text in the Markdown transcript", async (kind) => {
     const parsed = parseWidgetInput(WIDGET_SAMPLES.pullRequests);
     if (!parsed.ok) throw new Error(parsed.error);
