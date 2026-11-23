@@ -22,6 +22,8 @@ const DB_FILE = () => join(DATA_DIR, "messages.db");
 const WORK_KINDS = "kind IN ('activity', 'digest', 'options')";
 const CARD_KINDS = "kind IN ('secret', 'signin', 'connector')";
 const FAILED_CALL = "kind = 'activity' AND instr(json, '\"ok\":false') > 0";
+export const LIBRARY_FILE_REPLY_FILTER = `role = 'bot' AND kind = 'text'
+  AND (instr(text, '](') > 0 OR instr(text, ']:') > 0 OR instr(text, '<file:') > 0 OR json_extract(json, '$.attachments') IS NOT NULL)`;
 /** The rows that order the thread list and the time each one counts at. SQLite uses messages_thread_order only for a
  * statement whose WHERE and MAX repeat these texts exactly. */
 const ORDERING_ROW = "((role = 'user' AND json_extract(json, '$.peerAsk') IS NULL) OR (role = 'bot' AND kind = 'text' AND (json_extract(json, '$.turnTerminal') = 1 OR json_extract(json, '$.turnId') IS NULL)))";
@@ -63,6 +65,7 @@ function open(): DatabaseSync {
     CREATE INDEX IF NOT EXISTS messages_thread_at ON messages(thread_id, at);
     -- Partial, so no other query's plan can move onto them: only a statement that repeats the WHERE may use one.
     CREATE INDEX IF NOT EXISTS messages_thread_bot_text ON messages(thread_id, at) WHERE kind = 'text' AND role = 'bot' AND text IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS messages_library_file_replies ON messages(thread_id, role) WHERE ${LIBRARY_FILE_REPLY_FILTER};
     CREATE INDEX IF NOT EXISTS messages_thread_order ON messages(thread_id, ${ORDERING_AT}) WHERE ${ORDERING_ROW};
     CREATE INDEX IF NOT EXISTS messages_work_at ON messages(kind, at) WHERE ${WORK_KINDS};
     CREATE INDEX IF NOT EXISTS messages_cards_at ON messages(kind, at) WHERE ${CARD_KINDS};
