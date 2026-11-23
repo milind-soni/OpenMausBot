@@ -66,7 +66,7 @@ export function threadLabels(
   const recent = (task: LabelTask) => now - threadRecency(task) < ACTIVE_DAYS * DAY_MS;
   const anchored = (task: LabelTask) => task.threadId === current || task.threadId === bot.mainThreadId;
   const active = own.filter((task) => anchored(task) || labelStatus(task) !== null || recent(task))
-    .sort((a, b) => threadRecency(b) - threadRecency(a));
+    .sort((a, b) => Number(b.threadId === bot.mainThreadId) - Number(a.threadId === bot.mainThreadId) || threadRecency(b) - threadRecency(a));
   const others = active.filter((task) => !anchored(task)).slice(0, Math.max(0, ACTIVE_LIMIT - active.filter(anchored).length));
   const shown = active.filter((task) => anchored(task) || others.includes(task));
   const listed = new Set(shown.map((task) => task.threadId));

@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState, type Dispatch, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Archive, ArchiveRestore, BellOff, Brain, Check, ChevronRight, Clock, Clock3, FolderInput, Link2, Link2Off, Loader2, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, BellOff, Brain, Check, ChevronRight, Clock, Clock3, FolderInput, Link2, Link2Off, Loader2, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, Star, Trash2 } from "lucide-react";
 import type { Action, AppState, BotProject, Task } from "@/state/store";
 import { api } from "@/state/store";
 import type { RoutineRun } from "@/lib/routines";
@@ -10,6 +10,7 @@ import { useHeldMenuMotion } from "./MenuMotion";
 import { intlLocale, t } from "@/lib/i18n";
 import { nextRename } from "@/lib/rename";
 import { imeComposing } from "@/lib/send-key";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { isTickable, opensRowMenuFromKey } from "@/lib/bulk-select";
 import { threadRefUrl, threadWebRefUrl } from "@/lib/thread-refs";
 import { copyText } from "@/lib/copy-text";
@@ -27,7 +28,7 @@ import { ShareRowItems } from "./conversation-share/ShareRowItems";
 
 export { isSnoozed, orderedThreadList };
 
-type ThreadRowTask = Pick<Task, "threadId" | "title" | "sharedChat" | "private" | "shared" | "sharedWith" | "projectId" | "busy" | "activity" | "unread" | "openedBy" | "closedBy" | "archivedAt" | "snoozedUntil" | "waitingForTeammates" | "link" | "turnStartedAt"> & {
+type ThreadRowTask = Pick<Task, "threadId" | "title" | "routineRunId" | "sharedChat" | "private" | "shared" | "sharedWith" | "projectId" | "busy" | "activity" | "unread" | "openedBy" | "closedBy" | "archivedAt" | "snoozedUntil" | "waitingForTeammates" | "link" | "turnStartedAt"> & {
   queued?: boolean;
   pinned?: boolean;
   createdAt?: number;
@@ -101,13 +102,13 @@ const isWaitingOnTeammate = (task: Pick<Task, "waitingForTeammates">): boolean =
 const demandsAttention = (task: ThreadRowTask, activeId: string) =>
   task.threadId === activeId || task.activity === "waiting-on-you" || isWorking(task) || isWaitingOnTeammate(task) || Boolean(task.queued) || Boolean(task.unread);
 
-export function partitionHelperThreads<T extends ThreadRowTask>(tasks: T[], activeId: string, query = "", folders: BotProject[] = []): { own: T[]; helpers: T[] } {
+export function partitionHelperThreads<T extends ThreadRowTask>(tasks: T[], activeId: string, query = "", folders: BotProject[] = [], mainId?: string): { own: T[]; helpers: T[] } {
   if (query.trim()) return { own: tasks, helpers: [] };
   const own: T[] = [];
   const helpers: T[] = [];
   for (const task of tasks) {
     const filed = folders.some((folder) => folder.id === task.projectId);
-    const helper = Boolean(task.openedBy) && task.pinned !== true && !filed && !demandsAttention(task, activeId) &&
+    const helper = Boolean(task.openedBy) && task.threadId !== mainId && task.pinned !== true && !filed && !demandsAttention(task, activeId) &&
       !task.closedBy && !isArchived(task) && !isSnoozed(task);
     (helper ? helpers : own).push(task);
   }
@@ -127,6 +128,12 @@ export function HelperThreadGroup<T>({ tasks, renderThread }: { tasks: T[]; rend
     </button>
     {open && <div role="group" aria-label={label}>{tasks.map(renderThread)}</div>}
   </div>;
+}
+
+/** A bot's main thread leads every list of its threads, above pinned ones and whatever was written in last. */
+export function mainThreadFirst<T extends { threadId: string }>(tasks: T[], mainId?: string): T[] {
+  const main = tasks.find((task) => task.threadId === mainId);
+  return main ? [main, ...tasks.filter((task) => task !== main)] : tasks;
 }
 
 /** Default list shows each routine's newest run only; older runs stay under "Show all". */
@@ -223,6 +230,7 @@ export function threadRowActions(botId: string, dispatch: Dispatch<Action>) {
     onMove: (task: { threadId: string }, projectId: string | null) => dispatch({ type: "updateTask", botId, threadId: task.threadId, patch: { projectId } }),
     onArchive: (task: { threadId: string }, archivedAt: number | null) => dispatch({ type: "updateTask", botId, threadId: task.threadId, patch: { archivedAt } }),
     onPin: (task: { threadId: string }, pinned: boolean) => dispatch({ type: "updateTask", botId, threadId: task.threadId, patch: { pinned } }),
+    onSetMain: (task: { threadId: string }) => dispatch({ type: "updateBot", botId, patch: { mainThreadChoice: task.threadId } }),
     onSnooze: (task: { threadId: string }, snoozedUntil: number | null) => dispatch({ type: "updateTask", botId, threadId: task.threadId, patch: { snoozedUntil } }),
     onLink: (task: { threadId: string }, link: string | null) => dispatch({ type: "updateTask", botId, threadId: task.threadId, patch: { link } }),
     onMemory: () => openBotSettings(dispatch, "memory", { botId }),
@@ -244,6 +252,7 @@ type ThreadRowProps = {
   onMove?: (task: ThreadRowTask, folderId: string | null) => void;
   onArchive?: (task: ThreadRowTask, archivedAt: number | null) => void;
   onPin?: (task: ThreadRowTask, pinned: boolean) => void;
+  onSetMain?: (task: ThreadRowTask) => void;
   onSnooze?: (task: ThreadRowTask, snoozedUntil: number | null) => void;
   onLink?: (task: ThreadRowTask, link: string | null) => void;
   onRefreshPermissions?: (task: ThreadRowTask) => void;
@@ -268,10 +277,11 @@ const sameFields = <T extends object>(a: T, b: T): boolean => {
 const sameThreadRow = ({ task: previousTask, ...previous }: ThreadRowProps, { task, ...next }: ThreadRowProps): boolean =>
   sameFields(previousTask, task) && sameFields(previous, next);
 
-export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, current, folders, onSelect, onRename, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSnooze, onLink, onRefreshPermissions, onMemory, activityLabel: liveActivity, now, selectMode = false, checked = false, onToggleSelect, panel = false, preview, main = false }: ThreadRowProps) {
+export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, current, folders, onSelect, onRename, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSetMain, onSnooze, onLink, onRefreshPermissions, onMemory, activityLabel: liveActivity, now, selectMode = false, checked = false, onToggleSelect, panel = false, preview, main = false }: ThreadRowProps) {
   const activityLabel = useHeldText(liveActivity);
   // Simple mode's menu keeps what a person needs for a conversation; Advanced adds the rest.
   const advanced = useAdvancedMode();
+  const admin = useOwnerOrAdmin();
   const [menu, setMenu] = useState<{ left: number; top: number } | null>(null);
   const [webLink, setWebLink] = useState<string | null>(null);
   useEffect(() => {
@@ -408,6 +418,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
         </Select>
       </label>}
       {onPin && <button type="button" onClick={() => { setMenu(null); onPin(task, task.pinned !== true); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover">{task.pinned === true ? <PinOff size={16} /> : <Pin size={16} />}{task.pinned === true ? t("sidebar.bot.unpin") : t("sidebar.bot.pin")}</button>}
+      {onSetMain && admin === true && window.ogb?.remoteClient?.active !== true && !task.routineRunId && !task.private && !archived && <button type="button" disabled={main} title={main ? t("sidebar.bot.simple.isMainThread") : undefined} onClick={() => { setMenu(null); onSetMain(task); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40"><Star size={16} />{t("sidebar.bot.simple.setMainThread")}</button>}
       {advanced && onLink && task.link && <button type="button" onClick={() => { setMenu(null); onLink(task, null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Link2Off size={16} />{t("task.removeLink")}</button>}
       {onArchive && <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); onArchive(task, isArchived(task) ? null : Date.now()); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40">{archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}{archived ? t("task.unarchive") : t("task.archive")}</button>}
       {advanced && onSnooze && <div className="px-2 pt-1">

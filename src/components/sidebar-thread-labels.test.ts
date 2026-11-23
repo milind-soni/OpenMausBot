@@ -32,10 +32,10 @@ describe("a bot's threads under its sidebar row", () => {
     expect(open.more).toBe(3);
   });
 
-  it("unfolded, keeps the main thread listed however old it is, in place of the oldest active one", () => {
+  it("unfolded, lists the main thread first, however old it is, in place of the oldest active one", () => {
     const tasks = [thread("main", 30), thread("a", 1), thread("b", 2), thread("c", 3), thread("d", 4), thread("e", 5)];
     const labels = threadLabels({ ...bot(tasks, "e"), mainThreadId: "main" }, {}, { unfolded: true, current: "e", rowThreadId: "e", now: NOW });
-    expect(ids(labels)).toEqual(["a", "b", "e", "main"]);
+    expect(ids(labels)).toEqual(["main", "a", "b", "e"]);
     expect(labels.more).toBe(2);
   });
 

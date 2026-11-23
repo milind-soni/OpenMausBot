@@ -107,6 +107,28 @@ describe("a bot's main thread", () => {
     await unmount();
   });
 
+  it("leads the list, above folders and pinned threads, folded or showing all, and is listed once", async () => {
+    const rows = () => [...host.querySelectorAll("[data-sidebar-thread-row]")].map((row) => row.getAttribute("data-sidebar-thread-row"));
+    bot.mainThreadId = "loose-0";
+    await mount();
+    expect(rows().slice(0, 3)).toEqual(["loose-0", "filed-pinned", "filed-plain"]);
+    await click("Show all 11 threads");
+    expect(rows()[0]).toBe("loose-0");
+    expect(rows().filter((id) => id === "loose-0")).toHaveLength(1);
+    expect(rows()).toHaveLength(11);
+    await unmount();
+    forgetSidebarShowAllForTests();
+    localStorage.clear();
+    bot.mainThreadId = "filed-plain";
+    await mount();
+    expect(rows().slice(0, 2)).toEqual(["filed-plain", "filed-pinned"]);
+    expect(rows().filter((id) => id === "filed-plain")).toHaveLength(1);
+    await click("Collapse Taxes threads");
+    expect(rows().slice(0, 2)).toEqual(["filed-plain", "filed-pinned"]);
+    await unmount();
+    delete bot.mainThreadId;
+  });
+
   it("is marked on a collapsed bot's row for it", () => {
     const html = renderToStaticMarkup(createElement(SidebarBotActivity, {
       bot: { ...bot, mainThreadId: "filed-pinned" }, rowThreadId: bot.threadId, density: "comfortable", pendingQueued: {}, dispatch: vi.fn(),

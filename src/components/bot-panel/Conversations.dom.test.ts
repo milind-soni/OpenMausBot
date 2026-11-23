@@ -10,7 +10,9 @@ const fixture = vi.hoisted(() => ({
   dispatch: vi.fn(),
   wide: true,
   api: vi.fn(),
+  admin: true as boolean | null,
 }));
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return {
@@ -150,9 +152,19 @@ describe("a bot's conversations in its panel", () => {
     expect(more()!.textContent).toBe("Show 6 more");
   });
 
-  it("keeps the main thread listed, with its star, when it is older than the first three", () => {
+  it("lists the main thread first, above a pinned one, however old it is, folded or not", () => {
     render(research({ mainThreadId: "gift" }));
-    expect(listed()).toEqual(["hiring", "launch", "who", "gift"]);
+    expect(listed()).toEqual(["gift", "hiring", "launch", "who"]);
+    click(more());
+    expect(listed().slice(0, 3)).toEqual(["gift", "hiring", "launch"]);
+    expect(listed()).toHaveLength(10);
+    render(research({ mainThreadId: "hiring" }));
+    expect(listed().slice(0, 2)).toEqual(["hiring", "launch"]);
+  });
+
+  it("keeps the main thread listed, with its mark, when it is older than the first three", () => {
+    render(research({ mainThreadId: "gift" }));
+    expect(listed()).toEqual(["gift", "hiring", "launch", "who"]);
     expect(row("gift").querySelector('[aria-label="Main thread"]')).not.toBeNull();
     expect(more()!.textContent).toBe("Show 6 more");
   });
@@ -292,6 +304,29 @@ describe("a bot's conversations in its panel", () => {
     fixture.dispatch.mockReset();
     click(menuFor("Translate the launch post").find((button) => button.textContent === "Archive")!);
     expect(fixture.dispatch.mock.calls).toEqual([[{ type: "updateTask", botId: "research", threadId: "launch", patch: { archivedAt: expect.any(Number) } }]]);
+  });
+
+  it("sets the row's own thread as the main one from its menu, and not the one that already is, an archived one, or for a member", () => {
+    const toggle = (title: string) => click(host.querySelector(`[aria-label="Actions for ${title}"]`));
+    const item = (title: string) => [...document.querySelector(`[data-thread-overlay][aria-label="Actions for ${title}"]`)!.querySelectorAll("button")]
+      .find((button) => button.textContent === "Set as main thread");
+    const archived = [...tasks, task("old", "Old notes", 11, { archivedAt: now })];
+    render(research({ mainThreadId: "launch", threadId: "old", tasks: archived }));
+    toggle("Who am I?");
+    click(item("Who am I?")!);
+    expect(fixture.dispatch.mock.calls).toEqual([[{ type: "updateBot", botId: "research", patch: { mainThreadChoice: "who" } }]]);
+    toggle("Translate the launch post");
+    const already = item("Translate the launch post")!;
+    expect([already.disabled, already.title]).toEqual([true, "This is already the main thread"]);
+    toggle("Translate the launch post");
+    toggle("Old notes");
+    expect(item("Old notes")).toBeUndefined();
+    toggle("Old notes");
+    fixture.admin = false;
+    render(research({ mainThreadId: "launch", threadId: "deck" }));
+    toggle("Who am I?");
+    expect(item("Who am I?")).toBeUndefined();
+    fixture.admin = true;
   });
 
   it("keeps the search open when archiving leaves one conversation listed", () => {
