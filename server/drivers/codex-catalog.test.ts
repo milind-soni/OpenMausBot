@@ -171,6 +171,7 @@ describe("readCodexModelCatalog", () => {
       "gpt-fake-default+priority",
       "gpt-fake-default+ultrafast",
       "gpt-page-two",
+      "gpt-page-two+ultrafast",
     ]);
     expect(catalog.options.find((option) => option.id === "gpt-fake-default+ultrafast")?.label).toBe(
       "GPT Fake Default · Ultrafast",
