@@ -5,7 +5,7 @@ import type { Action, AppState, Bot } from "./store";
 export type NewChat = { session: number; botId: string; projectId?: string; held: HeldAction[] };
 type HeldAction = Extract<Action, { type: "setModel" } | { type: "updateTask" }>;
 /** Makes the conversation a bot's blank chat stands for, as its first send would, and answers with its thread. */
-export type MakeNewChatAction = { type: "makeNewChat"; botId: string; threadId: string; onMade: (threadId: string) => void };
+export type MakeNewChatAction = { type: "makeNewChat"; botId: string; threadId: string; onMade: (threadId: string) => void; onError?: () => void };
 
 const THREAD_PREFIX = "new-chat-";
 export const newChatThreadId = (botId: string) => `${THREAD_PREFIX}${botId}`;
@@ -88,8 +88,13 @@ export function createNewChat(effects: Effects) {
     if (!intoBlank && !("threadId" in action && isNewChatThread(action.threadId))) return false;
     const conversationFor = (botId: string) => open?.botId === botId ? making.get(open.session) ?? make(open) : null;
     if (action.type === "makeNewChat") {
-      conversationFor(action.botId)?.then((threadId) => effects.settled(action.botId, threadId).then(() => action.onMade(threadId)))
-        .catch(effects.showError);
+      const made = conversationFor(action.botId);
+      if (!made) action.onError?.();
+      else made.then((threadId) => effects.settled(action.botId, threadId).then(() => action.onMade(threadId)))
+        .catch((error: unknown) => {
+          action.onError?.();
+          effects.showError(error);
+        });
       return true;
     }
     if (action.type !== "send") {

@@ -326,6 +326,15 @@ describe("a new conversation opens blank and is made by its first send", () => {
     await vi.waitFor(() => expect(made).toHaveBeenCalledExactlyOnceWith("made"));
   });
 
+  it("tells a Live call from a blank chat that is no longer open that no conversation is coming", () => {
+    const made = vi.fn();
+    const failed = vi.fn();
+    flushSync(() => dispatch({ type: "makeNewChat", botId: "bot", threadId: DRAFT, onMade: made, onError: failed }));
+    expect(failed).toHaveBeenCalledOnce();
+    expect(made).not.toHaveBeenCalled();
+    expect(creates).toEqual([]);
+  });
+
   it("makes one conversation for a Live call and a send that start together", async () => {
     const made = vi.fn();
     openBlank();

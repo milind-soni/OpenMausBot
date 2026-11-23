@@ -93,6 +93,27 @@ describe("a call started from the composer's + menu", () => {
     expect(liveMedia()).toMatchObject({ phase: "starting", botId: "atlas", threadId: "made" });
   });
 
+  it("waits for the blank chat's Live start when Live is pressed again before its settings are saved", () => {
+    render(newChatThreadId("atlas"));
+    flushSync(() => requestCallStart("atlas", "live"));
+    render("made");
+    flushSync(() => requestCallStart("atlas", "live"));
+    expect(liveMedia().phase).toBe("idle");
+    expect(fixture.dispatch).toHaveBeenCalledOnce();
+
+    flushSync(() => fixture.dispatch.mock.calls[0][0].onMade("made"));
+    expect(liveMedia()).toMatchObject({ phase: "starting", botId: "atlas", threadId: "made" });
+  });
+
+  it("lets Live be pressed again once making the blank chat's conversation failed", () => {
+    render(newChatThreadId("atlas"));
+    flushSync(() => requestCallStart("atlas", "live"));
+    flushSync(() => fixture.dispatch.mock.calls[0][0].onError());
+    render("made");
+    flushSync(() => requestCallStart("atlas", "live"));
+    expect(liveMedia()).toMatchObject({ phase: "starting", botId: "atlas", threadId: "made" });
+  });
+
   it("never goes Live from a blank chat after a Turns call started and hung up while the conversation was being made", () => {
     render(newChatThreadId("atlas"));
     flushSync(() => requestCallStart("atlas", "live"));

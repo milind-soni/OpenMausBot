@@ -178,20 +178,27 @@ export function CallTargetButton({
 
   useEffect(() => () => dismissStartPrompt(targetId), [targetId]);
 
-  // A Live call from a blank chat starts once its conversation is made; a later start or a Turns call cancels it.
+  // A Live call from a blank chat starts once its conversation is made and its held settings are saved; a later start
+  // or a Turns call cancels it, and pressing Live again meanwhile waits for that same start.
   const liveRequest = useRef(0);
+  const waitingLive = useRef(0);
   useEffect(() => { if (onCall) liveRequest.current++; }, [onCall]);
   const start = (next: CallMode) => {
     setHelpOpen(false);
     setMenuOpen(false);
+    if (next === "live" && waitingLive.current && waitingLive.current === liveRequest.current) return;
     const request = ++liveRequest.current;
     if (next === "live" && liveThreadId !== undefined) {
       onStart("live");
       const live = (thread: string) => {
+        if (waitingLive.current === request) waitingLive.current = 0;
         if (liveRequest.current === request) void startLiveCall({ botId: targetId, threadId: thread, provider: state.config?.live?.provider });
       };
-      if (isNewChatThread(liveThreadId)) dispatch({ type: "makeNewChat", botId: targetId, threadId: liveThreadId, onMade: live });
-      else live(liveThreadId);
+      if (isNewChatThread(liveThreadId)) {
+        waitingLive.current = request;
+        const failed = () => { if (waitingLive.current === request) waitingLive.current = 0; };
+        dispatch({ type: "makeNewChat", botId: targetId, threadId: liveThreadId, onMade: live, onError: failed });
+      } else live(liveThreadId);
       return;
     }
     if (!turnsReady) {
