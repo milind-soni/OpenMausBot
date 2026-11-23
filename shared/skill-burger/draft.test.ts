@@ -15,6 +15,11 @@ const multi = (slug: string, args: unknown, output?: unknown) =>
   tool("mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL", { tools: [{ tool_slug: slug, arguments: args }] }, output === undefined ? {} : { output: JSON.stringify(output) });
 
 describe("where each step ran", () => {
+  it("leaves out the app's own status rows", () => {
+    const run = [ask("Archive it"), tool("recovery: Automatic recovery: trying Backup once in this thread.", {}), tool("notice: The model changed.", {}), tool("Bash", { command: "cp a.csv archive/" }, { summary: "cp a.csv archive/" })];
+    expect(burgerLayers(run).map((layer) => layer.kind)).toEqual(["shell"]);
+  });
+
   it("marks apps, the browser, the bot's own commands, the cloud computer and the person's computer", () => {
     const run = [
       ask("Archive the report and post it"),

@@ -62,6 +62,8 @@ const FILE_WRITE = new Set(["Write", "write_file", "create_file"]);
 const FILE_EDIT = new Set(["Edit", "MultiEdit", "NotebookEdit", "edit", "apply_patch", "str_replace_based_edit_tool"]);
 const BROWSER_OPEN = /(?:^|_)(?:navigate|open|open_url|goto|tab_new)$/;
 const BROWSER_LOOK = /(?:^|_)(?:snapshot|screenshot|read|get_text|status|tabs|wait|check|console|network|close|evaluate_read)$/;
+/** A status row the app writes as an activity: a lowercase word, a colon, then words, never a tool name. */
+const STATUS_ROW = /^[a-z]+: \S/;
 /** An input the driver clipped, or a value the server masked: the call can't be repeated as recorded. */
 const CLIPPED = /\[(?:additional data|large content|binary content) omitted\]|••••••|«redacted \d+ chars»/;
 
@@ -126,6 +128,8 @@ type RawLayer = Omit<BurgerLayer, "where"> & { where?: LayerWhere };
 function layersIn(message: RunMessage, live: ReadonlySet<string>): RawLayer[] {
   const tool = message.tool;
   if (message.kind !== "activity" || !tool?.name) return [];
+  // The app's own status rows ("recovery: …", "notice: …") ride in activity messages too; they are not steps.
+  if (STATUS_ROW.test(tool.name)) return [];
   const status: LayerStatus = tool.ok === false ? "failed" : tool.ok === undefined && live.has(message.id) ? "running" : "done";
   const base = { messageId: message.id, status, ...(tool.output ? { output: tool.output } : {}) };
   const input = parse(tool.input);
