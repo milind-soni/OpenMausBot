@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -8,7 +8,8 @@ import { createPerfDiagnosticsRoutes, STORAGE_PATH } from "../routes/perf-diagno
 import type { RouteContext } from "../routes/table.ts";
 import { STORAGE_CATEGORIES } from "./disk-categories.ts";
 import { MAX_BOTS, nodeWalkFs, type WalkFs } from "./disk-walk.ts";
-import { createDiskUsage, readSavedPass, STORAGE_HEALTH_MAX_BYTES, storageHealth, type DiskUsageOptions, type StorageReport } from "./disk-usage.ts";
+import { cloudStorage, createPerfHost } from "./perf-host.ts";
+import { createDiskUsage, readSavedPass, readSavedProgress, STORAGE_HEALTH_MAX_BYTES, storageHealth, type DiskUsageOptions, type StorageReport } from "./disk-usage.ts";
 
 const START = 1_800_000_000_000;
 const dirs: string[] = [];
@@ -206,6 +207,61 @@ describe("storage sampler", () => {
     expect(w.disk.report()).toMatchObject({ at: null, running: false, failed: false });
   });
 
+  it("goes on after a restart from where the pass was saved, to the same figures as one pass", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "disk-usage-progress-"));
+    dirs.push(folder);
+    const progressFile = join(folder, "cache", "storage-progress.json"), file = join(folder, "cache", "storage-report.json");
+    const whole = usage({ tickEntries: 1_000_000 });
+    whole.advance(60_000);
+    await untilDone(whole);
+    const expected = whole.disk.report();
+
+    const { home, data } = volume();
+    let clock = START;
+    const make = () => createDiskUsage({ roots: [{ path: home, scope: "home" }, { path: data, scope: "data" }], volume: home, timer: false, file, progressFile,
+      now: () => clock, knownBot: (id) => id === "bot-known", statfs: async () => ({ blocks: 1_000_000, bsize: 4096, bavail: 400_000, bfree: 450_000 }),
+      firstPassAfterMs: 60_000, passEveryMs: 3_600_000, tickEntries: 2 });
+    let disk = make();
+    clock += 60_000;
+    let restarts = 0;
+    for (let index = 0; index < 500 && disk.report().at === null; index++) {
+      clock += 61_000;
+      await disk.tick();
+      if (existsSync(progressFile) && index % 5 === 4) { await disk.stop(); disk = make(); restarts += 1; clock += 60_000; }
+    }
+    expect(restarts).toBeGreaterThan(0);
+    const report = disk.report();
+    expect(report.resumes).toBeGreaterThan(0);
+    const figures = (one: StorageReport) => ({ categories: one.categories, bots: one.bots, botsRest: one.botsRest, other: one.other, walkedBytes: one.walkedBytes });
+    expect(figures(report)).toEqual(figures(expected));
+    expect(existsSync(progressFile)).toBe(false);
+  });
+
+  it("starts again from nothing on a saved pass that is unreadable, too old or names a folder outside the roots", () => {
+    const { home } = volume();
+    const roots = [{ path: home, scope: "home" as const }];
+    const saved = (checkpoint: unknown, savedAt = START) => JSON.stringify({ v: 1, startedAt: START, waitedMs: 0, savedAt, checkpoint });
+    const totals = { categories: {}, bots: [] };
+    expect(readSavedProgress(saved({ totals, doneRoots: [], frames: [{ path: home, names: ["a"] }] }), roots, START)).not.toBeNull();
+    expect(readSavedProgress(saved({ totals, doneRoots: [], frames: [{ path: home, names: ["a"] }] }), roots, START + 8 * 24 * 3_600_000)).toBeNull();
+    expect(readSavedProgress(saved({ totals, doneRoots: [], frames: [{ path: "/etc", names: ["passwd"] }] }), roots, START)).toBeNull();
+    expect(readSavedProgress("{", roots, START)).toBeNull();
+  });
+
+  it("walks only on a Cloud home: the desktop app and a self-hosted server measure nothing", () => {
+    expect(cloudStorage(null, "/home/ada", () => true)).toEqual({});
+    expect(cloudStorage(undefined, "/home/ada", () => true)).toEqual({});
+    expect(cloudStorage({ adminOrigin: "https://admin.test" }, "/data", () => true).storage?.home).toBe("/data");
+    const store = { onChange: () => () => {}, botByThread: () => null };
+    const bus = { subscribe: () => () => {} };
+    const { home } = volume();
+    expect(createPerfHost({ dataDir: home, timer: false, wholeMachine: false, bus, store, ...cloudStorage(null, home, () => true) }).storage()).toBeNull();
+    expect(createPerfHost({ dataDir: home, timer: false, wholeMachine: true, bus, store, ...cloudStorage({}, home, () => true) }).storage()).toMatchObject({ v: 1, at: null });
+    const index = readFileSync(join(import.meta.dirname, "..", "index.ts"), "utf8");
+    expect(index.match(/\.\.\.cloudStorage\(CLOUD_HOME, homedir\(\), /g)).toHaveLength(1);
+    expect(index).not.toMatch(/storage: \{ home:/);
+  });
+
   it("walks a data folder that is HOME itself once", async () => {
     const { home } = volume();
     const disk = createDiskUsage({ roots: [{ path: home, scope: "home" }, { path: home, scope: "data" }], volume: home, timer: false, firstPassAfterMs: 0, now: () => START });
@@ -226,7 +282,7 @@ function worstCase(): StorageReport {
     bots: Array.from({ length: Math.min(MAX_BOTS, 10) }, (_, index) => ({ id: `${"b".repeat(62)}${String(index).padStart(2, "0")}`, ...tally })),
     botsRest: { ...tally, count: big },
     other: { named: Array.from({ length: 5 }, (_, index) => ({ name: `lost+found${index}`, ...tally })), unlisted: { ...tally, entries: big } },
-    skipped: { unreadable: big, otherDevice: big, tooDeep: big, vanished: big, links: big }, linksCapped: true, failed: true,
+    skipped: { unreadable: big, otherDevice: big, tooDeep: big, vanished: big, links: big }, linksCapped: true, linksUncheckedBytes: big, resumes: big, failed: true,
   };
 }
 

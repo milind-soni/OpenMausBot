@@ -35,13 +35,16 @@ describe("storage categories", () => {
       ["vm-homes/abc/.browser-profiles/p/Cookies", "browser_profiles"], ["vm-home/.browser-profiles/p", "browser_profiles"], ["vm-home/work/x", "bot_files"],
       ["dist-native/cloudflared", "engine_clis"],
       ["tools/chrome/153/linux64/chrome", "browser_engines"], ["tools/agent-browser/1.2/agent-browser", "browser_engines"],
-      ["tools/npm/lib/node_modules/@anthropic-ai/claude-code/cli.js", "engine_clis"], ["tools/standalone/x", "engine_clis"], ["tools/bitwarden/bw", "engine_clis"],
+      ["tools/npm/lib/node_modules/@anthropic-ai/claude-code/cli.js", "engine_clis"], ["tools/standalone/x", "engine_clis"], ["tools/bitwarden/2026.1.0/bw", "engine_clis"],
+      ["tools/bitwarden/account/data.json", "settings"], ["tools/bitwarden/notes", "other"], ["tools/something-new/x", "other"], ["tools/npm-home/.npmrc", "settings"],
       ["scrcpy/scrcpy-server-v3", "engine_clis"], ["tools/npm-home/cache/_cacache/x", "packages"],
-      ["logs/service.log", "logs"], ["evidence/thread/1.png", "logs"], ["decider-log/x", "logs"], ["engine-runs/tag/pid", "logs"], ["perf-timings.json", "logs"],
+      ["logs/service.log", "logs"], ["evidence/thread/1.png", "attachments"], ["decisions.ndjson", "settings"], ["decisions.ndjson.1", "settings"], ["decisions/2026-11.ndjson", "settings"], ["decider-log/x", "logs"], ["engine-runs/tag/pid", "logs"], ["perf-timings.json", "logs"],
       ["perf-stalls.json", "logs"], ["launch-timings.json", "logs"], ["server.log", "logs"],
       ["cache/node-compile/x", "caches"], ["duckdb-extensions/v1/x", "caches"], ["org-library/blobs/abc", "caches"], ["org-library/catalog.json", "settings"],
       ["tmp/omb-cline-mcp-1/x", "temp"], ["tunnel-runtime/x", "temp"], ["tools/.npm-staging-1/x", "temp"], ["tools/.npm-aside-1/x", "temp"],
-      ["bots/bot1/data-tmp/spill", "temp"], ["config.json.123.abc.tmp", "temp"],
+      ["bots/bot1/data-tmp/spill", "temp"], ["config.json.123.0f8fad5b-d9cb-469f-a165-70867728950e.tmp", "temp"], ["notes.tmp", "settings"],
+      ["browser/audiences.json", "browser_profiles"], ["browser/panes/abc", "browser_profiles"], ["browser/identity/x.json", "browser_cache"], ["browser/displays/1/x", "browser_cache"],
+      ["browser/something-new", "other"], [".cache/x", "other"],
       ["something-new/x", "other"],
     ];
     for (const [path, expected] of cases) expect([path, category("data", path)]).toEqual([path, expected]);
@@ -57,7 +60,8 @@ describe("storage categories", () => {
       [".npm/_cacache/x", "packages"], [".cache/pip/x", "packages"], [".cache/uv/x", "packages"], [".local/share/pnpm/store/x", "packages"], [".cargo/registry/x", "packages"],
       [".cache/ms-playwright/chromium-1/chrome", "browser_engines"], [".agent-browser/browsers/chrome/x", "browser_engines"],
       [".agent-browser/sessions/s.json", "browser_profiles"],
-      [".cache/opencode/models.json", "caches"], [".cache/something", "caches"],
+      [".cache/opencode/models.json", "caches"], [".cache/something", "other"], [".cache/huggingface/token", "other"],
+      [".local/share/pnpm/store/v3/x", "packages"], [".local/share/pnpm/global/5/x", "other"], [".local/state/claude/locks/x", "engine_clis"], [".local/share/uv/tools/x", "other"],
       [".config/gh/hosts.yml", "settings"], [".omb-cloud-home.json", "settings"], [".omb-edge/caddy/x", "settings"],
       ["Synced/Desktop/a.txt", "synced"], [".local/share/Trash/files/x", "trash"],
       ["lost+found/x", "other"], ["acme-merger/plan.md", "other"], [".local/lib/x", "other"],
@@ -94,7 +98,11 @@ describe("storage categories", () => {
     expect(placeStoragePath("data", ["logs"], true).category).toBe("logs");
   });
 
-  it("gives every category one of the three classes", () => {
-    for (const value of Object.values(STORAGE_CATEGORIES)) expect(["precious", "work", "rebuildable"]).toContain(value);
+  it("pins every category's class: only caches, downloads and scratch space are rebuildable", () => {
+    expect(STORAGE_CATEGORIES).toEqual({
+      conversations: "precious", settings: "precious", engine_state: "precious", browser_profiles: "precious",
+      bot_files: "work", attachments: "work", synced: "work", backups: "work", trash: "work", other: "work", logs: "work",
+      browser_cache: "rebuildable", browser_engines: "rebuildable", engine_clis: "rebuildable", packages: "rebuildable", caches: "rebuildable", temp: "rebuildable",
+    });
   });
 });

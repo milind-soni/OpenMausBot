@@ -1,16 +1,19 @@
 // What fills a Cloud home's volume, by category (disk-categories.ts), for the Admin's health read and the owner's
 // diagnostics. A pass walks the volume a little at a time (disk-walk.ts): at most TICK_ENTRIES entries or TICK_BUDGET_MS
-// every TICK_MS, nothing while a turn runs, one pass soon after boot and then one every PASS_EVERY_MS. Node gives no
+// every TICK_MS, nothing while a turn runs, one pass soon after boot and then one every PASS_EVERY_MS. A pass under way
+// is saved as it goes, so a home that sleeps by stopping goes on after each start rather than starting again. Node gives no
 // per-call I/O priority and re-nicing would slow the whole server, so the budget is the only throttle. Privacy invariant:
 // sizes, counts, fixed category names, ids of bots the store knows and names from OTHER_NAMES; never a file's contents.
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { statfs } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 
 import { writeFileAtomic } from "../atomic.ts";
 import { OTHER_NAMES, STORAGE_CATEGORIES, type StorageCategory, type StorageClass } from "./disk-categories.ts";
-import { createDiskWalk, type DiskWalk, type Tally, type WalkFs, type WalkRoot, type WalkSkipped, type WalkTotals } from "./disk-walk.ts";
+import {
+  checkpointFrom, createDiskWalk, totalsFrom, totalsJson, type DiskWalk, type Tally, type WalkCheckpoint, type WalkFs, type WalkRoot, type WalkSkipped, type WalkTotals,
+} from "./disk-walk.ts";
 
 export const STORAGE_REPORT_VERSION = 1;
 /** The health report's `storage` field is at most this many bytes of JSON, apart from `perf`'s own budget. */
@@ -19,7 +22,7 @@ export const TICK_MS = 2_000;
 export const TICK_BUDGET_MS = 25;
 export const TICK_ENTRIES = 2_000;
 export const PASS_EVERY_MS = 6 * 3_600_000;
-export const FIRST_PASS_AFTER_MS = 10 * 60_000;
+export const FIRST_PASS_AFTER_MS = 2 * 60_000;
 const BOTS_SHOWN = 10, OTHER_SHOWN = 5;
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -38,7 +41,8 @@ export interface StorageReport {
   /** The volume when the last pass ended. */
   volume: VolumeBytes | null;
   walkedBytes: number | null;
-  /** Used on the volume but not seen by the walk: files held open after deletion, other mounts' roots, metadata. */
+  /** Used on the volume minus walked: files held open after deletion and filesystem metadata when positive; negative when
+   * the walk over-counted (hard links past MAX_LINKS, see linksUncheckedBytes, or a pass resumed after a restart). */
   unwalkedBytes: number | null;
   /** The categories with anything in them, the largest first. */
   categories: StorageCategoryRow[];
@@ -49,6 +53,10 @@ export interface StorageReport {
   other: { named: Array<{ name: string } & Tally>; unlisted: Tally & { entries: number } } | null;
   skipped: WalkSkipped | null;
   linksCapped: boolean;
+  /** Bytes of hard-linked files past the check: at most this much may be counted twice. */
+  linksUncheckedBytes: number;
+  /** Times the last pass went on after a restart. */
+  resumes: number;
   /** The last pass failed; the figures are from the one before, if any. */
   failed: boolean;
 }
@@ -77,44 +85,48 @@ export interface DiskUsageOptions {
   maxDepth?: number;
   /** Where the last completed pass is kept, so a restart (a home that sleeps by stopping) still has it. */
   file?: string;
+  /** Where the pass under way is kept as it goes, so a restart goes on from it. */
+  progressFile?: string;
 }
 
 /** Bots kept in the saved pass: the report shows ten, and a bot the store learns of later is rare. */
 const SAVED_BOTS = 100;
+/** A pass under way is saved at most this often, at a folder boundary (disk-walk.ts WalkCheckpoint). */
+export const PROGRESS_EVERY_MS = 60_000;
+/** A saved pass under way older than this starts again from nothing. */
+const PROGRESS_MAX_AGE_MS = 7 * 24 * 3_600_000;
 
 const count = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0);
-const tallyOf = (value: unknown): Tally => ({ bytes: count((value as Tally | null)?.bytes), files: count((value as Tally | null)?.files) });
 
 function savedText(completed: CompletedPass): string {
   const bots = [...completed.totals.bots].sort(([, a], [, b]) => b.bytes - a.bytes);
   const overflow = bots.slice(SAVED_BOTS).reduce((rest, [, tally]) => ({ bytes: rest.bytes + tally.bytes, files: rest.files + tally.files }), { ...completed.totals.botsOverflow });
-  return JSON.stringify({ v: STORAGE_REPORT_VERSION, at: completed.at, tookMs: completed.tookMs, volume: completed.volume, totals: {
-    ...completed.totals, bots: bots.slice(0, SAVED_BOTS), botsOverflow: overflow, otherNamed: [...completed.totals.otherNamed] } });
+  return JSON.stringify({ v: STORAGE_REPORT_VERSION, at: completed.at, tookMs: completed.tookMs, volume: completed.volume,
+    totals: totalsJson({ ...completed.totals, bots: new Map(bots.slice(0, SAVED_BOTS)), botsOverflow: overflow }) });
 }
 
-/** A saved pass, every field checked: a name that is not a category, a bot id or an allowed other name is dropped. */
+/** A saved pass, every field checked: a name that is not a category, a bot-id-shaped id or an allowed name is dropped. */
 export function readSavedPass(text: string): CompletedPass | null {
   let saved: Record<string, unknown>;
   try { saved = JSON.parse(text) as Record<string, unknown>; } catch { return null; }
   if (!saved || saved.v !== STORAGE_REPORT_VERSION || !count(saved.at)) return null;
-  const totals = (saved.totals ?? {}) as Record<string, unknown>;
-  const categories = (totals.categories ?? {}) as Record<string, unknown>;
-  const pairs = (value: unknown, keep: (name: string) => boolean) =>
-    new Map((Array.isArray(value) ? value : []).flatMap((pair) => (Array.isArray(pair) && typeof pair[0] === "string" && keep(pair[0]) ? [[pair[0], tallyOf(pair[1])] as const] : [])));
   const volume = saved.volume as Record<string, unknown> | null;
-  const skipped = (totals.skipped ?? {}) as Record<string, unknown>;
-  const unlisted = (totals.otherUnlisted ?? {}) as Record<string, unknown>;
   return {
     at: count(saved.at), tookMs: count(saved.tookMs),
     volume: volume && typeof volume === "object" ? { totalBytes: count(volume.totalBytes), freeBytes: count(volume.freeBytes), usedBytes: count(volume.usedBytes) } : null,
-    totals: {
-      categories: Object.fromEntries((Object.keys(STORAGE_CATEGORIES) as StorageCategory[]).map((name) => [name, tallyOf(categories[name])])) as WalkTotals["categories"],
-      bots: pairs(totals.bots, (id) => ID.test(id)), botsOverflow: tallyOf(totals.botsOverflow),
-      otherNamed: pairs(totals.otherNamed, (name) => OTHER_NAMES.has(name)), otherUnlisted: { ...tallyOf(unlisted), entries: count(unlisted.entries) },
-      skipped: { unreadable: count(skipped.unreadable), otherDevice: count(skipped.otherDevice), tooDeep: count(skipped.tooDeep), vanished: count(skipped.vanished), links: count(skipped.links) },
-      walkedBytes: count(totals.walkedBytes), entries: count(totals.entries), linksCapped: totals.linksCapped === true,
-    },
+    totals: totalsFrom(saved.totals),
   };
+}
+
+interface SavedProgress { startedAt: number; waitedMs: number; savedAt: number; checkpoint: WalkCheckpoint }
+
+/** The pass under way as saved: its start, its wait for turns and where to go on from. */
+export function readSavedProgress(text: string, roots: readonly WalkRoot[], at: number): SavedProgress | null {
+  let saved: Record<string, unknown>;
+  try { saved = JSON.parse(text) as Record<string, unknown>; } catch { return null; }
+  if (!saved || saved.v !== STORAGE_REPORT_VERSION || !count(saved.startedAt) || at - count(saved.savedAt) > PROGRESS_MAX_AGE_MS) return null;
+  const checkpoint = checkpointFrom(saved.checkpoint, roots);
+  return checkpoint ? { startedAt: count(saved.startedAt), waitedMs: count(saved.waitedMs), savedAt: count(saved.savedAt), checkpoint } : null;
 }
 
 export function createDiskUsage(options: DiskUsageOptions) {
@@ -135,11 +147,23 @@ export function createDiskUsage(options: DiskUsageOptions) {
   const firstAt = now() + (options.firstPassAfterMs ?? FIRST_PASS_AFTER_MS);
   let dueAt = last && last.at <= now() ? Math.max(firstAt, last.at + everyMs) : firstAt;
   let walk: DiskWalk | null = null, pass: { startedAt: number; waitedMs: number; lastTickAt: number } | null = null;
-  let failed = false, ticking = false, stopped = false;
-  const save = (completed: CompletedPass) => {
-    if (!options.file) return;
-    try { mkdirSync(dirname(options.file), { recursive: true, mode: 0o700 }); writeFileAtomic(options.file, savedText(completed), { mode: 0o600 }); } catch {}
+  let failed = false, ticking = false, stopped = false, progressSavedAt = -Infinity;
+  let resumeFrom: SavedProgress | null = null;
+  if (options.progressFile) { try { resumeFrom = readSavedProgress(readFileSync(options.progressFile, "utf8"), roots, now()); } catch {} }
+  if (resumeFrom) dueAt = firstAt;
+  const write = (file: string | undefined, text: string) => {
+    if (!file) return;
+    try { mkdirSync(dirname(file), { recursive: true, mode: 0o700 }); writeFileAtomic(file, text, { mode: 0o600 }); } catch {}
   };
+  const saveProgress = (take: () => WalkCheckpoint | null) => {
+    if (!options.progressFile || !pass || now() - progressSavedAt < PROGRESS_EVERY_MS) return;
+    const checkpoint = take();
+    if (!checkpoint) return;
+    progressSavedAt = now();
+    write(options.progressFile, JSON.stringify({ v: STORAGE_REPORT_VERSION, startedAt: pass.startedAt, waitedMs: pass.waitedMs, savedAt: progressSavedAt,
+      checkpoint: { ...checkpoint, totals: totalsJson(checkpoint.totals) } }));
+  };
+  const forgetProgress = () => { if (options.progressFile) { try { rmSync(options.progressFile, { force: true }); } catch {} } };
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   const schedule = () => {
@@ -157,8 +181,11 @@ export function createDiskUsage(options: DiskUsageOptions) {
       const at = now();
       if (!walk) {
         if (at < dueAt) return;
-        walk = createDiskWalk(roots, { ...(options.fs ? { fs: options.fs } : {}), ...(options.maxDepth ? { maxDepth: options.maxDepth } : {}) });
-        pass = { startedAt: at, waitedMs: 0, lastTickAt: at };
+        walk = createDiskWalk(roots, { ...(options.fs ? { fs: options.fs } : {}), ...(options.maxDepth ? { maxDepth: options.maxDepth } : {}),
+          resume: resumeFrom?.checkpoint ?? null, onBoundary: saveProgress });
+        pass = { startedAt: resumeFrom?.startedAt ?? at, waitedMs: resumeFrom?.waitedMs ?? 0, lastTickAt: at };
+        resumeFrom = null;
+        progressSavedAt = now();
       }
       const current = pass!, walking = walk;
       if (busy()) { current.waitedMs += at - current.lastTickAt; current.lastTickAt = at; return; }
@@ -170,12 +197,14 @@ export function createDiskUsage(options: DiskUsageOptions) {
         failed = false;
         walk = null; pass = null;
         dueAt = now() + everyMs;
-        save(last);
+        write(options.file, savedText(last));
+        forgetProgress();
       }
     } catch {
       await walk?.close().catch(() => {});
       walk = null; pass = null; failed = true;
       dueAt = now() + everyMs;
+      forgetProgress();
     } finally {
       ticking = false;
       schedule();
@@ -208,7 +237,7 @@ export function createDiskUsage(options: DiskUsageOptions) {
         progress: walk && pass ? { entries: walk.totals.entries, waitedS: Math.round(pass.waitedMs / 1000) } : null,
         volume,
         walkedBytes: totals?.walkedBytes ?? null,
-        unwalkedBytes: totals && volume ? Math.max(0, volume.usedBytes - totals.walkedBytes) : null,
+        unwalkedBytes: totals && volume ? volume.usedBytes - totals.walkedBytes : null,
         categories: totals ? (Object.keys(STORAGE_CATEGORIES) as StorageCategory[])
           .map((name) => ({ name, class: STORAGE_CATEGORIES[name], ...totals.categories[name] }))
           .filter((row) => row.bytes > 0 || row.files > 0).sort((a, b) => b.bytes - a.bytes) : [],
@@ -220,6 +249,8 @@ export function createDiskUsage(options: DiskUsageOptions) {
         } : null,
         skipped: totals ? { ...totals.skipped } : null,
         linksCapped: totals?.linksCapped ?? false,
+        linksUncheckedBytes: totals?.linksUncheckedBytes ?? 0,
+        resumes: totals?.resumes ?? 0,
         failed,
       };
     },

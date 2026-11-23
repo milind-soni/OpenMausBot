@@ -1,9 +1,9 @@
-import { chmodSync, linkSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, linkSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { allocatedBytes, createDiskWalk, nodeWalkFs, type WalkFs, type WalkRoot, type WalkStat } from "./disk-walk.ts";
+import { allocatedBytes, checkpointFrom, createDiskWalk, nodeWalkFs, totalsJson, type WalkCheckpoint, type WalkFs, type WalkRoot, type WalkStat, type WalkTotals } from "./disk-walk.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -166,11 +166,59 @@ describe("disk walk", () => {
     expect(totals.skipped.tooDeep).toBeGreaterThan(0);
   });
 
-  it("measures allocated blocks where the platform has them, else the size", () => {
+  it("measures allocated blocks where the platform has them, a sparse file's included, else the size", () => {
     expect(allocatedBytes({ size: 10, blocks: 8 })).toBe(4096);
     expect(allocatedBytes({ size: 10_000_000, blocks: 8 })).toBe(4096);
+    expect(allocatedBytes({ size: 2_147_483_648, blocks: 0 })).toBe(0);
     expect(allocatedBytes({ size: 0, blocks: 0 })).toBe(0);
     expect(allocatedBytes({ size: 10 })).toBe(10);
-    expect(allocatedBytes({ size: 10, blocks: 0 })).toBe(10);
+  });
+
+  it.skipIf(process.platform === "win32")("counts a sparse file by what it takes on disk", async () => {
+    const { data, roots } = tree();
+    const before = (await walkAll(roots)).totals.walkedBytes;
+    truncateSync(join(data, "workspaces", "bot1", "notes.md"), 2_147_483_648);
+    const { totals } = await walkAll(roots);
+    expect(totals.walkedBytes - before).toBeLessThan(1_000_000);
+  });
+
+  it.skipIf(process.platform === "win32")("says how many bytes of hard links went unchecked past the cap", async () => {
+    const { data, roots } = tree();
+    linkSync(join(data, "messages.db"), join(data, "workspaces", "bot1", "copy.db"));
+    const { totals } = await walkAll(roots, { maxLinks: 0 });
+    expect(totals.linksCapped).toBe(true);
+    expect(totals.linksUncheckedBytes).toBeGreaterThanOrEqual(2 * 10_000);
+  });
+
+  it("goes on from any checkpoint to the same totals as one walk, never counting anything twice", async () => {
+    const { data, roots } = tree();
+    for (let index = 0; index < 4; index++) {
+      mkdirSync(join(data, "task-workspaces", "bot1", `t${index + 2}`, "deep", "er"), { recursive: true });
+      writeFileSync(join(data, "task-workspaces", "bot1", `t${index + 2}`, "deep", "er", "f"), Buffer.alloc(3_000, 1));
+      writeFileSync(join(data, "task-workspaces", "bot1", `t${index + 2}`, "top"), Buffer.alloc(1_000, 1));
+    }
+    const whole = (await walkAll(roots)).totals;
+    const checkpoints: WalkCheckpoint[] = [];
+    const first = createDiskWalk(roots, { onBoundary: (take) => { const taken = take(); if (taken) checkpoints.push(JSON.parse(JSON.stringify({ ...taken, totals: totalsJson(taken.totals) }))); } });
+    while (!(await first.step({ entries: 1, stop: () => false })));
+    expect(checkpoints.length).toBeGreaterThan(5);
+    const comparable = (totals: WalkTotals) => ({ ...totalsJson(totals), entries: 0, resumes: 0 });
+    for (const saved of checkpoints) {
+      const checkpoint = checkpointFrom(saved, roots);
+      expect(checkpoint).not.toBeNull();
+      const { totals } = await walkAll(roots, { resume: checkpoint });
+      expect(totals.resumes).toBe(1);
+      expect(comparable(totals)).toEqual(comparable(whole));
+    }
+  });
+
+  it("refuses a saved checkpoint naming a folder outside the roots or a name with a separator", () => {
+    const { home, roots } = tree();
+    const totals = totalsJson(createDiskWalk(roots).totals);
+    expect(checkpointFrom({ totals, doneRoots: [], frames: [{ path: home, names: ["a"] }] }, roots)).not.toBeNull();
+    expect(checkpointFrom({ totals, doneRoots: [], frames: [{ path: "/etc", names: ["a"] }] }, roots)).toBeNull();
+    expect(checkpointFrom({ totals, doneRoots: [], frames: [{ path: home, names: ["../x"] }] }, roots)).toBeNull();
+    expect(checkpointFrom({ totals, doneRoots: ["/etc"], frames: [] }, roots)).toBeNull();
+    expect(checkpointFrom({ totals: { categories: { "acme-merger": { bytes: 1, files: 1 } }, bots: [["Ada's plans", { bytes: 1, files: 1 }]] }, doneRoots: [], frames: [] }, roots)?.totals.bots.size).toBe(0);
   });
 });

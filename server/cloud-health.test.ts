@@ -55,7 +55,7 @@ describe("a Cloud home's storage in its health report", () => {
   const report = (bots: number): StorageReport => ({
     v: 1, at: START, ageS: 0, tookS: 60, running: false, progress: null, volume: { totalBytes: 84e9, freeBytes: 3e9, usedBytes: 81e9 }, walkedBytes: 80e9, unwalkedBytes: 1e9,
     categories: [{ name: "engine_state", class: "precious", bytes: 50e9, files: 10 }], bots: Array.from({ length: bots }, (_, index) => ({ id: `${"b".repeat(60)}${index}`, bytes: 1e9, files: 1 })),
-    botsRest: { bytes: 0, files: 0, count: 0 }, other: null, skipped: null, linksCapped: false, failed: false,
+    botsRest: { bytes: 0, files: 0, count: 0 }, other: null, skipped: null, linksCapped: false, linksUncheckedBytes: 0, resumes: 0, failed: false,
   });
 
   it("carries the last breakdown within its own budget, and leaves the field out where it is not measured or its read throws", () => {

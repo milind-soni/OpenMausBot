@@ -3,8 +3,9 @@
 // relative to one of the two. Privacy invariant: nothing here returns a name taken from the disk except a bot id (which the
 // report shows only for bots the store knows) and a name from OTHER_NAMES.
 
-/** `precious`: losing it loses something only this home holds. `work`: what bots and people made, which they could
- * make again only by doing the work again. `rebuildable`: the code named next to it makes it again when it is missing. */
+/** `precious`: losing it loses something only this home holds. `work`: what bots and people made or may still read,
+ * which only doing the work again would bring back. `rebuildable`: the code named next to it makes it again when it is
+ * missing. Security invariant: only a name listed here as rebuildable is ever rebuildable; anything unknown is `other`. */
 export type StorageClass = "precious" | "work" | "rebuildable";
 
 export const STORAGE_CATEGORIES = {
@@ -26,8 +27,8 @@ export const STORAGE_CATEGORIES = {
   engine_clis: "rebuildable",
   // npm, pnpm, pip, uv, cargo and bun fetch packages again; node_modules is rebuilt by its project's install.
   packages: "rebuildable",
-  // Written for diagnosis and read by nobody to run: deleting them loses only history.
-  logs: "rebuildable",
+  // History people may still read (service logs, the timings, what each run started): nothing makes it again.
+  logs: "work",
   // Node's compile cache (cloud-home-start.ts NODE_COMPILE_CACHE), DuckDB's extensions (data/engine.ts) and tools' caches.
   caches: "rebuildable",
   // Scratch space a running step made for itself and removes when it ends.
@@ -62,8 +63,8 @@ const DATA_FOLDERS: Readonly<Record<string, StorageCategory>> = {
   events: "conversations", native: "conversations", checkpoints: "conversations", "memory-journal": "conversations",
   // Sign-ins and settings: providers (provider logins), people and people-connections (team-connections.ts), caddy
   // (caddy.ts), ssh (vps-ssh.ts), the skills folders (index.ts, skill-library.ts, imported-skills.ts), themes
-  // (themes/store.ts), org-library (org-library.ts), share (share.ts), usage (usage-ledger.ts), decisions
-  // (decision-log.ts), admin-activity (admin-activity.ts), prompt-split (drivers/prompt-split.ts),
+  // (themes/store.ts), org-library (org-library.ts), share (share.ts), usage (usage-ledger.ts), decisions and
+  // admin-activity (decision-log.ts, admin-activity.ts: the audit log readDecisions reads), prompt-split (drivers/prompt-split.ts),
   // codex-instructions (drivers/codex-instructions.ts), local-vm-stops, skill-switch, hook-tokens (drivers/claude.ts),
   // claude-user-skills (turn-settings.ts), box (bot-box/boot.ts).
   providers: "settings", people: "settings", "people-connections": "settings", caddy: "settings", ssh: "settings",
@@ -76,36 +77,35 @@ const DATA_FOLDERS: Readonly<Record<string, StorageCategory>> = {
   // host/team-files.ts (container-computer.ts's vm-home and vm-homes are placed in dataPlacement).
   "team-files": "bot_files",
   // attachments.ts, attachment-originals.ts, box-uploads (attachments.ts), host/browser.ts, tool-results
-  // (mcp-gate-config.ts), meetings/manager.ts.
+  // (mcp-gate-config.ts), meetings/manager.ts, evidence (browser-evidence.ts: the browser steps' screenshots a
+  // conversation still shows).
   attachments: "attachments", "attachment-originals": "attachments", "box-uploads": "attachments", "browser-uploads": "attachments",
-  "tool-results": "attachments", meetings: "attachments",
+  "tool-results": "attachments", meetings: "attachments", evidence: "attachments",
   // cloud-sync-store.ts: what a desktop lent this Cloud.
   sync: "synced",
   // workspace-backup.ts (backup and restore jobs, the restore's safety copy); doctor/backup.ts.
   ".backups": "backups", "doctor-backups": "backups",
-  // cli.ts and service-unit.ts (service logs), browser-evidence.ts (each browser step's screenshot), decider/log.ts,
-  // engine-records.ts (what each server run started).
-  logs: "logs", evidence: "logs", "decider-log": "logs", "engine-runs": "logs",
+  // cli.ts and service-unit.ts (service logs), decider/log.ts, engine-records.ts (what each server run started).
+  logs: "logs", "decider-log": "logs", "engine-runs": "logs",
   // Made again on first use: phone-screen/scrcpy-server-file.ts downloads scrcpy; service-cli.ts installs the app copy;
   // tunnel.ts prepares cloudflared in dist-native again when it is missing.
   scrcpy: "engine_clis", app: "engine_clis", "dist-native": "engine_clis",
   // excludedWorkspaceAuthPath (workspace-backup-policy.ts): login profiles of older browser engines.
   "chrome-profile": "browser_profiles", ".agent-browser": "browser_profiles",
-  "duckdb-extensions": "caches", cache: "caches", ".cache": "caches",
+  "duckdb-extensions": "caches", cache: "caches",
   // cloud-send-files.ts and the MCP configs; tunnel.ts TUNNEL_RUNTIME_DIR.
   tmp: "temp", ".tmp": "temp", "tunnel-runtime": "temp",
 };
 
-/** `tools/<name>` in the data folder. */
+/** `tools/<name>` in the data folder (engine-roots.ts, browser/chrome/install.ts, browser-engine.ts ENGINE_DIR). */
 const TOOL_FOLDERS: Readonly<Record<string, StorageCategory>> = {
   chrome: "browser_engines", "agent-browser": "browser_engines",
-  npm: "engine_clis", standalone: "engine_clis", "antigravity-acp": "engine_clis", bitwarden: "engine_clis", token: "engine_clis",
-  "npm-home": "packages",
+  npm: "engine_clis", standalone: "engine_clis", "antigravity-acp": "engine_clis",
 };
 
 /** Data folder, first level, files: the rest of the first-level files are settings and state files. */
 const DATA_FILES: Readonly<Record<string, StorageCategory>> = {
-  "perf-timings.json": "logs", "perf-stalls.json": "logs", "launch-timings.json": "logs", "decisions.ndjson": "logs",
+  "perf-timings.json": "logs", "perf-stalls.json": "logs", "launch-timings.json": "logs",
 };
 const CONVERSATION_DB = /^(?:messages|runtime|bursts)\.db(?:-wal|-shm|-journal)?$/;
 
@@ -130,15 +130,23 @@ function profilePlacement(rest: readonly string[]): Placement {
   return at(SERVICE_WORKER_CACHES.has(third) ? "browser_cache" : "browser_profiles");
 }
 
-/** `browser/<name>/…` (browser/chrome/profile.ts browserRoot). */
+/** `browser/<name>` (browser/chrome/profile.ts browserRoot). */
+const BROWSER_ENTRIES: Readonly<Record<string, StorageCategory>> = {
+  // The bot's downloads (browser/service.ts downloadDir) and the screenshots it took (#saveScreenshot) are its work.
+  downloads: "attachments", screenshots: "attachments",
+  // workspace-id (profile.ts), the per-member profiles' record (host/browser.ts AudienceBrowsers, read to erase a deleted
+  // bot's profiles) and the panes each profile opened (pane/backend.ts marksDir).
+  "workspace-id": "browser_profiles", "audiences.json": "browser_profiles", panes: "browser_profiles",
+  // Temporary profiles, swept when unused (chrome/processes.ts); a display's runtime files (desktop/displays.ts); the
+  // calibrated identity, measured again when missing (chrome/calibrate.ts).
+  temp: "browser_cache", displays: "browser_cache", identity: "browser_cache",
+};
+
 function browserPlacement(rest: readonly string[]): Placement {
   const [first] = rest;
   if (first === undefined) return at("browser_profiles", false);
   if (first === "profiles") return rest.length < 2 ? at("browser_profiles", false) : profilePlacement(rest.slice(2));
-  // The bot's downloads (browser/service.ts downloadDir) and the screenshots it took (#saveScreenshot) are its work.
-  if (first === "downloads" || first === "screenshots") return at("attachments");
-  // temp profiles (swept), displays, panes, identity: made again when a browser starts.
-  return rest.length === 1 && first === "workspace-id" ? at("browser_profiles") : at("browser_cache");
+  return at(BROWSER_ENTRIES[first] ?? "other");
 }
 
 function dataPlacement(segments: readonly string[], directory: boolean): Placement {
@@ -147,8 +155,11 @@ function dataPlacement(segments: readonly string[], directory: boolean): Placeme
   if (segments.length === 1 && !directory) {
     if (CONVERSATION_DB.test(first)) return at("conversations");
     if (DATA_FILES[first]) return at(DATA_FILES[first]);
+    // decision-log.ts keeps the audit log's older file beside the current one.
+    if (first === "decisions.ndjson" || first === "decisions.ndjson.1") return at("settings");
     if (first.endsWith(".log")) return at("logs");
-    if (first.endsWith(".tmp")) return at("temp");
+    // atomic.ts writeWhole: `<file>.<pid>.<uuid>.tmp`, renamed over the file once written; one left is a crashed write.
+    if (/\.\d+\.[0-9a-f-]{36}\.tmp$/.test(first)) return at("temp");
     return at("settings");
   }
   if (BOT_FOLDERS.has(first)) {
@@ -168,7 +179,12 @@ function dataPlacement(segments: readonly string[], directory: boolean): Placeme
     if (second === undefined) return at("engine_clis", false);
     // engine-npm-update.ts and engine-standalone.ts stage an update beside the copy it replaces.
     if (second.startsWith(".npm-staging-") || second.startsWith(".npm-aside-") || second.startsWith(".staging-")) return at("temp");
-    return at(TOOL_FOLDERS[second] ?? "engine_clis");
+    // engine-install.ts npmServerHome: npm's own config files beside its download cache.
+    if (second === "npm-home") return third === undefined ? at("engine_clis", false) : at(third === "cache" ? "packages" : "settings");
+    // host/bitwarden-cli.ts puts the tool in tools/bitwarden/<version>; bitwarden-vault.ts keeps the signed-in account
+    // and its encrypted copy of the vault in tools/bitwarden/account.
+    if (second === "bitwarden") return third === undefined ? at("engine_clis", false) : at(third === "account" ? "settings" : /^\d[\w.-]*$/.test(third) ? "engine_clis" : "other");
+    return at(TOOL_FOLDERS[second] ?? "other");
   }
   if (first === "sync") {
     if (second === undefined) return at("synced", false);
@@ -217,11 +233,13 @@ const HOME_PACKAGE_CACHES: ReadonlyArray<readonly [string, string, string?]> = [
   [".cargo", "registry"], [".cargo", "git"], ["go", "pkg", "mod"], [".m2", "repository"], [".gradle", "caches"], [".bun", "install", "cache"], [".yarn", "berry", "cache"],
 ];
 
-/** `~/.cache/<name>`: browser engines, package stores, the rest caches. */
+/** `~/.cache/<name>`: browser engines, package stores and caches; any other name is `other` (a token may live there). */
 const HOME_CACHES: Readonly<Record<string, StorageCategory>> = {
   "ms-playwright": "browser_engines", puppeteer: "browser_engines",
   pip: "packages", uv: "packages", pnpm: "packages", yarn: "packages", "node-gyp": "packages", npm: "packages", bun: "packages",
   "pypoetry": "packages", "go-build": "packages",
+  // model-catalog/catalog.ts: opencode's model list, fetched again.
+  opencode: "caches",
 };
 
 function homePlacement(segments: readonly string[], directory: boolean): Placement {
@@ -232,14 +250,16 @@ function homePlacement(segments: readonly string[], directory: boolean): Placeme
     if (known) return at(known);
     return OTHER_NAMES.has(first) ? { category: "other", otherName: first, final: true } : at("other");
   }
-  if (first === ".cache") return second === undefined ? at("caches", false) : at(HOME_CACHES[second] ?? "caches");
+  if (first === ".cache") return second === undefined ? at("caches", false) : at(HOME_CACHES[second] ?? "other");
   if (first === ".local") {
     if (second === undefined) return at("other", false);
     if (second !== "share" && second !== "state") return at("other");
     if (third === undefined) return at("other", false);
-    // The Claude native installer keeps each version under ~/.local/share/claude (env-path.ts).
+    // The Claude native installer keeps each version under ~/.local/share/claude (env-path.ts), and its locks under
+    // ~/.local/state/claude.
     if (third === "claude") return at("engine_clis");
-    if (third === "pnpm" || third === "uv") return at("packages");
+    // pnpm's content-addressed store; its global installs beside it are not a cache.
+    if (third === "pnpm") return segments.length < 4 ? at("other", false) : at(segments[3] === "store" ? "packages" : "other");
     if (third === "Trash") return at("trash");
     if (third === "opencode") return at("engine_state");
     return at("other");
