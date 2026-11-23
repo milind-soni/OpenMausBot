@@ -210,6 +210,11 @@ export function draftWorkflow(messages: readonly RunMessage[], options: { summar
   if (layers.length < 2) return null;
   const ask = askOf(messages) ?? "";
   const summary = (options.summary?.trim() || ask || layers.map(layerLabel).join(", ")).replace(/\s+/g, " ").slice(0, 160);
+  return { workflow: draftFromLayers(layers, ask, summary), layers };
+}
+
+/** Finished layers as a workflow's steps and args, with the same pipes, args, AI steps and scrubbing as a whole run. */
+export function draftFromLayers(layers: readonly BurgerLayer[], ask: string, summary: string): Workflow {
   const drafter = new Drafter(ask, summary);
   layers.forEach((layer, index) => drafter.add(layer, index));
   const byId = new Map(layers.map((layer, index) => [`s${index + 1}`, layer]));
@@ -217,5 +222,5 @@ export function draftWorkflow(messages: readonly RunMessage[], options: { summar
     ai: (secret) => ({ id: secret.id, kind: "ai", deterministic: false, label: secret.label, prompt: `Do this step again: ${secret.label}. It used a secret, so it isn't saved here.` }),
   }));
   const args = JSON.parse(redactSecretsInText(JSON.stringify(drafter.args))) as Workflow["args"];
-  return { workflow: { version: 1, summary: redactSecretsInText(summary), args, steps }, layers };
+  return { version: 1, summary: redactSecretsInText(summary), args, steps };
 }
