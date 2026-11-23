@@ -1,5 +1,5 @@
-// Consistent databases for a Cloud server's own backup of its volume (the Admin's Hetzner boot script, behind its switch
-// OMB_CLOUD_HETZNER_BACKUP_DB_SNAPSHOT). That backup is a tar of the whole volume while the home runs, and a tar reads
+// Consistent databases for a Cloud server's own backup of its volume (its boot script, behind a switch on the Cloud's
+// control side, off by default). That backup is a tar of the whole volume while the home runs, and a tar reads
 // messages.db and its -wal at different moments: a checkpoint between the two reads leaves an archive that restores a
 // database missing pages, or a corrupt one. So, just before the tar, the server's backup runs
 // `docker exec -u maus omb-home timeout 1800 node /app/dist-server/cloud-backup-db-snapshot.js`, which writes one moment of
