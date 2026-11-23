@@ -27,7 +27,7 @@ export function NoticeCard({ titleId, icon: Icon, title, onDismiss, dismissLabel
 
 export const PRIMARY_BUTTON = "ui-button ui-button-primary min-h-9 gap-1.5 px-3 py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
-export function LinkButton({ url, label, onOpened, className = PRIMARY_BUTTON }: { url: string; label: string; onOpened?: () => void; className?: string }) {
+export function LinkButton({ url, label, onOpened, showUrlOnError, className = PRIMARY_BUTTON }: { url: string; label: string; onOpened?: () => void; showUrlOnError?: boolean; className?: string }) {
   const [failed, setFailed] = useState(false);
   return <div>
     <button type="button" className={className} onClick={() => {
@@ -36,7 +36,9 @@ export function LinkButton({ url, label, onOpened, className = PRIMARY_BUTTON }:
     }}>
       {label}<ArrowUpRight size={14} aria-hidden="true" />
     </button>
-    {failed && <p role="alert" className="mt-2 text-[12px] text-danger">{t("notice.openFailed")}</p>}
+    {failed && <p role="alert" className="mt-2 text-[12px] text-danger">
+      {t("notice.openFailed")}{showUrlOnError && <> <span className="select-all">{url}</span></>}
+    </p>}
   </div>;
 }
 

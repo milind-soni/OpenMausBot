@@ -243,10 +243,11 @@ export function Composer({
   draftIdRef.current = draftId;
   const caretRef = useRef(0);
   caretRef.current = caret;
-  const refocusInput = useCallback(() => {
+  const escapeBlurs = useRef(0);
+  const refocusInput = useCallback((escapesBefore: number) => {
     requestAnimationFrame(() => {
       const input = inputRef.current;
-      if (!input || input.disabled || !composerShouldRefocus(document.activeElement, input)) return;
+      if (escapeBlurs.current !== escapesBefore || !input || input.disabled || !composerShouldRefocus(document.activeElement, input)) return;
       const at = Math.min(caretRef.current, input.value.length);
       input.focus();
       input.setSelectionRange(at, at);
@@ -492,6 +493,7 @@ export function Composer({
   const uploadImage = useCallback((file: File) => uploadDraftImage(draftId, file), [draftId]);
   const pickFiles = async (picked: FileList | readonly File[] | null) => {
     if (!picked?.length) return;
+    const escapesBefore = escapeBlurs.current;
     changeDraftAttachmentPending(draftId, true);
     try {
       const { attachments: added, notice } = await intakeFilesWithNotice(Array.from(picked), {
@@ -506,7 +508,7 @@ export function Composer({
     } finally {
       changeDraftAttachmentPending(draftId, false);
     }
-    refocusInput();
+    refocusInput(escapesBefore);
   };
 
   const hasContent = Boolean(effectiveText.trim()) || attachments.length > 0;
@@ -906,7 +908,12 @@ export function Composer({
               }
               send(followUpFor(alternateSend(e.nativeEvent, sendKey)));
             }
-            if (e.key === "Escape" && recording) stopDictation();
+            if (e.key !== "Escape") return;
+            if (recording) stopDictation();
+            else if (!e.defaultPrevented) {
+              escapeBlurs.current += 1;
+              e.currentTarget.blur();
+            }
           }}
           // Not disabled during an upload: a disabled element drops keyboard focus for good. send() refuses while one
           // is pending.
