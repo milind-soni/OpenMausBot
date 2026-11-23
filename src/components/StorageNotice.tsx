@@ -4,8 +4,8 @@ import { HardDrive } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { readRoomCardHidden } from "@/lib/room-card";
-import { settleSeen, storageFullness, storageNotice } from "@/lib/storage-report";
-import { rememberStorageSeen, useStorageReport, useStorageSeen } from "@/lib/use-storage-report";
+import { settleSeen, storageBand, storageFullness, storageNotice } from "@/lib/storage-report";
+import { markStorageNoticeShown, rememberStorageSeen, storageNoticeShownThisLaunch, useStorageReport, useStorageSeen } from "@/lib/use-storage-report";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useStoreDispatch } from "@/state/store-select";
 import { useCloudRoom } from "./CloudRoomCard";
@@ -38,12 +38,14 @@ function useRoomCardOnDisk(): boolean {
 
 function Shown({ band, percent, className }: { band: "near" | "full"; percent: number; className?: string }) {
   const dispatch = useStoreDispatch();
-  if (useRoomCardOnDisk()) return null;
+  const yielded = useRoomCardOnDisk();
+  useEffect(() => { if (!yielded) markStorageNoticeShown(band); }, [yielded, band]);
+  if (yielded) return null;
   return <StorageNoticeLine band={band} percent={percent} className={className} onOpen={() => dispatch({ type: "toggleAppSettings", open: true, section: "storage" })} />;
 }
 
-/** At 80% and again at 90% full, once per crossing: opening Settings → Storage is seeing it, and it comes back only after usage
- * falls well under the line and crosses it again. Only an owner or admin, never a paired client, reads the report. */
+/** At 80% and again at 90% full, once per crossing: shown for one launch (or until Settings → Storage is opened), and back only
+ * after usage falls well under the line and crosses it again. Only an owner or admin, never a paired client, reads the report. */
 export function StorageNotice({ className }: { className?: string }) {
   const admin = useOwnerOrAdmin() === true;
   const client = typeof window !== "undefined" && window.ogb?.remoteClient?.active === true;
@@ -55,7 +57,9 @@ export function StorageNotice({ className }: { className?: string }) {
     const settled = settleSeen(seen, percent);
     if (settled !== seen) rememberStorageSeen(settled);
   }, [percent, seen]);
-  const band = storageNotice(percent, seen);
+  const fresh = storageNotice(percent, seen);
+  const kept = storageNoticeShownThisLaunch();
+  const band = fresh ?? (percent !== null && kept !== null && kept !== "ok" && storageBand(percent) === kept ? kept : null);
   if (!band || percent === null) return null;
   return <Shown band={band} percent={percent} className={className} />;
 }

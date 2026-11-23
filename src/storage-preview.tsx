@@ -68,14 +68,14 @@ try {
   localStorage.setItem("omb-advanced-mode", params.get("mode") === "advanced" ? "1" : "0");
 } catch { /* blocked storage */ }
 
-const [{ StoreProvider, useStore }, { SettingsModal }, { SidebarFooter }, { applySkin, readSkin, SKIN_IDS }, { loadLocale }] = await Promise.all([
-  import("@/state/store"), import("@/components/SettingsModal"), import("@/components/SidebarFooter"), import("@/lib/skins"), import("@/lib/i18n"),
+const [{ StoreProvider }, { useStoreDispatch, useStoreSelector }, { SettingsModal }, { SidebarFooter }, { applySkin, readSkin, SKIN_IDS }, { loadLocale }] = await Promise.all([
+  import("@/state/store"), import("@/state/store-select"), import("@/components/SettingsModal"), import("@/components/SidebarFooter"), import("@/lib/skins"), import("@/lib/i18n"),
 ]);
 
 function SettingsView() {
-  const { state: app, dispatch } = useStore();
-  useEffect(() => { if (app.config) dispatch({ type: "toggleAppSettings", open: true, section: page as never }); }, [Boolean(app.config)]);
-  return app.appSettingsOpen ? <SettingsModal /> : null;
+  const loaded = useStoreSelector((app) => app.config !== null), open = useStoreSelector((app) => app.appSettingsOpen), dispatch = useStoreDispatch();
+  useEffect(() => { if (loaded) dispatch({ type: "toggleAppSettings", open: true, section: page as never }); }, [loaded, dispatch]);
+  return open ? <SettingsModal /> : null;
 }
 
 function SidebarView() {

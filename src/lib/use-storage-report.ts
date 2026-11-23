@@ -93,13 +93,26 @@ export function useStorageSeen(): [StorageBand | null, (seen: StorageBand | null
   return [seen, rememberStorageSeen];
 }
 
+let shownThisLaunch: StorageBand | null = null;
+
+/** The sidebar showed its line for `band`: from the next launch on that counts as seen, and this launch keeps showing it
+ * until Storage is opened. */
+export function markStorageNoticeShown(band: StorageBand): void {
+  if (shownThisLaunch === band) return;
+  shownThisLaunch = band;
+  writeStorageSeen(band);
+}
+export const storageNoticeShownThisLaunch = (): StorageBand | null => shownThisLaunch;
+
 export function rememberStorageSeen(seen: StorageBand | null): void {
+  shownThisLaunch = null;
   writeStorageSeen(seen);
   for (const listener of seenListeners) listener(seen === "ok" ? null : seen);
 }
 
-/** Tests: forget the shared answer. */
+/** Tests: forget the shared answer and what this launch showed, as a new launch would. */
 export function forgetStorageReport(): void {
   state = { status: "unknown" };
   loading = null;
+  shownThisLaunch = null;
 }

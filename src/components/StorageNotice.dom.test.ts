@@ -44,11 +44,18 @@ afterEach(async () => { await act(async () => root.unmount()); container.remove(
 async function launch() {
   await act(async () => { root.render(createElement(StorageNotice)); });
   await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+  await answered();
+}
+/** The read's answer reaches the page. */
+async function answered() {
+  await act(async () => { await vi.dynamicImportSettled(); });
+  for (let i = 0; i < 5; i++) await act(async () => { await Promise.resolve(); });
 }
 /** The half-hourly read, with usage at `usedGb`. */
 async function later(usedGb: number) {
   fixture.usedGb = usedGb;
   await act(async () => { await vi.advanceTimersByTimeAsync(30 * 60_000); });
+  await answered();
 }
 async function relaunch() {
   await act(async () => root.unmount());
@@ -81,11 +88,23 @@ describe("the sidebar's storage line", () => {
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "storage" });
   });
 
+  it("shown for one launch is seen: never on the launches after, though nobody clicked it", async () => {
+    fixture.usedGb = 83;
+    await launch();
+    expect(line()?.dataset.storageNotice).toBe("near");
+    await later(85);
+    expect(line(), "stays through the launch it appeared in").not.toBeNull();
+    await relaunch();
+    expect(line()).toBeNull();
+    await relaunch();
+    expect(line()).toBeNull();
+  });
+
   it("once seen at a line, stays away on every launch after, comes back at 90%, and once more only after usage falls well under", async () => {
     fixture.usedGb = 83;
     await launch();
     expect(line()).not.toBeNull();
-    // Opening Settings → Storage is what sees it.
+    // Opening Settings → Storage sees it at once.
     await act(async () => { rememberStorageSeen("near"); });
     expect(line()).toBeNull();
     await relaunch();
@@ -94,7 +113,6 @@ describe("the sidebar's storage line", () => {
     expect(line()).toBeNull();
     await later(91);
     expect(line()?.dataset.storageNotice).toBe("full");
-    await act(async () => { rememberStorageSeen("full"); });
     await relaunch();
     expect(line()).toBeNull();
     await later(78);
