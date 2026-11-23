@@ -2,9 +2,12 @@
 import { existsSync } from "node:fs";
 import { join, sep } from "node:path";
 
-export const LATEST_RELEASE_URL = "https://api.github.com/repos/milind-soni/OpenMausBot/releases/latest";
-/** Written by .github/workflows/promote-stable.yml: the released version our own Clouds have run for 48 hours. */
-export const STABLE_CHANNEL_URL = "https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json";
+import product from "../product.json" with { type: "json" };
+
+/** This build's own releases (product.json updates), the same repository the desktop app updates from. */
+export const LATEST_RELEASE_URL = `https://api.github.com/repos/${product.updates.owner}/${product.updates.repo}/releases/latest`;
+/** Written by .github/workflows/promote-stable.yml on that repository's channels branch. */
+export const STABLE_CHANNEL_URL = `https://raw.githubusercontent.com/${product.updates.owner}/${product.updates.repo}/channels/stable.json`;
 const CACHE_MS = 60 * 60_000;
 /** How long the last answer stands in when the channel cannot be read: an outage of GitHub is no reason to say nothing. */
 const STALE_MS = 24 * 60 * 60_000;

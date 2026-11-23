@@ -10,6 +10,7 @@ import { useAccountSummary } from "./account-summary";
 import { useOtherPlaces } from "./settings-context";
 import { SettingsDialog } from "./SettingsDialog";
 import { useSettingsShell } from "./settings-shell";
+import { cloudOffered } from "@/lib/brand";
 
 type PrivateStatus = { runtime: string | null; daemonUp: boolean; image: boolean; ready: boolean } | null;
 type Kind = "ready" | "setup" | "none" | "attention" | "elsewhere";
@@ -101,7 +102,7 @@ export function DesktopKinds() {
   return (
     <SettingsGroup label={t("settings.desktops.kinds")} block="desktops">
       <SettingsRows icons>
-        {row(cloudKind, t("settings.desktops.cloud"), t("settings.desktops.cloudLine"), <Cloud />, () => go(ctx.plan && !cloud?.configured ? "plan" : "ai", ctx.plan && !cloud?.configured ? undefined : "ai-keys"), "cloud")}
+        {cloudOffered() && row(cloudKind, t("settings.desktops.cloud"), t("settings.desktops.cloudLine"), <Cloud />, () => go(ctx.plan && !cloud?.configured ? "plan" : "ai", ctx.plan && !cloud?.configured ? undefined : "ai-keys"), "cloud")}
         {!cloudHome && row(privateKind, t("settings.desktops.private"), t("settings.desktops.privateLine"), <Laptop />, () => setSetup(true), "private")}
         {(ctx.advanced || vps?.configured) && row(serversKind, t("settings.desktops.servers"), t("settings.desktops.serversLine"), <Server />, () => go("ai", "ai-keys"), "servers")}
       </SettingsRows>

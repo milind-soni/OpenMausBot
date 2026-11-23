@@ -1,5 +1,7 @@
 // Digests computed from the official GitHub assets on 2026-09-08, except the versioned Windows vendor build; update pins
 // only through a reviewed native end-to-end run. The Dockerfile keeps the official Linux version.
+import { REPOSITORY_URL } from "../shared/services.ts";
+
 export const AGENT_BROWSER_VERSION = "0.37.0";
 
 export interface AgentBrowserReleaseAsset {
@@ -46,7 +48,8 @@ const RELEASES = new Map<string, AgentBrowserReleaseAsset>([
       // Retain the native-verified revision until its replacement is tested.
       target: "win32-x64", version: "0.36.0-omb.1",
       asset: "agent-browser-win32-x64-0.36.0-omb.1.exe",
-      url: "https://github.com/milind-soni/OpenMausBot/releases/download/browser-engine-v0.36.0-omb.1/agent-browser-win32-x64-0.36.0-omb.1.exe",
+      // Served from this build's own releases: upload the same file there; the sha256 below accepts nothing else.
+      url: `${REPOSITORY_URL}/releases/download/browser-engine-v0.36.0-omb.1/agent-browser-win32-x64-0.36.0-omb.1.exe`,
       sha256: "33bee834f6a6072ec8688b0914726e0262874d758f69f27e8baf7eaac6b5ed15", bytes: 13806080,
     },
   ],

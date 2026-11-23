@@ -5,6 +5,7 @@ import { track } from "@/lib/analytics";
 import { cloudPlanView, moneyBackShort, offerPlanLabel, trialRunning, trialTerms, usd } from "@/lib/cloud-plan";
 import { t } from "@/lib/i18n";
 import { WHATS_NEW_NOTICE } from "@/lib/notices";
+import { SERVICES } from "../../shared/services";
 
 export type WhatsNewSlide = "pro" | "team";
 /** Who the account is to MausBot Cloud: no plan, a plan of its own, in a team, or something else (being bought, needing
@@ -13,7 +14,8 @@ export type WhatsNewAudience = "none" | "own" | "team" | "other";
 
 /** Each slide's tag on the Cloud's funnel: `src` on its links, and `source` on the checkout the app opens from it. */
 export const WHATS_NEW_SOURCES = { pro: "app_whats_new_pro", team: "app_whats_new_team" } as const satisfies Record<WhatsNewSlide, string>;
-const CLOUD_SITE = "https://cloud.openmausbot.com", STAGING_SITE = "https://omb-cloud-staging.fly.dev";
+/** What's New links to the Cloud only on a build that offers one (makersOffers); otherwise a reserved origin no one serves. */
+const CLOUD_SITE = SERVICES.cloud ?? "https://cloud.invalid", STAGING_SITE = "https://cloud-staging.invalid";
 
 /** The Cloud website's Home, which shows the plans to someone without one; `src` on /cloud opens that page. */
 export const newCloudUrl = (staging = false) => `${staging ? STAGING_SITE : CLOUD_SITE}/cloud?src=${WHATS_NEW_SOURCES.pro}`;

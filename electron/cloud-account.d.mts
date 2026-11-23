@@ -258,6 +258,7 @@ export interface CloudPlanBridge {
 
 export declare const CLOUD_ORIGIN: string;
 export declare const STAGING_CLOUD_ORIGIN: string;
+export declare const CLOUD_OFFERED: boolean;
 export declare function cloudTarget(env?: Record<string, string | undefined>): {
   origin: string; staging: boolean;
   /** Under userData: the sign-in, saved servers, Files' folder, the Cloud's chosen name. */

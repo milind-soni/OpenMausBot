@@ -1,4 +1,5 @@
 import { APP_NAME, PRODUCT_NAME } from "../../shared/product";
+import { SERVICES } from "../../shared/services";
 
 export interface Brand {
   name: string;
@@ -28,6 +29,17 @@ export function brand(): Brand {
 /** The name a person reads: a white-label brand file's own name, else PRODUCT_NAME. */
 export function productName(): string {
   return current.source === "file" ? current.brand.name : PRODUCT_NAME;
+}
+
+/** Whether this build has its makers' Cloud to offer (product.json services.cloud). */
+export function cloudOffered(): boolean {
+  return SERVICES.cloud !== null;
+}
+
+/** Whether this build may show its makers' own offers: their Cloud, sponsors, launch and star notices, announcements. A
+ * white-label brand hides them, and so does a build with no Cloud of its makers. */
+export function makersOffers(): boolean {
+  return current.source !== "file" && cloudOffered();
 }
 
 export function brandStatus(): BrandStatus {

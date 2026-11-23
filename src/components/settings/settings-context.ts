@@ -10,6 +10,7 @@ import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useStoreSelector } from "@/state/store-select";
 import { workspacesAvailable } from "../WorkspacesSection";
 import type { SettingsContext } from "./settings-index";
+import { cloudOffered } from "@/lib/brand";
 
 export function useSettingsContext(): SettingsContext {
   const config = useStoreSelector((state) => state.config);
@@ -25,7 +26,7 @@ export function useSettingsContext(): SettingsContext {
   const here = pageIsThisComputer();
   const home = here || Boolean(ogb?.home);
   const placesShown = known > 1 || (!ogb?.environments && railShown(places));
-  const plan = desktop ? Boolean(ogb?.cloudAccount || (ogb?.cloudPlan && cloud)) : cloud && !team && admin;
+  const plan = cloudOffered() && (desktop ? Boolean(ogb?.cloudAccount || (ogb?.cloudPlan && cloud)) : cloud && !team && admin);
   const organization = Boolean(ogb?.organization) && !client;
   const environments = Boolean(ogb?.environments);
   const installations = workspacesAvailable(config);

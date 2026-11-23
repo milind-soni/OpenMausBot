@@ -13,7 +13,7 @@ import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useInboxOrigin } from "./InboxLine";
 import { yourComputerAsk } from "@/lib/your-computer";
 import { computerAskWords } from "@/lib/computer-ask";
-import { DESKTOP_DOWNLOAD_URL } from "../../shared/computer-ask";
+import { RELEASES_URL } from "@/lib/app-links";
 
 interface ApprovalLabels {
   [tool: string]: LocaleKey;
@@ -295,7 +295,7 @@ export function PendingApprovalActions({
     return (
       <>
         {turnOn.getApp && (
-          <a key="get" {...marked("get-app")} href={DESKTOP_DOWNLOAD_URL} target="_blank" rel="noreferrer" className={ASK_SECONDARY_BUTTON}>{turnOn.getApp}</a>
+          <a key="get" {...marked("get-app")} href={`${RELEASES_URL}/latest`} target="_blank" rel="noreferrer" className={ASK_SECONDARY_BUTTON}>{turnOn.getApp}</a>
         )}
         <button key="deny" {...marked("deny")} type="button" onClick={() => decide("deny")} className={turnOn.turnOn ? ASK_SECONDARY_BUTTON : ASK_QUIET_ANSWER}>
           {t("computerAsk.action.notNow")}

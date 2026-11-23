@@ -4,12 +4,16 @@ import { CLOUD_ID, CLOUD_SWATCHES, cleanCloudListName, ORGANIZATION_BLOCKS, othe
 import { planTeam, teamPlan } from "./cloud-team-plan.mjs";
 import { cleanCode, cleanEmail, failureKind, parseSignInStart, READ_WAIT_MS, resetOffered, retryAfterSeconds, settledWithin, SIGN_IN_START, SIGN_IN_TRIES, SIGN_IN_VERIFY, signInBlock, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
 import nativeText from "./native-text.cjs";
+import product from "../product.json" with { type: "json" };
 
 const { englishText } = nativeText;
 
-export const CLOUD_ORIGIN = "https://cloud.openmausbot.com";
-/** The staging Admin (Dodo test mode, real test Clouds): a fixed address, on only with OMB_CLOUD_STAGING=1. */
-export const STAGING_CLOUD_ORIGIN = "https://omb-cloud-staging.fly.dev";
+/** The Cloud this build signs in to (product.json services.cloud). Without one, a reserved `.invalid` origin (RFC 2606) that
+ * never resolves: every Cloud call fails as offline, so nothing reaches anyone, and the app offers no Cloud. */
+export const CLOUD_ORIGIN = product.services.cloud ?? "https://cloud.invalid";
+/** The staging Admin, on only with OMB_CLOUD_STAGING=1; a build with no Cloud has none. */
+export const STAGING_CLOUD_ORIGIN = "https://cloud-staging.invalid";
+export const CLOUD_OFFERED = product.services.cloud !== null;
 /** Which Admin this app signs in to, and the files that depend on it (the sign-in, saved servers with the Cloud's
  * entry, Files' state, the Cloud's chosen name): staging never reads or writes production's. */
 export function cloudTarget(env = process.env) {

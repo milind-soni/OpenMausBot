@@ -85,8 +85,6 @@ export interface TemplateRepoPublish {
 }
 
 /** The community repository a published template lands in, and the page anyone can upload a folder through. */
-export const COMMUNITY_REPOSITORY_URL = "https://github.com/milind-soni/openmausbot-teams";
-export const COMMUNITY_UPLOAD_URL = `${COMMUNITY_REPOSITORY_URL}/upload/main/teams`;
 
 /** The chat message the bot's Share button sends, and the one Update sends. */
 export const TEMPLATE_SHARE_MESSAGE = "Create a public template of yourself that I can share with somebody else";

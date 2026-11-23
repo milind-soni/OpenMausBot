@@ -5,7 +5,7 @@ import { announcementHistory, announcementsUnread, markAnnouncementsRead, useAnn
 import { announcementConditions, announcementFeedUpdatedAt, announcementPlan, announcementPlatform, announcementSurface, cardsForPerson, providersRestricted,
   SPONSOR_CARDS_FOR_TEAM_MEMBERS, useAnnouncementCards } from "@/lib/announcements";
 import { appVersion } from "@/lib/app-links";
-import { brandStatus } from "@/lib/brand";
+import { makersOffers } from "@/lib/brand";
 import { cloudPlanView } from "@/lib/cloud-plan";
 import { activeLocale } from "@/lib/i18n";
 import { modelgoOfferable } from "@/lib/modelgo-offer";
@@ -68,7 +68,7 @@ export function useAnnouncements(now: () => number = Date.now): Announcements {
   const desktopState = useDesktopNotices(desktop);
   const organization = useOrganization();
   const account = useCloudAccount(bridge);
-  const branded = brandStatus().source === "file";
+  const branded = !makersOffers();
   const team = Boolean(state.config?.team);
   const canSave = viewer?.canSave !== false;
   const cloudHome = Boolean(state.config?.cloudHome || viewer?.cloudHome);

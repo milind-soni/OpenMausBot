@@ -19,6 +19,7 @@ import { useAccountSummary, useYou } from "../account-summary";
 import { useSettingsShell } from "../settings-shell";
 import { SpentRow } from "../plan-parts";
 import { profileLabel } from "../../SidebarProfileMenu";
+import { cloudOffered } from "@/lib/brand";
 
 export function AccountPage() {
   const { ctx, place, go } = useSettingsShell();
@@ -27,7 +28,7 @@ export function AccountPage() {
   const summary = useAccountSummary();
   const computer = useSwitchToComputer();
   const [signingOut, setSigningOut] = useState(false);
-  const bridge = ctx.client ? undefined : window.ogb?.cloudAccount;
+  const bridge = ctx.client || !cloudOffered() ? undefined : window.ogb?.cloudAccount;
   // A Cloud's page in the desktop window that isn't the app's home: the account lives on This computer until main
   // shares it (S2). The same `home` decides This app's rows, so the two never disagree.
   const elsewhere = ctx.desktop && !ctx.client && !ctx.here && !ctx.home && !bridge;

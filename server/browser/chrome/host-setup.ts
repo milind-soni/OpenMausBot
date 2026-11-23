@@ -15,11 +15,12 @@ import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { APP_NAME } from "../../../shared/product.ts";
+import { repositoryDoc } from "../../../shared/services.ts";
 
 /** Installs the Linux libraries Chrome needs (as root, once). */
 export const LIBRARIES_COMMAND = "sudo openmausbot browser install --with-deps";
 /** There is no command for the sandbox: an administrator allows one root-owned Chrome by hand. */
-export const SANDBOX_STEPS_URL = "https://github.com/milind-soni/OpenMausBot/blob/main/docs/deploy-vps.md#ubuntu-2404-browser-sandbox";
+export const SANDBOX_STEPS_URL = repositoryDoc("docs/deploy-vps.md#ubuntu-2404-browser-sandbox");
 
 /** What Chrome prints before aborting when it cannot sandbox itself. */
 export const NO_SANDBOX_SIGNATURE = "No usable sandbox";

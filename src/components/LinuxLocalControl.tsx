@@ -12,11 +12,12 @@ import {
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
+import { repositoryDoc } from "../../shared/services";
 
 const LINUX_GUIDE_URL =
-  "https://github.com/milind-soni/OpenMausBot/blob/main/docs/linux-desktop.md#enable-local-control";
+  repositoryDoc("docs/linux-desktop.md#enable-local-control");
 const OMARCHY_DOCS_URL =
-  "https://github.com/milind-soni/OpenMausBot/blob/main/docs/linux-desktop.md#omarchy-hyprland-experimental";
+  repositoryDoc("docs/linux-desktop.md#omarchy-hyprland-experimental");
 const CUA_OMARCHY_GUIDE_URL = "https://cua.ai/docs/cua-sdk/guides/omarchy";
 
 export function LinuxLocalControl() {

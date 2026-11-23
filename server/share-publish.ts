@@ -2,7 +2,7 @@
 // request on the community repository from its own GitHub App: nobody needs a GitHub account. The request is signed the
 // way page publishing signs its token request: a desktop's MausBot sign-in token, or a Cloud home's machine signature
 // over the label `omb-community-v1`.
-import { COMMUNITY_REPOSITORY_URL } from "../shared/share-card.ts";
+import { SERVICES } from "../shared/services.ts";
 import { pagesAuthHeaders, type PagesAccess } from "./pages/access.ts";
 import { PRODUCT_NAME } from "../shared/product.ts";
 
@@ -30,7 +30,8 @@ function communityLink(value: unknown): string | null {
   if (typeof value !== "string") return null;
   try {
     const url = new URL(value);
-    return url.protocol === "https:" && url.hostname === "github.com" && `${url.origin}${url.pathname}`.startsWith(`${COMMUNITY_REPOSITORY_URL}/`) ? url.href : null;
+    const repository = SERVICES.teamLibrary?.repository;
+    return repository && url.protocol === "https:" && url.hostname === "github.com" && `${url.origin}${url.pathname}`.startsWith(`${repository}/`) ? url.href : null;
   } catch {
     return null;
   }

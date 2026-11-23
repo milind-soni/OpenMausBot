@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ArrowUpRight, Check, ChevronDown, Copy, FolderDown, Github, Library, Loader2, MoreHorizontal, RefreshCw, Trash2, Upload } from "lucide-react";
 
-import { COMMUNITY_UPLOAD_URL, TEMPLATE_UPDATE_MESSAGE, type TemplateAvatar, type TemplateCard, type TemplateDetails, type TemplateRepoPublish } from "../../shared/share-card";
+import { TEMPLATE_UPDATE_MESSAGE, type TemplateAvatar, type TemplateCard, type TemplateDetails, type TemplateRepoPublish } from "../../shared/share-card";
 import { botBodyId } from "../../shared/bot-body";
 import { MAUS_COLOR_NAMES, type MausColor } from "../../shared/wire";
 import { openExternalLink } from "@/lib/app-links";
@@ -18,6 +18,10 @@ import { useStore, type Message } from "@/state/store";
 import { ASK_CHIP, ASK_CHIP_IDLE, ASK_PRIMARY_BUTTON } from "./AskCard";
 import { BotAvatar } from "./Avatar";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
+import { SERVICES } from "../../shared/services";
+
+/** Where a template is uploaded by hand when it cannot be published from here; none without a team library. */
+const COMMUNITY_UPLOAD_URL = SERVICES.teamLibrary ? `${SERVICES.teamLibrary.repository}/upload/main/teams` : null;
 
 const FACES = 4;
 const STATUS_KEY = {
@@ -155,9 +159,11 @@ export function TemplateButtons({ actions, primary, view, extra }: {
     <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
       {card.fallback ? <>
         {saveButton}
-        <button type="button" data-template-upload onClick={() => openLink(COMMUNITY_UPLOAD_URL)} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
-          <Github size={14} aria-hidden="true" />{t("template.uploadOnGithub")}
-        </button>
+        {COMMUNITY_UPLOAD_URL && (
+          <button type="button" data-template-upload onClick={() => openLink(COMMUNITY_UPLOAD_URL)} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
+            <Github size={14} aria-hidden="true" />{t("template.uploadOnGithub")}
+          </button>
+        )}
       </> : card.status === "published" && card.link ? <>
         <CopyLinkButton link={card.link} />
         {view.url && <button type="button" onClick={() => openLink(view.url!)} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>

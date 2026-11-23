@@ -5,6 +5,7 @@ import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { LearnMore, SETTINGS_INPUT, SettingRow, SettingsEmptyRow, SettingsField, SettingsGroup, SettingsRows } from "./SettingsPrimitives";
 import { SettingsSkeletonRows } from "./settings/SettingsStates";
+import { repositoryDoc } from "../../shared/services";
 
 export interface CustomDomainStatus {
   publicUrl: string | null;
@@ -88,7 +89,7 @@ export function customDomainProxyExample(status: Pick<CustomDomainStatus, "appPo
 
 /** The self-hosting guide's section on custom domains: the server steps (DNS, the HTTPS proxy, ports) live there, behind
  * the row's Learn more, never inline in Settings. */
-export const CUSTOM_DOMAIN_GUIDE_URL = "https://github.com/milind-soni/OpenMausBot/blob/main/docs/self-hosting.md#connect-a-custom-domain-in-settings";
+export const CUSTOM_DOMAIN_GUIDE_URL = repositoryDoc("docs/self-hosting.md#connect-a-custom-domain-in-settings");
 
 export function CustomDomainSettings() {
   const [status, setStatus] = useState<CustomDomainStatus | null>(null);

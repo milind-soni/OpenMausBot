@@ -16,6 +16,7 @@ import { engineReady } from "./EngineLibrary";
 import { IntroChips } from "./HelperSetup";
 import { usePrefersReducedMotion } from "./mascot-clock";
 import { preloadConnectedApps } from "@/lib/connected-apps";
+import { cloudOffered } from "@/lib/brand";
 
 /** How long after the part before each part arrives, when a first run has just landed here: the three lines, the typing
  * row, the follow-up and its chips. With no AI there is no typing row, and the follow-up comes `noAi` after the last line. */
@@ -158,6 +159,7 @@ export function SimpleHelperIntro({ botId, threadId, message, answered, followup
 
   const bubbles = [...lines.slice(0, Math.min(shown, 3)), ...(shown >= 5 && facts ? [followupLine(facts)] : [])];
   const chips = answered || shown < ALL || !facts ? [] : introChips({
+    cloudOffered: cloudOffered(),
     aiReady: ai === "own",
     ownBots: state.bots.filter((candidate) => !candidate.hidden && !candidate.defaultBot).length,
     onCloud: state.config?.cloudHome === true,

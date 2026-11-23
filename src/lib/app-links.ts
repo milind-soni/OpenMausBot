@@ -1,15 +1,20 @@
-export const APP_NAME = "OpenMausBot";
-export const APP_REPOSITORY = "https://github.com/milind-soni/OpenMausBot";
+import { APP_NAME } from "../../shared/product";
+import { REPOSITORY_URL, repositoryDoc, SERVICES } from "../../shared/services";
+
+export { APP_NAME };
+export const APP_REPOSITORY = REPOSITORY_URL;
+/** Cloud pages, only ever linked from Cloud screens, which a build with no Cloud never shows. */
+const CLOUD_SITE = SERVICES.cloud ?? "https://cloud.invalid";
 export const DOCS_URL = `${APP_REPOSITORY}/tree/main/docs`;
 export const HELP_CENTER_URL = DOCS_URL;
 export const APPROVAL_LEVELS_URL = `${APP_REPOSITORY}/blob/main/docs/approval-levels.md`;
-export const PASSKEY_HELP_URL = "https://docs.openmausbot.com/docs/troubleshooting/google-sign-in-cloud-browser";
-export const FEEDBACK_URL = "https://discord.gg/9Wb8MEpXRs";
+export const PASSKEY_HELP_URL = repositoryDoc("apps/docs/content/docs/troubleshooting/google-sign-in-cloud-browser.mdx");
+export const FEEDBACK_URL = `${REPOSITORY_URL}/issues`;
 export const RELEASES_URL = `${APP_REPOSITORY}/releases`;
-export const PRICING_URL = "https://www.openmausbot.com/pricing";
+export const PRICING_URL = `${CLOUD_SITE}/pricing`;
 /** The website's Team plans: `#teams` opens the pricing page on its Team tab. */
 export const TEAM_PLANS_URL = `${PRICING_URL}#teams`;
-export const CLOUD_PLAN_URL = "https://cloud.openmausbot.com/cloud";
+export const CLOUD_PLAN_URL = `${CLOUD_SITE}/cloud`;
 /** The Admin's team People page (openmaus-cloud docs/team-seats.md): people, seats and roles are managed there, never in
  * the app. `invite` opens its invite box (Owner and Admins); `seats` its seat stepper (the Owner, whose card pays). */
 export const TEAM_PEOPLE_PAGES = { invite: "people?do=invite", seats: "people?do=seats" } as const;

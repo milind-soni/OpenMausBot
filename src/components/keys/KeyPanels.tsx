@@ -6,6 +6,7 @@ import { t } from "@/lib/i18n";
 import { Switch } from "../SettingsPrimitives";
 import { KEY_FIELD } from "./KeyRow";
 import { cleanKey, looksLikeKey } from "./key-save";
+import { repositoryDoc } from "../../../shared/services";
 
 /** Security: write-only; the server returns names, never keys, and hands the keys to OpenCode alone. */
 export function OpenCodeProviderKeys() {
@@ -176,7 +177,7 @@ export function VpsConnection() {
     <div className="flex flex-col gap-2">
       <p className="text-[12px] leading-4 text-ink-secondary">
         {t("keys.vps.descBefore")}
-        <a href="https://github.com/milind-soni/OpenMausBot/blob/main/docs/byo-vps.md" target="_blank" rel="noopener noreferrer" className="text-accent-text hover:underline">
+        <a href={repositoryDoc("docs/byo-vps.md")} target="_blank" rel="noopener noreferrer" className="text-accent-text hover:underline">
           {t("keys.vps.descLink")}
         </a>
         {t("keys.vps.descAfter")}

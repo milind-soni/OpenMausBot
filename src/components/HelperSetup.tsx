@@ -11,6 +11,7 @@ import { engineReady } from "./EngineLibrary";
 import { ConnectAiDialog } from "./onboarding/ConnectAi";
 import { ConnectAiPlaceContext } from "@/lib/connect-ai-events";
 import { useWelcomeAi } from "./onboarding/welcome-ai";
+import { cloudOffered } from "@/lib/brand";
 
 const STEPS: Record<SetupStep, { label: LocaleKey; icon: LucideIcon }> = {
   ai: { label: "helperIntro.step.ai", icon: Sparkles },
@@ -35,6 +36,7 @@ export function setupAction(step: SetupStep): Action {
 export function HelperSetup() {
   const { state, dispatch } = useStore();
   const steps = setupSteps({
+    cloudOffered: cloudOffered(),
     aiReady: state.instances.some(engineReady),
     ownBots: state.bots.filter((bot) => !bot.hidden && !bot.defaultBot).length,
     onCloud: state.config?.cloudHome === true,

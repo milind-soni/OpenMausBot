@@ -4,6 +4,7 @@
 // reconnect opens with the newest size and cap, and OpenMausBot's own messages are passed on.
 
 import { t } from "./i18n";
+import { repositoryDoc } from "../../shared/services";
 
 /** The browser's host cannot run Chrome until it is set up; the close reason names the fix. */
 export const PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE = 4503;
@@ -19,7 +20,7 @@ export const PREVIEW_STREAM_LIBRARIES_COMMAND = "sudo openmausbot browser instal
 /** What a container's operator sets to run its browser without Chrome's own sandbox. */
 export const PREVIEW_STREAM_SANDBOX_OFF = "OMB_BROWSER_SANDBOX=0";
 export const PREVIEW_STREAM_SANDBOX_STEPS_URL =
-  "https://github.com/milind-soni/OpenMausBot/blob/main/docs/deploy-vps.md#ubuntu-2404-browser-sandbox";
+  repositoryDoc("docs/deploy-vps.md#ubuntu-2404-browser-sandbox");
 
 export type PreviewViewportSetting =
   | { readonly mode: "fill" }
