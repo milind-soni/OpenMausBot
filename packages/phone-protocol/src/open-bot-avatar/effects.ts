@@ -41,8 +41,8 @@ export interface RibbonPiece {
 }
 
 /**
- * The ribbons ride hoops round the body's centre, laid out as PR #14 measured them from the
- * Grok Bot demo, at one size for every avatar. Lengths are in design units: the demo's
+ * The ribbons ride hoops round the body's centre, laid out as measured from a reference
+ * animation, at one size for every avatar. Lengths are in design units: the reference's
  * 228.541-unit space, which its bot fills; here that space is a body of the typical size,
  * BODY units across, so one design unit is BODY / DESIGN avatar units whatever the avatar.
  *

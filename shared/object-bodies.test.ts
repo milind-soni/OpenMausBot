@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { validateAvatar } from "../packages/phone-protocol/src/open-bot-avatar/index.ts";
+import { validateAvatar } from "../packages/phone-protocol/src/open-bot-avatar/validate.ts";
 import { MASCOT_BODY_IDS } from "./mascot-bodies.ts";
 import { OBJECT_BODIES, OBJECT_BODY_IDS, SHAPE_BODIES, engineBody } from "./object-bodies.ts";
 

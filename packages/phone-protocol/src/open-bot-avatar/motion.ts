@@ -201,7 +201,7 @@ export function computePose(input: PoseInput): Pose {
 }
 
 /**
- * Done celebrates in cycles, timed as PR #14 measured the Grok Bot demo: the ribbons go round
+ * Done celebrates in cycles, timed from a reference animation: the ribbons go round
  * DONE_SWEEPS times while the body turns DONE_SWEEPS / 3 times (see celebration), then they draw
  * back in and the bot rests. DONE_TURN_S covers the turn and the drawing in. A cycle lasts
  * DONE_CYCLE_S or up to a seventh longer, differently for each avatar, so several done bots on a
@@ -251,7 +251,7 @@ function workTurn(seed: number, age: number): number | null {
 const near = (angle: number) => angle - TAU * Math.round(angle / TAU);
 
 /**
- * How far a celebration's ribbons have gone round `t` seconds in, radians, on PR #14's curve: half
+ * How far a celebration's ribbons have gone round `t` seconds in, radians, on the reference curve: half
  * a radian of wind-up the other way over 0.24 s, a speed-up to a steady run, then from 2.54 s a
  * slow-down that lands, at 3.79 s, on DONE_SWEEPS whole turns.
  */
