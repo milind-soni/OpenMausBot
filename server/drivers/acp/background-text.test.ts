@@ -163,6 +163,15 @@ describe("ACP memory one-shot (generateMemoryText)", () => {
       await (await create(createAcpDriver({ ...support, resolveTurnModel }))).generateMemoryText!("prompt", { fallback: { model: "m-bot", refused: new Set<string>(), onRefused: () => {} } });
       expect(promptedModels()).toEqual(["m-default"]);
     });
+
+    it("skips subscription authenticate for local-inject models", async () => {
+      const pickAuthMethod = vi.fn(() => "sub-auth");
+      const resolveTurnModel = (model: string | undefined) => model === "ollama::llama3" ? "m-bot" : undefined;
+      await (await create(createAcpDriver({ ...support, pickAuthMethod, authFailure: "fail", resolveTurnModel })))
+        .generateMemoryText!("prompt", { fallback: { model: "ollama::llama3", refused: new Set<string>(), onRefused: () => {} } });
+      expect(pickAuthMethod).not.toHaveBeenCalled();
+      expect(promptedModels()).toEqual(["m-bot"]);
+    });
   });
 
   describe("on Grok (slug via -m and session/set_model)", () => {
@@ -238,6 +247,22 @@ describe("ACP memory one-shot (generateMemoryText)", () => {
       await (await create(createAcpDriver(support))).generateMemoryText!("prompt", { fallback: botModel("m-bot") });
       const { argv } = JSON.parse(readFileSync(process.env.FAKE_ACP_DUMP!, "utf8"));
       expect(argv).not.toContain("-m");
+    });
+
+    it("skips subscription authenticate when oneShotModel resolves a local-inject model", async () => {
+      const pickAuthMethod = vi.fn(() => "sub-auth");
+      const support: AcpSupport = {
+        driverKind: "oneshot-local-inject-test", displayName: "OneShot inject", models: { default: "m-default", options: [{ id: "m-default", label: "m-default" }] },
+        defaultCli: FAKE_CLI, nativeSource: "oneshot-local-inject-test.acp", loginNote: "sign in",
+        spawnArgs: (_c, turn) => (turn.model ? ["-m", turn.model] : []),
+        pickAuthMethod, authFailure: "fail", isAuthenticated: () => true,
+        oneShotModel: (model) => (model === "ollama::llama3" ? "local-slug" : undefined),
+      };
+      await (await create(createAcpDriver(support))).generateMemoryText!("prompt", { fallback: botModel("ollama::llama3") });
+      expect(pickAuthMethod).not.toHaveBeenCalled();
+      const { argv } = JSON.parse(readFileSync(process.env.FAKE_ACP_DUMP!, "utf8"));
+      expect(argv).toContain("-m");
+      expect(argv[argv.indexOf("-m") + 1]).toBe("local-slug");
     });
   });
 

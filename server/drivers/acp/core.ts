@@ -1464,6 +1464,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           const model = applyOneShotEnv(support, env, options, catalog.models, { fullAuto: false, cwd, threadId: turn.threadId, mcpServers: [], ...(turnModel ? { model: turnModel } : {}) });
           const launch: { command: string; args?: string[]; env?: Record<string, string | undefined>; ro?: readonly string[] } = support.resolveCommand ? await support.resolveCommand(env, turnConfig, instanceId) : { command: turnConfig.cli };
           const spawnEnv = launch.env ?? env;
+          const skipAuth = Boolean(support.skipsAuthenticate?.(instanceId)) || Boolean((turnModel || model) && skipSubscriptionAuthForLocalInject(options.model ?? options.fallback?.model));
           return await runAcpOneShot({
             displayName: support.displayName,
             spawn: (...args) => { const child = spawnCli(...args); support.processStarted?.(child, instanceId); return child; }, kill: killCliTree, box: { allowEnv: instanceEnvNames(input.environment, spawnEnv), ro: launch.ro },
@@ -1473,8 +1474,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             cwd,
             prompt,
             defaultModel: turnModel ?? catalog.models.default, model, ...(turnModel ? { configuredModel: turnModel } : {}),
-            pickAuthMethod: (methods) => support.skipsAuthenticate?.(instanceId) ? null : support.pickAuthMethod(methods, spawnEnv),
-            authRequired: turnModel && skipSubscriptionAuthForLocalInject(options.model ?? options.fallback?.model) ? false : !support.skipsAuthenticate?.(instanceId) && (support.authFailure === "fail-request" ? "if-requested" : support.authFailure === "fail"),
+            pickAuthMethod: (methods) => skipAuth ? null : support.pickAuthMethod(methods, spawnEnv),
+            authRequired: skipAuth ? false : (support.authFailure === "fail-request" ? "if-requested" : support.authFailure === "fail"),
             loginNote: support.loginNote, signInRefused: support.skipsAuthenticate?.(instanceId) && support.signInRequest ? (error) => { const refused = support.signInRequest!.rpcError(error, instanceId); if (refused) support.signInRequest!.required(instanceId); return refused; } : undefined,
             clientCapabilitiesMeta: support.clientCapabilitiesMeta,
             ...(support.configureSession ? {
