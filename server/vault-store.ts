@@ -83,6 +83,9 @@ const fileSchema = z.object({
   /** Security: MCP server name → the items whose `vault:<id>` that server may read. Written only when a bot's secretRef
    * is redeemed into the server (or a move carries the server), so a pointer planted in config.json reads nothing. */
   mcpKeys: z.record(z.string(), z.array(z.string().min(1))).optional(),
+  /** A pasted GitHub token per sign-in (`owner`, or a Team Cloud member's person key): server-side git and GitHub calls
+   * only (server/github/sign-in.ts), never a bot's, never listed with the saved secrets. */
+  github: z.record(z.string(), z.object({ token: z.string().min(1), login: z.string(), savedAt: z.number() })).optional(),
 });
 
 const memberSecretsSchema = z.object({
@@ -447,8 +450,9 @@ export class VaultStore {
   forgetPerson(person: string): number {
     const data = this.read();
     const gone = (data.secrets ?? []).filter((secret) => secret.person === person).map((secret) => secret.id);
+    if (data.github?.[person]) this.setGithubToken(person, null);
     if (!gone.length) return 0;
-    this.write({ ...data, secrets: data.secrets!.filter((secret) => secret.person !== person) });
+    this.write({ ...this.read(), secrets: data.secrets!.filter((secret) => secret.person !== person) });
     for (const id of gone) this.secretChanged(id);
     return gone.length;
   }
@@ -555,9 +559,23 @@ export class VaultStore {
     this.write(Object.keys(grants).length ? { ...rest, onePasswordItemGrants: grants } : rest);
   }
 
+  /** The GitHub token pasted for one sign-in (sign-in.ts): never a route's answer, never a bot's. */
+  githubToken(audience: string): { token: string; login: string } | null {
+    const saved = this.read().github?.[audience];
+    return saved ? { token: saved.token, login: saved.login } : null;
+  }
+
+  setGithubToken(audience: string, saved: { token: string; login: string } | null): void {
+    const { github, ...rest } = this.read();
+    const { [audience]: _previous, ...others } = github ?? {};
+    const next = saved ? { ...others, [audience]: { ...saved, savedAt: this.now() } } : others;
+    this.write(Object.keys(next).length ? { ...rest, github: next } : rest);
+  }
+
   secretValues(): string[] {
     const data = this.read();
     return [
+      ...Object.values(data.github ?? {}).map((saved) => saved.token),
       ...data.logins.flatMap((login) => [login.password, ...(login.totp ? [login.totp.secret] : [])]),
       ...(data.onePassword ? [data.onePassword.token] : []),
       ...(data.bitwarden ? [data.bitwarden.clientSecret, data.bitwarden.password] : []),
