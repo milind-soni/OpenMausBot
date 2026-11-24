@@ -1,19 +1,13 @@
 import { useEffect } from "react";
 import { threadCycleStep } from "@/lib/keyboard-shortcuts";
-import type { AppState, Bot, Task } from "@/state/store";
+import { newChatThreadId } from "@/state/new-chat";
+import type { AppState } from "@/state/store";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
-import { byPinOrder, ownThread } from "./sidebar-thread-labels";
-import { isArchived, isSnoozed, orderedThreadList } from "./SidebarThreadRow";
+import { openTabId, threadTabs, type TabsBot } from "./thread-tabs";
 
-type CycleBot = Pick<Bot, "threadId" | "switchingTo" | "mainThreadId" | "tasks">;
 interface CycleTarget { botId: string; open: string; order: string[] }
 
-export function threadCycleOrder(bot: Pick<CycleBot, "mainThreadId" | "tasks">): string[] {
-  const open = (bot.tasks ?? []).filter((task) => !task.routineRunId && !isArchived(task) && !isSnoozed(task)
-    && (ownThread(task) || task.pinned === true || task.threadId === bot.mainThreadId));
-  const pinned = (task: Task) => task.pinned === true;
-  return [...byPinOrder(open.filter(pinned)), ...orderedThreadList(open.filter((task) => !pinned(task)))].map((task) => task.threadId);
-}
+export const threadCycleOrder = (bot: TabsBot): string[] => threadTabs(bot).filter((tab) => !tab.draft).map((tab) => tab.threadId);
 
 export function nextCycleThread(order: readonly string[], open: string, step: 1 | -1): string | null {
   const at = order.indexOf(open);
@@ -25,7 +19,9 @@ export function nextCycleThread(order: readonly string[], open: string, step: 1 
 function cycleTarget(state: AppState): CycleTarget | null {
   if (state.activeView !== "chat" || state.shortcutsOpen) return null;
   const bot = state.bots.find((candidate) => candidate.id === state.selectedId && !candidate.hidden);
-  return bot ? { botId: bot.id, open: bot.switchingTo ?? bot.threadId, order: threadCycleOrder(bot) } : null;
+  if (!bot) return null;
+  const open = state.newChat?.botId === bot.id ? newChatThreadId(bot.id) : openTabId(bot);
+  return { botId: bot.id, open, order: threadCycleOrder(bot) };
 }
 
 const sameTarget = (a: CycleTarget | null, b: CycleTarget | null) =>

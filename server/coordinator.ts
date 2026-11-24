@@ -13,8 +13,8 @@ export type CoordinateBotsCall = {
   message: string;
   reason?: string;
   rework: boolean;
-  /** "standing" (the conversation's one work thread with each teammate), "new", or the id of a thread the caller opened on
-   * that teammate. */
+  /** "standing" (the conversation's work thread with each teammate; while a turn runs there, another idle one or a new one,
+   * unless work it still waits on is there), "new", or the id of a thread the caller opened on that teammate. */
   thread: string;
   reply: "resume" | "none";
   consult: boolean;
@@ -28,6 +28,8 @@ export type CoordinateBotsCall = {
   files?: readonly PassedFile[];
   /** start_thread's report_back: the one target is the sender's own new thread, run on this model. */
   ownThread?: { modelSelection?: ModelSelection; approvalMode?: NewThreadLevel };
+  /** coordinate_bots thread "new": the thread it opens is this one hand-off's, so it closes once the result is back. */
+  oneShot?: true;
   /** post_to_thread: one message into this existing thread; wake starts a run there, else it waits for the next one. */
   post?: { deliveryId: string; wake: boolean };
 };
@@ -267,6 +269,13 @@ export interface CoordinatorOptions {
   /** What a turn a restart cut ends with in place of starting again, or null (runtime/runtime.ts RuntimeOptions). */
   restartCut?: (threadId: string, startedAt: number | undefined) => string | null;
 }
+
+/** The outcome clause for the same-turn "finish your response" answer about an assignment this turn handed out, from its
+ * reply mode — the same wording the coordinate_bots receipt gives. */
+export const sameTurnReturns = (reply: Reply | undefined): string =>
+  reply === "none" ? "nothing comes back from it"
+  : reply === "poll" ? "read its result with assignment_status"
+  : "its result returns to this conversation and resumes you";
 
 export function createCoordinator(options: CoordinatorOptions): Coordinator {
   return new RuntimeCoordinator(options);

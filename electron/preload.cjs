@@ -50,7 +50,7 @@ ipcRenderer.on("desktop-notifications:open", (_event, target) => {
 
 // Only fixed actions are retained, never a destination supplied by a renderer.
 const FIXED_SETTINGS_ACTIONS = new Set(["organization", "cloud", "cloud-settings", "cloud-add", "cloud-add-howto",
-  "overview", "devices", "phone", "ai", "bots", "desktops", "vault", "usage", "transfer", "storage", "data", "people", "installations", "account", "plan", "app", "general", "appearance"]);
+  "overview", "devices", "phone", "ai", "bots", "desktops", "vault", "usage", "transfer", "storage", "data", "people", "installations", "account", "plan", "app", "general", "appearance", "features"]);
 let pendingSettingsAction = null;
 const appSettingsListeners = new Set();
 ipcRenderer.on("app:open-settings", (_event, section) => {

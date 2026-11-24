@@ -93,12 +93,20 @@ The `.rpm` is community-supported: every release builds and checks it, but it is
 `.deb` is on Ubuntu. Install it with the package manager so its desktop dependencies are resolved:
 
 ```sh
-sudo dnf install ./OpenMausBot-x86_64.rpm
+cd ~/Downloads   # or wherever you saved the file
+sudo dnf install ./OpenMausBot-*.rpm
 ```
+
+The glob matches both the stable-named download (`OpenMausBot-x86_64.rpm`) and the versioned one from the
+releases page (`OpenMausBot-<version>-x86_64.rpm`), so the command works no matter which asset you saved.
 
 Remove it with `sudo dnf remove openmausbot`. Updates are downloaded by the app, which then copies the `rpm` install
 command and opens a terminal for you to run it. Other RPM distributions (RHEL, openSUSE) and image-based Fedora
 editions such as Silverblue are untested; use the AppImage there.
+
+Recent Fedora releases run GNOME only on Wayland (no Xorg session to choose), so **This computer** stays unavailable
+there for now, as on Ubuntu's GNOME Wayland (see [Enable local control](#enable-local-control)). Chat, screen preview,
+Cloud desktop and Private desktop still work.
 
 ### Arch Linux and EndeavourOS
 
@@ -236,9 +244,10 @@ user's physical pointer; approved click and typing actions still target the requ
 mouse remains under their control.
 
 On GNOME Wayland, **This computer** remains unavailable and an older persisted opt-in is reset to off with private
-file permissions. Sign out and choose **Ubuntu on Xorg** from the login-screen session menu, or continue using Chat,
-preview-only capture, Cloud, or Local VM. Wayland re-enablement requires its own real-seat evidence and will not be
-controlled by an environment override.
+file permissions. Sign out and choose an Xorg session from the login-screen session menu if it offers one
+(**Ubuntu on Xorg** on Ubuntu releases before 25.10). If it offers none (Ubuntu 25.10 and later, or Fedora, for
+example), use a cloud desktop. Either way you can keep using Chat, preview-only capture, Cloud, or Local VM.
+Wayland re-enablement requires its own real-seat evidence and will not be controlled by an environment override.
 
 Upstream release assets are mutable, so the build uses an explicit reviewed digest as its trust anchor (the release's
 own `checksums.txt` and Sigstore bundles were checked when the digest was reviewed, but the build does not depend on them):
@@ -373,7 +382,8 @@ on Wayland. On Xorg, enable it from the **Local control** card first.
 
 On Xorg, press **Try again** and use the reason shown in the card. The bundled package requires no manual driver
 installation or `chmod`; an upgraded DEB repairs its exact package-owned directory modes automatically. On Wayland,
-the card directs you to Ubuntu on Xorg and intentionally offers no enable button.
+the card directs you to an Xorg session (**Ubuntu on Xorg** on Ubuntu) or, where none is offered, a cloud desktop,
+and intentionally offers no enable button.
 
 ### Screen preview does not start
 

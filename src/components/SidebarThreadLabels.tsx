@@ -1,5 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { createPortal } from "react-dom";
+import { useLayoutEffect, useRef, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { ChevronRight, Clock3, Loader2, Pin, Plus, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -12,6 +11,8 @@ import { canUnfold, openThreadPinned, threadLabels, type LabelRow } from "./side
 import { isWorking } from "./SidebarThreadRow";
 import { showAllConversations } from "./bot-panel/Conversations";
 import { reducedMotion } from "./MenuMotion";
+import { UndoToast, useUndoToast } from "./UndoToast";
+import { MainThreadMark } from "./SidebarRowMarkers";
 
 const SLOT = "pointer-events-none absolute end-[30px] top-1.5 flex size-6 items-center justify-center rounded-lg text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:hidden touch:pointer-events-auto touch:opacity-70 motion-reduce:transition-none";
 const ROW = "group/label relative flex h-8 w-full min-w-0 items-center gap-2 rounded-lg ps-2.5 pe-2 text-start text-[13px] leading-[18px] outline-none transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none";
@@ -63,8 +64,6 @@ function StatusMark({ row }: { row: LabelRow }) {
   }
 }
 
-type Toast = { text: string; undo: () => void };
-
 /** The rows under a bot in Simple mode's sidebar: what is going on while folded, the bot's active threads unfolded. */
 export function SidebarThreadLabels({ bot, selected, drafting = false, rowThreadId, pendingQueued, dispatch }: {
   bot: Bot; selected: boolean; drafting?: boolean; rowThreadId: string; pendingQueued: AppState["pendingQueued"]; dispatch: Dispatch<Action>;
@@ -74,7 +73,7 @@ export function SidebarThreadLabels({ bot, selected, drafting = false, rowThread
   const { rows, more, runningMore } = threadLabels(bot, pendingQueued, { unfolded, current, rowThreadId, now: Date.now() });
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
-  const [toast, setToast] = useState<Toast | null>(null);
+  const [toast, setToast] = useUndoToast();
   const [focusAt, setFocusAt] = useState<number | null>(null);
   const finishing = useRef(false);
   const tree = useRef<HTMLDivElement>(null);
@@ -94,11 +93,6 @@ export function SidebarThreadLabels({ bot, selected, drafting = false, rowThread
     return () => window.clearTimeout(timer);
   }, [unfolded, pins]);
   useLayoutEffect(() => { shown.current = { unfolded, rows, more }; });
-  useEffect(() => {
-    if (!toast) return;
-    const timer = window.setTimeout(() => setToast(null), 6000);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
   if (!rows.length && !more && !runningMore && !toast && !leaving) return null;
 
   const items = () => Array.from(tree.current?.querySelectorAll<HTMLElement>("[role=treeitem]") ?? []);
@@ -183,6 +177,7 @@ export function SidebarThreadLabels({ bot, selected, drafting = false, rowThread
                 <span dir="auto" className="min-w-0 truncate">{title}</span>
                 {row.pinned && <Pin size={10} role="img" aria-label={t("task.pinned")} className="shrink-0 text-ink-tertiary" />}
               </span>
+              {row.task.threadId === bot.mainThreadId && <MainThreadMark />}
               <span className={cn("flex shrink-0 items-center", hideable(row) && "transition-opacity duration-[120ms] group-hover/label:opacity-0 motion-reduce:transition-none")}>
                 <StatusMark row={row} />
               </span>
@@ -214,12 +209,6 @@ export function SidebarThreadLabels({ bot, selected, drafting = false, rowThread
         </div>
       )}
     </div>
-    {toast && createPortal(
-      <div role="status" className="fixed bottom-4 start-[calc(var(--rail-beside,0px)_+_1rem)] z-[60] flex max-w-[340px] items-center gap-3 rounded-xl border border-hairline/50 bg-card px-3.5 py-2.5 text-[13px] text-ink shadow-xl animate-fade-in motion-reduce:animate-none">
-        <span className="min-w-0 line-clamp-2">{toast.text}</span>
-        <button type="button" onClick={() => { toast.undo(); setToast(null); }} className="shrink-0 rounded-md px-1.5 py-0.5 font-medium text-accent-text hover:bg-ink/[0.06]">{t("common.undo")}</button>
-      </div>,
-      document.body,
-    )}
+    <UndoToast toast={toast} onDone={() => setToast(null)} />
   </>;
 }
