@@ -125,8 +125,9 @@ for (const advanced of [false, true]) {
       expect(document.body.textContent).toContain("Alpha moved to position 3 of 3");
     });
 
-    it("moves a bot below a waiting one's place among the rows as drawn", () => {
-      render([bot("alpha"), bot("bravo", { activity: "waiting-on-you" }), bot("charlie"), bot("delta")]);
+    // A bot waiting on the person is listed in Unread instead, where rows are not dragged.
+    it("moves a bot below a working one's place among the rows as drawn", () => {
+      render([bot("alpha"), bot("bravo", { busy: true }), bot("charlie"), bot("delta")]);
       expect(order()).toEqual(["bravo", "alpha", "charlie", "delta"]);
       dragOnto("delta", "bravo", "bottom");
       expect(saved()).toEqual([{ type: "botsOrdered", botIds: ["delta", "alpha", "bravo", "charlie"] }]);
