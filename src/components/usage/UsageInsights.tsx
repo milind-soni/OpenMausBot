@@ -642,7 +642,7 @@ export function Breakdown({ data, metric, groupLabel }: { data: UsageInsights; m
         <span role="cell" className={cn(wide, "text-right tabular-nums text-ink-secondary")}>{bucket.errors || "—"}</span>
         <span role="cell" className={cn(wide, "text-right tabular-nums text-ink-secondary")}>{percent(cacheRate(bucket) ?? 0)}</span>
         <span role="cell" className={cn(wide, "text-right tabular-nums text-ink-secondary")}>{formatTokens(tokensOf(bucket))}</span>
-        <span role="cell" className="text-right font-medium tabular-nums text-ink"><SpendValue value={bucket} /></span>
+        <span role="cell" className="text-right font-medium tabular-nums text-ink">{metric === "cost" ? <SpendValue value={bucket} /> : formatCost(bucket.costUsd)}</span>
       </div>
     ));
   } else {
@@ -671,7 +671,7 @@ export function Breakdown({ data, metric, groupLabel }: { data: UsageInsights; m
           <span role="cell" className="text-right tabular-nums text-ink-secondary">{entry.turns}</span>
           <span role="cell" className={cn(wide, "text-right tabular-nums text-ink-secondary")}>{entry.errors || "—"}</span>
           <span role="cell" className={cn(wide, "text-right tabular-nums text-ink-secondary")}>{whole > 0 ? percent(size(entry) / whole) : "—"}</span>
-          <span role="cell" className={cn(wide, "text-right tabular-nums text-ink-secondary")}>{metric === "cost" ? formatTokens(tokensOf(entry)) : <SpendValue value={entry} />}</span>
+          <span role="cell" className={cn(wide, "text-right tabular-nums text-ink-secondary")}>{metric === "cost" ? formatTokens(tokensOf(entry)) : formatCost(entry.costUsd)}</span>
           <span role="cell" className="text-right font-medium tabular-nums text-ink">{metric === "cost" ? <SpendValue value={entry} /> : formatTokens(tokensOf(entry))}</span>
         </div>
       );

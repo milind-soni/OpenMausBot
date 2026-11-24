@@ -268,5 +268,18 @@ describe("Spending Overview plan vs billed separation", () => {
     });
     expect(host.textContent).toContain("$0");
     expect(host.textContent).toContain("$2.78 on plan");
+
+    renderBreakdown(purePlan, "tokens");
+    expect(host.textContent).toContain("$2.78");
+    expect(host.textContent).not.toContain("on plan");
+
+    const tokensSelect = host.querySelector("select")!;
+    flushSync(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
+      setter?.call(tokensSelect, "time");
+      tokensSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(host.textContent).toContain("$2.78");
+    expect(host.textContent).not.toContain("on plan");
   });
 });
