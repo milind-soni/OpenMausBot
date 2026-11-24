@@ -1,10 +1,10 @@
 // A room as a feed of its threads, in the real renderer: with Settings → Features → Room feed on, a room of two bots
 // shows each thread's first line and its replies, a row opens its thread beside the feed, and a line sent from the
 // feed's composer starts a thread of its own there while the room's current thread stays where it was. A row's menu
-// pins and archives its thread, archived ones come back under Show archived threads, and the panel beside the feed
-// renames the thread it holds. With the switch off the room is its single transcript again. Needs the pinned
-// agent-browser binary: runs when one resolves (tools directory, OMB_AGENT_BROWSER_PATH or PATH) or OMB_UI_E2E=1 asks
-// for the verified download; otherwise skipped.
+// pins, archives and deletes its thread, archived ones come back under Show archived threads, and the panel beside
+// the feed renames and deletes the thread it holds. With the switch off the room is its single transcript again.
+// Needs the pinned agent-browser binary: runs when one resolves (tools directory, OMB_AGENT_BROWSER_PATH or PATH) or
+// OMB_UI_E2E=1 asks for the verified download; otherwise skipped.
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -140,6 +140,23 @@ async function until<T>(probe: () => Promise<T> | T, what: string, timeoutMs = 3
     expect(await evaluate("document.querySelector('[data-thread-panel] h2').textContent")).toBe("Logo files");
     expect(await evaluate("getComputedStyle(document.querySelector('[data-room-feed] .glass-scroller')).maskImage")).toContain("linear-gradient");
     await ui("screenshot", "--out", join(evidenceDir, "room-feed-thread-actions.png"));
+
+    const confirmDelete = `[...document.querySelectorAll('[role="alertdialog"] button')].find((button) => button.textContent === "Delete thread")`;
+    const demo = (await evaluate("[...document.querySelectorAll('[data-feed-thread]')].map((item) => item.getAttribute('data-feed-thread'))") as string[])[2]!;
+    await evaluate(`document.querySelector('${row(demo)} button[aria-expanded]').click(); true`);
+    await until(() => evaluate(`Boolean(${menuItem("Delete thread")})`), "Delete in the row's menu");
+    await evaluate(`${menuItem("Delete thread")}.click(); true`);
+    await until(() => evaluate(`Boolean(${confirmDelete})`), "the delete confirmation");
+    await evaluate(`${confirmDelete}.click(); true`);
+    await until(async () => !(await tasks()).some((task) => task.threadId === demo), "the thread to be deleted");
+    await until(() => evaluate(`!document.querySelector('${row(demo)}')`), "its row to leave the feed");
+    await browse("click", "[data-thread-panel] header button[aria-expanded]");
+    await until(() => evaluate(`Boolean(${menuItem("Delete thread")})`), "Delete in the panel's menu");
+    await evaluate(`${menuItem("Delete thread")}.click(); true`);
+    await until(() => evaluate(`Boolean(${confirmDelete})`), "the panel's delete confirmation");
+    await evaluate(`${confirmDelete}.click(); true`);
+    await until(async () => !(await tasks()).some((task) => task.threadId === logos), "the open thread to be deleted");
+    await until(() => evaluate("!document.querySelector('[data-thread-panel]')"), "the panel to close");
 
     await ui("flag", "--set", "features.roomFeed=false");
     await until(() => evaluate("!document.querySelector('[data-room-feed]') && Boolean(document.querySelector('[data-look=\"chat\"] [role=\"log\"]'))"), "the room's transcript to come back");

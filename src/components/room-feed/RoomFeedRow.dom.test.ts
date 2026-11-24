@@ -22,7 +22,7 @@ const render = (data: FeedRowData, onOpen = vi.fn(), open = false, actions?: Fee
   act(() => root!.render(createElement(RoomFeedRow, { row: data, groupId: "room", bots: BOTS, you: "Sam", now: NOW, open, onOpen, actions })));
   return onOpen;
 };
-const roomActions = (): FeedRowActions => ({ onRename: vi.fn(), onDelete: vi.fn(), onPin: vi.fn(), onArchive: vi.fn() });
+const roomActions = (deletable = true): FeedRowActions => ({ onRename: vi.fn(), onDelete: vi.fn(), onPin: vi.fn(), onArchive: vi.fn(), deletable });
 const menuItem = (label: string) => [...document.querySelectorAll<HTMLButtonElement>("[data-thread-overlay] button")].find((button) => button.textContent?.includes(label));
 const item = () => document.querySelector<HTMLElement>("[data-feed-thread]")!;
 afterEach(() => { act(() => root?.unmount()); root = null; document.body.innerHTML = ""; });
@@ -111,13 +111,18 @@ describe("a room feed row", () => {
     expect(actions.onRename).toHaveBeenCalledWith(expect.objectContaining({ threadId: "t1" }), "Launch week");
   });
 
-  it("marks a pinned thread with the pin, an archived one as archived with Unarchive in its menu, and gives a line on its way no menu", () => {
+  it("marks a pinned thread with the pin, an archived one as archived with Unarchive in its menu, keeps a room's only thread, and gives a line on its way no menu", () => {
     render(row({ title: "Launch plan", pinned: true, archived: true }), vi.fn(), false, roomActions());
     expect(item().querySelector("[data-feed-pinned]")?.getAttribute("aria-label")).toBe("Pin");
     expect(item().textContent).toContain("Archived");
     act(() => item().querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
     expect(menuItem("Unpin")).toBeDefined();
     expect(menuItem("Unarchive")).toBeDefined();
+    act(() => root!.unmount());
+    render(row({ title: "Only thread" }), vi.fn(), false, roomActions(false));
+    act(() => item().querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
+    expect(menuItem("Archive")).toBeDefined();
+    expect(menuItem("Delete")).toBeUndefined();
     act(() => root!.unmount());
     render(row({ threadId: "" }), vi.fn(), false, roomActions());
     expect(item().querySelector("button[aria-expanded]")).toBeNull();

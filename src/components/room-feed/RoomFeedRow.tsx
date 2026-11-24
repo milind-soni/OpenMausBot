@@ -43,6 +43,8 @@ export interface FeedRowActions {
   onDelete: (task: { threadId: string }) => void;
   onPin: (task: { threadId: string; title: string }, pinned: boolean) => void;
   onArchive: (task: { threadId: string }, archivedAt: number | null) => void;
+  /** False while the room has only this thread, which it keeps. */
+  deletable: boolean;
 }
 
 const FACES = 3;
@@ -104,7 +106,8 @@ export const RoomFeedRow = memo(function RoomFeedRow({ row, groupId, bots, you, 
   const task = useMemo(() => ({ threadId: row.threadId, title: titled ?? "", pinned: row.pinned, archivedAt: row.archived ? 0 : undefined, busy: row.working }),
     [row.threadId, titled, row.pinned, row.archived, row.working]);
   const menuSheet = useThreadRowMenu({ task, displayTitle: localizedTaskTitle(task.title), ownerId: groupId, menu, setMenu, actionRef: moreRef,
-    onStartRename: () => { setMenu(null); setRenaming(true); }, onDelete: actions?.onDelete ?? (() => {}), onPin: actions?.onPin, onArchive: actions?.onArchive });
+    onStartRename: () => { setMenu(null); setRenaming(true); }, onDelete: actions?.onDelete ?? (() => {}), onPin: actions?.onPin, onArchive: actions?.onArchive,
+    deletable: actions?.deletable !== false });
   const fromBot = "botId" in row.speaker;
   const text = useMemo(() => previewText(row, fromBot), [row, fromBot]);
   const long = text.length > LONG_CHARS || text.split("\n").length > LONG_LINES;

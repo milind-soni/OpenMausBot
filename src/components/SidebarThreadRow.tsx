@@ -409,10 +409,12 @@ type ThreadMenuProps = Pick<ThreadRowProps, "task" | "ownerId" | "folders" | "ma
   displayTitle: string;
   /** More rows above Delete; each closes the menu with the function it is given. */
   extra?: (close: () => void) => ReactNode;
+  /** False for a room's only thread, which a room keeps. */
+  deletable?: boolean;
 };
 
 /** A thread row's menu and its delete confirmation, for every list that draws a thread with its actions. */
-export function useThreadRowMenu({ task, displayTitle, ownerId, folders, main = false, menu, setMenu, actionRef, onStartRename, onSelect, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSetMain, onSnooze, onLink, onRefreshPermissions, onMemory, extra }: ThreadMenuProps): ReactNode {
+export function useThreadRowMenu({ task, displayTitle, ownerId, folders, main = false, menu, setMenu, actionRef, onStartRename, onSelect, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSetMain, onSnooze, onLink, onRefreshPermissions, onMemory, extra, deletable = true }: ThreadMenuProps): ReactNode {
   const advanced = useAdvancedMode();
   const [webLink, setWebLink] = useState<string | null>(null);
   useEffect(() => {
@@ -493,7 +495,7 @@ export function useThreadRowMenu({ task, displayTitle, ownerId, folders, main = 
       {advanced && onSnooze && snoozed && <button type="button" onClick={() => { setMenu(null); onSnooze(task, null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><BellOff size={16} />{t("task.stopSnoozing")}</button>}
       {advanced && onRefreshPermissions && <button type="button" disabled={isWorking(task)} title={t("task.refreshPermissionsHint")} onClick={() => { setMenu(null); onRefreshPermissions(task); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40"><RefreshCw size={16} />{t("task.refreshPermissions")}</button>}
       {extra?.(() => setMenu(null))}
-      <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); setDeleting(true); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-danger hover:bg-menu-hover disabled:opacity-40"><Trash2 size={16} />{t("task.deleteAria")}</button>
+      {deletable && <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); setDeleting(true); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-danger hover:bg-menu-hover disabled:opacity-40"><Trash2 size={16} />{t("task.deleteAria")}</button>}
     </div>, document.body)}
     <ConfirmDialog open={deleting} title={t("task.deleteConfirm")} body={t("task.deleteBody", { title: task.title })} confirmLabel={t("task.deleteAria")}
       onCancel={() => setDeleting(false)} onConfirm={() => { if (!isWorking(task)) onDelete(task); setDeleting(false); }} returnFocusRef={actionRef} />

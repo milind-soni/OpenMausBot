@@ -43,13 +43,6 @@ export function openRoomThreadThen(dispatch: (action: Action) => void, state: Pi
   dispatch(openFeedThread(groupId, threadId));
 }
 
-/** The sidebar's activity row for a room thread: with the feed, any of the room's threads, its current one too, opens
- * beside the chat; otherwise the current one shows the room and another becomes the room's current thread. */
-export function roomAttentionJump(groupId: string, threadId: string, current: boolean, state?: Pick<AppState, "config" | "groups">): Action {
-  if (state && roomFeedShows(state.config, state.groups.find((group) => group.id === groupId))) return openFeedThread(groupId, threadId);
-  return current ? { type: "select", id: groupId } : { type: "switchGroupTask", groupId, threadId };
-}
-
 /** With the room feed on, a thread opened from the Inbox opens beside whatever is on screen, and the Inbox stays.
  * False where today's way applies: a phone, a room's bot-to-bot chat, a thread no room or bot here holds, or the one
  * already shown in the chat. */

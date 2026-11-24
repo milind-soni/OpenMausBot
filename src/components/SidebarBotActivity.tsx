@@ -3,7 +3,7 @@ import type { Dispatch } from "react";
 import type { Action, AppState, Bot, Group, Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { roomThreadSpeakerId, roomThreadWorking } from "@/lib/room-threads";
-import { roomAttentionJump } from "@/lib/room-feed";
+import { openFeedThread, roomFeedShows } from "@/lib/room-feed";
 import { t } from "@/lib/i18n";
 import { isArchived, orderedSidebarThreads, orderedThreadList } from "./SidebarThreadRow";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
@@ -97,10 +97,25 @@ export function attentionOwnerName(entry: AttentionThread): string {
   return entry.kind === "bot" ? entry.botName : entry.groupName;
 }
 
-/** `state` lets a room thread open beside its feed when the room shows one. */
-export function attentionJumpAction(entry: AttentionThread, state?: Pick<AppState, "config" | "groups">): Action {
+export function attentionJumpAction(entry: AttentionThread):
+  | { type: "switchTask"; botId: string; threadId: string }
+  | { type: "switchGroupTask"; groupId: string; threadId: string }
+  | { type: "select"; id: string } {
   if (entry.kind === "bot") return { type: "switchTask", botId: entry.botId, threadId: entry.task.threadId };
-  return roomAttentionJump(entry.groupId, entry.task.threadId, entry.task.threadId === entry.groupThreadId, state);
+  return entry.task.threadId === entry.groupThreadId
+    ? { type: "select", id: entry.groupId }
+    : { type: "switchGroupTask", groupId: entry.groupId, threadId: entry.task.threadId };
+}
+
+/** Opens an activity row's thread; a room that shows its feed comes on screen with the thread beside the feed, its
+ * current thread too. */
+export function attentionJump(dispatch: Dispatch<Action>, entry: AttentionThread, state: Pick<AppState, "config" | "groups">): void {
+  if (entry.kind === "group" && roomFeedShows(state.config, state.groups.find((group) => group.id === entry.groupId))) {
+    dispatch({ type: "select", id: entry.groupId });
+    dispatch(openFeedThread(entry.groupId, entry.task.threadId));
+    return;
+  }
+  dispatch(attentionJumpAction(entry));
 }
 
 export function attentionUnpinAction(entry: AttentionThread):

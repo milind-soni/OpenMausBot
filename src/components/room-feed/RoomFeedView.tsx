@@ -70,6 +70,7 @@ export function RoomFeedView({ group }: { group: Group }) {
   const composerDock = useComposerDockPad(composerDockRef);
   const now = useRelativeNow();
   const hasArchived = (group.tasks ?? []).some(isArchived);
+  const deletable = (group.tasks?.length ?? 1) > 1;
   const [showArchived, setShowArchived] = useState(false);
   const { threads, failed, retry } = useRoomThreads(group, showArchived && hasArchived);
   const actions = useMemo<FeedRowActions>(() => {
@@ -79,8 +80,9 @@ export function RoomFeedView({ group }: { group: Group }) {
       ...room,
       onDelete: (task) => { leave(task.threadId); room.onDelete(task); },
       onArchive: (task, archivedAt) => { if (archivedAt !== null) leave(task.threadId); room.onArchive(task, archivedAt); },
+      deletable,
     };
-  }, [group.id, dispatch, store]);
+  }, [group.id, dispatch, store, deletable]);
   const [pending, setPending] = useState<{ text: string; at: number; threadId: string | null } | null>(null);
 
   const rows = useMemo(() => {

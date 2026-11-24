@@ -86,7 +86,7 @@ import { isSidebarToggle } from "@/lib/keyboard-shortcuts";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { useBotUnread, useUnreadHold } from "./unread-notice";
-import { attentionHasRunningWork, attentionJumpAction, crossBotAttentionThreads, hasCrossBotRunningWork, runningRoutineRun, SidebarBotActivity, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
+import { attentionHasRunningWork, attentionJump, crossBotAttentionThreads, hasCrossBotRunningWork, runningRoutineRun, SidebarBotActivity, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
 import { SidebarNoBots, SidebarTileGrid } from "./SidebarTiles";
 import { BotContextMenu } from "./SidebarBotMenu";
 export { BotContextMenu };
@@ -1334,7 +1334,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
         <SidebarAttentionPanel
           entries={attention}
           onUnpin={() => setAttentionPinned(false)}
-          onJump={(entry) => dispatch(attentionJumpAction(entry, state))}
+          onJump={(entry) => attentionJump(dispatch, entry, state)}
           collapsed={sectionCollapsed(ATTENTION_SECTION_ID)}
           onToggle={layoutInteractive ? () => toggleSection(ATTENTION_SECTION_ID) : undefined}
         />

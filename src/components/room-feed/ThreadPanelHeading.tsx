@@ -13,7 +13,7 @@ const ITEM = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left te
 
 /** The title of a room thread open beside its feed, and its menu: what the feed row's menu offers, and the thread's
  * export, since its lines are loaded here. */
-export function ThreadPanelHeading({ group, task, messages, working }: { group: Pick<Group, "id" | "name">; task: GroupTask; messages: readonly Message[]; working: boolean }) {
+export function ThreadPanelHeading({ group, task, messages, working }: { group: Pick<Group, "id" | "name" | "tasks">; task: GroupTask; messages: readonly Message[]; working: boolean }) {
   const store = useStoreRef();
   const dispatch = store.dispatch;
   const [menu, setMenu] = useState<ThreadMenuAt | null>(null);
@@ -31,6 +31,7 @@ export function ThreadPanelHeading({ group, task, messages, working }: { group: 
     onDelete: (thread) => { close(); actions.onDelete(thread); },
     onPin: actions.onPin,
     onArchive: (thread, archivedAt) => { if (archivedAt !== null) close(); actions.onArchive(thread, archivedAt); },
+    deletable: (group.tasks?.length ?? 1) > 1,
     extra: (done) => <>
       <button type="button" disabled={messages.length === 0} className={ITEM} onClick={() => { done(); void copyTranscriptToClipboard(markdown()); }}>
         <Copy size={16} aria-hidden="true" />{t("chat.export.copy")}
