@@ -10,10 +10,10 @@ import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { BotAvatar } from "./Avatar";
 import { reducedMotion } from "./MenuMotion";
 import { botShowsTabs, neighbourOf, openTabId, showsTabs, threadTabs, type ThreadTab } from "./thread-tabs";
-import { useTabMotion } from "./thread-tab-motion";
+import { useSlidingIndicator, useTabMotion } from "./thread-tab-motion";
 import { UndoToast, useUndoToast } from "./UndoToast";
 
-const TAB = "thread-tab group/tab relative flex h-9 min-w-24 max-w-42 shrink items-center rounded-t-xl ps-3 pe-1 text-[13px] leading-[18px] outline-none transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none";
+const TAB = "thread-tab group/tab relative z-[1] flex h-8.5 min-w-24 max-w-42 shrink items-center rounded-t-lg ps-3 pe-1 pb-0.5 text-[13px] leading-[18px] outline-none transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none";
 const CLOSE = "pointer-events-none ms-1 flex size-5 shrink-0 items-center justify-center rounded-full text-ink-tertiary opacity-0 transition-opacity duration-[120ms] hover:bg-ink/[0.08] hover:text-ink group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 group-focus-within/tab:pointer-events-auto group-focus-within/tab:opacity-100 touch:pointer-events-auto touch:opacity-100 motion-reduce:transition-none";
 const FADE = 24;
 
@@ -51,9 +51,11 @@ export function edgeFade(element: HTMLElement, fade = FADE): string | undefined 
 function Strip({ bot, tabs }: { bot: Bot; tabs: ThreadTab[] }) {
   const dispatch = useStoreDispatch();
   const panelOpen = useStoreSelector((state) => state.settingsOpen);
+  const panelBeside = useStoreSelector((state) => state.settingsOpen || state.computerOpen || state.inspectorOpen);
   const scroller = useRef<HTMLDivElement>(null);
   const { shown, entering } = useTabMotion(tabs, scroller);
   const active = openTabId(bot);
+  const indicator = useSlidingIndicator(scroller, active);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const finishing = useRef(false);
@@ -139,15 +141,18 @@ function Strip({ bot, tabs }: { bot: Bot; tabs: ThreadTab[] }) {
   };
 
   return (
-    <div data-thread-tabs={bot.id} className="flex h-9 min-w-0 flex-1 items-center max-md:hidden">
+    <div data-thread-tabs={bot.id} data-panel-beside={panelBeside ? "" : undefined} className="flex h-full min-w-0 flex-1 items-end max-md:hidden">
       <button type="button" data-thread-tabs-bot aria-label={t("chat.openProfileAria", { name: bot.name })} title={t("chat.openBotPanel")} aria-expanded={panelOpen}
         onClick={() => dispatch({ type: "toggleSettings", open: !panelOpen })}
-        className="flex size-7 shrink-0 items-center justify-center rounded-full transition-colors duration-[120ms] hover:bg-ink/[0.06] active:bg-ink/[0.08] motion-reduce:transition-none">
-        <BotAvatar bot={bot} size={16} />
+        className="mb-0.5 flex h-8 max-w-40 shrink-0 items-center gap-1.5 rounded-full ps-1.5 pe-2.5 text-[13px] font-medium leading-[18px] text-ink outline-none transition-colors duration-[120ms] hover:bg-ink/[0.06] active:bg-ink/[0.08] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none">
+        <BotAvatar bot={bot} size={20} />
+        <span dir="auto" className="min-w-0 truncate">{bot.name}</span>
       </button>
       <div ref={scroller} role="tablist" aria-label={t("task.namedList", { name: bot.name })} onKeyDown={onKey} onScroll={measure} onWheel={scrollSideways}
         style={{ maskImage: fade, WebkitMaskImage: fade }}
-        className="flex h-9 min-w-0 items-end overflow-x-auto overflow-y-hidden px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        className="relative flex h-full min-w-0 items-end gap-0.5 overflow-x-auto overflow-y-hidden px-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {indicator.box && <span aria-hidden="true" data-tab-indicator data-glide={indicator.glide ? "" : undefined} className="thread-tab-indicator"
+          style={{ transform: `translateX(${indicator.box.left}px)`, width: indicator.box.width }} />}
         {shown.map((tab) => {
           const selected = tab.threadId === active && !tab.leaving;
           const title = tab.draft ? t("task.newShort") : localizedTaskTitle(tab.title);
@@ -157,7 +162,7 @@ function Strip({ bot, tabs }: { bot: Bot; tabs: ThreadTab[] }) {
               data-entering={entering.has(tab.threadId) ? "" : undefined} data-leaving={tab.leaving ? "" : undefined} aria-hidden={tab.leaving || undefined}
               onClick={() => { if (renaming !== tab.threadId) open(tab); }} onDoubleClick={() => startRename(tab)}
               onMouseDown={(event) => { if (event.button === 1) event.preventDefault(); }} onAuxClick={(event) => onAuxClick(event, tab)}
-              className={cn(TAB, selected ? "text-ink" : "cursor-default text-ink-secondary hover:text-ink")}>
+              className={cn(TAB, selected ? "font-medium text-ink" : "cursor-default text-ink-secondary hover:text-ink")}>
               {renaming === tab.threadId ? (
                 <input autoFocus dir="auto" value={draft} maxLength={80} aria-label={t("task.renameAria")}
                   onFocus={(event) => event.currentTarget.select()} onChange={(event) => setDraft(event.target.value)}
@@ -170,8 +175,11 @@ function Strip({ bot, tabs }: { bot: Bot; tabs: ThreadTab[] }) {
               ) : (
                 <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
                   {tab.working ? <span role="img" aria-label={t("chat.activity.working")} className="size-1.5 shrink-0 animate-pulse rounded-full bg-success motion-reduce:animate-none" />
-                    : tab.pinned ? <Pin size={12} role="img" aria-label={t("task.pinned")} className="shrink-0 text-ink-tertiary" /> : null}
-                  <span dir="auto" className="min-w-0 truncate">{title}</span>
+                    : tab.pinned ? <Pin size={10} role="img" aria-label={t("task.pinned")} className="shrink-0 text-ink-tertiary" /> : null}
+                  <span data-tab-label className="grid min-w-0">
+                    <span dir="auto" className="col-start-1 row-start-1 truncate">{title}</span>
+                    <span aria-hidden="true" className="invisible col-start-1 row-start-1 truncate font-medium">{title}</span>
+                  </span>
                 </span>
               )}
               {renaming === tab.threadId ? null : !closable ? <span aria-hidden="true" className="ms-1 size-5 shrink-0" /> : (
@@ -187,7 +195,7 @@ function Strip({ bot, tabs }: { bot: Bot; tabs: ThreadTab[] }) {
       </div>
       {canWrite && (
         <button type="button" data-thread-tabs-new aria-label={t("task.newShort")} title={t("task.newShort")} onClick={() => dispatch({ type: "newTask", botId: bot.id })}
-          className="ms-0.5 flex size-7 shrink-0 items-center justify-center rounded-full text-ink-secondary transition-colors duration-[120ms] hover:bg-ink/[0.06] hover:text-ink active:bg-ink/[0.08] motion-reduce:transition-none">
+          className="mb-0.5 flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary transition-colors duration-[120ms] hover:bg-ink/[0.06] hover:text-ink active:bg-ink/[0.08] motion-reduce:transition-none">
           <Plus size={16} aria-hidden="true" />
         </button>
       )}
