@@ -182,6 +182,21 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     urlOf(await cloud.open(request()));
   });
 
+  it("when the relay says the fleet has as many sandboxes running as it allows, tries again after the back-off, not the next day", async () => {
+    fake.state = "archived";
+    fake.available = false;
+    fake.unavailableReason = "fleet_running";
+    const cloud = browser();
+    expect(await cloud.open(request())).toEqual({ home: "unavailable" });
+    clock += CLOUD_BROWSER_BACKOFF_MS - 1;
+    expect(await cloud.open(request())).toEqual({ home: "unavailable" });
+    expect(fake.requests.filter((one) => one.path.endsWith("/browser-sandbox"))).toHaveLength(1);
+    clock += 1;
+    fake.available = true;
+    urlOf(await cloud.open(request()));
+    expect(fake.resumes()).toBe(1);
+  });
+
   it("replaces a sandbox the provider reports broken: deleted first, a fresh one made and counted", async () => {
     fake.state = "error";
     const cloud = browser();

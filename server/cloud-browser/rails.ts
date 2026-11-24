@@ -200,11 +200,11 @@ export function createCloudBrowserRails(options: CloudBrowserRailsOptions) {
       today().oldRelayUntil = now() + 7 * 24 * 60 * 60_000;
       save();
     },
-    /** The relay's no, until its `resetsAt` (else the next UTC day): the fleet's starts, this Cloud's, or switched off. */
+    /** The relay's no, until its `resetsAt` (the fleet's starts, this Cloud's, or switched off), else for the back-off. */
     unavailable(reason: string, resetsAt: string | null): HomeReason {
       const current = today();
-      const limit = resetsAt ? { reason: "too_many_starts" as const, resetsAt } : undefined;
-      current.unavailableUntil = liftsAt(limit, now());
+      // A day's budget names its reset; the fleet's sandboxes at once, or usage that can't be read, pass sooner: the back-off.
+      current.unavailableUntil = resetsAt ? liftsAt({ reason: "too_many_starts", resetsAt }, now()) : now() + CLOUD_BROWSER_BACKOFF_MS;
       save();
       return reason === "cloud_minutes" ? "minutes-used" : reason === "cloud_starts" ? "budget" : "unavailable";
     },
