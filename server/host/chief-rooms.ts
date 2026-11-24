@@ -17,11 +17,14 @@ const ledBy = (room: Pick<GroupRecord, "defaultResponder">, botId: string): bool
   return lead.kind === "member" ? lead.botId === botId : lead.kind === "auto" && lead.fallbackBotId === botId;
 };
 
-/** The department's Chief, when this room is a department's room and that Chief is not in it. */
+/** The department's Chief, when this room is a department's room and that Chief is not in it. A room that already has
+ * any Chief of Staff among its members — say, the team's own — needs no notice about another one. */
 export function chiefAbsentFrom(room: Pick<GroupRecord, "dm" | "section" | "memberIds">, bots: readonly BotRecord[]): { botId: string; name: string } | undefined {
   if (room.dm) return undefined;
+  const chiefBot = (bot: BotRecord): boolean => Boolean(bot.chiefOfStaff) && !bot.hidden;
+  if (room.memberIds.some((id) => bots.some((bot) => bot.id === id && chiefBot(bot)))) return undefined;
   const scope = chiefScope({ section: room.section });
-  const chief = bots.find((bot) => bot.chiefOfStaff && !bot.hidden && chiefScope(bot) === scope);
+  const chief = bots.find((bot) => chiefBot(bot) && chiefScope(bot) === scope);
   return chief && !room.memberIds.includes(chief.id) ? { botId: chief.id, name: chief.name } : undefined;
 }
 

@@ -83,4 +83,9 @@ describe("a room without its department's Chief", () => {
     expect(chiefAbsentFrom(room("r", ["mira"], { kind: "mentions" }, { dm: true }), [chief])).toBeUndefined();
     expect(chiefAbsentFrom(room("r", ["mira"], { kind: "mentions" }), [{ ...chief, hidden: true } as BotRecord])).toBeUndefined();
   });
+
+  it("stays quiet in a room that already has a Chief of Staff among its members", () => {
+    const teamChief = bot("team", true, "Growth");
+    expect(chiefAbsentFrom(room("r", ["mira", "team"], { kind: "mentions" }), [chief, teamChief])).toBeUndefined();
+  });
 });
