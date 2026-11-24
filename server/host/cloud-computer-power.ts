@@ -116,8 +116,9 @@ export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
     deps.log(`cloud computer ${owner}: asleep after ${Math.round(CLOUD_COMPUTER_IDLE_MS / 1_000)}s idle`);
   }
 
-  /** Starts, or restarts, this owner's idle window. */
-  function used(owner: string): void {
+  /** Starts, or restarts, this owner's idle window; `windowMs` asks for a shorter or longer one (the browser's), which
+   * never cuts a longer window another use asked for. */
+  function used(owner: string, windowMs?: number): void {
     if (closed || !boat.boatConfigured(cfg)) return;
     let timer = timers.get(owner);
     if (!timer) {
@@ -127,7 +128,7 @@ export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
       });
       timers.set(owner, timer);
     }
-    timer.touch();
+    timer.touch(windowMs);
   }
 
   /** Before the wake, so a start that fails or outlives its turn still leaves the computer timed. */

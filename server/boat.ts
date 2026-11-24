@@ -643,7 +643,7 @@ export async function listManagedBoats(
     let owner: ManagedBoatOwner | null = null;
     let legacyOwner = false;
     if (SCOPED_MANAGED_BOAT_NAME.test(name) || SET_ASIDE_BOAT_NAME.test(name)) {
-      if (!name.startsWith(scopedPrefix)) continue;
+      if (!name.startsWith(scopedPrefix) || name === `${scopedPrefix}browser-${boatBotNameParts("browser").hash}`) continue; // The Cloud's browser sandbox (cloud-browser/remote.ts) is no computer of a bot's.
       owner = ownerByCurrentName.get(name) ?? null;
     } else if (LEGACY_MANAGED_BOAT_NAME.test(name)) {
       owner = ownerByLegacyName.get(name) ?? null;
