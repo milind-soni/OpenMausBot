@@ -166,8 +166,15 @@ export function createExecutors(context: ExecutorContext): StepExecutors {
       try {
         return { ok: true, output: toolData(slug, answer.body) };
       } catch (error) {
-        const plain = callText(answer.body);
-        return plain.ok ? plain : { ok: false, error: error instanceof Error ? error.message : String(error) };
+        const content = record(answer.body.result)?.content;
+        const text = Array.isArray(content) ? content.map(record).find((part) => typeof part?.text === "string")?.text : undefined;
+        if (typeof text === "string") {
+          try { JSON.parse(text); } catch {
+            const plain = callText(answer.body);
+            if (plain.ok) return plain;
+          }
+        }
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
       }
     },
     async browser(input) {
