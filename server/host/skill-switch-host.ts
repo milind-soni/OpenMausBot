@@ -12,6 +12,7 @@ import { appendDecision } from "../decision-log.ts";
 import { UNDO_STALE, type DirectApply } from "../direct-apply.ts";
 import { setImportedSkillEnabled } from "../imported-skills.ts";
 import { applySkillWriteWithReceipt, listSkills, readSkillFile, readSkillReferences, rejectStagedSkillWrite, removeSkill, setSkillEnabled, stageSkillWrite } from "../skills.ts";
+import { setAllBotsSkillOff } from "../skills-for-all-bots.ts";
 import { skillSwitchCardCopy, skillSwitchStillMatches, skillSwitchTarget, type SkillSwitchTarget, type SwitchableSkill } from "../skill-switch.ts";
 import { conversationLanguage } from "../server-lines.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
@@ -61,6 +62,7 @@ export function createSkillSwitchHost(deps: SkillSwitchHostDeps) {
     const seen = deps.listBotSkills(bot).find((skill) => skill.name === name);
     if (!seen) return undefined;
     const imported = (seen as { origin?: string }).origin === "imported";
+    if ((seen as { allBots?: boolean }).allBots) return { kind: "all-bots", enabled: seen.enabled, text: deps.readBotSkillFile(bot, name), source: seen.source, description: seen.description };
     return { kind: imported ? "imported" : "fixed", enabled: seen.enabled, text: imported ? deps.readBotSkillFile(bot, name) : null, source: seen.source, description: seen.description };
   }
 
@@ -115,6 +117,8 @@ export function createSkillSwitchHost(deps: SkillSwitchHostDeps) {
 
   function apply(botId: string, name: string, action: SkillSwitchAction, kind: SwitchableSkill["kind"] | undefined) {
     if (action === "delete") return removeSkill(botId, name);
+    // This bot's own switch for a skill on all of the person's bots; the others keep theirs.
+    if (kind === "all-bots") return (setAllBotsSkillOff(botId, name, action === "disable"), { ok: true as const });
     return (kind === "imported" ? setImportedSkillEnabled : setSkillEnabled)(botId, name, action === "enable");
   }
 

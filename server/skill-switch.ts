@@ -5,9 +5,10 @@ import { serverLine, type ServerLineKey } from "./server-lines.ts";
 import { STAGED_GIST_MAX } from "./skills.ts";
 import type { SkillSwitchAction } from "../shared/skill-request.ts";
 
-/** own: in this bot's own skills; imported: brought in from this computer for every bot, switched per bot;
- * fixed: shared from the team library or the engine's own, which only the person changes. */
-export type SwitchableSkillKind = "own" | "imported" | "fixed";
+/** own: in this bot's own skills; imported: brought in from this computer for every bot, switched per bot; all-bots: on
+ * all of the person's bots, switched per bot; fixed: shared from the team library or the engine's own, which only the
+ * person changes. */
+export type SwitchableSkillKind = "own" | "imported" | "all-bots" | "fixed";
 
 export interface SwitchableSkill {
   kind: SwitchableSkillKind;

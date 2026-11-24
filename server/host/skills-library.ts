@@ -18,6 +18,7 @@ import { readSectionContext } from "../section-context.ts";
 import { librarySkillFilePath, librarySkillOptOuts, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, skillsLibraryEnabled } from "../skill-library.ts";
 import { findWorkflowSkill, skillBurgerEnabled, workflowSkillsPrompt } from "../skill-burger/store.ts";
 import { librarySkillFiles, ownSkillFiles, type StoredSkillFiles } from "../skill-side-files.ts";
+import { allBotsRootOfBot, allBotsSkillFile, readAllBotsSkillFile } from "../skills-for-all-bots.ts";
 import {
   conversationAssignedSkills,
   prepareShareNote,
@@ -90,7 +91,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
 
   /** The bot's own skills, and its library skills while the library is on; an imported skill of the same name yields. */
   const ownSkills = (bot: BotRecord) =>
-    skillsLibraryEnabled(cfg) ? resolveBotSkills(bot.id, bot.assignedSkills ?? []) : listSkills(bot.id);
+    resolveBotSkills(bot.id, skillsLibraryEnabled(cfg) ? bot.assignedSkills ?? [] : undefined);
   /** What the bot is for, as its settings and its department's shared instructions say: what its skills from this
    * computer are picked by. */
   const aboutBot = (bot: BotRecord): string => {
@@ -114,6 +115,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     if (own !== null) return own;
     // Private wins collisions: a private skill that no longer verifies must not fall through to a same-named shared one.
     if (listSkills(bot.id).some((skill) => skill.name === name)) return null;
+    if (allBotsSkillFile(bot.id, name)) return readAllBotsSkillFile(bot.id, name);
     // The library fallback is by assignment only, never by name alone.
     if (skillsLibraryEnabled(cfg) && listLibrarySkills().some((skill) => skill.name === name && (bot.assignedSkills?.includes(name) || (skill.everyBot && !librarySkillOptOuts(bot.id).has(name))))) return readLibrarySkillFile(name);
     if (readImportedSkills()[name]) return readImportedSkillFile(name);
@@ -125,6 +127,8 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
   const readBotSkillFiles = (bot: BotRecord, name: string): StoredSkillFiles => {
     if (readSkillFile(bot.id, name) !== null) return ownSkillFiles(bot.id, name);
     if (listSkills(bot.id).some((skill) => skill.name === name)) return null;
+    const everywhere = allBotsSkillFile(bot.id, name) && allBotsRootOfBot(bot.id);
+    if (everywhere) return librarySkillFiles(name, everywhere);
     if (skillsLibraryEnabled(cfg) && listLibrarySkills().some((skill) => skill.name === name && (bot.assignedSkills?.includes(name) || (skill.everyBot && !librarySkillOptOuts(bot.id).has(name))))) return librarySkillFiles(name);
     return [];
   };

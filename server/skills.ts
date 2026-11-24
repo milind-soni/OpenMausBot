@@ -29,6 +29,7 @@ import {
 import { LEARN_SOURCE_PREFIX } from "./skill-learn.ts";
 import { libraryDescriptionsAt, librarySkillFilePath, librarySkillsForBot, librarySkillsToOffer, type LibrarySkillListing } from "./skill-library.ts";
 import { readManagedLinks, writeManagedLinks } from "./skill-link-registry.ts";
+import { allBotsSkillFile, allBotsSkills } from "./skills-for-all-bots.ts";
 import {
   directoryEntryState, entryExistsWithoutFollowing, formatKb, isSkillReferencePath, learnedSkillDirectoryMatches, publishReviewedRevision,
   readReferenceFiles, referenceLimitError, referencePathError, REFERENCES_ADVICE, skillReferencesSha256, STAGED_SKILL_FILE_MAX_BYTES,
@@ -37,13 +38,7 @@ import { workspaceDir } from "./workspace.ts";
 import { isSkillName, parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES, type ParsedSkill } from "../shared/skill-md.ts";
 
 export {
-  DESCRIPTION_MAX,
-  isSkillName,
-  parseSkillMd,
-  scanSkillText,
-  SKILL_FILE_MAX_BYTES,
-  SKILL_NAME_MAX,
-  type ParsedSkill,
+  DESCRIPTION_MAX, isSkillName, parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES, SKILL_NAME_MAX, type ParsedSkill,
 } from "../shared/skill-md.ts";
 export { STAGED_SKILL_FILE_MAX_BYTES } from "./skill-storage.ts";
 
@@ -1274,8 +1269,8 @@ export function skillsSystemPrompt(botId: string, assignedLibrary?: readonly str
     (omitted ? `${entries.length ? "\n" : ""}${notice(omitted, entries.length)}` : "");
   for (const skill of enabled.slice(0, INDEX_MAX_SKILLS)) {
     const entry = manifest[skill.name];
-    const file = entry ? join(skillTarget(root, skill.name, entry), "SKILL.md") : librarySkillFilePath(skill.name);
-    const line = `- ${skill.name}: ${entry ? skill.description : describe(skill.name, skill.description)} Read ${JSON.stringify(file)}.`;
+    const file = entry ? join(skillTarget(root, skill.name, entry), "SKILL.md") : allBotsSkillFile(botId, skill.name) ?? librarySkillFilePath(skill.name);
+    const line = `- ${skill.name}: ${entry || "allBots" in skill ? skill.description : describe(skill.name, skill.description)} Read ${JSON.stringify(file)}.`;
     if (Buffer.byteLength(block([...lines, line], enabled.length - lines.length - 1), "utf8") > INDEX_MAX_BYTES) break;
     lines.push(line);
   }
@@ -1300,32 +1295,33 @@ export function enabledSkillFile(botId: string, name: string, assignedLibrary?: 
 export function enabledSkillFiles(botId: string, names: readonly string[], assignedLibrary?: readonly string[]): Map<string, string> {
   if (!names.length) return new Map();
   const on = new Set(resolveBotSkills(botId, assignedLibrary).filter((skill) => skill.enabled).map((skill) => skill.name)), manifest = readManifest(botId);
-  return new Map(names.filter((name) => on.has(name)).map((name) => [name, manifest[name] ? join(skillTarget(workspaceDir(botId), name, manifest[name]), "SKILL.md") : librarySkillFilePath(name)] as const));
+  return new Map(names.filter((name) => on.has(name)).map((name) => [name, manifest[name] ? join(skillTarget(workspaceDir(botId), name, manifest[name]), "SKILL.md") : allBotsSkillFile(botId, name) ?? librarySkillFilePath(name)] as const));
 }
 
+/** The bot's own skills, then the person's skills for all their bots, then (while the library is on) its library skills:
+ * a name shows once, and the earlier kind wins it. */
 export function resolveBotSkills(botId: string, assignedLibrary: readonly string[] | undefined): SkillListing[] {
-  const own = listSkills(botId);
-  if (assignedLibrary === undefined) return own; // the library is off: no every-bot skills either
-  const ownNames = new Set(own.map((skill) => skill.name));
-  return [...own, ...librarySkillsForBot(botId, new Set(assignedLibrary), ownNames)];
+  const own = listSkills(botId), ownNames = new Set(own.map((skill) => skill.name));
+  const mine = [...own, ...allBotsSkills(botId).filter((skill) => !ownNames.has(skill.name))];
+  if (assignedLibrary === undefined) return mine; // the library is off: no library every-bot skills either
+  return [...mine, ...librarySkillsForBot(botId, new Set(assignedLibrary), new Set(mine.map((skill) => skill.name)))];
 }
 
 export interface BotSkillWithOrigin extends SkillListing {
-  origin: "private" | "library";
+  origin: "private" | "library" | "all-bots";
 }
 
 export function listBotSkillsWithOrigin(
   botId: string,
   assignedLibrary: readonly string[] | undefined,
 ): { skills: BotSkillWithOrigin[]; library: LibrarySkillListing[] } {
-  const own = listSkills(botId);
-  const ownNames = new Set(own.map((skill) => skill.name));
+  const ownNames = new Set(listSkills(botId).map((skill) => skill.name));
   const assigned = new Set(assignedLibrary ?? []);
   const skills = resolveBotSkills(botId, assignedLibrary ?? []).map((skill) => ({
     ...skill,
-    origin: ownNames.has(skill.name) ? ("private" as const) : ("library" as const),
+    origin: ownNames.has(skill.name) ? ("private" as const) : "allBots" in skill ? ("all-bots" as const) : ("library" as const),
   }));
-  const library = librarySkillsToOffer(botId, assigned, ownNames);
+  const library = librarySkillsToOffer(botId, assigned, new Set(skills.map((skill) => skill.name)));
   return { skills, library };
 }
 
