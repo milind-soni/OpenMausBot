@@ -53,6 +53,22 @@ describe("handoffLines", () => {
     expect(handoffLines([{ sourceBotId: "a", targetBotId: "b", state: "running" }], stack)[0].path).toBe("M 50 50 C 50 75 50 75 50 100");
   });
 
+  it("never routes the way around through the giver's or receiver's own card", () => {
+    const wide = (x: number, y: number): CardBox => ({ x, y, width: 236, height: 126 });
+    const cards = new Map([["from", wide(0, 0)], ["to", wide(500, 80)], ["between", wide(260, 90)]]);
+    const [line] = handoffLines([{ sourceBotId: "from", targetBotId: "to", state: "running" }], cards);
+    const steps = line.path.match(/-?\d+(\.\d+)?/g)!.map(Number);
+    const [sx, sy, ax, ay, bx, by, ex, ey] = steps;
+    for (let step = 1; step < 20; step++) {
+      const t = step / 20, u = 1 - t;
+      const x = u * u * u * sx + 3 * u * u * t * ax + 3 * u * t * t * bx + t * t * t * ex;
+      const y = u * u * u * sy + 3 * u * u * t * ay + 3 * u * t * t * by + t * t * t * ey;
+      for (const card of cards.values()) {
+        expect(x > card.x && x < card.x + card.width && y > card.y && y < card.y + card.height).toBe(false);
+      }
+    }
+  });
+
   it("joins stacked cards bottom to top, and skips bots that are not on the canvas", () => {
     const lines = handoffLines([
       { sourceBotId: "c", targetBotId: "a", state: "connected" },

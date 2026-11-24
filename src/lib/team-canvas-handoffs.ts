@@ -60,8 +60,8 @@ const curvePoint = ({ start, first, second, end }: Curve, t: number): Point => {
 
 const inside = (point: Point, box: CardBox) => point.x > box.x && point.x < box.x + box.width && point.y > box.y && point.y < box.y + box.height;
 
-/** Whether the curve runs through a card it does not start or end at. */
-const crossesCards = (curve: Curve, others: CardBox[]) => others.some((box) => {
+/** Whether the curve runs through the inside of any of these cards. */
+const crossesCards = (curve: Curve, cards: CardBox[]) => cards.some((box) => {
   for (let step = 1; step < 20; step++) if (inside(curvePoint(curve, step / 20), box)) return true;
   return false;
 });
@@ -115,7 +115,8 @@ function arrowHead({ second, end, start }: Curve): string {
 
 /**
  * A curved line from the bot handing work on to the bot receiving it, edge to facing edge.
- * When that curve would run through another bot's card it goes around the cards instead.
+ * When that curve would run through another bot's card it goes around the cards instead,
+ * on a way round that enters no card, its own two included.
  * Running and queued hand-offs end in an arrow at the receiving bot; a plain connection has none.
  */
 export function handoffLines(edges: TeamMapEdge[], boxes: Map<string, CardBox>): HandoffLine[] {
@@ -125,7 +126,7 @@ export function handoffLines(edges: TeamMapEdge[], boxes: Map<string, CardBox>):
     const others = [...boxes].filter(([id]) => id !== edge.sourceBotId && id !== edge.targetBotId).map(([, box]) => box);
     const direct = directCurve(from, to);
     const blocking = others.filter((box) => crossesCards(direct, [box]));
-    const curve = blocking.length ? detours(from, to, blocking).find((route) => !crossesCards(route, others)) ?? direct : direct;
+    const curve = blocking.length ? detours(from, to, blocking).find((route) => !crossesCards(route, [from, to, ...others])) ?? direct : direct;
     const { start, first, second, end } = curve;
     return [{
       key: `${edge.sourceBotId}:${edge.targetBotId}`,
