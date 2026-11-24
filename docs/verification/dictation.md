@@ -59,11 +59,6 @@ change the fake microphone's start or stop counts. Retry and run `fail()` again
 to see the warning return. Add `skin=midnight` or `skin=daylight` to the preview
 URL to check either look without changing application settings.
 
-Before and after: Midnight [desktop](assets/dictation-dismiss/midnight-1440.png)
-and [narrow](assets/dictation-dismiss/midnight-390.png); Daylight
-[desktop](assets/dictation-dismiss/daylight-1440.png) and
-[narrow](assets/dictation-dismiss/daylight-390.png).
-
 ```sh
 pnpm exec vitest run src/components/Composer.dictation.test.ts src/components/CallWarning.dom.test.ts
 ```
