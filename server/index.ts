@@ -8767,7 +8767,7 @@ if (CLOUD_HOME && CLOUD_OWNER_KEY && cloudRoutineAuthors) {
   ownerOnlyCache.clear();
 }
 // Only now: an earlier owner key is the owner's once settled.
-routines.clearFrozenResultsThreads(); proactive.ensureWatch(); startFirstHour({ hooks: firstHourHooks, fresh: firstHourFresh, store, bus, cfg, dataDir: DATA_DIR, proactive, briefOn: () => proactive.briefOn(), ensureBrief: () => { proactive.ensureWatch(); }, composio, sessions, phones: () => phones.paired(), routines: () => routines, mainThread: botMainThread, threadBusy, startTurn, notify, wrote: markTaskContextExternallyUpdated, stale: shouldIgnoreProviderEvent, welcomeDone: () => { adminActorScope.exit(() => saveConfig(welcomeDonePatch(cfg.onboarding))); Object.assign(cfg, loadConfig()); broadcast({ kind: "config", ...configStatus() }); } });
+routines.clearFrozenResultsThreads(); proactive.ensureWatch(); startFirstHour({ hooks: firstHourHooks, fresh: firstHourFresh, store, bus, cfg, dataDir: DATA_DIR, proactive, stopped: (threadId) => personStops.stopped(threadId, undefined), briefOn: () => proactive.briefOn(), ensureBrief: () => { proactive.ensureWatch(); }, composio, sessions, phones: () => phones.paired(), routines: () => routines, mainThread: botMainThread, threadBusy, startTurn, notify, wrote: markTaskContextExternallyUpdated, stale: shouldIgnoreProviderEvent, welcomeDone: () => { adminActorScope.exit(() => saveConfig(welcomeDonePatch(cfg.onboarding))); Object.assign(cfg, loadConfig()); broadcast({ kind: "config", ...configStatus() }); } });
 orgLibrary = new OrgLibrary({
   dataDir: DATA_DIR,
   store,
