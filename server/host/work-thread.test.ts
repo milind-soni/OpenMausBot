@@ -28,6 +28,18 @@ describe("workThreadFor", () => {
     expect(fromLiaison("opened-by-liaison", false)?.threadId).toBe("opened-by-liaison");
   });
 
+  it("keeps a one-shot thread the sender opened after its result archived it, so a follow-up or rework there reopens it", () => {
+    const archived = (more: Partial<TaskRecord>, oneShot = true) => workThreadFor({ ...store, taskByThread: () => task("finished-new",
+      { botId: "liaison", name: "Liaison", threadId: "liaison-chat", at: 0, ...(oneShot ? { oneShot: true as const } : {}) }, more) },
+    { botId: "bugfixer", botName: "Bugfixer", fromBotId: "liaison", fromThreadId: "liaison-chat", thread: "finished-new",
+      notice: false, answering: undefined, also: () => true, reach: () => true })?.threadId;
+    expect(archived({ archivedAt: 9, closedBy: { botId: "liaison", name: "Liaison", at: 9 } })).toBe("finished-new");
+    // The person archived it (another moment than the close), or it was never one hand-off's: it stays in the archive.
+    expect(() => archived({ archivedAt: 12, closedBy: { botId: "liaison", name: "Liaison", at: 9 } })).toThrow(/is not a thread you opened/);
+    expect(() => archived({ archivedAt: 9 })).toThrow(/is not a thread you opened/);
+    expect(() => archived({ archivedAt: 9, closedBy: { botId: "liaison", name: "Liaison", at: 9 } }, false)).toThrow(/is not a thread you opened/);
+  });
+
   it("lets a one-way notice answer the thread that handed the sender work, and refuses new work there", () => {
     expect(fromLiaison("run-1", true)?.threadId).toBe("run-1");
     expect(() => fromLiaison("run-1", false)).toThrow(/handed you work: answer it there with reply "none"/);

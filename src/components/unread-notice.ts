@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 
 import { botShowsUnread } from "@/lib/bot-unread";
+import { nextUnreadHold, unreadSinceByBot, type UnreadHold } from "@/lib/sidebar-layout";
+import { newChatThreadId } from "@/state/new-chat";
+import type { Bot } from "@/state/store";
 
 import { EFFECTS } from "./CursorAvatar";
 
@@ -26,4 +29,20 @@ export function useUnreadNotice(unread: boolean): boolean {
 export function useBotUnread(bot: Parameters<typeof botShowsUnread>[0]): { unread: boolean; noticing: boolean } {
   const unread = botShowsUnread(bot);
   return { unread, noticing: useUnreadNotice(unread) };
+}
+
+function sameTimes(a: ReadonlyMap<string, number>, b: ReadonlyMap<string, number>): boolean {
+  return a.size === b.size && [...a].every(([id, since]) => b.get(id) === since);
+}
+
+/** The bot Unread keeps listed while the conversation it was opened in is the open one: `openId`'s current thread, or its
+ * blank new chat when `newChatBotId` names it. It lasts for the session only. */
+export function useUnreadHold(openId: string | null, bots: readonly Bot[], newChatBotId?: string): UnreadHold | null {
+  const unread = unreadSinceByBot(bots);
+  const open = bots.find((bot) => bot.id === openId);
+  const chat = open && newChatBotId === open.id ? newChatThreadId(open.id) : open?.switchingTo ?? open?.threadId;
+  const [seen, setSeen] = useState<{ unread: ReadonlyMap<string, number>; held: UnreadHold | null }>({ unread, held: null });
+  const held = nextUnreadHold(seen.held, openId, seen.unread, chat);
+  if (held !== seen.held || !sameTimes(unread, seen.unread)) setSeen({ unread, held });
+  return held;
 }
