@@ -27,6 +27,15 @@ export function threadPanel(state: Pick<AppState, "forkPanel" | "workspacePanes"
   return state.workspacePanes?.panels[id] ?? (state.forkPanel?.threadId === id ? state.forkPanel : null);
 }
 
+export function cardMessages(state: AppState, botId: string, groupId?: string, threadId?: string): Message[] | undefined {
+  const panel = threadPanel(state, threadId);
+  if (threadId && panel?.threadId === threadId && panel.kind === (groupId ? "group" : "bot") && panel.ownerId === (groupId ?? botId)) {
+    return panel.messages;
+  }
+  const host = groupId ? state.groups.find((group) => group.id === groupId) : state.bots.find((bot) => bot.id === botId);
+  return !threadId || host?.threadId === threadId ? host?.messages : undefined;
+}
+
 export function updatePanel(state: AppState, panel: ForkPanelState): AppState {
   const panes = state.workspacePanes;
   if (panes?.panels[panel.threadId]) return { ...state, workspacePanes: {

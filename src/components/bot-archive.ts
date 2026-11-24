@@ -65,3 +65,10 @@ export async function archiveBotWithNotice(bot: Bot, context: {
     notify({ error: true, text: cause instanceof Error ? cause.message : String(cause) });
   }
 }
+
+/** A confirmation may span live fleet updates; never authorize from its snapshot. */
+export function currentArchivableBot(bots: readonly Bot[], id: string): Bot | undefined {
+  const active = bots.filter((candidate) => !candidate.hidden);
+  if (active.length <= 1) return undefined;
+  return active.find((candidate) => candidate.id === id && !candidate.chiefOfStaff && !candidate.defaultBot);
+}

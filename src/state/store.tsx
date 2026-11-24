@@ -5,7 +5,7 @@ import { capHeldInBackground, loadOlderPage, MESSAGE_PAGE_SIZE, olderThanHeld, r
 import { readChatSnapshot } from "./chat-snapshot";
 import { followHeldTails, noteAppPagePatch } from "./held-tails";
 export { MESSAGE_PAGE_SIZE } from "./message-history";
-import { threadPanel, updatePanel, type WorkspacePanes, addForkOptimistic, reduceForkPanel, removeForkOptimistic, runForkEffect, type ForkPanelAction, type ForkPanelState } from "./fork-panel";
+import { cardMessages, threadPanel, updatePanel, type WorkspacePanes, addForkOptimistic, reduceForkPanel, removeForkOptimistic, runForkEffect, type ForkPanelAction, type ForkPanelState } from "./fork-panel";
 import { use, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createAppStore } from "./app-store"; import { readOneBot } from "./bot-read"; import { sameJson } from "./same-json"; import { forgetSharedSession } from "@/lib/session-reuse"; import { StoreContext, StoreSourceContext } from "./store-context";
 import { flushSync } from "react-dom";
@@ -821,15 +821,6 @@ function patchGroupCard(state: AppState, groupId: string, messageId: string, pat
       g.id === groupId ? { ...g, messages: withPatchedCard(g.messages, messageId, patch) } : g,
     ),
   };
-}
-
-function cardMessages(state: AppState, botId: string, groupId?: string, threadId?: string): Message[] | undefined {
-  const panel = threadPanel(state, threadId);
-  if (threadId && panel?.threadId === threadId && panel.kind === (groupId ? "group" : "bot") && panel.ownerId === (groupId ?? botId)) {
-    return panel.messages;
-  }
-  const host = groupId ? state.groups.find((group) => group.id === groupId) : state.bots.find((bot) => bot.id === botId);
-  return !threadId || host?.threadId === threadId ? host?.messages : undefined;
 }
 
 function patchThreadCard(state: AppState, action: { botId: string; messageId: string; threadId?: string; groupId?: string }, patch: Partial<OptionCardData>): AppState {
