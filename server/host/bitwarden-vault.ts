@@ -4,7 +4,7 @@
 // collections are the boundary, so its items are for every bot.
 import { join } from "node:path";
 
-import type { BitwardenCredentials, BitwardenStatus, LoginPlace } from "../../shared/logins.ts";
+import type { BitwardenCredentials, BitwardenEmptySummary, BitwardenStatus, LoginPlace } from "../../shared/logins.ts";
 import { loginSite, normalizeLoginHost } from "../../shared/logins.ts";
 import type { LinkedSecret } from "../../shared/vault.ts";
 import type { VaultProviderFailure } from "../onepassword.ts";
@@ -27,7 +27,7 @@ const DEFAULT_SERVER = "https://vault.bitwarden.com";
 
 interface BwField { name?: string | null; value?: string | null; type?: number }
 interface BwItem {
-  id: string; name?: string | null; type: number; notes?: string | null; fields?: BwField[] | null;
+  id: string; name?: string | null; type: number; notes?: string | null; fields?: BwField[] | null; deletedDate?: string | null;
   login?: { uris?: Array<{ uri?: string | null }> | null; username?: string | null; password?: string | null; totp?: string | null } | null;
 }
 
@@ -75,7 +75,7 @@ export function bitwardenProblem(result: Pick<BwResult, "code" | "stdout" | "std
   if (result.code === 127) return new BitwardenProblem("Bitwarden's command line tool is missing on this computer. Connect again to set it up.", "unavailable");
   if (/invalid master password/iu.test(text)) return new BitwardenProblem(BITWARDEN_WRONG_PASSWORD, "refused");
   if (/client_id or client_secret|invalid_client|invalid client/iu.test(text)) return new BitwardenProblem(BITWARDEN_BAD_KEY, "refused");
-  if (/vault is locked|not logged in|unauthenticated/iu.test(text)) return new BitwardenProblem(LOCKED, "unreadable", { relock: true });
+  if (/vault is locked|not logged in|unauthenticated|\bmaster password\s*:/iu.test(text)) return new BitwardenProblem(LOCKED, "unreadable", { relock: true });
   if (/^\s*not found\.?\s*$/imu.test(text)) return new BitwardenProblem("That item is no longer in Bitwarden.", "unreadable", { gone: true });
   if (/too many requests|rate limit|\b429\b/iu.test(text)) return new BitwardenProblem(LIMITED, "rate-limited");
   if (/ECONNREFUSED|ENOTFOUND|EAI_AGAIN|getaddrinfo|fetch failed|ETIMEDOUT|ECONNRESET|socket hang up|network|certificate|UNABLE_TO_VERIFY/iu.test(text)) {
@@ -170,8 +170,10 @@ export class BitwardenLogins implements VaultProvider {
   private entries = new Map<string, ItemEntry>();
   private refreshedAt: number | null = null;
   private syncedAt: number | null = null;
+  private emptySummary: BitwardenEmptySummary | undefined;
   private error: BitwardenProblem | undefined;
   private refreshing: Promise<BitwardenStatus> | null = null;
+  private generation = 0;
   private readonly lastUsed = new Map<string, number>();
 
   constructor(options: { credentials: () => BitwardenCredentials | null; run: BwRun; now?: () => number; forgetAppData?: () => void }) {
@@ -184,9 +186,12 @@ export class BitwardenLogins implements VaultProvider {
   status(): BitwardenStatus {
     const credentials = this.credentials();
     if (!credentials) return { connected: false };
+    const items = this.logins.length + [...this.entries.values()].filter(listedAsSecret).length;
     return {
       connected: true, server: hostOf(credentials.serverUrl), ...(this.account ? { account: this.account } : {}),
-      items: this.logins.length + [...this.entries.values()].filter(listedAsSecret).length, ...(this.error ? { error: this.error.message } : {}),
+      items,
+      ...(items === 0 && !this.error && this.emptySummary ? { empty: this.emptySummary } : {}),
+      ...(this.error ? { error: this.error.message } : {}),
     };
   }
 
@@ -209,6 +214,8 @@ export class BitwardenLogins implements VaultProvider {
 
   /** Signs the tool out and forgets its settings folder: the account's cached vault goes with it. */
   async disconnect(): Promise<void> {
+    this.generation++;
+    this.unlocking = null;
     if (this.signedInAs !== null || this.session) await this.run(["logout"]).catch(() => null);
     this.clear();
     this.signedInAs = null;
@@ -216,12 +223,16 @@ export class BitwardenLogins implements VaultProvider {
   }
 
   clear(): void {
+    this.generation++;
+    this.refreshing = null;
+    this.unlocking = null;
     this.session = null;
     this.account = undefined;
     this.logins = [];
     this.entries = new Map();
     this.refreshedAt = null;
     this.syncedAt = null;
+    this.emptySummary = undefined;
     this.error = undefined;
     this.lastUsed.clear();
   }
@@ -229,69 +240,117 @@ export class BitwardenLogins implements VaultProvider {
   private async load(candidate?: BitwardenCredentials): Promise<BitwardenStatus> {
     const credentials = candidate ?? this.credentials();
     if (!credentials) { this.clear(); return this.status(); }
+    if (candidate) { this.generation++; this.refreshing = null; this.unlocking = null; }
+    const generation = this.generation;
+    const stale = () => {
+      if (generation === this.generation) return false;
+      if (candidate) throw new BitwardenProblem(UNREADABLE, "unavailable");
+      return true;
+    };
     try {
-      if (candidate) { this.session = null; await this.unlock(candidate, true); }
-      await this.sync(credentials, true);
+      if (candidate) { this.session = null; await this.unlock(candidate, true, generation); }
+      if (stale()) return this.status();
+      await this.sync(credentials, true, generation);
+      if (stale()) return this.status();
       // Every value in this answer is dropped here and read again when a bot uses it.
-      const listed = JSON.parse(await this.call(credentials, ["list", "items"])) as unknown;
-      const items = (Array.isArray(listed) ? listed as BwItem[] : []).filter((item) => typeof item?.id === "string" && (item.type === LOGIN || item.type === SECURE_NOTE)).slice(0, MAX_ITEMS);
+      const listed = JSON.parse(await this.call(credentials, ["list", "items"], generation)) as unknown;
+      if (stale()) return this.status();
+      if (!Array.isArray(listed)) throw new BitwardenProblem(UNREADABLE, "unreadable");
+      const active = (listed as BwItem[]).filter((item) => typeof item?.id === "string" && !item.deletedDate);
+      let hiddenPasswords = 0;
+      let noWebsite = 0;
+      const usable: Array<{ item: BwItem; entry: ItemEntry; hosts: Set<string> }> = [];
+      const other: Array<{ item: BwItem; entry: ItemEntry; hosts: Set<string> }> = [];
+      for (const item of active) {
+        if (item.type !== LOGIN && item.type !== SECURE_NOTE) continue;
+        const entry = entryOf(item);
+        let hosts = new Set<string>();
+        if (item.type === LOGIN) {
+          if (!item.login?.password) hiddenPasswords++;
+          else {
+            hosts = new Set((item.login.uris ?? []).flatMap((uri) => normalizeLoginHost(uri?.uri) ?? []));
+            if (hosts.size === 0) noWebsite++;
+          }
+        }
+        // Keep website logins and listed secrets first so non-website logins never push them out of MAX_ITEMS.
+        const bucket = hosts.size > 0 || listedAsSecret(entry) ? usable : other;
+        bucket.push({ item, entry, hosts });
+      }
       const logins: LoginEntry[] = [];
       const entries = new Map<string, ItemEntry>();
-      for (const item of items) {
-        const entry = entryOf(item);
+      for (const { item, entry, hosts } of [...usable, ...other].slice(0, MAX_ITEMS)) {
         entries.set(item.id, entry);
-        if (item.type !== LOGIN || !item.login?.password) continue;
-        const hosts = new Set((item.login.uris ?? []).flatMap((uri) => normalizeLoginHost(uri.uri) ?? []));
+        if (item.type !== LOGIN || !item.login?.password || hosts.size === 0) continue;
         for (const [site, siteHosts] of bySite(hosts)) {
           logins.push({ id: `${ID_PREFIX}${item.id}:${site}`, itemId: item.id, site, hosts: siteHosts, exactHost: false,
             username: item.login.username ?? "", hasTotp: Boolean(parseTotpKey(item.login.totp)) });
         }
       }
+      if (stale()) return this.status();
       this.logins = logins.sort((a, b) => a.site.localeCompare(b.site) || a.username.localeCompare(b.username));
       this.entries = entries;
+      const totalListed = this.logins.length + [...entries.values()].filter(listedAsSecret).length;
+      this.emptySummary = totalListed === 0 ? { total: active.length, hiddenPasswords, noWebsite } : undefined;
       this.refreshedAt = this.now();
       this.error = undefined;
       return this.status();
     } catch (error) {
       const problem = error instanceof BitwardenProblem ? error : new BitwardenProblem(error instanceof Error ? error.message : UNREADABLE, "unavailable");
       if (candidate) throw problem;
-      this.error = problem;
+      if (generation === this.generation) this.error = problem;
       return this.status();
     }
   }
 
   /** Signs in with the API key when the tool is signed out (or signed in elsewhere), then unlocks with the master password.
    * `again`: a new connection, so whatever account the tool holds is signed out first. */
-  private unlock(credentials: BitwardenCredentials, again = false): Promise<string> {
+  private unlock(credentials: BitwardenCredentials, again = false, generation = this.generation): Promise<string> {
     if (!again && this.unlocking) return this.unlocking;
-    const running = this.unlockNow(credentials, again).finally(() => { if (this.unlocking === running) this.unlocking = null; });
+    const running = this.unlockNow(credentials, again, generation).finally(() => { if (this.unlocking === running) this.unlocking = null; });
     this.unlocking = running;
     return running;
   }
 
-  private async unlockNow(credentials: BitwardenCredentials, again: boolean): Promise<string> {
+  private async unlockNow(credentials: BitwardenCredentials, again: boolean, generation: number): Promise<string> {
     const host = hostOf(credentials.serverUrl);
     const check = (result: BwResult) => { if (result.code !== 0 || result.timedOut) throw bitwardenProblem(result, host); return result.stdout; };
+    const guard = () => { if (generation !== this.generation) throw new BitwardenProblem(UNREADABLE, "unavailable"); };
+    guard();
     const before = this.statusOf(check(await this.run(["status"])));
+    guard();
     let signedOut = before.status === "unauthenticated";
     const server = bitwardenServerUrl(before.serverUrl ?? DEFAULT_SERVER);
     const elsewhere = server !== bitwardenServerUrl(credentials.serverUrl) || (this.signedInAs !== null && this.signedInAs !== credentials.clientId);
     if (!signedOut && (again || elsewhere)) {
       await this.run(["logout"]);
+      guard();
       this.signedInAs = null;
       signedOut = true;
     }
     if (signedOut) {
       check(await this.run(["config", "server", credentials.serverUrl]));
+      guard();
       check(await this.run(["login", "--apikey"], { BW_CLIENTID: credentials.clientId, BW_CLIENTSECRET: credentials.clientSecret }));
+      guard();
+      // The CLI now holds credentials.clientId on disk; track it so later unlocks or disconnects sign it out.
       this.signedInAs = credentials.clientId;
     }
     const key = check(await this.run(["unlock", "--passwordenv", "BW_PASSWORD", "--raw"], { BW_PASSWORD: credentials.password })).trim();
+    guard();
     if (!key) throw new BitwardenProblem(LOCKED, "unreadable");
+    const after = await this.run(["status"], { BW_SESSION: key });
+    guard();
+    let hasAccount = false;
+    let account: string | undefined;
+    if (after.code === 0 && !after.timedOut) {
+      const afterStatus = this.statusOf(after.stdout);
+      if (afterStatus.status === "locked" || afterStatus.status === "unauthenticated") throw new BitwardenProblem(LOCKED, "unreadable");
+      hasAccount = true;
+      account = afterStatus.userEmail ?? undefined;
+    }
     this.session = { key, credentials: credentialKey(credentials) };
     this.signedInAs = credentials.clientId;
-    const after = await this.run(["status"], { BW_SESSION: key });
-    if (after.code === 0) this.account = this.statusOf(after.stdout).userEmail ?? undefined;
+    if (hasAccount) this.account = account;
     return key;
   }
 
@@ -301,28 +360,35 @@ export class BitwardenLogins implements VaultProvider {
   }
 
   /** One call with the session, unlocking again once if the session ended. */
-  private async call(credentials: BitwardenCredentials, args: string[]): Promise<string> {
+  private async call(credentials: BitwardenCredentials, args: string[], generation = this.generation): Promise<string> {
+    const host = hostOf(credentials.serverUrl);
     for (let attempt = 0; ; attempt++) {
-      const key = this.session?.credentials === credentialKey(credentials) ? this.session.key : await this.unlock(credentials);
+      if (generation !== this.generation) throw new BitwardenProblem(UNREADABLE, "unavailable");
+      const key = this.session?.credentials === credentialKey(credentials) ? this.session.key : await this.unlock(credentials, false, generation);
+      if (generation !== this.generation) throw new BitwardenProblem(UNREADABLE, "unavailable");
       const result = await this.run(args, { BW_SESSION: key });
-      if (result.code === 0 && !result.timedOut) return result.stdout;
-      const problem = bitwardenProblem(result, hostOf(credentials.serverUrl));
+      if (generation !== this.generation) throw new BitwardenProblem(UNREADABLE, "unavailable");
+      const problem = bitwardenProblem(result, host);
+      if (result.code === 0 && !result.timedOut && (result.stdout.trim() || !problem.relock)) return result.stdout;
       if (!problem.relock || attempt > 0) throw problem;
       this.session = null;
     }
   }
 
-  private async sync(credentials: BitwardenCredentials, force = false): Promise<void> {
+  private async sync(credentials: BitwardenCredentials, force = false, generation = this.generation): Promise<void> {
     if (!force && this.syncedAt !== null && this.now() - this.syncedAt < SYNC_EVERY_MS) return;
-    await this.call(credentials, ["sync"]);
+    if (generation !== this.generation) throw new BitwardenProblem(UNREADABLE, "unavailable");
+    await this.call(credentials, force ? ["sync", "--force"] : ["sync"], generation);
+    if (generation !== this.generation) throw new BitwardenProblem(UNREADABLE, "unavailable");
     this.syncedAt = this.now();
   }
 
   private async item(itemId: string): Promise<BwItem | null> {
     const credentials = this.credentials();
     if (!credentials) return null;
-    await this.sync(credentials);
-    try { return JSON.parse(await this.call(credentials, ["get", "item", itemId])) as BwItem; }
+    const generation = this.generation;
+    await this.sync(credentials, false, generation);
+    try { return JSON.parse(await this.call(credentials, ["get", "item", itemId], generation)) as BwItem; }
     catch (error) {
       if (error instanceof BitwardenProblem && !error.gone) throw error;
       return null;

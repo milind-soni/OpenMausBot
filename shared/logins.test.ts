@@ -8,13 +8,16 @@ describe("a login's host", () => {
     ["https://Accounts.Example.com/login?next=/", "accounts.example.com"],
     ["www.example.com", "www.example.com"],
     ["http://localhost:3000/sign-in", "localhost"],
+    ["localhost:3000/sign-in", "localhost"],
+    ["app.example.com:8443", "app.example.com"],
+    ["127.0.0.1:8080/login", "127.0.0.1"],
     ["  example.com  ", "example.com"],
     ["https://example.com./login", "example.com"],
   ])("reads %s as %s", (raw, host) => {
     expect(normalizeLoginHost(raw)).toBe(host);
   });
 
-  it.each(["", "example", "javascript:alert(1)", "file:///etc/passwd", "https://user:pw@example.com/", "ftp://example.com", "exa mple.com", 42])(
+  it.each(["", "example", "javascript:alert(1)", "file:///etc/passwd", "https://user:pw@example.com/", "user:1234@example.com", "data:1234", "androidapp://com.example", "ftp://example.com", "exa mple.com", 42])(
     "refuses %s", (raw) => {
       expect(normalizeLoginHost(raw)).toBeNull();
     });
