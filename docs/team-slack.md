@@ -76,8 +76,8 @@ ones on this page. What differs, because there is one person and no team:
   direct message. `{ default: true }` is the Cloud's MausBot, else the first bot.
 - **Where it came from.** The titles are the same. A conversation a channel's message opened is still never the chat
   its bot opens to; with no sharing to record it in, its id is kept in `team-slack-messages.json` (`channels`), after
-  its messages are dropped. A direct message's conversation is as any the owner opens, so the one they last wrote in
-  is the chat the bot opens to.
+  its messages are dropped. A direct message's conversation is as any the owner opens, so writing in it does
+  not move the chat the bot opens to.
 - **Nobody leaves.** Nothing is forgotten for a person; the record keeps its week, month and 2,000.
 
 ## The routes

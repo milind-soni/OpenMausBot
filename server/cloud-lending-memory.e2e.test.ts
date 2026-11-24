@@ -849,14 +849,15 @@ it("the results conversation of a routine a guest left behind never reaches the 
   expect(JSON.stringify(await ownerTools("list_threads", {}))).toContain(bot.threadId);
 }, 60_000);
 
-it("an owner's routine reports into the conversation the owner last wrote in, never one a guest left behind", async () => {
+it("an owner's routine reports into the owner's oldest open conversation, never an older one a guest left behind", async () => {
   const bot = await newBot("Main thread", "done");
-  const mine = await newThread(bot);
-  await completedTurn(() => say(owner, bot, "Morning.", mine));
-  await settled(mine);
   const left = await newThread(bot, owner, "Guest's");
   await completedTurn(() => say(owner, bot, "Evening.", left));
   await settled(left);
+  const mine = await newThread(bot);
+  await completedTurn(() => say(owner, bot, "Morning.", mine));
+  await settled(mine);
+  expect((await api("PATCH", `/api/bots/${bot.id}/tasks/${bot.threadId}`, { token: owner, body: { archivedAt: Date.now() } })).status).toBe(200);
   await leftBehind({ threadIds: [left] });
   const created = await api("POST", "/api/routines", { token: owner, body: {
     name: "OWNER-REPORT", prompt: "Summarize my day.", botId: bot.id, enabled: false,

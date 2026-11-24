@@ -1,6 +1,6 @@
-// Which runtime an Antigravity account runs. Its CLI path (Settings, Runs on) decides: `antigravity` the native CLI,
+// Which runtime an Antigravity account runs. Its CLI path decides: `antigravity` the native CLI,
 // `agy_acp_server` the pinned (Classic) runtime. With neither, a computer that has the pinned runtime keeps it, nothing
-// is moved, removed or offered, and a new install takes the CLI. OMB_ANTIGRAVITY_NATIVE_CLI=1 gives such an account the
+// is moved or removed, and a new install takes the CLI. OMB_ANTIGRAVITY_NATIVE_CLI=1 gives such an account the
 // CLI even where the pinned runtime is installed; an account set to a runtime keeps it, and nothing is removed.
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

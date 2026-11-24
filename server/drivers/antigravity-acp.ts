@@ -214,7 +214,7 @@ export function antigravityCliTokenPath(instanceId: string, baseDir = DATA_DIR):
   return join(antigravityProfileDirectory(instanceId, baseDir), "antigravity-acp", ANTIGRAVITY_CLI_TOKEN_FILE);
 }
 
-/** Both runtimes' sign-in files. An account switched to the other runtime under Runs on keeps the first one's file. */
+/** Both runtimes' sign-in files. An account that switched to the CLI keeps the Classic runtime's file. */
 export function antigravitySignInPaths(instanceId: string, baseDir = DATA_DIR): string[] {
   return [antigravityCliTokenPath(instanceId, baseDir), antigravityTokenPath(instanceId, baseDir)];
 }
