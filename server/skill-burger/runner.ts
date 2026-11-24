@@ -281,7 +281,14 @@ export async function runFrom(state: Omit<RunState, "waiting" | "createdAt"> & {
       continue;
     }
     if (step.kind === "ai" || step.where === "yourComputer") return hand(step, "ai_step");
-    if (step.kind === "delegate") return startDelegation(step, state.delegation?.step === step.id ? state.delegation.who : {});
+    if (step.kind === "delegate") {
+      const chosen = state.delegation?.step === step.id ? state.delegation.who : {};
+      if (step.tasks.every((task) => chosen[task.bot.name] === null)) {
+        end(step, { state: "skipped" });
+        continue;
+      }
+      return startDelegation(step, chosen);
+    }
 
     deps.events.started(id, name, step);
     const limit = step.timeoutMs ?? STEP_TIMEOUT_MS;
