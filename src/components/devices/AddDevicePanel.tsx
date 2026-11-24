@@ -1,0 +1,187 @@
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Check, ChevronLeft, Cloud, Laptop, Server, Smartphone } from "lucide-react";
+import { productName } from "@/lib/brand";
+import { cn } from "@/lib/cn";
+import { t } from "@/lib/i18n";
+import type { Device, PrivateNetwork } from "@/lib/devices";
+import { DESKTOP_DOWNLOAD_URL } from "../../../shared/computer-ask";
+import { OwnServerLink } from "../PlaceAddSheet";
+import { SettingsLinkRow, SettingsRows } from "../SettingsPrimitives";
+import { networkLine, networkShort } from "./device-words";
+import type { NetworkAction } from "./DeviceRows";
+import { CommandRow, PairCodePanel, SERVER_COMMANDS } from "./PairCodePanel";
+import { StatusMark } from "./device-parts";
+
+export type AddKind = "phone" | "computer" | "server" | "cloud";
+
+const CARD = "settings-card relative flex flex-col gap-5 rounded-[12px] bg-menu p-4 after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:shadow-[inset_0_0_0_0.5px_var(--settings-edge)] after:content-['']";
+const BODY = "text-[13px] leading-[18px] text-ink-secondary";
+
+/** One numbered step: its number (a check once done), its title, and what to do under it. A step still to come is quiet. */
+function Step({ n, title, state = "now", children }: { n: number; title: string; state?: "done" | "now" | "later"; children?: ReactNode }) {
+  return (
+    <li data-step={n} data-step-state={state} className="flex gap-3">
+      <span aria-hidden="true" className={cn("flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-medium leading-none tabular-nums",
+        state === "done" ? "bg-success text-success-ink" : state === "now" ? "bg-ink text-app" : "shadow-[inset_0_0_0_1px_var(--settings-edge)] text-ink-tertiary")}>
+        {state === "done" ? <Check size={12} strokeWidth={2.5} /> : n}
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <span className={cn("text-[13px] font-medium leading-5", state === "later" ? "text-ink-tertiary" : "text-ink")}>
+          <span className="sr-only">{t("devicesPage.addFlow.stepOf", { n })}</span>{title}
+        </span>
+        {state !== "later" && children}
+      </div>
+    </li>
+  );
+}
+
+function Steps({ children }: { children: ReactNode }) {
+  return <ol className="flex flex-col gap-5">{children}</ol>;
+}
+
+/** The private network's state and its one button, as a step of adding a computer. */
+function NetworkStep({ network, action, waiting }: { network: PrivateNetwork; action: NetworkAction | null; waiting: boolean }) {
+  return (
+    <div data-add-network={waiting ? "waiting" : network.state} className="flex flex-col items-start gap-2">
+      <span className="flex items-center gap-1.5 text-[13px] leading-[18px] text-ink"><StatusMark status={network.state === "ready" ? "online" : network.state === "unknown" ? "unknown" : "attention"} />{networkShort(network)}</span>
+      <span className={BODY}>{waiting ? t("devices.computers.waiting", { app: productName() }) : networkLine(network)}</span>
+      {action && (action.href
+        ? <a href={action.href} target="_blank" rel="noreferrer" className="ui-button ui-button-sm" data-network-action="">{action.label}</a>
+        : <button type="button" className="ui-button ui-button-sm" data-network-action="" disabled={action.busy} onClick={action.run}>{action.label}</button>)}
+    </div>
+  );
+}
+
+/** A device that joined while this panel was open: the confirmation, and Done back to the list with it open. */
+function Connected({ device, onDone }: { device: Device; onDone: (id: string) => void }) {
+  const done = useRef<HTMLButtonElement>(null);
+  useEffect(() => { done.current?.focus(); }, []);
+  return (
+    <div role="status" data-add-connected={device.id} className="flex flex-col items-start gap-3">
+      <span className="flex items-center gap-2 text-[14px] font-medium leading-5 text-ink">
+        <span aria-hidden="true" className="flex size-5 items-center justify-center rounded-full bg-success text-success-ink"><Check size={12} strokeWidth={2.5} /></span>
+        {t("devicesPage.addFlow.connected", { name: device.name })}
+      </span>
+      <p className={BODY}>{t("devicesPage.addFlow.connectedLine")}</p>
+      <button ref={done} type="button" data-add-done="" className="ui-button ui-button-primary" onClick={() => onDone(device.id)}>{t("devices.pair.done")}</button>
+    </div>
+  );
+}
+
+const GROUP_OF: Record<AddKind, (device: Device) => boolean> = {
+  phone: (device) => device.kind === "phone",
+  computer: (device) => device.kind === "laptop" || device.kind === "desktop",
+  server: (device) => device.kind === "server" || device.kind === "desktop",
+  cloud: (device) => device.kind === "cloud",
+};
+
+export interface AddDeviceProps {
+  /** This computer's own page in the desktop app. */
+  here: boolean;
+  /** A MausBot Cloud's page: another computer opens it by signing in, with no code. */
+  cloud: boolean;
+  devices: readonly Device[];
+  network: PrivateNetwork | null;
+  networkAction: NetworkAction | null;
+  /** Where another computer on the private network opens this one. */
+  tailnetAddress: string | null;
+  start: AddKind | null;
+  /** Back to the list; with an id, that new device's row opens. */
+  onBack: (opened?: string) => void;
+  onConnected: () => void;
+  /** On This computer: Pair a phone's own steps, shown here. */
+  phoneSteps: ((onClose: () => void) => ReactNode) | null;
+  canConnectServer: boolean;
+  onGetCloud: (() => void) | null;
+  onCheck?: () => void;
+  checking?: boolean;
+}
+
+/**
+ * Add a device, in the page: what kind, then that kind's few steps, numbered, with the next one always in view, and a
+ * confirmation once the new device shows up. Back (or Escape) goes up one step and then to the list. Nothing opens over
+ * Settings: a phone on This computer gets Pair a phone's own steps, a server Connect to a server's own form.
+ */
+export function AddDevicePanel(props: AddDeviceProps) {
+  const { here, cloud, devices, network, networkAction, tailnetAddress, start, onBack, onConnected, phoneSteps, canConnectServer, onGetCloud, onCheck, checking = false } = props;
+  const [kind, setKind] = useState<AddKind | null>(start);
+  const [known] = useState(() => new Set(devices.map((device) => device.id)));
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => { heading.current?.focus({ preventScroll: false }); }, [kind]);
+  const back = () => (kind && !start ? setKind(null) : onBack());
+  const onKey = (event: KeyboardEvent) => {
+    if (event.key !== "Escape" || event.defaultPrevented) return;
+    event.preventDefault();
+    event.stopPropagation();
+    back();
+  };
+  const joined = kind ? devices.find((device) => !known.has(device.id) && GROUP_OF[kind](device)) : undefined;
+  const shared = network?.state === "ready" && network.shared;
+  const networkReady = Boolean(shared && tailnetAddress);
+  // On and shared, but nothing answers at the address yet: the step is to check again.
+  const stepAction: NetworkAction | null = shared && !tailnetAddress ? (onCheck ? { label: t("remote.checkAgain"), run: onCheck, busy: checking } : null) : networkAction;
+  const title = kind ? t(TITLE[kind]) : t("devicesPage.add");
+  const lede = kind ? t(LEDE[kind], { app: productName() }) : t("devicesPage.addFlow.chooseLede");
+  return (
+    <div data-add-panel="" data-add-step={kind ?? "choose"} onKeyDown={onKey} className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1 px-4">
+        <button type="button" data-add-back="" onClick={back} aria-label={kind && !start ? t("devicesPage.addFlow.backToChoose") : t("devicesPage.addFlow.backToList")}
+          className="-ms-1.5 inline-flex h-7 w-fit cursor-pointer items-center gap-0.5 rounded-full pe-2 ps-1 text-[13px] font-medium leading-5 text-ink-secondary hover:bg-ink/[0.05] hover:text-ink">
+          <ChevronLeft size={16} aria-hidden="true" className="rtl:-scale-x-100" />{kind && !start ? t("devicesPage.add") : t("settings.page.devices")}
+        </button>
+        <h3 ref={heading} tabIndex={-1} data-add-title="" className="text-[17px] font-semibold leading-6 tracking-[-0.01em] text-ink outline-none!">{title}</h3>
+        <p className={BODY}>{lede}</p>
+      </div>
+      {!kind && (
+        <SettingsRows icons>
+          <SettingsLinkRow leading={<Smartphone size={16} className="text-ink-secondary" />} title={t("devicesPage.add.phone")} subtitle={t("devicesPage.add.phoneLine", { app: productName() })} onClick={() => setKind("phone")} data={{ "data-add-kind": "phone" }} />
+          <SettingsLinkRow leading={<Laptop size={16} className="text-ink-secondary" />} title={t("devicesPage.add.computer")} subtitle={t("devicesPage.add.computerLine")} onClick={() => setKind("computer")} data={{ "data-add-kind": "computer" }} />
+          <SettingsLinkRow leading={<Server size={16} className="text-ink-secondary" />} title={t("devicesPage.add.server")} subtitle={t("devicesPage.add.serverLine")} onClick={() => setKind("server")} data={{ "data-add-kind": "server" }} />
+          {onGetCloud && <SettingsLinkRow leading={<Cloud size={16} className="text-ink-secondary" />} title={t("devicesPage.add.cloud")} subtitle={t("devicesPage.add.cloudLine")} onClick={() => setKind("cloud")} data={{ "data-add-kind": "cloud" }} />}
+        </SettingsRows>
+      )}
+      {kind && (
+        <div className={CARD}>
+          {joined ? <Connected device={joined} onDone={(id) => onBack(id)} /> : <>
+            {kind === "phone" && (phoneSteps ? phoneSteps(() => onBack()) : <PairCodePanel kind="phone" address={null} onConnected={onConnected} />)}
+            {kind === "computer" && (cloud
+              ? <p className={BODY}>{t("devicesPage.addFlow.computerCloud", { app: productName() })}</p>
+              : <Steps>
+                {here && network && <Step n={1} title={t("devicesPage.addFlow.networkFirst")} state={networkReady ? "done" : "now"}>
+                  {!networkReady && <NetworkStep network={network} action={stepAction} waiting={Boolean(shared && !tailnetAddress)} />}
+                </Step>}
+                <Step n={here && network ? 2 : 1} title={t("devicesPage.addFlow.installStep", { app: productName() })} state={!here || networkReady ? "now" : "later"}>
+                  <a href={DESKTOP_DOWNLOAD_URL} target="_blank" rel="noreferrer" className="w-fit text-[13px] leading-[18px] text-accent-text hover:underline">{t("computerAsk.action.getApp", { app: productName() })}</a>
+                </Step>
+                <Step n={here && network ? 3 : 2} title={t("devicesPage.addFlow.pasteStep")} state={!here || networkReady ? "now" : "later"}>
+                  <PairCodePanel kind="computer" address={tailnetAddress} onConnected={onConnected} />
+                </Step>
+              </Steps>)}
+            {kind === "server" && <Steps>
+              <Step n={1} title={t("devicesPage.addFlow.serverRun")}>
+                <CommandRow label={t("devicesPage.addFlow.serverAnywhere")} command={SERVER_COMMANDS.anywhere} />
+                <CommandRow label={t("devicesPage.addFlow.serverTailscale")} command={SERVER_COMMANDS.tailscale} />
+                <p className="text-[12px] leading-4 text-ink-secondary">{t("devicesPage.addFlow.serverNode")}</p>
+              </Step>
+              <Step n={2} title={t("devicesPage.addFlow.pasteLink")}>
+                {canConnectServer
+                  ? <OwnServerLink inline onBack={null} onConnected={onConnected} />
+                  : <p className={BODY}>{t("devicesPage.addFlow.serverDesktop", { app: productName() })}</p>}
+              </Step>
+            </Steps>}
+            {kind === "cloud" && onGetCloud && (
+              <div className="flex flex-col items-start gap-3">
+                <p className={BODY}>{t("devicesPage.addFlow.cloudLine", { app: productName() })}</p>
+                <button type="button" data-get-cloud="" className="ui-button ui-button-primary" onClick={onGetCloud}>{t("devicesPage.addFlow.seePlans")}</button>
+                <p className="text-[12px] leading-4 text-ink-tertiary">{t("devicesPage.addFlow.cloudLeaves")}</p>
+              </div>
+            )}
+          </>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const TITLE = { phone: "devicesPage.add.phoneTitle", computer: "devicesPage.add.computerTitle", server: "devicesPage.add.serverTitle", cloud: "devicesPage.add.cloudTitle" } as const;
+const LEDE = { phone: "devicesPage.addFlow.phoneLede", computer: "devicesPage.addFlow.computerLede", server: "devicesPage.addFlow.serverLede", cloud: "devicesPage.addFlow.cloudLede" } as const;

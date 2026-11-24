@@ -1,0 +1,115 @@
+import { useState, type ReactNode } from "react";
+import { BotAvatar } from "@/components/Avatar";
+import { t } from "@/lib/i18n";
+import { lastSeen } from "@/lib/pairing-time";
+import type { Device, DeviceAction } from "@/lib/devices";
+import { vpsServerId } from "../../../shared/bot-computers";
+import { VpsServerEditor } from "../keys/VpsServerEditor";
+import { LendComputerSwitch } from "../LendComputerSwitch";
+import { OwnServerLink } from "../PlaceAddSheet";
+import { updateCommand } from "../ServerList";
+import { CommandLine } from "../SettingsPrimitives";
+import { needOf, useBotsOn } from "./device-parts";
+import { kindLabel, routeLabel } from "./device-words";
+
+export function actionLabel(action: DeviceAction, device: Device): string {
+  switch (action.type) {
+    case "switch": return t("devicesPage.action.switch");
+    case "retry": return t("servers.tryNow");
+    case "pair-again": return t("servers.pairAgain");
+    case "copy-address": return t("servers.copyAddress");
+    case "copy-update": return t("devicesPage.tile.update");
+    case "manage": return t("devicesPage.action.manage");
+    case "remove":
+      if (device.sources.length > 1 && action.source.type === "phone-app") return t("devicesPage.action.removeApps");
+      if (device.sources.length > 1 && action.source.type === "session") return t("devicesPage.action.signOut");
+      return t("remote.devices.removeShort");
+  }
+}
+
+/** A server bots reach over SSH: the id its editor takes. */
+export const vpsOf = (device: Device): string | null => {
+  const source = device.sources.find((one) => one.type === "vps");
+  return source ? vpsServerId(source.id) : null;
+};
+
+/** A server saved by hand on This computer's own page: the saved id its lend switch is about. */
+const lendsHere = (device: Device) => (window.ogb?.lendComputer?.wish && device.address && device.kind !== "cloud" ? device.sources.find((source) => source.type === "place")?.id ?? null : null);
+
+function Detail({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5 @min-[440px]/rows:flex-row @min-[440px]/rows:items-baseline @min-[440px]/rows:gap-3">
+      <dt className="shrink-0 text-[12px] leading-4 text-ink-tertiary @min-[440px]/rows:w-24">{label}</dt>
+      <dd className="min-w-0 break-words text-[13px] leading-[18px] text-ink-secondary">{children}</dd>
+    </div>
+  );
+}
+
+export function ActionButton({ device, action, onAction }: { device: Device; action: DeviceAction; onAction: (device: Device, action: DeviceAction) => void }) {
+  return (
+    <button type="button" data-device-action={action.type} data-danger={action.type === "remove" ? "" : undefined} onClick={() => onAction(device, action)}
+      aria-label={`${actionLabel(action, device)}: ${device.name}`} className="settings-quiet shrink-0 cursor-pointer">{actionLabel(action, device)}</button>
+  );
+}
+const actionKey = (action: DeviceAction) => `${action.type}:${"source" in action ? action.source.id : ""}`;
+
+/** The bots that work on it by face and name; with none, what bots can do with it. */
+function BotsDetail({ device }: { device: Device }) {
+  const bots = useBotsOn(device);
+  if (bots.length) {
+    return <ul data-device-bot-names="" className="flex flex-wrap gap-x-3 gap-y-1">
+      {bots.map((bot) => <li key={bot.id} className="flex min-w-0 items-center gap-1.5 text-ink"><BotAvatar bot={bot} size={16} /><span className="break-words">{bot.name}</span></li>)}
+    </ul>;
+  }
+  return <>{device.canRunBots ? t("devicesPage.detail.runsBots") : device.canHostComputer ? t("devicesPage.detail.hostsComputer") : t("devicesPage.detail.reachesBots")}</>;
+}
+
+/**
+ * A device's details, open under its row: what it is, how it connects and which bots work on it; the update command when
+ * it needs one; the lend switch or a server's own editor; then its other actions. Pair again opens its form right here.
+ */
+export function DeviceDetails({ device, onAction, onRemoved, now, pairing, onPairing }: {
+  device: Device; onAction: (device: Device, action: DeviceAction) => void; onRemoved: (notice: string | null) => void; now: number;
+  /** Pair again's form is open in place of the actions. */
+  pairing: boolean;
+  onPairing: (open: boolean, connected?: boolean) => void;
+}) {
+  const need = needOf(device);
+  const update = device.actions.find((action) => action.type === "copy-update");
+  const pairAgain = device.actions.find((action) => action.type === "pair-again");
+  const actions = device.actions.filter((action) => action !== need && action.type !== "copy-update");
+  const vps = vpsOf(device);
+  const lend = lendsHere(device);
+  const [version] = useState(() => window.ogb?.app?.version ?? "");
+  return (
+    <div className="flex flex-col gap-4">
+      <dl className="flex flex-col gap-2">
+        <Detail label={t("devicesPage.detail.kind")}>{kindLabel(device.kind)}</Detail>
+        {!device.here && <Detail label={t("devicesPage.detail.reaches")}>{device.routes.map(routeLabel).join(", ")}</Detail>}
+        {device.address && <Detail label={t("devicesPage.detail.address")}><span className="select-text break-all font-mono text-[12px]">{device.address}</span></Detail>}
+        {device.version && <Detail label={t("devicesPage.detail.version")}>{device.version}</Detail>}
+        {device.lastSeen && device.status !== "online" && <Detail label={t("devicesPage.detail.lastSeen")}>{lastSeen(device.lastSeen, now)}</Detail>}
+        <Detail label={t("devicesPage.detail.bots")}><BotsDetail device={device} /></Detail>
+      </dl>
+      {update?.type === "copy-update" && (
+        <div data-device-update="" className="flex flex-col gap-1.5">
+          <p className="text-[13px] leading-[18px] text-ink">{t("devicesPage.update.run", { name: device.name })}</p>
+          <CommandLine command={updateCommand(update.install, version)} copyLabel={t("devicesPage.action.copyUpdate")} />
+        </div>
+      )}
+      {device.usesThisComputer && !lend && <p className="text-[13px] leading-[18px] text-ink-secondary">{t("servers.share.on", { name: device.name })}</p>}
+      {lend && <LendComputerSwitch id={lend} />}
+      {vps && <VpsServerEditor serverId={vps} onRemoved={onRemoved} />}
+      {pairing && pairAgain?.type === "pair-again"
+        ? <div data-device-pair-again="" className="flex flex-col gap-3">
+          <p className="text-[13px] font-medium leading-[18px] text-ink">{t("servers.pairAgainTitle", { name: device.name })}</p>
+          <OwnServerLink inline onBack={null} onConnected={() => onPairing(false, true)} start={{ address: pairAgain.address, locked: true, title: "" }}
+            aside={<button type="button" className="ui-button" data-pair-again-cancel="" onClick={() => onPairing(false)}>{t("common.cancel")}</button>} />
+        </div>
+        : actions.length > 0 && <div data-device-actions="" className="-ms-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+          {actions.map((action) => <ActionButton key={actionKey(action)} device={device} action={action}
+            onAction={(chosen, act) => (act.type === "pair-again" ? onPairing(true) : onAction(chosen, act))} />)}
+        </div>}
+    </div>
+  );
+}

@@ -21,6 +21,7 @@ import { BackLink, FIELD, Heading, PRIMARY_WIDE } from "./cloud-buy/parts";
 import { Layer, useIsTopLayer } from "./Layer";
 import { SwatchRadios } from "./SwatchRadios";
 import { AddFormLendSwitch } from "./LendComputerSwitch";
+import { SETTINGS_INPUT } from "./SettingsPrimitives";
 
 const PAIR_COMMAND = "npx openmausbot pair";
 
@@ -49,8 +50,12 @@ const TRANSPORT_KEY = { https: "connect.found.https", tailscale: "connect.found.
 /** Connect to a server: a link, or an address with the pairing code typed apart (a code pasted alone is moved to its
  * field). Main looks the address up as the person types and connects only to the server it found, opening that server's
  * own /pair page with the code. `connect`: a server of theirs that signed in with their account, not connected yet. */
-export function OwnServerLink({ onBack, onConnected, connect = null, start = null }: { onBack: (() => void) | null; onConnected: () => void; connect?: { name: string } | null;
-  start?: { address: string; locked: boolean; title: string } | null }) {
+export function OwnServerLink({ onBack, onConnected, connect = null, start = null, inline = false, aside = null }: { onBack: (() => void) | null; onConnected: () => void; connect?: { name: string } | null;
+  start?: { address: string; locked: boolean; title: string } | null;
+  /** In a page that gives it its own heading (Settings → Devices): no sheet padding, heading or other-computer hint. */
+  inline?: boolean;
+  /** Beside Connect: the page's own way out (Cancel). */
+  aside?: ReactNode }) {
   const [address, setAddress] = useState(start?.address ?? "");
   const [code, setCode] = useState("");
   const [movedCode, setMovedCode] = useState(false);
@@ -109,15 +114,15 @@ export function OwnServerLink({ onBack, onConnected, connect = null, start = nul
   };
   const shownProblem = failure ?? (probe?.outcome === "problem" && probe.problem !== "empty" ? problemText(probe.problem, probe.host) : null);
   const codeOnlyHint = movedCode && !address.trim();
-  return <form data-place-add={connect ? "connect-server" : "own-server"} onSubmit={(event) => void submit(event)} className="flex flex-col gap-4 px-[30px] pb-[26px] pt-7">
+  return <form data-place-add={connect ? "connect-server" : "own-server"} onSubmit={(event) => void submit(event)} className={cn("flex flex-col gap-4", !inline && "px-[30px] pb-[26px] pt-7")}>
     {onBack && <div><BackLink label={t("rail.back")} onClick={onBack} /></div>}
-    <Heading title={connect ? t("rail.connectTitle", { name: connect.name }) : start?.title ?? t("connect.title")} sub={t(connect ? "connect.signedInLede" : "connect.lede")} />
+    {!inline && <Heading title={connect ? t("rail.connectTitle", { name: connect.name }) : start?.title ?? t("connect.title")} sub={t(connect ? "connect.signedInLede" : "connect.lede")} />}
     <label className="flex flex-col gap-1.5 text-[13px] font-medium text-ink">{t("connect.address")}
       <input data-autofocus={start?.locked ? undefined : true} data-own-server-link value={address} disabled={busy} readOnly={start?.locked === true} onChange={(event) => { if (!start?.locked) typeAddress(event.target.value, (event.nativeEvent as InputEvent).inputType === "insertFromPaste"); }}
         placeholder={t("connect.addressPlaceholder")} autoCapitalize="none" autoCorrect="off" autoComplete="off" spellCheck={false} aria-invalid={Boolean(shownProblem) || undefined}
-        className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] font-normal text-ink outline-none focus:border-accent/50" />
+        className={inline ? cn(SETTINGS_INPUT, "font-normal") : "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] font-normal text-ink outline-none focus:border-accent/50"} />
     </label>
-    {!connect && !start && <p data-connect-other-computer className="text-[12px] leading-4 text-ink-secondary">{t("connect.otherComputer", { app: productName() })}</p>}
+    {!connect && !start && !inline && <p data-connect-other-computer className="text-[12px] leading-4 text-ink-secondary">{t("connect.otherComputer", { app: productName() })}</p>}
     {codeOnlyHint && <p data-connect-hint className="text-[13px] text-ink-secondary">{t("connect.addAddress", { example: EXAMPLE_ADDRESS })}</p>}
     {found && <p data-connect-found className="text-[13px] text-ink-secondary">
       ✓ {found.version ? t("connect.found", { name: found.label, version: found.version }) : found.label} · {t(TRANSPORT_KEY[found.transport])}
@@ -125,7 +130,7 @@ export function OwnServerLink({ onBack, onConnected, connect = null, start = nul
     {showCode && <label className="flex flex-col gap-1.5 text-[13px] font-medium text-ink">{t("connect.code")}
       <input ref={codeField} data-autofocus={start?.locked ? true : undefined} data-own-server-code value={code} disabled={busy} onChange={(event) => { setCode(event.target.value); setFailure(null); }}
         placeholder="7KQ2-M9XD-H4TP" autoCapitalize="characters" autoCorrect="off" autoComplete="off" spellCheck={false}
-        className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[14px] font-normal text-ink outline-none focus:border-accent/50" />
+        className={inline ? cn(SETTINGS_INPUT, "font-mono font-normal") : "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[14px] font-normal text-ink outline-none focus:border-accent/50"} />
       <span className="flex flex-col gap-1 text-[12px] font-normal text-ink-secondary">{t("connect.noCode")}<CommandLine command={PAIR_COMMAND} /></span>
     </label>}
     {/* The question after pairing lives here: on, a server of the person's own may use this computer once paired. */}
@@ -134,9 +139,9 @@ export function OwnServerLink({ onBack, onConnected, connect = null, start = nul
     {canProbe && probing && !found && !shownProblem && <p data-connect-checking className="inline-flex items-center gap-1.5 text-[13px] text-ink-secondary">
       <Loader2 size={13} className="animate-spin" aria-hidden="true" />{t("connect.checking")}
     </p>}
-    <div><button type="submit" data-own-server-connect disabled={busy || !address.trim() || (canProbe && !found)} className="ui-button ui-button-primary inline-flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2"><button type="submit" data-own-server-connect disabled={busy || !address.trim() || (canProbe && !found)} className="ui-button ui-button-primary inline-flex items-center gap-2">
       {busy && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}{found ? t("connect.to", { name: found.label }) : t("rail.connect")}
-    </button></div>
+    </button>{aside}</div>
   </form>;
 }
 

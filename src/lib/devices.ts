@@ -318,8 +318,8 @@ export const GROUP_ORDER: readonly DeviceGroup[] = ["phones", "computers", "serv
 export const deviceGroup = (device: Device): DeviceGroup =>
   device.kind === "phone" ? "phones" : device.kind === "laptop" || device.kind === "desktop" ? "computers" : "servers";
 
-/** The groups the map draws around this place, in a fixed order; empty groups are left out. */
-export function groupByKind(devices: readonly Device[]): Array<{ group: DeviceGroup; devices: Device[] }> {
+/** The groups around this place, in a fixed order; empty groups are left out unless `all` asks for them. */
+export function groupByKind(devices: readonly Device[], { all = false }: { all?: boolean } = {}): Array<{ group: DeviceGroup; devices: Device[] }> {
   return GROUP_ORDER.map((group) => ({ group, devices: devices.filter((device) => !device.here && deviceGroup(device) === group) }))
-    .filter((entry) => entry.devices.length > 0);
+    .filter((entry) => all || entry.devices.length > 0);
 }

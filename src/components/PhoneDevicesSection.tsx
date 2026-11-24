@@ -223,7 +223,7 @@ function RouteRow({ c, state, route, blocked, onSignIn }: { c: PhoneSetupControl
   );
 }
 
-type PairStep = "consent" | "sign-in" | "pairing";
+export type PairStep = "consent" | "sign-in" | "pairing";
 type PairRoute = "wifi" | "relay";
 
 const FOCUSABLE = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
@@ -258,14 +258,16 @@ function RouteCard({ route, chosen, disabled, onChoose, needs, action, hint }: {
   );
 }
 
-/** Pair a device: which way the phone reaches this computer comes first, then the code. */
-export function PairDeviceDialog({ c, state, onClose, secureAddress = false, placeName = t("rail.thisComputer") }: {
+/** Pair a device's steps: which way the phone reaches this computer comes first, then the code. The Pair a phone dialog
+ * frames them; Settings → Devices shows them in its page. `onClose` is Cancel and Done; a code still open is cancelled
+ * when the steps close or go away. */
+export function PairPhoneSteps({ c, state, onClose, secureAddress = false, onStep }: {
   c: PhoneSetupController;
   state: CompanionState;
   onClose: () => void;
-  placeName?: string;
   /** HTTPS address → Set up: the free web address, with its sign-in, before the code. */
   secureAddress?: boolean;
+  onStep?: (step: PairStep) => void;
 }) {
   const signedIn = c.account?.status === "ready";
   const relayAvailable = c.account?.available !== false;
@@ -276,18 +278,71 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false, pla
   useEffect(() => {
     if (secureAddress) start();
   }, [secureAddress, start]);
+  useEffect(() => { onStep?.(step); }, [step, onStep]);
   // Back from the sign-in: with it, Anywhere is chosen; cancelled, the same screen as before.
   useEffect(() => {
     if (step !== "sign-in") return;
     if (signedIn) { setPicked("relay"); setStep("consent"); return; }
     if (c.phase !== "sign-in") setStep("consent");
   }, [step, signedIn, c.phase]);
+  const opened = useRef(false);
+  opened.current = step !== "consent";
+  const cancel = useRef(c.cancel);
+  cancel.current = c.cancel;
+  // Checked a tick later: a development remount is not a close.
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; window.setTimeout(() => { if (!mounted.current && opened.current) cancel.current(); }, 0); };
+  }, []);
   const begin = async () => {
     if (!await c.act((bridge) => setRoute(bridge, picked, true))) return;
     setStep("pairing");
     c.useLocal();
   };
-  const close = step === "consent" ? onClose : () => { c.cancel(); onClose(); };
+  const localHint = picked === "wifi" && !state.routes?.wifi?.on && typeof window !== "undefined" && window.ogb?.platform === "darwin";
+  if (step === "sign-in") return <PhoneSetupFlowView controller={c} />;
+  if (step === "pairing") {
+    return <>
+      <PhoneSetupFlowView controller={c} />
+      <div className="text-[12px] leading-4 text-ink-secondary">{reachLine(state)}</div>
+      <div className="flex justify-end">
+        <button type="button" className="ui-button ui-button-primary" onClick={onClose}>{t("devices.pair.done")}</button>
+      </div>
+    </>;
+  }
+  return <>
+    <p className="text-[13px] leading-[18px] text-ink-secondary">{t("phone.pair.howReach")}</p>
+    <div role="radiogroup" aria-label={t("phone.pair.howReach")} className="flex flex-col gap-2">
+      <RouteCard route="wifi" chosen={picked === "wifi"} onChoose={() => setPicked("wifi")}
+        hint={localHint ? <span data-local-network-hint="">{t("phone.pair.localNetworkHint", { app: productName() })}</span> : undefined} />
+      {relayAvailable && (
+        <RouteCard route="relay" chosen={picked === "relay"} disabled={!signedIn} onChoose={() => setPicked("relay")}
+          needs={signedIn ? undefined : t("phone.pair.needsSignIn", { app: productName() })}
+          action={!signedIn && (
+            <button type="button" className="ui-button ui-button-md mt-1 rounded-full" data-pair-sign-in=""
+              onClick={() => { setStep("sign-in"); c.start(); }}>{t("phone.pair.signIn")}</button>
+          )} />
+      )}
+    </div>
+    <p className="text-[12px] leading-4 text-ink-secondary">{t("phone.pair.footShort")}</p>
+    {c.error && <p role="alert" className="text-[12px] leading-4 text-danger">{c.error}</p>}
+    <div className="flex justify-end gap-2">
+      <button type="button" className="ui-button" onClick={onClose}>{t("common.cancel")}</button>
+      <button type="button" disabled={c.busy} onClick={() => void begin()} className="ui-button ui-button-primary" data-pair-turn-on="">{t("phone.pair.turnOnShow")}</button>
+    </div>
+  </>;
+}
+
+/** Pair a device, as a dialog over Phone & devices. */
+export function PairDeviceDialog({ c, state, onClose, secureAddress = false, placeName = t("rail.thisComputer") }: {
+  c: PhoneSetupController;
+  state: CompanionState;
+  onClose: () => void;
+  placeName?: string;
+  secureAddress?: boolean;
+}) {
+  const [step, setStep] = useState<PairStep>("consent");
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -301,7 +356,7 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false, pla
       const box = root.current;
       if (!box || event.defaultPrevented || event.isComposing || (event.key !== "Escape" && event.key !== "Tab")) return;
       event.preventDefault();
-      if (event.key === "Escape") { close(); return; }
+      if (event.key === "Escape") { onClose(); return; }
       const controls = [...box.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((control) => control.getClientRects().length);
       if (!controls.length) return;
       const at = controls.indexOf(document.activeElement as HTMLElement);
@@ -310,52 +365,18 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false, pla
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [close]);
+  }, [onClose]);
   // An ancestor with backdrop-filter becomes the containing block for `fixed`, so it renders through Layer, on the body.
   const title = t("phone.pair.dialogTitle", { place: placeName });
-  const localHint = picked === "wifi" && !state.routes?.wifi?.on && typeof window !== "undefined" && window.ogb?.platform === "darwin";
-  const dialog = (
+  return <Layer modal>
     <div ref={root} role="dialog" aria-modal="true" aria-label={title}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" data-pair-dialog={step} data-settings-look="simple">
       <div className="relative flex max-h-full w-full max-w-[440px] flex-col gap-4 overflow-y-auto rounded-2xl border-[0.5px] border-(--settings-edge) bg-app p-6 shadow-xl">
-        <DialogTitle title={title} onClose={close} />
-        {step === "consent" ? (
-          <>
-            <p className="text-[13px] leading-[18px] text-ink-secondary">{t("phone.pair.howReach")}</p>
-            <div role="radiogroup" aria-label={t("phone.pair.howReach")} className="flex flex-col gap-2">
-              <RouteCard route="wifi" chosen={picked === "wifi"} onChoose={() => setPicked("wifi")}
-                hint={localHint ? <span data-local-network-hint="">{t("phone.pair.localNetworkHint", { app: productName() })}</span> : undefined} />
-              {relayAvailable && (
-                <RouteCard route="relay" chosen={picked === "relay"} disabled={!signedIn} onChoose={() => setPicked("relay")}
-                  needs={signedIn ? undefined : t("phone.pair.needsSignIn", { app: productName() })}
-                  action={!signedIn && (
-                    <button type="button" className="ui-button ui-button-md mt-1 rounded-full" data-pair-sign-in=""
-                      onClick={() => { setStep("sign-in"); c.start(); }}>{t("phone.pair.signIn")}</button>
-                  )} />
-              )}
-            </div>
-            <p className="text-[12px] leading-4 text-ink-secondary">{t("phone.pair.footShort")}</p>
-            {c.error && <p role="alert" className="text-[12px] leading-4 text-danger">{c.error}</p>}
-            <div className="flex justify-end gap-2">
-              <button type="button" className="ui-button" onClick={close}>{t("common.cancel")}</button>
-              <button type="button" disabled={c.busy} onClick={() => void begin()} className="ui-button ui-button-primary" data-pair-turn-on="">{t("phone.pair.turnOnShow")}</button>
-            </div>
-          </>
-        ) : step === "sign-in" ? (
-          <PhoneSetupFlowView controller={c} />
-        ) : (
-          <>
-            <PhoneSetupFlowView controller={c} />
-            <div className="text-[12px] leading-4 text-ink-secondary">{reachLine(state)}</div>
-            <div className="flex justify-end">
-              <button type="button" className="ui-button ui-button-primary" onClick={close}>{t("devices.pair.done")}</button>
-            </div>
-          </>
-        )}
+        <DialogTitle title={title} onClose={onClose} />
+        <PairPhoneSteps c={c} state={state} onClose={onClose} secureAddress={secureAddress} onStep={setStep} />
       </div>
     </div>
-  );
-  return <Layer modal>{dialog}</Layer>;
+  </Layer>;
 }
 
 /** A pairing code still open: anyone holding it can pair until it runs out, so it can be revoked here. */

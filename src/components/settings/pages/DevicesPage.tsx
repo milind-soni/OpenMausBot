@@ -1,25 +1,20 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Laptop } from "lucide-react";
+import { privateNetwork, groupByKind, type Device, type DeviceAction, type DeviceGroup, type PrivateNetwork } from "@/lib/devices";
 import { copyText } from "@/lib/copy-text";
-import { privateNetwork, type Device, type DeviceAction, type PrivateNetwork } from "@/lib/devices";
 import { t } from "@/lib/i18n";
 import { phoneRemovePath } from "@/lib/phones";
 import { useDevices } from "@/lib/use-devices";
 import type { CompanionState } from "@/lib/companion-types";
 import { api } from "@/state/api";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
-import { AddDeviceDialog, type AddKind } from "../../devices/AddDeviceDialog";
-import { DeviceMap, type NetworkAction } from "../../devices/DeviceMap";
-import { DevicePanel } from "../../devices/DevicePanel";
+import { AddDevicePanel, type AddKind } from "../../devices/AddDevicePanel";
+import { GroupSection, HereSection, type NetworkAction, type Opened } from "../../devices/DeviceRows";
 import { networkLine } from "../../devices/device-words";
-import { PairDeviceDialog } from "../../PhoneDevicesSection";
+import { PairPhoneSteps } from "../../PhoneDevicesSection";
 import { usePhoneSetupController } from "../../PhoneSetupFlow";
-import { OwnServerLink, RailSheet } from "../../PlaceAddSheet";
-import { updateCommand } from "../../ServerList";
 import { PlaceBadge } from "../SettingsNav";
 import { useSettingsShell } from "../settings-shell";
-
-type Sheet = { address: string; locked: boolean; title: string } | null;
 
 /** Tailscale's download page for this computer's system. */
 export function tailscaleDownload(platform: string | undefined): string {
@@ -29,7 +24,7 @@ export function tailscaleDownload(platform: string | undefined): string {
   return "https://tailscale.com/download";
 }
 
-/** The private network's one next step, for the map and the Add flow. Null while an organization turned remote access off. */
+/** The private network's one next step, for its row and the Add flow. Null while an organization turned remote access off. */
 export function nextNetworkStep(network: PrivateNetwork | null, run: { check: () => void; addComputer: () => void }, opts: { busy: boolean; blocked: boolean; platform?: string }): NetworkAction | null {
   if (!network || opts.blocked) return null;
   switch (network.state) {
@@ -43,16 +38,18 @@ export function nextNetworkStep(network: PrivateNetwork | null, run: { check: ()
 /** A recheck when the person comes back to the window: at most this often, and only after they asked once here. */
 const RECHECK_MS = 5_000;
 
+const ADD_LABEL: Record<DeviceGroup, Parameters<typeof t>[0]> = { phones: "devicesPage.addGroup.phone", computers: "devicesPage.addGroup.computer", servers: "devicesPage.addGroup.server" };
+const ADD_KIND: Record<DeviceGroup, AddKind> = { phones: "phone", computers: "computer", servers: "server" };
+
 export function DevicesPage() {
   const { ctx, place, go } = useSettingsShell();
   const dispatch = useStoreDispatch();
   const config = useStoreSelector((state) => state.config);
   const { devices, companion, refresh } = useDevices({ here: ctx.here, client: ctx.client, name: place.name, kind: place.kind });
   const c = usePhoneSetupController(config?.profile?.email);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [adding, setAdding] = useState<AddKind | null | false>(false);
-  const [pairingPhone, setPairingPhone] = useState(false);
-  const [sheet, setSheet] = useState<Sheet>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const [pairing, setPairing] = useState(false);
+  const [adding, setAdding] = useState<{ start: AddKind | null; from: string } | null>(null);
   const [problem, setProblem] = useState<CompanionState["tailscaleProblem"] | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -79,11 +76,13 @@ export function DevicesPage() {
     return () => window.removeEventListener("focus", onFocus);
   }, [problem, check]);
 
-  const networkAction = nextNetworkStep(network, { check: () => void check(), addComputer: () => setAdding("computer") },
+  const focusNode = (id: string) => window.requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-device-node="${CSS.escape(id)}"]`)?.focus());
+  const startAdding = (start: AddKind | null, from: string) => { setNotice(null); setFailure(null); setAdding({ start, from }); };
+  const networkAction = nextNetworkStep(network, { check: () => void check(), addComputer: () => startAdding("computer", "[data-network-action]") },
     { busy: c.busy, blocked: Boolean(blocked), platform: window.ogb?.platform });
 
   const environments = ctx.here ? window.ogb?.environments : undefined;
-  const places = useMemo(() => devices.filter((device) => device.sources[0]?.type === "place").map((device) => ({ id: device.sources[0]!.id, name: device.name })), [devices]);
+  const workspaces = ctx.here ? window.ogb?.workspaces : undefined;
 
   const act = async (device: Device, action: DeviceAction) => {
     setFailure(null);
@@ -91,9 +90,9 @@ export function DevicesPage() {
       switch (action.type) {
         case "switch": await environments?.switch(action.placeId); return;
         case "retry": await environments?.retry?.(action.placeId); break;
-        case "pair-again": setSheet({ address: action.address, locked: true, title: t("servers.pairAgainTitle", { name: device.name }) }); return;
+        case "pair-again": setOpen(device.id); setPairing(true); return;
         case "copy-address": await copyText(action.address); return;
-        case "copy-update": await copyText(updateCommand(action.install, window.ogb?.app?.version ?? "")); return;
+        case "copy-update": setOpen(device.id); setPairing(false); return;
         case "manage": go(action.page, action.anchor); return;
         case "remove": {
           const { source } = action;
@@ -101,7 +100,8 @@ export function DevicesPage() {
           else if (source.type === "phone") await c.act((bridge) => bridge.revoke(source.id));
           else if (source.type === "phone-app") await api(phoneRemovePath(source.id), { method: "DELETE" });
           else if (source.type === "session") await api(`/api/auth/sessions/${encodeURIComponent(source.id)}`, { method: "DELETE" });
-          if (selected === device.id) setSelected(null);
+          if (open === device.id) setOpen(null);
+          setNotice(t("devicesPage.removed", { name: device.name }));
           break;
         }
       }
@@ -111,39 +111,51 @@ export function DevicesPage() {
     refresh();
   };
 
-  const mark = place.kind === "computer" ? <Laptop size={20} aria-hidden="true" /> : <PlaceBadge place={place} size={24} />;
-  const workspaces = ctx.here ? window.ogb?.workspaces : undefined;
-  const chosen = selected ? devices.find((device) => device.id === selected) : undefined;
   const close = () => {
-    const id = selected;
-    setSelected(null);
-    if (id) window.requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-device-node="${CSS.escape(id)}"]`)?.focus());
+    const id = open;
+    setOpen(null);
+    setPairing(false);
+    if (id) focusNode(id === "here" ? "here" : id);
   };
-  const shared = network?.state === "ready" && network.shared;
-  const secondary = network && (networkAction?.href
-    ? <button type="button" className="settings-quiet cursor-pointer" disabled={c.busy} onClick={() => void check()}>{c.busy ? t("common.checking") : t("remote.checkAgain")}</button>
-    : shared ? <button type="button" className="settings-quiet cursor-pointer" onClick={() => go("phone", "computers")}>{t("devicesPage.action.manage")}</button> : null);
+  const opened: Opened = {
+    id: open, pairing,
+    toggle: (id) => { setNotice(null); setPairing(false); setOpen((now) => (now === id ? null : id)); },
+    close,
+    onPairing: (device, on, connected) => { setPairing(on); if (connected) { setNotice(t("devicesPage.pairedAgain", { name: device.name })); refresh(); } },
+    onRemoved: (text) => { setOpen(null); setNotice(text); refresh(); },
+  };
 
+  if (adding) {
+    const leave = (id?: string) => {
+      const from = adding.from;
+      setAdding(null);
+      refresh();
+      if (id) { setOpen(id); focusNode(id); }
+      else window.requestAnimationFrame(() => document.querySelector<HTMLElement>(from)?.focus());
+    };
+    return <AddDevicePanel here={ctx.here} cloud={ctx.cloud} devices={devices} network={network} networkAction={networkAction}
+      tailnetAddress={companion?.tailnetShare?.origin ?? null} start={adding.start} onBack={leave} onConnected={refresh}
+      phoneSteps={ctx.here && c.state ? (onClose) => <PairPhoneSteps c={c} state={c.state!} onClose={() => { refresh(); onClose(); }} /> : null}
+      canConnectServer={Boolean(workspaces?.add)} onCheck={() => void check()} checking={c.busy}
+      onGetCloud={workspaces?.add ? () => { setAdding(null); dispatch({ type: "toggleAppSettings", open: false }); void workspaces.add?.("cloud"); } : null} />;
+  }
+
+  const here = devices.find((device) => device.here)!;
+  const mark = place.kind === "computer" ? <Laptop size={16} aria-hidden="true" /> : <PlaceBadge place={place} size={20} />;
+  const groups = groupByKind(devices, { all: true });
+  const now = Date.now();
+  const link = network && networkAction?.href
+    ? <button type="button" className="cursor-pointer text-accent-text hover:underline disabled:opacity-50" disabled={c.busy} onClick={() => void check()}>{c.busy ? t("common.checking") : t("remote.checkAgain")}</button>
+    : network?.state === "ready" && network.shared ? <button type="button" className="cursor-pointer text-accent-text hover:underline" onClick={() => go("phone", "computers")}>{t("devicesPage.action.manage")}</button> : null;
   return <>
-    <DeviceMap devices={devices} mark={mark} selected={chosen ? chosen.id : null} onSelect={(id) => { setNotice(null); setSelected((now) => (now === id ? null : id)); }} onClose={close}
-      onAction={(device, action) => void act(device, action)} onAdd={() => setAdding(null)}
-      network={network && { network, line: blocked ?? networkLine(network), action: networkAction, secondary }}
-      panel={(caret) => chosen && <DevicePanel device={chosen} caret={caret} onAction={(device, action) => void act(device, action)} onClose={close}
-        onRemoved={(text) => { setSelected(null); setNotice(text); refresh(); }} />} />
-    {failure && <p role="alert" className="px-4 text-[12px] leading-4 text-danger">{failure}</p>}
-    {notice && <p role="status" className="px-4 text-[12px] leading-4 text-ink-secondary">{notice}</p>}
-    {adding !== false && (
-      <AddDeviceDialog here={ctx.here} cloud={ctx.cloud} network={network} networkAction={networkAction} tailnetAddress={companion?.tailnetShare?.origin ?? null} places={places} start={adding}
-        onClose={() => { setAdding(false); refresh(); }} onConnected={refresh}
-        onPairPhone={ctx.here ? () => { setAdding(false); setPairingPhone(true); } : null} onCheck={() => void check()} checking={c.busy}
-        onConnectServer={workspaces?.add ? () => setSheet({ address: "", locked: false, title: t("connect.title") }) : null}
-        onGetCloud={workspaces?.add ? () => { setAdding(false); dispatch({ type: "toggleAppSettings", open: false }); void workspaces.add?.("cloud"); } : null} />
-    )}
-    {pairingPhone && c.state && <PairDeviceDialog c={c} state={c.state} placeName={place.name} onClose={() => { setPairingPhone(false); refresh(); }} />}
-    {sheet && (
-      <RailSheet focusKey={sheet.locked ? "pair-again" : "connect"} onClose={() => setSheet(null)}>
-        <OwnServerLink onBack={null} onConnected={() => { setSheet(null); refresh(); }} start={sheet.address || sheet.locked ? sheet : null} />
-      </RailSheet>
-    )}
+    {failure && <p role="alert" className="px-4 text-[13px] leading-[18px] text-danger">{failure}</p>}
+    {notice && <p role="status" data-devices-notice="" className="px-4 text-[13px] leading-[18px] text-ink-secondary">{notice}</p>}
+    <HereSection device={here} mark={mark} opened={opened} onAction={(device, action) => void act(device, action)} onAdd={() => startAdding(null, "[data-add-device]")} now={now}
+      network={network && { network, line: blocked ?? networkLine(network), action: networkAction, link: blocked ? null : link }} />
+    {groups.map((entry) => (
+      <GroupSection key={entry.group} group={entry.group} devices={entry.devices} opened={opened} onAction={(device, action) => void act(device, action)} now={now}
+        addLabel={t(ADD_LABEL[entry.group])}
+        onAdd={() => startAdding(ADD_KIND[entry.group], `[data-add-group="${entry.group}"]`)} />
+    ))}
   </>;
 }

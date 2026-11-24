@@ -1,24 +1,17 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { Check, ChevronLeft, Cloud, Laptop, Loader2, Server, Smartphone } from "lucide-react";
+import { Check, Loader2 } from "lucide-react";
 import { productName } from "@/lib/brand";
-import { cn } from "@/lib/cn";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { readMembership } from "@/lib/membership";
 import { codeUntil } from "@/lib/pairing-time";
-import type { PrivateNetwork } from "@/lib/devices";
 import type { SessionState } from "@/lib/session";
 import { readSharedSessionState } from "@/lib/shared-session";
 import { api } from "@/state/api";
 import { useStoreSelector } from "@/state/store-select";
 import { canPairDevices, computerLink, pairingBlockedReason, type PairingOffer } from "../ServerPairingCard";
-import { SettingsDialog } from "../settings/SettingsDialog";
 import { TeamPhoneCard } from "../TeamPhoneCard";
-import { networkLine } from "./device-words";
-import type { NetworkAction } from "./DeviceMap";
-
-export type AddKind = "phone" | "computer" | "server" | "cloud";
 
 /** One copyable line to run on a new server: the sign-in a tunnel needs, then the server, in one go. */
 export const SERVER_COMMANDS = {
@@ -29,7 +22,7 @@ export const SERVER_COMMANDS = {
 /** How often an open code checks whether a device has used it. */
 export const PAIR_WATCH_MS = 2_000;
 
-function CommandRow({ label, command }: { label: string; command: string }) {
+export function CommandRow({ label, command }: { label: string; command: string }) {
   const { state, copy } = useCopyFeedback(command);
   return (
     <div className="flex flex-col gap-1">
@@ -44,7 +37,7 @@ function CommandRow({ label, command }: { label: string; command: string }) {
   );
 }
 
-function Waiting({ connected }: { connected: string | null }) {
+export function Waiting({ connected }: { connected: string | null }) {
   return connected
     ? <p role="status" data-pair-state="connected" className="flex items-center gap-2 text-[13px] leading-[18px] text-ink"><Check size={14} aria-hidden="true" className="text-success" />{t("devicesPage.addFlow.connected", { name: connected })}</p>
     : <p role="status" data-pair-state="waiting" className="flex items-center gap-2 text-[13px] leading-[18px] text-ink-secondary"><Loader2 size={14} aria-hidden="true" className="motion-safe:animate-spin" />{t("devicesPage.addFlow.waiting")}</p>;
@@ -170,103 +163,3 @@ export function PairCodePanel({ kind, address, onConnected }: { kind: "phone" | 
   );
 }
 
-function Option({ kind, icon, title, line, onChoose }: { kind: AddKind; icon: ReactNode; title: string; line: string; onChoose: (kind: AddKind) => void }) {
-  return (
-    <button type="button" data-add-kind={kind} onClick={() => onChoose(kind)}
-      className="flex w-full cursor-pointer items-center gap-3 rounded-xl bg-menu px-4 py-3 text-start shadow-[inset_0_0_0_0.5px_var(--settings-edge)] transition-colors hover:bg-ink/[0.06] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
-      <span aria-hidden="true" className="flex size-5 shrink-0 items-center justify-center text-ink-secondary">{icon}</span>
-      <span className="flex min-w-0 flex-col">
-        <span className="text-[14px] leading-5 text-ink">{title}</span>
-        <span className="text-[13px] leading-[18px] text-ink-secondary">{line}</span>
-      </span>
-    </button>
-  );
-}
-
-function NetworkStep({ network, action, waiting }: { network: PrivateNetwork; action: NetworkAction | null; waiting: boolean }) {
-  return (
-    <div data-add-network={waiting ? "waiting" : network.state} className="flex flex-col items-start gap-3 rounded-xl bg-menu px-4 py-3 shadow-[inset_0_0_0_0.5px_var(--settings-edge)]">
-      <span className="text-[13px] font-medium leading-[18px] text-ink">{t("devicesPage.addFlow.networkFirst")}</span>
-      <span className="text-[13px] leading-[18px] text-ink-secondary">{waiting ? t("devices.computers.waiting", { app: productName() }) : networkLine(network)}</span>
-      {action && (action.href
-        ? <a href={action.href} target="_blank" rel="noreferrer" className="ui-button" data-network-action="">{action.label}</a>
-        : <button type="button" className="ui-button" data-network-action="" disabled={action.busy} onClick={action.run}>{action.label}</button>)}
-    </div>
-  );
-}
-
-/**
- * Add a device: what kind, then the existing way in for it with nothing extra. A phone on This computer opens Pair a
- * phone; a computer gets a link over the private network; a server gets the one line to run there and Connect to a
- * server for the link it prints; a Cloud opens Get a Cloud.
- */
-export function AddDeviceDialog({ here, cloud, network, networkAction, tailnetAddress, places, onClose, onPairPhone, onConnectServer, onGetCloud, onConnected, onCheck, checking = false, start = null }: {
-  /** This computer's own page in the desktop app. */
-  here: boolean;
-  network: PrivateNetwork | null;
-  networkAction: NetworkAction | null;
-  /** Where another computer on the private network opens this one. */
-  tailnetAddress: string | null;
-  /** A MausBot Cloud's page: another computer opens it by signing in, with no code. */
-  cloud: boolean;
-  /** The places this app has saved: one not there when the dialog opened is the server that just connected. */
-  places: ReadonlyArray<{ id: string; name: string }>;
-  onClose: () => void;
-  onPairPhone: (() => void) | null;
-  onConnectServer: (() => void) | null;
-  onGetCloud: (() => void) | null;
-  onConnected: () => void;
-  /** Ask Tailscale again: while the private network is on but its address does not answer yet. */
-  onCheck?: () => void;
-  checking?: boolean;
-  start?: AddKind | null;
-}) {
-  const [kind, setKind] = useState<AddKind | null>(start);
-  const [placesBefore] = useState(() => new Set(places.map((place) => place.id)));
-  const choose = (next: AddKind) => {
-    if (next === "phone" && onPairPhone) { onPairPhone(); return; }
-    if (next === "cloud" && onGetCloud) { onGetCloud(); return; }
-    setKind(next);
-  };
-  const back = kind && !start ? <button type="button" onClick={() => setKind(null)} className="inline-flex cursor-pointer items-center gap-1 self-start text-[13px] leading-[18px] text-ink-secondary hover:text-ink">
-    <ChevronLeft size={14} aria-hidden="true" />{t("rail.back")}</button> : null;
-  const shared = network?.state === "ready" && network.shared;
-  const networkReady = shared && Boolean(tailnetAddress);
-  // On and shared, but nothing answers at the address yet: the step is to check again, never Add a computer again.
-  const stepAction: NetworkAction | null = shared && !tailnetAddress ? (onCheck ? { label: t("remote.checkAgain"), run: onCheck, busy: checking } : null) : networkAction;
-  const newServer = places.find((place) => !placesBefore.has(place.id))?.name ?? null;
-  const title = kind === "computer" ? t("devicesPage.add.computer") : kind === "server" ? t("devicesPage.add.server") : kind === "phone" ? t("devicesPage.add.phone") : t("devicesPage.add");
-  return (
-    <SettingsDialog title={title} onClose={onClose} footer={<button type="button" className={cn("ui-button", kind && "ui-button-primary")} onClick={onClose}>{t("devices.pair.done")}</button>}>
-      <div className="flex flex-col gap-3" data-add-step={kind ?? "choose"}>
-        {back}
-        {!kind && <>
-          <Option kind="phone" icon={<Smartphone size={16} />} title={t("devicesPage.add.phone")} line={t("devicesPage.add.phoneLine", { app: productName() })} onChoose={choose} />
-          <Option kind="computer" icon={<Laptop size={16} />} title={t("devicesPage.add.computer")} line={t("devicesPage.add.computerLine")} onChoose={choose} />
-          <Option kind="server" icon={<Server size={16} />} title={t("devicesPage.add.server")} line={t("devicesPage.add.serverLine")} onChoose={choose} />
-          {onGetCloud && <Option kind="cloud" icon={<Cloud size={16} />} title={t("devicesPage.add.cloud")} line={t("devicesPage.add.cloudLine")} onChoose={choose} />}
-        </>}
-        {kind === "phone" && !here && <PairCodePanel kind="phone" address={null} onConnected={onConnected} />}
-        {kind === "computer" && (cloud
-          ? <p className="text-[13px] leading-[18px] text-ink-secondary">{t("devicesPage.addFlow.computerCloud", { app: productName() })}</p>
-          : here && !networkReady
-          ? network && <NetworkStep network={network} action={stepAction} waiting={Boolean(shared && !tailnetAddress)} />
-          : <>
-            <p className="text-[13px] leading-[18px] text-ink-secondary">{t(here ? "devicesPage.addFlow.computerNeeds" : "devicesPage.addFlow.computerInstall", { app: productName() })}</p>
-            <PairCodePanel kind="computer" address={tailnetAddress} onConnected={onConnected} />
-          </>)}
-        {kind === "server" && <>
-          <CommandRow label={t("devicesPage.addFlow.serverAnywhere")} command={SERVER_COMMANDS.anywhere} />
-          <CommandRow label={t("devicesPage.addFlow.serverTailscale")} command={SERVER_COMMANDS.tailscale} />
-          <p className="text-[12px] leading-4 text-ink-secondary">{t("devicesPage.addFlow.serverNeeds")}</p>
-          {onConnectServer
-            ? <>
-              <div><button type="button" className="ui-button" data-connect-server="" onClick={onConnectServer}>{t("devicesPage.addFlow.pasteLink")}</button></div>
-              <Waiting connected={newServer} />
-            </>
-            : <p className="text-[12px] leading-4 text-ink-secondary">{t("devicesPage.addFlow.serverDesktop", { app: productName() })}</p>}
-        </>}
-      </div>
-    </SettingsDialog>
-  );
-}
