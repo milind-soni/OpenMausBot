@@ -114,7 +114,7 @@ import { boatCreateRecoverySnapshot } from "./boat-create-idempotency.ts";
 import { boatDeletionSnapshot } from "./boat-delete-journal.ts";
 import { liveDecisionRefusal } from "../shared/live-approval.ts"; import type { PersonWaitKind } from "../shared/person-wait.ts";
 import { vpsLeftBehindNotice, vpsNotChosenReason } from "./cloud-backend.ts";
-import * as composio from "./composio.ts"; import { createConnectorListingRoutes } from "./routes/connectors-listing.ts"; import { createGhTools } from "./github/gh-cli.ts"; import { createGithubSignIn } from "./github/sign-in.ts"; import { provideGithubSignIn } from "./github/token.ts"; import { createGitCredentialRoutes } from "./github/git-credential.ts"; import { createGithubSignInRoutes } from "./routes/github-sign-in.ts";
+import * as composio from "./composio.ts"; import { createConnectorListingRoutes } from "./routes/connectors-listing.ts"; import { createGhTools } from "./github/gh-cli.ts"; import { createGithubSignIn } from "./github/sign-in.ts"; import { provideGithubSignIn } from "./github/token.ts"; import { createGitCredentialRoutes } from "./github/git-credential.ts"; import { gitAudience } from "./github/git-access.ts"; import { createGithubSignInRoutes, githubAudience } from "./routes/github-sign-in.ts";
 import { appSandboxRule, connectorCallFromFrame, connectorRefusalText, connectorScopeRefusalText, connectorUnrecognizedText, evaluateConnectorTools } from "./connector-verdict.ts";
 import { signInCardText } from "./connector-card-text.ts";
 import { BOT_HELD_CODE, BOT_PAUSED_CODE } from "../shared/bot-limit.ts"; import { createBotHolds } from "./host/bot-holds.ts"; import { createBotHoldRoutes } from "./routes/bot-holds.ts"; import { createCliLogin } from "./routes/cli-login.ts"; import { createStarterAwake } from "./host/starter-awake.ts"; import { createStarterCaps } from "./host/starter-caps.ts"; import { createStarterRoutineWake, workInFlight, type StarterRoutineWake } from "./host/starter-routine-wake.ts"; import { createStarterAwakeRoutes } from "./routes/starter-awake.ts"; import { chiefOfStaffPrompt, chiefOfStaffSystemPrompt } from "./chief-of-staff.ts"; import { coordinateMessageMax, coordinateTooLong, reportBackTooLong } from "./too-long.ts"; import { chiefAbsentFrom, createChiefRooms } from "./host/chief-rooms.ts"; import { chiefLevel, readTeamRolesWith } from "./chief-level.ts"; import { defaultBotRefusal, ensureDefaultBot } from "./default-bot.ts";
@@ -384,7 +384,7 @@ import {
   stageSkillWrite,
   undoSkillWrite,
 } from "./skills.ts";
-import { fetchSkillFromSource } from "./skill-fetch.ts";
+import { fetchSkillFromSource, skillImportToken } from "./skill-fetch.ts";
 import { ensureTaskWorkspaceWithSkills, harnessSkillLinks } from "./skill-task-links.ts"; import { changedWords, createLendingLifts, handedInSince } from "./host/lending-lifts.ts"; import { deviceWord } from "./lent-computers.ts"; import { sendingSession } from "./sending-sessions.ts";
 import { importedSkillRequest, parseSkillManageReferences, previousSkillVersion, skillCardCopy, skillRequestReferences } from "./skill-request-card.ts";
 import { skillReferencesSha256 } from "./skill-storage.ts";
@@ -12000,7 +12000,7 @@ ROUTES.push(createBotLifecycleRoutes({
   store, routines: () => routines, interruptAllDirectThreads, cancelDirectTurnDispatch, revokeInternalCapabilitiesForThread,
   activeGroupTurnForBot, cancelGroupTurnOperations, runningTurnInstance, closeOpenApprovals, deleteBotWithLifecycle, deleteRefusal: (auth, botId) => memberDeleteRefusal(auth, store.bot(botId), Boolean(CLOUD_TEAM)),
 }));
-const skillsRoutes = createBotSkillsRoutes({ store, cfg, listBotSkills, readBotSkillFile, stagedSkillListing }); ROUTES.push(skillsRoutes);
+const skillsRoutes = createBotSkillsRoutes({ store, cfg, listBotSkills, readBotSkillFile, stagedSkillListing, team: Boolean(CLOUD_TEAM) }); ROUTES.push(skillsRoutes);
 ROUTES.push(createEmailRoutes({ service: emailService }));
 ROUTES.push(phones.routes);
 ROUTES.push(createSkillShareRoutes({ enabled: () => skillsHost.mode() !== "off", botExists: (id) => Boolean(store.bot(id)),
@@ -13416,7 +13416,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 403, { error: "source conversation does not belong to sender" });
         }
         if (isSkillSwitchAction(received.action)) { const staged = skillSwitch.stage(from, fromThreadId, received.action, received, appliesDirectly(from.id, fromThreadId)); return json(res, staged.status, staged.body); }
-        const body = await importedSkillRequest(received, fetch, callSignal); if ("importError" in body) return json(res, 422, { error: body.importError }); if (!internalCapabilityIsActive(internalCapability)) return json(res, 401, { error: TURN_ENDED_REFUSAL }); if (!skillAuthoringEnabled(cfg)) return json(res, 403, { error: "skill authoring is not enabled in Settings" });
+        const body = await importedSkillRequest(received, fetch, callSignal, () => skillImportToken(gitAudience(fromThreadId))); if ("importError" in body) return json(res, 422, { error: body.importError }); if (!internalCapabilityIsActive(internalCapability)) return json(res, 401, { error: TURN_ENDED_REFUSAL }); if (!skillAuthoringEnabled(cfg)) return json(res, 403, { error: "skill authoring is not enabled in Settings" });
         const direct = appliesDirectly(from.id, fromThreadId);
         const persistence = skillProposalPersistence(from.id, fromThreadId, !direct);
         if (!persistence.ok) return json(res, persistence.status, { error: persistence.error });
@@ -14541,7 +14541,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const checked = z.object({ source: z.string().min(1).max(2000) }).strict().safeParse(await readBody(req));
       if (!checked.success) return json(res, 400, { error: checked.error.message });
       const input = checked.data;
-      const fetched = await fetchSkillFromSource(input.source);
+      const fetched = await fetchSkillFromSource(input.source, fetch, undefined, () => skillImportToken(githubAudience(auth, Boolean(CLOUD_TEAM))));
       if ("error" in fetched) return json(res, 422, { error: fetched.error });
       const skills = [];
       for (const skill of fetched.skills) {

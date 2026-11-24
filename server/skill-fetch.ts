@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import type { GitHubSkillOrigin, SkippedSkillFile } from "../shared/skill-import.ts";
 import { SKILL_FILE_MAX_BYTES } from "../shared/skill-md.ts";
+import { githubToken } from "./github/token.ts";
 import { planSkillFolder, SKILL_FOLDER_LIMITS, type FolderEntry, type SkillFolderFile } from "./skill-folder.ts";
 
 const API = "https://api.github.com";
@@ -15,20 +16,61 @@ const PARALLEL_DOWNLOADS = 4;
 class ImportLimitError extends Error {}
 class GitHubApiError extends Error {}
 
+/** A refused audience (`null`) stays anonymous. `githubToken(null)` is the server sign-in off a Team Cloud. */
+export function skillImportToken(audience?: string | null): Promise<string | null> {
+  return audience === null ? Promise.resolve(null) : githubToken(audience);
+}
+
+function requestHref(input: Parameters<typeof fetch>[0]): string {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.href;
+  return input.url;
+}
+
+function isGitHubApiRequest(input: Parameters<typeof fetch>[0]): boolean {
+  try {
+    return new URL(requestHref(input)).origin === API;
+  } catch {
+    return false;
+  }
+}
+
+function withBearer(input: Parameters<typeof fetch>[0], init: RequestInit | undefined, credential: string): Headers | null {
+  // Headers.set quotes an illegal value in its TypeError, which would return the sign-in in the import error.
+  if (!/^[A-Za-z0-9_]+$/.test(credential)) return null;
+  const headers = new Headers(input instanceof Request ? input.headers : undefined);
+  if (init?.headers) new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+  headers.set("authorization", `Bearer ${credential}`);
+  return headers;
+}
+
 // One budget for the whole import, enforced while reading the stream.
-function boundedImportFetch(fetcher: typeof fetch, cancel?: AbortSignal): typeof fetch {
+function boundedImportFetch(
+  fetcher: typeof fetch,
+  cancel?: AbortSignal,
+  authorization: () => Promise<string | null> = () => skillImportToken(),
+): typeof fetch {
   let apiRequests = 0;
   let downloads = 0;
   let bytes = 0;
   const timeout = AbortSignal.timeout(IMPORT_LIMITS.ms);
   const signal = cancel ? AbortSignal.any([timeout, cancel]) : timeout;
   return async (input, init) => {
-    const listing = String(input).startsWith(`${API}/`);
-    if (listing ? ++apiRequests > IMPORT_LIMITS.apiRequests : ++downloads > IMPORT_LIMITS.downloads) {
+    const api = isGitHubApiRequest(input);
+    if (api ? ++apiRequests > IMPORT_LIMITS.apiRequests : ++downloads > IMPORT_LIMITS.downloads) {
       throw new ImportLimitError("Import request limit reached — paste a specific skill folder instead.");
     }
     signal.throwIfAborted();
-    const response = await fetcher(input, { ...init, signal });
+    const sent: RequestInit = { ...init, signal };
+    if (api) {
+      const credential = await authorization();
+      const headers = credential ? withBearer(input, init, credential) : null;
+      if (headers) {
+        sent.headers = headers;
+        sent.redirect = "error";
+      }
+    }
+    const response = await fetcher(input, sent);
     if (!response.ok) {
       await response.body?.cancel().catch(() => {});
       return response;
@@ -43,7 +85,7 @@ function boundedImportFetch(fetcher: typeof fetch, cancel?: AbortSignal): typeof
         if (chunk.done) break;
         size += chunk.value.byteLength;
         bytes += chunk.value.byteLength;
-        if (size > (listing ? LISTING_MAX_BYTES : SKILL_FOLDER_LIMITS.fileBytes) || bytes > IMPORT_LIMITS.bytes) {
+        if (size > (api ? LISTING_MAX_BYTES : SKILL_FOLDER_LIMITS.fileBytes) || bytes > IMPORT_LIMITS.bytes) {
           throw new ImportLimitError("Import size limit reached — paste a smaller skill folder instead.");
         }
         chunks.push(chunk.value);
@@ -159,7 +201,7 @@ function encodePath(path: string): string {
 function apiError(response: Response, url: string): GitHubApiError {
   const limited = response.status === 429 || (response.status === 403 && response.headers.get("x-ratelimit-remaining") === "0");
   return new GitHubApiError(limited
-    ? "GitHub's limit for requests without sign-in was reached — try again within the hour"
+    ? "GitHub's API rate limit was reached — try again later"
     : `GitHub API ${response.status} for ${url}`);
 }
 
@@ -359,10 +401,11 @@ export async function fetchSkillFromSource(
   input: string,
   fetcher: typeof fetch = fetch,
   cancel?: AbortSignal,
+  authorization?: () => Promise<string | null>,
 ): Promise<{ skills: FetchedSkill[] } | { error: string }> {
   const parsed = parseSkillSource(input);
   if ("error" in parsed) return parsed;
-  fetcher = boundedImportFetch(fetcher, cancel);
+  fetcher = boundedImportFetch(fetcher, cancel, authorization);
   try {
     return { skills: await fetchSkills(parsed, fetcher) };
   } catch (error) {
@@ -377,9 +420,13 @@ export async function fetchSkillFromSource(
 }
 
 /** The commit a GitHub skill's link names now: newer than `origin.commit` means an update is available. */
-export async function latestSkillCommit(origin: GitHubSkillOrigin, fetcher: typeof fetch = fetch): Promise<string | { error: string }> {
+export async function latestSkillCommit(
+  origin: GitHubSkillOrigin,
+  fetcher: typeof fetch = fetch,
+  authorization?: () => Promise<string | null>,
+): Promise<string | { error: string }> {
   try {
-    return await resolveCommit(origin.owner, origin.repo, origin.ref, boundedImportFetch(fetcher));
+    return await resolveCommit(origin.owner, origin.repo, origin.ref, boundedImportFetch(fetcher, undefined, authorization));
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
   }

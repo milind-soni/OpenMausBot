@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DATA_DIR, type AppConfig } from "../config.ts";
+import { provideGithubSignIn } from "../github/token.ts";
 import { json, readBody } from "../harness/http.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { installLibrarySkill, readLibrarySkillFile, setLibrarySkillEveryBot } from "../skill-library.ts";
@@ -19,6 +20,7 @@ const SKILL = "---\nname: pdf-forms\ndescription: Fills PDF forms.\n---\n\n# PDF
 
 const servers: Server[] = [];
 afterEach(async () => {
+  provideGithubSignIn(null);
   vi.unstubAllGlobals();
   await Promise.all(servers.splice(0).map((server) => new Promise((done) => server.close(done))));
 });
@@ -31,6 +33,7 @@ async function serve(botId: string) {
     listBotSkills: () => [],
     readBotSkillFile: () => null,
     stagedSkillListing: (staged) => staged,
+    team: false,
   })];
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -79,6 +82,76 @@ describe("importing a skill from GitHub into a bot", () => {
   });
 });
 
+describe("whose GitHub sign-in a bot import uses", () => {
+  const TOKEN = "gho_syntheticSkillImportToken";
+  const OWNER = "gho_ownerSignInMustNotLeak";
+  const SKILL_MD = "---\nname: pdf\ndescription: Does pdf things.\n---\n\n# pdf\n";
+
+  async function importAs(auth: RequestAuth) {
+    const asked: Array<string | null | undefined> = [];
+    provideGithubSignIn({
+      token: async (audience) => { asked.push(audience); return audience === "owner" ? TOKEN : OWNER; },
+      reportAuthFailure: () => {},
+      signedIn: () => true,
+    });
+    const botId = `route-auth-${Math.random().toString(36).slice(2, 10)}`;
+    const realFetch = globalThis.fetch;
+    const github = fakeGitHub({ "acme/skills": { "skills/pdf/SKILL.md": SKILL_MD } });
+    const calls: Array<{ url: string; headers: Headers }> = [];
+    const recording: typeof fetch = async (input, init) => {
+      calls.push({ url: String(input), headers: new Headers(init?.headers) });
+      return github.fetch(input, init);
+    };
+    vi.stubGlobal("fetch", recording);
+    const store = { bot: (id: string) => (id === botId ? { id } : undefined), bots: [] } as unknown as Store;
+    const routes = [createBotSkillsRoutes({
+      store,
+      cfg: {} as AppConfig,
+      listBotSkills: () => [],
+      readBotSkillFile: () => null,
+      stagedSkillListing: (staged) => staged,
+      team: false,
+    })];
+    const server = createServer(async (req, res) => {
+      const url = new URL(req.url ?? "/", "http://localhost");
+      if (!await dispatchRoutes(routes, { req, res, url, path: url.pathname, method: req.method ?? "GET", auth, json, readBody })) json(res, 404, {});
+    });
+    servers.push(server);
+    await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
+    const response = await realFetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/bots/${botId}/skills`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ source: "acme/skills" }),
+    });
+    const body = await response.json() as { error?: string };
+    return { status: response.status, body, calls, asked };
+  }
+
+  it("sends the owner sign-in on API requests for an owner or admin", async () => {
+    const { status, body, calls, asked } = await importAs({ kind: "loopback", scopes: ["admin"] } as RequestAuth);
+    expect(status).toBe(201);
+    const api = calls.filter((call) => call.url.startsWith("https://api.github.com/"));
+    const raw = calls.filter((call) => call.url.startsWith("https://raw.githubusercontent.com/"));
+    expect(api.length).toBeGreaterThan(0);
+    expect(raw.length).toBeGreaterThan(0);
+    expect(api.every((call) => call.headers.get("authorization") === `Bearer ${TOKEN}`)).toBe(true);
+    expect(raw.every((call) => call.headers.get("authorization") === null)).toBe(true);
+    expect(asked).toContain("owner");
+    expect(JSON.stringify(body)).not.toContain(TOKEN);
+    expect(calls.every((call) => !call.url.includes(TOKEN))).toBe(true);
+  });
+
+  it("stays anonymous when this request may not use the server sign-in, even if that sign-in exists", async () => {
+    const { status, body, calls, asked } = await importAs({ kind: "loopback", scopes: ["admin"], trust: "service" } as RequestAuth);
+    expect(status).toBe(201);
+    expect(calls.some((call) => call.url.startsWith("https://api.github.com/"))).toBe(true);
+    expect(calls.every((call) => call.headers.get("authorization") === null)).toBe(true);
+    expect(asked).toEqual([]);
+    expect(JSON.stringify({ body, calls })).not.toContain(OWNER);
+    expect(JSON.stringify({ body, calls })).not.toContain(TOKEN);
+  });
+});
+
 const learned = (name: string) => `---\nname: ${name}\ndescription: A skill.\n---\n\n# ${name}\n\nSteps.\n`;
 
 describe("removing a skill from one bot", () => {
@@ -117,6 +190,7 @@ describe("removing a skill from one bot", () => {
       ] as never,
       readBotSkillFile: () => null,
       stagedSkillListing: (staged) => staged,
+      team: false,
     })];
     const server = createServer(async (req, res) => {
       const url = new URL(req.url ?? "/", "http://localhost");
@@ -181,6 +255,7 @@ describe("removing a skill from one bot", () => {
       listBotSkills: () => [],
       readBotSkillFile: () => null,
       stagedSkillListing: (staged) => staged,
+      team: false,
     })];
     const server = createServer(async (req, res) => {
       const url = new URL(req.url ?? "/", "http://localhost");
