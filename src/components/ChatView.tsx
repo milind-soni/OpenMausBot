@@ -936,7 +936,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
         <div data-chathead-identity className={cn("flex min-w-0 items-center gap-2", phone ? "flex-1" : "@max-[30rem]/chathead:basis-full @min-[30rem]/chathead:col-start-2 @min-[30rem]/chathead:justify-self-center", simpleHead && phone && "justify-center")} style={headerNoDragStyle}>
           {simpleHead ? (
             <ChatHeadPill
-              bot={bot}
+              bot={bot} tabsAbove={!inForkPanel}
               avatar={{ state: stateForBot({ ...bot, messages }), motion: headerMotion, motionKey: mascotMotion?.nonce ?? 0, animated: headerAnimated }}
               privacy={privateChat ? { kind: "private" } : ownHelper ? { kind: "ownHelper" } : sharedChat && team ? { kind: "shared", team: team.name, onlyPeopleAdded: bot.onlyPeopleAdded, sharedWith: currentTask?.sharedWith?.name } : null}
               onToggle={() => dispatch({ type: "toggleSettings", open: !state.settingsOpen })}

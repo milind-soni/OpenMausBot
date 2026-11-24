@@ -33,8 +33,9 @@ function privacyLabelOf(privacy: ChatHeadPrivacy): string | null {
 /** Simple mode's whole chat header: the bot's face and name in one pill, which opens and closes the bot panel. Away from
  * the bot's main conversation it also names the one on screen. A dot says another of the bot's conversations needs a
  * look; a team chat says who can read it with one quiet glyph. */
-export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
+export function ChatHeadPill({ bot, avatar, privacy, onToggle, tabsAbove = false }: {
   bot: Bot;
+  tabsAbove?: boolean;
   avatar: Pick<ComponentProps<typeof BotAvatar>, "state" | "motion" | "motionKey" | "animated">;
   privacy: ChatHeadPrivacy;
   onToggle: () => void;
@@ -48,7 +49,7 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
   const conversation = !awayFromMainThread(bot, false) ? (privacy?.kind === "shared" ? t("task.sharedChat") : null)
     : !title || title === UNTITLED ? t("task.untitledChat") : localizedTaskTitle(title);
   const label = t("chat.openProfileAria", { name: bot.name });
-  const tabsName = useThreadTabsShown(bot.id);
+  const tabsName = useThreadTabsShown(bot.id) && tabsAbove;
   return (
     <button
       type="button"
