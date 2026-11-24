@@ -23,7 +23,7 @@ describe("the Skill Burger switch on the server", () => {
   });
 
   it("is a config.json field Settings can patch, with thread tabs beside it", () => {
-    expect(parseConfigPatch({ features: { skillBurger: false, threadTabs: true } })).toMatchObject({ features: { skillBurger: false, threadTabs: true } });
+    expect(parseConfigPatch({ features: { skillBurger: false, threadTabs: true, roomFeed: true } })).toMatchObject({ features: { skillBurger: false, threadTabs: true, roomFeed: true } });
   });
 
   it("offers the run and edit tools while on, and neither once off", () => {

@@ -1,6 +1,7 @@
 import { botShowsUnread } from "@/lib/bot-unread";
 import type { Action, AppState, BotAnnouncement, Group } from "./store";
 import { serverFetch } from "@/lib/relay-server";
+import { roomFeedShows } from "@/lib/room-feed";
 
 /** "seen": only on screen, which a conversation the person marked unread with it open holds against; "open": the person
  * opened it again, which ends that mark. */
@@ -59,6 +60,10 @@ export function shownChatHeldUnread(state: AppState): boolean {
   return marked === undefined || newest === undefined || newest <= marked;
 }
 
+/** Whether the thread panel holds one of this owner's threads: it is on screen beside whatever the chat shows. */
+const panelHolds = (state: AppState, kind: "bot" | "group", ownerId: string) => state.forkPanel?.kind === kind && state.forkPanel.ownerId === ownerId;
+const chatShows = (state: AppState, id: string) => id === state.selectedId && state.activeView === "chat";
+
 function visibleThreadIds(state: AppState, kind: "bot" | "group", ownerId: string, shown?: string): string[] {
   const panel = state.forkPanel;
   return [...new Set([shown, panel?.kind === kind && panel.ownerId === ownerId ? panel.threadId : undefined])]
@@ -66,8 +71,8 @@ function visibleThreadIds(state: AppState, kind: "bot" | "group", ownerId: strin
 }
 
 export function markVisibleBotThreadsRead(state: AppState, bot: BotAnnouncement, focused: boolean, post: SendRead = sendRead): void {
-  if (bot.id !== state.selectedId || state.activeView !== "chat" || !focused) return;
-  const selected = state.bots.find((candidate) => candidate.id === bot.id);
+  if (!focused || !(chatShows(state, bot.id) || panelHolds(state, "bot", bot.id))) return;
+  const selected = chatShows(state, bot.id) ? state.bots.find((candidate) => candidate.id === bot.id) : undefined;
   const shown = selected?.switchingTo ?? selected?.threadId;
   const visibleThreads = visibleThreadIds(state, "bot", bot.id, shown);
   let held = false;
@@ -97,8 +102,9 @@ export function markVisibleBotThreadsRead(state: AppState, bot: BotAnnouncement,
 
 export function markVisibleGroupThreadsRead(state: AppState, group: Partial<Group> & { id: string }, focused: boolean,
   post: SendRead = sendRead): void {
-  if (group.id !== state.selectedId || state.activeView !== "chat" || !focused) return;
-  const shown = state.groups.find((candidate) => candidate.id === group.id)?.threadId;
+  if (!focused || !(chatShows(state, group.id) || panelHolds(state, "group", group.id))) return;
+  const room = chatShows(state, group.id) ? state.groups.find((candidate) => candidate.id === group.id) : undefined;
+  const shown = room && !roomFeedShows(state.config, room) ? room.threadId : undefined;
   const visibleThreads = visibleThreadIds(state, "group", group.id, shown);
   for (const threadId of visibleThreads) {
     const task = group.tasks?.find((candidate) => candidate.threadId === threadId);

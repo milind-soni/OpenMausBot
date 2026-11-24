@@ -11626,7 +11626,7 @@ function configStatus() {
       autoRecall: autoRecallEnabled(cfg),
       roomMemoryCapture: roomMemoryCaptureEnabled(cfg),
       parallelRoomJobs: parallelRoomJobsEnabled(cfg),
-      savedSteps: savedStepsEnabled(cfg), savedStepsHere: savedSteps.here(), skillBurger: skillBurgerEnabled(cfg), threadTabs: cfg.features?.threadTabs === true,
+      savedSteps: savedStepsEnabled(cfg), savedStepsHere: savedSteps.here(), skillBurger: skillBurgerEnabled(cfg), threadTabs: cfg.features?.threadTabs === true, roomFeed: cfg.features?.roomFeed === true,
       usbPhoneTakeover: HAS_USB_PORT ? usbPhoneTakeoverEnabled(cfg) : undefined,
     },
     onboarding: {
@@ -12064,7 +12064,7 @@ ROUTES.push(createGroupRoutes({
 ROUTES.push(createChannelRoutes({
   store, threadRead: teamMessages.seen, runOwners, runActor,
   personMarkRoom: personRooms.personMarkRoom,
-  groupFor: personRooms.groupForAuth,
+  groupFor: personRooms.groupForAuth, threadShown: (auth: RequestAuth, threadId: string) => visibleTo(viewerFor(auth)).thread(threadId),
   cfg,
   userName: userNameFor,
   desktopManaged: DESKTOP_MANAGED,
