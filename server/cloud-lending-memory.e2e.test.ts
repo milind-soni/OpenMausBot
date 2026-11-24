@@ -1475,9 +1475,9 @@ it("his own line in a thread a bot opened gets the card; Allow lets that line th
   expect((await sees(mine)).computers).toHaveLength(1);
   // Still not his own conversation for what feeds memory.
   expect((await mine("memory_update", { action: "append", text: INJECTED })).isError).toBe(true);
-  // The bot that opened it hands more work into it while his turn runs: that shuts it again.
+  // The bot that opened it hands more work into it, by its thread id, while his turn runs: that shuts it again.
   const senderTools = await toolsFor(() => say(owner, sender, "Send them one more thing.", sender.threadId));
-  const more2 = JSON.parse((await senderTools("coordinate_bots", { bot_ids: [receiver.id], message: "Also check the spam folder." })).content[0].text);
+  const more2 = JSON.parse((await senderTools("coordinate_bots", { bot_ids: [receiver.id], message: "Also check the spam folder.", thread })).content[0].text);
   expect(more2.receipts?.[0]?.threadId, JSON.stringify(more2)).toBe(thread);
   await expect.poll(async () => (await sees(mine)).computers.length).toBe(0);
   await stop(sender, sender.threadId);

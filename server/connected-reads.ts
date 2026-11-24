@@ -39,6 +39,8 @@ export interface EmailHeader {
   subject: string;
   preview: string;
   app?: MailApp;
+  /** Outlook's own web address for the message. */
+  link?: string;
 }
 
 export interface ThreadMessage {
@@ -333,6 +335,7 @@ function outlookHeader(raw: unknown): EmailHeader | null {
     subject: flat(item.subject),
     preview: flat(item.bodyPreview).slice(0, PREVIEW_MAX),
     app: "outlook",
+    ...(typeof item.webLink === "string" && item.webLink ? { link: item.webLink } : {}),
   };
 }
 
@@ -626,7 +629,7 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
         for (;;) {
           const data = await call(OUTLOOK_LIST_TOOL, {
             user_id: "me", folder: "inbox", top: size, received_date_time_ge: new Date(sinceMs).toISOString(),
-            select: ["id", "subject", "from", "receivedDateTime", "bodyPreview", "conversationId"],
+            select: ["id", "subject", "from", "receivedDateTime", "bodyPreview", "conversationId", "webLink"],
           }, { shortened: size > GMAIL_PAGE_MIN, pin });
           if (data === SHORTENED) {
             size = Math.max(GMAIL_PAGE_MIN, Math.floor(size / 2));
@@ -637,7 +640,7 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
       },
       async outlookMessage(id) {
         const data = await call(OUTLOOK_MESSAGE_TOOL, {
-          user_id: "me", message_id: id, select: ["id", "subject", "from", "receivedDateTime", "bodyPreview", "conversationId"],
+          user_id: "me", message_id: id, select: ["id", "subject", "from", "receivedDateTime", "bodyPreview", "conversationId", "webLink"],
         }, { gone: messageGone });
         return data === GONE ? null : parsed("outlook", () => outlookMessageFromData(data));
       },

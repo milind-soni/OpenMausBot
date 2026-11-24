@@ -52,9 +52,11 @@ import { piSessionDir, piSessionPath, piTurnArgs } from "./pi-session.ts";
 import { piAgentDir, readPiDefaultModel, withOwnPiAgentDir } from "./pi-agent-dir.ts";
 import { noticeFailure } from "../chat-notices.ts";
 
+import { piCatalogFromFrame } from "./pi-catalog.ts";
 import { decodePiFrame, PiRpcChunks, piLineReader, piNativeLogMessage, readPiPromptImages } from "./pi-rpc.ts";
-import { PiRunUsage, type PiUsage, type TurnUsage } from "./pi-usage.ts";
+import { piMessageUsage, PiRunUsage, type PiUsage, type TurnUsage } from "./pi-usage.ts";
 export { decodePiFrame, PiRpcChunks, piLineReader } from "./pi-rpc.ts";
+export { parsePiCatalog } from "./pi-catalog.ts";
 
 const DRIVER_KIND = "piAgent";
 const PI_ARGS = ["--mode", "rpc", "--no-session"]; // catalog probes only: do not write a session file
@@ -74,46 +76,6 @@ class PiRpcRefusalError extends Error {}
 
 export function piThinkingLevel(effort: EffortLevel): (typeof PI_EFFORT_LEVELS)[number] | "off" {
   return effort === "none" ? "off" : effort === "ultra" ? "max" : effort;
-}
-
-interface PiModelEntry {
-  provider: string;
-  id: string;
-  name?: string;
-}
-
-interface PiModelsResponse {
-  type: "response";
-  command: "get_available_models";
-  success: boolean;
-  data?: { models?: PiModelEntry[] };
-}
-
-function piCatalogFromFrame(frame: unknown, fallbackDefault: string): ModelCatalog | null {
-  const res = frame as PiModelsResponse;
-  if (res?.type !== "response" || res.command !== "get_available_models" || !res.success) return null;
-  const options: Array<{ id: string; label: string; custom: true; provider: string }> = [];
-  for (const m of res.data?.models ?? []) {
-    if (!m?.provider || !m?.id) continue;
-    const id = `${m.provider}/${m.id}`;
-    options.push({ id, label: m.name ?? m.id, custom: true, provider: m.provider });
-  }
-  return { default: fallbackDefault || (options[0]?.id ?? ""), options };
-}
-
-export function parsePiCatalog(stdout: string, fallbackDefault = ""): ModelCatalog {
-  for (const line of stdout.split("\n")) {
-    if (!line.trim()) continue;
-    let msg: unknown;
-    try {
-      msg = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const catalog = piCatalogFromFrame(msg, fallbackDefault);
-    if (catalog) return catalog;
-  }
-  return { default: fallbackDefault, options: [] };
 }
 
 export function splitPiModel(id: string): { provider: string; modelId: string } | null {
@@ -710,9 +672,23 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             if (evt.type.endsWith("compaction_end") && typeof (evt as { result?: { summary?: unknown } }).result?.summary === "string" && /\S/.test((evt as { result: { summary: string } }).result.summary) && !(evt as { aborted?: boolean }).aborted && !(evt as { errorMessage?: string }).errorMessage) { flushAssistantText(); emit({ ...base(threadId, turnId), type: "context.compacted" }); }
             return;
           }
-          case "message_end":
-            if (evt.message?.role === "assistant") runUsage.add(evt.message.usage);
+          case "message_end": {
+            if (evt.message?.role !== "assistant") return;
+            runUsage.add(evt.message.usage);
+            const call = piMessageUsage(evt.message.usage);
+            if (!call) return;
+            const contextWindow = models.options.find((option) => option.id === turn.model)?.contextWindow;
+            emit({
+              ...base(threadId, turnId),
+              type: "thread.token-usage.updated",
+              input: call.input,
+              output: call.output,
+              ...(call.cachedInput === undefined ? {} : { cachedInput: call.cachedInput }),
+              contextTokens: call.contextTokens,
+              ...(typeof contextWindow === "number" && contextWindow > 0 ? { contextWindow } : {}),
+            });
             return;
+          }
           case "turn_end":
           {
             // A killed child can still flush one buffered frame after the turn settled.
