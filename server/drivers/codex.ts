@@ -680,8 +680,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           && warm.keep(threadId, { connection, contract, nativeThreadId: codexThreadId, ...keepable })) return complete();
         completeStoppedTurn = complete;
         if (await stop()) return;
-        emit({ ...base(threadId, turnId), type: "runtime.error", message: "codex did not shut down after termination was requested" });
-        await keepStopping(terminate, () => active.get(threadId)?.stop === stop);
+        const owned = () => active.get(threadId)?.stop === stop;
+        if (!(await keepStopping(terminate, owned)) && owned()) {
+          emit({ ...base(threadId, turnId), type: "runtime.error", message: "codex did not shut down after termination was requested" });
+        }
         complete();
       };
 

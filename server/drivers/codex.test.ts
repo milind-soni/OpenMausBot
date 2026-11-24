@@ -2629,7 +2629,8 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     const stopping = vi.spyOn(procs, "killCliTree").mockResolvedValue(false);
     try {
       await expect(instance.signOut!()).rejects.toThrow("could not stop safely");
-      await recorder.until(event => event.type === "runtime.error" && event.message.includes("did not shut down"));
+      expect(stopping).toHaveBeenCalled();
+      expect(recorder.events.some(event => event.type === "runtime.error" && event.message.includes("did not shut down"))).toBe(false);
       const seen = JSON.parse(readFileSync(dump, "utf8"));
       expect(seen.calls.some((call: { method: string }) => call.method === "turn/interrupt")).toBe(true);
       expect(processIsAlive(seen.pid)).toBe(true);
@@ -2766,14 +2767,17 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     const stopping = vi.spyOn(procs, "killCliTree").mockResolvedValueOnce(false);
     await instance.adapter.sendTurn({ threadId: "t-stop-unconfirmed", text: "hi" });
     await expect(recorder.until((e) => e.type === "turn.completed", 10_000)).resolves.toMatchObject({ ok: true, stopReason: null });
-    expect(recorder.events.some((e) => e.type === "runtime.error" && e.message.includes("did not shut down"))).toBe(true);
+    expect(recorder.events.some((e) => e.type === "runtime.error" && e.message.includes("did not shut down"))).toBe(false);
     expect(stopping.mock.calls.length).toBeGreaterThan(1);
     expect(instance.adapter.hasSession("t-stop-unconfirmed")).toBe(false);
 
     recorder.events.length = 0;
+    stopping.mockClear();
     stopping.mockResolvedValue(false);
     await instance.adapter.sendTurn({ threadId: "t-stop-never", text: "hi" });
     await expect(recorder.until((e) => e.type === "turn.completed", 10_000)).resolves.toMatchObject({ ok: true });
+    expect(stopping.mock.calls.length).toBeGreaterThan(1);
+    expect(recorder.events.filter((e) => e.type === "runtime.error" && e.message.includes("did not shut down"))).toHaveLength(1);
     expect(instance.adapter.hasSession("t-stop-never")).toBe(false);
   });
 
@@ -3925,6 +3929,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
   it.each([false, true])("keeps ownership after an uncertain stop even when root close arrives (before failure: %s)", async (closeFirst) => {
     await create();
     vi.stubEnv("OMB_CODEX_SESSION_KEEP", "0");
+    vi.stubEnv("FAKE_CODEX_STOP_RETRY_MS", "100");
     const stopping = vi.spyOn(procs, "killCliTree").mockImplementation(async (child) => {
       if (closeFirst && child.exitCode === null && child.signalCode === null) {
         const closed = once(child, "close");
@@ -3935,15 +3940,16 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     });
     try {
       await instance.adapter.sendTurn({ threadId: "t-uncertain-stop", text: "one" });
-      await recorder.until((event) => event.type === "runtime.error" && event.message.includes("did not shut down"));
+      await expect.poll(() => stopping.mock.calls.length).toBeGreaterThan(0);
       const child = stopping.mock.calls[0]![0];
       if (!closeFirst) {
         const closed = once(child, "close");
         child.kill("SIGKILL");
         await closed;
-        await expect.poll(() => stopping.mock.calls.length).toBeGreaterThan(1);
       }
+      await expect.poll(() => stopping.mock.calls.length).toBeGreaterThan(1);
       expect(recorder.events.some((event) => event.type === "turn.completed")).toBe(false);
+      expect(recorder.events.some((event) => event.type === "runtime.error" && event.message.includes("did not shut down"))).toBe(false);
       expect(instance.adapter.hasSession("t-uncertain-stop")).toBe(true);
       await expect(instance.adapter.sendTurn({ threadId: "t-uncertain-stop", text: "two" })).rejects.toThrow(/already running/);
     } finally {
