@@ -11981,6 +11981,8 @@
   "room.feed.empty": "Nenhuma conversa ainda. Escreva abaixo para começar uma.",
   "room.feed.loadFailed": "Não foi possível carregar as conversas deste grupo.",
   "room.feed.startFailed": "Não foi possível começar a conversa. Verifique sua conexão e tente de novo.",
+  "room.feed.showArchived": "Mostrar conversas arquivadas",
+  "room.feed.hideArchived": "Ocultar conversas arquivadas",
   "room.thread.panel": "Conversa",
   "room.thread.close": "Fechar conversa",
   "room.thread.resize": "Redimensionar conversa",

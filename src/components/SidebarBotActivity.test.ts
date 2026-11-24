@@ -1,6 +1,6 @@
 import { BellDot, CircleAlert, Clock3, Loader2 } from "lucide-react";
-import { describe, expect, it } from "vitest";
-import type { Bot, Group, GroupTask, Task } from "@/state/store";
+import { describe, expect, it, vi } from "vitest";
+import type { AppState, Bot, Group, GroupTask, Task } from "@/state/store";
 import { botShowsUnread } from "@/lib/bot-unread";
 import { t } from "@/lib/i18n";
 import { attentionHasRunningWork, attentionJumpAction, attentionOwnerName, attentionRowStatus, attentionTriggerLabel, attentionUnpinAction, crossBotAttentionThreads, crossBotPinnedThreads, sidebarBotActivityTasks, sidebarGroupActivityTasks, threadsWaitingOnPerson, threadsWhenTreeHidden } from "./SidebarBotActivity";
@@ -188,6 +188,20 @@ describe("group attention", () => {
     const sideRoom = group("g", "Crew", "g0", { tasks: [{ threadId: "g0", title: "Crew", createdAt: 0 }, { threadId: "g1", title: "Side thread", createdAt: 0 }] });
     const [side] = crossBotAttentionThreads([], { g1: [{}] }, undefined, [sideRoom]);
     expect(attentionJumpAction(side)).toEqual({ type: "switchGroupTask", groupId: "g", threadId: "g1" });
+    const off = { config: { features: { roomFeed: false } } as AppState["config"], groups: [room] };
+    expect(attentionJumpAction(primary, off)).toEqual({ type: "select", id: "g" });
+  });
+
+  it("with the room feed on, opens a room's thread beside the feed, its current one too", () => {
+    vi.stubGlobal("window", { matchMedia: () => ({ matches: true }) });
+    const room = group("g", "Crew", "g0", { messages: [{ id: "m" }], tasks: [{ threadId: "g0", title: "Crew", createdAt: 0 }, { threadId: "g1", title: "Side", createdAt: 0 }] } as never);
+    const entries = crossBotAttentionThreads([], { g0: [{}], g1: [{}] }, undefined, [room]);
+    const on = { config: { features: { roomFeed: true } } as AppState["config"], groups: [room] };
+    expect(entries.map((entry) => attentionJumpAction(entry, on))).toEqual([
+      { type: "openForkPanel", kind: "group", ownerId: "g", threadId: "g0" },
+      { type: "openForkPanel", kind: "group", ownerId: "g", threadId: "g1" },
+    ]);
+    vi.unstubAllGlobals();
   });
 
   it("jumps a bot entry with switchTask", () => {

@@ -1334,7 +1334,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
         <SidebarAttentionPanel
           entries={attention}
           onUnpin={() => setAttentionPinned(false)}
-          onJump={(entry) => dispatch(attentionJumpAction(entry))}
+          onJump={(entry) => dispatch(attentionJumpAction(entry, state))}
           collapsed={sectionCollapsed(ATTENTION_SECTION_ID)}
           onToggle={layoutInteractive ? () => toggleSection(ATTENTION_SECTION_ID) : undefined}
         />

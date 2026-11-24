@@ -462,7 +462,7 @@ export function TaskPicker({ bot }: { bot: Bot }) {
       onDelete={(threadId) => dispatch({ type: "deleteTask", botId: bot.id, threadId })}
       onMove={(threadId, projectId) => dispatch({ type: "updateTask", botId: bot.id, threadId, patch: { projectId } })}
       onPin={(threadId, pinned) => dispatch({ type: "updateTask", botId: bot.id, threadId, patch: { pinned } })}
-      onAttentionJump={(entry) => dispatch(attentionJumpAction(entry))}
+      onAttentionJump={(entry) => dispatch(attentionJumpAction(entry, state))}
     />
   );
 }

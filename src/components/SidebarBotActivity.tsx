@@ -3,6 +3,7 @@ import type { Dispatch } from "react";
 import type { Action, AppState, Bot, Group, Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { roomThreadSpeakerId, roomThreadWorking } from "@/lib/room-threads";
+import { roomAttentionJump } from "@/lib/room-feed";
 import { t } from "@/lib/i18n";
 import { isArchived, orderedSidebarThreads, orderedThreadList } from "./SidebarThreadRow";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
@@ -96,14 +97,10 @@ export function attentionOwnerName(entry: AttentionThread): string {
   return entry.kind === "bot" ? entry.botName : entry.groupName;
 }
 
-export function attentionJumpAction(entry: AttentionThread):
-  | { type: "switchTask"; botId: string; threadId: string }
-  | { type: "switchGroupTask"; groupId: string; threadId: string }
-  | { type: "select"; id: string } {
+/** `state` lets a room thread open beside its feed when the room shows one. */
+export function attentionJumpAction(entry: AttentionThread, state?: Pick<AppState, "config" | "groups">): Action {
   if (entry.kind === "bot") return { type: "switchTask", botId: entry.botId, threadId: entry.task.threadId };
-  return entry.task.threadId === entry.groupThreadId
-    ? { type: "select", id: entry.groupId }
-    : { type: "switchGroupTask", groupId: entry.groupId, threadId: entry.task.threadId };
+  return roomAttentionJump(entry.groupId, entry.task.threadId, entry.task.threadId === entry.groupThreadId, state);
 }
 
 export function attentionUnpinAction(entry: AttentionThread):
