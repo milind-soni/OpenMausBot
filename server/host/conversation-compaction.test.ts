@@ -98,7 +98,7 @@ describe("compactConversation", () => {
         return options.engineCompact === "stale" ? "stale" : options.engineCompact ? "done" : "skipped";
       },
       resumesSession: () => options.resumes ?? true,
-      instance: () => undefined, currentSelection: () => ({ instanceId: "engine", model: "model" }),
+      instance: () => undefined, confirmDelivery: () => undefined, currentSelection: () => ({ instanceId: "engine", model: "model" }),
       generateText: options.generateText ?? (() => undefined),
       claimIsCurrent: options.claimIsCurrent ?? (() => true),
       controllers: new Map(),
@@ -245,7 +245,9 @@ describe("noteEngineCompaction", () => {
       resumeCursors: { engine: options.cursor ?? "s1" },
       handedMessages: options.handed ? { engine: { session: options.handed.session, through: options.handed.through, ids: [] } } : undefined,
     };
-    const deps: Pick<ConversationCompactionDeps, "store" | "directContext" | "instance"> = {
+    const confirmed: Array<[string, string | undefined, string]> = [];
+    const deps: Pick<ConversationCompactionDeps, "store" | "directContext" | "instance" | "confirmDelivery"> = {
+      confirmDelivery: (threadId, turnId, id) => { confirmed.push([threadId, turnId, id]); },
       store: {
         taskByThread: () => task as never,
         activePath: () => messages,
@@ -261,8 +263,8 @@ describe("noteEngineCompaction", () => {
         return { instanceId: id, driverKind: "engine", adapter };
       },
     };
-    const note = (direct = true, reported?: string) => createConversationCompaction(deps as never).noteEngineCompaction(direct ? bot : undefined, thread, reported, () => notices.push({}));
-    return { note, patches, notices };
+    const note = (direct = true, reported?: string) => createConversationCompaction(deps as never).noteEngineCompaction(direct ? bot : undefined, thread, "turn-1", reported, () => notices.push({}));
+    return { note, patches, notices, confirmed };
   }
 
   it("writes the boundary of a session its engine keeps, through what it had received, beside the notice", () => {
@@ -270,6 +272,7 @@ describe("noteEngineCompaction", () => {
     engine.note();
     expect(engine.patches).toEqual([{ engineCompacted: { instanceId: "engine", session: "s1", throughId: "b1" } }]);
     expect(engine.notices).toHaveLength(1);
+    expect(engine.confirmed).toEqual([["thread", "turn-1", "engine"]]);
   });
 
   it("only notices, for an engine that folds for itself or offers no compaction of its session", () => {
@@ -279,6 +282,8 @@ describe("noteEngineCompaction", () => {
     pi.note();
     expect(codex.patches).toEqual([]);
     expect(pi.patches).toEqual([]);
+    expect(codex.confirmed).toEqual([]);
+    expect(pi.confirmed).toEqual([]);
     expect(codex.notices).toHaveLength(1);
     expect(pi.notices).toHaveLength(1);
   });
@@ -343,7 +348,7 @@ describe("compactConversation on an engine that compacts in place only when aske
       engineCompactionOn: () => true,
       engineCompact: async (_target, _signal, check) => { boundaries.push(check.boundary?.()); return "done"; },
       resumesSession: () => options.resumes ?? true,
-      instance: () => undefined, currentSelection: () => ({ instanceId: "engine", model: "model" }),
+      instance: () => undefined, confirmDelivery: () => undefined, currentSelection: () => ({ instanceId: "engine", model: "model" }),
       generateText: () => undefined,
       claimIsCurrent: () => true,
       controllers: new Map(),

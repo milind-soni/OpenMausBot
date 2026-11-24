@@ -6604,7 +6604,7 @@ bus.subscribe((event: RuntimeEvent) => {
         tool: { name: `retrying — attempt ${event.attempt + 1}/${RETRY_MAX_ATTEMPTS} in ${Math.round(event.delayMs / 1000)}s — ${event.reason}`, ok: true },
       });
       break;
-    case "context.compacted": compactConversation.noteEngineCompaction(bot, event.threadId, event.providerInstanceId, () => pushMessage({ role: "bot", kind: "compaction", engineCompaction: true })); break;
+    case "context.compacted": compactConversation.noteEngineCompaction(bot, event.threadId, event.turnId, event.providerInstanceId, () => pushMessage({ role: "bot", kind: "compaction", engineCompaction: true })); break;
     case "runtime.notice": pushMessage({ role: "bot", kind: "activity", tool: { ...runtimeNoticeTool(event), name: `notice: ${event.message.slice(0, 400)}` } }); break;
     case "runtime.error":
       // A turn the person stopped ends quietly, whatever error the stop cut it short with.
@@ -6962,7 +6962,7 @@ const compactConversation = createConversationCompaction({
   nativeCompactTokens: (instance, model) => nativeCompactTokens(instance, model),
   engineCompactionOn: (instance) => instance.driverKind !== "claudeAgent" || !claudeCompactionDisabled({ ...process.env, ...cfg.instances?.[instance.instanceId]?.environment }),
   engineCompact: (target, signal, check) => warmSummaries.compactNow(target, signal, check),
-  resumesSession: (input, session) => nextTurnResumes(input, session), instance: (instanceId) => registry.get(instanceId),
+  resumesSession: (input, session) => nextTurnResumes(input, session), instance: (instanceId) => registry.get(instanceId), confirmDelivery: (threadId, turnId, instanceId) => handoffs.confirm(threadId, turnId, instanceId),
   currentSelection: (botId, threadId) => store.projectBotForTask(botId, threadId)?.modelSelection,
   generateText: (botId, instance) => sideJobs.text("compaction", botId, { instance: instance as NonNullable<ReturnType<typeof registry.get>> })?.generateText,
   claimIsCurrent: (botId, generation, threadId) => directTurnClaimIsCurrent(botId, generation, threadId),

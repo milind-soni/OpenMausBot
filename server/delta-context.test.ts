@@ -272,6 +272,26 @@ describe("Handoffs", () => {
     expect(f.records.get("claude")).toEqual({ session: "s", through: "m1", ids: [] });
   });
 
+  it("does not count a compaction notice as delivery: a turn that fails after one is offered its line again", () => {
+    const f = setup(ids(4), { session: "s", through: "m1", ids: [] });
+    f.start({ resumeCursor: "s", placed: ["m2"], carried: ["m3"] });
+    f.event({ type: "context.compacted" });
+    f.event({ type: "turn.completed", ok: false });
+    expect(f.records.get("claude")).toEqual({ session: "s", through: "m1", ids: [] });
+  });
+
+  it("takes a delivery confirmed by the host for the in-flight turn of that instance only", () => {
+    const wrong = setup(ids(4), { session: "s", through: "m1", ids: [] });
+    wrong.start({ resumeCursor: "s", placed: ["m2"], carried: ["m3"] });
+    wrong.handoffs.confirm("t", "turn", "other");
+    wrong.handoffs.confirm("t", "elsewhere", "claude");
+    expect(wrong.records.get("claude")).toEqual({ session: "s", through: "m1", ids: [] });
+    const f = setup(ids(4), { session: "s", through: "m1", ids: [] });
+    f.start({ resumeCursor: "s", placed: ["m2"], carried: ["m3"] });
+    f.handoffs.confirm("t", "turn", "claude");
+    expect(f.records.get("claude")).toEqual({ session: "s", through: "m3", ids: [] });
+  });
+
   it("clears the record when another session carries the turn, and credits that session only with its rebuild", () => {
     const order = ids(10);
     const f = setup(order, { session: "old", through: "m7", ids: [] });

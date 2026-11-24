@@ -29,7 +29,7 @@
 //                           at the pre-compaction size (the summary call itself), the reply, then one far below it, same window
 //   FAKE_AGY_AUTO_COMPACT_AT  compact only a turn whose reading so far is at least this (default 0: every turn)
 //   FAKE_AGY_AUTO_COMPACT_THEN  after the compaction's low reading: window (one more reading in a window twice as large) | model
-//                           (a config_option_update that switches the session's model, sent ahead of the readings)
+//                           (a config_option_update that switches the session's model)
 //   FAKE_AGY_FLOW           plain (default) | system-first (a <SYSTEM_MESSAGE> block, then "Done.") | system-only (a reply of only a <SYSTEM_MESSAGE> block) | tool-done (reply, one
 //                           tool, reasoning, then "Done.") | tool-system (the same, ending in a <SYSTEM_MESSAGE> block)
 //   FAKE_AGY_PROMPT_ERROR   1: answer the prompt with an RPC error after its reply
@@ -222,10 +222,6 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
       const auto = process.env.FAKE_AGY_AUTO_COMPACT === "1" && used >= Number(process.env.FAKE_AGY_AUTO_COMPACT_AT ?? 0);
       const internal = "<SYSTEM_MESSAGE>a fixture internal notification</SYSTEM_MESSAGE>";
       const finish = () => result(message.id, { stopReason: "end_turn", ...(readings ? { usage: answersCompact ? usage(used - 777, 777) : usage(used - 20, 20) } : {}) });
-      if (auto && process.env.FAKE_AGY_AUTO_COMPACT_THEN === "model") {
-        model = model === accountModel ? "fixture-base-model" : accountModel;
-        update(sessionId, { sessionUpdate: "config_option_update", configOptions: configOptions() });
-      }
       if (auto) update(sessionId, { sessionUpdate: "usage_update", used, size: WINDOW });
       const flow = process.env.FAKE_AGY_FLOW ?? "plain";
       if (flow === "system-only") {
@@ -249,6 +245,10 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
       if (auto) {
         used = 2_000;
         update(sessionId, { sessionUpdate: "usage_update", used, size: WINDOW });
+        if (process.env.FAKE_AGY_AUTO_COMPACT_THEN === "model") {
+          model = model === accountModel ? "fixture-base-model" : accountModel;
+          update(sessionId, { sessionUpdate: "config_option_update", configOptions: configOptions() });
+        }
         if (process.env.FAKE_AGY_AUTO_COMPACT_THEN === "window") update(sessionId, { sessionUpdate: "usage_update", used: used + 500, size: WINDOW * 2 });
       }
       if (process.env.FAKE_AGY_PROMPT_ERROR === "1") return failure(message.id, -32603, "fake antigravity: the upstream model call failed");

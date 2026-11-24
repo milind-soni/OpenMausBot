@@ -63,6 +63,8 @@ export interface ConversationCompactionDeps {
   engineCompact(target: { botId: string; threadId: string; instanceId: string }, signal: AbortSignal, check: EngineCompactCheck): Promise<EngineCompactOutcome>;
   /** Whether the conversation's next turn carries on `session`, by the decision that turn makes before it dispatches. */
   resumesSession(input: CompactConversationInput, session: string): boolean;
+  /** The in-flight turn's prompt reached the engine: the delivery record takes the turn's messages in. */
+  confirmDelivery(threadId: string, turnId: string | undefined, instanceId: string): void;
   /** The engine instance behind an id, while it is still configured. */
   instance(instanceId: string): CompactionInstance | null | undefined;
   /** The engine instance and model the conversation's next turn would run on now. */
@@ -93,12 +95,13 @@ export function createConversationCompaction(deps: ConversationCompactionDeps) {
     return { instanceId, session, throughId: handed.through };
   };
 
-  const noteEngineCompaction = (bot: BotRecord | undefined, threadId: string, reportedInstanceId: string | undefined, notice: () => void): void => {
+  const noteEngineCompaction = (bot: BotRecord | undefined, threadId: string, turnId: string | undefined, reportedInstanceId: string | undefined, notice: () => void): void => {
     notice();
     if (!bot) return;
     const instanceId = reportedInstanceId ?? store.taskByThread(bot.id, threadId)?.lastInstanceId;
     const instance = instanceId === undefined ? undefined : deps.instance(instanceId);
     if (instanceId === undefined || !instance?.adapter.compactSession || instance.adapter.capabilities.nativeCompaction === true) return;
+    deps.confirmDelivery(threadId, turnId, instanceId);
     const context = deps.directContext(bot, threadId, sinceFreshStart(store.activePath(threadId)));
     const through = receivedThrough(bot.id, threadId, instanceId, context);
     if (through) store.patchTask(bot.id, threadId, { engineCompacted: through });
