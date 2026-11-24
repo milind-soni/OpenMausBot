@@ -7586,6 +7586,7 @@
   "brief.card.join": "加入",
   "brief.card.open": "開啟",
   "brief.card.openGmail": "在 Gmail 中開啟",
+  "brief.card.openOutlook": "在 Outlook 中開啟",
   "brief.card.openPage": "開啟頁面",
   "brief.card.draftReply": "起草給 {who} 的回覆",
   "brief.card.dismissEmail": "略過 {who} 的郵件",

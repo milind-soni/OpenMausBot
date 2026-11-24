@@ -53,6 +53,12 @@ type ReceiptArgs = {
   };
 };
 
+
+/** A burger's inputs and the values it was saved with, so a run takes this request's values and says when it reuses one. */
+function burgerInputs(workflow: { args: Record<string, { default?: unknown }> }): string {
+  const args = Object.entries(workflow.args).slice(0, 8);
+  return args.length ? ` Its inputs: ${args.map(([arg, value]) => `${arg}${value.default === undefined ? "" : ` (saved: ${JSON.stringify(value.default).slice(0, 80)})`}`).join(", ")}; a run without one uses the saved value.` : "";
+}
 export interface SkillsLibraryHostDeps {
   store: Store;
   cfg: AppConfig;
@@ -356,7 +362,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
       const burgers = mentioned.flatMap((name) => { const found = findWorkflowSkill(bot.id, name); return found ? [{ name, found }] : []; });
       for (const { name, found } of burgers) if (!files.has(name) && "everyChat" in found.place) files.set(name, librarySkillFilePath(name));
       const expanded = skillCommandTurnText(text, files, typed, ownStart);
-      return burgers.length ? `${expanded}\n\n${burgers.map(({ name }) => `/${name} is a saved Skill Burger: run it with the run_workflow tool (name "${name}"), filling its args from the request, rather than by hand.`).join(" ")}` : expanded;
+      return burgers.length ? `${expanded}\n\n${burgers.map(({ name, found }) => `/${name} is a saved Skill Burger: run it with the run_workflow tool (name "${name}"), filling its args from the request, rather than by hand.${burgerInputs(found.workflow)}`).join(" ")}` : expanded;
     },
 
     shareNote(bot: BotRecord, threadId: string, enabled: boolean): TurnShareNote {

@@ -5,7 +5,7 @@ import { inboxNoteWords } from "./inbox-words.ts";
 // and Caption nodes only, and a link becomes a button only when it is an https link with no username or password.
 import { WEB_URL_MAX, WIDGET_LIMITS, type WidgetRoot } from "../../shared/widget.ts";
 import type { WidgetMoment, WidgetText, WidgetTextFields } from "../../shared/widget-text.ts";
-import type { CalendarEvent } from "../connected-reads.ts";
+import type { CalendarEvent, MailApp } from "../connected-reads.ts";
 import { intlLocale } from "../language.ts";
 import { briefWords, type BriefWords } from "./brief-words.ts";
 import { localDate, validZone } from "./check-plan.ts";
@@ -132,7 +132,7 @@ export const BRIEF_ROWS = 6;
 export const DISMISS_ACTION = "dismiss_row";
 export const DRAFT_ACTION = "draft_reply";
 
-export interface BriefEmail { messageId: string; threadId: string; from: string; subject: string; why?: string; whyText?: ServerText; needsReply: boolean }
+export interface BriefEmail { messageId: string; threadId: string; from: string; subject: string; why?: string; whyText?: ServerText; needsReply: boolean; app?: MailApp; link?: string }
 /** `page`: the live page a routine's run published; its row's Open page opens it, while Open opens the run's chat. */
 export interface BriefRow { text: string; note: string; open?: OpenTarget; page?: string; said?: { text?: WidgetText; note?: WidgetText } }
 /** A row that needs the person. `key` names what it is about in no particular language, so a new language is not news. */
@@ -181,16 +181,24 @@ const section = (title: [string, string], rows: Node[], w: BriefWords, empty?: [
 const openButton = (target: OpenTarget | undefined, w: BriefWords): Node[] => (target ? [button(w.open, { type: "open_thread", payload: target }, false, words("brief.card.open"))] : []);
 const pageButton = (url: string | undefined, w: BriefWords): Node[] => { const link = httpsLink(url), open = link ? openUrl(link) : undefined; return open ? [button(w.openPage, open, false, words("brief.card.openPage"))] : []; };
 
+function openEmailButton(email: BriefEmail, w: BriefWords): Node[] {
+  if (email.app === "outlook") {
+    const link = httpsLink(email.link), outlook = link ? openUrl(link) : undefined;
+    return outlook ? [button(w.openInOutlook, outlook, false, words("brief.card.openOutlook"))] : [];
+  }
+  const gmail = email.threadId.length <= BRIEF_TEXT.link ? openUrl(gmailUrl(email.threadId)) : undefined;
+  return gmail ? [button(w.openInGmail, gmail, false, words("brief.card.openGmail"))] : [];
+}
+
 function emailRow(email: BriefEmail, w: BriefWords): Node {
   const who = sender(email, BRIEF_TEXT.label, w);
-  const gmail = email.threadId.length <= BRIEF_TEXT.link ? openUrl(gmailUrl(email.threadId)) : undefined;
   const note = email.needsReply ? (email.why ? `${w.waitingOnReply} · ${email.why}` : w.waitingOnReply) : email.why ?? w.important;
   const whoWords = senderName(email.from).trim() ? who : words("brief.part.noSender");
   const line = words("brief.card.emailLine", { sender: senderName(email.from).trim() ? sender(email, BRIEF_TEXT.sender, w) : words("brief.part.noSender"), subject: email.subject || words("brief.part.noSubject") });
   const noteWords = inboxNoteWords(email.why, email.whyText, email.needsReply) ?? (email.needsReply ? (email.why ? words("brief.card.waitingReplyWhy", { why: email.why }) : words("brief.card.waitingReply")) : email.why ? undefined : words("brief.card.important"));
   return rowUnder(`${sender(email, BRIEF_TEXT.sender, w)}: ${email.subject || w.noSubject}`, note, [
     button(w.draftReply(who), { type: DRAFT_ACTION, payload: { messageId: email.messageId } }, true, words("brief.card.draftReply", { who: whoWords })),
-    ...(gmail ? [button(w.openInGmail, gmail, false, words("brief.card.openGmail"))] : []),
+    ...openEmailButton(email, w),
     button(w.dismiss(who), { type: DISMISS_ACTION, payload: { messageId: email.messageId } }, false, words("brief.card.dismissEmail", { who: whoWords })),
   ], { text: line, ...(noteWords ? { note: noteWords } : {}) });
 }
