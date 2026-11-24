@@ -4,12 +4,17 @@ import { renderSound, type SoundChoice, type SoundEvent, type SoundStyle } from 
 export const BACKGROUND_EVENTS: ReadonlySet<SoundEvent> = new Set(["attention", "mention", "done", "error"]);
 
 export const REPEAT_WINDOW_MS = 150;
+/** How long a suspended context gets to wake before the cue is left to the system chime. */
+export const RESUME_DEADLINE_MS = 300;
 
 export type HoldReason = "recording" | "call";
 
 /** What became of one sound: heard, kept quiet on purpose, or one the app cannot make here, which the system chime stands in for. */
 export type SoundOutcome = "played" | "silenced" | "unplayable";
 export type SoundDecision = SoundOutcome | Promise<SoundOutcome>;
+/** `elsewhere`: this window is in the background and another one is the window in use, so that one decides. */
+export type PlayOutcome = SoundOutcome | "elsewhere";
+export type PlayDecision = PlayOutcome | Promise<PlayOutcome>;
 
 export interface SoundOutput {
   readonly sampleRate: number;
@@ -63,8 +68,8 @@ export function createSoundPlayer(host: SoundHost) {
     source.start();
   };
 
-  /** A suspended context only counts once its resume succeeded; a rejected resume leaves the cue to the system. */
-  const emitWhenRunning = (event: SoundEvent, style: SoundStyle): SoundDecision => {
+  /** A suspended context only counts once it woke within the deadline; until then anything may have asked for quiet. */
+  const emitWhenRunning = (event: SoundEvent, style: SoundStyle, quiet: () => boolean): SoundDecision => {
     const out = output;
     if (!out) return "unplayable";
     if (out.state === "running") {
@@ -72,10 +77,21 @@ export function createSoundPlayer(host: SoundHost) {
       return "played";
     }
     if (out.state !== "suspended") return "unplayable";
-    return out.resume().then(
-      () => (out.state === "running" ? (emit(out, event, style), "played" as const) : "unplayable" as const),
-      () => "unplayable" as const,
-    );
+    return new Promise<SoundOutcome>((resolve) => {
+      let open = true;
+      const settle = (outcome: SoundOutcome) => {
+        if (!open) return;
+        open = false;
+        clearTimeout(deadline);
+        if (outcome === "played") emit(out, event, style);
+        resolve(outcome);
+      };
+      const deadline = setTimeout(() => settle("unplayable"), RESUME_DEADLINE_MS);
+      out.resume().then(
+        () => settle(quiet() ? "silenced" : out.state === "running" ? "played" : "unplayable"),
+        () => settle("unplayable"),
+      );
+    });
   };
 
   /** Browsers only let a page make sound after the person clicked or typed in it: call from that gesture. */
@@ -92,22 +108,24 @@ export function createSoundPlayer(host: SoundHost) {
       holds.set(token, reason);
       return () => void holds.delete(token);
     },
-    play(event: SoundEvent): SoundDecision {
+    /** `wanted`: asked again once a suspended context wakes, for what may have changed meanwhile (a notice read). */
+    play(event: SoundEvent, wanted: () => boolean = () => true): PlayDecision {
       const choice = host.choice();
       if (choice === "off" || held(event)) return "silenced";
-      if (host.background() && (!BACKGROUND_EVENTS.has(event) || !host.leader())) return "silenced";
+      if (host.background() && !BACKGROUND_EVENTS.has(event)) return "silenced";
+      if (host.background() && !host.leader()) return "elsewhere";
       if (!output) return "unplayable";
       const now = host.now();
       const last = lastPlayed.get(event);
       if (last !== undefined && now - last < REPEAT_WINDOW_MS) return "silenced";
       lastPlayed.set(event, now);
-      return emitWhenRunning(event, choice);
+      return emitWhenRunning(event, choice, () => host.choice() === "off" || held(event) || !wanted());
     },
     /** The sample a person hears when they pick a style, from their own click; a call or a recording keeps it quiet. */
     preview(style: SoundStyle): SoundDecision {
       if (holds.size > 0) return "silenced";
       unlock();
-      return emitWhenRunning("done", style);
+      return emitWhenRunning("done", style, () => holds.size > 0);
     },
   };
 }

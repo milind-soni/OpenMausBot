@@ -1,5 +1,5 @@
 import type { Notification, NotifyKind } from "../../../shared/notification";
-import type { SoundDecision } from "./player";
+import type { PlayDecision } from "./player";
 import type { SoundEvent } from "./render";
 
 export const NOTIFICATION_SOUNDS: Record<NotifyKind, SoundEvent | null> = {
@@ -27,13 +27,14 @@ const REMEMBERED = 200;
 export type NotificationSoundEntry = Pick<Notification, "kind" | "threadId" | "groupId"> & { id?: string; read?: boolean };
 
 export function createEventSounds(deps: {
-  play: (event: SoundEvent) => SoundDecision;
+  play: (event: SoundEvent, wanted?: () => boolean) => PlayDecision;
   now: () => number;
   finishedNotices: () => boolean;
   soundsOn: () => boolean;
 }) {
   const heard = new Set<string>();
   const groupHeard = new Map<string, number>();
+  const read = new Set<string>();
   const firstTime = (id: string | undefined) => {
     if (!id) return true;
     if (heard.has(id)) return false;
@@ -44,7 +45,7 @@ export function createEventSounds(deps: {
 
   return {
     /** `viewing`: the person has this thread open in a focused window, where its reply already made a sound. */
-    notified(entry: NotificationSoundEntry, viewing: boolean): SoundDecision {
+    notified(entry: NotificationSoundEntry, viewing: boolean): PlayDecision {
       const event = NOTIFICATION_SOUNDS[entry.kind];
       if (entry.read || !firstTime(entry.id)) return "silenced";
       if (!event) return deps.soundsOn() ? "unplayable" : "silenced";
@@ -54,9 +55,13 @@ export function createEventSounds(deps: {
       const last = groupHeard.get(group);
       if (last !== undefined && now - last < GROUP_WINDOW_MS) return "silenced";
       groupHeard.set(group, now);
-      return deps.play(event);
+      return deps.play(event, () => !entry.id || !read.has(entry.id));
     },
-    replied(messageId: string, inView: boolean): SoundDecision {
+    notificationsRead(ids: readonly string[]): void {
+      for (const id of ids) read.add(id);
+      while (read.size > REMEMBERED) read.delete(read.values().next().value as string);
+    },
+    replied(messageId: string, inView: boolean): PlayDecision {
       if (!inView || !firstTime(`message:${messageId}`)) return "silenced";
       return deps.play("reply");
     },

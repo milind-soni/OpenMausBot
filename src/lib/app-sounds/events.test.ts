@@ -7,7 +7,9 @@ let finished = true;
 let played: SoundEvent[] = [];
 let soundsOn = true;
 
-const sounds = () => createEventSounds({ play: (event) => (played.push(event), "played"), now: () => clock, finishedNotices: () => finished, soundsOn: () => soundsOn });
+let wanted: Array<(() => boolean) | undefined> = [];
+
+const sounds = () => createEventSounds({ play: (event, still) => (played.push(event), wanted.push(still), "played"), now: () => clock, finishedNotices: () => finished, soundsOn: () => soundsOn });
 const entry = (over: Partial<NotificationSoundEntry> = {}): NotificationSoundEntry => ({ kind: "approval", threadId: "t1", id: `n${Math.random()}`, ...over });
 
 beforeEach(() => {
@@ -15,6 +17,7 @@ beforeEach(() => {
   finished = true;
   soundsOn = true;
   played = [];
+  wanted = [];
 });
 
 describe("notification sounds", () => {
@@ -70,5 +73,13 @@ describe("notification sounds", () => {
     expect(notices.replied("m1", true)).toBe("played");
     expect(notices.replied("m1", true)).toBe("silenced");
     expect(played).toEqual(["reply"]);
+  });
+
+  it("lets a sound still waiting to play know its notice was read meanwhile", () => {
+    const notices = sounds();
+    notices.notified(entry({ id: "a" }), false);
+    notices.notified(entry({ id: "b", threadId: "t2" }), false);
+    notices.notificationsRead(["a"]);
+    expect(wanted.map((still) => still?.())).toEqual([false, true]);
   });
 });

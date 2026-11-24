@@ -84,6 +84,7 @@ describe("app sounds in a window", () => {
     left.fire("pointerdown");
     page.visibilityState = "hidden";
     page.hasFocus = () => false;
+    expect(left.sounds.notificationSound(mention("m1", "t1"), false)).toBe("played");
     expect(right.sounds.notificationSound(mention("m1", "t1"), false)).toBe("silenced");
     left.fire("pagehide");
     expect(right.sounds.notificationSound(mention("m2", "t2"), false)).toBe("played");
@@ -101,9 +102,44 @@ describe("app sounds in a window", () => {
     expect(busy.sounds.isSoundWindow()).toBe(false);
     local.setItem(quiet.sounds.SOUND_WINDOW_KEY, JSON.stringify({ id: "closed-without-a-word", at: Date.now() }));
     vi.advanceTimersByTime(quiet.sounds.SOUND_WINDOW_STALE_MS - 1);
-    expect(busy.sounds.notificationSound(mention("m3", "t3"), false)).toBe("silenced");
+    const waiting = busy.sounds.notificationSound(mention("m3", "t3"), false);
+    vi.advanceTimersByTime(busy.sounds.SOUND_ACK_WAIT_MS);
+    await expect(waiting).resolves.toBe("unplayable");
     local.setItem(quiet.sounds.SOUND_WINDOW_KEY, JSON.stringify({ id: "closed-without-a-word", at: Date.now() - quiet.sounds.SOUND_WINDOW_STALE_MS }));
     expect(busy.sounds.notificationSound(mention("m4", "t4"), false)).toBe("played");
+  });
+
+  it("chimes through another window's banner when the window in use is frozen and never takes the notice", async () => {
+    const frozen = await openWindow();
+    const other = await openWindow();
+    other.fire("pointerdown");
+    frozen.fire("pointerdown");
+    page.visibilityState = "hidden";
+    page.hasFocus = () => false;
+    const waiting = other.sounds.notificationSound(mention("m5", "t5"), false);
+    expect(typeof waiting).not.toBe("string");
+    vi.advanceTimersByTime(other.sounds.SOUND_ACK_WAIT_MS - 1);
+    let outcome: string | undefined;
+    void Promise.resolve(waiting).then((value) => void (outcome = value));
+    await Promise.resolve();
+    expect(outcome).toBeUndefined();
+    vi.advanceTimersByTime(1);
+    await expect(waiting).resolves.toBe("unplayable");
+    expect(started).toBe(0);
+  });
+
+  it("makes one sound when the window in use takes the notice, whichever window hears of it first", async () => {
+    const leader = await openWindow();
+    const other = await openWindow();
+    other.fire("pointerdown");
+    leader.fire("pointerdown");
+    page.visibilityState = "hidden";
+    page.hasFocus = () => false;
+    const waiting = other.sounds.notificationSound(mention("m6", "t6"), false);
+    expect(leader.sounds.notificationSound(mention("m6", "t6"), false)).toBe("played");
+    vi.advanceTimersByTime(other.sounds.SOUND_ACK_WAIT_MS);
+    await expect(waiting).resolves.toBe("silenced");
+    expect(started).toBe(1);
   });
 
   it("plays no style sample while recording", async () => {

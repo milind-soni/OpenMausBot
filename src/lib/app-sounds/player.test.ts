@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createSoundPlayer, REPEAT_WINDOW_MS, type SoundOutput } from "./player";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createSoundPlayer, REPEAT_WINDOW_MS, RESUME_DEADLINE_MS, type SoundOutput } from "./player";
 import type { SoundChoice, SoundEvent } from "./render";
 
 function fakeOutput(state = "running", resumes = true) {
@@ -52,6 +52,21 @@ beforeEach(() => {
   made = 0;
   speaker = fakeOutput();
 });
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+/** A suspended context whose wake-up the test releases by hand, or never. */
+function slowWake() {
+  speaker = fakeOutput("suspended");
+  const wakes: Array<() => void> = [];
+  speaker.output.resume.mockImplementation(() => new Promise<void>((resolve) => wakes.push(() => {
+    (speaker.output as { state: string }).state = "running";
+    resolve();
+  })));
+  return () => wakes.forEach((wake) => wake());
+}
 
 describe("app sound player", () => {
   it("makes no audio context and no sound before the first click or key", () => {
@@ -119,7 +134,8 @@ describe("app sound player", () => {
     sounds.unlock();
     background = true;
     leader = false;
-    expect(sounds.play("attention")).toBe("silenced");
+    expect(sounds.play("attention")).toBe("elsewhere");
+    expect(sounds.play("send")).toBe("silenced");
     background = false;
     expect(sounds.play("attention")).toBe("played");
   });
@@ -162,6 +178,58 @@ describe("app sound player", () => {
     expect(speaker.started).toHaveLength(0);
     release();
     expect(sounds.preview("glass")).toBe("played");
+    expect(speaker.started).toHaveLength(1);
+  });
+
+  it.each([
+    ["a call starts", (sounds: ReturnType<typeof player>) => void sounds.hold("call")],
+    ["a recording starts", (sounds: ReturnType<typeof player>) => void sounds.hold("recording")],
+    ["sounds are turned off", () => void (choice = "off")],
+  ])("plays nothing when %s while a suspended context wakes", async (_change, change) => {
+    const wake = slowWake();
+    const sounds = player();
+    sounds.unlock();
+    const decision = sounds.play("mention");
+    change(sounds);
+    wake();
+    await expect(decision).resolves.toBe("silenced");
+    expect(speaker.started).toHaveLength(0);
+  });
+
+  it("plays nothing for a notice read while the context woke", async () => {
+    const wake = slowWake();
+    const sounds = player();
+    sounds.unlock();
+    let unread = true;
+    const decision = sounds.play("mention", () => unread);
+    unread = false;
+    wake();
+    await expect(decision).resolves.toBe("silenced");
+    expect(speaker.started).toHaveLength(0);
+  });
+
+  it("leaves the cue to the system when the context does not wake in time, and stays quiet if it wakes later", async () => {
+    vi.useFakeTimers();
+    const wake = slowWake();
+    const sounds = player();
+    sounds.unlock();
+    const decision = sounds.play("mention");
+    vi.advanceTimersByTime(RESUME_DEADLINE_MS);
+    await expect(decision).resolves.toBe("unplayable");
+    wake();
+    await Promise.resolve();
+    expect(speaker.started).toHaveLength(0);
+  });
+
+  it("plays once the context wakes within the deadline", async () => {
+    vi.useFakeTimers();
+    const wake = slowWake();
+    const sounds = player();
+    sounds.unlock();
+    const decision = sounds.play("mention");
+    vi.advanceTimersByTime(RESUME_DEADLINE_MS - 1);
+    wake();
+    await expect(decision).resolves.toBe("played");
     expect(speaker.started).toHaveLength(1);
   });
 });

@@ -1,6 +1,6 @@
 import { finishedNotificationsEnabled, readSoundChoice } from "../notification-preferences";
-import { createEventSounds } from "./events";
-import { createSoundPlayer, type HoldReason, type SoundDecision, type SoundOutput } from "./player";
+import { createEventSounds, type NotificationSoundEntry } from "./events";
+import { createSoundPlayer, type HoldReason, type PlayDecision, type PlayOutcome, type SoundDecision, type SoundOutcome, type SoundOutput } from "./player";
 import type { SoundEvent, SoundStyle } from "./render";
 
 export { SOUND_STYLES, type SoundChoice, type SoundEvent, type SoundStyle } from "./render";
@@ -11,6 +11,10 @@ export const SOUND_WINDOW_KEY = "omb-sound-window";
  * Chrome 88+ wakes a hidden page's timers about once a minute, so the wait outlasts that. */
 export const SOUND_WINDOW_HEARTBEAT_MS = 15_000;
 export const SOUND_WINDOW_STALE_MS = 90_000;
+export const SOUND_ACK_KEY = "omb-sound-ack";
+/** How long a window in the background waits for the window in use to say it took a notice, before chiming itself. */
+export const SOUND_ACK_WAIT_MS = 1_500;
+const ACK_KEPT_MS = 10_000;
 const windowId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
 
 function storage(): Storage | undefined {
@@ -58,6 +62,44 @@ function closing(): void {
   }
 }
 
+function readAcks(): Array<{ id: string; at: number }> {
+  try {
+    const value = JSON.parse(storage()?.getItem(SOUND_ACK_KEY) ?? "[]") as unknown;
+    return Array.isArray(value) ? value.filter((ack): ack is { id: string; at: number } => typeof ack?.id === "string" && typeof ack?.at === "number") : [];
+  } catch {
+    return [];
+  }
+}
+
+const acknowledged = (key: string) => readAcks().some((ack) => ack.id === key);
+
+function acknowledge(key: string): void {
+  const now = Date.now();
+  try {
+    const kept = readAcks().filter((ack) => ack.id !== key && now - ack.at < ACK_KEPT_MS);
+    storage()?.setItem(SOUND_ACK_KEY, JSON.stringify([...kept, { id: key, at: now }]));
+  } catch {
+    // Without storage every window counts as the one in use, so none waits for this.
+  }
+}
+
+/** The window in use writes a receipt for each notice it took. One that never does (frozen, or closed without a word)
+ * leaves this window's banner to chime, so a notice is never lost; a slow one may mean the person hears two. */
+function awaitLeader(key: string): Promise<SoundOutcome> {
+  return new Promise((resolve) => {
+    const done = (outcome: SoundOutcome) => {
+      clearTimeout(timer);
+      if (typeof window !== "undefined") window.removeEventListener("storage", heard);
+      resolve(outcome);
+    };
+    const heard = (event: StorageEvent) => {
+      if (event.key === SOUND_ACK_KEY && acknowledged(key)) done("silenced");
+    };
+    const timer = setTimeout(() => done(acknowledged(key) ? "silenced" : "unplayable"), SOUND_ACK_WAIT_MS);
+    if (typeof window !== "undefined") window.addEventListener("storage", heard);
+  });
+}
+
 function createOutput(): SoundOutput | null {
   const Context = globalThis.AudioContext ?? (globalThis as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!Context) return null;
@@ -78,13 +120,29 @@ const player = createSoundPlayer({
   createOutput,
 });
 
-const eventSounds = createEventSounds({ play: (event) => player.play(event), now, finishedNotices: finishedNotificationsEnabled, soundsOn: () => readSoundChoice() !== "off" && !player.holding() });
+const eventSounds = createEventSounds({ play: (event, wanted) => player.play(event, wanted), now, finishedNotices: finishedNotificationsEnabled, soundsOn: () => readSoundChoice() !== "off" && !player.holding() });
 
-export const playAppSound = (event: SoundEvent): SoundDecision => player.play(event);
+const here = (outcome: PlayOutcome): SoundOutcome => (outcome === "elsewhere" ? "silenced" : outcome);
+const inThisWindow = (decision: PlayDecision): SoundDecision => (typeof decision === "string" ? here(decision) : decision.then(here));
+
+export const playAppSound = (event: SoundEvent): SoundDecision => inThisWindow(player.play(event));
 export const holdAppSounds = (reason: HoldReason): (() => void) => player.hold(reason);
 export const previewAppSound = (style: SoundStyle): SoundDecision => player.preview(style);
-export const notificationSound = eventSounds.notified;
-export const replySound = eventSounds.replied;
+export const replySound = (messageId: string, inView: boolean): SoundDecision => inThisWindow(eventSounds.replied(messageId, inView));
+export const notificationsRead = eventSounds.notificationsRead;
+
+export function notificationSound(entry: NotificationSoundEntry, viewing: boolean): SoundDecision {
+  const key = entry.id ?? `${entry.kind}:${entry.groupId ?? entry.threadId}`;
+  const settled = (outcome: PlayOutcome): SoundDecision => {
+    if (outcome !== "elsewhere") {
+      acknowledge(key);
+      return outcome;
+    }
+    return acknowledged(key) ? "silenced" : awaitLeader(key);
+  };
+  const decision = eventSounds.notified(entry, viewing);
+  return typeof decision === "string" ? settled(decision) : decision.then(settled);
+}
 
 let started = false;
 export function startAppSounds(): void {
