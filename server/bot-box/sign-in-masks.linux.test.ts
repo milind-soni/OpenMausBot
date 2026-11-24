@@ -1,0 +1,69 @@
+// The sign-in masks in a real box, where one can run: Linux with an unprivileged bubblewrap (a Cloud home, the Fly test
+// machine). Elsewhere the suite says so and skips, like the box's own self-check.
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { detectBox } from "./detect.ts";
+import { bwrapArgs, planBox, type BoxRequest } from "./plan.ts";
+import { signInMasks } from "./sign-in-masks.ts";
+
+const detection = detectBox({ env: { ...process.env, OMB_BOT_BOX: "1" } });
+const available = detection.box === "bwrap" && detection.tools !== null;
+const root = realpathSync(mkdtempSync(join(tmpdir(), "omb-sign-in-box-")));
+afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+const home = join(root, "home"), dataDir = join(home, ".openmausbot");
+const cwd = join(dataDir, "task-workspaces", "bot-a", "t-1");
+const claude = join(home, ".claude", ".credentials.json"), codex = join(home, ".codex", "auth.json");
+const put = (path: string, text: string) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, text); };
+
+function runInBox(engine: string, script: string): string {
+  const request: BoxRequest = { command: "/bin/sh", args: [], cwd, env: { HOME: home, PATH: "/usr/bin:/bin" }, engine };
+  const plan = planBox({ dataDir, home, codeRoots: [], engineRoots: [], bridges: [] }, request, signInMasks({ home, dataDir, env: request.env, engine }));
+  const ran = spawnSync(detection.tools!.bwrap, [...bwrapArgs(plan), "--", "/bin/sh", "-c", script], { env: { HOME: home, PATH: "/usr/bin:/bin" }, encoding: "utf8", timeout: 30_000 });
+  return `${ran.stdout}${ran.stderr}`;
+}
+
+describe.skipIf(!available)(`sign-in masks in a real box (${available ? "bubblewrap works here" : `skipped: ${detection.reason}`})`, () => {
+  beforeAll(() => {
+    put(claude, '{"claudeAiOauth":{"accessToken":"claude-secret"}}');
+    put(codex, '{"tokens":{"access_token":"codex-1"}}');
+    put(join(home, ".omb-edge", "caddy", "site.key"), "edge-secret");
+    mkdirSync(cwd, { recursive: true });
+  });
+
+  it("a Codex bot's shell reads and refreshes its own login, and never Claude's or the edge's keys", () => {
+    const before = readdirSync(home).sort();
+    const output = runInBox("codex", [
+      `cat "${claude}"; echo " CLAUDE-END"`,
+      `grep -r edge-secret "${home}/.omb-edge" 2>/dev/null || echo EDGE-UNREADABLE`,
+      `printf x > "${claude}" 2>/dev/null || echo MASK-NOT-WRITABLE`,
+      `mv "${claude}" "${home}/stolen" 2>/dev/null || echo MASK-NOT-MOVABLE`,
+      `printf x > "${home}/.claude/.next" && mv "${home}/.claude/.next" "${claude}" 2>/dev/null || echo MASK-NOT-REPLACEABLE`,
+      `cat "${codex}"; echo`,
+      `mv "${home}/.codex/auth.json" "${home}/.codex/moved" 2>/dev/null || echo OWN-RENAME-REFUSED`,
+      `printf '%s' '{"tokens":{"access_token":"codex-2"}}' > "${codex}" && echo WROTE-IN-PLACE`,
+    ].join("\n"));
+    expect(output).not.toContain("claude-secret");
+    expect(output).toContain(" CLAUDE-END");
+    expect(output).toContain("EDGE-UNREADABLE");
+    expect(output).toContain("MASK-NOT-WRITABLE");
+    expect(output).toContain("MASK-NOT-MOVABLE");
+    expect(output).toContain("MASK-NOT-REPLACEABLE");
+    expect(output).toContain("codex-1");
+    expect(output).toContain("OWN-RENAME-REFUSED");
+    expect(output).toContain("WROTE-IN-PLACE");
+    expect(readFileSync(codex, "utf8")).toContain("codex-2");
+    expect(readFileSync(claude, "utf8")).toContain("claude-secret");
+    expect(readdirSync(home).sort()).toEqual(before);
+  }, 60_000);
+
+  it("leaves no empty sign-in file behind for an engine that never signed in here", () => {
+    runInBox("claudeAgent", "true");
+    expect(readdirSync(home)).not.toContain(".grok");
+    expect(readdirSync(home)).not.toContain(".gemini");
+  }, 60_000);
+});
