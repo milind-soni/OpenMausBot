@@ -35,6 +35,8 @@ import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
 import { extractSteerImages } from "../turn-images.ts";
 import { followupFacts, helperFollowup, helperFollowupBody, mayFollowUp } from "../helper-followup.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
+import { forgetSendingSession, noteSendingSession } from "../sending-sessions.ts";
+import { ownWindowSendStarting } from "../own-window-sends.ts";
 import { noteTypedSend } from "../typed-sends.ts";
 import { engineSessionOutdated, startFresh } from "../fresh-start.ts";
 import { parseMentionPicks } from "../../shared/room-mentions.ts";
@@ -76,6 +78,8 @@ export interface BotMessageRouteDeps {
     threadId?: string; replyTo?: Message; sendId?: string; sender?: ResolvedSender; trigger?: UsageTrigger; relayed?: boolean;
     dataContext?: DataContext; compactOnly?: boolean; cardContinuation?: boolean; editedMessageId?: string;
   }): Promise<Message>;
+  /** Retry on a line a caller sent through the Bot API, run as that call ran (bot-api-host.ts); null for any other line. */
+  botApiRetry?(botId: string, threadId: string, source: Message, sendId?: string): Promise<Message | null>;
   usageTriggerFor(auth: RequestAuth): UsageTrigger;
   messageSender(auth: RequestAuth): ResolvedSender | undefined;
   cloudGuestSendRefusal(auth: RequestAuth, threadId: string): string | null;
@@ -281,7 +285,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const target = resolveReplyTarget(threadId, press ? press.messageId : appSent ? appSent.messageId : body.replyToId);
       if (relayed && target?.role !== "bot") return json(res, 400, { error: "a relayed reaction answers a bot's message" });
       const passedBack = !guarded && !press && !appSent && !pointed && target ? deps.inboxReply?.(auth, threadId, target.id, text, { sendId, sender: messageSender(auth) }) : null;
-      const typedAnswer = passedBack || guarded || press || appSent || pointed ? null : await deps.typedCardAnswer?.(auth, threadId, text, target, { sendId, sender: messageSender(auth) });
+      const queuedAgain = Boolean(sendId && queuedSteeredMessage(bot.id, threadId, sendId));
+      const typedAnswer = passedBack || guarded || press || appSent || pointed || queuedAgain ? null : await deps.typedCardAnswer?.(auth, threadId, text, target, { sendId, sender: messageSender(auth) });
       const answeredBack = passedBack ?? typedAnswer;
       if (answeredBack) return json(res, answeredBack.status, answeredBack.message ? { ok: true, threadId, message: answeredBack.message } : refusalText(answeredBack.error ?? ""));
       // Only a real press or reaction, or an app's own words, marks the reply; a typed reply to the same row never does, whatever its words.
@@ -339,19 +344,28 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       // paired session or the desktop capability proves a person and lifts the webhook block.
       const personPresent = auth.kind === "session" || DESKTOP_MANAGED;
       if (personPresent && sendId && !guarded && !press && !appSent) noteTypedSend(threadId, sendId, text);
+      const notedSession = auth.kind === "session" && sendId ? noteSendingSession(threadId, sendId, auth.session.id) : false;
+      // The desktop app's own window: in the desktop app a loopback change needs its private capability.
+      // Only a new line the send itself adds: a repeat or a collision must not lend the proof to a line already there or waiting.
+      const ownWindowSend = DESKTOP_MANAGED && auth.kind === "loopback" && !auth.companionDevice && sendId && !guarded && !press && !appSent
+        && !store.messagesFor(threadId).some((line) => line.sendId === sendId) && !queuedSteeredMessage(bot.id, threadId, sendId);
       if (pressKey) pressesInFlight.set(pressKey, sendId);
+      const ownWindowSettled = ownWindowSend ? ownWindowSendStarting(threadId, sendId, text) : undefined;
       try {
         const receipt = await acceptDirectSend({
           botId: bot.id, threadId, text, sendId, replyTo, sender, trigger, dataContext, ...(app ? { app } : {}),
           personPresent, admin: owners.admin(auth), ...(followUp ? { followUp } : {}),
           ...(mentions?.length && !press && !appSent ? { mentions } : {}),
         }, guardedStart);
+        ownWindowSettled?.(true);
         press?.settle("queueId" in receipt ? receipt.queueId : undefined);
         appContext?.deliver();
         if (relayed && target && onBehalfOf) relayedReaction(threadId, target.id, onBehalfOf, relayed);
         return json(res, 202, receipt);
       } catch (error) {
         slot?.release();
+        ownWindowSettled?.(false);
+        if (notedSession) forgetSendingSession(threadId, sendId!);
         if (error instanceof DirectSendRefused) return json(res, error.status, error.body);
         throw error;
       } finally {
@@ -555,6 +569,9 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const rerunInstance = registry.get(rerunSelection.instanceId)!;
       const rerunRefusal = policyModelRefusal(rerunInstance);
       if (rerunRefusal) return json(res, 409, { error: rerunRefusal });
+      // The same words again on a caller's line: the caller's message again, never the person's own.
+      const apiRetry = source.via === "api" && text === source.text?.trim() ? await deps.botApiRetry?.(bot.id, bot.threadId, source, sendId) : null;
+      if (apiRetry) return json(res, 202, { ok: true, message: apiRetry });
       const quoted = source.replyToId ? resolveReplyTarget(bot.threadId, source.replyToId) : undefined;
       const replyTo: ReplyTarget | undefined = quoted && source.reaction && text === source.text ? { ...quoted, reactedWith: source.reaction } : quoted;
       const dataContext = parseDataContext(body.dataContext) ?? (text === source.text ? source.dataContext : undefined);

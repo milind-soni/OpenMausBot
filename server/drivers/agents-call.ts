@@ -13,14 +13,15 @@ import { callTriggerTool, TRIGGER_TOOL_NAMES } from "./agents-call-triggers.ts";
 import { catalogProfileFromEnv, fullInputSchema, SHARED_COMPUTER_TOOL_NAMES } from "./agents-catalog.ts";
 import { harnessClientFromEnv } from "./agents-client.ts";
 import type { HarnessClient, Json } from "./agents-client.ts";
-import { memorySearchText } from "./memory-search-text.ts";
+import { memorySavedText, memorySearchText, threadReadText, threadsListText } from "./memory-search-text.ts";
 import { apiAnswer, boundedAgentResult } from "./agents-result.ts";
 import { argumentNames, outOfBounds } from "./agents-schema.ts";
 import { dropBlankArguments } from "./agents-blank-arguments.ts";
 import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
 import { callHelperTool, HELPER_TOOL_NAMES } from "./agents-helper-tools.ts";
+import { callWhatChangedTool, WHAT_CHANGED_TOOL } from "./agents-what-changed-tool.ts";
 import { callUsageLimitsTool, USAGE_LIMITS_TOOL } from "./agents-usage-tool.ts";
-import { callThreadPostTool, THREAD_POST_TOOL } from "./agents-thread-post-tool.ts"; import { callListThreadsTool, LIST_THREADS_TOOL } from "./agents-list-threads-tool.ts"; import { callRenameThreadTool, RENAME_THREAD_TOOL } from "./agents-thread-title-tool.ts";
+import { callThreadPostTool, THREAD_POST_TOOL } from "./agents-thread-post-tool.ts"; import { callListThreadsTool, closedThreadText, LIST_THREADS_TOOL } from "./agents-list-threads-tool.ts"; import { callRenameThreadTool, RENAME_THREAD_TOOL } from "./agents-thread-title-tool.ts"; import { callWorkflowTool, WORKFLOW_TOOL_NAMES } from "./agents-workflow-tool.ts";
 import { callWaitTool, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts"; import { callCheckBackTool, CHECK_BACK_TOOL_NAMES } from "./agents-check-back-tool.ts";
 import { callBurstTool } from "./agents-burst-tool.ts";
 import { callComputerAskTool, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.ts";
@@ -246,6 +247,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   if (CARD_TOOL_NAMES.has(name)) return callCardTool(name, args, context);
   if (RESEARCH_TOOL_NAMES.has(name)) return callResearchTool(name, args, context);
   if (HELPER_TOOL_NAMES.has(name)) return callHelperTool(name, args, context);
+  if (name === WHAT_CHANGED_TOOL) return callWhatChangedTool(args, context);
   if (IMAGE_TOOL_NAMES.has(name)) return callImageTool(name, args, context);
   if (HOSTING_TOOL_NAMES.has(name)) return callHostingTool(name, args, context);
   if (MEETING_TOOL_NAMES.has(name)) return callMeetingTool(name, args, context);
@@ -256,7 +258,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   if (DEVS_TOOL_NAMES.has(name)) return callDevsTool(name, args, context);
   if (TRIGGER_TOOL_NAMES.has(name)) return callTriggerTool(name, args, context);
   if (WAIT_TOOL_NAMES.has(name)) return callWaitTool(name, args, context); if (CHECK_BACK_TOOL_NAMES.has(name)) return callCheckBackTool(args, context);
-  if (name === USAGE_LIMITS_TOOL) return callUsageLimitsTool(context);
+  if (name === USAGE_LIMITS_TOOL) return callUsageLimitsTool(context, args);
   if (COMPUTER_ASK_TOOL_NAMES.has(name)) return callComputerAskTool(args, context);
   // Second lock: with sharing off the catalog already omits these tools.
   if (SHARED_COMPUTER_TOOL_NAMES.has(name) && !context.sharedComputers) {
@@ -342,6 +344,8 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       const why = status === 404 ? `No assignment ${id || "(none given)"} is known here: check the id against your coordinate_bots receipt or list_threads.`
         : status === 403 ? `Assignment ${id} can't be read here: ${String(r.error ?? "only the conversation that sent it can read it")}.`
         : String(r.error ?? `HTTP ${status}`);
+      // An id this turn sent is an instruction to finish the turn, not a failed call that ends it.
+      if (r.sentThisTurn === true) return { text: why };
       return { text: why, isError: true };
     }
     if (id) return { text: renderAssignmentStatus(r, id) };
@@ -407,6 +411,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   }
   if (name === THREAD_POST_TOOL) return callThreadPostTool(args, context);
   if (name === RENAME_THREAD_TOOL) return callRenameThreadTool(args, context);
+  if (WORKFLOW_TOOL_NAMES.has(name)) return callWorkflowTool(name, args, context);
   if (name === "select_computer") {
     if (args.surface !== undefined && (typeof args.surface !== "string" || !["auto", "cloud", "vm", "local", "browser"].includes(args.surface))) {
       return { text: "Choose auto, cloud, vm, local or browser; omit surface to inspect connected choices.", isError: true };
@@ -430,7 +435,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (!threadId) return { text: "close_thread needs the thread_id from list_threads or start_thread.", isError: true };
     const r = await api(`/api/internal/threads/${encodeURIComponent(threadId)}/close`, { method: "POST", body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID }) });
     if (r.error) return { text: `Couldn't close that thread: ${String(r.error)}`, isError: true };
-    return { text: `Closed #${String(r.title)}${r.botName ? ` on @${String(r.botName)}` : ""}. It stays in the person's sidebar, idle, with a note that you closed it.` };
+    return { text: closedThreadText(r) };
   }
   if (name === "start_thread") {
     const title = String(args.title ?? "").trim();
@@ -621,15 +626,25 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     };
   }
   if (name === "request_sign_in") {
+    const instruction = typeof args.instruction === "string" ? args.instruction.trim() : "";
     const site = typeof args.site === "string" ? args.site.trim() : "";
-    if (!site) return { text: "request_sign_in needs site: the page's address or its domain, such as example.com.", isError: true };
+    if (!instruction && !site) return { text: "request_sign_in needs instruction: one sentence on the step the person does.", isError: true };
     const reason = typeof args.reason === "string" ? args.reason.trim().slice(0, 240) : "";
     const r = await api("/api/internal/request-sign-in", {
       method: "POST",
-      body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, site, ...(reason ? { reason } : {}) }),
+      body: JSON.stringify({
+        fromBotId: BOT_ID, fromThreadId: THREAD_ID, ...(instruction ? { instruction } : {}), ...(site ? { site } : {}), ...(reason ? { reason } : {}),
+        ...(typeof args.kind === "string" ? { kind: args.kind } : {}), ...(typeof args.target === "string" ? { target: args.target } : {}),
+      }),
     });
+    const where = SIGN_IN_PLACES[String(r.place)] ?? "the place you work";
+    if (!instruction) {
+      return {
+        text: `The person was asked to sign in to ${r.site ?? site} on ${where}. Your turn ends now: say in one short line that you are waiting for them, then stop. OpenMausBot resumes you when they finish or decline. Never ask for the password or a code in chat.`,
+      };
+    }
     return {
-      text: `The person was asked to sign in to ${r.site ?? site} on ${SIGN_IN_PLACES[String(r.place)] ?? "the place you work"}. Your turn ends now: say in one short line that you are waiting for them, then stop. OpenMausBot resumes you when they finish or decline. Never ask for the password or a code in chat.`,
+      text: `Waiting for the person. Asked them on ${where}: ${JSON.stringify(instruction)} The request expires in 30 minutes. Say in one short line that you are waiting for them, then stop, or do other work that does not need ${where}. OpenMausBot resumes you with the outcome: done, skipped or expired. Never ask for a password, a code or payment details in chat.`,
     };
   }
   if (name === "fill_login") {
@@ -733,23 +748,19 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
         action: args.action,
         text: args.text,
         oldText: args.old_text,
-        ...(typeof args.until === "string" && args.until.trim() ? { until: args.until.trim() } : {}),
+        ...(typeof args.until === "string" && args.until.trim() ? { until: args.until.trim() } : {}), ...(args.scope === "thread" || args.scope === "everywhere" ? { scope: args.scope } : {}),
       }),
     });
     if (r.error || r.ok !== true) return { text: String(r.error ?? "Memory update was not confirmed."), isError: true };
     if (args.action === "forget") return { text: forgetText(String(args.old_text), r) };
     if (args.action === "prefer") return { text: preferText(r) };
-    const entry = typeof r.entry === "string" && r.entry ? ` Entry: ${r.entry}` : "";
     const moved = Array.isArray(r.moved) ? r.moved.filter((line) => typeof line === "string") : [];
-    const full = r.truncated
-      ? "\nSaved, but the lines that never move out of MEMORY.md (hand-written ones, health and safety facts) fill what loads each session, so the newest entries do not load. Tell the person their saved notes are full, and that they can remove ones they no longer need under What it remembers in your panel."
-      : "";
     const shown = moved.slice(0, MOVED_ENTRIES_SHOWN).map((text) => text.split("\n")[0]);
     const more = moved.length > shown.length ? `\n…and ${moved.length - shown.length} more` : "";
     const movedNote = moved.length
       ? `\nTo stay within what loads each session, moved ${moved.length === 1 ? "1 older entry" : `${moved.length} older entries`} to your archive (session_search finds them):\n${shown.join("\n")}${more}`
       : "";
-    return { text: `Memory updated.${entry}${full}${movedNote}` };
+    return { text: `${memorySavedText(r)}${movedNote}` };
   }
   if (name === "retry_thread") {
     const botId = String(args.bot_id ?? "").trim();
@@ -796,7 +807,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     const q = String(args.query ?? "").trim();
     const since = typeof args.since === "string" ? args.since.trim() : "";
     const until = typeof args.until === "string" ? args.until.trim() : "";
-    if (!q && !since) {
+    if (!q && !since && args.scope !== "threads") {
       return { text: "session_search needs a query (a few content words) or a since span, for example {\"query\":\"site audit broken links\"} or {\"since\":\"2d\"}.", isError: true };
     }
     const query = new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID });
@@ -804,8 +815,8 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (since) query.set("since", since);
     if (until) query.set("until", until);
     if (typeof args.limit === "number" && Number.isFinite(args.limit)) query.set("limit", String(Math.trunc(args.limit)));
-    if (args.scope === "conversations" || args.scope === "memory" || args.scope === "team") query.set("scope", args.scope);
-    const r = await api(`/api/internal/session-search?${query.toString()}`);
+    if (args.scope === "conversations" || args.scope === "memory" || args.scope === "team" || args.scope === "threads") query.set("scope", args.scope);
+    const r = await api(`/api/internal/session-search?${query.toString()}`); if (args.scope === "threads") return { text: threadsListText(q, r) };
     const hits = Array.isArray(r.hits) ? (r.hits as Json[]) : [];
     const memoryHits = Array.isArray(r.memoryHits) ? r.memoryHits.filter(jsonRecord) : [];
     const teamHits = Array.isArray(r.teamHits) ? r.teamHits.filter(jsonRecord) : [];
@@ -840,6 +851,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     };
   }
   if (member === "session_read") {
+    if (args.scope === "threads" && typeof args.thread_id === "string") return { text: threadReadText(await api(`/api/internal/session-search?${new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, scope: "threads", threadId: args.thread_id.trim(), ...(typeof args.message_id === "string" && args.message_id.trim() ? { before: args.message_id.trim() } : {}), ...(typeof args.limit === "number" && Number.isFinite(args.limit) ? { limit: String(Math.trunc(args.limit)) } : {}) }).toString()}`)) };
     const threadId = String(args.thread_id ?? "").trim();
     const messageId = String(args.message_id ?? "").trim();
     if (!threadId || !messageId) {

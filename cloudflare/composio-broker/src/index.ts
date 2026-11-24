@@ -343,9 +343,49 @@ async function limitSessionRequests(installation: InstallationRow, env: Env) {
   }
 }
 
-async function ensureSession(installation: InstallationRow, env: Env, ctx: ExecutionContext) {
+interface HeldSession {
+  session: ComposioSession;
+  /** True while the Session is one an earlier request checked, not one Composio confirmed for this request. */
+  reused: boolean;
+}
+
+/** The installation's Session. One this isolate checked in the last five minutes is used as it is, when it still covers
+ *  the project's auth configs: the row is this request's own read, so its Session id and user are current. */
+async function heldSession(installation: InstallationRow, env: Env, ctx: ExecutionContext): Promise<HeldSession> {
   await limitSessionRequests(installation, env);
-  return verifySession(installation, env, ctx);
+  const reused = verifiedSession(installation);
+  if (reused && sessionReady(reused, await projectAuthConfigs(env))) {
+    touchLastSeen(installation, env, ctx);
+    return { session: reused, reused: true };
+  }
+  return { session: await verifySession(installation, env, ctx), reused: false };
+}
+
+async function ensureSession(installation: InstallationRow, env: Env, ctx: ExecutionContext) {
+  return (await heldSession(installation, env, ctx)).session;
+}
+
+/** A request under the installation's Session. Composio answers 404 or 410 for a Session it dropped, having done nothing:
+ *  a reused Session is then looked up again and the request sent once more. Any failure has the next request look the
+ *  Session up again. */
+async function sessionRequest(
+  held: HeldSession,
+  installation: InstallationRow,
+  env: Env,
+  ctx: ExecutionContext,
+  path: (sessionId: string) => string,
+  init?: RequestInit,
+) {
+  let response = await composioRequest(env, path(held.session.sessionId), init);
+  if (held.reused && (response.status === 404 || response.status === 410)) {
+    forgetSession(held.session.sessionId);
+    await response.body?.cancel();
+    held.session = await verifySession(installation, env, ctx);
+    held.reused = false;
+    response = await composioRequest(env, path(held.session.sessionId), init);
+  }
+  if (!response.ok) forgetSession(held.session.sessionId);
+  return response;
 }
 
 async function currentInstallation(env: Env, id: string) {
@@ -458,24 +498,77 @@ async function proxyMcp(request: Request, installation: InstallationRow, env: En
   return new Response(response.body, { status: response.status, headers });
 }
 
-async function catalog(env: Env, url: URL) {
+/** The catalog is the same for every installation and changes rarely, so a page is kept: in this isolate, and in the
+ *  data center's cache where the Worker's hostname has one. The key is the cursor alone, never anything of the caller's. */
+const CATALOG_KEEP_SECONDS = 30 * 60;
+const CATALOG_PAGES_KEPT = 8;
+const catalogPages = new Map<string, { at: number; body: string; contentType: string }>();
+
+function catalogResponse(body: string, contentType: string) {
+  return new Response(body, { headers: { "content-type": contentType, "cache-control": "private, max-age=600" } });
+}
+
+function keepCatalogPage(cursor: string, body: string, contentType: string, at = Date.now()) {
+  catalogPages.delete(cursor);
+  catalogPages.set(cursor, { at, body, contentType });
+  for (const oldest of catalogPages.keys()) {
+    if (catalogPages.size <= CATALOG_PAGES_KEPT) break;
+    catalogPages.delete(oldest);
+  }
+}
+
+/** Cloudflare's per-data-center cache; absent outside Workers. */
+function edgeCache(): Cache | undefined {
+  return typeof caches === "undefined" ? undefined : (caches as unknown as { default?: Cache }).default;
+}
+
+function hasToolkits(body: string) {
+  try {
+    const page = JSON.parse(body) as { items?: unknown; data?: unknown };
+    const items = page.items ?? page.data;
+    return Array.isArray(items) && items.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function catalog(env: Env, url: URL, ctx?: Pick<ExecutionContext, "waitUntil">) {
   // The catalog runs past a thousand toolkits, so pass the caller's cursor through.
   const params = new URLSearchParams({ limit: "500", sort_by: "usage" });
-  const cursor = url.searchParams.get("cursor");
-  if (cursor && CATALOG_CURSOR.test(cursor)) params.set("cursor", cursor);
+  const asked = url.searchParams.get("cursor");
+  const cursor = asked && CATALOG_CURSOR.test(asked) ? asked : "";
+  if (cursor) params.set("cursor", cursor);
+  const kept = catalogPages.get(cursor);
+  if (kept && Date.now() - kept.at < CATALOG_KEEP_SECONDS * 1_000) return catalogResponse(kept.body, kept.contentType);
+  const edge = edgeCache();
+  const edgeKey = `https://catalog.invalid/v1/catalog?${new URLSearchParams({ cursor })}`;
+  const stored = await edge?.match(edgeKey).catch(() => undefined);
+  if (stored) {
+    const body = await stored.text();
+    const contentType = stored.headers.get("content-type") ?? "application/json";
+    const age = Number(stored.headers.get("age"));
+    keepCatalogPage(cursor, body, contentType, Date.now() - (Number.isFinite(age) ? age * 1_000 : 0));
+    return catalogResponse(body, contentType);
+  }
   const response = await fetch(`${env.COMPOSIO_TOOLKIT_BASE}/toolkits?${params}`, {
     headers: { accept: "application/json", "x-api-key": env.COMPOSIO_API_KEY },
     signal: AbortSignal.timeout(20_000),
   });
   if (!response.ok) return json({ error: await upstreamError(response, "Catalog unavailable") }, 502);
-  return new Response(response.body, {
-    headers: { "content-type": response.headers.get("content-type") ?? "application/json", "cache-control": "private, max-age=600" },
-  });
+  const body = await response.text();
+  const contentType = response.headers.get("content-type") ?? "application/json";
+  // A page with no toolkits is an upstream hiccup or the walk's end past the last page: never kept.
+  if (hasToolkits(body)) {
+    keepCatalogPage(cursor, body, contentType);
+    const put = edge?.put(edgeKey, new Response(body, { headers: { "content-type": contentType, "cache-control": `public, max-age=${CATALOG_KEEP_SECONDS}` } }))
+      .catch((error: unknown) => console.warn(JSON.stringify({ message: "catalog page not cached", error: error instanceof Error ? error.message : String(error) })));
+    if (put) ctx?.waitUntil(put);
+  }
+  return catalogResponse(body, contentType);
 }
 
 async function listSessionToolkits(
-  env: Env,
-  sessionId: string,
+  request: (path: (sessionId: string) => string) => Promise<Response>,
 ): Promise<ToolkitItem[]> {
   const toolkits: ToolkitItem[] = [];
   const seenCursors = new Set<string>();
@@ -485,10 +578,7 @@ async function listSessionToolkits(
     // Composio supports a server-side connected-only filter on this route.
     const params = new URLSearchParams({ limit: "50", is_connected: "true" });
     if (cursor) params.set("cursor", cursor);
-    const response = await composioRequest(
-      env,
-      `/tool_router/session/${encodeURIComponent(sessionId)}/toolkits?${params}`,
-    );
+    const response = await request((sessionId) => `/tool_router/session/${encodeURIComponent(sessionId)}/toolkits?${params}`);
     if (!response.ok) throw new Error(await upstreamError(response, "Toolkit inventory unavailable"));
     const body = toolkitPageSchema.parse(await response.json());
     toolkits.push(...(body.items ?? []));
@@ -573,9 +663,9 @@ async function connectedServices(
   env: Env,
   ctx: ExecutionContext,
 ) {
-  const session = await ensureSession(installation, env, ctx);
+  const held = await heldSession(installation, env, ctx);
   const [toolkits, accounts] = await Promise.all([
-    listSessionToolkits(env, session.sessionId),
+    listSessionToolkits((path) => sessionRequest(held, installation, env, ctx, path)),
     listConnectedAccounts(env, actingUser(installation), []).catch(() => []),
   ]);
   return json({
@@ -586,12 +676,10 @@ async function connectedServices(
 
 async function connectionStatus(url: URL, installation: InstallationRow, env: Env, ctx: ExecutionContext) {
   const slugs = [...new Set((url.searchParams.get("services") ?? "").split(",").map((slug) => slug.toLowerCase()).filter(Boolean))].slice(0, 50);
-  const session = await ensureSession(installation, env, ctx);
+  const held = await heldSession(installation, env, ctx);
   const [response, accounts] = await Promise.all([
-    composioRequest(
-      env,
-      `/tool_router/session/${encodeURIComponent(session.sessionId)}/toolkits?${new URLSearchParams({ limit: "50", toolkits: slugs.join(",") })}`,
-    ),
+    sessionRequest(held, installation, env, ctx,
+      (sessionId) => `/tool_router/session/${encodeURIComponent(sessionId)}/toolkits?${new URLSearchParams({ limit: "50", toolkits: slugs.join(",") })}`),
     listConnectedAccounts(env, actingUser(installation), slugs).catch(() => []),
   ]);
   if (!response.ok) return json({ error: await upstreamError(response, "Connection status unavailable") }, 502);
@@ -619,7 +707,7 @@ async function authorize(
   env: Env,
   ctx: ExecutionContext,
 ) {
-  const session = await ensureSession(installation, env, ctx);
+  const held = await heldSession(installation, env, ctx);
   // Listing can be denied to the broker's key scope; authorize must still
   // work, with the alias guardrails degrading to first-account behavior.
   const accounts = await listConnectedAccounts(env, actingUser(installation), [slug]).catch(() => []);
@@ -636,10 +724,10 @@ async function authorize(
     const removed = await composioRequest(env, `/connected_accounts/${encodeURIComponent(id)}?revoke_on_delete=true`, { method: "DELETE" });
     if (!removed.ok) return json({ error: await upstreamError(removed, "Removing the earlier sign-in failed") }, 502);
   }
-  await raiseAccountCap(session, env);
+  await raiseAccountCap(held.session, env);
   const linkRequest: AccountLinkRequest = { toolkit: slug };
   if (plan.alias) linkRequest.alias = plan.alias;
-  const response = await composioRequest(env, `/tool_router/session/${encodeURIComponent(session.sessionId)}/link`, {
+  const response = await sessionRequest(held, installation, env, ctx, (sessionId) => `/tool_router/session/${encodeURIComponent(sessionId)}/link`, {
     method: "POST",
     body: JSON.stringify(linkRequest),
   });
@@ -654,11 +742,9 @@ async function authorize(
 }
 
 async function disconnect(slug: string, installation: InstallationRow, env: Env, ctx: ExecutionContext) {
-  const session = await ensureSession(installation, env, ctx);
-  const list = await composioRequest(
-    env,
-    `/tool_router/session/${encodeURIComponent(session.sessionId)}/toolkits?${new URLSearchParams({ limit: "50", toolkits: slug })}`,
-  );
+  const held = await heldSession(installation, env, ctx);
+  const list = await sessionRequest(held, installation, env, ctx,
+    (sessionId) => `/tool_router/session/${encodeURIComponent(sessionId)}/toolkits?${new URLSearchParams({ limit: "50", toolkits: slug })}`);
   if (!list.ok) return json({ error: await upstreamError(list, "Connection lookup unavailable") }, 502);
   const body = toolkitPageSchema.parse(await list.json());
   const id = body.items?.find((item) => item.slug?.toLowerCase() === slug)?.connected_account?.id;
@@ -768,7 +854,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext) {
     await limitSessionRequests(installation, env);
     return requestFileUpload(request, installation, env);
   }
-  if (request.method === "GET" && url.pathname === "/v1/catalog") return catalog(env, url);
+  if (request.method === "GET" && url.pathname === "/v1/catalog") return catalog(env, url, ctx);
   if (request.method === "GET" && url.pathname === "/v1/connectors/connected") return connectedServices(installation, env, ctx);
   if (request.method === "GET" && url.pathname === "/v1/connectors") return connectionStatus(url, installation, env, ctx);
   const accountMatch = url.pathname.match(/^\/v1\/connectors\/([a-z0-9_][a-z0-9_-]{0,80})\/accounts\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})$/);

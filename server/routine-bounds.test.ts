@@ -19,7 +19,7 @@ const passes = (row: RoutineRun, clock: RunClock, from: number, to: number) => {
   return over;
 };
 
-afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
 describe("the work a run has done", () => {
   it("is added up pass by pass while it is running, from its start", () => {
@@ -72,6 +72,21 @@ describe("the run limit", () => {
     expect(runOverLimit(row, clock, 3 * HOUR)).toEqual({ text: "Stopped: this run ran longer than the 3-hour limit", codes: { errorCode: "routines.server.overLimit", errorParams: { hours: 3 } } });
   });
 
+  it("stops a bot's run at the limit the environment names", () => {
+    vi.stubEnv("OMB_ROUTINE_RUN_LIMIT_HOURS", "6");
+    const row = run(), clock = new RunClock();
+    clock.from(row, "workedMs", 0);
+    expect(passes(row, clock, MINUTE, 6 * HOUR - MINUTE)).toBeNull();
+    expect(runOverLimit(row, clock, 6 * HOUR)).toEqual({ text: "Stopped: this run ran longer than the 6-hour limit", codes: { errorCode: "routines.server.overLimit", errorParams: { hours: 6 } } });
+  });
+
+  it("keeps a routine's own limit when the environment names another default", () => {
+    vi.stubEnv("OMB_ROUTINE_RUN_LIMIT_HOURS", "6");
+    const own = run({ timeoutMinutes: 10 }), clock = new RunClock();
+    expect(runOverLimit(own, clock, 10 * MINUTE)).toEqual({ text: "Stopped after reaching the 10-minute run limit", codes: { errorCode: "routines.server.overOwnLimit", errorParams: { minutes: 10 } } });
+    expect(runLimitAt(own, 5 * MINUTE)).toBe(10 * MINUTE);
+  });
+
   it("gives a room goal's run, which stays running across its members' turns, twelve hours", () => {
     expect(ROUTINE_GOAL_RUN_LIMIT_MINUTES).toBe(720);
     const row = run({ target: "room-goal" }), clock = new RunClock();
@@ -107,7 +122,7 @@ describe("the run limit", () => {
     const clock = new RunClock();
     const own = run({ timeoutMinutes: 10 });
     expect(runOverLimit(own, clock, 10 * MINUTE - 1)).toBeNull();
-    expect(runOverLimit(own, clock, 10 * MINUTE)).toEqual({ text: "Stopped after reaching the 10-minute run limit", codes: { errorCode: undefined, errorParams: undefined } });
+    expect(runOverLimit(own, clock, 10 * MINUTE)).toEqual({ text: "Stopped after reaching the 10-minute run limit", codes: { errorCode: "routines.server.overOwnLimit", errorParams: { minutes: 10 } } });
     const long = run({ timeoutMinutes: 1_440 });
     expect(runOverLimit(long, clock, 24 * HOUR - 1)).toBeNull();
     expect(runOverLimit(long, clock, 24 * HOUR)?.text).toBe("Stopped after reaching the 1440-minute run limit");

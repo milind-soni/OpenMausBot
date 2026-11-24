@@ -88,7 +88,9 @@ export interface WireComputerControl {
   help?: ComputerHelpRef;
 }
 
-/** GET /api/bots?messages=N: the fleet, each bot and room with the newest page of its selected conversation. */
+/** GET /api/bots?messages=N: the fleet, each bot and room with the newest page of its selected conversation. With
+ * `&tail=T&open=ID,…`, a bot not named in `open` carries only the newest T or more of those rows (`hasMore` true when
+ * rows were left out), reaching back to every line a client reads from a conversation it is not showing. */
 export interface BotsResponse<Message = WireMessage> {
   bots: Array<WireBot & WireMessagePage<Message>>;
   botQueuedMessages: BotQueuedMessages;
@@ -133,6 +135,7 @@ export interface WireModelOption {
   label: string;
   custom?: boolean;
   provider?: string;
+  effortLevels?: readonly string[];
 }
 
 /** One AI engine set up on the server, as GET /api/instances lists it: the fields a phone reads. Each entry carries more

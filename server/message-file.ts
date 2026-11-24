@@ -268,7 +268,7 @@ function utf8Prefix(value: string, maximumBytes: number): string {
 }
 
 /** Below common 255-byte name limits, with room for the app's temporary-file suffix. */
-function boundedDisplayName(value: string, maximumBytes = 180): string {
+export function boundedDisplayName(value: string, maximumBytes = 180): string {
   if (Buffer.byteLength(value) <= maximumBytes) return value;
   const extension = extname(value);
   const extensionBytes = Buffer.byteLength(extension);
@@ -475,7 +475,7 @@ export async function openFileSavedSince(
   if (hidden || refused.some((root) => containedBy(root, canonical))) {
     throw statusError(403, "files in hidden folders or in the app's own data can't be attached", "outside_workspace");
   }
-  const file = await openMessageFile(canonical, [dirname(canonical)], maxBytes);
+  const file = await openMessageFile(pathToFileURL(canonical).href, [dirname(canonical)], maxBytes);
   const opened = await file.handle.stat().catch(async (error: unknown) => {
     await file.handle.close().catch(() => undefined);
     throw error;

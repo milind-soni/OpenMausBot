@@ -55,7 +55,7 @@ const level = z.enum(["ask", "edits", "auto", "full", "custom"]);
 export const linkedBotSchema = z.object({
   id: botId, name, title: z.string().max(200).optional(), description: z.string().max(400).optional(), model: z.string().max(200).optional(), level: level.optional(),
   /** How it looks and where its own chat is, so the other place can draw it as it is drawn at home. */
-  color: z.string().max(64).optional(), mascotBody: z.string().max(64).optional(), mascotFaceColor: z.string().max(64).optional(), chief: z.boolean().optional(), threadId: botId.optional(),
+  color: z.string().max(64).optional(), mascotBody: z.string().max(64).optional(), mascotFaceColor: z.string().max(64).optional(), mascotBodyColor: z.string().max(64).optional(), mascotMaterial: z.string().max(64).optional(), chief: z.boolean().optional(), threadId: botId.optional(),
 });
 export type LinkedBot = z.infer<typeof linkedBotSchema>;
 

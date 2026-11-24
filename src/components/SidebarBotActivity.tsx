@@ -1,14 +1,14 @@
-import { BellDot, CircleAlert, Clock3, Loader2, Pin, PinOff, type LucideIcon } from "lucide-react";
+import { BellDot, CircleAlert, Clock3, Loader2, Pin, type LucideIcon } from "lucide-react";
 import type { Dispatch } from "react";
 import type { Action, AppState, Bot, Group, Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { roomThreadSpeakerId, roomThreadWorking } from "@/lib/room-threads";
 import { t } from "@/lib/i18n";
-import { isArchived, orderedSidebarThreads, orderedThreadList, threadRecency, threadUpdatedLabel } from "./SidebarThreadRow";
+import { isArchived, orderedSidebarThreads, orderedThreadList } from "./SidebarThreadRow";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 import { localizedTaskTitle } from "@/lib/task-title";
 import { endedOnFailure } from "@/lib/mascot";
-import { rowSelectedSurface } from "./SidebarRowMarkers";
+import { MainThreadMark, rowSelectedSurface } from "./SidebarRowMarkers";
 import { handoffStatusText } from "./HandoffStatusChip";
 
 export function sidebarBotActivityTasks(bot: Bot, queued: Record<string, unknown[]>, archivedApprovals = false): Array<Task & { queued: boolean }> {
@@ -118,8 +118,16 @@ export function attentionTriggerLabel(count: number): string {
   return count > 0 ? t("attention.titleCount", { count }) : t("attention.title");
 }
 
+const taskHasRunningWork = (task: { activity?: Task["activity"]; busy?: boolean; queued?: boolean }): boolean =>
+  task.activity === "working" || (task.busy === true && task.activity !== "waiting-on-you") || task.queued === true;
+
 export function attentionHasRunningWork(entries: readonly AttentionThread[]): boolean {
-  return entries.some((entry) => entry.task.activity === "working" || (entry.task.busy === true && entry.task.activity !== "waiting-on-you") || entry.task.queued === true);
+  return entries.some((entry) => taskHasRunningWork(entry.task));
+}
+
+export function hasCrossBotRunningWork(bots: Bot[], queued: Record<string, unknown[]>, groups: Group[] = []): boolean {
+  return bots.some((bot) => !bot.hidden && sidebarBotActivityTasks(bot, queued, true).some(taskHasRunningWork))
+    || groups.some((group) => sidebarGroupActivityTasks(group, bots, queued).some(taskHasRunningWork));
 }
 
 export function attentionRowStatus(task: AttentionThread["task"]): { active: boolean; Icon: LucideIcon; colorClass: string; label: string } {
@@ -198,40 +206,10 @@ export function AttentionThreadRows({ entries, onJump, inset = false, unreadDot 
         <Icon size={inset ? 16 : 15} aria-hidden="true" className={cn("shrink-0", colorClass)} />
         <span className="min-w-0 flex-1">
           <span className={cn("block truncate", unread && "font-medium text-ink")}>{entry.task.title}</span>
-          <span className="block truncate text-[11px] text-ink-secondary">{name} · {status}</span>
+          <span className="block truncate text-[12px] leading-4 text-ink-secondary">{name} · {status}</span>
         </span>
         {unread && <span data-attention-unread-dot aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-accent" />}
       </button>;
-    })}
-  </>;
-}
-
-export function PinnedThreadRows({ entries, now, onJump, onUnpin }: { entries: AttentionThread[]; now: number; onJump: (entry: AttentionThread) => void; onUnpin: (entry: AttentionThread) => void }) {
-  return <>
-    {entries.map((entry) => {
-      const name = attentionOwnerName(entry);
-      const status = attentionRowStatus(entry.task);
-      const updated = threadUpdatedLabel(threadRecency(entry.task), now);
-      const byline = status.active ? `${name} · ${status.label}` : updated ? `${name} · ${updated}` : name;
-      const label = t("sidebar.pinnedThreads.item", { title: entry.task.title, name: byline });
-      const unpinLabel = t("sidebar.bot.unpin");
-      const key = `${entry.kind}-${entry.kind === "bot" ? entry.botId : entry.groupId}-${entry.task.threadId}`;
-      const Icon = status.active ? status.Icon : Pin;
-      return <div key={key} className="group/pinned flex w-full items-center">
-        <button type="button" aria-label={label} title={label}
-          onClick={() => onJump(entry)}
-          className="flex min-w-0 flex-1 items-center gap-2.5 px-3.5 py-2 text-left text-[13px] text-ink hover:bg-menu-hover">
-          <Icon size={15} aria-hidden="true" className={cn("shrink-0", status.active ? status.colorClass : "text-ink-secondary")} />
-          <span className="min-w-0 flex-1">
-            <span className="block truncate">{entry.task.title}</span>
-            <span className="block truncate text-[11px] text-ink-secondary">{byline}</span>
-          </span>
-        </button>
-        <button type="button" aria-label={unpinLabel} title={unpinLabel} onClick={() => onUnpin(entry)}
-          className="mr-2 flex size-6 shrink-0 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover/pinned:opacity-100 max-md:opacity-70 touch:opacity-70">
-          <PinOff size={13} aria-hidden="true" />
-        </button>
-      </div>;
     })}
   </>;
 }
@@ -255,9 +233,9 @@ export function SidebarBotActivity({ bot, rowThreadId, density, pendingQueued, d
       const Icon = waiting ? CircleAlert : working ? Loader2 : teammateWait || task.queued ? Clock3 : pinnedOnly ? Pin : BellDot;
       return <button key={task.threadId} type="button" data-sidebar-activity-row={task.threadId} aria-label={label} title={label}
         onClick={() => dispatch({ type: "switchTask", botId: bot.id, threadId: task.threadId })}
-        className={cn("flex min-h-7 w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-left text-[11px] outline-none hover:bg-raised/50 focus-visible:ring-1 focus-visible:ring-accent/60", iconOnly && "justify-center", waiting ? "text-warning" : "text-ink-secondary")}>
-        <Icon size={12} aria-hidden="true" className={cn("shrink-0", working && "animate-spin text-success", teammateWait && "text-warning", task.unread && !waiting && !working && !teammateWait && "text-accent")} />
-        {!iconOnly && <><span className="min-w-0 flex-1 truncate">{title}</span>{!pinnedOnly && <span className="shrink-0 text-[10px]">{waiting ? t("task.waiting") : status}</span>}
+        className={cn("flex min-h-7 w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-left text-[13px] leading-[18px] outline-none hover:bg-ink/[0.06] focus-visible:ring-1 focus-visible:ring-accent/60", iconOnly && "justify-center", waiting ? "text-warning" : "text-ink-secondary")}>
+        <Icon size={14} aria-hidden="true" className={cn("shrink-0", working && "animate-spin text-success", teammateWait && "text-warning", task.unread && !waiting && !working && !teammateWait && "text-accent")} />
+        {!iconOnly && <><span className="min-w-0 flex-1 truncate">{title}</span>{task.threadId === bot.mainThreadId && <MainThreadMark />}{!pinnedOnly && <span className="shrink-0 text-[12px] leading-4">{waiting ? t("task.waiting") : status}</span>}
           {task.unread && (waiting || working || teammateWait || task.queued) && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-hidden="true" />}</>}
       </button>;
     })}

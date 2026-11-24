@@ -8,7 +8,7 @@ export type { InspectorEntry, InspectorPage, NativeRecord } from "../shared/insp
 const DEFAULT_LIMIT = 300;
 const MAX_LIMIT = 2000;
 const READ_CHUNK = 64 * 1024;
-const MAX_TAIL_BYTES = 8 * 1024 * 1024;
+export const MAX_TAIL_BYTES = 8 * 1024 * 1024;
 
 interface LineCount {
   dev: number;
@@ -222,6 +222,8 @@ export function isRuntimeEvent(value: unknown): value is RuntimeEvent {
       return typeof value.message === "string";
     case "context.compacted":
       return true;
+    case "context.summarizing":
+      return typeof value.active === "boolean";
     case "runtime.error":
       return typeof value.message === "string" &&
         (value.setup === undefined || typeof value.setup === "boolean") &&

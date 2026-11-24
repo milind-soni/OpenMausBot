@@ -41,7 +41,7 @@ export interface ChatToolDefinition {
 export interface ChatToolResult { text: string; ok: boolean; images?: ChatImagePart[] }
 /** How a call is shown and granted. A grant names the exact tool on the server as launched; the
  * person's own computer never gets a session-wide one. */
-export interface ChatToolCallView { title: string; input: Record<string, unknown>; ask: boolean; grant?: string }
+export interface ChatToolCallView { title: string; /** mcp__<server>__<tool>: the name a saved grant knows it by. */ permissionTool?: string; input: Record<string, unknown>; ask: boolean; grant?: string }
 /** A dispatched operation may already have taken effect: never retry it through a new round. */
 export class ChatToolSessionError extends Error {}
 export interface SkippedChatMcpServer { server: string; reason: string }
@@ -491,7 +491,9 @@ function omitBlankDefaults(builtInBrowser: boolean, tool: string, args: unknown)
 
 type CheckedTool = { tool: Record<string, unknown> & { name: string; inputSchema: Record<string, unknown> }; schema: ValidateFunction; check: ServerToolCheck };
 type ToolOrigin = Omit<RegisteredTool, "name" | "schema">;
-const ARGUMENTS_MISFIT = "Tool arguments do not match the advertised input schema; use its required fields and types";
+const ARGUMENTS_MISFIT = (tool: string, problems: readonly string[]): string =>
+  `Tool arguments do not match the advertised input schema: ${tool}: ${problems.join("; ") || "use its required fields and types"}.`;
+const ARGUMENTS_NOT_OBJECT = "arguments must be an object";
 
 function checkedTools(tools: readonly unknown[], server: string): CheckedTool[] {
   const names = new Set<string>();
@@ -826,7 +828,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     if (listedAs) {
       const call = listedAs === CALL_TOOL ? searchedCall(args) : undefined;
       if (call && selectionExcludes(call.tool, call.args)) throw new Error("Tool selection excludes this tool");
-      if (!object(args)) throw new Error(ARGUMENTS_MISFIT);
+      if (!object(args)) throw new Error(ARGUMENTS_MISFIT(name, [ARGUMENTS_NOT_OBJECT]));
       return;
     }
     const tool = registered.get(name);
@@ -834,15 +836,16 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     if (selectionExcludes(tool, args)) throw new Error("Tool selection excludes this tool");
     omitBlankDefaults(tool.builtInBrowser, tool.name, args);
     if (!object(args) || (!(tool.searched && isDirectoryTool(tool.name)) && !tool.schema(args))) {
-      throw new Error(readsAddressOnly(tool, args) ? readOpenPageOnly(tool.server) : ARGUMENTS_MISFIT);
+      const problems = object(args) ? schemaProblems(tool.schema.errors) : [ARGUMENTS_NOT_OBJECT];
+      throw new Error(readsAddressOnly(tool, args) ? readOpenPageOnly(tool.server) : ARGUMENTS_MISFIT(name, problems));
     }
   };
   const viewOf = (tool: RegisteredTool, args: Record<string, unknown>, title: string): ChatToolCallView => {
     const runs = target(tool, args);
     if (runs === undefined || tool.agents) return { title, input: args, ask: false };
-    const grant = !tool.hostComputer ? JSON.stringify([tool.server, tool.launch, runs]) : undefined;
-    if (!tool.searched || tool.name !== CALL_TOOL) return { title, input: args, ask: true, ...(grant ? { grant } : {}) };
-    return { title: chatToolName(tool.server, runs), input: object(args.arguments) ? args.arguments : {}, ask: true, ...(grant ? { grant } : {}) };
+    const grant = !tool.hostComputer ? JSON.stringify([tool.server, tool.launch, runs]) : undefined, permissionTool = `mcp__${tool.server}__${runs}`;
+    if (!tool.searched || tool.name !== CALL_TOOL) return { title, permissionTool, input: args, ask: true, ...(grant ? { grant } : {}) };
+    return { title: chatToolName(tool.server, runs), permissionTool, input: object(args.arguments) ? args.arguments : {}, ask: true, ...(grant ? { grant } : {}) };
   };
   const view = (name: string, args: Record<string, unknown>): ChatToolCallView => {
     if (name === standIn?.definition.function.name) return { title: name, input: args, ask: false };

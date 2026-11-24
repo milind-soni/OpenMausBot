@@ -4,7 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { randomBytes, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { allowedServerOrigin } from "./server-address.mjs";
+import { allowedServerOrigin } from "./server-address.mjs"; import { ownServerRefusal } from "./own-server-refusal.mjs";
 import { createSharedCua, executeSharedOperation, personalSecretPaths, sharedComputerError, validCommandSeconds } from "./shared-computer-access.mjs";
 import { createLentMcp, LENT_MCP_ACTIONS, ownPorts, validLentMcpJob } from "./lent-mcp.mjs";
 import { sharedCuaConnection } from "./shared-cua-connection.mjs";
@@ -283,9 +283,9 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
       lending: lent.map(env => env.id),
       clouds: (paused ? [...ownClouds(), ...environments().filter(env => records[env.id]?.own && records[env.id].enabled === true)] : lent).map(env => env.name),
       // Lent, but the Cloud hasn't accepted this computer yet (or lost it): the menu must not say it can use it. A
-      // sleeping My Cloud still can; it wakes when a bot needs this computer.
+      // sleeping My Cloud still can; it wakes when a bot needs this computer. Such a Cloud takes it as the one typed on (typing); a server of their own doesn't.
       waiting: lent.filter(env => !status.get(env.id)?.connected && status.get(env.id)?.problem !== "asleep").map(env => env.name),
-      ...(problems.length ? { problems } : {}),
+      ...(problems.length ? { problems } : {}), ...(lent.some(env => records[env.id]?.cloud && !ownHomeId(env) && (status.get(env.id)?.connected || status.get(env.id)?.problem === "asleep")) ? { typing: true } : {}),
       using: using.map(env => env.name),
       ...(bots.length ? { bots } : {}),
       paused,
@@ -446,8 +446,8 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
   /** This desktop's sign-in on a server of the person's own, checked now (ownServerSession). */
   const ownIdentity = async env => {
     const described = await describe(env, false);
-    if (!ownServerSession(described.auth)) throw Object.assign(new Error(t("native.lend.notOwnServer")), { problem: "not-own" });
-    if (!described.supported) throw new Error(UPDATE_SERVER);
+    if (!ownServerSession(described.auth)) throw Object.assign(new Error(t("native.lend.notOwnServer")), { problem: "not-own", why: ownServerRefusal(described.auth) ?? "not-owner" });
+    if (!described.supported) throw Object.assign(new Error(UPDATE_SERVER), { why: "old" });
     takes(env, { ...described, link: false, chrome: false });
     return described.info;
   };
@@ -865,7 +865,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
     },
     /** Whether `env` is a server of the person's own, checked now: its identity, or null (not paired as its admin, a team
      * or Cloud, too old to take a lent computer, or not answering). */
-    ownServer: env => ownIdentity(env).catch(() => null),
+    ownServer: env => ownIdentity(env).catch(() => null), /** Why `env` is not a server of the person's own: ownServerRefusal's word, "old", or "unreachable". */ ownRefusal: env => ownIdentity(env).then(() => null, error => error?.why ?? "unreachable"),
     /** A server of the person's own whose pairing here was never asked about: its identity, for the popup; null once the
      * person answered for this pairing (a grant they allowed carries over to a new pairing of that same server); false
      * when it is not a server of their own. */

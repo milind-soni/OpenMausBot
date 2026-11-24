@@ -30,6 +30,7 @@ import { BotEditorStore, initialState, StoreProvider } from "@/state/store";
 import { setLocale } from "@/lib/i18n";
 import { ThreadRefsContext } from "./ThreadRefs";
 import * as AttachmentPreview from "./AttachmentPreview";
+import * as OutsideWorkspaceProbe from "./outside-workspace-probe";
 import { messageReferencesFile } from "../../server/message-file";
 
 // Most of this file pins Advanced mode's chrome; the Simple code block has its own tests below.
@@ -928,10 +929,16 @@ describe("ChatMarkdown attachments", () => {
 
   describe("a file link outside the conversation's workspace", () => {
     const filePath = "C:\\Users\\Maus\\_draft\\ollama-gen.js";
-    const render = (outsideWorkspace: boolean, href = filePath) => {
+    const render = (
+      outsideWorkspace: boolean,
+      href = filePath,
+      probedOutside: boolean | null = outsideWorkspace ? true : false,
+      saveFailed = outsideWorkspace,
+    ) => {
+      const probe = vi.spyOn(OutsideWorkspaceProbe, "useMessageFileOutsideWorkspace").mockReturnValue(probedOutside);
       const save = vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
-        state: "failed",
-        reason: "the linked file is outside this conversation's workspace",
+        state: saveFailed ? "failed" : "idle",
+        reason: outsideWorkspace ? "the linked file is outside this conversation's workspace" : "",
         savedTo: "",
         outsideWorkspace,
         retryable: !outsideWorkspace,
@@ -944,17 +951,19 @@ describe("ChatMarkdown attachments", () => {
         }));
       } finally {
         save.mockRestore();
+        probe.mockRestore();
       }
     };
     const revealInFolder = vi.fn(async () => "shown" as const);
 
-    it("offers Show in folder in the local desktop app, without printing the path", () => {
+    it("reveals the host path on the first click in the local desktop app when the probe already refused it", () => {
       vi.stubGlobal("window", { ogb: { revealInFolder, remoteClient: { active: false } } });
       try {
-        const html = render(true);
-        expect(html).toContain("This file is outside this chat&#x27;s working folder, so it can&#x27;t be saved from here");
+        const html = render(false, filePath, true);
+        expect(html).not.toContain("This file is outside this chat&#x27;s working folder, so it can&#x27;t be saved from here");
         expect(html).not.toContain("the linked file is outside");
-        expect(html).toContain("Show in folder");
+        expect(html).toContain('title="Show in folder"');
+        expect(html).toContain("lucide-folder-open");
         expect(html).not.toContain("<code");
       } finally {
         vi.unstubAllGlobals();
@@ -964,8 +973,8 @@ describe("ChatMarkdown attachments", () => {
     it("shows the full path as selectable text to a remote client instead", () => {
       vi.stubGlobal("window", { ogb: { revealInFolder, remoteClient: { active: true } } });
       try {
-        const html = render(true);
-        expect(html).not.toContain("Show in folder");
+        const html = render(true, filePath, null);
+        expect(html).not.toContain('title="Show in folder"');
         expect(html).toMatch(/<code[^>]*select-all[^>]*>C:\\Users\\Maus\\_draft\\ollama-gen\.js<\/code>/);
       } finally {
         vi.unstubAllGlobals();
@@ -973,22 +982,36 @@ describe("ChatMarkdown attachments", () => {
     });
 
     it("does not offer a retry for a refusal that happens on every try", () => {
-      expect(render(true)).not.toContain("lucide-rotate-ccw");
-      expect(render(true, "file:///Users/maus/Desktop/designs/Posts/2026-10-08_News")).not.toContain("lucide-rotate-ccw");
-      expect(render(false)).toContain("lucide-rotate-ccw");
+      vi.stubGlobal("window", { ogb: { revealInFolder, remoteClient: { active: false } } });
+      try {
+        expect(render(false, filePath, true)).not.toContain("lucide-rotate-ccw");
+        expect(render(false, "file:///Users/maus/Desktop/designs/Posts/2026-10-08_News", true)).not.toContain("lucide-rotate-ccw");
+        expect(render(false, filePath, false, true)).toContain("lucide-rotate-ccw");
+      } finally {
+        vi.unstubAllGlobals();
+      }
     });
 
     it("shows the path in a browser, which has no desktop bridge", () => {
-      expect(render(true)).toContain(`>${filePath}</code>`);
+      expect(render(true, filePath, null)).toContain(`>${filePath}</code>`);
+    });
+
+    it("keeps the link usable in a browser, where nothing probes it", () => {
+      const html = render(false, filePath, null);
+      expect(html).not.toContain("animate-spin");
+      expect(html).not.toContain('disabled=""');
     });
 
     describe("a backticked folder path with a space", () => {
       const folder = "D:\\Claude Works\\v3\\";
       const text = `The videos are in \`${folder}\``;
-      const outsideSave = () => vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
-        state: "failed", reason: "", savedTo: "", outsideWorkspace: true, retryable: false, folder: null,
-        save: vi.fn(async () => undefined),
-      });
+      const outsideSave = () => {
+        vi.spyOn(OutsideWorkspaceProbe, "useMessageFileOutsideWorkspace").mockReturnValue(null);
+        return vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
+          state: "failed", reason: "", savedTo: "", outsideWorkspace: true, retryable: false, folder: null,
+          save: vi.fn(async () => undefined),
+        });
+      };
 
       it("shows the real path in a browser, not the link's %20 spelling", () => {
         const save = outsideSave();
@@ -1013,15 +1036,20 @@ describe("ChatMarkdown attachments", () => {
 
       it("asks the desktop app to show the real folder", async () => {
         const save = outsideSave();
+        const probe = vi.spyOn(OutsideWorkspaceProbe, "useMessageFileOutsideWorkspace").mockReturnValue(true);
         const ogb = (window as { ogb?: unknown }).ogb;
         const reveal = vi.fn(async () => "shown" as const);
         (window as { ogb?: unknown }).ogb = { revealInFolder: reveal, remoteClient: { active: false } };
+        vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
+          state: "idle", reason: "", savedTo: "", outsideWorkspace: false, retryable: false, folder: null,
+          save: vi.fn(async () => undefined),
+        });
         const host = document.createElement("div");
         document.body.append(host);
         const root = createRoot(host);
         try {
           await act(async () => root.render(createElement(ChatMarkdown, { text, message: { threadId: "thread-1", messageId: "message-1" } })));
-          const show = [...host.querySelectorAll("button")].find((button) => button.textContent === "Show in folder")!;
+          const show = host.querySelector('button[title="Show in folder"]') as HTMLButtonElement;
           await act(async () => show.click());
           expect(reveal).toHaveBeenCalledWith(folder);
         } finally {
@@ -1029,19 +1057,34 @@ describe("ChatMarkdown attachments", () => {
           host.remove();
           (window as { ogb?: unknown }).ogb = ogb;
           save.mockRestore();
+          probe.mockRestore();
         }
       });
     });
 
     it("leaves other failures alone", () => {
       vi.stubGlobal("window", { ogb: { revealInFolder, remoteClient: { active: false } } });
+      const probe = vi.spyOn(OutsideWorkspaceProbe, "useMessageFileOutsideWorkspace").mockReturnValue(false);
+      const save = vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
+        state: "failed",
+        reason: "the linked file is outside this conversation's workspace",
+        savedTo: "",
+        outsideWorkspace: false,
+        retryable: true,
+        folder: null,
+        save: vi.fn(async () => undefined),
+      });
       try {
-        const html = render(false);
+        const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+          text: `[ollama-gen.js](${filePath})`, message: { threadId: "thread-1", messageId: "message-1" },
+        }));
         expect(html).toContain("the linked file is outside this conversation&#x27;s workspace");
-        expect(html).not.toContain("Show in folder");
+        expect(html).not.toContain('title="Show in folder"');
         expect(html).not.toContain(filePath);
       } finally {
         vi.unstubAllGlobals();
+        save.mockRestore();
+        probe.mockRestore();
       }
     });
   });
@@ -1290,7 +1333,68 @@ describe("a fence's wrap directive", () => {
 describe("bidi: message content carries its own direction", () => {
   const ARABIC = "مرحبا بالعالم";
 
-  it("reads direction from the first strong letter, ignoring weak characters", () => {
+  it("goes with the script that has more words, so an Arabic answer opening on a Latin name stays right-to-left", () => {
+    expect(textDirection("Chrome 158 هو الإصدار الأحدث من المتصفح")).toBe("rtl");
+    expect(textDirection("Node.js بيئة تشغيل لجافاسكريبت على الخادم")).toBe("rtl");
+    expect(textDirection("OpenMausBot v0.1.169 صدر في 2026-11-18 مع إصلاحات كثيرة")).toBe("rtl");
+    expect(textDirection("The Arabic word مرحبا means hello")).toBe("ltr");
+    expect(textDirection("שלום is how you say hello in Hebrew, among other things")).toBe("ltr");
+  });
+
+  it("does not count a bare address, which is Latin in any language", () => {
+    expect(textDirection("راجع https://github.com/milind-soni/OpenMausBot/issues/6541 للتفاصيل")).toBe("rtl");
+    expect(textDirection("https://openmausbot.com/download هو رابط التحميل الرسمي")).toBe("rtl");
+    expect(textDirection("انظر www.example.com/a/very/long/path/to/the/release/notes هنا")).toBe("rtl");
+    expect(textDirection("https://example.com/page")).toBe("ltr");
+  });
+
+  it("keeps an Arabic sentence right-to-left when it holds long technical Latin tokens", () => {
+    expect(textDirection("شغّل pnpm install --frozen-lockfile بعدين")).toBe("rtl");
+    expect(textDirection("استخدم TypeScriptLanguageServer")).toBe("rtl");
+    expect(textDirection("راجع pnpm.io/installation/and/more/details/here للتفاصيل")).toBe("rtl");
+  });
+
+  it("keeps an English sentence left-to-right when it holds an Arabic name", () => {
+    expect(textDirection("Meeting with محمد عبد الرحمن at 5")).toBe("ltr");
+    expect(textDirection("Set process.env.NODE_ENV in config.ts for مرحبا")).toBe("ltr");
+  });
+
+  it("counts a word that ends a sentence, and still skips a dotted technical token", () => {
+    expect(textDirection("Hello. Welcome. مرحبا")).toBe("ltr");
+    expect(textDirection("Done! Thanks, really? مرحبا بك")).toBe("ltr");
+    expect(textDirection("افتح config.ts. ثم احفظ")).toBe("rtl");
+  });
+
+  it("does not count digits as words, Arabic-Indic ones included", () => {
+    expect(textDirection("١٢٣ hello")).toBe("ltr");
+    expect(textDirection("١٢٣ مرحبا")).toBe("rtl");
+    expect(textDirection("٤٥٦ ٧٨٩ hello world")).toBe("ltr");
+  });
+
+  it("does not let an address swallow the RTL text glued to it", () => {
+    expect(textDirection("API https://x.io/aوالتفاصيل هنا")).toBe("rtl");
+    expect(textDirection("التوثيق (https://pnpm.io/installation) فيه كل التفاصيل")).toBe("rtl");
+    expect(textDirection("مرحبا welcome https://example.com،والتفاصيل")).toBe("rtl");
+  });
+
+  it("keeps a link label and the Arabic prose right after it apart when judging the block", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "مرحبا welcome [https://example.com](https://example.com)،والتفاصيل",
+    }));
+    expect(html).toMatch(/<p dir="rtl"/);
+  });
+
+  it("gives a list whose items open on Latin names the direction of its text", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: [
+        "- **Chrome**: متصفح من جوجل يعمل على كل الأنظمة",
+        "- **Firefox**: متصفح مفتوح المصدر من موزيلا",
+      ].join("\n"),
+    }));
+    expect(html).toMatch(/<ul dir="rtl"/);
+  });
+
+  it("breaks a tie with the first strong letter, ignoring weak characters", () => {
     expect(textDirection("مرحبا")).toBe("rtl");
     expect(textDirection("hello")).toBe("ltr");
     expect(textDirection("")).toBe("ltr");

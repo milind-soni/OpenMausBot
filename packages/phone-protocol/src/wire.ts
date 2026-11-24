@@ -1,13 +1,13 @@
 /** The client-visible wire model for tasks, bots, messages and rooms. A field
  * here is one the server emits in every response and SSE frame that carries
  * the shape. */
-import type { PresenceFrame } from "./team-presence.ts";
+import type { PresenceFrame } from "./team-presence.ts"; import type { HandoffCardFields } from "./sign-in-request.ts";
 import type { DataBroadcast } from "./data-surface.ts";
 import type { ApprovalMode } from "./approval-mode.ts";
 import type { ToolScope } from "./tool-scope.ts"; import type { ToolGroup } from "./tool-groups.ts";
 import type { CommandAllowlistCandidate } from "./command-allowlist.ts";
 import type { TurnDigest } from "./digest.ts";
-import type { BotAvatarCrop, MascotFaceColor } from "./bot-avatar.ts";
+import type { BotAvatarCrop, MascotFaceColor, MascotMaterial } from "./bot-avatar.ts";
 import type { BotBodyId } from "./bot-body.ts";
 import type { ReplyStyle } from "./reply-style.ts";
 import type { CredentialTargetId, CUSTOM_SECRET_TARGET, SecretDelivery } from "./credential-request.ts"; import type { EmailOutgoingFields } from "./email.ts";
@@ -45,7 +45,7 @@ export type { AuthPairResponse, AuthSessionResponse, BotCreateResponse, BotsResp
 
 /** Reasoning-effort levels, ascending: a union of what any engine accepts;
  * each driver declares the subset its CLI will take. */
-export const EFFORT_LEVELS = ["none", "low", "medium", "high", "xhigh", "max"] as const;
+export const EFFORT_LEVELS = ["none", "low", "medium", "high", "xhigh", "max", "ultra"] as const;
 export type EffortLevel = (typeof EFFORT_LEVELS)[number];
 
 export function isEffortLevel(value: unknown): value is EffortLevel {
@@ -163,7 +163,7 @@ export interface WireTask extends InboxTask, HandoffStatusField {
   approvalMode?: ApprovalMode;
   autoApprove?: boolean;
   alwaysAllow?: string[];
-  unread?: boolean;
+  unread?: boolean; /** Marked unread by the person with it open: the newest message then ("" for none). Being on screen alone does not read it until a reply follows; opening it, writing in it or a new reply ends the mark. */ heldUnread?: string;
   /** The newest message on screen the last time the person read this
    * conversation. The New divider goes after it. */
   lastReadMessageId?: string;
@@ -285,7 +285,7 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   mascotExpression?: MausExpression | null;
   mascotBody?: BotBodyId | null;
   /** Overrides both eyes and mouth. Absent or null preserves the body's default inks. */
-  mascotFaceColor?: MascotFaceColor | null;
+  mascotFaceColor?: MascotFaceColor | null; /** Lowercase `#rrggbb` tint for the avatar body only. Absent or null uses `color`. */ mascotBodyColor?: string | null; mascotMaterial?: MascotMaterial | null;
   /** App-owned attachment served as this bot's custom profile image;
    * always present on the wire, null when the bot has none. */
   avatarUrl: string | null;
@@ -376,13 +376,13 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   /** Record a screenshot and a short note of each browser action, kept with
    * the conversation. Off unless true. */
   recordBrowserSteps?: boolean;
-  /** Memory upkeep: the harness captures facts from finished chats into
-   * MEMORY.md and topic files, adds facts about the person to About me and
-   * tidies nightly. On unless explicitly false. */
+  /** Capture facts from finished chats into memory and About me, and tidy nightly. On unless false. */
   memoryUpkeep?: boolean;
-  /** Prompt-cache keep-warm for this bot's Claude threads: true or false
-   * overrides the workspace setting; absent follows it. */
+  /** The model memory upkeep uses on this bot's OpenRouter connection; absent uses the connection's automatic pick. */
+  memoryModel?: { instanceId: string; model: string };
+  /** Prompt-cache keep-warm for this bot's Claude threads: true or false overrides the workspace setting; absent follows it. */
   cacheKeepWarm?: boolean;
+  checkWork?: import("./check-work.ts").CheckWork;
   /** false: the workspace's helper model never writes this bot's background texts. Absent or true: allowed. */
   helperModel?: boolean;
   /** Which of the app-wide MCP servers this bot mounts, by name. */
@@ -753,7 +753,7 @@ export interface SecretRequestCardData {
 /** A bot asked the person to sign in to a website themselves: they type the
  * password into the page, or save a login the server fills for the bot. The
  * bot never sees the password either way. */
-export interface SignInRequestCardData {
+export interface SignInRequestCardData extends HandoffCardFields {
   /** The page to open, an http(s) address. */
   url: string;
   /** Its host, the card's headline. */
@@ -783,7 +783,7 @@ export interface SignInRequestCardData {
 
 /** The open sign-in request a bot's computer plea stands for, so whichever
  * panel shows the plea can settle that card. */
-export interface ComputerHelpRef {
+export interface ComputerHelpRef extends Pick<HandoffCardFields, "instruction"> {
   /** The asking bot: a team computer's plea reaches every member's panel. */
   botId: string;
   threadId: string;

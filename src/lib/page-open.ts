@@ -82,9 +82,16 @@ export function publishedLink(href: string | null | undefined): AppPreview | nul
 
 const SIDE_PANELS = ["toggleComputer", "toggleSettings", "toggleInspector", "toggleActivity"] as const;
 
-/** Shows a published app beside the open conversation, in place of any other panel on that side. */
-export function showAppBesideChat(dispatch: (action: { type: (typeof SIDE_PANELS)[number]; open: false }) => void, preview: AppPreview): void {
+type SidePanelDispatch = (action: { type: (typeof SIDE_PANELS)[number]; open: false }) => void;
+
+/** Closes every panel on the chat's right side, so a preview can take that side. */
+export function closeSidePanels(dispatch: SidePanelDispatch): void {
   for (const type of SIDE_PANELS) dispatch({ type, open: false });
+}
+
+/** Shows a published app beside the open conversation, in place of any other panel on that side. */
+export function showAppBesideChat(dispatch: SidePanelDispatch, preview: AppPreview): void {
+  closeSidePanels(dispatch);
   openAppPreview(preview);
 }
 

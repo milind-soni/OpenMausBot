@@ -36,6 +36,32 @@ export type LookHistoryItem = ThemeHistoryItem & { seq: number; look: Look; file
 
 export const slugFor = (name: string) => name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "theme";
 
+export type PictureKind = "png" | "jpg" | "webp" | "gif" | "avif" | "svg";
+const HEIF_BRANDS = new Set(["heic", "heix", "hevc", "hevx", "heim", "heis", "hevm", "hevs", "mif1", "msf1"]);
+
+/** The brands an ISO media file's ftyp box names (AVIF and HEIC both are such files), or null when it is not one. */
+function ftypBrands(bytes: Buffer): string[] | null {
+  if (bytes.length < 16 || bytes.subarray(4, 8).toString("latin1") !== "ftyp") return null;
+  const end = Math.min(bytes.length, Math.max(16, bytes.readUInt32BE(0)));
+  const brands = [bytes.subarray(8, 12).toString("latin1")];
+  for (let at = 16; at + 4 <= end; at += 4) brands.push(bytes.subarray(at, at + 4).toString("latin1"));
+  return brands;
+}
+
+/** What picture the bytes are, by their first bytes: one a window can show, "heic" for a phone photo it cannot, or null. */
+export function pictureKind(bytes: Buffer): PictureKind | "heic" | null {
+  const starts = (...values: number[]) => values.every((value, index) => bytes[index] === value);
+  const ascii = (at: number, text: string) => bytes.subarray(at, at + text.length).toString("latin1") === text;
+  if (starts(0x89, 0x50, 0x4e, 0x47)) return "png";
+  if (starts(0xff, 0xd8, 0xff)) return "jpg";
+  if (ascii(0, "GIF8")) return "gif";
+  if (ascii(0, "RIFF") && ascii(8, "WEBP")) return "webp";
+  const brands = ftypBrands(bytes);
+  if (brands) return brands.some((brand) => brand === "avif" || brand === "avis") ? "avif" : brands.some((brand) => HEIF_BRANDS.has(brand)) ? "heic" : null;
+  const head = bytes.subarray(0, 4096).toString("utf8").replace(/^\uFEFF/, "").trimStart();
+  return /^(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*(<!DOCTYPE svg[^>]*>\s*)?<svg[\s>]/i.test(head) ? "svg" : null;
+}
+
 /** Security: a file's first bytes must match its extension, so a theme file is only ever the image or font it claims. */
 function looksLike(name: string, bytes: Buffer): boolean {
   const ext = name.slice(name.lastIndexOf(".") + 1);
@@ -46,7 +72,7 @@ function looksLike(name: string, bytes: Buffer): boolean {
     case "jpg": case "jpeg": return starts(0xff, 0xd8, 0xff);
     case "gif": return ascii(0, "GIF8");
     case "webp": return ascii(0, "RIFF") && ascii(8, "WEBP");
-    case "avif": return ascii(4, "ftyp");
+    case "avif": return pictureKind(bytes) === "avif";
     case "woff": return ascii(0, "wOFF");
     case "woff2": return ascii(0, "wOF2");
     case "ttf": return starts(0x00, 0x01, 0x00, 0x00) || ascii(0, "true");

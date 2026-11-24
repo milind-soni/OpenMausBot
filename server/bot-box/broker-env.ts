@@ -62,9 +62,18 @@ export function usableUpstream(value: string | undefined, fallback: string): str
 export function brokerRewrite(env: Record<string, string>, token: string, port: number): BrokerRewrite {
   const out = { ...env };
   const grants: Record<string, BrokerGrant> = {};
+  // Keys that share a base URL (ANTHROPIC_API_KEY + ANTHROPIC_AUTH_TOKEN, GEMINI_ + GOOGLE_API_KEY) share its grant: the
+  // later one adds its header there (an endpoint may answer only one of them) and is replaced too, never left raw.
+  const routed: Record<string, string> = {};
   for (const provider of BROKERED_PROVIDERS) {
     const key = out[provider.keyEnv];
     if (!key || isToken(key)) continue;
+    const shared = routed[provider.baseUrlEnv];
+    if (shared) {
+      grants[shared]!.headers[provider.header] ??= provider.header === "authorization" ? `Bearer ${key}` : key;
+      out[provider.keyEnv] = token;
+      continue;
+    }
     const upstream = usableUpstream(out[provider.baseUrlEnv], provider.defaultUpstream);
     // A base URL that already points at this broker (a re-wrap) keeps its grant's upstream unknown: refuse by leaving the key.
     if (/^http:\/\/127\.0\.0\.1:\d+\/b\//.test(upstream)) continue;
@@ -72,6 +81,7 @@ export function brokerRewrite(env: Record<string, string>, token: string, port: 
     grants[provider.name] = { upstream, headers: { [provider.header]: value } };
     out[provider.keyEnv] = token;
     out[provider.baseUrlEnv] = brokerUrl(port, token, provider.name);
+    routed[provider.baseUrlEnv] = provider.name;
   }
   const unbrokered = UNBROKERED_KEY_ENV.filter((name) => out[name] && !isToken(out[name]!));
   return { env: out, grants, unbrokered };

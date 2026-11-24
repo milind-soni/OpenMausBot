@@ -48,7 +48,7 @@ export function PhoneRow({ device, connected, state, c, onRemoved, onPairAgain, 
     <li data-phone-row={device.id}>
       <div className="flex min-h-16 items-center gap-3 px-4 py-3">
         <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary" title={phoneSubtitle(device, connected, e2eEnabled)}>
-          <Smartphone size={18} strokeWidth={1.75} aria-hidden="true" />
+          <Smartphone size={18} aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
           <div className="truncate text-[14px] leading-5 text-ink">{device.name}</div>

@@ -55,7 +55,7 @@ describe("the Settings window", () => {
   it("opens with the place, Your account and This app, each headed by an identity row", () => {
     fixture.advanced = true;
     const html = render();
-    expect(navPages(html)).toEqual(["overview", "phone", "ai", "bots", "desktops", "vault", "usage", "transfer", "data", "account", "app", "general", "appearance"]);
+    expect(navPages(html)).toEqual(["overview", "devices", "phone", "ai", "bots", "desktops", "vault", "usage", "transfer", "data", "features", "account", "app", "general", "appearance"]);
     expect(html).toContain("This computer");
     expect(html).toContain("Your account");
     expect(html).toContain("This app");
@@ -77,14 +77,14 @@ describe("the Settings window", () => {
     expect(render("appearance")).toContain("MausBot on this device");
   });
 
-  const SIMPLE_NAV = ["overview", "phone", "ai", "vault", "usage", "transfer", "account", "plan", "app", "appearance"];
+  const SIMPLE_NAV = ["overview", "devices", "phone", "ai", "vault", "usage", "transfer", "features", "account", "plan", "app", "appearance"];
   const SIMPLE_PEOPLE: Array<[string, () => void]> = [
     ["a person with only this computer", () => vi.stubGlobal("window", desktopHere({ cloudAccount: { state: () => new Promise(() => {}), onState: () => () => {} } }))],
     ["This computer's rail, with My Cloud", () => vi.stubGlobal("window", desktopHere({ cloudAccount: { state: () => new Promise(() => {}), onState: () => () => {} }, workspaces: { state: () => new Promise(() => {}), places: () => new Promise(() => {}) } }))],
     ["My Cloud's rail in the desktop window", () => { vi.stubGlobal("window", { ogb: { platform: "darwin", cloudPlan: { state: () => new Promise(() => {}) }, workspaces: { state: () => new Promise(() => {}), places: () => new Promise(() => {}) } } }); fixture.config = { cloudHome: true }; }],
     ["My Cloud in a browser", () => { vi.stubGlobal("window", {}); fixture.config = { cloudHome: true }; }],
   ];
-  it.each(SIMPLE_PEOPLE)("shows Simple's ten entries for %s", (_who, set) => {
+  it.each(SIMPLE_PEOPLE)("shows Simple's eleven entries for %s", (_who, set) => {
     set();
     fixture.advanced = false;
     expect(navPages(render("overview"))).toEqual(SIMPLE_NAV);
@@ -102,10 +102,15 @@ describe("the Settings window", () => {
     expect(render("app")).not.toContain('data-settings-block="typing"');
   });
 
-  it("turns Advanced on for a link to a page Simple doesn't show, and lands there", () => {
+  it("lands a link to a page Simple doesn't list there, marked as an Advanced setting, and stays in Simple", () => {
     fixture.advanced = false;
-    expect(render("general")).toMatch(/data-settings-page-open="general"/);
+    const general = render("general");
+    expect(general).toMatch(/data-settings-page-open="general"/);
+    expect(general).toMatch(/data-settings-header[\s\S]*?Advanced setting/);
+    expect(general).not.toContain("data-settings-advanced=");
     expect(render("activity")).toMatch(/data-settings-page-open="data"/);
+    expect(render("appearance")).not.toContain("Advanced setting");
+    expect(fixture.setAdvancedMode).not.toHaveBeenCalled();
   });
 
   const order = (html: string, marks: string[]) => marks.map((mark) => html.indexOf(mark));
@@ -269,5 +274,36 @@ describe("the outer menu", () => {
     });
     expect(rows.find((item) => item.key === "plan")?.separatorBefore).toBeFalsy();
     expect(rows.find((item) => item.key === "support")?.separatorBefore).toBe(true);
+  });
+});
+
+describe("Settings → Features", () => {
+  const featureSwitches = () => Object.fromEntries(fixture.switches.map((props) => [(props as { "data-feature-switch"?: string })["data-feature-switch"], props.checked]).filter(([name]) => name));
+
+  it("is in Simple mode's list, with Skill Burger on and thread tabs off by default", () => {
+    fixture.config = { features: { skillBurger: true, threadTabs: false } };
+    const html = render("features");
+    expect(navPages(html)).toContain("features");
+    expect(html).toContain("Skill Burger");
+    expect(html).toContain("Save a bot&#x27;s run as steps you can run again");
+    expect(html).not.toContain("Saved in");
+    expect(featureSwitches()).toEqual({ skillBurger: true, threadTabs: false });
+  });
+
+  it("saves Skill Burger off in the place's config.json", async () => {
+    const { api } = await import("@/state/store");
+    fixture.config = { features: { skillBurger: true, threadTabs: false } };
+    render("features");
+    fixture.switches.find((props) => (props as { "data-feature-switch"?: string })["data-feature-switch"] === "skillBurger")!.onClick!({} as never);
+    expect(api).toHaveBeenCalledWith("/api/config", { method: "PATCH", body: JSON.stringify({ features: { skillBurger: false } }) });
+  });
+
+  it("shows no switch its server doesn't know, and isn't offered to a team's member", () => {
+    fixture.config = {};
+    render("features");
+    expect(featureSwitches()).toEqual({});
+    fixture.config = { cloudHome: true, team: { name: "Acme" }, features: { skillBurger: true, threadTabs: false } };
+    fixture.admin = false;
+    expect(navPages(render("overview"))).not.toContain("features");
   });
 });

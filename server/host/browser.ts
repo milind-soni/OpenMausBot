@@ -39,14 +39,25 @@ import type { BrowserSitesRef } from "../routes/browser-sites.ts";
 import { chromeLauncher } from "../browser/chrome/launcher.ts";
 import { LAUNCHER_SECCOMP_FD, browserLanguage, type LauncherBox } from "../browser/chrome/wrapper.ts";
 import type { HostKind } from "../browser/chrome/flags.ts";
-import { browserEngineKind, type BrowserEngineKind } from "../browser/config.ts";
+import { browserEngineKind, browserPaneWanted, cloudDisplayWanted, type BrowserEngineKind } from "../browser/config.ts";
 import { parseSocks5Proxy } from "../browser/egress/policy.ts";
 import { ChromeEngine, chromeTarget, LiveRouter, profileKey, RuntimeRouter } from "../browser/engines.ts";
+import { ceilingLines, createBrowserCeiling, killChrome, startCeilingLoop, statmBytes } from "../browser/memory-ceiling.ts";
+import { BROWSER_CGROUP_ENV, browserCgroupDir, containInGroup, groupOomKills } from "../browser/memory-cgroup.ts";
+import { browserProcessTree } from "../browser-processes.ts";
+import { pssBytes } from "../bot-memory-cap.ts";
+import { boxMemory } from "../box-memory.ts";
 import { CHROME_BROWSER_SYSTEM_PROMPT } from "../browser/prompt.ts";
+import { PaneBackend } from "../browser/pane/backend.ts";
+import { desktopPaneLink } from "../browser/pane/link.ts";
+import { cookieRequests } from "../browser/cookies/requests.ts";
+import { keyStoreFor, systemFiles } from "../browser/cookies/sources.ts";
+import { sweep as sweepCookieCopies } from "../browser/cookies/snapshot.ts";
 import { passkeyAnnotation } from "../browser/passkey-notice.ts";
 import { LentChromeDoors, lentChromeGuidance, type ChromeLender } from "../browser/lent-chrome.ts";
 import type { ChromeRoute } from "../device-links.ts";
 import type { EngineBrowsers } from "../engine-memory.ts";
+import { createBrowserReclaim, reclaimable } from "./browser-reclaim.ts";
 import { BROWSER_TASKS, processBudget } from "../process-room.ts";
 import { idleAfter } from "../drivers/session-idle.ts";
 import { augmentedPath } from "../env-path.ts";
@@ -82,7 +93,7 @@ export interface BrowserHostDeps {
   lentChrome?: { route(): ChromeRoute | null; lender(): ChromeLender | null };
   /** The engine memory guard, told which browsers each thread's turn starts or holds. */
   /** `selfHosted`: turns wait for room on this server, under its pids limit, and so do its bots' browsers. */
-  engineMemory?: { useBrowsers(browsers: EngineBrowsers): void; selfHosted?(): boolean; roomFactor?(): number; reclaimIdle?(): Promise<boolean> };
+  engineMemory?: { useBrowsers(browsers: EngineBrowsers): void; selfHosted?(): boolean; roomFactor?(): number; reclaimIdle?(): Promise<boolean>; memoryShort?(times?: number): boolean; stopForBrowser?(threadId: string): boolean };
   /** Whose browser a conversation's turns use on a Team Cloud: the member's, the group chat's or the team's. Every
    * browser is the bot's own without it. */
   audienceOf?(threadId: string): Audience;
@@ -161,13 +172,16 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     const configured = browserIdleMs(cfg, { cloudHome: Boolean(CLOUD_HOME) });
     return idleAfter(configured, Math.min(configured, BROWSER_IDLE_FLOOR_MS), deps.engineMemory?.roomFactor?.() ?? 1);
   };
+  const paneLink = desktopPaneLink(DESKTOP_MANAGED);
   const chromeEngine = new ChromeEngine({
     dataDir: DATA_DIR,
     host,
+    ...(paneLink ? { pane: { backend: new PaneBackend(paneLink, DATA_DIR, (key) => browserEgress.open(key), { identity: () => cfg.browserEngine?.paneIdentity ?? "native" }), wanted: () => browserPaneWanted(cfg) } } : {}),
     egressPort: (key) => browserEgress.open(key),
     egressNotice: (key) => browserEgress.takeNotice(key),
     idleMs,
     language: deps.language,
+    cloudDisplay: () => cloudDisplayWanted(cfg, host),
     held: (session) => !turnResources.free(`browser:${session}`),
     log: (line) => console.warn(line),
   });
@@ -227,9 +241,10 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       if (!lender) return lentChromeGuidance("not-lent", null);
       return lender.online ? null : lentChromeGuidance("offline", lender);
     },
-    annotate: passkeyAnnotation(CLOUD_HOME ? "cloud" : DESKTOP_MANAGED ? "desktop" : "server"),
+    annotate: (spec, result) => passkeyAnnotation(chromeEngine.onPane(spec) ? "pane" : CLOUD_HOME ? "cloud" : DESKTOP_MANAGED ? "desktop" : "server")(spec, result),
     // agent-browser's own error names only the CDP connection; the door knows what went wrong on the way.
-    afterCall: (session, spec, result) => {
+    afterCall: (session, spec, answer) => {
+      const result = withCeilingNote(session, answer);
       const failed = result as { isError?: unknown; content?: unknown };
       const found = failed?.isError === true && viaDoor(session, spec) ? doors?.problem(session) : null;
       // A door refused under an earlier holder says nothing about a caller that may use it.
@@ -279,22 +294,84 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     running: (session) => browserRunning(session, usedBrowserSessions.get(session)),
     inUse: (session) => !turnResources.free(`browser:${session}`) || agentBrowserRuntime.working(session) });
   let gateTimer: ReturnType<typeof setInterval> | undefined;
+  // Every 15 s, and every 3 s while a browser is large with memory getting short: a browser can take a small home's memory in minutes.
+  let ceilingLoop: { stop(): void } | undefined;
   const browserSweep = {
     start() {
       gateTimer = setInterval(() => void releaseGates().catch(() => undefined), 60_000);
       gateTimer.unref?.();
+      if (browserCeiling) ceilingLoop = startCeilingLoop(() => browserCeiling.tick());
       agentBrowserSweep.start();
       chromeEngine.start({ inUse: browserEngineKind(cfg) === "chrome", prepare: builtInBrowserEnabled(cfg) });
       return browserSweep;
     },
     closeAll: () => {
       clearInterval(gateTimer);
+      ceilingLoop?.stop();
       doors?.close();
       doorUrls.clear();
       leftovers.clear();
       return agentBrowserSweep.closeAll();
     },
   };
+  // Linux servers only: there a browser's proportional size can be read, and its memory is the home's. A Cloud home's root
+  // supervisor may also have put the bots' Chrome under a kernel memory limit (browser/memory-cgroup.ts).
+  const browserGroup = process.platform === "linux" ? browserCgroupDir(process.env[BROWSER_CGROUP_ENV]) : null;
+  const browserCeiling = process.platform === "linux" && !DESKTOP_MANAGED ? createBrowserCeiling({
+    ...(browserGroup ? {
+      kernelKills: () => groupOomKills(browserGroup),
+      contain: ({ pids, daemon }: { pids: readonly number[]; daemon?: number }) => { containInGroup(browserGroup, pids.filter((pid) => pid !== daemon)); },
+    } : {}),
+    lines: ceilingLines(boxMemory().bytes),
+    browsers: async () => (await Promise.all(browserOwners().map(async ({ pid, session }) => {
+      const spec = usedBrowserSessions.get(session);
+      const tree = spec ? await browserProcessTree(spec.command, pid, session) : null;
+      return tree ? [{ session, pids: [...tree.members.keys()], daemon: tree.daemon, started: tree.members }] : [];
+    }))).flat(),
+    pss: (pid) => pssBytes(pid),
+    quiet: (session) => !agentBrowserRuntime.working(session),
+    tabs: async (session) => {
+      const tabs = (await inRunningSession(session, ["tab", "list"]))?.tabs;
+      return Array.isArray(tabs) ? tabs.flatMap((tab: { tabId?: unknown; title?: unknown; url?: unknown; active?: unknown }) =>
+        typeof tab.tabId === "string" ? [{ tabId: tab.tabId, title: String(tab.title ?? ""), url: String(tab.url ?? ""), active: tab.active === true }] : []) : null;
+    },
+    closeTab: async (session, tabId) => (await inRunningSession(session, ["tab", "close", tabId])) !== null,
+    // Memory relief's rules under ordinary shortage; which bots have a turn running is not known here.
+    close: async (session) => {
+      const spec = usedBrowserSessions.get(session);
+      if (!spec) return false;
+      const working = agentBrowserRuntime.working(session), spare = agentBrowserRuntime.spare(session);
+      const candidate = { session, held: !turnResources.free(`browser:${session}`), working, running: browserRunning(session, spec),
+        attached: Boolean(chromeTarget(session, spec)) || attachesToChrome(spec.env), watched: spare === null && !working, turnRunning: false,
+        savesSignIns: spare?.savesSignIns ?? spec.env.AGENT_BROWSER_RESTORE_SAVE === "auto" };
+      return reclaimable(candidate, false) && browserRuntime.closeUnused(session, spec);
+    },
+    memoryShort: (times) => deps.engineMemory?.memoryShort?.(times) ?? false,
+    quickSize: (pids) => statmBytes(pids),
+    // The holder's turn is stopped first, so its line says the browser was closed; Chrome's memory then comes back at once,
+    // and the daemon closes once no turn holds it (closeForMemory). Where no engine of this server runs the turn, Chrome is
+    // still stopped, and the turn's next browser call fails with no line about memory.
+    forceClose: async (browser) => {
+      const spec = usedBrowserSessions.get(browser.session);
+      if (!spec || chromeTarget(browser.session, spec) || attachesToChrome(spec.env)) return false;
+      const holder = turnResources.holder(`browser:${browser.session}`);
+      const ending = holder !== undefined && deps.engineMemory?.stopForBrowser?.(holder.threadId) === true;
+      killChrome(browser);
+      if (!ending) void closeForMemory(browser.session, spec);
+      return true;
+    },
+  }) : null;
+  function inRunningSession(session: string, args: string[]): Promise<Record<string, unknown> | null> {
+    const spec = usedBrowserSessions.get(session);
+    return spec ? inRunningBrowser(spec.command, browserRuntimeEnv({ ...spec.env, AGENT_BROWSER_SESSION: session }), args).catch(() => null) : Promise.resolve(null);
+  }
+  /** The ceiling's word on what it closed, added to the bot's next call in that browser. */
+  function withCeilingNote(session: string, result: unknown): unknown {
+    const content = (result as { content?: unknown } | null)?.content;
+    const note = Array.isArray(content) ? browserCeiling?.takeNote(session) : null;
+    if (!note || !Array.isArray(content)) return result;
+    return { ...(result as object), content: [...content, { type: "text", text: note }] };
+  }
   // The viewer and the agent must address the SAME temporary browser.
   const temporaryBrowserSessions = new Map<string, string>();
   /** The suffix an audience gives a browser's name, remembered so a deletion erases every audience's browser. */
@@ -391,6 +468,31 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     const target = profile && profile !== "guest" ? browserProfilePartitionTarget(cfg, profile) : null;
     return { session, spec: chromeEngine.spec(session, profileKey(botId + suffix, session, { guest: profile === "guest", partitionId: target ? target.partitionId + suffix : null })) };
   }
+  /** The profile a bot's panel shows as desktop panes, or null when its browser is not one. */
+  paneLink?.resolveWith((botId, threadId) => {
+    const bot = store.bot(botId);
+    if (!bot || bot.browser === false || !browserPaneWanted(cfg) || !onChrome(bot.browserProfile)) return null;
+    const { session, spec } = chromeSpec(botId, bot.browserProfile, browserAudience(threadId ?? undefined));
+    return chromeTarget(session, spec)?.key ?? null;
+  });
+  // A person's sign-in import, from their own browsers into a bot's. agent-browser keeps its profiles in its own encrypted
+  // saved state, which only its running daemon writes: it takes none, and neither do temporary browsers or My Chrome.
+  const cookieScratch = join(DATA_DIR, "browser", "cookie-import");
+  // A copy an import left when the server stopped mid-read holds another browser's cookies in plain text.
+  if (paneLink) void sweepCookieCopies(cookieScratch);
+  paneLink?.answerCookieRequests(cookieRequests({
+    files: systemFiles,
+    keys: () => keyStoreFor(process.env),
+    scratch: cookieScratch,
+    destination: (botId, threadId) => {
+      const bot = store.bot(botId);
+      if (!bot || bot.browser === false || bot.browserProfile === "guest" || !onChrome(bot.browserProfile)) return null;
+      const { session, spec } = chromeSpec(botId, bot.browserProfile, browserAudience(threadId ?? undefined));
+      const target = chromeTarget(session, spec);
+      return target ? chromeEngine.cookieSink(target) : null;
+    },
+    log: (line) => console.warn(line),
+  }));
   /** Chrome for the new engine, the installed agent-browser otherwise. */
   function browserReady(profile: string | undefined): boolean {
     return onChrome(profile) ? chromeEngine.summary().kind === "engine" : browserEngineStatus().kind === "ready";
@@ -529,6 +631,19 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       await sleep(2_000);
     }
   }
+  // Memory relief's early close of unused browsers (host/browser-reclaim.ts): attached and Chrome-engine ones never.
+  const browserReclaim = createBrowserReclaim({
+    candidates: (busy) => {
+      const busySessions = new Set(busy.flatMap((threadId) => threadBrowser(threadId)?.session ?? []));
+      return [...usedBrowserSessions].map(([session, spec]) => {
+        const working = agentBrowserRuntime.working(session), spare = agentBrowserRuntime.spare(session);
+        return { session, held: !turnResources.free(`browser:${session}`), working, running: browserRunning(session, spec),
+          attached: Boolean(chromeTarget(session, spec)) || attachesToChrome(spec.env), watched: spare === null && !working, turnRunning: busySessions.has(session),
+          savesSignIns: spare?.savesSignIns ?? spec.env.AGENT_BROWSER_RESTORE_SAVE === "auto" };
+      });
+    },
+    close: (session) => { const spec = usedBrowserSessions.get(session); return spec ? browserRuntime.closeUnused(session, spec) : Promise.resolve(false); },
+  });
   const engineBrowsers: EngineBrowsers = {
     starts: (threadId) => {
       const browser = threadBrowser(threadId);
@@ -541,8 +656,10 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     },
     stopped: (threadId) => {
       const browser = threadBrowser(threadId);
-      if (browser?.session !== undefined && browser.spec) void closeForMemory(browser.session, browser.spec);
+      return browser?.session !== undefined && browser.spec ? closeForMemory(browser.session, browser.spec) : undefined;
     },
+    reclaimUnused: (pressure) => browserReclaim.reclaim(pressure),
+    anyRunning: () => [...usedBrowserSessions].some(([session, spec]) => browserRunning(session, spec)),
   };
   deps.engineMemory?.useBrowsers(engineBrowsers);
   /** A deleted bot's or profile's browser on the new engine, whatever the flag says now. */
@@ -628,7 +745,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     return { binaryPath: engine.binaryPath, session, env: browserSessionSpec(engine.binaryPath, session, profile, await browserEgress.open(session)).env, encryptionKey: browserEngineEncryptionKey() };
   }
   /** What Settings shows of the engine that runs bots' browsers here; My Chrome stays on agent-browser. */
-  function engineSummary<T extends { myChrome: boolean }>(agentBrowser: T): (T | (ReturnType<ChromeEngine["summary"]> & { myChrome: boolean })) & { engine: BrowserEngineKind; serverSites?: boolean; proxyConfigured?: boolean; proxySaved?: boolean } {
+  function engineSummary<T extends { kind: "engine" | "unavailable"; myChrome: boolean }>(agentBrowser: T): (T | (ReturnType<ChromeEngine["summary"]> & { myChrome: boolean })) & { engine: BrowserEngineKind; pane?: true; cookieImport?: true; noChrome?: true; serverSites?: boolean; proxyConfigured?: boolean; proxySaved?: boolean } {
     const serverSites = sitesSwitch ? { serverSites: cfg.browserEngine?.egress?.localNetwork === true } : {};
     const engine = browserEngineKind(cfg);
     const proxyValue = cfg.browserEngine?.egress?.proxy;
@@ -636,6 +753,9 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     const proxyConfigured = builtInBrowserEnabled(cfg) && !hostedServer && parseSocks5Proxy(proxyValue) !== null;
     return {
       ...(engine === "chrome" ? { ...chromeEngine.summary(), myChrome: agentBrowser.myChrome, ...lentChromeSummary(), engine } : { ...agentBrowser, engine }),
+      ...(paneLink?.available && browserPaneWanted(cfg) ? { pane: true as const } : {}),
+      ...(paneLink?.available && engine === "chrome" ? { cookieImport: true as const } : {}),
+      ...(engine !== "chrome" && agentBrowser.kind === "engine" && chromeLauncher.runsShellForWantOfChrome() ? { noChrome: true as const } : {}),
       ...serverSites,
       ...(proxyConfigured ? { proxyConfigured: true } : {}),
       ...(proxySaved ? { proxySaved: true } : {}),

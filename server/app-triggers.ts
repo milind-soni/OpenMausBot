@@ -59,6 +59,8 @@ export interface AppTriggerManagerOptions {
   service: () => { available: true } | { available: false; reason: "self-hosted" | "unavailable" | "off" };
   connectedApps: () => Promise<ConnectedApps>;
   botState: (botId: string) => "ready" | "busy" | "missing";
+  /** The account ids of an app a bot may use, from its Access settings; undefined when it may use every account. */
+  accountLimit?: (botId: string, app: string) => string[] | undefined;
   runs: {
     enqueue(input: { webhookId: string; webhookName: string; prompt: string; botId: string; runOn: RoutineRunOn; deliveryId: string; receivedAt: number; eventSource: "app"; sameConversation?: boolean }): { id: string };
     merge(triggerId: string, eventId: string, sameConversation: boolean, merge: (prompt: string) => string | null): { id: string } | null;
@@ -163,6 +165,9 @@ export interface AppTriggerPatch {
 
 const utcDay = (at: number) => new Date(at).toISOString().slice(0, 10);
 const active = (status: string) => /^active$/i.test(status);
+const ACCOUNT_NOT_ALLOWED = "Its bot may no longer use this account. Allow it again under the bot's Access settings, or make the automation for an account the bot may use.";
+const QUEUED_RUN_REFUSED = "Its bot may no longer use this account, so this event's run did not start";
+const names = (accounts: Array<{ id: string; alias?: string }>) => accounts.map((account) => account.alias ?? account.id).join(", ");
 
 function cleanFilter(filter: AppTriggerFilter | null | undefined): AppTriggerFilter | undefined {
   if (!filter) return undefined;
@@ -211,6 +216,7 @@ export class AppTriggerManager {
   private abort = new AbortController();
   private nextReconcileAt = 0;
   private loop: Promise<void> | null = null;
+  private runVersion = 0;
   /** A deleted automation's service copy could not be removed yet; reconciliation removes it. */
   private releasePending = false;
 
@@ -271,7 +277,7 @@ export class AppTriggerManager {
     const type = await this.remote(() => this.options.broker.triggerType(input.event.trim()));
     if (!type) throw new AppTriggerError(`${input.event} is not an event OpenMausBot can watch. Call trigger_info action=events to see the events this app offers.`, 404);
     if (type.toolkit !== app) throw new AppTriggerError(`${type.slug} is a ${appLabel(type.toolkit)} event, not ${appLabel(app)}.`);
-    const account = await this.resolveAccount(app, input.account);
+    const account = await this.resolveAccount(input.botId, app, input.account);
     const filter = cleanFilter(input.filter);
     const config = triggerConfig(type, input.config ?? {}, filter);
     const now = this.now();
@@ -284,12 +290,13 @@ export class AppTriggerManager {
       received: 0, filtered: 0, createdAt: now, updatedAt: now,
     };
     await this.exclusive(async () => {
+      if (this.triggers.some((candidate) => candidate.id === trigger.id)) throw new AppTriggerError("An automation with this id already exists.", 409);
       const duplicate = this.triggers.find((trigger) => trigger.enabled && trigger.botId === input.botId && trigger.event === type.slug &&
         trigger.accountId === account.id && trigger.prompt === prompt && JSON.stringify(trigger.config) === JSON.stringify(config));
       if (duplicate) throw new AppTriggerError(`The same automation already exists (${duplicate.id}). Use trigger_info to review it, then change that one instead.`, 409);
       try {
         await this.bind(trigger);
-        if (!trigger.enabled) await this.applyEnabled(trigger.remote.triggerId);
+        await this.applyEnabled(trigger.remote.triggerId, trigger.enabled);
       } catch (error) {
         // Composio refused this config: nothing to save. Anything else is retried by reconciliation.
         if (error instanceof BrokerError && !error.transient && error.status !== 403) throw new AppTriggerError(error.message, 400);
@@ -311,9 +318,18 @@ export class AppTriggerManager {
       return (await this.update(record.id, { name: record.name, prompt: record.prompt, runOn: record.runOn, filter: record.filter ?? null, config,
         sameConversation: record.sameConversation === true }))!;
     }
-    return this.create({ id: record.id, botId: record.botId, name: record.name, prompt: record.prompt, app: record.app, event: record.event, account: record.accountId,
-      ...(record.filter ? { filter: record.filter } : {}), config, runOn: record.runOn, enabled: false, ...(record.sourceThreadId ? { sourceThreadId: record.sourceThreadId } : {}),
-      ...(record.sameConversation ? { sameConversation: true } : {}) });
+    try {
+      return await this.create({ id: record.id, botId: record.botId, name: record.name, prompt: record.prompt, app: record.app, event: record.event, account: record.accountId,
+        ...(record.filter ? { filter: record.filter } : {}), config, runOn: record.runOn, enabled: false, ...(record.sourceThreadId ? { sourceThreadId: record.sourceThreadId } : {}),
+        ...(record.sameConversation ? { sameConversation: true } : {}) });
+    } catch (error) {
+      // Another copy of the same move may have completed while this one validated its account and event.
+      if (error instanceof AppTriggerError && error.status === 409 && this.triggers.some((candidate) => candidate.id === record.id)) {
+        return (await this.update(record.id, { name: record.name, prompt: record.prompt, runOn: record.runOn, filter: record.filter ?? null, config,
+          sameConversation: record.sameConversation === true }))!;
+      }
+      throw error;
+    }
   }
 
   async update(id: string, patch: AppTriggerPatch, options: { protectInstructions?: boolean } = {}): Promise<AppTrigger | null> {
@@ -395,26 +411,34 @@ export class AppTriggerManager {
   /** Brings back one deleted in the last week, with its settings; the service copy is made again. */
   async restore(id: string): Promise<AppTrigger | null> {
     this.assertWritable();
-    const entry = this.deleted.find((candidate) => candidate.trigger.id === id && candidate.at >= this.now() - RESTORE_WINDOW_MS);
-    if (!entry || this.triggers.some((trigger) => trigger.id === id)) return null;
-    if (this.options.botState(entry.trigger.botId) === "missing") throw new AppTriggerError("The assigned bot no longer exists.", 410);
-    const trigger: StoredTrigger = { ...structuredClone(entry.trigger), remote: { state: "pending" }, updatedAt: this.now() };
-    await this.exclusive(async () => {
-      try { await this.bind(trigger); await this.applyEnabled(trigger.remote.triggerId); }
+    return this.exclusive(async () => {
+      const entry = this.deleted.find((candidate) => candidate.trigger.id === id && candidate.at >= this.now() - RESTORE_WINDOW_MS);
+      if (!entry || this.triggers.some((trigger) => trigger.id === id)) return null;
+      if (this.options.botState(entry.trigger.botId) === "missing") throw new AppTriggerError("The assigned bot no longer exists.", 410);
+      if (!this.botMayUse(entry.trigger.botId, entry.trigger.app, entry.trigger.accountId)) throw new AppTriggerError(ACCOUNT_NOT_ALLOWED, 403);
+      const trigger: StoredTrigger = { ...structuredClone(entry.trigger), remote: { state: "pending" }, updatedAt: this.now() };
+      try { await this.bind(trigger); await this.applyEnabled(trigger.remote.triggerId, trigger.enabled); }
       catch (error) { this.markRemoteFailure(trigger, error); }
       this.deleted = this.deleted.filter((candidate) => candidate !== entry);
       this.triggers.unshift(trigger);
       this.save();
+      this.emitTrigger(trigger);
+      this.wake();
+      return publicTrigger(trigger);
     });
-    this.emitTrigger(trigger);
-    this.wake();
-    return publicTrigger(trigger);
+  }
+
+  /** Why a queued run of this automation may not start now, checked as it starts: its bot lost the account since the event came in. */
+  runRefusal(id: string): string | null {
+    const trigger = this.triggers.find((candidate) => candidate.id === id);
+    return trigger && !this.botMayUse(trigger.botId, trigger.app, trigger.accountId) ? QUEUED_RUN_REFUSED : null;
   }
 
   /** A test event marked as one, sent through the service's real queue when the automation has its copy there. */
   async runNow(id: string): Promise<{ via: "service" | "here"; runId?: string } | null> {
     const trigger = this.triggers.find((candidate) => candidate.id === id);
     if (!trigger) return null;
+    if (!this.botMayUse(trigger.botId, trigger.app, trigger.accountId)) throw new AppTriggerError(ACCOUNT_NOT_ALLOWED, 403);
     const data = { omb_test: true, note: "A test run started from OpenMausBot." };
     if (trigger.remote.triggerId && trigger.remote.state === "active" && this.options.service().available) {
       try {
@@ -438,14 +462,16 @@ export class AppTriggerManager {
     this.stopped = false;
     this.abort = new AbortController();
     this.nextReconcileAt = 0;
-    this.loop = this.run().catch((error) => this.log(`app events stopped: ${error instanceof Error ? error.message : String(error)}`));
+    this.loop = this.run(++this.runVersion).catch((error) => this.log(`app events stopped: ${error instanceof Error ? error.message : String(error)}`));
   }
 
   async stop(): Promise<void> {
+    const loop = this.loop;
     this.stopped = true;
+    this.runVersion += 1;
     this.abort.abort();
-    await this.loop;
-    this.loop = null;
+    await loop;
+    if (this.loop === loop) this.loop = null;
   }
 
   /** Cuts the current wait short: a trigger changed, or access to the service arrived. */
@@ -507,6 +533,10 @@ export class AppTriggerManager {
         this.record(trigger, event, "rejected", { reason: "its bot was deleted" });
         continue;
       }
+      if (!this.botMayUse(trigger.botId, trigger.app, trigger.accountId)) {
+        this.record(trigger, event, "rejected", { reason: "its bot may no longer use this account" });
+        continue;
+      }
       if (!matchesFilter(trigger.app, trigger.filter, data)) {
         trigger.filtered += 1;
         this.record(trigger, event, "filtered", { reason: "did not match the filter" });
@@ -540,9 +570,9 @@ export class AppTriggerManager {
     }
   }
 
-  private async run(): Promise<void> {
+  private async run(version: number): Promise<void> {
     let failures = 0;
-    while (!this.stopped) {
+    while (!this.stopped && version === this.runVersion) {
       const signal = this.abort.signal;
       try {
         if (this.options.service().available && this.now() >= this.nextReconcileAt && (this.triggers.length > 0 || this.releasePending)) {
@@ -552,6 +582,7 @@ export class AppTriggerManager {
             this.log(`reconciliation failed: ${error instanceof Error ? error.message : String(error)}`);
           });
         }
+        if (this.stopped || version !== this.runVersion) break;
         if (!this.pollable()) {
           await this.sleep(IDLE_CHECK_MS, signal);
           continue;
@@ -559,10 +590,10 @@ export class AppTriggerManager {
         await this.pollOnce(signal);
         failures = 0;
       } catch (error) {
-        if (this.stopped) break;
+        if (this.stopped || version !== this.runVersion) break;
         if (signal.aborted) continue;
         failures += 1;
-        const retry = error instanceof BrokerError && error.status === 409 && error.retryAfterS ? error.retryAfterS * 1000 : 0;
+        const retry = error instanceof BrokerError && (error.status === 409 || error.transient) && error.retryAfterS ? error.retryAfterS * 1000 : 0;
         await this.sleep(retry || Math.min(60_000, 1_000 * 2 ** Math.min(failures, 6)), this.abort.signal);
       }
     }
@@ -571,6 +602,7 @@ export class AppTriggerManager {
   /** One long-poll: acks everything handled so far (the cursor) and handles what comes back. */
   async pollOnce(signal?: AbortSignal, waitS = POLL_WAIT_S): Promise<number> {
     const { events, cursor } = await this.options.broker.poll({ after: this.cursor, waitS, poller: this.pollerId, signal });
+    if (signal?.aborted) return 0;
     if (events.length || cursor > this.cursor) this.receive(events, cursor);
     return events.length;
   }
@@ -622,6 +654,8 @@ export class AppTriggerManager {
   private async reconcileOne(trigger: StoredTrigger, bindings: Map<string, BrokerInventory["triggers"][number]>, accounts: ConnectedApps | null): Promise<void> {
     // Its bot is gone: paused here, so Composio stops sending what no one would run.
     if (trigger.enabled && this.options.botState(trigger.botId) === "missing") trigger.enabled = false;
+    const allowed = this.botMayUse(trigger.botId, trigger.app, trigger.accountId);
+    if (!allowed) this.options.runs.cancelQueued(trigger.id, QUEUED_RUN_REFUSED);
     const account = accounts?.[trigger.app]?.accounts.find((candidate) => candidate.id === trigger.accountId);
     if (accounts && (!account || !active(account.status))) {
       if (trigger.problem?.kind !== "reconnect") trigger.problem = { kind: "reconnect", at: this.now() };
@@ -636,7 +670,9 @@ export class AppTriggerManager {
       return;
     }
     trigger.remote = { triggerId: binding.triggerId, state: "active", syncedAt: this.now() };
-    if (trigger.problem?.kind === "error") delete trigger.problem;
+    // Kept, not re-stamped, while the account stays off the bot's list, so each pass does not announce it again.
+    if (trigger.problem?.kind === "error" && (allowed || trigger.problem.text !== ACCOUNT_NOT_ALLOWED)) delete trigger.problem;
+    if (!allowed && !trigger.problem) trigger.problem = { kind: "error", text: ACCOUNT_NOT_ALLOWED, at: this.now() };
   }
 
   /** The service's drop counts never reset; today's share is what grew since the UTC day began. */
@@ -660,7 +696,11 @@ export class AppTriggerManager {
     trigger.skipped = { ...current, [reason]: current[reason] + 1 };
   }
 
-  private async resolveAccount(app: string, wanted: string | undefined): Promise<{ id: string; alias?: string }> {
+  private botMayUse(botId: string, app: string, accountId: string): boolean {
+    return this.options.accountLimit?.(botId, app)?.includes(accountId) ?? true;
+  }
+
+  private async resolveAccount(botId: string, app: string, wanted: string | undefined): Promise<{ id: string; alias?: string }> {
     let apps: ConnectedApps;
     try {
       apps = await this.options.connectedApps();
@@ -670,16 +710,22 @@ export class AppTriggerManager {
     const accounts = (apps[app]?.accounts ?? []).filter((account) => active(account.status));
     const label = appLabel(app);
     if (!accounts.length) throw new AppTriggerError(`${label} is not connected. Ask the person to connect ${label} first (COMPOSIO_MANAGE_CONNECTIONS shows them a card for it), then create the automation.`, 409);
+    const allowed = accounts.filter((account) => this.botMayUse(botId, app, account.id));
+    const refusal = () => new AppTriggerError(allowed.length
+      ? `This bot may use only ${names(allowed)} in ${label}. Watch one of those, or ask the person to allow another account under the bot's Access settings.`
+      : `This bot may use none of the connected ${label} accounts. Ask the person to allow one under the bot's Access settings.`, 403);
     if (wanted?.trim()) {
       const key = wanted.trim().toLowerCase();
       const match = accounts.find((account) => account.id === wanted.trim() || account.alias?.toLowerCase() === key);
-      if (!match) throw new AppTriggerError(`No connected ${label} account is called ${wanted}. The accounts are: ${accounts.map((account) => account.alias ?? account.id).join(", ")}.`);
+      if (!match) throw allowed.length < accounts.length ? refusal() : new AppTriggerError(`No connected ${label} account is called ${wanted}. The accounts are: ${names(accounts)}.`);
+      if (!allowed.includes(match)) throw refusal();
       return match;
     }
-    if (accounts.length > 1) {
-      throw new AppTriggerError(`The person has ${accounts.length} ${label} accounts (${accounts.map((account) => account.alias ?? account.id).join(", ")}). Ask which one, then pass account.`);
+    if (!allowed.length) throw refusal();
+    if (allowed.length > 1) {
+      throw new AppTriggerError(`${allowed.length === accounts.length ? "The person has" : "This bot may use"} ${allowed.length} ${label} accounts (${names(allowed)}). Ask which one, then pass account.`);
     }
-    return accounts[0]!;
+    return allowed[0]!;
   }
 
   private async bind(trigger: StoredTrigger): Promise<void> {
@@ -691,7 +737,11 @@ export class AppTriggerManager {
 
   /** Several automations with the same settings share one service copy; it goes only when the last one does. */
   private async release(triggerId: string | undefined): Promise<void> {
-    if (!triggerId || this.triggers.some((trigger) => trigger.remote.triggerId === triggerId)) return;
+    if (!triggerId) return;
+    if (this.triggers.some((trigger) => trigger.remote.triggerId === triggerId)) {
+      await this.applyEnabled(triggerId);
+      return;
+    }
     if (this.serviceOutOfReach()) {
       this.releasePending = true;
       return;
@@ -699,8 +749,9 @@ export class AppTriggerManager {
     await this.options.broker.remove(triggerId);
   }
 
-  private async applyEnabled(triggerId: string | undefined): Promise<void> {
-    if (triggerId && !this.serviceOutOfReach()) await this.options.broker.setEnabled(triggerId, this.wantsEnabled(triggerId));
+  /** A new or restored automation is not in this.triggers yet when its binding is configured. */
+  private async applyEnabled(triggerId: string | undefined, alsoEnabled = false): Promise<void> {
+    if (triggerId && !this.serviceOutOfReach()) await this.options.broker.setEnabled(triggerId, alsoEnabled || this.wantsEnabled(triggerId));
   }
 
   /** The owner's own key, or the service switched off. A service merely not reached yet still gets its calls and retries. */
@@ -710,7 +761,7 @@ export class AppTriggerManager {
   }
 
   private wantsEnabled(triggerId: string): boolean {
-    return this.triggers.some((trigger) => trigger.remote.triggerId === triggerId && trigger.enabled);
+    return this.triggers.some((trigger) => trigger.remote.triggerId === triggerId && trigger.enabled && this.botMayUse(trigger.botId, trigger.app, trigger.accountId));
   }
 
   private markRemoteFailure(trigger: StoredTrigger, error: unknown): void {

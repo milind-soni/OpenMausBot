@@ -246,12 +246,14 @@ use an appropriate event/webhook workflow instead of a fake weekly schedule.
   lifts.
 - A run stops when it reaches its limit, ends as failed with the limit named
   ("Stopped: this run ran longer than the 3-hour limit"), and the schedule
-  carries on. A routine may set its own limit, 5 minutes to 24 hours: that one
+  carries on. A run that had already delivered its report keeps it: its row
+  says the work was partly done. A routine may set its own limit, 5 minutes to 24 hours: that one
   counts the time since the run started, less the time its approvals and
   questions were open. Without one, the default applies to every run, whether
   the schedule, an event or **Run now** started it: 3 hours of work for a
   bot's run, 12 hours for a room goal's run (which stays running across every
-  member's turn). Work is the time the run spent running since its current
+  member's turn). A server whose routines run longer may set another default
+  (`OMB_ROUTINE_RUN_LIMIT_HOURS`). Work is the time the run spent running since its current
   start: the time it is queued (behind a busy bot, for its one retry, for a
   usage limit's reset) and the time it waits (on your approval or answer, on a
   conversation left with you, on work it handed to teammates) is not in it.

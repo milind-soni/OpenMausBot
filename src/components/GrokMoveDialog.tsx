@@ -5,10 +5,11 @@ import { track } from "@/lib/analytics";
 import { openExternalLink } from "@/lib/app-links";
 import { cn } from "@/lib/cn";
 import { useCopyFeedback } from "@/lib/copy-text";
-import { foundExports, grokConnector, grokErrorText, lookForGrokBot, MAUSBOT_GROK_TEMPLATE_URL, NOTHING_FOUND, previewGrokMove, runGrokMove, type GrokConnector, type GrokLook, type GrokPreview, type GrokReport } from "@/lib/grok-move";
+import { foundExports, grokConnector, grokErrorText, lookForGrokBot, MAUSBOT_GROK_TEMPLATE_URL, NOTHING_FOUND, previewGrokMove, runGrokMove, type GrokConnector, type GrokHistory, type GrokLook, type GrokPreview, type GrokReport } from "@/lib/grok-move";
 import { t } from "@/lib/i18n";
 import { localSetupImport } from "@/lib/setup-import";
 import { api, useStore } from "@/state/store";
+import type { LocaleKey } from "@/locales";
 import { GROK_EXPORT_MAX_CHARS, GROK_EXPORT_PROMPT, parseGrokExport, type GrokBot } from "../../shared/grok-import";
 
 const PRIMARY = "ui-button ui-button-primary min-h-9 px-4 text-[14px]";
@@ -16,11 +17,12 @@ const SECONDARY = "ui-button min-h-9 px-4 text-[14px]";
 const LINE = "text-[13px] leading-relaxed text-ink-secondary";
 
 /** A Bot as one heading and a count per kind; a kind it has none of is left out. */
-export function BotCounts({ heading, skills, routines, memories, notes, skillsOff }: {
-  heading: string; skills: number; routines: number; memories: number; notes: number; skillsOff: readonly string[];
+export function BotCounts({ heading, skills, routines, memories, notes, skillsOff, history }: {
+  heading: string; skills: number; routines: number; memories: number; notes: number; skillsOff: readonly string[]; history?: GrokHistory;
 }) {
   const rows = [
     [t("grokMove.count.skills"), skills], [t("grokMove.count.routines"), routines], [t("grokMove.count.memories"), memories], [t("grokMove.count.notes"), notes],
+    [t("grokMove.count.messages"), history && "messages" in history ? history.messages : 0],
   ] as const;
   return (
     <section data-grok-move-bot className="flex flex-col gap-1.5">
@@ -34,12 +36,14 @@ export function BotCounts({ heading, skills, routines, memories, notes, skillsOf
         ))}
       </dl>
       {skillsOff.length > 0 && <p className={LINE}>{t("grokMove.skillsOff", { names: skillsOff.join(", ") })}</p>}
+      {history && "reason" in history && <p className={LINE}>{t(`grokMove.history.${history.reason}` as LocaleKey)}</p>}
     </section>
   );
 }
 
-export function GrokMoveLines({ paused, files = null, apps, moved, unreadable, failed = [] }: { paused: string | null; files?: string | null; apps: number; moved: readonly string[]; unreadable: readonly string[]; failed?: readonly string[] }) {
+export function GrokMoveLines({ paused, history = null, files = null, apps, moved, unreadable, failed = [] }: { paused: string | null; history?: string | null; files?: string | null; apps: number; moved: readonly string[]; unreadable: readonly string[]; failed?: readonly string[] }) {
   const lines = [
+    history,
     paused,
     files,
     apps === 1 ? t("grokMove.appsOne") : apps > 1 ? t("grokMove.appsMany", { count: apps }) : null,
@@ -99,7 +103,7 @@ function ConnectGrokBot({ url, stopped, names, error, busy, onConnect, onUse }: 
   );
 }
 
-function BringBack({ connect, local, look, found, reply, error, onReply, onFile, onFound }: {
+function BringBack({ connect, local, look, found, reply, error, onReply, onFiles, onFound }: {
   connect: ReactNode;
   local: boolean;
   look: GrokLook;
@@ -107,7 +111,7 @@ function BringBack({ connect, local, look, found, reply, error, onReply, onFile,
   reply: string;
   error: string;
   onReply: (reply: string) => void;
-  onFile: (file: File | undefined) => void;
+  onFiles: (files: readonly File[]) => void;
   onFound: () => void;
 }) {
   const picker = useRef<HTMLInputElement>(null);
@@ -141,7 +145,7 @@ function BringBack({ connect, local, look, found, reply, error, onReply, onFile,
         {error && <p role="alert" className="text-[13px] leading-relaxed text-danger">{error}</p>}
         <div>
           <button type="button" onClick={() => picker.current?.click()} className={cn(SECONDARY, "inline-flex items-center gap-2")}><FileUp size={15} />{t("grokMove.chooseFile")}</button>
-          <input ref={picker} type="file" accept=".json,.md,.txt,application/json,text/plain,text/markdown" className="hidden" onChange={(event) => { onFile(event.target.files?.[0]); event.target.value = ""; }} />
+          <input ref={picker} type="file" multiple accept=".json,.md,.txt,application/json,text/plain,text/markdown" className="hidden" onChange={(event) => { onFiles(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
         </div>
       </section>
     </>
@@ -235,11 +239,23 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
     }
   };
 
-  const readFile = useRef<(file: File | undefined) => void>(() => {});
-  readFile.current = (file) => {
-    if (!file) return;
-    if (file.size > GROK_EXPORT_MAX_CHARS) return setError(t("grokMove.error.tooLarge"));
-    void file.text().then((text) => show(() => parseGrokExport(text)));
+  /** Several files are the parts of one split export, joined by Bot as the link joins them. One part that can't be read stops
+   * them all, so a Bot never comes over with a part missing. */
+  const readFiles = useRef<(files: readonly File[]) => void>(() => {});
+  readFiles.current = (files) => {
+    if (!files.length) return;
+    const refusal = (file: string, reason: string) => (files.length > 1 ? t("grokMove.refused", { file, reason }) : reason);
+    const tooLarge = files.find((file) => file.size > GROK_EXPORT_MAX_CHARS);
+    if (tooLarge) return setError(refusal(tooLarge.name, t("grokMove.error.tooLarge")));
+    const read = (file: File, order: number) => file.text().then(
+      (text) => ({ name: file.name, modifiedAt: order, text }),
+      (cause: unknown) => { throw new Error(refusal(file.name, grokErrorText(cause))); },
+    );
+    void Promise.all(files.map(read)).then((parts) => show(() => {
+      const { bots, refused: [first] } = foundExports(parts);
+      if (first) throw new Error(refusal(first.file, first.error));
+      return bots;
+    }), (cause: unknown) => setError(grokErrorText(cause)));
   };
   // The chat box behind this dialog attaches any file dropped on the window, and one Send would hand a private export to its
   // model. So nothing behind the dialog sees a drag, on any step, and only the first step reads what was dropped.
@@ -250,7 +266,7 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
     };
     const drop = (event: DragEvent) => {
       hold(event);
-      if (onStart) readFile.current(event.dataTransfer?.files[0]);
+      if (onStart) readFiles.current(Array.from(event.dataTransfer?.files ?? []));
     };
     const listeners = [["dragenter", hold], ["dragover", hold], ["dragleave", hold], ["drop", drop]] as const;
     for (const [type, listener] of listeners) window.addEventListener(type, listener, true);
@@ -262,7 +278,7 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
   const start = async () => {
     if (!preview) return;
     setImporting(true);
-    const done = await runGrokMove(preview, dispatch);
+    const done = await runGrokMove(preview, dispatch, local);
     track("team_imported", { members: preview.plans.length, source: "grok", mode: "add", format: "package" });
     if (viaLink.current && done.bots.length > 0 && done.failed.length === 0) {
       // Best effort: a link left behind stops working on its own within the hour.
@@ -303,8 +319,12 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
           {report ? (
             <>
               {report.bots.map((bot) => <BotCounts key={bot.name} heading={t("grokMove.isHere", { name: bot.name })} {...bot} />)}
+              {report.moved.flatMap(({ name, history }) => !history ? [] : [
+                <p key={name} className={LINE}>{"messages" in history ? t("grokMove.movedChat", { name, count: history.messages })
+                  : t("grokMove.movedNoChat", { name, why: t(`grokMove.history.${history.reason}` as LocaleKey) })}</p>,
+              ])}
               <GrokMoveLines paused={report.bots.some((bot) => bot.routines > 0) ? t("grokMove.pausedReport") : null} files={t("grokMove.filesStay")} apps={report.bots.reduce((total, bot) => total + bot.apps, 0)}
-                moved={report.moved} unreadable={report.unreadable} failed={report.failed} />
+                moved={report.moved.flatMap(({ name, history }) => history ? [] : [name])} unreadable={report.unreadable} failed={report.failed} />
             </>
           ) : preview ? (
             <>
@@ -312,12 +332,14 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
                 <BotCounts key={plan.packageId} heading={plan.addedAs} skills={plan.skills.length} routines={plan.routines} memories={plan.memories} notes={plan.notes}
                   skillsOff={plan.skills.filter((skill) => !skill.on).map((skill) => skill.name)} />
               ))}
-              <GrokMoveLines paused={preview.plans.some((plan) => plan.routines > 0) ? t("grokMove.pausedPreview") : null} apps={preview.plans.reduce((total, plan) => total + plan.apps, 0)}
-                moved={preview.moved} unreadable={preview.unreadable} />
+              <GrokMoveLines history={local ? t("grokMove.historyPreview") : null} paused={preview.plans.some((plan) => plan.routines > 0) ? t("grokMove.pausedPreview") : null}
+                apps={preview.plans.reduce((total, plan) => total + plan.apps, 0)}
+                moved={local ? [] : preview.moved.map(({ name }) => name)} unreadable={preview.unreadable} />
+              {local && preview.moved.length > 0 && <p className={LINE}>{t("grokMove.alreadyHereChats", { names: preview.moved.map(({ name }) => name).join(", ") })}</p>}
             </>
           ) : (
             <BringBack local={local} look={look} found={found} reply={reply} error={error} onReply={setReply}
-              onFile={(file) => readFile.current(file)} onFound={() => void show(() => found.bots)}
+              onFiles={(files) => readFiles.current(files)} onFound={() => void show(() => found.bots)}
               connect={local && connector.available && (
                 <ConnectGrokBot url={connector.connectorUrl} stopped={connector.stopped} names={arrived.map((bot) => bot.name)} error={connectFailed} busy={connecting}
                   onConnect={() => void connect()} onUse={() => void show(() => arrived, true)} />
@@ -334,7 +356,7 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
           ) : preview ? (
             <>
               <button type="button" disabled={importing} onClick={() => setPreview(null)} className={SECONDARY}>{t("grokMove.back")}</button>
-              <button type="button" data-grok-move-import disabled={importing || !preview.plans.length} onClick={() => void start()} className={cn(PRIMARY, "inline-flex items-center gap-2")}>
+              <button type="button" data-grok-move-import disabled={importing || !(preview.plans.length || (local && preview.moved.length))} onClick={() => void start()} className={cn(PRIMARY, "inline-flex items-center gap-2")}>
                 {importing && <Loader2 size={15} className="animate-spin" />}
                 {importing ? t("grokMove.importing") : t("grokMove.import")}
               </button>

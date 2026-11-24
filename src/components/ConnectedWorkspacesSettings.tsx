@@ -7,6 +7,7 @@ import { ComputerSharingSettings } from "./ComputerSharingSettings";
 import { ServerList, type OwnServerSharing } from "./ServerList";
 import { useStore } from "@/state/store";
 import { sharedComputersEnabled } from "@/lib/feature-flags";
+import { replaceUrl } from "@/lib/replace-url";
 
 type SavedWorkspaces = Awaited<ReturnType<NonNullable<NonNullable<Window["ogb"]>["environments"]>["state"]>>;
 
@@ -47,16 +48,12 @@ export function ConnectedWorkspacesSettings({ label, description }: { label?: st
     const timer = setInterval(read, 5000);
     return () => { current = false; clearInterval(timer); };
   }, [sharing, saved]);
-  const share = (id: string, on: boolean) => void perform(async () => {
-    if (on) { if (await sharing?.allow?.(id)) setComputerId(id); } else await sharing?.revoke(id);
-    if (sharing?.servers) setOwnServers(await sharing.servers());
-  });
   useEffect(() => {
     const consume = (id?: string | null) => {
       if (id) setComputerId(id);
       const url = new URL(window.location.href);
       url.searchParams.delete("share-computer");
-      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+      replaceUrl(`${url.pathname}${url.search}${url.hash}`);
     };
     consume();
     return bridge?.onOpenSettings?.(consume);
@@ -92,7 +89,7 @@ export function ConnectedWorkspacesSettings({ label, description }: { label?: st
   return <>
     <SettingsGroup label={label} description={description} block="your-computers">
       {!saved ? <SettingsRows><SettingRow title={t(error ? "servers.yours.loadFailed" : "servers.yours.loading")}>{null}</SettingRow></SettingsRows> :
-        <ServerList saved={saved} busy={busy} sharingOffered={sharingOffered} ownServers={ownServers} appVersion={window.ogb?.app?.version ?? null} onShare={share}
+        <ServerList saved={saved} busy={busy} sharingOffered={sharingOffered} ownServers={ownServers} appVersion={window.ogb?.app?.version ?? null}
           onSwitch={(id) => void perform(async () => { await bridge.switch(id); return true; })} onForget={(id) => void perform(() => bridge.forget(id))} onComputerAccess={setComputerId} />}
       {saved && error && <p role="alert" className="px-4 text-[12px] leading-4 text-danger">{error}</p>}
     </SettingsGroup>
@@ -103,7 +100,7 @@ export function ConnectedWorkspacesSettings({ label, description }: { label?: st
             const active = entry.id === saved.activeId;
             const confirming = forgetEntry?.id === entry.id;
             return <Fragment key={entry.id}>
-              <SettingRow title={envLabel(entry)} leading={<span className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Laptop size={18} strokeWidth={1.75} aria-hidden="true" /></span>}
+              <SettingRow title={envLabel(entry)} leading={<span className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Laptop size={18} aria-hidden="true" /></span>}
                 subtitle={<>{entry.dataDir ?? t("connectedWorkspaces.mainFolder")}{entry.missing && <> · {t("connectedWorkspaces.missing")}</>}</>}>
                 {active ? <span className="text-[13px] leading-5 text-ink-secondary">{t("connectedWorkspaces.current")}</span> : <>
                   <button type="button" disabled={busy} aria-label={t("connectedWorkspaces.switchTo", { name: entry.name })} className="ui-button"
@@ -136,7 +133,7 @@ export function ConnectedWorkspacesSettings({ label, description }: { label?: st
             </Fragment>;
           })}
           <SettingsFoldRow id="new-environment" title={t("connectedWorkspaces.newEnvironment")} open={newOpen} onToggle={() => setNewOpen(!newOpen)}
-            leading={<span aria-hidden="true" className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Plus size={18} strokeWidth={1.75} /></span>}>
+            leading={<span aria-hidden="true" className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Plus size={18} /></span>}>
             <form className="flex flex-col gap-3 py-3 pl-[60px] pr-4" onSubmit={(event) => {
               event.preventDefault();
               if (!envName.trim()) return;

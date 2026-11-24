@@ -117,3 +117,53 @@ describe("an ElevenLabs Live call's session", () => {
     await expect(create(fetchImpl)).rejects.toMatchObject({ status: 429 });
   });
 });
+
+// Spec: a bot's Live call speaks with the bot's own ElevenLabs voice (the voice it uses in chat), by the conversation's
+// voice override, so one agent can serve every bot. Written for the change adding `voice_id` to the ElevenLabs Live session.
+describe("an ElevenLabs Live call's voice", () => {
+  const VOICE = "Kysvuk17R9MDAP9l089v";
+  const withVoice = (fetchImpl: typeof fetch, voice: string | undefined, endpoint = elevenLabsLiveEndpoint("agent_1", {})) =>
+    createElevenLabsLiveSession({ key: "k", endpoint, bot: { name: "Rigel", voice }, history: [], cloudHome: false, fetchImpl, now: () => NOW });
+  const agentWith = (voiceOverride: boolean) => () => Response.json({ platform_settings: { overrides: { conversation_config_override: { tts: { voice_id: voiceOverride } } } } });
+
+  it("sets up new agents so a conversation may bring its own voice", async () => {
+    const fetchImpl = fakeElevenLabs();
+    await setUpElevenLabsAgent("k", elevenLabsLiveEndpoint(null, {}), "P", fetchImpl);
+    const agent = JSON.parse(String(fetchImpl.mock.calls[1]![1]!.body));
+    expect(agent.platform_settings.overrides.conversation_config_override.tts).toEqual({ voice_id: true });
+  });
+
+  it("sends the bot's ElevenLabs voice and leaves an agent that already allows it alone", async () => {
+    const fetchImpl = fakeElevenLabs({ "/v1/convai/agents/agent_1": agentWith(true) });
+    expect((await withVoice(fetchImpl, VOICE)).voice_id).toBe(VOICE);
+    expect(fetchImpl.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
+  });
+
+  it("lets an older agent take a voice, once, before the call", async () => {
+    const fetchImpl = fakeElevenLabs({ "/v1/convai/agents/agent_1": agentWith(false) });
+    expect((await withVoice(fetchImpl, VOICE)).voice_id).toBe(VOICE);
+    const patch = fetchImpl.mock.calls.find(([, init]) => init?.method === "PATCH")!;
+    expect(JSON.parse(String(patch[1]!.body)), "the prompt override and auth survive an update that replaces the settings").toEqual({ platform_settings: {
+      overrides: { conversation_config_override: { agent: { prompt: { prompt: true } }, tts: { voice_id: true } } }, auth: { enable_auth: true } } });
+  });
+
+  it("sends no voice for a bot without one, or whose voice is not an ElevenLabs voice id, and never touches the agent", async () => {
+    for (const voice of [undefined, "", "alloy", "a".repeat(32), "../../x"]) {
+      const fetchImpl = fakeElevenLabs();
+      expect(await withVoice(fetchImpl, voice)).not.toHaveProperty("voice_id");
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("keeps the agent's voice, and still calls, when the key may not change agents", async () => {
+    const fetchImpl = fakeElevenLabs({ "/v1/convai/agents/agent_1": () => new Response("", { status: 403 }) });
+    const session = await withVoice(fetchImpl, VOICE);
+    expect(session).not.toHaveProperty("voice_id");
+    expect(session.signed_url).toBe(SIGNED);
+  });
+
+  it("says when the agent is gone, so it can be set up again", async () => {
+    const fetchImpl = fakeElevenLabs({ "/v1/convai/agents/agent_1": () => new Response("", { status: 404 }) });
+    await expect(withVoice(fetchImpl, VOICE)).rejects.toMatchObject({ elevenlabsStatus: 404 });
+  });
+});

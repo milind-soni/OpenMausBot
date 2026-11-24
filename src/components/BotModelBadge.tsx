@@ -40,7 +40,7 @@ export function BotModelBadge({ bot, instances, avatarSize }: {
   );
 }
 
-/** Simple mode's faded engine mark. It has no title of its own, so hovering it still shows the row's tooltip with the model and engine. */
+/** Simple mode's faded engine mark, which the row shows on hover, keyboard focus and touch screens. It has no title of its own, so hovering it still shows the row's tooltip with the model and engine. */
 export function BotEngineMark({ bot, instances, className }: { bot: Pick<Bot, "modelSelection">; instances: InstanceInfo[]; className?: string }) {
   const model = botModel(bot, instances);
   if (!model) return null;

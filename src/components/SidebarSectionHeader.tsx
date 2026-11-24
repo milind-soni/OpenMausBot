@@ -11,6 +11,7 @@ import type { SectionNaming } from "./SidebarBotDrag";
 
 export function SidebarSectionHeader({
   name,
+  count,
   collapsed,
   attention,
   alert,
@@ -31,6 +32,8 @@ export function SidebarSectionHeader({
   dropInto = false,
 }: {
   name: string;
+  /** How many rows the section holds, for a section whose size is the point of it. */
+  count?: number;
   collapsed: boolean;
   attention?: SidebarSectionAttention;
   alert?: boolean;
@@ -74,11 +77,13 @@ export function SidebarSectionHeader({
       ? t("sidebar.section.expand", { name })
       : t("sidebar.section.collapse", { name });
 
+  const counted = count !== undefined;
+  const size = counted && <span data-section-count="" className={cn("shrink-0 text-[12px] leading-4 tabular-nums text-ink-tertiary", line && "me-auto")}>{count}</span>;
   const dropMark = dropInto ? "bg-accent/10 outline outline-2 -outline-offset-2 outline-accent/70" : undefined;
 
   if (line) {
     const tail = onToggle && (
-      <Chevron size={14} aria-hidden="true" className="shrink-0 text-ink-secondary opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-within/section:opacity-100 touch:opacity-100" />
+      <Chevron size={12} aria-hidden="true" className="shrink-0 text-ink-secondary opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-within/section:opacity-100 touch:opacity-100" />
     );
     return (
       <div
@@ -102,13 +107,15 @@ export function SidebarSectionHeader({
             title={toggleTitle}
             className="flex min-w-0 flex-1 items-center gap-1.5 rounded text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
           >
-            <span className="min-w-0 flex-1 truncate text-[13px] leading-[18px] text-ink-secondary">{name}</span>
+            <span className={cn("min-w-0 truncate text-[13px] leading-[18px] text-ink-secondary", !counted && "flex-1")}>{name}</span>
+            {size}
             {collapsed && <SectionAttention attention={attention} label={attentionLabel} alert={alert} />}
             {tail}
           </button>
         ) : (
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
-            <span className="min-w-0 flex-1 truncate text-[13px] leading-[18px] text-ink-secondary">{name}</span>
+            <span className={cn("min-w-0 truncate text-[13px] leading-[18px] text-ink-secondary", !counted && "flex-1")}>{name}</span>
+            {size}
             {attentionLabel && <span className="sr-only">{attentionLabel}</span>}
             {tail}
           </div>
@@ -143,17 +150,19 @@ export function SidebarSectionHeader({
           title={toggleTitle}
           className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-0.5 text-left hover:bg-raised/50"
         >
-          <span className="truncate text-[12px] font-semibold text-ink-secondary">
+          <span className="truncate text-[13px] leading-[18px] text-ink-secondary">
             {name}
           </span>
-          <Chevron size={13} className="shrink-0 text-ink-secondary" aria-hidden="true" />
+          {size}
+          <Chevron size={12} className="shrink-0 text-ink-secondary" aria-hidden="true" />
           <SectionAttention attention={attention} label={attentionLabel} alert={alert} />
         </button>
       ) : (
         <div className="flex min-w-0 flex-1 items-center gap-1.5 px-1 py-0.5">
-          <span className="truncate text-[12px] font-semibold text-ink-secondary">
+          <span className="truncate text-[13px] leading-[18px] text-ink-secondary">
             {name}
           </span>
+          {size}
           {attentionLabel && <span className="sr-only">{attentionLabel}</span>}
         </div>
       )}

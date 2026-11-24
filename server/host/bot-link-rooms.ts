@@ -47,7 +47,7 @@ const FILE = "bot-link-rooms.json";
 const RECORDS_MAX = 2_000;
 
 /** What a far member was last known as, kept so that it can be named while its place cannot be asked. */
-interface Known { name: string; color?: string; place: string; placeName: string; botId: string; kind?: "computer" | "cloud"; title?: string; mascotBody?: string; mascotFaceColor?: string }
+interface Known { name: string; color?: string; place: string; placeName: string; botId: string; kind?: "computer" | "cloud"; title?: string; mascotBody?: string; mascotFaceColor?: string; mascotBodyColor?: string; mascotMaterial?: string }
 /** One turn handed over: where its words started and ended, so that the same turn sent again says the same and more, never
  * less; and how many members' answers led to it. */
 interface Turn { seat: string; hop: number; at: number; composed?: boolean; after?: string; through?: string }
@@ -72,7 +72,7 @@ export interface LinkedRoomsDeps {
   linked(peer: string): boolean;
   online(peer: string): boolean;
   /** The bots the linked places have now, by their address here. */
-  linkedBots(): ReadonlyArray<{ id: string; peer: string; place: { name: string }; kind?: "computer" | "cloud"; bot: { id: string; name: string; color?: string; title?: string; mascotBody?: string; mascotFaceColor?: string } }>;
+  linkedBots(): ReadonlyArray<{ id: string; peer: string; place: { name: string }; kind?: "computer" | "cloud"; bot: { id: string; name: string; color?: string; title?: string; mascotBody?: string; mascotFaceColor?: string; mascotBodyColor?: string; mascotMaterial?: string } }>;
   selfName(): string;
   /** There is work for a place that is not connected: a computer asks its Cloud for it now, as for any hand-off. */
   wanted(): void;
@@ -179,7 +179,8 @@ export function createLinkedRooms(deps: LinkedRoomsDeps) {
     for (const id of ids) {
       const one = live.get(id);
       if (one) kept.members[id] = { name: one.bot.name, place: one.peer, placeName: one.place.name, botId: one.bot.id, ...(one.kind ? { kind: one.kind } : {}), ...(one.bot.color ? { color: one.bot.color } : {}),
-        ...(one.bot.title ? { title: one.bot.title } : {}), ...(one.bot.mascotBody ? { mascotBody: one.bot.mascotBody } : {}), ...(one.bot.mascotFaceColor ? { mascotFaceColor: one.bot.mascotFaceColor } : {}) };
+        ...(one.bot.title ? { title: one.bot.title } : {}), ...(one.bot.mascotBody ? { mascotBody: one.bot.mascotBody } : {}), ...(one.bot.mascotFaceColor ? { mascotFaceColor: one.bot.mascotFaceColor } : {}),
+        ...(one.bot.mascotBodyColor ? { mascotBodyColor: one.bot.mascotBodyColor } : {}), ...(one.bot.mascotMaterial ? { mascotMaterial: one.bot.mascotMaterial } : {}) };
     }
     for (const id of Object.keys(kept.members)) if (!ids.has(id)) delete kept.members[id];
     if (JSON.stringify([kept.members, Object.keys(kept.seats)]) !== before) save();

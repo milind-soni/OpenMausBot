@@ -326,6 +326,34 @@ describe("review fixes", () => {
     expect(manager.authState("docs", mcp.url)).toBe("signed-in");
   });
 
+  it("keeps a secret the server issues at registration and proves it on sign-in, refresh and sign-out", async () => {
+    await setup({ registerConfidential: "client_secret_basic", expiresIn: 60 });
+    const started = await manager.start("docs", mcp.url);
+    await approve(started);
+    expect((await settled("docs", started.flowId)).phase).toBe("succeeded");
+    const token = await manager.accessToken("docs", mcp.url);
+    expect(oauth.counts.refresh).toBe(1);
+    expect(oauth.isValid(`Bearer ${token}`)).toBe(true);
+    await manager.signOut("docs", mcp.url);
+    expect(oauth.counts.revoke).toBe(1);
+    expect(oauth.clientAuths).toEqual([
+      { method: "basic", clientId: "client_1" },
+      { method: "basic", clientId: "client_1" },
+      { method: "basic", clientId: "client_1" },
+    ]);
+  });
+
+  it("sends an issued secret in the form when the registration asks for that", async () => {
+    await setup({ registerConfidential: "client_secret_post" });
+    const started = await manager.start("docs", mcp.url);
+    await approve(started);
+    expect((await settled("docs", started.flowId)).phase).toBe("succeeded");
+    expect(oauth.clientAuths).toEqual([{ method: "post", clientId: "client_1" }]);
+    const stored = JSON.parse(readFileSync(join(dir, "mcp-oauth.json"), "utf8")).servers.docs;
+    expect(stored).toMatchObject({ clientId: "client_1", tokenAuth: "client_secret_post" });
+    expect(stored.clientSecret).toMatch(/^secret_/);
+  });
+
   it("registers a fresh client for every sign-in", async () => {
     await setup();
     for (let i = 0; i < 2; i++) {
@@ -802,6 +830,20 @@ describe("McpOAuthManager sign-in from a browser on another computer", () => {
     expect(new URL(started.authorizationUrl!).searchParams.get("redirect_uri")).toBe(mcpOAuthRedirectUri(mcp.url));
     expect(started.pasteBack).toBe(true);
     expect(oauth.counts.register).toBe(0);
+  });
+
+  it("returns a configured app to its configured https address, on any browser, with no loopback listener", async () => {
+    await setup({ noRegistration: true, preRegistered: { corp: null } });
+    registered = { clientId: "corp", redirectUri: "https://cloud.example/mcp-oauth/callback" };
+    const started = await manager.start("docs", mcp.url, undefined, "alice", elsewhere);
+    expect(new URL(started.authorizationUrl!).searchParams.get("redirect_uri")).toBe("https://cloud.example/mcp-oauth/callback");
+    expect(started.pasteBack).toBeUndefined();
+    expect(oauth.counts.register).toBe(0);
+    expect(await portFree(Number(new URL(mcpOAuthRedirectUri(mcp.url)).port))).toBe(true);
+    const callback = await returnAddress(started);
+    expect((await manager.publicCallback("cloud.example", callback.search)).status).toBe(200);
+    expect(manager.status("docs", started.flowId, "alice")?.phase).toBe("succeeded");
+    expect(oauth.isValid(`Bearer ${await manager.accessToken("docs", mcp.url)}`)).toBe(true);
   });
 
   it("asks a browser on this machine to paste nothing", async () => {

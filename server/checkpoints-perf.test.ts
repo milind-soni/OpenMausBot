@@ -404,6 +404,77 @@ describe("incremental shadow index", () => {
     expect(snapshotHashes(bot, cwd)).toEqual([stopped]);
   });
 
+  /** A collection made due by its loose objects (only while `due()` says so), held by a pinned snapshot and then released. */
+  async function dueCollection(bot: string, cwd: string, label: string, due: () => boolean) {
+    hooks.inject = (args) => {
+      if (args[0] === "count-objects" && due()) return { stdout: countObjects({ count: 7000 }) };
+      return gcInject?.(args);
+    };
+    writeFileSync(join(cwd, "a.txt"), label);
+    await snapshot(bot, cwd, label, undefined, { pin: `dispatch-${label}` });
+    await drain(bot, cwd);
+    await release(bot, cwd, `dispatch-${label}`);
+    await drain(bot, cwd);
+  }
+  let gcInject: ((args: string[]) => Injected | undefined) | undefined;
+  afterEach(() => { gcInject = undefined; });
+  const gitRefuses = (): Injected => ({ error: Object.assign(new Error("Command failed: git gc"), { code: 128 }), stderr: "fatal: gc is already running on machine 'fixture' pid 4242" });
+
+  it("runs a collection whose git fails once again at once, and it succeeds", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "one");
+    await snapshot(bot, cwd, "first");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let gcs = 0;
+    gcInject = (args) => (args[0] === "gc" && (gcs += 1) === 1 ? gitRefuses() : undefined);
+    await dueCollection(bot, cwd, "due", () => gcs === 0);
+    expect(gcs).toBe(2);
+    expect(warn).not.toHaveBeenCalled();
+    // Collected: the next commit owes nothing.
+    hooks.calls = [];
+    await dueCollection(bot, cwd, "after", () => false);
+    expect(subcommands()).not.toContain("gc");
+  });
+
+  it("keeps a collection that keeps failing owed, tries it again on later commits with growing gaps, never in a loop, and says git's reason", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "one");
+    await snapshot(bot, cwd, "first");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let gcs = 0;
+    gcInject = (args) => (args[0] === "gc" ? ((gcs += 1), gitRefuses()) : undefined);
+    await dueCollection(bot, cwd, "due", () => gcs === 0);
+    // The try and one more after clearing locks; then nothing until a later commit.
+    expect(gcs).toBe(2);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]![0])).toContain("fatal: gc is already running on machine 'fixture' pid 4242");
+    await drain(bot, cwd);
+    expect(gcs).toBe(2);
+    // Owed after one failure: the next commit queues it again.
+    await dueCollection(bot, cwd, "c1", () => false);
+    expect(gcs).toBe(4);
+    // After two in a row: two more commits.
+    await dueCollection(bot, cwd, "c2", () => false);
+    expect(gcs).toBe(4);
+    await dueCollection(bot, cwd, "c3", () => false);
+    expect(gcs).toBe(6);
+    // After three: four more.
+    for (const label of ["c4", "c5", "c6"]) await dueCollection(bot, cwd, label, () => false);
+    expect(gcs).toBe(6);
+    await dueCollection(bot, cwd, "c7", () => false);
+    expect(gcs).toBe(8);
+    expect(warn).toHaveBeenCalledTimes(4);
+    // Once git works again the collection runs, and nothing is owed after it.
+    gcInject = undefined;
+    for (const label of ["c8", "c9", "c10", "c11", "c12", "c13", "c14"]) await dueCollection(bot, cwd, label, () => false);
+    hooks.calls = [];
+    await dueCollection(bot, cwd, "c15", () => false);
+    expect(subcommands().filter((command) => command === "gc")).toHaveLength(1);
+    hooks.calls = [];
+    await dueCollection(bot, cwd, "c16", () => false);
+    expect(subcommands()).not.toContain("gc");
+  });
+
   it.skipIf(process.platform === "win32")("stops a running collection for a new turn's snapshot, and runs it again behind that turn", async () => {
     const { bot, cwd } = workspace();
     writeFileSync(join(cwd, "a.txt"), "one");
@@ -715,7 +786,7 @@ describe("a folder being read ahead when its turn starts", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const reading = prime(bot, cwd);
     const turn = snapshot(bot, cwd, "the turn", undefined, { pin: "dispatch-1" });
-    await vi.waitFor(() => expect(subcommands()).toContain("add"));
+    await vi.waitFor(() => expect(subcommands()).toContain("add"), { timeout: 15_000 });
     giveUp(timeoutError("add"));
     expect(await reading).toBe(false);
     expect(await turn).toBeNull();

@@ -88,6 +88,13 @@ export function registerPathDir(dir: string): void {
   resetPathCache();
 }
 
+export function unregisterPathDir(dir: string): void {
+  const at = registeredDirs.indexOf(dir);
+  if (at === -1) return;
+  registeredDirs.splice(at, 1);
+  resetPathCache();
+}
+
 // App-installed standalone builds go last: a copy the person installs themselves, anywhere, takes over.
 const fallbackDirs: string[] = [];
 
@@ -167,7 +174,7 @@ function probeLoginShellPath(): void {
   // Applied once the shell has exited cleanly and its whole answer has arrived, not when stdout closes: its rc may leave a
   // background job holding it. Reading stops there, so that job's later output is never part of the answer.
   const applyIfDone = (): void => {
-    if (exitCode !== 0) return;
+    if (finished || exitCode !== 0) return;
     const m = /__OMB_PATH__([^\n]*?)__OMB_END__/.exec(stdout);
     if (!m) return;
     if (m[1] && m[1] !== loginShellPath) {

@@ -2,7 +2,7 @@
 // the person's own Clouds, from computer control's state.
 import nativeText from "./native-text.cjs";
 
-const namedDevice = (device, t) => device === "computer" ? t("native.lendTray.computer") : device;
+export const namedDevice = (device, t) => device === "computer" ? t("native.lendTray.computer") : device;
 
 /** Why apps and screen aren't available, as one plain sentence without a full stop; null when they are. */
 export function screenLine(status, device, t = nativeText.englishText.t) {

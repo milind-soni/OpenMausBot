@@ -5,6 +5,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DATA_DIR, ensureDirs } from "../config.ts";
+import { startupModelCachePath } from "../startup-model-catalog.ts";
+import { recentTurnStarts } from "../perf/turn-starts.ts";
 import { TurnNotStartedError, type ProviderInstance } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
@@ -193,8 +195,8 @@ describe("Antigravity sign-in lifecycle", () => {
       await instance.signOut!();
     } finally {
       await instance.dispose();
-      rmSync(profile, { recursive: true, force: true });
-      rmSync(antigravityProfileDirectory("antigravity-other"), { recursive: true, force: true });
+      await removeTempDir(profile);
+      await removeTempDir(antigravityProfileDirectory("antigravity-other"));
     }
   });
 
@@ -411,6 +413,18 @@ describe("official Antigravity runtime", () => {
     expect(asset.archiveBytes).toBeGreaterThan(100_000_000);
   });
 
+  it("publishes Google's official runtime for Intel Macs like the other Mac and PC builds", () => {
+    const intelMac = resolveAntigravityReleaseAsset("darwin", "x64");
+    expect(intelMac).toMatchObject({
+      version: ANTIGRAVITY_RELEASE_VERSION,
+      url: "https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.4.3-darwin-x86_64.zip",
+      sha256: "9392dbbdad7f0663dbfb5a0bf641297b0cf80d2ee9cd2d49a616bbbc7378731d",
+      archiveBytes: 119_801_100,
+    });
+    expect(intelMac?.executable.name).toBe(resolveAntigravityReleaseAsset("darwin", "arm64")?.executable.name);
+    expect(intelMac?.harness.name).toBe(resolveAntigravityReleaseAsset("darwin", "arm64")?.harness.name);
+  });
+
   function testValidatesAcpInitializeResults() {
     const basePayload = {
       protocolVersion: 1,
@@ -529,10 +543,12 @@ describe("official Antigravity runtime", () => {
     expect(runtime).toMatchObject({ executablePath: officialExecutable, source: "path" });
   });
 
-  it("explains the official setup when a legacy CLI has no replacement installed", async () => {
+  it("explains the setup when a legacy CLI has no replacement installed: the Google Antigravity CLI a new install takes, or the pinned runtime alone", async () => {
     if (!resolveAntigravityReleaseAsset()) return;
     const fake = fakeRuntime();
     await expect(resolveAntigravityRuntime("/old/bin/agy", { PATH: "" }, fake.directory))
+      .rejects.toThrow(/Google Antigravity CLI is not installed yet/);
+    await expect(resolveAntigravityRuntime("/old/bin/agy", { PATH: "" }, fake.directory, { nativeByDefault: false }))
       .rejects.toThrow(/Install official Antigravity, then Sign in with Google/);
   });
 
@@ -631,6 +647,27 @@ describe("official Antigravity runtime", () => {
     });
   }, 20_000);
 
+  it("offers Gemini 4 Neon from the account's own list with its thinking levels, keeping the bundled default", async () => {
+    const fake = fakeRuntime();
+    const runtime = await resolveAntigravityRuntime(fake.executable);
+    const levels = [{ value: "medium", name: "Medium" }, { value: "high", name: "High" }];
+    const profile = await prepareAntigravityProfile({
+      instanceId: "neon-catalog", runtime, baseDir: fake.directory,
+      baseEnv: {
+        PATH: process.env.PATH,
+        FAKE_ACP_AUTH_METHOD: "oauth-personal",
+        FAKE_ACP_MODELS: "gemini-4-neon,gemini-3.8-flash",
+        FAKE_ACP_VARIANTS: JSON.stringify({ "gemini-4-neon": { id: "thought_level", currentValue: "high", options: levels } }),
+      },
+    });
+    const catalog = await probeAntigravityModels({ runtime, profile, fallbackDefault: "gemini-3.8-flash" });
+    expect(catalog.default).toBe("gemini-3.8-flash");
+    expect(catalog.options.find((option) => option.id === "gemini-4-neon")).toEqual({
+      id: "gemini-4-neon", label: "gemini-4-neon", variants: [{ id: "medium", label: "Medium" }, { id: "high", label: "High" }],
+    });
+    await expect(probeAntigravityModels({ runtime, profile, fallbackDefault: "gemini-9-flash" })).resolves.toMatchObject({ default: "gemini-4-neon" });
+  }, 20_000);
+
   it("rejects a download redirected to insecure HTTP", async () => {
     const baseDir = mkdtempSync(join(tmpdir(), "omb-antigravity-insecure-"));
     scratch.push(baseDir);
@@ -686,7 +723,7 @@ describe("official Antigravity runtime", () => {
     expect(installAntigravityRuntime(options)).toBe(first);
     const installed = await first;
     expect(readFileSync(installed.executablePath, "utf8")).toBe("#!/bin/sh\nexit 0\n");
-    expect(readFileSync(installed.harnessPath, "utf8")).toBe("#!/bin/sh\nexit 0\n");
+    expect(readFileSync(installed.harnessPath!, "utf8")).toBe("#!/bin/sh\nexit 0\n");
     await installAntigravityRuntime(options);
     expect(fetches).toBe(1);
     expect(validations).toBe(2);
@@ -848,7 +885,8 @@ describe("Antigravity driver over shared ACP", () => {
   it("uses managed setup and defaults to approval cards", () => {
     expect(AntigravityDriver.defaultConfig()).toEqual({ cli: "agy", fullAuto: false, workspace: undefined });
     expect(AntigravityDriver.install?.docsUrl).toContain("antigravity-acp");
-    if (resolveAntigravityReleaseAsset()) expect(AntigravityDriver.install?.managed?.downloadBytes).toBeGreaterThan(0);
+    // The native CLI is opt-in: by default the card offers the pinned runtime with its download size, as before it.
+    expect(AntigravityDriver.install?.managed).toEqual({ label: "Install official Antigravity", downloadBytes: resolveAntigravityReleaseAsset()?.archiveBytes ?? 0, sizeUnknown: true });
     expect(antigravityPermissionMode(false)).toBe("default");
     expect(antigravityPermissionMode(false, "ask")).toBe("default");
     expect(antigravityPermissionMode(false, "auto")).toBe("default");
@@ -1003,7 +1041,7 @@ describe("Antigravity driver over shared ACP", () => {
       environment: {
         FAKE_ACP_AUTH_METHOD: "oauth-personal",
         FAKE_ACP_MODELS: sessionModels,
-        FAKE_ACP_VARIANTS: JSON.stringify(Object.fromEntries(["gemini-3.8-flash", "gemini-4-argon"].map((id) => [id, {
+        FAKE_ACP_VARIANTS: JSON.stringify(Object.fromEntries(["gemini-3.8-flash", "gemini-4-argon", "gemini-4-neon"].map((id) => [id, {
           id: "thinking_level",
           currentValue: "high",
           options: [{ value: "low", name: "Low" }, { value: "medium", name: "Medium" }, { value: "high", name: "High" }],
@@ -1048,6 +1086,12 @@ describe("Antigravity driver over shared ACP", () => {
     expect(calls.some((call: any) => call.params.value === "gemini-4-argon-high")).toBe(false);
   });
 
+  it("runs a Gemini 4 Neon (High) pick as the base model at High thinking when the runtime offers only the base", async () => {
+    const { calls, selection } = await legacyPickTurn("antigravity-legacy-neon", "gemini-3.8-flash,gemini-4-neon", "gemini-4-neon-high");
+    expect(selection).toEqual({ sessionId: expect.any(String), model: "gemini-4-neon", variant: "high" });
+    expect(calls.some((call: any) => call.params.value === "gemini-4-neon-high")).toBe(false);
+  });
+
   it("keeps a suffixed Gemini 3.8 Flash pick unchanged when the runtime still offers it", async () => {
     const { calls, selection } = await legacyPickTurn("antigravity-suffixed-offered", "gemini-3.8-flash,gemini-3.8-flash-medium", "gemini-3.8-flash-medium");
     expect(selection).toEqual({ sessionId: expect.any(String), model: "gemini-3.8-flash-medium" });
@@ -1063,6 +1107,18 @@ describe("Antigravity driver over shared ACP", () => {
     expect(normalizeAntigravityTurn({ ...turn, model: "gemini-4-argon-medium" }, ["gemini-3.8-flash", "gemini-4-argon"])).toEqual({ ...turn, model: "gemini-4-argon", variant: "medium" });
     expect(normalizeAntigravityTurn({ ...turn, model: "gemini-4-argon-high" }, ["gemini-4-argon", "gemini-4-argon-high"])).toEqual({ ...turn, model: "gemini-4-argon-high" });
     expect(normalizeAntigravityTurn({ ...turn, model: "gemini-4-argon-high" }, ["gemini-3.8-flash"])).toEqual({ ...turn, model: "gemini-4-argon-high" });
+  });
+
+  it("splits a suffixed id only at a thinking level the catalog gives its base model", () => {
+    const turn = { threadId: "t", text: "hi", model: "gemini-4-neon-high" };
+    const catalog = { default: "gemini-3.8-flash", options: [
+      { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash" },
+      { id: "gemini-4-neon", label: "Gemini 4 Neon", variants: [{ id: "extra-low", label: "Extra Low" }, { id: "high", label: "High" }] },
+    ] };
+    const offered = ["gemini-3.8-flash", "gemini-4-neon"];
+    expect(normalizeAntigravityTurn(turn, offered, catalog)).toEqual({ ...turn, model: "gemini-4-neon", variant: "high" });
+    expect(normalizeAntigravityTurn({ ...turn, model: "gemini-4-neon-extra-low" }, offered, catalog)).toEqual({ ...turn, model: "gemini-4-neon", variant: "extra-low" });
+    expect(normalizeAntigravityTurn({ ...turn, model: "gemini-4-neon-medium" }, offered, catalog)).toEqual({ ...turn, model: "gemini-4-neon-medium" });
   });
 
   it("keeps one process across approval and model changes, starting on OMB's model", async () => {
@@ -1111,6 +1167,186 @@ describe("Antigravity driver over shared ACP", () => {
       ["mode", "auto_edit"],
     ]);
   });
+
+  it("sends an unchanged permission mode and thinking level once per live session, and a change at once", async () => {
+    ensureDirs();
+    const fake = fakeRuntime();
+    const dump = join(fake.directory, "dump.json");
+    const instanceId = "antigravity-config-once";
+    const tokenDirectory = join(antigravityProfileDirectory(instanceId), "antigravity-acp");
+    mkdirSync(tokenDirectory, { recursive: true });
+    writeFileSync(join(tokenDirectory, "acp_token.json"), "{}", { mode: 0o600 });
+    const levels = [{ value: "low", name: "Low" }, { value: "high", name: "High" }];
+    instance = await AntigravityDriver.create({
+      instanceId,
+      displayName: "Antigravity",
+      environment: {
+        FAKE_ACP_AUTH_METHOD: "oauth-personal",
+        FAKE_ACP_MODELS: "gemini-3.8-flash",
+        FAKE_ACP_VARIANTS: JSON.stringify({ "gemini-3.8-flash": { id: "thought_level", currentValue: "low", options: levels } }),
+        FAKE_ACP_MODES: "default,yolo,auto_edit",
+        FAKE_ACP_DUMP: dump,
+      },
+      enabled: true,
+      config: { cli: fake.executable, fullAuto: false },
+    });
+    await instance.startupModelRefresh;
+    recorder = recordEvents(instance.adapter);
+    const configCalls = () => (JSON.parse(readFileSync(`${dump}.config.json`, "utf8")) as Array<{ params: { configId: string; value: string } }>)
+      .map((call) => [call.params.configId, call.params.value]);
+    const run = async (approvalMode: "ask" | "full", variant: string, extra: { sessionReset?: true } = {}) => {
+      const { turnId } = await instance!.adapter.sendTurn({
+        threadId: "thread-config-once", text: "hello", approvalMode, model: "gemini-3.8-flash", variant, cwd: fake.directory,
+        resumeCursor: "fake-acp-session", ...extra,
+      });
+      expect(await recorder!.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok: true });
+    };
+    await run("ask", "high");
+    await run("ask", "high");
+    await run("ask", "high");
+    expect(configCalls()).toEqual([["mode", "default"], ["thought_level", "high"]]);
+    await run("full", "high");
+    await run("full", "low");
+    await run("full", "low");
+    expect(configCalls()).toEqual([["mode", "default"], ["thought_level", "high"], ["mode", "yolo"], ["thought_level", "low"]]);
+    // A reset session (here in a new process, whose record starts empty) confirms nothing yet: both are sent again.
+    await run("full", "low", { sessionReset: true });
+    expect(configCalls()).toEqual([["mode", "yolo"], ["thought_level", "low"]]);
+    await run("full", "low");
+    expect(configCalls()).toEqual([["mode", "yolo"], ["thought_level", "low"]]);
+  });
+
+  describe("after a restart with a saved model list from another build", () => {
+    const levels = [{ value: "low", name: "Low" }, { value: "high", name: "High" }];
+    const seed = (instanceId: string, models: string[]) => {
+      ensureDirs();
+      writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify([{ id: "bot-restart" }]));
+      const path = startupModelCachePath(instanceId)!;
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, JSON.stringify({ default: models[0], options: models.map((id) => ({ id, label: id })), checkedAt: Date.now() - 60_000, build: "0.0.0-older" }));
+      const tokenDirectory = join(antigravityProfileDirectory(instanceId), "antigravity-acp");
+      mkdirSync(tokenDirectory, { recursive: true });
+      writeFileSync(join(tokenDirectory, "acp_token.json"), "{}", { mode: 0o600 });
+    };
+    afterEach(() => rmSync(join(DATA_DIR, "bots.json"), { force: true }));
+
+    it("runs the first turn on the saved list while the list is read again in the background", async () => {
+      const fake = fakeRuntime();
+      seed("antigravity-restart-standin", ["gemini-3.8-flash", "gemini-4-argon"]);
+      instance = await AntigravityDriver.create({
+        instanceId: "antigravity-restart-standin",
+        displayName: "Antigravity",
+        environment: {
+          FAKE_ACP_AUTH_METHOD: "oauth-personal",
+          FAKE_ACP_MODELS: "gemini-3.8-flash,gemini-4-argon",
+          FAKE_ACP_VARIANTS: JSON.stringify({ "gemini-3.8-flash": { id: "thought_level", currentValue: "low", options: levels } }),
+          FAKE_ACP_MODES: "default,yolo",
+          // The background read's thinking-level survey hangs on this model until its budget runs out.
+          FAKE_ACP_HANG_ON_MODEL: "gemini-4-argon",
+        },
+        enabled: true,
+        config: { cli: fake.executable, fullAuto: false },
+      });
+      expect(instance.startupModelRefresh).toBeDefined();
+      let refreshed = false;
+      const refresh = instance.startupModelRefresh!.then(() => { refreshed = true; });
+      recorder = recordEvents(instance.adapter);
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "thread-restart", text: "hello", approvalMode: "ask", model: "gemini-3.8-flash", variant: "high", cwd: fake.directory });
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId, 8_000)).toMatchObject({ ok: true });
+      expect(refreshed).toBe(false);
+      await refresh;
+    }, 40_000);
+
+    it("reads the list and tries once more when the agent refuses a model the stale list still named", async () => {
+      const fake = fakeRuntime();
+      const rpc = join(fake.directory, "rpc.jsonl");
+      seed("antigravity-restart-stale", ["gemini-retired", "gemini-3.8-flash"]);
+      instance = await AntigravityDriver.create({
+        instanceId: "antigravity-restart-stale",
+        displayName: "Antigravity",
+        environment: {
+          FAKE_ACP_AUTH_METHOD: "oauth-personal",
+          FAKE_ACP_MODELS: "gemini-3.8-flash",
+          FAKE_ACP_MODES: "default,yolo",
+          FAKE_ACP_RPC_APPEND_FILE: rpc,
+          FAKE_ACP_DUMP: join(fake.directory, "dump.json"),
+        },
+        enabled: true,
+        config: { cli: fake.executable, fullAuto: false },
+      });
+      recorder = recordEvents(instance.adapter);
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "thread-stale", text: "hello", approvalMode: "ask", model: "gemini-retired", cwd: fake.directory });
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId, 15_000)).toMatchObject({ ok: false });
+      await instance.startupModelRefresh;
+      // The stale id never reached the runtime as its unchecked launch default.
+      expect(JSON.parse(readFileSync(join(fake.directory, "dump.json"), "utf8")).env.AGY_ACP_DEFAULT_MODEL).toBeUndefined();
+      const turnSelects = readFileSync(rpc, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { method: string; cwd: string })
+        .filter((line) => line.method === "session/set_config_option" && realpathSync(line.cwd) === realpathSync(fake.directory));
+      expect(turnSelects).toHaveLength(2);
+      expect(instance.models.options.map((option) => option.id)).not.toContain("gemini-retired");
+      expect(recorder.events.filter((event) => event.type === "turn.started")).toHaveLength(1);
+    }, 40_000);
+  });
+
+  it("writes one start-timing line per turn: a cold one, a warm one, and one refused for sign-in", async () => {
+    ensureDirs();
+    const fake = fakeRuntime();
+    const instanceId = "antigravity-turn-starts";
+    const tokenDirectory = join(antigravityProfileDirectory(instanceId), "antigravity-acp");
+    mkdirSync(tokenDirectory, { recursive: true });
+    writeFileSync(join(tokenDirectory, "acp_token.json"), "{}", { mode: 0o600 });
+    instance = await AntigravityDriver.create({
+      instanceId, displayName: "Antigravity", enabled: true, config: { cli: fake.executable, fullAuto: false },
+      environment: { FAKE_ACP_AUTH_METHOD: "oauth-personal", FAKE_ACP_MODELS: "gemini-3.8-flash", FAKE_ACP_MODES: "default,yolo" },
+    });
+    await instance.startupModelRefresh;
+    recorder = recordEvents(instance.adapter);
+    const run = async () => {
+      const { turnId } = await instance!.adapter.sendTurn({ threadId: "thread-starts", text: "hello", approvalMode: "ask", model: "gemini-3.8-flash", cwd: fake.directory, resumeCursor: "fake-acp-session" });
+      await recorder!.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      return recentTurnStarts().at(-1)!;
+    };
+    expect(await run()).toMatch(/^\[perf\] engine turn antigravityAgent: new process, models waited \d+ ms, spawn to initialize \d+ ms, authenticate \d+ ms, session (?:new|resume) \d+ ms, config 1 call \d+ ms, prompt to first update \d+ ms, total \d+ ms, ended end_turn$/u);
+    expect(await run()).toMatch(/^\[perf\] engine turn antigravityAgent: kept process, models waited \d+ ms, session live, config 0 calls 0 ms, prompt to first update \d+ ms, total \d+ ms, ended end_turn$/u);
+    rmSync(join(tokenDirectory, "acp_token.json"));
+    expect(await run()).toMatch(/: no process, .*no prompt, total \d+ ms, ended auth_required$/u);
+  });
+
+  it("ends a stale-model turn at once when the person stops it while the model list is read", async () => {
+    ensureDirs();
+    writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify([{ id: "bot-restart" }]));
+    try {
+      const fake = fakeRuntime();
+      const instanceId = "antigravity-restart-stale-stop";
+      const path = startupModelCachePath(instanceId)!;
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, JSON.stringify({ default: "gemini-retired", options: [{ id: "gemini-retired", label: "Retired" }, { id: "gemini-3.8-flash", label: "Flash" }], checkedAt: Date.now() - 60_000, build: "0.0.0-older" }));
+      const tokenDirectory = join(antigravityProfileDirectory(instanceId), "antigravity-acp");
+      mkdirSync(tokenDirectory, { recursive: true });
+      writeFileSync(join(tokenDirectory, "acp_token.json"), "{}", { mode: 0o600 });
+      const levels = [{ value: "low", name: "Low" }, { value: "high", name: "High" }];
+      instance = await AntigravityDriver.create({
+        instanceId, displayName: "Antigravity", enabled: true, config: { cli: fake.executable, fullAuto: false },
+        environment: {
+          FAKE_ACP_AUTH_METHOD: "oauth-personal", FAKE_ACP_MODELS: "gemini-3.8-flash,gemini-4-argon", FAKE_ACP_MODES: "default,yolo",
+          FAKE_ACP_VARIANTS: JSON.stringify({ "gemini-4-argon": { id: "thought_level", currentValue: "low", options: levels } }),
+          // The read's survey hangs here until its budget runs out, so the turn is still waiting when it is stopped.
+          FAKE_ACP_HANG_ON_MODEL: "gemini-4-argon",
+        },
+      });
+      recorder = recordEvents(instance.adapter);
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "thread-stale-stop", text: "hello", approvalMode: "ask", model: "gemini-retired", cwd: fake.directory });
+      await vi.waitFor(() => expect(instance!.adapter.hasSession("thread-stale-stop")).toBe(true));
+      // Refused once, now waiting for the read.
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      await instance.adapter.interruptTurn("thread-stale-stop");
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId, 2_000)).toMatchObject({ ok: true, stopReason: "cancelled" });
+      await instance.startupModelRefresh;
+      expect(recorder.events.filter((event) => event.type === "turn.completed" && event.turnId === turnId)).toHaveLength(1);
+    } finally {
+      rmSync(join(DATA_DIR, "bots.json"), { force: true });
+    }
+  }, 40_000);
 
   it("never starts a session on a model this account has not offered", async () => {
     ensureDirs();

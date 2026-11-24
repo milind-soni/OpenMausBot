@@ -20,11 +20,12 @@ import type { ModelSelection } from "./contracts.ts";
 import * as mdb from "./message-db.ts";
 import { hasTeamAuthority } from "./peer-roster.ts";
 import { flushLaterSaves } from "./save-batch.ts";
-import { Store, toWireTask, type BotRecord } from "./store.ts";
+import { Store, toWireTask, type BotRecord, type Message } from "./store.ts";
 import type { TeamSetupRequest } from "../shared/team-setup.ts";
 import { SECTION_CONTEXTS_FILE, readSectionContext, writeSectionContext } from "./section-context.ts";
 import { TeamComputers } from "./team-computers.ts";
 import { allowsTool } from "../shared/tool-scope.ts";
+import { approvalModeFor } from "../shared/approval-mode.ts";
 import { readRegistry, writeRegistry } from "./testing/registry.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-sonnet-5" });
@@ -1344,6 +1345,24 @@ describe("Store", () => {
     }
   });
 
+  it("starts a bot a team setup creates at the saved New bot level, and at the default without one", () => {
+    const store = new Store(selection);
+    const chief = store.createBot({ name: "Chief", section: "Ops" });
+    store.patchBot(chief.id, { chiefOfStaff: true });
+    const setup = (requestId: string, botId: string, approval?: "ask" | "auto" | "full") => store.applyTeamSetup({ version: 1, requestId, botId: chief.id,
+      threadId: chief.threadId, reason: "Requested", createdAt: 1, requesterRevision: "fixture", newTeams: [], operations: [
+        { action: "create", botId, threadId: `${botId}-thread`, fields: { name: botId, section: "Ops", modelSelection: selection() } },
+      ] }, approval);
+    setup("setup-auto", "templated", "auto");
+    setup("setup-plain", "plain");
+    const reloaded = new Store(selection);
+    expect(approvalModeFor(reloaded.bot("templated")!)).toBe("auto");
+    expect(reloaded.bot("templated")?.autoApprove).toBe(true);
+    expect(approvalModeFor(reloaded.projectBotForTask("templated", "templated-thread")!)).toBe("auto");
+    expect(reloaded.bot("plain")?.approvalMode).toBeUndefined();
+    expect(reloaded.bot("plain")?.autoApprove).toBe(false);
+  });
+
   it("gives a new department to a Chief in charge of every department once the write that made it is saved", async () => {
     const store = new Store(selection);
     const lead = store.createBot({ name: "Lead", section: "Ops" });
@@ -1779,6 +1798,27 @@ describe("Store", () => {
       { type: "message", messageId: edited.id },
       { type: "thread", activeLeafId: edited.id },
     ]);
+  });
+
+  it("branchMessage keeps an automation's line automated when its words are sent again, and only then", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const followUp = "[Wait finished: the build] Tell me how it went.";
+    const automatedLine = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: `${followUp}\n`, automated: true, waitId: "w1" });
+    const typed = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "Thanks" });
+    const live: Message[] = [];
+    store.onChange((change) => { if (change.type === "message") live.push(change.message); });
+
+    const again = store.branchMessage(bot.threadId, automatedLine.id, followUp)!;
+    const edited = store.branchMessage(bot.threadId, automatedLine.id, "Tell me tomorrow instead.")!;
+    const typedAgain = store.branchMessage(bot.threadId, typed.id, "Thanks")!;
+
+    expect(live.map((message) => [message.id, message.automated, message.waitId])).toEqual([[again.id, true, "w1"], [edited.id, undefined, undefined], [typedAgain.id, undefined, undefined]]);
+    const reread = new Store(selection).messagesFor(bot.threadId);
+    expect(reread.find((message) => message.id === again.id)).toMatchObject({ text: followUp, automated: true, waitId: "w1" });
+    expect(reread.find((message) => message.id === edited.id)).not.toHaveProperty("automated");
+    expect(reread.find((message) => message.id === edited.id)).not.toHaveProperty("waitId");
+    expect(reread.find((message) => message.id === typedAgain.id)).not.toHaveProperty("automated");
   });
 
   it("setActiveLeaf switches branches and descends to the newest leaf", () => {

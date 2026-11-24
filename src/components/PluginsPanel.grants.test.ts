@@ -12,13 +12,17 @@ const fixture = vi.hoisted(() => ({
   services: {} as Record<string, unknown>,
   after: undefined as unknown,
   email: null as boolean | null,
+  extraCards: [] as string[],
 }));
 
 vi.mock("@/state/store", () => ({
   api: vi.fn(async (path: string, init?: RequestInit) => {
-    if (path === "/api/connectors/catalog") return { cards: [{ slug: "apollo", label: "Apollo", blurb: "leads", logo: null, domain: null }], source: "api", configured: true, mode: "self-hosted" };
+    if (path === "/api/connectors/catalog") {
+      const cards = ["apollo", ...fixture.extraCards].map((slug) => ({ slug, label: slug[0]!.toUpperCase() + slug.slice(1), blurb: "leads", logo: null, domain: null }));
+      return { cards, source: "api", configured: true, mode: "self-hosted" };
+    }
     if (path.endsWith("/authorize")) return { url: "https://auth.example.com/connect" };
-    if (path.startsWith("/api/connectors?services=")) return { services: { apollo: fixture.after } };
+    if (path.startsWith("/api/connectors?services=")) return { services: { [path.slice("/api/connectors?services=".length)]: fixture.after } };
     if (init?.method === "DELETE") return {};
     throw new Error(`unexpected ${path}`);
   }),
@@ -64,7 +68,7 @@ const open = async () => {
   await flush();
 };
 const toast = () => document.body.querySelector<HTMLElement>("[data-access-toast]");
-const tile = () => host.querySelector<HTMLElement>('[data-app-tile="apollo"]')!;
+const tile = (slug = "apollo") => host.querySelector<HTMLElement>(`[data-app-tile="${slug}"]`)!;
 const button = (scope: ParentNode, label: string) => Array.from(scope.querySelectorAll("button")).find((candidate) => candidate.textContent === label || candidate.getAttribute("aria-label") === label)!;
 const prompt = () => host.querySelector<HTMLElement>("[data-app-grant-prompt]");
 const switchOf = (name: string) => prompt()!.querySelector<HTMLElement>(`[aria-label="${name} can use Apollo"]`)!;
@@ -76,13 +80,14 @@ const type = async (input: HTMLInputElement, value: string) => {
   });
 };
 /** Presses Connect, names the account, and lets one poll read the answer. */
-const connectApollo = async () => {
-  await click(tile().querySelector("button")!);
-  await type(tile().querySelector("form input") as HTMLInputElement, "work");
-  await act(async () => { tile().querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+const connectApp = async (slug: string) => {
+  await click(tile(slug).querySelector("button")!);
+  await type(tile(slug).querySelector("form input") as HTMLInputElement, "work");
+  await act(async () => { tile(slug).querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
   await flush();
   await settlePoll();
 };
+const connectApollo = () => connectApp("apollo");
 const settlePoll = async () => {
   await act(async () => { vi.advanceTimersByTime(5_000); });
   await flush();
@@ -100,6 +105,7 @@ beforeEach(() => {
   fixture.services = {};
   fixture.after = active;
   fixture.email = null;
+  fixture.extraCards = [];
   showAppGrantNotice(null);
 });
 afterEach(async () => {
@@ -141,6 +147,38 @@ describe("after connecting an app", () => {
     await connectApollo();
     expect(writes()).toEqual([{ type: "updateBot", botId: "ada", patch: { composio: true, connectorScopes: { apps: { apollo: "write" } } } }]);
     expect(toast()?.textContent).toContain("Your bots can now use Apollo.");
+  });
+
+  it("takes the bot it was started from while the Apps pop-up is already open, and only for that one connection", async () => {
+    fixture.state.bots = [bot("scout", { composio: false }), bot("ada", { composio: false })];
+    await open();
+    connectAppFromBot(fixture.dispatch, "ada");
+    await flush();
+    fixture.dispatch.mockClear();
+    await connectApollo();
+    expect(writes()).toEqual([{ type: "updateBot", botId: "ada", patch: { composio: true, connectorScopes: { apps: { apollo: "write" } } } }]);
+
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    fixture.dispatch.mockClear();
+    fixture.state.bots = [bot("scout", { composio: false }), bot("ada", { composio: false })];
+    await open();
+    await connectApollo();
+    expect(writes()).toEqual([]);
+  });
+
+  it("gives only the next connection to the bot it was started from, not a later one in the same pop-up", async () => {
+    fixture.extraCards = ["bolt"];
+    fixture.state.bots = [bot("scout", { composio: false }), bot("ada", { composio: false })];
+    connectAppFromBot(fixture.dispatch, "ada");
+    await open();
+    fixture.dispatch.mockClear();
+    await connectApollo();
+    expect(writes().map((write) => write.botId)).toEqual(["ada"]);
+
+    fixture.dispatch.mockClear();
+    await connectApp("bolt");
+    expect(writes()).toEqual([]);
   });
 
   it("says plainly when every bot's apps are off, and Change opens the switches", async () => {

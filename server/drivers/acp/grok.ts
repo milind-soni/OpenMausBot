@@ -1,15 +1,21 @@
 // Grok Build: the official `grok` CLI over ACP stdio (`grok … agent stdio`) on the grok.com
 // subscription login (~/.grok/auth.json), not the xAI API key. Verified against grok 1.0.0.
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { parse as parseYaml } from "yaml";
 
-import type { ModelCatalog } from "../../contracts.ts";
+import type { ModelCatalog, SendTurnInput } from "../../contracts.ts";
 import { harnessHome, splitCliString } from "../../env-path.ts";
 import type { DeviceSignIn, DeviceSignInState } from "../device-auth.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { LiveSwitchRefused } from "./driver-hooks.ts";
+import { grokLoginCheck } from "./grok-sign-in.ts";
+import { closeEndsBackgroundWork } from "./background-work.ts";
+import { readGrokFollowUp } from "./grok-follow-up.ts";
+import { GROK_CANCEL_META, GROK_INITIALIZE_META, GROK_PROMPT_COMPLETION, grokPromptOutcome, grokReportedFailure } from "./grok-signals.ts";
+import type { AcpPromptSteer } from "./steer.ts";
 import { bundledEngineCatalog } from "../../model-manifest/bundled.ts";
 import { currentEngineCatalog } from "../../model-manifest/manifest.ts";
 import { ENGINE_MODEL_ID } from "../../model-manifest/schema.ts";
@@ -29,6 +35,12 @@ export function grokHome(env: Record<string, string | undefined> = process.env):
 
 export function grokSignedIn(env: Record<string, string | undefined>): boolean {
   return existsSync(join(grokHome(env), "auth.json"));
+}
+
+const grokLogin = grokLoginCheck();
+/** The engine's status: an auth.json whose login `grok models` reports gone (expired, revoked) is signed out too. */
+export function grokAuthenticated(cli: string, env: Record<string, string | undefined>): Promise<boolean> {
+  return grokLogin(cli, env, join(grokHome(env), "auth.json"));
 }
 
 /** The sign-out probe: an auth.json that cannot be read is `unknown`, so sign-out refuses instead of reporting a
@@ -54,8 +66,8 @@ function grokLoginFailure(output: string): string {
   return "Grok sign-in did not finish. Check the server's connection, then try again.";
 }
 
-/** `grok login --device-auth` / `grok logout` on the grok.com subscription (grok 1.0.25 and 1.0.41). Grok has no
- * status command, so the stored auth.json is the sign-in check. */
+/** `grok login --device-auth` / `grok logout` on the grok.com subscription (grok 1.0.25 and 1.0.41). The stored auth.json
+ * confirms them: `grok models` also reports the login, but takes seconds, and only the engine's status waits for it. */
 export const GROK_DEVICE_SIGN_IN: DeviceSignIn = {
   provider: "grok",
   product: "Grok",
@@ -138,6 +150,21 @@ export function readGrokModelCatalog(env: Record<string, string | undefined> = p
     default: configuredDefault && seen.has(configuredDefault) ? configuredDefault : fixed.default,
     options,
   };
+}
+
+/** What a person reads when Grok refused `model` and its session listed the models this sign-in offers without it; null
+ * when the session listed none, or listed this one (then the refusal was something else). */
+export function grokModelNotOffered(model: string, sessionModels: readonly { modelId?: string }[]): string | null {
+  const offered = [...new Set(sessionModels.map((entry) => entry.modelId).filter((id): id is string => typeof id === "string" && id.length > 0))];
+  if (offered.length === 0 || offered.includes(model)) return null;
+  const list = offered.length === 1 ? offered[0] : `${offered.slice(0, -1).join(", ")} and ${offered.at(-1)}`;
+  // "can't use the model" keeps a routine from retrying a run that would be refused the same way (retry.ts).
+  return `Grok can't use the model ${model} here: this Grok sign-in offers ${list}, so choose ${offered.length === 1 ? "it" : "one of those"} for this bot.`;
+}
+
+/** Grok's answer to set_model for a model it does not know: JSON-RPC invalid params, or its "unknown model id" words. */
+function unknownGrokModel(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === -32602 || /\bunknown model\b/i.test(error instanceof Error ? error.message : String(error));
 }
 
 function suggestGrokSlug(host: string, model: string, taken: Set<string>): string {
@@ -338,6 +365,53 @@ export function grokToolScopeProfile(scope: unknown, init: unknown, inherited?: 
   };
 }
 
+/** grok 1.0.89: with `[ui] follow_up_behavior = "steer"` in config.toml, a second `session/prompt` is injected into the running
+ * turn at its next safe point and answers `cancelled` with `_meta.completionKind: "removedFromQueue"` and no tokens; with the
+ * default "queue" it waits for the turn to end. `initialize` does not report the setting, and `GROK_CONFIG` cannot set `ui`. */
+export const GROK_STEER: AcpPromptSteer = {
+  kind: "prompt",
+  enabled: (env) => {
+    try {
+      return readGrokFollowUp(readFileSync(join(grokHome(env), "config.toml"), "utf8")).value === "steer";
+    } catch {
+      return false;
+    }
+  },
+  folded: (response) => (response as { _meta?: { completionKind?: unknown } } | null)?._meta?.completionKind === "removedFromQueue",
+};
+
+/** grok 1.0.89 (auto_wake, on by default): a background subagent or shell command that finishes after the turn wakes a turn
+ * no `session/prompt` asked for; `session/close` ends it and `session/load` of the same id brings the history back. */
+const GROK_BACKGROUND = closeEndsBackgroundWork();
+
+/** Turns on Grok's mid-turn steering for a signed-in account, unless its config.toml already sets `follow_up_behavior`. */
+export function ensureGrokSteer(env: Record<string, string | undefined> = process.env): void {
+  if (!grokSignedIn(env)) return;
+  const path = join(grokHome(env), "config.toml");
+  let text = "";
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return;
+  }
+  const found = readGrokFollowUp(text);
+  if (found.present || found.unclear || (found.insertAt === undefined && found.uiElsewhere)) return;
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const line = `follow_up_behavior = "steer"${eol}`;
+  const next = found.insertAt !== undefined
+    ? text.slice(0, found.insertAt) + (text.slice(0, found.insertAt).endsWith("\n") ? "" : eol) + line + text.slice(found.insertAt)
+    : `${text}${text && !text.endsWith("\n") ? eol : ""}${text ? eol : ""}[ui]${eol}${line}`;
+  // config.toml can hold `api_key` values (ensureGrokInjectSlug writes them), so the staged copy is private from its first byte.
+  const staged = `${path}.omb-${process.pid}.tmp`;
+  try {
+    writeFileSync(staged, next, { mode: 0o600, flag: "wx" });
+    renameSync(staged, path);
+  } catch {
+    rmSync(staged, { force: true });
+    // Grok then keeps queueing mid-turn messages, its default.
+  }
+}
+
 /** Grok's `ask_user_question` blocks its turn on this extension request (xai-org/grok-build ask_user_question/types.rs);
  * ACP's Rust SDK adds the `_` prefix on the wire. Answers are keyed by Grok's question text, one label per pick; own
  * words ride as "Other" with the text in annotations[].notes. */
@@ -375,6 +449,54 @@ export const GROK_ASK_USER_QUESTION: AcpQuestionRequest = {
   },
 };
 
+/** The process contract leaves out the model and effort that configureSession changes in a live session, keeping only
+ * whether each is set. A narrowed tool profile carries the model, so there a change still starts a new process. */
+function grokContractArgs(args: string[], turn: SendTurnInput): string[] {
+  if (narrowsNativeTools(turn.toolScope)) return args;
+  return args.map((arg, index) => index > 0 && (args[index - 1] === "-m" || args[index - 1] === "--reasoning-effort") ? "set" : arg);
+}
+
+/** grok 1.0.x can leave session/load unanswered once it has replayed the history. The replay is taken to be one burst
+ * from its own session files, so two seconds without an update ends it. */
+const GROK_LOAD_REPLAY_QUIET_MS = 2_000;
+
+/** grok 1.0.41 reports effort as the `reasoning_effort` select (category `thought_level`) of session/new's and
+ * session/load's configOptions, and session/set_config_option answers with the whole updated list. A load that went
+ * quiet reported no options, so the documented id is tried. */
+async function setGrokEffort(
+  request: (method: string, params: unknown, timeoutMs?: number) => Promise<any>,
+  sessionId: string,
+  effort: string,
+  configOptions: ReadonlyArray<{ id?: unknown; category?: unknown }>,
+): Promise<void> {
+  const offered = configOptions.find((entry) => entry.id === "reasoning_effort" || entry.category === "thought_level")?.id;
+  const configId = typeof offered === "string" ? offered : "reasoning_effort";
+  let reply: { configOptions?: Array<{ id?: unknown; currentValue?: unknown }> } | undefined;
+  try {
+    reply = await request("session/set_config_option", { sessionId, configId, value: effort }, 15_000);
+  } catch (e) {
+    throw new LiveSwitchRefused(`Grok rejected effort "${effort}": ${(e as Error).message}`);
+  }
+  if (reply?.configOptions?.find((entry) => entry.id === configId)?.currentValue !== effort) {
+    throw new LiveSwitchRefused(`Grok did not switch to effort "${effort}".`);
+  }
+}
+
+/** Only `allow-edits-session` of grok's `allow_always` options ends with the session; the others save a grant beyond it:
+ * `always-allow` stops asking about bash commands in the project (1.0.41), and the 1.0.25 binary also names
+ * `allow-always-command`, `allow-always-mcp`, `allow-always-domain` and `enable-always-approve` (every request). Without
+ * the session option, "this session" allows once and the driver remembers the exact operation. A question's options are
+ * its answers and stay as offered. */
+const GROK_SESSION_ALLOW = "allow-edits-session";
+export function grokPermissionRequest(params: Record<string, any>): Record<string, any> {
+  if (String(params.toolCall?.toolCallId ?? "").startsWith("interaction_") || !Array.isArray(params.options)) return params;
+  return {
+    ...params,
+    options: params.options.filter((option: { optionId?: unknown; kind?: unknown }) =>
+      option?.kind !== "allow_always" || option.optionId === GROK_SESSION_ALLOW),
+  };
+}
+
 const support: AcpSupport = {
   driverKind: "grokAgent",
   questionRequests: {
@@ -391,6 +513,7 @@ const support: AcpSupport = {
   effortLevels: ["low", "medium", "high"],
   defaultCli: "grok",
   nativeSource: "grok.acp",
+  ownMcpOverHttp: "advertised",
   loginNote: "Grok is not signed in to your grok.com account — choose Sign in to Grok in engine setup",
 
   // No Windows one-liner: the installer is a POSIX shell script.
@@ -403,6 +526,13 @@ const support: AcpSupport = {
     signInCommand: "grok login",
   },
   deviceSignIn: GROK_DEVICE_SIGN_IN,
+  steer: GROK_STEER,
+  backgroundWork: GROK_BACKGROUND,
+  initializeMeta: GROK_INITIALIZE_META,
+  cancelMeta: GROK_CANCEL_META,
+  promptCompletion: GROK_PROMPT_COMPLETION,
+  promptOutcome: grokPromptOutcome,
+  reportedFailure: grokReportedFailure,
 
   // With the instance HOME/GROK_HOME: ensureGrokInjectSlug defaults to process.env.
   resolveTurnModel: (model, env) => (model ? ensureGrokInjectSlug(model, env) : model),
@@ -422,6 +552,13 @@ const support: AcpSupport = {
     ...(turn.effort ? ["--reasoning-effort", turn.effort] : []),
     "stdio",
   ],
+  oneShotModel: (model, env) => {
+    const resolved = ensureGrokInjectSlug(model, env);
+    return resolved !== "default" && SLUG.test(resolved) ? resolved : undefined;
+  },
+  spawnContractArgs: (config, turn) => grokContractArgs(support.spawnArgs(config, turn), turn),
+  loadReplayQuietMs: (turn) => narrowsNativeTools(turn.toolScope) ? undefined : GROK_LOAD_REPLAY_QUIET_MS,
+  permissionRequest: grokPermissionRequest,
 
   toolScopeSessionParams: (turn, init, hasMcp, { config, env, cwd }) => {
     if (!narrowsNativeTools(turn.toolScope)) return {};
@@ -433,7 +570,7 @@ const support: AcpSupport = {
   toolScopeCacheKey: ({ config, env, cwd }) => JSON.stringify(grokInheritedProfile(config.cli, env, cwd) ?? null),
 
   // -m on argv is not enough: session/new still starts on [models].default.
-  async configureSession({ request, sessionId, turn, currentModelId }) {
+  async configureSession({ request, sessionId, turn, sessionModels, currentModelId, currentEffort, effortApplied, configOptions }) {
     if (turn.toolScope !== undefined) {
       const available = new Set([
         ...(turn.integrations?.agents ? ["agents"] : []), ...(turn.integrations?.composio ? ["composio"] : []), ...(turn.integrations?.composioOwn ? [OWN_APPS_SERVER] : []),
@@ -465,17 +602,26 @@ const support: AcpSupport = {
       }
     }
     // Repeating set_model can rebuild the harness, dropping its MCP catalog, or reject a valid resumed profile.
-    if (!turn.model || currentModelId === turn.model) return;
-    if (narrowsNativeTools(turn.toolScope)) {
-      throw new Error("Grok could not confirm the selected model without replacing its tool profile. Start a new conversation or choose a model with a supported Grok profile. No prompt was sent.");
+    if (turn.model && currentModelId !== turn.model) {
+      if (narrowsNativeTools(turn.toolScope)) {
+        throw new Error("Grok could not confirm the selected model without replacing its tool profile. Start a new conversation or choose a model with a supported Grok profile. No prompt was sent.");
+      }
+      try {
+        await request("session/set_model", { sessionId, modelId: turn.model });
+      } catch (e) {
+        // Refused as unknown, and missing from the models this sign-in offers: this turn ends at once, since a new process
+        // would be refused the same way, and the process is retired, so the next turn reads the list afresh.
+        const notOffered = unknownGrokModel(e) ? grokModelNotOffered(turn.model, sessionModels) : null;
+        if (notOffered) throw Object.assign(new Error(notOffered), { acpSessionFailure: true });
+        throw new LiveSwitchRefused(
+          `Grok rejected model "${turn.model}" via session/set_model: ${(e as Error).message}. ` +
+            `Check that grok is current (1.0.6+ supports it) and that this slug exists in ~/.grok/config.toml.`,
+        );
+      }
     }
-    try {
-      await request("session/set_model", { sessionId, modelId: turn.model });
-    } catch (e) {
-      throw new Error(
-        `Grok rejected model "${turn.model}" via session/set_model: ${(e as Error).message}. ` +
-          `Check that grok is current (1.0.6+ supports it) and that this slug exists in ~/.grok/config.toml.`,
-      );
+    if (effortApplied && turn.effort !== undefined && turn.effort !== currentEffort) {
+      await setGrokEffort(request, sessionId, turn.effort, configOptions);
+      effortApplied(turn.effort);
     }
   },
 
@@ -484,6 +630,7 @@ const support: AcpSupport = {
     delete env.XAI_API_KEY;
   },
   applyTurnEnv: (env, { toolScope }) => {
+    ensureGrokSteer(env);
     if (toolScope !== undefined) {
       // These env switches outrank account defaults in the verified runtime.
       env.GROK_MANAGED_MCPS_ENABLED = "false";
@@ -500,7 +647,7 @@ const support: AcpSupport = {
 
   pickAuthMethod: (methods) => ["cached_token", "grok.com"].find((id) => methods.some((m) => m.id === id)) ?? null,
   authFailure: "fail",
-  isAuthenticated: (env) => grokSignedIn(env),
+  isAuthenticated: (env, config) => grokAuthenticated(config.cli, env),
 
   // `--append-system-prompt`/`--rules` do not reach the agent-stdio system prompt (1.0.0).
   buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),

@@ -7,6 +7,7 @@ const OFFICIAL = [
   "https://platform.claude.com/",
   "https://docs.x.ai/",
   "https://ai.google.dev/",
+  "https://cursor.com/",
   "https://platform.minimax.io/",
   "https://openrouter.ai/",
 ];
@@ -34,6 +35,21 @@ describe("built-in list prices", () => {
     }
     expect(listPriceFor("gemini-3.8-flash-high", new Date("2026-12-31T23:00:00Z"))?.inputPerMillion).toBe(0.75);
     expect(listPriceFor("gemini-3.8-flash", new Date("2027-01-01T00:00:00Z"))).toEqual({ inputPerMillion: 1.5, cachedInputPerMillion: 0.15, outputPerMillion: 7.5 });
+  });
+
+  it("prices the current OpenAI, Gemini and Cursor models", () => {
+    expect(listPriceFor("gpt-6.1-terra")).toEqual({ inputPerMillion: 1, cachedInputPerMillion: 0.05, outputPerMillion: 5 });
+    expect(listPriceFor("gpt-6.2-astra")).toEqual({ inputPerMillion: 8, cachedInputPerMillion: 0.4, outputPerMillion: 40 });
+    expect(listPriceFor("gemini-4-neon")).toEqual({ inputPerMillion: 3, cachedInputPerMillion: 0.15, outputPerMillion: 15 });
+    expect(listPriceFor("gemini-4-hydrogen")).toEqual({ inputPerMillion: 1.5, cachedInputPerMillion: 0.075, outputPerMillion: 7.5 });
+    expect(listPriceFor("gemini-4-argon", new Date("2026-11-30T23:00:00Z"))?.inputPerMillion).toBe(2);
+    expect(listPriceFor("gemini-4-argon", new Date("2026-12-01T00:00:00Z"))).toEqual({ inputPerMillion: 4, cachedInputPerMillion: 0.2, outputPerMillion: 20 });
+    expect(listPriceFor("gemini-4-carbon", new Date("2026-12-01T00:00:00Z"))?.inputPerMillion).toBe(4);
+    expect(listPriceFor("composer-2.5")).toEqual({ inputPerMillion: 0.5, cachedInputPerMillion: 0.2, outputPerMillion: 2.5 });
+    expect(listPriceFor("composer-2.5-fast")?.outputPerMillion).toBe(15);
+    for (const model of ["gpt-6.1-sol", "gpt-6.2-sol", "gpt-6-luna", "gpt-6-sol"]) expect(listPriceFor(model), model).not.toBeNull();
+    expect(ledgerCost({ driverKind: "codex", model: "gpt-6.1-terra", input: 1_000_000, cachedInput: 500_000, output: 100_000, costUsd: null }, null))
+      .toEqual({ costUsd: expect.closeTo(0.5 * 1 + 0.5 * 0.05 + 0.1 * 5, 9), costSource: "estimated" });
   });
 
   it("leaves models without a published price unpriced rather than guessing from a sibling", () => {
@@ -74,15 +90,28 @@ describe("what the ledger books for a settled turn", () => {
     expect(ledgerCost({ driverKind: "acp", model: "fake-model", input: 1_000_000, output: 0, costUsd: null }, operator)).toEqual({ costUsd: 10, costSource: "estimated" });
   });
 
-  it("prices a Codex Fast row as its base model", () => {
+  it("prices a Codex Fast or Ultrafast row as its base model", () => {
     const fast = { ...codex, model: "gpt-5.5+priority", costUsd: null };
+    const ultrafast = { ...codex, model: "gpt-5.5+ultrafast", costUsd: null };
     expect(ledgerCost(fast, null)).toEqual(ledgerCost({ ...codex, costUsd: null }, null));
+    expect(ledgerCost(ultrafast, null)).toEqual(ledgerCost({ ...codex, costUsd: null }, null));
     const operator: PriceList = { "codex/gpt-5.5": { inputPerMillion: 1, outputPerMillion: 2 }, default: { inputPerMillion: 10, outputPerMillion: 10 } };
     expect(ledgerCost(fast, operator).costUsd).toBeCloseTo(1 * 1 + 0.1 * 2, 9);
+    expect(ledgerCost(ultrafast, operator).costUsd).toBeCloseTo(1 * 1 + 0.1 * 2, 9);
     expect(estimatePriceFor({ driverKind: "codex", model: "gpt-5.5+priority" }, { "codex/gpt-5.5+priority": { inputPerMillion: 7, outputPerMillion: 7 } })?.inputPerMillion).toBe(7);
     expect(estimatePriceFor({ driverKind: "acp", model: "gpt-5.5+priority" }, null)).toBeNull();
     // A provider-qualified custom model keeps its `+`: it is not a Fast row, so another model's price must not apply.
     expect(estimatePriceFor({ driverKind: "codex", model: "local::foo+priority" }, { "codex/local::foo": { inputPerMillion: 9, outputPerMillion: 9 } })).toBeNull();
+  });
+
+  it("prices an Antigravity id with a thinking level or an Orchestrator name as its base Gemini model", () => {
+    const operator: PriceList = { "gemini-4-neon": { inputPerMillion: 3, outputPerMillion: 15 }, "antigravityAgent/gemini-4-argon": { inputPerMillion: 2, outputPerMillion: 10 } };
+    for (const model of ["gemini-4-neon", "gemini-4-neon-high", "gemini-pro-orchestrator-neon"]) {
+      expect(estimatePriceFor({ driverKind: "antigravityAgent", model }, operator), model).toEqual({ inputPerMillion: 3, outputPerMillion: 15 });
+    }
+    expect(estimatePriceFor({ driverKind: "antigravityAgent", model: "gemini-pro-orchestrator-g1-pro" }, operator)?.inputPerMillion).toBe(2);
+    expect(estimatePriceFor({ driverKind: "antigravityAgent", model: "gemini-3.8-flash-extra-low" }, null)).toEqual(listPriceFor("gemini-3.8-flash"));
+    expect(estimatePriceFor({ driverKind: "acp", model: "gemini-4-neon-high" }, operator)).toBeNull();
   });
 
   it("books an unpriced model as unpriced, not as free", () => {

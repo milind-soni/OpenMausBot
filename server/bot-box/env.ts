@@ -11,14 +11,20 @@ export const BOX_ENV_NAMES: ReadonlySet<string> = new Set([
   "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR", "DISPLAY", "WAYLAND_DISPLAY",
   "AGENT_BROWSER_EXECUTABLE_PATH", "BROWSER", "BASH_MAX_TIMEOUT_MS", "ELECTRON_RUN_AS_NODE", "PYTHONUNBUFFERED", "PYTHONDONTWRITEBYTECODE",
   "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL",
+  // Antigravity's native CLI keeps each profile's Google sign-in in that profile's own file only while this is set
+  // (server/drivers/antigravity-acp.ts sets a fixed value); without it, it waits on an OS keyring the box does not have.
+  "SSH_CONNECTION",
 ]);
+
+/** The one SSH_CONNECTION value a box may see (server/drivers/antigravity-acp.ts starts the native CLI with it). */
+export const BOX_SSH_CONNECTION = "127.0.0.1 0 127.0.0.1 0";
 
 /** OpenMausBot's own variables a boxed process reads: what the harness sets for a bot's engine, its hooks and the MCP
  * proxies it starts. Security: no other `OMB_` name passes, whatever the operator set on the server (an SMTP URL, a
  * token); env.test.ts lists every `OMB_` name the server knows, so a new one needs a decision. */
 export const BOX_ENV_OMB_NAMES: ReadonlySet<string> = new Set([
   "OMB_HARNESS_URL", "OMB_BOT_ID", "OMB_THREAD_ID", "OMB_COMMS_TOKEN", "OMB_EXTERNAL_RUNTIME",
-  "OMB_CHIEF_OF_STAFF", "OMB_MAUSBOT", "OMB_SKILL_AUTHORING_ENABLED", "OMB_MEMORY_ENABLED", "OMB_SHARED_COMPUTERS_ENABLED",
+  "OMB_CHIEF_OF_STAFF", "OMB_MAUSBOT", "OMB_SKILL_AUTHORING_ENABLED", "OMB_SKILL_BURGER", "OMB_MEMORY_ENABLED", "OMB_SHARED_COMPUTERS_ENABLED",
   "OMB_VOICE_NOTES", "OMB_X_RESEARCH", "OMB_RESEARCH", "OMB_TEAM_PEOPLE", "OMB_COMPUTER_SELECTION", "OMB_ROOM",
   "OMB_IMAGE_GENERATION", "OMB_MEETINGS", "OMB_APP_HOSTING", "OMB_TOOLS_OFF", "OMB_LOCAL_VM", "OMB_AGENTS_TOOL_BRIDGE", "OMB_AGENTS_DEFER_TOOLS", "OMB_TOOL_LIMIT", "OMB_TOOL_SCHEMA_PROFILE",
   "OMB_MCP_CONFIG", "OMB_MCP_RESTART", "OMB_MCP_RESULT_BUDGET",
@@ -31,8 +37,9 @@ export const BOX_ENV_OMB_NAMES: ReadonlySet<string> = new Set([
   "OMB_PHONE_TOKEN", "OMB_ADB_PATH", "OMB_RESOURCES_PATH", "OMB_CODEX_AUTH_SOCKET", "OMB_CODEX_AUTH_SECRET",
   "OMB_COPILOT_MCP_CONFIG", "OMB_BROWSER_PROFILE", "OMB_BOX_PROBE", "OMB_EXTRA_PATH", "OMB_TEST_SEALED_PATH",
 ]);
-/** Families of the same, one variable per server or kind: a harness MCP server's token, a gated or remote server's config. */
-export const BOX_ENV_OMB_PREFIXES: readonly string[] = ["OMB_MCP_TOKEN_", "OMB_GATE_CONFIG_", "OMB_REMOTE_MCP_CONFIG_"];
+/** Families of the same, one variable per server or kind: a harness MCP server's token, a gated or remote server's config,
+ * and a saved Skill Burger's inputs, which its shell steps read as OMB_ARG_<NAME> (set per step, never from the server's own environment). */
+export const BOX_ENV_OMB_PREFIXES: readonly string[] = ["OMB_MCP_TOKEN_", "OMB_GATE_CONFIG_", "OMB_REMOTE_MCP_CONFIG_", "OMB_ARG_"];
 
 /** Prefixes of the engines' own settings and keys (T0b replaces the keys with per-turn broker tokens). */
 export const BOX_ENV_PREFIXES: readonly string[] = [
@@ -73,6 +80,8 @@ export function boxEnvironment(
   const kept: Record<string, string> = {};
   for (const [name, value] of Object.entries(env)) {
     if (value === undefined || !boxEnvironmentAllows(name, deny, allow)) continue;
+    // Security: only the fixed value an engine is started with passes, never the server's own SSH session (its addresses).
+    if (name === "SSH_CONNECTION" && value !== BOX_SSH_CONNECTION) continue;
     kept[name] = value;
   }
   return kept;

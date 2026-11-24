@@ -115,7 +115,7 @@ jobs:
       - name: Source guards
         # The tests that only read the source: seconds here, and they stay in the shards. On Nov 3-4 2026 one of them was
         # red on main for 11 hours, and each PR heard about it after about 70 minutes, once its shards had found a runner.
-        run: pnpm exec vitest run src/locales/ scripts/testing/file-size-ratchet.test.ts scripts/testing/index-route-ratchet.test.ts scripts/testing/tighten-ratchets.test.ts scripts/testing/comment-history.test.ts scripts/testing/lazy-server-modules.test.ts scripts/testing/duration-sequencer.test.ts scripts/testing/host-e2e.test.ts scripts/testing/ci-retry-list.test.ts src/lib/copy-text.guard.test.ts src/components/Select.guard.test.ts --reporter=default --reporter=github-actions
+        run: pnpm exec vitest run src/locales/ scripts/testing/file-size-ratchet.test.ts scripts/testing/index-route-ratchet.test.ts scripts/testing/store-read-ratchet.test.ts scripts/testing/tighten-ratchets.test.ts scripts/testing/comment-history.test.ts scripts/testing/lazy-server-modules.test.ts scripts/testing/duration-sequencer.test.ts scripts/testing/host-e2e.test.ts scripts/testing/ci-retry-list.test.ts src/lib/copy-text.guard.test.ts src/components/Select.guard.test.ts --reporter=default --reporter=github-actions
       # The rest runs only on a Boat VM, where ci-scope moved the Linux jobs' work into this job.
       - name: Remove what Boat installs and GitHub's runners lack
         if: steps.scope.outputs.linux_lanes
@@ -176,6 +176,16 @@ jobs:
       - run: pnpm check:electron
       - name: production UI build
         run: pnpm exec vite build
+      - name: The bots' browsers' kernel memory limit, on a real kernel, as root
+        # A Cloud home's root supervisor puts the bots' Chrome under a cgroup v2 memory limit (server/browser/memory-cgroup.ts):
+        # here a memory-hungry child started through the real launcher must be killed by the kernel while the unprivileged
+        # "server" beside it keeps answering. Root without CAP_SYS_ADMIN, as the supervisor runs after its setpriv drop;
+        # OMB_CGROUP_TEST=require fails rather than skips.
+        run: |
+          scratch="$(mktemp -d)"
+          sudo setpriv --inh-caps=-sys_admin,-setpcap --bounding-set=-sys_admin,-setpcap -- \
+            env "PATH=$PATH" HOME="$scratch" OMB_DATA_DIR="$scratch/data" TMPDIR="$scratch" OMB_CGROUP_TEST=require \
+            "$(command -v pnpm)" exec vitest run server/browser/memory-cgroup.linux.test.ts --reporter=verbose --silent=false
 
   vitest:
     # Admit the expensive runner fan-out only after the quick checks pass.
@@ -246,8 +256,9 @@ jobs:
         run: node scripts/testing/ci-retry-summary.mjs
       - name: Broker and Electron unit tests
         if: matrix.node_tests
-        # About half a minute; node --test has no overall deadline, so a file
-        # that never exits would otherwise hold the job to its cap.
+        # About two minutes on macOS and Windows, which the duration sequencer
+        # counts against this shard; node --test has no overall deadline, so a
+        # file that never exits would otherwise hold the job to its cap.
         timeout-minutes: 5
         run: pnpm broker:test && pnpm test:electron
 
@@ -596,7 +607,7 @@ jobs:
         env:
           OMB_UI_E2E: "1"
           OMB_UI_EVIDENCE_DIR: .omb-scratch/verify-evidence
-        run: pnpm exec vitest run scripts/testing/control-omb-ui.e2e.test.ts scripts/testing/bot-tools-ui.e2e.test.ts scripts/testing/thinking-timer-ui.e2e.test.ts scripts/testing/team-share-ui.e2e.test.ts scripts/testing/org-library-ui.e2e.test.ts scripts/testing/browser-evidence.e2e.test.ts scripts/testing/browser-fill.e2e.test.ts scripts/testing/rich-table-composer-ui.e2e.test.ts scripts/testing/computer-panel-focus-ui.e2e.test.ts scripts/testing/mobile-code-blocks-ui.e2e.test.ts scripts/testing/inline-page-height-ui.e2e.test.ts scripts/testing/room-pages-ui.e2e.test.ts
+        run: pnpm exec vitest run scripts/testing/control-omb-ui.e2e.test.ts scripts/testing/bot-tools-ui.e2e.test.ts scripts/testing/thinking-timer-ui.e2e.test.ts scripts/testing/team-share-ui.e2e.test.ts scripts/testing/org-library-ui.e2e.test.ts scripts/testing/browser-evidence.e2e.test.ts scripts/testing/browser-fill.e2e.test.ts scripts/testing/browser-input.e2e.test.ts scripts/testing/rich-table-composer-ui.e2e.test.ts scripts/testing/computer-panel-focus-ui.e2e.test.ts scripts/testing/mobile-code-blocks-ui.e2e.test.ts scripts/testing/inline-page-height-ui.e2e.test.ts scripts/testing/room-pages-ui.e2e.test.ts
       - name: Upload the renderer screenshot
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
@@ -669,7 +680,7 @@ jobs:
       - name: Install package validation and native smoke tools
         run: >-
           sudo apt-get update && sudo apt-get install -y
-          at-spi2-core dbus-x11 desktop-file-utils libxi6 libxkbcommon0 openbox squashfs-tools x11-utils xdotool xvfb
+          at-spi2-core cpio dbus-x11 desktop-file-utils libxi6 libxkbcommon0 openbox rpm squashfs-tools x11-utils xdotool xvfb
       - run: pnpm install --frozen-lockfile
       - name: Stage the pinned CUA runtime
         run: pnpm build:cua:linux
@@ -749,11 +760,19 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Let Chrome build its sandbox on this runner, and give it a display
         # Ubuntu 24.04 restricts unprivileged user namespaces; Chrome's own
-        # documented fix for 23.10+. The sandbox itself stays on.
+        # documented fix for 23.10+. The sandbox itself stays on. Xvnc and
+        # bubblewrap run the desktop view's suite (server/browser/desktop): its
+        # own private displays, and Chrome's lock-down policy for each display's
+        # Chrome alone, which the suite proves from Chrome's own address bar.
         if: runner.os == 'Linux'
+        # Ubuntu 25.04+ also confines what bubblewrap starts (AppArmor's
+        # bwrap-userns-restrict: its children get no capabilities, so Chrome
+        # cannot build its own sandbox under bwrap and exits with SIGTRAP).
+        # A Cloud is Debian with no AppArmor, so the suite runs as there.
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          sudo apt-get update && sudo apt-get install -y xvfb
+          sudo apt-get update && sudo apt-get install -y xvfb tigervnc-standalone-server bubblewrap
+          if [ -f /etc/apparmor.d/bwrap-userns-restrict ]; then sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict; fi
       - name: Keep the runner's Google Chrome as it is for the whole run
         # The macOS image's Chrome is older than Google's release, and about
         # 30 s after Chrome first runs it starts its bundled GoogleUpdater,
@@ -769,10 +788,20 @@ jobs:
         # The headed-identity case needs a display, which Linux runners get from Xvfb.
         env:
           OMB_CDP_E2E: "1"
+          # The desktop view's suite keeps pictures of its private display here; a failed run uploads them.
+          DESKTOP_E2E_SHOTS: ${{ runner.temp }}/desktop-e2e-pictures
         shell: bash
         run: |
-          run=(pnpm exec vitest run server/browser/cdp/s4- server/browser/checklist.e2e server/browser/passkey-wall.e2e server/browser/viewers/viewers.e2e server/browser/viewers/stream-v2.e2e --reporter=verbose --silent=false --reporter=github-actions)
+          run=(pnpm exec vitest run server/browser/cdp/s4- server/browser/checklist.e2e server/browser/passkey-wall.e2e server/browser/viewers/viewers.e2e server/browser/viewers/stream-v2.e2e server/browser/desktop/desktop.e2e --reporter=verbose --silent=false --reporter=github-actions)
           if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a "${run[@]}"; else "${run[@]}"; fi
+      - name: Upload the desktop view's pictures on failure
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure() && runner.os == 'Linux'
+        with:
+          name: desktop-e2e-pictures-${{ matrix.os }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/desktop-e2e-pictures/
+          if-no-files-found: warn
+          retention-days: 7
       - name: The runner's Google Chrome did not change during the run
         if: ${{ !cancelled() && runner.os == 'macOS' }}
         run: test "$(defaults read "/Applications/Google Chrome.app/Contents/Info.plist" CFBundleShortVersionString)" = "$(cat "$RUNNER_TEMP/chrome-version")"

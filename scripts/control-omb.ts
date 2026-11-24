@@ -164,6 +164,11 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
     OMB_TEST_SEALED_PATH: "1",
     // The project's live announcement cards would sit over the corner the UI tests click in.
     OMB_DISABLE_ANNOUNCEMENTS: "1",
+    // The bundled model list, as in-process tests use: a downloaded one that differs makes the engines read their status
+    // again mid-boot, so what a fixture probes would depend on what is published on main.
+    OMB_DISABLE_MODEL_MANIFEST_FETCH: "1",
+    // A save of bots.json that serializes only the bots it names is checked against the whole serialization.
+    OMB_BOTS_SAVE_CHECK: "1",
   });
   // The fake engines' knobs are the one thing a caller may script into the child.
   for (const [key, value] of Object.entries(parentEnv)) {
@@ -291,7 +296,7 @@ export async function launchVerificationServer(
   enterprise?: { dir: string; licenseKey: string },
   room?: { scripted: boolean },
   /** Optional repository-owned fake providers for multi-engine setup checks. */
-  extraProviders: Array<"codex" | "cline" | "copilot" | "customAcp" | "opencode" | "kimi"> = [],
+  extraProviders: Array<"codex" | "cline" | "copilot" | "customAcp" | "opencode" | "kimi" | "grok"> = [],
   /** Programmatic tests only: an owned loopback Boat provider, never a live account. */
   boatFixtureApi?: string,
   /** Programmatic web UI qualification against the fixture's static server. */
@@ -338,8 +343,13 @@ export async function launchVerificationServer(
         driver: "kimiAgent", displayName: "Verification Kimi",
         config: { cli: fileURLToPath(new URL("../server/testing/fake-acp-cli.ts", import.meta.url)) },
       } } : {}),
+      ...(extraProviders.includes("grok") ? { grok: {
+        driver: "grokAgent", displayName: "Verification Grok",
+        config: { cli: fileURLToPath(new URL("../server/testing/fake-acp-cli.ts", import.meta.url)), fullAuto: true },
+      } } : {}),
       ...(extraProviders.includes("codex") ? { codex: {
         driver: "codex", displayName: "Verification Codex", config: { cli: fileURLToPath(new URL("../server/testing/fake-codex-app-server.ts", import.meta.url)) },
+        environment: Object.fromEntries(Object.entries(parentEnv).filter(([key, value]) => key.startsWith("FAKE_CODEX_") && value)),
       } } : {}),
       ...(extraProviders.includes("cline") ? { cline: {
         driver: "clineAgent", displayName: "Verification Cline",

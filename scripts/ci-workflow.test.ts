@@ -264,8 +264,11 @@ describe("CI concurrency", () => {
     });
     // The build job runs where the scope selects it, and static holds only what is quick and always runs.
     expect(workflow.jobs.build.if).toBe(`contains(needs.static.outputs.jobs, '"build"')`);
-    expect((workflow.jobs.build.steps as { run?: string }[]).map((step) => step.run).filter(Boolean))
-      .toEqual(["pnpm install --frozen-lockfile", "pnpm typecheck", "pnpm check:electron", "pnpm exec vite build"]);
+    const buildRuns = (workflow.jobs.build.steps as { run?: string }[]).map((step) => step.run).filter(Boolean);
+    expect(buildRuns.slice(0, 4)).toEqual(["pnpm install --frozen-lockfile", "pnpm typecheck", "pnpm check:electron", "pnpm exec vite build"]);
+    // Then the one test that needs root on a real kernel (the browsers' memory limit), which fails rather than skips there.
+    expect(buildRuns).toHaveLength(5);
+    expect(buildRuns[4]).toMatch(/sudo setpriv .*--bounding-set=-sys_admin.*OMB_CGROUP_TEST=require .*vitest run server\/browser\/memory-cgroup\.linux\.test\.ts/s);
     for (const run of ["pnpm typecheck", "pnpm check:electron", "pnpm exec vite build"]) {
       expect((workflow.jobs.static.steps as { run?: string }[]).some((step) => step.run === run), run).toBe(false);
     }

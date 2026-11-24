@@ -1,13 +1,5 @@
 import { boatCapableEngine } from "@/lib/remote-desktop";
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type DragEvent as ReactDragEvent,
-  type PointerEvent as ReactPointerEvent,
-  type ReactNode,
-} from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
   CheckCircle2,
   ChevronRight,
@@ -55,19 +47,16 @@ import {
   addDays,
   atLocalTime,
   CALENDAR_SLOT_MINUTES,
-  formatGmtOffset,
   fromLocalDateAndTime,
   intervalAnchorForSave,
   nextIntervalForSave,
-  packCalendarCollisions,
-  slotAt,
   startOfDay,
   toLocalDateInput,
   toLocalTimeInput,
   type CallOccurrence,
   type RoutineCalendarItem,
 } from "@/lib/routine-calendar";
-import { limitResetWhen, type ResetMarker } from "@/lib/limit-resets";
+import { limitResetWhen } from "@/lib/limit-resets";
 import { LimitResetFields, type LimitResetChoice } from "./routines/LimitResetFields";
 import { DAY_NAMES, dayName, durationLabel, niceDate, niceTime, scheduleLabel } from "@/lib/schedule-label";
 import { Select } from "./Select";
@@ -83,14 +72,15 @@ import {
   type RoutineTarget,
 } from "@/lib/routines"; import { ROUTINE_GOAL_RUN_LIMIT_MINUTES, ROUTINE_RUN_LIMIT_MAX_MINUTES, ROUTINE_RUN_LIMIT_MINUTES } from "@/lib/routines";
 import { api, openBotThread, openThread, useStore, type Bot, type Group } from "@/state/store";
+import { useStoreDispatch } from "@/state/store-select";
 import { RoutineScheduleNote } from "./RoutineScheduleNote";
-import { CalendarEventCard, HOUR_HEIGHT, statusState } from "./routines/CalendarEventCard";
+import { statusState } from "./routines/CalendarEventCard";
+export { CalendarGrid } from "./routines/CalendarGrid";
 
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
 const WEEKDAYS = [1, 2, 3, 4, 5];
 const INTERVAL_PRESETS = [5, 10, 15, 30, 60];
 const EVENT_DURATION_OPTIONS = Array.from({ length: 240 / CALENDAR_SLOT_MINUTES }, (_, index) => (index + 1) * CALENDAR_SLOT_MINUTES), RUN_LIMIT_OPTIONS = [...EVENT_DURATION_OPTIONS, 300, 360, 480, 720, ROUTINE_RUN_LIMIT_MAX_MINUTES];
-import { BOT_DRAG_TYPE, EVENT_DRAG_TYPE, LimitResetMarker, type ResetDrop } from "./routines/LimitResetMarkers";
 
 export type EventKind = "routine" | "call";
 export type RoutinesLayout = "day" | "week" | "list";
@@ -766,7 +756,7 @@ export function EventEditor({
               )}
     </>
   );
-  const defaultRunLimit = durationLabel(isRoomGoal ? ROUTINE_GOAL_RUN_LIMIT_MINUTES : ROUTINE_RUN_LIMIT_MINUTES), runLimitControls = kind === "routine" && (
+  const defaultRunLimit = durationLabel(isRoomGoal ? (state.routineRunLimits?.goalMinutes ?? ROUTINE_GOAL_RUN_LIMIT_MINUTES) : (state.routineRunLimits?.runMinutes ?? ROUTINE_RUN_LIMIT_MINUTES)), runLimitControls = kind === "routine" && (
                 <details className="rounded-xl border border-hairline/40 bg-inset/40 px-3 py-2.5">
                   <summary className="cursor-pointer select-none text-[12px] font-medium text-ink-secondary hover:text-ink">
                     {timeoutMinutes == null ? t("routines.runLimit.none", { duration: defaultRunLimit }) : t("routines.runLimit.some", { duration: durationLabel(timeoutMinutes) })}
@@ -1159,133 +1149,6 @@ export function QuickComposer({
   );
 }
 
-export function CalendarGrid({
-  anchor,
-  days,
-  items,
-  bots,
-  groups,
-  selectedId,
-  onOpen,
-  onCreate,
-  onMove,
-  onResize,
-  markers = [],
-  onDropOnReset,
-}: {
-  anchor: number;
-  days: number;
-  items: CalendarEventItem[];
-  markers?: ResetMarker[];
-  onDropOnReset?: (drop: ResetDrop, marker: ResetMarker) => void;
-  bots: Bot[];
-  groups: Group[];
-  selectedId?: string;
-  onOpen: (item: CalendarEventItem) => void;
-  onCreate: (seed: EventSeed) => void;
-  onMove: (item: { kind: EventKind; id: string; at: number }, nextAt: number) => void;
-  onResize: (item: CalendarEventItem, duration: number) => void;
-}) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const [selection, setSelection] = useState<{ day: number; start: number; end: number } | null>(null);
-  const [dragPreview, setDragPreview] = useState<{ day: number; at: number } | null>(null);
-  const today = startOfDay(Date.now());
-  const starts = Array.from({ length: days }, (_, index) => addDays(anchor, index));
-  const minDayWidth = days === 7 ? 64 : days === 3 ? 180 : 280;
-  const gridTemplateColumns = `64px repeat(${days}, minmax(${minDayWidth}px, 1fr))`;
-  const minWidth = 64 + days * minDayWidth;
-
-  useEffect(() => {
-    const viewport = scrollRef.current;
-    if (!viewport) return;
-    const now = new Date();
-    const hour = starts.includes(today) ? Math.max(0, now.getHours() - 2) : 7;
-    viewport.scrollTo({ top: hour * HOUR_HEIGHT });
-  }, [days]);
-
-  const beginSelection = (event: ReactPointerEvent<HTMLDivElement>, day: number) => {
-    if (event.button !== 0 || (event.target as HTMLElement).closest("[data-event-card]")) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const start = slotAt(day, event.clientY, rect.top, HOUR_HEIGHT);
-    let end = start + 30 * 60_000;
-    setSelection({ day, start, end });
-    const move = (pointer: PointerEvent) => {
-      const current = slotAt(day, pointer.clientY, rect.top, HOUR_HEIGHT);
-      end = Math.max(start + CALENDAR_SLOT_MINUTES * 60_000, current + CALENDAR_SLOT_MINUTES * 60_000);
-      setSelection({ day, start, end });
-    };
-    const up = (pointer: PointerEvent) => {
-      document.removeEventListener("pointermove", move);
-      document.removeEventListener("pointerup", up);
-      setSelection(null);
-      onCreate({ kind: "routine", at: start, durationMinutes: Math.max(CALENDAR_SLOT_MINUTES, Math.round((end - start) / 60_000)), botIds: [], anchor: { x: pointer.clientX, y: pointer.clientY } });
-    };
-    document.addEventListener("pointermove", move);
-    document.addEventListener("pointerup", up, { once: true });
-  };
-
-  const drop = (event: ReactDragEvent<HTMLDivElement>, day: number) => {
-    event.preventDefault();
-    setDragPreview(null);
-    const rect = event.currentTarget.getBoundingClientRect();
-    const at = slotAt(day, event.clientY, rect.top, HOUR_HEIGHT);
-    const botId = event.dataTransfer.getData(BOT_DRAG_TYPE);
-    if (botId) return onCreate({ kind: "routine", at, durationMinutes: 30, botIds: [botId], anchor: { x: event.clientX, y: event.clientY } });
-    const raw = event.dataTransfer.getData(EVENT_DRAG_TYPE);
-    if (!raw) return;
-    try {
-      const item = JSON.parse(raw) as { kind: EventKind; id: string; at: number };
-      onMove(item, at);
-    } catch {
-    }
-  };
-
-  const previewDrop = (event: ReactDragEvent<HTMLDivElement>, day: number) => {
-    if (!event.dataTransfer.types.includes(BOT_DRAG_TYPE) && !event.dataTransfer.types.includes(EVENT_DRAG_TYPE)) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = event.dataTransfer.types.includes(EVENT_DRAG_TYPE) ? "move" : "copy";
-    const rect = event.currentTarget.getBoundingClientRect();
-    const at = slotAt(day, event.clientY, rect.top, HOUR_HEIGHT);
-    setDragPreview((current) => current?.day === day && current.at === at ? current : { day, at });
-  };
-
-  return (
-    <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto border-l border-t border-hairline/40 bg-app">
-      <div className="sticky top-0 z-30 grid bg-app/95 backdrop-blur" style={{ gridTemplateColumns, minWidth }}>
-        <div className="border-b border-r border-hairline/40 px-2 py-3 text-center text-[9px] uppercase tracking-wider text-ink-secondary">{formatGmtOffset(-new Date(anchor).getTimezoneOffset())}</div>
-        {starts.map((start) => {
-          const date = new Date(start);
-          const isToday = start === today;
-          return <div key={start} role="columnheader" className={cn("border-b border-r border-hairline/40 px-2 py-2 text-center last:border-r-0", isToday && "bg-accent/[0.035]")}><div className={cn("text-[10px] font-medium uppercase tracking-[0.14em]", isToday ? "text-accent" : "text-ink-secondary")}>{dayName(date.getDay())}</div><div className={cn("mx-auto mt-1 flex size-8 items-center justify-center rounded-full text-[15px] font-medium", isToday ? "bg-accent text-accent-ink" : "text-ink")}>{date.getDate()}</div></div>;
-        })}
-      </div>
-      <div role="grid" aria-label={t("routines.calendar.label")} onDragEnd={() => setDragPreview(null)} className="relative grid" style={{ height: HOUR_HEIGHT * 24, gridTemplateColumns, minWidth }}>
-        <div className="relative border-r border-hairline/40">
-          {Array.from({ length: 24 }, (_, hour) => <div key={hour} className="absolute right-2 -translate-y-1/2 text-[10px] tabular-nums text-ink-tertiary" style={{ top: hour * HOUR_HEIGHT }}>{hour === 0 ? "" : new Date(2000, 0, 1, hour).toLocaleTimeString(intlLocale(), { hour: "numeric" })}</div>)}
-        </div>
-        {starts.map((start) => {
-          const now = new Date();
-          const nowTop = ((now.getHours() * 60 + now.getMinutes()) / 60) * HOUR_HEIGHT;
-          const dayItems = items.filter((item) => startOfDay(item.at) === start);
-          const collisionLayouts = packCalendarCollisions(dayItems);
-          const selected = selection?.day === start ? selection : null;
-          const preview = dragPreview?.day === start ? dragPreview : null;
-          return (
-            <div key={start} role="gridcell" aria-label={t("routines.calendar.day", { date: niceDate(start) })} onPointerDown={(event) => beginSelection(event, start)} onDragOver={(event) => previewDrop(event, start)} onDragLeave={(event) => { if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setDragPreview(null); }} onDrop={(event) => drop(event, start)} className={cn("relative border-r border-hairline/40 last:border-r-0", start === today && "bg-accent/[0.025]")}>
-              {Array.from({ length: 48 }, (_, half) => <div key={half} className={cn("pointer-events-none absolute inset-x-0 border-t", half % 2 === 0 ? "border-hairline/30" : "border-hairline/10")} style={{ top: (half / 2) * HOUR_HEIGHT }} />)}
-              {start === today && <div className="pointer-events-none absolute inset-x-0 z-20 flex items-center" style={{ top: nowTop }}><span className="-ml-1 size-2 rounded-full bg-danger" /><span className="h-px flex-1 bg-danger/80" /></div>}
-              {selected && <div className="pointer-events-none absolute inset-x-1 z-10 rounded-md border border-accent/70 bg-accent/20" style={{ top: ((new Date(selected.start).getHours() * 60 + new Date(selected.start).getMinutes()) / 60) * HOUR_HEIGHT, height: Math.max(16, ((selected.end - selected.start) / 3_600_000) * HOUR_HEIGHT) }} />}
-              {preview && <div className="pointer-events-none absolute inset-x-1 z-20 rounded-md border border-accent/80 bg-accent/25 shadow-sm" style={{ top: ((new Date(preview.at).getHours() * 60 + new Date(preview.at).getMinutes()) / 60) * HOUR_HEIGHT, height: HOUR_HEIGHT / 2 }}><div className="px-2 py-1 text-[10px] font-medium text-accent">{niceTime(preview.at)}</div></div>}
-              {markers.filter((marker) => startOfDay(marker.at) === start).map((marker) => <LimitResetMarker key={marker.engine} marker={marker} hourHeight={HOUR_HEIGHT} onDrop={onDropOnReset && ((drop) => onDropOnReset(drop, marker))} />)}
-              {dayItems.map((item) => <CalendarEventCard key={item.id} item={item} bots={bots} groups={groups} compact={days === 7} layout={collisionLayouts.get(item.id) ?? { column: 0, columns: 1 }} selected={item.id === selectedId} onOpen={() => onOpen(item)} onResize={(minutes) => onResize(item, minutes)} />)}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 export function EventDetails({
   item,
   bots,
@@ -1468,7 +1331,7 @@ export function EventDetails({
         )}
         {!isCall && !isRoomGoal && <DrawerField label={t("routines.results.label")}><div className="text-[13px] text-ink">{resultsTitle}</div></DrawerField>}
         {attachments.length > 0 && <DrawerField label={t("routines.drawer.attachments")}><AttachmentChips attachments={attachments} />{call && <div className="mt-1.5 text-[11px] leading-relaxed text-ink-secondary">{t(call.botIds.length > 1 ? "routines.drawer.callSharedHelp" : "routines.drawer.callKeptHelp")}</div>}</DrawerField>}
-        {advanced && !isCall && <DrawerField label={t("routines.drawer.runLimit")}><div className="text-[13px] text-ink">{safetyLimit == null ? t("routines.drawer.noTimeLimit", { duration: durationLabel(isRoomGoal ? ROUTINE_GOAL_RUN_LIMIT_MINUTES : ROUTINE_RUN_LIMIT_MINUTES) }) : t("routines.drawer.stopsAfter", { duration: durationLabel(safetyLimit) })}</div></DrawerField>}
+        {advanced && !isCall && <DrawerField label={t("routines.drawer.runLimit")}><div className="text-[13px] text-ink">{safetyLimit == null ? t("routines.drawer.noTimeLimit", { duration: durationLabel(isRoomGoal ? (state.routineRunLimits?.goalMinutes ?? ROUTINE_GOAL_RUN_LIMIT_MINUTES) : (state.routineRunLimits?.runMinutes ?? ROUTINE_RUN_LIMIT_MINUTES)) }) : t("routines.drawer.stopsAfter", { duration: durationLabel(safetyLimit) })}</div></DrawerField>}
         {!isCall && (
           <DrawerField label={t("routines.logs")} action={routine && <button type="button" onClick={() => { dispatch({ type: "showRoutines", section: "logs", routineId: routine.id, botId: routine.botId }); onClose(); }} className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-accent-text hover:bg-raised"><FileText size={11} />{t("routines.drawer.allRuns")}</button>}>
             {recentRuns.length === 0
@@ -1564,7 +1427,7 @@ export function PausedList({
   onEdit: (routine: Routine) => void;
   onOpenRoom: (id: string) => void;
 }) {
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   const dialogRef = useRef<HTMLDivElement>(null);
   useModalDialog(dialogRef, onClose);
   return (

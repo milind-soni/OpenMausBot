@@ -47,7 +47,7 @@ export class Navigations {
     // stopped past its time: that would stop the page's own scripts.
     const yieldMs = Math.max(1, Math.min(2_000, deadline - Date.now()));
     await this.#frames.inWorld(this.#frames.mainFrameId, (session, contextId) =>
-      session.send("Runtime.evaluate", { expression: AFTER_PAGE_TASKS, contextId, awaitPromise: true, returnByValue: true }, { timeoutMs: yieldMs })).catch(() => {});
+      session.send("Runtime.evaluate", { expression: AFTER_PAGE_TASKS, contextId, awaitPromise: true, returnByValue: true }, { timeoutMs: yieldMs, readOnly: true })).catch(() => {});
     if (this.#requested === mark.requested && this.#lifecycle.loaderId === mark.loaderId) return;
     const moved = () => this.#lifecycle.loaderId !== mark.loaderId || this.#withinDocument !== mark.withinDocument || this.#stopped !== mark.stopped;
     if (!moved()) {

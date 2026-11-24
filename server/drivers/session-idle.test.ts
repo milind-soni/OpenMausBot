@@ -2,8 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { forgetPresence, personAsks, sawThread, seenWithin } from "../thread-presence.ts";
 import {
-  armIdleClose, engineIdleMs, idleEnginesAllowed, keepWarm, PRESTART_IDLE_MS, PRESTART_MOST, prestartAllowed, sessionIdlePolicy, SMALL_BOX_BYTES, SMALL_BOX_IDLE_MS, stopIdleClose, sweepIdleEngines,
-  UNWATCHED_IDLE_MS, warmEngineKeys,
+  armedIdleCount, armIdleClose, engineIdleMs, idleEngineCap, idleEnginesAllowed, keepWarm, PRESTART_IDLE_MS, PRESTART_MOST, prestartAllowed, sessionIdlePolicy, SMALL_BOX_BYTES,
+  SMALL_BOX_IDLE_ENGINES, SMALL_BOX_IDLE_MS, stopIdleClose, sweepIdleEngines,
+  UNWATCHED_IDLE_MS, warmEngineKeys, type WarmEngine, EXPENSIVE_IDLE_MS, EXPENSIVE_UNWATCHED_IDLE_MS, roomBesideIdle,
 } from "./session-idle.ts";
 
 const GB = 1024 ** 3;
@@ -136,11 +137,11 @@ describe("idle engines on a small box", () => {
     expect(warmEngineKeys()).toEqual(["c"]);
   });
 
-  it("keeps every idle engine on a large box, and forgets one once it closes or works again", () => {
+  it("keeps every idle engine on a large box up to the cap, and forgets one once it closes or works again", () => {
     const [a, b] = [engine(), engine()];
-    keepWarm("a", a.warm, { bytes: DESKTOP }, () => 0, () => Infinity);
-    keepWarm("b", b.warm, { bytes: DESKTOP }, () => 0, () => Infinity);
-    expect([a.state.closed, b.state.closed, warmEngineKeys()]).toEqual([0, 0, []]);
+    keepWarm("a", a.warm, { bytes: DESKTOP }, () => 0, () => Infinity, () => 8);
+    keepWarm("b", b.warm, { bytes: DESKTOP }, () => 0, () => Infinity, () => 8);
+    expect([a.state.closed, b.state.closed, warmEngineKeys()]).toEqual([0, 0, ["a", "b"]]);
     keepWarm("a", a.warm, small, () => 0.6 * GB);
     stopIdleClose("a", null);
     keepWarm("b", b.warm, small, () => 0.1 * GB);
@@ -160,6 +161,139 @@ describe("idle engines on a small box", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("never closes an engine a turn took again or one still held when its idle timer runs out", () => {
+    vi.useFakeTimers();
+    const before = armedIdleCount();
+    try {
+      const working = engine();
+      const held = engine();
+      const warmHeld: WarmEngine = { ...held.warm, held: () => true };
+      const quiet = engine();
+      const timers = [
+        armIdleClose("working", 150_000, working.warm),
+        armIdleClose("held", 150_000, warmHeld),
+        armIdleClose("quiet", 150_000, quiet.warm),
+      ];
+      working.state.busy = true;
+      vi.advanceTimersByTime(150_000);
+      expect([working.state.closed, held.state.closed, quiet.state.closed]).toEqual([0, 0, 1]);
+      expect(armedIdleCount()).toBe(before);
+      working.state.busy = false;
+      const again = armIdleClose("working", 150_000, working.warm);
+      vi.advanceTimersByTime(150_000);
+      expect(working.state.closed).toBe(1);
+      stopIdleClose("working", again);
+      stopIdleClose("held", timers[1]);
+      stopIdleClose("quiet", timers[2]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves a later arm's entry and engine alone when an old timer still fires", () => {
+    vi.useFakeTimers();
+    const before = armedIdleCount();
+    try {
+      const old = engine();
+      const fresh = engine();
+      armIdleClose("g", 150_000, old.warm);
+      const freshTimer = armIdleClose("g", 300_000, fresh.warm);
+      vi.advanceTimersByTime(150_000);
+      expect(old.state.closed).toBe(0);
+      expect(armedIdleCount()).toBe(before + 1);
+      vi.advanceTimersByTime(150_000);
+      expect(fresh.state.closed).toBe(1);
+      stopIdleClose("g", freshTimer);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("the cap on idle engines", () => {
+  const engine = (threadId: string, busy = false) => {
+    const state = { busy, closed: 0 };
+    return { state, warm: { threadId, idle: () => !state.busy, close: () => { state.closed += 1; } } as WarmEngine };
+  };
+  const capped = (most: number) => (key: string, warm: WarmEngine) => keepWarm(key, warm, { bytes: DESKTOP }, () => 8 * GB, () => Infinity, () => most);
+  afterEach(() => {
+    for (const key of warmEngineKeys()) stopIdleClose(key, null);
+    forgetPresence();
+  });
+
+  it("is one idle engine per 2 GB between four and eight, two on a small box, or OMB_IDLE_ENGINES_MAX", () => {
+    expect(idleEngineCap({}, 4 * GB)).toBe(4);
+    expect(idleEngineCap({}, 8 * GB)).toBe(4);
+    expect(idleEngineCap({}, 12 * GB)).toBe(6);
+    expect(idleEngineCap({}, DESKTOP)).toBe(8);
+    expect(idleEngineCap({}, 64 * GB)).toBe(8);
+    expect(idleEngineCap({}, SMALL_BOX_BYTES)).toBe(SMALL_BOX_IDLE_ENGINES);
+    expect(idleEngineCap({ OMB_IDLE_ENGINES_MAX: "12" }, DESKTOP)).toBe(12);
+    expect(idleEngineCap({ OMB_IDLE_ENGINES_MAX: "1" }, GB)).toBe(1);
+    for (const unusable of ["0", "-2", "2.5", "many", ""]) expect(idleEngineCap({ OMB_IDLE_ENGINES_MAX: unusable }, DESKTOP)).toBe(8);
+  });
+
+  it("closes the least recently used idle engines past the cap, on a box with room to spare", () => {
+    const engines = ["a", "b", "c", "d", "e", "f"].map((id) => [id, engine(id)] as const);
+    for (const [id, { warm }] of engines) capped(3)(id, warm);
+    expect(engines.map(([, { state }]) => state.closed)).toEqual([1, 1, 1, 0, 0, 0]);
+    expect(warmEngineKeys()).toEqual(["d", "e", "f"]);
+  });
+
+  it("never closes or counts an engine with a turn running", () => {
+    const [busy, b, c, d] = [engine("busy"), engine("b"), engine("c"), engine("d")];
+    capped(2)("busy", busy.warm);
+    busy.state.busy = true;
+    capped(2)("b", b.warm);
+    capped(2)("c", c.warm);
+    expect([busy.state.closed, b.state.closed, c.state.closed]).toEqual([0, 0, 0]);
+    capped(2)("d", d.warm);
+    expect([busy.state.closed, b.state.closed, c.state.closed, d.state.closed]).toEqual([0, 1, 0, 0]);
+  });
+
+  it("counts an engine as used again when it goes idle after a turn or a person opens its conversation", () => {
+    const [a, b, c, d, e] = [engine("a"), engine("b"), engine("c"), engine("d"), engine("e")];
+    for (const id of ["a", "b", "c", "d", "e"]) sawThread(id);
+    capped(3)("a", a.warm);
+    capped(3)("b", b.warm);
+    capped(3)("c", c.warm);
+    sawThread("a");
+    capped(3)("d", d.warm);
+    expect([a.state.closed, b.state.closed]).toEqual([0, 1]);
+    capped(3)("c", c.warm);
+    capped(3)("e", e.warm);
+    expect([a.state.closed, c.state.closed, d.state.closed]).toEqual([1, 0, 0]);
+    expect(warmEngineKeys()).toEqual(["d", "c", "e"]);
+  });
+
+  it("closes an engine no person has had in front of them before one they have", () => {
+    const [mine, routine, next] = [engine("mine"), engine("routine"), engine("next")];
+    sawThread("mine");
+    capped(2)("mine", mine.warm);
+    capped(2)("routine", routine.warm);
+    capped(2)("next", next.warm);
+    expect([mine.state.closed, routine.state.closed, next.state.closed]).toEqual([0, 1, 0]);
+  });
+
+  it("never closes the engine that is going idle, even one no person has in front of them", () => {
+    const [mine, theirs, routine] = [engine("mine"), engine("theirs"), engine("routine")];
+    sawThread("mine");
+    sawThread("theirs");
+    capped(2)("mine", mine.warm);
+    capped(2)("theirs", theirs.warm);
+    capped(2)("routine", routine.warm);
+    expect([mine.state.closed, theirs.state.closed, routine.state.closed]).toEqual([1, 0, 0]);
+    expect(warmEngineKeys()).toEqual(["theirs", "routine"]);
+  });
+
+  it("keeps an engine started ahead of a first message as the most recent, and never closes a held one", () => {
+    const [used, held, spare] = [engine("used"), engine("held"), engine("spare")];
+    capped(1)("held", { ...held.warm, held: () => true });
+    capped(1)("used", used.warm);
+    capped(1)("spare", { ...spare.warm, spare: () => true });
+    expect([used.state.closed, held.state.closed, spare.state.closed]).toEqual([1, 0, 0]);
   });
 });
 
@@ -209,5 +343,59 @@ describe("engines started before a first message", () => {
       vi.useRealTimers();
       forgetPresence();
     }
+  });
+});
+
+describe("an engine whose cold start is expensive", () => {
+  const now = 1_800_000_000_000;
+  const cloud = (factor: number) => ({ enabled: true, headroom: () => factor, roomFactor: () => factor });
+  const small = 4 * GB, large = 16 * GB;
+  afterEach(forgetPresence);
+
+  it("is kept longer only by drivers that say so, never when an idle time is configured or on a box of 1.5 GB or less", () => {
+    expect(sessionIdlePolicy("ACP", {}, small, "expensive")).toEqual({ idleMs: 10 * 60_000, minimumMs: 10_000, expensiveIdleMs: EXPENSIVE_IDLE_MS });
+    expect(sessionIdlePolicy("ACP", {}, small)).toEqual({ idleMs: 10 * 60_000, minimumMs: 10_000 });
+    expect(sessionIdlePolicy("ACP", { OMB_ACP_SESSION_IDLE_MS: "120000" }, small, "expensive").expensiveIdleMs).toBeUndefined();
+    expect(sessionIdlePolicy("ACP", { OMB_SESSION_IDLE_MS: "120000" }, small, "expensive").expensiveIdleMs).toBeUndefined();
+    expect(sessionIdlePolicy("ACP", {}, 1.5 * GB, "expensive").expensiveIdleMs).toBeUndefined();
+  });
+
+  it("needs room for one more of the largest engines above the floor beside it", () => {
+    // headroom = (free - floor) / (total / 2): 1.5 GB above the floor is 0.75 on a 4 GB Cloud, 0.1875 on a 16 GB one.
+    expect(roomBesideIdle(0.75, small)).toBe(true);
+    expect(roomBesideIdle(0.7, small)).toBe(false);
+    expect(roomBesideIdle(0.19, large)).toBe(true);
+    expect(roomBesideIdle(0.18, large)).toBe(false);
+    // A 2 GB box never has that much headroom; a 3 GB one only with nearly all of it (1,500 MiB of 1,536).
+    expect(roomBesideIdle(1, 2 * GB)).toBe(false);
+    expect(roomBesideIdle(0.97, 3 * GB)).toBe(false);
+    expect(roomBesideIdle(1, 1.5 * GB)).toBe(false);
+  });
+
+  it("keeps a watched conversation's idle process 30 minutes and an unwatched one 3 while the room allows, else the usual rule", () => {
+    const policy = sessionIdlePolicy("ACP", {}, small, "expensive");
+    sawThread("open", now - 60_000);
+    expect(engineIdleMs("open", policy, cloud(1), now, small)).toBe(EXPENSIVE_IDLE_MS);
+    expect(engineIdleMs("open", policy, cloud(0.8), now, small)).toBe(EXPENSIVE_IDLE_MS);
+    expect(engineIdleMs("open", policy, cloud(0.5), now, small)).toBe(5 * 60_000);
+    expect(engineIdleMs("open", policy, cloud(0.1), now, small)).toBe(60_000);
+    expect(engineIdleMs("routine", policy, cloud(1), now, small)).toBe(EXPENSIVE_UNWATCHED_IDLE_MS);
+    expect(engineIdleMs("routine", policy, cloud(0.5), now, small)).toBe(UNWATCHED_IDLE_MS);
+    expect(engineIdleMs("routine", policy, cloud(1), now, 2 * GB)).toBe(UNWATCHED_IDLE_MS);
+    // The desktop, with no memory to read, keeps the configured time: nothing could shorten a longer one later.
+    expect(engineIdleMs("open", policy, { enabled: false, headroom: () => 1 }, now, large)).toBe(10 * 60_000);
+  });
+
+  it("is closed by the sweep once the room shrinks below that", () => {
+    const policy = sessionIdlePolicy("ACP", {}, small, "expensive");
+    sawThread("open-sweep", now);
+    let closed = 0;
+    const engine: WarmEngine = { idle: () => true, close: () => { closed += 1; }, threadId: "open-sweep", policy };
+    armIdleClose("expensive-sweep", EXPENSIVE_IDLE_MS, engine, now);
+    const room = (factor: number) => ({ enabled: true, headroom: () => factor, roomFactor: () => factor, shortOfRoom: () => false });
+    expect(sweepIdleEngines(room(0.8), now + 20 * 60_000, small)).toBe(0);
+    expect(closed).toBe(0);
+    expect(sweepIdleEngines(room(0.5), now + 20 * 60_000, small)).toBe(1);
+    expect(closed).toBe(1);
   });
 });

@@ -8,11 +8,12 @@ import type { ConnectorScopes } from "../../shared/connector-scopes.ts";
 import type { WireBot } from "../../shared/wire.ts";
 import { VPS_BOT_ALIAS_CHANGE_ERROR, VPS_BOT_ALIAS_LIFECYCLE_ERROR, VPS_BOT_ALIAS_RESOURCES_ERROR } from "../cloud-backend.ts";
 import { DATA_DIR, type AppConfig } from "../config.ts";
-import type { ModelSelection } from "../contracts.ts";
+import type { ModelSelection, ProviderInstance } from "../contracts.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { Store, type BotRecord } from "../store.ts";
 import * as vps from "../vps-computer.ts";
 import type { ManagedVpsInventory } from "../vps-computer.ts";
+import { stillHeldUnread } from "../host/room-reads.ts";
 import { createBotPatchRoutes, type BotPatchRouteDeps } from "./bot-patch.ts";
 import { PASS, type RouteContext } from "./table.ts";
 
@@ -85,6 +86,24 @@ function fixture(extra: Partial<BotPatchRouteDeps> = {}) {
   };
   return { store, bot, activeVpsThreads, privateThreads, patch };
 }
+
+describe("PATCH /api/bots/:id memory model", () => {
+  it("saves a model from the bot's OpenRouter connection and restores Automatic on null", async () => {
+    const memoryModel = { instanceId: "router", model: "vendor/memory" };
+    const provider = { openRouter: true, enabled: true, models: { options: [{ id: memoryModel.model }] } } as ProviderInstance;
+    const { store, bot, patch } = fixture({ registry: { get: () => provider } });
+    const chatModel = { instanceId: "router", model: "vendor/chat" };
+    store.patchBot(bot.id, { modelSelection: chatModel });
+
+    expect((await patch(bot.id, { memoryModel: { ...memoryModel, instanceId: "other" } })).status).toBe(400);
+    expect((await patch(bot.id, { memoryModel: { ...memoryModel, model: "vendor/unknown" } })).status).toBe(400);
+    expect((await patch(bot.id, { memoryModel }, { headers: { "x-openmausbot-companion": "1" } })).status).toBe(403);
+    expect(await patch(bot.id, { memoryModel })).toMatchObject({ status: 200, body: { bot: { modelSelection: chatModel, memoryModel } } });
+    expect(new Store(() => sonnet).bot(bot.id)?.memoryModel).toEqual(memoryModel);
+    expect((await patch(bot.id, { memoryModel: null })).status).toBe(200);
+    expect(new Store(() => sonnet).bot(bot.id)?.memoryModel).toBeUndefined();
+  });
+});
 
 describe("PATCH /api/bots/:id vpsAlias relocation guard", () => {
   it("skips the guard when pinning a bot to the host it already uses", async () => {
@@ -248,6 +267,16 @@ describe("PATCH /api/bots/:id vpsAlias relocation guard", () => {
   });
 });
 
+describe("PATCH /api/bots/:id defaultBot: null", () => {
+  it("demotes a hidden MausBot to a regular bot that shows in the sidebar again", async () => {
+    const { store, bot, patch } = fixture();
+    store.patchBot(bot.id, { defaultBot: {}, sidebarHidden: true });
+    expect((await patch(bot.id, { defaultBot: null })).status).toBe(200);
+    expect(store.bot(bot.id)?.defaultBot).toBeUndefined();
+    expect(store.bot(bot.id)?.sidebarHidden).toBeUndefined();
+  });
+});
+
 describe("PATCH /api/bots/:id toolsOff", () => {
   it("stores known groups once each in one order, clears them with null or an empty list, and refuses anything else", async () => {
     const { store, bot, patch } = fixture();
@@ -267,6 +296,14 @@ describe("PATCH /api/bots/:id toolsOff", () => {
 });
 
 describe("PATCH /api/bots/:id liveVoice", () => {
+  it.each(["nuri", "juni", "flitz", "brise", "sillage", "nira", "harema", "shida", "noeul"])("saves %s as the bot's Live call voice", async (liveVoice) => {
+    const { store, bot, patch } = fixture();
+    const response = await patch(bot.id, { liveVoice });
+    expect(response.status).toBe(200);
+    expect(response.body.bot.liveVoice).toBe(liveVoice);
+    expect(store.bot(bot.id)?.liveVoice).toBe(liveVoice);
+  });
+
   it("gives one bot its own Live call voice, leaves the others on the app's, clears it, and refuses a voice that is not a Live one", async () => {
     const { store, bot, patch } = fixture();
     const other = store.createBot({ name: "Echo" });
@@ -518,5 +555,32 @@ describe("PATCH /api/bots/:id mainThreadChoice", () => {
     expect(client.status).toBe(403);
     expect(paired.status).toBe(403);
     expect(store.bot(bot.id)?.mainThreadChoice).toBeUndefined();
+  });
+});
+
+describe("PATCH /api/bots/:id unread", () => {
+  it("holds a mark made right after a reply was inserted mid-history, until a reply written later comes", async () => {
+    const { store, bot, patch } = fixture();
+    const first = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "First answer." });
+    store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "Thanks.", at: 1 });
+    store.insertMessageAfter(bot.threadId, first.id, { role: "bot", kind: "text", text: "A late note under the first answer." });
+    expect((await patch(bot.id, { unread: true })).status).toBe(200);
+    const held = () => stillHeldUnread(store.activePath(bot.threadId), store.taskByThread(bot.id, bot.threadId)?.heldUnread, store.messagesFor(bot.threadId));
+    expect(held(), "the inserted reply was there when the person marked").toBe(true);
+    store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "A new answer.", at: 0 });
+    expect(store.taskByThread(bot.id, bot.threadId)?.heldUnread, "a reply written after it ends it, whatever its clock").toBeUndefined();
+  });
+
+  it("marks the open main conversation, not a routine run on screen", async () => {
+    const { store, bot, patch } = fixture();
+    const openThreadId = bot.threadId;
+    const routine = store.createTask(bot.id, "Daily check", true)!;
+    store.patchTask(bot.id, routine.threadId, { routineRunId: "run-1", unread: false });
+    expect(store.bot(bot.id)!.threadId).toBe(routine.threadId);
+    expect((await patch(bot.id, { unread: true })).status).toBe(200);
+    expect(store.taskByThread(bot.id, routine.threadId)?.unread).toBe(false);
+    expect(store.taskByThread(bot.id, openThreadId)?.unread).toBe(true);
+    expect(store.taskByThread(bot.id, openThreadId)?.heldUnread).toBeDefined();
+    expect(store.bot(bot.id)?.unread).toBe(true);
   });
 });

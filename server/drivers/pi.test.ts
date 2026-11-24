@@ -1,17 +1,18 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ensureDirs, NATIVE_DIR } from "../config.ts";
+import { DATA_DIR, ensureDirs, NATIVE_DIR } from "../config.ts";
 import type { ProviderInstance, RuntimeEvent } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { publishedMessages, replyProblems } from "../harness/text-items.testkit.ts";
 import { caseTokens, LIVE_REPLY_CASES, liveReplyScripts } from "../testing/live-reply-cases.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { encodeInjectId, localHost } from "./local-inject.ts";
+import { piSessionDir } from "./pi-session.ts";
 import { buildMcpServers } from "./pi-mcp-servers.ts";
 import {
   applyPiLocalCatalog,
@@ -22,6 +23,7 @@ import {
   PiDriver,
   PiRpcChunks,
   piLineReader,
+  piThinkingLevel,
   preferPiInjectRows,
   splitPiModel,
   updatePiModelCatalog,
@@ -67,6 +69,16 @@ describe("parsePiCatalog", () => {
     expect(
       parsePiCatalog('{"type":"response","command":"get_available_models","success":true,"data":{"models":[]}}\n'),
     ).toEqual({ default: "", options: [] });
+  });
+
+  it("keeps a listed model's context window and drops a non-positive one", () => {
+    const line =
+      '{"type":"response","command":"get_available_models","success":true,"data":{"models":[' +
+      '{"provider":"ollama-cloud","id":"glm-5.2","name":"glm-5.2","contextWindow":131072},' +
+      '{"provider":"openai","id":"gpt-4o","name":"GPT-4o","contextWindow":0}]}}\n';
+    const catalog = parsePiCatalog(line);
+    expect(catalog.options[0]).toMatchObject({ id: "ollama-cloud/glm-5.2", contextWindow: 131072 });
+    expect(catalog.options[1]).not.toHaveProperty("contextWindow");
   });
 
   it("ignores non-response lines (pi emits TUI bookkeeping on stdout too)", () => {
@@ -329,6 +341,30 @@ describe("PiDriver catalog (fake CLI)", () => {
     }
   });
 
+  it("probes the model list with a Pi login the person makes after the instance started", async () => {
+    const home = mkdtempSync(join(tmpdir(), "omb-pi-later-login-"));
+    const dump = join(home, "launches.jsonl");
+    const instance = await PiDriver.create({
+      instanceId: "pi-later-login",
+      displayName: undefined,
+      environment: { HOME: home, FAKE_PI_DUMP: dump },
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    try {
+      mkdirSync(join(home, ".pi", "agent"), { recursive: true });
+      writeFileSync(join(home, ".pi", "agent", "auth.json"), '{"openai":{"type":"api_key","key":"sk-later"}}');
+      writeFileSync(dump, "");
+      await instance.refreshModels?.();
+      const rows = readFileSync(dump, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { agentDir?: string | null });
+      const own = rows.at(-1)!.agentDir!;
+      expect(own.startsWith(join(DATA_DIR, "providers", "pi-own"))).toBe(true);
+      expect(statSync(join(own, "auth.json"), { bigint: true }).ino).toBe(statSync(join(home, ".pi", "agent", "auth.json"), { bigint: true }).ino);
+    } finally {
+      await instance.dispose();
+    }
+  });
+
   it("reports update failure without preventing a cached catalog probe", async () => {
     expect(await updatePiModelCatalog(FAKE_CLI, {
       PATH: process.env.PATH ?? "",
@@ -404,7 +440,7 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(recorder.events.every((e) => e.turnId === turnId && e.provider === "piAgent")).toBe(true);
 
     const session = recorder.events.find((e) => e.type === "session.started")!;
-    expect((session as { sessionId: string }).sessionId).toMatch(/\/fake\/pi-session-\d+\.json/);
+    expect((session as { sessionId: string }).sessionId).toMatch(/pi-session-\d+-\d+\.json$/);
 
     const text = recorder.events.find(
       (e) => e.type === "item.completed" && (e as { itemType: string }).itemType === "assistant_text",
@@ -465,7 +501,7 @@ describe("PiDriver turns (fake CLI)", () => {
     const firstSession = recorder.events.find((e) => e.type === "session.started" && e.turnId === first.turnId) as
       | { sessionId: string }
       | undefined;
-    expect(firstSession?.sessionId).toMatch(/\/fake\/pi-session-\d+\.json/);
+    expect(firstSession?.sessionId).toMatch(/pi-session-\d+-\d+\.json$/);
 
     const second = await instance.adapter.sendTurn({
       threadId: "t-resume",
@@ -477,6 +513,59 @@ describe("PiDriver turns (fake CLI)", () => {
       | { sessionId: string }
       | undefined;
     expect(secondSession?.sessionId).toBe(firstSession?.sessionId);
+  });
+
+  it("starts conversation turns without --no-session and keeps catalog probes ephemeral", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-session-dir-"));
+    const dump = join(dir, "dump.jsonl");
+    await create(undefined, { FAKE_PI_DUMP: dump });
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-pi-session-dir", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    const rows = readFileSync(dump, "utf8")
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { argv?: string[] });
+    const probes = rows.filter((row) => row.argv && !row.argv.includes("-e"));
+    const turns = rows.filter((row) => row.argv?.includes("-e"));
+    expect(probes.some((row) => row.argv!.join(" ") === "--mode rpc --no-session")).toBe(true);
+    expect(turns.length).toBeGreaterThan(0);
+    for (const row of turns) {
+      expect(row.argv).toEqual(["--mode", "rpc", "--session-dir", piSessionDir({ threadId: "t-pi-session-dir" }, "pi-test"), "-e", expect.any(String)]);
+      expect(row.argv).not.toContain("--no-session");
+    }
+    expect(piSessionDir({ threadId: "t-pi-session-dir" }, "pi-test")).toContain(join(DATA_DIR, "pi-sessions", "local"));
+  });
+
+  it("reads sessionFile from get_state when new_session omits it, then resumes with switch_session", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-session-state-"));
+    const dump = join(dir, "dump.jsonl");
+    await create(undefined, { FAKE_PI_DUMP: dump, FAKE_PI_SESSION_FILE_IN_STATE_ONLY: "1" });
+    const first = await instance.adapter.sendTurn({ threadId: "t-pi-state-session", text: "first" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+    const firstSession = recorder.events.find((e) => e.type === "session.started" && e.turnId === first.turnId) as
+      | { sessionId: string }
+      | undefined;
+    expect(firstSession?.sessionId).toMatch(/pi-session-\d+-\d+\.json$/);
+
+    const second = await instance.adapter.sendTurn({
+      threadId: "t-pi-state-session",
+      text: "second",
+      resumeCursor: firstSession!.sessionId,
+    });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    const secondSession = recorder.events.find((e) => e.type === "session.started" && e.turnId === second.turnId) as
+      | { sessionId: string }
+      | undefined;
+    expect(secondSession?.sessionId).toBe(firstSession?.sessionId);
+
+    const rpc = readFileSync(dump, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { rpc?: string; sessionPath?: string })
+      .filter((row) => row.rpc);
+    expect(rpc.map((row) => row.rpc)).toEqual(["new_session", "switch_session"]);
+    expect(rpc[1]?.sessionPath).toBe(firstSession?.sessionId);
   });
 
   it("delivers the full prompt once per session and rides volatile changes as notes", async () => {
@@ -662,6 +751,8 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(recorder.events.find((e) => e.type === "runtime.error")).toMatchObject({
       message: "pi prompt failed",
     });
+    const rejectedSession = recorder.events.find((event) => event.type === "session.started" && event.turnId === turnId);
+    if (rejectedSession?.type !== "session.started") throw new Error("missing rejected session");
     recorder.stop();
     await instance.dispose();
     await create(undefined, { FAKE_PI_DUMP: dump });
@@ -671,7 +762,7 @@ describe("PiDriver turns (fake CLI)", () => {
       system: "Standing rules.\n\nMemory: likes quiet hours.",
       systemStable: "Standing rules.",
       systemVolatile: "Memory: likes quiet hours.",
-      resumeCursor: "/fake/pi-session-1.json",
+      resumeCursor: rejectedSession.sessionId,
     });
     await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
     const row = readFileSync(dump, "utf8").split("\n").filter(Boolean)
@@ -758,6 +849,7 @@ describe("PiDriver turns (fake CLI)", () => {
     await create();
     expect(instance.adapter.capabilities.images).toBe(true);
     expect(instance.adapter.capabilities.effortLevels).toEqual(["none", "low", "medium", "high", "xhigh", "max"]);
+    expect(piThinkingLevel("ultra")).toBe("max");
   });
 
   it("pins reasoning effort via set_thinking_level after the model", async () => {
@@ -877,6 +969,19 @@ describe("PiDriver turns (fake CLI)", () => {
 
     const servers = mcpRow!.mcpConfig!.mcpServers!;
     expect(servers.composio).toMatchObject({ command: "node", args: ["connector-proxy.js"], env: { COMPOSIO_KEY: "ck" } });
+  });
+
+  it("reports each assistant call's prompt size, not the run's summed usage", async () => {
+    await create("priced", { FAKE_PI_CONTEXT_WINDOW: "200000" });
+    await instance.adapter.sendTurn({ threadId: "t-context", text: "run it", model: "ollama-cloud/glm-5.2" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const updates = recorder.events.filter((event) => event.type === "thread.token-usage.updated");
+    expect(updates).toEqual([
+      expect.objectContaining({ input: 105, output: 1, cachedInput: 100, contextTokens: 125, contextWindow: 200_000 }),
+      expect.objectContaining({ input: 132, output: 2, cachedInput: 120, contextTokens: 132, contextWindow: 200_000 }),
+    ]);
+    expect(recorder.events.at(-1)).toMatchObject({ usage: { input: 257, output: 3, cachedInput: 220 } });
   });
 
   it("reports pi's priced cost and cached tokens summed over the whole run", async () => {
@@ -1150,9 +1255,22 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(done).toMatchObject({ ok: true, stopReason: "cancelled" });
   });
 
-  it("writes models.json and set_model for a host::model inject pick", async () => {
+  it("writes models.json and set_model for a host::model inject pick, in MausBot's own Pi folder", async () => {
     const home = mkdtempSync(join(tmpdir(), "omb-pi-turn-inject-"));
     const dump = join(home, "dump.jsonl");
+    // The person's own Pi setup: what a bot's turn must not load, and the login and providers it needs.
+    const person = join(home, ".pi", "agent");
+    mkdirSync(join(person, "extensions"), { recursive: true });
+    mkdirSync(join(person, "skills", "mine"), { recursive: true });
+    writeFileSync(join(person, "AGENTS.md"), "My own instructions\n");
+    writeFileSync(join(person, "SYSTEM.md"), "My own system prompt\n");
+    writeFileSync(join(person, "mcp.json"), '{"mcpServers":{"mine":{"command":"mine"}}}');
+    writeFileSync(join(person, "extensions", "edit.ts"), "export default () => {};\n");
+    writeFileSync(join(person, "skills", "mine", "SKILL.md"), "---\nname: mine\n---\n");
+    writeFileSync(join(person, "settings.json"), JSON.stringify({ defaultProvider: "openai", defaultModel: "gpt-4o", packages: ["npm:mine"], extensions: ["./x.ts"], skills: ["./s"] }));
+    writeFileSync(join(person, "auth.json"), '{"openai":{"type":"api_key","key":"sk-person"}}');
+    const personModels = '{"providers":{"mine":{"baseUrl":"http://127.0.0.1:9/v1","models":[{"id":"m"}]}}}';
+    writeFileSync(join(person, "models.json"), personModels);
     await create(undefined, { HOME: home, FAKE_PI_DUMP: dump });
     const { turnId } = await instance.adapter.sendTurn({
       threadId: "t-inject",
@@ -1168,11 +1286,21 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(dumps.some((row) => row.setModel?.provider === "omlx" && row.setModel?.modelId === "MiniMax-M3-4bit")).toBe(
       true,
     );
-    const written = JSON.parse(readFileSync(join(home, ".pi", "agent", "models.json"), "utf8")) as {
-      providers: { omlx: { baseUrl: string; models: Array<{ id: string }> } };
+    const agentDirs = new Set(dumps.map((row) => (row as { agentDir?: string | null }).agentDir).filter((dir) => dir !== undefined));
+    expect(agentDirs.size).toBe(1);
+    const own = [...agentDirs][0]!;
+    expect(own.startsWith(join(DATA_DIR, "providers", "pi-own"))).toBe(true);
+    expect(readdirSync(own).filter((name) => !name.startsWith(".")).sort()).toEqual(["auth.json", "models.json", "settings.json"]);
+    expect(statSync(join(own, "auth.json"), { bigint: true }).ino).toBe(statSync(join(person, "auth.json"), { bigint: true }).ino);
+    expect(JSON.parse(readFileSync(join(own, "settings.json"), "utf8"))).toEqual({ defaultProvider: "openai", defaultModel: "gpt-4o" });
+    const written = JSON.parse(readFileSync(join(own, "models.json"), "utf8")) as {
+      providers: { mine: unknown; omlx: { baseUrl: string; models: Array<{ id: string }> } };
     };
+    expect(written.providers.mine).toBeDefined();
     expect(written.providers.omlx.baseUrl).toBe("http://127.0.0.1:8080/v1");
     expect(written.providers.omlx.models.some((m) => m.id === "MiniMax-M3-4bit")).toBe(true);
+    // MausBot's local model stays out of the person's own file.
+    expect(readFileSync(join(person, "models.json"), "utf8")).toBe(personModels);
   });
 });
 

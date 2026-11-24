@@ -221,6 +221,17 @@ the server's address. Sign-in with a registered app always uses that port; if
 another program holds it, sign-in stops and says so. Changing the client ID
 or the scopes signs the server out; a new secret for the same app does not.
 
+When you sign in from a browser on another computer, a return to
+`127.0.0.1` lands on the wrong machine and only the paste-back step is left.
+If the provider lets the app register an https address instead, set
+**Redirect URI** in the app's entry in `config.json` to this server's public
+https address at `/mcp-oauth/callback` (for example
+`https://maus.example/mcp-oauth/callback`) — the same address the editor
+shows once it is set. The sign-in then returns straight to that page and
+says **Signed in**, with nothing to paste; a browser on this computer uses
+the same address. Only that exact address is accepted, over https, with no
+query, credentials or fragment.
+
 ### Example: give your bots web search
 
 A good first URL server is You.com's search server, because the free profile
@@ -260,8 +271,15 @@ already use** step (`server/setup-import.ts`). On the computer running
 OpenMausBot, and only for the desktop app's own window there, it reads the
 `mcpServers` of Claude Code (only the top-level key of `~/.claude.json`),
 Claude Desktop, Cursor (`~/.cursor/mcp.json`) and Gemini CLI
-(`~/.gemini/settings.json`), and the `[mcp_servers.*]` tables of Codex's
-`config.toml`. Each server goes through the import parser, switched off;
+(`~/.gemini/settings.json`), the `[mcp_servers.*]` tables of Codex's
+`config.toml`, the `mcp_servers:` of Hermes Agent's `config.yaml`
+(`$HERMES_HOME`, else `~/.hermes`, or `%LOCALAPPDATA%\hermes` on Windows) and
+the `mcp.servers` of OpenClaw's `openclaw.json` (`$OPENCLAW_CONFIG_PATH`, else
+`$OPENCLAW_STATE_DIR` or `~/.openclaw`; its JSON5 comments and trailing commas
+are accepted, and a config that still can't be read brings no tools).
+OpenClaw's `transport: "sse"` stays SSE; `streamable-http` comes in as HTTP.
+Neither tool's `.env`, `auth.json`, `mcp-tokens/`, `secrets.json`,
+`credentials/`, sessions, state databases or memory files are ever opened. Each server goes through the import parser, switched off;
 one already here by command or address is left alone, a different server
 under a name already taken is skipped and named in the result, a name
 OpenMausBot keeps for itself (`browser`, `computer`, `data`…) gets an `mcp-`
@@ -273,7 +291,9 @@ Claude bots already run them. Token variables (Codex `bearer_token_env_var`)
 are not resolved: add the token as a header when you test the server.
 
 The step also brings in the person's own skills (`~/.claude/skills`,
-`~/.codex/skills`). Each one is copied once, read-only except on Windows, into
+`~/.codex/skills`, Hermes Agent's `skills/` with its category folders, and
+OpenClaw's `skills/` and `workspace/skills/`). The skills Hermes ships itself,
+listed in its `skills/.bundled_manifest`, are left out. Each one is copied once, read-only except on Windows, into
 `<data>/imported-skills` (`server/imported-skills.ts`), and every bot uses
 that copy on every engine that works with files: the bot the tour sets up,
 and any bot made later with New bot, the API, a template, a Chief
@@ -438,19 +458,19 @@ the servers above, its integrations (computer, browser, agents, phone), and
 its own project's `<cwd>/.mcp.json`. By default it does **not** inherit this
 machine's Claude Code setup — the MCP servers and claude.ai connectors in your
 user or local Claude config, your skills and agents, your hooks, and your
-personal `~/.claude/CLAUDE.md`. Those were being mounted into every turn of
-every bot (one measured desktop added 407 tools, ~10k tokens per model call)
-and were reachable by the bot. Codex bots, by contrast, have always read the
-MCP servers in `~/.codex/config.toml`, which is why the two engines looked
-different.
+personal `~/.claude/CLAUDE.md` and `~/.claude/rules`. Those were being mounted
+into every turn of every bot (one measured desktop added 407 tools, ~10k tokens
+per model call) and were reachable by the bot. Codex bots, by contrast, have
+always read the MCP servers in `~/.codex/config.toml`, which is why the two
+engines looked different.
 
 If you want Claude bots to see your own Claude Code MCP servers too, switch on
 **Also use my Claude Code MCP servers** at the top of Plugins → MCP servers.
 With it on, every Claude bot also loads the servers and connectors from your
 Claude Code config on every message; skills, hooks and the personal
-`CLAUDE.md` still stay out. More tools means more tokens per message, so keep
-it off unless you need those servers — the recommended way to give a bot a
-server is still this page or the bot project's `.mcp.json`.
+`CLAUDE.md` and rules still stay out. More tools means more tokens per
+message, so keep it off unless you need those servers — the recommended way
+to give a bot a server is still this page or the bot project's `.mcp.json`.
 
 **Also use my Claude Code skills**, just below it, gives Claude bots the skills
 in your own `~/.claude/skills` and nothing else from your setup. OpenMausBot

@@ -42,6 +42,15 @@ posixOnly("mid-turn steering e2e", () => {
   const askedAt = (botId: string, threadId: string) => (readRegistry(join(home, ".openmausbot")).bots as any[])
     .find((bot) => bot.id === botId).tasks.find((task: any) => task.threadId === threadId).askedAt;
   const PAIRED = { name: "Safari on Mac", id: expect.stringMatching(/^p_[\w-]{22}$/) };
+  /** A codex turn's command started, so the turn is live with no card waiting. */
+  const codexCommandRunning = (threadId: string) => {
+    try {
+      return readFileSync(join(home, ".openmausbot", "native", `${threadId}.ndjson`), "utf8").trim().split("\n")
+        .some((line) => { const row = JSON.parse(line); return row.dir === "in" && row.msg?.method === "item/started"; });
+    } catch {
+      return false;
+    }
+  };
   const asPairedPerson = async () => {
     const opened = await api("POST", "/api/auth/pairing", {});
     expect(opened.status).toBe(200);
@@ -119,13 +128,11 @@ posixOnly("mid-turn steering e2e", () => {
           },
           // codex parks its turn on an unanswered question; turn/steer folds new input into that live turn without ending it.
           codex: { driver: "codex", environment: { FAKE_CODEX_MODE: "question", FAKE_CODEX_ASK_HOLD: "1" }, config: { cli: FAKE_CODEX } },
+          // A codex turn held mid-command, with no card: a question card waiting would take a typed line as its answer.
+          codexHold: { driver: "codex", environment: { FAKE_CODEX_COMMAND_GATE: join(home, "codex-hold.never") }, config: { cli: FAKE_CODEX } },
           codexRace: {
             driver: "codex",
-            environment: {
-              FAKE_CODEX_MODE: "question",
-              FAKE_CODEX_ASK_HOLD: "1",
-              FAKE_CODEX_STEER_ERROR_FILE: codexSteerGate,
-            },
+            environment: { FAKE_CODEX_COMMAND_GATE: join(home, "codex-hold.never"), FAKE_CODEX_STEER_ERROR_FILE: codexSteerGate },
             config: { cli: FAKE_CODEX },
           },
         },
@@ -458,7 +465,8 @@ posixOnly("mid-turn steering e2e", () => {
           type: "image",
           source: { type: "base64", media_type: "image/png", data: "[image data: 16 base64 chars]" },
         },
-        { type: "text", text: "look at this\n\n\n\nand this\n\n" },
+        // Each image keeps a file reference beside its pixels, so a file tool can use the upload.
+        { type: "text", text: `look at this\n\n<attached-file path="${firstImagePath}" name="first.png" />\n\nand this\n\n<attached-file path="${secondImagePath}" name="second.png" />` },
       ]);
     } finally {
       await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot: previousLimit } });
@@ -494,7 +502,7 @@ posixOnly("mid-turn steering e2e", () => {
     expect(steered.steered).toBe(true);
     const replies = bot.messages.filter((m: any) => m.role === "bot" && m.kind === "text" && m.text.startsWith("reply to:"));
     expect(replies).toHaveLength(1);
-    expect(withoutTurnClock(replies[0].text)).toBe("reply to: first + steered: [image] and look at this");
+    expect(withoutTurnClock(replies[0].text)).toBe(`reply to: first + steered: [image] and look at this\n\n<attached-file path="${imagePath}" name="shot.png" />`);
 
     const nativeRows = readFileSync(join(home, ".openmausbot", "native", `${created.threadId}.ndjson`), "utf8")
       .trim().split("\n").map((line) => JSON.parse(line));
@@ -504,7 +512,7 @@ posixOnly("mid-turn steering e2e", () => {
     expect(steerRow.uuid).toEqual(expect.any(String));
     expect(steerRow.message.content).toEqual([
       { type: "image", source: { type: "base64", media_type: "image/png", data: "[image data: 16 base64 chars]" } },
-      { type: "text", text: "and look at this\n\n" },
+      { type: "text", text: `and look at this\n\n<attached-file path="${imagePath}" name="shot.png" />` },
     ]);
   }, 40_000);
 
@@ -701,18 +709,15 @@ posixOnly("mid-turn steering e2e", () => {
   it("a codex message during a live turn is steered into it via turn/steer, and Stop never reports SIGTERM", async () => {
     const created = (await api("POST", "/api/bots")).body.bot;
     const instances = (await api("GET", "/api/instances")).body.instances;
-    const codexInstance = instances.find((i: any) => i.instanceId === "codex");
+    const codexInstance = instances.find((i: any) => i.instanceId === "codexHold");
     expect(codexInstance.capabilities.queueing).toBe(true);
     await api("PATCH", `/api/bots/${created.id}`, {
-      modelSelection: { instanceId: "codex", model: codexInstance.models.default },
+      modelSelection: { instanceId: "codexHold", model: codexInstance.models.default },
     });
 
     expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "first codex turn" })).status).toBe(202);
     await waitFor(async () => (await getBot(created.id)).busy === true, "the codex turn to start");
-    await waitFor(
-      async () => (await getBot(created.id)).messages.some((m: any) => m.card),
-      "the codex question card",
-    );
+    await waitFor(async () => codexCommandRunning(created.threadId), "the codex turn's held command");
 
     const second = await api("POST", `/api/bots/${created.id}/messages`, { text: "and also this" });
     expect(second.status).toBe(202);
@@ -744,10 +749,7 @@ posixOnly("mid-turn steering e2e", () => {
 
     expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "first gated turn" })).status).toBe(202);
     await waitFor(async () => (await getBot(created.id)).busy === true, "the gated turn to start");
-    await waitFor(
-      async () => (await getBot(created.id)).messages.some((m: any) => m.card),
-      "the gated question card",
-    );
+    await waitFor(async () => codexCommandRunning(created.threadId), "the gated turn's held command");
 
     // the gate file makes the live steer lose: the words queue instead
     const person = await asPairedPerson();
@@ -992,7 +994,7 @@ posixOnly("mid-turn steering e2e", () => {
     try {
       expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "start the room" })).status).toBe(202);
       await waitFor(async () => (await getGroup())?.busyBotId === created.id, "the room turn to start");
-      await waitFor(async () => (await getGroup())?.messages.some((m: any) => m.kind === "activity"), "the room tool chip");
+      await waitFor(async () => (await getGroup())?.messages.some((m: any) => m.kind === "activity" && m.tool?.name === "Bash"), "the room tool chip");
 
       const attachments = join(home, ".openmausbot", "attachments");
       mkdirSync(attachments, { recursive: true });
@@ -1029,7 +1031,7 @@ posixOnly("mid-turn steering e2e", () => {
     expect(steerRow.uuid).toEqual(expect.any(String));
     expect(steerRow.message.content).toEqual([
       { type: "image", source: { type: "base64", media_type: "image/png", data: "[image data: 20 base64 chars]" } },
-      { type: "text", text: "what about this one\n\n" },
+      { type: "text", text: `what about this one\n\n<attached-file path="${join(home, ".openmausbot", "attachments", "123e4567-e89b-42d3-a456-426614174007.png")}" name="room.png" />` },
     ]);
   }, 40_000);
 
@@ -1049,9 +1051,15 @@ posixOnly("mid-turn steering e2e", () => {
     const imagePath = join(attachments, "123e4567-e89b-42d3-a456-426614174008.png");
     writeFileSync(imagePath, "codex png");
     const imageText = `see this\n\n<attached-image path="${imagePath}" name="codex.png" />`;
-    const queued = await api("POST", `/api/bots/${created.id}/messages`, { text: imageText });
+    const sendId = "codex_image_steer_retry_123456";
+    const queued = await api("POST", `/api/bots/${created.id}/messages`, { text: imageText, followUp: "steer", sendId });
     expect(queued.status).toBe(202);
-    expect(queued.body).toMatchObject({ ok: true, queued: true });
+    expect(queued.body).toMatchObject({ ok: true, queued: true, blockedBy: "images" });
+    expect(queued.body.steered).toBeUndefined();
+    const retried = await api("POST", `/api/bots/${created.id}/messages`, { text: imageText, followUp: "steer", sendId });
+    expect(retried.status).toBe(202);
+    expect(retried.body).toMatchObject({ ok: true, queued: true, queueId: queued.body.queueId, blockedBy: "images" });
+    expect(retried.body.steered).toBeUndefined();
 
     const still = await api("POST", `/api/bots/${created.id}/queue/${queued.body.queueId}/steer`, {
       threadId: created.threadId,

@@ -11,6 +11,7 @@ import { findCliCandidates, harnessHome, resolveCliSpawn, splitCliString, whichW
 import { killCliTree, resolveCli, spawnCli } from "../../procs.ts";
 import { decodeInjectId, hostApiKey, INJECT_SEP, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { selectAdvertisedMode } from "./session-modes.ts";
 
 const EMPTY: ModelCatalog = { default: "", options: [] };
 
@@ -438,6 +439,7 @@ const support: AcpSupport = {
   spawnArgs: () => ["acp"],
   // Hermes keeps the first MCP server it registers under a name for the process's life, so a new bearer needs a fresh process.
   restartOnMcpChange: true,
+  sessionScopedApproval: true,
   resendsReasoningReply: true,
   steer: { command: "steer", answer: hermesSteerAnswer },
   transformEnv: (env) => {
@@ -448,7 +450,18 @@ const support: AcpSupport = {
   pickAuthMethod: () => null,
   authFailure: "continue",
   isAuthenticated: () => true,
-  async configureSession({ request, sessionId, turn }) {
+  async configureSession({ request, sessionId, config, turn, sessionModes, expectMode }) {
+    if (sessionModes) {
+      const modeId = selectAdvertisedMode(sessionModes.availableModes, turn.approvalMode, config.fullAuto);
+      if (!modeId) {
+        const level = turn.approvalMode ?? (config.fullAuto ? "full" : "ask");
+        throw new Error(`Hermes did not advertise an ACP mode for approval level "${level}"`);
+      }
+      expectMode?.(modeId);
+      if (sessionModes.currentModeId !== modeId) {
+        await applySetting(request, "session/set_mode", { sessionId, modeId }, `mode "${modeId}"`);
+      }
+    }
     // Decode only: ensure* here would read process.env and rewrite the user's real ~/.hermes/config.yaml.
     const native = hermesAcpModelId(turn.model);
     if (!native) return;

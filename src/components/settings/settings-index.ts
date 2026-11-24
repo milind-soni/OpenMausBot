@@ -1,5 +1,5 @@
 import {
-  Archive, ArrowLeftRight, Bot, Coins, CreditCard, LockKeyhole, Monitor, Palette, Server, SlidersHorizontal, Smartphone, Sparkles, Users,
+  Archive, ArrowLeftRight, Bot, Coins, CreditCard, HardDrive, LockKeyhole, Monitor, Network, Palette, Server, SlidersHorizontal, Smartphone, Sparkles, ToggleRight, Users,
   type LucideIcon,
 } from "lucide-react";
 import type { LocaleKey } from "@/locales";
@@ -32,6 +32,8 @@ export interface SettingsContext {
   installations: boolean;
   skills: boolean;
   advanced: boolean;
+  /** this place's server answers with a storage report (a Cloud home), read only by an owner or admin */
+  storage?: boolean;
 }
 
 export interface SettingsPage {
@@ -49,12 +51,15 @@ const notClient = (ctx: SettingsContext) => !ctx.client;
 const adminPage = (ctx: SettingsContext) => !ctx.client && !(ctx.team && !ctx.admin);
 /** A page Simple mode leaves out: its everyday rows show elsewhere in Simple (Overview, This app, Plan & billing). */
 const advancedOnly = (when: (ctx: SettingsContext) => boolean) => (ctx: SettingsContext) => ctx.advanced && when(ctx);
-/** Simple mode's ten entries: the place (Overview, Phone & devices, AI, Vault, Spending, Import & export), Your account
- * (Plan & billing) and This app (Appearance). Advanced adds You and your bots, Desktops & browser, Data and General. */
+/** Simple mode's twelve entries: the place (Overview, Devices, Phone & devices, AI, Vault, Spending, Import & export, Storage
+ * on a Cloud, and Features), Your account (Plan & billing) and This app (Appearance). Advanced adds You and your bots, Desktops & browser,
+ * Data and General. */
 export const ADVANCED_PAGES: readonly SettingsPageId[] = ["bots", "desktops", "data", "general"];
 
 export const SETTINGS_PAGES: readonly SettingsPage[] = [
   { id: "overview", owner: "place", labelKey: "settings.page.overview", synonyms: ["overview", "place", "status", "version", "domain", "address", "sidebar"], when: () => true },
+  { id: "devices", owner: "place", labelKey: "settings.page.devices", icon: Network, when: notClient,
+    synonyms: ["devices", "my devices", "all devices", "device map", "map", "computers", "laptops", "servers", "mac mini", "vps", "cloud", "private network", "tailnet", "add a device", "add device"] },
   { id: "phone", owner: "place", labelKey: "settings.section.phoneDevices", icon: Smartphone, when: notClient,
     synonyms: ["phone", "pair", "pairing", "qr", "code", "iphone", "android", "mobile", "tablet", "device", "devices", "wifi", "wi-fi", "anywhere", "relay", "remote", "companion", "tailscale", "connect your phone", "get the phone app", "pair a device", "this server", "remote access"] },
   { id: "ai", owner: "place", labelKey: "settings.group.ai", icon: Sparkles, when: adminPage,
@@ -69,6 +74,8 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     synonyms: ["spending", "usage", "cost", "costs", "tokens", "money", "runs", "export csv"] },
   { id: "transfer", owner: "place", labelKey: "settings.page.importExport", icon: ArrowLeftRight, when: adminPage,
     synonyms: ["import", "export", "backup", "backups", "restore", "grok", "grok bot", "move from", "bring"] },
+  { id: "storage", owner: "place", labelKey: "settings.page.storage", icon: HardDrive, when: (ctx) => ctx.storage === true && adminPage(ctx),
+    synonyms: ["storage", "disk", "disk space", "space", "full", "free space", "volume", "what uses space", "cache", "downloads"] },
   { id: "data", owner: "place", labelKey: "settings.page.data", icon: Archive, when: advancedOnly(adminPage),
     synonyms: ["data", "storage", "attachments", "activity", "audit"] },
   { id: "people", owner: "place", labelKey: "settings.section.people", icon: Users,
@@ -76,6 +83,8 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     synonyms: ["people", "members", "invite", "roles", "bot access", "sharing", "team"] },
   { id: "installations", owner: "place", labelKey: "settings.section.workspaces", icon: Server, when: (ctx) => !ctx.client && ctx.installations,
     synonyms: ["installations", "fleet", "clients", "tenants"] },
+  { id: "features", owner: "place", labelKey: "settings.page.features", icon: ToggleRight, when: adminPage,
+    synonyms: ["features", "turn off", "turn on", "hide", "skill burger", "skill burgers", "tabs", "thread tabs"] },
   { id: "account", owner: "account", labelKey: "settings.page.account", when: () => true,
     synonyms: ["account", "sign in", "log in", "log out", "sign out", "email", "organization", "mausbot cloud"] },
   { id: "plan", owner: "account", labelKey: "settings.page.plan", icon: CreditCard, when: (ctx) => !ctx.client && ctx.plan,
@@ -134,7 +143,8 @@ export function needsAdvanced(target: SettingsTarget, ctx: SettingsContext): boo
 }
 
 /** Where a request for Settings lands here: its page (or Overview when that page can't exist on this place) and the
- * section to scroll to. A page or row only Advanced mode shows comes back with `advanced`: opening it turns Advanced on. */
+ * section to scroll to. A page or row only Advanced mode shows comes back with `advanced`: Simple shows it there,
+ * marked, without turning Advanced mode on. */
 export function resolveSettingsTarget(requested: AppSettingsSection, ctx: SettingsContext): SettingsTarget & { missing?: SettingsPageId; advanced?: true } {
   const target = isSettingsPage(requested) ? { page: requested } : LEGACY_SETTINGS[requested](ctx);
   if (needsAdvanced(target, ctx)) return { ...target, advanced: true };
@@ -174,6 +184,8 @@ const hereOnly = (ctx: SettingsContext) => ctx.here;
 const browserAdmin = (ctx: SettingsContext) => !ctx.desktop && ctx.admin;
 
 export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
+  { id: "add-device", page: "devices", anchor: "add", labelKey: "devicesPage.add", topFor: ["add a device", "add device", "new device"], synonyms: ["add a computer", "add a server", "add a phone", "connect a device"] },
+  { id: "private-network", page: "devices", anchor: "network", labelKey: "devicesPage.network.title", when: hereOnly, synonyms: ["tailscale", "tailnet", "private network", "vpn"] },
   { id: "pair", page: "phone", anchor: "pair", labelKey: "phone.pair.button", sectionKey: "phone.pair.section", topFor: ["phone", "pair", "pairing", "qr", "iphone", "android", "this server", "pair a device", "connect your phone"],
     synonyms: ["code", "mobile", "tablet", "companion", "get the phone app"] },
   { id: "paired", page: "phone", anchor: "paired", labelKey: "devices.paired", synonyms: ["devices", "remove", "revoke", "pair again"] },
@@ -187,7 +199,7 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
     topFor: ["add a mac mini", "add mac mini", "add a computer", "add always-on computer"], synonyms: ["mac mini", "mini", "home server", "spare computer", "move my bots"] },
   { id: "other-computers", page: "phone", anchor: "computers", labelKey: "devices.computers.title", when: hereOnly, topFor: ["tailscale", "other computers", "another computer", "other computer", "my other computer"],
     synonyms: ["computer", "computers", "laptop", "desktop", "mac", "pc", "share", "tailnet", "connect to a server"] },
-  { id: "tailscale", page: "phone", anchor: "reach", labelKey: "devices.moreWays", sectionKey: "phone.reach.title", when: hereOnly, advanced: true, synonyms: ["tailscale", "https", "tailnet"] },
+  { id: "tailscale", page: "phone", anchor: "more-ways", labelKey: "devices.moreWays", sectionKey: "phone.reach.title", when: hereOnly, advanced: true, synonyms: ["tailscale", "https", "tailnet"] },
   { id: "domain", page: "overview", anchor: "address", labelKey: "settings.overview.address", advanced: true, when: (ctx) => !ctx.here && !ctx.client, synonyms: ["domain", "dns", "https", "custom domain"] },
   { id: "sidebar-color", page: "overview", anchor: "sidebar", labelKey: "placeLook.sidebarColor", sectionKey: "settings.overview.sidebar", synonyms: ["color", "colour", "tint", "cloud color"] },
   { id: "sidebar-picture", page: "overview", anchor: "sidebar", labelKey: "placeLook.sidebarPicture", sectionKey: "settings.overview.sidebar", topFor: ["wallpaper", "background", "sidebar image"], synonyms: ["picture", "banner", "image"] },
@@ -200,6 +212,7 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "about-you", page: "bots", anchor: "about-you", labelKey: "settings.bots.aboutYou", topFor: ["name", "my name", "photo", "avatar", "picture", "profile", "profile picture", "about me"], synonyms: ["rules", "rules for every bot"] },
   { id: "away-emails", page: "bots", anchor: "about-you", labelKey: "settings.profile.awayEmails", sectionKey: "settings.bots.aboutYou", synonyms: ["away", "emails", "email me"] },
   { id: "new-bots", page: "bots", anchor: "new-bots", labelKey: "settings.bots.newBots", synonyms: ["defaults", "effort", "reasoning", "preset", "share as preset"] },
+  { id: "remote-teammates", page: "bots", anchor: "remote-teammates", labelKey: "settings.remoteTeammates.title", advanced: true, when: adminPage, synonyms: ["other servers", "remote", "another server", "bot api key", "teammates"] },
   { id: "limits", page: "bots", anchor: "limits", labelKey: "settings.simple.more.limits", advanced: true, synonyms: ["group turns", "timeout", "tool time limit", "parallel threads", "concurrency", "keep warm"] },
   { id: "parallel", page: "bots", anchor: "parallel", labelKey: "settings.threads.title", sectionKey: "settings.simple.more.limits", advanced: true, synonyms: ["parallel", "threads", "concurrency"] },
   { id: "group-turns", page: "bots", anchor: "group-turns", labelKey: "settings.roomTurns.title", sectionKey: "settings.simple.more.limits", advanced: true, synonyms: ["group", "turns"] },
@@ -212,7 +225,7 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "vault", page: "vault", labelKey: "settings.section.vault", topFor: ["password", "passwords", "login", "logins"], synonyms: ["secrets", "1password", "2fa", "totp"] },
   { id: "spending", page: "usage", labelKey: "settings.page.spending", topFor: ["spending", "cost", "costs", "tokens", "money"], synonyms: ["usage"] },
   { id: "grok-move", page: "transfer", anchor: "grok-move", labelKey: "settings.import.grokTitle", sectionKey: "settings.data.bringIn", topFor: ["grok", "grok bot", "move from"], synonyms: ["import", "bring", "another app"] },
-  { id: "ai-apps", page: "transfer", anchor: "bring-in", labelKey: "settings.import.appsTitle", sectionKey: "settings.data.bringIn", synonyms: ["import", "bring", "skills", "mcp", "claude code", "codex", "cursor", "gemini"] },
+  { id: "ai-apps", page: "transfer", anchor: "bring-in", labelKey: "settings.import.appsTitle", sectionKey: "settings.data.bringIn", synonyms: ["import", "bring", "skills", "mcp", "claude code", "codex", "cursor", "gemini", "hermes", "openclaw"] },
   { id: "backup-import", page: "transfer", anchor: "bring-in", labelKey: "backup.import", sectionKey: "settings.data.bringIn", topFor: ["restore"], synonyms: ["import", "bring", "backup", "backups", "bring back"] },
   { id: "bring-in", page: "transfer", anchor: "bring-in", labelKey: "settings.data.bringIn", synonyms: ["import", "move from", "bring"] },
   { id: "backup-export", page: "transfer", anchor: "take-out", labelKey: "backup.export", sectionKey: "settings.data.takeOut", topFor: ["backup", "backups", "export"], synonyms: ["full backup", "download"] },
@@ -242,6 +255,8 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "bubbles", page: "appearance", anchor: "look", labelKey: "settings.userBubbles.simpleTitle", synonyms: ["message color", "my messages", "bubbles"] },
   { id: "tool-calls", page: "appearance", anchor: "chat", labelKey: "settings.appearance.chat", synonyms: ["tool calls", "this run", "chat width", "font", "typeface"] },
   { id: "layout", page: "appearance", anchor: "appearance", labelKey: "settings.appearance.layout", advanced: true, synonyms: ["show your computers", "rail", "window frame", "title bar", "threads", "tools layout", "pinned", "circles", "universal pins", "pinned panels"] },
+  { id: "skill-burger-switch", page: "features", anchor: "features", labelKey: "settings.features.skillBurger", topFor: ["skill burger", "skill burgers"], synonyms: ["burger", "saved runs", "workflows"] },
+  { id: "thread-tabs", page: "features", anchor: "features", labelKey: "settings.features.threadTabs", synonyms: ["tabs", "threads"] },
   { id: "apps", page: "overview", labelKey: "settings.search.apps", jump: "apps", synonyms: ["apps", "gmail", "slack", "calendar", "notion", "connect app", "integrations"] },
   { id: "bot-settings", page: "overview", labelKey: "settings.search.bot", jump: "bot", synonyms: ["approvals", "safety", "routines", "memory", "bot's notifications"] },
   { id: "shortcuts", page: "app", labelKey: "sidebar.menu.shortcuts", jump: "shortcuts", synonyms: ["keyboard shortcuts", "hotkeys", "cheat sheet"] },
@@ -252,7 +267,7 @@ export interface SearchHit {
   /** the row exists only on another place on the rail */
   elsewhere: boolean;
   score: number;
-  /** only Advanced mode shows it: choosing it turns Advanced on */
+  /** only Advanced mode lists it: choosing it shows it in Simple, marked */
   advanced?: boolean;
 }
 

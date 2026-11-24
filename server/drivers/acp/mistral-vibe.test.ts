@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -136,6 +136,62 @@ describe("Mistral (Vibe) ACP driver", () => {
     expect(launch.env.OPENAI_COMPAT_API_KEY).toBeUndefined();
     const promptRows = readFileSync(join(scratch, "launch.json.prompts.jsonl"), "utf8").trim().split("\n");
     expect(JSON.parse(promptRows.at(-1)!)).toMatchObject({ model: "zai-glm-5-3-flash" });
+  });
+
+  // A close that fails re-loads in a fresh process instead: one more launch per new bearer.
+  it.each([["1", 1], ["error", 3]])("closes the live session before re-loading it with a new MCP bearer, so vibe-acp streams each reply once (close: %s)", async (close, processes) => {
+    const launches = join(scratch, "launches");
+    const { instance, recorder } = await create({
+      MISTRAL_API_KEY: "engine-fixture-key", FAKE_ACP_LAUNCH_COUNT_FILE: launches,
+      FAKE_ACP_SESSION_CLOSE: String(close), FAKE_ACP_COPY_LIVE_LOAD: "1", FAKE_ACP_TEXT_REPLY: "hello",
+    });
+    const agents = (token: string) => ({
+      command: process.execPath,
+      args: ["/app/dist-server/agents-proxy.js"],
+      env: { OMB_HARNESS_URL: "http://127.0.0.1:8799", OMB_COMMS_TOKEN: token, OMB_BOT_ID: "sprout", OMB_THREAD_ID: "mistral-vibe-bearer" },
+    });
+    const reply = async (text: string, token: string, resume: boolean) => {
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId: "mistral-vibe-bearer", text, model: "mistral-medium-3.5", approvalMode: "ask",
+        ...(resume ? { resumeCursor: "fake-acp-session" } : {}), integrations: { agents: agents(token) },
+      });
+      await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      return recorder.events.find((event) => event.turnId === turnId && event.type === "item.completed" && event.itemType === "assistant_text");
+    };
+    expect(await reply("one", "token-one", false)).toMatchObject({ text: "hello" });
+    expect(await reply("two", "token-two", true)).toMatchObject({ text: "hello" });
+    expect(await reply("three", "token-three", true)).toMatchObject({ text: "hello" });
+    expect(Number(readFileSync(launches, "utf8"))).toBe(processes);
+  });
+
+  it("forgets a closed live session when its re-load is refused, so the next turn loads it instead of prompting the closed copy", async () => {
+    const reject = join(scratch, "reject");
+    const rpc = join(scratch, "rpc.jsonl");
+    const { instance, recorder } = await create({
+      MISTRAL_API_KEY: "engine-fixture-key", FAKE_ACP_COPY_LIVE_LOAD: "1", FAKE_ACP_TEXT_REPLY: "hello",
+      FAKE_ACP_REJECT_LIVE_LOAD_FILE: reject, FAKE_ACP_REJECT_LIVE_LOAD_DSH: "1", FAKE_ACP_RPC_APPEND_FILE: rpc,
+    });
+    const agents = (token: string) => ({
+      command: process.execPath,
+      args: ["/app/dist-server/agents-proxy.js"],
+      env: { OMB_HARNESS_URL: "http://127.0.0.1:8799", OMB_COMMS_TOKEN: token, OMB_BOT_ID: "sprout", OMB_THREAD_ID: "mistral-vibe-refused" },
+    });
+    const run = async (text: string, token: string, resume: boolean) => {
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId: "mistral-vibe-refused", text, model: "mistral-medium-3.5", approvalMode: "ask",
+        ...(resume ? { resumeCursor: "fake-acp-session" } : {}), integrations: { agents: agents(token) },
+      });
+      return recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+    };
+    const methods = () => readFileSync(rpc, "utf8").trim().split("\n").map((line) => (JSON.parse(line) as { method: string }).method);
+    expect(await run("one", "token-one", false)).toMatchObject({ ok: true });
+    writeFileSync(reject, "1");
+    expect(await run("two", "token-two", true)).toMatchObject({ ok: false });
+    expect(methods().slice(-2)).toEqual(["session/close", "session/load"]);
+    const before = methods().length;
+    rmSync(reject);
+    expect(await run("three", "token-one", true)).toMatchObject({ ok: true });
+    expect(methods().slice(before)).toContain("session/load");
   });
 
   it("turns Vibe's session/request_permission into an approval card and answers with the person's choice", async () => {

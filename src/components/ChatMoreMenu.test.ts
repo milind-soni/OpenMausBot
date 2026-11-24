@@ -80,14 +80,14 @@ beforeEach(() => {
 });
 
 describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
-  it("is a round 32px button labelled More, on the raised surface in Simple mode", () => {
+  it("is a round 36px button labelled More, on the raised surface in Simple mode", () => {
     const menu = menuOf(createElement(ChatMoreMenu, { bot }));
     expect(menu.ariaLabel).toBe("More");
     expect(menu.placement).toBeUndefined();
     expect(menu.trigger).toContain('data-testid="chat-more"');
-    expect(menu.trigger).toMatch(/class="[^"]*\bsize-8\b[^"]*\brounded-full\b[^"]*\bbg-composer\b[^"]*\bring-inset\b/);
+    expect(menu.trigger).toMatch(/class="[^"]*\bsize-9\b[^"]*\brounded-full\b[^"]*\bbg-composer\b[^"]*\bring-inset\b/);
     fixture.advanced = true;
-    expect(menuOf(createElement(ChatMoreMenu, { bot })).trigger).toMatch(/class="[^"]*\bsize-8\b[^"]*\brounded-full\b[^"]*\bbg-raised\/50\b/);
+    expect(menuOf(createElement(ChatMoreMenu, { bot })).trigger).toMatch(/class="[^"]*\bsize-9\b[^"]*\brounded-full\b[^"]*\bbg-raised\/50\b/);
   });
 
   it("offers threads in Simple mode, and Usage and the Inspector unlocked", () => {
@@ -121,15 +121,16 @@ describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "newTask", botId: "pepper" });
   });
 
-  it("lists the bot's threads newest first, without routine runs, marks the open one and opens another", () => {
+  it("lists the bot's main thread first, then newest first, without routine runs, marks the open one and opens another", () => {
     const threads = menuOf(createElement(ChatMoreMenu, { bot })).items.find((item) => item.key === "threads")!;
     expect(threads).toMatchObject({ label: "All threads", value: "3" });
     expect(threads.submenu!.map((item) => [item.label, Boolean(item.active)])).toEqual([
+      ["Our chat", false],
       ["Trip plan", true],
       ["Untitled chat", false],
-      ["Our chat", false],
     ]);
-    threads.submenu![2].onSelect();
+    expect(threads.submenu!.map((item) => renderToStaticMarkup(createElement("div", null, item.trailing)).includes('aria-label="Main thread"'))).toEqual([true, false, false]);
+    threads.submenu![0].onSelect();
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: "pepper", threadId: "main" });
   });
 
@@ -205,7 +206,7 @@ describe("ChatHeaderMenu, Advanced mode's header ⋯", () => {
     expect(menu.items.find((item) => item.key === "inspector")).toMatchObject({ separatorBefore: true });
     expect(menu.items.every((item) => !item.disabled && item.heading !== "In Advanced mode")).toBe(true);
     expect(menu).toMatchObject({ placement: "below", openOnHover: true });
-    expect(menu.trigger).toMatch(/data-testid="chat-more" class="flex size-8 items-center justify-center rounded-full /);
+    expect(menu.trigger).toMatch(/data-testid="chat-more" class="flex size-9 items-center justify-center rounded-full /);
   });
 
   it("has no thread items even if rendered by ChatMoreMenu in Advanced mode", () => {

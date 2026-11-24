@@ -1,11 +1,11 @@
-// Reads Google Calendar events, Gmail headers and, for a one-time code, a single Gmail or Outlook message from the server
+// Reads Google Calendar events, Gmail and Outlook headers and, for a one-time code, a single Gmail or Outlook message from the server
 // through the connected-apps relay, with no AI turn, as the default connected account of each app, or the one the host
 // names when an app has several. Tool names, arguments and answer shapes follow Composio's documentation; the fixtures are
 // not yet checked against the live service, so an answer of any other shape is an error, never an empty list.
 import { findMeetingLink } from "../shared/meetings.ts";
 import { parseMcpResponse } from "./connector-tools-list.ts";
 
-export const READ_APPS = ["gmail", "googlecalendar"] as const;
+export const READ_APPS = ["gmail", "outlook", "googlecalendar"] as const;
 export type ReadApp = (typeof READ_APPS)[number];
 export type MailApp = "gmail" | "outlook";
 
@@ -38,6 +38,9 @@ export interface EmailHeader {
   from: string;
   subject: string;
   preview: string;
+  app?: MailApp;
+  /** Outlook's own web address for the message. */
+  link?: string;
 }
 
 export interface ThreadMessage {
@@ -51,11 +54,11 @@ const SIGNED_OUT = /\b(?:unauthori[sz]ed|unauthenticated|invalid[_ ]grant|expire
 
 /** A read that failed: the app, what went wrong, and whether reconnecting the app is what fixes it. */
 export class SourceError extends Error {
-  readonly app: ReadApp | "outlook";
+  readonly app: ReadApp;
   readonly signedOut: boolean;
   /** The read named one of the app's several connected accounts, so that account is the one to check. */
   readonly severalAccounts: boolean;
-  constructor(app: ReadApp | "outlook", message: string, severalAccounts = false) {
+  constructor(app: ReadApp, message: string, severalAccounts = false) {
     super(message);
     this.app = app;
     this.signedOut = SIGNED_OUT.test(message);
@@ -309,8 +312,10 @@ export function gmailBodyFromData(data: unknown): string {
 }
 
 function outlookSender(item: Record<string, unknown>): string {
-  const address = record(record(item.from)?.emailAddress)?.address;
-  return typeof address === "string" ? address.trim() : "";
+  const from = record(record(item.from)?.emailAddress);
+  const address = typeof from?.address === "string" ? from.address.trim() : "";
+  const name = flat(from?.name);
+  return name && address && name.toLowerCase() !== address.toLowerCase() ? `${name} <${address}>` : address;
 }
 
 function outlookReceivedAt(item: Record<string, unknown>): number {
@@ -318,16 +323,35 @@ function outlookReceivedAt(item: Record<string, unknown>): number {
   return Number.isFinite(at) ? at : 0;
 }
 
+function outlookHeader(raw: unknown): EmailHeader | null {
+  const item = record(raw);
+  if (!item || typeof item.id !== "string" || !item.id) return null;
+  const threadId = typeof item.conversationId === "string" && item.conversationId ? item.conversationId : item.id;
+  return {
+    id: item.id,
+    threadId,
+    at: outlookReceivedAt(item),
+    from: outlookSender(item),
+    subject: flat(item.subject),
+    preview: flat(item.bodyPreview).slice(0, PREVIEW_MAX),
+    app: "outlook",
+    ...(typeof item.webLink === "string" && item.webLink ? { link: item.webLink } : {}),
+  };
+}
+
 export function outlookMessagesFromData(data: unknown): EmailHeader[] {
   const list = listIn(data, ["value", "messages"]);
   if (!list) throw new Error("the Outlook answer had no message list");
-  const headers = list.flatMap((raw): EmailHeader[] => {
-    const item = record(raw);
-    if (!item || typeof item.id !== "string" || !item.id) return [];
-    return [{ id: item.id, threadId: item.id, at: outlookReceivedAt(item), from: outlookSender(item), subject: flat(item.subject), preview: "" }];
-  });
+  const headers = list.flatMap((raw) => outlookHeader(raw) ?? []);
   if (list.length > 0 && headers.length === 0) throw new Error("none of the Outlook messages could be read");
-  return headers;
+  return headers.sort((a, b) => b.at - a.at);
+}
+
+export function outlookMessageFromData(data: unknown): EmailHeader {
+  const top = record(data);
+  const header = outlookHeader(record(top?.message) ?? record(top?.response_data) ?? top);
+  if (!header) throw new Error("the Outlook message could not be read");
+  return header;
 }
 
 /** An Outlook message's body text; a message with none to read is an error. */
@@ -392,11 +416,11 @@ function untilAborted<T>(promise: Promise<T>, signal: AbortSignal, onAbort: () =
 }
 
 /** The account to name per app, for apps with several connected. */
-type AppAccounts = Partial<Record<ReadApp | "outlook", string>>;
+type AppAccounts = Partial<Record<ReadApp, string>>;
 
 export interface ConnectedReadDeps {
-  /** Null when connected apps are not set up here; else which of the two apps are connected. */
-  connected(): Promise<Record<ReadApp, boolean> | null>;
+  /** Null when connected apps are not set up here; else which of the read apps are connected. */
+  connected(): Promise<Partial<Record<ReadApp, boolean>> | null>;
   /** The account to read for each app with several connected (Composio refuses a read that names none then); an app
    *  with one is left out, and its reads name no account. Asked once per session, with the bot the session reads for. */
   accounts?(botId?: string): Promise<AppAccounts>;
@@ -416,6 +440,10 @@ export interface ReadSession {
   thread(threadId: string): Promise<ThreadMessage[]>;
   /** The connected Gmail account's own address. */
   address(): Promise<string>;
+  /** Outlook's inbox since `sinceMs`, newest first, at most `limit`, without bodies. */
+  outlookEmails?(sinceMs: number, limit: number): Promise<EmailHeader[]>;
+  /** Null only when Outlook says the message is gone. */
+  outlookMessage?(messageId: string): Promise<EmailHeader | null>;
 }
 
 /** The reads for a one-time code: a message's body, never kept or passed to a bot. */
@@ -424,11 +452,13 @@ export interface MailBodySession extends ReadSession {
   messageBody(messageId: string): Promise<string | null>;
   /** Outlook's inbox since `sinceMs`, newest first, at most `limit`, without bodies. */
   outlookEmails(sinceMs: number, limit: number): Promise<EmailHeader[]>;
+  /** Null only when Outlook says the message is gone. */
+  outlookMessage(messageId: string): Promise<EmailHeader | null>;
   outlookBody(messageId: string): Promise<string>;
 }
 
 export interface ConnectedReads {
-  connected(): Promise<Record<ReadApp, boolean> | null>;
+  connected(): Promise<Partial<Record<ReadApp, boolean>> | null>;
   /** `botId`: the bot the reads are for, so an account limit of its own picks the account. */
   session(botId?: string): ReadSession;
 }
@@ -442,7 +472,7 @@ const GMAIL_PAGES = 6;
 /** The account lookup one multi-request read keeps for all its requests. */
 type AccountPin = { accounts?: Promise<AppAccounts> };
 
-const appOf = (slug: string): ReadApp | "outlook" => (slug.startsWith("GMAIL_") ? "gmail" : slug.startsWith("OUTLOOK_") ? "outlook" : "googlecalendar");
+const appOf = (slug: string): ReadApp => (slug.startsWith("GMAIL_") ? "gmail" : slug.startsWith("OUTLOOK_") ? "outlook" : "googlecalendar");
 
 export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedReads, "session"> & { session(botId?: string): MailBodySession } {
   const readTimeoutMs = deps.readTimeoutMs ?? READ_TIMEOUT_MS;
@@ -503,7 +533,7 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
       }
     }
 
-    function parsed<T>(app: ReadApp | "outlook", parse: () => T): T {
+    function parsed<T>(app: ReadApp, parse: () => T): T {
       try {
         return parse();
       } catch (error) {
@@ -511,7 +541,7 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
       }
     }
 
-    function requireFinite(app: ReadApp | "outlook", ...times: number[]): void {
+    function requireFinite(app: ReadApp, ...times: number[]): void {
       if (times.some((time) => !Number.isFinite(time))) throw new SourceError(app, "the time window was not a finite time");
     }
 
@@ -594,10 +624,25 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
       },
       async outlookEmails(sinceMs, limit) {
         requireFinite("outlook", sinceMs);
-        const data = await call(OUTLOOK_LIST_TOOL, {
-          user_id: "me", folder: "inbox", top: limit, received_date_time_ge: new Date(sinceMs).toISOString(), select: ["id", "subject", "from", "receivedDateTime"],
-        });
-        return parsed("outlook", () => outlookMessagesFromData(data));
+        let size = limit;
+        const pin: AccountPin = {};
+        for (;;) {
+          const data = await call(OUTLOOK_LIST_TOOL, {
+            user_id: "me", folder: "inbox", top: size, received_date_time_ge: new Date(sinceMs).toISOString(),
+            select: ["id", "subject", "from", "receivedDateTime", "bodyPreview", "conversationId", "webLink"],
+          }, { shortened: size > GMAIL_PAGE_MIN, pin });
+          if (data === SHORTENED) {
+            size = Math.max(GMAIL_PAGE_MIN, Math.floor(size / 2));
+            continue;
+          }
+          return parsed("outlook", () => outlookMessagesFromData(data));
+        }
+      },
+      async outlookMessage(id) {
+        const data = await call(OUTLOOK_MESSAGE_TOOL, {
+          user_id: "me", message_id: id, select: ["id", "subject", "from", "receivedDateTime", "bodyPreview", "conversationId", "webLink"],
+        }, { gone: messageGone });
+        return data === GONE ? null : parsed("outlook", () => outlookMessageFromData(data));
       },
       async outlookBody(id) {
         const data = await call(OUTLOOK_MESSAGE_TOOL, { user_id: "me", message_id: id, select: ["id", "body"] });

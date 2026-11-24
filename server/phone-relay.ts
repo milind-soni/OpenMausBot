@@ -6,7 +6,6 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
-import type { Duplex } from "node:stream";
 
 import { phonePairingLink, type CompanionEndpoint } from "../shared/pairing-link.ts";
 import { relayBaseUrlOverride } from "../companion/src/e2e/config.ts";
@@ -24,6 +23,7 @@ import { isLoopbackHost } from "../electron/server-address.mjs";
 import { writeFileAtomic } from "./atomic.ts";
 import { reportableServerVersion } from "./environment.ts";
 import { bearerToken, PROXY_HEADERS } from "./request-auth.ts";
+import type { Upgrades } from "./routes/upgrades.ts";
 import { isPairingCredential, type SessionRegistry } from "./sessions.ts";
 import { describeTunnelAccount, FLEET_CREDENTIAL_ENV, fleetCredential, openTunnelCredentials } from "./tunnel.ts";
 import type { E2ESession } from "../companion/src/e2e/session.ts";
@@ -76,6 +76,8 @@ export interface PhoneRelayOptions {
   dataDir: string;
   sessions: Pick<SessionRegistry, "bearerDigests" | "pairingDigests" | "onSessionIssued" | "onSessionRevoked" | "list" | "ticketOwner">;
   handle: Handler;
+  /** The server's WebSocket routes (live screens, computer viewing): a relayed upgrade reaches them through `handle`. */
+  upgrades: Pick<Upgrades, "accept">;
   serverName(): string;
   publicOrigin(): string | null;
   version: string;
@@ -254,7 +256,9 @@ export function startPhoneRelay(options: PhoneRelayOptions): PhoneRelay | null {
     log: (line) => log(`phone relay: ${line}`),
   });
 
-  const origin = createE2EOrigin((req, res) => relayed(req, res), (_req, socket) => refuseUpgrade(socket), options.streamDeadlines ?? STREAM_DEADLINES);
+  // An upgrade meets the same checks as a request before its route answers the handshake.
+  const origin = createE2EOrigin((req, res) => relayed(req, res), (req, socket, head) => options.upgrades.accept(req, socket, head, async (upgrade, res) => relayed(upgrade, res)),
+    options.streamDeadlines ?? STREAM_DEADLINES);
 
   /** One phone (or one pairing window) holds a few live sessions; a new one closes its oldest, so a phone that lost its
    * sessions without the relay noticing can still come back. */
@@ -300,10 +304,6 @@ export function startPhoneRelay(options: PhoneRelayOptions): PhoneRelay | null {
     relay.start();
   }
 
-  function refuseUpgrade(socket: Duplex): void {
-    socket.end("HTTP/1.1 501 Not Implemented\r\nconnection: close\r\ncontent-length: 0\r\n\r\n");
-  }
-
   /** Security: a relayed request is never this machine's. It has no peer address, which the request gate always treats as
    * remote, and whatever Host, proxy, cookie or owner headers the phone wrote are replaced: it needs a session of its own. */
   function scrub(req: IncomingMessage, peer: Peer): void {
@@ -314,7 +314,8 @@ export function startPhoneRelay(options: PhoneRelayOptions): PhoneRelay | null {
     req.headers["x-forwarded-for"] = sourceOf(peer);
   }
 
-  function relayed(req: IncomingMessage, res: ServerResponse): void {
+  /** Settles when the handler has answered, so an upgrade's handshake deadline covers the whole route. */
+  function relayed(req: IncomingMessage, res: ServerResponse): Promise<unknown> | void {
     const context = e2eContextOf(req.socket);
     if (!context) return reply(res, 500, { error: "not a relayed request" });
     const peer = context.peer;
@@ -339,7 +340,7 @@ export function startPhoneRelay(options: PhoneRelayOptions): PhoneRelay | null {
         return reply(res, 200, { serverName: options.serverName(), endpoints: route.endpoints ?? [], ...(version ? { version } : {}), ...(descriptor() ? { e2e: descriptor() } : {}) });
       }
     }
-    void pairing.run(context, () => Promise.resolve(options.handle(req, res))).catch(() => {
+    return pairing.run(context, () => Promise.resolve(options.handle(req, res))).catch(() => {
       if (!res.headersSent) reply(res, 500, { error: "request failed" });
       else res.destroy();
     });

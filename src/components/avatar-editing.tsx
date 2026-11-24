@@ -1,6 +1,6 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
 
-import { useStore, type Bot } from "@/state/store";
+import { type Bot } from "@/state/store";
 import { imageAttachmentFromFile } from "@/lib/composer-attachments";
 import { useOrganizationBranding } from "@/lib/use-organization-branding";
 import { t } from "@/lib/i18n";
@@ -15,12 +15,13 @@ import {
 } from "../../shared/bot-avatar";
 import { BotAvatar } from "./Avatar";
 import { useBotEditor } from "./bot-settings/BotEditorContext";
+import { useStoreActions } from "@/state/store-select";
 
 export type AvatarPatch = Partial<
-  Pick<Bot, "avatarCrop" | "avatarUrl" | "avatarZoom" | "avatarFocusX" | "avatarFocusY" | "color" | "mascotExpression" | "mascotBody" | "mascotFaceColor">
+  Pick<Bot, "avatarCrop" | "avatarUrl" | "avatarZoom" | "avatarFocusX" | "avatarFocusY" | "color" | "mascotExpression" | "mascotBody" | "mascotFaceColor" | "mascotBodyColor" | "mascotMaterial">
 >;
 
-export const RESET_MASCOT_PATCH: AvatarPatch = { avatarCrop: "mascot", color: "green", mascotExpression: null, mascotBody: "cursor", mascotFaceColor: null };
+export const RESET_MASCOT_PATCH: AvatarPatch = { avatarCrop: "mascot", color: "green", mascotExpression: null, mascotBody: "cursor", mascotFaceColor: null, mascotBodyColor: null, mascotMaterial: null };
 
 export const CROP_LABEL = {
   mascot: "Mascot",
@@ -131,7 +132,7 @@ export function OrganizationAvatarIcons({ busy, onUpload }: { busy: boolean; onU
 }
 
 export function useAvatarImage(bot: Bot, onPatch: (patch: AvatarPatch) => void) {
-  const { flushBotPatches } = useStore();
+  const { flushBotPatches } = useStoreActions();
   const { request: api, uploadAvatar } = useBotEditor();
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);

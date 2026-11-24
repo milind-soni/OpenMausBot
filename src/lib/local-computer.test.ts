@@ -63,7 +63,7 @@ describe("local computer UI eligibility", () => {
         localComputer: { available: false, reasonCode: "remote-server" },
       } as DesktopCapabilities;
       expect(localComputerSelectable({ capabilities, providerSupportsLocal: true })).toBe(false);
-      expect(localComputerDisabledReason({ capabilities, providerSupportsLocal: true })).toBe(en["computer.problem.localRemoteServer"]);
+      expect(localComputerDisabledReason({ capabilities, providerSupportsLocal: true })).toBe(en["computer.problem.lendRemoteServer"]);
     }
   });
 
@@ -105,6 +105,35 @@ describe("local computer UI eligibility", () => {
     ).toBe(
       "Bots can't use this computer in this kind of desktop session yet. Sign out, choose “Ubuntu on Xorg” on the sign-in screen, and sign back in.",
     );
+  });
+
+  it("doesn't send Fedora and other non-Ubuntu Wayland desktops to Ubuntu on Xorg", () => {
+    const capabilities = {
+      host: { platform: "linux" as const },
+      localComputer: {
+        available: false,
+        enabled: false,
+        reasonCode: "linux-wayland-seat-safety-blocked",
+        ubuntuDesktop: false,
+      },
+    } as DesktopCapabilities;
+
+    expect(
+      localComputerDisabledReason({ capabilities, providerSupportsLocal: true }),
+    ).toBe(
+      "Bots can't use this computer in this kind of desktop session yet. If your sign-in screen offers an Xorg session, sign out and choose it. On a desktop without one, such as Fedora, use Cloud desktop or Private desktop instead.",
+    );
+  });
+
+  it("tells a Mac older than macOS 15 to update, not to grant permissions", () => {
+    const capabilities = {
+      host: { platform: "darwin" as const, label: "Mac" },
+      localComputer: { available: false, enabled: false, status: "unavailable", reasonCode: "macos-version-unsupported" },
+    } as DesktopCapabilities;
+    expect(localComputerDisabledReason({ capabilities, providerSupportsLocal: true })).toBe(
+      "Bots can't use this Mac: local desktop control needs macOS 15 Sequoia or later. Update macOS to use it.",
+    );
+    expect(localComputerSelectable({ capabilities, providerSupportsLocal: true })).toBe(false);
   });
 
   it("preserves the ready local fallback on supported non-Linux hosts", () => {

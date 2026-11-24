@@ -34,6 +34,22 @@ export function httpErrorDetail(body: string, limit = 500): string {
 
 export class UnsupportedChatToolsError extends Error {}
 
+export class ChatHttpError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+export class ChatCompletionError extends ChatProtocolError {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
 /** The provider closed the stream with neither finish_reason nor [DONE]; resending repeats nothing. */
 export class StreamTruncatedError extends ChatProtocolError {}
 
@@ -102,5 +118,21 @@ export function completionError(json: ProviderBody, label: string): ChatProtocol
   if (!message) return null;
   const text = `provider returned a ${label}: ${message.slice(0, 200)}`;
   const refusal = toolCallRefusal(json.error);
-  return refusal ? new RejectedToolCallError(text, refusal) : new ChatProtocolError(text);
+  if (refusal) return new RejectedToolCallError(text, refusal);
+  const code = object(json.error)?.code;
+  const status = code === "rate_limit_exceeded" ? 429 : code;
+  return typeof status === "number" ? new ChatCompletionError(status, text) : new ChatProtocolError(text);
+}
+
+/** The data of an SSE `data:` line, or undefined for any other line. llama.cpp before b7200 (seen on b6500) refuses a
+ * streamed request with HTTP 200 and an `error:` event holding the bare error: that throws what `failure` makes of it. */
+export function sseData(line: string, failure: (status: number, body: string) => Error): string | undefined {
+  if (line.startsWith("error:")) {
+    const event = line.slice("error:".length).trim();
+    let error: Record<string, unknown> | undefined;
+    try { error = object(JSON.parse(event)); } catch { error = undefined; }
+    throw typeof error?.code === "number" ? failure(error.code, JSON.stringify({ error }))
+      : new ChatProtocolError(`provider returned a streaming error: ${event.slice(0, 200)}`);
+  }
+  return line.startsWith("data:") ? line.slice("data:".length).trim() : undefined;
 }

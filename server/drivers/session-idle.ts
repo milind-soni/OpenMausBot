@@ -12,10 +12,12 @@
 // floor, and per-chat engines already kept are looked at again every couple of seconds (sweepIdleEngines), not only when
 // they went idle. Short of room, a keep-warm hold yields too. Before admission makes a new engine wait it stops the
 // engine idle longest (engine-memory.ts), and a browser with no room to open asks for the same first (host/browser.ts).
+// On every host, no more per-chat engines stay idle at once than idleEngineCap allows: past it, the least recently used
+// closes as another goes idle, and its conversation's next turn resumes its session by id.
 import { availableMemory, boxMemory, type BoxMemory } from "../box-memory.ts";
 import { stoppedForBotMemory } from "../bot-memory-cap.ts";
-import { engineMemory, type EngineMemory } from "../engine-memory.ts";
-import { seenWithin } from "../thread-presence.ts";
+import { ENGINE_MAX_BYTES, engineMemory, type EngineMemory } from "../engine-memory.ts";
+import { onThreadSeen, seenWithin } from "../thread-presence.ts";
 
 export type IdleScope = "per-chat" | "per-bot" | "shared";
 
@@ -26,6 +28,24 @@ export const idleAfter = (baseMs: number, minimumMs: number, factor: number): nu
 export interface SessionIdlePolicy {
   idleMs: number;
   minimumMs: number;
+  /** An engine whose cold start costs tens of seconds, with no idle time configured: where turns wait for room, how long
+   * its idle process stays up for a watched conversation while the room holds one more of the largest engines. */
+  expensiveIdleMs?: number;
+}
+
+/** What a driver says a cold start of its engine costs: "expensive" for one that takes tens of seconds (Google's packaged
+ * Antigravity server, a ~1 GB runtime that unpacks and loads its own Python before it answers). */
+export type ColdStartCost = "expensive";
+/** Where turns wait for room, an expensive engine's idle process for a watched conversation stays up this long while the
+ * room allows (the time a reference ACP client keeps an idle Antigravity process), and this long for an unwatched one. */
+export const EXPENSIVE_IDLE_MS = 30 * 60_000;
+export const EXPENSIVE_UNWATCHED_IDLE_MS = 3 * 60_000;
+
+/** Room for one more of the largest engines admission plans for (ENGINE_MAX_BYTES) above the memory floor, besides this
+ * idle one: headroom is (free - floor) / (total / 2), so that is a factor of at least ENGINE_MAX_BYTES / (total / 2). Never
+ * on a box under 3 GB, whose whole headroom is less than that engine; on a 3 GB box only with all of it free. */
+export function roomBesideIdle(factor: number, boxBytes: number): boolean {
+  return boxBytes > SMALL_BOX_BYTES && Math.min(1, factor) * (boxBytes / 2) >= ENGINE_MAX_BYTES;
 }
 
 const DEFAULT_IDLE_MS = 10 * 60_000;
@@ -49,6 +69,7 @@ export function sessionIdlePolicy(
   driverPrefix: string,
   env: Record<string, string | undefined> = process.env,
   boxBytes: number = boxMemory().bytes,
+  coldStart?: ColdStartCost,
 ): SessionIdlePolicy {
   const minimumMs = Math.max(
     MINIMUM_IDLE_MS,
@@ -60,7 +81,9 @@ export function sessionIdlePolicy(
     usableMilliseconds(
       env[`OMB_${driverPrefix}_SESSION_IDLE_MS`] ?? env.OMB_SESSION_IDLE_MS,
     ) ?? (boxBytes <= SMALL_BOX_BYTES ? SMALL_BOX_IDLE_MS : DEFAULT_IDLE_MS);
-  return { idleMs: Math.max(minimumMs, configured), minimumMs };
+  const idleMs = Math.max(minimumMs, configured);
+  const chosen = usableMilliseconds(env[`OMB_${driverPrefix}_SESSION_IDLE_MS`] ?? env.OMB_SESSION_IDLE_MS) !== null;
+  return { idleMs, minimumMs, ...(coldStart === "expensive" && !chosen && boxBytes > SMALL_BOX_BYTES ? { expensiveIdleMs: Math.max(idleMs, EXPENSIVE_IDLE_MS) } : {}) };
 }
 
 /** On a small box with less than half of it free, a second idle engine would leave no room for a turn's own engine. On a
@@ -83,21 +106,46 @@ export interface WarmEngine {
   spare?: () => boolean;
 }
 
-/** Idle engines of every driver, the longest idle first. */
+const GB = 1024 ** 3;
+export const SMALL_BOX_IDLE_ENGINES = 2;
+const IDLE_ENGINES_FEWEST = 4, IDLE_ENGINES_MOST = 8;
+
+/** How many engines may stay idle at once across every driver and conversation, whatever the idle times allow:
+ * OMB_IDLE_ENGINES_MAX (1 or more), else one per 2 GB of the box between four and eight, and two on a box of 1.5 GB or
+ * less. Each holds 250 to 450 MB with its MCP servers. */
+export function idleEngineCap(env: Record<string, string | undefined> = process.env, boxBytes: number = boxMemory().bytes): number {
+  const configured = Number(env.OMB_IDLE_ENGINES_MAX);
+  if (env.OMB_IDLE_ENGINES_MAX && Number.isInteger(configured) && configured >= 1) return configured;
+  if (boxBytes <= SMALL_BOX_BYTES) return SMALL_BOX_IDLE_ENGINES;
+  return Math.min(IDLE_ENGINES_MOST, Math.max(IDLE_ENGINES_FEWEST, Math.floor(boxBytes / (2 * GB))));
+}
+
+/** Idle engines of every driver, the least recently used first: an engine moves to the end when it goes idle and when a
+ * person opens or reads its conversation. */
 const warmEngines = new Map<string, WarmEngine>();
 
-/** An engine went idle: when the box allows fewer idle engines than are up, the ones idle longest close now. */
+/** An engine went idle: when the box allows fewer idle engines than are up, the ones idle longest close now (an engine
+ * started ahead of a first message before them); past the cap on idle engines, the least recently used close now (one
+ * whose conversation no person has had in front of them before them). Never one with a turn running, nor one held. */
 export function keepWarm(key: string, engine: WarmEngine, box: Pick<BoxMemory, "bytes"> = boxMemory(),
-  available: () => number = availableMemory, fits: () => number = () => engineMemory.idleEnginesAllowed()): void {
-  const most = fits();
-  if (box.bytes > SMALL_BOX_BYTES && most === Infinity) return;
+  available: () => number = availableMemory, fits: () => number = () => engineMemory.idleEnginesAllowed(),
+  cap: () => number = () => idleEngineCap(process.env, box.bytes)): void {
   warmEngines.delete(key);
   warmEngines.set(key, engine);
   for (const [other, warm] of warmEngines) if (other !== key && (!warm.idle() || warm.held?.())) warmEngines.delete(other);
-  const extra = warmEngines.size - idleEnginesAllowed(box, available(), most);
-  if (extra <= 0) return;
-  for (const [other, warm] of sparesFirst([...warmEngines]).slice(0, extra)) {
-    warmEngines.delete(other);
+  const most = fits();
+  const roomAllows = box.bytes > SMALL_BOX_BYTES && most === Infinity ? Infinity : idleEnginesAllowed(box, available(), most);
+  const idleBefore = () => [...warmEngines].filter(([other]) => other !== key);
+  closeKept(sparesFirst(idleBefore()).slice(0, Math.max(0, warmEngines.size - roomAllows)));
+  closeKept(unwatchedFirst(idleBefore()).slice(0, Math.max(0, warmEngines.size - Math.max(1, cap()))));
+}
+
+function closeKept(engines: Array<[string, WarmEngine]>): void {
+  for (const [key, warm] of engines) {
+    warmEngines.delete(key);
+    const entry = armed.get(key);
+    if (entry) clearTimeout(entry.timer);
+    armed.delete(key);
     warm.close();
   }
 }
@@ -105,13 +153,34 @@ export function keepWarm(key: string, engine: WarmEngine, box: Pick<BoxMemory, "
 const sparesFirst = (engines: Array<[string, WarmEngine]>): Array<[string, WarmEngine]> =>
   [...engines.filter(([, warm]) => warm.spare?.()), ...engines.filter(([, warm]) => !warm.spare?.())];
 
+const watched = (warm: WarmEngine): boolean => warm.threadId !== undefined && seenWithin(warm.threadId, WATCHED_MS);
+const unwatchedFirst = (engines: Array<[string, WarmEngine]>): Array<[string, WarmEngine]> =>
+  [...engines.filter(([, warm]) => !watched(warm)), ...engines.filter(([, warm]) => watched(warm))];
+
+/** A person opened or read a conversation: its idle engines become the most recently used. */
+function touchWarm(threadId: string): void {
+  const touched = [...warmEngines].filter(([, warm]) => warm.threadId === threadId);
+  for (const [key, warm] of touched) {
+    warmEngines.delete(key);
+    warmEngines.set(key, warm);
+  }
+}
+onThreadSeen(touchWarm);
+
 /** Every per-chat engine idle now, with when it went idle: what the sweep looks at again. */
 const armed = new Map<string, { engine: WarmEngine; since: number; timer: ReturnType<typeof setTimeout> }>();
 
 /** Closes an idle per-chat engine after `ms`, sooner on a small box once another engine goes idle after it, and sooner
  * still once the room shrinks its idle time (sweepIdleEngines). */
 export function armIdleClose(key: string, ms: number, engine: WarmEngine, now: number = Date.now()): ReturnType<typeof setTimeout> {
-  const timer = setTimeout(() => { armed.delete(key); engine.close(); }, ms);
+  const timer = setTimeout(() => {
+    // A stale timer (`timer` not the one armed under `key` now, as in stopIdleClose) leaves a later arm's entry alone.
+    if (armed.get(key)?.timer !== timer) return;
+    armed.delete(key);
+    // No longer idle (a turn took it again) or still held: its driver arms it again when it next goes idle.
+    if (!engine.idle() || engine.held?.()) return;
+    engine.close();
+  }, ms);
   timer.unref?.();
   armed.set(key, { engine, since: now, timer });
   keepWarm(key, engine);
@@ -130,7 +199,7 @@ export function stopIdleClose(key: string, timer: ReturnType<typeof setTimeout> 
 
 /** Closes each idle per-chat engine kept past what the room allows now; short of room, a keep-warm hold too. Runs on
  * engine-memory's tick. Returns how many it closed. */
-export function sweepIdleEngines(memory: Pick<EngineMemory, "enabled" | "headroom" | "roomFactor" | "shortOfRoom"> = engineMemory, now: number = Date.now()): number {
+export function sweepIdleEngines(memory: Pick<EngineMemory, "enabled" | "headroom" | "roomFactor" | "shortOfRoom"> = engineMemory, now: number = Date.now(), boxBytes: number = boxMemory().bytes): number {
   if (!memory.enabled || !armed.size) return 0;
   const factor = memory.roomFactor(), short = memory.shortOfRoom();
   if (factor >= 1 && !short) return 0;
@@ -139,7 +208,7 @@ export function sweepIdleEngines(memory: Pick<EngineMemory, "enabled" | "headroo
     // No longer idle (a turn took it again, or it ended): its driver arms it again when it next goes idle.
     if (!engine.idle()) { armed.delete(key); continue; }
     if (!engine.threadId || !engine.policy || (engine.held?.() && !short)) continue;
-    if (!engine.spare?.() && now - since < engineIdleMs(engine.threadId, engine.policy, { enabled: true, headroom: () => factor, roomFactor: () => factor }, now)) continue;
+    if (!engine.spare?.() && now - since < engineIdleMs(engine.threadId, engine.policy, { enabled: true, headroom: () => factor, roomFactor: () => factor }, now, boxBytes)) continue;
     armed.delete(key);
     warmEngines.delete(key);
     engine.close();
@@ -176,14 +245,22 @@ export function prestartAllowed(box: Pick<BoxMemory, "bytes"> = boxMemory(), mem
 /**
  * How long one conversation's idle engine (per-chat) stays up after a turn. Where turns wait for room (a Cloud home, a
  * self-hosted Linux server): briefly for a thread no person has had in front of them lately, and for the one they have,
- * the configured time scaled by the room left (memory and, under a pids limit, processes; down to a tenth). Elsewhere the
- * configured time.
+ * the configured time scaled by the room left (memory and, under a pids limit, processes; down to a tenth). An engine whose
+ * cold start is expensive keeps EXPENSIVE_IDLE_MS (watched) or EXPENSIVE_UNWATCHED_IDLE_MS (unwatched) instead while the
+ * room holds one more of the largest engines beside it (roomBesideIdle); the sweep shortens it again as soon as it does
+ * not, and admission stops it first when another engine needs the room. Elsewhere the configured time: with no memory to
+ * read there, nothing could shorten a longer one later.
  */
 export function engineIdleMs(threadId: string, policy: SessionIdlePolicy,
-  memory: Pick<EngineMemory, "enabled" | "headroom"> & Partial<Pick<EngineMemory, "roomFactor">> = engineMemory, now: number = Date.now()): number {
+  memory: Pick<EngineMemory, "enabled" | "headroom"> & Partial<Pick<EngineMemory, "roomFactor">> = engineMemory, now: number = Date.now(),
+  boxBytes: number = boxMemory().bytes): number {
   if (!memory.enabled) return policy.idleMs;
-  if (!seenWithin(threadId, WATCHED_MS, now)) return Math.max(policy.minimumMs, Math.min(policy.idleMs, UNWATCHED_IDLE_MS));
-  return idleAfter(policy.idleMs, policy.minimumMs, memory.roomFactor?.() ?? memory.headroom());
+  const factor = memory.roomFactor?.() ?? memory.headroom();
+  const roomy = policy.expensiveIdleMs !== undefined && roomBesideIdle(factor, boxBytes);
+  if (!seenWithin(threadId, WATCHED_MS, now)) {
+    return Math.max(policy.minimumMs, roomy ? EXPENSIVE_UNWATCHED_IDLE_MS : Math.min(policy.idleMs, UNWATCHED_IDLE_MS));
+  }
+  return roomy ? policy.expensiveIdleMs! : idleAfter(policy.idleMs, policy.minimumMs, factor);
 }
 
 /** Whether this thread's engine (`pid`, the process that exited) was just stopped to make room, or for want of it, or for

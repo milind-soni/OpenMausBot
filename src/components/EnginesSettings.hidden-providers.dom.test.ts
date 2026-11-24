@@ -103,8 +103,8 @@ describe("Settings → AI: a provider hidden from its own card", () => {
     expect(hiddenRows()).toEqual(["kimi"]);
     expect(server.refreshes).toBe(0);
     expect(moreCount()).toContain("More providers");
-    // Hidden Kimi and the Google AI Studio row.
-    expect(moreCount()).toContain("2");
+    // Only hidden Kimi: the Google AI Studio row is in the main list.
+    expect(moreCount()).toMatch(/\D1$/);
     const hiddenRow = container.querySelector('[data-hidden-engine="kimi"]')!;
     expect(hiddenRow.textContent).toContain("Kimi");
     expect(hiddenRow.textContent).toContain(t("settings.ai.hiddenStatus"));
@@ -122,7 +122,7 @@ describe("Settings → AI: a provider hidden from its own card", () => {
     server.hidden.add("kimi");
     fixture.state = { ...fixture.state, instances: [codex] };
     await render(false);
-    expect(moreCount()).toContain("2");
+    expect(moreCount()).toMatch(/\D1$/);
     expect(hiddenRows()).toEqual([]);
     await render(true);
     expect(hiddenRows()).toEqual(["kimi"]);
@@ -203,6 +203,21 @@ describe("Settings → AI: Sign out on other CLI sign-ins", () => {
     await click([...document.body.querySelectorAll("button")].filter((button) => button.textContent === "Sign out").at(-1));
     expect(server.calls).toContainEqual({ method: "POST", path: `/api/instances/${engine.instanceId}/auth/sign-out` });
     expect(server.calls.some((call) => call.method === "PATCH")).toBe(false);
+  });
+
+  // The native CLI keeps each account's sign-in in its own profile (antigravity-acp.ts), so signing out ends that one alone.
+  it.each([["antigravity", true], ["agy", false]] as const)("asks the usual question before signing out an account on %s (native CLI: %s)", async (cli, native) => {
+    server.all = [codex, {
+      instanceId: "antigravity", driverKind: "antigravityAgent", displayName: "Antigravity", cli,
+      snapshot: { state: "available", authenticated: true, ...(native ? { nativeCli: true as const } : {}) }, models: { default: "gemini", options: [] },
+      authentication: { method: "callback-url", signOut: true },
+    }];
+    fixture.state = { ...fixture.state, instances: [...server.all] };
+    await render();
+    await click(rowButton("antigravity"));
+    await click([...container.querySelectorAll('[data-engine-card="antigravity"] button')].find((button) => button.textContent === "Sign out"));
+    expect(document.body.textContent).toContain("Bots that use this account need it signed in again before their next task.");
+    expect(document.body.textContent).not.toContain("keeps one sign-in");
   });
 
   it("offers no Sign out to an engine an API key signs in", async () => {

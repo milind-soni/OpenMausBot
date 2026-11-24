@@ -25,6 +25,11 @@ const __APP_VERSION__: string;
   type DesktopSharedFolder = import("../../electron/computer-sharing.mjs").SharedFolder;
   type DesktopComputerSharing = import("../../electron/computer-sharing.mjs").SharingState;
   type DesktopLendingActivity = import("../../electron/computer-sharing.mjs").LendingActivityEntry;
+  /** Lending this computer to one server, as the switch shows it (electron/server-lending.mjs view). `why`: what keeps it
+   * from being lent there. `screen`: why its apps and screen don't work yet while it is on (screen-status.mjs). */
+  type DesktopLendView =
+    | { name: string; lendable: true; on: boolean; connected: boolean; paused: boolean; screen?: "starting" | "permissions" | "blocked" | "off" | "not-running" | "unsupported" }
+    | { name: string; lendable: false; why: "team" | "cloud" | "not-owner" | "shared" | "old" | "unreachable" | "settings" };
 
   type DesktopCapabilities = {
     host: {
@@ -46,7 +51,7 @@ const __APP_VERSION__: string;
     };
     dictation: {
       available: boolean;
-      engine: "apple-speech" | "fish-audio" | "none";
+      engine: "apple-speech" | "windows-speech" | "fish-audio" | "none";
       onDevice: boolean;
       reasonCode?: string;
     };
@@ -62,8 +67,21 @@ const __APP_VERSION__: string;
       driverSource?: "bundled" | "environment" | "user-local" | "path" | "system-package";
       session?: "x11" | "wayland" | "headless" | "unknown";
       compositor?: "gnome-mutter" | "hyprland";
+      /** Set with the Wayland seat-safety block: false on a desktop that isn't Ubuntu, which may have no Xorg session. */
+      ubuntuDesktop?: boolean;
     };
   };
+
+  interface BrowserCookieSource {
+    id: string;
+    name: string;
+    engine: "chromium" | "firefox" | "safari";
+    profiles: Array<{ id: string; name: string }>;
+  }
+
+  type BrowserCookieImportResult =
+    | { ok: true; site: string; imported: number; sessionOnly: number; skipped: Partial<Record<string, number>> }
+    | { ok: false; reason: string };
 
   interface DesktopWorkspaceBounds {
     x: number;
@@ -206,6 +224,9 @@ const __APP_VERSION__: string;
         /** Remove from list: a Cloud the window's rail lists as `removable`, by its circle's id, once the person said yes on
          * the rail's own page (refused on any other page). Absent on an older app. */
         remove?: (id: string) => Promise<{ outcome: import("../../electron/cloud-account.mjs").CloudRemoveOutcome }>;
+        /** Rename: a server the window's rail lists with `renames`, by its circle's id, under a name kept on this computer
+         * only. Absent on an older app. */
+        rename?: (id: string, name: string) => Promise<{ outcome: "saved" | "name" | "failed" | "unsupported" }>;
         /** Make a server of the person's own, which the rail lists with `makeHome`, their bots' home: the move starts. */
         makeHome?: (id: string) => Promise<{ started: true }>;
         /** The ids of the servers main offers Make … my home for now (none once a move is done). Absent on an older app. */
@@ -298,6 +319,17 @@ const __APP_VERSION__: string;
         /** Every Cloud and server of the person's own stops using this computer until resume(), as the icon's menu does. */
         pause?(): Promise<void>;
         resume?(): Promise<void>;
+      };
+      /** The one switch for lending this computer to a server of the person's own (electron/server-lending.mjs). On this
+       * app's own page `id` names the saved server; on a server's own page it is that server, whatever `id` says. */
+      lendComputer?: {
+        state(id: string | null): Promise<DesktopLendView>;
+        set(id: string | null, on: boolean): Promise<DesktopLendView>;
+        /** macOS: asks for Accessibility and Screen Recording, the one step the system itself requires. */
+        allowScreen(id: string | null): Promise<DesktopLendView>;
+        /** The add form's switch (this app's own page only): lend to the server about to be paired at `address` if it
+         * turns out to be the person's own. */
+        wish?(address: string, on: boolean): Promise<boolean>;
       };
       confirm(message: string): Promise<boolean>;
       getCapabilities(): Promise<DesktopCapabilities>;
@@ -441,6 +473,21 @@ const __APP_VERSION__: string;
         setInteractive(contextId: string | null): Promise<boolean>;
         close(contextId?: string): Promise<boolean>;
         onState(cb: (state: DesktopWorkspaceState) => void): () => void;
+      };
+      /** A bot's browser as a native view over its Browser panel (browserEngine.surface "pane"). The main process asks
+       * the server which browser the bot's panel shows; the page never names one. */
+      browserPane?: {
+        show(input: { botId: string; threadId: string | null; profile: string | null; bounds: DesktopWorkspaceBounds | null; visible: boolean }): Promise<{ shown: boolean }>;
+        /** The person takes the tab the panel shows from the bot (`held`), or hands it back; the bot may only read a
+         * held tab. Every hold ends when the window closes. */
+        hold(input: { botId: string; threadId: string | null; held: boolean }): Promise<{ held: boolean }>;
+      };
+      /** A site's sign-in from the person's own browsers into a bot's browser, which the person starts. Counts and a
+       * reason code come back, never a cookie. `offer` says whether a site can be imported for a bot (Google never). */
+      browserCookies?: {
+        sources(): Promise<BrowserCookieSource[]>;
+        offer(input: { botId: string; threadId: string | null; site: string }): Promise<{ offered: boolean; reason?: string }>;
+        import(input: { botId: string; threadId: string | null; site: string; source: string; profile: string }): Promise<BrowserCookieImportResult>;
       };
       /** Native folder picker; resolves null when the user cancels. */
       pickFolder?(current?: string): Promise<string | null>;

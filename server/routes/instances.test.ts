@@ -71,7 +71,7 @@ async function serve(extra: Partial<InstanceRouteDeps> = {}, auth: RequestAuth =
     await call("GET", "/api/instances");
     return fake.probes.length;
   };
-  return { sign, call, probesAfterList, base, fake };
+  return { sign, call, probesAfterList, base, fake, registry };
 }
 
 describe("engine sign-in routes", () => {
@@ -101,6 +101,54 @@ describe("engine sign-in routes", () => {
 
     await call("POST", "/api/instances/a/auth/sign-out", {});
     expect(await probesAfterList()).toBe(5);
+  });
+});
+
+const phoneHeaders = { "x-openmausbot-companion": "1", "x-openmausbot-companion-device": "phone-1" };
+
+describe("browser sign-in from a paired phone", () => {
+  const start = (base: string, headers: Record<string, string> = {}) =>
+    fetch(`${base}/api/instances/a/auth/start`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: "{}" });
+
+  it("is refused with the instruction to use the computer, while a code sign-in and the desktop itself are not", async () => {
+    const phone: RequestAuth = { kind: "loopback", scopes: ["admin", "client"], companionDevice: "phone-1" };
+    const onPhone = await serve({}, phone);
+    const desktop = await serve();
+    const instance = (served: typeof onPhone) => served.registry.get("a") as { authenticationMethod?: string };
+
+    instance(onPhone).authenticationMethod = "browser";
+    const refused = await start(onPhone.base);
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as { error: string }).error).toMatch(/happens in a browser on the computer/);
+
+    instance(onPhone).authenticationMethod = "browser-pkce";
+    const pkce = await start(onPhone.base);
+    expect(pkce.status).toBe(403);
+    expect(((await pkce.json()) as { error: string }).error).toMatch(/Continue with ChatGPT on the computer/);
+
+    instance(onPhone).authenticationMethod = "code";
+    expect((await start(onPhone.base)).status).toBe(200);
+
+    instance(desktop).authenticationMethod = "browser";
+    // The standalone companion has no desktop token: its phone is plain loopback carrying only the companion's mark.
+    expect((await start(desktop.base, phoneHeaders)).status).toBe(403);
+    expect((await start(desktop.base)).status).toBe(200);
+  });
+});
+
+describe("whose sign-in it is", () => {
+  it("gives a phone its own, so it never resumes or cancels the computer's", async () => {
+    const { base } = await serve();
+    const start = (headers: Record<string, string> = {}) =>
+      fetch(`${base}/api/instances/a/auth/start`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: "{}" });
+    const cancel = (headers: Record<string, string> = {}) =>
+      fetch(`${base}/api/instances/a/auth/cancel`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ flowId: "flow-1" }) });
+
+    expect((await start()).status).toBe(200);
+    expect((await start(phoneHeaders)).status).toBe(409);
+    expect((await cancel(phoneHeaders)).status).toBe(404);
+    expect((await start()).status).toBe(200);
+    expect((await cancel()).status).toBe(200);
   });
 });
 

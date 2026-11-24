@@ -125,11 +125,15 @@ export function parseWaitRequest(body: unknown, home: string): { ok: true; reque
 export function waitSourceRefusal(turn: {
   owned: boolean; room: boolean; depth: number; handedOff: boolean; routineRun: boolean; outsideDriven: boolean; personStarted: boolean; guest: boolean;
   op?: "create" | "cancel"; assignmentId?: string; waitContinuation?: boolean;
+  /** A Cloud home confines outside work; off a Cloud its record only stops a level travelling (outside-lineage.ts). */
+  cloudHome?: boolean;
 }): string | null {
   if (!turn.owned) return WAIT_MESSAGES.notYours;
   if (turn.room) return WAIT_MESSAGES.room;
   if (turn.waitContinuation && turn.routineRun && turn.depth === 0 && !turn.handedOff && !turn.guest && turn.op === "create") return null;
-  if (turn.routineRun || turn.outsideDriven) return WAIT_MESSAGES.notPerson;
+  // Off a Cloud, mail read or work handed on from such a conversation does not undo the person's own request that started this turn.
+  const outside = turn.outsideDriven && (turn.cloudHome !== false || !turn.personStarted);
+  if (turn.routineRun || outside) return WAIT_MESSAGES.notPerson;
   if (turn.depth > 0 || turn.handedOff) {
     if (!turn.personStarted || turn.guest || !turn.assignmentId) return WAIT_MESSAGES.notPerson;
     return turn.op === "create" ? null : WAIT_MESSAGES.handedStop;

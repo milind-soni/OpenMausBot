@@ -1,9 +1,11 @@
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { browserAvailable, builtInBrowserEnabled } from "@/lib/feature-flags";
 import { stateForBot } from "@/lib/mascot";
-import { useStore, type Bot } from "@/state/store";
+import { type Bot } from "@/state/store";
 import { approvalModeFor } from "../../../shared/approval-mode";
 import { connectorGrantsState, type ConnectorGrantsState } from "@/lib/connector-grants";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
+import { useBotApartFromTurns } from "@/state/apart-from-turns";
 
 export type BotPatch = Partial<
   Pick<
@@ -20,6 +22,8 @@ export type BotPatch = Partial<
     | "mascotExpression"
     | "mascotBody"
     | "mascotFaceColor"
+    | "mascotBodyColor"
+    | "mascotMaterial"
     | "avatarUrl"
     | "avatarCrop"
     | "avatarZoom"
@@ -56,11 +60,15 @@ export type BotPatch = Partial<
 };
 
 export function useBotSettingsDerived(bot: Bot) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config, instances: s.instances, routines: s.routines }), sameFields), dispatch = useStoreDispatch();
+  const currentChief = useBotApartFromTurns((bots) => bots.find(
+    (candidate) =>
+      candidate.chiefOfStaff &&
+      (candidate.section?.trim() || "") === (bot.section?.trim() || ""),
+  ));
   const { capabilities } = useDesktopCapabilities();
   const patch = (p: BotPatch) => dispatch({ type: "updateBot", botId: bot.id, patch: p });
   const activeState = stateForBot(bot);
-  const mascotMotion = state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
   const engine = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
   const approvalMode = approvalModeFor(bot);
   const trustedModesAvailable = Boolean(window.ogb?.approvals && capabilities.host.packaged);
@@ -77,11 +85,6 @@ export function useBotSettingsDerived(bot: Bot) {
   const browserAllowed = bot.browser !== false;
   const browserEnabled = browserFeature && browserAllowed;
   const sectionName = bot.section?.trim() || "General";
-  const currentChief = state.bots.find(
-    (candidate) =>
-      candidate.chiefOfStaff &&
-      (candidate.section?.trim() || "") === (bot.section?.trim() || ""),
-  );
   const botRoutines = state.routines.filter((routine) => routine.botId === bot.id);
   const activeBotRoutines = botRoutines.filter((routine) => routine.enabled).length;
 
@@ -106,6 +109,5 @@ export function useBotSettingsDerived(bot: Bot) {
     botRoutines,
     activeBotRoutines,
     activeState,
-    mascotMotion,
   };
 }

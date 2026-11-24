@@ -44,6 +44,8 @@ import * as localInject from "./local-inject.ts";
 import { DEFER_TOOLS_ENV } from "./agents-claude-defer.ts";
 import { OWN_MCP_HTTP_ENV } from "./own-mcp-http.ts";
 
+const personalMemory = () => [join(homedir(), ".claude", "CLAUDE.md"), join(homedir(), ".claude", "rules", "**")];
+
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-claude-cli.ts");
 const dumpedPid = (dump: string): number => JSON.parse(readFileSync(dump, "utf8")).pid;
 
@@ -1720,6 +1722,20 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.argv[seen.argv.indexOf("--autocompact") + 1]).toBe("200000");
   });
 
+  it("compacts a Claude Opus 5.5 (1M) CLI session at 1M", async () => {
+    await create();
+    await instance.snapshot();
+    const dump = join(scratch, "compact-1m.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-compact-1m", text: "hi", model: "claude-opus-5-5[1m]" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv[seen.argv.indexOf("--model") + 1]).toBe("claude-opus-5-5[1m]");
+    expect(seen.argv[seen.argv.indexOf("--autocompact") + 1]).toBe("1000000");
+  });
+
   it("clamps a configured compaction window into the range the CLI accepts", () => {
     expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "50000" })).toBe("100000");
     expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "9000000" })).toBe("1000000");
@@ -1728,6 +1744,16 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(autoCompactWindow({})).toBe("200000");
     expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "auto" })).toBe("auto");
     expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "off" })).toBe(null);
+  });
+
+  it("compacts at 1M by default only for the Claude Opus 5.5 (1M) pick", () => {
+    expect(autoCompactWindow({}, "claude-opus-5-5[1m]")).toBe("1000000");
+    expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "nonsense" }, "claude-opus-5-5[1m]")).toBe("1000000");
+    expect(autoCompactWindow({}, "claude-opus-5-5")).toBe("200000");
+    expect(autoCompactWindow({}, "claude-sonnet-4-6[1m]")).toBe("200000");
+    expect(autoCompactWindow({}, null)).toBe("200000");
+    expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "300000" }, "claude-opus-5-5[1m]")).toBe("300000");
+    expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "off" }, "claude-opus-5-5[1m]")).toBe(null);
   });
 
   it("passes no compaction window when it is turned off", async () => {
@@ -1772,7 +1798,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       expect(seen.settings.permissions).toEqual({ deny: ["Read(./.env)"] });
       expect(seen.settings.env).toMatchObject({ GUARD_LEVEL: "strict", ENABLE_TOOL_SEARCH: "true" });
       expect(seen.settings).not.toHaveProperty("model");
-      expect(seen.settings.claudeMdExcludes).toEqual([join(homedir(), ".claude", "CLAUDE.md")]);
+      expect(seen.settings.claudeMdExcludes).toEqual(personalMemory());
     });
 
     it("keeps an MCP output limit the bot's settings set instead of the automatic one", async () => {
@@ -1869,7 +1895,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.argv).toContain("--strict-mcp-config");
     expect(seen.argv[seen.argv.indexOf("--setting-sources") + 1]).toBe("project");
-    expect(seen.settings.claudeMdExcludes).toEqual([join(homedir(), ".claude", "CLAUDE.md")]);
+    expect(seen.settings.claudeMdExcludes).toEqual(personalMemory());
     // A bot's memory is OpenMausBot's: the CLI's per-folder one would split notes by thread and break the cached prompt.
     expect(seen.settings.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBe("1");
   });
@@ -2027,7 +2053,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await instance.adapter.sendTurn({ threadId: "t-auth-settings", text: "hi" });
     await recorder.until((e) => e.type === "turn.completed");
     const seen = JSON.parse(readFileSync(dump, "utf8"));
-    expect(seen.settings).toEqual({ claudeMdExcludes: [join(homedir(), ".claude", "CLAUDE.md")], apiKeyHelper: settings.apiKeyHelper, env: { ANTHROPIC_BASE_URL: settings.env.ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN: "synthetic-token", ENABLE_TOOL_SEARCH: "true", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" } });
+    expect(seen.settings).toEqual({ claudeMdExcludes: personalMemory(), apiKeyHelper: settings.apiKeyHelper, env: { ANTHROPIC_BASE_URL: settings.env.ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN: "synthetic-token", ENABLE_TOOL_SEARCH: "true", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" } });
     expect(seen.argv[seen.argv.indexOf("--setting-sources") + 1]).toBe("project");
     expect(JSON.stringify(seen.argv)).not.toContain("synthetic");
     const settingsPath = seen.argv[seen.argv.indexOf("--settings") + 1];
@@ -2138,7 +2164,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await instance.adapter.sendTurn({ threadId: "t-auth-explicit", text: "hi" });
     await recorder.until((e) => e.type === "turn.completed");
     const seen = JSON.parse(readFileSync(dump, "utf8"));
-    expect(seen.settings).toEqual({ claudeMdExcludes: [join(homedir(), ".claude", "CLAUDE.md")], env: { ENABLE_TOOL_SEARCH: "true", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" } });
+    expect(seen.settings).toEqual({ claudeMdExcludes: personalMemory(), env: { ENABLE_TOOL_SEARCH: "true", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" } });
     expect(seen.env.ANTHROPIC_API_KEY).toBe("workspace-key");
     expect(seen.env.ANTHROPIC_BASE_URL).toBeUndefined();
     expect(readClaudeAuthSettings({ HOME: scratch, CLAUDE_CONFIG_DIR: join(scratch, "other-account") })).toEqual({});
@@ -2966,6 +2992,66 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(instance.adapter.capabilities.localComputerMcp).toBe(true);
   });
 
+  it("mounts a cloud computer without pre-allowing its tools", async () => {
+    await create();
+    const dump = join(scratch, "cloud-dump.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    await instance.adapter.sendTurn({
+      threadId: "t-cloud",
+      text: "fill in the form",
+      approvalMode: "ask",
+      integrations: {
+        localComputer: {
+          command: process.execPath,
+          args: ["/fake/harness-mcp", "computer"],
+          env: { OMB_HARNESS_URL: "http://127.0.0.1:1" },
+          platform: "linux",
+        },
+      },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.mcpConfig.mcpServers.computer).toBeDefined();
+    const allowed = seen.argv[seen.argv.indexOf("--allowedTools") + 1];
+    expect(allowed).not.toContain("mcp__computer");
+  });
+
+  it("asks before a cloud computer acts, with session allowance like a command", async () => {
+    await create("hang");
+    await instance.adapter.sendTurn({
+      threadId: "t-cloud-ask",
+      text: "go",
+      approvalMode: "ask",
+      integrations: {
+        localComputer: {
+          command: process.execPath,
+          args: ["/fake/harness-mcp", "computer"],
+          env: {},
+          platform: "linux",
+        },
+      },
+    });
+    await recorder.until((e) => e.type === "session.started");
+
+    const conn = connect(permissionSocketPath("t-cloud-ask"));
+    await new Promise<void>((resolve, reject) => {
+      conn.on("connect", resolve);
+      conn.on("error", reject);
+    });
+    conn.write(JSON.stringify({ t: "ask", id: "ask-1", tool: "mcp__computer__click", input: { x: 1, y: 2 } }) + "\n");
+
+    const opened = await recorder.until((e) => e.type === "request.opened" && e.requestId === "ask-1");
+    expect(opened).toMatchObject({ requestType: "permission", tool: "mcp__computer__click" });
+    expect(opened).toHaveProperty("allowSession", true);
+    expect(opened).toHaveProperty("approvalScope", undefined);
+    await instance.adapter.respondToRequest("t-cloud-ask", "ask-1", { behavior: "deny" });
+
+    conn.end();
+    await instance.adapter.interruptTurn("t-cloud-ask");
+    await recorder.until((e) => e.type === "turn.completed");
+  });
+
   it("resumes with --resume when a cursor exists and reports that session id", async () => {
     await create();
     const dump = join(scratch, "dump.json");
@@ -3129,7 +3215,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     }));
   });
 
-  it.each([false, true])("finalizes root close after an uncertain Stop succeeds on retry (retained: %s)", async (retained) => {
+  it.each([false, true])("settles an interrupted turn once the root closes, even with tree uncertainty (retained: %s)", async (retained) => {
     const gate = join(scratch, "retry-stop.gate");
     await create("slow", { FAKE_CLAUDE_SLOW_FINISH_GATE: gate });
     const threadId = `t-retry-stop-${retained}`;
@@ -3149,19 +3235,73 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     try {
       await instance.adapter.interruptTurn(threadId);
       await recorder.until((event) => event.type === "runtime.error" && event.message.includes("could not be confirmed stopped"));
-      expect(instance.adapter.hasSession(threadId)).toBe(true);
-      expect(recorder.events.some((event) => event.type === "turn.completed" && event.turnId === running.turnId)).toBe(false);
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === running.turnId)).toMatchObject({ ok: false, stopReason: "interrupted" });
+      expect(instance.adapter.hasSession(threadId)).toBe(false);
+      expect(recorder.events.filter((event) => event.type === "turn.completed" && event.turnId === running.turnId)).toHaveLength(1);
     } finally {
       uncertain.mockRestore();
-      await instance.adapter.interruptTurn(threadId);
     }
-    await recorder.until((event) => event.type === "turn.completed" && event.turnId === running.turnId);
-    expect(instance.adapter.hasSession(threadId)).toBe(false);
-    expect(recorder.events.filter((event) => event.type === "turn.completed" && event.turnId === running.turnId)).toHaveLength(1);
 
     writeFileSync(gate, "finish");
     const replacement = await instance.adapter.sendTurn({ threadId, text: "replacement" });
-    await recorder.until((event) => event.type === "turn.completed" && event.turnId === replacement.turnId);
+    expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === replacement.turnId)).toMatchObject({ ok: true });
+  });
+
+  it("closes an interrupted turn even when the tool call's tree stays unconfirmed", async () => {
+    const release = join(scratch, "unconfirmed-release");
+    await create(undefined, {
+      FAKE_CLAUDE_TOOL_CALLS: JSON.stringify([{ name: "Bash", input: { command: "sleep 60" }, hold: "idle" }]),
+      FAKE_CLAUDE_RELEASE: release,
+    });
+    const threadId = "t-unconfirmed-stop";
+    const running = await instance.adapter.sendTurn({ threadId, text: "hold the tool" });
+    await recorder.until((event) => event.type === "item.started" && event.itemType === "tool" && event.turnId === running.turnId);
+    const kill = procs.killCliTree;
+    const uncertain = vi.spyOn(procs, "killCliTree").mockImplementation(async (child) => {
+      await kill(child, 0); // the engine itself is gone; only the tree answer stays unknown
+      return false;
+    });
+    try {
+      await instance.adapter.interruptTurn(threadId);
+      await recorder.until((event) => event.type === "runtime.error" && event.message.includes("could not be confirmed stopped"));
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === running.turnId)).toMatchObject({ ok: false, stopReason: "interrupted" });
+      expect(instance.adapter.hasSession(threadId)).toBe(false);
+      expect(recorder.events.filter((event) => event.type === "turn.completed" && event.turnId === running.turnId)).toHaveLength(1);
+    } finally {
+      uncertain.mockRestore();
+      writeFileSync(release, "go");
+    }
+    const replacement = await instance.adapter.sendTurn({ threadId, text: "replacement" });
+    expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === replacement.turnId)).toMatchObject({ ok: true });
+  });
+
+  it("warns only once when the late close also fails to confirm the stop", async () => {
+    const release = join(scratch, "unconfirmed-warn-once");
+    await create(undefined, {
+      FAKE_CLAUDE_TOOL_CALLS: JSON.stringify([{ name: "Bash", input: { command: "sleep 60" }, hold: "idle" }]),
+      FAKE_CLAUDE_RELEASE: release,
+    });
+    const threadId = "t-unconfirmed-warn-once";
+    const running = await instance.adapter.sendTurn({ threadId, text: "hold the tool" });
+    await recorder.until((event) => event.type === "item.started" && event.itemType === "tool" && event.turnId === running.turnId);
+    const kill = procs.killCliTree;
+    const uncertain = vi.spyOn(procs, "killCliTree").mockImplementation(async (child) => {
+      await kill(child, 0); // the engine itself is gone; only the tree answer stays unknown
+      return false;
+    });
+    try {
+      await instance.adapter.interruptTurn(threadId);
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === running.turnId)).toMatchObject({ ok: false, stopReason: "interrupted" });
+      // The root's late close finalizes through the same unconfirmed tree; the warning must not repeat.
+      await vi.waitFor(() => expect(uncertain.mock.results.length).toBeGreaterThanOrEqual(2));
+      await uncertain.mock.results[1].value;
+      expect(recorder.events.filter((event) => event.type === "runtime.error" && event.message.includes("could not be confirmed stopped"))).toHaveLength(1);
+    } finally {
+      uncertain.mockRestore();
+      writeFileSync(release, "go");
+    }
+    const replacement = await instance.adapter.sendTurn({ threadId, text: "replacement" });
+    expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === replacement.turnId)).toMatchObject({ ok: true });
   });
 
   it("a message sent mid-turn is steered into the running turn", async () => {

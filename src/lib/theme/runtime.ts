@@ -5,6 +5,7 @@ import { readColorScheme } from "../color-scheme";
 import { DEFAULT_SKIN_CHOICE, SKIN_IDS, applySkinChoice, readSkin, resolveSkin, subscribeSkin, THEME_SKINS, wearSkin, type SkinChoice } from "../skins";
 import { accentPalette, canvasPalette, modeOf } from "./palette";
 import { applyThemeCss } from "./theme-css";
+import { serverFetch } from "../relay-server";
 
 const CACHE_KEY = "omb-theme";
 const SAFE_KEY = "omb-safe-look";
@@ -89,7 +90,8 @@ function paint(): void {
     }
     if (theme.font) {
       root.style.setProperty("--font-sans", theme.font);
-      painted.push("--font-sans");
+      root.style.setProperty("--tracking-ui", "0");
+      painted.push("--font-sans", "--tracking-ui");
     }
     root.dataset.theme = worn!.id;
     applyThemeCss(theme.css ?? "");
@@ -123,7 +125,7 @@ function cachedTheme(): WornTheme | null {
 /** Asks the server which theme this person wears and wears it. A failed read keeps what is painted. */
 export async function loadTheme(): Promise<void> {
   try {
-    const res = await fetch("/api/themes/active", { headers: { accept: "application/json" } });
+    const res = await serverFetch("/api/themes/active", { headers: { accept: "application/json" } });
     if (!res.ok) return;
     const active = (await res.json()) as ActiveTheme;
     const theme = active.theme ? themeFileSchema.safeParse(active.theme) : null;
@@ -140,7 +142,7 @@ export function applyThemeFrame(frame: { skin?: string }): void {
 }
 
 const wearOnServer = (id: string | null, skin?: SkinChoice) =>
-  fetch("/api/themes/active", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, ...(skin ? { skin } : {}) }) })
+  serverFetch("/api/themes/active", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, ...(skin ? { skin } : {}) }) })
     .then((res) => res.ok, () => false);
 
 /** Takes the custom theme off for this person, here at once and on the server for their other windows. */

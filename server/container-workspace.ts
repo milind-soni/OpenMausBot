@@ -13,21 +13,43 @@ export function workspacePreparationDockerfile(workspace: string): string {
       'fi' \\
       'migrate_profile() {' \\
       '  source="$1"' \\
-      '  target="$profiles/$2"' \\
-      '  if [ -d "$source" ] && [ ! -L "$source" ] && [ -z "$(find "$target" -mindepth 1 -print -quit)" ]; then' \\
-      '    cp -a "$source"/. "$target"/' \\
+      '  target="$2"' \\
+      '  if [ -e "$source" ] && [ ! -L "$source" ]; then' \\
+      '    if [ -d "$source" ]; then' \\
+      '      cp -an "$source/." "$target/" || true' \\
+      '      missing=$(cd "$source" && find . -mindepth 1 -print | while IFS= read -r item; do' \\
+      '        if [ -L "$item" ]; then' \\
+      '          [ "$(readlink "$item")" = "$(readlink "$target/$item" || true)" ] || echo "$item"' \\
+      '        elif [ -f "$item" ]; then' \\
+      '          cmp -s "$item" "$target/$item" || echo "$item"' \\
+      '        elif [ ! -e "$target/$item" ]; then' \\
+      '          echo "$item"' \\
+      '        fi' \\
+      '      done)' \\
+      '      if [ -z "$missing" ]; then' \\
+      '        rm -rf "$source"' \\
+      '      else' \\
+      '        mv "$source" "$workspace/unmerged-$(basename "$target")-$(date +%s)-$$"' \\
+      '      fi' \\
+      '    else' \\
+      '      name=$(basename "$source")' \\
+      '      if [ -f "$target/$name" ] && cmp -s "$source" "$target/$name"; then' \\
+      '        rm -f "$source"' \\
+      '      elif [ ! -e "$target/$name" ]; then' \\
+      '        cp -a "$source" "$target/$name"' \\
+      '        rm -f "$source"' \\
+      '      else' \\
+      '        mv "$source" "$workspace/unmerged-$name-$(date +%s)-$$"' \\
+      '      fi' \\
+      '    fi' \\
       '  fi' \\
       '  rm -rf "$source"' \\
       '  ln -s "$target" "$source"' \\
       '}' \\
-      'migrate_profile "$HOME/.config/google-chrome" google-chrome' \\
-      'migrate_profile "$HOME/.config/chromium" chromium' \\
-      'migrate_profile "$HOME/.mozilla" mozilla' \\
-      'if [ -d "$HOME/.local" ] && [ ! -L "$HOME/.local" ] && [ -z "$(find "$apps/local" -mindepth 1 -print -quit)" ]; then' \\
-      '  cp -a "$HOME/.local"/. "$apps/local"/' \\
-      'fi' \\
-      'rm -rf "$HOME/.local"' \\
-      'ln -s "$apps/local" "$HOME/.local"' \\
+      'migrate_profile "$HOME/.config/google-chrome" "$profiles/google-chrome"' \\
+      'migrate_profile "$HOME/.config/chromium" "$profiles/chromium"' \\
+      'migrate_profile "$HOME/.mozilla" "$profiles/mozilla"' \\
+      'migrate_profile "$HOME/.local" "$apps/local"' \\
       'container_start="$(cat /proc/sys/kernel/random/boot_id):$(sed "s/.*) //" /proc/1/stat | cut -d " " -f20)"' \\
       'prepared="$HOME/.cache/openmausbot-browser-locks"' \\
       'if [ "$(cat "$prepared" 2>/dev/null || true)" != "$container_start" ]; then' \\

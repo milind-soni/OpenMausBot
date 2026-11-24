@@ -163,16 +163,17 @@ describe("Settings → Engines → setup cards", () => {
     expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain(note);
   });
 
-  it("shows the actual Google account email with an honest fallback", () => {
+  it("shows the actual Google account email, and only that it is signed in with Google when the email is not known", () => {
     vi.stubGlobal("window", {});
     fixture.bots = [];
     const instance: InstanceInfo = { instanceId: "google-work", driverKind: "antigravityAgent", displayName: "Work", cliDefault: "agy_acp_server", snapshot: { state: "available", authenticated: true, account: { email: "work@example.test" } }, models: { default: "gemini", options: [] } };
     fixture.instances = [instance];
     expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain("work@example.test");
     delete instance.snapshot.account;
-    expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain("account email unavailable");
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain("Signed in with Google");
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("unavailable");
     instance.snapshot.authenticated = false;
-    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("account email unavailable");
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("Signed in with Google");
   });
 
   it("offers removal for an added Antigravity account only", () => {
@@ -453,7 +454,7 @@ describe("Settings → AI in Simple mode", () => {
     ];
     const html = simple();
     expect(html).toContain(">Providers</h3>");
-    expect(rows(html)).toEqual(["claude", "codex"]);
+    expect(rows(html)).toEqual(["claude", "codex", "google-ai-studio"]);
     expect(html).toMatch(/data-simple-engine="claude"[\s\S]*?>Manage<\/button>/);
     expect(html).toMatch(/data-simple-engine="codex"[\s\S]*?>Set up<\/button>/);
     expect(html).not.toContain("Model providers and accounts");
@@ -461,8 +462,8 @@ describe("Settings → AI in Simple mode", () => {
 
   it("folds every other provider under More providers, in the same card, with the count", () => {
     fixture.instances = [engine("claude", "claudeAgent", true), engine("kimi", "kimiAgent", false), engine("mistral", "mistral", false)];
-    // Kimi, Mistral and the Google AI Studio row (a Gemini key).
-    expect(simple()).toMatch(/aria-expanded="false"[^>]*>[\s\S]*?More providers[\s\S]*?>3</);
+    // Kimi and Mistral; the Google AI Studio row (a Gemini key) is in the main list.
+    expect(simple()).toMatch(/aria-expanded="false"[^>]*>[\s\S]*?More providers[\s\S]*?>2</);
     expect(simple()).not.toContain('data-simple-engine="kimi"');
     expect(simple(true)).toContain('data-simple-engine="kimi"');
   });

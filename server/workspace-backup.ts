@@ -7,7 +7,7 @@ import {
 } from "node:fs";
 import { isAbsolute, join, parse, posix, relative, resolve, sep, win32 } from "node:path";
 import { homedir } from "node:os";
-import { backup, DatabaseSync } from "node:sqlite";
+import { DatabaseSync } from "node:sqlite";
 import { pipeline } from "node:stream/promises";
 import { Worker } from "node:worker_threads";
 import { writeFileAtomic } from "./atomic.ts";
@@ -15,9 +15,10 @@ import { userErrorFields, userErrorThrown } from "./user-errors.ts";
 import { WORKSPACE_BACKUP_CLIENT_KEYS } from "../shared/workspace-backup-client.ts";
 import { INSTRUCTION_FILE, restorePaths, validRelative } from "./workspace-backup-paths.ts";
 import { cjkSearchText } from "./cjk-search.ts";
-import { ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, liveDataEnginePath, managedTaskSkillLink, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
+import { dataEngineSpillPath, ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, managedTaskSkillLink, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
 import { omittedAsTeamPrivate, routinesWithoutTeamPrivate, stripTeamPrivate, TEAM_PRIVATE_NOTE, teamPrivateAttachments, teamPrivateThreads, withoutTeamPrivate } from "./workspace-backup-team-private.ts";
 import { flushLaterSaves } from "./save-batch.ts";
+import { DATA_TABLES, foldLegacySidecars, LEGACY_SIDECARS, LIVE_DATABASE_SIDECARS, SNAPSHOT_DATABASES, snapshotDatabases, tooLargeError } from "./workspace-backup-databases.ts";
 import type { WorkspaceBackupClientState, WorkspaceBackupPrivateMetadata, WorkspaceBackupSummary, WorkspaceLeftBehind } from "../shared/workspace-backup.ts";
 
 export type { WorkspaceBackupSummary, WorkspaceBackupPrivateMetadata } from "../shared/workspace-backup.ts";
@@ -47,6 +48,9 @@ const EXCLUDED = new Set([
   "box",
   // The processes this machine's servers started (engine-records.ts), stopped by its next start.
   "engine-runs",
+  // Deleted and idle conversations' dependency trees on their way out, what the orphan sweep has seen on this disk and
+  // what the idle reclaim shed (host/conversation-folder-cleanup.ts, host/orphan-sweep.ts, host/idle-reclaim.ts).
+  ".removing", "orphan-sweep.json", "idle-reclaim.json",
   // A Team Cloud's engine homes (engine-homes/layout.ts): CLI login homes, each audience's own transcripts and the held
   // folder, which no admin reads.
   "engine-homes",
@@ -57,6 +61,8 @@ const EXCLUDED = new Set([
   // The doctor's copies of what it repaired, and the version it last ran for (doctor/backup.ts, doctor/start.ts): this
   // folder's own history, and copies of files a backup already holds.
   "doctor-backups", "doctor-state.json",
+  // A Cloud server's database copies for its own backup of the volume (cloud-backup-stage.ts), removed when it is packed.
+  "backup-stage",
 ]);
 const EXCLUSION_NOTES = [
   "Device pairing, server identity, live leases and runtime files (existing destination identities are preserved).",
@@ -111,8 +117,6 @@ function preserved(name: string): boolean {
   const folded = name.toLowerCase();
   return excluded(folded) && !LIVE_DATABASE_SIDECARS.has(folded) && folded !== WAITS_FILE;
 }
-const SNAPSHOT_DATABASES: Record<string, string> = { "messages.db": "messages-snapshot.db", "runtime.db": "runtime-snapshot.db" };
-const LIVE_DATABASE_SIDECARS = new Set(Object.keys(SNAPSHOT_DATABASES).flatMap((name) => [`${name}-wal`, `${name}-shm`]));
 function keptInPlace(name: string): boolean {
   return preserved(name) || name.toLowerCase() === "sessions.json.open";
 }
@@ -322,25 +326,14 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
   const foldedPaths = new Map<string, string>();
   const warnings = ["Stop external editors and managed desktops before exporting; files written outside this server cannot be frozen by the backup gate.", "Conversation text and user files are not redacted and may contain secrets you pasted. Keep the encrypted backup private.", RESTORE_WARNING];
   let bytes = 0;
+  let dataBytes = 0;
   let skippedLinks = 0;
   let skippedDependencies = 0;
   let skippedWorkLinks = 0;
   let copiedLinks = 0;
   try {
     const root = realpathSync(dataDir);
-    for (const [name, snapshotName] of Object.entries(SNAPSHOT_DATABASES)) {
-      const sourceDb = join(root, name);
-      if (!existsSync(sourceDb)) continue;
-      if (lstatSync(sourceDb).isSymbolicLink()) throw new Error(`The ${name === "messages.db" ? "message" : "runtime"} database must not be a symbolic link.`);
-      // Another connection may open this database meanwhile; without a busy timeout the backup fails at once ("database is locked").
-      const db = new DatabaseSync(sourceDb, { readOnly: true, timeout: 5_000 });
-      // Node 26's native backup completion can wait on unrelated event-loop activity after an async scrypt; this pulse keeps it moving.
-      const completionPulse = setInterval(() => {}, 25);
-      try { await backup(db, join(snapshot, snapshotName)); }
-      finally { clearInterval(completionPulse); db.close(); }
-      const snapshotDb = new DatabaseSync(join(snapshot, snapshotName));
-      try { snapshotDb.exec("PRAGMA journal_mode = DELETE"); } finally { snapshotDb.close(); }
-    }
+    await snapshotDatabases(root, snapshot);
     const teamPrivate = teamPrivateThreads({ starters: join(root, "thread-starters.json"), groups: join(root, "groups.json"), bots: join(root, "bots.json") });
     const privacy = teamPrivate && { ...teamPrivate, attachments: teamPrivateAttachments(root, join(snapshot, SNAPSHOT_DATABASES["messages.db"]!), teamPrivate) };
     if (privacy) {
@@ -349,9 +342,9 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
     }
     const walk = (directory: string, prefix = "", chain: string[] = [root]) => {
       for (const name of readdirSync(directory).sort()) {
-        if (!prefix && excluded(name)) continue;
+        if (!prefix && (excluded(name) || LEGACY_SIDECARS.has(name))) continue;
         const path = prefix ? `${prefix}/${name}` : name;
-        if (excludedWorkspaceAuthPath(path) || ephemeralWorkspaceTokenPath(path) || redownloadedOrgLibraryPath(path) || liveDataEnginePath(path)) continue;
+        if (excludedWorkspaceAuthPath(path) || ephemeralWorkspaceTokenPath(path) || redownloadedOrgLibraryPath(path) || dataEngineSpillPath(path)) continue;
         if (privacy && omittedAsTeamPrivate(path, privacy)) continue;
         // Reject noncanonical spellings: a case-sensitive host must not export auth paths active on Windows/Mac.
         if (forbiddenArchivePath(path)) throw new Error("A workspace filename conflicts with a protected authentication or runtime path.");
@@ -407,6 +400,8 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
           entries.push({ path, type: "directory", size: 0, mode: 0o700 });
           walk(source, path, [...chain, source]);
         } else if (stat.isFile()) {
+          // Said before a copy that could take minutes: Data tables are the files a workspace grows past the limit with.
+          if (DATA_TABLES.test(path) && bytes + stat.size > MAX_WORKSPACE_BACKUP_BYTES) throw tooLargeError(bytes + stat.size, dataBytes + stat.size);
           let copied: { size: number; mode: number; sha256: string };
           if (path === "config.json" || path === "webhooks.json" || (privacy && (path === "bots.json" || path === "routines.json"))) {
             const value = privateJson(source);
@@ -422,7 +417,8 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
             copied = { size: lstatSync(destination).size, mode: 0o600, sha256: hashFile(destination) };
           } else copied = copyRegular(SNAPSHOT_DATABASES[path] ? join(snapshot, SNAPSHOT_DATABASES[path]) : source, destination);
           bytes += copied.size;
-          if (bytes > MAX_WORKSPACE_BACKUP_BYTES) throw new Error("The workspace exceeds the 10 GB backup limit.");
+          if (DATA_TABLES.test(path)) dataBytes += copied.size;
+          if (bytes > MAX_WORKSPACE_BACKUP_BYTES) throw tooLargeError(bytes, dataBytes);
           entries.push({ path, type: "file", ...copied });
         } else throw new Error(`Cannot back up special or live runtime file: ${path}`);
       }
@@ -724,6 +720,7 @@ function prepareRestore(dataDir: string, id: string, manifest: Manifest): string
     const destination = join(prepared, entry.path);
     if (entry.type === "file") copyRegular(join(job, "staged", "data", entry.path), destination);
   }
+  foldLegacySidecars(prepared);
   const changeJson = (name: string, change: (value: unknown) => void) => {
     const path = join(prepared, name);
     if (!existsSync(path)) return;
@@ -987,5 +984,5 @@ export function removeWorkspaceBackupJob(dataDir: string, id: string): void {
 }
 
 export function omittedFromWorkspaceBackup(path: string): boolean {
-  return excluded(path.split("/")[0]) || excludedWorkspaceAuthPath(path) || ephemeralWorkspaceTokenPath(path) || redownloadedOrgLibraryPath(path) || liveDataEnginePath(path);
+  return excluded(path.split("/")[0]) || excludedWorkspaceAuthPath(path) || ephemeralWorkspaceTokenPath(path) || redownloadedOrgLibraryPath(path) || dataEngineSpillPath(path);
 }

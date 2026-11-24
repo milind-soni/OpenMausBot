@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot } from "@/state/store";
 import { restoreComposerDraft } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
+import { isMacPlatform } from "@/lib/keyboard-shortcuts";
 
 const fixture = vi.hoisted(() => ({ dispatch: vi.fn() }));
 vi.mock("@/state/store", async (importOriginal) => {
@@ -18,6 +19,8 @@ vi.mock("@/state/store", async (importOriginal) => {
   }) };
 });
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
+// The model picker in Advanced mode's footer reads a store this file does not build.
+vi.mock("./ModelPicker", () => ({ ModelPicker: () => null }));
 vi.mock("@/lib/use-slash-skills", () => ({ useSlashSkills: () => [] }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => false }));
 vi.mock("./CallView", () => ({ CallButton: () => null }));
@@ -110,6 +113,34 @@ describe("native dictation in the real composer", () => {
     expect(speechStop).toHaveBeenCalled();
     hear("遅れた結果。");
     expect(input().value).toBe("");
+  });
+
+  it("stops and starts again with the dictation shortcut in the text field", () => {
+    const press = () => {
+      const event = new KeyboardEvent("keydown", { key: "d", code: "KeyD", bubbles: true, cancelable: true, ...(isMacPlatform() ? { metaKey: true } : { ctrlKey: true }) });
+      flushSync(() => input().dispatchEvent(event));
+      return event;
+    };
+    expect(press().defaultPrevented).toBe(true);
+    expect(speechStop).toHaveBeenCalledOnce();
+    expect(button(t("composer.dictation.start"))).not.toBeNull();
+    press();
+    expect(speechStart).toHaveBeenCalledTimes(2);
+    expect(button(t("composer.dictation.stop"))).not.toBeNull();
+  });
+
+  it("ignores the repeats of a held dictation shortcut", () => {
+    const press = (repeat: boolean) => {
+      const event = new KeyboardEvent("keydown", { key: "d", code: "KeyD", repeat, bubbles: true, cancelable: true, ...(isMacPlatform() ? { metaKey: true } : { ctrlKey: true }) });
+      flushSync(() => input().dispatchEvent(event));
+      return event;
+    };
+    press(false);
+    expect(speechStop).toHaveBeenCalledOnce();
+    expect(press(true).defaultPrevented).toBe(true);
+    expect(press(true).defaultPrevented).toBe(true);
+    expect(speechStart).toHaveBeenCalledOnce();
+    expect(button(t("composer.dictation.start"))).not.toBeNull();
   });
 
   it("accepts multiple recognition results before React paints", () => {

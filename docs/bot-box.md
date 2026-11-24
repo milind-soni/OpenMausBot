@@ -58,6 +58,117 @@ the same).
 
 Cost on Fly (measured, T0 build notes): about 5 ms and 3 MB per box, plus one socat per bridge.
 
+## Tool caches
+
+`server/bot-box/tool-caches.ts`, behind `OMB_CACHE_ROOT` (default off; `1`/`on` turns it on, only on a Cloud home, never
+on a desktop). With it on, the box gives each process the tools' own cache variables, so what a bot's tools download
+lands in one folder, `cache` in the box's HOME, instead of all over it:
+
+| Variable | Folder under `<box HOME>/cache` | Was | It beats (config files) |
+|---|---|---|---|
+| `npm_config_cache` (npx too) | `npm` | `~/.npm` | `cache=` in `~/.npmrc`, a project's `.npmrc`, the global npmrc |
+| `PIP_CACHE_DIR` | `pip` | `~/.cache/pip` | `cache-dir` in any `pip.conf` (global, user, a venv's) |
+| `UV_CACHE_DIR` | `uv` | `~/.cache/uv` | `cache-dir` in `uv.toml` or a project's `pyproject.toml` `[tool.uv]` |
+| `HF_HUB_CACHE`, `HF_XET_CACHE` | `huggingface/hub`, `huggingface/xet` | `~/.cache/huggingface/{hub,xet}` | none (Hugging Face reads only variables) |
+| `BUN_INSTALL_CACHE_DIR` | `bun` | `~/.bun/install/cache` | not checked against `bunfig.toml` `[install.cache] dir` |
+
+- **Where.** The box's HOME: `/data/cache` on a personal Cloud, `engine-homes/<audience>/cache` on a Team Cloud. So
+  the folder is shared exactly as `~/.npm` and `~/.cache` already are (every bot of a personal Cloud; one audience on a
+  Team Cloud, never another member's). It is under the HOME line of the plan, so no new mount is made: the bubblewrap
+  arguments are the same with the switch on or off (pinned by a test). The app's own rebuildable files stay in the data
+  folder's `cache/` (`NODE_COMPILE_CACHE`), which the box hides.
+- **Only a folder the server made.** On the first spawn for a HOME (never at start), the server makes `cache` there and
+  writes a `CACHEDIR.TAG` (the standard signature, plus a line naming OpenMausBot). A `cache` that is already there
+  without that tag and with anything in it is the person's own: nothing is written in it, and that HOME's tools keep
+  their own places. An empty one is marked and used (a start that made it may have stopped before writing the tag). A link
+  named `cache` is never the server's. The cache cap (below) works only in a tagged folder.
+- **A value in the environment wins; a value in a config file loses.** A cache variable the spawn was handed is kept:
+  one an engine's saved environment or an MCP server's environment passes through `allowEnv`, and one a driver merged in
+  without vouching (Claude's and Codex's instance environment), which goes back after the allow-list with its own value.
+  On a Cloud home the server's own environment carries none of these names (`SERVER_ENV_NAMES`). A cache whose place
+  something else the spawn was handed already decides is left alone: `XDG_CACHE_HOME` (pip, uv,
+  bun, Hugging Face), `HF_HOME`, `BUN_INSTALL`. What an engine or a shell sets for its own children (an MCP server's `env` in
+  the engine's config, an `export`) is set on top inside the box, so it wins too. But each variable beats the config
+  files in the table's last column, because each tool ranks its environment above them:
+  - what that costs is the place only: the tool downloads into ours what it would have found in the folder its config
+    names;
+  - what can fail: an install that must work offline from a cache folder a config file names (npm with `offline=true`
+    or `--offline`, uv with `offline = true` or `--offline`). It fails as it would with an empty cache. pip's cache
+    is never needed offline, and Hugging Face has no config file for its cache.
+- **Left alone on purpose.** `XDG_CACHE_HOME` (Hugging Face keeps its login token under it, and engines write there),
+  `HF_HOME` (the token), `CARGO_HOME` (credentials and installed programs), `GRADLE_USER_HOME` (properties that may hold
+  keys), `PNPM_HOME`, `UV_TOOL_DIR` and `UV_PYTHON_INSTALL_DIR` (installed programs and the Pythons venvs point into),
+  pnpm's store (a project's `node_modules` records it, and `npm_config_store_dir` makes every npm command warn), Yarn's
+  cache (a Berry project may keep it in the repository), Maven (no variable but `MAVEN_OPTS`), and:
+  - `PLAYWRIGHT_BROWSERS_PATH`: older `@playwright/mcp` releases (seen in 0.0.41, 0.0.70 and 0.0.75; 0.0.76 and later use
+    `~/.cache/ms-playwright-mcp`) keep the MCP browser's profile (cookies, site sign-ins) in that folder, so moving it
+    would sign the browser out;
+  - `PUPPETEER_CACHE_DIR`: it beats a project's `.puppeteerrc`, so a project keeping Chrome in its own folder would stop
+    finding it;
+  - `GOMODCACHE`: it beats `go env -w GOMODCACHE`, and a project building offline from its module cache would fail;
+  - `COREPACK_HOME`: its `lastKnownGood.json` records which package manager version is active, not only downloads;
+  - `GOCACHE`: it also holds Go's fuzzing corpus (`fuzz/`), which `go clean -cache` keeps.
+- **Nothing is moved or deleted.** The old folders stay; with the switch on, new downloads go to the new folder, and a
+  tool downloads once more what the old folder held (an npx package, a model). Something run offline from the old place
+  (`HF_HUB_OFFLINE=1` with a model there) fails until it is downloaded again. A later cleanup may delete the old folders
+  in the table's third column.
+- **Box off, no change.** A Cloud whose box is off (`OMB_BOT_BOX=0`, or no working bubblewrap) runs its bots unboxed
+  with today's environment.
+
+### Tool caches: the cap
+
+`server/cache-sweep/`, behind `OMB_CACHE_SWEEP`. It is off by default; `1`/`on` turns it on, and only on a Cloud
+home. With it off, nothing is read, started or deleted: no state file is read, no timer starts, and the two admin routes
+are not there. With it on, making it at start reads nothing either; its first tick is 5 minutes after the server answers.
+
+- **Caps.** The smaller of 10 GB and 15% of the volume (`limits.ts`), once for the tools' cache folders and once for the
+  app's own `<data folder>/cache`. On a Team Cloud the tools' cap is split evenly between the cache folders there (the
+  server's HOME and each audience's engine home), so one member's caches never push out another's. Overrides:
+  `OMB_CACHE_CAP_TOOLS` and `OMB_CACHE_CAP_APP`, in bytes or as `4G`, `512M`.
+- **Which folders.** Only a tools root the server made (its `CACHEDIR.TAG`, above), and only while the tools' switch is
+  on and the bot box is live. In it, only these whole folders, by fixed name: `npm`, `pip`, `uv`, `huggingface/hub`,
+  `huggingface/xet`, `bun`. Nothing else in a root is counted, listed or touched: not a
+  person's own folder, not `huggingface/token`, and no browser's folder ever (a Playwright MCP profile holds cookies and
+  sign-ins). In the app's own folder: each old `node-compile/<version>`, never the running server's.
+- **Least recently written first.** A folder's age is its newest modification or change time. Access times are not
+  used: a backup that reads the whole volume would refresh them. A folder written in the last 30 minutes stays. A
+  folder that alone is over its root's cap is left and logged once, and not counted, so it does not empty the others on
+  every pass; only a clear or the emergency pass removes it, so the cap does not bound such a folder (a Hugging Face
+  hub with one large model is the likely one). `npm` goes whole: every npx-installed MCP server goes with it, and npx
+  fetches each again the next time it starts it.
+- **Never while a bot works.** In a tools root, nothing is deleted while a turn runs, an engine is kept warm, or any
+  process the server started (directly or inside a box) uses that root: its working folder, program, open files, mapped
+  files or environment name a path in it (`in-use.ts`, from `/proc`). Every bot process is one of the server's
+  descendants (`--unshare-pid` and `--die-with-parent` keep even a bot's daemon in its box's tree), and every boxed
+  process carries its HOME's cache variables, so any process a bot of that HOME started counts. A descendant that cannot
+  be read counts as using every root (logged once); a process the server did not start is not looked at. This is checked
+  before each folder goes. A busy home is tried again on the next tick, 5 minutes later; a pass that finishes waits an
+  hour. The turn and warm-engine check is for the whole Cloud: on a Team Cloud one member's turn holds every root's
+  pass (a process seen in one root holds only that root). Any long-lived bot process holds the cap for its root for as
+  long as it runs: a dev server or a watcher a bot left running, an MCP server an engine keeps open. Nothing there is
+  removed until it ends. A folder about to go is first renamed inside its own parent (below), so a tool that starts
+  meanwhile finds it missing, not half there. What each tool then does with a missing cache folder is its own behaviour:
+  npm, pip, uv and bun are expected to fetch again what they need; this was not tested for each.
+- **Never outside the root.** Every walk and removal goes through open folders (`tree.ts`): the root is opened with
+  `O_NOFOLLOW`, and each step names one child of an open folder through `/proc/self/fd/<fd>/<name>`, so the kernel
+  resolves it from that open folder, never again by path. A link is never entered (`O_NOFOLLOW`), a folder on another
+  filesystem is never entered, and `unlink`/`rmdir` act on the link itself. A folder above that a bot swaps for a link
+  changes nothing. A folder about to go is renamed to `.omb-trash-<random>` in the same open parent (never moved
+  elsewhere, never put back), then emptied and removed; whatever a removal that stopped part-way left under that name,
+  the next pass in that root finishes the same way (a link there is removed as a link). A walk goes at most 128 folders
+  deep, so a bot's endlessly nested folders cannot use up the server's open files or memory; what lies deeper stays.
+  This needs Linux; anywhere else nothing is walked or deleted.
+- **Emergency.** At 95% of the volume used, the tools' folders go, least recently written first, until it is under 90%,
+  under the same rule: if a bot is working, nothing is removed, and one line is logged (the Admin's disk auto-grow and
+  its alert cover a full disk). A pass that measured is not repeated within 30 minutes.
+- **On demand.** `clearCaches({ dryRun, scope })` returns the bytes and folders that go, or would in a dry run, and how
+  many roots were left because a bot was working. Its admin-scope route is `POST /api/caches/clear`, a dry run unless the
+  body says `"dryRun": false`; `GET /api/caches` returns the counters. Both only with the switch on.
+- **Counters.** `<data folder>/cache-sweep.json` (any shape reads; written whole by rename) keeps the cleared and
+  emergency counters and the last pass; the storage report carries them once read.
+- **Not touched.** The scattered caches from before the tools' folder (`~/.npm`, `~/.cache/*`, `~/go/pkg/mod`, …) are left
+  for a separate cleanup.
+
 ## The self-check and the report
 
 At boot, and by hand with `node dist-server/bot-box/box-check.js`, the server runs `box-probe.ts` inside a real box

@@ -920,7 +920,7 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
                 disabled={c.accountBusy || c.codeSent}
                 onChange={(event) => c.setEmail(event.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter" && !c.codeSent && canSubmitEmail) c.requestCode();
+                  if (event.key === "Enter" && !c.codeSent && canSubmitEmail && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) c.requestCode();
                 }}
                 placeholder={t("common.emailPlaceholder")}
                 className="rounded-lg border border-hairline/50 bg-inset px-3 py-2.5 text-[14px] text-ink outline-none placeholder:text-ink-tertiary focus:border-accent disabled:opacity-50"
@@ -937,7 +937,7 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
                   disabled={c.accountBusy}
                   onChange={(event) => c.setCode(event.target.value)}
                   onKeyDown={(event) => {
-                    if (event.key === "Enter" && c.code.length === 8) c.verifyCode();
+                    if (event.key === "Enter" && c.code.length === 8 && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) c.verifyCode();
                   }}
                   placeholder="12345678"
                   className="rounded-lg border border-hairline/50 bg-inset px-3 py-2.5 font-mono text-[16px] tracking-[0.18em] text-ink outline-none placeholder:tracking-normal placeholder:text-ink-tertiary focus:border-accent disabled:opacity-50"

@@ -158,7 +158,7 @@ export interface TestRelay {
 }
 
 /** A relay in this process on a free port, with `limits` overriding the spec values. */
-export async function startTestRelay(limits: Partial<Limits> = {}, options: { wallSeconds?: () => number; key?: TestKey } = {}): Promise<TestRelay> {
+export async function startTestRelay(limits: Partial<Limits> = {}, options: { wallSeconds?: () => number; key?: TestKey; phoneOrigins?: string[] } = {}): Promise<TestRelay> {
   const key = options.key ?? testKey();
   const logs: LogEvent[] = [];
   const config: RelayConfig = {
@@ -167,6 +167,7 @@ export async function startTestRelay(limits: Partial<Limits> = {}, options: { wa
     port: 0,
     tokenKeys: parseTokenKeys(keysJson(key)),
     metricsToken: "m".repeat(40),
+    phoneOrigins: new Set(options.phoneOrigins),
     limits: { ...DEFAULT_LIMITS, ...limits },
   };
   const relay = await startRelay(config, { log: (event) => logs.push(event), wallSeconds: options.wallSeconds });

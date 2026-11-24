@@ -1,6 +1,6 @@
 import { blankCode, offersSkillCommand } from "../../shared/skill-command";
 
-export type ComposerSlashCommandId = "goal" | "learn" | "setup" | "burst";
+export type ComposerSlashCommandId = "goal" | "learn" | "setup" | "burst" | "fork";
 
 export type ComposerSlashCommand =
   | { kind: "command"; id: ComposerSlashCommandId; label: `/${ComposerSlashCommandId}`; description: string }

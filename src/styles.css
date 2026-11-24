@@ -56,6 +56,12 @@
   color: transparent;
   caret-color: var(--color-ink);
 }
+.mention-editor[data-composing] .mention-editor-mirror {
+  visibility: hidden;
+}
+.mention-editor[data-composing] textarea {
+  color: var(--color-ink);
+}
 .mention-editor textarea::selection {
   color: var(--color-ink);
   background: var(--color-raised-hover);
@@ -68,7 +74,7 @@
 }
 @media (forced-colors: active) {
   .mention-editor-mirror { display: none; }
-  .mention-editor textarea { color: CanvasText; caret-color: CanvasText; }
+  .mention-editor textarea, .mention-editor[data-composing] textarea { color: CanvasText; caret-color: CanvasText; }
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -112,6 +118,7 @@
 
 @theme {
   --animate-panel-in: panel-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+  --animate-panel-beside-in: panel-beside-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-sheet-in: sheet-in 0.26s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-workspace-in: workspace-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-pop-in: pop-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
@@ -192,6 +199,8 @@
   /* Some engines map `ui-monospace` to a proportional face, so concrete names come first. */
   --font-mono: "Geist Mono Variable", "SF Mono", SFMono-Regular, ui-monospace, Menlo,
     Consolas, "Liberation Mono", monospace;
+  /* Geist's wght axis runs 100–900, so text sits between Regular and Medium; a static face rounds it to 400. */
+  --font-weight-normal: 415;
 
   --shadow-lg: 0 6px 16px -8px rgb(0 0 0 / 0.18), 0 1px 3px rgb(0 0 0 / 0.06);
   --shadow-xl: 0 10px 28px -12px rgb(0 0 0 / 0.24), 0 2px 6px -2px rgb(0 0 0 / 0.08);
@@ -215,6 +224,9 @@
   /* Menus; a phone rounds them like its sheets. */
   --radius-menu: 12px;
 }
+:root[data-font] {
+  --tracking-ui: 0;
+}
 :root[data-chat-width="wide"] {
   --chat-bubble-max: 64rem;
   --chat-bubble-pct: 92%;
@@ -232,6 +244,8 @@
 
 :root {
   --code-color-scheme: dark;
+  /* +0.012em suits Geist; a skin or a font choice with another face sets 0. */
+  --tracking-ui: 0.012em;
   /* ink carried by a filled accent / danger surface (see the rule at the
      bottom of this file, which is what makes them take effect) */
   --color-accent-ink: #ffffff;
@@ -244,6 +258,14 @@
   /* second speed line of the mascot — contrasts against the app ground */
   --color-maus-line: #f5f5f5;
   --shadow-float: 0 0 #0000;
+  /* The composer floats over the scrolling transcript: a soft lift with a 1px line of ink at 4%. One value for every
+     skin; on a dark ground it reads as nothing, so the dark skins keep their 0.5px ring alone. */
+  --shadow-composer: 0 2px 8px -1px rgb(0 0 0 / 0.05), 0 1px 2px rgb(0 0 0 / 0.03), 0 0 0 1px rgb(28 28 28 / 0.04);
+}
+/* Daylight's composer rests on that lift alone; its 0.5px ring comes back on hover and while it holds focus.
+   Unlayered, so it wins over the ring utility the shell carries. */
+:root[data-skin="daylight"] .composer-shell:not(:hover, :focus-within) {
+  --tw-ring-color: transparent;
 }
 
 /* ── Midnight ──────────────────────────────────────────────────────────────
@@ -292,6 +314,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   /* One radius scale, shared with Daylight. What takes which step: buttons
      and pills full; keycaps, chips and menu rows 6; fields, controls and
      sidebar rows 8; cards and menus 12; dialogs 16; bubbles and the cards in
@@ -369,6 +392,7 @@
   /* System faces rather than Geist: paper reads as the platform's own. */
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     Roboto, sans-serif;
+  --tracking-ui: 0;
   --radius-lg: 6px;
   --radius-xl: 10px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -444,6 +468,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   --radius-lg: 4px;
   --radius-xl: 8px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -526,6 +551,7 @@
 
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     Roboto, sans-serif;
+  --tracking-ui: 0;
   --radius-lg: 8px;
   --radius-xl: 14px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -588,6 +614,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   --radius-lg: 6px;
   --radius-xl: 10px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -650,6 +677,7 @@
 
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     Roboto, sans-serif;
+  --tracking-ui: 0;
   --radius-lg: 8px;
   --radius-xl: 12px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -711,6 +739,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   --radius-lg: 8px;
   --radius-xl: 12px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -787,6 +816,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   --radius-xs: 2px;
   --radius-sm: 4px;
   --radius-md: 6px;
@@ -854,6 +884,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   --radius-lg: 10px;
   --radius-xl: 16px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -918,6 +949,7 @@
 
   --font-sans: "Plus Jakarta Sans", ui-rounded, "SF Pro Rounded", "Geist Variable",
     -apple-system, system-ui, "Segoe UI", sans-serif;
+  --tracking-ui: 0;
   --radius-lg: 12px;
   --radius-xl: 18px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -975,6 +1007,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   --radius-lg: 8px;
   --radius-xl: 12px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -1032,6 +1065,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   --radius-lg: 8px;
   --radius-xl: 12px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -1092,6 +1126,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   --radius-xs: 2px;
   --radius-sm: 4px;
   --radius-md: 6px;
@@ -1121,7 +1156,7 @@
 }
 /* Lucide draws at 2px by default, heavy beside Geist; one lighter stroke for every icon left at that default. */
 :where(svg.lucide[stroke-width="2"]) {
-  stroke-width: 1.75;
+  stroke-width: 1.9;
 }
 :root[data-skin="midnight"] .popover-surface {
   box-shadow: 0 14px 32px -10px rgb(0 0 0 / 0.7), 0 2px 8px rgb(0 0 0 / 0.35);
@@ -1203,9 +1238,7 @@
   text-align: start;
 }
 
-/* Chat copy. 15px stays; the line box goes from Tailwind's leading-relaxed
-   (1.625) to 1.75 so Arabic and Latin both get a little more air without
-   moving the surrounding chrome. Arabic and Hebrew use a local face when
+/* Chat copy: 15px on a 22px line in both modes. Arabic and Hebrew use a local face when
    the machine has one. Geist and the UI stack do not carry those glyphs,
    and a generic family listed later would otherwise win. */
 @font-face {
@@ -1236,15 +1269,11 @@
 
 .chat-text,
 .chat-md {
-  line-height: 1.75;
+  line-height: 22px;
   font-family: "omb-chat", var(--font-sans);
 }
 .chat-md :is(strong, b) {
   font-weight: 600;
-}
-[data-chat-bubble="simple"] :is(.chat-md, .chat-text),
-[data-chat-bubble="simple"].chat-text {
-  line-height: 22px;
 }
 [data-chat-bubble="simple"] .chat-md > * + * {
   margin-top: 10px;
@@ -1254,10 +1283,10 @@
 .chat-md :is(p, li, blockquote) {
   text-wrap: pretty;
 }
-[data-chat-bubble="simple"] .chat-md > * + .md-heading {
+.chat-md > * + .md-heading {
   margin-top: 18px;
 }
-[data-chat-bubble="simple"] .chat-md > .md-heading:first-child {
+.chat-md > .md-heading:first-child {
   margin-top: 0;
 }
 /* A short line keeps the tight chat bubble; a structured reply gets room to breathe. */
@@ -1303,9 +1332,25 @@
 [data-simple-rows] > [data-tuck] > :first-child {
   margin-top: -4px;
 }
-/* Arabic and Hebrew script needs the taller line the rest of the app gives it. */
-[data-chat-bubble="simple"] .chat-md [dir="rtl"] {
+/* Arabic and Hebrew script needs a taller line than Latin. */
+.chat-md [dir="rtl"] {
   line-height: 1.75;
+}
+
+/* A streaming reply's blocks fade in as each one arrives, so a chunk of text does not pop in. @starting-style applies
+   only when an element is first put on the page, and the rule holds only while the reply streams, so opening a
+   finished reply never plays it. Opacity only, once per block, no layout change, nothing running after the stream. */
+@media (prefers-reduced-motion: no-preference) {
+  .chat-md[data-streaming] > *,
+  .chat-md[data-streaming] [data-stream-fade] {
+    transition: opacity 600ms ease-out;
+  }
+  @starting-style {
+    .chat-md[data-streaming] > *,
+    .chat-md[data-streaming] [data-stream-fade] {
+      opacity: 0;
+    }
+  }
 }
 
 .chat-code-actions > button:focus-visible {
@@ -1339,6 +1384,18 @@ html,
 body,
 #root {
   height: 100%;
+}
+
+/* iOS Safari keeps its bottom bar in light mode unless the root names a
+   scheme. The bar's color is theme-color, copied from --color-app when the
+   skin changes. The root itself has to paint the same ground, or the home
+   indicator inset stays the canvas white. Only on iOS WebKit: elsewhere the
+   scheme stays scoped to code, so native controls keep their styling. */
+@supports (-webkit-touch-callout: none) {
+  html {
+    background-color: var(--color-app);
+    color-scheme: var(--code-color-scheme);
+  }
 }
 
 /* Standalone phone windows can reach behind the notch and home indicator.
@@ -1377,6 +1434,9 @@ body {
   background-color: var(--color-app);
   color: var(--color-ink);
   font-family: var(--font-sans);
+  font-weight: var(--font-weight-normal);
+  /* Declared once here, so an em value resolves at 16px and every size below inherits the same ~0.19px. */
+  letter-spacing: var(--tracking-ui);
   /* Chromium on macOS thickens every stem under the default (`auto`)
      smoothing, so regular text reads close to semibold on dark skins.
      Windows ignores both properties. */
@@ -1400,7 +1460,8 @@ body {
     font-size: 13px;
     font-weight: 500;
     line-height: 1.25rem;
-    transition: background-color 120ms ease, color 120ms ease;
+    /* transform: the press feedback below */
+    transition: background-color 120ms ease, color 120ms ease, transform 50ms cubic-bezier(0.165, 0.84, 0.44, 1);
   }
   .ui-button {
     /* 4px + 20px line + 4px + a 1px border each side = 30px, so the 32px
@@ -1438,7 +1499,7 @@ body {
   .ui-button-pill {
     border-radius: 9999px;
     font-size: 14px;
-    font-weight: 400;
+    font-weight: var(--font-weight-normal);
     line-height: 1.25rem;
   }
   .ui-button-lg {
@@ -1501,11 +1562,12 @@ body {
      an inline background already centers on the glyphs, and `clone` keeps
      the padding on every wrapped piece. */
   .ui-code-chip {
-    padding: 0.125em 0.35em;
+    padding: 0 0.27em;
     border-radius: 0.25rem;
-    background: color-mix(in srgb, var(--color-ink) 8%, transparent);
+    background: color-mix(in srgb, var(--color-ink) 4%, transparent);
+    color: var(--color-ink-secondary);
     font-family: var(--font-mono);
-    font-size: 0.86em;
+    font-size: 0.93em;
     line-height: 1;
     -webkit-box-decoration-break: clone;
     box-decoration-break: clone;
@@ -1521,7 +1583,7 @@ body {
     border-radius: 0.375rem;
     text-align: left;
     font-size: 14px;
-    font-weight: 400;
+    font-weight: var(--font-weight-normal);
     line-height: 18px;
   }
   .ui-menu-row:enabled:hover { background: var(--color-menu-hover); }
@@ -1594,7 +1656,93 @@ body {
     .ui-icon-button,
     .ui-pill { transition: none; }
   }
+  /* Press feedback: a button gives a little under the pointer, 98% over 50ms, and not at all with reduced motion
+     (DESIGN §10). Layered, so Pop's own sticker press still wins on its buttons. */
+  @media (prefers-reduced-motion: no-preference) {
+    :root:not([data-reduced-motion="true"]) :is(.ui-button, .ui-icon-button):not(:disabled):active {
+      transform: scale(0.98);
+    }
+  }
+  /* A bot's bubble on a light ground: its tint, a top-lit sheen and a 0.5px inset line of ink at 6% (DESIGN §8).
+     A dark ground keeps the flat tint: there the sheen would lift the bubble's top edge out of its tone. Layered, so
+     Pop's sticker outline on .bg-card still wins. */
+  .bubble-finish {
+    background-image: linear-gradient(rgb(255 255 255 / 0.16), transparent);
+    box-shadow:
+      inset 0 0.5px 0 rgb(255 255 255 / 0.16),
+      inset 0 -0.5px 0 rgb(255 255 255 / 0.16),
+      inset 0 0 0 0.5px color-mix(in srgb, var(--color-ink) 6%, transparent);
+  }
+  @container style(--code-color-scheme: dark) {
+    .bubble-finish { background-image: none; box-shadow: none; }
+  }
 }
+
+/* The sidebar's bot rows and pinned bots give under the pointer like a button (98% over 50ms), but not while a
+   button inside the row is the one pressed. The colour fade the rows already had is repeated here, because this
+   transition replaces theirs. */
+[data-sidebar-bot-row] {
+  transition-property: color, background-color, border-color, outline-color, fill, stroke, scale;
+  transition-duration: 150ms, 150ms, 150ms, 150ms, 150ms, 150ms, 50ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1), cubic-bezier(0.4, 0, 0.2, 1), cubic-bezier(0.4, 0, 0.2, 1),
+    cubic-bezier(0.4, 0, 0.2, 1), cubic-bezier(0.4, 0, 0.2, 1), cubic-bezier(0.4, 0, 0.2, 1), cubic-bezier(0.165, 0.84, 0.44, 1);
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduced-motion="true"]) [data-sidebar-bot-row]:active:not(:has(button:active)) {
+    scale: 0.98;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-sidebar-bot-row] { transition: none; }
+}
+:root[data-reduced-motion="true"] [data-sidebar-bot-row] { transition: none; }
+
+/* The chat header's model pill folds to its AI's mark while a side panel narrows the chat (ModelPickerTrigger).
+   The pill glides over the panel's own 240ms on the motion curve: its padding and the mark's gap close, and the rest
+   rides a grid column from 1fr to 0fr, so no width is measured and the first paint lands folded or open with no jump.
+   The words never wrap (nowrap) and are never cut hard: they fade, drift 4px toward the mark and soften as the column
+   closes, the name first and the bars and chevron a beat later; opening, they wait for the column to start widening.
+   A transition takes its timing from the state it goes to, so each state below carries the timing that reaches it. */
+[data-model-pill] {
+  transition-property: color, background-color, padding;
+  transition-duration: 120ms, 120ms, 240ms;
+  transition-timing-function: ease-out, ease-out, cubic-bezier(0.22, 1, 0.36, 1);
+}
+[data-model-pill][data-folded] { padding-inline: 0; }
+[data-model-pill] [data-model-pill-mark] { transition: margin 240ms cubic-bezier(0.22, 1, 0.36, 1); }
+[data-model-pill][data-folded] [data-model-pill-mark] { margin-inline-end: 0; }
+[data-model-pill] [data-model-pill-rest] {
+  grid-template-columns: 1fr;
+  transition: grid-template-columns 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+[data-model-pill][data-folded] [data-model-pill-rest] { grid-template-columns: 0fr; }
+/* Folding, the column's closing edge fades instead of cutting the words off. */
+[data-model-pill][data-folded] [data-model-pill-rest] > * { mask-image: linear-gradient(to right, #000 calc(100% - 12px), transparent); }
+[dir="rtl"] [data-model-pill][data-folded] [data-model-pill-rest] > * { mask-image: linear-gradient(to left, #000 calc(100% - 12px), transparent); }
+[data-model-pill] [data-model-pill-words],
+[data-model-pill] [data-model-pill-tail] {
+  transition-property: opacity, translate, filter;
+  transition-duration: 180ms, 200ms, 180ms;
+  transition-timing-function: ease-out, cubic-bezier(0.22, 1, 0.36, 1), ease-out;
+  transition-delay: 70ms;
+}
+[data-model-pill] [data-model-pill-tail] { transition-delay: 110ms; }
+[data-model-pill][data-folded] [data-model-pill-words],
+[data-model-pill][data-folded] [data-model-pill-tail] {
+  opacity: 0;
+  translate: -4px 0;
+  filter: blur(2px);
+  transition-duration: 140ms, 200ms, 140ms;
+  transition-delay: 0ms;
+}
+[data-model-pill][data-folded] [data-model-pill-tail] { transition-delay: 40ms; }
+[dir="rtl"] [data-model-pill][data-folded] [data-model-pill-words],
+[dir="rtl"] [data-model-pill][data-folded] [data-model-pill-tail] { translate: 4px 0; }
+@media (prefers-reduced-motion: reduce) {
+  [data-model-pill], [data-model-pill] * { transition: none !important; }
+}
+:root[data-reduced-motion="true"] [data-model-pill],
+:root[data-reduced-motion="true"] [data-model-pill] * { transition: none !important; }
 
 /* Liquid glass: the surface for centred pop-ups (Settings, Apps, Triggers).
    Every value is derived from the active skin's own tokens, so each of the
@@ -1891,7 +2039,7 @@ body {
   .glass-popup-frame[data-settings-sheet][data-settings-look="simple"] > .glass-popup {
     width: min(920px, 100%);
     height: min(720px, 100%);
-    border-radius: 16px;
+    border-radius: 14px;
   }
 }
 
@@ -1946,6 +2094,26 @@ body {
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
   mask-image: none;
+}
+/* Simple mode's chat header has no band at all: the transcript runs up to the window's top edge under the floating pill
+   and buttons, and the scroller itself fades it in, in even steps, over the --top-fade just above the bar's bottom
+   edge, where the first row rests at the top of the history. A mask, not a fill, so whatever ground the skin paints
+   (Aurora's field included) shows through. A taller bar (find, a notice) keeps what lies above that stretch hidden.
+   Only the bar's controls take the pointer; between them, a click reaches the transcript. */
+.glass-bar[data-chathead-float]::before {
+  content: none;
+}
+.glass-scroller[data-top-fade] {
+  --top-fade: 60px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--glass-top, 0px) - var(--top-fade)), #000 var(--glass-top, 0px));
+  mask-image: linear-gradient(to bottom, transparent calc(var(--glass-top, 0px) - var(--top-fade)), #000 var(--glass-top, 0px));
+}
+[data-chathead-float] {
+  pointer-events: none;
+}
+[data-chathead-float] > :not([data-look="chat-header"]),
+[data-chathead-float] :is([data-chathead-identity], [data-chathead-controls]) > * {
+  pointer-events: auto;
 }
 /* The colour of the place on screen (PlaceTint), faint, from the very top of the sidebar to just below its head, under
    everything there: the head's words and controls stay on what is still almost the plain panel. Dark skins take a
@@ -2010,7 +2178,7 @@ body {
   padding-bottom: calc(var(--glass-bottom, 0px) + var(--glass-bottom-reach, 0px));
 }
 /* The transcript and its composer share one centered column with a fixed cap. The transcript sits
-   inside the scroller's px-5; the dock spans the pane and holds the composer's own px-5, so it adds
+   inside the scroller's px-4; the dock spans the pane and holds the composer's own px-4, so it adds
    that padding to the same cap and the composer's edges meet the transcript's. */
 .chat-column {
   margin-inline: auto;
@@ -2018,7 +2186,7 @@ body {
 }
 .chat-column-dock {
   margin-inline: auto;
-  max-width: calc(var(--chat-column-max) + 2.5rem);
+  max-width: calc(var(--chat-column-max) + 2rem);
 }
 @media (prefers-reduced-transparency: reduce) {
   .glass-bar::before {
@@ -2127,6 +2295,10 @@ body {
 @keyframes panel-in {
   from { transform: translateX(28px); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
+}
+/* A side panel's room grows from nothing as it slides in over the window's edge (bot-panel/side-panel.ts). */
+@keyframes panel-beside-in {
+  from { margin-inline-end: calc(-1 * var(--side-panel-w)); opacity: 0; }
 }
 @keyframes sheet-in {
   from { transform: translateY(32px); opacity: 0; }
@@ -2443,9 +2615,11 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
    without touching system settings; the welcome flow also reads it to skip
    its view transitions. Mirrors the media block above for its own classes. */
 :root[data-reduced-motion="true"] .animate-rise,
+:root[data-reduced-motion="true"] .animate-link-flow,
 :root[data-reduced-motion="true"] .animate-spot-in,
 :root[data-reduced-motion="true"] .animate-pop-in,
 :root[data-reduced-motion="true"] .animate-pop-out,
+:root[data-reduced-motion="true"] .md\:animate-panel-beside-in,
 :root[data-reduced-motion="true"] .step-open,
 :root[data-reduced-motion="true"] .check-in,
 :root[data-reduced-motion="true"] .progress-fill,
@@ -3308,7 +3482,10 @@ button:disabled.bg-danger {
   }
   /* lucide writes stroke-width="2" as an attribute, which any CSS outranks; an explicit strokeWidth prop is left alone. */
   :where(svg.lucide[stroke-width="2"]) {
-    stroke-width: 1.75;
+    stroke-width: 1.9;
+  }
+  :where(code, pre, kbd, samp, .font-mono) {
+    letter-spacing: 0;
   }
 }
 
@@ -3661,3 +3838,133 @@ button:disabled.bg-danger {
   from { opacity: 0; transform: translateX(-0.375rem); }
   to { opacity: 1; transform: translateX(0); }
 }
+
+/* The chat backdrop (GlassScrollFrame's ChatBackdrop) is a theme's to paint and animate; with reduced motion asked for,
+   whatever a theme animates there stands still, whether or not its CSS says so. */
+@media (prefers-reduced-motion: reduce) {
+  [data-look="chat-backdrop"],
+  [data-look="chat-backdrop"]::before,
+  [data-look="chat-backdrop"]::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* Skill Burger. The fun is in shape and motion: buns with rounder outer corners, three sesame dots, layers that settle
+   in with a soft overshoot (the one place --ease-settle is used), and a single press of the bottom bun when the run is
+   saved. Nothing loops but the running layer's sheen, and reduced motion turns every bit of it off. */
+.skill-burger { --ease-settle: cubic-bezier(0.34, 1.4, 0.64, 1); }
+.burger-sesame {
+  position: absolute;
+  top: 6px;
+  inset-inline-start: 50%;
+  width: 26px;
+  height: 4px;
+  transform: translateX(-50%);
+  background:
+    radial-gradient(circle, color-mix(in srgb, var(--color-ink) 18%, transparent) 1.5px, transparent 2px) 0 50% / 9px 4px repeat-x;
+  pointer-events: none;
+}
+[dir="rtl"] .burger-sesame { transform: translateX(50%); }
+/* A new step slides in: its row opens from nothing so the card grows smoothly (nothing below jumps), the layer drops a
+   little from above out of a soft blur and settles, and its fill glows faintly with the accent before fading to the card. */
+@keyframes burger-drop {
+  0% { opacity: 0; min-height: 0; max-height: 0; transform: translateY(-12px) scale(0.96); filter: blur(4px); }
+  45% { opacity: 1; min-height: 2.25rem; max-height: 3rem; filter: blur(0); }
+  100% { opacity: 1; min-height: 2.25rem; max-height: none; transform: none; filter: none; }
+}
+@keyframes burger-land {
+  from { background-color: color-mix(in srgb, var(--color-accent) 14%, var(--color-card)); }
+  to { background-color: var(--color-card); }
+}
+.burger-layer {
+  overflow: hidden;
+  animation: burger-drop 560ms cubic-bezier(0.22, 1, 0.36, 1) both, burger-land 1100ms ease-out 180ms both;
+}
+@keyframes burger-press {
+  0%, 100% { transform: none; }
+  45% { transform: translateY(-3px); }
+}
+.burger-stacked .burger-bun-bottom { animation: burger-press 240ms cubic-bezier(0.22, 1, 0.36, 1); }
+.burger-stacked .burger-bun-bottom > * { animation: fade-in 200ms ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .burger-layer, .burger-stacked .burger-bun-bottom, .burger-stacked .burger-bun-bottom > * { animation: none; }
+}
+:root[data-reduced-motion="true"] :is(.burger-layer, .burger-stacked .burger-bun-bottom, .burger-stacked .burger-bun-bottom > *) { animation: none; }
+:root[data-reduced-motion="true"] .skill-burger .thinking-sheen { display: none; }
+/* The pill's count ticks over in place, and a new app's mark slides in at its end. */
+@keyframes burger-tick { from { opacity: 0; transform: translateY(45%); } }
+.burger-tick { animation: burger-tick 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes burger-mark-in { from { opacity: 0; transform: translateX(-6px) scale(0.96); } }
+.burger-mark-in { animation: burger-mark-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@media (prefers-reduced-motion: reduce) { .burger-tick, .burger-mark-in { animation: none; } }
+:root[data-reduced-motion="true"] :is(.burger-tick, .burger-mark-in) { animation: none; }
+/* Folding the layers: the list's row collapses to nothing and fades, so the bun below glides up rather than jumping. */
+.burger-fold { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease-out; }
+.burger-fold[data-folded="true"] { grid-template-rows: 0fr; opacity: 0; }
+.burger-fold > ol, .burger-fold > div { overflow: hidden auto; min-width: 0; }
+.burger-fold { grid-template-columns: minmax(0, 1fr); }
+/* Rows that open to show more (a finished run's steps, its inputs and outcome, a step's replies) keep the landing glow
+   but not the drop's height cap. */
+.burger-layer.burger-open { animation: burger-land 1100ms ease-out 180ms both; }
+@media (prefers-reduced-motion: reduce) { .burger-fold { transition: none; } }
+:root[data-reduced-motion="true"] .burger-fold { transition: none; }
+/* Thread tabs, from tablet width up: the sidebar and the chat header's band are one frame in the sidebar's ground, and
+   the chat is a card set into it, its top corners rounded where it meets the band (the right one square while a panel
+   sits beside the chat). A hairline in the frame's edge colour runs along the card's top, round its corners and down
+   the sidebar's side. The open tab's ground is the card's and slides between tabs; its foot curves out into the band.
+   Separators sit only between two closed tabs, neither under the pointer. Every control in the band is 32px tall on
+   the sidebar buttons' centre line, 10px apart as the sidebar's are, and the band's end inset mirrors the sidebar's. */
+@media (min-width: 768px) {
+  [data-chathead-tabs] {
+    --chat-card-radius: var(--radius-xl);
+    position: relative; padding-top: 12px; padding-bottom: 0;
+    background: linear-gradient(var(--color-edge), var(--color-edge)) var(--chat-card-radius) 100% / calc(100% - 2 * var(--chat-card-radius)) 0.5px no-repeat, var(--color-panel);
+  }
+  [data-chathead-tabs="advanced"] { padding-top: 6px; }
+  [data-chathead-tabs]:has([data-panel-beside]) { background-size: calc(100% - var(--chat-card-radius)) 0.5px, auto; }
+  [data-chathead-tabs]::before,
+  [data-chathead-tabs]::after { content: ""; position: absolute; top: 100%; width: var(--chat-card-radius); height: var(--chat-card-radius); pointer-events: none; }
+  [data-chathead-tabs]::before { left: 0; background: radial-gradient(circle at 100% 100%, transparent calc(var(--chat-card-radius) - 0.5px), var(--color-edge) calc(var(--chat-card-radius) - 0.5px), var(--color-edge) var(--chat-card-radius), var(--color-panel) calc(var(--chat-card-radius) + 0.5px)); }
+  [data-chathead-tabs]::after { right: 0; background: radial-gradient(circle at 0 100%, transparent calc(var(--chat-card-radius) - 0.5px), var(--color-edge) calc(var(--chat-card-radius) - 0.5px), var(--color-edge) var(--chat-card-radius), var(--color-panel) calc(var(--chat-card-radius) + 0.5px)); }
+  [data-chathead-tabs]:has([data-panel-beside])::after { display: none; }
+  :root:has([data-chathead-tabs="simple"]) [data-sidebar] { border-image: linear-gradient(to bottom, transparent 60px, var(--color-edge) 60px) 1; }
+  :root:has([data-chathead-tabs="advanced"]) [data-sidebar] { border-image: linear-gradient(to bottom, transparent 54px, var(--color-edge) 54px) 1; }
+  [data-chathead-tabs] [data-chathead-row] { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; height: 100%; }
+  [data-chathead-tabs] [data-chathead-identity] { grid-column: 2; justify-self: stretch; align-self: stretch; -webkit-app-region: drag !important; }
+  [data-chathead-tabs] [data-chathead-identity] > :not([data-thread-tabs], [data-chathead-status]) { display: none; }
+  [data-chathead-tabs="advanced"] [data-chathead-identity] { margin-inline-start: 8px; }
+  [data-chathead-tabs] [data-chathead-controls] { grid-column: 3; margin-inline-start: 8px; gap: 10px; }
+  [data-chathead-tabs="simple"] { height: 48px; padding-inline-end: 16px; }
+  [data-chathead-tabs="advanced"] { height: 42px; padding-inline-end: 8px; }
+  [data-chathead-tabs] [data-chathead-controls] :is(.size-9, .h-9, [data-model-pill]) { height: 32px; }
+  [data-chathead-tabs] [data-chathead-controls] .size-9 { width: 32px; }
+  [data-chathead-tabs] [data-chathead-controls] .min-w-9 { min-width: 32px; }
+}
+.thread-tab-indicator {
+  --tab-foot: 10px;
+  position: absolute; left: 0; bottom: 0; height: 34px; border-radius: var(--tab-foot) var(--tab-foot) 0 0; background: var(--color-app); pointer-events: none;
+}
+.thread-tab-indicator[data-glide] { transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), width 220ms cubic-bezier(0.22, 1, 0.36, 1); }
+.thread-tab-indicator::before,
+.thread-tab-indicator::after { content: ""; position: absolute; bottom: 0; width: var(--tab-foot); height: var(--tab-foot); }
+.thread-tab-indicator::before { right: 100%; background: radial-gradient(circle at 0 0, transparent calc(var(--tab-foot) - 0.5px), var(--color-app) var(--tab-foot)); }
+.thread-tab-indicator::after { left: 100%; background: radial-gradient(circle at 100% 0, transparent calc(var(--tab-foot) - 0.5px), var(--color-app) var(--tab-foot)); }
+.thread-tab + .thread-tab::before {
+  content: ""; position: absolute; inset-inline-start: -1.5px; top: 8px; width: 1px; height: 16px; background: var(--color-hairline);
+  transition: opacity 120ms ease-out;
+}
+.thread-tab[aria-selected="true"]::before,
+.thread-tab[aria-selected="true"] + .thread-tab::before,
+.thread-tab:hover::before,
+.thread-tab:hover + .thread-tab::before { opacity: 0; }
+.thread-tab[data-entering] { animation: thread-tab-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.thread-tab[data-leaving] { animation: thread-tab-out 180ms cubic-bezier(0.22, 1, 0.36, 1) both; pointer-events: none; }
+@keyframes thread-tab-in { from { max-width: 0; padding-inline: 0; opacity: 0; } }
+@keyframes thread-tab-out { to { max-width: 0; padding-inline: 0; opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .thread-tab, .thread-tab::before, .thread-tab-indicator { animation: none !important; transition: none !important; }
+}
+:root[data-reduced-motion="true"] .thread-tab,
+:root[data-reduced-motion="true"] .thread-tab::before,
+:root[data-reduced-motion="true"] .thread-tab-indicator { animation: none !important; transition: none !important; }

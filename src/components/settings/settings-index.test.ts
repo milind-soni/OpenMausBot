@@ -10,7 +10,7 @@ import {
 beforeEach(() => setLocale("en"));
 
 const ids = (ctx: SettingsContext) => visiblePages(ctx).map((page) => page.id);
-const PLACE_PAGES = ["overview", "phone", "ai", "bots", "desktops", "vault", "usage", "transfer", "data"];
+const PLACE_PAGES = ["overview", "devices", "phone", "ai", "bots", "desktops", "vault", "usage", "transfer", "data"];
 const find = (query: string, ctx: SettingsContext = fullContext()) => searchSettings(query, ctx, (entry) => t(entry.labelKey), (page) => t(page.labelKey));
 const first = (query: string, ctx?: SettingsContext) => find(query, ctx)[0]?.entry;
 
@@ -25,7 +25,7 @@ const PEOPLE = {
 
 describe("the pages", () => {
   it("lists the place's pages, then Your account, then This app, in one fixed order", () => {
-    expect(ids(fullContext())).toEqual([...PLACE_PAGES, "account", "plan", "app", "general", "appearance"]);
+    expect(ids(fullContext())).toEqual([...PLACE_PAGES, "features", "account", "plan", "app", "general", "appearance"]);
   });
 
   it.each(Object.entries(PEOPLE))("keeps the same place pages, in the same order, for %s", (who, ctx) => {
@@ -35,8 +35,8 @@ describe("the pages", () => {
   });
 
   it.each(["local only", "This computer, with My Cloud", "My Cloud's page in the desktop window", "My Cloud in a browser (owner)"] as const)(
-    "shows Simple's ten entries for %s", (who) => {
-      expect(ids({ ...PEOPLE[who], advanced: false })).toEqual(["overview", "phone", "ai", "vault", "usage", "transfer", "account", "plan", "app", "appearance"]);
+    "shows Simple's eleven entries for %s", (who) => {
+      expect(ids({ ...PEOPLE[who], advanced: false })).toEqual(["overview", "devices", "phone", "ai", "vault", "usage", "transfer", "features", "account", "plan", "app", "appearance"]);
     });
 
   it("is shorter in Simple: the four Advanced pages come back in Advanced, in place", () => {

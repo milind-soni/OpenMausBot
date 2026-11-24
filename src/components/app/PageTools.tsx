@@ -20,6 +20,7 @@ import { appDownloadPath, publishAppPage, unpublishPage } from "./app-api";
 import { AppFrame, type AppFrameHandle } from "./AppFrame";
 import type { AppSelection } from "./app-frame-host";
 import { ASK_CHIP, ASK_CHIP_IDLE, ASK_CHIP_PICKED, ASK_PRIMARY_BUTTON } from "../AskCard";
+import { serverFetch } from "@/lib/relay-server";
 
 /** A page starts at this height in the chat and grows to its content up to the cap, then scrolls inside. */
 export const PAGE_HEIGHT = { start: 520, cap: 560 } as const;
@@ -114,7 +115,7 @@ export function usePageSave(threadId: string, messageId: string, title: string) 
     setBusy(true);
     setReason("");
     try {
-      const response = await fetch(appDownloadPath(threadId, messageId, rev));
+      const response = await serverFetch(appDownloadPath(threadId, messageId, rev));
       if (!response.ok) throw new Error(serverErrorText(await response.json().catch(() => null), t("chat.preview.saveFailed")));
       const name = canonicalDownloadFilename({ contentDisposition: response.headers.get("content-disposition"), fallback: `${title}.html` });
       await saveToDevice(new File([await response.blob()], name, { type: "text/html" }));
@@ -333,6 +334,7 @@ export function PageFullScreen(props: PageToolsProps & {
   pane?: HTMLElement | null;
   /** Text the person selected in the page, to cite it: never in a room. */
   onSelection?(selection: AppSelection | null): void;
+  onDraft?(text: string): void;
 }) {
   const { point, close, pane } = props;
   const closer = useRef<HTMLDivElement | null>(null);
@@ -362,7 +364,8 @@ export function PageFullScreen(props: PageToolsProps & {
       <div className={cn("relative min-h-0 flex-1 bg-app", point.pointing && "ring-2 ring-inset ring-accent/60")}>
         <AppFrame doc={props.doc} botId={props.botId} threadId={props.threadId} title={props.title} height={600} handle={props.handle}
           onHeight={() => {}} onProblem={() => {}} onTeardownRequested={close} fill
-          {...(props.onSelection ? { onSelection: props.onSelection } : {})} />
+          {...(props.onSelection ? { onSelection: props.onSelection } : {})}
+          {...(props.onDraft ? { onDraft: props.onDraft } : {})} />
       </div>
     </div>,
     pane ?? document.body,

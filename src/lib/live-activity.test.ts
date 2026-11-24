@@ -147,6 +147,8 @@ describe("turnNowPhrases: what the status line says is happening now", () => {
     expect(turnNowPhrases({ activity: "web" })?.phrases[0]).toBe("Searching the web");
     expect(turnNowPhrases({ activity: "read", file: "notes.md" })?.phrases[0]).toBe("Reading notes.md");
     expect(turnNowPhrases({ activity: "thinking" })?.phrases[0]).toBe("Thinking");
+    expect(turnNowPhrases({ activity: "summarizing" })?.phrases[0]).toBe("Summarizing earlier messages…");
+    expect(friendlyNowPhrases({ activity: "summarizing" }).phrases).toEqual(["Summarizing earlier messages…"]);
     expect(turnNowPhrases({ activity: "reply" })?.phrases[0]).toBe("Writing a reply");
     expect(turnNowPhrases({ activity: "tool", tool: "mcp__agents__publish_page" })?.phrases[0]).toBe("Publishing a page");
   });

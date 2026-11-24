@@ -1,18 +1,24 @@
 import { t } from "@/lib/i18n";
-import { useEffect, useRef, useState } from "react";
-import { MessageSquare, Search, Users } from "lucide-react";
+import { memo, useEffect, useRef, useState } from "react";
+import { MessageSquare, Search, SunMoon, Users } from "lucide-react";
 import { BotAvatar } from "./Avatar";
-import { api, openBot, useStore, type Bot, type Group } from "@/state/store";
+import { api, openBot } from "@/state/store";
+import { useBotsApartFromTurns, useGroupsApartFromTurns, type BotApartFromTurns, type GroupApartFromTurns } from "@/state/apart-from-turns";
+import { useStoreRef } from "@/state/store-ref";
+import { useActiveLocale } from "@/lib/use-active-locale";
 import { rankByName } from "@/lib/palette-rank";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { cn } from "@/lib/cn";
 import type { SearchHit } from "@/lib/search-hit";
 import { landOnSearchHit } from "@/lib/focus-message";
 import { imeComposing } from "@/lib/send-key";
+import { readColorScheme } from "@/lib/color-scheme";
+import { applySkinChoice, THEME_SKINS } from "@/lib/skins";
 
 type PaletteEntry =
-  | { kind: "bot"; bot: Bot }
-  | { kind: "room"; group: Group }
+  | { kind: "bot"; bot: BotApartFromTurns }
+  | { kind: "room"; group: GroupApartFromTurns }
+  | { kind: "theme" }
   | { kind: "message"; hit: SearchHit };
 
 const OPEN_EVENT = "omb:open-command-palette";
@@ -21,8 +27,9 @@ export function openCommandPalette() {
   window.dispatchEvent(new Event(OPEN_EVENT));
 }
 
-export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean) => void }) {
-  const { state, dispatch } = useStore();
+export const CommandPalette = memo(function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean) => void }) {
+  const store = useStoreRef(), dispatch = store.dispatch, allBots = useBotsApartFromTurns(), groups = useGroupsApartFromTurns();
+  useActiveLocale();
   const showThreads = useShowThreads();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -85,11 +92,13 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
 
   if (!open) return null;
 
-  const bots = rankByName(state.bots.filter((b) => !b.hidden), q);
-  const rooms = rankByName(state.groups, q);
+  const bots = rankByName(allBots.filter((b) => !b.hidden), q);
+  const rooms = rankByName(groups, q);
+  const themeCommand = t("palette.toggleTheme").toLowerCase().includes(q);
   const entries: PaletteEntry[] = [
     ...bots.map((bot): PaletteEntry => ({ kind: "bot", bot })),
     ...rooms.map((group): PaletteEntry => ({ kind: "room", group })),
+    ...(themeCommand ? [{ kind: "theme" } as const] : []),
     ...(q ? messageHits.map((hit): PaletteEntry => ({ kind: "message", hit })) : []),
   ];
   const selected = entries.length ? Math.min(cursor, entries.length - 1) : 0;
@@ -98,12 +107,15 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
     if (entry.kind === "message") {
       const hit = entry.hit;
       try {
-        await landOnSearchHit(hit, state, dispatch, showThreads);
+        await landOnSearchHit(hit, store.state(), dispatch, showThreads);
       } catch (error) {
         dispatch({ type: "error", message: error instanceof Error ? error.message : String(error) });
       }
+    } else if (entry.kind === "theme") {
+      applySkinChoice(readColorScheme() === "dark" ? THEME_SKINS.light : THEME_SKINS.dark);
     } else if (entry.kind === "bot") {
-      openBot(dispatch, entry.bot, showThreads);
+      const bot = store.state().bots.find((candidate) => candidate.id === entry.bot.id);
+      if (bot) openBot(dispatch, bot, showThreads);
     } else {
       dispatch({ type: "select", id: entry.group.id });
     }
@@ -130,7 +142,8 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
   };
 
   const roomOffset = bots.length;
-  const messageOffset = bots.length + rooms.length;
+  const themeOffset = bots.length + rooms.length;
+  const messageOffset = themeOffset + (themeCommand ? 1 : 0);
 
   const row = (key: string, index: number, onPick: () => void, children: React.ReactNode, twoLine = false) => (
     <button
@@ -211,11 +224,26 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
               roomOffset + i,
               () => void activate({ kind: "room", group }),
               <>
-                <Users size={16} strokeWidth={1.75} className="mx-[3px] shrink-0 text-ink-secondary" />
+                <Users size={16} className="mx-[3px] shrink-0 text-ink-secondary" />
                 <span className="truncate text-[14px] text-ink">{group.name}</span>
               </>,
             ),
           )}
+          {themeCommand && (
+            <div className="px-3 pb-1 pt-2 text-[12px] font-medium text-ink-tertiary">
+              {t("palette.commands")}
+            </div>
+          )}
+          {themeCommand &&
+            row(
+              "command:theme",
+              themeOffset,
+              () => void activate({ kind: "theme" }),
+              <>
+                <SunMoon size={16} className="mx-[3px] shrink-0 text-ink-secondary" />
+                <span className="truncate text-[14px] text-ink">{t("palette.toggleTheme")}</span>
+              </>,
+            )}
           {q && messageHits.length > 0 && (
             <div className="px-3 pb-1 pt-2 text-[12px] font-medium text-ink-tertiary">
               {t("palette.messages")}
@@ -247,4 +275,4 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
       </div>
     </div>
   );
-}
+});

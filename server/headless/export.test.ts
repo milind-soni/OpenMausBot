@@ -6,7 +6,11 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fromMarkdown } from "mdast-util-from-markdown";
 
+import { htmlFallbackText } from "../../shared/app.ts";
+import { parseWidgetInput, widgetToText } from "../../shared/widget.ts";
+import { WIDGET_SAMPLES } from "../../shared/widget-samples.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import type { HeadlessIo } from "./output.ts";
 import { safeName } from "./export.ts";
@@ -159,6 +163,45 @@ function checkReportFiles(out: string, result: { files: Array<{ link: string; en
 }
 
 describe("export", () => {
+  it.each(["```js\nconst answer = 42;", "~~~js\nconst answer = 42;"])("exports a follow-up after an unfinished code block: %s", async (text) => {
+    const previous = messages[LEAD]!;
+    messages[LEAD] = [
+      { id: "partial", role: "bot", kind: "text", text },
+      { id: "follow-up", role: "user", kind: "text", text: "Please use Python instead." },
+    ];
+    try {
+      const out = mkdtempSync(join(dir, "unfinished-code-"));
+      const { code } = await run(["export", "--thread", LEAD, "--out", out, "--json"]);
+      expect(code).toBe(0);
+      const nodes = fromMarkdown(readFileSync(join(out, "transcripts/conversation-lead-thr.md"), "utf8")).children;
+      expect(nodes.filter((node) => node.type === "code").map((node) => node.value)).toEqual(["const answer = 42;"]);
+      expect(nodes.some((node) => node.type === "paragraph" && node.children.some((child) => child.type === "text" && child.value === "Please use Python instead."))).toBe(true);
+    } finally {
+      messages[LEAD] = previous;
+    }
+  });
+
+  it("keeps later messages readable when the transcript limit cuts a complete code block", async () => {
+    const previous = messages[LEAD]!;
+    const text = `\`\`\`text\n${"a line of output\n".repeat(4_000)}\`\`\``;
+    messages[LEAD] = [
+      { id: "large-reply", role: "bot", kind: "text", text },
+      { id: "follow-up", role: "user", kind: "text", text: "Summarize this output." },
+    ];
+    try {
+      const out = mkdtempSync(join(dir, "truncated-code-"));
+      const { code } = await run(["export", "--thread", LEAD, "--out", out, "--json"]);
+      expect(code).toBe(0);
+      const saved = JSON.parse(readFileSync(join(out, "transcripts/conversation-lead-thr.json"), "utf8")) as { messages: Array<{ text: string }> };
+      expect(saved.messages[0]!.text).toBe(`${text.slice(0, 50_000)}…`);
+      const nodes = fromMarkdown(readFileSync(join(out, "transcripts/conversation-lead-thr.md"), "utf8")).children;
+      expect(nodes.find((node) => node.type === "code")?.value).toBe(fromMarkdown(saved.messages[0]!.text).children.find((node) => node.type === "code")?.value);
+      expect(nodes.at(-1)).toMatchObject({ type: "paragraph", children: [{ type: "text", value: "Summarize this output." }] });
+    } finally {
+      messages[LEAD] = previous;
+    }
+  });
+
   it("keeps same-named linked report folders and their relative assets separate", async () => {
     const out = join(dir, "report-folders");
     const { code, result } = await exportReports(out);
@@ -322,8 +365,59 @@ describe("export", () => {
     expect(safeName("console.md")).toBe("console.md");
   });
 
+  it.each([".pdf", ".xlsx"])("keeps %s when shortening a long exported file name", (extension) => {
+    const name = safeName(`${"annual-report-".repeat(12)}${extension}`);
+    expect(name.endsWith(extension)).toBe(true);
+    expect(Buffer.byteLength(name)).toBeLessThanOrEqual(120);
+  });
+
+  it("shortens multilingual names on complete characters while keeping their extension", () => {
+    const name = safeName(`${"季度报告📊".repeat(12)}.xlsx`);
+    expect(name.endsWith(".xlsx")).toBe(true);
+    expect(Buffer.byteLength(name)).toBeLessThanOrEqual(120);
+    expect(Buffer.from(name).toString("utf8")).toBe(name);
+    expect(name).not.toContain("�");
+  });
+
+  it.each(["widget", "app"])("keeps %s fallback text in the Markdown transcript", async (kind) => {
+    const parsed = parseWidgetInput(WIDGET_SAMPLES.pullRequests);
+    if (!parsed.ok) throw new Error(parsed.error);
+    const text = kind === "widget" ? widgetToText(parsed.value) : htmlFallbackText("Sales by month", "<h1>Sales</h1><p>Up 12%</p>");
+    const out = join(dir, kind);
+    const lead = messages[LEAD]!;
+    messages[LEAD] = [
+      { id: "before", role: "user", kind: "text", text: "Show the result" },
+      { id: "card", role: "bot", kind, text },
+      { id: "after", role: "user", kind: "text", text: "Thanks for the result" },
+    ];
+    try {
+      expect((await run(["export", "--thread", LEAD, "--out", out, "--json"])).code).toBe(0);
+    } finally {
+      messages[LEAD] = lead;
+    }
+    const transcript = JSON.parse(readFileSync(join(out, "transcripts/conversation-lead-thr.json"), "utf8"));
+    expect(transcript.messages[1]).toMatchObject({ kind, text });
+    const markdown = readFileSync(join(out, "transcripts/conversation-lead-thr.md"), "utf8");
+    expect(markdown).toContain(`**Room Lead:**\n\n${text}`);
+    expect(markdown.indexOf(text)).toBeGreaterThan(markdown.indexOf("Show the result"));
+    expect(markdown.indexOf("Thanks for the result")).toBeGreaterThan(markdown.indexOf(text));
+  });
+
   it("keeps one job of the conversation with --root, and says so when there is none", async () => {
     const missing = await run(["export", "--thread", LEAD, "--out", join(dir, "none"), "--root", "nope", "--json"]);
     expect(missing).toMatchObject({ code: 2, result: { error: "no job with root nope in this conversation" } });
+  });
+
+  it("leaves an earlier export intact when --force is paired with an unknown job root", async () => {
+    const out = join(dir, "invalid-root");
+    expect((await run(["export", "--thread", LEAD, "--out", out, "--json"])).code).toBe(0);
+    const saved = [
+      "manifest.json", "job.json", "transcripts/conversation-lead-thr.json", "transcripts/conversation-lead-thr.md",
+      "files/conversation-lead-thr/report.md", "screens/conversation-lead-thr/001-s1.png",
+    ].map((file) => ({ file, bytes: readFileSync(join(out, file)) }));
+
+    const refused = await run(["export", "--thread", LEAD, "--out", out, "--force", "--root", "nope", "--json"]);
+    expect(refused).toMatchObject({ code: 2, result: { error: "no job with root nope in this conversation" } });
+    for (const { file, bytes } of saved) expect(readFileSync(join(out, file))).toEqual(bytes);
   });
 });

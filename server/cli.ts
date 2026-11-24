@@ -41,7 +41,7 @@ import { defaultSetupIo, SetupCancelled, type SetupIo } from "./cli-prompts.ts";
 import { routeCli, usage } from "./cli-usage.ts"; import { savedSessionHeaders } from "./headless/saved-servers.ts";
 import { normalizePhoneOrigin, phonePairingInstructions, runPhoneSetup } from "./cli-phone-setup.ts";
 import { browserSignInLines, desktopOwnedRefusal, formatSessions, pairingBlock, RELAY_NOT_WITH_TUNNEL, relayPairingBlock, showRelayPairing } from "./cli-pairing.ts";
-import { cliCommand, cliPrefix } from "./cli-invocation.ts";
+import { cliCommand, cliPrefix } from "./cli-invocation.ts"; import { defaultDataDir, type DataHomes } from "./data-dir.ts";
 import { checkReach, envPublicUrl, lanProblem, localLinkBase, noRouteLines, publicUrlProblem, reachLines, waitForReach, type Route } from "./cli-reach.ts";
 import { lanUrl } from "./lan-address.ts";
 import { isLoopbackHost } from "../electron/server-address.mjs";
@@ -124,7 +124,7 @@ export interface CliOptions {
 
 const COMMANDS = ["setup", "start", "serve", "pair", "sessions", "devices", "status", "login", "logout", "access", "service", "browser", "fleet", "help", "--help", "-h", "--version", "-v", "version"];
 
-export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): CliOptions | { error: string } {
+export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env, homes: DataHomes = {}): CliOptions | { error: string } {
   const implicitStart = !argv.length || (argv[0]!.startsWith("--") && argv[0] !== "--help" && argv[0] !== "--version");
   const [command = "start", ...rest] = implicitStart ? ["start", ...argv] : argv;
   if (!COMMANDS.includes(command)) {
@@ -133,7 +133,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   const options: CliOptions = {
     command: command === "--help" || command === "-h" ? "help" : command === "--version" || command === "-v" ? "version" : command === "devices" ? "sessions" : (command as CliOptions["command"]),
     port: Number(env.OMB_PORT || 8799),
-    dataDir: env.OMB_DATA_DIR || join(homedir(), ".openmausbot"),
+    dataDir: rest.includes("--data-dir") ? "" : defaultDataDir(env, homes.under, homes.realHome),
     tailscale: false,
     tunnel: false,
     client: false,

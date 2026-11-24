@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ComponentProps } from "react";
 import { ChevronDown, Search, X } from "lucide-react";
 
-import { useStore, type Bot, type BotSettingsSection } from "@/state/store";
+import { type Bot, type BotSettingsSection } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useCaptionChrome } from "./DesktopCapabilities";
 import { BOT_SECTIONS, appSearchPhase, searchEmptyText, sectionLabel, sectionMatches } from "./bot-settings/sections";
@@ -27,22 +27,30 @@ import { useAdvancedMode } from "@/lib/interface-mode";
 import { BotPanel } from "./bot-panel/PanelShell";
 import { LibraryTab } from "./bot-panel/LibraryTab";
 import type { SimplePageId } from "./bot-panel/page-registry";
-import { BOT_PANEL_ID, sidePanelCls } from "./bot-panel/side-panel";
+import { BOT_PANEL_ID, sidePanelCls, useSidePanelLeave } from "./bot-panel/side-panel";
 import { HistoryRollbackDialog, useBotHistory, useBotOverview } from "./bot-settings/useBotOverview";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { ShareBotButton, useTeamName } from "./bot-access/ShareBotButton";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 /** Where the Library's memory, skills and folder rows lead in Advanced settings. */
 const LIBRARY_LINKS: Partial<Record<SimplePageId, BotSettingsSection>> = { memory: "memory", skills: "skills", folder: "access" };
+
+/** The avatar moves with every turn of the bot, so only this section follows its motion. */
+function MovingIdentitySection(props: Omit<ComponentProps<typeof IdentitySection>, "mascotMotion">) {
+  const mascotMotion = useStoreSelector((state) => state.mascotMotion?.botId === props.bot.id ? state.mascotMotion : null);
+  return <IdentitySection {...props} mascotMotion={mascotMotion} />;
+}
 
 export function BotSettingsDialog({ bot, overlay = false }: {
   bot: Bot;
   overlay?: boolean;
 }) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ botSettingsExpandAccordion: s.botSettingsExpandAccordion, botSettingsExpandRemembered: s.botSettingsExpandRemembered, botSettingsSection: s.botSettingsSection, routineRuns: s.routineRuns }), sameFields), dispatch = useStoreDispatch();
   const section = state.botSettingsSection;
   const derived = useBotSettingsDerived(bot);
   const dialogRef = useRef<HTMLElement | null>(null);
+  useSidePanelLeave(dialogRef);
   const { dragProps } = useCaptionChrome();
   const [query, setQuery] = useState("");
   const collapsed = !state.botSettingsExpandAccordion;
@@ -118,11 +126,10 @@ export function BotSettingsDialog({ bot, overlay = false }: {
         );
       case "identity":
         return (
-          <IdentitySection
+          <MovingIdentitySection
             bot={bot}
             patch={derived.patch}
             activeState={derived.activeState}
-            mascotMotion={derived.mascotMotion}
           />
         );
       case "soul":

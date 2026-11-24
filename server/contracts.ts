@@ -93,7 +93,7 @@ export interface TurnImageInput {
   source?: "video-frame";
 }
 
-/** A video already admitted to the private attachment store; resolved into TurnImageInput frames before any driver sees it. */
+/** A video already admitted to the private attachment store; a driver with `nativeImageInput` gets it as the clip within its `nativeVideoBytes`. Otherwise, best effort, a driver with `nativeImageInput` gets TurnImageInput frames when the turn has image slots left and ffprobe and ffmpeg can sample it, and none when they can't. */
 export interface TurnVideoInput {
   path: string;
   mime: "video/mp4" | "video/webm" | "video/quicktime";
@@ -142,6 +142,8 @@ export interface SendTurnInput {
   confinedWhy?: string;
   /** Images for this user turn only; kept out of replay transcripts. */
   images?: TurnImageInput[];
+  /** Video clips for this user turn only, sent as they are; set only for a driver with `capabilities.nativeVideoBytes`. */
+  videos?: TurnVideoInput[];
   model?: string;
   effort?: EffortLevel;
   variant?: string;
@@ -275,6 +277,8 @@ export interface ProviderAdapter {
     images?: boolean;
     /** sendTurn consumes `images` as structured input, so dispatch strips the attachment path from `text`. */
     nativeImageInput?: boolean;
+    /** With `nativeImageInput`, sendTurn also takes `videos` as the clips themselves, up to this many bytes per turn; any other clip arrives, best effort, as frames only when the turn has image slots left and ffprobe and ffmpeg can sample it. */
+    nativeVideoBytes?: number;
     /** Effort levels the driver can pass to its CLI, ascending; absent hides the control. */
     effortLevels?: readonly EffortLevel[];
     /** The driver validates and applies model-specific variant IDs per session. */
@@ -337,6 +341,12 @@ export interface ProviderAdapter {
     hold(threadId: ThreadId, until: number | null): boolean;
     compact?(threadId: ThreadId, options: { instructions: string; session?: string; signal?: AbortSignal }): Promise<IdleCompactResult>;
   };
+  /** The engine's own compaction of this thread's native session, in place, asked for by the person. `session` is the
+   * resume cursor the host holds, `model` the selection the next turn would run on, and `selectionNow` the instance and model read again
+   * when the engine is about to be asked. Only a kept engine process that is
+   * still on that session takes it: otherwise `ok` is false and nothing was sent to the engine. `usage` is null when the
+   * engine reports none for the compaction. */
+  compactSession?(threadId: ThreadId, options: { botId?: string; session: string; model?: string | null; selectionNow?: () => { instanceId: string; model: string | null } | undefined; signal?: AbortSignal }): Promise<EngineCompactResult>;
   /** Starting a thread's engine before its first message, so that message finds it running. `start` launches the process
    * exactly as a turn with this input would and sends it nothing; it resolves true once the process is launched. The next
    * sendTurn on the thread takes that process when its launch would have been the same and it has started up (`ready`),
@@ -365,6 +375,10 @@ export type IdleCompactResult =
   | { ok: true; session: string; sessionBefore: string; input: number; cacheRead: number; cacheWrite: number; output: number; costUsd: number | null; model: string | null }
   | { ok: false; reason: string; busy?: boolean; limit?: boolean };
 
+export type EngineCompactResult =
+  | { ok: true; usage: { input: number; output: number; cachedInput: number } | null; model: string | null }
+  | { ok: false; reason: string };
+
 export type SteerOutcome = "steered" | "refused" | "indeterminate";
 
 export interface ProviderSnapshot {
@@ -379,6 +393,10 @@ export interface ProviderSnapshot {
   authenticated?: boolean;
   /** The CLI path runs another program: it answered --version as something other than this engine's own CLI. */
   notEngineCli?: true;
+  /** The account runs Google's native Antigravity CLI, not the pinned (Classic) runtime. */
+  nativeCli?: true;
+  /** Not ready because its runtime is being installed on this computer right now. */
+  installing?: true;
   /** Display identity from the provider CLI, never credentials; `method` is a personal login or the workspace API key. */
   account?: { email?: string; organization?: string; method?: "login" | "api-key" };
   version?: string | null;
@@ -417,10 +435,12 @@ export interface EngineInstall {
   /** The vendor's npm package, for an engine whose `command` is its own installer script: Settings installs it on the
    * server when npm is there, while a terminal keeps the vendor's command. */
   npmPackage?: string;
-  /** The app downloads and verifies a pinned provider runtime itself. */
+  /** The app downloads and verifies a provider runtime itself. `downloadBytes` is a number for every client; with
+   * `sizeUnknown` it is not the size of what will be downloaded, and a client shows no size. */
   managed?: {
     label: string;
     downloadBytes: number;
+    sizeUnknown?: true;
   };
   /** The engine needs a key saved in the app rather than a terminal step. */
   settings?: "connections";
@@ -488,6 +508,9 @@ export interface ProviderAuthenticationStart {
   expiresAt: string | null;
   /** A short-lived code to enter only at the provider's authorization URL. */
   userCode?: string;
+  /** `pasted-code`: the page the link leads to ends on a code (or an address holding it) that the person pastes back, and
+   * not on a redirect to this computer. */
+  kind?: "pasted-code";
 }
 
 export interface ProviderAuthenticationStatus extends Omit<ProviderAuthenticationStart, "phase"> {
@@ -510,6 +533,8 @@ export interface ModelCatalog {
     contextWindow?: number;
     /** Discovery hints; the native session revalidates these before each turn. */
     variants?: ModelVariantOption[];
+    /** Effort levels this model accepts when narrower/wider than the engine default. */
+    effortLevels?: readonly EffortLevel[];
     /** The organization of the signed-in account turned this model off: the engine would answer with another. */
     orgBlocked?: true;
     /** The installed CLI is too old for this model: the version it needs. */
@@ -517,6 +542,9 @@ export interface ModelCatalog {
     local?: LocalModelFacts;
   }>;
 }
+
+/** Why an engine's model list could not be read: it refused the sign-in, it took too long, or anything else. */
+export type ModelListProblem = "signedOut" | "timedOut" | "failed";
 
 /** "gpt-5.4-mini" → "Gpt 5.4 Mini", splitting on the caller's word breaks. */
 export function titleCaseModelId(id: string, wordBreaks: RegExp): string {
@@ -563,6 +591,8 @@ export interface TextGenerationOptions {
   /** One of this instance's models instead of the driver's quick-call choice: the helper model setting, and the setup
    * card's quick model (side-jobs.ts). */
   model?: string;
+  /** A one-shot call can reject the resolved model before sending the prompt. */
+  checkModel?: (model: string) => void;
   /** How long the caller will wait; drivers with their own process timer use it instead of their default. */
   timeoutMs?: number;
   /** For a bot's own engine whose driver picks a small model of its own. */
@@ -583,8 +613,12 @@ export interface ProviderInstance {
   readonly displayName: string | undefined;
   readonly enabled: boolean;
   readonly models: ModelCatalog;
+  /** An unmanaged OpenRouter connection, where upkeep can name a model from this account's catalog. */
+  readonly openRouter?: true;
   /** True while the catalog is the driver's fixed list or a failed read's leftover, not a list the engine gave. */
   readonly modelsUnconfirmed?: boolean;
+  /** Set with modelsUnconfirmed when the engine's last read of its list failed: why, for the picker to say. */
+  readonly modelsUnreadable?: ModelListProblem;
   /** False while the sign-in can refuse a model its catalog lists (Codex on a ChatGPT account): a short message and background text then stay on the bot's own model. */
   readonly quickModelsUsable?: () => boolean;
   /** Refresh a live catalog without recreating the provider instance. */
@@ -601,6 +635,8 @@ export interface ProviderInstance {
   readonly cancelAuthentication?: () => Promise<void>;
   /** Remove the provider CLI's stored sign-in on this server; never touches another instance's home. */
   readonly signOut?: () => Promise<void>;
+  /** Drops what was last learned about this instance's sign-in, so the next read asks the engine again. */
+  readonly forgetAuthentication?: () => void;
   readonly adapter: ProviderAdapter;
   snapshot(): Promise<ProviderSnapshot>;
   /** Cheap one-shot text call (titles, summaries); the signal is a best-effort cap. */

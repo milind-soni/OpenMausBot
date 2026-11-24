@@ -5,6 +5,7 @@ import {
   promptHalves,
   promptSplitFingerprints,
   readPromptSplitReceipt,
+  splitSessionNote,
   splitSessionPrompt,
   volatileContextNote,
   withContextNote,
@@ -165,4 +166,34 @@ describe("splitSessionPrompt", () => {
     state = splitSessionPrompt("stable rules.", "memory", state.receipt, fullSystem, "second", false, 1);
     expect(state.text).toBe(fullSystem + "\n\nsecond");
   });
+});
+
+describe("splitSessionNote", () => {
+  it("sends the whole volatile half where the full prompt would go, then only its changes", () => {
+    const first = splitSessionNote("stable rules.", "memory", null);
+    expect(first.note).toBe(volatileContextNote("memory", false));
+    const same = splitSessionNote("stable rules.", "memory", first.receipt);
+    expect(same.note).toBe("");
+    const moved = splitSessionNote("stable rules.", "moved to Toronto", same.receipt);
+    expect(moved.note).toBe(volatileContextNote("moved to Toronto", true));
+    const revised = splitSessionNote("revised rules.", "moved to Toronto", moved.receipt);
+    expect(revised.note).toBe(volatileContextNote("moved to Toronto", false));
+    expect(revised.receipt.turnsSinceFull).toBe(0);
+  });
+
+  it("keeps the receipt splitSessionPrompt would keep, so a session can move between the two", () => {
+    const previous = splitSessionPrompt("stable rules.", "memory", null, "stable rules.\n\nmemory", "first").receipt;
+    expect(splitSessionNote("stable rules.", "memory", previous, true, 8))
+      .toEqual({ note: volatileContextNote("memory", true), receipt: splitSessionPrompt("stable rules.", "memory", previous, "", "", true, 8).receipt });
+  });
+
+  it("has no note for a session with no volatile half", () => {
+    expect(splitSessionNote("stable rules.", "", null).note).toBe("");
+  });
+});
+
+it("tells a session that holds the stable half that the volatile half was cleared when a changed stable half resends it empty", () => {
+  const previous = promptSplitFingerprints("stable one", "the open task");
+  expect(splitSessionNote("stable two", "", previous).note).toContain("have been cleared");
+  expect(splitSessionNote("stable two", "", promptSplitFingerprints("stable one", "")).note).toBe("");
 });

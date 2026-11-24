@@ -1,6 +1,6 @@
 import { useMemo, useState, type JSX } from "react";
 import { Bug, Copy, Cpu, Download, Gauge, LayoutTemplate, ListChecks, MessagesSquare, Monitor, MoreHorizontal, RotateCcw, Search, Share, SquarePen, UserPlus, UserRound, Users } from "lucide-react";
-import { currentTaskBot, openBotThread, useStore, visibleMessages, type Bot } from "@/state/store";
+import { currentTaskBot, openBotThread, visibleMessages, type Bot } from "@/state/store";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { requestChatFind, useChatFindOpen } from "@/lib/chat-find";
@@ -8,9 +8,9 @@ import { usageSummary } from "@/lib/chat-usage-summary";
 import {
   copyTranscriptToClipboard,
   downloadMarkdownTranscript,
-  formatTranscriptMarkdown,
   slugifyTranscriptFilename,
 } from "@/lib/export-transcript";
+import { conversationTranscript } from "@/lib/conversation-transcript";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { localizedTaskTitle } from "@/lib/task-title";
@@ -18,7 +18,8 @@ import { useContextAction } from "./ContextWarning";
 import { ELEVATED_CONTROL, ELEVATED_HOVER, ELEVATED_OPEN } from "./elevated";
 import { ShortcutHint } from "./ShortcutHint";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
-import { orderedThreadList } from "./SidebarThreadRow";
+import { MainThreadMark } from "./SidebarRowMarkers";
+import { mainThreadFirst, orderedThreadList } from "./SidebarThreadRow";
 import { openBotSettings } from "./bot-panel/panel-link";
 import { ShareBotButton, useTeamName } from "./bot-access/ShareBotButton";
 import { UsageBars } from "./EngineUsage";
@@ -27,13 +28,14 @@ import { tasksOfSide } from "@/state/team-side";
 import { openConversationDialog, shareChoices } from "./conversation-share/conversation-share";
 import { askBot } from "@/lib/template-share";
 import { TEMPLATE_SHARE_MESSAGE } from "../../shared/share-card";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 /** One item list for the chat's ⋯ menu wherever it sits; it lists the threads whenever the sidebar hides them. The
  * Simple bot panel draws the same items as rows, and its Share button holds the two that export. */
 export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: SidebarMenuItem[]; on: boolean } {
   const bot = useMemo(() => currentTaskBot(profile), [profile]);
   const messages = useMemo(() => visibleMessages(bot), [bot]);
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ activityOpen: s.activityOpen, computerOpen: s.computerOpen, inspectorOpen: s.inspectorOpen, instances: s.instances }), sameFields), dispatch = useStoreDispatch();
   const advanced = useAdvancedMode();
   const showThreads = useShowThreads();
   const findOpen = useChatFindOpen(bot.threadId);
@@ -43,9 +45,9 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
   const hasMessages = messages.length > 0;
   const contextAction = useContextAction();
   const atFreshStart = messages.at(-1)?.compaction?.fresh === true;
-  const transcript = () => formatTranscriptMarkdown({ title: bot.name, messages, botName: bot.name, isGroup: false });
+  const transcript = () => conversationTranscript({ threadId: bot.threadId, hasMore: bot.hasMore, activeLeafId: bot.activeLeafId, title: bot.name, messages, botName: bot.name, isGroup: false });
   const side = useConversationSide(profile);
-  const threads = showThreads ? [] : orderedThreadList((side ? tasksOfSide(profile, side) : profile.tasks ?? []).filter((task) => !task.routineRunId));
+  const threads = showThreads ? [] : mainThreadFirst(orderedThreadList((side ? tasksOfSide(profile, side) : profile.tasks ?? []).filter((task) => !task.routineRunId)), profile.mainThreadId);
   const sharing = shareChoices(profile, profile.tasks?.find((task) => task.threadId === bot.threadId), Boolean(useTeamName()));
   const shareItems: SidebarMenuItem[] = [
     { key: TEMPLATE_ITEM, label: t("template.shareAsTemplate"), icon: <LayoutTemplate size={16} />,
@@ -115,6 +117,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
         key: `thread:${task.threadId}`,
       label: localizedTaskTitle(task.title || t("task.newShort")),
         active: task.threadId === bot.threadId,
+        trailing: task.threadId === profile.mainThreadId ? <MainThreadMark /> : undefined,
         onSelect: () => openBotThread(dispatch, profile, task.threadId, showThreads),
       })),
       onSelect: () => {},
@@ -144,7 +147,12 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
       label: t("chat.export.download"),
       icon: <Download size={16} />,
       disabled: !hasMessages,
-      onSelect: () => downloadMarkdownTranscript(slugifyTranscriptFilename(bot.name), transcript()),
+      onSelect: () => {
+        const content = transcript();
+        const save = (markdown: string) => downloadMarkdownTranscript(slugifyTranscriptFilename(bot.name), markdown);
+        if (typeof content === "string") save(content);
+        else void content.then(save).catch((cause) => dispatch({ type: "error", message: cause instanceof Error ? cause.message : String(cause) }));
+      },
     },
     ...(usage ? [{
       key: "usage",
@@ -187,7 +195,7 @@ function RoundChatMoreMenu({ bot, phoneHeader }: { bot: Bot; phoneHeader: boolea
         <span
           data-testid="chat-more"
           className={cn(
-            "flex size-8 items-center justify-center rounded-full",
+            "flex size-9 items-center justify-center rounded-full",
             advanced ? "bg-raised/50 transition-colors hover:bg-raised" : cn(ELEVATED_CONTROL, ELEVATED_HOVER, open && ELEVATED_OPEN),
             "max-md:size-9 max-md:border max-md:border-hairline max-md:bg-card",
             open || on ? "text-accent" : "text-ink",
@@ -268,12 +276,12 @@ export function ChatHeaderMenu({ bot }: { bot: Bot }): JSX.Element {
         <span
           data-testid="chat-more"
           className={cn(
-            "flex size-8 items-center justify-center rounded-full transition-colors hover:bg-ink/[0.06]",
+            "flex size-9 items-center justify-center rounded-full transition-colors hover:bg-ink/[0.06]",
             open || on ? "text-accent" : "text-ink-secondary hover:text-ink",
           )}
           title={t("chat.more")}
         >
-          <MoreHorizontal size={18} />
+          <MoreHorizontal size={16} />
         </span>
       )}
     />

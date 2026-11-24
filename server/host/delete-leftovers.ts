@@ -1,7 +1,8 @@
 // Deleting a conversation or a bot removes what it kept on disk outside its transcript: the files uploaded to the
-// conversation, its box uploads folder, the session files the engines wrote for it, and for a bot its checkpoints and
+// conversation, its box uploads folder, its own notes, the session files the engines wrote for it, and for a bot its checkpoints and
 // the memory layers kept beside its own folder. A conversation's own folder (task-workspaces/<bot>/<thread>) holds
-// files the bot made for the person, and stays when the conversation or the bot is deleted.
+// files the bot made for the person, and stays when the conversation or the bot is deleted: on a Cloud home only its
+// package installs, and the conversation's full tool results, go (conversation-folder-cleanup.ts).
 //
 // Security: a file goes only when it is provably the deleted conversation's or bot's. An upload another conversation,
 // a picture or a routine still names stays; an engine session a remaining conversation still resumes stays. Nothing is
@@ -35,12 +36,14 @@ export interface EngineSessionFolders {
 }
 
 type Cursors = Record<string, unknown> | undefined;
+type Folder = string | null | undefined;
 type Change = { type: string; threadId?: string; botId?: string };
 
 export interface DeleteLeftoversDeps {
   dataDir: string;
   store: {
-    readonly bots: ReadonlyArray<{ id: string; threadId?: string; resumeCursors?: Cursors; tasks?: ReadonlyArray<{ threadId: string; resumeCursors?: Cursors }> }>;
+    readonly bots: ReadonlyArray<{ id: string; threadId?: string; resumeCursors?: Cursors; tasks?: ReadonlyArray<{ threadId: string; resumeCursors?: Cursors; cwd?: Folder }> }>;
+    readonly groups?: ReadonlyArray<{ threadId?: string; pinnedCwd?: Folder; tasks?: ReadonlyArray<{ threadId: string; pinnedCwd?: Folder }> }>;
     messagesFor(threadId: string): readonly unknown[];
     onChange(listener: (change: Change) => void): unknown;
     /** Set here: the store calls it before it tries to delete these conversations. */
@@ -58,6 +61,8 @@ export interface DeleteLeftoversDeps {
   checkpointsQuiet?(botId: string): Promise<void>;
   /** Runs `flush` once the delete under way has finished, so one pass covers every conversation it removed. */
   defer?(flush: () => void): void;
+  /** What clears the deleted conversations' and bots' rebuildable trees and tool results, off the delete's own call. */
+  folders?: { conversationsGone(threadIds: Iterable<string>, workedIn?: Iterable<string>): void; botGone(botId: string): void };
   warn?(line: string): void;
 }
 
@@ -203,7 +208,10 @@ export function instanceEnvironment(base: Record<string, string | undefined>, in
 interface Noted {
   attachments: Set<string>;
   sessions: Set<string>;
+  /** The folders it worked in: a fork works in its source's folder, which may be left with no conversation. */
+  folders: Set<string>;
 }
+const nothingNoted = (): Noted => ({ attachments: new Set(), sessions: new Set(), folders: new Set() });
 
 export function createDeleteLeftovers(deps: DeleteLeftoversDeps) {
   const dataDir = resolve(deps.dataDir);
@@ -225,11 +233,16 @@ export function createDeleteLeftovers(deps: DeleteLeftoversDeps) {
 
   function note(threadId: string): void {
     if (!ID.test(threadId)) return;
-    const found: Noted = { attachments: new Set(), sessions: new Set() };
+    const found = nothingNoted();
     for (const match of JSON.stringify(deps.store.messagesFor(threadId)).matchAll(ATTACHMENT)) found.attachments.add(match[1]!);
     for (const bot of deps.store.bots) {
       if (bot.threadId === threadId) for (const cursor of cursorsOf(bot.resumeCursors)) found.sessions.add(cursor);
       for (const task of bot.tasks ?? []) if (task.threadId === threadId) for (const cursor of cursorsOf(task.resumeCursors)) found.sessions.add(cursor);
+      for (const task of bot.tasks ?? []) if (task.threadId === threadId && task.cwd) found.folders.add(task.cwd);
+    }
+    for (const group of deps.store.groups ?? []) {
+      if (group.threadId === threadId && group.pinnedCwd) found.folders.add(group.pinnedCwd);
+      for (const task of group.tasks ?? []) if (task.threadId === threadId && task.pinnedCwd) found.folders.add(task.pinnedCwd);
     }
     for (const session of loggedSessions(dataDir, threadId)) found.sessions.add(session);
     noted.delete(threadId);
@@ -281,6 +294,12 @@ export function createDeleteLeftovers(deps: DeleteLeftoversDeps) {
     for (const bot of entries(root)) removeUnder(dataDir, join(root, bot, threadId));
   }
 
+  /** memory/threads/<thread>.md in the workspace of whichever bot kept the conversation. */
+  function removeThreadNotes(threadId: string): void {
+    const root = join(dataDir, "workspaces");
+    for (const bot of entries(root)) removeUnder(dataDir, join(root, bot, "memory", "threads", `${threadId}.md`));
+  }
+
   function removeBot(botId: string): void {
     if (!ID.test(botId) || isLayerId(botId)) return;
     const removeCheckpoints = () => attempt(`checkpoints of ${botId}`, () => void removeUnder(dataDir, join(dataDir, "checkpoints", botId)));
@@ -303,7 +322,13 @@ export function createDeleteLeftovers(deps: DeleteLeftoversDeps) {
     attempt("uploads", () => removeAttachments(new Set([...threads.values()].flatMap((found) => [...found.attachments]))));
     attempt("engine sessions", () => removeSessions(new Set([...threads.values()].flatMap((found) => [...found.sessions]))));
     for (const threadId of threads.keys()) attempt(`box uploads of ${threadId}`, () => removeBoxUploads(threadId));
+    for (const threadId of threads.keys()) attempt(`notes of ${threadId}`, () => removeThreadNotes(threadId));
     for (const botId of bots) removeBot(botId);
+    if (deps.folders) {
+      const folders = deps.folders;
+      attempt("conversation folders", () => folders.conversationsGone(threads.keys(), [...threads.values()].flatMap((found) => [...found.folders])));
+      for (const botId of bots) if (!isLayerId(botId)) attempt(`conversation folders of ${botId}`, () => folders.botGone(botId));
+    }
   }
 
   function schedule(): void {
@@ -317,7 +342,7 @@ export function createDeleteLeftovers(deps: DeleteLeftoversDeps) {
   };
   deps.store.onChange((change) => {
     if (change.type === "thread.deleted" && change.threadId && ID.test(change.threadId)) {
-      gone.set(change.threadId, noted.get(change.threadId) ?? { attachments: new Set(), sessions: new Set() });
+      gone.set(change.threadId, noted.get(change.threadId) ?? nothingNoted());
       noted.delete(change.threadId);
       schedule();
     } else if (change.type === "bot.deleted" && change.botId) {

@@ -47,15 +47,21 @@ function unlistedE2eSeconds(weights: ShardWeights): number {
   return e2e.length % 2 ? e2e[middle] : (e2e[middle - 1] + e2e[middle]) / 2;
 }
 
+// Shard 1 of a platform's run also runs the node:test suites after vitest
+// (ci.yml's matrix.node_tests): about two minutes on the macOS and Windows
+// runners in November 2026, against a 30-minute job cap.
+export const NODE_TESTS_SECONDS: Readonly<Partial<Record<NodeJS.Platform, number>>> = { darwin: 120, win32: 105 };
+
 // Longest-processing-time first: sort by seconds (ties by key, so the result
 // never depends on the order vitest found the files), then give each file to
-// the shard with the least time so far, the lowest index winning a tie.
-export function planShards(keys: readonly string[], weights: ShardWeights, count: number) {
+// the shard with the least time so far, the lowest index winning a tie. The
+// first shard starts at `firstShardSeconds`.
+export function planShards(keys: readonly string[], weights: ShardWeights, count: number, firstShardSeconds = 0) {
   const e2eSeconds = unlistedE2eSeconds(weights);
   const seconds = keys.map((key) => Object.hasOwn(weights, key) ? weights[key] : E2E.test(key) ? e2eSeconds : UNLISTED_SECONDS);
   const order = keys.map((_, i) => i)
     .sort((a, b) => seconds[b] - seconds[a] || (keys[a] < keys[b] ? -1 : keys[a] > keys[b] ? 1 : 0));
-  const loads = Array.from({ length: count }, () => 0);
+  const loads = Array.from({ length: count }, (_, shard) => shard === 0 ? firstShardSeconds : 0);
   const shardOf: number[] = [];
   for (const i of order) {
     let target = 0;
@@ -72,7 +78,8 @@ export class DurationSequencer extends BaseSequencer {
     if (!shard) return files;
     const weights = loadShardWeights(root);
     const keys = files.map((spec) => weightKey(root, spec.moduleId) ?? spec.moduleId);
-    const { shardOf, loads } = planShards(keys, weights, shard.count);
+    const nodeTests = process.env.OMB_VITEST_SUBSET ? 0 : NODE_TESTS_SECONDS[process.platform] ?? 0;
+    const { shardOf, loads } = planShards(keys, weights, shard.count, nodeTests);
     const mine = files.filter((_, i) => shardOf[i] === shard.index - 1);
     // One line per run, so a CI log shows the weights were applied. If most
     // weighted files go unmatched (a path-key mismatch on some platform), the

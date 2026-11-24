@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Cloud } from "lucide-react";
 import { BOT_BODY_IDS, type BotBodyId } from "../../shared/bot-body";
-import { MASCOT_FACE_COLORS, type MascotFaceColor } from "../../shared/bot-avatar";
+import { MASCOT_FACE_COLORS, mascotBodyColorSchema, mascotMaterialSchema, type MascotFaceColor } from "../../shared/bot-avatar";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
@@ -41,7 +41,9 @@ function avatarOf(row: PlaceBotRow) {
   const color = (MAUS_COLOR_NAMES as readonly string[]).includes(row.color ?? "") ? row.color as MausColor : "green";
   const body = (BOT_BODY_IDS as readonly string[]).includes(row.mascotBody ?? "") ? row.mascotBody as BotBodyId : null;
   const face = (MASCOT_FACE_COLORS as readonly string[]).includes(row.mascotFaceColor ?? "") ? row.mascotFaceColor as MascotFaceColor : null;
-  return { name: row.name, color, mascotBody: body, mascotFaceColor: face };
+  const tint = mascotBodyColorSchema.safeParse(row.mascotBodyColor).data ?? null;
+  const material = mascotMaterialSchema.safeParse(row.mascotMaterial).data ?? null;
+  return { name: row.name, color, mascotBody: body, mascotFaceColor: face, mascotBodyColor: tint, mascotMaterial: material };
 }
 
 function OtherPlaceBotRow({ row, dim, iconOnly, simple }: { row: PlaceBotRow; dim: boolean; iconOnly: boolean; simple: boolean }) {

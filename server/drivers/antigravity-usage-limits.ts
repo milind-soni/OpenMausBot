@@ -15,9 +15,18 @@ import { readFile, stat } from "node:fs/promises";
 import type { PlanExtra, PlanFetch, PlanModelUsage, PlanWindow, PlanWindows } from "../plan-usage.ts";
 import { antigravityTokenPath } from "./antigravity-acp.ts";
 import { refreshAntigravityAccess } from "./antigravity-account.ts";
+import { antigravityQuotaFamily } from "./antigravity-turn-outcome.ts";
+import { readNativeAccessToken } from "./antigravity-native-sign-in.ts";
 
 /** Whether Antigravity accounts are asked for their limits at all. Off, they have no row in the usage report. */
 export const ANTIGRAVITY_USAGE_LIMITS = true;
+
+/** Whether an instance with this CLI path runs the native CLI, or would once installed. Its limits come from the sign-in
+ * that CLI keeps: a token file left from the pinned runtime must not stand for its account. */
+export async function antigravityRunsNativeCli(cli: string | undefined, env: NodeJS.ProcessEnv): Promise<boolean> {
+  const { antigravityPathRunsNativeCli } = await import("./antigravity-runtime.ts");
+  return antigravityPathRunsNativeCli(cli, env);
+}
 
 export function antigravityUserAgent(platform: NodeJS.Platform, architecture: string): string {
   return `antigravity/hub/2.24.0 (aidev_client; os_type=${platform}; arch=${architecture}; cl=963137146)`;
@@ -162,6 +171,8 @@ export function antigravitySummaryWindows(response: unknown, requestedAt: number
   return [...windows.values()];
 }
 
+const GEMINI_FAMILIES: Readonly<Record<string, string>> = { "gemini-argon": "Gemini Argon", "gemini-carbon": "Gemini Carbon" };
+
 /** Older accounts expose model quotas without a window length. Do not invent a reset cadence. */
 export function antigravityModelWindows(response: unknown): AntigravityUsageWindow[] {
   const models = record(record(response)?.models);
@@ -171,7 +182,7 @@ export function antigravityModelWindows(response: unknown): AntigravityUsageWind
     const model = record(value);
     if (!model) continue;
     const family = model.modelProvider === "MODEL_PROVIDER_GOOGLE" || modelId.startsWith("gemini-")
-      ? "Gemini"
+      ? GEMINI_FAMILIES[antigravityQuotaFamily(modelId)] ?? "Gemini"
       : model.modelProvider === "MODEL_PROVIDER_ANTHROPIC" || modelId.startsWith("claude-")
         ? "Claude"
         : model.modelProvider === "MODEL_PROVIDER_OPENAI" || modelId.startsWith("gpt-")
@@ -181,7 +192,7 @@ export function antigravityModelWindows(response: unknown): AntigravityUsageWind
     for (const [suffix, entry] of [["quota", quota(model.quotaInfo)], ["weekly", quota(model.weeklyQuotaInfo)]] as const) {
       if (!entry) continue;
       const window = quotaWindow(
-        `${family.toLowerCase()}-${suffix}`,
+        `${family.toLowerCase().replaceAll(" ", "-")}-${suffix}`,
         family,
         suffix === "weekly" ? "Weekly" : "Reported quota",
         entry,
@@ -303,9 +314,14 @@ export async function readAntigravityUsageWindows(tokenPath: string, deps: Antig
     if (cachedAccess.size >= 128) cachedAccess.delete(cachedAccess.keys().next().value!);
     cachedAccess.set(tokenPath, cached);
   }
-  const { accessToken } = cached;
+  return antigravityQuotaWindows(cached.accessToken, signIn.project_id, deps, signal);
+}
+
+/** The windows Google reports to the holder of `accessToken`; empty when it reports none. Every request shares `signal`. */
+export async function antigravityQuotaWindows(accessToken: string, projectId: string | undefined, deps: AntigravityUsageDeps, signal: AbortSignal): Promise<AntigravityUsageWindow[]> {
+  const now = deps.now ?? Date.now;
   const headers = { Authorization: `Bearer ${accessToken}`, "User-Agent": antigravityUserAgent(process.platform, process.arch), "content-type": "application/json" };
-  const body = JSON.stringify(signIn.project_id ? { project: signIn.project_id } : {});
+  const body = JSON.stringify(projectId ? { project: projectId } : {});
   // Merge endpoints because quota groups differ; the metered host's reading of a bucket wins.
   const fetchWindows = async (operation: string, parse: (response: unknown, requestedAt: number) => AntigravityUsageWindow[]) => {
     const responses = await Promise.all(PERSONAL_ENDPOINTS.map(async (endpoint) => {
@@ -337,6 +353,26 @@ export async function antigravityPlanUsage(
   try {
     // One deadline for the refresh, the summary and the fallback together.
     const windows = await readAntigravityUsageWindows(tokenPath, deps, AbortSignal.timeout(deps.timeoutMs ?? READ_DEADLINE_MS));
+    return windows.length ? antigravityPlanWindows(windows) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A native-CLI instance's limits for the usage report, read with the access token of the sign-in that CLI keeps for
+ * `environment`; null for no row, as for the pinned runtime, and also while no stored token is live. */
+export async function antigravityNativePlanUsage(
+  instanceId: string,
+  environment: Record<string, string | undefined>,
+  deps: AntigravityUsageDeps,
+  readAccessToken: (instanceId: string, env: NodeJS.ProcessEnv, now: number) => Promise<string | null> = readNativeAccessToken,
+  enabled = ANTIGRAVITY_USAGE_LIMITS,
+): Promise<PlanWindows | null> {
+  if (!enabled) return null;
+  try {
+    const accessToken = await readAccessToken(instanceId, { ...process.env, ...environment }, (deps.now ?? Date.now)());
+    if (!accessToken) return null;
+    const windows = await antigravityQuotaWindows(accessToken, undefined, deps, AbortSignal.timeout(deps.timeoutMs ?? READ_DEADLINE_MS));
     return windows.length ? antigravityPlanWindows(windows) : null;
   } catch {
     return null;

@@ -6,7 +6,8 @@ import { glassPopupFrameStyle, glassPopupTopInset, GLASS_POPUP_GUTTER } from "@/
 import { scrollWithin } from "@/lib/scroll-within";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { setAdvancedMode } from "@/lib/interface-mode";
-import { api, useStore, type ConfigStatus } from "@/state/store";
+import { api, type ConfigStatus } from "@/state/store";
+import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { useIsTopLayer } from "../Layer";
 import { LicenseExpiryBanner } from "../LicenseExpiryBanner";
 import { shortcutLabel } from "../ShortcutHint";
@@ -50,20 +51,21 @@ export function revealAnchor(scroller: HTMLElement | null, anchor: string | null
 
 export function SettingsWindow() {
   const isTop = useIsTopLayer();
-  const { state, dispatch } = useStore();
+  const section = useStoreSelector((state) => state.appSettingsSection), config = useStoreSelector((state) => state.config);
+  const unreachable = useStoreSelector((state) => Boolean(state.error)), dispatch = useStoreDispatch();
   const ctx = useSettingsContext();
   const place = useSettingsPlace();
   const narrow = useMediaQuery(NARROW, false);
-  const target = resolveSettingsTarget(state.appSettingsSection, ctx);
+  const target = resolveSettingsTarget(section, ctx);
   const [anchor, setAnchor] = useState<string | null>(target.anchor ?? null);
-  const [narrowPage, setNarrowPage] = useState(state.appSettingsSection !== "overview");
+  const [narrowPage, setNarrowPage] = useState(section !== "overview");
   const [query, setQuery] = useState("");
   const pages = visiblePages(ctx);
   const page = pageById(target.page);
   const dialogRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { setAnchor(target.anchor ?? null); setNarrowPage((open) => open || state.appSettingsSection !== "overview"); }, [state.appSettingsSection, target.anchor]);
+  useEffect(() => { setAnchor(target.anchor ?? null); setNarrowPage((open) => open || section !== "overview"); }, [section, target.anchor]);
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       if (anchor) revealAnchor(scrollRef.current, anchor);
@@ -71,15 +73,13 @@ export function SettingsWindow() {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [anchor, target.page]);
-  // A link, a notice or a search result that asks for what only Advanced mode shows turns Advanced on and lands there.
-  useEffect(() => { if (target.advanced) setAdvancedMode(true); }, [target.advanced]);
   useEffect(() => window.ogb?.onOpenAppSettings?.(() => setQuery("")), []);
   useEffect(markOpened, []);
 
   const hits = useMemo(() => searchSettings(query, ctx, (entry) => hitLabel({ entry, elsewhere: false, score: 0 }, place, ctx.desktop),
     (candidate) => pageLabel(candidate, place, ctx.desktop)), [query, ctx, place]);
 
-  const keyHits = useMemo(() => (ctx.client || !query.trim() ? [] : KEY_CATALOG.filter((entry) => !keyHidden(entry.id, state.config) && keyMatches(entry, query.trim().toLowerCase(), state.config)).slice(0, 8)), [ctx.client, query, state.config]);
+  const keyHits = useMemo(() => (ctx.client || !query.trim() ? [] : KEY_CATALOG.filter((entry) => !keyHidden(entry.id, config) && keyMatches(entry, query.trim().toLowerCase(), config)).slice(0, 8)), [ctx.client, query, config]);
   const openKey = (entry: KeyEntry) => { setQuery(""); setNarrowPage(true); dispatch(entry.uses ? openKeySettings(entry.uses, entry.id) : openKeySettings(entry.id)); };
   const computer = useSwitchToComputer();
   const close = () => dispatch({ type: "toggleAppSettings", open: false });
@@ -96,8 +96,14 @@ export function SettingsWindow() {
     if (entry.jump === "shortcuts") { close(); dispatch({ type: "toggleShortcuts", open: true }); return; }
     if (entry.jump === "bot") { close(); return; }
     if (hit.elsewhere) { computer.open?.(); return; }
-    if (hit.advanced || needsAdvanced({ page: entry.page, anchor: entry.anchor }, ctx)) setAdvancedMode(true);
     go(entry.page, entry.anchor);
+  };
+  /** Clearing the search puts away an Advanced setting it showed in Simple. */
+  const search = (next: string) => {
+    setQuery(next);
+    if (next.trim() || ctx.advanced) return;
+    if (!page.when(ctx)) dispatch({ type: "toggleAppSettings", open: true, section: "overview" });
+    else if (anchor && needsAdvanced({ page: target.page, anchor }, ctx)) setAnchor(null);
   };
   /** Turning Advanced off on a page Simple doesn't show lands on the place's Overview; anywhere else it stays put. */
   const setAdvanced = (on: boolean) => {
@@ -180,7 +186,7 @@ export function SettingsWindow() {
             <div className="flex min-h-0 flex-1">
               {(!narrow || showList) && (
                 <SettingsNav ctx={ctx} place={place} pages={pages} current={narrow ? null : target.page} query={query} hits={hits} narrow={narrow}
-                  onQuery={setQuery} onOpen={(next) => go(next)} onHit={openHit} keyHits={keyHits} onKey={openKey} onClose={close} onAdvanced={setAdvanced} />
+                  onQuery={search} onOpen={(next) => go(next)} onHit={openHit} keyHits={keyHits} onKey={openKey} onClose={close} onAdvanced={setAdvanced} />
               )}
               {(!narrow || !showList) && (
                 <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
@@ -188,11 +194,11 @@ export function SettingsWindow() {
                   <div ref={scrollRef} data-settings-scroll data-settings-content=""
                     className={cn("settings-scroll min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]", narrow ? "pb-12" : "pb-12 pl-8 pr-16")}>
                     <div className={cn("flex max-w-[640px] flex-col", narrow && "max-w-none")}>
-                      <SettingsPageHeader page={page} ctx={ctx} place={place} narrow={narrow} missing={missing} />
+                      <SettingsPageHeader page={page} ctx={ctx} place={place} narrow={narrow} missing={missing} peek={!ctx.advanced && !page.when(ctx) && !anchor} />
                       <div key={target.page} data-settings-page-body={target.page} className={cn("flex flex-col gap-6", narrow && "px-4")}>
-                        <LicenseExpiryBanner config={state.config} />
-                        {page.owner === "place" && state.config === null
-                          ? state.error ? <SettingsUnreachable place={place.name} onRetry={() => void api<ConfigStatus>("/api/config").then((config) => dispatch({ type: "configStatus", config })).catch(() => {})} />
+                        <LicenseExpiryBanner config={config} />
+                        {page.owner === "place" && config === null
+                          ? unreachable ? <SettingsUnreachable place={place.name} onRetry={() => void api<ConfigStatus>("/api/config").then((config) => dispatch({ type: "configStatus", config })).catch(() => {})} />
                             : <><SettingsSkeletonCard place={place.name} /><SettingsSkeletonCard place={place.name} /></>
                           : <SettingsPageBody page={target.page} />}
                       </div>

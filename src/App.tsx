@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, Loader2, Menu } from "lucide-react";
 import { CLOUD_LINK_SETTINGS, openBot, StoreProvider, useStore } from "@/state/store";
 import { nextShortcutBot, shortcutBots, shownBotIds } from "@/lib/sidebar-shortcut-order";
@@ -20,17 +20,21 @@ import { parseComputerHelp } from "@/lib/computer-control";
 import { viewerClosedRelease } from "@/components/computer-takeover";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
+import { HandoffExchangeHost } from "@/components/HandoffExchange";
 import { GroupView } from "@/components/GroupView";
 import { ForkPanel } from "@/components/ForkPanel";
-import { SIDEBAR_AND_PANEL_FIT, SIDEBAR_INLINE, TWO_SIDE_PANELS_FIT, useMediaQuery } from "@/lib/use-media-query";
+import { PHONE_LAYOUT, SIDEBAR_AND_BOT_PANEL_FIT, SIDEBAR_AND_NARROW_PANEL_FIT, SIDEBAR_AND_PANEL_FIT, SIDEBAR_INLINE, TWO_SIDE_PANELS_FIT, useMediaQuery } from "@/lib/use-media-query";
+import { anySidePanel, botPanelFloats, panelsMovingSidebar, sidebarFoldsForPanel, type OpenSidePanels } from "@/lib/sidebar-fold";
 import { preloadConnectedApps } from "@/lib/connected-apps";
 import {
-  ActivityPanel, AnnouncementsPage, BotSettingsDialog, CloudAddDialog, ComputerPanel, FilesView, InspectorPanel, KeyboardShortcutsModal, LocalVmWorkspace,
-  PluginsPanel, preloadScreens, PublishedAppsPage, RemoteAgentSettingsPanel, RemoteDesktopPanel, RoomPanel, SettingsModal, TeamFilesPage, TeamMapPage, TriggersPage,
+  ActivityPanel, AnnouncementsPage, BotSettingsDialog, CloudAddDialog, ComputerPanel, FilesView, InboxPanel, InspectorPanel, KeyboardShortcutsModal, LocalVmWorkspace,
+  PluginsPanel, preloadScreens, PublishedAppsPage, RemoteAgentSettingsPanel, SkillBurgersPage, RemoteDesktopPanel, RoomPanel, SettingsModal, TeamFilesPage, TeamMapPage, TriggersPage,
 } from "@/components/lazy-screens";
 import { useAdvancedMode } from "@/lib/interface-mode";
-import { useRoomPanelShown } from "@/lib/room-panel";
-import { WorkspaceBackupRecovery } from "@/components/WorkspaceBackupSettings";
+import { closeRoomPanel, useRoomPanelShown } from "@/lib/room-panel";
+import { closeAppPreview, useAppPreview } from "@/lib/app-preview";
+import { closeFilePreview, useFilePreview } from "@/lib/file-preview";
+import { WorkspaceBackupRecovery } from "@/components/WorkspaceBackupRecovery";
 import { NotificationRail, NotificationsPanel } from "@/components/NotificationsPanel";
 import { useNotificationFeed } from "@/lib/notification-preferences";
 import { UpdateBanner } from "@/components/UpdateBanner";
@@ -44,9 +48,9 @@ import { CloudSendStrip } from "@/components/CloudSendStrip";
 import { HomeLine } from "@/components/HomeLine";
 import { useTeamChats } from "@/state/team-chats";
 import { needsYouVersion, useTeamPeopleLoader } from "@/state/team-people";
+import { newChatBot } from "@/state/new-chat";
 import { useTeamPresence } from "@/state/team-presence";
-import { inboxVersion, useInboxLoader, useInboxPanel, useInboxReady } from "@/state/inbox";
-import { InboxPanel } from "@/components/inbox/InboxPanel";
+import { closeInbox, inboxVersion, useInboxLoader, useInboxPanel, useInboxReady } from "@/state/inbox";
 import { PlacesRail } from "@/components/PlacesRail";
 import { NewLocalFromMenu } from "@/components/PlaceAddSheet";
 import { CloudHowTo } from "@/components/CloudHowTo";
@@ -70,16 +74,20 @@ import { engineReady } from "@/components/EngineLibrary";
 import { CommandPalette } from "@/components/CommandPalette";
 import { t } from "@/lib/i18n";
 import { botCycleStep, shouldOpenKeyboardShortcuts } from "@/lib/keyboard-shortcuts";
+import { useThreadCycleKeys } from "@/components/thread-cycle";
 import { effectiveLanguage, useLanguageChoice, usePageLanguage } from "@/lib/language-preference";
 import { botUnreadCount, showBrowserUnread } from "@/lib/bot-unread";
 import { phonePairingSettingsAction, takePhonePairingRequest } from "@/lib/phone-pairing"; import { useConnectLink } from "@/lib/use-connect-link";
 import { isSettingsPage } from "@/components/settings/settings-index";
 import { useBotListDrawer } from "@/hooks/use-bot-list-drawer";
+import { usePhoneBack } from "@/hooks/use-phone-back";
 import { useRememberedSidePanel } from "@/hooks/use-remembered-side-panel";
+import { closeSidePanels } from "@/lib/page-open";
+import { phoneBackStep, phoneBackSteps } from "@/lib/phone-back";
 import { useDesktopNotificationOpens, useExternalChatLinks } from "@/hooks/use-external-chat-links"; import { useNewBotFromOtherPlace } from "@/lib/places-together";
 import { useUsageSnapshot } from "@/hooks/use-usage-snapshot";
 import { useReadShownChatOnFocus } from "@/hooks/use-read-shown-chat";
-import { usePresence } from "@/hooks/use-presence";
+import { usePresence } from "@/hooks/use-presence"; import { useFeature } from "@/lib/use-feature";
 import { ChatNotice } from "@/components/ChatErrorBanner";
 import { loadingLine } from "@/lib/app-loading";
 import { useAiSwitchKeeper } from "@/lib/ai-switch";
@@ -88,7 +96,10 @@ import { useSessionEnded } from "@/lib/session-ended";
 import { PairPage } from "./pair/PairPage";
 import { WebPanelPage } from "@/components/WebPanelPage";
 import { AppPreviewPanel } from "@/components/published-apps/AppPreviewPanel";
+import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { refreshPublishedApps } from "@/lib/own-published-apps";
+import { serverFetch } from "@/lib/relay-server";
+import { replaceUrl } from "@/lib/replace-url";
 
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
@@ -98,7 +109,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   useInboxLoader(`${inboxVersion(state.bots) ?? ""}|${needsYou}`);
   useEffect(() => { refreshPublishedApps(); }, []);
   const inboxReady = useInboxReady();
-  const inboxShown = useInboxPanel().open && inboxReady;
+  const inboxPanel = useInboxPanel();
+  const inboxShown = inboxPanel.open && inboxReady;
   // A Switch AI pick lands once its stopped turn's chat is idle, wherever the person is by then.
   useAiSwitchKeeper({ bots: state.bots, dispatch });
   const showThreads = useShowThreads();
@@ -110,6 +122,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const twoSidePanelsFit = useMediaQuery(TWO_SIDE_PANELS_FIT, true);
   const sidebarAndPanelFit = useMediaQuery(SIDEBAR_AND_PANEL_FIT, true);
+  const sidebarAndNarrowPanelFit = useMediaQuery(SIDEBAR_AND_NARROW_PANEL_FIT, true);
+  const sidebarAndBotPanelFit = useMediaQuery(SIDEBAR_AND_BOT_PANEL_FIT, true);
   const sidebarInline = useMediaQuery(SIDEBAR_INLINE, false);
   useEffect(() => {
     if (!sidebarInline && state.forkPanel) dispatch({ type: "closeForkPanel" });
@@ -121,7 +135,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       if (computerId) {
         const target = new URL(window.location.href);
         target.searchParams.set("share-computer", computerId);
-        window.history.replaceState(null, "", `${target.pathname}${target.search}${target.hash}`);
+        replaceUrl(`${target.pathname}${target.search}${target.hash}`);
       }
       dispatch({ type: "toggleAppSettings", open: true, section: "desktopWorkspaces" });
     };
@@ -131,7 +145,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     if (requestedSettings === "workspaces" || (requestedSettings === "organization" && window.ogb.organization && !remoteClient) ||
       (cloud && window.ogb.cloudAccount && !remoteClient)) {
       url.searchParams.delete("desktop-settings");
-      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+      replaceUrl(`${url.pathname}${url.search}${url.hash}`);
       if (requestedSettings === "organization") dispatch({ type: "toggleAppSettings", open: true, section: "organization" });
       else if (requestedSettings === "cloud") dispatch(CLOUD_LINK_SETTINGS);
       else if (requestedSettings === "cloud-settings") dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" });
@@ -143,7 +157,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   useEffect(() => {
     const rest = takePhonePairingRequest(window.location.href);
     if (rest === null) return;
-    window.history.replaceState(null, "", rest);
+    replaceUrl(rest);
     dispatch(phonePairingSettingsAction());
   }, [dispatch]);
   useConnectLink(dispatch, Boolean(state.config?.team));
@@ -168,15 +182,43 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const group = state.groups.find((g) => g.id === state.selectedId);
   const chiefStep = useChiefStepOpen();
   const bot = group || chiefStep ? undefined : (state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0]);
-  const { open: drawerOpen, show: openDrawer, hide: hideDrawer, noteAction: noteDrawerAction } = useBotListDrawer({ selectedId: state.selectedId, botThread: bot?.threadId, groupThread: group?.threadId,
+  const chatBot = useMemo(() => bot && newChatBot(bot, state.newChat), [bot, state.newChat]);
+  const { open: drawerOpen, show: openDrawer, hide: hideDrawer, noteAction: noteDrawerAction, back: drawerBack, backSteps: drawerBackSteps } = useBotListDrawer({ selectedId: state.selectedId, botThread: chatBot?.threadId, groupThread: group?.threadId,
     view: state.activeView, pluginsOpen: state.pluginsOpen, settingsOpen: state.settingsOpen });
   const closeDrawer = useCallback(() => { hideDrawer(); menuButtonRef.current?.focus(); }, [hideDrawer]);
   const notificationFeed = useNotificationFeed() && !remoteClient;
-  const advanced = useAdvancedMode();
+  const advanced = useAdvancedMode(), skillBurger = useFeature("skillBurger");
   const roomPanelOpen = useRoomPanelShown({ group, state, simple: !advanced && !remoteClient });
-  const sidePanelOpen = (Boolean(bot) && (state.settingsOpen || state.computerOpen || state.inspectorOpen || state.activityOpen)) || Boolean(state.forkPanel) || roomPanelOpen || (notificationFeed && state.notificationsOpen) || inboxShown;
-  const collapseSidebar = sidePanelOpen && !sidebarAndPanelFit;
+  const sidePanels: OpenSidePanels = {
+    simple: !advanced, remoteClient, bot: Boolean(bot) && state.settingsOpen, room: roomPanelOpen, inbox: inboxShown, inboxWide: inboxPanel.wide === true,
+    notifications: notificationFeed && state.notificationsOpen,
+    wide: (Boolean(bot) && (state.computerOpen || state.inspectorOpen || state.activityOpen)) || Boolean(state.forkPanel),
+  };
+  const panelOpen = anySidePanel(sidePanels);
+  // On a phone, back closes the open list or side panel, and from a chat picked in the list goes back to the list.
+  const phoneLayout = useMediaQuery(PHONE_LAYOUT, false);
   const calendarFocus = state.activeView === "routines" && state.routinesFocus.view === "calendar";
+  const appPreview = useAppPreview();
+  const filePreview = useFilePreview();
+  const preview = state.activeView === "chat" && (appPreview !== null || filePreview !== null);
+  const backPlace = { calendar: calendarFocus, drawerOpen, panelOpen, preview, appsPage: state.pluginsOpen, drawerSteps: drawerBackSteps };
+  usePhoneBack(phoneLayout, phoneBackSteps(backPlace), () => {
+    const step = phoneBackStep(backPlace);
+    if (step === "calendar") return dispatch({ type: "showRoutines", view: "list", botId: state.routinesFocus.botId });
+    if (step === "apps-page") dispatch({ type: "togglePlugins", open: false });
+    if (step !== "panels") return drawerBack();
+    closeSidePanels(dispatch);
+    dispatch({ type: "toggleNotifications", open: false });
+    dispatch({ type: "closeForkPanel" });
+    closeRoomPanel();
+    closeInbox();
+    closeAppPreview();
+    closeFilePreview();
+  });
+  // A 320 panel leaves room for the open sidebar from 1040 up; a wider one from 1280. Narrower, the sidebar folds.
+  const collapseSidebar = sidebarFoldsForPanel(sidePanels, { wide: sidebarAndPanelFit, narrow: sidebarAndNarrowPanelFit });
+  // Open beside a panel below 1280, the sidebar keeps to 280 so the chat keeps its 440; Simple's bot panel never moves it.
+  const sidebarBesidePanel = anySidePanel(panelsMovingSidebar(sidePanels)) && !sidebarAndPanelFit;
   const notificationTray = notificationFeed && !calendarFocus;
 
   const noEngines =
@@ -212,9 +254,10 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       if (!mod) return;
       const bots = shortcutBots(state.bots.filter((b) => !b.hidden), shownBotIds(document.querySelector("[data-sidebar-root]")));
       const step = e.shiftKey ? botCycleStep(e) : null;
-      if (e.key.toLowerCase() === "n" && !e.altKey) {
+      const newThreadKey = e.key.toLowerCase() === "t" && !e.shiftKey && !e.altKey;
+      if ((e.key.toLowerCase() === "n" || newThreadKey) && !e.altKey) {
         e.preventDefault();
-        if (e.shiftKey) {
+        if (e.shiftKey || newThreadKey) {
           const selected = state.bots.find((bot) => bot.id === state.selectedId && !bot.hidden);
           if (!e.repeat && selected && selected.yourAccess !== "view") dispatch({ type: "newTask", botId: selected.id });
         } else {
@@ -238,6 +281,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [state.bots, state.selectedId, state.shortcutsOpen, showThreads, dispatch]);
 
+  useThreadCycleKeys();
   useReadShownChatOnFocus();
   useEffect(() => {
     if (window.ogb?.setUnreadCount) window.ogb.setUnreadCount(unreadCount);
@@ -318,7 +362,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     return window.ogb?.desktopViewer?.onState((viewer) => {
       if (viewer.open || !viewer.contextId) return;
       const botId = viewer.contextId, release = viewerClosedRelease(botId);
-      if (release) void fetch(`/api/bots/${botId}/computer/control`, {
+      if (release) void serverFetch(`/api/bots/${botId}/computer/control`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(release),
@@ -328,7 +372,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           if (snap) dispatch({ type: "computerControl", botId, held: snap.held === true, helpReason: snap.helpReason ?? null, help: parseComputerHelp(snap.help) });
         })
         .catch(() => {});
-      void fetch(`/api/bots/${botId}/computer/viewer-close`, {
+      void serverFetch(`/api/bots/${botId}/computer/viewer-close`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: "{}",
@@ -337,8 +381,10 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   }, [dispatch]);
 
   const framed = windowFramed(capabilities);
+  // The sidebar is on screen, so its update button is too. In Simple that button is the one; the top bar leaves its own out.
+  const sidebarShown = !calendarFocus && (sidebarInline || drawerOpen);
   const strips = <>
-    <UpdateBanner sidebarIndicator={framed || (!calendarFocus && (sidebarInline || drawerOpen))} />
+    <UpdateBanner sidebarIndicator={framed || sidebarShown} />
     <CloudAsleepStrip />
     <LiveConnectionStrip connected={state.connected} hydrated={state.hydrated === true} />
     <CloudSendStrip cloudHome={state.config?.cloudHome === true} />
@@ -348,11 +394,11 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   </>;
   return (
     <div data-look="app" className={cn("flex h-full flex-col", framed && "bg-frame")} onClickCapture={drawerOpen ? noteDrawerAction : undefined} onKeyDownCapture={drawerOpen ? noteDrawerAction : undefined}>
-      <WindowFrameBar notifications={notificationTray} />
+      <WindowFrameBar notifications={notificationTray} sidebarUpdate={!advanced && sidebarShown} />
       <BotLimitPopup />
       <ConversationShareDialogs />
       {!framed && strips}
-      <div className="relative flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1 overflow-x-clip">
       {!calendarFocus && <button
         type="button"
         ref={menuButtonRef}
@@ -377,11 +423,12 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           the window's rail: its top corners and its bottom-left corner are round, and it runs to the window's right and
           bottom edges. */}
       <div data-window-card={framed ? "" : undefined}
-        className={framed ? "relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-t-[12px] rounded-bl-[12px] bg-app" : "contents"}>
+        data-look={framed ? "window" : undefined} className={framed ? "relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-t-[12px] rounded-bl-[12px] bg-app" : "contents"}>
       {framed && strips}
-      <div className={framed ? "relative flex min-h-0 flex-1" : "contents"}>
+      <div className={framed ? "relative flex min-h-0 flex-1 overflow-x-clip" : "contents"}>
       {!calendarFocus && <Sidebar
         collapseToIcons={collapseSidebar}
+        besidePanel={sidebarBesidePanel}
         open={drawerOpen}
         onClose={closeDrawer}
       />}
@@ -391,6 +438,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         <FilesView />
       ) : state.activeView === "web-panel" ? (
         <WebPanelPage />
+      ) : state.activeView === "skill-burgers" && skillBurger ? (
+        <SkillBurgersPage />
       ) : state.activeView === "published-apps" ? (
         <PublishedAppsPage />
       ) : state.activeView === "announcements" ? (
@@ -419,7 +468,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       ) : group ? (
         <GroupView key={group.id} group={group} />
       ) : bot ? (
-        <ChatView bot={bot} />
+        <HandoffExchangeHost bot={chatBot ?? bot}><ChatView bot={chatBot ?? bot} /></HandoffExchangeHost>
       ) : noEngines ? (
         <NoEngines />
       ) : (
@@ -439,7 +488,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       {state.settingsOpen && bot && (
         remoteClient
           ? <RemoteAgentSettingsPanel bot={bot} overlay={state.computerOpen && !twoSidePanelsFit} />
-          : <BotSettingsDialog key={`settings:${bot.id}`} bot={bot} overlay={(state.inspectorOpen || state.computerOpen || (notificationFeed && state.notificationsOpen)) && !twoSidePanelsFit} />
+          : <BotSettingsDialog key={`settings:${bot.id}`} bot={bot} overlay={((state.inspectorOpen || state.computerOpen || (notificationFeed && state.notificationsOpen)) && !twoSidePanelsFit) || botPanelFloats(sidePanels, sidebarAndBotPanelFit)} />
       )}
       {state.computerOpen && bot && (
         remoteClient ? (
@@ -453,6 +502,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         )
       )}
       <AppPreviewPanel />
+      <FilePreviewPanel threadId={group?.threadId ?? bot?.threadId} />
       {state.forkPanel && sidebarInline && <ForkPanel />}
       {!state.forkPanel && roomPanelOpen && group && (
         <RoomPanel key={`room:${group.id}`} group={group} overlay={notificationFeed && state.notificationsOpen && !twoSidePanelsFit} />

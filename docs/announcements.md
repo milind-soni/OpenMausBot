@@ -19,7 +19,8 @@ change to it on `main` and every install that runs this version or later picks i
   Move to Cloud leave out), and downloads at most once an hour (every five minutes after a failure). A download that
   fails, is slow (ten seconds at most), is larger than 64 KB, is not JSON or does not validate is dropped and the last
   good copy is kept. A page's first ask waits at most three seconds for the first download; nothing else ever waits for
-  it, and nothing is shown when it fails. The two should share one helper once both are on `main`.
+  it, and nothing is shown when it fails. The fetch, cache and failure handling are one helper,
+  `server/announcements/remote-file.ts`, which the release notes below use too (the model manifest keeps its own copy).
 - **Cards, not pages.** The file carries words, a picture's address and one of a few button actions. The app draws the
   card with its own notice card (`src/components/AnnouncementCard.tsx`); nothing in the file is read as HTML or run.
 
@@ -190,6 +191,38 @@ app before see the dot for Teams alone.
 A card from this file is dated by its `starts`, else by the file's `updatedAt` (which `GET /api/announcements` hands over
 with the cards). Give a card `starts` when its date matters.
 
+### What each release brought
+
+The list also has one row per app release, newest first among the rest by its date: **What's new in** its version, the
+leads of its first two lines, and **See all changes**, which opens its sections and lines in place. The row of the
+version running here says **You're on this version**; when the desktop app has an update downloaded, that version's row
+(or a row on top from the update's own notes, when the list does not have it yet) has **Restart to update**, which does
+what the update card's button does. A branded build lists no releases.
+
+The releases come from [`announcements/releases.json`](../announcements/releases.json), delivered like the cards: bundled,
+cached under `providers/announcements/`, downloaded from `main` at most hourly with the same switch, at most 128 KB read,
+and handed to pages as `releases` in `GET /api/announcements`. Each release is `{ version, date, sections: [{ title,
+items }] }`; a line is plain text with `**bold**` and `` `code` `` only, which the page draws itself (no tags, links or
+addresses; CI and the app refuse them). The file keeps the latest 20 releases; its JSON Schema is
+`announcements/releases.schema.json`, and `node scripts/check-announcements.mjs` checks both files.
+
+A release raises the red dot when it is newer than the person's last look and later than the version this browser first
+listed announcements on (kept in the browser), so a new install is not told about every release before it. A downloaded
+update's own row never raises it.
+
+**Each release adds its entry with the script**, once the release is published (never in its version-bump PR: `main`
+reaches installs within the hour, and a bump that never ships would list a release nobody can get):
+
+```sh
+gh release view v0.1.176 -R milind-soni/OpenMausBot --json body,publishedAt > /tmp/release.json
+jq -r .body /tmp/release.json > /tmp/notes.md
+node scripts/release-notes-feed.mjs 0.1.176 /tmp/notes.md --date "$(jq -r .publishedAt /tmp/release.json)"
+```
+
+It reads the notes as published (`### Section` headings and `- ` lines; nested lines fold into theirs), keeps only bold
+and code, drops lines naming a pull request or a contributor's handle, replaces an entry with the same version, keeps
+the list newest first and moves `updatedAt` forward. Read the diff, then merge it like any change to the cards.
+
 ### Adding an announcement
 
 - **A card, without a release:** add it to `announcements/announcements.json` as above. It is listed and raises the dot by
@@ -204,7 +237,7 @@ with the cards). Give a card `starts` when its date matters.
 ## Turning it off
 
 - **`OMB_DISABLE_ANNOUNCEMENTS=1`** in the server's environment stops the download and every remote card on that server's
-  pages, the bundled ones included. For a self-hosted server or an open-source build that should never show them. The
+  pages, the bundled ones included, and the release notes with them. For a self-hosted server or an open-source build that should never show them. The
   desktop app's own server inherits the app's environment, so it holds there when the app is started with it set.
 - **No in-app switch governs these cards.** The app has no setting for promotional popups: the product-updates question is
   about email, and the usage-analytics switch only stops the counting. A person closes a card with Not now or the X, and

@@ -58,6 +58,7 @@ describe("skins", () => {
       expect(body).toContain(`--code-color-scheme: ${scheme};`);
     }
     expect(css).toMatch(/\.chat-md \.shiki\s*\{\s*color-scheme:\s*var\(--code-color-scheme\);\s*\}/);
+    expect(css).toMatch(/@supports \(-webkit-touch-callout: none\) \{\s*html\s*\{\s*background-color:\s*var\(--color-app\);\s*color-scheme:\s*var\(--code-color-scheme\);\s*\}\s*\}/);
   });
 
   it("adds Meadow without moving or replacing the original eight", () => {

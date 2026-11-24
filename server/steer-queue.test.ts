@@ -545,6 +545,19 @@ describe("steer-queue module", () => {
     expect(queuedSteeredMessage(bot.id, bot.threadId, "send_1234567890123456")).toBeNull();
   });
 
+  it("keeps a pictures hold on the queued receipt so a retried send can say why", () => {
+    const bot = fakeBot("bot-images-receipt", "thread-images-receipt", true);
+    const queued = queueSteeredMessage(bot.id, bot.threadId, "see this", {
+      sendId: "send_images_held_123456",
+      blockedBy: "images",
+    });
+    expect(queuedSteeredMessage(bot.id, bot.threadId, "send_images_held_123456")).toEqual({
+      id: queued.id,
+      text: "see this",
+      blockedBy: "images",
+    });
+  });
+
   it("holds the queue while the bot is busy and drains it once when idle", () => {
     const bot = fakeBot("bot-b", "thread-b", true);
     const store = fakeStore([bot]);

@@ -20,8 +20,8 @@ function skin(id: string): Record<string, string> {
 }
 
 describe("room speaker colors", () => {
-  it("gives chat text a taller line box without changing the type size", () => {
-    expect(css).toMatch(/\.chat-text,\s*\.chat-md\s*\{\s*line-height:\s*1\.75;/);
+  it("sets chat text on a 22px line in both modes without changing the type size", () => {
+    expect(css).toMatch(/\.chat-text,\s*\.chat-md\s*\{\s*line-height:\s*22px;/);
   });
 
   it("names each bot with a class that reads the skin token", () => {

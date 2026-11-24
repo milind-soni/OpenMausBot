@@ -127,9 +127,12 @@ export function appPermissionHandlers({ rendererOrigin, mainContents, cloudHomeO
   };
 }
 
-// Both explicit IPC links and window.open use this one policy: a web link, or an email draft the person sends themselves.
+// Both explicit IPC links and window.open use this one policy: a web link, an email draft the person sends themselves,
+// or an Obsidian note to open.
 export function externalLinkUrl(rawUrl) {
-  return typeof rawUrl === "string" && /^\s*mailto:/i.test(rawUrl) ? emailDraftUrl(rawUrl) : externalWebUrl(rawUrl);
+  if (typeof rawUrl === "string" && /^\s*mailto:/i.test(rawUrl)) return emailDraftUrl(rawUrl);
+  if (typeof rawUrl === "string" && /^\s*obsidian:/i.test(rawUrl)) return obsidianNoteUrl(rawUrl);
+  return externalWebUrl(rawUrl);
 }
 
 export function externalWebUrl(rawUrl) {
@@ -161,6 +164,49 @@ export function emailDraftUrl(rawUrl) {
   if (!/^[^\s@,;]+@[^\s@,;]+$/.test(address)) throw new Error("An email link names one address");
   if ([...url.searchParams.keys()].some(field => !EMAIL_DRAFT_FIELDS.has(field.toLowerCase()))) {
     throw new Error("An email link carries only a subject and a body");
+  }
+  return url.toString();
+}
+
+const OBSIDIAN_NOTE_FIELDS = new Set(["vault", "file"]);
+
+/** Security: only `open` with a vault and a file inside it. Obsidian's other actions (`new`, `search`, …), `open`'s
+ * absolute `path`, and plugin-registered actions such as Advanced URI's `commandid` can write notes, open any folder
+ * or run commands. A raw `+` is refused (`%2B` is fine) so every query decoder reads the same fields as this check.
+ * Raw control characters are refused before parsing, since WHATWG URL parsing silently drops tabs and newlines. */
+export function obsidianNoteUrl(rawUrl) {
+  if (/\p{Cc}/u.test(rawUrl)) throw new Error("That Obsidian link is invalid");
+  let url;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error("That Obsidian link is invalid");
+  }
+  if (url.protocol !== "obsidian:") throw new Error("Only Obsidian links can open notes");
+  if (url.host !== "open" || url.pathname !== "" || url.username || url.password || url.port || url.hash) {
+    throw new Error("An Obsidian link only opens a note");
+  }
+  if (url.search.includes("+")) throw new Error("That Obsidian link is invalid");
+  const fields = new Map();
+  const query = url.search.slice(1);
+  for (const pair of query ? query.split("&") : []) {
+    const parts = pair.split("=");
+    let name, value;
+    try {
+      [name, value] = parts.map(decodeURIComponent);
+    } catch {
+      throw new Error("That Obsidian link is invalid");
+    }
+    if (parts.length !== 2 || !OBSIDIAN_NOTE_FIELDS.has(name) || fields.has(name)) {
+      throw new Error("An Obsidian link carries only a vault and a file");
+    }
+    if (!value.trim() || /\p{Cc}/u.test(value)) throw new Error("That Obsidian link is invalid");
+    fields.set(name, value);
+  }
+  if (!fields.has("vault")) throw new Error("An Obsidian link names its vault");
+  const file = fields.get("file");
+  if (file !== undefined && (/^(?:[\\/~]|[a-zA-Z]:)/.test(file) || file.split(/[\\/]/).includes(".."))) {
+    throw new Error("An Obsidian link opens a file inside its vault");
   }
   return url.toString();
 }

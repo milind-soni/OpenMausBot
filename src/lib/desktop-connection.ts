@@ -1,6 +1,7 @@
 import RFB from "@novnc/novnc";
 import { DESKTOP_VIEWER_TARGET } from "../../shared/desktop-viewer";
 import { isMacPlatform } from "./keyboard-shortcuts";
+import { serverFetch } from "./relay-server";
 
 export interface DesktopConnectionEvents {
   connected(): void;
@@ -29,20 +30,35 @@ export async function connectDesktop(screen: HTMLElement, target: string, option
   const signal = AbortSignal.any([cancelled, AbortSignal.timeout(30_000)]);
   if (target.startsWith("vps/")) {
     const query = options.threadId ? `?${new URLSearchParams({ threadId: options.threadId })}` : "";
-    const joined = await fetch(`/api/bots/${target.slice(4)}/computer/join${query}`, {
+    const joined = await serverFetch(`/api/bots/${target.slice(4)}/computer/join${query}`, {
       method: "POST", headers: { "content-type": "application/json" }, body: "{}", signal,
     });
     if (!joined.ok) throw new DesktopUnreachable();
   }
   const path = `/api/desktop-viewer/${target}`;
-  const response = await fetch(path, { signal, credentials: "same-origin", cache: "no-store" });
+  const response = await serverFetch(path, { signal, credentials: "same-origin", cache: "no-store" });
   if (!response.ok) throw new DesktopUnreachable();
   const config = await response.json();
   cancelled.throwIfAborted();
-  const websocket = new URL(`${path}/websockify`, location.href);
+  return openDesktop(screen, socketUrl(`${path}/websockify`), { password: config.password ?? "", signal: cancelled, events });
+}
+
+/** A same-origin WebSocket address for `path`. */
+export function socketUrl(path: string): string {
+  const websocket = new URL(path, location.href);
   websocket.protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  const client = new RFB(screen, websocket.href, {
-    credentials: { password: config.password ?? "", username: "", target: "" },
+  return websocket.href;
+}
+
+/** The app's noVNC client on an RFB WebSocket the server proxies, scaled into `screen`, with the local paste shortcut
+ * carried over. A bot's computer and a bot's browser window on a Cloud both show through it. */
+export function openDesktop(screen: HTMLElement, socket: string | WebSocket, { password = "", signal: cancelled, events }: {
+  password?: string;
+  signal: AbortSignal;
+  events: DesktopConnectionEvents;
+}): RFB {
+  const client = new RFB(screen, socket, {
+    credentials: { password, username: "", target: "" },
   });
   client.scaleViewport = true;
   client.background = "var(--color-inset)";

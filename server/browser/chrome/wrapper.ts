@@ -21,6 +21,9 @@ export interface LauncherSettings {
   home?: string;
   /** Every Chrome this launcher starts runs in this box (a Team Cloud's), with only the profile it was started on. */
   box?: LauncherBox;
+  /** A Cloud home's browsers' cgroup (browser/memory-cgroup.ts): Chrome joins it before it starts, so all of its processes
+   * are born under the kernel's memory limit. A failed join leaves Chrome where it was. */
+  memoryGroup?: string;
 }
 
 /** bubblewrap's options for a browser's box, before `--` and without the profile, which the launcher binds per start. */
@@ -33,6 +36,11 @@ export interface LauncherBox {
 
 /** agent-browser hands Chrome only stdio (it speaks to it over a port), so 9 is free for the filter. */
 export const LAUNCHER_SECCOMP_FD = 9;
+
+/** Headless Chrome 152–156 still keeps a renderer for its WebUI omnibox popups and reload button, which it never shows.
+ * agent-browser 0.37 passes --disable-features=Translate and Chrome keeps only the last value of a switch, so Translate
+ * stays in the list; agent-browser splits AGENT_BROWSER_ARGS at commas, so only the launcher can pass a list. */
+export const HEADLESS_DISABLED_FEATURES = "--disable-features=Translate,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIReloadButton";
 
 /** Last on the command line, so they win over any switch of the same name: Chrome keeps the last value of a switch. A bot's
  * Chrome never touches the person's keychain or keyring (agent-browser 0.37 passes these too). */
@@ -66,11 +74,15 @@ export function launcherScript(settings: LauncherSettings, platform: NodeJS.Plat
   if (platform === "win32") {
     return ["@echo off", `${batchQuote(settings.chrome)} %* ${flags.map(batchQuote).join(" ")}`, ""].join("\r\n");
   }
-  const chrome = `${shellQuote(settings.chrome)} "$@" ${flags.map(shellQuote).join(" ")}`;
+  // $headless holds one word without spaces or patterns, so it is expanded unquoted: nothing at all when Chrome has a window.
+  const chrome = `${shellQuote(settings.chrome)} "$@" ${flags.map(shellQuote).join(" ")} $headless`;
   return [
     "#!/bin/sh",
+    ...(settings.memoryGroup ? [`{ echo $$ > ${shellQuote(`${settings.memoryGroup}/cgroup.procs`)}; } 2>/dev/null`] : []),
     ...(settings.home ? [`HOME=${shellQuote(settings.home)}`, "export HOME"] : []),
     ...(settings.timeZone ? [`TZ=${shellQuote(settings.timeZone)}`, "export TZ"] : []),
+    "headless=",
+    `for arg in "$@"; do case "$arg" in --headless|--headless=*) headless=${shellQuote(HEADLESS_DISABLED_FEATURES)} ;; esac; done`,
     ...(settings.box ? boxedLaunch(settings.box, chrome) : [`exec ${chrome}`]),
     "",
   ].join("\n");
@@ -108,17 +120,18 @@ const run: Run = (file, args, timeoutMs) => new Promise((resolve, reject) => {
   execFile(file, args, { encoding: "utf8", timeout: timeoutMs, windowsHide: true }, (error, stdout) => error ? reject(error) : resolve(String(stdout)));
 });
 
-const SIZE = /(\d{3,5})x(\d{3,5})/u;
+const SIZE = /(\d{3,5}(?:\.\d+)?)x(\d{3,5}(?:\.\d+)?)/u;
 const SERVER_SCREEN: Screen = { width: 1920, height: 1080 };
 const MAC_SCREEN = `ObjC.import("AppKit"); const size = $.NSScreen.screens.objectAtIndex(0).frame.size; Math.round(size.width) + "x" + Math.round(size.height)`;
-/** WPF reports the primary screen in device-independent pixels, the unit of a page's `screen.width`. */
-const WINDOWS_SCREEN = "Add-Type -AssemblyName PresentationFramework; '{0}x{1}' -f [System.Windows.SystemParameters]::PrimaryScreenWidth, [System.Windows.SystemParameters]::PrimaryScreenHeight";
+/** WPF reports the primary screen in device-independent pixels, the unit of a page's `screen.width`. F0 rounds away the
+ * fractional DIPs of a scaled display (150% gives 1706.666…), which a coarse scan would otherwise read as 66667. */
+const WINDOWS_SCREEN = "Add-Type -AssemblyName PresentationFramework; '{0:F0}x{1:F0}' -f [System.Windows.SystemParameters]::PrimaryScreenWidth, [System.Windows.SystemParameters]::PrimaryScreenHeight";
 
 /** The primary display, as headed Chrome reports `screen` on it; a server has none and declares 1920×1080. */
 export async function primaryScreen(platform: NodeJS.Platform, env: NodeJS.ProcessEnv, runCommand: Run = run): Promise<Screen> {
   const parse = (output: string): Screen | null => {
     const match = SIZE.exec(output);
-    return match ? { width: Number(match[1]), height: Number(match[2]) } : null;
+    return match ? { width: Math.round(Number(match[1])), height: Math.round(Number(match[2])) } : null;
   };
   const named = parse(env.OMB_BROWSER_SCREEN?.trim() ?? "");
   if (named) return named;

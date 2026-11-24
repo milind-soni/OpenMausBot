@@ -20,7 +20,7 @@ import { z } from "zod";
 import { writeFileAtomic } from "../atomic.ts";
 import type { CoordinateBotsCall, Coordinator, CoordinatorHost, HandoffView, HostTurnResult } from "../coordinator.ts";
 import type { PassedFile } from "../host/handoff-files.ts";
-import type { PeerDeliveryReceipt } from "../peer-delivery.ts";
+import { foldName, withTargetsHere, type CoordinateResult, type PeerDeliveryReceipt } from "../peer-delivery.ts";
 import { isIdStart } from "../peer-roster.ts";
 import type { Level } from "../runtime/types.ts";
 import { BRIEF_MAX, EXCHANGE_BYTES, FILES_MAX, LINK_EXPIRES_MS, PEERS_MAX, frameSchema, handoffOfRoot, isLinkedId, linkRoot, linkedBotSchema, linkedId, parseLinked, peerKey, placeSchema,
@@ -104,7 +104,7 @@ const endedSchema = z.array(z.object({ origin: z.string(), token: z.string(), at
 export type EndedLink = z.infer<typeof endedSchema>[number];
 
 interface LocalBot { id: string; name: string; color?: string; hidden?: boolean; title?: string; description?: string; movedTo?: unknown;
-  mascotBody?: string | null; mascotFaceColor?: string | null; chiefOfStaff?: boolean; threadId?: string }
+  mascotBody?: string | null; mascotFaceColor?: string | null; mascotBodyColor?: string | null; mascotMaterial?: string | null; chiefOfStaff?: boolean; threadId?: string }
 
 export interface BotLinkDeps {
   dataDir: string;
@@ -116,7 +116,7 @@ export interface BotLinkDeps {
   model?(bot: LocalBot): string | undefined;
   level(bot: LocalBot): Level;
   /** Opens the thread another place's work runs in, and returns its id. */
-  openThread(bot: LocalBot, title: string, opener: { botId: string; name: string; threadId: string }): string | undefined;
+  openThread(bot: LocalBot, title: string, opener: { botId: string; name: string; threadId: string }, brief: string): string | undefined;
   hasThread(botId: string, threadId: string): boolean;
   personName(threadId: string): string | undefined;
   /** "Sent to …" in the requester's conversation. */
@@ -169,7 +169,6 @@ export interface CoordinateContext {
   problem?: string;
   handed(nodeId: string): void;
 }
-type CoordinateResult = { status: number; body: Record<string, unknown> };
 type Remote = { peer: string; bot: LinkedBot };
 /** `level`: what that place's version reads (protocol.ts), 1 until it says more. `told`: the level its last hello was made for. */
 type Live = { online: boolean; seq: number; outbox: Numbered[]; level: number; told?: number };
@@ -210,6 +209,7 @@ export function createBotLink(deps: BotLinkDeps) {
     id: bot.id, name: bot.name, ...(bot.title ? { title: bot.title.slice(0, 200) } : {}), ...(bot.description ? { description: bot.description.slice(0, 400) } : {}),
     ...(deps.model?.(bot) ? { model: deps.model(bot)!.slice(0, 200) } : {}), level: deps.level(bot),
     ...(bot.color ? { color: bot.color.slice(0, 64) } : {}), ...(bot.mascotBody ? { mascotBody: bot.mascotBody.slice(0, 64) } : {}), ...(bot.mascotFaceColor ? { mascotFaceColor: bot.mascotFaceColor.slice(0, 64) } : {}),
+    ...(bot.mascotBodyColor ? { mascotBodyColor: bot.mascotBodyColor.slice(0, 64) } : {}), ...(bot.mascotMaterial ? { mascotMaterial: bot.mascotMaterial.slice(0, 64) } : {}),
     ...(bot.chiefOfStaff ? { chief: true } : {}), ...(bot.threadId ? { threadId: bot.threadId } : {}),
   })).slice(0, 500);
 
@@ -312,7 +312,6 @@ export function createBotLink(deps: BotLinkDeps) {
     const address = parseLinked(linked), bot = address ? state?.peers[address.peer]?.bots.find((one) => one.id === address.botId) : undefined;
     return address && bot ? { peer: address.peer, bot } : undefined;
   };
-  const fold = (value: string) => value.replace(/^@/u, "").replace(/[-_]+/gu, " ").replace(/\s+/gu, " ").trim().toLowerCase();
   /** The bot of another place `raw` names: by its address here, or by a name no bot here has and only one bot elsewhere has.
    * A bot's id here, in any case, or the start of one (8+ characters), stays with the local resolver, so a bot elsewhere
    * named after it never takes that bot's work or its files. */
@@ -323,9 +322,9 @@ export function createBotLink(deps: BotLinkDeps) {
     if (local.some((bot) => bot.id.toLowerCase() === lower)) return undefined;
     if (isLinkedId(wanted)) return remoteOf(wanted);
     if (isIdStart(wanted) && local.some((bot) => bot.id.toLowerCase().startsWith(lower))) return undefined;
-    const named = fold(wanted);
-    if (!named || local.some((bot) => !bot.hidden && fold(bot.name) === named)) return undefined;
-    const matches = Object.entries(state.peers).flatMap(([peer, known]) => known.bots.filter((bot) => fold(bot.name) === named).map((bot) => ({ peer, bot })));
+    const named = foldName(wanted);
+    if (!named || local.some((bot) => !bot.hidden && foldName(bot.name) === named)) return undefined;
+    const matches = Object.entries(state.peers).flatMap(([peer, known]) => known.bots.filter((bot) => foldName(bot.name) === named).map((bot) => ({ peer, bot })));
     return matches.length === 1 ? matches[0] : undefined;
   }
 
@@ -470,7 +469,7 @@ export function createBotLink(deps: BotLinkDeps) {
       const key = `${peer}:${frame.thread}`;
       let threadId = state.threads[key]?.threadId;
       if (!threadId || !deps.hasThread(bot.id, threadId)) {
-        const opened = deps.openThread(bot, `@${frame.from.name} · work`, { botId: address.botId, name: frame.from.name, threadId: address.threadId });
+        const opened = deps.openThread(bot, `@${frame.from.name} · work`, { botId: address.botId, name: frame.from.name, threadId: address.threadId }, frame.text);
         if (!opened) throw new Error("That bot is no longer here.");
         threadId = opened;
       }
@@ -671,20 +670,7 @@ export function createBotLink(deps: BotLinkDeps) {
         receipts.push(receipt(remote, "failed", said));
       }
     }
-    const sent = refused.length < receipts.length;
-    const mine = sent ? `Handed to the person's other place. ${call.reply === "none" ? "Nothing comes back from a one-way notice." : "Finish your turn now: the result resumes you when it is back."}` : "";
-    if (here.length === 0) return { status: sent ? 200 : 409, body: { receipts, ...(sent ? { message: mine } : { error: refused.join("; ") }) } };
-    const rest = await local({ ...call, botIds: here });
-    const theirs = Array.isArray(rest.body.receipts) ? rest.body.receipts as PeerDeliveryReceipt[] : [];
-    const ok = sent || rest.status === 200;
-    const errors = [...refused, ...(typeof rest.body.error === "string" ? [rest.body.error] : [])];
-    // Instruction-only is the whole call's verdict: nothing was delivered anywhere and no refusal of another place is a
-    // real failure. One genuine refusal, or a delivery, keeps this a failed call however the local part answered.
-    const { instructionOnly: localInstructionOnly, ...restBody } = rest.body;
-    const instructionOnly = !ok && refused.length === 0 && localInstructionOnly === true;
-    return { status: ok ? 200 : rest.status, body: { ...restBody, receipts: [...receipts, ...theirs],
-      ...(ok ? { message: [mine, rest.body.message].filter(Boolean).join(" "), ...(errors.length ? { notSent: errors.join("; ") } : {}) } : { error: errors.join("; ") }),
-      ...(instructionOnly ? { instructionOnly: true } : {}) } };
+    return withTargetsHere(call, here, { receipts, refused, message: `Handed to the person's other place. ${call.reply === "none" ? "Nothing comes back from a one-way notice." : "Finish your turn now: the result resumes you when it is back."}` }, local);
   }
   /** Why this call cannot go to another place at all, or null. */
   function unsupportedHere(call: CoordinateBotsCall, context: CoordinateContext, place: string): string | null {
@@ -881,7 +867,7 @@ export function createBotLink(deps: BotLinkDeps) {
       const taken: Numbered[] = [];
       let bytes = 0;
       for (const entry of one.outbox) {
-        bytes += JSON.stringify(entry.frame).length;
+        bytes += Buffer.byteLength(JSON.stringify(entry.frame), "utf8");
         if (taken.length > 0 && (bytes > EXCHANGE_BYTES || taken.length >= 500)) break;
         taken.push(entry);
       }

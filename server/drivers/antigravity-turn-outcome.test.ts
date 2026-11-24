@@ -2,7 +2,7 @@
 // T3 Tools Inc. (full text in third_party/t3-code/LICENSE); modified:
 //   - apps/server/src/provider/acp/AntigravityTurnOutcome.test.ts (the error
 //     payload fixtures and the cases of the two reader tests).
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -39,6 +39,16 @@ const UNAVAILABLE_ERROR = errorText("Error 503, Message: The service is currentl
 const TIMESTAMP_ERROR = errorText(
   "Error 429, Message: Quota exhausted., Status: RESOURCE_EXHAUSTED, Details: [map[metadata:map[quotaResetDelay:3600s quotaResetTimeStamp:2026-11-20T10:00:00Z] reason:QUOTA_EXHAUSTED]]",
 );
+// Adapted from pingdotgg/t3code@f9a3c38c505 and f68d36d8aa9 (AntigravityTurnOutcome.test.ts fixtures).
+const MISSING_SIGNATURE_ERROR = errorText(
+  'Error 400, Message: {"type":"error","error":{"type":"invalid_request_error","message":"messages.1.content.0.thinking.signature: Field required"}}, Status: INVALID_ARGUMENT, Details: []',
+);
+const INVALID_SIGNATURE_ERROR = errorText(
+  'Error 400, Message: {"type":"error","error":{"type":"invalid_request_error","message":"messages.3.content.0: Invalid `signature` in `thinking` block"}}, Status: INVALID_ARGUMENT, Details: []',
+);
+const NOT_FOUND_ERROR = errorText("Error 404, Message: Requested entity was not found., Status: NOT_FOUND, Details: []");
+// Antigravity 1.5 with a Google account writes "STATUS (code NNN): message", then the HTTP body.
+const STATUS_NOT_FOUND_ERROR = '\u00127NOT_FOUND (code 404): Requested entity was not found.\u001a\u0080\u0001HTTP 404 Not Found\n\n{"error":{"code":404,"message":"Requested entity was not found.","status":"NOT_FOUND"}}';
 // The model's reply quoting the agent's quota notice is an ordinary planner response.
 const QUOTED_NOTICE = "Usage Limit Reached\n\nYou have reached your current quota for this period. Your limit will reset in 1 hour.";
 
@@ -127,6 +137,33 @@ describe("watchAntigravityPromptOutcome", () => {
     expect(refusal!.facts.limitResetsAt).toBeUndefined();
   });
 
+  it("reads a lost thinking signature as a broken session, a 404 by when it came, and restarts the runtime after any of them", async () => {
+    const { directory, conversations } = profile();
+    const sessionId = "4c2b7d1e-5472-4277-b6ee-27b2e05570a7";
+    const turn = async (steps: ReadonlyArray<readonly [number, string]>) => {
+      const check = await watchAntigravityPromptOutcome(NAME, directory, sessionId, () => 0);
+      append(join(conversations, `${sessionId}.db`), steps);
+      return check({ stopReason: "end_turn" });
+    };
+    expect(await turn([[USER_INPUT, "hello"], [PLANNER_RESPONSE, "fine"]])).toBeUndefined();
+    for (const error of [MISSING_SIGNATURE_ERROR, INVALID_SIGNATURE_ERROR]) {
+      expect(await turn([[USER_INPUT, "again"], [ERROR_MESSAGE, error]])).toMatchObject({
+        acpSessionBroken: true, acpSessionFailure: true, acpUsageLimit: false,
+        message: `${NAME}'s saved conversation can no longer be sent to the model. The next message starts a fresh ${NAME} session with this conversation's context.`,
+      });
+    }
+    // After the model answered in this turn, a 404 in either form is a temporary edge error.
+    for (const error of [NOT_FOUND_ERROR, STATUS_NOT_FOUND_ERROR]) {
+      const failure = await turn([[USER_INPUT, "go"], [PLANNER_RESPONSE, "working"], [TOOL, "ran"], [ERROR_MESSAGE, error]]);
+      expect(failure).toMatchObject({ acpSessionFailure: true, message: expect.stringContaining("temporary server problem (HTTP 404") });
+      expect(failure).not.toHaveProperty("acpSessionBroken");
+    }
+    // Before the model answered, it is an unknown or unentitled model.
+    expect((await turn([[USER_INPUT, "go"], [ERROR_MESSAGE, STATUS_NOT_FOUND_ERROR]]))!.message).toContain("stopped with an error (HTTP 404");
+    expect(await turn([[USER_INPUT, "go"], [ERROR_MESSAGE, INVALID_ARGUMENT_ERROR]])).toMatchObject({ acpSessionFailure: true });
+    expect(await turn([[USER_INPUT, "go"], [ERROR_MESSAGE, QUOTA_ERROR]])).toMatchObject({ acpSessionFailure: true, acpUsageLimit: true });
+  });
+
   it.skipIf(process.platform === "win32")("reads only this session's own unlinked log, and keeps a typed refusal", async () => {
     const { directory, conversations } = profile();
     const own = "e6aba774-5472-4277-b6ee-27b2e05570a7";
@@ -170,6 +207,8 @@ describe("watchAntigravityPromptOutcome", () => {
     expect(antigravityLimitFacts("claude-sonnet-5", known)).toEqual({ limit: "model", limitModels: ["claude-sonnet-5", "gpt-6"] });
     expect(antigravityLimitFacts("gemini-3.8-flash-high", known)).toEqual({ limit: "model", limitModels: ["gemini-3.8-flash-high", "gemini-3.8-flash", "gemini-3.8-pro"] });
     expect(antigravityLimitFacts("gemini-4-argon", known)).toEqual({ limit: "model", limitModels: ["gemini-4-argon"] });
+    expect(antigravityQuotaFamily("gemini-4-neon")).toBe("gemini");
+    expect(antigravityLimitFacts("gemini-4-neon", known)).toEqual({ limit: "model", limitModels: ["gemini-4-neon", "gemini-3.8-flash", "gemini-3.8-pro"] });
     expect(antigravityLimitFacts(undefined, known)).toEqual({ limit: "model" });
   });
 
@@ -180,8 +219,8 @@ describe("watchAntigravityPromptOutcome", () => {
     const file = join(conversations, "session.db");
     append(file, [[USER_INPUT, "first"]]);
     const check = await watchAntigravityPromptOutcome(NAME, directory, "session");
-    rmSync(file);
-    append(join(conversations, "other.db"), [[USER_INPUT, "hold the inode"]]);
+    // Moved aside, not deleted: the first log stays on disk, so the file system cannot hand its inode to the new one.
+    renameSync(file, join(conversations, "replaced.db"));
     append(file, [[USER_INPUT, "second"], [USER_INPUT, "third"], [ERROR_MESSAGE, QUOTA_ERROR]]);
     expect(await check({ stopReason: "end_turn" })).toBeUndefined();
   });
@@ -235,6 +274,30 @@ describe("an Antigravity turn whose reply was an upstream failure", () => {
     const later = recorder.events.filter((event) => event.turnId === next.turnId);
     expect(later.some((event) => event.type === "runtime.error")).toBe(false);
     expect(later.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+  }, 90_000);
+
+  it("starts the turn after a lost thinking signature in a fresh session, from this conversation's context, in a new process", async () => {
+    const { created, directory, stepsFile } = await instance("antigravity-outcome-signature", [[USER_INPUT, "hello"], [ERROR_MESSAGE, INVALID_SIGNATURE_ERROR]]);
+    const rpc = join(directory, "rpc.jsonl");
+    process.env.FAKE_ACP_RPC_APPEND_FILE = rpc;
+    try {
+      const recorder = recordEvents(created.adapter);
+      const { turnId } = await created.adapter.sendTurn({ threadId: "signature", text: "hello", model: "gemini-3.8-flash", approvalMode: "full", cwd: directory });
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok: false });
+      const started = recorder.events.find((event) => event.type === "session.started" && event.turnId === turnId) as { sessionId: string };
+      writeFileSync(stepsFile, JSON.stringify([[USER_INPUT, "again"], [PLANNER_RESPONSE, "fine"]]));
+      const next = await created.adapter.sendTurn({
+        threadId: "signature", text: "again", approvalMode: "full", cwd: directory,
+        resumeCursor: started.sessionId, recoveryText: "Person: hello\nBot: (failed)",
+      });
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === next.turnId)).toMatchObject({ ok: true });
+      const calls = readFileSync(rpc, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { pid: number; method: string });
+      const second = calls.filter((call) => call.pid !== calls[0]!.pid);
+      expect(second.map((call) => call.method)).toContain("session/new");
+      expect(second.map((call) => call.method)).not.toContain("session/resume");
+    } finally {
+      delete process.env.FAKE_ACP_RPC_APPEND_FILE;
+    }
   }, 90_000);
 
   it("leaves a normal reply, and a runtime that keeps no log, alone", async () => {

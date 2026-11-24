@@ -2,6 +2,7 @@
 // server's store and coordinator, the computer's end that asks the Cloud, and the routes. With the link off (no
 // bot-link.json in the data folder) `start` asks nobody and every hook here answers as if the link did not exist.
 import { dirname } from "node:path";
+import { mascotBodyColorSchema, mascotMaterialSchema } from "../../shared/bot-avatar.ts";
 
 import { createDialer } from "../bot-link/dial.ts";
 import { createBotLink } from "../bot-link/link.ts";
@@ -31,6 +32,8 @@ export interface BotLinkHostDeps {
   coordinator(): Coordinator;
   kick(): void;
   level(bot: BotRecord): Level;
+  /** A work thread a far bot opened here is named from the job it handed, behind "@Sender · ". */
+  titleHanded?(botId: string, threadId: string, brief: string, prefix: string): void;
   refusal(bot: BotRecord): string | null;
   language(threadId: string): string | undefined;
   personName(threadId: string): string | undefined;
@@ -44,6 +47,16 @@ export interface BotLinkHostDeps {
   log(line: string): void;
 }
 
+/** Another place's body tint and fur land here only as valid values, since the avatar paints them. */
+const bodyColor = (value: string | undefined) => {
+  const color = mascotBodyColorSchema.safeParse(value).data;
+  return color ? { mascotBodyColor: color } : {};
+};
+const fur = (value: string | undefined) => {
+  const style = mascotMaterialSchema.safeParse(value).data;
+  return style ? { mascotMaterial: style } : {};
+};
+
 export function createBotLinkHost(deps: BotLinkHostDeps) {
   const { store } = deps;
   /** Each bot of each linked place as a record this place finds by its address: its name and look, and where it lives.
@@ -53,14 +66,15 @@ export function createBotLinkHost(deps: BotLinkHostDeps) {
     for (const { id, peer, place, kind, bot } of link.linked()) {
       next.set(id, { id, name: bot.name, color: bot.color ?? "blue", threadId: "", tasks: [], resumeCursors: {}, modelSelection: { instanceId: "", model: bot.model ?? "" },
         home: { place: peer, placeName: place.name, botId: bot.id, kind }, ...(bot.title ? { title: bot.title } : {}), ...(bot.description ? { description: bot.description } : {}),
-        ...(bot.mascotBody ? { mascotBody: bot.mascotBody } : {}), ...(bot.mascotFaceColor ? { mascotFaceColor: bot.mascotFaceColor } : {}) } as unknown as BotRecord);
+        ...(bot.mascotBody ? { mascotBody: bot.mascotBody } : {}), ...(bot.mascotFaceColor ? { mascotFaceColor: bot.mascotFaceColor } : {}),
+        ...bodyColor(bot.mascotBodyColor), ...fur(bot.mascotMaterial) } as unknown as BotRecord);
     }
     // A far member of a room here that cannot be reached now (the link is off, its place is unlinked, or its place no
     // longer has it) stays a member: it is found by its address, named as it was last known, and takes no turn.
     rooms.sync();
-    for (const { id, gone, name, color, place, placeName, botId, kind, title, mascotBody, mascotFaceColor } of rooms.absent()) {
+    for (const { id, gone, name, color, place, placeName, botId, kind, title, mascotBody, mascotFaceColor, mascotBodyColor, mascotMaterial } of rooms.absent()) {
       next.set(id, { id, name, color: color ?? "blue", threadId: "", tasks: [], resumeCursors: {}, modelSelection: { instanceId: "", model: "" },
-        home: { place, placeName, botId, ...(kind ? { kind } : {}), gone }, ...(title ? { title } : {}), ...(mascotBody ? { mascotBody } : {}), ...(mascotFaceColor ? { mascotFaceColor } : {}) } as unknown as BotRecord);
+        home: { place, placeName, botId, ...(kind ? { kind } : {}), gone }, ...(title ? { title } : {}), ...(mascotBody ? { mascotBody } : {}), ...(mascotFaceColor ? { mascotFaceColor } : {}), ...bodyColor(mascotBodyColor), ...fur(mascotMaterial) } as unknown as BotRecord);
     }
     store.standIns.clear();
     for (const [id, record] of next) if (isLinkedId(id)) store.standIns.set(id, record);
@@ -81,7 +95,11 @@ export function createBotLinkHost(deps: BotLinkHostDeps) {
     refusal: (bot) => deps.refusal(bot as BotRecord),
     model: (bot) => (bot as BotRecord).modelSelection.model,
     level: (bot) => deps.level(bot as BotRecord),
-    openThread: (bot, title, opener) => store.createTask(bot.id, title, false, undefined, { ...opener, at: Date.now(), kind: "work" })?.threadId,
+    openThread: (bot, title, opener, brief) => {
+      const threadId = store.createTask(bot.id, title, false, undefined, { ...opener, at: Date.now(), kind: "work" })?.threadId;
+      if (threadId) deps.titleHanded?.(bot.id, threadId, brief, `@${opener.name} · `);
+      return threadId;
+    },
     hasThread: (botId, threadId) => Boolean(store.taskByThread(botId, threadId)),
     personName: deps.personName,
     files: {

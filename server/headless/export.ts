@@ -4,7 +4,8 @@ import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
 
-import { messageFileTargets } from "../message-file.ts";
+import { closeUnfinishedCodeFence } from "../../shared/markdown-code-fence.ts";
+import { boundedDisplayName, messageFileTargets } from "../message-file.ts";
 import { EXIT, flag, HeadlessError, parseCount, parseSize, usageError } from "./args.ts";
 import { readJob, type HeadlessClient } from "./client.ts";
 import { resolveTarget, type VerbContext, type VerbOutcome } from "./context.ts";
@@ -32,7 +33,8 @@ const slug = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, "-").re
 /** One path segment; no trailing dot or space (Windows drops them) and never a Windows device name (con.md is the console there). */
 export function safeName(raw: string): string {
   // eslint-disable-next-line no-control-regex
-  const name = basename(raw.replace(/[\\/]/g, "_")).replace(/[\x00-\x1f<>:"|?*]/g, "_").trim().slice(0, 120).replace(/[. ]+$/, "");
+  const portable = basename(raw.replace(/[\\/]/g, "_")).replace(/[\x00-\x1f<>:"|?*]/g, "_").trim().replace(/[. ]+$/, "");
+  const name = boundedDisplayName(portable, 120).replace(/[. ]+$/, "");
   if (!name) return "file";
   return /^(con|prn|aux|nul|com\d|lpt\d)(\.|$)/i.test(name) ? `_${name}` : name;
 }
@@ -63,14 +65,14 @@ function unusedFolder(parent: string, name: string, taken: Set<string>): string 
 
 export function exportFolder(dir: string, force: boolean): string {
   const out = resolve(dir);
-  if (!existsSync(out) || force) return out;
+  if (!existsSync(out)) return out;
   let entries: string[];
   try {
     entries = readdirSync(out);
   } catch (error) {
     throw usageError(`${out} cannot be written into (${(error as NodeJS.ErrnoException).code ?? "error"})`, "choose a folder");
   }
-  if (entries.length) throw usageError(`${out} already has files in it`, "choose an empty folder, or pass --force to write into it");
+  if (entries.length && !force) throw usageError(`${out} already has files in it`, "choose an empty folder, or pass --force to write into it");
   return out;
 }
 
@@ -80,7 +82,7 @@ function markdownOf(title: string, messages: readonly Rec[], botName: string): s
     const who = message.role === "user"
       ? `${message.sender?.name ?? "User"}${message.via === "api" ? " (via the local API)" : ""}`
       : message.from?.name ?? botName;
-    if (message.kind === "text" && message.text) lines.push(`**${who}:**`, "", String(message.text), "");
+    if ((message.kind === "text" || message.kind === "widget" || message.kind === "app") && message.text) lines.push(`**${who}:**`, "", closeUnfinishedCodeFence(String(message.text)), "");
     else if (message.kind === "activity" && message.tool) lines.push(`> ${message.tool.name}`, "");
     else if (message.kind === "screen") lines.push("> [screen capture]", "");
     else if (message.kind === "options" && message.card) lines.push(`> ${message.card.title}${message.card.answered ? ` — answered: ${message.card.answered}` : ""}`, "");
@@ -138,13 +140,13 @@ const refusal = async (response: Response | null): Promise<string> =>
 
 export async function exportJob(client: HeadlessClient, options: ExportOptions, output: Output): Promise<Rec> {
   const out = exportFolder(options.out, options.force === true);
-  if (options.force) removeEarlierExport(out);
   const maxFiles = options.maxFiles ?? 200;
   const maxScreens = options.maxScreens ?? 100;
   const maxBytes = options.maxBytes ?? 500_000_000;
   const job = await readJob(client, options.threadId, { since: String(options.since ?? 0), full: "1" });
   const nodes: Rec[] = (job.nodes ?? []).filter((node: Rec) => !options.root || node.rootId === options.root);
   if (options.root && !nodes.length) throw usageError(`no job with root ${options.root} in this conversation`, "openmausbot export TARGET without --root writes all of it");
+  if (options.force) removeEarlierExport(out);
   for (const dir of ["transcripts", "files", "screens"]) mkdirSync(join(out, dir), { recursive: true });
 
   const threads = new Map<string, string>([[options.threadId, "conversation"]]);

@@ -25,42 +25,20 @@ import { nextMenuIndex, SidebarPopoverMenu, type SidebarMenuItem } from "./Sideb
 import type { ApprovalChoice } from "./thread-approval";
 import { SIMPLE_CONTROL } from "./composer-simple";
 
-/** Finish together: the room (or, `solo`, the one bot) keeps working until the goal is done. The chip turns accent while it is on.
- * `compact` is Simple mode's chip, shown only while the mode is on: its name and a × that turns it off. */
-export function GoalToggle({ on, onToggle, solo = false, compact = false }: { on: boolean; onToggle: () => void; solo?: boolean; compact?: boolean }) {
-  if (compact) {
-    const off = t(solo ? "composer.goal.offSolo" : "composer.goal.off");
-    return (
-      <button
-        type="button"
-        data-goal-chip
-        aria-label={off}
-        title={off}
-        onClick={onToggle}
-        className="flex h-7 items-center gap-1 whitespace-nowrap rounded-full border border-accent/35 bg-accent/10 px-2.5 text-[13px] text-accent transition-colors hover:bg-accent/15"
-      >
-        {t(solo ? "composer.goal.soloAria" : "composer.goal.aria")}
-        <X size={12} aria-hidden="true" />
-      </button>
-    );
-  }
+/** Finish together (Work until done for one bot), shown while it is on: its name and a × that turns it off. */
+export function GoalToggle({ onToggle, solo = false }: { on: boolean; onToggle: () => void; solo?: boolean }) {
+  const off = t(solo ? "composer.goal.offSolo" : "composer.goal.off");
   return (
     <button
       type="button"
-      aria-pressed={on}
-      aria-label={t(solo ? "composer.goal.soloAria" : "composer.goal.aria")}
-      title={t(solo ? "composer.goal.soloTitle" : "composer.goal.title")}
+      data-goal-chip
+      aria-label={off}
+      title={off}
       onClick={onToggle}
-      className={cn(
-        "flex items-center gap-1.5 whitespace-nowrap rounded-full border text-[13px] transition-colors",
-        compact ? "h-7 px-2.5" : "h-8 px-3",
-        on
-          ? "border-accent/35 bg-accent/10 text-accent"
-          : "border-hairline/20 bg-transparent text-ink-secondary hover:bg-raised hover:text-ink",
-      )}
+      className="flex h-7 items-center gap-1 whitespace-nowrap rounded-full border border-accent/35 bg-accent/10 px-2.5 text-[13px] text-accent transition-colors hover:bg-accent/15"
     >
-      <Target size={14} aria-hidden="true" />
-      {on ? "/goal" : t("composer.goal.chip")}
+      {t(solo ? "composer.goal.soloAria" : "composer.goal.aria")}
+      <X size={12} aria-hidden="true" />
     </button>
   );
 }
@@ -122,22 +100,8 @@ function approvalItem(name: string, choice: ApprovalChoice, simple: boolean): Si
   };
 }
 
-/** The thread's approval level as a small pill that opens its choices: in the Simple composer while it is not the
- * default, and on the bot panel's Details. */
-export function TeachTaskButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={t("composer.teachTask")}
-      title={t("composer.teachTask")}
-      className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-control hover:text-ink"
-    >
-      <GraduationCap size={16} strokeWidth={1.75} absoluteStrokeWidth />
-    </button>
-  );
-}
-
+/** The thread's approval level as a small pill that opens its choices: in the composer while it is not the bot's own
+ * level, and on the bot panel's Details. */
 export function ApprovalChip({ choice, quiet = false }: { choice: ApprovalChoice; quiet?: boolean }) {
   const { current, note, items } = approvalMenu(choice, !useAdvancedMode());
   const CurrentIcon = current.Icon;
@@ -164,11 +128,11 @@ export function ApprovalChip({ choice, quiet = false }: { choice: ApprovalChoice
 }
 
 /**
- * The composer's round +: attach files, Work until done (Finish together in a group) and Teach a task. A phone's + also
- * holds what its narrow composer has no room for: the thread's approval level, the call mode and where the bot works,
- * each running the handler its Advanced button runs. With attaching the only choice, the + opens the file picker.
+ * The composer's round +: attach files, Work until done (Finish together in a group) and Teach a task. A phone's + and
+ * Advanced mode's also hold the thread's approval level, the call mode and where the bot works.
+ * With attaching the only choice, the + opens the file picker.
  */
-export function ComposerPlusMenu({ onAttach, goal, teach, approval, callBotId, extraItems = [], circle = false }: {
+export function ComposerPlusMenu({ onAttach, goal, teach, approval, callBotId, extraItems = [], circle = false, quiet = false }: {
   onAttach: () => void;
   /** Starts a /learn draft in the field, where the composer offers /learn. */
   teach?: () => void;
@@ -176,6 +140,8 @@ export function ComposerPlusMenu({ onAttach, goal, teach, approval, callBotId, e
   extraItems?: SidebarMenuItem[];
   /** The phone dock: a round button of its own beside the field, not a small chip inside it. */
   circle?: boolean;
+  /** Advanced mode's footer: a bare + that opens the full menu, submenus included. */
+  quiet?: boolean;
   goal?: { on: boolean; onToggle: () => void; solo?: boolean };
   approval?: { name: string; choice: ApprovalChoice };
   /** The bot whose call button the call mode starts, as that button's own mode menu did. */
@@ -222,7 +188,17 @@ export function ComposerPlusMenu({ onAttach, goal, teach, approval, callBotId, e
       };
     })),
   ];
-  const trigger = (open: boolean) => circle ? (
+  const trigger = (open: boolean) => quiet ? (
+    <span
+      data-composer-plus
+      className={cn(
+        "flex size-8 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-control hover:text-ink",
+        open && "bg-control text-ink",
+      )}
+    >
+      <Plus size={16} aria-hidden="true" />
+    </span>
+  ) : circle ? (
     <span
       data-composer-plus
       className={cn(
@@ -235,7 +211,7 @@ export function ComposerPlusMenu({ onAttach, goal, teach, approval, callBotId, e
     </span>
   ) : (
     <span data-composer-plus className={cn("flex items-center justify-center transition-colors", SIMPLE_CONTROL, open && "bg-ink/[0.09] text-ink")}>
-      <Plus size={20} strokeWidth={1.75} absoluteStrokeWidth aria-hidden="true" />
+      <Plus size={16} aria-hidden="true" />
     </span>
   );
   if (!circle && items.length === 1) {
@@ -245,7 +221,7 @@ export function ComposerPlusMenu({ onAttach, goal, teach, approval, callBotId, e
       </button>
     );
   }
-  if (!circle) return <ComposerMenu items={items} renderTrigger={trigger} />;
+  if (!circle && !quiet) return <ComposerMenu items={items} renderTrigger={trigger} />;
   return (
     <SidebarPopoverMenu
       items={items}
@@ -336,9 +312,9 @@ function ComposerMenu({ items, renderTrigger }: { items: SidebarMenuItem[]; rend
                 close(false);
                 item.onSelect();
               }}
-              className="flex h-[34px] w-full items-center gap-2 rounded-[8px] px-3 text-start text-[15px] text-ink transition-colors hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:outline-none disabled:opacity-50"
+              className="flex h-8 w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-[14px] leading-5 text-ink transition-colors hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:outline-none disabled:opacity-50"
             >
-              <span className={cn("flex size-3.5 shrink-0 items-center justify-center [&_svg]:size-3.5 [&_svg]:stroke-[1.5]", item.active ? "text-accent" : "text-ink-secondary")} aria-hidden="true">{item.icon}</span>
+              <span className={cn("flex size-4 shrink-0 items-center justify-center [&_svg]:size-4", item.active ? "text-accent" : "text-ink-secondary")} aria-hidden="true">{item.icon}</span>
               <span className="min-w-0 flex-1 truncate">{item.label}</span>
               {item.trailing}
             </button>

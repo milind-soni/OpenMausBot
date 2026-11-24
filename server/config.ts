@@ -1,6 +1,6 @@
 // ~/.openmausbot/config.json, with env vars overriding its credentials.
 import { readFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
-import { dataHome } from "./data-dir.ts";
+import { dataHome, defaultDataDir } from "./data-dir.ts";
 import { signInFromEnv } from "./sign-in-env.ts";
 export { signInFromEnv };
 import { join } from "node:path";
@@ -10,6 +10,7 @@ import type { ImageGenerationConfig } from "../shared/image-generation.ts";
 import { imageGenConfigSchema, imageGenPatchSchema, keepKeysOutOfImageModels, type ImageGenCredentialPatch } from "./image-generation-config.ts";
 import { botAvatarUrlSchema } from "../shared/bot-avatar.ts";
 import { writeFileAtomic } from "./atomic.ts";
+import { isValidSshAlias, normalizeVpsConfig, storedVpsServersSchema, vpsConfigSchema, vpsServersSchema, type VpsConfig, type VpsServer } from "./vps-config.ts";
 import { configBackupRefusal, configSaveRefusal, readConfigFile, writeConfigBackup } from "./config-backup.ts";
 import { defaultBotThreads, MAX_CONCURRENT_BOT_THREADS } from "./bot-thread-limits.ts";
 import { anthropicKeyEnv } from "./anthropic-key-env.ts";
@@ -29,14 +30,14 @@ import { settledFileCache, settledFileStamp } from "./settled-file.ts";
 import { isRemoteMcpServer, mcpServerServes, parseStoredMcpServer } from "./mcp-registry.ts"; import { postizKeyHeaders } from "./postiz/connection.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
 import { deciderConfigSchema, type DeciderConfig } from "./decider/config.ts";
-import { fishKeyFromLiveKey, liveConfigSchema, liveConfigWithEnv, liveSettingEnv, type LiveConfig } from "./live-config.ts";
+import { fishKeyFromLiveKey, liveConfigSchema, liveConfigWithEnv, liveSettingEnv, type LiveConfig } from "./live-config.ts"; import { hearingConfigShape } from "./tts/hearing-config.ts";
 import { browserEngineConfigSchema, isValidCdpTarget, type BrowserEngineConfig } from "./browser/config.ts";
 import { roomContextSettings } from "./room-context-settings.ts"; import { usageCapsSchema, type UsageCapsConfig } from "./usage-caps-config.ts";
 import { localVmConfigSchema } from "./local-vm-settings.ts";
 export * from "./local-vm-settings.ts";
+export * from "./vps-config.ts";
 
 const optionalText = z.string().optional();
-const SSH_ALIAS = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 const LEGACY_BROWSER_PROFILE_ID = /^[A-Za-z0-9_-]{1,40}$/;
 const BROWSER_PROFILE_ID = /^[a-z0-9_-]{1,40}$/;
 
@@ -54,26 +55,6 @@ export const MAX_MCP_CALL_TIMEOUT_MINUTES = 60;
 export const MIN_THREAD_EVENT_LOG_BYTES = 256 * 1024;
 export const MAX_THREAD_EVENT_LOG_BYTES = 4 * 1024 * 1024 * 1024;
 
-export function isValidSshAlias(value: unknown): value is string {
-  return typeof value === "string" && SSH_ALIAS.test(value);
-}
-
-export function normalizeVpsConfig(raw: unknown): { sshAlias?: string } {
-  if (raw === undefined || raw === null) return {};
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error("vps must be an object containing an SSH config alias");
-  }
-  const alias = (raw as Record<string, unknown>).sshAlias;
-  if (alias === undefined || alias === "") return {};
-  if (!isValidSshAlias(alias)) {
-    throw new Error("vps.sshAlias must be a simple SSH config alias (letters, numbers, dot, dash, or underscore)");
-  }
-  return { sshAlias: alias };
-}
-
-const vpsConfigSchema = z.object({
-  sshAlias: z.string().refine((value) => value === "" || isValidSshAlias(value), { message: "must be a simple SSH config alias" }).optional(),
-});
 const roomConfigSchema = z.object({
   turnTimeoutMinutes: z
     .number()
@@ -245,7 +226,7 @@ const featureConfigSchema = z.object({
   /** Room jobs to several members run side by side, each in a thread of its own. On unless false. */
   parallelRoomJobs: z.boolean().optional(),
   acpPlanLines: z.boolean().optional(), // An ACP agent's plan as activity lines. Off unless true.
-}).extend({ agentsToolBridge: z.boolean().optional(), savedSteps: z.boolean().optional(), usbPhoneTakeover: z.boolean().optional(), cloudComputerAutoReplace: z.boolean().optional(), phonePush: z.boolean().optional() }); // cloudComputerAutoReplace: set a dead or silent cloud computer aside (kept seven days with its files) and give its bot a new one by itself, on unless false (OMB_CLOUD_COMPUTER_AUTO_REPLACE wins); agentsToolBridge: the find_tool / use_tool bridge, off unless true; savedSteps: repeat a computer task from its saved steps, on unless false; usbPhoneTakeover: watch and take over the bots' USB phone, off unless true; phonePush: wake a paired phone whose app is closed through the hosted push relay, off unless true (OMB_PHONE_PUSH wins)
+}).extend({ agentsToolBridge: z.boolean().optional(), savedSteps: z.boolean().optional(), usbPhoneTakeover: z.boolean().optional(), cloudComputerAutoReplace: z.boolean().optional(), phonePush: z.boolean().optional(), skillBurger: z.boolean().optional(), threadTabs: z.boolean().optional() }); // skillBurger: Skill Burgers in chat, the side menu and the bot panel, and the tools that run them, on unless false; threadTabs: a bot's threads as tabs above its chat, off unless true; cloudComputerAutoReplace: set a dead or silent cloud computer aside (kept seven days with its files) and give its bot a new one by itself, on unless false (OMB_CLOUD_COMPUTER_AUTO_REPLACE wins); agentsToolBridge: the find_tool / use_tool bridge, off unless true; savedSteps: repeat a computer task from its saved steps, on unless false; usbPhoneTakeover: watch and take over the bots' USB phone, off unless true; phonePush: wake a paired phone whose app is closed through the hosted push relay, off unless true (OMB_PHONE_PUSH wins)
 const onboardingConfigSchema = z.object({
   completedAt: z.string().trim().max(40).optional(),
   version: z.number().int().min(0).max(1000).optional(),
@@ -364,6 +345,7 @@ const appConfigSchema = z.object({
   composio: z.object({ apiKey: optionalText, userId: optionalText, sessionId: optionalText }).optional(),
   box: z.object({ token: optionalText }).optional(),
   vps: vpsConfigSchema.optional(),
+  vpsServers: vpsServersSchema.optional(),
   /** OpenCode key, plus `providerKeys` for its other providers by the env name OpenCode reads; both write-only and only for its child. */
   opencodeGo: z.object({ apiKey: optionalText, providerKeys: z.record(z.string(), z.string()).optional() }).optional(),
   /** `provider`: "elevenlabs" (default, `key`), "fish" (`fishKey`, `fishModel`), "system", "xai" (`xai.key`), "gemini" (`geminiKey`, `model`), "openai" (`openai.key`), "deepseek" (`deepseek.key`; it also hears dictation) or "chatterbox" (local; `baseUrl`, `model`). */
@@ -379,7 +361,7 @@ const appConfigSchema = z.object({
       .max(2048)
       .refine((value) => !value || /^https?:\/\//i.test(value), "the Chatterbox server address must start with http:// or https://")
       .optional(),
-    model: optionalText,
+    model: optionalText, ...hearingConfigShape,
     fishModel: z.enum(FISH_TTS_MODELS).optional(), everyReply: z.boolean().optional(), // a voice note with every reply unless a bot's voiceNoteEveryReply says otherwise
   }).optional(),
   decider: deciderConfigSchema.optional(),
@@ -418,6 +400,7 @@ const appConfigSchema = z.object({
   mcpServers: z.record(z.string(), z.unknown()).optional(),
 });
 const storedAppConfigSchema = appConfigSchema.extend(helperStoredShape).extend({
+  vpsServers: storedVpsServersSchema,
   browserProfiles: storedBrowserProfilesSchema.optional(),
   /** Loose like mcpServers: a bad provider key is dropped later, never the whole file. */
   opencodeGo: z.object({
@@ -470,10 +453,10 @@ export interface AppConfig extends HelperConfig {
   composio?: { apiKey?: string; userId?: string; sessionId?: string };
   /** Boat token (ascii.dev renamed Box to Boat); config key "box", env BOX_TOKEN. */
   box?: { token?: string };
-  /** A named host from the user's SSH config. Authentication stays with SSH. */
-  vps?: { sshAlias?: string };
+  vps?: VpsConfig;
+  vpsServers?: VpsServer[];
   opencodeGo?: { apiKey?: string; providerKeys?: Record<string, string> };
-  tts?: { key?: string; fishKey?: string; geminiKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini" | "openai" | "deepseek"; baseUrl?: string; model?: string; fishModel?: FishTtsModel; everyReply?: boolean };
+  tts?: { key?: string; fishKey?: string; geminiKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini" | "openai" | "deepseek"; baseUrl?: string; model?: string; fishModel?: FishTtsModel; everyReply?: boolean; hearWith?: "device" | "elevenlabs"; hearLanguage?: string };
   decider?: DeciderConfig;
   imageGen?: ImageGenerationConfig;
   live?: LiveConfig;
@@ -484,7 +467,7 @@ export interface AppConfig extends HelperConfig {
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean; roomCompactAt?: number; roomSessions?: boolean; replayToolHistory?: boolean };
   memory?: { captureQuietMs?: number; tidyHour?: number };
   localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number; idleTimeoutMinutes?: number; preserveInstalledApps?: boolean; memoryGb?: number; cpus?: number };
-  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; smartSetupChoices?: boolean; autoRecall?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; parallelRoomJobs?: boolean; acpPlanLines?: boolean; agentsToolBridge?: boolean; savedSteps?: boolean; usbPhoneTakeover?: boolean; cloudComputerAutoReplace?: boolean; phonePush?: boolean };
+  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; smartSetupChoices?: boolean; autoRecall?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; parallelRoomJobs?: boolean; acpPlanLines?: boolean; agentsToolBridge?: boolean; savedSteps?: boolean; usbPhoneTakeover?: boolean; cloudComputerAutoReplace?: boolean; phonePush?: boolean; skillBurger?: boolean; threadTabs?: boolean };
   onboarding?: { completedAt?: string; version?: number; reelSeen?: boolean; hintsSeen?: string[]; firstTurnAt?: string };
   browserProfiles?: BrowserProfile[];
   browserEngine?: BrowserEngineConfig;
@@ -693,7 +676,7 @@ export function changedInstanceIds(before: Record<string, unknown>, after: Recor
     .filter((id) => !isDeepStrictEqual(before[id], after[id]));
 }
 
-export const DATA_DIR = process.env.OMB_DATA_DIR || join(dataHome(), ".openmausbot");
+export const DATA_DIR = defaultDataDir();
 const LEGACY_DATA_DIR = join(dataHome(), ".opengrokbot");
 export const EVENTS_DIR = join(DATA_DIR, "events");
 export const NATIVE_DIR = join(DATA_DIR, "native");
@@ -919,8 +902,9 @@ export function saveConfig(
     disk[key] = merged;
   }
   keepImageModels();
-  if (checkedPatch.vps !== undefined) disk.vps = normalizeVpsConfig(checkedPatch.vps);
-  for (const key of ["language", "computerName", "everyBotRules"] as const) if (checkedPatch[key] !== undefined) disk[key] = checkedPatch[key];
+  if (checkedPatch.vps !== undefined) disk.vps = normalizeVpsConfig(checkedPatch.vps, disk.vps);
+  // vpsServers is kept even when empty: the running config is updated by Object.assign, which cannot drop a key.
+  for (const key of ["language", "computerName", "everyBotRules", "vpsServers"] as const) if (checkedPatch[key] !== undefined) disk[key] = checkedPatch[key];
   if (checkedPatch.customDomain !== undefined) disk.customDomain = checkedPatch.customDomain;
   if (checkedPatch.signIn !== undefined) disk.signIn = checkedPatch.signIn;
   // Replace the section so clearing a backup cannot revive the old selection.

@@ -5,7 +5,9 @@ import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Socket } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
+import { WebSocket, WebSocketServer, type RawData } from "ws";
 
 import { admission, admissionHash, b64u, credentialHash, ed25519RawPublicKey, fromB64u, keyId, mintRelayToken, psk } from "../companion/src/e2e/credentials.ts";
 import { TRANSPORT_RELAY } from "../companion/src/e2e/noise.ts";
@@ -16,6 +18,7 @@ import { http, json, waitFor } from "../companion/test/e2e/rig.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { MAX_RELAY_PHONES, MAX_SESSIONS_PER_PHONE, PHONE_RELAY_KEY_FILE, PHONE_RELAY_PHONES_FILE, startPhoneRelay, tunnelHolder, type PhoneRelay, type PhoneRelayOptions } from "./phone-relay.ts";
 import { requestSource, resolveRequestAuth } from "./request-auth.ts";
+import { createUpgrades, type Upgrades } from "./routes/upgrades.ts";
 import { SessionRegistry } from "./sessions.ts";
 
 const SERVER_VERSION = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
@@ -41,8 +44,16 @@ async function body(req: IncomingMessage): Promise<Record<string, string>> {
   return raw ? JSON.parse(raw) : {};
 }
 
-/** The parts of the server's handler a phone meets: `/api/pair` as the server answers it, and the real request gate. */
-function serverHandler(sessions: SessionRegistry, relay: () => PhoneRelay | null) {
+// A WebSocket path a client session may open, like a shared computer's link.
+const WS_PATH = "/api/shared-computers/test-computer/link";
+/** The route's end of every WebSocket it accepted. */
+const routeSockets: WebSocket[] = [];
+
+/** The parts of the server's handler a phone meets: `/api/pair` as the server answers it, the real request gate, and a WebSocket route. */
+function serverHandler(sessions: SessionRegistry, relay: () => PhoneRelay | null, upgrades: Upgrades) {
+  const echo = new WebSocketServer({ noServer: true });
+  cleanup.push(() => echo.close());
+  upgrades.route((path) => path === WS_PATH);
   return async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", "http://server");
     const send = (status: number, payload: unknown) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(payload));
@@ -62,9 +73,22 @@ function serverHandler(sessions: SessionRegistry, relay: () => PhoneRelay | null
       res.once("close", () => clearInterval(tick));
       return;
     }
-    const gate = resolveRequestAuth(req, { sessions, cookieName: "omb_session", streamPath: "/api/events", url });
+    const gate = resolveRequestAuth(req, { sessions, cookieName: "omb_session", streamPath: "/api/events", url, features: { sharedComputers: true } });
     if (url.pathname === "/api/health" && !gate.auth) return send(200, { app: "openmausbot" });
     if (!gate.auth) return send(gate.status, { error: gate.error });
+    if (url.pathname === WS_PATH) {
+      // Like the live screens: the route answers the handshake itself, after the same gate as every request.
+      const pending = upgrades.pending(req);
+      if (!pending) return send(426, { error: "WebSocket upgrade required" });
+      const who = { kind: gate.auth.kind, id: gate.auth.kind === "session" ? gate.auth.session.id : null, source: requestSource(req), host: req.headers.host };
+      pending.release();
+      echo.handleUpgrade(req, pending.socket, pending.head, (ws) => {
+        routeSockets.push(ws);
+        ws.send(JSON.stringify(who));
+        ws.on("message", (data, binary) => ws.send(data, { binary }));
+      });
+      return;
+    }
     return send(200, { kind: gate.auth.kind, id: gate.auth.kind === "session" ? gate.auth.session.id : null, source: requestSource(req), host: req.headers.host, via: gate.auth.kind === "session" ? gate.auth.via : null });
   };
 }
@@ -89,11 +113,14 @@ async function startServer(input: Partial<PhoneRelayOptions> & { dir?: string; r
   const hostId = randomBytes(16);
   const logs: string[] = [];
   let phoneRelay: PhoneRelay | null = null;
+  const upgrades = createUpgrades();
+  cleanup.push(() => upgrades.close());
   phoneRelay = startPhoneRelay({
     env: { OMB_PHONE_RELAY: "1", OMB_PHONE_RELAY_URL: relay.url },
     dataDir: dir,
     sessions,
-    handle: serverHandler(sessions, () => phoneRelay),
+    handle: serverHandler(sessions, () => phoneRelay, upgrades),
+    upgrades,
     serverName: () => "VPS",
     publicOrigin: () => null,
     version: "0.1.152",
@@ -125,6 +152,31 @@ function viaRelay(server: Server, k: Buffer, token: string): Promise<E2ESession<
   });
 }
 
+type Opened = { ws: WebSocket; first: Record<string, unknown> } | { status: number; error: unknown };
+
+/** A WebSocket inside one encrypted stream of the session, as a phone opens a live screen. */
+function socketOver(session: E2ESession<never>, path: string, token?: string): Promise<Opened> {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://phone-relay${path}`, {
+      createConnection: () => session.openStream() as unknown as Socket,
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+    });
+    const parsed = (raw: string) => {
+      try { return raw ? JSON.parse(raw) as Record<string, unknown> : {}; } catch { return { raw }; }
+    };
+    ws.once("message", (data: RawData) => resolve({ ws, first: parsed(String(data)) }));
+    ws.once("unexpected-response", (_req, res) => {
+      let raw = "";
+      res.on("data", (chunk: Buffer) => { raw += chunk; });
+      res.on("end", () => {
+        ws.terminate();
+        resolve({ status: res.statusCode ?? 0, error: parsed(raw).error ?? null });
+      });
+    });
+    ws.once("error", reject);
+  });
+}
+
 const connected = (server: Server) => waitFor(() => server.phoneRelay.status().relay === "connected", 5_000);
 
 async function pairPhone(server: Server): Promise<{ token: string; id: string; k: Buffer; session: E2ESession<never> }> {
@@ -146,7 +198,7 @@ describe("phones through MausBot Relay on a server", () => {
     const sessions = new SessionRegistry({ file: join(dir, "sessions.json") });
     cleanup.push(() => sessions.close());
     const logs: string[] = [];
-    const base = { dataDir: dir, sessions, handle: () => {}, serverName: () => "VPS", publicOrigin: () => null, version: "0.1.152", log: (line: string) => logs.push(line) };
+    const base = { dataDir: dir, sessions, handle: () => {}, upgrades: createUpgrades(), serverName: () => "VPS", publicOrigin: () => null, version: "0.1.152", log: (line: string) => logs.push(line) };
     expect(startPhoneRelay({ ...base, env: {}, refusal: null })).toBeNull();
     expect(startPhoneRelay({ ...base, env: { OMB_PHONE_RELAY: "true" }, refusal: null })).toBeNull();
     expect(startPhoneRelay({ ...base, env: { OMB_PHONE_RELAY: "1" }, refusal: "a MausBot Cloud home" })).toBeNull();
@@ -200,6 +252,37 @@ describe("phones through MausBot Relay on a server", () => {
       const outcome = await viaRelay(server, k, opened.credential).then((check) => (check.shutdown(), null), (error: unknown) => error);
       return outcome instanceof SessionClosed && outcome.code === 4404 ? outcome : null;
     }, 6_000)).toEqual(new SessionClosed(4404));
+  });
+
+  it("carries a paired phone's WebSocket to the route that owns it, through the same gate and scrubbing as its requests", async () => {
+    const server = await startServer();
+    await connected(server);
+    const phone = await pairPhone(server);
+    const opened = await socketOver(phone.session, WS_PATH, phone.token);
+    if (!("ws" in opened)) throw new Error(`refused: ${opened.status} ${String(opened.error)}`);
+    expect(opened.first).toEqual({ kind: "session", id: phone.id, source: `relay-${phone.id}`, host: "phone-relay.invalid" });
+    const echoed = new Promise<RawData>((resolve) => opened.ws.once("message", resolve));
+    opened.ws.send(Buffer.from([1, 2, 3]));
+    expect(await echoed).toEqual(Buffer.from([1, 2, 3]));
+    // The phone going away closes the route's end too, so a live screen stops with it.
+    const route = routeSockets.at(-1)!;
+    phone.session.shutdown();
+    await waitFor(() => route.readyState === WebSocket.CLOSED, 5_000);
+  });
+
+  it("refuses a WebSocket from a session that has not paired, or that carries another device's token or none", async () => {
+    const server = await startServer();
+    await connected(server);
+    const opened = server.sessions.openPairing({ scopes: ["client"] });
+    const k = fromB64u(descriptorOf(server.phoneRelay.invite(opened.credential, "VPS", null)!).k)!;
+    const window = await waitFor(() => viaRelay(server, k, opened.credential).catch(() => null), 6_000);
+    expect(await socketOver(window, WS_PATH)).toEqual({ status: 401, error: "pair this phone first" });
+    window.shutdown();
+    const phone = await pairPhone(server);
+    const other = server.sessions.issue({ label: "Laptop", scopes: ["admin", "client"] });
+    expect(await socketOver(phone.session, WS_PATH, other.token)).toEqual({ status: 401, error: "this connection belongs to another device" });
+    expect(await socketOver(phone.session, WS_PATH)).toEqual({ status: 403, error: "forbidden: this request came through a proxy (pair this device to use the server remotely)" });
+    phone.session.shutdown();
   });
 
   it("tells a removed phone so inside the encryption, then the relay admits it no more", async () => {
@@ -261,7 +344,7 @@ describe("phones through MausBot Relay on a server", () => {
     const logs: string[] = [];
     const sessions = new SessionRegistry({ file: join(dir, "sessions.json") });
     cleanup.push(() => sessions.close());
-    expect(startPhoneRelay({ env: { OMB_PHONE_RELAY: "1" }, dataDir: dir, sessions, handle: () => {}, serverName: () => "VPS", publicOrigin: () => null, version: "0.1.152", refusal: null, log: (line) => logs.push(line) })).toBeNull();
+    expect(startPhoneRelay({ env: { OMB_PHONE_RELAY: "1" }, dataDir: dir, sessions, handle: () => {}, upgrades: createUpgrades(), serverName: () => "VPS", publicOrigin: () => null, version: "0.1.152", refusal: null, log: (line) => logs.push(line) })).toBeNull();
     expect(logs[0]).toMatch(/^phone relay: off: .*is not a connection key/);
     expect(readFileSync(join(dir, PHONE_RELAY_KEY_FILE), "utf8")).toBe("{\"v\":1}\n");
   });
@@ -316,7 +399,7 @@ describe("phones through MausBot Relay on a server", () => {
       const logs: string[] = [];
       const sessions = new SessionRegistry({ file: join(dir, "sessions.json") });
       cleanup.push(() => sessions.close());
-      const relay = startPhoneRelay({ env, dataDir: dir, sessions, handle: () => {}, serverName: () => "VPS", publicOrigin: () => null, version: "0.1.152", refusal: null, fetchGrant: async () => (asked += 1, {}), log: (line) => logs.push(line) })!;
+      const relay = startPhoneRelay({ env, dataDir: dir, sessions, handle: () => {}, upgrades: createUpgrades(), serverName: () => "VPS", publicOrigin: () => null, version: "0.1.152", refusal: null, fetchGrant: async () => (asked += 1, {}), log: (line) => logs.push(line) })!;
       expect(relay.status()).toMatchObject({ relay: "off", grant: "tunnel", reason: expect.any(String) });
       expect(relay.invite(sessions.openPairing().credential, "VPS", null)).toBeNull();
       expect(logs[0]).toMatch(/^phone relay: off: .*login --relay/);

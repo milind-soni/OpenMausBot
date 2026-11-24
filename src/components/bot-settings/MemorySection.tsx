@@ -1,5 +1,5 @@
 import { FileText, FolderOpen, RotateCcw, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { cn } from "@/lib/cn";
 import {
@@ -17,7 +17,6 @@ import {
   openMemoryLocation,
   revertMemoryChange,
   saveMemoryDoc,
-  fetchUpkeepStatus,
   tidyMemoryNow,
   tidySummary,
   noticedCount,
@@ -34,10 +33,15 @@ import { localizedRelativeTime } from "@/lib/relative-time";
 import { shortPath } from "@/lib/short-path";
 import { activeLocale, t } from "@/lib/i18n";
 import { roomMemoryCaptureEnabled } from "@/lib/feature-flags";
-import { api, ApiError, useStore, type Bot, type ConfigStatus } from "@/state/store";
+import { api, ApiError, type Bot, type ConfigStatus } from "@/state/store";
 import { Switch } from "../SettingsPrimitives";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { inputCls } from "./field";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
+import { useMinuteTick } from "@/lib/minute-tick";
+import { ThreadMemoryCard } from "../bot-panel/MemoryText";
+import { MemoryModelSetting } from "./MemoryModelSetting";
+import { useMemoryUpkeepStatus } from "./use-memory-upkeep-status";
 
 const buttonCls = "rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50";
 const quietButtonCls = "rounded-md px-2 py-1 text-[13px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50";
@@ -118,26 +122,24 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
   const [saving, setSaving] = useState(false);
   const [reverting, setReverting] = useState<string | null>(null);
   const [newTopic, setNewTopic] = useState("");
-  const [upkeep, setUpkeep] = useState<UpkeepStatus | null>(null);
+  const upkeep = useMemoryUpkeepStatus(bot, active && bot.memoryEnabled !== false && bot.memoryUpkeep !== false);
   const [tidying, setTidying] = useState(false);
   const [lendingReview, setLendingReview] = useState<LendingReview | null>(null);
   const [lendingReviewStale, setLendingReviewStale] = useState(false);
   const [reviewing, setReviewing] = useState(false);
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const learnFromRooms = roomMemoryCaptureEnabled(state.config);
   const [roomsSaving, setRoomsSaving] = useState(false);
   const [roomsError, setRoomsError] = useState("");
 
   const refresh = async (openPath?: string) => {
-    const [nextOverview, nextJournal, nextUpkeep] = await Promise.all([
+    const [nextOverview, nextJournal] = await Promise.all([
       fetchMemoryOverview(bot.id),
       fetchMemoryJournal(bot.id),
-      fetchUpkeepStatus(bot.id).catch(() => null),
     ]);
     setOverview(nextOverview);
     setLendingReview(nextOverview.lendingReview ?? null);
     setJournal(nextJournal);
-    setUpkeep(nextUpkeep);
     if (openPath) {
       const doc = await fetchMemoryDoc(bot.id, openPath);
       setEditing({ path: doc.path, text: doc.text, hash: doc.hash, dirty: false, readOnly: openPath.startsWith("memory/log/") });
@@ -252,7 +254,6 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
   const toggleUpkeep = () => {
     const enabled = bot.memoryUpkeep === false;
     dispatch({ type: "updateBot", botId: bot.id, patch: { memoryUpkeep: enabled } });
-    setUpkeep((current) => (current ? { ...current, enabled } : current));
   };
 
   const toggleRooms = async () => {
@@ -279,8 +280,8 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
     try {
       const { report, overview: next } = await tidyMemoryNow(bot.id);
       setOverview(next);
-      setJournal(await fetchMemoryJournal(bot.id));
-      setUpkeep(await fetchUpkeepStatus(bot.id));
+      const [nextJournal] = await Promise.all([fetchMemoryJournal(bot.id), upkeep.reload()]);
+      setJournal(nextJournal);
       if (editing && !editing.dirty) await open(editing.path);
       setNotice(`${localizedTidySummary(report)}.${report.note ? ` ${report.note}` : ""}`);
     } catch (e) {
@@ -323,6 +324,8 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
         )}
       </div>
 
+      <ThreadMemoryCard bot={bot} />
+
       {lendingReview && (
         <LendingReviewNotice
           changed={lendingReview.changed}
@@ -348,11 +351,13 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
 
       {bot.memoryEnabled !== false && <MemoryUpkeepCard
         enabled={bot.memoryUpkeep !== false}
-        status={upkeep}
+        status={upkeep.status}
         tidying={tidying}
         onToggle={toggleUpkeep}
         onTidy={() => void tidyNow()}
         rooms={{ enabled: learnFromRooms, saving: roomsSaving, error: roomsError, onToggle: () => void toggleRooms() }}
+        model={active && bot.memoryUpkeep !== false
+          ? <MemoryModelSetting key={bot.id} bot={bot} upkeep={upkeep} className="mt-3 border-t border-hairline/40" /> : undefined}
       />}
 
       {editing && (
@@ -482,6 +487,7 @@ export function MemoryUpkeepCard({
   onToggle,
   onTidy,
   rooms,
+  model,
 }: {
   enabled: boolean;
   status: UpkeepStatus | null;
@@ -489,6 +495,7 @@ export function MemoryUpkeepCard({
   onToggle: () => void;
   onTidy: () => void;
   rooms?: { enabled: boolean; saving: boolean; error: string; onToggle: () => void };
+  model?: ReactNode;
 }) {
   return (
     <div className="rounded-xl bg-card p-4">
@@ -499,6 +506,7 @@ export function MemoryUpkeepCard({
         </div>
         <Switch checked={enabled} aria-label={t("memory.upkeep.title")} onClick={onToggle} />
       </div>
+      {model}
       {enabled && rooms && (
         <div className="mt-3 flex items-start justify-between gap-3 border-t border-hairline/40 pt-3">
           <div className="min-w-0">
@@ -673,6 +681,7 @@ export function MemoryJournalList({
   onRevert: (row: MemoryJournalRow) => void;
   now?: number;
 }) {
+  useMinuteTick();
   if (!rows) return <div className="text-[13px] text-ink-secondary">{t("memory.loading")}</div>;
   if (rows.length === 0) return <div className="text-[13px] text-ink-secondary">{t("memory.noChanges")}</div>;
   return (

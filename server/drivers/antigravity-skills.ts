@@ -40,7 +40,7 @@ export function stageAntigravitySkills(turn: SendTurnInput, profile: string): Se
         const path = prefix + name;
         const full = join(folder, name);
         const info = lstatSync(full);
-        if (skillFilePathProblem(path, info.isDirectory())) throw new Error("Antigravity skill contains an unsafe path.");
+        if (skillFilePathProblem(path, info.isDirectory())) continue;
         if (info.isDirectory()) { visit(full, path + "/"); continue; }
         if (!info.isFile() || info.size > SKILL_FOLDER_LIMITS.fileBytes) throw new Error("Antigravity skill contains an unsafe file.");
         const content = readFileNoFollow(full, SKILL_FOLDER_LIMITS.fileBytes);

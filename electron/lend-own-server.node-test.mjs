@@ -12,6 +12,9 @@ import { setTimeout as delay } from "node:timers/promises";
 import { createComputerSharing, ownServerSession } from "./computer-sharing.mjs";
 import { createLendingIndicator } from "./lending-indicator.mjs";
 import { installServerLending } from "./server-lending.mjs";
+import { ownServerRefusal } from "./own-server-refusal.mjs";
+import { cloudPageSenderAllowed } from "./cloud-home.mjs";
+import { screenStatus } from "./screen-status.mjs";
 
 const GARAGE = "http://192.168.1.20:8799";
 const garage = { id: "garage", name: "Garage", origin: GARAGE, kind: "remote" };
@@ -75,6 +78,24 @@ test("only this desktop's admin pairing on a server that is no Cloud, team or ho
   assert.equal(ownServerSession({ ...owner, cloudHome: true }), false, "a Cloud is lent by its own rules");
   assert.equal(ownServerSession({ ...owner, hosted: true }), false);
   assert.equal(ownServerSession({ ...owner, kind: "loopback" }), false);
+  // Why not, in one word the app turns into one line.
+  assert.equal(ownServerRefusal(owner), null);
+  assert.equal(ownServerRefusal({ ...owner, own: undefined }), "shared");
+  assert.equal(ownServerRefusal({ ...owner, scopes: ["client"] }), "not-owner");
+  assert.equal(ownServerRefusal({ ...owner, team: { id: "t", role: "admin" } }), "team");
+  assert.equal(ownServerRefusal({ ...owner, cloudHome: true }), "cloud");
+  assert.equal(ownServerRefusal(undefined), "not-owner");
+});
+
+test("ownRefusal asks the server itself: its own when it is, why not when it isn't", async t => {
+  const mine = await desktop(t, selfHosted());
+  assert.equal(await mine.sharing.ownRefusal(garage), null);
+  const shared = await desktop(t, selfHosted({ own: false }));
+  assert.equal(await shared.sharing.ownRefusal(garage), "shared");
+  const narrow = await desktop(t, selfHosted({ scopes: ["client"] }));
+  assert.equal(await narrow.sharing.ownRefusal(garage), "not-owner");
+  const team = await desktop(t, selfHosted({ extra: { team: { id: "t", role: "admin" } } }));
+  assert.equal(await team.sharing.ownRefusal(garage), "team");
 });
 
 test("once the person allows it, a server of their own gets the apps on the screen and its MCP servers, with the maintainer flag off; no folder or terminal unless chosen", async t => {
@@ -206,7 +227,7 @@ test("the menu-bar item keeps its Clouds' terminal switch only while a Cloud is 
 });
 
 /** main's channels and popup, with this desktop's lending and native dialogs stood in for. */
-function mainLending({ response = 1, own = true, flag = false, offer } = {}) {
+function mainLending({ response = 1, own = true, flag = false, offer, refusal = "shared", screen = async () => ({ ready: true, lent: true, reason: null, fix: null }), now = () => 1_000 } = {}) {
   const handlers = new Map(), calls = { lent: [], declined: [], saved: [], revoked: [], boxes: [] };
   const win = { isDestroyed: () => false, webContents: { getURL: () => `${GARAGE}/` } };
   const info = { sessionId: randomUUID(), environmentId: randomUUID() };
@@ -214,6 +235,7 @@ function mainLending({ response = 1, own = true, flag = false, offer } = {}) {
   const controller = {
     state: id => records[id] ?? { enabled: false, folders: [], terminal: false, computer: false },
     ownServer: async () => (own ? info : null),
+    ownRefusal: async () => (own ? null : refusal),
     ownOffer: async () => (offer !== undefined ? offer : own ? info : false),
     lendOwn: async (env, grant) => { calls.lent.push([env.id, grant]); records[env.id] = { enabled: true, own: true, ...grant }; return records[env.id]; },
     declineOwn: (env, seen) => { calls.declined.push([env.id, seen]); },
@@ -224,26 +246,55 @@ function mainLending({ response = 1, own = true, flag = false, offer } = {}) {
   const lending = installServerLending({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, guard: (_channel, handler) => handler, sharing: () => controller,
     dialogs: { chooseFolder: async () => null, confirmServerAccess: async () => true }, validate: async folders => folders ?? [], dialog, window: () => win,
     saved: id => { if (id !== garage.id) throw new Error("unknown"); return garage; }, candidate: env => !env.cloud && !env.team && !env.home, flag: async () => flag,
-    environments: () => [garage, { id: "acme", name: "Acme", origin: "https://omb-t-acme.fly.dev", team: { id: "t" } }], active: () => garage });
+    environments: () => [garage, { id: "acme", name: "Acme", origin: "https://omb-t-acme.fly.dev", team: { id: "t" } }], active: () => garage,
+    // This app's own page sends an empty event here; the server's own page sends { page: env }.
+    local: event => !event?.page && !event?.other, page: event => event?.page ?? null, screen, allowScreen: async () => { calls.allowScreen = (calls.allowScreen ?? 0) + 1; }, now });
   return { handlers, calls, lending, win, info };
 }
 
-test("right after pairing a server of the person's own, one popup in main's own dialog: Allow lends the apps on the screen, Not now nothing", async () => {
-  const allowed = mainLending({ response: 0 });
-  await allowed.lending.offer(allowed.win);
-  assert.equal(allowed.calls.boxes.length, 1);
-  assert.deepEqual(allowed.calls.boxes[0], { type: "question", message: "Let Garage use this computer?", detail: allowed.calls.boxes[0].detail, buttons: ["Allow", "Not now"], defaultId: 1, cancelId: 1 });
-  assert.match(allowed.calls.boxes[0].detail, /apps on your screen.*folders you choose and run commands in a terminal/s);
-  assert.deepEqual(allowed.calls.lent, [["garage", { folders: [], terminal: false, computer: true }]]);
+test("after pairing a server of the person's own, no popup: the add form's switch, when on, lends the apps on the screen", async () => {
+  const quiet = mainLending({ response: 0 });
+  await quiet.lending.offer(quiet.win);
+  assert.deepEqual(quiet.calls.boxes, [], "the question lives in the add form and on the server's row, never in a popup");
+  assert.deepEqual(quiet.calls.lent, []);
 
-  const notNow = mainLending({ response: 1 });
-  await notNow.lending.offer(notNow.win);
-  assert.deepEqual(notNow.calls.lent, []);
-  assert.deepEqual(notNow.calls.declined, [["garage", notNow.info]]);
+  const wished = mainLending({ response: 1 });
+  assert.equal(await wished.handlers.get("lend:wish")({}, "192.168.1.20:8799", true), true);
+  await wished.lending.offer(wished.win);
+  assert.deepEqual(wished.calls.boxes, [], "the switch was the person's answer");
+  assert.deepEqual(wished.calls.lent, [["garage", { folders: [], terminal: false, computer: true }]]);
+  await wished.lending.offer(wished.win);
+  assert.equal(wished.calls.lent.length, 1, "a wish is used once");
+
+  const unwished = mainLending();
+  await unwished.handlers.get("lend:wish")({}, "http://192.168.1.20:8799", true);
+  await unwished.handlers.get("lend:wish")({}, "http://192.168.1.20:8799", false);
+  await unwished.lending.offer(unwished.win);
+  assert.deepEqual(unwished.calls.lent, [], "the switch turned off again");
+
+  let clock = 1_000;
+  const stale = mainLending({ now: () => clock });
+  await stale.handlers.get("lend:wish")({}, "192.168.1.20", true);
+  clock += 11 * 60_000;
+  await stale.lending.offer(stale.win);
+  assert.deepEqual(stale.calls.lent, [], "an old wish lends nothing");
+
+  const typed = mainLending();
+  await typed.handlers.get("lend:wish")({}, "192.168.1.20", true);
+  await typed.handlers.get("lend:wish")({}, "192.168.1.2", true);
+  await typed.lending.offer(typed.win);
+  assert.deepEqual(typed.calls.lent, [], "only the address as last typed is wished for");
+
+  const elsewhere = mainLending();
+  await elsewhere.handlers.get("lend:wish")({}, "other.example", true);
+  await elsewhere.lending.offer(elsewhere.win);
+  assert.deepEqual(elsewhere.calls.lent, [], "a wish is for the server it was typed for");
+  await assert.rejects(elsewhere.handlers.get("lend:wish")({ page: garage }, "192.168.1.20", true), /main desktop window/, "a server's page can't wish itself lent");
 
   const answered = mainLending({ response: 0, offer: null });
+  await answered.handlers.get("lend:wish")({}, "192.168.1.20", true);
   await answered.lending.offer(answered.win);
-  assert.deepEqual(answered.calls.boxes, [], "a pairing already answered is never asked again");
+  assert.deepEqual(answered.calls.lent, [], "a pairing already answered keeps its answer");
 
   const notOwn = mainLending({ response: 0, own: false });
   await notOwn.lending.offer(notOwn.win);
@@ -275,4 +326,91 @@ test("Settings: each server of the person's own has the switch, which asks the s
   assert.deepEqual(await other.handlers.get("sharing:servers")({}), []);
   await other.handlers.get("sharing:revoke")({}, "garage");
   assert.deepEqual(other.calls.revoked, ["garage"], "stopping never needs a flag");
+});
+
+test("the switch: one tap on this app's own page lends and stops at once; a server's own page gets main's popup first", async () => {
+  const here = mainLending({ response: 1 });
+  assert.deepEqual(await here.handlers.get("lend:state")({}, "garage"), { name: "Garage", lendable: true, on: false, connected: false, paused: false });
+  const on = await here.handlers.get("lend:set")({}, "garage", true);
+  assert.equal(on.on, true);
+  assert.deepEqual(here.calls.boxes, [], "no popup from this app's own page");
+  assert.deepEqual(here.calls.lent, [["garage", { folders: [], terminal: false, computer: true }]]);
+  assert.equal((await here.handlers.get("lend:set")({}, "garage", false)).on, false);
+  assert.deepEqual(here.calls.revoked, ["garage"]);
+
+  // The server's own page (its Screen panel): about that server only, whatever id it sends.
+  const page = mainLending({ response: 1 });
+  assert.equal((await page.handlers.get("lend:set")({ page: garage }, "acme", true)).on, false, "Not now lends nothing");
+  assert.equal(page.calls.boxes[0].message, "Let Garage use this computer?");
+  assert.equal(page.calls.boxes[0].defaultId, 1);
+  const allowed = mainLending({ response: 0 });
+  assert.equal((await allowed.handlers.get("lend:set")({ page: garage }, null, true)).on, true);
+  assert.equal((await allowed.handlers.get("lend:set")({ page: garage }, null, false)).on, false, "stopping is one tap");
+  assert.equal(allowed.calls.boxes.length, 1);
+  const stranger = mainLending();
+  await assert.rejects(stranger.handlers.get("lend:state")({ page: null, other: true }, "garage"), /main desktop window/);
+
+  // Who may lend is unchanged: a server that isn't their own is never lent, from anywhere.
+  const notOwn = mainLending({ own: false });
+  await assert.rejects(notOwn.handlers.get("lend:set")({}, "garage", true), /Only your own server/);
+  assert.deepEqual(notOwn.calls.lent, []);
+});
+
+test("a server that can't be lent to says why in one word; a Cloud or team never asks the server", async () => {
+  for (const refusal of ["shared", "not-owner", "old", "team", "cloud", "unreachable"]) {
+    const { handlers } = mainLending({ own: false, refusal });
+    assert.deepEqual(await handlers.get("lend:state")({}, "garage"), { name: "Garage", lendable: false, why: refusal });
+  }
+  const flagged = mainLending({ own: false, flag: true });
+  assert.deepEqual(await flagged.handlers.get("lend:state")({}, "garage"), { name: "Garage", lendable: false, why: "settings" });
+  const team = { id: "acme", name: "Acme", origin: "https://omb-t-acme.fly.dev", team: { id: "t" } };
+  assert.deepEqual(await mainLending().handlers.get("lend:state")({ page: team }), { name: "Acme", lendable: false, why: "team" });
+  const cloud = { id: "home", name: "My Cloud", origin: "https://omb-h.fly.dev", home: true };
+  assert.deepEqual(await mainLending().handlers.get("lend:state")({ page: cloud }), { name: "My Cloud", lendable: false, why: "cloud" });
+  // A Cloud's or a team's page changes nothing: no stop written on its grant, no system prompt for the screen.
+  for (const page of [team, cloud]) {
+    const quiet = mainLending({ response: 0 });
+    await quiet.handlers.get("lend:set")({ page }, null, false);
+    await assert.rejects(quiet.handlers.get("lend:set")({ page }, null, true), /Only your own server/);
+    await quiet.handlers.get("lend:allow-screen")({ page }, null);
+    assert.deepEqual(quiet.calls.revoked, []);
+    assert.deepEqual(quiet.calls.lent, []);
+    assert.equal(quiet.calls.allowScreen, undefined);
+    assert.deepEqual(quiet.calls.boxes, []);
+  }
+  const off = mainLending();
+  await off.handlers.get("lend:allow-screen")({}, "garage");
+  assert.equal(off.calls.allowScreen, undefined, "nothing is asked of the system while the switch is off");
+});
+
+test("on, its apps and screen as the system allows them: macOS asks for its two permissions, Windows needs nothing more", async () => {
+  // The same computer control state, as screen-status.mjs reads it on each system.
+  const missing = { status: "unavailable", reason: "Accessibility and Screen Recording required" };
+  const mac = mainLending({ screen: async () => screenStatus({ platform: "darwin", connection: missing }) });
+  await mac.handlers.get("lend:set")({}, "garage", true);
+  assert.deepEqual(await mac.handlers.get("lend:state")({}, "garage"), { name: "Garage", lendable: true, on: true, connected: false, paused: false, screen: "permissions" });
+  await mac.handlers.get("lend:allow-screen")({}, "garage");
+  assert.equal(mac.calls.allowScreen, 1);
+  const ready = { status: "ready", path: "/x", socket: "/tmp/cua.sock", version: "0.45.4" };
+  const windows = mainLending({ screen: async () => screenStatus({ platform: "win32", connection: { ...ready, socket: "\\\\.\\pipe\\cua-omb-1" } }) });
+  await windows.handlers.get("lend:set")({}, "garage", true);
+  const view = await windows.handlers.get("lend:state")({}, "garage");
+  assert.equal(view.on, true);
+  assert.equal(view.screen === undefined || view.screen !== "permissions", true, "Windows never asks for macOS's permissions");
+  const blocked = mainLending({ screen: async () => screenStatus({ platform: "win32", connection: { status: "unavailable", reason: "spawn cua-driver.exe EACCES" } }) });
+  await blocked.handlers.get("lend:set")({}, "garage", true);
+  assert.notEqual((await blocked.handlers.get("lend:state")({}, "garage")).screen, "permissions");
+});
+
+test("main wires the switch's senders as tested here: this app's own page, or the main frame of the active server's page", async () => {
+  const main = await readFile(new URL("./main.mjs", import.meta.url), "utf8");
+  assert.match(main, /installServerLending\(\{[\s\S]{0,1500}?local: event => cloudPageAsking\(event\) === "local"/);
+  assert.match(main, /page: event => \{ const env = activeEnvironment\(environmentsState\); return env\?\.origin && env\.kind !== "local" && activePageOrigin\(event\) === env\.origin \? env : null; \}/);
+  // activePageOrigin is cloudPageSenderAllowed for the active origin: only the window's main frame, on that origin.
+  const mainFrame = { url: `${GARAGE}/chat` }, contents = { mainFrame };
+  const page = event => (cloudPageSenderAllowed(event, { contents, homeOrigin: GARAGE, activeOrigin: GARAGE }) ? garage : null);
+  assert.equal(page({ sender: contents, senderFrame: mainFrame }), garage);
+  assert.equal(page({ sender: contents, senderFrame: { url: `${GARAGE}/frame` } }), null, "a frame inside the page");
+  assert.equal(page({ sender: contents, senderFrame: Object.assign(mainFrame, { url: "https://evil.example/" }) }), null, "another origin");
+  assert.equal(page({ sender: {}, senderFrame: mainFrame }), null, "another window");
 });

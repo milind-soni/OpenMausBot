@@ -20,7 +20,7 @@ import { ThreadRefText } from "./ThreadRefs";
 import { BugReportNote } from "./BugReportNote";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { MessageBoundary } from "./ChatView";
-import { SIMPLE_BOT_BUBBLE, SIMPLE_BUBBLE_MAX, SIMPLE_BUBBLE_TEXT, SIMPLE_USER_BUBBLE } from "./chat-bubble";
+import { BOT_BUBBLE_FINISH, SIMPLE_BOT_BUBBLE, SIMPLE_BUBBLE_MAX, SIMPLE_BUBBLE_TEXT, SIMPLE_USER_BUBBLE } from "./chat-bubble";
 import { ReplyBlocks } from "./ReplyBlocks";
 import { CopyButton, MESSAGE_ROW, MessageActions, messageActionClass, ReplyAction } from "./MessageActions";
 import { ReactAction, ReactionChips } from "./Reactions";
@@ -159,7 +159,7 @@ export const RoomTextMessage = memo(function RoomTextMessage({
                 ? cn(formattedReplyWidth(m.text ?? ""), "px-1 text-ink")
                 : user
                   ? cn("chat-text whitespace-pre-wrap [overflow-wrap:anywhere] text-ink", simple ? SIMPLE_USER_BUBBLE : "bg-bubble-user px-4 py-2.5")
-                  : simple ? SIMPLE_BOT_BUBBLE : "bg-card px-4 py-2.5 text-ink",
+                  : simple ? SIMPLE_BOT_BUBBLE : cn("bg-card px-4 py-2.5 text-ink", BOT_BUBBLE_FINISH),
           )}
           title={new Date(m.at).toLocaleString(intlLocale())}
         >
@@ -197,7 +197,7 @@ export const RoomTextMessage = memo(function RoomTextMessage({
                 }}
               />}
               {m.via === "api" && (
-                <div className="mt-1 text-[11px] text-ink-secondary">{t("room.viaApi")}</div>
+                <div className="mt-1 text-[12px] leading-4 text-ink-secondary">{t("room.viaApi")}</div>
               )}
               {collapsible && (
                 <button type="button" onClick={() => setExpanded(true)} className="mt-1 text-[13px] text-ink-secondary hover:text-ink">
@@ -233,7 +233,7 @@ export const RoomTextMessage = memo(function RoomTextMessage({
           )}
         </div>
         {!tabled && botActions}
-        <span className="self-end pb-1 text-[11px] tabular-nums text-ink-tertiary opacity-0 transition-opacity group-hover:opacity-100">
+        <span className="self-end pb-1 text-[12px] font-medium leading-4 tabular-nums whitespace-nowrap text-ink-tertiary opacity-0 transition-opacity group-hover:opacity-100">
           {formatTime(m.at)}
         </span>
       </div>

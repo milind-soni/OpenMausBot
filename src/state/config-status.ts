@@ -53,7 +53,8 @@ export interface ConfigStatus {
   composio: SavedKey & { mode?: "managed" | "self-hosted" | "unavailable" };
   /** `included`: cloud computers come with Cloud Pro, no key is saved. */
   box: SavedKey & { included?: boolean };
-  vps: { configured: boolean; sshAlias: string };
+  /** `servers`: named servers for the per-bot picker; empty for client sessions, missing from an older server. */
+  vps: { configured: boolean; sshAlias: string; servers?: { name: string; sshAlias: string; memoryGb?: number; cpus?: number }[]; memoryGb?: number; cpus?: number };
   rooms: { turnTimeoutMinutes: number };
   /** Per-call ceiling (minutes) for a bot's MCP tools. Absent from servers
    * older than the setting; read it with mcpCallTimeoutMinutes(). */
@@ -99,6 +100,10 @@ export interface ConfigStatus {
     model?: string;
     /** Voice note with every reply, for every bot without its own choice. Absent from older servers. */
     everyReply?: boolean;
+    /** "elevenlabs": the person chose to be heard through their own ElevenLabs key (Scribe). Absent: the default. */
+    hearWith?: "elevenlabs";
+    /** The language the person speaks to Scribe (ISO 639 code); absent lets Scribe detect it. */
+    hearLanguage?: string;
     /** Fish Audio speech model; present only while Fish is the provider. */
     fishModel?: "s2.1-pro" | "s2.1-pro-free";
     /** ElevenLabs voice comes with Cloud Pro; no key is saved. */
@@ -164,7 +169,7 @@ export interface ConfigStatus {
   /** What a paired phone calls this computer; "" uses the default. */
   computerName?: string;
   /** Opt-in flags. Absent means off. */
-  features?: { skillAuthoring: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; savedSteps?: boolean; savedStepsHere?: boolean; usbPhoneTakeover?: boolean };
+  features?: { skillAuthoring: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; savedSteps?: boolean; savedStepsHere?: boolean; usbPhoneTakeover?: boolean; skillBurger?: boolean; threadTabs?: boolean };
   /** First-run progress: whether the welcome tour was finished and which
    * one-time hints were dismissed. Server-owned so it follows the workspace. */
   onboarding?: OnboardingStatus;
@@ -206,6 +211,8 @@ export interface BrowserEngineSummary {
   /** The browser the engine starts, e.g. "Google Chrome 153 (installed)", or while Chrome for Testing downloads,
    * "Chrome for Testing 153.0.8010.47 (downloading: 52 of 182 MB)". */
   chrome?: string;
+  /** agent-browser runs Chromium's headless shell, which many sites refuse, only because no Google Chrome is installed here. */
+  noChrome?: true;
   installing?: boolean;
   installError?: string;
   /** Whether a browser profile can use "My Chrome", the person's own running
@@ -217,6 +224,13 @@ export interface BrowserEngineSummary {
   myChromeLendable?: true;
   /** browserEngine.engine: "chrome" when the bots' browsers run on OpenMausBot's own Chrome driver. */
   engine?: "agent-browser" | "chrome";
+  /** The desktop app shows the Chrome engine's browsers as panes the person uses directly (browserEngine.surface "pane"). */
+  pane?: true;
+  /** browserEngine.cloudDisplay is on and this server can run it: the panel shows the browser's window as a remote
+   * desktop (GET /api/bots/:id/browser/desktop), and falls back to the picture view when that closes with 4415. */
+  desktopView?: true;
+  /** The person can import a site's sign-in from their own browsers into a bot's (the desktop app, Chrome engine). */
+  cookieImport?: true;
   /** Self-hosted servers only: whether bots' browsers may open this server's own sites and its local network
    * (browserEngine.egress.localNetwork, off by default). Absent on the desktop and on MausBot Cloud. */
   serverSites?: boolean;

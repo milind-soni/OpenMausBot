@@ -15,10 +15,10 @@ const HELP_PLACES = new Set(["browser", "local", "vm", "cloud"]);
 export function parseComputerHelp(value: unknown): ComputerHelpRef | null {
   const ref = value as Partial<Record<keyof ComputerHelpRef, unknown>> | null;
   if (!ref || typeof ref !== "object") return null;
-  const { botId, threadId, messageId, site, place } = ref;
+  const { botId, threadId, messageId, site, place, instruction } = ref;
   return typeof botId === "string" && typeof threadId === "string" && typeof messageId === "string" &&
     typeof site === "string" && typeof place === "string" && HELP_PLACES.has(place)
-    ? { botId, threadId, messageId, site, place: place as ComputerHelpRef["place"] } : null;
+    ? { botId, threadId, messageId, site, place: place as ComputerHelpRef["place"], ...(typeof instruction === "string" && instruction ? { instruction } : {}) } : null;
 }
 
 export type BrowserControlTransitionFailure =

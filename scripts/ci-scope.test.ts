@@ -76,7 +76,7 @@ describe("vitest matrix", () => {
   it("gives Linux and Windows eight shards each and macOS four, and only Linux every e2e file", () => {
     const { include } = vitestMatrix(["macos-latest", "ubuntu-latest", "windows-latest"]);
     const count = (os: string) => include.filter((entry) => entry.os === os).length;
-    expect([count("ubuntu-latest"), count("windows-latest"), count("macos-latest")]).toEqual([8, 8, 4]);
+    expect([count("ubuntu-latest"), count("windows-latest"), count("macos-latest")]).toEqual([8, 8, 5]);
     expect(include.find((entry) => entry.os === "windows-latest" && entry.shard === 8))
       .toEqual({ os: "windows-latest", part: "shard 8/8", shard: 8, shards: 8, files: "", e2e: "host", node_tests: false, workers: 2 });
     expect(include.filter((entry) => entry.node_tests).map((entry) => [entry.os, entry.shard]))
@@ -198,6 +198,7 @@ describe("CI outputs", () => {
       "electron/cua-watch-restart.test.mjs",
       "electron/cua-windows-isolation.test.mjs",
       "electron/menu.test.mjs",
+      "electron/phone-key-credential.test.mjs",
       "electron/updater.test.mjs",
       "scripts/generate-locale.test.mjs",
       "scripts/testing/bot-tools-ui.e2e.test.ts",
@@ -210,6 +211,7 @@ describe("CI outputs", () => {
       "scripts/testing/team-private-default-ui.e2e.test.ts",
       "scripts/testing/team-side-switch-ui.e2e.test.ts",
       "server/body-thread-guards.e2e.test.ts",
+      "server/check-work-team.e2e.test.ts",
       "server/client-notifications.e2e.test.ts",
       "server/cloud-connections.e2e.test.ts",
       "server/cloud-lending-browser.e2e.test.ts",

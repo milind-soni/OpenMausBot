@@ -1,29 +1,27 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
-import { FileText, FolderOpen, Maximize2, Minimize2, Plus, Server } from "lucide-react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { FolderOpen, Plus, Server } from "lucide-react";
 
 import { appSwitchPatch } from "@/lib/bot-app-access";
-import { cn } from "@/lib/cn";
-import { useModalDialog } from "@/hooks/use-modal-dialog";
 import { skillsLibraryEnabled } from "@/lib/feature-flags";
+import { useFeature } from "@/lib/use-feature";
 import { t } from "@/lib/i18n";
 import { mcpServersForBot, mcpServersOfBot, mcpSwitch, useMcpServers } from "@/lib/mcp-servers";
-import { deleteMemoryDoc, MEMORY_INDEX, saveMemoryDoc, type MemoryDoc } from "@/lib/memory";
+import { fetchMemoryOverview, markMemoryReviewed, MEMORY_INDEX, saveMemoryDoc, saveThreadNotes, type LendingReview } from "@/lib/memory";
 import { openExternalLink } from "@/lib/app-links";
 import type { Routine } from "@/lib/routines";
 import type { SkillImportSummary } from "../../../shared/skill-import";
 import { shortPath } from "@/lib/short-path";
 import { skillImportLines } from "@/lib/skill-import";
-import { useStore, type Bot } from "@/state/store";
+import { ApiError, type Bot } from "@/state/store";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { connectAppFromBot } from "../AppGrantPrompt";
 import { ServiceIcon } from "../ServiceIcon";
 import { RoutineEditor } from "../RoutinesPage";
 import { useWorkingFolder } from "../bot-settings/AccessSection";
 import { useBotEditor } from "../bot-settings/BotEditorContext";
-import { inputCls } from "../bot-settings/field";
-import { ConflictNotice } from "../bot-settings/MemorySection";
 import { OrgSkillsCard } from "../bot-settings/OrgSkillsCard";
+import { SavedWorkflowsCard } from "../skill-burger/SavedWorkflowsCard";
+import { isBurgerSource } from "../../../shared/skill-burger/saved";
 import { SkillReviewDialog, skillSwitchOn, useManagedSkills, type ManagedSkill } from "../bot-settings/SkillsSection";
 import { useBotApps, type BotApp } from "../bot-settings/useBotApps";
 import { useChoosesVisibility, VisibilitySection } from "../bot-settings/VisibilitySection";
@@ -32,12 +30,13 @@ import { RoutineList } from "../routines/RoutineList";
 import { BrowserLogins } from "./browser-logins";
 import { useOpenComputer, WherePage } from "./ComputerTab";
 import { SettingsPage } from "./SettingsPage";
-import { panelMemoryNotes, withMemoryNote, withoutMemoryNote, type PanelMemoryNote } from "./memory-notes";
-import type { SimplePageId } from "./page-registry";
-import { BotSwitch, buttonCls, Card, ColRow, ItemRow, LinkRow, NoteRow, RadioRow, RowIcon, rowCls, RowText, SwitchRow, TextRow, TrashButton } from "./rows";
-import { MemoryUpkeepCards } from "./MemoryUpkeepCards";
-import { useMemoryDoc } from "./use-memory-doc";
+import { MemoryText } from "./MemoryText";
+import { LendingReviewNotice } from "../bot-settings/MemorySection";
 import { useTeamMemoryEntries } from "../conversation-share/conversation-share";
+import type { SimplePageId } from "./page-registry";
+import { BotSwitch, buttonCls, Card, ItemRow, LinkRow, NoteRow, RadioRow, RowIcon, rowCls, RowText, SwitchRow, TextRow, TrashButton } from "./rows";
+import { useMemoryDoc } from "./use-memory-doc";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 type Derived = ReturnType<typeof useBotSettingsDerived>;
 
@@ -55,7 +54,7 @@ function errorText(error: unknown, fallback: string): string {
 }
 
 export function AppsPage({ bot, derived }: PageContext) {
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   const apps = useBotApps(bot);
   const { servers: allServers, error: mcpError } = useMcpServers();
   const { patch, canUseConnectedApps } = derived;
@@ -135,7 +134,7 @@ export function AppsPage({ bot, derived }: PageContext) {
 }
 
 export function RoutinesPage({ bot, derived }: PageContext) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config, routineRuns: s.routineRuns, routinesLoadState: s.routinesLoadState }), sameFields), dispatch = useStoreDispatch();
   // Arriving with no routines means the person asked to add one, so the editor opens straight away.
   const [editing, setEditing] = useState<Routine | "new" | null>(() => derived.botRoutines.length === 0 ? "new" : null);
   return (
@@ -169,257 +168,85 @@ export function RoutinesPage({ bot, derived }: PageContext) {
   );
 }
 
-/** MEMORY.md's bullets, and on a Team Cloud the person's own notes. Every write goes through the memory file route with
- * the hash it was read at, so a note the bot added meanwhile is never lost: a conflict re-reads and asks again. */
+/** The bot's memory as plain text, saved as the person types: this conversation's own notes when it keeps them, and
+ * MEMORY.md, which loads in every conversation. On a Team Cloud the notes are the person's own layer of the bot's
+ * memory, its topic files included, with the lines they saved to the team's memory. */
 export function MemoryPage({ bot }: PageContext) {
   const memory = useMemoryDoc(bot);
-  const teamSaved = useTeamMemoryEntries(bot.id, memory.mine && bot.memoryEnabled !== false && !bot.defaultBot?.person, memory.docs);
-  const [draft, setDraft] = useState("");
-  const [asText, setAsText] = useState<{ botId: string; doc: MemoryDoc } | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const memoryOn = bot.memoryEnabled !== false;
-  const notes = memory.docs ? panelMemoryNotes(memory.docs) : null;
-  const index = memory.docs?.find((doc) => doc.path === MEMORY_INDEX) ?? null;
-  useEffect(() => setAsText(null), [bot.id, memoryOn]);
-
-  const change = async (save: () => Promise<boolean>) => {
-    if (saving) return false;
-    setSaving(true);
-    setError(null);
-    try {
-      return await save();
-    } catch (cause) {
-      setError(errorText(cause, t("botPanel.library.memoryError")));
-      return false;
-    } finally {
-      setSaving(false);
-    }
-  };
-  const write = (doc: MemoryDoc, text: string) => change(async () => {
-    const result = await saveMemoryDoc(bot.id, doc.path, text, doc.exists ? doc.hash : undefined, memory.mine);
-    if (result.ok) {
-      memory.setDoc(result.doc);
-      return true;
-    }
-    await memory.reload();
-    setError(t("memory.conflict.title", { name: bot.name }));
-    return false;
-  });
-  const forget = (note: PanelMemoryNote) => {
-    const doc = memory.docs?.find((candidate) => candidate.path === note.path);
-    if (!doc) return;
-    if (note.line !== null) void write(doc, withoutMemoryNote(doc.text, note.line));
-    else void change(async () => {
-      await deleteMemoryDoc(bot.id, doc.path, memory.mine);
-      await memory.reload();
-      return true;
-    });
-  };
-  const add = async () => {
-    if (!index || !draft.trim()) return;
-    if (await write(index, withMemoryNote(index.text, draft))) setDraft("");
-  };
-
-  if (memoryOn && asText?.botId === bot.id) {
-    return (
-      <MemoryTextEditor
-        bot={bot}
-        doc={asText.doc}
-        mine={memory.mine}
-        onDone={(saved) => {
-          if (saved) memory.setDoc(saved);
-          setAsText(null);
-          setError(null);
-        }}
-      />
-    );
-  }
-
+  const teamSaved = useTeamMemoryEntries(bot.id, memory.mine && memoryOn && !bot.defaultBot?.person, memory.docs);
+  if (!memoryOn) return <Card><NoteRow>{t("botPanel.library.memoryOff", { name: bot.name })}</NoteRow></Card>;
+  if (memory.error) return <Card><NoteRow tone="warn">{t("botPanel.library.memoryError")}</NoteRow></Card>;
+  const index = memory.docs?.find((doc) => doc.path === MEMORY_INDEX);
+  if (!index) return <Card><NoteRow>{t("common.checking")}</NoteRow></Card>;
+  const thread = memory.thread;
+  const topics = memory.mine ? memory.docs!.filter((doc) => doc.path !== MEMORY_INDEX) : [];
   return (
-    <>
-      <Card>
-        {!memoryOn ? (
-          <NoteRow>{t("botPanel.library.memoryOff", { name: bot.name })}</NoteRow>
-        ) : memory.error ? (
-          <NoteRow tone="warn">{t("botPanel.library.memoryError")}</NoteRow>
-        ) : notes === null ? (
-          <NoteRow>{t("common.checking")}</NoteRow>
-        ) : notes.length === 0 && teamSaved.entries.length === 0 ? (
-          <NoteRow>{t("botPanel.memory.empty")}</NoteRow>
-        ) : notes.map((note) => (
-          <div key={`${note.path}:${note.line}:${note.text}`} data-memory-note={note.line ?? note.path} className={rowCls}>
-            <div className="min-w-0 flex-1 text-[13px] leading-[1.45] text-ink">{note.text}</div>
-            <TrashButton label={t("botPanel.memory.forget")} disabled={saving} onClick={() => forget(note)} />
-          </div>
-        ))}
-        {memoryOn && !memory.error && notes !== null && teamSaved.entries.map((entry) => (
-          <div key={entry.id} data-team-memory-entry={entry.id} className={rowCls}>
-            <div className="min-w-0 flex-1 text-[13px] leading-[1.45] text-ink">
-              {entry.text}
-              {entry.yours && <span className="block text-[12px] text-ink-secondary">{t("teamMemorySave.yours")}</span>}
-            </div>
-            <TrashButton label={t("botPanel.memory.forget")} disabled={saving} onClick={() => void change(async () => { await teamSaved.remove(entry.id); return true; })} />
-          </div>
-        ))}
-        {error && <NoteRow tone="warn">{error}</NoteRow>}
-      </Card>
-      {memoryOn && (
+    <div key={`${bot.id}:${bot.threadId}`} data-panel-memory="" className="flex flex-col gap-4 px-1 pt-2">
+      {!memory.mine && <MemoryReviewNotice bot={bot} />}
+      {thread && (thread.scoped || thread.text.trim()) && (
+        <MemoryText attr="thread" label={t("memoryPage.thisThread")} doc={thread} placeholder={t("memoryPage.empty")}
+          save={(text, hash) => saveThreadNotes(bot.id, bot.threadId, text, hash)} />
+      )}
+      <MemoryText attr="everywhere" label={t("memoryPage.everywhere")} doc={index} placeholder={t("memoryPage.empty")}
+        save={(text, hash) => saveMemoryDoc(bot.id, MEMORY_INDEX, text, hash, memory.mine)} />
+      {topics.map((doc) => (
+        <MemoryText key={doc.path} attr={doc.path} label={doc.path.replace(/^memory\//, "").replace(/\.md$/, "")} doc={doc} placeholder={t("memoryPage.empty")}
+          save={(text, hash) => saveMemoryDoc(bot.id, doc.path, text, hash, true)} />
+      ))}
+      {teamSaved.entries.length > 0 && (
         <Card>
-          <TextRow
-            data-panel-form="memory-add"
-            value={draft}
-            placeholder={t("botPanel.memory.addPlaceholder", { name: bot.name })}
-            label={t("botPanel.memory.addPlaceholder", { name: bot.name })}
-            action={t("common.add")}
-            disabled={saving || index === null}
-            onChange={setDraft}
-            onSubmit={() => void add()}
-          />
-          {index && (
-            <LinkRow data-panel-link="memory-text" icon={FileText} onClick={() => setAsText({ botId: bot.id, doc: index })}>
-              {t("botPanel.memory.editText")}
-            </LinkRow>
-          )}
+          {teamSaved.entries.map((entry) => (
+            <div key={entry.id} data-team-memory-entry={entry.id} className={rowCls}>
+              <div className="min-w-0 flex-1 text-[13px] leading-[1.45] text-ink">
+                {entry.text}
+                {entry.yours && <span className="block text-[12px] text-ink-secondary">{t("teamMemorySave.yours")}</span>}
+              </div>
+              <TrashButton label={t("botPanel.memory.forget")} onClick={() => void teamSaved.remove(entry.id)} />
+            </div>
+          ))}
         </Card>
       )}
-      {memoryOn && !memory.mine && <MemoryUpkeepCards bot={bot} onChanged={memory.reload} />}
-    </>
+    </div>
   );
 }
 
-/** The whole MEMORY.md as text, saved against the hash it was opened at, so a note the bot writes meanwhile is a
- * conflict to settle, never silently lost: Reload shows the bot's version and keeps what the person typed beside it. */
-function MemoryTextEditor({ bot, doc, mine, onDone }: {
-  bot: Bot;
-  doc: MemoryDoc;
-  mine: boolean;
-  onDone: (saved: MemoryDoc | null) => void;
-}) {
-  // A file not written yet has the empty file's hash, so the bot creating it meanwhile is a conflict too.
-  const [base, setBase] = useState({ text: doc.text, hash: doc.hash });
-  const [text, setText] = useState(doc.text);
-  const [conflict, setConflict] = useState<{ current: string; currentHash: string } | null>(null);
-  const [savedDraft, setSavedDraft] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // Full window shows the same text over the whole app; going in or out keeps what was typed.
-  const [wide, setWide] = useState(false);
-  const field = useRef<HTMLTextAreaElement>(null);
-  const firstRender = useRef(true);
-  useEffect(() => {
-    if (firstRender.current) firstRender.current = false;
-    else field.current?.focus();
-  }, [wide]);
-  // The file is saved either way; a save that lands after the person moved to another bot must not show in that bot's list.
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => { mounted.current = false; };
-  }, []);
-
-  const save = async (expectedHash: string) => {
-    setSaving(true);
-    setError(null);
+/** On a Cloud lending this computer, a change someone else made to the bot's memory holds lent turns until the owner
+ * has looked: the one review this page keeps. */
+function MemoryReviewNotice({ bot }: { bot: Pick<Bot, "id" | "busy"> }) {
+  const [review, setReview] = useState<{ value: LendingReview; stale: boolean } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => fetchMemoryOverview(bot.id).then((overview) => {
+    setReview((current) => (overview.lendingReview ? { value: overview.lendingReview, stale: current?.stale ?? false } : null));
+  }, () => {}), [bot.id]);
+  useEffect(() => { void load(); }, [load, bot.busy]);
+  if (!review) return null;
+  const reviewed = async () => {
+    setBusy(true);
     try {
-      const result = await saveMemoryDoc(bot.id, doc.path, text, expectedHash, mine);
-      if (!mounted.current) return;
-      if (result.ok) onDone(result.doc);
-      else setConflict({ current: result.current, currentHash: result.currentHash });
-    } catch (cause) {
-      setError(errorText(cause, t("botPanel.library.memoryError")));
+      await markMemoryReviewed(bot.id, review.value.token);
+      setReview(null);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        setReview({ ...review, stale: true });
+        await load();
+      }
     } finally {
-      setSaving(false);
+      setBusy(false);
     }
   };
-  const reload = () => {
-    if (!conflict) return;
-    // A second Reload keeps the first kept draft too.
-    setSavedDraft((kept) => (kept === null || kept === text ? text : `${kept}\n\n${text}`));
-    setBase({ text: conflict.current, hash: conflict.currentHash });
-    setText(conflict.current);
-    setConflict(null);
-  };
-
-  const body = (
-    <>
-        {conflict && <ConflictNotice botName={bot.name} busy={saving} onReload={reload} onOverwrite={() => void save(conflict.currentHash)} />}
-        <textarea
-          ref={field}
-          data-memory-text=""
-          className={cn(inputCls, wide ? "min-h-0 flex-1 resize-none" : "min-h-[280px] resize-y", "font-mono text-[13px] leading-relaxed")}
-          value={text}
-          placeholder={t("memory.indexPlaceholder")}
-          aria-label={t("memory.botMemory")}
-          readOnly={saving}
-          onChange={(event) => setText(event.target.value)}
-        />
-        {error && <div className="text-[13px] text-warning">{error}</div>}
-        {savedDraft !== null && (
-          <div data-memory-draft="">
-            <div className="mb-1 text-[12px] text-ink-secondary">{t("memory.unsavedDraft")}</div>
-            <pre className="max-h-[160px] overflow-auto whitespace-pre-wrap rounded-lg border border-hairline/40 bg-inset p-3 font-mono text-[12px] leading-relaxed text-ink">
-              {savedDraft}
-            </pre>
-            <button type="button" className={cn(buttonCls, "mt-1")} onClick={() => setSavedDraft(null)}>{t("memory.dismissDraft")}</button>
-          </div>
-        )}
-        <div className="flex justify-end gap-2">
-          <button type="button" data-memory-wide="" className={cn(buttonCls, "mr-auto inline-flex items-center gap-1.5")} onClick={() => setWide(!wide)}>
-            {wide ? <Minimize2 size={14} aria-hidden="true" /> : <Maximize2 size={14} aria-hidden="true" />}
-            {t(wide ? "botPanel.memory.exitFullWindow" : "botPanel.memory.fullWindow")}
-          </button>
-          <button type="button" className={buttonCls} disabled={saving} onClick={() => onDone(null)}>{t("common.cancel")}</button>
-          <button
-            type="button"
-            data-panel-done="memory-text"
-            className={buttonCls}
-            disabled={saving || text === base.text}
-            onClick={() => void save(base.hash)}
-          >
-            {saving ? t("memory.saving") : t("memory.save")}
-          </button>
-        </div>
-    </>
-  );
-
-  if (wide) return <MemoryFullWindow label={t("memory.botMemory")} onClose={() => setWide(false)}>{body}</MemoryFullWindow>;
-  return (
-    <Card>
-      <ColRow data-panel-row="memory-text">{body}</ColRow>
-    </Card>
-  );
-}
-
-/** The memory text over the whole app window, so a long MEMORY.md is easy to read and edit; Escape goes back to the panel. */
-function MemoryFullWindow({ label, onClose, children }: { label: string; onClose: () => void; children: ReactNode }) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useModalDialog(dialogRef, onClose);
-  return createPortal(
-    <div
-      ref={dialogRef}
-      tabIndex={-1}
-      role="dialog"
-      aria-modal="true"
-      aria-label={label}
-      data-memory-full-window=""
-      className="fixed inset-0 z-[65] flex flex-col gap-3 bg-app p-4 outline-none"
-    >
-      {children}
-    </div>,
-    document.body,
-  );
+  return <LendingReviewNotice changed={review.value.changed} stale={review.stale} busy={busy} onReviewed={() => void reviewed()} />;
 }
 
 export function SkillsPage({ bot }: PageContext) {
   const { request: api } = useBotEditor();
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const skills = useManagedSkills(bot);
   const [source, setSource] = useState("");
   const [importing, setImporting] = useState(false);
   const [imported, setImported] = useState<string[]>([]);
-  const libraryOn = skillsLibraryEnabled(state.config);
-  const own = skills.skills.filter((skill) => skill.origin !== "project");
+  const libraryOn = skillsLibraryEnabled(state.config), skillBurger = useFeature("skillBurger");
+  const own = skills.skills.filter((skill) => skill.origin !== "project" && !isBurgerSource(skill.source));
   const project = skills.skills.filter((skill) => skill.origin === "project");
 
   const remove = async (skill: ManagedSkill) => {
@@ -464,6 +291,7 @@ export function SkillsPage({ bot }: PageContext) {
 
   return (
     <>
+      {skillBurger && <SavedWorkflowsCard botId={bot.id} threadId={bot.threadId} />}
       <Card>
         {skills.loading ? (
           <NoteRow>{t("skills.loading")}</NoteRow>

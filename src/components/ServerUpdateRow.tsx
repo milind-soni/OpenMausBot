@@ -5,10 +5,11 @@ import { openExternalLink } from "@/lib/app-links";
 import { t } from "@/lib/i18n";
 import { serverUpdateConfirmBody, serverUpdateView, type ServerUpdateCheck, type ServerUpdateStatus, type ServerUpdateView } from "@/lib/server-update";
 import { ApiError } from "@/state/api";
-import { api, useStore } from "@/state/store";
+import { api } from "@/state/store";
 import type { AppUpdateAnswer } from "@/types/ogb";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { SettingRow } from "./SettingsPrimitives";
+import { sameFields, useStoreSelector } from "@/state/store-select";
 
 const STATUS = "/api/updates/server";
 const POLL_MS = 4_000;
@@ -24,7 +25,7 @@ const settled = (status: ServerUpdateStatus | null) => status?.run?.outcome !== 
 /** The check every session may read, the admin's button state, and the press. While the server restarts the page's
  * connection drops; the store's own reconnect brings it back (`state.connected`), and only then is the server asked again. */
 export function useServerUpdate() {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ connected: s.connected }), sameFields);
   const connected = state.connected !== false;
   const [check, setCheck] = useState<ServerUpdateCheck | null>(null);
   const [status, setStatus] = useState<ServerUpdateStatus | null>(null);
@@ -40,11 +41,12 @@ export function useServerUpdate() {
     return next;
   }, []);
 
-  const load = useCallback(async () => {
+  /** `fresh`: the Check for updates button, which must not get the server's answer from up to an hour ago. */
+  const load = useCallback(async (fresh = false) => {
     setChecking(true);
     setFailed(false);
     try {
-      const next = await api<ServerUpdateCheck>("/api/updates/check", { timeoutMs: 20_000 });
+      const next = await api<ServerUpdateCheck>(fresh ? "/api/updates/check?fresh=1" : "/api/updates/check", { timeoutMs: 20_000 });
       setCheck(next);
       if (next.install !== "desktop" && next.install !== "managed") await readStatus().catch(() => null);
     } catch {
@@ -128,7 +130,7 @@ export function ServerUpdateRow({ title }: { title: string }) {
   const [confirming, setConfirming] = useState(false);
   const { view, check, status } = update;
   const press = () => {
-    if (view.action === "check") return void update.load();
+    if (view.action === "check") return void update.load(true);
     if (view.action === "reload") return window.location.reload();
     if (view.action === "update-app") return void update.updateApp();
     if (view.action === "update-server") {

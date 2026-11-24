@@ -49,6 +49,7 @@ let assignmentStatusCode = 200;
 let lastThreadBody: any = null;
 let threadCalls = 0;
 let threadsList: unknown = { threads: [] };
+let closeReply: unknown = {};
 let lastThreadsUrl = "";
 let threadResponse: unknown = { threadId: "thread-new", title: "QA: PR #1", botId: "bot-asker", botName: "Asker", self: true, state: "running", limit: 3 };
 let computerRequests: { method: string; url: string; body: unknown }[] = [];
@@ -273,6 +274,11 @@ beforeAll(async () => {
       lastThreadsUrl = req.url;
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(threadsList));
+      return;
+    }
+    if (req.method === "POST" && /^\/api\/internal\/threads\/[\w-]+\/close$/.test(req.url ?? "")) {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(closeReply));
       return;
     }
     if (req.method === "POST" && req.url === "/api/internal/threads") {
@@ -648,6 +654,8 @@ describe("agents-proxy MCP surface", () => {
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -670,6 +678,7 @@ describe("agents-proxy MCP surface", () => {
       "fill_login",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -775,7 +784,7 @@ describe("agents-proxy MCP surface", () => {
       "list_shared_computers",
       "assignment_status", "list_bots", "usage_limits", "list_rooms", "list_threads",
       "list_models", "list_team_setup",
-      "session_search", "trigger_info", "list_waits", "skills_list",
+      "what_changed", "session_search", "trigger_info", "list_waits", "skills_list",
     ];
     expect(list.result.tools.filter((tool: any) => tool.annotations?.readOnlyHint)
       .map((tool: any) => tool.name)).toEqual(readNames);
@@ -1275,17 +1284,19 @@ describe("agents-proxy MCP surface", () => {
     expect(JSON.stringify(tool.inputSchema)).not.toMatch(/"(oneOf|anyOf|allOf|const|format)":/);
   });
 
-  it("assignment_status relays the harness's refusal to read an assignment handed out this turn", async () => {
+  it("assignment_status passes on an assignment sent this turn, and keeps a real failure a failure", async () => {
     // Which turn made it is the harness's to know: a warm proxy serves many.
     assignmentStatusCode = 409;
-    assignmentStatusResponse = { error: "Assignment asg-abc123 was handed out during this turn. Finish your response now so the teammate can work; its result returns to this conversation and resumes you. Do not check or wait for it until a later turn." };
+    assignmentStatusResponse = { error: "Assignment asg-abc123 was handed out during this turn. Finish your response now so the teammate can work; its result returns to this conversation and resumes you. Do not check or wait for it until a later turn.", sentThisTurn: true };
     try {
       lastAssignmentStatusUrl = null;
       const status = await callTool("assignment_status", { id: "asg-abc123", wait_ms: 240_000 });
-      expect(status.result.isError).toBe(true);
+      expect(status.result.isError).toBeFalsy();
       expect(status.result.content[0].text).toContain("handed out during this turn");
       expect(status.result.content[0].text).toContain("Finish your response now");
       expect(lastAssignmentStatusUrl).toBe("/api/internal/assignment-status?id=asg-abc123&wait_ms=240000");
+      assignmentStatusResponse = { error: "Assignment asg-abc123 was handed out during this turn. Finish your response now so the teammate can work; its result returns to this conversation and resumes you. Do not check or wait for it until a later turn." };
+      expect((await callTool("assignment_status", { id: "asg-abc123" })).result.isError).toBe(true);
     } finally {
       assignmentStatusCode = 200;
       assignmentStatusResponse = DONE_ASSIGNMENT;
@@ -1340,6 +1351,29 @@ describe("agents-proxy MCP surface", () => {
       expect((await callTool("list_threads", {})).result.content[0].text).toContain(`#Export CSV (on @Ops, queued: ${waiting}) [thread id: t-q] [delegation id: asg-q]`);
     } finally {
       assignmentStatusResponse = DONE_ASSIGNMENT;
+      threadsList = { threads: [] };
+    }
+  });
+
+  it("close_thread and list_threads say whether a thread is archived, and a repeat close says it was already closed", async () => {
+    try {
+      closeReply = { closed: true, threadId: "t-1", title: "Export CSV", botName: "Ops", archived: false };
+      expect((await callTool("close_thread", { thread_id: "t-1" })).result.content[0].text)
+        .toBe("Closed #Export CSV on @Ops. It stays in the person's sidebar, idle, with a note that you closed it.");
+      closeReply = { closed: true, threadId: "t-1", title: "Export CSV", botName: "Ops", archived: true };
+      expect((await callTool("close_thread", { thread_id: "t-1" })).result.content[0].text)
+        .toBe("Closed #Export CSV on @Ops. It was archived already, so it stays out of the person's sidebar, with a note that you closed it.");
+      closeReply = { closed: true, alreadyClosed: true, threadId: "t-1", title: "Export CSV", botName: "Ops", closedBy: "Clive", archived: true };
+      expect((await callTool("close_thread", { thread_id: "t-1" })).result.content[0].text)
+        .toBe("#Export CSV on @Ops was already closed by @Clive, so nothing changed. It is archived: it is no longer in the person's sidebar.");
+      closeReply = { closed: true, alreadyClosed: true, threadId: "t-1", title: "Export CSV", botName: "Ops", closedBy: "Clive", archived: false };
+      expect((await callTool("close_thread", { thread_id: "t-1" })).result.content[0].text)
+        .toBe("#Export CSV on @Ops was already closed by @Clive, so nothing changed. It stays in the person's sidebar, idle.");
+      threadsList = { threads: [{ threadId: "t-1", botId: "bot-ops", botName: "Ops", title: "Export CSV", state: "closed", archived: true, own: false, unread: false, openedAt: 1 }] };
+      expect((await callTool("list_threads", {})).result.content[0].text)
+        .toBe("Threads, newest first:\n- #Export CSV (on @Ops, closed, archived: no longer in the person's sidebar) [thread id: t-1]");
+    } finally {
+      closeReply = {};
       threadsList = { threads: [] };
     }
   });
@@ -1570,7 +1604,7 @@ describe("agents-proxy MCP surface", () => {
 
   it("session_search lists memory-file hits by file, ahead of conversation hits, and forwards the scope", async () => {
     const list = await rpc("tools/list");
-    expect(list.result.tools.find((t: { name: string }) => t.name === "session_search").inputSchema.properties.scope.enum).toEqual(["all", "conversations", "memory", "team"]);
+    expect(list.result.tools.find((t: { name: string }) => t.name === "session_search").inputSchema.properties.scope.enum).toEqual(["all", "conversations", "memory", "team", "threads"]);
     sessionSearchResponse = {
       hits: [{ threadId: "thread-old", messageId: "m-audit", at: Date.UTC(2026, 8, 1), role: "bot", snippet: "the [audit] found three [broken] [links]", task: "Site audit", current: false }],
       memoryHits: [

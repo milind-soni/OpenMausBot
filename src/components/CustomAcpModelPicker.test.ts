@@ -15,6 +15,7 @@ const fixture = vi.hoisted(() => {
   return { instances: [] as InstanceInfo[], modelVariantSessions: {} as AppState["modelVariantSessions"], dispatch: vi.fn(),
     values: [] as unknown[], index: 0, own: 0, advanced: false };
 });
+vi.mock("@/state/store-select", async (importOriginal) => (await import("@/testing/plain-store-select")).plainStoreSelect(await importOriginal()));
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
   useState: (initial: unknown) => {

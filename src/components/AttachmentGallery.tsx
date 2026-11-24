@@ -19,9 +19,12 @@ import {
   type PreviewImage,
 } from "./AttachmentPreview";
 import { useRevealOriginalMenu } from "./RevealOriginalMenu";
+import { WhatChangedButton } from "./WhatChangedButton";
+import { useEditSources } from "@/lib/use-edit-sources";
 
 export interface GalleryFile extends TranscriptFileAttachment {
   linked?: boolean;
+  shownPath?: string;
 }
 
 type MarkdownNode = {
@@ -51,16 +54,20 @@ export function collectMessageFiles(text: string, existingPaths: readonly string
     }
     if (node.children) pending.push(...[...node.children].reverse());
   }
+  return linkedFiles(links.map((node) => node.url ?? (node.identifier ? definitions.get(node.identifier) : undefined)), existingPaths);
+}
+
+/** The local files among link targets, as their chips show them, once each; never one of `existingPaths`. */
+export function linkedFiles(hrefs: ReadonlyArray<string | undefined>, existingPaths: readonly string[] = []): GalleryFile[] {
   const seen = new Set(existingPaths.map(fileIdentity));
-  return links.flatMap((node) => {
-    const href = node.url ?? (node.identifier ? definitions.get(node.identifier) : undefined);
+  return hrefs.flatMap((href) => {
     const path = localFilePath(href);
     if (!path || !href) return [];
     const identity = fileIdentity(href);
     if (seen.has(identity)) return [];
     seen.add(identity);
     // Security: send the authored spelling; the server owns the one decode at its authorization boundary.
-    return [{ path: href, name: safeDownloadFilename(attachmentBasename(identity)), linked: true }];
+    return [{ path: href, shownPath: identity, name: safeDownloadFilename(attachmentBasename(identity)), linked: true }];
   });
 }
 
@@ -472,11 +479,13 @@ export function AttachmentGallery({ images = [], files = [], originals, message,
       if (seen.has(key)) continue;
       seen.add(key);
       const trusted = Boolean(message && (file.private || file.linked));
-      result.push({ key, source: originalOf(originals, file.path), kind: trusted && isVideoAttachment(file.path) ? "video" : trusted && isAudioAttachment(file.path) ? "audio" : "file", file });
+      const source = originalOf(originals, file.path) ?? (message && file.linked ? key : undefined);
+      result.push({ key, source, kind: trusted && isVideoAttachment(file.path) ? "video" : trusted && isAudioAttachment(file.path) ? "audio" : "file", file });
     }
     return result;
   }, [images, files, originals, message]);
   const reveal = useRevealOriginalMenu();
+  const edits = useEditSources(message, files);
   if (!items.length) return null;
   const limit = beneath ? BENEATH_LIMIT : 4;
   const shown = expanded ? items : items.slice(0, limit);
@@ -514,7 +523,7 @@ export function AttachmentGallery({ images = [], files = [], originals, message,
           <div className="flex max-w-full flex-wrap items-start gap-1.5">
             {rest.map((item) => item.kind === "audio" && message
               ? <span key={`${message.threadId}:${message.messageId}:${item.key}`} className="contents" {...reveal.targetProps(item.source)}><AudioAttachment file={item.file} message={message} /></span>
-              : item.kind === "file" && <span key={item.key} className="contents" {...reveal.targetProps(item.source)}><AttachedFileChip file={item.file} linked={item.file.linked} message={message} compact /></span>)}
+              : item.kind === "file" && <span key={item.key} className="contents" {...reveal.targetProps(item.source)}><AttachedFileChip file={item.file} linked={item.file.linked} message={message} compact />{message && edits.has(item.file.path) && <WhatChangedButton path={item.file.path} name={item.file.name} message={message} source={edits.get(item.file.path)!} compact />}</span>)}
             {items.length > limit && (
               <button type="button" onClick={() => setExpanded(!expanded)} aria-expanded={expanded} className="inline-flex h-7 items-center rounded-full px-2.5 text-[13px] leading-none text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
                 {expanded ? t("attach.showLess") : t("attach.moreCount", { count: items.length - limit })}
@@ -544,7 +553,7 @@ export function AttachmentGallery({ images = [], files = [], originals, message,
         <div className="flex flex-col items-start gap-1.5">
           {documents.map((item) => item.kind === "audio" && message
             ? <span key={`${message.threadId}:${message.messageId}:${item.key}`} className="contents" {...reveal.targetProps(item.source)}><AudioAttachment file={item.file} message={message} /></span>
-            : item.kind === "file" && <span key={item.key} className="contents" {...reveal.targetProps(item.source)}><AttachedFileChip file={item.file} linked={item.file.linked} message={message} className="max-w-none rounded-xl border-hairline/25 bg-transparent" /></span>)}
+            : item.kind === "file" && <span key={item.key} className={message && edits.has(item.file.path) ? "flex max-w-full items-center gap-1" : "contents"} {...reveal.targetProps(item.source)}><AttachedFileChip file={item.file} linked={item.file.linked} message={message} className="max-w-none rounded-xl border-hairline/25 bg-transparent" />{message && edits.has(item.file.path) && <WhatChangedButton path={item.file.path} name={item.file.name} message={message} source={edits.get(item.file.path)!} />}</span>)}
         </div>
       )}
       {items.length > limit && (
