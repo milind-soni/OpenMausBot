@@ -61,15 +61,11 @@ function viewingHandoff(previous: Bot, incoming: Bot): boolean {
   return Boolean(task?.openedBy?.botId) && (incoming.tasks ?? []).some(candidate => candidate.threadId === previous.threadId);
 }
 
-function reconcileTranscript(previous: Message[], incoming: Message[]): Message[] {
-  const incomingById = new Map(incoming.map(message => [message.id, message]));
-  const seen = new Set<string>();
-  const merged = previous.map(message => {
-    seen.add(message.id);
-    return incomingById.get(message.id) ?? message;
-  });
-  for (const message of incoming) if (!seen.has(message.id)) merged.push(message);
-  return merged;
+/** The snapshot is the server's copy of the hand-off from its first row on, so a send it confirmed or a row it no longer
+ * has does not linger; only the rows loaded before that first row stay. Without an overlap the snapshot wins. */
+function reconcileTranscript(previous: Message[], incoming: Message[]): { messages: Message[]; earlier: boolean } {
+  const start = incoming[0] ? previous.findIndex(message => message.id === incoming[0]!.id) : -1;
+  return start > 0 ? { messages: [...previous.slice(0, start), ...incoming], earlier: true } : { messages: incoming, earlier: false };
 }
 
 export function keepBotNavigation(previous: Bot | undefined, incoming: Bot, preserve: boolean, taskIdsAtStart?: ReadonlySet<string>): Bot {
@@ -78,14 +74,15 @@ export function keepBotNavigation(previous: Bot | undefined, incoming: Bot, pres
   const keepHandoff = previous !== undefined && !preserve && viewingHandoff(previous, incoming);
   if ((!preserve && !keepHandoff) || !previous) return incoming;
   const sameOpenHandoff = keepHandoff && incoming.threadId === previous.threadId;
+  const reconciled = sameOpenHandoff ? reconcileTranscript(previous.messages, incoming.messages) : null;
   return {
     ...incoming,
     threadId: previous.threadId,
     tasks: keepNewTasks(previous.tasks, incoming.tasks, taskIdsAtStart),
     switchingTo: previous.switchingTo,
     awaitingThreadSnapshot: previous.awaitingThreadSnapshot,
-    messages: sameOpenHandoff ? reconcileTranscript(previous.messages, incoming.messages) : previous.messages,
-    hasMore: sameOpenHandoff ? Boolean(previous.hasMore || incoming.hasMore) : previous.hasMore,
+    messages: reconciled ? reconciled.messages : previous.messages,
+    hasMore: reconciled ? (reconciled.earlier ? previous.hasMore : incoming.hasMore) : previous.hasMore,
     activeLeafId: sameOpenHandoff ? (incoming.activeLeafId === undefined ? previous.activeLeafId : incoming.activeLeafId) : previous.activeLeafId,
     pinnedMessageId: previous.pinnedMessageId,
   };

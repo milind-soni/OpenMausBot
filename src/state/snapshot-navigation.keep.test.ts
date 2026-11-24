@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Bot, Message } from "./store";
 import { keepBotNavigation } from "./snapshot-navigation";
+import { optimisticMessageId } from "./optimistic-send";
 
 const line = (id: string): Message => ({ id, at: 1, role: "user", kind: "text", text: id, parentId: null });
 
@@ -75,5 +76,28 @@ describe("a reconnect snapshot must not replace a hand-off the person is reading
     const incoming = fixture("main");
     incoming.tasks = [{ threadId: "main", title: "Main", createdAt: 1 }];
     expect(keepBotNavigation(fixture("work", true), incoming, false).threadId).toBe("main");
+  });
+
+  it("lets the same hand-off's snapshot replace a confirmed send and drop a row the server no longer has", () => {
+    const previous = fixture("work", true);
+    previous.messages = [line("older"), line("work"), line("gone"), { ...line(optimisticMessageId("s1")), sendId: "s1" }];
+    previous.hasMore = true;
+    const incoming = fixture("work", true);
+    incoming.messages = [line("work"), { ...line("sent"), sendId: "s1" }];
+    incoming.hasMore = true;
+    const kept = keepBotNavigation(previous, incoming, false);
+    expect(kept.messages.map(message => message.id)).toEqual(["older", "work", "sent"]);
+    expect(kept.hasMore).toBe(true);
+  });
+
+  it("takes the same hand-off's snapshot whole when it shares no row with what is on screen", () => {
+    const previous = fixture("work", true);
+    previous.messages = [line("a"), line("b")];
+    const incoming = fixture("work", true);
+    incoming.messages = [line("c"), line("d")];
+    incoming.hasMore = true;
+    const kept = keepBotNavigation(previous, incoming, false);
+    expect(kept.messages.map(message => message.id)).toEqual(["c", "d"]);
+    expect(kept.hasMore).toBe(true);
   });
 });
