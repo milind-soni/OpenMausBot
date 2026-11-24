@@ -15,7 +15,9 @@ describe("the program file a CLI runs", () => {
     scratch.push(bin);
     const exe = process.platform === "win32" ? ".exe" : "";
     writeFileSync(join(bin, `opencode${exe}`), "");
-    expect(cliProgramFile("opencode", ["", join(bin, "missing"), bin].join(delimiter))).toBe(join(bin, `opencode${exe}`));
+    // Windows finds it by PATHEXT, whose case (".EXE") it keeps; file names there are not case-sensitive.
+    const found = cliProgramFile("opencode", ["", join(bin, "missing"), bin].join(delimiter));
+    expect(process.platform === "win32" ? found?.toLowerCase() : found).toBe(process.platform === "win32" ? join(bin, "opencode.exe").toLowerCase() : join(bin, "opencode"));
     expect(cliProgramFile(`"${join(bin, `opencode${exe}`)}" acp`, "")).toBe(join(bin, `opencode${exe}`));
     expect(cliProgramFile("codex", bin)).toBeNull();
     expect(cliProgramFile(bin, "")).toBeNull(); // a folder
