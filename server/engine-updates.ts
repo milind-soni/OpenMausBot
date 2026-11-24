@@ -33,8 +33,9 @@ const SWITCH_POLL_MS = 15_000;
 /** A runtime the app manages itself (Antigravity): it installs each version beside the others and checks it. */
 export interface ManagedRuntime {
   /** The version installed when a newer one is to be installed, else null; with the release channel that version came
-   * from when the runtime has more than one. `skip` names the channels this pass already tried. */
-  older(skip?: readonly string[]): Promise<string | { version: string; channel: string } | null>;
+   * from when the runtime has more than one. `skip` names the channels this pass already tried. `first`: nothing is
+   * installed yet and this is the first install, which is not shown as an update. */
+  older(skip?: readonly string[]): Promise<string | { version: string; channel: string; first?: true } | null>;
   /** Installs from `channel` (the one `older` named). Resolves with the version of the runtime it installed when that
    * is not the pinned one. */
   install(channel?: string): Promise<string | void>;
@@ -135,7 +136,7 @@ type Outcome =
   | { kind: "updated"; from: string; to: string; moves?: Move[]; busyAfter?: true }
   | { kind: "failed"; from: string; to: string; reason: string; moves?: Move[]; busyAfter?: true };
 
-type Move = { from: string; to: string };
+type Move = { from: string; to: string; first?: true };
 
 export interface EngineUpdater {
   /** One pass over every engine now; resolves when it has finished. */
@@ -321,9 +322,9 @@ export function createEngineUpdater(options: EngineUpdaterOptions): EngineUpdate
         busyAfter = true;
         break;
       }
-      const { version: older, channel } = typeof found === "string" ? { version: found, channel: undefined } : found;
+      const { version: older, channel, first } = typeof found === "string" ? { version: found, channel: undefined, first: undefined } : found;
       const outcome = await installManaged(plan, managed, older, channel);
-      if (outcome.kind === "updated") moves.push({ from: outcome.from, to: outcome.to });
+      if (outcome.kind === "updated") moves.push({ from: outcome.from, to: outcome.to, ...(first ? { first } : {}) });
       else if (outcome.kind === "failed") failed ??= outcome;
       if (channel === undefined || tried.includes(channel)) break;
       tried.push(channel);
@@ -361,8 +362,9 @@ export function createEngineUpdater(options: EngineUpdaterOptions): EngineUpdate
       }
       if (outcome.kind === "busy" || outcome.kind === "waiting" || ("busyAfter" in outcome && outcome.busyAfter)) waiting = true;
       const moves = outcome.kind === "updated" ? outcome.moves ?? [{ from: outcome.from, to: outcome.to }] : outcome.kind === "failed" ? outcome.moves ?? [] : [];
-      for (const move of moves) log(`Engine update: ${plan.name} ${move.from} → ${move.to}`);
-      const moved = moves.length ? { updatedTo: moves.at(-1)!.to, updatedVersions: moves.map((move) => move.to), updatedAt: now() } : {};
+      for (const move of moves) log(move.first ? `Engine update: ${plan.name} ${move.to} installed` : `Engine update: ${plan.name} ${move.from} → ${move.to}`);
+      const shownMoves = moves.filter((move) => !move.first);
+      const moved = shownMoves.length ? { updatedTo: shownMoves.at(-1)!.to, updatedVersions: shownMoves.map((move) => move.to), updatedAt: now() } : {};
       if (moves.length) changed = true;
       if (outcome.kind === "updated") {
         state.engines[plan.driverKind] = moved;

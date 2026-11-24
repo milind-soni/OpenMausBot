@@ -5,8 +5,8 @@
 //   - apps/server/src/provider/AntigravityInstallation.ts:57, 311-345, 922-966,
 //     985-999 (a CLI needs no harness sibling, the hourly look at the channel,
 //     and keeping an installed CLI that is newer than the channel's).
-// Each account's CLI path chooses its runtime (Settings, Runs on): `antigravity` the native CLI, `agy_acp_server` the
-// pinned runtime. With neither, a computer that has the pinned runtime keeps it and a new install takes the CLI, with the
+// Each account's CLI path chooses its runtime: `antigravity` the native CLI (what Switch to Google Antigravity CLI in
+// Settings saves, one way), `agy_acp_server` the pinned runtime (kept for configurations that already name it). With neither, a computer that has the pinned runtime keeps it and a new install takes the CLI, with the
 // pinned runtime as the fallback where the channel has no build or cannot be reached; OMB_ANTIGRAVITY_NATIVE_CLI=1 gives
 // such an account the CLI even where the pinned runtime is installed. Nothing removes the pinned runtime. A saved `agy`
 // path is never started.
@@ -187,7 +187,7 @@ function pathCandidates(binary: string, env: NodeJS.ProcessEnv): string[] {
 
 const cliVersions = new Map<string, { stamp: string; version: string | null }>();
 
-const CLI_NOT_INSTALLED = "The Google Antigravity CLI is not installed yet. Install it here, or choose Classic runtime under Runs on.";
+const CLI_NOT_INSTALLED = "The Google Antigravity CLI is not installed yet. Install it here.";
 
 /** Security: a program a path names never gets the server's, the workspace's or a provider's credentials. */
 function versionProbeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -261,7 +261,7 @@ export async function antigravityPathRunsNativeCli(cli: string | undefined, env:
 
 /** Written when the native CLI is installed on a computer with no pinned runtime: this computer's accounts that name no
  * runtime run the CLI from then on, even after an account set to the Classic runtime installs that one beside it. A
- * computer that had the pinned runtime first never gets it, so its accounts keep the pinned runtime until each chooses. */
+ * computer that had the pinned runtime first never gets it, so its accounts keep the pinned runtime until each switches. */
 const CLI_FIRST_MARKER = "cli-first.json";
 
 async function cliCameFirst(root: string): Promise<boolean> {
@@ -503,14 +503,41 @@ async function installOnce(options: AntigravityInstallOptions): Promise<Antigrav
   }
 }
 
+/** One install per channel at a time. The two that can download the CLI go one after the other, so the card's install
+ * asked during the updater's (or the other way round) finds that release in place instead of downloading it again. */
 export function installAntigravityRuntime(options: AntigravityInstallOptions = {}): Promise<AntigravityRuntime> {
   const channel = options.asset !== undefined ? "pinned" : options.native ? "native" : options.nativeByDefault === false ? "pinned-only" : "default";
-  const key = `${runtimeRoot(options.baseDir)}\0${channel}`;
+  const root = `${runtimeRoot(options.baseDir)}\0`;
+  const key = `${root}${channel}`;
   const existing = installs.get(key);
   if (existing) return existing;
-  const running = installOnce(options).finally(() => installs.delete(key));
+  const takesCli = (name: string) => name === "native" || name === "default";
+  const before = takesCli(channel)
+    ? [...installs].filter(([other]) => other.startsWith(root) && takesCli(other.slice(root.length))).map(([, install]) => install.catch(() => {}))
+    : [];
+  const running = Promise.all(before).then(() => installOnce(options)).finally(() => installs.delete(key));
   installs.set(key, running);
   return running;
+}
+
+/** An install of any channel is running on this computer now. */
+export function antigravityInstallRunning(baseDir?: string): boolean {
+  const root = `${runtimeRoot(baseDir)}\0`;
+  return [...installs.keys()].some((key) => key.startsWith(root));
+}
+
+/** No Antigravity runtime here at all: no CLI or pinned release this app installed (of any version), and no pinned
+ * runtime on PATH. Starts no program. */
+export async function antigravityNothingInstalled(baseDir = DATA_DIR, env: NodeJS.ProcessEnv = process.env): Promise<boolean> {
+  const root = runtimeRoot(baseDir);
+  if (await activeAntigravityCli(root)) return false;
+  const pinned = resolveAntigravityReleaseAsset();
+  if (pinned && (await completedRelease(join(root, "versions", pinned.sha256), pinned))) return false;
+  if ((await antigravityOlderRuntime(baseDir, pinned)) !== null) return false;
+  for (const candidate of pathCandidates(executableNames().executable, env)) {
+    if (await externalRuntime(candidate, "path")) return false;
+  }
+  return true;
 }
 
 let channelAnswer: { at: number; version: string } | undefined;
@@ -533,7 +560,7 @@ export async function antigravityCliUpdate(options: {
   const active = await activeAntigravityCli(root);
   const pinned = options.asset === undefined ? resolveAntigravityReleaseAsset() : options.asset;
   const pinnedHere = pinned ? (await completedRelease(join(root, "versions", pinned.sha256), pinned)) !== null : false;
-  // The move from the pinned runtime is offered only with the switch on; an account chooses it itself under Runs on.
+  // The updater moves from the pinned runtime only with the switch on; otherwise an account switches itself in Settings.
   const from = active?.version
     ?? (ANTIGRAVITY_CLI_FIRST ? (pinnedHere ? pinned!.version : await antigravityOlderRuntime(options.baseDir, pinned)) : null);
   if (!from) return null;
