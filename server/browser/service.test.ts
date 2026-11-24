@@ -1,9 +1,10 @@
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 import { removeTempDir } from "../testing/cleanup.ts";
+import { profileDir } from "./chrome/profile.ts";
 import { forbiddenCommand } from "./cdp/testing/real-chrome.ts";
 import { BROWSER_CONTROL_REFUSAL } from "./control.ts";
 import { REDDIT_REFUSAL } from "./egress/reddit.ts";
@@ -697,7 +698,79 @@ describe("browsers on one computer", () => {
     const replacement = service.profile(target);
     await service.running(replacement);
     await Promise.all([closing, ...erases]);
-    const { existsSync } = await import("node:fs");
     expect(existsSync(replacement.downloadDir)).toBe(true);
+  });
+
+  it("remounts the persistent cookie jar (including session cookies) across idle close and relaunch, and drops it on temporary or erased profiles", async () => {
+    const { service, backend, call } = setup();
+    await call("agent_browser_open", { url: "https://facebook.com" });
+    backend.chromes[0]!.cookies.push(
+      { name: "c_user", value: "1001", domain: ".facebook.com", path: "/", secure: true, httpOnly: true, sameSite: "None", expires: Math.floor(Date.now() / 1000) + 3_600 },
+      { name: "xs", value: "session-secret", domain: ".facebook.com", path: "/", secure: true, httpOnly: true, sameSite: "None", expires: -1 },
+      { name: "stale", value: "old", domain: ".facebook.com", path: "/", secure: true, httpOnly: false, expires: 100 },
+    );
+    await sleep(25);
+    expect(await service.closeIdle(10)).toEqual(["bot:a"]);
+
+    await call("agent_browser_get_url");
+    expect(backend.chromes).toHaveLength(2);
+    expect(backend.chromes[1]!.cookies).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "c_user", value: "1001", domain: ".facebook.com" }),
+      expect.objectContaining({ name: "xs", value: "session-secret", domain: ".facebook.com" }),
+    ]));
+    expect(backend.chromes[1]!.cookies.some((c) => c.name === "stale")).toBe(false);
+
+    await service.erase("bot:a");
+    await call("agent_browser_open", { url: "https://facebook.com" });
+    expect(backend.chromes[2]!.cookies).toEqual([]);
+
+    const tempTarget = { session: "guest-1", key: "temp:guest-1" };
+    await call("agent_browser_open", { url: "https://example.com" }, tempTarget);
+    backend.chromes[3]!.cookies.push({ name: "tmp", value: "1", domain: ".example.com", path: "/", expires: -1 });
+    await sleep(25);
+    expect(await service.closeIdle(10)).toEqual(["bot:a", "temp:guest-1"]);
+    await call("agent_browser_get_url", {}, tempTarget);
+    expect(backend.chromes[4]!.cookies).toEqual([]);
+  });
+
+  it("keeps running browsers open when idle timeout is 0 and never recreates cookies when erase races a live snapshot", async () => {
+    const { service, backend, call, dataDir } = setup({ idleMs: () => 0 });
+    await call("agent_browser_open", { url: "https://facebook.com" });
+    await sleep(25);
+    expect(await service.closeIdle()).toEqual([]);
+    expect(await service.closeIdle(0)).toEqual([]);
+    expect(backend.chromes).toHaveLength(1);
+
+    const profile = service.profile({ session: "bot-a", key: "bot:a" });
+    const root = profile.run!.browser.connection.root;
+    const origSend = root.send.bind(root);
+    let signalGetCookies!: () => void;
+    const getCookiesStarted = new Promise<void>((resolve) => { signalGetCookies = resolve; });
+    let allowGetCookiesReturn!: () => void;
+    const getCookiesCanReturn = new Promise<void>((resolve) => { allowGetCookiesReturn = resolve; });
+    root.send = (async (method: string, params: Record<string, unknown>, opts?: { timeoutMs?: number }) => {
+      const result = await origSend(method, params, opts);
+      if (method === "Storage.getCookies") {
+        signalGetCookies();
+        await getCookiesCanReturn;
+      }
+      return result;
+    }) as typeof root.send;
+
+    backend.chromes[0]!.cookies.push({ name: "xs", value: "session-secret", domain: ".facebook.com", path: "/", secure: true, expires: -1 });
+    const baseNow = Date.now();
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(baseNow + 35_000);
+    try {
+      const pendingCall = call("agent_browser_open", { url: "https://facebook.com/home" });
+      await getCookiesStarted;
+      const erased = service.erase("bot:a");
+      await erased;
+      allowGetCookiesReturn();
+      await pendingCall;
+    } finally {
+      nowSpy.mockRestore();
+    }
+    expect(existsSync(join(profileDir(dataDir, "bot:a"), "omb-cookies.enc"))).toBe(false);
+    expect(existsSync(profileDir(dataDir, "bot:a"))).toBe(false);
   });
 });

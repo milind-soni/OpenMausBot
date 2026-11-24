@@ -584,6 +584,17 @@ describe("every other setting applies at once with Undo, Full access or not", ()
     expect(fx.saved).toEqual([{ browserEngine: { egress: { proxy: "socks5://proxy.example:1080" } } }, { browserEngine: { egress: { proxy: "" } } }]);
   });
 
+  it("the browser idle timeout accepts 0 (never) and 1-60 minutes, and rejects out-of-range values", async () => {
+    const fx = fixture();
+    expect((await fx.set("desktops.browserIdleTimeout", "-1")).status).toBe(400);
+    expect((await fx.set("desktops.browserIdleTimeout", "61")).status).toBe(400);
+    const never = await fx.set("desktops.browserIdleTimeout", "0");
+    expect(never.status).toBe(200);
+    expect(fx.saved.at(-1)).toEqual({ browserEngine: { idleTimeoutMinutes: 0 } });
+    expect(await fx.undo()).toEqual({ claimed: true, state: "undone" });
+    expect(fx.saved.at(-1)).toEqual({ browserEngine: { idleTimeoutMinutes: null } });
+  });
+
   it("a bot's library skills are set from the full list, and Undo gives back the earlier list", async () => {
     const fx = fixture();
     await fx.set("bots.skills", JSON.stringify({ botId: "clive", skills: [] }));

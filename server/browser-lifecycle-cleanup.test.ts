@@ -360,10 +360,44 @@ describe("closing this data dir's browsers nothing uses", () => {
     info.mockRestore();
   });
 
-  it("closes an unused browser after ten minutes, three on a Cloud home, unless config.json says otherwise", () => {
+  it("closes an unused browser after ten minutes, three on a Cloud home, 0 for never, unless config.json says otherwise", () => {
     expect(browserIdleMs({})).toBe(10 * 60_000);
     expect(browserIdleMs({}, { cloudHome: true })).toBe(3 * 60_000);
+    expect(browserIdleMs({ browserEngine: { idleTimeoutMinutes: 0 } })).toBe(0);
+    expect(browserIdleMs({ browserEngine: { idleTimeoutMinutes: 0 } }, { cloudHome: true })).toBe(0);
     expect(browserIdleMs({ browserEngine: { idleTimeoutMinutes: 2 } })).toBe(2 * 60_000);
     expect(browserIdleMs({ browserEngine: { idleTimeoutMinutes: 20 } }, { cloudHome: true })).toBe(20 * 60_000);
+  });
+
+  it("pings live sessions on keepAliveInterval when idle closing is turned off", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const homeDir = mkdtempSync(join(tmpdir(), "openmaus-sweep-keepalive-"));
+    folders.push(homeDir);
+    const runtimeDir = join(homeDir, "rt");
+    mkdirSync(join(runtimeDir, "agent-browser"), { recursive: true });
+    writeFileSync(join(runtimeDir, "agent-browser", "bot-keep.pid"), "123\n");
+    vi.stubEnv("HOME", homeDir);
+    vi.stubEnv("XDG_RUNTIME_DIR", runtimeDir);
+    vi.mocked(runningBrowserSessionNames).mockResolvedValueOnce(["bot-keep"]);
+    vi.mocked(runningBrowserSessionNames).mockResolvedValueOnce(["bot-keep"]);
+    const keepAlive = vi.fn(async () => {});
+    let now = 1_000;
+    const running = new BrowserSweep({
+      engine: () => "/bin/agent-browser",
+      owns: (session) => session === "bot-keep",
+      live: (session) => session === "bot-keep",
+      held: () => false,
+      closeIdle: async () => false,
+      keepAlive,
+      keepAliveIntervalMs: 500,
+      now: () => now,
+    });
+    await running.sweep();
+    expect(keepAlive).not.toHaveBeenCalled();
+    now += 600;
+    await running.sweep();
+    expect(keepAlive).toHaveBeenCalledExactlyOnceWith("bot-keep");
+    vi.unstubAllEnvs();
+    info.mockRestore();
   });
 });

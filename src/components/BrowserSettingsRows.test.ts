@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setLocale } from "@/lib/i18n";
-import { BrowserProxyRow, BuiltInBrowserRow, NewBrowserSettings, ServerSitesRow } from "./BrowserSettingsRows";
+import { BrowserIdleTimeoutRow, BrowserProxyRow, BuiltInBrowserRow, NewBrowserSettings, ServerSitesRow } from "./BrowserSettingsRows";
 
 const fixture = vi.hoisted(() => ({
   config: undefined as Record<string, unknown> | undefined,
@@ -180,5 +180,39 @@ describe("Built-in browser without Google Chrome", () => {
     fixture.config = { features: { browser: false }, browserEngine: { kind: "engine", noChrome: true, myChrome: true } };
     show();
     expect(row()).not.toContain("Google Chrome");
+  });
+});
+
+describe("BrowserIdleTimeoutRow", () => {
+  const show = () => flushSync(() => root.render(createElement(BrowserIdleTimeoutRow)));
+  const select = () => host.querySelector<HTMLSelectElement>('select[aria-label="Close unused browsers after"]');
+
+  it("shows when built-in browser is on, defaults to 10 min (3 on Cloud), and saves 0 (never) via PATCH /api/config", async () => {
+    fixture.config = { features: { browser: false }, browserEngine: { kind: "engine" } };
+    show();
+    expect(select()).toBeNull();
+
+    fixture.config = { features: { browser: true }, cloudHome: true, browserEngine: { kind: "engine" } };
+    show();
+    expect(select()?.value).toBe("3");
+
+    fixture.config = { features: { browser: true }, browserEngine: { kind: "engine" } };
+    show();
+    expect(select()?.value).toBe("10");
+    expect([...select()!.options].map((option) => option.value)).toContain("0");
+
+    const saved = { features: { browser: true }, browserEngine: { kind: "engine", idleTimeoutMinutes: 0 } };
+    fixture.api.mockResolvedValue(saved);
+    flushSync(() => {
+      select()!.value = "0";
+      select()!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await vi.waitFor(() => expect(fixture.dispatch).toHaveBeenCalledWith({ type: "configStatus", config: saved }));
+    expect(fixture.api).toHaveBeenCalledWith("/api/config", {
+      method: "PATCH",
+      body: JSON.stringify({ browserEngine: { idleTimeoutMinutes: 0 } }),
+    });
+    show();
+    expect(select()?.value).toBe("0");
   });
 });

@@ -286,6 +286,12 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     live: (session) => usedBrowserSessions.has(session) && belongs(session),
     held: (session) => !turnResources.free(`browser:${session}`),
     closeIdle: (session) => browserRuntime.closeIfIdle(session, idleMs(), usedBrowserSessions.get(session)),
+    keepAlive: async (session) => {
+      if (idleMs() > 0) return;
+      const spec = usedBrowserSessions.get(session);
+      if (!spec || chromeTarget(session, spec) || attachesToChrome(spec.env)) return;
+      await inRunningBrowser(spec.command, browserRuntimeEnv({ ...spec.env, AGENT_BROWSER_SESSION: session }), ["get", "url"]).then(() => undefined, () => undefined);
+    },
   });
   // A browser that has ended keeps no loopback listener: its gate opens again with it, on the same port where it can, and
   // the session's launch settings are worked out again then.
@@ -745,12 +751,13 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     return { binaryPath: engine.binaryPath, session, env: browserSessionSpec(engine.binaryPath, session, profile, await browserEgress.open(session)).env, encryptionKey: browserEngineEncryptionKey() };
   }
   /** What Settings shows of the engine that runs bots' browsers here; My Chrome stays on agent-browser. */
-  function engineSummary<T extends { kind: "engine" | "unavailable"; myChrome: boolean }>(agentBrowser: T): (T | (ReturnType<ChromeEngine["summary"]> & { myChrome: boolean })) & { engine: BrowserEngineKind; pane?: true; cookieImport?: true; noChrome?: true; serverSites?: boolean; proxyConfigured?: boolean; proxySaved?: boolean } {
+  function engineSummary<T extends { kind: "engine" | "unavailable"; myChrome: boolean }>(agentBrowser: T): (T | (ReturnType<ChromeEngine["summary"]> & { myChrome: boolean })) & { engine: BrowserEngineKind; pane?: true; cookieImport?: true; noChrome?: true; serverSites?: boolean; proxyConfigured?: boolean; proxySaved?: boolean; idleTimeoutMinutes?: number } {
     const serverSites = sitesSwitch ? { serverSites: cfg.browserEngine?.egress?.localNetwork === true } : {};
     const engine = browserEngineKind(cfg);
     const proxyValue = cfg.browserEngine?.egress?.proxy;
     const proxySaved = typeof proxyValue === "string" && proxyValue.trim().length > 0;
     const proxyConfigured = builtInBrowserEnabled(cfg) && !hostedServer && parseSocks5Proxy(proxyValue) !== null;
+    const idleTimeoutMinutes = cfg.browserEngine?.idleTimeoutMinutes;
     return {
       ...(engine === "chrome" ? { ...chromeEngine.summary(), myChrome: agentBrowser.myChrome, ...lentChromeSummary(), engine } : { ...agentBrowser, engine }),
       ...(paneLink?.available && browserPaneWanted(cfg) ? { pane: true as const } : {}),
@@ -759,6 +766,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       ...serverSites,
       ...(proxyConfigured ? { proxyConfigured: true } : {}),
       ...(proxySaved ? { proxySaved: true } : {}),
+      ...(idleTimeoutMinutes !== undefined ? { idleTimeoutMinutes } : {}),
     };
   }
 

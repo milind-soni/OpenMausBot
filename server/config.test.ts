@@ -563,13 +563,25 @@ describe("configuration boundaries", () => {
     expect(browserEngineAttachCdpUrl({ browserEngine: { attachCdpUrl: "" } })).toBeNull();
   });
 
-  it("takes browserEngine.idleTimeoutMinutes as whole minutes up to the engine's own hour", () => {
-    for (const value of [1, 10, 60]) {
+  it("takes browserEngine.idleTimeoutMinutes as whole minutes from 0 (never) up to the engine's own hour, and clears on null patch", () => {
+    for (const value of [0, 1, 10, 60]) {
       expect(parseStoredConfig({ browserEngine: { idleTimeoutMinutes: value } })).toEqual({ browserEngine: { idleTimeoutMinutes: value } });
       expect(parseConfigPatch({ browserEngine: { idleTimeoutMinutes: value } })).toEqual({ browserEngine: { idleTimeoutMinutes: value } });
     }
-    for (const value of [0, 61, 2.5, -1, "10"]) expect(() => parseConfigPatch({ browserEngine: { idleTimeoutMinutes: value } })).toThrow();
+    expect(parseConfigPatch({ browserEngine: { idleTimeoutMinutes: null } })).toEqual({ browserEngine: { idleTimeoutMinutes: null } });
+    expect(() => parseStoredConfig({ browserEngine: { idleTimeoutMinutes: null } })).toThrow("browserEngine.idleTimeoutMinutes");
+    for (const value of [61, 2.5, -1, "10"]) expect(() => parseConfigPatch({ browserEngine: { idleTimeoutMinutes: value } })).toThrow();
     expect(parseConfigPatch({ browserEngine: { attachCdpUrl: "9333", idleTimeoutMinutes: 5 } })).toEqual({ browserEngine: { attachCdpUrl: "9333", idleTimeoutMinutes: 5 } });
+
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({ browserEngine: { engine: "chrome", idleTimeoutMinutes: 0 } }));
+    try {
+      saveConfig({ browserEngine: { idleTimeoutMinutes: null } });
+      expect(JSON.parse(readFileSync(path, "utf8")).browserEngine).toEqual({ engine: "chrome" });
+    } finally {
+      rmSync(path, { force: true });
+    }
   });
 
   it("keeps a browser profile's My Chrome choice through saving, loading and migration, and nothing else", () => {

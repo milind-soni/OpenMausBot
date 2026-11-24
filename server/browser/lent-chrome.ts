@@ -111,7 +111,7 @@ export class LentChromeDoors {
       const limit = this.#deps.idleMs();
       for (const [socket, seen] of this.#joined) {
         if (socket.bytesRead !== seen.bytes) { seen.bytes = socket.bytesRead; seen.at = now; }
-        else if (now - seen.at >= limit) socket.destroy();
+        else if (limit > 0 && now - seen.at >= limit) socket.destroy();
       }
     }, this.#deps.sweepMs ?? 30_000);
     this.#sweep.unref();

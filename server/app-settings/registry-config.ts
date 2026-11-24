@@ -143,6 +143,12 @@ export function configEntries(deps: Pick<RegistryDeps, "cfg" | "saveConfig" | "b
       synonyms: ["browser engine", "chrome", "new browser", "agent-browser"], value: z.enum(["agent-browser", "chrome"]), allowed: "agent-browser or chrome",
       current: () => cfg().browserEngine?.engine ?? "agent-browser", patch: (engine) => ({ browserEngine: { engine } }),
     }),
+    section({
+      id: "desktops.browserIdleTimeout", label: "Close unused browsers after", help: "Minutes before an unused built-in browser closes; 0 keeps browsers open to preserve site logins.", where: "browser",
+      synonyms: ["idle timeout", "keep signed in", "browser idle", "never close", "cookies", "login"], value: z.number().int().min(0).max(60).nullable(), allowed: "0 (never), 1 to 60 minutes, or null to restore default",
+      current: () => cfg().browserEngine?.idleTimeoutMinutes ?? null, patch: (idleTimeoutMinutes) => ({ browserEngine: { idleTimeoutMinutes } }),
+      says: (minutes) => (minutes === null ? "Restore the default unused browser close timeout" : minutes === 0 ? "Keep unused built-in browsers open to preserve site logins" : `Close unused built-in browsers after ${minutes} minute${minutes === 1 ? "" : "s"}`),
+    }),
     feature("desktops.savedSteps", "Saved steps", "Bots may repeat saved browser steps without AI.", "saved-steps", ["saved steps", "repeat", "without ai"], "savedSteps", true,
       "Let bots repeat saved steps without AI", "Turn off saved steps"),
     section({

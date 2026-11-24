@@ -197,11 +197,18 @@ describe("LentChromeDoors", () => {
     expect((await nextData(b)).toString()).toBe("still");
   });
 
-  it("a connection unused for the idle time is closed", async () => {
+  it("a connection unused for the idle time is closed, and stays open when idleMs is 0 (never)", async () => {
     const target = await echo();
     const { door } = make(joining(target.port), { idleMs: () => 50, sweepMs: 10 });
     const socket = await client(await door.door("s1"));
     await closed(socket);
+
+    const { door: neverIdle } = make(joining(target.port), { idleMs: () => 0, sweepMs: 10 });
+    const persistent = await client(await neverIdle.door("s2"));
+    await nextData(persistent);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    persistent.write("alive");
+    expect((await nextData(persistent)).toString()).toBe("alive");
   });
 
   it("guidance names the computer and what to do", () => {

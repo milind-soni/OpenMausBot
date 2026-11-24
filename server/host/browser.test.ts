@@ -505,21 +505,25 @@ describe("My Chrome on My Cloud, through the person's lent Chrome", () => {
 });
 
 describe("how long an unused browser stays open", () => {
-  it("is three minutes on a Cloud home and ten on a desktop, unless config.json sets it", () => {
+  it("is three minutes on a Cloud home and ten on a desktop, unless config.json sets it (including 0 for never)", () => {
     const cloud = setup(undefined, { cloudHome: true });
     expect(cloud.host.browserIdleMs()).toBe(3 * 60_000);
     cloud.cfg.browserEngine = { idleTimeoutMinutes: 20 };
     expect(cloud.host.browserIdleMs()).toBe(20 * 60_000);
+    cloud.cfg.browserEngine = { idleTimeoutMinutes: 0 };
+    expect(cloud.host.browserIdleMs()).toBe(0);
     expect(setup(undefined).host.browserIdleMs()).toBe(10 * 60_000);
   });
 });
 
 describe("the bots' browser host by default", () => {
-  it("keeps agent-browser's prompt and status", () => {
-    const { host } = setup(undefined);
+  it("keeps agent-browser's prompt and status, and exposes idleTimeoutMinutes only when set", () => {
+    const { cfg, host } = setup(undefined);
     expect(host.browserSystemPrompt(undefined)).toBe(BUILT_IN_BROWSER_SYSTEM_PROMPT);
     expect(host.signedInSitesRefusal("work")).toBeNull();
     expect(host.engineSummary({ kind: "engine", version: "0.37.0", myChrome: true })).toEqual({ kind: "engine", version: "0.37.0", myChrome: true, engine: "agent-browser" });
+    cfg.browserEngine = { idleTimeoutMinutes: 0 };
+    expect(host.engineSummary({ kind: "engine", version: "0.37.0", myChrome: true })).toEqual({ kind: "engine", version: "0.37.0", myChrome: true, engine: "agent-browser", idleTimeoutMinutes: 0 });
   });
 
   it("says when agent-browser runs its headless shell because Google Chrome is not installed", () => {

@@ -62,6 +62,7 @@ const MIN_WIDTH = 500;
 export class FakeChrome implements CdpTransport {
   readonly sent: SentToFake[] = [];
   readonly pages = new Map<string, FakePage>();
+  readonly cookies: Array<Record<string, unknown>> = [];
   readonly window = { width: 1280, height: 720 + CHROME_HEIGHT };
   dpr = 2;
   /** Commands that never answer, to stand for a browser that hung. */
@@ -233,6 +234,22 @@ export class FakeChrome implements CdpTransport {
         return {};
       case "Browser.getVersion":
         return { product: "Chrome/153.0.8010.12", userAgent: "Mozilla/5.0 Chrome/153.0.0.0", protocolVersion: "1.3", revision: "@x" };
+      case "Storage.getCookies":
+        return { cookies: this.cookies.map((cookie) => ({ ...cookie })) };
+      case "Storage.setCookies": {
+        const added = Array.isArray(params.cookies) ? params.cookies as Array<Record<string, unknown>> : [];
+        for (const cookie of added) {
+          const domain = typeof cookie.domain === "string"
+            ? cookie.domain
+            : (() => { try { return new URL(String(cookie.url ?? "")).hostname; } catch { return ""; } })();
+          const path = typeof cookie.path === "string" ? cookie.path : "/";
+          const idx = this.cookies.findIndex((existing) => existing.name === cookie.name && existing.domain === domain && existing.path === path);
+          const stored = { ...cookie, domain, path };
+          if (idx >= 0) this.cookies[idx] = stored;
+          else this.cookies.push(stored);
+        }
+        return {};
+      }
       default:
         return {};
     }

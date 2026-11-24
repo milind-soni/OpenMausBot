@@ -376,7 +376,7 @@ export class BrowserCleanupCoordinator {
   }
 }
 
-/** Defaults for config.json's browserEngine.idleTimeoutMinutes (1-60); agent-browser's own backstop closes an idle daemon after an hour. */
+/** Defaults for config.json's browserEngine.idleTimeoutMinutes (0-60; 0 keeps browsers open, while agent-browser's own backstop closes an idle daemon after an hour). */
 export const DEFAULT_BROWSER_IDLE_MINUTES = 10;
 export const CLOUD_HOME_BROWSER_IDLE_MINUTES = 3;
 
@@ -401,6 +401,10 @@ export class BrowserSweep {
   readonly #live: (session: string) => boolean;
   readonly #held: (session: string) => boolean;
   readonly #closeIdle: (session: string) => Promise<boolean>;
+  readonly #keepAlive?: (session: string) => Promise<void>;
+  readonly #keepAliveIntervalMs: number;
+  readonly #now: () => number;
+  readonly #lastKeepAlive = new Map<string, number>();
   readonly #intervalMs: number;
   readonly #warned = new Set<string>();
   #timer: ReturnType<typeof setInterval> | undefined;
@@ -414,6 +418,10 @@ export class BrowserSweep {
     /** A turn holds it until it finishes: never closed while one does. */
     held: (session: string) => boolean;
     closeIdle: (session: string) => Promise<boolean>;
+    /** Called periodically on live unclosed sessions so agent-browser's built-in 1h idle timer stays reset when idle-close is off. */
+    keepAlive?: (session: string) => Promise<void>;
+    keepAliveIntervalMs?: number;
+    now?: () => number;
     intervalMs?: number;
   }) {
     this.#engine = options.engine;
@@ -421,6 +429,9 @@ export class BrowserSweep {
     this.#live = options.live;
     this.#held = options.held;
     this.#closeIdle = options.closeIdle;
+    this.#keepAlive = options.keepAlive;
+    this.#keepAliveIntervalMs = options.keepAliveIntervalMs ?? 25 * 60_000;
+    this.#now = options.now ?? Date.now;
     this.#intervalMs = options.intervalMs ?? 60_000;
   }
 
@@ -457,11 +468,30 @@ export class BrowserSweep {
       }
     }
     this.#hadDaemons = owned !== null;
+    const ownedSet = new Set(owned ?? []);
+    for (const session of this.#lastKeepAlive.keys()) {
+      if (!ownedSet.has(session) || !this.#live(session)) this.#lastKeepAlive.delete(session);
+    }
     for (const session of owned ?? []) {
       // Read per browser, after the awaits before it: a turn may have started using it.
-      if (this.#held(session)) continue;
+      if (this.#held(session)) {
+        if (this.#keepAlive && this.#live(session)) this.#lastKeepAlive.set(session, this.#now());
+        continue;
+      }
       if (this.#live(session)) {
-        if (await this.#closeIdle(session)) console.info(`browser ${session}: closed after it sat unused`);
+        if (await this.#closeIdle(session)) {
+          this.#lastKeepAlive.delete(session);
+          console.info(`browser ${session}: closed after it sat unused`);
+        } else if (this.#keepAlive) {
+          const now = this.#now();
+          const last = this.#lastKeepAlive.get(session);
+          if (last === undefined) {
+            this.#lastKeepAlive.set(session, now);
+          } else if (now - last >= this.#keepAliveIntervalMs) {
+            this.#lastKeepAlive.set(session, now);
+            await this.#keepAlive(session);
+          }
+        }
         continue;
       }
       const closed = await closeBrowserSession(binaryPath, browserRuntimeEnv({ AGENT_BROWSER_SESSION: session }));

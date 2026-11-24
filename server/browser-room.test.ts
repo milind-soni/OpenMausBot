@@ -154,6 +154,7 @@ describe("which browser a bot waiting for a slot may close", () => {
     expect(spareForRoom(idle(179_999), { holds: true, idleMs: 180_000 })).toBeNull();
     expect(spareForRoom(idle(180_000), { holds: true, idleMs: 180_000 })).toBe(180_000);
     expect(spareForRoom(idle(600_000, false), { holds: true, idleMs: 180_000 })).toBeNull();
+    expect(spareForRoom(idle(600_000), { holds: true, idleMs: 0 })).toBeNull();
   });
 
   it("none a call, a person or a view has", () => {

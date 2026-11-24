@@ -31,7 +31,7 @@ import { isRemoteMcpServer, mcpServerServes, parseStoredMcpServer } from "./mcp-
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
 import { deciderConfigSchema, type DeciderConfig } from "./decider/config.ts";
 import { fishKeyFromLiveKey, liveConfigSchema, liveConfigWithEnv, liveSettingEnv, type LiveConfig } from "./live-config.ts"; import { hearingConfigShape } from "./tts/hearing-config.ts";
-import { browserEngineConfigSchema, isValidCdpTarget, type BrowserEngineConfig } from "./browser/config.ts";
+import { browserEngineConfigSchema, browserEnginePatchSchema, isValidCdpTarget, type BrowserEngineConfig } from "./browser/config.ts";
 import { roomContextSettings } from "./room-context-settings.ts"; import { usageCapsSchema, type UsageCapsConfig } from "./usage-caps-config.ts";
 import { localVmConfigSchema } from "./local-vm-settings.ts";
 export * from "./local-vm-settings.ts";
@@ -411,7 +411,7 @@ const storedAppConfigSchema = appConfigSchema.extend(helperStoredShape).extend({
   }).optional(),
 });
 const appConfigPatchSchema = appConfigSchema.omit({ instances: true, mcpServers: true, cliStartup: true, customDomain: true })
-  .extend({ threads: threadsPatchSchema.optional(), newBots: newBotsPatchSchema.optional(), imageGen: imageGenPatchSchema.optional() }); export const CONFIG_PATCH_FIELDS = appConfigPatchSchema.shape;
+  .extend({ threads: threadsPatchSchema.optional(), newBots: newBotsPatchSchema.optional(), imageGen: imageGenPatchSchema.optional(), browserEngine: browserEnginePatchSchema.optional() }); export const CONFIG_PATCH_FIELDS = appConfigPatchSchema.shape;
 const jsonObjectSchema = z.record(z.string(), z.json());
 
 export interface AppConfig extends HelperConfig {
@@ -769,7 +769,7 @@ export function cacheUntilConfigChanges<T>(derive: (config: AppConfig) => T): ()
 }
 
 /** Keeps process.env in step with a saved credential ("" drops the var), because loadConfig() prefers env. */
-export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "newBots" | "imageGen">> & { imageGen?: ImageGenCredentialPatch }): void {
+export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "newBots" | "imageGen" | "browserEngine">> & { imageGen?: ImageGenCredentialPatch }): void {
   const secrets: Array<[value: string | undefined, name: string]> = [
     [patch.xai?.key, "XAI_API_KEY"],
     [patch.mistral?.key, "MISTRAL_API_KEY"],
@@ -872,19 +872,16 @@ export function onConfigSaved(listener: (before: JsonObject, after: JsonObject) 
 }
 
 /** Secrets are never echoed back; callers report configured-or-not only. */
+type SaveSectionOverrides = Pick<ConfigPatch, "threads" | "newBots" | "imageGen" | "browserEngine">;
 export function saveConfig(
-  patch: Partial<Omit<AppConfig, "threads" | "newBots" | "imageGen">> & {
-    threads?: z.output<typeof threadsPatchSchema>;
-    newBots?: z.output<typeof newBotsPatchSchema>;
-    imageGen?: z.output<typeof imageGenPatchSchema>;
-  },
+  patch: Partial<Omit<AppConfig, keyof SaveSectionOverrides>> & SaveSectionOverrides,
   options: { replaceInstances?: boolean } = {},
 ): void {
   const p = join(DATA_DIR, "config.json");
   const read = readConfigFile(p);
   if (read.state === "unreadable" || read.state === "invalid") throw configSaveRefusal(read, p);
   const disk: JsonObject = read.state === "ok" ? read.value : {};
-  const checkedPatch = appConfigSchema.partial().extend({ threads: threadsPatchSchema.optional(), newBots: newBotsPatchSchema.optional(), imageGen: imageGenPatchSchema.optional() }).parse(patch);
+  const checkedPatch = appConfigSchema.partial().extend({ threads: threadsPatchSchema.optional(), newBots: newBotsPatchSchema.optional(), imageGen: imageGenPatchSchema.optional(), browserEngine: browserEnginePatchSchema.optional() }).parse(patch);
   const before = configSaveListeners.size ? structuredClone(disk) : disk;
   const keepImageModels = keepKeysOutOfImageModels(disk, checkedPatch.imageGen);
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);

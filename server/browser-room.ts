@@ -65,7 +65,7 @@ export function defaultBrowserRoomSize(env: NodeJS.ProcessEnv = process.env): nu
 export function spareForRoom(spare: { idleMs: number; savesSignIns: boolean } | null, turn: { holds: boolean; idleMs: number }): number | null {
   if (spare === null) return null;
   if (!turn.holds) return spare.idleMs;
-  return spare.savesSignIns && spare.idleMs >= turn.idleMs ? spare.idleMs : null;
+  return turn.idleMs > 0 && spare.savesSignIns && spare.idleMs >= turn.idleMs ? spare.idleMs : null;
 }
 
 export interface BrowserRoomOptions {
