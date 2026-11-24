@@ -83,4 +83,13 @@ describe("a room without its department's Chief", () => {
     expect(chiefAbsentFrom(room("r", ["mira"], { kind: "mentions" }, { dm: true }), [chief])).toBeUndefined();
     expect(chiefAbsentFrom(room("r", ["mira"], { kind: "mentions" }), [{ ...chief, hidden: true } as BotRecord])).toBeUndefined();
   });
+
+  it("says nothing when another Chief of Staff is in the room, since work it hands out comes down at its level", () => {
+    const global = bot("global", true, "");
+    const teamChief = bot("lead", true, "Growth");
+    const general = (members: string[]) => room("r", members, { kind: "member", botId: members[0]! }, { section: "" });
+    expect(chiefAbsentFrom(general(["lead", "mira"]), [global, teamChief, bot("mira")])).toBeUndefined();
+    expect(chiefAbsentFrom(general(["mira"]), [global, teamChief, bot("mira")])).toEqual({ botId: "global", name: "GLOBAL" });
+    expect(chiefAbsentFrom(general(["lead"]), [global, { ...teamChief, hidden: true } as BotRecord])).toEqual({ botId: "global", name: "GLOBAL" });
+  });
 });
