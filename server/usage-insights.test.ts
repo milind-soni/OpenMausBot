@@ -42,6 +42,8 @@ describe("summarizeInsights", () => {
     ], { from: "2026-11-03", to: "2026-11-03" }, "UTC");
     expect(purePlan.totals).toMatchObject({ billedCostUsd: 0, planCostUsd: expect.closeTo(0.3, 12) });
     expect(purePlan.models[0]).toMatchObject({ billedCostUsd: 0, planCostUsd: expect.closeTo(0.3, 12) });
+    expect(purePlan.buckets[10]).toMatchObject({ costUsd: 0.1, billedCostUsd: 0, planCostUsd: 0.1 });
+    expect(purePlan.buckets[11]).toMatchObject({ costUsd: 0.2, billedCostUsd: 0, planCostUsd: 0.2 });
 
     const asked: string[] = [];
     const mixed = summarizeInsights([
@@ -56,6 +58,9 @@ describe("summarizeInsights", () => {
     expect(asked).toEqual(["openai", "claude"]);
     expect(mixed.totals).toMatchObject({ billedCostUsd: 1.5, planCostUsd: 2 });
     expect(mixed.previous).toMatchObject({ billedCostUsd: 0, planCostUsd: 0.75 });
+    expect(mixed.buckets[10]).toMatchObject({ costUsd: 2, billedCostUsd: 0, planCostUsd: 2 });
+    expect(mixed.buckets[11]).toMatchObject({ costUsd: 1, billedCostUsd: 1, planCostUsd: 0 });
+    expect(mixed.buckets[12]).toMatchObject({ costUsd: 0.5, billedCostUsd: 0.5, planCostUsd: 0 });
     expect(mixed.models.find((entry) => entry.key === "model:claudeAgent/claude-sonnet-5-5")).toMatchObject({
       billedCostUsd: 1,
       planCostUsd: 2,

@@ -33,6 +33,10 @@ export interface InsightBucket extends InsightTokens {
   start: string;
   turns: number;
   costUsd: number;
+  /** Billed dollars in this bucket (excludes subscription-covered turns). */
+  billedCostUsd?: number;
+  /** Estimated dollars from subscription-covered turns in this bucket (not billed). */
+  planCostUsd?: number;
   unpriced: number;
   errors: number;
   durationMs: number;

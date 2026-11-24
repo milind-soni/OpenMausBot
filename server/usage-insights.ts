@@ -150,7 +150,7 @@ export function summarizeInsights(
   const unit = dayList.length === 1 ? "hour" : "day";
   const starts = unit === "hour" ? Array.from({ length: 24 }, (_, hour) => `${range.from}T${String(hour).padStart(2, "0")}`) : dayList;
   const buckets = new Map<string, InsightBucket>(starts.map((start) => [start, {
-    start, input: 0, cachedInput: 0, output: 0, reasoning: 0, turns: 0, costUsd: 0, unpriced: 0, errors: 0, durationMs: 0, timedTurns: 0, models: {}, modelCosts: {},
+    start, input: 0, cachedInput: 0, output: 0, reasoning: 0, turns: 0, costUsd: 0, billedCostUsd: 0, planCostUsd: 0, unpriced: 0, errors: 0, durationMs: 0, timedTurns: 0, models: {}, modelCosts: {},
   }]));
   const hours = Array.from({ length: 7 }, () => Array<number>(24).fill(0));
   for (const { row, local } of current) {
@@ -159,7 +159,11 @@ export function summarizeInsights(
     day.turns += 1;
     const cost = price(row.costUsd);
     if (cost === null) day.unpriced += 1;
-    else day.costUsd += cost;
+    else {
+      day.costUsd += cost;
+      if (isPlan(row)) day.planCostUsd = (day.planCostUsd ?? 0) + cost;
+      else day.billedCostUsd = (day.billedCostUsd ?? 0) + cost;
+    }
     if (failed(row)) day.errors += 1;
     const duration = rowDuration(row);
     if (duration !== null) { day.durationMs += duration; day.timedTurns += 1; }
