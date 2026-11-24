@@ -9031,6 +9031,8 @@
   "palette.bots": "Bots",
   "palette.groups": "Groups",
   "palette.messages": "Messages",
+  "palette.commands": "Commands",
+  "palette.toggleTheme": "Toggle light/dark",
   "remote.status.pairedOne": "1 device paired",
   "remote.status.pairedMany": "{count} devices paired",
   "companyBackup.restorePending": "An earlier restore needs recovery first.",

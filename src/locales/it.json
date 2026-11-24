@@ -8946,6 +8946,8 @@
   "palette.bots": "Bots",
   "palette.groups": "Gruppi",
   "palette.messages": "Messaggi",
+  "palette.commands": "Comandi",
+  "palette.toggleTheme": "Alterna chiaro/scuro",
   "remote.status.pairedOne": "1 dispositivo abbinato",
   "remote.status.pairedMany": "{count} dispositivi abbinati",
   "companyBackup.restorePending": "Un precedente ripristino ha bisogno di recupero prima.",

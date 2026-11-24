@@ -8963,6 +8963,8 @@
   "palette.bots": "Bots",
   "palette.groups": "Grupos",
   "palette.messages": "Mensagens",
+  "palette.commands": "Comandos",
+  "palette.toggleTheme": "Alternar claro/escuro",
   "remote.status.pairedOne": "1 dispositivo pareado",
   "remote.status.pairedMany": "{count} dispositivos pareados",
   "companyBackup.restorePending": "Uma restauração anterior precisa ser recuperada primeiro.",
