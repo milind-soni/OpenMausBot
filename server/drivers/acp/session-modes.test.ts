@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { readSessionModes, selectAdvertisedMode } from "./session-modes.ts";
+import { currentModeUpdateId, readSessionModes, selectAdvertisedMode, withSessionMode } from "./session-modes.ts";
 
 describe("readSessionModes", () => {
   it("parses Hermes advertised modes and currentModeId", () => {
@@ -73,5 +73,34 @@ describe("selectAdvertisedMode", () => {
     )).toBe("unrestricted");
     expect(selectAdvertisedMode([], "edits", false)).toBeNull();
     expect(selectAdvertisedMode([{ id: "plan" }], "edits", false)).toBeNull();
+  });
+});
+
+describe("withSessionMode and currentModeUpdateId", () => {
+  it("updates currentModeId without dropping advertised modes or inventing availableModes", () => {
+    const initial = {
+      sessionId: "s-1",
+      modes: {
+        currentModeId: "default",
+        availableModes: [{ id: "default" }, { id: "dont_ask" }],
+      },
+    };
+    expect(withSessionMode(initial, " dont_ask ")).toEqual({
+      sessionId: "s-1",
+      modes: {
+        currentModeId: "dont_ask",
+        availableModes: [{ id: "default" }, { id: "dont_ask" }],
+      },
+    });
+    expect(withSessionMode(initial, "   ")).toBe(initial);
+    expect(withSessionMode(initial, null)).toBe(initial);
+    expect(withSessionMode(null, "default")).toEqual({ modes: { currentModeId: "default" } });
+  });
+
+  it("extracts currentModeId only from valid current_mode_update notifications", () => {
+    expect(currentModeUpdateId({ sessionUpdate: "current_mode_update", currentModeId: " accept_edits " })).toBe("accept_edits");
+    expect(currentModeUpdateId({ sessionUpdate: "current_mode_update", currentModeId: "  " })).toBeNull();
+    expect(currentModeUpdateId({ sessionUpdate: "config_option_update", currentModeId: "dont_ask" })).toBeNull();
+    expect(currentModeUpdateId(null)).toBeNull();
   });
 });

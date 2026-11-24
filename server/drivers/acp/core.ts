@@ -30,7 +30,7 @@ import { acpMissingSession } from "./rpc-error.ts";
 import { readSessionReport } from "./session-reports.ts";
 import { promptTokenUsage } from "./prompt-usage.ts";
 import { advertisedCommands, turnAnswers, turnSteering, type AcpSteerSupport } from "./steer.ts";
-import { pickSessionModel, SessionModelControls, type AcpModelSelection } from "./session-model-controls.ts"; import { readSessionModes, type AcpSessionModes } from "./session-modes.ts";
+import { pickSessionModel, SessionModelControls, type AcpModelSelection } from "./session-model-controls.ts"; import { currentModeUpdateId, readSessionModes, withSessionMode, type AcpSessionModes } from "./session-modes.ts";
 import { notThisCli, versionFromProbe } from "./version-probe.ts"; import { engineHomes } from "../../engine-homes/engine-homes.ts"; import { apiKeyAccount } from "./api-key-account.ts";
 
 export function skipSubscriptionAuthForLocalInject(model: string | undefined): boolean {
@@ -699,6 +699,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           const p = msg.params ?? {};
           if (p._meta?.isReplay === true) return;
           session.commands = advertisedCommands(p.update) ?? session.commands;
+          const updatedModeId = currentModeUpdateId(p.update); if (updatedModeId && (!p.sessionId || p.sessionId === session.sessionId)) { session.sessionConfigResult = withSessionMode(session.sessionConfigResult, updatedModeId); return; }
           const current = session.current;
           if (support.modelVariants && p.update?.sessionUpdate === "config_option_update") {
             if (current && !current.state.settled && session.sessionId && p.sessionId === session.sessionId) current.receiveModelVariants(p.update);
@@ -1224,9 +1225,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                     if (method === "session/set_model" && params && typeof params === "object" && "modelId" in params && typeof params.modelId === "string") {
                       session.sessionConfigResult = { ...session.sessionConfigResult, models: { ...session.sessionConfigResult?.models, currentModelId: params.modelId } };
                     }
-                    if (method === "session/set_mode" && params && typeof params === "object" && "modeId" in params && typeof params.modeId === "string") {
-                      session.sessionConfigResult = { ...session.sessionConfigResult, modes: { ...session.sessionConfigResult?.modes, currentModeId: params.modeId } };
-                    }
+                    if (method === "session/set_mode" && params && typeof params === "object" && "modeId" in params) session.sessionConfigResult = withSessionMode(session.sessionConfigResult, params.modeId);
                     if (method === "session/set_config_option" && Array.isArray(result?.configOptions)) session.sessionConfigResult = { ...session.sessionConfigResult, configOptions: result.configOptions };
                     return result;
                   },

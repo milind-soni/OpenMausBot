@@ -451,9 +451,15 @@ const support: AcpSupport = {
   authFailure: "continue",
   isAuthenticated: () => true,
   async configureSession({ request, sessionId, config, turn, sessionModes }) {
-    const modeId = sessionModes ? selectAdvertisedMode(sessionModes.availableModes, turn.approvalMode, config.fullAuto) : null;
-    if (modeId && sessionModes?.currentModeId !== modeId) {
-      await applySetting(request, "session/set_mode", { sessionId, modeId }, `mode "${modeId}"`);
+    if (sessionModes) {
+      const modeId = selectAdvertisedMode(sessionModes.availableModes, turn.approvalMode, config.fullAuto);
+      if (!modeId) {
+        const level = turn.approvalMode ?? (config.fullAuto ? "full" : "ask");
+        throw new Error(`Hermes did not advertise an ACP mode for approval level "${level}"`);
+      }
+      if (sessionModes.currentModeId !== modeId) {
+        await applySetting(request, "session/set_mode", { sessionId, modeId }, `mode "${modeId}"`);
+      }
     }
     // Decode only: ensure* here would read process.env and rewrite the user's real ~/.hermes/config.yaml.
     const native = hermesAcpModelId(turn.model);

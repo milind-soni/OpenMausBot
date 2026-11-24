@@ -677,6 +677,7 @@ async function listMcpTools(entry: AnyMcpEntry, handshake: unknown, hold = false
   });
 }
 let liveSession: string | null = null;
+let idleModeUpdateSent = false;
 const openCopies = new Map<string, number>();
 let sessionsOpened = 0;
 let rpcFailure: unknown = null;
@@ -1422,6 +1423,15 @@ function handle(msg: any) {
             ? { stopReason: "end_turn", usage: { inputTokens: 10, outputTokens: 5 }, _meta: {} }
             : { stopReason: "end_turn", _meta: { inputTokens: 10, outputTokens: 5 } },
         );
+        const idleMode = process.env.FAKE_ACP_IDLE_MODE_UPDATE;
+        if (idleMode && !idleModeUpdateSent) {
+          idleModeUpdateSent = true;
+          const sid = msg.params?.sessionId ?? liveSession;
+          setTimeout(() => {
+            currentSessionMode = idleMode;
+            out({ jsonrpc: "2.0", method: "session/update", params: { sessionId: sid, update: { sessionUpdate: "current_mode_update", currentModeId: idleMode } } });
+          }, 10);
+        }
       };
       const script = streamScript((Array.isArray(msg.params?.prompt) ? msg.params.prompt : []).map((block: any) => block?.text ?? "").join(""));
       if (script) {

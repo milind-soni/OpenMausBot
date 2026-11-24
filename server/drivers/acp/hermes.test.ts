@@ -615,4 +615,94 @@ describe("Hermes advertised ACP edit modes", () => {
     await recorder.until((event) => event.type === "turn.completed" && event.turnId === second.turnId);
     expect(Number(readFileSync(launches, "utf8"))).toBe(2);
   });
+
+  it("refreshes cached currentModeId from idle current_mode_update notifications and ignores replays", async () => {
+    const { instance, recorder } = await create({
+      FAKE_ACP_SESSION_MODES: HERMES_SESSION_MODES,
+      FAKE_ACP_IDLE_MODE_UPDATE: "dont_ask",
+    });
+    const first = await instance.adapter.sendTurn({
+      threadId: "t-hermes-idle-update",
+      text: "turn-1",
+      cwd: scratch,
+      approvalMode: "ask",
+    });
+    expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === first.turnId)).toMatchObject({ ok: true });
+    expect(modeCalls()).toEqual([]);
+
+    // Wait for the out-of-band notification emitted while idle after turn 1 settles.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    const second = await instance.adapter.sendTurn({
+      threadId: "t-hermes-idle-update",
+      text: "turn-2",
+      cwd: scratch,
+      approvalMode: "ask",
+    });
+    expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === second.turnId)).toMatchObject({ ok: true });
+    expect(modeCalls()).toEqual(["default"]);
+
+    await instance.dispose();
+    recorder.stop();
+
+    const replayDump = join(scratch, "replay.json");
+    const replayUpdates = join(scratch, "replay-updates.json");
+    writeFileSync(replayUpdates, JSON.stringify([
+      { sessionId: "fake-acp-session", _meta: { isReplay: true }, update: { sessionUpdate: "current_mode_update", currentModeId: "dont_ask" } },
+    ]));
+    const replayRun = await create({
+      FAKE_ACP_DUMP: replayDump,
+      FAKE_ACP_SESSION_MODES: HERMES_SESSION_MODES,
+      FAKE_ACP_UPDATES_FILE: replayUpdates,
+    });
+    for (const text of ["replay-1", "replay-2"]) {
+      const turn = await replayRun.instance.adapter.sendTurn({
+        threadId: "t-hermes-replay-mode",
+        text,
+        cwd: scratch,
+        approvalMode: "ask",
+      });
+      expect(await replayRun.recorder.until((event) => event.type === "turn.completed" && event.turnId === turn.turnId)).toMatchObject({ ok: true });
+    }
+    replayRun.recorder.stop();
+    expect(existsSync(`${replayDump}.config.json`)).toBe(false);
+  });
+
+  it("fails closed and retires the pooled session when advertised modes omit the requested level", async () => {
+    const launches = join(scratch, "launches-unmatched");
+    const { instance, recorder } = await create({
+      FAKE_ACP_SESSION_MODES: "default,dont_ask",
+      FAKE_ACP_LAUNCH_COUNT_FILE: launches,
+    });
+
+    const fullTurn = await instance.adapter.sendTurn({
+      threadId: "t-hermes-unmatched",
+      text: "run full",
+      cwd: scratch,
+      approvalMode: "full",
+    });
+    expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === fullTurn.turnId)).toMatchObject({ ok: true });
+    expect(modeCalls()).toEqual(["dont_ask"]);
+
+    const editsTurn = await instance.adapter.sendTurn({
+      threadId: "t-hermes-unmatched",
+      text: "try edits",
+      cwd: scratch,
+      approvalMode: "edits",
+    });
+    const failed = await recorder.until((event) => event.type === "turn.completed" && event.turnId === editsTurn.turnId);
+    expect(failed).toMatchObject({ ok: false, stopReason: "rpc_error" });
+    expect(recorder.events.some((event) => event.type === "runtime.error" && event.message.includes("did not advertise an ACP mode"))).toBe(true);
+    expect(modeCalls()).toEqual(["dont_ask"]);
+
+    // Pooled process must have been retired so the next turn starts a fresh session rather than reusing dont_ask.
+    const askTurn = await instance.adapter.sendTurn({
+      threadId: "t-hermes-unmatched",
+      text: "back to ask",
+      cwd: scratch,
+      approvalMode: "ask",
+    });
+    expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === askTurn.turnId)).toMatchObject({ ok: true });
+    expect(Number(readFileSync(launches, "utf8"))).toBe(2);
+  });
 });

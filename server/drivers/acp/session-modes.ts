@@ -60,3 +60,18 @@ export function selectAdvertisedMode(
   }
   return null;
 }
+
+/** Records a newly confirmed or notified ACP `currentModeId` without discarding advertised `availableModes`. */
+export function withSessionMode(result: any, modeId: unknown): any {
+  if (typeof modeId !== "string" || !modeId.trim()) return result;
+  return { ...result, modes: { ...result?.modes, currentModeId: modeId.trim() } };
+}
+
+/** Extracts `currentModeId` from an ACP `current_mode_update` notification, or null for any other update. */
+export function currentModeUpdateId(update: unknown): string | null {
+  if (!update || typeof update !== "object") return null;
+  const { sessionUpdate, currentModeId } = update as { sessionUpdate?: unknown; currentModeId?: unknown };
+  return sessionUpdate === "current_mode_update" && typeof currentModeId === "string" && currentModeId.trim()
+    ? currentModeId.trim()
+    : null;
+}
