@@ -42,6 +42,8 @@ const SERVER_ENV_NAMES = new Set([
   "OMB_CLOUD_LEGACY_ORIGINS",
   // The bot box switch (server/bot-box/detect.ts): the Admin may turn a home's box off for support.
   "OMB_BOT_BOX",
+  // Tool caches into one folder in each bot box's HOME (server/bot-box/tool-caches.ts): off unless the Admin turns it on.
+  "OMB_CACHE_ROOT",
   // The image's own engine CLIs before older copies in the data folder (server/image-engines.ts), for one test Cloud first.
   "OMB_IMAGE_ENGINES",
   // An ended Cloud started only for its owner's export: the server runs frozen (server/move-freeze.ts).
@@ -50,6 +52,8 @@ const SERVER_ENV_NAMES = new Set([
   "OMB_TASK_WORKSPACE_RETENTION",
   // The delete-time cleanup's switch (server/host/conversation-folder-cleanup.ts): off unless the Admin sets it on.
   "OMB_CONVERSATION_FOLDER_CLEANUP",
+  // The orphan sweep's switch (server/host/orphan-sweep.ts): off, report or remove, set per home by the Admin.
+  "OMB_ORPHAN_SWEEP", "OMB_ORPHAN_SWEEP_MAX_SHARE",
 ]);
 export function serverEnvironmentAllowed(name: string): boolean {
   return SERVER_ENV_NAMES.has(name) || name.startsWith("LC_");
