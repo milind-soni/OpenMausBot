@@ -253,6 +253,8 @@ type EngineRow = { instanceId: string; snapshot: { state: string; busy?: true; a
 
 /** Engines seen available since this page loaded. */
 const workedThisSession = new Set<string>();
+/** A fresh page, as a new load starts (tests). */
+export const forgetWorkedEngines = (): void => workedThisSession.clear();
 
 /** Notes the engines available now; true for one that was available earlier since this page loaded. A setup page never
  * replaces a working engine that reads unavailable later: the app's usual waiting view stays while the server checks it

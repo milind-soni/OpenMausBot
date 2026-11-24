@@ -13,8 +13,10 @@ vi.mock("./state/store", async (original) => ({
 }));
 vi.mock("./lib/analytics", () => ({ initAnalytics: () => {}, track: () => {}, emailGateDone: () => true }));
 const { default: App } = await import("./App");
+const { forgetWorkedEngines } = await import("./lib/onboarding");
 
-afterEach(() => { vi.unstubAllGlobals(); });
+// Each test is a fresh page: which engines worked is remembered only for a page's own life.
+afterEach(() => { vi.unstubAllGlobals(); forgetWorkedEngines(); });
 
 it("keeps a saved conversation visible through an unavailable engine status and recovery", () => {
   vi.stubGlobal("fetch", () => new Promise(() => {}));
@@ -54,6 +56,26 @@ it("offers AI setup when there is no conversation and every engine is unavailabl
     flushSync(() => root.render(createElement(App)));
     expect(container.querySelector("[data-chathead-identity]")).toBeNull();
     expect(container.textContent).toContain("Check again");
+  } finally {
+    root.unmount();
+    container.remove();
+  }
+});
+
+it("keeps the setup page away for an engine that worked earlier on this page, whose status check later fails", () => {
+  vi.stubGlobal("fetch", () => new Promise(() => {}));
+  const claude = (snapshot: AppState["instances"][number]["snapshot"]) => ({ instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude", models: { default: "", options: [] }, snapshot });
+  state = { ...initialState, connected: true, hydrated: true, instances: [claude({ state: "available", authenticated: true })] };
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    flushSync(() => root.render(createElement(App)));
+    for (const snapshot of [{ state: "unavailable", reason: "CLI probe timed out", busy: true }, { state: "unavailable", reason: "CLI probe timed out" }] as const) {
+      state = { ...state, instances: [claude(snapshot)] };
+      flushSync(() => root.render(createElement(App)));
+      expect(container.textContent).not.toContain("Check again");
+    }
   } finally {
     root.unmount();
     container.remove();
