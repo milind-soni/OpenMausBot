@@ -223,3 +223,56 @@ it("a bot on the computer and a bot on the person's own server hand each other w
     await Promise.all(fixtures.map((fixture) => fixture.close()));
   }
 }, 180_000);
+
+it("bots made, renamed, hidden or shown after the link is on reach the other place without a new session, and a name it cannot find is answered with both places' bots", async () => {
+  const fixtures = [await launchVerificationServer({}, undefined, undefined, undefined, undefined, { scripted: true }),
+    await launchVerificationServer({}, undefined, undefined, undefined, undefined, { scripted: true })];
+  const computer = place(fixtures[0]!), home = place(fixtures[1]!);
+  try {
+    const writer = (await computer.cli("new-bot", "--name", "Writer")).bot;
+    const pairing = await home.api("POST", "/api/auth/pairing", { label: "The person's app", scopes: ["admin", "client"] });
+    const owner = (await home.api("POST", "/api/auth/pair", { code: pairing.code })).token as string;
+    const thisComputer = { id: (await computer.api("GET", "/.well-known/openmausbot/environment")).environmentId as string, name: "Sam's Mac" };
+    const paired = await home.api("POST", "/api/bot-link/pair", { computer: thisComputer, name: "My server" }, { token: owner });
+    await computer.api("PUT", "/api/bot-link", { on: true, origin: home.url, token: paired.token, name: "Sam's Mac", cloud: paired.place });
+    await expect.poll(async () => (await computer.api("GET", "/api/bot-link")).online, { timeout: 15_000 }).toBe(true);
+    const farNames = async (side: typeof computer) => ((await side.api("GET", "/api/bot-link/bots")).bots as any[]).map((row) => row.name).sort();
+    await expect.poll(() => farNames(home), { timeout: 15_000 }).toContain("Writer");
+
+    // Made on the server after the link is on: the computer lists it and finds it by its address.
+    const late = (await home.cli("new-bot", "--name", "Latecomer")).bot;
+    const address = linkedAddress(paired.place.id, late.id);
+    await expect.poll(() => farNames(computer), { timeout: 10_000 }).toContain("Latecomer");
+    expect(JSON.stringify(await computer.api("GET", `/api/bots/${address}`))).toContain("\"Latecomer\"");
+    // Renamed, hidden and shown again there: each reaches the computer as it happens.
+    await home.api("PATCH", `/api/bots/${late.id}/profile`, { name: "Lateblossom" });
+    await expect.poll(() => farNames(computer), { timeout: 10_000 }).toContain("Lateblossom");
+    expect(await farNames(computer)).not.toContain("Latecomer");
+    await home.api("PATCH", `/api/bots/${late.id}`, { hidden: true });
+    await expect.poll(() => farNames(computer), { timeout: 10_000 }).not.toContain("Lateblossom");
+    await computer.api("GET", `/api/bots/${address}`, undefined, { status: 404 });
+    await home.api("PATCH", `/api/bots/${late.id}`, { hidden: false });
+    await expect.poll(() => farNames(computer), { timeout: 10_000 }).toContain("Lateblossom");
+    // And the other way: a bot made on the computer reaches the server.
+    await computer.cli("new-bot", "--name", "Deskmate");
+    await expect.poll(() => farNames(home), { timeout: 10_000 }).toContain("Deskmate");
+
+    // A name no bot of either place has: the bot hears the bots of both places it can reach, and never that bots work
+    // only within one place. Two bots of the server with one name: it is asked which one, by id.
+    const twins = [(await home.cli("new-bot", "--name", "Twin")).bot, (await home.cli("new-bot", "--name", "Twin")).bot];
+    await expect.poll(async () => (await farNames(computer)).filter((name) => name === "Twin").length, { timeout: 10_000 }).toBe(2);
+    computer.plan(writer.id, { steps: [{ tool: "coordinate_bots", arguments: { bot_ids: ["Nobody"], request_key: "nobody", message: "Count the orders." }, expectError: true },
+      { tool: "coordinate_bots", arguments: { bot_ids: ["Twin"], request_key: "twin", message: "Count the orders." }, expectError: true }], reply: "Could not ask." });
+    await computer.cli("send", "--bot", writer.id, "--task", writer.activeTaskId, "--text", "Ask Nobody, then Twin, for the orders.");
+    expect((await computer.cli("wait", "--bot", writer.id, "--task", writer.activeTaskId, "--timeout", "30")).status).toBe("settled");
+    const said = ((computer.providerTurns().filter((turn) => turn.botId === writer.id).at(-1)?.evidence ?? []) as any[]).filter((entry) => entry?.step).map((entry) => JSON.stringify(entry.response));
+    expect(said).toHaveLength(2);
+    expect(said[0]).toContain("No bot with id or name");
+    expect(said[0]).toContain(`Lateblossom on My server (id ${address})`);
+    expect(said[0]).not.toMatch(/only within one place|can't be reached from here/u);
+    for (const twin of twins) expect(said[1]).toContain(linkedAddress(paired.place.id, twin.id));
+    expect(said[1]).toContain("Send it again with the id of the one you mean");
+  } finally {
+    await Promise.all(fixtures.map((fixture) => fixture.close()));
+  }
+}, 180_000);

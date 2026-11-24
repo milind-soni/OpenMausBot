@@ -96,7 +96,9 @@ export function createDialer({ link, fetch: fetchImpl = fetch, log = () => {}, h
   const stopWanted = link.onWanted(() => { if (stopped) return; asleep = false; retryMs = firstRetryMs; wakeUp?.(); });
 
   async function exchange(target: { origin: string; token: string }, peer: string): Promise<void> {
-    if (fresh) link.sessionStarted(peer);
+    // A new session takes everything the Cloud sends again from the start: a Cloud that ended this link and paired it again
+    // numbers its frames from one again, and a count kept from before would pass over its hello.
+    if (fresh) { link.sessionStarted(peer); ack = 0; }
     const sending = link.outgoing(peer, 0);
     const controller = new AbortController();
     active = controller;
