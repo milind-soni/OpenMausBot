@@ -6,9 +6,9 @@ import { cn } from "@/lib/cn";
 import {
   copyTranscriptToClipboard,
   downloadMarkdownTranscript,
-  formatTranscriptMarkdown,
   slugifyTranscriptFilename,
 } from "@/lib/export-transcript";
+import { conversationTranscript } from "@/lib/conversation-transcript";
 import { t } from "@/lib/i18n";
 import { localizedTaskTitle } from "@/lib/task-title";
 import { useShowThreads } from "@/lib/thread-preferences";
@@ -33,7 +33,7 @@ function useRoomMoreItems(group: Group): { items: SidebarMenuItem[]; on: boolean
   const [copyStatus, setCopyStatus] = useState<"copied" | "failed" | null>(null);
   const messages = group.messages;
   const hasMessages = messages.length > 0;
-  const transcript = () => formatTranscriptMarkdown({ title: group.name, messages, isGroup: true });
+  const transcript = () => conversationTranscript({ threadId: group.threadId, hasMore: group.hasMore, title: group.name, messages, isGroup: true });
   const threads = showThreads ? [] : orderedThreadList(group.tasks ?? []);
   const usage = groupUsageSummary(group.usage);
   const items: SidebarMenuItem[] = [
@@ -82,7 +82,12 @@ function useRoomMoreItems(group: Group): { items: SidebarMenuItem[]; on: boolean
       label: t("chat.export.download"),
       icon: <Download size={16} />,
       disabled: !hasMessages,
-      onSelect: () => downloadMarkdownTranscript(slugifyTranscriptFilename(group.name), transcript()),
+      onSelect: () => {
+        const content = transcript();
+        const save = (markdown: string) => downloadMarkdownTranscript(slugifyTranscriptFilename(group.name), markdown);
+        if (typeof content === "string") save(content);
+        else void content.then(save).catch((cause) => dispatch({ type: "error", message: cause instanceof Error ? cause.message : String(cause) }));
+      },
     },
     {
       key: "turn-limit",

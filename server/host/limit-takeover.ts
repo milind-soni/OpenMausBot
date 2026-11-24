@@ -9,7 +9,7 @@ import { approvalModeFor, modelSwitchNeedsAsk, type ApprovalMode } from "../../s
 import { writeFileAtomic } from "../atomic.ts";
 import { recoveryCapabilityError } from "../automatic-recovery.ts";
 import type { InstanceConfigMap, ProviderAdapter, RuntimeEvent } from "../contracts.ts";
-import { readyToRun, type DefaultSelectionContext, type SelectableInstance } from "../default-model-selection.ts";
+import { readyToRun, signedOut as statusSignedOut, type DefaultSelectionContext, type SelectableInstance } from "../default-model-selection.ts";
 import { engineFailureKind } from "../drivers/engine-errors.ts";
 import { classifyError } from "../drivers/retry.ts";
 import { failoverLine, limitBackupAllowed, signedOutLine, type LimitFailover } from "../limit-failover.ts";
@@ -170,7 +170,7 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
 
   const notReady = (engine: TakeoverEngine): string => engine.enabled === false ? "switched off"
     : engine.snapshot.state !== "available" ? engine.snapshot.reason ?? "unavailable"
-    : engine.snapshot.authenticated === false ? "signed out" : deps.context.refusal?.(engine) ?? "not ready";
+    : deps.context.refusal?.(engine) ?? (statusSignedOut(engine) ? "signed out" : "not ready");
 
   const skipped = (engines: TakeoverEngine[], current: TakeoverEngine, selection: ModelSelection, scope: TakeoverScope, approval?: ApprovalMode): Omit<SkippedBackup, "selection"> | null => {
     const engine = engines.find((candidate) => candidate.instanceId === selection.instanceId);
@@ -269,15 +269,20 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
     signedIn(selection.instanceId);
   };
 
-  function heldAtStart(bot: ThreadBot, selection: ModelSelection, recovering = false, chosen?: readonly ModelSelection[]): { scope: TakeoverScope; resetsAt?: number } | null {
+  function holdOn(selection: ModelSelection): { scope: TakeoverScope; resetsAt?: number } | null {
     const engineUntil = deps.blockedUntil(selection.instanceId, selection.model);
     const model = engineUntil === null ? modelHeld(selection) : null;
     const scope: TakeoverScope | null = engineUntil !== null ? "engine" : model ? model.scope : signedOutHeld(selection.instanceId) ? "signed-out" : null;
     if (!scope) return null;
-    const carries = (deps.enabled?.() ?? true) && backups(bot.id, selection, scope, approvalModeFor(bot), chosen).length > 0;
-    if (!carries && !(recovering && scope !== "signed-out")) return null;
     const resetsAt = scope === "engine" ? deps.resetAt?.(selection.instanceId, selection.model) ?? undefined : model?.resetsAt;
     return { scope, ...(resetsAt && resetsAt > now() ? { resetsAt } : {}) };
+  }
+
+  function heldAtStart(bot: ThreadBot, selection: ModelSelection, recovering = false, chosen?: readonly ModelSelection[]): { scope: TakeoverScope; resetsAt?: number } | null {
+    const held = holdOn(selection);
+    if (!held) return null;
+    const carries = (deps.enabled?.() ?? true) && backups(bot.id, selection, held.scope, approvalModeFor(bot), chosen).length > 0;
+    return carries || (recovering && held.scope !== "signed-out") ? held : null;
   }
 
   function carryOnRows(bot: Bot, from: ModelSelection, to: ModelSelection, facts: { scope: TakeoverScope; resetsAt?: number }): CarriedOnRow[] {
@@ -331,8 +336,8 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
     /** Before a turn on `selection`: when what holds that AI is already known and one of `chosen` can take the turn, that
      * backup and what held it; the backups passed over are logged. Null when the turn goes to `selection` as usual. */
     takeoverAtStart(bot: ThreadBot, selection: ModelSelection, chosen: readonly ModelSelection[]): { to: ModelSelection; scope: TakeoverScope; resetsAt?: number } | null {
-      const held = heldAtStart(bot, selection, false, chosen);
-      if (!held) return null;
+      const held = holdOn(selection);
+      if (!held || !(deps.enabled?.() ?? true)) return null;
       const { backups: usable, skipped } = weighBackups(bot.id, selection, held.scope, approvalModeFor(bot), chosen);
       passedOver(bot, selection, held.scope, skipped);
       return usable[0] ? { to: usable[0], ...held } : null;
