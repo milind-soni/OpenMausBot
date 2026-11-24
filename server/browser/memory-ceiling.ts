@@ -138,18 +138,20 @@ export function createBrowserCeiling(deps: BrowserCeilingDeps) {
   let seen = new Map<string, Seen>();
   let kills: number | null = null, unexplained = false;
 
-  /** A browser's size and each of its processes'. With memory short, from statm (quickSize), which takes no lock. */
+  /** A browser's size, and each of its processes' where a kernel kill may need to be explained (kernelKills). With memory
+   * short, from statm (quickSize), which takes no lock. */
   function measure(browser: CeilingBrowser, short: boolean): { used: number | null; each: Map<number, number> } {
     const each = new Map<number, number>();
     const quick = short && deps.quickSize ? deps.quickSize : null;
+    if (quick) {
+      if (deps.kernelKills) for (const pid of browser.pids) { const bytes = quick([pid]); if (bytes !== null) each.set(pid, bytes); }
+      return { used: quick(browser.pids), each };
+    }
     for (const pid of browser.pids) {
-      const bytes = quick ? quick([pid]) : deps.pss(pid);
+      const bytes = deps.pss(pid);
       if (bytes !== null) each.set(pid, bytes);
     }
-    let used: number | null = null;
-    if (quick) used = quick(browser.pids);
-    else if (each.size) used = [...each.values()].reduce((sum, bytes) => sum + bytes, 0);
-    return { used, each };
+    return { used: each.size ? [...each.values()].reduce((sum, bytes) => sum + bytes, 0) : null, each };
   }
 
   async function closeBackgroundTabs(session: string, used: number): Promise<boolean> {
