@@ -614,7 +614,7 @@ class BotDb implements BotDatabase {
       const finite = `isfinite(${value})`;
       const sql = `WITH omb_range AS (SELECT min(${value}) AS lo, max(${value}) AS hi FROM ${from} AS omb_source WHERE ${finite})
 SELECT LEAST(coalesce(floor((${value} - omb_range.lo) / nullif(omb_range.hi - omb_range.lo, 0) * ${bins}), 0), ${bins - 1})::INTEGER AS bin, count(*) AS n, min(omb_range.lo), min(omb_range.hi)
-FROM ${from} AS omb_source, omb_range WHERE ${finite} GROUP BY bin ORDER BY bin`;
+FROM ${from} AS omb_source, omb_range WHERE ${finite} GROUP BY 1 ORDER BY bin`;
       const rows = (await this.statement("panel", sql, options, (o, conn) => this.read(o, conn, sql))).rows;
       if (!rows.length) return result;
       const lo = Number(rows[0][2]);
@@ -631,7 +631,7 @@ FROM ${from} AS omb_source, omb_range WHERE ${finite} GROUP BY bin ORDER BY bin`
       return result;
     }
 
-    const sql = `SELECT CAST(${id} AS VARCHAR) AS v, count(*) AS n FROM ${from} WHERE ${id} IS NOT NULL GROUP BY v ORDER BY n DESC, v LIMIT ${bins}`;
+    const sql = `SELECT CAST(${id} AS VARCHAR) AS v, count(*) AS n FROM ${from} WHERE ${id} IS NOT NULL GROUP BY 1 ORDER BY n DESC, v LIMIT ${bins}`;
     const rows = (await this.statement("panel", sql, options, (o, conn) => this.read(o, conn, sql))).rows;
     result.bins = rows.map((row) => ({ label: String(row[0]).slice(0, 2 * DATA_LIMITS.sampleChars), count: toCount(row[1]) }));
     return result;
