@@ -161,6 +161,9 @@ describe("the Simple header", () => {
       expect(identity).not.toContain("data-chathead-conversation");
       expect(identity).not.toContain("data-thread-chip-new");
       expect(simple.slice(simple.indexOf("data-chathead-controls"))).toMatch(/data-tour="computer"[\s\S]*data-new-thread="true"/);
+      // New thread wears the computer button's round chip: same size, surface, shadow and hover.
+      const chip = (attr: string) => new Set(simple.match(new RegExp(`<button[^>]*${attr}[^>]*>`))![0].match(/class="([^"]*)"/)![1]!.split(" ").filter((name) => !["relative", "shrink-0", "md:hidden", "text-accent"].includes(name)));
+      expect(chip('data-new-thread="true"')).toEqual(chip('data-tour="computer"'));
       expect(identity.replace(pill[0], "").replace(threads[0], "").replace(/<span role="status"[^>]*>[^<]*<\/span>/, "")).not.toMatch(/<(button|a|span)[\s>]/);
       for (const gone of ["data-chathead-role", "data-background-activity", "data-chathead-back", 'data-testid="chat-more"']) {
         expect(simple, gone).not.toContain(gone);
