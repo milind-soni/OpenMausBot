@@ -83,7 +83,7 @@ function Stub({ device, last }: { device: Device; last: boolean }) {
     <span aria-hidden="true" data-line={device.live ? "live" : gone ? "away" : "on"} className={cn("absolute start-2 top-5 w-3 border-t", gone ? AWAY : SOLID)} />
     {device.live && (
       <svg aria-hidden="true" viewBox="0 0 12 2" className="absolute start-2 top-5 -mt-px h-0.5 w-3 overflow-visible rtl:-scale-x-100">
-        <line x1="0" y1="1" x2="12" y2="1" strokeWidth="1.5" strokeDasharray="2 3" className="stroke-success motion-safe:animate-link-flow" style={{ animationDuration: "2.2s" }} />
+        <line x1="0" y1="1" x2="12" y2="1" strokeWidth="1.5" strokeDasharray="2 3" className="animate-link-flow stroke-success" style={{ animationDuration: "2.2s" }} />
       </svg>
     )}
   </>;
@@ -150,12 +150,14 @@ function useMapLayout(root: React.RefObject<HTMLElement | null>, selected: strin
  * card opens against the map: under the hub, under the groups (pointing at the tile), or in a narrow window right under
  * the tile. The groups are headed lists of buttons, so the map reads the same to a screen reader and the keyboard.
  */
-export function DeviceMap({ devices, mark, network, selected, onSelect, onAction, onAdd, panel, now = Date.now() }: {
+export function DeviceMap({ devices, mark, network, selected, onSelect, onClose, onAction, onAdd, panel, now = Date.now() }: {
   devices: readonly Device[];
   mark: ReactNode;
   network: { network: PrivateNetwork; line: string; action: NetworkAction | null; secondary?: ReactNode } | null;
   selected: string | null;
   onSelect: (id: string) => void;
+  /** Escape anywhere on the map while a device is chosen closes its card, never all of Settings. */
+  onClose: () => void;
   onAction: (device: Device, action: DeviceAction) => void;
   onAdd: () => void;
   /** The chosen device's card, given where its pointer sits. */
@@ -170,7 +172,8 @@ export function DeviceMap({ devices, mark, network, selected, onSelect, onAction
   const inGroups = Boolean(card) && selected !== here.id;
   const everyoneAway = groups.every((entry) => away(entry.devices));
   return (
-    <div ref={root} data-settings-block="map" data-map-layout={narrow ? "narrow" : "wide"} className="@container/map flex scroll-mt-4 flex-col" role="group" aria-label={t("devicesPage.mapLabel")}>
+    <div ref={root} data-settings-block="map" data-map-layout={narrow ? "narrow" : "wide"} className="@container/map flex scroll-mt-4 flex-col" role="group" aria-label={t("devicesPage.mapLabel")}
+      onKeyDown={(event) => { if (selected && event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); } }}>
       <Hub device={here} mark={mark} selected={selected === here.id} onSelect={onSelect} onAdd={onAdd}
         network={network && <NetworkRow {...network} />} />
       {selected === here.id && card && <div className="pt-3">{card}</div>}

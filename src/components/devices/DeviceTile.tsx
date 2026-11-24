@@ -90,7 +90,7 @@ export function DeviceTile({ device, selected, onSelect, onAction, now }: {
       </button>
       {action && (
         <span className="flex px-2.5 pb-2.5 ps-[34px]">
-          <button type="button" data-tile-action={action.type} onClick={() => (action.type === "copy-update" ? onSelect(device.id) : onAction(device, action))}
+          <button type="button" data-tile-action={action.type} onClick={() => (action.type !== "copy-update" ? onAction(device, action) : selected ? undefined : onSelect(device.id))}
             aria-label={`${actionText}: ${device.name}`} className="ui-button ui-button-sm max-w-full">{actionText}</button>
         </span>
       )}

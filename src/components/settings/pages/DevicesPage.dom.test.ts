@@ -157,9 +157,31 @@ describe("the Devices page", () => {
     await click("[data-device-node='phone:iphone']");
     await click("[data-device-card='phone:iphone'] [data-device-action=manage]");
     expect(go).toHaveBeenCalledWith("phone", "paired");
-    act(() => { $("[data-device-card='phone:iphone'] button")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    // Settings closes on an Escape that reaches the window unhandled: the map's Escape closes only the card.
+    const reached: boolean[] = [];
+    const onWindow = (event: KeyboardEvent) => reached.push(!event.defaultPrevented);
+    window.addEventListener("keydown", onWindow);
+    act(() => { $("[data-device-card='phone:iphone'] button")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); });
     await settle();
     expect($("[data-device-card]")).toBeNull();
+    await click("[data-device-node='place:vps']");
+    act(() => { $("[data-device-node='place:vps']")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); });
+    await settle();
+    window.removeEventListener("keydown", onWindow);
+    expect($("[data-device-card]")).toBeNull();
+    expect(reached.filter(Boolean)).toEqual([]);
+  });
+
+  it("opens the card from a tile's Update…, and never closes it from there", async () => {
+    environments.state.mockResolvedValue({ localOrigin: "http://127.0.0.1:8799", remote: false, packaged: true, activeId: "local", environments: [
+      { id: "local", kind: "local", name: "This computer" }, { id: "mini", kind: "remote", name: "Studio Mac mini", origin: "http://mini.tail1.ts.net:8799" },
+    ] });
+    environments.status.mockResolvedValue([{ id: "mini", state: "connected", since: NOW, version: "0.1.170", behind: true, install: "global" }]);
+    await render();
+    await click("[data-device-node='place:mini'] ~ * [data-tile-action=copy-update]");
+    expect($("[data-device-card='place:mini'] [data-device-action=copy-update]")?.textContent).toBe("Copy update command");
+    await click("[data-device-node='place:mini'] ~ * [data-tile-action=copy-update]");
+    expect($("[data-device-card='place:mini']")).not.toBeNull();
   });
 
   it("is a set of headed lists of buttons, so the keyboard and a screen reader reach every device", async () => {

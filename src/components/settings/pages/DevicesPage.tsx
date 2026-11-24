@@ -125,7 +125,7 @@ export function DevicesPage() {
     : shared ? <button type="button" className="settings-quiet cursor-pointer" onClick={() => go("phone", "computers")}>{t("devicesPage.action.manage")}</button> : null);
 
   return <>
-    <DeviceMap devices={devices} mark={mark} selected={chosen ? chosen.id : null} onSelect={(id) => { setNotice(null); setSelected((now) => (now === id ? null : id)); }}
+    <DeviceMap devices={devices} mark={mark} selected={chosen ? chosen.id : null} onSelect={(id) => { setNotice(null); setSelected((now) => (now === id ? null : id)); }} onClose={close}
       onAction={(device, action) => void act(device, action)} onAdd={() => setAdding(null)}
       network={network && { network, line: blocked ?? networkLine(network), action: networkAction, secondary }}
       panel={(caret) => chosen && <DevicePanel device={chosen} caret={caret} onAction={(device, action) => void act(device, action)} onClose={close}

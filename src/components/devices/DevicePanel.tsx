@@ -17,7 +17,7 @@ export const vpsOf = (device: Device): string | null => {
 
 /**
  * The chosen device's card, drawn against the map where it was chosen: its state and its one button, the bots on it,
- * its details and other actions, and for a server bots reach over SSH its own editor. Escape closes it.
+ * its details and other actions, and for a server bots reach over SSH its own editor.
  */
 export function DevicePanel({ device, onAction, onClose, onRemoved, caret, children, now = Date.now() }: {
   device: Device; onAction: (device: Device, action: DeviceAction) => void; onClose: () => void; onRemoved: (notice: string | null) => void;
@@ -32,7 +32,6 @@ export function DevicePanel({ device, onAction, onClose, onRemoved, caret, child
   useEffect(() => { card.current?.scrollIntoView?.({ block: "nearest" }); }, [device.id]);
   return (
     <section ref={card} id="device-card" data-device-card={device.id} aria-label={device.name} style={caret === null ? undefined : { "--caret": `${caret}px` } as CSSProperties}
-      onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}
       className="relative flex scroll-mt-4 flex-col gap-3 rounded-xl bg-menu px-4 py-3 shadow-[inset_0_0_0_0.5px_var(--settings-edge)] motion-safe:animate-fade-in">
       {caret !== null && <span aria-hidden="true" className="absolute -top-[5px] start-(--caret) size-2.5 -translate-x-1/2 rotate-45 border-s-[0.5px] border-t-[0.5px] border-(--settings-edge) bg-menu rtl:translate-x-1/2" />}
       <div className="flex items-center gap-3">
