@@ -12,7 +12,7 @@ const BACKUP_REPLY = "done from fake codex";
 const jsonLines = (path: string): any[] => existsSync(path)
   ? readFileSync(path, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
 
-type Room = { api: (method: string, path: string, body?: unknown) => Promise<any>; send: (text: string, settles?: string) => Promise<void>; messages: () => Promise<any[]>; claudeTurns: () => any[]; usage: () => any[]; bot: any };
+type Room = { api: (method: string, path: string, body?: unknown) => Promise<any>; send: (text: string, settles?: string) => Promise<void>; messages: () => Promise<any[]>; claudeTurns: () => any[]; usage: () => any[]; serverLog: () => string; bot: any };
 
 /** One room with one member on fake Claude, whose every turn its usage limit refuses, and fake Codex beside it. */
 async function withLimitedRoom(choose: (f: { api: (method: string, path: string, body?: unknown) => Promise<any>; bot: any; codex: { instanceId: string; model: string } }) => Promise<void>,
@@ -49,12 +49,14 @@ async function withLimitedRoom(choose: (f: { api: (method: string, path: string,
     await choose({ api, bot, codex });
     const send = async (text: string, settles = "settled") => {
       await cli("send-channel", "--channel", channel.id, "--text", `@Analyst ${text}`);
-      expect((await cli("wait", "--channel", channel.id, "--timeout", "60")).status).toBe(settles);
+      const waited = await cli("wait", "--channel", channel.id, "--timeout", "60");
+      evidence.push({ sent: text, wait: waited });
+      expect(waited.status).toBe(settles);
     };
     const messages = async () => (await api("GET", `/api/threads/${channel.activeTaskId}/messages?limit=200`)).messages as any[];
     try {
       const usage = () => readUsage(dataDir, { from: new Date(Date.now() - 3_600_000), to: new Date(Date.now() + 3_600_000) }).filter((row) => row.threadId === channel.activeTaskId && row.botId === bot.id);
-      await check({ api, send, messages, claudeTurns: () => jsonLines(`${planPath}.evidence.jsonl`).filter((turn) => turn.botId === bot.id), usage, bot });
+      await check({ api, send, messages, claudeTurns: () => jsonLines(`${planPath}.evidence.jsonl`).filter((turn) => turn.botId === bot.id), usage, serverLog: () => readFileSync(logPath, "utf8"), bot });
     } finally {
       evidence.push({ messages: await messages() });
     }
@@ -102,5 +104,19 @@ it("never sends a room member's turn to the installation's backup, which leaves 
     expect(rows.some((row) => row.kind === "text" && row.text === BACKUP_REPLY)).toBe(false);
     expect(rows.some((row) => row.kind === "activity" && /took over/.test(row.tool?.name ?? ""))).toBe(false);
     expect(usage().some((row) => row.instanceId === "codex")).toBe(false);
+  });
+}, 180_000);
+
+it("keeps a room member on its own AI when none of its own backups can take the turn, and logs why each was passed over", async () => {
+  await withLimitedRoom(async ({ api, bot }) => {
+    await api("PATCH", `/api/bots/${bot.id}`, { fallback: [{ instanceId: "codex", model: "gpt-gone" }] });
+  }, async ({ send, messages, claudeTurns, usage, serverLog }) => {
+    await send("How did October close?", "failed");
+    await send("And November so far?", "failed");
+    expect(claudeTurns(), "each turn is tried on its own AI").toHaveLength(2);
+    const rows = await messages();
+    expect(rows.some((row) => row.kind === "activity" && /took over/.test(row.tool?.name ?? ""))).toBe(false);
+    expect(usage().some((row) => row.instanceId === "codex")).toBe(false);
+    await expect.poll(serverLog, { timeout: 15_000 }).toMatch(/limit takeover: Analyst \([^)]+\) on claude\/\S+ \(engine\) passed over backup codex\/gpt-gone: unknown-model/);
   });
 }, 180_000);

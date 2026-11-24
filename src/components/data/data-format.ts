@@ -40,8 +40,8 @@ export function rowObjects(columns: DataColumn[], rows: Cell[][]): Array<Record<
 }
 
 export function tsv(columns: string[], rows: Cell[][]): string {
-  const clean = (text: string) => text.replace(/[\t\r\n]+/g, " ");
-  return [columns.map(clean).join("\t"), ...rows.map((row) => row.map((cell) => clean(cellText(cell))).join("\t"))].join("\n");
+  const quote = (text: string) => /["\t\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  return [columns.map(quote).join("\t"), ...rows.map((row) => row.map((cell) => quote(cellText(cell))).join("\t"))].join("\n");
 }
 
 export function markdownTable(columns: string[], rows: Cell[][]): string {

@@ -47,7 +47,7 @@ import {
   skillRequestBehavior,
   type SkillRequestCardData,
 } from "../../shared/skill-request";
-import type { Routine, RoutineInput, RoutineRun, RoutineRunStatusFilter } from "@/lib/routines";
+import type { Routine, RoutineInput, RoutineRun, RoutineRunLimits, RoutineRunStatusFilter } from "@/lib/routines";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { duplicateBotProfile, restrictedCopyRequest } from "@/lib/bot-duplicate";
 import { holdMarkedUnread, markVisibleBotThreadsRead, markVisibleGroupThreadsRead, type ReadReason } from "./read-visible";
@@ -512,7 +512,7 @@ export interface AppState {
   activeView: "chat" | "team-map" | "routines" | "files" | "web-panel" | "published-apps" | "team-files" | "announcements" | "skill-burgers";
   /** Folders a finished move left on this computer, for Files to offer sharing. */
   filesSuggest: string[] | null; webPanelId?: string;
-  routines: Routine[];
+  routines: Routine[]; routineRunLimits?: RoutineRunLimits;
   routineRuns: RoutineRun[];
   routinesLoadState: "loading" | "ready" | "error"; routineRunsSince: number | null;
   routinesFocus: { section?: "schedule" | "logs"; view?: "calendar" | "list"; botId?: string; routineId?: string; runStatus?: RoutineRunStatusFilter; nonce: number };
@@ -596,7 +596,7 @@ export type Action =
   | { type: "showTeamMap" } | { type: "showPublishedApps" } | { type: "showSkillBurgers" } | { type: "showTeamFiles" } | { type: "showAnnouncements" } | { type: "showWebPanel"; id: string }
   | { type: "showFiles"; suggest?: string[] }
   | { type: "showChat" }
-  | { type: "routinesHydrated"; routines: Routine[]; runs: RoutineRun[]; since?: number }
+  | { type: "routinesHydrated"; routines: Routine[]; runs: RoutineRun[]; since?: number; runLimits?: RoutineRunLimits }
   | { type: "routinesLoadFailed" } | { type: "routineRunsLoaded"; runs: RoutineRun[]; from?: number; to?: number }
   | { type: "routinePatched"; routine: Routine }
   | { type: "routineDeleted"; routineId: string }
@@ -952,7 +952,7 @@ function reduceApp(state: AppState, action: Action): AppState {
         settingsOpen: false, computerOpen: false, inspectorOpen: false, activityOpen: false, appSettingsOpen: false, pluginsOpen: false,
       };
     case "routinesHydrated":
-      return { ...state, routines: action.routines, routineRuns: trimRoutineRuns(action.runs), routineRunsSince: action.since ?? null, routinesLoadState: "ready" };
+      return { ...state, routines: action.routines, routineRuns: trimRoutineRuns(action.runs), routineRunsSince: action.since ?? null, routinesLoadState: "ready", routineRunLimits: action.runLimits };
     case "routinesLoadFailed":
       return { ...state, routinesLoadState: "error" };
     case "routinePatched": {
@@ -2887,8 +2887,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       {
         key: "routines",
         request: async () => {
-          const since = Date.now() - ROUTINE_RUNS_WINDOW_MS, { routines, runs } = snapshotArrays(await api(`/api/routines?since=${since}`), "routines", "runs");
-          return () => rawDispatch({ type: "routinesHydrated", routines, runs, since });
+          const since = Date.now() - ROUTINE_RUNS_WINDOW_MS, answer = await api(`/api/routines?since=${since}`), { routines, runs } = snapshotArrays(answer, "routines", "runs");
+          return () => rawDispatch({ type: "routinesHydrated", routines, runs, since, runLimits: answer.runLimits });
         },
       },
       {

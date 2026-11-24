@@ -2887,6 +2887,7 @@
   "attach.retryAria": "重新加载 {name}",
   "attach.imageUnavailable": "图片不可用",
   "attach.imageOutsideWorkspace": "这张图片不在此聊天的工作文件夹中，因此无法在这里显示",
+  "attach.previewOutsideWorkspace": "该文件不在此聊天的工作文件夹中，因此无法在这里打开。请让保存它的机器人附上一份副本。",
   "attach.previewImageAria": "预览附件图片 {name}",
   "attach.externalHidden": "出于隐私考虑，已隐藏外部图片",
   "attach.savedTo": "已保存到 {path}",

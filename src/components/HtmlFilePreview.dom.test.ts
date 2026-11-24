@@ -23,8 +23,8 @@ const alertText = () => document.body.querySelector("[role=alert]")?.textContent
 
 describe("HTML file preview errors", () => {
   it("shows the server's own reason instead of blaming the connection or the encoding", async () => {
-    await open(async () => new Response(JSON.stringify({ error: "the linked file is outside this conversation's workspace", code: "outside_workspace" }), { status: 403, headers: { "content-type": "application/json" } }));
-    expect(alertText()).toContain("the linked file is outside this conversation's workspace");
+    await open(async () => new Response(JSON.stringify({ error: "the linked file changed while it was being opened" }), { status: 409, headers: { "content-type": "application/json" } }));
+    expect(alertText()).toContain("the linked file changed while it was being opened");
     expect(alertText()).not.toContain("Check your connection");
     expect(alertText()).not.toContain("UTF-8");
   });
@@ -34,8 +34,8 @@ describe("HTML file preview errors", () => {
     expect(alertText()).toContain("Check your connection");
   });
 
-  it("opens a page the server sends", async () => {
-    await open(async () => new Response("<h1>Report</h1>"));
+  it("opens an HTML page larger than 2 MiB", async () => {
+    await open(async () => new Response(" ".repeat(2 * 1024 * 1024) + "<h1>Report</h1>"));
     expect(alertText()).toBe("");
     expect(document.body.querySelector("iframe")?.getAttribute("srcdoc")).toContain("<h1>Report</h1>");
   });

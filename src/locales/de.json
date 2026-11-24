@@ -1235,6 +1235,7 @@
   "attach.retryAria": "{name} erneut laden",
   "attach.imageUnavailable": "Bild nicht verfügbar",
   "attach.imageOutsideWorkspace": "Dieses Bild liegt außerhalb des Arbeitsordners dieses Chats und kann hier nicht angezeigt werden",
+  "attach.previewOutsideWorkspace": "Diese Datei liegt außerhalb des Arbeitsordners dieses Chats und kann hier nicht geöffnet werden. Bitte den Bot, der sie gespeichert hat, eine Kopie anzuhängen.",
   "attach.previewImageAria": "Angehängtes Bild {name} ansehen",
   "attach.externalHidden": "Externes Bild aus Datenschutzgründen ausgeblendet",
   "attach.savedTo": "Gespeichert unter {path}",
